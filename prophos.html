@@ -4001,9 +4001,9 @@
   /* ========== TOPSTEP MIRROR — TSX CONNECTION ========== */
   // Backend auto-detection: same-origin if served via http(s) (like old tool),
   // fallback to localhost:5000 if opened as file://
-  const TS_BACKEND = (location.protocol === 'http:' || location.protocol === 'https:')
-    ? location.origin
-    : 'http://localhost:5000'
+  const TS_BACKEND = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    ? 'http://localhost:5000'
+    : 'https://web-production-bec81.up.railway.app'
 
   const TS_LS = {
     token: 'prophos_tsx_token',
