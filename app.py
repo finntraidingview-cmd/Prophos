@@ -8,9 +8,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from flask import Flask, request, jsonify, Response, send_from_directory
 import os
 
-# AI Advisor: Claude-basierter Empfehlungs-Endpoint (siehe ai_advisor.py)
-from ai_advisor import register_advisor_routes
-
 app = Flask(__name__)
 TSX_BASE = "https://api.topstepx.com"
 MA_BASE  = "https://mt-client-api-v1.london.agiliumtrade.ai"
@@ -28,6 +25,40 @@ mirror_sessions = {}
 # Duplikium credential cache (in-memory): user_email -> {token, password, last_refresh}
 # Hinweis: Passwort wird nur in Memory gehalten, NICHT auf Disk geschrieben.
 duplikum_sessions = {}
+
+def flatten_php_form(data, parent_key=""):
+    """Konvertiert nested dict/list zu PHP-Bracket-Form für x-www-form-urlencoded.
+
+    Beispiel: {'settings': [{'id_slave': '29524'}]}
+    →        [('settings[0][id_slave]', '29524')]
+
+    Wird von Duplikium V4 verlangt für Endpoints die Arrays nehmen (z.B. setSettings.php).
+    Flache Dicts ohne Nesting bleiben unverändert (Backwards-Compat zu getAccounts etc.).
+    """
+    items = []
+    if isinstance(data, dict):
+        for k, v in data.items():
+            new_key = f"{parent_key}[{k}]" if parent_key else str(k)
+            if isinstance(v, (dict, list)):
+                items.extend(flatten_php_form(v, new_key))
+            elif v is None:
+                items.append((new_key, ""))
+            elif isinstance(v, bool):
+                items.append((new_key, "1" if v else "0"))
+            else:
+                items.append((new_key, str(v)))
+    elif isinstance(data, list):
+        for i, v in enumerate(data):
+            new_key = f"{parent_key}[{i}]"
+            if isinstance(v, (dict, list)):
+                items.extend(flatten_php_form(v, new_key))
+            elif v is None:
+                items.append((new_key, ""))
+            elif isinstance(v, bool):
+                items.append((new_key, "1" if v else "0"))
+            else:
+                items.append((new_key, str(v)))
+    return items
 
 @app.after_request
 def cors(r):
@@ -184,10 +215,13 @@ def duplikum_proxy(path):
     url = f"{DUP_BASE}/{path}"
 
     # JSON Body vom Frontend → form-encoded für Duplikium
+    # WICHTIG: Duplikium V4 will PHP-Bracket-Notation für nested arrays
+    # (z.B. setSettings.php braucht settings[0][id_slave]=...).
+    # Flat dicts wie {email: 'x'} bleiben dabei unverändert.
     body_data = None
     if request.method == "POST":
-        body_data = request.get_json(silent=True) or {}
-        # Falls Listen drin sind (z.B. account_id: ['A','B']), requests handhabt das via doseq
+        raw = request.get_json(silent=True) or {}
+        body_data = flatten_php_form(raw) if raw else None
 
     def do_request(tok):
         h = {
@@ -852,9 +886,6 @@ def debug_account():
         headers={"Authorization": f"Bearer {token}","Content-Type":"application/json"},
         timeout=10)
     return Response(r.content, status=r.status_code, content_type="application/json")
-
-# AI Advisor Routes registrieren
-register_advisor_routes(app)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
