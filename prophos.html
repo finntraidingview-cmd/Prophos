@@ -1674,17 +1674,19 @@
   #dashboard-view .mg-table td.num.neg{color:var(--danger);font-weight:600}
   #dashboard-view .mg-table tbody tr:last-child td{border-bottom:none}
   #dashboard-view .mg-table input{
-    background:transparent;border:1px solid transparent;color:inherit;
+    background:var(--surface);border:1px solid var(--border);color:inherit;
     padding:5px 8px;border-radius:6px;font-size:13px;width:100%;
     font-family:inherit;outline:none;transition:all .12s var(--ease);
   }
   #dashboard-view .mg-table input.num{font-variant-numeric:tabular-nums;font-family:'JetBrains Mono',monospace;text-align:right}
-  #dashboard-view .mg-table input:hover{background:var(--surface-tint)}
+  #dashboard-view .mg-table input:hover{border-color:var(--sub-2)}
   #dashboard-view .mg-table input:focus{
     background:var(--surface);border-color:var(--violet);
     box-shadow:var(--shadow-input-focus);
   }
-  #dashboard-view .mg-add-trade-row td{background:var(--surface-tint)}
+  #dashboard-view .mg-table input::placeholder{color:var(--sub-2)}
+  #dashboard-view .mg-add-trade-row td{background:var(--violet-tint)}
+  #dashboard-view .mg-add-trade-row input{border-color:var(--border-soft)}
   #dashboard-view .mg-totals-row td{
     font-weight:700;background:var(--surface-tint);
     border-top:1px solid var(--border);
