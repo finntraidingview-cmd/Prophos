@@ -12125,268 +12125,6 @@
       }
     }
   }
-</script>
-<!-- ── Coin-Flip Floating Button + Modal ── -->
-<style>
-  #coinflip-fab {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #fbbf24, #d97706);
-    border: 2px solid rgba(255,255,255,.2);
-    box-shadow: 0 4px 12px rgba(217,119,6,.35), 0 2px 4px rgba(0,0,0,.1);
-    cursor: pointer;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    transition: transform .15s ease, box-shadow .15s ease;
-  }
-  #coinflip-fab:hover {
-    transform: scale(1.08);
-    box-shadow: 0 6px 18px rgba(217,119,6,.45), 0 3px 6px rgba(0,0,0,.15);
-  }
-  #coinflip-fab:active { transform: scale(.95); }
-
-  #coinflip-modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.55);
-    z-index: 200;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-  }
-  #coinflip-modal.open { display: flex; }
-  #coinflip-modal .cf-content {
-    background: var(--card, #fff);
-    border-radius: 18px;
-    padding: 32px 40px 28px;
-    text-align: center;
-    box-shadow: 0 20px 60px rgba(0,0,0,.3);
-    min-width: 320px;
-  }
-  #coinflip-modal .cf-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--sub, #666);
-    text-transform: uppercase;
-    letter-spacing: .8px;
-    margin-bottom: 18px;
-  }
-  #coinflip-modal .cf-stage {
-    perspective: 1000px;
-    height: 200px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 16px;
-  }
-  #coinflip-modal .cf-coin {
-    position: relative;
-    width: 140px;
-    height: 140px;
-    transform-style: preserve-3d;
-    transition: transform 0s;
-  }
-  #coinflip-modal .cf-coin.flipping {
-    animation: coinFlip 1.5s cubic-bezier(.2, .8, .3, 1) forwards;
-  }
-  #coinflip-modal .cf-coin.show-kopf {
-    transform: rotateY(0deg);
-  }
-  #coinflip-modal .cf-coin.show-zahl {
-    transform: rotateY(180deg);
-  }
-  @keyframes coinFlip {
-    0%   { transform: translateY(0) rotateY(0deg) rotateX(0deg); }
-    20%  { transform: translateY(-30px) rotateY(720deg) rotateX(180deg); }
-    60%  { transform: translateY(-50px) rotateY(2160deg) rotateX(540deg); }
-    100% { transform: translateY(0) rotateY(var(--final-rotation, 2880deg)) rotateX(720deg); }
-  }
-  #coinflip-modal .cf-face {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    backface-visibility: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-    font-weight: 800;
-    color: #78350f;
-    background: radial-gradient(circle at 30% 30%, #fde68a, #f59e0b 60%, #b45309 100%);
-    box-shadow:
-      inset 0 -4px 8px rgba(120,53,15,.4),
-      inset 0 4px 8px rgba(255,255,255,.5),
-      0 8px 24px rgba(217,119,6,.4);
-    border: 3px solid #d97706;
-  }
-  #coinflip-modal .cf-face.cf-back {
-    transform: rotateY(180deg);
-  }
-  #coinflip-modal .cf-face::before {
-    content: '';
-    position: absolute;
-    inset: 6px;
-    border-radius: 50%;
-    border: 2px dashed rgba(120,53,15,.25);
-  }
-  #coinflip-modal .cf-result {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--ink, #111);
-    margin-top: 8px;
-    min-height: 36px;
-    opacity: 0;
-    transition: opacity .3s ease;
-  }
-  #coinflip-modal .cf-result.show { opacity: 1; }
-  #coinflip-modal .cf-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    margin-top: 20px;
-  }
-  #coinflip-modal .cf-btn {
-    padding: 10px 20px;
-    border-radius: 10px;
-    border: 1px solid var(--border, #e5e5e5);
-    background: var(--surface, #fafafa);
-    color: var(--ink, #111);
-    font-weight: 600;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background .15s;
-  }
-  #coinflip-modal .cf-btn:hover { background: var(--surface-hover, #f0f0f0); }
-  #coinflip-modal .cf-btn-primary {
-    background: linear-gradient(135deg, #fbbf24, #d97706);
-    color: white;
-    border-color: transparent;
-  }
-  #coinflip-modal .cf-btn-primary:hover {
-    background: linear-gradient(135deg, #f59e0b, #b45309);
-  }
-  #coinflip-modal .cf-stats {
-    margin-top: 14px;
-    font-size: 11.5px;
-    color: var(--sub, #888);
-    font-variant-numeric: tabular-nums;
-  }
-</style>
-
-<button id="coinflip-fab" title="Münze werfen — Kopf oder Zahl?">🪙</button>
-
-<div id="coinflip-modal">
-  <div class="cf-content">
-    <div class="cf-title">Münze werfen</div>
-    <div class="cf-stage">
-      <div class="cf-coin" id="cf-coin">
-        <div class="cf-face cf-front">K</div>
-        <div class="cf-face cf-back">Z</div>
-      </div>
-    </div>
-    <div class="cf-result" id="cf-result">&nbsp;</div>
-    <div class="cf-actions">
-      <button class="cf-btn cf-btn-primary" id="cf-flip-btn">Werfen</button>
-      <button class="cf-btn" id="cf-close-btn">Schließen</button>
-    </div>
-    <div class="cf-stats" id="cf-stats">Noch keine Würfe in dieser Session</div>
-  </div>
-</div>
-
-<script>
-(function(){
-  const fab = document.getElementById('coinflip-fab')
-  const modal = document.getElementById('coinflip-modal')
-  const coin = document.getElementById('cf-coin')
-  const result = document.getElementById('cf-result')
-  const flipBtn = document.getElementById('cf-flip-btn')
-  const closeBtn = document.getElementById('cf-close-btn')
-  const stats = document.getElementById('cf-stats')
-
-  let session = { kopf: 0, zahl: 0, total: 0 }
-  let flipping = false
-
-  function updateStats(){
-    if(session.total === 0){
-      stats.textContent = 'Noch keine Würfe in dieser Session'
-    } else {
-      const kPct = (session.kopf / session.total * 100).toFixed(0)
-      const zPct = (session.zahl / session.total * 100).toFixed(0)
-      stats.textContent = `${session.total} Würfe · ${session.kopf}× Kopf (${kPct}%) · ${session.zahl}× Zahl (${zPct}%)`
-    }
-  }
-
-  function flip(){
-    if(flipping) return
-    flipping = true
-    flipBtn.disabled = true
-    result.classList.remove('show')
-    result.textContent = '\u00A0'
-
-    // Coin reset (remove animation class to retrigger)
-    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
-    void coin.offsetWidth  // force reflow
-
-    // Random outcome
-    const isKopf = Math.random() < 0.5
-    // Final rotation: even multiple of 360 for Kopf, odd for Zahl (to land on right face)
-    const baseRotations = 8  // 2880deg
-    const finalDeg = (baseRotations * 360) + (isKopf ? 0 : 180)
-    coin.style.setProperty('--final-rotation', finalDeg + 'deg')
-    coin.classList.add('flipping')
-
-    setTimeout(() => {
-      // Lock final state
-      coin.classList.remove('flipping')
-      coin.classList.add(isKopf ? 'show-kopf' : 'show-zahl')
-
-      result.textContent = isKopf ? 'Kopf' : 'Zahl'
-      result.style.color = isKopf ? '#d97706' : '#7c3aed'
-      result.classList.add('show')
-
-      // Update stats
-      if(isKopf) session.kopf++; else session.zahl++
-      session.total++
-      updateStats()
-
-      flipping = false
-      flipBtn.disabled = false
-    }, 1500)
-  }
-
-  function open(){
-    modal.classList.add('open')
-    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
-    coin.style.removeProperty('--final-rotation')
-    result.classList.remove('show')
-    result.textContent = '\u00A0'
-  }
-
-  function close(){
-    modal.classList.remove('open')
-  }
-
-  fab.addEventListener('click', open)
-  closeBtn.addEventListener('click', close)
-  flipBtn.addEventListener('click', flip)
-  modal.addEventListener('click', (e) => { if(e.target === modal) close() })
-
-  // Spacebar im Modal = werfen, Escape = schließen
-  document.addEventListener('keydown', (e) => {
-    if(!modal.classList.contains('open')) return
-    if(e.key === ' ' || e.code === 'Space'){ e.preventDefault(); flip() }
-    if(e.key === 'Escape'){ close() }
-  })
-})()
 
 /* ============================================================
    MANAGE MODULE — Topstep für andere
@@ -13008,6 +12746,268 @@
   } else {
     setTimeout(mgInit, 0)
   }
+})()
+</script>
+<!-- ── Coin-Flip Floating Button + Modal ── -->
+<style>
+  #coinflip-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #fbbf24, #d97706);
+    border: 2px solid rgba(255,255,255,.2);
+    box-shadow: 0 4px 12px rgba(217,119,6,.35), 0 2px 4px rgba(0,0,0,.1);
+    cursor: pointer;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  #coinflip-fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 18px rgba(217,119,6,.45), 0 3px 6px rgba(0,0,0,.15);
+  }
+  #coinflip-fab:active { transform: scale(.95); }
+
+  #coinflip-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  #coinflip-modal.open { display: flex; }
+  #coinflip-modal .cf-content {
+    background: var(--card, #fff);
+    border-radius: 18px;
+    padding: 32px 40px 28px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    min-width: 320px;
+  }
+  #coinflip-modal .cf-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--sub, #666);
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    margin-bottom: 18px;
+  }
+  #coinflip-modal .cf-stage {
+    perspective: 1000px;
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+  #coinflip-modal .cf-coin {
+    position: relative;
+    width: 140px;
+    height: 140px;
+    transform-style: preserve-3d;
+    transition: transform 0s;
+  }
+  #coinflip-modal .cf-coin.flipping {
+    animation: coinFlip 1.5s cubic-bezier(.2, .8, .3, 1) forwards;
+  }
+  #coinflip-modal .cf-coin.show-kopf {
+    transform: rotateY(0deg);
+  }
+  #coinflip-modal .cf-coin.show-zahl {
+    transform: rotateY(180deg);
+  }
+  @keyframes coinFlip {
+    0%   { transform: translateY(0) rotateY(0deg) rotateX(0deg); }
+    20%  { transform: translateY(-30px) rotateY(720deg) rotateX(180deg); }
+    60%  { transform: translateY(-50px) rotateY(2160deg) rotateX(540deg); }
+    100% { transform: translateY(0) rotateY(var(--final-rotation, 2880deg)) rotateX(720deg); }
+  }
+  #coinflip-modal .cf-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    backface-visibility: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    font-weight: 800;
+    color: #78350f;
+    background: radial-gradient(circle at 30% 30%, #fde68a, #f59e0b 60%, #b45309 100%);
+    box-shadow:
+      inset 0 -4px 8px rgba(120,53,15,.4),
+      inset 0 4px 8px rgba(255,255,255,.5),
+      0 8px 24px rgba(217,119,6,.4);
+    border: 3px solid #d97706;
+  }
+  #coinflip-modal .cf-face.cf-back {
+    transform: rotateY(180deg);
+  }
+  #coinflip-modal .cf-face::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    border: 2px dashed rgba(120,53,15,.25);
+  }
+  #coinflip-modal .cf-result {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink, #111);
+    margin-top: 8px;
+    min-height: 36px;
+    opacity: 0;
+    transition: opacity .3s ease;
+  }
+  #coinflip-modal .cf-result.show { opacity: 1; }
+  #coinflip-modal .cf-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 20px;
+  }
+  #coinflip-modal .cf-btn {
+    padding: 10px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--border, #e5e5e5);
+    background: var(--surface, #fafafa);
+    color: var(--ink, #111);
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  #coinflip-modal .cf-btn:hover { background: var(--surface-hover, #f0f0f0); }
+  #coinflip-modal .cf-btn-primary {
+    background: linear-gradient(135deg, #fbbf24, #d97706);
+    color: white;
+    border-color: transparent;
+  }
+  #coinflip-modal .cf-btn-primary:hover {
+    background: linear-gradient(135deg, #f59e0b, #b45309);
+  }
+  #coinflip-modal .cf-stats {
+    margin-top: 14px;
+    font-size: 11.5px;
+    color: var(--sub, #888);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+
+<button id="coinflip-fab" title="Münze werfen — Kopf oder Zahl?">🪙</button>
+
+<div id="coinflip-modal">
+  <div class="cf-content">
+    <div class="cf-title">Münze werfen</div>
+    <div class="cf-stage">
+      <div class="cf-coin" id="cf-coin">
+        <div class="cf-face cf-front">K</div>
+        <div class="cf-face cf-back">Z</div>
+      </div>
+    </div>
+    <div class="cf-result" id="cf-result">&nbsp;</div>
+    <div class="cf-actions">
+      <button class="cf-btn cf-btn-primary" id="cf-flip-btn">Werfen</button>
+      <button class="cf-btn" id="cf-close-btn">Schließen</button>
+    </div>
+    <div class="cf-stats" id="cf-stats">Noch keine Würfe in dieser Session</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const fab = document.getElementById('coinflip-fab')
+  const modal = document.getElementById('coinflip-modal')
+  const coin = document.getElementById('cf-coin')
+  const result = document.getElementById('cf-result')
+  const flipBtn = document.getElementById('cf-flip-btn')
+  const closeBtn = document.getElementById('cf-close-btn')
+  const stats = document.getElementById('cf-stats')
+
+  let session = { kopf: 0, zahl: 0, total: 0 }
+  let flipping = false
+
+  function updateStats(){
+    if(session.total === 0){
+      stats.textContent = 'Noch keine Würfe in dieser Session'
+    } else {
+      const kPct = (session.kopf / session.total * 100).toFixed(0)
+      const zPct = (session.zahl / session.total * 100).toFixed(0)
+      stats.textContent = `${session.total} Würfe · ${session.kopf}× Kopf (${kPct}%) · ${session.zahl}× Zahl (${zPct}%)`
+    }
+  }
+
+  function flip(){
+    if(flipping) return
+    flipping = true
+    flipBtn.disabled = true
+    result.classList.remove('show')
+    result.textContent = '\u00A0'
+
+    // Coin reset (remove animation class to retrigger)
+    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
+    void coin.offsetWidth  // force reflow
+
+    // Random outcome
+    const isKopf = Math.random() < 0.5
+    // Final rotation: even multiple of 360 for Kopf, odd for Zahl (to land on right face)
+    const baseRotations = 8  // 2880deg
+    const finalDeg = (baseRotations * 360) + (isKopf ? 0 : 180)
+    coin.style.setProperty('--final-rotation', finalDeg + 'deg')
+    coin.classList.add('flipping')
+
+    setTimeout(() => {
+      // Lock final state
+      coin.classList.remove('flipping')
+      coin.classList.add(isKopf ? 'show-kopf' : 'show-zahl')
+
+      result.textContent = isKopf ? 'Kopf' : 'Zahl'
+      result.style.color = isKopf ? '#d97706' : '#7c3aed'
+      result.classList.add('show')
+
+      // Update stats
+      if(isKopf) session.kopf++; else session.zahl++
+      session.total++
+      updateStats()
+
+      flipping = false
+      flipBtn.disabled = false
+    }, 1500)
+  }
+
+  function open(){
+    modal.classList.add('open')
+    coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
+    coin.style.removeProperty('--final-rotation')
+    result.classList.remove('show')
+    result.textContent = '\u00A0'
+  }
+
+  function close(){
+    modal.classList.remove('open')
+  }
+
+  fab.addEventListener('click', open)
+  closeBtn.addEventListener('click', close)
+  flipBtn.addEventListener('click', flip)
+  modal.addEventListener('click', (e) => { if(e.target === modal) close() })
+
+  // Spacebar im Modal = werfen, Escape = schließen
+  document.addEventListener('keydown', (e) => {
+    if(!modal.classList.contains('open')) return
+    if(e.key === ' ' || e.code === 'Space'){ e.preventDefault(); flip() }
+    if(e.key === 'Escape'){ close() }
+  })
 })()
 </script>
 
