@@ -14370,7 +14370,7 @@
     text-transform: uppercase; font-weight: 500;
   }
 
-  /* Checklist */
+  /* Checklist — sequenziell freigeschaltet */
   #ptc-modal .ptc-list {
     list-style: none; padding: 0; margin: 0 0 14px;
     display: flex; flex-direction: column; gap: 8px;
@@ -14380,13 +14380,10 @@
     padding: 12px 14px; border-radius: 12px;
     background: rgba(255,255,255,.6);
     border: 1px solid rgba(28,24,20,.07);
-    cursor: pointer;
-    transition: all .15s;
+    transition: all .25s;
+    position: relative;
   }
-  #ptc-modal .ptc-item:hover {
-    background: rgba(255,255,255,.9);
-    border-color: rgba(217,119,6,.25);
-  }
+  /* Hidden checkbox bleibt drin als state-tracker, aber nicht klickbar */
   #ptc-modal .ptc-cb {
     position: absolute; opacity: 0; pointer-events: none;
   }
@@ -14396,33 +14393,106 @@
     border: 2px solid rgba(28,24,20,.2);
     border-radius: 7px;
     display: inline-flex; align-items: center; justify-content: center;
-    transition: all .18s cubic-bezier(.34,1.56,.64,1);
+    transition: all .25s cubic-bezier(.34,1.56,.64,1);
     margin-top: 1px;
+    background: rgba(28,24,20,.03);
   }
   #ptc-modal .ptc-item-check {
     color: white; font-size: 14px; font-weight: 700;
     opacity: 0; transform: scale(.4);
-    transition: all .2s cubic-bezier(.34,1.56,.64,1);
+    transition: all .25s cubic-bezier(.34,1.56,.64,1);
     line-height: 1;
   }
-  #ptc-modal .ptc-cb:checked ~ .ptc-item-box {
-    background: #10b981; border-color: #10b981;
-    transform: scale(1.08);
-  }
-  #ptc-modal .ptc-cb:checked ~ .ptc-item-box .ptc-item-check {
-    opacity: 1; transform: scale(1);
-  }
-  #ptc-modal .ptc-cb:checked ~ .ptc-item-text .ptc-item-title { color: #059669 }
   #ptc-modal .ptc-item-text {
     display: flex; flex-direction: column; gap: 2px; flex: 1;
+    transition: color .2s;
   }
   #ptc-modal .ptc-item-title {
     font-size: 14px; font-weight: 600; color: #1c1814;
-    transition: color .2s;
+    transition: color .25s;
   }
   #ptc-modal .ptc-item-hint {
     font-size: 11.5px; color: #8a7d6c; line-height: 1.4;
   }
+
+  /* LOCKED — vor und nach dem aktuellen Step */
+  #ptc-modal .ptc-item.is-locked {
+    opacity: .35;
+    background: rgba(28,24,20,.02);
+  }
+  #ptc-modal .ptc-item.is-locked .ptc-item-box {
+    background: rgba(28,24,20,.06);
+    border-color: rgba(28,24,20,.1);
+    border-style: dashed;
+  }
+
+  /* CURRENT — wartet auf Ablauf des Timers */
+  #ptc-modal .ptc-item.is-current {
+    background: rgba(255, 251, 235, .95);
+    border-color: rgba(217,119,6,.45);
+    box-shadow: 0 0 0 3px rgba(217,119,6,.12);
+    animation: ptcItemBreathing 2.2s ease-in-out infinite;
+  }
+  @keyframes ptcItemBreathing {
+    0%,100% { box-shadow: 0 0 0 3px rgba(217,119,6,.12) }
+    50%     { box-shadow: 0 0 0 6px rgba(217,119,6,.25) }
+  }
+  #ptc-modal .ptc-item.is-current .ptc-item-box {
+    background: rgba(217,119,6,.12);
+    border-color: rgba(217,119,6,.55);
+  }
+
+  /* CURRENT + READY — Timer abgelaufen, jetzt klickbar */
+  #ptc-modal .ptc-item.is-current.is-ready {
+    animation: none;
+    border-color: rgba(16,185,129,.5);
+    box-shadow: 0 0 0 3px rgba(16,185,129,.18);
+    cursor: pointer;
+  }
+  #ptc-modal .ptc-item.is-current.is-ready .ptc-item-box {
+    background: rgba(16,185,129,.15);
+    border-color: rgba(16,185,129,.55);
+    animation: ptcReadyBoxPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes ptcReadyBoxPulse {
+    0%,100% { transform: scale(1) }
+    50%     { transform: scale(1.08) }
+  }
+  #ptc-modal .ptc-item.is-current.is-ready:hover {
+    transform: translateX(2px);
+  }
+  #ptc-modal .ptc-item.is-current.is-ready:hover .ptc-item-box {
+    background: #10b981; border-color: #10b981;
+  }
+  #ptc-modal .ptc-item.is-current.is-ready:hover .ptc-item-check {
+    opacity: 1; transform: scale(1);
+  }
+
+  /* DONE — abgehakt */
+  #ptc-modal .ptc-item.is-done {
+    opacity: .55;
+    background: rgba(16,185,129,.05);
+    border-color: rgba(16,185,129,.2);
+    transition: all .3s;
+  }
+  #ptc-modal .ptc-item.is-done .ptc-item-box {
+    background: #10b981;
+    border-color: #10b981;
+    border-style: solid;
+  }
+  #ptc-modal .ptc-item.is-done .ptc-item-check {
+    opacity: 1; transform: scale(1);
+  }
+  #ptc-modal .ptc-item.is-done .ptc-item-title { color: #059669 }
+
+  /* SHAKE — wenn User auf locked oder noch-nicht-ready klickt */
+  #ptc-modal .ptc-item.shake { animation: ptcShake .4s }
+  @keyframes ptcShake {
+    0%,100% { transform: translateX(0) }
+    18%,58% { transform: translateX(-5px) }
+    38%,78% { transform: translateX(5px) }
+  }
+
 
   #ptc-modal .ptc-progress-text {
     text-align: center; font-size: 11.5px; color: #8a7d6c;
@@ -14494,7 +14564,7 @@
     <div class="ptc-head">
       <span class="ptc-icon">🎯</span>
       <h2 class="ptc-title">Letzter Check vorm Trade</h2>
-      <p class="ptc-sub">30 Sekunden — kurz Atemzug, kurz durchgehen.</p>
+      <p class="ptc-sub">Punkt für Punkt durchgehen — erst nach dem Timer abhakbar.</p>
     </div>
 
     <div class="ptc-countdown">
@@ -14665,7 +14735,9 @@
 <script>
 /* ============================================================
    Pre-Trade Checklist Modal
-   30-Sekunden Countdown + 4-Punkte-Checkliste vor jedem Trade.
+   Sequenzielle Checkliste: pro Item ein eigener Timer, erst
+   nach Ablauf abhakbar, dann wird der nächste Punkt freigeschaltet.
+   Erzwungene Pause, kein Schnellklick-Modus.
    ============================================================ */
 (function(){
   const modal     = document.getElementById('ptc-modal')
@@ -14677,100 +14749,190 @@
   const goLabel   = document.getElementById('ptc-go-label')
   const cancelBtn = document.getElementById('ptc-cancel-btn')
   const progText  = document.getElementById('ptc-progress-text')
-  const checkboxes = () => modal.querySelectorAll('.ptc-cb')
 
-  const TOTAL_SECONDS = 30
+  // Per-Item Timer (in Sekunden). Falls du das tunen willst:
+  // erste Punkte etwas länger, später kürzer.
+  const TIMERS_PER_ITEM = [15, 15, 15, 15]
+  const STEP_LABELS = [
+    'Schritt 1 von 4 — Asset',
+    'Schritt 2 von 4 — Lot-Size',
+    'Schritt 3 von 4 — Multiplikator',
+    'Schritt 4 von 4 — Copy-Trading'
+  ]
   const CIRCUMFERENCE = 2 * Math.PI * 45  // ≈ 282.74
 
-  let countdownTimer = null
-  let secondsLeft = TOTAL_SECONDS
-  let waitElapsed = false  // 30s sind rum
+  let items = []
+  let currentStep = 0      // 0..3 während aktiv, 4 = alle done
+  let stepReady   = false  // Timer für aktuellen Step abgelaufen
+  let secondsLeft = 0
+  let timer = null
+
+  function refreshItems(){ items = Array.from(modal.querySelectorAll('.ptc-item')) }
 
   function reset(){
-    // Checkboxen leeren
-    checkboxes().forEach(cb => cb.checked = false)
-    // Countdown reset
-    secondsLeft = TOTAL_SECONDS
-    waitElapsed = false
-    cdNum.textContent = TOTAL_SECONDS
+    if(timer){ clearInterval(timer); timer = null }
+    refreshItems()
+    items.forEach(it => {
+      it.classList.remove('is-locked','is-current','is-ready','is-done','shake')
+      const cb = it.querySelector('.ptc-cb'); if(cb) cb.checked = false
+    })
+    currentStep = 0
+    stepReady = false
+    startStep(0)
+  }
+
+  function startStep(idx){
+    currentStep = idx
+    stepReady = false
+
+    // Item-States updaten
+    items.forEach((it, i) => {
+      it.classList.remove('is-locked','is-current','is-ready','is-done','shake')
+      if(i < idx)        it.classList.add('is-done')
+      else if(i === idx) it.classList.add('is-current')
+      else               it.classList.add('is-locked')
+      const cb = it.querySelector('.ptc-cb')
+      if(cb) cb.checked = i < idx
+    })
+
+    // Timer-UI resetten
+    const total = TIMERS_PER_ITEM[idx] || 8
+    secondsLeft = total
+    cdNum.textContent = secondsLeft
     cdNum.classList.remove('done')
-    cdCircle.style.strokeDashoffset = '0'
     cdCircle.classList.remove('warn','urgent','done')
-    cdLabel.textContent = 'Sekunden zum durchgehen'
+    cdCircle.style.strokeDashoffset = '0'
+    cdLabel.textContent = STEP_LABELS[idx] || ''
+
+    // Progress-Text
+    progText.textContent = `${idx} von ${items.length} gecheckt`
+
+    // Go-Button bleibt disabled bis alle done
     updateGoBtn()
-    updateProgress()
+
+    // Timer starten
+    if(timer) clearInterval(timer)
+    timer = setInterval(() => tick(total), 1000)
   }
 
-  function updateProgress(){
-    const total = checkboxes().length
-    const checked = Array.from(checkboxes()).filter(c => c.checked).length
-    progText.textContent = `${checked} von ${total} gecheckt`
-    updateGoBtn()
-  }
-
-  function allChecked(){
-    return Array.from(checkboxes()).every(c => c.checked)
-  }
-
-  function updateGoBtn(){
-    const ready = waitElapsed || allChecked()
-    goBtn.disabled = !ready
-    if(ready){
-      if(allChecked() && !waitElapsed)
-        goLabel.textContent = 'Alle gecheckt — los geht\'s →'
-      else if(waitElapsed && allChecked())
-        goLabel.textContent = 'Bereit — Trade starten →'
-      else
-        goLabel.textContent = '30s rum — Trade starten →'
-    } else {
-      goLabel.textContent = `Noch ${secondsLeft}s · oder alle abhaken`
-    }
-  }
-
-  function tick(){
+  function tick(total){
     secondsLeft--
     if(secondsLeft <= 0){
       secondsLeft = 0
-      waitElapsed = true
+      stepReady = true
       cdNum.textContent = '✓'
       cdNum.classList.add('done')
       cdCircle.classList.add('done')
       cdCircle.style.strokeDashoffset = String(CIRCUMFERENCE)
-      cdLabel.textContent = 'Bereit'
-      clearInterval(countdownTimer); countdownTimer = null
-      updateGoBtn()
+      cdLabel.textContent = 'Jetzt abhaken um weiterzugehen'
+      if(items[currentStep]) items[currentStep].classList.add('is-ready')
+      clearInterval(timer); timer = null
       return
     }
     cdNum.textContent = secondsLeft
-    // Progress: was läuft schon ab, dashoffset = (elapsed/total) * circumference
-    const elapsed = TOTAL_SECONDS - secondsLeft
-    cdCircle.style.strokeDashoffset = String((elapsed / TOTAL_SECONDS) * CIRCUMFERENCE)
-    // Color shift
+    const elapsed = total - secondsLeft
+    cdCircle.style.strokeDashoffset = String((elapsed / total) * CIRCUMFERENCE)
     cdCircle.classList.remove('warn','urgent')
-    if(secondsLeft <= 5) cdCircle.classList.add('urgent')
-    else if(secondsLeft <= 15) cdCircle.classList.add('warn')
-    updateGoBtn()
+    if(secondsLeft <= Math.max(2, Math.floor(total * 0.2))) cdCircle.classList.add('urgent')
+    else if(secondsLeft <= Math.floor(total * 0.5))         cdCircle.classList.add('warn')
+  }
+
+  function checkCurrent(){
+    if(!stepReady) return
+    const idx = currentStep
+    if(idx >= items.length) return
+
+    // Done-State setzen
+    const cb = items[idx].querySelector('.ptc-cb'); if(cb) cb.checked = true
+    items[idx].classList.remove('is-current','is-ready')
+    items[idx].classList.add('is-done')
+
+    // Nächster Step (oder Ende)
+    const next = idx + 1
+    if(next < items.length){
+      // Kurze Pause für die Animation, dann nächster Step
+      setTimeout(() => startStep(next), 350)
+    } else {
+      // Alle done
+      currentStep = items.length
+      stepReady = false
+      if(timer){ clearInterval(timer); timer = null }
+      cdNum.textContent = '✓'
+      cdNum.classList.add('done')
+      cdCircle.classList.add('done')
+      cdCircle.style.strokeDashoffset = String(CIRCUMFERENCE)
+      cdLabel.textContent = 'Alle gecheckt'
+      progText.textContent = `${items.length} von ${items.length} gecheckt — du bist bereit`
+      updateGoBtn()
+    }
+  }
+
+  function updateGoBtn(){
+    const allDone = currentStep >= items.length
+    goBtn.disabled = !allDone
+    goLabel.textContent = allDone
+      ? 'Bereit — Trade starten →'
+      : `Punkt ${currentStep + 1}/${items.length} läuft…`
   }
 
   function open(){
-    reset()
+    refreshItems()
     modal.classList.add('open')
-    countdownTimer = setInterval(tick, 1000)
+    reset()
   }
   function close(){
     modal.classList.remove('open')
-    if(countdownTimer){ clearInterval(countdownTimer); countdownTimer = null }
+    if(timer){ clearInterval(timer); timer = null }
   }
 
-  // Wire-up
-  checkboxes().forEach(cb => cb.addEventListener('change', updateProgress))
+  function handleItemClick(idx){
+    if(idx < currentStep){
+      // bereits done — ignore
+      return
+    }
+    if(idx > currentStep){
+      // future locked — shake feedback
+      shake(idx)
+      return
+    }
+    // idx === currentStep
+    if(!stepReady){
+      // Timer läuft noch — shake
+      shake(idx)
+      return
+    }
+    checkCurrent()
+  }
+  function shake(idx){
+    if(!items[idx]) return
+    items[idx].classList.add('shake')
+    setTimeout(() => items[idx]?.classList.remove('shake'), 420)
+  }
+
+  // Wire-up: clicks auf items
+  modal.addEventListener('click', (e) => {
+    if(e.target === modal){ close(); return }
+    const item = e.target.closest('.ptc-item')
+    if(item){
+      e.preventDefault()
+      refreshItems()
+      const idx = items.indexOf(item)
+      if(idx >= 0) handleItemClick(idx)
+    }
+  })
+
   cancelBtn.addEventListener('click', close)
   goBtn.addEventListener('click', () => { if(!goBtn.disabled) close() })
-  modal.addEventListener('click', (e) => { if(e.target === modal) close() })
   document.addEventListener('keydown', (e) => {
     if(!modal.classList.contains('open')) return
     if(e.key === 'Escape') close()
     else if(e.key === 'Enter' && !goBtn.disabled){ e.preventDefault(); close() }
+    else if(e.key === ' ' || e.code === 'Space'){
+      // Spacebar = aktuellen Punkt abhaken wenn ready
+      e.preventDefault()
+      if(stepReady) checkCurrent()
+      else if(currentStep < items.length) shake(currentStep)
+    }
   })
 
   // Globale API
