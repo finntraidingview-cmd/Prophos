@@ -1093,6 +1093,52 @@
     margin-top:8px;font-size:11px;color:var(--ink-2);font-family:var(--mono);line-height:1.4;
   }
 
+  /* === Trade-Plan Modal: Push to Duplikium === */
+  #dashboard-view .tp-dup-push{margin-top:12px}
+  #dashboard-view .tp-dup-push:empty{display:none}
+  #dashboard-view .tp-dup-hint{
+    display:flex;gap:9px;align-items:center;padding:10px 13px;
+    background:var(--violet-tint);border:1px dashed rgba(84,71,206,.3);
+    border-radius:var(--r-md);font-size:12px;color:var(--ink-2);line-height:1.4;
+  }
+  #dashboard-view .tp-dup-hint svg{width:14px;height:14px;flex-shrink:0;color:var(--violet)}
+  #dashboard-view .tp-dup-ready{
+    display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+    padding:11px 14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--r-md);
+  }
+  #dashboard-view .tp-dup-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+  #dashboard-view .tp-dup-info-label{
+    font-size:10.5px;font-weight:600;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--sub);
+  }
+  #dashboard-view .tp-dup-info-target{
+    font-size:13px;font-weight:500;color:var(--ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  #dashboard-view .tp-dup-info-target .mono{font-family:var(--mono);font-size:11.5px;color:var(--sub)}
+  #dashboard-view .tp-dup-action{
+    display:flex;flex-direction:column;align-items:flex-end;gap:4px;
+  }
+  #dashboard-view .tp-dup-action .btn{
+    display:inline-flex;align-items:center;gap:6px;padding:8px 14px;font-size:12.5px;
+  }
+  #dashboard-view .tp-dup-action .btn svg{width:13px;height:13px}
+  #dashboard-view .tp-dup-action .btn:disabled{opacity:.5;cursor:not-allowed}
+  #dashboard-view .tp-dup-status{
+    font-size:11px;font-family:var(--mono);
+    padding:2px 8px;border-radius:999px;
+    background:transparent;color:var(--sub);
+    transition:all .2s var(--ease);
+  }
+  #dashboard-view .tp-dup-status.ok{background:rgba(18,183,106,.1);color:var(--good)}
+  #dashboard-view .tp-dup-status.err{background:rgba(240,68,56,.1);color:var(--danger)}
+  #dashboard-view .tp-dup-status.loading{background:var(--violet-tint);color:var(--violet)}
+  @media (max-width:480px){
+    #dashboard-view .tp-dup-ready{grid-template-columns:1fr}
+    #dashboard-view .tp-dup-action{align-items:stretch}
+  }
+
   /* Lot-Kalibrierung */
   #dashboard-view .calib-container{margin-top:18px}
   #dashboard-view .calib-panel{
@@ -1412,7 +1458,7 @@
     background:var(--violet-tint);color:var(--violet);
   }
   #dashboard-view .calc-dup-row{
-    display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+    display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;
   }
   #dashboard-view .calc-dup-row .btn{
     display:inline-flex;align-items:center;gap:6px;padding:9px 14px;
@@ -1421,7 +1467,7 @@
   #dashboard-view .calc-dup-row .btn:disabled{
     opacity:.5;cursor:not-allowed;
   }
-  @media (max-width:520px){
+  @media (max-width:680px){
     #dashboard-view .calc-dup-row{grid-template-columns:1fr}
     #dashboard-view .calc-dup-head{flex-direction:column}
   }
@@ -2671,6 +2717,9 @@
             <span class="calc-dup-status" id="calc-dup-status"></span>
           </div>
           <div class="calc-dup-row">
+            <select class="input" id="calc-dup-master">
+              <option value="">— Alle Master (Default) —</option>
+            </select>
             <select class="input" id="calc-dup-slave">
               <option value="">— Slave wählen —</option>
             </select>
@@ -2895,6 +2944,11 @@
                 <div class="tp-multi-eq" id="tp-multi-eq">Bitte Felder ausfüllen</div>
               </div>
             </div>
+          </div>
+
+          <!-- Push to Duplikium (Modal-Variante) -->
+          <div class="tp-dup-push" id="tp-dup-push">
+            <!-- Markup wird durch tpDupPushRender() gefüllt -->
           </div>
 
           <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
@@ -4567,13 +4621,15 @@
   /* ========== LOT RECHNER ⇢ DUPLIKIUM PUSH ========== */
   // Verwendet existierendes dupApi(). Schreibt nur den Multiplier-Wert,
   // preserved den existierenden risk_factor_type des Slaves.
-  const DUP_CALC_LS = 'prophos_calc_dup_slave'  // persistiert letzte Slave-Wahl
+  const DUP_CALC_LS        = 'prophos_calc_dup_slave'   // persistiert letzte Slave-Wahl
+  const DUP_CALC_MASTER_LS = 'prophos_calc_dup_master'  // persistiert letzte Master-Wahl
 
   function dupCalcEls(){
     return {
       panel:    document.getElementById('calc-dup-panel'),
       hint:     document.getElementById('calc-dup-hint'),
       push:     document.getElementById('calc-dup-push'),
+      master:   document.getElementById('calc-dup-master'),
       select:   document.getElementById('calc-dup-slave'),
       btn:      document.getElementById('calc-dup-push-btn'),
       btnLabel: document.getElementById('calc-dup-push-btn-label'),
@@ -4602,11 +4658,9 @@
   }
 
   /**
-   * Füllt das Slave-Dropdown mit allen Slaves aus dupState.accounts.
-   * Behaviour:
-   *   - Connected & ≥1 Slave  → zeigt Push-UI
-   *   - Connected & 0 Slaves  → zeigt Push-UI mit leerem Dropdown + Hint
-   *   - Nicht connected       → zeigt Hint
+   * Füllt Master- + Slave-Dropdown aus dupState.accounts.
+   * - Master ist optional (leer = "Alle Master" / Default-Setting)
+   * - Slave ist required
    */
   function dupCalcRender(){
     const els = dupCalcEls()
@@ -4617,10 +4671,34 @@
     if(els.push) els.push.hidden = !connected
     if(!connected) return
 
-    // Slave-Liste füllen
-    const slaves = (dupState.accounts || []).filter(a => Number(a.type) === 1)
-    const prev = els.select.value || localStorage.getItem(DUP_CALC_LS) || ''
+    const masters = (dupState.accounts || []).filter(a => Number(a.type) === 0)
+    const slaves  = (dupState.accounts || []).filter(a => Number(a.type) === 1)
 
+    // ── Master-Dropdown füllen ──
+    if(els.master){
+      const prevMaster = els.master.value || localStorage.getItem(DUP_CALC_MASTER_LS) || ''
+      els.master.innerHTML = ''
+      const allMastersOpt = document.createElement('option')
+      allMastersOpt.value = ''
+      allMastersOpt.textContent = masters.length === 0
+        ? '— Keine Master verbunden —'
+        : '— Alle Master (Default) —'
+      els.master.appendChild(allMastersOpt)
+      for(const m of masters){
+        const opt = document.createElement('option')
+        opt.value = String(m.account_id)
+        const broker = dupBrokerLabel(m.broker)
+        const name = m.name || m.account_id
+        opt.textContent = `${name} · ${broker} (${m.account_id})`
+        els.master.appendChild(opt)
+      }
+      if(prevMaster && masters.some(m => String(m.account_id) === prevMaster)){
+        els.master.value = prevMaster
+      }
+    }
+
+    // ── Slave-Dropdown füllen ──
+    const prev = els.select.value || localStorage.getItem(DUP_CALC_LS) || ''
     els.select.innerHTML = ''
     if(slaves.length === 0){
       const opt = document.createElement('option')
@@ -4642,7 +4720,6 @@
         opt.textContent = `${name} · ${broker} (${s.account_id})`
         els.select.appendChild(opt)
       }
-      // Restore previous selection if still valid
       if(prev && slaves.some(s => String(s.account_id) === prev)){
         els.select.value = prev
       }
@@ -4653,26 +4730,30 @@
   function dupCalcUpdateBtn(){
     const els = dupCalcEls()
     if(!els.btn) return
-    const mult   = dupCalcCurrentMultiplier()
-    const slave  = els.select?.value || ''
+    const mult  = dupCalcCurrentMultiplier()
+    const slave = els.select?.value || ''
     els.btn.disabled = !mult || !slave
   }
 
   /**
-   * Push: Multiplier → Duplikium-Slave.
+   * Push: Multiplier → Duplikium-(Master,Slave)-Paar.
    *
-   * 1. settings/getSettings.php { id_slave } → existierende Settings holen
-   * 2. Default-Entry suchen (kein symbol_slave, kein id_group) → risk_factor_type davon übernehmen
-   * 3. settings/setSettings.php { settings: [{ id_slave, risk_factor_type, risk_factor_value: <new> }] }
-   *
-   * Damit bleibt dein Risk-Factor-Typ (Multiplier Lot / Notional / Auto Risk) erhalten —
-   * wir ändern nur den Zahlenwert.
+   * Workflow:
+   *   1. settings/getSettings.php { id_slave, id_master? } → existierende Settings holen
+   *   2. Bevorzugten Entry suchen:
+   *      - mit gewähltem id_master → exakter Match Master+Slave
+   *      - ohne gewählten id_master → "All Masters"-Default (kein id_master)
+   *      - Fallback → irgendein Entry für diesen Slave
+   *   3. risk_factor_type preserven, risk_factor_value updaten
+   *   4. setSettings.php pushen — id_master nur mitschicken wenn explizit gewählt ODER
+   *      vom preserved Entry geerbt
    */
   async function dupCalcPush(){
     const els = dupCalcEls()
     if(!els.btn) return
     const mult = dupCalcCurrentMultiplier()
-    const slaveId = els.select?.value || ''
+    const slaveId  = els.select?.value || ''
+    const masterId = els.master?.value || ''  // leer = "All Masters"
     if(!mult || !slaveId){
       dupCalcSetStatus('Multiplier oder Slave fehlt', 'err')
       return
@@ -4683,58 +4764,76 @@
     dupCalcSetStatus('⏳ lese Settings…', 'loading')
 
     try {
-      // 1) Existierende Settings holen
-      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: slaveId })
+      // 1) Settings holen — wenn Master gewählt: gefiltert; sonst alle für den Slave
+      const getBody = { id_slave: slaveId }
+      if(masterId) getBody.id_master = masterId
+      const getRes = await dupApi('POST', 'settings/getSettings.php', getBody)
       if(!getRes.ok){
         const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
         throw new Error(`getSettings: ${errMsg}`)
       }
 
-      // Response-Shape: { settings: [{ id_slave, id_master, risk_factor_type, risk_factor_value, symbol_slave, symbol_master, id_group, ... }, ...] }
       const settings = (getRes.data && Array.isArray(getRes.data.settings))
         ? getRes.data.settings
         : (Array.isArray(getRes.data) ? getRes.data : [])
 
-      // Default-Entry suchen: kein symbol_slave (oder leer), kein id_group, gehört zu unserem slave
-      // Bevorzugt: id_master leer → "All Masters" Default; sonst irgendein Entry für diesen Slave
+      // Default-Entry für diesen Slave suchen
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveId))
-      let preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
+
+      let preserved
+      if(masterId){
+        // Master ist explizit gewählt → exakter Master+Slave Entry bevorzugt
+        preserved = matches.find(e => String(e.id_master || '') === String(masterId) && !e.symbol_slave && !e.id_group)
+                 || matches.find(e => String(e.id_master || '') === String(masterId))
+      }
+      // Fallback: "All Masters"-Default oder irgendein Entry
+      if(!preserved){
+        preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
                  || matches.find(e => !e.symbol_slave && !e.id_group)
                  || matches[0]
-
-      if(!preserved){
-        throw new Error(`Kein Setting für Slave ${slaveId} gefunden. Leg in Duplikium erst eines an (egal welcher Wert), danach kann ich den Multiplier updaten.`)
       }
 
-      // 2) Setting-Eintrag zusammenbauen — nur risk_factor_value ändern, alles andere preserved
+      if(!preserved){
+        const masterTxt = masterId ? ` mit Master ${masterId}` : ''
+        throw new Error(`Kein Setting für Slave ${slaveId}${masterTxt} gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
+      }
+
+      // 2) Setting-Entry: nur risk_factor_value ändern
       const entry = {
         id_slave: String(preserved.id_slave),
         risk_factor_type:  String(preserved.risk_factor_type),
         risk_factor_value: String(mult)
       }
-      // id_master mitschicken wenn der existierende Entry einen hat (sonst "All Masters")
-      if(preserved.id_master) entry.id_master = String(preserved.id_master)
-      // Symbol-Felder leer lassen — wir editieren den Default-Entry, nicht symbol-specific
+      // id_master:
+      //  - User hat einen gewählt → override mit user-Wahl (wichtig falls preserved nur "All Masters" war)
+      //  - User hat keinen gewählt + preserved hat einen → preserved übernehmen
+      //  - User hat keinen + preserved hat keinen → leer ("All Masters")
+      if(masterId){
+        entry.id_master = String(masterId)
+      } else if(preserved.id_master){
+        entry.id_master = String(preserved.id_master)
+      }
 
       dupCalcSetStatus('⏳ pushe…', 'loading')
 
-      // 3) setSettings.php aufrufen
+      // 3) setSettings
       const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: [entry] })
       if(!setRes.ok){
         const errMsg = (setRes.data && setRes.data.error) || `HTTP ${setRes.status}`
         throw new Error(`setSettings: ${errMsg}`)
       }
 
-      // 4) Erfolg — Auswahl persistieren
+      // 4) Erfolg
       localStorage.setItem(DUP_CALC_LS, slaveId)
+      if(masterId) localStorage.setItem(DUP_CALC_MASTER_LS, masterId)
       const multTxt = mult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
-      dupCalcSetStatus(`✓ ${multTxt}× gepusht`, 'ok')
+      const pairTxt = masterId ? `${masterId}→${slaveId}` : `→${slaveId}`
+      dupCalcSetStatus(`✓ ${multTxt}× gepusht (${pairTxt})`, 'ok')
 
-      // Status nach 5s wieder ausblenden
       clearTimeout(dupCalcPush._timer)
-      dupCalcPush._timer = setTimeout(() => dupCalcSetStatus(''), 5000)
+      dupCalcPush._timer = setTimeout(() => dupCalcSetStatus(''), 6000)
     } catch(e){
-      dupCalcSetStatus(`✗ ${e.message || 'Fehler'}`, 'err')
+      dupCalcSetStatus(`✗ ${(e.message || 'Fehler').slice(0, 100)}`, 'err')
       console.error('[dupCalcPush]', e)
     } finally {
       els.btnLabel.textContent = 'Push'
@@ -4755,8 +4854,183 @@
       dupCalcUpdateBtn()
       if(els.select.value) localStorage.setItem(DUP_CALC_LS, els.select.value)
     })
+    if(els.master){
+      els.master.addEventListener('change', () => {
+        if(els.master.value) localStorage.setItem(DUP_CALC_MASTER_LS, els.master.value)
+        else localStorage.removeItem(DUP_CALC_MASTER_LS)
+      })
+    }
     dupCalcRender()
   })()
+
+  /* ========== TRADE-PLAN MODAL ⇢ DUPLIKIUM PUSH ========== */
+  // Push-UI direkt im Trade-Plan-Modal unter dem Multiplier-Block.
+  // Slave wird automatisch via dupGetLinks() ausgelesen — keine extra Auswahl nötig.
+
+  function tpDupCurrentMultiplier(){
+    const el = document.getElementById('tp-multi-value')
+    if(!el) return null
+    const txt = (el.textContent || '').trim()
+    if(!txt || txt === '—' || txt === '–') return null
+    // tp-multi-value nutzt mult.toFixed(3) → "0.769", aber je nach Locale evtl. "0,769"
+    const n = parseFloat(txt.replace(/\./g,'').replace(',','.'))
+    return isFinite(n) && n > 0 ? n : (parseFloat(txt) > 0 ? parseFloat(txt) : null)
+  }
+
+  /**
+   * Reverse-Lookup: für eine Prophos-Account-ID den verknüpften Duplikium-Slave finden.
+   * dupGetLinks() returns { dupAccountId: prophosManualId }.
+   */
+  function tpDupFindLinkedSlave(prophosAccountId){
+    if(!prophosAccountId) return null
+    const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+    const dupId = Object.entries(links).find(([_, manualId]) => String(manualId) === String(prophosAccountId))?.[0]
+    if(!dupId) return null
+    const dupAcc = (dupState.accounts || []).find(a => String(a.account_id) === String(dupId))
+    return dupAcc || { account_id: dupId }  // Fallback falls Accounts noch nicht geladen
+  }
+
+  /**
+   * Render den Push-Block im Modal je nach State:
+   *  - Duplikium nicht verbunden  → Hint mit Link zu Settings
+   *  - Slave-Account nicht gewählt → leerer Container (kein UI)
+   *  - Slave nicht verknüpft       → Hint mit Anleitung zur Verknüpfung
+   *  - Alles ok                    → Push-Button + Slave-Info
+   */
+  function tpDupPushRender(){
+    const container = document.getElementById('tp-dup-push')
+    if(!container) return
+
+    const connected = !!(typeof dupState !== 'undefined' && dupState.token)
+    if(!connected){
+      container.innerHTML = `
+        <div class="tp-dup-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span>Verbinde Duplikium unter <strong>Accounts → Duplikum</strong>, um den Multiplier direkt zu pushen.</span>
+        </div>`
+      return
+    }
+
+    // Slave-Account aus dem Modal
+    const slaveId = document.getElementById('tp-slave')?.value || ''
+    if(!slaveId){
+      container.innerHTML = ''
+      return
+    }
+
+    const linkedSlave = tpDupFindLinkedSlave(slaveId)
+    const slaveAcc = accounts.find(a => String(a.id) === String(slaveId))
+
+    if(!linkedSlave){
+      container.innerHTML = `
+        <div class="tp-dup-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span><strong>${(slaveAcc && slaveAcc.name) ? escapeHtml(slaveAcc.name) : 'Slave'}</strong> ist nicht mit einem Duplikium-Account verknüpft. Verknüpf den Account unter <strong>Accounts → Duplikum</strong>, dann kann ich den Multiplier direkt pushen.</span>
+        </div>`
+      return
+    }
+
+    // Ready-State: Push-Button rendern
+    const dupBrokerName = (typeof dupBrokerLabel === 'function') ? dupBrokerLabel(linkedSlave.broker) : (linkedSlave.broker || '')
+    const dupName = linkedSlave.name || linkedSlave.account_id
+    const mult = tpDupCurrentMultiplier()
+
+    container.innerHTML = `
+      <div class="tp-dup-ready">
+        <div class="tp-dup-info">
+          <div class="tp-dup-info-label">→ Push auf Duplikium</div>
+          <div class="tp-dup-info-target">${escapeHtml(dupName)} <span class="mono">· ${escapeHtml(dupBrokerName)} · ${escapeHtml(String(linkedSlave.account_id))}</span></div>
+        </div>
+        <div class="tp-dup-action">
+          <button class="btn btn-primary" id="tp-dup-push-btn" ${mult ? '' : 'disabled'}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            <span id="tp-dup-push-btn-label">Push ${mult ? mult.toFixed(3) + '×' : ''}</span>
+          </button>
+          <span class="tp-dup-status" id="tp-dup-status"></span>
+        </div>
+      </div>`
+
+    // Listener neu binden (Markup wurde gerade ersetzt)
+    document.getElementById('tp-dup-push-btn')?.addEventListener('click', () => tpDupPush(linkedSlave.account_id))
+  }
+
+  function tpDupSetStatus(text, kind=''){
+    const el = document.getElementById('tp-dup-status')
+    if(!el) return
+    el.textContent = text || ''
+    el.className = 'tp-dup-status' + (kind ? ' ' + kind : '')
+  }
+
+  /**
+   * Push-Action — identische Logik zu dupCalcPush, nur mit Modal-IDs.
+   * Slave-ID wird aus der Account-Verknüpfung mitgegeben (kein User-Picker).
+   */
+  async function tpDupPush(slaveAccountId){
+    if(!slaveAccountId){ tpDupSetStatus('Kein Slave verknüpft', 'err'); return }
+    const mult = tpDupCurrentMultiplier()
+    if(!mult){ tpDupSetStatus('Kein gültiger Multiplier', 'err'); return }
+
+    const btn = document.getElementById('tp-dup-push-btn')
+    const btnLabel = document.getElementById('tp-dup-push-btn-label')
+    if(btn) btn.disabled = true
+    if(btnLabel) btnLabel.textContent = 'Pushe…'
+    tpDupSetStatus('⏳ lese Settings…', 'loading')
+
+    try {
+      // 1) Existierende Settings holen → risk_factor_type preserven
+      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveAccountId) })
+      if(!getRes.ok){
+        const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
+        throw new Error(`getSettings: ${errMsg}`)
+      }
+      const settings = (getRes.data && Array.isArray(getRes.data.settings))
+        ? getRes.data.settings
+        : (Array.isArray(getRes.data) ? getRes.data : [])
+
+      // Default-Entry: kein symbol_slave, kein id_group; bevorzugt ohne id_master
+      const matches = settings.filter(e => String(e.id_slave || '') === String(slaveAccountId))
+      const preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
+                    || matches.find(e => !e.symbol_slave && !e.id_group)
+                    || matches[0]
+
+      if(!preserved){
+        throw new Error(`Kein Setting für Slave ${slaveAccountId} in Duplikium gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
+      }
+
+      const entry = {
+        id_slave: String(preserved.id_slave),
+        risk_factor_type:  String(preserved.risk_factor_type),
+        risk_factor_value: String(mult)
+      }
+      if(preserved.id_master) entry.id_master = String(preserved.id_master)
+
+      tpDupSetStatus('⏳ pushe…', 'loading')
+
+      // 2) setSettings — nur den Value ändern
+      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: [entry] })
+      if(!setRes.ok){
+        const errMsg = (setRes.data && setRes.data.error) || `HTTP ${setRes.status}`
+        throw new Error(`setSettings: ${errMsg}`)
+      }
+
+      const multTxt = mult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
+      tpDupSetStatus(`✓ ${multTxt}× gepusht`, 'ok')
+      clearTimeout(tpDupPush._timer)
+      tpDupPush._timer = setTimeout(() => tpDupSetStatus(''), 6000)
+    } catch(e){
+      tpDupSetStatus(`✗ ${(e.message || 'Fehler').slice(0, 80)}`, 'err')
+      console.error('[tpDupPush]', e)
+    } finally {
+      if(btn) btn.disabled = !tpDupCurrentMultiplier()
+      if(btnLabel){
+        const m = tpDupCurrentMultiplier()
+        btnLabel.textContent = `Push ${m ? m.toFixed(3) + '×' : ''}`
+      }
+    }
+  }
+
+  // Globaler Hook — wird von tpRecompute() aufgerufen und vom Dup-Loader
+  window.tpDupPushRender = tpDupPushRender
 
   function dupBrokerLabel(broker){
     const map = {
@@ -9541,6 +9815,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = master && slave ? 'Risiko und Anzahl ausfüllen' : 'Master und Slave wählen'
+      if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
     const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
@@ -9548,6 +9823,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = '–'
+      if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
     const slaveQty = masterQty * mult
@@ -9571,6 +9847,9 @@
         rrEl.style.color = ratio >= 2 ? '#10b981' : (ratio >= 1 ? '#f59e0b' : '#ef4444')
       }
     }
+
+    // Push-to-Duplikium Panel live aktualisieren
+    if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
   }
 
   // Bind modal inputs
