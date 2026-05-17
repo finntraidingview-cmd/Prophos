@@ -1117,18 +1117,22 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
   #dashboard-view .tp-dup-info-target .mono{font-family:var(--mono);font-size:11.5px;color:var(--sub)}
-  #dashboard-view .tp-dup-action{
-    display:flex;flex-direction:column;align-items:flex-end;gap:4px;
-  }
-  #dashboard-view .tp-dup-action .btn{
+  #dashboard-view .tp-dup-btn{
     display:inline-flex;align-items:center;gap:6px;padding:8px 14px;font-size:12.5px;
   }
-  #dashboard-view .tp-dup-action .btn svg{width:13px;height:13px}
-  #dashboard-view .tp-dup-action .btn:disabled{opacity:.5;cursor:not-allowed}
+  #dashboard-view .tp-dup-btn svg{width:13px;height:13px}
+  #dashboard-view .tp-dup-btn:disabled{opacity:.5;cursor:not-allowed}
+  #dashboard-view .tp-dup-status-row{
+    margin-top:6px;min-height:18px;
+    display:flex;justify-content:flex-end;
+  }
+  #dashboard-view .tp-dup-status-row:empty,
+  #dashboard-view .tp-dup-status-row:has(.tp-dup-status:empty){display:none}
   #dashboard-view .tp-dup-status{
     font-size:11px;font-family:var(--mono);
-    padding:2px 8px;border-radius:999px;
+    padding:3px 9px;border-radius:999px;
     background:transparent;color:var(--sub);
+    max-width:100%;
     transition:all .2s var(--ease);
   }
   #dashboard-view .tp-dup-status.ok{background:rgba(18,183,106,.1);color:var(--good)}
@@ -1142,7 +1146,7 @@
   #dashboard-view .tp-dup-warn em{font-style:italic;font-weight:600}
   @media (max-width:480px){
     #dashboard-view .tp-dup-ready{grid-template-columns:1fr}
-    #dashboard-view .tp-dup-action{align-items:stretch}
+    #dashboard-view .tp-dup-btn{justify-content:center}
   }
 
   /* Lot-Kalibrierung */
@@ -4788,10 +4792,9 @@
     dupCalcSetStatus('⏳ lese Settings…', 'loading')
 
     try {
-      // 1) Settings holen — wenn Master gewählt: gefiltert; sonst alle für den Slave
-      const getBody = { id_slave: slaveId }
-      if(masterId) getBody.id_master = masterId
-      const getRes = await dupApi('POST', 'settings/getSettings.php', getBody)
+      // 1) Settings holen — IMMER ohne id_master Filter (sonst kriegen wir leeres
+      //    Array wenn noch kein Per-Master-Eintrag existiert). Master-Match passiert clientseitig.
+      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: slaveId })
       if(!getRes.ok){
         const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
         throw new Error(`getSettings: ${errMsg}`)
@@ -4810,7 +4813,7 @@
         preserved = matches.find(e => String(e.id_master || '') === String(masterId) && !e.symbol_slave && !e.id_group)
                  || matches.find(e => String(e.id_master || '') === String(masterId))
       }
-      // Fallback: "All Masters"-Default oder irgendein Entry
+      // Fallback: "All Masters"-Default oder irgendein Entry (wird als Template für risk_factor_type benutzt)
       if(!preserved){
         preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
                  || matches.find(e => !e.symbol_slave && !e.id_group)
@@ -4818,8 +4821,7 @@
       }
 
       if(!preserved){
-        const masterTxt = masterId ? ` mit Master ${masterId}` : ''
-        throw new Error(`Kein Setting für Slave ${slaveId}${masterTxt} gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
+        throw new Error(`Kein Setting für Slave ${slaveId} gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
       }
 
       // 2) Setting-Entry: nur risk_factor_value ändern
@@ -4986,14 +4988,12 @@
           <div class="tp-dup-info-label">→ Push auf Duplikium</div>
           <div class="tp-dup-info-target">${targetLine}</div>
         </div>
-        <div class="tp-dup-action">
-          <button class="btn btn-primary" id="tp-dup-push-btn" ${mult ? '' : 'disabled'}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-            <span id="tp-dup-push-btn-label">Push ${mult ? mult.toFixed(3) + '×' : ''}</span>
-          </button>
-          <span class="tp-dup-status" id="tp-dup-status"></span>
-        </div>
+        <button class="btn btn-primary tp-dup-btn" id="tp-dup-push-btn" ${mult ? '' : 'disabled'}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          <span id="tp-dup-push-btn-label">Push ${mult ? mult.toFixed(3) + '×' : ''}</span>
+        </button>
       </div>
+      <div class="tp-dup-status-row"><span class="tp-dup-status" id="tp-dup-status"></span></div>
       ${warnLine}`
 
     // Listener neu binden (Markup wurde gerade ersetzt)
@@ -5028,9 +5028,10 @@
 
     try {
       // 1) Existierende Settings holen → risk_factor_type preserven
-      const getBody = { id_slave: String(slaveAccountId) }
-      if(masterAccountId) getBody.id_master = String(masterAccountId)
-      const getRes = await dupApi('POST', 'settings/getSettings.php', getBody)
+      // WICHTIG: KEIN id_master Filter — sonst kriegen wir leeres Array wenn noch kein
+      // Per-Master-Eintrag existiert. Wir wollen aber auch den All-Masters-Default als
+      // Template benutzen können, um daraus einen neuen Per-Master-Eintrag zu erstellen.
+      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveAccountId) })
       if(!getRes.ok){
         const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
         throw new Error(`getSettings: ${errMsg}`)
@@ -5039,9 +5040,10 @@
         ? getRes.data.settings
         : (Array.isArray(getRes.data) ? getRes.data : [])
 
-      // Bevorzugter Entry:
-      //  - mit gewähltem Master → exakter Master+Slave Eintrag (Per-Master Setting)
-      //  - ohne gewählten Master → "All Masters"-Default (kein id_master)
+      // Bevorzugter Entry — als Template (für risk_factor_type):
+      //  1. mit gewähltem Master → exakter Per-Master Eintrag (falls existiert, sonst Skip)
+      //  2. All-Masters-Default (kein id_master) → Standardfall
+      //  3. Irgendein Entry für diesen Slave → Fallback
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveAccountId))
       let preserved
       if(masterAccountId){
@@ -5066,6 +5068,7 @@
       }
       // Master-Strategie:
       //  - User hat einen Prophos-Master gewählt und der ist verknüpft → master-spezifisch pushen
+      //    (Duplikium legt einen neuen Per-Master-Eintrag an falls noch keiner existiert)
       //  - sonst → preserved übernehmen (was meist "All Masters" ist)
       if(masterAccountId){
         entry.id_master = String(masterAccountId)
