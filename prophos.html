@@ -5062,9 +5062,14 @@
       }
 
       const entry = {
+        // Alle existierenden Felder preserven (Duplikium braucht u.U. max_order_size, copier_status, etc.)
+        // Schließt id, dates und andere DB-Metadaten aus.
+        ...preserved,
+        // Override: der eigentliche Update-Wert
+        risk_factor_value: String(mult),
+        // Sicherstellen dass id_slave + risk_factor_type als String vorliegen
         id_slave: String(preserved.id_slave),
-        risk_factor_type:  String(preserved.risk_factor_type),
-        risk_factor_value: String(mult)
+        risk_factor_type: String(preserved.risk_factor_type)
       }
       // Master-Strategie:
       //  - User hat einen Prophos-Master gewählt und der ist verknüpft → master-spezifisch pushen
@@ -5074,15 +5079,31 @@
         entry.id_master = String(masterAccountId)
       } else if(preserved.id_master){
         entry.id_master = String(preserved.id_master)
+      } else {
+        delete entry.id_master  // leer = "All Masters"
       }
+      // Symbol-Felder nicht mitschicken — wir editieren den Default-Entry, nicht symbol-specific
+      delete entry.symbol_slave
+      delete entry.symbol_master
+      delete entry.id_group
+
+      console.log('[tpDupPush] getSettings settings:', settings)
+      console.log('[tpDupPush] preserved entry:', preserved)
+      console.log('[tpDupPush] push entry:', entry)
 
       tpDupSetStatus('⏳ pushe…', 'loading')
 
       // 2) setSettings — nur den Value ändern
       const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: [entry] })
+      console.log('[tpDupPush] setSettings response:', setRes)
       if(!setRes.ok){
         const errMsg = (setRes.data && setRes.data.error) || `HTTP ${setRes.status}`
         throw new Error(`setSettings: ${errMsg}`)
+      }
+      // Body-Error-Check: Duplikium kann HTTP 200 mit Error im Body antworten
+      if(setRes.data && (setRes.data.error || setRes.data.success === false)){
+        const errMsg = setRes.data.error || setRes.data.message || JSON.stringify(setRes.data)
+        throw new Error(`Duplikium hat abgelehnt: ${errMsg}`)
       }
 
       const multTxt = mult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
