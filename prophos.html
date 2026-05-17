@@ -1134,6 +1134,12 @@
   #dashboard-view .tp-dup-status.ok{background:rgba(18,183,106,.1);color:var(--good)}
   #dashboard-view .tp-dup-status.err{background:rgba(240,68,56,.1);color:var(--danger)}
   #dashboard-view .tp-dup-status.loading{background:var(--violet-tint);color:var(--violet)}
+  #dashboard-view .tp-dup-warn{
+    margin-top:8px;padding:9px 12px;
+    background:rgba(247,144,9,.08);border:1px solid rgba(247,144,9,.2);
+    border-radius:var(--r-md);font-size:11.5px;color:#b6690a;line-height:1.45;
+  }
+  #dashboard-view .tp-dup-warn em{font-style:italic;font-weight:600}
   @media (max-width:480px){
     #dashboard-view .tp-dup-ready{grid-template-columns:1fr}
     #dashboard-view .tp-dup-action{align-items:stretch}
@@ -4896,10 +4902,11 @@
   }
 
   /**
-   * Reverse-Lookup: für eine Prophos-Account-ID den verknüpften Duplikium-Slave finden.
+   * Reverse-Lookup: für eine Prophos-Account-ID den verknüpften Duplikium-Account finden.
    * dupGetLinks() returns { dupAccountId: prophosManualId }.
+   * Funktioniert für Master UND Slave (gleicher Verknüpfungs-Mechanismus).
    */
-  function tpDupFindLinkedSlave(prophosAccountId){
+  function tpDupFindLinkedAccount(prophosAccountId){
     if(!prophosAccountId) return null
     const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
     const dupId = Object.entries(links).find(([_, manualId]) => String(manualId) === String(prophosAccountId))?.[0]
@@ -4907,13 +4914,16 @@
     const dupAcc = (dupState.accounts || []).find(a => String(a.account_id) === String(dupId))
     return dupAcc || { account_id: dupId }  // Fallback falls Accounts noch nicht geladen
   }
+  // Alias zur Rückwärtskompatibilität
+  const tpDupFindLinkedSlave = tpDupFindLinkedAccount
 
   /**
    * Render den Push-Block im Modal je nach State:
    *  - Duplikium nicht verbunden  → Hint mit Link zu Settings
    *  - Slave-Account nicht gewählt → leerer Container (kein UI)
    *  - Slave nicht verknüpft       → Hint mit Anleitung zur Verknüpfung
-   *  - Alles ok                    → Push-Button + Slave-Info
+   *  - Master nicht verknüpft      → Push wird zum "All Masters"-Default mit Warnung
+   *  - Alles ok                    → Push-Button mit Master+Slave Info, target = master-specific
    */
   function tpDupPushRender(){
     const container = document.getElementById('tp-dup-push')
@@ -4929,15 +4939,18 @@
       return
     }
 
-    // Slave-Account aus dem Modal
-    const slaveId = document.getElementById('tp-slave')?.value || ''
+    // Slave + Master Accounts aus dem Modal
+    const slaveId  = document.getElementById('tp-slave')?.value || ''
+    const masterId = document.getElementById('tp-master')?.value || ''
     if(!slaveId){
       container.innerHTML = ''
       return
     }
 
-    const linkedSlave = tpDupFindLinkedSlave(slaveId)
-    const slaveAcc = accounts.find(a => String(a.id) === String(slaveId))
+    const linkedSlave  = tpDupFindLinkedAccount(slaveId)
+    const linkedMaster = masterId ? tpDupFindLinkedAccount(masterId) : null
+    const slaveAcc  = accounts.find(a => String(a.id) === String(slaveId))
+    const masterAcc = accounts.find(a => String(a.id) === String(masterId))
 
     if(!linkedSlave){
       container.innerHTML = `
@@ -4949,15 +4962,29 @@
     }
 
     // Ready-State: Push-Button rendern
-    const dupBrokerName = (typeof dupBrokerLabel === 'function') ? dupBrokerLabel(linkedSlave.broker) : (linkedSlave.broker || '')
-    const dupName = linkedSlave.name || linkedSlave.account_id
-    const mult = tpDupCurrentMultiplier()
+    const slaveBroker = (typeof dupBrokerLabel === 'function') ? dupBrokerLabel(linkedSlave.broker) : (linkedSlave.broker || '')
+    const slaveName   = linkedSlave.name || linkedSlave.account_id
+    const mult        = tpDupCurrentMultiplier()
+
+    // Master-Info: wenn verknüpft → "Master → Slave"; sonst → Warnung dass nur "All Masters"-Default geupdated wird
+    let targetLine
+    let warnLine = ''
+    if(linkedMaster){
+      const masterBroker = (typeof dupBrokerLabel === 'function') ? dupBrokerLabel(linkedMaster.broker) : (linkedMaster.broker || '')
+      const masterName   = linkedMaster.name || linkedMaster.account_id
+      targetLine = `${escapeHtml(masterName)} <span class="mono">(${escapeHtml(String(linkedMaster.account_id))})</span> → ${escapeHtml(slaveName)} <span class="mono">(${escapeHtml(String(linkedSlave.account_id))})</span>`
+    } else {
+      targetLine = `<span class="mono">Alle Master</span> → ${escapeHtml(slaveName)} <span class="mono">· ${escapeHtml(slaveBroker)} · ${escapeHtml(String(linkedSlave.account_id))}</span>`
+      if(masterAcc){
+        warnLine = `<div class="tp-dup-warn">⚠ <strong>${escapeHtml(masterAcc.name)}</strong> ist nicht mit Duplikium verknüpft → Update geht in den „All Masters"-Default. Falls Duplikium ein <em>Per-Master</em>-Setting für diesen Slave hat, wird das den Default überschreiben und du siehst den gepushten Wert nicht im Cockpit. Verknüpf den Master unter <strong>Accounts → Duplikum</strong>.</div>`
+      }
+    }
 
     container.innerHTML = `
       <div class="tp-dup-ready">
         <div class="tp-dup-info">
           <div class="tp-dup-info-label">→ Push auf Duplikium</div>
-          <div class="tp-dup-info-target">${escapeHtml(dupName)} <span class="mono">· ${escapeHtml(dupBrokerName)} · ${escapeHtml(String(linkedSlave.account_id))}</span></div>
+          <div class="tp-dup-info-target">${targetLine}</div>
         </div>
         <div class="tp-dup-action">
           <button class="btn btn-primary" id="tp-dup-push-btn" ${mult ? '' : 'disabled'}>
@@ -4966,10 +4993,12 @@
           </button>
           <span class="tp-dup-status" id="tp-dup-status"></span>
         </div>
-      </div>`
+      </div>
+      ${warnLine}`
 
     // Listener neu binden (Markup wurde gerade ersetzt)
-    document.getElementById('tp-dup-push-btn')?.addEventListener('click', () => tpDupPush(linkedSlave.account_id))
+    const masterDupId = linkedMaster ? linkedMaster.account_id : null
+    document.getElementById('tp-dup-push-btn')?.addEventListener('click', () => tpDupPush(linkedSlave.account_id, masterDupId))
   }
 
   function tpDupSetStatus(text, kind=''){
@@ -4980,10 +5009,13 @@
   }
 
   /**
-   * Push-Action — identische Logik zu dupCalcPush, nur mit Modal-IDs.
-   * Slave-ID wird aus der Account-Verknüpfung mitgegeben (kein User-Picker).
+   * Push-Action — pushed master-spezifisch wenn masterAccountId vorhanden, sonst All-Masters-Default.
+   *
+   * Wichtig: Duplikium Override-Reihenfolge ist 1) Default, 2) Per Master, 3) Per Symbol.
+   * Wenn ein Per-Master-Setting existiert, überschreibt es den Default — d.h. wir MÜSSEN
+   * den Per-Master-Eintrag updaten, sonst sieht der User im Cockpit den alten Wert.
    */
-  async function tpDupPush(slaveAccountId){
+  async function tpDupPush(slaveAccountId, masterAccountId){
     if(!slaveAccountId){ tpDupSetStatus('Kein Slave verknüpft', 'err'); return }
     const mult = tpDupCurrentMultiplier()
     if(!mult){ tpDupSetStatus('Kein gültiger Multiplier', 'err'); return }
@@ -4996,7 +5028,9 @@
 
     try {
       // 1) Existierende Settings holen → risk_factor_type preserven
-      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveAccountId) })
+      const getBody = { id_slave: String(slaveAccountId) }
+      if(masterAccountId) getBody.id_master = String(masterAccountId)
+      const getRes = await dupApi('POST', 'settings/getSettings.php', getBody)
       if(!getRes.ok){
         const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
         throw new Error(`getSettings: ${errMsg}`)
@@ -5005,14 +5039,24 @@
         ? getRes.data.settings
         : (Array.isArray(getRes.data) ? getRes.data : [])
 
-      // Default-Entry: kein symbol_slave, kein id_group; bevorzugt ohne id_master
+      // Bevorzugter Entry:
+      //  - mit gewähltem Master → exakter Master+Slave Eintrag (Per-Master Setting)
+      //  - ohne gewählten Master → "All Masters"-Default (kein id_master)
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveAccountId))
-      const preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
-                    || matches.find(e => !e.symbol_slave && !e.id_group)
-                    || matches[0]
+      let preserved
+      if(masterAccountId){
+        preserved = matches.find(e => String(e.id_master || '') === String(masterAccountId) && !e.symbol_slave && !e.id_group)
+                 || matches.find(e => String(e.id_master || '') === String(masterAccountId))
+      }
+      if(!preserved){
+        preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
+                 || matches.find(e => !e.symbol_slave && !e.id_group)
+                 || matches[0]
+      }
 
       if(!preserved){
-        throw new Error(`Kein Setting für Slave ${slaveAccountId} in Duplikium gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
+        const tgt = masterAccountId ? `Master ${masterAccountId} → Slave ${slaveAccountId}` : `Slave ${slaveAccountId}`
+        throw new Error(`Kein Setting für ${tgt} in Duplikium gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
       }
 
       const entry = {
@@ -5020,7 +5064,14 @@
         risk_factor_type:  String(preserved.risk_factor_type),
         risk_factor_value: String(mult)
       }
-      if(preserved.id_master) entry.id_master = String(preserved.id_master)
+      // Master-Strategie:
+      //  - User hat einen Prophos-Master gewählt und der ist verknüpft → master-spezifisch pushen
+      //  - sonst → preserved übernehmen (was meist "All Masters" ist)
+      if(masterAccountId){
+        entry.id_master = String(masterAccountId)
+      } else if(preserved.id_master){
+        entry.id_master = String(preserved.id_master)
+      }
 
       tpDupSetStatus('⏳ pushe…', 'loading')
 
@@ -5032,7 +5083,8 @@
       }
 
       const multTxt = mult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
-      tpDupSetStatus(`✓ ${multTxt}× gepusht`, 'ok')
+      const tgtTxt = masterAccountId ? `${masterAccountId}→${slaveAccountId}` : `→${slaveAccountId}`
+      tpDupSetStatus(`✓ ${multTxt}× gepusht (${tgtTxt})`, 'ok')
       clearTimeout(tpDupPush._timer)
       tpDupPush._timer = setTimeout(() => tpDupSetStatus(''), 6000)
     } catch(e){
