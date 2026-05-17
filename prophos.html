@@ -1144,6 +1144,48 @@
     border-radius:var(--r-md);font-size:11.5px;color:#b6690a;line-height:1.45;
   }
   #dashboard-view .tp-dup-warn em{font-style:italic;font-weight:600}
+
+  /* "Aktuell in Duplikium" Anzeige unter dem Push-Block */
+  #dashboard-view .tp-dup-current{
+    margin-top:8px;padding:9px 12px;
+    border-radius:var(--r-md);font-size:12px;line-height:1.4;
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    background:rgba(84,71,206,.04);border:1px solid rgba(84,71,206,.12);
+    color:var(--ink-2);
+  }
+  #dashboard-view .tp-dup-current.diff{
+    background:rgba(247,144,9,.08);border-color:rgba(247,144,9,.25);
+    color:#b6690a;
+  }
+  #dashboard-view .tp-dup-current.ok{
+    background:rgba(18,183,106,.07);border-color:rgba(18,183,106,.2);
+    color:#0f7a44;
+  }
+  #dashboard-view .tp-dup-current.empty{
+    color:var(--sub);background:transparent;border-style:dashed;
+  }
+  #dashboard-view .tp-dup-current.err{
+    color:var(--danger);background:rgba(240,68,56,.06);border-color:rgba(240,68,56,.2);
+  }
+  #dashboard-view .tp-dup-current.loading{color:var(--sub);background:transparent}
+  #dashboard-view .tp-dup-current.loading .mono{animation:tpDupPulse 1.2s ease-in-out infinite}
+  @keyframes tpDupPulse{50%{opacity:.4}}
+  #dashboard-view .tp-dup-cur-label{
+    font-size:10.5px;font-weight:600;letter-spacing:.08em;
+    text-transform:uppercase;color:inherit;opacity:.75;
+  }
+  #dashboard-view .tp-dup-cur-val{
+    font-size:14px;font-weight:700;font-family:var(--mono);color:inherit;
+  }
+  #dashboard-view .tp-dup-cur-scope{
+    font-size:10.5px;padding:1px 7px;border-radius:999px;
+    background:rgba(0,0,0,.06);color:inherit;opacity:.7;
+  }
+  #dashboard-view .tp-dup-cur-arrow{color:inherit;opacity:.5;font-size:13px}
+  #dashboard-view .tp-dup-cur-rec{font-size:11.5px;color:inherit;font-weight:500}
+  #dashboard-view .tp-dup-cur-rec .mono{font-weight:700;font-size:13px}
+  #dashboard-view .tp-dup-cur-match{font-size:11px;color:inherit;margin-left:auto}
+
   @media (max-width:480px){
     #dashboard-view .tp-dup-ready{grid-template-columns:1fr}
     #dashboard-view .tp-dup-btn{justify-content:center}
@@ -4589,6 +4631,11 @@
     catch { return { ok: r.ok, status: r.status, data: text } }
   }
 
+  // Expose für DevTools-Debugging: window.dupApi(method, path, body)
+  // Beispiel: await dupApi('POST', 'subscription/getSubscriptions.php', {})
+  window.dupApi = dupApi
+  window.dupState = dupState
+
   /**
    * Lädt die Duplikium-Accounts via account/getAccounts.php.
    * Doku: https://www.trade-copier.com/how-to/trade-copier-api-documentation
@@ -4920,6 +4967,101 @@
   const tpDupFindLinkedSlave = tpDupFindLinkedAccount
 
   /**
+   * Cache des aktuell in Duplikium hinterlegten Multipliers für das aktive Master-Slave-Paar.
+   * Wird vom getSettings.php Endpoint befüllt (was im Free-Tier funktioniert, im Gegensatz zu setSettings).
+   */
+  let tpDupCurrentSetting = null  // {slaveDupId, masterDupId, value, type, isPerMaster, found, error, loading}
+
+  /**
+   * Async fetch des aktuellen Settings für ein Master-Slave-Paar.
+   * Updated tpDupCurrentSetting + triggert Re-Render des Push-Blocks.
+   * Vermeidet parallele Requests für dasselbe Paar.
+   */
+  async function tpDupFetchCurrent(slaveDupId, masterDupId){
+    const key = `${masterDupId || ''}|${slaveDupId || ''}`
+    if(tpDupFetchCurrent._inflight === key) return
+    tpDupFetchCurrent._inflight = key
+
+    // Loading-State setzen + sofort rendern (damit User Spinner sieht)
+    tpDupCurrentSetting = { slaveDupId, masterDupId, loading: true }
+    if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
+
+    try {
+      const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
+      if(!res.ok){
+        throw new Error((res.data && res.data.error) || `HTTP ${res.status}`)
+      }
+      const arr = (res.data && Array.isArray(res.data.settings))
+        ? res.data.settings
+        : (Array.isArray(res.data) ? res.data : [])
+      const matches = arr.filter(e => String(e.id_slave || '') === String(slaveDupId))
+
+      // Bevorzugter Eintrag:
+      //  - exakter Master-Match falls Master gewählt
+      //  - sonst "All Masters"-Default
+      //  - sonst irgendein Eintrag für diesen Slave
+      let setting = null
+      if(masterDupId){
+        setting = matches.find(e => String(e.id_master||'') === String(masterDupId) && !e.symbol_slave && !e.id_group)
+                || matches.find(e => String(e.id_master||'') === String(masterDupId))
+      }
+      const isPerMaster = !!setting
+      if(!setting){
+        setting = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
+                || matches.find(e => !e.symbol_slave && !e.id_group)
+                || matches[0]
+                || null
+      }
+
+      tpDupCurrentSetting = {
+        slaveDupId, masterDupId,
+        value: setting ? parseFloat(setting.risk_factor_value) : null,
+        type:  setting ? String(setting.risk_factor_type)  : null,
+        isPerMaster,
+        found: !!setting,
+        loading: false
+      }
+    } catch(e){
+      console.error('[tpDupFetchCurrent]', e)
+      tpDupCurrentSetting = {
+        slaveDupId, masterDupId,
+        loading: false, found: false,
+        error: e.message || 'Fehler'
+      }
+    } finally {
+      tpDupFetchCurrent._inflight = null
+      if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
+    }
+  }
+
+  /**
+   * Checked die aktuell im Modal gewählten Accounts und triggert ggf. einen Fetch.
+   * Wird aus tpRecompute() aufgerufen — nutzt den Cache wenn das Paar unverändert ist.
+   */
+  function tpDupMaybeFetchCurrent(){
+    if(!dupState || !dupState.token) return
+    const slaveId  = document.getElementById('tp-slave')?.value || ''
+    const masterId = document.getElementById('tp-master')?.value || ''
+    if(!slaveId) { tpDupCurrentSetting = null; return }
+    const linkedSlave  = tpDupFindLinkedAccount(slaveId)
+    if(!linkedSlave) { tpDupCurrentSetting = null; return }
+    const slaveDupId  = String(linkedSlave.account_id)
+    const linkedMaster = masterId ? tpDupFindLinkedAccount(masterId) : null
+    const masterDupId  = linkedMaster ? String(linkedMaster.account_id) : ''
+
+    // Cache hit? Skip.
+    if(tpDupCurrentSetting &&
+       tpDupCurrentSetting.slaveDupId === slaveDupId &&
+       tpDupCurrentSetting.masterDupId === masterDupId &&
+       !tpDupCurrentSetting.error){
+      return
+    }
+    // Pair-Wechsel oder noch nichts geholt → fetch
+    tpDupFetchCurrent(slaveDupId, masterDupId)
+  }
+  window.tpDupMaybeFetchCurrent = tpDupMaybeFetchCurrent
+
+  /**
    * Render den Push-Block im Modal je nach State:
    *  - Duplikium nicht verbunden  → Hint mit Link zu Settings
    *  - Slave-Account nicht gewählt → leerer Container (kein UI)
@@ -4978,8 +5120,47 @@
     } else {
       targetLine = `<span class="mono">Alle Master</span> → ${escapeHtml(slaveName)} <span class="mono">· ${escapeHtml(slaveBroker)} · ${escapeHtml(String(linkedSlave.account_id))}</span>`
       if(masterAcc){
-        warnLine = `<div class="tp-dup-warn">⚠ <strong>${escapeHtml(masterAcc.name)}</strong> ist nicht mit Duplikium verknüpft → Update geht in den „All Masters"-Default. Falls Duplikium ein <em>Per-Master</em>-Setting für diesen Slave hat, wird das den Default überschreiben und du siehst den gepushten Wert nicht im Cockpit. Verknüpf den Master unter <strong>Accounts → Duplikum</strong>.</div>`
+        warnLine = `<div class="tp-dup-warn">⚠ <strong>${escapeHtml(masterAcc.name)}</strong> ist nicht mit Duplikium verknüpft → Aktuell-Wert kommt vom „All Masters"-Default. Verknüpf den Master unter <strong>Accounts → Duplikum</strong> für master-spezifische Werte.</div>`
       }
+    }
+
+    // "Aktuell in Duplikium" Zeile aus dem Cache
+    const cs = tpDupCurrentSetting
+    let currentLine = ''
+    if(cs && cs.loading){
+      currentLine = `<div class="tp-dup-current loading">↺ Aktuell in Duplikium: <span class="mono">lädt…</span></div>`
+    } else if(cs && cs.error){
+      currentLine = `<div class="tp-dup-current err">✗ Aktuell in Duplikium: <span class="mono">${escapeHtml(cs.error)}</span></div>`
+    } else if(cs && cs.found && cs.value != null){
+      const curVal = cs.value
+      const curTxt = curVal.toLocaleString('de-DE', { maximumFractionDigits: 3, minimumFractionDigits: 3 })
+      const recTxt = mult != null ? mult.toLocaleString('de-DE', { maximumFractionDigits: 3, minimumFractionDigits: 3 }) : null
+      const diff = (mult != null) && Math.abs(curVal - mult) > 0.0005
+      const scope = cs.isPerMaster ? 'Per-Master' : (linkedMaster ? 'All Masters Default' : 'Default')
+      if(diff && recTxt){
+        currentLine = `<div class="tp-dup-current diff">
+          <span class="tp-dup-cur-label">Aktuell in Duplikium</span>
+          <span class="tp-dup-cur-val mono">${curTxt}×</span>
+          <span class="tp-dup-cur-scope">${escapeHtml(scope)}</span>
+          <span class="tp-dup-cur-arrow">→</span>
+          <span class="tp-dup-cur-rec">Empfohlen <span class="mono">${recTxt}×</span></span>
+        </div>`
+      } else if(recTxt){
+        currentLine = `<div class="tp-dup-current ok">
+          <span class="tp-dup-cur-label">Aktuell in Duplikium</span>
+          <span class="tp-dup-cur-val mono">${curTxt}×</span>
+          <span class="tp-dup-cur-scope">${escapeHtml(scope)}</span>
+          <span class="tp-dup-cur-match">✓ stimmt mit Empfehlung überein</span>
+        </div>`
+      } else {
+        currentLine = `<div class="tp-dup-current">
+          <span class="tp-dup-cur-label">Aktuell in Duplikium</span>
+          <span class="tp-dup-cur-val mono">${curTxt}×</span>
+          <span class="tp-dup-cur-scope">${escapeHtml(scope)}</span>
+        </div>`
+      }
+    } else if(cs && !cs.found){
+      currentLine = `<div class="tp-dup-current empty">○ Aktuell in Duplikium: <span class="mono">noch nicht konfiguriert</span></div>`
     }
 
     container.innerHTML = `
@@ -4993,6 +5174,7 @@
           <span id="tp-dup-push-btn-label">Push ${mult ? mult.toFixed(3) + '×' : ''}</span>
         </button>
       </div>
+      ${currentLine}
       <div class="tp-dup-status-row"><span class="tp-dup-status" id="tp-dup-status"></span></div>
       ${warnLine}`
 
@@ -5109,6 +5291,9 @@
       const multTxt = mult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
       const tgtTxt = masterAccountId ? `${masterAccountId}→${slaveAccountId}` : `→${slaveAccountId}`
       tpDupSetStatus(`✓ ${multTxt}× gepusht (${tgtTxt})`, 'ok')
+      // Cache invalidieren + re-fetch damit "Aktuell"-Anzeige aktualisiert wird
+      tpDupCurrentSetting = null
+      tpDupFetchCurrent(String(slaveAccountId), masterAccountId ? String(masterAccountId) : '')
       clearTimeout(tpDupPush._timer)
       tpDupPush._timer = setTimeout(() => tpDupSetStatus(''), 6000)
     } catch(e){
@@ -9909,6 +10094,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = master && slave ? 'Risiko und Anzahl ausfüllen' : 'Master und Slave wählen'
+      if(typeof window.tpDupMaybeFetchCurrent === 'function') window.tpDupMaybeFetchCurrent()
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
@@ -9917,6 +10103,7 @@
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
       eq.textContent = '–'
+      if(typeof window.tpDupMaybeFetchCurrent === 'function') window.tpDupMaybeFetchCurrent()
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
@@ -9943,6 +10130,7 @@
     }
 
     // Push-to-Duplikium Panel live aktualisieren
+    if(typeof window.tpDupMaybeFetchCurrent === 'function') window.tpDupMaybeFetchCurrent()
     if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
   }
 
