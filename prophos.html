@@ -4646,15 +4646,33 @@
 
   /**
    * Liest aktuellen Multiplier aus dem UI. Returns null wenn keiner berechnet.
+   *
+   * WICHTIG: Lot Rechner nutzt toLocaleString('de-DE') → "0,006" (Komma als Dezimal),
+   * Modal nutzt toFixed(3) → "0.006" (Punkt als Dezimal).
+   * Wir müssen BEIDE Formate handhaben.
    */
   function dupCalcCurrentMultiplier(){
     const el = document.getElementById('calc-multiplier')
     if(!el) return null
     const txt = (el.textContent || '').trim()
-    if(!txt || txt === '—') return null
-    // German format "0,769" → 0.769
-    const n = parseFloat(txt.replace(/\./g,'').replace(',','.'))
+    if(!txt || txt === '—' || txt === '–') return null
+    const n = parseLocaleNumber(txt)
     return isFinite(n) && n > 0 ? n : null
+  }
+
+  /**
+   * Parsed Zahl im deutschen ("1.234,56") oder englischen ("1234.56") Format.
+   * Heuristik: Wenn ein Komma vorkommt → deutsches Format (Punkte sind Tausender).
+   * Sonst → englisches Format (parseFloat direkt).
+   */
+  function parseLocaleNumber(txt){
+    if(typeof txt !== 'string') return NaN
+    txt = txt.trim()
+    if(!txt) return NaN
+    if(txt.includes(',')){
+      return parseFloat(txt.replace(/\./g,'').replace(',','.'))
+    }
+    return parseFloat(txt)
   }
 
   /**
@@ -4872,9 +4890,9 @@
     if(!el) return null
     const txt = (el.textContent || '').trim()
     if(!txt || txt === '—' || txt === '–') return null
-    // tp-multi-value nutzt mult.toFixed(3) → "0.769", aber je nach Locale evtl. "0,769"
-    const n = parseFloat(txt.replace(/\./g,'').replace(',','.'))
-    return isFinite(n) && n > 0 ? n : (parseFloat(txt) > 0 ? parseFloat(txt) : null)
+    // Nutzt den gleichen format-aware Parser wie dupCalcCurrentMultiplier
+    const n = parseLocaleNumber(txt)
+    return isFinite(n) && n > 0 ? n : null
   }
 
   /**
