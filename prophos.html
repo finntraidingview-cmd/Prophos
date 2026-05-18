@@ -14604,6 +14604,16 @@
           <input type="checkbox" class="ptc-cb">
           <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
           <span class="ptc-item-text">
+            <span class="ptc-item-title">Richtiger Account?</span>
+            <span class="ptc-item-hint">Master-Konto in TSX = der Account aus dem Plan</span>
+          </span>
+        </label>
+      </li>
+      <li>
+        <label class="ptc-item">
+          <input type="checkbox" class="ptc-cb">
+          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
+          <span class="ptc-item-text">
             <span class="ptc-item-title">Multiplikator stimmt</span>
             <span class="ptc-item-hint">Aktueller Wert in Duplikium = berechneter</span>
           </span>
@@ -14752,12 +14762,13 @@
 
   // Per-Item Timer (in Sekunden). Falls du das tunen willst:
   // erste Punkte etwas länger, später kürzer.
-  const TIMERS_PER_ITEM = [10, 10, 10, 10]
+  const TIMERS_PER_ITEM = [5, 5, 5, 5, 5]
   const STEP_LABELS = [
-    'Schritt 1 von 4 — Asset',
-    'Schritt 2 von 4 — Lot-Size',
-    'Schritt 3 von 4 — Multiplikator',
-    'Schritt 4 von 4 — Copy-Trading'
+    'Schritt 1 von 5 — Asset',
+    'Schritt 2 von 5 — Lot-Size',
+    'Schritt 3 von 5 — Account',
+    'Schritt 4 von 5 — Multiplikator',
+    'Schritt 5 von 5 — Copy-Trading'
   ]
   const CIRCUMFERENCE = 2 * Math.PI * 45  // ≈ 282.74
 
