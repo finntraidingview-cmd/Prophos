@@ -3328,6 +3328,19 @@
               <label>Anzahl Kontrakte</label>
               <input type="number" class="input mono" id="tp-master-qty" min="0.01" step="0.1" placeholder="z.B. 1" value="1">
             </div>
+            <div class="field" id="tp-master-contract-field" style="grid-column:span 2;display:none">
+              <label>Master-Kontrakt</label>
+              <div class="calc-toggle" data-tp-side="master">
+                <button type="button" class="calc-toggle-opt active" data-value="micro">
+                  <span class="calc-toggle-sym">MNQ</span>
+                  <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
+                </button>
+                <button type="button" class="calc-toggle-opt" data-value="mini">
+                  <span class="calc-toggle-sym">NQ</span>
+                  <span class="calc-toggle-sub">Mini · $20/Pkt</span>
+                </button>
+              </div>
+            </div>
             <div class="field" style="grid-column:span 2">
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
@@ -3340,6 +3353,19 @@
                   <button type="button" id="tp-slave-suggest-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
                 </div>
                 <div id="tp-slave-suggest-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
+            </div>
+            <div class="field" id="tp-slave-contract-field" style="grid-column:span 2;display:none">
+              <label>Slave-Kontrakt</label>
+              <div class="calc-toggle" data-tp-side="slave">
+                <button type="button" class="calc-toggle-opt active" data-value="micro">
+                  <span class="calc-toggle-sym">MNQ</span>
+                  <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
+                </button>
+                <button type="button" class="calc-toggle-opt" data-value="mini">
+                  <span class="calc-toggle-sym">NQ</span>
+                  <span class="calc-toggle-sub">Mini · $20/Pkt</span>
+                </button>
               </div>
             </div>
 
@@ -9607,15 +9633,51 @@
     return 'projectx'
   }
 
-  function calcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk){
+  function calcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk, masterContract, slaveContract){
     if(!masterRisk || !masterQty || !slaveRisk) return null
-    const m = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
-    const s = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
-    const stopDistance = masterRisk / (m.ppl * masterQty)
+    const mBase = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
+    const sBase = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
+    // Bei projectx-Firms: ppl je nach Toggle (MNQ=Micro/2$ oder NQ=Mini/20$)
+    const mPpl = mBase.hasContractToggle
+      ? (PROJECTX_VARIANTS[masterContract || 'micro'] || PROJECTX_VARIANTS.micro).ppl
+      : mBase.ppl
+    const sPpl = sBase.hasContractToggle
+      ? (PROJECTX_VARIANTS[slaveContract || 'micro'] || PROJECTX_VARIANTS.micro).ppl
+      : sBase.ppl
+    const stopDistance = masterRisk / (mPpl * masterQty)
     if(!stopDistance) return null
-    const slaveQty = slaveRisk / (s.ppl * stopDistance)
+    const slaveQty = slaveRisk / (sPpl * stopDistance)
     return slaveQty / masterQty
   }
+
+  // Trade-Plan-Modal: Kontrakt-Toggle pro Seite, persistiert in localStorage
+  const tpContractType = {
+    master: (localStorage.getItem('prophos_tp_master_contract') === 'mini') ? 'mini' : 'micro',
+    slave:  (localStorage.getItem('prophos_tp_slave_contract')  === 'mini') ? 'mini' : 'micro'
+  }
+  /**
+   * Show/hide den Master- und Slave-Kontrakt-Toggle basierend auf den gewählten
+   * Accounts. Nur sichtbar wenn die Firm des jeweiligen Accounts ein
+   * projectx-Preset hat (Topstep/Tradeify/Alpha/Apex).
+   */
+  function updateTpContractToggles(){
+    const masterId = document.getElementById('tp-master')?.value
+    const slaveId  = document.getElementById('tp-slave')?.value
+    const master = (typeof accounts !== 'undefined') ? accounts.find(a => String(a.id) === String(masterId)) : null
+    const slave  = (typeof accounts !== 'undefined') ? accounts.find(a => String(a.id) === String(slaveId))  : null
+    const masterIsProjectX = !!(master && FIRM_PRESETS[firmToPreset(master.firm)]?.hasContractToggle)
+    const slaveIsProjectX  = !!(slave  && FIRM_PRESETS[firmToPreset(slave.firm)]?.hasContractToggle)
+    const mField = document.getElementById('tp-master-contract-field')
+    const sField = document.getElementById('tp-slave-contract-field')
+    if(mField) mField.style.display = masterIsProjectX ? '' : 'none'
+    if(sField) sField.style.display = slaveIsProjectX  ? '' : 'none'
+    // Active-State der Toggle-Buttons mit State synchronisieren
+    document.querySelectorAll('[data-tp-side="master"] .calc-toggle-opt').forEach(b =>
+      b.classList.toggle('active', b.dataset.value === tpContractType.master))
+    document.querySelectorAll('[data-tp-side="slave"] .calc-toggle-opt').forEach(b =>
+      b.classList.toggle('active', b.dataset.value === tpContractType.slave))
+  }
+  window.updateTpContractToggles = updateTpContractToggles
 
   function priorityWeight(p){
     return p === 'high' ? 0 : p === 'medium' ? 1 : 2
@@ -10440,6 +10502,7 @@
 
     document.getElementById('tradePlanMsg').textContent = ''
     document.getElementById('tradePlanModal').classList.add('open')
+    updateTpContractToggles()
     tpRecompute()
   }
   function closeTradePlanModal(){
@@ -10597,7 +10660,7 @@
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
-    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
+    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk, tpContractType.master, tpContractType.slave)
     if(mult == null){
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
@@ -10636,6 +10699,28 @@
   // Bind modal inputs
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
+  })
+  // Account-Wechsel triggert Toggle-Sichtbarkeit
+  ;['tp-master','tp-slave'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      updateTpContractToggles()
+      tpRecompute()
+    })
+  })
+  // Pill-Toggle Clicks im Trade-Plan-Modal
+  document.querySelectorAll('[data-tp-side]').forEach(toggle => {
+    const side = toggle.dataset.tpSide  // 'master' oder 'slave'
+    toggle.querySelectorAll('.calc-toggle-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.value  // 'micro' oder 'mini'
+        if(tpContractType[side] === val) return
+        tpContractType[side] = val
+        localStorage.setItem(`prophos_tp_${side}_contract`, val)
+        toggle.querySelectorAll('.calc-toggle-opt').forEach(b =>
+          b.classList.toggle('active', b.dataset.value === val))
+        tpRecompute()
+      })
+    })
   })
   // Auto-Vorschlag übernehmen
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
@@ -10694,7 +10779,7 @@
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = accounts.find(a => String(a.id) === String(slaveId))
-    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
+    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk, tpContractType.master, tpContractType.slave)
 
     const planObj = {
       masterAccountId: masterId,
