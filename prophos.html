@@ -3009,12 +3009,16 @@
           <div class="field">
             <label>Prop Firm</label>
             <select class="input" id="calc-master-firm">
-              <option value="projectx">MNQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
+              <option value="projectx">MNQ / NQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
               <option value="fundednext">FundedNext</option>
               <option value="fundingpips">FundingPips</option>
               <option value="the5ers">The5%ers</option>
               <option value="fusion">Fusion Markets</option>
             </select>
+          </div>
+          <div class="field" id="calc-master-asset-field" style="display:none">
+            <label>Asset</label>
+            <select class="input" id="calc-master-asset"></select>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-master-cur">$</span>)</label>
@@ -3037,12 +3041,16 @@
           <div class="field">
             <label>Prop Firm</label>
             <select class="input" id="calc-slave-firm">
-              <option value="projectx">MNQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
+              <option value="projectx">MNQ / NQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
               <option value="fundednext">FundedNext</option>
               <option value="fundingpips">FundingPips</option>
               <option value="the5ers">The5%ers</option>
               <option value="fusion" selected>Fusion Markets</option>
             </select>
+          </div>
+          <div class="field" id="calc-slave-asset-field" style="display:none">
+            <label>Asset</label>
+            <select class="input" id="calc-slave-asset"></select>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-slave-cur">€</span>)</label>
@@ -9312,12 +9320,59 @@
   /* ========== LOT RECHNER ========== */
   // Master/Slave Berechnung wie im alten Tool
   // unit = "Kontrakt" (Futures via ProjectX) oder "Lot" (CFD)
+  //
+  // Firms mit "assets"-Objekt erlauben Mehrfach-Asset-Auswahl
+  // (typisch: Futures mit Full-Size vs. Micro Varianten — NQ ≠ MNQ etc.)
   const FIRM_PRESETS = {
-    projectx:    { label:'MNQ Futures (Topstep/Tradeify/Alpha/Apex)', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,    currency:'$', tbd:false },
-    fundednext:  { label:'FundedNext',   symbol:'NDX100', unit:'Lots',      ppl:10.00,   currency:'$', tbd:false },
-    fundingpips: { label:'FundingPips',  symbol:'NDX100', unit:'Lots',      ppl:20.00,   currency:'$', tbd:false },
-    the5ers:     { label:'The5%ers',     symbol:'NAS100', unit:'Lots',      ppl:1.00,    currency:'$', tbd:false },
-    fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots',    ppl:0.85,    currency:'\u20ac', tbd:false }
+    projectx: {
+      label: 'MNQ/NQ Futures (Topstep/Tradeify/Alpha/Apex)',
+      unit: 'Kontrakte',
+      currency: '$',
+      tbd: false,
+      assets: {
+        'MNQ': { ppl: 2.00,  label: 'MNQ — Micro Nasdaq ($2/Pkt)' },
+        'NQ':  { ppl: 20.00, label: 'NQ — E-Mini Nasdaq ($20/Pkt) · 10× Hebel' }
+      },
+      defaultAsset: 'MNQ'
+    },
+    fundednext:  { label:'FundedNext',     symbol:'NDX100', unit:'Lots', ppl:10.00, currency:'$', tbd:false },
+    fundingpips: { label:'FundingPips',    symbol:'NDX100', unit:'Lots', ppl:20.00, currency:'$', tbd:false },
+    the5ers:     { label:'The5%ers',       symbol:'NAS100', unit:'Lots', ppl:1.00,  currency:'$', tbd:false },
+    fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots', ppl:0.85,  currency:'\u20ac', tbd:false }
+  }
+
+  // Liefert die effektiven Werte (ppl, symbol) für eine Firm —
+  // falls die Firm assets hat, wird der ausgewählte Asset aufgelöst.
+  function getFirmEffective(firmKey, assetKey){
+    const f = FIRM_PRESETS[firmKey]
+    if(!f) return null
+    if(f.assets){
+      const useKey = (assetKey && f.assets[assetKey]) ? assetKey : f.defaultAsset
+      const a = f.assets[useKey]
+      return { label:f.label, symbol:useKey, unit:f.unit, ppl:a.ppl, currency:f.currency, tbd:f.tbd }
+    }
+    return { label:f.label, symbol:f.symbol, unit:f.unit, ppl:f.ppl, currency:f.currency, tbd:f.tbd }
+  }
+
+  // Füllt das Asset-Dropdown einer Seite (master|slave) basierend auf der Firm.
+  // Sichtbar nur wenn die Firm assets hat. Auswahl wird in localStorage persistiert.
+  function updateCalcAssetDropdown(side){
+    const firmEl  = document.getElementById(`calc-${side}-firm`)
+    const fieldEl = document.getElementById(`calc-${side}-asset-field`)
+    const selEl   = document.getElementById(`calc-${side}-asset`)
+    if(!firmEl || !fieldEl || !selEl) return
+    const f = FIRM_PRESETS[firmEl.value]
+    if(f && f.assets){
+      const lsKey = `prophos_calc_${side}_asset`
+      const saved = localStorage.getItem(lsKey)
+      selEl.innerHTML = Object.entries(f.assets).map(([key, info]) =>
+        `<option value="${key}">${info.label}</option>`
+      ).join('')
+      selEl.value = (saved && f.assets[saved]) ? saved : f.defaultAsset
+      fieldEl.style.display = ''
+    } else {
+      fieldEl.style.display = 'none'
+    }
   }
 
   function fmtCalcNum(n, dec=2){
@@ -9329,8 +9384,11 @@
     const masterFirm = document.getElementById('calc-master-firm')?.value
     const slaveFirm  = document.getElementById('calc-slave-firm')?.value
     if(!masterFirm || !slaveFirm) return
-    const m = FIRM_PRESETS[masterFirm]
-    const s = FIRM_PRESETS[slaveFirm]
+    const masterAsset = document.getElementById('calc-master-asset')?.value
+    const slaveAsset  = document.getElementById('calc-slave-asset')?.value
+    const m = getFirmEffective(masterFirm, masterAsset)
+    const s = getFirmEffective(slaveFirm,  slaveAsset)
+    if(!m || !s) return
 
     // Update labels & currency symbols based on selection
     document.getElementById('calc-master-cur').textContent = m.currency
@@ -9379,6 +9437,27 @@
       const el = document.getElementById(id)
       if(el) el.addEventListener('input', calcRecompute)
     })
+  // Firm-Change updated zusätzlich das Asset-Dropdown auf der jeweiligen Seite
+  document.getElementById('calc-master-firm')?.addEventListener('change', () => {
+    updateCalcAssetDropdown('master'); calcRecompute()
+  })
+  document.getElementById('calc-slave-firm')?.addEventListener('change', () => {
+    updateCalcAssetDropdown('slave'); calcRecompute()
+  })
+  // Asset-Change persistiert + recomputed
+  document.getElementById('calc-master-asset')?.addEventListener('change', () => {
+    const v = document.getElementById('calc-master-asset').value
+    localStorage.setItem('prophos_calc_master_asset', v)
+    calcRecompute()
+  })
+  document.getElementById('calc-slave-asset')?.addEventListener('change', () => {
+    const v = document.getElementById('calc-slave-asset').value
+    localStorage.setItem('prophos_calc_slave_asset', v)
+    calcRecompute()
+  })
+  // Initiale Asset-Dropdown-Befüllung + erste Berechnung
+  updateCalcAssetDropdown('master')
+  updateCalcAssetDropdown('slave')
   calcRecompute()
 
   /* ========== TRADE PLANS ========== */
