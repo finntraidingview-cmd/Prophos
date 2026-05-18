@@ -1784,6 +1784,35 @@
   #dashboard-view .calc-equation-wrap .calc-result-eq{
     margin-top:4px;font-size:11.5px;line-height:1.5;
   }
+
+  /* MNQ/NQ Pill-Toggle (nur sichtbar bei projectx-Firms) */
+  #dashboard-view .calc-toggle{
+    display:flex; gap:0;
+    background:rgba(0,0,0,.04);
+    border-radius:10px; padding:3px;
+    border:1px solid var(--border);
+  }
+  #dashboard-view .calc-toggle-opt{
+    flex:1; padding:8px 10px;
+    background:transparent; border:none; border-radius:7px;
+    cursor:pointer; color:var(--sub);
+    display:flex; flex-direction:column; align-items:center; gap:1px;
+    font-family:inherit;
+    transition:all .18s cubic-bezier(.34,1.56,.64,1);
+  }
+  #dashboard-view .calc-toggle-opt:hover{ color:var(--ink-2) }
+  #dashboard-view .calc-toggle-opt.active{
+    background:var(--surface, #fff);
+    color:var(--violet);
+    box-shadow:0 1px 3px rgba(0,0,0,.08), 0 0 0 1px rgba(84,71,206,.08);
+  }
+  #dashboard-view .calc-toggle-sym{
+    font-weight:700; font-size:13.5px; letter-spacing:.02em;
+  }
+  #dashboard-view .calc-toggle-sub{
+    font-size:10px; opacity:.7; font-family:var(--mono); letter-spacing:.02em;
+  }
+  #dashboard-view .calc-toggle-opt.active .calc-toggle-sub{ opacity:.85 }
   #dashboard-view .calc-result-label{
     font-size:11px;font-weight:600;letter-spacing:.12em;
     text-transform:uppercase;color:var(--sub);margin-bottom:6px;
@@ -3017,8 +3046,17 @@
             </select>
           </div>
           <div class="field" id="calc-master-asset-field" style="display:none">
-            <label>Asset</label>
-            <select class="input" id="calc-master-asset"></select>
+            <label>Kontrakt</label>
+            <div class="calc-toggle" data-side="master">
+              <button type="button" class="calc-toggle-opt active" data-value="micro">
+                <span class="calc-toggle-sym">MNQ</span>
+                <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
+              </button>
+              <button type="button" class="calc-toggle-opt" data-value="mini">
+                <span class="calc-toggle-sym">NQ</span>
+                <span class="calc-toggle-sub">Mini · $20/Pkt</span>
+              </button>
+            </div>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-master-cur">$</span>)</label>
@@ -3049,8 +3087,17 @@
             </select>
           </div>
           <div class="field" id="calc-slave-asset-field" style="display:none">
-            <label>Asset</label>
-            <select class="input" id="calc-slave-asset"></select>
+            <label>Kontrakt</label>
+            <div class="calc-toggle" data-side="slave">
+              <button type="button" class="calc-toggle-opt active" data-value="micro">
+                <span class="calc-toggle-sym">MNQ</span>
+                <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
+              </button>
+              <button type="button" class="calc-toggle-opt" data-value="mini">
+                <span class="calc-toggle-sym">NQ</span>
+                <span class="calc-toggle-sub">Mini · $20/Pkt</span>
+              </button>
+            </div>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-slave-cur">€</span>)</label>
@@ -9321,57 +9368,58 @@
   // Master/Slave Berechnung wie im alten Tool
   // unit = "Kontrakt" (Futures via ProjectX) oder "Lot" (CFD)
   //
-  // Firms mit "assets"-Objekt erlauben Mehrfach-Asset-Auswahl
-  // (typisch: Futures mit Full-Size vs. Micro Varianten — NQ ≠ MNQ etc.)
+  // ProjectX-Firmen (Topstep/Tradeify/Alpha/Apex) erlauben zwischen
+  // MNQ (Mikro, $2/Pkt) und NQ (Mini, $20/Pkt) per Toggle umzuschalten.
   const FIRM_PRESETS = {
-    projectx: {
-      label: 'MNQ/NQ Futures (Topstep/Tradeify/Alpha/Apex)',
-      unit: 'Kontrakte',
-      currency: '$',
-      tbd: false,
-      assets: {
-        'MNQ': { ppl: 2.00,  label: 'MNQ — Micro Nasdaq ($2/Pkt)' },
-        'NQ':  { ppl: 20.00, label: 'NQ — E-Mini Nasdaq ($20/Pkt) · 10× Hebel' }
-      },
-      defaultAsset: 'MNQ'
-    },
+    projectx:    { label:'MNQ/NQ Futures (Topstep/Tradeify/Alpha/Apex)', unit:'Kontrakte', currency:'$', tbd:false, hasContractToggle:true },
     fundednext:  { label:'FundedNext',     symbol:'NDX100', unit:'Lots', ppl:10.00, currency:'$', tbd:false },
     fundingpips: { label:'FundingPips',    symbol:'NDX100', unit:'Lots', ppl:20.00, currency:'$', tbd:false },
     the5ers:     { label:'The5%ers',       symbol:'NAS100', unit:'Lots', ppl:1.00,  currency:'$', tbd:false },
     fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots', ppl:0.85,  currency:'\u20ac', tbd:false }
   }
 
-  // Liefert die effektiven Werte (ppl, symbol) für eine Firm —
-  // falls die Firm assets hat, wird der ausgewählte Asset aufgelöst.
-  function getFirmEffective(firmKey, assetKey){
-    const f = FIRM_PRESETS[firmKey]
-    if(!f) return null
-    if(f.assets){
-      const useKey = (assetKey && f.assets[assetKey]) ? assetKey : f.defaultAsset
-      const a = f.assets[useKey]
-      return { label:f.label, symbol:useKey, unit:f.unit, ppl:a.ppl, currency:f.currency, tbd:f.tbd }
-    }
-    return { label:f.label, symbol:f.symbol, unit:f.unit, ppl:f.ppl, currency:f.currency, tbd:f.tbd }
+  // ProjectX-Varianten: Mikro (MNQ, $2/Pkt) ↔ Mini (NQ, $20/Pkt)
+  const PROJECTX_VARIANTS = {
+    micro: { symbol:'MNQ', ppl:2.00  },
+    mini:  { symbol:'NQ',  ppl:20.00 }
   }
 
-  // Füllt das Asset-Dropdown einer Seite (master|slave) basierend auf der Firm.
-  // Sichtbar nur wenn die Firm assets hat. Auswahl wird in localStorage persistiert.
-  function updateCalcAssetDropdown(side){
+  // State pro Seite (master|slave) — wird in localStorage persistiert
+  const calcContractType = {
+    master: (localStorage.getItem('prophos_calc_master_contract') === 'mini') ? 'mini' : 'micro',
+    slave:  (localStorage.getItem('prophos_calc_slave_contract')  === 'mini') ? 'mini' : 'micro'
+  }
+
+  /**
+   * Liefert das effektive Preset für den Lot-Rechner.
+   * Bei Firms mit hasContractToggle wird der ppl-Wert aus dem Toggle-State gezogen.
+   */
+  function getEffectivePreset(firmKey, side){
+    const base = FIRM_PRESETS[firmKey]
+    if(!base) return null
+    if(base.hasContractToggle){
+      const v = PROJECTX_VARIANTS[calcContractType[side]] || PROJECTX_VARIANTS.micro
+      return { label:base.label, symbol:v.symbol, unit:base.unit, ppl:v.ppl, currency:base.currency, tbd:base.tbd }
+    }
+    return { label:base.label, symbol:base.symbol, unit:base.unit, ppl:base.ppl, currency:base.currency, tbd:base.tbd }
+  }
+
+  /**
+   * Show/hide den Toggle-Slider basierend auf der gewählten Firm.
+   * Plus: visueller Active-State der Toggle-Buttons synchronisieren.
+   */
+  function updateCalcContractToggle(side){
     const firmEl  = document.getElementById(`calc-${side}-firm`)
     const fieldEl = document.getElementById(`calc-${side}-asset-field`)
-    const selEl   = document.getElementById(`calc-${side}-asset`)
-    if(!firmEl || !fieldEl || !selEl) return
+    if(!firmEl || !fieldEl) return
     const f = FIRM_PRESETS[firmEl.value]
-    if(f && f.assets){
-      const lsKey = `prophos_calc_${side}_asset`
-      const saved = localStorage.getItem(lsKey)
-      selEl.innerHTML = Object.entries(f.assets).map(([key, info]) =>
-        `<option value="${key}">${info.label}</option>`
-      ).join('')
-      selEl.value = (saved && f.assets[saved]) ? saved : f.defaultAsset
-      fieldEl.style.display = ''
-    } else {
-      fieldEl.style.display = 'none'
+    fieldEl.style.display = (f && f.hasContractToggle) ? '' : 'none'
+    if(f && f.hasContractToggle){
+      // Active-State der Buttons synchronisieren
+      const buttons = fieldEl.querySelectorAll('.calc-toggle-opt')
+      buttons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === calcContractType[side])
+      })
     }
   }
 
@@ -9384,10 +9432,8 @@
     const masterFirm = document.getElementById('calc-master-firm')?.value
     const slaveFirm  = document.getElementById('calc-slave-firm')?.value
     if(!masterFirm || !slaveFirm) return
-    const masterAsset = document.getElementById('calc-master-asset')?.value
-    const slaveAsset  = document.getElementById('calc-slave-asset')?.value
-    const m = getFirmEffective(masterFirm, masterAsset)
-    const s = getFirmEffective(slaveFirm,  slaveAsset)
+    const m = getEffectivePreset(masterFirm, 'master')
+    const s = getEffectivePreset(slaveFirm,  'slave')
     if(!m || !s) return
 
     // Update labels & currency symbols based on selection
@@ -9437,27 +9483,32 @@
       const el = document.getElementById(id)
       if(el) el.addEventListener('input', calcRecompute)
     })
-  // Firm-Change updated zusätzlich das Asset-Dropdown auf der jeweiligen Seite
+  // Firm-Change zeigt/versteckt den Toggle und triggert Recompute
   document.getElementById('calc-master-firm')?.addEventListener('change', () => {
-    updateCalcAssetDropdown('master'); calcRecompute()
+    updateCalcContractToggle('master'); calcRecompute()
   })
   document.getElementById('calc-slave-firm')?.addEventListener('change', () => {
-    updateCalcAssetDropdown('slave'); calcRecompute()
+    updateCalcContractToggle('slave'); calcRecompute()
   })
-  // Asset-Change persistiert + recomputed
-  document.getElementById('calc-master-asset')?.addEventListener('change', () => {
-    const v = document.getElementById('calc-master-asset').value
-    localStorage.setItem('prophos_calc_master_asset', v)
-    calcRecompute()
+  // Pill-Toggle Clicks: state ändern, persistieren, recompute
+  document.querySelectorAll('.calc-toggle').forEach(toggle => {
+    const side = toggle.dataset.side  // 'master' oder 'slave'
+    toggle.querySelectorAll('.calc-toggle-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.dataset.value  // 'micro' oder 'mini'
+        if(calcContractType[side] === val) return
+        calcContractType[side] = val
+        localStorage.setItem(`prophos_calc_${side}_contract`, val)
+        // Active-State aktualisieren
+        toggle.querySelectorAll('.calc-toggle-opt').forEach(b =>
+          b.classList.toggle('active', b.dataset.value === val))
+        calcRecompute()
+      })
+    })
   })
-  document.getElementById('calc-slave-asset')?.addEventListener('change', () => {
-    const v = document.getElementById('calc-slave-asset').value
-    localStorage.setItem('prophos_calc_slave_asset', v)
-    calcRecompute()
-  })
-  // Initiale Asset-Dropdown-Befüllung + erste Berechnung
-  updateCalcAssetDropdown('master')
-  updateCalcAssetDropdown('slave')
+  // Initialer Sync + erste Berechnung
+  updateCalcContractToggle('master')
+  updateCalcContractToggle('slave')
   calcRecompute()
 
   /* ========== TRADE PLANS ========== */
