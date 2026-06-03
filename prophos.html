@@ -1318,378 +1318,51 @@
   #dashboard-view .calib-status.ok{color:#10b981}
   #dashboard-view .calib-status.err{color:#ef4444}
 
-  /* ===================================================================
-     JOURNAL — Editorial design
-     Warmes Cream/Amber-Theme, Serif-Headlines, generous whitespace.
-     =================================================================== */
-
-  /* Imported above the style block — keine Custom-Font, sondern Browser-Built-in
-     "Charter"/"Iowan Old Style"/"Cambria" als beautiful serifs für die Fragen-Labels. */
-  #dashboard-view .jr-view{
-    --jr-cream:    #fdfaf3;
-    --jr-cream-2:  #f7f1e4;
-    --jr-amber:    #d97706;
-    --jr-amber-l:  #fbbf24;
-    --jr-ink:      #1c1814;
-    --jr-ink-2:    #564a3d;
-    --jr-sub:      #8a7d6c;
-    --jr-line:     rgba(28,24,20,.08);
-    --jr-serif:    "Iowan Old Style", "Charter", "Cambria", Georgia, serif;
-    max-width:1100px;margin:0 auto;
-  }
-
-  /* HERO */
-  #dashboard-view .jr-hero{
-    position:relative;overflow:hidden;
-    padding:34px 36px 30px;margin-bottom:18px;
-    border-radius:20px;
-    background:var(--jr-cream);
-    border:1px solid var(--jr-line);
-    display:grid;grid-template-columns:1fr auto;gap:30px;align-items:center;
-  }
-  #dashboard-view .jr-hero-bg{
-    position:absolute;inset:0;pointer-events:none;opacity:.55;
-    background:
-      radial-gradient(circle at 90% 10%, rgba(251,191,36,.25), transparent 45%),
-      radial-gradient(circle at 10% 90%, rgba(217,119,6,.12), transparent 50%);
-  }
-  #dashboard-view .jr-hero-l{position:relative;z-index:1}
-  #dashboard-view .jr-hero-eyebrow{
-    font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
-    color:var(--jr-amber);font-weight:600;margin-bottom:10px;
-    display:flex;align-items:center;gap:8px;
-  }
-  #dashboard-view .jr-hero-dot{opacity:.4}
-  #dashboard-view .jr-hero-title{
-    font-family:var(--jr-serif);font-size:36px;line-height:1.1;letter-spacing:-0.02em;
-    color:var(--jr-ink);font-weight:600;margin:0 0 6px;font-style:italic;
-  }
-  #dashboard-view .jr-hero-sub{
-    color:var(--jr-ink-2);font-size:14px;line-height:1.5;margin:0;max-width:480px;
-  }
-
-  /* Hero stats */
-  #dashboard-view .jr-hero-r{
-    position:relative;z-index:1;display:flex;gap:10px;
-  }
-  #dashboard-view .jr-stat{
-    background:rgba(255,255,255,.65);backdrop-filter:blur(4px);
-    border:1px solid var(--jr-line);border-radius:14px;
-    padding:12px 16px;min-width:80px;text-align:center;
-    transition:transform .25s cubic-bezier(.34,1.56,.64,1);
-  }
-  #dashboard-view .jr-stat:hover{transform:translateY(-2px)}
-  #dashboard-view .jr-stat-icon{font-size:18px;line-height:1;margin-bottom:4px}
-  #dashboard-view .jr-stat-val{
-    font-family:var(--mono);font-size:22px;font-weight:700;line-height:1;color:var(--jr-ink);
-  }
-  #dashboard-view .jr-stat-lbl{
-    font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;
-    color:var(--jr-sub);margin-top:4px;font-weight:500;
-  }
-  /* Streak with glow when active */
-  #dashboard-view .jr-stat-streak.active{
-    background:linear-gradient(135deg, rgba(251,191,36,.18), rgba(217,119,6,.08));
-    border-color:rgba(217,119,6,.3);
-  }
-  #dashboard-view .jr-stat-streak.active .jr-stat-icon{
-    animation:jrFlameFlicker 2.5s ease-in-out infinite;
-  }
-  #dashboard-view .jr-stat-streak.active .jr-stat-val{color:var(--jr-amber)}
-  @keyframes jrFlameFlicker{
-    0%,100%{filter:drop-shadow(0 0 4px rgba(251,191,36,.5)) brightness(1)}
-    50%    {filter:drop-shadow(0 0 8px rgba(251,191,36,.8)) brightness(1.1)}
-  }
-
-  @media (max-width:760px){
-    #dashboard-view .jr-hero{grid-template-columns:1fr;padding:24px 22px}
-    #dashboard-view .jr-hero-title{font-size:28px}
-    #dashboard-view .jr-hero-r{justify-content:flex-start;flex-wrap:wrap}
-    #dashboard-view .jr-stat{flex:1;min-width:0}
-  }
-
-  /* CARD */
-  #dashboard-view .jr-card{
-    background:var(--surface);border:1px solid var(--border);
-    border-radius:18px;overflow:hidden;margin-bottom:24px;
-    box-shadow:0 1px 2px rgba(0,0,0,.02), 0 12px 32px -16px rgba(0,0,0,.08);
-  }
-
-  #dashboard-view .jr-card-head{
-    display:flex;justify-content:space-between;align-items:center;
-    padding:14px 22px;border-bottom:1px solid var(--border);
-    background:linear-gradient(to bottom, var(--jr-cream-2), transparent);
-  }
-  #dashboard-view .jr-date-switcher{display:flex;align-items:center;gap:8px}
-  #dashboard-view .jr-date-pick{
-    border:1px solid var(--border);background:transparent;
-    border-radius:8px;padding:6px 12px;font-family:var(--mono);font-size:13px;
-    color:var(--ink);cursor:pointer;
-  }
-  #dashboard-view .jr-date-pick:focus{outline:2px solid var(--jr-amber-l);outline-offset:1px}
-  #dashboard-view .jr-today-btn{
-    background:transparent;border:1px solid var(--border);
-    border-radius:8px;padding:6px 14px;font-size:12px;font-weight:500;
-    color:var(--ink-2);cursor:pointer;transition:all .15s;
-  }
-  #dashboard-view .jr-today-btn:hover{background:var(--jr-cream-2);border-color:var(--jr-amber-l)}
-  #dashboard-view .jr-today-btn.is-today{background:var(--jr-cream-2);border-color:var(--jr-amber);color:var(--jr-amber)}
-  #dashboard-view .jr-icon-btn{
-    width:30px;height:30px;border:1px solid var(--border);background:transparent;
-    border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
-    color:var(--sub);transition:all .15s;padding:0;
-  }
-  #dashboard-view .jr-icon-btn svg{width:14px;height:14px}
-  #dashboard-view .jr-icon-btn:hover{background:var(--jr-cream-2);color:var(--ink);border-color:var(--jr-amber-l)}
-  #dashboard-view .jr-icon-btn.jr-danger:hover{background:rgba(239,68,68,.08);color:#dc2626;border-color:rgba(239,68,68,.3)}
-  #dashboard-view .jr-card-actions{display:flex;align-items:center;gap:10px}
-  #dashboard-view .jr-status{
-    font-size:11.5px;color:var(--sub);font-family:var(--mono);
-    transition:opacity .2s;min-height:14px;
-  }
-  #dashboard-view .jr-status.saved{color:#10b981}
-  #dashboard-view .jr-status.saving{color:var(--jr-amber)}
-  #dashboard-view .jr-status.err{color:#ef4444}
-
-  /* Quick row */
-  #dashboard-view .jr-quick{
-    display:grid;grid-template-columns:auto 1fr auto;gap:30px;
-    padding:20px 22px;border-bottom:1px solid var(--border);
-    align-items:end;
+  /* Journal */
+  #dashboard-view .journal-grid{
+    display:grid;grid-template-columns:340px 1fr;gap:14px;align-items:start;
   }
   @media (max-width:880px){
-    #dashboard-view .jr-quick{grid-template-columns:1fr;gap:18px}
+    #dashboard-view .journal-grid{grid-template-columns:1fr}
   }
-  #dashboard-view .jr-quick-cell{display:flex;flex-direction:column;gap:8px}
-  #dashboard-view .jr-q-label-sm{
-    font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
-    font-weight:600;color:var(--sub);
+  #dashboard-view .journal-list-wrap{position:sticky;top:14px}
+  #dashboard-view #journal-list{max-height:calc(100vh - 200px);overflow-y:auto}
+  #dashboard-view .journal-item{
+    padding:14px 18px;border-bottom:1px solid var(--border);cursor:pointer;
+    transition:background .12s;display:flex;flex-direction:column;gap:4px;
   }
-  #dashboard-view .jr-help{
-    font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;
-    color:var(--sub);opacity:.7;margin-left:6px;
+  #dashboard-view .journal-item:hover{background:rgba(84,71,206,.04)}
+  #dashboard-view .journal-item.active{background:rgba(84,71,206,.1);border-left:3px solid var(--violet);padding-left:15px}
+  #dashboard-view .journal-item-head{
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
   }
+  #dashboard-view .journal-item-date{
+    font-size:11.5px;color:var(--sub);font-family:var(--mono);font-weight:500;
+  }
+  #dashboard-view .journal-item-mood{font-size:16px;line-height:1}
+  #dashboard-view .journal-item-title{
+    font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.3;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  #dashboard-view .journal-item-preview{
+    font-size:11.5px;color:var(--sub);line-height:1.4;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  #dashboard-view .journal-item-meta{
+    display:flex;gap:8px;font-size:10.5px;color:var(--sub);margin-top:2px;
+  }
+  #dashboard-view .journal-item-pl{font-family:var(--mono);font-weight:600}
+  #dashboard-view .journal-item-pl.pos{color:#10b981}
+  #dashboard-view .journal-item-pl.neg{color:#ef4444}
 
-  /* Mood pills */
-  #dashboard-view .jr-moods{display:flex;gap:6px}
-  #dashboard-view .jr-mood{
-    width:42px;height:42px;border-radius:50%;cursor:pointer;padding:0;
-    border:2px solid transparent;background:var(--jr-cream-2);
-    font-size:22px;line-height:1;
-    display:inline-flex;align-items:center;justify-content:center;
-    transition:transform .22s cubic-bezier(.34,1.56,.64,1), border-color .15s, background .15s;
+  /* Mood Picker im Editor */
+  #dashboard-view .je-mood{
+    width:32px;height:32px;border:1px solid var(--border);background:transparent;
+    border-radius:8px;cursor:pointer;font-size:18px;line-height:1;padding:0;
+    transition:all .12s;
   }
-  #dashboard-view .jr-mood span{display:block;transition:transform .22s}
-  #dashboard-view .jr-mood:hover{transform:translateY(-3px)}
-  #dashboard-view .jr-mood:hover span{transform:scale(1.15)}
-  #dashboard-view .jr-mood.active{
-    border-color:var(--mood-c);background:white;
-    box-shadow:0 0 0 4px color-mix(in srgb, var(--mood-c) 20%, transparent),
-               0 8px 20px -8px var(--mood-c);
-    transform:translateY(-3px) scale(1.08);
-  }
-  #dashboard-view .jr-mood.active span{transform:scale(1.15)}
-
-  /* Discipline pills */
-  #dashboard-view .jr-disc{display:flex;gap:3px;flex-wrap:wrap}
-  #dashboard-view .jr-disc-btn{
-    width:30px;height:30px;border-radius:7px;border:1px solid var(--border);
-    background:transparent;color:var(--ink-2);font-size:12px;font-weight:600;
-    font-family:var(--mono);cursor:pointer;padding:0;
-    transition:all .15s;
-  }
-  #dashboard-view .jr-disc-btn:hover{background:var(--jr-cream-2);border-color:var(--jr-amber-l)}
-  #dashboard-view .jr-disc-btn.active{
-    color:white;border-color:transparent;
-    background:linear-gradient(135deg, #10b981, #059669);
-  }
-  /* Color-grade based on value */
-  #dashboard-view .jr-disc-btn[data-disc="1"].active,
-  #dashboard-view .jr-disc-btn[data-disc="2"].active,
-  #dashboard-view .jr-disc-btn[data-disc="3"].active{background:linear-gradient(135deg, #ef4444, #dc2626)}
-  #dashboard-view .jr-disc-btn[data-disc="4"].active,
-  #dashboard-view .jr-disc-btn[data-disc="5"].active{background:linear-gradient(135deg, #f97316, #ea580c)}
-  #dashboard-view .jr-disc-btn[data-disc="6"].active,
-  #dashboard-view .jr-disc-btn[data-disc="7"].active{background:linear-gradient(135deg, #eab308, #ca8a04)}
-
-  /* P/L */
-  #dashboard-view .jr-pl-input{
-    display:flex;align-items:center;gap:6px;
-    border:1px solid var(--border);border-radius:8px;
-    padding:6px 12px;background:transparent;width:fit-content;
-    transition:border-color .15s;
-  }
-  #dashboard-view .jr-pl-input:focus-within{border-color:var(--jr-amber)}
-  #dashboard-view .jr-pl-currency{color:var(--sub);font-size:13px;font-family:var(--mono)}
-  #dashboard-view .jr-pl-input input{
-    border:none;background:transparent;color:var(--ink);
-    font-family:var(--mono);font-size:14px;font-weight:600;
-    width:100px;outline:none;text-align:right;padding:0;
-  }
-  #dashboard-view .jr-pl-input input::-webkit-outer-spin-button,
-  #dashboard-view .jr-pl-input input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-
-  /* Guided questions */
-  #dashboard-view .jr-questions{display:flex;flex-direction:column;gap:22px;padding:26px 22px}
-  #dashboard-view .jr-q{display:flex;flex-direction:column;gap:8px;cursor:text}
-  #dashboard-view .jr-q-label{
-    font-family:var(--jr-serif);font-size:18px;line-height:1.3;
-    color:var(--ink);font-weight:500;letter-spacing:-0.01em;
-    display:flex;align-items:baseline;gap:10px;
-  }
-  #dashboard-view .jr-q-emoji{font-size:16px;font-family:inherit}
-  #dashboard-view .jr-q textarea{
-    width:100%;border:none;background:transparent;color:var(--ink);
-    font-size:14.5px;line-height:1.6;resize:vertical;
-    font-family:inherit;outline:none;
-    padding:6px 0 8px 30px;
-    border-bottom:1px solid var(--border);
-    transition:border-color .2s;
-    min-height:48px;
-  }
-  #dashboard-view .jr-q textarea::placeholder{color:var(--sub);font-style:italic;opacity:.7}
-  #dashboard-view .jr-q textarea:focus{border-bottom-color:var(--jr-amber)}
-
-  /* Optional more block */
-  #dashboard-view .jr-more{
-    margin:0 22px 22px;border-top:1px solid var(--border);padding-top:18px;
-  }
-  #dashboard-view .jr-more summary{
-    cursor:pointer;font-size:13px;color:var(--sub);
-    display:flex;align-items:center;gap:8px;
-    user-select:none;padding:4px 0;
-    list-style:none;
-  }
-  #dashboard-view .jr-more summary::-webkit-details-marker{display:none}
-  #dashboard-view .jr-more summary::before{
-    content:"▸";font-size:10px;color:var(--sub);transition:transform .2s;display:inline-block;
-  }
-  #dashboard-view .jr-more[open] summary::before{transform:rotate(90deg)}
-  #dashboard-view .jr-more-icon{font-size:14px}
-  #dashboard-view .jr-more-hint{font-size:11.5px;opacity:.7}
-  #dashboard-view .jr-more-body{display:flex;flex-direction:column;gap:12px;margin-top:14px}
-  #dashboard-view .jr-more-body textarea{
-    width:100%;border:1px solid var(--border);border-radius:10px;
-    padding:12px 14px;font-family:inherit;font-size:13.5px;
-    background:transparent;color:var(--ink);line-height:1.55;
-    resize:vertical;outline:none;transition:border-color .15s;
-  }
-  #dashboard-view .jr-more-body textarea:focus{border-color:var(--jr-amber)}
-  #dashboard-view .jr-tags-input{
-    width:100%;border:1px solid var(--border);border-radius:10px;
-    padding:10px 14px;font-family:inherit;font-size:13px;
-    background:transparent;color:var(--ink);outline:none;
-    transition:border-color .15s;
-  }
-  #dashboard-view .jr-tags-input:focus{border-color:var(--jr-amber)}
-  #dashboard-view .jr-tags-input::placeholder{color:var(--sub);font-style:italic;opacity:.7}
-
-  /* HISTORY */
-  #dashboard-view .jr-history{margin-top:30px}
-  #dashboard-view .jr-history-head{
-    display:flex;justify-content:space-between;align-items:baseline;
-    margin-bottom:16px;padding:0 4px;
-  }
-  #dashboard-view .jr-history-title{
-    font-family:var(--jr-serif);font-size:24px;font-weight:600;
-    letter-spacing:-0.015em;color:var(--ink);margin:0;font-style:italic;
-  }
-  #dashboard-view .jr-history-count{
-    font-size:12px;color:var(--sub);font-family:var(--mono);
-  }
-  #dashboard-view .jr-history-grid{
-    display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
-    gap:14px;
-  }
-  #dashboard-view .jr-h-card{
-    position:relative;background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:16px 18px 14px;cursor:pointer;
-    transition:transform .2s, box-shadow .2s, border-color .2s;
-    overflow:hidden;
-  }
-  #dashboard-view .jr-h-card::before{
-    content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
-    background:var(--card-c, var(--jr-amber-l));
-    transition:width .2s;
-  }
-  #dashboard-view .jr-h-card:hover{
-    transform:translateY(-2px);
-    box-shadow:0 8px 24px -10px rgba(0,0,0,.12);
-    border-color:var(--card-c, var(--jr-amber));
-  }
-  #dashboard-view .jr-h-card:hover::before{width:6px}
-  #dashboard-view .jr-h-card.is-active{
-    border-color:var(--card-c, var(--jr-amber));
-    box-shadow:0 0 0 2px color-mix(in srgb, var(--card-c, var(--jr-amber)) 25%, transparent);
-  }
-  #dashboard-view .jr-h-card.is-active::before{width:6px}
-  #dashboard-view .jr-h-card-head{
-    display:flex;justify-content:space-between;align-items:flex-start;
-    gap:10px;margin-bottom:8px;
-  }
-  #dashboard-view .jr-h-card-date{
-    font-family:var(--mono);font-size:11px;font-weight:500;
-    color:var(--sub);letter-spacing:.04em;text-transform:uppercase;
-  }
-  #dashboard-view .jr-h-card-mood{font-size:18px;line-height:1}
-  #dashboard-view .jr-h-card-body{
-    font-family:var(--jr-serif);font-size:14px;line-height:1.5;color:var(--ink-2);
-    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
-    overflow:hidden;margin-bottom:10px;min-height:64px;
-  }
-  #dashboard-view .jr-h-card-body.empty{font-style:italic;color:var(--sub);opacity:.6}
-  #dashboard-view .jr-h-card-meta{
-    display:flex;justify-content:space-between;align-items:center;gap:8px;
-    font-size:11px;
-  }
-  #dashboard-view .jr-h-card-pl{font-family:var(--mono);font-weight:700}
-  #dashboard-view .jr-h-card-pl.pos{color:#10b981}
-  #dashboard-view .jr-h-card-pl.neg{color:#ef4444}
-  #dashboard-view .jr-h-card-disc{
-    background:rgba(0,0,0,.04);padding:2px 8px;border-radius:10px;
-    font-family:var(--mono);font-weight:600;color:var(--sub);
-  }
-  #dashboard-view .jr-history-empty{
-    text-align:center;padding:50px 20px;color:var(--sub);
-    border:1px dashed var(--border);border-radius:14px;
-    line-height:1.6;font-size:14px;
-  }
-  #dashboard-view .jr-history-empty-icon{font-size:32px;margin-bottom:10px;opacity:.6}
-
-  /* Sidebar reminder dot */
-  .sb-link .sb-jr-dot{
-    display:inline-block;width:7px;height:7px;border-radius:50%;
-    background:var(--jr-amber, #d97706);margin-left:6px;vertical-align:middle;
-    box-shadow:0 0 0 2px rgba(217,119,6,.18);
-    animation:jrDotPulse 2s ease-in-out infinite;
-  }
-  @keyframes jrDotPulse{
-    0%,100%{transform:scale(1);opacity:1}
-    50%    {transform:scale(1.2);opacity:.85}
-  }
-
-  /* Evening reminder banner */
-  #dashboard-view .jr-evening-banner{
-    margin:0 0 18px;padding:14px 22px;
-    border-radius:14px;
-    background:linear-gradient(135deg, rgba(251,191,36,.15), rgba(217,119,6,.06));
-    border:1px solid rgba(217,119,6,.2);
-    color:var(--jr-ink, #1c1814);
-    display:flex;align-items:center;gap:14px;font-size:13.5px;
-    animation:jrBannerSlide .4s ease-out;
-  }
-  #dashboard-view .jr-evening-banner-icon{font-size:22px;line-height:1}
-  #dashboard-view .jr-evening-banner-text{flex:1;line-height:1.45}
-  #dashboard-view .jr-evening-banner-text strong{color:#92400e;font-weight:600}
-  #dashboard-view .jr-evening-banner-close{
-    background:transparent;border:none;color:var(--sub);cursor:pointer;
-    font-size:18px;padding:4px 8px;border-radius:6px;line-height:1;
-  }
-  #dashboard-view .jr-evening-banner-close:hover{background:rgba(0,0,0,.05)}
-  @keyframes jrBannerSlide{
-    from{opacity:0;transform:translateY(-8px)}
-    to{opacity:1;transform:translateY(0)}
-  }
+  #dashboard-view .je-mood:hover{background:rgba(84,71,206,.06);border-color:var(--violet)}
+  #dashboard-view .je-mood.active{background:rgba(84,71,206,.14);border-color:var(--violet);transform:scale(1.1)}
 
   /* Priority Picker */
   #dashboard-view .priority-picker{
@@ -1784,35 +1457,6 @@
   #dashboard-view .calc-equation-wrap .calc-result-eq{
     margin-top:4px;font-size:11.5px;line-height:1.5;
   }
-
-  /* MNQ/NQ Pill-Toggle (nur sichtbar bei projectx-Firms) */
-  #dashboard-view .calc-toggle{
-    display:flex; gap:0;
-    background:rgba(0,0,0,.04);
-    border-radius:10px; padding:3px;
-    border:1px solid var(--border);
-  }
-  #dashboard-view .calc-toggle-opt{
-    flex:1; padding:8px 10px;
-    background:transparent; border:none; border-radius:7px;
-    cursor:pointer; color:var(--sub);
-    display:flex; flex-direction:column; align-items:center; gap:1px;
-    font-family:inherit;
-    transition:all .18s cubic-bezier(.34,1.56,.64,1);
-  }
-  #dashboard-view .calc-toggle-opt:hover{ color:var(--ink-2) }
-  #dashboard-view .calc-toggle-opt.active{
-    background:var(--surface, #fff);
-    color:var(--violet);
-    box-shadow:0 1px 3px rgba(0,0,0,.08), 0 0 0 1px rgba(84,71,206,.08);
-  }
-  #dashboard-view .calc-toggle-sym{
-    font-weight:700; font-size:13.5px; letter-spacing:.02em;
-  }
-  #dashboard-view .calc-toggle-sub{
-    font-size:10px; opacity:.7; font-family:var(--mono); letter-spacing:.02em;
-  }
-  #dashboard-view .calc-toggle-opt.active .calc-toggle-sub{ opacity:.85 }
   #dashboard-view .calc-result-label{
     font-size:11px;font-weight:600;letter-spacing:.12em;
     text-transform:uppercase;color:var(--sub);margin-bottom:6px;
@@ -2692,6 +2336,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Sync MT5
           </button>
+          <button class="btn btn-ghost" id="bulkAddAccountBtn" title="Mehrere gleichartige Accounts auf einmal anlegen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="9" y1="14.5" x2="15" y2="14.5"/></svg>
+            Bulk hinzufügen
+          </button>
           <button class="btn btn-primary" id="addAccountBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Account hinzufügen
@@ -3038,25 +2686,12 @@
           <div class="field">
             <label>Prop Firm</label>
             <select class="input" id="calc-master-firm">
-              <option value="projectx">MNQ / NQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
+              <option value="projectx">MNQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
               <option value="fundednext">FundedNext</option>
               <option value="fundingpips">FundingPips</option>
               <option value="the5ers">The5%ers</option>
               <option value="fusion">Fusion Markets</option>
             </select>
-          </div>
-          <div class="field" id="calc-master-asset-field" style="display:none">
-            <label>Kontrakt</label>
-            <div class="calc-toggle" data-side="master">
-              <button type="button" class="calc-toggle-opt active" data-value="micro">
-                <span class="calc-toggle-sym">MNQ</span>
-                <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
-              </button>
-              <button type="button" class="calc-toggle-opt" data-value="mini">
-                <span class="calc-toggle-sym">NQ</span>
-                <span class="calc-toggle-sub">Mini · $20/Pkt</span>
-              </button>
-            </div>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-master-cur">$</span>)</label>
@@ -3079,25 +2714,12 @@
           <div class="field">
             <label>Prop Firm</label>
             <select class="input" id="calc-slave-firm">
-              <option value="projectx">MNQ / NQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
+              <option value="projectx">MNQ Futures (Topstep / Tradeify / Alpha / Apex)</option>
               <option value="fundednext">FundedNext</option>
               <option value="fundingpips">FundingPips</option>
               <option value="the5ers">The5%ers</option>
               <option value="fusion" selected>Fusion Markets</option>
             </select>
-          </div>
-          <div class="field" id="calc-slave-asset-field" style="display:none">
-            <label>Kontrakt</label>
-            <div class="calc-toggle" data-side="slave">
-              <button type="button" class="calc-toggle-opt active" data-value="micro">
-                <span class="calc-toggle-sym">MNQ</span>
-                <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
-              </button>
-              <button type="button" class="calc-toggle-opt" data-value="mini">
-                <span class="calc-toggle-sym">NQ</span>
-                <span class="calc-toggle-sub">Mini · $20/Pkt</span>
-              </button>
-            </div>
           </div>
           <div class="field">
             <label>Risiko (<span class="calc-currency" id="calc-slave-cur">€</span>)</label>
@@ -3328,19 +2950,6 @@
               <label>Anzahl Kontrakte</label>
               <input type="number" class="input mono" id="tp-master-qty" min="0.01" step="0.1" placeholder="z.B. 1" value="1">
             </div>
-            <div class="field" id="tp-master-contract-field" style="grid-column:span 2;display:none">
-              <label>Master-Kontrakt</label>
-              <div class="calc-toggle" data-tp-side="master">
-                <button type="button" class="calc-toggle-opt active" data-value="micro">
-                  <span class="calc-toggle-sym">MNQ</span>
-                  <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
-                </button>
-                <button type="button" class="calc-toggle-opt" data-value="mini">
-                  <span class="calc-toggle-sym">NQ</span>
-                  <span class="calc-toggle-sub">Mini · $20/Pkt</span>
-                </button>
-              </div>
-            </div>
             <div class="field" style="grid-column:span 2">
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
@@ -3353,19 +2962,6 @@
                   <button type="button" id="tp-slave-suggest-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
                 </div>
                 <div id="tp-slave-suggest-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
-              </div>
-            </div>
-            <div class="field" id="tp-slave-contract-field" style="grid-column:span 2;display:none">
-              <label>Slave-Kontrakt</label>
-              <div class="calc-toggle" data-tp-side="slave">
-                <button type="button" class="calc-toggle-opt active" data-value="micro">
-                  <span class="calc-toggle-sym">MNQ</span>
-                  <span class="calc-toggle-sub">Mikro · $2/Pkt</span>
-                </button>
-                <button type="button" class="calc-toggle-opt" data-value="mini">
-                  <span class="calc-toggle-sym">NQ</span>
-                  <span class="calc-toggle-sub">Mini · $20/Pkt</span>
-                </button>
               </div>
             </div>
 
@@ -3964,133 +3560,91 @@
     </section>
 
     <!-- JOURNAL -->
-    <section class="view jr-view" data-view="journal">
-      <!-- HERO -->
-      <header class="jr-hero">
-        <div class="jr-hero-bg"></div>
-        <div class="jr-hero-l">
-          <div class="jr-hero-eyebrow">
-            <span class="jr-hero-weekday" id="jr-weekday">—</span>
-            <span class="jr-hero-dot">·</span>
-            <span class="jr-hero-date" id="jr-date-full">—</span>
-          </div>
-          <h1 class="jr-hero-title" id="jr-greeting">Wie war dein Tag?</h1>
-          <p class="jr-hero-sub" id="jr-sub-msg">Drei Fragen, zwei Minuten. Heute Abend mit Tee in der Hand.</p>
+    <section class="view" data-view="journal">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Journal</h1>
+          <p class="view-sub">Tägliche Notizen, Reflexion, Verbesserungen.</p>
         </div>
-        <div class="jr-hero-r">
-          <div class="jr-stat jr-stat-streak" id="jr-streak-card">
-            <div class="jr-stat-icon">🔥</div>
-            <div class="jr-stat-val" id="jr-streak-val">0</div>
-            <div class="jr-stat-lbl">Streak</div>
-          </div>
-          <div class="jr-stat">
-            <div class="jr-stat-icon">📓</div>
-            <div class="jr-stat-val" id="jr-total-val">0</div>
-            <div class="jr-stat-lbl">Einträge</div>
-          </div>
-          <div class="jr-stat">
-            <div class="jr-stat-icon" id="jr-avg-icon">—</div>
-            <div class="jr-stat-val" id="jr-avg-val">—</div>
-            <div class="jr-stat-lbl">Ø 30T</div>
-          </div>
-        </div>
-      </header>
+        <button class="btn btn-primary" id="journalNewBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Eintrag heute
+        </button>
+      </div>
 
-      <!-- ACTIVE ENTRY (heute oder beliebiges Datum) -->
-      <article class="jr-card" id="jr-card">
-        <div class="jr-card-head">
-          <div class="jr-date-switcher">
-            <button class="jr-icon-btn" id="jr-prev-day" type="button" title="Voriger Tag" aria-label="Voriger Tag">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <input type="date" id="jr-active-date" class="jr-date-pick">
-            <button class="jr-icon-btn" id="jr-next-day" type="button" title="Nächster Tag" aria-label="Nächster Tag">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-            <button class="jr-today-btn" id="jr-today-btn" type="button">Heute</button>
-          </div>
-          <div class="jr-card-actions">
-            <span class="jr-status" id="jr-status"></span>
-            <button class="jr-icon-btn jr-danger" id="jr-delete-btn" type="button" title="Eintrag löschen" hidden>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
+      <div class="journal-grid">
+        <!-- Linke Spalte: Liste aller Einträge -->
+        <div class="journal-list-wrap">
+          <div class="panel" style="padding:0;overflow:hidden">
+            <div class="panel-head" style="border-bottom:1px solid var(--border)">
+              <div class="panel-title">Verlauf <span id="journal-count" style="color:var(--sub);font-weight:400">(0)</span></div>
+            </div>
+            <div id="journal-list-empty" class="empty" style="border:none;background:transparent;padding:30px 18px">
+              <p style="color:var(--sub);font-size:13px;text-align:center">Noch keine Einträge.<br>Klick auf "Eintrag heute" um zu starten.</p>
+            </div>
+            <div id="journal-list" style="display:flex;flex-direction:column"></div>
           </div>
         </div>
 
-        <!-- Quick row: Mood / Disciplin / P/L -->
-        <div class="jr-quick">
-          <div class="jr-quick-cell">
-            <div class="jr-q-label-sm">Stimmung</div>
-            <div class="jr-moods" id="jr-moods">
-              <button class="jr-mood" data-mood="terrible" style="--mood-c:#ef4444" type="button" title="Mies"><span>😩</span></button>
-              <button class="jr-mood" data-mood="bad"      style="--mood-c:#f97316" type="button" title="Naja"><span>😕</span></button>
-              <button class="jr-mood" data-mood="neutral"  style="--mood-c:#94a3b8" type="button" title="Neutral"><span>😐</span></button>
-              <button class="jr-mood" data-mood="good"     style="--mood-c:#10b981" type="button" title="Gut"><span>🙂</span></button>
-              <button class="jr-mood" data-mood="great"    style="--mood-c:#059669" type="button" title="Klasse"><span>😄</span></button>
+        <!-- Rechte Spalte: Editor -->
+        <div class="journal-editor-wrap">
+          <div class="panel" id="journal-editor-panel" hidden>
+            <div class="panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:14px">
+              <div style="display:flex;align-items:center;gap:14px;flex:1">
+                <input type="date" class="input mono" id="je-date" style="width:auto;padding:6px 10px;font-size:13px">
+                <input type="text" class="input" id="je-title" placeholder="Titel (optional)" style="flex:1;padding:6px 12px;font-size:14px">
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost icon-btn" id="je-delete-btn" type="button" title="Eintrag löschen" style="padding:6px 10px" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Mood + P/L row -->
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--border);gap:18px;flex-wrap:wrap">
+              <div style="display:flex;gap:6px" id="je-mood-picker">
+                <button class="je-mood" data-mood="great"    type="button" title="Sehr gut">😄</button>
+                <button class="je-mood" data-mood="good"     type="button" title="Gut">🙂</button>
+                <button class="je-mood" data-mood="neutral"  type="button" title="Neutral">😐</button>
+                <button class="je-mood" data-mood="bad"      type="button" title="Schlecht">😕</button>
+                <button class="je-mood" data-mood="terrible" type="button" title="Sehr schlecht">😢</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub)">
+                <span>Realisierter P/L:</span>
+                <input type="number" class="input mono" id="je-pl" placeholder="—" step="1" style="width:120px;padding:5px 10px;font-size:13px;text-align:right">
+                <span>$</span>
+              </div>
+            </div>
+
+            <!-- Tags -->
+            <div style="padding:12px 18px;border-bottom:1px solid var(--border)">
+              <input type="text" class="input" id="je-tags" placeholder="Tags (komma-getrennt) — z.B. discipline, overtrading, news"
+                style="font-size:13px;padding:6px 12px">
+            </div>
+
+            <!-- Content -->
+            <div style="padding:14px 18px">
+              <textarea id="je-content" placeholder="Wie lief der Tag? Was ist gut gelaufen? Was würdest du anders machen?"
+                style="width:100%;min-height:280px;border:none;background:transparent;color:var(--ink);font-size:14px;line-height:1.6;resize:vertical;font-family:inherit;outline:none"></textarea>
+            </div>
+
+            <!-- Footer status -->
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 18px;border-top:1px solid var(--border);font-size:11.5px;color:var(--sub)">
+              <span id="je-status">—</span>
+              <span><span id="je-char-count">0</span> Zeichen</span>
             </div>
           </div>
-          <div class="jr-quick-cell">
-            <div class="jr-q-label-sm">Disziplin <span class="jr-help">1 = chaotisch, 10 = clean</span></div>
-            <div class="jr-disc" id="jr-disc">
-              <button class="jr-disc-btn" data-disc="1" type="button">1</button>
-              <button class="jr-disc-btn" data-disc="2" type="button">2</button>
-              <button class="jr-disc-btn" data-disc="3" type="button">3</button>
-              <button class="jr-disc-btn" data-disc="4" type="button">4</button>
-              <button class="jr-disc-btn" data-disc="5" type="button">5</button>
-              <button class="jr-disc-btn" data-disc="6" type="button">6</button>
-              <button class="jr-disc-btn" data-disc="7" type="button">7</button>
-              <button class="jr-disc-btn" data-disc="8" type="button">8</button>
-              <button class="jr-disc-btn" data-disc="9" type="button">9</button>
-              <button class="jr-disc-btn" data-disc="10" type="button">10</button>
+
+          <div id="journal-editor-empty" class="empty" style="padding:60px 24px;text-align:center;border:1px dashed var(--line);border-radius:var(--r-lg)">
+            <div class="empty-icon" style="margin:0 auto 14px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             </div>
-          </div>
-          <div class="jr-quick-cell">
-            <div class="jr-q-label-sm">P/L heute</div>
-            <div class="jr-pl-input">
-              <span class="jr-pl-currency">$</span>
-              <input type="number" id="jr-pl" placeholder="0" step="1" autocomplete="off">
-            </div>
+            <h3 style="margin-bottom:6px">Wähl einen Eintrag oder erstell einen neuen</h3>
+            <p style="color:var(--sub);font-size:13px">Tägliches Journaling hilft dir Patterns zu erkennen — wann wirst du emotional, was funktioniert, was nicht.</p>
           </div>
         </div>
-
-        <!-- Guided Questions -->
-        <div class="jr-questions">
-          <label class="jr-q">
-            <span class="jr-q-label"><span class="jr-q-emoji">✅</span> Was lief heute richtig gut?</span>
-            <textarea id="jr-q-good" rows="2" placeholder="Welcher Trade, welche Entscheidung, welcher Moment — der eine Sache, die heute klick gemacht hat."></textarea>
-          </label>
-          <label class="jr-q">
-            <span class="jr-q-label"><span class="jr-q-emoji">🔄</span> Was würdest du anders machen?</span>
-            <textarea id="jr-q-improve" rows="2" placeholder="Eine konkrete Situation — kein Selbst-Geißeln, nur Beobachtung."></textarea>
-          </label>
-          <label class="jr-q">
-            <span class="jr-q-label"><span class="jr-q-emoji">💡</span> Welche Lesson nimmst du mit?</span>
-            <textarea id="jr-q-lesson" rows="2" placeholder="Ein Satz reicht. Was möchtest du morgen erinnern?"></textarea>
-          </label>
-        </div>
-
-        <!-- Optional: more -->
-        <details class="jr-more" id="jr-more">
-          <summary><span class="jr-more-icon">📝</span> Freie Notizen & Tags <span class="jr-more-hint">— wenn du mehr Zeit hast</span></summary>
-          <div class="jr-more-body">
-            <textarea id="jr-q-notes" rows="3" placeholder="Setup-Details, Marktbedingungen, Emotionen, alles was sonst noch raus muss…"></textarea>
-            <input type="text" id="jr-tags" class="jr-tags-input" placeholder="Tags (komma-getrennt) — z.B. discipline, news, overtrading, fomo">
-          </div>
-        </details>
-      </article>
-
-      <!-- HISTORY -->
-      <section class="jr-history">
-        <header class="jr-history-head">
-          <h2 class="jr-history-title">Verlauf</h2>
-          <span class="jr-history-count" id="jr-history-count">0 Einträge</span>
-        </header>
-        <div class="jr-history-grid" id="jr-history-grid"></div>
-        <div class="jr-history-empty" id="jr-history-empty">
-          <div class="jr-history-empty-icon">📖</div>
-          <p>Noch nichts geschrieben.<br>Fang heute Abend an — zwei Minuten reichen.</p>
-        </div>
-      </section>
+      </div>
     </section>
 
     <!-- ACCOUNT DETAIL -->
@@ -4554,6 +4108,96 @@
       <div class="modal-actions">
         <button class="btn btn-ghost" id="ac-cancel">Abbrechen</button>
         <button class="btn btn-primary" id="ac-save">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BULK ADD ACCOUNTS MODAL -->
+  <div class="modal-bg" id="bulkAddModal">
+    <div class="modal" role="dialog" aria-labelledby="bulkAddTitle" style="max-width:500px">
+      <div class="modal-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px">
+        <div>
+          <h3 class="modal-title" id="bulkAddTitle" style="margin:0 0 4px">Bulk: Accounts anlegen</h3>
+          <p class="modal-sub" style="margin:0">Mehrere gleichartige Accounts auf einmal erstellen.</p>
+        </div>
+        <button class="modal-x" id="bulkAddClose" aria-label="Schließen" style="flex-shrink:0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
+        <div class="field">
+          <label>Firm *</label>
+          <input class="input" id="bulk-firm" list="bulkFirmList" placeholder="z.B. AlphaFutures" autocomplete="off">
+          <datalist id="bulkFirmList">
+            <option value="Topstep"></option>
+            <option value="Fusion Markets"></option>
+            <option value="FundingPips"></option>
+            <option value="FundedNext"></option>
+            <option value="Tradeify"></option>
+            <option value="Apex"></option>
+            <option value="The5%ers"></option>
+            <option value="AlphaFutures"></option>
+            <option value="MFFU"></option>
+            <option value="ProjectX"></option>
+          </datalist>
+        </div>
+        <div class="field">
+          <label>Typ *</label>
+          <select class="input" id="bulk-type">
+            <option value="phase1">Phase 1</option>
+            <option value="phase2">Phase 2</option>
+            <option value="challenge">Challenge</option>
+            <option value="funded">Funded</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Account-Größe ($)</label>
+          <input class="input mono" id="bulk-size" type="number" step="1000" placeholder="z.B. 50000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Anfangs-Balance ($)</label>
+          <input class="input mono" id="bulk-balance" type="number" step="0.01" placeholder="= Account-Größe" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Kaufpreis pro Account (€)</label>
+          <input class="input mono" id="bulk-cost" type="number" step="0.01" placeholder="z.B. 149" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Drawdown ($)</label>
+          <input class="input mono" id="bulk-maxdd" type="number" step="100" placeholder="optional" autocomplete="off">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
+        </div>
+        <div class="field">
+          <label>Anzahl Accounts *</label>
+          <input class="input mono" id="bulk-count" type="number" min="1" max="50" step="1" placeholder="z.B. 16" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Startnummer</label>
+          <input class="input mono" id="bulk-startnum" type="number" min="1" step="1" placeholder="1" autocomplete="off" value="1">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Name-Vorlage</label>
+          <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <div class="modal-msg" id="bulk-msg" style="margin-top:12px"></div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+        <span id="bulk-total-cost" style="font-size:12px;color:var(--sub)"></span>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" id="bulk-cancel">Abbrechen</button>
+          <button class="btn btn-primary" id="bulk-save">
+            <span id="bulk-save-label">Accounts anlegen</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -8573,6 +8217,209 @@
     openAccountModal('live')
   })
 
+  /* ========== BULK ADD ACCOUNTS ========== */
+  ;(function(){
+    const bEl = {
+      openBtn:   document.getElementById('bulkAddAccountBtn'),
+      modal:     document.getElementById('bulkAddModal'),
+      closeBtn:  document.getElementById('bulkAddClose'),
+      cancelBtn: document.getElementById('bulk-cancel'),
+      saveBtn:   document.getElementById('bulk-save'),
+      saveLabel: document.getElementById('bulk-save-label'),
+      firm:      document.getElementById('bulk-firm'),
+      type:      document.getElementById('bulk-type'),
+      size:      document.getElementById('bulk-size'),
+      balance:   document.getElementById('bulk-balance'),
+      cost:      document.getElementById('bulk-cost'),
+      maxdd:     document.getElementById('bulk-maxdd'),
+      count:     document.getElementById('bulk-count'),
+      startnum:  document.getElementById('bulk-startnum'),
+      template:  document.getElementById('bulk-nametemplate'),
+      preview:   document.getElementById('bulk-preview'),
+      msg:       document.getElementById('bulk-msg'),
+      totalCost: document.getElementById('bulk-total-cost'),
+    }
+
+    function buildName(n){
+      const firm   = bEl.firm.value.trim() || 'Account'
+      const sizeRaw = parseFloat(bEl.size.value)
+      const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
+      let tmpl = bEl.template.value.trim()
+      if(!tmpl){
+        tmpl = sizeK ? `{firm} {size} · #{n}` : `{firm} · #{n}`
+      }
+      return tmpl
+        .replace(/\{firm\}/g, firm)
+        .replace(/\{size\}/g, sizeK)
+        .replace(/\{n\}/g, n)
+    }
+
+    function updatePreview(){
+      const count    = parseInt(bEl.count.value) || 0
+      const startnum = parseInt(bEl.startnum.value) || 1
+      const cost     = parseFloat(bEl.cost.value)
+      const firm     = bEl.firm.value.trim()
+
+      // Total cost hint
+      if(!isNaN(cost) && cost > 0 && count > 0){
+        bEl.totalCost.textContent = `Gesamtkosten: ${(cost * count).toLocaleString('de-DE', {maximumFractionDigits:2})} €`
+      } else {
+        bEl.totalCost.textContent = ''
+      }
+
+      if(!firm || count < 1){
+        bEl.preview.style.display = 'none'
+        return
+      }
+
+      const names = []
+      const showMax = Math.min(count, 4)
+      for(let i = 0; i < showMax; i++){
+        names.push(buildName(startnum + i))
+      }
+      let preview = names.join(' &nbsp;·&nbsp; ')
+      if(count > showMax){
+        preview += ` &nbsp;·&nbsp; <em style="color:var(--sub-2)">… +${count - showMax} weitere</em>`
+      }
+      bEl.preview.innerHTML = preview
+      bEl.preview.style.display = 'block'
+    }
+
+    function openBulkModal(){
+      bEl.firm.value     = ''
+      bEl.type.value     = 'phase1'
+      bEl.size.value     = ''
+      bEl.balance.value  = ''
+      bEl.cost.value     = ''
+      bEl.maxdd.value    = ''
+      bEl.count.value    = ''
+      bEl.startnum.value = '1'
+      bEl.template.value = ''
+      bEl.preview.style.display = 'none'
+      bEl.msg.textContent = ''
+      bEl.msg.className = 'modal-msg'
+      bEl.totalCost.textContent = ''
+      bEl.saveBtn.disabled = false
+      bEl.saveLabel.textContent = 'Accounts anlegen'
+      bEl.modal.classList.add('open')
+      setTimeout(() => bEl.firm.focus(), 50)
+    }
+
+    function closeBulkModal(){
+      bEl.modal.classList.remove('open')
+    }
+
+    function setBulkMsg(text, kind){
+      bEl.msg.textContent = text || ''
+      bEl.msg.className = 'modal-msg' + (kind ? ' ' + kind : '')
+    }
+
+    async function saveBulkAccounts(){
+      const firm     = bEl.firm.value.trim()
+      const type     = bEl.type.value
+      const sizeRaw  = parseFloat(bEl.size.value)
+      const balRaw   = parseFloat(bEl.balance.value)
+      const costRaw  = parseFloat(bEl.cost.value)
+      const maxddRaw = parseFloat(bEl.maxdd.value)
+      const count    = parseInt(bEl.count.value)
+      const startnum = parseInt(bEl.startnum.value) || 1
+
+      if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
+      if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
+      if(count > 50)                { setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
+      if(!currentUserId)            { setBulkMsg('Nicht eingeloggt.', 'err'); return }
+
+      const accountSize    = !isNaN(sizeRaw)  && sizeRaw  > 0 ? sizeRaw  : null
+      const initialBalance = !isNaN(balRaw)   && balRaw   > 0 ? balRaw   : (accountSize || 0)
+      const purchaseCost   = !isNaN(costRaw)  && costRaw  > 0 ? costRaw  : null
+      const maxDrawdown    = !isNaN(maxddRaw) && maxddRaw > 0 ? maxddRaw : null
+
+      bEl.saveBtn.disabled = true
+      bEl.saveBtn.classList.add('ts-btn-loading')
+
+      let created = 0
+      let errors  = 0
+
+      for(let i = 0; i < count; i++){
+        const n    = startnum + i
+        const name = buildName(n)
+        const row  = {
+          user_id:        currentUserId,
+          name,
+          firm,
+          account_type:   type,
+          balance:        initialBalance,
+          account_size:   accountSize,
+          starting_balance: initialBalance,
+          purchase_cost:  purchaseCost,
+          max_drawdown:   maxDrawdown,
+        }
+
+        bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
+
+        try{
+          const { data, error } = await supabase
+            .from('accounts').insert(row).select('*').single()
+          if(error) throw error
+          const newAcc = rowToAccount(data)
+          accounts.unshift(newAcc)
+          created++
+
+          if(purchaseCost && purchaseCost > 0){
+            await insertAutoTransaction({
+              account_id:   newAcc.id,
+              account_name: newAcc.name,
+              account_firm: newAcc.firm,
+              kind:         'account_purchase',
+              amount:       -Math.abs(purchaseCost),
+              currency:     'EUR',
+              occurred_at:  new Date().toISOString().slice(0, 10),
+              notes:        'Account-Kauf (auto)',
+              auto_generated: true
+            })
+          }
+        }catch(e){
+          console.error(`Bulk insert #${n} failed:`, e)
+          errors++
+        }
+      }
+
+      renderAccounts()
+      renderOverviewKpis()
+      updateSidebarBadges()
+      if(typeof renderPairs === 'function') renderPairs()
+
+      bEl.saveBtn.disabled = false
+      bEl.saveBtn.classList.remove('ts-btn-loading')
+
+      if(errors === 0){
+        closeBulkModal()
+      } else {
+        setBulkMsg(`${created} angelegt, ${errors} Fehler. Seite neu laden und prüfen.`, 'err')
+        bEl.saveLabel.textContent = 'Accounts anlegen'
+      }
+    }
+
+    // Wire up inputs for live preview
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
+      el.addEventListener('input', updatePreview)
+    })
+
+    // Wire buttons
+    bEl.openBtn?.addEventListener('click',   openBulkModal)
+    bEl.closeBtn?.addEventListener('click',  closeBulkModal)
+    bEl.cancelBtn?.addEventListener('click', closeBulkModal)
+    bEl.saveBtn?.addEventListener('click',   saveBulkAccounts)
+    bEl.modal?.addEventListener('click', e => {
+      if(e.target === bEl.modal) closeBulkModal()
+    })
+    document.addEventListener('keydown', e => {
+      if(e.key === 'Escape' && bEl.modal?.classList.contains('open')) closeBulkModal()
+    })
+  })()
+
+  /* ========== END BULK ADD ========== */
+
   // Initial render moved below pair-section init to avoid TDZ on `pairs`
 
   /* ========== TOPSTEP MIRROR — PAIR MAPPING ========== */
@@ -9393,60 +9240,12 @@
   /* ========== LOT RECHNER ========== */
   // Master/Slave Berechnung wie im alten Tool
   // unit = "Kontrakt" (Futures via ProjectX) oder "Lot" (CFD)
-  //
-  // ProjectX-Firmen (Topstep/Tradeify/Alpha/Apex) erlauben zwischen
-  // MNQ (Mikro, $2/Pkt) und NQ (Mini, $20/Pkt) per Toggle umzuschalten.
   const FIRM_PRESETS = {
-    projectx:    { label:'MNQ/NQ Futures (Topstep/Tradeify/Alpha/Apex)', unit:'Kontrakte', currency:'$', tbd:false, hasContractToggle:true },
-    fundednext:  { label:'FundedNext',     symbol:'NDX100', unit:'Lots', ppl:10.00, currency:'$', tbd:false },
-    fundingpips: { label:'FundingPips',    symbol:'NDX100', unit:'Lots', ppl:20.00, currency:'$', tbd:false },
-    the5ers:     { label:'The5%ers',       symbol:'NAS100', unit:'Lots', ppl:1.00,  currency:'$', tbd:false },
-    fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots', ppl:0.85,  currency:'\u20ac', tbd:false }
-  }
-
-  // ProjectX-Varianten: Mikro (MNQ, $2/Pkt) ↔ Mini (NQ, $20/Pkt)
-  const PROJECTX_VARIANTS = {
-    micro: { symbol:'MNQ', ppl:2.00  },
-    mini:  { symbol:'NQ',  ppl:20.00 }
-  }
-
-  // State pro Seite (master|slave) — wird in localStorage persistiert
-  const calcContractType = {
-    master: (localStorage.getItem('prophos_calc_master_contract') === 'mini') ? 'mini' : 'micro',
-    slave:  (localStorage.getItem('prophos_calc_slave_contract')  === 'mini') ? 'mini' : 'micro'
-  }
-
-  /**
-   * Liefert das effektive Preset für den Lot-Rechner.
-   * Bei Firms mit hasContractToggle wird der ppl-Wert aus dem Toggle-State gezogen.
-   */
-  function getEffectivePreset(firmKey, side){
-    const base = FIRM_PRESETS[firmKey]
-    if(!base) return null
-    if(base.hasContractToggle){
-      const v = PROJECTX_VARIANTS[calcContractType[side]] || PROJECTX_VARIANTS.micro
-      return { label:base.label, symbol:v.symbol, unit:base.unit, ppl:v.ppl, currency:base.currency, tbd:base.tbd }
-    }
-    return { label:base.label, symbol:base.symbol, unit:base.unit, ppl:base.ppl, currency:base.currency, tbd:base.tbd }
-  }
-
-  /**
-   * Show/hide den Toggle-Slider basierend auf der gewählten Firm.
-   * Plus: visueller Active-State der Toggle-Buttons synchronisieren.
-   */
-  function updateCalcContractToggle(side){
-    const firmEl  = document.getElementById(`calc-${side}-firm`)
-    const fieldEl = document.getElementById(`calc-${side}-asset-field`)
-    if(!firmEl || !fieldEl) return
-    const f = FIRM_PRESETS[firmEl.value]
-    fieldEl.style.display = (f && f.hasContractToggle) ? '' : 'none'
-    if(f && f.hasContractToggle){
-      // Active-State der Buttons synchronisieren
-      const buttons = fieldEl.querySelectorAll('.calc-toggle-opt')
-      buttons.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === calcContractType[side])
-      })
-    }
+    projectx:    { label:'MNQ Futures (Topstep/Tradeify/Alpha/Apex)', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,    currency:'$', tbd:false },
+    fundednext:  { label:'FundedNext',   symbol:'NDX100', unit:'Lots',      ppl:10.00,   currency:'$', tbd:false },
+    fundingpips: { label:'FundingPips',  symbol:'NDX100', unit:'Lots',      ppl:20.00,   currency:'$', tbd:false },
+    the5ers:     { label:'The5%ers',     symbol:'NAS100', unit:'Lots',      ppl:1.00,    currency:'$', tbd:false },
+    fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots',    ppl:0.85,    currency:'\u20ac', tbd:false }
   }
 
   function fmtCalcNum(n, dec=2){
@@ -9458,9 +9257,8 @@
     const masterFirm = document.getElementById('calc-master-firm')?.value
     const slaveFirm  = document.getElementById('calc-slave-firm')?.value
     if(!masterFirm || !slaveFirm) return
-    const m = getEffectivePreset(masterFirm, 'master')
-    const s = getEffectivePreset(slaveFirm,  'slave')
-    if(!m || !s) return
+    const m = FIRM_PRESETS[masterFirm]
+    const s = FIRM_PRESETS[slaveFirm]
 
     // Update labels & currency symbols based on selection
     document.getElementById('calc-master-cur').textContent = m.currency
@@ -9509,32 +9307,6 @@
       const el = document.getElementById(id)
       if(el) el.addEventListener('input', calcRecompute)
     })
-  // Firm-Change zeigt/versteckt den Toggle und triggert Recompute
-  document.getElementById('calc-master-firm')?.addEventListener('change', () => {
-    updateCalcContractToggle('master'); calcRecompute()
-  })
-  document.getElementById('calc-slave-firm')?.addEventListener('change', () => {
-    updateCalcContractToggle('slave'); calcRecompute()
-  })
-  // Pill-Toggle Clicks: state ändern, persistieren, recompute
-  document.querySelectorAll('.calc-toggle').forEach(toggle => {
-    const side = toggle.dataset.side  // 'master' oder 'slave'
-    toggle.querySelectorAll('.calc-toggle-opt').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = btn.dataset.value  // 'micro' oder 'mini'
-        if(calcContractType[side] === val) return
-        calcContractType[side] = val
-        localStorage.setItem(`prophos_calc_${side}_contract`, val)
-        // Active-State aktualisieren
-        toggle.querySelectorAll('.calc-toggle-opt').forEach(b =>
-          b.classList.toggle('active', b.dataset.value === val))
-        calcRecompute()
-      })
-    })
-  })
-  // Initialer Sync + erste Berechnung
-  updateCalcContractToggle('master')
-  updateCalcContractToggle('slave')
   calcRecompute()
 
   /* ========== TRADE PLANS ========== */
@@ -9633,51 +9405,15 @@
     return 'projectx'
   }
 
-  function calcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk, masterContract, slaveContract){
+  function calcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk){
     if(!masterRisk || !masterQty || !slaveRisk) return null
-    const mBase = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
-    const sBase = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
-    // Bei projectx-Firms: ppl je nach Toggle (MNQ=Micro/2$ oder NQ=Mini/20$)
-    const mPpl = mBase.hasContractToggle
-      ? (PROJECTX_VARIANTS[masterContract || 'micro'] || PROJECTX_VARIANTS.micro).ppl
-      : mBase.ppl
-    const sPpl = sBase.hasContractToggle
-      ? (PROJECTX_VARIANTS[slaveContract || 'micro'] || PROJECTX_VARIANTS.micro).ppl
-      : sBase.ppl
-    const stopDistance = masterRisk / (mPpl * masterQty)
+    const m = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
+    const s = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
+    const stopDistance = masterRisk / (m.ppl * masterQty)
     if(!stopDistance) return null
-    const slaveQty = slaveRisk / (sPpl * stopDistance)
+    const slaveQty = slaveRisk / (s.ppl * stopDistance)
     return slaveQty / masterQty
   }
-
-  // Trade-Plan-Modal: Kontrakt-Toggle pro Seite, persistiert in localStorage
-  const tpContractType = {
-    master: (localStorage.getItem('prophos_tp_master_contract') === 'mini') ? 'mini' : 'micro',
-    slave:  (localStorage.getItem('prophos_tp_slave_contract')  === 'mini') ? 'mini' : 'micro'
-  }
-  /**
-   * Show/hide den Master- und Slave-Kontrakt-Toggle basierend auf den gewählten
-   * Accounts. Nur sichtbar wenn die Firm des jeweiligen Accounts ein
-   * projectx-Preset hat (Topstep/Tradeify/Alpha/Apex).
-   */
-  function updateTpContractToggles(){
-    const masterId = document.getElementById('tp-master')?.value
-    const slaveId  = document.getElementById('tp-slave')?.value
-    const master = (typeof accounts !== 'undefined') ? accounts.find(a => String(a.id) === String(masterId)) : null
-    const slave  = (typeof accounts !== 'undefined') ? accounts.find(a => String(a.id) === String(slaveId))  : null
-    const masterIsProjectX = !!(master && FIRM_PRESETS[firmToPreset(master.firm)]?.hasContractToggle)
-    const slaveIsProjectX  = !!(slave  && FIRM_PRESETS[firmToPreset(slave.firm)]?.hasContractToggle)
-    const mField = document.getElementById('tp-master-contract-field')
-    const sField = document.getElementById('tp-slave-contract-field')
-    if(mField) mField.style.display = masterIsProjectX ? '' : 'none'
-    if(sField) sField.style.display = slaveIsProjectX  ? '' : 'none'
-    // Active-State der Toggle-Buttons mit State synchronisieren
-    document.querySelectorAll('[data-tp-side="master"] .calc-toggle-opt').forEach(b =>
-      b.classList.toggle('active', b.dataset.value === tpContractType.master))
-    document.querySelectorAll('[data-tp-side="slave"] .calc-toggle-opt').forEach(b =>
-      b.classList.toggle('active', b.dataset.value === tpContractType.slave))
-  }
-  window.updateTpContractToggles = updateTpContractToggles
 
   function priorityWeight(p){
     return p === 'high' ? 0 : p === 'medium' ? 1 : 2
@@ -10502,7 +10238,6 @@
 
     document.getElementById('tradePlanMsg').textContent = ''
     document.getElementById('tradePlanModal').classList.add('open')
-    updateTpContractToggles()
     tpRecompute()
   }
   function closeTradePlanModal(){
@@ -10660,7 +10395,7 @@
       if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
       return
     }
-    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk, tpContractType.master, tpContractType.slave)
+    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
     if(mult == null){
       out.textContent = '—'
       if(slaveQtyEl) slaveQtyEl.textContent = '—'
@@ -10699,28 +10434,6 @@
   // Bind modal inputs
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
-  })
-  // Account-Wechsel triggert Toggle-Sichtbarkeit
-  ;['tp-master','tp-slave'].forEach(id => {
-    document.getElementById(id)?.addEventListener('change', () => {
-      updateTpContractToggles()
-      tpRecompute()
-    })
-  })
-  // Pill-Toggle Clicks im Trade-Plan-Modal
-  document.querySelectorAll('[data-tp-side]').forEach(toggle => {
-    const side = toggle.dataset.tpSide  // 'master' oder 'slave'
-    toggle.querySelectorAll('.calc-toggle-opt').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const val = btn.dataset.value  // 'micro' oder 'mini'
-        if(tpContractType[side] === val) return
-        tpContractType[side] = val
-        localStorage.setItem(`prophos_tp_${side}_contract`, val)
-        toggle.querySelectorAll('.calc-toggle-opt').forEach(b =>
-          b.classList.toggle('active', b.dataset.value === val))
-        tpRecompute()
-      })
-    })
   })
   // Auto-Vorschlag übernehmen
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
@@ -10779,7 +10492,7 @@
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = accounts.find(a => String(a.id) === String(slaveId))
-    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk, tpContractType.master, tpContractType.slave)
+    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
     const planObj = {
       masterAccountId: masterId,
@@ -12338,81 +12051,16 @@
 
 
   /* ========================================================================
-   * JOURNAL — Editorial Daily Reflection
+   * JOURNAL — Tägliche Trading-Notizen
    *
    * Tabelle: public.journal_entries (Supabase)
    *   user_id, entry_date (unique), title, content, mood, tags[], pl_realised
    *
-   * Content-Format: strukturierte Markdown-Sections (## ✅ heading\nbody…)
-   * Disziplin gespeichert als Meta-Tag _disc_7 (1-10) in der tags-Spalte.
-   * Legacy free-text entries → automatisch in den "Notizen"-Block gemappt.
+   * Migration: migration_journal_entries.sql
    * ====================================================================== */
   let journalEntries = []
-  let _jrActiveId = null
-  let _jrActiveDate = null
-  let _jrSaveTimer = null
-  let _jrLoadingActiveEntry = false  // verhindert Auto-Save während Load
-
-  const JR_MOOD_EMOJI = { great:'😄', good:'🙂', neutral:'😐', bad:'😕', terrible:'😩' }
-  const JR_MOOD_SCORE = { great:5, good:4, neutral:3, bad:2, terrible:1 }
-  const JR_MOOD_COLOR = { great:'#059669', good:'#10b981', neutral:'#94a3b8', bad:'#f97316', terrible:'#ef4444' }
-
-  function jrTodayIso(){ return new Date().toISOString().slice(0,10) }
-  function jrAddDays(iso, n){
-    const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n)
-    return d.toISOString().slice(0,10)
-  }
-
-  /* Parse structured content into sections. Legacy free text → notes. */
-  function parseJrContent(content){
-    const out = { good:'', improve:'', lesson:'', notes:'' }
-    if(!content) return out
-    const re = /(^|\n)##\s+([^\n]+)\n([\s\S]*?)(?=\n##\s|\s*$)/g
-    let m, matched = false
-    while((m = re.exec(content)) !== null){
-      matched = true
-      const heading = m[2].toLowerCase()
-      const body = m[3].trim()
-      if(/gut|good/.test(heading))                       out.good = body
-      else if(/anders|improve|change/.test(heading))     out.improve = body
-      else if(/lesson|nimmst|learning/.test(heading))    out.lesson = body
-      else                                                out.notes = (out.notes ? out.notes + '\n\n' : '') + body
-    }
-    if(!matched) out.notes = content
-    return out
-  }
-  function serializeJrContent(sec){
-    const parts = []
-    if(sec.good)    parts.push(`## ✅ Was lief gut?\n${sec.good}`)
-    if(sec.improve) parts.push(`## 🔄 Was anders machen?\n${sec.improve}`)
-    if(sec.lesson)  parts.push(`## 💡 Lesson\n${sec.lesson}`)
-    if(sec.notes)   parts.push(`## 📝 Notizen\n${sec.notes}`)
-    return parts.join('\n\n')
-  }
-
-  function jrExtractDisc(tags){
-    const t = (tags || []).find(t => /^_disc_(\d+)$/.test(t))
-    return t ? parseInt(t.match(/^_disc_(\d+)$/)[1], 10) : null
-  }
-  function jrUserTags(tags){ return (tags || []).filter(t => !t.startsWith('_')) }
-
-  /* Streak: consecutive days backwards starting from today (or yesterday). */
-  function jrCalculateStreak(){
-    if(!journalEntries.length) return 0
-    const dates = new Set(journalEntries.map(e => e.date))
-    const today = jrTodayIso()
-    let cursor = dates.has(today) ? today : jrAddDays(today, -1)
-    if(!dates.has(cursor)) return 0
-    let streak = 0
-    while(dates.has(cursor)){ streak++; cursor = jrAddDays(cursor, -1) }
-    return streak
-  }
-  function jrAvgMood30(){
-    const cutoff = jrAddDays(jrTodayIso(), -30)
-    const recent = journalEntries.filter(e => e.date >= cutoff && e.mood)
-    if(!recent.length) return null
-    return recent.reduce((a, e) => a + (JR_MOOD_SCORE[e.mood] || 3), 0) / recent.length
-  }
+  let _selectedJournalId = null
+  let _journalSaveTimer = null
 
   async function loadJournal(){
     if(!currentUserId) return
@@ -12427,346 +12075,266 @@
           console.warn('[journal] Tabelle existiert nicht. Bitte migration_journal_entries.sql einspielen.')
           return
         }
-        console.warn('[journal] load failed:', error.message); return
+        console.warn('[journal] load failed:', error.message)
+        return
       }
       journalEntries = (data || []).map(r => ({
-        id: r.id, date: r.entry_date, title: r.title || '',
-        content: r.content || '', mood: r.mood || null,
+        id: r.id,
+        date: r.entry_date,
+        title: r.title || '',
+        content: r.content || '',
+        mood: r.mood || null,
         tags: r.tags || [],
         plRealised: r.pl_realised != null ? Number(r.pl_realised) : null,
         updatedAt: r.updated_at
       }))
-      renderJrHero()
-      renderJrHistory()
-      renderJrActiveEntry()
-      updateJrReminder()
+      renderJournalList()
     } catch(e){
       console.warn('[journal] load exception:', e)
     }
   }
 
-  function renderJrHero(){
-    const now = new Date()
-    const wd = now.toLocaleDateString('de-DE', { weekday:'long' })
-    const dt = now.toLocaleDateString('de-DE', { day:'numeric', month:'long', year:'numeric' })
-    const wdEl = document.getElementById('jr-weekday'); if(wdEl) wdEl.textContent = wd
-    const dtEl = document.getElementById('jr-date-full'); if(dtEl) dtEl.textContent = dt
+  function renderJournalList(){
+    const wrap   = document.getElementById('journal-list')
+    const empty  = document.getElementById('journal-list-empty')
+    const cnt    = document.getElementById('journal-count')
+    if(!wrap) return
+    if(cnt) cnt.textContent = `(${journalEntries.length})`
 
-    const h = now.getHours()
-    const greeting = h < 11 ? 'Guten Morgen — wie startest du in den Tag?'
-      : h < 16 ? 'Hey — wie läuft\'s gerade?'
-      : h < 22 ? 'Wie war dein Tag?'
-      : 'Noch einmal kurz reflektieren?'
-    const grEl = document.getElementById('jr-greeting'); if(grEl) grEl.textContent = greeting
-
-    const streak = jrCalculateStreak()
-    const sCard = document.getElementById('jr-streak-card')
-    const sVal  = document.getElementById('jr-streak-val')
-    if(sVal) sVal.textContent = streak
-    if(sCard) sCard.classList.toggle('active', streak > 0)
-
-    const tEl = document.getElementById('jr-total-val')
-    if(tEl) tEl.textContent = journalEntries.length
-
-    const avg = jrAvgMood30()
-    const avgEl = document.getElementById('jr-avg-val')
-    const avgIcoEl = document.getElementById('jr-avg-icon')
-    if(avgEl) avgEl.textContent = avg ? avg.toFixed(1) : '—'
-    if(avgIcoEl){
-      avgIcoEl.textContent = avg == null ? '—'
-        : avg >= 4.5 ? '😄' : avg >= 3.5 ? '🙂' : avg >= 2.5 ? '😐' : avg >= 1.5 ? '😕' : '😩'
-    }
-  }
-
-  function renderJrHistory(){
-    const grid = document.getElementById('jr-history-grid')
-    const empty = document.getElementById('jr-history-empty')
-    const count = document.getElementById('jr-history-count')
-    if(!grid) return
-    if(count) count.textContent = `${journalEntries.length} ${journalEntries.length === 1 ? 'Eintrag' : 'Einträge'}`
     if(!journalEntries.length){
-      grid.innerHTML = ''; grid.style.display = 'none'
+      wrap.innerHTML = ''
       if(empty) empty.style.display = ''
       return
     }
-    grid.style.display = ''
     if(empty) empty.style.display = 'none'
 
-    grid.innerHTML = journalEntries.map(e => {
-      const d = new Date(e.date + 'T00:00:00')
-      const dateStr = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'short' })
-      const isActive = e.date === _jrActiveDate
-      const sec = parseJrContent(e.content)
-      const preview = sec.good || sec.improve || sec.lesson || sec.notes || ''
-      const moodEmoji = e.mood ? JR_MOOD_EMOJI[e.mood] : ''
-      const moodColor = e.mood ? JR_MOOD_COLOR[e.mood] : null
+    const moodEmoji = {
+      great:'😄', good:'🙂', neutral:'😐', bad:'😕', terrible:'😢'
+    }
+    wrap.innerHTML = journalEntries.map(e => {
+      const date = new Date(e.date + 'T00:00:00')
+      const dateStr = date.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'short', year:'numeric' })
+      const isActive = String(e.id) === String(_selectedJournalId)
       const plDisp = e.plRealised != null
-        ? `<span class="jr-h-card-pl ${e.plRealised >= 0 ? 'pos' : 'neg'}">${e.plRealised >= 0 ? '+' : ''}${fmtMoney(e.plRealised)}</span>`
+        ? `<span class="journal-item-pl ${e.plRealised >= 0 ? 'pos' : 'neg'}">${e.plRealised >= 0 ? '+' : ''}${fmtMoney(e.plRealised)}</span>`
         : ''
-      const disc = jrExtractDisc(e.tags)
-      const discDisp = disc != null ? `<span class="jr-h-card-disc">${disc}/10</span>` : ''
+      const tagDisp = (e.tags || []).slice(0, 3).map(t =>
+        `<span style="background:#94a3b822;color:var(--sub);padding:1px 6px;border-radius:4px;font-size:10px">${escapeHtml(t)}</span>`
+      ).join(' ')
+      const preview = (e.content || '').slice(0, 100).replace(/\n/g, ' ')
       return `
-        <div class="jr-h-card ${isActive ? 'is-active' : ''}" data-jr-date="${escapeHtml(e.date)}" style="${moodColor ? `--card-c:${moodColor}` : ''}">
-          <div class="jr-h-card-head">
-            <span class="jr-h-card-date">${dateStr}</span>
-            ${moodEmoji ? `<span class="jr-h-card-mood">${moodEmoji}</span>` : ''}
+        <div class="journal-item ${isActive ? 'active' : ''}" data-journal-id="${escapeHtml(e.id)}">
+          <div class="journal-item-head">
+            <span class="journal-item-date">${dateStr}</span>
+            <span class="journal-item-mood">${e.mood ? moodEmoji[e.mood] || '' : ''}</span>
           </div>
-          <div class="jr-h-card-body ${preview ? '' : 'empty'}">${preview ? escapeHtml(preview.slice(0, 180)) + (preview.length > 180 ? '…' : '') : 'Kein Text — nur Mood/P/L gesetzt'}</div>
-          ${(plDisp || discDisp) ? `<div class="jr-h-card-meta">${plDisp}${discDisp}</div>` : ''}
+          ${e.title ? `<div class="journal-item-title">${escapeHtml(e.title)}</div>` : ''}
+          ${preview ? `<div class="journal-item-preview">${escapeHtml(preview)}${e.content.length > 100 ? '…' : ''}</div>` : ''}
+          ${(plDisp || tagDisp) ? `<div class="journal-item-meta">${plDisp} ${tagDisp}</div>` : ''}
         </div>
       `
     }).join('')
 
-    grid.querySelectorAll('[data-jr-date]').forEach(el => {
-      el.addEventListener('click', () => jrSwitchDate(el.dataset.jrDate))
+    wrap.querySelectorAll('[data-journal-id]').forEach(el =>
+      el.addEventListener('click', () => openJournalEntry(el.dataset.journalId))
+    )
+  }
+
+  function openJournalEntry(id){
+    const e = journalEntries.find(x => String(x.id) === String(id))
+    if(!e) return
+    _selectedJournalId = id
+    document.getElementById('journal-editor-empty').hidden = true
+    document.getElementById('journal-editor-panel').hidden = false
+    document.getElementById('je-date').value     = e.date || ''
+    document.getElementById('je-title').value    = e.title || ''
+    document.getElementById('je-content').value  = e.content || ''
+    document.getElementById('je-tags').value     = (e.tags || []).join(', ')
+    document.getElementById('je-pl').value       = e.plRealised != null ? e.plRealised : ''
+    document.getElementById('je-delete-btn').hidden = false
+    // Mood
+    document.querySelectorAll('#je-mood-picker .je-mood').forEach(b => {
+      b.classList.toggle('active', b.dataset.mood === e.mood)
     })
+    updateJournalCharCount()
+    document.getElementById('je-status').textContent = e.updatedAt
+      ? `Zuletzt geändert: ${new Date(e.updatedAt).toLocaleString('de-DE')}`
+      : ''
+    renderJournalList()
   }
 
-  function renderJrActiveEntry(){
-    if(!_jrActiveDate) _jrActiveDate = jrTodayIso()
-    const e = journalEntries.find(x => x.date === _jrActiveDate)
-    _jrActiveId = e ? e.id : null
-
-    _jrLoadingActiveEntry = true
-    try {
-      const dp = document.getElementById('jr-active-date'); if(dp) dp.value = _jrActiveDate
-      const todayBtn = document.getElementById('jr-today-btn')
-      if(todayBtn) todayBtn.classList.toggle('is-today', _jrActiveDate === jrTodayIso())
-      const delBtn = document.getElementById('jr-delete-btn'); if(delBtn) delBtn.hidden = !e
-
-      document.querySelectorAll('#jr-moods .jr-mood').forEach(b =>
-        b.classList.toggle('active', !!(e && b.dataset.mood === e.mood)))
-
-      const disc = e ? jrExtractDisc(e.tags) : null
-      document.querySelectorAll('#jr-disc .jr-disc-btn').forEach(b =>
-        b.classList.toggle('active', disc != null && parseInt(b.dataset.disc, 10) === disc))
-
-      const plEl = document.getElementById('jr-pl')
-      if(plEl) plEl.value = (e && e.plRealised != null) ? e.plRealised : ''
-
-      const sec = e ? parseJrContent(e.content) : { good:'', improve:'', lesson:'', notes:'' }
-      const set = (id, v) => { const x = document.getElementById(id); if(x) x.value = v || '' }
-      set('jr-q-good',    sec.good)
-      set('jr-q-improve', sec.improve)
-      set('jr-q-lesson',  sec.lesson)
-      set('jr-q-notes',   sec.notes)
-
-      const tagsEl = document.getElementById('jr-tags')
-      if(tagsEl) tagsEl.value = e ? jrUserTags(e.tags).join(', ') : ''
-
-      const moreEl = document.getElementById('jr-more')
-      if(moreEl) moreEl.open = !!(sec.notes || (e && jrUserTags(e.tags).length))
-
-      jrSetStatus('')
-    } finally {
-      _jrLoadingActiveEntry = false
+  function newJournalEntry(){
+    // Falls heute schon ein Eintrag existiert → den öffnen
+    const today = new Date().toISOString().slice(0,10)
+    const existing = journalEntries.find(e => e.date === today)
+    if(existing){
+      openJournalEntry(existing.id)
+      return
     }
-    renderJrHistory()  // active-card highlight
+    // Sonst: leeren Editor öffnen, Save erstellt dann den Eintrag
+    _selectedJournalId = null
+    document.getElementById('journal-editor-empty').hidden = true
+    document.getElementById('journal-editor-panel').hidden = false
+    document.getElementById('je-date').value     = today
+    document.getElementById('je-title').value    = ''
+    document.getElementById('je-content').value  = ''
+    document.getElementById('je-tags').value     = ''
+    document.getElementById('je-pl').value       = ''
+    document.getElementById('je-delete-btn').hidden = true
+    document.querySelectorAll('#je-mood-picker .je-mood').forEach(b => b.classList.remove('active'))
+    document.getElementById('je-status').textContent = 'Neuer Eintrag — wird automatisch gespeichert'
+    updateJournalCharCount()
+    setTimeout(() => document.getElementById('je-content').focus(), 100)
   }
 
-  function jrSwitchDate(date){
-    if(!date) return
-    if(_jrSaveTimer){ clearTimeout(_jrSaveTimer); _jrSaveTimer = null; saveJournalEntry() }
-    _jrActiveDate = date
-    renderJrActiveEntry()
+  function updateJournalCharCount(){
+    const c = document.getElementById('je-content').value.length
+    const el = document.getElementById('je-char-count')
+    if(el) el.textContent = c
   }
 
-  function jrSetStatus(text, kind){
-    const el = document.getElementById('jr-status'); if(!el) return
-    el.textContent = text
-    el.classList.remove('saved','saving','err')
-    if(kind) el.classList.add(kind)
-  }
-
-  function getJrFormData(){
-    const date = document.getElementById('jr-active-date')?.value || _jrActiveDate
-    const sec = {
-      good:    (document.getElementById('jr-q-good')?.value || '').trim(),
-      improve: (document.getElementById('jr-q-improve')?.value || '').trim(),
-      lesson:  (document.getElementById('jr-q-lesson')?.value || '').trim(),
-      notes:   (document.getElementById('jr-q-notes')?.value || '').trim()
-    }
-    const content = serializeJrContent(sec)
-    const plStr = document.getElementById('jr-pl')?.value || ''
+  function getJournalFormData(){
+    const date = document.getElementById('je-date').value
+    const title = document.getElementById('je-title').value.trim() || null
+    const content = document.getElementById('je-content').value
+    const tagsRaw = document.getElementById('je-tags').value
+    const tags = tagsRaw.split(',').map(t => t.trim()).filter(Boolean)
+    const plStr = document.getElementById('je-pl').value
     const plRealised = plStr === '' ? null : parseFloat(plStr)
-    const moodEl = document.querySelector('#jr-moods .jr-mood.active')
+    const moodEl = document.querySelector('#je-mood-picker .je-mood.active')
     const mood = moodEl ? moodEl.dataset.mood : null
-    const discEl = document.querySelector('#jr-disc .jr-disc-btn.active')
-    const disc = discEl ? parseInt(discEl.dataset.disc, 10) : null
-    const tagsRaw = document.getElementById('jr-tags')?.value || ''
-    const userTags = tagsRaw.split(',').map(t => t.trim()).filter(t => t && !t.startsWith('_'))
-    const tags = disc != null ? [...userTags, `_disc_${disc}`] : userTags
-    return {
-      date, content, mood, tags,
-      plRealised: isFinite(plRealised) ? plRealised : null,
-      isEmpty: !content && !mood && plRealised == null && tags.length === 0
-    }
+    return { date, title, content, tags, plRealised: isFinite(plRealised) ? plRealised : null, mood }
   }
 
   async function saveJournalEntry(){
     if(!currentUserId) return
-    if(_jrLoadingActiveEntry) return
-    const data = getJrFormData()
-    if(!data.date){ jrSetStatus('⚠ Datum fehlt', 'err'); return }
-
-    // Alles leer → existierenden löschen oder nichts tun
-    if(data.isEmpty){
-      if(_jrActiveId){
-        try {
-          await supabase.from('journal_entries').delete()
-            .eq('id', _jrActiveId).eq('user_id', currentUserId)
-          _jrActiveId = null
-          await loadJournal()
-          jrSetStatus('')
-        } catch(e){ console.warn('[journal] delete empty:', e) }
-      } else jrSetStatus('')
+    const data = getJournalFormData()
+    if(!data.date){
+      document.getElementById('je-status').textContent = '⚠ Datum fehlt'
       return
     }
 
-    jrSetStatus('Speichere…', 'saving')
+    document.getElementById('je-status').textContent = 'Speichere…'
+
     try {
-      const { data: row, error } = await supabase
-        .from('journal_entries')
-        .upsert({
-          user_id: currentUserId, entry_date: data.date,
-          title: null, content: data.content, mood: data.mood,
-          tags: data.tags, pl_realised: data.plRealised
-        }, { onConflict: 'user_id,entry_date' })
-        .select('*').single()
-      if(error) throw error
-      _jrActiveId = row.id
-      const mapped = {
-        id: row.id, date: row.entry_date, title: row.title || '',
-        content: row.content || '', mood: row.mood || null,
-        tags: row.tags || [],
-        plRealised: row.pl_realised != null ? Number(row.pl_realised) : null,
-        updatedAt: row.updated_at
+      // Wenn _selectedJournalId gesetzt → UPDATE auf existing
+      if(_selectedJournalId){
+        const { error } = await supabase
+          .from('journal_entries')
+          .update({
+            entry_date:   data.date,
+            title:        data.title,
+            content:      data.content,
+            mood:         data.mood,
+            tags:         data.tags,
+            pl_realised:  data.plRealised
+          })
+          .eq('id', _selectedJournalId)
+          .eq('user_id', currentUserId)
+        if(error) throw error
+      } else {
+        // INSERT — aber: wenn schon ein Eintrag mit dem Datum existiert, machen wir UPSERT
+        const { data: row, error } = await supabase
+          .from('journal_entries')
+          .upsert({
+            user_id:      currentUserId,
+            entry_date:   data.date,
+            title:        data.title,
+            content:      data.content,
+            mood:         data.mood,
+            tags:         data.tags,
+            pl_realised:  data.plRealised
+          }, { onConflict: 'user_id,entry_date' })
+          .select('*')
+          .single()
+        if(error) throw error
+        _selectedJournalId = row.id
+        document.getElementById('je-delete-btn').hidden = false
       }
-      const idx = journalEntries.findIndex(x => x.date === data.date)
-      if(idx >= 0) journalEntries[idx] = mapped
-      else { journalEntries.unshift(mapped); journalEntries.sort((a,b) => b.date.localeCompare(a.date)) }
-      renderJrHero(); renderJrHistory()
-      const delBtn = document.getElementById('jr-delete-btn'); if(delBtn) delBtn.hidden = false
-      updateJrReminder()
-      jrSetStatus(`✓ ${new Date().toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })}`, 'saved')
+      await loadJournal()
+      // active-state wieder setzen
+      renderJournalList()
+      document.getElementById('je-status').textContent =
+        `✓ Gespeichert · ${new Date().toLocaleTimeString('de-DE')}`
     } catch(e){
       console.warn('[journal] save error:', e)
       const msg = e.message || String(e)
-      if(/relation .* does not exist/i.test(msg)) jrSetStatus('⚠ Tabelle fehlt — migration_journal_entries.sql', 'err')
-      else jrSetStatus('⚠ ' + msg.slice(0, 60), 'err')
+      if(msg.includes('relation') && msg.includes('does not exist')){
+        document.getElementById('je-status').textContent =
+          '⚠ Tabelle fehlt — bitte migration_journal_entries.sql einspielen'
+      } else {
+        document.getElementById('je-status').textContent = '⚠ Fehler: ' + msg.slice(0,80)
+      }
     }
   }
 
   async function deleteJournalEntry(){
-    if(!_jrActiveId) return
-    const d = new Date((_jrActiveDate || jrTodayIso()) + 'T00:00:00')
-        .toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'numeric' })
-    if(!confirm('Eintrag vom ' + d + ' wirklich löschen?')) return
+    if(!_selectedJournalId) return
+    if(!confirm('Diesen Journal-Eintrag wirklich löschen?')) return
     try {
-      const { error } = await supabase.from('journal_entries').delete()
-        .eq('id', _jrActiveId).eq('user_id', currentUserId)
+      const { error } = await supabase
+        .from('journal_entries')
+        .delete()
+        .eq('id', _selectedJournalId)
+        .eq('user_id', currentUserId)
       if(error) throw error
-      _jrActiveId = null
+      _selectedJournalId = null
+      document.getElementById('journal-editor-panel').hidden = true
+      document.getElementById('journal-editor-empty').hidden = false
       await loadJournal()
-      renderJrActiveEntry()
     } catch(e){
       alert('Fehler beim Löschen: ' + (e.message || e))
     }
   }
 
+  // Auto-Save mit Debounce: 1.2s nach letzter Änderung
   function scheduleJournalSave(){
-    if(_jrLoadingActiveEntry) return
-    clearTimeout(_jrSaveTimer)
-    jrSetStatus('Speichere…', 'saving')
-    _jrSaveTimer = setTimeout(() => { _jrSaveTimer = null; saveJournalEntry() }, 1200)
+    clearTimeout(_journalSaveTimer)
+    document.getElementById('je-status').textContent = '…'
+    _journalSaveTimer = setTimeout(saveJournalEntry, 1200)
   }
 
-  /* Sidebar dot + evening banner reminder */
-  function updateJrReminder(){
-    const today = jrTodayIso()
-    const hasToday = journalEntries.some(e => e.date === today)
+  // Wire-up
+  document.getElementById('journalNewBtn')?.addEventListener('click', newJournalEntry)
+  document.getElementById('je-delete-btn')?.addEventListener('click', deleteJournalEntry)
 
-    // Sidebar dot
-    document.querySelectorAll('.sb-link[data-view="journal"]').forEach(link => {
-      let dot = link.querySelector('.sb-jr-dot')
-      if(!hasToday){
-        if(!dot){
-          dot = document.createElement('span')
-          dot.className = 'sb-jr-dot'
-          dot.setAttribute('aria-label', 'Heute noch kein Journal-Eintrag')
-          link.appendChild(dot)
-        }
-      } else if(dot){ dot.remove() }
-    })
-
-    // Evening banner — nur sichtbar in Journal-View, nach 19 Uhr, wenn nicht dismissed
-    const view = document.querySelector('[data-view="journal"].view')
-    if(!view) return
-    const dismissedKey = `prophos_jr_banner_dismissed_${today}`
-    const existing = view.querySelector('.jr-evening-banner')
-    if(!hasToday && new Date().getHours() >= 19 && !localStorage.getItem(dismissedKey)){
-      if(!existing){
-        const banner = document.createElement('div')
-        banner.className = 'jr-evening-banner'
-        banner.innerHTML = `
-          <span class="jr-evening-banner-icon">🌙</span>
-          <span class="jr-evening-banner-text"><strong>Heute noch kein Journal-Eintrag.</strong> Zwei Minuten reichen — wie war dein Tag?</span>
-          <button class="jr-evening-banner-close" aria-label="Schließen">×</button>
-        `
-        view.insertBefore(banner, view.firstChild)
-        banner.querySelector('.jr-evening-banner-close').addEventListener('click', () => {
-          localStorage.setItem(dismissedKey, '1'); banner.remove()
-        })
-      }
-    } else if(existing){ existing.remove() }
-  }
-
-  /* Wire-up */
-  document.getElementById('jr-active-date')?.addEventListener('change', e => jrSwitchDate(e.target.value))
-  document.getElementById('jr-prev-day')?.addEventListener('click', () => jrSwitchDate(jrAddDays(_jrActiveDate || jrTodayIso(), -1)))
-  document.getElementById('jr-next-day')?.addEventListener('click', () => jrSwitchDate(jrAddDays(_jrActiveDate || jrTodayIso(), +1)))
-  document.getElementById('jr-today-btn')?.addEventListener('click', () => jrSwitchDate(jrTodayIso()))
-  document.getElementById('jr-delete-btn')?.addEventListener('click', deleteJournalEntry)
-
-  document.querySelectorAll('#jr-moods .jr-mood').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const wasActive = btn.classList.contains('active')
-      document.querySelectorAll('#jr-moods .jr-mood').forEach(b => b.classList.remove('active'))
-      if(!wasActive) btn.classList.add('active')
+  ;['je-title','je-content','je-tags','je-pl','je-date'].forEach(id => {
+    const el = document.getElementById(id)
+    if(!el) return
+    el.addEventListener('input', () => {
+      if(id === 'je-content') updateJournalCharCount()
       scheduleJournalSave()
     })
   })
-  document.querySelectorAll('#jr-disc .jr-disc-btn').forEach(btn => {
+  document.querySelectorAll('#je-mood-picker .je-mood').forEach(btn => {
     btn.addEventListener('click', () => {
       const wasActive = btn.classList.contains('active')
-      document.querySelectorAll('#jr-disc .jr-disc-btn').forEach(b => b.classList.remove('active'))
-      if(!wasActive) btn.classList.add('active')
+      document.querySelectorAll('#je-mood-picker .je-mood').forEach(b => b.classList.remove('active'))
+      if(!wasActive) btn.classList.add('active')  // toggle: zweiter Klick = abwählen
       scheduleJournalSave()
     })
   })
-  ;['jr-pl','jr-q-good','jr-q-improve','jr-q-lesson','jr-q-notes','jr-tags'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', scheduleJournalSave)
-  })
 
+  // Beim Verlassen der Seite: pending Save sofort durchführen
   window.addEventListener('beforeunload', () => {
-    if(_jrSaveTimer){ clearTimeout(_jrSaveTimer); _jrSaveTimer = null; try { saveJournalEntry() } catch(_){} }
+    if(_journalSaveTimer){
+      clearTimeout(_journalSaveTimer)
+      // synchroner Last-Ditch: ignorieren falls fehlschlägt
+      try { saveJournalEntry() } catch(_){}
+    }
   })
 
+  // Beim ersten Laden Journal abrufen
   setTimeout(() => {
-    if(currentUserId) loadJournal().catch(e => console.warn('[journal] init:', e))
-    else { _jrActiveDate = jrTodayIso(); renderJrHero(); renderJrActiveEntry() }
+    if(currentUserId) loadJournal().catch(e => console.warn('[journal] init load:', e))
   }, 600)
 
+  // Wenn der User auf den Journal-Tab klickt, neu laden
   document.querySelectorAll('[data-view="journal"]').forEach(btn => {
     btn.addEventListener('click', () => {
       if(currentUserId) loadJournal().catch(_=>{})
-      else { renderJrHero(); renderJrActiveEntry() }
-      updateJrReminder()
     })
   })
-
-  // Periodischer Reminder-Check (alle 10min, um z.B. abends ohne Reload den Banner zu zeigen)
-  setInterval(updateJrReminder, 10 * 60 * 1000)
 
   // Initial render — accounts first (populates the table), then pairs.
   // Both happen here, AFTER `let pairs` is initialised, so no TDZ.
@@ -14473,283 +14041,6 @@
     color: var(--sub, #888);
     font-variant-numeric: tabular-nums;
   }
-
-  /* "Trade starten" button im Coin-Flip Modal (erscheint nach erstem Flip) */
-  #coinflip-modal .cf-btn-go {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    border-color: transparent;
-    font-weight: 600;
-    box-shadow: 0 4px 12px -4px rgba(16, 185, 129, .5);
-    animation: cfGoFadeIn .4s ease-out;
-  }
-  #coinflip-modal .cf-btn-go:hover {
-    background: linear-gradient(135deg, #059669, #047857);
-    transform: translateY(-1px);
-  }
-  @keyframes cfGoFadeIn {
-    from { opacity: 0; transform: scale(.9) }
-    to   { opacity: 1; transform: scale(1) }
-  }
-
-  /* ====================================================================
-     PRE-TRADE CHECKLIST MODAL
-     ==================================================================== */
-  #ptc-modal {
-    display: none;
-    position: fixed; inset: 0;
-    z-index: 10001;
-    background: rgba(15, 12, 8, .82);
-    backdrop-filter: blur(8px);
-    align-items: center; justify-content: center;
-    padding: 20px;
-    animation: ptcFade .25s ease-out;
-  }
-  #ptc-modal.open { display: flex; }
-  @keyframes ptcFade {
-    from { opacity: 0 }
-    to   { opacity: 1 }
-  }
-
-  #ptc-modal .ptc-content {
-    background: linear-gradient(180deg, #fefdfb 0%, #fdfaf3 100%);
-    border-radius: 22px;
-    padding: 30px 32px 26px;
-    max-width: 480px; width: 100%;
-    box-shadow: 0 30px 80px -20px rgba(0,0,0,.5),
-                0 0 0 1px rgba(255,255,255,.05);
-    animation: ptcScale .35s cubic-bezier(.2, .9, .3, 1.1);
-    color: #1c1814;
-    position: relative;
-  }
-  @keyframes ptcScale {
-    from { opacity: 0; transform: scale(.92) translateY(10px) }
-    to   { opacity: 1; transform: scale(1) translateY(0) }
-  }
-
-  #ptc-modal .ptc-head {
-    text-align: center; margin-bottom: 22px;
-  }
-  #ptc-modal .ptc-icon { font-size: 28px; line-height: 1; display: block; margin-bottom: 8px }
-  #ptc-modal .ptc-title {
-    margin: 0; font-size: 22px; font-weight: 700;
-    font-family: "Iowan Old Style", "Charter", "Cambria", Georgia, serif;
-    font-style: italic; letter-spacing: -0.01em;
-    color: #1c1814;
-  }
-  #ptc-modal .ptc-sub {
-    margin: 6px 0 0; font-size: 13px; color: #8a7d6c;
-  }
-
-  /* Countdown ring */
-  #ptc-modal .ptc-countdown {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    margin-bottom: 22px;
-  }
-  #ptc-modal .ptc-cd-ring {
-    position: relative; width: 90px; height: 90px;
-  }
-  #ptc-modal .ptc-cd-ring svg {
-    width: 100%; height: 100%; transform: rotate(-90deg);
-  }
-  #ptc-modal .ptc-cd-track {
-    fill: none; stroke: rgba(28, 24, 20, .08); stroke-width: 6;
-  }
-  #ptc-modal .ptc-cd-progress {
-    fill: none; stroke: #d97706; stroke-width: 6; stroke-linecap: round;
-    stroke-dasharray: 282.7;  /* 2 * π * 45 */
-    stroke-dashoffset: 0;
-    transition: stroke-dashoffset 1s linear, stroke .3s;
-  }
-  #ptc-modal .ptc-cd-progress.warn { stroke: #f59e0b }
-  #ptc-modal .ptc-cd-progress.urgent { stroke: #ef4444 }
-  #ptc-modal .ptc-cd-progress.done { stroke: #10b981 }
-  #ptc-modal .ptc-cd-num {
-    position: absolute; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-family: var(--mono, monospace);
-    font-size: 26px; font-weight: 700;
-    color: #1c1814;
-    font-variant-numeric: tabular-nums;
-  }
-  #ptc-modal .ptc-cd-num.done {
-    color: #10b981;
-    animation: ptcReadyPulse 1.5s ease-in-out infinite;
-  }
-  @keyframes ptcReadyPulse {
-    0%,100% { transform: scale(1) }
-    50%     { transform: scale(1.08) }
-  }
-  #ptc-modal .ptc-cd-label {
-    font-size: 11px; color: #8a7d6c; letter-spacing: .04em;
-    text-transform: uppercase; font-weight: 500;
-  }
-
-  /* Checklist — sequenziell freigeschaltet */
-  #ptc-modal .ptc-list {
-    list-style: none; padding: 0; margin: 0 0 14px;
-    display: flex; flex-direction: column; gap: 8px;
-  }
-  #ptc-modal .ptc-item {
-    display: flex; align-items: flex-start; gap: 12px;
-    padding: 12px 14px; border-radius: 12px;
-    background: rgba(255,255,255,.6);
-    border: 1px solid rgba(28,24,20,.07);
-    transition: all .25s;
-    position: relative;
-  }
-  /* Hidden checkbox bleibt drin als state-tracker, aber nicht klickbar */
-  #ptc-modal .ptc-cb {
-    position: absolute; opacity: 0; pointer-events: none;
-  }
-  #ptc-modal .ptc-item-box {
-    flex-shrink: 0;
-    width: 22px; height: 22px;
-    border: 2px solid rgba(28,24,20,.2);
-    border-radius: 7px;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: all .25s cubic-bezier(.34,1.56,.64,1);
-    margin-top: 1px;
-    background: rgba(28,24,20,.03);
-  }
-  #ptc-modal .ptc-item-check {
-    color: white; font-size: 14px; font-weight: 700;
-    opacity: 0; transform: scale(.4);
-    transition: all .25s cubic-bezier(.34,1.56,.64,1);
-    line-height: 1;
-  }
-  #ptc-modal .ptc-item-text {
-    display: flex; flex-direction: column; gap: 2px; flex: 1;
-    transition: color .2s;
-  }
-  #ptc-modal .ptc-item-title {
-    font-size: 14px; font-weight: 600; color: #1c1814;
-    transition: color .25s;
-  }
-  #ptc-modal .ptc-item-hint {
-    font-size: 11.5px; color: #8a7d6c; line-height: 1.4;
-  }
-
-  /* LOCKED — vor und nach dem aktuellen Step */
-  #ptc-modal .ptc-item.is-locked {
-    opacity: .35;
-    background: rgba(28,24,20,.02);
-  }
-  #ptc-modal .ptc-item.is-locked .ptc-item-box {
-    background: rgba(28,24,20,.06);
-    border-color: rgba(28,24,20,.1);
-    border-style: dashed;
-  }
-
-  /* CURRENT — wartet auf Ablauf des Timers */
-  #ptc-modal .ptc-item.is-current {
-    background: rgba(255, 251, 235, .95);
-    border-color: rgba(217,119,6,.45);
-    box-shadow: 0 0 0 3px rgba(217,119,6,.12);
-    animation: ptcItemBreathing 2.2s ease-in-out infinite;
-  }
-  @keyframes ptcItemBreathing {
-    0%,100% { box-shadow: 0 0 0 3px rgba(217,119,6,.12) }
-    50%     { box-shadow: 0 0 0 6px rgba(217,119,6,.25) }
-  }
-  #ptc-modal .ptc-item.is-current .ptc-item-box {
-    background: rgba(217,119,6,.12);
-    border-color: rgba(217,119,6,.55);
-  }
-
-  /* CURRENT + READY — Timer abgelaufen, jetzt klickbar */
-  #ptc-modal .ptc-item.is-current.is-ready {
-    animation: none;
-    border-color: rgba(16,185,129,.5);
-    box-shadow: 0 0 0 3px rgba(16,185,129,.18);
-    cursor: pointer;
-  }
-  #ptc-modal .ptc-item.is-current.is-ready .ptc-item-box {
-    background: rgba(16,185,129,.15);
-    border-color: rgba(16,185,129,.55);
-    animation: ptcReadyBoxPulse 1.5s ease-in-out infinite;
-  }
-  @keyframes ptcReadyBoxPulse {
-    0%,100% { transform: scale(1) }
-    50%     { transform: scale(1.08) }
-  }
-  #ptc-modal .ptc-item.is-current.is-ready:hover {
-    transform: translateX(2px);
-  }
-  #ptc-modal .ptc-item.is-current.is-ready:hover .ptc-item-box {
-    background: #10b981; border-color: #10b981;
-  }
-  #ptc-modal .ptc-item.is-current.is-ready:hover .ptc-item-check {
-    opacity: 1; transform: scale(1);
-  }
-
-  /* DONE — abgehakt */
-  #ptc-modal .ptc-item.is-done {
-    opacity: .55;
-    background: rgba(16,185,129,.05);
-    border-color: rgba(16,185,129,.2);
-    transition: all .3s;
-  }
-  #ptc-modal .ptc-item.is-done .ptc-item-box {
-    background: #10b981;
-    border-color: #10b981;
-    border-style: solid;
-  }
-  #ptc-modal .ptc-item.is-done .ptc-item-check {
-    opacity: 1; transform: scale(1);
-  }
-  #ptc-modal .ptc-item.is-done .ptc-item-title { color: #059669 }
-
-  /* SHAKE — wenn User auf locked oder noch-nicht-ready klickt */
-  #ptc-modal .ptc-item.shake { animation: ptcShake .4s }
-  @keyframes ptcShake {
-    0%,100% { transform: translateX(0) }
-    18%,58% { transform: translateX(-5px) }
-    38%,78% { transform: translateX(5px) }
-  }
-
-
-  #ptc-modal .ptc-progress-text {
-    text-align: center; font-size: 11.5px; color: #8a7d6c;
-    margin-bottom: 18px; font-variant-numeric: tabular-nums;
-  }
-
-  /* Actions */
-  #ptc-modal .ptc-actions {
-    display: flex; gap: 10px;
-  }
-  #ptc-modal .ptc-btn {
-    flex: 1; padding: 12px 18px; border-radius: 11px;
-    font-size: 13.5px; font-weight: 600;
-    cursor: pointer; border: 1px solid rgba(28,24,20,.12);
-    background: white; color: #564a3d;
-    transition: all .15s;
-  }
-  #ptc-modal .ptc-btn-cancel:hover {
-    background: rgba(28,24,20,.04); color: #1c1814;
-  }
-  #ptc-modal .ptc-btn-go {
-    background: rgba(28,24,20,.06); color: #8a7d6c;
-    border-color: transparent;
-    flex: 1.5;
-  }
-  #ptc-modal .ptc-btn-go:not(:disabled) {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    box-shadow: 0 6px 16px -6px rgba(16,185,129,.6);
-  }
-  #ptc-modal .ptc-btn-go:not(:disabled):hover {
-    background: linear-gradient(135deg, #059669, #047857);
-    transform: translateY(-1px);
-    box-shadow: 0 10px 20px -6px rgba(16,185,129,.7);
-  }
-  #ptc-modal .ptc-btn-go:disabled { cursor: not-allowed }
-
-  @media (max-width: 480px) {
-    #ptc-modal .ptc-content { padding: 22px 20px 20px }
-    #ptc-modal .ptc-title { font-size: 19px }
-    #ptc-modal .ptc-item { padding: 10px 12px }
-  }
 </style>
 
 <button id="coinflip-fab" title="Münze werfen — Kopf oder Zahl?">🪙</button>
@@ -14766,94 +14057,9 @@
     <div class="cf-result" id="cf-result">&nbsp;</div>
     <div class="cf-actions">
       <button class="cf-btn cf-btn-primary" id="cf-flip-btn">Werfen</button>
-      <button class="cf-btn cf-btn-go" id="cf-trade-start-btn" hidden>Trade starten →</button>
       <button class="cf-btn" id="cf-close-btn">Schließen</button>
     </div>
     <div class="cf-stats" id="cf-stats">Noch keine Würfe in dieser Session</div>
-  </div>
-</div>
-
-<!-- Pre-Trade Checklist Modal -->
-<div id="ptc-modal">
-  <div class="ptc-content">
-    <div class="ptc-head">
-      <span class="ptc-icon">🎯</span>
-      <h2 class="ptc-title">Letzter Check vorm Trade</h2>
-      <p class="ptc-sub">Punkt für Punkt durchgehen — erst nach dem Timer abhakbar.</p>
-    </div>
-
-    <div class="ptc-countdown">
-      <div class="ptc-cd-ring">
-        <svg viewBox="0 0 100 100" aria-hidden="true">
-          <circle class="ptc-cd-track" cx="50" cy="50" r="45"/>
-          <circle class="ptc-cd-progress" cx="50" cy="50" r="45" id="ptc-cd-circle"/>
-        </svg>
-        <div class="ptc-cd-num" id="ptc-cd-num">30</div>
-      </div>
-      <div class="ptc-cd-label" id="ptc-cd-label">Sekunden zum durchgehen</div>
-    </div>
-
-    <ul class="ptc-list">
-      <li>
-        <label class="ptc-item">
-          <input type="checkbox" class="ptc-cb">
-          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
-          <span class="ptc-item-text">
-            <span class="ptc-item-title">Richtiges Asset?</span>
-            <span class="ptc-item-hint">NQ ≠ MNQ — ein Buchstabe = 10× Hebel</span>
-          </span>
-        </label>
-      </li>
-      <li>
-        <label class="ptc-item">
-          <input type="checkbox" class="ptc-cb">
-          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
-          <span class="ptc-item-text">
-            <span class="ptc-item-title">Lot-Size & Verhältnis</span>
-            <span class="ptc-item-hint">Master ↔ Slave stimmt, kein Faktor verdreht</span>
-          </span>
-        </label>
-      </li>
-      <li>
-        <label class="ptc-item">
-          <input type="checkbox" class="ptc-cb">
-          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
-          <span class="ptc-item-text">
-            <span class="ptc-item-title">Richtiger Account?</span>
-            <span class="ptc-item-hint">Master-Konto in TSX = der Account aus dem Plan</span>
-          </span>
-        </label>
-      </li>
-      <li>
-        <label class="ptc-item">
-          <input type="checkbox" class="ptc-cb">
-          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
-          <span class="ptc-item-text">
-            <span class="ptc-item-title">Multiplikator stimmt</span>
-            <span class="ptc-item-hint">Aktueller Wert in Duplikium = berechneter</span>
-          </span>
-        </label>
-      </li>
-      <li>
-        <label class="ptc-item">
-          <input type="checkbox" class="ptc-cb">
-          <span class="ptc-item-box"><span class="ptc-item-check">✓</span></span>
-          <span class="ptc-item-text">
-            <span class="ptc-item-title">Copy-Trading aktiv</span>
-            <span class="ptc-item-hint">Slave verbunden, Copier ON</span>
-          </span>
-        </label>
-      </li>
-    </ul>
-
-    <div class="ptc-progress-text" id="ptc-progress-text">0 von 4 gecheckt</div>
-
-    <div class="ptc-actions">
-      <button class="ptc-btn ptc-btn-cancel" id="ptc-cancel-btn">Abbrechen</button>
-      <button class="ptc-btn ptc-btn-go" id="ptc-go-btn" disabled>
-        <span id="ptc-go-label">Warte 30s oder hak alle ab</span>
-      </button>
-    </div>
   </div>
 </div>
 
@@ -14915,10 +14121,6 @@
 
       flipping = false
       flipBtn.disabled = false
-
-      // Trade-Start Button erscheint nach erstem Wurf
-      const tradeBtn = document.getElementById('cf-trade-start-btn')
-      if(tradeBtn) tradeBtn.hidden = false
     }, 1500)
   }
 
@@ -14928,9 +14130,6 @@
     coin.style.removeProperty('--final-rotation')
     result.classList.remove('show')
     result.textContent = '\u00A0'
-    // "Trade starten" Button erst nach erstem Flip wieder zeigen
-    const tradeBtn = document.getElementById('cf-trade-start-btn')
-    if(tradeBtn) tradeBtn.hidden = true
   }
 
   function close(){
@@ -14942,227 +14141,12 @@
   flipBtn.addEventListener('click', flip)
   modal.addEventListener('click', (e) => { if(e.target === modal) close() })
 
-  // "Trade starten" → schließt Coin-Flip Modal, öffnet Pre-Trade Checklist
-  document.getElementById('cf-trade-start-btn')?.addEventListener('click', () => {
-    close()
-    if(typeof window.openPreTradeChecklist === 'function') window.openPreTradeChecklist()
-  })
-
   // Spacebar im Modal = werfen, Escape = schließen
   document.addEventListener('keydown', (e) => {
     if(!modal.classList.contains('open')) return
     if(e.key === ' ' || e.code === 'Space'){ e.preventDefault(); flip() }
     if(e.key === 'Escape'){ close() }
   })
-})()
-</script>
-
-<script>
-/* ============================================================
-   Pre-Trade Checklist Modal
-   Sequenzielle Checkliste: pro Item ein eigener Timer, erst
-   nach Ablauf abhakbar, dann wird der nächste Punkt freigeschaltet.
-   Erzwungene Pause, kein Schnellklick-Modus.
-   ============================================================ */
-(function(){
-  const modal     = document.getElementById('ptc-modal')
-  if(!modal) return
-  const cdNum     = document.getElementById('ptc-cd-num')
-  const cdCircle  = document.getElementById('ptc-cd-circle')
-  const cdLabel   = document.getElementById('ptc-cd-label')
-  const goBtn     = document.getElementById('ptc-go-btn')
-  const goLabel   = document.getElementById('ptc-go-label')
-  const cancelBtn = document.getElementById('ptc-cancel-btn')
-  const progText  = document.getElementById('ptc-progress-text')
-
-  // Per-Item Timer (in Sekunden). Falls du das tunen willst:
-  // erste Punkte etwas länger, später kürzer.
-  const TIMERS_PER_ITEM = [5, 5, 5, 5, 5]
-  const STEP_LABELS = [
-    'Schritt 1 von 5 — Asset',
-    'Schritt 2 von 5 — Lot-Size',
-    'Schritt 3 von 5 — Account',
-    'Schritt 4 von 5 — Multiplikator',
-    'Schritt 5 von 5 — Copy-Trading'
-  ]
-  const CIRCUMFERENCE = 2 * Math.PI * 45  // ≈ 282.74
-
-  let items = []
-  let currentStep = 0      // 0..3 während aktiv, 4 = alle done
-  let stepReady   = false  // Timer für aktuellen Step abgelaufen
-  let secondsLeft = 0
-  let timer = null
-
-  function refreshItems(){ items = Array.from(modal.querySelectorAll('.ptc-item')) }
-
-  function reset(){
-    if(timer){ clearInterval(timer); timer = null }
-    refreshItems()
-    items.forEach(it => {
-      it.classList.remove('is-locked','is-current','is-ready','is-done','shake')
-      const cb = it.querySelector('.ptc-cb'); if(cb) cb.checked = false
-    })
-    currentStep = 0
-    stepReady = false
-    startStep(0)
-  }
-
-  function startStep(idx){
-    currentStep = idx
-    stepReady = false
-
-    // Item-States updaten
-    items.forEach((it, i) => {
-      it.classList.remove('is-locked','is-current','is-ready','is-done','shake')
-      if(i < idx)        it.classList.add('is-done')
-      else if(i === idx) it.classList.add('is-current')
-      else               it.classList.add('is-locked')
-      const cb = it.querySelector('.ptc-cb')
-      if(cb) cb.checked = i < idx
-    })
-
-    // Timer-UI resetten
-    const total = TIMERS_PER_ITEM[idx] || 8
-    secondsLeft = total
-    cdNum.textContent = secondsLeft
-    cdNum.classList.remove('done')
-    cdCircle.classList.remove('warn','urgent','done')
-    cdCircle.style.strokeDashoffset = '0'
-    cdLabel.textContent = STEP_LABELS[idx] || ''
-
-    // Progress-Text
-    progText.textContent = `${idx} von ${items.length} gecheckt`
-
-    // Go-Button bleibt disabled bis alle done
-    updateGoBtn()
-
-    // Timer starten
-    if(timer) clearInterval(timer)
-    timer = setInterval(() => tick(total), 1000)
-  }
-
-  function tick(total){
-    secondsLeft--
-    if(secondsLeft <= 0){
-      secondsLeft = 0
-      stepReady = true
-      cdNum.textContent = '✓'
-      cdNum.classList.add('done')
-      cdCircle.classList.add('done')
-      cdCircle.style.strokeDashoffset = String(CIRCUMFERENCE)
-      cdLabel.textContent = 'Jetzt abhaken um weiterzugehen'
-      if(items[currentStep]) items[currentStep].classList.add('is-ready')
-      clearInterval(timer); timer = null
-      return
-    }
-    cdNum.textContent = secondsLeft
-    const elapsed = total - secondsLeft
-    cdCircle.style.strokeDashoffset = String((elapsed / total) * CIRCUMFERENCE)
-    cdCircle.classList.remove('warn','urgent')
-    if(secondsLeft <= Math.max(2, Math.floor(total * 0.2))) cdCircle.classList.add('urgent')
-    else if(secondsLeft <= Math.floor(total * 0.5))         cdCircle.classList.add('warn')
-  }
-
-  function checkCurrent(){
-    if(!stepReady) return
-    const idx = currentStep
-    if(idx >= items.length) return
-
-    // Done-State setzen
-    const cb = items[idx].querySelector('.ptc-cb'); if(cb) cb.checked = true
-    items[idx].classList.remove('is-current','is-ready')
-    items[idx].classList.add('is-done')
-
-    // Nächster Step (oder Ende)
-    const next = idx + 1
-    if(next < items.length){
-      // Kurze Pause für die Animation, dann nächster Step
-      setTimeout(() => startStep(next), 350)
-    } else {
-      // Alle done
-      currentStep = items.length
-      stepReady = false
-      if(timer){ clearInterval(timer); timer = null }
-      cdNum.textContent = '✓'
-      cdNum.classList.add('done')
-      cdCircle.classList.add('done')
-      cdCircle.style.strokeDashoffset = String(CIRCUMFERENCE)
-      cdLabel.textContent = 'Alle gecheckt'
-      progText.textContent = `${items.length} von ${items.length} gecheckt — du bist bereit`
-      updateGoBtn()
-    }
-  }
-
-  function updateGoBtn(){
-    const allDone = currentStep >= items.length
-    goBtn.disabled = !allDone
-    goLabel.textContent = allDone
-      ? 'Bereit — Trade starten →'
-      : `Punkt ${currentStep + 1}/${items.length} läuft…`
-  }
-
-  function open(){
-    refreshItems()
-    modal.classList.add('open')
-    reset()
-  }
-  function close(){
-    modal.classList.remove('open')
-    if(timer){ clearInterval(timer); timer = null }
-  }
-
-  function handleItemClick(idx){
-    if(idx < currentStep){
-      // bereits done — ignore
-      return
-    }
-    if(idx > currentStep){
-      // future locked — shake feedback
-      shake(idx)
-      return
-    }
-    // idx === currentStep
-    if(!stepReady){
-      // Timer läuft noch — shake
-      shake(idx)
-      return
-    }
-    checkCurrent()
-  }
-  function shake(idx){
-    if(!items[idx]) return
-    items[idx].classList.add('shake')
-    setTimeout(() => items[idx]?.classList.remove('shake'), 420)
-  }
-
-  // Wire-up: clicks auf items
-  modal.addEventListener('click', (e) => {
-    if(e.target === modal){ close(); return }
-    const item = e.target.closest('.ptc-item')
-    if(item){
-      e.preventDefault()
-      refreshItems()
-      const idx = items.indexOf(item)
-      if(idx >= 0) handleItemClick(idx)
-    }
-  })
-
-  cancelBtn.addEventListener('click', close)
-  goBtn.addEventListener('click', () => { if(!goBtn.disabled) close() })
-  document.addEventListener('keydown', (e) => {
-    if(!modal.classList.contains('open')) return
-    if(e.key === 'Escape') close()
-    else if(e.key === 'Enter' && !goBtn.disabled){ e.preventDefault(); close() }
-    else if(e.key === ' ' || e.code === 'Space'){
-      // Spacebar = aktuellen Punkt abhaken wenn ready
-      e.preventDefault()
-      if(stepReady) checkCurrent()
-      else if(currentStep < items.length) shake(currentStep)
-    }
-  })
-
-  // Globale API
-  window.openPreTradeChecklist = open
 })()
 </script>
 
