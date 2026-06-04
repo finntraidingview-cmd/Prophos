@@ -5583,20 +5583,13 @@
 
     // Picker — manuelle Accounts (nicht schon mit ANDEREM Dup-Account verlinkt + nicht archiviert)
     const picker = document.getElementById('linkDupPicker')
-    const links = dupGetLinks()
-    const linkedManualIds = new Set(
-      Object.entries(links)
-        .filter(([dupId, manualId]) => dupId !== dupAccountId)
-        .map(([_, manualId]) => manualId)
-    )
-    const archive = (typeof getArchive === 'function') ? getArchive() : {}
-    // Basis-Liste: nicht-archiviert + nicht anderweitig verlinkt
-    const allAvailable = (accounts || []).filter(m =>
-      !linkedManualIds.has(m.id) && !archive[m.id]?.archived
-    )
 
-    // Firmen-Filter befüllen — nur Firmen die in der Liste tatsächlich vorkommen
-    const firmList = [...new Set(allAvailable.map(a => a.firm).filter(Boolean))].sort()
+    // Firmen-Filter initial befüllen (alle nicht-archivierten Accounts)
+    const _allForFirmList = (accounts || []).filter(m => {
+      const arc = (typeof getArchive === 'function') ? getArchive() : {}
+      return !arc[m.id]?.archived
+    })
+    const firmList = [...new Set(_allForFirmList.map(a => a.firm).filter(Boolean))].sort()
     const firmFilterEl = document.getElementById('linkDupFirmFilter')
     if(firmFilterEl){
       firmFilterEl.innerHTML = '<option value="">Alle Firmen</option>' +
@@ -5607,6 +5600,18 @@
     if(typeFilterEl) typeFilterEl.value = ''
 
     function renderDupPicker(){
+      // LIVE berechnen — immer aktueller Stand
+      const links = dupGetLinks()
+      const linkedManualIds = new Set(
+        Object.entries(links)
+          .filter(([dupId]) => dupId !== dupAccountId)  // nur ANDERE Dup-Accounts ausschließen
+          .map(([_, manualId]) => manualId)
+      )
+      const archive = (typeof getArchive === 'function') ? getArchive() : {}
+      const allAvailable = (accounts || []).filter(m =>
+        !linkedManualIds.has(m.id) && !archive[m.id]?.archived
+      )
+
       const firmFilter = firmFilterEl?.value || ''
       const typeFilter = typeFilterEl?.value || ''
       const available = allAvailable.filter(m => {
@@ -5615,11 +5620,14 @@
         return true
       })
 
+      // Aktuell verknüpften Account für diesen Dup-Account hervorheben
+      const currentLinkedId = links[dupAccountId]
+
       if(!allAvailable.length){
         picker.innerHTML = `
           <div class="link-picker-empty">
             <strong>Keine manuellen Accounts verfügbar</strong>
-            Leg erst einen unter "Manuell" → "Account hinzufügen" an, oder löse eine bestehende Verknüpfung.
+            Leg erst einen unter "Accounts" → "Account hinzufügen" an.
           </div>
         `
         return
@@ -5637,11 +5645,12 @@
         const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
         const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
         const maHint = m.ma ? ' · MT5 verbunden' : ''
+        const isCurrentlyLinked = String(m.id) === String(currentLinkedId)
         return `
-          <button type="button" class="link-picker-card" data-dup-target="${escapeHtml(m.id)}">
+          <button type="button" class="link-picker-card${isCurrentlyLinked ? ' selected' : ''}" data-dup-target="${escapeHtml(m.id)}">
             <span class="lpc-radio"></span>
             <div class="lpc-body">
-              <div class="lpc-name">${escapeHtml(m.name)}</div>
+              <div class="lpc-name">${escapeHtml(m.name)}${isCurrentlyLinked ? ' <span style="font-size:10px;color:var(--violet);font-weight:600">● aktuell</span>' : ''}</div>
               <div class="lpc-meta">
                 <span>${escapeHtml(m.firm||'–')}</span>
                 <span>·</span>
@@ -5653,6 +5662,12 @@
           </button>
         `
       }).join('')
+
+      // Wenn aktuell verknüpfter Account sichtbar: Confirm-Button direkt aktivieren
+      if(currentLinkedId && available.some(m => String(m.id) === String(currentLinkedId))){
+        _linkDupTargetId = currentLinkedId
+        document.getElementById('linkDupConfirm').disabled = false
+      }
 
       picker.querySelectorAll('.link-picker-card').forEach(card => {
         card.addEventListener('click', () => {
@@ -8963,13 +8978,13 @@
       </div>
     `
 
-    // Card-Picker mit verfügbaren manuellen Accounts (nicht schon mit Topstep verknüpft + nicht archiviert)
+    // Card-Picker mit verfügbaren manuellen Accounts
     const picker = document.getElementById('linkTopstepPicker')
     const archive = (typeof getArchive === 'function') ? getArchive() : {}
-    const allFree = accounts.filter(a => !a.topstep && !archive[a.id]?.archived)
 
-    // Firmen-Filter befüllen
-    const firmList = [...new Set(allFree.map(a => a.firm).filter(Boolean))].sort()
+    // Firmen-Filter initial mit ALLEN nicht-archivierten Accounts befüllen
+    const _allForTsxFirmList = accounts.filter(a => !archive[a.id]?.archived)
+    const firmList = [...new Set(_allForTsxFirmList.map(a => a.firm).filter(Boolean))].sort()
     const firmFilterEl = document.getElementById('linkTsxFirmFilter')
     if(firmFilterEl){
       firmFilterEl.innerHTML = '<option value="">Alle Firmen</option>' +
@@ -8980,6 +8995,18 @@
     if(typeFilterEl) typeFilterEl.value = ''
 
     function renderTsxPicker(){
+      // LIVE berechnen — inkl. aktuell mit diesem TSX verknüpfter Account
+      const arc = (typeof getArchive === 'function') ? getArchive() : {}
+      // Accounts die mit ANDEREM TSX-Account verknüpft sind ausschließen
+      const otherLinkedIds = new Set(
+        accounts
+          .filter(a => a.topstep && String(a.topstep.id) !== String(tsx.id))
+          .map(a => a.id)
+      )
+      const allFree = accounts.filter(a =>
+        !otherLinkedIds.has(a.id) && !arc[a.id]?.archived
+      )
+
       const firmFilter = firmFilterEl?.value || ''
       const typeFilter = typeFilterEl?.value || ''
       const free = allFree.filter(a => {
@@ -8988,11 +9015,14 @@
         return true
       })
 
+      // Aktuell verknüpfter Account (falls vorhanden)
+      const currentLinkedAcc = accounts.find(a => a.topstep && String(a.topstep.id) === String(tsx.id))
+
       if(!allFree.length){
         picker.innerHTML = `
           <div class="link-picker-empty">
             <strong>Keine manuellen Accounts vorhanden</strong>
-            Leg erst einen unter "Manuell" → "Account hinzufügen" an, dann komm wieder hierher.
+            Leg erst einen unter "Accounts" → "Account hinzufügen" an.
           </div>
         `
         return
@@ -9009,11 +9039,12 @@
       picker.innerHTML = free.map(a => {
         const liveBal = (a.ma && a.ma.balance != null) ? a.ma.balance : a.initialBalance
         const typeLbl = typeLabel(a.type)
+        const isCurrentlyLinked = currentLinkedAcc && String(a.id) === String(currentLinkedAcc.id)
         return `
-          <button type="button" class="link-picker-card" data-link-target="${a.id}">
+          <button type="button" class="link-picker-card${isCurrentlyLinked ? ' selected' : ''}" data-link-target="${a.id}">
             <span class="lpc-radio"></span>
             <div class="lpc-body">
-              <div class="lpc-name">${escapeHtml(a.name)}</div>
+              <div class="lpc-name">${escapeHtml(a.name)}${isCurrentlyLinked ? ' <span style="font-size:10px;color:var(--violet);font-weight:600">● aktuell</span>' : ''}</div>
               <div class="lpc-meta">
                 <span>${escapeHtml(a.firm||'–')}</span>
                 <span>·</span>
@@ -9025,13 +9056,18 @@
         `
       }).join('')
 
+      // Confirm-Button direkt aktivieren wenn aktuell verknüpfter Account sichtbar
+      if(currentLinkedAcc && free.some(a => String(a.id) === String(currentLinkedAcc.id))){
+        _linkTargetId = currentLinkedAcc.id
+        document.getElementById('linkTopstepConfirm').disabled = false
+      }
+
       // Card-Click-Handler
       picker.querySelectorAll('.link-picker-card').forEach(card => {
         card.addEventListener('click', () => {
           picker.querySelectorAll('.link-picker-card').forEach(c => c.classList.remove('selected'))
           card.classList.add('selected')
           _linkTargetId = card.dataset.linkTarget
-          // Confirm-Button enablen
           document.getElementById('linkTopstepConfirm').disabled = false
         })
       })
@@ -10633,7 +10669,7 @@
 
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = accounts.find(a => String(a.id) === String(slaveId))
-    const mult = calcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
+    const mult = tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
     const planObj = {
       masterAccountId: masterId,
