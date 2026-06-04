@@ -10332,8 +10332,15 @@
     setTimeout(() => {
       try {
         if(document.getElementById('tradePlanModal')?.classList.contains('open')){
+          const prevMaster = document.getElementById('tp-master')?.value
+          const prevSlave  = document.getElementById('tp-slave')?.value
           tpRenderAccountSelect('master')
           tpRenderAccountSelect('slave')
+          // Auswahl wiederherstellen nach Re-Render
+          if(prevMaster) document.getElementById('tp-master').value = prevMaster
+          if(prevSlave)  document.getElementById('tp-slave').value  = prevSlave
+          tpNqUpdateToggle()
+          tpRecompute()
         }
       } catch(_){}
     }, 1500)
@@ -10389,8 +10396,11 @@
 
     document.getElementById('tradePlanMsg').textContent = ''
     document.getElementById('tradePlanModal').classList.add('open')
-    tpNqUpdateToggle()
+    tpNqUpdateToggle()  // initial (evtl. noch kein Slave-Value)
     tpRecompute()
+    // Nochmal nach dem DOM-Paint — stellt sicher dass Toggle korrekt ist
+    // nachdem isEdit-Werte gesetzt wurden
+    requestAnimationFrame(() => { tpNqUpdateToggle(); tpRecompute() })
   }
   function closeTradePlanModal(){
     _editingPlanId = null
