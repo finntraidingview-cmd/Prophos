@@ -2950,12 +2950,24 @@
               <select class="input" id="tp-slave"></select>
             </div>
 
-            <!-- NQ/MNQ Toggle — visible when master or slave is a projectx firm -->
-            <div class="field" id="tp-nq-toggle-row" style="grid-column:span 2;display:none">
-              <label style="margin-bottom:6px;display:block">Instrument (Master)</label>
+            <!-- NQ/MNQ Toggle Master — sichtbar wenn Master projectx-Firma ist -->
+            <div class="field" id="tp-nq-toggle-master" style="display:none">
+              <label style="margin-bottom:6px;display:block;font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Instrument Master</label>
               <div style="display:flex;gap:6px">
                 <button type="button" id="tp-nq-mnq" class="btn btn-ghost active" style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">MNQ <span style="font-size:10px;color:var(--sub);font-weight:400">$2/pt</span></button>
                 <button type="button" id="tp-nq-nq"  class="btn btn-ghost"        style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">NQ  <span style="font-size:10px;color:var(--sub);font-weight:400">$20/pt</span></button>
+              </div>
+            </div>
+            <!-- Placeholder col 2 wenn nur Master-Toggle sichtbar — hält Grid-Alignment -->
+            <div id="tp-nq-toggle-slave-placeholder" style="display:none"></div>
+
+            <!-- NQ/MNQ Toggle Slave — sichtbar wenn Slave projectx-Firma ist (col 2) -->
+            <!-- Wenn beide sichtbar: Master col1, Slave col2; wenn nur Slave: span 2 -->
+            <div class="field" id="tp-nq-toggle-slave" style="display:none">
+              <label style="margin-bottom:6px;display:block;font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Instrument Slave</label>
+              <div style="display:flex;gap:6px">
+                <button type="button" id="tp-nqs-mnq" class="btn btn-ghost active" style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">MNQ <span style="font-size:10px;color:var(--sub);font-weight:400">$2/pt</span></button>
+                <button type="button" id="tp-nqs-nq"  class="btn btn-ghost"        style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">NQ  <span style="font-size:10px;color:var(--sub);font-weight:400">$20/pt</span></button>
               </div>
             </div>
 
@@ -10438,12 +10450,14 @@
   }
 
   /* ── NQ / MNQ Toggle für Trade-Plan-Modal ──
-   * Betrifft nur projectx-Firmen als Master (Topstep, Tradeify, AlphaFutures, Apex).
+   * Separat für Master und Slave.
+   * Betrifft nur projectx-Firmen (Topstep, Tradeify, AlphaFutures, Apex).
    * MNQ = $2/pt (Standard), NQ = $20/pt
-   * State wird in localStorage persistiert.
    */
-  const TP_NQ_MODE_LS = 'prophos_tp_nq_mode'  // 'mnq' | 'nq'
-  let _tpNqMode = localStorage.getItem(TP_NQ_MODE_LS) || 'mnq'
+  const TP_NQ_MODE_LS  = 'prophos_tp_nq_mode'   // master
+  const TP_NQS_MODE_LS = 'prophos_tp_nqs_mode'  // slave
+  let _tpNqMode  = localStorage.getItem(TP_NQ_MODE_LS)  || 'mnq'
+  let _tpNqsMode = localStorage.getItem(TP_NQS_MODE_LS) || 'mnq'
 
   function tpNqIsProjectx(firm){
     if(!firm) return false
@@ -10452,50 +10466,81 @@
 
   function tpNqUpdateToggle(){
     const masterId = document.getElementById('tp-master')?.value
+    const slaveId  = document.getElementById('tp-slave')?.value
     const master = masterId ? accounts.find(a => String(a.id) === String(masterId)) : null
-    const isProjectx = tpNqIsProjectx(master?.firm)
-    const row = document.getElementById('tp-nq-toggle-row')
-    if(row) row.style.display = isProjectx ? '' : 'none'
-    // Button active states
-    const mnqBtn = document.getElementById('tp-nq-mnq')
-    const nqBtn  = document.getElementById('tp-nq-nq')
-    if(mnqBtn) mnqBtn.classList.toggle('active', _tpNqMode === 'mnq')
-    if(nqBtn)  nqBtn.classList.toggle('active',  _tpNqMode === 'nq')
+    const slave  = slaveId  ? accounts.find(a => String(a.id) === String(slaveId))  : null
+
+    const masterIsProjectx = tpNqIsProjectx(master?.firm)
+    const slaveIsProjectx  = tpNqIsProjectx(slave?.firm)
+
+    // Master toggle
+    const rowM = document.getElementById('tp-nq-toggle-master')
+    if(rowM) rowM.style.display = masterIsProjectx ? '' : 'none'
+    document.getElementById('tp-nq-mnq')?.classList.toggle('active', _tpNqMode  === 'mnq')
+    document.getElementById('tp-nq-nq')?.classList.toggle('active',  _tpNqMode  === 'nq')
+
+    // Slave toggle
+    const rowS = document.getElementById('tp-nq-toggle-slave')
+    if(rowS){
+      rowS.style.display = slaveIsProjectx ? '' : 'none'
+      // Wenn nur Slave sichtbar (kein Master): volle Breite; wenn beide: normale Spalte
+      rowS.style.gridColumn = (!masterIsProjectx && slaveIsProjectx) ? 'span 2' : ''
+    }
+    // Placeholder col2 — sichtbar wenn nur Master-Toggle gezeigt wird
+    const ph = document.getElementById('tp-nq-toggle-slave-placeholder')
+    if(ph) ph.style.display = (masterIsProjectx && !slaveIsProjectx) ? '' : 'none'
+
+    document.getElementById('tp-nqs-mnq')?.classList.toggle('active', _tpNqsMode === 'mnq')
+    document.getElementById('tp-nqs-nq')?.classList.toggle('active',  _tpNqsMode === 'nq')
   }
 
-  function tpNqGetPpl(){
-    // Gibt den effektiven ppl-Wert für den Master zurück (falls projectx)
-    return _tpNqMode === 'nq' ? 20.0 : 2.0
+  function tpNqGetMasterPpl(firm){
+    if(tpNqIsProjectx(firm)) return _tpNqMode  === 'nq' ? 20.0 : 2.0
+    return null  // null = use FIRM_PRESETS default
+  }
+  function tpNqGetSlavePpl(firm){
+    if(tpNqIsProjectx(firm)) return _tpNqsMode === 'nq' ? 20.0 : 2.0
+    return null
   }
 
-  // Override calcMultiplier für Trade-Plan-Modal — respektiert NQ-Toggle
+  // Override calcMultiplier für Trade-Plan-Modal — respektiert beide NQ-Toggles
   function tpCalcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk){
     if(!masterRisk || !masterQty || !slaveRisk) return null
     const m = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
     const s = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
-    // Wenn Master projectx ist: NQ-Toggle berücksichtigen
-    const masterPpl = tpNqIsProjectx(masterFirm) ? tpNqGetPpl() : m.ppl
+    const masterPpl = tpNqGetMasterPpl(masterFirm) ?? m.ppl
+    const slavePpl  = tpNqGetSlavePpl(slaveFirm)  ?? s.ppl
     const stopDistance = masterRisk / (masterPpl * masterQty)
     if(!stopDistance) return null
-    const slaveQty = slaveRisk / (s.ppl * stopDistance)
+    const slaveQty = slaveRisk / (slavePpl * stopDistance)
     return slaveQty / masterQty
   }
 
-  // Wire NQ/MNQ toggle buttons
+  // Wire Master toggle buttons
   document.getElementById('tp-nq-mnq')?.addEventListener('click', () => {
     _tpNqMode = 'mnq'
     localStorage.setItem(TP_NQ_MODE_LS, 'mnq')
-    tpNqUpdateToggle()
-    tpRecompute()
+    tpNqUpdateToggle(); tpRecompute()
   })
   document.getElementById('tp-nq-nq')?.addEventListener('click', () => {
     _tpNqMode = 'nq'
     localStorage.setItem(TP_NQ_MODE_LS, 'nq')
-    tpNqUpdateToggle()
-    tpRecompute()
+    tpNqUpdateToggle(); tpRecompute()
   })
-  // Update toggle visibility when master account changes
+  // Wire Slave toggle buttons
+  document.getElementById('tp-nqs-mnq')?.addEventListener('click', () => {
+    _tpNqsMode = 'mnq'
+    localStorage.setItem(TP_NQS_MODE_LS, 'mnq')
+    tpNqUpdateToggle(); tpRecompute()
+  })
+  document.getElementById('tp-nqs-nq')?.addEventListener('click', () => {
+    _tpNqsMode = 'nq'
+    localStorage.setItem(TP_NQS_MODE_LS, 'nq')
+    tpNqUpdateToggle(); tpRecompute()
+  })
+  // Update toggles when accounts change
   document.getElementById('tp-master')?.addEventListener('change', tpNqUpdateToggle)
+  document.getElementById('tp-slave')?.addEventListener('change',  tpNqUpdateToggle)
 
   /* ── END NQ/MNQ Toggle ── */
 
@@ -10611,9 +10656,10 @@
     if(slaveQtyEl) slaveQtyEl.textContent = slaveQty.toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const masterPreset = FIRM_PRESETS[firmToPreset(master.firm)] || FIRM_PRESETS.projectx
-    // NQ/MNQ-Toggle: effektives Symbol für Master anzeigen
-    const masterSymbol = tpNqIsProjectx(master.firm) ? (_tpNqMode === 'nq' ? 'NQ' : 'MNQ') : masterPreset.symbol
-    eq.textContent = `${masterQty} ${masterSymbol} @ $${masterRisk}  →  ${slaveQty.toFixed(3)} ${slavePreset.unit} ${slavePreset.symbol} @ ${slavePreset.currency}${slaveRisk}`
+    // NQ/MNQ-Toggle: effektives Symbol für Master und Slave anzeigen
+    const masterSymbol = tpNqIsProjectx(master.firm) ? (_tpNqMode  === 'nq' ? 'NQ' : 'MNQ') : masterPreset.symbol
+    const slaveSymbol  = tpNqIsProjectx(slave.firm)  ? (_tpNqsMode === 'nq' ? 'NQ' : 'MNQ') : slavePreset.symbol
+    eq.textContent = `${masterQty} ${masterSymbol} @ $${masterRisk}  →  ${slaveQty.toFixed(3)} ${slavePreset.unit} ${slaveSymbol} @ ${slavePreset.currency}${slaveRisk}`
     // Update slave-unit label too
     if(slaveUnitEl) slaveUnitEl.textContent = `${slavePreset.pluralUnit || slavePreset.unit} ${slavePreset.symbol}`
     // Update NQ toggle visibility
