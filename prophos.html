@@ -5624,6 +5624,41 @@
       const currentLinkedId = links[dupAccountId]
 
       if(!allAvailable.length){
+        // Fallback: zeige ALLE nicht-archivierten Accounts wenn durch Link-Filter alles weggefiltert
+        const allNonArchived = (accounts || []).filter(m => !archive[m.id]?.archived)
+        if(allNonArchived.length){
+          picker.innerHTML = `
+            <div class="link-picker-empty">
+              <strong>Alle Accounts bereits anderweitig verknüpft</strong>
+              Löse eine bestehende Duplikum-Verknüpfung um hier fortzufahren, oder wähle einen der folgenden:
+            </div>
+          ` + allNonArchived.filter(m => {
+            if(firmFilterEl?.value && (m.firm||'') !== firmFilterEl.value) return false
+            if(typeFilterEl?.value && m.type !== typeFilterEl.value) return false
+            return true
+          }).map(m => {
+            const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
+            const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
+            const isCurrentlyLinked = String(m.id) === String(currentLinkedId)
+            return `<button type="button" class="link-picker-card${isCurrentlyLinked ? ' selected' : ''}" data-dup-target="${escapeHtml(m.id)}" style="opacity:0.7">
+              <span class="lpc-radio"></span>
+              <div class="lpc-body">
+                <div class="lpc-name">${escapeHtml(m.name)}</div>
+                <div class="lpc-meta"><span>${escapeHtml(m.firm||'–')}</span><span>·</span><span>${escapeHtml(typeLbl)}</span></div>
+              </div>
+              <span class="lpc-bal">${fmtMoney(bal)}</span>
+            </button>`
+          }).join('')
+          picker.querySelectorAll('.link-picker-card').forEach(card => {
+            card.addEventListener('click', () => {
+              picker.querySelectorAll('.link-picker-card').forEach(c => c.classList.remove('selected'))
+              card.classList.add('selected')
+              _linkDupTargetId = card.dataset.dupTarget
+              document.getElementById('linkDupConfirm').disabled = false
+            })
+          })
+          return
+        }
         picker.innerHTML = `
           <div class="link-picker-empty">
             <strong>Keine manuellen Accounts verfügbar</strong>
@@ -5680,22 +5715,20 @@
     }
     renderDupPicker()
 
-    // Filter-Listener (idempotent — bind nur einmal pro Modal)
-    if(firmFilterEl && !firmFilterEl._dupHooked){
-      firmFilterEl.addEventListener('change', () => {
+    // Filter-Listener — immer neu binden (kein _dupHooked Cache, damit renderDupPicker immer frisch ist)
+    if(firmFilterEl){
+      firmFilterEl.onchange = () => {
         _linkDupTargetId = null
         document.getElementById('linkDupConfirm').disabled = true
         renderDupPicker()
-      })
-      firmFilterEl._dupHooked = true
+      }
     }
-    if(typeFilterEl && !typeFilterEl._dupHooked){
-      typeFilterEl.addEventListener('change', () => {
+    if(typeFilterEl){
+      typeFilterEl.onchange = () => {
         _linkDupTargetId = null
         document.getElementById('linkDupConfirm').disabled = true
         renderDupPicker()
-      })
-      typeFilterEl._dupHooked = true
+      }
     }
 
     document.getElementById('linkDupConfirm').disabled = true
@@ -9074,22 +9107,20 @@
     }
     renderTsxPicker()
 
-    // Filter-Listener (idempotent — bind nur einmal pro Modal)
-    if(firmFilterEl && !firmFilterEl._tsxHooked){
-      firmFilterEl.addEventListener('change', () => {
+    // Filter-Listener — immer neu binden (kein _tsxHooked Cache)
+    if(firmFilterEl){
+      firmFilterEl.onchange = () => {
         _linkTargetId = null
         document.getElementById('linkTopstepConfirm').disabled = true
         renderTsxPicker()
-      })
-      firmFilterEl._tsxHooked = true
+      }
     }
-    if(typeFilterEl && !typeFilterEl._tsxHooked){
-      typeFilterEl.addEventListener('change', () => {
+    if(typeFilterEl){
+      typeFilterEl.onchange = () => {
         _linkTargetId = null
         document.getElementById('linkTopstepConfirm').disabled = true
         renderTsxPicker()
-      })
-      typeFilterEl._tsxHooked = true
+      }
     }
 
     // Confirm-Button initial deaktiviert (kein Target gewählt)
