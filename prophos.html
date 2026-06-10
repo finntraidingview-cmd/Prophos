@@ -10453,7 +10453,7 @@
     _atState.polling = true
     try {
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      console.log('[AT] raw response: ok='+res.ok+' dataKeys='+JSON.stringify(Object.keys(res.data||{})))
+      console.log('[AT] raw response: ok='+res.ok+' dataKeys='+JSON.stringify(Object.keys(res.data||{}))+(res.data?.error ? ' ERROR='+res.data.error : '')+(res.data?.code ? ' CODE='+res.data.code : ''))
       if(!res.ok) return
       const positions = (res.data && res.data.data) ? res.data.data
                       : Array.isArray(res.data) ? res.data
