@@ -2848,6 +2848,10 @@
 
       <!-- Open -->
       <div class="subtab-pane" data-tradepane="open">
+        <!-- Live-Übersicht: erscheint automatisch wenn Trades laufen -->
+        <div id="trades-live-overview" style="display:none;margin-bottom:16px">
+          <div id="trades-live-cards" style="display:flex;flex-direction:column;gap:10px"></div>
+        </div>
         <div class="trade-cards" id="tradeCardsOpen"></div>
         <div class="empty" id="tradeEmptyOpen" style="display:none;border:none;background:transparent">
           <div class="empty-icon">
@@ -6294,18 +6298,26 @@
   }
 
   function ltRenderPlanOverview(){
-    const container = document.getElementById('lt-plan-overview')
-    const cardsEl   = document.getElementById('lt-plan-cards')
+    const container  = document.getElementById('lt-plan-overview')
+    const cardsEl    = document.getElementById('lt-plan-cards')
+    // Also render in Trades tab (Open pane)
+    const container2 = document.getElementById('trades-live-overview')
+    const cardsEl2   = document.getElementById('trades-live-cards')
     if(!container || !cardsEl) return
 
     const allPlans = (typeof tradePlans !== 'undefined' ? tradePlans : [])
     const openPlans = allPlans.filter(p => p.status === 'open')
-    if(!openPlans.length){ container.style.display = 'none'; return }
+    if(!openPlans.length){
+      container.style.display = 'none'
+      if(container2) container2.style.display = 'none'
+      return
+    }
     container.style.display = ''
+    if(container2) container2.style.display = ''
 
     const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
 
-    cardsEl.innerHTML = openPlans.map(plan => {
+    const _html = openPlans.map(plan => {
       const live = _atState.livePnl[plan.id] || {}
       const slavePnl  = live.slave  != null ? live.slave  : null
       const masterPnl = live.master != null ? live.master : null
@@ -6429,6 +6441,8 @@
         </div>
       `
     }).join('')
+    cardsEl.innerHTML = _html
+    if(cardsEl2) cardsEl2.innerHTML = _html
   }
   // CSS für pulsierenden Punkt
   ;(function _ltInjectCss(){
@@ -10392,7 +10406,7 @@
   function _atLotsMatch(actual, expected){
     if(!expected || !actual) return false
     const ratio = Math.abs(actual) / Math.abs(expected)
-    return ratio >= 0.75 && ratio <= 1.25
+    return ratio >= 0.98 && ratio <= 1.02  // ±2%
   }
 
   // ── Audio-Notifications ──
@@ -10469,21 +10483,13 @@
         return null
       }
 
-      // Ratio-basiertes Matching: slaveLots/masterLots ≈ multiplier (±15%)
-      // ODER wenn kein Master erkennbar: nur Slave-Lots ≈ multiplier mit enger Toleranz (±10%)
+      // Matching: amountLot auf Slave ≈ multiplier mit ±2% Toleranz
+      // Duplikum kopiert exakt → kein Master-Zwang nötig
       function _atMatchPos(slavePos, masterPos, plan){
         const sLots = Math.abs(parseFloat(slavePos?.amountLot || slavePos?.size || 0))
         if(!sLots || !plan.multiplier) return false
-        if(masterPos){
-          const mLots = Math.abs(Number(masterPos.size || 0))
-          if(!mLots) return false
-          const ratio = sLots / mLots
-          const target = Math.abs(plan.multiplier)
-          return Math.abs(ratio - target) / target <= 0.15  // ±15% vom erwarteten Verhältnis
-        } else {
-          // Fallback: direkt gegen multiplier, aber engere Toleranz ±10%
-          return Math.abs(sLots - Math.abs(plan.multiplier)) / Math.abs(plan.multiplier) <= 0.10
-        }
+        const target = Math.abs(plan.multiplier)
+        return Math.abs(sLots - target) / target <= 0.02  // ±2%
       }
 
       // Geplante Plans: prüfen ob BEIDE Seiten offen sind → auto zu 'open'
@@ -10493,27 +10499,16 @@
         const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
         if(!dupId) continue
 
+        // Plan muss mindestens 60s alt sein — verhindert false match direkt nach Speichern
+        const planAge = plan.createdAt ? (Date.now() - new Date(plan.createdAt)) / 1000 : 999
+        if(planAge < 60) continue
+
         const masterPos = _atFindMasterPos(plan)
         const slaveMatch = positions.find(pos =>
           String(pos.account_id) === String(dupId) &&
           _atMatchPos(pos, masterPos, plan)
         )
-
-        // Wenn kein Master erkennbar: nur fortfahren wenn Slave eindeutig matcht
-        // (beide offen bevorzugt, aber Slave-only als Fallback)
         if(!slaveMatch) continue
-        if(!masterPos){
-          // Slave-only: prüfen ob kein anderer geplanter Plan besser passt
-          const betterMatch = plannedPlans.filter(p => p.id !== plan.id).some(p2 => {
-            const d2 = _atGetDupIdForAccount(p2.slaveAccountId)
-            if(d2 !== dupId || !p2.multiplier) return false
-            const sLots = Math.abs(parseFloat(slaveMatch.amountLot || 0))
-            const diff1 = Math.abs(sLots - Math.abs(plan.multiplier))
-            const diff2 = Math.abs(sLots - Math.abs(p2.multiplier))
-            return diff2 < diff1  // anderer Plan passt besser
-          })
-          if(betterMatch) continue  // nicht der beste Match
-        }
 
         try{
           const { data, error } = await supabase
@@ -10555,6 +10550,8 @@
           String(pos.account_id) === String(dupId) &&
           _atMatchPos(pos, masterPos, plan)
         )
+
+        if(!stillOpen && !tracking) continue  // nie getracked → ignorieren
 
         if(!stillOpen && tracking){
           let slavePl = null
