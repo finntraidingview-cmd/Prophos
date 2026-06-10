@@ -3749,6 +3749,12 @@
       <!-- Hedge-Übersicht -->
       <div id="lt-hedge-overview" style="display:none;margin-bottom:14px"></div>
 
+      <!-- Aktive Trade Plans — automatisch befüllt wenn Plans auf 'Offen' stehen -->
+      <div id="lt-plan-overview" style="display:none;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Laufende Trade Plans</div>
+        <div id="lt-plan-cards" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+
       <div id="lt-cards" style="display:flex;flex-direction:column;gap:14px"></div>
 
       <div id="lt-empty" class="empty" style="margin-top:0">
@@ -6284,7 +6290,157 @@
     `
   }
 
+  function ltRenderPlanOverview(){
+    const container = document.getElementById('lt-plan-overview')
+    const cardsEl   = document.getElementById('lt-plan-cards')
+    if(!container || !cardsEl) return
+
+    const openPlans = (typeof tradePlans !== 'undefined' ? tradePlans : []).filter(p => p.status === 'open')
+    if(!openPlans.length){ container.style.display = 'none'; return }
+
+    container.style.display = ''
+
+    const dupPositions = ltState.positions?.dup || []
+    const tsxPositions = ltState.positions?.tsx || []
+    const mtPositions  = ltState.positions?.mt  || []
+    const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+
+    cardsEl.innerHTML = openPlans.map(plan => {
+      // ── Slave-Position auf Fusion/Dup ──
+      const dupId = Object.entries(links).find(([, pId]) => String(pId) === String(plan.slaveAccountId))?.[0]
+      const slavePos = dupId ? dupPositions.find(pos =>
+        String(pos.accountId) === String(dupId) &&
+        plan.multiplier && Math.abs(parseFloat(pos.size||0) - plan.multiplier) / plan.multiplier < 0.25
+      ) : null
+
+      // ── Master-Position (TSX oder MT5) ──
+      const masterAcc = (typeof accounts !== 'undefined' ? accounts : []).find(a => String(a.id) === String(plan.masterAccountId))
+      const slaveAcc  = (typeof accounts !== 'undefined' ? accounts : []).find(a => String(a.id) === String(plan.slaveAccountId))
+
+      // TSX: match über topstep.id
+      const masterTsxPos = tsxPositions.find(pos =>
+        masterAcc?.topstep && String(pos.accountId) === String(masterAcc.topstep.id)
+      )
+      // MT5: match über ma.accountId
+      const masterMtPos = mtPositions.find(pos =>
+        masterAcc?.ma && String(pos.accountId) === String(masterAcc.ma.accountId)
+      )
+      const masterPos = masterTsxPos || masterMtPos
+
+      // ── Symmetrie-Analyse ──
+      let symBadge = ''
+      let symDetail = ''
+      if(masterPos && slavePos){
+        const mSide = ltSideToSign(masterPos.side)
+        const sSide = ltSideToSign(slavePos.side)
+        const mSize = Number(masterPos.size) || 0
+        const sSize = Number(slavePos.size)  || 0
+        const actualMultiplier = mSize > 0 ? sSize / mSize : 0
+        const expectedMult = plan.multiplier || 0
+        const multRatio = expectedMult > 0 ? actualMultiplier / expectedMult : 0
+        const sidesOpposite = mSide !== 0 && sSide !== 0 && mSide !== sSide  // Hedge: gegenläufig
+        const sidesAligned   = mSide !== 0 && sSide !== 0 && mSide === sSide  // Gleiche Richtung
+
+        if(sidesOpposite && multRatio >= 0.90 && multRatio <= 1.10){
+          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#22c55e18;color:#16a34a;font-size:11px;font-weight:700">✓ Symmetrisch</span>`
+          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
+        } else if(sidesOpposite && multRatio >= 0.75 && multRatio <= 1.25){
+          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#f59e0b18;color:#d97706;font-size:11px;font-weight:700">≈ Leicht abw.</span>`
+          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
+        } else if(sidesAligned){
+          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">⚠ Gleiche Seite!</span>`
+          symDetail = `Master ${masterPos.side} · Slave ${slavePos.side}`
+        } else {
+          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">✕ Asymmetrisch</span>`
+          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
+        }
+      } else if(masterPos && !slavePos){
+        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">⚠ Slave fehlt</span>`
+        symDetail = 'Master offen, kein Slave erkannt'
+      } else if(!masterPos && slavePos){
+        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#f59e0b18;color:#d97706;font-size:11px;font-weight:700">⚠ Master fehlt</span>`
+        symDetail = 'Slave offen, kein Master erkannt'
+      } else {
+        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:var(--surface-tint);color:var(--sub);font-size:11px">— Keine Daten</span>`
+        symDetail = 'Live-Verbindung prüfen'
+      }
+
+      // ── Live P&L ──
+      const livePnl = slavePos?.pnl != null ? Number(slavePos.pnl) : null
+      const masterPnl = masterPos?.pnl != null ? Number(masterPos.pnl) : null
+      const totalPnl = (livePnl ?? 0) + (masterPnl ?? 0)
+      const hasPnl = livePnl != null || masterPnl != null
+
+      const pnlBlock = hasPnl ? `
+        <div style="display:flex;gap:14px;align-items:center">
+          ${masterPnl != null ? `<div style="text-align:center"><div style="font-size:10px;color:var(--sub);margin-bottom:1px">MASTER</div><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:${masterPnl>=0?'#16a34a':'#dc2626'}">${masterPnl>=0?'+':''}${masterPnl.toFixed(0)}</div></div>` : ''}
+          ${livePnl != null && masterPnl != null ? `<div style="color:var(--sub);font-size:14px">+</div>` : ''}
+          ${livePnl != null ? `<div style="text-align:center"><div style="font-size:10px;color:var(--sub);margin-bottom:1px">SLAVE</div><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:${livePnl>=0?'#16a34a':'#dc2626'}">${livePnl>=0?'+':''}${livePnl.toFixed(0)}</div></div>` : ''}
+          ${hasPnl && masterPnl != null && livePnl != null ? `
+            <div style="border-left:1px solid var(--border);padding-left:14px;text-align:center">
+              <div style="font-size:10px;color:var(--sub);margin-bottom:1px">GESAMT</div>
+              <div style="font-size:15px;font-weight:800;font-family:var(--mono);color:${totalPnl>=0?'#16a34a':'#dc2626'}">${totalPnl>=0?'+':''}${totalPnl.toFixed(0)}</div>
+            </div>` : ''}
+        </div>
+      ` : `<span style="font-size:12px;color:var(--sub)">P&L —</span>`
+
+      // ── Laufzeit ──
+      const since = plan.startedAt ? (() => {
+        const mins = Math.round((Date.now() - new Date(plan.startedAt)) / 60000)
+        return mins < 60 ? `${mins}m` : `${Math.floor(mins/60)}h ${mins%60}m`
+      })() : '—'
+
+      // ── Master/Slave Side-Indikatoren ──
+      const masterSideEl = masterPos
+        ? `<span style="padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700;background:${ltSideToSign(masterPos.side)>0?'#22c55e18':'#ef444418'};color:${ltSideToSign(masterPos.side)>0?'#16a34a':'#dc2626'}">${masterPos.side} ${masterPos.size}</span>`
+        : `<span style="font-size:11px;color:var(--sub)">—</span>`
+      const slaveSideEl = slavePos
+        ? `<span style="padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700;background:${ltSideToSign(slavePos.side)>0?'#22c55e18':'#ef444418'};color:${ltSideToSign(slavePos.side)>0?'#16a34a':'#dc2626'}">${slavePos.side} ${slavePos.size}</span>`
+        : `<span style="font-size:11px;color:var(--sub)">—</span>`
+
+      return `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+          <!-- Header -->
+          <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
+            <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 6px #22c55e88;animation:at-pulse 2s infinite"></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${escapeHtml(plan.masterName || plan.masterFirm || '—')}
+                <span style="color:var(--sub);font-weight:400;margin:0 4px">→</span>
+                ${escapeHtml(plan.slaveName || plan.slaveFirm || '—')}
+              </div>
+              <div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <span>×${plan.multiplier != null ? plan.multiplier.toFixed(3) : '—'}</span>
+                <span>·</span><span>⏱ ${since}</span>
+                <span>·</span>${symBadge}
+                ${symDetail ? `<span style="color:var(--sub-2);font-size:10px">${escapeHtml(symDetail)}</span>` : ''}
+              </div>
+            </div>
+            <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;flex-shrink:0" onclick="openTradeCompleteModal('${plan.id}')">Abschließen</button>
+          </div>
+          <!-- Body: Sides + P&L -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px;flex-wrap:wrap">
+            <div style="display:flex;gap:16px;align-items:center;font-size:12px">
+              <div><span style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px">Master</span>${masterSideEl}</div>
+              <div style="color:var(--sub)">⇄</div>
+              <div><span style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px">Slave</span>${slaveSideEl}</div>
+            </div>
+            <div>${pnlBlock}</div>
+          </div>
+        </div>
+      `
+    }).join('')
+  }
+
+  // CSS für pulsierenden Punkt
+  ;(function _ltInjectCss(){
+    const s = document.createElement('style')
+    s.textContent = `@keyframes at-pulse{0%,100%{opacity:1}50%{opacity:.4}}`
+    document.head.appendChild(s)
+  })()
+
   function ltRender(){
+    ltRenderPlanOverview()
     const cards = document.getElementById('lt-cards')
     const empty = document.getElementById('lt-empty')
     const stat  = document.getElementById('lt-status')
@@ -10231,20 +10387,126 @@
     return null
   }
 
-  // Toleranz-Vergleich für Lot-Größen (±15% wegen Rundung/Kommissionsunterschiede)
+  // Toleranz-Vergleich für Lot-Größen (±25% wegen Rundung)
+  // Vergleicht Duplikum-Lots direkt mit plan.multiplier (masterContracts ignoriert)
   function _atLotsMatch(actual, expected){
     if(!expected || !actual) return false
     const ratio = actual / expected
-    return ratio >= 0.70 && ratio <= 1.30
+    return ratio >= 0.75 && ratio <= 1.25
   }
 
-  // Notification anzeigen (falls Browser-Permission vorhanden, sonst Toast)
-  function _atNotify(title, body){
-    // In-App Toast
-    _atShowToast(title, body)
-    // Browser Notification wenn erlaubt
-    if(Notification?.permission === 'granted'){
-      try{ new Notification(title, { body, icon: '/favicon.ico', silent: false }) }catch(_){}
+  // Haupt-Poll-Funktion
+  async function _atPoll(){
+    if(_atState.polling) return
+    if(!dupState.token) return
+    const openPlans = tradePlans.filter(p => p.status === 'open' || p.status === 'planned')
+    if(!openPlans.length) return
+
+    _atState.polling = true
+    try {
+      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      if(!res.ok) return
+      const positions = (res.data && res.data.data) ? res.data.data : []
+
+      // Geplante Plans: prüfen ob Position aufgemacht wurde → auto zu 'open'
+      const plannedPlans = openPlans.filter(p => p.status === 'planned')
+      for(const plan of plannedPlans){
+        if(!plan.slaveAccountId || !plan.multiplier) continue
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        if(!dupId) continue
+        // Match direkt auf multiplier (keine masterContracts nötig)
+        const match = positions.find(pos =>
+          String(pos.account_id) === String(dupId) &&
+          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
+        )
+        if(match){
+          try{
+            const { data, error } = await supabase
+              .from('trade_plans')
+              .update({ status: 'open', started_at: new Date().toISOString() })
+              .eq('id', plan.id).select('*').single()
+            if(!error){
+              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+              _atState.tracked[plan.id] = {
+                dupAccountId: dupId,
+                positionId: match.id || match.position_id || null,
+                openedAt: new Date(),
+                lastLots: parseFloat(match.amountLot || 0)
+              }
+              renderTradePlans()
+              if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+              _atNotify(
+                `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
+                `${plan.multiplier} Lots auf ${plan.slaveName || plan.slaveFirm} erkannt`
+              )
+            }
+          }catch(_){}
+        }
+      }
+
+      // Offene Plans: prüfen ob Position geschlossen wurde → Toast + Complete-Modal
+      const runningPlans = tradePlans.filter(p => p.status === 'open')
+      for(const plan of runningPlans){
+        if(!plan.slaveAccountId || !plan.multiplier) continue
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        if(!dupId) continue
+
+        const tracking = _atState.tracked[plan.id]
+
+        const stillOpen = positions.find(pos =>
+          String(pos.account_id) === String(dupId) &&
+          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
+        )
+
+        if(!stillOpen && tracking){
+          let slavePl = null
+          try{
+            const closedRes = await dupApi('POST', 'position/getClosedPositions.php', {
+              id_slave: dupId,
+              from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
+              length: 10
+            })
+            if(closedRes.ok){
+              const closed = (closedRes.data && closedRes.data.data) ? closedRes.data.data : []
+              const match = closed
+                .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
+                .find(pos => _atLotsMatch(parseFloat(pos.amountLot||0), plan.multiplier))
+              if(match) slavePl = parseFloat(match.profit || match.pnl || match.pl || 0)
+            }
+          }catch(_){}
+
+          try{
+            if(slavePl != null){
+              await supabase.from('trade_plans').update({ slave_pl: slavePl }).eq('id', plan.id)
+              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
+            }
+            delete _atState.tracked[plan.id]
+            renderTradePlans()
+            if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl?.toFixed(2)}` : ''
+            _atShowToastWithAction(
+              `🔴 Trade geschlossen: ${plan.masterName || plan.masterFirm}`,
+              `${plan.slaveName || plan.slaveFirm}${plStr}`,
+              'Jetzt eintragen →',
+              () => openTradeCompleteModal(plan.id)
+            )
+          }catch(_){}
+        } else if(stillOpen && !tracking){
+          _atState.tracked[plan.id] = {
+            dupAccountId: dupId,
+            positionId: stillOpen.id || stillOpen.position_id || null,
+            openedAt: plan.startedAt ? new Date(plan.startedAt) : new Date(),
+            lastLots: parseFloat(stillOpen.amountLot || 0)
+          }
+        }
+      }
+
+    }catch(e){
+      console.warn('AT poll error:', e)
+    }finally{
+      _atState.polling = false
     }
   }
 
@@ -10283,133 +10545,6 @@
     container.appendChild(toast)
     // Bleibt 15 Sekunden sichtbar (länger als normaler Toast)
     setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 15000)
-  }
-
-  // Haupt-Poll-Funktion
-  async function _atPoll(){
-    if(_atState.polling) return
-    if(!dupState.token) return
-    const openPlans = tradePlans.filter(p => p.status === 'open' || p.status === 'planned')
-    if(!openPlans.length) return
-
-    _atState.polling = true
-    try {
-      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      if(!res.ok) return
-      const positions = (res.data && res.data.data) ? res.data.data : []
-
-      // Geplante Plans: prüfen ob Position aufgemacht wurde → auto zu 'open'
-      const plannedPlans = openPlans.filter(p => p.status === 'planned')
-      for(const plan of plannedPlans){
-        if(!plan.slaveAccountId || !plan.multiplier || !plan.masterContracts) continue
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        if(!dupId) continue
-        const expectedLots = plan.multiplier * plan.masterContracts
-        // Finde passende Position: gleicher Dup-Account + Lots passen
-        const match = positions.find(pos =>
-          String(pos.account_id) === String(dupId) &&
-          _atLotsMatch(parseFloat(pos.amountLot || 0), expectedLots)
-        )
-        if(match){
-          // Auto → 'open'
-          try{
-            const { data, error } = await supabase
-              .from('trade_plans')
-              .update({ status: 'open', started_at: new Date().toISOString() })
-              .eq('id', plan.id).select('*').single()
-            if(!error){
-              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-              if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-              _atState.tracked[plan.id] = {
-                dupAccountId: dupId,
-                positionId: match.id || match.position_id || null,
-                openedAt: new Date(),
-                lastLots: parseFloat(match.amountLot || 0)
-              }
-              renderTradePlans()
-              _atNotify(
-                `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
-                `${(plan.multiplier * plan.masterContracts).toFixed(3)} Lots auf ${plan.slaveName || plan.slaveFirm} erkannt`
-              )
-            }
-          }catch(_){}
-        }
-      }
-
-      // Offene Plans: prüfen ob Position geschlossen wurde → auto P&L + 'completed'
-      const runningPlans = tradePlans.filter(p => p.status === 'open')
-      for(const plan of runningPlans){
-        if(!plan.slaveAccountId || !plan.multiplier || !plan.masterContracts) continue
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        if(!dupId) continue
-        const expectedLots = plan.multiplier * plan.masterContracts
-
-        // Prüfen ob wir diese Position tracken
-        const tracking = _atState.tracked[plan.id]
-
-        // Position noch offen?
-        const stillOpen = positions.find(pos =>
-          String(pos.account_id) === String(dupId) &&
-          _atLotsMatch(parseFloat(pos.amountLot || 0), expectedLots)
-        )
-
-        if(!stillOpen && tracking){
-          // Position geschlossen — jetzt P&L holen
-          // Versuch: getClosedPositions für letzten Trade
-          let slavePl = null
-          try{
-            const closedRes = await dupApi('POST', 'position/getClosedPositions.php', {
-              id_slave: dupId,
-              from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
-              length: 10
-            })
-            if(closedRes.ok){
-              const closed = (closedRes.data && closedRes.data.data) ? closedRes.data.data : []
-              // Neueste geschlossene Position mit passendem Lot
-              const match = closed
-                .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
-                .find(pos => _atLotsMatch(parseFloat(pos.amountLot||0), expectedLots))
-              if(match) slavePl = parseFloat(match.profit || match.pnl || match.pl || 0)
-            }
-          }catch(_){}
-
-          // Trade geschlossen → Modal öffnen mit vorausgefülltem Slave-P&L (kein silent save)
-          try{
-            const updatesPartial = { slave_pl: slavePl }
-            // Slave-P&L schon mal speichern damit er im Modal vorausgefüllt ist
-            if(slavePl != null){
-              await supabase.from('trade_plans').update(updatesPartial).eq('id', plan.id)
-              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-              if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
-            }
-            delete _atState.tracked[plan.id]
-            renderTradePlans()
-
-            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl?.toFixed(2)}` : ''
-            // Toast mit "Jetzt eintragen"-Button
-            _atShowToastWithAction(
-              `🔴 Trade geschlossen: ${plan.masterName || plan.masterFirm}`,
-              `${plan.slaveName || plan.slaveFirm}${plStr}`,
-              'Jetzt eintragen →',
-              () => openTradeCompleteModal(plan.id)
-            )
-          }catch(_){}
-        } else if(stillOpen && !tracking){
-          // Position läuft aber wir tracken sie noch nicht (z.B. nach Page-Reload)
-          _atState.tracked[plan.id] = {
-            dupAccountId: dupId,
-            positionId: stillOpen.id || stillOpen.position_id || null,
-            openedAt: plan.startedAt ? new Date(plan.startedAt) : new Date(),
-            lastLots: parseFloat(stillOpen.amountLot || 0)
-          }
-        }
-      }
-
-    }catch(e){
-      console.warn('AT poll error:', e)
-    }finally{
-      _atState.polling = false
-    }
   }
 
   // Start/Stop polling
