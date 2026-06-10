@@ -6086,7 +6086,11 @@
           side: p.side || 'Buy',
           size: p.amountLot || 0,
           openPrice: p.openPrice || null,
-          pnl: null,
+          pnl: p.profit != null ? Number(p.profit)
+             : p.pnl   != null ? Number(p.pnl)
+             : p.unrealizedProfit != null ? Number(p.unrealizedProfit)
+             : p.floatingPl != null ? Number(p.floatingPl)
+             : null,
           ccy: acc.ccy || 'USD'
         })
       }
@@ -10489,95 +10493,52 @@
       }
 
       const now = Date.now()
-      const MATCH_WINDOW_MS = 10_000  // 10 Sekunden
+      const MATCH_WINDOW_MS = 30_000  // 30 Sekunden Fenster (großzügiger)
 
-      // ── Schritt 1: Neue Positionen auf Master-Accounts erkennen ──
+      // ── Neue Positionen auf Master + Slave gleichzeitig erkennen ──
+      // Beide kommen aus Duplikum getOpenPositions (positions Array)
       const plannedPlans = openPlans.filter(p => p.status === 'planned')
-      for(const plan of plannedPlans){
-        if(!plan.masterAccountId) continue
-        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
-        if(!masterAcc) continue
 
-        // Aktuelle Master-Positionen sammeln
-        const mKey = String(plan.masterAccountId)
-        const currentMasterKeys = new Set()
-        const allLtPos = [
-          ...(ltState.positions?.tsx || []),
-          ...(ltState.positions?.mt  || []),
-          ...(ltState.positions?.dup || [])
-        ]
-
-        let masterPosNow = null
-        if(masterAcc.topstep){
-          masterPosNow = allLtPos.find(p => p.src==='tsx' && String(p.accountId)===String(masterAcc.topstep.id))
-        }
-        if(!masterPosNow && masterAcc.ma){
-          masterPosNow = allLtPos.find(p => p.src==='mt' && String(p.accountId)===String(masterAcc.ma.accountId))
-        }
-        if(!masterPosNow){
-          const mDupId = _atGetDupIdForAccount(plan.masterAccountId)
-          if(mDupId) masterPosNow = allLtPos.find(p => p.src==='dup' && String(p.accountId)===String(mDupId))
-        }
-
-        if(masterPosNow) currentMasterKeys.add(`${masterPosNow.side}-${masterPosNow.size}-${masterPosNow.symbol}`)
-
-        const prevKeys = _atState.prevMasterPos[mKey] || new Set()
-        // Neue Position auf Master?
-        for(const k of currentMasterKeys){
-          if(!prevKeys.has(k)){
-            // Neue Master-Position erkannt → Timestamp setzen
-            _atState.masterOpenTs[mKey] = { ts: now, key: k, pos: masterPosNow }
-          }
-        }
-        _atState.prevMasterPos[mKey] = currentMasterKeys
-      }
-
-      // ── Schritt 2: Neue Positionen auf Slave-Accounts (Duplikum) erkennen ──
-      for(const plan of plannedPlans){
-        if(!plan.slaveAccountId) continue
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        if(!dupId) continue
-
-        const currentSlaveKeys = new Set()
-        const slavePosNow = positions.filter(pos => String(pos.account_id) === String(dupId))
-        for(const sp of slavePosNow){
-          currentSlaveKeys.add(`${sp.side || sp.direction}-${sp.amountLot}`)
-        }
-
-        const prevKeys = _atState.prevSlavePos[dupId] || new Set()
-        for(const k of currentSlaveKeys){
-          if(!prevKeys.has(k)){
-            _atState.slaveOpenTs[dupId] = { ts: now, key: k }
-          }
-        }
-        _atState.prevSlavePos[dupId] = currentSlaveKeys
-      }
-
-      // ── Schritt 3: Timestamp-Match — wenn Master + Slave innerhalb 10s aufgingen ──
       for(const plan of plannedPlans){
         if(!plan.masterAccountId || !plan.slaveAccountId || !plan.multiplier) continue
-        if(_atState.tracked[plan.id]) continue  // bereits getrackt
+        if(_atState.tracked[plan.id]) continue
 
-        const mKey = String(plan.masterAccountId)
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        if(!dupId) continue
+        const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
+        const slaveDupId  = _atGetDupIdForAccount(plan.slaveAccountId)
 
-        const masterTs = _atState.masterOpenTs[mKey]
-        const slaveTs  = _atState.slaveOpenTs[dupId]
+        if(!masterDupId || !slaveDupId) continue
+
+        // Beide Seiten müssen jetzt offen sein auf Duplikum
+        const masterOpen = positions.find(pos => String(pos.account_id) === String(masterDupId))
+        const slaveOpen  = positions.find(pos => String(pos.account_id) === String(slaveDupId))
+
+        if(!masterOpen || !slaveOpen) continue
+
+        // Neu aufgegangen? Vergleiche mit vorherigem Poll
+        const masterKey = `${masterOpen.side||masterOpen.direction}-${masterOpen.amountLot}-${masterOpen.symbol||''}`
+        const slaveKey  = `${slaveOpen.side||slaveOpen.direction}-${slaveOpen.amountLot}-${slaveOpen.symbol||''}`
+
+        const prevMasterKeys = _atState.prevMasterPos[masterDupId] || new Set()
+        const prevSlaveKeys  = _atState.prevSlavePos[slaveDupId]   || new Set()
+
+        const masterIsNew = !prevMasterKeys.has(masterKey)
+        const slaveIsNew  = !prevSlaveKeys.has(slaveKey)
+
+        // Timestamp merken wenn neue Position
+        if(masterIsNew) _atState.masterOpenTs[masterDupId] = { ts: now, key: masterKey }
+        if(slaveIsNew)  _atState.slaveOpenTs[slaveDupId]   = { ts: now, key: slaveKey  }
+
+        const masterTs = _atState.masterOpenTs[masterDupId]
+        const slaveTs  = _atState.slaveOpenTs[slaveDupId]
+
         if(!masterTs || !slaveTs) continue
 
-        // Beide innerhalb 10 Sekunden aufgegangen?
         const timeDiff = Math.abs(masterTs.ts - slaveTs.ts)
         if(timeDiff > MATCH_WINDOW_MS) continue
 
-        // Match! → Trade auf 'open' setzen
+        // Match! Beide Seiten innerhalb 30s aufgegangen
         try{
-          // Speichere den exakten Slave-Position-Key für Close-Detection
-          const slavePos = positions.find(pos => String(pos.account_id) === String(dupId))
-          const slavePosKey = slavePos
-            ? `${slavePos.side||slavePos.direction}-${slavePos.amountLot}-${slavePos.symbol||''}`
-            : null
-
+          const slaveKey2 = `${slaveOpen.side||slaveOpen.direction}-${slaveOpen.amountLot}-${slaveOpen.symbol||''}`
           const { data, error } = await supabase
             .from('trade_plans')
             .update({ status: 'open', started_at: new Date().toISOString() })
@@ -10586,14 +10547,14 @@
             const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
             if(idx >= 0) tradePlans[idx] = rowToPlan(data)
             _atState.tracked[plan.id] = {
-              dupAccountId: dupId,
+              dupAccountId: slaveDupId,
+              masterDupId,
               openedAt: new Date(Math.min(masterTs.ts, slaveTs.ts)),
-              slavePosKey,  // ← exakter Key für Close-Detection
-              slavePos,     // ← komplette Position für P&L-Referenz
+              slavePosKey: slaveKey2,
+              masterPosKey: masterKey,
             }
-            // Timestamps zurücksetzen
-            delete _atState.masterOpenTs[mKey]
-            delete _atState.slaveOpenTs[dupId]
+            delete _atState.masterOpenTs[masterDupId]
+            delete _atState.slaveOpenTs[slaveDupId]
 
             renderTradePlans()
             if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
@@ -10601,11 +10562,22 @@
             _atPlaySound('open')
             _atNotify(
               `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
-              `Master + Slave innerhalb ${(timeDiff/1000).toFixed(1)}s erkannt`
+              `Master + Slave auf Duplikum erkannt (${(timeDiff/1000).toFixed(0)}s)`
             )
           }
         }catch(_){}
       }
+
+      // Prev-State für nächsten Poll: aktuellen Stand merken
+      const newPrevState = {}
+      for(const pos of positions){
+        const key = `${pos.side||pos.direction}-${pos.amountLot}-${pos.symbol||''}`
+        const aid = String(pos.account_id)
+        if(!newPrevState[aid]) newPrevState[aid] = new Set()
+        newPrevState[aid].add(key)
+      }
+      _atState.prevMasterPos = newPrevState
+      _atState.prevSlavePos  = newPrevState  // gleiche Quelle
 
       // Offene Plans: prüfen ob Slave-Position geschlossen wurde → Sound + Modal
       const runningPlans = tradePlans.filter(p => p.status === 'open')
