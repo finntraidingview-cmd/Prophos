@@ -11401,9 +11401,36 @@
           .from('trade_plans').insert(planToRow(planObj)).select('*').single()
         if(error) throw error
         tradePlans.unshift(rowToPlan(data))
+        // prevState SOFORT mit aktuellen Positionen initialisieren
+        // damit der nächste Poll korrekt "neue" Positionen erkennt
+        const newPlan = tradePlans[0]
+        if(newPlan && typeof _atGetDupIdForAccount === 'function' && dupState.token){
+          const mDupId = _atGetDupIdForAccount(newPlan.masterAccountId)
+          const sDupId = _atGetDupIdForAccount(newPlan.slaveAccountId)
+          if(mDupId || sDupId){
+            dupApi('POST', 'position/getOpenPositions.php', { length: 1000 }).then(res => {
+              if(!res.ok) return
+              const pos = (res.data?.data) || []
+              if(mDupId){
+                const keys = new Set(pos.filter(p => String(p.account_id)===String(mDupId))
+                  .map(p => String(p.amountLot)+(p.symbol||'')+(p.side||'')))
+                _atState.prevMasterPos[mDupId] = keys
+                console.log('[AT] prevState Master initialisiert:', keys.size, 'positions')
+              }
+              if(sDupId){
+                const keys = new Set(pos.filter(p => String(p.account_id)===String(sDupId))
+                  .map(p => String(p.amountLot)+(p.symbol||'')+(p.side||'')))
+                _atState.prevSlavePos[sDupId] = keys
+                console.log('[AT] prevState Slave initialisiert:', keys.size, 'positions')
+              }
+            }).catch(()=>{})
+          }
+        }
       }
       renderTradePlans()
       closeTradePlanModal()
+      // Poll sofort ausführen damit prevState für den neuen Plan gesetzt wird
+      if(typeof _atPoll === 'function') setTimeout(_atPoll, 500)
     }catch(e){
       msg('Fehler: ' + (e.message || e), 'err')
     }
