@@ -2508,6 +2508,10 @@
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-ghost" id="dup-auto-connect-btn" type="button" title="Duplikum-Accounts automatisch mit Prophos-Accounts verknüpfen (über Login-ID)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  Auto-Connect
+                </button>
                 <button class="btn btn-ghost" id="dup-sync-btn" type="button" title="Accounts neu laden">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   Sync
@@ -4110,6 +4114,11 @@
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Externe ID <span style="font-size:11px;color:var(--sub);font-weight:400">(Duplikum Auto-Connect)</span></label>
+          <input class="input mono" id="ac-external-id" type="text" placeholder="z.B. TDFYSL150872544204 oder 7234927" autocomplete="off" style="font-size:13px">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Tradovate-ID (z.B. <code style="background:var(--surface-tint);padding:1px 4px;border-radius:3px">TDFYSL150872544204</code>) oder MT5-Login (<code style="background:var(--surface-tint);padding:1px 4px;border-radius:3px">7234927</code>). Wird beim Duplikum-Sync zum automatischen Verknüpfen genutzt.</div>
+        </div>
       </div>
 
       <!-- MetaApi section, only visible when type === 'live' -->
@@ -4212,6 +4221,13 @@
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Externe IDs <span style="font-size:11px;color:var(--sub);font-weight:400">— optional, eine pro Zeile</span></label>
+          <textarea class="input mono" id="bulk-external-ids" rows="4"
+            placeholder="TDFYSL150325875918&#10;TDFYSL150894194381&#10;TDFYSL150267847152&#10;7234927"
+            style="resize:vertical;font-size:12px;line-height:1.6;font-family:var(--mono)"></textarea>
+          <div id="bulk-ids-hint" style="font-size:11px;color:var(--sub);margin-top:4px">Jede ID wird dem entsprechenden Account in Reihenfolge zugewiesen. Für Duplikum Auto-Connect.</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
@@ -4779,6 +4795,8 @@
         if(typeof renderTradePlans === 'function') renderTradePlans()
         // Lot-Rechner Push-Panel mit frischen Slaves befüllen
         if(typeof window.dupCalcRender === 'function') window.dupCalcRender()
+        // Auto-Tracking: starte Polling sobald Accounts geladen
+        if(typeof _atCheckAndStart === 'function') _atCheckAndStart()
         if(dupEls.testOut){
           dupEls.testOut.style.display = 'none'
           dupEls.testOut.textContent = ''
@@ -5855,7 +5873,63 @@
     }, 250)
   }
 
-  /* ── Auto-Load: wenn der User auf den Duplikum-Tab klickt und noch keine Accounts geladen sind ── */
+  /* ── Auto-Connect: Duplikum ↔ Prophos Account Matching ── */
+  async function dupAutoConnect(){
+    const btn = document.getElementById('dup-auto-connect-btn')
+    if(btn){ btn.disabled = true; btn.textContent = 'Verbinde…' }
+
+    const dupAccounts = dupState.accounts || []
+    const links = dupGetLinks()
+    let connected = 0, skipped = 0, alreadyLinked = 0
+
+    for(const dupAcc of dupAccounts){
+      const dupId    = String(dupAcc.account_id || '')
+      const dupLogin = String(dupAcc.login || dupAcc.name || '').trim()
+
+      if(!dupLogin) continue
+
+      // Bereits verknüpft → überspringen
+      if(links[dupId]){ alreadyLinked++; continue }
+
+      // Suche passenden Prophos-Account über externalId (primär) oder Fallbacks
+      const match = accounts.find(a => {
+        const extId   = String(a.externalId   || '').trim()
+        const tsxId   = String(a.topstep?.id  || '').trim()
+        const maLogin = String(a.ma?.login     || '').trim()
+        return (
+          (extId   && extId   === dupLogin) ||  // ← primärer Match
+          (tsxId   && tsxId   === dupLogin) ||
+          (maLogin && maLogin === dupLogin)
+        )
+      })
+
+      if(!match){ skipped++; continue }
+
+      // Nicht schon mit anderem Dup-Account verknüpft?
+      const alreadyUsed = Object.entries(links).some(([, pId]) => String(pId) === String(match.id))
+      if(alreadyUsed){ alreadyLinked++; continue }
+
+      links[dupId] = match.id
+      connected++
+    }
+
+    localStorage.setItem('prophos_dup_links', JSON.stringify(links))
+    renderDupAccountsTable()
+    if(typeof renderAccounts === 'function') renderAccounts()
+
+    const msg = connected > 0
+      ? `✓ ${connected} Account${connected > 1 ? 's' : ''} verknüpft${skipped > 0 ? ` · ${skipped} ohne Match` : ''}`
+      : `Keine neuen Matches${skipped > 0 ? ` · ${skipped} Duplikum-Accounts ohne passende Externe ID` : ''}`
+    _atShowToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
+
+    if(btn){
+      btn.disabled = false
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Auto-Connect`
+    }
+  }
+
+  document.getElementById('dup-auto-connect-btn')?.addEventListener('click', dupAutoConnect)
+  /* ── END Auto-Connect ── */
   document.querySelectorAll('[data-subtab="duplikum"]').forEach(btn => {
     btn.addEventListener('click', () => {
       if(dupState.token && !dupState.accounts.length){
@@ -7742,6 +7816,7 @@
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
+      externalId:     row.external_id || null,
       createdAt: row.created_at,
       topstep: row.topstep_account_id ? {
         id:        row.topstep_account_id,
@@ -7768,7 +7843,8 @@
       account_type: a.type,
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
-      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
+      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
+      external_id: a.externalId || null
     }
     if(a.topstep){
       row.topstep_account_id   = a.topstep.id
@@ -7817,6 +7893,7 @@
     bal:      document.getElementById('ac-balance'),
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
+    extId:    document.getElementById('ac-external-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -8098,6 +8175,7 @@
       accEls.bal.value  = editAccount.initialBalance != null ? editAccount.initialBalance : ''
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
+      if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -8108,6 +8186,7 @@
       accEls.bal.value  = ''
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
+      if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
     }
@@ -8154,6 +8233,7 @@
     const initialBalance = parseFloat(accEls.bal.value) || 0
     const purchaseCost = parseFloat(accEls.purchase.value)
     const maxDrawdown = parseFloat(accEls.maxDd.value)
+    const externalId = accEls.extId?.value?.trim() || null
     const isEdit = !!_editingAccountId
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
@@ -8164,6 +8244,7 @@
       name, firm, type, initialBalance,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
+      externalId,
       createdAt: new Date().toISOString(),
       ma: null
     }
@@ -8313,6 +8394,8 @@
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
+      extIds:    document.getElementById('bulk-external-ids'),
+      idsHint:   document.getElementById('bulk-ids-hint'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
@@ -8345,6 +8428,23 @@
         bEl.totalCost.textContent = ''
       }
 
+      // IDs count hint
+      if(bEl.extIds && bEl.idsHint){
+        const ids = bEl.extIds.value.split('\n').map(l => l.trim()).filter(Boolean)
+        if(ids.length > 0 && count > 0){
+          if(ids.length === count){
+            bEl.idsHint.textContent = `✓ ${ids.length} IDs — passt genau`
+            bEl.idsHint.style.color = 'var(--green, #22c55e)'
+          } else {
+            bEl.idsHint.textContent = `${ids.length} IDs eingegeben, ${count} Accounts — ${ids.length < count ? `${count - ids.length} Accounts bekommen keine ID` : `${ids.length - count} IDs werden ignoriert`}`
+            bEl.idsHint.style.color = 'var(--amber, #f59e0b)'
+          }
+        } else {
+          bEl.idsHint.textContent = 'Jede ID wird dem entsprechenden Account in Reihenfolge zugewiesen. Für Duplikum Auto-Connect.'
+          bEl.idsHint.style.color = 'var(--sub)'
+        }
+      }
+
       if(!firm || count < 1){
         bEl.preview.style.display = 'none'
         return
@@ -8373,6 +8473,7 @@
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
+      if(bEl.extIds) bEl.extIds.value = ''
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -8401,6 +8502,8 @@
       const maxddRaw = parseFloat(bEl.maxdd.value)
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
+      // Parse externe IDs — eine pro Zeile, leer = null
+      const extIdLines = (bEl.extIds?.value || '').split('\n').map(l => l.trim()).filter(Boolean)
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
@@ -8421,6 +8524,7 @@
       for(let i = 0; i < count; i++){
         const n    = startnum + i
         const name = buildName(n)
+        const extId = extIdLines[i] || null   // i-te ID oder null wenn nicht angegeben
         const row  = {
           user_id:        currentUserId,
           name,
@@ -8431,6 +8535,7 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
+          external_id:    extId,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -8479,8 +8584,8 @@
     }
 
     // Wire up inputs for live preview
-    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
-      el.addEventListener('input', updatePreview)
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost, bEl.extIds].forEach(el => {
+      if(el) el.addEventListener('input', updatePreview)
     })
 
     // Wire buttons
@@ -10104,6 +10209,249 @@
       alert('Fehler: ' + (e.message || e))
     }
   }
+
+  /* ═══════════════════════════════════════════════════════════════
+   * AUTO-TRACKING ENGINE
+   * Pollt Duplikum alle 30s, matched offene Positionen mit Trade Plans,
+   * markiert Trades automatisch als "läuft" / "erledigt" und trägt P&L ein.
+   * ═══════════════════════════════════════════════════════════════ */
+  const _atState = {
+    // planId → { dupAccountId, positionId?, openedAt, lastLots, lastPnl }
+    tracked: {},
+    pollTimer: null,
+    polling: false
+  }
+
+  // Reverse-Lookup: prophosAccountId → duplikumAccountId
+  function _atGetDupIdForAccount(prophosAccountId){
+    const links = dupGetLinks()  // { dupId: prophosId }
+    for(const [dupId, pId] of Object.entries(links)){
+      if(String(pId) === String(prophosAccountId)) return dupId
+    }
+    return null
+  }
+
+  // Toleranz-Vergleich für Lot-Größen (±15% wegen Rundung/Kommissionsunterschiede)
+  function _atLotsMatch(actual, expected){
+    if(!expected || !actual) return false
+    const ratio = actual / expected
+    return ratio >= 0.70 && ratio <= 1.30
+  }
+
+  // Notification anzeigen (falls Browser-Permission vorhanden, sonst Toast)
+  function _atNotify(title, body){
+    // In-App Toast
+    _atShowToast(title, body)
+    // Browser Notification wenn erlaubt
+    if(Notification?.permission === 'granted'){
+      try{ new Notification(title, { body, icon: '/favicon.ico', silent: false }) }catch(_){}
+    }
+  }
+
+  function _atShowToast(title, body){
+    let container = document.getElementById('at-toast-container')
+    if(!container){
+      container = document.createElement('div')
+      container.id = 'at-toast-container'
+      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:400px;width:calc(100vw - 48px)'
+      document.body.appendChild(container)
+    }
+    const toast = document.createElement('div')
+    toast.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
+    toast.innerHTML = `<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">${title}</div><div style="font-size:12px;color:var(--sub)">${body}</div>`
+    container.appendChild(toast)
+    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 5000)
+  }
+
+  function _atShowToastWithAction(title, body, actionLabel, onAction){
+    let container = document.getElementById('at-toast-container')
+    if(!container){
+      container = document.createElement('div')
+      container.id = 'at-toast-container'
+      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
+      document.body.appendChild(container)
+    }
+    const toast = document.createElement('div')
+    toast.style.cssText = 'background:var(--surface);border:1.5px solid var(--violet);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(99,102,241,.2);pointer-events:auto;animation:at-slide-in .25s ease'
+    toast.innerHTML = `
+      <div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:4px">${title}</div>
+      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">${body}</div>
+      <button style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;width:100%">${actionLabel}</button>
+    `
+    const btn = toast.querySelector('button')
+    btn.addEventListener('click', () => { toast.remove(); onAction() })
+    container.appendChild(toast)
+    // Bleibt 15 Sekunden sichtbar (länger als normaler Toast)
+    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 15000)
+  }
+
+  // Haupt-Poll-Funktion
+  async function _atPoll(){
+    if(_atState.polling) return
+    if(!dupState.token) return
+    const openPlans = tradePlans.filter(p => p.status === 'open' || p.status === 'planned')
+    if(!openPlans.length) return
+
+    _atState.polling = true
+    try {
+      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      if(!res.ok) return
+      const positions = (res.data && res.data.data) ? res.data.data : []
+
+      // Geplante Plans: prüfen ob Position aufgemacht wurde → auto zu 'open'
+      const plannedPlans = openPlans.filter(p => p.status === 'planned')
+      for(const plan of plannedPlans){
+        if(!plan.slaveAccountId || !plan.multiplier || !plan.masterContracts) continue
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        if(!dupId) continue
+        const expectedLots = plan.multiplier * plan.masterContracts
+        // Finde passende Position: gleicher Dup-Account + Lots passen
+        const match = positions.find(pos =>
+          String(pos.account_id) === String(dupId) &&
+          _atLotsMatch(parseFloat(pos.amountLot || 0), expectedLots)
+        )
+        if(match){
+          // Auto → 'open'
+          try{
+            const { data, error } = await supabase
+              .from('trade_plans')
+              .update({ status: 'open', started_at: new Date().toISOString() })
+              .eq('id', plan.id).select('*').single()
+            if(!error){
+              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+              _atState.tracked[plan.id] = {
+                dupAccountId: dupId,
+                positionId: match.id || match.position_id || null,
+                openedAt: new Date(),
+                lastLots: parseFloat(match.amountLot || 0)
+              }
+              renderTradePlans()
+              _atNotify(
+                `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
+                `${(plan.multiplier * plan.masterContracts).toFixed(3)} Lots auf ${plan.slaveName || plan.slaveFirm} erkannt`
+              )
+            }
+          }catch(_){}
+        }
+      }
+
+      // Offene Plans: prüfen ob Position geschlossen wurde → auto P&L + 'completed'
+      const runningPlans = tradePlans.filter(p => p.status === 'open')
+      for(const plan of runningPlans){
+        if(!plan.slaveAccountId || !plan.multiplier || !plan.masterContracts) continue
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        if(!dupId) continue
+        const expectedLots = plan.multiplier * plan.masterContracts
+
+        // Prüfen ob wir diese Position tracken
+        const tracking = _atState.tracked[plan.id]
+
+        // Position noch offen?
+        const stillOpen = positions.find(pos =>
+          String(pos.account_id) === String(dupId) &&
+          _atLotsMatch(parseFloat(pos.amountLot || 0), expectedLots)
+        )
+
+        if(!stillOpen && tracking){
+          // Position geschlossen — jetzt P&L holen
+          // Versuch: getClosedPositions für letzten Trade
+          let slavePl = null
+          try{
+            const closedRes = await dupApi('POST', 'position/getClosedPositions.php', {
+              id_slave: dupId,
+              from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
+              length: 10
+            })
+            if(closedRes.ok){
+              const closed = (closedRes.data && closedRes.data.data) ? closedRes.data.data : []
+              // Neueste geschlossene Position mit passendem Lot
+              const match = closed
+                .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
+                .find(pos => _atLotsMatch(parseFloat(pos.amountLot||0), expectedLots))
+              if(match) slavePl = parseFloat(match.profit || match.pnl || match.pl || 0)
+            }
+          }catch(_){}
+
+          // Trade geschlossen → Modal öffnen mit vorausgefülltem Slave-P&L (kein silent save)
+          try{
+            const updatesPartial = { slave_pl: slavePl }
+            // Slave-P&L schon mal speichern damit er im Modal vorausgefüllt ist
+            if(slavePl != null){
+              await supabase.from('trade_plans').update(updatesPartial).eq('id', plan.id)
+              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
+            }
+            delete _atState.tracked[plan.id]
+            renderTradePlans()
+
+            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl?.toFixed(2)}` : ''
+            // Toast mit "Jetzt eintragen"-Button
+            _atShowToastWithAction(
+              `🔴 Trade geschlossen: ${plan.masterName || plan.masterFirm}`,
+              `${plan.slaveName || plan.slaveFirm}${plStr}`,
+              'Jetzt eintragen →',
+              () => openTradeCompleteModal(plan.id)
+            )
+          }catch(_){}
+        } else if(stillOpen && !tracking){
+          // Position läuft aber wir tracken sie noch nicht (z.B. nach Page-Reload)
+          _atState.tracked[plan.id] = {
+            dupAccountId: dupId,
+            positionId: stillOpen.id || stillOpen.position_id || null,
+            openedAt: plan.startedAt ? new Date(plan.startedAt) : new Date(),
+            lastLots: parseFloat(stillOpen.amountLot || 0)
+          }
+        }
+      }
+
+    }catch(e){
+      console.warn('AT poll error:', e)
+    }finally{
+      _atState.polling = false
+    }
+  }
+
+  // Start/Stop polling
+  function atStartPolling(){
+    if(_atState.pollTimer) return
+    _atPoll()  // sofort einmal
+    _atState.pollTimer = setInterval(_atPoll, 30_000)
+    console.log('Auto-Tracking: polling started (30s interval)')
+  }
+  function atStopPolling(){
+    if(_atState.pollTimer){ clearInterval(_atState.pollTimer); _atState.pollTimer = null }
+  }
+
+  // Polling starten sobald Duplikum verbunden ist
+  const _origDupRender = typeof dupRender === 'function' ? dupRender : null
+  // Hook: starte polling wenn Duplikum-Token verfügbar
+  ;(function _atInit(){
+    if(dupState.token) atStartPolling()
+    // Polling startet auch wenn User sich nachher einloggt — via existing dupRender hook
+    const origDupLoadAccounts = dupLoadAccounts
+    window._atDupLoadHooked = true
+  })()
+
+  // CSS für Toast-Animation
+  ;(function _atInjectCss(){
+    const s = document.createElement('style')
+    s.textContent = `@keyframes at-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`
+    document.head.appendChild(s)
+  })()
+
+  // Polling starten/stoppen wenn Duplikum connected/disconnected
+  // (wird nach dupRender aufgerufen via existierendem Hook-Mechanismus)
+  function _atCheckAndStart(){
+    if(dupState.token && !_atState.pollTimer) atStartPolling()
+    if(!dupState.token && _atState.pollTimer) atStopPolling()
+  }
+  // Poll auch bei View-Wechsel zu Trades starten
+  document.querySelector('[data-view="trades"]')?.addEventListener('click', _atCheckAndStart)
+
+  /* ═══════════════════════════════════════════════════════════════
+   * END AUTO-TRACKING ENGINE
+   * ═══════════════════════════════════════════════════════════════ */
 
   async function deleteTradePlan(planId){
     if(!confirm('Trade-Plan wirklich löschen?')) return
