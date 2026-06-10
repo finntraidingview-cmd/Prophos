@@ -10453,8 +10453,11 @@
     _atState.polling = true
     try {
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      console.log('[AT] raw response: ok='+res.ok+' dataKeys='+JSON.stringify(Object.keys(res.data||{})))
       if(!res.ok) return
-      const positions = (res.data && res.data.data) ? res.data.data : []
+      const positions = (res.data && res.data.data) ? res.data.data
+                      : Array.isArray(res.data) ? res.data
+                      : []
       const now = Date.now()
 
       const plannedPlans = tradePlans.filter(p => p.status === 'planned')
