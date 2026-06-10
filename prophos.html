@@ -10436,46 +10436,112 @@
       if(!res.ok) return
       const positions = (res.data && res.data.data) ? res.data.data : []
 
-      // Geplante Plans: prüfen ob Position aufgemacht wurde → auto zu 'open'
+      // Hole Master-Positionen einmalig für alle Plans (TSX + MT5 + Duplikum-Master)
+      const masterPositions = [
+        ...(ltState.positions?.tsx || []),
+        ...(ltState.positions?.mt  || []),
+        ...(ltState.positions?.dup || [])
+      ]
+
+      // Hilfsfunktion: Master-Position für einen Plan finden
+      function _atFindMasterPos(plan){
+        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+        if(!masterAcc) return null
+        // TSX
+        if(masterAcc.topstep){
+          const p = masterPositions.find(pos =>
+            pos.src === 'tsx' && String(pos.accountId) === String(masterAcc.topstep.id))
+          if(p) return p
+        }
+        // MT5
+        if(masterAcc.ma){
+          const p = masterPositions.find(pos =>
+            pos.src === 'mt' && String(pos.accountId) === String(masterAcc.ma.accountId))
+          if(p) return p
+        }
+        // Duplikum-Master
+        const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
+        if(masterDupId){
+          const p = masterPositions.find(pos =>
+            pos.src === 'dup' && String(pos.accountId) === String(masterDupId))
+          if(p) return p
+        }
+        return null
+      }
+
+      // Ratio-basiertes Matching: slaveLots/masterLots ≈ multiplier (±15%)
+      // ODER wenn kein Master erkennbar: nur Slave-Lots ≈ multiplier mit enger Toleranz (±10%)
+      function _atMatchPos(slavePos, masterPos, plan){
+        const sLots = Math.abs(parseFloat(slavePos?.amountLot || slavePos?.size || 0))
+        if(!sLots || !plan.multiplier) return false
+        if(masterPos){
+          const mLots = Math.abs(Number(masterPos.size || 0))
+          if(!mLots) return false
+          const ratio = sLots / mLots
+          const target = Math.abs(plan.multiplier)
+          return Math.abs(ratio - target) / target <= 0.15  // ±15% vom erwarteten Verhältnis
+        } else {
+          // Fallback: direkt gegen multiplier, aber engere Toleranz ±10%
+          return Math.abs(sLots - Math.abs(plan.multiplier)) / Math.abs(plan.multiplier) <= 0.10
+        }
+      }
+
+      // Geplante Plans: prüfen ob BEIDE Seiten offen sind → auto zu 'open'
       const plannedPlans = openPlans.filter(p => p.status === 'planned')
       for(const plan of plannedPlans){
         if(!plan.slaveAccountId || !plan.multiplier) continue
         const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
         if(!dupId) continue
-        const match = positions.find(pos =>
+
+        const masterPos = _atFindMasterPos(plan)
+        const slaveMatch = positions.find(pos =>
           String(pos.account_id) === String(dupId) &&
-          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
+          _atMatchPos(pos, masterPos, plan)
         )
-        if(match){
-          try{
-            const { data, error } = await supabase
-              .from('trade_plans')
-              .update({ status: 'open', started_at: new Date().toISOString() })
-              .eq('id', plan.id).select('*').single()
-            if(!error){
-              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-              if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-              _atState.tracked[plan.id] = {
-                dupAccountId: dupId,
-                positionId: match.id || match.position_id || null,
-                openedAt: new Date(),
-                lastLots: parseFloat(match.amountLot || 0)
-              }
-              renderTradePlans()
-              if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-              // Trade läuft → Fast Poll starten
-              _atStartFastPoll()
-              _atPlaySound('open')
-              _atNotify(
-                `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
-                `${plan.multiplier} Lots auf ${plan.slaveName || plan.slaveFirm} erkannt`
-              )
-            }
-          }catch(_){}
+
+        // Wenn kein Master erkennbar: nur fortfahren wenn Slave eindeutig matcht
+        // (beide offen bevorzugt, aber Slave-only als Fallback)
+        if(!slaveMatch) continue
+        if(!masterPos){
+          // Slave-only: prüfen ob kein anderer geplanter Plan besser passt
+          const betterMatch = plannedPlans.filter(p => p.id !== plan.id).some(p2 => {
+            const d2 = _atGetDupIdForAccount(p2.slaveAccountId)
+            if(d2 !== dupId || !p2.multiplier) return false
+            const sLots = Math.abs(parseFloat(slaveMatch.amountLot || 0))
+            const diff1 = Math.abs(sLots - Math.abs(plan.multiplier))
+            const diff2 = Math.abs(sLots - Math.abs(p2.multiplier))
+            return diff2 < diff1  // anderer Plan passt besser
+          })
+          if(betterMatch) continue  // nicht der beste Match
         }
+
+        try{
+          const { data, error } = await supabase
+            .from('trade_plans')
+            .update({ status: 'open', started_at: new Date().toISOString() })
+            .eq('id', plan.id).select('*').single()
+          if(!error){
+            const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+            if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+            _atState.tracked[plan.id] = {
+              dupAccountId: dupId,
+              positionId: slaveMatch.id || slaveMatch.position_id || null,
+              openedAt: new Date(),
+              lastLots: parseFloat(slaveMatch.amountLot || 0)
+            }
+            renderTradePlans()
+            if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+            _atStartFastPoll()
+            _atPlaySound('open')
+            _atNotify(
+              `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
+              `${masterPos ? 'Master+Slave erkannt' : 'Slave erkannt'} · ${Math.abs(plan.multiplier).toFixed(3)} Lots`
+            )
+          }
+        }catch(_){}
       }
 
-      // Offene Plans: prüfen ob Position geschlossen wurde → Sound + Modal auto-öffnen
+      // Offene Plans: prüfen ob Slave-Position geschlossen wurde → Sound + Modal
       const runningPlans = tradePlans.filter(p => p.status === 'open')
       for(const plan of runningPlans){
         if(!plan.slaveAccountId || !plan.multiplier) continue
@@ -10483,10 +10549,11 @@
         if(!dupId) continue
 
         const tracking = _atState.tracked[plan.id]
+        const masterPos = _atFindMasterPos(plan)
 
         const stillOpen = positions.find(pos =>
           String(pos.account_id) === String(dupId) &&
-          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
+          _atMatchPos(pos, masterPos, plan)
         )
 
         if(!stillOpen && tracking){
