@@ -10384,12 +10384,17 @@
    * markiert Trades automatisch als "läuft" / "erledigt" und trägt P&L ein.
    * ═══════════════════════════════════════════════════════════════ */
   const _atState = {
-    tracked: {},       // planId → { dupAccountId, openedAt, lastLots }
-    pollTimer: null,   // slow poll (10s) — erkennt open/close
-    fastTimer: null,   // fast poll (750ms) — nur wenn Trades laufen
+    tracked: {},        // planId → { dupAccountId, openedAt, lastLots }
+    pollTimer: null,    // slow poll (10s) — erkennt open/close
+    fastTimer: null,    // fast poll (750ms) — nur wenn Trades laufen
     fastPolling: false,
     polling: false,
-    livePnl: {}        // planId → { master, slave, ts }
+    livePnl: {},        // planId → { master, slave, ts }
+    // Timestamp-Matching: wenn Master-Position neu aufgeht, Timestamp merken
+    masterOpenTs: {},   // masterAccountId → { ts, side, size, symbol }
+    slaveOpenTs: {},    // slaveAccountId (dupId) → { ts, side, size, symbol }
+    prevMasterPos: {},  // masterAccountId → Set von position-keys (für change detection)
+    prevSlavePos: {},   // dupId → Set von position-keys
   }
 
   // Reverse-Lookup: prophosAccountId → duplikumAccountId
@@ -10483,34 +10488,96 @@
         return null
       }
 
-      // Matching: amountLot auf Slave ≈ multiplier mit ±2% Toleranz
-      // Duplikum kopiert exakt → kein Master-Zwang nötig
-      function _atMatchPos(slavePos, masterPos, plan){
-        const sLots = Math.abs(parseFloat(slavePos?.amountLot || slavePos?.size || 0))
-        if(!sLots || !plan.multiplier) return false
-        const target = Math.abs(plan.multiplier)
-        return Math.abs(sLots - target) / target <= 0.02  // ±2%
-      }
+      const now = Date.now()
+      const MATCH_WINDOW_MS = 10_000  // 10 Sekunden
 
-      // Geplante Plans: prüfen ob BEIDE Seiten offen sind → auto zu 'open'
+      // ── Schritt 1: Neue Positionen auf Master-Accounts erkennen ──
       const plannedPlans = openPlans.filter(p => p.status === 'planned')
       for(const plan of plannedPlans){
-        if(!plan.slaveAccountId || !plan.multiplier) continue
+        if(!plan.masterAccountId) continue
+        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+        if(!masterAcc) continue
+
+        // Aktuelle Master-Positionen sammeln
+        const mKey = String(plan.masterAccountId)
+        const currentMasterKeys = new Set()
+        const allLtPos = [
+          ...(ltState.positions?.tsx || []),
+          ...(ltState.positions?.mt  || []),
+          ...(ltState.positions?.dup || [])
+        ]
+
+        let masterPosNow = null
+        if(masterAcc.topstep){
+          masterPosNow = allLtPos.find(p => p.src==='tsx' && String(p.accountId)===String(masterAcc.topstep.id))
+        }
+        if(!masterPosNow && masterAcc.ma){
+          masterPosNow = allLtPos.find(p => p.src==='mt' && String(p.accountId)===String(masterAcc.ma.accountId))
+        }
+        if(!masterPosNow){
+          const mDupId = _atGetDupIdForAccount(plan.masterAccountId)
+          if(mDupId) masterPosNow = allLtPos.find(p => p.src==='dup' && String(p.accountId)===String(mDupId))
+        }
+
+        if(masterPosNow) currentMasterKeys.add(`${masterPosNow.side}-${masterPosNow.size}-${masterPosNow.symbol}`)
+
+        const prevKeys = _atState.prevMasterPos[mKey] || new Set()
+        // Neue Position auf Master?
+        for(const k of currentMasterKeys){
+          if(!prevKeys.has(k)){
+            // Neue Master-Position erkannt → Timestamp setzen
+            _atState.masterOpenTs[mKey] = { ts: now, key: k, pos: masterPosNow }
+          }
+        }
+        _atState.prevMasterPos[mKey] = currentMasterKeys
+      }
+
+      // ── Schritt 2: Neue Positionen auf Slave-Accounts (Duplikum) erkennen ──
+      for(const plan of plannedPlans){
+        if(!plan.slaveAccountId) continue
         const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
         if(!dupId) continue
 
-        // Plan muss mindestens 60s alt sein — verhindert false match direkt nach Speichern
-        const planAge = plan.createdAt ? (Date.now() - new Date(plan.createdAt)) / 1000 : 999
-        if(planAge < 60) continue
+        const currentSlaveKeys = new Set()
+        const slavePosNow = positions.filter(pos => String(pos.account_id) === String(dupId))
+        for(const sp of slavePosNow){
+          currentSlaveKeys.add(`${sp.side || sp.direction}-${sp.amountLot}`)
+        }
 
-        const masterPos = _atFindMasterPos(plan)
-        const slaveMatch = positions.find(pos =>
-          String(pos.account_id) === String(dupId) &&
-          _atMatchPos(pos, masterPos, plan)
-        )
-        if(!slaveMatch) continue
+        const prevKeys = _atState.prevSlavePos[dupId] || new Set()
+        for(const k of currentSlaveKeys){
+          if(!prevKeys.has(k)){
+            _atState.slaveOpenTs[dupId] = { ts: now, key: k }
+          }
+        }
+        _atState.prevSlavePos[dupId] = currentSlaveKeys
+      }
 
+      // ── Schritt 3: Timestamp-Match — wenn Master + Slave innerhalb 10s aufgingen ──
+      for(const plan of plannedPlans){
+        if(!plan.masterAccountId || !plan.slaveAccountId || !plan.multiplier) continue
+        if(_atState.tracked[plan.id]) continue  // bereits getrackt
+
+        const mKey = String(plan.masterAccountId)
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        if(!dupId) continue
+
+        const masterTs = _atState.masterOpenTs[mKey]
+        const slaveTs  = _atState.slaveOpenTs[dupId]
+        if(!masterTs || !slaveTs) continue
+
+        // Beide innerhalb 10 Sekunden aufgegangen?
+        const timeDiff = Math.abs(masterTs.ts - slaveTs.ts)
+        if(timeDiff > MATCH_WINDOW_MS) continue
+
+        // Match! → Trade auf 'open' setzen
         try{
+          // Speichere den exakten Slave-Position-Key für Close-Detection
+          const slavePos = positions.find(pos => String(pos.account_id) === String(dupId))
+          const slavePosKey = slavePos
+            ? `${slavePos.side||slavePos.direction}-${slavePos.amountLot}-${slavePos.symbol||''}`
+            : null
+
           const { data, error } = await supabase
             .from('trade_plans')
             .update({ status: 'open', started_at: new Date().toISOString() })
@@ -10520,17 +10587,21 @@
             if(idx >= 0) tradePlans[idx] = rowToPlan(data)
             _atState.tracked[plan.id] = {
               dupAccountId: dupId,
-              positionId: slaveMatch.id || slaveMatch.position_id || null,
-              openedAt: new Date(),
-              lastLots: parseFloat(slaveMatch.amountLot || 0)
+              openedAt: new Date(Math.min(masterTs.ts, slaveTs.ts)),
+              slavePosKey,  // ← exakter Key für Close-Detection
+              slavePos,     // ← komplette Position für P&L-Referenz
             }
+            // Timestamps zurücksetzen
+            delete _atState.masterOpenTs[mKey]
+            delete _atState.slaveOpenTs[dupId]
+
             renderTradePlans()
             if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
             _atStartFastPoll()
             _atPlaySound('open')
             _atNotify(
               `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
-              `${masterPos ? 'Master+Slave erkannt' : 'Slave erkannt'} · ${Math.abs(plan.multiplier).toFixed(3)} Lots`
+              `Master + Slave innerhalb ${(timeDiff/1000).toFixed(1)}s erkannt`
             )
           }
         }catch(_){}
@@ -10544,14 +10615,23 @@
         if(!dupId) continue
 
         const tracking = _atState.tracked[plan.id]
-        const masterPos = _atFindMasterPos(plan)
+        if(!tracking) continue  // kein Tracking-Eintrag = manuell gesetzt, skip
 
-        const stillOpen = positions.find(pos =>
-          String(pos.account_id) === String(dupId) &&
-          _atMatchPos(pos, masterPos, plan)
-        )
-
-        if(!stillOpen && !tracking) continue  // nie getracked → ignorieren
+        // Prüfe ob genau DIESE Position noch offen ist (via gespeichertem Key)
+        let stillOpen
+        if(tracking.slavePosKey){
+          // Exakter Match auf gespeicherten Position-Key
+          stillOpen = positions.some(pos => {
+            const k = `${pos.side||pos.direction}-${pos.amountLot}-${pos.symbol||''}`
+            return String(pos.account_id) === String(dupId) && k === tracking.slavePosKey
+          })
+        } else {
+          // Fallback (manuell getrackte Plans): ±20% auf Multiplier
+          stillOpen = positions.some(pos =>
+            String(pos.account_id) === String(dupId) &&
+            Math.abs(Math.abs(parseFloat(pos.amountLot||0)) - Math.abs(plan.multiplier)) / Math.abs(plan.multiplier) <= 0.20
+          )
+        }
 
         if(!stillOpen && tracking){
           let slavePl = null
@@ -10670,10 +10750,22 @@
 
       for(const plan of openPlans){
         const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        const slavePos = dupId ? positions.find(pos =>
-          String(pos.account_id) === String(dupId) &&
-          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
-        ) : null
+        const tracking = _atState.tracked[plan.id]
+
+        // Slave-Position: exakter Key wenn vorhanden, sonst Lots-Fallback
+        let slavePos = null
+        if(dupId){
+          if(tracking?.slavePosKey){
+            // Exakter Match auf die beim Open gemerkte Position
+            slavePos = positions.find(pos => {
+              const k = `${pos.side||pos.direction}-${pos.amountLot}-${pos.symbol||''}`
+              return String(pos.account_id) === String(dupId) && k === tracking.slavePosKey
+            })
+          } else {
+            // Fallback: irgendeIne Position auf dem Slave-Account
+            slavePos = positions.find(pos => String(pos.account_id) === String(dupId))
+          }
+        }
 
         // Master P&L aus ltState (bereits alle 5s aktuell via ltRefresh)
         const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
