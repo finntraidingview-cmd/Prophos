@@ -4803,6 +4803,8 @@
         if(typeof window.dupCalcRender === 'function') window.dupCalcRender()
         // Auto-Tracking: starte Polling sobald Accounts geladen
         if(typeof _atCheckAndStart === 'function') _atCheckAndStart()
+        // Auto-Connect: bei jedem Sync still im Hintergrund verknüpfen
+        if(typeof dupAutoConnect === 'function') dupAutoConnect(true)
         if(dupEls.testOut){
           dupEls.testOut.style.display = 'none'
           dupEls.testOut.textContent = ''
@@ -5880,9 +5882,9 @@
   }
 
   /* ── Auto-Connect: Duplikum ↔ Prophos Account Matching ── */
-  async function dupAutoConnect(){
+  async function dupAutoConnect(silent = false){
     const btn = document.getElementById('dup-auto-connect-btn')
-    if(btn){ btn.disabled = true; btn.textContent = 'Verbinde…' }
+    if(!silent && btn){ btn.disabled = true; btn.textContent = 'Verbinde…' }
 
     const dupAccounts = dupState.accounts || []
     const links = dupGetLinks()
@@ -5926,9 +5928,10 @@
     const msg = connected > 0
       ? `✓ ${connected} Account${connected > 1 ? 's' : ''} verknüpft${skipped > 0 ? ` · ${skipped} ohne Match` : ''}`
       : `Keine neuen Matches${skipped > 0 ? ` · ${skipped} Duplikum-Accounts ohne passende Externe ID` : ''}`
-    _atShowToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
+    // Toast nur zeigen wenn manuell oder wenn etwas verknüpft wurde
+    if(!silent || connected > 0) _atShowToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
 
-    if(btn){
+    if(!silent && btn){
       btn.disabled = false
       btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Auto-Connect`
     }
@@ -6295,143 +6298,138 @@
     const cardsEl   = document.getElementById('lt-plan-cards')
     if(!container || !cardsEl) return
 
-    const openPlans = (typeof tradePlans !== 'undefined' ? tradePlans : []).filter(p => p.status === 'open')
+    const allPlans = (typeof tradePlans !== 'undefined' ? tradePlans : [])
+    const openPlans = allPlans.filter(p => p.status === 'open')
     if(!openPlans.length){ container.style.display = 'none'; return }
-
     container.style.display = ''
 
-    const dupPositions = ltState.positions?.dup || []
-    const tsxPositions = ltState.positions?.tsx || []
-    const mtPositions  = ltState.positions?.mt  || []
     const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
 
     cardsEl.innerHTML = openPlans.map(plan => {
-      // ── Slave-Position auf Fusion/Dup ──
-      const dupId = Object.entries(links).find(([, pId]) => String(pId) === String(plan.slaveAccountId))?.[0]
-      const slavePos = dupId ? dupPositions.find(pos =>
-        String(pos.accountId) === String(dupId) &&
-        plan.multiplier && Math.abs(parseFloat(pos.size||0) - plan.multiplier) / plan.multiplier < 0.25
-      ) : null
+      const live = _atState.livePnl[plan.id] || {}
+      const slavePnl  = live.slave  != null ? live.slave  : null
+      const masterPnl = live.master != null ? live.master : null
+      const totalPnl  = slavePnl != null && masterPnl != null ? slavePnl + masterPnl
+                      : slavePnl != null ? slavePnl
+                      : masterPnl != null ? masterPnl : null
 
-      // ── Master-Position (TSX oder MT5) ──
-      const masterAcc = (typeof accounts !== 'undefined' ? accounts : []).find(a => String(a.id) === String(plan.masterAccountId))
-      const slaveAcc  = (typeof accounts !== 'undefined' ? accounts : []).find(a => String(a.id) === String(plan.slaveAccountId))
-
-      // TSX: match über topstep.id
-      const masterTsxPos = tsxPositions.find(pos =>
-        masterAcc?.topstep && String(pos.accountId) === String(masterAcc.topstep.id)
-      )
-      // MT5: match über ma.accountId
-      const masterMtPos = mtPositions.find(pos =>
-        masterAcc?.ma && String(pos.accountId) === String(masterAcc.ma.accountId)
-      )
-      const masterPos = masterTsxPos || masterMtPos
-
-      // ── Symmetrie-Analyse ──
-      let symBadge = ''
-      let symDetail = ''
-      if(masterPos && slavePos){
-        const mSide = ltSideToSign(masterPos.side)
-        const sSide = ltSideToSign(slavePos.side)
-        const mSize = Number(masterPos.size) || 0
-        const sSize = Number(slavePos.size)  || 0
-        const actualMultiplier = mSize > 0 ? sSize / mSize : 0
-        const expectedMult = plan.multiplier || 0
-        const multRatio = expectedMult > 0 ? actualMultiplier / expectedMult : 0
-        const sidesOpposite = mSide !== 0 && sSide !== 0 && mSide !== sSide  // Hedge: gegenläufig
-        const sidesAligned   = mSide !== 0 && sSide !== 0 && mSide === sSide  // Gleiche Richtung
-
-        if(sidesOpposite && multRatio >= 0.90 && multRatio <= 1.10){
-          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#22c55e18;color:#16a34a;font-size:11px;font-weight:700">✓ Symmetrisch</span>`
-          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
-        } else if(sidesOpposite && multRatio >= 0.75 && multRatio <= 1.25){
-          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#f59e0b18;color:#d97706;font-size:11px;font-weight:700">≈ Leicht abw.</span>`
-          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
-        } else if(sidesAligned){
-          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">⚠ Gleiche Seite!</span>`
-          symDetail = `Master ${masterPos.side} · Slave ${slavePos.side}`
+      // ── Symmetrie ──
+      let symStatus = 'none'  // perfect | good | warn | bad | missing
+      let symLabel  = '— Keine Daten'
+      let symColor  = 'var(--sub)'
+      let actualMult = null
+      if(live.masterLots && live.slaveLots && plan.multiplier){
+        actualMult = live.slaveLots / live.masterLots
+        const ratio = actualMult / Math.abs(plan.multiplier)
+        const sidesOk = live.masterSide && live.slaveSide && live.masterSide !== live.slaveSide
+        if(!sidesOk){
+          symStatus = 'bad'; symColor = '#dc2626'
+          symLabel = live.masterSide === live.slaveSide ? '⚠ Gleiche Seite!' : '⚠ Seite fehlt'
+        } else if(ratio >= 0.97 && ratio <= 1.03){
+          symStatus = 'perfect'; symColor = '#16a34a'; symLabel = '✓ Perfekt'
+        } else if(ratio >= 0.90 && ratio <= 1.10){
+          symStatus = 'good'; symColor = '#16a34a'; symLabel = '✓ Symmetrisch'
+        } else if(ratio >= 0.80 && ratio <= 1.20){
+          symStatus = 'warn'; symColor = '#f59e0b'; symLabel = '≈ Leicht abw.'
         } else {
-          symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">✕ Asymmetrisch</span>`
-          symDetail = `×${actualMultiplier.toFixed(3)} (soll ×${expectedMult.toFixed(3)})`
+          symStatus = 'bad'; symColor = '#dc2626'; symLabel = '✕ Asymmetrisch'
         }
-      } else if(masterPos && !slavePos){
-        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#ef444418;color:#dc2626;font-size:11px;font-weight:700">⚠ Slave fehlt</span>`
-        symDetail = 'Master offen, kein Slave erkannt'
-      } else if(!masterPos && slavePos){
-        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:#f59e0b18;color:#d97706;font-size:11px;font-weight:700">⚠ Master fehlt</span>`
-        symDetail = 'Slave offen, kein Master erkannt'
-      } else {
-        symBadge = `<span style="padding:2px 8px;border-radius:6px;background:var(--surface-tint);color:var(--sub);font-size:11px">— Keine Daten</span>`
-        symDetail = 'Live-Verbindung prüfen'
+      } else if(live.ts){
+        symStatus = 'missing'; symColor = '#f59e0b'
+        symLabel = live.masterLots && !live.slaveLots ? '⚠ Slave fehlt'
+                 : !live.masterLots && live.slaveLots ? '⚠ Master fehlt'
+                 : '— Warte…'
       }
 
-      // ── Live P&L ──
-      const livePnl = slavePos?.pnl != null ? Number(slavePos.pnl) : null
-      const masterPnl = masterPos?.pnl != null ? Number(masterPos.pnl) : null
-      const totalPnl = (livePnl ?? 0) + (masterPnl ?? 0)
-      const hasPnl = livePnl != null || masterPnl != null
-
-      const pnlBlock = hasPnl ? `
-        <div style="display:flex;gap:14px;align-items:center">
-          ${masterPnl != null ? `<div style="text-align:center"><div style="font-size:10px;color:var(--sub);margin-bottom:1px">MASTER</div><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:${masterPnl>=0?'#16a34a':'#dc2626'}">${masterPnl>=0?'+':''}${masterPnl.toFixed(0)}</div></div>` : ''}
-          ${livePnl != null && masterPnl != null ? `<div style="color:var(--sub);font-size:14px">+</div>` : ''}
-          ${livePnl != null ? `<div style="text-align:center"><div style="font-size:10px;color:var(--sub);margin-bottom:1px">SLAVE</div><div style="font-size:13px;font-weight:700;font-family:var(--mono);color:${livePnl>=0?'#16a34a':'#dc2626'}">${livePnl>=0?'+':''}${livePnl.toFixed(0)}</div></div>` : ''}
-          ${hasPnl && masterPnl != null && livePnl != null ? `
-            <div style="border-left:1px solid var(--border);padding-left:14px;text-align:center">
-              <div style="font-size:10px;color:var(--sub);margin-bottom:1px">GESAMT</div>
-              <div style="font-size:15px;font-weight:800;font-family:var(--mono);color:${totalPnl>=0?'#16a34a':'#dc2626'}">${totalPnl>=0?'+':''}${totalPnl.toFixed(0)}</div>
-            </div>` : ''}
-        </div>
-      ` : `<span style="font-size:12px;color:var(--sub)">P&L —</span>`
+      // ── P&L Farben ──
+      const pnlColor = n => n == null ? 'var(--sub)' : n >= 0 ? '#16a34a' : '#dc2626'
+      const pnlFmt = (n, ccy='') => n == null ? '—'
+        : (n >= 0 ? '+' : '') + n.toFixed(2) + (ccy ? ' '+ccy : '')
 
       // ── Laufzeit ──
-      const since = plan.startedAt ? (() => {
+      const tracking = _atState.tracked[plan.id]
+      const since = tracking?.openedAt ? (() => {
+        const s = Math.round((Date.now() - tracking.openedAt) / 1000)
+        if(s < 60) return s + 's'
+        if(s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's'
+        return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm'
+      })() : (plan.startedAt ? (() => {
         const mins = Math.round((Date.now() - new Date(plan.startedAt)) / 60000)
-        return mins < 60 ? `${mins}m` : `${Math.floor(mins/60)}h ${mins%60}m`
-      })() : '—'
+        return mins < 60 ? mins + 'm' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm'
+      })() : '—')
 
-      // ── Master/Slave Side-Indikatoren ──
-      const masterSideEl = masterPos
-        ? `<span style="padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700;background:${ltSideToSign(masterPos.side)>0?'#22c55e18':'#ef444418'};color:${ltSideToSign(masterPos.side)>0?'#16a34a':'#dc2626'}">${masterPos.side} ${masterPos.size}</span>`
-        : `<span style="font-size:11px;color:var(--sub)">—</span>`
-      const slaveSideEl = slavePos
-        ? `<span style="padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700;background:${ltSideToSign(slavePos.side)>0?'#22c55e18':'#ef444418'};color:${ltSideToSign(slavePos.side)>0?'#16a34a':'#dc2626'}">${slavePos.side} ${slavePos.size}</span>`
-        : `<span style="font-size:11px;color:var(--sub)">—</span>`
+      // ── Multiplier bar: wie viel % Abweichung ──
+      const multPct = actualMult != null && plan.multiplier
+        ? Math.min(100, Math.round(100 * actualMult / Math.abs(plan.multiplier)))
+        : null
 
       return `
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
-          <!-- Header -->
-          <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
-            <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 6px #22c55e88;animation:at-pulse 2s infinite"></div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+
+          <!-- ── TOP BAR: Status + Name ── -->
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--border)">
+            <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 0 3px #22c55e22;animation:at-pulse 1.5s infinite"></div>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                ${escapeHtml(plan.masterName || plan.masterFirm || '—')}
-                <span style="color:var(--sub);font-weight:400;margin:0 4px">→</span>
-                ${escapeHtml(plan.slaveName || plan.slaveFirm || '—')}
-              </div>
-              <div style="font-size:11px;color:var(--sub);margin-top:2px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <span>×${plan.multiplier != null ? plan.multiplier.toFixed(3) : '—'}</span>
-                <span>·</span><span>⏱ ${since}</span>
-                <span>·</span>${symBadge}
-                ${symDetail ? `<span style="color:var(--sub-2);font-size:10px">${escapeHtml(symDetail)}</span>` : ''}
+              <div style="font-weight:700;font-size:13px;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escapeHtml(plan.masterName||plan.masterFirm||'—')}">${escapeHtml(plan.masterName||plan.masterFirm||'—')}</span>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;color:var(--sub)"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escapeHtml(plan.slaveName||plan.slaveFirm||'—')}">${escapeHtml(plan.slaveName||plan.slaveFirm||'—')}</span>
               </div>
             </div>
-            <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;flex-shrink:0" onclick="openTradeCompleteModal('${plan.id}')">Abschließen</button>
-          </div>
-          <!-- Body: Sides + P&L -->
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px;flex-wrap:wrap">
-            <div style="display:flex;gap:16px;align-items:center;font-size:12px">
-              <div><span style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px">Master</span>${masterSideEl}</div>
-              <div style="color:var(--sub)">⇄</div>
-              <div><span style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px">Slave</span>${slaveSideEl}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <span style="font-size:11px;color:var(--sub)">⏱ ${since}</span>
+              <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;height:28px" onclick="openTradeCompleteModal('${plan.id}')">Abschließen</button>
             </div>
-            <div>${pnlBlock}</div>
           </div>
+
+          <!-- ── MAIN: 3 Spalten ── -->
+          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch">
+
+            <!-- Master P&L -->
+            <div style="padding:14px 16px;border-right:1px solid var(--border)">
+              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Master · ${escapeHtml(plan.masterFirm||'—')}</div>
+              <div style="font-size:22px;font-weight:800;font-family:var(--mono);color:${pnlColor(masterPnl)};line-height:1">${pnlFmt(masterPnl, '$')}</div>
+              ${live.masterSide ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px">
+                <span style="padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${live.masterSide==='Buy'?'#22c55e18':'#ef444418'};color:${live.masterSide==='Buy'?'#16a34a':'#dc2626'}">${live.masterSide}</span>
+                <span style="font-size:11px;color:var(--sub);font-family:var(--mono)">${live.masterLots != null ? live.masterLots+' Lots' : ''}</span>
+              </div>` : '<div style="height:22px"></div>'}
+            </div>
+
+            <!-- Symmetrie Center -->
+            <div style="padding:14px 12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:110px;background:var(--bg)">
+              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em">Symmetrie</div>
+              <div style="font-size:12px;font-weight:700;color:${symColor};text-align:center">${symLabel}</div>
+              ${actualMult != null ? `
+                <div style="font-size:10px;color:var(--sub);font-family:var(--mono);text-align:center">
+                  ×${actualMult.toFixed(3)}<br>
+                  <span style="color:var(--sub-2)">soll ×${Math.abs(plan.multiplier).toFixed(3)}</span>
+                </div>
+                ${multPct != null ? '<div style="width:80px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:2px"><div style="height:100%;width:' + Math.min(100, Math.max(10, 100 - Math.abs(multPct - 100) * 2.5)) + '%;background:' + symColor + ';border-radius:2px;transition:width .3s"></div></div>' : ''}
+              ` : `<div style="font-size:10px;color:var(--sub-2);text-align:center">Warte auf<br>Live-Daten</div>`}
+            </div>
+
+            <!-- Slave P&L -->
+            <div style="padding:14px 16px;border-left:1px solid var(--border)">
+              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;text-align:right">Slave · ${escapeHtml(plan.slaveFirm||'—')}</div>
+              <div style="font-size:22px;font-weight:800;font-family:var(--mono);color:${pnlColor(slavePnl)};line-height:1;text-align:right">${pnlFmt(slavePnl, '€')}</div>
+              ${live.slaveSide ? `<div style="margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                <span style="font-size:11px;color:var(--sub);font-family:var(--mono)">${live.slaveLots != null ? live.slaveLots.toFixed(3)+' Lots' : ''}</span>
+                <span style="padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${live.slaveSide==='Buy'?'#22c55e18':'#ef444418'};color:${live.slaveSide==='Buy'?'#16a34a':'#dc2626'}">${live.slaveSide}</span>
+              </div>` : '<div style="height:22px"></div>'}
+            </div>
+          </div>
+
+          <!-- ── FOOTER: Gesamt P&L ── -->
+          ${totalPnl != null ? `
+          <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--card)">
+            <span style="font-size:11px;color:var(--sub)">Gesamt P&L (Slave + Master)</span>
+            <span style="font-size:15px;font-weight:800;font-family:var(--mono);color:${pnlColor(totalPnl)}">${pnlFmt(totalPnl)}</span>
+          </div>` : ''}
+
         </div>
       `
     }).join('')
   }
-
   // CSS für pulsierenden Punkt
   ;(function _ltInjectCss(){
     const s = document.createElement('style')
@@ -10372,10 +10370,12 @@
    * markiert Trades automatisch als "läuft" / "erledigt" und trägt P&L ein.
    * ═══════════════════════════════════════════════════════════════ */
   const _atState = {
-    // planId → { dupAccountId, positionId?, openedAt, lastLots, lastPnl }
-    tracked: {},
-    pollTimer: null,
-    polling: false
+    tracked: {},       // planId → { dupAccountId, openedAt, lastLots }
+    pollTimer: null,   // slow poll (10s) — erkennt open/close
+    fastTimer: null,   // fast poll (750ms) — nur wenn Trades laufen
+    fastPolling: false,
+    polling: false,
+    livePnl: {}        // planId → { master, slave, ts }
   }
 
   // Reverse-Lookup: prophosAccountId → duplikumAccountId
@@ -10391,8 +10391,36 @@
   // Vergleicht Duplikum-Lots direkt mit plan.multiplier (masterContracts ignoriert)
   function _atLotsMatch(actual, expected){
     if(!expected || !actual) return false
-    const ratio = actual / expected
+    const ratio = Math.abs(actual) / Math.abs(expected)
     return ratio >= 0.75 && ratio <= 1.25
+  }
+
+  // ── Audio-Notifications ──
+  function _atPlaySound(type){
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      if(type === 'open'){
+        // Zwei aufsteigende Töne (positiv)
+        osc.frequency.setValueAtTime(520, ctx.currentTime)
+        osc.frequency.setValueAtTime(780, ctx.currentTime + 0.12)
+        gain.gain.setValueAtTime(0.18, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.35)
+      } else {
+        // Zwei absteigende Töne (alert)
+        osc.frequency.setValueAtTime(680, ctx.currentTime)
+        osc.frequency.setValueAtTime(440, ctx.currentTime + 0.15)
+        gain.gain.setValueAtTime(0.22, ctx.currentTime)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45)
+        osc.start(ctx.currentTime)
+        osc.stop(ctx.currentTime + 0.45)
+      }
+    }catch(_){}
   }
 
   // Haupt-Poll-Funktion
@@ -10414,7 +10442,6 @@
         if(!plan.slaveAccountId || !plan.multiplier) continue
         const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
         if(!dupId) continue
-        // Match direkt auf multiplier (keine masterContracts nötig)
         const match = positions.find(pos =>
           String(pos.account_id) === String(dupId) &&
           _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
@@ -10436,6 +10463,9 @@
               }
               renderTradePlans()
               if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+              // Trade läuft → Fast Poll starten
+              _atStartFastPoll()
+              _atPlaySound('open')
               _atNotify(
                 `🟢 Trade gestartet: ${plan.masterName || plan.masterFirm}`,
                 `${plan.multiplier} Lots auf ${plan.slaveName || plan.slaveFirm} erkannt`
@@ -10445,7 +10475,7 @@
         }
       }
 
-      // Offene Plans: prüfen ob Position geschlossen wurde → Toast + Complete-Modal
+      // Offene Plans: prüfen ob Position geschlossen wurde → Sound + Modal auto-öffnen
       const runningPlans = tradePlans.filter(p => p.status === 'open')
       for(const plan of runningPlans){
         if(!plan.slaveAccountId || !plan.multiplier) continue
@@ -10477,21 +10507,32 @@
           }catch(_){}
 
           try{
+            // Slave P&L schon mal speichern
             if(slavePl != null){
               await supabase.from('trade_plans').update({ slave_pl: slavePl }).eq('id', plan.id)
               const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
               if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
             }
             delete _atState.tracked[plan.id]
+            delete _atState.livePnl[plan.id]
             renderTradePlans()
             if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl?.toFixed(2)}` : ''
-            _atShowToastWithAction(
+            // Fast Poll stoppen wenn keine offenen Trades mehr
+            if(!tradePlans.some(p => p.status === 'open')) _atStopFastPoll()
+
+            // Sound abspielen
+            _atPlaySound('close')
+
+            // Modal direkt öffnen (kein reines Toast mehr) + Toast als Backup
+            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl.toFixed(2)}` : ''
+            _atShowToast(
               `🔴 Trade geschlossen: ${plan.masterName || plan.masterFirm}`,
-              `${plan.slaveName || plan.slaveFirm}${plStr}`,
-              'Jetzt eintragen →',
-              () => openTradeCompleteModal(plan.id)
+              `${plan.slaveName || plan.slaveFirm}${plStr} · Modal öffnet sich…`
             )
+            // Kurze Verzögerung damit der DOM-Render fertig ist, dann Modal öffnen
+            setTimeout(() => {
+              try{ openTradeCompleteModal(plan.id) }catch(_){}
+            }, 400)
           }catch(_){}
         } else if(stillOpen && !tracking){
           _atState.tracked[plan.id] = {
@@ -10547,15 +10588,82 @@
     setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 15000)
   }
 
+  // ── Fast Poll (750ms) — Live P&L wenn Trades laufen ──
+  async function _atFastPoll(){
+    if(_atState.fastPolling) return
+    const openPlans = tradePlans.filter(p => p.status === 'open')
+    if(!openPlans.length){
+      _atStopFastPoll()
+      return
+    }
+    _atState.fastPolling = true
+    try{
+      // Duplikum: offene Positionen für P&L
+      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      if(!res.ok) return
+      const positions = (res.data && res.data.data) ? res.data.data : []
+      const links = dupGetLinks()
+
+      for(const plan of openPlans){
+        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
+        const slavePos = dupId ? positions.find(pos =>
+          String(pos.account_id) === String(dupId) &&
+          _atLotsMatch(parseFloat(pos.amountLot || 0), plan.multiplier)
+        ) : null
+
+        // Master P&L aus ltState (bereits alle 5s aktuell via ltRefresh)
+        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+        const tsxPos = (ltState.positions?.tsx || []).find(pos =>
+          masterAcc?.topstep && String(pos.accountId) === String(masterAcc.topstep.id)
+        )
+        const mtPos = (ltState.positions?.mt || []).find(pos =>
+          masterAcc?.ma && String(pos.accountId) === String(masterAcc.ma.accountId)
+        )
+        const masterDupId = Object.entries(links).find(([, pId]) => String(pId) === String(plan.masterAccountId))?.[0]
+        const masterDupPos = masterDupId ? (ltState.positions?.dup || []).find(pos =>
+          String(pos.accountId) === String(masterDupId)
+        ) : null
+        const masterPos = tsxPos || mtPos || masterDupPos
+
+        _atState.livePnl[plan.id] = {
+          slave:  slavePos?.pnl != null ? Number(slavePos.pnl) : null,
+          slaveLots: slavePos ? Math.abs(parseFloat(slavePos.amountLot || 0)) : null,
+          slaveSide: slavePos?.side || null,
+          master: masterPos?.pnl != null ? Number(masterPos.pnl) : null,
+          masterLots: masterPos ? Number(masterPos.size || 0) : null,
+          masterSide: masterPos?.side || null,
+          ts: Date.now()
+        }
+      }
+      // Re-render Plan-Overview mit frischen P&L-Daten
+      ltRenderPlanOverview()
+    }catch(_){
+    }finally{
+      _atState.fastPolling = false
+    }
+  }
+
+  function _atStartFastPoll(){
+    if(_atState.fastTimer) return
+    _atFastPoll()
+    _atState.fastTimer = setInterval(_atFastPoll, 750)
+  }
+  function _atStopFastPoll(){
+    if(_atState.fastTimer){ clearInterval(_atState.fastTimer); _atState.fastTimer = null }
+    _atState.fastPolling = false
+  }
+
   // Start/Stop polling
   function atStartPolling(){
     if(_atState.pollTimer) return
-    _atPoll()  // sofort einmal
-    _atState.pollTimer = setInterval(_atPoll, 30_000)
-    console.log('Auto-Tracking: polling started (30s interval)')
+    _atPoll()
+    _atState.pollTimer = setInterval(_atPoll, 10_000)
+    // Fast Poll starten wenn bereits offene Plans vorhanden
+    if(tradePlans.some(p => p.status === 'open')) _atStartFastPoll()
   }
   function atStopPolling(){
     if(_atState.pollTimer){ clearInterval(_atState.pollTimer); _atState.pollTimer = null }
+    _atStopFastPoll()
   }
 
   // Polling starten sobald Duplikum verbunden ist
@@ -11309,6 +11417,11 @@
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
+    // Auto-fokus auf Master P&L damit man sofort tippen kann
+    setTimeout(() => {
+      const masterPlEl = document.getElementById('tc-master-pl')
+      if(masterPlEl){ masterPlEl.focus(); masterPlEl.select() }
+    }, 100)
   }
   function closeTradeCompleteModal(){
     _completingPlanId = null
