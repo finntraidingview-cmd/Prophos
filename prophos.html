@@ -10450,101 +10450,69 @@
   async function _atPoll(){
     if(_atState.polling) return
     if(!dupState.token) return
-    const openPlans = tradePlans.filter(p => p.status === 'open' || p.status === 'planned')
-    if(!openPlans.length) return
-
     _atState.polling = true
     try {
+      // Fetch alle offenen Positionen von Duplikum
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
       if(!res.ok) return
       const positions = (res.data && res.data.data) ? res.data.data : []
-
-      // Hole Master-Positionen einmalig für alle Plans (TSX + MT5 + Duplikum-Master)
-      const masterPositions = [
-        ...(ltState.positions?.tsx || []),
-        ...(ltState.positions?.mt  || []),
-        ...(ltState.positions?.dup || [])
-      ]
-
-      // Hilfsfunktion: Master-Position für einen Plan finden
-      function _atFindMasterPos(plan){
-        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
-        if(!masterAcc) return null
-        // TSX
-        if(masterAcc.topstep){
-          const p = masterPositions.find(pos =>
-            pos.src === 'tsx' && String(pos.accountId) === String(masterAcc.topstep.id))
-          if(p) return p
-        }
-        // MT5
-        if(masterAcc.ma){
-          const p = masterPositions.find(pos =>
-            pos.src === 'mt' && String(pos.accountId) === String(masterAcc.ma.accountId))
-          if(p) return p
-        }
-        // Duplikum-Master
-        const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
-        if(masterDupId){
-          const p = masterPositions.find(pos =>
-            pos.src === 'dup' && String(pos.accountId) === String(masterDupId))
-          if(p) return p
-        }
-        return null
-      }
-
-      // TIMESTAMP-MATCHING: Neue Position auf Master + Slave innerhalb 30s = Trade läuft
-      const plannedPlans = openPlans.filter(p => p.status === 'planned')
       const now = Date.now()
-      const WINDOW = 30_000
 
-      // Für jeden geplanten Plan: neue Positionen auf Master und Slave erkennen
+      // Für jeden geplanten Plan: neue Positionen erkennen und matchen
+      const plannedPlans = tradePlans.filter(p => p.status === 'planned')
       for(const plan of plannedPlans){
-        if(!plan.masterAccountId || !plan.slaveAccountId) continue
         if(_atState.tracked[plan.id]) continue
+        if(!plan.masterAccountId || !plan.slaveAccountId) continue
 
         const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
         const slaveDupId  = _atGetDupIdForAccount(plan.slaveAccountId)
         if(!masterDupId || !slaveDupId) continue
 
-        // Alle Positionen auf Master- bzw Slave-Account
-        const masterPositions = positions.filter(p => String(p.account_id) === String(masterDupId))
-        const slavePositions  = positions.filter(p => String(p.account_id) === String(slaveDupId))
-
-        // Keys für Vergleich (Position-Fingerprint)
-        const masterKeys = new Set(masterPositions.map(p => p.account_id+'-'+p.amountLot+'-'+(p.symbol||'')))
-        const slaveKeys  = new Set(slavePositions.map(p =>  p.account_id+'-'+p.amountLot+'-'+(p.symbol||'')))
-
-        // Initialisiere prevState wenn noch nicht vorhanden (erster Poll)
-        if(!_atState.prevMasterPos[masterDupId]) _atState.prevMasterPos[masterDupId] = new Set(masterKeys)
-        if(!_atState.prevSlavePos[slaveDupId])   _atState.prevSlavePos[slaveDupId]   = new Set(slaveKeys)
-
-        // Neue Keys = in aktuell aber nicht in prev
-        const newMasterKeys = [...masterKeys].filter(k => !_atState.prevMasterPos[masterDupId].has(k))
-        const newSlaveKeys  = [...slaveKeys].filter(k =>  !_atState.prevSlavePos[slaveDupId].has(k))
-
-        // Timestamp für neue Positionen setzen
-        if(newMasterKeys.length > 0) _atState.masterOpenTs[masterDupId] = { ts: now, key: newMasterKeys[0] }
-        if(newSlaveKeys.length  > 0) _atState.slaveOpenTs[slaveDupId]   = { ts: now, key: newSlaveKeys[0]  }
-
-        // Prev-State updaten
-        _atState.prevMasterPos[masterDupId] = new Set(masterKeys)
-        _atState.prevSlavePos[slaveDupId]   = new Set(slaveKeys)
-
-        const masterTs = _atState.masterOpenTs[masterDupId]
-        const slaveTs  = _atState.slaveOpenTs[slaveDupId]
-
-        console.log('[AT]', plan.masterName,
-          'newMaster:', newMasterKeys.length, 'newSlave:', newSlaveKeys.length,
-          'masterTs:', masterTs ? Math.round((now-masterTs.ts)/1000)+'s ago' : 'none',
-          'slaveTs:',  slaveTs  ? Math.round((now-slaveTs.ts)/1000)+'s ago'  : 'none'
+        // Aktuelle Position-Fingerprints auf Master und Slave
+        const masterNow = new Set(
+          positions.filter(p => String(p.account_id) === String(masterDupId))
+                   .map(p => String(p.amountLot) + (p.symbol||'') + (p.side||''))
+        )
+        const slaveNow = new Set(
+          positions.filter(p => String(p.account_id) === String(slaveDupId))
+                   .map(p => String(p.amountLot) + (p.symbol||'') + (p.side||''))
         )
 
-        if(!masterTs || !slaveTs) continue
-        if(Math.abs(masterTs.ts - slaveTs.ts) > WINDOW) continue
+        // Erster Poll für diesen Plan: prev-State initialisieren, noch kein Match
+        const mPrev = _atState.prevMasterPos[masterDupId]
+        const sPrev = _atState.prevSlavePos[slaveDupId]
+        if(!mPrev || !sPrev){
+          _atState.prevMasterPos[masterDupId] = masterNow
+          _atState.prevSlavePos[slaveDupId]   = slaveNow
+          continue  // Kein Match beim ersten Poll
+        }
 
-        // MATCH
-        const matchedSlavePos = slavePositions.find(p => p.account_id+'-'+p.amountLot+'-'+(p.symbol||'') === slaveTs.key)
-        const slaveKey = slaveTs.key
+        // Neue Positionen = in "now" aber nicht in "prev"
+        const newOnMaster = [...masterNow].filter(k => !mPrev.has(k))
+        const newOnSlave  = [...slaveNow].filter(k =>  !sPrev.has(k))
+
+        // Timestamp für neue Positionen merken
+        if(newOnMaster.length) _atState.masterOpenTs[masterDupId] = now
+        if(newOnSlave.length)  _atState.slaveOpenTs[slaveDupId]   = now
+
+        // Prev-State updaten
+        _atState.prevMasterPos[masterDupId] = masterNow
+        _atState.prevSlavePos[slaveDupId]   = slaveNow
+
+        // Match: beide innerhalb 30s neu aufgegangen?
+        const mTs = _atState.masterOpenTs[masterDupId]
+        const sTs = _atState.slaveOpenTs[slaveDupId]
+        if(!mTs || !sTs) continue
+        if(Math.abs(mTs - sTs) > 30000) continue
+
+        // Die neue Slave-Position für Close-Tracking merken
+        const newSlavePos = positions.find(p =>
+          String(p.account_id) === String(slaveDupId) &&
+          newOnSlave.includes(String(p.amountLot) + (p.symbol||'') + (p.side||''))
+        )
+        const slavePosKey = newSlavePos
+          ? String(newSlavePos.amountLot) + (newSlavePos.symbol||'') + (newSlavePos.side||'')
+          : null
 
         try{
           const { data, error } = await supabase
@@ -10554,144 +10522,79 @@
           if(error) throw error
           const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
           if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-          _atState.tracked[plan.id] = { dupAccountId: slaveDupId, masterDupId, openedAt: new Date(), slavePosKey: slaveKey }
+          _atState.tracked[plan.id] = { dupAccountId: slaveDupId, masterDupId, openedAt: new Date(), slavePosKey }
           delete _atState.masterOpenTs[masterDupId]
           delete _atState.slaveOpenTs[slaveDupId]
           renderTradePlans()
           if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
           _atStartFastPoll()
           _atPlaySound('open')
-          const diff = Math.abs(masterTs.ts - slaveTs.ts)
-          _atNotify('🟢 Trade gestartet: '+(plan.masterName||plan.masterFirm), 'Erkannt nach '+Math.round(diff/1000)+'s')
+          _atNotify('🟢 Trade gestartet: '+(plan.masterName||plan.masterFirm||''), 'Erkannt auf Master + Slave')
         }catch(e){ console.error('[AT] open error:', e) }
       }
 
-      // Offene Plans: prüfen ob Slave-Position geschlossen wurde → Sound + Modal
+      // Offene Plans: Slave-Position noch offen?
       const runningPlans = tradePlans.filter(p => p.status === 'open')
       for(const plan of runningPlans){
-        if(!plan.slaveAccountId || !plan.multiplier) continue
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
-        if(!dupId) continue
-
+        if(!plan.slaveAccountId) continue
         const tracking = _atState.tracked[plan.id]
-        if(!tracking) continue  // kein Tracking-Eintrag = manuell gesetzt, skip
+        if(!tracking) continue
 
-        // Prüfe ob genau DIESE Position noch offen ist (via gespeichertem Key)
+        const slaveDupId = tracking.dupAccountId
+        if(!slaveDupId) continue
+
         let stillOpen
         if(tracking.slavePosKey){
-          // Exakter Match auf gespeicherten Position-Key
-          stillOpen = positions.some(pos => {
-            const k = `${pos.side||pos.direction}-${pos.amountLot}-${pos.symbol||''}`
-            return String(pos.account_id) === String(dupId) && k === tracking.slavePosKey
-          })
-        } else {
-          // Fallback (manuell getrackte Plans): ±20% auf Multiplier
-          stillOpen = positions.some(pos =>
-            String(pos.account_id) === String(dupId) &&
-            Math.abs(Math.abs(parseFloat(pos.amountLot||0)) - Math.abs(plan.multiplier)) / Math.abs(plan.multiplier) <= 0.20
+          stillOpen = positions.some(p =>
+            String(p.account_id) === String(slaveDupId) &&
+            (String(p.amountLot)+(p.symbol||'')+(p.side||'')) === tracking.slavePosKey
           )
+        } else {
+          stillOpen = positions.some(p => String(p.account_id) === String(slaveDupId))
         }
 
-        if(!stillOpen && tracking){
-          let slavePl = null
-          try{
-            const closedRes = await dupApi('POST', 'position/getClosedPositions.php', {
-              id_slave: dupId,
-              from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
-              length: 10
-            })
-            if(closedRes.ok){
-              const closed = (closedRes.data && closedRes.data.data) ? closedRes.data.data : []
-              const match = closed
-                .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
-                .find(pos => _atLotsMatch(parseFloat(pos.amountLot||0), plan.multiplier))
-              if(match) slavePl = parseFloat(match.profit || match.pnl || match.pl || 0)
-            }
-          }catch(_){}
+        if(stillOpen) continue
 
-          try{
-            // Slave P&L schon mal speichern
-            if(slavePl != null){
-              await supabase.from('trade_plans').update({ slave_pl: slavePl }).eq('id', plan.id)
-              const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-              if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
-            }
-            delete _atState.tracked[plan.id]
-            delete _atState.livePnl[plan.id]
-            renderTradePlans()
-            if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-            // Fast Poll stoppen wenn keine offenen Trades mehr
-            if(!tradePlans.some(p => p.status === 'open')) _atStopFastPoll()
-
-            // Sound abspielen
-            _atPlaySound('close')
-
-            // Modal direkt öffnen (kein reines Toast mehr) + Toast als Backup
-            const plStr = slavePl != null ? ` · Slave: ${slavePl > 0 ? '+' : ''}${slavePl.toFixed(2)}` : ''
-            _atShowToast(
-              `🔴 Trade geschlossen: ${plan.masterName || plan.masterFirm}`,
-              `${plan.slaveName || plan.slaveFirm}${plStr} · Modal öffnet sich…`
-            )
-            // Kurze Verzögerung damit der DOM-Render fertig ist, dann Modal öffnen
-            setTimeout(() => {
-              try{ openTradeCompleteModal(plan.id) }catch(_){}
-            }, 400)
-          }catch(_){}
-        } else if(stillOpen && !tracking){
-          _atState.tracked[plan.id] = {
-            dupAccountId: dupId,
-            positionId: stillOpen.id || stillOpen.position_id || null,
-            openedAt: plan.startedAt ? new Date(plan.startedAt) : new Date(),
-            lastLots: parseFloat(stillOpen.amountLot || 0)
+        // Position geschlossen → P&L holen und Modal öffnen
+        let slavePl = null
+        try{
+          const cr = await dupApi('POST', 'position/getClosedPositions.php', {
+            id_slave: slaveDupId,
+            from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
+            length: 5
+          })
+          if(cr.ok){
+            const closed = (cr.data?.data || [])
+              .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
+            if(closed[0]) slavePl = parseFloat(closed[0].profit || closed[0].pnl || 0)
           }
-        }
+        }catch(_){}
+
+        try{
+          if(slavePl != null){
+            await supabase.from('trade_plans').update({ slave_pl: slavePl }).eq('id', plan.id)
+            const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+            if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
+          }
+          delete _atState.tracked[plan.id]
+          delete _atState.livePnl[plan.id]
+          renderTradePlans()
+          if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+          if(!tradePlans.some(p => p.status === 'open')) _atStopFastPoll()
+          _atPlaySound('close')
+          const plStr = slavePl != null ? ' · Slave: '+(slavePl>=0?'+':'')+slavePl.toFixed(2) : ''
+          _atShowToast('🔴 Trade geschlossen: '+(plan.masterName||plan.masterFirm||''), (plan.slaveName||'')+plStr)
+          setTimeout(() => { try{ openTradeCompleteModal(plan.id) }catch(_){} }, 400)
+        }catch(e){ console.error('[AT] close error:', e) }
       }
 
     }catch(e){
-      console.warn('AT poll error:', e)
+      console.warn('[AT] poll error:', e)
     }finally{
       _atState.polling = false
     }
   }
 
-  function _atShowToast(title, body){
-    let container = document.getElementById('at-toast-container')
-    if(!container){
-      container = document.createElement('div')
-      container.id = 'at-toast-container'
-      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:400px;width:calc(100vw - 48px)'
-      document.body.appendChild(container)
-    }
-    const toast = document.createElement('div')
-    toast.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
-    toast.innerHTML = `<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">${title}</div><div style="font-size:12px;color:var(--sub)">${body}</div>`
-    container.appendChild(toast)
-    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 5000)
-  }
-
-  function _atShowToastWithAction(title, body, actionLabel, onAction){
-    let container = document.getElementById('at-toast-container')
-    if(!container){
-      container = document.createElement('div')
-      container.id = 'at-toast-container'
-      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
-      document.body.appendChild(container)
-    }
-    const toast = document.createElement('div')
-    toast.style.cssText = 'background:var(--surface);border:1.5px solid var(--violet);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(99,102,241,.2);pointer-events:auto;animation:at-slide-in .25s ease'
-    toast.innerHTML = `
-      <div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:4px">${title}</div>
-      <div style="font-size:12px;color:var(--sub);margin-bottom:10px">${body}</div>
-      <button style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;width:100%">${actionLabel}</button>
-    `
-    const btn = toast.querySelector('button')
-    btn.addEventListener('click', () => { toast.remove(); onAction() })
-    container.appendChild(toast)
-    // Bleibt 15 Sekunden sichtbar (länger als normaler Toast)
-    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 15000)
-  }
-
-  // ── Fast Poll (750ms) — Live P&L wenn Trades laufen ──
   async function _atFastPoll(){
     if(_atState.fastPolling) return
     const openPlans = tradePlans.filter(p => p.status === 'open')
