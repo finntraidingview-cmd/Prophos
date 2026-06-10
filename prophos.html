@@ -10452,20 +10452,23 @@
     if(!dupState.token) return
     _atState.polling = true
     try {
-      // Fetch alle offenen Positionen von Duplikum
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
       if(!res.ok) return
       const positions = (res.data && res.data.data) ? res.data.data : []
       const now = Date.now()
 
-      // Für jeden geplanten Plan: neue Positionen erkennen und matchen
       const plannedPlans = tradePlans.filter(p => p.status === 'planned')
+      console.log('[AT] Poll - positions:', positions.length, 'plannedPlans:', plannedPlans.length, 'time:', new Date().toLocaleTimeString())
+
       for(const plan of plannedPlans){
         if(_atState.tracked[plan.id]) continue
         if(!plan.masterAccountId || !plan.slaveAccountId) continue
 
         const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
         const slaveDupId  = _atGetDupIdForAccount(plan.slaveAccountId)
+
+        console.log('[AT] Plan "'+plan.masterName+'": masterDupId='+masterDupId+' slaveDupId='+slaveDupId)
+
         if(!masterDupId || !slaveDupId) continue
 
         // Aktuelle Position-Fingerprints auf Master und Slave
@@ -10484,12 +10487,17 @@
         if(!mPrev || !sPrev){
           _atState.prevMasterPos[masterDupId] = masterNow
           _atState.prevSlavePos[slaveDupId]   = slaveNow
-          continue  // Kein Match beim ersten Poll
+          console.log('[AT] Plan "'+plan.masterName+'": prevState initialisiert (master:'+masterNow.size+' slave:'+slaveNow.size+')')
+          continue
         }
 
-        // Neue Positionen = in "now" aber nicht in "prev"
         const newOnMaster = [...masterNow].filter(k => !mPrev.has(k))
         const newOnSlave  = [...slaveNow].filter(k =>  !sPrev.has(k))
+
+        console.log('[AT] Plan "'+plan.masterName+'": newMaster='+newOnMaster.length+' newSlave='+newOnSlave.length+
+          ' masterTs='+(  _atState.masterOpenTs[masterDupId] ? Math.round((now-_atState.masterOpenTs[masterDupId])/1000)+'s' : 'none')+
+          ' slaveTs='+(   _atState.slaveOpenTs[slaveDupId]   ? Math.round((now-_atState.slaveOpenTs[slaveDupId])/1000)+'s'   : 'none')
+        )
 
         // Timestamp für neue Positionen merken
         if(newOnMaster.length) _atState.masterOpenTs[masterDupId] = now
@@ -10674,9 +10682,9 @@
   // Start/Stop polling
   function atStartPolling(){
     if(_atState.pollTimer) return
+    console.log('[AT] Polling gestartet')
     _atPoll()
     _atState.pollTimer = setInterval(_atPoll, 10_000)
-    // Fast Poll starten wenn bereits offene Plans vorhanden
     if(tradePlans.some(p => p.status === 'open')) _atStartFastPoll()
   }
   function atStopPolling(){
