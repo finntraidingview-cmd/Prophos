@@ -5898,6 +5898,8 @@
       const dupId    = String(dupAcc.account_id || '')
       const dupLogin = String(dupAcc.login || dupAcc.name || '').trim()
 
+      console.log('[AutoConnect] dupAcc:', dupId, 'login='+dupLogin, 'name='+(dupAcc.name||''))
+
       if(!dupLogin) continue
 
       // Bereits verknüpft → überspringen
@@ -10419,6 +10421,21 @@
   }
 
   // ── Audio-Notifications ──
+  function _atShowToast(title, body){
+    let container = document.getElementById('at-toast-container')
+    if(!container){
+      container = document.createElement('div')
+      container.id = 'at-toast-container'
+      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
+      document.body.appendChild(container)
+    }
+    const toast = document.createElement('div')
+    toast.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
+    toast.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">'+title+'</div><div style="font-size:12px;color:var(--sub)">'+body+'</div>'
+    container.appendChild(toast)
+    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 6000)
+  }
+
   function _atPlaySound(type){
     try{
       const ctx = new (window.AudioContext || window.webkitAudioContext)()
@@ -10615,51 +10632,60 @@
     }
     _atState.fastPolling = true
     try{
-      // Duplikum: offene Positionen für P&L
-      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      if(!res.ok) return
-      const positions = (res.data && res.data.data) ? res.data.data : []
+      // P&L aus ltState holen (wird alle 5s von ltRefresh aktualisiert)
+      // Kein extra API-Call nötig
       const links = dupGetLinks()
 
       for(const plan of openPlans){
-        const dupId = _atGetDupIdForAccount(plan.slaveAccountId)
         const tracking = _atState.tracked[plan.id]
 
-        // Slave-Position: exakter Key wenn vorhanden, sonst Lots-Fallback
+        // Slave P&L: aus MT5 (MetaApi) wenn Slave-Account verbunden
+        const slaveAcc = (accounts || []).find(a => String(a.id) === String(plan.slaveAccountId))
         let slavePos = null
-        if(dupId){
-          if(tracking?.slavePosKey){
-            // Exakter Match auf die beim Open gemerkte Position
-            slavePos = positions.find(pos => {
-              const k = `${pos.side||pos.direction}-${pos.amountLot}-${pos.symbol||''}`
-              return String(pos.account_id) === String(dupId) && k === tracking.slavePosKey
-            })
-          } else {
-            // Fallback: irgendeIne Position auf dem Slave-Account
-            slavePos = positions.find(pos => String(pos.account_id) === String(dupId))
+        // 1. MetaApi (Finn V1)
+        if(slaveAcc?.ma){
+          slavePos = (ltState.positions?.mt || []).find(pos =>
+            String(pos.accountId) === String(slaveAcc.ma.accountId)
+          )
+        }
+        // 2. Duplikum-ltState (falls dort P&L vorhanden)
+        if(!slavePos){
+          const sDupId = _atGetDupIdForAccount(plan.slaveAccountId)
+          if(sDupId){
+            slavePos = (ltState.positions?.dup || []).find(pos =>
+              String(pos.accountId) === String(sDupId)
+            )
           }
         }
 
-        // Master P&L aus ltState (bereits alle 5s aktuell via ltRefresh)
+        // Master P&L: aus TSX oder MT5
         const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
-        const tsxPos = (ltState.positions?.tsx || []).find(pos =>
-          masterAcc?.topstep && String(pos.accountId) === String(masterAcc.topstep.id)
-        )
-        const mtPos = (ltState.positions?.mt || []).find(pos =>
-          masterAcc?.ma && String(pos.accountId) === String(masterAcc.ma.accountId)
-        )
-        const masterDupId = Object.entries(links).find(([, pId]) => String(pId) === String(plan.masterAccountId))?.[0]
-        const masterDupPos = masterDupId ? (ltState.positions?.dup || []).find(pos =>
-          String(pos.accountId) === String(masterDupId)
-        ) : null
-        const masterPos = tsxPos || mtPos || masterDupPos
+        let masterPos = null
+        if(masterAcc?.topstep){
+          masterPos = (ltState.positions?.tsx || []).find(pos =>
+            String(pos.accountId) === String(masterAcc.topstep.id)
+          )
+        }
+        if(!masterPos && masterAcc?.ma){
+          masterPos = (ltState.positions?.mt || []).find(pos =>
+            String(pos.accountId) === String(masterAcc.ma.accountId)
+          )
+        }
+        if(!masterPos){
+          const mDupId = _atGetDupIdForAccount(plan.masterAccountId)
+          if(mDupId){
+            masterPos = (ltState.positions?.dup || []).find(pos =>
+              String(pos.accountId) === String(mDupId)
+            )
+          }
+        }
 
         _atState.livePnl[plan.id] = {
-          slave:  slavePos?.pnl != null ? Number(slavePos.pnl) : null,
-          slaveLots: slavePos ? Math.abs(parseFloat(slavePos.amountLot || 0)) : null,
-          slaveSide: slavePos?.side || null,
-          master: masterPos?.pnl != null ? Number(masterPos.pnl) : null,
-          masterLots: masterPos ? Number(masterPos.size || 0) : null,
+          slave:      slavePos?.pnl  != null ? Number(slavePos.pnl)  : null,
+          slaveLots:  slavePos ? Math.abs(Number(slavePos.size || 0)) : null,
+          slaveSide:  slavePos?.side || null,
+          master:     masterPos?.pnl != null ? Number(masterPos.pnl) : null,
+          masterLots: masterPos ? Number(masterPos.size || 0)        : null,
           masterSide: masterPos?.side || null,
           ts: Date.now()
         }
@@ -10687,7 +10713,7 @@
     if(_atState.pollTimer) return
     console.log('[AT] Polling gestartet')
     _atPoll()
-    _atState.pollTimer = setInterval(_atPoll, 10_000)
+    _atState.pollTimer = setInterval(_atPoll, 20_000)  // 20s — Rate Limit: 20/min
     if(tradePlans.some(p => p.status === 'open')) _atStartFastPoll()
   }
   function atStopPolling(){
