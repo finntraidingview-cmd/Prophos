@@ -10450,6 +10450,7 @@
     try{
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
       console.log('[AT] res ok='+res.ok+' keys='+JSON.stringify(Object.keys(res.data||{})) +' positions='+(res.data?.data?.length??'?')+' code='+res.data?.code)
+      if(res.data?.data?.length > 0) console.log('[AT] sample pos:', JSON.stringify(res.data.data[0]))
       if(!res.ok || res.data?.code === 0) return  // Rate limit oder Fehler
       const positions = res.data?.data || res.data || []
       if(!Array.isArray(positions)){ console.log('[AT] not array'); return }
