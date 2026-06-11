@@ -10538,19 +10538,19 @@
           const mTs = _at.newPosTs['m_'+mDupId]
           if(!mTs) continue  // Master-Orders da aber keine neue → skip
           if(Math.abs(mTs - sTs) > WINDOW) continue
-          console.log('[AT] MATCH (master+slave):', plan.masterName, '→', plan.slaveName)
+          console.log('[AT] MATCH (master+slave):', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
         } else {
           // Keine Master-Orders verfügbar → nur Slave reicht
           console.log('[AT] MATCH (slave only):', plan.masterName, '→', plan.slaveName)
         }
 
-        // Match — beide innerhalb 30s neue Position
-        console.log('[AT] MATCH:', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
-
-        const slaveNewPos = positions.find(p =>
-          String(p.account_id) === String(sDupId) &&
-          !(_at.prevPos[sDupId] && _at.prevPos[sDupId].has(String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')))
-        ) || positions.find(p => String(p.account_id) === String(sDupId))
+        // Extra check: slave Position enthält master_id → direkter Match möglich
+        // (aus sample pos: {"account_id":"pKwSZJqKh","master_id":"SZVUhJqKh",...})
+        const slaveNewPos = positions.find(p => {
+          if(String(p.account_id) !== String(sDupId)) return false
+          const key = String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')
+          return !(_at.prevPos[sDupId] && _at.prevPos[sDupId].has(key))
+        }) || positions.find(p => String(p.account_id) === String(sDupId))
 
         const slaveKey = slaveNewPos
           ? String(slaveNewPos.amountLot)+(slaveNewPos.symbol||'')+(slaveNewPos.side||slaveNewPos.direction||'')
