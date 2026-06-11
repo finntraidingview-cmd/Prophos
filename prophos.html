@@ -10557,8 +10557,20 @@
           ? String(newSlavePos.amountLot)+(newSlavePos.symbol||'')+(newSlavePos.side||newSlavePos.direction||'')
           : null
 
-        const slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===sDupId)?.balance ?? null
-        const masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===mDupId)?.balance ?? null
+        // Frische Balances beim Trade-Start holen (nicht gecachten State nutzen)
+        let slaveBalStart = null, masterBalStart = null
+        try{
+          const balRes = await dupApi('POST', 'account/getAccounts.php', {})
+          if(balRes.ok && balRes.data?.accounts){
+            const accs = balRes.data.accounts
+            slaveBalStart  = accs.find(a=>String(a.account_id)===sDupId)?.balance ?? null
+            masterBalStart = accs.find(a=>String(a.account_id)===mDupId)?.balance ?? null
+          }
+        }catch(_){
+          // Fallback auf gecachten State
+          slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===sDupId)?.balance ?? null
+          masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===mDupId)?.balance ?? null
+        }
 
         try{
           const {data, error} = await supabase.from('trade_plans')
@@ -10596,19 +10608,23 @@
         const slaveAcc = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
 
         // Slave P&L: NUR via MetaApi — kein Balance-Diff Fallback
-        // (Slave hat mehrere parallele Trades → Balance-Diff ungenau)
         if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
           try{
-            const from = encodeURIComponent(new Date(tr.openedAt.getTime()-5000).toISOString())
+            const from = encodeURIComponent(tr.openedAt.toISOString())
             const to   = encodeURIComponent(new Date().toISOString())
             const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+from+'&endTime='+to,
               {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
             if(r.ok){
               const d = await r.json()
               const list = Array.isArray(d) ? d : (d.deals||[])
-              // Nur OUT-Deals (geschlossene Positionen) im Zeitraum
-              const closed = list.filter(x => x.profit!=null && (x.entryType==='DEAL_ENTRY_OUT' || x.type==='DEAL_TYPE_SELL' || x.type==='DEAL_TYPE_BUY'))
-              if(closed.length > 0) slavePl = Math.round(closed.reduce((s,x)=>s+Number(x.profit),0)*100)/100
+              // Nur Deals mit echtem P&L, sortiert nach Zeit → neuester zuerst
+              const relevant = list
+                .filter(x => x.profit != null && Number(x.profit) !== 0)
+                .sort((a,b) => new Date(b.time||b.brokerTime||0) - new Date(a.time||a.brokerTime||0))
+              // Den neuesten Deal nehmen (= der zuletzt geschlossene Trade)
+              if(relevant.length > 0){
+                slavePl = Math.round(Number(relevant[0].profit)*100)/100
+              }
             }
           }catch(_){}
         }
