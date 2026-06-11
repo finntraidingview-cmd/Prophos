@@ -10534,7 +10534,11 @@
         const sTs = _at.newPosTs['s_'+sDupId] || 0
         const mTs = _at.newPosTs['m_'+mDupId] || 0
 
-        // Wenn Slave neue Position hat aber Master kein Timestamp:
+        // Debug: welche master account_ids sind in masterOrders?
+        if(sTs && !mTs){
+          const masterAccIds = [...new Set(masterOrders.map(o=>o.account_id))].join(',')
+          console.log('[AT] mDupId='+mDupId+' masterOrders account_ids='+masterAccIds)
+        }
         // prüfe ob Master überhaupt Orders in getMasterOrders hat (= Master ist aktiv)
         let effectiveMTs = mTs
         if(sTs && !mTs){
