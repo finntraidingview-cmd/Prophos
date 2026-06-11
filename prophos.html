@@ -10458,6 +10458,7 @@
       }
       const positions    = Array.isArray(res.data?.data) ? res.data.data : []
       const masterOrders = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
+      console.log('[AT] pos='+positions.length+' masterOrders='+masterOrders.length+' prevAccounts='+Object.keys(_at.prevPos).filter(k=>!k.startsWith('m_')).length)
       const now = Date.now()
       const WINDOW = 60_000  // 60s Fenster
 
@@ -10475,6 +10476,7 @@
         const newKeys = [...keys].filter(k => !prev.has(k))
         if(newKeys.length > 0){
           for(const k of newKeys) _at.newPosTs[aid+':'+k] = now
+          console.log('[AT] ✓ slave', aid, 'new='+newKeys.length, 'ts set')
         }
         _at.prevPos[aid] = keys
       }
@@ -10492,12 +10494,17 @@
         const prev = _at.prevPos['m_'+aid]
         if(!prev){ _at.prevPos['m_'+aid] = keys; continue }  // init only
         const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0) _at.newPosTs['m_'+aid] = now
+        if(newKeys.length > 0){
+          _at.newPosTs['m_'+aid] = now
+          console.log('[AT] ✓ master', aid, 'new='+newKeys.length, 'ts set')
+        }
         _at.prevPos['m_'+aid] = keys
       }
 
       // ── Schritt 3: Matchen ──
       const planned = tradePlans.filter(p => p.status === 'planned')
+      const tsKeys = Object.keys(_at.newPosTs)
+      if(tsKeys.length > 0) console.log('[AT] newPosTs:', tsKeys.map(k=>k+':'+(now-_at.newPosTs[k])+'ms').join(' | '))
       for(const plan of planned){
         if(_at.tracked[plan.id]) continue
         const sDupId = _atDupId(plan.slaveAccountId)
