@@ -10314,11 +10314,16 @@
         </div>
       `
     }else if(isOpen){
+      const isClosed = _at?.needsCompletion?.[p.id]
       actions = `
         <div class="tc-row" style="justify-content:flex-end">
+          ${isClosed ? `<div style="display:flex;align-items:center;gap:8px;padding:4px 10px;background:#ef444418;border:1px solid #ef444440;border-radius:8px;margin-right:8px">
+            <span style="width:8px;height:8px;border-radius:50%;background:#dc2626;display:inline-block"></span>
+            <span style="font-size:12px;font-weight:600;color:#dc2626">Trade geschlossen — bitte eintragen</span>
+          </div>` : ''}
           <div class="tc-actions">
             <button class="btn btn-ghost" data-plan-back="${p.id}" style="padding:5px 11px;font-size:12px">Zurück zu Geplant</button>
-            <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px">Erledigt</button>
+            <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px${isClosed ? ';background:#dc2626;border-color:#dc2626' : ''}">Erledigt</button>
           </div>
         </div>
       `
@@ -10362,7 +10367,11 @@
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
     })
     document.querySelectorAll('[data-plan-complete]').forEach(btn => {
-      btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planComplete))
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.planComplete
+        if(_at?.needsCompletion) delete _at.needsCompletion[id]
+        openTradeCompleteModal(id)
+      })
     })
     document.querySelectorAll('[data-plan-edit-completed]').forEach(btn => {
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planEditCompleted))
@@ -10401,7 +10410,8 @@
     tracked:       {},
     prevPos:       {},
     newPosTs:      {},
-    livePnl:       {}
+    livePnl:       {},
+    needsCompletion: {}  // planId → true wenn Trade geschlossen aber noch nicht eingetragen
   }
 
   // ── Hilfsfunktionen ──
@@ -10648,12 +10658,15 @@
           if(idx>=0) tradePlans[idx]={...tradePlans[idx],...(slavePl!=null?{slavePl}:{}),...(masterPl!=null?{masterPl}:{})}
           delete _at.tracked[plan.id]
           delete _at.livePnl[plan.id]
+          // Plan bleibt auf "Offen" aber wird als "muss eingetragen werden" markiert
+          _at.needsCompletion = _at.needsCompletion || {}
+          _at.needsCompletion[plan.id] = true
           renderTradePlans()
           if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
           _atSound('close')
           const pl=slavePl!=null?' · '+(slavePl>=0?'+':'')+slavePl.toFixed(2)+'€':''
-          _atToast('🔴 '+plan.masterName+' geschlossen', (plan.slaveName||'')+pl, 15000)
-          setTimeout(()=>{ if(typeof openTradeCompleteModal==='function') openTradeCompleteModal(plan.id) },500)
+          _atToast('🔴 '+plan.masterName+' geschlossen', (plan.slaveName||'')+pl+' · Bitte eintragen', 20000)
+          // Kein Auto-Popup — User klickt selbst auf "Erledigen"
         }catch(e){ console.error('[AT] close error:', e) }
       }
 
