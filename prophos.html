@@ -5935,7 +5935,7 @@
       ? `✓ ${connected} Account${connected > 1 ? 's' : ''} verknüpft${skipped > 0 ? ` · ${skipped} ohne Match` : ''}`
       : `Keine neuen Matches${skipped > 0 ? ` · ${skipped} Duplikum-Accounts ohne passende Externe ID` : ''}`
     // Toast nur zeigen wenn manuell oder wenn etwas verknüpft wurde
-    if(!silent || connected > 0) _atShowToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
+    if(!silent || connected > 0) _atToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
 
     if(!silent && btn){
       btn.disabled = false
@@ -6324,7 +6324,7 @@
     const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
 
     const _html = openPlans.map(plan => {
-      const live = _atState.livePnl[plan.id] || {}
+      const live = _at.livePnl[plan.id] || {}
       const slavePnl  = live.slave  != null ? live.slave  : null
       const masterPnl = live.master != null ? live.master : null
       const totalPnl  = slavePnl != null && masterPnl != null ? slavePnl + masterPnl
@@ -6365,7 +6365,7 @@
         : (n >= 0 ? '+' : '') + n.toFixed(2) + (ccy ? ' '+ccy : '')
 
       // ── Laufzeit ──
-      const tracking = _atState.tracked[plan.id]
+      const tracking = _at.tracked[plan.id]
       const since = tracking?.openedAt ? (() => {
         const s = Math.round((Date.now() - tracking.openedAt) / 1000)
         if(s < 60) return s + 's'
@@ -10385,162 +10385,132 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════
-   * AUTO-TRACKING ENGINE
-   * Pollt Duplikum alle 30s, matched offene Positionen mit Trade Plans,
-   * markiert Trades automatisch als "läuft" / "erledigt" und trägt P&L ein.
+   * AUTO-TRACKING ENGINE — v3 clean
+   * Erkennt Trade-Start wenn auf beiden Accounts (Master+Slave) in
+   * den letzten 30s eine neue Position aufgetaucht ist.
    * ═══════════════════════════════════════════════════════════════ */
-  const _atState = {
-    tracked: {},        // planId → { dupAccountId, openedAt, lastLots }
-    pollTimer: null,    // slow poll (10s) — erkennt open/close
-    fastTimer: null,    // fast poll (750ms) — nur wenn Trades laufen
-    fastPolling: false,
-    polling: false,
-    livePnl: {},        // planId → { master, slave, ts }
-    // Timestamp-Matching: wenn Master-Position neu aufgeht, Timestamp merken
-    masterOpenTs: {},   // masterAccountId → { ts, side, size, symbol }
-    slaveOpenTs: {},    // slaveAccountId (dupId) → { ts, side, size, symbol }
-    prevMasterPos: {},  // masterAccountId → Set von position-keys (für change detection)
-    prevSlavePos: {},   // dupId → Set von position-keys
+
+  // ── State ──
+  const _at = {
+    timer:    null,
+    running:  false,
+    // planId → { slaveDupId, masterDupId, openedAt, slavePosKey, slaveBalStart, masterBalStart }
+    tracked:  {},
+    // dupAccountId → Set<positionKey> — Stand vom letzten Poll
+    prevPos:  {},
+    // dupAccountId → timestamp (ms) — wann neue Position zuletzt erkannt
+    newPosTs: {},
+    // livePnl: planId → { slave, master, slaveLots, slaveSide, masterLots, masterSide, ts }
+    livePnl:  {}
   }
 
-  // Reverse-Lookup: prophosAccountId → duplikumAccountId
-  function _atGetDupIdForAccount(prophosAccountId){
-    const links = dupGetLinks()  // { dupId: prophosId }
-    for(const [dupId, pId] of Object.entries(links)){
-      if(String(pId) === String(prophosAccountId)) return dupId
+  // ── Hilfsfunktionen ──
+
+  function _atDupId(prophosAccountId){
+    const links = dupGetLinks()
+    for(const [dId, pId] of Object.entries(links)){
+      if(String(pId) === String(prophosAccountId)) return dId
     }
     return null
   }
 
-  // Toleranz-Vergleich für Lot-Größen (±25% wegen Rundung)
-  // Vergleicht Duplikum-Lots direkt mit plan.multiplier (masterContracts ignoriert)
-  function _atLotsMatch(actual, expected){
-    if(!expected || !actual) return false
-    const ratio = Math.abs(actual) / Math.abs(expected)
-    return ratio >= 0.98 && ratio <= 1.02  // ±2%
-  }
-
-  // ── Audio-Notifications ──
-  function _atShowToast(title, body){
-    let container = document.getElementById('at-toast-container')
-    if(!container){
-      container = document.createElement('div')
-      container.id = 'at-toast-container'
-      container.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
-      document.body.appendChild(container)
+  function _atToast(title, body, duration = 6000){
+    let c = document.getElementById('at-toast-container')
+    if(!c){
+      c = document.createElement('div')
+      c.id = 'at-toast-container'
+      c.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
+      document.body.appendChild(c)
     }
-    const toast = document.createElement('div')
-    toast.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
-    toast.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">'+title+'</div><div style="font-size:12px;color:var(--sub)">'+body+'</div>'
-    container.appendChild(toast)
-    setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity .3s'; setTimeout(()=>toast.remove(),350) }, 6000)
+    const t = document.createElement('div')
+    t.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
+    t.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">'+title+'</div><div style="font-size:12px;color:var(--sub)">'+body+'</div>'
+    c.appendChild(t)
+    setTimeout(() => { t.style.transition='opacity .3s'; t.style.opacity='0'; setTimeout(()=>t.remove(),350) }, duration)
   }
 
-  function _atPlaySound(type){
+  function _atSound(type){
     try{
-      const ctx = new (window.AudioContext || window.webkitAudioContext)()
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      if(type === 'open'){
-        // Zwei aufsteigende Töne (positiv)
-        osc.frequency.setValueAtTime(520, ctx.currentTime)
-        osc.frequency.setValueAtTime(780, ctx.currentTime + 0.12)
-        gain.gain.setValueAtTime(0.18, ctx.currentTime)
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
-        osc.start(ctx.currentTime)
-        osc.stop(ctx.currentTime + 0.35)
-      } else {
-        // Zwei absteigende Töne (alert)
-        osc.frequency.setValueAtTime(680, ctx.currentTime)
-        osc.frequency.setValueAtTime(440, ctx.currentTime + 0.15)
-        gain.gain.setValueAtTime(0.22, ctx.currentTime)
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45)
-        osc.start(ctx.currentTime)
-        osc.stop(ctx.currentTime + 0.45)
-      }
+      const ctx = new (window.AudioContext||window.webkitAudioContext)()
+      const osc = ctx.createOscillator(), gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      if(type==='open'){ osc.frequency.setValueAtTime(520,ctx.currentTime); osc.frequency.setValueAtTime(780,ctx.currentTime+.12); gain.gain.setValueAtTime(.18,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.35); osc.start(ctx.currentTime); osc.stop(ctx.currentTime+.35) }
+      else             { osc.frequency.setValueAtTime(680,ctx.currentTime); osc.frequency.setValueAtTime(440,ctx.currentTime+.15); gain.gain.setValueAtTime(.22,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.45); osc.start(ctx.currentTime); osc.stop(ctx.currentTime+.45) }
     }catch(_){}
   }
 
-  // Haupt-Poll-Funktion
+  // ── Haupt-Poll (alle 15s) ──
+
   async function _atPoll(){
-    if(_atState.polling) return
+    if(_at.running) return
     if(!dupState.token) return
-    _atState.polling = true
-    try {
+    _at.running = true
+    try{
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      console.log('[AT] raw response: ok='+res.ok+' dataKeys='+JSON.stringify(Object.keys(res.data||{}))+(res.data?.error ? ' ERROR='+res.data.error : '')+(res.data?.code ? ' CODE='+res.data.code : ''))
-      if(!res.ok) return
-      const positions = (res.data && res.data.data) ? res.data.data
-                      : Array.isArray(res.data) ? res.data
-                      : []
+      if(!res.ok || res.data?.code === 0) return  // Rate limit oder Fehler
+      const positions = res.data?.data || res.data || []
+      if(!Array.isArray(positions)) return
       const now = Date.now()
+      const WINDOW = 30_000  // 30s Erkennungsfenster
 
-      const plannedPlans = tradePlans.filter(p => p.status === 'planned')
-      console.log('[AT] Poll - positions:', positions.length, 'plannedPlans:', plannedPlans.length, 'time:', new Date().toLocaleTimeString())
+      // ── Schritt 1: Neue Positionen pro Account erkennen ──
+      // Baue neue prevPos-Snapshots
+      const newPrev = {}
+      for(const pos of positions){
+        const aid = String(pos.account_id)
+        const key = String(pos.amountLot) + (pos.symbol||'') + (pos.side||pos.direction||'')
+        if(!newPrev[aid]) newPrev[aid] = new Set()
+        newPrev[aid].add(key)
+      }
 
-      for(const plan of plannedPlans){
-        if(_atState.tracked[plan.id]) continue
-        if(!plan.masterAccountId || !plan.slaveAccountId) continue
-
-        const masterDupId = _atGetDupIdForAccount(plan.masterAccountId)
-        const slaveDupId  = _atGetDupIdForAccount(plan.slaveAccountId)
-
-        console.log('[AT] Plan "'+plan.masterName+'": masterDupId='+masterDupId+' slaveDupId='+slaveDupId)
-
-        if(!masterDupId || !slaveDupId) continue
-
-        // Aktuelle Position-Fingerprints auf Master und Slave
-        const masterNow = new Set(
-          positions.filter(p => String(p.account_id) === String(masterDupId))
-                   .map(p => String(p.amountLot) + (p.symbol||'') + (p.side||''))
-        )
-        const slaveNow = new Set(
-          positions.filter(p => String(p.account_id) === String(slaveDupId))
-                   .map(p => String(p.amountLot) + (p.symbol||'') + (p.side||''))
-        )
-
-        // Erster Poll für diesen Plan: prev-State initialisieren, noch kein Match
-        const mPrev = _atState.prevMasterPos[masterDupId]
-        const sPrev = _atState.prevSlavePos[slaveDupId]
-        if(!mPrev || !sPrev){
-          _atState.prevMasterPos[masterDupId] = masterNow
-          _atState.prevSlavePos[slaveDupId]   = slaveNow
-          console.log('[AT] Plan "'+plan.masterName+'": prevState initialisiert (master:'+masterNow.size+' slave:'+slaveNow.size+')')
+      // Vergleiche mit vorherigem Snapshot — neue Keys = neue Positionen
+      for(const [aid, keys] of Object.entries(newPrev)){
+        const prev = _at.prevPos[aid]
+        if(!prev){
+          // Erster Poll für diesen Account: nur initialisieren, kein Timestamp
+          _at.prevPos[aid] = keys
           continue
         }
+        const hasNew = [...keys].some(k => !prev.has(k))
+        if(hasNew){
+          _at.newPosTs[aid] = now
+          console.log('[AT] Neue Position auf Account', aid, 'um', new Date().toLocaleTimeString())
+        }
+        _at.prevPos[aid] = keys
+      }
+      // Accounts die jetzt leer sind: auch updaten
+      for(const aid of Object.keys(_at.prevPos)){
+        if(!newPrev[aid]) _at.prevPos[aid] = new Set()
+      }
 
-        const newOnMaster = [...masterNow].filter(k => !mPrev.has(k))
-        const newOnSlave  = [...slaveNow].filter(k =>  !sPrev.has(k))
+      // ── Schritt 2: Geplante Plans matchen ──
+      const planned = tradePlans.filter(p => p.status === 'planned')
+      for(const plan of planned){
+        if(_at.tracked[plan.id]) continue
 
-        console.log('[AT] Plan "'+plan.masterName+'": newMaster='+newOnMaster.length+' newSlave='+newOnSlave.length+
-          ' masterTs='+(  _atState.masterOpenTs[masterDupId] ? Math.round((now-_atState.masterOpenTs[masterDupId])/1000)+'s' : 'none')+
-          ' slaveTs='+(   _atState.slaveOpenTs[slaveDupId]   ? Math.round((now-_atState.slaveOpenTs[slaveDupId])/1000)+'s'   : 'none')
-        )
+        const mDupId = _atDupId(plan.masterAccountId)
+        const sDupId = _atDupId(plan.slaveAccountId)
+        if(!mDupId || !sDupId) continue
 
-        // Timestamp für neue Positionen merken
-        if(newOnMaster.length) _atState.masterOpenTs[masterDupId] = now
-        if(newOnSlave.length)  _atState.slaveOpenTs[slaveDupId]   = now
-
-        // Prev-State updaten
-        _atState.prevMasterPos[masterDupId] = masterNow
-        _atState.prevSlavePos[slaveDupId]   = slaveNow
-
-        // Match: beide innerhalb 30s neu aufgegangen?
-        const mTs = _atState.masterOpenTs[masterDupId]
-        const sTs = _atState.slaveOpenTs[slaveDupId]
+        const mTs = _at.newPosTs[mDupId]
+        const sTs = _at.newPosTs[sDupId]
         if(!mTs || !sTs) continue
-        if(Math.abs(mTs - sTs) > 30000) continue
+        if(Math.abs(mTs - sTs) > WINDOW) continue
 
-        // Die neue Slave-Position für Close-Tracking merken
-        const newSlavePos = positions.find(p =>
-          String(p.account_id) === String(slaveDupId) &&
-          newOnSlave.includes(String(p.amountLot) + (p.symbol||'') + (p.side||''))
-        )
-        const slavePosKey = newSlavePos
-          ? String(newSlavePos.amountLot) + (newSlavePos.symbol||'') + (newSlavePos.side||'')
+        // Match — beide innerhalb 30s neue Position
+        console.log('[AT] MATCH:', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
+
+        const slaveNewPos = positions.find(p =>
+          String(p.account_id) === String(sDupId) &&
+          !(_at.prevPos[sDupId] && _at.prevPos[sDupId].has(String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')))
+        ) || positions.find(p => String(p.account_id) === String(sDupId))
+
+        const slaveKey = slaveNewPos
+          ? String(slaveNewPos.amountLot)+(slaveNewPos.symbol||'')+(slaveNewPos.side||slaveNewPos.direction||'')
           : null
+
+        const slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===String(sDupId))?.balance ?? null
+        const masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===String(mDupId))?.balance ?? null
 
         try{
           const { data, error } = await supabase
@@ -10548,210 +10518,154 @@
             .update({ status: 'open', started_at: new Date().toISOString() })
             .eq('id', plan.id).select('*').single()
           if(error) throw error
-          const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-          if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-          _atState.tracked[plan.id] = { dupAccountId: slaveDupId, masterDupId, openedAt: new Date(), slavePosKey }
-          delete _atState.masterOpenTs[masterDupId]
-          delete _atState.slaveOpenTs[slaveDupId]
+          const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
+          if(idx>=0) tradePlans[idx] = rowToPlan(data)
+          _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slaveKey, slaveBalStart, masterBalStart }
+          // Timestamps zurücksetzen damit kein anderer Plan denselben Match klaut
+          delete _at.newPosTs[mDupId]
+          delete _at.newPosTs[sDupId]
           renderTradePlans()
           if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-          _atStartFastPoll()
-          _atPlaySound('open')
-          _atShowToast('\u{1F7E2} Trade gestartet: '+(plan.masterName||plan.masterFirm||''), 'Master + Slave erkannt')
+          _atSound('open')
+          _atToast('🟢 Trade gestartet: '+(plan.masterName||plan.masterFirm||''), 'Master + Slave erkannt')
         }catch(e){ console.error('[AT] open error:', e) }
       }
 
-      // Offene Plans: Slave-Position noch offen?
-      const runningPlans = tradePlans.filter(p => p.status === 'open')
-      for(const plan of runningPlans){
-        if(!plan.slaveAccountId) continue
-        const tracking = _atState.tracked[plan.id]
-        if(!tracking) continue
+      // ── Schritt 3: Offene Plans — Position noch offen? ──
+      const open = tradePlans.filter(p => p.status === 'open')
+      for(const plan of open){
+        const tr = _at.tracked[plan.id]
+        if(!tr) continue  // manuell auf offen gesetzt — skip
 
-        const slaveDupId = tracking.dupAccountId
-        if(!slaveDupId) continue
-
+        const sDupId = tr.slaveDupId
         let stillOpen
-        if(tracking.slavePosKey){
+        if(tr.slaveKey){
           stillOpen = positions.some(p =>
-            String(p.account_id) === String(slaveDupId) &&
-            (String(p.amountLot)+(p.symbol||'')+(p.side||'')) === tracking.slavePosKey
+            String(p.account_id)===String(sDupId) &&
+            (String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')) === tr.slaveKey
           )
         } else {
-          stillOpen = positions.some(p => String(p.account_id) === String(slaveDupId))
+          stillOpen = positions.some(p => String(p.account_id)===String(sDupId))
         }
-
         if(stillOpen) continue
 
-        // Position geschlossen → P&L holen und Modal öffnen
-        let slavePl = null
+        // Geschlossen → P&L ermitteln
+        let slavePl = null, masterPl = null
+
+        // Slave: MetaApi wenn verfügbar
+        const slaveAcc = (accounts||[]).find(a=>String(a.id)===String(plan.slaveAccountId))
+        if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
+          try{
+            const from = new Date(tr.openedAt.getTime()-5000).toISOString()
+            const to   = new Date().toISOString()
+            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+encodeURIComponent(from)+'&endTime='+encodeURIComponent(to),
+              { headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId} })
+            if(r.ok){
+              const d = await r.json().catch(()=>({}))
+              const list = Array.isArray(d) ? d : (d.deals||[])
+              const pl = list.filter(x=>x.profit!=null).reduce((s,x)=>s+Number(x.profit),0)
+              if(list.length) slavePl = Math.round(pl*100)/100
+            }
+          }catch(_){}
+        }
+
+        // Master: Balance-Diff (nur ein Trade → valid)
         try{
-          const cr = await dupApi('POST', 'position/getClosedPositions.php', {
-            id_slave: slaveDupId,
-            from: new Date(tracking.openedAt.getTime() - 60000).toISOString().slice(0,19),
-            length: 5
-          })
-          if(cr.ok){
-            const closed = (cr.data?.data || [])
-              .sort((a,b) => new Date(b.closeTime||b.close_time||0) - new Date(a.closeTime||a.close_time||0))
-            if(closed[0]) slavePl = parseFloat(closed[0].profit || closed[0].pnl || 0)
+          const ar = await dupApi('POST','account/getAccounts.php',{})
+          if(ar.ok && ar.data?.accounts){
+            const fa = ar.data.accounts
+            const mNow = fa.find(a=>String(a.account_id)===String(tr.masterDupId))
+            const sNow = fa.find(a=>String(a.account_id)===String(sDupId))
+            if(mNow?.balance!=null && tr.masterBalStart!=null)
+              masterPl = Math.round((Number(mNow.balance)-Number(tr.masterBalStart))*100)/100
+            if(slavePl==null && sNow?.balance!=null && tr.slaveBalStart!=null)
+              slavePl = Math.round((Number(sNow.balance)-Number(tr.slaveBalStart))*100)/100
           }
         }catch(_){}
 
+        // Speichern + Modal öffnen
         try{
-          if(slavePl != null){
-            await supabase.from('trade_plans').update({ slave_pl: slavePl }).eq('id', plan.id)
-            const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-            if(idx >= 0) tradePlans[idx] = { ...tradePlans[idx], slavePl }
-          }
-          delete _atState.tracked[plan.id]
-          delete _atState.livePnl[plan.id]
+          const upd = {}
+          if(slavePl!=null)  upd.slave_pl  = slavePl
+          if(masterPl!=null) upd.master_pl = masterPl
+          if(Object.keys(upd).length) await supabase.from('trade_plans').update(upd).eq('id',plan.id)
+          const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
+          if(idx>=0) tradePlans[idx] = {...tradePlans[idx], ...(slavePl!=null?{slavePl}:{}), ...(masterPl!=null?{masterPl}:{})}
+          delete _at.tracked[plan.id]
+          delete _at.livePnl[plan.id]
           renderTradePlans()
-          if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-          if(!tradePlans.some(p => p.status === 'open')) _atStopFastPoll()
-          _atPlaySound('close')
-          const plStr = slavePl != null ? ' · Slave: '+(slavePl>=0?'+':'')+slavePl.toFixed(2) : ''
-          _atShowToast('🔴 Trade geschlossen: '+(plan.masterName||plan.masterFirm||''), (plan.slaveName||'')+plStr)
-          setTimeout(() => { try{ openTradeCompleteModal(plan.id) }catch(_){} }, 400)
+          if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
+          _atSound('close')
+          const plStr = slavePl!=null?' · Slave: '+(slavePl>=0?'+':'')+slavePl.toFixed(2):''
+          _atToast('🔴 Trade geschlossen: '+(plan.masterName||plan.masterFirm||''), (plan.slaveName||'')+plStr, 15000)
+          setTimeout(()=>{ if(typeof openTradeCompleteModal==='function') openTradeCompleteModal(plan.id) }, 500)
         }catch(e){ console.error('[AT] close error:', e) }
       }
 
-    }catch(e){
-      console.warn('[AT] poll error:', e)
-    }finally{
-      _atState.polling = false
-    }
+    }catch(e){ console.warn('[AT] poll error:', e) }
+    finally{ _at.running = false }
   }
 
-  async function _atFastPoll(){
-    if(_atState.fastPolling) return
-    const openPlans = tradePlans.filter(p => p.status === 'open')
-    if(!openPlans.length){
-      _atStopFastPoll()
-      return
-    }
-    _atState.fastPolling = true
-    try{
-      // P&L aus ltState holen (wird alle 5s von ltRefresh aktualisiert)
-      // Kein extra API-Call nötig
-      const links = dupGetLinks()
+  // ── Fast Poll (3s) — Live P&L aus ltState ──
+  function _atFastRender(){
+    const open = tradePlans.filter(p=>p.status==='open')
+    if(!open.length) return
+    for(const plan of open){
+      const slaveAcc  = (accounts||[]).find(a=>String(a.id)===String(plan.slaveAccountId))
+      const masterAcc = (accounts||[]).find(a=>String(a.id)===String(plan.masterAccountId))
+      const sDupId = _atDupId(plan.slaveAccountId)
+      const mDupId = _atDupId(plan.masterAccountId)
 
-      for(const plan of openPlans){
-        const tracking = _atState.tracked[plan.id]
+      // Slave: MT5 > Duplikum-ltState
+      const sPos = slaveAcc?.ma ? (ltState.positions?.mt||[]).find(p=>String(p.accountId)===String(slaveAcc.ma.accountId))
+                 : sDupId ? (ltState.positions?.dup||[]).find(p=>String(p.accountId)===String(sDupId)) : null
+      // Master: TSX > MT5 > Duplikum-ltState
+      const mPos = masterAcc?.topstep ? (ltState.positions?.tsx||[]).find(p=>String(p.accountId)===String(masterAcc.topstep.id))
+                 : masterAcc?.ma ? (ltState.positions?.mt||[]).find(p=>String(p.accountId)===String(masterAcc.ma.accountId))
+                 : mDupId ? (ltState.positions?.dup||[]).find(p=>String(p.accountId)===String(mDupId)) : null
 
-        // Slave P&L: aus MT5 (MetaApi) wenn Slave-Account verbunden
-        const slaveAcc = (accounts || []).find(a => String(a.id) === String(plan.slaveAccountId))
-        let slavePos = null
-        // 1. MetaApi (Finn V1)
-        if(slaveAcc?.ma){
-          slavePos = (ltState.positions?.mt || []).find(pos =>
-            String(pos.accountId) === String(slaveAcc.ma.accountId)
-          )
-        }
-        // 2. Duplikum-ltState (falls dort P&L vorhanden)
-        if(!slavePos){
-          const sDupId = _atGetDupIdForAccount(plan.slaveAccountId)
-          if(sDupId){
-            slavePos = (ltState.positions?.dup || []).find(pos =>
-              String(pos.accountId) === String(sDupId)
-            )
-          }
-        }
-
-        // Master P&L: aus TSX oder MT5
-        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
-        let masterPos = null
-        if(masterAcc?.topstep){
-          masterPos = (ltState.positions?.tsx || []).find(pos =>
-            String(pos.accountId) === String(masterAcc.topstep.id)
-          )
-        }
-        if(!masterPos && masterAcc?.ma){
-          masterPos = (ltState.positions?.mt || []).find(pos =>
-            String(pos.accountId) === String(masterAcc.ma.accountId)
-          )
-        }
-        if(!masterPos){
-          const mDupId = _atGetDupIdForAccount(plan.masterAccountId)
-          if(mDupId){
-            masterPos = (ltState.positions?.dup || []).find(pos =>
-              String(pos.accountId) === String(mDupId)
-            )
-          }
-        }
-
-        _atState.livePnl[plan.id] = {
-          slave:      slavePos?.pnl  != null ? Number(slavePos.pnl)  : null,
-          slaveLots:  slavePos ? Math.abs(Number(slavePos.size || 0)) : null,
-          slaveSide:  slavePos?.side || null,
-          master:     masterPos?.pnl != null ? Number(masterPos.pnl) : null,
-          masterLots: masterPos ? Number(masterPos.size || 0)        : null,
-          masterSide: masterPos?.side || null,
-          ts: Date.now()
-        }
+      _at.livePnl[plan.id] = {
+        slave:      sPos?.pnl  != null ? Number(sPos.pnl)  : null,
+        slaveLots:  sPos ? Math.abs(Number(sPos.size||0))   : null,
+        slaveSide:  sPos?.side || null,
+        master:     mPos?.pnl  != null ? Number(mPos.pnl)  : null,
+        masterLots: mPos ? Number(mPos.size||0)             : null,
+        masterSide: mPos?.side || null,
+        ts: Date.now()
       }
-      // Re-render Plan-Overview mit frischen P&L-Daten
-      ltRenderPlanOverview()
-    }catch(_){
-    }finally{
-      _atState.fastPolling = false
     }
+    if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
   }
 
-  function _atStartFastPoll(){
-    if(_atState.fastTimer) return
-    _atFastPoll()
-    _atState.fastTimer = setInterval(_atFastPoll, 750)
-  }
-  function _atStopFastPoll(){
-    if(_atState.fastTimer){ clearInterval(_atState.fastTimer); _atState.fastTimer = null }
-    _atState.fastPolling = false
-  }
-
-  // Start/Stop polling
-  function atStartPolling(){
-    if(_atState.pollTimer) return
-    console.log('[AT] Polling gestartet')
+  // ── Start/Stop ──
+  function _atStart(){
+    if(_at.timer) return
+    console.log('[AT] Start — Polling alle 15s')
     _atPoll()
-    _atState.pollTimer = setInterval(_atPoll, 20_000)  // 20s — Rate Limit: 20/min
-    if(tradePlans.some(p => p.status === 'open')) _atStartFastPoll()
+    _at.timer = setInterval(_atPoll, 15_000)
+    // Fast render alle 3s aus ltState (kein extra API-Call)
+    _at.fastTimer = setInterval(_atFastRender, 3_000)
   }
-  function atStopPolling(){
-    if(_atState.pollTimer){ clearInterval(_atState.pollTimer); _atState.pollTimer = null }
-    _atStopFastPoll()
+  function _atStop(){
+    if(_at.timer)     { clearInterval(_at.timer);     _at.timer     = null }
+    if(_at.fastTimer) { clearInterval(_at.fastTimer); _at.fastTimer = null }
+    _at.running = false
   }
-
-  // Polling starten sobald Duplikum verbunden ist
-  const _origDupRender = typeof dupRender === 'function' ? dupRender : null
-  // Hook: starte polling wenn Duplikum-Token verfügbar
-  ;(function _atInit(){
-    if(dupState.token) atStartPolling()
-    // Polling startet auch wenn User sich nachher einloggt — via existing dupRender hook
-    const origDupLoadAccounts = dupLoadAccounts
-    window._atDupLoadHooked = true
-  })()
-
-  // CSS für Toast-Animation
-  ;(function _atInjectCss(){
-    const s = document.createElement('style')
-    s.textContent = `@keyframes at-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}`
-    document.head.appendChild(s)
-  })()
-
-  // Polling starten/stoppen wenn Duplikum connected/disconnected
-  // (wird nach dupRender aufgerufen via existierendem Hook-Mechanismus)
   function _atCheckAndStart(){
-    if(dupState.token && !_atState.pollTimer) atStartPolling()
-    if(!dupState.token && _atState.pollTimer) atStopPolling()
+    if(dupState.token && !_at.timer) _atStart()
+    if(!dupState.token && _at.timer) _atStop()
   }
-  // Poll auch bei View-Wechsel zu Trades starten
+
+  // CSS
+  ;(()=>{ const s=document.createElement('style'); s.textContent='@keyframes at-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}@keyframes at-pulse{0%,100%{opacity:1}50%{opacity:.4}}'; document.head.appendChild(s) })()
+
   document.querySelector('[data-view="trades"]')?.addEventListener('click', _atCheckAndStart)
 
   /* ═══════════════════════════════════════════════════════════════
    * END AUTO-TRACKING ENGINE
    * ═══════════════════════════════════════════════════════════════ */
 
-  async function deleteTradePlan(planId){
+    async function deleteTradePlan(planId){
     if(!confirm('Trade-Plan wirklich löschen?')) return
     try{
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
