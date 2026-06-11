@@ -10534,12 +10534,23 @@
         const sTs = _at.newPosTs['s_'+sDupId] || 0
         const mTs = _at.newPosTs['m_'+mDupId] || 0
 
+        // Wenn Slave neue Position hat aber Master kein Timestamp:
+        // prüfe ob Master überhaupt Orders in getMasterOrders hat (= Master ist aktiv)
+        let effectiveMTs = mTs
+        if(sTs && !mTs){
+          const masterHasOrders = masterOrders.some(o => String(o.account_id) === mDupId)
+          if(masterHasOrders){
+            effectiveMTs = sTs  // Master ist aktiv, nutze Slave-Timestamp
+            console.log('[AT] master', mDupId, 'hat orders aber kein neuen Timestamp → nutze slave ts')
+          }
+        }
+
         console.log('[AT] check plan', plan.masterName,
           'sTs='+(sTs?(now-sTs)+'ms ago':'none'),
-          'mTs='+(mTs?(now-mTs)+'ms ago':'none'))
+          'mTs='+(effectiveMTs?(now-effectiveMTs)+'ms ago':'none'))
 
-        if(!sTs || !mTs) continue
-        if(Math.abs(sTs - mTs) > 60_000) continue
+        if(!sTs || !effectiveMTs) continue
+        if(Math.abs(sTs - effectiveMTs) > 60_000) continue
 
         // MATCH
         console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
@@ -10548,7 +10559,6 @@
           const k = String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')
           return String(p.account_id) === sDupId && (_at.newPosTs['s_'+sDupId+':'+k] || 0) >= sTs
         }) || slavePositions.find(p => String(p.account_id) === sDupId)
-
         const slavePosKey = newSlavePos
           ? String(newSlavePos.amountLot)+(newSlavePos.symbol||'')+(newSlavePos.side||newSlavePos.direction||'')
           : null
