@@ -10477,19 +10477,15 @@
       for(const [aid, keys] of Object.entries(newPrev)){
         const prev = _at.prevPos[aid]
         if(!prev){
-          // Erster Poll für diesen Account: als "neu" markieren damit Match möglich
-          _at.newPosTs[aid] = now  // Account-Level Timestamp
-          for(const k of keys) _at.newPosTs[aid+':'+k] = now  // Position-Level Timestamps
+          // Erster Poll: nur initialisieren, KEIN Match (verhindert false positive nach Reload)
           _at.prevPos[aid] = keys
-          console.log('[AT] init+mark slave', aid, 'size='+keys.size)
+          console.log('[AT] init slave', aid, 'size='+keys.size)
           continue
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
-        console.log('[AT] slave', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
         if(newKeys.length > 0){
-          _at.newPosTs[aid] = now
           for(const k of newKeys) _at.newPosTs[aid+':'+k] = now
-          console.log('[AT] ✓ Neue Slave-Position auf', aid, new Date().toLocaleTimeString())
+          console.log('[AT] ✓ neue pos auf', aid, newKeys.length+'x', new Date().toLocaleTimeString())
         }
         _at.prevPos[aid] = keys
       }
@@ -10531,38 +10527,35 @@
         const sDupId = String(pos.account_id)
         const posKey = String(pos.amountLot)+(pos.symbol||'')+(pos.side||pos.direction||'')
 
-        // Neue Position: entweder nicht in prevPos ODER kürzlich als neu erkannt (max 90s)
-        const prev = _at.prevPos[sDupId]
-        const isNew = !prev || !prev.has(posKey)
+        // Neue Position: nur wenn in newPosTs (gesetzt nach echtem neuen Poll)
         const wasRecentlyNew = _at.newPosTs[sDupId+':'+posKey] && (now - _at.newPosTs[sDupId+':'+posKey] < 90_000)
-        if(!isNew && !wasRecentlyNew) continue
-
-        // Timestamp für diese spezifische Position merken
-        if(isNew) _at.newPosTs[sDupId+':'+posKey] = now
+        if(!wasRecentlyNew) continue
 
         const orderIdMaster = String(pos.order_id_master || pos.orderId || '')
         console.log('[AT] neue pos auf', sDupId, 'order_id_master='+orderIdMaster)
 
+        // order_id_master MUSS vorhanden sein für sicheren Match
+        if(!orderIdMaster){ console.log('[AT] skip - keine order_id_master'); continue }
+
         // Master-Duplikum-Account via order_id_master finden
         let masterDupAccountId = null
-        if(orderIdMaster && masterOrders.length > 0){
+        if(masterOrders.length > 0){
           const mOrder = masterOrders.find(o => String(o.order_id_master||o.orderId||'') === orderIdMaster)
           if(mOrder){
             masterDupAccountId = String(mOrder.account_id || mOrder.id_master || '')
-            console.log('[AT] master order matched: dupId='+masterDupAccountId+' name='+mOrder.name)
+            console.log('[AT] master matched: dupId='+masterDupAccountId+' name='+mOrder.name)
           }
         }
 
-        // Plan finden der diesen Slave+Master hat
+        // Ohne Master-Account-ID kein sicherer Match möglich
+        if(!masterDupAccountId){ console.log('[AT] skip - kein master account für order', orderIdMaster); continue }
+
+        // Plan finden der genau diesen Slave+Master hat
         const matchedPlan = planned.find(plan => {
           if(_at.tracked[plan.id]) return false
           const planSDupId = _atDupId(plan.slaveAccountId)
-          if(planSDupId !== sDupId) return false
-          if(masterDupAccountId){
-            const planMDupId = _atDupId(plan.masterAccountId)
-            return planMDupId === masterDupAccountId
-          }
-          return true  // Fallback: erster Plan mit diesem Slave
+          const planMDupId = _atDupId(plan.masterAccountId)
+          return planSDupId === sDupId && planMDupId === masterDupAccountId
         })
 
         if(!matchedPlan){ console.log('[AT] kein Plan für slave', sDupId, 'master', masterDupAccountId); continue }
