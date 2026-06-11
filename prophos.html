@@ -10477,14 +10477,18 @@
       for(const [aid, keys] of Object.entries(newPrev)){
         const prev = _at.prevPos[aid]
         if(!prev){
+          // Erster Poll für diesen Account: als "neu" markieren damit Match möglich
+          _at.newPosTs[aid] = now  // Account-Level Timestamp
+          for(const k of keys) _at.newPosTs[aid+':'+k] = now  // Position-Level Timestamps
           _at.prevPos[aid] = keys
-          console.log('[AT] init slave prevPos for', aid, 'size='+keys.size)
+          console.log('[AT] init+mark slave', aid, 'size='+keys.size)
           continue
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
         console.log('[AT] slave', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
         if(newKeys.length > 0){
           _at.newPosTs[aid] = now
+          for(const k of newKeys) _at.newPosTs[aid+':'+k] = now
           console.log('[AT] ✓ Neue Slave-Position auf', aid, new Date().toLocaleTimeString())
         }
         _at.prevPos[aid] = keys
