@@ -10394,16 +10394,14 @@
 
   // ── State ──
   const _at = {
-    timer:    null,
-    running:  false,
-    // planId → { slaveDupId, masterDupId, openedAt, slavePosKey, slaveBalStart, masterBalStart }
-    tracked:  {},
-    // dupAccountId → Set<positionKey> — Stand vom letzten Poll
-    prevPos:  {},
-    // dupAccountId → timestamp (ms) — wann neue Position zuletzt erkannt
-    newPosTs: {},
-    // livePnl: planId → { slave, master, slaveLots, slaveSide, masterLots, masterSide, ts }
-    livePnl:  {}
+    timer:         null,
+    fastTimer:     null,
+    running:       false,
+    firstPollDone: false,
+    tracked:       {},
+    prevPos:       {},
+    newPosTs:      {},
+    livePnl:       {}
   }
 
   // ── Hilfsfunktionen ──
@@ -10497,24 +10495,22 @@
       }
       console.log('[AT] masterByAcc keys:', Object.keys(masterByAcc).join(',') || 'EMPTY')
 
-      // ── Schritt 2: Neue Positionen/Orders erkennen ──
+      // ── Schritt 2: Neue Positionen erkennen ──
+      const isFirstPoll = !_at.firstPollDone
+      if(isFirstPoll) _at.firstPollDone = true
+
       // Slave
       for(const [aid, keys] of Object.entries(slaveByAcc)){
         const prev = _at.prevPos['s_'+aid]
         if(!prev){
           _at.prevPos['s_'+aid] = keys
-          // Erster Poll: wenn planned plans existieren → als neu markieren
-          if(planned.length > 0){
-            _at.newPosTs['s_'+aid] = now
-            for(const k of keys) _at.newPosTs['s_'+aid+':'+k] = now
-          }
+          // Erster Poll: NIEMALS als neu markieren → verhindert false positives nach Reload
           continue
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0){
+        if(newKeys.length > 0 && !isFirstPoll){
           _at.newPosTs['s_'+aid] = now
           for(const k of newKeys) _at.newPosTs['s_'+aid+':'+k] = now
-          console.log('[AT] neue slave pos auf', aid, newKeys.length+'x')
         }
         _at.prevPos['s_'+aid] = keys
       }
@@ -10524,13 +10520,11 @@
         const prev = _at.prevPos['m_'+aid]
         if(!prev){
           _at.prevPos['m_'+aid] = keys
-          if(planned.length > 0) _at.newPosTs['m_'+aid] = now
-          continue
+          continue  // Erster Poll: nicht als neu markieren
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0){
+        if(newKeys.length > 0 && !isFirstPoll){
           _at.newPosTs['m_'+aid] = now
-          console.log('[AT] neue master order auf', aid, newKeys.length+'x')
         }
         _at.prevPos['m_'+aid] = keys
       }
