@@ -10517,45 +10517,54 @@
         _at.prevPos['m_'+aid] = keys
       }
 
-      // ── Schritt 2: Matchen — nur Slave-Erkennung nötig ──
-      // Begründung: du startest nie zwei Plans gleichzeitig auf demselben Slave
-      // → neue Position auf Slave = Trade gestartet
+      // ── Schritt 2: Matchen via order_id_master ──
+      // Slave-Position hat order_id_master → Master-Order direkt identifizierbar
       const planned = tradePlans.filter(p => p.status === 'planned')
-      console.log('[AT] planned='+planned.length+' newPosTs='+JSON.stringify(Object.entries(_at.newPosTs).map(([k,v])=>k+':'+(now-v)+'ms')))
-      for(const plan of planned){
-        if(_at.tracked[plan.id]) continue
+      console.log('[AT] planned='+planned.length)
 
-        const mDupId = _atDupId(plan.masterAccountId)
-        const sDupId = _atDupId(plan.slaveAccountId)
-        if(!sDupId) continue
+      for(const pos of positions){
+        const sDupId = String(pos.account_id)
+        const posKey = String(pos.amountLot)+(pos.symbol||'')+(pos.side||pos.direction||'')
 
-        const sTs = _at.newPosTs[sDupId]
-        if(!sTs) continue
-        if(now - sTs > 60_000) continue
+        // Neue Position: entweder nicht in prevPos ODER kürzlich als neu erkannt (max 90s)
+        const prev = _at.prevPos[sDupId]
+        const isNew = !prev || !prev.has(posKey)
+        const wasRecentlyNew = _at.newPosTs[sDupId+':'+posKey] && (now - _at.newPosTs[sDupId+':'+posKey] < 90_000)
+        if(!isNew && !wasRecentlyNew) continue
 
-        // Wenn Master-Orders verfügbar: prüfe ob Master auch neue Order hat
-        if(masterOrders.length > 0 && mDupId){
-          const mTs = _at.newPosTs['m_'+mDupId]
-          if(!mTs) continue  // Master-Orders da aber keine neue → skip
-          if(Math.abs(mTs - sTs) > WINDOW) continue
-          console.log('[AT] MATCH (master+slave):', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
-        } else {
-          // Keine Master-Orders verfügbar → nur Slave reicht
-          console.log('[AT] MATCH (slave only):', plan.masterName, '→', plan.slaveName)
+        // Timestamp für diese spezifische Position merken
+        if(isNew) _at.newPosTs[sDupId+':'+posKey] = now
+
+        const orderIdMaster = String(pos.order_id_master || pos.orderId || '')
+        console.log('[AT] neue pos auf', sDupId, 'order_id_master='+orderIdMaster)
+
+        // Master-Duplikum-Account via order_id_master finden
+        let masterDupAccountId = null
+        if(orderIdMaster && masterOrders.length > 0){
+          const mOrder = masterOrders.find(o => String(o.order_id_master||o.orderId||'') === orderIdMaster)
+          if(mOrder){
+            masterDupAccountId = String(mOrder.account_id || mOrder.id_master || '')
+            console.log('[AT] master order matched: dupId='+masterDupAccountId+' name='+mOrder.name)
+          }
         }
 
-        // Extra check: slave Position enthält master_id → direkter Match möglich
-        // (aus sample pos: {"account_id":"pKwSZJqKh","master_id":"SZVUhJqKh",...})
-        const slaveNewPos = positions.find(p => {
-          if(String(p.account_id) !== String(sDupId)) return false
-          const key = String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')
-          return !(_at.prevPos[sDupId] && _at.prevPos[sDupId].has(key))
-        }) || positions.find(p => String(p.account_id) === String(sDupId))
+        // Plan finden der diesen Slave+Master hat
+        const matchedPlan = planned.find(plan => {
+          if(_at.tracked[plan.id]) return false
+          const planSDupId = _atDupId(plan.slaveAccountId)
+          if(planSDupId !== sDupId) return false
+          if(masterDupAccountId){
+            const planMDupId = _atDupId(plan.masterAccountId)
+            return planMDupId === masterDupAccountId
+          }
+          return true  // Fallback: erster Plan mit diesem Slave
+        })
 
-        const slaveKey = slaveNewPos
-          ? String(slaveNewPos.amountLot)+(slaveNewPos.symbol||'')+(slaveNewPos.side||slaveNewPos.direction||'')
-          : null
+        if(!matchedPlan){ console.log('[AT] kein Plan für slave', sDupId, 'master', masterDupAccountId); continue }
 
+        console.log('[AT] MATCH:', matchedPlan.masterName, '→', matchedPlan.slaveName)
+
+        const mDupId = _atDupId(matchedPlan.masterAccountId)
         const slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===String(sDupId))?.balance ?? null
         const masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===String(mDupId))?.balance ?? null
 
@@ -10563,18 +10572,16 @@
           const { data, error } = await supabase
             .from('trade_plans')
             .update({ status: 'open', started_at: new Date().toISOString() })
-            .eq('id', plan.id).select('*').single()
+            .eq('id', matchedPlan.id).select('*').single()
           if(error) throw error
-          const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
+          const idx = tradePlans.findIndex(x=>String(x.id)===String(matchedPlan.id))
           if(idx>=0) tradePlans[idx] = rowToPlan(data)
-          _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slaveKey, slaveBalStart, masterBalStart }
-          // Timestamps zurücksetzen
-          delete _at.newPosTs[sDupId]
-          if(mDupId) delete _at.newPosTs['m_'+mDupId]
+          _at.tracked[matchedPlan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey: posKey, slaveBalStart, masterBalStart }
+          delete _at.newPosTs[sDupId+':'+posKey]  // cleanup
           renderTradePlans()
-          if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
+          if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
           _atSound('open')
-          _atToast('🟢 Trade gestartet: '+(plan.masterName||plan.masterFirm||''), 'Master + Slave erkannt')
+          _atToast('🟢 Trade gestartet: '+(matchedPlan.masterName||matchedPlan.masterFirm||''), 'Erkannt via Duplikum')
         }catch(e){ console.error('[AT] open error:', e) }
       }
 
