@@ -10488,14 +10488,36 @@
 
       }
       for(const ord of masterOrders){
-        const aid = String(ord.account_id || ord.id_master || '')
-        const name = String(ord.name || ord.master_name || '')
-        const dupAcc = (dupState.accounts||[]).find(a =>
-          String(a.account_id) === aid ||
-          String(a.name || '').includes(name.split(' ').pop()) ||
-          name.includes(String(a.login || a.account_id || ''))
-        )
-        const resolvedId = dupAcc ? String(dupAcc.account_id) : aid
+        const ordName = String(ord.name || ord.master_name || '')
+        // Finde den Duplikum-Account der zu dieser Order gehört
+        const dupAcc = (dupState.accounts||[]).find(a => {
+          const accId = String(a.account_id || '')
+          const accName = String(a.name || '')
+          // 1. Direkter account_id Match
+          if(ord.account_id && String(ord.account_id) === accId) return true
+          // 2. Name enthält Account-ID oder Login
+          if(ordName && accId && ordName.includes(accId)) return true
+          // 3. Account-Name ist im Order-Namen enthalten
+          if(ordName && accName && ordName.includes(accName.split(' ').pop())) return true
+          return false
+        })
+
+        // Fallback: Prophos-Account über externalId matchen
+        let resolvedId = dupAcc ? String(dupAcc.account_id) : null
+        if(!resolvedId){
+          // Suche Prophos-Account dessen externalId im Order-Namen vorkommt
+          const prophosAcc = (accounts||[]).find(a => {
+            const ext = String(a.externalId || '').trim()
+            return ext && ordName.includes(ext)
+          })
+          if(prophosAcc){
+            // Finde den Duplikum-Account der mit diesem Prophos-Account verknüpft ist
+            const links = dupGetLinks()
+            const dupId = Object.entries(links).find(([,pId]) => String(pId) === String(prophosAcc.id))?.[0]
+            if(dupId) resolvedId = dupId
+          }
+        }
+
         if(!resolvedId) continue
         if(!masterByAcc[resolvedId]) masterByAcc[resolvedId] = new Set()
         masterByAcc[resolvedId].add(String(ord.order_id_master || ord.master_ticket || ord.id || ''))
@@ -10551,12 +10573,11 @@
         if(!sTs) continue
         if(now - sTs > 60_000) continue
 
-        // Master muss in den letzten 60s eine NEUE Order bekommen haben
+        // Master muss in den letzten 60s eine neue Order haben
         const mTs = _at.newPosTs['m_'+mDupId] || 0
         if(!mTs) continue
         if(now - mTs > 60_000) continue
 
-        // MATCH
         console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
 
         const newSlavePos = slavePositions.find(p => {
