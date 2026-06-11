@@ -10448,18 +10448,24 @@
     _at.running = true
     console.log('[AT] poll', new Date().toLocaleTimeString())
     try{
-      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      console.log('[AT] res ok='+res.ok+' keys='+JSON.stringify(Object.keys(res.data||{})) +' positions='+(res.data?.data?.length??'?')+' code='+res.data?.code)
-      if(res.data?.data?.length > 0) console.log('[AT] sample pos:', JSON.stringify(res.data.data[0]))
-      if(!res.ok || res.data?.code === 0) return  // Rate limit oder Fehler
-      const positions = res.data?.data || res.data || []
-      if(!Array.isArray(positions)){ console.log('[AT] not array'); return }
+      // SLAVE-Positionen + MASTER-Orders parallel holen
+      const [res, masterRes] = await Promise.all([
+        dupApi('POST', 'position/getOpenPositions.php', { length: 1000 }),
+        dupApi('POST', 'order/getMasterOrders.php', { length: 1000, status: 'open' })
+      ])
+      console.log('[AT] slave res: ok='+res.ok+' pos='+(res.data?.data?.length??'?')+' code='+res.data?.code)
+      console.log('[AT] master res: ok='+masterRes.ok+' orders='+(masterRes.data?.data?.length??'?')+' code='+masterRes.data?.code)
+      if(masterRes.data?.data?.length > 0) console.log('[AT] sample master order:', JSON.stringify(masterRes.data.data[0]))
+      if(!res.ok || res.data?.code === 0) return
+      const positions = res.data?.data || []
+      const masterOrders = (masterRes.ok && masterRes.data?.data) ? masterRes.data.data : []
+      if(!Array.isArray(positions)) return
 
       // ── Schritt 1: Neue Positionen erkennen ──
       const now = Date.now()
       const WINDOW = 10_000  // 10s Erkennungsfenster
 
-      // SLAVE: neue Positionen aus getOpenPositions (Duplikum Slave-Accounts)
+      // SLAVE: neue Positionen aus getOpenPositions
       const newPrev = {}
       for(const pos of positions){
         const aid = String(pos.account_id)
@@ -10469,15 +10475,14 @@
       }
       for(const [aid, keys] of Object.entries(newPrev)){
         const prev = _at.prevPos[aid]
-        if(!prev){ 
+        if(!prev){
           _at.prevPos[aid] = keys
-          console.log('[AT] init prevPos for', aid, 'size='+keys.size)
-          continue 
+          console.log('[AT] init slave prevPos for', aid, 'size='+keys.size)
+          continue
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
-        const hasNew = newKeys.length > 0
         console.log('[AT] slave', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
-        if(hasNew){
+        if(newKeys.length > 0){
           _at.newPosTs[aid] = now
           console.log('[AT] ✓ Neue Slave-Position auf', aid, new Date().toLocaleTimeString())
         }
@@ -10485,6 +10490,31 @@
       }
       for(const aid of Object.keys(_at.prevPos)){
         if(!newPrev[aid]) _at.prevPos[aid] = new Set()
+      }
+
+      // MASTER: neue Orders aus getMasterOrders
+      const masterNewPrev = {}
+      for(const ord of masterOrders){
+        const aid = String(ord.account_id || ord.id_master || '')
+        const key = String(ord.lots||ord.volume||'')+(ord.symbol||'')+(ord.type||ord.side||'')
+        if(!aid) continue
+        if(!masterNewPrev[aid]) masterNewPrev[aid] = new Set()
+        masterNewPrev[aid].add(key)
+      }
+      for(const [aid, keys] of Object.entries(masterNewPrev)){
+        const prev = _at.prevPos['m_'+aid]
+        if(!prev){
+          _at.prevPos['m_'+aid] = keys
+          console.log('[AT] init master prevPos for', aid, 'size='+keys.size)
+          continue
+        }
+        const newKeys = [...keys].filter(k => !prev.has(k))
+        console.log('[AT] master', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
+        if(newKeys.length > 0){
+          _at.newPosTs['m_'+aid] = now
+          console.log('[AT] ✓ Neue Master-Order auf', aid, new Date().toLocaleTimeString())
+        }
+        _at.prevPos['m_'+aid] = keys
       }
 
       // ── Schritt 2: Matchen — nur Slave-Erkennung nötig ──
@@ -10495,13 +10525,24 @@
       for(const plan of planned){
         if(_at.tracked[plan.id]) continue
 
+        const mDupId = _atDupId(plan.masterAccountId)
         const sDupId = _atDupId(plan.slaveAccountId)
         if(!sDupId) continue
 
         const sTs = _at.newPosTs[sDupId]
         if(!sTs) continue
-        // Max 60s alt (verhindert false match bei alten Timestamps)
         if(now - sTs > 60_000) continue
+
+        // Wenn Master-Orders verfügbar: prüfe ob Master auch neue Order hat
+        if(masterOrders.length > 0 && mDupId){
+          const mTs = _at.newPosTs['m_'+mDupId]
+          if(!mTs) continue  // Master-Orders da aber keine neue → skip
+          if(Math.abs(mTs - sTs) > WINDOW) continue
+          console.log('[AT] MATCH (master+slave):', plan.masterName, '→', plan.slaveName)
+        } else {
+          // Keine Master-Orders verfügbar → nur Slave reicht
+          console.log('[AT] MATCH (slave only):', plan.masterName, '→', plan.slaveName)
+        }
 
         // Match — beide innerhalb 30s neue Position
         console.log('[AT] MATCH:', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
@@ -10529,6 +10570,7 @@
           _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slaveKey, slaveBalStart, masterBalStart }
           // Timestamps zurücksetzen
           delete _at.newPosTs[sDupId]
+          if(mDupId) delete _at.newPosTs['m_'+mDupId]
           renderTradePlans()
           if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
           _atSound('open')
