@@ -10506,14 +10506,13 @@
         const prev = _at.prevPos['m_'+aid]
         if(!prev){
           _at.prevPos['m_'+aid] = keys
-          console.log('[AT] init master prevPos for', aid, 'size='+keys.size)
+          console.log('[AT] init master', aid, 'size='+keys.size)
           continue
         }
         const newKeys = [...keys].filter(k => !prev.has(k))
-        console.log('[AT] master', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
         if(newKeys.length > 0){
           _at.newPosTs['m_'+aid] = now
-          console.log('[AT] ✓ Neue Master-Order auf', aid, new Date().toLocaleTimeString())
+          console.log('[AT] ✓ neue master order auf', aid)
         }
         _at.prevPos['m_'+aid] = keys
       }
@@ -10534,8 +10533,44 @@
         const orderIdMaster = String(pos.order_id_master || pos.orderId || '')
         console.log('[AT] neue pos auf', sDupId, 'order_id_master='+orderIdMaster)
 
-        // order_id_master MUSS vorhanden sein für sicheren Match
-        if(!orderIdMaster){ console.log('[AT] skip - keine order_id_master'); continue }
+        // Wenn order_id_master leer: Position für nächsten Poll merken und warten
+        if(!orderIdMaster){
+          // Bereits 2 Polls gewartet? Dann Timestamp-Fallback nutzen
+          const waitKey = sDupId+':'+posKey+':wait'
+          const waitCount = (_at.newPosTs[waitKey] || 0)
+          if(waitCount < 2){
+            _at.newPosTs[waitKey] = waitCount + 1
+            console.log('[AT] warte auf order_id_master ('+waitCount+'/2)'); continue
+          }
+          // Nach 2 Polls: Timestamp-basierter Fallback
+          // Prüfe ob ein Master-Order in den letzten 60s neu aufgetaucht ist
+          const mTs = Object.entries(_at.newPosTs).find(([k,v]) => k.startsWith('m_') && (now-v) < 60_000)
+          if(!mTs){ console.log('[AT] skip - kein master timestamp'); continue }
+          // Master-Account aus Timestamp-Key ermitteln
+          const mDupIdFromTs = mTs[0].replace('m_','')
+          // Plan finden
+          const fallbackPlan = planned.find(plan => {
+            if(_at.tracked[plan.id]) return false
+            return _atDupId(plan.slaveAccountId) === sDupId && _atDupId(plan.masterAccountId) === mDupIdFromTs
+          })
+          if(!fallbackPlan){ console.log('[AT] skip - kein Plan für fallback'); continue }
+          console.log('[AT] MATCH (fallback):', fallbackPlan.masterName, '→', fallbackPlan.slaveName)
+          delete _at.newPosTs[waitKey]
+          const mDupId2 = mDupIdFromTs
+          const slaveBalStart2 = (dupState.accounts||[]).find(a=>String(a.account_id)===String(sDupId))?.balance ?? null
+          const masterBalStart2 = (dupState.accounts||[]).find(a=>String(a.account_id)===String(mDupId2))?.balance ?? null
+          try{
+            const {data,error} = await supabase.from('trade_plans').update({status:'open',started_at:new Date().toISOString()}).eq('id',fallbackPlan.id).select('*').single()
+            if(error) throw error
+            const idx=tradePlans.findIndex(x=>String(x.id)===String(fallbackPlan.id))
+            if(idx>=0) tradePlans[idx]=rowToPlan(data)
+            _at.tracked[fallbackPlan.id]={slaveDupId:sDupId,masterDupId:mDupId2,openedAt:new Date(),slavePosKey:posKey,slaveBalStart:slaveBalStart2,masterBalStart:masterBalStart2}
+            delete _at.newPosTs[sDupId+':'+posKey]
+            renderTradePlans(); if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
+            _atSound('open'); _atToast('🟢 Trade gestartet: '+(fallbackPlan.masterName||''), 'Erkannt via Duplikum')
+          }catch(e){console.error('[AT] open fallback error:',e)}
+          continue
+        }
 
         // Master-Duplikum-Account via order_id_master finden
         let masterDupAccountId = null
