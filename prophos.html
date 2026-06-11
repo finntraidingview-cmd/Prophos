@@ -10456,6 +10456,7 @@
       console.log('[AT] slave res: ok='+res.ok+' pos='+(res.data?.data?.length??'?')+' code='+res.data?.code)
       console.log('[AT] master res: ok='+masterRes.ok+' orders='+(masterRes.data?.data?.length??'?')+' code='+masterRes.data?.code)
       if(masterRes.data?.data?.length > 0) console.log('[AT] sample master order:', JSON.stringify(masterRes.data.data[0]))
+      if(positions.length > 0) console.log('[AT] slave accounts:', [...new Set(positions.map(p=>p.account_id+':'+p.side))].join(' | '))
       if(!res.ok || res.data?.code === 0) return
       const positions = res.data?.data || []
       const masterOrders = (masterRes.ok && masterRes.data?.data) ? masterRes.data.data : []
