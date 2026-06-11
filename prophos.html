@@ -10468,11 +10468,17 @@
       }
       for(const [aid, keys] of Object.entries(newPrev)){
         const prev = _at.prevPos[aid]
-        if(!prev){ _at.prevPos[aid] = keys; continue }
-        const hasNew = [...keys].some(k => !prev.has(k))
+        if(!prev){ 
+          _at.prevPos[aid] = keys
+          console.log('[AT] init prevPos for', aid, 'size='+keys.size)
+          continue 
+        }
+        const newKeys = [...keys].filter(k => !prev.has(k))
+        const hasNew = newKeys.length > 0
+        console.log('[AT] slave', aid, 'prev='+prev.size, 'now='+keys.size, 'new='+newKeys.length)
         if(hasNew){
           _at.newPosTs[aid] = now
-          console.log('[AT] Neue Slave-Position auf', aid, new Date().toLocaleTimeString())
+          console.log('[AT] ✓ Neue Slave-Position auf', aid, new Date().toLocaleTimeString())
         }
         _at.prevPos[aid] = keys
       }
@@ -10503,19 +10509,20 @@
         }
 
         if(mPos){
-          // Key für diesen Master-Account
           const mKey = String(plan.masterAccountId)
           const posKey = (mPos.side||'')+(mPos.size||'')+(mPos.symbol||'')
           const prevMKey = _at.prevPos['master_'+mKey]
+          console.log('[AT] master', plan.masterName, 'prevKey='+prevMKey, 'nowKey='+posKey, 'src='+mPos.src)
           if(!prevMKey){
-            // Erster Poll: initialisieren
             _at.prevPos['master_'+mKey] = posKey
+            console.log('[AT] init master prevPos for', mKey)
           } else if(prevMKey !== posKey){
-            // Neue/andere Position auf Master
             _at.newPosTs['master_'+mKey] = now
-            console.log('[AT] Neue Master-Position für Plan', plan.masterName, new Date().toLocaleTimeString())
+            console.log('[AT] ✓ Neue Master-Position für Plan', plan.masterName, new Date().toLocaleTimeString())
             _at.prevPos['master_'+mKey] = posKey
           }
+        } else {
+          console.log('[AT] master NOT FOUND in ltState for', plan.masterName, 'topstep='+plan.masterAccountId)
         }
       }
 
