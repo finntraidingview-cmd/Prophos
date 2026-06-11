@@ -8467,7 +8467,8 @@
           account_type: acc.type,
           balance: acc.initialBalance,
           purchase_cost: acc.purchaseCost,
-          max_drawdown: acc.maxDrawdown
+          max_drawdown: acc.maxDrawdown,
+          external_id: acc.externalId || null
         }
         // MetaApi-Felder mit-updaten falls vorhanden, sonst auf null setzen
         if(acc.ma){
@@ -10446,175 +10447,182 @@
     if(_at.running) return
     if(!dupState.token) return
     _at.running = true
-    console.log('[AT] poll', new Date().toLocaleTimeString(), 'planned='+tradePlans.filter(p=>p.status==='planned').length)
     try{
-      const [res, masterRes] = await Promise.all([
+      // Hole Slave-Positionen + Master-Orders parallel
+      const [slaveRes, masterRes] = await Promise.all([
         dupApi('POST', 'position/getOpenPositions.php', { length: 1000 }),
-        dupApi('POST', 'order/getMasterOrders.php', { length: 1000 })
+        dupApi('POST', 'order/getMasterOrders.php',     { length: 1000 })
       ])
-      if(!res.ok || res.data?.code === 0){
-        console.log('[AT] API error/ratelimit, skip')
-        return
-      }
-      const positions    = Array.isArray(res.data?.data) ? res.data.data : []
-      const masterOrders = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
-      console.log('[AT] pos='+positions.length+' masterOrders='+masterOrders.length+' prevAccounts='+Object.keys(_at.prevPos).filter(k=>!k.startsWith('m_')).length)
+      if(!slaveRes.ok || slaveRes.data?.code === 0) return
+
+      const slavePositions = Array.isArray(slaveRes.data?.data) ? slaveRes.data.data : []
+      const masterOrders   = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
       const now = Date.now()
-      const WINDOW = 60_000  // 60s Fenster
 
-      // ── Schritt 1: Neue Positionen auf Slave-Accounts erkennen ──
-      const newPrev = {}
-      for(const pos of positions){
+      console.log('[AT] poll', new Date().toLocaleTimeString(),
+        'slave='+slavePositions.length, 'master='+masterOrders.length,
+        'planned='+tradePlans.filter(p=>p.status==='planned').length)
+
+      // ── Schritt 1: prevPos aufbauen (nur beim ersten Poll) ──
+      const planned = tradePlans.filter(p => p.status === 'planned')
+
+      // Slave prevPos
+      const slaveByAcc = {}
+      for(const pos of slavePositions){
         const aid = String(pos.account_id)
+        if(!slaveByAcc[aid]) slaveByAcc[aid] = new Set()
         const key = String(pos.amountLot)+(pos.symbol||'')+(pos.side||pos.direction||'')
-        if(!newPrev[aid]) newPrev[aid] = new Set()
-        newPrev[aid].add(key)
-      }
-      for(const [aid, keys] of Object.entries(newPrev)){
-        const prev = _at.prevPos[aid]
-        if(!prev){ _at.prevPos[aid] = keys; continue }  // init only
-        const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0){
-          for(const k of newKeys) _at.newPosTs[aid+':'+k] = now
-          console.log('[AT] ✓ slave', aid, 'new='+newKeys.length, 'ts set')
-        }
-        _at.prevPos[aid] = keys
+        slaveByAcc[aid].add(key)
       }
 
-      // ── Schritt 2: Neue Master-Orders erkennen ──
-      const masterNewPrev = {}
+      // Master prevPos (nutze order_id_master als unique key)
+      const masterByAcc = {}
       for(const ord of masterOrders){
         const aid = String(ord.account_id || '')
-        const key = String(ord.order_id_master||ord.master_ticket||ord.id||'')
-        if(!aid || !key) continue
-        if(!masterNewPrev[aid]) masterNewPrev[aid] = new Set()
-        masterNewPrev[aid].add(key)
+        if(!aid) continue
+        if(!masterByAcc[aid]) masterByAcc[aid] = new Set()
+        masterByAcc[aid].add(String(ord.order_id_master || ord.master_ticket || ord.id || ''))
       }
-      for(const [aid, keys] of Object.entries(masterNewPrev)){
+
+      // ── Schritt 2: Neue Positionen/Orders erkennen ──
+      // Slave
+      for(const [aid, keys] of Object.entries(slaveByAcc)){
+        const prev = _at.prevPos['s_'+aid]
+        if(!prev){
+          _at.prevPos['s_'+aid] = keys
+          // Erster Poll: wenn planned plans existieren → als neu markieren
+          if(planned.length > 0){
+            _at.newPosTs['s_'+aid] = now
+            for(const k of keys) _at.newPosTs['s_'+aid+':'+k] = now
+          }
+          continue
+        }
+        const newKeys = [...keys].filter(k => !prev.has(k))
+        if(newKeys.length > 0){
+          _at.newPosTs['s_'+aid] = now
+          for(const k of newKeys) _at.newPosTs['s_'+aid+':'+k] = now
+          console.log('[AT] neue slave pos auf', aid, newKeys.length+'x')
+        }
+        _at.prevPos['s_'+aid] = keys
+      }
+
+      // Master
+      for(const [aid, keys] of Object.entries(masterByAcc)){
         const prev = _at.prevPos['m_'+aid]
-        if(!prev){ _at.prevPos['m_'+aid] = keys; continue }  // init only
+        if(!prev){
+          _at.prevPos['m_'+aid] = keys
+          if(planned.length > 0) _at.newPosTs['m_'+aid] = now
+          continue
+        }
         const newKeys = [...keys].filter(k => !prev.has(k))
         if(newKeys.length > 0){
           _at.newPosTs['m_'+aid] = now
-          console.log('[AT] ✓ master', aid, 'new='+newKeys.length, 'ts set')
+          console.log('[AT] neue master order auf', aid, newKeys.length+'x')
         }
         _at.prevPos['m_'+aid] = keys
       }
 
       // ── Schritt 3: Matchen ──
-      const planned = tradePlans.filter(p => p.status === 'planned')
-      const tsKeys = Object.keys(_at.newPosTs)
-      if(tsKeys.length > 0) console.log('[AT] newPosTs:', tsKeys.map(k=>k+':'+(now-_at.newPosTs[k])+'ms').join(' | '))
+      // Für jeden geplanten Plan: hat Master UND Slave innerhalb 60s neue Aktivität?
       for(const plan of planned){
         if(_at.tracked[plan.id]) continue
+
         const sDupId = _atDupId(plan.slaveAccountId)
         const mDupId = _atDupId(plan.masterAccountId)
         if(!sDupId || !mDupId) continue
 
-        // Beide müssen innerhalb WINDOW eine neue Position/Order haben
-        const slaveTs  = Math.max(...Object.entries(_at.newPosTs)
-          .filter(([k]) => k.startsWith(sDupId+':'))
-          .map(([,v]) => v), 0)
-        const masterTs = _at.newPosTs['m_'+mDupId] || 0
+        const sTs = _at.newPosTs['s_'+sDupId] || 0
+        const mTs = _at.newPosTs['m_'+mDupId] || 0
 
-        if(!slaveTs || !masterTs) continue
-        if(Math.abs(slaveTs - masterTs) > WINDOW) continue
+        console.log('[AT] check plan', plan.masterName,
+          'sTs='+(sTs?(now-sTs)+'ms ago':'none'),
+          'mTs='+(mTs?(now-mTs)+'ms ago':'none'))
 
-        console.log('[AT] MATCH:', plan.masterName, '→', plan.slaveName,
-          'slave:'+(now-slaveTs)+'ms ago master:'+(now-masterTs)+'ms ago')
+        if(!sTs || !mTs) continue
+        if(Math.abs(sTs - mTs) > 60_000) continue
 
-        // Neue Slave-Position für Close-Tracking finden
-        const newSlavePos = positions.find(p => {
+        // MATCH
+        console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
+
+        const newSlavePos = slavePositions.find(p => {
           const k = String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')
-          return String(p.account_id)===sDupId && _at.newPosTs[sDupId+':'+k]
-        }) || positions.find(p => String(p.account_id)===sDupId)
+          return String(p.account_id) === sDupId && (_at.newPosTs['s_'+sDupId+':'+k] || 0) >= sTs
+        }) || slavePositions.find(p => String(p.account_id) === sDupId)
 
-        const slaveKey = newSlavePos
+        const slavePosKey = newSlavePos
           ? String(newSlavePos.amountLot)+(newSlavePos.symbol||'')+(newSlavePos.side||newSlavePos.direction||'')
           : null
 
-        const slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===String(sDupId))?.balance ?? null
-        const masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===String(mDupId))?.balance ?? null
+        const slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===sDupId)?.balance ?? null
+        const masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===mDupId)?.balance ?? null
 
         try{
-          const {data,error} = await supabase.from('trade_plans')
+          const {data, error} = await supabase.from('trade_plans')
             .update({status:'open', started_at: new Date().toISOString()})
             .eq('id', plan.id).select('*').single()
           if(error) throw error
-          const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
-          if(idx>=0) tradePlans[idx] = rowToPlan(data)
-          _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey: slaveKey, slaveBalStart, masterBalStart }
-          // Timestamps löschen damit kein Doppel-Match
-          Object.keys(_at.newPosTs).filter(k=>k.startsWith(sDupId+':')).forEach(k=>delete _at.newPosTs[k])
+          const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+          if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+          _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey, slaveBalStart, masterBalStart }
+          // Timestamps löschen
+          Object.keys(_at.newPosTs).filter(k => k.startsWith('s_'+sDupId)).forEach(k => delete _at.newPosTs[k])
           delete _at.newPosTs['m_'+mDupId]
           renderTradePlans()
-          if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
+          if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
           _atSound('open')
-          _atToast('🟢 Trade gestartet: '+(plan.masterName||plan.masterFirm||''), 'Master + Slave erkannt')
+          _atToast('🟢 '+plan.masterName+' → '+plan.slaveName, 'Trade erkannt')
         }catch(e){ console.error('[AT] open error:', e) }
       }
 
-      // ── Schritt 4: Offene Plans — Position noch offen? ──
+      // ── Schritt 4: Close-Erkennung ──
       const open = tradePlans.filter(p => p.status === 'open')
       for(const plan of open){
         const tr = _at.tracked[plan.id]
         if(!tr) continue
         const sDupId = tr.slaveDupId
-        let stillOpen
-        if(tr.slavePosKey){
-          stillOpen = positions.some(p =>
-            String(p.account_id)===String(sDupId) &&
-            (String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')) === tr.slavePosKey
-          )
-        } else {
-          stillOpen = positions.some(p => String(p.account_id)===String(sDupId))
-        }
+
+        const stillOpen = tr.slavePosKey
+          ? slavePositions.some(p => String(p.account_id)===sDupId && (String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')) === tr.slavePosKey)
+          : slavePositions.some(p => String(p.account_id)===sDupId)
+
         if(stillOpen) continue
 
-        // Geschlossen → P&L + Modal
+        // Geschlossen
         let slavePl = null, masterPl = null
-        const slaveAcc = (accounts||[]).find(a=>String(a.id)===String(plan.slaveAccountId))
-        if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
+        const slaveAcc = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
+        if(slaveAcc?.ma?.token){
           try{
-            const from = new Date(tr.openedAt.getTime()-5000).toISOString()
-            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+encodeURIComponent(from)+'&endTime='+encodeURIComponent(new Date().toISOString()),
+            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+encodeURIComponent(new Date(tr.openedAt-5000).toISOString())+'&endTime='+encodeURIComponent(new Date().toISOString()),
               {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
-            if(r.ok){
-              const d = await r.json().catch(()=>({}))
-              const list = Array.isArray(d)?d:(d.deals||[])
-              const pl = list.filter(x=>x.profit!=null).reduce((s,x)=>s+Number(x.profit),0)
-              if(list.length) slavePl = Math.round(pl*100)/100
-            }
+            if(r.ok){ const d=await r.json(); const list=Array.isArray(d)?d:(d.deals||[]); const pl=list.filter(x=>x.profit!=null).reduce((s,x)=>s+Number(x.profit),0); if(list.length) slavePl=Math.round(pl*100)/100 }
           }catch(_){}
         }
         try{
           const ar = await dupApi('POST','account/getAccounts.php',{})
           if(ar.ok && ar.data?.accounts){
             const fa = ar.data.accounts
-            const mNow = fa.find(a=>String(a.account_id)===String(tr.masterDupId))
-            const sNow = fa.find(a=>String(a.account_id)===String(sDupId))
-            if(mNow?.balance!=null && tr.masterBalStart!=null)
-              masterPl = Math.round((Number(mNow.balance)-Number(tr.masterBalStart))*100)/100
-            if(slavePl==null && sNow?.balance!=null && tr.slaveBalStart!=null)
-              slavePl = Math.round((Number(sNow.balance)-Number(tr.slaveBalStart))*100)/100
+            const mN = fa.find(a=>String(a.account_id)===tr.masterDupId)
+            const sN = fa.find(a=>String(a.account_id)===sDupId)
+            if(mN?.balance!=null && tr.masterBalStart!=null) masterPl=Math.round((Number(mN.balance)-Number(tr.masterBalStart))*100)/100
+            if(slavePl==null && sN?.balance!=null && tr.slaveBalStart!=null) slavePl=Math.round((Number(sN.balance)-Number(tr.slaveBalStart))*100)/100
           }
         }catch(_){}
 
         try{
           const upd = {}
-          if(slavePl!=null) upd.slave_pl = slavePl
-          if(masterPl!=null) upd.master_pl = masterPl
+          if(slavePl!=null) upd.slave_pl=slavePl
+          if(masterPl!=null) upd.master_pl=masterPl
           if(Object.keys(upd).length) await supabase.from('trade_plans').update(upd).eq('id',plan.id)
           const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
-          if(idx>=0) tradePlans[idx] = {...tradePlans[idx], ...(slavePl!=null?{slavePl}:{}), ...(masterPl!=null?{masterPl}:{})}
+          if(idx>=0) tradePlans[idx]={...tradePlans[idx],...(slavePl!=null?{slavePl}:{}),...(masterPl!=null?{masterPl}:{})}
           delete _at.tracked[plan.id]
           delete _at.livePnl[plan.id]
           renderTradePlans()
           if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
           _atSound('close')
-          const plStr = slavePl!=null?' · '+( slavePl>=0?'+':'')+slavePl.toFixed(2)+'€':''
-          _atToast('🔴 Trade geschlossen: '+(plan.masterName||plan.masterFirm||''), (plan.slaveName||'')+plStr, 15000)
-          setTimeout(()=>{ if(typeof openTradeCompleteModal==='function') openTradeCompleteModal(plan.id) }, 500)
+          const pl=slavePl!=null?' · '+(slavePl>=0?'+':'')+slavePl.toFixed(2)+'€':''
+          _atToast('🔴 '+plan.masterName+' geschlossen', (plan.slaveName||'')+pl, 15000)
+          setTimeout(()=>{ if(typeof openTradeCompleteModal==='function') openTradeCompleteModal(plan.id) },500)
         }catch(e){ console.error('[AT] close error:', e) }
       }
 
