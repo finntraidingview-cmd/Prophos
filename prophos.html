@@ -10475,13 +10475,16 @@
         slaveByAcc[aid].add(key)
       }
 
-      // Master prevPos (nutze name-field da account_id leer sein kann)
+      // Master prevPos
       const masterByAcc = {}
+      if(masterOrders.length > 0){
+        const sampleOrd = masterOrders[0]
+        console.log('[AT] master order keys:', JSON.stringify(Object.keys(sampleOrd)))
+        console.log('[AT] master order sample:', JSON.stringify(sampleOrd).slice(0,300))
+      }
       for(const ord of masterOrders){
-        // account_id kann leer sein - nutze den Namen um den Duplikum-Account zu identifizieren
         const aid = String(ord.account_id || ord.id_master || '')
         const name = String(ord.name || ord.master_name || '')
-        // Finde Duplikum-Account-ID über den Namen
         const dupAcc = (dupState.accounts||[]).find(a =>
           String(a.account_id) === aid ||
           String(a.name || '').includes(name.split(' ').pop()) ||
@@ -10492,7 +10495,7 @@
         if(!masterByAcc[resolvedId]) masterByAcc[resolvedId] = new Set()
         masterByAcc[resolvedId].add(String(ord.order_id_master || ord.master_ticket || ord.id || ''))
       }
-      console.log('[AT] masterByAcc keys:', Object.keys(masterByAcc).join(','))
+      console.log('[AT] masterByAcc keys:', Object.keys(masterByAcc).join(',') || 'EMPTY')
 
       // ── Schritt 2: Neue Positionen/Orders erkennen ──
       // Slave
