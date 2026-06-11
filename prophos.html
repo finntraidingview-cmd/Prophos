@@ -10457,9 +10457,6 @@
       const masterOrders   = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
       const now = Date.now()
 
-      console.log('[AT] poll', new Date().toLocaleTimeString(),
-        'slave='+slavePositions.length, 'master='+masterOrders.length,
-        'planned='+tradePlans.filter(p=>p.status==='planned').length)
 
       // ── Schritt 1: prevPos aufbauen (nur beim ersten Poll) ──
       const planned = tradePlans.filter(p => p.status === 'planned')
@@ -10477,8 +10474,8 @@
       const masterByAcc = {}
       if(masterOrders.length > 0){
         const sampleOrd = masterOrders[0]
-        console.log('[AT] master order keys:', JSON.stringify(Object.keys(sampleOrd)))
-        console.log('[AT] master order sample:', JSON.stringify(sampleOrd).slice(0,300))
+
+
       }
       for(const ord of masterOrders){
         const aid = String(ord.account_id || ord.id_master || '')
@@ -10493,7 +10490,7 @@
         if(!masterByAcc[resolvedId]) masterByAcc[resolvedId] = new Set()
         masterByAcc[resolvedId].add(String(ord.order_id_master || ord.master_ticket || ord.id || ''))
       }
-      console.log('[AT] masterByAcc keys:', Object.keys(masterByAcc).join(',') || 'EMPTY')
+
 
       // ── Schritt 2: Neue Positionen erkennen ──
       const isFirstPoll = !_at.firstPollDone
@@ -10539,29 +10536,12 @@
         if(!sDupId || !mDupId) continue
 
         const sTs = _at.newPosTs['s_'+sDupId] || 0
-        const mTs = _at.newPosTs['m_'+mDupId] || 0
+        if(!sTs) continue
+        if(now - sTs > 60_000) continue
 
-        // Debug: welche master account_ids sind in masterOrders?
-        if(sTs && !mTs){
-          const masterAccIds = [...new Set(masterOrders.map(o=>o.account_id))].join(',')
-          console.log('[AT] mDupId='+mDupId+' masterOrders account_ids='+masterAccIds)
-        }
-        // prüfe ob Master überhaupt Orders in getMasterOrders hat (= Master ist aktiv)
-        let effectiveMTs = mTs
-        if(sTs && !mTs){
-          const masterHasOrders = masterOrders.some(o => String(o.account_id) === mDupId)
-          if(masterHasOrders){
-            effectiveMTs = sTs  // Master ist aktiv, nutze Slave-Timestamp
-            console.log('[AT] master', mDupId, 'hat orders aber kein neuen Timestamp → nutze slave ts')
-          }
-        }
-
-        console.log('[AT] check plan', plan.masterName,
-          'sTs='+(sTs?(now-sTs)+'ms ago':'none'),
-          'mTs='+(effectiveMTs?(now-effectiveMTs)+'ms ago':'none'))
-
-        if(!sTs || !effectiveMTs) continue
-        if(Math.abs(sTs - effectiveMTs) > 60_000) continue
+        // Master muss aktive Orders haben (in masterByAcc vorhanden)
+        const masterIsActive = !!masterByAcc[mDupId]
+        if(!masterIsActive) continue
 
         // MATCH
         console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
@@ -10611,21 +10591,32 @@
         // Geschlossen
         let slavePl = null, masterPl = null
         const slaveAcc = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
-        if(slaveAcc?.ma?.token){
+
+        // Slave P&L: NUR via MetaApi — kein Balance-Diff Fallback
+        // (Slave hat mehrere parallele Trades → Balance-Diff ungenau)
+        if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
           try{
-            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+encodeURIComponent(new Date(tr.openedAt-5000).toISOString())+'&endTime='+encodeURIComponent(new Date().toISOString()),
+            const from = encodeURIComponent(new Date(tr.openedAt.getTime()-5000).toISOString())
+            const to   = encodeURIComponent(new Date().toISOString())
+            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+from+'&endTime='+to,
               {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
-            if(r.ok){ const d=await r.json(); const list=Array.isArray(d)?d:(d.deals||[]); const pl=list.filter(x=>x.profit!=null).reduce((s,x)=>s+Number(x.profit),0); if(list.length) slavePl=Math.round(pl*100)/100 }
+            if(r.ok){
+              const d = await r.json()
+              const list = Array.isArray(d) ? d : (d.deals||[])
+              // Nur OUT-Deals (geschlossene Positionen) im Zeitraum
+              const closed = list.filter(x => x.profit!=null && (x.entryType==='DEAL_ENTRY_OUT' || x.type==='DEAL_TYPE_SELL' || x.type==='DEAL_TYPE_BUY'))
+              if(closed.length > 0) slavePl = Math.round(closed.reduce((s,x)=>s+Number(x.profit),0)*100)/100
+            }
           }catch(_){}
         }
+
+        // Master P&L: Balance-Diff (nur ein Trade gleichzeitig auf Challenge-Account)
         try{
           const ar = await dupApi('POST','account/getAccounts.php',{})
           if(ar.ok && ar.data?.accounts){
-            const fa = ar.data.accounts
-            const mN = fa.find(a=>String(a.account_id)===tr.masterDupId)
-            const sN = fa.find(a=>String(a.account_id)===sDupId)
-            if(mN?.balance!=null && tr.masterBalStart!=null) masterPl=Math.round((Number(mN.balance)-Number(tr.masterBalStart))*100)/100
-            if(slavePl==null && sN?.balance!=null && tr.slaveBalStart!=null) slavePl=Math.round((Number(sN.balance)-Number(tr.slaveBalStart))*100)/100
+            const mNow = ar.data.accounts.find(a=>String(a.account_id)===tr.masterDupId)
+            if(mNow?.balance!=null && tr.masterBalStart!=null)
+              masterPl = Math.round((Number(mNow.balance)-Number(tr.masterBalStart))*100)/100
           }
         }catch(_){}
 
