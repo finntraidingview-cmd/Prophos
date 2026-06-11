@@ -10486,60 +10486,21 @@
         if(!newPrev[aid]) _at.prevPos[aid] = new Set()
       }
 
-      // MASTER: neue Positionen aus ltState (TSX + MT5 + Duplikum-Master via ltRefresh)
-      const allLtPos = [
-        ...(ltState.positions?.tsx || []),
-        ...(ltState.positions?.mt  || []),
-        ...(ltState.positions?.dup || [])
-      ]
-      // Für jeden geplanten Plan: Master-Account in ltState suchen
+      // ── Schritt 2: Matchen — nur Slave-Erkennung nötig ──
+      // Begründung: du startest nie zwei Plans gleichzeitig auf demselben Slave
+      // → neue Position auf Slave = Trade gestartet
       const planned = tradePlans.filter(p => p.status === 'planned')
-      for(const plan of planned){
-        if(_at.tracked[plan.id]) continue
-        const masterAcc = (accounts||[]).find(a => String(a.id)===String(plan.masterAccountId))
-        if(!masterAcc) continue
-
-        // Master-Position in ltState finden
-        let mPos = null
-        if(masterAcc.topstep) mPos = allLtPos.find(p => p.src==='tsx' && String(p.accountId)===String(masterAcc.topstep.id))
-        if(!mPos && masterAcc.ma) mPos = allLtPos.find(p => p.src==='mt' && String(p.accountId)===String(masterAcc.ma.accountId))
-        if(!mPos){
-          const mDupId = _atDupId(plan.masterAccountId)
-          if(mDupId) mPos = allLtPos.find(p => p.src==='dup' && String(p.accountId)===String(mDupId))
-        }
-
-        if(mPos){
-          const mKey = String(plan.masterAccountId)
-          const posKey = (mPos.side||'')+(mPos.size||'')+(mPos.symbol||'')
-          const prevMKey = _at.prevPos['master_'+mKey]
-          console.log('[AT] master', plan.masterName, 'prevKey='+prevMKey, 'nowKey='+posKey, 'src='+mPos.src)
-          if(!prevMKey){
-            _at.prevPos['master_'+mKey] = posKey
-            console.log('[AT] init master prevPos for', mKey)
-          } else if(prevMKey !== posKey){
-            _at.newPosTs['master_'+mKey] = now
-            console.log('[AT] ✓ Neue Master-Position für Plan', plan.masterName, new Date().toLocaleTimeString())
-            _at.prevPos['master_'+mKey] = posKey
-          }
-        } else {
-          console.log('[AT] master NOT FOUND in ltState for', plan.masterName, 'topstep='+plan.masterAccountId)
-        }
-      }
-
-      // ── Schritt 2: Matchen ──
       console.log('[AT] planned='+planned.length+' newPosTs='+JSON.stringify(Object.entries(_at.newPosTs).map(([k,v])=>k+':'+(now-v)+'ms')))
       for(const plan of planned){
         if(_at.tracked[plan.id]) continue
 
-        const mDupId = _atDupId(plan.masterAccountId)
         const sDupId = _atDupId(plan.slaveAccountId)
-        if(!sDupId) continue  // Slave muss in Duplikum sein
+        if(!sDupId) continue
 
-        // Master-Timestamp: entweder via Duplikum-ID oder via master_ Key
-        const mTs = _at.newPosTs[mDupId] || _at.newPosTs['master_'+plan.masterAccountId]
         const sTs = _at.newPosTs[sDupId]
-        if(!mTs || !sTs) continue
-        if(Math.abs(mTs - sTs) > WINDOW) continue
+        if(!sTs) continue
+        // Max 60s alt (verhindert false match bei alten Timestamps)
+        if(now - sTs > 60_000) continue
 
         // Match — beide innerhalb 30s neue Position
         console.log('[AT] MATCH:', plan.masterName, '→', plan.slaveName, 'diff='+Math.abs(mTs-sTs)+'ms')
@@ -10566,8 +10527,6 @@
           if(idx>=0) tradePlans[idx] = rowToPlan(data)
           _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slaveKey, slaveBalStart, masterBalStart }
           // Timestamps zurücksetzen
-          if(mDupId) delete _at.newPosTs[mDupId]
-          delete _at.newPosTs['master_'+plan.masterAccountId]
           delete _at.newPosTs[sDupId]
           renderTradePlans()
           if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
