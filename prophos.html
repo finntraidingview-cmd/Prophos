@@ -5910,10 +5910,11 @@
         const extId   = String(a.externalId   || '').trim()
         const tsxId   = String(a.topstep?.id  || '').trim()
         const maLogin = String(a.ma?.login     || '').trim()
+        // Duplikum login ist oft die Tradovate-ID direkt, oder der Account-Name enthält sie
         return (
-          (extId   && extId   === dupLogin) ||  // ← primärer Match
-          (tsxId   && tsxId   === dupLogin) ||
-          (maLogin && maLogin === dupLogin)
+          (extId   && (extId === dupLogin || dupLogin.includes(extId))) ||
+          (tsxId   && (tsxId === dupLogin || dupLogin.includes(tsxId))) ||
+          (maLogin && (maLogin === dupLogin || dupLogin.includes(maLogin)))
         )
       })
 
@@ -10442,16 +10443,18 @@
   // ── Haupt-Poll (alle 15s) ──
 
   async function _atPoll(){
-    if(_at.running) return
-    if(!dupState.token) return
+    if(_at.running){ console.log('[AT] skip - running'); return }
+    if(!dupState.token){ console.log('[AT] skip - no token'); return }
     _at.running = true
+    console.log('[AT] poll', new Date().toLocaleTimeString())
     try{
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      console.log('[AT] res ok='+res.ok+' keys='+JSON.stringify(Object.keys(res.data||{})) +' positions='+(res.data?.data?.length??'?')+' code='+res.data?.code)
       if(!res.ok || res.data?.code === 0) return  // Rate limit oder Fehler
       const positions = res.data?.data || res.data || []
-      if(!Array.isArray(positions)) return
+      if(!Array.isArray(positions)){ console.log('[AT] not array'); return }
       const now = Date.now()
-      const WINDOW = 30_000  // 30s Erkennungsfenster
+      const WINDOW = 10_000  // 10s Erkennungsfenster
 
       // ── Schritt 1: Neue Positionen pro Account erkennen ──
       // Baue neue prevPos-Snapshots
@@ -10485,6 +10488,7 @@
 
       // ── Schritt 2: Geplante Plans matchen ──
       const planned = tradePlans.filter(p => p.status === 'planned')
+      console.log('[AT] planned='+planned.length+' newPosTs='+JSON.stringify(Object.entries(_at.newPosTs).map(([k,v])=>k+':'+(now-v)+'ms')))
       for(const plan of planned){
         if(_at.tracked[plan.id]) continue
 
