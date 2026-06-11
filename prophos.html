@@ -10512,18 +10512,20 @@
         _at.prevPos['s_'+aid] = keys
       }
 
-      // Master
-      for(const [aid, keys] of Object.entries(masterByAcc)){
-        const prev = _at.prevPos['m_'+aid]
-        if(!prev){
+      // Master prevPos — nur updaten wenn masterOrders nicht leer
+      if(masterOrders.length > 0){
+        for(const [aid, keys] of Object.entries(masterByAcc)){
+          const prev = _at.prevPos['m_'+aid]
+          if(!prev){
+            _at.prevPos['m_'+aid] = keys
+            continue  // Erster Poll: nicht als neu markieren
+          }
+          const newKeys = [...keys].filter(k => !prev.has(k))
+          if(newKeys.length > 0 && !isFirstPoll){
+            _at.newPosTs['m_'+aid] = now
+          }
           _at.prevPos['m_'+aid] = keys
-          continue  // Erster Poll: nicht als neu markieren
         }
-        const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0 && !isFirstPoll){
-          _at.newPosTs['m_'+aid] = now
-        }
-        _at.prevPos['m_'+aid] = keys
       }
 
       // ── Schritt 3: Matchen ──
@@ -10539,9 +10541,10 @@
         if(!sTs) continue
         if(now - sTs > 60_000) continue
 
-        // Master muss aktive Orders haben (in masterByAcc vorhanden)
-        const masterIsActive = !!masterByAcc[mDupId]
-        if(!masterIsActive) continue
+        // Master muss in den letzten 60s eine NEUE Order bekommen haben
+        const mTs = _at.newPosTs['m_'+mDupId] || 0
+        if(!mTs) continue
+        if(now - mTs > 60_000) continue
 
         // MATCH
         console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
