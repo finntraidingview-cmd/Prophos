@@ -10489,32 +10489,39 @@
       }
       for(const ord of masterOrders){
         const ordName = String(ord.name || ord.master_name || '')
-        // Finde den Duplikum-Account der zu dieser Order gehört
+        // Finde Duplikum-Account: login-Feld matcht External ID des Prophos-Accounts
         const dupAcc = (dupState.accounts||[]).find(a => {
-          const accId = String(a.account_id || '')
-          const accName = String(a.name || '')
-          // 1. Direkter account_id Match
-          if(ord.account_id && String(ord.account_id) === accId) return true
-          // 2. Name enthält Account-ID oder Login
-          if(ordName && accId && ordName.includes(accId)) return true
-          // 3. Account-Name ist im Order-Namen enthalten
-          if(ordName && accName && ordName.includes(accName.split(' ').pop())) return true
+          const login = String(a.login || a.account_id || '')
+          if(!login) return false
+          // login direkt gegen externalId aller Prophos-Accounts checken
+          const prophosMatch = (accounts||[]).some(pa => String(pa.externalId||'').trim() === login)
+          if(prophosMatch) return false  // Das ist ein bekannter Account, aber prüfe ob er der richtige ist
           return false
         })
 
-        // Fallback: Prophos-Account über externalId matchen
-        let resolvedId = dupAcc ? String(dupAcc.account_id) : null
-        if(!resolvedId){
-          // Suche Prophos-Account dessen externalId im Order-Namen vorkommt
-          const prophosAcc = (accounts||[]).find(a => {
-            const ext = String(a.externalId || '').trim()
-            return ext && ordName.includes(ext)
-          })
-          if(prophosAcc){
-            // Finde den Duplikum-Account der mit diesem Prophos-Account verknüpft ist
-            const links = dupGetLinks()
-            const dupId = Object.entries(links).find(([,pId]) => String(pId) === String(prophosAcc.id))?.[0]
-            if(dupId) resolvedId = dupId
+        // Direkter Ansatz: finde Prophos-Account dessen externalId im Order-Namen oder login vorkommt
+        let resolvedId = null
+        const prophosAcc = (accounts||[]).find(a => {
+          const ext = String(a.externalId || '').trim()
+          if(!ext) return false
+          // Order-Name enthält die External ID
+          if(ordName.includes(ext)) return true
+          // Oder Duplikum-Account login === externalId
+          const dupA = (dupState.accounts||[]).find(da => String(da.login||'') === ext)
+          if(dupA && ordName.includes(String(dupA.account_id||''))) return true
+          return false
+        })
+
+        if(prophosAcc){
+          // Finde Duplikum-Account der zu diesem Prophos-Account gehört
+          // Methode 1: via dupGetLinks (manuelle Verknüpfung)
+          const links = dupGetLinks()
+          resolvedId = Object.entries(links).find(([,pId]) => String(pId) === String(prophosAcc.id))?.[0] || null
+          // Methode 2: via login === externalId
+          if(!resolvedId){
+            const ext = String(prophosAcc.externalId||'').trim()
+            const da = (dupState.accounts||[]).find(a => String(a.login||'') === ext)
+            if(da) resolvedId = String(da.account_id)
           }
         }
 
