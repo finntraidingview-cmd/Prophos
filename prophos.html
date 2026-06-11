@@ -10446,12 +10446,16 @@
     if(_at.running) return
     if(!dupState.token) return
     _at.running = true
+    console.log('[AT] poll', new Date().toLocaleTimeString(), 'planned='+tradePlans.filter(p=>p.status==='planned').length)
     try{
       const [res, masterRes] = await Promise.all([
         dupApi('POST', 'position/getOpenPositions.php', { length: 1000 }),
         dupApi('POST', 'order/getMasterOrders.php', { length: 1000 })
       ])
-      if(!res.ok || res.data?.code === 0) return
+      if(!res.ok || res.data?.code === 0){
+        console.log('[AT] API error/ratelimit, skip')
+        return
+      }
       const positions    = Array.isArray(res.data?.data) ? res.data.data : []
       const masterOrders = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
       const now = Date.now()
