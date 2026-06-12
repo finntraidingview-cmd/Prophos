@@ -10598,7 +10598,24 @@
           if(error) throw error
           const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
           if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-          _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey, slaveBalStart, masterBalStart }
+          // MetaApi positionId beim Open holen für präzises P&L beim Close
+        let maPositionId = null
+        const slaveAccForOpen = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
+        if(slaveAccForOpen?.ma?.token && slaveAccForOpen?.ma?.accountId){
+          try{
+            const r = await fetch(TS_BACKEND+'/ma/positions',
+              {headers:{'ma-token':slaveAccForOpen.ma.token,'ma-account':slaveAccForOpen.ma.accountId}})
+            if(r.ok){
+              const positions = await r.json()
+              const list = Array.isArray(positions) ? positions : (positions.positions||[])
+              // Neueste Position = der gerade eröffnete Trade
+              const newest = list.sort((a,b) => new Date(b.openTime||b.time||0) - new Date(a.openTime||a.time||0))[0]
+              if(newest) maPositionId = newest.id || newest.positionId || null
+            }
+          }catch(_){}
+        }
+
+        _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey, slaveBalStart, masterBalStart, maPositionId }
           // Timestamps löschen
           Object.keys(_at.newPosTs).filter(k => k.startsWith('s_'+sDupId)).forEach(k => delete _at.newPosTs[k])
           delete _at.newPosTs['m_'+mDupId]
@@ -10626,23 +10643,27 @@
         let slavePl = null, masterPl = null
         const slaveAcc = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
 
-        // Slave P&L: NUR via MetaApi — kein Balance-Diff Fallback
+        // Slave P&L: via MetaApi, exakt über positionId wenn vorhanden
         if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
           try{
-            const from = encodeURIComponent(tr.openedAt.toISOString())
-            const to   = encodeURIComponent(new Date().toISOString())
-            const r = await fetch(TS_BACKEND+'/ma/deals?startTime='+from+'&endTime='+to,
-              {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
+            let url
+            if(tr.maPositionId){
+              // Exakt: nur Deals für diese positionId
+              url = TS_BACKEND+'/ma/deals?positionId='+encodeURIComponent(tr.maPositionId)
+            } else {
+              // Fallback: Zeitraum seit Trade-Open
+              const from = encodeURIComponent(tr.openedAt.toISOString())
+              const to   = encodeURIComponent(new Date().toISOString())
+              url = TS_BACKEND+'/ma/deals?startTime='+from+'&endTime='+to
+            }
+            const r = await fetch(url, {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
             if(r.ok){
               const d = await r.json()
               const list = Array.isArray(d) ? d : (d.deals||[])
-              // Nur Deals mit echtem P&L, sortiert nach Zeit → neuester zuerst
-              const relevant = list
-                .filter(x => x.profit != null && Number(x.profit) !== 0)
-                .sort((a,b) => new Date(b.time||b.brokerTime||0) - new Date(a.time||a.brokerTime||0))
-              // Den neuesten Deal nehmen (= der zuletzt geschlossene Trade)
+              const relevant = list.filter(x => x.profit != null && Number(x.profit) !== 0)
               if(relevant.length > 0){
-                slavePl = Math.round(Number(relevant[0].profit)*100)/100
+                // Bei positionId: alle zugehörigen Deals summieren (Entry + Exit)
+                slavePl = Math.round(relevant.reduce((s,x)=>s+Number(x.profit),0)*100)/100
               }
             }
           }catch(_){}
