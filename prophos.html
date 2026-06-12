@@ -2508,9 +2508,14 @@
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
+                <span id="dup-mappings-status" style="font-size:12px;color:var(--muted)"></span>
                 <button class="btn btn-ghost" id="dup-auto-connect-btn" type="button" title="Duplikum-Accounts automatisch mit Prophos-Accounts verknüpfen (über Login-ID)">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                   Auto-Connect
+                </button>
+                <button class="btn btn-ghost" id="dup-mappings-btn" type="button" title="Standard-Symbol-Mappings (NQ/MNQ/Index → NAS100) auf alle Master-Accounts anwenden">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M3 12h6m6 0h6M9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0"/></svg>
+                  Mappings setzen
                 </button>
                 <button class="btn btn-ghost" id="dup-sync-btn" type="button" title="Accounts neu laden">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -4848,6 +4853,69 @@
     }
   }
 
+  /**
+   * ─── Standard-Symbol-Mappings auf alle Master-Accounts anwenden ───
+   * Mappt alle bekannten NQ/MNQ-Futures-Kontrakte (alle Quartale) sowie
+   * gängige Index-CFD-Schreibweisen auf NAS100 für den NAS100-Slave.
+   * Nutzt symbols/addMappings.php pro Master-Account.
+   */
+  const DUP_STANDARD_MAPPINGS = [
+    'NQM6','MNQM6','NQU6','MNQU6','NQZ6','MNQZ6','NQH7','MNQH7','NQM7',
+    'NDX100','US100.cash','US100','USTEC','USTEC.cash','USTECH100','NAS100.cash','NASDAQ100'
+  ]
+
+  function dupMappingsSetStatus(text, kind=''){
+    const el = document.getElementById('dup-mappings-status')
+    if(!el) return
+    el.textContent = text
+    el.style.color = kind === 'err' ? 'var(--red,#e5484d)' : kind === 'ok' ? 'var(--green,#30a46c)' : 'var(--muted)'
+  }
+
+  async function dupApplyStandardMappings(){
+    const btn = document.getElementById('dup-mappings-btn')
+    if(!dupState.token){ dupMappingsSetStatus('Nicht verbunden', 'err'); return }
+
+    const masters = (dupState.accounts || []).filter(a => Number(a.type) === 0)
+    const slaves  = (dupState.accounts || []).filter(a => Number(a.type) === 1)
+
+    if(slaves.length === 0){ dupMappingsSetStatus('Kein Slave-Account gefunden', 'err'); return }
+    // Slave wählen: bevorzugt "Fusion Live" im Namen, sonst ersten Slave nehmen
+    const slave = slaves.find(s => /fusion live/i.test(s.name || '')) || slaves[0]
+    const slaveId = slave.account_id
+
+    if(masters.length === 0){ dupMappingsSetStatus('Keine Master-Accounts gefunden', 'err'); return }
+
+    if(btn){ btn.disabled = true }
+    let ok = 0, fail = 0
+    for(const m of masters){
+      dupMappingsSetStatus(`⏳ ${ok+fail+1}/${masters.length}: ${m.name || m.account_id}…`, 'loading')
+      const mappings = DUP_STANDARD_MAPPINGS.map(sym => ({
+        id_master: String(m.account_id),
+        id_slave:  String(slaveId),
+        symbol_master: sym,
+        symbol_slave:  'NAS100'
+      }))
+      try{
+        const res = await dupApi('POST', 'symbols/addMappings.php', { mappings })
+        if(res.ok){ ok++ }
+        else {
+          fail++
+          console.error('[dupMappings] Fehler bei', m.name, m.account_id, res.status, res.data)
+        }
+      }catch(e){
+        fail++
+        console.error('[dupMappings] Exception bei', m.name, m.account_id, e)
+      }
+    }
+
+    if(btn){ btn.disabled = false }
+    if(fail === 0){
+      dupMappingsSetStatus(`✓ Mappings auf ${ok} Master angewendet (${DUP_STANDARD_MAPPINGS.length} Symbole → NAS100, Slave: ${slave.name||slaveId})`, 'ok')
+    } else {
+      dupMappingsSetStatus(`⚠ ${ok} ok, ${fail} fehlgeschlagen — siehe Konsole`, 'err')
+    }
+  }
+
   function dupCalcSetStatus(text, kind=''){
     const els = dupCalcEls()
     if(!els.status) return
@@ -5945,6 +6013,7 @@
   }
 
   document.getElementById('dup-auto-connect-btn')?.addEventListener('click', dupAutoConnect)
+  document.getElementById('dup-mappings-btn')?.addEventListener('click', dupApplyStandardMappings)
   /* ── END Auto-Connect ── */
   document.querySelectorAll('[data-subtab="duplikum"]').forEach(btn => {
     btn.addEventListener('click', () => {
