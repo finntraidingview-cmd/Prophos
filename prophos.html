@@ -7244,33 +7244,12 @@
     const parents = (typeof getParents === 'function') ? getParents() : {}
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
     const filters = (typeof accFilters !== 'undefined') ? accFilters : { firm:'', type:'' }
-    const q = (typeof accSearch === 'string') ? accSearch : ''
-
-    // Duplikum-Lookup für Suche
-    const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-    const dupByManualId = {}
-    for(const [dupId, manualId] of Object.entries(dupLinks)){
-      const dupAcc = (dupState?.accounts || []).find(d => d.account_id === dupId)
-      if(dupAcc) dupByManualId[manualId] = dupAcc
-    }
-    const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
-    const accHaystack = a => {
-      const dupAcc = dupByManualId[a.id] || null
-      return searchNorm([
-        a.name, a.externalId,
-        a.ma?.login, a.ma?.accountId,
-        a.topstep?.id, a.topstep?.name,
-        dupAcc?.login, dupAcc?.account_id, dupAcc?.name
-      ].filter(Boolean).join(' '))
-    }
-    const qNorm = searchNorm(q)
 
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
-      if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
