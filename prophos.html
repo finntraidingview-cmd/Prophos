@@ -8887,11 +8887,62 @@
       if(typeof updatePreview === 'function') updatePreview()
     }
 
-    /* ── Account-Vorlagen (localStorage) ── */
-    const _TPL_KEY = 'prophos_acc_templates'
+    /* ── Account-Vorlagen (Supabase, mit localStorage-Cache/Fallback) ── */
+    const _TPL_KEY = 'prophos_acc_templates'   // lokaler Cache / Offline-Fallback
     const _tplEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-    function _tplLoad(){ try { return JSON.parse(localStorage.getItem(_TPL_KEY) || '[]') } catch { return [] } }
-    function _tplSaveAll(arr){ try { localStorage.setItem(_TPL_KEY, JSON.stringify(arr)) } catch(e){} }
+    let _tplCache = _tplLoadLocal()
+    let _tplRemoteOk = true
+    function _tplLoadLocal(){ try { return JSON.parse(localStorage.getItem(_TPL_KEY) || '[]') } catch { return [] } }
+    function _tplSaveLocal(arr){ try { localStorage.setItem(_TPL_KEY, JSON.stringify(arr)) } catch(e){} }
+    function _tplFromRow(r){ return {
+      id: r.id, name: r.name, firm: r.firm||'', type: r.type||'phase1',
+      accountSize: r.account_size||'', initialBalance: r.initial_balance||'',
+      purchaseCost: r.purchase_cost||'', purchaseCcy: r.purchase_ccy||'EUR',
+      maxDrawdown: r.max_drawdown||'', nameTemplate: r.name_template||''
+    } }
+    function _tplToRow(t){ return {
+      user_id: currentUserId, name: t.name,
+      firm: t.firm||null, type: t.type||null, account_size: t.accountSize||null,
+      initial_balance: t.initialBalance||null, purchase_cost: t.purchaseCost||null,
+      purchase_ccy: t.purchaseCcy||'EUR', max_drawdown: t.maxDrawdown||null,
+      name_template: t.nameTemplate||null
+    } }
+    async function _tplFetch(){
+      _tplRender()  // sofort aus Cache rendern
+      if(!currentUserId){ return }
+      try {
+        const { data, error } = await supabase.from('account_templates')
+          .select('*').eq('user_id', currentUserId).order('created_at', { ascending: true })
+        if(error) throw error
+        _tplRemoteOk = true
+        _tplCache = (data || []).map(_tplFromRow)
+        _tplSaveLocal(_tplCache)
+      } catch(e){
+        _tplRemoteOk = false
+        _tplCache = _tplLoadLocal()
+        console.warn('[Prophos] account_templates nicht erreichbar (Migration ausgeführt?), nutze lokalen Cache:', e?.message || e)
+      }
+      _tplRender()
+    }
+    async function _tplPersistSave(tpl){   // tpl ohne id
+      if(_tplRemoteOk && currentUserId){
+        try {
+          const { data, error } = await supabase.from('account_templates')
+            .insert(_tplToRow(tpl)).select('*').single()
+          if(error) throw error
+          _tplCache.push(_tplFromRow(data)); _tplSaveLocal(_tplCache); _tplRender(); return
+        } catch(e){ _tplRemoteOk = false; console.warn('[Prophos] tpl insert → lokaler Fallback:', e?.message || e) }
+      }
+      _tplCache.push({ id: 'tpl_'+Date.now(), ...tpl }); _tplSaveLocal(_tplCache); _tplRender()
+    }
+    async function _tplPersistRename(id, name){
+      const t = _tplCache.find(x => x.id === id); if(t){ t.name = name; _tplSaveLocal(_tplCache) }
+      _tplRender()
+      if(_tplRemoteOk && currentUserId && !String(id).startsWith('tpl_')){
+        try { await supabase.from('account_templates').update({ name }).eq('id', id) }
+        catch(e){ console.warn('[Prophos] tpl rename:', e?.message || e) }
+      }
+    }
     function _tplCapture(){
       return {
         firm:           bEl.firm?.value.trim() || '',
@@ -8934,7 +8985,7 @@
     function _tplRender(){
       const wrap = document.getElementById('bulk-templates')
       if(!wrap) return
-      const tpls = _tplLoad()
+      const tpls = _tplCache
       if(!tpls.length){
         wrap.innerHTML = `<div class="tpl-empty">Noch keine Vorlagen — füll die Felder aus und klick „＋ Aktuelle speichern".</div>`
         return
@@ -8969,24 +9020,24 @@
       const doSave = () => {
         const name = input.value.trim()
         if(!name){ input.focus(); return }
-        const tpls = _tplLoad(); tpls.push({ id: 'tpl_'+Date.now(), name, ...cap }); _tplSaveAll(tpls); _tplRender()
+        _tplPersistSave({ name, ...cap })
       }
       input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); doSave() } if(e.key==='Escape'){ _tplRender() } })
       card.querySelector('[data-sv="ok"]').addEventListener('click', e => { e.stopPropagation(); doSave() })
       card.querySelector('[data-sv="x"]').addEventListener('click', e => { e.stopPropagation(); _tplRender() })
     }
     function _tplRename(id){
-      const tpls = _tplLoad(); const cur = tpls.find(t => t.id === id); if(!cur) return
+      const cur = _tplCache.find(t => t.id === id); if(!cur) return
       const card = document.querySelector(`.tpl-card[data-tpl-id="${id}"]`); if(!card) return
       const nameEl = card.querySelector('.tpl-name')
       nameEl.innerHTML = `<input class="tpl-name-input" value="${_tplEsc(cur.name)}">`
       const input = nameEl.querySelector('input'); input.focus(); input.select()
       let done = false
-      const commit = () => { if(done) return; done = true; const name = input.value.trim() || cur.name; const arr = _tplLoad(); const t = arr.find(x => x.id === id); if(t){ t.name = name; _tplSaveAll(arr) } _tplRender() }
+      const commit = () => { if(done) return; done = true; const name = input.value.trim() || cur.name; _tplPersistRename(id, name) }
       input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); commit() } if(e.key==='Escape'){ done=true; _tplRender() } })
       input.addEventListener('blur', commit)
     }
-    function _tplDelete(id){ _tplSaveAll(_tplLoad().filter(t => t.id !== id)); _tplRender() }
+    async function _tplDelete(id){ _tplCache = _tplCache.filter(t => t.id !== id); _tplSaveLocal(_tplCache); _tplRender(); if(_tplRemoteOk && currentUserId && !String(id).startsWith("tpl_")){ try { await supabase.from("account_templates").delete().eq("id", id) } catch(e){ console.warn("[Prophos] tpl delete:", e?.message||e) } } }
     document.getElementById('bulk-templates')?.addEventListener('click', e => {
       const card = e.target.closest('.tpl-card[data-tpl-id]'); if(!card) return
       const id = card.dataset.tplId
@@ -8998,7 +9049,7 @@
         return
       }
       if(card.querySelector('.tpl-name-input')) return  // im Rename-Modus → nicht anwenden
-      const tpl = _tplLoad().find(t => t.id === id); if(tpl) _tplApply(tpl)
+      const tpl = _tplCache.find(t => t.id === id); if(tpl) _tplApply(tpl)
     })
     document.getElementById('bulk-tpl-save')?.addEventListener('click', _tplStartSave)
 
@@ -9082,7 +9133,7 @@
       bEl.template.value = ''
       if(bEl.extIds) bEl.extIds.value = ''
       if(typeof _bulkSetCostCcy === 'function') _bulkSetCostCcy('EUR')
-      if(typeof _tplRender === 'function') _tplRender()
+      if(typeof _tplFetch === 'function') _tplFetch()
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
