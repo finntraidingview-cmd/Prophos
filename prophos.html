@@ -2235,7 +2235,7 @@
 
     <div class="tb-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" placeholder="Suchen…" />
+      <input type="text" id="globalSearch" placeholder="Account suchen (ID · Login · Name)…" autocomplete="off" />
       <span class="kbd">⌘K</span>
     </div>
 
@@ -7732,6 +7732,7 @@
    * ACCOUNT-FILTER (Firma + Typ)
    * ====================================================================== */
   let accFilters = { firm: '', type: '' }
+  let accSearch = ''  // Freitext-Suche über External ID / Login / Name (Header-Suchbar)
 
   function populateAccountFilters(){
     const firmSel = document.getElementById('acc-firm-filter')
@@ -7751,6 +7752,26 @@
     accFilters.type = e.target.value
     if(typeof renderAccounts === 'function') renderAccounts()
   })
+
+  /* Header-Suchbar (⌘K) → Accounts nach External ID / Login / Name filtern */
+  ;(function wireGlobalSearch(){
+    const input = document.getElementById('globalSearch')
+    if(!input) return
+    input.addEventListener('input', e => {
+      accSearch = (e.target.value || '').trim().toLowerCase()
+      // Bei aktiver Suche automatisch auf die Accounts-View wechseln
+      const onAccounts = document.querySelector('#dashboard-view .view.active')?.dataset.view === 'accounts'
+      if(accSearch && !onAccounts && typeof switchView === 'function') switchView('accounts')
+      if(typeof renderAccounts === 'function') renderAccounts()
+    })
+    // ⌘K / Ctrl+K fokussiert die Suche
+    document.addEventListener('keydown', ev => {
+      if((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K')){
+        ev.preventDefault()
+        input.focus(); input.select()
+      }
+    })
+  })()
 
   /* ========================================================================
    * DASHBOARD — TODO-LISTE + RECENT TRADES
@@ -8178,12 +8199,35 @@
     const parents = (typeof getParents === 'function') ? getParents() : {}
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
     const filters = (typeof accFilters !== 'undefined') ? accFilters : { firm:'', type:'' }
+    const q = (typeof accSearch === 'string') ? accSearch : ''
+
+    // Reverse-Lookup: manual_id → Duplikum-Account-Daten (auch für die Suche gebraucht)
+    const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+    const dupByManualId = {}
+    for(const [dupId, manualId] of Object.entries(dupLinks)){
+      const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
+      if(dupAcc) dupByManualId[manualId] = dupAcc
+    }
+
+    // Durchsuchbarer Text pro Account: External ID, MT5-Login, Topstep/Tradovate-Login,
+    // Duplikum-Login, Name
+    const accHaystack = a => {
+      const dupAcc = dupByManualId[a.id] || null
+      return [
+        a.name,
+        a.externalId,
+        a.ma?.login, a.ma?.accountId,          // MT5
+        a.topstep?.id, a.topstep?.name,        // Topstep / Tradovate
+        dupAcc?.login, dupAcc?.account_id      // Duplikum
+      ].filter(Boolean).join(' ').toLowerCase()
+    }
 
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
+      if(q && !accHaystack(a).includes(q)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -8200,16 +8244,17 @@
     if(!visible.length){
       accEls.table.innerHTML = ''
       accEls.empty.style.display = 'block'
+      const emptyH3 = accEls.empty.querySelector('h3')
+      const emptyP  = accEls.empty.querySelector('p')
+      if(q){
+        if(emptyH3) emptyH3.textContent = 'Keine Treffer'
+        if(emptyP)  emptyP.textContent = `Kein Account passt zu „${q}“. Suche über External ID, MT5-/Topstep-Login oder Name.`
+      } else {
+        if(emptyH3) emptyH3.textContent = 'Noch keine Accounts'
+        if(emptyP)  emptyP.textContent = 'Füg deinen ersten Account manuell hinzu — oder verknüpf einen Topstep-Account aus dem nächsten Tab.'
+      }
     }else{
       accEls.empty.style.display = 'none'
-
-      // Reverse-Lookup: manual_id → Duplikum-Account-Daten
-      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-      const dupByManualId = {}
-      for(const [dupId, manualId] of Object.entries(dupLinks)){
-        const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
-        if(dupAcc) dupByManualId[manualId] = dupAcc
-      }
 
       accEls.table.innerHTML = visible.map(a => {
         const archInfo = archive[a.id] || null
