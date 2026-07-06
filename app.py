@@ -19,6 +19,13 @@ TOKEN_REFRESH_INTERVAL = 20 * 60  # 20 Minuten
 # Duplikium tokens leben 48h — wir refreshen alle 40h proaktiv
 DUP_REFRESH_INTERVAL = 40 * 60 * 60  # 40 Stunden
 
+# Dauerhafte Duplikum-Credentials via Railway Env-Vars.
+# Damit überlebt die Verbindung Restarts/Redeploys/mehrere Gunicorn-Worker:
+# jeder Worker kann jederzeit selbstständig einen frischen Token holen,
+# ohne dass im Frontend neu verbunden werden muss.
+DUP_EMAIL    = (os.environ.get("DUP_EMAIL") or "").strip()
+DUP_PASSWORD = os.environ.get("DUP_PASSWORD") or ""
+
 # Active mirror sessions: pair_id -> session data
 mirror_sessions = {}
 
@@ -166,13 +173,20 @@ def duplikum_connect():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 def refresh_duplikum_token(email):
-    """Holt mit gecachten Creds einen neuen Token. Returns neuer Token oder None."""
+    """Holt einen neuen Token. Nutzt gecachte Creds ODER dauerhafte Env-Creds
+    (überlebt Restarts/Worker-Wechsel). Returns neuer Token oder None."""
     s = duplikum_sessions.get(email)
-    if not s or not s.get("password"): return None
+    password = (s or {}).get("password")
+    # Fallback: dauerhafte Env-Creds, falls der In-Memory-Cache leer ist
+    # (z.B. nach Railway-Restart oder in einem anderen Gunicorn-Worker).
+    if not password and email and DUP_EMAIL and email.lower() == DUP_EMAIL.lower():
+        password = DUP_PASSWORD
+    if not password:
+        return None
     try:
         r = requests.post(
             f"{DUP_BASE}/access/getToken.php",
-            auth=(email, s["password"]),
+            auth=(email, password),
             timeout=15
         )
         token = None
@@ -187,8 +201,12 @@ def refresh_duplikum_token(email):
             if txt and len(txt) < 2000 and " " not in txt:
                 token = txt
         if r.ok and token:
-            s["token"] = token
-            s["last_refresh"] = time.time()
+            # Session (neu) aufbauen, damit Folge-Refreshes wieder aus dem Cache gehen
+            duplikum_sessions[email] = {
+                "token": token,
+                "password": password,
+                "last_refresh": time.time()
+            }
             print(f"[duplikum] 🔄 Token refreshed für {email}")
             return token
     except Exception as e:
@@ -240,9 +258,10 @@ def duplikum_proxy(path):
     try:
         r = do_request(token)
 
-        # 401 → Token abgelaufen → versuchen zu refreshen mit gecachten Creds
-        if r.status_code == 401 and email:
-            new_tok = refresh_duplikum_token(email)
+        # 401 → Token abgelaufen → versuchen zu refreshen (Cache- ODER Env-Creds)
+        refresh_email = email or DUP_EMAIL
+        if r.status_code == 401 and refresh_email:
+            new_tok = refresh_duplikum_token(refresh_email)
             if new_tok:
                 r = do_request(new_tok)
                 resp = Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
@@ -886,6 +905,38 @@ def debug_account():
         headers={"Authorization": f"Bearer {token}","Content-Type":"application/json"},
         timeout=10)
     return Response(r.content, status=r.status_code, content_type="application/json")
+
+# ── Duplikum Auto-Connect + proaktiver Refresh (überlebt Restarts) ──
+# Läuft auf Modul-Ebene, damit es auch unter Gunicorn (Production) startet.
+# Wenn DUP_EMAIL/DUP_PASSWORD als Env-Vars gesetzt sind, hält dieser Daemon
+# die Verbindung dauerhaft warm — du musst im Frontend nie wieder verbinden.
+_dup_daemon_started = False
+
+def _dup_keepalive_loop():
+    # Beim Start einmal sofort einen frischen Token holen (Session warm machen)
+    while True:
+        try:
+            tok = refresh_duplikum_token(DUP_EMAIL)
+            if tok:
+                print(f"[duplikum] ✅ Keepalive: Token aktiv für {DUP_EMAIL}")
+            else:
+                print(f"[duplikum] ⚠️ Keepalive: konnte keinen Token holen — prüfe DUP_EMAIL/DUP_PASSWORD")
+        except Exception as e:
+            print(f"[duplikum] ⚠️ Keepalive-Fehler: {e}")
+        time.sleep(DUP_REFRESH_INTERVAL)  # 40h < 48h Ablauf
+
+def start_dup_keepalive():
+    global _dup_daemon_started
+    if _dup_daemon_started:
+        return
+    if not (DUP_EMAIL and DUP_PASSWORD):
+        print("[duplikum] ℹ️ Kein DUP_EMAIL/DUP_PASSWORD gesetzt — Auto-Keepalive inaktiv (manuelles Verbinden nötig).")
+        return
+    _dup_daemon_started = True
+    threading.Thread(target=_dup_keepalive_loop, daemon=True).start()
+    print("[duplikum] 🚀 Keepalive-Daemon gestartet")
+
+start_dup_keepalive()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

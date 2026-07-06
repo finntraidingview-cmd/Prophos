@@ -3006,6 +3006,16 @@
                 </div>
                 <div id="tp-slave-suggest-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
               </div>
+              <div id="tp-slave-suggest-total" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.28);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                  <div style="color:var(--ink)">
+                    <span style="color:#059669;font-weight:700">💰 Gesamtkosten:</span>
+                    <span id="tp-slave-suggest-total-value" style="font-family:var(--mono);font-weight:600">—</span>
+                  </div>
+                  <button type="button" id="tp-slave-suggest-total-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
+                </div>
+                <div id="tp-slave-suggest-total-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
             </div>
 
             <!-- Take-Profit Master (SL = Risiko Master) -->
@@ -11180,6 +11190,78 @@
   }
 
   // Live Multiplier-Berechnung im Modal
+  // ── Vorgänger-Kette eines Accounts (Phase-1 → Phase-2 → …, ganze Kette) ──
+  // Läuft über archive[predecessorId].successorId nach oben. Cycle-Guard inklusive.
+  function getAncestorAccounts(account){
+    if(!account) return []
+    const archive = (typeof getArchive === 'function') ? getArchive() : {}
+    const chain = []
+    const seen = new Set([String(account.id)])
+    let current = account
+    while(current){
+      const entry = Object.entries(archive).find(([_, info]) =>
+        info?.successorId && String(info.successorId) === String(current.id))
+      const parent = entry ? accounts.find(x => String(x.id) === String(entry[0])) : null
+      if(!parent || seen.has(String(parent.id))) break
+      seen.add(String(parent.id))
+      chain.push(parent)
+      current = parent
+    }
+    return chain
+  }
+
+  // ── Gesamtkosten / "Reingesteckt" eines Accounts inkl. GANZER Vorgänger-Kette (in EUR) ──
+  // Identische Formel wie die "Reingesteckt"-Anzeige im Account-Detail:
+  //   Reingesteckt = |Kaufpreise| + max(0, -reale Hedge-P/L)
+  // D.h. Kaufpreis + reale Hedge-VERLUSTE; Hedge-Gewinne senken den Wert NICHT.
+  // Unterschied zu calcAcquisitionCost: rechnet auch die Live-Hedge-Verluste des
+  // AKTUELLEN Accounts mit ein (nicht nur die der Vorgänger).
+  function calcReingestecktEur(account){
+    if(!account) return 0
+    const fx = window._fxUsdEur || 0.85
+    const chainAccounts = [account, ...getAncestorAccounts(account)]
+    const chainIds = new Set(chainAccounts.map(x => String(x.id)))
+    const txAll = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []
+    const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
+
+    // 1) Kaufpreise (→ USD): TX bevorzugt, sonst Fallback purchaseCost (EUR gespeichert)
+    let totalCostsUsd = 0
+    for(const acc of chainAccounts){
+      const accTx = txAll.filter(t => String(t.account_id) === String(acc.id) && t.kind === 'account_purchase')
+      if(accTx.length){
+        for(const t of accTx){
+          const amt = Number(t.amount || 0)
+          totalCostsUsd += (t.currency === 'EUR') ? amt / fx : amt
+        }
+      } else if(acc.purchaseCost){
+        totalCostsUsd += -Math.abs(Number(acc.purchaseCost)) / fx
+      }
+    }
+
+    // 2) Reale Hedge-P/L (→ USD): Trades der Kette, bei denen die Live-Gegenseite P/L machte
+    let liveRealisedUsd = 0
+    const completed = planList.filter(p => p.status === 'completed' &&
+      (chainIds.has(String(p.masterAccountId)) || chainIds.has(String(p.slaveAccountId))))
+    for(const p of completed){
+      if(chainIds.has(String(p.masterAccountId))){
+        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
+        if(slaveAcc?.type === 'live' && p.slavePl != null){
+          const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
+          liveRealisedUsd += (slavePreset.currency === '€') ? Number(p.slavePl) / fx : Number(p.slavePl)
+        }
+      }
+      if(chainIds.has(String(p.slaveAccountId))){
+        const masterAcc = accounts.find(x => String(x.id) === String(p.masterAccountId))
+        if(masterAcc?.type === 'live' && p.masterPl != null){
+          liveRealisedUsd += Number(p.masterPl)  // Master immer USD
+        }
+      }
+    }
+
+    const reingestecktUsd = Math.abs(totalCostsUsd) + Math.max(0, -liveRealisedUsd)
+    return reingestecktUsd * fx  // → EUR
+  }
+
   // ── Acquisition-Cost-Hedge: berechnet kumulierte Cash-Kosten eines Accounts (in EUR)
   // Phase 1 / Challenge: nur Kaufpreis (in EUR gespeichert)
   // Phase 2: Kaufpreis + alle Live-Hedge-Verluste aus Vorgänger-Account(s)
@@ -11374,8 +11456,32 @@
           suggestEl.dataset.suggestedValue = ''
         }
       }
+
+      // ── Gesamtkosten-Hedge: Slave-Vorschlag auf Basis "Reingesteckt" (ganze Kette) ──
+      // Kaufpreis + reale Hedge-Verluste; gleicher Risk-Anteil wie oben.
+      const totalEl  = document.getElementById('tp-slave-suggest-total')
+      const totalVal = document.getElementById('tp-slave-suggest-total-value')
+      const totalDet = document.getElementById('tp-slave-suggest-total-detail')
+      if(totalEl){
+        const reingestecktEur = calcReingestecktEur(master)
+        let suggestedTotal = reingestecktEur * riskRatio  // EUR
+        if(slavePreset.currency !== '€') suggestedTotal = suggestedTotal / fxUsdEur
+        if(reingestecktEur > 0){
+          totalEl.style.display = 'block'
+          totalVal.textContent = `${slavePreset.currency}${suggestedTotal.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
+          const rgStr = '€' + reingestecktEur.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
+          const ratioPctT = (riskRatio * 100).toFixed(1).replace('.', ',')
+          totalDet.innerHTML = `Reingesteckt (ganze Kette): <span class="mono">${rgStr}</span> · Risk-Anteil: <span class="mono">${ratioPctT}%</span> von Max-DD ($${master.maxDrawdown.toLocaleString('de-DE')})`
+          totalEl.dataset.suggestedValue = suggestedTotal.toFixed(2)
+        } else {
+          totalEl.style.display = 'none'
+          totalEl.dataset.suggestedValue = ''
+        }
+      }
     } else if(suggestEl){
       suggestEl.style.display = 'none'
+      const totalElHide = document.getElementById('tp-slave-suggest-total')
+      if(totalElHide){ totalElHide.style.display = 'none'; totalElHide.dataset.suggestedValue = '' }
       // Hint dass Max-DD fehlt — zeigen sobald Master + masterRisk da sind, auch ohne slave
       if(master && masterRisk > 0 && (!master.maxDrawdown || master.maxDrawdown <= 0)){
         suggestEl.style.display = 'block'
@@ -11475,6 +11581,15 @@
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
     const suggestEl = document.getElementById('tp-slave-suggest')
     const value = suggestEl?.dataset.suggestedValue
+    if(value){
+      document.getElementById('tp-slave-risk').value = value
+      tpRecompute()
+    }
+  })
+  // Gesamtkosten-Vorschlag übernehmen
+  document.getElementById('tp-slave-suggest-total-apply')?.addEventListener('click', () => {
+    const totalEl = document.getElementById('tp-slave-suggest-total')
+    const value = totalEl?.dataset.suggestedValue
     if(value){
       document.getElementById('tp-slave-risk').value = value
       tpRecompute()
