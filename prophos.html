@@ -4206,6 +4206,70 @@
         </button>
       </div>
 
+      <style>
+        #bulk-templates-wrap .tpl-card{
+          position:relative; flex:0 0 auto; min-width:132px; max-width:180px;
+          padding:9px 11px; border:1px solid var(--border); border-radius:10px;
+          background:var(--surface); cursor:pointer; transition:all .15s ease;
+          overflow:hidden;
+        }
+        #bulk-templates-wrap .tpl-card::before{
+          content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+          background:var(--violet); opacity:.65;
+        }
+        #bulk-templates-wrap .tpl-card:hover{
+          border-color:var(--violet); transform:translateY(-2px);
+          box-shadow:0 6px 16px rgba(99,102,241,.18);
+        }
+        #bulk-templates-wrap .tpl-card .tpl-name{
+          font-weight:650; font-size:12.5px; color:var(--ink);
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:34px;
+        }
+        #bulk-templates-wrap .tpl-card .tpl-meta{
+          font-size:10.5px; color:var(--sub); margin-top:3px; line-height:1.35;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        #bulk-templates-wrap .tpl-card .tpl-price{
+          font-size:11.5px; font-weight:600; color:var(--violet);
+          margin-top:5px; font-family:var(--mono);
+        }
+        #bulk-templates-wrap .tpl-card .tpl-actions{
+          position:absolute; top:6px; right:6px; display:flex; gap:2px;
+          opacity:0; transition:opacity .15s ease;
+        }
+        #bulk-templates-wrap .tpl-card:hover .tpl-actions{ opacity:1 }
+        #bulk-templates-wrap .tpl-actions button{
+          border:none; background:var(--surface-tint); color:var(--sub);
+          width:20px; height:20px; border-radius:5px; cursor:pointer;
+          display:flex; align-items:center; justify-content:center; padding:0;
+        }
+        #bulk-templates-wrap .tpl-actions button:hover{ color:var(--ink); background:var(--border) }
+        #bulk-templates-wrap .tpl-empty{
+          font-size:11.5px; color:var(--sub); padding:10px 12px;
+          border:1px dashed var(--border); border-radius:10px; flex:1;
+        }
+        #bulk-templates-wrap .tpl-name-input{
+          font-size:12.5px; font-weight:650; width:100%; border:none;
+          background:transparent; color:var(--ink); padding:0; outline:none;
+          border-bottom:1px solid var(--violet);
+        }
+        .tpl-flash{ animation: tplFlash .7s ease }
+        @keyframes tplFlash{
+          0%{ box-shadow:0 0 0 0 rgba(99,102,241,.35) }
+          100%{ box-shadow:0 0 0 6px rgba(99,102,241,0) }
+        }
+      </style>
+      <div id="bulk-templates-wrap" style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);display:inline-flex;align-items:center;gap:5px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Vorlagen
+          </span>
+          <button type="button" id="bulk-tpl-save" class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px">＋ Aktuelle speichern</button>
+        </div>
+        <div id="bulk-templates" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px"></div>
+      </div>
+
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
         <div class="field">
           <label>Firm *</label>
@@ -8823,6 +8887,121 @@
       if(typeof updatePreview === 'function') updatePreview()
     }
 
+    /* ── Account-Vorlagen (localStorage) ── */
+    const _TPL_KEY = 'prophos_acc_templates'
+    const _tplEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+    function _tplLoad(){ try { return JSON.parse(localStorage.getItem(_TPL_KEY) || '[]') } catch { return [] } }
+    function _tplSaveAll(arr){ try { localStorage.setItem(_TPL_KEY, JSON.stringify(arr)) } catch(e){} }
+    function _tplCapture(){
+      return {
+        firm:           bEl.firm?.value.trim() || '',
+        type:           bEl.type?.value || 'phase1',
+        accountSize:    bEl.size?.value.trim() || '',
+        initialBalance: bEl.balance?.value.trim() || '',
+        purchaseCost:   bEl.cost?.value.trim() || '',
+        purchaseCcy:    _bulkPurchaseCcy,
+        maxDrawdown:    bEl.maxdd?.value.trim() || '',
+        nameTemplate:   bEl.template?.value.trim() || ''
+      }
+    }
+    function _tplFlashFields(){
+      ;[bEl.firm, bEl.size, bEl.balance, bEl.cost, bEl.maxdd, bEl.template].forEach(el => {
+        if(!el) return
+        el.classList.remove('tpl-flash'); void el.offsetWidth; el.classList.add('tpl-flash')
+        setTimeout(() => el.classList.remove('tpl-flash'), 800)
+      })
+    }
+    function _tplApply(tpl){
+      if(bEl.firm)     bEl.firm.value     = tpl.firm || ''
+      if(bEl.type && tpl.type) bEl.type.value = tpl.type
+      if(bEl.size)     bEl.size.value     = tpl.accountSize || ''
+      if(bEl.balance)  bEl.balance.value  = tpl.initialBalance || ''
+      if(bEl.cost)     bEl.cost.value     = tpl.purchaseCost || ''
+      if(bEl.maxdd)    bEl.maxdd.value    = tpl.maxDrawdown || ''
+      if(bEl.template) bEl.template.value = tpl.nameTemplate || ''
+      _bulkSetCostCcy(tpl.purchaseCcy === 'USD' ? 'USD' : 'EUR')
+      if(typeof updatePreview === 'function') updatePreview()
+      _tplFlashFields()
+    }
+    function _tplMetaStr(t){
+      const parts = []
+      if(t.firm) parts.push(t.firm)
+      if(t.accountSize){ const n = parseFloat(t.accountSize); parts.push(!isNaN(n) && n >= 1000 ? Math.round(n/1000)+'K' : t.accountSize) }
+      if(t.type) parts.push((typeof typeLabel === 'function') ? typeLabel(t.type) : t.type)
+      return parts.join(' · ')
+    }
+    function _tplPriceStr(t){ return t.purchaseCost ? (t.purchaseCcy === 'USD' ? '$' : '€') + t.purchaseCost : '' }
+    function _tplRender(){
+      const wrap = document.getElementById('bulk-templates')
+      if(!wrap) return
+      const tpls = _tplLoad()
+      if(!tpls.length){
+        wrap.innerHTML = `<div class="tpl-empty">Noch keine Vorlagen — füll die Felder aus und klick „＋ Aktuelle speichern".</div>`
+        return
+      }
+      wrap.innerHTML = tpls.map(t => `
+        <div class="tpl-card" data-tpl-id="${_tplEsc(t.id)}" title="Vorlage anwenden">
+          <div class="tpl-actions">
+            <button type="button" data-act="rename" title="Umbenennen">✎</button>
+            <button type="button" data-act="delete" title="Löschen">🗑</button>
+          </div>
+          <div class="tpl-name">${_tplEsc(t.name)}</div>
+          <div class="tpl-meta">${_tplEsc(_tplMetaStr(t)) || '—'}</div>
+          ${_tplPriceStr(t) ? `<div class="tpl-price">${_tplEsc(_tplPriceStr(t))}</div>` : ''}
+        </div>`).join('')
+    }
+    function _tplStartSave(){
+      const wrap = document.getElementById('bulk-templates')
+      if(!wrap) return
+      const cap = _tplCapture()
+      if(!cap.firm){ if(bEl.firm){ bEl.firm.focus(); bEl.firm.classList.add('tpl-flash'); setTimeout(()=>bEl.firm.classList.remove('tpl-flash'),800) } return }
+      const suggested = _tplMetaStr(cap)
+      const card = document.createElement('div')
+      card.className = 'tpl-card'; card.style.cssText = 'flex:0 0 auto;min-width:170px;cursor:default'
+      card.innerHTML = `<input class="tpl-name-input" placeholder="Vorlagen-Name…" value="${_tplEsc(suggested)}">
+        <div class="tpl-meta" style="margin-top:6px">${_tplEsc(suggested) || '—'}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button type="button" data-sv="ok" class="btn btn-primary" style="padding:2px 10px;font-size:11px">Speichern</button>
+          <button type="button" data-sv="x" class="btn btn-ghost" style="padding:2px 8px;font-size:11px">✕</button>
+        </div>`
+      wrap.prepend(card)
+      const input = card.querySelector('input'); input.focus(); input.select()
+      const doSave = () => {
+        const name = input.value.trim()
+        if(!name){ input.focus(); return }
+        const tpls = _tplLoad(); tpls.push({ id: 'tpl_'+Date.now(), name, ...cap }); _tplSaveAll(tpls); _tplRender()
+      }
+      input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); doSave() } if(e.key==='Escape'){ _tplRender() } })
+      card.querySelector('[data-sv="ok"]').addEventListener('click', e => { e.stopPropagation(); doSave() })
+      card.querySelector('[data-sv="x"]').addEventListener('click', e => { e.stopPropagation(); _tplRender() })
+    }
+    function _tplRename(id){
+      const tpls = _tplLoad(); const cur = tpls.find(t => t.id === id); if(!cur) return
+      const card = document.querySelector(`.tpl-card[data-tpl-id="${id}"]`); if(!card) return
+      const nameEl = card.querySelector('.tpl-name')
+      nameEl.innerHTML = `<input class="tpl-name-input" value="${_tplEsc(cur.name)}">`
+      const input = nameEl.querySelector('input'); input.focus(); input.select()
+      let done = false
+      const commit = () => { if(done) return; done = true; const name = input.value.trim() || cur.name; const arr = _tplLoad(); const t = arr.find(x => x.id === id); if(t){ t.name = name; _tplSaveAll(arr) } _tplRender() }
+      input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); commit() } if(e.key==='Escape'){ done=true; _tplRender() } })
+      input.addEventListener('blur', commit)
+    }
+    function _tplDelete(id){ _tplSaveAll(_tplLoad().filter(t => t.id !== id)); _tplRender() }
+    document.getElementById('bulk-templates')?.addEventListener('click', e => {
+      const card = e.target.closest('.tpl-card[data-tpl-id]'); if(!card) return
+      const id = card.dataset.tplId
+      const actBtn = e.target.closest('[data-act]')
+      if(actBtn){
+        e.stopPropagation()
+        if(actBtn.dataset.act === 'rename') _tplRename(id)
+        else if(actBtn.dataset.act === 'delete'){ if(confirm('Vorlage wirklich löschen?')) _tplDelete(id) }
+        return
+      }
+      if(card.querySelector('.tpl-name-input')) return  // im Rename-Modus → nicht anwenden
+      const tpl = _tplLoad().find(t => t.id === id); if(tpl) _tplApply(tpl)
+    })
+    document.getElementById('bulk-tpl-save')?.addEventListener('click', _tplStartSave)
+
     function buildName(n, extId){
       const firm   = bEl.firm.value.trim() || 'Account'
       const sizeRaw = parseFloat(bEl.size.value)
@@ -8903,6 +9082,7 @@
       bEl.template.value = ''
       if(bEl.extIds) bEl.extIds.value = ''
       if(typeof _bulkSetCostCcy === 'function') _bulkSetCostCcy('EUR')
+      if(typeof _tplRender === 'function') _tplRender()
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
