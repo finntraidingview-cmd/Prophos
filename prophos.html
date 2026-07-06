@@ -6485,6 +6485,10 @@
   // End-Prompt
   function atShowEndPrompt(plan){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
+    // Schon einmal gemeldet? → Popup NICHT erneut zeigen (auch nicht nach "Später").
+    // Der orange Banner in der Karte bleibt als Erinnerung; das Popup kommt erst
+    // wieder, wenn der Trade abgeschlossen wurde (dann wird pendingFinish geleert).
+    if(autoTrack.pendingFinish.has(String(plan.id))) return
     // pendingFinish persistieren → Banner in der Karte
     autoTrack.pendingFinish.add(String(plan.id))
     localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
