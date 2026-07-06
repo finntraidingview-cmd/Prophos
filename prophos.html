@@ -4496,9 +4496,11 @@
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
+  let _detailAccountId = null  // Account-Detail-View State
+
   function switchView(name){
     // Wenn wir die Detail-View verlassen, State zurücksetzen
-    if(name !== 'account-detail' && typeof _detailAccountId !== 'undefined'){
+    if(name !== 'account-detail'){
       _detailAccountId = null
     }
     document.querySelectorAll('#dashboard-view .view').forEach(v =>
