@@ -83,45 +83,22 @@
   .at-toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
   .at-toggle input[type=checkbox]{accent-color:var(--violet);width:14px;height:14px;cursor:pointer}
 
-  /* ── Open Trade Card — Live Tracking UI ── */
+  /* ── Live Trade Card Animations ── */
   @keyframes tcLivePulse{
     0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}
     50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}
   }
   @keyframes tcCardGlow{
-    0%,100%{box-shadow:0 0 0 0 rgba(99,102,241,.0), var(--shadow-card)}
-    50%{box-shadow:0 0 18px 2px rgba(99,102,241,.10), var(--shadow-card)}
+    0%,100%{box-shadow:0 0 0 0 rgba(99,102,241,.0),var(--shadow-card)}
+    50%{box-shadow:0 0 18px 2px rgba(99,102,241,.10),var(--shadow-card)}
   }
-  @keyframes tcTimerTick{from{opacity:.7}to{opacity:1}}
-  #dashboard-view .trade-card.is-open{
-    border-color:rgba(99,102,241,.35);
-    animation:tcCardGlow 3s ease-in-out infinite;
-  }
-  #dashboard-view .trade-card.is-open:hover{
-    border-color:rgba(99,102,241,.55);
-  }
-  #dashboard-view .tc-live-strip{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:7px 14px;margin:-16px -18px 4px -18px;
-    background:linear-gradient(90deg,rgba(16,185,129,.08),rgba(99,102,241,.06));
-    border-bottom:1px solid rgba(16,185,129,.15);border-radius:var(--r-lg) var(--r-lg) 0 0;
-  }
-  #dashboard-view .tc-live-dot-wrap{display:flex;align-items:center;gap:7px}
-  #dashboard-view .tc-live-dot{
-    width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;
-    animation:tcLivePulse 1.6s ease-in-out infinite;
-  }
-  #dashboard-view .tc-live-label{
-    font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#10b981;
-  }
-  #dashboard-view .tc-live-timer{
-    font-size:11.5px;font-family:var(--mono);font-weight:600;
-    color:var(--ink-2);letter-spacing:.03em;
-  }
-  #dashboard-view .tc-live-since{
-    font-size:10px;color:var(--sub);margin-left:4px;font-weight:400;
-  }
-
+  #dashboard-view .trade-card.is-open{border-color:rgba(99,102,241,.35);animation:tcCardGlow 3s ease-in-out infinite}
+  #dashboard-view .tc-live-strip{display:flex;align-items:center;justify-content:space-between;padding:7px 14px;margin:-16px -18px 4px -18px;background:linear-gradient(90deg,rgba(16,185,129,.08),rgba(99,102,241,.06));border-bottom:1px solid rgba(16,185,129,.15);border-radius:var(--r-lg) var(--r-lg) 0 0}
+  #dashboard-view .tc-live-dot-wrap{display:flex;align-items:center;gap:6px}
+  #dashboard-view .tc-live-dot{width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;animation:tcLivePulse 1.6s ease-in-out infinite}
+  #dashboard-view .tc-live-label{font-size:11.5px;color:#10b981;font-weight:600}
+  #dashboard-view .tc-live-timer{font-size:11.5px;color:var(--sub);font-family:var(--mono)}
+  #dashboard-view .tc-live-since{color:var(--sub-2)}
 
   /* ============================================================
      BOOT SCREEN (shown until session check finishes)
@@ -2294,7 +2271,7 @@
 
     <div class="tb-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" placeholder="Suchen…" />
+      <input type="text" id="tb-search-input" placeholder="Suchen…" autocomplete="off" />
       <span class="kbd">⌘K</span>
     </div>
 
@@ -4014,12 +3991,10 @@
           <div class="panel-title">Account-Firmen verwalten</div>
         </div>
         <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 16px;line-height:1.55">
-          Zeigt alle Firma-Namen die in deinen Accounts gespeichert sind. Umbenennen wirkt auf alle Accounts dieser Firma gleichzeitig — praktisch um Duplikate wie „Alpha Future" vs. „AlphaFutures" zu bereinigen.
+          Alle Firma-Namen aus deinen Accounts. Umbenennen wirkt auf alle Accounts dieser Firma gleichzeitig — ideal um Duplikate wie „Alpha Future" vs. „AlphaFutures" zu bereinigen.
         </p>
         <div id="accFirmsSpinner" style="text-align:center;padding:14px;color:var(--sub);font-size:12.5px">Lädt…</div>
-        <div id="accFirmsEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;display:none">
-          Keine Firmen in deinen Accounts gefunden.
-        </div>
+        <div id="accFirmsEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;display:none">Keine Firmen gefunden.</div>
         <div id="accFirmsList" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
@@ -4203,8 +4178,8 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
-          <label>External ID (optional)</label>
-          <input class="input mono" id="ac-ext-id" placeholder="z.B. 511290232" autocomplete="off">
+          <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+          <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Broker-Account-Nummer. Wird als #ID-Badge in Trade-Plänen angezeigt.</div>
         </div>
       </div>
@@ -4309,11 +4284,6 @@
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>External ID Vorlage <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
-          <input class="input mono" id="bulk-exttemplate" placeholder="z.B. {n} oder 51129{n}" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> = laufende Nummer &nbsp;·&nbsp; Wird als #ID-Badge in Trade-Plänen angezeigt</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
@@ -4594,6 +4564,11 @@
     document.getElementById('sbOverlay').classList.remove('open')
     userDropdown.classList.remove('open')
     history.replaceState(null, '', '#' + name)
+    // Settings-Panel: Firm-Listen neu rendern
+    if(name === 'settings'){
+      if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
+      if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
+    }
   }
   // Nur echte Navigations-Buttons (Sidebar + User-Dropdown) — NICHT die View-Sections selbst,
   // sonst bubbled jeder Klick innerhalb einer View zur Section und switcht zurück
@@ -6474,10 +6449,10 @@
     enabled: localStorage.getItem('prophos_autotrack') !== 'false',
     timer:   null,
     INTERVAL: 10_000,
-    // planId → { wasOpen: bool, notified: bool }
+    // planId → { wasOpen: bool, notified: bool, baselineCount: number|null }
     state:   new Map(),
     inProgress: new Set(),
-    // planIds die als beendet erkannt wurden aber noch nicht abgeschlossen
+    // planIds wo Trade-Ende erkannt wurde aber User noch PnL eintragen muss
     pendingFinish: new Set(JSON.parse(localStorage.getItem('prophos_at_pending') || '[]'))
   }
 
@@ -6526,10 +6501,11 @@
   // End-Prompt
   function atShowEndPrompt(plan){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
-    // Plan als "pending finish" markieren → bleibt in der Karte sichtbar
+    // pendingFinish persistieren → Banner in der Karte
     autoTrack.pendingFinish.add(String(plan.id))
     localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
     if(typeof renderTradePlans === 'function') renderTradePlans()
+
     const el = document.createElement('div')
     el.className = 'at-prompt'
     el.id = `at-prompt-${plan.id}`
@@ -6548,7 +6524,7 @@
     })
     document.getElementById(`at-dismiss-${plan.id}`)?.addEventListener('click', () => {
       el.remove()
-      // notified bleibt true → Popup kommt nicht nochmal
+      // notified bleibt true → Popup kommt nicht nochmal, Banner in der Karte bleibt
     })
     setTimeout(() => el.remove(), 60_000)
   }
@@ -6969,38 +6945,6 @@
     if(typeof renderAccounts === 'function') renderAccounts()
   })
 
-  let accFilters = { firm: '', type: '' }
-
-  function populateAccountFilters(){
-    const firmSel = document.getElementById('acc-firm-filter')
-    const typeSel = document.getElementById('acc-type-filter')
-
-    // Firmen-Dropdown: eindeutige Firms aus allen Accounts
-    if(firmSel){
-      const currentFirm = accFilters.firm
-      const firms = [...new Set((accounts || []).map(a => a.firm).filter(Boolean))].sort()
-      firmSel.innerHTML = '<option value="">Alle</option>' +
-        firms.map(f => `<option value="${escapeHtml(f)}"${f === currentFirm ? ' selected' : ''}>${escapeHtml(f)}</option>`).join('')
-      // Listener nur einmal setzen
-      if(!firmSel.dataset.listenerSet){
-        firmSel.dataset.listenerSet = '1'
-        firmSel.addEventListener('change', () => {
-          accFilters.firm = firmSel.value
-          renderAccounts()
-        })
-      }
-    }
-
-    // Typ-Dropdown (Listener nur einmal)
-    if(typeSel && !typeSel.dataset.listenerSet){
-      typeSel.dataset.listenerSet = '1'
-      typeSel.addEventListener('change', () => {
-        accFilters.type = typeSel.value
-        renderAccounts()
-      })
-    }
-  }
-
 
   /* ========== ACCOUNTS — SUPABASE CRUD ========== */
   let accounts = []   // hydrated from Supabase after login
@@ -7014,10 +6958,10 @@
       name: row.name,
       firm: row.firm,
       type: row.account_type,
+      externalId: row.external_id || null,
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
-      externalId: row.external_id || null,
       createdAt: row.created_at,
       topstep: row.topstep_account_id ? {
         id:        row.topstep_account_id,
@@ -7042,10 +6986,10 @@
       name: a.name,
       firm: a.firm,
       account_type: a.type,
+      external_id: a.externalId || null,
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
-      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
-      external_id: a.externalId || null
+      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
     }
     if(a.topstep){
       row.topstep_account_id   = a.topstep.id
@@ -7078,7 +7022,7 @@
       renderOverviewKpis()
       updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
-      // Refresh Settings firm list if visible
+      // Settings-Panel aktualisieren wenn gerade offen
       if(document.querySelector('[data-view="settings"].active') && typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }catch(e){
       console.error('loadAccountsFromSupabase failed:', e)
@@ -7096,15 +7040,14 @@
     bal:      document.getElementById('ac-balance'),
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
+    extId:    document.getElementById('ac-ext-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
     msg:      document.getElementById('ac-msg'),
     cancel:   document.getElementById('ac-cancel'),
     save:     document.getElementById('ac-save'),
-    addLive:   document.getElementById('ts-add-live-btn'),
-    extId:    document.getElementById('ac-ext-id'),
-    extIdRow: document.getElementById('ac-ext-id-row')
+    addLive:   document.getElementById('ts-add-live-btn')
   }
 
   const fmtMoney = n => {
@@ -7122,207 +7065,176 @@
 
   function persistAccounts(){ /* no-op: Supabase is source of truth */ }
 
-  // ─────── Account Detail View ───────
+  // ── Account-Filter State ──
+  let accFilters = { firm: '', type: '', search: '' }
+
+  // Topbar-Suche verdrahten
+  document.addEventListener('DOMContentLoaded', () => {
+    const tbSearch = document.getElementById('tb-search-input')
+    if(tbSearch){
+      tbSearch.addEventListener('input', () => {
+        accFilters.search = tbSearch.value.toLowerCase().trim()
+        if(typeof renderAccounts === 'function') renderAccounts()
+      })
+      // ⌘K fokussiert die Suche
+      document.addEventListener('keydown', e => {
+        if((e.metaKey || e.ctrlKey) && e.key === 'k'){
+          e.preventDefault()
+          tbSearch.focus()
+          tbSearch.select()
+        }
+      })
+    }
+  })
+
+  function populateAccountFilters(){
+    const firmSel = document.getElementById('acc-firm-filter')
+    if(!firmSel) return
+    const current = firmSel.value
+    const firms = [...new Set((accounts||[]).map(a=>a.firm).filter(Boolean))].sort()
+    firmSel.innerHTML = '<option value="">Alle</option>' + firms.map(f=>`<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
+    // Selektion wiederherstellen falls noch vorhanden
+    if(firms.includes(current)) firmSel.value = current
+    if(!firmSel.dataset.listenerSet){
+      firmSel.dataset.listenerSet = '1'
+      firmSel.addEventListener('change', () => { accFilters.firm = firmSel.value; renderAccounts() })
+    }
+    const typeSel = document.getElementById('acc-type-filter')
+    if(typeSel && !typeSel.dataset.listenerSet){
+      typeSel.dataset.listenerSet = '1'
+      typeSel.addEventListener('change', () => { accFilters.type = typeSel.value; renderAccounts() })
+    }
+  }
+
+  // ── Account Detail View ──
   function renderAccountDetail(){
-    const acc = accounts.find(a => String(a.id) === String(_detailAccountId))
-    if(!acc) return
+    const acc = (accounts||[]).find(a => String(a.id) === String(_detailAccountId))
+    if(!acc){ switchView('accounts'); return }
 
-    // Title
-    const title    = document.getElementById('ad-title')
-    const subtitle = document.getElementById('ad-subtitle')
-    if(title)    title.textContent    = acc.name
-    if(subtitle) subtitle.textContent = `${acc.firm || '–'} · ${typeLabel(acc.type)}`
+    document.getElementById('ad-title').textContent = acc.name || '—'
+    document.getElementById('ad-subtitle').textContent = `${acc.firm||'—'} · ${typeLabel(acc.type)}`
+    document.getElementById('ad-back-btn').onclick = () => switchView('accounts')
+    document.getElementById('ad-edit-btn').onclick = () => openAccountModal(null, acc)
 
-    // Back / Edit buttons
-    document.getElementById('ad-back-btn')?.addEventListener('click', () => switchView('accounts'))
-    document.getElementById('ad-edit-btn')?.addEventListener('click', () => {
-      openAccountModal(null, acc)
-    })
-
-    // ── Stats Reihe ──
+    // Stats row
+    const acPlans = (tradePlans||[]).filter(p => String(p.masterAccountId)===String(acc.id) || String(p.slaveAccountId)===String(acc.id))
+    const openPlans = acPlans.filter(p=>p.status==='open').length
+    const donePlans = acPlans.filter(p=>p.status==='completed').length
+    const totalPl = acPlans.filter(p=>p.status==='completed').reduce((s,p)=>{
+      const isMaster = String(p.masterAccountId)===String(acc.id)
+      return s + (isMaster ? (p.masterPl||0) : (p.slavePl||0))
+    }, 0)
     const statsEl = document.getElementById('ad-stats')
-    if(statsEl){
-      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-      const dupId    = Object.entries(dupLinks).find(([_, mId]) => mId === acc.id)?.[0]
-      const dupAcc   = dupId ? (dupState?.accounts || []).find(a => a.account_id === dupId) : null
-      const balance  = dupAcc?.balance ?? acc.initialBalance ?? 0
-      const ccy      = dupAcc?.ccy || 'USD'
-
-      // Trades dieses Accounts (als Master oder Slave)
-      const accTrades = (tradePlans || []).filter(p =>
-        String(p.masterAccountId) === String(acc.id) || String(p.slaveAccountId) === String(acc.id)
-      )
-      const openTrades      = accTrades.filter(p => p.status === 'open').length
-      const completedTrades = accTrades.filter(p => p.status === 'completed').length
-
-      // PnL aus abgeschlossenen Trades (als Master)
-      const masterTrades = accTrades.filter(p => p.status === 'completed' && String(p.masterAccountId) === String(acc.id))
-      const totalMasterPl = masterTrades.reduce((s, p) => s + (p.masterPl || 0), 0)
-
-      statsEl.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
-          <div class="panel" style="padding:14px 18px">
-            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Balance</div>
-            <div style="font-size:22px;font-weight:700;color:var(--ink);font-family:var(--mono)">${dupFmtMoney ? dupFmtMoney(balance, ccy) : '$' + balance.toLocaleString('de-DE')}</div>
-          </div>
-          <div class="panel" style="padding:14px 18px">
-            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Offene Trades</div>
-            <div style="font-size:22px;font-weight:700;color:${openTrades > 0 ? 'var(--violet)' : 'var(--ink)'};font-family:var(--mono)">${openTrades}</div>
-          </div>
-          <div class="panel" style="padding:14px 18px">
-            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Trades gesamt</div>
-            <div style="font-size:22px;font-weight:700;color:var(--ink);font-family:var(--mono)">${completedTrades}</div>
-          </div>
-          <div class="panel" style="padding:14px 18px">
-            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">P/L (Master)</div>
-            <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${totalMasterPl >= 0 ? 'var(--good)' : 'var(--danger)'}">
-              ${totalMasterPl >= 0 ? '+' : ''}$${totalMasterPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}
-            </div>
-          </div>
+    if(statsEl) statsEl.innerHTML = `
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+          <div class="kpi-label">Balance</div>
+          <div class="kpi-value tnum" style="font-size:18px">${acc.ma?.balance!=null?fmtMoney(acc.ma.balance):acc.initialBalance?fmtMoney(acc.initialBalance):'—'}</div>
         </div>
-      `
+        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+          <div class="kpi-label">Offene Trades</div>
+          <div class="kpi-value tnum" style="font-size:18px">${openPlans}</div>
+        </div>
+        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+          <div class="kpi-label">Trades Gesamt</div>
+          <div class="kpi-value tnum" style="font-size:18px">${donePlans}</div>
+        </div>
+        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+          <div class="kpi-label">P/L (Master)</div>
+          <div class="kpi-value tnum ${totalPl>=0?'delta-pos':'delta-neg'}" style="font-size:18px">${totalPl>=0?'+':''}$${totalPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
+        </div>
+      </div>`
+
+    // Data list
+    const dataEl = document.getElementById('ad-data-list')
+    if(dataEl){
+      const rows = [
+        ['Firm', acc.firm||'—'],
+        ['Typ', typeLabel(acc.type)],
+        ['Anfangs-Balance', acc.initialBalance ? fmtMoney(acc.initialBalance) : '—'],
+        ['Kaufpreis', acc.purchaseCost ? (acc.purchaseCost + ' €') : '—'],
+        ['Max Drawdown', acc.maxDrawdown ? ('$' + Number(acc.maxDrawdown).toLocaleString('de-DE')) : '—'],
+        ['External ID', acc.externalId || '—']
+      ]
+      dataEl.innerHTML = rows.map(([l,v])=>`
+        <div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line)">
+          <span style="color:var(--sub);font-size:12.5px">${l}</span>
+          <span style="font-weight:500;font-size:12.5px;text-align:right">${escapeHtml(String(v))}</span>
+        </div>`).join('')
     }
 
-    // ── Account-Daten ──
-    const dataList = document.getElementById('ad-data-list')
-    if(dataList){
-      const row = (label, val) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line)">
-          <span style="font-size:12px;color:var(--sub)">${label}</span>
-          <span style="font-size:13px;font-weight:600;color:var(--ink);font-family:var(--mono)">${val}</span>
-        </div>`
-      const extId = acc.externalId || acc.ma?.login || '—'
-      dataList.innerHTML =
-        row('Firm',            escapeHtml(acc.firm || '—')) +
-        row('Typ',             typeLabel(acc.type)) +
-        row('Anfangs-Balance', acc.initialBalance ? '$' + Number(acc.initialBalance).toLocaleString('de-DE') : '—') +
-        row('Kaufpreis',       acc.purchaseCost   ? '€' + Number(acc.purchaseCost).toLocaleString('de-DE')  : '—') +
-        row('Max Drawdown',    acc.maxDrawdown     ? '$' + Number(acc.maxDrawdown).toLocaleString('de-DE')   : '—') +
-        row('External ID',     escapeHtml(String(extId)))
-    }
-
-    // ── Verknüpfungen ──
+    // Links list
     const linksEl = document.getElementById('ad-links-list')
     if(linksEl){
-      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-      const dupId    = Object.entries(dupLinks).find(([_, mId]) => mId === acc.id)?.[0]
-      const dupAcc   = dupId ? (dupState?.accounts || []).find(a => a.account_id === dupId) : null
-      let html = ''
-      if(dupAcc){
-        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
-          <span style="background:#f59e0b22;color:#d97706;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">DUPLIKUM</span>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--ink)">${escapeHtml(dupAcc.name||dupAcc.login||'—')}</div>
-            <div style="font-size:11px;color:var(--sub)">${dupAcc.login ? 'Login: '+dupAcc.login : ''}</div>
-          </div>
-        </div>`
+      const chips = []
+      const dupLinks = typeof dupGetLinks==='function' ? dupGetLinks() : {}
+      const dupId = Object.entries(dupLinks).find(([_,mId])=>String(mId)===String(acc.id))?.[0]
+      if(dupId && dupState?.accounts){
+        const dupAcc = dupState.accounts.find(a=>a.account_id===dupId)
+        if(dupAcc) chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f59e0b11;border:1px solid #f59e0b33;border-radius:8px">
+          <span style="font-size:11px;font-weight:700;color:#d97706;background:#f59e0b22;padding:2px 6px;border-radius:4px">DUPLIKUM</span>
+          <div><div style="font-size:12.5px;font-weight:600">${escapeHtml(dupAcc.name||dupId)}</div><div style="font-size:11px;color:var(--sub)">Login: ${escapeHtml(dupAcc.login||dupId)}</div></div>
+        </div>`)
       }
-      if(acc.ma){
-        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
-          <span style="background:#3b82f622;color:#3b82f6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">MT5</span>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--ink)">Login #${escapeHtml(String(acc.ma.login||'—'))}</div>
-            <div style="font-size:11px;color:var(--sub)">Balance: ${acc.ma.balance != null ? '$'+Number(acc.ma.balance).toLocaleString('de-DE') : '—'}</div>
-          </div>
-        </div>`
-      }
-      if(acc.topstep && acc.topstep.canTrade != null){
-        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
-          <span style="background:#8b5cf622;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">TOPSTEP</span>
-          <div>
-            <div style="font-size:13px;font-weight:600;color:var(--ink)">ID ${escapeHtml(String(acc.topstep.id))}</div>
-            <div style="font-size:11px;color:var(--sub)">Can Trade: ${acc.topstep.canTrade ? '✓' : '✗'} · ${acc.topstep.balance != null ? '$'+Number(acc.topstep.balance).toLocaleString('de-DE') : '—'}</div>
-          </div>
-        </div>`
-      }
-      if(acc.externalId && !(acc.topstep?.canTrade != null) && !acc.ma){
-        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
-          <span style="background:#64748b22;color:#64748b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">EXT ID</span>
-          <div style="font-size:13px;font-weight:600;color:var(--ink);font-family:var(--mono)">${escapeHtml(acc.externalId)}</div>
-        </div>`
-      }
-      if(!html) html = '<div style="padding:14px 18px;color:var(--sub);font-size:12.5px">Keine Verknüpfungen</div>'
-      linksEl.innerHTML = html
+      if(acc.externalId) chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px">
+        <span style="font-size:11px;font-weight:700;color:var(--sub);background:var(--line);padding:2px 6px;border-radius:4px">EXT ID</span>
+        <span style="font-size:12.5px;font-family:var(--mono)">${escapeHtml(String(acc.externalId))}</span>
+      </div>`)
+      if(acc.topstep?.canTrade!=null) chips.push(`<div style="padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+        <span style="font-weight:600">TopstepX</span> · ${acc.topstep.canTrade?'✅ Trading erlaubt':'⛔ Kein Trading'}
+      </div>`)
+      linksEl.innerHTML = chips.length ? chips.join('') : '<span style="color:var(--sub);font-size:12.5px">Keine Verknüpfungen</span>'
     }
 
-    // ── Aktivitäts-Timeline: Trades + Transaktionen chronologisch ──
-    const actList  = document.getElementById('ad-activity-list')
-    const actEmpty = document.getElementById('ad-act-empty')
-    const actCount = document.getElementById('ad-act-count')
-    const actSummary = document.getElementById('ad-act-summary')
-    if(!actList) return
+    // Aktivitäts-Timeline
+    const actEl = document.getElementById('ad-activity-list')
+    const actCountEl = document.getElementById('ad-act-count')
+    const actSumEl   = document.getElementById('ad-act-summary')
+    if(actEl){
+      const txs = (transactions||[]).filter(t=>String(t.accountId)===String(acc.id))
+      const items = [
+        ...acPlans.filter(p=>p.status==='completed').map(p=>({
+          type:'trade', date: p.completedAt||p.plannedFor||'', obj:p
+        })),
+        ...txs.map(t=>({ type:'tx', date:t.date||'', obj:t }))
+      ].sort((a,b)=> new Date(b.date)-new Date(a.date))
 
-    // Trades dieses Accounts
-    const accTrades = (tradePlans || []).filter(p =>
-      String(p.masterAccountId) === String(acc.id) || String(p.slaveAccountId) === String(acc.id)
-    )
-    // Transaktionen dieses Accounts
-    const accTxns = (transactions || []).filter(t => String(t.accountId) === String(acc.id))
+      if(actCountEl) actCountEl.textContent = `(${items.length})`
+      const tradePl = acPlans.filter(p=>p.status==='completed').reduce((s,p)=>s+(String(p.masterAccountId)===String(acc.id)?(p.masterPl||0):(p.slavePl||0)),0)
+      const txTotal = txs.reduce((s,t)=>s+Number(t.amount||0),0)
+      if(actSumEl) actSumEl.textContent = `${acPlans.filter(p=>p.status==='completed').length} Trades · ${txs.length} Buchungen`
 
-    // Kombinieren und sortieren (neueste zuerst)
-    const items = [
-      ...accTrades.map(p => ({ type:'trade', date: p.completedAt || p.startedAt || p.createdAt || '', data: p })),
-      ...accTxns.map(t  => ({ type:'txn',   date: t.occurredAt || t.createdAt || '', data: t }))
-    ].sort((a, b) => new Date(b.date) - new Date(a.date))
-
-    if(actCount) actCount.textContent = `(${items.length})`
-    const completedCount = accTrades.filter(p => p.status === 'completed').length
-    if(actSummary) actSummary.textContent = items.length ? `${completedCount} Trades · ${accTxns.length} Buchungen` : '—'
-
-    if(!items.length){
-      if(actList)  actList.innerHTML  = ''
-      if(actEmpty) actEmpty.style.display = ''
-      return
+      actEl.innerHTML = items.length ? items.map(item=>{
+        if(item.type==='trade'){
+          const p = item.obj
+          const isMaster = String(p.masterAccountId)===String(acc.id)
+          const pl = isMaster ? (p.masterPl||0) : (p.slavePl||0)
+          const plCls = pl>=0?'color:#16a34a':'color:#dc2626'
+          const dateLabel = p.completedAt ? new Date(p.completedAt).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
+          return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
+            <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'#16a34a':'#dc2626'};margin-top:5px;flex-shrink:0"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13px">${escapeHtml(isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${isMaster?'Slave':'Master'}</span></div>
+              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
+            </div>
+            <span style="font-weight:700;font-size:13px;${plCls}">${pl>=0?'+':''}$${pl.toLocaleString('de-DE',{minimumFractionDigits:0})}</span>
+          </div>`
+        } else {
+          const t = item.obj
+          const amt = Number(t.amount||0)
+          const amtCls = amt>=0?'color:#16a34a':'color:#dc2626'
+          const dateLabel = t.date ? new Date(t.date).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
+          return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--sub-2);margin-top:5px;flex-shrink:0"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:13px">${escapeHtml(t.description||t.kind||'Buchung')}</div>
+              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${dateLabel} · Account-${t.kind==='account_purchase'?'Kauf':'Buchung'} (auto)</div>
+            </div>
+            <span style="font-weight:700;font-size:13px;${amtCls}">${amt>=0?'+':''}${Number(amt).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} ${t.currency||'€'}</span>
+          </div>`
+        }
+      }).join('') : '<div style="padding:24px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Aktivität für diesen Account.</div>'
     }
-    if(actEmpty) actEmpty.style.display = 'none'
-
-    actList.innerHTML = items.map(item => {
-      if(item.type === 'trade'){
-        const p = item.data
-        const isMaster = String(p.masterAccountId) === String(acc.id)
-        const role = isMaster ? 'Master' : 'Slave'
-        const statusColor = { open:'#8b5cf6', planned:'#f59e0b', completed:'#10b981' }[p.status] || 'var(--sub)'
-        const statusLabel = { open:'Offen', planned:'Geplant', completed:'Erledigt' }[p.status] || p.status
-        const plVal = isMaster ? p.masterPl : p.slavePl
-        const plStr = plVal != null
-          ? `<span style="font-weight:700;color:${plVal >= 0 ? 'var(--good)' : 'var(--danger)'}">${plVal >= 0 ? '+' : ''}${isMaster ? '$' : '€'}${Number(plVal).toLocaleString('de-DE')}</span>`
-          : ''
-        const dateStr = item.date ? new Date(item.date).toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'numeric' }) : '—'
-        const counterName = isMaster ? (p.slaveName || '—') : (p.masterName || '—')
-        return `
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line)">
-            <div style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:var(--ink)">
-                ${escapeHtml(isMaster ? p.masterName || '—' : p.slaveName || '—')}
-                <span style="font-size:11px;color:var(--sub);font-weight:400;margin-left:6px">→ ${escapeHtml(counterName)}</span>
-              </div>
-              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">
-                <span style="background:${statusColor}22;color:${statusColor};padding:1px 6px;border-radius:4px;font-weight:600;font-size:10.5px">${statusLabel}</span>
-                <span style="margin-left:6px">${role}</span>
-                <span style="margin-left:8px">${dateStr}</span>
-              </div>
-            </div>
-            <div style="text-align:right;flex-shrink:0">${plStr}</div>
-          </div>`
-      } else {
-        const t = item.data
-        const kindLabel = { payout:'Payout', account_purchase:'Account-Kauf', live_pnl:'Live P/L', manual:'Manuell' }[t.kind] || t.kind
-        const amtColor = t.amount >= 0 ? 'var(--good)' : 'var(--danger)'
-        const dateStr = t.occurredAt ? new Date(t.occurredAt).toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'numeric' }) : '—'
-        return `
-          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line)">
-            <div style="width:8px;height:8px;border-radius:4px;background:var(--border-strong);flex-shrink:0"></div>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:var(--ink)">${escapeHtml(kindLabel)}</div>
-              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${dateStr}${t.notes ? ' · ' + escapeHtml(t.notes) : ''}</div>
-            </div>
-            <div style="font-weight:700;color:${amtColor};font-family:var(--mono);font-size:13px;flex-shrink:0">
-              ${t.amount >= 0 ? '+' : ''}${Number(t.amount).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})} ${t.currency}
-            </div>
-          </div>`
-      }
-    }).join('')
   }
 
   function renderAccounts(){
@@ -7347,6 +7259,11 @@
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
+      if(filters.search){
+        const q = filters.search
+        const haystack = [a.name, a.firm, a.externalId, a.ma?.login, a.type].filter(Boolean).join(' ').toLowerCase()
+        if(!haystack.includes(q)) return false
+      }
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -7548,7 +7465,6 @@
       // Row-Click → Account Detail View
       accEls.table.querySelectorAll('tr[data-acc-detail]').forEach(row => {
         row.addEventListener('click', e => {
-          // Klick auf Buttons / action-Zellen ignorieren
           if(e.target.closest('[data-stop-row-click]')) return
           if(e.target.closest('button')) return
           if(e.target.closest('a')) return
@@ -7596,19 +7512,18 @@
       accEls.bal.value  = editAccount.initialBalance != null ? editAccount.initialBalance : ''
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
+      if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
-      if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
-      if(accEls.extId) accEls.extId.readOnly = false
     }else{
       accEls.name.value = ''
       accEls.firm.value = ''
       accEls.type.value = prefillType || 'phase1'
       accEls.bal.value  = ''
-      if(accEls.extId){ accEls.extId.value = '' }
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
+      if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
     }
@@ -7661,11 +7576,12 @@
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
+    const externalIdVal = accEls.extId?.value.trim() || null
     const acc = {
       name, firm, type, initialBalance,
+      externalId: externalIdVal || null,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
-      externalId: accEls.extId ? (accEls.extId.value.trim() || null) : null,
       createdAt: new Date().toISOString(),
       ma: null
     }
@@ -7731,10 +7647,6 @@
           updateRow.meta_api_balance    = null
           updateRow.meta_api_equity     = null
           updateRow.meta_api_last_check = null
-        }
-        // External ID speichern
-        if(accEls.extId){
-          updateRow.external_id = accEls.extId.value.trim() || null
         }
         const { data, error } = await supabase
           .from('accounts').update(updateRow).eq('id', _editingAccountId).select('*').single()
@@ -7819,7 +7731,6 @@
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
-      exttempl:  document.getElementById('bulk-exttemplate'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
@@ -7833,18 +7744,6 @@
       if(!tmpl){
         tmpl = sizeK ? `{firm} {size} · #{n}` : `{firm} · #{n}`
       }
-      return tmpl
-        .replace(/\{firm\}/g, firm)
-        .replace(/\{size\}/g, sizeK)
-        .replace(/\{n\}/g, n)
-    }
-
-    function buildExtId(n){
-      const tmpl = bEl.exttempl?.value.trim()
-      if(!tmpl) return null
-      const firm   = bEl.firm.value.trim() || 'Account'
-      const sizeRaw = parseFloat(bEl.size.value)
-      const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
       return tmpl
         .replace(/\{firm\}/g, firm)
         .replace(/\{size\}/g, sizeK)
@@ -7892,7 +7791,6 @@
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
-      if(bEl.exttempl) bEl.exttempl.value = ''
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -7939,9 +7837,8 @@
       let errors  = 0
 
       for(let i = 0; i < count; i++){
-        const n      = startnum + i
-        const name   = buildName(n)
-        const extId  = buildExtId(n)
+        const n    = startnum + i
+        const name = buildName(n)
         const row  = {
           user_id:        currentUserId,
           name,
@@ -7952,7 +7849,6 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
-          external_id:    extId || null,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -8001,8 +7897,8 @@
     }
 
     // Wire up inputs for live preview
-    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.exttempl, bEl.cost].forEach(el => {
-      el?.addEventListener('input', updatePreview)
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
+      el.addEventListener('input', updatePreview)
     })
 
     // Wire buttons
@@ -8866,6 +8762,8 @@
     the5ers:     { label:'The5%ers',     symbol:'NAS100', unit:'Lots',      ppl:1.00,    currency:'$', tbd:false },
     fusion:      { label:'Fusion Markets', symbol:'NAS100', unit:'Lots',    ppl:0.85,    currency:'\u20ac', tbd:false }
   }
+  // Custom Firms aus localStorage sofort einlesen
+  if(typeof mergeCustomFirmsIntoPresets === 'function') mergeCustomFirmsIntoPresets()
 
   function fmtCalcNum(n, dec=2){
     if(!isFinite(n)) return '—'
@@ -9048,184 +8946,122 @@
   }
 
   // ── Custom Firms Settings Panel ──────────────────────────────────────────
-  // Storage: localStorage 'prophos_custom_firms' → Array of {id, name, symbol, unit, ppl, currency}
-  // Synced to Supabase user_settings key 'custom_firms' via existing SYNC_KEYS mechanism.
-
   function getCustomFirms(){
     try { return JSON.parse(localStorage.getItem('prophos_custom_firms') || '[]') } catch{ return [] }
   }
-
   function saveCustomFirms(arr){
     localStorage.setItem('prophos_custom_firms', JSON.stringify(arr))
-    // auto-sync hook already wired via Storage.prototype.setItem override
   }
-
   function mergeCustomFirmsIntoPresets(){
-    const firms = getCustomFirms()
-    // Remove old custom entries
-    for(const k of Object.keys(FIRM_PRESETS)){
-      if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k]
+    for(const k of Object.keys(FIRM_PRESETS)){ if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k] }
+    for(const f of getCustomFirms()){
+      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency:f.currency||'$', _custom:true, tbd:false }
     }
-    for(const f of firms){
-      const key = 'custom_' + f.id
-      FIRM_PRESETS[key] = {
-        label: f.name,
-        symbol: f.symbol || 'NAS100',
-        unit: f.unit || 'Lots',
-        ppl: parseFloat(f.ppl) || 1,
-        currency: f.currency || '$',
-        _custom: true,
-        tbd: false
-      }
-    }
-    if(typeof refreshFirmDatalist === 'function') refreshFirmDatalist()
-    if(typeof refreshCalcFirmDropdowns === 'function') refreshCalcFirmDropdowns()
+    if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
+    if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
   }
-
   function renderCustomFirmsList(){
     const listEl  = document.getElementById('customFirmsList')
     const emptyEl = document.getElementById('customFirmsEmpty')
     if(!listEl) return
     const firms = getCustomFirms()
     listEl.innerHTML = ''
-    if(firms.length === 0){
-      if(emptyEl) emptyEl.style.display = ''
-      return
-    }
+    if(firms.length === 0){ if(emptyEl) emptyEl.style.display = ''; return }
     if(emptyEl) emptyEl.style.display = 'none'
     for(const f of firms){
       const row = document.createElement('div')
-      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;'
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px'
       row.innerHTML = `
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:13px">${escapeHtml(f.name)}</div>
-          <div style="font-size:11px;color:var(--sub);margin-top:2px">${escapeHtml(f.symbol||'—')} · ${escapeHtml(f.unit||'—')} · ${f.ppl != null ? f.ppl : '—'} ${escapeHtml(f.currency||'')} / Pkt</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px">${escapeHtml(f.symbol||'—')} · ${escapeHtml(f.unit||'—')} · ${f.ppl!=null?f.ppl:'—'} ${escapeHtml(f.currency||'')} / Pkt</div>
         </div>
         <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px" data-cf-edit="${escapeHtml(f.id)}">Bearbeiten</button>
-        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--danger)" data-cf-del="${escapeHtml(f.id)}">Löschen</button>
-      `
-      row.querySelector(`[data-cf-edit]`).addEventListener('click', () => openCustomFirmModal(f.id))
-      row.querySelector(`[data-cf-del]`).addEventListener('click', () => {
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--danger)" data-cf-del="${escapeHtml(f.id)}">Löschen</button>`
+      row.querySelector('[data-cf-edit]').addEventListener('click', () => openCustomFirmModal(f.id))
+      row.querySelector('[data-cf-del]').addEventListener('click', () => {
         if(!confirm(`Firm "${f.name}" wirklich löschen?`)) return
-        const updated = getCustomFirms().filter(x => x.id !== f.id)
-        saveCustomFirms(updated)
-        mergeCustomFirmsIntoPresets()
-        renderCustomFirmsList()
+        saveCustomFirms(getCustomFirms().filter(x=>x.id!==f.id))
+        mergeCustomFirmsIntoPresets(); renderCustomFirmsList()
       })
       listEl.appendChild(row)
     }
   }
-
-  let _cfEditId = null // null = add mode, string = edit mode
-
+  let _cfEditId = null
+  const CF_TEMPLATES = {
+    mnq:       {symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$'},
+    nas100_usd:{symbol:'NAS100', unit:'Lots',      ppl:1.00,  currency:'$'},
+    nas100_eur:{symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'€'},
+    ndx100_10: {symbol:'NDX100', unit:'Lots',      ppl:10.00, currency:'$'},
+    ndx100_20: {symbol:'NDX100', unit:'Lots',      ppl:20.00, currency:'$'}
+  }
   function openCustomFirmModal(editId){
-    _cfEditId = editId || null
+    _cfEditId = editId||null
     const modal = document.getElementById('customFirmModal')
-    const title = document.getElementById('customFirmModalTitle')
     const msg   = document.getElementById('customFirmMsg')
     if(!modal) return
-    if(msg) msg.textContent = ''
-
+    if(msg) msg.textContent=''
     if(editId){
-      const f = getCustomFirms().find(x => x.id === editId)
+      const f = getCustomFirms().find(x=>x.id===editId)
       if(!f) return
-      if(title) title.textContent = 'Firm bearbeiten'
-      document.getElementById('cf-name').value     = f.name || ''
-      document.getElementById('cf-symbol').value   = f.symbol || ''
-      document.getElementById('cf-unit').value      = f.unit || 'Lots'
-      document.getElementById('cf-ppl').value       = f.ppl != null ? f.ppl : ''
-      document.getElementById('cf-currency').value  = f.currency || '$'
-      document.getElementById('cf-template').value  = ''
+      document.getElementById('customFirmModalTitle').textContent='Firm bearbeiten'
+      document.getElementById('cf-name').value    = f.name||''
+      document.getElementById('cf-symbol').value  = f.symbol||''
+      document.getElementById('cf-unit').value     = f.unit||'Lots'
+      document.getElementById('cf-ppl').value      = f.ppl!=null?f.ppl:''
+      document.getElementById('cf-currency').value = f.currency||'$'
+      document.getElementById('cf-template').value = ''
     } else {
-      if(title) title.textContent = 'Prop Firm hinzufügen'
-      document.getElementById('cf-name').value     = ''
-      document.getElementById('cf-symbol').value   = ''
-      document.getElementById('cf-unit').value      = 'Lots'
-      document.getElementById('cf-ppl').value       = ''
-      document.getElementById('cf-currency').value  = '$'
-      document.getElementById('cf-template').value  = ''
+      document.getElementById('customFirmModalTitle').textContent='Prop Firm hinzufügen'
+      document.getElementById('cf-name').value=''; document.getElementById('cf-symbol').value=''
+      document.getElementById('cf-unit').value='Lots'; document.getElementById('cf-ppl').value=''
+      document.getElementById('cf-currency').value='$'; document.getElementById('cf-template').value=''
     }
     modal.classList.add('open')
   }
-
-  function closeCustomFirmModal(){
-    document.getElementById('customFirmModal')?.classList.remove('open')
-    _cfEditId = null
-  }
-
-  const CF_TEMPLATES = {
-    mnq:        { symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$'  },
-    nas100_usd: { symbol:'NAS100', unit:'Lots',      ppl:1.00,  currency:'$'  },
-    nas100_eur: { symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'€'  },
-    ndx100_10:  { symbol:'NDX100', unit:'Lots',      ppl:10.00, currency:'$'  },
-    ndx100_20:  { symbol:'NDX100', unit:'Lots',      ppl:20.00, currency:'$'  }
-  }
-
+  function closeCustomFirmModal(){ document.getElementById('customFirmModal')?.classList.remove('open'); _cfEditId=null }
   document.getElementById('cf-template')?.addEventListener('change', function(){
-    const tmpl = CF_TEMPLATES[this.value]
-    if(!tmpl) return
-    document.getElementById('cf-symbol').value   = tmpl.symbol
-    document.getElementById('cf-unit').value      = tmpl.unit
-    document.getElementById('cf-ppl').value       = tmpl.ppl
-    document.getElementById('cf-currency').value  = tmpl.currency
+    const t=CF_TEMPLATES[this.value]; if(!t) return
+    document.getElementById('cf-symbol').value=t.symbol; document.getElementById('cf-unit').value=t.unit
+    document.getElementById('cf-ppl').value=t.ppl; document.getElementById('cf-currency').value=t.currency
+  })
+  document.getElementById('customFirmAddBtn')?.addEventListener('click',()=>openCustomFirmModal(null))
+  document.getElementById('customFirmCancel')?.addEventListener('click',closeCustomFirmModal)
+  document.getElementById('customFirmCancel2')?.addEventListener('click',closeCustomFirmModal)
+  document.getElementById('customFirmSave')?.addEventListener('click',()=>{
+    const name=document.getElementById('cf-name').value.trim()
+    const symbol=document.getElementById('cf-symbol').value.trim()
+    const unit=document.getElementById('cf-unit').value
+    const ppl=parseFloat(document.getElementById('cf-ppl').value)
+    const currency=document.getElementById('cf-currency').value
+    const msg=document.getElementById('customFirmMsg')
+    if(!name){if(msg)msg.textContent='Name ist Pflicht.';return}
+    if(isNaN(ppl)||ppl<=0){if(msg)msg.textContent='$ pro Punkt muss > 0 sein.';return}
+    const firms=getCustomFirms()
+    if(_cfEditId){ const i=firms.findIndex(x=>x.id===_cfEditId); if(i>=0) firms[i]={...firms[i],name,symbol,unit,ppl,currency} }
+    else firms.push({id:'cf_'+Date.now(),name,symbol,unit,ppl,currency})
+    saveCustomFirms(firms); mergeCustomFirmsIntoPresets(); renderCustomFirmsList(); closeCustomFirmModal()
   })
 
-  document.getElementById('customFirmAddBtn')?.addEventListener('click', () => openCustomFirmModal(null))
-  document.getElementById('customFirmCancel')?.addEventListener('click', closeCustomFirmModal)
-  document.getElementById('customFirmCancel2')?.addEventListener('click', closeCustomFirmModal)
-
-  document.getElementById('customFirmSave')?.addEventListener('click', () => {
-    const name = document.getElementById('cf-name').value.trim()
-    const symbol = document.getElementById('cf-symbol').value.trim()
-    const unit = document.getElementById('cf-unit').value
-    const ppl = parseFloat(document.getElementById('cf-ppl').value)
-    const currency = document.getElementById('cf-currency').value
-    const msg = document.getElementById('customFirmMsg')
-
-    if(!name){ if(msg) msg.textContent = 'Name ist pflicht.'; return }
-    if(isNaN(ppl) || ppl <= 0){ if(msg) msg.textContent = '$ pro Punkt muss größer 0 sein.'; return }
-
-    const firms = getCustomFirms()
-    if(_cfEditId){
-      const idx = firms.findIndex(x => x.id === _cfEditId)
-      if(idx >= 0) firms[idx] = { ...firms[idx], name, symbol, unit, ppl, currency }
-    } else {
-      firms.push({ id: 'cf_' + Date.now(), name, symbol, unit, ppl, currency })
-    }
-    saveCustomFirms(firms)
-    mergeCustomFirmsIntoPresets()
-    renderCustomFirmsList()
-    closeCustomFirmModal()
-  })
-
-  // ── Account-Firmen: alle Firm-Namen aus accounts umbenennen ──────────────
-
+  // ── Account-Firmen umbenennen ──
   async function renderAccountFirmsList(){
     const listEl  = document.getElementById('accFirmsList')
     const emptyEl = document.getElementById('accFirmsEmpty')
     const spinner = document.getElementById('accFirmsSpinner')
     if(!listEl) return
-    listEl.innerHTML = ''
-    if(spinner) spinner.style.display = ''
-    if(emptyEl) emptyEl.style.display = 'none'
-
-    const firms = [...new Set((accounts || []).map(a => a.firm).filter(Boolean))].sort()
-    if(spinner) spinner.style.display = 'none'
-
-    if(firms.length === 0){
-      if(emptyEl) emptyEl.style.display = ''
-      return
-    }
-
+    listEl.innerHTML=''; if(spinner) spinner.style.display=''
+    const firms=[...(new Set((accounts||[]).map(a=>a.firm).filter(Boolean)))].sort()
+    if(spinner) spinner.style.display='none'
+    if(!firms.length){ if(emptyEl) emptyEl.style.display=''; return }
+    if(emptyEl) emptyEl.style.display='none'
     for(const firm of firms){
-      const count = (accounts || []).filter(a => a.firm === firm).length
-      const row = document.createElement('div')
-      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;'
-      row.dataset.accFirmRow = firm
-      row.innerHTML = `
+      const count=(accounts||[]).filter(a=>a.firm===firm).length
+      const row=document.createElement('div')
+      row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px'
+      row.innerHTML=`
         <div style="flex:1;min-width:0">
           <span class="af-firm-name" style="font-weight:600;font-size:13px">${escapeHtml(firm)}</span>
-          <span style="font-size:11px;color:var(--sub);margin-left:8px">${count} Account${count !== 1 ? 's' : ''}</span>
+          <span style="font-size:11px;color:var(--sub);margin-left:8px">${count} Account${count!==1?'s':''}</span>
         </div>
         <div class="af-edit-wrap" style="display:none;flex:1;min-width:0">
           <input class="input af-rename-input" style="font-size:13px;padding:5px 10px" value="${escapeHtml(firm)}" autocomplete="off">
@@ -9233,79 +9069,31 @@
         <button class="btn btn-ghost af-rename-btn" style="padding:5px 10px;font-size:11.5px">Umbenennen</button>
         <button class="btn btn-primary af-save-btn" style="padding:5px 10px;font-size:11.5px;display:none">Speichern</button>
         <button class="btn btn-ghost af-cancel-btn" style="padding:5px 10px;font-size:11.5px;display:none">Abbrechen</button>
-        <div class="af-status" style="font-size:11px;color:var(--sub);display:none"></div>
-      `
-      const nameEl   = row.querySelector('.af-firm-name')
-      const editWrap = row.querySelector('.af-edit-wrap')
-      const input    = row.querySelector('.af-rename-input')
-      const renameBtn= row.querySelector('.af-rename-btn')
-      const saveBtn  = row.querySelector('.af-save-btn')
-      const cancelBtn= row.querySelector('.af-cancel-btn')
-      const statusEl = row.querySelector('.af-status')
-
-      renameBtn.addEventListener('click', () => {
-        editWrap.style.display = ''
-        nameEl.style.display = 'none'
-        renameBtn.style.display = 'none'
-        saveBtn.style.display = ''
-        cancelBtn.style.display = ''
-        input.focus()
-        input.select()
-      })
-
-      cancelBtn.addEventListener('click', () => {
-        editWrap.style.display = 'none'
-        nameEl.style.display = ''
-        renameBtn.style.display = ''
-        saveBtn.style.display = 'none'
-        cancelBtn.style.display = 'none'
-        input.value = firm
-        statusEl.style.display = 'none'
-      })
-
-      saveBtn.addEventListener('click', async () => {
-        const newName = input.value.trim()
-        if(!newName || newName === firm){ cancelBtn.click(); return }
-        saveBtn.disabled = true
-        saveBtn.textContent = '…'
-        statusEl.style.display = ''
-        statusEl.textContent = 'Wird gespeichert…'
-        statusEl.style.color = 'var(--sub)'
-        try {
-          const { error } = await _supabase
-            .from('accounts')
-            .update({ firm: newName })
-            .eq('user_id', currentUserId)
-            .eq('firm', firm)
+        <div class="af-status" style="font-size:11px;color:var(--sub);display:none"></div>`
+      const nameEl=row.querySelector('.af-firm-name'), editWrap=row.querySelector('.af-edit-wrap')
+      const input=row.querySelector('.af-rename-input'), renameBtn=row.querySelector('.af-rename-btn')
+      const saveBtn=row.querySelector('.af-save-btn'), cancelBtn=row.querySelector('.af-cancel-btn')
+      const statusEl=row.querySelector('.af-status')
+      renameBtn.addEventListener('click',()=>{editWrap.style.display='';nameEl.style.display='none';renameBtn.style.display='none';saveBtn.style.display='';cancelBtn.style.display='';input.focus();input.select()})
+      cancelBtn.addEventListener('click',()=>{editWrap.style.display='none';nameEl.style.display='';renameBtn.style.display='';saveBtn.style.display='none';cancelBtn.style.display='none';input.value=firm;statusEl.style.display='none'})
+      saveBtn.addEventListener('click',async()=>{
+        const newName=input.value.trim()
+        if(!newName||newName===firm){cancelBtn.click();return}
+        saveBtn.disabled=true;saveBtn.textContent='…';statusEl.style.display='';statusEl.textContent='Wird gespeichert…';statusEl.style.color='var(--sub)'
+        try{
+          const {error}=await _supabase.from('accounts').update({firm:newName}).eq('user_id',currentUserId).eq('firm',firm)
           if(error) throw error
-          // Update local accounts array
-          for(const a of (accounts || [])){
-            if(a.firm === firm) a.firm = newName
-          }
-          statusEl.textContent = '✓ Gespeichert'
-          statusEl.style.color = 'var(--success, #10b981)'
-          nameEl.textContent = newName
-          editWrap.style.display = 'none'
-          nameEl.style.display = ''
-          renameBtn.style.display = ''
-          saveBtn.style.display = 'none'
-          cancelBtn.style.display = 'none'
-          row.dataset.accFirmRow = newName
-          // Refresh filter dropdown
-          if(typeof populateAccountFilters === 'function') populateAccountFilters()
-          setTimeout(() => { statusEl.style.display = 'none' }, 2000)
-        } catch(e) {
-          statusEl.textContent = '✗ Fehler: ' + (e.message || e)
-          statusEl.style.color = 'var(--danger, #ef4444)'
-        }
-        saveBtn.disabled = false
-        saveBtn.textContent = 'Speichern'
+          for(const a of(accounts||[])){if(a.firm===firm)a.firm=newName}
+          statusEl.textContent='✓ Gespeichert';statusEl.style.color='var(--success,#10b981)'
+          nameEl.textContent=newName;editWrap.style.display='none';nameEl.style.display='';renameBtn.style.display='';saveBtn.style.display='none';cancelBtn.style.display='none'
+          if(typeof populateAccountFilters==='function') populateAccountFilters()
+          setTimeout(()=>{statusEl.style.display='none'},2000)
+        }catch(e){statusEl.textContent='✗ '+((e.message||e));statusEl.style.color='var(--danger,#ef4444)'}
+        saveBtn.disabled=false;saveBtn.textContent='Speichern'
       })
-
       listEl.appendChild(row)
     }
   }
-
   // ── END Custom Firms ──────────────────────────────────────────────────────
 
   // Map firm string → FIRM_PRESET key
@@ -9646,10 +9434,43 @@
     `
   }
 
+  function fmtDuration(ms){
+    const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24)
+    if(d>0) return `${d}T ${h%24}h`
+    if(h>0) return `${h}h ${m%60}m`
+    if(m>0) return `${m}m ${s%60}s`
+    return `${s}s`
+  }
+  function tickLiveTimers(){
+    document.querySelectorAll('.tc-live-timer[data-started]').forEach(el => {
+      const start = new Date(el.dataset.started)
+      if(isNaN(start)) return
+      el.childNodes[0].textContent = fmtDuration(Date.now() - start.getTime())
+    })
+  }
+  setInterval(tickLiveTimers, 1000)
+
   function renderTradePlanCardFull(p){
     const isPlanned   = p.status === 'planned'
     const isOpen      = p.status === 'open'
     const isCompleted = p.status === 'completed'
+
+    // Live-Track UI
+    const isPending = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
+    const startIso  = p.startedAt || null
+    const pendingBanner = isPending ? `
+      <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;margin:-16px -18px 12px -18px;display:flex;align-items:center;justify-content:space-between;border-radius:var(--r-lg) var(--r-lg) 0 0">
+        <span style="font-size:12.5px;font-weight:600;color:#d97706">🔴 Trade beendet erkannt — PnL eintragen</span>
+        <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px">Abschließen →</button>
+      </div>` : ''
+    const liveStrip = isOpen && !isPending ? `
+      <div class="tc-live-strip">
+        <div class="tc-live-dot-wrap">
+          <span class="tc-live-dot"></span>
+          <span class="tc-live-label">Live getrackt</span>
+        </div>
+        ${startIso ? `<span class="tc-live-timer" data-started="${startIso}">—<span class="tc-live-since"> läuft</span></span>` : ''}
+      </div>` : ''
 
     const masterName = p.masterName || '— gelöscht —'
     const slaveName  = p.slaveName  || '— gelöscht —'
@@ -9666,7 +9487,7 @@
     // Header row
     const _masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))
     const _slaveAcc  = accounts.find(a => String(a.id) === String(p.slaveAccountId))
-    // External ID badge: Tradovate-ID (topstep.id) > MT5 login > — 
+    // External ID badge: external_id > Tradovate-ID > MT5 login
     function extIdBadge(acc){
       if(!acc) return ''
       const extId = acc.externalId || acc.topstep?.id || acc.ma?.login || null
@@ -9839,34 +9660,9 @@
       `
     }
 
-    // Pending-Finish-Banner: wenn Trade als beendet erkannt aber noch nicht abgeschlossen
-    const isPending = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
-    const pendingBanner = isPending ? `
-      <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;display:flex;align-items:center;gap:10px;border-radius:12px 12px 0 0;margin:-16px -18px 4px -18px">
-        <span style="font-size:15px">🔴</span>
-        <span style="font-size:13px;font-weight:600;color:#b45309;flex:1">Trade beendet erkannt — PnL eintragen</span>
-        <button data-plan-complete="${p.id}" style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
-      </div>
-    ` : ''
-
-    // Live-Strip für offene Trades
-    const liveStrip = isOpen && !isPending ? (() => {
-      const startIso = p.startedAt ? new Date(p.startedAt).toISOString() : null
-      return `
-        <div class="tc-live-strip">
-          <div class="tc-live-dot-wrap">
-            <span class="tc-live-dot"></span>
-            <span class="tc-live-label">Live getrackt</span>
-          </div>
-          ${startIso ? `<span class="tc-live-timer" data-started="${startIso}">—<span class="tc-live-since"> läuft</span></span>` : ''}
-        </div>
-      `
-    })() : ''
-
     return `
-      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''}${isOpen && !isPending ? ' is-open' : ''}${isPending ? ' at-pending' : ''}" data-plan-id="${p.id}" style="${isPending ? 'border:2px solid #f59e0b55;animation:none' : ''}">
-        ${isPending ? pendingBanner : liveStrip}
-        ${isPending ? '' : ''}
+      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''} ${isOpen ? 'is-open' : ''}" data-plan-id="${p.id}">
+        ${pendingBanner || liveStrip}
         ${header}
         ${meta}
         ${result}
@@ -9896,30 +9692,6 @@
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planEditCompleted))
     })
   }
-
-  // ─────── Live Timer für offene Trades ───────
-  function fmtDuration(ms){
-    const s = Math.floor(ms / 1000)
-    const m = Math.floor(s / 60)
-    const h = Math.floor(m / 60)
-    const d = Math.floor(h / 24)
-    if(d > 0)  return `${d}T ${h % 24}h`
-    if(h > 0)  return `${h}h ${m % 60}m`
-    if(m > 0)  return `${m}m ${s % 60}s`
-    return `${s}s`
-  }
-  function tickLiveTimers(){
-    document.querySelectorAll('.tc-live-timer[data-started]').forEach(el => {
-      const start = new Date(el.dataset.started)
-      if(isNaN(start)) return
-      const elapsed = Date.now() - start.getTime()
-      const sinceEl = el.querySelector('.tc-live-since')
-      el.childNodes[0].textContent = fmtDuration(elapsed)
-      if(sinceEl) sinceEl.textContent = ' läuft'
-    })
-  }
-  setInterval(tickLiveTimers, 1000)
-  document.addEventListener('DOMContentLoaded', tickLiveTimers)
 
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
@@ -10118,7 +9890,7 @@
         const liveMarker = bal.src === 'init' ? '' : '●'  // Punkt = live verknüpft
         const balPart = liveMarker ? `${liveMarker} ${balStr}` : balStr
         // External ID suffix: Tradovate ID > MT5 login
-        const extId = a.externalId || a.topstep?.id || a.ma?.login || null
+        const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
         return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}</option>`
       }
@@ -10717,7 +10489,7 @@
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
     _completingPlanId = planId
-    // Pending-Finish-State löschen und Karte aktualisieren
+    // pendingFinish löschen → Banner verschwindet sobald Modal geöffnet
     if(autoTrack?.pendingFinish?.has(String(planId))){
       autoTrack.pendingFinish.delete(String(planId))
       localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
@@ -13452,10 +13224,6 @@
         window._advisorInitialised = true
         advisorEnsureMarked()
         setTimeout(advisorCheckHealth, 100)
-      }
-      if (name === 'settings') {
-        if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
-        if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
       }
     }
   }
