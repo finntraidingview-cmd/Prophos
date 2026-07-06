@@ -6482,23 +6482,54 @@
       const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
       if(!res.ok) return
       positions = res.data?.data || []
-      console.log('[atCheck] Duplikum offene Positionen:', positions.length, positions.map(p=>p.account_id))
+      console.log('[atCheck] Duplikum Positionen:', positions.length, positions.map(p=>p.account_id))
+      if(positions.length > 0) console.log('[atCheck] Beispiel-Position:', JSON.stringify(positions[0]))
     } catch(e){ console.warn('[atCheck] API-Fehler:', e); return }
 
     for(const plan of plans){
       if(autoTrack.inProgress.has(plan.id)) continue
-      const dupSlaveId = atGetDupId(plan.slaveAccountId)
-      if(!dupSlaveId) continue
 
-      // Hat dieser Slave-Account gerade eine offene Position?
-      const hasOpenPosition = positions.some(p => String(p.account_id) === String(dupSlaveId))
-      const prev = autoTrack.state.get(plan.id) || { wasOpen: false, notified: false }
+      // Slave UND Master via External ID (dupGetLinks) auflösen
+      const dupSlaveId  = atGetDupId(plan.slaveAccountId)
+      const dupMasterId = atGetDupId(plan.masterAccountId)
+      if(!dupSlaveId) continue  // Slave nicht in Duplikum verknüpft → überspringen
 
-      console.log(`[atCheck] Plan ${plan.id} | dupSlaveId=${dupSlaveId} | hasOpen=${hasOpenPosition} | status=${plan.status} | prev=`, prev)
+      // Slave-Positionen zählen
+      const slavePositions = positions.filter(p => String(p.account_id) === String(dupSlaveId))
+      const currentCount   = slavePositions.length
+      const hasOpenPosition = currentCount > 0
 
-      if(plan.status === 'planned' && hasOpenPosition){
-        // Auto-Start
-        autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
+      // Master-Check: falls Master verknüpft ist, muss er auch eine offene Position haben.
+      // Alternativ: prüfe ob eine Slave-Position das Feld id_master/master_id gesetzt hat.
+      const masterPositionOk = (() => {
+        if(!dupMasterId) return true  // Master nicht in Duplikum → kein zusätzlicher Check
+        // Option A: Master hat eigene offene Position im gleichen Account
+        const masterHasPos = positions.some(p => String(p.account_id) === String(dupMasterId))
+        if(masterHasPos) return true
+        // Option B: Slave-Position hat id_master/master_id Feld das auf den Master zeigt
+        return slavePositions.some(p =>
+          String(p.id_master||p.master_id||p.masterId||'') === String(dupMasterId)
+        )
+      })()
+
+      const prev = autoTrack.state.get(plan.id) || { wasOpen: false, notified: false, baselineCount: null }
+
+      console.log(`[atCheck] Plan ${plan.id} | slave=${dupSlaveId}(${currentCount}) | master=${dupMasterId}(ok=${masterPositionOk}) | baseline=${prev.baselineCount} | status=${plan.status}`)
+
+      if(plan.status === 'planned'){
+        if(prev.baselineCount === null){
+          // Erster Check: Baseline merken, noch nicht triggern
+          autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: false, baselineCount: currentCount })
+          console.log(`[atCheck] Baseline gesetzt: ${currentCount} Slave-Positionen, masterId=${dupMasterId}`)
+          continue
+        }
+        if(currentCount <= prev.baselineCount || !masterPositionOk){
+          // Keine neue Position ODER Master nicht aktiv → warten
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenPosition })
+          continue
+        }
+        // Neue Slave-Position + Master OK → Auto-Start
+        autoTrack.state.set(plan.id, { wasOpen: true, notified: false, baselineCount: currentCount })
         autoTrack.inProgress.add(plan.id)
         try {
           const { data, error } = await supabase
@@ -6516,10 +6547,10 @@
 
       } else if(plan.status === 'open'){
         if(hasOpenPosition){
-          autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false })
         } else if(prev.wasOpen && !prev.notified){
           // War offen, ist jetzt geschlossen
-          autoTrack.state.set(plan.id, { wasOpen: false, notified: true })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: false, notified: true })
           atShowEndPrompt(plan)
         } else {
           autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenPosition })
