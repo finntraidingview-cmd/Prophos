@@ -5816,9 +5816,11 @@
   dupLoadAccounts = async function(){
     await _origDupLoadAccounts.apply(this, arguments)
     if(dupState.accounts.length) dupStartAutoRefresh()
+    if(autoTrack?.enabled) atStartClosedPoll()
   }
 
   async function dupLogout(){
+    atStopClosedPoll()
     try {
       await fetch(`${TS_BACKEND}/duplikum/disconnect`, {
         method: 'POST',
@@ -6049,7 +6051,7 @@
       ltState.lastUpdate = new Date()
       ltRender()
       // Auto-Detect: Open-Positions gegen Trade-Pläne prüfen
-      atCheckOpenPositions(dup).catch(e => console.warn('atCheckOpen:', e))
+      atCheckOpenPositions(dup, mt).catch(e => console.warn('atCheckOpen:', e))
     } catch(e) {
       if(stat) stat.textContent = '⚠ Fehler: ' + (e.message || e)
     } finally {
@@ -6470,24 +6472,33 @@
   }
 
   // ── Open-Positions-Check (wird nach jedem ltRender aufgerufen) ──
-  async function atCheckOpenPositions(dupOpenPositions){
+  async function atCheckOpenPositions(dupOpenPositions, mtPositions){
     if(!autoTrack.enabled) return
     if(!Array.isArray(tradePlans) || !tradePlans.length) return
 
     // Duplikum-Positionen nach account_id gruppieren
     const openByDupAcc = new Map()
-    for(const pos of dupOpenPositions){
+    for(const pos of (dupOpenPositions||[])){
       const id = String(pos.accountId || pos.account_id || '')
       if(!openByDupAcc.has(id)) openByDupAcc.set(id, [])
       openByDupAcc.get(id).push(pos)
+    }
+    // MT5-Positionen nach Prophos-accountId (direkt matchbar, kein Dup-Lookup nötig)
+    const openByMtAcc = new Map()
+    for(const pos of (mtPositions||[])){
+      const id = String(pos.accountId || '')
+      if(!openByMtAcc.has(id)) openByMtAcc.set(id, [])
+      openByMtAcc.get(id).push(pos)
     }
 
     for(const plan of tradePlans.filter(p => p.status === 'planned')){
       if(autoTrack.inProgress.has(plan.id)) continue
       const dupSlaveId = atGetDupId(plan.slaveAccountId)
-      if(!dupSlaveId) continue
 
-      const hasPos = (openByDupAcc.get(String(dupSlaveId)) || []).length > 0
+      // Match: Duplikum-Position auf Slave ODER MT5-Position direkt auf Slave-Account
+      const hasDupPos = dupSlaveId ? (openByDupAcc.get(String(dupSlaveId)) || []).length > 0 : false
+      const hasMtPos  = (openByMtAcc.get(String(plan.slaveAccountId)) || []).length > 0
+      const hasPos = hasDupPos || hasMtPos
       const prev   = autoTrack.state.get(plan.id) || { hadPosition: false }
 
       if(hasPos && !prev.hadPosition){
@@ -6515,8 +6526,9 @@
     // Open-Plans: letzten P&L aus laufenden Positionen tracken
     for(const plan of tradePlans.filter(p => p.status === 'open')){
       const dupSlaveId = atGetDupId(plan.slaveAccountId)
-      if(!dupSlaveId) continue
-      const positions = openByDupAcc.get(String(dupSlaveId)) || []
+      const dupPositions = dupSlaveId ? (openByDupAcc.get(String(dupSlaveId)) || []) : []
+      const mtPosForPlan = openByMtAcc.get(String(plan.slaveAccountId)) || []
+      const positions = [...dupPositions, ...mtPosForPlan]
       const prev = autoTrack.state.get(plan.id) || { hadPosition: true, lastPnl: null, notified: false }
       if(positions.length > 0){
         const pnl = positions.reduce((s, p) => s + (Number(p.pnl) || 0), 0)
