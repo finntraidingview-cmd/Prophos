@@ -4139,8 +4139,15 @@
           <input class="input mono" id="ac-balance" type="number" step="0.01" placeholder="50000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Kaufpreis (€, optional)</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
+            <label style="margin:0">Kaufpreis (optional)</label>
+            <div id="ac-purchase-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
+              <button type="button" class="ac-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
+              <button type="button" class="ac-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
+            </div>
+          </div>
           <input class="input mono" id="ac-purchase-cost" type="number" step="0.01" placeholder="z.B. 450" autocomplete="off">
+          <div id="ac-purchase-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <label>Max Drawdown ($, optional)</label>
@@ -8512,6 +8519,8 @@
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
     }
+    // Kaufpreis-Währung immer auf € (Base) zurücksetzen — gespeicherter Wert ist EUR
+    if(typeof window._acSetPurchaseCcy === 'function') window._acSetPurchaseCcy('EUR')
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
@@ -8553,7 +8562,11 @@
     const firm = accEls.firm.value.trim()
     const type = accEls.type.value
     const initialBalance = parseFloat(accEls.bal.value) || 0
-    const purchaseCost = parseFloat(accEls.purchase.value)
+    // Kaufpreis: in € gespeichert. Bei $-Eingabe mit Settings-Kurs umrechnen.
+    let purchaseCost = parseFloat(accEls.purchase.value)
+    if(!isNaN(purchaseCost) && (typeof window._acGetPurchaseCcy === 'function') && window._acGetPurchaseCcy() === 'USD'){
+      purchaseCost = purchaseCost * (window._fxUsdEur || 0.85)  // USD → EUR
+    }
     const maxDrawdown = parseFloat(accEls.maxDd.value)
     const externalId = accEls.extId?.value?.trim() || null
     const isEdit = !!_editingAccountId
@@ -8698,6 +8711,43 @@
     switchView('accounts')
     openAccountModal('live')
   })
+
+  /* ── Kaufpreis-Währung (€/$) Umschalter ── */
+  // Gespeichert wird immer in EUR. Bei $-Eingabe → Umrechnung mit window._fxUsdEur (Settings).
+  let _acPurchaseCcy = 'EUR'
+  function _acUpdatePurchaseHint(){
+    const hint = document.getElementById('ac-purchase-hint')
+    if(!hint) return
+    const raw = parseFloat(accEls.purchase?.value)
+    const fx = window._fxUsdEur || 0.85
+    const fxStr = fx.toFixed(4).replace('.', ',')
+    if(_acPurchaseCcy === 'USD'){
+      if(!isNaN(raw) && raw > 0){
+        const eur = raw * fx
+        hint.textContent = `= €${eur.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})}  (Kurs 1 USD = ${fxStr} €) — gespeichert wird in Euro`
+      } else {
+        hint.textContent = `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € nach Euro umgerechnet`
+      }
+    } else {
+      hint.textContent = ''
+    }
+  }
+  function _acSetPurchaseCcy(ccy){
+    _acPurchaseCcy = (ccy === 'USD') ? 'USD' : 'EUR'
+    document.querySelectorAll('#ac-purchase-ccy .ac-ccy-btn').forEach(b => {
+      const active = b.dataset.ccy === _acPurchaseCcy
+      b.classList.toggle('active', active)
+      b.style.background = active ? 'var(--violet)' : 'transparent'
+      b.style.color = active ? '#fff' : 'var(--sub)'
+    })
+    _acUpdatePurchaseHint()
+  }
+  window._acGetPurchaseCcy = () => _acPurchaseCcy
+  window._acSetPurchaseCcy = _acSetPurchaseCcy
+  document.querySelectorAll('#ac-purchase-ccy .ac-ccy-btn').forEach(b => {
+    b.addEventListener('click', () => _acSetPurchaseCcy(b.dataset.ccy))
+  })
+  accEls.purchase?.addEventListener('input', _acUpdatePurchaseHint)
 
   /* ========== BULK ADD ACCOUNTS ========== */
   ;(function(){
