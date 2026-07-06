@@ -83,6 +83,45 @@
   .at-toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
   .at-toggle input[type=checkbox]{accent-color:var(--violet);width:14px;height:14px;cursor:pointer}
 
+  /* ── Open Trade Card — Live Tracking UI ── */
+  @keyframes tcLivePulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}
+    50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}
+  }
+  @keyframes tcCardGlow{
+    0%,100%{box-shadow:0 0 0 0 rgba(99,102,241,.0), var(--shadow-card)}
+    50%{box-shadow:0 0 18px 2px rgba(99,102,241,.10), var(--shadow-card)}
+  }
+  @keyframes tcTimerTick{from{opacity:.7}to{opacity:1}}
+  #dashboard-view .trade-card.is-open{
+    border-color:rgba(99,102,241,.35);
+    animation:tcCardGlow 3s ease-in-out infinite;
+  }
+  #dashboard-view .trade-card.is-open:hover{
+    border-color:rgba(99,102,241,.55);
+  }
+  #dashboard-view .tc-live-strip{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:7px 14px;margin:-16px -18px 4px -18px;
+    background:linear-gradient(90deg,rgba(16,185,129,.08),rgba(99,102,241,.06));
+    border-bottom:1px solid rgba(16,185,129,.15);border-radius:var(--r-lg) var(--r-lg) 0 0;
+  }
+  #dashboard-view .tc-live-dot-wrap{display:flex;align-items:center;gap:7px}
+  #dashboard-view .tc-live-dot{
+    width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0;
+    animation:tcLivePulse 1.6s ease-in-out infinite;
+  }
+  #dashboard-view .tc-live-label{
+    font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#10b981;
+  }
+  #dashboard-view .tc-live-timer{
+    font-size:11.5px;font-family:var(--mono);font-weight:600;
+    color:var(--ink-2);letter-spacing:.03em;
+  }
+  #dashboard-view .tc-live-since{
+    font-size:10px;color:var(--sub);margin-left:4px;font-weight:400;
+  }
+
 
   /* ============================================================
      BOOT SCREEN (shown until session check finishes)
@@ -9239,16 +9278,31 @@
     // Pending-Finish-Banner: wenn Trade als beendet erkannt aber noch nicht abgeschlossen
     const isPending = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
     const pendingBanner = isPending ? `
-      <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;display:flex;align-items:center;gap:10px;border-radius:12px 12px 0 0">
+      <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;display:flex;align-items:center;gap:10px;border-radius:12px 12px 0 0;margin:-16px -18px 4px -18px">
         <span style="font-size:15px">🔴</span>
         <span style="font-size:13px;font-weight:600;color:#b45309;flex:1">Trade beendet erkannt — PnL eintragen</span>
         <button data-plan-complete="${p.id}" style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
       </div>
     ` : ''
 
+    // Live-Strip für offene Trades
+    const liveStrip = isOpen && !isPending ? (() => {
+      const startIso = p.startedAt ? new Date(p.startedAt).toISOString() : null
+      return `
+        <div class="tc-live-strip">
+          <div class="tc-live-dot-wrap">
+            <span class="tc-live-dot"></span>
+            <span class="tc-live-label">Live getrackt</span>
+          </div>
+          ${startIso ? `<span class="tc-live-timer" data-started="${startIso}">—<span class="tc-live-since"> läuft</span></span>` : ''}
+        </div>
+      `
+    })() : ''
+
     return `
-      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''}${isPending ? ' at-pending' : ''}" data-plan-id="${p.id}" style="${isPending ? 'border:2px solid #f59e0b55;' : ''}">
-        ${pendingBanner}
+      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''}${isOpen && !isPending ? ' is-open' : ''}${isPending ? ' at-pending' : ''}" data-plan-id="${p.id}" style="${isPending ? 'border:2px solid #f59e0b55;animation:none' : ''}">
+        ${isPending ? pendingBanner : liveStrip}
+        ${isPending ? '' : ''}
         ${header}
         ${meta}
         ${result}
@@ -9278,6 +9332,30 @@
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planEditCompleted))
     })
   }
+
+  // ─────── Live Timer für offene Trades ───────
+  function fmtDuration(ms){
+    const s = Math.floor(ms / 1000)
+    const m = Math.floor(s / 60)
+    const h = Math.floor(m / 60)
+    const d = Math.floor(h / 24)
+    if(d > 0)  return `${d}T ${h % 24}h`
+    if(h > 0)  return `${h}h ${m % 60}m`
+    if(m > 0)  return `${m}m ${s % 60}s`
+    return `${s}s`
+  }
+  function tickLiveTimers(){
+    document.querySelectorAll('.tc-live-timer[data-started]').forEach(el => {
+      const start = new Date(el.dataset.started)
+      if(isNaN(start)) return
+      const elapsed = Date.now() - start.getTime()
+      const sinceEl = el.querySelector('.tc-live-since')
+      el.childNodes[0].textContent = fmtDuration(elapsed)
+      if(sinceEl) sinceEl.textContent = ' läuft'
+    })
+  }
+  setInterval(tickLiveTimers, 1000)
+  document.addEventListener('DOMContentLoaded', tickLiveTimers)
 
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
