@@ -3129,6 +3129,10 @@
                   <input type="radio" name="tc-status" value="passed">
                   <span style="color:var(--ink)">✅ Phase bestanden — Nachfolger anlegen</span>
                 </label>
+                <label class="tc-status-opt" data-tc-status="reset" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .12s">
+                  <input type="radio" name="tc-status" value="reset">
+                  <span style="color:var(--ink)">🔄 Account resetten — alten archivieren, neuen anlegen</span>
+                </label>
               </div>
               <div id="tc-status-account-wrap" style="margin-top:10px;display:none">
                 <label style="font-size:11.5px;color:var(--sub);margin-bottom:4px;display:block">Welcher Account?</label>
@@ -3200,6 +3204,53 @@
         <div class="modal-foot">
           <button class="btn btn-ghost" id="successorCancel2">Abbrechen</button>
           <button class="btn btn-primary" id="successorConfirm">Anlegen & Vorgänger archivieren</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESET ACCOUNT MODAL -->
+    <div class="modal-bg" id="resetModal">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div>
+            <h3 style="margin:0 0 4px">🔄 Account resetten</h3>
+            <p class="modal-sub" style="margin:0">Alten Account archivieren, frisch neu starten.</p>
+          </div>
+          <button class="modal-x" id="resetCancel" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="resetInfo" class="link-tsx-hero"></div>
+          <p style="font-size:12.5px;color:var(--sub);margin:12px 0 12px">
+            Der alte Account wird archiviert (Grund: Reset). Der neue Account startet <strong>frisch</strong> — die Kosten sind separat, keine Verrechnung mit dem alten.
+          </p>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
+            <div class="field" style="grid-column:span 2">
+              <label>Neue External ID <span style="color:#ef4444">*</span></label>
+              <input class="input mono" id="reset-extid" placeholder="z.B. TDFYSL150… oder MT5-Login" autocomplete="off">
+            </div>
+            <div class="field" style="grid-column:span 2">
+              <label>Name des neuen Accounts</label>
+              <input class="input" id="reset-name" placeholder="Name">
+            </div>
+            <div class="field" style="grid-column:span 2">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
+                <label style="margin:0">Reset-Gebühr</label>
+                <div id="reset-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
+                  <button type="button" class="reset-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
+                  <button type="button" class="reset-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
+                </div>
+              </div>
+              <input class="input mono" id="reset-fee" type="number" step="0.01" value="0" placeholder="0">
+              <div id="reset-fee-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+            </div>
+          </div>
+          <div class="modal-msg" id="resetMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="resetCancel2">Abbrechen</button>
+          <button class="btn btn-primary" id="resetConfirm">Resetten &amp; alten archivieren</button>
         </div>
       </div>
     </div>
@@ -3723,6 +3774,10 @@
           <button class="btn btn-ghost" id="ad-plan-trade-btn" type="button" title="Trade für später planen — dieser Account ist Master">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             Trade planen
+          </button>
+          <button class="btn btn-ghost" id="ad-reset-btn" type="button" title="Account resetten — alten archivieren, neuen mit neuer External ID anlegen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Reset
           </button>
           <button class="btn btn-ghost" id="ad-edit-btn" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -7136,7 +7191,7 @@
       if(a.firm) parts.push(escapeHtml(a.firm))
       parts.push(typeLabel(a.type))
       if(archInfo?.archived){
-        const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', manual: '📦 Archiviert' }
+        const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', reset: '🔄 Reset', manual: '📦 Archiviert' }
         parts.push(reasonMap[archInfo.reason] || '📦 Archiviert')
       }
       subEl.innerHTML = parts.join(' · ')
@@ -7805,6 +7860,11 @@
     }
   })
 
+  // Reset-Button im Detail-Header
+  document.getElementById('ad-reset-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    if(_detailAccountId && typeof openResetModal === 'function') openResetModal(_detailAccountId)
+  })
   // Trade hinzufügen (jetzt) — dieser Account als Master, Datum heute
   document.getElementById('ad-add-trade-btn')?.addEventListener('click', (e) => {
     e.stopPropagation()
@@ -8039,7 +8099,7 @@
     })
     const status = document.querySelector('input[name="tc-status"]:checked')?.value
     const wrap = document.getElementById('tc-status-account-wrap')
-    if(wrap) wrap.style.display = (status === 'blown' || status === 'passed') ? 'block' : 'none'
+    if(wrap) wrap.style.display = (status === 'blown' || status === 'passed' || status === 'reset') ? 'block' : 'none'
   }
 
   document.querySelectorAll('input[name="tc-status"]').forEach(r =>
@@ -8128,6 +8188,123 @@
   document.getElementById('successorCancel2')?.addEventListener('click', closeSuccessorWizard)
   document.getElementById('successorModal')?.addEventListener('click', e => {
     if(e.target === document.getElementById('successorModal')) closeSuccessorWizard()
+  })
+
+  /* ========== ACCOUNT RESET ========== */
+  let _resetTargetId = null
+  let _resetFeeCcy = 'EUR'
+  function _resetUpdateHint(){
+    const hint = document.getElementById('reset-fee-hint')
+    if(!hint) return
+    const raw = parseFloat(document.getElementById('reset-fee')?.value)
+    const fx = window._fxUsdEur || 0.85
+    const fxStr = fx.toFixed(4).replace('.', ',')
+    hint.textContent = (_resetFeeCcy === 'USD')
+      ? ((!isNaN(raw) && raw > 0)
+          ? `= €${(raw*fx).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} (Kurs 1 USD = ${fxStr} €) — gespeichert in Euro`
+          : `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € umgerechnet`)
+      : ''
+  }
+  function _resetSetCcy(ccy){
+    _resetFeeCcy = (ccy === 'USD') ? 'USD' : 'EUR'
+    document.querySelectorAll('#reset-ccy .reset-ccy-btn').forEach(b => {
+      const active = b.dataset.ccy === _resetFeeCcy
+      b.classList.toggle('active', active)
+      b.style.background = active ? 'var(--violet)' : 'transparent'
+      b.style.color = active ? '#fff' : 'var(--sub)'
+    })
+    _resetUpdateHint()
+  }
+  function openResetModal(accountId){
+    const a = accounts.find(x => String(x.id) === String(accountId))
+    if(!a) return
+    _resetTargetId = a.id
+    const info = document.getElementById('resetInfo')
+    if(info){
+      info.innerHTML = `
+        <div class="lh-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </div>
+        <div class="lh-name">${escapeHtml(a.name)}</div>
+        <div class="lh-meta">${escapeHtml(a.firm || '–')} · ${typeLabel(a.type)}${a.externalId ? ' · alt: ' + escapeHtml(String(a.externalId)) : ''}</div>`
+    }
+    const nameEl = document.getElementById('reset-name')
+    const extEl  = document.getElementById('reset-extid')
+    const feeEl  = document.getElementById('reset-fee')
+    const msgEl  = document.getElementById('resetMsg')
+    if(nameEl) nameEl.value = a.name || ''
+    if(extEl)  extEl.value = ''
+    if(feeEl)  feeEl.value = a.purchaseCost != null ? a.purchaseCost : 0
+    if(msgEl){ msgEl.textContent = ''; msgEl.className = 'modal-msg' }
+    _resetSetCcy('EUR')
+    document.getElementById('resetModal').classList.add('open')
+    setTimeout(() => extEl?.focus(), 50)
+  }
+  function closeResetModal(){
+    document.getElementById('resetModal').classList.remove('open')
+    _resetTargetId = null
+  }
+  window.openResetModal = openResetModal
+  document.getElementById('resetCancel')?.addEventListener('click', closeResetModal)
+  document.getElementById('resetCancel2')?.addEventListener('click', closeResetModal)
+  document.getElementById('resetModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('resetModal')) closeResetModal()
+  })
+  document.querySelectorAll('#reset-ccy .reset-ccy-btn').forEach(b => {
+    b.addEventListener('click', () => _resetSetCcy(b.dataset.ccy))
+  })
+  document.getElementById('reset-fee')?.addEventListener('input', _resetUpdateHint)
+
+  document.getElementById('resetConfirm')?.addEventListener('click', async () => {
+    const oldId = _resetTargetId
+    const old = accounts.find(x => String(x.id) === String(oldId))
+    const msgEl = document.getElementById('resetMsg')
+    if(!old){ return }
+    const newExtId = (document.getElementById('reset-extid')?.value || '').trim()
+    const newName  = (document.getElementById('reset-name')?.value || '').trim() || old.name
+    let fee = parseFloat(document.getElementById('reset-fee')?.value)
+    if(isNaN(fee)) fee = 0
+    if(_resetFeeCcy === 'USD') fee = fee * (window._fxUsdEur || 0.85)  // → EUR
+    if(!newExtId){
+      if(msgEl){ msgEl.textContent = 'Neue External ID ist nötig (ändert sich beim Reset).'; msgEl.className = 'modal-msg err' }
+      document.getElementById('reset-extid')?.focus()
+      return
+    }
+    const btn = document.getElementById('resetConfirm')
+    btn.disabled = true; btn.classList.add('ts-btn-loading')
+    try {
+      // Neuer, EIGENSTÄNDIGER Account (Kopie des Schemas, frische Kosten, neue External ID)
+      const newAcc = {
+        name:           newName,
+        firm:           old.firm,
+        type:           old.type,
+        initialBalance: old.initialBalance || 0,
+        purchaseCost:   fee > 0 ? fee : null,
+        maxDrawdown:    old.maxDrawdown != null ? old.maxDrawdown : null,
+        externalId:     newExtId
+      }
+      const { data, error } = await supabase.from('accounts').insert(accountToRow(newAcc)).select('*').single()
+      if(error) throw error
+      const created = rowToAccount(data)
+      accounts.push(created)
+      // Alten Account archivieren — Grund "reset". Bewusst OHNE successorId,
+      // damit die Gesamtkosten-Kette NICHT weiterläuft (frischer Start).
+      archiveAccount(oldId, 'reset')
+
+      renderAccounts()
+      if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
+      if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
+      if(typeof renderPairs === 'function') renderPairs()
+      closeResetModal()
+      // Zum neuen Account springen
+      _detailAccountId = created.id
+      if(typeof switchView === 'function') switchView('account-detail')
+      if(typeof renderAccountDetail === 'function') renderAccountDetail()
+    } catch(e){
+      if(msgEl){ msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err' }
+    } finally {
+      btn.disabled = false; btn.classList.remove('ts-btn-loading')
+    }
   })
 
   document.getElementById('successorConfirm')?.addEventListener('click', async () => {
@@ -8445,7 +8622,7 @@
         // Archiv-Badge
         let archBadge = ''
         if(isArchived){
-          const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', manual: '📦 Archiviert' }
+          const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', reset: '🔄 Reset', manual: '📦 Archiviert' }
           const reasonLabel = reasonMap[archInfo.reason] || '📦 Archiviert'
           archBadge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#94a3b822;color:#475569;margin-left:8px;vertical-align:middle">${reasonLabel}</span>`
         }
@@ -8469,6 +8646,11 @@
         // Archivierte ausgrauen
         const rowOpacity = isArchived ? 'opacity:.55' : ''
 
+        // Reset-Button (nur aktive Accounts)
+        const resetActionBtn = isArchived ? '' : `<button class="btn btn-ghost icon-btn" data-acc-reset="${a.id}" title="Resetten (alten archivieren, neuen anlegen)" style="padding:5px 8px;margin-left:4px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>`
+
         return `
           <tr data-acc-id="${a.id}" style="cursor:pointer;${rowOpacity}" data-acc-detail="${a.id}">
             <td style="padding-left:20px">
@@ -8483,6 +8665,7 @@
               <button class="btn btn-ghost icon-btn" data-acc-edit="${a.id}" title="Bearbeiten" style="padding:5px 8px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
+              ${resetActionBtn}
               ${archiveActionBtn}
               <button class="btn btn-ghost icon-btn" data-acc-del="${a.id}" title="Löschen" style="padding:5px 8px;margin-left:4px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -8497,6 +8680,11 @@
           if(!confirm('Account archivieren? Er bleibt erhalten und kann jederzeit wieder reaktiviert werden.')) return
           archiveAccount(btn.dataset.accArchive, 'manual')
           renderAccounts()
+        })
+      })
+      accEls.table.querySelectorAll('[data-acc-reset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if(typeof openResetModal === 'function') openResetModal(btn.dataset.accReset)
         })
       })
       accEls.table.querySelectorAll('[data-acc-unarchive]').forEach(btn => {
@@ -12422,6 +12610,9 @@
       } else if(statusChoice === 'passed' && targetAccountId){
         // Nachfolger-Wizard öffnen — der archiviert dann automatisch den Vorgänger
         setTimeout(() => openSuccessorWizard(targetAccountId), 200)
+      } else if(statusChoice === 'reset' && targetAccountId){
+        // Reset-Dialog öffnen — archiviert den alten & legt einen frischen an
+        setTimeout(() => { if(typeof openResetModal === 'function') openResetModal(targetAccountId) }, 200)
       }
     }catch(e){
       const el = document.getElementById('tradeCompleteMsg')
