@@ -4188,9 +4188,9 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
-          <label>Broker Account ID (optional)</label>
+          <label>External ID (optional)</label>
           <input class="input mono" id="ac-ext-id" placeholder="z.B. 511290232" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird als #ID-Badge in Trade-Plänen angezeigt. Bei TopstepX-Accounts automatisch gesetzt.</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Broker-Account-Nummer. Wird als #ID-Badge in Trade-Plänen angezeigt.</div>
         </div>
       </div>
 
@@ -6954,6 +6954,38 @@
     if(typeof renderAccounts === 'function') renderAccounts()
   })
 
+  let accFilters = { firm: '', type: '' }
+
+  function populateAccountFilters(){
+    const firmSel = document.getElementById('acc-firm-filter')
+    const typeSel = document.getElementById('acc-type-filter')
+
+    // Firmen-Dropdown: eindeutige Firms aus allen Accounts
+    if(firmSel){
+      const currentFirm = accFilters.firm
+      const firms = [...new Set((accounts || []).map(a => a.firm).filter(Boolean))].sort()
+      firmSel.innerHTML = '<option value="">Alle</option>' +
+        firms.map(f => `<option value="${escapeHtml(f)}"${f === currentFirm ? ' selected' : ''}>${escapeHtml(f)}</option>`).join('')
+      // Listener nur einmal setzen
+      if(!firmSel.dataset.listenerSet){
+        firmSel.dataset.listenerSet = '1'
+        firmSel.addEventListener('change', () => {
+          accFilters.firm = firmSel.value
+          renderAccounts()
+        })
+      }
+    }
+
+    // Typ-Dropdown (Listener nur einmal)
+    if(typeSel && !typeSel.dataset.listenerSet){
+      typeSel.dataset.listenerSet = '1'
+      typeSel.addEventListener('change', () => {
+        accFilters.type = typeSel.value
+        renderAccounts()
+      })
+    }
+  }
+
 
   /* ========== ACCOUNTS — SUPABASE CRUD ========== */
   let accounts = []   // hydrated from Supabase after login
@@ -6970,6 +7002,7 @@
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
+      externalId: row.external_id || null,
       createdAt: row.created_at,
       topstep: row.topstep_account_id ? {
         id:        row.topstep_account_id,
@@ -6996,7 +7029,8 @@
       account_type: a.type,
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
-      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
+      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
+      external_id: a.externalId || null
     }
     if(a.topstep){
       row.topstep_account_id   = a.topstep.id
@@ -7070,6 +7104,209 @@
   }
 
   function persistAccounts(){ /* no-op: Supabase is source of truth */ }
+
+  // ─────── Account Detail View ───────
+  function renderAccountDetail(){
+    const acc = accounts.find(a => String(a.id) === String(_detailAccountId))
+    if(!acc) return
+
+    // Title
+    const title    = document.getElementById('ad-title')
+    const subtitle = document.getElementById('ad-subtitle')
+    if(title)    title.textContent    = acc.name
+    if(subtitle) subtitle.textContent = `${acc.firm || '–'} · ${typeLabel(acc.type)}`
+
+    // Back / Edit buttons
+    document.getElementById('ad-back-btn')?.addEventListener('click', () => switchView('accounts'))
+    document.getElementById('ad-edit-btn')?.addEventListener('click', () => {
+      openAccountModal(null, acc)
+    })
+
+    // ── Stats Reihe ──
+    const statsEl = document.getElementById('ad-stats')
+    if(statsEl){
+      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dupId    = Object.entries(dupLinks).find(([_, mId]) => mId === acc.id)?.[0]
+      const dupAcc   = dupId ? (dupState?.accounts || []).find(a => a.account_id === dupId) : null
+      const balance  = dupAcc?.balance ?? acc.initialBalance ?? 0
+      const ccy      = dupAcc?.ccy || 'USD'
+
+      // Trades dieses Accounts (als Master oder Slave)
+      const accTrades = (tradePlans || []).filter(p =>
+        String(p.masterAccountId) === String(acc.id) || String(p.slaveAccountId) === String(acc.id)
+      )
+      const openTrades      = accTrades.filter(p => p.status === 'open').length
+      const completedTrades = accTrades.filter(p => p.status === 'completed').length
+
+      // PnL aus abgeschlossenen Trades (als Master)
+      const masterTrades = accTrades.filter(p => p.status === 'completed' && String(p.masterAccountId) === String(acc.id))
+      const totalMasterPl = masterTrades.reduce((s, p) => s + (p.masterPl || 0), 0)
+
+      statsEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">
+          <div class="panel" style="padding:14px 18px">
+            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Balance</div>
+            <div style="font-size:22px;font-weight:700;color:var(--ink);font-family:var(--mono)">${dupFmtMoney ? dupFmtMoney(balance, ccy) : '$' + balance.toLocaleString('de-DE')}</div>
+          </div>
+          <div class="panel" style="padding:14px 18px">
+            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Offene Trades</div>
+            <div style="font-size:22px;font-weight:700;color:${openTrades > 0 ? 'var(--violet)' : 'var(--ink)'};font-family:var(--mono)">${openTrades}</div>
+          </div>
+          <div class="panel" style="padding:14px 18px">
+            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">Trades gesamt</div>
+            <div style="font-size:22px;font-weight:700;color:var(--ink);font-family:var(--mono)">${completedTrades}</div>
+          </div>
+          <div class="panel" style="padding:14px 18px">
+            <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--sub);margin-bottom:4px">P/L (Master)</div>
+            <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${totalMasterPl >= 0 ? 'var(--good)' : 'var(--danger)'}">
+              ${totalMasterPl >= 0 ? '+' : ''}$${totalMasterPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}
+            </div>
+          </div>
+        </div>
+      `
+    }
+
+    // ── Account-Daten ──
+    const dataList = document.getElementById('ad-data-list')
+    if(dataList){
+      const row = (label, val) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 18px;border-bottom:1px solid var(--line)">
+          <span style="font-size:12px;color:var(--sub)">${label}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--ink);font-family:var(--mono)">${val}</span>
+        </div>`
+      const extId = acc.externalId || acc.ma?.login || '—'
+      dataList.innerHTML =
+        row('Firm',            escapeHtml(acc.firm || '—')) +
+        row('Typ',             typeLabel(acc.type)) +
+        row('Anfangs-Balance', acc.initialBalance ? '$' + Number(acc.initialBalance).toLocaleString('de-DE') : '—') +
+        row('Kaufpreis',       acc.purchaseCost   ? '€' + Number(acc.purchaseCost).toLocaleString('de-DE')  : '—') +
+        row('Max Drawdown',    acc.maxDrawdown     ? '$' + Number(acc.maxDrawdown).toLocaleString('de-DE')   : '—') +
+        row('External ID',     escapeHtml(String(extId)))
+    }
+
+    // ── Verknüpfungen ──
+    const linksEl = document.getElementById('ad-links-list')
+    if(linksEl){
+      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dupId    = Object.entries(dupLinks).find(([_, mId]) => mId === acc.id)?.[0]
+      const dupAcc   = dupId ? (dupState?.accounts || []).find(a => a.account_id === dupId) : null
+      let html = ''
+      if(dupAcc){
+        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+          <span style="background:#f59e0b22;color:#d97706;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">DUPLIKUM</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">${escapeHtml(dupAcc.name||dupAcc.login||'—')}</div>
+            <div style="font-size:11px;color:var(--sub)">${dupAcc.login ? 'Login: '+dupAcc.login : ''}</div>
+          </div>
+        </div>`
+      }
+      if(acc.ma){
+        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+          <span style="background:#3b82f622;color:#3b82f6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">MT5</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">Login #${escapeHtml(String(acc.ma.login||'—'))}</div>
+            <div style="font-size:11px;color:var(--sub)">Balance: ${acc.ma.balance != null ? '$'+Number(acc.ma.balance).toLocaleString('de-DE') : '—'}</div>
+          </div>
+        </div>`
+      }
+      if(acc.topstep && acc.topstep.canTrade != null){
+        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+          <span style="background:#8b5cf622;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">TOPSTEP</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">ID ${escapeHtml(String(acc.topstep.id))}</div>
+            <div style="font-size:11px;color:var(--sub)">Can Trade: ${acc.topstep.canTrade ? '✓' : '✗'} · ${acc.topstep.balance != null ? '$'+Number(acc.topstep.balance).toLocaleString('de-DE') : '—'}</div>
+          </div>
+        </div>`
+      }
+      if(acc.externalId && !(acc.topstep?.canTrade != null) && !acc.ma){
+        html += `<div style="padding:10px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px">
+          <span style="background:#64748b22;color:#64748b;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;letter-spacing:.05em">EXT ID</span>
+          <div style="font-size:13px;font-weight:600;color:var(--ink);font-family:var(--mono)">${escapeHtml(acc.externalId)}</div>
+        </div>`
+      }
+      if(!html) html = '<div style="padding:14px 18px;color:var(--sub);font-size:12.5px">Keine Verknüpfungen</div>'
+      linksEl.innerHTML = html
+    }
+
+    // ── Aktivitäts-Timeline: Trades + Transaktionen chronologisch ──
+    const actList  = document.getElementById('ad-activity-list')
+    const actEmpty = document.getElementById('ad-act-empty')
+    const actCount = document.getElementById('ad-act-count')
+    const actSummary = document.getElementById('ad-act-summary')
+    if(!actList) return
+
+    // Trades dieses Accounts
+    const accTrades = (tradePlans || []).filter(p =>
+      String(p.masterAccountId) === String(acc.id) || String(p.slaveAccountId) === String(acc.id)
+    )
+    // Transaktionen dieses Accounts
+    const accTxns = (transactions || []).filter(t => String(t.accountId) === String(acc.id))
+
+    // Kombinieren und sortieren (neueste zuerst)
+    const items = [
+      ...accTrades.map(p => ({ type:'trade', date: p.completedAt || p.startedAt || p.createdAt || '', data: p })),
+      ...accTxns.map(t  => ({ type:'txn',   date: t.occurredAt || t.createdAt || '', data: t }))
+    ].sort((a, b) => new Date(b.date) - new Date(a.date))
+
+    if(actCount) actCount.textContent = `(${items.length})`
+    const completedCount = accTrades.filter(p => p.status === 'completed').length
+    if(actSummary) actSummary.textContent = items.length ? `${completedCount} Trades · ${accTxns.length} Buchungen` : '—'
+
+    if(!items.length){
+      if(actList)  actList.innerHTML  = ''
+      if(actEmpty) actEmpty.style.display = ''
+      return
+    }
+    if(actEmpty) actEmpty.style.display = 'none'
+
+    actList.innerHTML = items.map(item => {
+      if(item.type === 'trade'){
+        const p = item.data
+        const isMaster = String(p.masterAccountId) === String(acc.id)
+        const role = isMaster ? 'Master' : 'Slave'
+        const statusColor = { open:'#8b5cf6', planned:'#f59e0b', completed:'#10b981' }[p.status] || 'var(--sub)'
+        const statusLabel = { open:'Offen', planned:'Geplant', completed:'Erledigt' }[p.status] || p.status
+        const plVal = isMaster ? p.masterPl : p.slavePl
+        const plStr = plVal != null
+          ? `<span style="font-weight:700;color:${plVal >= 0 ? 'var(--good)' : 'var(--danger)'}">${plVal >= 0 ? '+' : ''}${isMaster ? '$' : '€'}${Number(plVal).toLocaleString('de-DE')}</span>`
+          : ''
+        const dateStr = item.date ? new Date(item.date).toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'numeric' }) : '—'
+        const counterName = isMaster ? (p.slaveName || '—') : (p.masterName || '—')
+        return `
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line)">
+            <div style="width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--ink)">
+                ${escapeHtml(isMaster ? p.masterName || '—' : p.slaveName || '—')}
+                <span style="font-size:11px;color:var(--sub);font-weight:400;margin-left:6px">→ ${escapeHtml(counterName)}</span>
+              </div>
+              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">
+                <span style="background:${statusColor}22;color:${statusColor};padding:1px 6px;border-radius:4px;font-weight:600;font-size:10.5px">${statusLabel}</span>
+                <span style="margin-left:6px">${role}</span>
+                <span style="margin-left:8px">${dateStr}</span>
+              </div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">${plStr}</div>
+          </div>`
+      } else {
+        const t = item.data
+        const kindLabel = { payout:'Payout', account_purchase:'Account-Kauf', live_pnl:'Live P/L', manual:'Manuell' }[t.kind] || t.kind
+        const amtColor = t.amount >= 0 ? 'var(--good)' : 'var(--danger)'
+        const dateStr = t.occurredAt ? new Date(t.occurredAt).toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'numeric' }) : '—'
+        return `
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line)">
+            <div style="width:8px;height:8px;border-radius:4px;background:var(--border-strong);flex-shrink:0"></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--ink)">${escapeHtml(kindLabel)}</div>
+              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${dateStr}${t.notes ? ' · ' + escapeHtml(t.notes) : ''}</div>
+            </div>
+            <div style="font-weight:700;color:${amtColor};font-family:var(--mono);font-size:13px;flex-shrink:0">
+              ${t.amount >= 0 ? '+' : ''}${Number(t.amount).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})} ${t.currency}
+            </div>
+          </div>`
+      }
+    }).join('')
+  }
 
   function renderAccounts(){
     if(!accEls.table) return
@@ -7291,6 +7528,20 @@
           }
         })
       })
+      // Row-Click → Account Detail View
+      accEls.table.querySelectorAll('tr[data-acc-detail]').forEach(row => {
+        row.addEventListener('click', e => {
+          // Klick auf Buttons / action-Zellen ignorieren
+          if(e.target.closest('[data-stop-row-click]')) return
+          if(e.target.closest('button')) return
+          if(e.target.closest('a')) return
+          const id = row.dataset.accDetail
+          if(!id) return
+          _detailAccountId = id
+          switchView('account-detail')
+          if(typeof renderAccountDetail === 'function') renderAccountDetail()
+        })
+      })
     }
     // Sub-tab counts updaten
     const cntManual = document.getElementById('subtab-count-manual')
@@ -7331,18 +7582,14 @@
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
-      // External ID: topstep.id wenn vorhanden (auch manuell gesetzte)
-      if(accEls.extId) accEls.extId.value = editAccount.topstep?.id || ''
-      // Bei echten TopstepX-Accounts (canTrade gesetzt) Feld readonly machen
-      const isRealTopstep = editAccount.topstep?.canTrade != null
-      if(accEls.extId) accEls.extId.readOnly = isRealTopstep
-      if(accEls.extIdRow) accEls.extIdRow.title = isRealTopstep ? 'Automatisch via TopstepX gesetzt' : ''
+      if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
+      if(accEls.extId) accEls.extId.readOnly = false
     }else{
       accEls.name.value = ''
       accEls.firm.value = ''
       accEls.type.value = prefillType || 'phase1'
       accEls.bal.value  = ''
-      if(accEls.extId){ accEls.extId.value = ''; accEls.extId.readOnly = false }
+      if(accEls.extId){ accEls.extId.value = '' }
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       accEls.maTok.value = ''
@@ -7397,15 +7644,13 @@
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
-    const manualExtId = accEls.extId ? accEls.extId.value.trim() : ''
     const acc = {
       name, firm, type, initialBalance,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
+      externalId: accEls.extId ? (accEls.extId.value.trim() || null) : null,
       createdAt: new Date().toISOString(),
-      ma: null,
-      // Manuell gesetzte External ID (für INSERT)
-      topstep: manualExtId ? { id: manualExtId, name: '', balance: null, canTrade: null, lastCheck: null } : null
+      ma: null
     }
 
     accEls.save.disabled = true
@@ -7470,16 +7715,9 @@
           updateRow.meta_api_equity     = null
           updateRow.meta_api_last_check = null
         }
-        // Manuell gesetzte External ID (nur wenn nicht echter TopstepX-Account)
-        const existingAcc = accounts.find(x => String(x.id) === String(_editingAccountId))
-        const isRealTopstep = existingAcc?.topstep?.canTrade != null
-        if(!isRealTopstep && accEls.extId){
-          const manualExtId = accEls.extId.value.trim()
-          if(manualExtId){
-            updateRow.topstep_account_id = manualExtId
-          } else {
-            updateRow.topstep_account_id = null
-          }
+        // External ID speichern
+        if(accEls.extId){
+          updateRow.external_id = accEls.extId.value.trim() || null
         }
         const { data, error } = await supabase
           .from('accounts').update(updateRow).eq('id', _editingAccountId).select('*').single()
@@ -7697,7 +7935,7 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
-          topstep_account_id: extId || null,
+          external_id:    extId || null,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -9153,7 +9391,7 @@
     // External ID badge: Tradovate-ID (topstep.id) > MT5 login > — 
     function extIdBadge(acc){
       if(!acc) return ''
-      const extId = acc.topstep?.id || acc.ma?.login || null
+      const extId = acc.externalId || acc.topstep?.id || acc.ma?.login || null
       if(!extId) return ''
       return `<span style="font-size:10px;color:var(--sub-2);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px" title="${escapeHtml(String(extId))}">#${escapeHtml(String(extId))}</span>`
     }
@@ -9602,7 +9840,7 @@
         const liveMarker = bal.src === 'init' ? '' : '●'  // Punkt = live verknüpft
         const balPart = liveMarker ? `${liveMarker} ${balStr}` : balStr
         // External ID suffix: Tradovate ID > MT5 login
-        const extId = a.topstep?.id || a.ma?.login || null
+        const extId = a.externalId || a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
         return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}</option>`
       }
