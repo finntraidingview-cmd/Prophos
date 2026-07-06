@@ -3714,6 +3714,14 @@
           </div>
         </div>
         <div style="display:flex;gap:10px">
+          <button class="btn btn-primary" id="ad-add-trade-btn" type="button" title="Trade jetzt anlegen — dieser Account ist Master">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Trade hinzufügen
+          </button>
+          <button class="btn btn-ghost" id="ad-plan-trade-btn" type="button" title="Trade für später planen — dieser Account ist Master">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Trade planen
+          </button>
           <button class="btn btn-ghost" id="ad-edit-btn" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Bearbeiten
@@ -7717,6 +7725,21 @@
     }
   })
 
+  // Trade hinzufügen (jetzt) — dieser Account als Master, Datum heute
+  document.getElementById('ad-add-trade-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    if(_detailAccountId && typeof openTradePlanModal === 'function'){
+      openTradePlanModal(null, { masterId: _detailAccountId, plannedFor: 'today' })
+    }
+  })
+  // Trade planen (für später) — dieser Account als Master, Datum morgen
+  document.getElementById('ad-plan-trade-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    if(_detailAccountId && typeof openTradePlanModal === 'function'){
+      openTradePlanModal(null, { masterId: _detailAccountId })
+    }
+  })
+
   // Hash-Listener: 
   //  - manuelle Navigation zu #account-detail ohne ID → zurück zu Accounts
   //  - bei jeder Änderung der Account-Daten von außen wird beim Re-Show gerendert
@@ -10899,7 +10922,7 @@
   }
 
   // ─────── Trade-Plan-Modal (Create + Edit) ───────
-  function openTradePlanModal(editId){
+  function openTradePlanModal(editId, opts){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
     if(!accounts.length){
       alert('Bitte erst mindestens einen Account anlegen.')
@@ -11167,13 +11190,21 @@
       document.getElementById('tp-slave-risk').value  = ''
       document.getElementById('tp-master-tp').value   = ''
       document.getElementById('tp-notes').value       = ''
-      // Default: morgen
-      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-      document.getElementById('tp-planned-for').value = tomorrow.toISOString().slice(0,10)
+      // Datum: default morgen; bei "Trade hinzufügen" (plannedFor:'today') heute
+      const baseDate = new Date()
+      if(!(opts && opts.plannedFor === 'today')) baseDate.setDate(baseDate.getDate() + 1)
+      document.getElementById('tp-planned-for').value = baseDate.toISOString().slice(0,10)
       // Priority default: medium
       document.querySelectorAll('#tp-priority .prio-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.prio === 'medium')
       })
+      // Master vorauswählen (z.B. von der Account-Detail-Seite aus)
+      if(opts && opts.masterId){
+        const midStr = String(opts.masterId)
+        if(accounts.some(a => String(a.id) === midStr)){
+          masterSel.value = midStr
+        }
+      }
     }
 
     document.getElementById('tradePlanMsg').textContent = ''
