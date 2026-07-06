@@ -2944,6 +2944,7 @@
                   <option value="live">Live</option>
                 </select>
               </div>
+              <input type="text" class="input" id="tp-master-search" placeholder="Account suchen (Name · ID · Login)…" autocomplete="off" style="margin-bottom:6px;font-size:12px;padding:6px 10px">
               <select class="input" id="tp-master"></select>
             </div>
             <div class="field">
@@ -2961,6 +2962,7 @@
                   <option value="live">Live</option>
                 </select>
               </div>
+              <input type="text" class="input" id="tp-slave-search" placeholder="Account suchen (Name · ID · Login)…" autocomplete="off" style="margin-bottom:6px;font-size:12px;padding:6px 10px">
               <select class="input" id="tp-slave"></select>
             </div>
 
@@ -11163,12 +11165,33 @@
       }
       // Archivierte Accounts ausschließen (außer geschützt)
       const archive = (typeof getArchive === 'function') ? getArchive() : {}
+      // Freitext-Suche (Name · External ID · MT5-/Topstep-Login · Duplikum)
+      const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
+      const qNorm = searchNorm(document.getElementById(`tp-${role}-search`)?.value || '')
+      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dupByManualId = {}
+      for(const [dupId, manualId] of Object.entries(dupLinks)){
+        const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
+        if(dupAcc) dupByManualId[manualId] = dupAcc
+      }
+      const accMatchesSearch = a => {
+        if(!qNorm) return true
+        const dupAcc = dupByManualId[a.id] || null
+        const hay = searchNorm([
+          a.name, a.externalId,
+          a.ma?.login, a.ma?.accountId,
+          a.topstep?.id, a.topstep?.name,
+          dupAcc?.login, dupAcc?.account_id, dupAcc?.name
+        ].filter(Boolean).join(' '))
+        return hay.includes(qNorm)
+      }
       // Filter-Logik
       const filtered = accounts.filter(a => {
         const isProtected = protectedIds.has(String(a.id))
         if(archive[a.id]?.archived && !isProtected) return false
         if(firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
         if(typeFilter && a.type !== typeFilter && !isProtected) return false
+        if(!isProtected && !accMatchesSearch(a)) return false
         return true
       })
       // Duplikat-Labels + Balance-Lookup vorbereiten
@@ -11277,6 +11300,24 @@
       if(tf && !tf._tpHooked){
         tf.addEventListener('change', () => tpRenderAccountSelect(role))
         tf._tpHooked = true
+      }
+      // Freitext-Suche pro Rolle
+      const sf = document.getElementById(`tp-${role}-search`)
+      if(sf){
+        sf.value = ''  // beim Öffnen leeren
+        if(!sf._tpHooked){
+          const rerun = () => {
+            const keep = (role === 'master' ? masterSel : slaveSel).value
+            tpRenderAccountSelect(role)
+            // Auswahl beibehalten, falls noch in der gefilterten Liste
+            const selEl = (role === 'master' ? masterSel : slaveSel)
+            if(keep && [...selEl.options].some(o => o.value === keep)) selEl.value = keep
+            if(typeof tpRecompute === 'function') tpRecompute()
+          }
+          ;['input','keyup','change','cut'].forEach(ev => sf.addEventListener(ev, rerun))
+          sf.addEventListener('paste', () => setTimeout(rerun, 0))
+          sf._tpHooked = true
+        }
       }
     })
 
