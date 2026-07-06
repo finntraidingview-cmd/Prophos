@@ -6547,14 +6547,24 @@
       const currentCount   = slavePositions.length
       const hasOpenPosition = currentCount > 0
 
-      // Master-Check: falls Master verknüpft ist, muss er auch eine offene Position haben.
-      // Alternativ: prüfe ob eine Slave-Position das Feld id_master/master_id gesetzt hat.
+      // Master-Check = eindeutiger "Fingerabdruck", damit bei mehreren geplanten Trades
+      // auf DEMSELBEN Slave nur der richtige live geht.
       const masterPositionOk = (() => {
-        if(!dupMasterId) return true  // Master nicht in Duplikum → kein zusätzlicher Check
-        // Option A: Master hat eigene offene Position im gleichen Account
+        // Master NICHT in Duplikum verknüpft → wir können den Trade keinem Master zuordnen
+        // → NICHT blind auf die (evtl. geteilte) Slave-Position anspringen.
+        // (Vorher: return true → das war der Fehltrigger, wenn ein anderer Trade auf dem
+        //  gleichen Slave startete. MT5-Master sind IMMER verknüpft → dieser Zweig wird bei
+        //  MT5 nie betreten → MT5×MT5 bleibt unverändert.)
+        if(!dupMasterId) return false
+        // Option A (MT5): Master hat eine eigene offene Position → eindeutiger Fingerabdruck.
+        // UNVERÄNDERT — MT5×MT5 läuft exakt wie bisher.
         const masterHasPos = positions.some(p => String(p.account_id) === String(dupMasterId))
         if(masterHasPos) return true
-        // Option B: Slave-Position hat id_master/master_id Feld das auf den Master zeigt
+        // Option B (Tradovate): Master hat KEINE eigene Position (Duplikum meldet Tradovate
+        // nicht positionsseitig). Fingerabdruck ist dann das master_id-Feld auf der kopierten
+        // Slave-Position → nur der Trade, dessen Master-ID dort steht, matcht. Verhindert
+        // Fehltrigger bei geteiltem Slave und bringt Tradovate zum Laufen (sofern Duplikum
+        // master_id bei der kopierten Position stempelt — wird live verifiziert).
         return slavePositions.some(p =>
           String(p.id_master||p.master_id||p.masterId||'') === String(dupMasterId)
         )
