@@ -4008,6 +4008,21 @@
         </button>
       </div>
 
+      <!-- Account-Firmen umbenennen -->
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-head">
+          <div class="panel-title">Account-Firmen verwalten</div>
+        </div>
+        <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 16px;line-height:1.55">
+          Zeigt alle Firma-Namen die in deinen Accounts gespeichert sind. Umbenennen wirkt auf alle Accounts dieser Firma gleichzeitig — praktisch um Duplikate wie „Alpha Future" vs. „AlphaFutures" zu bereinigen.
+        </p>
+        <div id="accFirmsSpinner" style="text-align:center;padding:14px;color:var(--sub);font-size:12.5px">Lädt…</div>
+        <div id="accFirmsEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;display:none">
+          Keine Firmen in deinen Accounts gefunden.
+        </div>
+        <div id="accFirmsList" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+
       <!-- Lot-Kalibrierung (wird per JS gefüllt) -->
       <div class="calib-container" data-calib-mount="settings"></div>
 
@@ -7063,6 +7078,8 @@
       renderOverviewKpis()
       updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
+      // Refresh Settings firm list if visible
+      if(document.querySelector('[data-view="settings"].active') && typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }catch(e){
       console.error('loadAccountsFromSupabase failed:', e)
     }
@@ -9029,6 +9046,267 @@
       console.error('loadTradePlansFromSupabase failed:', e)
     }
   }
+
+  // ── Custom Firms Settings Panel ──────────────────────────────────────────
+  // Storage: localStorage 'prophos_custom_firms' → Array of {id, name, symbol, unit, ppl, currency}
+  // Synced to Supabase user_settings key 'custom_firms' via existing SYNC_KEYS mechanism.
+
+  function getCustomFirms(){
+    try { return JSON.parse(localStorage.getItem('prophos_custom_firms') || '[]') } catch{ return [] }
+  }
+
+  function saveCustomFirms(arr){
+    localStorage.setItem('prophos_custom_firms', JSON.stringify(arr))
+    // auto-sync hook already wired via Storage.prototype.setItem override
+  }
+
+  function mergeCustomFirmsIntoPresets(){
+    const firms = getCustomFirms()
+    // Remove old custom entries
+    for(const k of Object.keys(FIRM_PRESETS)){
+      if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k]
+    }
+    for(const f of firms){
+      const key = 'custom_' + f.id
+      FIRM_PRESETS[key] = {
+        label: f.name,
+        symbol: f.symbol || 'NAS100',
+        unit: f.unit || 'Lots',
+        ppl: parseFloat(f.ppl) || 1,
+        currency: f.currency || '$',
+        _custom: true,
+        tbd: false
+      }
+    }
+    if(typeof refreshFirmDatalist === 'function') refreshFirmDatalist()
+    if(typeof refreshCalcFirmDropdowns === 'function') refreshCalcFirmDropdowns()
+  }
+
+  function renderCustomFirmsList(){
+    const listEl  = document.getElementById('customFirmsList')
+    const emptyEl = document.getElementById('customFirmsEmpty')
+    if(!listEl) return
+    const firms = getCustomFirms()
+    listEl.innerHTML = ''
+    if(firms.length === 0){
+      if(emptyEl) emptyEl.style.display = ''
+      return
+    }
+    if(emptyEl) emptyEl.style.display = 'none'
+    for(const f of firms){
+      const row = document.createElement('div')
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;'
+      row.innerHTML = `
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px">${escapeHtml(f.name)}</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px">${escapeHtml(f.symbol||'—')} · ${escapeHtml(f.unit||'—')} · ${f.ppl != null ? f.ppl : '—'} ${escapeHtml(f.currency||'')} / Pkt</div>
+        </div>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px" data-cf-edit="${escapeHtml(f.id)}">Bearbeiten</button>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--danger)" data-cf-del="${escapeHtml(f.id)}">Löschen</button>
+      `
+      row.querySelector(`[data-cf-edit]`).addEventListener('click', () => openCustomFirmModal(f.id))
+      row.querySelector(`[data-cf-del]`).addEventListener('click', () => {
+        if(!confirm(`Firm "${f.name}" wirklich löschen?`)) return
+        const updated = getCustomFirms().filter(x => x.id !== f.id)
+        saveCustomFirms(updated)
+        mergeCustomFirmsIntoPresets()
+        renderCustomFirmsList()
+      })
+      listEl.appendChild(row)
+    }
+  }
+
+  let _cfEditId = null // null = add mode, string = edit mode
+
+  function openCustomFirmModal(editId){
+    _cfEditId = editId || null
+    const modal = document.getElementById('customFirmModal')
+    const title = document.getElementById('customFirmModalTitle')
+    const msg   = document.getElementById('customFirmMsg')
+    if(!modal) return
+    if(msg) msg.textContent = ''
+
+    if(editId){
+      const f = getCustomFirms().find(x => x.id === editId)
+      if(!f) return
+      if(title) title.textContent = 'Firm bearbeiten'
+      document.getElementById('cf-name').value     = f.name || ''
+      document.getElementById('cf-symbol').value   = f.symbol || ''
+      document.getElementById('cf-unit').value      = f.unit || 'Lots'
+      document.getElementById('cf-ppl').value       = f.ppl != null ? f.ppl : ''
+      document.getElementById('cf-currency').value  = f.currency || '$'
+      document.getElementById('cf-template').value  = ''
+    } else {
+      if(title) title.textContent = 'Prop Firm hinzufügen'
+      document.getElementById('cf-name').value     = ''
+      document.getElementById('cf-symbol').value   = ''
+      document.getElementById('cf-unit').value      = 'Lots'
+      document.getElementById('cf-ppl').value       = ''
+      document.getElementById('cf-currency').value  = '$'
+      document.getElementById('cf-template').value  = ''
+    }
+    modal.classList.add('open')
+  }
+
+  function closeCustomFirmModal(){
+    document.getElementById('customFirmModal')?.classList.remove('open')
+    _cfEditId = null
+  }
+
+  const CF_TEMPLATES = {
+    mnq:        { symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$'  },
+    nas100_usd: { symbol:'NAS100', unit:'Lots',      ppl:1.00,  currency:'$'  },
+    nas100_eur: { symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'€'  },
+    ndx100_10:  { symbol:'NDX100', unit:'Lots',      ppl:10.00, currency:'$'  },
+    ndx100_20:  { symbol:'NDX100', unit:'Lots',      ppl:20.00, currency:'$'  }
+  }
+
+  document.getElementById('cf-template')?.addEventListener('change', function(){
+    const tmpl = CF_TEMPLATES[this.value]
+    if(!tmpl) return
+    document.getElementById('cf-symbol').value   = tmpl.symbol
+    document.getElementById('cf-unit').value      = tmpl.unit
+    document.getElementById('cf-ppl').value       = tmpl.ppl
+    document.getElementById('cf-currency').value  = tmpl.currency
+  })
+
+  document.getElementById('customFirmAddBtn')?.addEventListener('click', () => openCustomFirmModal(null))
+  document.getElementById('customFirmCancel')?.addEventListener('click', closeCustomFirmModal)
+  document.getElementById('customFirmCancel2')?.addEventListener('click', closeCustomFirmModal)
+
+  document.getElementById('customFirmSave')?.addEventListener('click', () => {
+    const name = document.getElementById('cf-name').value.trim()
+    const symbol = document.getElementById('cf-symbol').value.trim()
+    const unit = document.getElementById('cf-unit').value
+    const ppl = parseFloat(document.getElementById('cf-ppl').value)
+    const currency = document.getElementById('cf-currency').value
+    const msg = document.getElementById('customFirmMsg')
+
+    if(!name){ if(msg) msg.textContent = 'Name ist pflicht.'; return }
+    if(isNaN(ppl) || ppl <= 0){ if(msg) msg.textContent = '$ pro Punkt muss größer 0 sein.'; return }
+
+    const firms = getCustomFirms()
+    if(_cfEditId){
+      const idx = firms.findIndex(x => x.id === _cfEditId)
+      if(idx >= 0) firms[idx] = { ...firms[idx], name, symbol, unit, ppl, currency }
+    } else {
+      firms.push({ id: 'cf_' + Date.now(), name, symbol, unit, ppl, currency })
+    }
+    saveCustomFirms(firms)
+    mergeCustomFirmsIntoPresets()
+    renderCustomFirmsList()
+    closeCustomFirmModal()
+  })
+
+  // ── Account-Firmen: alle Firm-Namen aus accounts umbenennen ──────────────
+
+  async function renderAccountFirmsList(){
+    const listEl  = document.getElementById('accFirmsList')
+    const emptyEl = document.getElementById('accFirmsEmpty')
+    const spinner = document.getElementById('accFirmsSpinner')
+    if(!listEl) return
+    listEl.innerHTML = ''
+    if(spinner) spinner.style.display = ''
+    if(emptyEl) emptyEl.style.display = 'none'
+
+    const firms = [...new Set((accounts || []).map(a => a.firm).filter(Boolean))].sort()
+    if(spinner) spinner.style.display = 'none'
+
+    if(firms.length === 0){
+      if(emptyEl) emptyEl.style.display = ''
+      return
+    }
+
+    for(const firm of firms){
+      const count = (accounts || []).filter(a => a.firm === firm).length
+      const row = document.createElement('div')
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;'
+      row.dataset.accFirmRow = firm
+      row.innerHTML = `
+        <div style="flex:1;min-width:0">
+          <span class="af-firm-name" style="font-weight:600;font-size:13px">${escapeHtml(firm)}</span>
+          <span style="font-size:11px;color:var(--sub);margin-left:8px">${count} Account${count !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="af-edit-wrap" style="display:none;flex:1;min-width:0">
+          <input class="input af-rename-input" style="font-size:13px;padding:5px 10px" value="${escapeHtml(firm)}" autocomplete="off">
+        </div>
+        <button class="btn btn-ghost af-rename-btn" style="padding:5px 10px;font-size:11.5px">Umbenennen</button>
+        <button class="btn btn-primary af-save-btn" style="padding:5px 10px;font-size:11.5px;display:none">Speichern</button>
+        <button class="btn btn-ghost af-cancel-btn" style="padding:5px 10px;font-size:11.5px;display:none">Abbrechen</button>
+        <div class="af-status" style="font-size:11px;color:var(--sub);display:none"></div>
+      `
+      const nameEl   = row.querySelector('.af-firm-name')
+      const editWrap = row.querySelector('.af-edit-wrap')
+      const input    = row.querySelector('.af-rename-input')
+      const renameBtn= row.querySelector('.af-rename-btn')
+      const saveBtn  = row.querySelector('.af-save-btn')
+      const cancelBtn= row.querySelector('.af-cancel-btn')
+      const statusEl = row.querySelector('.af-status')
+
+      renameBtn.addEventListener('click', () => {
+        editWrap.style.display = ''
+        nameEl.style.display = 'none'
+        renameBtn.style.display = 'none'
+        saveBtn.style.display = ''
+        cancelBtn.style.display = ''
+        input.focus()
+        input.select()
+      })
+
+      cancelBtn.addEventListener('click', () => {
+        editWrap.style.display = 'none'
+        nameEl.style.display = ''
+        renameBtn.style.display = ''
+        saveBtn.style.display = 'none'
+        cancelBtn.style.display = 'none'
+        input.value = firm
+        statusEl.style.display = 'none'
+      })
+
+      saveBtn.addEventListener('click', async () => {
+        const newName = input.value.trim()
+        if(!newName || newName === firm){ cancelBtn.click(); return }
+        saveBtn.disabled = true
+        saveBtn.textContent = '…'
+        statusEl.style.display = ''
+        statusEl.textContent = 'Wird gespeichert…'
+        statusEl.style.color = 'var(--sub)'
+        try {
+          const { error } = await _supabase
+            .from('accounts')
+            .update({ firm: newName })
+            .eq('user_id', currentUserId)
+            .eq('firm', firm)
+          if(error) throw error
+          // Update local accounts array
+          for(const a of (accounts || [])){
+            if(a.firm === firm) a.firm = newName
+          }
+          statusEl.textContent = '✓ Gespeichert'
+          statusEl.style.color = 'var(--success, #10b981)'
+          nameEl.textContent = newName
+          editWrap.style.display = 'none'
+          nameEl.style.display = ''
+          renameBtn.style.display = ''
+          saveBtn.style.display = 'none'
+          cancelBtn.style.display = 'none'
+          row.dataset.accFirmRow = newName
+          // Refresh filter dropdown
+          if(typeof populateAccountFilters === 'function') populateAccountFilters()
+          setTimeout(() => { statusEl.style.display = 'none' }, 2000)
+        } catch(e) {
+          statusEl.textContent = '✗ Fehler: ' + (e.message || e)
+          statusEl.style.color = 'var(--danger, #ef4444)'
+        }
+        saveBtn.disabled = false
+        saveBtn.textContent = 'Speichern'
+      })
+
+      listEl.appendChild(row)
+    }
+  }
+
+  // ── END Custom Firms ──────────────────────────────────────────────────────
 
   // Map firm string → FIRM_PRESET key
   function firmToPreset(firm){
@@ -13174,6 +13452,10 @@
         window._advisorInitialised = true
         advisorEnsureMarked()
         setTimeout(advisorCheckHealth, 100)
+      }
+      if (name === 'settings') {
+        if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
+        if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
       }
     }
   }
