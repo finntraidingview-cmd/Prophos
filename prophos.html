@@ -4187,6 +4187,11 @@
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
+        <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
+          <label>Broker Account ID (optional)</label>
+          <input class="input mono" id="ac-ext-id" placeholder="z.B. 511290232" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird als #ID-Badge in Trade-Plänen angezeigt. Bei TopstepX-Accounts automatisch gesetzt.</div>
+        </div>
       </div>
 
       <!-- MetaApi section, only visible when type === 'live' -->
@@ -4289,6 +4294,11 @@
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>External ID Vorlage <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+          <input class="input mono" id="bulk-exttemplate" placeholder="z.B. {n} oder 51129{n}" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> = laufende Nummer &nbsp;·&nbsp; Wird als #ID-Badge in Trade-Plänen angezeigt</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
@@ -6523,8 +6533,7 @@
     })
     document.getElementById(`at-dismiss-${plan.id}`)?.addEventListener('click', () => {
       el.remove()
-      const s = autoTrack.state.get(plan.id)
-      if(s) autoTrack.state.set(plan.id, { ...s, notified: false })
+      // notified bleibt true → Popup kommt nicht nochmal
     })
     setTimeout(() => el.remove(), 60_000)
   }
@@ -7042,7 +7051,9 @@
     msg:      document.getElementById('ac-msg'),
     cancel:   document.getElementById('ac-cancel'),
     save:     document.getElementById('ac-save'),
-    addLive:   document.getElementById('ts-add-live-btn')
+    addLive:   document.getElementById('ts-add-live-btn'),
+    extId:    document.getElementById('ac-ext-id'),
+    extIdRow: document.getElementById('ac-ext-id-row')
   }
 
   const fmtMoney = n => {
@@ -7320,11 +7331,18 @@
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
+      // External ID: topstep.id wenn vorhanden (auch manuell gesetzte)
+      if(accEls.extId) accEls.extId.value = editAccount.topstep?.id || ''
+      // Bei echten TopstepX-Accounts (canTrade gesetzt) Feld readonly machen
+      const isRealTopstep = editAccount.topstep?.canTrade != null
+      if(accEls.extId) accEls.extId.readOnly = isRealTopstep
+      if(accEls.extIdRow) accEls.extIdRow.title = isRealTopstep ? 'Automatisch via TopstepX gesetzt' : ''
     }else{
       accEls.name.value = ''
       accEls.firm.value = ''
       accEls.type.value = prefillType || 'phase1'
       accEls.bal.value  = ''
+      if(accEls.extId){ accEls.extId.value = ''; accEls.extId.readOnly = false }
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       accEls.maTok.value = ''
@@ -7379,12 +7397,15 @@
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
+    const manualExtId = accEls.extId ? accEls.extId.value.trim() : ''
     const acc = {
       name, firm, type, initialBalance,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
       createdAt: new Date().toISOString(),
-      ma: null
+      ma: null,
+      // Manuell gesetzte External ID (für INSERT)
+      topstep: manualExtId ? { id: manualExtId, name: '', balance: null, canTrade: null, lastCheck: null } : null
     }
 
     accEls.save.disabled = true
@@ -7448,6 +7469,17 @@
           updateRow.meta_api_balance    = null
           updateRow.meta_api_equity     = null
           updateRow.meta_api_last_check = null
+        }
+        // Manuell gesetzte External ID (nur wenn nicht echter TopstepX-Account)
+        const existingAcc = accounts.find(x => String(x.id) === String(_editingAccountId))
+        const isRealTopstep = existingAcc?.topstep?.canTrade != null
+        if(!isRealTopstep && accEls.extId){
+          const manualExtId = accEls.extId.value.trim()
+          if(manualExtId){
+            updateRow.topstep_account_id = manualExtId
+          } else {
+            updateRow.topstep_account_id = null
+          }
         }
         const { data, error } = await supabase
           .from('accounts').update(updateRow).eq('id', _editingAccountId).select('*').single()
@@ -7532,6 +7564,7 @@
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
+      exttempl:  document.getElementById('bulk-exttemplate'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
@@ -7545,6 +7578,18 @@
       if(!tmpl){
         tmpl = sizeK ? `{firm} {size} · #{n}` : `{firm} · #{n}`
       }
+      return tmpl
+        .replace(/\{firm\}/g, firm)
+        .replace(/\{size\}/g, sizeK)
+        .replace(/\{n\}/g, n)
+    }
+
+    function buildExtId(n){
+      const tmpl = bEl.exttempl?.value.trim()
+      if(!tmpl) return null
+      const firm   = bEl.firm.value.trim() || 'Account'
+      const sizeRaw = parseFloat(bEl.size.value)
+      const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
       return tmpl
         .replace(/\{firm\}/g, firm)
         .replace(/\{size\}/g, sizeK)
@@ -7592,6 +7637,7 @@
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
+      if(bEl.exttempl) bEl.exttempl.value = ''
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -7638,8 +7684,9 @@
       let errors  = 0
 
       for(let i = 0; i < count; i++){
-        const n    = startnum + i
-        const name = buildName(n)
+        const n      = startnum + i
+        const name   = buildName(n)
+        const extId  = buildExtId(n)
         const row  = {
           user_id:        currentUserId,
           name,
@@ -7650,6 +7697,7 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
+          topstep_account_id: extId || null,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -7698,8 +7746,8 @@
     }
 
     // Wire up inputs for live preview
-    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
-      el.addEventListener('input', updatePreview)
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.exttempl, bEl.cost].forEach(el => {
+      el?.addEventListener('input', updatePreview)
     })
 
     // Wire buttons
