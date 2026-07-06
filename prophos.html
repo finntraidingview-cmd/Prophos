@@ -6051,7 +6051,7 @@
       ltState.lastUpdate = new Date()
       ltRender()
       // Auto-Detect: Open-Positions gegen Trade-Pläne prüfen
-      atCheckOpenPositions(dup, mt).catch(e => console.warn('atCheckOpen:', e))
+      if(autoTrack.enabled) atCheck().catch(e => console.warn('atCheck:', e))
     } catch(e) {
       if(stat) stat.textContent = '⚠ Fehler: ' + (e.message || e)
     } finally {
@@ -6468,34 +6468,33 @@
     setTimeout(() => el.remove(), 60_000)
   }
 
-  // Haupt-Check
+  // Haupt-Check — nutzt position/getOpenPositions (funktionierender v4 Endpoint)
   async function atCheck(){
     if(!autoTrack.enabled) return
     if(!dupState?.token) return
     const plans = (tradePlans || []).filter(p => p.status === 'planned' || p.status === 'open')
     if(!plans.length) return
 
-    let orders = []
+    let positions = []
     try {
-      const res = await dupApi('POST', 'orders/getSlaveOrders.php', { length: 100 })
+      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
       if(!res.ok) return
-      orders = res.data?.data || res.data?.orders || []
-    } catch(e){ return }
+      positions = res.data?.data || []
+      console.log('[atCheck] Duplikum offene Positionen:', positions.length, positions.map(p=>p.account_id))
+    } catch(e){ console.warn('[atCheck] API-Fehler:', e); return }
 
     for(const plan of plans){
       if(autoTrack.inProgress.has(plan.id)) continue
       const dupSlaveId = atGetDupId(plan.slaveAccountId)
       if(!dupSlaveId) continue
 
-      // Orders die zu diesem Slave-Account gehören
-      const planOrders = orders.filter(o =>
-        String(o.id_slave || o.account_id || o.slave_id || '') === String(dupSlaveId)
-      )
-
-      const hasOpenOrder = planOrders.some(o => atIsOpen(o.status))
+      // Hat dieser Slave-Account gerade eine offene Position?
+      const hasOpenPosition = positions.some(p => String(p.account_id) === String(dupSlaveId))
       const prev = autoTrack.state.get(plan.id) || { wasOpen: false, notified: false }
 
-      if(plan.status === 'planned' && hasOpenOrder){
+      console.log(`[atCheck] Plan ${plan.id} | dupSlaveId=${dupSlaveId} | hasOpen=${hasOpenPosition} | status=${plan.status} | prev=`, prev)
+
+      if(plan.status === 'planned' && hasOpenPosition){
         // Auto-Start
         autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
         autoTrack.inProgress.add(plan.id)
@@ -6514,17 +6513,17 @@
         finally { autoTrack.inProgress.delete(plan.id) }
 
       } else if(plan.status === 'open'){
-        if(hasOpenOrder){
+        if(hasOpenPosition){
           autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
-        } else if(prev.wasOpen && !prev.notified && planOrders.length > 0){
+        } else if(prev.wasOpen && !prev.notified){
           // War offen, ist jetzt geschlossen
           autoTrack.state.set(plan.id, { wasOpen: false, notified: true })
           atShowEndPrompt(plan)
         } else {
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenOrder })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenPosition })
         }
       } else {
-        autoTrack.state.set(plan.id, { wasOpen: hasOpenOrder, notified: prev.notified })
+        autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: prev.notified })
       }
     }
   }
