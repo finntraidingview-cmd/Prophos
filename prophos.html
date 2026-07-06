@@ -3019,6 +3019,20 @@
               </div>
             </div>
 
+            <!-- Gesamtkosten (volle Vorgänger-Kette) — flacher Gesamtbetrag, unabhängig vom Risk-Anteil -->
+            <div class="field" style="grid-column:span 2">
+              <div id="tp-gesamtkosten-suggest" style="display:none;padding:8px 12px;background:rgba(22,200,198,.08);border:1px solid rgba(22,200,198,.25);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                  <div style="color:var(--ink)">
+                    <span style="color:#0d9c9a;font-weight:700">📊 Gesamtkosten:</span>
+                    <span id="tp-gesamtkosten-value" style="font-family:var(--mono);font-weight:600">—</span>
+                  </div>
+                  <button type="button" id="tp-gesamtkosten-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
+                </div>
+                <div id="tp-gesamtkosten-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
+            </div>
+
             <!-- Take-Profit Master (SL = Risiko Master) -->
             <div class="field" style="grid-column:span 2">
               <label>Take-Profit Master ($)</label>
@@ -6546,14 +6560,33 @@
         finally { autoTrack.inProgress.delete(plan.id) }
 
       } else if(plan.status === 'open'){
-        if(hasOpenPosition){
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false })
-        } else if(prev.wasOpen && !prev.notified){
-          // War offen, ist jetzt geschlossen
+        // Erster Check für diesen offenen Plan: Baseline setzen
+        if(prev.baselineCount === null){
+          autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: false, baselineCount: currentCount })
+          continue
+        }
+
+        // wasOpen auf true setzen sobald wir Positionen sehen
+        if(hasOpenPosition && !prev.wasOpen){
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: true })
+        }
+
+        // Close-Erkennung:
+        // Wenn Master in Duplikum → prüfe ob Master-Position noch da (präzise)
+        // Sonst → Slave-Count unter Baseline gesunken (Fallback)
+        const tradeClosed = dupMasterId
+          ? !masterPositionOk
+          : currentCount < prev.baselineCount
+
+        if(tradeClosed && prev.wasOpen && !prev.notified){
           autoTrack.state.set(plan.id, { ...prev, wasOpen: false, notified: true })
           atShowEndPrompt(plan)
+        } else if(hasOpenPosition){
+          // Baseline nach oben anpassen wenn mehr Positionen dazukommen
+          const newBaseline = Math.max(prev.baselineCount, currentCount)
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false, baselineCount: newBaseline })
         } else {
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenPosition })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: false })
         }
       } else {
         autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: prev.notified })
@@ -9550,55 +9583,69 @@
   }
 
   // Live Multiplier-Berechnung im Modal
-  // ── Acquisition-Cost-Hedge: berechnet kumulierte Cash-Kosten eines Accounts (in EUR)
-  // Phase 1 / Challenge: nur Kaufpreis (in EUR gespeichert)
-  // Phase 2: Kaufpreis + alle Live-Hedge-Verluste aus Vorgänger-Account(s)
-  // Andere Trade-Effekte (Hedge-Gewinne, Master-PL etc.) werden bewusst NICHT eingerechnet
-  function calcAcquisitionCost(masterAcc){
+  // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab
+  // (Phase 1 → Phase 2 → Phase 3 → ... — nicht nur einen Schritt zurück).
+  // Für den Account selbst: nur Kaufpreis (in EUR gespeichert).
+  // Für JEDEN Vorgänger in der Kette: dessen Kaufpreis + dessen Live-Hedge-Verluste.
+  // Andere Trade-Effekte (Hedge-Gewinne, Master-PL etc.) werden bewusst NICHT eingerechnet —
+  // ein gewinnender Hedge war Glück, keine "zurückgeholten Kosten".
+  function calcReingesteckdEur(masterAcc){
     if(!masterAcc) return 0
     let totalCostEur = 0  // Berechnung in EUR
     const fxUsdEur = window._fxUsdEur || 0.85
 
-    // 1. Kaufpreis dieses Accounts (in EUR)
+    // 1. Kaufpreis des Accounts selbst (in EUR)
     if(masterAcc.purchaseCost) totalCostEur += Number(masterAcc.purchaseCost)
 
-    // 2. Vorgänger-Accounts in der Successor-Chain (über archived successorId)
-    //    Für jeden Vorgänger: dessen Kaufpreis + dessen Live-Hedge-Verluste
-    if(typeof archive !== 'undefined'){
-      Object.entries(archive).forEach(([archId, info]) => {
-        if(info?.successorId && String(info.successorId) === String(masterAcc.id)){
-          const archAcc = accounts.find(x => String(x.id) === String(archId))
-          if(!archAcc) return
+    // 2. Komplette Vorgänger-Kette ablaufen (über archived successorId, Schritt für Schritt zurück)
+    let currentId = String(masterAcc.id)
+    const visited = new Set([currentId])
+    let safety = 0
 
-          // Kaufpreis des Vorgängers (EUR)
-          if(archAcc.purchaseCost) totalCostEur += Number(archAcc.purchaseCost)
+    while(safety++ < 50){ // Sicherheitslimit gegen kaputte/zyklische Ketten
+      if(typeof archive === 'undefined') break
+      const predecessorEntry = Object.entries(archive).find(([archId, info]) =>
+        info?.successorId && String(info.successorId) === currentId && !visited.has(String(archId))
+      )
+      if(!predecessorEntry) break
+      const [archId] = predecessorEntry
+      const archAcc = accounts.find(x => String(x.id) === String(archId))
+      if(!archAcc) break
+      visited.add(String(archId))
 
-          // Live-Hedge-Verluste auf dem Vorgänger:
-          // Wir suchen Trades wo dieser Vorgänger Master war UND Slave Live war UND Slave Verlust gemacht hat
-          const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
-          const archTrades = planList.filter(p =>
-            p.status === 'completed' && String(p.masterAccountId) === String(archAcc.id)
-          )
-          for(const p of archTrades){
-            const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
-            if(slaveAcc?.type === 'live' && p.slavePl != null){
-              const slavePl = Number(p.slavePl)
-              if(slavePl < 0){
-                // Slave Live hat verloren → wir haben Cash verloren → kommt zur Acq-Cost dazu (in EUR)
-                const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-                let lossEur = Math.abs(slavePl)
-                if(slavePreset.currency !== '€') lossEur = lossEur * fxUsdEur  // USD → EUR
-                totalCostEur += lossEur
-              }
-              // Hedge-Gewinne werden bewusst NICHT abgezogen — der Account hat die Phase ja bestanden,
-              // der gewinnende Hedge war Glück, nicht "zurückgeholte Kosten"
-            }
+      // Kaufpreis dieses Vorgängers (EUR)
+      if(archAcc.purchaseCost) totalCostEur += Number(archAcc.purchaseCost)
+
+      // Live-Hedge-Verluste auf diesem Vorgänger:
+      // Trades wo dieser Vorgänger Master war UND Slave Live war UND Slave Verlust gemacht hat
+      const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
+      const archTrades = planList.filter(p =>
+        p.status === 'completed' && String(p.masterAccountId) === String(archAcc.id)
+      )
+      for(const p of archTrades){
+        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
+        if(slaveAcc?.type === 'live' && p.slavePl != null){
+          const slavePl = Number(p.slavePl)
+          if(slavePl < 0){
+            // Slave Live hat verloren → wir haben Cash verloren → kommt zu den Gesamtkosten dazu (in EUR)
+            const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
+            let lossEur = Math.abs(slavePl)
+            if(slavePreset.currency !== '€') lossEur = lossEur * fxUsdEur  // USD → EUR
+            totalCostEur += lossEur
           }
         }
-      })
+      }
+
+      // Eine Ebene weiter zurück in der Kette
+      currentId = String(archAcc.id)
     }
 
     return totalCostEur
+  }
+
+  // Backward-kompatibler Alias — ruft jetzt die volle Kette ab statt nur einen Schritt
+  function calcAcquisitionCost(masterAcc){
+    return calcReingesteckdEur(masterAcc)
   }
 
   /* ── NQ / MNQ Toggle für Trade-Plan-Modal ──
@@ -9707,20 +9754,22 @@
     const master = accounts.find(a => String(a.id) === String(masterId))
     const slave  = accounts.find(a => String(a.id) === String(slaveId))
 
-    // ── Acquisition-Cost-Hedge: Auto-Suggest für Slave-Risk ──
+    // ── Acquisition-Cost-Hedge: Auto-Suggest für Slave-Risk (proportional zum Risk-Anteil) ──
     const suggestEl = document.getElementById('tp-slave-suggest')
     const suggestVal = document.getElementById('tp-slave-suggest-value')
     const suggestDet = document.getElementById('tp-slave-suggest-detail')
     // Debug-Hilfe falls master kein maxDrawdown hat
-    if(master && masterRisk > 0){
+    if(master){
       const dbgAcq = master.maxDrawdown ? calcAcquisitionCost(master) : 'N/A'
       console.log('[Auto-Hedge Debug] Master:', master.name, '| maxDrawdown:', master.maxDrawdown, '| purchaseCost:', master.purchaseCost, '| acqCost calculated:', dbgAcq)
     }
-    if(master && slave && masterRisk > 0 && master.maxDrawdown && master.maxDrawdown > 0){
+    if(master && slave && master.maxDrawdown && master.maxDrawdown > 0){
       // Acquisition-Cost in EUR (Kaufpreis ist in EUR, Verluste werden zu EUR konvertiert)
       const acqCostEur = calcAcquisitionCost(master)
-      // Hedge-Größe proportional zum genutzten Master-Risk-Anteil von Max-DD
-      const riskRatio = masterRisk / master.maxDrawdown
+      // Hedge-Größe proportional zum genutzten Master-Risk-Anteil von Max-DD.
+      // Solange noch kein Risiko eingetragen ist: Vorschau mit vollem Verhältnis (100%) rechnen,
+      // damit der Vorschlag schon direkt bei Master+Slave-Auswahl sichtbar ist.
+      const riskRatio = masterRisk > 0 ? (masterRisk / master.maxDrawdown) : 1
       // Hedge in EUR (zur Account-Cost passend)
       const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
       const fxUsdEur = window._fxUsdEur || 0.85
@@ -9735,7 +9784,8 @@
           suggestVal.textContent = `${slavePreset.currency}${suggestedSlaveRisk.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
           const acqCostStr = '€' + acqCostEur.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
           const ratioPct = (riskRatio * 100).toFixed(1).replace('.', ',')
-          suggestDet.innerHTML = `Acquisition-Cost: <span class="mono">${acqCostStr}</span> · Risk-Anteil: <span class="mono">${ratioPct}%</span> von Max-DD ($${master.maxDrawdown.toLocaleString('de-DE')})`
+          const ratioNote = masterRisk > 0 ? '' : ' · Vorschau — noch kein Risiko eingetragen'
+          suggestDet.innerHTML = `Acquisition-Cost: <span class="mono">${acqCostStr}</span> · Risk-Anteil: <span class="mono">${ratioPct}%</span> von Max-DD ($${master.maxDrawdown.toLocaleString('de-DE')})${ratioNote}`
           suggestEl.dataset.suggestedValue = suggestedSlaveRisk.toFixed(2)
         } else {
           // acqCost = 0 (Account hat schon alles ausgezahlt oder Phase-2 ohne Verluste)
@@ -9746,18 +9796,53 @@
       }
     } else if(suggestEl){
       suggestEl.style.display = 'none'
-      // Hint dass Max-DD fehlt — zeigen sobald Master + masterRisk da sind, auch ohne slave
-      if(master && masterRisk > 0 && (!master.maxDrawdown || master.maxDrawdown <= 0)){
+      // Hint dass Max-DD fehlt — zeigen sobald Master da ist, auch ohne Risiko/Slave
+      if(master && (!master.maxDrawdown || master.maxDrawdown <= 0)){
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
         suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Max Drawdown am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
-      } else if(master && masterRisk > 0 && master.maxDrawdown > 0 && (!master.purchaseCost || master.purchaseCost <= 0)){
+      } else if(master && master.maxDrawdown > 0 && (!master.purchaseCost || master.purchaseCost <= 0)){
         // Max-DD da, aber Kaufpreis fehlt
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
         suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Kaufpreis am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
+      }
+    }
+
+    // ── Gesamtkosten (volle Vorgänger-Kette) — flacher Gesamtbetrag, unabhängig vom Risk-Anteil.
+    // Erscheint sofort sobald ein Master gewählt ist, auch ohne Slave/Risiko.
+    const gkEl  = document.getElementById('tp-gesamtkosten-suggest')
+    const gkVal = document.getElementById('tp-gesamtkosten-value')
+    const gkDet = document.getElementById('tp-gesamtkosten-detail')
+    if(gkEl){
+      if(master){
+        const gkEur = calcReingesteckdEur(master)
+        if(gkEur > 0){
+          gkEl.style.display = 'block'
+          let gkDisplay = gkEur
+          let gkCur = '€'
+          if(slave){
+            const slavePresetGk = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+            const fxUsdEurGk = window._fxUsdEur || 0.85
+            if(slavePresetGk.currency !== '€'){
+              gkDisplay = gkEur / fxUsdEurGk
+              gkCur = slavePresetGk.currency
+            }
+          }
+          gkVal.textContent = `${gkCur}${gkDisplay.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
+          gkDet.innerHTML = `Kompletter Reingesteckt-Betrag über die gesamte Vorgänger-Kette (Kaufpreis + Live-Hedge-Verluste), in EUR: <span class="mono">€${gkEur.toLocaleString('de-DE', {maximumFractionDigits: 2})}</span>`
+          gkEl.dataset.suggestedGkEur = gkEur.toFixed(2)
+        } else {
+          gkEl.style.display = 'block'
+          gkVal.textContent = '—'
+          gkDet.innerHTML = `<span style="color:#10b981">✓ Kein Kaufpreis / keine Vorgänger-Kette hinterlegt</span>`
+          gkEl.dataset.suggestedGkEur = ''
+        }
+      } else {
+        gkEl.style.display = 'none'
+        gkEl.dataset.suggestedGkEur = ''
       }
     }
 
@@ -9841,14 +9926,49 @@
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
   })
-  // Auto-Vorschlag übernehmen
+  // Auto-Vorschlag übernehmen (Acquisition-Cost, proportional)
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
+    const masterId = document.getElementById('tp-master').value
+    const master = accounts.find(a => String(a.id) === String(masterId))
+    const masterRiskInput = document.getElementById('tp-master-risk')
+    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer —
+    // sonst hat der Ratio-Vorschlag keine sinnvolle Basis
+    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
+      masterRiskInput.value = master.maxDrawdown
+      tpRecompute() // neu berechnen, damit der Vorschlag zur jetzt gesetzten Risk-Basis passt
+    }
     const suggestEl = document.getElementById('tp-slave-suggest')
     const value = suggestEl?.dataset.suggestedValue
     if(value){
       document.getElementById('tp-slave-risk').value = value
       tpRecompute()
     }
+  })
+  // Gesamtkosten übernehmen (voller Reingesteckt-Betrag, unskaliert)
+  document.getElementById('tp-gesamtkosten-apply')?.addEventListener('click', () => {
+    const masterId = document.getElementById('tp-master').value
+    const master = accounts.find(a => String(a.id) === String(masterId))
+    const gkEl = document.getElementById('tp-gesamtkosten-suggest')
+    const gkEur = parseFloat(gkEl?.dataset.suggestedGkEur || '')
+    if(!isFinite(gkEur) || gkEur <= 0) return
+
+    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer
+    const masterRiskInput = document.getElementById('tp-master-risk')
+    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
+      masterRiskInput.value = master.maxDrawdown
+    }
+
+    // Slave-Risiko auf den vollen Gesamtkosten-Betrag setzen (in Slave-Währung konvertiert)
+    const slaveId = document.getElementById('tp-slave').value
+    const slave = accounts.find(a => String(a.id) === String(slaveId))
+    let slaveVal = gkEur
+    if(slave){
+      const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+      const fxUsdEur = window._fxUsdEur || 0.85
+      if(slavePreset.currency !== '€') slaveVal = gkEur / fxUsdEur
+    }
+    document.getElementById('tp-slave-risk').value = slaveVal.toFixed(2)
+    tpRecompute()
   })
   // Priority picker
   document.querySelectorAll('#tp-priority .prio-btn').forEach(btn => {
