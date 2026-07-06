@@ -8791,6 +8791,25 @@
     const masterFirm = document.getElementById('calc-master-firm')?.value
     const slaveFirm  = document.getElementById('calc-slave-firm')?.value
     if(!masterFirm || !slaveFirm) return
+
+    // Firma ohne Specs gewählt → Hinweis anzeigen statt zu rechnen
+    const noSpecsFirm = [masterFirm, slaveFirm].find(f => f.startsWith('_nospec:'))
+    if(noSpecsFirm){
+      const firmName = noSpecsFirm.replace('_nospec:', '')
+      const out = document.getElementById('calc-multiplier')
+      const eq  = document.getElementById('calc-equation')
+      const tbd = document.getElementById('calc-tbd')
+      const slaveQtyEl  = document.getElementById('calc-slave-qty')
+      const slaveUnitEl = document.getElementById('calc-slave-unit-label')
+      if(out) out.textContent = '—'
+      if(slaveQtyEl) slaveQtyEl.textContent = '—'
+      if(slaveUnitEl) slaveUnitEl.textContent = '—'
+      if(eq) eq.textContent = `Für „${firmName}" fehlen noch Lot-Specs. Einstellungen → Prop Firms → Specs hinzufügen.`
+      if(tbd) tbd.hidden = true
+      lcNqUpdateToggle()
+      return
+    }
+
     const m = { ...FIRM_PRESETS[masterFirm] }
     const s = FIRM_PRESETS[slaveFirm]
 
@@ -8944,6 +8963,47 @@
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
   }
+
+  function refreshCalcFirmDropdowns(){
+    const masterSel = document.getElementById('calc-master-firm')
+    const slaveSel  = document.getElementById('calc-slave-firm')
+    if(!masterSel || !slaveSel) return
+
+    const prevMaster = masterSel.value
+    const prevSlave  = slaveSel.value
+
+    // 1. projectx immer zuerst (MNQ Futures Gruppe)
+    const opts = [{ value:'projectx', label: FIRM_PRESETS.projectx.label }]
+
+    // 2. Alle anderen FIRM_PRESETS (alphabetisch)
+    const others = Object.entries(FIRM_PRESETS)
+      .filter(([k]) => k !== 'projectx')
+      .sort((a,b) => a[1].label.localeCompare(b[1].label, 'de'))
+    for(const [k, v] of others) opts.push({ value: k, label: v.label })
+
+    // 3. Account-Firms die NICHT in FIRM_PRESETS abgedeckt sind und keine Futures
+    const coveredLabels = new Set(Object.values(FIRM_PRESETS).map(v => v.label?.toLowerCase()))
+    const allAccountFirms = [...new Set((accounts||[]).map(a=>a.firm).filter(Boolean))].sort()
+    for(const firmName of allAccountFirms){
+      if(coveredLabels.has(firmName.toLowerCase())) continue
+      // Futures-Firms (mappen auf projectx) → schon abgedeckt, überspringen
+      if(typeof firmToPreset === 'function' && firmToPreset(firmName) === 'projectx') continue
+      opts.push({ value: '_nospec:' + firmName, label: firmName + ' (keine Specs)', noSpecs: true })
+    }
+
+    function applyToSelect(sel, prevVal){
+      sel.innerHTML = opts.map(o =>
+        `<option value="${escapeHtml(o.value)}"${o.noSpecs ? ' style="color:var(--sub,#888)"' : ''}>${escapeHtml(o.label)}</option>`
+      ).join('')
+      if(prevVal && [...sel.options].some(o => o.value === prevVal)) sel.value = prevVal
+    }
+
+    applyToSelect(masterSel, prevMaster)
+    applyToSelect(slaveSel, prevSlave)
+    if(typeof lcNqUpdateToggle === 'function') lcNqUpdateToggle()
+    if(typeof calcRecompute === 'function') calcRecompute()
+  }
+
   // Unified panel: zeigt alle Firms aus Accounts + Custom-Specs zusammen
   function renderCustomFirmsList(){ renderFirmsPanel() }   // Compat-Alias
   function renderAccountFirmsList(){ renderFirmsPanel() }  // Compat-Alias
@@ -8984,16 +9044,28 @@
           </div>
           ${specsText ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">📊 ${specsText}</div>` : `<div style="font-size:11px;color:var(--sub-2);margin-top:2px">Keine Lot-Rechner-Specs</div>`}
         </div>
-        <div class="fp-view" style="display:flex;gap:6px;align-items:center">
+        <div class="fp-view" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${count>0 ? `<button class="btn btn-ghost fp-rename-btn" style="padding:5px 10px;font-size:11.5px">Umbenennen</button>` : ''}
-          <button class="btn btn-ghost fp-specs-btn" style="padding:5px 10px;font-size:11.5px">${cfEntry ? 'Specs bearbeiten' : 'Specs hinzufügen'}</button>
-          ${isOrphan ? `<button class="btn btn-ghost fp-del-btn" style="padding:5px 10px;font-size:11.5px;color:var(--danger)">Löschen</button>` : ''}
+          <button class="btn btn-ghost fp-specs-btn" style="padding:5px 10px;font-size:11.5px">${cfEntry ? 'Specs' : 'Specs hinzufügen'}</button>
+          <button class="btn btn-ghost fp-del-btn" style="padding:5px 10px;font-size:11.5px;color:var(--danger,#ef4444)">Löschen</button>
         </div>
-        <div class="fp-rename-wrap" style="display:none;width:100%;display:none;gap:8px;align-items:center;margin-top:8px">
+        <div class="fp-rename-wrap" style="display:none;width:100%;gap:8px;align-items:center;margin-top:8px">
           <input class="input fp-rename-input" style="flex:1;font-size:13px;padding:5px 10px" value="${escapeHtml(firmName)}" placeholder="Neuer Name…" autocomplete="off">
           <button class="btn btn-primary fp-rename-save" style="padding:5px 12px;font-size:11.5px">Speichern</button>
           <button class="btn btn-ghost fp-rename-cancel" style="padding:5px 10px;font-size:11.5px">Abbrechen</button>
           <span class="fp-rename-status" style="font-size:11px;display:none"></span>
+        </div>
+        <div class="fp-del-wrap" style="display:none;width:100%;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          ${count>0
+            ? `<span style="font-size:12.5px;color:var(--ink)">„${escapeHtml(firmName)}" hat ${count} Account${count!==1?'s':''}. Wohin verschieben?</span>
+               <select class="input fp-del-target" style="flex:1;min-width:140px;padding:5px 10px;font-size:12.5px;height:auto">
+                 <option value="">— Firmfeld leeren —</option>
+               </select>`
+            : `<span style="font-size:12.5px;color:var(--ink)">„${escapeHtml(firmName)}" wirklich löschen?</span>`
+          }
+          <button class="btn btn-primary fp-del-confirm" style="padding:5px 12px;font-size:11.5px;background:var(--danger,#ef4444);border-color:var(--danger,#ef4444)">Löschen</button>
+          <button class="btn btn-ghost fp-del-cancel" style="padding:5px 10px;font-size:11.5px">Abbrechen</button>
+          <span class="fp-del-status" style="font-size:11px;display:none"></span>
         </div>`
 
       const nameEl      = row.querySelector('.fp-firm-name')
@@ -9005,8 +9077,24 @@
       const renameBtn   = row.querySelector('.fp-rename-btn')
       const specsBtn    = row.querySelector('.fp-specs-btn')
       const delBtn      = row.querySelector('.fp-del-btn')
+      const delWrap     = row.querySelector('.fp-del-wrap')
+      const delTarget   = row.querySelector('.fp-del-target')
+      const delConfirm  = row.querySelector('.fp-del-confirm')
+      const delCancel   = row.querySelector('.fp-del-cancel')
+      const delStatus   = row.querySelector('.fp-del-status')
+
+      // Befülle Ziel-Dropdown mit allen anderen Firms
+      if(delTarget){
+        const otherFirms = allFirms.filter(f => f !== firmName)
+        otherFirms.forEach(f => {
+          const opt = document.createElement('option')
+          opt.value = f; opt.textContent = f
+          delTarget.appendChild(opt)
+        })
+      }
 
       renameBtn?.addEventListener('click', () => {
+        delWrap.style.display = 'none'
         renameWrap.style.display = 'flex'
         renameInput.focus(); renameInput.select()
       })
@@ -9024,24 +9112,52 @@
           const { error } = await _supabase.from('accounts').update({ firm: newName }).eq('user_id', currentUserId).eq('firm', firmName)
           if(error) throw error
           for(const a of (accounts||[])){ if(a.firm===firmName) a.firm=newName }
-          // Custom Firm Specs mitumbenennen falls vorhanden
           const cf = getCustomFirms()
           const ci = cf.findIndex(x=>x.name===firmName)
           if(ci>=0){ cf[ci].name=newName; saveCustomFirms(cf); mergeCustomFirmsIntoPresets() }
           renameStatus.textContent = '✓ Gespeichert'; renameStatus.style.color = 'var(--success,#10b981)'
           nameEl.textContent = newName
           if(typeof populateAccountFilters==='function') populateAccountFilters()
-          setTimeout(()=>{ renameWrap.style.display='none'; renameStatus.style.display='none'; renderFirmsPanel() }, 1200)
+          setTimeout(()=>{ renameWrap.style.display='none'; renameStatus.style.display='none'; renderFirmsPanel() }, 1000)
         } catch(e){
           renameStatus.textContent = '✗ ' + (e.message||e); renameStatus.style.color = 'var(--danger,#ef4444)'
         }
         renameSave.disabled = false; renameSave.textContent = 'Speichern'
       })
+
       specsBtn?.addEventListener('click', () => openCustomFirmModal(cfEntry?.id||null, firmName))
+
       delBtn?.addEventListener('click', () => {
-        if(!confirm(`Firm "${firmName}" löschen? (Nur die Specs werden entfernt, keine Accounts betroffen.)`)) return
-        if(cfEntry){ saveCustomFirms(getCustomFirms().filter(x=>x.id!==cfEntry.id)); mergeCustomFirmsIntoPresets() }
-        renderFirmsPanel()
+        renameWrap.style.display = 'none'
+        delWrap.style.display = 'flex'
+      })
+      delCancel?.addEventListener('click', () => {
+        delWrap.style.display = 'none'
+        if(delStatus) delStatus.style.display = 'none'
+      })
+      delConfirm?.addEventListener('click', async () => {
+        const targetFirm = delTarget ? delTarget.value : ''  // '' = leeren
+        delConfirm.disabled = true; delConfirm.textContent = '…'
+        if(delStatus){ delStatus.style.display=''; delStatus.textContent='Löschen…'; delStatus.style.color='var(--sub)' }
+        try{
+          if(count > 0){
+            const { error } = await _supabase.from('accounts')
+              .update({ firm: targetFirm || null })
+              .eq('user_id', currentUserId)
+              .eq('firm', firmName)
+            if(error) throw error
+            for(const a of (accounts||[])){
+              if(a.firm===firmName) a.firm = targetFirm || null
+            }
+          }
+          // Custom Specs entfernen
+          if(cfEntry){ saveCustomFirms(getCustomFirms().filter(x=>x.id!==cfEntry.id)); mergeCustomFirmsIntoPresets() }
+          if(typeof populateAccountFilters==='function') populateAccountFilters()
+          setTimeout(()=>renderFirmsPanel(), 600)
+        } catch(e){
+          if(delStatus){ delStatus.textContent='✗ '+(e.message||e); delStatus.style.color='var(--danger,#ef4444)' }
+          delConfirm.disabled=false; delConfirm.textContent='Löschen'
+        }
       })
       listEl.appendChild(row)
     }
