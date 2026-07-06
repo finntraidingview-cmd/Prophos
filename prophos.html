@@ -6412,7 +6412,9 @@
     INTERVAL: 10_000,
     // planId → { wasOpen: bool, notified: bool }
     state:   new Map(),
-    inProgress: new Set()
+    inProgress: new Set(),
+    // planIds die als beendet erkannt wurden aber noch nicht abgeschlossen
+    pendingFinish: new Set(JSON.parse(localStorage.getItem('prophos_at_pending') || '[]'))
   }
 
   // Toggle initialisieren
@@ -6460,6 +6462,10 @@
   // End-Prompt
   function atShowEndPrompt(plan){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
+    // Plan als "pending finish" markieren → bleibt in der Karte sichtbar
+    autoTrack.pendingFinish.add(String(plan.id))
+    localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
+    if(typeof renderTradePlans === 'function') renderTradePlans()
     const el = document.createElement('div')
     el.className = 'at-prompt'
     el.id = `at-prompt-${plan.id}`
@@ -9230,8 +9236,19 @@
       `
     }
 
+    // Pending-Finish-Banner: wenn Trade als beendet erkannt aber noch nicht abgeschlossen
+    const isPending = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
+    const pendingBanner = isPending ? `
+      <div style="background:#f59e0b1a;border-bottom:2px solid #f59e0b55;padding:10px 18px;display:flex;align-items:center;gap:10px;border-radius:12px 12px 0 0">
+        <span style="font-size:15px">🔴</span>
+        <span style="font-size:13px;font-weight:600;color:#b45309;flex:1">Trade beendet erkannt — PnL eintragen</span>
+        <button data-plan-complete="${p.id}" style="background:var(--violet);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
+      </div>
+    ` : ''
+
     return `
-      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''}" data-plan-id="${p.id}">
+      <div class="trade-card priority-${p.priority} ${isCompleted ? 'completed' : ''}${isPending ? ' at-pending' : ''}" data-plan-id="${p.id}" style="${isPending ? 'border:2px solid #f59e0b55;' : ''}">
+        ${pendingBanner}
         ${header}
         ${meta}
         ${result}
@@ -10058,6 +10075,12 @@
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
     _completingPlanId = planId
+    // Pending-Finish-State löschen und Karte aktualisieren
+    if(autoTrack?.pendingFinish?.has(String(planId))){
+      autoTrack.pendingFinish.delete(String(planId))
+      localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
+      if(typeof renderTradePlans === 'function') renderTradePlans()
+    }
 
     // Title je nach Status — bei completed = "bearbeiten", sonst "abschließen"
     const titleEl = document.querySelector('#tradeCompleteModal .modal-head h3')
