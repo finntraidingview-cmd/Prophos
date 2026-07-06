@@ -4239,8 +4239,15 @@
           <input class="input mono" id="bulk-balance" type="number" step="0.01" placeholder="= Account-Größe" autocomplete="off">
         </div>
         <div class="field">
-          <label>Kaufpreis pro Account (€)</label>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
+            <label style="margin:0">Kaufpreis pro Account</label>
+            <div id="bulk-cost-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
+              <button type="button" class="bulk-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
+              <button type="button" class="bulk-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
+            </div>
+          </div>
           <input class="input mono" id="bulk-cost" type="number" step="0.01" placeholder="z.B. 149" autocomplete="off">
+          <div id="bulk-cost-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
         </div>
         <div class="field">
           <label>Max Drawdown ($)</label>
@@ -7797,13 +7804,21 @@
   ;(function wireGlobalSearch(){
     const input = document.getElementById('globalSearch')
     if(!input) return
-    input.addEventListener('input', e => {
-      accSearch = (e.target.value || '').trim().toLowerCase()
+    let _lastQuery = null
+    function runGlobalSearch(){
+      const q = (input.value || '').trim().toLowerCase()
+      if(q === _lastQuery) return  // nichts geändert → kein Re-Render
+      _lastQuery = q
+      accSearch = q
       // Bei aktiver Suche automatisch auf die Accounts-View wechseln
       const onAccounts = document.querySelector('#dashboard-view .view.active')?.dataset.view === 'accounts'
       if(accSearch && !onAccounts && typeof switchView === 'function') switchView('accounts')
       if(typeof renderAccounts === 'function') renderAccounts()
-    })
+    }
+    // Alle Eingabewege abdecken: Tippen, Einfügen, Ausschneiden, Autofill
+    ;['input','change','keyup','cut'].forEach(ev => input.addEventListener(ev, runGlobalSearch))
+    // Einfügen: Wert steht erst nach dem Event fest → im nächsten Tick lesen
+    input.addEventListener('paste', () => setTimeout(runGlobalSearch, 0))
     // ⌘K / Ctrl+K fokussiert die Suche
     document.addEventListener('keydown', ev => {
       if((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K')){
@@ -8251,23 +8266,27 @@
 
     // Durchsuchbarer Text pro Account: External ID, MT5-Login, Topstep/Tradovate-Login,
     // Duplikum-Login, Name
+    // Trenner (Leerzeichen, -, _, ., /) ignorieren, damit Teilsuchen über
+    // formatierte IDs hinweg greifen (z.B. "master - tradovate - 2026…").
+    const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
     const accHaystack = a => {
       const dupAcc = dupByManualId[a.id] || null
-      return [
+      return searchNorm([
         a.name,
         a.externalId,
-        a.ma?.login, a.ma?.accountId,          // MT5
-        a.topstep?.id, a.topstep?.name,        // Topstep / Tradovate
-        dupAcc?.login, dupAcc?.account_id      // Duplikum
-      ].filter(Boolean).join(' ').toLowerCase()
+        a.ma?.login, a.ma?.accountId,               // MT5
+        a.topstep?.id, a.topstep?.name,             // Topstep / Tradovate
+        dupAcc?.login, dupAcc?.account_id, dupAcc?.name  // Duplikum (inkl. Anzeige-Name)
+      ].filter(Boolean).join(' '))
     }
+    const qNorm = searchNorm(q)
 
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
-      if(q && !accHaystack(a).includes(q)) return false
+      if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -8774,6 +8793,34 @@
       totalCost: document.getElementById('bulk-total-cost'),
     }
 
+    // Kaufpreis-Währung im Bulk-Dialog (gespeichert wird immer in EUR)
+    let _bulkPurchaseCcy = 'EUR'
+    function _bulkUpdateCostHint(){
+      const hint = document.getElementById('bulk-cost-hint')
+      if(!hint) return
+      const raw = parseFloat(bEl.cost?.value)
+      const fx = window._fxUsdEur || 0.85
+      const fxStr = fx.toFixed(4).replace('.', ',')
+      if(_bulkPurchaseCcy === 'USD'){
+        hint.textContent = (!isNaN(raw) && raw > 0)
+          ? `= €${(raw*fx).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} pro Account (Kurs 1 USD = ${fxStr} €) — gespeichert in Euro`
+          : `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € nach Euro umgerechnet`
+      } else {
+        hint.textContent = ''
+      }
+    }
+    function _bulkSetCostCcy(ccy){
+      _bulkPurchaseCcy = (ccy === 'USD') ? 'USD' : 'EUR'
+      document.querySelectorAll('#bulk-cost-ccy .bulk-ccy-btn').forEach(b => {
+        const active = b.dataset.ccy === _bulkPurchaseCcy
+        b.classList.toggle('active', active)
+        b.style.background = active ? 'var(--violet)' : 'transparent'
+        b.style.color = active ? '#fff' : 'var(--sub)'
+      })
+      _bulkUpdateCostHint()
+      if(typeof updatePreview === 'function') updatePreview()
+    }
+
     function buildName(n){
       const firm   = bEl.firm.value.trim() || 'Account'
       const sizeRaw = parseFloat(bEl.size.value)
@@ -8794,9 +8841,11 @@
       const cost     = parseFloat(bEl.cost.value)
       const firm     = bEl.firm.value.trim()
 
-      // Total cost hint
-      if(!isNaN(cost) && cost > 0 && count > 0){
-        bEl.totalCost.textContent = `Gesamtkosten: ${(cost * count).toLocaleString('de-DE', {maximumFractionDigits:2})} €`
+      // Total cost hint (Kaufpreis ggf. USD → EUR umrechnen)
+      const fx = window._fxUsdEur || 0.85
+      const costEur = (_bulkPurchaseCcy === 'USD' && !isNaN(cost)) ? cost * fx : cost
+      if(!isNaN(costEur) && costEur > 0 && count > 0){
+        bEl.totalCost.textContent = `Gesamtkosten: ${(costEur * count).toLocaleString('de-DE', {maximumFractionDigits:2})} €`
       } else {
         bEl.totalCost.textContent = ''
       }
@@ -8847,6 +8896,7 @@
       bEl.startnum.value = '1'
       bEl.template.value = ''
       if(bEl.extIds) bEl.extIds.value = ''
+      if(typeof _bulkSetCostCcy === 'function') _bulkSetCostCcy('EUR')
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -8885,7 +8935,10 @@
 
       const accountSize    = !isNaN(sizeRaw)  && sizeRaw  > 0 ? sizeRaw  : null
       const initialBalance = !isNaN(balRaw)   && balRaw   > 0 ? balRaw   : (accountSize || 0)
-      const purchaseCost   = !isNaN(costRaw)  && costRaw  > 0 ? costRaw  : null
+      // Kaufpreis: bei $-Eingabe mit Settings-Kurs nach EUR umrechnen (gespeichert in EUR)
+      let costEur = costRaw
+      if(!isNaN(costEur) && _bulkPurchaseCcy === 'USD') costEur = costEur * (window._fxUsdEur || 0.85)
+      const purchaseCost   = !isNaN(costEur)  && costEur  > 0 ? costEur  : null
       const maxDrawdown    = !isNaN(maxddRaw) && maxddRaw > 0 ? maxddRaw : null
 
       bEl.saveBtn.disabled = true
@@ -8960,6 +9013,11 @@
     ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost, bEl.extIds].forEach(el => {
       if(el) el.addEventListener('input', updatePreview)
     })
+    // Kaufpreis-Währung Toggle + Hint
+    document.querySelectorAll('#bulk-cost-ccy .bulk-ccy-btn').forEach(b => {
+      b.addEventListener('click', () => _bulkSetCostCcy(b.dataset.ccy))
+    })
+    bEl.cost?.addEventListener('input', _bulkUpdateCostHint)
 
     // Wire buttons
     bEl.openBtn?.addEventListener('click',   openBulkModal)
