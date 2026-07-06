@@ -11459,11 +11459,14 @@
       const dbgAcq = master.maxDrawdown ? calcAcquisitionCost(master) : 'N/A'
       console.log('[Auto-Hedge Debug] Master:', master.name, '| maxDrawdown:', master.maxDrawdown, '| purchaseCost:', master.purchaseCost, '| acqCost calculated:', dbgAcq)
     }
-    if(master && slave && masterRisk > 0 && master.maxDrawdown && master.maxDrawdown > 0){
+    if(master && slave && master.maxDrawdown && master.maxDrawdown > 0){
       // Acquisition-Cost in EUR (Kaufpreis ist in EUR, Verluste werden zu EUR konvertiert)
       const acqCostEur = calcAcquisitionCost(master)
+      // Wenn noch kein Master-Risiko eingegeben ist, nehmen wir das volle Max-DD an
+      // (Risk-Anteil 100%) — so erscheint der Vorschlag sofort bei Master+Slave-Auswahl.
+      const effectiveMasterRisk = masterRisk > 0 ? masterRisk : master.maxDrawdown
       // Hedge-Größe proportional zum genutzten Master-Risk-Anteil von Max-DD
-      const riskRatio = masterRisk / master.maxDrawdown
+      const riskRatio = effectiveMasterRisk / master.maxDrawdown
       // Hedge in EUR (zur Account-Cost passend)
       const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
       const fxUsdEur = window._fxUsdEur || 0.85
@@ -11513,17 +11516,11 @@
       suggestEl.style.display = 'none'
       const totalElHide = document.getElementById('tp-slave-suggest-total')
       if(totalElHide){ totalElHide.style.display = 'none'; totalElHide.dataset.suggestedValue = '' }
-      // Hint dass Max-DD fehlt — zeigen sobald Master + masterRisk da sind, auch ohne slave
-      if(master && masterRisk > 0 && (!master.maxDrawdown || master.maxDrawdown <= 0)){
+      // Hint dass Max-DD fehlt — zeigen sobald Master + Slave gewählt sind
+      if(master && slave && (!master.maxDrawdown || master.maxDrawdown <= 0)){
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
         suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Max Drawdown am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
-        suggestEl.dataset.suggestedValue = ''
-      } else if(master && masterRisk > 0 && master.maxDrawdown > 0 && (!master.purchaseCost || master.purchaseCost <= 0)){
-        // Max-DD da, aber Kaufpreis fehlt
-        suggestEl.style.display = 'block'
-        suggestVal.textContent = '—'
-        suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Kaufpreis am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
       }
     }
@@ -11608,23 +11605,28 @@
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
   })
+  // Vorschlag übernehmen: Slave-Risiko setzen + wenn Master-Risiko leer ist,
+  // automatisch das volle Max-DD des Master-Accounts eintragen.
+  function tpApplySuggestion(elId){
+    const el = document.getElementById(elId)
+    const value = el?.dataset.suggestedValue
+    if(!value) return
+    const masterRiskEl = document.getElementById('tp-master-risk')
+    const curMasterRisk = parseFloat(masterRiskEl?.value)
+    if(!(curMasterRisk > 0)){
+      const master = accounts.find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
+      if(master && master.maxDrawdown > 0) masterRiskEl.value = master.maxDrawdown
+    }
+    document.getElementById('tp-slave-risk').value = value
+    tpRecompute()
+  }
   // Auto-Vorschlag übernehmen
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
-    const suggestEl = document.getElementById('tp-slave-suggest')
-    const value = suggestEl?.dataset.suggestedValue
-    if(value){
-      document.getElementById('tp-slave-risk').value = value
-      tpRecompute()
-    }
+    tpApplySuggestion('tp-slave-suggest')
   })
   // Gesamtkosten-Vorschlag übernehmen
   document.getElementById('tp-slave-suggest-total-apply')?.addEventListener('click', () => {
-    const totalEl = document.getElementById('tp-slave-suggest-total')
-    const value = totalEl?.dataset.suggestedValue
-    if(value){
-      document.getElementById('tp-slave-risk').value = value
-      tpRecompute()
-    }
+    tpApplySuggestion('tp-slave-suggest-total')
   })
   // Priority picker
   document.querySelectorAll('#tp-priority .prio-btn').forEach(btn => {
