@@ -63,6 +63,26 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  /* ── Auto-Track Toast & Prompt ── */
+  @keyframes atSlideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  .at-toast{
+    position:fixed;bottom:28px;right:28px;z-index:9999;
+    padding:13px 18px;border-radius:11px;font-size:13.5px;font-weight:600;
+    color:#fff;box-shadow:0 4px 24px rgba(0,0,0,.22);
+    animation:atSlideUp .22s ease;max-width:320px;line-height:1.4;pointer-events:none;
+  }
+  .at-toast.start{background:#10b981}
+  .at-toast.end{background:#7c3aed}
+  .at-prompt{
+    position:fixed;bottom:28px;right:28px;z-index:9999;
+    background:var(--card);border:1.5px solid var(--border);border-radius:13px;
+    padding:16px 18px;box-shadow:0 8px 32px rgba(0,0,0,.18);
+    font-size:13px;max-width:320px;line-height:1.5;
+    animation:atSlideUp .22s ease;
+  }
+  .at-toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
+  .at-toggle input[type=checkbox]{accent-color:var(--violet);width:14px;height:14px;cursor:pointer}
+
 
   /* ============================================================
      BOOT SCREEN (shown until session check finishes)
@@ -2235,7 +2255,7 @@
 
     <div class="tb-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="globalSearch" placeholder="Account suchen (ID · Login · Name)…" autocomplete="off" />
+      <input type="text" placeholder="Suchen…" />
       <span class="kbd">⌘K</span>
     </div>
 
@@ -2508,15 +2528,6 @@
                 </div>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
-                <span id="dup-mappings-status" style="font-size:12px;color:var(--muted)"></span>
-                <button class="btn btn-ghost" id="dup-auto-connect-btn" type="button" title="Duplikum-Accounts automatisch mit Prophos-Accounts verknüpfen (über Login-ID)">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                  Auto-Connect
-                </button>
-                <button class="btn btn-ghost" id="dup-mappings-btn" type="button" title="Standard-Symbol-Mappings (NQ/MNQ/Index → NAS100) auf alle Master-Accounts anwenden">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M3 12h6m6 0h6M9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0"/></svg>
-                  Mappings setzen
-                </button>
                 <button class="btn btn-ghost" id="dup-sync-btn" type="button" title="Accounts neu laden">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   Sync
@@ -2815,7 +2826,11 @@
           <h1 class="view-title">Trade Plan</h1>
           <p class="view-sub">Plan abends, exec tagsüber, eintragen wenn fertig.</p>
         </div>
-        <div style="display:flex;gap:10px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <label class="at-toggle" title="Trades automatisch starten/beenden wenn Duplikum-Position erkannt wird">
+            <input type="checkbox" id="autotrack-toggle">
+            <span id="autotrack-label">Auto-Erkennung</span>
+          </label>
           <button class="btn btn-primary" id="addTradePlanBtn" onclick="window.openTradePlanModal && window.openTradePlanModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Trade planen
@@ -2853,10 +2868,6 @@
 
       <!-- Open -->
       <div class="subtab-pane" data-tradepane="open">
-        <!-- Live-Übersicht: erscheint automatisch wenn Trades laufen -->
-        <div id="trades-live-overview" style="display:none;margin-bottom:16px">
-          <div id="trades-live-cards" style="display:flex;flex-direction:column;gap:10px"></div>
-        </div>
         <div class="trade-cards" id="tradeCardsOpen"></div>
         <div class="empty" id="tradeEmptyOpen" style="display:none;border:none;background:transparent">
           <div class="empty-icon">
@@ -2944,7 +2955,6 @@
                   <option value="live">Live</option>
                 </select>
               </div>
-              <input type="text" class="input" id="tp-master-search" placeholder="Account suchen (Name · ID · Login)…" autocomplete="off" style="margin-bottom:6px;font-size:12px;padding:6px 10px">
               <select class="input" id="tp-master"></select>
             </div>
             <div class="field">
@@ -2962,7 +2972,6 @@
                   <option value="live">Live</option>
                 </select>
               </div>
-              <input type="text" class="input" id="tp-slave-search" placeholder="Account suchen (Name · ID · Login)…" autocomplete="off" style="margin-bottom:6px;font-size:12px;padding:6px 10px">
               <select class="input" id="tp-slave"></select>
             </div>
 
@@ -3007,16 +3016,6 @@
                   <button type="button" id="tp-slave-suggest-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
                 </div>
                 <div id="tp-slave-suggest-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
-              </div>
-              <div id="tp-slave-suggest-total" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.28);border-radius:6px;font-size:12px;line-height:1.4">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-                  <div style="color:var(--ink)">
-                    <span style="color:#059669;font-weight:700">💰 Gesamtkosten:</span>
-                    <span id="tp-slave-suggest-total-value" style="font-family:var(--mono);font-weight:600">—</span>
-                  </div>
-                  <button type="button" id="tp-slave-suggest-total-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
-                </div>
-                <div id="tp-slave-suggest-total-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
               </div>
             </div>
 
@@ -3129,10 +3128,6 @@
                   <input type="radio" name="tc-status" value="passed">
                   <span style="color:var(--ink)">✅ Phase bestanden — Nachfolger anlegen</span>
                 </label>
-                <label class="tc-status-opt" data-tc-status="reset" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:border-color .12s">
-                  <input type="radio" name="tc-status" value="reset">
-                  <span style="color:var(--ink)">🔄 Account resetten — alten archivieren, neuen anlegen</span>
-                </label>
               </div>
               <div id="tc-status-account-wrap" style="margin-top:10px;display:none">
                 <label style="font-size:11.5px;color:var(--sub);margin-bottom:4px;display:block">Welcher Account?</label>
@@ -3204,53 +3199,6 @@
         <div class="modal-foot">
           <button class="btn btn-ghost" id="successorCancel2">Abbrechen</button>
           <button class="btn btn-primary" id="successorConfirm">Anlegen & Vorgänger archivieren</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- RESET ACCOUNT MODAL -->
-    <div class="modal-bg" id="resetModal">
-      <div class="modal" style="max-width:480px">
-        <div class="modal-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
-          <div>
-            <h3 style="margin:0 0 4px">🔄 Account resetten</h3>
-            <p class="modal-sub" style="margin:0">Alten Account archivieren, frisch neu starten.</p>
-          </div>
-          <button class="modal-x" id="resetCancel" aria-label="Schließen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div id="resetInfo" class="link-tsx-hero"></div>
-          <p style="font-size:12.5px;color:var(--sub);margin:12px 0 12px">
-            Der alte Account wird archiviert (Grund: Reset). Der neue Account startet <strong>frisch</strong> — die Kosten sind separat, keine Verrechnung mit dem alten.
-          </p>
-          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
-            <div class="field" style="grid-column:span 2">
-              <label>Neue External ID <span style="color:#ef4444">*</span></label>
-              <input class="input mono" id="reset-extid" placeholder="z.B. TDFYSL150… oder MT5-Login" autocomplete="off">
-            </div>
-            <div class="field" style="grid-column:span 2">
-              <label>Name des neuen Accounts</label>
-              <input class="input" id="reset-name" placeholder="Name">
-            </div>
-            <div class="field" style="grid-column:span 2">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
-                <label style="margin:0">Reset-Gebühr</label>
-                <div id="reset-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
-                  <button type="button" class="reset-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
-                  <button type="button" class="reset-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
-                </div>
-              </div>
-              <input class="input mono" id="reset-fee" type="number" step="0.01" value="0" placeholder="0">
-              <div id="reset-fee-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
-            </div>
-          </div>
-          <div class="modal-msg" id="resetMsg"></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn btn-ghost" id="resetCancel2">Abbrechen</button>
-          <button class="btn btn-primary" id="resetConfirm">Resetten &amp; alten archivieren</button>
         </div>
       </div>
     </div>
@@ -3767,18 +3715,6 @@
           </div>
         </div>
         <div style="display:flex;gap:10px">
-          <button class="btn btn-primary" id="ad-add-trade-btn" type="button" title="Trade jetzt anlegen — dieser Account ist Master">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Trade hinzufügen
-          </button>
-          <button class="btn btn-ghost" id="ad-plan-trade-btn" type="button" title="Trade für später planen — dieser Account ist Master">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-            Trade planen
-          </button>
-          <button class="btn btn-ghost" id="ad-reset-btn" type="button" title="Account resetten — alten archivieren, neuen mit neuer External ID anlegen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Reset
-          </button>
           <button class="btn btn-ghost" id="ad-edit-btn" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Bearbeiten
@@ -3832,12 +3768,6 @@
 
       <!-- Hedge-Übersicht -->
       <div id="lt-hedge-overview" style="display:none;margin-bottom:14px"></div>
-
-      <!-- Aktive Trade Plans — automatisch befüllt wenn Plans auf 'Offen' stehen -->
-      <div id="lt-plan-overview" style="display:none;margin-bottom:20px">
-        <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Laufende Trade Plans</div>
-        <div id="lt-plan-cards" style="display:flex;flex-direction:column;gap:10px"></div>
-      </div>
 
       <div id="lt-cards" style="display:flex;flex-direction:column;gap:14px"></div>
 
@@ -4196,25 +4126,13 @@
           <input class="input mono" id="ac-balance" type="number" step="0.01" placeholder="50000" autocomplete="off">
         </div>
         <div class="field">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
-            <label style="margin:0">Kaufpreis (optional)</label>
-            <div id="ac-purchase-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
-              <button type="button" class="ac-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
-              <button type="button" class="ac-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
-            </div>
-          </div>
+          <label>Kaufpreis (€, optional)</label>
           <input class="input mono" id="ac-purchase-cost" type="number" step="0.01" placeholder="z.B. 450" autocomplete="off">
-          <div id="ac-purchase-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <label>Max Drawdown ($, optional)</label>
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>Externe ID <span style="font-size:11px;color:var(--sub);font-weight:400">(Duplikum Auto-Connect)</span></label>
-          <input class="input mono" id="ac-external-id" type="text" placeholder="z.B. TDFYSL150872544204 oder 7234927" autocomplete="off" style="font-size:13px">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Tradovate-ID (z.B. <code style="background:var(--surface-tint);padding:1px 4px;border-radius:3px">TDFYSL150872544204</code>) oder MT5-Login (<code style="background:var(--surface-tint);padding:1px 4px;border-radius:3px">7234927</code>). Wird beim Duplikum-Sync zum automatischen Verknüpfen genutzt.</div>
         </div>
       </div>
 
@@ -4261,70 +4179,6 @@
         </button>
       </div>
 
-      <style>
-        #bulk-templates-wrap .tpl-card{
-          position:relative; flex:0 0 auto; min-width:132px; max-width:180px;
-          padding:9px 11px; border:1px solid var(--border); border-radius:10px;
-          background:var(--surface); cursor:pointer; transition:all .15s ease;
-          overflow:hidden;
-        }
-        #bulk-templates-wrap .tpl-card::before{
-          content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-          background:var(--violet); opacity:.65;
-        }
-        #bulk-templates-wrap .tpl-card:hover{
-          border-color:var(--violet); transform:translateY(-2px);
-          box-shadow:0 6px 16px rgba(99,102,241,.18);
-        }
-        #bulk-templates-wrap .tpl-card .tpl-name{
-          font-weight:650; font-size:12.5px; color:var(--ink);
-          white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:34px;
-        }
-        #bulk-templates-wrap .tpl-card .tpl-meta{
-          font-size:10.5px; color:var(--sub); margin-top:3px; line-height:1.35;
-          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-        }
-        #bulk-templates-wrap .tpl-card .tpl-price{
-          font-size:11.5px; font-weight:600; color:var(--violet);
-          margin-top:5px; font-family:var(--mono);
-        }
-        #bulk-templates-wrap .tpl-card .tpl-actions{
-          position:absolute; top:6px; right:6px; display:flex; gap:2px;
-          opacity:0; transition:opacity .15s ease;
-        }
-        #bulk-templates-wrap .tpl-card:hover .tpl-actions{ opacity:1 }
-        #bulk-templates-wrap .tpl-actions button{
-          border:none; background:var(--surface-tint); color:var(--sub);
-          width:20px; height:20px; border-radius:5px; cursor:pointer;
-          display:flex; align-items:center; justify-content:center; padding:0;
-        }
-        #bulk-templates-wrap .tpl-actions button:hover{ color:var(--ink); background:var(--border) }
-        #bulk-templates-wrap .tpl-empty{
-          font-size:11.5px; color:var(--sub); padding:10px 12px;
-          border:1px dashed var(--border); border-radius:10px; flex:1;
-        }
-        #bulk-templates-wrap .tpl-name-input{
-          font-size:12.5px; font-weight:650; width:100%; border:none;
-          background:transparent; color:var(--ink); padding:0; outline:none;
-          border-bottom:1px solid var(--violet);
-        }
-        .tpl-flash{ animation: tplFlash .7s ease }
-        @keyframes tplFlash{
-          0%{ box-shadow:0 0 0 0 rgba(99,102,241,.35) }
-          100%{ box-shadow:0 0 0 6px rgba(99,102,241,0) }
-        }
-      </style>
-      <div id="bulk-templates-wrap" style="margin-bottom:16px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:11px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);display:inline-flex;align-items:center;gap:5px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            Vorlagen
-          </span>
-          <button type="button" id="bulk-tpl-save" class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px">＋ Aktuelle speichern</button>
-        </div>
-        <div id="bulk-templates" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px"></div>
-      </div>
-
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
         <div class="field">
           <label>Firm *</label>
@@ -4360,15 +4214,8 @@
           <input class="input mono" id="bulk-balance" type="number" step="0.01" placeholder="= Account-Größe" autocomplete="off">
         </div>
         <div class="field">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
-            <label style="margin:0">Kaufpreis pro Account</label>
-            <div id="bulk-cost-ccy" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:12px">
-              <button type="button" class="bulk-ccy-btn active" data-ccy="EUR" style="padding:3px 10px;border:none;background:var(--violet);color:#fff;cursor:pointer;font-weight:600">€</button>
-              <button type="button" class="bulk-ccy-btn" data-ccy="USD" style="padding:3px 10px;border:none;background:transparent;color:var(--sub);cursor:pointer;font-weight:600">$</button>
-            </div>
-          </div>
+          <label>Kaufpreis pro Account (€)</label>
           <input class="input mono" id="bulk-cost" type="number" step="0.01" placeholder="z.B. 149" autocomplete="off">
-          <div id="bulk-cost-hint" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
         </div>
         <div class="field">
           <label>Max Drawdown ($)</label>
@@ -4387,15 +4234,8 @@
         </div>
         <div class="field" style="grid-column:1/-1">
           <label>Name-Vorlage</label>
-          <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · {EX}" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{EX}</code> = Externe ID (aus Liste unten)</div>
-        </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>Externe IDs <span style="font-size:11px;color:var(--sub);font-weight:400">— optional, eine pro Zeile</span></label>
-          <textarea class="input mono" id="bulk-external-ids" rows="4"
-            placeholder="z.B. TDFYSL150325875918&#10;TDFYSL150894194381&#10;TDFYSL150267847152&#10;7234927 (MT5-Login)"
-            style="resize:vertical;font-size:12px;line-height:1.6;font-family:var(--mono)"></textarea>
-          <div id="bulk-ids-hint" style="font-size:11px;color:var(--sub);margin-top:4px">Jede ID wird dem entsprechenden Account in Reihenfolge zugewiesen. Für Duplikum Auto-Connect.</div>
+          <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
@@ -4963,10 +4803,6 @@
         if(typeof renderTradePlans === 'function') renderTradePlans()
         // Lot-Rechner Push-Panel mit frischen Slaves befüllen
         if(typeof window.dupCalcRender === 'function') window.dupCalcRender()
-        // Auto-Tracking: starte Polling sobald Accounts geladen
-        if(typeof _atCheckAndStart === 'function') _atCheckAndStart()
-        // Auto-Connect: bei jedem Sync still im Hintergrund verknüpfen
-        if(typeof dupAutoConnect === 'function') dupAutoConnect(true)
         if(dupEls.testOut){
           dupEls.testOut.style.display = 'none'
           dupEls.testOut.textContent = ''
@@ -5003,69 +4839,6 @@
       btn:      document.getElementById('calc-dup-push-btn'),
       btnLabel: document.getElementById('calc-dup-push-btn-label'),
       status:   document.getElementById('calc-dup-status')
-    }
-  }
-
-  /**
-   * ─── Standard-Symbol-Mappings auf alle Master-Accounts anwenden ───
-   * Mappt alle bekannten NQ/MNQ-Futures-Kontrakte (alle Quartale) sowie
-   * gängige Index-CFD-Schreibweisen auf NAS100 für den NAS100-Slave.
-   * Nutzt symbols/addMappings.php pro Master-Account.
-   */
-  const DUP_STANDARD_MAPPINGS = [
-    'NQM6','MNQM6','NQU6','MNQU6','NQZ6','MNQZ6','NQH7','MNQH7','NQM7',
-    'NDX100','US100.cash','US100','USTEC','USTEC.cash','USTECH100','NAS100.cash','NASDAQ100'
-  ]
-
-  function dupMappingsSetStatus(text, kind=''){
-    const el = document.getElementById('dup-mappings-status')
-    if(!el) return
-    el.textContent = text
-    el.style.color = kind === 'err' ? 'var(--red,#e5484d)' : kind === 'ok' ? 'var(--green,#30a46c)' : 'var(--muted)'
-  }
-
-  async function dupApplyStandardMappings(){
-    const btn = document.getElementById('dup-mappings-btn')
-    if(!dupState.token){ dupMappingsSetStatus('Nicht verbunden', 'err'); return }
-
-    const masters = (dupState.accounts || []).filter(a => Number(a.type) === 0)
-    const slaves  = (dupState.accounts || []).filter(a => Number(a.type) === 1)
-
-    if(slaves.length === 0){ dupMappingsSetStatus('Kein Slave-Account gefunden', 'err'); return }
-    // Slave wählen: bevorzugt "Fusion Live" im Namen, sonst ersten Slave nehmen
-    const slave = slaves.find(s => /fusion live/i.test(s.name || '')) || slaves[0]
-    const slaveId = slave.account_id
-
-    if(masters.length === 0){ dupMappingsSetStatus('Keine Master-Accounts gefunden', 'err'); return }
-
-    if(btn){ btn.disabled = true }
-    let ok = 0, fail = 0
-    for(const m of masters){
-      dupMappingsSetStatus(`⏳ ${ok+fail+1}/${masters.length}: ${m.name || m.account_id}…`, 'loading')
-      const mappings = DUP_STANDARD_MAPPINGS.map(sym => ({
-        id_master: String(m.account_id),
-        id_slave:  String(slaveId),
-        symbol_master: sym,
-        symbol_slave:  'NAS100'
-      }))
-      try{
-        const res = await dupApi('POST', 'symbols/addMappings.php', { mappings })
-        if(res.ok){ ok++ }
-        else {
-          fail++
-          console.error('[dupMappings] Fehler bei', m.name, m.account_id, res.status, res.data)
-        }
-      }catch(e){
-        fail++
-        console.error('[dupMappings] Exception bei', m.name, m.account_id, e)
-      }
-    }
-
-    if(btn){ btn.disabled = false }
-    if(fail === 0){
-      dupMappingsSetStatus(`✓ Mappings auf ${ok} Master angewendet (${DUP_STANDARD_MAPPINGS.length} Symbole → NAS100, Slave: ${slave.name||slaveId})`, 'ok')
-    } else {
-      dupMappingsSetStatus(`⚠ ${ok} ok, ${fail} fehlgeschlagen — siehe Konsole`, 'err')
     }
   }
 
@@ -6106,68 +5879,7 @@
     }, 250)
   }
 
-  /* ── Auto-Connect: Duplikum ↔ Prophos Account Matching ── */
-  async function dupAutoConnect(silent = false){
-    const btn = document.getElementById('dup-auto-connect-btn')
-    if(!silent && btn){ btn.disabled = true; btn.textContent = 'Verbinde…' }
-
-    const dupAccounts = dupState.accounts || []
-    const links = dupGetLinks()
-    let connected = 0, skipped = 0, alreadyLinked = 0
-
-    for(const dupAcc of dupAccounts){
-      const dupId    = String(dupAcc.account_id || '')
-      const dupLogin = String(dupAcc.login || dupAcc.name || '').trim()
-
-      console.log('[AutoConnect] dupAcc:', dupId, 'login='+dupLogin, 'name='+(dupAcc.name||''))
-
-      if(!dupLogin) continue
-
-      // Bereits verknüpft → überspringen
-      if(links[dupId]){ alreadyLinked++; continue }
-
-      // Suche passenden Prophos-Account über externalId (primär) oder Fallbacks
-      const match = accounts.find(a => {
-        const extId   = String(a.externalId   || '').trim()
-        const tsxId   = String(a.topstep?.id  || '').trim()
-        const maLogin = String(a.ma?.login     || '').trim()
-        // Duplikum login ist oft die Tradovate-ID direkt, oder der Account-Name enthält sie
-        return (
-          (extId   && (extId === dupLogin || dupLogin.includes(extId))) ||
-          (tsxId   && (tsxId === dupLogin || dupLogin.includes(tsxId))) ||
-          (maLogin && (maLogin === dupLogin || dupLogin.includes(maLogin)))
-        )
-      })
-
-      if(!match){ skipped++; continue }
-
-      // Nicht schon mit anderem Dup-Account verknüpft?
-      const alreadyUsed = Object.entries(links).some(([, pId]) => String(pId) === String(match.id))
-      if(alreadyUsed){ alreadyLinked++; continue }
-
-      links[dupId] = match.id
-      connected++
-    }
-
-    localStorage.setItem('prophos_dup_links', JSON.stringify(links))
-    renderDupAccountsTable()
-    if(typeof renderAccounts === 'function') renderAccounts()
-
-    const msg = connected > 0
-      ? `✓ ${connected} Account${connected > 1 ? 's' : ''} verknüpft${skipped > 0 ? ` · ${skipped} ohne Match` : ''}`
-      : `Keine neuen Matches${skipped > 0 ? ` · ${skipped} Duplikum-Accounts ohne passende Externe ID` : ''}`
-    // Toast nur zeigen wenn manuell oder wenn etwas verknüpft wurde
-    if(!silent || connected > 0) _atToast(connected > 0 ? '🔗 Auto-Connect' : 'Auto-Connect', msg)
-
-    if(!silent && btn){
-      btn.disabled = false
-      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Auto-Connect`
-    }
-  }
-
-  document.getElementById('dup-auto-connect-btn')?.addEventListener('click', dupAutoConnect)
-  document.getElementById('dup-mappings-btn')?.addEventListener('click', dupApplyStandardMappings)
-  /* ── END Auto-Connect ── */
+  /* ── Auto-Load: wenn der User auf den Duplikum-Tab klickt und noch keine Accounts geladen sind ── */
   document.querySelectorAll('[data-subtab="duplikum"]').forEach(btn => {
     btn.addEventListener('click', () => {
       if(dupState.token && !dupState.accounts.length){
@@ -6311,11 +6023,7 @@
           side: p.side || 'Buy',
           size: p.amountLot || 0,
           openPrice: p.openPrice || null,
-          pnl: p.profit != null ? Number(p.profit)
-             : p.pnl   != null ? Number(p.pnl)
-             : p.unrealizedProfit != null ? Number(p.unrealizedProfit)
-             : p.floatingPl != null ? Number(p.floatingPl)
-             : null,
+          pnl: null,
           ccy: acc.ccy || 'USD'
         })
       }
@@ -6340,6 +6048,8 @@
       ltState.positions = { tsx, mt, dup }
       ltState.lastUpdate = new Date()
       ltRender()
+      // Auto-Detect: Open-Positions gegen Trade-Pläne prüfen
+      atCheckOpenPositions(dup).catch(e => console.warn('atCheckOpen:', e))
     } catch(e) {
       if(stat) stat.textContent = '⚠ Fehler: ' + (e.message || e)
     } finally {
@@ -6526,162 +6236,7 @@
     `
   }
 
-  function ltRenderPlanOverview(){
-    const container  = document.getElementById('lt-plan-overview')
-    const cardsEl    = document.getElementById('lt-plan-cards')
-    // Also render in Trades tab (Open pane)
-    const container2 = document.getElementById('trades-live-overview')
-    const cardsEl2   = document.getElementById('trades-live-cards')
-    if(!container || !cardsEl) return
-
-    const allPlans = (typeof tradePlans !== 'undefined' ? tradePlans : [])
-    const openPlans = allPlans.filter(p => p.status === 'open')
-    if(!openPlans.length){
-      container.style.display = 'none'
-      if(container2) container2.style.display = 'none'
-      return
-    }
-    container.style.display = ''
-    if(container2) container2.style.display = ''
-
-    const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-
-    const _html = openPlans.map(plan => {
-      const live = _at.livePnl[plan.id] || {}
-      const slavePnl  = live.slave  != null ? live.slave  : null
-      const masterPnl = live.master != null ? live.master : null
-      const totalPnl  = slavePnl != null && masterPnl != null ? slavePnl + masterPnl
-                      : slavePnl != null ? slavePnl
-                      : masterPnl != null ? masterPnl : null
-
-      // ── Symmetrie ──
-      let symStatus = 'none'  // perfect | good | warn | bad | missing
-      let symLabel  = '— Keine Daten'
-      let symColor  = 'var(--sub)'
-      let actualMult = null
-      if(live.masterLots && live.slaveLots && plan.multiplier){
-        actualMult = live.slaveLots / live.masterLots
-        const ratio = actualMult / Math.abs(plan.multiplier)
-        const sidesOk = live.masterSide && live.slaveSide && live.masterSide !== live.slaveSide
-        if(!sidesOk){
-          symStatus = 'bad'; symColor = '#dc2626'
-          symLabel = live.masterSide === live.slaveSide ? '⚠ Gleiche Seite!' : '⚠ Seite fehlt'
-        } else if(ratio >= 0.97 && ratio <= 1.03){
-          symStatus = 'perfect'; symColor = '#16a34a'; symLabel = '✓ Perfekt'
-        } else if(ratio >= 0.90 && ratio <= 1.10){
-          symStatus = 'good'; symColor = '#16a34a'; symLabel = '✓ Symmetrisch'
-        } else if(ratio >= 0.80 && ratio <= 1.20){
-          symStatus = 'warn'; symColor = '#f59e0b'; symLabel = '≈ Leicht abw.'
-        } else {
-          symStatus = 'bad'; symColor = '#dc2626'; symLabel = '✕ Asymmetrisch'
-        }
-      } else if(live.ts){
-        symStatus = 'missing'; symColor = '#f59e0b'
-        symLabel = live.masterLots && !live.slaveLots ? '⚠ Slave fehlt'
-                 : !live.masterLots && live.slaveLots ? '⚠ Master fehlt'
-                 : '— Warte…'
-      }
-
-      // ── P&L Farben ──
-      const pnlColor = n => n == null ? 'var(--sub)' : n >= 0 ? '#16a34a' : '#dc2626'
-      const pnlFmt = (n, ccy='') => n == null ? '—'
-        : (n >= 0 ? '+' : '') + n.toFixed(2) + (ccy ? ' '+ccy : '')
-
-      // ── Laufzeit ──
-      const tracking = _at.tracked[plan.id]
-      const since = tracking?.openedAt ? (() => {
-        const s = Math.round((Date.now() - tracking.openedAt) / 1000)
-        if(s < 60) return s + 's'
-        if(s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's'
-        return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm'
-      })() : (plan.startedAt ? (() => {
-        const mins = Math.round((Date.now() - new Date(plan.startedAt)) / 60000)
-        return mins < 60 ? mins + 'm' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm'
-      })() : '—')
-
-      // ── Multiplier bar: wie viel % Abweichung ──
-      const multPct = actualMult != null && plan.multiplier
-        ? Math.min(100, Math.round(100 * actualMult / Math.abs(plan.multiplier)))
-        : null
-
-      return `
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-
-          <!-- ── TOP BAR: Status + Name ── -->
-          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--border)">
-            <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;flex-shrink:0;box-shadow:0 0 0 3px #22c55e22;animation:at-pulse 1.5s infinite"></div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:700;font-size:13px;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escapeHtml(plan.masterName||plan.masterFirm||'—')}">${escapeHtml(plan.masterName||plan.masterFirm||'—')}</span>
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px;flex-shrink:0;color:var(--sub)"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px" title="${escapeHtml(plan.slaveName||plan.slaveFirm||'—')}">${escapeHtml(plan.slaveName||plan.slaveFirm||'—')}</span>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              <span style="font-size:11px;color:var(--sub)">⏱ ${since}</span>
-              <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;height:28px" onclick="openTradeCompleteModal('${plan.id}')">Abschließen</button>
-            </div>
-          </div>
-
-          <!-- ── MAIN: 3 Spalten ── -->
-          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:0;align-items:stretch">
-
-            <!-- Master P&L -->
-            <div style="padding:14px 16px;border-right:1px solid var(--border)">
-              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Master · ${escapeHtml(plan.masterFirm||'—')}</div>
-              <div style="font-size:22px;font-weight:800;font-family:var(--mono);color:${pnlColor(masterPnl)};line-height:1">${pnlFmt(masterPnl, '$')}</div>
-              ${live.masterSide ? `<div style="margin-top:6px;display:flex;align-items:center;gap:6px">
-                <span style="padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${live.masterSide==='Buy'?'#22c55e18':'#ef444418'};color:${live.masterSide==='Buy'?'#16a34a':'#dc2626'}">${live.masterSide}</span>
-                <span style="font-size:11px;color:var(--sub);font-family:var(--mono)">${live.masterLots != null ? live.masterLots+' Lots' : ''}</span>
-              </div>` : '<div style="height:22px"></div>'}
-            </div>
-
-            <!-- Symmetrie Center -->
-            <div style="padding:14px 12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:110px;background:var(--bg)">
-              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em">Symmetrie</div>
-              <div style="font-size:12px;font-weight:700;color:${symColor};text-align:center">${symLabel}</div>
-              ${actualMult != null ? `
-                <div style="font-size:10px;color:var(--sub);font-family:var(--mono);text-align:center">
-                  ×${actualMult.toFixed(3)}<br>
-                  <span style="color:var(--sub-2)">soll ×${Math.abs(plan.multiplier).toFixed(3)}</span>
-                </div>
-                ${multPct != null ? '<div style="width:80px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:2px"><div style="height:100%;width:' + Math.min(100, Math.max(10, 100 - Math.abs(multPct - 100) * 2.5)) + '%;background:' + symColor + ';border-radius:2px;transition:width .3s"></div></div>' : ''}
-              ` : `<div style="font-size:10px;color:var(--sub-2);text-align:center">Warte auf<br>Live-Daten</div>`}
-            </div>
-
-            <!-- Slave P&L -->
-            <div style="padding:14px 16px;border-left:1px solid var(--border)">
-              <div style="font-size:10px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;text-align:right">Slave · ${escapeHtml(plan.slaveFirm||'—')}</div>
-              <div style="font-size:22px;font-weight:800;font-family:var(--mono);color:${pnlColor(slavePnl)};line-height:1;text-align:right">${pnlFmt(slavePnl, '€')}</div>
-              ${live.slaveSide ? `<div style="margin-top:6px;display:flex;align-items:center;justify-content:flex-end;gap:6px">
-                <span style="font-size:11px;color:var(--sub);font-family:var(--mono)">${live.slaveLots != null ? live.slaveLots.toFixed(3)+' Lots' : ''}</span>
-                <span style="padding:1px 7px;border-radius:4px;font-size:11px;font-weight:700;background:${live.slaveSide==='Buy'?'#22c55e18':'#ef444418'};color:${live.slaveSide==='Buy'?'#16a34a':'#dc2626'}">${live.slaveSide}</span>
-              </div>` : '<div style="height:22px"></div>'}
-            </div>
-          </div>
-
-          <!-- ── FOOTER: Gesamt P&L ── -->
-          ${totalPnl != null ? `
-          <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--card)">
-            <span style="font-size:11px;color:var(--sub)">Gesamt P&L (Slave + Master)</span>
-            <span style="font-size:15px;font-weight:800;font-family:var(--mono);color:${pnlColor(totalPnl)}">${pnlFmt(totalPnl)}</span>
-          </div>` : ''}
-
-        </div>
-      `
-    }).join('')
-    cardsEl.innerHTML = _html
-    if(cardsEl2) cardsEl2.innerHTML = _html
-  }
-  // CSS für pulsierenden Punkt
-  ;(function _ltInjectCss(){
-    const s = document.createElement('style')
-    s.textContent = `@keyframes at-pulse{0%,100%{opacity:1}50%{opacity:.4}}`
-    document.head.appendChild(s)
-  })()
-
   function ltRender(){
-    ltRenderPlanOverview()
     const cards = document.getElementById('lt-cards')
     const empty = document.getElementById('lt-empty')
     const stat  = document.getElementById('lt-status')
@@ -6827,6 +6382,210 @@
   function ltStop(){
     if(ltState.refreshTimer){ clearInterval(ltState.refreshTimer); ltState.refreshTimer = null }
   }
+
+  /* ========================================================================
+   * AUTO TRADE TRACKER
+   * Erkennt automatisch Trade-Start und -Ende via Duplikum Open/Closed Positions.
+   * Matching: plan.slaveAccountId → dupGetLinks() rückwärts → Duplikum account_id
+   * ====================================================================== */
+  const autoTrack = {
+    enabled:    localStorage.getItem('prophos_autotrack') !== 'false',
+    // planId → { hadPosition: bool, lastPnl: number|null, notified: bool }
+    state:      new Map(),
+    inProgress: new Set(),
+    closedTimer: null,
+    CLOSED_INTERVAL: 60_000   // getClosedPositions alle 60s
+  }
+
+  // Beim Laden: Toggle-State setzen
+  document.addEventListener('DOMContentLoaded', () => {
+    const tog = document.getElementById('autotrack-toggle')
+    if(tog){
+      tog.checked = autoTrack.enabled
+      tog.addEventListener('change', () => {
+        autoTrack.enabled = tog.checked
+        localStorage.setItem('prophos_autotrack', String(tog.checked))
+        const lbl = document.getElementById('autotrack-label')
+        if(lbl) lbl.style.color = tog.checked ? 'var(--violet)' : 'var(--sub)'
+        if(tog.checked) atStartClosedPoll()
+        else atStopClosedPoll()
+      })
+      if(autoTrack.enabled){
+        const lbl = document.getElementById('autotrack-label')
+        if(lbl) lbl.style.color = 'var(--violet)'
+      }
+    }
+  })
+
+  // ── Hilfsfunktion: Prophos-Account-ID → Duplikum-Account-ID ──
+  function atGetDupId(prophosAccountId){
+    const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+    // links = { dupAccountId: prophosAccountId }
+    for(const [dupId, manualId] of Object.entries(links)){
+      if(String(manualId) === String(prophosAccountId)) return dupId
+    }
+    return null
+  }
+
+  // ── Toast anzeigen (verschwindet nach 4.5s) ──
+  function atToast(msg, type){
+    document.querySelectorAll('.at-toast').forEach(el => el.remove())
+    const el = document.createElement('div')
+    el.className = `at-toast ${type}`
+    el.textContent = msg
+    document.body.appendChild(el)
+    setTimeout(() => el.remove(), 4500)
+  }
+
+  // ── End-Prompt anzeigen (Trade beendet, P&L vorausfüllen) ──
+  function atShowEndPrompt(plan, slavePl){
+    // Nur einen Prompt gleichzeitig pro Plan
+    if(document.getElementById(`at-prompt-${plan.id}`)) return
+    const el = document.createElement('div')
+    el.className = 'at-prompt'
+    el.id = `at-prompt-${plan.id}`
+    const plText = slavePl != null
+      ? ` · P&L: <strong style="color:${slavePl>=0?'#10b981':'#ef4444'}">${slavePl>=0?'+':''}${slavePl.toFixed(2)}$</strong>`
+      : ''
+    el.innerHTML = `
+      <div style="font-weight:700;font-size:14px;color:var(--ink);margin-bottom:3px">🔴 Trade erkannt: beendet</div>
+      <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')}${plText}</div>
+      <div style="display:flex;gap:8px">
+        <button id="at-complete-${plan.id}" style="flex:1;padding:8px;background:var(--violet);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
+        <button id="at-dismiss-${plan.id}" style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--sub);font-size:12px">Später</button>
+      </div>
+    `
+    document.body.appendChild(el)
+    document.getElementById(`at-complete-${plan.id}`)?.addEventListener('click', () => {
+      el.remove()
+      openTradeCompleteModal(plan.id, slavePl)
+    })
+    document.getElementById(`at-dismiss-${plan.id}`)?.addEventListener('click', () => {
+      el.remove()
+      // Beim nächsten Closed-Poll nochmal melden
+      const s = autoTrack.state.get(plan.id)
+      if(s) autoTrack.state.set(plan.id, { ...s, notified: false })
+    })
+    setTimeout(() => el.remove(), 30_000)
+  }
+
+  // ── Open-Positions-Check (wird nach jedem ltRender aufgerufen) ──
+  async function atCheckOpenPositions(dupOpenPositions){
+    if(!autoTrack.enabled) return
+    if(!Array.isArray(tradePlans) || !tradePlans.length) return
+
+    // Duplikum-Positionen nach account_id gruppieren
+    const openByDupAcc = new Map()
+    for(const pos of dupOpenPositions){
+      const id = String(pos.accountId || pos.account_id || '')
+      if(!openByDupAcc.has(id)) openByDupAcc.set(id, [])
+      openByDupAcc.get(id).push(pos)
+    }
+
+    for(const plan of tradePlans.filter(p => p.status === 'planned')){
+      if(autoTrack.inProgress.has(plan.id)) continue
+      const dupSlaveId = atGetDupId(plan.slaveAccountId)
+      if(!dupSlaveId) continue
+
+      const hasPos = (openByDupAcc.get(String(dupSlaveId)) || []).length > 0
+      const prev   = autoTrack.state.get(plan.id) || { hadPosition: false }
+
+      if(hasPos && !prev.hadPosition){
+        // Neue Position → Auto-Start
+        autoTrack.state.set(plan.id, { hadPosition: true, lastPnl: null, notified: false })
+        autoTrack.inProgress.add(plan.id)
+        try {
+          const { data, error } = await supabase
+            .from('trade_plans')
+            .update({ status: 'open', started_at: new Date().toISOString() })
+            .eq('id', plan.id).select('*').single()
+          if(!error){
+            const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+            if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+            renderTradePlans()
+            atToast(`▶ Trade gestartet: ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
+          }
+        } catch(e){ console.warn('autoTrack start:', e) }
+        finally { autoTrack.inProgress.delete(plan.id) }
+      } else {
+        autoTrack.state.set(plan.id, { ...prev, hadPosition: hasPos })
+      }
+    }
+
+    // Open-Plans: letzten P&L aus laufenden Positionen tracken
+    for(const plan of tradePlans.filter(p => p.status === 'open')){
+      const dupSlaveId = atGetDupId(plan.slaveAccountId)
+      if(!dupSlaveId) continue
+      const positions = openByDupAcc.get(String(dupSlaveId)) || []
+      const prev = autoTrack.state.get(plan.id) || { hadPosition: true, lastPnl: null, notified: false }
+      if(positions.length > 0){
+        const pnl = positions.reduce((s, p) => s + (Number(p.pnl) || 0), 0)
+        autoTrack.state.set(plan.id, { hadPosition: true, lastPnl: pnl || prev.lastPnl, notified: false })
+      } else if(prev.hadPosition) {
+        // Position gerade verschwunden aus Open — Closed-Poll wird End-Prompt zeigen
+        autoTrack.state.set(plan.id, { ...prev, hadPosition: false })
+      }
+    }
+  }
+
+  // ── Closed-Positions-Poll (alle 60s) ──
+  async function atCheckClosedPositions(){
+    if(!autoTrack.enabled) return
+    if(!dupState?.token) return
+    const openPlans = (tradePlans || []).filter(p => p.status === 'open')
+    if(!openPlans.length) return
+
+    try {
+      const res = await dupApi('POST', 'position/getClosedPositions.php', {
+        length: 50,
+        // Letzte 10 Minuten: jetzt minus 600s
+        dateFrom: new Date(Date.now() - 600_000).toISOString().slice(0,19).replace('T',' ')
+      })
+      if(!res.ok) return
+      const closed = (res.data?.data || [])
+
+      for(const plan of openPlans){
+        if(autoTrack.inProgress.has(plan.id)) continue
+        const dupSlaveId = atGetDupId(plan.slaveAccountId)
+        if(!dupSlaveId) continue
+
+        const prev = autoTrack.state.get(plan.id) || { hadPosition: false, lastPnl: null, notified: false }
+        if(prev.notified) continue
+
+        // Schau ob eine kürzlich geschlossene Position zu diesem Slave-Account gehört
+        const planStart = plan.startedAt ? new Date(plan.startedAt).getTime() : 0
+        const match = closed.find(c =>
+          String(c.account_id) === String(dupSlaveId) &&
+          new Date(c.closeTime || c.close_time || 0).getTime() > planStart
+        )
+        if(match){
+          const slavePl = match.profit != null ? Number(match.profit)
+            : (match.pnl != null ? Number(match.pnl) : prev.lastPnl)
+          autoTrack.state.set(plan.id, { ...prev, notified: true })
+          atShowEndPrompt(plan, slavePl)
+        } else if(!prev.hadPosition && !prev.notified && prev.lastPnl != null){
+          // Keine Closed-Position gefunden aber Open-Position weg → Fallback mit letztem P&L
+          autoTrack.state.set(plan.id, { ...prev, notified: true })
+          atShowEndPrompt(plan, prev.lastPnl)
+        }
+      }
+    } catch(e){ console.warn('autoTrack closedPoll:', e) }
+  }
+
+  function atStartClosedPoll(){
+    if(autoTrack.closedTimer) return
+    atCheckClosedPositions()
+    autoTrack.closedTimer = setInterval(atCheckClosedPositions, autoTrack.CLOSED_INTERVAL)
+  }
+  function atStopClosedPoll(){
+    if(autoTrack.closedTimer){ clearInterval(autoTrack.closedTimer); autoTrack.closedTimer = null }
+  }
+
+  // Closed-Poll starten wenn Duplikum verbunden ist
+  document.addEventListener('DOMContentLoaded', () => {
+    if(autoTrack.enabled) setTimeout(() => { if(dupState?.token) atStartClosedPoll() }, 3000)
+  })
+
 
   // Manueller Refresh-Button
   document.getElementById('lt-refresh-btn')?.addEventListener('click', ltRefresh)
@@ -7191,7 +6950,7 @@
       if(a.firm) parts.push(escapeHtml(a.firm))
       parts.push(typeLabel(a.type))
       if(archInfo?.archived){
-        const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', reset: '🔄 Reset', manual: '📦 Archiviert' }
+        const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', manual: '📦 Archiviert' }
         parts.push(reasonMap[archInfo.reason] || '📦 Archiviert')
       }
       subEl.innerHTML = parts.join(' · ')
@@ -7860,26 +7619,6 @@
     }
   })
 
-  // Reset-Button im Detail-Header
-  document.getElementById('ad-reset-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    if(_detailAccountId && typeof openResetModal === 'function') openResetModal(_detailAccountId)
-  })
-  // Trade hinzufügen (jetzt) — dieser Account als Master, Datum heute
-  document.getElementById('ad-add-trade-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    if(_detailAccountId && typeof openTradePlanModal === 'function'){
-      openTradePlanModal(null, { masterId: _detailAccountId, plannedFor: 'today' })
-    }
-  })
-  // Trade planen (für später) — dieser Account als Master, Datum morgen
-  document.getElementById('ad-plan-trade-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    if(_detailAccountId && typeof openTradePlanModal === 'function'){
-      openTradePlanModal(null, { masterId: _detailAccountId })
-    }
-  })
-
   // Hash-Listener: 
   //  - manuelle Navigation zu #account-detail ohne ID → zurück zu Accounts
   //  - bei jeder Änderung der Account-Daten von außen wird beim Re-Show gerendert
@@ -7905,7 +7644,6 @@
    * ACCOUNT-FILTER (Firma + Typ)
    * ====================================================================== */
   let accFilters = { firm: '', type: '' }
-  let accSearch = ''  // Freitext-Suche über External ID / Login / Name (Header-Suchbar)
 
   function populateAccountFilters(){
     const firmSel = document.getElementById('acc-firm-filter')
@@ -7925,34 +7663,6 @@
     accFilters.type = e.target.value
     if(typeof renderAccounts === 'function') renderAccounts()
   })
-
-  /* Header-Suchbar (⌘K) → Accounts nach External ID / Login / Name filtern */
-  ;(function wireGlobalSearch(){
-    const input = document.getElementById('globalSearch')
-    if(!input) return
-    let _lastQuery = null
-    function runGlobalSearch(){
-      const q = (input.value || '').trim().toLowerCase()
-      if(q === _lastQuery) return  // nichts geändert → kein Re-Render
-      _lastQuery = q
-      accSearch = q
-      // Bei aktiver Suche automatisch auf die Accounts-View wechseln
-      const onAccounts = document.querySelector('#dashboard-view .view.active')?.dataset.view === 'accounts'
-      if(accSearch && !onAccounts && typeof switchView === 'function') switchView('accounts')
-      if(typeof renderAccounts === 'function') renderAccounts()
-    }
-    // Alle Eingabewege abdecken: Tippen, Einfügen, Ausschneiden, Autofill
-    ;['input','change','keyup','cut'].forEach(ev => input.addEventListener(ev, runGlobalSearch))
-    // Einfügen: Wert steht erst nach dem Event fest → im nächsten Tick lesen
-    input.addEventListener('paste', () => setTimeout(runGlobalSearch, 0))
-    // ⌘K / Ctrl+K fokussiert die Suche
-    document.addEventListener('keydown', ev => {
-      if((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K')){
-        ev.preventDefault()
-        input.focus(); input.select()
-      }
-    })
-  })()
 
   /* ========================================================================
    * DASHBOARD — TODO-LISTE + RECENT TRADES
@@ -8099,7 +7809,7 @@
     })
     const status = document.querySelector('input[name="tc-status"]:checked')?.value
     const wrap = document.getElementById('tc-status-account-wrap')
-    if(wrap) wrap.style.display = (status === 'blown' || status === 'passed' || status === 'reset') ? 'block' : 'none'
+    if(wrap) wrap.style.display = (status === 'blown' || status === 'passed') ? 'block' : 'none'
   }
 
   document.querySelectorAll('input[name="tc-status"]').forEach(r =>
@@ -8190,123 +7900,6 @@
     if(e.target === document.getElementById('successorModal')) closeSuccessorWizard()
   })
 
-  /* ========== ACCOUNT RESET ========== */
-  let _resetTargetId = null
-  let _resetFeeCcy = 'EUR'
-  function _resetUpdateHint(){
-    const hint = document.getElementById('reset-fee-hint')
-    if(!hint) return
-    const raw = parseFloat(document.getElementById('reset-fee')?.value)
-    const fx = window._fxUsdEur || 0.85
-    const fxStr = fx.toFixed(4).replace('.', ',')
-    hint.textContent = (_resetFeeCcy === 'USD')
-      ? ((!isNaN(raw) && raw > 0)
-          ? `= €${(raw*fx).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} (Kurs 1 USD = ${fxStr} €) — gespeichert in Euro`
-          : `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € umgerechnet`)
-      : ''
-  }
-  function _resetSetCcy(ccy){
-    _resetFeeCcy = (ccy === 'USD') ? 'USD' : 'EUR'
-    document.querySelectorAll('#reset-ccy .reset-ccy-btn').forEach(b => {
-      const active = b.dataset.ccy === _resetFeeCcy
-      b.classList.toggle('active', active)
-      b.style.background = active ? 'var(--violet)' : 'transparent'
-      b.style.color = active ? '#fff' : 'var(--sub)'
-    })
-    _resetUpdateHint()
-  }
-  function openResetModal(accountId){
-    const a = accounts.find(x => String(x.id) === String(accountId))
-    if(!a) return
-    _resetTargetId = a.id
-    const info = document.getElementById('resetInfo')
-    if(info){
-      info.innerHTML = `
-        <div class="lh-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-        </div>
-        <div class="lh-name">${escapeHtml(a.name)}</div>
-        <div class="lh-meta">${escapeHtml(a.firm || '–')} · ${typeLabel(a.type)}${a.externalId ? ' · alt: ' + escapeHtml(String(a.externalId)) : ''}</div>`
-    }
-    const nameEl = document.getElementById('reset-name')
-    const extEl  = document.getElementById('reset-extid')
-    const feeEl  = document.getElementById('reset-fee')
-    const msgEl  = document.getElementById('resetMsg')
-    if(nameEl) nameEl.value = a.name || ''
-    if(extEl)  extEl.value = ''
-    if(feeEl)  feeEl.value = a.purchaseCost != null ? a.purchaseCost : 0
-    if(msgEl){ msgEl.textContent = ''; msgEl.className = 'modal-msg' }
-    _resetSetCcy('EUR')
-    document.getElementById('resetModal').classList.add('open')
-    setTimeout(() => extEl?.focus(), 50)
-  }
-  function closeResetModal(){
-    document.getElementById('resetModal').classList.remove('open')
-    _resetTargetId = null
-  }
-  window.openResetModal = openResetModal
-  document.getElementById('resetCancel')?.addEventListener('click', closeResetModal)
-  document.getElementById('resetCancel2')?.addEventListener('click', closeResetModal)
-  document.getElementById('resetModal')?.addEventListener('click', e => {
-    if(e.target === document.getElementById('resetModal')) closeResetModal()
-  })
-  document.querySelectorAll('#reset-ccy .reset-ccy-btn').forEach(b => {
-    b.addEventListener('click', () => _resetSetCcy(b.dataset.ccy))
-  })
-  document.getElementById('reset-fee')?.addEventListener('input', _resetUpdateHint)
-
-  document.getElementById('resetConfirm')?.addEventListener('click', async () => {
-    const oldId = _resetTargetId
-    const old = accounts.find(x => String(x.id) === String(oldId))
-    const msgEl = document.getElementById('resetMsg')
-    if(!old){ return }
-    const newExtId = (document.getElementById('reset-extid')?.value || '').trim()
-    const newName  = (document.getElementById('reset-name')?.value || '').trim() || old.name
-    let fee = parseFloat(document.getElementById('reset-fee')?.value)
-    if(isNaN(fee)) fee = 0
-    if(_resetFeeCcy === 'USD') fee = fee * (window._fxUsdEur || 0.85)  // → EUR
-    if(!newExtId){
-      if(msgEl){ msgEl.textContent = 'Neue External ID ist nötig (ändert sich beim Reset).'; msgEl.className = 'modal-msg err' }
-      document.getElementById('reset-extid')?.focus()
-      return
-    }
-    const btn = document.getElementById('resetConfirm')
-    btn.disabled = true; btn.classList.add('ts-btn-loading')
-    try {
-      // Neuer, EIGENSTÄNDIGER Account (Kopie des Schemas, frische Kosten, neue External ID)
-      const newAcc = {
-        name:           newName,
-        firm:           old.firm,
-        type:           old.type,
-        initialBalance: old.initialBalance || 0,
-        purchaseCost:   fee > 0 ? fee : null,
-        maxDrawdown:    old.maxDrawdown != null ? old.maxDrawdown : null,
-        externalId:     newExtId
-      }
-      const { data, error } = await supabase.from('accounts').insert(accountToRow(newAcc)).select('*').single()
-      if(error) throw error
-      const created = rowToAccount(data)
-      accounts.push(created)
-      // Alten Account archivieren — Grund "reset". Bewusst OHNE successorId,
-      // damit die Gesamtkosten-Kette NICHT weiterläuft (frischer Start).
-      archiveAccount(oldId, 'reset')
-
-      renderAccounts()
-      if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
-      if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
-      if(typeof renderPairs === 'function') renderPairs()
-      closeResetModal()
-      // Zum neuen Account springen
-      _detailAccountId = created.id
-      if(typeof switchView === 'function') switchView('account-detail')
-      if(typeof renderAccountDetail === 'function') renderAccountDetail()
-    } catch(e){
-      if(msgEl){ msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err' }
-    } finally {
-      btn.disabled = false; btn.classList.remove('ts-btn-loading')
-    }
-  })
-
   document.getElementById('successorConfirm')?.addEventListener('click', async () => {
     const parentId = _successorParentAccId
     if(!parentId) return
@@ -8379,7 +7972,6 @@
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
-      externalId:     row.external_id || null,
       createdAt: row.created_at,
       topstep: row.topstep_account_id ? {
         id:        row.topstep_account_id,
@@ -8406,8 +7998,7 @@
       account_type: a.type,
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
-      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
-      external_id: a.externalId || null
+      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
     }
     if(a.topstep){
       row.topstep_account_id   = a.topstep.id
@@ -8456,7 +8047,6 @@
     bal:      document.getElementById('ac-balance'),
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
-    extId:    document.getElementById('ac-external-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -8497,39 +8087,12 @@
     const parents = (typeof getParents === 'function') ? getParents() : {}
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
     const filters = (typeof accFilters !== 'undefined') ? accFilters : { firm:'', type:'' }
-    const q = (typeof accSearch === 'string') ? accSearch : ''
-
-    // Reverse-Lookup: manual_id → Duplikum-Account-Daten (auch für die Suche gebraucht)
-    const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-    const dupByManualId = {}
-    for(const [dupId, manualId] of Object.entries(dupLinks)){
-      const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
-      if(dupAcc) dupByManualId[manualId] = dupAcc
-    }
-
-    // Durchsuchbarer Text pro Account: External ID, MT5-Login, Topstep/Tradovate-Login,
-    // Duplikum-Login, Name
-    // Trenner (Leerzeichen, -, _, ., /) ignorieren, damit Teilsuchen über
-    // formatierte IDs hinweg greifen (z.B. "master - tradovate - 2026…").
-    const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
-    const accHaystack = a => {
-      const dupAcc = dupByManualId[a.id] || null
-      return searchNorm([
-        a.name,
-        a.externalId,
-        a.ma?.login, a.ma?.accountId,               // MT5
-        a.topstep?.id, a.topstep?.name,             // Topstep / Tradovate
-        dupAcc?.login, dupAcc?.account_id, dupAcc?.name  // Duplikum (inkl. Anzeige-Name)
-      ].filter(Boolean).join(' '))
-    }
-    const qNorm = searchNorm(q)
 
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
-      if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -8546,17 +8109,16 @@
     if(!visible.length){
       accEls.table.innerHTML = ''
       accEls.empty.style.display = 'block'
-      const emptyH3 = accEls.empty.querySelector('h3')
-      const emptyP  = accEls.empty.querySelector('p')
-      if(q){
-        if(emptyH3) emptyH3.textContent = 'Keine Treffer'
-        if(emptyP)  emptyP.textContent = `Kein Account passt zu „${q}“. Suche über External ID, MT5-/Topstep-Login oder Name.`
-      } else {
-        if(emptyH3) emptyH3.textContent = 'Noch keine Accounts'
-        if(emptyP)  emptyP.textContent = 'Füg deinen ersten Account manuell hinzu — oder verknüpf einen Topstep-Account aus dem nächsten Tab.'
-      }
     }else{
       accEls.empty.style.display = 'none'
+
+      // Reverse-Lookup: manual_id → Duplikum-Account-Daten
+      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dupByManualId = {}
+      for(const [dupId, manualId] of Object.entries(dupLinks)){
+        const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
+        if(dupAcc) dupByManualId[manualId] = dupAcc
+      }
 
       accEls.table.innerHTML = visible.map(a => {
         const archInfo = archive[a.id] || null
@@ -8622,7 +8184,7 @@
         // Archiv-Badge
         let archBadge = ''
         if(isArchived){
-          const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', reset: '🔄 Reset', manual: '📦 Archiviert' }
+          const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', manual: '📦 Archiviert' }
           const reasonLabel = reasonMap[archInfo.reason] || '📦 Archiviert'
           archBadge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;background:#94a3b822;color:#475569;margin-left:8px;vertical-align:middle">${reasonLabel}</span>`
         }
@@ -8646,11 +8208,6 @@
         // Archivierte ausgrauen
         const rowOpacity = isArchived ? 'opacity:.55' : ''
 
-        // Reset-Button (nur aktive Accounts)
-        const resetActionBtn = isArchived ? '' : `<button class="btn btn-ghost icon-btn" data-acc-reset="${a.id}" title="Resetten (alten archivieren, neuen anlegen)" style="padding:5px 8px;margin-left:4px">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            </button>`
-
         return `
           <tr data-acc-id="${a.id}" style="cursor:pointer;${rowOpacity}" data-acc-detail="${a.id}">
             <td style="padding-left:20px">
@@ -8665,7 +8222,6 @@
               <button class="btn btn-ghost icon-btn" data-acc-edit="${a.id}" title="Bearbeiten" style="padding:5px 8px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
-              ${resetActionBtn}
               ${archiveActionBtn}
               <button class="btn btn-ghost icon-btn" data-acc-del="${a.id}" title="Löschen" style="padding:5px 8px;margin-left:4px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -8680,11 +8236,6 @@
           if(!confirm('Account archivieren? Er bleibt erhalten und kann jederzeit wieder reaktiviert werden.')) return
           archiveAccount(btn.dataset.accArchive, 'manual')
           renderAccounts()
-        })
-      })
-      accEls.table.querySelectorAll('[data-acc-reset]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          if(typeof openResetModal === 'function') openResetModal(btn.dataset.accReset)
         })
       })
       accEls.table.querySelectorAll('[data-acc-unarchive]').forEach(btn => {
@@ -8777,7 +8328,6 @@
       accEls.bal.value  = editAccount.initialBalance != null ? editAccount.initialBalance : ''
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
-      if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -8788,12 +8338,9 @@
       accEls.bal.value  = ''
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
-      if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
     }
-    // Kaufpreis-Währung immer auf € (Base) zurücksetzen — gespeicherter Wert ist EUR
-    if(typeof window._acSetPurchaseCcy === 'function') window._acSetPurchaseCcy('EUR')
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
@@ -8835,13 +8382,8 @@
     const firm = accEls.firm.value.trim()
     const type = accEls.type.value
     const initialBalance = parseFloat(accEls.bal.value) || 0
-    // Kaufpreis: in € gespeichert. Bei $-Eingabe mit Settings-Kurs umrechnen.
-    let purchaseCost = parseFloat(accEls.purchase.value)
-    if(!isNaN(purchaseCost) && (typeof window._acGetPurchaseCcy === 'function') && window._acGetPurchaseCcy() === 'USD'){
-      purchaseCost = purchaseCost * (window._fxUsdEur || 0.85)  // USD → EUR
-    }
+    const purchaseCost = parseFloat(accEls.purchase.value)
     const maxDrawdown = parseFloat(accEls.maxDd.value)
-    const externalId = accEls.extId?.value?.trim() || null
     const isEdit = !!_editingAccountId
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
@@ -8852,7 +8394,6 @@
       name, firm, type, initialBalance,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
-      externalId,
       createdAt: new Date().toISOString(),
       ma: null
     }
@@ -8900,8 +8441,7 @@
           account_type: acc.type,
           balance: acc.initialBalance,
           purchase_cost: acc.purchaseCost,
-          max_drawdown: acc.maxDrawdown,
-          external_id: acc.externalId || null
+          max_drawdown: acc.maxDrawdown
         }
         // MetaApi-Felder mit-updaten falls vorhanden, sonst auf null setzen
         if(acc.ma){
@@ -8985,43 +8525,6 @@
     openAccountModal('live')
   })
 
-  /* ── Kaufpreis-Währung (€/$) Umschalter ── */
-  // Gespeichert wird immer in EUR. Bei $-Eingabe → Umrechnung mit window._fxUsdEur (Settings).
-  let _acPurchaseCcy = 'EUR'
-  function _acUpdatePurchaseHint(){
-    const hint = document.getElementById('ac-purchase-hint')
-    if(!hint) return
-    const raw = parseFloat(accEls.purchase?.value)
-    const fx = window._fxUsdEur || 0.85
-    const fxStr = fx.toFixed(4).replace('.', ',')
-    if(_acPurchaseCcy === 'USD'){
-      if(!isNaN(raw) && raw > 0){
-        const eur = raw * fx
-        hint.textContent = `= €${eur.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})}  (Kurs 1 USD = ${fxStr} €) — gespeichert wird in Euro`
-      } else {
-        hint.textContent = `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € nach Euro umgerechnet`
-      }
-    } else {
-      hint.textContent = ''
-    }
-  }
-  function _acSetPurchaseCcy(ccy){
-    _acPurchaseCcy = (ccy === 'USD') ? 'USD' : 'EUR'
-    document.querySelectorAll('#ac-purchase-ccy .ac-ccy-btn').forEach(b => {
-      const active = b.dataset.ccy === _acPurchaseCcy
-      b.classList.toggle('active', active)
-      b.style.background = active ? 'var(--violet)' : 'transparent'
-      b.style.color = active ? '#fff' : 'var(--sub)'
-    })
-    _acUpdatePurchaseHint()
-  }
-  window._acGetPurchaseCcy = () => _acPurchaseCcy
-  window._acSetPurchaseCcy = _acSetPurchaseCcy
-  document.querySelectorAll('#ac-purchase-ccy .ac-ccy-btn').forEach(b => {
-    b.addEventListener('click', () => _acSetPurchaseCcy(b.dataset.ccy))
-  })
-  accEls.purchase?.addEventListener('input', _acUpdatePurchaseHint)
-
   /* ========== BULK ADD ACCOUNTS ========== */
   ;(function(){
     const bEl = {
@@ -9040,208 +8543,12 @@
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
-      extIds:    document.getElementById('bulk-external-ids'),
-      idsHint:   document.getElementById('bulk-ids-hint'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
     }
 
-    // Kaufpreis-Währung im Bulk-Dialog (gespeichert wird immer in EUR)
-    let _bulkPurchaseCcy = 'EUR'
-    function _bulkUpdateCostHint(){
-      const hint = document.getElementById('bulk-cost-hint')
-      if(!hint) return
-      const raw = parseFloat(bEl.cost?.value)
-      const fx = window._fxUsdEur || 0.85
-      const fxStr = fx.toFixed(4).replace('.', ',')
-      if(_bulkPurchaseCcy === 'USD'){
-        hint.textContent = (!isNaN(raw) && raw > 0)
-          ? `= €${(raw*fx).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} pro Account (Kurs 1 USD = ${fxStr} €) — gespeichert in Euro`
-          : `Eingabe in USD — wird mit Kurs 1 USD = ${fxStr} € nach Euro umgerechnet`
-      } else {
-        hint.textContent = ''
-      }
-    }
-    function _bulkSetCostCcy(ccy){
-      _bulkPurchaseCcy = (ccy === 'USD') ? 'USD' : 'EUR'
-      document.querySelectorAll('#bulk-cost-ccy .bulk-ccy-btn').forEach(b => {
-        const active = b.dataset.ccy === _bulkPurchaseCcy
-        b.classList.toggle('active', active)
-        b.style.background = active ? 'var(--violet)' : 'transparent'
-        b.style.color = active ? '#fff' : 'var(--sub)'
-      })
-      _bulkUpdateCostHint()
-      if(typeof updatePreview === 'function') updatePreview()
-    }
-
-    /* ── Account-Vorlagen (Supabase, mit localStorage-Cache/Fallback) ── */
-    const _TPL_KEY = 'prophos_acc_templates'   // lokaler Cache / Offline-Fallback
-    const _tplEsc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-    let _tplCache = _tplLoadLocal()
-    let _tplRemoteOk = true
-    function _tplLoadLocal(){ try { return JSON.parse(localStorage.getItem(_TPL_KEY) || '[]') } catch { return [] } }
-    function _tplSaveLocal(arr){ try { localStorage.setItem(_TPL_KEY, JSON.stringify(arr)) } catch(e){} }
-    function _tplFromRow(r){ return {
-      id: r.id, name: r.name, firm: r.firm||'', type: r.type||'phase1',
-      accountSize: r.account_size||'', initialBalance: r.initial_balance||'',
-      purchaseCost: r.purchase_cost||'', purchaseCcy: r.purchase_ccy||'EUR',
-      maxDrawdown: r.max_drawdown||'', nameTemplate: r.name_template||''
-    } }
-    function _tplToRow(t){ return {
-      user_id: currentUserId, name: t.name,
-      firm: t.firm||null, type: t.type||null, account_size: t.accountSize||null,
-      initial_balance: t.initialBalance||null, purchase_cost: t.purchaseCost||null,
-      purchase_ccy: t.purchaseCcy||'EUR', max_drawdown: t.maxDrawdown||null,
-      name_template: t.nameTemplate||null
-    } }
-    async function _tplFetch(){
-      _tplRender()  // sofort aus Cache rendern
-      if(!currentUserId){ return }
-      try {
-        const { data, error } = await supabase.from('account_templates')
-          .select('*').eq('user_id', currentUserId).order('created_at', { ascending: true })
-        if(error) throw error
-        _tplRemoteOk = true
-        _tplCache = (data || []).map(_tplFromRow)
-        _tplSaveLocal(_tplCache)
-      } catch(e){
-        _tplRemoteOk = false
-        _tplCache = _tplLoadLocal()
-        console.warn('[Prophos] account_templates nicht erreichbar (Migration ausgeführt?), nutze lokalen Cache:', e?.message || e)
-      }
-      _tplRender()
-    }
-    async function _tplPersistSave(tpl){   // tpl ohne id
-      if(_tplRemoteOk && currentUserId){
-        try {
-          const { data, error } = await supabase.from('account_templates')
-            .insert(_tplToRow(tpl)).select('*').single()
-          if(error) throw error
-          _tplCache.push(_tplFromRow(data)); _tplSaveLocal(_tplCache); _tplRender(); return
-        } catch(e){ _tplRemoteOk = false; console.warn('[Prophos] tpl insert → lokaler Fallback:', e?.message || e) }
-      }
-      _tplCache.push({ id: 'tpl_'+Date.now(), ...tpl }); _tplSaveLocal(_tplCache); _tplRender()
-    }
-    async function _tplPersistRename(id, name){
-      const t = _tplCache.find(x => x.id === id); if(t){ t.name = name; _tplSaveLocal(_tplCache) }
-      _tplRender()
-      if(_tplRemoteOk && currentUserId && !String(id).startsWith('tpl_')){
-        try { await supabase.from('account_templates').update({ name }).eq('id', id) }
-        catch(e){ console.warn('[Prophos] tpl rename:', e?.message || e) }
-      }
-    }
-    function _tplCapture(){
-      return {
-        firm:           bEl.firm?.value.trim() || '',
-        type:           bEl.type?.value || 'phase1',
-        accountSize:    bEl.size?.value.trim() || '',
-        initialBalance: bEl.balance?.value.trim() || '',
-        purchaseCost:   bEl.cost?.value.trim() || '',
-        purchaseCcy:    _bulkPurchaseCcy,
-        maxDrawdown:    bEl.maxdd?.value.trim() || '',
-        nameTemplate:   bEl.template?.value.trim() || ''
-      }
-    }
-    function _tplFlashFields(){
-      ;[bEl.firm, bEl.size, bEl.balance, bEl.cost, bEl.maxdd, bEl.template].forEach(el => {
-        if(!el) return
-        el.classList.remove('tpl-flash'); void el.offsetWidth; el.classList.add('tpl-flash')
-        setTimeout(() => el.classList.remove('tpl-flash'), 800)
-      })
-    }
-    function _tplApply(tpl){
-      if(bEl.firm)     bEl.firm.value     = tpl.firm || ''
-      if(bEl.type && tpl.type) bEl.type.value = tpl.type
-      if(bEl.size)     bEl.size.value     = tpl.accountSize || ''
-      if(bEl.balance)  bEl.balance.value  = tpl.initialBalance || ''
-      if(bEl.cost)     bEl.cost.value     = tpl.purchaseCost || ''
-      if(bEl.maxdd)    bEl.maxdd.value    = tpl.maxDrawdown || ''
-      if(bEl.template) bEl.template.value = tpl.nameTemplate || ''
-      _bulkSetCostCcy(tpl.purchaseCcy === 'USD' ? 'USD' : 'EUR')
-      if(typeof updatePreview === 'function') updatePreview()
-      _tplFlashFields()
-    }
-    function _tplMetaStr(t){
-      const parts = []
-      if(t.firm) parts.push(t.firm)
-      if(t.accountSize){ const n = parseFloat(t.accountSize); parts.push(!isNaN(n) && n >= 1000 ? Math.round(n/1000)+'K' : t.accountSize) }
-      if(t.type) parts.push((typeof typeLabel === 'function') ? typeLabel(t.type) : t.type)
-      return parts.join(' · ')
-    }
-    function _tplPriceStr(t){ return t.purchaseCost ? (t.purchaseCcy === 'USD' ? '$' : '€') + t.purchaseCost : '' }
-    function _tplRender(){
-      const wrap = document.getElementById('bulk-templates')
-      if(!wrap) return
-      const tpls = _tplCache
-      if(!tpls.length){
-        wrap.innerHTML = `<div class="tpl-empty">Noch keine Vorlagen — füll die Felder aus und klick „＋ Aktuelle speichern".</div>`
-        return
-      }
-      wrap.innerHTML = tpls.map(t => `
-        <div class="tpl-card" data-tpl-id="${_tplEsc(t.id)}" title="Vorlage anwenden">
-          <div class="tpl-actions">
-            <button type="button" data-act="rename" title="Umbenennen">✎</button>
-            <button type="button" data-act="delete" title="Löschen">🗑</button>
-          </div>
-          <div class="tpl-name">${_tplEsc(t.name)}</div>
-          <div class="tpl-meta">${_tplEsc(_tplMetaStr(t)) || '—'}</div>
-          ${_tplPriceStr(t) ? `<div class="tpl-price">${_tplEsc(_tplPriceStr(t))}</div>` : ''}
-        </div>`).join('')
-    }
-    function _tplStartSave(){
-      const wrap = document.getElementById('bulk-templates')
-      if(!wrap) return
-      const cap = _tplCapture()
-      if(!cap.firm){ if(bEl.firm){ bEl.firm.focus(); bEl.firm.classList.add('tpl-flash'); setTimeout(()=>bEl.firm.classList.remove('tpl-flash'),800) } return }
-      const suggested = _tplMetaStr(cap)
-      const card = document.createElement('div')
-      card.className = 'tpl-card'; card.style.cssText = 'flex:0 0 auto;min-width:170px;cursor:default'
-      card.innerHTML = `<input class="tpl-name-input" placeholder="Vorlagen-Name…" value="${_tplEsc(suggested)}">
-        <div class="tpl-meta" style="margin-top:6px">${_tplEsc(suggested) || '—'}</div>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button type="button" data-sv="ok" class="btn btn-primary" style="padding:2px 10px;font-size:11px">Speichern</button>
-          <button type="button" data-sv="x" class="btn btn-ghost" style="padding:2px 8px;font-size:11px">✕</button>
-        </div>`
-      wrap.prepend(card)
-      const input = card.querySelector('input'); input.focus(); input.select()
-      const doSave = () => {
-        const name = input.value.trim()
-        if(!name){ input.focus(); return }
-        _tplPersistSave({ name, ...cap })
-      }
-      input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); doSave() } if(e.key==='Escape'){ _tplRender() } })
-      card.querySelector('[data-sv="ok"]').addEventListener('click', e => { e.stopPropagation(); doSave() })
-      card.querySelector('[data-sv="x"]').addEventListener('click', e => { e.stopPropagation(); _tplRender() })
-    }
-    function _tplRename(id){
-      const cur = _tplCache.find(t => t.id === id); if(!cur) return
-      const card = document.querySelector(`.tpl-card[data-tpl-id="${id}"]`); if(!card) return
-      const nameEl = card.querySelector('.tpl-name')
-      nameEl.innerHTML = `<input class="tpl-name-input" value="${_tplEsc(cur.name)}">`
-      const input = nameEl.querySelector('input'); input.focus(); input.select()
-      let done = false
-      const commit = () => { if(done) return; done = true; const name = input.value.trim() || cur.name; _tplPersistRename(id, name) }
-      input.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); commit() } if(e.key==='Escape'){ done=true; _tplRender() } })
-      input.addEventListener('blur', commit)
-    }
-    async function _tplDelete(id){ _tplCache = _tplCache.filter(t => t.id !== id); _tplSaveLocal(_tplCache); _tplRender(); if(_tplRemoteOk && currentUserId && !String(id).startsWith("tpl_")){ try { await supabase.from("account_templates").delete().eq("id", id) } catch(e){ console.warn("[Prophos] tpl delete:", e?.message||e) } } }
-    document.getElementById('bulk-templates')?.addEventListener('click', e => {
-      const card = e.target.closest('.tpl-card[data-tpl-id]'); if(!card) return
-      const id = card.dataset.tplId
-      const actBtn = e.target.closest('[data-act]')
-      if(actBtn){
-        e.stopPropagation()
-        if(actBtn.dataset.act === 'rename') _tplRename(id)
-        else if(actBtn.dataset.act === 'delete'){ if(confirm('Vorlage wirklich löschen?')) _tplDelete(id) }
-        return
-      }
-      if(card.querySelector('.tpl-name-input')) return  // im Rename-Modus → nicht anwenden
-      const tpl = _tplCache.find(t => t.id === id); if(tpl) _tplApply(tpl)
-    })
-    document.getElementById('bulk-tpl-save')?.addEventListener('click', _tplStartSave)
-
-    function buildName(n, extId){
+    function buildName(n){
       const firm   = bEl.firm.value.trim() || 'Account'
       const sizeRaw = parseFloat(bEl.size.value)
       const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
@@ -9252,10 +8559,7 @@
       return tmpl
         .replace(/\{firm\}/g, firm)
         .replace(/\{size\}/g, sizeK)
-        .replace(/\{ex\}/gi, extId || '')   // Externe ID (i-te Zeile aus der Liste)
         .replace(/\{n\}/g, n)
-        .replace(/\s{2,}/g, ' ')            // doppelte Leerzeichen (z.B. wenn {ex} leer) glätten
-        .trim()
     }
 
     function updatePreview(){
@@ -9264,30 +8568,11 @@
       const cost     = parseFloat(bEl.cost.value)
       const firm     = bEl.firm.value.trim()
 
-      // Total cost hint (Kaufpreis ggf. USD → EUR umrechnen)
-      const fx = window._fxUsdEur || 0.85
-      const costEur = (_bulkPurchaseCcy === 'USD' && !isNaN(cost)) ? cost * fx : cost
-      if(!isNaN(costEur) && costEur > 0 && count > 0){
-        bEl.totalCost.textContent = `Gesamtkosten: ${(costEur * count).toLocaleString('de-DE', {maximumFractionDigits:2})} €`
+      // Total cost hint
+      if(!isNaN(cost) && cost > 0 && count > 0){
+        bEl.totalCost.textContent = `Gesamtkosten: ${(cost * count).toLocaleString('de-DE', {maximumFractionDigits:2})} €`
       } else {
         bEl.totalCost.textContent = ''
-      }
-
-      // IDs count hint
-      if(bEl.extIds && bEl.idsHint){
-        const ids = bEl.extIds.value.split('\n').map(l => l.trim()).filter(Boolean)
-        if(ids.length > 0 && count > 0){
-          if(ids.length === count){
-            bEl.idsHint.textContent = `✓ ${ids.length} IDs — passt genau`
-            bEl.idsHint.style.color = 'var(--green, #22c55e)'
-          } else {
-            bEl.idsHint.textContent = `${ids.length} IDs eingegeben, ${count} Accounts — ${ids.length < count ? `${count - ids.length} Accounts bekommen keine ID` : `${ids.length - count} IDs werden ignoriert`}`
-            bEl.idsHint.style.color = 'var(--amber, #f59e0b)'
-          }
-        } else {
-          bEl.idsHint.textContent = 'Jede ID wird dem entsprechenden Account in Reihenfolge zugewiesen. Für Duplikum Auto-Connect.'
-          bEl.idsHint.style.color = 'var(--sub)'
-        }
       }
 
       if(!firm || count < 1){
@@ -9296,10 +8581,9 @@
       }
 
       const names = []
-      const previewExtIds = (bEl.extIds?.value || '').split('\n').map(l => l.trim()).filter(Boolean)
       const showMax = Math.min(count, 4)
       for(let i = 0; i < showMax; i++){
-        names.push(buildName(startnum + i, previewExtIds[i] || null))
+        names.push(buildName(startnum + i))
       }
       let preview = names.join(' &nbsp;·&nbsp; ')
       if(count > showMax){
@@ -9319,9 +8603,6 @@
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
-      if(bEl.extIds) bEl.extIds.value = ''
-      if(typeof _bulkSetCostCcy === 'function') _bulkSetCostCcy('EUR')
-      if(typeof _tplFetch === 'function') _tplFetch()
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -9350,8 +8631,6 @@
       const maxddRaw = parseFloat(bEl.maxdd.value)
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
-      // Parse externe IDs — eine pro Zeile, leer = null
-      const extIdLines = (bEl.extIds?.value || '').split('\n').map(l => l.trim()).filter(Boolean)
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
@@ -9360,10 +8639,7 @@
 
       const accountSize    = !isNaN(sizeRaw)  && sizeRaw  > 0 ? sizeRaw  : null
       const initialBalance = !isNaN(balRaw)   && balRaw   > 0 ? balRaw   : (accountSize || 0)
-      // Kaufpreis: bei $-Eingabe mit Settings-Kurs nach EUR umrechnen (gespeichert in EUR)
-      let costEur = costRaw
-      if(!isNaN(costEur) && _bulkPurchaseCcy === 'USD') costEur = costEur * (window._fxUsdEur || 0.85)
-      const purchaseCost   = !isNaN(costEur)  && costEur  > 0 ? costEur  : null
+      const purchaseCost   = !isNaN(costRaw)  && costRaw  > 0 ? costRaw  : null
       const maxDrawdown    = !isNaN(maxddRaw) && maxddRaw > 0 ? maxddRaw : null
 
       bEl.saveBtn.disabled = true
@@ -9374,8 +8650,7 @@
 
       for(let i = 0; i < count; i++){
         const n    = startnum + i
-        const extId = extIdLines[i] || null   // i-te ID oder null wenn nicht angegeben
-        const name = buildName(n, extId)
+        const name = buildName(n)
         const row  = {
           user_id:        currentUserId,
           name,
@@ -9386,7 +8661,6 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
-          external_id:    extId,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -9435,14 +8709,9 @@
     }
 
     // Wire up inputs for live preview
-    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost, bEl.extIds].forEach(el => {
-      if(el) el.addEventListener('input', updatePreview)
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
+      el.addEventListener('input', updatePreview)
     })
-    // Kaufpreis-Währung Toggle + Hint
-    document.querySelectorAll('#bulk-cost-ccy .bulk-ccy-btn').forEach(b => {
-      b.addEventListener('click', () => _bulkSetCostCcy(b.dataset.ccy))
-    })
-    bEl.cost?.addEventListener('input', _bulkUpdateCostHint)
 
     // Wire buttons
     bEl.openBtn?.addEventListener('click',   openBulkModal)
@@ -10994,16 +10263,11 @@
         </div>
       `
     }else if(isOpen){
-      const isClosed = _at?.needsCompletion?.[p.id]
       actions = `
         <div class="tc-row" style="justify-content:flex-end">
-          ${isClosed ? `<div style="display:flex;align-items:center;gap:8px;padding:4px 10px;background:#ef444418;border:1px solid #ef444440;border-radius:8px;margin-right:8px">
-            <span style="width:8px;height:8px;border-radius:50%;background:#dc2626;display:inline-block"></span>
-            <span style="font-size:12px;font-weight:600;color:#dc2626">Trade geschlossen — bitte eintragen</span>
-          </div>` : ''}
           <div class="tc-actions">
             <button class="btn btn-ghost" data-plan-back="${p.id}" style="padding:5px 11px;font-size:12px">Zurück zu Geplant</button>
-            <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px${isClosed ? ';background:#dc2626;border-color:#dc2626' : ''}">Erledigt</button>
+            <button class="btn btn-primary" data-plan-complete="${p.id}" style="padding:5px 11px;font-size:12px">Erledigt</button>
           </div>
         </div>
       `
@@ -11047,11 +10311,7 @@
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
     })
     document.querySelectorAll('[data-plan-complete]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.planComplete
-        if(_at?.needsCompletion) delete _at.needsCompletion[id]
-        openTradeCompleteModal(id)
-      })
+      btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planComplete))
     })
     document.querySelectorAll('[data-plan-edit-completed]').forEach(btn => {
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planEditCompleted))
@@ -11075,374 +10335,7 @@
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════
-   * AUTO-TRACKING ENGINE — v3 clean
-   * Erkennt Trade-Start wenn auf beiden Accounts (Master+Slave) in
-   * den letzten 30s eine neue Position aufgetaucht ist.
-   * ═══════════════════════════════════════════════════════════════ */
-
-  // ── State ──
-  const _at = {
-    timer:         null,
-    fastTimer:     null,
-    running:       false,
-    firstPollDone: false,
-    tracked:       {},
-    prevPos:       {},
-    newPosTs:      {},
-    livePnl:       {},
-    needsCompletion: {}  // planId → true wenn Trade geschlossen aber noch nicht eingetragen
-  }
-
-  // ── Hilfsfunktionen ──
-
-  function _atDupId(prophosAccountId){
-    // Methode 1: manuelle Verknüpfung via localStorage
-    const links = dupGetLinks()
-    for(const [dId, pId] of Object.entries(links)){
-      if(String(pId) === String(prophosAccountId)) return dId
-    }
-    // Methode 2: externalId des Prophos-Accounts gegen login in dupState.accounts
-    const prophosAcc = (accounts||[]).find(a => String(a.id) === String(prophosAccountId))
-    if(prophosAcc?.externalId){
-      const ext = String(prophosAcc.externalId).trim()
-      const dupAcc = (dupState.accounts||[]).find(a => String(a.login||'') === ext)
-      if(dupAcc) return String(dupAcc.account_id)
-    }
-    return null
-  }
-
-  function _atToast(title, body, duration = 6000){
-    let c = document.getElementById('at-toast-container')
-    if(!c){
-      c = document.createElement('div')
-      c.id = 'at-toast-container'
-      c.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:420px;width:calc(100vw - 48px)'
-      document.body.appendChild(c)
-    }
-    const t = document.createElement('div')
-    t.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 16px;box-shadow:0 4px 24px rgba(0,0,0,.18);pointer-events:auto;animation:at-slide-in .25s ease'
-    t.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:2px">'+title+'</div><div style="font-size:12px;color:var(--sub)">'+body+'</div>'
-    c.appendChild(t)
-    setTimeout(() => { t.style.transition='opacity .3s'; t.style.opacity='0'; setTimeout(()=>t.remove(),350) }, duration)
-  }
-
-  function _atSound(type){
-    try{
-      const ctx = new (window.AudioContext||window.webkitAudioContext)()
-      const osc = ctx.createOscillator(), gain = ctx.createGain()
-      osc.connect(gain); gain.connect(ctx.destination)
-      if(type==='open'){ osc.frequency.setValueAtTime(520,ctx.currentTime); osc.frequency.setValueAtTime(780,ctx.currentTime+.12); gain.gain.setValueAtTime(.18,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.35); osc.start(ctx.currentTime); osc.stop(ctx.currentTime+.35) }
-      else             { osc.frequency.setValueAtTime(680,ctx.currentTime); osc.frequency.setValueAtTime(440,ctx.currentTime+.15); gain.gain.setValueAtTime(.22,ctx.currentTime); gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.45); osc.start(ctx.currentTime); osc.stop(ctx.currentTime+.45) }
-    }catch(_){}
-  }
-
-  // ── Haupt-Poll (alle 15s) ──
-
-  async function _atPoll(){
-    if(_at.running) return
-    if(!dupState.token) return
-    _at.running = true
-    try{
-      // Hole Slave-Positionen + Master-Orders parallel
-      const [slaveRes, masterRes] = await Promise.all([
-        dupApi('POST', 'position/getOpenPositions.php', { length: 1000 }),
-        dupApi('POST', 'order/getMasterOrders.php',     { length: 1000 })
-      ])
-      if(!slaveRes.ok || slaveRes.data?.code === 0) return
-
-      const slavePositions = Array.isArray(slaveRes.data?.data) ? slaveRes.data.data : []
-      const masterOrders   = Array.isArray(masterRes.data?.data) ? masterRes.data.data : []
-      const now = Date.now()
-
-
-      // ── Schritt 1: prevPos aufbauen (nur beim ersten Poll) ──
-      const planned = tradePlans.filter(p => p.status === 'planned')
-
-      // Slave prevPos
-      const slaveByAcc = {}
-      for(const pos of slavePositions){
-        const aid = String(pos.account_id)
-        if(!slaveByAcc[aid]) slaveByAcc[aid] = new Set()
-        const key = String(pos.amountLot)+(pos.symbol||'')+(pos.side||pos.direction||'')
-        slaveByAcc[aid].add(key)
-      }
-
-      // Master prevPos — baue masterByAcc via _atDupId (nutzt dupGetLinks + externalId)
-      const masterByAcc = {}
-      for(const ord of masterOrders){
-        // Finde welcher Prophos-Account diese Order hat
-        // Suche Plan der einen Master hat, dessen dupId in dieser Order vorkommt
-        const ordName = String(ord.name || '')
-        // Alle bekannten Master-Accounts prüfen
-        for(const plan of planned){
-          const mDupId = _atDupId(plan.masterAccountId)
-          if(!mDupId) continue
-          // Prüfe ob diese Order zu diesem Master-Account gehört
-          const dupAcc = (dupState.accounts||[]).find(a => String(a.account_id) === mDupId)
-          if(!dupAcc) continue
-          const matches = String(ord.account_id||'') === mDupId ||
-            (dupAcc.login && ordName.includes(String(dupAcc.login))) ||
-            ordName.includes(mDupId)
-          if(matches){
-            if(!masterByAcc[mDupId]) masterByAcc[mDupId] = new Set()
-            masterByAcc[mDupId].add(String(ord.order_id_master || ord.master_ticket || ord.id || ''))
-          }
-        }
-      }
-
-
-      // ── Schritt 2: Neue Positionen erkennen ──
-      const isFirstPoll = !_at.firstPollDone
-      if(isFirstPoll) _at.firstPollDone = true
-
-      // Slave
-      for(const [aid, keys] of Object.entries(slaveByAcc)){
-        const prev = _at.prevPos['s_'+aid]
-        if(!prev){
-          _at.prevPos['s_'+aid] = keys
-          // Erster Poll: NIEMALS als neu markieren → verhindert false positives nach Reload
-          continue
-        }
-        const newKeys = [...keys].filter(k => !prev.has(k))
-        if(newKeys.length > 0 && !isFirstPoll){
-          _at.newPosTs['s_'+aid] = now
-          for(const k of newKeys) _at.newPosTs['s_'+aid+':'+k] = now
-        }
-        _at.prevPos['s_'+aid] = keys
-      }
-
-      // Master prevPos — nur updaten wenn masterOrders nicht leer
-      if(masterOrders.length > 0){
-        for(const [aid, keys] of Object.entries(masterByAcc)){
-          const prev = _at.prevPos['m_'+aid]
-          if(!prev){
-            _at.prevPos['m_'+aid] = keys
-            continue  // Erster Poll: nicht als neu markieren
-          }
-          const newKeys = [...keys].filter(k => !prev.has(k))
-          if(newKeys.length > 0 && !isFirstPoll){
-            _at.newPosTs['m_'+aid] = now
-          }
-          _at.prevPos['m_'+aid] = keys
-        }
-      }
-
-      // ── Schritt 3: Matchen ──
-      // Für jeden geplanten Plan: hat Master UND Slave innerhalb 60s neue Aktivität?
-      for(const plan of planned){
-        if(_at.tracked[plan.id]) continue
-
-        const sDupId = _atDupId(plan.slaveAccountId)
-        const mDupId = _atDupId(plan.masterAccountId)
-        if(!sDupId || !mDupId) continue
-
-        const sTs = _at.newPosTs['s_'+sDupId] || 0
-        if(!sTs) continue
-        if(now - sTs > 60_000) continue
-
-        // Master muss in den letzten 60s eine neue Order haben
-        const mTs = _at.newPosTs['m_'+mDupId] || 0
-        if(!mTs) continue
-        if(now - mTs > 60_000) continue
-
-        console.log('[AT] ✅ MATCH:', plan.masterName, '→', plan.slaveName)
-
-        const newSlavePos = slavePositions.find(p => {
-          const k = String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')
-          return String(p.account_id) === sDupId && (_at.newPosTs['s_'+sDupId+':'+k] || 0) >= sTs
-        }) || slavePositions.find(p => String(p.account_id) === sDupId)
-        const slavePosKey = newSlavePos
-          ? String(newSlavePos.amountLot)+(newSlavePos.symbol||'')+(newSlavePos.side||newSlavePos.direction||'')
-          : null
-
-        // Frische Balances beim Trade-Start holen (nicht gecachten State nutzen)
-        let slaveBalStart = null, masterBalStart = null
-        try{
-          const balRes = await dupApi('POST', 'account/getAccounts.php', {})
-          if(balRes.ok && balRes.data?.accounts){
-            const accs = balRes.data.accounts
-            slaveBalStart  = accs.find(a=>String(a.account_id)===sDupId)?.balance ?? null
-            masterBalStart = accs.find(a=>String(a.account_id)===mDupId)?.balance ?? null
-          }
-        }catch(_){
-          // Fallback auf gecachten State
-          slaveBalStart  = (dupState.accounts||[]).find(a=>String(a.account_id)===sDupId)?.balance ?? null
-          masterBalStart = (dupState.accounts||[]).find(a=>String(a.account_id)===mDupId)?.balance ?? null
-        }
-
-        try{
-          const {data, error} = await supabase.from('trade_plans')
-            .update({status:'open', started_at: new Date().toISOString()})
-            .eq('id', plan.id).select('*').single()
-          if(error) throw error
-          const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-          if(idx >= 0) tradePlans[idx] = rowToPlan(data)
-          // MetaApi positionId beim Open holen für präzises P&L beim Close
-        let maPositionId = null
-        const slaveAccForOpen = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
-        if(slaveAccForOpen?.ma?.token && slaveAccForOpen?.ma?.accountId){
-          try{
-            const r = await fetch(TS_BACKEND+'/ma/positions',
-              {headers:{'ma-token':slaveAccForOpen.ma.token,'ma-account':slaveAccForOpen.ma.accountId}})
-            if(r.ok){
-              const positions = await r.json()
-              const list = Array.isArray(positions) ? positions : (positions.positions||[])
-              // Neueste Position = der gerade eröffnete Trade
-              const newest = list.sort((a,b) => new Date(b.openTime||b.time||0) - new Date(a.openTime||a.time||0))[0]
-              if(newest) maPositionId = newest.id || newest.positionId || null
-            }
-          }catch(_){}
-        }
-
-        _at.tracked[plan.id] = { slaveDupId: sDupId, masterDupId: mDupId, openedAt: new Date(), slavePosKey, slaveBalStart, masterBalStart, maPositionId }
-          // Timestamps löschen
-          Object.keys(_at.newPosTs).filter(k => k.startsWith('s_'+sDupId)).forEach(k => delete _at.newPosTs[k])
-          delete _at.newPosTs['m_'+mDupId]
-          renderTradePlans()
-          if(typeof ltRenderPlanOverview === 'function') ltRenderPlanOverview()
-          _atSound('open')
-          _atToast('🟢 '+plan.masterName+' → '+plan.slaveName, 'Trade erkannt')
-        }catch(e){ console.error('[AT] open error:', e) }
-      }
-
-      // ── Schritt 4: Close-Erkennung ──
-      const open = tradePlans.filter(p => p.status === 'open')
-      for(const plan of open){
-        const tr = _at.tracked[plan.id]
-        if(!tr) continue
-        const sDupId = tr.slaveDupId
-
-        const stillOpen = tr.slavePosKey
-          ? slavePositions.some(p => String(p.account_id)===sDupId && (String(p.amountLot)+(p.symbol||'')+(p.side||p.direction||'')) === tr.slavePosKey)
-          : slavePositions.some(p => String(p.account_id)===sDupId)
-
-        if(stillOpen) continue
-
-        // Geschlossen
-        let slavePl = null, masterPl = null
-        const slaveAcc = (accounts||[]).find(a => String(a.id)===String(plan.slaveAccountId))
-
-        // Slave P&L: via MetaApi, exakt über positionId wenn vorhanden
-        if(slaveAcc?.ma?.token && slaveAcc?.ma?.accountId){
-          try{
-            let url
-            if(tr.maPositionId){
-              // Exakt: nur Deals für diese positionId
-              url = TS_BACKEND+'/ma/deals?positionId='+encodeURIComponent(tr.maPositionId)
-            } else {
-              // Fallback: Zeitraum seit Trade-Open
-              const from = encodeURIComponent(tr.openedAt.toISOString())
-              const to   = encodeURIComponent(new Date().toISOString())
-              url = TS_BACKEND+'/ma/deals?startTime='+from+'&endTime='+to
-            }
-            const r = await fetch(url, {headers:{'ma-token':slaveAcc.ma.token,'ma-account':slaveAcc.ma.accountId}})
-            if(r.ok){
-              const d = await r.json()
-              const list = Array.isArray(d) ? d : (d.deals||[])
-              const relevant = list.filter(x => x.profit != null && Number(x.profit) !== 0)
-              if(relevant.length > 0){
-                // Bei positionId: alle zugehörigen Deals summieren (Entry + Exit)
-                slavePl = Math.round(relevant.reduce((s,x)=>s+Number(x.profit),0)*100)/100
-              }
-            }
-          }catch(_){}
-        }
-
-        // Master P&L: Balance-Diff (nur ein Trade gleichzeitig auf Challenge-Account)
-        try{
-          const ar = await dupApi('POST','account/getAccounts.php',{})
-          if(ar.ok && ar.data?.accounts){
-            const mNow = ar.data.accounts.find(a=>String(a.account_id)===tr.masterDupId)
-            if(mNow?.balance!=null && tr.masterBalStart!=null)
-              masterPl = Math.round((Number(mNow.balance)-Number(tr.masterBalStart))*100)/100
-          }
-        }catch(_){}
-
-        try{
-          const upd = {}
-          if(slavePl!=null) upd.slave_pl=slavePl
-          if(masterPl!=null) upd.master_pl=masterPl
-          if(Object.keys(upd).length) await supabase.from('trade_plans').update(upd).eq('id',plan.id)
-          const idx = tradePlans.findIndex(x=>String(x.id)===String(plan.id))
-          if(idx>=0) tradePlans[idx]={...tradePlans[idx],...(slavePl!=null?{slavePl}:{}),...(masterPl!=null?{masterPl}:{})}
-          delete _at.tracked[plan.id]
-          delete _at.livePnl[plan.id]
-          // Plan bleibt auf "Offen" aber wird als "muss eingetragen werden" markiert
-          _at.needsCompletion = _at.needsCompletion || {}
-          _at.needsCompletion[plan.id] = true
-          renderTradePlans()
-          if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
-          _atSound('close')
-          const pl=slavePl!=null?' · '+(slavePl>=0?'+':'')+slavePl.toFixed(2)+'€':''
-          _atToast('🔴 '+plan.masterName+' geschlossen', (plan.slaveName||'')+pl+' · Bitte eintragen', 20000)
-          // Kein Auto-Popup — User klickt selbst auf "Erledigen"
-        }catch(e){ console.error('[AT] close error:', e) }
-      }
-
-    }catch(e){ console.warn('[AT] poll error:', e) }
-    finally{ _at.running = false }
-  }
-
-  function _atFastRender(){
-    const open = tradePlans.filter(p=>p.status==='open')
-    if(!open.length) return
-    for(const plan of open){
-      const slaveAcc  = (accounts||[]).find(a=>String(a.id)===String(plan.slaveAccountId))
-      const masterAcc = (accounts||[]).find(a=>String(a.id)===String(plan.masterAccountId))
-      const sDupId = _atDupId(plan.slaveAccountId)
-      const mDupId = _atDupId(plan.masterAccountId)
-
-      // Slave: MT5 > Duplikum-ltState
-      const sPos = slaveAcc?.ma ? (ltState.positions?.mt||[]).find(p=>String(p.accountId)===String(slaveAcc.ma.accountId))
-                 : sDupId ? (ltState.positions?.dup||[]).find(p=>String(p.accountId)===String(sDupId)) : null
-      // Master: TSX > MT5 > Duplikum-ltState
-      const mPos = masterAcc?.topstep ? (ltState.positions?.tsx||[]).find(p=>String(p.accountId)===String(masterAcc.topstep.id))
-                 : masterAcc?.ma ? (ltState.positions?.mt||[]).find(p=>String(p.accountId)===String(masterAcc.ma.accountId))
-                 : mDupId ? (ltState.positions?.dup||[]).find(p=>String(p.accountId)===String(mDupId)) : null
-
-      _at.livePnl[plan.id] = {
-        slave:      sPos?.pnl  != null ? Number(sPos.pnl)  : null,
-        slaveLots:  sPos ? Math.abs(Number(sPos.size||0))   : null,
-        slaveSide:  sPos?.side || null,
-        master:     mPos?.pnl  != null ? Number(mPos.pnl)  : null,
-        masterLots: mPos ? Number(mPos.size||0)             : null,
-        masterSide: mPos?.side || null,
-        ts: Date.now()
-      }
-    }
-    if(typeof ltRenderPlanOverview==='function') ltRenderPlanOverview()
-  }
-
-  // ── Start/Stop ──
-  function _atStart(){
-    if(_at.timer) return
-    console.log('[AT] Start — Polling alle 15s')
-    _atPoll()
-    _at.timer = setInterval(_atPoll, 15_000)
-    // Fast render alle 3s aus ltState (kein extra API-Call)
-    _at.fastTimer = setInterval(_atFastRender, 3_000)
-  }
-  function _atStop(){
-    if(_at.timer)     { clearInterval(_at.timer);     _at.timer     = null }
-    if(_at.fastTimer) { clearInterval(_at.fastTimer); _at.fastTimer = null }
-    _at.running = false
-  }
-  function _atCheckAndStart(){
-    if(dupState.token && !_at.timer) _atStart()
-    if(!dupState.token && _at.timer) _atStop()
-  }
-
-  // CSS
-  ;(()=>{ const s=document.createElement('style'); s.textContent='@keyframes at-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}@keyframes at-pulse{0%,100%{opacity:1}50%{opacity:.4}}'; document.head.appendChild(s) })()
-
-  document.querySelector('[data-view="trades"]')?.addEventListener('click', _atCheckAndStart)
-
-  /* ═══════════════════════════════════════════════════════════════
-   * END AUTO-TRACKING ENGINE
-   * ═══════════════════════════════════════════════════════════════ */
-
-    async function deleteTradePlan(planId){
+  async function deleteTradePlan(planId){
     if(!confirm('Trade-Plan wirklich löschen?')) return
     try{
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
@@ -11455,7 +10348,7 @@
   }
 
   // ─────── Trade-Plan-Modal (Create + Edit) ───────
-  function openTradePlanModal(editId, opts){
+  function openTradePlanModal(editId){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
     if(!accounts.length){
       alert('Bitte erst mindestens einen Account anlegen.')
@@ -11584,33 +10477,12 @@
       }
       // Archivierte Accounts ausschließen (außer geschützt)
       const archive = (typeof getArchive === 'function') ? getArchive() : {}
-      // Freitext-Suche (Name · External ID · MT5-/Topstep-Login · Duplikum)
-      const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
-      const qNorm = searchNorm(document.getElementById(`tp-${role}-search`)?.value || '')
-      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-      const dupByManualId = {}
-      for(const [dupId, manualId] of Object.entries(dupLinks)){
-        const dupAcc = (dupState.accounts || []).find(d => d.account_id === dupId)
-        if(dupAcc) dupByManualId[manualId] = dupAcc
-      }
-      const accMatchesSearch = a => {
-        if(!qNorm) return true
-        const dupAcc = dupByManualId[a.id] || null
-        const hay = searchNorm([
-          a.name, a.externalId,
-          a.ma?.login, a.ma?.accountId,
-          a.topstep?.id, a.topstep?.name,
-          dupAcc?.login, dupAcc?.account_id, dupAcc?.name
-        ].filter(Boolean).join(' '))
-        return hay.includes(qNorm)
-      }
       // Filter-Logik
       const filtered = accounts.filter(a => {
         const isProtected = protectedIds.has(String(a.id))
         if(archive[a.id]?.archived && !isProtected) return false
         if(firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
         if(typeFilter && a.type !== typeFilter && !isProtected) return false
-        if(!isProtected && !accMatchesSearch(a)) return false
         return true
       })
       // Duplikat-Labels + Balance-Lookup vorbereiten
@@ -11720,24 +10592,6 @@
         tf.addEventListener('change', () => tpRenderAccountSelect(role))
         tf._tpHooked = true
       }
-      // Freitext-Suche pro Rolle
-      const sf = document.getElementById(`tp-${role}-search`)
-      if(sf){
-        sf.value = ''  // beim Öffnen leeren
-        if(!sf._tpHooked){
-          const rerun = () => {
-            const keep = (role === 'master' ? masterSel : slaveSel).value
-            tpRenderAccountSelect(role)
-            // Auswahl beibehalten, falls noch in der gefilterten Liste
-            const selEl = (role === 'master' ? masterSel : slaveSel)
-            if(keep && [...selEl.options].some(o => o.value === keep)) selEl.value = keep
-            if(typeof tpRecompute === 'function') tpRecompute()
-          }
-          ;['input','keyup','change','cut'].forEach(ev => sf.addEventListener(ev, rerun))
-          sf.addEventListener('paste', () => setTimeout(rerun, 0))
-          sf._tpHooked = true
-        }
-      }
     })
 
     if(isEdit){
@@ -11762,21 +10616,13 @@
       document.getElementById('tp-slave-risk').value  = ''
       document.getElementById('tp-master-tp').value   = ''
       document.getElementById('tp-notes').value       = ''
-      // Datum: default morgen; bei "Trade hinzufügen" (plannedFor:'today') heute
-      const baseDate = new Date()
-      if(!(opts && opts.plannedFor === 'today')) baseDate.setDate(baseDate.getDate() + 1)
-      document.getElementById('tp-planned-for').value = baseDate.toISOString().slice(0,10)
+      // Default: morgen
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+      document.getElementById('tp-planned-for').value = tomorrow.toISOString().slice(0,10)
       // Priority default: medium
       document.querySelectorAll('#tp-priority .prio-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.prio === 'medium')
       })
-      // Master vorauswählen (z.B. von der Account-Detail-Seite aus)
-      if(opts && opts.masterId){
-        const midStr = String(opts.masterId)
-        if(accounts.some(a => String(a.id) === midStr)){
-          masterSel.value = midStr
-        }
-      }
     }
 
     document.getElementById('tradePlanMsg').textContent = ''
@@ -11793,78 +10639,6 @@
   }
 
   // Live Multiplier-Berechnung im Modal
-  // ── Vorgänger-Kette eines Accounts (Phase-1 → Phase-2 → …, ganze Kette) ──
-  // Läuft über archive[predecessorId].successorId nach oben. Cycle-Guard inklusive.
-  function getAncestorAccounts(account){
-    if(!account) return []
-    const archive = (typeof getArchive === 'function') ? getArchive() : {}
-    const chain = []
-    const seen = new Set([String(account.id)])
-    let current = account
-    while(current){
-      const entry = Object.entries(archive).find(([_, info]) =>
-        info?.successorId && String(info.successorId) === String(current.id))
-      const parent = entry ? accounts.find(x => String(x.id) === String(entry[0])) : null
-      if(!parent || seen.has(String(parent.id))) break
-      seen.add(String(parent.id))
-      chain.push(parent)
-      current = parent
-    }
-    return chain
-  }
-
-  // ── Gesamtkosten / "Reingesteckt" eines Accounts inkl. GANZER Vorgänger-Kette (in EUR) ──
-  // Identische Formel wie die "Reingesteckt"-Anzeige im Account-Detail:
-  //   Reingesteckt = |Kaufpreise| + max(0, -reale Hedge-P/L)
-  // D.h. Kaufpreis + reale Hedge-VERLUSTE; Hedge-Gewinne senken den Wert NICHT.
-  // Unterschied zu calcAcquisitionCost: rechnet auch die Live-Hedge-Verluste des
-  // AKTUELLEN Accounts mit ein (nicht nur die der Vorgänger).
-  function calcReingestecktEur(account){
-    if(!account) return 0
-    const fx = window._fxUsdEur || 0.85
-    const chainAccounts = [account, ...getAncestorAccounts(account)]
-    const chainIds = new Set(chainAccounts.map(x => String(x.id)))
-    const txAll = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []
-    const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
-
-    // 1) Kaufpreise (→ USD): TX bevorzugt, sonst Fallback purchaseCost (EUR gespeichert)
-    let totalCostsUsd = 0
-    for(const acc of chainAccounts){
-      const accTx = txAll.filter(t => String(t.account_id) === String(acc.id) && t.kind === 'account_purchase')
-      if(accTx.length){
-        for(const t of accTx){
-          const amt = Number(t.amount || 0)
-          totalCostsUsd += (t.currency === 'EUR') ? amt / fx : amt
-        }
-      } else if(acc.purchaseCost){
-        totalCostsUsd += -Math.abs(Number(acc.purchaseCost)) / fx
-      }
-    }
-
-    // 2) Reale Hedge-P/L (→ USD): Trades der Kette, bei denen die Live-Gegenseite P/L machte
-    let liveRealisedUsd = 0
-    const completed = planList.filter(p => p.status === 'completed' &&
-      (chainIds.has(String(p.masterAccountId)) || chainIds.has(String(p.slaveAccountId))))
-    for(const p of completed){
-      if(chainIds.has(String(p.masterAccountId))){
-        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
-        if(slaveAcc?.type === 'live' && p.slavePl != null){
-          const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-          liveRealisedUsd += (slavePreset.currency === '€') ? Number(p.slavePl) / fx : Number(p.slavePl)
-        }
-      }
-      if(chainIds.has(String(p.slaveAccountId))){
-        const masterAcc = accounts.find(x => String(x.id) === String(p.masterAccountId))
-        if(masterAcc?.type === 'live' && p.masterPl != null){
-          liveRealisedUsd += Number(p.masterPl)  // Master immer USD
-        }
-      }
-    }
-
-    const reingestecktUsd = Math.abs(totalCostsUsd) + Math.max(0, -liveRealisedUsd)
-    return reingestecktUsd * fx  // → EUR
-  }
-
   // ── Acquisition-Cost-Hedge: berechnet kumulierte Cash-Kosten eines Accounts (in EUR)
   // Phase 1 / Challenge: nur Kaufpreis (in EUR gespeichert)
   // Phase 2: Kaufpreis + alle Live-Hedge-Verluste aus Vorgänger-Account(s)
@@ -12031,14 +10805,11 @@
       const dbgAcq = master.maxDrawdown ? calcAcquisitionCost(master) : 'N/A'
       console.log('[Auto-Hedge Debug] Master:', master.name, '| maxDrawdown:', master.maxDrawdown, '| purchaseCost:', master.purchaseCost, '| acqCost calculated:', dbgAcq)
     }
-    if(master && slave && master.maxDrawdown && master.maxDrawdown > 0){
+    if(master && slave && masterRisk > 0 && master.maxDrawdown && master.maxDrawdown > 0){
       // Acquisition-Cost in EUR (Kaufpreis ist in EUR, Verluste werden zu EUR konvertiert)
       const acqCostEur = calcAcquisitionCost(master)
-      // Wenn noch kein Master-Risiko eingegeben ist, nehmen wir das volle Max-DD an
-      // (Risk-Anteil 100%) — so erscheint der Vorschlag sofort bei Master+Slave-Auswahl.
-      const effectiveMasterRisk = masterRisk > 0 ? masterRisk : master.maxDrawdown
       // Hedge-Größe proportional zum genutzten Master-Risk-Anteil von Max-DD
-      const riskRatio = effectiveMasterRisk / master.maxDrawdown
+      const riskRatio = masterRisk / master.maxDrawdown
       // Hedge in EUR (zur Account-Cost passend)
       const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
       const fxUsdEur = window._fxUsdEur || 0.85
@@ -12062,37 +10833,19 @@
           suggestEl.dataset.suggestedValue = ''
         }
       }
-
-      // ── Gesamtkosten-Hedge: Slave-Vorschlag auf Basis "Reingesteckt" (ganze Kette) ──
-      // Kaufpreis + reale Hedge-Verluste; gleicher Risk-Anteil wie oben.
-      const totalEl  = document.getElementById('tp-slave-suggest-total')
-      const totalVal = document.getElementById('tp-slave-suggest-total-value')
-      const totalDet = document.getElementById('tp-slave-suggest-total-detail')
-      if(totalEl){
-        const reingestecktEur = calcReingestecktEur(master)
-        let suggestedTotal = reingestecktEur * riskRatio  // EUR
-        if(slavePreset.currency !== '€') suggestedTotal = suggestedTotal / fxUsdEur
-        if(reingestecktEur > 0){
-          totalEl.style.display = 'block'
-          totalVal.textContent = `${slavePreset.currency}${suggestedTotal.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
-          const rgStr = '€' + reingestecktEur.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
-          const ratioPctT = (riskRatio * 100).toFixed(1).replace('.', ',')
-          totalDet.innerHTML = `Reingesteckt (ganze Kette): <span class="mono">${rgStr}</span> · Risk-Anteil: <span class="mono">${ratioPctT}%</span> von Max-DD ($${master.maxDrawdown.toLocaleString('de-DE')})`
-          totalEl.dataset.suggestedValue = suggestedTotal.toFixed(2)
-        } else {
-          totalEl.style.display = 'none'
-          totalEl.dataset.suggestedValue = ''
-        }
-      }
     } else if(suggestEl){
       suggestEl.style.display = 'none'
-      const totalElHide = document.getElementById('tp-slave-suggest-total')
-      if(totalElHide){ totalElHide.style.display = 'none'; totalElHide.dataset.suggestedValue = '' }
-      // Hint dass Max-DD fehlt — zeigen sobald Master + Slave gewählt sind
-      if(master && slave && (!master.maxDrawdown || master.maxDrawdown <= 0)){
+      // Hint dass Max-DD fehlt — zeigen sobald Master + masterRisk da sind, auch ohne slave
+      if(master && masterRisk > 0 && (!master.maxDrawdown || master.maxDrawdown <= 0)){
         suggestEl.style.display = 'block'
         suggestVal.textContent = '—'
         suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Max Drawdown am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
+        suggestEl.dataset.suggestedValue = ''
+      } else if(master && masterRisk > 0 && master.maxDrawdown > 0 && (!master.purchaseCost || master.purchaseCost <= 0)){
+        // Max-DD da, aber Kaufpreis fehlt
+        suggestEl.style.display = 'block'
+        suggestVal.textContent = '—'
+        suggestDet.innerHTML = `<span style="color:#f59e0b">⚠ Kaufpreis am Master-Account "${master.name}" fehlt — bearbeite den Account um Auto-Hedge zu nutzen</span>`
         suggestEl.dataset.suggestedValue = ''
       }
     }
@@ -12177,28 +10930,14 @@
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
   })
-  // Vorschlag übernehmen: Slave-Risiko setzen + wenn Master-Risiko leer ist,
-  // automatisch das volle Max-DD des Master-Accounts eintragen.
-  function tpApplySuggestion(elId){
-    const el = document.getElementById(elId)
-    const value = el?.dataset.suggestedValue
-    if(!value) return
-    const masterRiskEl = document.getElementById('tp-master-risk')
-    const curMasterRisk = parseFloat(masterRiskEl?.value)
-    if(!(curMasterRisk > 0)){
-      const master = accounts.find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
-      if(master && master.maxDrawdown > 0) masterRiskEl.value = master.maxDrawdown
-    }
-    document.getElementById('tp-slave-risk').value = value
-    tpRecompute()
-  }
   // Auto-Vorschlag übernehmen
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
-    tpApplySuggestion('tp-slave-suggest')
-  })
-  // Gesamtkosten-Vorschlag übernehmen
-  document.getElementById('tp-slave-suggest-total-apply')?.addEventListener('click', () => {
-    tpApplySuggestion('tp-slave-suggest-total')
+    const suggestEl = document.getElementById('tp-slave-suggest')
+    const value = suggestEl?.dataset.suggestedValue
+    if(value){
+      document.getElementById('tp-slave-risk').value = value
+      tpRecompute()
+    }
   })
   // Priority picker
   document.querySelectorAll('#tp-priority .prio-btn').forEach(btn => {
@@ -12278,15 +11017,13 @@
       }
       renderTradePlans()
       closeTradePlanModal()
-      // Poll sofort ausführen damit prevState für den neuen Plan gesetzt wird
-      if(typeof _atPoll === 'function') setTimeout(_atPoll, 500)
     }catch(e){
       msg('Fehler: ' + (e.message || e), 'err')
     }
   })
 
   // ─────── Trade-Complete-Modal ───────
-  function openTradeCompleteModal(planId){
+  function openTradeCompleteModal(planId, preFillSlavePl){
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
     _completingPlanId = planId
@@ -12308,7 +11045,7 @@
     `
     document.getElementById('tc-slave-cur').textContent = slavePreset.currency
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
-    document.getElementById('tc-slave-pl').value  = p.slavePl  ?? ''
+    document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
     document.getElementById('tradeCompleteMsg').textContent = ''
 
@@ -12319,11 +11056,6 @@
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
-    // Auto-fokus auf Master P&L damit man sofort tippen kann
-    setTimeout(() => {
-      const masterPlEl = document.getElementById('tc-master-pl')
-      if(masterPlEl){ masterPlEl.focus(); masterPlEl.select() }
-    }, 100)
   }
   function closeTradeCompleteModal(){
     _completingPlanId = null
@@ -12610,9 +11342,6 @@
       } else if(statusChoice === 'passed' && targetAccountId){
         // Nachfolger-Wizard öffnen — der archiviert dann automatisch den Vorgänger
         setTimeout(() => openSuccessorWizard(targetAccountId), 200)
-      } else if(statusChoice === 'reset' && targetAccountId){
-        // Reset-Dialog öffnen — archiviert den alten & legt einen frischen an
-        setTimeout(() => { if(typeof openResetModal === 'function') openResetModal(targetAccountId) }, 200)
       }
     }catch(e){
       const el = document.getElementById('tradeCompleteMsg')
