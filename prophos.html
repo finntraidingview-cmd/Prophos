@@ -3965,37 +3965,21 @@
         <div id="fxUsdEurStatus" style="margin-top:8px;font-size:11.5px;height:14px"></div>
       </div>
 
+      <!-- Prop Firms verwalten (unified) -->
       <div class="panel" style="margin-bottom:14px">
-        <div class="panel-head">
-          <div class="panel-title">Eigene Prop Firms</div>
+        <div class="panel-head" style="justify-content:space-between">
+          <div class="panel-title">Prop Firms</div>
+          <button class="btn btn-primary" id="customFirmAddBtn" type="button" style="padding:6px 12px;font-size:12.5px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Firm hinzufügen
+          </button>
         </div>
         <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 16px;line-height:1.55">
-          Füg eigene Prop Firms hinzu, die im "Account hinzufügen"-Dialog und im Lot-Rechner auswählbar werden. Die Defaults (Topstep, Fusion Markets, FundingPips, FundedNext, Tradeify, Apex, The5%ers) sind immer dabei und können nicht entfernt werden.
+          Alle Prop Firms aus deinen Accounts. <strong>Umbenennen</strong> korrigiert den Namen auf allen zugehörigen Accounts gleichzeitig — damit lassen sich Duplikate wie „Alpha Future" + „AlphaFutures" mergen. Lot-Rechner-Specs können pro Firma hinterlegt werden.
         </p>
-
-        <div id="customFirmsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px"></div>
-
-        <div id="customFirmsEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;margin-bottom:14px">
-          Noch keine eigenen Firms hinzugefügt.
-        </div>
-
-        <button class="btn btn-primary" id="customFirmAddBtn" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Firm hinzufügen
-        </button>
-      </div>
-
-      <!-- Account-Firmen umbenennen -->
-      <div class="panel" style="margin-bottom:14px">
-        <div class="panel-head">
-          <div class="panel-title">Account-Firmen verwalten</div>
-        </div>
-        <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 16px;line-height:1.55">
-          Alle Firma-Namen aus deinen Accounts. Umbenennen wirkt auf alle Accounts dieser Firma gleichzeitig — ideal um Duplikate wie „Alpha Future" vs. „AlphaFutures" zu bereinigen.
-        </p>
-        <div id="accFirmsSpinner" style="text-align:center;padding:14px;color:var(--sub);font-size:12.5px">Lädt…</div>
-        <div id="accFirmsEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;display:none">Keine Firmen gefunden.</div>
-        <div id="accFirmsList" style="display:flex;flex-direction:column;gap:8px"></div>
+        <div id="firmsPanelSpinner" style="text-align:center;padding:14px;color:var(--sub);font-size:12.5px">Lädt…</div>
+        <div id="firmsPanelEmpty" style="text-align:center;padding:18px;color:var(--sub);font-size:12.5px;border:1px dashed var(--line);border-radius:8px;display:none">Noch keine Firms vorhanden.</div>
+        <div id="firmsPanelList" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
       <!-- Lot-Kalibrierung (wird per JS gefüllt) -->
@@ -8960,33 +8944,109 @@
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
   }
-  function renderCustomFirmsList(){
-    const listEl  = document.getElementById('customFirmsList')
-    const emptyEl = document.getElementById('customFirmsEmpty')
+  // Unified panel: zeigt alle Firms aus Accounts + Custom-Specs zusammen
+  function renderCustomFirmsList(){ renderFirmsPanel() }   // Compat-Alias
+  function renderAccountFirmsList(){ renderFirmsPanel() }  // Compat-Alias
+
+  function renderFirmsPanel(){
+    const listEl   = document.getElementById('firmsPanelList')
+    const emptyEl  = document.getElementById('firmsPanelEmpty')
+    const spinner  = document.getElementById('firmsPanelSpinner')
     if(!listEl) return
-    const firms = getCustomFirms()
     listEl.innerHTML = ''
-    if(firms.length === 0){ if(emptyEl) emptyEl.style.display = ''; return }
+    if(spinner) spinner.style.display = 'none'
+
+    // Alle Firm-Namen: aus Accounts + aus customFirms die noch keinen Account haben
+    const accFirms = [...new Set((accounts||[]).map(a=>a.firm).filter(Boolean))]
+    const customFirms = getCustomFirms()
+    // Custom firms die NICHT in accFirms sind (orphan specs)
+    const orphanFirms = customFirms.filter(f => !accFirms.includes(f.name))
+    const allFirms = [...accFirms, ...orphanFirms.map(f=>f.name)].sort((a,b)=>a.localeCompare(b,'de'))
+
+    if(!allFirms.length){ if(emptyEl) emptyEl.style.display=''; return }
     if(emptyEl) emptyEl.style.display = 'none'
-    for(const f of firms){
+
+    for(const firmName of allFirms){
+      const count   = (accounts||[]).filter(a=>a.firm===firmName).length
+      const cfEntry = customFirms.find(f=>f.name===firmName)
+      const isOrphan = count === 0  // nur in custom_firms, kein Account mit diesem Namen
+      const specsText = cfEntry
+        ? `${escapeHtml(cfEntry.symbol||'—')} · ${escapeHtml(cfEntry.unit||'—')} · ${cfEntry.ppl} ${escapeHtml(cfEntry.currency||'')} / Pkt`
+        : null
+
       const row = document.createElement('div')
-      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px'
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;flex-wrap:wrap'
       row.innerHTML = `
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:600;font-size:13px">${escapeHtml(f.name)}</div>
-          <div style="font-size:11px;color:var(--sub);margin-top:2px">${escapeHtml(f.symbol||'—')} · ${escapeHtml(f.unit||'—')} · ${f.ppl!=null?f.ppl:'—'} ${escapeHtml(f.currency||'')} / Pkt</div>
+        <div style="flex:1;min-width:160px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="fp-firm-name" style="font-weight:600;font-size:13px">${escapeHtml(firmName)}</span>
+            ${count>0 ? `<span style="font-size:11px;color:var(--sub)">${count} Account${count!==1?'s':''}</span>` : '<span style="font-size:11px;color:var(--danger)">kein Account</span>'}
+          </div>
+          ${specsText ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">📊 ${specsText}</div>` : `<div style="font-size:11px;color:var(--sub-2);margin-top:2px">Keine Lot-Rechner-Specs</div>`}
         </div>
-        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px" data-cf-edit="${escapeHtml(f.id)}">Bearbeiten</button>
-        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11.5px;color:var(--danger)" data-cf-del="${escapeHtml(f.id)}">Löschen</button>`
-      row.querySelector('[data-cf-edit]').addEventListener('click', () => openCustomFirmModal(f.id))
-      row.querySelector('[data-cf-del]').addEventListener('click', () => {
-        if(!confirm(`Firm "${f.name}" wirklich löschen?`)) return
-        saveCustomFirms(getCustomFirms().filter(x=>x.id!==f.id))
-        mergeCustomFirmsIntoPresets(); renderCustomFirmsList()
+        <div class="fp-view" style="display:flex;gap:6px;align-items:center">
+          ${count>0 ? `<button class="btn btn-ghost fp-rename-btn" style="padding:5px 10px;font-size:11.5px">Umbenennen</button>` : ''}
+          <button class="btn btn-ghost fp-specs-btn" style="padding:5px 10px;font-size:11.5px">${cfEntry ? 'Specs bearbeiten' : 'Specs hinzufügen'}</button>
+          ${isOrphan ? `<button class="btn btn-ghost fp-del-btn" style="padding:5px 10px;font-size:11.5px;color:var(--danger)">Löschen</button>` : ''}
+        </div>
+        <div class="fp-rename-wrap" style="display:none;width:100%;display:none;gap:8px;align-items:center;margin-top:8px">
+          <input class="input fp-rename-input" style="flex:1;font-size:13px;padding:5px 10px" value="${escapeHtml(firmName)}" placeholder="Neuer Name…" autocomplete="off">
+          <button class="btn btn-primary fp-rename-save" style="padding:5px 12px;font-size:11.5px">Speichern</button>
+          <button class="btn btn-ghost fp-rename-cancel" style="padding:5px 10px;font-size:11.5px">Abbrechen</button>
+          <span class="fp-rename-status" style="font-size:11px;display:none"></span>
+        </div>`
+
+      const nameEl      = row.querySelector('.fp-firm-name')
+      const renameWrap  = row.querySelector('.fp-rename-wrap')
+      const renameInput = row.querySelector('.fp-rename-input')
+      const renameSave  = row.querySelector('.fp-rename-save')
+      const renameCancel= row.querySelector('.fp-rename-cancel')
+      const renameStatus= row.querySelector('.fp-rename-status')
+      const renameBtn   = row.querySelector('.fp-rename-btn')
+      const specsBtn    = row.querySelector('.fp-specs-btn')
+      const delBtn      = row.querySelector('.fp-del-btn')
+
+      renameBtn?.addEventListener('click', () => {
+        renameWrap.style.display = 'flex'
+        renameInput.focus(); renameInput.select()
+      })
+      renameCancel?.addEventListener('click', () => {
+        renameWrap.style.display = 'none'
+        renameInput.value = firmName
+        renameStatus.style.display = 'none'
+      })
+      renameSave?.addEventListener('click', async () => {
+        const newName = renameInput.value.trim()
+        if(!newName || newName === firmName){ renameCancel.click(); return }
+        renameSave.disabled = true; renameSave.textContent = '…'
+        renameStatus.style.display = ''; renameStatus.textContent = 'Speichern…'; renameStatus.style.color = 'var(--sub)'
+        try{
+          const { error } = await _supabase.from('accounts').update({ firm: newName }).eq('user_id', currentUserId).eq('firm', firmName)
+          if(error) throw error
+          for(const a of (accounts||[])){ if(a.firm===firmName) a.firm=newName }
+          // Custom Firm Specs mitumbenennen falls vorhanden
+          const cf = getCustomFirms()
+          const ci = cf.findIndex(x=>x.name===firmName)
+          if(ci>=0){ cf[ci].name=newName; saveCustomFirms(cf); mergeCustomFirmsIntoPresets() }
+          renameStatus.textContent = '✓ Gespeichert'; renameStatus.style.color = 'var(--success,#10b981)'
+          nameEl.textContent = newName
+          if(typeof populateAccountFilters==='function') populateAccountFilters()
+          setTimeout(()=>{ renameWrap.style.display='none'; renameStatus.style.display='none'; renderFirmsPanel() }, 1200)
+        } catch(e){
+          renameStatus.textContent = '✗ ' + (e.message||e); renameStatus.style.color = 'var(--danger,#ef4444)'
+        }
+        renameSave.disabled = false; renameSave.textContent = 'Speichern'
+      })
+      specsBtn?.addEventListener('click', () => openCustomFirmModal(cfEntry?.id||null, firmName))
+      delBtn?.addEventListener('click', () => {
+        if(!confirm(`Firm "${firmName}" löschen? (Nur die Specs werden entfernt, keine Accounts betroffen.)`)) return
+        if(cfEntry){ saveCustomFirms(getCustomFirms().filter(x=>x.id!==cfEntry.id)); mergeCustomFirmsIntoPresets() }
+        renderFirmsPanel()
       })
       listEl.appendChild(row)
     }
   }
+
   let _cfEditId = null
   const CF_TEMPLATES = {
     mnq:       {symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$'},
@@ -8995,7 +9055,7 @@
     ndx100_10: {symbol:'NDX100', unit:'Lots',      ppl:10.00, currency:'$'},
     ndx100_20: {symbol:'NDX100', unit:'Lots',      ppl:20.00, currency:'$'}
   }
-  function openCustomFirmModal(editId){
+  function openCustomFirmModal(editId, prefillName){
     _cfEditId = editId||null
     const modal = document.getElementById('customFirmModal')
     const msg   = document.getElementById('customFirmMsg')
@@ -9004,7 +9064,7 @@
     if(editId){
       const f = getCustomFirms().find(x=>x.id===editId)
       if(!f) return
-      document.getElementById('customFirmModalTitle').textContent='Firm bearbeiten'
+      document.getElementById('customFirmModalTitle').textContent='Lot-Rechner Specs bearbeiten'
       document.getElementById('cf-name').value    = f.name||''
       document.getElementById('cf-symbol').value  = f.symbol||''
       document.getElementById('cf-unit').value     = f.unit||'Lots'
@@ -9012,10 +9072,16 @@
       document.getElementById('cf-currency').value = f.currency||'$'
       document.getElementById('cf-template').value = ''
     } else {
-      document.getElementById('customFirmModalTitle').textContent='Prop Firm hinzufügen'
-      document.getElementById('cf-name').value=''; document.getElementById('cf-symbol').value=''
-      document.getElementById('cf-unit').value='Lots'; document.getElementById('cf-ppl').value=''
-      document.getElementById('cf-currency').value='$'; document.getElementById('cf-template').value=''
+      document.getElementById('customFirmModalTitle').textContent = prefillName ? `Specs für ${prefillName}` : 'Prop Firm hinzufügen'
+      document.getElementById('cf-name').value     = prefillName||''
+      document.getElementById('cf-symbol').value   = ''
+      document.getElementById('cf-unit').value      = 'Lots'
+      document.getElementById('cf-ppl').value       = ''
+      document.getElementById('cf-currency').value  = '$'
+      document.getElementById('cf-template').value  = ''
+      // Name-Feld sperren wenn wir Specs für bestehende Firma hinzufügen
+      const nameField = document.getElementById('cf-name')
+      if(nameField) nameField.readOnly = !!prefillName
     }
     modal.classList.add('open')
   }
@@ -9040,60 +9106,12 @@
     const firms=getCustomFirms()
     if(_cfEditId){ const i=firms.findIndex(x=>x.id===_cfEditId); if(i>=0) firms[i]={...firms[i],name,symbol,unit,ppl,currency} }
     else firms.push({id:'cf_'+Date.now(),name,symbol,unit,ppl,currency})
-    saveCustomFirms(firms); mergeCustomFirmsIntoPresets(); renderCustomFirmsList(); closeCustomFirmModal()
+    // Name-Feld wieder freigeben
+    const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
+    saveCustomFirms(firms); mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
   })
 
   // ── Account-Firmen umbenennen ──
-  async function renderAccountFirmsList(){
-    const listEl  = document.getElementById('accFirmsList')
-    const emptyEl = document.getElementById('accFirmsEmpty')
-    const spinner = document.getElementById('accFirmsSpinner')
-    if(!listEl) return
-    listEl.innerHTML=''; if(spinner) spinner.style.display=''
-    const firms=[...(new Set((accounts||[]).map(a=>a.firm).filter(Boolean)))].sort()
-    if(spinner) spinner.style.display='none'
-    if(!firms.length){ if(emptyEl) emptyEl.style.display=''; return }
-    if(emptyEl) emptyEl.style.display='none'
-    for(const firm of firms){
-      const count=(accounts||[]).filter(a=>a.firm===firm).length
-      const row=document.createElement('div')
-      row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px'
-      row.innerHTML=`
-        <div style="flex:1;min-width:0">
-          <span class="af-firm-name" style="font-weight:600;font-size:13px">${escapeHtml(firm)}</span>
-          <span style="font-size:11px;color:var(--sub);margin-left:8px">${count} Account${count!==1?'s':''}</span>
-        </div>
-        <div class="af-edit-wrap" style="display:none;flex:1;min-width:0">
-          <input class="input af-rename-input" style="font-size:13px;padding:5px 10px" value="${escapeHtml(firm)}" autocomplete="off">
-        </div>
-        <button class="btn btn-ghost af-rename-btn" style="padding:5px 10px;font-size:11.5px">Umbenennen</button>
-        <button class="btn btn-primary af-save-btn" style="padding:5px 10px;font-size:11.5px;display:none">Speichern</button>
-        <button class="btn btn-ghost af-cancel-btn" style="padding:5px 10px;font-size:11.5px;display:none">Abbrechen</button>
-        <div class="af-status" style="font-size:11px;color:var(--sub);display:none"></div>`
-      const nameEl=row.querySelector('.af-firm-name'), editWrap=row.querySelector('.af-edit-wrap')
-      const input=row.querySelector('.af-rename-input'), renameBtn=row.querySelector('.af-rename-btn')
-      const saveBtn=row.querySelector('.af-save-btn'), cancelBtn=row.querySelector('.af-cancel-btn')
-      const statusEl=row.querySelector('.af-status')
-      renameBtn.addEventListener('click',()=>{editWrap.style.display='';nameEl.style.display='none';renameBtn.style.display='none';saveBtn.style.display='';cancelBtn.style.display='';input.focus();input.select()})
-      cancelBtn.addEventListener('click',()=>{editWrap.style.display='none';nameEl.style.display='';renameBtn.style.display='';saveBtn.style.display='none';cancelBtn.style.display='none';input.value=firm;statusEl.style.display='none'})
-      saveBtn.addEventListener('click',async()=>{
-        const newName=input.value.trim()
-        if(!newName||newName===firm){cancelBtn.click();return}
-        saveBtn.disabled=true;saveBtn.textContent='…';statusEl.style.display='';statusEl.textContent='Wird gespeichert…';statusEl.style.color='var(--sub)'
-        try{
-          const {error}=await _supabase.from('accounts').update({firm:newName}).eq('user_id',currentUserId).eq('firm',firm)
-          if(error) throw error
-          for(const a of(accounts||[])){if(a.firm===firm)a.firm=newName}
-          statusEl.textContent='✓ Gespeichert';statusEl.style.color='var(--success,#10b981)'
-          nameEl.textContent=newName;editWrap.style.display='none';nameEl.style.display='';renameBtn.style.display='';saveBtn.style.display='none';cancelBtn.style.display='none'
-          if(typeof populateAccountFilters==='function') populateAccountFilters()
-          setTimeout(()=>{statusEl.style.display='none'},2000)
-        }catch(e){statusEl.textContent='✗ '+((e.message||e));statusEl.style.color='var(--danger,#ef4444)'}
-        saveBtn.disabled=false;saveBtn.textContent='Speichern'
-      })
-      listEl.appendChild(row)
-    }
-  }
   // ── END Custom Firms ──────────────────────────────────────────────────────
 
   // Map firm string → FIRM_PRESET key
