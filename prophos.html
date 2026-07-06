@@ -7050,45 +7050,52 @@
   function persistAccounts(){ /* no-op: Supabase is source of truth */ }
 
   // ── Account-Filter State ──
-  let accFilters = { firm: '', type: '', search: '' }
-
-  // Topbar-Suche verdrahten
-  document.addEventListener('DOMContentLoaded', () => {
-    const tbSearch = document.getElementById('tb-search-input')
-    if(tbSearch){
-      tbSearch.addEventListener('input', () => {
-        accFilters.search = tbSearch.value.toLowerCase().trim()
-        if(typeof renderAccounts === 'function') renderAccounts()
-      })
-      // ⌘K fokussiert die Suche
-      document.addEventListener('keydown', e => {
-        if((e.metaKey || e.ctrlKey) && e.key === 'k'){
-          e.preventDefault()
-          tbSearch.focus()
-          tbSearch.select()
-        }
-      })
-    }
-  })
+  let accFilters = { firm: '', type: '' }
+  let accSearch = ''  // Freitext-Suche (Header-Suchbar)
 
   function populateAccountFilters(){
     const firmSel = document.getElementById('acc-firm-filter')
     if(!firmSel) return
+    const firms = [...new Set((accounts||[]).map(a => a.firm).filter(Boolean))].sort()
     const current = firmSel.value
-    const firms = [...new Set((accounts||[]).map(a=>a.firm).filter(Boolean))].sort()
-    firmSel.innerHTML = '<option value="">Alle</option>' + firms.map(f=>`<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
-    // Selektion wiederherstellen falls noch vorhanden
-    if(firms.includes(current)) firmSel.value = current
-    if(!firmSel.dataset.listenerSet){
-      firmSel.dataset.listenerSet = '1'
-      firmSel.addEventListener('change', () => { accFilters.firm = firmSel.value; renderAccounts() })
-    }
-    const typeSel = document.getElementById('acc-type-filter')
-    if(typeSel && !typeSel.dataset.listenerSet){
-      typeSel.dataset.listenerSet = '1'
-      typeSel.addEventListener('change', () => { accFilters.type = typeSel.value; renderAccounts() })
-    }
+    firmSel.innerHTML = '<option value="">Alle</option>' +
+      firms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
+    if(current && firms.includes(current)) firmSel.value = current
   }
+
+  document.getElementById('acc-firm-filter')?.addEventListener('change', e => {
+    accFilters.firm = e.target.value
+    if(typeof renderAccounts === 'function') renderAccounts()
+  })
+  document.getElementById('acc-type-filter')?.addEventListener('change', e => {
+    accFilters.type = e.target.value
+    if(typeof renderAccounts === 'function') renderAccounts()
+  })
+
+  /* Header-Suchbar (⌘K) */
+  ;(function wireGlobalSearch(){
+    const input = document.getElementById('tb-search-input')
+    if(!input) return
+    let _lastQuery = null
+    function runGlobalSearch(){
+      const q = (input.value || '').trim().toLowerCase()
+      if(q === _lastQuery) return
+      _lastQuery = q
+      accSearch = q
+      if(accSearch && typeof switchView === 'function'){
+        const onAccounts = document.querySelector('#dashboard-view .view.active')?.dataset.view === 'accounts'
+        if(!onAccounts) switchView('accounts')
+      }
+      if(typeof renderAccounts === 'function') renderAccounts()
+    }
+    ;['input','change','keyup','cut'].forEach(ev => input.addEventListener(ev, runGlobalSearch))
+    input.addEventListener('paste', () => setTimeout(runGlobalSearch, 0))
+    document.addEventListener('keydown', ev => {
+      if((ev.metaKey || ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K')){
+        ev.preventDefault(); input.focus(); input.select()
+      }
+    })
+  })()
 
   // ── Account Detail View ──
   function renderAccountDetail(){
@@ -7237,17 +7244,33 @@
     const parents = (typeof getParents === 'function') ? getParents() : {}
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
     const filters = (typeof accFilters !== 'undefined') ? accFilters : { firm:'', type:'' }
+    const q = (typeof accSearch === 'string') ? accSearch : ''
+
+    // Duplikum-Lookup für Suche
+    const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+    const dupByManualId = {}
+    for(const [dupId, manualId] of Object.entries(dupLinks)){
+      const dupAcc = (dupState?.accounts || []).find(d => d.account_id === dupId)
+      if(dupAcc) dupByManualId[manualId] = dupAcc
+    }
+    const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
+    const accHaystack = a => {
+      const dupAcc = dupByManualId[a.id] || null
+      return searchNorm([
+        a.name, a.externalId,
+        a.ma?.login, a.ma?.accountId,
+        a.topstep?.id, a.topstep?.name,
+        dupAcc?.login, dupAcc?.account_id, dupAcc?.name
+      ].filter(Boolean).join(' '))
+    }
+    const qNorm = searchNorm(q)
 
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
-      if(filters.search){
-        const q = filters.search
-        const haystack = [a.name, a.firm, a.externalId, a.ma?.login, a.type].filter(Boolean).join(' ').toLowerCase()
-        if(!haystack.includes(q)) return false
-      }
+      if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -9109,7 +9132,7 @@
         renameSave.disabled = true; renameSave.textContent = '…'
         renameStatus.style.display = ''; renameStatus.textContent = 'Speichern…'; renameStatus.style.color = 'var(--sub)'
         try{
-          const { error } = await _supabase.from('accounts').update({ firm: newName }).eq('user_id', currentUserId).eq('firm', firmName)
+          const { error } = await supabase.from('accounts').update({ firm: newName }).eq('user_id', currentUserId).eq('firm', firmName)
           if(error) throw error
           for(const a of (accounts||[])){ if(a.firm===firmName) a.firm=newName }
           const cf = getCustomFirms()
@@ -9141,7 +9164,7 @@
         if(delStatus){ delStatus.style.display=''; delStatus.textContent='Löschen…'; delStatus.style.color='var(--sub)' }
         try{
           if(count > 0){
-            const { error } = await _supabase.from('accounts')
+            const { error } = await supabase.from('accounts')
               .update({ firm: targetFirm || null })
               .eq('user_id', currentUserId)
               .eq('firm', firmName)
