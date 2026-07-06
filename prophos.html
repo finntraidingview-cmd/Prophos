@@ -5816,11 +5816,11 @@
   dupLoadAccounts = async function(){
     await _origDupLoadAccounts.apply(this, arguments)
     if(dupState.accounts.length) dupStartAutoRefresh()
-    if(autoTrack?.enabled) atStartClosedPoll()
+    if(autoTrack?.enabled) atStart()
   }
 
   async function dupLogout(){
-    atStopClosedPoll()
+    atStop()
     try {
       await fetch(`${TS_BACKEND}/duplikum/disconnect`, {
         method: 'POST',
@@ -6386,72 +6386,70 @@
   }
 
   /* ========================================================================
-   * AUTO TRADE TRACKER
-   * Erkennt automatisch Trade-Start und -Ende via Duplikum Open/Closed Positions.
-   * Matching: plan.slaveAccountId → dupGetLinks() rückwärts → Duplikum account_id
+   * AUTO TRADE TRACKER — simpel via getSlaveOrders
+   * Matching: plan.slaveAccountId → dupGetLinks() → Duplikum account_id
+   * Poll: alle 10s, unabhängig vom aktiven Tab
    * ====================================================================== */
   const autoTrack = {
-    enabled:    localStorage.getItem('prophos_autotrack') !== 'false',
-    // planId → { hadPosition: bool, lastPnl: number|null, notified: bool }
-    state:      new Map(),
-    inProgress: new Set(),
-    closedTimer: null,
-    CLOSED_INTERVAL: 60_000   // getClosedPositions alle 60s
+    enabled: localStorage.getItem('prophos_autotrack') !== 'false',
+    timer:   null,
+    INTERVAL: 10_000,
+    // planId → { wasOpen: bool, notified: bool }
+    state:   new Map(),
+    inProgress: new Set()
   }
 
-  // Beim Laden: Toggle-State setzen
+  // Toggle initialisieren
   document.addEventListener('DOMContentLoaded', () => {
     const tog = document.getElementById('autotrack-toggle')
-    if(tog){
-      tog.checked = autoTrack.enabled
-      tog.addEventListener('change', () => {
-        autoTrack.enabled = tog.checked
-        localStorage.setItem('prophos_autotrack', String(tog.checked))
-        const lbl = document.getElementById('autotrack-label')
-        if(lbl) lbl.style.color = tog.checked ? 'var(--violet)' : 'var(--sub)'
-        if(tog.checked) atStartClosedPoll()
-        else atStopClosedPoll()
-      })
-      if(autoTrack.enabled){
-        const lbl = document.getElementById('autotrack-label')
-        if(lbl) lbl.style.color = 'var(--violet)'
-      }
-    }
+    if(!tog) return
+    tog.checked = autoTrack.enabled
+    const lbl = document.getElementById('autotrack-label')
+    if(lbl && autoTrack.enabled) lbl.style.color = 'var(--violet)'
+    tog.addEventListener('change', () => {
+      autoTrack.enabled = tog.checked
+      localStorage.setItem('prophos_autotrack', String(tog.checked))
+      if(lbl) lbl.style.color = tog.checked ? 'var(--violet)' : 'var(--sub)'
+      tog.checked ? atStart() : atStop()
+    })
   })
 
-  // ── Hilfsfunktion: Prophos-Account-ID → Duplikum-Account-ID ──
+  // Hilfsfunktion: Prophos-Account-ID → Duplikum-Account-ID
   function atGetDupId(prophosAccountId){
     const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-    // links = { dupAccountId: prophosAccountId }
     for(const [dupId, manualId] of Object.entries(links)){
       if(String(manualId) === String(prophosAccountId)) return dupId
     }
     return null
   }
 
-  // ── Toast anzeigen (verschwindet nach 4.5s) ──
+  // Order-Status: ist die Order noch offen?
+  function atIsOpen(status){
+    if(!status) return false
+    const s = String(status).toLowerCase()
+    // "executed" = offen, "closed"/"cancelled"/"expired" = zu
+    return s.includes('execut') || s === 'open' || s === 'active'
+  }
+
+  // Toast
   function atToast(msg, type){
     document.querySelectorAll('.at-toast').forEach(el => el.remove())
     const el = document.createElement('div')
     el.className = `at-toast ${type}`
     el.textContent = msg
     document.body.appendChild(el)
-    setTimeout(() => el.remove(), 4500)
+    setTimeout(() => el.remove(), 5000)
   }
 
-  // ── End-Prompt anzeigen (Trade beendet, P&L vorausfüllen) ──
-  function atShowEndPrompt(plan, slavePl){
-    // Nur einen Prompt gleichzeitig pro Plan
+  // End-Prompt
+  function atShowEndPrompt(plan){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
     const el = document.createElement('div')
     el.className = 'at-prompt'
     el.id = `at-prompt-${plan.id}`
-    const plText = slavePl != null
-      ? ` · P&L: <strong style="color:${slavePl>=0?'#10b981':'#ef4444'}">${slavePl>=0?'+':''}${slavePl.toFixed(2)}$</strong>`
-      : ''
     el.innerHTML = `
       <div style="font-weight:700;font-size:14px;color:var(--ink);margin-bottom:3px">🔴 Trade erkannt: beendet</div>
-      <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')}${plText}</div>
+      <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')}</div>
       <div style="display:flex;gap:8px">
         <button id="at-complete-${plan.id}" style="flex:1;padding:8px;background:var(--violet);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
         <button id="at-dismiss-${plan.id}" style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--sub);font-size:12px">Später</button>
@@ -6460,50 +6458,46 @@
     document.body.appendChild(el)
     document.getElementById(`at-complete-${plan.id}`)?.addEventListener('click', () => {
       el.remove()
-      openTradeCompleteModal(plan.id, slavePl)
+      if(typeof openTradeCompleteModal === 'function') openTradeCompleteModal(plan.id)
     })
     document.getElementById(`at-dismiss-${plan.id}`)?.addEventListener('click', () => {
       el.remove()
-      // Beim nächsten Closed-Poll nochmal melden
       const s = autoTrack.state.get(plan.id)
       if(s) autoTrack.state.set(plan.id, { ...s, notified: false })
     })
-    setTimeout(() => el.remove(), 30_000)
+    setTimeout(() => el.remove(), 60_000)
   }
 
-  // ── Open-Positions-Check (wird nach jedem ltRender aufgerufen) ──
-  async function atCheckOpenPositions(dupOpenPositions, mtPositions){
+  // Haupt-Check
+  async function atCheck(){
     if(!autoTrack.enabled) return
-    if(!Array.isArray(tradePlans) || !tradePlans.length) return
+    if(!dupState?.token) return
+    const plans = (tradePlans || []).filter(p => p.status === 'planned' || p.status === 'open')
+    if(!plans.length) return
 
-    // Duplikum-Positionen nach account_id gruppieren
-    const openByDupAcc = new Map()
-    for(const pos of (dupOpenPositions||[])){
-      const id = String(pos.accountId || pos.account_id || '')
-      if(!openByDupAcc.has(id)) openByDupAcc.set(id, [])
-      openByDupAcc.get(id).push(pos)
-    }
-    // MT5-Positionen nach Prophos-accountId (direkt matchbar, kein Dup-Lookup nötig)
-    const openByMtAcc = new Map()
-    for(const pos of (mtPositions||[])){
-      const id = String(pos.accountId || '')
-      if(!openByMtAcc.has(id)) openByMtAcc.set(id, [])
-      openByMtAcc.get(id).push(pos)
-    }
+    let orders = []
+    try {
+      const res = await dupApi('POST', 'orders/getSlaveOrders.php', { length: 100 })
+      if(!res.ok) return
+      orders = res.data?.data || res.data?.orders || []
+    } catch(e){ return }
 
-    for(const plan of tradePlans.filter(p => p.status === 'planned')){
+    for(const plan of plans){
       if(autoTrack.inProgress.has(plan.id)) continue
       const dupSlaveId = atGetDupId(plan.slaveAccountId)
+      if(!dupSlaveId) continue
 
-      // Match: Duplikum-Position auf Slave ODER MT5-Position direkt auf Slave-Account
-      const hasDupPos = dupSlaveId ? (openByDupAcc.get(String(dupSlaveId)) || []).length > 0 : false
-      const hasMtPos  = (openByMtAcc.get(String(plan.slaveAccountId)) || []).length > 0
-      const hasPos = hasDupPos || hasMtPos
-      const prev   = autoTrack.state.get(plan.id) || { hadPosition: false }
+      // Orders die zu diesem Slave-Account gehören
+      const planOrders = orders.filter(o =>
+        String(o.id_slave || o.account_id || o.slave_id || '') === String(dupSlaveId)
+      )
 
-      if(hasPos && !prev.hadPosition){
-        // Neue Position → Auto-Start
-        autoTrack.state.set(plan.id, { hadPosition: true, lastPnl: null, notified: false })
+      const hasOpenOrder = planOrders.some(o => atIsOpen(o.status))
+      const prev = autoTrack.state.get(plan.id) || { wasOpen: false, notified: false }
+
+      if(plan.status === 'planned' && hasOpenOrder){
+        // Auto-Start
+        autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
         autoTrack.inProgress.add(plan.id)
         try {
           const { data, error } = await supabase
@@ -6516,1164 +6510,37 @@
             renderTradePlans()
             atToast(`▶ Trade gestartet: ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
           }
-        } catch(e){ console.warn('autoTrack start:', e) }
+        } catch(e){ console.warn('atCheck start:', e) }
         finally { autoTrack.inProgress.delete(plan.id) }
-      } else {
-        autoTrack.state.set(plan.id, { ...prev, hadPosition: hasPos })
-      }
-    }
 
-    // Open-Plans: letzten P&L aus laufenden Positionen tracken
-    for(const plan of tradePlans.filter(p => p.status === 'open')){
-      const dupSlaveId = atGetDupId(plan.slaveAccountId)
-      const dupPositions = dupSlaveId ? (openByDupAcc.get(String(dupSlaveId)) || []) : []
-      const mtPosForPlan = openByMtAcc.get(String(plan.slaveAccountId)) || []
-      const positions = [...dupPositions, ...mtPosForPlan]
-      const prev = autoTrack.state.get(plan.id) || { hadPosition: true, lastPnl: null, notified: false }
-      if(positions.length > 0){
-        const pnl = positions.reduce((s, p) => s + (Number(p.pnl) || 0), 0)
-        autoTrack.state.set(plan.id, { hadPosition: true, lastPnl: pnl || prev.lastPnl, notified: false })
-      } else if(prev.hadPosition) {
-        // Position gerade verschwunden aus Open — Closed-Poll wird End-Prompt zeigen
-        autoTrack.state.set(plan.id, { ...prev, hadPosition: false })
-      }
-    }
-  }
-
-  // ── Closed-Positions-Poll (alle 60s) ──
-  async function atCheckClosedPositions(){
-    if(!autoTrack.enabled) return
-    if(!dupState?.token) return
-    const openPlans = (tradePlans || []).filter(p => p.status === 'open')
-    if(!openPlans.length) return
-
-    try {
-      const res = await dupApi('POST', 'position/getClosedPositions.php', {
-        length: 50,
-        // Letzte 10 Minuten: jetzt minus 600s
-        dateFrom: new Date(Date.now() - 600_000).toISOString().slice(0,19).replace('T',' ')
-      })
-      if(!res.ok) return
-      const closed = (res.data?.data || [])
-
-      for(const plan of openPlans){
-        if(autoTrack.inProgress.has(plan.id)) continue
-        const dupSlaveId = atGetDupId(plan.slaveAccountId)
-        if(!dupSlaveId) continue
-
-        const prev = autoTrack.state.get(plan.id) || { hadPosition: false, lastPnl: null, notified: false }
-        if(prev.notified) continue
-
-        // Schau ob eine kürzlich geschlossene Position zu diesem Slave-Account gehört
-        const planStart = plan.startedAt ? new Date(plan.startedAt).getTime() : 0
-        const match = closed.find(c =>
-          String(c.account_id) === String(dupSlaveId) &&
-          new Date(c.closeTime || c.close_time || 0).getTime() > planStart
-        )
-        if(match){
-          const slavePl = match.profit != null ? Number(match.profit)
-            : (match.pnl != null ? Number(match.pnl) : prev.lastPnl)
-          autoTrack.state.set(plan.id, { ...prev, notified: true })
-          atShowEndPrompt(plan, slavePl)
-        } else if(!prev.hadPosition && !prev.notified && prev.lastPnl != null){
-          // Keine Closed-Position gefunden aber Open-Position weg → Fallback mit letztem P&L
-          autoTrack.state.set(plan.id, { ...prev, notified: true })
-          atShowEndPrompt(plan, prev.lastPnl)
-        }
-      }
-    } catch(e){ console.warn('autoTrack closedPoll:', e) }
-  }
-
-  function atStartClosedPoll(){
-    if(autoTrack.closedTimer) return
-    atCheckClosedPositions()
-    autoTrack.closedTimer = setInterval(atCheckClosedPositions, autoTrack.CLOSED_INTERVAL)
-  }
-  function atStopClosedPoll(){
-    if(autoTrack.closedTimer){ clearInterval(autoTrack.closedTimer); autoTrack.closedTimer = null }
-  }
-
-  // Closed-Poll starten wenn Duplikum verbunden ist
-  document.addEventListener('DOMContentLoaded', () => {
-    if(autoTrack.enabled) setTimeout(() => { if(dupState?.token) atStartClosedPoll() }, 3000)
-  })
-
-
-  // Manueller Refresh-Button
-  document.getElementById('lt-refresh-btn')?.addEventListener('click', ltRefresh)
-
-  // Start/Stop basierend auf View-Sichtbarkeit (sparen Backend-Calls)
-  function ltCheckVisibility(){
-    const lt = document.querySelector('.view[data-view="livetrades"]')
-    const isVisible = lt && lt.classList.contains('active')
-    if(isVisible) ltStart()
-    else ltStop()
-  }
-  // Listener auf alle Sidebar-Klicks die View wechseln
-  document.querySelectorAll('#dashboard-view .sb-link').forEach(l =>
-    l.addEventListener('click', () => setTimeout(ltCheckVisibility, 50))
-  )
-  // Auch bei Hash-Change reagieren
-  window.addEventListener('hashchange', () => setTimeout(ltCheckVisibility, 50))
-  // Initial-Check (falls man direkt mit #livetrades ladet)
-  setTimeout(ltCheckVisibility, 500)
-
-  /* ========================================================================
-   * CUSTOM PROP FIRMS — eigene Firms hinzufügen / verwalten
-   * Speicherung in localStorage 'prophos_custom_firms':
-   *   [{ id, name, symbol, unit, ppl, currency }]
-   * ====================================================================== */
-  const CUSTOM_FIRMS_LS = 'prophos_custom_firms'
-
-  function getCustomFirms(){
-    try { return JSON.parse(localStorage.getItem(CUSTOM_FIRMS_LS) || '[]') }
-    catch { return [] }
-  }
-  function saveCustomFirms(list){
-    localStorage.setItem(CUSTOM_FIRMS_LS, JSON.stringify(list))
-  }
-
-  /**
-   * Mergen Custom Firms in das globale FIRM_PRESETS-Objekt,
-   * damit der Lot-Rechner sie kennt.
-   */
-  function mergeCustomFirmsIntoPresets(){
-    let presets
-    try { presets = FIRM_PRESETS } catch(_) { return }  // TDZ-Schutz
-    if(!presets) return
-    // Erst alle alten Custom Keys entfernen, dann neu setzen
-    Object.keys(presets).forEach(k => {
-      if(presets[k]._custom) delete presets[k]
-    })
-    for(const f of getCustomFirms()){
-      presets[f.id] = {
-        label: f.name,
-        symbol: f.symbol || '?',
-        unit: f.unit || 'Lots',
-        ppl: Number(f.ppl) || 1,
-        currency: f.currency || '$',
-        tbd: false,
-        _custom: true
-      }
-    }
-  }
-
-  /**
-   * Datalist im "Account hinzufügen"-Modal mit Custom Firms erweitern.
-   * Default-Optionen werden behalten.
-   */
-  function refreshFirmDatalist(){
-    const dl = document.getElementById('firmList')
-    if(!dl) return
-    // Alte Custom-Optionen entfernen
-    dl.querySelectorAll('option[data-custom="1"]').forEach(o => o.remove())
-    // Neu hinzufügen
-    for(const f of getCustomFirms()){
-      const opt = document.createElement('option')
-      opt.value = f.name
-      opt.dataset.custom = '1'
-      dl.appendChild(opt)
-    }
-  }
-
-  /**
-   * Prüft ob zwei Firm-Specs (symbol, ppl, currency, unit) gleichwertig sind.
-   * Wird benutzt um Custom-Firms automatisch in einen ProjectX-/etc.-Sammeleintrag
-   * zu mergen wenn sie die gleichen Werte haben.
-   */
-  function _firmSpecsMatch(a, b){
-    if(!a || !b) return false
-    if(String(a.symbol||'').toLowerCase() !== String(b.symbol||'').toLowerCase()) return false
-    if(String(a.unit||'').toLowerCase() !== String(b.unit||'').toLowerCase()) return false
-    if(String(a.currency||'') !== String(b.currency||'')) return false
-    // ppl mit kleiner Toleranz (Rundungsfehler bei FX)
-    return Math.abs(Number(a.ppl||0) - Number(b.ppl||0)) < 0.01
-  }
-
-  /**
-   * Berechnet welche Custom-Firms in welche Built-in-Presets gemerged werden können.
-   * Returnt: { customId: builtinKey } für mergebare Firms,
-   *          und mergedLabel pro Built-in-Key wenn was gemerged wurde
-   *          (z.B. "Topstep / Tradeify / Alpha / Apex / MyFundedFutures")
-   */
-  function _computeFirmMerges(){
-    const customs = getCustomFirms()
-    const merges = {}        // customId -> builtinKey
-    const mergedNames = {}   // builtinKey -> [name1, name2, ...]
-    if(!customs.length) return { merges, mergedNames }
-    const builtinKeys = ['projectx','fundednext','fundingpips','the5ers','fusion']
-    for(const f of customs){
-      const customSpec = {
-        symbol: f.symbol, unit: f.unit,
-        currency: f.currency, ppl: Number(f.ppl)
-      }
-      for(const key of builtinKeys){
-        const builtin = FIRM_PRESETS[key]
-        if(!builtin) continue
-        if(_firmSpecsMatch(customSpec, builtin)){
-          merges[f.id] = key
-          ;(mergedNames[key] = mergedNames[key] || []).push(f.name)
-          break
-        }
-      }
-    }
-    return { merges, mergedNames }
-  }
-
-  /**
-   * Lot-Rechner-Dropdowns mit Custom Firms erweitern.
-   * Custom-Firms die identische Werte zu einem Built-in haben werden GEMERGED
-   * (Name wird zum Built-in-Eintrag-Label hinzugefügt, kein separater Eintrag).
-   */
-  function refreshCalcFirmDropdowns(){
-    const { merges, mergedNames } = _computeFirmMerges()
-    const ids = ['calc-master-firm', 'calc-slave-firm']
-    // Built-in-Optionen-Labels anpassen falls was reingemerged wurde
-    const baseBuiltinLabels = {
-      projectx:    'Topstep / Tradeify / Alpha / Apex',
-      fundednext:  'FundedNext',
-      fundingpips: 'FundingPips',
-      the5ers:     'The5%ers',
-      fusion:      'Fusion Markets'
-    }
-    for(const id of ids){
-      const sel = document.getElementById(id)
-      if(!sel) continue
-      // Vorhandene Custom-Options entfernen
-      sel.querySelectorAll('option[data-custom="1"]').forEach(o => o.remove())
-      // Built-in Labels updaten
-      for(const [key, baseLabel] of Object.entries(baseBuiltinLabels)){
-        const opt = sel.querySelector(`option[value="${key}"]`)
-        if(!opt) continue
-        const extras = mergedNames[key] || []
-        opt.textContent = extras.length
-          ? `${baseLabel} / ${extras.join(' / ')}`
-          : baseLabel
-      }
-      // Custom-Firms die NICHT gemerged wurden separat hinzufügen
-      for(const f of getCustomFirms()){
-        if(merges[f.id]) continue  // schon im Built-in gemerged
-        const opt = document.createElement('option')
-        opt.value = f.id
-        opt.textContent = f.name
-        opt.dataset.custom = '1'
-        sel.appendChild(opt)
-      }
-    }
-  }
-
-  /**
-   * Settings-View: Liste aller Custom Firms rendern.
-   */
-  function renderCustomFirmsList(){
-    const wrap = document.getElementById('customFirmsList')
-    const empty = document.getElementById('customFirmsEmpty')
-    if(!wrap || !empty) return
-
-    const firms = getCustomFirms()
-    if(!firms.length){
-      wrap.innerHTML = ''
-      empty.style.display = ''
-      return
-    }
-    empty.style.display = 'none'
-
-    wrap.innerHTML = firms.map(f => `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg-2,transparent)">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <div style="font-weight:600;color:var(--ink);font-size:14px">${escapeHtml(f.name)}</div>
-          <div style="font-size:11.5px;color:var(--sub)">
-            ${escapeHtml(f.symbol||'?')} · ${escapeHtml(f.unit||'')} · ${escapeHtml(f.currency||'$')}${Number(f.ppl).toFixed(2)}/Pkt
-          </div>
-        </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost icon-btn" data-cf-edit="${escapeHtml(f.id)}" title="Bearbeiten" style="padding:6px 8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn btn-ghost icon-btn" data-cf-del="${escapeHtml(f.id)}" title="Löschen" style="padding:6px 8px">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </div>
-      </div>
-    `).join('')
-
-    wrap.querySelectorAll('[data-cf-edit]').forEach(btn =>
-      btn.addEventListener('click', () => openCustomFirmModal(btn.dataset.cfEdit))
-    )
-    wrap.querySelectorAll('[data-cf-del]').forEach(btn =>
-      btn.addEventListener('click', () => deleteCustomFirm(btn.dataset.cfDel))
-    )
-  }
-
-  /* ── Modal: hinzufügen / bearbeiten ── */
-  let _editingCustomFirmId = null
-
-  function openCustomFirmModal(firmId){
-    _editingCustomFirmId = firmId || null
-    const f = firmId ? getCustomFirms().find(x => x.id === firmId) : null
-
-    document.getElementById('customFirmModalTitle').textContent =
-      f ? 'Prop Firm bearbeiten' : 'Prop Firm hinzufügen'
-    document.getElementById('cf-name').value     = f?.name     || ''
-    document.getElementById('cf-symbol').value   = f?.symbol   || ''
-    document.getElementById('cf-unit').value     = f?.unit     || 'Kontrakte'
-    document.getElementById('cf-ppl').value      = f?.ppl      ?? ''
-    document.getElementById('cf-currency').value = f?.currency || '$'
-    document.getElementById('customFirmMsg').textContent = ''
-    document.getElementById('customFirmModal').classList.add('open')
-    setTimeout(() => document.getElementById('cf-name').focus(), 50)
-  }
-
-  function closeCustomFirmModal(){
-    document.getElementById('customFirmModal').classList.remove('open')
-    _editingCustomFirmId = null
-  }
-
-  function deleteCustomFirm(firmId){
-    const f = getCustomFirms().find(x => x.id === firmId)
-    if(!f) return
-    if(!confirm(`"${f.name}" wirklich löschen? Bestehende Accounts mit dieser Firm bleiben erhalten, aber die Firm verschwindet aus den Dropdowns.`)) return
-    const list = getCustomFirms().filter(x => x.id !== firmId)
-    saveCustomFirms(list)
-    mergeCustomFirmsIntoPresets()
-    refreshFirmDatalist()
-    refreshCalcFirmDropdowns()
-    renderCustomFirmsList()
-  }
-
-  function saveCustomFirmFromModal(){
-    const name     = document.getElementById('cf-name').value.trim()
-    const symbol   = document.getElementById('cf-symbol').value.trim()
-    const unit     = document.getElementById('cf-unit').value
-    const ppl      = parseFloat(document.getElementById('cf-ppl').value)
-    const currency = document.getElementById('cf-currency').value
-    const msg      = document.getElementById('customFirmMsg')
-
-    if(!name){
-      msg.textContent = 'Name ist nötig.'
-      msg.className = 'modal-msg err'
-      return
-    }
-    if(!isFinite(ppl) || ppl <= 0){
-      msg.textContent = '$ pro Punkt muss eine positive Zahl sein.'
-      msg.className = 'modal-msg err'
-      return
-    }
-
-    // Doppelter Name-Check (nur Custom Firms, Defaults dürfen nicht überschrieben werden)
-    const DEFAULT_NAMES = ['topstep','fusion markets','fundingpips','fundednext','tradeify','apex','the5%ers','the 5%ers']
-    if(DEFAULT_NAMES.includes(name.toLowerCase()) && !_editingCustomFirmId){
-      msg.textContent = `"${name}" ist bereits ein Standard. Wähl einen anderen Namen.`
-      msg.className = 'modal-msg err'
-      return
-    }
-
-    const list = getCustomFirms()
-    if(_editingCustomFirmId){
-      // Update
-      const idx = list.findIndex(x => x.id === _editingCustomFirmId)
-      if(idx >= 0) list[idx] = { ...list[idx], name, symbol, unit, ppl, currency }
-    } else {
-      // Create — ID generieren (slugified name + timestamp)
-      const baseId = 'custom_' + name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20)
-      let id = baseId
-      let n = 1
-      while(list.some(x => x.id === id) || (typeof FIRM_PRESETS !== 'undefined' && FIRM_PRESETS[id])){
-        id = baseId + '_' + (++n)
-      }
-      list.push({ id, name, symbol, unit, ppl, currency })
-    }
-    saveCustomFirms(list)
-    mergeCustomFirmsIntoPresets()
-    refreshFirmDatalist()
-    refreshCalcFirmDropdowns()
-    renderCustomFirmsList()
-    closeCustomFirmModal()
-  }
-
-  // Wire up listeners
-  document.getElementById('customFirmAddBtn')?.addEventListener('click', () => openCustomFirmModal())
-  document.getElementById('customFirmCancel')?.addEventListener('click', closeCustomFirmModal)
-  document.getElementById('customFirmCancel2')?.addEventListener('click', closeCustomFirmModal)
-  document.getElementById('customFirmSave')?.addEventListener('click', saveCustomFirmFromModal)
-  document.getElementById('customFirmModal')?.addEventListener('click', e => {
-    if(e.target === document.getElementById('customFirmModal')) closeCustomFirmModal()
-  })
-  // Enter-Submit aus Inputs
-  ;['cf-name','cf-symbol','cf-ppl'].forEach(id => {
-    const el = document.getElementById(id)
-    if(el) el.addEventListener('keydown', e => { if(e.key === 'Enter') saveCustomFirmFromModal() })
-  })
-
-  // Initialisierung beim Page-Load
-  // Wichtig: erst NACH FIRM_PRESETS-Definition ausführen → setTimeout 0 wartet auf
-  // den Rest des Scripts (FIRM_PRESETS wird weiter unten definiert)
-  setTimeout(() => {
-    try {
-      mergeCustomFirmsIntoPresets()
-      refreshFirmDatalist()
-      refreshCalcFirmDropdowns()
-      renderCustomFirmsList()
-    } catch(e) {
-      console.warn('Custom Firms init failed:', e)
-    }
-  }, 0)
-
-  /* ========================================================================
-   * ACCOUNT-DETAIL VIEW
-   * Klick auf Account-Zeile → eigene "account-detail" Seite mit:
-   *   - Stammdaten (Name, Firma, Typ, Balance, Kosten, Verknüpfungen, Status)
-   *   - Liste aller Trade-Plans wo dieser Account Master oder Slave war
-   *   - Liste aller Finanz-Buchungen für diesen Account
-   *   - Klick auf Trade-Plan → springt zur Trades-Übersicht
-   * ====================================================================== */
-  let _detailAccountId = null
-
-  function showAccountDetail(accId){
-    if(!accId) return
-    _detailAccountId = String(accId)
-    // Erst View wechseln (.active setzen), dann rendern
-    if(typeof switchView === 'function') switchView('account-detail')
-    else location.hash = 'account-detail'
-    renderAccountDetail()
-    // Scroll oben
-    try { window.scrollTo({ top: 0, behavior: 'instant' }) } catch(_) { window.scrollTo(0,0) }
-  }
-
-  function renderAccountDetail(){
-    const accId = _detailAccountId
-    if(!accId) return
-    const a = accounts.find(x => String(x.id) === String(accId))
-    if(!a){
-      // Account weg → zurück zur Liste
-      location.hash = 'accounts'
-      _detailAccountId = null
-      return
-    }
-
-    // Header
-    const titleEl = document.getElementById('ad-title')
-    const subEl = document.getElementById('ad-subtitle')
-    if(titleEl) titleEl.textContent = a.name
-    if(subEl){
-      const archive = (typeof getArchive === 'function') ? getArchive() : {}
-      const archInfo = archive[a.id]
-      const parts = []
-      if(a.firm) parts.push(escapeHtml(a.firm))
-      parts.push(typeLabel(a.type))
-      if(archInfo?.archived){
-        const reasonMap = { blown: '💀 Geblowt', passed: '✅ Bestanden', manual: '📦 Archiviert' }
-        parts.push(reasonMap[archInfo.reason] || '📦 Archiviert')
-      }
-      subEl.innerHTML = parts.join(' · ')
-    }
-
-    // ─── Vorgänger-Account ermitteln (für Phase-2-Inheritance) ───
-    // archive[parentId] = { successorId: this account } → parent Account
-    const archive = (typeof getArchive === 'function') ? getArchive() : {}
-    const parentEntry = Object.entries(archive).find(([_, info]) => info?.successorId && String(info.successorId) === String(a.id))
-    const parentAcc = parentEntry ? accounts.find(x => String(x.id) === String(parentEntry[0])) : null
-
-    // ─── Stats KPIs ───
-    const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
-    const accountTrades = planList.filter(p =>
-      String(p.masterAccountId) === String(a.id) || String(p.slaveAccountId) === String(a.id)
-    )
-    const completedTrades = accountTrades.filter(p => p.status === 'completed')
-    let totalPl = 0
-    for(const p of completedTrades){
-      if(String(p.masterAccountId) === String(a.id) && p.masterPl != null) totalPl += Number(p.masterPl)
-      if(String(p.slaveAccountId)  === String(a.id) && p.slavePl  != null) totalPl += Number(p.slavePl)
-    }
-
-    // ─── Vorgänger-Trades sammeln (für Inheritance-Bewegungen) ───
-    const parentCompletedTrades = parentAcc
-      ? planList.filter(p =>
-          p.status === 'completed' && (
-            String(p.masterAccountId) === String(parentAcc.id) ||
-            String(p.slaveAccountId) === String(parentAcc.id)
-          )
-        )
-      : []
-
-    // ─── Live-Realisiert: nur P/L vom Live-Account-Counterparty in Trades dieses Accounts
-    // Wenn der aktuelle Account ein Master war, schau ob der Slave Live war → addiere Slave-P/L
-    // Wenn der aktuelle Account ein Slave war, schau ob der Master Live war → addiere Master-P/L
-    let liveRealisedUsd = 0  // Master-Currency immer USD
-    let liveRealisedNonUsd = {}  // Slave-Currencies (z.B. EUR, GBP)
-    // Trades dieses Accounts UND alle Trades vom Vorgänger werden zusammen aggregiert
-    const tradesForLiveCalc = [...completedTrades, ...parentCompletedTrades]
-    const ownerForTrade = new Map()
-    for(const p of completedTrades) ownerForTrade.set(p.id, a)
-    for(const p of parentCompletedTrades) if(!ownerForTrade.has(p.id)) ownerForTrade.set(p.id, parentAcc)
-
-    for(const p of tradesForLiveCalc){
-      const owner = ownerForTrade.get(p.id) || a
-      const thisIsMaster = String(p.masterAccountId) === String(owner.id)
-      const thisIsSlave  = String(p.slaveAccountId)  === String(owner.id)
-      if(thisIsMaster){
-        // Slave-Seite war counter — falls Live, deren P/L zählt
-        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
-        if(slaveAcc?.type === 'live' && p.slavePl != null){
-          const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-          const cur = slavePreset.currency
-          if(cur === '$') liveRealisedUsd += Number(p.slavePl)
-          else liveRealisedNonUsd[cur] = (liveRealisedNonUsd[cur] || 0) + Number(p.slavePl)
-        }
-      }
-      if(thisIsSlave){
-        // Master-Seite war counter — falls Live, deren P/L zählt
-        const masterAcc = accounts.find(x => String(x.id) === String(p.masterAccountId))
-        if(masterAcc?.type === 'live' && p.masterPl != null){
-          liveRealisedUsd += Number(p.masterPl)  // Master immer USD
-        }
-      }
-    }
-
-    // Eigene Transaktionen + geerbte (Vorgänger) für Cost/Payout-Aggregation
-    const ownTransactions = (typeof transactions !== 'undefined' && Array.isArray(transactions))
-      ? transactions.filter(t => String(t.account_id) === String(a.id))
-      : []
-    const parentTransactions = (parentAcc && typeof transactions !== 'undefined' && Array.isArray(transactions))
-      ? transactions.filter(t => String(t.account_id) === String(parentAcc.id))
-      : []
-    const accountTransactions = [...ownTransactions, ...parentTransactions]
-    const totalCostsTx = accountTransactions
-      .filter(t => t.kind === 'account_purchase')
-      .reduce((s, t) => {
-        // Bei Kaufpreis: Currency egal — wenn EUR direkt, wenn USD konvertieren? Nein, wir aggregieren
-        // nach EUR als Reingesteckt-Wert. Hier zählen wir EUR-Beträge direkt, USD-Beträge konvertieren.
-        const amt = Number(t.amount || 0)
-        if(t.currency === 'EUR') return s + amt  // EUR direkt addieren
-        return s + amt  // USD wird später korrigiert
-      }, 0)
-    // FALLBACK: wenn keine Kauf-Transaction für diesen Account existiert (legacy Accounts)
-    const hasOwnCostTx = ownTransactions.some(t => t.kind === 'account_purchase')
-    const hasParentCostTx = parentAcc ? parentTransactions.some(t => t.kind === 'account_purchase') : false
-    const fallbackOwnCost = (!hasOwnCostTx && a.purchaseCost) ? -Math.abs(Number(a.purchaseCost)) : 0
-    const fallbackParentCost = (parentAcc && !hasParentCostTx && parentAcc.purchaseCost) ? -Math.abs(Number(parentAcc.purchaseCost)) : 0
-    const hasCostTx = hasOwnCostTx || hasParentCostTx
-    const totalCosts = totalCostsTx + fallbackOwnCost + fallbackParentCost
-    const totalPayouts = accountTransactions
-      .filter(t => t.kind === 'payout')
-      .reduce((s, t) => s + Number(t.amount || 0), 0)
-
-    // ─── Netto-Bilanz mit Wechselkurs-Konvertierung ───
-    // Alle Beträge in USD umrechnen (Master-Currency)
-    // FX: window._fxUsdEur z.B. 0.85 (1 USD = 0.85 EUR)
-    // Um EUR → USD: EUR / fx
-    const fxUsdEur = window._fxUsdEur || 0.85
-    let liveRealisedUsdConverted = liveRealisedUsd
-    Object.entries(liveRealisedNonUsd).forEach(([cur, val]) => {
-      if(cur === '€') liveRealisedUsdConverted += val / fxUsdEur
-    })
-
-    // Total Costs aufgeteilt nach Currency und konvertiert zu USD
-    let totalCostsUsd = 0
-    accountTransactions.filter(t => t.kind === 'account_purchase').forEach(t => {
-      const amt = Number(t.amount || 0)
-      if(t.currency === 'EUR') totalCostsUsd += amt / fxUsdEur
-      else totalCostsUsd += amt  // USD oder default
-    })
-    // Fallback purchaseCost (in EUR gespeichert) falls keine TX existiert
-    if(!hasOwnCostTx && a.purchaseCost) totalCostsUsd += -Math.abs(Number(a.purchaseCost)) / fxUsdEur
-    if(parentAcc && !hasParentCostTx && parentAcc.purchaseCost) totalCostsUsd += -Math.abs(Number(parentAcc.purchaseCost)) / fxUsdEur
-
-    // Reingesteckt = alle Geldabflüsse aus deiner Tasche (Kosten + negative Hedge-P/L)
-    // Rausgeholt   = alle Geldzuflüsse in deine Tasche (positive Hedge-P/L + Payouts)
-    const reingesteckt = Math.abs(totalCostsUsd) + Math.max(0, -liveRealisedUsdConverted)
-    const rausgeholt   = Math.max(0, liveRealisedUsdConverted) + Math.max(0, totalPayouts)
-    const nettoUsd     = rausgeholt - reingesteckt
-
-    const stats = document.getElementById('ad-stats')
-    if(stats){
-      // Live-Balance Priorität: TSX > MT5 > Duplikum > manuell
-      const dupAccDetail = (typeof dupState !== 'undefined' && dupState.accounts)
-        ? Object.entries(typeof dupGetLinks === 'function' ? dupGetLinks() : {})
-            .filter(([_, mId]) => String(mId) === String(a.id))
-            .map(([dupId]) => dupState.accounts.find(x => x.account_id === dupId))
-            .filter(Boolean)[0]
-        : null
-      let liveBal = null, liveSrc = null, liveCcy = '$'
-      if(a.topstep?.balance != null){
-        liveBal = a.topstep.balance; liveSrc = 'TopstepX'; liveCcy = '$'
-      } else if(a.ma?.balance != null){
-        liveBal = a.ma.balance; liveSrc = 'MT5'; liveCcy = '$'
-      } else if(dupAccDetail && dupAccDetail.balance != null){
-        liveBal = Number(dupAccDetail.balance); liveSrc = 'Duplikum'
-        liveCcy = (dupAccDetail.ccy === 'EUR') ? '€' : '$'
-      }
-      const fmtSig = (n) => (n >= 0 ? '+' : '−') + fmtMoney(Math.abs(n))
-      const fmtSigEur = (n) => (n >= 0 ? '+' : '−') + '€' + Math.abs(n).toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
-      const fmtMoneyCur = (n, cur) => {
-        if(cur === '€') return '€' + Math.abs(n).toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
-        return fmtMoney(Math.abs(n))
-      }
-      const fmtSigCur = (n, cur) => {
-        const sign = n >= 0 ? '+' : '−'
-        const symbol = cur === '€' ? '€' : '$'
-        return sign + symbol + Math.abs(n).toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})
-      }
-
-      // ─── EUR-Werte für Bilanz-Anzeige (alles in EUR umgerechnet) ───
-      // FX: 1 USD = X EUR → um USD → EUR: USD * fxUsdEur
-      const reingestecktEur = reingesteckt * fxUsdEur
-      const rausgeholtEur = rausgeholt * fxUsdEur
-      const nettoEur = nettoUsd * fxUsdEur
-
-      const nettoColor = nettoEur > 5 ? '#10b981' : (nettoEur < -5 ? '#ef4444' : '#94a3b8')
-      const nettoBgTint = nettoEur > 5 ? '#10b9810f' : (nettoEur < -5 ? '#ef44440f' : '#94a3b80a')
-
-      // ─── Bewegungs-Liste für Tabelle ───
-      const bewegungen = []
-
-      // Helper: Bewegung mit Inheritance-Marker bauen
-      const pushB = (b, fromParent) => {
-        bewegungen.push({...b, fromParent: !!fromParent})
-      }
-
-      // Kaufpreise (eigene)
-      if(hasOwnCostTx){
-        ownTransactions.filter(t => t.kind === 'account_purchase').forEach(t => {
-          pushB({
-            date: t.occurred_at,
-            label: 'Account-Kauf',
-            sublabel: t.notes || '',
-            amount: Number(t.amount || 0),
-            currency: t.currency === 'EUR' ? '€' : '$',
-            kind: 'cost'
-          }, false)
-        })
-      } else if(a.purchaseCost) {
-        pushB({
-          date: a.createdAt,
-          label: 'Account-Kauf',
-          sublabel: 'aus Stammdaten',
-          amount: -Math.abs(Number(a.purchaseCost)),
-          currency: '€',  // Kaufpreise sind jetzt EUR
-          kind: 'cost'
-        }, false)
-      }
-
-      // Kaufpreise (Vorgänger)
-      if(parentAcc){
-        if(hasParentCostTx){
-          parentTransactions.filter(t => t.kind === 'account_purchase').forEach(t => {
-            pushB({
-              date: t.occurred_at,
-              label: 'Account-Kauf',
-              sublabel: t.notes || `auf ${parentAcc.name}`,
-              amount: Number(t.amount || 0),
-              currency: t.currency === 'EUR' ? '€' : '$',
-              kind: 'cost'
-            }, true)
-          })
-        } else if(parentAcc.purchaseCost){
-          pushB({
-            date: parentAcc.createdAt,
-            label: 'Account-Kauf',
-            sublabel: `auf ${parentAcc.name}`,
-            amount: -Math.abs(Number(parentAcc.purchaseCost)),
-            currency: '€',
-            kind: 'cost'
-          }, true)
-        }
-      }
-
-      // Live-Hedge pro Trade (eigene + Vorgänger-Trades)
-      const allTradesForRows = [
-        ...completedTrades.map(p => ({p, owner: a, fromParent: false})),
-        ...parentCompletedTrades.map(p => ({p, owner: parentAcc, fromParent: true}))
-      ]
-      for(const {p, owner, fromParent} of allTradesForRows){
-        const thisIsMaster = String(p.masterAccountId) === String(owner.id)
-        const thisIsSlave  = String(p.slaveAccountId)  === String(owner.id)
-        if(thisIsMaster){
-          const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
-          if(slaveAcc?.type === 'live' && p.slavePl != null){
-            const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-            pushB({
-              date: p.completedAt,
-              label: 'Live-Hedge',
-              sublabel: `Slave: ${slaveAcc.name}`,
-              amount: Number(p.slavePl),
-              currency: slavePreset.currency,
-              kind: 'hedge'
-            }, fromParent)
-          }
-        }
-        if(thisIsSlave){
-          const masterAcc = accounts.find(x => String(x.id) === String(p.masterAccountId))
-          if(masterAcc?.type === 'live' && p.masterPl != null){
-            pushB({
-              date: p.completedAt,
-              label: 'Live-Hedge',
-              sublabel: `Master: ${masterAcc.name}`,
-              amount: Number(p.masterPl),
-              currency: '$',
-              kind: 'hedge'
-            }, fromParent)
-          }
-        }
-      }
-
-      // Payouts (eigene + Vorgänger)
-      ownTransactions.filter(t => t.kind === 'payout').forEach(t => {
-        pushB({
-          date: t.occurred_at,
-          label: 'Payout',
-          sublabel: t.notes || '',
-          amount: Number(t.amount || 0),
-          currency: t.currency === 'EUR' ? '€' : '$',
-          kind: 'payout'
-        }, false)
-      })
-      if(parentAcc){
-        parentTransactions.filter(t => t.kind === 'payout').forEach(t => {
-          pushB({
-            date: t.occurred_at,
-            label: 'Payout',
-            sublabel: t.notes || `auf ${parentAcc.name}`,
-            amount: Number(t.amount || 0),
-            currency: t.currency === 'EUR' ? '€' : '$',
-            kind: 'payout'
-          }, true)
-        })
-      }
-
-      // Sortiert nach Datum desc
-      bewegungen.sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')))
-
-      const bewegungenHtml = bewegungen.length === 0
-        ? `<tr><td colspan="4" style="padding:18px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Bewegungen.</td></tr>`
-        : bewegungen.map(b => {
-            const dateStr = b.date ? new Date(b.date).toLocaleDateString('de-DE', {day: '2-digit', month: '2-digit', year: '2-digit'}) : '—'
-            const amountColor = b.amount >= 0 ? '#10b981' : '#ef4444'
-            const kindBadge = b.kind === 'cost' ? '<span style="display:inline-block;padding:3px 8px;border-radius:5px;background:#ef44441a;color:#dc2626;font-size:10.5px;font-weight:700;letter-spacing:.3px">KAUF</span>'
-                            : b.kind === 'hedge' ? '<span style="display:inline-block;padding:3px 8px;border-radius:5px;background:#a78bfa1a;color:#8b5cf6;font-size:10.5px;font-weight:700;letter-spacing:.3px">HEDGE</span>'
-                            : '<span style="display:inline-block;padding:3px 8px;border-radius:5px;background:#10b9811a;color:#059669;font-size:10.5px;font-weight:700;letter-spacing:.3px">PAYOUT</span>'
-            // Inheritance: dezente Markierung wenn vom Vorgänger geerbt
-            const inheritedBadge = b.fromParent
-              ? `<span title="Übernommen vom Vorgänger-Account ${parentAcc ? escapeHtml(parentAcc.name) : ''}" style="display:inline-block;padding:2px 6px;border-radius:4px;background:rgba(99,102,241,.08);color:#6366f1;font-size:10px;font-weight:600;margin-left:6px;letter-spacing:.2px">↑ Phase 1</span>`
-              : ''
-            const rowOpacity = b.fromParent ? '0.78' : '1'
-            return `
-              <tr style="border-top:1px solid var(--border-soft);opacity:${rowOpacity}">
-                <td style="padding:11px 16px;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;width:88px;white-space:nowrap">${dateStr}</td>
-                <td style="padding:11px 8px;width:90px">${kindBadge}</td>
-                <td style="padding:11px 16px;font-size:13px;color:var(--ink)">
-                  <div style="font-weight:500;line-height:1.2">${escapeHtml(b.label)}${inheritedBadge}</div>
-                  ${b.sublabel ? `<div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(b.sublabel)}</div>` : ''}
-                </td>
-                <td style="padding:11px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${amountColor};white-space:nowrap;font-size:13.5px">${fmtSigCur(b.amount, b.currency)}</td>
-              </tr>
-            `
-          }).join('')
-
-      // ─── Layout: eine breite Hero-Zeile + Tabelle drunter ───
-      stats.innerHTML = `
-        <div style="display:block">
-        <!-- Stats-Hero: alle KPIs in einer Reihe, gleich hoch -->
-        <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px;align-items:stretch">
-
-          <!-- Netto-Bilanz: groß und prominent (in EUR) -->
-          <div style="background:${nettoBgTint};border:1px solid var(--border);border-radius:12px;padding:18px 22px;display:flex;flex-direction:column;justify-content:space-between;min-height:180px">
-            <div>
-              <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;font-weight:600">Netto-Bilanz</div>
-              <div style="font-size:32px;font-weight:700;font-variant-numeric:tabular-nums;color:${nettoColor};margin-top:6px;line-height:1.05">${fmtSigEur(nettoEur)}</div>
-              <div style="font-size:11px;color:var(--sub);margin-top:4px">in EUR · FX 1 USD = ${fxUsdEur.toFixed(4).replace('.', ',')} EUR</div>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-soft)">
-              <div>
-                <div style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Reingesteckt</div>
-                <div style="color:#ef4444;font-weight:600;font-variant-numeric:tabular-nums;margin-top:3px;font-size:15px">−€${reingestecktEur.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}</div>
-              </div>
-              <div>
-                <div style="color:var(--sub);font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Rausgeholt</div>
-                <div style="color:#10b981;font-weight:600;font-variant-numeric:tabular-nums;margin-top:3px;font-size:15px">+€${rausgeholtEur.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Aktuelle Balance (in Account-Currency, Duplikum bevorzugt) -->
-          <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center;min-height:180px">
-            <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;font-weight:600">Aktuelle Balance</div>
-            <div style="font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink);margin-top:6px;line-height:1.05">${liveBal != null ? fmtMoneyCur(liveBal, liveCcy) : fmtMoney(a.initialBalance)}</div>
-            <div style="font-size:11px;color:var(--sub);margin-top:4px">${liveSrc ? '● Live · ' + liveSrc : 'Manuell'}</div>
-          </div>
-
-          <!-- Trade P/L Sim -->
-          <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center;min-height:180px">
-            <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;font-weight:600">Trade P/L (Sim)</div>
-            <div style="font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;color:${totalPl>=0?'#10b981':'#ef4444'};margin-top:6px;line-height:1.05">${fmtSig(totalPl)}</div>
-            <div style="font-size:11px;color:var(--sub);margin-top:4px">${completedTrades.length} erledigte Trades</div>
-          </div>
-        </div>
-
-        <!-- Bewegungs-Tabelle: alles was die Bilanz ausmacht -->
-        <div style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden">
-          <div style="padding:13px 18px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-            <div>
-              <div style="font-size:13px;font-weight:600;color:var(--ink)">Bewegungen</div>
-              <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${bewegungen.length} Eintrag${bewegungen.length===1?'':'e'} — alles was den Netto-Wert ausmacht</div>
-            </div>
-          </div>
-          <table style="width:100%;border-collapse:collapse">
-            <tbody>${bewegungenHtml}</tbody>
-          </table>
-        </div>
-        </div>
-      `
-    }
-
-    // ─── Stammdaten ───
-    const dataList = document.getElementById('ad-data-list')
-    if(dataList){
-      const rows = []
-      const row = (label, val) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 16px;font-size:13px"><span style="color:var(--sub)">${label}</span><span style="color:var(--ink);font-weight:500;text-align:right">${val}</span></div>`
-      rows.push(row('Name', escapeHtml(a.name)))
-      rows.push(row('Firma', escapeHtml(a.firm || '–')))
-      rows.push(row('Typ', typeLabel(a.type)))
-      rows.push(row('Anfangs-Balance', `<span class="mono">${fmtMoney(a.initialBalance)}</span>`))
-      if(a.purchaseCost != null) rows.push(row('Kaufpreis', `<span class="mono">€${Number(a.purchaseCost).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>`))
-      if(a.profitTarget != null) rows.push(row('Profit-Ziel', `<span class="mono">${fmtMoney(a.profitTarget)}</span>`))
-      if(a.dailyLossLimit != null) rows.push(row('Daily Loss Limit', `<span class="mono">${fmtMoney(a.dailyLossLimit)}</span>`))
-      if(a.maxDrawdown != null) rows.push(row('Max Drawdown', `<span class="mono">${fmtMoney(a.maxDrawdown)}</span>`))
-      dataList.innerHTML = rows.join('')
-    }
-
-    // ─── Verknüpfungen / Status ───
-    const linksList = document.getElementById('ad-links-list')
-    if(linksList){
-      const rows = []
-      const row = (label, val) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 16px;font-size:13px"><span style="color:var(--sub)">${label}</span><span style="color:var(--ink);font-weight:500;text-align:right">${val}</span></div>`
-      if(a.topstep) rows.push(row('Topstep', `<span style="font-family:var(--mono);font-size:12px">${escapeHtml(a.topstep.name||'–')}</span>`))
-      if(a.ma)      rows.push(row('MetaApi (MT5)', `<span style="font-family:var(--mono);font-size:12px">#${escapeHtml(a.ma.login||'–')}</span>`))
-      // Duplikum
-      const dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
-      let dupAcc = null
-      for(const [dupId, manualId] of Object.entries(dupLinks)){
-        if(String(manualId) === String(a.id)){
-          dupAcc = (typeof dupState !== 'undefined' && dupState.accounts || []).find(d => d.account_id === dupId)
-          break
-        }
-      }
-      if(dupAcc) rows.push(row('Duplikum', `<span style="font-family:var(--mono);font-size:12px">${escapeHtml(dupAcc.name||dupAcc.login||'–')}</span>`))
-
-      // Parent / Successor
-      const parents = (typeof getParents === 'function') ? getParents() : {}
-      const archive = (typeof getArchive === 'function') ? getArchive() : {}
-      const parentId = parents[a.id]
-      if(parentId){
-        const parentAcc = accounts.find(x => String(x.id) === String(parentId))
-        if(parentAcc){
-          rows.push(row('Vorgänger', `<a href="#" data-ad-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a>`))
-        }
-      }
-      const successorEntry = Object.entries(archive).find(([k, info]) => info?.successorId === a.id)
-      if(successorEntry){
-        const oldAcc = accounts.find(x => String(x.id) === String(successorEntry[0]))
-        if(oldAcc) rows.push(row('Nachfolger von', `<a href="#" data-ad-jump="${escapeHtml(oldAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(oldAcc.name)}</a>`))
-      }
-      const archInfo = archive[a.id]
-      if(archInfo?.successorId){
-        const sucAcc = accounts.find(x => String(x.id) === String(archInfo.successorId))
-        if(sucAcc) rows.push(row('Nachfolger', `<a href="#" data-ad-jump="${escapeHtml(sucAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(sucAcc.name)}</a>`))
-      }
-
-      if(!rows.length) rows.push(`<div style="padding:6px 16px;font-size:13px;color:var(--sub)">Keine Verknüpfungen</div>`)
-      linksList.innerHTML = rows.join('')
-
-      // Jump-Links
-      linksList.querySelectorAll('[data-ad-jump]').forEach(link => {
-        link.addEventListener('click', e => {
-          e.preventDefault()
-          showAccountDetail(link.dataset.adJump)
-        })
-      })
-    }
-
-    // ─── AKTIVITÄTS-TIMELINE (Trades + Buchungen chronologisch) ───
-    const actList = document.getElementById('ad-activity-list')
-    const actEmpty = document.getElementById('ad-act-empty')
-    const actCount = document.getElementById('ad-act-count')
-    const actSummary = document.getElementById('ad-act-summary')
-
-    // Events sammeln aus Trades und Transactions
-    const events = []
-
-    // ── Trade-Events ──
-    for(const p of accountTrades){
-      const isMaster = String(p.masterAccountId) === String(a.id)
-      const role = isMaster ? 'master' : 'slave'
-      const myPl = isMaster ? p.masterPl : p.slavePl
-      const otherPl = isMaster ? p.slavePl : p.masterPl
-      const otherName = isMaster ? (p.slaveName || '–') : (p.masterName || '–')
-      const myCurrency = isMaster ? '$' : '€'  // Master = USD, Slave = EUR (Hedge-Konvention)
-      const otherCurrency = isMaster ? '€' : '$'
-      const date = p.completedAt || p.plannedFor || p.createdAt || ''
-      events.push({
-        kind: 'trade',
-        date,
-        sortDate: date,
-        plan: p,
-        role,
-        myPl,
-        otherPl,
-        otherName,
-        myCurrency,
-        otherCurrency,
-        status: p.status,
-        blown: !!p.blown,
-        notes: p.notes
-      })
-    }
-
-    // ── Transaction-Events ──
-    for(const t of accountTransactions){
-      events.push({
-        kind: 'tx',
-        date: t.occurred_at || '',
-        sortDate: t.occurred_at || '',
-        tx: t
-      })
-    }
-
-    // Chronologisch sortieren (neueste zuerst)
-    events.sort((e1, e2) => (e2.sortDate || '').localeCompare(e1.sortDate || ''))
-
-    // Saldo (kumuliert) berechnen
-    let saldoTrade = 0
-    for(const p of completedTrades){
-      if(String(p.masterAccountId) === String(a.id) && p.masterPl != null) saldoTrade += Number(p.masterPl)
-      if(String(p.slaveAccountId)  === String(a.id) && p.slavePl  != null) saldoTrade += Number(p.slavePl)
-    }
-    const saldoTx = accountTransactions.reduce((s, t) => s + Number(t.amount || 0), 0)
-    const saldoTotal = saldoTrade + saldoTx
-    const fmtSig = (n) => (n >= 0 ? '+' : '−') + fmtMoney(Math.abs(n))
-
-    if(actCount) actCount.textContent = `(${events.length})`
-    if(actSummary){
-      actSummary.innerHTML = `Saldo: <span style="color:${saldoTotal>=0?'#10b981':'#ef4444'};font-weight:600">${fmtSig(saldoTotal)}</span>`
-    }
-
-    if(!events.length){
-      if(actList) actList.style.display = 'none'
-      if(actEmpty) actEmpty.style.display = ''
-    } else {
-      if(actList) actList.style.display = ''
-      if(actEmpty) actEmpty.style.display = 'none'
-
-      // SVG-Icons
-      const ICON = {
-        tradeUp:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
-        tradeDn:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>',
-        clock:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-        cart:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6"/></svg>',
-        dollar:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
-        edit:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
-        skull:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 14v.5"/><path d="M16 14v.5"/><path d="M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M9 22h6"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"/></svg>',
-        check:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-      }
-
-      const fmtDate = (d) => {
-        if(!d) return '–'
-        const dt = new Date(d)
-        if(isNaN(dt.getTime())) return '–'
-        return dt.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
-      }
-      const fmtAmt = (n, currency='$') => {
-        const sign = n >= 0 ? '+' : '−'
-        const abs = Math.abs(Number(n)).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        return `${sign}${currency}${abs}`
-      }
-
-      const txKindLabel = {
-        'account_purchase': 'Account gekauft',
-        'live_pnl':         'Live P/L gebucht',
-        'payout':           'Payout erhalten',
-        'manual':           'Manuelle Buchung'
-      }
-      const txIcon = {
-        'account_purchase': { icon: ICON.cart,   color: 'amber' },
-        'live_pnl':         { icon: ICON.tradeUp, color: 'violet' },
-        'payout':           { icon: ICON.dollar, color: 'green' },
-        'manual':           { icon: ICON.edit,   color: 'gray' }
-      }
-
-      actList.innerHTML = events.map((ev, idx) => {
-        if(ev.kind === 'trade'){
-          const p = ev.plan
-          const isCompleted = ev.status === 'completed'
-          const isBlown = ev.blown
-          const myAmt = ev.myPl
-          // Icon-Logik
-          let iconHtml, iconClass
-          if(!isCompleted){
-            iconHtml = ICON.clock
-            iconClass = 'gray'
-          } else if(isBlown){
-            iconHtml = ICON.skull
-            iconClass = 'red'
-          } else if(myAmt != null && Number(myAmt) >= 0){
-            iconHtml = ICON.tradeUp
-            iconClass = 'green'
-          } else {
-            iconHtml = ICON.tradeDn
-            iconClass = 'red'
-          }
-          const roleLabel = ev.role === 'master' ? 'Master' : 'Slave'
-          const arrow = ev.role === 'master' ? '→' : '←'
-          // Title
-          let titleHtml = `<span class="activity-pill role-${ev.role}">${roleLabel}</span> ${arrow} ${escapeHtml(ev.otherName)}`
-          if(!isCompleted) titleHtml += ` <span class="activity-pill planned">Geplant</span>`
-          else if(isBlown) titleHtml += ` <span class="activity-pill blown">💀 Geblowt</span>`
-          // Sub: andere Seite + Notes
-          const subParts = []
-          if(isCompleted && ev.otherPl != null){
-            const otherSign = Number(ev.otherPl) >= 0 ? '+' : '−'
-            const otherAbs  = Math.abs(Number(ev.otherPl)).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-            const otherSide = ev.role === 'master' ? 'Slave' : 'Master'
-            const otherColor = Number(ev.otherPl) >= 0 ? '#10b981' : '#ef4444'
-            subParts.push(`${otherSide}: <span style="color:${otherColor};font-weight:500">${otherSign}${ev.otherCurrency}${otherAbs}</span>`)
-          } else if(!isCompleted){
-            // Geplant: Risiko anzeigen
-            if(ev.role === 'master' && p.masterRisk != null){
-              const tpStr = p.masterTp ? ` · TP $${Number(p.masterTp).toLocaleString('de-DE')}` : ''
-              subParts.push(`Risiko: $${Number(p.masterRisk).toLocaleString('de-DE')}${tpStr}`)
-            } else if(ev.role === 'slave' && p.slaveRisk != null){
-              subParts.push(`Risiko: €${Number(p.slaveRisk).toLocaleString('de-DE')}`)
-            }
-          }
-          if(p.notes) subParts.push(escapeHtml(p.notes.slice(0, 80) + (p.notes.length > 80 ? '…' : '')))
-          // Amount-Display
-          let amtHtml
-          if(!isCompleted || myAmt == null){
-            amtHtml = `<span class="activity-amount muted">–</span>`
-          } else {
-            const cls = Number(myAmt) >= 0 ? 'pos' : 'neg'
-            amtHtml = `<span class="activity-amount ${cls}">${fmtAmt(myAmt, ev.myCurrency)}</span>`
-          }
-          return `
-            <div class="activity-item clickable" data-act-trade="${escapeHtml(p.id)}">
-              <div class="activity-icon ${iconClass}">${iconHtml}</div>
-              <div>
-                <div class="activity-title">${titleHtml}</div>
-                ${subParts.length ? `<div class="activity-sub">${subParts.join(' · ')}</div>` : ''}
-              </div>
-              <div class="activity-meta">
-                ${amtHtml}
-                <div class="activity-date">${fmtDate(ev.date)}</div>
-              </div>
-            </div>`
+      } else if(plan.status === 'open'){
+        if(hasOpenOrder){
+          autoTrack.state.set(plan.id, { wasOpen: true, notified: false })
+        } else if(prev.wasOpen && !prev.notified && planOrders.length > 0){
+          // War offen, ist jetzt geschlossen
+          autoTrack.state.set(plan.id, { wasOpen: false, notified: true })
+          atShowEndPrompt(plan)
         } else {
-          // Transaction
-          const t = ev.tx
-          const cfg = txIcon[t.kind] || { icon: ICON.edit, color: 'gray' }
-          const label = txKindLabel[t.kind] || t.kind
-          const amt = Number(t.amount || 0)
-          const amtClass = amt >= 0 ? 'pos' : 'neg'
-          const subParts = []
-          if(t.notes) subParts.push(escapeHtml(t.notes))
-          // Counter-Account Hint bei Account-Kauf
-          if(t.kind === 'account_purchase' && a.firm){
-            subParts.unshift(`bei ${escapeHtml(a.firm)}`)
-          }
-          return `
-            <div class="activity-item">
-              <div class="activity-icon ${cfg.color}">${cfg.icon}</div>
-              <div>
-                <div class="activity-title">${escapeHtml(label)}</div>
-                ${subParts.length ? `<div class="activity-sub">${subParts.join(' · ')}</div>` : ''}
-              </div>
-              <div class="activity-meta">
-                <span class="activity-amount ${amtClass}">${fmtAmt(amt, '$')}</span>
-                <div class="activity-date">${fmtDate(ev.date)}</div>
-              </div>
-            </div>`
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: hasOpenOrder })
         }
-      }).join('')
-
-      // Klick auf Trade-Event → zur Trades-View
-      actList.querySelectorAll('[data-act-trade]').forEach(row => {
-        row.addEventListener('click', () => {
-          if(typeof switchView === 'function') switchView('trades')
-          else location.hash = 'trades'
-        })
-      })
-    }
-  }
-
-  // Click-Handler: Account-Zeile → Detail
-  document.addEventListener('click', e => {
-    // Stop-Propagation Cells (Action-Buttons) ignorieren
-    if(e.target.closest('[data-stop-row-click]')) return
-    if(e.target.closest('button')) return
-    const row = e.target.closest('[data-acc-detail]')
-    if(!row) return
-    const id = row.dataset.accDetail
-    if(id) showAccountDetail(id)
-  })
-
-  // Zurück-Button
-  document.getElementById('ad-back-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    _detailAccountId = null
-    if(typeof switchView === 'function') switchView('accounts')
-    else location.hash = 'accounts'
-  })
-  // Edit-Button im Detail-Header — nach Save Detail neu rendern
-  document.getElementById('ad-edit-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation()
-    const a = accounts.find(x => String(x.id) === String(_detailAccountId))
-    if(a && typeof openAccountModal === 'function'){
-      openAccountModal(null, a)
-    }
-  })
-
-  // Hash-Listener: 
-  //  - manuelle Navigation zu #account-detail ohne ID → zurück zu Accounts
-  //  - bei jeder Änderung der Account-Daten von außen wird beim Re-Show gerendert
-  window.addEventListener('hashchange', () => {
-    if(location.hash === '#account-detail'){
-      if(_detailAccountId){
-        renderAccountDetail()
       } else {
-        // Kein Account ausgewählt (z.B. nach Page-Reload mit Hash) → zurück
-        if(typeof switchView === 'function') switchView('accounts')
+        autoTrack.state.set(plan.id, { wasOpen: hasOpenOrder, notified: prev.notified })
       }
     }
-  })
-
-  // Initial-Load: wenn Page mit #account-detail geladen wird ohne State → zu Accounts
-  if(location.hash === '#account-detail' && !_detailAccountId){
-    setTimeout(() => {
-      if(typeof switchView === 'function') switchView('accounts')
-    }, 100)
   }
 
-  /* ========================================================================
-   * ACCOUNT-FILTER (Firma + Typ)
-   * ====================================================================== */
-  let accFilters = { firm: '', type: '' }
-
-  function populateAccountFilters(){
-    const firmSel = document.getElementById('acc-firm-filter')
-    if(!firmSel) return
-    const firms = [...new Set(accounts.map(a => a.firm).filter(Boolean))].sort()
-    const current = firmSel.value
-    firmSel.innerHTML = '<option value="">Alle</option>' +
-      firms.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
-    if(current && firms.includes(current)) firmSel.value = current
+  function atStart(){
+    if(autoTrack.timer) return
+    atCheck()
+    autoTrack.timer = setInterval(atCheck, autoTrack.INTERVAL)
+  }
+  function atStop(){
+    if(autoTrack.timer){ clearInterval(autoTrack.timer); autoTrack.timer = null }
   }
 
-  document.getElementById('acc-firm-filter')?.addEventListener('change', e => {
-    accFilters.firm = e.target.value
-    if(typeof renderAccounts === 'function') renderAccounts()
-  })
-  document.getElementById('acc-type-filter')?.addEventListener('change', e => {
-    accFilters.type = e.target.value
-    if(typeof renderAccounts === 'function') renderAccounts()
+  // Starten sobald Duplikum verbunden
+  document.addEventListener('DOMContentLoaded', () => {
+    if(autoTrack.enabled) setTimeout(() => { if(dupState?.token) atStart() }, 2000)
   })
 
   /* ========================================================================
