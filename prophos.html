@@ -4266,13 +4266,13 @@
         </div>
         <div class="field" style="grid-column:1/-1">
           <label>Name-Vorlage</label>
-          <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
+          <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · {EX}" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{EX}</code> = Externe ID (aus Liste unten)</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <label>Externe IDs <span style="font-size:11px;color:var(--sub);font-weight:400">— optional, eine pro Zeile</span></label>
           <textarea class="input mono" id="bulk-external-ids" rows="4"
-            placeholder="TDFYSL150325875918&#10;TDFYSL150894194381&#10;TDFYSL150267847152&#10;7234927"
+            placeholder="z.B. TDFYSL150325875918&#10;TDFYSL150894194381&#10;TDFYSL150267847152&#10;7234927 (MT5-Login)"
             style="resize:vertical;font-size:12px;line-height:1.6;font-family:var(--mono)"></textarea>
           <div id="bulk-ids-hint" style="font-size:11px;color:var(--sub);margin-top:4px">Jede ID wird dem entsprechenden Account in Reihenfolge zugewiesen. Für Duplikum Auto-Connect.</div>
         </div>
@@ -8821,7 +8821,7 @@
       if(typeof updatePreview === 'function') updatePreview()
     }
 
-    function buildName(n){
+    function buildName(n, extId){
       const firm   = bEl.firm.value.trim() || 'Account'
       const sizeRaw = parseFloat(bEl.size.value)
       const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
@@ -8832,7 +8832,10 @@
       return tmpl
         .replace(/\{firm\}/g, firm)
         .replace(/\{size\}/g, sizeK)
+        .replace(/\{ex\}/gi, extId || '')   // Externe ID (i-te Zeile aus der Liste)
         .replace(/\{n\}/g, n)
+        .replace(/\s{2,}/g, ' ')            // doppelte Leerzeichen (z.B. wenn {ex} leer) glätten
+        .trim()
     }
 
     function updatePreview(){
@@ -8873,9 +8876,10 @@
       }
 
       const names = []
+      const previewExtIds = (bEl.extIds?.value || '').split('\n').map(l => l.trim()).filter(Boolean)
       const showMax = Math.min(count, 4)
       for(let i = 0; i < showMax; i++){
-        names.push(buildName(startnum + i))
+        names.push(buildName(startnum + i, previewExtIds[i] || null))
       }
       let preview = names.join(' &nbsp;·&nbsp; ')
       if(count > showMax){
@@ -8949,8 +8953,8 @@
 
       for(let i = 0; i < count; i++){
         const n    = startnum + i
-        const name = buildName(n)
         const extId = extIdLines[i] || null   // i-te ID oder null wenn nicht angegeben
+        const name = buildName(n, extId)
         const row  = {
           user_id:        currentUserId,
           name,
