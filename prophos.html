@@ -6517,7 +6517,8 @@
   async function atCheck(){
     if(!autoTrack.enabled) return
     if(!dupState?.token) return
-    const plans = (tradePlans || []).filter(p => p.status === 'planned' || p.status === 'open')
+    let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+    const plans = (_tp || []).filter(p => p.status === 'planned' || p.status === 'open')
     if(!plans.length) return
 
     let positions = []
@@ -9002,8 +9003,9 @@
 
     applyToSelect(masterSel, prevMaster)
     applyToSelect(slaveSel, prevSlave)
-    if(typeof lcNqUpdateToggle === 'function') lcNqUpdateToggle()
-    if(typeof calcRecompute === 'function') calcRecompute()
+    // NOTE: lcNqUpdateToggle + calcRecompute NOT called here — this function runs
+    // during mergeCustomFirmsIntoPresets() at page load, before _lcNqMode is declared.
+    // Those calls happen at their own initialization points (lines 8874-8875).
   }
 
   // Unified panel: zeigt alle Firms aus Accounts + Custom-Specs zusammen
