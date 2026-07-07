@@ -10945,6 +10945,97 @@
     _completingPlanId = null
     document.getElementById('tradeCompleteModal').classList.remove('open')
   }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+   * AUTO-PnL — SEPARATER, ADDITIVER BLOCK (fasst bestehende Logik NICHT an)
+   * Beim Öffnen des "Trade abschließen"-Modals: realisierten P&L aus Duplikum
+   * position/getClosedPositions.php ziehen und die LEEREN PnL-Felder vorbefüllen.
+   * Slave (Fusion) profitCcy = Slave-PnL; über masterTicket die Master-Position
+   * → Master-PnL. Matching per account_id=Slave + master_id=Master, neueste
+   * closeTime (nie eine vorherige, da nach dem Master gefiltert wird) + Retry
+   * nach 1,5s gegen Duplikum-Latenz. Überschreibt NIE vorhandene Werte.
+   * ═══════════════════════════════════════════════════════════════════════ */
+  async function _autoPnlFetch(plan){
+    if(typeof dupState === 'undefined' || !dupState.token) return null
+    const dupSlaveId  = (typeof atGetDupId === 'function') ? atGetDupId(plan.slaveAccountId)  : null
+    const dupMasterId = (typeof atGetDupId === 'function') ? atGetDupId(plan.masterAccountId) : null
+    if(!dupSlaveId) return null
+    let list = []
+    try {
+      const res = await dupApi('POST', 'position/getClosedPositions.php', { length: 1000 })
+      list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : []
+    } catch(e){ console.warn('[AutoPnL] getClosedPositions:', e); return null }
+    if(!list.length) return null
+    const ct = t => new Date(String(t||'').replace(' ', 'T')).getTime() || 0
+    // Slave-Kandidaten: dieser Slave + (falls Master verlinkt) genau dieser Master
+    let cands = list.filter(p =>
+      String(p.account_id) === String(dupSlaveId) &&
+      (!dupMasterId || String(p.master_id) === String(dupMasterId))
+    )
+    if(!cands.length) return null
+    // Neueste geschlossene Position (die gerade geschlossene) für dieses Slave+Master-Paar
+    cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
+    const slavePos = cands[0]
+    if(!slavePos) return null
+    const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
+    const slaveCcy = slavePos.ccy || ''
+    // Master-Position über masterTicket (der Master-Trade hat ticket === masterTicket der Slave-Kopie)
+    let masterPnl = null, masterCcy = ''
+    if(slavePos.masterTicket != null){
+      const mt = String(slavePos.masterTicket)
+      const masterPos = list.find(p => String(p.account_id) === String(dupMasterId) && String(p.ticket) === mt)
+                     || list.find(p => String(p.ticket) === mt && String(p.account_id) !== String(dupSlaveId))
+      if(masterPos && masterPos.profitCcy != null && masterPos.profitCcy !== ''){
+        masterPnl = Number(masterPos.profitCcy); masterCcy = masterPos.ccy || ''
+      }
+    }
+    return { slavePnl, slaveCcy, masterPnl, masterCcy }
+  }
+
+  ;(function wrapCompleteModalForAutoPnl(){
+    if(typeof openTradeCompleteModal !== 'function') return
+    const _origOpen = openTradeCompleteModal
+    openTradeCompleteModal = function(planId, preFill){
+      _origOpen.apply(this, arguments)
+      try {
+        const plan = (tradePlans || []).find(x => String(x.id) === String(planId))
+        if(!plan) return
+        const mEl   = document.getElementById('tc-master-pl')
+        const sEl   = document.getElementById('tc-slave-pl')
+        const msgEl = document.getElementById('tradeCompleteMsg')
+        // Nur wenn beide Felder leer sind (nie vorhandene Werte überschreiben, z.B. beim Bearbeiten)
+        if((mEl && mEl.value !== '') || (sEl && sEl.value !== '')) return
+        if(typeof dupState === 'undefined' || !dupState.token) return
+        if(msgEl){ msgEl.textContent = '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        const apply = (res) => {
+          if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
+          if(!res) return false
+          const filled = []
+          if(res.slavePnl != null && sEl && sEl.value === ''){ sEl.value = res.slavePnl.toFixed(2); filled.push('Slave ' + res.slavePnl.toFixed(2) + (res.slaveCcy||'')) }
+          if(res.masterPnl != null && mEl && mEl.value === ''){ mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||'')) }
+          if(filled.length){
+            if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
+            if(msgEl){ msgEl.textContent = '✨ Auto aus Duplikum: ' + filled.join(' · ') + ' — bitte prüfen'; msgEl.className = 'modal-msg ok' }
+            return true
+          }
+          return false
+        }
+        _autoPnlFetch(plan).then(res => {
+          if(apply(res)) return
+          // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
+          setTimeout(() => {
+            if(String(_completingPlanId) !== String(planId)) return
+            _autoPnlFetch(plan).then(r2 => {
+              if(!apply(r2) && msgEl && String(_completingPlanId) === String(planId) && msgEl.textContent.indexOf('Auto-PnL') !== -1){
+                msgEl.textContent = ''  // nichts gefunden → Lade-Hinweis entfernen
+              }
+            }).catch(() => {})
+          }, 1500)
+        }).catch(e => { console.warn('[AutoPnL]', e); if(msgEl && msgEl.textContent.indexOf('Auto-PnL') !== -1) msgEl.textContent = '' })
+      } catch(e){ console.warn('[AutoPnL] wrapper:', e) }
+    }
+  })()
+
   function tcRecompute(){
     if(!_completingPlanId) return
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
