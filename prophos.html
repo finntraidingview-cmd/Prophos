@@ -6769,7 +6769,7 @@
       } else if(plan.status === 'open'){
         // Erster Check für diesen offenen Plan: Baseline setzen
         if(prev.baselineCount === null){
-          autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: false, baselineCount: currentCount })
+          autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: false, baselineCount: currentCount, closeStreak: 0 })
           continue
         }
 
@@ -6785,15 +6785,23 @@
           ? !masterPositionOk
           : currentCount < prev.baselineCount
 
-        if(tradeClosed && prev.wasOpen && !prev.notified){
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: false, notified: true })
+        // Schutz gegen einzelne fehlerhafte/leere Duplikum-Antworten (Rate-Limit, Hänger, o.ä.):
+        // "beendet" muss 2x IN FOLGE gemessen werden, bevor es als bestätigt gilt. Verhindert,
+        // dass ein einziger leerer getOpenPositions-Fetch ALLE offenen Trades gleichzeitig
+        // fälschlich als beendet markiert (07.07.2026 live beobachtet — Duplikum lieferte kurz
+        // 0 Positionen, alle 4 offenen Pläne wurden sofort als "beendet" gemeldet).
+        const closeStreak = tradeClosed ? (prev.closeStreak || 0) + 1 : 0
+        const closeConfirmed = closeStreak >= 2
+
+        if(closeConfirmed && prev.wasOpen && !prev.notified){
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: false, notified: true, closeStreak })
           atShowEndPrompt(plan)
         } else if(hasOpenPosition){
           // Baseline nach oben anpassen wenn mehr Positionen dazukommen
           const newBaseline = Math.max(prev.baselineCount, currentCount)
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false, baselineCount: newBaseline })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false, baselineCount: newBaseline, closeStreak })
         } else {
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: false })
+          autoTrack.state.set(plan.id, { ...prev, wasOpen: false, closeStreak })
         }
       } else {
         autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: prev.notified })
