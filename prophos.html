@@ -4189,11 +4189,66 @@
         </p>
       </div>
 
+      <!-- Zugangsdaten (optional) — für schnellen Zugriff, v.a. bei CFD-Accounts -->
+      <div class="modal-divider">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        Zugangsdaten (optional)
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Login / Kontonr.</label>
+          <input class="input mono" id="ac-cred-login" placeholder="z.B. 511290232" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Passwort</label>
+          <div style="position:relative">
+            <input class="input" id="ac-cred-password" type="password" placeholder="••••••••" autocomplete="new-password" style="padding-right:64px">
+            <button type="button" id="ac-cred-pw-toggle" class="btn btn-ghost" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:3px 8px;font-size:11px">Zeigen</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Server</label>
+          <input class="input mono" id="ac-cred-server" placeholder="z.B. FusionMarkets-Live" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Plattform</label>
+          <select class="input" id="ac-cred-platform">
+            <option value="">—</option>
+            <option value="MT5">MT5</option>
+            <option value="MT4">MT4</option>
+            <option value="cTrader">cTrader</option>
+            <option value="Tradovate">Tradovate</option>
+            <option value="Andere">Andere</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Notiz</label>
+          <textarea class="input" id="ac-cred-notes" rows="2" placeholder="z.B. Broker, E-Mail, weitere Infos…"></textarea>
+        </div>
+      </div>
+
       <div class="modal-msg" id="ac-msg"></div>
 
       <div class="modal-actions">
         <button class="btn btn-ghost" id="ac-cancel">Abbrechen</button>
         <button class="btn btn-primary" id="ac-save">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREDENTIALS VIEW MODAL -->
+  <div class="modal-bg" id="credModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head">
+        <h3 id="credModalTitle">Zugangsdaten</h3>
+        <button class="modal-x" id="credModalClose" aria-label="Schließen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="credModalBody"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="credModalEdit">Bearbeiten</button>
+        <button class="btn btn-primary" id="credModalCloseBtn">Schließen</button>
       </div>
     </div>
   </div>
@@ -6961,6 +7016,13 @@
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
+      creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
+        login:    row.cred_login    || '',
+        password: row.cred_password || '',
+        server:   row.cred_server   || '',
+        platform: row.cred_platform || '',
+        notes:    row.cred_notes    || ''
+      } : null,
       createdAt: row.created_at,
       topstep: row.topstep_account_id ? {
         id:        row.topstep_account_id,
@@ -6989,6 +7051,13 @@
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
       max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
+    }
+    if(a.creds){
+      row.cred_login    = a.creds.login    || null
+      row.cred_password = a.creds.password || null
+      row.cred_server   = a.creds.server   || null
+      row.cred_platform = a.creds.platform || null
+      row.cred_notes    = a.creds.notes    || null
     }
     if(a.topstep){
       row.topstep_account_id   = a.topstep.id
@@ -7043,6 +7112,11 @@
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
+    credLogin:    document.getElementById('ac-cred-login'),
+    credPass:     document.getElementById('ac-cred-password'),
+    credServer:   document.getElementById('ac-cred-server'),
+    credPlatform: document.getElementById('ac-cred-platform'),
+    credNotes:    document.getElementById('ac-cred-notes'),
     msg:      document.getElementById('ac-msg'),
     cancel:   document.getElementById('ac-cancel'),
     save:     document.getElementById('ac-save'),
@@ -7391,7 +7465,10 @@
             <td>${balCell}</td>
             <td>${linksHtml}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
-              <button class="btn btn-ghost icon-btn" data-acc-edit="${a.id}" title="Bearbeiten" style="padding:5px 8px">
+              <button class="btn btn-ghost icon-btn" data-acc-cred="${a.id}" title="Zugangsdaten${a.creds ? '' : ' (leer)'}" style="padding:5px 8px${a.creds ? ';color:var(--violet)' : ''}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              </button>
+              <button class="btn btn-ghost icon-btn" data-acc-edit="${a.id}" title="Bearbeiten" style="padding:5px 8px;margin-left:4px">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
               ${archiveActionBtn}
@@ -7444,6 +7521,10 @@
           const acc = accounts.find(x => String(x.id) === String(id))
           if(acc) openAccountModal(null, acc)
         })
+      })
+      // Zugangsdaten-Buttons (🔑)
+      accEls.table.querySelectorAll('[data-acc-cred]').forEach(btn => {
+        btn.addEventListener('click', () => openCredModal(btn.dataset.accCred))
       })
       // Delete-Buttons
       accEls.table.querySelectorAll('[data-acc-del]').forEach(btn => {
@@ -7517,6 +7598,12 @@
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
+      // Zugangsdaten vorausfüllen
+      if(accEls.credLogin)    accEls.credLogin.value    = editAccount.creds?.login    || ''
+      if(accEls.credPass)     accEls.credPass.value     = editAccount.creds?.password || ''
+      if(accEls.credServer)   accEls.credServer.value   = editAccount.creds?.server   || ''
+      if(accEls.credPlatform) accEls.credPlatform.value = editAccount.creds?.platform || ''
+      if(accEls.credNotes)    accEls.credNotes.value    = editAccount.creds?.notes    || ''
     }else{
       accEls.name.value = ''
       accEls.firm.value = ''
@@ -7527,7 +7614,16 @@
       if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
+      if(accEls.credLogin)    accEls.credLogin.value    = ''
+      if(accEls.credPass)     accEls.credPass.value     = ''
+      if(accEls.credServer)   accEls.credServer.value   = ''
+      if(accEls.credPlatform) accEls.credPlatform.value = ''
+      if(accEls.credNotes)    accEls.credNotes.value    = ''
     }
+    // Passwort-Feld immer verdeckt starten
+    if(accEls.credPass) accEls.credPass.type = 'password'
+    const credPwToggle = document.getElementById('ac-cred-pw-toggle')
+    if(credPwToggle) credPwToggle.textContent = 'Zeigen'
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
@@ -7578,11 +7674,21 @@
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
     const externalIdVal = accEls.extId?.value.trim() || null
+    // Zugangsdaten einlesen (optional)
+    const credObj = {
+      login:    accEls.credLogin?.value.trim()    || '',
+      password: accEls.credPass?.value            || '',
+      server:   accEls.credServer?.value.trim()   || '',
+      platform: accEls.credPlatform?.value        || '',
+      notes:    accEls.credNotes?.value.trim()    || ''
+    }
+    const hasCreds = credObj.login || credObj.password || credObj.server || credObj.platform || credObj.notes
     const acc = {
       name, firm, type, initialBalance,
       externalId: externalIdVal || null,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
+      creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
     }
@@ -7630,7 +7736,13 @@
           account_type: acc.type,
           balance: acc.initialBalance,
           purchase_cost: acc.purchaseCost,
-          max_drawdown: acc.maxDrawdown
+          max_drawdown: acc.maxDrawdown,
+          // Zugangsdaten immer mit-updaten (auch Leeren möglich)
+          cred_login:    acc.creds?.login    || null,
+          cred_password: acc.creds?.password || null,
+          cred_server:   acc.creds?.server   || null,
+          cred_platform: acc.creds?.platform || null,
+          cred_notes:    acc.creds?.notes    || null
         }
         // MetaApi-Felder mit-updaten falls vorhanden, sonst auf null setzen
         if(acc.ma){
@@ -7712,6 +7824,81 @@
   if(accEls.addLive) accEls.addLive.addEventListener('click', () => {
     switchView('accounts')
     openAccountModal('live')
+  })
+
+  /* ── Zugangsdaten: Passwort-Toggle im Account-Modal + Ansichts-Modal ── */
+  document.getElementById('ac-cred-pw-toggle')?.addEventListener('click', () => {
+    const inp = accEls.credPass
+    const btn = document.getElementById('ac-cred-pw-toggle')
+    if(!inp) return
+    const show = inp.type === 'password'
+    inp.type = show ? 'text' : 'password'
+    if(btn) btn.textContent = show ? 'Verbergen' : 'Zeigen'
+  })
+
+  let _credAccountId = null
+  function openCredModal(accountId){
+    const a = accounts.find(x => String(x.id) === String(accountId))
+    if(!a) return
+    _credAccountId = accountId
+    const modal = document.getElementById('credModal')
+    const body  = document.getElementById('credModalBody')
+    const title = document.getElementById('credModalTitle')
+    if(title) title.textContent = 'Zugangsdaten · ' + (a.name || '')
+    const c = a.creds || {}
+    const rows = [
+      ['Login / Kontonr.', c.login, false],
+      ['Passwort', c.password, true],
+      ['Server', c.server, false],
+      ['Plattform', c.platform, false],
+      ['Notiz', c.notes, false]
+    ].filter(r => r[1])
+    if(!rows.length){
+      body.innerHTML = `<div style="padding:22px 8px;text-align:center;color:var(--sub);font-size:13px;line-height:1.5">Noch keine Zugangsdaten hinterlegt.<br>Klick <strong>„Bearbeiten"</strong>, um Login, Passwort, Server usw. zu speichern.</div>`
+    } else {
+      body.innerHTML = rows.map(([label, val, isPw]) => {
+        const safe = escapeHtml(String(val))
+        return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border-soft)">
+            <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${label}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="mono" style="flex:1;word-break:break-all;font-size:13.5px" data-cred-plain="${safe}"${isPw ? ' data-cred-pw="1"' : ''}>${isPw ? '••••••••' : safe}</span>
+              ${isPw ? `<button type="button" class="btn btn-ghost" data-cred-toggle style="padding:3px 9px;font-size:11px">Zeigen</button>` : ''}
+              <button type="button" class="btn btn-ghost" data-cred-copy="${safe}" style="padding:3px 9px;font-size:11px">Kopieren</button>
+            </div>
+          </div>`
+      }).join('')
+      body.querySelectorAll('[data-cred-copy]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const val = btn.getAttribute('data-cred-copy')
+          const done = () => { const o = btn.textContent; btn.textContent = '✓ Kopiert'; setTimeout(() => btn.textContent = o, 1200) }
+          if(navigator.clipboard?.writeText) navigator.clipboard.writeText(val).then(done).catch(done)
+          else done()
+        })
+      })
+      body.querySelectorAll('[data-cred-toggle]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const span = btn.parentElement.querySelector('[data-cred-pw]')
+          if(!span) return
+          const shown = span.dataset.shown === '1'
+          span.textContent = shown ? '••••••••' : span.getAttribute('data-cred-plain')
+          span.dataset.shown = shown ? '0' : '1'
+          btn.textContent = shown ? 'Zeigen' : 'Verbergen'
+        })
+      })
+    }
+    modal.classList.add('open')
+  }
+  function closeCredModal(){ document.getElementById('credModal')?.classList.remove('open'); _credAccountId = null }
+  document.getElementById('credModalClose')?.addEventListener('click', closeCredModal)
+  document.getElementById('credModalCloseBtn')?.addEventListener('click', closeCredModal)
+  document.getElementById('credModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('credModal')) closeCredModal()
+  })
+  document.getElementById('credModalEdit')?.addEventListener('click', () => {
+    const a = accounts.find(x => String(x.id) === String(_credAccountId))
+    closeCredModal()
+    if(a) openAccountModal(null, a)
   })
 
   /* ========== BULK ADD ACCOUNTS ========== */
