@@ -7326,8 +7326,10 @@
       ? (adLiveSrc === 'Duplikum' ? dupFmtMoney(adLiveBal, adLiveCcy) : fmtMoney(adLiveBal))
       : (acc.initialBalance ? fmtMoney(acc.initialBalance) : '—')
 
-    // Gesamtkosten (EUR) — die wichtigste Zahl: Kaufpreise (ganze Kette) + Netto-Live-Hedge
-    const adGkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
+    // Gesamtkosten (EUR) — die wichtigste Zahl für Challenge/Funded-Accounts.
+    // Live-Accounts sind reines Cash-Konto ohne "Kette"/Kaufpreis-Konzept — keine Kachel dafür.
+    const adIsLive = acc.type === 'live'
+    const adGkEur = (!adIsLive && typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
     const adGkStr = adGkEur != null
       ? (adGkEur < 0 ? '−' : '') + Math.abs(adGkEur).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
       : '—'
@@ -7335,10 +7337,10 @@
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,rgba(84,71,206,.10),rgba(22,200,198,.07));border:1px solid rgba(84,71,206,.30)">
+        ${adIsLive ? '' : `<div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,rgba(84,71,206,.10),rgba(22,200,198,.07));border:1px solid rgba(84,71,206,.30)">
           <div class="kpi-label" style="color:var(--violet)">Gesamtkosten</div>
           <div class="kpi-value tnum" style="font-size:20px;color:var(--violet)">${adGkStr}</div>
-        </div>
+        </div>`}
         <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
           <div class="kpi-label">Balance</div>
           <div class="kpi-value tnum" style="font-size:18px">${adBalStr}</div>
@@ -7428,13 +7430,25 @@
           const pl = isMaster ? (p.masterPl||0) : (p.slavePl||0)
           const plCls = pl>=0?'color:#16a34a':'color:#dc2626'
           const dateLabel = p.completedAt ? new Date(p.completedAt).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'}) : '—'
+          // Gegenseite mit anzeigen (die für die Gesamtkosten mitzählt, wenn sie ein Live-Account ist)
+          const otherPl = isMaster ? (p.slavePl||0) : (p.masterPl||0)
+          const otherHasPl = isMaster ? (p.slavePl!=null) : (p.masterPl!=null)
+          const otherIsLive = isMaster
+            ? accounts.find(x=>String(x.id)===String(p.slaveAccountId))?.type==='live'
+            : accounts.find(x=>String(x.id)===String(p.masterAccountId))?.type==='live'
+          const otherCcy = isMaster ? ((FIRM_PRESETS[firmToPreset(p.slaveFirm)]||FIRM_PRESETS.projectx).currency) : '$'
+          const otherLabel = isMaster ? 'Slave' : 'Master'
+          const otherCls = otherPl>=0?'color:#16a34a':'color:#dc2626'
           return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
             <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'#16a34a':'#dc2626'};margin-top:5px;flex-shrink:0"></span>
             <div style="flex:1;min-width:0">
               <div style="font-weight:600;font-size:13px">${escapeHtml(isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${isMaster?'Slave':'Master'}</span></div>
               <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
             </div>
-            <span style="font-weight:700;font-size:13px;${plCls}">${pl>=0?'+':''}$${pl.toLocaleString('de-DE',{minimumFractionDigits:0})}</span>
+            <div style="text-align:right">
+              <div style="font-weight:700;font-size:13px;${plCls}">${pl>=0?'+':''}$${pl.toLocaleString('de-DE',{minimumFractionDigits:0})}</div>
+              ${otherHasPl ? `<div style="font-size:10.5px;${otherCls};margin-top:2px">${otherLabel}${otherIsLive?' 🔴':''}: ${otherPl>=0?'+':''}${otherCcy==='$'?'$':''}${Number(otherPl).toLocaleString('de-DE',{minimumFractionDigits:0})}${otherCcy!=='$'?otherCcy:''}</div>` : ''}
+            </div>
           </div>`
         } else {
           const t = item.obj
