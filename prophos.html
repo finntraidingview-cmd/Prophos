@@ -6617,7 +6617,8 @@
       el.remove()
       // notified bleibt true → Popup kommt nicht nochmal, Banner in der Karte bleibt
     })
-    setTimeout(() => el.remove(), 60_000)
+    // Auto-Ausblenden nach 15s (der orange Banner in der Karte bleibt als Erinnerung)
+    setTimeout(() => el.remove(), 15_000)
   }
 
   // Haupt-Check — nutzt position/getOpenPositions (funktionierender v4 Endpoint)
