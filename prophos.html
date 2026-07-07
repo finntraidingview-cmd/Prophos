@@ -7312,23 +7312,48 @@
       const isMaster = String(p.masterAccountId)===String(acc.id)
       return s + (isMaster ? (p.masterPl||0) : (p.slavePl||0))
     }, 0)
+    // Live-Balance: TSX > MT5 > Duplikum (wie in der Accounts-Liste)
+    let adLiveBal = null, adLiveSrc = null, adLiveCcy = 'USD'
+    if(acc.topstep && acc.topstep.balance != null){ adLiveBal = Number(acc.topstep.balance); adLiveSrc = 'TSX' }
+    else if(acc.ma && acc.ma.balance != null){ adLiveBal = Number(acc.ma.balance); adLiveSrc = 'MT5' }
+    else {
+      const _dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const _dupId = Object.entries(_dl).find(([_, mId]) => String(mId) === String(acc.id))?.[0]
+      const _dupAcc = (_dupId && dupState?.accounts) ? dupState.accounts.find(a => a.account_id === _dupId) : null
+      if(_dupAcc && _dupAcc.balance != null){ adLiveBal = Number(_dupAcc.balance); adLiveSrc = 'Duplikum'; adLiveCcy = _dupAcc.ccy || 'USD' }
+    }
+    const adBalStr = adLiveBal != null
+      ? (adLiveSrc === 'Duplikum' ? dupFmtMoney(adLiveBal, adLiveCcy) : fmtMoney(adLiveBal))
+      : (acc.initialBalance ? fmtMoney(acc.initialBalance) : '—')
+
+    // Gesamtkosten (EUR) — die wichtigste Zahl: Kaufpreise (ganze Kette) + Netto-Live-Hedge
+    const adGkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
+    const adGkStr = adGkEur != null
+      ? (adGkEur < 0 ? '−' : '') + Math.abs(adGkEur).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
+      : '—'
+
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
-          <div class="kpi-label">Balance</div>
-          <div class="kpi-value tnum" style="font-size:18px">${acc.ma?.balance!=null?fmtMoney(acc.ma.balance):acc.initialBalance?fmtMoney(acc.initialBalance):'—'}</div>
+        <div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,rgba(84,71,206,.10),rgba(22,200,198,.07));border:1px solid rgba(84,71,206,.30)">
+          <div class="kpi-label" style="color:var(--violet)">Gesamtkosten</div>
+          <div class="kpi-value tnum" style="font-size:20px;color:var(--violet)">${adGkStr}</div>
         </div>
         <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+          <div class="kpi-label">Balance</div>
+          <div class="kpi-value tnum" style="font-size:18px">${adBalStr}</div>
+          ${adLiveSrc ? `<div style="font-size:10px;color:var(--violet);font-weight:500;margin-top:2px">Live · ${adLiveSrc}</div>` : ''}
+        </div>
+        <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
           <div class="kpi-label">Offene Trades</div>
           <div class="kpi-value tnum" style="font-size:18px">${openPlans}</div>
         </div>
-        <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
+        <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
           <div class="kpi-label">Trades Gesamt</div>
           <div class="kpi-value tnum" style="font-size:18px">${donePlans}</div>
         </div>
         <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
-          <div class="kpi-label">P/L (Master)</div>
+          <div class="kpi-label">P/L realisiert</div>
           <div class="kpi-value tnum ${totalPl>=0?'delta-pos':'delta-neg'}" style="font-size:18px">${totalPl>=0?'+':''}$${totalPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
         </div>
       </div>`
@@ -7386,6 +7411,10 @@
         })),
         ...txs.map(t=>({ type:'tx', date:t.date||'', obj:t }))
       ].sort((a,b)=> new Date(b.date)-new Date(a.date))
+
+      // Statischer Empty-State im HTML wird nie gebraucht — die Liste rendert ihre eigene Leer-Meldung
+      const adActEmpty = document.getElementById('ad-act-empty')
+      if(adActEmpty) adActEmpty.style.display = 'none'
 
       if(actCountEl) actCountEl.textContent = `(${items.length})`
       const tradePl = acPlans.filter(p=>p.status==='completed').reduce((s,p)=>s+(String(p.masterAccountId)===String(acc.id)?(p.masterPl||0):(p.slavePl||0)),0)
@@ -10701,17 +10730,37 @@
   // Live Multiplier-Berechnung im Modal
   // ── Reingesteckt / Gesamtkosten: läuft die GESAMTE Vorgänger-Kette ab
   // (Phase 1 → Phase 2 → Phase 3 → ... — nicht nur einen Schritt zurück).
-  // Für den Account selbst: nur Kaufpreis (in EUR gespeichert).
-  // Für JEDEN Vorgänger in der Kette: dessen Kaufpreis + dessen Live-Hedge-Verluste.
-  // Andere Trade-Effekte (Hedge-Gewinne, Master-PL etc.) werden bewusst NICHT eingerechnet —
-  // ein gewinnender Hedge war Glück, keine "zurückgeholten Kosten".
+  // Gesamtkosten (EUR) = Kaufpreis (Account SELBST + alle Vorgänger)
+  //   + NETTO-Live-Hedge-P/L (Verlust = +Kosten, Gewinn = −Kosten) — für den Account
+  //   selbst UND jeden Vorgänger. Master-/Prop-P/L (Payout erst bei Auszahlung) zählt NICHT.
+  // (Bestätigt von Finn 07.07.2026: eigene Live-Trades mitzählen, Gewinne abziehen.)
   function calcReingesteckdEur(masterAcc){
     if(!masterAcc) return 0
     let totalCostEur = 0  // Berechnung in EUR
     const fxUsdEur = window._fxUsdEur || 0.85
+    const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
 
-    // 1. Kaufpreis des Accounts selbst (in EUR)
+    // Netto-Live-Hedge-Ergebnis eines Accounts als KOSTEN (Verlust → +, Gewinn → −), in EUR.
+    // Nur abgeschlossene Trades, nur wo der Account Master war und der Slave ein "Live"-Account ist.
+    const liveHedgeCostEur = (accId) => {
+      let c = 0
+      for(const p of planList){
+        if(p.status !== 'completed') continue
+        if(String(p.masterAccountId) !== String(accId)) continue
+        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
+        if(slaveAcc?.type === 'live' && p.slavePl != null){
+          let plEur = Number(p.slavePl)
+          const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
+          if(slavePreset.currency !== '€') plEur = plEur * fxUsdEur  // USD → EUR
+          c += (-plEur)  // slavePl<0 (Verlust) → +Kosten ; slavePl>0 (Gewinn) → −Kosten
+        }
+      }
+      return c
+    }
+
+    // 1. Aktiver Account: Kaufpreis + eigenes Netto-Live-Hedge
     if(masterAcc.purchaseCost) totalCostEur += Number(masterAcc.purchaseCost)
+    totalCostEur += liveHedgeCostEur(masterAcc.id)
 
     // 2. Komplette Vorgänger-Kette ablaufen (über archived successorId, Schritt für Schritt zurück)
     let currentId = String(masterAcc.id)
@@ -10729,28 +10778,9 @@
       if(!archAcc) break
       visited.add(String(archId))
 
-      // Kaufpreis dieses Vorgängers (EUR)
+      // Kaufpreis + Netto-Live-Hedge dieses Vorgängers (EUR)
       if(archAcc.purchaseCost) totalCostEur += Number(archAcc.purchaseCost)
-
-      // Live-Hedge-Verluste auf diesem Vorgänger:
-      // Trades wo dieser Vorgänger Master war UND Slave Live war UND Slave Verlust gemacht hat
-      const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
-      const archTrades = planList.filter(p =>
-        p.status === 'completed' && String(p.masterAccountId) === String(archAcc.id)
-      )
-      for(const p of archTrades){
-        const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
-        if(slaveAcc?.type === 'live' && p.slavePl != null){
-          const slavePl = Number(p.slavePl)
-          if(slavePl < 0){
-            // Slave Live hat verloren → wir haben Cash verloren → kommt zu den Gesamtkosten dazu (in EUR)
-            const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-            let lossEur = Math.abs(slavePl)
-            if(slavePreset.currency !== '€') lossEur = lossEur * fxUsdEur  // USD → EUR
-            totalCostEur += lossEur
-          }
-        }
-      }
+      totalCostEur += liveHedgeCostEur(archAcc.id)
 
       // Eine Ebene weiter zurück in der Kette
       currentId = String(archAcc.id)
