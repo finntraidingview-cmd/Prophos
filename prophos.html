@@ -11226,12 +11226,10 @@
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
     _completingPlanId = planId
-    // pendingFinish löschen → Banner verschwindet sobald Modal geöffnet
-    if(autoTrack?.pendingFinish?.has(String(planId))){
-      autoTrack.pendingFinish.delete(String(planId))
-      localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
-      if(typeof renderTradePlans === 'function') renderTradePlans()
-    }
+    // pendingFinish wird NICHT hier gelöscht (nur beim tatsächlichen Speichern, siehe unten) —
+    // sonst verschwindet die "muss noch eingetragen werden"-Erinnerung schon beim bloßen Öffnen
+    // des Modals, auch wenn Finn danach abbricht ohne zu speichern (07.07.2026 live beobachtet:
+    // Popup geöffnet → Karte sah sofort wieder "live" aus, Trade war aber nie wirklich fertig).
 
     // Title je nach Status — bei completed = "bearbeiten", sonst "abschließen"
     const titleEl = document.querySelector('#tradeCompleteModal .modal-head h3')
@@ -11590,6 +11588,12 @@
       if(error) throw error
       const idx = tradePlans.findIndex(x => String(x.id) === String(_completingPlanId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+
+      // pendingFinish erst JETZT löschen — nach erfolgreichem Speichern, nicht schon beim Öffnen des Modals
+      if(autoTrack?.pendingFinish?.has(String(_completingPlanId))){
+        autoTrack.pendingFinish.delete(String(_completingPlanId))
+        localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
+      }
 
       // Auto-Buchung in Finanzen — nur wenn Live-Account beteiligt; idempotent über Match-Tag im notes-Feld
       const masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))
