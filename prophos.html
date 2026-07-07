@@ -2373,6 +2373,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
             Sync MT5
           </button>
+          <button class="btn btn-ghost" id="dupAutoLinkBtn" title="Alle Accounts automatisch mit Duplikum verknüpfen (External ID = Duplikum-Login)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Duplikum verknüpfen
+          </button>
           <button class="btn btn-ghost" id="bulkAddAccountBtn" title="Mehrere gleichartige Accounts auf einmal anlegen">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="9" y1="14.5" x2="15" y2="14.5"/></svg>
             Bulk hinzufügen
@@ -5684,6 +5688,50 @@
     if(typeof renderAccounts === 'function') renderAccounts()
   }
 
+  /* ── Auto-Verknüpfen: Prophos-External-ID ↔ Duplikum-Login ──
+   * Geht ALLE noch nicht verknüpften Accounts durch und verlinkt jeden,
+   * dessen External ID exakt dem Login eines (freien) Duplikum-Accounts
+   * entspricht. Ein Klick verknüpft alles auf einmal.
+   * Returns { connected, noDup, newLinks, linkedNames }.
+   */
+  function dupAutoLink(){
+    if(typeof dupState === 'undefined' || !dupState.token) return { connected:false, newLinks:0 }
+    const dupAccs = dupState.accounts || []
+    if(!dupAccs.length) return { connected:true, noDup:true, newLinks:0, linkedNames:[] }
+    const links = dupGetLinks()  // { dupAccountId: prophosAccountId }
+    const linkedProphosIds = new Set(Object.values(links).map(String))
+    const linkedDupIds     = new Set(Object.keys(links).map(String))
+    const norm = s => String(s || '').trim().toUpperCase()
+    // Freie Duplikum-Accounts nach normalisiertem Login indizieren
+    const byLogin = {}
+    for(const d of dupAccs){
+      if(linkedDupIds.has(String(d.account_id))) continue  // schon anderweitig verlinkt
+      const key = norm(d.login)
+      if(key && !byLogin[key]) byLogin[key] = d
+    }
+    let count = 0
+    const linkedNames = []
+    for(const a of (accounts || [])){
+      if(!a.externalId) continue
+      if(linkedProphosIds.has(String(a.id))) continue  // Prophos-Account schon verlinkt
+      const match = byLogin[norm(a.externalId)]
+      if(!match) continue
+      links[match.account_id] = a.id            // Format: dupId → prophosId
+      linkedProphosIds.add(String(a.id))
+      delete byLogin[norm(a.externalId)]        // Dup-Account nicht doppelt vergeben
+      count++
+      linkedNames.push(a.name)
+    }
+    if(count > 0){
+      dupSaveLinks(links)  // schreibt localStorage + synct nach Supabase (Storage-Hook)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof renderDupAccountsTable === 'function') renderDupAccountsTable()
+      if(typeof renderTradePlans === 'function') renderTradePlans()
+    }
+    return { connected:true, newLinks:count, linkedNames }
+  }
+  window.dupAutoLink = dupAutoLink  // für DevTools/Debug
+
   let _linkDupAccId = null
   let _linkDupTargetId = null
 
@@ -7789,6 +7837,15 @@
             auto_generated: true
           })
         }
+
+        // Neuer Account mit External ID → sofort mit Duplikum verknüpfen (falls dort vorhanden)
+        if(newAcc.externalId && typeof dupState !== 'undefined' && dupState.token){
+          const lr = dupAutoLink()
+          if(lr.newLinks > 0){
+            showSyncBanner(`🔗 „${newAcc.name}" automatisch mit Duplikum verknüpft`, 'ok')
+            hideSyncBannerSoon(5000)
+          }
+        }
       }
 
       renderAccounts()
@@ -8929,6 +8986,26 @@
   // CTA: zum Topstep-Login springen
   document.getElementById('goTsxLoginBtn')?.addEventListener('click', () => {
     switchView('topstep')
+  })
+
+  // Duplikum Auto-Verknüpfen (globaler Button in der Accounts-Kopfzeile)
+  document.getElementById('dupAutoLinkBtn')?.addEventListener('click', () => {
+    const res = dupAutoLink()
+    if(!res.connected){
+      showSyncBanner('Duplikum nicht verbunden — verbinde dich erst unter Accounts → Duplikum, dann klappt das Verknüpfen.', 'err')
+      hideSyncBannerSoon(5500); return
+    }
+    if(res.noDup){
+      showSyncBanner('Duplikum verbunden, aber keine Accounts geladen — klick im Duplikum-Tab auf „Sync".', 'muted')
+      hideSyncBannerSoon(5500); return
+    }
+    if(res.newLinks > 0){
+      const names = res.linkedNames.slice(0,6).join(', ') + (res.linkedNames.length > 6 ? ` +${res.linkedNames.length-6} weitere` : '')
+      showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}`, 'ok')
+    } else {
+      showSyncBanner('Keine neuen Verknüpfungen — alle passenden Accounts sind schon verknüpft (oder keine External ID stimmt mit einem Duplikum-Login überein).', 'muted')
+    }
+    hideSyncBannerSoon(7000)
   })
 
   // CTA-Button im Overview-Empty-State
