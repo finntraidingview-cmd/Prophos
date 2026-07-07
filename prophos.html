@@ -7764,6 +7764,7 @@
     if(cntManual) cntManual.textContent = String(accounts.length)
     if(typeof renderTopstepAccountsTab === 'function') renderTopstepAccountsTab()
     renderLiveAccounts()
+    if(typeof refreshFirmDatalist === 'function') refreshFirmDatalist()
   }
 
   function escapeHtml(s){
@@ -9570,6 +9571,36 @@
     }
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
+  }
+
+  /**
+   * Füllt die Firm-<datalist>-Dropdowns im "Account hinzufügen"- und "Bulk"-Modal.
+   * War bisher als toter Aufruf vorhanden (Funktion existierte nicht) — die Dropdowns
+   * waren dadurch komplett statisch/hardcoded und zeigten neu angelegte Firmen (egal ob
+   * über "+ Firm hinzufügen" in den Settings oder einfach frei getippt bei einem neuen
+   * Account) nie an. Quelle jetzt: statische Basis-Firmen + alle Custom-Firms + alle
+   * tatsächlich auf Accounts verwendeten Firmennamen — dedupliziert, alphabetisch.
+   */
+  function refreshFirmDatalist(){
+    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','Tradeify','Apex','The5%ers']
+    const seen = new Map()  // lowercase → Original-Schreibweise (erste gesehene gewinnt)
+    const addName = (name) => {
+      const n = (name || '').trim()
+      if(!n) return
+      const key = n.toLowerCase()
+      if(!seen.has(key)) seen.set(key, n)
+    }
+    STATIC_FIRMS.forEach(addName)
+    getCustomFirms().forEach(f => addName(f.name))
+    ;(accounts||[]).forEach(a => addName(a.firm))
+
+    const names = [...seen.values()].sort((a,b) => a.localeCompare(b, 'de'))
+    const optionsHtml = names.map(n => `<option value="${escapeHtml(n)}"></option>`).join('')
+
+    const firmList = document.getElementById('firmList')
+    if(firmList) firmList.innerHTML = optionsHtml
+    const bulkFirmList = document.getElementById('bulkFirmList')
+    if(bulkFirmList) bulkFirmList.innerHTML = optionsHtml
   }
 
   function refreshCalcFirmDropdowns(){
