@@ -9614,9 +9614,14 @@
     // 1. projectx immer zuerst (MNQ Futures Gruppe)
     const opts = [{ value:'projectx', label: FIRM_PRESETS.projectx.label }]
 
-    // 2. Alle anderen FIRM_PRESETS (alphabetisch)
+    // 2. Alle anderen FIRM_PRESETS (alphabetisch) — Futures-Firmen im Topstep/Tradeify/Alpha/Apex-
+    //    Stil werden NICHT einzeln aufgeführt, auch wenn sie einen eigenen Custom-Preset mit exakt
+    //    passendem Namen haben (z.B. "Alpha Future's", "Apex Trader" — beide mit identischen
+    //    MNQ/Kontrakte/2$-Specs manuell in den Settings angelegt). Die gehören zur einheitlichen
+    //    "MNQ Futures"-Sammelgruppe oben (Punkt 1), sonst entstehen sichtbare Duplikate im Dropdown.
+    const isProjectxLikeName = (name) => /topstep|tradeify|alpha|apex/i.test(name || '')
     const others = Object.entries(FIRM_PRESETS)
-      .filter(([k]) => k !== 'projectx')
+      .filter(([k, v]) => k !== 'projectx' && !isProjectxLikeName(v.label))
       .sort((a,b) => a[1].label.localeCompare(b[1].label, 'de'))
     for(const [k, v] of others) opts.push({ value: k, label: v.label })
 
