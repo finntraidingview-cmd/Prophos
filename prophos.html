@@ -64,22 +64,28 @@
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   /* ── Auto-Track Toast & Prompt ── */
-  @keyframes atSlideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes atSlideUp{from{opacity:0;transform:translateY(22px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+  @keyframes atDotPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,.55)}50%{box-shadow:0 0 0 5px rgba(255,255,255,0)}}
   .at-toast{
     position:fixed;bottom:28px;right:28px;z-index:9999;
-    padding:13px 18px;border-radius:11px;font-size:13.5px;font-weight:600;
-    color:#fff;box-shadow:0 4px 24px rgba(0,0,0,.22);
-    animation:atSlideUp .22s ease;max-width:320px;line-height:1.4;pointer-events:none;
+    padding:13px 18px 13px 15px;border-radius:14px;font-size:13.5px;font-weight:600;
+    color:#fff;line-height:1.4;pointer-events:none;max-width:340px;
+    display:flex;align-items:center;gap:10px;
+    box-shadow:0 10px 34px rgba(0,0,0,.26);
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    animation:atSlideUp .3s cubic-bezier(.2,.9,.3,1.25);
   }
-  .at-toast.start{background:#10b981}
-  .at-toast.end{background:#7c3aed}
+  .at-toast::before{content:'';width:9px;height:9px;border-radius:50%;background:#fff;flex-shrink:0;animation:atDotPulse 1.5s ease-in-out infinite}
+  .at-toast.start{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
+  .at-toast.end{background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)}
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
-    background:var(--card);border:1.5px solid var(--border);border-radius:13px;
-    padding:16px 18px;box-shadow:0 8px 32px rgba(0,0,0,.18);
-    font-size:13px;max-width:320px;line-height:1.5;
-    animation:atSlideUp .22s ease;
+    background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    padding:16px 18px;box-shadow:0 14px 44px rgba(16,24,40,.22);
+    font-size:13px;max-width:330px;line-height:1.5;overflow:hidden;
+    animation:atSlideUp .3s cubic-bezier(.2,.9,.3,1.25);
   }
+  .at-prompt::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#7c3aed,#16C8C6)}
   .at-toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
   .at-toggle input[type=checkbox]{accent-color:var(--violet);width:14px;height:14px;cursor:pointer}
 
@@ -1025,6 +1031,48 @@
   #dashboard-view .trade-card.completed{opacity:.85}
   #dashboard-view .trade-card.completed:hover{opacity:1}
 
+  /* ── Kompakte Trade-Zeilen (tc2) — dichter, mehr Infos, mit Live-Animation ── */
+  #dashboard-view .tc2{display:flex;align-items:center;gap:11px;padding:8px 13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;transition:border-color .12s,background .12s;position:relative;overflow:hidden}
+  #dashboard-view .tc2:hover{border-color:#d1d5db;background:var(--surface-tint)}
+  #dashboard-view .tc2-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--sub-2)}
+  #dashboard-view .tc2-dot-live{background:#10b981;animation:tc2Pulse 1.6s ease-in-out infinite}
+  #dashboard-view .tc2-dot-pending{background:#f59e0b;animation:tc2Pulse 1.3s ease-in-out infinite}
+  #dashboard-view .tc2-dot-prio-high{background:#F04438}
+  #dashboard-view .tc2-dot-prio-medium{background:#F79009}
+  #dashboard-view .tc2-dot-prio-low{background:#16C8C6}
+  #dashboard-view .tc2-main{flex:1;min-width:0}
+  #dashboard-view .tc2-pair{display:flex;align-items:center;gap:6px;min-width:0}
+  #dashboard-view .tc2-name{font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+  #dashboard-view .tc2-arrow{color:var(--sub-2);font-style:normal;flex-shrink:0;font-size:12px}
+  #dashboard-view .tc2-sub{font-size:11.5px;color:var(--sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .tc2-sub b{color:var(--ink-2);font-weight:600}
+  #dashboard-view .tc2-metric{display:flex;align-items:center;gap:8px;flex-shrink:0;font-size:12.5px}
+  #dashboard-view .tc2-timer{font-family:var(--mono);font-size:12.5px;color:#0f9c7a;font-weight:600}
+  #dashboard-view .tc2-pnl{font-weight:600;font-size:13px;font-family:var(--mono)}
+  #dashboard-view .tc2-sym{width:19px;height:19px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+  #dashboard-view .tc2-pending-lbl{font-size:11.5px;font-weight:600;color:#d97706;white-space:nowrap}
+  #dashboard-view .tc2-chip{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:5px;white-space:nowrap}
+  #dashboard-view .tc2-prio-high{background:rgba(240,68,56,.1);color:#F04438}
+  #dashboard-view .tc2-prio-medium{background:rgba(247,144,9,.1);color:#B6690A}
+  #dashboard-view .tc2-prio-low{background:rgba(22,200,198,.1);color:#0E9795}
+  #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
+  #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
+  #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
+  #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
+  #dashboard-view .tc2.tc2-is-pending{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.05)}
+  #dashboard-view .tc2.tc2-open{border-color:rgba(16,185,129,.3)}
+  #dashboard-view .tc2.tc2-completed{opacity:.9}
+  #dashboard-view .tc2.tc2-completed:hover{opacity:1}
+  @keyframes tc2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
+  @keyframes tc2Appear{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:translateX(0)}}
+  @keyframes tc2Sweep{from{transform:translateX(-60px);opacity:.75}to{transform:translateX(760px);opacity:0}}
+  @keyframes tc2FlashLive{0%{box-shadow:0 0 0 0 rgba(16,185,129,0)}28%{box-shadow:0 0 0 3px rgba(16,185,129,.4);border-color:#10b981}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+  @keyframes tc2FlashEnd{0%{box-shadow:0 0 0 0 rgba(245,158,11,0)}28%{box-shadow:0 0 0 3px rgba(245,158,11,.4);border-color:#f59e0b}100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}}
+  #dashboard-view .tc2-anim-live{animation:tc2Appear .42s cubic-bezier(.2,.8,.2,1),tc2FlashLive 1.7s ease-out}
+  #dashboard-view .tc2-anim-live::after{content:'';position:absolute;left:0;top:0;bottom:0;width:55px;background:linear-gradient(90deg,rgba(16,185,129,0),rgba(16,185,129,.22),rgba(16,185,129,0));pointer-events:none;animation:tc2Sweep .85s ease-in}
+  #dashboard-view .tc2-anim-end{animation:tc2FlashEnd 1.7s ease-out}
+  #dashboard-view .tc2-anim-end::after{content:'';position:absolute;left:0;top:0;bottom:0;width:55px;background:linear-gradient(90deg,rgba(245,158,11,0),rgba(245,158,11,.2),rgba(245,158,11,0));pointer-events:none;animation:tc2Sweep .85s ease-in}
+
   #dashboard-view .tc-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   #dashboard-view .tc-row-1{justify-content:space-between}
   #dashboard-view .tc-pair{
@@ -1458,21 +1506,28 @@
   @media (max-width:880px){
     #dashboard-view .calc-result-grid{grid-template-columns:1fr}
   }
+  @keyframes calcGlow{0%,100%{box-shadow:0 4px 22px rgba(84,71,206,.14)}50%{box-shadow:0 8px 38px rgba(84,71,206,.34)}}
+  @keyframes calcShine{0%{transform:translateX(-140%)}55%,100%{transform:translateX(320%)}}
+  @keyframes calcPop{0%{transform:scale(1)}42%{transform:scale(1.09)}100%{transform:scale(1)}}
   #dashboard-view .calc-slave-output{
-    padding:36px 28px;text-align:center;
-    background:linear-gradient(135deg,rgba(84,71,206,.18),rgba(22,200,198,.12));
-    border:2px solid var(--violet);border-radius:var(--r-lg);
-    box-shadow:0 4px 24px rgba(84,71,206,.15);
+    padding:34px 28px;text-align:center;position:relative;overflow:hidden;
+    background:linear-gradient(135deg,rgba(84,71,206,.17) 0%,rgba(73,150,255,.10) 48%,rgba(22,200,198,.15) 100%);
+    border:1.5px solid rgba(84,71,206,.5);border-radius:16px;
     display:flex;flex-direction:column;justify-content:center;align-items:center;gap:6px;
+    animation:calcGlow 3.6s ease-in-out infinite;
   }
+  #dashboard-view .calc-slave-output::after{content:'';position:absolute;top:0;bottom:0;width:36%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.4),transparent);transform:translateX(-140%);animation:calcShine 5.5s ease-in-out infinite;pointer-events:none}
   #dashboard-view .calc-slave-label{
     font-size:11px;font-weight:600;letter-spacing:.14em;
-    text-transform:uppercase;color:var(--ink-2);
+    text-transform:uppercase;color:var(--ink-2);position:relative;
   }
   #dashboard-view .calc-slave-value{
-    font-size:64px;font-weight:700;letter-spacing:-.025em;
-    color:var(--violet);font-family:var(--mono);line-height:1;
+    font-size:66px;font-weight:700;letter-spacing:-.025em;line-height:1;position:relative;
+    background:linear-gradient(120deg,var(--violet) 0%,#4996FF 55%,var(--teal) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    font-family:var(--mono);
   }
+  #dashboard-view .calc-slave-value.calc-pop{animation:calcPop .36s ease}
   #dashboard-view .calc-slave-unit{
     font-size:13px;color:var(--sub);font-weight:500;
   }
@@ -2376,6 +2431,10 @@
           <button class="btn btn-ghost" id="dupAutoLinkBtn" title="Alle Accounts automatisch mit Duplikum verknüpfen (External ID = Duplikum-Login)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             Duplikum verknüpfen
+          </button>
+          <button class="btn btn-ghost" id="balanceRefreshBtn" title="Alle Live-Balances jetzt frisch ziehen (Duplikum + MT5)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Balance aktualisieren
           </button>
           <button class="btn btn-ghost" id="bulkAddAccountBtn" title="Mehrere gleichartige Accounts auf einmal anlegen">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="9" y1="14.5" x2="15" y2="14.5"/></svg>
@@ -7383,11 +7442,37 @@
     const showArchived = (typeof showArchivedAccounts !== 'undefined') ? showArchivedAccounts : false
     const filters = (typeof accFilters !== 'undefined') ? accFilters : { firm:'', type:'' }
 
+    // Freitext-Suche (Header-Suchbar): Name, Firma, External ID, alle Logins/IDs
+    // (MT5, Topstep, Duplikum) + hinterlegte Zugangsdaten. Trennzeichen werden
+    // ignoriert, damit Teilsuchen über formatierte IDs hinweg greifen.
+    const q = (typeof accSearch === 'string') ? accSearch.trim() : ''
+    const searchNorm = s => String(s || '').toLowerCase().replace(/[\s\-_.\/]/g, '')
+    const qNorm = searchNorm(q)
+    const dupBySearch = {}
+    if(qNorm){
+      const dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      for(const [dupId, manualId] of Object.entries(dl)){
+        const d = (dupState.accounts || []).find(x => x.account_id === dupId)
+        if(d) dupBySearch[manualId] = d
+      }
+    }
+    const accHaystack = a => {
+      const d = dupBySearch[a.id] || null
+      return searchNorm([
+        a.name, a.firm, a.externalId,
+        a.ma?.login, a.ma?.accountId,
+        a.topstep?.id, a.topstep?.name,
+        d?.login, d?.account_id, d?.name,
+        a.creds?.login, a.creds?.server
+      ].filter(Boolean).join(' '))
+    }
+
     const visible = accounts.filter(a => {
       const isArch = !!archive[a.id]?.archived
       if(!showArchived && isArch) return false
       if(filters.firm && a.firm !== filters.firm) return false
       if(filters.type && a.type !== filters.type) return false
+      if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
@@ -9009,6 +9094,29 @@
     hideSyncBannerSoon(7000)
   })
 
+  // Balance aktualisieren — zieht alle Live-Balances frisch aus Duplikum (getAccounts.php).
+  // Deckt alle Duplikum-verknüpften Accounts ab (= Finns Live-Balances). Für reine
+  // MetaApi-Accounts bleibt der separate "Sync MT5"-Button.
+  document.getElementById('balanceRefreshBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('balanceRefreshBtn')
+    if(typeof dupState === 'undefined' || !dupState.token){
+      showSyncBanner('Duplikum nicht verbunden — verbinde dich erst unter Accounts → Duplikum.', 'muted')
+      hideSyncBannerSoon(4500); return
+    }
+    if(btn){ btn.disabled = true; btn.classList.add('ts-btn-loading') }
+    showSyncBanner('Live-Balances werden aktualisiert…', 'muted')
+    try {
+      await dupLoadAccounts()  // frische Duplikum-Balances + renderAccounts()
+      showSyncBanner('✓ Live-Balances aktualisiert', 'ok')
+    } catch(e){
+      console.warn('[BalanceRefresh]', e)
+      showSyncBanner('Balance-Update fehlgeschlagen: ' + (e.message || e), 'err')
+    } finally {
+      if(btn){ btn.disabled = false; btn.classList.remove('ts-btn-loading') }
+      hideSyncBannerSoon(4500)
+    }
+  })
+
   // CTA-Button im Overview-Empty-State
   const overviewCtaAdd = document.getElementById('overview-cta-add')
   if(overviewCtaAdd){
@@ -9153,6 +9261,18 @@
     })
   lcNqUpdateToggle()
   calcRecompute()
+
+  /* Lot-Rechner: dezenter Pop, wenn sich das Ergebnis neu berechnet (nur kosmetisch, fasst calcRecompute nicht an) */
+  try {
+    const _calcQtyEl = document.getElementById('calc-slave-qty')
+    if(_calcQtyEl && 'MutationObserver' in window){
+      let _calcPopT
+      new MutationObserver(() => {
+        _calcQtyEl.classList.remove('calc-pop'); void _calcQtyEl.offsetWidth; _calcQtyEl.classList.add('calc-pop')
+        clearTimeout(_calcPopT); _calcPopT = setTimeout(() => _calcQtyEl.classList.remove('calc-pop'), 400)
+      }).observe(_calcQtyEl, { childList:true, characterData:true, subtree:true })
+    }
+  } catch(_){}
 
   /* ========== TRADE PLANS ========== */
   let tradePlans = []
@@ -9723,7 +9843,64 @@
     }
     populateTradeFilterAccounts()
     bindTradePlanCardActions()
+    try { tcDetectTransitions() } catch(_){}
   }
+
+  /* ── Live-Erkennungs-Animation + dezenter Sound ──
+   * Rein anzeige-basiert: vergleicht Status zwischen zwei Renders und feuert
+   * Animation + Sound nur beim ECHTEN Übergang (planned→open = "live erkannt",
+   * open→open-pending = "beendet erkannt"). Fasst atCheck/Detection NICHT an.
+   */
+  let _tcPrevStatus = {}
+  let _tcStatusInit = false
+  function tcDetectTransitions(){
+    const now = {}
+    for(const p of (tradePlans || [])){
+      const pending = p.status === 'open' && autoTrack?.pendingFinish?.has(String(p.id))
+      now[p.id] = p.status + (pending ? '-pending' : '')
+    }
+    if(_tcStatusInit){
+      for(const id in now){
+        const prev = _tcPrevStatus[id]
+        if(prev === undefined || prev === now[id]) continue
+        if(now[id] === 'open' && prev === 'planned'){
+          tcAnimateRow(id, 'live'); tcPlaySound('live')
+        } else if(now[id] === 'open-pending' && (prev === 'open' || prev === 'planned')){
+          tcAnimateRow(id, 'end'); tcPlaySound('end')
+        }
+      }
+    }
+    _tcPrevStatus = now
+    _tcStatusInit = true
+  }
+  function tcAnimateRow(id, kind){
+    const el = document.querySelector(`.tc2[data-plan-id="${id}"]`)
+    if(!el) return
+    el.classList.remove('tc2-anim-live','tc2-anim-end')
+    void el.offsetWidth
+    el.classList.add(kind === 'live' ? 'tc2-anim-live' : 'tc2-anim-end')
+    setTimeout(() => el.classList.remove('tc2-anim-live','tc2-anim-end'), 2000)
+  }
+  let _tcAudioCtx = null
+  function tcPlaySound(kind){
+    try {
+      if(localStorage.getItem('prophos_sound') === 'off') return
+      _tcAudioCtx = _tcAudioCtx || new (window.AudioContext || window.webkitAudioContext)()
+      const ctx = _tcAudioCtx
+      if(ctx.state === 'suspended') ctx.resume()
+      const t = ctx.currentTime
+      const osc = ctx.createOscillator(), gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.type = 'sine'
+      if(kind === 'live'){ osc.frequency.setValueAtTime(523.25, t); osc.frequency.setValueAtTime(783.99, t + .09) }
+      else { osc.frequency.setValueAtTime(659.25, t); osc.frequency.setValueAtTime(440, t + .11) }
+      gain.gain.setValueAtTime(.0001, t)
+      gain.gain.exponentialRampToValueAtTime(.13, t + .02)
+      gain.gain.exponentialRampToValueAtTime(.0001, t + .32)
+      osc.start(t); osc.stop(t + .34)
+    } catch(_){}
+  }
+  window.tcToggleSound = (on) => { localStorage.setItem('prophos_sound', on === false ? 'off' : 'on'); return on !== false }
 
   // ─── Filter-Bindings ───
   document.addEventListener('DOMContentLoaded', () => {
@@ -9764,10 +9941,101 @@
     })
   })
 
+  // Kompakter Zeilen-Renderer für alle drei Status. Behält ALLE data-plan-*-Buttons
+  // → bestehende Handler (bindTradePlanCardActions) laufen unverändert weiter.
   function renderTradePlanCard(p){
+    const isPlanned   = p.status === 'planned'
+    const isOpen      = p.status === 'open'
     const isCompleted = p.status === 'completed'
-    if(isCompleted) return renderCompletedCardCompact(p)
-    return renderTradePlanCardFull(p)
+    const isPending   = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
+
+    const masterName = p.masterName || '— gelöscht —'
+    const slaveName  = p.slaveName  || '— gelöscht —'
+    const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
+    const sCur = slavePreset.currency
+    const mult = p.multiplier != null ? p.multiplier.toFixed(3) : '—'
+
+    const _m = accounts.find(a => String(a.id) === String(p.masterAccountId))
+    const _s = accounts.find(a => String(a.id) === String(p.slaveAccountId))
+    const extOf = acc => acc ? (acc.externalId || acc.topstep?.id || acc.ma?.login || '') : ''
+    const mExt = extOf(_m)
+    const mDup = getDupBalanceForAccount(p.masterAccountId)
+    const sDup = getDupBalanceForAccount(p.slaveAccountId)
+
+    // Status-Dot
+    let dotCls = 'tc2-dot'
+    if(isPending) dotCls += ' tc2-dot-pending'
+    else if(isOpen) dotCls += ' tc2-dot-live'
+    else if(isPlanned) dotCls += ' tc2-dot-prio-' + (p.priority || 'medium')
+
+    // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
+    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6">#${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
+      + ` · ×<b style="color:var(--violet)">${mult}</b>`
+      + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`
+      + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
+      + (sDup ? ` · <span style="color:var(--violet)">${fmtDupBalance(sDup)}</span>` : '')
+
+    // Rechte Metrik je Status
+    let metric = ''
+    if(isPlanned){
+      const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
+      const prioLbl = { high:'Hoch', medium:'Mittel', low:'Niedrig' }[p.priority] || 'Mittel'
+      metric = `<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
+    } else if(isOpen){
+      if(isPending){
+        metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
+      } else {
+        metric = p.startedAt
+          ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
+          : `<span class="tc2-timer">live</span>`
+      }
+    } else if(isCompleted){
+      const mPl = p.masterPl ?? 0, sPl = p.slavePl ?? 0
+      const fmt = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
+      const col = v => v>=0 ? '#15803d' : '#b91c1c'
+      const symCat = (typeof calcSymCategory === 'function') ? calcSymCategory(p) : null
+      const symCfg = { perfekt:['#15803d','✓'], ok:['#4d7c0f','✓'], warn:['#b45309','⚠'], bad:['#b91c1c','✕'] }[symCat]
+      const sym = symCfg ? `<span class="tc2-sym" style="color:${symCfg[0]};background:${symCfg[0]}1a" title="Symmetrie">${symCfg[1]}</span>` : ''
+      metric = `<span class="tc2-pnl" style="color:${col(mPl)}">$${fmt(mPl)}</span>`
+        + `<span class="tc2-pnl" style="color:${col(sPl)}">${sCur}${fmt(sPl)}</span>`
+        + sym + (p.blown ? `<span class="tc2-chip tc2-prio-high">⚡</span>` : '')
+    }
+
+    // Actions (data-plan-* unverändert → Handler bleiben)
+    const svgEdit = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`
+    const svgDel  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
+    let actions = ''
+    if(isPlanned){
+      actions = `
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
+        <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}">Läuft</button>
+        <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
+    } else if(isOpen){
+      actions = `
+        <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
+        <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">${isPending ? 'Abschließen →' : 'Erledigt'}</button>`
+    } else if(isCompleted){
+      actions = `
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit-completed="${p.id}" title="Bearbeiten">${svgEdit}</button>
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
+    }
+
+    const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}`
+    return `
+      <div class="${cls}" data-plan-id="${p.id}">
+        <span class="${dotCls}"></span>
+        <div class="tc2-main">
+          <div class="tc2-pair">
+            <span class="tc2-name" title="${escapeHtml(masterName)}">${escapeHtml(masterName)}</span>
+            <i class="tc2-arrow">→</i>
+            <span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>
+          </div>
+          <div class="tc2-sub">${sub}</div>
+        </div>
+        <div class="tc2-metric">${metric}</div>
+        <div class="tc2-actions">${actions}</div>
+      </div>`
   }
 
   // ── Compact card for completed trades ──
