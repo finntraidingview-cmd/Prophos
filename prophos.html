@@ -4329,6 +4329,17 @@
         </button>
       </div>
 
+      <div class="field" style="margin-bottom:14px">
+        <label>Vorlage</label>
+        <div style="display:flex;gap:8px">
+          <select class="input" id="bulk-template-select" style="flex:1">
+            <option value="">— Keine Vorlage —</option>
+          </select>
+          <button class="btn btn-ghost" id="bulk-template-save" type="button" title="Aktuelle Werte als Vorlage speichern" style="flex-shrink:0;padding:8px 12px">💾</button>
+          <button class="btn btn-ghost" id="bulk-template-delete" type="button" title="Ausgewählte Vorlage löschen" style="flex-shrink:0;padding:8px 12px" disabled>🗑️</button>
+        </div>
+      </div>
+
       <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
         <div class="field">
           <label>Firm *</label>
@@ -4385,7 +4396,12 @@
         <div class="field" style="grid-column:1/-1">
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> wird durch die laufende Nummer ersetzt &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> = laufende Nummer &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{ex}</code> = External ID</div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>External IDs (optional)</label>
+          <textarea class="input" id="bulk-extids" rows="3" placeholder="Eine External ID pro Zeile, in Reihenfolge der Accounts" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird pro Zeile dem jeweiligen Account zugeordnet (1. Zeile → #{startnum}, 2. Zeile → nächster, …). Mit externer ID wird automatisch mit Duplikum verknüpft, falls dort vorhanden.</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
@@ -8113,15 +8129,31 @@
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
+      extids:    document.getElementById('bulk-extids'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
+      tplSelect: document.getElementById('bulk-template-select'),
+      tplSave:   document.getElementById('bulk-template-save'),
+      tplDelete: document.getElementById('bulk-template-delete'),
     }
 
-    function buildName(n){
+    const BULK_TPL_LS = 'prophos_bulk_templates'  // localStorage-Fallback falls Supabase-Tabelle/RLS noch nicht bereit
+    let bulkTemplates = []
+
+    function getExtIds(){
+      return (bEl.extids?.value || '')
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean)
+    }
+
+    function buildName(n, i){
       const firm   = bEl.firm.value.trim() || 'Account'
       const sizeRaw = parseFloat(bEl.size.value)
       const sizeK  = (!isNaN(sizeRaw) && sizeRaw > 0) ? (sizeRaw >= 1000 ? Math.round(sizeRaw/1000) + 'K' : sizeRaw) : ''
+      const extIds = getExtIds()
+      const ex = extIds[i] || ''
       let tmpl = bEl.template.value.trim()
       if(!tmpl){
         tmpl = sizeK ? `{firm} {size} · #{n}` : `{firm} · #{n}`
@@ -8130,6 +8162,7 @@
         .replace(/\{firm\}/g, firm)
         .replace(/\{size\}/g, sizeK)
         .replace(/\{n\}/g, n)
+        .replace(/\{ex\}/g, ex)
     }
 
     function updatePreview(){
@@ -8153,14 +8186,112 @@
       const names = []
       const showMax = Math.min(count, 4)
       for(let i = 0; i < showMax; i++){
-        names.push(buildName(startnum + i))
+        names.push(buildName(startnum + i, i))
       }
       let preview = names.join(' &nbsp;·&nbsp; ')
       if(count > showMax){
         preview += ` &nbsp;·&nbsp; <em style="color:var(--sub-2)">… +${count - showMax} weitere</em>`
       }
+      const extIds = getExtIds()
+      if(extIds.length && extIds.length !== count){
+        preview += `<br><span style="color:#b6690a">⚠ ${extIds.length} External IDs für ${count} Accounts — Rest bleibt ohne External ID</span>`
+      }
       bEl.preview.innerHTML = preview
       bEl.preview.style.display = 'block'
+    }
+
+    // ── Templates: laden, Dropdown füllen ──
+    async function loadBulkTemplates(){
+      bulkTemplates = []
+      if(currentUserId){
+        try{
+          const { data, error } = await supabase
+            .from('account_templates').select('*')
+            .eq('user_id', currentUserId).order('name', { ascending: true })
+          if(!error && Array.isArray(data)) bulkTemplates = data
+        }catch(e){ /* Tabelle evtl. noch nicht migriert — Fallback unten */ }
+      }
+      if(!bulkTemplates.length){
+        try{ bulkTemplates = JSON.parse(localStorage.getItem(BULK_TPL_LS) || '[]') }catch(_){ bulkTemplates = [] }
+      }
+      renderTplSelect()
+    }
+
+    function renderTplSelect(){
+      const prev = bEl.tplSelect.value
+      bEl.tplSelect.innerHTML = '<option value="">— Keine Vorlage —</option>' +
+        bulkTemplates.map(t => `<option value="${escapeHtml(String(t.id))}">${escapeHtml(t.name)}</option>`).join('')
+      if(prev && bulkTemplates.some(t => String(t.id) === prev)) bEl.tplSelect.value = prev
+      bEl.tplDelete.disabled = !bEl.tplSelect.value
+    }
+
+    function applyTemplate(id){
+      const t = bulkTemplates.find(x => String(x.id) === String(id))
+      if(!t) return
+      bEl.firm.value     = t.firm || ''
+      bEl.type.value     = t.account_type || 'phase1'
+      bEl.size.value     = t.account_size != null ? t.account_size : ''
+      bEl.cost.value     = t.purchase_cost != null ? t.purchase_cost : ''
+      bEl.maxdd.value    = t.max_drawdown != null ? t.max_drawdown : ''
+      bEl.template.value = t.name_template || ''
+      updatePreview()
+    }
+
+    async function saveBulkTemplate(){
+      const firm = bEl.firm.value.trim()
+      if(!firm){ setBulkMsg('Erst Firm (und idealerweise Größe/Preis) ausfüllen, dann als Vorlage speichern.', 'err'); return }
+      const defaultName = bEl.size.value ? `${firm} ${bEl.size.value >= 1000 ? Math.round(bEl.size.value/1000)+'K' : bEl.size.value}` : firm
+      const name = (prompt('Name für diese Vorlage:', defaultName) || '').trim()
+      if(!name) return
+
+      const row = {
+        name,
+        firm,
+        account_type:  bEl.type.value,
+        account_size:  parseFloat(bEl.size.value)  || null,
+        purchase_cost: parseFloat(bEl.cost.value)   || null,
+        max_drawdown:  parseFloat(bEl.maxdd.value)  || null,
+        name_template: bEl.template.value.trim() || null,
+      }
+
+      let saved = null
+      if(currentUserId){
+        try{
+          const { data, error } = await supabase
+            .from('account_templates').insert({ ...row, user_id: currentUserId }).select('*').single()
+          if(!error) saved = data
+        }catch(e){ /* Fallback unten */ }
+      }
+      if(!saved){
+        saved = { id: 'local_' + Date.now(), ...row }
+        const local = JSON.parse(localStorage.getItem(BULK_TPL_LS) || '[]')
+        local.push(saved)
+        localStorage.setItem(BULK_TPL_LS, JSON.stringify(local))
+      }
+      bulkTemplates.push(saved)
+      bulkTemplates.sort((a,b) => (a.name||'').localeCompare(b.name||''))
+      renderTplSelect()
+      bEl.tplSelect.value = String(saved.id)
+      bEl.tplDelete.disabled = false
+      setBulkMsg(`Vorlage "${name}" gespeichert.`, 'ok')
+    }
+
+    async function deleteBulkTemplate(){
+      const id = bEl.tplSelect.value
+      if(!id) return
+      const t = bulkTemplates.find(x => String(x.id) === String(id))
+      if(!t) return
+      if(!confirm(`Vorlage "${t.name}" löschen?`)) return
+
+      if(currentUserId && !String(id).startsWith('local_')){
+        try{ await supabase.from('account_templates').delete().eq('id', id) }catch(e){}
+      } else {
+        const local = JSON.parse(localStorage.getItem(BULK_TPL_LS) || '[]').filter(x => String(x.id) !== String(id))
+        localStorage.setItem(BULK_TPL_LS, JSON.stringify(local))
+      }
+      bulkTemplates = bulkTemplates.filter(x => String(x.id) !== String(id))
+      renderTplSelect()
+      setBulkMsg(`Vorlage "${t.name}" gelöscht.`, 'ok')
     }
 
     function openBulkModal(){
@@ -8173,6 +8304,9 @@
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
+      bEl.extids.value   = ''
+      bEl.tplSelect.value = ''
+      bEl.tplDelete.disabled = true
       bEl.preview.style.display = 'none'
       bEl.msg.textContent = ''
       bEl.msg.className = 'modal-msg'
@@ -8180,6 +8314,7 @@
       bEl.saveBtn.disabled = false
       bEl.saveLabel.textContent = 'Accounts anlegen'
       bEl.modal.classList.add('open')
+      loadBulkTemplates()
       setTimeout(() => bEl.firm.focus(), 50)
     }
 
@@ -8201,6 +8336,7 @@
       const maxddRaw = parseFloat(bEl.maxdd.value)
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
+      const extIds   = getExtIds()
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
@@ -8217,10 +8353,12 @@
 
       let created = 0
       let errors  = 0
+      let anyExtId = false
 
       for(let i = 0; i < count; i++){
         const n    = startnum + i
-        const name = buildName(n)
+        const name = buildName(n, i)
+        const extId = extIds[i] || null
         const row  = {
           user_id:        currentUserId,
           name,
@@ -8231,6 +8369,7 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
+          external_id:    extId,
         }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
@@ -8242,6 +8381,7 @@
           const newAcc = rowToAccount(data)
           accounts.unshift(newAcc)
           created++
+          if(extId) anyExtId = true
 
           if(purchaseCost && purchaseCost > 0){
             await insertAutoTransaction({
@@ -8262,6 +8402,15 @@
         }
       }
 
+      // Neue Accounts mit External ID → in einem Rutsch mit Duplikum verknüpfen (falls dort vorhanden)
+      if(anyExtId && typeof dupState !== 'undefined' && dupState.token && typeof dupAutoLink === 'function'){
+        const lr = dupAutoLink()
+        if(lr?.newLinks > 0 && typeof showSyncBanner === 'function'){
+          showSyncBanner(`🔗 ${lr.newLinks} Account(s) automatisch mit Duplikum verknüpft`, 'ok')
+          if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+        }
+      }
+
       renderAccounts()
       renderOverviewKpis()
       updateSidebarBadges()
@@ -8279,7 +8428,7 @@
     }
 
     // Wire up inputs for live preview
-    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost].forEach(el => {
+    ;[bEl.firm, bEl.size, bEl.count, bEl.startnum, bEl.template, bEl.cost, bEl.extids].forEach(el => {
       el.addEventListener('input', updatePreview)
     })
 
@@ -8288,6 +8437,12 @@
     bEl.closeBtn?.addEventListener('click',  closeBulkModal)
     bEl.cancelBtn?.addEventListener('click', closeBulkModal)
     bEl.saveBtn?.addEventListener('click',   saveBulkAccounts)
+    bEl.tplSelect?.addEventListener('change', () => {
+      bEl.tplDelete.disabled = !bEl.tplSelect.value
+      if(bEl.tplSelect.value) applyTemplate(bEl.tplSelect.value)
+    })
+    bEl.tplSave?.addEventListener('click', saveBulkTemplate)
+    bEl.tplDelete?.addEventListener('click', deleteBulkTemplate)
     bEl.modal?.addEventListener('click', e => {
       if(e.target === bEl.modal) closeBulkModal()
     })
