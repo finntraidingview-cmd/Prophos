@@ -11129,15 +11129,16 @@
       const dbgAcq = master.maxDrawdown ? calcAcquisitionCost(master) : 'N/A'
       console.log('[Auto-Hedge Debug] Master:', master.name, '| maxDrawdown:', master.maxDrawdown, '| purchaseCost:', master.purchaseCost, '| acqCost calculated:', dbgAcq)
     }
-    if(master && slave && master.maxDrawdown && master.maxDrawdown > 0){
+    if(master && master.maxDrawdown && master.maxDrawdown > 0){
       // Acquisition-Cost in EUR (Kaufpreis ist in EUR, Verluste werden zu EUR konvertiert)
       const acqCostEur = calcAcquisitionCost(master)
       // Hedge-Größe proportional zum genutzten Master-Risk-Anteil von Max-DD.
       // Solange noch kein Risiko eingetragen ist: Vorschau mit vollem Verhältnis (100%) rechnen,
-      // damit der Vorschlag schon direkt bei Master+Slave-Auswahl sichtbar ist.
+      // damit der Vorschlag schon direkt bei Master-Auswahl sichtbar ist (auch ohne Slave —
+      // "Übernehmen" wählt den Live-Slave dann automatisch, siehe Klick-Handler unten).
       const riskRatio = masterRisk > 0 ? (masterRisk / master.maxDrawdown) : 1
-      // Hedge in EUR (zur Account-Cost passend)
-      const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+      // Hedge in EUR (zur Account-Cost passend) — ohne gewählten Slave EUR annehmen (wie Gesamtkosten-Box)
+      const slavePreset = slave ? (FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx) : { currency: '€' }
       const fxUsdEur = window._fxUsdEur || 0.85
       let suggestedSlaveRisk = acqCostEur * riskRatio  // Default in EUR
       // Wenn Slave-Account in USD ist, EUR → USD konvertieren
@@ -11292,8 +11293,24 @@
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
   })
+  // Wählt automatisch den Live-Account (Fusion Markets) als Slave, falls beim Klick auf
+  // "Übernehmen" (Auto-Vorschlag oder Gesamtkosten) noch keiner ausgewählt ist — Finn hat
+  // praktisch immer denselben Live-Slave, das erspart den manuellen Zwischenschritt UND behebt
+  // den Bug, dass der Gesamtkosten-Betrag ohne Slave unkonvertiert (roh in EUR) übernommen wurde.
+  function tpAutoSelectLiveSlaveIfEmpty(){
+    const slaveSel = document.getElementById('tp-slave')
+    if(!slaveSel || slaveSel.value) return  // schon ein Slave gewählt → nichts tun
+    const liveAcc = accounts.find(a => a.type === 'live')
+    if(!liveAcc) return
+    const hasOption = [...slaveSel.options].some(o => o.value === String(liveAcc.id))
+    if(!hasOption) return  // z.B. durch Firm/Typ-Filter aktuell ausgeblendet
+    slaveSel.value = String(liveAcc.id)
+    tpRecompute()
+  }
+
   // Auto-Vorschlag übernehmen (Acquisition-Cost, proportional)
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
+    tpAutoSelectLiveSlaveIfEmpty()
     const masterId = document.getElementById('tp-master').value
     const master = accounts.find(a => String(a.id) === String(masterId))
     const masterRiskInput = document.getElementById('tp-master-risk')
@@ -11312,6 +11329,7 @@
   })
   // Gesamtkosten übernehmen (voller Reingesteckt-Betrag, unskaliert)
   document.getElementById('tp-gesamtkosten-apply')?.addEventListener('click', () => {
+    tpAutoSelectLiveSlaveIfEmpty()
     const masterId = document.getElementById('tp-master').value
     const master = accounts.find(a => String(a.id) === String(masterId))
     const gkEl = document.getElementById('tp-gesamtkosten-suggest')
