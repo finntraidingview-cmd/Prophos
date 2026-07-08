@@ -11445,8 +11445,15 @@
 
     try{
       if(_editingPlanId){
+        // status NICHT mitschicken beim Bearbeiten: die Auto-Erkennung (atCheck, alle 10s im
+        // Hintergrund) kann den Plan zwischen "Bearbeiten"-Öffnen und "Speichern"-Klick längst
+        // korrekt auf 'open' gesetzt haben — planObj.status ist hier immer noch 'planned' (der
+        // feste Wert für's Formular), würde also den frisch erkannten Live-Status wieder
+        // überschreiben. Fix betrifft nur diesen Speicher-Pfad, die Erkennungslogik selbst
+        // bleibt unangetastet.
+        const { status: _ignoredStatus, ...updateRow } = planToRow(planObj)
         const { data, error } = await supabase
-          .from('trade_plans').update(planToRow(planObj)).eq('id', _editingPlanId).select('*').single()
+          .from('trade_plans').update(updateRow).eq('id', _editingPlanId).select('*').single()
         if(error) throw error
         const idx = tradePlans.findIndex(x => String(x.id) === String(_editingPlanId))
         if(idx >= 0) tradePlans[idx] = rowToPlan(data)
