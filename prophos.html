@@ -5210,8 +5210,9 @@
 
       dupCalcSetStatus('⏳ pushe…', 'loading')
 
-      // 3) setSettings
-      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: [entry] })
+      // 3) setSettings — Duplikum-Support bestätigt (08.07.2026): settings ist ein Objekt,
+      // KEIN Array mit einem Objekt drin. settings[id_slave]=..., nicht settings[0][id_slave]=...
+      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: entry })
       if(!setRes.ok){
         const errMsg = (setRes.data && setRes.data.error) || `HTTP ${setRes.status}`
         throw new Error(`setSettings: ${errMsg}`)
@@ -5596,8 +5597,10 @@
 
       tpDupSetStatus('⏳ pushe…', 'loading')
 
-      // 2) setSettings — nur den Value ändern
-      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: [entry] })
+      // 2) setSettings — nur den Value ändern. Duplikum-Support bestätigt (08.07.2026):
+      // settings ist ein Objekt, KEIN Array mit einem Objekt drin — settings[id_slave]=...,
+      // nicht settings[0][id_slave]=...
+      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: entry })
       console.log('[tpDupPush] setSettings response:', setRes)
       if(!setRes.ok){
         const errMsg = (setRes.data && setRes.data.error) || `HTTP ${setRes.status}`
