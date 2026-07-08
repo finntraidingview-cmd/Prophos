@@ -7422,7 +7422,28 @@
       if(acc.topstep?.canTrade!=null) chips.push(`<div style="padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;font-size:12.5px">
         <span style="font-weight:600">TopstepX</span> · ${acc.topstep.canTrade?'✅ Trading erlaubt':'⛔ Kein Trading'}
       </div>`)
+      // Vorgänger/Nachfolger-Kette sichtbar machen (Daten waren schon da — z.B. für Gesamtkosten
+      // genutzt — nur hier auf der Detail-Seite fehlte die Anzeige komplett).
+      const archiveMap = (typeof getArchive === 'function') ? getArchive() : {}
+      const parentId = (typeof getParent === 'function') ? getParent(acc.id) : null
+      const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
+      if(parentAcc) chips.push(`<div class="ad-jump-chip" data-ad-jump="${escapeHtml(String(parentAcc.id))}" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;cursor:pointer">
+        <span style="font-size:11px;font-weight:700;color:var(--sub);background:var(--line);padding:2px 6px;border-radius:4px">VORGÄNGER</span>
+        <span style="font-size:12.5px;font-weight:600">${escapeHtml(parentAcc.name)}</span>
+      </div>`)
+      const successorEntry = Object.entries(archiveMap).find(([archId, info]) => info?.successorId && String(archId) === String(acc.id))
+      const successorAcc = successorEntry ? accounts.find(x => String(x.id) === String(successorEntry[1].successorId)) : null
+      if(successorAcc) chips.push(`<div class="ad-jump-chip" data-ad-jump="${escapeHtml(String(successorAcc.id))}" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;cursor:pointer">
+        <span style="font-size:11px;font-weight:700;color:var(--sub);background:var(--line);padding:2px 6px;border-radius:4px">NACHFOLGER</span>
+        <span style="font-size:12.5px;font-weight:600">${escapeHtml(successorAcc.name)}</span>
+      </div>`)
       linksEl.innerHTML = chips.length ? chips.join('') : '<span style="color:var(--sub);font-size:12.5px">Keine Verknüpfungen</span>'
+      linksEl.querySelectorAll('[data-ad-jump]').forEach(el => {
+        el.addEventListener('click', () => {
+          _detailAccountId = el.dataset.adJump
+          renderAccountDetail()
+        })
+      })
     }
 
     // Aktivitäts-Timeline
@@ -10951,6 +10972,11 @@
     let totalCostEur = 0  // Berechnung in EUR
     const fxUsdEur = window._fxUsdEur || 0.85
     const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
+    // War hier nie definiert → die Vorgänger-Kette (Schritt 2 unten) brach immer sofort ab,
+    // ohne je einen Vorgänger zu finden. Erst bemerkt, weil bisher nur Accounts OHNE Vorgänger
+    // getestet wurden (dort greift Schritt 2 gar nicht) — mit echter Kette (Phase 1 → Phase 2)
+    // zeigte ein Nachfolger-Account fälschlich 0€ Gesamtkosten statt geerbter Vorgänger-Kosten.
+    const archive = (typeof getArchive === 'function') ? getArchive() : {}
 
     // Netto-Live-Hedge-Ergebnis eines Accounts als KOSTEN (Verlust → +, Gewinn → −), in EUR.
     // Nur abgeschlossene Trades, nur wo der Account Master war und der Slave ein "Live"-Account ist.
