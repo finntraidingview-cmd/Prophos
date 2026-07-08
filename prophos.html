@@ -11001,9 +11001,11 @@
     return totalCostEur
   }
 
-  // Backward-kompatibler Alias — ruft jetzt die volle Kette ab statt nur einen Schritt
+  // Reiner Account-Kaufpreis (nur dieser Account, keine Vorgänger-Kette, keine Hedge-Verluste) —
+  // für den Auto-Vorschlag im Trade-Plan-Modal. Bewusst getrennt von calcReingesteckdEur() (Gesamt-
+  // kosten-Kachel, volle Kette) — Finn will hier nur "was hab ich für DIESEN Account bezahlt".
   function calcAcquisitionCost(masterAcc){
-    return calcReingesteckdEur(masterAcc)
+    return masterAcc?.purchaseCost ? Number(masterAcc.purchaseCost) : 0
   }
 
   /* ── NQ / MNQ Toggle für Trade-Plan-Modal ──
