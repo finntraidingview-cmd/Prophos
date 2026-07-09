@@ -4161,9 +4161,9 @@
                 </select>
               </div>
               <div class="field" style="grid-column:1/-1">
-                <label>Duplikum-Symbol (Master)</label>
-                <input class="input" id="cf-dupsymbol" placeholder="z.B. US100.cash, NDX100" autocomplete="off">
-                <div style="font-size:11px;color:var(--sub);margin-top:4px">Das Symbol, unter dem diese Firma in Duplikum handelt — kann vom Lot-Rechner-Symbol abweichen (z.B. FTMO: Lot-Rechner NAS100, Duplikum US100.cash). Wird fürs automatische Symbol-Mapping (→ Slave) genutzt.</div>
+                <label>Duplikum-Symbol(e) (Master)</label>
+                <input class="input" id="cf-dupsymbol" placeholder="z.B. US100.cash — oder mehrere: NQ, MNQ" autocomplete="off">
+                <div style="font-size:11px;color:var(--sub);margin-top:4px">Symbol(e), unter denen diese Firma in Duplikum handelt — kann vom Lot-Rechner-Symbol abweichen (z.B. FTMO: Lot-Rechner NAS100, Duplikum US100.cash). Mehrere mit Komma trennen (z.B. Futures: <span class="mono">NQ, MNQ</span>) — für jedes wird ein eigenes Symbol-Mapping (→ Slave) angelegt.</div>
               </div>
             </div>
             <p style="font-size:11.5px;color:var(--sub);margin-top:10px;line-height:1.5">
@@ -5890,34 +5890,37 @@
    * Payloads bewusst MINIMAL — nur die Felder, die geändert werden (Lehre aus dem
    * setSettings-Support-Fall: Extra-/Read-only-Felder führen zu Ablehnung). */
 
-  // Duplikum-Master-Symbol der Firma (aus den Prop-Firm-Specs in den Settings)
-  function dupSymbolForFirm(firmName){
-    if(!firmName) return null
+  // Duplikum-Master-Symbol(e) der Firma (aus den Prop-Firm-Specs) — kommagetrennt, → Array.
+  // Beispiel: Futures-Firmen handeln "NQ, MNQ" → für jedes wird ein eigenes Mapping gebraucht.
+  function dupSymbolsForFirm(firmName){
+    if(!firmName) return []
     const p = FIRM_PRESETS[firmToPreset(firmName)]
-    return (p && p.dupSymbol) ? String(p.dupSymbol).trim() : null
+    if(!p || !p.dupSymbol) return []
+    return String(p.dupSymbol).split(',').map(s => s.trim()).filter(Boolean)
   }
 
-  // Slave-Symbol: Duplikum-Symbol der Slave-Firma falls hinterlegt, sonst Lot-Rechner-Symbol (Fusion → NAS100)
+  // Slave-Symbol: erstes Duplikum-Symbol der Slave-Firma falls hinterlegt, sonst Lot-Rechner-Symbol (Fusion → NAS100)
   function dupSlaveSymbolForFirm(firmName){
-    const explicit = dupSymbolForFirm(firmName)
-    if(explicit) return explicit
+    const explicit = dupSymbolsForFirm(firmName)
+    if(explicit.length) return explicit[0]
     const p = FIRM_PRESETS[firmToPreset(firmName)]
     return (p && p.symbol) ? String(p.symbol).trim() : null
   }
 
-  // Existierendes Symbol-Mapping für ein Master→Slave-Paar suchen. → { found, symbolMaster, symbolSlave } | { error }
-  async function dupFindSymbolMapping(masterDupId, slaveDupId){
+  // ALLE existierenden Symbol-Mappings eines Master→Slave-Paars. → { mappings: [{symbolMaster, symbolSlave}] } | { error }
+  async function dupFindSymbolMappings(masterDupId, slaveDupId){
     try {
       const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
       if(!res.ok) return { error: (res.data && res.data.error) || `HTTP ${res.status}` }
       const arr = (res.data && Array.isArray(res.data.settings)) ? res.data.settings : (Array.isArray(res.data) ? res.data : [])
-      const entry = arr.find(e =>
-        String(e.id_slave||'') === String(slaveDupId) &&
-        String(e.id_master||'') === String(masterDupId) &&
-        (e.symbol || e.symbol_master)
-      )
-      if(!entry) return { found: false }
-      return { found: true, symbolMaster: String(entry.symbol_master||''), symbolSlave: String(entry.symbol||'') }
+      const mappings = arr
+        .filter(e =>
+          String(e.id_slave||'') === String(slaveDupId) &&
+          String(e.id_master||'') === String(masterDupId) &&
+          (e.symbol || e.symbol_master)
+        )
+        .map(e => ({ symbolMaster: String(e.symbol_master||''), symbolSlave: String(e.symbol||'') }))
+      return { mappings }
     } catch(e){ return { error: e.message || 'Netzwerkfehler' } }
   }
 
@@ -5978,16 +5981,21 @@
       if(!dupId) continue
       const dupAcc = dupAccs.find(d => String(d.account_id) === String(dupId))
       if(!dupAcc || Number(dupAcc.type) !== 0) continue  // nur Master
-      const symMaster = dupSymbolForFirm(acc.firm)
-      if(!symMaster) continue  // Firma hat kein Duplikum-Symbol hinterlegt → nichts tun
+      const symMasters = dupSymbolsForFirm(acc.firm)
+      if(!symMasters.length) continue  // Firma hat kein Duplikum-Symbol hinterlegt → nichts tun
       for(const slave of slaves){
         const slaveProphos = (accounts||[]).find(a => String(a.id) === String(links[slave.account_id]))
         const symSlave = dupSlaveSymbolForFirm(slaveProphos?.firm) || 'NAS100'
-        const existing = await dupFindSymbolMapping(dupId, slave.account_id)
-        if(existing.found && existing.symbolMaster === symMaster && existing.symbolSlave === symSlave) continue
-        const r = await dupPushSymbolMapping(dupId, slave.account_id, symMaster, symSlave)
-        if(r.ok && typeof showSyncBanner === 'function'){
-          showSyncBanner(`🔗 Symbol-Mapping gesetzt: ${symMaster} → ${symSlave} („${acc.name}")`, 'ok')
+        const existing = await dupFindSymbolMappings(dupId, slave.account_id)
+        const have = existing.mappings || []
+        const pushed = []
+        for(const symMaster of symMasters){
+          if(have.some(m => m.symbolMaster === symMaster && m.symbolSlave === symSlave)) continue
+          const r = await dupPushSymbolMapping(dupId, slave.account_id, symMaster, symSlave)
+          if(r.ok) pushed.push(symMaster)
+        }
+        if(pushed.length && typeof showSyncBanner === 'function'){
+          showSyncBanner(`🔗 Symbol-Mapping gesetzt: ${pushed.join(', ')} → ${symSlave} („${acc.name}")`, 'ok')
           if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
         }
       }
@@ -10953,30 +10961,38 @@
     } else {
       const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
       const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
-      const symMaster = dupSymbolForFirm(masterAcc?.firm)
-      const symSlave  = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
-      if(!symMaster){
+      const symMasters = dupSymbolsForFirm(masterAcc?.firm)
+      const symSlave   = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
+      if(!symMasters.length){
         _pfSet('sym', 'warn', `Kein Duplikum-Symbol für „${escapeHtml(masterAcc?.firm||'—')}" hinterlegt (Settings → Prop Firms → Specs) — übersprungen.`)
       } else {
-        const found = await dupFindSymbolMapping(dupMasterId, dupSlaveId)
+        const found = await dupFindSymbolMappings(dupMasterId, dupSlaveId)
         if(found.error){
           _pfSet('sym', 'err', escapeHtml(found.error)); hardFail = true
-        } else if(found.found && found.symbolMaster === symMaster && found.symbolSlave === symSlave){
-          _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span> ✓`)
         } else {
-          const ist = found.found ? `aktuell <span class="mono">${escapeHtml(found.symbolMaster||'—')} → ${escapeHtml(found.symbolSlave||'—')}</span>` : 'kein Mapping vorhanden'
-          _pfSet('sym', 'warn', `Erwartet <span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span>, ${ist}.<br>
-            <button class="btn btn-primary pf-fix-btn" id="pf-fix-sym" style="padding:4px 12px;font-size:11.5px">Jetzt pushen</button>`)
-          softWait = true
-          document.getElementById('pf-fix-sym')?.addEventListener('click', async () => {
-            const btn = document.getElementById('pf-fix-sym')
-            if(btn){ btn.disabled = true; btn.textContent = 'Pushe…' }
-            const ico = document.getElementById('pf-ico-sym')
-            if(ico){ ico.classList.remove('pf-warn'); ico.innerHTML = '<div class="pf-spinner"></div>' }
-            const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, symMaster, symSlave)
-            if(pr.ok) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
-            else _pfSet('sym', 'err', escapeHtml(pr.error || 'Push fehlgeschlagen'))
-          })
+          const have = found.mappings || []
+          const missing = symMasters.filter(sm => !have.some(m => m.symbolMaster === sm && m.symbolSlave === symSlave))
+          if(!missing.length){
+            _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMasters.join(', '))} → ${escapeHtml(symSlave)}</span> ✓`)
+          } else {
+            const ist = have.length ? `vorhanden: <span class="mono">${escapeHtml(have.map(m=>m.symbolMaster+'→'+m.symbolSlave).join(', '))}</span>` : 'kein Mapping vorhanden'
+            _pfSet('sym', 'warn', `Fehlt: <span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> — ${ist}.<br>
+              <button class="btn btn-primary pf-fix-btn" id="pf-fix-sym" style="padding:4px 12px;font-size:11.5px">Jetzt pushen (${missing.length})</button>`)
+            softWait = true
+            document.getElementById('pf-fix-sym')?.addEventListener('click', async () => {
+              const btn = document.getElementById('pf-fix-sym')
+              if(btn){ btn.disabled = true; btn.textContent = 'Pushe…' }
+              const ico = document.getElementById('pf-ico-sym')
+              if(ico){ ico.classList.remove('pf-warn'); ico.innerHTML = '<div class="pf-spinner"></div>' }
+              const failed = []
+              for(const sm of missing){
+                const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, sm, symSlave)
+                if(!pr.ok) failed.push(`${sm}: ${pr.error || 'Fehler'}`)
+              }
+              if(!failed.length) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
+              else _pfSet('sym', 'err', escapeHtml(failed.join(' · ')))
+            })
+          }
         }
       }
     }
