@@ -5198,17 +5198,20 @@
       // Default-Entry für diesen Slave suchen
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveId))
 
+      // Slave-Symbol-Feld heißt in der API-Response `symbol` (nicht `symbol_slave`) —
+      // Symbol-Mapping-Einträge als Vorlage ausschließen, sonst wäre risk_factor_type null.
+      const isSymbolEntry = e => !!(e.symbol || e.symbol_master)
       let preserved
       if(masterId){
         // Master ist explizit gewählt → exakter Master+Slave Entry bevorzugt
-        preserved = matches.find(e => String(e.id_master || '') === String(masterId) && !e.symbol_slave && !e.id_group)
-                 || matches.find(e => String(e.id_master || '') === String(masterId))
+        preserved = matches.find(e => String(e.id_master || '') === String(masterId) && !isSymbolEntry(e) && !e.id_group)
+                 || matches.find(e => String(e.id_master || '') === String(masterId) && !isSymbolEntry(e))
       }
-      // Fallback: "All Masters"-Default oder irgendein Entry (wird als Template für risk_factor_type benutzt)
+      // Fallback: "All Masters"-Default oder irgendein Nicht-Symbol-Entry (Template für risk_factor_type)
       if(!preserved){
-        preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
-                 || matches.find(e => !e.symbol_slave && !e.id_group)
-                 || matches[0]
+        preserved = matches.find(e => !isSymbolEntry(e) && !e.id_group && !e.id_master)
+                 || matches.find(e => !isSymbolEntry(e) && !e.id_group)
+                 || matches.find(e => !isSymbolEntry(e))
       }
 
       if(!preserved){
@@ -5345,16 +5348,19 @@
       //  - exakter Master-Match falls Master gewählt
       //  - sonst "All Masters"-Default
       //  - sonst irgendein Eintrag für diesen Slave
+      // Slave-Symbol-Feld heißt in der API-Response `symbol` (nicht `symbol_slave`) —
+      // Symbol-Mapping-Einträge ignorieren, sonst zeigt "Aktuell" u.U. den falschen Eintrag.
+      const isSymbolEntry = e => !!(e.symbol || e.symbol_master)
       let setting = null
       if(masterDupId){
-        setting = matches.find(e => String(e.id_master||'') === String(masterDupId) && !e.symbol_slave && !e.id_group)
-                || matches.find(e => String(e.id_master||'') === String(masterDupId))
+        setting = matches.find(e => String(e.id_master||'') === String(masterDupId) && !isSymbolEntry(e) && !e.id_group)
+                || matches.find(e => String(e.id_master||'') === String(masterDupId) && !isSymbolEntry(e))
       }
       const isPerMaster = !!setting
       if(!setting){
-        setting = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
-                || matches.find(e => !e.symbol_slave && !e.id_group)
-                || matches[0]
+        setting = matches.find(e => !isSymbolEntry(e) && !e.id_group && !e.id_master)
+                || matches.find(e => !isSymbolEntry(e) && !e.id_group)
+                || matches.find(e => !isSymbolEntry(e))
                 || null
       }
 
@@ -5571,16 +5577,20 @@
       //  1. mit gewähltem Master → exakter Per-Master Eintrag (falls existiert, sonst Skip)
       //  2. All-Masters-Default (kein id_master) → Standardfall
       //  3. Irgendein Entry für diesen Slave → Fallback
+      // WICHTIG: Das Slave-Symbol-Feld heißt in der getSettings-Response `symbol` (nicht
+      // `symbol_slave` — der alte Filter !e.symbol_slave war wirkungslos und konnte ein
+      // Symbol-Mapping als Vorlage erwischen). Risk-Settings haben symbol/symbol_master leer.
+      const isSymbolEntry = e => !!(e.symbol || e.symbol_master)
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveAccountId))
       let preserved
       if(masterAccountId){
-        preserved = matches.find(e => String(e.id_master || '') === String(masterAccountId) && !e.symbol_slave && !e.id_group)
-                 || matches.find(e => String(e.id_master || '') === String(masterAccountId))
+        preserved = matches.find(e => String(e.id_master || '') === String(masterAccountId) && !isSymbolEntry(e) && !e.id_group)
+                 || matches.find(e => String(e.id_master || '') === String(masterAccountId) && !isSymbolEntry(e))
       }
       if(!preserved){
-        preserved = matches.find(e => !e.symbol_slave && !e.id_group && !e.id_master)
-                 || matches.find(e => !e.symbol_slave && !e.id_group)
-                 || matches[0]
+        preserved = matches.find(e => !isSymbolEntry(e) && !e.id_group && !e.id_master)
+                 || matches.find(e => !isSymbolEntry(e) && !e.id_group)
+                 || matches.find(e => !isSymbolEntry(e))
       }
 
       if(!preserved){
@@ -5588,15 +5598,14 @@
         throw new Error(`Kein Setting für ${tgt} in Duplikium gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
       }
 
+      // MINIMALER Payload — exakt die 4 Felder, mit denen Duplikum-Support den Endpoint
+      // erfolgreich getestet hat (Postman, 09.07.2026, Antwort {success:{SentRows:1,ChangedRows:2}}).
+      // Der frühere volle ...preserved-Spread (~70 Felder inkl. Read-only wie slave_name/date/
+      // *_string plus leere symbol-Felder) wurde vom Server mit "please contact us" abgelehnt.
       const entry = {
-        // Alle existierenden Felder preserven (Duplikium braucht u.U. max_order_size, copier_status, etc.)
-        // Schließt id, dates und andere DB-Metadaten aus.
-        ...preserved,
-        // Override: der eigentliche Update-Wert
-        risk_factor_value: String(mult),
-        // Sicherstellen dass id_slave + risk_factor_type als String vorliegen
         id_slave: String(preserved.id_slave),
-        risk_factor_type: String(preserved.risk_factor_type)
+        risk_factor_type: String(preserved.risk_factor_type),
+        risk_factor_value: String(mult)
       }
       // Master-Strategie:
       //  - User hat einen Prophos-Master gewählt und der ist verknüpft → master-spezifisch pushen
@@ -5606,13 +5615,7 @@
         entry.id_master = String(masterAccountId)
       } else if(preserved.id_master){
         entry.id_master = String(preserved.id_master)
-      } else {
-        delete entry.id_master  // leer = "All Masters"
       }
-      // Symbol-Felder nicht mitschicken — wir editieren den Default-Entry, nicht symbol-specific
-      delete entry.symbol_slave
-      delete entry.symbol_master
-      delete entry.id_group
 
       console.log('[tpDupPush] getSettings settings:', settings)
       console.log('[tpDupPush] preserved entry:', preserved)
