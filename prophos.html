@@ -3187,12 +3187,18 @@
             </div>
           </div>
 
-          <!-- Push to Duplikium (Modal-Variante) -->
-          <div class="tp-dup-push" id="tp-dup-push">
+          <!-- Push to Duplikium (Modal-Variante) — AUSGEBLENDET (09.07.2026, Finns Wunsch):
+               Push + Mapping laufen automatisch beim "Speichern & Starten"-Preflight, die
+               Info-Anzeige hier war dadurch redundant. Element bleibt im DOM, weil
+               tpDupPushRender()/tpRecompute() weiter hineinrendern. -->
+          <div class="tp-dup-push" id="tp-dup-push" style="display:none">
             <!-- Markup wird durch tpDupPushRender() gefüllt -->
           </div>
 
-          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+          <!-- Priorität / Geplant für / Notiz — AUSGEBLENDET (09.07.2026, Finns Wunsch: "nutze
+               ich nie"). Felder bleiben im DOM (display:none), weil der Save-Code sie liest —
+               Defaults: Priorität medium, Geplant für = morgen (setzt openTradePlanModal). -->
+          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;display:none">
             <div class="field">
               <label>Priorität</label>
               <div class="priority-picker" id="tp-priority">
@@ -8060,6 +8066,9 @@
   function closeAccountModal(){
     accEls.modal.classList.remove('open')
     _editingAccountId = null
+    // Abbruch ohne Speichern → geplanten Preflight-Wiederanlauf verwerfen (Save konsumiert
+    // die ID vorher selbst, dann ist das hier ein No-op)
+    _pfResumePlanId = null
   }
 
   function toggleMaSection(){
@@ -8228,12 +8237,30 @@
         }
       }
 
+      // Auch beim BEARBEITEN auto-verknüpfen, wenn eine External ID (neu) eingetragen wurde —
+      // vorher lief dupAutoLink nur beim Neu-Anlegen. Genau der Fall "External ID nachträglich
+      // ergänzen" (z.B. aus dem Trade-Start-Preflight heraus) blieb sonst unverknüpft.
+      if(isEdit && externalIdVal && typeof dupState !== 'undefined' && dupState.token && typeof dupAutoLink === 'function'){
+        const lr = dupAutoLink()
+        if(lr?.newLinks > 0){
+          showSyncBanner(`🔗 „${name}" automatisch mit Duplikum verknüpft`, 'ok')
+          hideSyncBannerSoon(5000)
+        }
+      }
+
       renderAccounts()
       renderOverviewKpis()
       updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
 
+      // Kam der Edit aus dem Trade-Start-Preflight ("Account bearbeiten"-Fix-Button)?
+      // → Check nach dem Speichern automatisch neu anlaufen lassen.
+      const _resumePid = _pfResumePlanId
+      _pfResumePlanId = null
       setTimeout(closeAccountModal, type === 'live' ? 700 : 0)
+      if(_resumePid){
+        setTimeout(() => tpPreflightAndStart(_resumePid), type === 'live' ? 900 : 350)
+      }
     }catch(e){
       const isNet = /failed to fetch|networkerror|load failed/i.test(e.message || '')
       const msg = isNet
@@ -9845,8 +9872,15 @@
     //    angelegt) werden NICHT einzeln aufgeführt, sondern gehören zur einheitlichen "MNQ Futures"-
     //    Sammelgruppe oben (Punkt 1), sonst entstehen sichtbare Duplikate. Erkennung über das Symbol
     //    (MNQ) statt über den Namen — robuster als eine Namens-Heuristik, siehe auch tpNqIsProjectx().
+    //    Zusätzlich: Label-Dedup mit Custom-Vorrang — legt Finn Specs für eine Standard-Firma
+    //    an (gleicher Name, z.B. "FundedNext"), existieren Standard- UND Custom-Preset parallel;
+    //    ohne Dedup erschiene die Firma doppelt. Custom gewinnt (konsistent zu firmToPreset()).
+    const customLabels = new Set(
+      Object.values(FIRM_PRESETS).filter(v => v._custom).map(v => (v.label||'').toLowerCase())
+    )
     const others = Object.entries(FIRM_PRESETS)
       .filter(([k, v]) => k !== 'projectx' && v.symbol !== 'MNQ')
+      .filter(([k, v]) => v._custom || !customLabels.has((v.label||'').toLowerCase()))
       .sort((a,b) => a[1].label.localeCompare(b[1].label, 'de'))
     for(const [k, v] of others) opts.push({ value: k, label: v.label })
 
@@ -10107,12 +10141,19 @@
   function firmToPreset(firm){
     if(!firm) return 'projectx'
     const f = firm.toLowerCase().trim()
-    // Exakter Match auf Custom-Firms (User-defined in Settings)
+    // 1. CUSTOM-Firms zuerst (User-Specs aus den Settings) — die überschreiben Standard-Presets.
+    // Wichtig für Firmen, deren Name exakt einem eingebauten Preset entspricht (FundedNext,
+    // FundingPips, …): Finns Specs (inkl. Duplikum-Symbol) liegen im Custom-Eintrag; der alte
+    // gemeinsame Loop matchte das Standard-Preset zuerst → dupSymbol wurde nie gefunden
+    // ("Kein Duplikum-Symbol hinterlegt", obwohl eingetragen — 09.07.2026 live beobachtet).
     for(const key of Object.keys(FIRM_PRESETS)){
       const preset = FIRM_PRESETS[key]
-      if(preset?.label?.toLowerCase() === f) return key
-      // Custom-Firms haben den Namen als label
       if(preset?._custom && preset.label?.toLowerCase() === f) return key
+    }
+    // 2. Standard-Presets (exakter Label-Match)
+    for(const key of Object.keys(FIRM_PRESETS)){
+      const preset = FIRM_PRESETS[key]
+      if(!preset?._custom && preset?.label?.toLowerCase() === f) return key
     }
     // Heuristik für Standard-Firms
     if(f.includes('topstep') || f.includes('tradeify') || f.includes('alpha') || f.includes('apex') || f === 'projectx') return 'projectx'
@@ -10834,8 +10875,11 @@
     document.querySelectorAll('[data-plan-del]').forEach(btn => {
       btn.addEventListener('click', () => deleteTradePlan(btn.dataset.planDel))
     })
+    // "Läuft"-Button: bewusst wieder das alte 1:1-Verhalten (manueller Override auf "offen").
+    // Der Preflight-Check läuft nur beim "Speichern & Starten" im Modal — und ändert dort
+    // den Status NICHT (Auto-Erkennung übernimmt den planned→open-Übergang).
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
-      btn.addEventListener('click', () => tpPreflightAndStart(btn.dataset.planStart))
+      btn.addEventListener('click', () => transitionPlan(btn.dataset.planStart, 'open'))
     })
     document.querySelectorAll('[data-plan-back]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
@@ -10858,6 +10902,10 @@
    * nur Hinweise (⚠ übersprungen), keine Blocker. */
   const _pfSleep = ms => new Promise(r => setTimeout(r, ms))
   let _pfPlanId = null
+  // Plan-ID für automatischen Preflight-Neustart, nachdem Finn aus dem Check heraus einen
+  // Account bearbeitet hat (External ID nachtragen). Wird vom Account-Save konsumiert,
+  // von closeAccountModal (Abbruch) verworfen.
+  let _pfResumePlanId = null
 
   function _pfAddRow(id, label){
     const rows = document.getElementById('pf-rows')
@@ -10882,23 +10930,30 @@
     document.getElementById('tpPreflightModal')?.classList.remove('open')
     _pfPlanId = null
   }
+  // WICHTIG: Der Check ändert den Plan-Status NICHT. Der Trade bleibt auf "Geplant" —
+  // die bestehende Auto-Erkennung (atCheck) setzt ihn selbst auf "Offen", sobald die
+  // Position real in Duplikum auftaucht (Finns Vorgabe 09.07.2026: Phasen-Logik 1:1
+  // wie bisher, der Check bereitet nur vor: Multiplier gepusht, Mapping geprüft).
   function _pfFinish(allOk, needsAttention){
     const finalEl = document.getElementById('pf-final')
     const foot = document.getElementById('pf-foot')
+    const forceBtn = document.getElementById('pf-force')
+    const cancelBtn = document.getElementById('pf-cancel')
     if(allOk){
       if(finalEl){
         finalEl.style.display = 'block'
         finalEl.className = 'pf-final ok'
-        finalEl.textContent = '✓ Alles erfolgreich — Trade wird gestartet…'
+        finalEl.textContent = '✓ Alles bereit — Trade ist geplant. Auto-Erkennung übernimmt, sobald er startet.'
       }
-      const pid = _pfPlanId
-      setTimeout(async () => { await transitionPlan(pid, 'open'); _pfClose() }, 1100)
+      setTimeout(() => _pfClose(), 1600)
     } else {
       if(finalEl){
         finalEl.style.display = 'block'
         finalEl.className = 'pf-final warn'
-        finalEl.textContent = needsAttention || 'Nicht alles konnte bestätigt werden — trotzdem starten?'
+        finalEl.textContent = needsAttention || 'Nicht alles konnte bestätigt werden — Details oben.'
       }
+      if(forceBtn) forceBtn.style.display = 'none'
+      if(cancelBtn) cancelBtn.textContent = 'Schließen'
       if(foot) foot.style.display = 'flex'
     }
   }
@@ -10930,7 +10985,24 @@
       hardFail = true
     } else if(!dupMasterId || !dupSlaveId){
       const missing = [!dupMasterId ? `Master „${plan.masterName||'—'}"` : null, !dupSlaveId ? `Slave „${plan.slaveName||'—'}"` : null].filter(Boolean).join(' und ')
-      _pfSet('link', 'err', `${missing} nicht verknüpft — External ID am Account prüfen oder „Duplikum verknüpfen" klicken.`)
+      // Direkt-Fix: Account-Modal öffnen, External ID nachtragen — nach dem Speichern
+      // läuft der Preflight automatisch neu an (_pfResumePlanId).
+      const missingAccs = []
+      if(!dupMasterId){ const a = accounts.find(x => String(x.id) === String(plan.masterAccountId)); if(a) missingAccs.push(a) }
+      if(!dupSlaveId){ const a = accounts.find(x => String(x.id) === String(plan.slaveAccountId)); if(a) missingAccs.push(a) }
+      const fixBtns = missingAccs.map((a, i) =>
+        `<button class="btn btn-primary pf-fix-btn" data-pf-edit-acc="${escapeHtml(String(a.id))}" style="padding:4px 12px;font-size:11.5px;margin-right:6px">„${escapeHtml(a.name)}" bearbeiten</button>`
+      ).join('')
+      _pfSet('link', 'err', `${missing} nicht verknüpft — External ID fehlt oder passt zu keinem Duplikum-Login.${fixBtns ? '<br>' + fixBtns : ''}`)
+      document.querySelectorAll('[data-pf-edit-acc]').forEach(b => {
+        b.addEventListener('click', () => {
+          const acc = accounts.find(x => String(x.id) === String(b.dataset.pfEditAcc))
+          if(!acc) return
+          _pfResumePlanId = _pfPlanId
+          _pfClose()
+          openAccountModal(null, acc)
+        })
+      })
       hardFail = true
     } else {
       _pfSet('link', 'ok', `Master <span class="mono">${escapeHtml(String(dupMasterId))}</span> · Slave <span class="mono">${escapeHtml(String(dupSlaveId))}</span>`)
@@ -10995,8 +11067,8 @@
 
     await _pfSleep(350)
     _pfFinish(!hardFail && !softWait, hardFail
-      ? 'Es gibt Probleme — Details oben. Trotzdem starten?'
-      : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — dann starten.' : null)
+      ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
+      : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — der Trade bleibt auf Geplant.' : null)
   }
 
   document.getElementById('pfClose')?.addEventListener('click', _pfClose)
