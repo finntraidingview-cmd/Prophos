@@ -89,6 +89,25 @@
   .at-toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
   .at-toggle input[type=checkbox]{accent-color:var(--violet);width:14px;height:14px;cursor:pointer}
 
+  /* ── Trade-Start Preflight-Check ── */
+  @keyframes pfSpin{to{transform:rotate(360deg)}}
+  @keyframes pfPop{0%{transform:scale(.3);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}
+  @keyframes pfRowIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+  .pf-row{display:flex;align-items:flex-start;gap:12px;padding:13px 4px;border-bottom:1px solid var(--line);font-size:13.5px;animation:pfRowIn .25s ease}
+  .pf-row:last-child{border-bottom:none}
+  .pf-ico{width:24px;height:24px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:13px;font-weight:700;margin-top:1px}
+  .pf-spinner{border:2.5px solid var(--line);border-top-color:var(--violet);border-radius:50%;width:16px;height:16px;animation:pfSpin .7s linear infinite}
+  .pf-ico.pf-ok{background:rgba(16,185,129,.14);color:#10b981;animation:pfPop .35s cubic-bezier(.2,.9,.3,1.4)}
+  .pf-ico.pf-warn{background:rgba(245,158,11,.14);color:#d97706;animation:pfPop .35s cubic-bezier(.2,.9,.3,1.4)}
+  .pf-ico.pf-err{background:rgba(239,68,68,.14);color:#ef4444;animation:pfPop .35s cubic-bezier(.2,.9,.3,1.4)}
+  .pf-body{flex:1;min-width:0}
+  .pf-label{font-weight:600;color:var(--ink)}
+  .pf-sub{font-size:11.5px;color:var(--sub);margin-top:2px;line-height:1.45}
+  .pf-fix-btn{margin-top:6px}
+  .pf-final{margin-top:14px;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:600;text-align:center;animation:pfPop .35s cubic-bezier(.2,.9,.3,1.4)}
+  .pf-final.ok{background:rgba(16,185,129,.12);color:#0d9668;border:1px solid rgba(16,185,129,.3)}
+  .pf-final.warn{background:rgba(245,158,11,.10);color:#b45309;border:1px solid rgba(245,158,11,.3)}
+
   /* ── Live Trade Card Animations ── */
   @keyframes tcLivePulse{
     0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}
@@ -3319,6 +3338,27 @@
       </div>
     </div>
 
+    <!-- TRADE-START PREFLIGHT-CHECK -->
+    <div class="modal-bg" id="tpPreflightModal">
+      <div class="modal" style="max-width:460px">
+        <div class="modal-head">
+          <h3>🚀 Trade-Start-Check</h3>
+          <button class="modal-x" id="pfClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="pf-plan-info" style="font-size:12.5px;color:var(--sub);margin-bottom:8px"></div>
+          <div id="pf-rows"></div>
+          <div id="pf-final" style="display:none"></div>
+        </div>
+        <div class="modal-foot" id="pf-foot" style="display:none">
+          <button class="btn btn-ghost" id="pf-cancel">Abbrechen</button>
+          <button class="btn btn-primary" id="pf-force">Trotzdem starten</button>
+        </div>
+      </div>
+    </div>
+
     <!-- RISK -->
     <section class="view" data-view="risk">
       <div class="view-head">
@@ -4119,6 +4159,11 @@
                   <option value="€">EUR (€)</option>
                   <option value="£">GBP (£)</option>
                 </select>
+              </div>
+              <div class="field" style="grid-column:1/-1">
+                <label>Duplikum-Symbol (Master)</label>
+                <input class="input" id="cf-dupsymbol" placeholder="z.B. US100.cash, NDX100" autocomplete="off">
+                <div style="font-size:11px;color:var(--sub);margin-top:4px">Das Symbol, unter dem diese Firma in Duplikum handelt — kann vom Lot-Rechner-Symbol abweichen (z.B. FTMO: Lot-Rechner NAS100, Duplikum US100.cash). Wird fürs automatische Symbol-Mapping (→ Slave) genutzt.</div>
               </div>
             </div>
             <p style="font-size:11.5px;color:var(--sub);margin-top:10px;line-height:1.5">
@@ -5831,10 +5876,123 @@
       if(typeof renderAccounts === 'function') renderAccounts()
       if(typeof renderDupAccountsTable === 'function') renderDupAccountsTable()
       if(typeof renderTradePlans === 'function') renderTradePlans()
+      // Fire-and-forget: für frisch verknüpfte Master das Symbol-Mapping in Duplikum anlegen
+      // (falls die Firma ein Duplikum-Symbol in den Settings hat). Fehler blockieren nichts —
+      // der Preflight-Check beim Trade-Start fängt fehlende Mappings sowieso nochmal ab.
+      try { dupAutoPushSymbolMappings(linkedNames) } catch(_){}
     }
     return { connected:true, newLinks:count, linkedNames }
   }
   window.dupAutoLink = dupAutoLink  // für DevTools/Debug
+
+  /* ========== DUPLIKUM SYMBOL-MAPPING + MULTIPLIER HELPERS ==========
+   * Bausteine für Auto-Mapping (beim Verknüpfen) und den Trade-Start-Preflight.
+   * Payloads bewusst MINIMAL — nur die Felder, die geändert werden (Lehre aus dem
+   * setSettings-Support-Fall: Extra-/Read-only-Felder führen zu Ablehnung). */
+
+  // Duplikum-Master-Symbol der Firma (aus den Prop-Firm-Specs in den Settings)
+  function dupSymbolForFirm(firmName){
+    if(!firmName) return null
+    const p = FIRM_PRESETS[firmToPreset(firmName)]
+    return (p && p.dupSymbol) ? String(p.dupSymbol).trim() : null
+  }
+
+  // Slave-Symbol: Duplikum-Symbol der Slave-Firma falls hinterlegt, sonst Lot-Rechner-Symbol (Fusion → NAS100)
+  function dupSlaveSymbolForFirm(firmName){
+    const explicit = dupSymbolForFirm(firmName)
+    if(explicit) return explicit
+    const p = FIRM_PRESETS[firmToPreset(firmName)]
+    return (p && p.symbol) ? String(p.symbol).trim() : null
+  }
+
+  // Existierendes Symbol-Mapping für ein Master→Slave-Paar suchen. → { found, symbolMaster, symbolSlave } | { error }
+  async function dupFindSymbolMapping(masterDupId, slaveDupId){
+    try {
+      const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
+      if(!res.ok) return { error: (res.data && res.data.error) || `HTTP ${res.status}` }
+      const arr = (res.data && Array.isArray(res.data.settings)) ? res.data.settings : (Array.isArray(res.data) ? res.data : [])
+      const entry = arr.find(e =>
+        String(e.id_slave||'') === String(slaveDupId) &&
+        String(e.id_master||'') === String(masterDupId) &&
+        (e.symbol || e.symbol_master)
+      )
+      if(!entry) return { found: false }
+      return { found: true, symbolMaster: String(entry.symbol_master||''), symbolSlave: String(entry.symbol||'') }
+    } catch(e){ return { error: e.message || 'Netzwerkfehler' } }
+  }
+
+  // Symbol-Mapping pushen (minimal: id_master, id_slave, symbol_master, symbol) → { ok } | { ok:false, error }
+  async function dupPushSymbolMapping(masterDupId, slaveDupId, symMaster, symSlave){
+    try {
+      const entry = {
+        id_master: String(masterDupId),
+        id_slave:  String(slaveDupId),
+        symbol_master: String(symMaster),
+        symbol: String(symSlave)
+      }
+      const res = await dupApi('POST', 'settings/setSettings.php', { settings: entry })
+      if(!res.ok) return { ok:false, error: (res.data && res.data.error) || `HTTP ${res.status}` }
+      if(res.data && (res.data.error || res.data.success === false)) return { ok:false, error: res.data.error || res.data.message || JSON.stringify(res.data).slice(0,120) }
+      return { ok:true }
+    } catch(e){ return { ok:false, error: e.message || 'Netzwerkfehler' } }
+  }
+
+  // Multiplier pushen (Kernlogik aus tpDupPush, ohne Modal-DOM — für den Preflight).
+  // Liest risk_factor_type vom bestehenden Setting, pusht minimal. → { ok } | { ok:false, error }
+  async function dupPushMultiplierValue(masterDupId, slaveDupId, mult){
+    try {
+      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
+      if(!getRes.ok) return { ok:false, error: (getRes.data && getRes.data.error) || `HTTP ${getRes.status}` }
+      const arr = (getRes.data && Array.isArray(getRes.data.settings)) ? getRes.data.settings : (Array.isArray(getRes.data) ? getRes.data : [])
+      const isSymbolEntry = e => !!(e.symbol || e.symbol_master)
+      const matches = arr.filter(e => String(e.id_slave||'') === String(slaveDupId))
+      const preserved = matches.find(e => String(e.id_master||'') === String(masterDupId) && !isSymbolEntry(e) && !e.id_group)
+                     || matches.find(e => !isSymbolEntry(e) && !e.id_group && !e.id_master)
+                     || matches.find(e => !isSymbolEntry(e))
+      if(!preserved) return { ok:false, error:'Kein Setting für dieses Paar in Duplikum — erst in Duplikum verbinden.' }
+      const entry = {
+        id_slave: String(slaveDupId),
+        id_master: String(masterDupId),
+        risk_factor_type: String(preserved.risk_factor_type),
+        risk_factor_value: String(mult)
+      }
+      const setRes = await dupApi('POST', 'settings/setSettings.php', { settings: entry })
+      if(!setRes.ok) return { ok:false, error: (setRes.data && setRes.data.error) || `HTTP ${setRes.status}` }
+      if(setRes.data && (setRes.data.error || setRes.data.success === false)) return { ok:false, error: setRes.data.error || setRes.data.message || JSON.stringify(setRes.data).slice(0,120) }
+      return { ok:true }
+    } catch(e){ return { ok:false, error: e.message || 'Netzwerkfehler' } }
+  }
+
+  // Nach dupAutoLink: für frisch verknüpfte MASTER-Accounts das Symbol-Mapping zu jedem
+  // Duplikum-Slave anlegen (falls Firma ein Duplikum-Symbol hat und noch kein Mapping existiert).
+  async function dupAutoPushSymbolMappings(linkedNames){
+    if(!Array.isArray(linkedNames) || !linkedNames.length) return
+    const links = dupGetLinks()
+    const dupAccs = dupState.accounts || []
+    const slaves = dupAccs.filter(d => Number(d.type) === 1)
+    if(!slaves.length) return
+    for(const name of linkedNames){
+      const acc = (accounts||[]).find(a => a.name === name)
+      if(!acc) continue
+      const dupId = Object.entries(links).find(([_, pid]) => String(pid) === String(acc.id))?.[0]
+      if(!dupId) continue
+      const dupAcc = dupAccs.find(d => String(d.account_id) === String(dupId))
+      if(!dupAcc || Number(dupAcc.type) !== 0) continue  // nur Master
+      const symMaster = dupSymbolForFirm(acc.firm)
+      if(!symMaster) continue  // Firma hat kein Duplikum-Symbol hinterlegt → nichts tun
+      for(const slave of slaves){
+        const slaveProphos = (accounts||[]).find(a => String(a.id) === String(links[slave.account_id]))
+        const symSlave = dupSlaveSymbolForFirm(slaveProphos?.firm) || 'NAS100'
+        const existing = await dupFindSymbolMapping(dupId, slave.account_id)
+        if(existing.found && existing.symbolMaster === symMaster && existing.symbolSlave === symSlave) continue
+        const r = await dupPushSymbolMapping(dupId, slave.account_id, symMaster, symSlave)
+        if(r.ok && typeof showSyncBanner === 'function'){
+          showSyncBanner(`🔗 Symbol-Mapping gesetzt: ${symMaster} → ${symSlave} („${acc.name}")`, 'ok')
+          if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+        }
+      }
+    }
+  }
 
   let _linkDupAccId = null
   let _linkDupTargetId = null
@@ -9631,7 +9789,7 @@
   function mergeCustomFirmsIntoPresets(){
     for(const k of Object.keys(FIRM_PRESETS)){ if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k] }
     for(const f of getCustomFirms()){
-      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency:f.currency||'$', _custom:true, tbd:false }
+      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency:f.currency||'$', dupSymbol:(f.dupSymbol||'').trim()||null, _custom:true, tbd:false }
     }
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
@@ -9739,7 +9897,7 @@
       const cfEntry = customFirms.find(f=>f.name===firmName)
       const isOrphan = count === 0  // nur in custom_firms, kein Account mit diesem Namen
       const specsText = cfEntry
-        ? `${escapeHtml(cfEntry.symbol||'—')} · ${escapeHtml(cfEntry.unit||'—')} · ${cfEntry.ppl} ${escapeHtml(cfEntry.currency||'')} / Pkt`
+        ? `${escapeHtml(cfEntry.symbol||'—')} · ${escapeHtml(cfEntry.unit||'—')} · ${cfEntry.ppl} ${escapeHtml(cfEntry.currency||'')} / Pkt${cfEntry.dupSymbol ? ` · 🔗 Duplikum: ${escapeHtml(cfEntry.dupSymbol)}` : ''}`
         : null
 
       const row = document.createElement('div')
@@ -9894,6 +10052,7 @@
       document.getElementById('cf-unit').value     = f.unit||'Lots'
       document.getElementById('cf-ppl').value      = f.ppl!=null?f.ppl:''
       document.getElementById('cf-currency').value = f.currency||'$'
+      document.getElementById('cf-dupsymbol').value = f.dupSymbol||''
       document.getElementById('cf-template').value = ''
     } else {
       document.getElementById('customFirmModalTitle').textContent = prefillName ? `Specs für ${prefillName}` : 'Prop Firm hinzufügen'
@@ -9902,6 +10061,7 @@
       document.getElementById('cf-unit').value      = 'Lots'
       document.getElementById('cf-ppl').value       = ''
       document.getElementById('cf-currency').value  = '$'
+      document.getElementById('cf-dupsymbol').value = ''
       document.getElementById('cf-template').value  = ''
       // Name-Feld sperren wenn wir Specs für bestehende Firma hinzufügen
       const nameField = document.getElementById('cf-name')
@@ -9924,12 +10084,13 @@
     const unit=document.getElementById('cf-unit').value
     const ppl=parseFloat(document.getElementById('cf-ppl').value)
     const currency=document.getElementById('cf-currency').value
+    const dupSymbol=document.getElementById('cf-dupsymbol').value.trim()
     const msg=document.getElementById('customFirmMsg')
     if(!name){if(msg)msg.textContent='Name ist Pflicht.';return}
     if(isNaN(ppl)||ppl<=0){if(msg)msg.textContent='$ pro Punkt muss > 0 sein.';return}
     const firms=getCustomFirms()
-    if(_cfEditId){ const i=firms.findIndex(x=>x.id===_cfEditId); if(i>=0) firms[i]={...firms[i],name,symbol,unit,ppl,currency} }
-    else firms.push({id:'cf_'+Date.now(),name,symbol,unit,ppl,currency})
+    if(_cfEditId){ const i=firms.findIndex(x=>x.id===_cfEditId); if(i>=0) firms[i]={...firms[i],name,symbol,unit,ppl,currency,dupSymbol} }
+    else firms.push({id:'cf_'+Date.now(),name,symbol,unit,ppl,currency,dupSymbol})
     // Name-Feld wieder freigeben
     const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
     saveCustomFirms(firms); mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
@@ -10670,7 +10831,7 @@
       btn.addEventListener('click', () => deleteTradePlan(btn.dataset.planDel))
     })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
-      btn.addEventListener('click', () => transitionPlan(btn.dataset.planStart, 'open'))
+      btn.addEventListener('click', () => tpPreflightAndStart(btn.dataset.planStart))
     })
     document.querySelectorAll('[data-plan-back]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
@@ -10682,6 +10843,160 @@
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planEditCompleted))
     })
   }
+
+  /* ─────── Trade-Start Preflight-Check ───────
+   * Beim Klick auf "Läuft"/Start werden 3 Dinge geprüft (mit Live-Feedback im Overlay):
+   *  1. Master & Slave mit Duplikum verknüpft (External IDs)
+   *  2. Geplanter Multiplier → direkt nach Duplikum pushen
+   *  3. Symbol-Mapping der Master-Firma vorhanden & korrekt (Fix-Button falls nicht)
+   * Alles grün → Trade startet automatisch. Problem → "Trotzdem starten" / "Abbrechen".
+   * Konfigurations-Lücken (kein Multiplier am Plan, kein Duplikum-Symbol hinterlegt) sind
+   * nur Hinweise (⚠ übersprungen), keine Blocker. */
+  const _pfSleep = ms => new Promise(r => setTimeout(r, ms))
+  let _pfPlanId = null
+
+  function _pfAddRow(id, label){
+    const rows = document.getElementById('pf-rows')
+    const div = document.createElement('div')
+    div.className = 'pf-row'
+    div.id = 'pf-row-' + id
+    div.innerHTML = `<div class="pf-ico" id="pf-ico-${id}"><div class="pf-spinner"></div></div>
+      <div class="pf-body"><div class="pf-label">${escapeHtml(label)}</div><div class="pf-sub" id="pf-sub-${id}">prüfe…</div></div>`
+    rows.appendChild(div)
+  }
+  function _pfSet(id, state, subHtml){
+    const ico = document.getElementById('pf-ico-' + id)
+    const sub = document.getElementById('pf-sub-' + id)
+    if(ico){
+      ico.classList.remove('pf-ok','pf-warn','pf-err')
+      ico.classList.add(state === 'ok' ? 'pf-ok' : state === 'warn' ? 'pf-warn' : 'pf-err')
+      ico.textContent = state === 'ok' ? '✓' : state === 'warn' ? '!' : '✕'
+    }
+    if(sub) sub.innerHTML = subHtml || ''
+  }
+  function _pfClose(){
+    document.getElementById('tpPreflightModal')?.classList.remove('open')
+    _pfPlanId = null
+  }
+  function _pfFinish(allOk, needsAttention){
+    const finalEl = document.getElementById('pf-final')
+    const foot = document.getElementById('pf-foot')
+    if(allOk){
+      if(finalEl){
+        finalEl.style.display = 'block'
+        finalEl.className = 'pf-final ok'
+        finalEl.textContent = '✓ Alles erfolgreich — Trade wird gestartet…'
+      }
+      const pid = _pfPlanId
+      setTimeout(async () => { await transitionPlan(pid, 'open'); _pfClose() }, 1100)
+    } else {
+      if(finalEl){
+        finalEl.style.display = 'block'
+        finalEl.className = 'pf-final warn'
+        finalEl.textContent = needsAttention || 'Nicht alles konnte bestätigt werden — trotzdem starten?'
+      }
+      if(foot) foot.style.display = 'flex'
+    }
+  }
+
+  async function tpPreflightAndStart(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan) return
+    _pfPlanId = planId
+
+    // Overlay vorbereiten
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+
+    let hardFail = false   // echtes Problem → Buttons statt Auto-Start
+    let softWait = false   // Fix-Button angeboten → nicht auto-starten
+
+    // ── 1. Verknüpfung ──
+    _pfAddRow('link', 'External IDs mit Duplikum verknüpft')
+    await _pfSleep(450)
+    const connected = !!(typeof dupState !== 'undefined' && dupState.token)
+    const dupMasterId = connected ? atGetDupId(plan.masterAccountId) : null
+    const dupSlaveId  = connected ? atGetDupId(plan.slaveAccountId)  : null
+    if(!connected){
+      _pfSet('link', 'err', 'Duplikum ist nicht verbunden (Accounts → Duplikum).')
+      hardFail = true
+    } else if(!dupMasterId || !dupSlaveId){
+      const missing = [!dupMasterId ? `Master „${plan.masterName||'—'}"` : null, !dupSlaveId ? `Slave „${plan.slaveName||'—'}"` : null].filter(Boolean).join(' und ')
+      _pfSet('link', 'err', `${missing} nicht verknüpft — External ID am Account prüfen oder „Duplikum verknüpfen" klicken.`)
+      hardFail = true
+    } else {
+      _pfSet('link', 'ok', `Master <span class="mono">${escapeHtml(String(dupMasterId))}</span> · Slave <span class="mono">${escapeHtml(String(dupSlaveId))}</span>`)
+    }
+
+    // ── 2. Multiplier pushen ──
+    _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
+    await _pfSleep(450)
+    if(hardFail){
+      _pfSet('mult', 'warn', 'Übersprungen — Verknüpfung fehlt.')
+    } else if(plan.multiplier == null || !isFinite(Number(plan.multiplier))){
+      _pfSet('mult', 'warn', 'Kein Multiplier am Plan gespeichert — übersprungen.')
+    } else {
+      const r = await dupPushMultiplierValue(dupMasterId, dupSlaveId, Number(plan.multiplier).toFixed(3))
+      if(r.ok) _pfSet('mult', 'ok', `<span class="mono">${Number(plan.multiplier).toFixed(3)}×</span> erfolgreich gepusht.`)
+      else { _pfSet('mult', 'err', escapeHtml(r.error || 'Push fehlgeschlagen')); hardFail = true }
+    }
+
+    // ── 3. Symbol-Mapping ──
+    _pfAddRow('sym', 'Symbol-Mapping korrekt')
+    await _pfSleep(450)
+    if(hardFail && (!dupMasterId || !dupSlaveId)){
+      _pfSet('sym', 'warn', 'Übersprungen — Verknüpfung fehlt.')
+    } else {
+      const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+      const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
+      const symMaster = dupSymbolForFirm(masterAcc?.firm)
+      const symSlave  = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
+      if(!symMaster){
+        _pfSet('sym', 'warn', `Kein Duplikum-Symbol für „${escapeHtml(masterAcc?.firm||'—')}" hinterlegt (Settings → Prop Firms → Specs) — übersprungen.`)
+      } else {
+        const found = await dupFindSymbolMapping(dupMasterId, dupSlaveId)
+        if(found.error){
+          _pfSet('sym', 'err', escapeHtml(found.error)); hardFail = true
+        } else if(found.found && found.symbolMaster === symMaster && found.symbolSlave === symSlave){
+          _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span> ✓`)
+        } else {
+          const ist = found.found ? `aktuell <span class="mono">${escapeHtml(found.symbolMaster||'—')} → ${escapeHtml(found.symbolSlave||'—')}</span>` : 'kein Mapping vorhanden'
+          _pfSet('sym', 'warn', `Erwartet <span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span>, ${ist}.<br>
+            <button class="btn btn-primary pf-fix-btn" id="pf-fix-sym" style="padding:4px 12px;font-size:11.5px">Jetzt pushen</button>`)
+          softWait = true
+          document.getElementById('pf-fix-sym')?.addEventListener('click', async () => {
+            const btn = document.getElementById('pf-fix-sym')
+            if(btn){ btn.disabled = true; btn.textContent = 'Pushe…' }
+            const ico = document.getElementById('pf-ico-sym')
+            if(ico){ ico.classList.remove('pf-warn'); ico.innerHTML = '<div class="pf-spinner"></div>' }
+            const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, symMaster, symSlave)
+            if(pr.ok) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMaster)} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
+            else _pfSet('sym', 'err', escapeHtml(pr.error || 'Push fehlgeschlagen'))
+          })
+        }
+      }
+    }
+
+    await _pfSleep(350)
+    _pfFinish(!hardFail && !softWait, hardFail
+      ? 'Es gibt Probleme — Details oben. Trotzdem starten?'
+      : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — dann starten.' : null)
+  }
+
+  document.getElementById('pfClose')?.addEventListener('click', _pfClose)
+  document.getElementById('pf-cancel')?.addEventListener('click', _pfClose)
+  document.getElementById('pf-force')?.addEventListener('click', async () => {
+    const pid = _pfPlanId
+    _pfClose()
+    if(pid) await transitionPlan(pid, 'open')
+  })
+  document.getElementById('tpPreflightModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('tpPreflightModal')) _pfClose()
+  })
 
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
