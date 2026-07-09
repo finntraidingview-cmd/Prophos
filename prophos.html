@@ -3112,6 +3112,25 @@
               </div>
             </div>
 
+            <!-- Fixkosten bei Phasenwechsel — Gesamtkosten DES VORGÄNGERS, eingefroren zum Zeitpunkt
+                 des Phasenwechsels. Anders als die "Gesamtkosten"-Box oben (die sich mit jedem neuen
+                 Trade auf DIESEM Account weiter verändert, sobald auf dem Nachfolger selbst real
+                 Geld verdient/verloren wird) bleibt dieser Wert stabil — "was hat es gekostet, bis
+                 hierhin zu kommen", ohne durch die eigene laufende Performance verwässert zu werden.
+                 Nur sichtbar wenn der gewählte Master einen Vorgänger hat. -->
+            <div class="field" style="grid-column:span 2">
+              <div id="tp-vorgaenger-suggest" style="display:none;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.25);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                  <div style="color:var(--ink)">
+                    <span style="color:#7c3aed;font-weight:700">🔒 Fixkosten (bei Phasenwechsel):</span>
+                    <span id="tp-vorgaenger-value" style="font-family:var(--mono);font-weight:600">—</span>
+                  </div>
+                  <button type="button" id="tp-vorgaenger-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
+                </div>
+                <div id="tp-vorgaenger-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
+            </div>
+
             <!-- Take-Profit Master (SL = Risiko Master) -->
             <div class="field" style="grid-column:span 2">
               <label>Take-Profit Master ($)</label>
@@ -3284,6 +3303,10 @@
             <div class="field">
               <label>Kosten</label>
               <input type="number" class="input mono" id="suc-cost" step="1" value="0" placeholder="0">
+            </div>
+            <div class="field" style="grid-column:span 2">
+              <label>External ID (optional)</label>
+              <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
             </div>
           </div>
 
@@ -7043,6 +7066,7 @@
     document.getElementById('suc-firm').value = acc.firm || ''
     document.getElementById('suc-balance').value = acc.initialBalance || ''
     document.getElementById('suc-cost').value = '0'
+    document.getElementById('suc-extid').value = ''
 
     // Name-Vorschlag basierend auf aktuellem Typ
     let suggested = acc.name
@@ -7086,6 +7110,7 @@
     const type = document.getElementById('suc-type').value
     const balance = parseFloat(document.getElementById('suc-balance').value) || 0
     const cost = parseFloat(document.getElementById('suc-cost').value) || 0
+    const externalId = document.getElementById('suc-extid').value.trim() || null
     const msgEl = document.getElementById('successorMsg')
 
     if(!name || !firm){
@@ -7100,7 +7125,8 @@
         name, firm,
         type,
         initialBalance: balance,
-        purchaseCost: cost
+        purchaseCost: cost,
+        externalId
       }
       const row = accountToRow(newAcc)
       const { data, error } = await supabase.from('accounts').insert(row).select('*').single()
@@ -7112,6 +7138,16 @@
       setParent(created.id, parentId)
       // Vorgänger archivieren mit Successor-ID
       archiveAccount(parentId, 'passed', created.id)
+
+      // Neuer Account mit External ID → sofort mit Duplikum verknüpfen (falls dort vorhanden),
+      // gleiches Verhalten wie beim normalen Account-Anlegen
+      if(created.externalId && typeof dupState !== 'undefined' && dupState.token && typeof dupAutoLink === 'function'){
+        const lr = dupAutoLink()
+        if(lr?.newLinks > 0 && typeof showSyncBanner === 'function'){
+          showSyncBanner(`🔗 „${created.name}" automatisch mit Duplikum verknüpft`, 'ok')
+          if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+        }
+      }
 
       // UI refreshen
       renderAccounts()
@@ -7963,6 +7999,7 @@
           balance: acc.initialBalance,
           purchase_cost: acc.purchaseCost,
           max_drawdown: acc.maxDrawdown,
+          external_id: acc.externalId,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
           cred_password: acc.creds?.password || null,
@@ -11242,6 +11279,41 @@
       }
     }
 
+    // ── Fixkosten bei Phasenwechsel — Gesamtkosten DES VORGÄNGERS (eingefroren), nicht die des
+    // aktuellen Accounts. Nur sichtbar wenn der Master einen Vorgänger hat (getParent).
+    const vgEl  = document.getElementById('tp-vorgaenger-suggest')
+    const vgVal = document.getElementById('tp-vorgaenger-value')
+    const vgDet = document.getElementById('tp-vorgaenger-detail')
+    if(vgEl){
+      const parentId = master && typeof getParent === 'function' ? getParent(master.id) : null
+      const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
+      if(parentAcc){
+        const vgEur = calcReingesteckdEur(parentAcc)
+        if(vgEur > 0){
+          vgEl.style.display = 'block'
+          let vgDisplay = vgEur
+          let vgCur = '€'
+          if(slave){
+            const slavePresetVg = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+            const fxUsdEurVg = window._fxUsdEur || 0.85
+            if(slavePresetVg.currency !== '€'){
+              vgDisplay = vgEur / fxUsdEurVg
+              vgCur = slavePresetVg.currency
+            }
+          }
+          vgVal.textContent = `${vgCur}${vgDisplay.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
+          vgDet.innerHTML = `Gesamtkosten von „${escapeHtml(parentAcc.name)}" zum Zeitpunkt des Phasenwechsels — verändert sich NICHT mehr mit der eigenen Performance dieses Accounts, in EUR: <span class="mono">€${vgEur.toLocaleString('de-DE', {maximumFractionDigits: 2})}</span>`
+          vgEl.dataset.suggestedVgEur = vgEur.toFixed(2)
+        } else {
+          vgEl.style.display = 'none'
+          vgEl.dataset.suggestedVgEur = ''
+        }
+      } else {
+        vgEl.style.display = 'none'
+        vgEl.dataset.suggestedVgEur = ''
+      }
+    }
+
     // Slave currency-symbol updaten
     if(slave){
       const sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
@@ -11379,6 +11451,34 @@
       const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
       const fxUsdEur = window._fxUsdEur || 0.85
       if(slavePreset.currency !== '€') slaveVal = gkEur / fxUsdEur
+    }
+    document.getElementById('tp-slave-risk').value = slaveVal.toFixed(2)
+    tpRecompute()
+  })
+  // Fixkosten (Vorgänger) übernehmen — gleiche Mechanik wie Gesamtkosten, nur mit dem
+  // eingefrorenen Vorgänger-Wert statt dem (sich verändernden) Wert des aktuellen Accounts
+  document.getElementById('tp-vorgaenger-apply')?.addEventListener('click', () => {
+    tpAutoSelectLiveSlaveIfEmpty()
+    const masterId = document.getElementById('tp-master').value
+    const master = accounts.find(a => String(a.id) === String(masterId))
+    const vgEl = document.getElementById('tp-vorgaenger-suggest')
+    const vgEur = parseFloat(vgEl?.dataset.suggestedVgEur || '')
+    if(!isFinite(vgEur) || vgEur <= 0) return
+
+    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer
+    const masterRiskInput = document.getElementById('tp-master-risk')
+    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
+      masterRiskInput.value = master.maxDrawdown
+    }
+
+    // Slave-Risiko auf den vollen Vorgänger-Betrag setzen (in Slave-Währung konvertiert)
+    const slaveId = document.getElementById('tp-slave').value
+    const slave = accounts.find(a => String(a.id) === String(slaveId))
+    let slaveVal = vgEur
+    if(slave){
+      const slavePreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+      const fxUsdEur = window._fxUsdEur || 0.85
+      if(slavePreset.currency !== '€') slaveVal = vgEur / fxUsdEur
     }
     document.getElementById('tp-slave-risk').value = slaveVal.toFixed(2)
     tpRecompute()
