@@ -3150,14 +3150,15 @@
               </div>
             </div>
 
-            <!-- Take-Profit Master (SL = Risiko Master) -->
-            <div class="field" style="grid-column:span 2">
+            <!-- Take-Profit Master + Slave-Hedge-Auswertung — AUSGEBLENDET (09.07.2026, Finns
+                 Wunsch: "brauch ich nicht"). Felder bleiben im DOM (display:none), weil
+                 tpRecompute()/Save-Code sie lesen/beschreiben. -->
+            <div class="field" style="grid-column:span 2;display:none">
               <label>Take-Profit Master ($)</label>
               <input type="number" class="input mono" id="tp-master-tp" min="0" step="10" placeholder="optional, z.B. 3600">
             </div>
 
-            <!-- Auto-berechnete Slave-Hedge-Werte -->
-            <div class="field" style="grid-column:span 2">
+            <div class="field" style="grid-column:span 2;display:none">
               <div style="display:flex;gap:14px;padding:10px 14px;background:rgba(84,71,206,.05);border:1px solid var(--border);border-radius:8px;font-size:12.5px">
                 <div style="flex:1;color:var(--sub)">
                   <span style="font-weight:600;color:var(--accent);text-transform:uppercase;font-size:10.5px;letter-spacing:.08em" title="Wieviel der Slave verliert wenn Master TP trifft">Slave-Verlust bei Master-TP</span>
@@ -3219,10 +3220,13 @@
 
           <div class="modal-msg" id="tradePlanMsg"></div>
         </div>
-        <div class="modal-foot">
-          <button class="btn btn-ghost" id="tradePlanCancel2">Abbrechen</button>
-          <button class="btn btn-ghost" id="tradePlanSave">Nur speichern</button>
-          <button class="btn btn-primary" id="tradePlanSaveStart">Speichern &amp; Starten →</button>
+        <div class="modal-foot" style="justify-content:center">
+          <!-- "Abbrechen"/"Nur speichern" ausgeblendet (09.07.2026, Finns Wunsch: nur ein
+               Button). X oben schließt weiterhin ohne Speichern. Bleiben im DOM (display:none),
+               weil Click-Handler daran hängen. -->
+          <button class="btn btn-ghost" id="tradePlanCancel2" style="display:none">Abbrechen</button>
+          <button class="btn btn-ghost" id="tradePlanSave" style="display:none">Nur speichern</button>
+          <button class="btn btn-primary" id="tradePlanSaveStart" style="min-width:220px">Speichern &amp; Starten →</button>
         </div>
       </div>
     </div>
