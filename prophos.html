@@ -3215,7 +3215,8 @@
         </div>
         <div class="modal-foot">
           <button class="btn btn-ghost" id="tradePlanCancel2">Abbrechen</button>
-          <button class="btn btn-primary" id="tradePlanSave">Plan speichern</button>
+          <button class="btn btn-ghost" id="tradePlanSave">Nur speichern</button>
+          <button class="btn btn-primary" id="tradePlanSaveStart">Speichern &amp; Starten →</button>
         </div>
       </div>
     </div>
@@ -5559,24 +5560,19 @@
       currentLine = `<div class="tp-dup-current empty">○ Aktuell in Duplikium: <span class="mono">noch nicht konfiguriert</span></div>`
     }
 
+    // Kein manueller Push-Button mehr — der Multiplier wird beim "Speichern & Starten"
+    // automatisch im Trade-Start-Preflight gepusht (Finns Wunsch, 09.07.2026).
+    // Die "Aktuell in Duplikium"-Zeile bleibt als Info erhalten.
     container.innerHTML = `
       <div class="tp-dup-ready">
         <div class="tp-dup-info">
-          <div class="tp-dup-info-label">→ Push auf Duplikium</div>
+          <div class="tp-dup-info-label">→ Duplikium</div>
           <div class="tp-dup-info-target">${targetLine}</div>
         </div>
-        <button class="btn btn-primary tp-dup-btn" id="tp-dup-push-btn" ${mult ? '' : 'disabled'}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-          <span id="tp-dup-push-btn-label">Push ${mult ? mult.toFixed(3) + '×' : ''}</span>
-        </button>
+        <span style="font-size:11px;color:var(--sub);flex-shrink:0">${mult ? `<span class="mono">${mult.toFixed(3)}×</span> wird beim Starten automatisch gepusht` : 'Push beim Starten automatisch'}</span>
       </div>
       ${currentLine}
-      <div class="tp-dup-status-row"><span class="tp-dup-status" id="tp-dup-status"></span></div>
       ${warnLine}`
-
-    // Listener neu binden (Markup wurde gerade ersetzt)
-    const masterDupId = linkedMaster ? linkedMaster.account_id : null
-    document.getElementById('tp-dup-push-btn')?.addEventListener('click', () => tpDupPush(linkedSlave.account_id, masterDupId))
   }
 
   function tpDupSetStatus(text, kind=''){
@@ -11056,7 +11052,11 @@
 
     // Title
     document.getElementById('tradePlanTitle').textContent = isEdit ? 'Trade-Plan bearbeiten' : 'Trade planen'
-    document.getElementById('tradePlanSave').textContent  = isEdit ? 'Speichern' : 'Plan speichern'
+    document.getElementById('tradePlanSave').textContent  = isEdit ? 'Nur speichern' : 'Nur speichern'
+    // "Speichern & Starten" nur für Pläne, die noch gestartet werden können
+    const _editPlan = isEdit ? tradePlans.find(x => String(x.id) === String(editId)) : null
+    const startBtn = document.getElementById('tradePlanSaveStart')
+    if(startBtn) startBtn.style.display = (!isEdit || _editPlan?.status === 'planned') ? '' : 'none'
 
     // Populate Master & Slave dropdowns from accounts (mit Filter-Support)
     const masterSel = document.getElementById('tp-master')
@@ -11839,7 +11839,10 @@
     if(e.target === document.getElementById('tradePlanModal')) closeTradePlanModal()
   })
 
-  document.getElementById('tradePlanSave')?.addEventListener('click', async () => {
+  // startAfter=true → nach dem Speichern schließt das Modal und der Trade-Start-Preflight
+  // (3 Checks: Verknüpfung, Multiplier-Push, Symbol-Mapping) läuft direkt an — alles grün
+  // startet den Trade automatisch, Probleme zeigen kurzes Feedback.
+  async function saveTradePlanFromModal(startAfter){
     const masterId = document.getElementById('tp-master').value
     const slaveId  = document.getElementById('tp-slave').value
     const masterRisk = parseFloat(document.getElementById('tp-master-risk').value) || 0
@@ -11881,6 +11884,7 @@
     }
 
     try{
+      let savedPlanId = null
       if(_editingPlanId){
         // status NICHT mitschicken beim Bearbeiten: die Auto-Erkennung (atCheck, alle 10s im
         // Hintergrund) kann den Plan zwischen "Bearbeiten"-Öffnen und "Speichern"-Klick längst
@@ -11894,18 +11898,25 @@
         if(error) throw error
         const idx = tradePlans.findIndex(x => String(x.id) === String(_editingPlanId))
         if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+        savedPlanId = data.id
       }else{
         const { data, error } = await supabase
           .from('trade_plans').insert(planToRow(planObj)).select('*').single()
         if(error) throw error
         tradePlans.unshift(rowToPlan(data))
+        savedPlanId = data.id
       }
       renderTradePlans()
       closeTradePlanModal()
+      if(startAfter && savedPlanId){
+        tpPreflightAndStart(savedPlanId)
+      }
     }catch(e){
       msg('Fehler: ' + (e.message || e), 'err')
     }
-  })
+  }
+  document.getElementById('tradePlanSave')?.addEventListener('click', () => saveTradePlanFromModal(false))
+  document.getElementById('tradePlanSaveStart')?.addEventListener('click', () => saveTradePlanFromModal(true))
 
   // ─────── Trade-Complete-Modal ───────
   function openTradeCompleteModal(planId, preFillSlavePl){
