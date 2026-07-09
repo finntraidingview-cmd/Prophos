@@ -5270,12 +5270,12 @@
         throw new Error(`Kein Setting für Slave ${slaveId} gefunden. Leg in Duplikium erst eines an (egal welcher Wert), dann kann ich den Multiplier updaten.`)
       }
 
-      // 2) Setting-Entry: nur risk_factor_value ändern — Vorzeichen preserven! Negativ = Reverse
-      // Trading bei Finn (sein ganzes Hedge-Setup). calcMultiplier() liefert immer einen
-      // positiven Betrag — ohne dies hätte jeder Push Reverse Trading unbemerkt ausgeschaltet.
-      const existingVal = parseFloat(preserved.risk_factor_value)
-      const wasNegative = isFinite(existingVal) && existingVal < 0
-      const signedMult = wasNegative ? -Math.abs(mult) : Math.abs(mult)
+      // 2) Setting-Entry: nur risk_factor_value ändern — IMMER negativ (Finns explizite Vorgabe
+      // 09.07.2026: "einfach ein Minus davor", kein Bedingungs-Gedöns mehr). Negativ = Reverse
+      // Trading bei Finn, gilt für jedes seiner Hedge-Paare ausnahmslos. calcMultiplier()
+      // liefert immer einen positiven Betrag — ohne das Minus hätte jeder Push Reverse Trading
+      // unbemerkt ausgeschaltet (echter Geldverlust, siehe Vault).
+      const signedMult = -Math.abs(mult)
       const entry = {
         id_slave: String(preserved.id_slave),
         risk_factor_type:  String(preserved.risk_factor_type),
@@ -5306,7 +5306,7 @@
       if(masterId) localStorage.setItem(DUP_CALC_MASTER_LS, masterId)
       const multTxt = signedMult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
       const pairTxt = masterId ? `${masterId}→${slaveId}` : `→${slaveId}`
-      dupCalcSetStatus(`✓ ${multTxt}× gepusht (${pairTxt})${wasNegative ? ' · Reverse Trading erhalten' : ''}`, 'ok')
+      dupCalcSetStatus(`✓ ${multTxt}× gepusht (${pairTxt}) · Reverse Trading`, 'ok')
 
       clearTimeout(dupCalcPush._timer)
       dupCalcPush._timer = setTimeout(() => dupCalcSetStatus(''), 6000)
@@ -5655,13 +5655,12 @@
       // Der frühere volle ...preserved-Spread (~70 Felder inkl. Read-only wie slave_name/date/
       // *_string plus leere symbol-Felder) wurde vom Server mit "please contact us" abgelehnt.
       //
-      // KRITISCH (09.07.2026, echter Geldverlust): Vorzeichen von risk_factor_value preserven!
-      // Negativ = Reverse Trading bei Finn (sein ganzes Hedge-Setup). tpCalcMultiplier() liefert
-      // immer einen positiven Betrag — ohne dies hätte jeder Push Reverse Trading unbemerkt
-      // ausgeschaltet, obwohl der Toggle in Duplikum selbst unverändert blieb.
-      const existingVal = parseFloat(preserved.risk_factor_value)
-      const wasNegative = isFinite(existingVal) && existingVal < 0
-      const signedMult = wasNegative ? -Math.abs(mult) : Math.abs(mult)
+      // KRITISCH (09.07.2026, echter Geldverlust): risk_factor_value IMMER negativ pushen
+      // (Finns explizite Vorgabe: "einfach ein Minus davor", kein Bedingungs-Gedöns). Negativ =
+      // Reverse Trading bei Finn, gilt ausnahmslos für jedes Hedge-Paar. tpCalcMultiplier()
+      // liefert immer einen positiven Betrag — ohne das Minus hätte jeder Push Reverse Trading
+      // unbemerkt ausgeschaltet, obwohl der Toggle in Duplikum selbst unverändert blieb.
+      const signedMult = -Math.abs(mult)
       const entry = {
         id_slave: String(preserved.id_slave),
         risk_factor_type: String(preserved.risk_factor_type),
@@ -5700,7 +5699,7 @@
 
       const multTxt = signedMult.toLocaleString('de-DE', { maximumFractionDigits: 3 })
       const tgtTxt = masterAccountId ? `${masterAccountId}→${slaveAccountId}` : `→${slaveAccountId}`
-      tpDupSetStatus(`✓ ${multTxt}× gepusht (${tgtTxt})${wasNegative ? ' · Reverse Trading erhalten' : ''}`, 'ok')
+      tpDupSetStatus(`✓ ${multTxt}× gepusht (${tgtTxt}) · Reverse Trading`, 'ok')
       // Cache invalidieren + re-fetch damit "Aktuell"-Anzeige aktualisiert wird
       tpDupCurrentSetting = null
       tpDupFetchCurrent(String(slaveAccountId), masterAccountId ? String(masterAccountId) : '')
@@ -5968,16 +5967,13 @@
                      || matches.find(e => !isSymbolEntry(e) && !e.id_group && !e.id_master)
                      || matches.find(e => !isSymbolEntry(e))
       if(!preserved) return { ok:false, error:'Kein Setting für dieses Paar in Duplikum — erst in Duplikum verbinden.' }
-      // KRITISCH (09.07.2026, echter Geldverlust durch diesen Bug): Das Vorzeichen von
-      // risk_factor_value ist bei Finn "Reverse Trading" — negativ = Slave läuft entgegengesetzt
-      // zum Master (sein gesamtes Hedge-Setup). calcMultiplier() liefert immer einen positiven
-      // Betrag (reine Verhältnisrechnung, kennt kein Vorzeichen). Ohne dieses Vorzeichen-Preserve
-      // hätte jeder Push Reverse Trading STILL ausgeschaltet, ohne dass der Toggle in Duplikum
-      // sich sichtbar ändert. Deshalb: Vorzeichen vom bestehenden Wert übernehmen, nur den
-      // Betrag aktualisieren.
-      const existingVal = parseFloat(preserved.risk_factor_value)
-      const wasNegative = isFinite(existingVal) && existingVal < 0
-      const signedMult = wasNegative ? -Math.abs(mult) : Math.abs(mult)
+      // KRITISCH (09.07.2026, echter Geldverlust durch diesen Bug): risk_factor_value IMMER
+      // negativ pushen (Finns explizite Vorgabe: "einfach ein Minus davor"). Negativ = Reverse
+      // Trading bei Finn — Slave läuft entgegengesetzt zum Master (sein gesamtes Hedge-Setup),
+      // gilt ausnahmslos für jedes Paar. calcMultiplier() liefert immer einen positiven Betrag
+      // (reine Verhältnisrechnung, kennt kein Vorzeichen) — ohne das Minus hätte jeder Push
+      // Reverse Trading ausgeschaltet, ohne dass der Toggle in Duplikum sich sichtbar ändert.
+      const signedMult = -Math.abs(mult)
       const entry = {
         id_slave: String(slaveDupId),
         id_master: String(masterDupId),
