@@ -5883,11 +5883,20 @@
     for(const a of (accounts || [])){
       if(!a.externalId) continue
       if(linkedProphosIds.has(String(a.id))) continue  // Prophos-Account schon verlinkt
-      const match = byLogin[norm(a.externalId)]
+      const extKey = norm(a.externalId)
+      let match = byLogin[extKey]
+      // Präfix-tolerant: Tradovate-Konten tragen in Duplikum ein Firmen-Präfix vor der
+      // Kontonummer (z.B. AFPRMEV2026070612479, FTDFYSLX…, PAAPEX…) — die External ID in
+      // Prophos ist aber nur die nackte Nummer. Suffix-Match, nur wenn eindeutig genau
+      // EIN freier Duplikum-Login auf die ID endet (Mindestlänge 6 gegen Fehltreffer).
+      if(!match && extKey.length >= 6){
+        const cands = Object.keys(byLogin).filter(k => k.endsWith(extKey))
+        if(cands.length === 1) match = byLogin[cands[0]]
+      }
       if(!match) continue
       links[match.account_id] = a.id            // Format: dupId → prophosId
       linkedProphosIds.add(String(a.id))
-      delete byLogin[norm(a.externalId)]        // Dup-Account nicht doppelt vergeben
+      delete byLogin[norm(match.login)]         // Dup-Account nicht doppelt vergeben
       count++
       linkedNames.push(a.name)
     }
@@ -9580,23 +9589,32 @@
   })
 
   // Duplikum Auto-Verknüpfen (globaler Button in der Accounts-Kopfzeile)
-  document.getElementById('dupAutoLinkBtn')?.addEventListener('click', () => {
-    const res = dupAutoLink()
-    if(!res.connected){
+  document.getElementById('dupAutoLinkBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('dupAutoLinkBtn')
+    if(typeof dupState === 'undefined' || !dupState.token){
       showSyncBanner('Duplikum nicht verbunden — verbinde dich erst unter Accounts → Duplikum, dann klappt das Verknüpfen.', 'err')
       hideSyncBannerSoon(5500); return
     }
-    if(res.noDup){
-      showSyncBanner('Duplikum verbunden, aber keine Accounts geladen — klick im Duplikum-Tab auf „Sync".', 'muted')
-      hideSyncBannerSoon(5500); return
+    if(btn){ btn.disabled = true; btn.classList.add('ts-btn-loading') }
+    try {
+      // Erst frischen Account-Stand aus Duplikum ziehen — sonst sind gerade erst in
+      // Duplikum angelegte Accounts hier noch unbekannt und werden nie verknüpft.
+      await dupLoadAccounts()
+      const res = dupAutoLink()
+      if(res.noDup || !(dupState.accounts || []).length){
+        showSyncBanner('Duplikum verbunden, aber keine Accounts gefunden — check den Duplikum-Tab.', 'muted')
+        hideSyncBannerSoon(5500); return
+      }
+      if(res.newLinks > 0){
+        const names = res.linkedNames.slice(0,6).join(', ') + (res.linkedNames.length > 6 ? ` +${res.linkedNames.length-6} weitere` : '')
+        showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}`, 'ok')
+      } else {
+        showSyncBanner('Keine neuen Verknüpfungen — alle passenden Accounts sind schon verknüpft (oder keine External ID passt zu einem Duplikum-Login).', 'muted')
+      }
+      hideSyncBannerSoon(7000)
+    } finally {
+      if(btn){ btn.disabled = false; btn.classList.remove('ts-btn-loading') }
     }
-    if(res.newLinks > 0){
-      const names = res.linkedNames.slice(0,6).join(', ') + (res.linkedNames.length > 6 ? ` +${res.linkedNames.length-6} weitere` : '')
-      showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}`, 'ok')
-    } else {
-      showSyncBanner('Keine neuen Verknüpfungen — alle passenden Accounts sind schon verknüpft (oder keine External ID stimmt mit einem Duplikum-Login überein).', 'muted')
-    }
-    hideSyncBannerSoon(7000)
   })
 
   // Balance aktualisieren — zieht alle Live-Balances frisch aus Duplikum (getAccounts.php).
