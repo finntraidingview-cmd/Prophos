@@ -5867,13 +5867,27 @@
    * Geht ALLE noch nicht verknüpften Accounts durch und verlinkt jeden,
    * dessen External ID exakt dem Login eines (freien) Duplikum-Accounts
    * entspricht. Ein Klick verknüpft alles auf einmal.
-   * Returns { connected, noDup, newLinks, linkedNames }.
+   * pruneOrphans: Links auf Duplikum-IDs entfernen, die es nicht mehr gibt.
+   * Nur true wenn dupState.accounts FRISCH geladen wurde (Button-Handler) —
+   * sonst könnte ein veralteter Cache gültige Links fälschlich löschen.
+   * Returns { connected, noDup, newLinks, linkedNames, unmatched, pruned }.
    */
-  function dupAutoLink(){
+  function dupAutoLink(pruneOrphans = false){
     if(typeof dupState === 'undefined' || !dupState.token) return { connected:false, newLinks:0 }
     const dupAccs = dupState.accounts || []
     if(!dupAccs.length) return { connected:true, noDup:true, newLinks:0, linkedNames:[] }
     const links = dupGetLinks()  // { dupAccountId: prophosAccountId }
+    // Verwaiste Links lösen: Wird ein Account in Duplikum gelöscht und neu angelegt,
+    // bekommt er eine NEUE account_id. Der alte Link zeigt dann ins Leere — und
+    // blockiert den Prophos-Account dauerhaft als "schon verlinkt", sodass die
+    // Neu-Verknüpfung nie zustande kommt (Finns Re-Add-Szenario, 10.07.2026).
+    let pruned = 0
+    if(pruneOrphans){
+      const dupIdSet = new Set(dupAccs.map(d => String(d.account_id)))
+      for(const dupId of Object.keys(links)){
+        if(!dupIdSet.has(String(dupId))){ delete links[dupId]; pruned++ }
+      }
+    }
     const linkedProphosIds = new Set(Object.values(links).map(String))
     const linkedDupIds     = new Set(Object.keys(links).map(String))
     const norm = s => String(s || '').trim().toUpperCase()
@@ -5907,7 +5921,7 @@
       count++
       linkedNames.push(a.name)
     }
-    if(count > 0){
+    if(count > 0 || pruned > 0){
       dupSaveLinks(links)  // schreibt localStorage + synct nach Supabase (Storage-Hook)
       if(typeof renderAccounts === 'function') renderAccounts()
       if(typeof renderDupAccountsTable === 'function') renderDupAccountsTable()
@@ -5915,9 +5929,9 @@
       // Fire-and-forget: für frisch verknüpfte Master das Symbol-Mapping in Duplikum anlegen
       // (falls die Firma ein Duplikum-Symbol in den Settings hat). Fehler blockieren nichts —
       // der Preflight-Check beim Trade-Start fängt fehlende Mappings sowieso nochmal ab.
-      try { dupAutoPushSymbolMappings(linkedNames) } catch(_){}
+      if(count > 0){ try { dupAutoPushSymbolMappings(linkedNames) } catch(_){} }
     }
-    return { connected:true, newLinks:count, linkedNames, unmatched }
+    return { connected:true, newLinks:count, linkedNames, unmatched, pruned }
   }
   window.dupAutoLink = dupAutoLink  // für DevTools/Debug
 
@@ -9607,20 +9621,23 @@
       // Erst frischen Account-Stand aus Duplikum ziehen — sonst sind gerade erst in
       // Duplikum angelegte Accounts hier noch unbekannt und werden nie verknüpft.
       await dupLoadAccounts()
-      const res = dupAutoLink()
+      // pruneOrphans=true: Stand ist frisch → Links auf gelöschte Duplikum-IDs lösen,
+      // damit re-addete Accounts (neue account_id, gleicher Login) neu verknüpft werden.
+      const res = dupAutoLink(true)
       if(res.noDup || !(dupState.accounts || []).length){
         showSyncBanner('Duplikum verbunden, aber keine Accounts gefunden — check den Duplikum-Tab.', 'muted')
         hideSyncBannerSoon(5500); return
       }
+      const prunedNote = res.pruned > 0 ? ` (${res.pruned} verwaiste alte Verknüpfung${res.pruned===1?'':'en'} gelöst)` : ''
       if(res.newLinks > 0){
         const names = res.linkedNames.slice(0,6).join(', ') + (res.linkedNames.length > 6 ? ` +${res.linkedNames.length-6} weitere` : '')
-        showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}`, 'ok')
+        showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}${prunedNote}`, 'ok')
       } else if((res.unmatched || []).length){
         // Diagnose statt Rätselraten: WELCHE External IDs haben keinen Duplikum-Login gefunden?
         const list = res.unmatched.slice(0,4).join(' · ') + (res.unmatched.length > 4 ? ` · +${res.unmatched.length-4} weitere` : '')
-        showSyncBanner(`Keine neuen Verknüpfungen. Ohne Duplikum-Treffer: ${list}`, 'muted')
+        showSyncBanner(`Keine neuen Verknüpfungen${prunedNote}. Ohne Duplikum-Treffer: ${list}`, 'muted')
       } else {
-        showSyncBanner('Keine neuen Verknüpfungen — alle Accounts mit External ID sind schon verknüpft.', 'muted')
+        showSyncBanner(`Keine neuen Verknüpfungen${prunedNote} — alle Accounts mit External ID sind schon verknüpft.`, 'muted')
       }
       hideSyncBannerSoon(10000)
     } finally {
