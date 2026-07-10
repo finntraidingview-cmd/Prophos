@@ -5944,7 +5944,12 @@
     } catch(e){ return { error: e.message || 'Netzwerkfehler' } }
   }
 
-  // Symbol-Mapping pushen (minimal: id_master, id_slave, symbol_master, symbol) → { ok } | { ok:false, error }
+  // Symbol-Mapping pushen → { ok } | { ok:false, error }
+  // WICHTIG (10.07.2026): Symbol-Mappings laufen über den eigenen Endpoint
+  // mapping/addMappings.php — NICHT über settings/setSettings.php (das lehnt
+  // neue Symbol-Zeilen mit "please contact us" ab; gleiches Fehlerbild wie
+  // damals beim Multiplier). addMappings erwartet ARRAY-Format
+  // (settings[0][...]), anders als setSettings (flaches Objekt).
   async function dupPushSymbolMapping(masterDupId, slaveDupId, symMaster, symSlave){
     try {
       const entry = {
@@ -5953,9 +5958,10 @@
         symbol_master: String(symMaster),
         symbol: String(symSlave)
       }
-      const res = await dupApi('POST', 'settings/setSettings.php', { settings: entry })
+      const res = await dupApi('POST', 'mapping/addMappings.php', { settings: [entry] })
       if(!res.ok) return { ok:false, error: (res.data && res.data.error) || `HTTP ${res.status}` }
       if(res.data && (res.data.error || res.data.success === false)) return { ok:false, error: res.data.error || res.data.message || JSON.stringify(res.data).slice(0,120) }
+      // added_count 0 = Mapping existierte schon → genauso ok (idempotent)
       return { ok:true }
     } catch(e){ return { ok:false, error: e.message || 'Netzwerkfehler' } }
   }
