@@ -776,6 +776,12 @@
     border:2px solid rgba(255,255,255,.3);border-top-color:#fff;
     border-radius:999px;animation:ts-spin .8s linear infinite;
   }
+  /* Ghost-Buttons haben hellen Hintergrund — weißer Spinner wäre unsichtbar (weiß auf weiß) */
+  #dashboard-view .btn-ghost.ts-btn-loading::after{
+    border-color:rgba(84,71,206,.25);border-top-color:var(--accent,#5447ce);
+  }
+  /* SVG-Icons im Button während des Ladens mit ausblenden (stroke folgt nicht color:transparent zuverlässig) */
+  #dashboard-view .ts-btn-loading svg{visibility:hidden}
   @keyframes ts-spin{to{transform:rotate(360deg)}}
 
   /* Activity Timeline (Account Detail) */
@@ -5880,6 +5886,7 @@
     }
     let count = 0
     const linkedNames = []
+    const unmatched = []  // Diagnose: External IDs ohne Duplikum-Treffer (für den Banner)
     for(const a of (accounts || [])){
       if(!a.externalId) continue
       if(linkedProphosIds.has(String(a.id))) continue  // Prophos-Account schon verlinkt
@@ -5893,7 +5900,7 @@
         const cands = Object.keys(byLogin).filter(k => k.endsWith(extKey))
         if(cands.length === 1) match = byLogin[cands[0]]
       }
-      if(!match) continue
+      if(!match){ unmatched.push(`${a.externalId} („${a.name}")`); continue }
       links[match.account_id] = a.id            // Format: dupId → prophosId
       linkedProphosIds.add(String(a.id))
       delete byLogin[norm(match.login)]         // Dup-Account nicht doppelt vergeben
@@ -5910,7 +5917,7 @@
       // der Preflight-Check beim Trade-Start fängt fehlende Mappings sowieso nochmal ab.
       try { dupAutoPushSymbolMappings(linkedNames) } catch(_){}
     }
-    return { connected:true, newLinks:count, linkedNames }
+    return { connected:true, newLinks:count, linkedNames, unmatched }
   }
   window.dupAutoLink = dupAutoLink  // für DevTools/Debug
 
@@ -9608,10 +9615,14 @@
       if(res.newLinks > 0){
         const names = res.linkedNames.slice(0,6).join(', ') + (res.linkedNames.length > 6 ? ` +${res.linkedNames.length-6} weitere` : '')
         showSyncBanner(`✓ ${res.newLinks} Account${res.newLinks===1?'':'s'} automatisch verknüpft: ${names}`, 'ok')
+      } else if((res.unmatched || []).length){
+        // Diagnose statt Rätselraten: WELCHE External IDs haben keinen Duplikum-Login gefunden?
+        const list = res.unmatched.slice(0,4).join(' · ') + (res.unmatched.length > 4 ? ` · +${res.unmatched.length-4} weitere` : '')
+        showSyncBanner(`Keine neuen Verknüpfungen. Ohne Duplikum-Treffer: ${list}`, 'muted')
       } else {
-        showSyncBanner('Keine neuen Verknüpfungen — alle passenden Accounts sind schon verknüpft (oder keine External ID passt zu einem Duplikum-Login).', 'muted')
+        showSyncBanner('Keine neuen Verknüpfungen — alle Accounts mit External ID sind schon verknüpft.', 'muted')
       }
-      hideSyncBannerSoon(7000)
+      hideSyncBannerSoon(10000)
     } finally {
       if(btn){ btn.disabled = false; btn.classList.remove('ts-btn-loading') }
     }
