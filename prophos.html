@@ -11906,16 +11906,25 @@
     tpRecompute()
   }
 
+  // Master-Risiko = Max Drawdown des gewählten Masters. Finns Standard-Setup: er riskiert
+  // auf dem Master IMMER den vollen Max Drawdown (holt über den Drawdown das Geld raus) —
+  // deshalb wird das Feld bei jedem „Übernehmen" und bei Master-Wahl gesetzt, nicht nur wenn leer.
+  function tpFillMasterRiskFromDD(){
+    const masterId = document.getElementById('tp-master')?.value
+    const master = accounts.find(a => String(a.id) === String(masterId))
+    const input = document.getElementById('tp-master-risk')
+    if(!input || !master?.maxDrawdown) return false
+    input.value = master.maxDrawdown
+    return true
+  }
+  document.getElementById('tp-master')?.addEventListener('change', () => {
+    if(tpFillMasterRiskFromDD()) tpRecompute()
+  })
+
   // Auto-Vorschlag übernehmen (Acquisition-Cost, proportional)
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
     tpAutoSelectLiveSlaveIfEmpty()
-    const masterId = document.getElementById('tp-master').value
-    const master = accounts.find(a => String(a.id) === String(masterId))
-    const masterRiskInput = document.getElementById('tp-master-risk')
-    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer —
-    // sonst hat der Ratio-Vorschlag keine sinnvolle Basis
-    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
-      masterRiskInput.value = master.maxDrawdown
+    if(tpFillMasterRiskFromDD()){
       tpRecompute() // neu berechnen, damit der Vorschlag zur jetzt gesetzten Risk-Basis passt
     }
     const suggestEl = document.getElementById('tp-slave-suggest')
@@ -11928,17 +11937,12 @@
   // Gesamtkosten übernehmen (voller Reingesteckt-Betrag, unskaliert)
   document.getElementById('tp-gesamtkosten-apply')?.addEventListener('click', () => {
     tpAutoSelectLiveSlaveIfEmpty()
-    const masterId = document.getElementById('tp-master').value
-    const master = accounts.find(a => String(a.id) === String(masterId))
     const gkEl = document.getElementById('tp-gesamtkosten-suggest')
     const gkEur = parseFloat(gkEl?.dataset.suggestedGkEur || '')
     if(!isFinite(gkEur) || gkEur <= 0) return
 
-    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer
-    const masterRiskInput = document.getElementById('tp-master-risk')
-    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
-      masterRiskInput.value = master.maxDrawdown
-    }
+    // Master-Risiko immer auf den Max Drawdown des Masters setzen
+    tpFillMasterRiskFromDD()
 
     // Slave-Risiko auf den vollen Gesamtkosten-Betrag setzen (in Slave-Währung konvertiert)
     const slaveId = document.getElementById('tp-slave').value
@@ -11956,17 +11960,12 @@
   // eingefrorenen Vorgänger-Wert statt dem (sich verändernden) Wert des aktuellen Accounts
   document.getElementById('tp-vorgaenger-apply')?.addEventListener('click', () => {
     tpAutoSelectLiveSlaveIfEmpty()
-    const masterId = document.getElementById('tp-master').value
-    const master = accounts.find(a => String(a.id) === String(masterId))
     const vgEl = document.getElementById('tp-vorgaenger-suggest')
     const vgEur = parseFloat(vgEl?.dataset.suggestedVgEur || '')
     if(!isFinite(vgEur) || vgEur <= 0) return
 
-    // Master-Risiko automatisch mit Max-Drawdown befüllen, wenn noch leer
-    const masterRiskInput = document.getElementById('tp-master-risk')
-    if(master?.maxDrawdown && (!masterRiskInput.value || parseFloat(masterRiskInput.value) <= 0)){
-      masterRiskInput.value = master.maxDrawdown
-    }
+    // Master-Risiko immer auf den Max Drawdown des Masters setzen
+    tpFillMasterRiskFromDD()
 
     // Slave-Risiko auf den vollen Vorgänger-Betrag setzen (in Slave-Währung konvertiert)
     const slaveId = document.getElementById('tp-slave').value
