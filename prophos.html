@@ -9966,7 +9966,13 @@
   function mergeCustomFirmsIntoPresets(){
     for(const k of Object.keys(FIRM_PRESETS)){ if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k] }
     for(const f of getCustomFirms()){
-      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency:f.currency||'$', dupSymbol:(f.dupSymbol||'').trim()||null, _custom:true, tbd:false }
+      // Fusion Markets ist Finns einziger Live-Broker (echtes Geld) und IMMER EUR-denominiert —
+      // hardcoded wie beim Reverse-Trading-Fix, weil ein Custom-Firm-Eintrag mit versehentlich
+      // stehengelassenem $-Default (Modal-Default beim Anlegen) sonst ALLE Vorschläge im
+      // Trade-Plan-Modal (Gesamtkosten/Fixkosten/Auto-Vorschlag) fälschlich in USD umrechnet,
+      // obwohl der Broker real in EUR abrechnet (13.07.2026, Finn live beobachtet).
+      const currency = /fusion/i.test(f.name || '') ? '€' : (f.currency || '$')
+      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency, dupSymbol:(f.dupSymbol||'').trim()||null, _custom:true, tbd:false }
     }
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
@@ -10235,7 +10241,10 @@
       document.getElementById('cf-symbol').value  = f.symbol||''
       document.getElementById('cf-unit').value     = f.unit||'Lots'
       document.getElementById('cf-ppl').value      = f.ppl!=null?f.ppl:''
-      document.getElementById('cf-currency').value = f.currency||'$'
+      // Fusion Markets ist immer EUR (Finns Live-Broker, echtes Geld) — Anzeige hier korrigieren,
+      // auch wenn im Storage versehentlich noch $ steht (mergeCustomFirmsIntoPresets erzwingt das
+      // ohnehin schon für die Berechnung; hier nur damit die Anzeige nicht widerspricht)
+      document.getElementById('cf-currency').value = /fusion/i.test(f.name||'') ? '€' : (f.currency||'$')
       document.getElementById('cf-dupsymbol').value = f.dupSymbol||''
       document.getElementById('cf-template').value = ''
     } else {
