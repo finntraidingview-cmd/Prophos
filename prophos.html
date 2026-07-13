@@ -11346,6 +11346,20 @@
       })
       // Duplikat-Labels + Balance-Lookup vorbereiten
       const labels = tpBuildAccountLabels()
+      // Accounts markieren, die schon in einem aktiven Plan stecken (geplant/läuft) —
+      // verhindert Verwechslungen, wenn mehrere Accounts derselben Firma zur Wahl stehen.
+      // Rollenbezogen: im Master-Dropdown zählt die Master-Rolle, im Slave-Dropdown die Slave-Rolle.
+      const busy = {}  // accountId -> '🔴 läuft' | '⏳ geplant'
+      try {
+        for(const p of (tradePlans || [])){
+          if(p.status !== 'open' && p.status !== 'planned') continue
+          const accId = role === 'master' ? p.masterAccountId : p.slaveAccountId
+          if(!accId) continue
+          const k = String(accId)
+          // "läuft" gewinnt über "geplant", wenn ein Account in mehreren Plänen steckt
+          if(busy[k] !== '🔴 läuft') busy[k] = p.status === 'open' ? '🔴 läuft' : '⏳ geplant'
+        }
+      } catch(_){}
       // Nach Firma gruppieren
       const byFirm = {}
       for(const a of filtered){
@@ -11376,7 +11390,8 @@
         // External ID suffix: Tradovate ID > MT5 login
         const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
-        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}</option>`
+        const busyPart = busy[String(a.id)] ? `  ·  ${busy[String(a.id)]}` : ''
+        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}</option>`
       }
 
       // HTML zusammenbauen — sortiert
