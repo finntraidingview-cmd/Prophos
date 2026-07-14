@@ -78,6 +78,21 @@
   .at-toast::before{content:'';width:9px;height:9px;border-radius:50%;background:#fff;flex-shrink:0;animation:atDotPulse 1.5s ease-in-out infinite}
   .at-toast.start{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
   .at-toast.end{background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)}
+
+  /* ── Live-Order-Watch: Notification oben rechts, wenn eine neue Order auf dem
+       Live-Account (MetaApi) auftaucht — Finn muss dafür nicht mehr manuell zum
+       Slave-Account wechseln (14.07.2026) ── */
+  @keyframes liveOrderSlideDown{from{opacity:0;transform:translateY(-14px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+  #live-order-toast-stack{position:fixed;top:76px;right:20px;z-index:9999;display:flex;flex-direction:column;align-items:flex-end;pointer-events:none}
+  .live-order-toast{
+    padding:12px 16px 12px 14px;border-radius:12px;font-size:13px;font-weight:600;
+    color:#fff;line-height:1.4;max-width:320px;margin-bottom:8px;
+    display:flex;align-items:center;gap:9px;
+    background:linear-gradient(135deg,#16C8C6 0%,#0e9795 100%);
+    box-shadow:0 10px 30px rgba(14,151,149,.35);
+    animation:liveOrderSlideDown .3s cubic-bezier(.2,.9,.3,1.25);
+  }
+  .live-order-toast::before{content:'⚡';flex-shrink:0;font-size:15px}
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
     background:var(--surface);border:1px solid var(--border);border-radius:16px;
@@ -6961,6 +6976,67 @@
     return s.includes('execut') || s === 'open' || s === 'active'
   }
 
+  /* ========================================================================
+   * LIVE-ORDER-WATCH — kleine Notification oben rechts, sobald eine neue Order
+   * auf dem Live-Account (Fusion Markets, via MetaApi) auftaucht. Finn musste
+   * bisher nach jedem Master-Start manuell zum Slave wechseln, um zu prüfen ob
+   * kopiert wurde (14.07.2026). Läuft unabhängig vom Duplikum-Auto-Track-Engine
+   * (atCheck) — bewusst getrennt, um die dort bewusst 1:1 gehaltene Logik nicht
+   * anzufassen. Reines Polling (kein MetaApi-Websocket im Backend) → ein paar
+   * Sekunden Verzögerung sind realistisch, kein echtes Echtzeit-Push.
+   * ====================================================================== */
+  const liveOrderWatch = { timer: null, intervalMs: 2000, inFlight: false, seen: null }
+
+  async function liveOrderWatchCheck(){
+    if(liveOrderWatch.inFlight) return
+    const liveAcc = (accounts || []).find(a => a.type === 'live' && a.ma && a.ma.token && a.ma.accountId)
+    if(!liveAcc){ liveOrderWatch.seen = null; return }
+    liveOrderWatch.inFlight = true
+    try {
+      const r = await fetch(`${TS_BACKEND}/ma/positions`, {
+        method: 'GET',
+        headers: { 'ma-token': liveAcc.ma.token, 'ma-account': liveAcc.ma.accountId }
+      })
+      if(!r.ok) return
+      const data = await r.json().catch(() => [])
+      const list = Array.isArray(data) ? data : (data.positions || [])
+      const fp = p => String(p.id != null ? p.id : `${p.symbol}-${p.type}-${p.volume}-${p.openPrice}`)
+      const currentIds = new Set(list.map(fp))
+      // Erster Lauf nach Login/Reload: nur Baseline setzen, sonst würden alle schon
+      // offenen Positionen fälschlich als "neu" gemeldet.
+      if(liveOrderWatch.seen === null){
+        liveOrderWatch.seen = currentIds
+        return
+      }
+      const newOnes = list.filter(p => !liveOrderWatch.seen.has(fp(p)))
+      liveOrderWatch.seen = currentIds
+      if(newOnes.length === 1){
+        const p = newOnes[0]
+        const side = /buy/i.test(String(p.type)) ? 'Long' : 'Short'
+        liveOrderToast(`Neue Order: ${p.symbol || '?'} · ${side} · ${p.volume || p.size || '?'} Lots`)
+      } else if(newOnes.length > 1){
+        liveOrderToast(`${newOnes.length} neue Orders auf ${liveAcc.name}`)
+      }
+    } catch(_){}
+    finally { liveOrderWatch.inFlight = false }
+  }
+
+  function liveOrderToast(msg){
+    const stack = document.getElementById('live-order-toast-stack')
+    if(!stack) return
+    const el = document.createElement('div')
+    el.className = 'live-order-toast'
+    el.textContent = msg
+    stack.appendChild(el)
+    setTimeout(() => el.remove(), 6000)
+  }
+
+  function liveOrderWatchStart(){
+    if(liveOrderWatch.timer) return
+    liveOrderWatchCheck()
+    liveOrderWatch.timer = setInterval(liveOrderWatchCheck, liveOrderWatch.intervalMs)
+  }
+
   // Toast
   function atToast(msg, type){
     document.querySelectorAll('.at-toast').forEach(el => el.remove())
@@ -7611,6 +7687,7 @@
       if(typeof renderPairs === 'function') renderPairs()
       // Settings-Panel aktualisieren wenn gerade offen
       if(document.querySelector('[data-view="settings"].active') && typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
+      if(typeof liveOrderWatchStart === 'function') liveOrderWatchStart()
     }catch(e){
       console.error('loadAccountsFromSupabase failed:', e)
     }
@@ -15941,6 +16018,8 @@
     font-variant-numeric: tabular-nums;
   }
 </style>
+
+<div id="live-order-toast-stack"></div>
 
 <button id="coinflip-fab" title="Münze werfen — Kopf oder Zahl?">🪙</button>
 
