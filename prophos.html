@@ -11180,6 +11180,36 @@
       _pfSet('link', 'ok', `Master <span class="mono">${escapeHtml(String(dupMasterId))}</span> · Slave <span class="mono">${escapeHtml(String(dupSlaveId))}</span>`)
     }
 
+    // ── 1b. Duplikum-Accounts aktiv & verbunden ──
+    // `status` = On/Off-Schalter im Cockpit (0/1) · `state` = Verbindungszustand
+    // (CONNECTED/DISCONNECTED/…). Finns Fall (14.07.2026): Account war korrekt verknüpft,
+    // stand in Duplikum aber auf DISCONNECTED (falsche Zugangsdaten) — der Trade wäre
+    // nie auf den Slave kopiert worden, ohne dass Prophos etwas gemerkt hätte.
+    _pfAddRow('conn', 'Duplikum-Accounts aktiv & verbunden')
+    await _pfSleep(450)
+    if(hardFail){
+      _pfSet('conn', 'warn', 'Übersprungen — Verknüpfung fehlt.')
+    } else {
+      try { await dupLoadAccounts() } catch(_){}  // frischer Stand — state ändert sich laufend
+      const dupAccsConn = (typeof dupState !== 'undefined' && dupState.accounts) || []
+      const connProblems = []
+      for(const [dupId, label] of [[dupMasterId, `Master „${plan.masterName||'—'}"`], [dupSlaveId, `Slave „${plan.slaveName||'—'}"`]]){
+        const d = dupAccsConn.find(x => String(x.account_id) === String(dupId))
+        if(!d){ connProblems.push(`${label}: in Duplikum nicht mehr gefunden`); continue }
+        const parts = []
+        if(Number(d.status) !== 1) parts.push('Schalter steht auf OFF')
+        const st = String(d.state || '').toUpperCase()
+        if(st && st !== 'CONNECTED') parts.push(st === 'DISCONNECTED' ? 'GETRENNT — Zugangsdaten in Duplikum prüfen' : `Status ${st}`)
+        if(parts.length) connProblems.push(`${label}: ${parts.join(' · ')}`)
+      }
+      if(!connProblems.length){
+        _pfSet('conn', 'ok', 'Master & Slave sind ON und verbunden.')
+      } else {
+        _pfSet('conn', 'err', escapeHtml(connProblems.join(' — ')) + '<br><span style="font-size:11px;color:var(--sub)">Im Duplikum-Cockpit (trade-copier.com) beheben, dann den Trade neu starten.</span>')
+        hardFail = true
+      }
+    }
+
     // ── 2. Multiplier pushen ──
     _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
     await _pfSleep(450)
@@ -11441,6 +11471,20 @@
           if(busy[k] !== '🔴 läuft') busy[k] = p.status === 'open' ? '🔴 läuft' : '⏳ geplant'
         }
       } catch(_){}
+      // Duplikum-Zustand pro verknüpftem Account: OFF-Schalter (status≠1) oder getrennt
+      // (state≠CONNECTED) → Warnhinweis direkt im Dropdown, damit Finn nicht erst beim
+      // Preflight-Check merkt, dass der Account in Duplikum tot ist.
+      const dupWarn = {}  // prophosAccountId -> '⛔ OFF' | '🔌 getrennt'
+      try {
+        const dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+        const dAccs = (typeof dupState !== 'undefined' && dupState.accounts) || []
+        for(const [dupId, pid] of Object.entries(dl)){
+          const d = dAccs.find(x => String(x.account_id) === String(dupId))
+          if(!d) continue
+          if(Number(d.status) !== 1) dupWarn[String(pid)] = '⛔ OFF'
+          else if(String(d.state || '').toUpperCase() === 'DISCONNECTED') dupWarn[String(pid)] = '🔌 getrennt'
+        }
+      } catch(_){}
       // Nach Firma gruppieren
       const byFirm = {}
       for(const a of filtered){
@@ -11472,7 +11516,8 @@
         const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
         const busyPart = busy[String(a.id)] ? `  ·  ${busy[String(a.id)]}` : ''
-        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}</option>`
+        const warnPart = dupWarn[String(a.id)] ? `  ·  ${dupWarn[String(a.id)]}` : ''
+        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}</option>`
       }
 
       // HTML zusammenbauen — sortiert
