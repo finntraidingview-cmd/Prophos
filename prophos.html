@@ -2297,15 +2297,19 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
       </button>
-      <button class="sb-link" data-view="livetrades">
+      <!-- Live Trades / Risk / AI Advisor / Analytics / Journal: aus der Navigation
+           ausgeblendet (Finn nutzt sie nie, 14.07.2026) — Views + Code bleiben intakt,
+           per URL-Hash (#livetrades etc.) weiter erreichbar. display:none statt löschen,
+           damit Badge-Referenzen (sb-badge-livetrades) nicht brechen. -->
+      <button class="sb-link" data-view="livetrades" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
         Live Trades <span class="sb-badge" id="sb-badge-livetrades" hidden>0</span>
       </button>
-      <button class="sb-link" data-view="risk">
+      <button class="sb-link" data-view="risk" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         Risk
       </button>
-      <button class="sb-link" data-view="advisor">
+      <button class="sb-link" data-view="advisor" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.5 2.5-1.5 3.5L13 11v3"/><circle cx="12" cy="18" r="1"/><path d="M9 22h6"/></svg>
         AI Advisor
       </button>
@@ -2313,11 +2317,11 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
         Finanzen
       </button>
-      <button class="sb-link" data-view="analytics">
+      <button class="sb-link" data-view="analytics" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 21H4.6c-.6 0-1.1-.2-1.4-.6s-.6-.9-.6-1.4V3"/><path d="M7 14l4-4 4 4 6-6"/></svg>
         Analytics
       </button>
-      <button class="sb-link" data-view="journal">
+      <button class="sb-link" data-view="journal" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         Journal
       </button>
