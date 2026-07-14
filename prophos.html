@@ -3345,6 +3345,11 @@
               <label>Kosten</label>
               <input type="number" class="input mono" id="suc-cost" step="1" value="0" placeholder="0">
             </div>
+            <div class="field">
+              <label>Max Drawdown ($)</label>
+              <input type="number" class="input mono" id="suc-maxdd" step="1" placeholder="4500">
+              <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
+            </div>
             <div class="field" style="grid-column:span 2">
               <label>External ID (optional)</label>
               <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
@@ -7341,10 +7346,11 @@
       </div>
     `
 
-    // Pre-fill: gleiche Firma, Vorschlag-Name, gleiche Balance
+    // Pre-fill: gleiche Firma, Vorschlag-Name, gleiche Balance, gleicher Max Drawdown
     document.getElementById('suc-firm').value = acc.firm || ''
     document.getElementById('suc-balance').value = acc.initialBalance || ''
     document.getElementById('suc-cost').value = '0'
+    document.getElementById('suc-maxdd').value = acc.maxDrawdown != null ? acc.maxDrawdown : ''
     document.getElementById('suc-extid').value = ''
 
     // Name-Vorschlag basierend auf aktuellem Typ
@@ -7411,11 +7417,21 @@
     const type = document.getElementById('suc-type').value
     const balance = parseFloat(document.getElementById('suc-balance').value) || 0
     const cost = parseFloat(document.getElementById('suc-cost').value) || 0
+    const maxDrawdownRaw = parseFloat(document.getElementById('suc-maxdd').value)
+    const maxDrawdown = !isNaN(maxDrawdownRaw) && maxDrawdownRaw > 0 ? maxDrawdownRaw : null
     const externalId = document.getElementById('suc-extid').value.trim() || null
     const msgEl = document.getElementById('successorMsg')
 
     if(!name || !firm){
       msgEl.textContent = 'Name und Firma sind nötig.'
+      msgEl.className = 'modal-msg err'
+      return
+    }
+    // Max Drawdown ist Pflicht — ohne ihn läuft der Auto-Vorschlag im Trade-Plan-Modal ins Leere
+    // (Finn hat wiederholt Nachfolger ohne Drawdown angelegt und musste ihn danach manuell
+    // nachtragen, 13.07.2026)
+    if(!maxDrawdown){
+      msgEl.textContent = 'Max Drawdown ist nötig — ohne den funktioniert der Auto-Hedge-Vorschlag nicht.'
       msgEl.className = 'modal-msg err'
       return
     }
@@ -7427,6 +7443,7 @@
         type,
         initialBalance: balance,
         purchaseCost: cost,
+        maxDrawdown,
         externalId
       }
       const row = accountToRow(newAcc)
