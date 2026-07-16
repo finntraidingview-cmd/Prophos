@@ -1138,6 +1138,9 @@
   #dashboard-view .tc2-prio-high{background:rgba(240,68,56,.1);color:#F04438}
   #dashboard-view .tc2-prio-medium{background:rgba(247,144,9,.1);color:#B6690A}
   #dashboard-view .tc2-prio-low{background:rgba(22,200,198,.1);color:#0E9795}
+  #dashboard-view .tc2-chip-ready{background:rgba(16,185,129,.12);color:#0f9c7a}
+  #dashboard-view .tc2-chip-issue{background:rgba(240,68,56,.12);color:#F04438;animation:tc2PulseIssue 1.6s ease-in-out infinite}
+  @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
@@ -11094,7 +11097,11 @@
     if(isPlanned){
       const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
       const prioLbl = { high:'Hoch', medium:'Mittel', low:'Niedrig' }[p.priority] || 'Mittel'
-      metric = `<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
+      const pf = _pfCheckStatus[String(p.id)]
+      const pfBadge = !pf ? '' : pf.state === 'ready'
+        ? `<span class="tc2-chip tc2-chip-ready" title="Preflight-Check bestanden">✓ Ready to start</span>`
+        : `<span class="tc2-chip tc2-chip-issue" title="Preflight-Check hatte ein Problem">⚠ Prüfung fehlgeschlagen</span>`
+      metric = `${pfBadge}<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
@@ -11509,6 +11516,10 @@
   // Account bearbeitet hat (External ID nachtragen). Wird vom Account-Save konsumiert,
   // von closeAccountModal (Abbruch) verworfen.
   let _pfResumePlanId = null
+  // Letztes Check-Ergebnis pro Plan (nur In-Memory, kein Supabase-Feld) — steuert den
+  // "Ready to start" / "Prüfung fehlgeschlagen"-Badge in der Geplant-Liste (Finns Wunsch
+  // 16.07.2026: nach dem Check soll die Liste selbst zeigen, ob der Trade startklar ist).
+  const _pfCheckStatus = {}
 
   function _pfAddRow(id, label){
     const rows = document.getElementById('pf-rows')
@@ -11699,7 +11710,10 @@
     }
 
     await _pfSleep(350)
-    _pfFinish(!hardFail && !softWait, hardFail
+    const allOk = !hardFail && !softWait
+    _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
+    try { renderTradePlans() } catch(_){}
+    _pfFinish(allOk, hardFail
       ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
       : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — der Trade bleibt auf Geplant.' : null)
   }
