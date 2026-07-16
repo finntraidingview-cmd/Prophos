@@ -3116,6 +3116,9 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
+              <div id="tp-master-daily-dd-info" style="display:none;margin-top:6px;font-size:11.5px;color:var(--sub)">
+                📅 Max Daily Drawdown dieser Firma: <span id="tp-master-daily-dd-value" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span> — reiner Hinweis, wird nicht geprüft.
+              </div>
             </div>
             <div class="field">
               <label>Anzahl Kontrakte</label>
@@ -4345,10 +4348,15 @@
           <label>Kaufpreis (€, optional)</label>
           <input class="input mono" id="ac-purchase-cost" type="number" step="0.01" placeholder="z.B. 450" autocomplete="off">
         </div>
-        <div class="field" style="grid-column:1/-1">
+        <div class="field">
           <label>Max Drawdown ($, optional)</label>
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
+        </div>
+        <div class="field">
+          <label>Max Daily Drawdown ($, optional)</label>
+          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000 (separates Daily-Loss-Limit)" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Nur falls die Firma ein EIGENES Tageslimit hat (zusätzlich zum Max Drawdown) — steht als Info im Trade-Plan-Modal.</div>
         </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
           <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
@@ -4507,6 +4515,10 @@
         <div class="field">
           <label>Max Drawdown ($)</label>
           <input class="input mono" id="bulk-maxdd" type="number" step="100" placeholder="optional" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Daily Drawdown ($)</label>
+          <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="optional, separates Tageslimit" autocomplete="off">
         </div>
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
@@ -7535,6 +7547,7 @@
       initialBalance: row.balance != null ? Number(row.balance) : 0,
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
+      maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -7569,7 +7582,8 @@
       external_id: a.externalId || null,
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
-      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null
+      max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
+      max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -7627,6 +7641,7 @@
     bal:      document.getElementById('ac-balance'),
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
+    maxDailyDd: document.getElementById('ac-max-daily-drawdown'),
     extId:    document.getElementById('ac-ext-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
@@ -8204,6 +8219,7 @@
       accEls.bal.value  = editAccount.initialBalance != null ? editAccount.initialBalance : ''
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
+      if(accEls.maxDailyDd) accEls.maxDailyDd.value = editAccount.maxDailyDrawdown != null ? editAccount.maxDailyDrawdown : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
@@ -8221,6 +8237,7 @@
       accEls.bal.value  = ''
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
+      if(accEls.maxDailyDd) accEls.maxDailyDd.value = ''
       if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
@@ -8280,6 +8297,7 @@
     const initialBalance = parseFloat(accEls.bal.value) || 0
     const purchaseCost = parseFloat(accEls.purchase.value)
     const maxDrawdown = parseFloat(accEls.maxDd.value)
+    const maxDailyDrawdown = parseFloat(accEls.maxDailyDd?.value)
     const isEdit = !!_editingAccountId
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
@@ -8301,6 +8319,7 @@
       externalId: externalIdVal || null,
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
+      maxDailyDrawdown: !isNaN(maxDailyDrawdown) && maxDailyDrawdown > 0 ? maxDailyDrawdown : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -8350,6 +8369,7 @@
           balance: acc.initialBalance,
           purchase_cost: acc.purchaseCost,
           max_drawdown: acc.maxDrawdown,
+          max_daily_drawdown: acc.maxDailyDrawdown,
           external_id: acc.externalId,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
@@ -8557,6 +8577,7 @@
       balance:   document.getElementById('bulk-balance'),
       cost:      document.getElementById('bulk-cost'),
       maxdd:     document.getElementById('bulk-maxdd'),
+      maxDailyDd: document.getElementById('bulk-max-daily-dd'),
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
@@ -8664,6 +8685,7 @@
       bEl.size.value     = t.account_size != null ? t.account_size : ''
       bEl.cost.value     = t.purchase_cost != null ? t.purchase_cost : ''
       bEl.maxdd.value    = t.max_drawdown != null ? t.max_drawdown : ''
+      if(bEl.maxDailyDd) bEl.maxDailyDd.value = t.max_daily_drawdown != null ? t.max_daily_drawdown : ''
       bEl.template.value = t.name_template || ''
       updatePreview()
     }
@@ -8682,6 +8704,7 @@
         account_size:  parseFloat(bEl.size.value)  || null,
         purchase_cost: parseFloat(bEl.cost.value)   || null,
         max_drawdown:  parseFloat(bEl.maxdd.value)  || null,
+        max_daily_drawdown: parseFloat(bEl.maxDailyDd?.value) || null,
         name_template: bEl.template.value.trim() || null,
       }
 
@@ -8732,6 +8755,7 @@
       bEl.balance.value  = ''
       bEl.cost.value     = ''
       bEl.maxdd.value    = ''
+      if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
@@ -8765,6 +8789,7 @@
       const balRaw   = parseFloat(bEl.balance.value)
       const costRaw  = parseFloat(bEl.cost.value)
       const maxddRaw = parseFloat(bEl.maxdd.value)
+      const maxDailyDdRaw = parseFloat(bEl.maxDailyDd?.value)
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
       const extIds   = getExtIds()
@@ -8778,6 +8803,7 @@
       const initialBalance = !isNaN(balRaw)   && balRaw   > 0 ? balRaw   : (accountSize || 0)
       const purchaseCost   = !isNaN(costRaw)  && costRaw  > 0 ? costRaw  : null
       const maxDrawdown    = !isNaN(maxddRaw) && maxddRaw > 0 ? maxddRaw : null
+      const maxDailyDrawdown = !isNaN(maxDailyDdRaw) && maxDailyDdRaw > 0 ? maxDailyDdRaw : null
 
       bEl.saveBtn.disabled = true
       bEl.saveBtn.classList.add('ts-btn-loading')
@@ -8800,6 +8826,7 @@
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
+          max_daily_drawdown: maxDailyDrawdown,
           external_id:    extId,
         }
 
@@ -11661,6 +11688,7 @@
       if(p){
         masterSel.value = p.masterAccountId || ''
         slaveSel.value  = p.slaveAccountId  || ''
+        if(typeof tpUpdateMasterDailyDdInfo === 'function') tpUpdateMasterDailyDdInfo()
         document.getElementById('tp-master-risk').value = p.masterRisk ?? ''
         document.getElementById('tp-master-qty').value  = p.masterContracts ?? 1
         document.getElementById('tp-slave-risk').value  = p.slaveRisk ?? ''
@@ -11673,6 +11701,7 @@
         })
       }
     }else{
+      if(typeof tpUpdateMasterDailyDdInfo === 'function') tpUpdateMasterDailyDdInfo()
       document.getElementById('tp-master-risk').value = ''
       document.getElementById('tp-master-qty').value  = 1
       document.getElementById('tp-slave-risk').value  = ''
@@ -12122,7 +12151,25 @@
   }
   document.getElementById('tp-master')?.addEventListener('change', () => {
     if(tpFillMasterRiskFromDD()) tpRecompute()
+    tpUpdateMasterDailyDdInfo()
   })
+
+  // Reiner Info-Hinweis (kein Check, kein Gate) — zeigt das separate Tageslimit der
+  // Master-Firma an, falls in den Account-Settings hinterlegt. Finn wollte explizit nur
+  // eine Anzeige, keine Blockade (15.07.2026).
+  function tpUpdateMasterDailyDdInfo(){
+    const masterId = document.getElementById('tp-master')?.value
+    const master = accounts.find(a => String(a.id) === String(masterId))
+    const box = document.getElementById('tp-master-daily-dd-info')
+    const val = document.getElementById('tp-master-daily-dd-value')
+    if(!box || !val) return
+    if(master?.maxDailyDrawdown){
+      val.textContent = '$' + Number(master.maxDailyDrawdown).toLocaleString('de-DE')
+      box.style.display = 'block'
+    } else {
+      box.style.display = 'none'
+    }
+  }
 
   // Auto-Vorschlag übernehmen (Acquisition-Cost, proportional)
   document.getElementById('tp-slave-suggest-apply')?.addEventListener('click', () => {
