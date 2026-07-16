@@ -1885,6 +1885,13 @@
   #dashboard-view .mg-acct-stat-val.pos{color:var(--good)}
   #dashboard-view .mg-acct-stat-val.neg{color:var(--danger)}
   #dashboard-view .mg-acct-stat.primary .mg-acct-stat-val{font-size:15px;font-weight:700}
+  #dashboard-view #mg-cycle-netto.pos,#dashboard-view #mg-cumulative-netto.pos{color:var(--good)}
+  #dashboard-view #mg-cycle-netto.neg,#dashboard-view #mg-cumulative-netto.neg{color:var(--danger)}
+  #dashboard-view .mg-history-item{display:grid;grid-template-columns:80px 1fr 80px 60px 90px 26px;gap:10px;padding:7px 2px;font-size:12px;border-bottom:1px solid var(--line);align-items:center}
+  #dashboard-view .mg-history-item:last-child{border-bottom:none}
+  #dashboard-view .mg-history-item .mg-h-date{color:var(--sub);font-family:var(--mono);font-size:11px}
+  #dashboard-view .mg-history-item .mg-h-note{color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .mg-history-item .mg-h-amt{font-family:var(--mono);text-align:right;font-weight:600}
 
   #dashboard-view .mg-acct-body{
     display:none;padding:0 18px 18px;border-top:1px solid var(--border-soft);
@@ -2327,7 +2334,7 @@
       </button>
       <button class="sb-link" data-view="managed">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Manage <span class="sb-badge" id="sb-badge-managed" hidden>0</span>
+        Topstep Manager <span class="sb-badge" id="sb-badge-managed" hidden>0</span>
       </button>
 
       <div class="sb-divider"></div>
@@ -4010,9 +4017,31 @@
     <section class="view" data-view="managed">
       <div class="view-head">
         <div>
-          <h1 class="view-title">Manage</h1>
+          <h1 class="view-title">Topstep Manager</h1>
           <p class="view-sub">Topstep-Accounts für andere · Kosten, Trades, Payouts, Real-Netto</p>
         </div>
+      </div>
+
+      <!-- Zyklus / Abrechnung -->
+      <div class="panel" id="mg-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,rgba(84,71,206,.04)) 100%)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:16px 18px">
+          <div style="display:flex;gap:28px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:4px">Aktueller Zyklus</div>
+              <div class="tnum" id="mg-cycle-netto" style="font-size:20px;font-weight:800">–</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:4px">Kumuliert gesamt</div>
+              <div class="tnum" id="mg-cumulative-netto" style="font-size:14px;font-weight:700">–</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="mg-settle-btn">Abrechnung machen</button>
+        </div>
+        <div style="padding:0 18px 12px;font-size:11px;color:var(--sub)" id="mg-settle-meta"></div>
+        <button type="button" id="mg-history-toggle" style="display:none;background:transparent;border:0;color:var(--sub);font-size:11px;cursor:pointer;padding:0 18px 14px;font-weight:600;align-items:center;gap:6px">
+          <span id="mg-history-chev" style="transition:transform .15s;display:inline-block">›</span> <span id="mg-history-label">Historie</span>
+        </button>
+        <div id="mg-history-list" style="display:none;padding:0 18px 16px"></div>
       </div>
 
       <!-- Stats Bar -->
@@ -4074,6 +4103,53 @@
       <!-- Toast for Manage -->
       <div class="mg-toast" id="mg-toast"></div>
     </section>
+
+    <!-- TOPSTEP MANAGER: ABRECHNUNG -->
+    <div class="modal-bg" id="mgSettleModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Abrechnung machen</h3>
+          <button class="modal-x" id="mgSettleClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Zyklus-Netto</span>
+            <span class="mono" id="mg-settle-cycle-netto" style="font-size:16px;font-weight:700">–</span>
+          </div>
+
+          <div class="field" style="margin-top:14px">
+            <label>Profit-Share (Du behältst %)</label>
+            <input type="number" class="input mono" id="mg-settle-pct" min="0" max="100" step="1" style="text-align:center;font-size:18px;font-weight:700" placeholder="40">
+          </div>
+
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:12px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span id="mg-settle-house-lbl" style="font-size:12.5px;color:var(--sub)">Du behältst (40%)</span>
+              <span class="mono" id="mg-settle-house-amt" style="font-weight:600">–</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span id="mg-settle-client-lbl" style="font-size:12.5px;color:var(--sub)">Client bekommt (60%)</span>
+              <span class="mono" id="mg-settle-client-amt" style="font-weight:600;color:var(--good,#12B76A)">–</span>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:12px">
+            <label>Notiz (optional)</label>
+            <input class="input" id="mg-settle-note" placeholder="z.B. Mai 2026, XFA #2" maxlength="120">
+          </div>
+
+          <div id="mg-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);color:#b45309"></div>
+
+          <div class="modal-msg" id="mgSettleMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="mgSettleCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="mgSettleSave">Abrechnen</button>
+        </div>
+      </div>
+    </div>
 
     <!-- SETTINGS -->
     <section class="view" data-view="settings">
@@ -15124,6 +15200,9 @@
   let mgOpenIds = new Set()
   let mgFilter = 'aktiv'
   let mgChart = null
+  let mgSettlements = []
+  let mgHistoryOpen = false
+  let mgDefaultPct = 40  // "Du behältst %" — wird nach jeder Abrechnung als neuer Default gemerkt
 
   // Helpers
   const $mg = (id) => document.getElementById(id)
@@ -15159,25 +15238,30 @@
     mgAccounts = []
     mgOpenIds = new Set()
     mgFilter = 'aktiv'
+    mgSettlements = []
+    mgHistoryOpen = false
     if(mgChart){ try { mgChart.destroy() } catch(_){} mgChart = null }
     const list = $mg('mg-list')
     if(list) list.innerHTML = ''
     mgRenderStats()
     mgRenderBadge()
+    mgRenderSettlement()
   }
 
   // Load from Supabase
   window.loadManagedFromSupabase = async function(){
     if(typeof currentUserId === 'undefined' || !currentUserId) return
     try{
-      const [{ data: accts, error: e1 }, { data: trades, error: e2 }, { data: payouts, error: e3 }] = await Promise.all([
+      const [{ data: accts, error: e1 }, { data: trades, error: e2 }, { data: payouts, error: e3 }, { data: setts, error: e4 }] = await Promise.all([
         supabase.from('managed_accounts').select('*').eq('user_id', currentUserId).order('created_at', { ascending: false }),
         supabase.from('managed_trades').select('*').eq('user_id', currentUserId).order('created_at', { ascending: true }),
-        supabase.from('managed_payouts').select('*').eq('user_id', currentUserId).order('created_at', { ascending: true })
+        supabase.from('managed_payouts').select('*').eq('user_id', currentUserId).order('created_at', { ascending: true }),
+        supabase.from('managed_settlements').select('*').eq('user_id', currentUserId).order('settled_at', { ascending: true })
       ])
       if(e1) throw e1
       if(e2) throw e2
       if(e3) throw e3
+      if(e4) throw e4
 
       const tradesByAcc = {}
       ;(trades || []).forEach(t => { (tradesByAcc[t.account_id] = tradesByAcc[t.account_id] || []).push(t) })
@@ -15189,6 +15273,14 @@
         trades: tradesByAcc[a.id] || [],
         payouts: payoutsByAcc[a.id] || []
       }))
+      mgSettlements = setts || []
+
+      // Default-Prozent aus dem letzten Settlement übernehmen, falls vorhanden
+      if(mgSettlements.length){
+        const lastPct = Number(mgSettlements[mgSettlements.length - 1].profit_share_pct)
+        if(!isNaN(lastPct)) mgDefaultPct = 100 - lastPct  // gespeichert wird "Client bekommt %", Feld hier ist "Du behältst %"
+      }
+
       mgRender()
     }catch(err){
       console.error('loadManagedFromSupabase failed:', err)
@@ -15206,6 +15298,81 @@
     return { topstep, live, realNetto, cost, payout,
       tradeCount: (a.trades || []).length,
       payoutCount: (a.payouts || []).length }
+  }
+
+  // ── Zyklus / Abrechnung ──
+  // Kumuliert = Summe Real-Netto über ALLE Accounts (pro Login, kein Client-Konzept —
+  // jede gemanagte Person hat ihren eigenen Prophos-Login, RLS trennt automatisch).
+  // Zyklus = Kumuliert seit der letzten Abrechnung (Baseline = Kumuliert-Stand zum
+  // Zeitpunkt der letzten Abrechnung, 0 falls noch nie abgerechnet).
+  function mgCalcCumulativeNetto(){
+    return mgAccounts.reduce((sum, a) => sum + mgCalcTotals(a).realNetto, 0)
+  }
+  function mgGetCycleBaseline(){
+    if(!mgSettlements.length) return 0
+    return Number(mgSettlements[mgSettlements.length - 1].cumulative_baseline || 0)
+  }
+  function mgCalcCycleNetto(){
+    return mgCalcCumulativeNetto() - mgGetCycleBaseline()
+  }
+
+  function mgRenderSettlement(){
+    const cumulative = mgCalcCumulativeNetto()
+    const cycle = mgCalcCycleNetto()
+    const cycleEl = $mg('mg-cycle-netto')
+    const cumEl = $mg('mg-cumulative-netto')
+    if(cycleEl){ cycleEl.textContent = mgFmt(cycle, true); cycleEl.className = 'tnum ' + mgCls(cycle) }
+    if(cumEl){ cumEl.textContent = mgFmt(cumulative, true); cumEl.className = 'tnum ' + mgCls(cumulative) }
+
+    const count = mgSettlements.length
+    const metaEl = $mg('mg-settle-meta')
+    if(metaEl){
+      metaEl.textContent = count > 0
+        ? `Letzte Abrechnung: ${mgFmtDate(mgSettlements[count-1].settled_at)} · ${count} Zyklus${count===1?'':'sen'} abgerechnet`
+        : 'Noch keine Abrechnung gemacht'
+    }
+
+    const toggleBtn = $mg('mg-history-toggle')
+    if(toggleBtn){
+      toggleBtn.style.display = count > 0 ? 'flex' : 'none'
+      const lbl = $mg('mg-history-label')
+      if(lbl) lbl.textContent = `Historie (${count})`
+    }
+    const chev = $mg('mg-history-chev')
+    if(chev) chev.style.transform = mgHistoryOpen ? 'rotate(90deg)' : ''
+
+    const listEl = $mg('mg-history-list')
+    if(!listEl) return
+    if(!mgHistoryOpen || count === 0){ listEl.style.display = 'none'; listEl.innerHTML = ''; return }
+    listEl.style.display = 'block'
+    const totalClient = mgSettlements.reduce((s,x) => s + Number(x.client_amount||0), 0)
+    const totalHouse  = mgSettlements.reduce((s,x) => s + Number(x.house_amount||0), 0)
+    listEl.innerHTML = mgSettlements.slice().reverse().map(s => `
+      <div class="mg-history-item">
+        <span class="mg-h-date">${mgFmtDate(s.settled_at)}</span>
+        <span class="mg-h-note">${mgEsc(s.note) || '–'}</span>
+        <span class="mg-h-amt ${mgCls(s.cycle_netto)}">${mgFmt(s.cycle_netto, true)}</span>
+        <span class="mg-h-amt" style="color:var(--sub)">${(100-Number(s.profit_share_pct)).toFixed(0)}%</span>
+        <span class="mg-h-amt" style="color:var(--good)">${mgFmt(s.house_amount)}</span>
+        <button type="button" class="mg-btn-del mg-del-settlement" data-id="${s.id}" title="Zyklus löschen">×</button>
+      </div>
+    `).join('') + `
+      <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--sub)">
+        <span>Insgesamt an Clients ausbezahlt: <strong class="mono" style="color:var(--good)">${mgFmt(totalClient)}</strong></span>
+        <span>Du hast behalten: <strong class="mono">${mgFmt(totalHouse)}</strong></span>
+      </div>
+    `
+    listEl.querySelectorAll('.mg-del-settlement').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id
+        if(!confirm('Diesen Abrechnungs-Eintrag wirklich löschen? Der Zyklus rechnet danach wieder ab der vorherigen Abrechnung.')) return
+        const { error } = await supabase.from('managed_settlements').delete().eq('id', id)
+        if(error) return mgToast('Fehler: ' + error.message, 'err')
+        mgSettlements = mgSettlements.filter(x => x.id !== id)
+        mgRenderSettlement()
+        mgToast('Abrechnung gelöscht')
+      })
+    })
   }
 
   // Render stats bar
@@ -15468,6 +15635,7 @@
     mgRenderStats()
     mgRenderBadge()
     mgRenderChart()
+    mgRenderSettlement()
 
     const list = $mg('mg-list')
     const empty = $mg('mg-empty')
@@ -15722,10 +15890,108 @@
     })
   }
 
+  // ── Abrechnung: History-Toggle + Settle-Modal ──
+  function mgWireSettlement(){
+    $mg('mg-history-toggle')?.addEventListener('click', () => {
+      mgHistoryOpen = !mgHistoryOpen
+      mgRenderSettlement()
+    })
+
+    function mgUpdateSettlePreview(){
+      const cycle = mgCalcCycleNetto()
+      const housePct = Number($mg('mg-settle-pct').value || 0)
+      const clientPct = 100 - housePct
+      const houseAmt = cycle * (housePct / 100)
+      const clientAmt = cycle - houseAmt
+      const houseLbl = $mg('mg-settle-house-lbl')
+      const clientLbl = $mg('mg-settle-client-lbl')
+      if(houseLbl) houseLbl.textContent = `Du behältst (${housePct.toFixed(0)}%)`
+      if(clientLbl) clientLbl.textContent = `Client bekommt (${clientPct.toFixed(0)}%)`
+      const houseAmtEl = $mg('mg-settle-house-amt')
+      const clientAmtEl = $mg('mg-settle-client-amt')
+      if(houseAmtEl) houseAmtEl.textContent = mgFmt(houseAmt, true)
+      if(clientAmtEl) clientAmtEl.textContent = mgFmt(clientAmt, true)
+    }
+
+    $mg('mg-settle-btn')?.addEventListener('click', () => {
+      const cycle = mgCalcCycleNetto()
+      const cycleEl = $mg('mg-settle-cycle-netto')
+      if(cycleEl){ cycleEl.textContent = mgFmt(cycle, true); cycleEl.className = 'mono ' + mgCls(cycle) }
+      $mg('mg-settle-pct').value = mgDefaultPct
+      $mg('mg-settle-note').value = ''
+      const msgEl = $mg('mgSettleMsg')
+      if(msgEl){ msgEl.textContent = ''; msgEl.className = 'modal-msg' }
+      const warn = $mg('mg-settle-warning')
+      if(warn){
+        if(cycle <= 0){
+          warn.style.display = 'block'
+          warn.textContent = cycle < 0
+            ? '⚠️ Zyklus ist negativ. Bei Abrechnung würde der Client anteilig mitzahlen — wirklich abrechnen?'
+            : '⚠️ Zyklus ist bei 0 — es gibt nichts abzurechnen.'
+        } else {
+          warn.style.display = 'none'
+        }
+      }
+      mgUpdateSettlePreview()
+      document.getElementById('mgSettleModal')?.classList.add('open')
+    })
+
+    $mg('mg-settle-pct')?.addEventListener('input', mgUpdateSettlePreview)
+
+    function mgCloseSettleModal(){
+      document.getElementById('mgSettleModal')?.classList.remove('open')
+    }
+    $mg('mgSettleClose')?.addEventListener('click', mgCloseSettleModal)
+    $mg('mgSettleCancel')?.addEventListener('click', mgCloseSettleModal)
+    document.getElementById('mgSettleModal')?.addEventListener('click', e => {
+      if(e.target === document.getElementById('mgSettleModal')) mgCloseSettleModal()
+    })
+
+    $mg('mgSettleSave')?.addEventListener('click', async () => {
+      if(typeof currentUserId === 'undefined' || !currentUserId) return
+      const cycle = mgCalcCycleNetto()
+      const cumulative = mgCalcCumulativeNetto()
+      const housePct = Number($mg('mg-settle-pct').value)
+      const msgEl = $mg('mgSettleMsg')
+      if(isNaN(housePct) || housePct < 0 || housePct > 100){
+        if(msgEl){ msgEl.textContent = 'Prozent muss zwischen 0 und 100 liegen.'; msgEl.className = 'modal-msg err' }
+        return
+      }
+      const clientPct = 100 - housePct
+      const houseAmt = cycle * (housePct / 100)
+      const clientAmt = cycle - houseAmt
+      const note = $mg('mg-settle-note').value.trim() || null
+
+      const payload = {
+        user_id: currentUserId,
+        cycle_netto: cycle,
+        cumulative_baseline: cumulative,
+        profit_share_pct: clientPct,   // wie im Original-Tool: "Client bekommt %"
+        client_amount: clientAmt,
+        house_amount: houseAmt,
+        note
+      }
+      const { data, error } = await supabase.from('managed_settlements').insert(payload).select().single()
+      if(error){
+        if(msgEl){ msgEl.textContent = 'Fehler: ' + error.message; msgEl.className = 'modal-msg err' }
+        return
+      }
+      mgSettlements.push(data)
+      // Default-Prozent für's nächste Mal: wird beim Laden ohnehin aus dem letzten
+      // Settlement-Eintrag abgeleitet (siehe loadManagedFromSupabase) — kein separater
+      // Speicher nötig, mgSettlements trägt den Stand schon.
+      mgDefaultPct = housePct
+      mgCloseSettleModal()
+      mgRender()
+      mgToast(`Abrechnung: Du behältst ${mgFmt(houseAmt)}`)
+    })
+  }
+
   // Init when dashboard ready
   function mgInit(){
     mgWireAddAccount()
     mgWireFilterChips()
+    mgWireSettlement()
     mgRender()  // initial render of empty state
   }
 
