@@ -2347,11 +2347,13 @@
 
     <div class="sb-section">Trading</div>
     <nav class="sb-nav">
-      <button class="sb-link active" data-view="overview">
+      <!-- Overview: aus der Navigation ausgeblendet (Finn wollte kein Design-Feature dort,
+           16.07.2026) — View + Code bleiben intakt, per URL-Hash (#overview) erreichbar. -->
+      <button class="sb-link" data-view="overview" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
         Overview
       </button>
-      <button class="sb-link" data-view="accounts">
+      <button class="sb-link active" data-view="accounts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
       </button>
@@ -2467,7 +2469,7 @@
   <main class="main">
 
     <!-- OVERVIEW -->
-    <section class="view active" data-view="overview">
+    <section class="view" data-view="overview">
       <!-- HEDGE COSMOS SCROLL — kein Bild-in-einer-Box, sondern eine echte, hohe Scroll-
            Strecke direkt auf dem hellen App-Hintergrund. Drei Parallax-Ebenen (Sterne/Glow
            ganz hinten am langsamsten, Umlaufbahn in der Mitte, Hedge-Paar vorne am schnellsten)
@@ -2580,7 +2582,7 @@
     </section>
 
     <!-- ACCOUNTS -->
-    <section class="view" data-view="accounts">
+    <section class="view active" data-view="accounts">
       <div class="view-head">
         <div>
           <h1 class="view-title">Accounts</h1>
@@ -4875,9 +4877,9 @@
       mountDashboard()
       dashboardMounted = true
     }
-    // Activate tab based on hash, or default to overview
+    // Activate tab based on hash, or default to accounts (Overview ausgeblendet)
     const hash = (location.hash || '').replace('#','')
-    const tab = Object.keys(viewTitles).includes(hash) ? hash : 'overview'
+    const tab = Object.keys(viewTitles).includes(hash) ? hash : 'accounts'
     switchView(tab)
   }
 
