@@ -3380,6 +3380,38 @@
       </div>
     </div>
 
+    <!-- BLOWN-ACCOUNT-ÜBERSICHT: kurzes Feedback direkt nach dem Archivieren -->
+    <div class="modal-bg" id="blownSummaryModal">
+      <div class="modal" style="max-width:400px">
+        <div class="modal-head">
+          <h3>💀 Account-Übersicht</h3>
+          <button class="modal-x" id="blownSummaryClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="blownSummaryAccName" style="font-weight:600;font-size:14px;margin-bottom:14px"></div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:9px">
+              <span style="font-size:12px;color:var(--sub)">Gesamtkosten</span>
+              <span class="mono" id="blownSummaryCost" style="font-weight:700;font-size:15px;color:var(--violet)">–</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:9px">
+              <span style="font-size:12px;color:var(--sub)">Plus gemacht (Live)</span>
+              <span class="mono" id="blownSummaryGain" style="font-weight:700;font-size:15px;color:var(--good,#12B76A)">–</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:9px">
+              <span style="font-size:12px;color:var(--sub)">Minus gemacht (Live)</span>
+              <span class="mono" id="blownSummaryLoss" style="font-weight:700;font-size:15px;color:var(--danger)">–</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot" style="justify-content:center">
+          <button class="btn btn-primary" id="blownSummaryOk" style="min-width:100px">Ja</button>
+        </div>
+      </div>
+    </div>
+
     <!-- TRADE-START PREFLIGHT-CHECK -->
     <div class="modal-bg" id="tpPreflightModal">
       <div class="modal" style="max-width:460px">
@@ -7417,6 +7449,36 @@
     window._origOpenTradeCompleteModal = openTradeCompleteModal
   }
 
+  /* ========== BLOWN-ACCOUNT-ÜBERSICHT ==========
+   * Kurzes Feedback direkt nach "Account geblowt → Archivieren": Gesamtkosten +
+   * Plus/Minus (Live-Hedge-Seite). Auch später über den Account selbst wieder
+   * einsehbar (renderAccountDetail zeigt die gleichen Zahlen als KPI-Kacheln,
+   * wenn der Account mit reason 'blown' archiviert ist) — Finn wollte beides:
+   * kurzes Popup direkt danach + später nochmal nachschaubar (14.07.2026).
+   */
+  function showBlownAccountSummary(accountId){
+    const acc = (accounts || []).find(a => String(a.id) === String(accountId))
+    if(!acc) return
+    const gkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : 0
+    const { gainEur, lossEur } = (typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : { gainEur:0, lossEur:0 }
+    const fmt = n => Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'
+    const nameEl = document.getElementById('blownSummaryAccName')
+    if(nameEl) nameEl.textContent = acc.name
+    const costEl = document.getElementById('blownSummaryCost')
+    if(costEl) costEl.textContent = (gkEur < 0 ? '−' : '') + fmt(gkEur)
+    const gainEl = document.getElementById('blownSummaryGain')
+    if(gainEl) gainEl.textContent = '+' + fmt(gainEur)
+    const lossEl = document.getElementById('blownSummaryLoss')
+    if(lossEl) lossEl.textContent = '−' + fmt(lossEur)
+    document.getElementById('blownSummaryModal')?.classList.add('open')
+  }
+  window.showBlownAccountSummary = showBlownAccountSummary
+  document.getElementById('blownSummaryClose')?.addEventListener('click', () => document.getElementById('blownSummaryModal')?.classList.remove('open'))
+  document.getElementById('blownSummaryOk')?.addEventListener('click', () => document.getElementById('blownSummaryModal')?.classList.remove('open'))
+  document.getElementById('blownSummaryModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('blownSummaryModal')) document.getElementById('blownSummaryModal').classList.remove('open')
+  })
+
   /* ========== NACHFOLGER-WIZARD ========== */
   let _successorParentAccId = null
   let _afterSuccessorCallback = null
@@ -7810,6 +7872,13 @@
       ? (adGkEur < 0 ? '−' : '') + Math.abs(adGkEur).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
       : '—'
 
+    // Geblowte Accounts: Plus/Minus (Live-Hedge) zusätzlich als Dauer-Kacheln zeigen —
+    // gleiche Zahlen wie im Popup direkt nach dem Archivieren, hier für "später nochmal
+    // nachschauen" (14.07.2026, Finns Ask).
+    const adArchive = (typeof getArchive === 'function') ? getArchive() : {}
+    const adIsBlown = adArchive[acc.id]?.reason === 'blown'
+    const adGainLoss = (adIsBlown && typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : null
+
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -7834,6 +7903,14 @@
           <div class="kpi-label">P/L realisiert</div>
           <div class="kpi-value tnum ${totalPl>=0?'delta-pos':'delta-neg'}" style="font-size:18px">${totalPl>=0?'+':''}$${totalPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
         </div>
+        ${adGainLoss ? `<div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
+          <div class="kpi-label">💀 Plus (Live)</div>
+          <div class="kpi-value tnum delta-pos" style="font-size:18px">+${adGainLoss.gainEur.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})} €</div>
+        </div>
+        <div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
+          <div class="kpi-label">💀 Minus (Live)</div>
+          <div class="kpi-value tnum delta-neg" style="font-size:18px">−${adGainLoss.lossEur.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})} €</div>
+        </div>` : ''}
       </div>`
 
     // Data list
@@ -11821,6 +11898,30 @@
     return masterAcc?.purchaseCost ? Number(masterAcc.purchaseCost) : 0
   }
 
+  // Plus/Minus NUR für diesen einen Account (keine Vorgänger-Kette) — Gewinn- und
+  // Verlust-Seite getrennt statt genettet, für die Blown-Account-Übersicht (14.07.2026).
+  // Gleiche Filter-Logik wie liveHedgeCostEur() in calcReingesteckdEur(): nur abgeschlossene
+  // Trades, nur wo DIESER Account Master war und der Slave ein Live-Account ist.
+  function calcAccountGainLossEur(masterAcc){
+    if(!masterAcc) return { gainEur: 0, lossEur: 0 }
+    const fxUsdEur = window._fxUsdEur || 0.85
+    const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
+    let gainEur = 0, lossEur = 0
+    for(const p of planList){
+      if(p.status !== 'completed') continue
+      if(String(p.masterAccountId) !== String(masterAcc.id)) continue
+      const slaveAcc = accounts.find(x => String(x.id) === String(p.slaveAccountId))
+      if(slaveAcc?.type === 'live' && p.slavePl != null){
+        let plEur = Number(p.slavePl)
+        const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
+        if(slavePreset.currency !== '€') plEur = plEur * fxUsdEur
+        if(plEur >= 0) gainEur += plEur
+        else lossEur += -plEur
+      }
+    }
+    return { gainEur, lossEur }
+  }
+
   /* ── NQ / MNQ Toggle für Trade-Plan-Modal ──
    * Separat für Master und Slave.
    * Betrifft nur projectx-Firmen (Topstep, Tradeify, AlphaFutures, Apex).
@@ -12766,6 +12867,7 @@
         renderAccounts()
         if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
         if(typeof updateSidebarBadges === 'function') updateSidebarBadges()
+        setTimeout(() => { if(typeof showBlownAccountSummary === 'function') showBlownAccountSummary(targetAccountId) }, 200)
       } else if(statusChoice === 'passed' && targetAccountId){
         // Nachfolger-Wizard öffnen — der archiviert dann automatisch den Vorgänger
         setTimeout(() => openSuccessorWizard(targetAccountId), 200)
