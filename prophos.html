@@ -1892,6 +1892,13 @@
   #dashboard-view .mg-history-item .mg-h-date{color:var(--sub);font-family:var(--mono);font-size:11px}
   #dashboard-view .mg-history-item .mg-h-note{color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #dashboard-view .mg-history-item .mg-h-amt{font-family:var(--mono);text-align:right;font-weight:600}
+  #dashboard-view #fin-cycle-netto.pos,#dashboard-view #fin-cumulative-netto.pos{color:var(--good)}
+  #dashboard-view #fin-cycle-netto.neg,#dashboard-view #fin-cumulative-netto.neg{color:var(--danger)}
+  #dashboard-view .fin-history-item{display:grid;grid-template-columns:80px 1fr 80px 60px 90px 26px;gap:10px;padding:7px 2px;font-size:12px;border-bottom:1px solid var(--line);align-items:center}
+  #dashboard-view .fin-history-item:last-child{border-bottom:none}
+  #dashboard-view .fin-history-item .fin-h-date{color:var(--sub);font-family:var(--mono);font-size:11px}
+  #dashboard-view .fin-history-item .fin-h-note{color:var(--sub);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .fin-history-item .fin-h-amt{font-family:var(--mono);text-align:right;font-weight:600}
 
   #dashboard-view .mg-acct-body{
     display:none;padding:0 18px 18px;border-top:1px solid var(--border-soft);
@@ -3688,6 +3695,28 @@
         </div>
       </div>
 
+      <!-- Zyklus / Abrechnung -->
+      <div class="panel" id="fin-settle-card" style="margin-bottom:14px;background:linear-gradient(135deg,var(--surface) 0%,var(--surface-soft,rgba(84,71,206,.04)) 100%)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:16px 18px">
+          <div style="display:flex;gap:28px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:4px">Aktueller Zyklus</div>
+              <div class="tnum" id="fin-cycle-netto" style="font-size:20px;font-weight:800">–</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:4px">Kumuliert gesamt</div>
+              <div class="tnum" id="fin-cumulative-netto" style="font-size:14px;font-weight:700">–</div>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="fin-settle-btn">Abrechnung machen</button>
+        </div>
+        <div style="padding:0 18px 12px;font-size:11px;color:var(--sub)" id="fin-settle-meta"></div>
+        <button type="button" id="fin-history-toggle" style="display:none;background:transparent;border:0;color:var(--sub);font-size:11px;cursor:pointer;padding:0 18px 14px;font-weight:600;align-items:center;gap:6px">
+          <span id="fin-history-chev" style="transition:transform .15s;display:inline-block">›</span> <span id="fin-history-label">Historie</span>
+        </button>
+        <div id="fin-history-list" style="display:none;padding:0 18px 16px"></div>
+      </div>
+
       <!-- KPIs -->
       <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
         <div class="kpi">
@@ -3820,6 +3849,53 @@
         <div class="modal-foot">
           <button class="btn btn-ghost" id="finModalCancel2">Abbrechen</button>
           <button class="btn btn-primary" id="finModalSave">Speichern</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FINANZEN: ABRECHNUNG -->
+    <div class="modal-bg" id="finSettleModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Abrechnung machen</h3>
+          <button class="modal-x" id="finSettleClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Zyklus-Netto</span>
+            <span class="mono" id="fin-settle-cycle-netto" style="font-size:16px;font-weight:700">–</span>
+          </div>
+
+          <div class="field" style="margin-top:14px">
+            <label>Profit-Share (Du behältst %)</label>
+            <input type="number" class="input mono" id="fin-settle-pct" min="0" max="100" step="1" style="text-align:center;font-size:18px;font-weight:700" placeholder="100">
+          </div>
+
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:12px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span id="fin-settle-house-lbl" style="font-size:12.5px;color:var(--sub)">Du behältst (100%)</span>
+              <span class="mono" id="fin-settle-house-amt" style="font-weight:600">–</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span id="fin-settle-client-lbl" style="font-size:12.5px;color:var(--sub)">Anderer Anteil (0%)</span>
+              <span class="mono" id="fin-settle-client-amt" style="font-weight:600;color:var(--good,#12B76A)">–</span>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:12px">
+            <label>Notiz (optional)</label>
+            <input class="input" id="fin-settle-note" placeholder="z.B. Auszahlung Juli 2026" maxlength="120">
+          </div>
+
+          <div id="fin-settle-warning" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:12px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.3);color:#b45309"></div>
+
+          <div class="modal-msg" id="finSettleMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="finSettleCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="finSettleSave">Abrechnen</button>
         </div>
       </div>
     </div>
@@ -12893,6 +12969,9 @@
   /* ========== FINANZEN ========== */
   let transactions = []
   let _activeFinTab = 'all'
+  let finSettlements = []
+  let finHistoryOpen = false
+  let finDefaultPct = 100  // "Du behältst %" — eigenes Geld, Default 100% falls noch nie abgerechnet
 
   function rowToTransaction(row){
     if(!row) return null
@@ -12911,16 +12990,112 @@
     }
   }
 
+  // ── Zyklus / Abrechnung (gleiche Logik wie Topstep Manager, siehe mgCalc*) ──
+  // Kumuliert = Summe ALLER Transaktionen (raw amount, gleiche Vereinfachung wie
+  // die bestehende "Realisiert YTD"-Kachel — keine Währungsumrechnung). Zyklus =
+  // Kumuliert seit der letzten Abrechnung.
+  const finFmt = (n, withSign=false) => {
+    if(n === null || n === undefined || isNaN(n)) return '–'
+    const num = Number(n)
+    const formatted = Math.abs(num).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+    const sign = num < 0 ? '−' : (withSign && num > 0 ? '+' : '')
+    return sign + '$' + formatted
+  }
+  const finFmtDate = (iso) => {
+    if(!iso) return '–'
+    return new Date(iso).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit' })
+  }
+  const finCls = (n) => n > 0.005 ? 'pos' : n < -0.005 ? 'neg' : ''
+
+  function finCalcCumulativeNetto(){
+    return transactions.reduce((s,t) => s + Number(t.amount || 0), 0)
+  }
+  function finGetCycleBaseline(){
+    if(!finSettlements.length) return 0
+    return Number(finSettlements[finSettlements.length - 1].cumulative_baseline || 0)
+  }
+  function finCalcCycleNetto(){
+    return finCalcCumulativeNetto() - finGetCycleBaseline()
+  }
+
+  function finRenderSettlement(){
+    const cumulative = finCalcCumulativeNetto()
+    const cycle = finCalcCycleNetto()
+    const cycleEl = document.getElementById('fin-cycle-netto')
+    const cumEl = document.getElementById('fin-cumulative-netto')
+    if(cycleEl){ cycleEl.textContent = finFmt(cycle, true); cycleEl.className = 'tnum ' + finCls(cycle) }
+    if(cumEl){ cumEl.textContent = finFmt(cumulative, true); cumEl.className = 'tnum ' + finCls(cumulative) }
+
+    const count = finSettlements.length
+    const metaEl = document.getElementById('fin-settle-meta')
+    if(metaEl){
+      metaEl.textContent = count > 0
+        ? `Letzte Abrechnung: ${finFmtDate(finSettlements[count-1].settled_at)} · ${count} Zyklus${count===1?'':'sen'} abgerechnet`
+        : 'Noch keine Abrechnung gemacht'
+    }
+
+    const toggleBtn = document.getElementById('fin-history-toggle')
+    if(toggleBtn){
+      toggleBtn.style.display = count > 0 ? 'flex' : 'none'
+      const lbl = document.getElementById('fin-history-label')
+      if(lbl) lbl.textContent = `Historie (${count})`
+    }
+    const chev = document.getElementById('fin-history-chev')
+    if(chev) chev.style.transform = finHistoryOpen ? 'rotate(90deg)' : ''
+
+    const listEl = document.getElementById('fin-history-list')
+    if(!listEl) return
+    if(!finHistoryOpen || count === 0){ listEl.style.display = 'none'; listEl.innerHTML = ''; return }
+    listEl.style.display = 'block'
+    const totalClient = finSettlements.reduce((s,x) => s + Number(x.client_amount||0), 0)
+    const totalHouse  = finSettlements.reduce((s,x) => s + Number(x.house_amount||0), 0)
+    listEl.innerHTML = finSettlements.slice().reverse().map(s => `
+      <div class="fin-history-item">
+        <span class="fin-h-date">${finFmtDate(s.settled_at)}</span>
+        <span class="fin-h-note">${escapeHtml(s.note) || '–'}</span>
+        <span class="fin-h-amt ${finCls(s.cycle_netto)}">${finFmt(s.cycle_netto, true)}</span>
+        <span class="fin-h-amt" style="color:var(--sub)">${(100-Number(s.profit_share_pct)).toFixed(0)}%</span>
+        <span class="fin-h-amt" style="color:var(--good)">${finFmt(s.house_amount)}</span>
+        <button type="button" class="btn btn-ghost icon-btn fin-del-settlement" data-id="${s.id}" title="Zyklus löschen" style="padding:2px 6px">×</button>
+      </div>
+    `).join('') + `
+      <div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--sub)">
+        <span>Insgesamt an andere ausbezahlt: <strong class="mono" style="color:var(--good)">${finFmt(totalClient)}</strong></span>
+        <span>Du hast behalten: <strong class="mono">${finFmt(totalHouse)}</strong></span>
+      </div>
+    `
+    listEl.querySelectorAll('.fin-del-settlement').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id
+        if(!confirm('Diesen Abrechnungs-Eintrag wirklich löschen? Der Zyklus rechnet danach wieder ab der vorherigen Abrechnung.')) return
+        const { error } = await supabase.from('finanzen_settlements').delete().eq('id', id)
+        if(error){ alert('Fehler: ' + error.message); return }
+        finSettlements = finSettlements.filter(x => x.id !== id)
+        finRenderSettlement()
+      })
+    })
+  }
+
   async function loadTransactionsFromSupabase(){
     if(!currentUserId) return
     try{
-      const { data, error } = await supabase
-        .from('transactions').select('*')
-        .eq('user_id', currentUserId)
-        .order('occurred_at', { ascending: false })
-        .order('created_at', { ascending: false })
+      const [{ data, error }, { data: setts, error: e2 }] = await Promise.all([
+        supabase.from('transactions').select('*')
+          .eq('user_id', currentUserId)
+          .order('occurred_at', { ascending: false })
+          .order('created_at', { ascending: false }),
+        supabase.from('finanzen_settlements').select('*')
+          .eq('user_id', currentUserId)
+          .order('settled_at', { ascending: true })
+      ])
       if(error){ console.error('loadTransactions:', error); return }
+      if(e2){ console.error('loadFinanzenSettlements:', e2); return }
       transactions = (data || []).map(rowToTransaction).filter(Boolean)
+      finSettlements = setts || []
+      if(finSettlements.length){
+        const lastPct = Number(finSettlements[finSettlements.length - 1].profit_share_pct)
+        if(!isNaN(lastPct)) finDefaultPct = 100 - lastPct
+      }
       renderFinanzen()
     }catch(e){
       console.error('loadTransactionsFromSupabase failed:', e)
@@ -13011,6 +13186,8 @@
   }
 
   function renderFinanzen(){
+    finRenderSettlement()
+
     const tbody = document.getElementById('finTable')
     const empty = document.getElementById('finEmpty')
     if(!tbody) return
@@ -13207,6 +13384,97 @@
     }catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
     }
+  })
+
+  // ── Finanzen: Abrechnung (Zyklus/Profit-Share, gleiche Logik wie Topstep Manager) ──
+  document.getElementById('fin-history-toggle')?.addEventListener('click', () => {
+    finHistoryOpen = !finHistoryOpen
+    finRenderSettlement()
+  })
+
+  function finUpdateSettlePreview(){
+    const cycle = finCalcCycleNetto()
+    const housePct = Number(document.getElementById('fin-settle-pct').value || 0)
+    const clientPct = 100 - housePct
+    const houseAmt = cycle * (housePct / 100)
+    const clientAmt = cycle - houseAmt
+    const houseLbl = document.getElementById('fin-settle-house-lbl')
+    const clientLbl = document.getElementById('fin-settle-client-lbl')
+    if(houseLbl) houseLbl.textContent = `Du behältst (${housePct.toFixed(0)}%)`
+    if(clientLbl) clientLbl.textContent = `Anderer Anteil (${clientPct.toFixed(0)}%)`
+    const houseAmtEl = document.getElementById('fin-settle-house-amt')
+    const clientAmtEl = document.getElementById('fin-settle-client-amt')
+    if(houseAmtEl) houseAmtEl.textContent = finFmt(houseAmt, true)
+    if(clientAmtEl) clientAmtEl.textContent = finFmt(clientAmt, true)
+  }
+
+  document.getElementById('fin-settle-btn')?.addEventListener('click', () => {
+    const cycle = finCalcCycleNetto()
+    const cycleEl = document.getElementById('fin-settle-cycle-netto')
+    if(cycleEl){ cycleEl.textContent = finFmt(cycle, true); cycleEl.className = 'mono ' + finCls(cycle) }
+    document.getElementById('fin-settle-pct').value = finDefaultPct
+    document.getElementById('fin-settle-note').value = ''
+    const msgEl = document.getElementById('finSettleMsg')
+    if(msgEl){ msgEl.textContent = ''; msgEl.className = 'modal-msg' }
+    const warn = document.getElementById('fin-settle-warning')
+    if(warn){
+      if(cycle <= 0){
+        warn.style.display = 'block'
+        warn.textContent = cycle < 0
+          ? '⚠️ Zyklus ist negativ. Wirklich abrechnen?'
+          : '⚠️ Zyklus ist bei 0 — es gibt nichts abzurechnen.'
+      } else {
+        warn.style.display = 'none'
+      }
+    }
+    finUpdateSettlePreview()
+    document.getElementById('finSettleModal')?.classList.add('open')
+  })
+
+  document.getElementById('fin-settle-pct')?.addEventListener('input', finUpdateSettlePreview)
+
+  function finCloseSettleModal(){
+    document.getElementById('finSettleModal')?.classList.remove('open')
+  }
+  document.getElementById('finSettleClose')?.addEventListener('click', finCloseSettleModal)
+  document.getElementById('finSettleCancel')?.addEventListener('click', finCloseSettleModal)
+  document.getElementById('finSettleModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('finSettleModal')) finCloseSettleModal()
+  })
+
+  document.getElementById('finSettleSave')?.addEventListener('click', async () => {
+    if(!currentUserId) return
+    const cycle = finCalcCycleNetto()
+    const cumulative = finCalcCumulativeNetto()
+    const housePct = Number(document.getElementById('fin-settle-pct').value)
+    const msgEl = document.getElementById('finSettleMsg')
+    if(isNaN(housePct) || housePct < 0 || housePct > 100){
+      if(msgEl){ msgEl.textContent = 'Prozent muss zwischen 0 und 100 liegen.'; msgEl.className = 'modal-msg err' }
+      return
+    }
+    const clientPct = 100 - housePct
+    const houseAmt = cycle * (housePct / 100)
+    const clientAmt = cycle - houseAmt
+    const note = document.getElementById('fin-settle-note').value.trim() || null
+
+    const payload = {
+      user_id: currentUserId,
+      cycle_netto: cycle,
+      cumulative_baseline: cumulative,
+      profit_share_pct: clientPct,
+      client_amount: clientAmt,
+      house_amount: houseAmt,
+      note
+    }
+    const { data, error } = await supabase.from('finanzen_settlements').insert(payload).select().single()
+    if(error){
+      if(msgEl){ msgEl.textContent = 'Fehler: ' + error.message; msgEl.className = 'modal-msg err' }
+      return
+    }
+    finSettlements.push(data)
+    finDefaultPct = housePct
+    finCloseSettleModal()
+    renderFinanzen()
   })
 
   /* ========== INITIAL LOAD: Accounts aus Supabase nach Login ========== */
