@@ -4282,8 +4282,9 @@
             <input type="email" class="input" id="settingsEmail" disabled />
           </div>
         </div>
-        <div style="margin-top:14px;display:flex;gap:10px">
-          <button class="btn btn-primary">Speichern</button>
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+          <button class="btn btn-primary" id="settingsNameSaveBtn">Speichern</button>
+          <span id="settingsNameMsg" style="font-size:12.5px"></span>
         </div>
       </div>
 
@@ -14294,6 +14295,37 @@
       return false
     }
   }
+
+  // Profil-Name Save Button — hatte bisher gar keine id/keinen Handler (14.07.2026 Bugfix,
+  // Finn konnte den Button nicht klicken weil er schlicht nichts tat).
+  document.addEventListener('click', async (e) => {
+    if(e.target.id !== 'settingsNameSaveBtn') return
+    const inp = document.getElementById('settingsName')
+    const msg = document.getElementById('settingsNameMsg')
+    if(!inp) return
+    const newName = inp.value.trim()
+    if(!newName){
+      if(msg){ msg.textContent = '✗ Name darf nicht leer sein'; msg.style.color = '#ef4444' }
+      return
+    }
+    const btn = document.getElementById('settingsNameSaveBtn')
+    if(btn){ btn.disabled = true; btn.classList.add('ts-btn-loading') }
+    try{
+      const { error } = await supabase.auth.updateUser({ data: { name: newName } })
+      if(error) throw error
+      // Überall im UI, wo der Name angezeigt wird, sofort mit aktualisieren
+      document.getElementById('userName').textContent = newName
+      document.getElementById('userNameFull').textContent = newName
+      document.getElementById('greetingName').textContent = newName.charAt(0).toUpperCase() + newName.slice(1) + ' 👋'
+      document.getElementById('userAvatar').textContent = (newName[0] || 'U').toUpperCase()
+      if(msg){ msg.textContent = '✓ Gespeichert'; msg.style.color = '#10b981' }
+    }catch(err){
+      if(msg){ msg.textContent = '✗ Fehler: ' + (err.message || err); msg.style.color = '#ef4444' }
+    }finally{
+      if(btn){ btn.disabled = false; btn.classList.remove('ts-btn-loading') }
+      setTimeout(() => { if(msg) msg.textContent = '' }, 3000)
+    }
+  })
 
   // FX Save Button
   document.addEventListener('click', async (e) => {
