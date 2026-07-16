@@ -12933,9 +12933,13 @@
     const kindSelect = document.getElementById('fin-kind')
     kindSelect.value = prefilledKind || 'payout'
 
-    // Account-Dropdown füllen
+    // Account-Dropdown füllen — nur aktive Funded-Accounts (Payouts kommen nur von denen;
+    // Challenge/Phase1/Phase2/Live und archivierte Accounts würden hier nur die Liste
+    // aufblähen, Finn hat hunderte Accounts insgesamt).
     const accountSel = document.getElementById('fin-account')
-    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + accounts.map(a =>
+    const finArchive = (typeof getArchive === 'function') ? getArchive() : {}
+    const finFundedAccounts = accounts.filter(a => a.type === 'funded' && !finArchive[a.id]?.archived)
+    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + finFundedAccounts.map(a =>
       `<option value="${a.id}">${escapeHtml(a.name)} · ${escapeHtml(a.firm||'–')}</option>`
     ).join('')
 
