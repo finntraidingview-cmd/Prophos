@@ -108,13 +108,6 @@
   .pf-final.ok{background:rgba(16,185,129,.12);color:#0d9668;border:1px solid rgba(16,185,129,.3)}
   .pf-final.warn{background:rgba(245,158,11,.10);color:#b45309;border:1px solid rgba(245,158,11,.3)}
 
-  /* Mini-Checkliste (Trade-Start, nach erfolgreichem Preflight) */
-  .pf-check-item{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;animation:pfRowIn .25s ease;transition:border-color .2s,background .2s}
-  .pf-check-item:has(.pf-check-box:checked){border-color:rgba(16,185,129,.4);background:rgba(16,185,129,.06)}
-  .pf-check-label{display:flex;align-items:center;gap:11px;cursor:pointer;font-size:13.5px;font-weight:500;color:var(--ink)}
-  .pf-check-box{width:19px;height:19px;flex-shrink:0;accent-color:var(--violet);cursor:pointer;transition:opacity .2s}
-  .pf-check-box:disabled{cursor:not-allowed;opacity:.35}
-
   /* ── Live Trade Card Animations ── */
   @keyframes tcLivePulse{
     0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}
@@ -3393,25 +3386,6 @@
           <div id="pf-plan-info" style="font-size:12.5px;color:var(--sub);margin-bottom:8px"></div>
           <div id="pf-rows"></div>
           <div id="pf-final" style="display:none"></div>
-          <!-- Mini-Checkliste: nur die 2 Punkte, die tatsächlich von Finn kommen (nicht Technik —
-               das prüft der Preflight oben schon automatisch). Jede Box hat 2s Zwangswartezeit,
-               bevor sie anklickbar wird — soll das Durchklicken im Autopilot verhindern, ohne
-               Zeit zu fressen (Finns Vorgabe 14.07.2026). -->
-          <div id="pf-checklist" style="display:none">
-            <div class="pf-check-item">
-              <label class="pf-check-label">
-                <input type="checkbox" class="pf-check-box" id="pf-check-1" disabled>
-                <span>Bin ich auf dem richtigen Account?</span>
-              </label>
-            </div>
-            <div class="pf-check-item">
-              <label class="pf-check-label">
-                <input type="checkbox" class="pf-check-box" id="pf-check-2" disabled>
-                <span>Stimmen die Prozente (Profit Target / Max Loss) für diesen Account?</span>
-              </label>
-            </div>
-            <button class="btn btn-primary" id="pf-checklist-next" disabled style="width:100%;margin-top:14px">Weiter →</button>
-          </div>
         </div>
         <div class="modal-foot" id="pf-foot" style="display:none">
           <button class="btn btn-ghost" id="pf-cancel">Abbrechen</button>
@@ -11172,13 +11146,9 @@
       if(finalEl){
         finalEl.style.display = 'block'
         finalEl.className = 'pf-final ok'
-        finalEl.innerHTML = `✓ Duplikum ist vorbereitet.<br>
-          <button class="btn btn-primary" id="pf-start-trade" style="width:100%;margin-top:10px">Trade starten →</button>`
-        document.getElementById('pf-start-trade')?.addEventListener('click', _pfShowChecklist)
+        finalEl.textContent = '✓ Alles bereit — Trade ist geplant. Auto-Erkennung übernimmt, sobald er startet.'
       }
-      // Kein Auto-Close mehr — Finn entscheidet per "Trade starten", wann er zur
-      // Mini-Checkliste + Coin-Flip weitergeht (14.07.2026). Plan-Status bleibt in
-      // JEDEM Fall unangetastet — das übernimmt weiterhin nur atCheck().
+      setTimeout(() => _pfClose(), 1600)
     } else {
       if(finalEl){
         finalEl.style.display = 'block'
@@ -11191,32 +11161,6 @@
     }
   }
 
-  // Mini-Checkliste nach erfolgreichem Preflight: nur die 2 Punkte, die tatsächlich von
-  // Finn kommen (nicht Technik). Jede Box startet disabled, wird nach 2s klickbar — soll
-  // das Durchklicken im Autopilot verhindern, ohne spürbar Zeit zu kosten. Danach Coin-Flip
-  // (eigenständiges Widget, siehe window.coinflipOpenForTrade weiter unten im Body).
-  function _pfShowChecklist(){
-    document.getElementById('pf-rows').style.display = 'none'
-    document.getElementById('pf-final').style.display = 'none'
-    const cl = document.getElementById('pf-checklist')
-    if(!cl) return
-    cl.style.display = 'block'
-    const boxes = [...cl.querySelectorAll('.pf-check-box')]
-    const nextBtn = document.getElementById('pf-checklist-next')
-    boxes.forEach(b => {
-      b.checked = false
-      b.disabled = true
-      setTimeout(() => { b.disabled = false }, 2000)
-    })
-    if(nextBtn) nextBtn.disabled = true
-    const updateNext = () => { if(nextBtn) nextBtn.disabled = !boxes.every(b => b.checked) }
-    boxes.forEach(b => b.addEventListener('change', updateNext))
-  }
-  document.getElementById('pf-checklist-next')?.addEventListener('click', () => {
-    _pfClose()
-    if(typeof window.coinflipOpenForTrade === 'function') window.coinflipOpenForTrade()
-  })
-
   async function tpPreflightAndStart(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
@@ -11224,8 +11168,6 @@
 
     // Overlay vorbereiten
     document.getElementById('pf-rows').innerHTML = ''
-    document.getElementById('pf-rows').style.display = ''
-    const checklistEl = document.getElementById('pf-checklist'); if(checklistEl) checklistEl.style.display = 'none'
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
     const info = document.getElementById('pf-plan-info')
@@ -15842,47 +15784,15 @@
     color: var(--sub, #666);
     text-transform: uppercase;
     letter-spacing: .8px;
-    margin-bottom: 4px;
-  }
-  #coinflip-modal .cf-trade-hint {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--violet, #7c3aed);
-    background: rgba(124,58,237,.09);
-    border-radius: 999px;
-    padding: 4px 12px;
-    display: inline-block;
-    margin-bottom: 14px;
+    margin-bottom: 18px;
   }
   #coinflip-modal .cf-stage {
-    position: relative;
     perspective: 1000px;
     height: 200px;
     display: flex;
     align-items: center;
     justify-content: center;
     margin-bottom: 16px;
-  }
-  /* Farblich ans App-Design angepasster Glow hinter der Münze — pulsiert während des Wurfs */
-  #coinflip-modal .cf-glow {
-    position: absolute;
-    width: 170px;
-    height: 170px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(124,58,237,.28), transparent 70%);
-    opacity: 0;
-    transition: opacity .3s ease;
-    pointer-events: none;
-  }
-  #coinflip-modal .cf-glow.active {
-    opacity: 1;
-    animation: cfGlowPulse 1.5s ease-in-out;
-  }
-  @keyframes cfGlowPulse {
-    0%   { transform: scale(.8); opacity: 0; }
-    30%  { transform: scale(1.1); opacity: 1; }
-    70%  { transform: scale(1); opacity: .9; }
-    100% { transform: scale(1.15); opacity: 0; }
   }
   #coinflip-modal .cf-coin {
     position: relative;
@@ -15896,19 +15806,9 @@
   }
   #coinflip-modal .cf-coin.show-kopf {
     transform: rotateY(0deg);
-    animation: cfLand .4s cubic-bezier(.3,1.6,.4,1);
   }
   #coinflip-modal .cf-coin.show-zahl {
     transform: rotateY(180deg);
-    animation: cfLandZahl .4s cubic-bezier(.3,1.6,.4,1);
-  }
-  @keyframes cfLand {
-    0%   { transform: rotateY(0deg) scale(1.18); }
-    100% { transform: rotateY(0deg) scale(1); }
-  }
-  @keyframes cfLandZahl {
-    0%   { transform: rotateY(180deg) scale(1.18); }
-    100% { transform: rotateY(180deg) scale(1); }
   }
   @keyframes coinFlip {
     0%   { transform: translateY(0) rotateY(0deg) rotateX(0deg); }
@@ -15994,9 +15894,7 @@
 <div id="coinflip-modal">
   <div class="cf-content">
     <div class="cf-title">Münze werfen</div>
-    <div class="cf-trade-hint" id="cf-trade-hint" style="display:none">🚀 Long/Short-Entscheidung für den Trade</div>
     <div class="cf-stage">
-      <div class="cf-glow" id="cf-glow"></div>
       <div class="cf-coin" id="cf-coin">
         <div class="cf-face cf-front">K</div>
         <div class="cf-face cf-back">Z</div>
@@ -16016,8 +15914,6 @@
   const fab = document.getElementById('coinflip-fab')
   const modal = document.getElementById('coinflip-modal')
   const coin = document.getElementById('cf-coin')
-  const glow = document.getElementById('cf-glow')
-  const tradeHint = document.getElementById('cf-trade-hint')
   const result = document.getElementById('cf-result')
   const flipBtn = document.getElementById('cf-flip-btn')
   const closeBtn = document.getElementById('cf-close-btn')
@@ -16025,10 +15921,6 @@
 
   let session = { kopf: 0, zahl: 0, total: 0 }
   let flipping = false
-  // Trade-Modus: wird vom Trade-Start-Preflight nach der Mini-Checkliste aufgerufen
-  // (window.coinflipOpenForTrade). Verhält sich sonst identisch zum freien FAB-Wurf —
-  // schließt sich nur 1s nach dem Ergebnis automatisch (Finns Vorgabe 14.07.2026).
-  let tradeMode = false
 
   function updateStats(){
     if(session.total === 0){
@@ -16050,9 +15942,6 @@
     // Coin reset (remove animation class to retrigger)
     coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
     void coin.offsetWidth  // force reflow
-
-    // Glow-Puls retriggern
-    if(glow){ glow.classList.remove('active'); void glow.offsetWidth; glow.classList.add('active') }
 
     // Random outcome
     const isKopf = Math.random() < 0.5
@@ -16078,12 +15967,6 @@
 
       flipping = false
       flipBtn.disabled = false
-
-      // Trade-Modus: Ergebnis kurz stehen lassen, dann automatisch schlie\u00DFen \u2014 kein
-      // manuelles "Schlie\u00DFen" n\u00F6tig, der Ablauf ist damit fertig.
-      if(tradeMode){
-        setTimeout(() => { tradeMode = false; close() }, 1000)
-      }
     }, 1500)
   }
 
@@ -16091,23 +15974,12 @@
     modal.classList.add('open')
     coin.classList.remove('flipping', 'show-kopf', 'show-zahl')
     coin.style.removeProperty('--final-rotation')
-    if(glow) glow.classList.remove('active')
     result.classList.remove('show')
     result.textContent = '\u00A0'
   }
 
-  // Vom Trade-Start-Preflight aufgerufen, nachdem die Mini-Checkliste durchgeklickt ist.
-  function openForTrade(){
-    tradeMode = true
-    open()
-    if(tradeHint) tradeHint.style.display = 'inline-block'
-  }
-  window.coinflipOpenForTrade = openForTrade
-
   function close(){
     modal.classList.remove('open')
-    tradeMode = false
-    if(tradeHint) tradeHint.style.display = 'none'
   }
 
   fab.addEventListener('click', open)
