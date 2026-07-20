@@ -7896,6 +7896,7 @@
   /* ========== ACCOUNTS — SUPABASE CRUD ========== */
   let accounts = []   // hydrated from Supabase after login
   let currentUserId = null
+  let customFirms = []   // Lot-Rechner-Specs pro Firm, hydrated aus firm_specs (Supabase)
 
   // Map between Supabase row (snake_case) and frontend account object
   function rowToAccount(row){
@@ -10407,12 +10408,87 @@
     }
   }
 
-  // ── Custom Firms Settings Panel ──────────────────────────────────────────
-  function getCustomFirms(){
-    try { return JSON.parse(localStorage.getItem('prophos_custom_firms') || '[]') } catch{ return [] }
+  // ── Custom Firms Settings Panel (firm_specs, Supabase — pro User) ─────────
+  // Kuratierte Startliste: jeder neue Prophos-Login (z.B. eine von Finn gemanagte
+  // Person, eigener Account) bekommt das beim ersten Öffnen automatisch als Zeilen
+  // in firm_specs eingetragen — danach ganz normal editierbar/löschbar pro Account,
+  // kein Hardcode-Zwang. Werte 1:1 aus Finns eigener Liste (20.07.2026).
+  const DEFAULT_FIRM_SPECS = [
+    { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
+    { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
+    { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'$', dupSymbol:'US100.cash' },
+    { name:'FundedNext',    symbol:'',       unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NDX100' },
+    { name:'FundingPips',   symbol:'',       unit:'Lots',      ppl:20.00, currency:'$', dupSymbol:'NDX100' },
+    { name:'Fusion Markets',symbol:'',       unit:'Lots',      ppl:0.85,  currency:'€', dupSymbol:'NAS100' },
+    { name:'Lucid Trading', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
+    { name:'The5%ers',      symbol:'',       unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'NAS100' },
+    { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' }
+  ]
+  function getCustomFirms(){ return customFirms }
+  function rowToFirmSpec(row){
+    return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'' }
   }
-  function saveCustomFirms(arr){
-    localStorage.setItem('prophos_custom_firms', JSON.stringify(arr))
+  function firmSpecToRow(f){
+    return { name: f.name, symbol: f.symbol||null, unit: f.unit||'Lots', ppl: f.ppl, currency: f.currency||'$', dup_symbol: f.dupSymbol||null }
+  }
+  async function addFirmSpec(entry){
+    const { data, error } = await supabase.from('firm_specs')
+      .insert({ user_id: currentUserId, ...firmSpecToRow(entry) }).select('*').single()
+    if(error) throw error
+    const row = rowToFirmSpec(data)
+    customFirms.push(row)
+    return row
+  }
+  async function updateFirmSpec(id, entry){
+    const { data, error } = await supabase.from('firm_specs')
+      .update(firmSpecToRow(entry)).eq('id', id).select('*').single()
+    if(error) throw error
+    const row = rowToFirmSpec(data)
+    const i = customFirms.findIndex(x => x.id === id)
+    if(i >= 0) customFirms[i] = row
+    return row
+  }
+  async function deleteFirmSpec(id){
+    const { error } = await supabase.from('firm_specs').delete().eq('id', id)
+    if(error) throw error
+    customFirms = customFirms.filter(x => x.id !== id)
+  }
+  async function loadFirmSpecsFromSupabase(){
+    if(!currentUserId) return
+    try{
+      const { data, error } = await supabase
+        .from('firm_specs').select('*')
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: true })
+      if(error){ console.error('loadFirmSpecs:', error); return }
+      if(!data || !data.length){
+        // Erster Login dieses Accounts. Auf Finns eigenem Browser liegen evtl. noch
+        // echte Specs im alten localStorage (vor dieser Migration) — die übernehmen
+        // statt sie mit der Standardliste zu überschreiben. Sonst: Standardliste seeden.
+        let legacy = []
+        try { legacy = JSON.parse(localStorage.getItem('prophos_custom_firms') || '[]') } catch(_){}
+        // Dedupe nach Name (case-insensitive, letzter gewinnt) — firm_specs hat
+        // unique(user_id, name), ein Duplikat in den alten localStorage-Daten
+        // würde sonst den kompletten Seed-Insert scheitern lassen.
+        if(legacy.length){
+          const byName = new Map()
+          for(const f of legacy) byName.set((f.name||'').toLowerCase().trim(), f)
+          legacy = [...byName.values()]
+        }
+        const seed = legacy.length ? legacy : DEFAULT_FIRM_SPECS
+        const rows = seed.map(f => ({ user_id: currentUserId, ...firmSpecToRow(f) }))
+        const { data: inserted, error: insErr } = await supabase.from('firm_specs').insert(rows).select('*')
+        if(insErr){ console.error('seedFirmSpecs:', insErr); return }
+        customFirms = (inserted || []).map(rowToFirmSpec)
+        if(legacy.length) localStorage.removeItem('prophos_custom_firms')
+      } else {
+        customFirms = data.map(rowToFirmSpec)
+      }
+      mergeCustomFirmsIntoPresets()
+      if(document.querySelector('[data-view="settings"].active') && typeof renderFirmsPanel === 'function') renderFirmsPanel()
+    }catch(e){
+      console.error('loadFirmSpecsFromSupabase failed:', e)
+    }
   }
   function mergeCustomFirmsIntoPresets(){
     for(const k of Object.keys(FIRM_PRESETS)){ if(FIRM_PRESETS[k]._custom) delete FIRM_PRESETS[k] }
@@ -10620,8 +10696,8 @@
           if(error) throw error
           for(const a of (accounts||[])){ if(a.firm===firmName) a.firm=newName }
           const cf = getCustomFirms()
-          const ci = cf.findIndex(x=>x.name===firmName)
-          if(ci>=0){ cf[ci].name=newName; saveCustomFirms(cf); mergeCustomFirmsIntoPresets() }
+          const match = cf.find(x=>x.name===firmName)
+          if(match){ await updateFirmSpec(match.id, { ...match, name:newName }); mergeCustomFirmsIntoPresets() }
           renameStatus.textContent = '✓ Gespeichert'; renameStatus.style.color = 'var(--success,#10b981)'
           nameEl.textContent = newName
           if(typeof populateAccountFilters==='function') populateAccountFilters()
@@ -10658,7 +10734,7 @@
             }
           }
           // Custom Specs entfernen
-          if(cfEntry){ saveCustomFirms(getCustomFirms().filter(x=>x.id!==cfEntry.id)); mergeCustomFirmsIntoPresets() }
+          if(cfEntry){ await deleteFirmSpec(cfEntry.id); mergeCustomFirmsIntoPresets() }
           if(typeof populateAccountFilters==='function') populateAccountFilters()
           setTimeout(()=>renderFirmsPanel(), 600)
         } catch(e){
@@ -10722,7 +10798,7 @@
   document.getElementById('customFirmAddBtn')?.addEventListener('click',()=>openCustomFirmModal(null))
   document.getElementById('customFirmCancel')?.addEventListener('click',closeCustomFirmModal)
   document.getElementById('customFirmCancel2')?.addEventListener('click',closeCustomFirmModal)
-  document.getElementById('customFirmSave')?.addEventListener('click',()=>{
+  document.getElementById('customFirmSave')?.addEventListener('click', async ()=>{
     const name=document.getElementById('cf-name').value.trim()
     const symbol=document.getElementById('cf-symbol').value.trim()
     const unit=document.getElementById('cf-unit').value
@@ -10732,12 +10808,18 @@
     const msg=document.getElementById('customFirmMsg')
     if(!name){if(msg)msg.textContent='Name ist Pflicht.';return}
     if(isNaN(ppl)||ppl<=0){if(msg)msg.textContent='$ pro Punkt muss > 0 sein.';return}
-    const firms=getCustomFirms()
-    if(_cfEditId){ const i=firms.findIndex(x=>x.id===_cfEditId); if(i>=0) firms[i]={...firms[i],name,symbol,unit,ppl,currency,dupSymbol} }
-    else firms.push({id:'cf_'+Date.now(),name,symbol,unit,ppl,currency,dupSymbol})
-    // Name-Feld wieder freigeben
-    const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
-    saveCustomFirms(firms); mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
+    const saveBtn = document.getElementById('customFirmSave')
+    saveBtn.disabled = true
+    try{
+      if(_cfEditId) await updateFirmSpec(_cfEditId, {name,symbol,unit,ppl,currency,dupSymbol})
+      else await addFirmSpec({name,symbol,unit,ppl,currency,dupSymbol})
+      // Name-Feld wieder freigeben
+      const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
+      mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
+    }catch(e){
+      if(msg) msg.textContent = 'Fehler: ' + (e.message||e)
+    }
+    saveBtn.disabled = false
   })
 
   // ── Account-Firmen umbenennen ──
@@ -13673,6 +13755,7 @@
       loadTradePlansFromSupabase()
       loadTransactionsFromSupabase()
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
+      if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
     }
   }
 
@@ -13682,6 +13765,7 @@
     accounts = []
     tradePlans = []
     transactions = []
+    customFirms = []
     currentUserId = null
     if(typeof renderAccounts === 'function') renderAccounts()
     if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
@@ -13689,6 +13773,7 @@
     if(typeof renderTradePlans === 'function') renderTradePlans()
     if(typeof renderFinanzen === 'function') renderFinanzen()
     if(typeof clearManagedState === 'function') clearManagedState()
+    if(typeof mergeCustomFirmsIntoPresets === 'function') mergeCustomFirmsIntoPresets()
     return _origShowLogin.apply(this, arguments)
   }
 
@@ -13703,6 +13788,7 @@
         loadTradePlansFromSupabase()
         loadTransactionsFromSupabase()
         if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
+        if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
       }
     }catch(_){}
   })()
