@@ -11,6 +11,19 @@ import os
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
 app = Flask(__name__)
+
+# Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
+# VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
+# irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
+APP_BUILD = "2026-07-21.1"
+
+@app.route("/version", methods=["GET"])
+def version():
+    return jsonify({
+        "build": APP_BUILD,
+        "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
+    })
+
 TSX_BASE = "https://api.topstepx.com"
 RTC_BASE = "https://rtc.topstepx.com"   # ProjectX Gateway Real-Time Hub (SignalR)
 MA_BASE  = "https://mt-client-api-v1.london.agiliumtrade.ai"
@@ -398,11 +411,12 @@ def mirror_start():
 
     # Watchdog: falls der Worker durch eine unerwartete Exception crasht
     # (sollte mit den neuen except-Klauseln nicht mehr passieren, aber zur Sicherheit),
-    # startet er sich automatisch neu — solange die Session noch active ist.
-    def watchdog(pid, fn):
+    # startet er sich automatisch neu — solange SEINE Session (Identität, nicht nur
+    # pair_id — Zombie-Bug 21.07.2026) noch aktiv ist.
+    def watchdog(pid, fn, sess):
         max_restarts = 5
         restarts = 0
-        while mirror_sessions.get(pid, {}).get("active") and restarts <= max_restarts:
+        while mirror_sessions.get(pid) is sess and sess.get("active") and restarts <= max_restarts:
             try:
                 fn(pid)
                 # Worker ist sauber returnt (z.B. weil active=False) → Loop verlassen
@@ -413,10 +427,10 @@ def mirror_start():
                 time.sleep(2 * restarts)  # kurzer Cooldown
         if restarts > max_restarts:
             log_msg(pid, f"⛔ Worker zu oft gecrasht ({restarts} Restarts) — Pair gestoppt")
-            if pid in mirror_sessions:
-                mirror_sessions[pid]["active"] = False
+            if mirror_sessions.get(pid) is sess:
+                sess["active"] = False
 
-    thread = threading.Thread(target=watchdog, args=(pair_id, worker_fn), daemon=True)
+    thread = threading.Thread(target=watchdog, args=(pair_id, worker_fn, session), daemon=True)
     thread.start()
 
     return jsonify({"ok": True})
@@ -449,7 +463,8 @@ def mirror_status():
         # Frontend erwartet die "log"-Einträge in einem Format mit "timestamp"/"message"/"kind"
         return jsonify({
             "active": s.get("active", False),
-            "log": s.get("log", [])[-50:],  # letzte 50 statt 20 — User will mehr Detail sehen
+            "engine": s.get("engine", "polling"),
+            "log": s.get("log", [])[-200:],  # neue Log-Konsole zeigt die volle Historie scrollbar
             "positions": s.get("positions", {})
         })
     # Ohne Param: alles (für Debug/Übersicht)
@@ -483,7 +498,10 @@ def run_mirror(pair_id):
     HEARTBEAT_INTERVAL = 120  # alle 2 Minuten ein "alles ruhig"-Log
     MAX_BACKOFF = 60  # max 60s zwischen retries
 
-    while mirror_sessions.get(pair_id, {}).get("active"):
+    # Session-IDENTITÄT prüfen (is s), nicht nur active per pair_id — nach Stop+Neustart
+    # existiert unter derselben pair_id eine NEUE Session, und der alte Thread würde sonst
+    # als Zombie ewig weiterlaufen und parallel spiegeln (Doppel-Orders, 21.07.2026).
+    while mirror_sessions.get(pair_id) is s and s.get("active"):
         # Proaktiver Token Refresh alle 20 min
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             refresh_tsx_token(pair_id, http)
@@ -617,9 +635,23 @@ def run_mirror_realtime(pair_id):
         log_msg(pair_id, f"⚙️ Risiko-Mode: Multiplier {multiplier}x")
 
     # Netto-Menge pro Contract (signed: + = Long, - = Short) + Referenz-ID für close_hedge
-    net = {}       # contractId -> signed qty
-    ref = {}       # contractId -> hedge reference id (für s["positions"] / close_hedge)
-    stop_flag = threading.Event()
+    net = {}           # contractId -> signed qty
+    ref = {}           # contractId -> hedge reference id (für s["positions"] / close_hedge)
+    seen_trades = {}   # trade-id -> ts. Dedup gegen doppelt zugestellte Events (z.B. nach
+                       # Reconnect oder falls serverseitig je doppelt abonniert) — ein doppelt
+                       # verarbeiteter Fill würde net verfälschen und falsche Hedges auslösen.
+    sub_lock = threading.Lock()
+    first_event_logged = [False]
+
+    # WICHTIG (Lesson vom 21.07.2026, Zombie-Thread-Bug): Session-IDENTITÄT prüfen, nicht
+    # nur active-Flag per pair_id. Nach Stop+Neustart existiert unter derselben pair_id eine
+    # NEUE Session — der alte Thread muss sich selbst als überholt erkennen und beenden,
+    # sonst spiegeln zwei Verbindungen parallel (Doppel-Orders).
+    def session_alive():
+        return mirror_sessions.get(pair_id) is s and s.get("active")
+
+    def hub_is_current(h):
+        return mirror_hubs.get(pair_id) is h
 
     def fetch_risk_for_contract(contract_id):
         """Best-effort: initialRisk für eine gerade neu erkannte Position nachladen,
@@ -638,18 +670,33 @@ def run_mirror_realtime(pair_id):
             pass
         return 0
 
-    def on_trade(args):
+    def is_dup_trade(tid):
+        if tid is None: return False
+        key = str(tid)
+        if key in seen_trades: return True
+        seen_trades[key] = time.time()
+        if len(seen_trades) > 2000:
+            for k in sorted(seen_trades, key=seen_trades.get)[:1000]:
+                seen_trades.pop(k, None)
+        return False
+
+    def on_trade(h, args):
         try:
-            # Identitäts-Check statt nur active-Flag: mirror_hubs[pair_id] zeigt IMMER auf
-            # die aktuell gültige Verbindung. Läuft trotz hub.stop() noch kurz die alte
-            # Connection eines vorherigen Threads (Race beim schnellen Stop+Neustart), wurde
-            # mirror_hubs[pair_id] bei Neustart längst auf die neue Connection umgebogen —
-            # die alte erkennt sich hier selbst als überholt und tut nichts mehr.
-            if mirror_hubs.get(pair_id) is not hub or not mirror_sessions.get(pair_id, {}).get("active"):
-                return
-            data = args[0] if args else {}
-            if str(data.get("accountId")) != str(s.get("tsxAccountId")):
+            if not session_alive() or not hub_is_current(h):
+                return  # überholte Verbindung/Session — nichts mehr auslösen
+            # Defensive: Event-Payload kann [tradeObj] oder [accountId, tradeObj] sein
+            data = None
+            if args and isinstance(args[0], dict): data = args[0]
+            elif args and len(args) > 1 and isinstance(args[1], dict): data = args[1]
+            if data is None: return
+            if not first_event_logged[0]:
+                first_event_logged[0] = True
+                log_msg(pair_id, f"📡 Erstes Trade-Event empfangen: {json.dumps(data)[:220]}")
+            evt_acc = data.get("accountId")
+            if evt_acc is not None and str(evt_acc) != str(s.get("tsxAccountId")):
                 return  # Event für einen anderen Account auf derselben Connection
+            if is_dup_trade(data.get("id")):
+                return  # exakt dieses Trade-Event wurde schon verarbeitet
             contract = data.get("contractId", "")
             raw_side = data.get("side", 0)
             size = int(data.get("size", 0) or 0)
@@ -698,18 +745,18 @@ def run_mirror_realtime(pair_id):
             log_msg(pair_id, f"⚠️ Fehler beim Verarbeiten eines Trade-Events: {type(e).__name__}: {str(e)[:120]}")
 
     def sync_baseline():
-        """Bereits offene TSX-Positionen (schon offen vor Verbindungsaufbau, oder
-        während eines kurzen Reconnects verpasst) einmalig per REST übernehmen —
-        der Echtzeit-Pfad reagiert sonst nur auf NEUE Fills NACH dem Connect/Subscribe,
-        anders als der alte Poll-Modus, der das beim ersten Poll automatisch mitnimmt.
-        Läuft bei jedem (Re-)Connect — bereits getrackte Contracts werden übersprungen,
-        also auch ein guter Nachschlag falls der Stream während eines Reconnects was verpasst hat."""
+        """Bereits offene TSX-Positionen (offen vor Verbindungsaufbau, oder während eines
+        Reconnects verpasst) per REST übernehmen — der Event-Stream liefert nur NEUE Fills.
+        Läuft bei jedem (Re-)Connect; bereits getrackte Contracts werden übersprungen."""
         try:
             r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
                 headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
                 json={"accountId": int(s["tsxAccountId"])}, timeout=10)
-            if not r.ok: return
+            if not r.ok:
+                log_msg(pair_id, f"⚠️ Baseline-Sync: HTTP {r.status_code} — {r.text[:80]}", "warn")
+                return
             positions = r.json().get("positions", r.json().get("data", []))
+            taken = 0
             for pos in positions:
                 contract = pos.get("contractId", "")
                 if not contract or contract in ref: continue
@@ -722,75 +769,94 @@ def run_mirror_realtime(pair_id):
                 net[contract] = qty if is_buy else -qty
                 rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                 ref[contract] = rid
+                taken += 1
                 log_msg(pair_id, f"🆕 Bereits offene TSX-Position übernommen: {'Buy' if is_buy else 'Sell'} {qty}× {contract}")
                 log_msg(pair_id, "➡️ Spiegle nach MT5…")
                 open_hedge(pair_id, rid, 0 if is_buy else 1, contract, qty, tsx_risk)
+            # Auch Stille diagnostizierbar machen — beim letzten Mal war unklar, ob der
+            # Baseline-Sync überhaupt gelaufen ist.
+            if not positions:
+                log_msg(pair_id, "📊 Baseline-Sync: keine offenen TSX-Positionen")
+            elif taken == 0:
+                log_msg(pair_id, "📊 Baseline-Sync: alle offenen Positionen bereits getrackt")
         except Exception as e:
-            log_msg(pair_id, f"⚠️ Baseline-Sync fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
+            log_msg(pair_id, f"⚠️ Baseline-Sync fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
 
-    def subscribe():
-        # Gleicher Identitäts-Check wie in on_trade — eine überholte Verbindung (altes
-        # hub.stop() noch nicht ganz durch, reconnected aber trotzdem kurz) soll weder
-        # erneut abonnieren noch einen Baseline-Sync mit doppelten Hedges auslösen.
-        if mirror_hubs.get(pair_id) is not hub:
-            return
-        try:
-            hub.send("SubscribeTrades", [int(s["tsxAccountId"])])
-            log_msg(pair_id, "🔌 Verbunden & auf Trades abonniert (User Hub)")
-            sync_baseline()
-        except Exception as e:
-            log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
+    def do_subscribe(h):
+        if not session_alive() or not hub_is_current(h):
+            return  # überholte Verbindung soll weder abonnieren noch Baseline-Hedges auslösen
+        with sub_lock:
+            if getattr(h, "_pph_subscribed", False):
+                return  # schon abonniert auf DIESER Verbindung — ein zweites SubscribeTrades
+                        # würde jedes Event doppelt zustellen (→ falsche net-Stände)
+            try:
+                h.send("SubscribeTrades", [int(s["tsxAccountId"])])
+                h._pph_subscribed = True
+            except Exception as e:
+                log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
+                return
+        log_msg(pair_id, "🔌 Verbunden & auf Trades abonniert (User Hub)")
+        sync_baseline()
 
-    hub = HubConnectionBuilder()\
-        .with_url(f"{RTC_BASE}/hubs/user?access_token={s['tsxToken']}", options={"skip_negotiation": True}) \
-        .configure_logging(logging.WARNING) \
-        .with_automatic_reconnect({
-            "type": "interval",
-            "keep_alive_interval": 10,
-            "intervals": [1, 2, 5, 10, 15, 30, 60]
-        }).build()
+    def on_hub_reopen(h):
+        # Nach einem Reconnect ist es serverseitig eine NEUE Verbindung — Subscription
+        # ist weg und muss neu angemeldet werden.
+        with sub_lock:
+            h._pph_subscribed = False
+        do_subscribe(h)
 
-    hub.on_open(subscribe)
-    hub.on_reconnect(subscribe)
-    hub.on_close(lambda: log_msg(pair_id, "🔌 Verbindung getrennt — automatischer Reconnect läuft…", "warn"))
-    hub.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
-    hub.on("GatewayUserTrade", on_trade)
+    def on_hub_close(h):
+        with sub_lock:
+            h._pph_subscribed = False
+        if session_alive() and hub_is_current(h):
+            log_msg(pair_id, "🔌 Verbindung getrennt — automatischer Reconnect läuft…", "warn")
 
-    mirror_hubs[pair_id] = hub  # VOR start() setzen — on_open kann sonst schon feuern, bevor die Registrierung durch ist
+    def build_hub(token):
+        # Callbacks werden fest an DIESES Hub-Objekt gebunden (Parameter h, nicht die äußere
+        # hub-Variable!) — sonst greifen die Callbacks einer alten Verbindung nach einem
+        # Token-Refresh auf die NEUE Verbindung zu und der Identitäts-Check läuft ins Leere.
+        h = HubConnectionBuilder()\
+            .with_url(f"{RTC_BASE}/hubs/user?access_token={token}", options={"skip_negotiation": True}) \
+            .configure_logging(logging.WARNING) \
+            .with_automatic_reconnect({
+                "type": "interval",
+                "keep_alive_interval": 10,
+                "intervals": [1, 2, 5, 10, 15, 30, 60]
+            }).build()
+        h.on_open(lambda: do_subscribe(h))
+        h.on_reconnect(lambda: on_hub_reopen(h))
+        h.on_close(lambda: on_hub_close(h))
+        h.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
+        h.on("GatewayUserTrade", lambda args: on_trade(h, args))
+        return h
+
+    hub = build_hub(s["tsxToken"])
+    mirror_hubs[pair_id] = hub  # VOR start() registrieren — on_open kann sofort feuern
     try:
         hub.start()
     except Exception as e:
         log_msg(pair_id, f"❌ Verbindungsaufbau fehlgeschlagen: {type(e).__name__}: {str(e)[:150]}", "err")
-        mirror_hubs.pop(pair_id, None)
+        if mirror_hubs.get(pair_id) is hub:
+            mirror_hubs.pop(pair_id, None)
         return
 
     # Reconciliation-Watchdog: periodischer REST-Abgleich als Sicherheitsnetz, falls der
-    # Stream mal was verpasst (z.B. während eines Reconnects). Korrigiert NICHT automatisch,
-    # loggt nur eine Warnung — bewusst konservativ für die erste Echtzeit-Version.
+    # Stream mal was verpasst. Korrigiert NICHT automatisch, loggt nur eine Warnung —
+    # bewusst konservativ, solange der Echtzeit-Modus mit echtem Geld noch neu ist.
     last_heartbeat = time.time()
     HEARTBEAT_INTERVAL = 120
-    while mirror_sessions.get(pair_id, {}).get("active"):
+    while session_alive():
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             if refresh_tsx_token(pair_id, http):
-                # Frischer Token → Hub braucht eine neue Verbindung (access_token steckt in der URL)
+                # Frischer Token → Hub braucht neue Verbindung (access_token steckt in der URL).
+                # Registrierung ZUERST auf die neue Verbindung umbiegen, dann alte stoppen —
+                # so erkennen sich alle Callbacks der alten sofort als überholt.
                 log_msg(pair_id, "🔄 Token erneuert — baue Echtzeit-Verbindung neu auf…")
-                try:
-                    hub.stop()
-                except Exception:
-                    pass
-                hub = HubConnectionBuilder()\
-                    .with_url(f"{RTC_BASE}/hubs/user?access_token={s['tsxToken']}", options={"skip_negotiation": True}) \
-                    .configure_logging(logging.WARNING) \
-                    .with_automatic_reconnect({
-                        "type": "interval", "keep_alive_interval": 10,
-                        "intervals": [1, 2, 5, 10, 15, 30, 60]
-                    }).build()
-                hub.on_open(subscribe)
-                hub.on_reconnect(subscribe)
-                hub.on_close(lambda: log_msg(pair_id, "🔌 Verbindung getrennt — automatischer Reconnect läuft…", "warn"))
-                hub.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
-                hub.on("GatewayUserTrade", on_trade)
+                old = hub
+                hub = build_hub(s["tsxToken"])
                 mirror_hubs[pair_id] = hub
+                try: old.stop()
+                except Exception: pass
                 try:
                     hub.start()
                 except Exception as e:
@@ -812,15 +878,16 @@ def run_mirror_realtime(pair_id):
                 missing_locally = rest_contracts - tracked_contracts    # TSX hat's, wir nicht
                 phantom_locally = tracked_contracts - rest_contracts    # wir haben's, TSX nicht mehr
                 if missing_locally:
-                    log_msg(pair_id, f"⚠️ Reconciliation: {len(missing_locally)} Position(en) auf TSX ohne lokalen Hedge-Stand ({', '.join(list(missing_locally)[:3])}) — Stream evtl. was verpasst, bitte prüfen.", "warn")
+                    log_msg(pair_id, f"⚠️ Reconciliation: {len(missing_locally)} Position(en) auf TSX ohne lokalen Hedge-Stand ({', '.join(list(missing_locally)[:3])}) — Mirror neu starten, um sie zu übernehmen.", "warn")
                 if phantom_locally:
-                    log_msg(pair_id, f"⚠️ Reconciliation: {len(phantom_locally)} Position(en) lokal getrackt, aber nicht mehr auf TSX ({', '.join(list(phantom_locally)[:3])}) — bitte prüfen.", "warn")
+                    log_msg(pair_id, f"⚠️ Reconciliation: {len(phantom_locally)} Position(en) lokal getrackt, aber nicht mehr auf TSX ({', '.join(list(phantom_locally)[:3])}) — Hedge ggf. manuell prüfen.", "warn")
         except Exception:
             pass  # Reconciliation ist nur ein Sicherheitsnetz, Fehler hier sollen den Mirror nicht stoppen
 
         time.sleep(RT_RECONCILE_INTERVAL)
 
-    mirror_hubs.pop(pair_id, None)
+    if mirror_hubs.get(pair_id) is hub:
+        mirror_hubs.pop(pair_id, None)
     try:
         hub.stop()
     except Exception:
@@ -956,7 +1023,8 @@ def run_mirror_mt_to_tsx(pair_id):
     HEARTBEAT_INTERVAL = 120
     MAX_BACKOFF = 60
 
-    while mirror_sessions.get(pair_id, {}).get("active"):
+    # Session-Identität statt nur active-Flag — siehe Kommentar in run_mirror (Zombie-Bug)
+    while mirror_sessions.get(pair_id) is s and s.get("active"):
         # TSX Token auch hier refreshen (brauchen wir für close orders)
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             refresh_tsx_token(pair_id, http)
