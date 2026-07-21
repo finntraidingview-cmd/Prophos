@@ -15,7 +15,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.1"
+APP_BUILD = "2026-07-21.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -616,7 +616,10 @@ def run_mirror(pair_id):
 # Reconciliation läuft nur als Log-Warnung (kein Auto-Fix) — bewusst konservativ für die
 # erste Version mit echtem Geld; Auto-Heal kann nachgezogen werden sobald das im Alltag
 # eine Weile sauber gelaufen ist.
-RT_RECONCILE_INTERVAL = 8  # Sekunden zwischen REST-Abgleichen
+# 3s statt 8s: seit die Reconciliation selbst heilt (Auto-Übernahme/Auto-Close statt
+# Warnung), ist sie das Sicherheitsnetz, wenn der Stream ausfällt — 3s hält die
+# Worst-Case-Latenz klein und bleibt weit unter dem Rate-Limit (200 Req/60s).
+RT_RECONCILE_INTERVAL = 3
 
 def run_mirror_realtime(pair_id):
     s = mirror_sessions.get(pair_id)
@@ -641,7 +644,14 @@ def run_mirror_realtime(pair_id):
                        # Reconnect oder falls serverseitig je doppelt abonniert) — ein doppelt
                        # verarbeiteter Fill würde net verfälschen und falsche Hedges auslösen.
     sub_lock = threading.Lock()
+    # pos_lock serialisiert ALLE net/ref-Mutationen inkl. Hedge-Auslösung — Event-Thread
+    # (on_trade) und Worker-Thread (Baseline/Heal) dürfen nie gleichzeitig dieselbe
+    # Position adoptieren, sonst öffnen beide einen Hedge (Race → Doppel-Order).
+    pos_lock = threading.Lock()
     first_event_logged = [False]
+    reconnects = [0]
+    phantom_seen = {}      # contractId -> aufeinanderfolgende Reconciliation-Pässe als "phantom"
+    last_rebuild = [time.time()]  # Cap: Stream-Neuaufbau nach Heal max. 1×/60s
 
     # WICHTIG (Lesson vom 21.07.2026, Zombie-Thread-Bug): Session-IDENTITÄT prüfen, nicht
     # nur active-Flag per pair_id. Nach Stop+Neustart existiert unter derselben pair_id eine
@@ -704,83 +714,92 @@ def run_mirror_realtime(pair_id):
                 return
             signed = size if raw_side in (0, "0", "Buy", "buy", "BUY", "Long", "long", "B") else -size
 
-            prev = net.get(contract, 0)
-            new = prev + signed
-            net[contract] = new
+            with pos_lock:
+                prev = net.get(contract, 0)
+                new = prev + signed
+                net[contract] = new
 
-            if prev == 0 and new != 0:
-                # Neue Position
-                rid = ref.get(contract) or f"rt-{contract}-{uuid.uuid4().hex[:8]}"
-                ref[contract] = rid
-                side_label = "Buy" if new > 0 else "Sell"
-                log_msg(pair_id, f"🆕 TSX Fill erkannt (Echtzeit): {side_label} {abs(new)}× {contract}")
-                risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
-                log_msg(pair_id, "➡️ Spiegle nach MT5…")
-                open_hedge(pair_id, rid, 0 if new > 0 else 1, contract, abs(new), risk)
-            elif prev != 0 and new == 0:
-                # Position komplett geschlossen
-                rid = ref.pop(contract, None)
-                log_msg(pair_id, f"🔚 TSX Position geschlossen (Echtzeit): {contract}")
-                if rid:
-                    log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
-                    close_hedge(pair_id, rid)
-            elif prev != 0 and new != 0 and (prev > 0) != (new > 0):
-                # Durchgerutscht (Long→Short direkt ohne 0-Zwischenstand) — alten Hedge zu,
-                # neuen auf. Seltener Fall (ein einzelner großer Gegen-Trade).
-                rid_old = ref.pop(contract, None)
-                if rid_old:
-                    log_msg(pair_id, f"🔁 TSX Position durch Gegen-Trade gedreht: {contract} — schließe alten Hedge…")
-                    close_hedge(pair_id, rid_old)
-                rid_new = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
-                ref[contract] = rid_new
-                risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
-                log_msg(pair_id, "➡️ Öffne gedrehten Hedge auf MT5…")
-                open_hedge(pair_id, rid_new, 0 if new > 0 else 1, contract, abs(new), risk)
-            elif prev != 0 and new != 0:
-                # Größe innerhalb einer offenen Position geändert (Nachkauf/Teilverkauf) —
-                # wie im alten Poll-Modell (das reagiert auch nur auf neu/weg, nicht auf
-                # Größenänderung) wird das hier nur geloggt, nicht automatisch nachjustiert.
-                log_msg(pair_id, f"ℹ️ Positionsgröße geändert: {contract} {prev}→{new} (Hedge-Größe bleibt wie beim Opening — nicht automatisch angepasst)")
+                if prev == 0 and new != 0:
+                    # Neue Position
+                    rid = ref.get(contract) or f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                    ref[contract] = rid
+                    side_label = "Buy" if new > 0 else "Sell"
+                    log_msg(pair_id, f"🆕 TSX Fill erkannt (Echtzeit): {side_label} {abs(new)}× {contract}")
+                    risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
+                    log_msg(pair_id, "➡️ Spiegle nach MT5…")
+                    open_hedge(pair_id, rid, 0 if new > 0 else 1, contract, abs(new), risk)
+                elif prev != 0 and new == 0:
+                    # Position komplett geschlossen
+                    rid = ref.pop(contract, None)
+                    log_msg(pair_id, f"🔚 TSX Position geschlossen (Echtzeit): {contract}")
+                    if rid:
+                        log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
+                        close_hedge(pair_id, rid)
+                elif prev != 0 and new != 0 and (prev > 0) != (new > 0):
+                    # Durchgerutscht (Long→Short direkt ohne 0-Zwischenstand) — alten Hedge zu,
+                    # neuen auf. Seltener Fall (ein einzelner großer Gegen-Trade).
+                    rid_old = ref.pop(contract, None)
+                    if rid_old:
+                        log_msg(pair_id, f"🔁 TSX Position durch Gegen-Trade gedreht: {contract} — schließe alten Hedge…")
+                        close_hedge(pair_id, rid_old)
+                    rid_new = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                    ref[contract] = rid_new
+                    risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
+                    log_msg(pair_id, "➡️ Öffne gedrehten Hedge auf MT5…")
+                    open_hedge(pair_id, rid_new, 0 if new > 0 else 1, contract, abs(new), risk)
+                elif prev != 0 and new != 0:
+                    # Größe innerhalb einer offenen Position geändert (Nachkauf/Teilverkauf) —
+                    # wie im alten Poll-Modell (das reagiert auch nur auf neu/weg, nicht auf
+                    # Größenänderung) wird das hier nur geloggt, nicht automatisch nachjustiert.
+                    log_msg(pair_id, f"ℹ️ Positionsgröße geändert: {contract} {prev}→{new} (Hedge-Größe bleibt wie beim Opening — nicht automatisch angepasst)")
         except Exception as e:
             log_msg(pair_id, f"⚠️ Fehler beim Verarbeiten eines Trade-Events: {type(e).__name__}: {str(e)[:120]}")
 
-    def sync_baseline():
+    def sync_baseline(heal=False):
         """Bereits offene TSX-Positionen (offen vor Verbindungsaufbau, oder während eines
-        Reconnects verpasst) per REST übernehmen — der Event-Stream liefert nur NEUE Fills.
-        Läuft bei jedem (Re-)Connect; bereits getrackte Contracts werden übersprungen."""
+        Reconnects/Stream-Ausfalls verpasst) per REST übernehmen — der Event-Stream liefert
+        nur NEUE Fills. Läuft bei jedem (Re-)Connect UND als Heal aus der Reconciliation;
+        bereits getrackte Contracts werden übersprungen. heal=True ändert nur die Log-Texte."""
         try:
             r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
                 headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
                 json={"accountId": int(s["tsxAccountId"])}, timeout=10)
             if not r.ok:
                 log_msg(pair_id, f"⚠️ Baseline-Sync: HTTP {r.status_code} — {r.text[:80]}", "warn")
-                return
+                return 0
             positions = r.json().get("positions", r.json().get("data", []))
             taken = 0
-            for pos in positions:
-                contract = pos.get("contractId", "")
-                if not contract or contract in ref: continue
-                raw_side = pos.get("side", pos.get("action", ""))
-                raw_type = pos.get("type", 0)
-                is_buy = raw_type == 1 or raw_side in (0, "0", "Buy", "buy", "BUY", "Long")
-                qty = int(pos.get("size", pos.get("quantity", 1)) or 0)
-                if qty <= 0: continue
-                tsx_risk = float(pos.get("initialRisk", pos.get("risk", 0)) or 0)
-                net[contract] = qty if is_buy else -qty
-                rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
-                ref[contract] = rid
-                taken += 1
-                log_msg(pair_id, f"🆕 Bereits offene TSX-Position übernommen: {'Buy' if is_buy else 'Sell'} {qty}× {contract}")
-                log_msg(pair_id, "➡️ Spiegle nach MT5…")
-                open_hedge(pair_id, rid, 0 if is_buy else 1, contract, qty, tsx_risk)
+            with pos_lock:
+                for pos in positions:
+                    contract = pos.get("contractId", "")
+                    if not contract or contract in ref: continue
+                    raw_side = pos.get("side", pos.get("action", ""))
+                    raw_type = pos.get("type", 0)
+                    is_buy = raw_type == 1 or raw_side in (0, "0", "Buy", "buy", "BUY", "Long")
+                    qty = int(pos.get("size", pos.get("quantity", 1)) or 0)
+                    if qty <= 0: continue
+                    tsx_risk = float(pos.get("initialRisk", pos.get("risk", 0)) or 0)
+                    net[contract] = qty if is_buy else -qty
+                    rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                    ref[contract] = rid
+                    taken += 1
+                    if heal:
+                        log_msg(pair_id, f"🛟 Stream-Lücke — übernehme TSX-Position per REST: {'Buy' if is_buy else 'Sell'} {qty}× {contract}", "warn")
+                    else:
+                        log_msg(pair_id, f"🆕 Bereits offene TSX-Position übernommen: {'Buy' if is_buy else 'Sell'} {qty}× {contract}")
+                    log_msg(pair_id, "➡️ Spiegle nach MT5…")
+                    open_hedge(pair_id, rid, 0 if is_buy else 1, contract, qty, tsx_risk)
             # Auch Stille diagnostizierbar machen — beim letzten Mal war unklar, ob der
-            # Baseline-Sync überhaupt gelaufen ist.
-            if not positions:
-                log_msg(pair_id, "📊 Baseline-Sync: keine offenen TSX-Positionen")
-            elif taken == 0:
-                log_msg(pair_id, "📊 Baseline-Sync: alle offenen Positionen bereits getrackt")
+            # Baseline-Sync überhaupt gelaufen ist. (Nur beim Connect-Sync, Heals sind eh laut.)
+            if not heal:
+                if not positions:
+                    log_msg(pair_id, "📊 Baseline-Sync: keine offenen TSX-Positionen")
+                elif taken == 0:
+                    log_msg(pair_id, "📊 Baseline-Sync: alle offenen Positionen bereits getrackt")
+            return taken
         except Exception as e:
             log_msg(pair_id, f"⚠️ Baseline-Sync fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
+            return 0
 
     def do_subscribe(h):
         if not session_alive() or not hub_is_current(h):
@@ -803,6 +822,8 @@ def run_mirror_realtime(pair_id):
         # ist weg und muss neu angemeldet werden.
         with sub_lock:
             h._pph_subscribed = False
+        reconnects[0] += 1
+        log_msg(pair_id, f"🔁 Stream-Reconnect #{reconnects[0]}", "warn")
         do_subscribe(h)
 
     def on_hub_close(h):
@@ -830,6 +851,21 @@ def run_mirror_realtime(pair_id):
         h.on("GatewayUserTrade", lambda args: on_trade(h, args))
         return h
 
+    def rebuild_connection(reason):
+        # Registrierung ZUERST auf die neue Verbindung umbiegen, dann alte stoppen —
+        # so erkennen sich alle Callbacks der alten sofort als überholt.
+        nonlocal hub
+        log_msg(pair_id, f"🔁 Stream-Verbindung wird neu aufgebaut — {reason}")
+        old = hub
+        hub = build_hub(s["tsxToken"])
+        mirror_hubs[pair_id] = hub
+        try: old.stop()
+        except Exception: pass
+        try:
+            hub.start()
+        except Exception as e:
+            log_msg(pair_id, f"❌ Stream-Neuaufbau fehlgeschlagen: {str(e)[:120]}", "err")
+
     hub = build_hub(s["tsxToken"])
     mirror_hubs[pair_id] = hub  # VOR start() registrieren — on_open kann sofort feuern
     try:
@@ -840,31 +876,29 @@ def run_mirror_realtime(pair_id):
             mirror_hubs.pop(pair_id, None)
         return
 
-    # Reconciliation-Watchdog: periodischer REST-Abgleich als Sicherheitsnetz, falls der
-    # Stream mal was verpasst. Korrigiert NICHT automatisch, loggt nur eine Warnung —
-    # bewusst konservativ, solange der Echtzeit-Modus mit echtem Geld noch neu ist.
+    # Reconciliation-Watchdog mit SELBSTHEILUNG (21.07.2026): der Live-Test hat gezeigt,
+    # dass der SignalR-Stream de facto ausfallen kann (Reconnect-Burst beim Start, danach
+    # nominell verbunden, aber keine Events mehr) — reine Warnungen halfen Finn nicht,
+    # die Position blieb ungespiegelt bis zum manuellen Neustart. Deshalb handelt der
+    # Abgleich jetzt selbst:
+    #  - Position auf TSX ohne lokalen Hedge → sofort per sync_baseline(heal) übernehmen
+    #    (racefrei durch pos_lock + ref-Check; schlimmstenfalls ~3-6s Latenz statt nie).
+    #  - Lokal getrackt, aber auf TSX weg → Hedge schließen, aber erst nach 2 Pässen in
+    #    Folge (~6s): schützt gegen den Race, dass ein frisch per Event eröffneter Trade
+    #    im gerade gezogenen (älteren) REST-Snapshot noch fehlt.
+    #  - Nach jedem Heal gilt der Stream als defekt → Verbindung wird neu aufgebaut
+    #    (max. 1×/60s, damit kein Rebuild-Loop entsteht).
     last_heartbeat = time.time()
     HEARTBEAT_INTERVAL = 120
     while session_alive():
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             if refresh_tsx_token(pair_id, http):
-                # Frischer Token → Hub braucht neue Verbindung (access_token steckt in der URL).
-                # Registrierung ZUERST auf die neue Verbindung umbiegen, dann alte stoppen —
-                # so erkennen sich alle Callbacks der alten sofort als überholt.
-                log_msg(pair_id, "🔄 Token erneuert — baue Echtzeit-Verbindung neu auf…")
-                old = hub
-                hub = build_hub(s["tsxToken"])
-                mirror_hubs[pair_id] = hub
-                try: old.stop()
-                except Exception: pass
-                try:
-                    hub.start()
-                except Exception as e:
-                    log_msg(pair_id, f"❌ Reconnect nach Token-Refresh fehlgeschlagen: {str(e)[:120]}", "err")
+                # Frischer Token → Hub braucht neue Verbindung (access_token steckt in der URL)
+                rebuild_connection("Token erneuert")
 
         if time.time() - last_heartbeat > HEARTBEAT_INTERVAL:
             n_open = len(ref)
-            log_msg(pair_id, f"💓 Mirror läuft (Echtzeit) — {n_open} offene Position{'en' if n_open != 1 else ''}")
+            log_msg(pair_id, f"💓 Mirror läuft (Echtzeit) — {n_open} offene Position{'en' if n_open != 1 else ''} · {reconnects[0]} Reconnects bisher")
             last_heartbeat = time.time()
 
         try:
@@ -874,13 +908,36 @@ def run_mirror_realtime(pair_id):
             if r.ok:
                 positions = r.json().get("positions", r.json().get("data", []))
                 rest_contracts = {p.get("contractId") for p in positions if p.get("contractId")}
-                tracked_contracts = {c for c, q in net.items() if q != 0}
+                with pos_lock:
+                    tracked_contracts = {c for c, q in net.items() if q != 0}
                 missing_locally = rest_contracts - tracked_contracts    # TSX hat's, wir nicht
                 phantom_locally = tracked_contracts - rest_contracts    # wir haben's, TSX nicht mehr
+                healed = False
+
                 if missing_locally:
-                    log_msg(pair_id, f"⚠️ Reconciliation: {len(missing_locally)} Position(en) auf TSX ohne lokalen Hedge-Stand ({', '.join(list(missing_locally)[:3])}) — Mirror neu starten, um sie zu übernehmen.", "warn")
-                if phantom_locally:
-                    log_msg(pair_id, f"⚠️ Reconciliation: {len(phantom_locally)} Position(en) lokal getrackt, aber nicht mehr auf TSX ({', '.join(list(phantom_locally)[:3])}) — Hedge ggf. manuell prüfen.", "warn")
+                    log_msg(pair_id, f"🛟 Abgleich: {len(missing_locally)} TSX-Position(en) ohne Hedge ({', '.join(list(missing_locally)[:3])}) — übernehme automatisch…", "warn")
+                    if sync_baseline(heal=True) > 0:
+                        healed = True
+
+                # Phantom-Zähler pflegen: nur Contracts, die WIEDERHOLT fehlen, werden geschlossen
+                for c in list(phantom_seen.keys()):
+                    if c not in phantom_locally:
+                        phantom_seen.pop(c, None)
+                for c in phantom_locally:
+                    phantom_seen[c] = phantom_seen.get(c, 0) + 1
+                    if phantom_seen[c] >= 2:
+                        phantom_seen.pop(c, None)
+                        with pos_lock:
+                            rid = ref.pop(c, None)
+                            net[c] = 0
+                        log_msg(pair_id, f"🛟 Abgleich: {c} auf TSX geschlossen (2× bestätigt) — schließe Hedge automatisch…", "warn")
+                        if rid:
+                            close_hedge(pair_id, rid)
+                        healed = True
+
+                if healed and time.time() - last_rebuild[0] > 60:
+                    last_rebuild[0] = time.time()
+                    rebuild_connection("Stream hat Events verpasst")
         except Exception:
             pass  # Reconciliation ist nur ein Sicherheitsnetz, Fehler hier sollen den Mirror nicht stoppen
 
