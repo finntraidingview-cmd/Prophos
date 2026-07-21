@@ -31,6 +31,11 @@ DUP_PASSWORD = os.environ.get("DUP_PASSWORD") or ""
 
 # Active mirror sessions: pair_id -> session data
 mirror_sessions = {}
+# Echtzeit-Modus: SignalR-Hub-Objekte pro pair_id, damit /mirror/stop die Verbindung
+# SOFORT trennen kann statt nur "active":False zu setzen und auf die nächste Loop-
+# Iteration zu warten (bis zu 8s Fenster, in dem die alte Verbindung noch weiter
+# mitgespiegelt hätte — echter Bug, hat zu doppelten Hedge-Orders geführt, 21.07.2026).
+mirror_hubs = {}
 
 # Duplikium credential cache (in-memory): user_email -> {token, password, last_refresh}
 # Hinweis: Passwort wird nur in Memory gehalten, NICHT auf Disk geschrieben.
@@ -424,6 +429,13 @@ def mirror_stop():
     if pair_id in mirror_sessions:
         mirror_sessions[pair_id]["active"] = False
         del mirror_sessions[pair_id]
+    # Echtzeit-Hub SOFORT trennen (nicht erst nächste Loop-Iteration) — sonst spiegelt
+    # die alte SignalR-Verbindung noch bis zu 8s weiter, während schon ein Neustart
+    # eine zweite Verbindung aufbaut → doppelte Hedge-Orders.
+    hub = mirror_hubs.pop(pair_id, None)
+    if hub:
+        try: hub.stop()
+        except Exception: pass
     return jsonify({"ok": True})
 
 @app.route("/mirror/status", methods=["GET"])
@@ -628,6 +640,13 @@ def run_mirror_realtime(pair_id):
 
     def on_trade(args):
         try:
+            # Identitäts-Check statt nur active-Flag: mirror_hubs[pair_id] zeigt IMMER auf
+            # die aktuell gültige Verbindung. Läuft trotz hub.stop() noch kurz die alte
+            # Connection eines vorherigen Threads (Race beim schnellen Stop+Neustart), wurde
+            # mirror_hubs[pair_id] bei Neustart längst auf die neue Connection umgebogen —
+            # die alte erkennt sich hier selbst als überholt und tut nichts mehr.
+            if mirror_hubs.get(pair_id) is not hub or not mirror_sessions.get(pair_id, {}).get("active"):
+                return
             data = args[0] if args else {}
             if str(data.get("accountId")) != str(s.get("tsxAccountId")):
                 return  # Event für einen anderen Account auf derselben Connection
@@ -710,6 +729,11 @@ def run_mirror_realtime(pair_id):
             log_msg(pair_id, f"⚠️ Baseline-Sync fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
 
     def subscribe():
+        # Gleicher Identitäts-Check wie in on_trade — eine überholte Verbindung (altes
+        # hub.stop() noch nicht ganz durch, reconnected aber trotzdem kurz) soll weder
+        # erneut abonnieren noch einen Baseline-Sync mit doppelten Hedges auslösen.
+        if mirror_hubs.get(pair_id) is not hub:
+            return
         try:
             hub.send("SubscribeTrades", [int(s["tsxAccountId"])])
             log_msg(pair_id, "🔌 Verbunden & auf Trades abonniert (User Hub)")
@@ -732,10 +756,12 @@ def run_mirror_realtime(pair_id):
     hub.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
     hub.on("GatewayUserTrade", on_trade)
 
+    mirror_hubs[pair_id] = hub  # VOR start() setzen — on_open kann sonst schon feuern, bevor die Registrierung durch ist
     try:
         hub.start()
     except Exception as e:
         log_msg(pair_id, f"❌ Verbindungsaufbau fehlgeschlagen: {type(e).__name__}: {str(e)[:150]}", "err")
+        mirror_hubs.pop(pair_id, None)
         return
 
     # Reconciliation-Watchdog: periodischer REST-Abgleich als Sicherheitsnetz, falls der
@@ -764,6 +790,7 @@ def run_mirror_realtime(pair_id):
                 hub.on_close(lambda: log_msg(pair_id, "🔌 Verbindung getrennt — automatischer Reconnect läuft…", "warn"))
                 hub.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
                 hub.on("GatewayUserTrade", on_trade)
+                mirror_hubs[pair_id] = hub
                 try:
                     hub.start()
                 except Exception as e:
@@ -793,6 +820,7 @@ def run_mirror_realtime(pair_id):
 
         time.sleep(RT_RECONCILE_INTERVAL)
 
+    mirror_hubs.pop(pair_id, None)
     try:
         hub.stop()
     except Exception:
