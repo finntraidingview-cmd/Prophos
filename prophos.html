@@ -9324,8 +9324,10 @@
   /* ========== TOPSTEP MIRROR — PAIR MAPPING ========== */
   const PAIRS_LS = 'prophos_mirror_pairs'
   const SYMBOL_MAP = {
-    MNQ:'NAS100', NQ:'NAS100', ES:'US500', MES:'US500',
+    MNQ:'NAS100', NQ:'NAS100', ENQ:'NAS100', ES:'US500', MES:'US500', EP:'US500',
     YM:'US30', MYM:'US30', CL:'OIL', GC:'XAUUSD'
+    // ENQ/EP: ProjectX benennt die E-minis in Contract-IDs teils so (E-mini NQ = ENQ,
+    // E-mini S&P = EP) — ohne die Einträge wäre ES fälschlich auf NAS100 gefallen (Default)
   }
   const POLL_STATUS_MS = 3000
 
@@ -9707,6 +9709,12 @@
 
   async function mirrorArmPlan(plan, master, slave){
     const pairId = mirrorPairIdFor(plan)
+    // Kontrakt-Basis des Plan-Multipliers (MNQ oder NQ) — kommt aus dem Instrument-
+    // Toggle des Plan-Modals (_tpNqMode, nicht in der DB persistiert; beim üblichen
+    // "Speichern & Starten" direkt nach dem Planen ist der Toggle-Stand exakt der,
+    // mit dem der Multiplier berechnet wurde). Die Engine rechnet Fills auf dem
+    // Schwester-Kontrakt damit automatisch um Faktor 10 um.
+    const baseInstrument = (typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'
     // Immer Stop→Start statt Wiederverwenden: /mirror/start aktualisiert bei
     // "Already running" den Multiplier nicht. Seit dem Zombie-Fix ist das racefrei.
     try {
@@ -9729,6 +9737,7 @@
         pollInterval: 0.5,
         direction: 'tsx_to_mt',
         engine: 'realtime',
+        baseInstrument,
         symbolMap: SYMBOL_MAP
       })
     })
@@ -9738,7 +9747,7 @@
     m[String(plan.id)] = pairId
     mirrorSaveArmed(m)
     mirrorPlanPollStart()
-    return pairId
+    return baseInstrument
   }
 
   async function mirrorReleasePlan(planId){
@@ -12099,8 +12108,8 @@
       hardFail = true
     } else {
       try {
-        await mirrorArmPlan(plan, route.master, route.slave)
-        _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)}</span> — wartet auf deinen Einstieg auf Topstep.`)
+        const baseInstr = await mirrorArmPlan(plan, route.master, route.slave)
+        _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)} je ${escapeHtml(baseInstr)}</span> — wartet auf deinen Einstieg auf Topstep. Fills auf ${escapeHtml(baseInstr === 'NQ' ? 'MNQ' : 'NQ')} werden automatisch ÷/×10 umgerechnet.`)
       } catch(e){
         _pfSet('marm', 'err', escapeHtml(String(e.message || e).slice(0, 120)))
         hardFail = true

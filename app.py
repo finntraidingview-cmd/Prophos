@@ -34,7 +34,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.5"
+APP_BUILD = "2026-07-21.6"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -412,6 +412,11 @@ def mirror_start():
         "pollInterval": float(data.get("pollInterval", 0.5)),
         "direction": data.get("direction", "tsx_to_mt"),
         "engine": engine,
+        # Kontrakt-Basis, auf die sich der Multiplier bezieht ("MNQ" oder "NQ").
+        # Fällt der echte Fill auf dem jeweils anderen Kontrakt der Familie, rechnet
+        # open_hedge den Faktor 10 automatisch um (Finn handelt mal MNQ, mal NQ —
+        # ein stur angewendeter Multiplier wäre dann ein 10x-Fehler im Hedge).
+        "baseInstrument": str(data.get("baseInstrument") or "MNQ").upper(),
         "symbolMap": symbol_map,
         "reverseSymbolMap": {"NAS100": "MNQ", "US500": "MES", "US30": "MYM", "OIL": "CL", "XAUUSD": "GC"},
         "active": True,
@@ -1038,6 +1043,25 @@ def run_mirror_realtime(pair_id):
     http.close()
     log_msg(pair_id, "Mirror gestoppt")
 
+def _instr_scale(fill_base, plan_base):
+    """Micro/Mini-Umrechnung innerhalb einer Kontrakt-Familie (Faktor 10).
+    Der Multiplier eines Plans bezieht sich auf EIN Instrument (z.B. Lots je NQ);
+    fällt der echte Fill auf dem Schwester-Kontrakt (MNQ), muss die Lot-Größe
+    durch 10 — sonst wäre der Hedge um Faktor 10 falsch. ProjectX benennt die
+    E-minis in Contract-IDs teils ENQ/EP, deshalb beide Schreibweisen."""
+    minis  = {"NQ": "NQ", "ENQ": "NQ", "ES": "ES", "EP": "ES", "YM": "YM"}
+    micros = {"MNQ": "NQ", "MES": "ES", "MYM": "YM"}
+    def norm(x):
+        x = str(x or "").upper()
+        if x in micros: return (micros[x], "micro")
+        if x in minis:  return (minis[x], "mini")
+        return (x, None)
+    ff, fk = norm(fill_base)
+    pf, pk = norm(plan_base)
+    if ff != pf or fk is None or pk is None or fk == pk:
+        return 1.0
+    return 10.0 if (pk == "micro" and fk == "mini") else 0.1
+
 def open_hedge(pair_id, order_id, side, contract, qty, tsx_risk_usd=0):
     s = mirror_sessions.get(pair_id)
     if not s: return
@@ -1053,7 +1077,10 @@ def open_hedge(pair_id, order_id, side, contract, qty, tsx_risk_usd=0):
         lots = round((target_eur / tsx_risk_usd) * qty * 2.33, 2)
         log_msg(pair_id, f"Lot Berechnung: ({target_eur}€ / ${tsx_risk_usd}) × {qty} × 2.33 = {lots}")
     else:
-        lots = round(qty * multiplier, 2)
+        scale = _instr_scale(base, s.get("baseInstrument", "MNQ"))
+        lots = round(qty * multiplier * scale, 2)
+        if scale != 1.0:
+            log_msg(pair_id, f"⚖️ Kontrakt-Umrechnung: Fill auf {base}, Multiplier-Basis {s.get('baseInstrument','MNQ')} → Faktor {scale} → {lots} Lots")
 
     lots = max(0.01, lots)
 
