@@ -659,6 +659,33 @@
     .cosmos-scroll *{animation:none !important;transition:none !important}
     .cosmos-svg{transform:none !important}
   }
+  /* Notizzettel */
+  #dashboard-view .notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+  #dashboard-view .note-card{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-card);display:flex;flex-direction:column;overflow:hidden;
+    transition:box-shadow .2s var(--ease),border-color .2s var(--ease);
+  }
+  #dashboard-view .note-card:focus-within{border-color:var(--violet-soft);box-shadow:0 0 0 3px rgba(136,124,252,.12)}
+  #dashboard-view .note-ta{
+    border:none;resize:vertical;width:100%;min-height:150px;padding:14px 14px 8px;
+    font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);background:transparent;outline:none;
+  }
+  #dashboard-view .note-ta::placeholder{color:var(--sub-2)}
+  #dashboard-view .note-foot{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:8px 12px;border-top:1px solid var(--border-soft);
+  }
+  #dashboard-view .note-time{font-size:11px;color:var(--sub-2);font-family:var(--mono)}
+  #dashboard-view .note-actions{display:flex;gap:4px}
+  #dashboard-view .note-btn{
+    display:inline-flex;align-items:center;gap:4px;padding:4px 9px;font-size:11.5px;font-weight:500;
+    background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--sub);
+    cursor:pointer;transition:all .15s var(--ease);
+  }
+  #dashboard-view .note-btn:hover{background:var(--bg2);color:var(--ink)}
+  #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
+  #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
   @media (max-width:960px){#dashboard-view .kpis{grid-template-columns:repeat(2,1fr)}}
   #dashboard-view .kpi{
@@ -2416,6 +2443,10 @@
       <button class="sb-link" data-view="managed">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Topstep Manager <span class="sb-badge" id="sb-badge-managed" hidden>0</span>
+      </button>
+      <button class="sb-link" data-view="notes">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+        Notizzettel
       </button>
 
       <div class="sb-divider"></div>
@@ -4399,6 +4430,26 @@
       </div>
     </div>
 
+    <!-- NOTIZZETTEL — geräteübergreifender Scratchpad (Supabase-synchron) -->
+    <section class="view" data-view="notes">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Notizzettel</h1>
+          <p class="view-sub">Schnell was reinschreiben — synct automatisch zwischen allen Geräten (PC ↔ MacBook ↔ Handy).</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span id="notesSyncState" style="font-size:12px;color:var(--sub)"></span>
+          <button class="btn btn-primary" id="notesAddBtn">+ Neuer Zettel</button>
+        </div>
+      </div>
+      <div id="notesGrid" class="notes-grid"></div>
+      <div id="notesEmpty" class="empty" style="display:none">
+        <div class="empty-ico">📝</div>
+        <h3>Noch keine Zettel</h3>
+        <p>Klick „+ Neuer Zettel" — was du hier reinschreibst, ist auf all deinen Geräten sofort da.</p>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section class="view" data-view="settings">
       <div class="view-head">
@@ -5097,6 +5148,7 @@
     analytics: ['Analytics', 'Performance deep-dive'],
     journal:   ['Journal',   'Trades reflektieren'],
     managed:   ['Manage',    'Topstep-Accounts für andere'],
+    notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -14138,6 +14190,145 @@
     renderFinanzen()
   })
 
+  /* ═══════════════════════════════════════════════════════════════════════
+   * NOTIZZETTEL — geräteübergreifender Scratchpad (Supabase-Tabelle `notes`)
+   * Freie Textzettel, autospeichern (debounced), synct über alle Geräte.
+   * Migration: migration_notes_2026-07-21.sql
+   * ═══════════════════════════════════════════════════════════════════════ */
+  let notes = []
+  const _noteSaveTimers = new Map()   // noteId -> setTimeout-Handle (Debounce)
+  const NOTE_FMT = t => {
+    if(!t) return ''
+    const d = new Date(t)
+    return d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' }) + ' ' +
+           d.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+  }
+  function notesSetSync(txt){
+    const el = document.getElementById('notesSyncState')
+    if(el) el.textContent = txt || ''
+  }
+
+  async function loadNotesFromSupabase(){
+    if(!currentUserId) return
+    try{
+      const { data, error } = await supabase
+        .from('notes').select('*')
+        .eq('user_id', currentUserId)
+        .order('updated_at', { ascending: false })
+      if(error){ console.error('loadNotes:', error); return }
+      notes = data || []
+      renderNotes()
+    }catch(e){ console.error('loadNotesFromSupabase failed:', e) }
+  }
+
+  function renderNotes(){
+    const grid  = document.getElementById('notesGrid')
+    const empty = document.getElementById('notesEmpty')
+    if(!grid) return
+    if(!notes.length){
+      grid.innerHTML = ''
+      if(empty) empty.style.display = ''
+      return
+    }
+    if(empty) empty.style.display = 'none'
+    grid.innerHTML = notes.map(n => `
+      <div class="note-card" data-note-id="${n.id}">
+        <textarea class="note-ta" data-note-input="${n.id}" placeholder="Hier reinschreiben…">${escapeHtml(n.content || '')}</textarea>
+        <div class="note-foot">
+          <span class="note-time" data-note-time="${n.id}">${NOTE_FMT(n.updated_at)}</span>
+          <div class="note-actions">
+            <button class="note-btn" data-note-copy="${n.id}" title="Kopieren">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Kopieren
+            </button>
+            <button class="note-btn note-btn-del" data-note-del="${n.id}" title="Löschen">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>`).join('')
+    bindNoteEvents()
+  }
+
+  function bindNoteEvents(){
+    document.querySelectorAll('[data-note-input]').forEach(ta => {
+      ta.addEventListener('input', () => {
+        const id = ta.dataset.noteInput
+        const local = notes.find(n => String(n.id) === String(id))
+        if(local) local.content = ta.value
+        // Debounce: erst 700ms nach der letzten Eingabe speichern
+        if(_noteSaveTimers.has(id)) clearTimeout(_noteSaveTimers.get(id))
+        notesSetSync('… tippt')
+        _noteSaveTimers.set(id, setTimeout(() => noteSave(id, ta.value), 700))
+      })
+    })
+    document.querySelectorAll('[data-note-copy]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.noteCopy
+        const ta = document.querySelector(`[data-note-input="${id}"]`)
+        const text = ta ? ta.value : ''
+        try {
+          await navigator.clipboard.writeText(text)
+        } catch(_){
+          if(ta){ ta.focus(); ta.select(); try { document.execCommand('copy') } catch(__){} }
+        }
+        const orig = btn.innerHTML
+        btn.classList.add('copied'); btn.textContent = '✓ Kopiert'
+        setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = orig }, 1400)
+      })
+    })
+    document.querySelectorAll('[data-note-del]').forEach(btn => {
+      btn.addEventListener('click', () => noteDelete(btn.dataset.noteDel))
+    })
+  }
+
+  async function noteSave(id, content){
+    _noteSaveTimers.delete(id)
+    try{
+      const now = new Date().toISOString()
+      const { data, error } = await supabase
+        .from('notes').update({ content, updated_at: now }).eq('id', id).select('*').single()
+      if(error) throw error
+      const i = notes.findIndex(n => String(n.id) === String(id))
+      if(i >= 0) notes[i] = data
+      const timeEl = document.querySelector(`[data-note-time="${id}"]`)
+      if(timeEl) timeEl.textContent = NOTE_FMT(data.updated_at)
+      notesSetSync('✓ gespeichert')
+      setTimeout(() => { if(!_noteSaveTimers.size) notesSetSync('') }, 1500)
+    }catch(e){
+      notesSetSync('⚠ nicht gespeichert')
+      console.warn('[notes] save:', e)
+    }
+  }
+
+  async function noteAdd(){
+    if(!currentUserId){ alert('Nicht eingeloggt.'); return }
+    try{
+      const { data, error } = await supabase
+        .from('notes').insert({ user_id: currentUserId, content: '' }).select('*').single()
+      if(error) throw error
+      notes.unshift(data)
+      renderNotes()
+      // Cursor direkt in den neuen Zettel setzen
+      const ta = document.querySelector(`[data-note-input="${data.id}"]`)
+      if(ta) ta.focus()
+    }catch(e){ alert('Konnte Zettel nicht anlegen: ' + (e.message || e)) }
+  }
+
+  async function noteDelete(id){
+    const local = notes.find(n => String(n.id) === String(id))
+    if(local && (local.content || '').trim() && !confirm('Diesen Zettel löschen?')) return
+    if(_noteSaveTimers.has(id)){ clearTimeout(_noteSaveTimers.get(id)); _noteSaveTimers.delete(id) }
+    try{
+      const { error } = await supabase.from('notes').delete().eq('id', id)
+      if(error) throw error
+      notes = notes.filter(n => String(n.id) !== String(id))
+      renderNotes()
+    }catch(e){ alert('Löschen fehlgeschlagen: ' + (e.message || e)) }
+  }
+
+  document.getElementById('notesAddBtn')?.addEventListener('click', noteAdd)
+
   /* ========== INITIAL LOAD: Accounts aus Supabase nach Login ========== */
   // Hook in showDashboard: lade Accounts sobald wir wissen wer eingeloggt ist
   const _origShowDashboard = showDashboard
@@ -14150,6 +14341,7 @@
       loadTransactionsFromSupabase()
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
       if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
+      if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
     }
   }
 
@@ -14168,6 +14360,8 @@
     if(typeof renderFinanzen === 'function') renderFinanzen()
     if(typeof clearManagedState === 'function') clearManagedState()
     if(typeof mergeCustomFirmsIntoPresets === 'function') mergeCustomFirmsIntoPresets()
+    notes = []
+    if(typeof renderNotes === 'function') renderNotes()
     return _origShowLogin.apply(this, arguments)
   }
 
@@ -14183,6 +14377,7 @@
         loadTransactionsFromSupabase()
         if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
         if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
+        if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
       }
     }catch(_){}
   })()
