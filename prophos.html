@@ -9452,6 +9452,11 @@
                     data-pair-poll="${p.id}">
                   <span class="pair-field-slider-val" data-pair-poll-val="${p.id}">${poll.toFixed(1)}s</span>
                 </div>
+                <div class="pair-field-row">
+                  <span class="pair-field-label">Echtzeit (Beta)</span>
+                  <input type="checkbox" data-pair-check="${p.id}" data-field="engine" ${p.engine==='realtime'?'checked':''}>
+                  <span class="pair-field-hint">SignalR statt Polling — noch nicht live getestet, Fallback ist Polling</span>
+                </div>
               </div>
               <div class="pair-example">
                 <div class="pair-example-label">10 MNQ / $950 →</div>
@@ -9496,6 +9501,11 @@
         const valEl = pairEls.list.querySelector(`[data-pair-poll-val="${s.dataset.pairPoll}"]`)
         if(valEl) valEl.textContent = v.toFixed(1) + 's'
         updatePair(s.dataset.pairPoll, 'pollInterval', v, true)
+      })
+    })
+    pairEls.list.querySelectorAll('[data-pair-check]').forEach(c => {
+      c.addEventListener('change', () => {
+        updatePair(c.dataset.pairCheck, c.dataset.field, c.checked ? 'realtime' : 'polling', true)
       })
     })
     pairEls.list.querySelectorAll('[data-pair-start]').forEach(b => {
@@ -9547,6 +9557,7 @@
       targetRiskEur: p.targetRiskEur || 0,
       pollInterval: p.pollInterval || 0.5,
       direction: p.direction || 'tsx_to_mt',
+      engine: p.engine || 'polling',
       symbolMap: SYMBOL_MAP
     }
 
