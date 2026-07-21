@@ -15,7 +15,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.2"
+APP_BUILD = "2026-07-21.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -616,10 +616,10 @@ def run_mirror(pair_id):
 # Reconciliation läuft nur als Log-Warnung (kein Auto-Fix) — bewusst konservativ für die
 # erste Version mit echtem Geld; Auto-Heal kann nachgezogen werden sobald das im Alltag
 # eine Weile sauber gelaufen ist.
-# 3s statt 8s: seit die Reconciliation selbst heilt (Auto-Übernahme/Auto-Close statt
-# Warnung), ist sie das Sicherheitsnetz, wenn der Stream ausfällt — 3s hält die
+# 2s: seit die Reconciliation selbst heilt (Auto-Übernahme/Auto-Close statt Warnung),
+# ist sie das Sicherheitsnetz, wenn der Stream ausfällt — kleines Intervall hält die
 # Worst-Case-Latenz klein und bleibt weit unter dem Rate-Limit (200 Req/60s).
-RT_RECONCILE_INTERVAL = 3
+RT_RECONCILE_INTERVAL = 2
 
 def run_mirror_realtime(pair_id):
     s = mirror_sessions.get(pair_id)
@@ -651,7 +651,32 @@ def run_mirror_realtime(pair_id):
     first_event_logged = [False]
     reconnects = [0]
     phantom_seen = {}      # contractId -> aufeinanderfolgende Reconciliation-Pässe als "phantom"
-    last_rebuild = [time.time()]  # Cap: Stream-Neuaufbau nach Heal max. 1×/60s
+    last_rebuild = [0]     # Cap: Stream-Neuaufbau nach Heal max. 1×/60s (erster Heal darf sofort)
+    stream_events = [0]    # empfangene GatewayUserTrade-Events — Diagnose: Stream lebt vs. tot
+    conn_mode = ["direct"] # "direct" (skip_negotiation, wie ProjectX-JS-Doku) | "negotiate"
+                           # (Standard-SignalR-Handshake). Liefert der Direktmodus nachweislich
+                           # keine Events (Heal nötig, 0 Events), wird beim Neuaufbau auf
+                           # Negotiation gewechselt — Verdacht: Load-Balancer hinter
+                           # rtc.topstepx.com braucht das Handshake für korrektes Routing.
+
+    # SignalR-interne Logs (INFO+) in die Pair-Konsole spiegeln — wenn der SERVER die
+    # Verbindung aktiv trennt, nennt er den Grund in einer Close-Message, die die Library
+    # nur auf INFO-Level loggt. Ohne diese Bridge flogen wir bei Verbindungsproblemen
+    # blind (Reconnect-Bursts beim Live-Test 21.07.2026, Ursache unsichtbar).
+    class _SrLogBridge(logging.Handler):
+        def emit(self, record):
+            try:
+                if not session_alive():
+                    return
+                m = record.getMessage()
+                if not m:
+                    return
+                log_msg(pair_id, f"📶 SignalR: {str(m)[:180]}", "warn" if record.levelno >= logging.WARNING else "info")
+            except Exception:
+                pass
+    _sr_logger = logging.getLogger("SignalRCoreClient")
+    _sr_bridge = _SrLogBridge(level=logging.INFO)
+    _sr_logger.addHandler(_sr_bridge)
 
     # WICHTIG (Lesson vom 21.07.2026, Zombie-Thread-Bug): Session-IDENTITÄT prüfen, nicht
     # nur active-Flag per pair_id. Nach Stop+Neustart existiert unter derselben pair_id eine
@@ -699,6 +724,7 @@ def run_mirror_realtime(pair_id):
             if args and isinstance(args[0], dict): data = args[0]
             elif args and len(args) > 1 and isinstance(args[1], dict): data = args[1]
             if data is None: return
+            stream_events[0] += 1
             if not first_event_logged[0]:
                 first_event_logged[0] = True
                 log_msg(pair_id, f"📡 Erstes Trade-Event empfangen: {json.dumps(data)[:220]}")
@@ -809,7 +835,13 @@ def run_mirror_realtime(pair_id):
                 return  # schon abonniert auf DIESER Verbindung — ein zweites SubscribeTrades
                         # würde jedes Event doppelt zustellen (→ falsche net-Stände)
             try:
-                h.send("SubscribeTrades", [int(s["tsxAccountId"])])
+                # on_invocation: Server-Completion abwarten — nur so wissen wir sicher,
+                # ob das Abonnement überhaupt akzeptiert wurde (Ablehnung käme als
+                # Error-Completion und landet über on_error in der Konsole).
+                def _sub_confirmed(completion, hh=h):
+                    if hub_is_current(hh):
+                        log_msg(pair_id, "✅ Subscription vom Server bestätigt")
+                h.send("SubscribeTrades", [int(s["tsxAccountId"])], on_invocation=_sub_confirmed)
                 h._pph_subscribed = True
             except Exception as e:
                 log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
@@ -836,9 +868,11 @@ def run_mirror_realtime(pair_id):
         # Callbacks werden fest an DIESES Hub-Objekt gebunden (Parameter h, nicht die äußere
         # hub-Variable!) — sonst greifen die Callbacks einer alten Verbindung nach einem
         # Token-Refresh auf die NEUE Verbindung zu und der Identitäts-Check läuft ins Leere.
+        use_negotiate = conn_mode[0] == "negotiate"
+        log_msg(pair_id, f"🔧 Verbindungsmodus: {'Negotiation-Handshake' if use_negotiate else 'Direkt (skip negotiation)'}")
         h = HubConnectionBuilder()\
-            .with_url(f"{RTC_BASE}/hubs/user?access_token={token}", options={"skip_negotiation": True}) \
-            .configure_logging(logging.WARNING) \
+            .with_url(f"{RTC_BASE}/hubs/user?access_token={token}", options={"skip_negotiation": not use_negotiate}) \
+            .configure_logging(logging.INFO) \
             .with_automatic_reconnect({
                 "type": "interval",
                 "keep_alive_interval": 10,
@@ -847,14 +881,18 @@ def run_mirror_realtime(pair_id):
         h.on_open(lambda: do_subscribe(h))
         h.on_reconnect(lambda: on_hub_reopen(h))
         h.on_close(lambda: on_hub_close(h))
-        h.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(e)[:120]}", "warn"))
+        # Completion-Errors kommen als CompletionMessage-Objekt — .error extrahieren,
+        # sonst steht nur der Objektname im Log statt der Server-Begründung.
+        h.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(getattr(e, 'error', None) or e)[:150]}", "warn"))
         h.on("GatewayUserTrade", lambda args: on_trade(h, args))
         return h
 
-    def rebuild_connection(reason):
+    def rebuild_connection(reason, flip_mode=False):
         # Registrierung ZUERST auf die neue Verbindung umbiegen, dann alte stoppen —
         # so erkennen sich alle Callbacks der alten sofort als überholt.
         nonlocal hub
+        if flip_mode:
+            conn_mode[0] = "negotiate" if conn_mode[0] == "direct" else "direct"
         log_msg(pair_id, f"🔁 Stream-Verbindung wird neu aufgebaut — {reason}")
         old = hub
         hub = build_hub(s["tsxToken"])
@@ -874,6 +912,10 @@ def run_mirror_realtime(pair_id):
         log_msg(pair_id, f"❌ Verbindungsaufbau fehlgeschlagen: {type(e).__name__}: {str(e)[:150]}", "err")
         if mirror_hubs.get(pair_id) is hub:
             mirror_hubs.pop(pair_id, None)
+        try:
+            _sr_logger.removeHandler(_sr_bridge)
+        except Exception:
+            pass
         return
 
     # Reconciliation-Watchdog mit SELBSTHEILUNG (21.07.2026): der Live-Test hat gezeigt,
@@ -937,7 +979,10 @@ def run_mirror_realtime(pair_id):
 
                 if healed and time.time() - last_rebuild[0] > 60:
                     last_rebuild[0] = time.time()
-                    rebuild_connection("Stream hat Events verpasst")
+                    # Hat der Stream in diesem Verbindungsmodus noch NIE ein Event geliefert,
+                    # ist der Modus selbst verdächtig → beim Neuaufbau auf den anderen wechseln
+                    # (direct ↔ negotiate). Kamen früher schon Events, Modus beibehalten.
+                    rebuild_connection("Stream hat Events verpasst", flip_mode=(stream_events[0] == 0))
         except Exception:
             pass  # Reconciliation ist nur ein Sicherheitsnetz, Fehler hier sollen den Mirror nicht stoppen
 
@@ -947,6 +992,10 @@ def run_mirror_realtime(pair_id):
         mirror_hubs.pop(pair_id, None)
     try:
         hub.stop()
+    except Exception:
+        pass
+    try:
+        _sr_logger.removeHandler(_sr_bridge)
     except Exception:
         pass
     http.close()
