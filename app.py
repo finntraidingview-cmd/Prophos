@@ -678,10 +678,42 @@ def run_mirror_realtime(pair_id):
         except Exception as e:
             log_msg(pair_id, f"⚠️ Fehler beim Verarbeiten eines Trade-Events: {type(e).__name__}: {str(e)[:120]}")
 
+    def sync_baseline():
+        """Bereits offene TSX-Positionen (schon offen vor Verbindungsaufbau, oder
+        während eines kurzen Reconnects verpasst) einmalig per REST übernehmen —
+        der Echtzeit-Pfad reagiert sonst nur auf NEUE Fills NACH dem Connect/Subscribe,
+        anders als der alte Poll-Modus, der das beim ersten Poll automatisch mitnimmt.
+        Läuft bei jedem (Re-)Connect — bereits getrackte Contracts werden übersprungen,
+        also auch ein guter Nachschlag falls der Stream während eines Reconnects was verpasst hat."""
+        try:
+            r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
+                headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
+                json={"accountId": int(s["tsxAccountId"])}, timeout=10)
+            if not r.ok: return
+            positions = r.json().get("positions", r.json().get("data", []))
+            for pos in positions:
+                contract = pos.get("contractId", "")
+                if not contract or contract in ref: continue
+                raw_side = pos.get("side", pos.get("action", ""))
+                raw_type = pos.get("type", 0)
+                is_buy = raw_type == 1 or raw_side in (0, "0", "Buy", "buy", "BUY", "Long")
+                qty = int(pos.get("size", pos.get("quantity", 1)) or 0)
+                if qty <= 0: continue
+                tsx_risk = float(pos.get("initialRisk", pos.get("risk", 0)) or 0)
+                net[contract] = qty if is_buy else -qty
+                rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                ref[contract] = rid
+                log_msg(pair_id, f"🆕 Bereits offene TSX-Position übernommen: {'Buy' if is_buy else 'Sell'} {qty}× {contract}")
+                log_msg(pair_id, "➡️ Spiegle nach MT5…")
+                open_hedge(pair_id, rid, 0 if is_buy else 1, contract, qty, tsx_risk)
+        except Exception as e:
+            log_msg(pair_id, f"⚠️ Baseline-Sync fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
+
     def subscribe():
         try:
             hub.send("SubscribeTrades", [int(s["tsxAccountId"])])
             log_msg(pair_id, "🔌 Verbunden & auf Trades abonniert (User Hub)")
+            sync_baseline()
         except Exception as e:
             log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
 
