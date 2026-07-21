@@ -1151,6 +1151,7 @@
   #dashboard-view .tc2-prio-medium{background:rgba(247,144,9,.1);color:#B6690A}
   #dashboard-view .tc2-prio-low{background:rgba(22,200,198,.1);color:#0E9795}
   #dashboard-view .tc2-chip-ready{background:rgba(16,185,129,.12);color:#0f9c7a}
+  #dashboard-view .tc2-chip-mirror{background:rgba(136,124,252,.14);color:#6d5ff0}
   #dashboard-view .tc2-chip-issue{background:rgba(240,68,56,.12);color:#F04438;animation:tc2PulseIssue 1.6s ease-in-out infinite}
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
@@ -7309,6 +7310,18 @@
     return null
   }
 
+  /* ── Routen-Erkennung: läuft dieser Plan über den Topstep Mirror statt Duplikum? ──
+   * Mirror-Route = Master hat TopstepX-API-Link (acc.topstep.id) UND Slave hat
+   * MetaApi-Link (acc.ma). Duplikum kann TSX nicht — die beiden Routen schließen
+   * sich in der Praxis gegenseitig aus. Siehe Vault: "Topstep Mirror Integration (Plan)". */
+  function planMirrorRoute(plan){
+    if(!plan) return null
+    const m  = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    const sl = (accounts || []).find(a => String(a.id) === String(plan.slaveAccountId))
+    if(m?.topstep?.id && sl?.ma?.token && sl?.ma?.accountId) return { master: m, slave: sl }
+    return null
+  }
+
   // Order-Status: ist die Order noch offen?
   function atIsOpen(status){
     if(!status) return false
@@ -7382,6 +7395,11 @@
 
     for(const plan of plans){
       if(autoTrack.inProgress.has(plan.id)) continue
+
+      // Mirror-Routen-Pläne (TSX→MetaApi) gehören dem Mirror-Poller, NICHT Duplikum —
+      // der Count-Fallback hier würde sie sonst fälschlich als beendet melden, sobald
+      // irgendwo eine Duplikum-Position zugeht (Slave kann in beiden Systemen verlinkt sein).
+      if(typeof planMirrorRoute === 'function' && planMirrorRoute(plan)) continue
 
       // Slave UND Master via External ID (dupGetLinks) auflösen
       const dupSlaveId  = atGetDupId(plan.slaveAccountId)
@@ -9670,6 +9688,154 @@
     setTimeout(() => pollPairStatus(pairId), POLL_STATUS_MS)
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════
+   * MIRROR-ROUTE für Trade-Pläne (21.07.2026)
+   * Pläne mit Master=TopstepX-API-Account + Slave=MetaApi-Account laufen über die
+   * eigene Mirror-Engine statt Duplikum. Der Preflight schaltet das Pair scharf
+   * ("Arming"), dieser Block verwaltet Lebenszyklus + Auto-Erkennung.
+   * Eigene Pair-IDs (plan-mirror-…) — bewusst getrennt von den manuellen Pairs
+   * der Topstep-Mirror-Seite. Design: Vault "Topstep Mirror Integration (Plan)".
+   * ═══════════════════════════════════════════════════════════════════════ */
+  const MIRROR_ARMED_LS = 'prophos_mirror_armed'   // { planId: pairId }
+
+  function mirrorArmedMap(){
+    try { return JSON.parse(localStorage.getItem(MIRROR_ARMED_LS) || '{}') } catch { return {} }
+  }
+  function mirrorSaveArmed(m){ localStorage.setItem(MIRROR_ARMED_LS, JSON.stringify(m)) }
+  function mirrorPairIdFor(plan){ return `plan-mirror-${plan.masterAccountId}-${plan.slaveAccountId}` }
+  function mirrorPlanIsArmed(planId){ return !!mirrorArmedMap()[String(planId)] }
+
+  async function mirrorArmPlan(plan, master, slave){
+    const pairId = mirrorPairIdFor(plan)
+    // Immer Stop→Start statt Wiederverwenden: /mirror/start aktualisiert bei
+    // "Already running" den Multiplier nicht. Seit dem Zombie-Fix ist das racefrei.
+    try {
+      await fetch(`${TS_BACKEND}/mirror/stop`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ pairId })
+      })
+    } catch(_){}
+    await new Promise(r => setTimeout(r, 400))
+    const r = await fetch(`${TS_BACKEND}/mirror/start`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        pairId,
+        tsxToken: tsState.token,
+        tsxAccountId: master.topstep.id,
+        maToken: slave.ma.token,
+        maAccountId: slave.ma.accountId,
+        multiplier: plan.multiplier || 1,
+        targetRiskEur: 0,
+        pollInterval: 0.5,
+        direction: 'tsx_to_mt',
+        engine: 'realtime',
+        symbolMap: SYMBOL_MAP
+      })
+    })
+    const d = await r.json().catch(() => ({}))
+    if(!d.ok) throw new Error(d.error || `Mirror-Start fehlgeschlagen (HTTP ${r.status})`)
+    const m = mirrorArmedMap()
+    m[String(plan.id)] = pairId
+    mirrorSaveArmed(m)
+    mirrorPlanPollStart()
+    return pairId
+  }
+
+  async function mirrorReleasePlan(planId){
+    const m = mirrorArmedMap()
+    const pairId = m[String(planId)]
+    if(!pairId) return
+    delete m[String(planId)]
+    mirrorSaveArmed(m)
+    mirrorPlanPoll.state.delete(String(planId))
+    // Pair nur stoppen, wenn kein anderer scharfer Plan es noch hält
+    if(!Object.values(m).includes(pairId)){
+      try {
+        await fetch(`${TS_BACKEND}/mirror/stop`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ pairId })
+        })
+      } catch(_){}
+    }
+    if(typeof renderTradePlans === 'function') renderTradePlans()
+  }
+
+  /* ── Auto-Erkennung für Mirror-Pläne (Gegenstück zu atCheck, aber über die
+   * eigene Engine): /mirror/status.positions wird nur nach ECHTEM Hedge-Open/-Close
+   * verändert, deshalb reicht eine einzelne Beobachtung (kein 2-Streak nötig). ── */
+  const mirrorPlanPoll = { timer: null, INTERVAL: 2500, state: new Map() }  // planId -> {sawOpen}
+
+  function mirrorPlanPollStart(){
+    if(mirrorPlanPoll.timer) return
+    mirrorPlanPoll.timer = setInterval(mirrorPlanPollTick, mirrorPlanPoll.INTERVAL)
+    mirrorPlanPollTick()
+  }
+  function mirrorPlanPollStop(){
+    if(mirrorPlanPoll.timer){ clearInterval(mirrorPlanPoll.timer); mirrorPlanPoll.timer = null }
+  }
+
+  async function mirrorPlanPollTick(){
+    const armed = mirrorArmedMap()
+    const entries = Object.entries(armed)
+    if(!entries.length){ mirrorPlanPollStop(); return }
+    if(!(tradePlans || []).length) return  // Pläne noch nicht geladen — nichts freigeben/entscheiden
+
+    // Pro Pair nur ein Status-Call, auch wenn mehrere Pläne es halten
+    const byPair = {}
+    for(const [planId, pairId] of entries) (byPair[pairId] = byPair[pairId] || []).push(planId)
+
+    for(const [pairId, planIds] of Object.entries(byPair)){
+      let d = null
+      try {
+        const r = await fetch(`${TS_BACKEND}/mirror/status?pairId=${encodeURIComponent(pairId)}`)
+        if(r.ok) d = await r.json()
+      } catch(_){}
+      if(!d) continue
+      const openCount = Object.keys(d.positions || {}).length
+
+      for(const planId of planIds){
+        const plan = (tradePlans || []).find(p => String(p.id) === String(planId))
+        if(!plan || plan.status === 'completed'){
+          await mirrorReleasePlan(planId)
+          continue
+        }
+        const st = mirrorPlanPoll.state.get(String(planId)) || { sawOpen: false }
+
+        if(plan.status === 'planned' && openCount > 0 && !st.sawOpen){
+          st.sawOpen = true
+          mirrorPlanPoll.state.set(String(planId), st)
+          try {
+            const { data, error } = await supabase
+              .from('trade_plans')
+              .update({ status: 'open', started_at: new Date().toISOString() })
+              .eq('id', planId).select('*').single()
+            if(!error){
+              const idx = tradePlans.findIndex(x => String(x.id) === String(planId))
+              if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+              renderTradePlans()
+              atToast(`▶ Trade gestartet (Mirror): ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
+            }
+          } catch(e){ console.warn('[mirrorPoll] open:', e) }
+        } else if(plan.status === 'open'){
+          if(openCount > 0 && !st.sawOpen){
+            st.sawOpen = true
+            mirrorPlanPoll.state.set(String(planId), st)
+          }
+          if(st.sawOpen && openCount === 0){
+            mirrorPlanPoll.state.set(String(planId), { sawOpen: false })
+            atShowEndPrompt(plan)  // identische UX wie Duplikum: Banner + Popup + pendingFinish
+          }
+        }
+      }
+    }
+  }
+
+  // Nach Reload: falls noch Pläne scharf sind, Poller wieder anwerfen (leicht verzögert,
+  // damit Accounts + Trade-Pläne aus Supabase geladen sind)
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => { if(Object.keys(mirrorArmedMap()).length) mirrorPlanPollStart() }, 4000)
+  })
+
   pairEls.addBtn.addEventListener('click', addPair)
 
   // Re-render pairs when TSX accounts load (after connect)
@@ -11238,7 +11404,9 @@
       const pfBadge = !pf ? '' : pf.state === 'ready'
         ? `<span class="tc2-chip tc2-chip-ready" title="Preflight-Check bestanden">✓ Ready to start</span>`
         : `<span class="tc2-chip tc2-chip-issue" title="Preflight-Check hatte ein Problem">⚠ Prüfung fehlgeschlagen</span>`
-      metric = `${pfBadge}<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
+      const mirrorBadge = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id))
+        ? `<span class="tc2-chip tc2-chip-mirror" title="Mirror-Engine läuft — wartet auf deinen Einstieg auf Topstep">🪞 Mirror scharf</span>` : ''
+      metric = `${mirrorBadge}${pfBadge}<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
@@ -11712,6 +11880,12 @@
   async function tpPreflightAndStart(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
+
+    // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
+    // Duplikum-Checks wären hier sinnlos. Routen-Erkennung: planMirrorRoute().
+    const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
+    if(mirrorRoute) return tpPreflightMirror(plan, mirrorRoute)
+
     _pfPlanId = planId
 
     // Overlay vorbereiten
@@ -11855,6 +12029,90 @@
       : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — der Trade bleibt auf Geplant.' : null)
   }
 
+  /* ── Preflight für die Mirror-Route (Master=TopstepX, Slave=MetaApi) ──
+   * Gleiche Modal-UI wie der Duplikum-Preflight, aber die Checks der Mirror-Welt.
+   * Schritt 4 ("Mirror scharfschalten") ist das Gegenstück zum Multiplier-Push:
+   * danach läuft die Engine und wartet auf Finns echten Einstieg auf TSX. */
+  async function tpPreflightMirror(plan, route){
+    _pfPlanId = plan.id
+
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `🪞 Mirror-Route · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+
+    let hardFail = false
+
+    // ── 1. TopstepX-Verbindung ──
+    _pfAddRow('mlink', 'TopstepX-API verbunden')
+    await _pfSleep(400)
+    if(!tsState.token){
+      _pfSet('mlink', 'err', 'Nicht verbunden — Topstep Mirror → mit Username + API-Key einloggen.')
+      hardFail = true
+    } else {
+      _pfSet('mlink', 'ok', `Angemeldet als <span class="mono">${escapeHtml(tsState.user || '—')}</span>`)
+    }
+
+    // ── 2. Master per TSX-API auffindbar ──
+    _pfAddRow('macct', 'Master-Account bei TopstepX gefunden')
+    await _pfSleep(400)
+    if(hardFail){
+      _pfSet('macct', 'warn', 'Übersprungen — keine Verbindung.')
+    } else {
+      try { await tsLoadAccounts() } catch(_){}
+      const tsx = (tsState.accounts || []).find(a => String(a.id) === String(route.master.topstep.id))
+      if(tsx){
+        _pfSet('macct', 'ok', `<span class="mono">${escapeHtml(tsx.name || String(tsx.id))}</span>${tsx.balance != null ? ' · Balance ' + Number(tsx.balance).toLocaleString('de-DE') + ' $' : ''}`)
+      } else {
+        _pfSet('macct', 'err', `„${escapeHtml(route.master.name)}" ist mit TSX-ID <span class="mono">${escapeHtml(String(route.master.topstep.id))}</span> verknüpft, aber die API listet diesen Account nicht (mehr). Accounts → Topstep API → neu verknüpfen.`)
+        hardFail = true
+      }
+    }
+
+    // ── 3. Slave-MetaApi erreichbar ──
+    _pfAddRow('mslave', 'Slave-MetaApi erreichbar')
+    await _pfSleep(400)
+    try {
+      const r = await fetch(`${TS_BACKEND}/ma/positions`, {
+        headers: { 'ma-token': route.slave.ma.token, 'ma-account': route.slave.ma.accountId }
+      })
+      if(r.ok){
+        _pfSet('mslave', 'ok', `<span class="mono">${escapeHtml(route.slave.name)}</span> antwortet.`)
+      } else {
+        _pfSet('mslave', 'err', `MetaApi antwortet mit HTTP ${r.status} — Verknüpfung des Live-Accounts prüfen.`)
+        hardFail = true
+      }
+    } catch(e){
+      _pfSet('mslave', 'err', 'MetaApi nicht erreichbar: ' + escapeHtml(String(e.message || e).slice(0, 80)))
+      hardFail = true
+    }
+
+    // ── 4. Mirror scharfschalten ──
+    _pfAddRow('marm', 'Mirror scharfschalten')
+    await _pfSleep(400)
+    if(hardFail){
+      _pfSet('marm', 'warn', 'Übersprungen — vorherige Checks fehlgeschlagen.')
+    } else if(plan.multiplier == null || !isFinite(Number(plan.multiplier)) || Number(plan.multiplier) <= 0){
+      _pfSet('marm', 'err', 'Kein (gültiger) Multiplier am Plan — ohne ihn kann der Mirror die Lot-Größe nicht bestimmen.')
+      hardFail = true
+    } else {
+      try {
+        await mirrorArmPlan(plan, route.master, route.slave)
+        _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)}</span> — wartet auf deinen Einstieg auf Topstep.`)
+      } catch(e){
+        _pfSet('marm', 'err', escapeHtml(String(e.message || e).slice(0, 120)))
+        hardFail = true
+      }
+    }
+
+    await _pfSleep(350)
+    _pfCheckStatus[String(plan.id)] = { state: !hardFail ? 'ready' : 'issue', at: Date.now() }
+    try { renderTradePlans() } catch(_){}
+    _pfFinish(!hardFail, hardFail ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.' : null)
+  }
+
   document.getElementById('pfClose')?.addEventListener('click', _pfClose)
   document.getElementById('pf-cancel')?.addEventListener('click', _pfClose)
   document.getElementById('pf-force')?.addEventListener('click', async () => {
@@ -11889,6 +12147,9 @@
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
       if(error) throw error
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
+      // Mirror-Route: scharfgeschaltetes Pair freigeben (stoppt die Engine, falls
+      // kein anderer Plan sie hält) — sonst würde ein gelöschter Plan weiterspiegeln
+      if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(planId)
       renderTradePlans()
     }catch(e){
       alert('Löschen fehlgeschlagen: ' + (e.message || e))
@@ -12900,7 +13161,71 @@
    * closeTime (nie eine vorherige, da nach dem Master gefiltert wird) + Retry
    * nach 1,5s gegen Duplikum-Latenz. Überschreibt NIE vorhandene Werte.
    * ═══════════════════════════════════════════════════════════════════════ */
+  /* Mirror-Routen-Variante: Slave-P/L aus MetaApi-Deals (gematcht über die
+   * geschlossenen Hedge-Positions-IDs aus /mirror/status.closedHedges),
+   * Master-P/L aus TSX POST /api/Trade/search (profitAndLoss; null = Half-Turn).
+   * Liefert null, wenn nichts Belastbares gefunden — dann bleibt alles manuell. */
+  async function _autoPnlFetchMirror(plan, route){
+    const startedAt = plan.startedAt ? new Date(plan.startedAt) : null
+    if(!startedAt) return null
+    const startISO = new Date(startedAt.getTime() - 5 * 60 * 1000).toISOString()
+    const endISO   = new Date(Date.now() + 60 * 1000).toISOString()
+
+    // Slave (Fusion, echtes Geld): Deals der geschlossenen Hedges summieren
+    let slavePnl = null
+    try {
+      const pairId = mirrorPairIdFor(plan)
+      const st = await fetch(`${TS_BACKEND}/mirror/status?pairId=${encodeURIComponent(pairId)}`).then(r => r.json()).catch(() => null)
+      const hedgeIds = new Set((st?.closedHedges || []).map(h => String(h.mtPosId)))
+      if(hedgeIds.size){
+        const r = await fetch(`${TS_BACKEND}/ma/history-deals/time/${encodeURIComponent(startISO)}/${encodeURIComponent(endISO)}`, {
+          headers: { 'ma-token': route.slave.ma.token, 'ma-account': route.slave.ma.accountId }
+        })
+        if(r.ok){
+          const deals = await r.json().catch(() => [])
+          const list = Array.isArray(deals) ? deals : (deals.deals || [])
+          let sum = 0, hit = false
+          for(const d of list){
+            if(!hedgeIds.has(String(d.positionId))) continue
+            hit = true
+            sum += Number(d.profit || 0) + Number(d.commission || 0) + Number(d.swap || 0)
+          }
+          if(hit) slavePnl = sum
+        }
+      }
+    } catch(e){ console.warn('[AutoPnL/Mirror] slave:', e) }
+
+    // Master (Topstep, Demo): realisierte Trades seit Plan-Start
+    let masterPnl = null
+    try {
+      if(tsState.token){
+        const r = await fetch(`${TS_BACKEND}/api/Trade/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tsState.token}` },
+          body: JSON.stringify({ accountId: Number(route.master.topstep.id), startTimestamp: startISO })
+        })
+        if(r.ok){
+          const d = await r.json().catch(() => ({}))
+          const trades = d.trades || []
+          let sum = 0, hit = false
+          for(const t of trades){
+            if(t.profitAndLoss == null) continue  // Half-Turn (Eröffnungs-Fill)
+            hit = true
+            sum += Number(t.profitAndLoss)
+          }
+          if(hit) masterPnl = sum
+        }
+      }
+    } catch(e){ console.warn('[AutoPnL/Mirror] master:', e) }
+
+    if(slavePnl == null && masterPnl == null) return null
+    return { slavePnl, slaveCcy: '€', masterPnl, masterCcy: '$' }
+  }
+
   async function _autoPnlFetch(plan){
+    // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
+    const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
+    if(mirrorRoute) return _autoPnlFetchMirror(plan, mirrorRoute)
     if(typeof dupState === 'undefined' || !dupState.token) return null
     const dupSlaveId  = (typeof atGetDupId === 'function') ? atGetDupId(plan.slaveAccountId)  : null
     const dupMasterId = (typeof atGetDupId === 'function') ? atGetDupId(plan.masterAccountId) : null
@@ -12950,8 +13275,9 @@
         const msgEl = document.getElementById('tradeCompleteMsg')
         // Nur wenn beide Felder leer sind (nie vorhandene Werte überschreiben, z.B. beim Bearbeiten)
         if((mEl && mEl.value !== '') || (sEl && sEl.value !== '')) return
-        if(typeof dupState === 'undefined' || !dupState.token) return
-        if(msgEl){ msgEl.textContent = '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
+        if(!isMirrorPlan && (typeof dupState === 'undefined' || !dupState.token)) return
+        if(msgEl){ msgEl.textContent = isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         const apply = (res) => {
           if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
           if(!res) return false
@@ -12960,7 +13286,7 @@
           if(res.masterPnl != null && mEl && mEl.value === ''){ mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||'')) }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
-            if(msgEl){ msgEl.textContent = '✨ Auto aus Duplikum: ' + filled.join(' · ') + ' — bitte prüfen'; msgEl.className = 'modal-msg ok' }
+            if(msgEl){ msgEl.textContent = '✨ Auto-PnL: ' + filled.join(' · ') + ' — bitte prüfen'; msgEl.className = 'modal-msg ok' }
             return true
           }
           return false
@@ -13220,6 +13546,10 @@
         autoTrack.pendingFinish.delete(String(_completingPlanId))
         localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
       }
+
+      // Mirror-Route: Pair freigeben — der Mirror läuft nur, solange ein aktiver Plan
+      // darauf liegt (kein Dauerbetrieb = keine ungeplant gespiegelten Spontan-Trades)
+      if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(_completingPlanId)
 
       // Auto-Buchung in Finanzen — nur wenn Live-Account beteiligt; idempotent über Match-Tag im notes-Feld
       const masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))

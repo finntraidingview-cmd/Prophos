@@ -34,7 +34,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.4"
+APP_BUILD = "2026-07-21.5"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -484,7 +484,8 @@ def mirror_status():
             "active": s.get("active", False),
             "engine": s.get("engine", "polling"),
             "log": s.get("log", [])[-200:],  # neue Log-Konsole zeigt die volle Historie scrollbar
-            "positions": s.get("positions", {})
+            "positions": s.get("positions", {}),
+            "closedHedges": s.get("closedHedges", [])[-20:]
         })
     # Ohne Param: alles (für Debug/Übersicht)
     result = {}
@@ -1102,6 +1103,12 @@ def close_hedge(pair_id, ref_id):
         if r.ok:
             log_msg(pair_id, f"✅ Hedge CLOSED: pos={pos_id}")
             s["positions"].pop(ref_id, None)
+            # Geschlossene Hedge-IDs behalten — das Auto-PnL-Prefill im Trade-Complete-
+            # Modal matcht darüber die MetaApi-Deals (die positions-Map verliert die ID
+            # ja gerade beim Schließen). Cap gegen unbegrenztes Wachstum.
+            s.setdefault("closedHedges", []).append({"mtPosId": str(pos_id), "ts": time.time()})
+            if len(s["closedHedges"]) > 50:
+                s["closedHedges"] = s["closedHedges"][-50:]
         else:
             # Wenn die Position auf MT-Seite schon weg ist (404 oder 4xx-Fehler), trotzdem aus dem Tracking entfernen
             err_text = r.text[:100]
