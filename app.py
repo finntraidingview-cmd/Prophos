@@ -10,12 +10,31 @@ from flask import Flask, request, jsonify, Response, send_from_directory
 import os
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
+# ── signalrcore-Hotfixes (21.07.2026, beide im Live-Test nachgewiesen) ──
+# 1. CloseMessage hat kein __str__ — die Library loggt "Close message received from
+#    server <object at 0x…>" und versteckt damit ausgerechnet die Server-Begründung
+#    fürs Trennen. Mit __str__-Patch steht der Grund im Log.
+# 2. WebsocketTransport definiert connection_alive nie (nur SSE/LongPolling-Transports
+#    tun das) — schlägt ein Reconnect-Versuch fehl (z.B. HTTP 429), crasht
+#    deferred_reconnect() mit AttributeError und die Reconnect-Maschinerie stirbt
+#    still: Verbindung wirkt verbunden, ist aber tot, on_close feuert nie.
+try:
+    from signalrcore.messages.close_message import CloseMessage as _SrCloseMessage
+    _SrCloseMessage.__str__ = lambda self: "CloseMessage(error={0}, allow_reconnect={1})".format(
+        getattr(self, "error", None), getattr(self, "allow_reconnect", None))
+    _SrCloseMessage.__repr__ = _SrCloseMessage.__str__
+    from signalrcore.transport.websockets.websocket_transport import WebsocketTransport as _SrWsTransport
+    if not hasattr(_SrWsTransport, "connection_alive"):
+        _SrWsTransport.connection_alive = False
+except Exception:
+    pass
+
 app = Flask(__name__)
 
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.3"
+APP_BUILD = "2026-07-21.4"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -616,10 +635,10 @@ def run_mirror(pair_id):
 # Reconciliation läuft nur als Log-Warnung (kein Auto-Fix) — bewusst konservativ für die
 # erste Version mit echtem Geld; Auto-Heal kann nachgezogen werden sobald das im Alltag
 # eine Weile sauber gelaufen ist.
-# 2s: seit die Reconciliation selbst heilt (Auto-Übernahme/Auto-Close statt Warnung),
-# ist sie das Sicherheitsnetz, wenn der Stream ausfällt — kleines Intervall hält die
-# Worst-Case-Latenz klein und bleibt weit unter dem Rate-Limit (200 Req/60s).
-RT_RECONCILE_INTERVAL = 2
+# 1s: seit die Reconciliation selbst heilt (Auto-Übernahme/Auto-Close statt Warnung),
+# ist sie das eigentliche Arbeitstier solange der Stream zickt — 60 searchOpen/min
+# bleibt klar unter dem dokumentierten Rate-Limit (200 Req/60s, History ausgenommen).
+RT_RECONCILE_INTERVAL = 1
 
 def run_mirror_realtime(pair_id):
     s = mirror_sessions.get(pair_id)
@@ -650,8 +669,14 @@ def run_mirror_realtime(pair_id):
     pos_lock = threading.Lock()
     first_event_logged = [False]
     reconnects = [0]
-    phantom_seen = {}      # contractId -> aufeinanderfolgende Reconciliation-Pässe als "phantom"
-    last_rebuild = [0]     # Cap: Stream-Neuaufbau nach Heal max. 1×/60s (erster Heal darf sofort)
+    opened_at = {}         # contractId -> Zeitpunkt der lokalen Übernahme. Ersetzt den alten
+                           # 2-Pass-Phantom-Zähler: statt zwei Abgleich-Runden zu warten
+                           # (kostete beim Schließen 4-6s, Finns Kritik 21.07.), reicht EIN
+                           # Pass, solange die Position älter ist als der REST-Snapshot sein
+                           # kann (2,5s-Guard gegen das Race "Event eröffnet Position, während
+                           # der gerade gezogene ältere Snapshot sie noch nicht kennt").
+    last_rebuild = [0]     # Cap gegen Rebuild-Loops (erster Heal darf sofort)
+    rebuild_count = [0]    # nach 3 erfolglosen Neuaufbauten: nur noch alle 5 min versuchen
     stream_events = [0]    # empfangene GatewayUserTrade-Events — Diagnose: Stream lebt vs. tot
     conn_mode = ["direct"] # "direct" (skip_negotiation, wie ProjectX-JS-Doku) | "negotiate"
                            # (Standard-SignalR-Handshake). Liefert der Direktmodus nachweislich
@@ -749,6 +774,7 @@ def run_mirror_realtime(pair_id):
                     # Neue Position
                     rid = ref.get(contract) or f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                     ref[contract] = rid
+                    opened_at[contract] = time.time()
                     side_label = "Buy" if new > 0 else "Sell"
                     log_msg(pair_id, f"🆕 TSX Fill erkannt (Echtzeit): {side_label} {abs(new)}× {contract}")
                     risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
@@ -757,6 +783,7 @@ def run_mirror_realtime(pair_id):
                 elif prev != 0 and new == 0:
                     # Position komplett geschlossen
                     rid = ref.pop(contract, None)
+                    opened_at.pop(contract, None)
                     log_msg(pair_id, f"🔚 TSX Position geschlossen (Echtzeit): {contract}")
                     if rid:
                         log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
@@ -770,6 +797,7 @@ def run_mirror_realtime(pair_id):
                         close_hedge(pair_id, rid_old)
                     rid_new = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                     ref[contract] = rid_new
+                    opened_at[contract] = time.time()
                     risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
                     log_msg(pair_id, "➡️ Öffne gedrehten Hedge auf MT5…")
                     open_hedge(pair_id, rid_new, 0 if new > 0 else 1, contract, abs(new), risk)
@@ -808,6 +836,7 @@ def run_mirror_realtime(pair_id):
                     net[contract] = qty if is_buy else -qty
                     rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                     ref[contract] = rid
+                    opened_at[contract] = time.time()
                     taken += 1
                     if heal:
                         log_msg(pair_id, f"🛟 Stream-Lücke — übernehme TSX-Position per REST: {'Buy' if is_buy else 'Sell'} {qty}× {contract}", "warn")
@@ -961,28 +990,35 @@ def run_mirror_realtime(pair_id):
                     if sync_baseline(heal=True) > 0:
                         healed = True
 
-                # Phantom-Zähler pflegen: nur Contracts, die WIEDERHOLT fehlen, werden geschlossen
-                for c in list(phantom_seen.keys()):
-                    if c not in phantom_locally:
-                        phantom_seen.pop(c, None)
+                # Phantom = lokal getrackt, auf TSX weg → Hedge schließen. EIN Pass reicht,
+                # solange die Position älter ist als der REST-Snapshot sein kann (2,5s) —
+                # der alte 2-Pass-Zähler kostete beim Schließen 4-6s (Finns Kritik 21.07.).
+                # Frisch eröffnete Positionen (< 2,5s) überspringen: der gerade verarbeitete
+                # Snapshot könnte VOR ihrer Eröffnung gezogen worden sein (Race).
                 for c in phantom_locally:
-                    phantom_seen[c] = phantom_seen.get(c, 0) + 1
-                    if phantom_seen[c] >= 2:
-                        phantom_seen.pop(c, None)
-                        with pos_lock:
-                            rid = ref.pop(c, None)
-                            net[c] = 0
-                        log_msg(pair_id, f"🛟 Abgleich: {c} auf TSX geschlossen (2× bestätigt) — schließe Hedge automatisch…", "warn")
-                        if rid:
-                            close_hedge(pair_id, rid)
-                        healed = True
+                    if time.time() - opened_at.get(c, 0) < 2.5:
+                        continue
+                    with pos_lock:
+                        rid = ref.pop(c, None)
+                        net[c] = 0
+                        opened_at.pop(c, None)
+                    log_msg(pair_id, f"🛟 Abgleich: {c} auf TSX geschlossen — schließe Hedge automatisch…", "warn")
+                    if rid:
+                        close_hedge(pair_id, rid)
+                    healed = True
 
-                if healed and time.time() - last_rebuild[0] > 60:
-                    last_rebuild[0] = time.time()
-                    # Hat der Stream in diesem Verbindungsmodus noch NIE ein Event geliefert,
-                    # ist der Modus selbst verdächtig → beim Neuaufbau auf den anderen wechseln
-                    # (direct ↔ negotiate). Kamen früher schon Events, Modus beibehalten.
-                    rebuild_connection("Stream hat Events verpasst", flip_mode=(stream_events[0] == 0))
+                if healed:
+                    # Nach 3 Neuaufbau-Versuchen ohne dass der Stream je geliefert hat:
+                    # Frequenz auf 5 min drosseln — die Reconnect-Stürme haben beim Live-Test
+                    # serverseitig HTTP 429 (Rate-Limit) provoziert und machen es nur schlimmer.
+                    cooldown = 60 if rebuild_count[0] < 3 else 300
+                    if last_rebuild[0] == 0 or time.time() - last_rebuild[0] > cooldown:
+                        last_rebuild[0] = time.time()
+                        rebuild_count[0] += 1
+                        # Hat der Stream in diesem Verbindungsmodus noch NIE ein Event geliefert,
+                        # ist der Modus selbst verdächtig → beim Neuaufbau auf den anderen wechseln
+                        # (direct ↔ negotiate). Kamen früher schon Events, Modus beibehalten.
+                        rebuild_connection("Stream hat Events verpasst", flip_mode=(stream_events[0] == 0))
         except Exception:
             pass  # Reconciliation ist nur ein Sicherheitsnetz, Fehler hier sollen den Mirror nicht stoppen
 
