@@ -4741,6 +4741,12 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
         Zugangsdaten (optional)
       </div>
+      <!-- Paste-Parser: ganze Prop-Firm-Mail reinpasten → Login/Passwort/Server ziehen sich automatisch -->
+      <div class="field" style="margin-bottom:10px">
+        <label>📋 Mail reinpasten — Felder füllen sich automatisch</label>
+        <textarea class="input" id="ac-paste-blob" rows="3" placeholder="Die ganze E-Mail / den Text der Prop-Firma hier reinkopieren — Prophos zieht Login, Passwort und Server automatisch raus (danach unten frei bearbeitbar)."></textarea>
+        <div id="ac-paste-hint" style="font-size:11.5px;color:var(--sub);margin-top:4px;display:none"></div>
+      </div>
       <div class="form-grid">
         <div class="field">
           <label>Login / Kontonr.</label>
@@ -4771,6 +4777,22 @@
         <div class="field" style="grid-column:1/-1">
           <label>Notiz</label>
           <textarea class="input" id="ac-cred-notes" rows="2" placeholder="z.B. Broker, E-Mail, weitere Infos…"></textarea>
+        </div>
+      </div>
+
+      <!-- Auto-Anlegen in Duplikum — nur sichtbar wenn Plattform MT4/MT5 + Duplikum verbunden -->
+      <div id="ac-dup-create-box" style="display:none;margin-top:10px;padding:11px 13px;background:rgba(136,124,252,.07);border:1px solid rgba(136,124,252,.25);border-radius:10px">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0">
+          <input type="checkbox" id="ac-dup-create" checked style="width:16px;height:16px;flex-shrink:0">
+          <span style="font-size:13px;font-weight:600">🔗 Diesen Account direkt in Duplikum anlegen &amp; verknüpfen</span>
+        </label>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:9px;padding-left:25px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--sub)">Rolle in Duplikum:</span>
+          <select class="input" id="ac-dup-role" style="width:auto;padding:5px 10px;font-size:12.5px;height:auto">
+            <option value="0">Master (Prop-Account)</option>
+            <option value="1">Slave (Hedge/Live)</option>
+          </select>
+          <span style="font-size:11px;color:var(--sub-2)">spart das manuelle Eintragen in Duplikum</span>
         </div>
       </div>
 
@@ -7720,7 +7742,34 @@
       ...(successorId ? { successorId } : {})
     }
     saveArchive(arch)
+    // Geblowter Account → aus Duplikum löschen (Master läuft sonst weiter). Best-effort,
+    // asynchron, blockiert das Archivieren nicht. Nur bei 'blown' (nicht bei 'passed'/'manual').
+    if(reason === 'blown' && typeof dupDeleteAccountForProphos === 'function'){
+      dupDeleteAccountForProphos(accountId)
+    }
   }
+
+  /* ── Account bei Blow aus Duplikum löschen (deleteAccount.php) ──
+   * Findet die verknüpfte Duplikum-account_id, löscht sie in Duplikum und räumt
+   * den lokalen Link weg. Best-effort — scheitert es, bleibt nur eine Info im Banner. */
+  async function dupDeleteAccountForProphos(prophosAccountId){
+    try{
+      if(typeof dupState === 'undefined' || !dupState.token) return
+      const dupId = (typeof atGetDupId === 'function') ? atGetDupId(prophosAccountId) : null
+      if(!dupId) return  // war nicht mit Duplikum verknüpft → nichts zu tun
+      const res = await dupApi('POST', 'account/deleteAccount.php', { account_id: String(dupId) })
+      if(res.ok){
+        const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+        delete links[dupId]
+        if(typeof dupSaveLinks === 'function') dupSaveLinks(links)
+        if(typeof showSyncBanner === 'function'){ showSyncBanner('🗑 Geblowter Account aus Duplikum entfernt', 'ok'); hideSyncBannerSoon?.(5000) }
+        if(typeof dupLoadAccounts === 'function') dupLoadAccounts().catch(() => {})
+      }else if(typeof showSyncBanner === 'function'){
+        showSyncBanner(`Duplikum-Löschen fehlgeschlagen: ${(res.data && res.data.error) || 'HTTP ' + res.status} — bitte manuell im Cockpit prüfen`, 'err')
+      }
+    }catch(e){ console.warn('[dupDelete]', e) }
+  }
+  window._dupDeleteAccountForProphos = dupDeleteAccountForProphos
   function unarchiveAccount(accountId){
     const arch = getArchive()
     delete arch[accountId]
@@ -8711,9 +8760,14 @@
     if(accEls.credPass) accEls.credPass.type = 'password'
     const credPwToggle = document.getElementById('ac-cred-pw-toggle')
     if(credPwToggle) credPwToggle.textContent = 'Zeigen'
+    // Paste-Parser-Feld + Auto-Anlegen-Box zurücksetzen
+    const _pasteEl = document.getElementById('ac-paste-blob'); if(_pasteEl) _pasteEl.value = ''
+    const _pasteHintEl = document.getElementById('ac-paste-hint'); if(_pasteHintEl) _pasteHintEl.style.display = 'none'
+    const _dupCreateCb = document.getElementById('ac-dup-create'); if(_dupCreateCb) _dupCreateCb.checked = true
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
+    if(typeof acUpdateDupCreateBox === 'function') acUpdateDupCreateBox()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
   }
@@ -8884,8 +8938,28 @@
           })
         }
 
+        // Auto-Anlegen in Duplikum (MT4/MT5, Checkbox aktiv) — legt den Account per API
+        // in Duplikum an und verknüpft ihn direkt. Spart das manuelle Eintragen dort.
+        const dupCreateOn = document.getElementById('ac-dup-create')?.checked
+        const dupBoxVisible = document.getElementById('ac-dup-create-box')?.style.display !== 'none'
+        let dupCreated = false
+        if(dupCreateOn && dupBoxVisible && newAcc.creds?.login){
+          setModalMsg('🔗 Lege Account in Duplikum an…', 'muted')
+          const roleType = document.getElementById('ac-dup-role')?.value || '0'
+          const cr = await dupCreateAccountInDuplikum(newAcc, roleType)
+          if(cr.ok){
+            dupCreated = true
+            showSyncBanner(`🔗 „${newAcc.name}" in Duplikum angelegt${cr.dupId ? ' & verknüpft' : ''}`, 'ok')
+            hideSyncBannerSoon(5000)
+            // Symbol-Mapping gleich mit pushen, wenn möglich
+            if(typeof dupAutoPushSymbolMappings === 'function'){ try { dupAutoPushSymbolMappings([newAcc.name]) } catch(_){} }
+          }else if(cr.error){
+            setModalMsg(`Account gespeichert, aber Duplikum-Anlegen fehlgeschlagen: ${cr.error}`, 'err')
+          }
+        }
+
         // Neuer Account mit External ID → sofort mit Duplikum verknüpfen (falls dort vorhanden)
-        if(newAcc.externalId && typeof dupState !== 'undefined' && dupState.token){
+        if(!dupCreated && newAcc.externalId && typeof dupState !== 'undefined' && dupState.token){
           const lr = dupAutoLink()
           if(lr.newLinks > 0){
             showSyncBanner(`🔗 „${newAcc.name}" automatisch mit Duplikum verknüpft`, 'ok')
@@ -8935,6 +9009,124 @@
   if(accEls.cancel)  accEls.cancel.addEventListener('click', closeAccountModal)
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
+
+  /* ═══════════════════════════════════════════════════════════════════════
+   * PASTE-PARSER — Prop-Firm-Mail einmal reinpasten → Login/Passwort/Server
+   * ziehen sich automatisch in die Felder (danach frei bearbeitbar).
+   * ═══════════════════════════════════════════════════════════════════════ */
+  function acParseCredBlob(text){
+    if(!text) return {}
+    const t = String(text).replace(/\r/g, '')
+    const out = {}
+    const grab = (patterns) => {
+      for(const p of patterns){ const m = t.match(p); if(m && m[1]) return m[1].trim() }
+      return null
+    }
+    // Login / Kontonummer (4-12 Ziffern hinter einem Login/Account/Konto-Label)
+    out.login = grab([
+      /(?:mt[45]\s*)?(?:login|account\s*(?:number|no|nr|id)?|konto\-?nr\.?|kontonummer|account)\s*[:#=]?\s*([0-9]{4,12})\b/i,
+      /\blogin\b[^\n0-9]*([0-9]{4,12})\b/i
+    ])
+    // Server (ein Token, keine Leerzeichen — z.B. FusionMarkets-Live, ICMarketsSC-MT5)
+    out.server = grab([
+      /server(?:\s*name)?\s*[:#=]?\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40})\b/i
+    ])
+    // Passwort: bevorzugt Master/Trading/Main; Investor/Read-Only meiden; sonst irgendein Passwort
+    out.password = grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
+    if(!out.password){
+      for(const ln of t.split('\n')){
+        if(/investor|read\-?only|nur\s*lese|lesezugriff/i.test(ln)) continue
+        const m = ln.match(/(?:password|passwort|kennwort|pass|pwd)\s*[:#=]?\s*(\S{3,})/i)
+        if(m){ out.password = m[1].trim(); break }
+      }
+    }
+    if(!out.password){
+      const m = t.match(/(?:password|passwort|kennwort)\s*[:#=]?\s*(\S{3,})/i)
+      if(m) out.password = m[1].trim()
+    }
+    // Plattform
+    if(/\bmt\.?\s*5\b|metatrader\s*5/i.test(t)) out.platform = 'MT5'
+    else if(/\bmt\.?\s*4\b|metatrader\s*4/i.test(t)) out.platform = 'MT4'
+    else if(/ctrader/i.test(t)) out.platform = 'cTrader'
+    else if(/tradovate/i.test(t)) out.platform = 'Tradovate'
+    return out
+  }
+
+  const acPasteBlob = document.getElementById('ac-paste-blob')
+  const acPasteHint = document.getElementById('ac-paste-hint')
+  if(acPasteBlob){
+    acPasteBlob.addEventListener('input', () => {
+      const parsed = acParseCredBlob(acPasteBlob.value)
+      const found = []
+      if(parsed.login && accEls.credLogin){ accEls.credLogin.value = parsed.login; found.push('Login') }
+      if(parsed.password && accEls.credPass){ accEls.credPass.value = parsed.password; found.push('Passwort') }
+      if(parsed.server && accEls.credServer){ accEls.credServer.value = parsed.server; found.push('Server') }
+      if(parsed.platform && accEls.credPlatform){ accEls.credPlatform.value = parsed.platform; found.push('Plattform: ' + parsed.platform) }
+      acUpdateDupCreateBox()
+      if(acPasteHint){
+        if(found.length){ acPasteHint.style.display = ''; acPasteHint.style.color = 'var(--good,#12B76A)'; acPasteHint.textContent = '✓ Erkannt: ' + found.join(' · ') + ' — unten prüfen/korrigieren.' }
+        else if(acPasteBlob.value.trim().length > 8){ acPasteHint.style.display = ''; acPasteHint.style.color = 'var(--sub)'; acPasteHint.textContent = 'Nichts automatisch erkannt — bitte die Felder unten manuell füllen.' }
+        else { acPasteHint.style.display = 'none' }
+      }
+    })
+  }
+
+  /* ── Auto-Anlegen-Box zeigen/verstecken je nach Plattform + Duplikum-Status ── */
+  function acUpdateDupCreateBox(){
+    const box = document.getElementById('ac-dup-create-box')
+    if(!box) return
+    const plat = (accEls.credPlatform?.value || '').toLowerCase()
+    const isMtType = plat === 'mt5' || plat === 'mt4'
+    const dupConnected = typeof dupState !== 'undefined' && dupState.token
+    const isEdit = !!_editingAccountId
+    // Nur beim NEU-Anlegen (kein Edit), nur MT4/MT5, nur wenn Duplikum verbunden
+    box.style.display = (!isEdit && isMtType && dupConnected) ? '' : 'none'
+    // Rolle default: Live-Account = Slave, sonst Master
+    const roleSel = document.getElementById('ac-dup-role')
+    if(roleSel && box.style.display !== 'none'){
+      roleSel.value = (accEls.type?.value === 'live') ? '1' : '0'
+    }
+  }
+  if(accEls.credPlatform) accEls.credPlatform.addEventListener('change', acUpdateDupCreateBox)
+  if(accEls.type) accEls.type.addEventListener('change', acUpdateDupCreateBox)
+
+  /* ── Account in Duplikum anlegen (addAccount.php) + auto-verknüpfen ──
+   * Nur MT4/MT5 (Duplikum kann Tradovate nicht per API), best-effort:
+   * scheitert es, bleibt der Prophos-Account trotzdem gespeichert. */
+  async function dupCreateAccountInDuplikum(acc, roleType){
+    const plat = (acc.creds?.platform || '').toLowerCase()
+    const broker = plat === 'mt5' ? 'mt5' : (plat === 'mt4' ? 'mt4' : null)
+    if(!broker) return { skipped: 'platform' }
+    if(!acc.creds?.login || !acc.creds?.password || !acc.creds?.server) return { skipped: 'creds' }
+    if(typeof dupState === 'undefined' || !dupState.token) return { skipped: 'nodup' }
+    try{
+      const res = await dupApi('POST', 'account/addAccount.php', {
+        type: String(roleType),
+        name: acc.name,
+        broker,
+        login: acc.creds.login,
+        password: acc.creds.password,
+        server: acc.creds.server,
+        status: '1',
+        subscription: 'auto'
+      })
+      if(!res.ok) return { error: (res.data && res.data.error) || `HTTP ${res.status}` }
+      // Robust: statt auf die exakte Response-Form zu vertrauen, frisch laden und per Login finden
+      await dupLoadAccounts()
+      const created = (dupState.accounts || []).find(d => String(d.login) === String(acc.creds.login))
+      if(created){
+        const links = dupGetLinks()
+        links[created.account_id] = acc.id
+        dupSaveLinks(links)
+        return { ok: true, dupId: created.account_id }
+      }
+      return { ok: true, dupId: null }  // angelegt, aber (noch) nicht wiedergefunden
+    }catch(e){
+      return { error: String(e.message || e) }
+    }
+  }
+  window._dupCreateAccountInDuplikum = dupCreateAccountInDuplikum
+
   if(accEls.modal)   accEls.modal.addEventListener('click', e => {
     if(e.target === accEls.modal) closeAccountModal()
   })
