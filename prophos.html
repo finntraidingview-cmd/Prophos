@@ -3480,6 +3480,13 @@
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
             </div>
+            <div class="field" style="grid-column:span 2">
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+                <input type="checkbox" id="tc-traded-today" style="width:16px;height:16px;flex-shrink:0">
+                <span style="color:var(--ink);font-weight:500">🚫 Heute schon getradet — kein weiterer Trade heute auf diesem Account</span>
+              </label>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Setzt sich automatisch um Mitternacht (deutsche Zeit) zurück.</div>
+            </div>
           </div>
 
           <div class="modal-msg" id="tradeCompleteMsg"></div>
@@ -12638,7 +12645,8 @@
         const idPart = extId ? `  #${extId}` : ''
         const busyPart = busy[String(a.id)] ? `  ·  ${busy[String(a.id)]}` : ''
         const warnPart = dupWarn[String(a.id)] ? `  ·  ${dupWarn[String(a.id)]}` : ''
-        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}</option>`
+        const tradedPart = (typeof isTradedToday === 'function' && isTradedToday(a.id)) ? '  ·  🚫 heute schon getradet' : ''
+        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}${escapeHtml(tradedPart)}</option>`
       }
 
       // HTML zusammenbauen — sortiert
@@ -13387,6 +13395,24 @@
   document.getElementById('tradePlanSaveStart')?.addEventListener('click', () => saveTradePlanFromModal(true))
 
   // ─────── Trade-Complete-Modal ───────
+  /* ── "Heute schon getradet" pro Account (Reset automatisch um Mitternacht DE-Zeit) ──
+   * Datums-basiert statt Timer: gespeichert wird das DE-Datum (YYYY-MM-DD, Europe/Berlin).
+   * Ist das gespeicherte Datum nicht mehr heute, gilt der Account als "nicht getradet" —
+   * damit resettet es sich um Mitternacht von selbst, auch wenn die App zu war. */
+  const TRADED_TODAY_LS = 'prophos_traded_today'
+  function _deTodayStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
+  function tradedTodayMap(){ try { return JSON.parse(localStorage.getItem(TRADED_TODAY_LS) || '{}') } catch { return {} } }
+  function isTradedToday(accountId){ if(!accountId) return false; return tradedTodayMap()[String(accountId)] === _deTodayStr() }
+  function setTradedToday(accountId, on){
+    if(!accountId) return
+    const m = tradedTodayMap()
+    const today = _deTodayStr()
+    if(on) m[String(accountId)] = today; else delete m[String(accountId)]
+    // Aufräumen: alle Einträge, die nicht von heute sind, wegwerfen (das ist der Mitternacht-Reset)
+    for(const k of Object.keys(m)){ if(m[k] !== today) delete m[k] }
+    localStorage.setItem(TRADED_TODAY_LS, JSON.stringify(m))
+  }
+
   function openTradeCompleteModal(planId, preFillSlavePl){
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
@@ -13421,6 +13447,10 @@
     if(typeof tcPopulateStatusAccountPicker === 'function'){
       tcPopulateStatusAccountPicker(p)
     }
+
+    // "Heute schon getradet"-Haken den aktuellen Stand des Master-Accounts spiegeln
+    const ttCb = document.getElementById('tc-traded-today')
+    if(ttCb) ttCb.checked = isTradedToday(p.masterAccountId)
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
@@ -13861,6 +13891,10 @@
           auto_generated: true
         }, `${planRef} Slave`)
       }
+
+      // "Heute schon getradet"-Haken auf den Master-Account anwenden (Reset autom. um Mitternacht DE)
+      const _ttCb = document.getElementById('tc-traded-today')
+      if(_ttCb && masterAcc?.id) setTradedToday(masterAcc.id, !!_ttCb.checked)
 
       renderTradePlans()
       // Auto-switch to "Erledigt" tab
