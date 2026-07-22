@@ -8753,7 +8753,7 @@
       if(accEls.credLogin)    accEls.credLogin.value    = ''
       if(accEls.credPass)     accEls.credPass.value     = ''
       if(accEls.credServer)   accEls.credServer.value   = ''
-      if(accEls.credPlatform) accEls.credPlatform.value = ''
+      if(accEls.credPlatform) accEls.credPlatform.value = 'MT5'  // Default: Finns häufigster Fall
       if(accEls.credNotes)    accEls.credNotes.value    = ''
     }
     // Passwort-Feld immer verdeckt starten
@@ -9022,16 +9022,14 @@
       for(const p of patterns){ const m = t.match(p); if(m && m[1]) return m[1].trim() }
       return null
     }
-    // Login / Kontonummer (4-12 Ziffern hinter einem Login/Account/Konto-Label)
+    // ── 1. Label-basiert (wenn "Login:"/"Server:"/"Password:" davorsteht, gewinnt das) ──
     out.login = grab([
       /(?:mt[45]\s*)?(?:login|account\s*(?:number|no|nr|id)?|konto\-?nr\.?|kontonummer|account)\s*[:#=]?\s*([0-9]{4,12})\b/i,
       /\blogin\b[^\n0-9]*([0-9]{4,12})\b/i
     ])
-    // Server (ein Token, keine Leerzeichen — z.B. FusionMarkets-Live, ICMarketsSC-MT5)
     out.server = grab([
       /server(?:\s*name)?\s*[:#=]?\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40})\b/i
     ])
-    // Passwort: bevorzugt Master/Trading/Main; Investor/Read-Only meiden; sonst irgendein Passwort
     out.password = grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
     if(!out.password){
       for(const ln of t.split('\n')){
@@ -9040,11 +9038,36 @@
         if(m){ out.password = m[1].trim(); break }
       }
     }
-    if(!out.password){
-      const m = t.match(/(?:password|passwort|kennwort)\s*[:#=]?\s*(\S{3,})/i)
-      if(m) out.password = m[1].trim()
+
+    // ── 2. Struktur-basiert: greift, wenn KEINE Labels da sind (z.B. Mail mit nur den 3
+    //   Werten untereinander). Login = reine Zahlen, Server = Wort-Trenner-Wort ohne
+    //   Passwort-Sonderzeichen, Passwort = die "komische" Restzeile. ──
+    const stripLabel = s => s.replace(/^[^:=#]{0,22}[:=#]\s*/, '').trim()
+    const isDigits = s => /^[0-9]{4,12}$/.test(s)
+    // Server-Namen: BrokerName + Trenner + Suffix (FundingPips-SIM1, FusionMarkets-Live,
+    // The5ers-Real, ICMarketsSC-MT5). Kein "Server"-Wort nötig. Keine Passwort-Sonderzeichen.
+    const PW_SPECIAL = /[!@#$%^&*()\[\]{}<>?\/\\|~`+=;:'"]/
+    const isServerish = s => /^[A-Za-z][A-Za-z0-9]+([-_. ][A-Za-z0-9]+)+$/.test(s) && !PW_SPECIAL.test(s)
+    const used = new Set([out.login, out.server, out.password].filter(Boolean))
+    const lines = t.split('\n').map(l => stripLabel(l.trim())).filter(Boolean)
+
+    if(!out.login){
+      for(const s of lines){ if(isDigits(s) && !used.has(s)){ out.login = s; used.add(s); break } }
     }
-    // Plattform
+    if(!out.server){
+      for(const s of lines){ if(isServerish(s) && !used.has(s)){ out.server = s; used.add(s); break } }
+    }
+    if(!out.password){
+      for(const s of lines){
+        if(used.has(s) || isDigits(s) || isServerish(s)) continue
+        if(s.length < 4 || s.length > 40 || /\s/.test(s)) continue  // Passwörter: kein Leerzeichen, keine Fließtext-Zeile
+        const hasSpecial = /[^A-Za-z0-9]/.test(s)
+        const hasMix = /[A-Za-z]/.test(s) && /[0-9]/.test(s)
+        if(hasSpecial || hasMix){ out.password = s; used.add(s); break }  // "passwortartig"
+      }
+    }
+
+    // ── 3. Plattform ──
     if(/\bmt\.?\s*5\b|metatrader\s*5/i.test(t)) out.platform = 'MT5'
     else if(/\bmt\.?\s*4\b|metatrader\s*4/i.test(t)) out.platform = 'MT4'
     else if(/ctrader/i.test(t)) out.platform = 'cTrader'
