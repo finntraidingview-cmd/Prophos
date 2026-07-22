@@ -9082,7 +9082,9 @@
       const parsed = acParseCredBlob(acPasteBlob.value)
       const found = []
       if(parsed.login && accEls.credLogin){ accEls.credLogin.value = parsed.login; found.push('Login') }
-      if(parsed.password && accEls.credPass){ accEls.credPass.value = parsed.password; found.push('Passwort') }
+      // External ID = Broker-Kontonummer = Login → automatisch mitfüllen (nur wenn leer,
+      // damit eine manuell abweichend eingetragene ID nicht überschrieben wird)
+      if(parsed.login && accEls.extId && !accEls.extId.value.trim()){ accEls.extId.value = parsed.login; found.push('External ID') }
       if(parsed.server && accEls.credServer){ accEls.credServer.value = parsed.server; found.push('Server') }
       if(parsed.platform && accEls.credPlatform){ accEls.credPlatform.value = parsed.platform; found.push('Plattform: ' + parsed.platform) }
       acUpdateDupCreateBox()
