@@ -6769,6 +6769,7 @@
   function dupStartAutoRefresh(){
     if(dupAutoRefreshTimer) return
     dupAutoRefreshTimer = setInterval(() => {
+      if(typeof document !== 'undefined' && document.hidden) return  // Hintergrund-Tab → nicht pollen
       if(dupState.token && dupState.accounts.length){
         dupLoadAccounts().catch(() => {})
       }
@@ -7359,7 +7360,7 @@
   const autoTrack = {
     enabled: localStorage.getItem('prophos_autotrack') !== 'false',
     timer:   null,
-    INTERVAL: 10_000,
+    INTERVAL: 20_000,
     // planId → { wasOpen: bool, notified: bool, baselineCount: number|null }
     state:   new Map(),
     inProgress: new Set(),
@@ -7461,6 +7462,10 @@
   async function atCheck(){
     if(!autoTrack.enabled) return
     if(!dupState?.token) return
+    // Tab im Hintergrund? → nicht pollen. Spart massiv Duplikum-Last, wenn Prophos
+    // (bei mehreren Leuten) in einem offenen, aber unbeobachteten Tab liegt. Beim
+    // Zurückkehren auf den Tab wird sofort einmal frisch gepollt (visibilitychange-Listener).
+    if(typeof document !== 'undefined' && document.hidden) return
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
     const plans = (_tp || []).filter(p => p.status === 'planned' || p.status === 'open')
     if(!plans.length) return
@@ -7599,6 +7604,12 @@
   function atStop(){
     if(autoTrack.timer){ clearInterval(autoTrack.timer); autoTrack.timer = null }
   }
+  // Kommt der Tab wieder in den Vordergrund → sofort einmal frisch pollen (statt bis
+  // zum nächsten Intervall zu warten), damit die Trade-Erkennung nach dem Zurückkehren
+  // nicht "hängt".
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && autoTrack.enabled && dupState?.token) atCheck().catch(() => {})
+  })
 
   // Starten sobald Duplikum verbunden
   document.addEventListener('DOMContentLoaded', () => {
