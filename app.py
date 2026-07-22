@@ -2,6 +2,7 @@ import requests
 import urllib3
 import threading
 import json
+import hashlib
 import time
 import uuid
 import logging
@@ -34,7 +35,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-21.7"
+APP_BUILD = "2026-07-22.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -72,6 +73,25 @@ mirror_hubs = {}
 # Duplikium credential cache (in-memory): user_email -> {token, password, last_refresh}
 # Hinweis: Passwort wird nur in Memory gehalten, NICHT auf Disk geschrieben.
 duplikum_sessions = {}
+
+# ── Kurz-Cache + Single-Flight für Duplikum-LESE-Endpoints (22.07.2026) ──
+# Problem: wenn mehrere Leute/Tabs gleichzeitig traden, pollen sie dieselben Lese-
+# Endpoints (offene Positionen etc.) im Sekundentakt → Duplikums 20-Calls/min-Limit
+# reißt, Calls hängen bis zum Timeout (Response-Time-Spikes bis 20s bei idle-CPU,
+# per Railway-Metrics bestätigt). Fix: (1) identische, gleichzeitige Anfragen werden
+# zusammengefasst (Single-Flight — nur EIN Upstream-Call, alle warten auf dasselbe
+# Ergebnis); (2) das Ergebnis wird ~3s gecacht, sodass Folge-Polls sofort bedient
+# werden ohne Duplikum überhaupt anzufassen. NUR Lese-Endpoints; Mutationen
+# (setSettings/addAccount/deleteAccount/mapping) laufen IMMER direkt durch.
+DUP_CACHEABLE = {
+    "position/getopenpositions.php",
+    "account/getaccounts.php",
+    "position/getclosedpositions.php",
+}
+DUP_CACHE_TTL = 3.0   # Sekunden
+_dup_cache = {}                      # key -> (expires_ts, status, content_bytes, content_type)
+_dup_cache_lock = threading.Lock()   # schützt _dup_cache + _dup_inflight
+_dup_inflight = {}                   # key -> threading.Lock (Single-Flight pro Key)
 
 def flatten_php_form(data, parent_key=""):
     """Konvertiert nested dict/list zu PHP-Bracket-Form für x-www-form-urlencoded.
@@ -281,6 +301,12 @@ def duplikum_proxy(path):
         raw = request.get_json(silent=True) or {}
         body_data = flatten_php_form(raw) if raw else None
 
+    path_norm = path.lower()
+    is_cacheable = request.method == "POST" and path_norm in DUP_CACHEABLE
+    # Read-Endpoints dürfen schneller aufgeben (12s) — hängt Duplikum länger, hilft
+    # Warten eh nicht; Mutationen behalten die vollen 20s.
+    req_timeout = 12 if is_cacheable else 20
+
     def do_request(tok):
         h = {
             "Authorization": f"Bearer {tok}",
@@ -292,27 +318,75 @@ def duplikum_proxy(path):
             params=request.args,
             data=body_data,  # Dict → automatisch form-encoded
             headers=h,
-            timeout=20
+            timeout=req_timeout
         )
 
-    try:
+    def do_full_request():
+        """Ein echter Upstream-Call inkl. 401-Refresh. Gibt (status, content, ctype, new_tok) zurück."""
         r = do_request(token)
-
-        # 401 → Token abgelaufen → versuchen zu refreshen (Cache- ODER Env-Creds)
         refresh_email = email or DUP_EMAIL
         if r.status_code == 401 and refresh_email:
             new_tok = refresh_duplikum_token(refresh_email)
             if new_tok:
                 r = do_request(new_tok)
-                resp = Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
-                resp.headers["X-New-Dup-Token"] = new_tok
-                return resp
+                return r.status_code, r.content, r.headers.get("Content-Type", "application/json"), new_tok
+        return r.status_code, r.content, r.headers.get("Content-Type", "application/json"), None
 
-        return Response(r.content, status=r.status_code, content_type=r.headers.get("Content-Type", "application/json"))
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Netzwerkfehler: {e}"}), 502
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # ── Nicht-cachebare Calls (Mutationen etc.): direkt durch, wie bisher ──
+    if not is_cacheable:
+        try:
+            status, content, ctype, new_tok = do_full_request()
+            resp = Response(content, status=status, content_type=ctype)
+            if new_tok: resp.headers["X-New-Dup-Token"] = new_tok
+            return resp
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Netzwerkfehler: {e}"}), 502
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # ── Cachebare Lese-Calls: Kurz-Cache + Single-Flight ──
+    key = hashlib.md5(
+        (path_norm + "|" + token + "|" + json.dumps(body_data or {}, sort_keys=True)
+         + "|" + json.dumps(dict(request.args), sort_keys=True)).encode()
+    ).hexdigest()
+    now = time.time()
+
+    # 1. Schneller Pfad: frischer Cache-Treffer → sofort, ohne Duplikum
+    with _dup_cache_lock:
+        hit = _dup_cache.get(key)
+    if hit and hit[0] > now:
+        return Response(hit[2], status=hit[1], content_type=hit[3])
+
+    # 2. Single-Flight: nur EIN Thread pro Key macht den echten Call, der Rest wartet
+    with _dup_cache_lock:
+        lk = _dup_inflight.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _dup_inflight[key] = lk
+    with lk:
+        # Re-Check: ein anderer Thread hat evtl. gerade eben schon gefüllt
+        with _dup_cache_lock:
+            hit = _dup_cache.get(key)
+        if hit and hit[0] > time.time():
+            return Response(hit[2], status=hit[1], content_type=hit[3])
+        try:
+            status, content, ctype, new_tok = do_full_request()
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Netzwerkfehler: {e}"}), 502
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        # Nur erfolgreiche Antworten cachen (kein 401/Fehler)
+        if status == 200:
+            with _dup_cache_lock:
+                _dup_cache[key] = (time.time() + DUP_CACHE_TTL, status, content, ctype)
+                # opportunistisches Aufräumen abgelaufener Einträge, damit das Dict nicht wächst
+                if len(_dup_cache) > 200:
+                    tnow = time.time()
+                    for k in [k for k, v in _dup_cache.items() if v[0] <= tnow]:
+                        _dup_cache.pop(k, None)
+        resp = Response(content, status=status, content_type=ctype)
+        if new_tok: resp.headers["X-New-Dup-Token"] = new_tok
+        return resp
 
 @app.route("/duplikum/disconnect", methods=["POST","OPTIONS"])
 def duplikum_disconnect():
