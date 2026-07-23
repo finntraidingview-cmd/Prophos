@@ -7433,6 +7433,9 @@
     autoTrack.pendingFinish.add(String(plan.id))
     localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
     if(typeof renderTradePlans === 'function') renderTradePlans()
+    // Auto-PnL schon JETZT im Hintergrund vorladen (Finns Wunsch) → beim Öffnen des
+    // Abschließen-Modals sind die Werte sofort da statt erst nachzuladen.
+    if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
 
     const el = document.createElement('div')
     el.className = 'at-prompt'
@@ -13541,6 +13544,21 @@
     return { slavePnl, slaveCcy: '€', masterPnl, masterCcy: '$' }
   }
 
+  // Vorgeladener Auto-PnL: planId → { res, ts }. Wird gefüllt, sobald ein Trade als
+  // beendet erkannt wird (atShowEndPrompt), damit die Werte beim Öffnen des Abschließen-
+  // Modals SOFORT da sind statt erst nachzuladen. Realisierter PnL eines geschlossenen
+  // Trades ändert sich nicht mehr → der vorgeladene Wert bleibt gültig.
+  const _autoPnlCache = new Map()
+  async function _autoPnlPrefetch(plan){
+    if(!plan) return
+    try {
+      const res = await _autoPnlFetch(plan)
+      if(res && (res.slavePnl != null || res.masterPnl != null)){
+        _autoPnlCache.set(String(plan.id), { res, ts: Date.now() })
+      }
+    } catch(_){}
+  }
+
   async function _autoPnlFetch(plan){
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
@@ -13596,7 +13614,6 @@
         if((mEl && mEl.value !== '') || (sEl && sEl.value !== '')) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         if(!isMirrorPlan && (typeof dupState === 'undefined' || !dupState.token)) return
-        if(msgEl){ msgEl.textContent = isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         const apply = (res) => {
           if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
           if(!res) return false
@@ -13610,14 +13627,27 @@
           }
           return false
         }
+
+        // 1. Vorgeladenen Wert (Hintergrund-Prefetch beim Trade-Ende) SOFORT anwenden
+        const cached = _autoPnlCache.get(String(planId))
+        if(cached && cached.res && (Date.now() - cached.ts) < 10 * 60 * 1000){
+          apply(cached.res)
+        }
+        // Sind durch den Cache schon beide Felder gefüllt → fertig, kein Live-Nachladen nötig
+        if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
+
+        if(msgEl){ msgEl.textContent = isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         _autoPnlFetch(plan).then(res => {
           if(apply(res)) return
           // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
           setTimeout(() => {
             if(String(_completingPlanId) !== String(planId)) return
             _autoPnlFetch(plan).then(r2 => {
-              if(!apply(r2) && msgEl && String(_completingPlanId) === String(planId) && msgEl.textContent.indexOf('Auto-PnL') !== -1){
-                msgEl.textContent = ''  // nichts gefunden → Lade-Hinweis entfernen
+              // Lade-Hinweis nur entfernen, wenn WIRKLICH nichts gefüllt ist (weder live
+              // noch aus dem Cache) — sonst würde eine Erfolgsmeldung fälschlich gelöscht.
+              const nothingFilled = (!mEl || mEl.value === '') && (!sEl || sEl.value === '')
+              if(!apply(r2) && msgEl && String(_completingPlanId) === String(planId) && nothingFilled && msgEl.textContent.indexOf('Auto-PnL') !== -1){
+                msgEl.textContent = ''
               }
             }).catch(() => {})
           }, 1500)
