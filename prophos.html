@@ -12262,42 +12262,6 @@
       }
     }
 
-    // ── 1c. Copy Trader Status (copier_status) pro Master→Slave-Paar ──
-    // Der Account-Schalter oben (1b) kann ON sein, aber die KOPIER-Beziehung dieses
-    // konkreten Paars trotzdem auf OFF/Frozen — dann wird der Trade nicht kopiert,
-    // ohne dass es vorher auffiel (Finn live erlebt 22.07.2026). copier_status:
-    // 1=On, 2=Open Only (beide öffnen), 0=Frozen, -1=Close Only (beide öffnen NICHT).
-    _pfAddRow('copier', 'Copy Trader Status ON (Master→Slave)')
-    await _pfSleep(450)
-    if(hardFail || !dupMasterId || !dupSlaveId){
-      _pfSet('copier', 'warn', 'Übersprungen — Verknüpfung/Verbindung fehlt.')
-    } else {
-      try {
-        const cs = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(dupSlaveId) })
-        const arr = (cs.data && Array.isArray(cs.data.settings)) ? cs.data.settings
-                  : (Array.isArray(cs.data) ? cs.data : [])
-        const isSym = e => !!(e.symbol || e.symbol_master)
-        const forSlave = arr.filter(e => String(e.id_slave || '') === String(dupSlaveId) && !isSym(e))
-        // Nur der Master zählt (Finns Vorgabe 22.07.2026): den für DIESEN Master gültigen
-        // Eintrag nehmen — Master-spezifisch bevorzugt, sonst der Default (kein id_master).
-        const effective = forSlave.find(e => String(e.id_master || '') === String(dupMasterId))
-                       || forSlave.find(e => !e.id_master)
-        const csVal = effective && effective.copier_status !== null && effective.copier_status !== undefined && effective.copier_status !== ''
-          ? Number(effective.copier_status) : null
-        const label = v => ({'1':'On','2':'Open Only','0':'Frozen (OFF)','-1':'Close Only'}[String(v)] || String(v))
-        if(csVal === null || isNaN(csVal)){
-          _pfSet('copier', 'warn', 'Kein Copier-Status für den Master gefunden — im Duplikum-Cockpit prüfen, ob die Kopier-Beziehung aktiv ist.')
-        } else if(csVal === 0 || csVal === -1){  // Frozen / Close Only → öffnet nicht
-          _pfSet('copier', 'err', `Copy Trader Status des Masters steht auf <b>${escapeHtml(label(csVal))}</b> — der Trade wird NICHT kopiert.<br><span style="font-size:11px;color:var(--sub)">Im Duplikum-Cockpit (Copy Settings) auf „On" stellen, dann neu starten.</span>`)
-          hardFail = true
-        } else {
-          _pfSet('copier', 'ok', `Master kopiert aktiv (${escapeHtml(label(csVal))}).`)
-        }
-      } catch(e){
-        _pfSet('copier', 'warn', 'Konnte Copier-Status nicht prüfen: ' + escapeHtml(String(e.message || e).slice(0,80)))
-      }
-    }
-
     // ── 2. Multiplier pushen ──
     _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
     await _pfSleep(450)
