@@ -4926,6 +4926,28 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird pro Zeile dem jeweiligen Account zugeordnet (1. Zeile → #{startnum}, 2. Zeile → nächster, …). Mit externer ID wird automatisch mit Duplikum verknüpft, falls dort vorhanden.</div>
         </div>
         <div class="field" style="grid-column:1/-1">
+          <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Zugangsdaten (optional)</label>
+          <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den Accounts zugeordnet (1. Zeile → #{startnum}, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
+        </div>
+        <div class="field" id="bulk-dup-create-box" style="grid-column:1/-1;display:none;margin-top:2px;padding:11px 13px;background:rgba(136,124,252,.07);border:1px solid rgba(136,124,252,.25);border-radius:10px">
+          <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0">
+            <input type="checkbox" id="bulk-dup-create" checked style="width:16px;height:16px;flex-shrink:0">
+            <span style="font-size:13px;font-weight:600">🔗 Accounts mit Zugangsdaten direkt in Duplikum anlegen &amp; verknüpfen</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:9px;padding-left:25px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--sub)">Rolle in Duplikum:</span>
+            <select class="input" id="bulk-dup-role" style="width:auto;padding:5px 10px;font-size:12.5px;height:auto">
+              <option value="0">Master (Prop-Account)</option>
+              <option value="1">Slave (Hedge/Live)</option>
+            </select>
+            <span style="font-size:11px;color:var(--sub-2)">nur Accounts mit vollständigen MT4/MT5-Zugangsdaten</span>
+          </div>
+        </div>
+        <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
         </div>
       </div>
@@ -9349,6 +9371,10 @@
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
       extids:    document.getElementById('bulk-extids'),
+      creds:     document.getElementById('bulk-creds'),
+      dupCreateBox: document.getElementById('bulk-dup-create-box'),
+      dupCreate: document.getElementById('bulk-dup-create'),
+      dupRole:   document.getElementById('bulk-dup-role'),
       preview:   document.getElementById('bulk-preview'),
       msg:       document.getElementById('bulk-msg'),
       totalCost: document.getElementById('bulk-total-cost'),
@@ -9365,6 +9391,27 @@
         .split('\n')
         .map(s => s.trim())
         .filter(Boolean)
+    }
+
+    // Zugangsdaten aus dem Bulk-Textfeld: eine Zeile pro Account.
+    // Reihenfolge Login → Passwort → Server, getrennt per Tab/;/,/mehrere Leerzeichen.
+    // Rückgabe: Array in Zeilenreihenfolge (leere Zeilen bleiben als null-Platzhalter,
+    // damit die Zuordnung zur Account-Nummer nicht verrutscht).
+    function getBulkCreds(){
+      const raw = (bEl.creds?.value || '')
+      if(!raw.trim()) return []
+      const firmServer = (typeof serverForFirm === 'function') ? (serverForFirm(bEl.firm?.value.trim()) || '') : ''
+      return raw.split('\n').map(line => {
+        const ln = line.trim()
+        if(!ln) return null
+        const parts = ln.split(/\t|;|,|\s{2,}| +/).map(s => s.trim()).filter(Boolean)
+        if(!parts.length) return null
+        const login    = parts[0] || ''
+        const password = parts[1] || ''
+        const server   = (parts[2] || firmServer || '').trim()
+        if(!login && !password) return null
+        return { login, password, server, platform: 'MT5' }
+      })
     }
 
     function buildName(n, i){
@@ -9527,6 +9574,13 @@
       bEl.startnum.value = '1'
       bEl.template.value = ''
       bEl.extids.value   = ''
+      if(bEl.creds) bEl.creds.value = ''
+      // Duplikum-Auto-Anlegen nur zeigen, wenn Duplikum verbunden ist
+      if(bEl.dupCreateBox){
+        const dupOn = typeof dupState !== 'undefined' && !!dupState.token
+        bEl.dupCreateBox.style.display = dupOn ? '' : 'none'
+        if(bEl.dupCreate) bEl.dupCreate.checked = true
+      }
       bEl.tplSelect.value = ''
       bEl.tplDelete.disabled = true
       bEl.preview.style.display = 'none'
@@ -9560,6 +9614,7 @@
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
       const extIds   = getExtIds()
+      const credList = getBulkCreds()
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
@@ -9578,11 +9633,13 @@
       let created = 0
       let errors  = 0
       let anyExtId = false
+      const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
 
       for(let i = 0; i < count; i++){
         const n    = startnum + i
         const name = buildName(n, i)
         const extId = extIds[i] || null
+        const cred  = credList[i] || null
         const row  = {
           user_id:        currentUserId,
           name,
@@ -9596,6 +9653,12 @@
           max_daily_drawdown: maxDailyDrawdown,
           external_id:    extId,
         }
+        if(cred && (cred.login || cred.password || cred.server)){
+          row.cred_login    = cred.login    || null
+          row.cred_password = cred.password || null
+          row.cred_server   = cred.server   || null
+          row.cred_platform = cred.platform || 'MT5'
+        }
 
         bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
 
@@ -9607,6 +9670,9 @@
           accounts.unshift(newAcc)
           created++
           if(extId) anyExtId = true
+          if(newAcc.creds?.login && newAcc.creds?.password && newAcc.creds?.server){
+            dupCandidates.push(newAcc)
+          }
 
           if(purchaseCost && purchaseCost > 0){
             await insertAutoTransaction({
@@ -9633,6 +9699,29 @@
         if(lr?.newLinks > 0 && typeof showSyncBanner === 'function'){
           showSyncBanner(`🔗 ${lr.newLinks} Account(s) automatisch mit Duplikum verknüpft`, 'ok')
           if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+        }
+      }
+
+      // Accounts mit vollständigen Zugangsdaten direkt in Duplikum anlegen (Checkbox aktiv)
+      const dupCreateOn = bEl.dupCreate?.checked && bEl.dupCreateBox && bEl.dupCreateBox.style.display !== 'none'
+      if(dupCreateOn && dupCandidates.length && typeof dupCreateAccountInDuplikum === 'function'){
+        const roleType = bEl.dupRole?.value || '0'
+        let dupOk = 0, dupErr = 0
+        for(let k = 0; k < dupCandidates.length; k++){
+          const acc = dupCandidates[k]
+          bEl.saveLabel.textContent = `Duplikum… ${k + 1}/${dupCandidates.length}`
+          try{
+            const cr = await dupCreateAccountInDuplikum(acc, roleType)
+            if(cr?.ok) dupOk++
+            else { dupErr++; console.warn('Duplikum-Anlegen fehlgeschlagen für', acc.name, cr) }
+          }catch(e){ dupErr++; console.error('Duplikum-Anlegen Exception für', acc.name, e) }
+        }
+        if(typeof showSyncBanner === 'function'){
+          showSyncBanner(`🔗 ${dupOk} Account(s) in Duplikum angelegt${dupErr ? ` · ${dupErr} fehlgeschlagen` : ''}`, dupErr ? 'err' : 'ok')
+          if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(6000)
+        }
+        if(dupOk && typeof dupAutoPushSymbolMappings === 'function'){
+          try{ dupAutoPushSymbolMappings(dupCandidates.map(a => a.name)) }catch(_){}
         }
       }
 
