@@ -4583,6 +4583,11 @@
                 <input class="input" id="cf-dupsymbol" placeholder="z.B. US100.cash — oder mehrere: NQ, MNQ" autocomplete="off">
                 <div style="font-size:11px;color:var(--sub);margin-top:4px">Symbol(e), unter denen diese Firma in Duplikum handelt — kann vom Lot-Rechner-Symbol abweichen (z.B. FTMO: Lot-Rechner NAS100, Duplikum US100.cash). Mehrere mit Komma trennen (z.B. Futures: <span class="mono">NQ, MNQ</span>) — für jedes wird ein eigenes Symbol-Mapping (→ Slave) angelegt.</div>
               </div>
+              <div class="field" style="grid-column:1/-1">
+                <label>MT-Server (optional)</label>
+                <input class="input mono" id="cf-server" placeholder="z.B. FundingPips-Server, FivePercentOnline-Real" autocomplete="off">
+                <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird beim „Account hinzufügen" automatisch als Server vorausgefüllt, sobald diese Firma gewählt ist (bleibt frei bearbeitbar).</div>
+              </div>
             </div>
             <p style="font-size:11.5px;color:var(--sub);margin-top:10px;line-height:1.5">
               <strong>Tipp:</strong> Wähl oben eine Vorlage und die Felder darunter werden automatisch ausgefüllt. Du kannst sie danach noch anpassen falls die Firma eigene Werte hat.
@@ -6424,6 +6429,13 @@
     const p = FIRM_PRESETS[firmToPreset(firmName)]
     if(!p || !p.dupSymbol) return []
     return String(p.dupSymbol).split(',').map(s => s.trim()).filter(Boolean)
+  }
+
+  // Hinterlegter MT-Server einer Firma (aus firm_specs) — für Auto-Prefill beim Account-Add.
+  function serverForFirm(firmName){
+    if(!firmName) return ''
+    const p = FIRM_PRESETS[firmToPreset(firmName)]
+    return (p && p.server) ? String(p.server).trim() : ''
   }
 
   /* ── Master-Futures-Symbol je nach MNQ/NQ-Toggle in Micro/Mini umwandeln ──
@@ -8808,10 +8820,12 @@
     const _pasteEl = document.getElementById('ac-paste-blob'); if(_pasteEl) _pasteEl.value = ''
     const _pasteHintEl = document.getElementById('ac-paste-hint'); if(_pasteHintEl) _pasteHintEl.style.display = 'none'
     const _dupCreateCb = document.getElementById('ac-dup-create'); if(_dupCreateCb) _dupCreateCb.checked = true
+    _acServerManual = false  // Server-Auto-Prefill für den neuen Modal-Durchlauf wieder aktivieren
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
     if(typeof acUpdateDupCreateBox === 'function') acUpdateDupCreateBox()
+    if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
   }
@@ -9054,6 +9068,21 @@
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
 
+  /* ── Server automatisch vorausfüllen, sobald die Firma gewählt ist (Punkt 2, 24.07.2026) ──
+   * Bleibt frei bearbeitbar: hat der User den Server selbst angefasst, wird nicht überschrieben.
+   * Der Firm→Server-Wert kommt aus den firm_specs (Settings → Prop Firms → MT-Server). */
+  let _acServerManual = false
+  if(accEls.credServer) accEls.credServer.addEventListener('input', () => { _acServerManual = true })
+  function acMaybeFillServer(){
+    if(_acServerManual) return
+    const srv = (typeof serverForFirm === 'function') ? serverForFirm(accEls.firm?.value.trim()) : ''
+    if(srv && accEls.credServer && !accEls.credServer.value.trim()) accEls.credServer.value = srv
+  }
+  if(accEls.firm){
+    accEls.firm.addEventListener('input',  acMaybeFillServer)
+    accEls.firm.addEventListener('change', acMaybeFillServer)
+  }
+
   /* ═══════════════════════════════════════════════════════════════════════
    * PASTE-PARSER — Prop-Firm-Mail einmal reinpasten → Login/Passwort/Server
    * ziehen sich automatisch in die Felder (danach frei bearbeitbar).
@@ -9076,10 +9105,20 @@
     ])
     out.password = grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
     if(!out.password){
-      for(const ln of t.split('\n')){
+      const tl = t.split('\n')
+      for(let i = 0; i < tl.length; i++){
+        const ln = tl[i]
         if(/investor|read\-?only|nur\s*lese|lesezugriff/i.test(ln)) continue
-        const m = ln.match(/(?:password|passwort|kennwort|pass|pwd)\s*[:#=]?\s*(\S{3,})/i)
+        const m = ln.match(/\b(?:password|passwort|kennwort|pass|pwd)\b\s*[:#=]?\s*(\S{3,})/i)
         if(m){ out.password = m[1].trim(); break }
+        // Label auf EIGENER Zeile ("Password:" ohne Wert) → nächste nicht-leere Zeile als Passwort
+        if(/^\s*\b(?:password|passwort|kennwort|pass|pwd)\b\s*[:#=]?\s*$/i.test(ln)){
+          for(let j = i + 1; j < tl.length; j++){
+            const nx = tl[j].trim()
+            if(nx){ out.password = nx.split(/\s+/)[0]; break }
+          }
+          if(out.password) break
+        }
       }
     }
 
@@ -9091,7 +9130,7 @@
     // Server-Namen: BrokerName + Trenner + Suffix (FundingPips-SIM1, FusionMarkets-Live,
     // The5ers-Real, ICMarketsSC-MT5). Kein "Server"-Wort nötig. Keine Passwort-Sonderzeichen.
     const PW_SPECIAL = /[!@#$%^&*()\[\]{}<>?\/\\|~`+=;:'"]/
-    const isServerish = s => /^[A-Za-z][A-Za-z0-9]+([-_. ][A-Za-z0-9]+)+$/.test(s) && !PW_SPECIAL.test(s)
+    const isServerish = s => /^[A-Za-z][A-Za-z0-9]+([-_.][A-Za-z0-9]+)+$/.test(s) && !PW_SPECIAL.test(s)
     const used = new Set([out.login, out.server, out.password].filter(Boolean))
     const lines = t.split('\n').map(l => stripLabel(l.trim())).filter(Boolean)
 
@@ -9102,12 +9141,19 @@
       for(const s of lines){ if(isServerish(s) && !used.has(s)){ out.server = s; used.add(s); break } }
     }
     if(!out.password){
+      const cand = s => !used.has(s) && !isDigits(s) && !isServerish(s) && s.length >= 4 && s.length <= 40 && !/\s/.test(s)
+      // Pass 1: bevorzugt „passwortartige" Zeilen (Sonderzeichen ODER Buchstaben+Zahlen)
       for(const s of lines){
-        if(used.has(s) || isDigits(s) || isServerish(s)) continue
-        if(s.length < 4 || s.length > 40 || /\s/.test(s)) continue  // Passwörter: kein Leerzeichen, keine Fließtext-Zeile
+        if(!cand(s)) continue
         const hasSpecial = /[^A-Za-z0-9]/.test(s)
         const hasMix = /[A-Za-z]/.test(s) && /[0-9]/.test(s)
-        if(hasSpecial || hasMix){ out.password = s; used.add(s); break }  // "passwortartig"
+        if(hasSpecial || hasMix){ out.password = s; used.add(s); break }
+      }
+      // Pass 2: reines Buchstaben-Passwort. Nur wenn Login UND Server schon erkannt sind und
+      // es ein kurzer Werte-Paste ist (≤8 Zeilen) — dann ist die übrige Zeile per Ausschluss
+      // das Passwort, ohne dass ein Fließtext-Wort erwischt wird.
+      if(!out.password && out.login && out.server && lines.length <= 8){
+        for(const s of lines){ if(cand(s)){ out.password = s; used.add(s); break } }
       }
     }
 
@@ -10969,22 +11015,34 @@
   ]
   function getCustomFirms(){ return customFirms }
   function rowToFirmSpec(row){
-    return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'' }
+    return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'', server: row.server||'' }
   }
   function firmSpecToRow(f){
-    return { name: f.name, symbol: f.symbol||null, unit: f.unit||'Lots', ppl: f.ppl, currency: f.currency||'$', dup_symbol: f.dupSymbol||null }
+    return { name: f.name, symbol: f.symbol||null, unit: f.unit||'Lots', ppl: f.ppl, currency: f.currency||'$', dup_symbol: f.dupSymbol||null, server: f.server||null }
   }
+  // Falls die firm_specs.server-Migration noch nicht gelaufen ist, würde ein Write mit
+  // server-Feld an einer „column does not exist"-Meldung scheitern → dann Feld weglassen
+  // und ohne Server nochmal versuchen (Server bleibt dann halt leer bis Migration läuft).
+  const _isMissingServerCol = err => /server/i.test(err?.message || '') && /column|does not exist|schema/i.test(err?.message || '')
   async function addFirmSpec(entry){
-    const { data, error } = await supabase.from('firm_specs')
-      .insert({ user_id: currentUserId, ...firmSpecToRow(entry) }).select('*').single()
+    let payload = { user_id: currentUserId, ...firmSpecToRow(entry) }
+    let { data, error } = await supabase.from('firm_specs').insert(payload).select('*').single()
+    if(error && _isMissingServerCol(error)){
+      delete payload.server
+      ;({ data, error } = await supabase.from('firm_specs').insert(payload).select('*').single())
+    }
     if(error) throw error
     const row = rowToFirmSpec(data)
     customFirms.push(row)
     return row
   }
   async function updateFirmSpec(id, entry){
-    const { data, error } = await supabase.from('firm_specs')
-      .update(firmSpecToRow(entry)).eq('id', id).select('*').single()
+    let payload = firmSpecToRow(entry)
+    let { data, error } = await supabase.from('firm_specs').update(payload).eq('id', id).select('*').single()
+    if(error && _isMissingServerCol(error)){
+      delete payload.server
+      ;({ data, error } = await supabase.from('firm_specs').update(payload).eq('id', id).select('*').single())
+    }
     if(error) throw error
     const row = rowToFirmSpec(data)
     const i = customFirms.findIndex(x => x.id === id)
@@ -11019,8 +11077,12 @@
           legacy = [...byName.values()]
         }
         const seed = legacy.length ? legacy : DEFAULT_FIRM_SPECS
-        const rows = seed.map(f => ({ user_id: currentUserId, ...firmSpecToRow(f) }))
-        const { data: inserted, error: insErr } = await supabase.from('firm_specs').insert(rows).select('*')
+        let rows = seed.map(f => ({ user_id: currentUserId, ...firmSpecToRow(f) }))
+        let { data: inserted, error: insErr } = await supabase.from('firm_specs').insert(rows).select('*')
+        if(insErr && _isMissingServerCol(insErr)){
+          rows = rows.map(({ server, ...rest }) => rest)  // server-Spalte fehlt noch → weglassen
+          ;({ data: inserted, error: insErr } = await supabase.from('firm_specs').insert(rows).select('*'))
+        }
         if(insErr){ console.error('seedFirmSpecs:', insErr); return }
         customFirms = (inserted || []).map(rowToFirmSpec)
         if(legacy.length) localStorage.removeItem('prophos_custom_firms')
@@ -11042,7 +11104,7 @@
       // Trade-Plan-Modal (Gesamtkosten/Fixkosten/Auto-Vorschlag) fälschlich in USD umrechnet,
       // obwohl der Broker real in EUR abrechnet (13.07.2026, Finn live beobachtet).
       const currency = /fusion/i.test(f.name || '') ? '€' : (f.currency || '$')
-      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency, dupSymbol:(f.dupSymbol||'').trim()||null, _custom:true, tbd:false }
+      FIRM_PRESETS['custom_' + f.id] = { label:f.name, symbol:f.symbol||'NAS100', unit:f.unit||'Lots', ppl:parseFloat(f.ppl)||1, currency, dupSymbol:(f.dupSymbol||'').trim()||null, server:(f.server||'').trim()||null, _custom:true, tbd:false }
     }
     if(typeof refreshFirmDatalist==='function') refreshFirmDatalist()
     if(typeof refreshCalcFirmDropdowns==='function') refreshCalcFirmDropdowns()
@@ -11316,6 +11378,7 @@
       // ohnehin schon für die Berechnung; hier nur damit die Anzeige nicht widerspricht)
       document.getElementById('cf-currency').value = /fusion/i.test(f.name||'') ? '€' : (f.currency||'$')
       document.getElementById('cf-dupsymbol').value = f.dupSymbol||''
+      document.getElementById('cf-server').value = f.server||''
       document.getElementById('cf-template').value = ''
     } else {
       document.getElementById('customFirmModalTitle').textContent = prefillName ? `Specs für ${prefillName}` : 'Prop Firm hinzufügen'
@@ -11325,6 +11388,7 @@
       document.getElementById('cf-ppl').value       = ''
       document.getElementById('cf-currency').value  = '$'
       document.getElementById('cf-dupsymbol').value = ''
+      document.getElementById('cf-server').value = ''
       document.getElementById('cf-template').value  = ''
       // Name-Feld sperren wenn wir Specs für bestehende Firma hinzufügen
       const nameField = document.getElementById('cf-name')
@@ -11348,14 +11412,15 @@
     const ppl=parseFloat(document.getElementById('cf-ppl').value)
     const currency=document.getElementById('cf-currency').value
     const dupSymbol=document.getElementById('cf-dupsymbol').value.trim()
+    const server=document.getElementById('cf-server').value.trim()
     const msg=document.getElementById('customFirmMsg')
     if(!name){if(msg)msg.textContent='Name ist Pflicht.';return}
     if(isNaN(ppl)||ppl<=0){if(msg)msg.textContent='$ pro Punkt muss > 0 sein.';return}
     const saveBtn = document.getElementById('customFirmSave')
     saveBtn.disabled = true
     try{
-      if(_cfEditId) await updateFirmSpec(_cfEditId, {name,symbol,unit,ppl,currency,dupSymbol})
-      else await addFirmSpec({name,symbol,unit,ppl,currency,dupSymbol})
+      if(_cfEditId) await updateFirmSpec(_cfEditId, {name,symbol,unit,ppl,currency,dupSymbol,server})
+      else await addFirmSpec({name,symbol,unit,ppl,currency,dupSymbol,server})
       // Name-Feld wieder freigeben
       const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
       mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
