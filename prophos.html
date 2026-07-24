@@ -7465,10 +7465,10 @@
   async function atCheck(){
     if(!autoTrack.enabled) return
     if(!dupState?.token) return
-    // Tab im Hintergrund? → nicht pollen. Spart massiv Duplikum-Last, wenn Prophos
-    // (bei mehreren Leuten) in einem offenen, aber unbeobachteten Tab liegt. Beim
-    // Zurückkehren auf den Tab wird sofort einmal frisch gepollt (visibilitychange-Listener).
-    if(typeof document !== 'undefined' && document.hidden) return
+    // Hinweis: KEIN harter document.hidden-Abbruch mehr hier — die Hintergrund-Drosselung
+    // sitzt im Timer (atStart), damit Direkt-Aufrufe (visibilitychange, ltRefresh, Trade-
+    // Start) IMMER sofort prüfen. Sonst wurden Trades im Hintergrund-Tab gar nicht mehr
+    // erkannt (Finn 24.07.2026: gehen nicht nach „Läuft" / werden nicht als beendet erkannt).
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
     const plans = (_tp || []).filter(p => p.status === 'planned' || p.status === 'open')
     if(!plans.length) return
@@ -7602,7 +7602,15 @@
   function atStart(){
     if(autoTrack.timer) return
     atCheck()
-    autoTrack.timer = setInterval(atCheck, autoTrack.INTERVAL)
+    let _tick = 0
+    autoTrack.timer = setInterval(() => {
+      _tick++
+      // Hintergrund-Tab: nur jeden 3. Tick pollen (~60s statt 20s) — Erkennung läuft
+      // weiter, aber mit 1/3 der Last (der Kompromiss statt „im Hintergrund ganz aus").
+      // Vordergrund: jeder Tick (20s).
+      if(typeof document !== 'undefined' && document.hidden && (_tick % 3 !== 0)) return
+      atCheck()
+    }, autoTrack.INTERVAL)
   }
   function atStop(){
     if(autoTrack.timer){ clearInterval(autoTrack.timer); autoTrack.timer = null }
