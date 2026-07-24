@@ -6426,6 +6426,21 @@
     return String(p.dupSymbol).split(',').map(s => s.trim()).filter(Boolean)
   }
 
+  /* ── Master-Futures-Symbol je nach MNQ/NQ-Toggle in Micro/Mini umwandeln ──
+   * NUR für Futures/ProjectX-Firmen (die den MNQ/NQ-Umschalter zeigen). CFD-Symbole
+   * (NAS100, US100.cash, NDX100 …) bleiben unangetastet. Das hinterlegte Duplikum-Symbol
+   * ist die Mini-Basis (z.B. „NQU6"); wählt Finn im Plan MNQ, wird die Micro-Variante
+   * gepusht/geprüft („MNQU6"), bei NQ die Mini („NQU6"). Robust egal ob mini oder micro
+   * gespeichert (führendes M-Präfix wird zur Basis normalisiert). Finn 24.07.2026. */
+  function tpMicroizeSymbols(firmName, symbols){
+    if(!(typeof tpNqIsProjectx === 'function' && tpNqIsProjectx(firmName))) return symbols
+    const wantMicro = (typeof _tpNqMode !== 'undefined') && _tpNqMode === 'mnq'
+    return symbols.map(s => {
+      const mini = /^M[A-Z]/.test(s) ? s.slice(1) : s   // evtl. Micro-Präfix weg → Mini-Basis
+      return wantMicro ? 'M' + mini : mini
+    })
+  }
+
   // Slave-Symbol: erstes Duplikum-Symbol der Slave-Firma falls hinterlegt, sonst Lot-Rechner-Symbol (Fusion → NAS100)
   function dupSlaveSymbolForFirm(firmName){
     const explicit = dupSymbolsForFirm(firmName)
@@ -12291,7 +12306,7 @@
     } else {
       const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
       const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
-      const symMasters = dupSymbolsForFirm(masterAcc?.firm)
+      const symMasters = tpMicroizeSymbols(masterAcc?.firm, dupSymbolsForFirm(masterAcc?.firm))
       const symSlave   = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
       if(!symMasters.length){
         _pfSet('sym', 'warn', `Kein Duplikum-Symbol für „${escapeHtml(masterAcc?.firm||'—')}" hinterlegt (Settings → Prop Firms → Specs) — übersprungen.`)
