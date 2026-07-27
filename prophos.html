@@ -14476,9 +14476,22 @@
     const accountSel = document.getElementById('fin-account')
     const finArchive = (typeof getArchive === 'function') ? getArchive() : {}
     const finFundedAccounts = accounts.filter(a => a.type === 'funded' && !finArchive[a.id]?.archived)
-    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + finFundedAccounts.map(a =>
-      `<option value="${a.id}">${escapeHtml(a.name)} · ${escapeHtml(a.firm||'–')}</option>`
-    ).join('')
+    // Live-Balance pro Account ans Dropdown hängen, damit Finn bei vielen fast
+    // gleich benannten Accounts den richtigen zuordnen kann (Priorität TSX > MT5 > Duplikum).
+    const finLiveBalStr = (a) => {
+      if(a.topstep && a.topstep.balance != null) return fmtMoney(Number(a.topstep.balance))
+      if(a.ma && a.ma.balance != null)           return fmtMoney(Number(a.ma.balance))
+      const dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dupId = Object.entries(dl).find(([_, mId]) => String(mId) === String(a.id))?.[0]
+      const dupAcc = (dupId && dupState?.accounts) ? dupState.accounts.find(x => x.account_id === dupId) : null
+      if(dupAcc && dupAcc.balance != null) return dupFmtMoney(Number(dupAcc.balance), dupAcc.ccy || 'USD')
+      return null
+    }
+    accountSel.innerHTML = '<option value="">— kein bestimmter Account —</option>' + finFundedAccounts.map(a => {
+      const bal = finLiveBalStr(a)
+      const label = `${a.name} · ${a.firm||'–'}${bal ? ' · ' + bal : ''}`
+      return `<option value="${a.id}">${escapeHtml(label)}</option>`
+    }).join('')
 
     document.getElementById('fin-amount').value = ''
     document.getElementById('fin-currency').value = 'USD'
