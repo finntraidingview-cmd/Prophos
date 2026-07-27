@@ -2382,6 +2382,9 @@
 <!-- ========== DASHBOARD VIEW ========== -->
 <div id="dashboard-view">
 
+  <!-- News-Alert-Notifications (oben rechts, stapelbar) -->
+  <div id="news-toasts" style="position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:10px;max-width:340px;pointer-events:none"></div>
+
   <aside class="sidebar" id="sidebar">
     <div class="sb-brand">
       <div class="logo-mark">P</div>
@@ -2447,6 +2450,10 @@
       <button class="sb-link" data-view="notes">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
         Notizzettel
+      </button>
+      <button class="sb-link" data-view="news">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
+        News <span class="sb-badge" id="sb-badge-news" hidden>0</span>
       </button>
 
       <div class="sb-divider"></div>
@@ -4462,6 +4469,41 @@
       </div>
     </section>
 
+    <!-- NEWS -->
+    <section class="view" data-view="news">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">News</h1>
+          <p class="view-sub">USD-Kalender (Forex Factory) mit Sound-Alerts 15 / 5 / 1 Min vor der News.</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer">
+            <input type="checkbox" id="news-alerts-on" checked style="width:15px;height:15px">
+            Alerts an
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer">
+            <input type="checkbox" id="news-incl-medium" style="width:15px;height:15px">
+            auch Medium (orange)
+          </label>
+          <button class="btn btn-ghost" id="news-test-sound" style="font-size:12px;padding:6px 11px">🔊 Sound testen</button>
+          <button class="btn btn-ghost" id="news-refresh" style="font-size:12px;padding:6px 11px">↻ Aktualisieren</button>
+        </div>
+      </div>
+      <div id="news-next-banner" style="display:none;margin-bottom:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(90deg,rgba(239,68,68,.10),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.28);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Nächste High-Impact-News (USD)</div>
+          <div id="news-next-title" style="font-size:15px;font-weight:700;margin-top:2px">–</div>
+        </div>
+        <div id="news-next-countdown" style="font-family:var(--mono);font-size:22px;font-weight:800;color:var(--danger)">–</div>
+      </div>
+      <div id="news-cal"></div>
+      <div id="news-empty" class="empty" style="display:none">
+        <div class="empty-ico">📅</div>
+        <h3>Keine USD-News geladen</h3>
+        <p>Klick „↻ Aktualisieren" — der Kalender kommt vom öffentlichen Forex-Factory-Feed.</p>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section class="view" data-view="settings">
       <div class="view-head">
@@ -5210,6 +5252,7 @@
     journal:   ['Journal',   'Trades reflektieren'],
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
+    news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -5238,6 +5281,7 @@
       if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
       if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }
+    if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
   }
   // Nur echte Navigations-Buttons (Sidebar + User-Dropdown) — NICHT die View-Sections selbst,
   // sonst bubbled jeder Klick innerhalb einer View zur Section und switcht zurück
@@ -10407,6 +10451,181 @@
       if(el) el.hidden = true
     }, ms || 4000)
   }
+
+  /* ========== NEWS — Forex-Factory USD-Kalender + eskalierende Sound-Alerts ==========
+   * Backend-Proxy /news/calendar liefert die USD-Events (High/Medium/Low). Wir zeigen
+   * sie als Tages-Kalender und feuern 15 / 5 / 1 Min vor jeder alertbaren News einen
+   * eskalierenden Sound + eine Notification oben rechts. Läuft app-weit (nicht nur im Tab).
+   */
+  const newsState = { events: [], loaded: false, loading: false, fired: new Set() }
+  const NEWS_STAGES = [ { min: 15, stage: 1 }, { min: 5, stage: 2 }, { min: 1, stage: 3 } ]
+
+  async function newsFetch(){
+    if(newsState.loading) return
+    newsState.loading = true
+    try{
+      const r = await fetch(`${TS_BACKEND}/news/calendar`)
+      const d = await r.json()
+      newsState.events = Array.isArray(d.events) ? d.events : []
+      newsState.loaded = true
+    }catch(e){ console.warn('News-Fetch fehlgeschlagen', e) }
+    finally{ newsState.loading = false }
+    newsRender(); newsUpdateBadge()
+  }
+  function newsOnEnterView(){
+    // Notification-Permission einmalig anfragen (optional, nur best-effort)
+    try{ if(window.Notification && Notification.permission === 'default') Notification.requestPermission() }catch(_){}
+    if(!newsState.loaded && !newsState.loading) newsFetch(); else newsRender()
+  }
+
+  // ── WebAudio: eskalierende Beeps (Stage 1 leise/tief → 3 laut/hoch) ──
+  let _newsAudioCtx = null
+  function newsAudio(){
+    if(!_newsAudioCtx){ try{ _newsAudioCtx = new (window.AudioContext || window.webkitAudioContext)() }catch(_){ return null } }
+    if(_newsAudioCtx && _newsAudioCtx.state === 'suspended') _newsAudioCtx.resume()
+    return _newsAudioCtx
+  }
+  function newsBeep(stage){
+    const ctx = newsAudio(); if(!ctx) return
+    const spec = { 1:{freq:520,count:1,gain:0.08,dur:0.18,gap:0},
+                   2:{freq:720,count:2,gain:0.15,dur:0.16,gap:0.12},
+                   3:{freq:980,count:3,gain:0.24,dur:0.15,gap:0.10} }[stage] || {freq:520,count:1,gain:0.08,dur:0.18,gap:0}
+    let t = ctx.currentTime
+    for(let i=0;i<spec.count;i++){
+      const osc = ctx.createOscillator(), g = ctx.createGain()
+      osc.type = 'sine'; osc.frequency.value = spec.freq + i*90   // innerhalb der Sequenz steigend
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.linearRampToValueAtTime(spec.gain, t+0.01)
+      g.gain.exponentialRampToValueAtTime(0.0001, t+spec.dur)
+      osc.connect(g); g.connect(ctx.destination)
+      osc.start(t); osc.stop(t+spec.dur)
+      t += spec.dur + spec.gap
+    }
+  }
+  // Audio-Kontext bei erster Nutzer-Interaktion entsperren (Autoplay-Policy)
+  document.addEventListener('pointerdown', () => { newsAudio() }, { once: true })
+
+  function newsToast(ev, stage){
+    const wrap = document.getElementById('news-toasts'); if(!wrap) return
+    const col = { 1:'#f59e0b', 2:'#f97316', 3:'#dc2626' }[stage] || '#dc2626'
+    const lbl = { 1:'in 15 Min', 2:'in 5 Min', 3:'GLEICH · 1 Min' }[stage] || ''
+    const hhmm = new Date(ev.date).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+    const el = document.createElement('div')
+    el.style.cssText = `pointer-events:auto;opacity:0;transform:translateX(24px);transition:opacity .25s,transform .25s;background:var(--card,#fff);border:1px solid ${col};border-left:5px solid ${col};border-radius:11px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.20)`
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <span style="font-size:11px;font-weight:800;letter-spacing:.04em;color:${col};text-transform:uppercase">🔴 USD · ${lbl}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--sub)">${hhmm}</span>
+      </div>
+      <div style="font-size:13.5px;font-weight:700;margin-top:4px">${escapeHtml(ev.title||'News')}</div>`
+    wrap.appendChild(el)
+    requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none' })
+    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(24px)'; setTimeout(() => el.remove(), 400) }, stage === 3 ? 60000 : 30000)
+    try{ if(window.Notification && Notification.permission === 'granted') new Notification(`USD-News ${lbl}`, { body: ev.title || '', silent: true }) }catch(_){}
+  }
+
+  function newsAlertsEnabled(){ return !!document.getElementById('news-alerts-on')?.checked }
+  function newsInclMedium(){ return !!document.getElementById('news-incl-medium')?.checked }
+  function newsIsAlertable(e){ return e.impact === 'High' || (newsInclMedium() && e.impact === 'Medium') }
+
+  function newsTick(){
+    const now = Date.now()
+    // Countdown-Banner auf die nächste alertbare News
+    let next = null
+    for(const e of newsState.events){
+      const t = new Date(e.date).getTime()
+      if(isNaN(t) || t <= now || !newsIsAlertable(e)) continue
+      if(!next || t < next.t) next = { e, t }
+    }
+    const banner = document.getElementById('news-next-banner')
+    if(banner){
+      if(next){
+        banner.style.display = 'flex'
+        const tEl = document.getElementById('news-next-title'); if(tEl) tEl.textContent = next.e.title || '–'
+        const secs = Math.max(0, Math.floor((next.t - now)/1000))
+        const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60), s = secs%60
+        const cEl = document.getElementById('news-next-countdown')
+        if(cEl) cEl.textContent = (h ? h+':' : '') + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')
+      } else banner.style.display = 'none'
+    }
+    if(!newsAlertsEnabled()) return
+    for(const e of newsState.events){
+      if(!newsIsAlertable(e)) continue
+      const t = new Date(e.date).getTime(); if(isNaN(t)) continue
+      const mins = (t - now)/60000
+      if(mins <= 0) continue
+      for(const st of NEWS_STAGES){
+        const fkey = (e.id || (e.title + e.date)) + '@' + st.stage
+        if(newsState.fired.has(fkey)) continue
+        if(mins <= st.min && mins > st.min - 1){   // 1-Min-Fenster, Tick alle 10s → nie verpasst
+          newsState.fired.add(fkey)
+          newsBeep(st.stage); newsToast(e, st.stage)
+        }
+      }
+    }
+  }
+
+  function newsImpMeta(imp){
+    return imp === 'High'   ? ['#dc2626','🔴','High']
+         : imp === 'Medium' ? ['#f59e0b','🟠','Medium']
+         : imp === 'Low'    ? ['#eab308','🟡','Low']
+         : ['#94a3b8','⚪', imp || '–']
+  }
+  function newsRender(){
+    const box = document.getElementById('news-cal'); const empty = document.getElementById('news-empty')
+    if(!box) return
+    const now = Date.now()
+    const evs = newsState.events
+      .map(e => ({ ...e, t: new Date(e.date).getTime() }))
+      .filter(e => !isNaN(e.t) && e.t > now - 2*3600*1000)   // laufende/kommende (letzte 2h noch zeigen)
+      .sort((a,b) => a.t - b.t)
+    if(!evs.length){ box.innerHTML = ''; if(empty) empty.style.display = ''; return }
+    if(empty) empty.style.display = 'none'
+    const groups = {}
+    for(const e of evs){ const key = new Date(e.t).toLocaleDateString('en-CA'); (groups[key] = groups[key] || []).push(e) }
+    const todayKey = new Date().toLocaleDateString('en-CA')
+    let html = ''
+    for(const key of Object.keys(groups)){
+      const d = new Date(key + 'T00:00:00')
+      const dayLbl = d.toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'2-digit' })
+      const isToday = key === todayKey
+      html += `<div style="margin:16px 0 8px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:${isToday?'var(--violet)':'var(--sub)'}">${isToday?'Heute · ':''}${dayLbl}</div>`
+      html += '<div style="display:flex;flex-direction:column;gap:6px">'
+      for(const e of groups[key]){
+        const [col,dot] = newsImpMeta(e.impact)
+        const tm = new Date(e.t).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+        const past = e.t < now
+        const fp = [ e.forecast ? 'F '+escapeHtml(String(e.forecast)) : '', e.previous ? 'P '+escapeHtml(String(e.previous)) : '' ].filter(Boolean).join('  ')
+        html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:9px;background:var(--bg2);border:1px solid var(--line);border-left:4px solid ${col};opacity:${past?0.45:1}">
+          <span style="font-family:var(--mono);font-size:13px;font-weight:700;min-width:46px">${tm}</span>
+          <span style="font-size:15px">${dot}</span>
+          <span style="flex:1;font-size:13.5px;font-weight:600">${escapeHtml(e.title||'–')}</span>
+          <span style="font-size:11.5px;color:var(--sub);font-family:var(--mono)">${fp}</span>
+        </div>`
+      }
+      html += '</div>'
+    }
+    box.innerHTML = html
+  }
+  function newsUpdateBadge(){
+    const b = document.getElementById('sb-badge-news'); if(!b) return
+    const now = Date.now(), today = new Date().toLocaleDateString('en-CA')
+    const n = newsState.events.filter(e => {
+      const t = new Date(e.date).getTime()
+      return e.impact === 'High' && t > now && new Date(t).toLocaleDateString('en-CA') === today
+    }).length
+    if(n > 0){ b.textContent = String(n); b.hidden = false } else b.hidden = true
+  }
+
+  // Wiring + Init
+  document.getElementById('news-refresh')?.addEventListener('click', () => { newsState.loaded = false; newsFetch() })
+  document.getElementById('news-test-sound')?.addEventListener('click', () => {
+    newsAudio(); newsBeep(3)
+    newsToast({ title:'Test-Alert (Beispiel-News)', date: new Date().toISOString() }, 3)
+  })
+  document.getElementById('news-incl-medium')?.addEventListener('change', () => { newsRender() })
+  setInterval(newsTick, 10000)
+  setInterval(() => { newsFetch() }, 30*60*1000)   // alle 30 Min neu laden (Backend cached ohnehin)
+  newsFetch()   // beim Start laden, damit Alerts app-weit laufen (auch ohne den Tab zu öffnen)
 
   // Time helper
   function timeAgo(iso){

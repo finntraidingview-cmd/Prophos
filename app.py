@@ -35,7 +35,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-22.2"
+APP_BUILD = "2026-07-27.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -43,6 +43,55 @@ def version():
         "build": APP_BUILD,
         "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
     })
+
+# ── Forex-Factory News-Kalender (öffentlicher Wochen-Feed, gecacht) ──
+# FF hat keine offizielle API, aber einen öffentlichen JSON-Feed pro Woche.
+# Wir proxien + cachen serverseitig (30 min), damit der Browser weder CORS noch
+# Rate-Limit trifft. Nur USD-Events werden durchgereicht.
+_news_cache = {"ts": 0, "data": None}
+_news_lock = threading.Lock()
+NEWS_TTL = 30 * 60
+FF_URLS = [
+    "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
+]
+
+@app.route("/news/calendar", methods=["GET", "OPTIONS"])
+def news_calendar():
+    if request.method == "OPTIONS":
+        return "", 200
+    now = time.time()
+    with _news_lock:
+        if _news_cache["data"] is not None and (now - _news_cache["ts"]) < NEWS_TTL:
+            return jsonify(_news_cache["data"])
+    events = []
+    try:
+        for url in FF_URLS:
+            r = requests.get(url, timeout=12, headers={"User-Agent": "Mozilla/5.0 (Prophos)"})
+            if r.status_code != 200:
+                continue
+            for ev in (r.json() or []):
+                if str(ev.get("country") or "").upper() != "USD":
+                    continue
+                events.append({
+                    "id": ev.get("id") or (str(ev.get("title")) + str(ev.get("date"))),
+                    "title": ev.get("title"),
+                    "country": ev.get("country"),
+                    "date": ev.get("date"),
+                    "impact": ev.get("impact"),
+                    "forecast": ev.get("forecast"),
+                    "previous": ev.get("previous"),
+                })
+    except Exception as e:
+        with _news_lock:
+            if _news_cache["data"] is not None:
+                return jsonify(_news_cache["data"])  # stale liefern statt Fehler
+        return jsonify({"error": str(e), "events": []}), 502
+    payload = {"events": events, "fetched": now}
+    with _news_lock:
+        _news_cache["data"] = payload
+        _news_cache["ts"] = now
+    return jsonify(payload)
 
 TSX_BASE = "https://api.topstepx.com"
 RTC_BASE = "https://rtc.topstepx.com"   # ProjectX Gateway Real-Time Hub (SignalR)
