@@ -3589,6 +3589,11 @@
               <span style="font-size:12px;color:var(--sub)">Minus gemacht (Live)</span>
               <span class="mono" id="blownSummaryLoss" style="font-weight:700;font-size:15px;color:var(--danger)">–</span>
             </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--bg2);border:1px solid var(--violet);border-radius:9px;margin-top:2px">
+              <span style="font-size:12.5px;font-weight:700;color:var(--ink)">Gesamt (Netto)</span>
+              <span class="mono" id="blownSummaryNet" style="font-weight:800;font-size:16px">–</span>
+            </div>
+            <div style="font-size:11px;color:var(--sub);text-align:right;margin-top:-4px">inkl. Kaufkosten & Vorgänger-Kette</div>
           </div>
         </div>
         <div class="modal-foot" style="justify-content:center">
@@ -7929,6 +7934,15 @@
     if(gainEl) gainEl.textContent = '+' + fmt(gainEur)
     const lossEl = document.getElementById('blownSummaryLoss')
     if(lossEl) lossEl.textContent = '−' + fmt(lossEur)
+    // Gesamt-Netto: gkEur ist die Netto-"Kosten" (Kaufpreis + Vorgänger-Kette + Live-Hedge,
+    // Verlust→+, Gewinn→−). Das echte Gesamtergebnis des Accounts ist damit genau −gkEur:
+    // positiv = insgesamt Plus gemacht, negativ = insgesamt Geld verloren (inkl. Kaufkosten).
+    const netEur = -gkEur
+    const netEl = document.getElementById('blownSummaryNet')
+    if(netEl){
+      netEl.textContent = (netEur >= 0 ? '+' : '−') + fmt(netEur)
+      netEl.style.color = netEur >= 0 ? 'var(--good,#12B76A)' : 'var(--danger)'
+    }
     document.getElementById('blownSummaryModal')?.classList.add('open')
   }
   window.showBlownAccountSummary = showBlownAccountSummary
@@ -14007,14 +14021,25 @@
         symLabel = 'Stark asymmetrisch'
         symIcon = '✕'
       }
+      // Geld-Differenz: was der Hedge NICHT ausgeglichen hat (= wie viel man netto mehr
+      // verloren/gewonnen hat). Master-P/L ist in $, Slave-P/L in slavePreset.currency →
+      // beide auf EUR normieren, dann kombinieren. Negativ = mehr verloren.
+      const _fx = window._fxUsdEur || 0.85
+      const _mEur = (isNaN(mPl) ? 0 : mPl) * _fx
+      const _sEur = (isNaN(sPl) ? 0 : sPl) * (slavePreset.currency !== '€' ? _fx : 1)
+      const _netEur = _mEur + _sEur
+      const _netFmt = Math.abs(_netEur).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'
+      const _netCol = _netEur < 0 ? '#dc2626' : '#16a34a'
+      const _netLbl = _netEur < 0 ? `−${_netFmt} mehr verloren` : `+${_netFmt} Netto`
       planHtml += `
         <div style="margin-top:10px;padding:8px 12px;border-radius:6px;background:${symColor}15;border:1px solid ${symColor}33;display:flex;justify-content:space-between;align-items:center;gap:10px">
           <div style="display:flex;align-items:center;gap:8px">
             <span style="color:${symColor};font-weight:700;font-size:14px">${symIcon}</span>
             <span style="color:${symColor};font-weight:600;font-size:12.5px">${symLabel}</span>
           </div>
-          <div style="font-size:11.5px;color:var(--sub);font-family:var(--mono)">
-            ${sym.absM.toFixed(0)}% / ${sym.absS.toFixed(0)}% · Δ ${sym.diff.toFixed(1)}%
+          <div style="text-align:right;font-family:var(--mono)">
+            <div style="font-size:11.5px;color:var(--sub)">${sym.absM.toFixed(0)}% / ${sym.absS.toFixed(0)}% · Δ ${sym.diff.toFixed(1)}%</div>
+            <div style="font-size:11.5px;font-weight:700;color:${_netCol};margin-top:2px">${_netLbl}</div>
           </div>
         </div>
       `
