@@ -3560,21 +3560,30 @@
               <input type="number" class="input mono" id="suc-maxdd" step="1" placeholder="4500">
               <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
             </div>
+            <div class="field" style="grid-column:span 2">
+              <label>External ID (optional)</label>
+              <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
+            </div>
+          </div>
+
+          <!-- Trade-Limits — eigener Block, vorbelegt vom Vorgänger -->
+          <div class="modal-divider" style="color:#d97706;margin-top:14px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Trade-Limits (Pflicht)
+          </div>
+          <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Vorbelegt vom Vorgänger — anpassen falls die neue Phase abweicht.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
             <div class="field">
               <label>Max Daily Loss ($) *</label>
               <input type="number" class="input mono" id="suc-max-daily-dd" step="50" placeholder="z.B. 3000">
             </div>
             <div class="field">
-              <label>Max Loss pro Trade ($) *</label>
+              <label>Max Loss / Trade ($) *</label>
               <input type="number" class="input mono" id="suc-max-loss-trade" step="50" placeholder="z.B. 1000">
             </div>
             <div class="field">
-              <label>Max Profit pro Trade ($) *</label>
+              <label>Max Profit / Trade ($) *</label>
               <input type="number" class="input mono" id="suc-max-profit-trade" step="50" placeholder="z.B. 2000">
-            </div>
-            <div class="field" style="grid-column:span 2">
-              <label>External ID (optional)</label>
-              <input class="input" id="suc-extid" placeholder="z.B. neue Broker-Account-Nummer">
             </div>
           </div>
 
@@ -4778,20 +4787,6 @@
           <input class="input mono" id="ac-max-drawdown" type="number" step="100" placeholder="z.B. 10000 (10% von 100K Account)" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
-        <div class="field">
-          <label>Max Daily Loss ($) *</label>
-          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Tageslimit der Firma. Pflicht — wird im Trade-Plan-Modal und beim Trade-Start angezeigt.</div>
-        </div>
-        <div class="field">
-          <label>Max Loss pro Trade ($) *</label>
-          <input class="input mono" id="ac-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Max Profit pro Trade ($) *</label>
-          <input class="input mono" id="ac-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Beide Pflicht — werden als Limit-Hinweis im Trade-Plan-Modal und beim Trade-Start angezeigt.</div>
-        </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
           <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
           <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
@@ -4877,6 +4872,27 @@
             <option value="1">Slave (Hedge/Live)</option>
           </select>
           <span style="font-size:11px;color:var(--sub-2)">spart das manuelle Eintragen in Duplikum</span>
+        </div>
+      </div>
+
+      <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt von den Zugangsdaten -->
+      <div class="modal-divider" style="color:#d97706">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Trade-Limits (Pflicht)
+      </div>
+      <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Werden im Trade-Plan-Modal und beim Trade-Start angezeigt — gegen Daily-Loss-Fehler.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="field">
+          <label>Max Daily Loss ($) *</label>
+          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Loss / Trade ($) *</label>
+          <input class="input mono" id="ac-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Profit / Trade ($) *</label>
+          <input class="input mono" id="ac-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
       </div>
 
@@ -4972,18 +4988,6 @@
           <label>Max Drawdown ($)</label>
           <input class="input mono" id="bulk-maxdd" type="number" step="100" placeholder="optional" autocomplete="off">
         </div>
-        <div class="field">
-          <label>Max Daily Loss ($) *</label>
-          <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Max Loss pro Trade ($) *</label>
-          <input class="input mono" id="bulk-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Max Profit pro Trade ($) *</label>
-          <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
-        </div>
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
         </div>
@@ -5029,6 +5033,27 @@
         </div>
         <div class="field" style="grid-column:1/-1">
           <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt vom Rest (gilt für ALLE Accounts des Batches) -->
+      <div class="modal-divider" style="color:#d97706">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Trade-Limits (Pflicht — für alle Accounts)
+      </div>
+      <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Werden im Trade-Plan-Modal und beim Trade-Start angezeigt — gegen Daily-Loss-Fehler.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <div class="field">
+          <label>Max Daily Loss ($) *</label>
+          <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Loss / Trade ($) *</label>
+          <input class="input mono" id="bulk-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Profit / Trade ($) *</label>
+          <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
       </div>
 
