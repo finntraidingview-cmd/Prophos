@@ -3301,8 +3301,12 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
-              <div id="tp-master-daily-dd-info" style="display:none;margin-top:6px;font-size:11.5px;color:var(--sub)">
-                📅 Max Daily Drawdown dieser Firma: <span id="tp-master-daily-dd-value" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span> — reiner Hinweis, wird nicht geprüft.
+              <div id="tp-master-limits-info" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:11.5px;color:var(--sub);line-height:1.7">
+                <div style="font-weight:700;color:var(--ink);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">⚠ Limits dieses Accounts</div>
+                <div>📅 Max Daily Loss: <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div>🔻 Max Loss pro Trade: <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div>🔺 Max Profit pro Trade: <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div style="font-size:10.5px;color:var(--sub-2)">Reiner Hinweis, wird nicht geprüft.</div>
               </div>
             </div>
             <div class="field">
@@ -3555,6 +3559,18 @@
               <label>Max Drawdown ($)</label>
               <input type="number" class="input mono" id="suc-maxdd" step="1" placeholder="4500">
               <div style="font-size:11px;color:var(--sub);margin-top:4px">Vorbelegt mit dem Wert des Vorgängers — anpassen falls die neue Phase abweicht.</div>
+            </div>
+            <div class="field">
+              <label>Max Daily Loss ($) *</label>
+              <input type="number" class="input mono" id="suc-max-daily-dd" step="50" placeholder="z.B. 3000">
+            </div>
+            <div class="field">
+              <label>Max Loss pro Trade ($) *</label>
+              <input type="number" class="input mono" id="suc-max-loss-trade" step="50" placeholder="z.B. 1000">
+            </div>
+            <div class="field">
+              <label>Max Profit pro Trade ($) *</label>
+              <input type="number" class="input mono" id="suc-max-profit-trade" step="50" placeholder="z.B. 2000">
             </div>
             <div class="field" style="grid-column:span 2">
               <label>External ID (optional)</label>
@@ -4763,9 +4779,18 @@
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Für die Auto-Hedge-Berechnung. Bei FundingPips 100K = 10K. Bei 150K Topstep = 4.5K. Trade-Plan rechnet damit den Slave-Risk so aus, dass bei Master-Stop-Out der Account-Kaufpreis (+ akkumulierte Verluste) zurückgeholt wird.</div>
         </div>
         <div class="field">
-          <label>Max Daily Drawdown ($, optional)</label>
-          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000 (separates Daily-Loss-Limit)" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Nur falls die Firma ein EIGENES Tageslimit hat (zusätzlich zum Max Drawdown) — steht als Info im Trade-Plan-Modal.</div>
+          <label>Max Daily Loss ($) *</label>
+          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Tageslimit der Firma. Pflicht — wird im Trade-Plan-Modal und beim Trade-Start angezeigt.</div>
+        </div>
+        <div class="field">
+          <label>Max Loss pro Trade ($) *</label>
+          <input class="input mono" id="ac-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Profit pro Trade ($) *</label>
+          <input class="input mono" id="ac-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Beide Pflicht — werden als Limit-Hinweis im Trade-Plan-Modal und beim Trade-Start angezeigt.</div>
         </div>
         <div class="field" style="grid-column:1/-1" id="ac-ext-id-row">
           <label>External ID <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
@@ -4948,8 +4973,16 @@
           <input class="input mono" id="bulk-maxdd" type="number" step="100" placeholder="optional" autocomplete="off">
         </div>
         <div class="field">
-          <label>Max Daily Drawdown ($)</label>
-          <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="optional, separates Tageslimit" autocomplete="off">
+          <label>Max Daily Loss ($) *</label>
+          <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Loss pro Trade ($) *</label>
+          <input class="input mono" id="bulk-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Max Profit pro Trade ($) *</label>
+          <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
@@ -7650,6 +7683,7 @@
             if(idx >= 0) tradePlans[idx] = rowToPlan(data)
             renderTradePlans()
             atToast(`▶ Trade gestartet: ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
+            if(typeof showTradeLimitsFlash === 'function') showTradeLimitsFlash(rowToPlan(data))
           }
         } catch(e){ console.warn('atCheck start:', e) }
         finally { autoTrack.inProgress.delete(plan.id) }
@@ -8022,6 +8056,9 @@
     document.getElementById('suc-balance').value = acc.initialBalance || ''
     document.getElementById('suc-cost').value = '0'
     document.getElementById('suc-maxdd').value = acc.maxDrawdown != null ? acc.maxDrawdown : ''
+    document.getElementById('suc-max-daily-dd').value    = acc.maxDailyDrawdown != null ? acc.maxDailyDrawdown : ''
+    document.getElementById('suc-max-loss-trade').value  = acc.maxLossPerTrade   != null ? acc.maxLossPerTrade   : ''
+    document.getElementById('suc-max-profit-trade').value = acc.maxProfitPerTrade != null ? acc.maxProfitPerTrade : ''
     document.getElementById('suc-extid').value = ''
 
     // Name-Vorschlag basierend auf aktuellem Typ
@@ -8090,6 +8127,9 @@
     const cost = parseFloat(document.getElementById('suc-cost').value) || 0
     const maxDrawdownRaw = parseFloat(document.getElementById('suc-maxdd').value)
     const maxDrawdown = !isNaN(maxDrawdownRaw) && maxDrawdownRaw > 0 ? maxDrawdownRaw : null
+    const sucMaxDailyDd    = parseFloat(document.getElementById('suc-max-daily-dd').value)
+    const sucMaxLossTrade  = parseFloat(document.getElementById('suc-max-loss-trade').value)
+    const sucMaxProfitTrade = parseFloat(document.getElementById('suc-max-profit-trade').value)
     const externalId = document.getElementById('suc-extid').value.trim() || null
     const msgEl = document.getElementById('successorMsg')
 
@@ -8106,6 +8146,11 @@
       msgEl.className = 'modal-msg err'
       return
     }
+    if(!(sucMaxDailyDd > 0) || !(sucMaxLossTrade > 0) || !(sucMaxProfitTrade > 0)){
+      msgEl.textContent = 'Max Daily Loss, Max Loss pro Trade und Max Profit pro Trade sind Pflicht.'
+      msgEl.className = 'modal-msg err'
+      return
+    }
 
     try {
       // Neuen Account in Supabase anlegen
@@ -8115,6 +8160,9 @@
         initialBalance: balance,
         purchaseCost: cost,
         maxDrawdown,
+        maxDailyDrawdown: sucMaxDailyDd,
+        maxLossPerTrade: sucMaxLossTrade,
+        maxProfitPerTrade: sucMaxProfitTrade,
         externalId
       }
       const row = accountToRow(newAcc)
@@ -8178,6 +8226,8 @@
       purchaseCost:   row.purchase_cost != null ? Number(row.purchase_cost) : null,
       maxDrawdown:    row.max_drawdown != null ? Number(row.max_drawdown) : null,
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
+      maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
+      maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -8213,7 +8263,9 @@
       balance: a.initialBalance || 0,
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
       max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
-      max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null
+      max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null,
+      max_loss_per_trade:   a.maxLossPerTrade   != null ? a.maxLossPerTrade   : null,
+      max_profit_per_trade: a.maxProfitPerTrade != null ? a.maxProfitPerTrade : null
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -8272,6 +8324,8 @@
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
     maxDailyDd: document.getElementById('ac-max-daily-drawdown'),
+    maxLossTrade:   document.getElementById('ac-max-loss-trade'),
+    maxProfitTrade: document.getElementById('ac-max-profit-trade'),
     extId:    document.getElementById('ac-ext-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
@@ -8440,6 +8494,9 @@
         ['Anfangs-Balance', acc.initialBalance ? fmtMoney(acc.initialBalance) : '—'],
         ['Kaufpreis', acc.purchaseCost ? (acc.purchaseCost + ' €') : '—'],
         ['Max Drawdown', acc.maxDrawdown ? ('$' + Number(acc.maxDrawdown).toLocaleString('de-DE')) : '—'],
+        ['Max Daily Loss', acc.maxDailyDrawdown ? ('$' + Number(acc.maxDailyDrawdown).toLocaleString('de-DE')) : '—'],
+        ['Max Loss / Trade', acc.maxLossPerTrade ? ('$' + Number(acc.maxLossPerTrade).toLocaleString('de-DE')) : '—'],
+        ['Max Profit / Trade', acc.maxProfitPerTrade ? ('$' + Number(acc.maxProfitPerTrade).toLocaleString('de-DE')) : '—'],
         ['External ID', acc.externalId || '—']
       ]
       dataEl.innerHTML = rows.map(([l,v])=>`
@@ -8865,6 +8922,8 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.maxDailyDd) accEls.maxDailyDd.value = editAccount.maxDailyDrawdown != null ? editAccount.maxDailyDrawdown : ''
+      if(accEls.maxLossTrade)   accEls.maxLossTrade.value   = editAccount.maxLossPerTrade   != null ? editAccount.maxLossPerTrade   : ''
+      if(accEls.maxProfitTrade) accEls.maxProfitTrade.value = editAccount.maxProfitPerTrade != null ? editAccount.maxProfitPerTrade : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
@@ -8883,6 +8942,8 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.maxDailyDd) accEls.maxDailyDd.value = ''
+      if(accEls.maxLossTrade)   accEls.maxLossTrade.value   = ''
+      if(accEls.maxProfitTrade) accEls.maxProfitTrade.value = ''
       if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
@@ -8950,10 +9011,15 @@
     const purchaseCost = parseFloat(accEls.purchase.value)
     const maxDrawdown = parseFloat(accEls.maxDd.value)
     const maxDailyDrawdown = parseFloat(accEls.maxDailyDd?.value)
+    const maxLossPerTrade   = parseFloat(accEls.maxLossTrade?.value)
+    const maxProfitPerTrade = parseFloat(accEls.maxProfitTrade?.value)
     const isEdit = !!_editingAccountId
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
+    if(!(maxDailyDrawdown > 0)){ setModalMsg('Max Daily Loss ist Pflicht.', 'err'); return }
+    if(!(maxLossPerTrade > 0)){ setModalMsg('Max Loss pro Trade ist Pflicht.', 'err'); return }
+    if(!(maxProfitPerTrade > 0)){ setModalMsg('Max Profit pro Trade ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
     const externalIdVal = accEls.extId?.value.trim() || null
@@ -8972,6 +9038,8 @@
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
       maxDailyDrawdown: !isNaN(maxDailyDrawdown) && maxDailyDrawdown > 0 ? maxDailyDrawdown : null,
+      maxLossPerTrade,
+      maxProfitPerTrade,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -9022,6 +9090,8 @@
           purchase_cost: acc.purchaseCost,
           max_drawdown: acc.maxDrawdown,
           max_daily_drawdown: acc.maxDailyDrawdown,
+          max_loss_per_trade: acc.maxLossPerTrade,
+          max_profit_per_trade: acc.maxProfitPerTrade,
           external_id: acc.externalId,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
@@ -9425,6 +9495,8 @@
       cost:      document.getElementById('bulk-cost'),
       maxdd:     document.getElementById('bulk-maxdd'),
       maxDailyDd: document.getElementById('bulk-max-daily-dd'),
+      maxLossTrade:   document.getElementById('bulk-max-loss-trade'),
+      maxProfitTrade: document.getElementById('bulk-max-profit-trade'),
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
@@ -9558,6 +9630,8 @@
       bEl.cost.value     = t.purchase_cost != null ? t.purchase_cost : ''
       bEl.maxdd.value    = t.max_drawdown != null ? t.max_drawdown : ''
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = t.max_daily_drawdown != null ? t.max_daily_drawdown : ''
+      if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = t.max_loss_per_trade   != null ? t.max_loss_per_trade   : ''
+      if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = t.max_profit_per_trade != null ? t.max_profit_per_trade : ''
       bEl.template.value = t.name_template || ''
       updatePreview()
     }
@@ -9577,6 +9651,8 @@
         purchase_cost: parseFloat(bEl.cost.value)   || null,
         max_drawdown:  parseFloat(bEl.maxdd.value)  || null,
         max_daily_drawdown: parseFloat(bEl.maxDailyDd?.value) || null,
+        max_loss_per_trade:   parseFloat(bEl.maxLossTrade?.value)   || null,
+        max_profit_per_trade: parseFloat(bEl.maxProfitTrade?.value) || null,
         name_template: bEl.template.value.trim() || null,
       }
 
@@ -9628,6 +9704,8 @@
       bEl.cost.value     = ''
       bEl.maxdd.value    = ''
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
+      if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = ''
+      if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = ''
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
@@ -9669,12 +9747,17 @@
       const costRaw  = parseFloat(bEl.cost.value)
       const maxddRaw = parseFloat(bEl.maxdd.value)
       const maxDailyDdRaw = parseFloat(bEl.maxDailyDd?.value)
+      const maxLossTradeRaw   = parseFloat(bEl.maxLossTrade?.value)
+      const maxProfitTradeRaw = parseFloat(bEl.maxProfitTrade?.value)
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
       const extIds   = getExtIds()
       const credList = getBulkCreds()
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
+      if(!(maxDailyDdRaw > 0))      { setBulkMsg('Max Daily Loss ist Pflicht.', 'err'); return }
+      if(!(maxLossTradeRaw > 0))    { setBulkMsg('Max Loss pro Trade ist Pflicht.', 'err'); return }
+      if(!(maxProfitTradeRaw > 0))  { setBulkMsg('Max Profit pro Trade ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
       if(count > 50)                { setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
       if(!currentUserId)            { setBulkMsg('Nicht eingeloggt.', 'err'); return }
@@ -9709,6 +9792,8 @@
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
           max_daily_drawdown: maxDailyDrawdown,
+          max_loss_per_trade:   maxLossTradeRaw,
+          max_profit_per_trade: maxProfitTradeRaw,
           external_id:    extId,
         }
         if(cred && (cred.login || cred.password || cred.server)){
@@ -10329,6 +10414,7 @@
               if(idx >= 0) tradePlans[idx] = rowToPlan(data)
               renderTradePlans()
               atToast(`▶ Trade gestartet (Mirror): ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
+              if(typeof showTradeLimitsFlash === 'function') showTradeLimitsFlash(rowToPlan(data))
             }
           } catch(e){ console.warn('[mirrorPoll] open:', e) }
         } else if(plan.status === 'open'){
@@ -12833,6 +12919,44 @@
     if(e.target === document.getElementById('tpPreflightModal')) _pfClose()
   })
 
+  // ─────── Trade-Start-Limits-Flash ───────
+  // Beim Start eines Trades werden die drei Limits des Master-Accounts (Max Daily Loss,
+  // Max Loss pro Trade, Max Profit pro Trade) kurz eingeblendet und schließen sich nach
+  // 3 Sekunden von selbst — Erinnerung gegen Daily-Loss-Fehler, kein Gate, kein Klick nötig.
+  let _limitsFlashTimer = null
+  function showTradeLimitsFlash(plan){
+    if(!plan) return
+    const master = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+    if(!master) return
+    const fmt = v => v > 0 ? '$' + Number(v).toLocaleString('de-DE') : '—'
+    let el = document.getElementById('tradeLimitsFlash')
+    if(!el){
+      el = document.createElement('div')
+      el.id = 'tradeLimitsFlash'
+      el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(10,12,20,.55);backdrop-filter:blur(3px)'
+      el.addEventListener('click', hideTradeLimitsFlash)
+      document.body.appendChild(el)
+    }
+    el.innerHTML = `
+      <div style="background:var(--panel,#fff);border:1px solid rgba(245,158,11,.45);border-radius:14px;padding:22px 30px;max-width:360px;width:90%;box-shadow:0 18px 50px rgba(0,0,0,.35);text-align:left">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#d97706;margin-bottom:4px">⚠ Limits — ${escapeHtml(master.name || '')}</div>
+        <div style="display:grid;grid-template-columns:auto auto;gap:6px 16px;font-size:14px;line-height:1.5;margin:10px 0 6px">
+          <span style="color:var(--sub)">📅 Max Daily Loss</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxDailyDrawdown)}</span>
+          <span style="color:var(--sub)">🔻 Max Loss / Trade</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxLossPerTrade)}</span>
+          <span style="color:var(--sub)">🔺 Max Profit / Trade</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxProfitPerTrade)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--sub-2)">Schließt automatisch · Klick zum Schließen</div>
+      </div>`
+    el.style.display = 'flex'
+    clearTimeout(_limitsFlashTimer)
+    _limitsFlashTimer = setTimeout(hideTradeLimitsFlash, 3000)
+  }
+  function hideTradeLimitsFlash(){
+    clearTimeout(_limitsFlashTimer)
+    const el = document.getElementById('tradeLimitsFlash')
+    if(el) el.style.display = 'none'
+  }
+
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
     try{
@@ -12845,6 +12969,7 @@
       const idx = tradePlans.findIndex(x => String(x.id) === String(planId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
       renderTradePlans()
+      if(newStatus === 'open') showTradeLimitsFlash(rowToPlan(data))
     }catch(e){
       alert('Fehler: ' + (e.message || e))
     }
@@ -13648,11 +13773,14 @@
   function tpUpdateMasterDailyDdInfo(){
     const masterId = document.getElementById('tp-master')?.value
     const master = accounts.find(a => String(a.id) === String(masterId))
-    const box = document.getElementById('tp-master-daily-dd-info')
-    const val = document.getElementById('tp-master-daily-dd-value')
-    if(!box || !val) return
-    if(master?.maxDailyDrawdown){
-      val.textContent = '$' + Number(master.maxDailyDrawdown).toLocaleString('de-DE')
+    const box = document.getElementById('tp-master-limits-info')
+    if(!box) return
+    const fmt = v => v > 0 ? '$' + Number(v).toLocaleString('de-DE') : '—'
+    const hasAny = master && (master.maxDailyDrawdown > 0 || master.maxLossPerTrade > 0 || master.maxProfitPerTrade > 0)
+    if(hasAny){
+      document.getElementById('tp-lim-daily').textContent  = fmt(master.maxDailyDrawdown)
+      document.getElementById('tp-lim-loss').textContent   = fmt(master.maxLossPerTrade)
+      document.getElementById('tp-lim-profit').textContent = fmt(master.maxProfitPerTrade)
       box.style.display = 'block'
     } else {
       box.style.display = 'none'
