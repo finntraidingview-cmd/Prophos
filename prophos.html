@@ -3301,13 +3301,6 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
-              <div id="tp-master-limits-info" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:11.5px;color:var(--sub);line-height:1.7">
-                <div style="font-weight:700;color:var(--ink);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">⚠ Limits dieses Accounts</div>
-                <div>📅 Max Daily Loss: <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
-                <div>🔻 Max Loss pro Trade: <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
-                <div>🔺 Max Profit pro Trade: <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
-                <div style="font-size:10.5px;color:var(--sub-2)">Reiner Hinweis, wird nicht geprüft.</div>
-              </div>
             </div>
             <div class="field">
               <label>Anzahl Kontrakte</label>
@@ -3358,6 +3351,20 @@
                   <button type="button" id="tp-vorgaenger-apply" class="btn btn-ghost" style="padding:4px 10px;font-size:11px">Übernehmen</button>
                 </div>
                 <div id="tp-vorgaenger-detail" style="font-size:11px;color:var(--sub);margin-top:4px"></div>
+              </div>
+            </div>
+
+            <!-- Trade-Limits des Masters — volle Breite, eine Zeile, gleiche Optik wie die
+                 Vorschlag-Boxen drüber. Reiner Hinweis, kein Gate (Finn, 15.07./28.07.2026). -->
+            <div class="field" style="grid-column:span 2">
+              <div id="tp-master-limits-info" style="display:none;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                  <span style="color:#d97706;font-weight:700">⚠ Limits:</span>
+                  <span style="color:var(--sub)">📅 Max Daily Loss <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
+                  <span style="color:var(--sub)">🔻 Max Loss/Trade <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
+                  <span style="color:var(--sub)">🔺 Max Profit/Trade <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
+                  <span style="font-size:11px;color:var(--sub-2);margin-left:auto">Reiner Hinweis, wird nicht geprüft</span>
+                </div>
               </div>
             </div>
 
@@ -7696,7 +7703,6 @@
             if(idx >= 0) tradePlans[idx] = rowToPlan(data)
             renderTradePlans()
             atToast(`▶ Trade gestartet: ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
-            if(typeof showTradeLimitsFlash === 'function') showTradeLimitsFlash(rowToPlan(data))
           }
         } catch(e){ console.warn('atCheck start:', e) }
         finally { autoTrack.inProgress.delete(plan.id) }
@@ -10397,7 +10403,6 @@
               if(idx >= 0) tradePlans[idx] = rowToPlan(data)
               renderTradePlans()
               atToast(`▶ Trade gestartet (Mirror): ${plan.masterName||'—'} → ${plan.slaveName||'—'}`, 'start')
-              if(typeof showTradeLimitsFlash === 'function') showTradeLimitsFlash(rowToPlan(data))
             }
           } catch(e){ console.warn('[mirrorPoll] open:', e) }
         } else if(plan.status === 'open'){
@@ -12902,43 +12907,8 @@
     if(e.target === document.getElementById('tpPreflightModal')) _pfClose()
   })
 
-  // ─────── Trade-Start-Limits-Flash ───────
-  // Beim Start eines Trades werden die drei Limits des Master-Accounts (Max Daily Loss,
-  // Max Loss pro Trade, Max Profit pro Trade) kurz eingeblendet und schließen sich nach
-  // 3 Sekunden von selbst — Erinnerung gegen Daily-Loss-Fehler, kein Gate, kein Klick nötig.
-  let _limitsFlashTimer = null
-  function showTradeLimitsFlash(plan){
-    if(!plan) return
-    const master = accounts.find(a => String(a.id) === String(plan.masterAccountId))
-    if(!master) return
-    const fmt = v => v > 0 ? '$' + Number(v).toLocaleString('de-DE') : '—'
-    let el = document.getElementById('tradeLimitsFlash')
-    if(!el){
-      el = document.createElement('div')
-      el.id = 'tradeLimitsFlash'
-      el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(10,12,20,.55);backdrop-filter:blur(3px)'
-      el.addEventListener('click', hideTradeLimitsFlash)
-      document.body.appendChild(el)
-    }
-    el.innerHTML = `
-      <div style="background:var(--panel,#fff);border:1px solid rgba(245,158,11,.45);border-radius:14px;padding:22px 30px;max-width:360px;width:90%;box-shadow:0 18px 50px rgba(0,0,0,.35);text-align:left">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#d97706;margin-bottom:4px">⚠ Limits — ${escapeHtml(master.name || '')}</div>
-        <div style="display:grid;grid-template-columns:auto auto;gap:6px 16px;font-size:14px;line-height:1.5;margin:10px 0 6px">
-          <span style="color:var(--sub)">📅 Max Daily Loss</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxDailyDrawdown)}</span>
-          <span style="color:var(--sub)">🔻 Max Loss / Trade</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxLossPerTrade)}</span>
-          <span style="color:var(--sub)">🔺 Max Profit / Trade</span><span class="mono" style="font-weight:700;text-align:right">${fmt(master.maxProfitPerTrade)}</span>
-        </div>
-        <div style="font-size:11px;color:var(--sub-2)">Schließt automatisch · Klick zum Schließen</div>
-      </div>`
-    el.style.display = 'flex'
-    clearTimeout(_limitsFlashTimer)
-    _limitsFlashTimer = setTimeout(hideTradeLimitsFlash, 3000)
-  }
-  function hideTradeLimitsFlash(){
-    clearTimeout(_limitsFlashTimer)
-    const el = document.getElementById('tradeLimitsFlash')
-    if(el) el.style.display = 'none'
-  }
+  // Der 3s-Limits-Flash beim Trade-Start wurde wieder entfernt (Finn, 28.07.2026):
+  // die Limits stehen jetzt nur noch beim PLANEN im Trade-Plan-Modal (tp-master-limits-info).
 
   // ─────── Status transitions (planned ↔ open) ───────
   async function transitionPlan(planId, newStatus){
@@ -12952,7 +12922,6 @@
       const idx = tradePlans.findIndex(x => String(x.id) === String(planId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
       renderTradePlans()
-      if(newStatus === 'open') showTradeLimitsFlash(rowToPlan(data))
     }catch(e){
       alert('Fehler: ' + (e.message || e))
     }
