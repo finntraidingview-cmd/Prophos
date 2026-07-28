@@ -3367,17 +3367,28 @@
               </div>
             </div>
 
-            <!-- Trade-Limits des Masters — volle Breite unter den Vorschlag-Boxen, Werte
-                 untereinander (Finn, 28.07.2026). Reiner Hinweis, kein Gate. -->
+            <!-- Trade-Limits des Masters — volle Breite unter den Vorschlag-Boxen, drei Spalten
+                 nebeneinander, Label oben / Zahl drunter (Finn, 28.07.2026). Reiner Hinweis, kein Gate. -->
             <div class="field" style="grid-column:span 2">
-              <div id="tp-master-limits-info" style="display:none;padding:7px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.55">
-                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+              <div id="tp-master-limits-info" style="display:none;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.4">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px">
                   <span style="color:#d97706;font-weight:700">⚠ Limits</span>
                   <span style="font-size:11px;color:var(--sub-2)">Reiner Hinweis, wird nicht geprüft</span>
                 </div>
-                <div style="color:var(--sub)">📅 Max Daily Loss: <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
-                <div style="color:var(--sub)">🔻 Max Loss/Trade: <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
-                <div style="color:var(--sub)">🔺 Max Profit/Trade: <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+                  <div>
+                    <div style="font-size:11px;color:var(--sub)">📅 Max Daily Loss</div>
+                    <div id="tp-lim-daily" style="font-family:var(--mono);font-weight:700;font-size:14px;color:var(--ink);margin-top:2px">—</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:var(--sub)"><span style="color:#dc2626">▼</span> Max Loss/Trade</div>
+                    <div id="tp-lim-loss" style="font-family:var(--mono);font-weight:700;font-size:14px;color:var(--ink);margin-top:2px">—</div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:var(--sub)"><span style="color:#16a34a">▲</span> Max Profit/Trade</div>
+                    <div id="tp-lim-profit" style="font-family:var(--mono);font-weight:700;font-size:14px;color:#16a34a;margin-top:2px">—</div>
+                  </div>
+                </div>
               </div>
             </div>
 
