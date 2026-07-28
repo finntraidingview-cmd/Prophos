@@ -13,6 +13,6 @@ alter table public.account_templates
   add column if not exists max_loss_per_trade  numeric,
   add column if not exists max_profit_per_trade numeric;
 
-comment on column public.accounts.max_daily_drawdown   is 'Max Daily Loss ($) — Pflicht beim Anlegen (UI-seitig erzwungen)';
-comment on column public.accounts.max_loss_per_trade   is 'Max Loss pro Trade ($) — Pflicht beim Anlegen (UI-seitig erzwungen)';
-comment on column public.accounts.max_profit_per_trade is 'Max Profit pro Trade ($) — Pflicht beim Anlegen (UI-seitig erzwungen)';
+comment on column public.accounts.max_daily_drawdown   is 'Max Daily Loss ($) — optional beim Anlegen (seit 28.07.2026 abends; war kurz Pflicht)';
+comment on column public.accounts.max_loss_per_trade   is 'Max Loss pro Trade ($) — optional beim Anlegen (seit 28.07.2026 abends; war kurz Pflicht)';
+comment on column public.accounts.max_profit_per_trade is 'Max Profit pro Trade ($) — optional beim Anlegen (seit 28.07.2026 abends; war kurz Pflicht)';

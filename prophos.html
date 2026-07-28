@@ -3569,20 +3569,20 @@
           <!-- Trade-Limits — eigener Block, vorbelegt vom Vorgänger -->
           <div class="modal-divider" style="color:#d97706;margin-top:14px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            Trade-Limits (Pflicht)
+            Trade-Limits (optional)
           </div>
           <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Vorbelegt vom Vorgänger — anpassen falls die neue Phase abweicht.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
             <div class="field">
-              <label>Max Daily Loss ($) *</label>
+              <label>Max Daily Loss ($)</label>
               <input type="number" class="input mono" id="suc-max-daily-dd" step="50" placeholder="z.B. 3000">
             </div>
             <div class="field">
-              <label>Max Loss / Trade ($) *</label>
+              <label>Max Loss / Trade ($)</label>
               <input type="number" class="input mono" id="suc-max-loss-trade" step="50" placeholder="z.B. 1000">
             </div>
             <div class="field">
-              <label>Max Profit / Trade ($) *</label>
+              <label>Max Profit / Trade ($)</label>
               <input type="number" class="input mono" id="suc-max-profit-trade" step="50" placeholder="z.B. 2000">
             </div>
           </div>
@@ -4859,39 +4859,27 @@
         </div>
       </div>
 
-      <!-- Auto-Anlegen in Duplikum — nur sichtbar wenn Plattform MT4/MT5 + Duplikum verbunden -->
-      <div id="ac-dup-create-box" style="display:none;margin-top:10px;padding:11px 13px;background:rgba(136,124,252,.07);border:1px solid rgba(136,124,252,.25);border-radius:10px">
-        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0">
-          <input type="checkbox" id="ac-dup-create" checked style="width:16px;height:16px;flex-shrink:0">
-          <span style="font-size:13px;font-weight:600">🔗 Diesen Account direkt in Duplikum anlegen &amp; verknüpfen</span>
-        </label>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:9px;padding-left:25px;flex-wrap:wrap">
-          <span style="font-size:12px;color:var(--sub)">Rolle in Duplikum:</span>
-          <select class="input" id="ac-dup-role" style="width:auto;padding:5px 10px;font-size:12.5px;height:auto">
-            <option value="0">Master (Prop-Account)</option>
-            <option value="1">Slave (Hedge/Live)</option>
-          </select>
-          <span style="font-size:11px;color:var(--sub-2)">spart das manuelle Eintragen in Duplikum</span>
-        </div>
-      </div>
+      <!-- Auto-Anlegen in Duplikum läuft ohne UI-Box: sobald Login-Daten (MT4/MT5) eingetragen
+           sind und Duplikum verbunden ist, wird der Account beim Speichern automatisch dort
+           angelegt & verknüpft (Rolle: Live = Slave, sonst Master). Box entfernt 28.07.2026. -->
 
       <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt von den Zugangsdaten -->
       <div class="modal-divider" style="color:#d97706">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Trade-Limits (Pflicht)
+        Trade-Limits (optional)
       </div>
       <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Werden im Trade-Plan-Modal und beim Trade-Start angezeigt — gegen Daily-Loss-Fehler.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="field">
-          <label>Max Daily Loss ($) *</label>
+          <label>Max Daily Loss ($)</label>
           <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Max Loss / Trade ($) *</label>
+          <label>Max Loss / Trade ($)</label>
           <input class="input mono" id="ac-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Max Profit / Trade ($) *</label>
+          <label>Max Profit / Trade ($)</label>
           <input class="input mono" id="ac-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
       </div>
@@ -5039,20 +5027,20 @@
       <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt vom Rest (gilt für ALLE Accounts des Batches) -->
       <div class="modal-divider" style="color:#d97706">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Trade-Limits (Pflicht — für alle Accounts)
+        Trade-Limits (optional — gelten für alle Accounts)
       </div>
       <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Werden im Trade-Plan-Modal und beim Trade-Start angezeigt — gegen Daily-Loss-Fehler.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="field">
-          <label>Max Daily Loss ($) *</label>
+          <label>Max Daily Loss ($)</label>
           <input class="input mono" id="bulk-max-daily-dd" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Max Loss / Trade ($) *</label>
+          <label>Max Loss / Trade ($)</label>
           <input class="input mono" id="bulk-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Max Profit / Trade ($) *</label>
+          <label>Max Profit / Trade ($)</label>
           <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
       </div>
@@ -8171,11 +8159,6 @@
       msgEl.className = 'modal-msg err'
       return
     }
-    if(!(sucMaxDailyDd > 0) || !(sucMaxLossTrade > 0) || !(sucMaxProfitTrade > 0)){
-      msgEl.textContent = 'Max Daily Loss, Max Loss pro Trade und Max Profit pro Trade sind Pflicht.'
-      msgEl.className = 'modal-msg err'
-      return
-    }
 
     try {
       // Neuen Account in Supabase anlegen
@@ -8185,9 +8168,9 @@
         initialBalance: balance,
         purchaseCost: cost,
         maxDrawdown,
-        maxDailyDrawdown: sucMaxDailyDd,
-        maxLossPerTrade: sucMaxLossTrade,
-        maxProfitPerTrade: sucMaxProfitTrade,
+        maxDailyDrawdown: !isNaN(sucMaxDailyDd) && sucMaxDailyDd > 0 ? sucMaxDailyDd : null,
+        maxLossPerTrade: !isNaN(sucMaxLossTrade) && sucMaxLossTrade > 0 ? sucMaxLossTrade : null,
+        maxProfitPerTrade: !isNaN(sucMaxProfitTrade) && sucMaxProfitTrade > 0 ? sucMaxProfitTrade : null,
         externalId
       }
       const row = accountToRow(newAcc)
@@ -8982,15 +8965,13 @@
     if(accEls.credPass) accEls.credPass.type = 'password'
     const credPwToggle = document.getElementById('ac-cred-pw-toggle')
     if(credPwToggle) credPwToggle.textContent = 'Zeigen'
-    // Paste-Parser-Feld + Auto-Anlegen-Box zurücksetzen
+    // Paste-Parser-Feld zurücksetzen
     const _pasteEl = document.getElementById('ac-paste-blob'); if(_pasteEl) _pasteEl.value = ''
     const _pasteHintEl = document.getElementById('ac-paste-hint'); if(_pasteHintEl) _pasteHintEl.style.display = 'none'
-    const _dupCreateCb = document.getElementById('ac-dup-create'); if(_dupCreateCb) _dupCreateCb.checked = true
     _acServerManual = false  // Server-Auto-Prefill für den neuen Modal-Durchlauf wieder aktivieren
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
-    if(typeof acUpdateDupCreateBox === 'function') acUpdateDupCreateBox()
     if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
@@ -9042,9 +9023,6 @@
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
-    if(!(maxDailyDrawdown > 0)){ setModalMsg('Max Daily Loss ist Pflicht.', 'err'); return }
-    if(!(maxLossPerTrade > 0)){ setModalMsg('Max Loss pro Trade ist Pflicht.', 'err'); return }
-    if(!(maxProfitPerTrade > 0)){ setModalMsg('Max Profit pro Trade ist Pflicht.', 'err'); return }
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
     const externalIdVal = accEls.extId?.value.trim() || null
@@ -9063,8 +9041,8 @@
       purchaseCost: !isNaN(purchaseCost) && purchaseCost > 0 ? purchaseCost : null,
       maxDrawdown: !isNaN(maxDrawdown) && maxDrawdown > 0 ? maxDrawdown : null,
       maxDailyDrawdown: !isNaN(maxDailyDrawdown) && maxDailyDrawdown > 0 ? maxDailyDrawdown : null,
-      maxLossPerTrade,
-      maxProfitPerTrade,
+      maxLossPerTrade: !isNaN(maxLossPerTrade) && maxLossPerTrade > 0 ? maxLossPerTrade : null,
+      maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -9171,14 +9149,14 @@
           })
         }
 
-        // Auto-Anlegen in Duplikum (MT4/MT5, Checkbox aktiv) — legt den Account per API
-        // in Duplikum an und verknüpft ihn direkt. Spart das manuelle Eintragen dort.
-        const dupCreateOn = document.getElementById('ac-dup-create')?.checked
-        const dupBoxVisible = document.getElementById('ac-dup-create-box')?.style.display !== 'none'
+        // Auto-Anlegen in Duplikum — läuft IMMER, sobald Login-Daten da sind (UI-Box entfernt,
+        // Finn 28.07.2026: leere Creds → egal, Creds eingetragen → immer anlegen & verknüpfen).
+        // dupCreateAccountInDuplikum sichert selbst ab: nur MT4/MT5, nur vollständige Creds,
+        // nur wenn Duplikum verbunden — sonst stiller Skip. Rolle: Live = Slave, sonst Master.
         let dupCreated = false
-        if(dupCreateOn && dupBoxVisible && newAcc.creds?.login){
+        if(newAcc.creds?.login){
           setModalMsg('🔗 Lege Account in Duplikum an…', 'muted')
-          const roleType = document.getElementById('ac-dup-role')?.value || '0'
+          const roleType = (newAcc.type === 'live') ? '1' : '0'
           const cr = await dupCreateAccountInDuplikum(newAcc, roleType)
           if(cr.ok){
             dupCreated = true
@@ -9352,7 +9330,6 @@
       if(parsed.login && accEls.extId && !accEls.extId.value.trim()){ accEls.extId.value = parsed.login; found.push('External ID') }
       if(parsed.server && accEls.credServer){ accEls.credServer.value = parsed.server; found.push('Server') }
       if(parsed.platform && accEls.credPlatform){ accEls.credPlatform.value = parsed.platform; found.push('Plattform: ' + parsed.platform) }
-      acUpdateDupCreateBox()
       if(acPasteHint){
         if(found.length){ acPasteHint.style.display = ''; acPasteHint.style.color = 'var(--good,#12B76A)'; acPasteHint.textContent = '✓ Erkannt: ' + found.join(' · ') + ' — unten prüfen/korrigieren.' }
         else if(acPasteBlob.value.trim().length > 8){ acPasteHint.style.display = ''; acPasteHint.style.color = 'var(--sub)'; acPasteHint.textContent = 'Nichts automatisch erkannt — bitte die Felder unten manuell füllen.' }
@@ -9361,24 +9338,8 @@
     })
   }
 
-  /* ── Auto-Anlegen-Box zeigen/verstecken je nach Plattform + Duplikum-Status ── */
-  function acUpdateDupCreateBox(){
-    const box = document.getElementById('ac-dup-create-box')
-    if(!box) return
-    const plat = (accEls.credPlatform?.value || '').toLowerCase()
-    const isMtType = plat === 'mt5' || plat === 'mt4'
-    const dupConnected = typeof dupState !== 'undefined' && dupState.token
-    const isEdit = !!_editingAccountId
-    // Nur beim NEU-Anlegen (kein Edit), nur MT4/MT5, nur wenn Duplikum verbunden
-    box.style.display = (!isEdit && isMtType && dupConnected) ? '' : 'none'
-    // Rolle default: Live-Account = Slave, sonst Master
-    const roleSel = document.getElementById('ac-dup-role')
-    if(roleSel && box.style.display !== 'none'){
-      roleSel.value = (accEls.type?.value === 'live') ? '1' : '0'
-    }
-  }
-  if(accEls.credPlatform) accEls.credPlatform.addEventListener('change', acUpdateDupCreateBox)
-  if(accEls.type) accEls.type.addEventListener('change', acUpdateDupCreateBox)
+  /* Auto-Anlegen-Box wurde entfernt (28.07.2026) — das Duplikum-Anlegen läuft jetzt
+     unsichtbar in saveAccount, sobald Login-Daten eingetragen sind. */
 
   /* ── Account in Duplikum anlegen (addAccount.php) + auto-verknüpfen ──
    * Nur MT4/MT5 (Duplikum kann Tradovate nicht per API), best-effort:
@@ -9780,9 +9741,6 @@
       const credList = getBulkCreds()
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
-      if(!(maxDailyDdRaw > 0))      { setBulkMsg('Max Daily Loss ist Pflicht.', 'err'); return }
-      if(!(maxLossTradeRaw > 0))    { setBulkMsg('Max Loss pro Trade ist Pflicht.', 'err'); return }
-      if(!(maxProfitTradeRaw > 0))  { setBulkMsg('Max Profit pro Trade ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
       if(count > 50)                { setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
       if(!currentUserId)            { setBulkMsg('Nicht eingeloggt.', 'err'); return }
@@ -9817,8 +9775,8 @@
           purchase_cost:  purchaseCost,
           max_drawdown:   maxDrawdown,
           max_daily_drawdown: maxDailyDrawdown,
-          max_loss_per_trade:   maxLossTradeRaw,
-          max_profit_per_trade: maxProfitTradeRaw,
+          max_loss_per_trade:   !isNaN(maxLossTradeRaw)   && maxLossTradeRaw   > 0 ? maxLossTradeRaw   : null,
+          max_profit_per_trade: !isNaN(maxProfitTradeRaw) && maxProfitTradeRaw > 0 ? maxProfitTradeRaw : null,
           external_id:    extId,
         }
         if(cred && (cred.login || cred.password || cred.server)){
