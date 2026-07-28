@@ -984,6 +984,19 @@
     border-top:1px solid var(--border);
   }
 
+  /* Trade-Plan-Modal einen Tick kompakter (28.07.2026, Finn): Gaps/Paddings leicht
+     reduziert, damit "Speichern & Starten" ohne Scrollen erreichbar ist. Nur dieses
+     Modal — die anderen behalten das normale Spacing. */
+  #tradePlanModal .modal{padding:18px 24px 16px}
+  #tradePlanModal .modal-head{padding-bottom:12px}
+  #tradePlanModal .modal-body{padding:12px 0 2px}
+  #tradePlanModal .form-grid{gap:10px 14px !important}
+  #tradePlanModal .tp-multi-display{margin-top:10px}
+  #tradePlanModal .tp-slave-out{padding:14px 18px}
+  #tradePlanModal .tp-mult-out{padding:12px 18px}
+  #tradePlanModal .modal-msg{margin-top:6px;min-height:0}
+  #tradePlanModal .modal-foot{padding-top:12px;margin-top:6px}
+
   /* Account type badges */
   #dashboard-view .type-badge{
     display:inline-flex;align-items:center;gap:5px;
@@ -3354,17 +3367,17 @@
               </div>
             </div>
 
-            <!-- Trade-Limits des Masters — volle Breite, eine Zeile, gleiche Optik wie die
-                 Vorschlag-Boxen drüber. Reiner Hinweis, kein Gate (Finn, 15.07./28.07.2026). -->
+            <!-- Trade-Limits des Masters — volle Breite unter den Vorschlag-Boxen, Werte
+                 untereinander (Finn, 28.07.2026). Reiner Hinweis, kein Gate. -->
             <div class="field" style="grid-column:span 2">
-              <div id="tp-master-limits-info" style="display:none;padding:8px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.4">
-                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-                  <span style="color:#d97706;font-weight:700">⚠ Limits:</span>
-                  <span style="color:var(--sub)">📅 Max Daily Loss <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
-                  <span style="color:var(--sub)">🔻 Max Loss/Trade <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
-                  <span style="color:var(--sub)">🔺 Max Profit/Trade <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></span>
-                  <span style="font-size:11px;color:var(--sub-2);margin-left:auto">Reiner Hinweis, wird nicht geprüft</span>
+              <div id="tp-master-limits-info" style="display:none;padding:7px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:6px;font-size:12px;line-height:1.55">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+                  <span style="color:#d97706;font-weight:700">⚠ Limits</span>
+                  <span style="font-size:11px;color:var(--sub-2)">Reiner Hinweis, wird nicht geprüft</span>
                 </div>
+                <div style="color:var(--sub)">📅 Max Daily Loss: <span id="tp-lim-daily" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div style="color:var(--sub)">🔻 Max Loss/Trade: <span id="tp-lim-loss" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
+                <div style="color:var(--sub)">🔺 Max Profit/Trade: <span id="tp-lim-profit" style="font-family:var(--mono);font-weight:600;color:var(--ink)">—</span></div>
               </div>
             </div>
 
