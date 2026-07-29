@@ -185,6 +185,22 @@ def cors(r):
 
 @app.route("/")
 def index():
+    # Optional (nur für lokale PC-Installationen): Frontend LIVE von einer URL holen,
+    # damit prophos.html auf den PCs nie veraltet — Updates laufen dann weiter normal
+    # über GitHub/Cloudflare, ohne dass auf jedem PC etwas nachgezogen werden muss.
+    # Aktivierung per Env-Var PROPHOS_FRONTEND (setzt start-local-backend.bat).
+    # Ohne die Var bleibt das Verhalten unverändert (Railway ist damit nicht betroffen).
+    # Bei jedem Fehler/Timeout: Fallback auf die lokale Datei, damit der PC offline
+    # weiterarbeiten kann.
+    remote = (os.environ.get("PROPHOS_FRONTEND") or "").strip()
+    if remote:
+        try:
+            r = requests.get(remote, timeout=10)
+            if r.ok and len(r.content) > 50000:
+                return Response(r.content, mimetype="text/html")
+            print(f"[frontend] Remote lieferte HTTP {r.status_code} / {len(r.content)} Bytes — nutze lokale Datei")
+        except Exception as e:
+            print(f"[frontend] Remote-Fetch fehlgeschlagen ({type(e).__name__}) — nutze lokale Datei")
     # Serve prophos.html if present, otherwise fall back to old index.html
     if os.path.exists("prophos.html"):
         return send_from_directory(".", "prophos.html")

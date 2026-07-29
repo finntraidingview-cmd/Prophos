@@ -64,9 +64,18 @@ prophos.pages.dev. Alles, was im Browser-Speicher liegt, ist dort deshalb leer:
 1. **Nie dasselbe Konto gleichzeitig lokal und über Railway scharfschalten.** Sonst
    spiegeln zwei Engines parallel → doppelte Hedge-Orders. Pro Person entweder lokal
    (empfohlen) oder Cloud, nicht beides.
-2. **`prophos.html` auf dem PC aktuell halten.** Neue Features/Fixes landen im Repo — auf
-   dem PC per `git pull` oder neuer Kopie nachziehen, sonst läuft dort eine alte
-   Oberfläche.
+2. **Updates: nichts zu tun.** `start-local-backend.bat` setzt `PROPHOS_FRONTEND` auf
+   `https://prophos.pages.dev/prophos` — das Backend holt die Oberfläche bei jedem
+   Seitenaufruf **live** von dort. Dein Update-Weg bleibt unverändert (GitHub →
+   Cloudflare); die PCs haben danach automatisch die neue Version, ohne dass du auf
+   einen einzigen PC musst. Die lokale `prophos.html` bleibt nur als Offline-Reserve
+   liegen: ist pages.dev nicht erreichbar, wird automatisch sie ausgeliefert
+   (Konsole zeigt dann „nutze lokale Datei"). Abschalten: die `set PROPHOS_FRONTEND`-Zeile
+   in der .bat mit `REM` davor deaktivieren.
+
+   Verifiziert am 29.07.2026: mit Variable = byte-identisch zur pages.dev-Version;
+   ohne Variable = unverändertes Verhalten (lokale Datei); bei unerreichbarer URL =
+   Fallback greift.
 
 ## Verhältnis zu `topstep-agent/`
 Der separate Agent in `topstep-agent/` macht dasselbe Ziel auf einem anderen Weg (nur
