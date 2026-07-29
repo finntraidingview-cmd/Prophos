@@ -49,6 +49,14 @@ prophos.pages.dev. Alles, was im Browser-Speicher liegt, ist dort deshalb leer:
 - **Topstep neu verbinden** (API-Key + Username eingeben) — genau der gewohnte Ablauf,
   nur einmal pro PC.
 - Rechner-/Toggle-Einstellungen und scharfgeschaltete Mirror-Pläne beginnen leer.
+- **Mirror-Pair neu einstellen** — die Pairs liegen in localStorage (`prophos_mirror_pairs`),
+  also pro Herkunft getrennt. Auf localhost steht ein Pair mit STANDARDWERTEN:
+  - Master-Account (TopstepX) auswählen — sonst „⚠ Accounts wählen", kein Start möglich.
+  - **Multiplikator auf den gewohnten Wert setzen.** Die grüne Box rechts zeigt die
+    resultierenden Lots — die MUSS mit dem bisherigen Wert übereinstimmen. Beispiel:
+    0,1 → 1.0 Lots (richtig) vs. Default 0,8 → 8.0 Lots (achtfach zu großer Hedge!).
+  - Häkchen **Echtzeit (BETA)** so setzen wie bisher (bei Finn: an) — sonst läuft eine
+    andere Engine (Polling statt SignalR).
 - **Nicht betroffen:** alles aus Supabase (Accounts, Trade-Pläne, Finanzen) — nach dem
   Login sofort wieder da.
 
