@@ -12684,6 +12684,70 @@
     }
   }
 
+  // ── Die 3 Duplikum-Checks als eigenständige Helfer, damit sie PARALLEL laufen können.
+  // Jeder setzt seine eigene Zeile (✓/!/✕) sobald ER fertig ist und gibt sein Ergebnis
+  // zurück ({hardFail?} / {softWait?}), das nach Promise.all aggregiert wird.
+  async function pfCheckConn(plan, dupMasterId, dupSlaveId){
+    try { await dupLoadAccounts() } catch(_){}  // frischer Stand — state ändert sich laufend
+    const dupAccsConn = (typeof dupState !== 'undefined' && dupState.accounts) || []
+    const connProblems = []
+    for(const [dupId, label] of [[dupMasterId, `Master „${plan.masterName||'—'}"`], [dupSlaveId, `Slave „${plan.slaveName||'—'}"`]]){
+      const d = dupAccsConn.find(x => String(x.account_id) === String(dupId))
+      if(!d){ connProblems.push(`${label}: in Duplikum nicht mehr gefunden`); continue }
+      const parts = []
+      if(Number(d.status) !== 1) parts.push('Schalter steht auf OFF')
+      const st = String(d.state || '').toUpperCase()
+      if(st && st !== 'CONNECTED') parts.push(st === 'DISCONNECTED' ? 'GETRENNT — Zugangsdaten in Duplikum prüfen' : `Status ${st}`)
+      if(parts.length) connProblems.push(`${label}: ${parts.join(' · ')}`)
+    }
+    if(!connProblems.length){ _pfSet('conn', 'ok', 'Master & Slave sind ON und verbunden.'); return {} }
+    _pfSet('conn', 'err', escapeHtml(connProblems.join(' — ')) + '<br><span style="font-size:11px;color:var(--sub)">Im Duplikum-Cockpit (trade-copier.com) beheben, dann den Trade neu starten.</span>')
+    return { hardFail: true }
+  }
+  async function pfCheckMult(plan, dupMasterId, dupSlaveId){
+    if(plan.multiplier == null || !isFinite(Number(plan.multiplier))){
+      _pfSet('mult', 'warn', 'Kein Multiplier am Plan gespeichert — übersprungen.'); return {}
+    }
+    const r = await dupPushMultiplierValue(dupMasterId, dupSlaveId, Number(plan.multiplier).toFixed(3))
+    if(r.ok){ _pfSet('mult', 'ok', `<span class="mono">${Number(plan.multiplier).toFixed(3)}×</span> erfolgreich gepusht.`); return {} }
+    _pfSet('mult', 'err', escapeHtml(r.error || 'Push fehlgeschlagen')); return { hardFail: true }
+  }
+  async function pfCheckSym(plan, dupMasterId, dupSlaveId){
+    const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+    const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
+    const symMasters = tpMicroizeSymbols(masterAcc?.firm, dupSymbolsForFirm(masterAcc?.firm))
+    const symSlave   = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
+    if(!symMasters.length){
+      _pfSet('sym', 'warn', `Kein Duplikum-Symbol für „${escapeHtml(masterAcc?.firm||'—')}" hinterlegt (Settings → Prop Firms → Specs) — übersprungen.`)
+      return {}
+    }
+    const found = await dupFindSymbolMappings(dupMasterId, dupSlaveId)
+    if(found.error){ _pfSet('sym', 'err', escapeHtml(found.error)); return { hardFail: true } }
+    const have = found.mappings || []
+    const missing = symMasters.filter(sm => !have.some(m => m.symbolMaster === sm && m.symbolSlave === symSlave))
+    if(!missing.length){
+      _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMasters.join(', '))} → ${escapeHtml(symSlave)}</span> ✓`)
+      return {}
+    }
+    const ist = have.length ? `vorhanden: <span class="mono">${escapeHtml(have.map(m=>m.symbolMaster+'→'+m.symbolSlave).join(', '))}</span>` : 'kein Mapping vorhanden'
+    _pfSet('sym', 'warn', `Fehlt: <span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> — ${ist}.<br>
+      <button class="btn btn-primary pf-fix-btn" id="pf-fix-sym" style="padding:4px 12px;font-size:11.5px">Jetzt pushen (${missing.length})</button>`)
+    document.getElementById('pf-fix-sym')?.addEventListener('click', async () => {
+      const btn = document.getElementById('pf-fix-sym')
+      if(btn){ btn.disabled = true; btn.textContent = 'Pushe…' }
+      const ico = document.getElementById('pf-ico-sym')
+      if(ico){ ico.classList.remove('pf-warn'); ico.innerHTML = '<div class="pf-spinner"></div>' }
+      const failed = []
+      for(const sm of missing){
+        const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, sm, symSlave)
+        if(!pr.ok) failed.push(`${sm}: ${pr.error || 'Fehler'}`)
+      }
+      if(!failed.length) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
+      else _pfSet('sym', 'err', escapeHtml(failed.join(' · ')))
+    })
+    return { softWait: true }
+  }
+
   async function tpPreflightAndStart(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
@@ -12706,9 +12770,16 @@
     let hardFail = false   // echtes Problem → Buttons statt Auto-Start
     let softWait = false   // Fix-Button angeboten → nicht auto-starten
 
-    // ── 1. Verknüpfung ──
+    // Alle 4 Zeilen SOFORT anlegen (alle mit Spinner). Check 1 (Verknüpfung) ist rein
+    // lokal/instant und liefert die Duplikum-IDs, die die anderen 3 brauchen. Danach laufen
+    // die 3 langsamen Netzwerk-Checks GLEICHZEITIG — jeder hakt sich ab, sobald ER fertig
+    // ist (statt nacheinander). Spart die Summe der Wartezeiten.
     _pfAddRow('link', 'External IDs mit Duplikum verknüpft')
-    await _pfSleep(450)
+    _pfAddRow('conn', 'Duplikum-Accounts aktiv & verbunden')
+    _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
+    _pfAddRow('sym',  'Symbol-Mapping korrekt')
+
+    // ── 1. Verknüpfung (Basis) ──
     const connected = !!(typeof dupState !== 'undefined' && dupState.token)
     const dupMasterId = connected ? atGetDupId(plan.masterAccountId) : null
     const dupSlaveId  = connected ? atGetDupId(plan.slaveAccountId)  : null
@@ -12740,94 +12811,21 @@
       _pfSet('link', 'ok', `Master <span class="mono">${escapeHtml(String(dupMasterId))}</span> · Slave <span class="mono">${escapeHtml(String(dupSlaveId))}</span>`)
     }
 
-    // ── 1b. Duplikum-Accounts aktiv & verbunden ──
-    // `status` = On/Off-Schalter im Cockpit (0/1) · `state` = Verbindungszustand
-    // (CONNECTED/DISCONNECTED/…). Finns Fall (14.07.2026): Account war korrekt verknüpft,
-    // stand in Duplikum aber auf DISCONNECTED (falsche Zugangsdaten) — der Trade wäre
-    // nie auf den Slave kopiert worden, ohne dass Prophos etwas gemerkt hätte.
-    _pfAddRow('conn', 'Duplikum-Accounts aktiv & verbunden')
-    await _pfSleep(450)
     if(hardFail){
+      // Verknüpfung fehlt → die anderen 3 können nicht laufen
       _pfSet('conn', 'warn', 'Übersprungen — Verknüpfung fehlt.')
-    } else {
-      try { await dupLoadAccounts() } catch(_){}  // frischer Stand — state ändert sich laufend
-      const dupAccsConn = (typeof dupState !== 'undefined' && dupState.accounts) || []
-      const connProblems = []
-      for(const [dupId, label] of [[dupMasterId, `Master „${plan.masterName||'—'}"`], [dupSlaveId, `Slave „${plan.slaveName||'—'}"`]]){
-        const d = dupAccsConn.find(x => String(x.account_id) === String(dupId))
-        if(!d){ connProblems.push(`${label}: in Duplikum nicht mehr gefunden`); continue }
-        const parts = []
-        if(Number(d.status) !== 1) parts.push('Schalter steht auf OFF')
-        const st = String(d.state || '').toUpperCase()
-        if(st && st !== 'CONNECTED') parts.push(st === 'DISCONNECTED' ? 'GETRENNT — Zugangsdaten in Duplikum prüfen' : `Status ${st}`)
-        if(parts.length) connProblems.push(`${label}: ${parts.join(' · ')}`)
-      }
-      if(!connProblems.length){
-        _pfSet('conn', 'ok', 'Master & Slave sind ON und verbunden.')
-      } else {
-        _pfSet('conn', 'err', escapeHtml(connProblems.join(' — ')) + '<br><span style="font-size:11px;color:var(--sub)">Im Duplikum-Cockpit (trade-copier.com) beheben, dann den Trade neu starten.</span>')
-        hardFail = true
-      }
-    }
-
-    // ── 2. Multiplier pushen ──
-    _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
-    await _pfSleep(450)
-    if(hardFail){
       _pfSet('mult', 'warn', 'Übersprungen — Verknüpfung fehlt.')
-    } else if(plan.multiplier == null || !isFinite(Number(plan.multiplier))){
-      _pfSet('mult', 'warn', 'Kein Multiplier am Plan gespeichert — übersprungen.')
+      _pfSet('sym',  'warn', 'Übersprungen — Verknüpfung fehlt.')
     } else {
-      const r = await dupPushMultiplierValue(dupMasterId, dupSlaveId, Number(plan.multiplier).toFixed(3))
-      if(r.ok) _pfSet('mult', 'ok', `<span class="mono">${Number(plan.multiplier).toFixed(3)}×</span> erfolgreich gepusht.`)
-      else { _pfSet('mult', 'err', escapeHtml(r.error || 'Push fehlgeschlagen')); hardFail = true }
+      // ── 1b + 2 + 3 GLEICHZEITIG — jede Zeile hakt sich selbst ab, sobald sie fertig ist ──
+      const results = await Promise.all([
+        pfCheckConn(plan, dupMasterId, dupSlaveId),
+        pfCheckMult(plan, dupMasterId, dupSlaveId),
+        pfCheckSym(plan,  dupMasterId, dupSlaveId)
+      ])
+      for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.softWait) softWait = true }
     }
 
-    // ── 3. Symbol-Mapping ──
-    _pfAddRow('sym', 'Symbol-Mapping korrekt')
-    await _pfSleep(450)
-    if(hardFail && (!dupMasterId || !dupSlaveId)){
-      _pfSet('sym', 'warn', 'Übersprungen — Verknüpfung fehlt.')
-    } else {
-      const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
-      const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
-      const symMasters = tpMicroizeSymbols(masterAcc?.firm, dupSymbolsForFirm(masterAcc?.firm))
-      const symSlave   = dupSlaveSymbolForFirm(slaveAcc?.firm) || 'NAS100'
-      if(!symMasters.length){
-        _pfSet('sym', 'warn', `Kein Duplikum-Symbol für „${escapeHtml(masterAcc?.firm||'—')}" hinterlegt (Settings → Prop Firms → Specs) — übersprungen.`)
-      } else {
-        const found = await dupFindSymbolMappings(dupMasterId, dupSlaveId)
-        if(found.error){
-          _pfSet('sym', 'err', escapeHtml(found.error)); hardFail = true
-        } else {
-          const have = found.mappings || []
-          const missing = symMasters.filter(sm => !have.some(m => m.symbolMaster === sm && m.symbolSlave === symSlave))
-          if(!missing.length){
-            _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(symMasters.join(', '))} → ${escapeHtml(symSlave)}</span> ✓`)
-          } else {
-            const ist = have.length ? `vorhanden: <span class="mono">${escapeHtml(have.map(m=>m.symbolMaster+'→'+m.symbolSlave).join(', '))}</span>` : 'kein Mapping vorhanden'
-            _pfSet('sym', 'warn', `Fehlt: <span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> — ${ist}.<br>
-              <button class="btn btn-primary pf-fix-btn" id="pf-fix-sym" style="padding:4px 12px;font-size:11.5px">Jetzt pushen (${missing.length})</button>`)
-            softWait = true
-            document.getElementById('pf-fix-sym')?.addEventListener('click', async () => {
-              const btn = document.getElementById('pf-fix-sym')
-              if(btn){ btn.disabled = true; btn.textContent = 'Pushe…' }
-              const ico = document.getElementById('pf-ico-sym')
-              if(ico){ ico.classList.remove('pf-warn'); ico.innerHTML = '<div class="pf-spinner"></div>' }
-              const failed = []
-              for(const sm of missing){
-                const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, sm, symSlave)
-                if(!pr.ok) failed.push(`${sm}: ${pr.error || 'Fehler'}`)
-              }
-              if(!failed.length) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
-              else _pfSet('sym', 'err', escapeHtml(failed.join(' · ')))
-            })
-          }
-        }
-      }
-    }
-
-    await _pfSleep(350)
     const allOk = !hardFail && !softWait
     _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
     try { renderTradePlans() } catch(_){}
