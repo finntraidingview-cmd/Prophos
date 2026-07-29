@@ -14342,16 +14342,18 @@
         symLabel = 'Stark asymmetrisch'
         symIcon = '✕'
       }
-      // Geld-Differenz: was der Hedge NICHT ausgeglichen hat (= wie viel man netto mehr
-      // verloren/gewonnen hat). Master-P/L ist in $, Slave-P/L in slavePreset.currency →
-      // beide auf EUR normieren, dann kombinieren. Negativ = mehr verloren.
-      const _fx = window._fxUsdEur || 0.85
-      const _mEur = (isNaN(mPl) ? 0 : mPl) * _fx
-      const _sEur = (isNaN(sPl) ? 0 : sPl) * (slavePreset.currency !== '€' ? _fx : 1)
-      const _netEur = _mEur + _sEur
-      const _netFmt = Math.abs(_netEur).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'
-      const _netCol = _netEur < 0 ? '#dc2626' : '#16a34a'
-      const _netLbl = _netEur < 0 ? `−${_netFmt} mehr verloren` : `+${_netFmt} Netto`
+      // Live-Abweichung vs. perfekte Symmetrie: aus dem Master-Ergebnis + Hedge-Verhältnis
+      // (slaveRisk/masterRisk) ergibt sich der ERWARTETE Slave-P/L bei perfekter Symmetrie.
+      // Die Abweichung (tatsächlich − erwartet) sagt genau, wie viel auf dem LIVE-Account
+      // netto zu viel (+, grün) oder zu wenig (−, rot) gemacht wurde. Alles in Slave-Währung.
+      const _cur = slavePreset.currency || '€'
+      const _ratio = p.masterRisk ? (p.slaveRisk / p.masterRisk) : 0
+      const _expSlave = -(isNaN(mPl) ? 0 : mPl) * _ratio        // erwarteter Slave-P/L (perfekte Symmetrie)
+      const _devSlave = (isNaN(sPl) ? 0 : sPl) - _expSlave       // + = mehr auf Live, − = weniger
+      const _devFmt = Math.abs(_devSlave).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+      const _expFmt = _expSlave.toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+      const _devCol = _devSlave >= 0 ? '#16a34a' : '#dc2626'
+      const _devLbl = `${_devSlave >= 0 ? '+' : '−'}${_devFmt} ${_cur} ${_devSlave >= 0 ? 'mehr' : 'weniger'} auf Live`
       planHtml += `
         <div style="margin-top:10px;padding:8px 12px;border-radius:6px;background:${symColor}15;border:1px solid ${symColor}33;display:flex;justify-content:space-between;align-items:center;gap:10px">
           <div style="display:flex;align-items:center;gap:8px">
@@ -14360,7 +14362,8 @@
           </div>
           <div style="text-align:right;font-family:var(--mono)">
             <div style="font-size:11.5px;color:var(--sub)">${sym.absM.toFixed(0)}% / ${sym.absS.toFixed(0)}% · Δ ${sym.diff.toFixed(1)}%</div>
-            <div style="font-size:11.5px;font-weight:700;color:${_netCol};margin-top:2px">${_netLbl}</div>
+            <div style="font-size:12px;font-weight:800;color:${_devCol};margin-top:2px" title="Erwartet bei perfekter Symmetrie: ${_cur}${_expFmt}">${_devLbl}</div>
+            <div style="font-size:10px;color:var(--sub)">vs. perfekte Symmetrie</div>
           </div>
         </div>
       `
