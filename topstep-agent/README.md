@@ -1,5 +1,12 @@
 # Topstep-Mirror-Agent (lokal pro PC)
 
+> **Zuerst lesen: [../LOKAL-PC-SETUP.md](../LOKAL-PC-SETUP.md).** Der einfachere Weg zum
+> gleichen Ziel ist, `app.py` direkt auf dem PC laufen zu lassen und Prophos über
+> `http://localhost:5000` zu öffnen — dann kommt die Topstep-Verbindung ebenfalls aus der
+> PC-IP, und das Frontend bleibt **komplett unverändert** (TS_BACKEND schaltet automatisch
+> auf localhost). Dieser Agent hier ist die Reserve-Variante für den Fall, dass der Mirror
+> ohne offenen Browser laufen soll.
+
 Verlagert den Topstep-Mirror vom zentralen Railway-Server (Amsterdam) auf den PC der
 jeweiligen Person. Die TopstepX-API-Verbindung kommt dann aus **der eigenen PC-IP** —
 dieselbe IP wie die manuelle TopstepX-Order — statt aus Amsterdam. Damit gibt es keine
