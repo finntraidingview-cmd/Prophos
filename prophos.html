@@ -5359,6 +5359,12 @@
       if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
+    // Beim Öffnen der Trades-View immer auf „Geplant" starten (nicht auf dem zuletzt
+    // aktiven Tab hängenbleiben — z.B. „Erledigt" nach einem Trade-Abschluss).
+    if(name === 'trades'){
+      const plannedTab = document.querySelector('[data-tradetab="planned"]')
+      if(plannedTab && !plannedTab.classList.contains('active')) plannedTab.click()
+    }
   }
   // Nur echte Navigations-Buttons (Sidebar + User-Dropdown) — NICHT die View-Sections selbst,
   // sonst bubbled jeder Klick innerhalb einer View zur Section und switcht zurück
