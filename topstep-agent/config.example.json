@@ -1,0 +1,15 @@
+{
+  "supabase_url": "https://gxhkannmzpyuepxlepta.supabase.co",
+  "supabase_key": "<SUPABASE-KEY — anon-Key mit RLS ODER ein per-Agent-Service-Key>",
+  "agent_id": "moritz-pc",
+  "poll_control_interval": 3,
+
+  "_kommentar": "accounts: Secrets pro pair_id. Diese Datei bleibt LOKAL auf dem PC, nie in git, nie in Supabase. Der pair_id-Schlüssel muss exakt dem pair_id in der mirror_control-Zeile entsprechen.",
+  "accounts": {
+    "moritz-topstep-1": {
+      "tsx_username": "<TopstepX-Username von Moritz>",
+      "tsx_api_key": "<ProjectX API-Key von Moritz>",
+      "ma_token": "<MetaApi-Token des Live-Hedge-Kontos>"
+    }
+  }
+}
