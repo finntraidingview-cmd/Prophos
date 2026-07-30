@@ -406,10 +406,20 @@ def duplikum_proxy(path):
             # — reiner Status->=400-Check hätte das unsichtbar gemacht (Body sah "erfolgreich"
             # aus, war aber ein No-Op).
             is_mapping_call = "mapping/" in path_norm
-            if status >= 400 or is_mapping_call:
-                snippet = (content or b"")[:300].decode("utf-8", errors="replace")
+            # PROPHOS_DEBUG_DUP=1 (nur lokal setzen): loggt zusätzlich die kompletten
+            # getSettings-Antworten — zum Diagnostizieren, welche Mapping-Zeilen Duplikum
+            # für einen Slave wirklich zurückgibt (id_master vs. id_group etc.).
+            debug_dup = bool(os.environ.get("PROPHOS_DEBUG_DUP"))
+            is_settings_read = "getsettings" in path_norm
+            if status >= 400 or is_mapping_call or (debug_dup and is_settings_read):
+                limit = 6000 if (debug_dup and is_settings_read) else 300
+                snippet = (content or b"")[:limit].decode("utf-8", errors="replace")
                 icon = "⚠️" if status >= 400 else "ℹ️"
-                print(f"[duplikum] {icon} {path} → HTTP {status}: {snippet}")
+                # flush=True: unter nohup ist stdout block-gepuffert — ohne Flush tauchen
+                # die Zeilen erst KB-weise später (oder nie) im Log auf.
+                print(f"[duplikum] {icon} {path} → HTTP {status}: {snippet}", flush=True)
+                if body_data:
+                    print(f"[duplikum]    ↳ Request war: {str(body_data)[:300]}", flush=True)
             resp = Response(content, status=status, content_type=ctype)
             if new_tok: resp.headers["X-New-Dup-Token"] = new_tok
             return resp

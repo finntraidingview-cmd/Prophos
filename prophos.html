@@ -5879,15 +5879,10 @@
     try {
       // 1) Settings holen — IMMER ohne id_master Filter (sonst kriegen wir leeres
       //    Array wenn noch kein Per-Master-Eintrag existiert). Master-Match passiert clientseitig.
-      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: slaveId })
-      if(!getRes.ok){
-        const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
-        throw new Error(`getSettings: ${errMsg}`)
-      }
-
-      const settings = (getRes.data && Array.isArray(getRes.data.settings))
-        ? getRes.data.settings
-        : (Array.isArray(getRes.data) ? getRes.data : [])
+      //    Über dupGetSettingsRows (Rate-Limit-sicher, siehe Helper-Kommentar).
+      const sr = await dupGetSettingsRows(slaveId)
+      if(sr.error) throw new Error(`getSettings: ${sr.error}`)
+      const settings = sr.rows
 
       // Default-Entry für diesen Slave suchen
       const matches = settings.filter(e => String(e.id_slave || '') === String(slaveId))
@@ -6034,13 +6029,10 @@
     if(typeof window.tpDupPushRender === 'function') window.tpDupPushRender()
 
     try {
-      const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
-      if(!res.ok){
-        throw new Error((res.data && res.data.error) || `HTTP ${res.status}`)
-      }
-      const arr = (res.data && Array.isArray(res.data.settings))
-        ? res.data.settings
-        : (Array.isArray(res.data) ? res.data : [])
+      // Rate-Limit-sicher über dupGetSettingsRows (siehe Helper-Kommentar)
+      const sr = await dupGetSettingsRows(slaveDupId)
+      if(sr.error) throw new Error(sr.error)
+      const arr = sr.rows
       const matches = arr.filter(e => String(e.id_slave || '') === String(slaveDupId))
 
       // Bevorzugter Eintrag:
@@ -6258,14 +6250,10 @@
       // WICHTIG: KEIN id_master Filter — sonst kriegen wir leeres Array wenn noch kein
       // Per-Master-Eintrag existiert. Wir wollen aber auch den All-Masters-Default als
       // Template benutzen können, um daraus einen neuen Per-Master-Eintrag zu erstellen.
-      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveAccountId) })
-      if(!getRes.ok){
-        const errMsg = (getRes.data && getRes.data.error) || `HTTP ${getRes.status}`
-        throw new Error(`getSettings: ${errMsg}`)
-      }
-      const settings = (getRes.data && Array.isArray(getRes.data.settings))
-        ? getRes.data.settings
-        : (Array.isArray(getRes.data) ? getRes.data : [])
+      // Rate-Limit-sicher über dupGetSettingsRows (siehe Helper-Kommentar)
+      const srP = await dupGetSettingsRows(slaveAccountId)
+      if(srP.error) throw new Error(`getSettings: ${srP.error}`)
+      const settings = srP.rows
 
       // Bevorzugter Entry — als Template (für risk_factor_type):
       //  1. mit gewähltem Master → exakter Per-Master Eintrag (falls existiert, sonst Skip)
@@ -6610,11 +6598,29 @@
   }
 
   // ALLE existierenden Symbol-Mappings eines Master→Slave-Paars. → { mappings: [{symbolMaster, symbolSlave}] } | { error }
+  /* Duplikum liefert Fehler teils als HTTP 200 mit {"code":"0","error":"You reached the
+   * request limit (2/1 per second)…"} — OHNE settings-Array. Wer das als "leere Liste"
+   * liest, meldet fälschlich "kein Mapping/kein Setting vorhanden", obwohl alles da ist
+   * (Root Cause des Flip-Flop-Verhaltens vom 30.07.2026, im Backend-Log bewiesen).
+   * Dieser Helper erkennt das und versucht es bis zu 3× mit Abstand. */
+  async function dupGetSettingsRows(slaveDupId){
+    let lastErr = null
+    for(let attempt = 0; attempt < 3; attempt++){
+      if(attempt) await new Promise(r => setTimeout(r, 1500 * attempt))
+      const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
+      if(!res.ok){ lastErr = (res.data && res.data.error) || `HTTP ${res.status}`; continue }
+      if(res.data && res.data.error && !Array.isArray(res.data.settings)){ lastErr = res.data.error; continue }
+      const arr = (res.data && Array.isArray(res.data.settings)) ? res.data.settings : (Array.isArray(res.data) ? res.data : [])
+      return { rows: arr }
+    }
+    return { error: lastErr || 'Duplikum nicht erreichbar' }
+  }
+
   async function dupFindSymbolMappings(masterDupId, slaveDupId){
     try {
-      const res = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
-      if(!res.ok) return { error: (res.data && res.data.error) || `HTTP ${res.status}` }
-      const arr = (res.data && Array.isArray(res.data.settings)) ? res.data.settings : (Array.isArray(res.data) ? res.data : [])
+      const sr = await dupGetSettingsRows(slaveDupId)
+      if(sr.error) return { error: sr.error }
+      const arr = sr.rows
       const mappings = arr
         .filter(e =>
           String(e.id_slave||'') === String(slaveDupId) &&
@@ -6701,9 +6707,11 @@
   // Liest risk_factor_type vom bestehenden Setting, pusht minimal. → { ok } | { ok:false, error }
   async function dupPushMultiplierValue(masterDupId, slaveDupId, mult){
     try {
-      const getRes = await dupApi('POST', 'settings/getSettings.php', { id_slave: String(slaveDupId) })
-      if(!getRes.ok) return { ok:false, error: (getRes.data && getRes.data.error) || `HTTP ${getRes.status}` }
-      const arr = (getRes.data && Array.isArray(getRes.data.settings)) ? getRes.data.settings : (Array.isArray(getRes.data) ? getRes.data : [])
+      // dupGetSettingsRows statt Direkt-Call: erkennt Duplikums als-200-getarnte
+      // Rate-Limit-Antworten (sonst hieße es fälschlich "Kein Setting für dieses Paar").
+      const sr = await dupGetSettingsRows(slaveDupId)
+      if(sr.error) return { ok:false, error: sr.error }
+      const arr = sr.rows
       const isSymbolEntry = e => !!(e.symbol || e.symbol_master)
       const matches = arr.filter(e => String(e.id_slave||'') === String(slaveDupId))
       const preserved = matches.find(e => String(e.id_master||'') === String(masterDupId) && !isSymbolEntry(e) && !e.id_group)
@@ -12748,6 +12756,10 @@
     _pfSet('mult', 'err', escapeHtml(r.error || 'Push fehlgeschlagen')); return { hardFail: true }
   }
   async function pfCheckSym(plan, dupMasterId, dupSlaveId){
+    // Leicht versetzt starten: läuft parallel zu pfCheckMult, das ebenfalls getSettings
+    // aufruft — zwei gleichzeitige Calls reißen Duplikums 2/Sekunde-Limit (als-200-
+    // getarnter Rate-Limit-Fehler). 900ms Versatz + Retry im Helper entschärfen das.
+    await _pfSleep(900)
     const masterAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
     const slaveAcc  = accounts.find(a => String(a.id) === String(plan.slaveAccountId))
     const symMasters = tpMicroizeSymbols(masterAcc?.firm, dupSymbolsForFirm(masterAcc?.firm))
