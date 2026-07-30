@@ -3999,6 +3999,29 @@
         </div>
       </div>
 
+      <!-- Zeitraum-Auswertung: Account-Kosten + Live-P/L im gewählten Zeitraum -->
+      <div style="margin:0 0 16px;padding:12px 16px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px;background:var(--bg2);border-radius:7px;padding:3px">
+          <button class="fin-range-pill active" data-finrange="today" style="padding:5px 11px;border-radius:5px;border:none;background:var(--card);color:var(--ink);font-size:11.5px;font-weight:600;cursor:pointer">Heute</button>
+          <button class="fin-range-pill" data-finrange="7d" style="padding:5px 11px;border-radius:5px;border:none;background:transparent;color:var(--sub);font-size:11.5px;font-weight:500;cursor:pointer">7 Tage</button>
+          <button class="fin-range-pill" data-finrange="30d" style="padding:5px 11px;border-radius:5px;border:none;background:transparent;color:var(--sub);font-size:11.5px;font-weight:500;cursor:pointer">30 Tage</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="date" class="input" id="fin-range-from" style="width:auto;padding:5px 8px;font-size:12px;height:auto">
+          <span style="color:var(--sub);font-size:12px">bis</span>
+          <input type="date" class="input" id="fin-range-to" style="width:auto;padding:5px 8px;font-size:12px;height:auto">
+        </div>
+        <div style="flex:1"></div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Account-Kosten</div>
+          <div class="tnum" id="fin-range-costs" style="font-size:17px;font-weight:800;color:var(--danger)">—</div>
+        </div>
+        <div style="text-align:right;margin-left:6px">
+          <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">Live P/L (Trades)</div>
+          <div class="tnum" id="fin-range-livepl" style="font-size:17px;font-weight:800">—</div>
+        </div>
+      </div>
+
       <!-- Filter -->
       <div class="subtabs">
         <button class="subtab active" data-fintab="all">
@@ -14915,8 +14938,78 @@
     return ({USD:'$', EUR:'\u20ac', GBP:'\u00a3'})[c] || c
   }
 
+  /* ── Zeitraum-Auswertung (Heute / 7T / 30T / eigener Bereich per Datepicker):
+   * Summe Account-Kosten (account_purchase) + Live-P/L (live_pnl) im Zeitraum.
+   * occurredAt ist ein 'YYYY-MM-DD'-String → lexikografischer Vergleich reicht. ── */
+  function _finDateStr(d){ return d.toLocaleDateString('en-CA') }
+  function finApplyRangePreset(mode){
+    const to = new Date()
+    const from = new Date()
+    if(mode === '7d')  from.setDate(from.getDate() - 6)
+    if(mode === '30d') from.setDate(from.getDate() - 29)
+    const fromEl = document.getElementById('fin-range-from')
+    const toEl   = document.getElementById('fin-range-to')
+    if(fromEl) fromEl.value = _finDateStr(from)
+    if(toEl)   toEl.value   = _finDateStr(to)
+  }
+  function renderFinRangeStats(){
+    const fromEl = document.getElementById('fin-range-from')
+    const toEl   = document.getElementById('fin-range-to')
+    if(!fromEl || !toEl) return
+    const from = fromEl.value, to = toEl.value
+    const inRange = t => {
+      const d = String(t.occurredAt || '').slice(0, 10)
+      if(from && d < from) return false
+      if(to && d > to) return false
+      return true
+    }
+    const list  = (transactions || []).filter(inRange)
+    const costsList = list.filter(t => t.kind === 'account_purchase')
+    const liveList  = list.filter(t => t.kind === 'live_pnl')
+    const costs = costsList.reduce((s,t) => s + t.amount, 0)
+    const live  = liveList.reduce((s,t) => s + t.amount, 0)
+    const fmt$ = n => (n >= 0 ? '+' : '−') + '$' + Math.abs(n).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})
+    const costsEl = document.getElementById('fin-range-costs')
+    const liveEl  = document.getElementById('fin-range-livepl')
+    if(costsEl) costsEl.textContent = costsList.length ? fmt$(costs) : '—'
+    if(liveEl){
+      liveEl.textContent = liveList.length ? fmt$(live) : '—'
+      liveEl.style.color = live >= 0 ? 'var(--good)' : 'var(--danger)'
+    }
+  }
+  ;(function wireFinRange(){
+    const pills = document.querySelectorAll('[data-finrange]')
+    if(!pills.length) return
+    const setActive = (activeBtn) => {
+      pills.forEach(b => {
+        const on = b === activeBtn
+        b.style.background = on ? 'var(--card)' : 'transparent'
+        b.style.color      = on ? 'var(--ink)'  : 'var(--sub)'
+        b.style.fontWeight = on ? '600' : '500'
+        b.classList.toggle('active', on)
+      })
+    }
+    pills.forEach(btn => {
+      btn.addEventListener('click', () => {
+        setActive(btn)
+        finApplyRangePreset(btn.dataset.finrange)
+        renderFinRangeStats()
+      })
+    })
+    // Manuelle Datumsänderung → Pills abwählen (eigener Bereich aktiv)
+    ;['fin-range-from', 'fin-range-to'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', () => {
+        setActive(null)
+        renderFinRangeStats()
+      })
+    })
+    finApplyRangePreset('today')
+    renderFinRangeStats()
+  })()
+
   function renderFinanzen(){
     finRenderSettlement()
+    renderFinRangeStats()
 
     const tbody = document.getElementById('finTable')
     const empty = document.getElementById('finEmpty')
