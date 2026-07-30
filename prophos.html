@@ -1200,6 +1200,8 @@
   #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
   #dashboard-view .tc2.tc2-is-pending{border-color:rgba(245,158,11,.45);background:rgba(245,158,11,.05)}
   #dashboard-view .tc2.tc2-open{border-color:rgba(16,185,129,.3)}
+  #dashboard-view .tc2.tc2-review{border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.04)}
+  #dashboard-view .tc2-dot-review{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.18)}
   #dashboard-view .tc2.tc2-completed{opacity:.9}
   #dashboard-view .tc2.tc2-completed:hover{opacity:1}
   @keyframes tc2Pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}50%{box-shadow:0 0 0 5px rgba(16,185,129,0)}}
@@ -3157,6 +3159,10 @@
           Offen
           <span class="subtab-count" id="tradetab-count-open">0</span>
         </button>
+        <button class="subtab" data-tradetab="review">
+          Überprüfen
+          <span class="subtab-count" id="tradetab-count-review">0</span>
+        </button>
         <button class="subtab" data-tradetab="completed">
           Erledigt
           <span class="subtab-count" id="tradetab-count-completed">0</span>
@@ -3184,6 +3190,18 @@
           </div>
           <h3>Keine offenen Trades</h3>
           <p>Wenn du einen geplanten Trade in Duplikum gestartet hast, klick "Trade läuft" — er wandert hierher bis du ihn abschließt.</p>
+        </div>
+      </div>
+
+      <!-- Review (Überprüfen) -->
+      <div class="subtab-pane" data-tradepane="review">
+        <div class="trade-cards" id="tradeCardsReview"></div>
+        <div class="empty" id="tradeEmptyReview" style="display:none;border:none;background:transparent">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
+          <h3>Nichts zu überprüfen</h3>
+          <p>Wenn ein Trade-Ende automatisch erkannt wird, landet er hier — mit schon gespeichertem P&amp;L. Du musst nur noch prüfen und bestätigen.</p>
         </div>
       </div>
 
@@ -7651,18 +7669,20 @@
     autoTrack.pendingFinish.add(String(plan.id))
     localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
     if(typeof renderTradePlans === 'function') renderTradePlans()
-    // Auto-PnL schon JETZT im Hintergrund vorladen (Finns Wunsch) → beim Öffnen des
-    // Abschließen-Modals sind die Werte sofort da statt erst nachzuladen.
-    if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
+    // Plan auf 'review' schieben (Überprüfen-Tab) + Auto-P&L holen und in die DB
+    // persistieren. Fällt bei fehlender Migration automatisch aufs alte Verhalten
+    // zurück (bleibt 'open' mit Banner; Prefetch passiert in atMoveToReview mit).
+    if(typeof atMoveToReview === 'function') atMoveToReview(plan)
+    else if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
 
     const el = document.createElement('div')
     el.className = 'at-prompt'
     el.id = `at-prompt-${plan.id}`
     el.innerHTML = `
       <div style="font-weight:700;font-size:14px;color:var(--ink);margin-bottom:3px">🔴 Trade erkannt: beendet</div>
-      <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')}</div>
+      <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')} · P&L wird automatisch erfasst</div>
       <div style="display:flex;gap:8px">
-        <button id="at-complete-${plan.id}" style="flex:1;padding:8px;background:var(--violet);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:12.5px">Abschließen →</button>
+        <button id="at-complete-${plan.id}" style="flex:1;padding:8px;background:var(--violet);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:12.5px">Überprüfen →</button>
         <button id="at-dismiss-${plan.id}" style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--sub);font-size:12px">Später</button>
       </div>
     `
@@ -10455,6 +10475,11 @@
           await mirrorReleasePlan(planId)
           continue
         }
+        // 'review' bewusst NICHT freigeben: das Pair bleibt bis zur Bestätigung scharf —
+        // /mirror/status (closedHedges) wird noch für den Auto-P&L-Abruf gebraucht, und
+        // ein Reopen (Fehlerkennung) braucht die laufende Engine. Freigabe passiert wie
+        // bisher beim Bestätigen (tradeCompleteSave → mirrorReleasePlan).
+        if(plan.status === 'review') continue
         const st = mirrorPlanPoll.state.get(String(planId)) || { sawOpen: false }
 
         if(plan.status === 'planned' && openCount > 0 && !st.sawOpen){
@@ -12063,6 +12088,7 @@
     const lanes = [
       { status:'planned',   target:'tradeCardsPlanned',   empty:'tradeEmptyPlanned',   countId:'tradetab-count-planned' },
       { status:'open',      target:'tradeCardsOpen',      empty:'tradeEmptyOpen',      countId:'tradetab-count-open' },
+      { status:'review',    target:'tradeCardsReview',    empty:'tradeEmptyReview',    countId:'tradetab-count-review' },
       { status:'completed', target:'tradeCardsCompleted', empty:'tradeEmptyCompleted', countId:'tradetab-count-completed' }
     ]
     for(const lane of lanes){
@@ -12072,9 +12098,12 @@
       if(lane.status === 'completed'){
         list = applyTradeFilter(list)
       }
-      // Sort: planned/open by priority then date, completed by completedAt desc
+      // Sort: planned/open by priority then date, completed by completedAt desc,
+      // review by startedAt desc (zuletzt beendeter Trade oben)
       if(lane.status === 'completed'){
         list.sort((a,b) => new Date(b.completedAt||0) - new Date(a.completedAt||0))
+      }else if(lane.status === 'review'){
+        list.sort((a,b) => new Date(b.startedAt||0) - new Date(a.startedAt||0))
       }else{
         list.sort((a,b) => {
           const pw = priorityWeight(a.priority) - priorityWeight(b.priority)
@@ -12137,6 +12166,9 @@
           tcAnimateRow(id, 'live'); tcPlaySound('live')
         } else if(now[id] === 'open-pending' && (prev === 'open' || prev === 'planned')){
           tcAnimateRow(id, 'end'); tcPlaySound('end')
+        } else if(now[id] === 'review' && (prev === 'open' || prev === 'open-pending')){
+          // Trade-Ende erkannt → in den Überprüfen-Tab gewandert
+          tcAnimateRow(id, 'end'); if(prev === 'open') tcPlaySound('end')
         }
       }
     }
@@ -12216,6 +12248,7 @@
   function renderTradePlanCard(p){
     const isPlanned   = p.status === 'planned'
     const isOpen      = p.status === 'open'
+    const isReview    = p.status === 'review'
     const isCompleted = p.status === 'completed'
     const isPending   = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
 
@@ -12236,6 +12269,7 @@
     let dotCls = 'tc2-dot'
     if(isPending) dotCls += ' tc2-dot-pending'
     else if(isOpen) dotCls += ' tc2-dot-live'
+    else if(isReview) dotCls += ' tc2-dot-review'
     else if(isPlanned) dotCls += ' tc2-dot-prio-' + (p.priority || 'medium')
 
     // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
@@ -12265,6 +12299,16 @@
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
           : `<span class="tc2-timer">live</span>`
       }
+    } else if(isReview){
+      // Auto-erfasstes P&L zeigen (schon in DB gespeichert) — fehlt es noch, lädt es gerade
+      const fmtR = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
+      const colR = v => v>=0 ? '#15803d' : '#b91c1c'
+      const parts = []
+      if(p.masterPl != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.masterPl)}">$${fmtR(p.masterPl)}</span>`)
+      if(p.slavePl  != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.slavePl)}">${sCur}${fmtR(p.slavePl)}</span>`)
+      metric = parts.length
+        ? parts.join('') + `<span class="tc2-chip" style="background:rgba(245,158,11,.14);color:#b45309">prüfen</span>`
+        : `<span class="tc2-pending-lbl">🟠 beendet — P&L wird geladen…</span>`
     } else if(isCompleted){
       const mPl = p.masterPl ?? 0, sPl = p.slavePl ?? 0
       const fmt = v => (v>=0?'+':'') + v.toLocaleString('de-DE')
@@ -12291,6 +12335,10 @@
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
         <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">${isPending ? 'Abschließen →' : 'Erledigt'}</button>`
+    } else if(isReview){
+      actions = `
+        <button class="btn btn-ghost tc2-btn" data-plan-reopen="${p.id}" title="Zurück zu Offen (Fehlerkennung)">↺</button>
+        <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">Überprüfen</button>`
     } else if(isCompleted){
       actions = `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit-completed="${p.id}" title="Bearbeiten">${svgEdit}</button>
@@ -12649,6 +12697,37 @@
     document.querySelectorAll('[data-plan-back]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planBack, 'planned'))
     })
+    // Review → zurück zu Offen (Fehlerkennung der Auto-Detection). Dabei:
+    // 1. pendingFinish + Detection-State zurücksetzen (nächstes echtes Ende wird wieder erkannt)
+    // 2. Auto-P&L VERWERFEN (DB + Cache) — es stammt aus der Fehlerkennung und könnte den
+    //    P&L des VORHERIGEN Trades enthalten; bliebe es stehen, würde atMoveToReview beim
+    //    echten Ende nichts mehr überschreiben (füllt nur null) und ein falscher Wert
+    //    ginge per „Bestätigen" in die Finanzen. Manuelle Werte existieren zu diesem
+    //    Zeitpunkt nie (die gibt es erst nach dem Bestätigen → completed).
+    document.querySelectorAll('[data-plan-reopen]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pid = btn.dataset.planReopen
+        if(autoTrack?.pendingFinish?.has(String(pid))){
+          autoTrack.pendingFinish.delete(String(pid))
+          localStorage.setItem('prophos_at_pending', JSON.stringify([...autoTrack.pendingFinish]))
+        }
+        // Map-Keys können je nach Quelle roh oder String sein → normalisiert löschen
+        for(const k of [...(autoTrack?.state?.keys?.() || [])]){
+          if(String(k) === String(pid)) autoTrack.state.delete(k)
+        }
+        try{ _autoPnlCache.delete(String(pid)) }catch(_){}
+        try{
+          const { data, error } = await supabase
+            .from('trade_plans')
+            .update({ status: 'open', master_pl: null, slave_pl: null })
+            .eq('id', pid).select('*').single()
+          if(error) throw error
+          const idx = tradePlans.findIndex(x => String(x.id) === String(pid))
+          if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+          renderTradePlans()
+        }catch(e){ alert('Fehler: ' + (e.message || e)) }
+      })
+    })
     document.querySelectorAll('[data-plan-complete]').forEach(btn => {
       btn.addEventListener('click', () => openTradeCompleteModal(btn.dataset.planComplete))
     })
@@ -12983,7 +13062,10 @@
   async function transitionPlan(planId, newStatus){
     try{
       const updates = { status: newStatus }
-      if(newStatus === 'open')    updates.started_at = new Date().toISOString()
+      // started_at nur setzen, wenn noch keins existiert — beim Reopen aus "Überprüfen"
+      // (Fehlerkennung) muss die Original-Startzeit erhalten bleiben (Auto-PnL-Zeitfenster).
+      const _cur = tradePlans.find(x => String(x.id) === String(planId))
+      if(newStatus === 'open' && !_cur?.startedAt) updates.started_at = new Date().toISOString()
       if(newStatus === 'planned') updates.started_at = null
       const { data, error } = await supabase
         .from('trade_plans').update(updates).eq('id', planId).select('*').single()
@@ -13995,9 +14077,14 @@
     // des Modals, auch wenn Finn danach abbricht ohne zu speichern (07.07.2026 live beobachtet:
     // Popup geöffnet → Karte sah sofort wieder "live" aus, Trade war aber nie wirklich fertig).
 
-    // Title je nach Status — bei completed = "bearbeiten", sonst "abschließen"
+    // Title je nach Status — bei completed = "bearbeiten", review = "überprüfen", sonst "abschließen"
     const titleEl = document.querySelector('#tradeCompleteModal .modal-head h3')
-    if(titleEl) titleEl.textContent = (p.status === 'completed') ? 'Trade bearbeiten' : 'Trade abschließen'
+    if(titleEl) titleEl.textContent = (p.status === 'completed') ? 'Trade bearbeiten'
+                                    : (p.status === 'review')    ? 'Trade überprüfen'
+                                    : 'Trade abschließen'
+    // Save-Button: bei Review heißt der Abschluss "Bestätigen" (P&L ist schon erfasst)
+    const saveBtnEl = document.getElementById('tradeCompleteSave')
+    if(saveBtnEl) saveBtnEl.textContent = (p.status === 'review') ? 'Bestätigen' : 'Erledigt'
 
     // Hero info
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
@@ -14015,6 +14102,11 @@
     document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
     document.getElementById('tradeCompleteMsg').textContent = ''
+    // Review-Plan mit schon persistiertem Auto-P&L → Hinweis statt leerer Message
+    if(p.status === 'review' && (p.masterPl != null || p.slavePl != null)){
+      const msgEl = document.getElementById('tradeCompleteMsg')
+      if(msgEl){ msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'; msgEl.className = 'modal-msg ok' }
+    }
 
     // Status-Auswahl initialisieren (3-Radio + Account-Picker)
     if(typeof tcPopulateStatusAccountPicker === 'function'){
@@ -14118,6 +14210,61 @@
     } catch(_){}
   }
 
+  /* Trade-Ende erkannt → Plan auf 'review' (Überprüfen-Tab) UND Auto-P&L sofort in die
+   * DB persistieren (master_pl/slave_pl). Grund: die Quelldaten (Duplikum getClosed-
+   * Positions, MetaApi-History) sind nur um den Schließzeitpunkt herum zuverlässig
+   * verfügbar — später wären sie evtl. weg. Finanzen-Buchungen entstehen weiterhin
+   * ERST beim Bestätigen im Modal (tradeCompleteSave), nicht hier.
+   * Fallback: schlägt das Status-Update fehl (Migration
+   * migration_trade_plans_review_status_2026-07-30.sql noch nicht ausgeführt →
+   * Check-Constraint lehnt 'review' ab), bleibt alles beim alten Verhalten
+   * (Plan bleibt 'open' mit pendingFinish-Banner). */
+  async function atMoveToReview(plan){
+    let moved = false
+    try{
+      // .eq('status','open')-Guard: falls der User im Erkennungs-Moment gerade manuell
+      // abgeschlossen hat, darf der Plan nicht von 'completed' zurück auf 'review' fallen.
+      const { data, error } = await supabase
+        .from('trade_plans').update({ status: 'review' })
+        .eq('id', plan.id).eq('status', 'open').select('*').single()
+      if(error) throw error
+      const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+      moved = true
+      renderTradePlans()
+    }catch(e){
+      console.warn('[review] Status-Update fehlgeschlagen (Migration ausgeführt?):', e.message || e)
+    }
+    // Auto-P&L holen — bei Erfolg in Cache UND (wenn moved) direkt in die DB
+    try{
+      const res = await _autoPnlFetch(plan)
+      if(res && (res.slavePnl != null || res.masterPnl != null)){
+        _autoPnlCache.set(String(plan.id), { res, ts: Date.now() })
+        if(moved){
+          const cur = tradePlans.find(x => String(x.id) === String(plan.id))
+          const upd = {}
+          // Nur leere Felder füllen — manuell eingetragene Werte nie überschreiben
+          if(res.masterPnl != null && cur?.masterPl == null) upd.master_pl = Number(res.masterPnl.toFixed(2))
+          if(res.slavePnl  != null && cur?.slavePl  == null) upd.slave_pl  = Number(res.slavePnl.toFixed(2))
+          if(Object.keys(upd).length){
+            // .eq('status','review')-Guard: hat der User inzwischen bestätigt (completed),
+            // darf der verzögerte Auto-Wert seine manuell korrigierten Zahlen nicht mehr
+            // überschreiben — der Update matcht dann schlicht 0 Zeilen.
+            const { data: d2, error: e2 } = await supabase
+              .from('trade_plans').update(upd)
+              .eq('id', plan.id).eq('status', 'review').select('*').single()
+            if(!e2){
+              const i2 = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(i2 >= 0) tradePlans[i2] = rowToPlan(d2)
+              renderTradePlans()
+            }
+          }
+        }
+      }
+    }catch(_){}
+    return moved
+  }
+
   async function _autoPnlFetch(plan){
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
@@ -14169,8 +14316,13 @@
         const mEl   = document.getElementById('tc-master-pl')
         const sEl   = document.getElementById('tc-slave-pl')
         const msgEl = document.getElementById('tradeCompleteMsg')
-        // Nur wenn beide Felder leer sind (nie vorhandene Werte überschreiben, z.B. beim Bearbeiten)
-        if((mEl && mEl.value !== '') || (sEl && sEl.value !== '')) return
+        // Abbruch nur, wenn BEIDE Felder schon gefüllt sind. apply() füllt ohnehin nur
+        // leere Felder — so kann bei Review-Plänen mit halb persistiertem Auto-P&L
+        // (z.B. nur Slave gespeichert) die fehlende Seite noch nachgeladen werden,
+        // ohne je vorhandene Werte zu überschreiben. Bei abgeschlossenen (completed)
+        // Plänen weiter gar nicht anfassen (Bearbeiten-Modus).
+        if(plan.status === 'completed') return
+        if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         if(!isMirrorPlan && (typeof dupState === 'undefined' || !dupState.token)) return
         const apply = (res) => {
