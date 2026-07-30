@@ -6677,14 +6677,19 @@
           // addMappings.php crasht bei Duplikum mit Laravel-500 („Whoops…") u.a. wenn das
           // Mapping SCHON EXISTIERT (Unique-Constraint statt sauberem Duplikat-Hinweis) —
           // getSettings zeigt es bei Tradovate-Mastern teils nicht an, also sieht der
-          // Preflight „fehlt" und pusht ein Duplikat. Ausweg: editMapping.php mit exakt
-          // denselben Werten — existiert das Mapping, wird es bestätigt/aktualisiert (ok);
-          // existiert es nicht (updated_count 0), war der Crash ein echter Fehler.
-          let er = await dupApi('POST', 'mapping/editMapping.php', entry)
-          if(resErr(er)) er = await dupApi('POST', 'mapping/editMapping.php', { 0: entry })
+          // Preflight „fehlt" und pusht ein Duplikat. Ausweg: editMapping.php — bestätigt
+          // laut API-Doku ein existierendes Mapping (wir wollen ja keine Änderung, nur
+          // sicherstellen, dass genau dieses Mapping da ist). WICHTIG (Doku geprüft):
+          // editMapping braucht zwingend old_symbol/old_symbol_master, um den Datensatz zu
+          // IDENTIFIZIEREN — ohne die crasht Duplikum genauso mit 500 (erst hier gefunden,
+          // vorherige Version schickte dieselbe entry ohne old_* und crashte identisch).
+          // Da wir keine Änderung wollen, sind old_* == neu_* (Alt-Symbol = Ziel-Symbol).
+          // Format laut Doku: flaches Objekt, NICHT in {0:...} gewrappt (anders als addMappings).
+          const editEntry = { ...entry, old_symbol: entry.symbol, old_symbol_master: entry.symbol_master }
+          const er = await dupApi('POST', 'mapping/editMapping.php', editEntry)
           const editOk = !resErr(er) && !(er.data && Number(er.data.updated_count) === 0)
           if(editOk) return { ok:true, edited:true }
-          return { ok:false, error: err }  // Original-Fehler melden (aussagekräftiger)
+          return { ok:false, error: err }  // Original-Fehler (addMappings) melden — aussagekräftiger
         }
       }
       // added_count 0 = Mapping existierte schon → genauso ok (idempotent)
