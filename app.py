@@ -35,7 +35,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-27.1"
+APP_BUILD = "2026-07-30.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -401,6 +401,11 @@ def duplikum_proxy(path):
     if not is_cacheable:
         try:
             status, content, ctype, new_tok = do_full_request()
+            if status >= 400:
+                # Duplikum-Fehler sichtbar machen (z.B. sporadische 500er von addMappings.php) —
+                # sonst steht im Frontend nur der Status und im Terminal gar nichts.
+                snippet = (content or b"")[:300].decode("utf-8", errors="replace")
+                print(f"[duplikum] ⚠️ {path} → HTTP {status}: {snippet}")
             resp = Response(content, status=status, content_type=ctype)
             if new_tok: resp.headers["X-New-Dup-Token"] = new_tok
             return resp

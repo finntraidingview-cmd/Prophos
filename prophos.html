@@ -6644,16 +6644,34 @@
         symbol: String(symSlave)
       }
       const resErr = res => {
-        if(!res.ok) return (res.data && res.data.error) || `HTTP ${res.status}`
+        if(!res.ok){
+          // Echte Fehlermeldung zeigen statt nur "HTTP 500": Duplikums Body kann JSON
+          // ({error:...}) oder Text/HTML sein — Snippet mitgeben, sonst rät man blind.
+          const bodySnip = res.data
+            ? (typeof res.data === 'string' ? res.data.replace(/<[^>]*>/g,' ').trim().slice(0,120) : (res.data.error || res.data.message || ''))
+            : ''
+          return `HTTP ${res.status}${bodySnip ? ' — ' + bodySnip : ''}`
+        }
         if(res.data && (res.data.error || res.data.success === false)) return res.data.error || res.data.message || JSON.stringify(res.data).slice(0,120)
         return null
       }
-      let res = await dupApi('POST', 'mapping/addMappings.php', { 0: entry })
+      // Duplikums addMappings.php wirft sporadisch transiente 500er (Server-Seite, wie
+      // schon beim setSettings-Fall). Der Push ist idempotent (existierendes Mapping =
+      // added_count 0 = ok) → bei 5xx bis zu 2× mit kurzer Pause neu versuchen.
+      const tryPush = async (payload) => {
+        let res = await dupApi('POST', 'mapping/addMappings.php', payload)
+        for(let attempt = 1; attempt <= 2 && res.status >= 500; attempt++){
+          await new Promise(r => setTimeout(r, 1200 * attempt))
+          res = await dupApi('POST', 'mapping/addMappings.php', payload)
+        }
+        return res
+      }
+      let res = await tryPush({ 0: entry })
       let err = resErr(res)
       if(err){
         // Fallback: settings-Wrapper flach (Format des bewährten setSettings-Pushes),
         // falls die Doku — wie schon beim setSettings-Fall — nicht der Realität entspricht.
-        res = await dupApi('POST', 'mapping/addMappings.php', { settings: entry })
+        res = await tryPush({ settings: entry })
         const err2 = resErr(res)
         if(err2) return { ok:false, error: err }  // Original-Fehler melden (aussagekräftiger)
       }
