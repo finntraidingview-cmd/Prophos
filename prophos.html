@@ -2512,6 +2512,13 @@
           <div style="font-size:13px;font-weight:500" id="userNameFull">—</div>
           <div class="ud-email" id="userEmail">—</div>
         </div>
+        <!-- Gespeicherte Accounts: Schnellwechsel ohne aus-/einloggen -->
+        <div id="ud-profiles"></div>
+        <button class="ud-item" id="ud-add-account">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Account hinzufügen
+        </button>
+        <div class="ud-divider"></div>
         <button class="ud-item" data-view="settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           Profil & Einstellungen
@@ -5184,6 +5191,18 @@
 
   /* Auth state change (sign in / sign out from any tab) */
   supabase.auth.onAuthStateChange((event, session) => {
+    if(event === 'TOKEN_REFRESHED' && session){
+      // Supabase rotiert den Refresh-Token (~stündlich) und entwertet den alten. Ohne
+      // Nachziehen wäre die im Profil gespeicherte Session nach kurzer Zeit tot und der
+      // Schnellwechsel würde jedes Mal nach dem Passwort fragen.
+      try{
+        const uid = session.user?.id
+        if(uid && session.refresh_token) localStorage.setItem('prophos_psession_' + uid, JSON.stringify({
+          access_token: session.access_token, refresh_token: session.refresh_token
+        }))
+      }catch(_){}
+      return
+    }
     if(event === 'SIGNED_IN' && session){
       showDashboard(session.user)
     } else if(event === 'SIGNED_OUT' || !session){
@@ -5204,7 +5223,199 @@
     document.getElementById('greetingName').textContent = name.charAt(0).toUpperCase() + name.slice(1) + ' 👋'
     document.getElementById('settingsName').value = name
     document.getElementById('settingsEmail').value = email
+
+    // Profil merken (für den Schnellwechsel oben rechts). Wechselt der aktive Nutzer,
+    // wird vorher der lokale Zustand des alten Profils gesichert und geleert — sonst
+    // würde Nutzer B die Duplikum-Links/Archiv-Daten von Nutzer A sehen.
+    try{
+      const prev = profActiveId()
+      if(prev !== user.id){
+        // prev === null (nach Logout) MUSS auch restaurieren — sonst startet jeder
+        // Login mit leerem localStorage und der nächste Snapshot überschreibt das
+        // Bucket mit dem Leerstand (Duplikum-/Topstep-Token wären dauerhaft weg).
+        if(prev) profSnapshotAndClear(prev)
+        profRestore(user.id)
+      }
+      profRegisterCurrent(user)
+    }catch(e){ console.warn('Profil-Handling:', e) }
   }
+
+  /* ========== MULTI-ACCOUNT: PROFILE + SCHNELLWECHSEL ==========
+   * Mehrere Prophos-Logins auf einem Rechner, Wechsel per Klick statt aus-/einloggen.
+   *
+   * WICHTIG — lokale Datentrennung: Die App legt ~20 prophos_*-Keys im localStorage ab
+   * (Duplikum-Verknüpfungen, Archiv, Mirror-Pairs, Broker-Tokens …). Beim Logout wurde
+   * davon bisher NICHTS gelöscht → beim Wechsel hätte Nutzer B die lokalen Daten von
+   * Nutzer A gesehen (und der Cloud-Sync hätte sie sogar in B's Account hochgeladen).
+   * Deshalb bekommt jedes Profil einen eigenen "Bucket": beim Wechsel werden die Keys
+   * des alten Profils weggeschrieben, aus dem localStorage entfernt und die des neuen
+   * Profils eingespielt.
+   *
+   * Passwörter werden NICHT gespeichert — nur die Supabase-Session (Refresh-Token).
+   * Ist die abgelaufen, fragt Prophos für dieses eine Profil einmal nach dem Passwort. */
+  const PROF_LS       = 'prophos_profiles'         // [{userId,email,name}]
+  const PROF_ACTIVE   = 'prophos_active_profile'   // userId
+  const PROF_BUCKET   = 'prophos_bucket_'          // + userId → {key:value}
+  const PROF_SESSION  = 'prophos_psession_'        // + userId → {access_token,refresh_token}
+  const PROF_SYS_KEYS = [PROF_LS, PROF_ACTIVE]     // gehören keinem Profil
+
+  function profList(){
+    try{ return JSON.parse(localStorage.getItem(PROF_LS) || '[]') }catch(_){ return [] }
+  }
+  function profSave(list){ localStorage.setItem(PROF_LS, JSON.stringify(list)) }
+  function profActiveId(){ return localStorage.getItem(PROF_ACTIVE) || null }
+
+  // Alle app-eigenen Keys (prophos_*), ohne die Profil-Systemkeys selbst
+  function _profAppKeys(){
+    const out = []
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i)
+      if(!k || !k.startsWith('prophos_')) continue
+      if(PROF_SYS_KEYS.includes(k)) continue
+      if(k.startsWith(PROF_BUCKET) || k.startsWith(PROF_SESSION)) continue
+      out.push(k)
+    }
+    return out
+  }
+  // Aktuellen lokalen Zustand ins Bucket des Profils sichern und aus dem LS entfernen
+  function profSnapshotAndClear(userId){
+    const keys = _profAppKeys()
+    if(userId){
+      const bucket = {}
+      for(const k of keys) bucket[k] = localStorage.getItem(k)
+      localStorage.setItem(PROF_BUCKET + userId, JSON.stringify(bucket))
+    }
+    for(const k of keys) localStorage.removeItem(k)
+  }
+  // Bucket eines Profils in den localStorage zurückspielen.
+  // _profBulkWrite blockiert dabei den Storage→Cloud-Sync-Hook: sonst würden die Keys des
+  // NEUEN Profils unter der noch aktiven Session des ALTEN Profils in dessen Supabase-Zeile
+  // hochgeladen (und über "Cloud gewinnt" dessen echte Daten dauerhaft überschreiben).
+  let _profBulkWrite = false
+  function profRestore(userId){
+    if(!userId) return
+    let bucket = null
+    try{ bucket = JSON.parse(localStorage.getItem(PROF_BUCKET + userId) || 'null') }catch(_){ bucket = null }
+    if(!bucket) return
+    _profBulkWrite = true
+    try{
+      for(const [k, v] of Object.entries(bucket)){ if(v != null) localStorage.setItem(k, v) }
+    } finally { _profBulkWrite = false }
+  }
+
+  // Profil (+ Session) des gerade eingeloggten Users merken/aktualisieren
+  async function profRegisterCurrent(user){
+    if(!user?.id) return
+    const email = user.email || ''
+    const name  = user.user_metadata?.name || email.split('@')[0] || 'Account'
+    const list  = profList()
+    const idx   = list.findIndex(p => p.userId === user.id)
+    const entry = { userId: user.id, email, name }
+    if(idx >= 0) list[idx] = entry; else list.push(entry)
+    profSave(list)
+    localStorage.setItem(PROF_ACTIVE, user.id)
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      if(session?.refresh_token){
+        localStorage.setItem(PROF_SESSION + user.id, JSON.stringify({
+          access_token: session.access_token, refresh_token: session.refresh_token
+        }))
+      }
+    }catch(_){}
+    renderProfileMenu()
+  }
+
+  // Auf ein anderes gespeichertes Profil wechseln
+  async function profSwitchTo(userId){
+    if(!userId || userId === profActiveId()) return
+    const target = profList().find(p => p.userId === userId)
+    if(!target) return
+    let sess = null
+    try{ sess = JSON.parse(localStorage.getItem(PROF_SESSION + userId) || 'null') }catch(_){}
+
+    // Aktuelle (evtl. rotierte) Session des NOCH aktiven Profils sichern, bevor gewechselt wird
+    const curId = profActiveId()
+    if(curId){
+      try{
+        const { data: { session: cur } } = await supabase.auth.getSession()
+        if(cur?.refresh_token) localStorage.setItem(PROF_SESSION + curId, JSON.stringify({
+          access_token: cur.access_token, refresh_token: cur.refresh_token
+        }))
+      }catch(_){}
+    }
+
+    // 1. Aktuellen Stand sichern + lokalen Zustand leeren, 2. Ziel-Bucket einspielen
+    profSnapshotAndClear(curId)
+    profRestore(userId)
+
+    if(!sess?.refresh_token){
+      // Keine Session gespeichert → einmalig Passwort abfragen (Login-Maske vorbefüllt)
+      localStorage.removeItem(PROF_ACTIVE)
+      await supabase.auth.signOut()
+      const em = document.getElementById('loginEmail'); if(em) em.value = target.email
+      showBanner('loginBanner', `Bitte einmal das Passwort für ${target.email} eingeben.`)
+      return
+    }
+    try{
+      const { error } = await supabase.auth.setSession(sess)
+      if(error) throw error
+      localStorage.setItem(PROF_ACTIVE, userId)
+      // NEU LADEN statt nur die View zu wechseln: dupState, tsState, pairs, Firm-Specs u.a.
+      // werden beim Modul-Start EINMAL aus dem localStorage gelesen und nie wieder — ohne
+      // Reload würde Profil B mit den Duplikum-/Topstep-Verbindungen von Profil A arbeiten.
+      location.reload()
+    }catch(e){
+      // Refresh-Token abgelaufen/ungültig → sauber auf Login zurück, Mail vorbefüllt
+      localStorage.removeItem(PROF_SESSION + userId)
+      localStorage.removeItem(PROF_ACTIVE)
+      await supabase.auth.signOut()
+      const em = document.getElementById('loginEmail'); if(em) em.value = target.email
+      showBanner('loginBanner', `Sitzung abgelaufen — bitte einmal das Passwort für ${target.email} eingeben.`)
+    }
+  }
+
+  // "Account hinzufügen": aktuellen Stand wegsichern, dann leere Login-Maske
+  async function profAddAccount(){
+    profSnapshotAndClear(profActiveId())
+    localStorage.removeItem(PROF_ACTIVE)
+    await supabase.auth.signOut()
+    const em = document.getElementById('loginEmail'); if(em) em.value = ''
+    const pw = document.getElementById('loginPassword'); if(pw) pw.value = ''
+  }
+
+  function profRemove(userId){
+    profSave(profList().filter(p => p.userId !== userId))
+    localStorage.removeItem(PROF_BUCKET + userId)
+    localStorage.removeItem(PROF_SESSION + userId)
+    renderProfileMenu()
+  }
+
+  function renderProfileMenu(){
+    const box = document.getElementById('ud-profiles')
+    if(!box) return
+    const list = profList(), active = profActiveId()
+    const others = list.filter(p => p.userId !== active)
+    box.innerHTML = others.length ? `<div class="ud-divider"></div>` + others.map(p => `
+      <button class="ud-item" data-prof-switch="${escapeHtml(p.userId)}" title="Zu ${escapeHtml(p.email)} wechseln">
+        <span style="width:18px;height:18px;border-radius:50%;background:var(--violet);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${escapeHtml((p.email[0]||'U').toUpperCase())}</span>
+        <span style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name || p.email)}</span>
+        <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;padding:0 2px;line-height:1">×</span>
+      </button>`).join('') : ''
+    box.querySelectorAll('[data-prof-switch]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        if(e.target?.dataset?.profRemove){
+          e.stopPropagation()
+          profRemove(e.target.dataset.profRemove)
+          return
+        }
+        profSwitchTo(btn.dataset.profSwitch)
+      })
+    })
+  }
+  document.getElementById('ud-add-account')?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    profAddAccount()
+  })
 
   /* ========== LOGIN SCREEN SWITCHING (login / signup / reset) ========== */
   function goScreen(name){
@@ -5335,6 +5546,9 @@
 
   /* ========== LOGOUT ========== */
   document.getElementById('logoutBtn').addEventListener('click', async () => {
+    // Lokalen Zustand ins Profil-Bucket sichern und aus dem localStorage nehmen,
+    // damit der nächste Login nicht die Daten des vorherigen Nutzers erbt.
+    try{ profSnapshotAndClear(profActiveId()); localStorage.removeItem(PROF_ACTIVE) }catch(_){}
     await supabase.auth.signOut()
     // onAuthStateChange ruft showLogin()
   })
@@ -7037,6 +7251,79 @@
   function dupStopAutoRefresh(){
     if(dupAutoRefreshTimer){ clearInterval(dupAutoRefreshTimer); dupAutoRefreshTimer = null }
   }
+
+  /* ── Nächtlicher Duplikum-Token-Reconnect (00:00 deutscher Zeit) ──
+   * Duplikums Token läuft nach 48h ab — bisher musste Finn manuell trennen/verbinden.
+   * Der Refresh läuft über das Backend (/duplikum/refresh), das die Zugangsdaten im RAM
+   * hält: Das Passwort muss dafür NICHT im Browser gespeichert werden.
+   * Robust gegen geschlossenen Tab/Standby: statt eines exakten Mitternachts-Timers wird
+   * jede Minute geprüft, ob heute (deutsches Datum) schon ein Refresh lief — falls nicht,
+   * wird er nachgeholt. Damit greift er auch, wenn der Rechner um 00:00 aus war. */
+  const DUP_LAST_REFRESH_LS = 'prophos_dup_last_refresh'
+  function _deDateStr(){ return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }
+
+  async function dupNightlyRefresh(reason){
+    if(!dupState.token || !dupState.user) return false
+    try{
+      const r = await fetch(`${TS_BACKEND}/duplikum/refresh`, {
+        method: 'POST',
+        // dup-token beweist dem Backend, dass wir die Session schon besitzen (der
+        // Endpoint rotiert nur, er vergibt keinen neuen Zugang — siehe app.py).
+        headers: { 'Content-Type': 'application/json', 'dup-token': dupState.token },
+        body: JSON.stringify({ email: dupState.user })
+      })
+      const d = await r.json().catch(() => ({}))
+      if(d.ok && d.token){
+        dupState.token = d.token
+        localStorage.setItem(DUP_LS.token, d.token)
+        localStorage.setItem(DUP_LAST_REFRESH_LS, _deDateStr())
+        console.log(`[duplikum] 🔄 Token automatisch erneuert (${reason})`)
+        try{ await dupLoadAccounts() }catch(_){}
+        if(typeof showSyncBanner === 'function'){
+          showSyncBanner('🔄 Duplikum-Token automatisch erneuert', 'ok')
+          hideSyncBannerSoon?.(4000)
+        }
+        return true
+      }
+      if(d.needs_login){
+        // Backend hat die Creds nicht mehr (z.B. nach Neustart) → einmal manuell verbinden
+        localStorage.setItem(DUP_LAST_REFRESH_LS, _deDateStr())  // nicht im Minutentakt nerven
+        if(typeof showSyncBanner === 'function'){
+          showSyncBanner('⚠️ Duplikum: bitte einmal neu verbinden (Accounts → Duplikum)', 'err')
+          hideSyncBannerSoon?.(8000)
+        }
+      }
+    }catch(e){ console.warn('[duplikum] Auto-Reconnect fehlgeschlagen:', e.message || e) }
+    _dupRefreshFails++          // Fehlschlag → Backoff, sonst liefe der Versuch im Minutentakt
+    return false
+  }
+
+  // Fehlversuche zählen: ohne Backoff würde ein dauerhaft fehlschlagender Refresh jede
+  // Minute einen vollen Duplikum-Login auslösen (Rate-Limit/Sperr-Risiko).
+  let _dupRefreshFails = 0
+  let _dupNextTryTs    = 0
+  ;(function startDupNightlyWatcher(){
+    const check = () => {
+      // Nur bei eingeloggtem Prophos-Nutzer: sonst liefe der Refresh auf der Verbindung
+      // eines abgemeldeten/anderen Profils und schriebe dessen Token ins falsche Bucket.
+      if(typeof currentUserId === 'undefined' || !currentUserId) return
+      if(!dupState.token || !dupState.user) return
+      const today = _deDateStr()
+      const last  = localStorage.getItem(DUP_LAST_REFRESH_LS)
+      if(last === today) return           // heute schon erledigt
+      if(!last){                          // erster Lauf → nur merken, nicht sofort refreshen
+        localStorage.setItem(DUP_LAST_REFRESH_LS, today)
+        return
+      }
+      if(_dupRefreshFails >= 4) return     // heute genug versucht — bis morgen Ruhe
+      if(Date.now() < _dupNextTryTs) return
+      _dupNextTryTs = Date.now() + 15 * 60 * 1000   // frühestens in 15 Min erneut
+      dupNightlyRefresh('Tageswechsel')
+    }
+    setInterval(check, 60_000)
+    setTimeout(check, 15_000)             // beim Start einmal nachholen (Tab war über Nacht zu)
+  })()
+  window.dupNightlyRefresh = dupNightlyRefresh   // manuell testbar: dupNightlyRefresh('manuell')
   // Auto-Start sobald wir Accounts haben
   const _origDupLoadAccounts = dupLoadAccounts
   dupLoadAccounts = async function(){
@@ -15673,6 +15960,9 @@
     _origLocalStorageSetItem.apply(this, arguments)
     if(this !== window.localStorage) return
     if(_syncInProgress) return
+    // Profil-Bucket wird gerade eingespielt → NICHT hochladen: die Session gehört noch
+    // dem alten Profil, der Upload landete sonst in dessen Supabase-Zeile.
+    if(typeof _profBulkWrite !== 'undefined' && _profBulkWrite) return
     if(!SYNC_KEYS.includes(key)) return
     if(!currentUserId) return
     // Async upload (fire-and-forget) — User merkt nichts
@@ -15686,10 +15976,15 @@
   }
 
   // Hook: nach Login initialer Sync
+  // FIX (31.07.2026): der Hook schrieb auf `window.showDashboard` — in einem
+  // <script type="module"> ist das eine ANDERE Bindung als die Modul-Variable, die
+  // onAuthStateChange aufruft. Der Sync lief dadurch NUR über den 800ms-Timeout beim
+  // Seitenladen, also nie bei einem Login/Account-Wechsel im selben Tab (neuer Nutzer
+  // hätte seine Cloud-Daten nicht gezogen). Jetzt wird die Modul-Variable selbst ersetzt.
   ;(function hookSync(){
     if(typeof showDashboard !== 'function') return
     const _origShowDashboardForSync = showDashboard
-    window.showDashboard = function(user){
+    showDashboard = function(user){
       const result = _origShowDashboardForSync.apply(this, arguments)
       // Erst nach kurzer Verzögerung, damit currentUserId schon gesetzt ist
       setTimeout(() => {
@@ -15697,6 +15992,7 @@
       }, 200)
       return result
     }
+    window.showDashboard = showDashboard
   })()
 
   // Falls schon eine Session beim Boot existierte (User war eingeloggt)

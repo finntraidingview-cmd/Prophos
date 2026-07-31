@@ -3,6 +3,7 @@ import urllib3
 import threading
 import json
 import hashlib
+import hmac
 import time
 import uuid
 import logging
@@ -35,7 +36,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-30.2"
+APP_BUILD = "2026-07-31.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -471,6 +472,44 @@ def duplikum_proxy(path):
         resp = Response(content, status=status, content_type=ctype)
         if new_tok: resp.headers["X-New-Dup-Token"] = new_tok
         return resp
+
+@app.route("/duplikum/refresh", methods=["POST","OPTIONS"])
+def duplikum_refresh():
+    """Erzwingt einen frischen Duplikum-Token (nächtlicher Auto-Reconnect im Frontend).
+
+    Nutzt die im RAM liegenden Zugangsdaten der bestehenden Session (bzw. die Env-Creds).
+    Das Passwort bleibt damit ausschließlich serverseitig — das Frontend braucht es nicht
+    zu speichern. Ist keine Session mehr da (z.B. nach einem Backend-Neustart), kommt
+    needs_login zurück und das Frontend bittet um einmaliges Neuverbinden.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or request.headers.get("dup-user") or "").strip()
+    if not email:
+        return jsonify({"ok": False, "error": "email fehlt"}), 400
+
+    # SICHERHEIT: Der Aufrufer muss den AKTUELL gültigen Token dieser Session vorlegen.
+    # Ohne diese Prüfung wäre der Endpoint ein offener Token-Automat — CORS steht auf "*",
+    # d.h. jeder, der die E-Mail kennt, könnte sich sonst einen gültigen Duplikum-Token
+    # ausstellen lassen (und damit über den Proxy handeln). Der Refresh rotiert also nur
+    # einen Token, den man ohnehin schon besitzt — er vergibt keinen neuen Zugang.
+    sess = duplikum_sessions.get(email) or {}
+    presented = (request.headers.get("dup-token") or data.get("token") or "").strip()
+    known = (sess.get("token") or "").strip()
+    if not presented or not known or not hmac.compare_digest(presented, known):
+        return jsonify({"ok": False, "error": "Nicht autorisiert"}), 401
+
+    has_creds = bool(sess.get("password")) or \
+                bool(DUP_EMAIL and email.lower() == DUP_EMAIL.lower() and DUP_PASSWORD)
+    if not has_creds:
+        return jsonify({"ok": False, "needs_login": True,
+                        "error": "Keine gespeicherten Zugangsdaten — bitte einmal neu verbinden."}), 200
+    token = refresh_duplikum_token(email)
+    if not token:
+        return jsonify({"ok": False, "error": "Token-Refresh fehlgeschlagen"}), 502
+    print(f"[duplikum] 🔄 Auto-Reconnect: neuer Token für {email}", flush=True)
+    return jsonify({"ok": True, "token": token})
 
 @app.route("/duplikum/disconnect", methods=["POST","OPTIONS"])
 def duplikum_disconnect():
