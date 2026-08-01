@@ -5880,6 +5880,10 @@
       localStorage.setItem(DUP_LS.token, d.token)
       localStorage.setItem(DUP_LS.user,  email)
       dupEls.pass.value = ''
+      // Zugang am PROPHOS-USER hinterlegen → beim nächsten Login/Account-Wechsel
+      // verbindet sich Duplikum automatisch, und der nächtliche Reconnect funktioniert
+      // auch nach einem Backend-Neustart (Passwort liegt dann nicht nur im RAM).
+      dupSaveCredsToDb(email, password, d.token)
       dupRender()
       // Optional: gleich versuchen Accounts zu laden
       dupLoadAccounts()
@@ -5893,6 +5897,103 @@
       dupEls.connectBtn.classList.remove('ts-btn-loading')
     }
   }
+
+  /* ── Duplikum-Zugang am Prophos-User (Supabase) ──────────────────────────────
+   * Vorher hing der Zugang am Browser: nach einem Account-Wechsel musste man Duplikum
+   * jedes Mal neu verbinden, und der 48h-Token-Refresh scheiterte, sobald das Backend
+   * neu startete (Passwort lag nur im RAM). Jetzt liegt der Zugang pro Prophos-User in
+   * `duplikum_credentials` (RLS: nur die eigene Zeile) → Login/Wechsel verbindet
+   * automatisch, der nächtliche Reconnect überlebt Neustarts.
+   * Fehlt die Tabelle (Migration noch nicht ausgeführt), laufen alle Funktionen
+   * geräuschlos ins Leere — das alte Verhalten bleibt erhalten. */
+  const _dupNoTableMsg = e => /duplikum_credentials/i.test(e?.message || '') &&
+                              /(does not exist|schema cache|relation)/i.test(e?.message || '')
+
+  async function dupSaveCredsToDb(email, password, token){
+    if(!currentUserId || !email || !password) return
+    try{
+      const { error } = await supabase.from('duplikum_credentials').upsert({
+        user_id: currentUserId, email, password,
+        token: token || null,
+        token_at: token ? new Date().toISOString() : null
+      }, { onConflict: 'user_id' })
+      if(error) throw error
+    }catch(e){
+      if(_dupNoTableMsg(e)) console.warn('[duplikum] Tabelle duplikum_credentials fehlt — Migration ausführen')
+      else console.warn('[duplikum] Zugang speichern fehlgeschlagen:', e.message || e)
+    }
+  }
+
+  async function dupLoadCredsFromDb(){
+    if(!currentUserId) return null
+    try{
+      const { data, error } = await supabase.from('duplikum_credentials')
+        .select('*').eq('user_id', currentUserId).maybeSingle()
+      if(error) throw error
+      return data || null
+    }catch(e){
+      if(!_dupNoTableMsg(e)) console.warn('[duplikum] Zugang laden fehlgeschlagen:', e.message || e)
+      return null
+    }
+  }
+
+  // Nur den frischen Token nachziehen (nach Refresh/Reconnect)
+  async function dupUpdateTokenInDb(token){
+    if(!currentUserId || !token) return
+    try{
+      await supabase.from('duplikum_credentials')
+        .update({ token, token_at: new Date().toISOString() })
+        .eq('user_id', currentUserId)
+    }catch(_){}
+  }
+
+  /* Verbindet Duplikum mit den in der DB hinterlegten Zugangsdaten.
+   * force=false → nur wenn noch kein Token im Browser liegt (normaler Login/Wechsel)
+   * force=true  → immer neu verbinden (nächtlicher Reconnect) */
+  async function dupConnectFromDb(force){
+    if(!currentUserId) return false
+    const creds = await dupLoadCredsFromDb()
+    if(!creds?.email || !creds?.password) return false
+    if(!force){
+      // Token im Browser vorhanden UND jünger als 40h (Duplikum-Token hält 48h) →
+      // nichts tun. Ohne die Altersprüfung würde ein abgelaufener Token aus dem
+      // Profil-Bucket den Auto-Connect blockieren und alle Calls liefen ins Leere.
+      const ageH = creds.token_at ? (Date.now() - new Date(creds.token_at).getTime()) / 36e5 : Infinity
+      if(dupState.token && ageH < 40) return false
+      // Anderer Duplikum-Account als gespeichert? → neu verbinden
+      if(dupState.token && dupState.user && dupState.user === creds.email && ageH < 40) return false
+    }
+    try{
+      if(force && dupState.user){
+        // Sauber trennen, damit die alte Session serverseitig verschwindet
+        try{
+          await fetch(`${TS_BACKEND}/duplikum/disconnect`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ email: dupState.user })
+          })
+        }catch(_){}
+      }
+      const r = await fetch(`${TS_BACKEND}/duplikum/connect`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: creds.email, password: creds.password })
+      })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok || !d.token) throw new Error(d.error || `HTTP ${r.status}`)
+      dupState.token = d.token
+      dupState.user  = creds.email
+      localStorage.setItem(DUP_LS.token, d.token)
+      localStorage.setItem(DUP_LS.user,  creds.email)
+      dupUpdateTokenInDb(d.token)
+      if(typeof dupRender === 'function') dupRender()
+      try{ await dupLoadAccounts() }catch(_){}
+      console.log(`[duplikum] ✅ Automatisch verbunden (${creds.email})`)
+      return true
+    }catch(e){
+      console.warn('[duplikum] Auto-Connect fehlgeschlagen:', e.message || e)
+      return false
+    }
+  }
+  window.dupConnectFromDb = dupConnectFromDb   // manuell testbar
 
   /**
    * Hilfs-Wrapper: ruft beliebigen Duplikium-V4-Endpoint via Backend-Proxy auf.
@@ -7264,6 +7365,23 @@
 
   async function dupNightlyRefresh(reason){
     if(!dupState.token || !dupState.user) return false
+    // Bevorzugt: echtes Trennen + Neuverbinden mit den am Prophos-User hinterlegten
+    // Zugangsdaten. Das ist der zuverlässigste Weg — er funktioniert auch, wenn das
+    // Backend zwischendurch neu gestartet hat (dann ist das Passwort dort nicht mehr im
+    // RAM und der reine Token-Refresh würde scheitern).
+    try{
+      if(typeof dupConnectFromDb === 'function' && await dupConnectFromDb(true)){
+        localStorage.setItem(DUP_LAST_REFRESH_LS, _deDateStr())
+        _dupRefreshFails = 0
+        console.log(`[duplikum] 🔄 Neu verbunden über gespeicherte Zugangsdaten (${reason})`)
+        if(typeof showSyncBanner === 'function'){
+          showSyncBanner('🔄 Duplikum automatisch neu verbunden', 'ok')
+          hideSyncBannerSoon?.(4000)
+        }
+        return true
+      }
+    }catch(_){}
+    // Fallback: reiner Token-Refresh über die Backend-Session
     try{
       const r = await fetch(`${TS_BACKEND}/duplikum/refresh`, {
         method: 'POST',
@@ -7277,6 +7395,8 @@
         dupState.token = d.token
         localStorage.setItem(DUP_LS.token, d.token)
         localStorage.setItem(DUP_LAST_REFRESH_LS, _deDateStr())
+        _dupRefreshFails = 0
+        if(typeof dupUpdateTokenInDb === 'function') dupUpdateTokenInDb(d.token)
         console.log(`[duplikum] 🔄 Token automatisch erneuert (${reason})`)
         try{ await dupLoadAccounts() }catch(_){}
         if(typeof showSyncBanner === 'function'){
@@ -7341,11 +7461,17 @@
         body: JSON.stringify({ email: dupState.user })
       })
     } catch(_){}
+    // Beim bewussten Trennen auch den hinterlegten Zugang löschen — sonst würde der
+    // Auto-Connect beim nächsten Login sofort wieder verbinden.
+    if(currentUserId){
+      try{ await supabase.from('duplikum_credentials').delete().eq('user_id', currentUserId) }catch(_){}
+    }
     dupState.token = ''
     dupState.user  = ''
     dupState.accounts = []
     localStorage.removeItem(DUP_LS.token)
     localStorage.removeItem(DUP_LS.user)
+    localStorage.removeItem(DUP_LAST_REFRESH_LS)
     if(dupEls.email) dupEls.email.value = ''
     if(dupEls.pass)  dupEls.pass.value  = ''
     dupSetError('')
@@ -15757,6 +15883,12 @@
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
       if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
       if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
+      // Duplikum automatisch verbinden, wenn für diesen Prophos-User Zugangsdaten
+      // hinterlegt sind (nur falls noch kein Token da ist) — damit nach einem
+      // Account-Wechsel nicht jedes Mal manuell verbunden werden muss.
+      if(typeof dupConnectFromDb === 'function'){
+        setTimeout(() => { dupConnectFromDb(false).catch(() => {}) }, 600)
+      }
     }
   }
 
