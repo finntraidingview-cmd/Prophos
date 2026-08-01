@@ -15099,8 +15099,8 @@
       if(_ttCb && masterAcc?.id) setTradedToday(masterAcc.id, !!_ttCb.checked)
 
       renderTradePlans()
-      // Auto-switch to "Erledigt" tab
-      document.querySelector('[data-tradetab="completed"]')?.click()
+      // Bewusst KEIN Tab-Wechsel nach dem Speichern (Finn 01.08.2026): der Trade wandert
+      // sowieso in "Erledigt" — die Ansicht soll da bleiben, wo man gerade arbeitet.
       closeTradeCompleteModal()
 
       // ═══ NEUE LOGIK: Account-Status-Aktionen ═══
