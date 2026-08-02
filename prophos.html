@@ -5351,7 +5351,7 @@
     if(!sess?.refresh_token){
       // Keine Session gespeichert → einmalig Passwort abfragen (Login-Maske vorbefüllt)
       localStorage.removeItem(PROF_ACTIVE)
-      await supabase.auth.signOut()
+      await supabase.auth.signOut({ scope: 'local' })
       const em = document.getElementById('loginEmail'); if(em) em.value = target.email
       showBanner('loginBanner', `Bitte einmal das Passwort für ${target.email} eingeben.`)
       return
@@ -5368,7 +5368,7 @@
       // Refresh-Token abgelaufen/ungültig → sauber auf Login zurück, Mail vorbefüllt
       localStorage.removeItem(PROF_SESSION + userId)
       localStorage.removeItem(PROF_ACTIVE)
-      await supabase.auth.signOut()
+      await supabase.auth.signOut({ scope: 'local' })
       const em = document.getElementById('loginEmail'); if(em) em.value = target.email
       showBanner('loginBanner', `Sitzung abgelaufen — bitte einmal das Passwort für ${target.email} eingeben.`)
     }
@@ -5378,7 +5378,11 @@
   async function profAddAccount(){
     profSnapshotAndClear(profActiveId())
     localStorage.removeItem(PROF_ACTIVE)
-    await supabase.auth.signOut()
+    // scope:'local' ist hier ENTSCHEIDEND: das Default (global) widerruft ALLE
+    // Refresh-Tokens dieses Users serverseitig — dadurch wurde beim Hinzufügen eines
+    // weiteren Accounts die gespeicherte Sitzung des vorherigen still entwertet und
+    // man flog nach Ablauf des Access-Tokens aus allen Profilen (Bug 01./02.08.2026).
+    await supabase.auth.signOut({ scope: 'local' })
     const em = document.getElementById('loginEmail'); if(em) em.value = ''
     const pw = document.getElementById('loginPassword'); if(pw) pw.value = ''
   }
@@ -5548,8 +5552,16 @@
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     // Lokalen Zustand ins Profil-Bucket sichern und aus dem localStorage nehmen,
     // damit der nächste Login nicht die Daten des vorherigen Nutzers erbt.
-    try{ profSnapshotAndClear(profActiveId()); localStorage.removeItem(PROF_ACTIVE) }catch(_){}
-    await supabase.auth.signOut()
+    try{
+      const _lid = profActiveId()
+      profSnapshotAndClear(_lid)
+      localStorage.removeItem(PROF_ACTIVE)
+      // Bewusstes Ausloggen → gespeicherte Sitzung dieses Profils verwerfen
+      if(_lid) localStorage.removeItem(PROF_SESSION + _lid)
+    }catch(_){}
+    // scope:'local' — nur dieser Browser. Global würde auch Handy/andere Geräte
+    // abmelden und die gespeicherten Sitzungen der anderen Profile mitreißen.
+    await supabase.auth.signOut({ scope: 'local' })
     // onAuthStateChange ruft showLogin()
   })
 
