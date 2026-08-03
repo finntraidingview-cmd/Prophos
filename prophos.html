@@ -4871,7 +4871,7 @@
       <div id="ac-ma-section" hidden>
         <div class="modal-divider">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
-          MetaApi-Verknüpfung
+          MetaApi-Verknüpfung <span style="font-weight:400;color:var(--sub);font-size:11.5px">(optional)</span>
         </div>
         <div class="form-grid">
           <div class="field" style="grid-column:1/-1">
@@ -4884,7 +4884,8 @@
           </div>
         </div>
         <p class="modal-msg muted" id="ac-ma-hint">
-          Voraussetzung: Mirror-Backend läuft (siehe Topstep Mirror).
+          Nur für den <b>Topstep Mirror</b> nötig — für reines Duplikum-Hedging kannst du beide Felder leer lassen.
+          Voraussetzung dann: Mirror-Backend läuft (siehe Topstep Mirror).
         </p>
       </div>
 
@@ -9627,31 +9628,41 @@
       if(type === 'live'){
         const maToken = accEls.maTok.value.trim()
         const maAccId = accEls.maAcc.value.trim()
-        if(!maToken || !maAccId){
-          setModalMsg('Token und Account ID sind bei Live-Accounts Pflicht.', 'err')
+        // MetaApi ist OPTIONAL (Finn 03.08.2026): gebraucht wird es nur für den
+        // Topstep-Mirror. Für reines Duplikum-Hedging reicht ein Live-Account ohne.
+        // Alle Verbraucher sind abgesichert: liveAccounts() filtert auf a.ma,
+        // planMirrorRoute() fällt ohne MetaApi auf die Duplikum-Route zurück.
+        if(!maToken && !maAccId){
+          // Keine Verknüpfung gewünscht. Beim Bearbeiten heißt "beide Felder leer"
+          // bewusst: bestehende Verknüpfung entfernen (der UPDATE-Pfad setzt dann
+          // meta_api_account_id auf null).
+          acc.ma = null
+        } else if(!maToken || !maAccId){
+          setModalMsg('Für die MetaApi-Verknüpfung brauchst du Token UND Account ID — oder lass beide leer.', 'err')
           return
-        }
+        } else {
 
-        // Im Edit-Modus: nur neu validieren wenn Token oder AccountId geändert wurden
-        const existing = isEdit ? accounts.find(x => String(x.id) === String(_editingAccountId)) : null
-        const tokenChanged   = !existing?.ma || existing.ma.token !== maToken
-        const accountChanged = !existing?.ma || existing.ma.accountId !== maAccId
+          // Im Edit-Modus: nur neu validieren wenn Token oder AccountId geändert wurden
+          const existing = isEdit ? accounts.find(x => String(x.id) === String(_editingAccountId)) : null
+          const tokenChanged   = !existing?.ma || existing.ma.token !== maToken
+          const accountChanged = !existing?.ma || existing.ma.accountId !== maAccId
 
-        if(tokenChanged || accountChanged){
-          setModalMsg('Verbinde mit MetaApi…', 'muted')
-          const d = await testMaConnection(maToken, maAccId)
-          acc.ma = {
-            token: maToken,
-            accountId: maAccId,
-            login: d.login || '',
-            balance: d.balance != null ? Number(d.balance) : null,
-            equity:  d.equity  != null ? Number(d.equity)  : null,
-            lastChecked: new Date().toISOString()
+          if(tokenChanged || accountChanged){
+            setModalMsg('Verbinde mit MetaApi…', 'muted')
+            const d = await testMaConnection(maToken, maAccId)
+            acc.ma = {
+              token: maToken,
+              accountId: maAccId,
+              login: d.login || '',
+              balance: d.balance != null ? Number(d.balance) : null,
+              equity:  d.equity  != null ? Number(d.equity)  : null,
+              lastChecked: new Date().toISOString()
+            }
+            setModalMsg(`✓ Verbunden — Balance ${fmtMoney(acc.ma.balance)}`, 'ok')
+          }else{
+            // Token unverändert → bestehende MetaApi-Daten beibehalten
+            acc.ma = existing.ma
           }
-          setModalMsg(`✓ Verbunden — Balance ${fmtMoney(acc.ma.balance)}`, 'ok')
-        }else{
-          // Token unverändert → bestehende MetaApi-Daten beibehalten
-          acc.ma = existing.ma
         }
       }
 
