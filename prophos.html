@@ -5231,10 +5231,13 @@
     try{
       const prev = profActiveId()
       if(prev !== user.id){
-        // prev === null (nach Logout) MUSS auch restaurieren — sonst startet jeder
-        // Login mit leerem localStorage und der nächste Snapshot überschreibt das
-        // Bucket mit dem Leerstand (Duplikum-/Topstep-Token wären dauerhaft weg).
-        if(prev) profSnapshotAndClear(prev)
+        // IMMER aufräumen — auch wenn prev null ist (Bug 03.08.2026): profSnapshotAndClear
+        // sichert nur dann ein Bucket, wenn eine prev-ID da ist, LEERT die App-Keys aber
+        // in jedem Fall. Ohne diesen Aufruf blieben bei prev===null die Keys des vorherigen
+        // Nutzers stehen (u.a. prophos_dup_token/-user) → man war als Finn eingeloggt, aber
+        // Duplikum hing noch an Jakobs Account. profRestore springt bei fehlendem Bucket
+        // früh raus und hätte das nicht überschrieben.
+        profSnapshotAndClear(prev)
         profRestore(user.id)
       }
       profRegisterCurrent(user)
@@ -5937,18 +5940,23 @@
     }
   }
 
-  async function dupLoadCredsFromDb(){
-    if(!currentUserId) return null
+  // Gibt { readable, creds } zurück. readable=false heißt: Tabelle/Abfrage nicht verfügbar
+  // (z.B. Migration noch nicht ausgeführt) — dann darf NICHT auf "keine Zugangsdaten"
+  // geschlossen werden, sonst würde die Fremd-Erkennung eine legitime manuelle
+  // Verbindung kappen.
+  async function dupLoadCredsInfo(){
+    if(!currentUserId) return { readable: false, creds: null }
     try{
       const { data, error } = await supabase.from('duplikum_credentials')
         .select('*').eq('user_id', currentUserId).maybeSingle()
       if(error) throw error
-      return data || null
+      return { readable: true, creds: data || null }
     }catch(e){
       if(!_dupNoTableMsg(e)) console.warn('[duplikum] Zugang laden fehlgeschlagen:', e.message || e)
-      return null
+      return { readable: false, creds: null }
     }
   }
+  async function dupLoadCredsFromDb(){ return (await dupLoadCredsInfo()).creds }
 
   // Nur den frischen Token nachziehen (nach Refresh/Reconnect)
   async function dupUpdateTokenInDb(token){
@@ -5965,7 +5973,36 @@
    * force=true  → immer neu verbinden (nächtlicher Reconnect) */
   async function dupConnectFromDb(force){
     if(!currentUserId) return false
-    const creds = await dupLoadCredsFromDb()
+    const info = await dupLoadCredsInfo()
+    const creds = info.creds
+
+    // SICHERHEITSNETZ (03.08.2026): Hängt im Browser noch eine Duplikum-Verbindung, die
+    // NICHT zu diesem Prophos-User gehört, muss sie weg. Sonst arbeitet man unter dem
+    // eigenen Login mit dem Duplikum-Konto eines anderen Profils (real passiert: als Finn
+    // eingeloggt, Duplikum von Jakob verbunden).
+    // NUR wenn die Tabelle lesbar ist — ohne Migration wüssten wir nicht, wem die
+    // Verbindung gehört, und würden eine legitime manuelle Verbindung kappen.
+    const foreign = info.readable && dupState.token && dupState.user &&
+                    (!creds?.email || dupState.user !== creds.email)
+    if(foreign){
+      console.warn(`[duplikum] Fremde Verbindung erkannt (${dupState.user}) — wird getrennt`)
+      try{
+        await fetch(`${TS_BACKEND}/duplikum/disconnect`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ email: dupState.user })
+        })
+      }catch(_){}
+      dupState.token = ''
+      dupState.user  = ''
+      dupState.accounts = []
+      localStorage.removeItem(DUP_LS.token)
+      localStorage.removeItem(DUP_LS.user)
+      localStorage.removeItem(DUP_LAST_REFRESH_LS)
+      if(typeof dupRender === 'function') dupRender()
+      if(typeof renderAccounts === 'function') renderAccounts()
+      force = true   // danach mit den EIGENEN Daten frisch verbinden
+    }
+
     if(!creds?.email || !creds?.password) return false
     if(!force){
       // Token im Browser vorhanden UND jünger als 40h (Duplikum-Token hält 48h) →
