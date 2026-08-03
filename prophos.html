@@ -10126,16 +10126,39 @@
     // ── Templates: laden, Dropdown füllen ──
     async function loadBulkTemplates(){
       bulkTemplates = []
+      let dbOk = false
       if(currentUserId){
         try{
           const { data, error } = await supabase
             .from('account_templates').select('*')
             .eq('user_id', currentUserId).order('name', { ascending: true })
-          if(!error && Array.isArray(data)) bulkTemplates = data
+          if(!error && Array.isArray(data)){ bulkTemplates = data; dbOk = true }
         }catch(e){ /* Tabelle evtl. noch nicht migriert — Fallback unten */ }
       }
-      if(!bulkTemplates.length){
-        try{ bulkTemplates = JSON.parse(localStorage.getItem(BULK_TPL_LS) || '[]') }catch(_){ bulkTemplates = [] }
+      // Lokale Alt-Vorlagen: die sind durch den fehlgeschlagenen Insert (Spalte
+      // account_type fehlte, bis 03.08.2026) nur im Browser gelandet. Sobald die
+      // Cloud wieder schreibbar ist, einmalig hochziehen — sonst gehen sie beim
+      // nächsten Profilwechsel verloren.
+      let local = []
+      try{ local = JSON.parse(localStorage.getItem(BULK_TPL_LS) || '[]') }catch(_){ local = [] }
+      if(dbOk && local.length){
+        const known = new Set(bulkTemplates.map(t => (t.name||'').toLowerCase()))
+        const toPush = local.filter(t => !known.has((t.name||'').toLowerCase()))
+        for(const t of toPush){
+          const { id, ...rest } = t
+          try{
+            const { data, error } = await supabase
+              .from('account_templates').insert({ ...rest, user_id: currentUserId }).select('*').single()
+            if(!error && data) bulkTemplates.push(data)
+          }catch(_){ /* einzelne Vorlage nicht migrierbar → lokal belassen */ }
+        }
+        if(toPush.length){
+          localStorage.removeItem(BULK_TPL_LS)   // erfolgreich übernommen
+          bulkTemplates.sort((a,b) => (a.name||'').localeCompare(b.name||''))
+          console.log(`[templates] ${toPush.length} lokale Vorlage(n) in die Cloud übernommen`)
+        }
+      } else if(!bulkTemplates.length){
+        bulkTemplates = local
       }
       renderTplSelect()
     }
@@ -10184,12 +10207,14 @@
       }
 
       let saved = null
+      let dbErr = null
       if(currentUserId){
         try{
           const { data, error } = await supabase
             .from('account_templates').insert({ ...row, user_id: currentUserId }).select('*').single()
-          if(!error) saved = data
-        }catch(e){ /* Fallback unten */ }
+          if(error) throw error
+          saved = data
+        }catch(e){ dbErr = e?.message || String(e) }
       }
       if(!saved){
         saved = { id: 'local_' + Date.now(), ...row }
@@ -10202,7 +10227,15 @@
       renderTplSelect()
       bEl.tplSelect.value = String(saved.id)
       bEl.tplDelete.disabled = false
-      setBulkMsg(`Vorlage "${name}" gespeichert.`, 'ok')
+      // Ehrliche Rückmeldung: der stille Fallback auf localStorage hat monatelang
+      // "gespeichert" gemeldet, obwohl der Supabase-Insert scheiterte (Spalte
+      // account_type fehlte) — die Vorlagen waren nach Profilwechsel/Cache weg.
+      if(dbErr){
+        console.warn('[templates] Supabase-Insert fehlgeschlagen:', dbErr)
+        setBulkMsg(`⚠️ "${name}" nur lokal im Browser gespeichert — Cloud-Speicherung fehlgeschlagen: ${String(dbErr).slice(0,120)}`, 'err')
+      } else {
+        setBulkMsg(`Vorlage "${name}" gespeichert.`, 'ok')
+      }
     }
 
     async function deleteBulkTemplate(){
