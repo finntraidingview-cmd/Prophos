@@ -13925,10 +13925,12 @@
   /* Gesamtkosten eines Accounts in EUR (Kaufpreis + Netto-Live-Hedge + komplette Vorgänger-Kette).
    *
    * netPayouts=true rechnet zusätzlich die bereits erhaltenen Payouts GEGEN (Finns Ask 03.08.2026:
-   * „die Payouts gehören auch zu den Gesamtkosten"). Bewusst optional und NICHT der Default:
-   * dieselbe Funktion speist den „Gesamtkosten übernehmen"-Button im Trade-Plan, der daraus das
-   * SLAVE-RISIKO (Hedge-Größe) setzt. Würde dort netto gerechnet, änderte sich still die
-   * Positionsgröße echter Trades. Anzeige = netto, Hedge-Vorschlag = brutto. */
+   * „die Payouts gehören auch zu den Gesamtkosten"). Alle produktiven Aufrufer nutzen inzwischen
+   * netPayouts:true — auch der „Gesamtkosten übernehmen"-Button im Trade-Plan, der daraus das
+   * SLAVE-RISIKO setzt (Finn ausdrücklich am 03.08.2026 bestätigt: der Hedge soll nur die NOCH
+   * OFFENEN Kosten zurückholen, nicht bereits ausgezahltes Geld doppelt).
+   * Der Parameter bleibt optional, damit der Brutto-Wert für die Aufschlüsselung
+   * („brutto − X Payouts") weiter abrufbar ist. */
   function calcAccountPayoutsEur(accId){
     const txs = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []
     let sum = 0
@@ -14211,7 +14213,10 @@
     const gkDet = document.getElementById('tp-gesamtkosten-detail')
     if(gkEl){
       if(master){
-        const gkEur = calcReingesteckdEur(master)
+        // netPayouts: erhaltene Payouts gegengerechnet (Finn 03.08.2026). Damit setzt der
+        // „Übernehmen"-Button das Slave-Risiko auf die NOCH OFFENEN Kosten, nicht auf die
+        // Bruttokosten — bereits ausgezahltes Geld muss nicht nochmal zurückgeholt werden.
+        const gkEur = calcReingesteckdEur(master, { netPayouts: true })
         if(gkEur > 0){
           gkEl.style.display = 'block'
           let gkDisplay = gkEur
@@ -14225,7 +14230,10 @@
             }
           }
           gkVal.textContent = `${gkCur}${gkDisplay.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
+          const gkGross = calcReingesteckdEur(master)
+          const gkPaid  = gkGross - gkEur   // bereits erhaltene Payouts
           gkDet.innerHTML = `Kompletter Reingesteckt-Betrag über die gesamte Vorgänger-Kette (Kaufpreis + Live-Hedge-Verluste), in EUR: <span class="mono">€${gkEur.toLocaleString('de-DE', {maximumFractionDigits: 2})}</span>`
+            + (gkPaid > 0.005 ? ` <span style="color:var(--sub)">(€${gkGross.toLocaleString('de-DE', {maximumFractionDigits: 2})} − €${gkPaid.toLocaleString('de-DE', {maximumFractionDigits: 2})} Payouts)</span>` : '')
           gkEl.dataset.suggestedGkEur = gkEur.toFixed(2)
         } else {
           gkEl.style.display = 'block'
@@ -14248,7 +14256,7 @@
       const parentId = master && typeof getParent === 'function' ? getParent(master.id) : null
       const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
       if(parentAcc){
-        const vgEur = calcReingesteckdEur(parentAcc)
+        const vgEur = calcReingesteckdEur(parentAcc, { netPayouts: true })
         if(vgEur > 0){
           vgEl.style.display = 'block'
           let vgDisplay = vgEur
