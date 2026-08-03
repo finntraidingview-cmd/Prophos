@@ -8722,6 +8722,24 @@
       const created = rowToAccount(data)
       accounts.push(created)
 
+      // Auto-Transaktion für den Kaufpreis (z.B. Activation Fee beim Phasenwechsel).
+      // FEHLTE hier bisher komplett (Finn 03.08.2026): der Betrag landete zwar am Account
+      // als purchaseCost, aber nie in den Finanzen — anders als beim normalen
+      // "Account hinzufügen" und beim Bulk-Import, die beide buchen.
+      if(cost && cost > 0){
+        await insertAutoTransaction({
+          account_id: created.id,
+          account_name: created.name,
+          account_firm: created.firm,
+          kind: 'account_purchase',
+          amount: -Math.abs(cost),   // negativ = raus
+          currency: 'EUR',
+          occurred_at: new Date().toISOString().slice(0,10),
+          notes: 'Account-Kauf (auto)',
+          auto_generated: true
+        })
+      }
+
       // Parent-Verlinkung speichern
       setParent(created.id, parentId)
       // Vorgänger archivieren mit Successor-ID
