@@ -8555,7 +8555,9 @@
   function showBlownAccountSummary(accountId){
     const acc = (accounts || []).find(a => String(a.id) === String(accountId))
     if(!acc) return
-    const gkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : 0
+    // netPayouts: erhaltene Payouts gegenrechnen — sonst zeigt die Bilanz eines geblowten
+    // Accounts nur die Kosten und unterschlägt, was er vorher eingebracht hat.
+    const gkEur = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc, { netPayouts: true }) : 0
     const { gainEur, lossEur } = (typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : { gainEur:0, lossEur:0 }
     const fmt = n => Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'
     const nameEl = document.getElementById('blownSummaryAccName')
@@ -8988,10 +8990,20 @@
     // Gesamtkosten (EUR) — die wichtigste Zahl für Challenge/Funded-Accounts.
     // Live-Accounts sind reines Cash-Konto ohne "Kette"/Kaufpreis-Konzept — keine Kachel dafür.
     const adIsLive = acc.type === 'live'
-    const adGkEur = (!adIsLive && typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
+    // netPayouts: erhaltene Payouts werden gegengerechnet — sie senken die echten Kosten
+    // des Accounts. (Der Hedge-Vorschlag im Trade-Plan rechnet bewusst weiter brutto.)
+    const adGkEur = (!adIsLive && typeof calcReingesteckdEur === 'function')
+      ? calcReingesteckdEur(acc, { netPayouts: true }) : null
     const adGkStr = adGkEur != null
       ? (adGkEur < 0 ? '−' : '') + Math.abs(adGkEur).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
       : '—'
+    // Aufschlüsselung: brutto + abgezogene Payouts (über die ganze Vorgänger-Kette)
+    const adGkGross = (!adIsLive && typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(acc) : null
+    const adPayoutsEur = (adGkGross != null && adGkEur != null) ? (adGkGross - adGkEur) : 0
+    const adFmtEur = v => Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' €'
+    const adGkSub = adPayoutsEur > 0.005
+      ? `<div style="font-size:10px;color:var(--sub);margin-top:2px">${adFmtEur(adGkGross)} − ${adFmtEur(adPayoutsEur)} Payouts</div>`
+      : ''
 
     // Geblowte Accounts: Plus/Minus (Live-Hedge) zusätzlich als Dauer-Kacheln zeigen —
     // gleiche Zahlen wie im Popup direkt nach dem Archivieren, hier für "später nochmal
@@ -9006,6 +9018,7 @@
         ${adIsLive ? '' : `<div class="kpi" style="flex:1.3;min-width:150px;padding:14px 18px;background:linear-gradient(135deg,rgba(84,71,206,.10),rgba(22,200,198,.07));border:1px solid rgba(84,71,206,.30)">
           <div class="kpi-label" style="color:var(--violet)">Gesamtkosten</div>
           <div class="kpi-value tnum" style="font-size:20px;color:var(--violet)">${adGkStr}</div>
+          ${adGkSub}
         </div>`}
         <div class="kpi" style="flex:1;min-width:120px;padding:14px 18px">
           <div class="kpi-label">Balance</div>
@@ -13909,8 +13922,27 @@
   //   + NETTO-Live-Hedge-P/L (Verlust = +Kosten, Gewinn = −Kosten) — für den Account
   //   selbst UND jeden Vorgänger. Master-/Prop-P/L (Payout erst bei Auszahlung) zählt NICHT.
   // (Bestätigt von Finn 07.07.2026: eigene Live-Trades mitzählen, Gewinne abziehen.)
-  function calcReingesteckdEur(masterAcc){
+  /* Gesamtkosten eines Accounts in EUR (Kaufpreis + Netto-Live-Hedge + komplette Vorgänger-Kette).
+   *
+   * netPayouts=true rechnet zusätzlich die bereits erhaltenen Payouts GEGEN (Finns Ask 03.08.2026:
+   * „die Payouts gehören auch zu den Gesamtkosten"). Bewusst optional und NICHT der Default:
+   * dieselbe Funktion speist den „Gesamtkosten übernehmen"-Button im Trade-Plan, der daraus das
+   * SLAVE-RISIKO (Hedge-Größe) setzt. Würde dort netto gerechnet, änderte sich still die
+   * Positionsgröße echter Trades. Anzeige = netto, Hedge-Vorschlag = brutto. */
+  function calcAccountPayoutsEur(accId){
+    const txs = (typeof transactions !== 'undefined' && Array.isArray(transactions)) ? transactions : []
+    let sum = 0
+    for(const t of txs){
+      if(t.kind !== 'payout') continue
+      if(String(t.accountId || '') !== String(accId)) continue
+      sum += Number(t.amount) || 0   // Beträge sind bereits EUR-Werte (siehe Finanzen-Umstellung 01.08.)
+    }
+    return sum
+  }
+
+  function calcReingesteckdEur(masterAcc, opts){
     if(!masterAcc) return 0
+    const netPayouts = !!(opts && opts.netPayouts)
     let totalCostEur = 0  // Berechnung in EUR
     const fxUsdEur = window._fxUsdEur || 0.85
     const planList = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans : []
@@ -13941,6 +13973,7 @@
     // 1. Aktiver Account: Kaufpreis + eigenes Netto-Live-Hedge
     if(masterAcc.purchaseCost) totalCostEur += Number(masterAcc.purchaseCost)
     totalCostEur += liveHedgeCostEur(masterAcc.id)
+    if(netPayouts) totalCostEur -= calcAccountPayoutsEur(masterAcc.id)
 
     // 2. Komplette Vorgänger-Kette ablaufen (über archived successorId, Schritt für Schritt zurück)
     let currentId = String(masterAcc.id)
@@ -13961,6 +13994,7 @@
       // Kaufpreis + Netto-Live-Hedge dieses Vorgängers (EUR)
       if(archAcc.purchaseCost) totalCostEur += Number(archAcc.purchaseCost)
       totalCostEur += liveHedgeCostEur(archAcc.id)
+      if(netPayouts) totalCostEur -= calcAccountPayoutsEur(archAcc.id)
 
       // Eine Ebene weiter zurück in der Kette
       currentId = String(archAcc.id)
