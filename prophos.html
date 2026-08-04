@@ -8089,6 +8089,88 @@
    * Matching: plan.slaveAccountId → dupGetLinks() → Duplikum account_id
    * Poll: alle 10s, unabhängig vom aktiven Tab
    * ====================================================================== */
+  /* ── Server-Wächter-Gate (04.08.2026) ─────────────────────────────────────
+   * Auf Railway läuft die Trade-Erkennung jetzt 24/7 serverseitig (app.py,
+   * /watcher/status). Läuft sie dort, schaltet der Browser seine EIGENE
+   * Erkennung ab (atCheck + mpWatch-Detection) und pollt nur noch die UI —
+   * sonst würden zwei Engines dieselben Pläne bearbeiten. Fällt der Server aus
+   * (kein Key, hängt, alte Version ohne Endpoint), springt die Browser-
+   * Erkennung beim nächsten Probe automatisch wieder ein. */
+  const serverWatch = { active: false, lastProbe: 0 }
+  // FEST auf Railway, NICHT TS_BACKEND (Review-Finding 04.08.2026): auf localhost
+  // zeigt TS_BACKEND aufs lokale app.py, das den Service-Key absichtlich nicht hat —
+  // die Probe bekäme enabled:false und die Browser-Erkennung liefe DAUERHAFT parallel
+  // zum Railway-Wächter (doppelte Duplikum-Last, Race-Potenzial). Der Wächter lebt
+  // beim Datenbestand (Supabase), nicht bei der Backend-Instanz.
+  const WATCHER_HOME = 'https://web-production-bec81.up.railway.app'
+  async function swProbe(){
+    try{
+      const r = await fetch(`${WATCHER_HOME}/watcher/status`, { cache: 'no-store' })
+      const d = await r.json()
+      const was = serverWatch.active
+      // fresh=false heißt: Thread gestartet, aber der letzte Zyklus ist zu alt
+      // (hängt/stirbt) → Browser übernimmt wieder. Selbstheilend in beide Richtungen.
+      serverWatch.active = !!(d && d.enabled && d.fresh)
+      serverWatch.lastProbe = Date.now()
+      if(serverWatch.active !== was){
+        console.log(`[watcher] Server-Wächter ${serverWatch.active ? 'AKTIV — Browser-Erkennung pausiert' : 'inaktiv — Browser-Erkennung übernimmt'}`)
+      }
+    }catch(_){ serverWatch.active = false }
+  }
+  window.serverWatch = serverWatch   // DevTools-Debugging
+
+  /* UI-Poll bei aktivem Server-Wächter: holt die Pläne des aktiven Profils und
+   * macht die serverseitigen Übergänge sichtbar (Toast + Überprüfen-Popup). */
+  const planPoll = { INTERVAL: 15_000, inFlight: false }
+  async function planPollTick(){
+    if(!serverWatch.active || planPoll.inFlight) return
+    if(typeof document !== 'undefined' && document.hidden) return
+    if(!currentUserId) return
+    planPoll.inFlight = true
+    try{
+      const { data, error } = await supabase
+        .from('trade_plans').select('*')
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: false })
+      if(error || !data) return
+      const fresh = data.map(rowToPlan).filter(Boolean)
+      const oldById = new Map((tradePlans || []).map(p => [String(p.id), p]))
+      let changed = fresh.length !== (tradePlans || []).length
+      for(const np of fresh){
+        const op = oldById.get(String(np.id))
+        if(!op){ changed = true; continue }
+        if(op.status !== np.status || op.masterPl !== np.masterPl || op.slavePl !== np.slavePl){
+          changed = true
+          if(op.status === 'planned' && np.status === 'open'){
+            atToast(`▶ Trade gestartet: ${np.masterName||'—'} → ${np.slaveName||'—'}`, 'start')
+          }
+          // review erreicht — egal von welchem Status aus (Review-Finding: bei
+          // schnellen Trades erledigt der Server planned→open→review innerhalb
+          // EINES Poll-Fensters; der reine open→review-Match hätte dann weder
+          // Popup noch Banner gezeigt).
+          if(np.status === 'review' && op.status !== 'review'){
+            // fromServer=true: Status + P&L hat der Server schon erledigt —
+            // nur Banner/Popup zeigen, nichts erneut schreiben oder fetchen.
+            atShowEndPrompt(np, true)
+          }
+        }
+      }
+      if(changed){
+        tradePlans = fresh
+        renderTradePlans()
+      }
+    }catch(_){
+    }finally{ planPoll.inFlight = false }
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    swProbe().catch(() => {})
+    setInterval(() => swProbe().catch(() => {}), 120_000)
+    setInterval(() => planPollTick().catch(() => {}), planPoll.INTERVAL)
+  })
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && serverWatch.active) planPollTick().catch(() => {})
+  })
+
   const autoTrack = {
     enabled: localStorage.getItem('prophos_autotrack') !== 'false',
     timer:   null,
@@ -8157,7 +8239,10 @@
   }
 
   // End-Prompt
-  function atShowEndPrompt(plan){
+  // fromServer=true (04.08.2026): der Railway-Wächter hat Status UND Auto-P&L
+  // bereits erledigt — dann ist das hier reine Anzeige (Banner + Popup), es wird
+  // nichts erneut geschrieben oder gefetcht.
+  function atShowEndPrompt(plan, fromServer){
     if(document.getElementById(`at-prompt-${plan.id}`)) return
     // Schon einmal gemeldet? → Popup NICHT erneut zeigen (auch nicht nach "Später").
     // Der orange Banner in der Karte bleibt als Erinnerung; das Popup kommt erst
@@ -8170,8 +8255,10 @@
     // Plan auf 'review' schieben (Überprüfen-Tab) + Auto-P&L holen und in die DB
     // persistieren. Fällt bei fehlender Migration automatisch aufs alte Verhalten
     // zurück (bleibt 'open' mit Banner; Prefetch passiert in atMoveToReview mit).
-    if(typeof atMoveToReview === 'function') atMoveToReview(plan)
-    else if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
+    if(!fromServer){
+      if(typeof atMoveToReview === 'function') atMoveToReview(plan)
+      else if(typeof _autoPnlPrefetch === 'function') _autoPnlPrefetch(plan)
+    }
 
     const el = document.createElement('div')
     el.className = 'at-prompt'
@@ -8200,6 +8287,10 @@
   // Haupt-Check — nutzt position/getOpenPositions (funktionierender v4 Endpoint)
   async function atCheck(){
     if(!autoTrack.enabled) return
+    // Server-Wächter aktiv → Erkennung läuft auf Railway, der Browser pollt nur
+    // noch die UI (planPollTick). Zwei Engines auf denselben Plänen gäbe doppelte
+    // Duplikum-Last und Race-Potenzial.
+    if(serverWatch.active) return
     if(!dupState?.token) return
     // Hinweis: KEIN harter document.hidden-Abbruch mehr hier — die Hintergrund-Drosselung
     // sitzt im Timer (atStart), damit Direkt-Aufrufe (visibilitychange, ltRefresh, Trade-
@@ -8607,7 +8698,10 @@
   async function mpCheckProfile(prof){
     const uid = prof.userId
     const sb  = await mpClient(uid);        if(!sb)  return
-    const dup = await mpDupToken(uid, sb);  if(!dup) return
+    // Läuft der Server-Wächter, braucht dieses Profil hier KEINEN Duplikum-Token
+    // (nur den Review-Zähler unten) — der Login-Umweg wäre unnötige Last/Token-Churn.
+    const dup = serverWatch.active ? null : await mpDupToken(uid, sb)
+    if(!serverWatch.active && !dup) return
 
     let plans = [], accById = new Map(), links = {}
     try{
@@ -8635,6 +8729,10 @@
       window.mpReviewCounts[uid] = count || 0
       if(before !== window.mpReviewCounts[uid]) renderProfileMenu()
     }catch(_){}
+
+    // Server-Wächter aktiv → Railway macht die Erkennung für ALLE Profile.
+    // Hier bleibt nur der Review-Zähler fürs Profil-Menü (oben) übrig.
+    if(serverWatch.active) return
 
     if(!plans.length || !Object.keys(links).length) return
 

@@ -1,6 +1,7 @@
 import requests
 import urllib3
 import threading
+import calendar
 import json
 import hashlib
 import hmac
@@ -36,7 +37,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-07-31.1"
+APP_BUILD = "2026-08-04.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -392,10 +393,19 @@ def duplikum_proxy(path):
         r = do_request(token)
         refresh_email = email or DUP_EMAIL
         if r.status_code == 401 and refresh_email:
-            new_tok = refresh_duplikum_token(refresh_email)
-            if new_tok:
-                r = do_request(new_tok)
-                return r.status_code, r.content, r.headers.get("Content-Type", "application/json"), new_tok
+            # SICHERHEIT (04.08.2026, Review-Finding): Refresh nur, wenn der Aufrufer den
+            # zuletzt bekannten Token dieser Session vorlegt — wie bei /duplikum/refresh.
+            # Ohne die Prüfung wäre der Endpoint ein Token-Automat: dup-user ist frei
+            # wählbar, CORS steht auf *, und ein beliebiger abgelaufener Token würde
+            # reichen, um sich über den 401-Pfad einen FRISCHEN Token für ein fremdes
+            # Konto generieren zu lassen (X-New-Dup-Token). Der Refresh rotiert jetzt nur
+            # noch einen Token, den man nachweislich schon besaß.
+            sess_known = ((duplikum_sessions.get(refresh_email) or {}).get("token") or "").strip()
+            if sess_known and hmac.compare_digest((token or "").strip(), sess_known):
+                new_tok = refresh_duplikum_token(refresh_email)
+                if new_tok:
+                    r = do_request(new_tok)
+                    return r.status_code, r.content, r.headers.get("Content-Type", "application/json"), new_tok
         return r.status_code, r.content, r.headers.get("Content-Type", "application/json"), None
 
     # ── Nicht-cachebare Calls (Mutationen etc.): direkt durch, wie bisher ──
@@ -1611,6 +1621,651 @@ def debug_account():
         headers={"Authorization": f"Bearer {token}","Content-Type":"application/json"},
         timeout=10)
     return Response(r.content, status=r.status_code, content_type="application/json")
+
+# ════════════════════════════════════════════════════════════════════════════
+# SERVER-WÄCHTER — Trade-Erkennung 24/7, unabhängig vom Browser (04.08.2026)
+#
+# Finns Anforderung: die drei Schritte Geplant→Läuft→Überprüfen + Auto-P&L
+# müssen DURCHGEHEND laufen — auch wenn kein Prophos-Tab offen ist und egal,
+# in welchem Profil er gerade eingeloggt ist. Der Browser-Wächter (mpWatch)
+# war der Zwischenschritt; das hier ist die echte Lösung: dieselbe Erkennung
+# als Server-Loop auf Railway.
+#
+# Voraussetzung: SUPABASE_SERVICE_KEY als Env-Var (NUR auf Railway setzen!
+# Der lokale Mac/PC-Backend darf den Key nicht bekommen, sonst laufen zwei
+# Wächter gegeneinander). Ohne Key bleibt der Wächter still inaktiv und das
+# Frontend fällt automatisch auf die Browser-Erkennung zurück.
+#
+# Die Logik ist ein 1:1-Port von atCheck/mpWatch aus prophos.html:
+#   - Baseline pro Plan (erster Blick zählt nur, triggert nie)
+#   - Master-Fingerabdruck (eigene Master-Position ODER id_master auf der
+#     Slave-Kopie) gegen Fehltrigger bei geteiltem Slave
+#   - Close erst nach 2 Messungen IN FOLGE (Schutz gegen einzelne leere/
+#     fehlerhafte Duplikum-Antworten, live beobachtet 07.07.2026)
+#   - Mirror-Routen-Pläne (TopstepX-Master + MetaApi-Slave) ausgeschlossen —
+#     die gehören dem lokalen Mirror, Duplikum kennt sie nicht
+#   - Rate-Limit-Antworten (HTTP 200 mit error-Body statt data-Array) werden
+#     als FEHLER behandelt, nie als "keine Positionen" (Lehre vom 30.07.2026)
+#   - Alle Status-Writes mit Guard (status=eq.planned bzw. eq.open), damit
+#     manuelle Aktionen im Frontend nie überschrieben werden
+#   - P&L wird im Moment des Trade-Endes geholt und persistiert; für Review-
+#     Pläne mit fehlendem P&L wird jede Runde nachversucht (max. 10x)
+# ════════════════════════════════════════════════════════════════════════════
+SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "https://gxhkannmzpyuepxlepta.supabase.co").rstrip("/")
+SUPABASE_SERVICE_KEY = (os.environ.get("SUPABASE_SERVICE_KEY")
+                        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+WATCHER_INTERVAL = max(10, int(os.environ.get("WATCHER_INTERVAL") or "15"))
+WATCHER_USER_SPACING = 1.2   # Sekunden zwischen zwei Usern (Duplikum: 2 Req/s)
+WATCHER_DISABLED = bool(os.environ.get("WATCHER_DISABLED"))
+
+_watcher_state = {}       # (uid, plan_id) -> {was_open, notified, baseline, streak, base_tickets, tickets, recovered}
+_watcher_pnl_tries = {}   # (uid, plan_id) -> Anzahl P&L-Nachversuche
+_watcher_backoff = {}     # uid -> {"until": epoch, "fails": n} — Login-Backoff bei kaputten Zugangsdaten
+_watcher_info = {"started": False, "last_run": 0, "runs": 0, "users": 0, "last_error": ""}
+_watcher_thread_started = False
+# Duplikums Zeitstempel (openTime/closeTime) kommen OHNE Zeitzone. Der Offset zur
+# echten UTC wird zur Laufzeit kalibriert: wenn der Wächter einen Trade-START erkennt,
+# ist die neue Position höchstens ~2 Ticks alt → parse(openTime) − jetzt ≈ Offset.
+# Solange unkalibriert, rechnen Vergleiche mit großzügiger Toleranz.
+_dup_clock = {"offset": None}   # Sekunden: naiver Duplikum-Zeitstempel − echte UTC
+
+
+def _sb_headers(prefer=None):
+    h = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        h["Prefer"] = prefer
+    return h
+
+
+def sb_select(table, params):
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", params=params,
+                     headers=_sb_headers(), timeout=12)
+    r.raise_for_status()
+    return r.json()
+
+
+def sb_update(table, params, body):
+    """PATCH mit return=representation → Liste der WIRKLICH geänderten Zeilen.
+    Leere Liste = Guard hat gegriffen (z.B. Status wurde inzwischen manuell
+    geändert) — das ist ein normales Ergebnis, kein Fehler."""
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}", params=params, json=body,
+                       headers=_sb_headers("return=representation"), timeout=12)
+    r.raise_for_status()
+    return r.json()
+
+
+def dup_login(email, password):
+    """Duplikum-Login → Token oder None.
+
+    SICHERHEIT (Review-Finding 04.08.2026): Der Wächter darf duplikum_sessions
+    NICHT befüllen. Der unauthentifizierte Proxy /duplikum/<path> nutzt diesen
+    Cache für seinen 401-Auto-Refresh — würde der Wächter dort die Passwörter
+    ALLER User ablegen, könnte jeder, der nur die E-Mail kennt, sich über den
+    Proxy frische Tokens für fremde Duplikum-Konten ausstellen lassen."""
+    if not email or not password:
+        return None
+    try:
+        r = requests.post(f"{DUP_BASE}/access/getToken.php", auth=(email, password), timeout=15)
+        token = None
+        try:
+            d = r.json()
+            if isinstance(d, dict):
+                token = d.get("token") or d.get("access_token") or (d.get("data") or {}).get("token")
+            elif isinstance(d, str):
+                token = d
+        except Exception:
+            txt = (r.text or "").strip().strip('"')
+            if txt and len(txt) < 2000 and " " not in txt:
+                token = txt
+        if r.ok and token:
+            return token
+    except Exception as e:
+        print(f"[watcher] ⚠️ Duplikum-Login {email}: {e}", flush=True)
+    return None
+
+
+def _wt_now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _wt_parse_ts(s):
+    """'YYYY-MM-DD HH:MM:SS' (oder ISO) → naiver Epoch (als wäre der String UTC).
+    Für ECHTE UTC noch _dup_clock['offset'] abziehen (falls kalibriert)."""
+    try:
+        return calendar.timegm(time.strptime(str(s)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        return None
+
+
+def _wt_calibrate_clock(slave_pos, trade_tickets):
+    """Uhr-Kalibrierung: Beim erkannten Trade-START ist die neue Position höchstens
+    ~1-2 Ticks alt → parse(openTime) − jetzt ≈ Offset der Duplikum-Zeitstempel zu UTC.
+    Damit werden closeTime-Vergleiche zeitzonen-sicher (Toleranz 15min statt 3h)."""
+    try:
+        tset = {str(t) for t in (trade_tickets or [])}
+        for p in slave_pos:
+            if tset and str(p.get("ticket")) not in tset:
+                continue
+            ot = _wt_parse_ts(p.get("openTime"))
+            if ot is None:
+                continue
+            off = ot - time.time()
+            if abs(off) < 26 * 3600:
+                _dup_clock["offset"] = off
+                break
+    except Exception:
+        pass
+
+
+def wt_dup_positions(token, path):
+    """Positionsliste holen. Rückgabe: list | '401' | None.
+    None = fehlerhafte Antwort (Netzwerk, Rate-Limit-als-200, kaputtes JSON) —
+    der Aufrufer muss den Tick ÜBERSPRINGEN, niemals als 'leer' interpretieren.
+    Ein 200-Dict OHNE error und OHNE data-Liste gilt dagegen als legitim leer
+    (gleiches Muster wie dupGetSettingsRows im Frontend)."""
+    try:
+        r = requests.post(f"{DUP_BASE}/{path}", data={"length": "1000"},
+                          headers={"Authorization": f"Bearer {token}"}, timeout=15)
+    except requests.exceptions.RequestException:
+        return None
+    if r.status_code == 401:
+        return "401"
+    if r.status_code != 200:
+        return None
+    try:
+        d = r.json()
+    except Exception:
+        return None
+    if isinstance(d, dict):
+        if isinstance(d.get("data"), list):
+            return d["data"]
+        if d.get("error"):
+            # Rate-Limit "2/1 per second" & Co. kommen als HTTP 200 mit error-Body
+            return None
+        return []
+    return None
+
+
+def wt_get_token(uid, creds, force=False):
+    """Duplikum-Token für ein Profil. Nutzt den in duplikum_credentials
+    gespeicherten Token solange er < 40h alt ist, sonst frischer Login mit den
+    hinterlegten Zugangsdaten (Token wird zurückgeschrieben, damit auch das
+    Frontend ihn übernehmen kann).
+    Login-Backoff (Review-Finding): sind die Zugangsdaten kaputt (Passwort
+    geändert), wird NICHT alle 15s neu versucht — exponentiell 5min→1h, sonst
+    hämmern wir ~5760 Fehl-Logins/Tag gegen trade-copier.com."""
+    email = (creds.get("email") or "").strip()
+    if not email:
+        return None
+    if not force:
+        tok, tok_at = creds.get("token"), creds.get("token_at")
+        if tok and tok_at:
+            try:
+                # token_at ist UTC → timegm, nicht mktime (das würde lokal interpretieren)
+                age_h = (time.time() - calendar.timegm(time.strptime(tok_at[:19], "%Y-%m-%dT%H:%M:%S"))) / 3600.0
+            except Exception:
+                age_h = 9999
+            if age_h < 40:
+                return tok
+    bo = _watcher_backoff.get(uid)
+    if bo and time.time() < bo["until"]:
+        return None
+    token = dup_login(email, creds.get("password") or "")
+    if token:
+        _watcher_backoff.pop(uid, None)
+        try:
+            sb_update("duplikum_credentials", {"user_id": f"eq.{uid}"},
+                      {"token": token, "token_at": _wt_now_iso()})
+        except Exception:
+            pass
+        print(f"[watcher] 🔑 Neuer Duplikum-Token für {email}", flush=True)
+    else:
+        fails = (bo["fails"] + 1) if bo else 1
+        wait = min(3600, 300 * (2 ** (fails - 1)))
+        _watcher_backoff[uid] = {"until": time.time() + wait, "fails": fails}
+        print(f"[watcher] ⚠️ Login fehlgeschlagen für {email} — Backoff {wait//60}min (Versuch {fails})", flush=True)
+    return token
+
+
+def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None):
+    """P&L der zu DIESEM Plan gehörenden geschlossenen Position.
+
+    Rückgabe (status, pnl):
+      ('ok',  {master, slave})  Treffer
+      ('none', None)            Liste kam, aber (noch) kein passender Kandidat → Retry
+      ('401', None)             Token tot → Aufrufer refresht, Versuch zählt nicht
+      ('err', None)             Netz/Rate-Limit → Versuch zählt nicht
+
+    Zuordnung (Review-Finding 04.08.2026 — vorher wurde blind die NEUESTE
+    geschlossene Position des Paars genommen, also bei jedem Folgetrade der
+    P&L des FALSCHEN Trades):
+      1. tickets: die beim Trade-Start beobachteten Slave-Ticket-IDs — exakteste
+         Zuordnung, keine Zeitzonen-Annahmen nötig.
+      2. sonst Zeitfenster: closeTime >= plan.started_at (mit Toleranz; Duplikums
+         Uhr wird über _dup_clock kalibriert) und davon die ÄLTESTE — der erste
+         Close nach dem Start ist der Trade des Plans, nicht ein späterer.
+      3. ohne started_at: kein sicherer Bezug herstellbar → ('none', None)."""
+    lst = wt_dup_positions(token, "position/getClosedPositions.php")
+    if lst == "401":
+        return "401", None
+    if not isinstance(lst, list):
+        return "err", None
+    if not lst:
+        return "none", None
+    cands = [p for p in lst
+             if str(p.get("account_id")) == str(dup_slave)
+             and (not dup_master or str(p.get("master_id")) == str(dup_master))]
+    if not cands:
+        return "none", None
+
+    sp = None
+    ticket_set = {str(t) for t in (tickets or []) if t is not None}
+    if ticket_set:
+        hits = [p for p in cands if str(p.get("ticket")) in ticket_set]
+        if hits:
+            hits.sort(key=lambda p: str(p.get("closeTime") or ""), reverse=True)
+            sp = hits[0]
+    if sp is None:
+        if not started_epoch:
+            return "none", None
+        offset = _dup_clock["offset"]
+        tol = 900 if offset is not None else 3 * 3600
+        off = offset or 0
+        in_window = []
+        for p in cands:
+            ct = _wt_parse_ts(p.get("closeTime"))
+            if ct is not None and (ct - off) >= (started_epoch - tol):
+                in_window.append((ct, p))
+        if not in_window:
+            return "none", None
+        in_window.sort(key=lambda x: x[0])   # ÄLTESTER Close nach Start = unser Trade
+        sp = in_window[0][1]
+
+    slave_pnl = None
+    if sp.get("profitCcy") not in (None, ""):
+        try:
+            slave_pnl = float(sp["profitCcy"])
+        except (TypeError, ValueError):
+            slave_pnl = None
+    master_pnl = None
+    if sp.get("masterTicket") is not None:
+        mts = str(sp["masterTicket"])
+        mp = next((p for p in lst if str(p.get("account_id")) == str(dup_master)
+                   and str(p.get("ticket")) == mts), None) \
+             or next((p for p in lst if str(p.get("ticket")) == mts
+                      and str(p.get("account_id")) != str(dup_slave)), None)
+        if mp and mp.get("profitCcy") not in (None, ""):
+            try:
+                master_pnl = float(mp["profitCcy"])
+            except (TypeError, ValueError):
+                master_pnl = None
+    if slave_pnl is None and master_pnl is None:
+        return "none", None
+    return "ok", {"master": master_pnl, "slave": slave_pnl}
+
+
+def wt_write_pnl(uid, plan, pnl):
+    """Nur LEERE P&L-Felder füllen, nur solange der Plan in 'review' steht —
+    manuell eingetragene oder bestätigte Werte werden nie angefasst."""
+    upd = {}
+    if pnl.get("master") is not None and plan.get("master_pl") is None:
+        upd["master_pl"] = round(pnl["master"], 2)
+    if pnl.get("slave") is not None and plan.get("slave_pl") is None:
+        upd["slave_pl"] = round(pnl["slave"], 2)
+    if not upd:
+        return False
+    rows = sb_update("trade_plans",
+                     {"id": f"eq.{plan['id']}", "status": "eq.review", "user_id": f"eq.{uid}"},
+                     upd)
+    return bool(rows)
+
+
+def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch=None, tickets=None):
+    """open → review + sofortiger P&L-Fetch. True = Plan ist versorgt."""
+    try:
+        rows = sb_update("trade_plans",
+                         {"id": f"eq.{plan['id']}", "status": "eq.open", "user_id": f"eq.{uid}"},
+                         {"status": "review"})
+    except Exception as e:
+        print(f"[watcher] ⚠️ {label}: review-Update fehlgeschlagen: {e}", flush=True)
+        return False   # nächster Tick probiert es erneut
+    if not rows:
+        # Guard hat gegriffen — jemand hat den Plan manuell abgeschlossen. Erledigt.
+        return True
+    print(f"[watcher] 🔴 {label}: Trade beendet → Überprüfen ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+    time.sleep(1.2)   # Duplikum-Rate-Limit: 2 Req/s
+    try:
+        st, pnl = wt_fetch_pnl(token, dup_slave, dup_master, started_epoch, tickets)
+        if st == "ok" and pnl:
+            wt_write_pnl(uid, plan, pnl)
+            print(f"[watcher] 💰 {label}: Auto-P&L persistiert (master={pnl.get('master')}, slave={pnl.get('slave')})", flush=True)
+        else:
+            # Noch nicht in getClosedPositions (oder Fehler) → Nachversuch-Zähler
+            # startet, die Review-Retry-Schleife holt es in den nächsten Runden nach.
+            _watcher_pnl_tries[(uid, str(plan["id"]))] = 0
+    except Exception as e:
+        print(f"[watcher] ⚠️ {label}: P&L-Fetch: {e}", flush=True)
+        _watcher_pnl_tries[(uid, str(plan["id"]))] = 0
+    return True
+
+
+def wt_check_user(uid, creds):
+    label = (creds.get("email") or uid)[:24]
+    plans = sb_select("trade_plans", {
+        "select": "*",
+        "user_id": f"eq.{uid}",
+        "status": "in.(planned,open,review)",
+    })
+    active = [p for p in plans if p.get("status") in ("planned", "open")]
+    review_missing = [p for p in plans if p.get("status") == "review"
+                      and (p.get("master_pl") is None or p.get("slave_pl") is None)]
+
+    # State-Hygiene: Einträge zu Plänen, die nicht mehr aktiv/review sind, entsorgen
+    live_ids = {str(p["id"]) for p in plans}
+    for k in [k for k in _watcher_state if k[0] == uid and k[1] not in live_ids]:
+        _watcher_state.pop(k, None)
+    for k in [k for k in _watcher_pnl_tries if k[0] == uid and k[1] not in live_ids]:
+        _watcher_pnl_tries.pop(k, None)
+
+    if not active and not review_missing:
+        return
+
+    # Verknüpfungen (dup_links) + Accounts (Mirror-Ausschluss)
+    us = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.dup_links"})
+    links = us[0].get("value") if us else None
+    if isinstance(links, str):
+        try:
+            links = json.loads(links)
+        except Exception:
+            links = None
+    if not isinstance(links, dict) or not links:
+        return
+    accs = sb_select("accounts", {"select": "id,topstep_account_id,meta_api_account_id",
+                                  "user_id": f"eq.{uid}"})
+    acc_by_id = {str(a["id"]): a for a in accs}
+
+    def dup_id_of(acc_id):
+        for dup_id, mapped in links.items():
+            if str(mapped) == str(acc_id):
+                return dup_id
+        return None
+
+    def is_mirror(p):
+        m = acc_by_id.get(str(p.get("master_account_id")))
+        s = acc_by_id.get(str(p.get("slave_account_id")))
+        return bool(m and s and m.get("topstep_account_id") and s.get("meta_api_account_id"))
+
+    token = wt_get_token(uid, creds)
+    if not token:
+        return
+
+    def started_epoch_of(plan):
+        return _wt_parse_ts(plan.get("started_at"))   # started_at ist UTC-ISO → timegm passt
+
+    # ── P&L-Nachversuche für Review-Pläne (z.B. Position war noch nicht in
+    # getClosedPositions, oder das Frontend hat nach review verschoben ohne P&L) ──
+    for plan in review_missing:
+        if is_mirror(plan):
+            continue
+        d_slave = dup_id_of(plan.get("slave_account_id"))
+        if not d_slave:
+            continue
+        se = started_epoch_of(plan)
+        # Zeitfenster (Review-Finding): nur junge Pläne nachversorgen. Der Zähler ist
+        # In-Memory und wird bei jedem Deploy zurückgesetzt — ohne absolute Grenze
+        # bekämen tagelang hängende Review-Pläne irgendwann den P&L eines SPÄTEREN
+        # Trades desselben Paars eingestempelt.
+        if not se or (time.time() - se) > 6 * 3600:
+            continue
+        key = (uid, str(plan["id"]))
+        tries = _watcher_pnl_tries.get(key, 0)
+        if tries >= 10:
+            continue
+        time.sleep(1.2)
+        try:
+            st, pnl = wt_fetch_pnl(token, d_slave, dup_id_of(plan.get("master_account_id")),
+                                   se, (_watcher_state.get(key) or {}).get("tickets"))
+            if st == "401":
+                token = wt_get_token(uid, creds, force=True)
+                if not token:
+                    return
+                continue   # Versuch zählt nicht — nächste Runde mit frischem Token
+            if st == "err":
+                continue   # Netz/Rate-Limit — Versuch zählt nicht
+            _watcher_pnl_tries[key] = tries + 1
+            if st == "ok" and pnl and wt_write_pnl(uid, plan, pnl):
+                print(f"[watcher] 💰 {label}: P&L nachgetragen für Plan {plan['id']}", flush=True)
+                _watcher_pnl_tries[key] = 10   # fertig
+        except Exception as e:
+            print(f"[watcher] ⚠️ {label}: P&L-Retry: {e}", flush=True)
+
+    if not active:
+        return
+
+    dup_active = [p for p in active if not is_mirror(p)]
+    if not dup_active:
+        return
+
+    positions = wt_dup_positions(token, "position/getOpenPositions.php")
+    if positions == "401":
+        token = wt_get_token(uid, creds, force=True)
+        if not token:
+            return
+        positions = wt_dup_positions(token, "position/getOpenPositions.php")
+    if not isinstance(positions, list):
+        return   # fehlerhafte Antwort → Tick überspringen, Streaks bleiben stehen
+
+    # Wie viele GEPLANTE Pläne teilen sich dasselbe Master→Slave-Paar? (Für die
+    # Restart-Erkennung unten: nur bei eindeutigem Paar darf sofort gestartet werden.)
+    planned_pairs = {}
+    for p in dup_active:
+        if p.get("status") == "planned":
+            pk = (str(p.get("master_account_id")), str(p.get("slave_account_id")))
+            planned_pairs[pk] = planned_pairs.get(pk, 0) + 1
+
+    for plan in dup_active:
+        d_slave = dup_id_of(plan.get("slave_account_id"))
+        d_master = dup_id_of(plan.get("master_account_id"))
+        if not d_slave:
+            continue
+        slave_pos = [p for p in positions if str(p.get("account_id")) == str(d_slave)]
+        count = len(slave_pos)
+        has_open = count > 0
+        if d_master:
+            master_ok = any(str(p.get("account_id")) == str(d_master) for p in positions) or \
+                any(str(p.get("id_master") or p.get("master_id") or p.get("masterId") or "") == str(d_master)
+                    for p in slave_pos)
+        else:
+            master_ok = False
+        # Slave-Positionen, die nachweislich Kopien DIESES Masters sind (id_master-Stempel)
+        copied_tickets = [str(p.get("ticket")) for p in slave_pos
+                          if p.get("ticket") is not None and d_master
+                          and str(p.get("id_master") or p.get("master_id") or p.get("masterId") or "") == str(d_master)]
+        all_tickets = [str(p.get("ticket")) for p in slave_pos if p.get("ticket") is not None]
+
+        key = (uid, str(plan["id"]))
+        prev = _watcher_state.get(key) or {"was_open": False, "notified": False, "baseline": None, "streak": 0}
+
+        if plan["status"] == "planned":
+            if prev["baseline"] is None:
+                # Restart-Recovery: läuft die Kopie dieses Masters BEREITS (id_master-
+                # Stempel) und ist dies der einzige geplante Plan auf dem Paar, ist der
+                # Start während einer Downtime passiert → sofort starten, statt die
+                # Baseline inklusive der Position zu setzen (das würde den Start für
+                # immer verschlucken — der Plan bliebe ewig auf 'Geplant').
+                pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
+                if copied_tickets and planned_pairs.get(pk, 0) == 1:
+                    try:
+                        rows = sb_update("trade_plans",
+                                         {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
+                                         {"status": "open", "started_at": _wt_now_iso()})
+                    except Exception as e:
+                        print(f"[watcher] ⚠️ {label}: Recovery-Start: {e}", flush=True)
+                        continue   # State NICHT setzen → nächster Tick versucht erneut
+                    _watcher_state[key] = {"was_open": True, "notified": False, "baseline": count,
+                                           "streak": 0, "tickets": copied_tickets}
+                    if rows:
+                        print(f"[watcher] ▶ {label}: Trade lief schon (Recovery-Start, Tickets {copied_tickets})", flush=True)
+                    continue
+                if master_ok and has_open:
+                    print(f"[watcher] ℹ️ {label}: Plan {plan['id']} geplant, aber Paar hat schon Aktivität — Baseline übernimmt (ggf. Start während Downtime verpasst)", flush=True)
+                _watcher_state[key] = {**prev, "was_open": has_open, "baseline": count,
+                                       "base_tickets": all_tickets}
+                continue
+            if count <= prev["baseline"] or not master_ok:
+                _watcher_state[key] = {**prev, "was_open": has_open}
+                continue
+            # Start erkannt. Review-Finding: ERST der DB-Write, DANN die Baseline anheben —
+            # sonst verliert ein einziger transienter Supabase-Fehler den Übergang dauerhaft
+            # (Baseline wäre schon oben, count > baseline würde nie wieder wahr).
+            base_set = set(prev.get("base_tickets") or [])
+            new_tickets = [t for t in all_tickets if t not in base_set]
+            trade_tickets = copied_tickets or new_tickets
+            try:
+                rows = sb_update("trade_plans",
+                                 {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
+                                 {"status": "open", "started_at": _wt_now_iso()})
+            except Exception as e:
+                print(f"[watcher] ⚠️ {label}: Start-Update: {e} — nächster Tick versucht erneut", flush=True)
+                continue
+            _wt_calibrate_clock(slave_pos, trade_tickets)
+            _watcher_state[key] = {"was_open": True, "notified": False, "baseline": count,
+                                   "streak": 0, "tickets": trade_tickets}
+            if rows:
+                print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+            continue
+
+        # status == 'open'
+        if prev["baseline"] is None:
+            # Ticket-Zuordnung beim (Re-)Init eines offenen Plans: bevorzugt die
+            # id_master-gestempelten Kopien, sonst alle aktuellen Slave-Positionen
+            # (Obermenge — der master_id-Filter beim Closed-Fetch engt weiter ein).
+            _watcher_state[key] = {"was_open": has_open, "notified": False, "baseline": count,
+                                   "streak": 0, "tickets": copied_tickets or all_tickets}
+            continue
+        closed = (not master_ok) if d_master else (count < prev["baseline"])
+        streak = (prev.get("streak") or 0) + 1 if closed else 0
+        if streak >= 2 and prev["was_open"] and not prev["notified"]:
+            ok = wt_finish_plan(uid, token, plan, d_slave, d_master, label,
+                                started_epoch_of(plan), prev.get("tickets"))
+            _watcher_state[key] = {**prev, "was_open": True, "notified": ok, "streak": streak}
+        elif has_open:
+            _watcher_state[key] = {**prev, "was_open": True, "notified": False,
+                                   "baseline": max(prev["baseline"], count), "streak": streak,
+                                   "tickets": copied_tickets or prev.get("tickets") or all_tickets}
+        else:
+            # was_open bleibt stehen — sonst hebelt sich der 2-Tick-Schutz selbst aus
+            # (derselbe Bug steckte bis 04.08.2026 im Frontend-atCheck).
+            st_new = {**prev, "streak": streak}
+            # Downtime-Recovery für offene Pläne: endete der Trade, während der Wächter
+            # down war (State weg), wird was_open nie wieder true und der Plan hinge
+            # für immer auf 'Läuft'. Bedingungen: keine Slave-Position, kein Master-
+            # Fingerabdruck, Plan läuft seit >5min — dann mit EIGENEM 2-Tick-Schutz
+            # (recovery_streak) nach review verschieben; P&L-Versuch inklusive.
+            if not prev["was_open"] and not prev["notified"] and not master_ok:
+                se = started_epoch_of(plan)
+                if se and (time.time() - se) > 300:
+                    rs = (prev.get("recovery_streak") or 0) + 1
+                    st_new["recovery_streak"] = rs
+                    if rs >= 2:
+                        ok = wt_finish_plan(uid, token, plan, d_slave, d_master, label,
+                                            se, prev.get("tickets"))
+                        st_new["notified"] = ok
+                        if ok:
+                            print(f"[watcher] ♻️ {label}: Plan {plan['id']} hing auf 'Läuft' (Ende während Downtime) — nachgeholt", flush=True)
+            _watcher_state[key] = st_new
+
+
+def watcher_cycle():
+    creds_rows = sb_select("duplikum_credentials", {"select": "*"})
+    _watcher_info["users"] = len(creds_rows)
+    # State von Usern, deren duplikum_credentials-Zeile gelöscht wurde (Duplikum im
+    # Frontend getrennt), aufräumen — sonst schleichender Leak über Monate Uptime.
+    known_uids = {c.get("user_id") for c in creds_rows}
+    for k in [k for k in _watcher_state if k[0] not in known_uids]:
+        _watcher_state.pop(k, None)
+    for k in [k for k in _watcher_pnl_tries if k[0] not in known_uids]:
+        _watcher_pnl_tries.pop(k, None)
+    for u in [u for u in _watcher_backoff if u not in known_uids]:
+        _watcher_backoff.pop(u, None)
+
+    failed = 0
+    for creds in creds_rows:
+        uid = creds.get("user_id")
+        if not uid:
+            continue
+        try:
+            wt_check_user(uid, creds)
+        except Exception as e:
+            failed += 1
+            print(f"[watcher] ⚠️ {(creds.get('email') or uid)[:24]}: {type(e).__name__}: {e}", flush=True)
+        time.sleep(WATCHER_USER_SPACING)
+    # Scheitern ALLE User (z.B. Supabase mitten im Zyklus weggebrochen), gilt der
+    # Zyklus als fehlgeschlagen → last_run bleibt stehen → fresh kippt → Browser
+    # übernimmt. Einzelne User-Fehler sind dagegen normal.
+    if creds_rows and failed == len(creds_rows):
+        raise RuntimeError(f"alle {failed} User fehlgeschlagen")
+
+
+def watcher_loop():
+    print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s)", flush=True)
+    while True:
+        started = time.time()
+        try:
+            watcher_cycle()
+            # WICHTIG (Review-Finding): last_run NUR nach erfolgreichem Zyklus stempeln.
+            # Stünde es hinter dem except, bliebe fresh=true, obwohl jeder Zyklus wirft
+            # (z.B. rotierter Service-Key) — alle Browser hätten ihre Erkennung
+            # abgeschaltet und NIEMAND würde Trades erkennen, komplett lautlos.
+            _watcher_info["last_run"] = time.time()
+            _watcher_info["last_error"] = ""
+        except Exception as e:
+            _watcher_info["last_error"] = f"{type(e).__name__}: {e}"
+            print(f"[watcher] ⚠️ Zyklus-Fehler: {e}", flush=True)
+        _watcher_info["runs"] += 1
+        time.sleep(max(3, WATCHER_INTERVAL - (time.time() - started)))
+
+
+def start_watcher():
+    global _watcher_thread_started
+    if _watcher_thread_started:
+        return
+    if WATCHER_DISABLED:
+        print("[watcher] ℹ️ WATCHER_DISABLED gesetzt — Server-Wächter aus.", flush=True)
+        return
+    if not SUPABASE_SERVICE_KEY:
+        print("[watcher] ℹ️ Kein SUPABASE_SERVICE_KEY — Server-Wächter inaktiv (Browser-Erkennung übernimmt).", flush=True)
+        return
+    _watcher_thread_started = True
+    _watcher_info["started"] = True
+    threading.Thread(target=watcher_loop, daemon=True).start()
+
+
+@app.route("/watcher/status", methods=["GET", "OPTIONS"])
+def watcher_status():
+    """Frontend-Gate: läuft der Server-Wächter, schaltet der Browser seine eigene
+    Erkennung ab (nur noch UI-Poll). Bewusst KEINE per-User-Daten im Response —
+    der Endpoint ist unauthentifiziert."""
+    if request.method == "OPTIONS":
+        return "", 200
+    fresh = _watcher_info["started"] and (time.time() - _watcher_info["last_run"]) < WATCHER_INTERVAL * 4
+    # Review-Finding: keine Nutzerzahl und keine rohen Fehlertexte nach außen
+    # (Endpoint ist offen + CORS *) — error nur als Flag, Details stehen im Railway-Log.
+    return jsonify({
+        "enabled": _watcher_info["started"],
+        "fresh": fresh,
+        "last_run": int(_watcher_info["last_run"]),
+        "interval": WATCHER_INTERVAL,
+        "error": bool(_watcher_info["last_error"]),
+        "build": APP_BUILD,
+    })
+
+
+start_watcher()
 
 # ── Duplikum Auto-Connect + proaktiver Refresh (überlebt Restarts) ──
 # Läuft auf Modul-Ebene, damit es auch unter Gunicorn (Production) startet.
