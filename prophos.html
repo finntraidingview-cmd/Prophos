@@ -78,6 +78,8 @@
   .at-toast::before{content:'';width:9px;height:9px;border-radius:50%;background:#fff;flex-shrink:0;animation:atDotPulse 1.5s ease-in-out infinite}
   .at-toast.start{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
   .at-toast.end{background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)}
+  /* Toast eines Hintergrund-Profils: anklickbar → wechselt direkt zu dem Profil */
+  .at-toast.mpw{pointer-events:auto;cursor:pointer}
   .at-prompt{
     position:fixed;bottom:28px;right:28px;z-index:9999;
     background:var(--surface);border:1px solid var(--border);border-radius:16px;
@@ -5403,12 +5405,20 @@
     if(!box) return
     const list = profList(), active = profActiveId()
     const others = list.filter(p => p.userId !== active)
-    box.innerHTML = others.length ? `<div class="ud-divider"></div>` + others.map(p => `
+    // Zähler = Pläne, die der Multi-Profil-Wächter im Hintergrund auf „Überprüfen"
+    // geschoben hat. window statt const, weil renderProfileMenu beim Boot laufen kann,
+    // bevor der Wächter-Abschnitt ausgewertet ist.
+    const reviewCounts = window.mpReviewCounts || {}
+    box.innerHTML = others.length ? `<div class="ud-divider"></div>` + others.map(p => {
+      const n = reviewCounts[p.userId] || 0
+      return `
       <button class="ud-item" data-prof-switch="${escapeHtml(p.userId)}" title="Zu ${escapeHtml(p.email)} wechseln">
         <span style="width:18px;height:18px;border-radius:50%;background:var(--violet);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${escapeHtml((p.email[0]||'U').toUpperCase())}</span>
         <span style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(p.name || p.email)}</span>
+        ${n ? `<span title="${n} Trade${n===1?'':'s'} warten auf Bestätigung" style="background:var(--violet);color:#fff;border-radius:9px;min-width:17px;height:17px;padding:0 5px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${n}</span>` : ''}
         <span data-prof-remove="${escapeHtml(p.userId)}" title="Aus der Liste entfernen" style="opacity:.45;font-size:15px;padding:0 2px;line-height:1">×</span>
-      </button>`).join('') : ''
+      </button>`
+    }).join('') : ''
     box.querySelectorAll('[data-prof-switch]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         if(e.target?.dataset?.profRemove){
@@ -8102,6 +8112,8 @@
       localStorage.setItem('prophos_autotrack', String(tog.checked))
       if(lbl) lbl.style.color = tog.checked ? 'var(--violet)' : 'var(--sub)'
       tog.checked ? atStart() : atStop()
+      // Der Wächter für die anderen Profile hängt am selben Schalter
+      if(typeof mpStart === 'function') tog.checked ? mpStart() : mpStop()
     })
   })
 
@@ -8315,7 +8327,13 @@
           const newBaseline = Math.max(prev.baselineCount, currentCount)
           autoTrack.state.set(plan.id, { ...prev, wasOpen: true, notified: false, baselineCount: newBaseline, closeStreak })
         } else {
-          autoTrack.state.set(plan.id, { ...prev, wasOpen: false, closeStreak })
+          // wasOpen bleibt STEHEN (Fix 04.08.2026). Vorher wurde es hier auf false
+          // gesetzt — damit hat sich der 2-Tick-Schutz selbst ausgehebelt: Tick 1
+          // (Position weg) landete in diesem Zweig und löschte wasOpen, Tick 2 fand
+          // dann `closeConfirmed && prev.wasOpen` = false und hat NIE ausgelöst.
+          // Genau deshalb blieben Trades in „Läuft" hängen. wasOpen heißt "wir haben
+          // diesen Plan mit offener Position gesehen" und darf nicht zurückfallen.
+          autoTrack.state.set(plan.id, { ...prev, closeStreak })
         }
       } else {
         autoTrack.state.set(plan.id, { wasOpen: hasOpenPosition, notified: prev.notified })
@@ -8349,6 +8367,394 @@
   // Starten sobald Duplikum verbunden
   document.addEventListener('DOMContentLoaded', () => {
     if(autoTrack.enabled) setTimeout(() => { if(dupState?.token) atStart() }, 2000)
+  })
+
+  /* ========================================================================
+   * MULTI-PROFIL-WÄCHTER — Trade-Ende auch für die NICHT aktiven Profile
+   *
+   * Problem (Finn 04.08.2026): atCheck oben arbeitet ausschließlich mit
+   * dupState.token und tradePlans des GERADE eingeloggten Profils. Endet ein
+   * Trade bei Moritz, während Finn aktiv ist, merkt das niemand — der Plan
+   * bleibt auf „Läuft", und der Auto-P&L wird erst beim Einloggen geholt. Bis
+   * dahin ist die passende Position oft schon aus dem getClosedPositions-
+   * Fenster gerutscht → leere oder falsche Zahlen.
+   *
+   * Lösung: für jedes hinzugefügte Profil läuft derselbe Check im Hintergrund
+   * mit dessen EIGENEN Zugängen — eigener Supabase-Client (gespeicherter
+   * Refresh-Token) und eigener Duplikum-Token (aus duplikum_credentials).
+   *
+   * ZWEI harte Regeln, damit das nichts kaputtmacht:
+   * 1. Geschrieben wird NUR in die Supabase-Zeilen des jeweiligen Profils.
+   *    Der localStorage gehört dem aktiven Profil — würde der Wächter dort
+   *    z.B. prophos_dup_links oder den Duplikum-Token setzen, hätte man sofort
+   *    wieder den Fehler „als Finn eingeloggt, Duplikum von Jakob verbunden".
+   *    Einzige erlaubte Ausnahme: prophos_psession_<uid> — der rotierte
+   *    Refresh-Token MUSS zurückgeschrieben werden, sonst wäre der
+   *    Schnellwechsel danach tot.
+   * 2. Nur EIN Tab fährt den Wächter (Leader-Election über localStorage).
+   *    Supabase-Refresh-Token sind Einmal-Token: zwei Tabs, die dasselbe
+   *    Hintergrund-Profil auffrischen, sperren sich gegenseitig aus.
+   * ====================================================================== */
+  const mpWatch = {
+    INTERVAL: 60_000,      // langsamer als das aktive Profil (20s) — reicht völlig
+    SPACING:  1500,        // Abstand zwischen zwei Profilen (Duplikum: max 2 Req/s)
+    timer:    null,
+    running:  false,
+    clients:  new Map(),   // userId → { sb, exp }
+    dupTok:   new Map(),   // userId → { uid, token, email, at }
+    state:    new Map(),   // `${userId}:${planId}` → { wasOpen, notified, baselineCount, closeStreak }
+    quiet:    new Set()    // Profile ohne gültige Sitzung → nur einmal warnen
+  }
+  // userId → Anzahl Pläne in „Überprüfen" (Zähler im Profil-Menü).
+  // Bewusst auf window statt im const-Objekt: renderProfileMenu läuft beim Boot
+  // evtl. bevor dieser Modul-Abschnitt ausgewertet ist (TDZ).
+  window.mpReviewCounts = {}
+
+  // Kein prophos_-Präfix → wird von _profAppKeys() NICHT in die Profil-Buckets gezogen
+  const MPW_LEADER_LS = 'prophos-mpw-leader'
+  const MPW_TAB_ID    = Math.random().toString(36).slice(2)
+
+  function mpIsLeader(){
+    let cur = null
+    try{ cur = JSON.parse(localStorage.getItem(MPW_LEADER_LS) || 'null') }catch(_){}
+    const stale = !cur || (Date.now() - (cur.ts || 0)) > mpWatch.INTERVAL * 2.5
+    if((cur && cur.id === MPW_TAB_ID) || stale){
+      localStorage.setItem(MPW_LEADER_LS, JSON.stringify({ id: MPW_TAB_ID, ts: Date.now() }))
+      return true
+    }
+    return false
+  }
+
+  // Anklickbarer Toast: springt direkt in das betroffene Profil
+  function mpToast(msg, type, userId){
+    const el = document.createElement('div')
+    el.className = `at-toast mpw ${type}`
+    el.textContent = msg
+    const stacked = document.querySelectorAll('.at-toast').length
+    el.style.bottom = (28 + stacked * 62) + 'px'
+    el.title = 'Klicken, um zu diesem Profil zu wechseln'
+    el.addEventListener('click', () => { el.remove(); profSwitchTo(userId) })
+    document.body.appendChild(el)
+    setTimeout(() => el.remove(), 12_000)
+  }
+
+  /* Supabase-Client für ein Hintergrund-Profil. persistSession:false +
+   * eigener storageKey → fasst die Sitzung des aktiven Profils nicht an. */
+  async function mpClient(uid){
+    const hit = mpWatch.clients.get(uid)
+    if(hit && hit.exp - Date.now() > 120_000) return hit.sb
+    let sess = null
+    try{ sess = JSON.parse(localStorage.getItem(PROF_SESSION + uid) || 'null') }catch(_){}
+    if(!sess?.refresh_token) return null
+    const sb = hit?.sb || createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'mpw-' + uid }
+    })
+    try{
+      const { data, error } = await sb.auth.setSession(sess)
+      if(error || !data?.session) throw error || new Error('keine Sitzung')
+      const s = data.session
+      if(s.refresh_token && s.refresh_token !== sess.refresh_token){
+        localStorage.setItem(PROF_SESSION + uid, JSON.stringify({
+          access_token: s.access_token, refresh_token: s.refresh_token
+        }))
+      }
+      mpWatch.clients.set(uid, { sb, exp: s.expires_at ? s.expires_at * 1000 : Date.now() + 3.6e6 })
+      mpWatch.quiet.delete(uid)
+      return sb
+    }catch(e){
+      mpWatch.clients.delete(uid)
+      if(!mpWatch.quiet.has(uid)){
+        mpWatch.quiet.add(uid)
+        console.warn(`[mpw] ${uid}: Sitzung abgelaufen — Profil einmal manuell öffnen.`)
+      }
+      return null
+    }
+  }
+
+  /* Duplikum-Token des Profils. Token < 40h alt → direkt nutzen, sonst mit den
+   * hinterlegten Zugangsdaten neu verbinden. duplikum_sessions im Backend ist
+   * nach E-Mail gekeyt, mehrere Profile stören sich also nicht. */
+  async function mpDupToken(uid, sb){
+    const hit = mpWatch.dupTok.get(uid)
+    if(hit && (Date.now() - hit.at) < 30 * 60_000) return hit
+    let creds = null
+    try{
+      const { data, error } = await sb.from('duplikum_credentials')
+        .select('*').eq('user_id', uid).maybeSingle()
+      if(error) throw error
+      creds = data
+    }catch(_){ return null }
+    if(!creds?.email) return null
+    const ageH = creds.token_at ? (Date.now() - new Date(creds.token_at).getTime()) / 36e5 : Infinity
+    if(creds.token && ageH < 40){
+      const v = { uid, token: creds.token, email: creds.email, at: Date.now() }
+      mpWatch.dupTok.set(uid, v)
+      return v
+    }
+    if(!creds.password) return null
+    try{
+      const r = await fetch(`${TS_BACKEND}/duplikum/connect`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: creds.email, password: creds.password })
+      })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok || !d.token) throw new Error(d.error || `HTTP ${r.status}`)
+      await sb.from('duplikum_credentials')
+        .update({ token: d.token, token_at: new Date().toISOString() }).eq('user_id', uid)
+      const v = { uid, token: d.token, email: creds.email, at: Date.now() }
+      mpWatch.dupTok.set(uid, v)
+      console.log(`[mpw] Duplikum verbunden (${creds.email})`)
+      return v
+    }catch(e){
+      console.warn(`[mpw] Duplikum-Connect fehlgeschlagen (${creds.email}):`, e.message || e)
+      return null
+    }
+  }
+
+  async function mpDupApi(dup, path, body){
+    const r = await fetch(`${TS_BACKEND}/duplikum/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'dup-token': dup.token, 'dup-user': dup.email },
+      body: JSON.stringify(body || {})
+    })
+    const newTok = r.headers.get('X-New-Dup-Token')
+    if(newTok) dup.token = newTok
+    if(r.status === 401){
+      mpWatch.dupTok.delete(dup.uid)   // beim nächsten Tick frisch verbinden
+      return { ok: false, status: 401, data: null }
+    }
+    const text = await r.text()
+    try { return { ok: r.ok, status: r.status, data: JSON.parse(text) } }
+    catch { return { ok: r.ok, status: r.status, data: text } }
+  }
+
+  // dup_links liegt in user_settings (Cloud-Sync) → funktioniert auch, wenn das
+  // Profil auf DIESEM Rechner noch nie offen war und kein Bucket existiert.
+  function mpLinkResolver(links){
+    return (accId) => {
+      for(const [dupId, mappedId] of Object.entries(links)){
+        if(String(mappedId) === String(accId)) return dupId
+      }
+      return null
+    }
+  }
+
+  async function mpAutoPnl(dup, plan, links){
+    const dupIdOf     = mpLinkResolver(links)
+    const dupSlaveId  = dupIdOf(plan.slaveAccountId)
+    const dupMasterId = dupIdOf(plan.masterAccountId)
+    if(!dupSlaveId) return null
+    const res  = await mpDupApi(dup, 'position/getClosedPositions.php', { length: 1000 })
+    const list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : []
+    if(!list.length) return null
+    const ct = t => new Date(String(t || '').replace(' ', 'T')).getTime() || 0
+    const cands = list.filter(p =>
+      String(p.account_id) === String(dupSlaveId) &&
+      (!dupMasterId || String(p.master_id) === String(dupMasterId))
+    )
+    if(!cands.length) return null
+    cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
+    const slavePos = cands[0]
+    const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
+    let masterPnl = null
+    if(slavePos.masterTicket != null){
+      const mt = String(slavePos.masterTicket)
+      const masterPos = list.find(p => String(p.account_id) === String(dupMasterId) && String(p.ticket) === mt)
+                     || list.find(p => String(p.ticket) === mt && String(p.account_id) !== String(dupSlaveId))
+      if(masterPos && masterPos.profitCcy != null && masterPos.profitCcy !== '') masterPnl = Number(masterPos.profitCcy)
+    }
+    return { slavePnl, masterPnl }
+  }
+
+  async function mpFinishPlan(prof, sb, dup, plan, links){
+    let moved = false
+    try{
+      // .eq('status','open')-Guard wie in atMoveToReview: hat das Profil selbst
+      // gerade manuell abgeschlossen, darf es nicht auf 'review' zurückfallen.
+      const { data, error } = await sb.from('trade_plans')
+        .update({ status: 'review' })
+        .eq('id', plan.id).eq('status', 'open').select('*').single()
+      if(error) throw error
+      moved = !!data
+    }catch(e){
+      console.warn(`[mpw] ${prof.name}: Status→review fehlgeschlagen:`, e.message || e)
+    }
+    if(!moved) return false
+    // Auto-P&L SOFORT holen — genau dafür gibt es den Wächter. Später ist die
+    // geschlossene Position häufig nicht mehr in getClosedPositions enthalten.
+    {
+      // Duplikum erlaubt nur 2 Requests/Sekunde und meldet die Überschreitung als
+      // HTTP 200 ohne Daten — kurz warten, sonst käme hier eine leere Liste zurück
+      // und der P&L bliebe leer (Ursache des Mapping-Bugs vom 30.07.2026).
+      await new Promise(r => setTimeout(r, 1200))
+      try{
+        const res = await mpAutoPnl(dup, plan, links)
+        if(res && (res.slavePnl != null || res.masterPnl != null)){
+          const upd = {}
+          if(res.masterPnl != null && plan.masterPl == null) upd.master_pl = Number(res.masterPnl.toFixed(2))
+          if(res.slavePnl  != null && plan.slavePl  == null) upd.slave_pl  = Number(res.slavePnl.toFixed(2))
+          if(Object.keys(upd).length){
+            await sb.from('trade_plans').update(upd)
+              .eq('id', plan.id).eq('status', 'review')
+          }
+        }
+      }catch(e){ console.warn(`[mpw] ${prof.name}: Auto-P&L:`, e.message || e) }
+    }
+    mpToast(`🔴 ${prof.name}: Trade beendet — ${plan.masterName || '—'} → ${plan.slaveName || '—'}`, 'end', prof.userId)
+    return true
+  }
+
+  async function mpCheckProfile(prof){
+    const uid = prof.userId
+    const sb  = await mpClient(uid);        if(!sb)  return
+    const dup = await mpDupToken(uid, sb);  if(!dup) return
+
+    let plans = [], accById = new Map(), links = {}
+    try{
+      const [pRes, aRes, lRes] = await Promise.all([
+        sb.from('trade_plans').select('*').in('status', ['planned','open']),
+        sb.from('accounts').select('id,topstep_account_id,meta_api_account_id'),
+        sb.from('user_settings').select('value').eq('user_id', uid).eq('key', 'dup_links').maybeSingle()
+      ])
+      if(pRes.error) throw pRes.error
+      plans   = (pRes.data || []).map(rowToPlan).filter(Boolean)
+      accById = new Map((aRes.data || []).map(a => [String(a.id), a]))
+      let lv  = lRes.data?.value
+      if(typeof lv === 'string'){ try{ lv = JSON.parse(lv) }catch(_){ lv = null } }
+      links   = (lv && typeof lv === 'object') ? lv : {}
+    }catch(e){
+      console.warn(`[mpw] ${prof.name}: Daten laden fehlgeschlagen:`, e.message || e)
+      return
+    }
+
+    // Zähler fürs Profil-Menü immer aktualisieren, auch ohne offene Pläne
+    try{
+      const { count } = await sb.from('trade_plans')
+        .select('id', { count: 'exact', head: true }).eq('status', 'review')
+      const before = window.mpReviewCounts[uid]
+      window.mpReviewCounts[uid] = count || 0
+      if(before !== window.mpReviewCounts[uid]) renderProfileMenu()
+    }catch(_){}
+
+    if(!plans.length || !Object.keys(links).length) return
+
+    const dupIdOf = mpLinkResolver(links)
+    // Mirror-Pläne (TopstepX-Master → MetaApi-Slave) gehören dem Mirror-Poller,
+    // nicht Duplikum — der Count-Fallback würde sie fälschlich als beendet melden.
+    const isMirror = (p) => {
+      const m = accById.get(String(p.masterAccountId))
+      const s = accById.get(String(p.slaveAccountId))
+      return !!(m?.topstep_account_id && s?.meta_api_account_id)
+    }
+
+    let positions = []
+    try{
+      const res = await mpDupApi(dup, 'position/getOpenPositions.php', { length: 1000 })
+      if(!res.ok) return
+      positions = res.data?.data || []
+    }catch(e){ return }
+
+    for(const plan of plans){
+      if(isMirror(plan)) continue
+      const dupSlaveId  = dupIdOf(plan.slaveAccountId)
+      const dupMasterId = dupIdOf(plan.masterAccountId)
+      if(!dupSlaveId) continue
+
+      const slavePositions  = positions.filter(p => String(p.account_id) === String(dupSlaveId))
+      const currentCount    = slavePositions.length
+      const hasOpenPosition = currentCount > 0
+      // Master-Fingerabdruck wie in atCheck — sonst springt bei mehreren Plänen
+      // auf demselben Slave der falsche Plan an.
+      const masterPositionOk = (() => {
+        if(!dupMasterId) return false
+        if(positions.some(p => String(p.account_id) === String(dupMasterId))) return true
+        return slavePositions.some(p =>
+          String(p.id_master || p.master_id || p.masterId || '') === String(dupMasterId)
+        )
+      })()
+
+      const key  = `${uid}:${plan.id}`
+      const prev = mpWatch.state.get(key) || { wasOpen: false, notified: false, baselineCount: null, closeStreak: 0 }
+
+      if(plan.status === 'planned'){
+        if(prev.baselineCount === null){
+          mpWatch.state.set(key, { ...prev, wasOpen: hasOpenPosition, baselineCount: currentCount })
+          continue
+        }
+        if(currentCount <= prev.baselineCount || !masterPositionOk){
+          mpWatch.state.set(key, { ...prev, wasOpen: hasOpenPosition })
+          continue
+        }
+        mpWatch.state.set(key, { wasOpen: true, notified: false, baselineCount: currentCount, closeStreak: 0 })
+        try{
+          await sb.from('trade_plans')
+            .update({ status: 'open', started_at: new Date().toISOString() })
+            .eq('id', plan.id).eq('status', 'planned')
+          mpToast(`▶ ${prof.name}: Trade gestartet — ${plan.masterName || '—'} → ${plan.slaveName || '—'}`, 'start', uid)
+        }catch(e){ console.warn(`[mpw] ${prof.name}: Start:`, e.message || e) }
+        continue
+      }
+
+      // status === 'open'
+      if(prev.baselineCount === null){
+        mpWatch.state.set(key, { wasOpen: hasOpenPosition, notified: false, baselineCount: currentCount, closeStreak: 0 })
+        continue
+      }
+      const tradeClosed = dupMasterId ? !masterPositionOk : currentCount < prev.baselineCount
+      // 2× in Folge, wie beim aktiven Profil: ein einzelner leerer/rate-limitierter
+      // getOpenPositions-Call darf nicht alle offenen Trades als beendet melden.
+      const closeStreak = tradeClosed ? (prev.closeStreak || 0) + 1 : 0
+
+      if(closeStreak >= 2 && prev.wasOpen && !prev.notified){
+        // notified erst setzen, wenn der Status wirklich auf 'review' stand — sonst
+        // wäre ein einmaliger Netzwerk-/DB-Fehler endgültig und der Plan bliebe für
+        // immer auf „Läuft" hängen. So probiert es der nächste Tick erneut.
+        const ok = await mpFinishPlan(prof, sb, dup, plan, links)
+        mpWatch.state.set(key, { ...prev, wasOpen: true, notified: ok, closeStreak })
+      } else if(hasOpenPosition){
+        mpWatch.state.set(key, { ...prev, wasOpen: true, notified: false,
+          baselineCount: Math.max(prev.baselineCount, currentCount), closeStreak })
+      } else {
+        // wasOpen bleibt stehen — siehe Fix in atCheck: würde es hier zurückfallen,
+        // käme der 2-Tick-Schutz nie zum Auslösen.
+        mpWatch.state.set(key, { ...prev, closeStreak })
+      }
+    }
+  }
+
+  async function mpTick(){
+    if(!autoTrack.enabled) return
+    if(mpWatch.running)    return
+    if(!mpIsLeader())      return
+    // Aktives Profil ausschließen — das bedient atCheck. currentUserId zusätzlich,
+    // falls PROF_ACTIVE mal nicht gesetzt ist (sonst liefen beide Engines auf
+    // denselben Plänen).
+    const active = profActiveId()
+    const others = profList().filter(p =>
+      p.userId && p.userId !== active && p.userId !== currentUserId)
+    if(!others.length) return
+    mpWatch.running = true
+    try{
+      for(const prof of others){
+        try{ await mpCheckProfile(prof) }
+        catch(e){ console.warn(`[mpw] ${prof.name || prof.userId}:`, e.message || e) }
+        await new Promise(r => setTimeout(r, mpWatch.SPACING))
+      }
+    } finally { mpWatch.running = false }
+  }
+
+  function mpStart(){
+    if(mpWatch.timer) return
+    setTimeout(() => mpTick().catch(() => {}), 6000)   // erst das aktive Profil, dann die anderen
+    mpWatch.timer = setInterval(() => mpTick().catch(() => {}), mpWatch.INTERVAL)
+  }
+  function mpStop(){
+    if(mpWatch.timer){ clearInterval(mpWatch.timer); mpWatch.timer = null }
+  }
+  window.mpTick = mpTick   // manuell testbar: await mpTick()
+
+  document.addEventListener('DOMContentLoaded', () => {
+    if(autoTrack.enabled) mpStart()
   })
 
   /* ========================================================================
