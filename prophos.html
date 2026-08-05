@@ -13819,10 +13819,31 @@
   // Account bearbeitet hat (External ID nachtragen). Wird vom Account-Save konsumiert,
   // von closeAccountModal (Abbruch) verworfen.
   let _pfResumePlanId = null
-  // Letztes Check-Ergebnis pro Plan (nur In-Memory, kein Supabase-Feld) — steuert den
-  // "Ready to start" / "Prüfung fehlgeschlagen"-Badge in der Geplant-Liste (Finns Wunsch
-  // 16.07.2026: nach dem Check soll die Liste selbst zeigen, ob der Trade startklar ist).
-  const _pfCheckStatus = {}
+  // Letztes Check-Ergebnis pro Plan — steuert den "Ready to start" / "Prüfung
+  // fehlgeschlagen"-Badge in der Geplant-Liste (Finns Wunsch 16.07.2026).
+  // Seit 05.08.2026 im localStorage statt nur im RAM: jeder Profil-Wechsel macht ein
+  // location.reload(), das den Badge sonst löschte (Finns Bug-Report). Der Key hat das
+  // prophos_-Präfix → wandert beim Profil-Wechsel automatisch mit ins richtige Bucket.
+  const _PF_STATUS_LS = 'prophos_pf_status'
+  const _pfCheckStatus = (() => {
+    try{ return JSON.parse(localStorage.getItem(_PF_STATUS_LS) || '{}') || {} }
+    catch(_){ return {} }
+  })()
+  function _pfStatusSave(){
+    try{
+      // Aufräumen: nur Einträge behalten, deren Plan noch existiert und noch 'planned'
+      // ist (nach Start/Abschluss ist der Badge bedeutungslos) — sonst wächst der Key ewig.
+      let plans = null
+      try{ plans = tradePlans }catch(_){ plans = null }
+      if(Array.isArray(plans) && plans.length){
+        const planned = new Set(plans.filter(p => p.status === 'planned').map(p => String(p.id)))
+        for(const k of Object.keys(_pfCheckStatus)){
+          if(!planned.has(k)) delete _pfCheckStatus[k]
+        }
+      }
+      localStorage.setItem(_PF_STATUS_LS, JSON.stringify(_pfCheckStatus))
+    }catch(_){}
+  }
 
   function _pfAddRow(id, label){
     const rows = document.getElementById('pf-rows')
@@ -14023,6 +14044,7 @@
 
     const allOk = !hardFail && !softWait
     _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
+    _pfStatusSave()
     try { renderTradePlans() } catch(_){}
     _pfFinish(allOk, hardFail
       ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
@@ -14109,6 +14131,7 @@
 
     await _pfSleep(350)
     _pfCheckStatus[String(plan.id)] = { state: !hardFail ? 'ready' : 'issue', at: Date.now() }
+    _pfStatusSave()
     try { renderTradePlans() } catch(_){}
     _pfFinish(!hardFail, hardFail ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.' : null)
   }
