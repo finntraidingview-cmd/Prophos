@@ -5139,7 +5139,12 @@
 
 <!-- ========== SCRIPT ========== -->
 <script type="module">
-  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+  // GEPINNT auf jsdelivr statt esm.sh/@2 (05.08.2026): esm.sh hat morgens die frisch
+  // gebaute 2.112.1 ausgeliefert, deren Sub-Imports im Browser nicht luden — die ganze
+  // App hing dadurch für ALLE im Boot-Spinner (Modul startet nie, kein Konsolen-Fehler).
+  // Floating "@2" heißt: jedes neue Upstream-Release kann die App sofort brechen.
+  // Deshalb feste Version + jsdelivr (liefert ein einzelnes Bundle, live verifiziert).
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.1/+esm'
 
   const SUPABASE_URL      = 'https://gxhkannmzpyuepxlepta.supabase.co'
   const SUPABASE_ANON_KEY = 'sb_publishable__LWDlDHJbNIr6X7kRwfqqg_tZcjwaDS'
