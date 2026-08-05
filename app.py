@@ -2,6 +2,7 @@ import requests
 import urllib3
 import threading
 import calendar
+import concurrent.futures
 import json
 import hashlib
 import hmac
@@ -37,7 +38,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-04.1"
+APP_BUILD = "2026-08-05.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1654,15 +1655,38 @@ def debug_account():
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "https://gxhkannmzpyuepxlepta.supabase.co").rstrip("/")
 SUPABASE_SERVICE_KEY = (os.environ.get("SUPABASE_SERVICE_KEY")
                         or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
-WATCHER_INTERVAL = max(10, int(os.environ.get("WATCHER_INTERVAL") or "15"))
-WATCHER_USER_SPACING = 1.2   # Sekunden zwischen zwei Usern (Duplikum: 2 Req/s)
+# 4s-Takt (05.08.2026, Finns Ansage: "muss so schnell wie möglich"): pro Duplikum-
+# KONTO ist das 1 Poll alle 4s = 0,25 Req/s — weit unter dem 2-Req/s-Limit. Die User
+# laufen parallel (eigene Konten = eigene Limits), nicht mehr nacheinander.
+WATCHER_INTERVAL = max(3, int(os.environ.get("WATCHER_INTERVAL") or "4"))
 WATCHER_DISABLED = bool(os.environ.get("WATCHER_DISABLED"))
 
-_watcher_state = {}       # (uid, plan_id) -> {was_open, notified, baseline, streak, base_tickets, tickets, recovered}
+_watcher_state = {}       # (uid, plan_id) -> {was_open, notified, baseline, streak, base_tickets, tickets}
 _watcher_pnl_tries = {}   # (uid, plan_id) -> Anzahl P&L-Nachversuche
-_watcher_backoff = {}     # uid -> {"until": epoch, "fails": n} — Login-Backoff bei kaputten Zugangsdaten
-_watcher_info = {"started": False, "last_run": 0, "runs": 0, "users": 0, "last_error": ""}
+_watcher_backoff = {}     # EMAIL -> {"until": epoch, "fails": n} — Login-Backoff (pro Duplikum-Konto)
+_watcher_meta = {}        # uid -> {"links":..., "accs":..., "at": epoch} — 60s-Cache für dup_links/accounts
+_watcher_tokens = {}      # EMAIL -> {"token":..., "at": epoch} — EIN Token pro Duplikum-Konto,
+                          # egal wie viele Prophos-Profile es teilen (Finn hat 2 Profile
+                          # auf derselben Duplikum-E-Mail — vorher wurde doppelt gepollt
+                          # und doppelt eingeloggt)
+_watcher_seen = {}        # EMAIL -> set(ticket) des letzten Ticks — für die Uhr-Kalibrierung
+_watcher_info = {"started": False, "last_run": 0, "runs": 0, "users": 0, "last_error": "", "cycle_ms": 0}
 _watcher_thread_started = False
+_watcher_memo_lock = threading.Lock()
+_watcher_email_locks = {}   # email -> Lock (Single-Flight: teilen sich zwei Profile
+                            # eine E-Mail, holt nur EIN Thread die Positionen)
+
+
+def _wt_email_lock(email):
+    with _watcher_memo_lock:
+        lk = _watcher_email_locks.get(email)
+        if lk is None:
+            # RLock: wt_email_token lockt selbst und wird auch aus bereits
+            # gelocktem Kontext (_wt_memo_positions_locked) gerufen — ein
+            # normales Lock wäre dort ein Deadlock.
+            lk = threading.RLock()
+            _watcher_email_locks[email] = lk
+        return lk
 # Duplikums Zeitstempel (openTime/closeTime) kommen OHNE Zeitzone. Der Offset zur
 # echten UTC wird zur Laufzeit kalibriert: wenn der Wächter einen Trade-START erkennt,
 # ist die neue Position höchstens ~2 Ticks alt → parse(openTime) − jetzt ≈ Offset.
@@ -1790,17 +1814,27 @@ def wt_dup_positions(token, path):
     return None
 
 
-def wt_get_token(uid, creds, force=False):
-    """Duplikum-Token für ein Profil. Nutzt den in duplikum_credentials
-    gespeicherten Token solange er < 40h alt ist, sonst frischer Login mit den
-    hinterlegten Zugangsdaten (Token wird zurückgeschrieben, damit auch das
-    Frontend ihn übernehmen kann).
-    Login-Backoff (Review-Finding): sind die Zugangsdaten kaputt (Passwort
-    geändert), wird NICHT alle 15s neu versucht — exponentiell 5min→1h, sonst
-    hämmern wir ~5760 Fehl-Logins/Tag gegen trade-copier.com."""
-    email = (creds.get("email") or "").strip()
+def wt_email_token(creds, force=False):
+    """EIN Duplikum-Token pro Konto (E-Mail), egal wie viele Prophos-Profile es
+    teilen. Reihenfolge: In-Memory-Cache (<30min) → DB-Token (<40h) → Login.
+
+    Zwei Review-Findings (05.08.2026) sind hier eingebaut:
+    - Der frische Token wird NUR in die EIGENE Zeile (user_id) zurückgeschrieben.
+      Ein email=eq.-Writeback wäre ein Token-Leck: jeder, der eine Zeile mit
+      fremder E-Mail (und falschem Passwort) anlegt, bekäme den echten Token des
+      fremden Kontos in seine per RLS lesbare Zeile gestellt.
+    - Der Backoff ist pro (E-Mail, Passwort-Hash): eine verwaiste Zeile mit
+      altem Passwort darf das Konto nicht für die Zeile mit dem RICHTIGEN
+      Passwort sperren.
+    Login + Backoff laufen unter dem E-Mail-RLock — parallele 401s zweier
+    Profile derselben E-Mail führen so zu EINEM Login, der zweite Thread nimmt
+    den gerade frisch geholten Cache-Token."""
+    email = (creds.get("email") or "").strip().lower()
     if not email:
         return None
+    hit = _watcher_tokens.get(email)
+    if not force and hit and (time.time() - hit["at"]) < 30 * 60:
+        return hit["token"]
     if not force:
         tok, tok_at = creds.get("token"), creds.get("token_at")
         if tok and tok_at:
@@ -1810,25 +1844,114 @@ def wt_get_token(uid, creds, force=False):
             except Exception:
                 age_h = 9999
             if age_h < 40:
+                _watcher_tokens[email] = {"token": tok, "at": time.time()}
                 return tok
-    bo = _watcher_backoff.get(uid)
-    if bo and time.time() < bo["until"]:
-        return None
-    token = dup_login(email, creds.get("password") or "")
-    if token:
-        _watcher_backoff.pop(uid, None)
+    with _wt_email_lock(email):
+        # Hat ein paralleler Thread GERADE eben frisch eingeloggt (z.B. beide
+        # Profile kassieren gleichzeitig 401)? → dessen Token nehmen.
+        hit = _watcher_tokens.get(email)
+        if hit and (time.time() - hit["at"]) < 10:
+            return hit["token"]
+        pw = creds.get("password") or ""
+        bo_key = email + "|" + hashlib.md5(pw.encode()).hexdigest()[:10]
+        bo = _watcher_backoff.get(bo_key)
+        if bo and time.time() < bo["until"]:
+            return None
+        token = dup_login(email, pw)
+        if token:
+            _watcher_backoff.pop(bo_key, None)
+            _watcher_tokens[email] = {"token": token, "at": time.time()}
+            uid = creds.get("user_id")
+            if uid:
+                try:
+                    sb_update("duplikum_credentials", {"user_id": f"eq.{uid}"},
+                              {"token": token, "token_at": _wt_now_iso()})
+                except Exception:
+                    pass
+            print(f"[watcher] 🔑 Neuer Duplikum-Token für {email}", flush=True)
+        else:
+            fails = (bo["fails"] + 1) if bo else 1
+            wait = min(3600, 300 * (2 ** (fails - 1)))
+            _watcher_backoff[bo_key] = {"until": time.time() + wait, "fails": fails}
+            print(f"[watcher] ⚠️ Login fehlgeschlagen für {email} — Backoff {wait//60}min (Versuch {fails})", flush=True)
+        return token
+
+
+def wt_memo_positions(creds, memo):
+    """Offene Positionen EINMAL pro Duplikum-Konto und Zyklus — alle Profile
+    derselben E-Mail teilen sich das Ergebnis (halbiert die Duplikum-Last bei
+    geteilten Konten). Thread-sicher über _watcher_memo_lock, inkl. 401-Refresh
+    und EINEM Sofort-Retry bei Fehlerantwort (Rate-Limit-als-200) — vorher ging
+    dadurch der komplette Tick verloren und die Erkennung wurde spürbar träger.
+    Rückgabe (token, positions|None)."""
+    email = (creds.get("email") or "").strip().lower()
+    with _watcher_memo_lock:
+        if email in memo:
+            return memo[email]
+    lock = _wt_email_lock(email)
+    with lock:
+        return _wt_memo_positions_locked(email, creds, memo)
+
+
+def _wt_memo_positions_locked(email, creds, memo):
+    # Re-Check unter dem E-Mail-Lock: ein paralleles Profil derselben E-Mail hat
+    # das Ergebnis evtl. gerade eben schon geholt (Single-Flight).
+    with _watcher_memo_lock:
+        if email in memo:
+            return memo[email]
+    token = wt_email_token(creds)
+    if not token:
+        with _watcher_memo_lock:
+            memo[email] = (None, None)
+        return None, None
+    positions = None
+    for attempt in range(2):
+        res = wt_dup_positions(token, "position/getOpenPositions.php")
+        if res == "401":
+            token = wt_email_token(creds, force=True)
+            if not token:
+                break
+            continue
+        if isinstance(res, list):
+            positions = res
+            break
+        time.sleep(0.7)   # Fehlerantwort → kurz warten, einmal sofort nachfassen
+    # Uhr-Kalibrierung: Tickets, die es im LETZTEN Tick noch nicht gab, sind
+    # höchstens Sekunden alt → openTime − jetzt ≈ Duplikums Uhr-Offset zu UTC.
+    # Drei Gates gegen Vergiftung (Review-Findings 05.08.2026):
+    # 1. Der Vergleichs-Snapshot muss FRISCH sein (≤ 3 Ticks) — nach einer Poll-
+    #    Pause (nachts keine Pläne) ist "neu" bedeutungslos, ein 10h altes Ticket
+    #    hätte den globalen Offset sonst um -10h verschoben.
+    # 2. Erst-Kalibrierung nur gegen einen NICHT-leeren Snapshot — eine einzelne
+    #    Leer-Antwort (07.07.-Klasse) lässt sonst alle Alt-Tickets "neu" aussehen.
+    # 3. Ist die Uhr schon kalibriert, werden neue Werte nur bei < 10min Abweichung
+    #    übernommen (der echte Offset ist eine Konstante — alles andere ist Müll).
+    if isinstance(positions, list):
         try:
-            sb_update("duplikum_credentials", {"user_id": f"eq.{uid}"},
-                      {"token": token, "token_at": _wt_now_iso()})
+            cur = {str(p.get("ticket")) for p in positions if p.get("ticket") is not None}
+            prev = _watcher_seen.get(email)
+            fresh_prev = prev is not None and (time.time() - prev["at"]) <= WATCHER_INTERVAL * 3
+            if fresh_prev and (prev["tickets"] or _dup_clock["offset"] is not None):
+                for p in positions:
+                    t = str(p.get("ticket"))
+                    if p.get("ticket") is None or t in prev["tickets"]:
+                        continue
+                    ot = _wt_parse_ts(p.get("openTime"))
+                    if ot is None:
+                        continue
+                    off = ot - time.time()
+                    if abs(off) >= 26 * 3600:
+                        continue
+                    cur_off = _dup_clock["offset"]
+                    if cur_off is None or abs(off - cur_off) < 600:
+                        _dup_clock["offset"] = off
+                    break
+            _watcher_seen[email] = {"tickets": cur, "at": time.time()}
         except Exception:
             pass
-        print(f"[watcher] 🔑 Neuer Duplikum-Token für {email}", flush=True)
-    else:
-        fails = (bo["fails"] + 1) if bo else 1
-        wait = min(3600, 300 * (2 ** (fails - 1)))
-        _watcher_backoff[uid] = {"until": time.time() + wait, "fails": fails}
-        print(f"[watcher] ⚠️ Login fehlgeschlagen für {email} — Backoff {wait//60}min (Versuch {fails})", flush=True)
-    return token
+    with _watcher_memo_lock:
+        memo[email] = (token, positions)
+    return token, positions
 
 
 def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None):
@@ -1937,7 +2060,7 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
         # Guard hat gegriffen — jemand hat den Plan manuell abgeschlossen. Erledigt.
         return True
     print(f"[watcher] 🔴 {label}: Trade beendet → Überprüfen ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
-    time.sleep(1.2)   # Duplikum-Rate-Limit: 2 Req/s
+    time.sleep(1.0)   # Duplikum-Rate-Limit: 2 Req/s pro Konto
     try:
         st, pnl = wt_fetch_pnl(token, dup_slave, dup_master, started_epoch, tickets)
         if st == "ok" and pnl:
@@ -1953,7 +2076,7 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
     return True
 
 
-def wt_check_user(uid, creds):
+def wt_check_user(uid, creds, memo):
     label = (creds.get("email") or uid)[:24]
     plans = sb_select("trade_plans", {
         "select": "*",
@@ -1964,29 +2087,52 @@ def wt_check_user(uid, creds):
     review_missing = [p for p in plans if p.get("status") == "review"
                       and (p.get("master_pl") is None or p.get("slave_pl") is None)]
 
-    # State-Hygiene: Einträge zu Plänen, die nicht mehr aktiv/review sind, entsorgen
+    # State-Hygiene: Einträge zu Plänen, die nicht mehr aktiv/review sind, entsorgen.
+    # list()-Snapshot vor der Iteration (Review-Finding): parallele Threads fügen
+    # gleichzeitig Keys ein — Iteration über das lebende Dict wirft dann
+    # "dictionary changed size during iteration".
     live_ids = {str(p["id"]) for p in plans}
-    for k in [k for k in _watcher_state if k[0] == uid and k[1] not in live_ids]:
+    for k in [k for k in list(_watcher_state) if k[0] == uid and k[1] not in live_ids]:
         _watcher_state.pop(k, None)
-    for k in [k for k in _watcher_pnl_tries if k[0] == uid and k[1] not in live_ids]:
+    for k in [k for k in list(_watcher_pnl_tries) if k[0] == uid and k[1] not in live_ids]:
         _watcher_pnl_tries.pop(k, None)
 
     if not active and not review_missing:
         return
 
-    # Verknüpfungen (dup_links) + Accounts (Mirror-Ausschluss)
-    us = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.dup_links"})
-    links = us[0].get("value") if us else None
-    if isinstance(links, str):
-        try:
-            links = json.loads(links)
-        except Exception:
-            links = None
-    if not isinstance(links, dict) or not links:
+    # Verknüpfungen (dup_links) + Accounts (Mirror-Ausschluss) — 60s-Cache: ändern
+    # sich selten, und im 4s-Takt wären das sonst 2 unnötige Supabase-Queries pro
+    # User und Tick.
+    def _load_meta():
+        us = sb_select("user_settings", {"select": "value", "user_id": f"eq.{uid}", "key": "eq.dup_links"})
+        lv = us[0].get("value") if us else None
+        if isinstance(lv, str):
+            try:
+                lv = json.loads(lv)
+            except Exception:
+                lv = None
+        accs = sb_select("accounts", {"select": "id,topstep_account_id,meta_api_account_id",
+                                      "user_id": f"eq.{uid}"})
+        m = {"links": lv if isinstance(lv, dict) else None,
+             "accs": {str(a["id"]): a for a in accs}, "at": time.time()}
+        _watcher_meta[uid] = m
+        return m
+
+    meta = _watcher_meta.get(uid)
+    if not meta or (time.time() - meta["at"]) > 60:
+        meta = _load_meta()
+    # Frisch verknüpft? Hängt ein aktiver Plan an einem Slave ohne Link, kann der
+    # Cache schuld sein → einmal sofort neu laden statt bis zu 60s blind zu sein.
+    def _slave_unlinked(m):
+        lv = m["links"] or {}
+        mapped = {str(v) for v in lv.values()}
+        return any(str(p.get("slave_account_id")) not in mapped for p in active)
+    if active and (time.time() - meta["at"]) > 5 and _slave_unlinked(meta):
+        meta = _load_meta()
+    links = meta["links"]
+    if not links:
         return
-    accs = sb_select("accounts", {"select": "id,topstep_account_id,meta_api_account_id",
-                                  "user_id": f"eq.{uid}"})
-    acc_by_id = {str(a["id"]): a for a in accs}
+    acc_by_id = meta["accs"]
 
     def dup_id_of(acc_id):
         for dup_id, mapped in links.items():
@@ -1999,7 +2145,9 @@ def wt_check_user(uid, creds):
         s = acc_by_id.get(str(p.get("slave_account_id")))
         return bool(m and s and m.get("topstep_account_id") and s.get("meta_api_account_id"))
 
-    token = wt_get_token(uid, creds)
+    # EIN Token + EIN Positions-Fetch pro Duplikum-Konto und Zyklus (memo) —
+    # Profile mit derselben E-Mail teilen sich beides.
+    token, positions = wt_memo_positions(creds, memo)
     if not token:
         return
 
@@ -2025,12 +2173,12 @@ def wt_check_user(uid, creds):
         tries = _watcher_pnl_tries.get(key, 0)
         if tries >= 10:
             continue
-        time.sleep(1.2)
+        time.sleep(1.0)
         try:
             st, pnl = wt_fetch_pnl(token, d_slave, dup_id_of(plan.get("master_account_id")),
                                    se, (_watcher_state.get(key) or {}).get("tickets"))
             if st == "401":
-                token = wt_get_token(uid, creds, force=True)
+                token = wt_email_token(creds, force=True)
                 if not token:
                     return
                 continue   # Versuch zählt nicht — nächste Runde mit frischem Token
@@ -2050,22 +2198,17 @@ def wt_check_user(uid, creds):
     if not dup_active:
         return
 
-    positions = wt_dup_positions(token, "position/getOpenPositions.php")
-    if positions == "401":
-        token = wt_get_token(uid, creds, force=True)
-        if not token:
-            return
-        positions = wt_dup_positions(token, "position/getOpenPositions.php")
     if not isinstance(positions, list):
-        return   # fehlerhafte Antwort → Tick überspringen, Streaks bleiben stehen
+        return   # fehlerhafte Antwort trotz Retry → Tick überspringen, Streaks bleiben stehen
 
-    # Wie viele GEPLANTE Pläne teilen sich dasselbe Master→Slave-Paar? (Für die
-    # Restart-Erkennung unten: nur bei eindeutigem Paar darf sofort gestartet werden.)
-    planned_pairs = {}
+    # Wie viele AKTIVE Pläne (planned UND open — Review-Finding: ein offener Plan
+    # auf demselben Paar macht die Ticket-Zuordnung mehrdeutig) teilen sich dasselbe
+    # Master→Slave-Paar? Nur bei eindeutigem Paar darf sofort/nachträglich gestartet
+    # werden.
+    pair_counts = {}
     for p in dup_active:
-        if p.get("status") == "planned":
-            pk = (str(p.get("master_account_id")), str(p.get("slave_account_id")))
-            planned_pairs[pk] = planned_pairs.get(pk, 0) + 1
+        pk = (str(p.get("master_account_id")), str(p.get("slave_account_id")))
+        pair_counts[pk] = pair_counts.get(pk, 0) + 1
 
     for plan in dup_active:
         d_slave = dup_id_of(plan.get("slave_account_id"))
@@ -2098,7 +2241,7 @@ def wt_check_user(uid, creds):
                 # Baseline inklusive der Position zu setzen (das würde den Start für
                 # immer verschlucken — der Plan bliebe ewig auf 'Geplant').
                 pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
-                if copied_tickets and planned_pairs.get(pk, 0) == 1:
+                if copied_tickets and pair_counts.get(pk, 0) == 1:
                     try:
                         rows = sb_update("trade_plans",
                                          {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
@@ -2117,6 +2260,37 @@ def wt_check_user(uid, creds):
                                        "base_tickets": all_tickets}
                 continue
             if count <= prev["baseline"] or not master_ok:
+                # Verpasster Start nachfangen (05.08.2026): Enthielt die Baseline die
+                # Position schon (Plan NACH der Ausführung angelegt, Prozess-Restart),
+                # steigt count nie über die Baseline — der Plan bliebe ewig auf Geplant.
+                # NUR auf id_master-gestempelten Kopien DIESES Masters (Review-Finding:
+                # jede beliebige Slave-Position wäre Beweis-Recycling — eine manuelle
+                # Position oder die Kopie eines ANDEREN Masters hätte den Plan gestartet
+                # und beim Close dessen fremden P&L geerbt), die NACH der Plan-Anlage
+                # geöffnet wurde (kalibrierte Duplikum-Uhr), auf eindeutigem Paar.
+                if copied_tickets and _dup_clock["offset"] is not None:
+                    pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
+                    ca = _wt_parse_ts(plan.get("created_at"))
+                    if ca and pair_counts.get(pk, 0) == 1:
+                        off = _dup_clock["offset"]
+                        open_time_of = {str(p.get("ticket")): _wt_parse_ts(p.get("openTime"))
+                                        for p in slave_pos if p.get("ticket") is not None}
+                        fresh = [t for t in copied_tickets
+                                 if open_time_of.get(t) is not None
+                                 and open_time_of[t] - off >= ca - 5]
+                        if fresh:
+                            try:
+                                rows = sb_update("trade_plans",
+                                                 {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
+                                                 {"status": "open", "started_at": _wt_now_iso()})
+                            except Exception as e:
+                                print(f"[watcher] ⚠️ {label}: Nachfang-Start: {e}", flush=True)
+                                continue
+                            _watcher_state[key] = {"was_open": True, "notified": False, "baseline": count,
+                                                   "streak": 0, "tickets": fresh}
+                            if rows:
+                                print(f"[watcher] ▶ {label}: Trade nachgefangen (Position jünger als Plan, Tickets {fresh})", flush=True)
+                            continue
                 _watcher_state[key] = {**prev, "was_open": has_open}
                 continue
             # Start erkannt. Review-Finding: ERST der DB-Write, DANN die Baseline anheben —
@@ -2149,29 +2323,38 @@ def wt_check_user(uid, creds):
             continue
         closed = (not master_ok) if d_master else (count < prev["baseline"])
         streak = (prev.get("streak") or 0) + 1 if closed else 0
-        if streak >= 2 and prev["was_open"] and not prev["notified"]:
+        # ZEIT-basierte Close-Bestätigung (Review-Finding): der 07.07.-Schutz war bei
+        # 15s-Takt implizit ein ~30s-Zeitfenster. Bei 4s-Takt wären 2 Ticks nur noch
+        # ~8s — eine kurze Duplikum-Störung würde wieder Fehlalarme produzieren.
+        # Deshalb: mindestens 2 Messungen IN FOLGE **und** ≥ 12s seit der ersten.
+        closed_since = (prev.get("closed_since") or time.time()) if closed else None
+        close_confirmed = (closed and streak >= 2 and closed_since is not None
+                           and (time.time() - closed_since) >= 12)
+        if close_confirmed and prev["was_open"] and not prev["notified"]:
             ok = wt_finish_plan(uid, token, plan, d_slave, d_master, label,
                                 started_epoch_of(plan), prev.get("tickets"))
-            _watcher_state[key] = {**prev, "was_open": True, "notified": ok, "streak": streak}
+            _watcher_state[key] = {**prev, "was_open": True, "notified": ok,
+                                   "streak": streak, "closed_since": closed_since}
         elif has_open:
             _watcher_state[key] = {**prev, "was_open": True, "notified": False,
                                    "baseline": max(prev["baseline"], count), "streak": streak,
+                                   "closed_since": closed_since,
                                    "tickets": copied_tickets or prev.get("tickets") or all_tickets}
         else:
             # was_open bleibt stehen — sonst hebelt sich der 2-Tick-Schutz selbst aus
             # (derselbe Bug steckte bis 04.08.2026 im Frontend-atCheck).
-            st_new = {**prev, "streak": streak}
+            st_new = {**prev, "streak": streak, "closed_since": closed_since}
             # Downtime-Recovery für offene Pläne: endete der Trade, während der Wächter
             # down war (State weg), wird was_open nie wieder true und der Plan hinge
             # für immer auf 'Läuft'. Bedingungen: keine Slave-Position, kein Master-
-            # Fingerabdruck, Plan läuft seit >5min — dann mit EIGENEM 2-Tick-Schutz
-            # (recovery_streak) nach review verschieben; P&L-Versuch inklusive.
+            # Fingerabdruck, Plan läuft seit >5min — dann mit EIGENEM Mehrfach-Schutz
+            # (recovery_streak ≥ 3 ≈ 12s bei 4s-Takt) nach review verschieben.
             if not prev["was_open"] and not prev["notified"] and not master_ok:
                 se = started_epoch_of(plan)
                 if se and (time.time() - se) > 300:
                     rs = (prev.get("recovery_streak") or 0) + 1
                     st_new["recovery_streak"] = rs
-                    if rs >= 2:
+                    if rs >= 3:
                         ok = wt_finish_plan(uid, token, plan, d_slave, d_master, label,
                                             se, prev.get("tickets"))
                         st_new["notified"] = ok
@@ -2186,33 +2369,48 @@ def watcher_cycle():
     # State von Usern, deren duplikum_credentials-Zeile gelöscht wurde (Duplikum im
     # Frontend getrennt), aufräumen — sonst schleichender Leak über Monate Uptime.
     known_uids = {c.get("user_id") for c in creds_rows}
+    known_emails = {(c.get("email") or "").strip().lower() for c in creds_rows}
     for k in [k for k in _watcher_state if k[0] not in known_uids]:
         _watcher_state.pop(k, None)
     for k in [k for k in _watcher_pnl_tries if k[0] not in known_uids]:
         _watcher_pnl_tries.pop(k, None)
-    for u in [u for u in _watcher_backoff if u not in known_uids]:
-        _watcher_backoff.pop(u, None)
+    for u in [u for u in _watcher_meta if u not in known_uids]:
+        _watcher_meta.pop(u, None)
+    for e in [e for e in list(_watcher_backoff) if e.split("|")[0] not in known_emails]:
+        _watcher_backoff.pop(e, None)
+    for e in [e for e in _watcher_tokens if e not in known_emails]:
+        _watcher_tokens.pop(e, None)
+    for e in [e for e in _watcher_seen if e not in known_emails]:
+        _watcher_seen.pop(e, None)
+    with _watcher_memo_lock:
+        for e in [e for e in _watcher_email_locks if e not in known_emails]:
+            _watcher_email_locks.pop(e, None)
 
+    # ALLE User PARALLEL (05.08.2026): jedes Duplikum-Konto hat sein eigenes
+    # 2-Req/s-Limit — das alte Nacheinander mit 1,2s Abstand hat die Erkennung
+    # nur künstlich verlangsamt. memo teilt Token + Positions-Fetch pro Konto.
+    memo = {}
     failed = 0
-    for creds in creds_rows:
-        uid = creds.get("user_id")
-        if not uid:
-            continue
-        try:
-            wt_check_user(uid, creds)
-        except Exception as e:
-            failed += 1
-            print(f"[watcher] ⚠️ {(creds.get('email') or uid)[:24]}: {type(e).__name__}: {e}", flush=True)
-        time.sleep(WATCHER_USER_SPACING)
+    rows = [c for c in creds_rows if c.get("user_id")]
+    if rows:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(rows))) as pool:
+            futs = {pool.submit(wt_check_user, c["user_id"], c, memo): c for c in rows}
+            for f in concurrent.futures.as_completed(futs):
+                c = futs[f]
+                try:
+                    f.result()
+                except Exception as e:
+                    failed += 1
+                    print(f"[watcher] ⚠️ {(c.get('email') or c.get('user_id'))[:24]}: {type(e).__name__}: {e}", flush=True)
     # Scheitern ALLE User (z.B. Supabase mitten im Zyklus weggebrochen), gilt der
     # Zyklus als fehlgeschlagen → last_run bleibt stehen → fresh kippt → Browser
     # übernimmt. Einzelne User-Fehler sind dagegen normal.
-    if creds_rows and failed == len(creds_rows):
+    if rows and failed == len(rows):
         raise RuntimeError(f"alle {failed} User fehlgeschlagen")
 
 
 def watcher_loop():
-    print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s)", flush=True)
+    print(f"[watcher] 🚀 Server-Wächter läuft (Intervall {WATCHER_INTERVAL}s, parallel)", flush=True)
     while True:
         started = time.time()
         try:
@@ -2226,8 +2424,9 @@ def watcher_loop():
         except Exception as e:
             _watcher_info["last_error"] = f"{type(e).__name__}: {e}"
             print(f"[watcher] ⚠️ Zyklus-Fehler: {e}", flush=True)
+        _watcher_info["cycle_ms"] = int((time.time() - started) * 1000)
         _watcher_info["runs"] += 1
-        time.sleep(max(3, WATCHER_INTERVAL - (time.time() - started)))
+        time.sleep(max(1.0, WATCHER_INTERVAL - (time.time() - started)))
 
 
 def start_watcher():
@@ -2252,7 +2451,10 @@ def watcher_status():
     der Endpoint ist unauthentifiziert."""
     if request.method == "OPTIONS":
         return "", 200
-    fresh = _watcher_info["started"] and (time.time() - _watcher_info["last_run"]) < WATCHER_INTERVAL * 4
+    # 45s-Mindestfenster: ein einzelner langsamer Zyklus (P&L-Nachversuche schlafen
+    # je 1s) darf fresh nicht kurz kippen lassen — Flapping würde die Browser-Engines
+    # unnötig an- und wieder abschalten.
+    fresh = _watcher_info["started"] and (time.time() - _watcher_info["last_run"]) < max(45, WATCHER_INTERVAL * 4)
     # Review-Finding: keine Nutzerzahl und keine rohen Fehlertexte nach außen
     # (Endpoint ist offen + CORS *) — error nur als Flag, Details stehen im Railway-Log.
     return jsonify({
@@ -2260,6 +2462,7 @@ def watcher_status():
         "fresh": fresh,
         "last_run": int(_watcher_info["last_run"]),
         "interval": WATCHER_INTERVAL,
+        "cycle_ms": _watcher_info["cycle_ms"],
         "error": bool(_watcher_info["last_error"]),
         "build": APP_BUILD,
     })

@@ -8125,8 +8125,10 @@
   window.serverWatch = serverWatch   // DevTools-Debugging
 
   /* UI-Poll bei aktivem Server-Wächter: holt die Pläne des aktiven Profils und
-   * macht die serverseitigen Übergänge sichtbar (Toast + Überprüfen-Popup). */
-  const planPoll = { INTERVAL: 15_000, inFlight: false }
+   * macht die serverseitigen Übergänge sichtbar (Toast + Überprüfen-Popup).
+   * 5s statt 15s (05.08.2026): der Server erkennt jetzt im 4s-Takt — die UI soll
+   * das nicht wieder verschlucken. Nur eigener User, nur sichtbarer Tab → billig. */
+  const planPoll = { INTERVAL: 5_000, inFlight: false }
   async function planPollTick(){
     if(!serverWatch.active || planPoll.inFlight) return
     if(typeof document !== 'undefined' && document.hidden) return
