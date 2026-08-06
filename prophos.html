@@ -15396,6 +15396,11 @@
     const dupSlaveId  = (typeof atGetDupId === 'function') ? atGetDupId(plan.slaveAccountId)  : null
     const dupMasterId = (typeof atGetDupId === 'function') ? atGetDupId(plan.masterAccountId) : null
     if(!dupSlaveId) return null
+    // Ohne verknüpften Master KEIN Rateversuch (Fix 06.08.2026): der Filter unten
+    // fiele sonst auf "irgendeine Position dieses Slaves" zurück — bei geteiltem
+    // Live-Slave landet dann der P&L eines FREMDEN Masters im Plan. Genau das war
+    // Finns "die P&Ls werden zwischen Accounts vertauscht".
+    if(!dupMasterId) return null
     let list = []
     try {
       const res = await dupApi('POST', 'position/getClosedPositions.php', { length: 1000 })
@@ -15403,15 +15408,32 @@
     } catch(e){ console.warn('[AutoPnL] getClosedPositions:', e); return null }
     if(!list.length) return null
     const ct = t => new Date(String(t||'').replace(' ', 'T')).getTime() || 0
-    // Slave-Kandidaten: dieser Slave + (falls Master verlinkt) genau dieser Master
+    // Slave-Kandidaten: dieser Slave + genau dieser Master
     let cands = list.filter(p =>
       String(p.account_id) === String(dupSlaveId) &&
-      (!dupMasterId || String(p.master_id) === String(dupMasterId))
+      String(p.master_id) === String(dupMasterId)
     )
     if(!cands.length) return null
-    // Neueste geschlossene Position (die gerade geschlossene) für dieses Slave+Master-Paar
     cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
-    const slavePos = cands[0]
+    // Mehrere Pläne auf DEMSELBEN Master→Slave-Paar warten auf ihren P&L?
+    // Dann darf nicht jeder die neueste Position nehmen (Finns "zwei Trades
+    // kriegen die gleichen P&Ls"). Zuordnung über die Reihenfolge: der
+    // n-t-jüngste offene Plan bekommt den n-t-jüngsten Close. Bewusst ohne
+    // Zeitvergleich — Duplikums closeTime hat eine unbekannte Zeitzone.
+    let idx = 0
+    try {
+      const waiting = (tradePlans || []).filter(p =>
+        String(p.masterAccountId) === String(plan.masterAccountId) &&
+        String(p.slaveAccountId)  === String(plan.slaveAccountId)  &&
+        (p.status === 'open' || p.status === 'review') &&
+        p.slavePl == null)
+      if(waiting.length > 1){
+        waiting.sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0))
+        const i = waiting.findIndex(p => String(p.id) === String(plan.id))
+        if(i > 0) idx = i
+      }
+    } catch(_){}
+    const slavePos = cands[idx] || null
     if(!slavePos) return null
     const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
     const slaveCcy = slavePos.ccy || ''
