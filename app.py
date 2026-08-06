@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-06.2"
+APP_BUILD = "2026-08-06.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2243,8 +2243,10 @@ def wt_write_pnl(uid, plan, pnl):
 
 
 def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch=None, tickets=None,
-                   email=None, accounts=None):
-    """open → review + sofortiger P&L-Fetch. True = Plan ist versorgt."""
+                   email=None, accounts=None, pnl_ready=None):
+    """open → review + sofortiger P&L-Fetch. True = Plan ist versorgt.
+    pnl_ready: bereits ermittelter P&L (Sofort-Bestätigung per Ticket-Treffer) —
+    dann entfällt die zweite Abfrage komplett."""
     try:
         rows = sb_update("trade_plans",
                          {"id": f"eq.{plan['id']}", "status": "eq.open", "user_id": f"eq.{uid}"},
@@ -2256,6 +2258,14 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
         # Guard hat gegriffen — jemand hat den Plan manuell abgeschlossen. Erledigt.
         return True
     print(f"[watcher] 🔴 {label}: Trade beendet → Überprüfen ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+    if pnl_ready:
+        try:
+            wt_write_pnl(uid, plan, pnl_ready)
+            print(f"[watcher] 💰 {label}: Auto-P&L persistiert (master={pnl_ready.get('master')}, slave={pnl_ready.get('slave')})", flush=True)
+        except Exception as e:
+            print(f"[watcher] ⚠️ {label}: P&L-Write: {e}", flush=True)
+            _watcher_pnl_tries[(uid, str(plan["id"]))] = 0
+        return True
     time.sleep(1.0)   # Duplikum liefert die geschlossene Position leicht verzögert
     try:
         st, pnl = wt_fetch_pnl(token, dup_slave, dup_master, started_epoch, tickets, email, accounts)
@@ -2541,9 +2551,28 @@ def wt_check_user(uid, creds, memo):
         closed_since = (prev.get("closed_since") or time.time()) if closed else None
         close_confirmed = (closed and streak >= 2 and closed_since is not None
                            and (time.time() - closed_since) >= 12)
+        # ── Sofort-Bestätigung per POSITIVEM Beweis (06.08.2026) ──
+        # Der 2-Messungen-Schutz existiert gegen ABWESENHEIT als Beweis: eine kurz
+        # gestörte Duplikum-Antwort darf nicht wie "Position weg" wirken (07.07.).
+        # Findet sich aber eine GESCHLOSSENE Position mit exakt dem gemerkten
+        # Master-Ticket, ist das positiver Beweis — da gibt es nichts zu bestätigen.
+        # Spart bei ~14s Poll-Abstand eine komplette Runde (Ende ~28s → ~14s) und
+        # liefert den P&L in derselben Abfrage mit.
+        pnl_now = None
+        if closed and not close_confirmed and not prev["notified"] and prev["was_open"] \
+           and prev.get("tickets"):
+            try:
+                st_q, pnl_q = wt_fetch_pnl(token, d_slave, d_master, started_epoch_of(plan),
+                                           prev.get("tickets"), dup_email, n_acc)
+                if st_q == "ok" and pnl_q:
+                    close_confirmed, pnl_now = True, pnl_q
+                    print(f"[watcher] ⚡ {label}: Close per Ticket-Treffer sofort bestätigt", flush=True)
+            except Exception:
+                pass
         if close_confirmed and prev["was_open"] and not prev["notified"]:
             ok = wt_finish_plan(uid, token, plan, d_slave, d_master, label,
-                                started_epoch_of(plan), prev.get("tickets"), dup_email, n_acc)
+                                started_epoch_of(plan), prev.get("tickets"), dup_email, n_acc,
+                                pnl_now)
             _watcher_state[key] = {**prev, "was_open": True, "notified": ok,
                                    "streak": streak, "closed_since": closed_since}
         elif has_open:
