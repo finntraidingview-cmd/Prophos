@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-06.1"
+APP_BUILD = "2026-08-06.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2174,9 +2174,16 @@ def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None,
         return "none", None
 
     sp = None
+    # `tickets` sind die beim Start beobachteten MASTER-Tickets. Die Slave-Kopie
+    # trägt genau diese Nummer in ihrem Feld `masterTicket` (live verifiziert
+    # 06.08.2026: Slave 205666039 ↔ masterTicket 258231486 = Ticket der Master-
+    # Position). Damit ist die Zuordnung exakt — ohne Zeitfenster, ohne Raten.
+    # `ticket` wird zusätzlich geprüft, falls der Fallback-Pfad (Master nicht
+    # verknüpft) Slave-Tickets gemerkt hat.
     ticket_set = {str(t) for t in (tickets or []) if t is not None}
     if ticket_set:
-        hits = [p for p in cands if str(p.get("ticket")) in ticket_set]
+        hits = [p for p in cands
+                if str(p.get("masterTicket")) in ticket_set or str(p.get("ticket")) in ticket_set]
         if hits:
             hits.sort(key=lambda p: str(p.get("closeTime") or ""), reverse=True)
             sp = hits[0]
@@ -2408,68 +2415,54 @@ def wt_check_user(uid, creds, memo):
             continue
         slave_pos = [p for p in positions if str(p.get("account_id")) == str(d_slave)]
         count = len(slave_pos)
-        has_open = count > 0
-        if d_master:
-            master_ok = any(str(p.get("account_id")) == str(d_master) for p in positions) or \
-                any(str(p.get("id_master") or p.get("master_id") or p.get("masterId") or "") == str(d_master)
-                    for p in slave_pos)
-        else:
-            master_ok = False
-        # Slave-Positionen, die nachweislich Kopien DIESES Masters sind (id_master-Stempel)
-        copied_tickets = [str(p.get("ticket")) for p in slave_pos
-                          if p.get("ticket") is not None and d_master
-                          and str(p.get("id_master") or p.get("master_id") or p.get("masterId") or "") == str(d_master)]
+        # ── Master-eigene Position ist das EINZIG verlässliche Per-Trade-Signal ──
+        # Live verifiziert am 06.08.2026: Duplikum stempelt auf OFFENEN Slave-Kopien
+        # NICHT den auslösenden Master (master_id == account_id == Slave). Erst bei
+        # GESCHLOSSENEN Positionen steht der echte Master drin. Auf Finns Setup —
+        # ein gemeinsamer Fusion-Live-Slave für ALLE Master, dazu dauerhaft offene
+        # Alt-Positionen darauf — ist die Slave-Positionszahl damit als Signal
+        # wertlos: sie ist immer > 0 und ändert sich durch fremde Master.
+        # Deshalb: bei verknüpftem Master zählt ausschließlich dessen EIGENE offene
+        # Position (Duplikum meldet die zuverlässig, auch für Tradovate-Master).
+        master_pos = [p for p in positions if str(p.get("account_id")) == str(d_master)] if d_master else []
+        master_ok = bool(master_pos)
+        # Tickets des Master-Trades — über masterTicket lässt sich die Slave-Kopie
+        # später in den geschlossenen Positionen exakt wiederfinden.
+        master_tickets = [str(p.get("ticket")) for p in master_pos if p.get("ticket") is not None]
         all_tickets = [str(p.get("ticket")) for p in slave_pos if p.get("ticket") is not None]
+        # has_open/was_open ebenfalls auf den Master beziehen, sobald er verknüpft
+        # ist. Vorher hingen sie an der Slave-Zahl — bei dauerhaft offenen Alt-
+        # Positionen war was_open sofort true, und zusammen mit "closed = kein
+        # Master-Fingerabdruck" hätte ein manuell auf 'Läuft' gesetzter Plan nach
+        # ~12s fälschlich 'beendet' gemeldet.
+        has_open = master_ok if d_master else (count > 0)
 
         key = (uid, str(plan["id"]))
         prev = _watcher_state.get(key) or {"was_open": False, "notified": False, "baseline": None, "streak": 0}
 
         if plan["status"] == "planned":
-            if prev["baseline"] is None:
-                # Restart-Recovery: läuft die Kopie dieses Masters BEREITS (id_master-
-                # Stempel) und ist dies der einzige geplante Plan auf dem Paar, ist der
-                # Start während einer Downtime passiert → sofort starten, statt die
-                # Baseline inklusive der Position zu setzen (das würde den Start für
-                # immer verschlucken — der Plan bliebe ewig auf 'Geplant').
-                pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
-                if copied_tickets and pair_counts.get(pk, 0) == 1:
-                    try:
-                        rows = sb_update("trade_plans",
-                                         {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
-                                         {"status": "open", "started_at": _wt_now_iso()})
-                    except Exception as e:
-                        print(f"[watcher] ⚠️ {label}: Recovery-Start: {e}", flush=True)
-                        continue   # State NICHT setzen → nächster Tick versucht erneut
-                    _watcher_state[key] = {"was_open": True, "notified": False, "baseline": count,
-                                           "streak": 0, "tickets": copied_tickets}
-                    if rows:
-                        print(f"[watcher] ▶ {label}: Trade lief schon (Recovery-Start, Tickets {copied_tickets})", flush=True)
-                    continue
-                if master_ok and has_open:
-                    print(f"[watcher] ℹ️ {label}: Plan {plan['id']} geplant, aber Paar hat schon Aktivität — Baseline übernimmt (ggf. Start während Downtime verpasst)", flush=True)
-                _watcher_state[key] = {**prev, "was_open": has_open, "baseline": count,
-                                       "base_tickets": all_tickets}
-                continue
-            if count <= prev["baseline"] or not master_ok:
-                # Verpasster Start nachfangen (05.08.2026): Enthielt die Baseline die
-                # Position schon (Plan NACH der Ausführung angelegt, Prozess-Restart),
-                # steigt count nie über die Baseline — der Plan bliebe ewig auf Geplant.
-                # NUR auf id_master-gestempelten Kopien DIESES Masters (Review-Finding:
-                # jede beliebige Slave-Position wäre Beweis-Recycling — eine manuelle
-                # Position oder die Kopie eines ANDEREN Masters hätte den Plan gestartet
-                # und beim Close dessen fremden P&L geerbt), die NACH der Plan-Anlage
-                # geöffnet wurde (kalibrierte Duplikum-Uhr), auf eindeutigem Paar.
-                if copied_tickets and _dup_clock["offset"] is not None:
-                    pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
-                    ca = _wt_parse_ts(plan.get("created_at"))
-                    if ca and pair_counts.get(pk, 0) == 1:
+            if d_master:
+                # ── Verknüpfter Master: Start = seine Position taucht auf ──
+                # Kein Slave-Zählwerk mehr (siehe Kommentar oben: auf dem geteilten
+                # Live-Slave ist die Zahl durch fremde Master und Alt-Positionen
+                # verrauscht). Ein Plan startet, wenn der Master eine offene
+                # Position hat, die er beim ersten Blick noch NICHT hatte —
+                # sonst würde ein Alt-Trade desselben Masters den Plan sofort
+                # fälschlich starten.
+                if prev["baseline"] is None:
+                    if master_ok:
+                        # Master handelt schon beim ersten Blick. Nur wenn die
+                        # Position NACH der Plan-Anlage geöffnet wurde, gehört sie
+                        # zu diesem Plan (Downtime/Deploy verpasst den Übergang
+                        # sonst dauerhaft) — sonst nur als Baseline merken.
+                        ca = _wt_parse_ts(plan.get("created_at"))
                         off = _dup_clock["offset"]
-                        open_time_of = {str(p.get("ticket")): _wt_parse_ts(p.get("openTime"))
-                                        for p in slave_pos if p.get("ticket") is not None}
-                        fresh = [t for t in copied_tickets
-                                 if open_time_of.get(t) is not None
-                                 and open_time_of[t] - off >= ca - 5]
-                        if fresh:
+                        fresh = []
+                        if ca is not None and off is not None:
+                            fresh = [str(p.get("ticket")) for p in master_pos
+                                     if (_wt_parse_ts(p.get("openTime")) or -1e12) - off >= ca - 5]
+                        pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
+                        if fresh and pair_counts.get(pk, 0) == 1:
                             try:
                                 rows = sb_update("trade_plans",
                                                  {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
@@ -2477,19 +2470,47 @@ def wt_check_user(uid, creds, memo):
                             except Exception as e:
                                 print(f"[watcher] ⚠️ {label}: Nachfang-Start: {e}", flush=True)
                                 continue
-                            _watcher_state[key] = {"was_open": True, "notified": False, "baseline": count,
-                                                   "streak": 0, "tickets": fresh}
+                            _watcher_state[key] = {"was_open": True, "notified": False, "baseline": 1,
+                                                   "streak": 0, "tickets": master_tickets}
                             if rows:
-                                print(f"[watcher] ▶ {label}: Trade nachgefangen (Position jünger als Plan, Tickets {fresh})", flush=True)
+                                print(f"[watcher] ▶ {label}: Trade nachgefangen (Master-Position jünger als Plan)", flush=True)
                             continue
+                        print(f"[watcher] ℹ️ {label}: Plan {plan['id']} geplant, Master handelt aber bereits — warte auf die NÄCHSTE Position", flush=True)
+                    _watcher_state[key] = {**prev, "was_open": False, "baseline": 1 if master_ok else 0,
+                                           "base_tickets": master_tickets}
+                    continue
+                # Master hatte vorher keine Position und hat jetzt eine → Start.
+                base_set = set(prev.get("base_tickets") or [])
+                new_master = [t for t in master_tickets if t not in base_set]
+                if not master_ok or not new_master:
+                    _watcher_state[key] = {**prev, "was_open": False,
+                                           "baseline": 1 if master_ok else 0,
+                                           "base_tickets": master_tickets if not master_ok else prev.get("base_tickets")}
+                    continue
+                try:
+                    rows = sb_update("trade_plans",
+                                     {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
+                                     {"status": "open", "started_at": _wt_now_iso()})
+                except Exception as e:
+                    print(f"[watcher] ⚠️ {label}: Start-Update: {e} — nächster Tick versucht erneut", flush=True)
+                    continue
+                _wt_calibrate_clock(master_pos, new_master)
+                _watcher_state[key] = {"was_open": True, "notified": False, "baseline": 1,
+                                       "streak": 0, "tickets": new_master}
+                if rows:
+                    print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+                continue
+
+            # ── Master NICHT verknüpft: alter Slave-Zählwerk-Fallback ──
+            if prev["baseline"] is None:
+                _watcher_state[key] = {**prev, "was_open": has_open, "baseline": count,
+                                       "base_tickets": all_tickets}
+                continue
+            if count <= prev["baseline"]:
                 _watcher_state[key] = {**prev, "was_open": has_open}
                 continue
-            # Start erkannt. Review-Finding: ERST der DB-Write, DANN die Baseline anheben —
-            # sonst verliert ein einziger transienter Supabase-Fehler den Übergang dauerhaft
-            # (Baseline wäre schon oben, count > baseline würde nie wieder wahr).
             base_set = set(prev.get("base_tickets") or [])
-            new_tickets = [t for t in all_tickets if t not in base_set]
-            trade_tickets = copied_tickets or new_tickets
+            trade_tickets = [t for t in all_tickets if t not in base_set]
             try:
                 rows = sb_update("trade_plans",
                                  {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
@@ -2506,11 +2527,10 @@ def wt_check_user(uid, creds, memo):
 
         # status == 'open'
         if prev["baseline"] is None:
-            # Ticket-Zuordnung beim (Re-)Init eines offenen Plans: bevorzugt die
-            # id_master-gestempelten Kopien, sonst alle aktuellen Slave-Positionen
-            # (Obermenge — der master_id-Filter beim Closed-Fetch engt weiter ein).
-            _watcher_state[key] = {"was_open": has_open, "notified": False, "baseline": count,
-                                   "streak": 0, "tickets": copied_tickets or all_tickets}
+            _watcher_state[key] = {"was_open": has_open, "notified": False,
+                                   "baseline": (1 if master_ok else 0) if d_master else count,
+                                   "streak": 0,
+                                   "tickets": master_tickets if d_master else all_tickets}
             continue
         closed = (not master_ok) if d_master else (count < prev["baseline"])
         streak = (prev.get("streak") or 0) + 1 if closed else 0
@@ -2528,9 +2548,10 @@ def wt_check_user(uid, creds, memo):
                                    "streak": streak, "closed_since": closed_since}
         elif has_open:
             _watcher_state[key] = {**prev, "was_open": True, "notified": False,
-                                   "baseline": max(prev["baseline"], count), "streak": streak,
-                                   "closed_since": closed_since,
-                                   "tickets": copied_tickets or prev.get("tickets") or all_tickets}
+                                   "baseline": prev["baseline"] if d_master else max(prev["baseline"], count),
+                                   "streak": streak, "closed_since": closed_since,
+                                   "tickets": (master_tickets or prev.get("tickets")) if d_master
+                                              else (prev.get("tickets") or all_tickets)}
         else:
             # was_open bleibt stehen — sonst hebelt sich der 2-Tick-Schutz selbst aus
             # (derselbe Bug steckte bis 04.08.2026 im Frontend-atCheck).
