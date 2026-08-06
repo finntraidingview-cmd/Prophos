@@ -1789,17 +1789,26 @@ def wt_account_count(email, token):
     hit = _dup_acct_count.get(e)
     if hit and (time.time() - hit["at"]) < 3600:
         return hit["n"]
-    n = 10   # konservativer Default bis zur ersten Antwort
+    # Bewusst KLEINER Default (Review-Finding): mit einem zu großen Wert wäre das
+    # Budget zu großzügig und wir liefen dauerhaft in Duplikums echtes Limit —
+    # genau der Zustand, der heute die Erkennung lahmgelegt hat. Lieber zu langsam
+    # als blind. Und ein fehlgeschlagener Abruf wird NICHT eine Stunde gecacht.
+    n, ok = 3, False
     try:
         r = requests.post(f"{DUP_BASE}/account/getAccounts.php", data={"length": "1000"},
                           headers={"Authorization": f"Bearer {token}"}, timeout=15)
         d = r.json() if r.status_code == 200 else {}
         if isinstance(d, dict) and isinstance(d.get("data"), list):
-            n = max(1, len(d["data"]))
+            n, ok = max(1, len(d["data"])), True
     except Exception:
         pass
-    _dup_acct_count[e] = {"n": n, "at": time.time()}
-    return n
+    if ok:
+        _dup_acct_count[e] = {"n": n, "at": time.time()}
+    else:
+        # Kurz zwischenspeichern, damit nicht jeder Tick erneut anfragt, aber bald
+        # wieder versuchen (statt eine Stunde mit dem Default zu rechnen).
+        _dup_acct_count[e] = {"n": (hit or {}).get("n", n), "at": time.time() - 3300}
+    return _dup_acct_count[e]["n"]
 
 
 def _wt_email_lock(email):
@@ -1962,13 +1971,22 @@ def wt_dup_positions(token, path, email=None, accounts=None):
     if isinstance(d, dict):
         if isinstance(d.get("data"), list):
             return d["data"]
+        # Token-Ablauf ZUERST prüfen, unabhängig vom error-Feld: käme ein Body nur
+        # mit code 1006 (ohne error-Text), würde er sonst unten als "legitim leer"
+        # gelesen — also als "keine offenen Positionen" und damit als Trade-Ende
+        # für ALLE laufenden Pläne. Genau die 07.07.-Fehlalarm-Klasse.
+        if _dup_is_expired_token(d.get("error"), d.get("code")):
+            return "401"
         if d.get("error"):
-            if _dup_is_expired_token(d.get("error"), d.get("code")):
-                return "401"
             # Rate-Limit ("You reached the request limit (574/300 per hour)") u.ä.
             # kommen ebenfalls als HTTP 200 mit error-Body.
             if email and "request limit" in str(d.get("error")).lower():
                 _dup_budget_penalize(email, path, str(d.get("error")))
+            return None
+        # Sicherheitsnetz: ein Body ohne data-Liste UND ohne error ist laut Doku
+        # eine leere Ergebnismenge — aber nur, wenn er auch sonst wie eine Antwort
+        # aussieht. Alles andere (z.B. unbekannte Fehlercodes) lieber überspringen.
+        if d.get("code") not in (None, "", "200", 200):
             return None
         return []
     return None

@@ -15388,6 +15388,11 @@
     return moved
   }
 
+  // Pläne, bei denen die P&L-Zuordnung nicht eindeutig ist (mehrere Trades auf
+  // demselben Master→Slave-Paar) — das Modal zeigt dafür einen klaren Hinweis
+  // statt stillschweigend nichts zu füllen.
+  const _autoPnlAmbiguous = new Set()
+
   async function _autoPnlFetch(plan){
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
@@ -15415,25 +15420,30 @@
     )
     if(!cands.length) return null
     cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
-    // Mehrere Pläne auf DEMSELBEN Master→Slave-Paar warten auf ihren P&L?
-    // Dann darf nicht jeder die neueste Position nehmen (Finns "zwei Trades
-    // kriegen die gleichen P&Ls"). Zuordnung über die Reihenfolge: der
-    // n-t-jüngste offene Plan bekommt den n-t-jüngsten Close. Bewusst ohne
-    // Zeitvergleich — Duplikums closeTime hat eine unbekannte Zeitzone.
-    let idx = 0
+    /* Mehrdeutigkeit ehrlich behandeln (06.08.2026, zweiter Anlauf).
+     * Warten MEHRERE Pläne desselben Master→Slave-Paars auf ihren P&L, lässt sich
+     * hier nicht sicher zuordnen: der erste Versuch ordnete "n-t-jüngster Plan →
+     * n-t-jüngster Close" zu, was aber voraussetzt, dass die Trades in derselben
+     * Reihenfolge SCHLIESSEN wie sie gestartet sind. Bei überlappenden Trades
+     * (zuletzt geöffnet, zuerst geschlossen) vertauscht das die Beträge — also
+     * genau der Fehler, der behoben werden sollte, nur seltener.
+     * Der Server ordnet exakt zu (gemerkte Ticket-IDs + kalibriertes Zeitfenster);
+     * dieses Frontend ist nur der Fallback. Deshalb: bei Mehrdeutigkeit KEIN
+     * Vorschlag — lieber einmal selbst eintragen als eine falsche Zahl bestätigen.
+     * Der Hinweistext dazu kommt aus dem Modal-Wrapper (_autoPnlAmbiguous). */
+    let ambiguous = false
     try {
-      const waiting = (tradePlans || []).filter(p =>
+      const rivals = (tradePlans || []).filter(p =>
+        String(p.id) !== String(plan.id) &&
         String(p.masterAccountId) === String(plan.masterAccountId) &&
         String(p.slaveAccountId)  === String(plan.slaveAccountId)  &&
         (p.status === 'open' || p.status === 'review') &&
-        p.slavePl == null)
-      if(waiting.length > 1){
-        waiting.sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0))
-        const i = waiting.findIndex(p => String(p.id) === String(plan.id))
-        if(i > 0) idx = i
-      }
+        (p.slavePl == null && p.masterPl == null))
+      ambiguous = rivals.length > 0 && cands.length > 1
     } catch(_){}
-    const slavePos = cands[idx] || null
+    if(ambiguous){ _autoPnlAmbiguous.add(String(plan.id)); return null }
+    _autoPnlAmbiguous.delete(String(plan.id))
+    const slavePos = cands[0] || null
     if(!slavePos) return null
     const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
     const slaveCcy = slavePos.ccy || ''
@@ -15503,7 +15513,13 @@
               // noch aus dem Cache) — sonst würde eine Erfolgsmeldung fälschlich gelöscht.
               const nothingFilled = (!mEl || mEl.value === '') && (!sEl || sEl.value === '')
               if(!apply(r2) && msgEl && String(_completingPlanId) === String(planId) && nothingFilled && msgEl.textContent.indexOf('Auto-PnL') !== -1){
-                msgEl.textContent = ''
+                // Mehrdeutig → ehrlich sagen warum, statt kommentarlos leer zu lassen
+                if(_autoPnlAmbiguous.has(String(planId))){
+                  msgEl.textContent = '⚠️ Mehrere Trades auf diesem Master→Slave-Paar offen — P&L lässt sich nicht sicher zuordnen. Bitte selbst eintragen.'
+                  msgEl.className = 'modal-msg err'
+                } else {
+                  msgEl.textContent = ''
+                }
               }
             }).catch(() => {})
           }, 1500)
