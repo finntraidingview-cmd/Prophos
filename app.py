@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-07.1"
+APP_BUILD = "2026-08-10.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2475,70 +2475,33 @@ def wt_check_user(uid, creds, memo):
 
         if plan["status"] == "planned":
             if d_master:
-                # ── Verknüpfter Master: Start = seine Position taucht auf ──
-                # Kein Slave-Zählwerk mehr (siehe Kommentar oben: auf dem geteilten
-                # Live-Slave ist die Zahl durch fremde Master und Alt-Positionen
-                # verrauscht). Ein Plan startet, wenn der Master eine offene
-                # Position hat, die er beim ersten Blick noch NICHT hatte —
-                # sonst würde ein Alt-Trade desselben Masters den Plan sofort
-                # fälschlich starten.
-                if prev["baseline"] is None:
-                    if master_ok:
-                        # Master handelt schon beim ersten Blick. Nur wenn die
-                        # Position NACH der Plan-Anlage geöffnet wurde, gehört sie
-                        # zu diesem Plan (Downtime/Deploy verpasst den Übergang
-                        # sonst dauerhaft) — sonst nur als Baseline merken.
-                        ca = _wt_parse_ts(plan.get("created_at"))
-                        off = _dup_clock["offset"]
-                        fresh = []
-                        if ca is not None and off is not None:
-                            fresh = [str(p.get("ticket")) for p in master_pos
-                                     # + 3 Intervalle Sicherheitsmarge (Review-Finding 07.08.):
-                                     # der kalibrierte Uhr-Offset ist systematisch um bis zu
-                                     # ~3 Poll-Abstände zu klein (Position wird erst beim
-                                     # nächsten Tick GESEHEN) — Alt-Positionen sähen dadurch
-                                     # jünger aus, als sie sind. Nur was auch mit dieser Marge
-                                     # BEWEISBAR nach der Plan-Anlage geöffnet wurde, zählt;
-                                     # im Zweifel wartet der Plan auf die nächste Position.
-                                     if (_wt_parse_ts(p.get("openTime")) or -1e12) - off >= ca + WATCHER_INTERVAL * 3]
-                        pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
-                        if fresh and pair_counts.get(pk, 0) == 1:
-                            try:
-                                rows = sb_update("trade_plans",
-                                                 {"id": f"eq.{plan['id']}", "status": "eq.planned", "user_id": f"eq.{uid}"},
-                                                 {"status": "open", "started_at": _wt_now_iso()})
-                            except Exception as e:
-                                print(f"[watcher] ⚠️ {label}: Nachfang-Start: {e}", flush=True)
-                                continue
-                            _watcher_state[key] = {"was_open": True, "notified": False, "baseline": 1,
-                                                   "streak": 0, "tickets": master_tickets}
-                            wt_save_tickets(uid, plan["id"], master_tickets)
-                            if rows:
-                                print(f"[watcher] ▶ {label}: Trade nachgefangen (Master-Position jünger als Plan)", flush=True)
-                            continue
-                        print(f"[watcher] ℹ️ {label}: Plan {plan['id']} geplant, Master handelt aber bereits — warte auf die NÄCHSTE Position", flush=True)
-                    _watcher_state[key] = {**prev, "was_open": False, "baseline": 1 if master_ok else 0,
-                                           "base_tickets": master_tickets}
+                # ── EINFACHE, ROBUSTE REGEL (10.08.2026) ──
+                # Finns Realität: jeder Master fährt IMMER nur EINE Order gleichzeitig.
+                # Also: hat der verknüpfte Master jetzt eine offene Position, IST das
+                # der Trade dieses Plans → sofort auf "Läuft" und die Master-Tickets
+                # merken. Fertig.
+                #
+                # Die frühere Baseline-/Uhr-/Frische-Mechanik ist RAUS. Sie sollte
+                # Alt-Positionen ausschließen, hat aber genau das Gegenteil bewirkt:
+                # Ging der In-Memory-State verloren (jeder Deploy, jeder Token-Hänger)
+                # und die Position war beim ersten neuen Blick schon offen, wartete
+                # der Plan ewig auf eine "nächste" Position, die bei 1-Order-pro-Master
+                # nie kommt → Plan blieb dauerhaft auf "Geplant" (live nachgewiesen
+                # 10.08.: FundedNext-Plan seit 11:22 haengend, Master handelte). Der
+                # neue Weg heilt sich nach jedem State-Verlust beim naechsten Tick.
+                if not master_ok:
+                    _watcher_state[key] = {"was_open": False, "notified": False,
+                                           "baseline": 0, "streak": 0}
                     continue
-                # Master hatte vorher keine Position und hat jetzt eine → Start.
-                base_set = set(prev.get("base_tickets") or [])
-                new_master = [t for t in master_tickets if t not in base_set]
-                if not master_ok or not new_master:
-                    _watcher_state[key] = {**prev, "was_open": False,
-                                           "baseline": 1 if master_ok else 0,
-                                           "base_tickets": master_tickets if not master_ok else prev.get("base_tickets")}
-                    continue
-                # Mehrdeutigkeit (Review-Finding 07.08.): Liegen MEHRERE aktive Pläne
-                # auf demselben Master→Slave-Paar, würde EINE neue Master-Position
-                # alle davon starten — und beim Close bekämen alle denselben P&L
-                # eingestempelt. Dann lieber gar nicht automatisch starten.
+                # Mehrere aktive Pläne auf demselben Master→Slave-Paar? Dann ist nicht
+                # eindeutig, welcher startet → nicht automatisch, einmal loggen.
                 pk = (str(plan.get("master_account_id")), str(plan.get("slave_account_id")))
                 if pair_counts.get(pk, 0) > 1:
                     if not prev.get("ambig_logged"):
                         print(f"[watcher] ⚠️ {label}: {pair_counts[pk]} aktive Pläne auf demselben Paar — "
                               f"Auto-Start ausgesetzt, bitte manuell auf 'Läuft' setzen (Plan {plan['id']})", flush=True)
                     _watcher_state[key] = {**prev, "was_open": False, "ambig_logged": True,
-                                           "baseline": 1, "base_tickets": master_tickets}
+                                           "baseline": 1}
                     continue
                 try:
                     rows = sb_update("trade_plans",
@@ -2547,10 +2510,9 @@ def wt_check_user(uid, creds, memo):
                 except Exception as e:
                     print(f"[watcher] ⚠️ {label}: Start-Update: {e} — nächster Tick versucht erneut", flush=True)
                     continue
-                _wt_calibrate_clock(master_pos, new_master)
                 _watcher_state[key] = {"was_open": True, "notified": False, "baseline": 1,
-                                       "streak": 0, "tickets": new_master}
-                wt_save_tickets(uid, plan["id"], new_master)
+                                       "streak": 0, "tickets": master_tickets}
+                wt_save_tickets(uid, plan["id"], master_tickets)
                 if rows:
                     print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
                 continue
