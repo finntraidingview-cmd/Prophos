@@ -2472,6 +2472,10 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
         News <span class="sb-badge" id="sb-badge-news" hidden>0</span>
       </button>
+      <button class="sb-link" data-view="kasse">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><circle cx="17" cy="14.5" r="1.4"/></svg>
+        Kasse
+      </button>
 
       <div class="sb-divider"></div>
       <div class="sb-section" style="padding-top:0">Account</div>
@@ -4604,6 +4608,70 @@
       </div>
     </section>
 
+    <!-- KASSE -->
+    <section class="view" data-view="kasse">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Kasse</h1>
+          <p class="view-sub">Gemeinsame 50 : 50-Kasse — Finn &amp; Pascal</p>
+        </div>
+      </div>
+
+      <div id="kasse-lock">
+        <div class="card" style="max-width:340px;margin:36px auto;text-align:center;padding:26px 22px">
+          <div style="font-size:30px;margin-bottom:8px">🔒</div>
+          <h3 style="margin:0 0 4px;font-size:16px">Kasse gesperrt</h3>
+          <p style="margin:0 0 16px;color:var(--sub);font-size:13px">Code eingeben, um die Kasse zu öffnen.</p>
+          <input id="kasse-code" type="password" inputmode="numeric" maxlength="8" placeholder="Code" autocomplete="off" style="text-align:center;font-size:20px;letter-spacing:.3em;width:100%;padding:11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+          <div id="kasse-code-err" style="color:var(--danger);font-size:12.5px;height:16px;margin-top:6px"></div>
+          <button class="btn btn-primary" id="kasse-unlock" style="width:100%;margin-top:6px">Öffnen</button>
+        </div>
+      </div>
+
+      <div id="kasse-content" hidden>
+        <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+          Tabelle <code>kasse_entries</code> fehlt noch — bitte <code>sql/2026-08-11_kasse.sql</code> im Supabase SQL-Editor ausführen.
+        </div>
+
+        <div class="card" style="padding:18px;margin-bottom:14px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin-bottom:7px">Wer muss nachzahlen</div>
+          <div id="kasse-status" style="font-size:22px;font-weight:750;letter-spacing:-.02em">—</div>
+          <div id="kasse-status-note" style="font-size:12.5px;color:var(--sub);margin-top:7px"></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <div class="card" style="padding:14px;border-top:2px solid var(--violet)">
+            <div style="font-size:12.5px;font-weight:600;color:var(--sub)">Finn eingezahlt</div>
+            <div id="kasse-finn-total" style="font-size:19px;font-weight:700;margin-top:3px">0 €</div>
+          </div>
+          <div class="card" style="padding:14px;border-top:2px solid #e0891f">
+            <div style="font-size:12.5px;font-weight:600;color:var(--sub)">Pascal eingezahlt</div>
+            <div id="kasse-pascal-total" style="font-size:19px;font-weight:700;margin-top:3px">0 €</div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:15px;margin-bottom:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:9px">
+            <button type="button" class="btn btn-ghost kasse-seg active" data-who="finn">Finn</button>
+            <button type="button" class="btn btn-ghost kasse-seg" data-who="pascal">Pascal</button>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input id="kasse-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Betrag (€)" style="flex:1;min-width:0;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+            <input id="kasse-date" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+          </div>
+          <input id="kasse-note" type="text" maxlength="60" placeholder="Wofür? (z. B. 5 Accounts)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+          <button class="btn btn-primary" id="kasse-add" style="width:100%;margin-top:10px">Eintragen</button>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:0 2px 9px">
+          <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Verlauf</span>
+          <button class="btn btn-ghost" id="kasse-refresh" style="font-size:12px;padding:5px 10px">↻ Aktualisieren</button>
+        </div>
+        <div id="kasse-list" style="display:flex;flex-direction:column;gap:7px"></div>
+        <div id="kasse-empty" class="empty" style="display:none"><div class="empty-ico">💸</div><h3>Noch keine Einträge</h3><p>Trag oben die erste Investition ein.</p></div>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section class="view" data-view="settings">
       <div class="view-head">
@@ -5610,6 +5678,7 @@
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
+    kasse:     ['Kasse', 'Gemeinsame 50 : 50-Kasse'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -5639,6 +5708,7 @@
       if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
+    if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
     // Beim Öffnen der Trades-View immer auf „Geplant" starten (nicht auf dem zuletzt
     // aktiven Tab hängenbleiben — z.B. „Erledigt" nach einem Trade-Abschluss).
     if(name === 'trades'){
@@ -5654,6 +5724,155 @@
       if(v) switchView(v)
     })
   })
+
+  /* ========== KASSE — gemeinsame 50:50-Kasse (profilübergreifend) ==========
+   * Eine geteilte Tabelle kasse_entries (keine user_id-Trennung), damit die
+   * Kasse über alle Profile hinweg dieselbe ist. Zugriffscode 7856 sitzt hier
+   * als UI-Gate; die Freischaltung gilt bis zum nächsten Reload (in-memory).
+   * Tabelle fehlt (Migration nicht ausgeführt) → Hinweis-Banner statt Absturz. */
+  ;(function(){
+    const CODE = '7856'
+    const FINN = 'var(--violet)', PASCAL = '#e0891f', EVEN = '#16a34a'
+    let unlocked = false, who = 'finn', entries = []
+    const eur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:0, maximumFractionDigits:2 })
+    const $ = id => document.getElementById(id)
+
+    function showLocked(){
+      $('kasse-lock').style.display = ''
+      $('kasse-content').hidden = true
+      const c = $('kasse-code'); if(c){ c.value = ''; setTimeout(() => c.focus(), 40) }
+      $('kasse-code-err').textContent = ''
+    }
+    function showContent(){
+      $('kasse-lock').style.display = 'none'
+      $('kasse-content').hidden = false
+      kasseLoad()
+    }
+    window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
+
+    function tryUnlock(){
+      if(($('kasse-code').value || '').trim() === CODE){ unlocked = true; showContent() }
+      else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
+    }
+
+    async function kasseLoad(){
+      try{
+        const { data, error } = await supabase.from('kasse_entries')
+          .select('*').order('entry_date', { ascending:false }).order('created_at', { ascending:false })
+        if(error) throw error
+        entries = data || []
+        $('kasse-db-warn').style.display = 'none'
+        kasseRender()
+      }catch(e){
+        const m = e.message || ''
+        if(/kasse_entries/i.test(m) && /(does not exist|relation|schema cache)/i.test(m)){
+          $('kasse-db-warn').style.display = ''
+        } else { console.warn('[kasse] load:', m || e) }
+      }
+    }
+
+    function totals(){
+      let f = 0, p = 0
+      for(const e of entries){ const a = Number(e.amount) || 0; e.who === 'finn' ? f += a : p += a }
+      return { f, p, diff: f - p }
+    }
+
+    function kasseRender(){
+      const { f, p, diff } = totals()
+      $('kasse-finn-total').textContent = eur.format(f)
+      $('kasse-pascal-total').textContent = eur.format(p)
+      const st = $('kasse-status'), note = $('kasse-status-note')
+      if(Math.abs(diff) < 0.005){
+        st.textContent = 'Ausgeglichen ✓'; st.style.color = EVEN
+        note.textContent = entries.length ? 'Beide haben gleich viel investiert.' : 'Noch nichts eingetragen.'
+      } else if(diff > 0){
+        st.textContent = 'Pascal zahlt ' + eur.format(diff); st.style.color = PASCAL
+        note.textContent = 'Danach seid ihr wieder 50 : 50.'
+      } else {
+        st.textContent = 'Finn zahlt ' + eur.format(-diff); st.style.color = FINN
+        note.textContent = 'Danach seid ihr wieder 50 : 50.'
+      }
+      const list = $('kasse-list')
+      list.innerHTML = ''
+      $('kasse-empty').style.display = entries.length ? 'none' : ''
+      for(const e of entries){
+        const isFinn = e.who === 'finn', col = isFinn ? FINN : PASCAL
+        const dt = e.entry_date ? String(e.entry_date).slice(0,10).split('-').reverse().join('.') : ''
+        const row = document.createElement('div')
+        row.className = 'card'
+        row.style.cssText = 'display:flex;align-items:center;gap:11px;padding:11px 12px'
+        row.innerHTML =
+          '<span style="width:3px;align-self:stretch;border-radius:2px;background:' + col + '"></span>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="display:flex;align-items:baseline;gap:8px">' +
+              '<span style="font-weight:650;font-size:15px;color:' + col + '">' + eur.format(Number(e.amount) || 0) + '</span>' +
+              '<span style="font-size:11.5px;font-weight:600;color:var(--sub)">' + (isFinn ? 'Finn' : 'Pascal') + '</span>' +
+            '</div>' +
+            (e.note ? '<div class="kasse-note" style="font-size:12.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>' : '') +
+          '</div>' +
+          '<span style="font-size:11px;color:var(--sub)">' + dt + '</span>' +
+          '<button class="kasse-del" data-id="' + e.id + '" title="Löschen" style="border:none;background:none;color:var(--sub);font-size:17px;line-height:1;cursor:pointer;padding:2px 5px">×</button>'
+        if(e.note) row.querySelector('.kasse-note').textContent = e.note
+        list.appendChild(row)
+      }
+    }
+
+    async function kasseAdd(){
+      const amtEl = $('kasse-amount')
+      const amt = parseFloat(String(amtEl.value || '').replace(',', '.'))
+      if(!amt || amt <= 0){ amtEl.style.borderColor = 'var(--danger)'; amtEl.focus(); return }
+      amtEl.style.borderColor = 'var(--border)'
+      const row = {
+        who,
+        amount: Math.round(amt * 100) / 100,
+        note: (($('kasse-note').value) || '').trim() || null,
+        entry_date: $('kasse-date').value || new Date().toISOString().slice(0,10)
+      }
+      const btn = $('kasse-add'); btn.disabled = true
+      try{
+        const { error } = await supabase.from('kasse_entries').insert(row)
+        if(error) throw error
+        amtEl.value = ''; $('kasse-note').value = ''; amtEl.focus()
+        await kasseLoad()
+      }catch(e){ console.warn('[kasse] add:', e.message || e); alert('Konnte nicht speichern: ' + (e.message || e)) }
+      finally{ btn.disabled = false }
+    }
+
+    async function kasseDelete(id){
+      if(!confirm('Eintrag löschen?')) return
+      try{
+        const { error } = await supabase.from('kasse_entries').delete().eq('id', id)
+        if(error) throw error
+        await kasseLoad()
+      }catch(e){ console.warn('[kasse] delete:', e.message || e) }
+    }
+
+    function selectWho(w){
+      who = w
+      document.querySelectorAll('.kasse-seg').forEach(x => {
+        const on = x.dataset.who === who
+        x.classList.toggle('active', on)
+        x.style.borderColor = on ? (who === 'finn' ? FINN : PASCAL) : ''
+        x.style.color       = on ? (who === 'finn' ? FINN : PASCAL) : ''
+      })
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if(!$('kasse-unlock')) return
+      $('kasse-unlock').addEventListener('click', tryUnlock)
+      $('kasse-code').addEventListener('keydown', e => { if(e.key === 'Enter') tryUnlock() })
+      document.querySelectorAll('.kasse-seg').forEach(b => b.addEventListener('click', () => selectWho(b.dataset.who)))
+      $('kasse-add').addEventListener('click', kasseAdd)
+      $('kasse-amount').addEventListener('keydown', e => { if(e.key === 'Enter') kasseAdd() })
+      $('kasse-note').addEventListener('keydown', e => { if(e.key === 'Enter') kasseAdd() })
+      $('kasse-refresh').addEventListener('click', kasseLoad)
+      $('kasse-date').value = new Date().toISOString().slice(0,10)
+      $('kasse-list').addEventListener('click', ev => {
+        const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
+      })
+      selectWho('finn')
+    })
+  })()
 
   /* ========== HEDGE COSMOS SCROLL (Overview-Hero) ========== */
   ;(function(){
