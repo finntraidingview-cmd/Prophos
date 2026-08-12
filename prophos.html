@@ -4642,11 +4642,11 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
           <div class="card" style="padding:14px;border-top:2px solid var(--violet)">
             <div style="font-size:12.5px;font-weight:600;color:var(--sub)">Finn eingezahlt</div>
-            <div id="kasse-finn-total" style="font-size:19px;font-weight:700;margin-top:3px">0 €</div>
+            <div id="kasse-finn-total" style="font-size:19px;font-weight:700;margin-top:3px">$0</div>
           </div>
           <div class="card" style="padding:14px;border-top:2px solid #e0891f">
             <div style="font-size:12.5px;font-weight:600;color:var(--sub)">Pascal eingezahlt</div>
-            <div id="kasse-pascal-total" style="font-size:19px;font-weight:700;margin-top:3px">0 €</div>
+            <div id="kasse-pascal-total" style="font-size:19px;font-weight:700;margin-top:3px">$0</div>
           </div>
         </div>
 
@@ -4656,7 +4656,7 @@
             <button type="button" class="btn btn-ghost kasse-seg" data-who="pascal">Pascal</button>
           </div>
           <div style="display:flex;gap:8px">
-            <input id="kasse-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Betrag (€)" style="flex:1;min-width:0;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+            <input id="kasse-amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="Betrag ($)" style="flex:1;min-width:0;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
             <input id="kasse-date" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
           </div>
           <input id="kasse-note" type="text" maxlength="60" placeholder="Wofür? (z. B. 5 Accounts)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
@@ -5734,7 +5734,7 @@
     const CODE = '7856'
     const FINN = 'var(--violet)', PASCAL = '#e0891f', EVEN = '#16a34a'
     let unlocked = false, who = 'finn', entries = []
-    const eur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:0, maximumFractionDigits:2 })
+    const eur = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:2 })
     const $ = id => document.getElementById(id)
 
     function showLocked(){
