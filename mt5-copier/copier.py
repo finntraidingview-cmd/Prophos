@@ -175,9 +175,16 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, max_lots, sym_inf
                                     "symbol": h["symbol"], "volume": take})
                     excess -= take
 
-    # Master-Position weg -> zugehörige Hedges komplett schließen
+    # Master-Position weg -> zugehörige Hedges komplett schließen.
+    # WICHTIG (Bug gefunden 13.08.2026): Es wird gegen die im Snapshot VORHANDENEN
+    # Positionen geprüft, nicht gegen `desired`. Sonst würde eine übersprungene
+    # Startup-Position (skip_idents) als "Master weg" gelten und ihr bestehender Hedge
+    # sofort geschlossen — nach einem Copier-Neustart wäre eine laufende Position
+    # unbemerkt ungehedged. Übersprungene Positionen werden hier bewusst NICHT
+    # angefasst; ihr Hedge wird erst geschlossen, wenn der Master wirklich zugeht.
+    present = {p["ident"] for p in positions}
     for ident, hs in hedges.items():
-        if ident in desired:
+        if ident in desired or ident in present:
             continue
         for h in hs:
             actions.append({"kind": "close", "ident": ident, "ticket": h["ticket"],

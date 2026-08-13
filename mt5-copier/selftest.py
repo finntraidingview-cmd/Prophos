@@ -175,6 +175,26 @@ def main():
         {14: [{"ticket": 904, "symbol": "NAS100", "type": 1, "volume": 2.0}]},
         expect_actions=[]))
 
+    # 16) NEUSTART mit offener Master-Position UND offenem Hedge (Bug 13.08.2026):
+    #     Die Startup-Position steht auf der Skip-Liste. Der bestehende Hedge darf
+    #     WEDER angefasst NOCH geschlossen werden — sonst waere die laufende Position
+    #     nach einem Copier-Neustart ungehedged.
+    results.append(run(
+        "NEUSTART: Master offen (uebersprungen) + Hedge offen → Hedge bleibt unangetastet",
+        [{"ident": 20, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+        {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+        skip=frozenset({20}),
+        expect_actions=[]))
+
+    # 17) Danach schliesst der Master wirklich -> der Hedge MUSS mitgehen,
+    #     obwohl die Position auf der Skip-Liste stand.
+    results.append(run(
+        "NEUSTART: uebersprungener Master schliesst spaeter → Hedge wird geschlossen",
+        [],
+        {20: [{"ticket": 910, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+        skip=frozenset({20}),
+        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 1.0}]))
+
     # 15) Zwei Master-Positionen gleichzeitig -> zwei getrennte Hedges
     results.append(run(
         "Zwei Master-Positionen → zwei getrennte Hedges",
