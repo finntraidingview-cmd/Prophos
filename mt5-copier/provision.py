@@ -47,11 +47,12 @@ EA_NAME = "ProphosHedgeReader"
 MAGIC_BASE = 770000
 STARTUP_SYMBOL = "EURUSD"   # existiert bei allen relevanten Brokern
 STARTUP_PERIOD = "H1"
-# MT5 schreibt seine eigenen ini/set-Dateien als UTF-16 LE; eigene Startdateien
-# werden in dieser Kodierung zuverlaessig gelesen (ASCII-ini geht meist auch,
-# UTF-16 ist die sichere Wahl).
-INI_ENCODING = "utf-16"
-SET_ENCODING = "utf-16"
+# Kodierung der selbst geschriebenen Startdateien: SCHLICHTER ASCII-TEXT.
+# Erster Live-Test 14.08.2026: mit UTF-16 (BOM) hat das Terminal die /config-ini
+# ignoriert — kein Login-Versuch im Journal. Die funktionierenden Praxis-Beispiele
+# schreiben plain text; MT5s eigene UTF-16-Dateien sind die, die es SELBST erzeugt.
+INI_ENCODING = "ascii"
+SET_ENCODING = "ascii"
 
 ORIGIN_FILE = "origin.txt"
 
@@ -226,31 +227,67 @@ def data_dir_for(install_dir, root=None):
     return map_installs(root).get(os.path.normcase(os.path.normpath(install_dir)))
 
 
-def _journal_says(data_dir, needles, since_ts):
-    """Sucht im Terminal-Journal (<Datenordner>\\logs\\JJJJMMTT.log, UTF-16) nach
-    einem der Begriffe. Heute UND gestern pruefen (Mitternachts-Rollover)."""
+def _journal_text(data_dir, since_ts):
+    """Inhalt des Terminal-Journals (<Datenordner>\\logs\\JJJJMMTT.log).
+    Heute UND gestern (Mitternachts-Rollover). Kodierung strikt durchprobieren —
+    errors='replace' beim ersten Versuch wuerde eine ANSI-Datei still zu
+    Zeichensalat dekodieren und die Suche blind machen."""
     import datetime as _dt
     logs = os.path.join(data_dir, "logs")
-    for d in (0, 1):
+    out = []
+    for d in (1, 0):
         day = (_dt.date.today() - _dt.timedelta(days=d)).strftime("%Y%m%d")
         p = os.path.join(logs, day + ".log")
         try:
             if os.path.getmtime(p) < since_ts - 60:
                 continue
-            for enc in ("utf-16", "utf-8"):
-                try:
-                    with open(p, "r", encoding=enc, errors="replace") as f:
-                        text = f.read()
-                    break
-                except (UnicodeError, OSError):
-                    text = ""
-            low = text.lower()
-            for n in needles:
-                if n.lower() in low:
-                    return n
         except OSError:
             continue
+        text = None
+        for enc in ("utf-16", "utf-8", "cp1252"):
+            try:
+                with open(p, "r", encoding=enc) as f:
+                    text = f.read()
+                break
+            except (UnicodeError, OSError):
+                continue
+        if text is None:
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+        out.append(text)
+    return "\n".join(out)
+
+
+def _journal_says(data_dir, needles, since_ts):
+    low = _journal_text(data_dir, since_ts).lower()
+    for n in needles:
+        if n.lower() in low:
+            return n
     return None
+
+
+def _journal_tail(data_dir, since_ts, n=6):
+    lines = [l.strip() for l in _journal_text(data_dir, since_ts).splitlines() if l.strip()]
+    return " | ".join(lines[-n:]) if lines else "(Journal leer)"
+
+
+def _kill_terminal_at(install_dir):
+    """Beendet ein evtl. noch laufendes Terminal DIESER Installation (z.B. Rest
+    eines vorherigen Fehlversuchs). Ein zweiter Start derselben Installation
+    wuerde nur das laufende Fenster nach vorn holen und die /config ignorieren."""
+    exe = os.path.join(install_dir, "terminal64.exe").replace("\\", "\\\\")
+    try:
+        r = subprocess.run(["wmic", "process", "where",
+                            f"ExecutablePath='{exe}'", "get", "ProcessId"],
+                           capture_output=True, text=True, timeout=30)
+        for tok in (r.stdout or "").split():
+            if tok.isdigit():
+                _taskkill(int(tok))
+    except Exception:
+        pass  # wmic fehlt/zickt -> schlimmstenfalls schlaegt der Start unten fehl
 
 
 def _taskkill(pid, grace_s=15):
@@ -286,8 +323,10 @@ def run_provision(*, name, login, password, server, template_exe,
         problems.append("Provisionierung laeuft nur auf dem Windows-PC.")
     template_install = os.path.dirname(os.path.abspath(template_exe or ""))
     target_install = os.path.join(os.path.dirname(template_install), f"MT5-{name}")
-    if os.path.exists(target_install):
-        problems.append(f"Zielordner existiert schon: {target_install} — nichts wird ueberschrieben.")
+    # Ein vorhandener Zielordner OHNE fertige Config ist der Rest eines
+    # Fehlversuchs — wiederverwenden statt abbrechen, damit "nochmal Fertig
+    # druecken" der natuerliche Retry ist (14.08.2026).
+    reuse = os.path.exists(target_install)
     root = terminals_root()
     tpl_data = data_dir_for(template_install, root) if not problems else None
     ex5 = os.path.join(tpl_data, "MQL5", "Experts", EA_NAME + ".ex5") if tpl_data else None
@@ -305,24 +344,29 @@ def run_provision(*, name, login, password, server, template_exe,
 
     # ── 2. klonen ───────────────────────────────────────────────────────────
     step("klonen")
-    # .log-Dateien auslassen — die haelt das laufende Vorlage-Terminal offen.
-    shutil.copytree(template_install, target_install,
-                    ignore=shutil.ignore_patterns("*.log"))
-    # Falls die Vorlage je im portable-Modus lief, laegen Konten/Configs IM
-    # Installationsordner und der Klon wuerde sie erben — vorsorglich raus
-    # (Recherche-Stolperfalle 5; bei normalen Installationen existieren die
-    # Ordner dort gar nicht).
-    for sub in ("Config", "logs", "Bases"):
-        shutil.rmtree(os.path.join(target_install, sub), ignore_errors=True)
+    if not reuse:
+        # .log-Dateien auslassen — die haelt das laufende Vorlage-Terminal offen.
+        shutil.copytree(template_install, target_install,
+                        ignore=shutil.ignore_patterns("*.log"))
+        # Falls die Vorlage je im portable-Modus lief, laegen Konten/Configs IM
+        # Installationsordner und der Klon wuerde sie erben — vorsorglich raus
+        # (Recherche-Stolperfalle 5; bei normalen Installationen existieren die
+        # Ordner dort gar nicht).
+        for sub in ("Config", "logs", "Bases"):
+            shutil.rmtree(os.path.join(target_install, sub), ignore_errors=True)
     target_exe = os.path.join(target_install, "terminal64.exe")
     if not os.path.exists(target_exe):
-        raise ProvisionError(f"Klon unvollstaendig — {target_exe} fehlt.")
-    report("klonen", "done", target_install)
+        raise ProvisionError(f"Klon unvollstaendig — {target_exe} fehlt. Ordner "
+                             f"{target_install} am PC loeschen und neu versuchen.")
+    report("klonen", "done", target_install + (" (wiederverwendet)" if reuse else ""))
 
     # ── 3. Erststart mit Login ──────────────────────────────────────────────
     # Die transiente ini ist der EINZIGE Ort, an dem das Passwort die Software
     # verlaesst. finally garantiert die Loeschung — auch im Fehlerfall.
     step("login")
+    # Rest eines Fehlversuchs? Ein laufendes Terminal derselben Installation
+    # wuerde den /config-Start schlucken (Fenster kommt nur nach vorn).
+    _kill_terminal_at(target_install)
     login_ini = os.path.join(target_install, "prophos-login.ini")
     proc = None
     started_ts = time.time()
@@ -353,10 +397,12 @@ def run_provision(*, name, login, password, server, template_exe,
                 break
             time.sleep(3)
         if verdict != "authorized":
+            # Journal-Auszug mitgeben — "kein Eintrag" ohne Kontext war beim
+            # ersten Fehlversuch (14.08.2026) nicht diagnostizierbar.
             raise ProvisionError(
                 f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 90 s'}) — "
-                f"Kontonummer/Passwort/Servername pruefen (Server muss exakt stimmen, "
-                f"z.B. 'FusionMarkets-Demo').")
+                f"Kontonummer/Passwort/Servername pruefen (Server muss exakt stimmen). "
+                f"Journal: {_journal_tail(new_data, started_ts)}")
     finally:
         try:
             os.remove(login_ini)
