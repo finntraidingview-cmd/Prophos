@@ -344,7 +344,7 @@ function addCard(job){
      <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 437899" ${busy?'disabled':''}></div>
    </div>
    <div class=row>
-     <div><label>Passwort</label><input type=password data-p=password autocomplete=new-password ${busy?'disabled':''}></div>
+     <div><label>Passwort (sichtbar — auf Wunsch)</label><input data-p=password autocomplete=off spellcheck=false ${busy?'disabled':''}></div>
      <div><label>Server</label><input data-p=server placeholder="z.B. FusionMarkets-Demo" ${busy?'disabled':''}></div>
    </div>
    <div class=acts><button data-prov ${busy?'disabled':''}>${busy?'läuft…':'Fertig — automatisch einrichten'}</button>
@@ -374,10 +374,13 @@ async function load(){
     }
   }
   // Die Hinzufügen-Karte: nur neu zeichnen, wenn kein Feld fokussiert ist ODER ein Job läuft
+  // Die Hinzufügen-Karte nie überschreiben, solange dort Eingaben stehen (dirty)
+  // oder ein Feld fokussiert ist — nur ein LAUFENDER Job erzwingt das Neuzeichnen
+  // (Felder sind dann eh gesperrt, und die Schritte sollen live ticken).
   const addCur=app.querySelector('.card.add');
   const addHtml=addCard(d.job);
   if(!addCur)app.insertAdjacentHTML('beforeend',addHtml);
-  else if((d.job&&!d.job.done)||!addCur.contains(document.activeElement))addCur.outerHTML=addHtml;
+  else if((d.job&&!d.job.done)||(!addCur.hasAttribute('data-dirty')&&!addCur.contains(document.activeElement)))addCur.outerHTML=addHtml;
 }
 document.getElementById('app').addEventListener('input',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
