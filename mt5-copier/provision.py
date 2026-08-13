@@ -360,34 +360,67 @@ def run_provision(*, name, login, password, server, template_exe,
                              f"{target_install} am PC loeschen und neu versuchen.")
     report("klonen", "done", target_install + (" (wiederverwendet)" if reuse else ""))
 
-    # ── 3. Erststart mit Login ──────────────────────────────────────────────
-    # Die transiente ini ist der EINZIGE Ort, an dem das Passwort die Software
-    # verlaesst. finally garantiert die Loeschung — auch im Fehlerfall.
+    # ── 3. Nackter Erststart: nur den Datenordner anlegen ───────────────────
+    # Ein Login ist hier noch gar nicht moeglich: der frische Klon hat eine
+    # LEERE Server-Liste, und die Startdatei sucht den Servernamen nur in
+    # servers.dat nach (kein Live-Broker-Scan wie im Dialog). Das war der
+    # zweite Fehlversuch am 14.08.2026 — Terminal las die ini, blieb aber
+    # netzwerk-still stehen.
     step("login")
     # Rest eines Fehlversuchs? Ein laufendes Terminal derselben Installation
-    # wuerde den /config-Start schlucken (Fenster kommt nur nach vorn).
+    # wuerde jeden weiteren Start schlucken (Fenster kommt nur nach vorn).
     _kill_terminal_at(target_install)
-    login_ini = os.path.join(target_install, "prophos-login.ini")
-    proc = None
+    proc = subprocess.Popen([target_exe], cwd=target_install)
+    new_data = None
+    t0 = time.time()
+    while time.time() - t0 < 120:
+        new_data = data_dir_for(target_install, root)
+        if new_data:
+            break
+        time.sleep(2)
+    if not new_data:
+        raise ProvisionError("Datenordner des neuen Terminals ist nach 120 s nicht "
+                             "aufgetaucht — Terminal-Fenster am PC pruefen.")
+    time.sleep(3)
+    _taskkill(proc.pid)
+    report("login", "done", "Datenordner angelegt")
+
+    # ── 4. Server-Liste + EA + Preset einlegen ──────────────────────────────
+    # servers.dat der Vorlage enthaelt nur die bekannten Broker-Server (keine
+    # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
+    step("ea")
+    tpl_servers = os.path.join(tpl_data, "config", "servers.dat")
+    if not os.path.exists(tpl_servers):
+        raise ProvisionError(f"Server-Liste der Vorlage fehlt ({tpl_servers}) — "
+                             f"Vorlage-Terminal einmal starten und wieder schliessen.")
+    os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
+    shutil.copy2(tpl_servers, os.path.join(new_data, "config", "servers.dat"))
+    experts = os.path.join(new_data, "MQL5", "Experts")
+    presets = os.path.join(new_data, "MQL5", "Presets")
+    os.makedirs(experts, exist_ok=True)
+    os.makedirs(presets, exist_ok=True)
+    shutil.copy2(ex5, os.path.join(experts, EA_NAME + ".ex5"))
+    preset_name = f"prophos-{name}.set"
+    with open(os.path.join(presets, preset_name), "w", encoding=SET_ENCODING) as f:
+        f.write(build_preset(ident["snapshot"]))
+    report("ea", "done", f"servers.dat + {EA_NAME}.ex5 + {preset_name}")
+
+    # ── 5. Start mit Login + EA in EINER Startdatei ─────────────────────────
+    # Die kombinierte ini ([Common]-Login mit KeepPrivate=1 + [StartUp]-EA) ist
+    # der EINZIGE Ort, an dem das Passwort die Software verlaesst — finally
+    # garantiert die Loeschung. Danach: MT5 speichert die Zugangsdaten selbst
+    # verschluesselt, der EA bleibt per Chart-Persistenz dauerhaft. Ein
+    # weiterer Start mit der ini haengte das EA auf einen ZWEITEN Chart —
+    # deshalb wird sie geloescht.
+    step("neustart")
+    start_ini = os.path.join(target_install, "prophos-start.ini")
     started_ts = time.time()
     try:
-        with open(login_ini, "w", encoding=INI_ENCODING) as f:
-            f.write(build_login_ini(login, password, server))
-        proc = subprocess.Popen([target_exe, f"/config:{login_ini}"], cwd=target_install)
-        # Warten, bis MT5 seinen Datenordner angelegt hat (origin.txt zeigt auf
-        # uns). Bewusst NICHT am Prozess festhalten: ein LiveUpdate kann das
-        # Terminal mitten im Erststart neu starten (Recherche-Stolperfalle 2).
-        new_data = None
-        t0 = time.time()
-        while time.time() - t0 < 120:
-            new_data = data_dir_for(target_install, root)
-            if new_data:
-                break
-            time.sleep(2)
-        if not new_data:
-            raise ProvisionError("Datenordner des neuen Terminals ist nach 120 s nicht "
-                                 "aufgetaucht — Terminal-Fenster am PC pruefen.")
-        # Login im Journal verifizieren, ERST DANN gilt der Schritt als fertig.
+        with open(start_ini, "w", encoding=INI_ENCODING) as f:
+            f.write(build_login_ini(login, password, server) + "\n"
+                    + build_startup_ini(preset=preset_name))
+        subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
+        # Erst den Login im Journal verifizieren …
         verdict = None
         t0 = time.time()
         while time.time() - t0 < 90:
@@ -397,48 +430,12 @@ def run_provision(*, name, login, password, server, template_exe,
                 break
             time.sleep(3)
         if verdict != "authorized":
-            # Journal-Auszug mitgeben — "kein Eintrag" ohne Kontext war beim
-            # ersten Fehlversuch (14.08.2026) nicht diagnostizierbar.
             raise ProvisionError(
                 f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 90 s'}) — "
-                f"Kontonummer/Passwort/Servername pruefen (Server muss exakt stimmen). "
+                f"Kontonummer/Passwort/Servername pruefen. "
                 f"Journal: {_journal_tail(new_data, started_ts)}")
-    finally:
-        try:
-            os.remove(login_ini)
-        except OSError:
-            pass
-    report("login", "done", "Login bestaetigt · Zugangsdaten-Datei geloescht")
-
-    # ── 4. Terminal sauber beenden, dann EA + Preset einlegen ───────────────
-    # Reihenfolge laut Recherche: erst sauberes Beenden (sichert accounts.dat
-    # und Profil), dann Dateien in den Datenordner.
-    step("ea")
-    if proc is not None:
-        _taskkill(proc.pid)
-    experts = os.path.join(new_data, "MQL5", "Experts")
-    presets = os.path.join(new_data, "MQL5", "Presets")
-    os.makedirs(experts, exist_ok=True)
-    os.makedirs(presets, exist_ok=True)
-    shutil.copy2(ex5, os.path.join(experts, EA_NAME + ".ex5"))
-    preset_name = f"prophos-{name}.set"
-    with open(os.path.join(presets, preset_name), "w", encoding=SET_ENCODING) as f:
-        f.write(build_preset(ident["snapshot"]))
-    report("ea", "done", f"{EA_NAME}.ex5 + {preset_name}")
-
-    # ── 5. Zweitstart: EA landet per [StartUp] auf einem Chart ──────────────
-    # Diese ini enthaelt KEINE Zugangsdaten; MT5 verbindet sich selbst wieder
-    # (KeepPrivate=1 beim Erststart). Der EA bleibt danach dauerhaft auf dem
-    # Chart (Chart-Persistenz). Die ini wird nach Erfolg GELOESCHT — ein
-    # weiterer Start damit haengte das EA auf einen ZWEITEN Chart (Duplikat).
-    step("neustart")
-    start_ini = os.path.join(target_install, "prophos-start.ini")
-    with open(start_ini, "w", encoding=INI_ENCODING) as f:
-        f.write(build_startup_ini(preset=preset_name))
-    try:
-        subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
-        # Snapshot-Datei ist der Beweis, dass Login UND EA stehen — der
-        # staerkste Check, den es gibt: unser eigenes EA schreibt sie.
+        # … dann den Snapshot: der Beweis, dass auch das EA laeuft — der
+        # staerkste Check, den es gibt: unser eigenes EA schreibt ihn.
         common = os.path.join(os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal",
                               "Common", "Files")
         snap_path = os.path.join(common, ident["snapshot"])
@@ -448,15 +445,15 @@ def run_provision(*, name, login, password, server, template_exe,
                 break
             time.sleep(2)
         if not os.path.exists(snap_path):
-            raise ProvisionError(f"Snapshot {ident['snapshot']} ist nach 120 s nicht erschienen. "
-                                 f"Im neuen Terminal pruefen: eingeloggt? EA auf dem Chart "
-                                 f"(Reiter 'Experten')?")
+            raise ProvisionError(f"Login ok, aber Snapshot {ident['snapshot']} ist nach 120 s "
+                                 f"nicht erschienen — im neuen Terminal Reiter 'Experten' "
+                                 f"pruefen. Journal: {_journal_tail(new_data, started_ts)}")
     finally:
         try:
             os.remove(start_ini)
         except OSError:
             pass
-    report("neustart", "done", "Snapshot fliesst · Start-Datei geloescht")
+    report("neustart", "done", "Login bestaetigt · Snapshot fliesst · Startdatei geloescht")
 
     # ── 6. Config anlegen — der laufende Copier nimmt sie binnen 5 s auf ────
     step("config")

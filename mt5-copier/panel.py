@@ -331,8 +331,9 @@ function addCard(job){
   const busy=job&&!job.done;
   const mark=s=>s.state==='done'?'✓':s.state==='running'?'…':s.state==='error'?'✗':'·';
   const labels={pruefen:'Prüfen & Kennwerte vergeben',klonen:'Terminal-Ordner klonen',
-    login:'Erststart + Login (Zugangsdaten-Datei wird danach gelöscht)',
-    ea:'Lese-EA + Preset einlegen',neustart:'Neustart — EA auf den Chart',config:'Config anlegen'};
+    login:'Erststart — Datenordner anlegen',
+    ea:'Server-Liste + Lese-EA + Preset einlegen',
+    neustart:'Start mit Login + EA (Zugangsdaten-Datei wird danach gelöscht)',config:'Config anlegen'};
   const steps=job?`<div class=steps>${job.steps.map(s=>`<div class="step ${s.state}"><span class=st>${mark(s)}</span>${labels[s.key]||s.key}${s.note?` <span class=note>${esc(s.note)}</span>`:''}</div>`).join('')}</div>`:'';
   const err=job&&job.error?`<div class=warn>${esc(job.error)}</div>`:'';
   const okmsg=job&&job.done&&!job.error?`<div class=steps><div class="step done"><span class=st>✓</span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</div></div>`:'';
