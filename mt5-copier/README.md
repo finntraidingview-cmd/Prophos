@@ -103,6 +103,36 @@ Noch nicht am Broker getestet: Teil-Schließung und Neustart-Recovery (im Selbst
 - **„Algo Trading nicht aktiv"** → im **Hedge**-Terminal einschalten (im Master nicht nötig).
 - **`hedge_portable`** muss `false` sein, wenn MT5 normal (nicht portable) installiert wurde.
 
+## Panel — Frontend im Browser (statt Textdatei)
+Eigenständiges Mini-Frontend für die Copier auf **diesem** PC. Prophos wird nicht angefasst.
+
+    python panel.py        (oder start-panel.bat)  →  http://127.0.0.1:8770
+
+Was es kann:
+- **Multiplikator, max Lots, Symbol-Mapping und Modus im Browser setzen** — Änderungen
+  landen in der `config.json` und der Copier übernimmt sie **live in ~2 s**, ohne Neustart.
+  (Ausnahme Modus: dort beendet sich der Copier bewusst, damit `start-copier.bat` neu startet
+  und alle Startprüfungen erneut laufen — ein Wechsel nach `live` im laufenden Prozess würde
+  sie umgehen.)
+- **Mehrere Firmen/Accounts gleichzeitig:** jede `config*.json` im Ordner ist eine Instanz —
+  `config.json`, `config-ftmo.json`, `config-apex.json` … Jede bekommt eine eigene Karte.
+  Den Copier für eine bestimmte Config startet man mit
+  `set COPIER_CONFIG=config-ftmo.json` vor `python copier.py` (bzw. eine eigene .bat je Instanz).
+  Der Status landet automatisch in der passenden `status-ftmo.json`.
+- **Live-Anzeige pro Instanz:** Master-/Hedge-Kontonummer, Anzahl Master-Positionen, offene
+  Hedges, Modus-Badge, „läuft/gestoppt" (Statusdatei-Alter) und die letzten Log-Zeilen.
+
+Sicherheit (getestet):
+- Bindet **nur an 127.0.0.1** — aus dem Netz nicht erreichbar.
+- **Whitelist:** das Panel darf ausschließlich `multiplier`, `symbol_map`,
+  `max_lots_per_hedge` und `mode` schreiben. Terminal-Pfade und die erwarteten
+  Kontonummern (`hedge_expected_login` / `master_expected_login`) sind tabu — das sind die
+  Sicherheitsanker des Copiers. Verifiziert: ein Push mit fremden Kontonummern und Pfad ließ
+  diese Felder unverändert.
+- Werte-Prüfung: negative/nicht-numerische Multiplikatoren und unbekannte Modi werden
+  abgelehnt, statt in die Config zu wandern.
+- Nur Python-Standardbibliothek — kein `pip install`, keine Cloud, keine Schlüssel auf dem PC.
+
 ## Dauerbetrieb (Autostart + Watchdog)
 Zwei Sicherungsnetze, damit der Copier unbeaufsichtigt laufen kann:
 1. **`start-copier.bat`** startet `copier.py` in einer Schleife — stirbt der Prozess oder

@@ -42,12 +42,42 @@ from datetime import datetime
 TOL = 1e-6
 
 
+_LOG_RING = []
+
+
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    _LOG_RING.append(line)
+    if len(_LOG_RING) > 120:
+        del _LOG_RING[:-120]
+
+
+def write_status(path, data):
+    """Zustand als status.json neben der config ablegen — Prophos liest sie ueber das
+    lokale Backend (app.py, Route /copier/status). Bewusst eine Datei auf derselben
+    Maschine: keine Cloud, keine Schluessel auf dem PC, kein zweiter Netzwerkweg.
+    Erst in eine .tmp schreiben und dann umbenennen, damit Prophos nie eine halb
+    geschriebene Datei liest."""
+    try:
+        data = dict(data)
+        data["log"] = _LOG_RING[-60:]
+        data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[status] konnte status.json nicht schreiben: {type(e).__name__}: {e}", flush=True)
+
+
+def config_path():
+    return os.environ.get("COPIER_CONFIG") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
 def load_config():
-    p = os.environ.get("COPIER_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    p = config_path()
     if not os.path.exists(p):
         sys.exit(f"config.json nicht gefunden ({p}) — config.example.json kopieren und ausfuellen.")
     with open(p, "r", encoding="utf-8") as f:
@@ -195,6 +225,7 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, max_lots, sym_inf
 
 def main():
     cfg = load_config()
+    cfg_path = config_path()
     mode = str(cfg.get("mode", "dryrun")).lower()
     if mode not in ("dryrun", "demo", "live"):
         sys.exit(f"mode '{mode}' ungueltig — erlaubt: dryrun | demo | live")
@@ -411,11 +442,61 @@ def main():
     stale_warned = False
     conn_fail = 0
     CONN_FAIL_EXIT = max(10, int(20 / max(poll, 0.1)))  # ~20 Sekunden Ausfall
+    # Prophos-Anbindung (lokal, ueber Dateien auf derselben Maschine):
+    #   status.json  ← der Copier schreibt hier seinen Zustand hinein (Prophos liest)
+    #   config.json  → Prophos darf Multiplikator/Mapping/max_lots aendern (whitelist in app.py)
+    # Damit greifen Aenderungen aus Prophos OHNE Neustart, weil hier zyklisch nachgeladen wird.
+    _base = os.path.basename(cfg_path)
+    status_path = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
+                               _base.replace("config", "status", 1) if "config" in _base else "status.json")
+    cfg_mtime = os.path.getmtime(cfg_path) if os.path.exists(cfg_path) else 0
+    last_status = 0.0
+    last_cfg_check = 0.0
 
     try:
         while True:
+            now = time.time()
+
+            # ── Aenderungen aus dem Panel/Prophos live uebernehmen ──────────────
+            # Multiplikator, Symbol-Mapping und max_lots wirken sofort. Ein Wechsel
+            # des MODUS beendet den Prozess bewusst: start-copier.bat startet neu und
+            # dabei laufen ALLE Startpruefungen (Konto, Hedging, Algo-Trading) erneut —
+            # ein Wechsel nach "live" im laufenden Prozess wuerde die umgehen.
+            if now - last_cfg_check > 2.0:
+                last_cfg_check = now
+                try:
+                    m = os.path.getmtime(cfg_path)
+                    if m != cfg_mtime:
+                        cfg_mtime = m
+                        new = load_config()
+                        if str(new.get("mode", mode)).lower() != mode:
+                            log(f"↻ Modus-Aenderung erkannt ({mode} → {new.get('mode')}) — beende mich "
+                                f"fuer einen sauberen Neustart durch start-copier.bat.")
+                            write_status(status_path, {"running": False, "mode": mode,
+                                                       "note": "Neustart wegen Modus-Aenderung"})
+                            break
+                        chg = []
+                        if float(new.get("multiplier", multiplier)) != multiplier:
+                            multiplier = float(new["multiplier"]); chg.append(f"Multiplikator {multiplier}")
+                        if new.get("symbol_map") and new["symbol_map"] != symbol_map:
+                            symbol_map = new["symbol_map"]; chg.append("Symbol-Mapping")
+                            warned_missing.clear()
+                        if float(new.get("max_lots_per_hedge", max_lots)) != max_lots:
+                            max_lots = float(new["max_lots_per_hedge"]); chg.append(f"max_lots {max_lots}")
+                        if chg:
+                            log("↻ Uebernommen aus der Config: " + ", ".join(chg))
+                except Exception as e:
+                    log(f"⚠ Config-Reload fehlgeschlagen: {type(e).__name__}: {str(e)[:80]}")
+
             snap = read_snapshot(snap_path)
             if snap is None:
+                if now - last_status > 3.0:
+                    last_status = now
+                    write_status(status_path, {
+                        "running": True, "mode": mode, "connected": False,
+                        "hedge_login": int(ai.login), "hedge_server": str(ai.server),
+                        "multiplier": multiplier, "max_lots": max_lots, "symbol_map": symbol_map,
+                        "note": "warte auf Snapshot des Master-Terminals"})
                 time.sleep(poll)
                 continue
 
@@ -519,6 +600,17 @@ def main():
                         open_pos = next((h for h in current.get(ident, []) if h["ticket"] == a["ticket"]), None)
                         if open_pos and close_part(open_pos, a["volume"]):
                             open_tries.pop(ident, None); open_last.pop(ident, None); blocked.discard(ident)
+
+            if time.time() - last_status > 3.0:
+                last_status = time.time()
+                write_status(status_path, {
+                    "running": True, "mode": mode, "connected": True,
+                    "master_login": snap["login"], "master_server": snap["server"],
+                    "hedge_login": int(ai.login), "hedge_server": str(ai.server),
+                    "multiplier": multiplier, "max_lots": max_lots, "symbol_map": symbol_map,
+                    "master_positions": snap["positions"],
+                    "hedges": {str(k): v for k, v in (current or {}).items()},
+                    "blocked": sorted(blocked)})
 
             time.sleep(poll)
     except KeyboardInterrupt:
