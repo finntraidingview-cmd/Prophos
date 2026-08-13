@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-15.1"
+APP_BUILD = "2026-08-15.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -183,7 +183,9 @@ def flatten_php_form(data, parent_key=""):
 @app.after_request
 def cors(r):
     r.headers["Access-Control-Allow-Origin"] = "*"
-    r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ma-token, ma-account, dup-token, dup-user"
+    # sb-token gehört dazu, sonst blockt der Browser den Admin-Endpoint schon im
+    # Preflight ("Failed to fetch", 15.08.2026 live aufgetreten).
+    r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ma-token, ma-account, dup-token, dup-user, sb-token"
     r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return r
 
@@ -2759,7 +2761,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -2828,53 +2830,40 @@ def admin_build_overview():
     except Exception:
         pass
 
-    firms, people, rows = {}, {}, []
+    # Eine flache Zeile pro Account — die UI filtert/aggregiert daraus selbst
+    # (Person, Firma, aktiv/archiviert). Das hält den Endpoint simpel und macht
+    # jede Zahl im Dashboard bis zum einzelnen Account nachvollziehbar.
+    rows = []
     for a in accounts:
         aid = str(a["id"])
-        if aid in archived:                        continue   # nur aktive
-        if (a.get("account_type") or "") == "live": continue   # Hedge-Broker, keine Prop-Firma
-        firm = _firm_norm(a.get("firm"))
-        uid  = str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live":
+            continue                                   # Hedge-Broker, keine Prop-Firma
         try: buy = float(a.get("purchase_cost") or 0)
         except (TypeError, ValueError): buy = 0.0
-        hg  = hedge.get(aid, 0.0)
-        po  = payouts.get(aid, 0.0)
-        parked = buy + hg - po
+        hg = round(hedge.get(aid, 0.0), 2)
+        po = round(payouts.get(aid, 0.0), 2)
+        uid = str(a.get("user_id"))
+        rows.append({
+            "id": aid,
+            "ext": a.get("external_id") or "",
+            "name": a.get("name") or "",
+            "firm": _firm_norm(a.get("firm")),
+            "firm_raw": (a.get("firm") or "").strip(),
+            "type": a.get("account_type") or "",
+            "user_id": uid,
+            "person": names.get(uid, uid[:8]),
+            "archived": aid in archived,
+            "buy": round(buy, 2),
+            "hedge": hg,
+            "payouts": po,
+            "parked": round(buy + hg - po, 2),
+        })
 
-        f = firms.setdefault(firm, {"firm": firm, "accounts": 0, "buy": 0.0,
-                                    "hedge": 0.0, "payouts": 0.0, "parked": 0.0, "people": {}})
-        f["accounts"] += 1; f["buy"] += buy; f["hedge"] += hg
-        f["payouts"] += po; f["parked"] += parked
-        pf = f["people"].setdefault(uid, {"accounts": 0, "parked": 0.0})
-        pf["accounts"] += 1; pf["parked"] += parked
-
-        p = people.setdefault(uid, {"user_id": uid, "name": names.get(uid, uid[:8]),
-                                    "accounts": 0, "parked": 0.0, "firms": {}})
-        p["accounts"] += 1; p["parked"] += parked
-        pfm = p["firms"].setdefault(firm, {"accounts": 0, "parked": 0.0})
-        pfm["accounts"] += 1; pfm["parked"] += parked
-        rows.append({"account_id": aid, "user_id": uid, "firm": firm,
-                     "name": a.get("name"), "parked": round(parked, 2)})
-
-    def r2(d, keys):
-        for k in keys: d[k] = round(d[k], 2)
-        return d
-
-    firm_list = sorted(firms.values(), key=lambda x: -x["parked"])
-    for f in firm_list:
-        f["people"] = {names.get(u, u[:8]): r2(v, ["parked"]) for u, v in f["people"].items()}
-        r2(f, ["buy", "hedge", "payouts", "parked"])
-    people_list = sorted(people.values(), key=lambda x: -x["parked"])
-    for p in people_list:
-        p["firms"] = {k: r2(v, ["parked"]) for k, v in p["firms"].items()}
-        r2(p, ["parked"])
-
-    total = round(sum(f["parked"] for f in firm_list), 2)
-    for f in firm_list:
-        f["share"] = round(100.0 * f["parked"] / total, 1) if total else 0.0
-    return {"firms": firm_list, "people": people_list,
-            "total_parked": total,
-            "total_accounts": sum(f["accounts"] for f in firm_list),
+    people_list = sorted(
+        [{"user_id": u, "name": names.get(u, u[:8])} for u in {r["user_id"] for r in rows}],
+        key=lambda p: p["name"].lower())
+    firm_list = sorted({r["firm"] for r in rows})
+    return {"accounts": rows, "people": people_list, "firms": firm_list,
             "fx_usd_eur": fx, "generated": _wt_now_iso()}
 
 

@@ -4638,47 +4638,105 @@
         <div id="adm-pane-overview">
           <div id="adm-msg" style="color:var(--sub);font-size:13px;padding:18px 2px">Lade Übersicht…</div>
           <div id="adm-body" hidden>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+            <!-- Filter -->
+            <div class="card" style="padding:12px 14px;margin-bottom:14px;display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+              <select id="adm-person" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+                <option value="">Alle Personen</option>
+              </select>
+              <select id="adm-firm" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+                <option value="">Alle Firmen</option>
+              </select>
+              <select id="adm-status" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+                <option value="active">Nur aktive</option>
+                <option value="archived">Nur archivierte</option>
+                <option value="all">Aktive + archivierte</option>
+              </select>
+              <input id="adm-search" type="search" placeholder="Suche Name / ID …" style="flex:1;min-width:150px;padding:7px 11px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+              <button class="btn btn-ghost" id="adm-refresh" style="font-size:12px;padding:6px 11px">↻</button>
+            </div>
+
+            <!-- KPIs -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:11px;margin-bottom:18px">
               <div class="card" style="padding:14px">
-                <div style="font-size:12px;color:var(--sub);font-weight:600">Aktiv geparkt</div>
-                <div id="adm-total" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Geparkt</div>
+                <div id="adm-k-parked" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
               </div>
               <div class="card" style="padding:14px">
-                <div style="font-size:12px;color:var(--sub);font-weight:600">Aktive Accounts</div>
-                <div id="adm-accs" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Accounts</div>
+                <div id="adm-k-accs" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
               </div>
               <div class="card" style="padding:14px">
-                <div style="font-size:12px;color:var(--sub);font-weight:600">Größtes Klumpenrisiko</div>
-                <div id="adm-top" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Kaufkosten</div>
+                <div id="adm-k-buy" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Hedge-Verluste</div>
+                <div id="adm-k-hedge" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Payouts erhalten</div>
+                <div id="adm-k-po" style="font-size:20px;font-weight:750;margin-top:3px;color:var(--ok)">–</div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Klumpenrisiko</div>
+                <div id="adm-k-top" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;gap:10px;margin:0 2px 10px;flex-wrap:wrap">
-              <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Pro Prop-Firma</span>
-              <select id="adm-person" style="margin-left:auto;padding:6px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
-                <option value="">Alle Personen zusammen</option>
-              </select>
-              <button class="btn btn-ghost" id="adm-refresh" style="font-size:12px;padding:5px 10px">↻</button>
-            </div>
-            <div style="overflow-x:auto">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:0 2px 8px">Pro Prop-Firma</div>
+            <div style="overflow-x:auto;margin-bottom:22px">
               <table style="width:100%;border-collapse:collapse;font-size:13px">
-                <thead>
-                  <tr style="text-align:left;color:var(--sub);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
-                    <th style="padding:8px 10px;font-weight:600">Firma</th>
-                    <th style="padding:8px 10px;font-weight:600;text-align:right">Accs</th>
-                    <th style="padding:8px 10px;font-weight:600;text-align:right">Kaufpreise</th>
-                    <th style="padding:8px 10px;font-weight:600;text-align:right">Hedge</th>
-                    <th style="padding:8px 10px;font-weight:600;text-align:right">Payouts</th>
-                    <th style="padding:8px 10px;font-weight:600;text-align:right">Geparkt</th>
-                    <th style="padding:8px 10px;font-weight:600;width:110px">Anteil</th>
-                  </tr>
-                </thead>
-                <tbody id="adm-rows"></tbody>
+                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em">
+                  <th style="padding:7px 9px;font-weight:600">Firma</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Accs</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Kauf</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Hedge</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Payouts</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Geparkt</th>
+                  <th style="padding:7px 9px;font-weight:600;width:110px">Anteil</th>
+                </tr></thead>
+                <tbody id="adm-firm-rows"></tbody>
+              </table>
+            </div>
+
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:0 2px 8px">Pro Person</div>
+            <div style="overflow-x:auto;margin-bottom:22px">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em">
+                  <th style="padding:7px 9px;font-weight:600">Person</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Accs</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Kauf</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Hedge</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Payouts</th>
+                  <th style="padding:7px 9px;font-weight:600;text-align:right">Geparkt</th>
+                  <th style="padding:7px 9px;font-weight:600;width:110px">Anteil</th>
+                </tr></thead>
+                <tbody id="adm-person-rows"></tbody>
+              </table>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 2px 8px">
+              <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Accounts &amp; IDs</span>
+              <span id="adm-acc-count" style="font-size:11.5px;color:var(--sub)"></span>
+            </div>
+            <div style="overflow:auto;max-height:460px;border:1px solid var(--border);border-radius:11px">
+              <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:var(--surface);z-index:1">
+                  <th style="padding:8px 9px;font-weight:600">Account</th>
+                  <th style="padding:8px 9px;font-weight:600">ID</th>
+                  <th style="padding:8px 9px;font-weight:600">Firma</th>
+                  <th style="padding:8px 9px;font-weight:600">Person</th>
+                  <th style="padding:8px 9px;font-weight:600;text-align:right">Kauf</th>
+                  <th style="padding:8px 9px;font-weight:600;text-align:right">Hedge</th>
+                  <th style="padding:8px 9px;font-weight:600;text-align:right">Payouts</th>
+                  <th style="padding:8px 9px;font-weight:600;text-align:right">Geparkt</th>
+                </tr></thead>
+                <tbody id="adm-acc-rows"></tbody>
               </table>
             </div>
             <p style="font-size:11.5px;color:var(--sub);margin:12px 2px 0">
-              Nur <b>aktive</b> Accounts (archivierte/geblowte zählen nicht mit). Geparkt = Kaufpreis + Hedge-Verluste − Payouts.
-              Live-Hedge-Konten sind keine Prop-Firma und bleiben außen vor.
+              Geparkt = Kaufpreis + Hedge-Verluste − Payouts. Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
+              Firmennamen werden zusammengefasst (z.&nbsp;B. „Apex Trader" → Apex), sonst wäre das Klumpenrisiko zu klein.
             </p>
           </div>
         </div>
@@ -5827,11 +5885,14 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
-        const sel = $('adm-person')
-        const cur = sel.value
-        sel.innerHTML = '<option value="">Alle Personen zusammen</option>' +
+        const selP = $('adm-person'), curP = selP.value
+        selP.innerHTML = '<option value="">Alle Personen</option>' +
           (d.people || []).map(p => `<option value="${escapeHtml(p.user_id)}">${escapeHtml(p.name)}</option>`).join('')
-        sel.value = cur
+        selP.value = curP
+        const selF = $('adm-firm'), curF = selF.value
+        selF.innerHTML = '<option value="">Alle Firmen</option>' +
+          (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
+        selF.value = curF
         msg.style.display = 'none'; body.hidden = false
         admRender()
       }catch(e){
@@ -5840,48 +5901,104 @@
       }
     }
 
+    // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
+    // KPIs, Firmen-, Personen- und Account-Tabelle IMMER überein und reagieren
+    // gemeinsam auf jeden Filter.
     function admRender(){
       if(!admData) return
-      const uid = $('adm-person').value
-      let firms, total, accs
-      if(uid){
-        const p = (admData.people || []).find(x => String(x.user_id) === String(uid))
-        firms = Object.entries((p && p.firms) || {}).map(([firm, v]) => ({ firm, accounts: v.accounts, parked: v.parked }))
-        firms.sort((a,b) => b.parked - a.parked)
-        total = p ? p.parked : 0; accs = p ? p.accounts : 0
-      }else{
-        firms = (admData.firms || []).slice()
-        total = admData.total_parked; accs = admData.total_accounts
-      }
-      $('adm-total').textContent = admEur.format(total || 0)
-      $('adm-accs').textContent = accs || 0
-      const top = firms[0]
-      const topShare = (top && total) ? Math.round(100 * top.parked / total) : 0
-      $('adm-top').textContent = top ? `${top.firm} ${topShare}%` : '–'
-      $('adm-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? '#e0891f' : 'var(--ink)')
+      const fPerson = $('adm-person').value
+      const fFirm   = $('adm-firm').value
+      const fStatus = $('adm-status').value
+      const q       = ($('adm-search').value || '').trim().toLowerCase()
 
-      const tb = $('adm-rows'); tb.innerHTML = ''
-      for(const f of firms){
-        const share = total ? (100 * f.parked / total) : 0
-        const col = share >= 40 ? 'var(--danger)' : (share >= 25 ? '#e0891f' : 'var(--violet)')
+      const rows = (admData.accounts || []).filter(r => {
+        if(fStatus === 'active'   && r.archived) return false
+        if(fStatus === 'archived' && !r.archived) return false
+        if(fPerson && String(r.user_id) !== String(fPerson)) return false
+        if(fFirm   && r.firm !== fFirm) return false
+        if(q && !((r.name||'').toLowerCase().includes(q) ||
+                  (r.ext||'').toLowerCase().includes(q)  ||
+                  (r.firm||'').toLowerCase().includes(q) ||
+                  (r.person||'').toLowerCase().includes(q))) return false
+        return true
+      })
+
+      const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
+      const totalParked = sum('parked')
+      $('adm-k-parked').textContent = admEur.format(totalParked)
+      $('adm-k-accs').textContent   = rows.length
+      $('adm-k-buy').textContent    = admEur.format(sum('buy'))
+      $('adm-k-hedge').textContent  = admEur.format(sum('hedge'))
+      $('adm-k-po').textContent     = admEur.format(sum('payouts'))
+
+      // Gruppieren
+      const group = (key, label) => {
+        const m = new Map()
+        for(const r of rows){
+          const k = r[key] || '—'
+          const g = m.get(k) || { label: r[label] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
+          g.accounts++; g.buy += r.buy; g.hedge += r.hedge; g.payouts += r.payouts; g.parked += r.parked
+          m.set(k, g)
+        }
+        return [...m.values()].sort((a,b) => b.parked - a.parked)
+      }
+      const byFirm   = group('firm', 'firm')
+      const byPerson = group('user_id', 'person')
+
+      const top = byFirm[0]
+      const topShare = (top && totalParked) ? (100 * top.parked / totalParked) : 0
+      $('adm-k-top').textContent = top ? `${top.label} ${topShare.toFixed(0)}%` : '–'
+      $('adm-k-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? '#e0891f' : 'var(--ink)')
+
+      const fill = (tbodyId, list) => {
+        const tb = $(tbodyId); tb.innerHTML = ''
+        for(const g of list){
+          const share = totalParked ? (100 * g.parked / totalParked) : 0
+          const col = share >= 40 ? 'var(--danger)' : (share >= 25 ? '#e0891f' : 'var(--violet)')
+          const c = (v, ex) => `<td style="padding:8px 9px;text-align:right;${ex||''}">${v}</td>`
+          const tr = document.createElement('tr')
+          tr.style.borderTop = '1px solid var(--border)'
+          tr.innerHTML =
+            `<td style="padding:8px 9px;font-weight:600" class="lbl"></td>` +
+            c(g.accounts) +
+            c(admEur.format(g.buy), 'color:var(--sub)') +
+            c(admEur.format(g.hedge), 'color:var(--sub)') +
+            c(g.payouts ? '−' + admEur.format(g.payouts) : '—', 'color:var(--sub)') +
+            c(`<b>${admEur.format(g.parked)}</b>`) +
+            `<td style="padding:8px 9px"><div style="display:flex;align-items:center;gap:7px">
+               <div style="flex:1;height:6px;border-radius:3px;background:var(--bg);overflow:hidden">
+                 <div style="height:100%;width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${col}"></div></div>
+               <span style="font-size:11.5px;color:var(--sub);min-width:32px;text-align:right">${share.toFixed(0)}%</span>
+             </div></td>`
+          tr.querySelector('.lbl').textContent = g.label
+          tb.appendChild(tr)
+        }
+      }
+      fill('adm-firm-rows', byFirm)
+      fill('adm-person-rows', byPerson)
+
+      // Account-Liste (nach geparktem Betrag, größte zuerst)
+      const accs = rows.slice().sort((a,b) => b.parked - a.parked)
+      $('adm-acc-count').textContent = accs.length + (accs.length === 1 ? ' Account' : ' Accounts')
+      const tb = $('adm-acc-rows'); tb.innerHTML = ''
+      for(const r of accs){
+        const c = (v, ex) => `<td style="padding:7px 9px;text-align:right;${ex||''}">${v}</td>`
         const tr = document.createElement('tr')
         tr.style.borderTop = '1px solid var(--border)'
-        const cell = (v, extra) => `<td style="padding:9px 10px;text-align:right;${extra||''}">${v}</td>`
+        if(r.archived) tr.style.opacity = '.55'
         tr.innerHTML =
-          `<td style="padding:9px 10px;font-weight:600"></td>` +
-          cell(f.accounts) +
-          cell(f.buy != null ? admEur.format(f.buy) : '—', 'color:var(--sub)') +
-          cell(f.hedge != null ? admEur.format(f.hedge) : '—', 'color:var(--sub)') +
-          cell(f.payouts ? '−' + admEur.format(f.payouts) : '—', 'color:var(--sub)') +
-          cell(`<b>${admEur.format(f.parked)}</b>`) +
-          `<td style="padding:9px 10px">
-             <div style="display:flex;align-items:center;gap:7px">
-               <div style="flex:1;height:6px;border-radius:3px;background:var(--bg);overflow:hidden">
-                 <div style="height:100%;width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${col}"></div>
-               </div>
-               <span style="font-size:11.5px;color:var(--sub);min-width:34px;text-align:right">${share.toFixed(0)}%</span>
-             </div></td>`
-        tr.firstElementChild.textContent = f.firm
+          `<td style="padding:7px 9px"><span class="nm" style="font-weight:600"></span>${r.archived ? ' <span style="font-size:10px;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;margin-left:5px">archiviert</span>' : ''}</td>` +
+          `<td style="padding:7px 9px" class="ext mono" style="font-size:11.5px;color:var(--sub)"></td>` +
+          `<td style="padding:7px 9px" class="fm"></td>` +
+          `<td style="padding:7px 9px;color:var(--sub)" class="pe"></td>` +
+          c(admEur.format(r.buy), 'color:var(--sub)') +
+          c(admEur.format(r.hedge), 'color:var(--sub)') +
+          c(r.payouts ? '−' + admEur.format(r.payouts) : '—', 'color:var(--sub)') +
+          c(`<b>${admEur.format(r.parked)}</b>`)
+        tr.querySelector('.nm').textContent  = r.name || '—'
+        tr.querySelector('.ext').textContent = r.ext || '—'
+        tr.querySelector('.fm').textContent  = r.firm
+        tr.querySelector('.pe').textContent  = r.person
         tb.appendChild(tr)
       }
     }
@@ -6016,7 +6133,8 @@
         $('adm-pane-overview').hidden = name !== 'overview'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
       }))
-      $('adm-person')?.addEventListener('change', admRender)
+      document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
+      $('adm-search')?.addEventListener('input', admRender)
       $('adm-refresh')?.addEventListener('click', admLoad)
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
