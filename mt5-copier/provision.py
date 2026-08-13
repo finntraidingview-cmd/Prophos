@@ -511,14 +511,19 @@ def run_provision(*, name, login, password, server, template_exe,
             if not hinted and time.time() - t0 > 45:
                 hinted = True
                 report("neustart", "running",
-                       "Zeigt das neue Terminal ein Login-Fenster? Dann dort einmal "
-                       "OK klicken (neuer Broker — nur beim ersten Konto noetig)")
+                       "Login-Fenster im neuen Terminal? OK klicken. Verbindet es "
+                       "trotzdem nicht (ganz neuer Broker): Rechtsklick auf 'Konten' "
+                       "→ 'Handelskonto eroeffnen' → Broker suchen (z.B. FundedNext) "
+                       "→ dann Login. Nur beim ALLERERSTEN Konto eines Brokers noetig "
+                       "— danach lernt das System den Broker dauerhaft.")
             time.sleep(3)
         if verdict != "authorized":
             raise ProvisionError(
                 f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 4 min'}) — "
-                f"Kontonummer/Passwort/Servername pruefen; falls ein Login-Fenster im "
-                f"Terminal offen ist, dort OK klicken und nochmal 'Fertig' druecken. "
+                f"Kontonummer/Passwort/Servername pruefen. Bei einem ganz neuen Broker: "
+                f"im Terminal Rechtsklick auf 'Konten' → 'Handelskonto eroeffnen' → "
+                f"Broker suchen, einloggen (Passwort speichern ✓), dann hier nochmal "
+                f"'Fertig' druecken — der Rest laeuft dann automatisch durch. "
                 f"Journal: {_journal_tail(new_data, jbase)}")
         # … dann der Snapshot: der Beweis, dass auch das EA laeuft — der
         # staerkste Check, den es gibt: unser eigenes EA schreibt ihn.
