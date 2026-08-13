@@ -1,0 +1,39 @@
+{
+  "_HINWEIS": "Vorlage fuer den ersten Test mit ZWEI FUSION-DEMO-KONTEN. Kopieren nach config.json und die 4 markierten Werte ausfuellen. Weil beide Konten beim selben Broker liegen, sind Symbolnamen und Kontraktgroessen identisch — das Symbol-Mapping ist deshalb 1:1.",
+
+  "_1_mode": "Fuer diesen Test 'demo': es werden ECHTE Orders gesendet, aber nur auf ein Demo-Konto. Das Programm bricht ab, falls dort ein Echtgeld-Konto eingeloggt ist. (Wer erst nur zuschauen will: 'dryrun'.)",
+  "mode": "demo",
+
+  "_2_AUSFUELLEN_terminal": "Pfad zur terminal64.exe der HEDGE-Installation (Demo-Konto B). Zweite MT5-Installation in einem eigenen Ordner, im portable-Modus gestartet.",
+  "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+  "hedge_portable": true,
+
+  "_3_AUSFUELLEN_kontonummern": "Die beiden Fusion-Demo-Kontonummern. hedge_expected_login = Konto B (dort wird gehedged). master_expected_login = Konto A (dort darf NICHTS platziert werden — haengt das Programm versehentlich dort, bricht es ab).",
+  "hedge_expected_login": 0,
+  "master_expected_login": 0,
+
+  "_4_snapshot": "Die Datei, die das Lese-EA im gemeinsamen Ordner schreibt. Standard passt normalerweise.",
+  "snapshot_file": "prophos_master.csv",
+  "common_files_dir": "",
+
+  "_5_hedge_berechnung": "Fuer den ersten Test multiplier 1.0 — dann muss der Hedge exakt dieselbe Lotgroesse haben wie der Master, das ist am leichtesten zu pruefen. Symbol-Mapping 1:1, weil selber Broker. Weitere Symbole nach Bedarf ergaenzen.",
+  "multiplier": 1.0,
+  "symbol_map": {
+    "NAS100": "NAS100",
+    "US500": "US500",
+    "US30": "US30",
+    "XAUUSD": "XAUUSD",
+    "EURUSD": "EURUSD"
+  },
+
+  "_6_sicherheit": "Fuer den Test klein halten — bricht ab, falls die Rechnung eine absurde Groesse ergibt.",
+  "max_lots_per_hedge": 2.0,
+  "adopt_existing_master_positions": false,
+
+  "_7_technik": "Standardwerte, normalerweise nichts anzupassen.",
+  "poll_interval": 0.5,
+  "deviation_points": 30,
+  "filling": "auto",
+  "magic": 770001,
+  "comment_prefix": "PH"
+}

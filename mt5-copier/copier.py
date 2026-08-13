@@ -97,6 +97,95 @@ def read_snapshot(path):
     return {"seq": seq, "login": login, "server": server, "margin_mode": margin_mode, "positions": positions}
 
 
+def norm_vol(si, vol):
+    """Volumen auf den Broker-Raster bringen: volume_step runden, auf min/max klemmen,
+    auf die Stellenzahl des Steps normalisieren (sonst 10014 invalid volume)."""
+    step = float(si.get("volume_step") or 0.01)
+    v = round(round(vol / step) * step, 8)
+    st = f"{step:.8f}".rstrip("0")
+    dec = len(st.split(".")[1]) if "." in st else 0
+    v = round(v, dec)
+    if v < float(si.get("volume_min") or 0.01) - TOL:
+        return 0.0
+    return min(v, float(si.get("volume_max") or 1e9))
+
+
+def plan_actions(positions, hedges, *, multiplier, symbol_map, max_lots, sym_info,
+                 skip_idents=frozenset()):
+    """REIN RECHNENDE Funktion — keine MT5-Aufrufe, deshalb testbar (siehe selftest.py).
+
+    positions: Master-Positionen aus dem Snapshot
+               [{ident, symbol, type(0=BUY/1=SELL), volume, contract_size}, …]
+    hedges:    aktueller Hedge-Bestand, {ident: [{ticket, symbol, type, volume}, …]}
+    sym_info:  callable(symbol) -> {volume_step, volume_min, volume_max, trade_contract_size} | None
+
+    Rückgabe: (actions, warnings)
+      actions: [{"kind":"open", ident, symbol, hedge_type, volume},
+                {"kind":"close", ident, ticket, symbol, volume}]
+
+    Prinzip: SOLL-Volumen pro Master-Position berechnen und den Ist-Bestand darauf
+    bringen. Dadurch sind Teil-Schließungen, verpasste Events und Recovery nach einem
+    Neustart derselbe Codepfad.
+    """
+    actions, warnings = [], []
+    desired = {}
+
+    for mp in positions:
+        if mp["ident"] in skip_idents:
+            continue
+        hsym = symbol_map.get(mp["symbol"])
+        if not hsym:
+            warnings.append(f"Kein Symbol-Mapping für '{mp['symbol']}'")
+            continue
+        si = sym_info(hsym)
+        if si is None:
+            warnings.append(f"Symbol {hsym} im Hedge-Terminal nicht gefunden")
+            continue
+        # Exposure statt Lots: derselbe Index hat je Broker andere Kontraktgrößen
+        m_cs = float(mp.get("contract_size") or 0) or 1.0
+        h_cs = float(si.get("trade_contract_size") or 0) or 1.0
+        v = norm_vol(si, mp["volume"] * multiplier * (m_cs / h_cs))
+        if v > max_lots:
+            warnings.append(f"Sicherheitsgrenze: {v} > max_lots_per_hedge {max_lots} ({hsym})")
+            continue
+        if v <= TOL:
+            warnings.append(f"Berechnetes Volumen unter Mindest-Lot ({hsym})")
+            continue
+        desired[mp["ident"]] = {"symbol": hsym, "type": mp["type"], "volume": v}
+
+    # Ist auf Soll bringen
+    for ident, d in desired.items():
+        have = sum(h["volume"] for h in hedges.get(ident, []))
+        if have < d["volume"] - TOL:
+            si = sym_info(d["symbol"])
+            missing = norm_vol(si, d["volume"] - have)
+            if missing > TOL:
+                actions.append({"kind": "open", "ident": ident, "symbol": d["symbol"],
+                                "hedge_type": 1 if d["type"] == 0 else 0,  # REVERSE
+                                "volume": missing})
+        elif have > d["volume"] + TOL:
+            excess = have - d["volume"]
+            for h in sorted(hedges.get(ident, []), key=lambda x: x["volume"]):
+                if excess <= TOL:
+                    break
+                si = sym_info(h["symbol"])
+                take = norm_vol(si, min(h["volume"], excess))
+                if take > TOL:
+                    actions.append({"kind": "close", "ident": ident, "ticket": h["ticket"],
+                                    "symbol": h["symbol"], "volume": take})
+                    excess -= take
+
+    # Master-Position weg -> zugehörige Hedges komplett schließen
+    for ident, hs in hedges.items():
+        if ident in desired:
+            continue
+        for h in hs:
+            actions.append({"kind": "close", "ident": ident, "ticket": h["ticket"],
+                            "symbol": h["symbol"], "volume": h["volume"]})
+
+    return actions, warnings
+
+
 def main():
     cfg = load_config()
     mode = str(cfg.get("mode", "dryrun")).lower()
@@ -219,35 +308,18 @@ def main():
             })
         return out
 
-    def norm_volume(sym, vol):
-        si = mt5.symbol_info(sym)
+    def sym_info(symbol):
+        """Symbol-Daten fuer plan_actions() — auf dem Hedge-Terminal abgefragt."""
+        si = mt5.symbol_info(symbol)
         if si is None:
-            return None, f"Symbol {sym} im Hedge-Terminal nicht gefunden"
-        step = float(si.volume_step or 0.01)
-        v = round(round(vol / step) * step, 8)
-        # auf die Stellenzahl des Steps normalisieren (sonst 10014 invalid volume)
-        dec = max(0, len(f"{step:.8f}".rstrip("0").split(".")[1]) if "." in f"{step:.8f}".rstrip("0") else 0)
-        v = round(v, dec)
-        if v < float(si.volume_min) - TOL:
-            return 0.0, None
-        v = min(v, float(si.volume_max))
-        return v, None
-
-    def target_volume(mpos, hedge_sym):
-        """Soll-Volumen ueber EXPOSURE, nicht ueber Lots: derselbe Index hat bei
-        verschiedenen Brokern unterschiedliche Kontraktgroessen."""
-        si = mt5.symbol_info(hedge_sym)
+            mt5.symbol_select(symbol, True)
+            si = mt5.symbol_info(symbol)
         if si is None:
-            return None, f"Symbol {hedge_sym} nicht gefunden"
-        m_cs = float(mpos.get("contract_size") or 0) or 1.0
-        h_cs = float(si.trade_contract_size or 0) or 1.0
-        raw = mpos["volume"] * multiplier * (m_cs / h_cs)
-        v, err = norm_volume(hedge_sym, raw)
-        if err:
-            return None, err
-        if v > max_lots:
-            return None, f"Sicherheitsgrenze: {v} > max_lots_per_hedge {max_lots}"
-        return v, None
+            return None
+        return {"volume_step": float(si.volume_step or 0.01),
+                "volume_min": float(si.volume_min or 0.01),
+                "volume_max": float(si.volume_max or 1e9),
+                "trade_contract_size": float(si.trade_contract_size or 1.0)}
 
     def send(req, what):
         if mode == "dryrun":
@@ -332,53 +404,26 @@ def main():
             seen_seq = snap["seq"]
 
             current = hedges_by_ident()
-            desired = {}
-            for mp in snap["positions"]:
-                if startup_idents and mp["ident"] in startup_idents:
-                    continue
-                hsym = symbol_map.get(mp["symbol"])
-                if not hsym:
-                    if mp["symbol"] not in warned_missing:
-                        log(f"⚠ Kein Symbol-Mapping fuer '{mp['symbol']}' — uebersprungen "
-                            f"(in config symbol_map ergaenzen).")
-                        warned_missing.add(mp["symbol"])
-                    continue
-                v, err = target_volume(mp, hsym)
-                if err:
-                    if mp["symbol"] not in warned_missing:
-                        log(f"⚠ {err} — uebersprungen.")
-                        warned_missing.add(mp["symbol"])
-                    continue
-                desired[mp["ident"]] = {"symbol": hsym, "type": mp["type"], "volume": v}
+            # Dieselbe Funktion, die selftest.py prueft — Test und Betrieb rechnen identisch.
+            actions, warns = plan_actions(
+                snap["positions"], current,
+                multiplier=multiplier, symbol_map=symbol_map, max_lots=max_lots,
+                sym_info=sym_info, skip_idents=(startup_idents or frozenset()))
 
-            # 1) Soll vorhanden → Ist darauf bringen
-            for ident, d in desired.items():
-                have = sum(h["volume"] for h in current.get(ident, []))
-                if d["volume"] <= TOL:
-                    continue
-                if have < d["volume"] - TOL:
-                    missing, err = norm_volume(d["symbol"], d["volume"] - have)
-                    if err or not missing:
-                        continue
-                    open_hedge(ident, d["symbol"], d["type"], missing)
-                elif have > d["volume"] + TOL:
-                    excess = have - d["volume"]
-                    for h in sorted(current.get(ident, []), key=lambda x: x["volume"]):
-                        if excess <= TOL:
-                            break
-                        take = min(h["volume"], excess)
-                        v, err = norm_volume(h["symbol"], take)
-                        if err or not v:
-                            continue
-                        if close_part(h, v):
-                            excess -= v
+            for w in warns:
+                if w not in warned_missing:
+                    log(f"⚠ {w} — uebersprungen.")
+                    warned_missing.add(w)
 
-            # 2) Master-Position weg → zugehoerige Hedges schliessen
-            for ident, hs in current.items():
-                if ident in desired:
-                    continue
-                for h in hs:
-                    close_part(h, h["volume"])
+            for a in actions:
+                if a["kind"] == "open":
+                    open_hedge(a["ident"], a["symbol"],
+                               0 if a["hedge_type"] == 1 else 1,  # master-Typ zurueckrechnen
+                               a["volume"])
+                else:
+                    open_pos = next((h for h in current.get(a["ident"], []) if h["ticket"] == a["ticket"]), None)
+                    if open_pos:
+                        close_part(open_pos, a["volume"])
 
             time.sleep(poll)
     except KeyboardInterrupt:
