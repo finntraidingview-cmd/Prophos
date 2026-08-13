@@ -1,12 +1,20 @@
 {
-  "_1_mode": "dryrun = nur mitlesen und loggen (Default, null Risiko) · demo = echte Orders, aber nur auf Demo-Hedge-Konto · live = echtes Geld",
+  "_1_mode": "dryrun = nur mitlesen und loggen (Default, null Risiko) · demo = echte Orders, aber nur auf DEMO-Hedge-Konto · live = echtes Geld",
   "mode": "dryrun",
 
-  "_2_terminals": "Pfad zur terminal64.exe der jeweiligen MT5-Installation. Beide Terminals muessen laufen und eingeloggt sein. Zwei getrennte (portable) Installationen, damit beide Accounts parallel offen sein koennen.",
-  "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
+  "_2_hedge_terminal": "Das LIVE-Terminal, an dem dieses Programm haengt. Es wird NUR hier gehandelt. Der Prop-Account wird gar nicht von Python beruehrt (dort laeuft das Lese-EA).",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+  "hedge_portable": true,
 
-  "_3_hedge": "multiplier = Lots auf dem Hedge pro 1 Lot Master (aus Prophos uebernehmen). symbol_map = Master-Symbol -> Hedge-Symbol.",
+  "_3_pflicht_pruefung": "Kontonummern zur Absicherung. hedge_expected_login = das Konto, auf dem gehedged werden DARF. master_expected_login = das Prop-Konto; haengt das Programm versehentlich DORT, bricht es ab. Beides eintragen — es ist der Schutz gegen das bekannte MT5-Problem, dass path= nicht immer greift.",
+  "hedge_expected_login": 399464,
+  "master_expected_login": 0,
+
+  "_4_snapshot": "Datei, die das Lese-EA im gemeinsamen Ordner schreibt. common_files_dir nur setzen, wenn der Standardpfad nicht passt (Standard: %APPDATA%\\MetaQuotes\\Terminal\\Common\\Files).",
+  "snapshot_file": "prophos_master.csv",
+  "common_files_dir": "",
+
+  "_5_hedge_berechnung": "multiplier = Faktor auf die Exposure (Kontraktgroessen werden automatisch umgerechnet). symbol_map = Master-Symbol -> Hedge-Symbol.",
   "multiplier": 1.0,
   "symbol_map": {
     "US100.cash": "NAS100",
@@ -16,14 +24,14 @@
     "SPX500": "US500"
   },
 
-  "_4_sicherheit": "max_lots_per_hedge bricht ab, wenn die berechnete Lotgroesse absurd hoch ist. adopt_existing = beim Start schon offene Master-Positionen nachtraeglich hedgen (Default false).",
+  "_6_sicherheit": "max_lots_per_hedge bricht ab statt eine absurde Groesse zu senden. adopt_existing = beim Start schon offene Master-Positionen nachtraeglich hedgen (Default false).",
   "max_lots_per_hedge": 5.0,
   "adopt_existing_master_positions": false,
 
-  "_5_technik": "poll_interval in Sekunden. filling IOC oder FOK (broker-abhaengig). magic/comment_prefix kennzeichnen die Hedges eindeutig.",
+  "_7_technik": "filling 'auto' waehlt anhand der Broker-Maske (empfohlen), alternativ IOC/FOK erzwingen.",
   "poll_interval": 0.5,
   "deviation_points": 30,
-  "filling": "IOC",
+  "filling": "auto",
   "magic": 770001,
   "comment_prefix": "PH"
 }

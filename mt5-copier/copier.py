@@ -1,137 +1,114 @@
 #!/usr/bin/env python3
 """
-Lokaler MT5-Hedge-Copier — EIGENSTÄNDIGE Testversion, getrennt vom laufenden Duplikum-Setup.
+Prophos MT5-Hedge-Executor — eigenstaendige Testversion, getrennt vom Duplikum-Setup.
 
-Idee: Auf dem PC der Person laufen zwei MT5-Terminals — eines mit dem Prop-MASTER (dort
-wird manuell getradet), eines mit dem LIVE-HEDGE-Konto. Dieses Programm hängt sich an
-BEIDE laufenden Terminals, liest die Master-Positionen und setzt die Gegenposition
-(Reverse-Hedge) im Hedge-Terminal.
+ARCHITEKTUR (nach Technik-Recherche 13.08.2026 bewusst so gewaehlt):
 
-WICHTIG — was dieses Programm NICHT tut:
-  · Es loggt sich NIE selbst bei einem Broker ein (keine Zugangsdaten nötig). Es benutzt
-    den Account, der im jeweiligen Terminal schon eingeloggt ist.
-  · Es sendet NIE eine Order an das Master-Terminal. Der Reader-Prozess enthält keinen
-    Order-Code — das ist strukturell ausgeschlossen, nicht nur per Flag.
-  · Es fasst Duplikum, app.py, prophos.html oder die Supabase-Tabellen NICHT an.
+  PROP-Terminal              gemeinsamer Ordner        LIVE-Terminal
+  ProphosHedgeReader.mq5  →  prophos_master.csv    →   dieses Programm
+  (nur lesend, kein                                    (haengt NUR hier,
+   OrderSend im Code)                                   setzt den Hedge)
 
-DREI STUFEN über `mode` in der config:
-  1. "dryrun"  (Default) — liest nur, LOGGT was es tun würde. Keine einzige Order.
-     → Damit kann man parallel zum laufenden Duplikum vergleichen, ob Richtung, Lots
-       und Symbol übereinstimmen. Null Risiko, null Nebenwirkung.
-  2. "demo"    — sendet echte Orders, aber NUR wenn das Hedge-Terminal auf einem
-     DEMO-Konto eingeloggt ist. Bei einem Echtgeld-Konto verweigert es den Versand.
-  3. "live"    — echte Orders auf echtem Konto. Erst wenn Stufe 1+2 sauber liefen.
-     ⚠ Für dasselbe Master-Paar dann Duplikum abschalten, sonst doppelter Hedge.
+Warum so und nicht mit Python auf beiden Seiten: Der `path=`-Parameter von
+mt5.initialize() greift laut mehreren dokumentierten Faellen nicht zuverlaessig —
+man kann an der FALSCHEN Terminal-Installation landen (Fehler -10003). Ein Python-
+Prozess, der versehentlich am Prop-Terminal haengt und dort Orders sendet, ist das
+schlimmste denkbare Szenario. Deshalb: Python haengt an GENAU EINEM Terminal (dem
+Live-Konto), die Master-Seite ist ein reines Lese-EA. Zusaetzlich wird nach dem
+Verbinden hart geprueft, ob wirklich das erwartete Konto dranhaengt (siehe
+verify_attached()) — bei Abweichung Abbruch, ohne eine einzige Order.
 
-Nicht getestet gegen echte Konten — Stufe 1 und 2 sind genau dafür da.
+DEKLARATIVES MODELL statt Event-Copier: Der Reader publiziert den KOMPLETTEN
+Positionsstand. Dieses Programm berechnet daraus pro Master-Position ein
+Soll-Volumen und bringt den Hedge darauf. Damit sind Teil-Schliessungen,
+verpasste Events, Teilfuellungen und Crash-Recovery derselbe Codepfad statt vier
+Sonderfaelle.
+
+DREI STUFEN (config "mode"):
+  1. dryrun (Default) — nur protokollieren, KEINE Order. Zum Vergleich mit dem
+     laufenden Duplikum.
+  2. demo — echte Orders, aber nur wenn das Live-Terminal auf einem DEMO-Konto ist.
+  3. live — echtes Geld. Vorher Duplikum fuer dieses Paar abschalten.
+
+Nicht gegen echte Konten getestet — Stufe 1 und 2 sind genau dafuer da.
 """
 
 import json
-import multiprocessing as mp
 import os
-import queue
 import sys
 import time
 from datetime import datetime
 
-# ── Config ─────────────────────────────────────────────────────────────────────
-def load_config(path=None):
-    path = path or os.environ.get("COPIER_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-    if not os.path.exists(path):
-        sys.exit(f"config.json nicht gefunden ({path}) — config.example.json kopieren und ausfuellen.")
-    with open(path, "r", encoding="utf-8") as f:
+TOL = 1e-6
+
+
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def load_config():
+    p = os.environ.get("COPIER_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    if not os.path.exists(p):
+        sys.exit(f"config.json nicht gefunden ({p}) — config.example.json kopieren und ausfuellen.")
+    with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def log(tag, msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] [{tag}] {msg}", flush=True)
+# ── Snapshot des Prop-Terminals lesen ───────────────────────────────────────────
+def read_snapshot(path):
+    """Gibt (seq, login, margin_mode, [positions]) oder None bei unvollstaendiger Datei."""
+    try:
+        with open(path, "r", encoding="ascii", errors="replace") as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    if not lines or not lines[0].startswith("PROPHOS1;"):
+        return None
+
+    head = lines[0].split(";")
+    try:
+        seq = int(head[1]); login = int(head[3]); server = head[4]
+        margin_mode = int(head[5]); count = int(head[6])
+    except (IndexError, ValueError):
+        return None
+
+    positions = []
+    footer_ok = False
+    for l in lines[1:]:
+        if l.startswith("P;"):
+            f_ = l.split(";")
+            try:
+                positions.append({
+                    "ident": int(f_[1]), "symbol": f_[2], "type": int(f_[3]),
+                    "volume": float(f_[4]), "contract_size": float(f_[5]),
+                })
+            except (IndexError, ValueError):
+                return None
+        elif l.startswith("END;"):
+            f_ = l.split(";")
+            try:
+                footer_ok = int(f_[1]) == seq and int(f_[2]) == len(positions)
+            except (IndexError, ValueError):
+                return None
+    if not footer_ok or len(positions) != count:
+        return None  # halb geschriebene Datei → diesen Tick ueberspringen
+    return {"seq": seq, "login": login, "server": server, "margin_mode": margin_mode, "positions": positions}
 
 
-# ── Reader: haengt am MASTER-Terminal, liest NUR ────────────────────────────────
-# Dieser Prozess importiert order_send nie und ruft es nie auf. Er kann auf dem
-# Prop-Konto nichts veraendern.
-def reader_proc(cfg, out_q, stop_ev):
-    import MetaTrader5 as mt5
-
-    path = cfg["master_terminal_path"]
-    if not mt5.initialize(path=path):
-        out_q.put({"type": "fatal", "who": "reader", "msg": f"initialize(master) fehlgeschlagen: {mt5.last_error()}"})
-        return
-
-    info = mt5.account_info()
-    if info is None:
-        out_q.put({"type": "fatal", "who": "reader", "msg": "account_info(master) leer — laeuft das Terminal und ist es eingeloggt?"})
-        mt5.shutdown()
-        return
-    out_q.put({"type": "hello", "who": "reader",
-               "login": info.login, "server": info.server, "name": info.name,
-               "trade_mode": int(info.trade_mode)})
-
-    poll = float(cfg.get("poll_interval", 0.5))
-    known = {}  # ticket -> {"volume": float, "type": int, "symbol": str}
-
-    while not stop_ev.is_set():
-        try:
-            positions = mt5.positions_get()
-            if positions is None:
-                positions = []
-            current = {}
-            for p in positions:
-                current[int(p.ticket)] = {"volume": float(p.volume), "type": int(p.type), "symbol": str(p.symbol)}
-
-            # neue Positionen
-            for tkt, pos in current.items():
-                if tkt not in known:
-                    out_q.put({"type": "open", "ticket": tkt, **pos})
-
-            # Teil-Schliessung (Volumen geschrumpft)
-            for tkt, pos in current.items():
-                prev = known.get(tkt)
-                if prev and pos["volume"] < prev["volume"] - 1e-9:
-                    out_q.put({"type": "partial", "ticket": tkt,
-                               "volume_before": prev["volume"], "volume_now": pos["volume"], **{k: pos[k] for k in ("type", "symbol")}})
-
-            # ganz geschlossen
-            for tkt, prev in list(known.items()):
-                if tkt not in current:
-                    out_q.put({"type": "close", "ticket": tkt, **prev})
-
-            known = current
-        except Exception as e:
-            out_q.put({"type": "error", "who": "reader", "msg": f"{type(e).__name__}: {str(e)[:150]}"})
-        time.sleep(poll)
-
-    mt5.shutdown()
-    out_q.put({"type": "bye", "who": "reader"})
-
-
-# ── Writer: haengt am HEDGE-Terminal, platziert die Gegenposition ───────────────
-def writer_proc(cfg, in_q, stop_ev):
-    import MetaTrader5 as mt5
-
+def main():
+    cfg = load_config()
     mode = str(cfg.get("mode", "dryrun")).lower()
-    path = cfg["hedge_terminal_path"]
-    if not mt5.initialize(path=path):
-        log("writer", f"FATAL initialize(hedge) fehlgeschlagen: {mt5.last_error()}")
-        return
+    if mode not in ("dryrun", "demo", "live"):
+        sys.exit(f"mode '{mode}' ungueltig — erlaubt: dryrun | demo | live")
 
-    info = mt5.account_info()
-    if info is None:
-        log("writer", "FATAL account_info(hedge) leer — Terminal offen und eingeloggt?")
-        mt5.shutdown()
-        return
+    import MetaTrader5 as mt5
 
-    # trade_mode: 0 = DEMO, 1 = CONTEST, 2 = REAL
-    is_real = int(info.trade_mode) == 2
-    log("writer", f"Hedge-Konto {info.login} @ {info.server} · {'ECHTGELD' if is_real else 'DEMO/CONTEST'} · Modus '{mode}'")
-
-    if mode == "demo" and is_real:
-        log("writer", "⛔ ABBRUCH: Modus 'demo', aber das Hedge-Terminal ist auf einem ECHTGELD-Konto. "
-                      "Entweder Demo-Konto einloggen oder bewusst mode='live' setzen.")
-        mt5.shutdown()
-        return
-    if mode == "live" and not is_real:
-        log("writer", "ℹ Modus 'live', Konto ist aber Demo — es wird auf Demo gehandelt.")
+    snap_name = cfg.get("snapshot_file", "prophos_master.csv")
+    common = cfg.get("common_files_dir") or os.path.join(
+        os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
+    snap_path = os.path.join(common, snap_name)
 
     prefix = cfg.get("comment_prefix", "PH")
     magic = int(cfg.get("magic", 770001))
@@ -139,199 +116,276 @@ def writer_proc(cfg, in_q, stop_ev):
     multiplier = float(cfg.get("multiplier", 1.0))
     max_lots = float(cfg.get("max_lots_per_hedge", 5.0))
     deviation = int(cfg.get("deviation_points", 30))
-    filling_name = str(cfg.get("filling", "IOC")).upper()
-    filling = mt5.ORDER_FILLING_FOK if filling_name == "FOK" else mt5.ORDER_FILLING_IOC
+    poll = float(cfg.get("poll_interval", 0.5))
+    adopt = bool(cfg.get("adopt_existing_master_positions", False))
+    exp_hedge_login = cfg.get("hedge_expected_login")
+    exp_master_login = cfg.get("master_expected_login")
 
-    def hedge_positions_by_master():
-        """Bestehende Hedges anhand des Kommentars wiedererkennen (Idempotenz nach Neustart)."""
+    print("=" * 72)
+    print(f" Prophos MT5-Hedge-Executor · Modus {mode.upper()}")
+    if mode == "dryrun":
+        print(" DRYRUN — es wird KEINE Order gesendet, nur protokolliert.")
+    print(f" Snapshot: {snap_path}")
+    print(f" Multiplikator {multiplier} · Mapping {symbol_map}")
+    print(" Duplikum / app.py / prophos.html werden nicht angefasst.")
+    print("=" * 72)
+
+    # ── An das LIVE-Terminal haengen ────────────────────────────────────────────
+    init_kw = {}
+    if cfg.get("hedge_terminal_path"):
+        init_kw["path"] = cfg["hedge_terminal_path"]
+    if cfg.get("hedge_portable"):
+        init_kw["portable"] = True
+    # BEWUSST kein login/password/server: initialize() nutzt den im Terminal
+    # eingeloggten Account. mt5.login() wird NIE aufgerufen — das wuerde ein
+    # Terminal auf ein anderes Konto umschalten.
+    if not mt5.initialize(**init_kw):
+        sys.exit(f"initialize() fehlgeschlagen: {mt5.last_error()} — laeuft das Live-Terminal?")
+
+    ti = mt5.terminal_info()
+    ai = mt5.account_info()
+    if ti is None or ai is None:
+        mt5.shutdown()
+        sys.exit("terminal_info()/account_info() leer — Terminal offen und eingeloggt?")
+
+    # ── HARTE PRUEFUNG: haengen wir am richtigen Terminal/Konto? ────────────────
+    # Ohne diese Pruefung koennte ein nicht greifender path=-Parameter dazu
+    # fuehren, dass wir am PROP-Terminal haengen und dort Orders senden.
+    log(f"Verbunden mit Terminal: {ti.path}")
+    log(f"Konto {ai.login} @ {ai.server} · {ai.company}")
+    problems = []
+    if exp_hedge_login and int(exp_hedge_login) != int(ai.login):
+        problems.append(f"Erwartet war Hedge-Konto {exp_hedge_login}, verbunden ist aber {ai.login}")
+    if exp_master_login and int(exp_master_login) == int(ai.login):
+        problems.append(f"GEFAHR: verbunden mit dem MASTER-Konto {ai.login} — hier darf nichts platziert werden")
+    if cfg.get("hedge_terminal_path"):
+        want = os.path.normcase(os.path.dirname(os.path.abspath(cfg["hedge_terminal_path"])))
+        got = os.path.normcase(os.path.abspath(str(ti.path)))
+        if want not in got and got not in want:
+            problems.append(f"Terminal-Pfad weicht ab: erwartet '{want}', verbunden '{got}' "
+                            f"(bekanntes MT5-Problem: path= greift nicht immer)")
+    if problems:
+        for p in problems:
+            log("⛔ " + p)
+        log("⛔ ABBRUCH — keine Order gesendet.")
+        mt5.shutdown()
+        sys.exit(1)
+
+    is_real = int(ai.trade_mode) == 2
+    log(f"Hedge-Konto ist {'ECHTGELD' if is_real else 'DEMO/CONTEST'}")
+    if mode == "demo" and is_real:
+        log("⛔ ABBRUCH: Modus 'demo', aber das Hedge-Terminal haengt an einem ECHTGELD-Konto.")
+        mt5.shutdown(); sys.exit(1)
+
+    # Hedging-Modus ist Pflicht: im Netting-Modus gibt es nur EINE Position pro
+    # Symbol, damit bricht die Zuordnung Master-Position ↔ Hedge-Position.
+    if int(ai.margin_mode) != int(mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING):
+        log("⛔ ABBRUCH: Das Hedge-Konto ist NICHT im Hedging-Modus (Netting). "
+            "Im Netting-Modus laesst sich pro Symbol nur eine Position halten — "
+            "Zuordnung und Teil-Schliessungen brechen. Hedging-Konto verwenden.")
+        mt5.shutdown(); sys.exit(1)
+
+    if mode != "dryrun" and not ti.trade_allowed:
+        log("⛔ ABBRUCH: 'Algo Trading' ist im Live-Terminal nicht aktiv "
+            "(Extras → Optionen → Expert Advisors). Aus Python nicht schaltbar.")
+        mt5.shutdown(); sys.exit(1)
+
+    # ── Hilfsfunktionen ─────────────────────────────────────────────────────────
+    def hedges_by_ident():
+        """Aktueller Hedge-Bestand, gruppiert nach Master-Identifier.
+        Primaerfilter ist die MAGIC (broker-stabil), der Kommentar traegt die
+        Zuordnung — Kommentare koennen vom Broker ergaenzt werden, deshalb wird
+        nur der Praefix gesucht statt auf Gleichheit geprueft."""
         out = {}
-        try:
-            for p in (mt5.positions_get() or []):
-                c = str(getattr(p, "comment", "") or "")
-                if c.startswith(prefix + "-"):
-                    try:
-                        mtkt = int(c.split("-", 1)[1])
-                    except (ValueError, IndexError):
-                        continue
-                    out[mtkt] = {"ticket": int(p.ticket), "volume": float(p.volume), "symbol": str(p.symbol), "type": int(p.type)}
-        except Exception as e:
-            log("writer", f"Konnte bestehende Hedges nicht lesen: {type(e).__name__}: {e}")
+        for p in (mt5.positions_get() or []):
+            if int(getattr(p, "magic", 0)) != magic:
+                continue
+            c = str(getattr(p, "comment", "") or "")
+            i = c.find(prefix + "-")
+            if i < 0:
+                continue
+            tok = c[i + len(prefix) + 1:]
+            digits = ""
+            for ch in tok:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            if not digits:
+                continue
+            out.setdefault(int(digits), []).append({
+                "ticket": int(p.ticket), "volume": float(p.volume),
+                "symbol": str(p.symbol), "type": int(p.type),
+            })
         return out
 
-    mapping = hedge_positions_by_master()
-    if mapping:
-        log("writer", f"↩ {len(mapping)} bestehende Hedge-Position(en) wiedererkannt — keine Doppel-Hedges.")
-
-    def calc_lots(hedge_symbol, master_volume):
-        lots = master_volume * multiplier
-        si = mt5.symbol_info(hedge_symbol)
+    def norm_volume(sym, vol):
+        si = mt5.symbol_info(sym)
         if si is None:
-            return None, f"Symbol {hedge_symbol} im Hedge-Terminal nicht gefunden"
+            return None, f"Symbol {sym} im Hedge-Terminal nicht gefunden"
         step = float(si.volume_step or 0.01)
-        lots = round(round(lots / step) * step, 8)
-        lots = max(float(si.volume_min), min(lots, float(si.volume_max)))
-        if lots > max_lots:
-            return None, f"Sicherheitsgrenze: {lots} > max_lots_per_hedge {max_lots}"
-        return lots, None
+        v = round(round(vol / step) * step, 8)
+        # auf die Stellenzahl des Steps normalisieren (sonst 10014 invalid volume)
+        dec = max(0, len(f"{step:.8f}".rstrip("0").split(".")[1]) if "." in f"{step:.8f}".rstrip("0") else 0)
+        v = round(v, dec)
+        if v < float(si.volume_min) - TOL:
+            return 0.0, None
+        v = min(v, float(si.volume_max))
+        return v, None
 
-    def send(request, what):
-        if mode == "dryrun":
-            log("writer", f"DRYRUN — wuerde senden: {what}")
-            return None
-        res = mt5.order_send(request)
-        if res is None:
-            log("writer", f"❌ order_send lieferte None ({mt5.last_error()}) für {what}")
-            return None
-        if res.retcode != mt5.TRADE_RETCODE_DONE:
-            log("writer", f"❌ {what} abgelehnt: retcode={res.retcode} {getattr(res,'comment','')}")
-            return None
-        log("writer", f"✅ {what} · deal={res.deal} order={res.order}")
-        return res
-
-    def open_hedge(ev):
-        m_symbol = ev["symbol"]
-        h_symbol = symbol_map.get(m_symbol)
-        if not h_symbol:
-            log("writer", f"⚠ Kein Symbol-Mapping für '{m_symbol}' — übersprungen (in config symbol_map ergänzen).")
-            return
-        lots, err = calc_lots(h_symbol, ev["volume"])
+    def target_volume(mpos, hedge_sym):
+        """Soll-Volumen ueber EXPOSURE, nicht ueber Lots: derselbe Index hat bei
+        verschiedenen Brokern unterschiedliche Kontraktgroessen."""
+        si = mt5.symbol_info(hedge_sym)
+        if si is None:
+            return None, f"Symbol {hedge_sym} nicht gefunden"
+        m_cs = float(mpos.get("contract_size") or 0) or 1.0
+        h_cs = float(si.trade_contract_size or 0) or 1.0
+        raw = mpos["volume"] * multiplier * (m_cs / h_cs)
+        v, err = norm_volume(hedge_sym, raw)
         if err:
-            log("writer", f"⚠ {err} — übersprungen.")
-            return
-        # REVERSE: Master BUY (0) -> Hedge SELL, Master SELL (1) -> Hedge BUY
-        h_type = mt5.ORDER_TYPE_SELL if ev["type"] == 0 else mt5.ORDER_TYPE_BUY
+            return None, err
+        if v > max_lots:
+            return None, f"Sicherheitsgrenze: {v} > max_lots_per_hedge {max_lots}"
+        return v, None
+
+    def send(req, what):
+        if mode == "dryrun":
+            log(f"DRYRUN — wuerde senden: {what}")
+            return True
+        r = mt5.order_send(req)
+        if r is None:
+            log(f"❌ order_send None ({mt5.last_error()}) — {what}")
+            return False
+        if r.retcode != mt5.TRADE_RETCODE_DONE:
+            log(f"❌ abgelehnt retcode={r.retcode} {getattr(r,'comment','')} — {what}")
+            return False
+        log(f"✅ {what} · deal={r.deal}")
+        return True
+
+    def filling_for(sym):
+        name = str(cfg.get("filling", "auto")).upper()
+        if name == "IOC":
+            return mt5.ORDER_FILLING_IOC
+        if name == "FOK":
+            return mt5.ORDER_FILLING_FOK
+        si = mt5.symbol_info(sym)
+        mask = int(getattr(si, "filling_mode", 0) or 0)
+        if mask & 2:
+            return mt5.ORDER_FILLING_IOC
+        if mask & 1:
+            return mt5.ORDER_FILLING_FOK
+        return mt5.ORDER_FILLING_RETURN
+
+    def open_hedge(ident, sym, mtype, vol):
+        h_type = mt5.ORDER_TYPE_SELL if mtype == 0 else mt5.ORDER_TYPE_BUY   # REVERSE
         side = "SELL" if h_type == mt5.ORDER_TYPE_SELL else "BUY"
-        if not mt5.symbol_select(h_symbol, True):
-            log("writer", f"⚠ symbol_select({h_symbol}) fehlgeschlagen")
-        tick = mt5.symbol_info_tick(h_symbol)
+        mt5.symbol_select(sym, True)
+        tick = mt5.symbol_info_tick(sym)
         price = (tick.bid if h_type == mt5.ORDER_TYPE_SELL else tick.ask) if tick else 0.0
-        req = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": h_symbol,
-            "volume": lots,
-            "type": h_type,
-            "price": price,
-            "deviation": deviation,
-            "magic": magic,
-            "comment": f"{prefix}-{ev['ticket']}",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": filling,
-        }
-        what = f"HEDGE OPEN {side} {lots} {h_symbol} (Master #{ev['ticket']} {ev['volume']} {m_symbol})"
-        res = send(req, what)
-        if res is not None:
-            mapping.update(hedge_positions_by_master())
+        # Bewusst KEIN SL/TP auf dem Hedge: bei einem Hedge wuerde ein eigener
+        # Stop die Absicherung vorzeitig aufloesen.
+        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": vol, "type": h_type,
+               "price": price, "deviation": deviation, "magic": magic,
+               "comment": f"{prefix}-{ident}", "type_time": mt5.ORDER_TIME_GTC,
+               "type_filling": filling_for(sym)}
+        return send(req, f"HEDGE OPEN {side} {vol} {sym} (Master-Pos {ident})")
 
-    def close_hedge(master_ticket, portion=1.0):
-        h = mapping.get(master_ticket) or hedge_positions_by_master().get(master_ticket)
-        if not h:
-            log("writer", f"ℹ Kein Hedge zu Master #{master_ticket} gefunden (schon zu / nie gesetzt).")
-            return
-        vol = h["volume"] if portion >= 1.0 else round(h["volume"] * portion, 2)
-        si = mt5.symbol_info(h["symbol"])
-        if si:
-            step = float(si.volume_step or 0.01)
-            vol = round(round(vol / step) * step, 8)
-            vol = max(float(si.volume_min), min(vol, h["volume"]))
-        close_type = mt5.ORDER_TYPE_BUY if h["type"] == 1 else mt5.ORDER_TYPE_SELL
+    def close_part(h, vol):
+        ctype = mt5.ORDER_TYPE_BUY if h["type"] == 1 else mt5.ORDER_TYPE_SELL
         tick = mt5.symbol_info_tick(h["symbol"])
-        price = (tick.ask if close_type == mt5.ORDER_TYPE_BUY else tick.bid) if tick else 0.0
-        req = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": h["symbol"],
-            "volume": vol,
-            "type": close_type,
-            "position": h["ticket"],
-            "price": price,
-            "deviation": deviation,
-            "magic": magic,
-            "comment": f"{prefix}c-{master_ticket}",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": filling,
-        }
-        what = f"HEDGE CLOSE {vol} {h['symbol']} (Master #{master_ticket}{'' if portion>=1 else f', anteilig {portion:.2%}'})"
-        res = send(req, what)
-        if res is not None or mode == "dryrun":
-            if portion >= 1.0:
-                mapping.pop(master_ticket, None)
-            else:
-                mapping.update(hedge_positions_by_master())
+        price = (tick.ask if ctype == mt5.ORDER_TYPE_BUY else tick.bid) if tick else 0.0
+        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": h["symbol"], "volume": vol,
+               "type": ctype, "position": h["ticket"], "price": price,
+               "deviation": deviation, "magic": magic, "comment": f"{prefix}c",
+               "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_for(h["symbol"])}
+        return send(req, f"HEDGE CLOSE {vol} {h['symbol']} (Ticket {h['ticket']})")
 
-    adopt = bool(cfg.get("adopt_existing_master_positions", False))
-    started = time.time()
+    # ── Hauptschleife: Soll/Ist abgleichen ──────────────────────────────────────
+    log("Warte auf Snapshot des Prop-Terminals…")
+    seen_seq = None
+    startup_idents = None
+    warned_missing = set()
 
-    while not stop_ev.is_set():
-        try:
-            ev = in_q.get(timeout=1.0)
-        except queue.Empty:
-            continue
-
-        t = ev.get("type")
-        if t == "hello":
-            tm = {0: "DEMO", 1: "CONTEST", 2: "ECHTGELD"}.get(ev.get("trade_mode"), "?")
-            log("reader", f"Master-Konto {ev['login']} @ {ev['server']} · {tm}")
-        elif t == "fatal":
-            log(ev.get("who", "?"), f"FATAL {ev['msg']}")
-            break
-        elif t == "error":
-            log(ev.get("who", "?"), f"Fehler: {ev['msg']}")
-        elif t == "open":
-            # Positionen, die beim Start schon offen waren, nicht ungefragt hedgen
-            if not adopt and time.time() - started < 3.0:
-                log("writer", f"⏭ Master #{ev['ticket']} war beim Start schon offen — nicht übernommen "
-                              f"(adopt_existing_master_positions=true, wenn gewünscht).")
-                continue
-            log("reader", f"🆕 Master-Position: {'BUY' if ev['type']==0 else 'SELL'} {ev['volume']} {ev['symbol']} #{ev['ticket']}")
-            open_hedge(ev)
-        elif t == "partial":
-            before, now = ev["volume_before"], ev["volume_now"]
-            portion = max(0.0, min(1.0, (before - now) / before)) if before > 0 else 0.0
-            log("reader", f"↘ Master #{ev['ticket']} teil-geschlossen: {before} → {now} ({portion:.2%})")
-            close_hedge(ev["ticket"], portion)
-        elif t == "close":
-            log("reader", f"🔚 Master #{ev['ticket']} geschlossen → Hedge zu")
-            close_hedge(ev["ticket"], 1.0)
-        elif t == "bye":
-            break
-
-    mt5.shutdown()
-    log("writer", "beendet")
-
-
-# ── Start ──────────────────────────────────────────────────────────────────────
-def main():
-    cfg = load_config()
-    mode = str(cfg.get("mode", "dryrun")).lower()
-    if mode not in ("dryrun", "demo", "live"):
-        sys.exit(f"mode '{mode}' ungültig — erlaubt: dryrun | demo | live")
-
-    print("=" * 70)
-    print(f" MT5-Hedge-Copier (Testversion) · Modus: {mode.upper()}")
-    if mode == "dryrun":
-        print(" DRYRUN: es wird KEINE Order gesendet — nur protokolliert.")
-    print(f" Multiplikator: {cfg.get('multiplier')} · Symbol-Mapping: {cfg.get('symbol_map')}")
-    print(" Duplikum/app.py/prophos.html werden nicht angefasst.")
-    print("=" * 70)
-
-    q = mp.Queue()
-    stop = mp.Event()
-    pr = mp.Process(target=reader_proc, args=(cfg, q, stop), daemon=True)
-    pw = mp.Process(target=writer_proc, args=(cfg, q, stop), daemon=True)
-    pr.start(); pw.start()
     try:
-        while pr.is_alive() and pw.is_alive():
-            time.sleep(0.5)
+        while True:
+            snap = read_snapshot(snap_path)
+            if snap is None:
+                time.sleep(poll)
+                continue
+
+            if exp_master_login and int(exp_master_login) != int(snap["login"]):
+                log(f"⛔ Snapshot kommt von Konto {snap['login']}, erwartet war {exp_master_login} — ignoriert.")
+                time.sleep(poll)
+                continue
+
+            if seen_seq is None:
+                log(f"✓ Snapshot verbunden — Master-Konto {snap['login']} @ {snap['server']}, "
+                    f"{len(snap['positions'])} offene Position(en)")
+                if not adopt:
+                    startup_idents = {p["ident"] for p in snap["positions"]}
+                    if startup_idents:
+                        log(f"⏭ {len(startup_idents)} Position(en) waren beim Start schon offen — "
+                            f"werden nicht nachtraeglich gehedged (adopt_existing_master_positions).")
+                else:
+                    startup_idents = set()
+            seen_seq = snap["seq"]
+
+            current = hedges_by_ident()
+            desired = {}
+            for mp in snap["positions"]:
+                if startup_idents and mp["ident"] in startup_idents:
+                    continue
+                hsym = symbol_map.get(mp["symbol"])
+                if not hsym:
+                    if mp["symbol"] not in warned_missing:
+                        log(f"⚠ Kein Symbol-Mapping fuer '{mp['symbol']}' — uebersprungen "
+                            f"(in config symbol_map ergaenzen).")
+                        warned_missing.add(mp["symbol"])
+                    continue
+                v, err = target_volume(mp, hsym)
+                if err:
+                    if mp["symbol"] not in warned_missing:
+                        log(f"⚠ {err} — uebersprungen.")
+                        warned_missing.add(mp["symbol"])
+                    continue
+                desired[mp["ident"]] = {"symbol": hsym, "type": mp["type"], "volume": v}
+
+            # 1) Soll vorhanden → Ist darauf bringen
+            for ident, d in desired.items():
+                have = sum(h["volume"] for h in current.get(ident, []))
+                if d["volume"] <= TOL:
+                    continue
+                if have < d["volume"] - TOL:
+                    missing, err = norm_volume(d["symbol"], d["volume"] - have)
+                    if err or not missing:
+                        continue
+                    open_hedge(ident, d["symbol"], d["type"], missing)
+                elif have > d["volume"] + TOL:
+                    excess = have - d["volume"]
+                    for h in sorted(current.get(ident, []), key=lambda x: x["volume"]):
+                        if excess <= TOL:
+                            break
+                        take = min(h["volume"], excess)
+                        v, err = norm_volume(h["symbol"], take)
+                        if err or not v:
+                            continue
+                        if close_part(h, v):
+                            excess -= v
+
+            # 2) Master-Position weg → zugehoerige Hedges schliessen
+            for ident, hs in current.items():
+                if ident in desired:
+                    continue
+                for h in hs:
+                    close_part(h, h["volume"])
+
+            time.sleep(poll)
     except KeyboardInterrupt:
-        print("\nStoppe…")
+        log("Gestoppt.")
     finally:
-        stop.set()
-        pr.join(timeout=5); pw.join(timeout=5)
-        for p in (pr, pw):
-            if p.is_alive():
-                p.terminate()
-    print("Copier beendet.")
+        mt5.shutdown()
 
 
 if __name__ == "__main__":
-    mp.freeze_support()
     main()
