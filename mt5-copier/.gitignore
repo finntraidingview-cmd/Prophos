@@ -18,3 +18,8 @@ accounts.json
 
 __pycache__/
 *.pyc
+
+# Selbst-Update-Artefakte der .bat-Schleifen (15.08.2026)
+*.prev
+*.newc
+*.newp

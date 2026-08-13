@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
@@ -795,6 +796,37 @@ class Handler(BaseHTTPRequestHandler):
         pass  # eigenes, ruhigeres Logging oben
 
 
+# ── Selbst-Update wie im Copier (15.08.2026): neue VERSION auf GitHub → Neustart
+# durch die start-panel.bat-Schleife. Das Panel ist zustandslos (Configs liegen
+# atomar auf Platte) — einzige Ruecksicht: nie mitten in einer Provisionierung.
+UPDATE_URL = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+              "main/mt5-copier/VERSION")
+
+
+def _local_version():
+    try:
+        with open(os.path.join(HERE, "VERSION"), "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _version_watcher(my_version):
+    import urllib.request
+    while True:
+        time.sleep(60)
+        try:
+            with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
+                remote = r.read().decode("utf-8", "replace").strip()
+        except Exception:
+            continue
+        if remote and remote != my_version:
+            if PROV_JOB and not PROV_JOB.get("done"):
+                continue  # nie mitten in einer Provisionierung
+            print(f"[panel] Update {my_version} → {remote} — Neustart durch start-panel.bat.", flush=True)
+            os._exit(0)
+
+
 def main():
     print("=" * 66)
     print(" Prophos Copier-Panel")
@@ -807,6 +839,10 @@ def main():
         print(f" IGNORIERT (kein gueltiger Config-Name): {', '.join(ignored)}")
     print(f" Im Browser oeffnen:  http://127.0.0.1:{PORT}")
     print(" Nur lokal erreichbar. Prophos wird nicht angefasst.")
+    v = _local_version()
+    if v:
+        print(f" Version {v} · Selbst-Update aktiv")
+        threading.Thread(target=_version_watcher, args=(v,), daemon=True).start()
     print("=" * 66)
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

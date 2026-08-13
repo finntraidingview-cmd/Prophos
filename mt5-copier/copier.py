@@ -37,10 +37,42 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+import urllib.request
 from datetime import datetime
 
 TOL = 1e-6
+
+# ── Selbst-Update (15.08.2026, Finns Wunsch: kein manuelles Nachladen mehr) ─────
+# Ein Hintergrund-Thread prueft jede Minute die VERSION-Datei auf GitHub. Weicht
+# sie von der lokalen ab, beendet sich der Copier SAUBER — aber erst, wenn alle
+# Master flach sind (nie mitten im Trade). Die start-copier.bat laedt in ihrer
+# Schleife vor jedem Start die aktuellen Dateien und ersetzt sie nur, wenn der
+# Download vollstaendig ankam. Ohne lokale VERSION-Datei (alte .bat) ist der
+# Mechanismus komplett aus.
+UPDATE_URL = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+              "main/mt5-copier/VERSION")
+_REMOTE_VERSION = {"v": None}
+
+
+def local_version():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"),
+                  "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _version_watcher():
+    while True:
+        try:
+            with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
+                _REMOTE_VERSION["v"] = r.read().decode("utf-8", "replace").strip()
+        except Exception:
+            pass  # kein Internet o.ae. — einfach beim alten Stand bleiben
+        time.sleep(60)
 
 # Dieselbe Namensregel wie im Panel (panel.py) — bewusst streng, damit
 # Explorer-Kopien wie "config - Kopie.json" oder "config (2).json" NICHT als
@@ -628,6 +660,11 @@ def main():
     last_dir_check = time.time()
     known_files = {os.path.basename(p) for p in cfg_paths}
     restart = False
+    my_version = local_version()
+    if my_version:
+        log(f"Version {my_version} · Selbst-Update aktiv (prueft GitHub jede Minute)")
+        threading.Thread(target=_version_watcher, daemon=True).start()
+    update_waiting = False
     log(f"Warte auf Snapshots von {len(masters)} Master-Terminal(s)…")
 
     def master_status(m, snap, hedges, connected):
@@ -673,6 +710,20 @@ def main():
                         log(f"⚠ [{m.file}] Config-Reload fehlgeschlagen: {type(e).__name__}: {str(e)[:80]}")
                 if restart:
                     break
+
+            # Selbst-Update: neue Version auf GitHub → sauber neu starten, aber
+            # NUR wenn kein Master eine Position oder einen Hedge offen hat.
+            rv = _REMOTE_VERSION["v"]
+            if my_version and rv and rv != my_version:
+                busy = [m.file for m in masters if getattr(m, "busy", False)]
+                if not busy:
+                    log(f"↻ Update {my_version} → {rv} — alle Master flach, starte neu "
+                        f"(start-copier.bat laedt die neuen Dateien).")
+                    break
+                if not update_waiting:
+                    update_waiting = True
+                    log(f"↻ Update {my_version} → {rv} verfuegbar — warte, bis alle Master "
+                        f"flach sind ({', '.join(busy)}).")
 
             # Neue/geloeschte config*.json → Neustart, damit die Flotten-Pruefung
             # und die Startpruefungen fuer den neuen Master laufen.
@@ -837,6 +888,10 @@ def main():
                                 m.open_done.pop(ident, None); m.open_last.pop(ident, None)
                                 m.open_seen.pop(ident, None)
                                 m.blocked.discard(ident)
+
+                # busy = dieser Master hat offene Positionen ODER offene Hedges —
+                # solange wird kein Selbst-Update-Neustart ausgefuehrt.
+                m.busy = bool(snap["positions"]) or bool(hedges)
 
                 if time.time() - m.last_status > 3.0:
                     m.last_status = time.time()
