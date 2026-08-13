@@ -11,5 +11,10 @@ config*.json
 # Status-/Laufzeitdateien des Copiers — pro PC, nie im Repo.
 status*.json
 
+# Falls je eine Account-Liste auf dem PC entsteht (Kontonummern, Pfade):
+# darf unter keinen Umstaenden in einen Commit. Vorsorglicher Eintrag —
+# provision.py, das sie nutzen wollte, wurde am 13.08.2026 wieder entfernt.
+accounts.json
+
 __pycache__/
 *.pyc
