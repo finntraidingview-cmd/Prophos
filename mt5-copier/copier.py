@@ -328,8 +328,28 @@ class Master:
         self.warned = set()
         self.virtual = {}
         self.virtual_ticket = -1
+        # Reopen-Guard, umgebaut 14.08.2026 (Internet-Ausfall-Szenario):
+        #   open_last  — letzter Sendeversuch (Cooldown-Anker)
+        #   open_fail  — FEHLGESCHLAGENE Sends in Folge (Ablehnung/keine Verbindung).
+        #                Eine abgelehnte Order kann kein Duplikat erzeugen -> es wird
+        #                geduldig ewig weiterversucht, mit wachsendem Abstand (3->30s).
+        #   open_done  — BESTAETIGTE Sends (retcode DONE), deren Hedge danach NICHT
+        #                im Bestand auftauchte. DAS ist die echte Mehrfach-Hedge-Gefahr
+        #                (z.B. Broker veraendert den Kommentar) -> nach 3x blocked.
+        #                Beide werden zurueckgesetzt, sobald der Hedge erkannt ist —
+        #                sonst blockierte das dritte Aufstocken derselben Position
+        #                faelschlich (schlummernder Fehler im alten Zaehler).
         self.open_last = {}
-        self.open_tries = {}
+        self.open_fail = {}
+        self.open_done = {}
+        # open_seen[ident] = erkanntes Hedge-Volumen im Moment des Sendeversuchs.
+        # Der Guard-Reset haengt am VOLUMENWACHSTUM seit dem letzten Send — nicht
+        # an "irgendein Hedge existiert". Sonst wuerde beim Aufstocken der alte
+        # Hedge den Zaehler jede halbe Sekunde loeschen und der Mehrfach-Hedge-
+        # Schutz waere genau dann wirkungslos, wenn er gebraucht wird
+        # (adversarische Pruefung 14.08.2026).
+        self.open_seen = {}
+        self.close_last = {}
         self.blocked = set()
         self.last_status = 0.0
 
@@ -714,29 +734,64 @@ def main():
                         log(f"⚠ [{m.file}] {w} — uebersprungen.")
                         m.warned.add(w)
 
+                # Guard-Reset: NUR wenn der erkannte Bestand seit dem letzten
+                # Sendeversuch GEWACHSEN ist, ist die Order angekommen und
+                # wiedererkannt. (Nicht "ident hat irgendeinen Hedge" — beim
+                # Aufstocken haette der Alt-Hedge den Zaehler dauernd geloescht
+                # und der Mehrfach-Hedge-Schutz waere ausgehebelt gewesen.)
+                for ident, hs in hedges.items():
+                    ref = m.open_seen.get(ident)
+                    if ref is None or sum(h["volume"] for h in hs) > ref + TOL:
+                        m.open_done.pop(ident, None)
+                        m.open_fail.pop(ident, None)
+                        m.open_seen.pop(ident, None)
+
                 for a in actions:
                     ident = a["ident"]
                     if a["kind"] == "open":
                         if ident in m.blocked:
                             continue
-                        if time.time() - m.open_last.get(ident, 0) < OPEN_COOLDOWN:
-                            continue  # zu kurz her — Broker/Terminal Zeit geben
-                        m.open_tries[ident] = m.open_tries.get(ident, 0) + 1
-                        if m.open_tries[ident] > OPEN_MAX_TRIES:
+                        # Cooldown waechst mit Fehlversuchen (3s -> 30s): bei
+                        # Internet-Ausfall wird geduldig weiterprobiert statt
+                        # aufzugeben. Eine abgelehnte Order erzeugt kein Duplikat;
+                        # der Restfall "Order kam an, Bestaetigung ging im Ausfall
+                        # verloren" heilt sich selbst: sobald die Position im
+                        # Bestand auftaucht, deckt sie das Soll (kein Nachschuss),
+                        # und ein Zuviel wird von plan_actions als Ueberhang
+                        # geschlossen.
+                        cool = OPEN_COOLDOWN * (1 + min(9, m.open_fail.get(ident, 0)))
+                        if time.time() - m.open_last.get(ident, 0) < cool:
+                            continue
+                        # Echte Mehrfach-Hedge-Gefahr: Order war BESTAETIGT (DONE),
+                        # der Bestand ist aber seither nicht gewachsen (z.B. Broker
+                        # veraendert den Kommentar). Nur DAS blockiert dauerhaft.
+                        if m.open_done.get(ident, 0) >= OPEN_MAX_TRIES:
                             m.blocked.add(ident)
-                            log(f"⛔ [{m.file}] Master-Pos {ident}: Hedge nach {OPEN_MAX_TRIES} "
-                                f"Versuchen nicht wiedererkannt — gestoppt (Schutz gegen "
+                            log(f"⛔ [{m.file}] Master-Pos {ident}: {OPEN_MAX_TRIES}x Order bestaetigt, "
+                                f"aber Hedge nie wiedererkannt — gestoppt (Schutz gegen "
                                 f"Mehrfach-Hedge). Im Hedge-Terminal pruefen.")
                             continue
                         m.open_last[ident] = time.time()
+                        # Referenzvolumen VOR dem Send merken — daran erkennt der
+                        # Guard-Reset oben, ob dieser Versuch angekommen ist.
+                        m.open_seen[ident] = sum(h["volume"] for h in hedges.get(ident, []))
                         ok = open_hedge(m, ident, a["symbol"],
                                         0 if a["hedge_type"] == 1 else 1,  # Master-Typ zurueckrechnen
                                         a["volume"])
-                        if ok and m.mode == "dryrun":
-                            m.virtual.setdefault(ident, []).append({
-                                "ticket": m.virtual_ticket, "volume": a["volume"],
-                                "symbol": a["symbol"], "type": a["hedge_type"]})
-                            m.virtual_ticket -= 1
+                        if ok:
+                            m.open_done[ident] = m.open_done.get(ident, 0) + 1
+                            m.open_fail.pop(ident, None)
+                            if m.mode == "dryrun":
+                                m.virtual.setdefault(ident, []).append({
+                                    "ticket": m.virtual_ticket, "volume": a["volume"],
+                                    "symbol": a["symbol"], "type": a["hedge_type"]})
+                                m.virtual_ticket -= 1
+                        else:
+                            f = m.open_fail[ident] = m.open_fail.get(ident, 0) + 1
+                            if f == 1:
+                                log(f"↻ [{m.file}] Master-Pos {ident}: Order nicht durchgekommen — "
+                                    f"es wird weiterversucht (Abstand waechst bis 30s), z.B. bei "
+                                    f"kurzem Internet-Ausfall voellig normal.")
                     else:
                         if m.mode == "dryrun":
                             hs = m.virtual.get(ident, [])
@@ -753,13 +808,22 @@ def main():
                                 m.virtual.pop(ident, None)
                             log(f"[{m.file}] DRYRUN — wuerde senden: HEDGE CLOSE {a['volume']} "
                                 f"{a['symbol']} (Master-Pos {ident})")
-                            m.open_tries.pop(ident, None); m.open_last.pop(ident, None)
+                            m.open_done.pop(ident, None); m.open_last.pop(ident, None)
+                            m.open_seen.pop(ident, None)
                             m.blocked.discard(ident)
                         else:
+                            # Auch Closes mit Cooldown wiederholen: waehrend eines
+                            # Ausfalls schlaegt der Close fehl — kein Grund zur
+                            # Panik, der naechste Versuch nach Reconnect sitzt.
+                            if time.time() - m.close_last.get(a["ticket"], 0) < OPEN_COOLDOWN:
+                                continue
+                            m.close_last[a["ticket"]] = time.time()
                             open_pos = next((h for h in hedges.get(ident, [])
                                              if h["ticket"] == a["ticket"]), None)
                             if open_pos and close_part(m, open_pos, a["volume"]):
-                                m.open_tries.pop(ident, None); m.open_last.pop(ident, None)
+                                m.close_last.pop(a["ticket"], None)
+                                m.open_done.pop(ident, None); m.open_last.pop(ident, None)
+                                m.open_seen.pop(ident, None)
                                 m.blocked.discard(ident)
 
                 if time.time() - m.last_status > 3.0:
