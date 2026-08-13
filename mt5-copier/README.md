@@ -82,6 +82,24 @@ dort ein Echtgeld-Konto hängt. Jetzt Öffnen, Teil-Schließen und Schließen re
 Erst wenn Stufe 2 mehrfach sauber war. **Vorher für dieses Master-Paar Duplikum
 abschalten** — sonst spiegeln zwei Systeme parallel und der Hedge ist doppelt.
 
+## Live getestet (13.08.2026, zwei Fusion-Demo-Konten)
+- `✅ HEDGE OPEN SELL 2.0 NAS100 · deal=355572440` — Gegenposition wurde real platziert.
+- `✅ HEDGE CLOSE 2.0 NAS100 · deal=355572637` — Hedge folgte dem Master-Close.
+- `⚠ Sicherheitsgrenze: 5.0 > max_lots_per_hedge 2.0 — uebersprungen` — Notbremse hat gehalten.
+- `⛔ ABBRUCH: 'Algo Trading' ist im Live-Terminal nicht aktiv` — Startprüfung greift.
+- Logik-Selbsttest: `python3 selftest.py` → **15/15** (läuft ohne MetaTrader, auch auf macOS).
+Noch nicht am Broker getestet: Teil-Schließung und Neustart-Recovery (im Selbsttest grün).
+
+## Häufige Stolpersteine
+- **Es passiert nichts?** Reihenfolge: **erst Copier starten, dann traden.** Was beim Start
+  schon offen war, wird absichtlich nicht gehedged (`⏭`-Zeile im Log).
+- **Immer noch DRYRUN im Log?** Der Copier liest die Config **nur beim Start** — nach dem
+  Ändern neu starten. Kontrolle: `type config.json`, und im Startblock muss `Modus DEMO` stehen.
+  Zum Umstellen zuverlässiger als Notepad:
+  `powershell -Command "(Get-Content config.json) -replace 'dryrun','demo' | Set-Content config.json"`
+- **„Algo Trading nicht aktiv"** → im **Hedge**-Terminal einschalten (im Master nicht nötig).
+- **`hedge_portable`** muss `false` sein, wenn MT5 normal (nicht portable) installiert wurde.
+
 ## Noch offen (bewusst)
 - Keine Pending Orders, kein SL/TP-Spiegeln (bei einem Hedge nicht gewollt).
 - Noch keine Prophos-Anbindung: Multiplikator und Mapping stehen in der `config.json`.

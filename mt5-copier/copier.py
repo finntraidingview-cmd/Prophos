@@ -378,6 +378,21 @@ def main():
     seen_seq = None
     startup_idents = None
     warned_missing = set()
+    # Dryrun führt einen VIRTUELLEN Hedge-Bestand: sonst würde jede Aktion bei jedem
+    # Poll neu geplant und geloggt (0,5s-Spam), weil real nie ein Hedge entsteht.
+    virtual = {}
+    virtual_ticket = -1
+    # Reopen-Guard: Falls ein Hedge nicht wiedererkannt wird (z.B. Broker hat den
+    # Kommentar verändert), würde der Executor alle 0,5s nachlegen. Nach
+    # OPEN_MAX_TRIES Versuchen pro Master-Position wird gestoppt und laut gewarnt.
+    OPEN_COOLDOWN = 3.0
+    OPEN_MAX_TRIES = 3
+    open_last = {}
+    open_tries = {}
+    blocked = set()
+    last_snap_change = time.time()
+    last_seq_seen = None
+    stale_warned = False
 
     try:
         while True:
@@ -403,7 +418,17 @@ def main():
                     startup_idents = set()
             seen_seq = snap["seq"]
 
-            current = hedges_by_ident()
+            # Snapshot-Timeout: aktualisiert das EA die Datei nicht mehr, laeuft es nicht.
+            if snap["seq"] != last_seq_seen:
+                last_seq_seen = snap["seq"]
+                last_snap_change = time.time()
+                stale_warned = False
+            elif not stale_warned and time.time() - last_snap_change > 15:
+                log("⚠ Snapshot seit 15s unveraendert — laeuft das Lese-EA im Master-Terminal noch? "
+                    "(Chart offen, Algo-Handel, Reiter 'Experten' pruefen)")
+                stale_warned = True
+
+            current = virtual if mode == "dryrun" else hedges_by_ident()
             # Dieselbe Funktion, die selftest.py prueft — Test und Betrieb rechnen identisch.
             actions, warns = plan_actions(
                 snap["positions"], current,
@@ -416,14 +441,48 @@ def main():
                     warned_missing.add(w)
 
             for a in actions:
+                ident = a["ident"]
                 if a["kind"] == "open":
-                    open_hedge(a["ident"], a["symbol"],
-                               0 if a["hedge_type"] == 1 else 1,  # master-Typ zurueckrechnen
-                               a["volume"])
+                    if ident in blocked:
+                        continue
+                    if time.time() - open_last.get(ident, 0) < OPEN_COOLDOWN:
+                        continue  # zu kurz her — Broker/Terminal Zeit geben
+                    open_tries[ident] = open_tries.get(ident, 0) + 1
+                    if open_tries[ident] > OPEN_MAX_TRIES:
+                        blocked.add(ident)
+                        log(f"⛔ Master-Pos {ident}: Hedge wurde nach {OPEN_MAX_TRIES} Versuchen nicht "
+                            f"wiedererkannt — weitere Versuche gestoppt (Schutz gegen Mehrfach-Hedge). "
+                            f"Bitte im Hedge-Terminal pruefen.")
+                        continue
+                    open_last[ident] = time.time()
+                    ok = open_hedge(ident, a["symbol"],
+                                    0 if a["hedge_type"] == 1 else 1,  # master-Typ zurueckrechnen
+                                    a["volume"])
+                    if ok and mode == "dryrun":
+                        virtual.setdefault(ident, []).append({
+                            "ticket": virtual_ticket, "volume": a["volume"],
+                            "symbol": a["symbol"], "type": a["hedge_type"]})
+                        virtual_ticket -= 1
                 else:
-                    open_pos = next((h for h in current.get(a["ident"], []) if h["ticket"] == a["ticket"]), None)
-                    if open_pos:
-                        close_part(open_pos, a["volume"])
+                    if mode == "dryrun":
+                        hs = virtual.get(ident, [])
+                        rest = a["volume"]
+                        for h in list(hs):
+                            if rest <= TOL:
+                                break
+                            take = min(h["volume"], rest)
+                            h["volume"] = round(h["volume"] - take, 8)
+                            rest -= take
+                            if h["volume"] <= TOL:
+                                hs.remove(h)
+                        if not hs:
+                            virtual.pop(ident, None)
+                        log(f"DRYRUN — wuerde senden: HEDGE CLOSE {a['volume']} {a['symbol']} (Master-Pos {ident})")
+                        open_tries.pop(ident, None); open_last.pop(ident, None); blocked.discard(ident)
+                    else:
+                        open_pos = next((h for h in current.get(ident, []) if h["ticket"] == a["ticket"]), None)
+                        if open_pos and close_part(open_pos, a["volume"]):
+                            open_tries.pop(ident, None); open_last.pop(ident, None); blocked.discard(ident)
 
             time.sleep(poll)
     except KeyboardInterrupt:
