@@ -414,7 +414,20 @@ def run_provision(*, name, login, password, server, template_exe,
     # deshalb wird sie geloescht.
     step("neustart")
     start_ini = os.path.join(target_install, "prophos-start.ini")
+    retry_ini = os.path.join(target_install, "prophos-retry.ini")
     started_ts = time.time()
+
+    def _wait_snapshot(seconds):
+        common = os.path.join(os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal",
+                              "Common", "Files")
+        snap_path = os.path.join(common, ident["snapshot"])
+        t0 = time.time()
+        while time.time() - t0 < seconds:
+            if os.path.exists(snap_path):
+                return True
+            time.sleep(2)
+        return os.path.exists(snap_path)
+
     try:
         with open(start_ini, "w", encoding=INI_ENCODING) as f:
             f.write(build_login_ini(login, password, server) + "\n"
@@ -434,26 +447,32 @@ def run_provision(*, name, login, password, server, template_exe,
                 f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 90 s'}) — "
                 f"Kontonummer/Passwort/Servername pruefen. "
                 f"Journal: {_journal_tail(new_data, started_ts)}")
-        # … dann den Snapshot: der Beweis, dass auch das EA laeuft — der
+        # … dann der Snapshot: der Beweis, dass auch das EA laeuft — der
         # staerkste Check, den es gibt: unser eigenes EA schreibt ihn.
-        common = os.path.join(os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal",
-                              "Common", "Files")
-        snap_path = os.path.join(common, ident["snapshot"])
-        t0 = time.time()
-        while time.time() - t0 < 120:
-            if os.path.exists(snap_path):
-                break
-            time.sleep(2)
-        if not os.path.exists(snap_path):
-            raise ProvisionError(f"Login ok, aber Snapshot {ident['snapshot']} ist nach 120 s "
-                                 f"nicht erschienen — im neuen Terminal Reiter 'Experten' "
-                                 f"pruefen. Journal: {_journal_tail(new_data, started_ts)}")
+        if not _wait_snapshot(60):
+            # Live getroffen 14.08.2026 (The5ers-Lauf): das frische Terminal hat
+            # sich beim Einrichten per LiveUpdate selbst neu gestartet ("full
+            # recompilation has been started" im Journal) und den [StartUp]-EA
+            # dabei verworfen ("loaded successfully" → "removed"). Heilung:
+            # Terminal neu starten und den EA ein zweites Mal aufziehen — die
+            # Retry-ini enthaelt KEIN Passwort, der Login ist schon gespeichert.
+            report("neustart", "running", "EA fehlt (Terminal-Update?) — zweiter Anlauf")
+            _kill_terminal_at(target_install)
+            with open(retry_ini, "w", encoding=INI_ENCODING) as f:
+                f.write(build_startup_ini(preset=preset_name))
+            subprocess.Popen([target_exe, f"/config:{retry_ini}"], cwd=target_install)
+            if not _wait_snapshot(90):
+                raise ProvisionError(
+                    f"Login ok, aber Snapshot {ident['snapshot']} kam auch im zweiten "
+                    f"Anlauf nicht — im neuen Terminal Reiter 'Experten' pruefen. "
+                    f"Journal: {_journal_tail(new_data, started_ts)}")
     finally:
-        try:
-            os.remove(start_ini)
-        except OSError:
-            pass
-    report("neustart", "done", "Login bestaetigt · Snapshot fliesst · Startdatei geloescht")
+        for p in (start_ini, retry_ini):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    report("neustart", "done", "Login bestaetigt · Snapshot fliesst · Startdateien geloescht")
 
     # ── 6. Config anlegen — der laufende Copier nimmt sie binnen 5 s auf ────
     step("config")
