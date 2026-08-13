@@ -735,6 +735,51 @@
   #dashboard-view .gauge-foot{text-align:center;font-size:12px;color:var(--sub);margin-top:6px}
   #dashboard-view .gauge-foot strong{color:var(--good);font-weight:500}
 
+  /* ── Admin-Dashboard ────────────────────────────────────────────────────
+   * Nutzt bewusst die bestehenden Prophos-Komponenten (.kpi, .panel, table.t,
+   * .chip). Hier stehen nur die Teile, die es sonst nirgends gibt: die
+   * Verteilungs-Balkenliste und die Filterleiste. */
+  #dashboard-view .adm-toolbar{
+    display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+  }
+  #dashboard-view .adm-toolbar select,
+  #dashboard-view .adm-toolbar input{
+    font:inherit;font-size:12.5px;padding:8px 11px;
+    border:1px solid var(--border);border-radius:var(--r-sm);
+    background:var(--surface);color:var(--ink);outline:none;
+    transition:border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  #dashboard-view .adm-toolbar select:focus,
+  #dashboard-view .adm-toolbar input:focus{
+    border-color:var(--violet);box-shadow:var(--shadow-input-focus);
+  }
+  #dashboard-view .adm-toolbar .adm-search{flex:1;min-width:170px}
+  #dashboard-view .adm-dist{display:flex;flex-direction:column}
+  #dashboard-view .adm-row{
+    display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(60px,1.6fr) auto 42px;
+    align-items:center;gap:12px;padding:10px 0;
+    border-bottom:1px solid var(--border-soft);
+  }
+  #dashboard-view .adm-row:last-child{border-bottom:none}
+  #dashboard-view .adm-row-name{
+    font-size:13px;font-weight:500;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;
+  }
+  #dashboard-view .adm-track{height:8px;border-radius:999px;background:var(--surface-tint);overflow:hidden}
+  #dashboard-view .adm-fill{height:100%;border-radius:999px;transition:width .7s var(--ease)}
+  #dashboard-view .adm-val{
+    font-size:13px;font-weight:600;text-align:right;
+    font-variant-numeric:tabular-nums;white-space:nowrap;
+  }
+  #dashboard-view .adm-pct{
+    font-size:12px;color:var(--sub);text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+  #dashboard-view .adm-sub{font-size:11.5px;color:var(--sub-2);font-weight:400}
+  #dashboard-view .adm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #dashboard-view .adm-scroll{max-height:440px;overflow:auto}
+  #dashboard-view .adm-empty{padding:26px 4px;text-align:center;color:var(--sub);font-size:13px}
+
   #dashboard-view .table-wrap{overflow-x:auto}
   #dashboard-view table.t{width:100%;border-collapse:collapse;font-size:13px}
   #dashboard-view .t th{
@@ -4629,119 +4674,124 @@
       </div>
 
       <div id="kasse-content" hidden>
-        <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border)">
-          <button class="btn btn-ghost adm-tab active" data-admtab="overview" style="border:none;border-bottom:2px solid var(--violet);border-radius:0;padding:9px 14px">Übersicht</button>
-          <button class="btn btn-ghost adm-tab" data-admtab="kasse" style="border:none;border-bottom:2px solid transparent;border-radius:0;padding:9px 14px">Kasse</button>
+        <div class="subtabs">
+          <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
+          <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
         </div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
         <div id="adm-pane-overview">
-          <div id="adm-msg" style="color:var(--sub);font-size:13px;padding:18px 2px">Lade Übersicht…</div>
+          <div id="adm-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-body" hidden>
-            <!-- Filter -->
-            <div class="card" style="padding:12px 14px;margin-bottom:14px;display:flex;gap:9px;flex-wrap:wrap;align-items:center">
-              <select id="adm-person" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
-                <option value="">Alle Personen</option>
-              </select>
-              <select id="adm-firm" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
-                <option value="">Alle Firmen</option>
-              </select>
-              <select id="adm-status" class="adm-f" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+
+            <div class="adm-toolbar">
+              <select id="adm-person" class="adm-f"><option value="">Alle Personen</option></select>
+              <select id="adm-firm" class="adm-f"><option value="">Alle Firmen</option></select>
+              <select id="adm-status" class="adm-f">
                 <option value="active">Nur aktive</option>
                 <option value="archived">Nur archivierte</option>
                 <option value="all">Aktive + archivierte</option>
               </select>
-              <input id="adm-search" type="search" placeholder="Suche Name / ID …" style="flex:1;min-width:150px;padding:7px 11px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
-              <button class="btn btn-ghost" id="adm-refresh" style="font-size:12px;padding:6px 11px">↻</button>
+              <input id="adm-search" class="adm-search" type="search" placeholder="Account, ID, Firma oder Person suchen …">
+              <button class="btn btn-ghost" id="adm-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
             </div>
 
-            <!-- KPIs -->
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:11px;margin-bottom:18px">
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Geparkt</div>
-                <div id="adm-k-parked" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+            <div class="kpis">
+              <div class="kpi">
+                <div class="kpi-label">Geparktes Kapital</div>
+                <div class="kpi-value" id="adm-k-parked">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-parked-sub">–</div>
               </div>
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Accounts</div>
-                <div id="adm-k-accs" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+              <div class="kpi">
+                <div class="kpi-label">Accounts</div>
+                <div class="kpi-value" id="adm-k-accs">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-accs-sub">–</div>
               </div>
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Kaufkosten</div>
-                <div id="adm-k-buy" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+              <div class="kpi">
+                <div class="kpi-label">Payouts erhalten</div>
+                <div class="kpi-value" id="adm-k-po">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-po-sub">gegengerechnet</div>
               </div>
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Hedge-Verluste</div>
-                <div id="adm-k-hedge" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
-              </div>
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Payouts erhalten</div>
-                <div id="adm-k-po" style="font-size:20px;font-weight:750;margin-top:3px;color:var(--ok)">–</div>
-              </div>
-              <div class="card" style="padding:14px">
-                <div style="font-size:11.5px;color:var(--sub);font-weight:600">Klumpenrisiko</div>
-                <div id="adm-k-top" style="font-size:20px;font-weight:750;margin-top:3px">–</div>
+              <div class="kpi">
+                <div class="kpi-label">Größtes Klumpenrisiko</div>
+                <div class="kpi-value" id="adm-k-top">–</div>
+                <div class="kpi-bar"><div class="kpi-bar-fill" id="adm-k-top-bar" style="width:0%"></div></div>
               </div>
             </div>
 
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:0 2px 8px">Pro Prop-Firma</div>
-            <div style="overflow-x:auto;margin-bottom:22px">
-              <table style="width:100%;border-collapse:collapse;font-size:13px">
-                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em">
-                  <th style="padding:7px 9px;font-weight:600">Firma</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Accs</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Kauf</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Hedge</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Payouts</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Geparkt</th>
-                  <th style="padding:7px 9px;font-weight:600;width:110px">Anteil</th>
-                </tr></thead>
-                <tbody id="adm-firm-rows"></tbody>
-              </table>
+            <div class="grid-2">
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title">Verteilung nach Prop-Firma</div>
+                    <div class="panel-sub">Wie viel Kapital bei welcher Firma liegt</div>
+                  </div>
+                </div>
+                <div class="adm-dist" id="adm-firm-dist"></div>
+              </div>
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title">Nach Person</div>
+                    <div class="panel-sub">Wer wie viel im Markt hat</div>
+                  </div>
+                </div>
+                <div class="adm-dist" id="adm-person-dist"></div>
+              </div>
             </div>
 
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);margin:0 2px 8px">Pro Person</div>
-            <div style="overflow-x:auto;margin-bottom:22px">
-              <table style="width:100%;border-collapse:collapse;font-size:13px">
-                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em">
-                  <th style="padding:7px 9px;font-weight:600">Person</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Accs</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Kauf</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Hedge</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Payouts</th>
-                  <th style="padding:7px 9px;font-weight:600;text-align:right">Geparkt</th>
-                  <th style="padding:7px 9px;font-weight:600;width:110px">Anteil</th>
-                </tr></thead>
-                <tbody id="adm-person-rows"></tbody>
-              </table>
+            <div class="panel" style="margin-top:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Kosten je Firma</div>
+                  <div class="panel-sub">Kaufpreis + Hedge-Verluste − erhaltene Payouts = geparkt</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="t">
+                  <thead><tr>
+                    <th>Firma</th>
+                    <th class="adm-num">Accounts</th>
+                    <th class="adm-num">Kaufkosten</th>
+                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num">Payouts</th>
+                    <th class="adm-num">Geparkt</th>
+                  </tr></thead>
+                  <tbody id="adm-firm-rows"></tbody>
+                </table>
+              </div>
             </div>
 
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 2px 8px">
-              <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Accounts &amp; IDs</span>
-              <span id="adm-acc-count" style="font-size:11.5px;color:var(--sub)"></span>
+            <div class="panel" style="margin-top:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Accounts &amp; IDs</div>
+                  <div class="panel-sub" id="adm-acc-count">–</div>
+                </div>
+              </div>
+              <div class="table-wrap adm-scroll">
+                <table class="t">
+                  <thead><tr>
+                    <th>Account</th>
+                    <th>Externe ID</th>
+                    <th>Person</th>
+                    <th class="adm-num">Kauf</th>
+                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num">Payouts</th>
+                    <th class="adm-num">Geparkt</th>
+                  </tr></thead>
+                  <tbody id="adm-acc-rows"></tbody>
+                </table>
+              </div>
+              <div class="adm-empty" id="adm-acc-empty" hidden>Keine Accounts für diesen Filter.</div>
             </div>
-            <div style="overflow:auto;max-height:460px;border:1px solid var(--border);border-radius:11px">
-              <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-                <thead><tr style="text-align:left;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:var(--surface);z-index:1">
-                  <th style="padding:8px 9px;font-weight:600">Account</th>
-                  <th style="padding:8px 9px;font-weight:600">ID</th>
-                  <th style="padding:8px 9px;font-weight:600">Firma</th>
-                  <th style="padding:8px 9px;font-weight:600">Person</th>
-                  <th style="padding:8px 9px;font-weight:600;text-align:right">Kauf</th>
-                  <th style="padding:8px 9px;font-weight:600;text-align:right">Hedge</th>
-                  <th style="padding:8px 9px;font-weight:600;text-align:right">Payouts</th>
-                  <th style="padding:8px 9px;font-weight:600;text-align:right">Geparkt</th>
-                </tr></thead>
-                <tbody id="adm-acc-rows"></tbody>
-              </table>
-            </div>
-            <p style="font-size:11.5px;color:var(--sub);margin:12px 2px 0">
-              Geparkt = Kaufpreis + Hedge-Verluste − Payouts. Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
-              Firmennamen werden zusammengefasst (z.&nbsp;B. „Apex Trader" → Apex), sonst wäre das Klumpenrisiko zu klein.
+
+            <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+              Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
+              Firmennamen werden zusammengefasst — z.&nbsp;B. „Apex Trader" → Apex, sonst wäre das Klumpenrisiko zu klein.
             </p>
           </div>
         </div>
-
-        <!-- KASSE -->
         <div id="adm-pane-kasse" hidden>
         <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
           Tabelle <code>kasse_entries</code> fehlt noch — bitte <code>sql/2026-08-11_kasse.sql</code> im Supabase SQL-Editor ausführen.
@@ -5904,14 +5954,15 @@
     // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
     // KPIs, Firmen-, Personen- und Account-Tabelle IMMER überein und reagieren
     // gemeinsam auf jeden Filter.
-    function admRender(){
-      if(!admData) return
+    // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
+    // KPIs, Verteilungen und Tabellen IMMER überein und reagieren gemeinsam auf
+    // jeden Filter.
+    function admFiltered(){
       const fPerson = $('adm-person').value
       const fFirm   = $('adm-firm').value
       const fStatus = $('adm-status').value
       const q       = ($('adm-search').value || '').trim().toLowerCase()
-
-      const rows = (admData.accounts || []).filter(r => {
+      return (admData.accounts || []).filter(r => {
         if(fStatus === 'active'   && r.archived) return false
         if(fStatus === 'archived' && !r.archived) return false
         if(fPerson && String(r.user_id) !== String(fPerson)) return false
@@ -5922,91 +5973,130 @@
                   (r.person||'').toLowerCase().includes(q))) return false
         return true
       })
+    }
 
-      const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
-      const totalParked = sum('parked')
-      $('adm-k-parked').textContent = admEur.format(totalParked)
-      $('adm-k-accs').textContent   = rows.length
-      $('adm-k-buy').textContent    = admEur.format(sum('buy'))
-      $('adm-k-hedge').textContent  = admEur.format(sum('hedge'))
-      $('adm-k-po').textContent     = admEur.format(sum('payouts'))
-
-      // Gruppieren
-      const group = (key, label) => {
-        const m = new Map()
-        for(const r of rows){
-          const k = r[key] || '—'
-          const g = m.get(k) || { label: r[label] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
-          g.accounts++; g.buy += r.buy; g.hedge += r.hedge; g.payouts += r.payouts; g.parked += r.parked
-          m.set(k, g)
-        }
-        return [...m.values()].sort((a,b) => b.parked - a.parked)
+    function admGroup(rows, key, labelKey){
+      const m = new Map()
+      for(const r of rows){
+        const k = r[key] || '—'
+        const g = m.get(k) || { label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
+        g.accounts++; g.buy += r.buy; g.hedge += r.hedge; g.payouts += r.payouts; g.parked += r.parked
+        m.set(k, g)
       }
-      const byFirm   = group('firm', 'firm')
-      const byPerson = group('user_id', 'person')
+      return [...m.values()].sort((a,b) => b.parked - a.parked)
+    }
+
+    // Ampel: ab 25% der Verteilung orange, ab 40% rot — bei einem Firmen-Exit
+    // ist genau dieser Anteil auf einen Schlag weg.
+    const admCol = s => s >= 40 ? 'var(--danger)' : (s >= 25 ? 'var(--warn)' : 'var(--violet)')
+
+    // E-Mail-Fallback als Label kürzen: alles vor dem @, voller Wert bleibt im title.
+    function admShortName(label){
+      const s = String(label || '')
+      const at = s.indexOf('@')
+      return at > 0 ? s.slice(0, at) : s
+    }
+
+    function admDist(el, list, total){
+      el.innerHTML = ''
+      if(!list.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
+      for(const g of list){
+        const share = total ? (100 * g.parked / total) : 0
+        const row = document.createElement('div')
+        row.className = 'adm-row'
+        row.innerHTML =
+          '<div class="adm-row-name"></div>' +
+          `<div class="adm-track"><div class="adm-fill" style="width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${admCol(share)}"></div></div>` +
+          `<div class="adm-val">${admEur.format(g.parked)}</div>` +
+          `<div class="adm-pct">${share.toFixed(0)}%</div>`
+        const nm = row.querySelector('.adm-row-name')
+        // Wenn kein Anzeigename hinterlegt ist, kommt die E-Mail — die passt nicht in die Spalte.
+        nm.textContent = admShortName(g.label)
+        nm.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
+        el.appendChild(row)
+      }
+    }
+
+    // Hedge-Zelle: negative Werte (= Gewinn statt Verlust) grün und mit echtem Minus.
+    function admHedgeCell(v){
+      const n = Number(v) || 0
+      return n < 0
+        ? `<td class="adm-num" style="color:var(--good)">−${admEur.format(-n)}</td>`
+        : `<td class="adm-num" style="color:var(--sub)">${admEur.format(n)}</td>`
+    }
+
+    function admRender(){
+      if(!admData) return
+      const rows = admFiltered()
+      const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
+      const totalParked = sum('parked')
+      const nArch = rows.filter(r => r.archived).length
+
+      $('adm-k-parked').textContent = admEur.format(totalParked)
+      $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf · ${admEur.format(sum('hedge'))} Hedge`
+      $('adm-k-accs').textContent = rows.length
+      $('adm-k-accs-sub').textContent = nArch ? `${rows.length - nArch} aktiv · ${nArch} archiviert` : 'alle aktiv'
+      $('adm-k-po').textContent = admEur.format(sum('payouts'))
+
+      const byFirm   = admGroup(rows, 'firm', 'firm')
+      const byPerson = admGroup(rows, 'user_id', 'person')
 
       const top = byFirm[0]
       const topShare = (top && totalParked) ? (100 * top.parked / totalParked) : 0
-      $('adm-k-top').textContent = top ? `${top.label} ${topShare.toFixed(0)}%` : '–'
-      $('adm-k-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? '#e0891f' : 'var(--ink)')
+      $('adm-k-top').textContent = top ? `${topShare.toFixed(0)}%` : '–'
+      $('adm-k-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? 'var(--warn)' : 'var(--ink)')
+      const bar = $('adm-k-top-bar')
+      bar.style.width = Math.max(0, Math.min(100, topShare)).toFixed(1) + '%'
+      bar.style.background = admCol(topShare)
+      const topLbl = $('adm-k-top').parentElement.querySelector('.kpi-label')
+      if(topLbl) topLbl.textContent = top ? `Größtes Klumpenrisiko · ${top.label}` : 'Größtes Klumpenrisiko'
 
-      const fill = (tbodyId, list) => {
-        const tb = $(tbodyId); tb.innerHTML = ''
-        for(const g of list){
-          const share = totalParked ? (100 * g.parked / totalParked) : 0
-          const col = share >= 40 ? 'var(--danger)' : (share >= 25 ? '#e0891f' : 'var(--violet)')
-          const c = (v, ex) => `<td style="padding:8px 9px;text-align:right;${ex||''}">${v}</td>`
-          const tr = document.createElement('tr')
-          tr.style.borderTop = '1px solid var(--border)'
-          tr.innerHTML =
-            `<td style="padding:8px 9px;font-weight:600" class="lbl"></td>` +
-            c(g.accounts) +
-            c(admEur.format(g.buy), 'color:var(--sub)') +
-            c(admEur.format(g.hedge), 'color:var(--sub)') +
-            c(g.payouts ? '−' + admEur.format(g.payouts) : '—', 'color:var(--sub)') +
-            c(`<b>${admEur.format(g.parked)}</b>`) +
-            `<td style="padding:8px 9px"><div style="display:flex;align-items:center;gap:7px">
-               <div style="flex:1;height:6px;border-radius:3px;background:var(--bg);overflow:hidden">
-                 <div style="height:100%;width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${col}"></div></div>
-               <span style="font-size:11.5px;color:var(--sub);min-width:32px;text-align:right">${share.toFixed(0)}%</span>
-             </div></td>`
-          tr.querySelector('.lbl').textContent = g.label
-          tb.appendChild(tr)
-        }
+      admDist($('adm-firm-dist'), byFirm, totalParked)
+      admDist($('adm-person-dist'), byPerson, totalParked)
+
+      // Kosten-Tabelle je Firma
+      const ftb = $('adm-firm-rows'); ftb.innerHTML = ''
+      for(const g of byFirm){
+        const tr = document.createElement('tr')
+        tr.innerHTML =
+          '<td><span class="fm" style="font-weight:500"></span></td>' +
+          `<td class="adm-num">${g.accounts}</td>` +
+          `<td class="adm-num" style="color:var(--sub)">${admEur.format(g.buy)}</td>` +
+          admHedgeCell(g.hedge) +
+          `<td class="adm-num" style="color:${g.payouts ? 'var(--good)' : 'var(--sub)'}">${g.payouts ? '−' + admEur.format(g.payouts) : '—'}</td>` +
+          `<td class="adm-num" style="font-weight:600">${admEur.format(g.parked)}</td>`
+        tr.querySelector('.fm').textContent = g.label
+        ftb.appendChild(tr)
       }
-      fill('adm-firm-rows', byFirm)
-      fill('adm-person-rows', byPerson)
 
-      // Account-Liste (nach geparktem Betrag, größte zuerst)
+      // Account-Liste
       const accs = rows.slice().sort((a,b) => b.parked - a.parked)
       $('adm-acc-count').textContent = accs.length + (accs.length === 1 ? ' Account' : ' Accounts')
+      $('adm-acc-empty').hidden = accs.length > 0
       const tb = $('adm-acc-rows'); tb.innerHTML = ''
       for(const r of accs){
-        const c = (v, ex) => `<td style="padding:7px 9px;text-align:right;${ex||''}">${v}</td>`
         const tr = document.createElement('tr')
-        tr.style.borderTop = '1px solid var(--border)'
         if(r.archived) tr.style.opacity = '.55'
+        const initials = (r.firm || '?').slice(0,2).toUpperCase()
         tr.innerHTML =
-          `<td style="padding:7px 9px"><span class="nm" style="font-weight:600"></span>${r.archived ? ' <span style="font-size:10px;color:var(--sub);border:1px solid var(--border);border-radius:5px;padding:1px 5px;margin-left:5px">archiviert</span>' : ''}</td>` +
-          `<td style="padding:7px 9px" class="ext mono" style="font-size:11.5px;color:var(--sub)"></td>` +
-          `<td style="padding:7px 9px" class="fm"></td>` +
-          `<td style="padding:7px 9px;color:var(--sub)" class="pe"></td>` +
-          c(admEur.format(r.buy), 'color:var(--sub)') +
-          c(admEur.format(r.hedge), 'color:var(--sub)') +
-          c(r.payouts ? '−' + admEur.format(r.payouts) : '—', 'color:var(--sub)') +
-          c(`<b>${admEur.format(r.parked)}</b>`)
+          '<td><div class="acct-cell">' +
+            `<div class="acct-logo">${escapeHtml(initials)}</div>` +
+            '<div style="min-width:0"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px"></div>' +
+            '<div class="adm-sub fm"></div></div>' +
+            (r.archived ? '<span class="chip chip-neutral">archiviert</span>' : '') +
+          '</div></td>' +
+          '<td><span class="ext" style="font-size:12px;color:var(--sub)"></span></td>' +
+          '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+          `<td class="adm-num" style="color:var(--sub)">${admEur.format(r.buy)}</td>` +
+          admHedgeCell(r.hedge) +
+          `<td class="adm-num" style="color:${r.payouts ? 'var(--good)' : 'var(--sub)'}">${r.payouts ? '−' + admEur.format(r.payouts) : '—'}</td>` +
+          `<td class="adm-num" style="font-weight:600">${admEur.format(r.parked)}</td>`
         tr.querySelector('.nm').textContent  = r.name || '—'
-        tr.querySelector('.ext').textContent = r.ext || '—'
         tr.querySelector('.fm').textContent  = r.firm
+        tr.querySelector('.ext').textContent = r.ext || '—'
         tr.querySelector('.pe').textContent  = r.person
         tb.appendChild(tr)
       }
-    }
-    window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
-
-    function tryUnlock(){
-      if(($('kasse-code').value || '').trim() === CODE){ unlocked = true; showContent() }
-      else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
     }
 
     async function kasseLoad(){
