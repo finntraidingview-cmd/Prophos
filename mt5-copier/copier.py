@@ -631,6 +631,18 @@ def main():
     log(f"Warte auf Snapshots von {len(masters)} Master-Terminal(s)…")
 
     def master_status(m, snap, hedges, connected):
+        # Ein EINGEFRORENER Snapshot ist genauso blind wie ein fehlender — nur
+        # unsichtbarer: die Datei von gestern liest sich gueltig (Fund 15.08.2026,
+        # EA war nach unsauberem Beenden vom Chart verschwunden, Karte sah gesund
+        # aus, Master-Trade blieb ungehedged). Deshalb steht das jetzt als Warnung
+        # in der Karte.
+        note = None
+        if not connected:
+            note = "warte auf Snapshot des Master-Terminals"
+        elif m.last_seq is not None and time.time() - m.last_change > 15:
+            note = (f"Snapshot eingefroren — Lese-EA im Master-Terminal pruefen! "
+                    f"(Chart mit ProphosHedgeReader offen? Sonst neu aufziehen, "
+                    f"InpFileName = {m.snapshot_file})")
         return {
             "running": True, "mode": m.mode, "connected": connected,
             "master_login": (snap or {}).get("login") or m.master_login or None,
@@ -641,7 +653,7 @@ def main():
             "master_positions": (snap or {}).get("positions") or [],
             "hedges": {str(k): v for k, v in (hedges or {}).items()},
             "blocked": sorted(m.blocked),
-            "note": None if connected else "warte auf Snapshot des Master-Terminals",
+            "note": note,
         }
 
     try:

@@ -590,6 +590,12 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
     if(!confirm(`Der Copier ist GESTOPPT — deine Trades würden NICHT gehedgt!\n\nErst start-copier.bat starten, dann hier erneut auf „Trade starten".\n\nTrotzdem fortfahren (nur Werte pushen + Terminal öffnen)?`)){
       msg.className='msg err';msg.textContent='Abgebrochen — erst den Copier starten.';return}
   }
+  // Zweithaerteste Falle: Copier laeuft, aber der Master liefert nichts
+  // (Snapshot fehlt/eingefroren, z.B. EA vom Chart verschwunden).
+  else if((d.status||{}).note){
+    if(!confirm(`Achtung bei „${d.name}":\n${(d.status||{}).note}\n\nSo würde dein Trade NICHT gehedgt. Trotzdem fortfahren?`)){
+      msg.className='msg err';msg.textContent='Abgebrochen — erst den Hinweis auf der Karte lösen.';return}
+  }
   const patch={multiplier:document.getElementById('plan-mult').value,
                max_lots_per_hedge:document.getElementById('plan-lots').value,
                mode:document.getElementById('plan-mode').value};
