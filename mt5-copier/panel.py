@@ -649,12 +649,9 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
     if(!confirm(`Der Copier ist GESTOPPT — deine Trades würden NICHT gehedgt!\n\nErst start-copier.bat starten, dann hier erneut auf „Trade starten".\n\nTrotzdem fortfahren (nur Werte pushen + Terminal öffnen)?`)){
       msg.className='msg err';msg.textContent='Abgebrochen — erst den Copier starten.';return}
   }
-  // Zweithaerteste Falle: Copier laeuft, aber der Master liefert nichts
-  // (Snapshot fehlt/eingefroren, z.B. EA vom Chart verschwunden).
-  else if((d.status||{}).note){
-    if(!confirm(`Achtung bei „${d.name}":\n${(d.status||{}).note}\n\nSo würde dein Trade NICHT gehedgt. Trotzdem fortfahren?`)){
-      msg.className='msg err';msg.textContent='Abgebrochen — erst den Hinweis auf der Karte lösen.';return}
-  }
+  // Liefert der Master gerade nichts (Terminal zu / EA fehlt), ist das KEIN
+  // Abbruchgrund mehr: Terminal-Start + EA-Selbstheilung erledigen das, und
+  // die Bereitschafts-Anzeige unten sagt, wann wirklich getradet werden darf.
   const patch={multiplier:document.getElementById('plan-mult').value,
                max_lots_per_hedge:document.getElementById('plan-lots').value,
                mode:document.getElementById('plan-mode').value};
@@ -674,12 +671,33 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   msg.textContent='gepusht — öffne Terminal…';
   const t=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const ts=await t.json();
-  msg.className='msg'+(ts.ok?'':' err');
-  msg.textContent=ts.ok
-    ?`✓ ×${patch.multiplier} aktiv (~2 s)${s.restart?' · Copier-Neustart läuft':''} · ${ts.msg}`
-    :('Multiplikator gepusht, aber Terminal: '+ts.msg);
-  setTimeout(load,2500);
-  if(ts.ok)setTimeout(closePlan,2200);
+  if(!ts.ok){msg.className='msg err';msg.textContent='Multiplikator gepusht, aber Terminal: '+ts.msg;return}
+  // Bereitschafts-Ueberwachung: der Dialog bleibt offen und meldet live, wann
+  // der Snapshot wirklich fliesst — erst DANN traden. Die EA-Selbstheilung im
+  // Hintergrund braucht im Reparaturfall bis ~1,5 Minuten.
+  const t0=Date.now();
+  msg.className='msg';msg.textContent=`⏳ ×${patch.multiplier} gepusht · Terminal startet, Login automatisch…`;
+  const timer=setInterval(async()=>{
+    let inst=null;
+    try{const rr=await fetch('/api/instances');const dd=await rr.json();inst=dd.instances.find(x=>x.file===file);}catch(e){}
+    const sec=Math.round((Date.now()-t0)/1000);
+    if(inst&&inst.alive&&!(inst.status||{}).note){
+      clearInterval(timer);
+      msg.className='msg';
+      msg.textContent=`✓ Bereit — ×${patch.multiplier} aktiv, Hedge bewacht. Jetzt im Terminal traden.`;
+      setTimeout(load,1000);
+      return;
+    }
+    if(sec>170){
+      clearInterval(timer);
+      msg.className='msg err';
+      msg.textContent='Terminal liefert nach 3 Minuten nichts — Details-Log der Karte prüfen.';
+      return;
+    }
+    msg.textContent=sec>50
+      ?`⏳ EA wird geprüft und notfalls automatisch aufgezogen… (${sec}s)`
+      :`⏳ Terminal startet, Login automatisch… (${sec}s)`;
+  },3000);
 });
 
 // ── Account-hinzufuegen-Modal ───────────────────────────────────────────────
