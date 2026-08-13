@@ -5950,6 +5950,19 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
+        // Der Server kennt nur die E-Mail (Auth-API). Die lesbaren Namen
+        // ("Finn", "Finn + Pascal", "EzPoker") stehen im Profil-Umschalter
+        // unter prophos_profiles — hier einmal drübergelegt, danach ziehen
+        // Filter, Balken, Tabelle UND Suche automatisch den Namen.
+        const nameById = new Map()
+        for(const p of (typeof profList === 'function' ? profList() : [])){
+          if(p && p.userId && p.name) nameById.set(String(p.userId), p.name)
+        }
+        const personName = (uid, fallback) => nameById.get(String(uid)) || admShortName(fallback || uid)
+        for(const r of (d.accounts || [])){ r.email = r.person; r.person = personName(r.user_id, r.person) }
+        for(const p of (d.people || [])){ p.email = p.name; p.name = personName(p.user_id, p.email) }
+        ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
+
         const selP = $('adm-person'), curP = selP.value
         selP.innerHTML = '<option value="">Alle Personen</option>' +
           (d.people || []).map(p => `<option value="${escapeHtml(p.user_id)}">${escapeHtml(p.name)}</option>`).join('')
@@ -5999,7 +6012,8 @@
         if(q && !((r.name||'').toLowerCase().includes(q) ||
                   (r.ext||'').toLowerCase().includes(q)  ||
                   (r.firm||'').toLowerCase().includes(q) ||
-                  (r.person||'').toLowerCase().includes(q))) return false
+                  (r.person||'').toLowerCase().includes(q) ||
+                  (r.email||'').toLowerCase().includes(q))) return false   // E-Mail bleibt suchbar
         return true
       })
     }
@@ -6171,7 +6185,9 @@
         tr.querySelector('.nm').textContent  = r.name || '—'
         tr.querySelector('.fm').textContent  = r.firm
         tr.querySelector('.ext').textContent = r.ext || '—'
-        tr.querySelector('.pe').textContent  = r.person
+        const pe = tr.querySelector('.pe')
+        pe.textContent = r.person
+        if(r.email && r.email !== r.person) pe.title = r.email   // E-Mail nur noch im Tooltip
         tb.appendChild(tr)
       }
     }
