@@ -103,6 +103,24 @@ Noch nicht am Broker getestet: Teil-Schließung und Neustart-Recovery (im Selbst
 - **„Algo Trading nicht aktiv"** → im **Hedge**-Terminal einschalten (im Master nicht nötig).
 - **`hedge_portable`** muss `false` sein, wenn MT5 normal (nicht portable) installiert wurde.
 
+## Dauerbetrieb (Autostart + Watchdog)
+Zwei Sicherungsnetze, damit der Copier unbeaufsichtigt laufen kann:
+1. **`start-copier.bat`** startet `copier.py` in einer Schleife — stirbt der Prozess oder
+   beendet er sich wegen dauerhaftem Verbindungsverlust, kommt er nach 10 s zurueck. Beim
+   Neustart laufen ALLE Startpruefungen wieder (Konto, Hedging-Modus, Algo-Trading) — das ist
+   bewusst so, statt im laufenden Prozess zu reattachen und dabei Pruefungen zu ueberspringen.
+2. **Windows-Aufgabenplanung** startet die .bat beim Anmelden/Hochfahren:
+   Aufgabenplanung → „Aufgabe erstellen…" → Trigger „Bei Anmeldung" → Aktion
+   `C:\mt5-copier\start-copier.bat` („Starten in" = `C:\mt5-copier`) → Einstellungen:
+   „Aufgabe neu starten, falls Fehler" alle 1 Minute, bis 99×; „Aufgabe beenden, falls laenger
+   ausgefuehrt als" **abwaehlen**.
+
+**Verbindungsabriss (wichtig fuer unbeaufsichtigten Betrieb):** `positions_get()` liefert bei
+gestoerter Terminal-Verbindung `None`. Das darf NICHT als „es gibt keine Hedges" gelten —
+sonst wuerde ein kurzer Abriss aussehen wie „Hedge fehlt" und der Executor riss ihn ein
+zweites Mal auf. Der Copier setzt bei `None` aus, warnt, und beendet sich nach ~20 s Ausfall
+fuer einen sauberen Neustart durch die .bat.
+
 ## Noch offen (bewusst)
 - Keine Pending Orders, kein SL/TP-Spiegeln (bei einem Hedge nicht gewollt).
 - Noch keine Prophos-Anbindung: Multiplikator und Mapping stehen in der `config.json`.

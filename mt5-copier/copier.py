@@ -291,9 +291,18 @@ def main():
         """Aktueller Hedge-Bestand, gruppiert nach Master-Identifier.
         Primaerfilter ist die MAGIC (broker-stabil), der Kommentar traegt die
         Zuordnung — Kommentare koennen vom Broker ergaenzt werden, deshalb wird
-        nur der Praefix gesucht statt auf Gleichheit geprueft."""
+        nur der Praefix gesucht statt auf Gleichheit geprueft.
+
+        WICHTIG: Gibt None zurueck, wenn die Terminal-Verbindung gestoert ist —
+        NICHT ein leeres Dict. Sonst saehe ein Verbindungsabriss aus wie "es gibt
+        keine Hedges", und der Executor wuerde bestehende Hedges ein zweites Mal
+        aufreissen. Der Aufrufer muss None als "unbekannt" behandeln und aussetzen.
+        """
+        raw = mt5.positions_get()
+        if raw is None:
+            return None
         out = {}
-        for p in (mt5.positions_get() or []):
+        for p in raw:
             if int(getattr(p, "magic", 0)) != magic:
                 continue
             c = str(getattr(p, "comment", "") or "")
@@ -400,6 +409,8 @@ def main():
     last_snap_change = time.time()
     last_seq_seen = None
     stale_warned = False
+    conn_fail = 0
+    CONN_FAIL_EXIT = max(10, int(20 / max(poll, 0.1)))  # ~20 Sekunden Ausfall
 
     try:
         while True:
@@ -436,6 +447,24 @@ def main():
                 stale_warned = True
 
             current = virtual if mode == "dryrun" else hedges_by_ident()
+            # Verbindung gestoert -> aussetzen statt auf leeren Daten zu handeln.
+            # Nach anhaltendem Ausfall beenden: start-copier.bat startet neu, und beim
+            # Neustart laufen ALLE Startpruefungen (Konto, Hedging-Modus, Algo-Trading)
+            # erneut — sicherer als ein Reattach im laufenden Prozess.
+            if current is None:
+                conn_fail += 1
+                if conn_fail == 1:
+                    log(f"⚠ Terminal-Verbindung gestoert ({mt5.last_error()}) — setze aus, "
+                        f"greife NICHT auf leere Daten zu.")
+                if conn_fail >= CONN_FAIL_EXIT:
+                    log("⛔ Verbindung dauerhaft weg — beende mich. start-copier.bat startet "
+                        "neu und prueft beim Hochlauf wieder alles durch.")
+                    break
+                time.sleep(poll)
+                continue
+            if conn_fail:
+                log(f"✓ Verbindung wieder da (nach {conn_fail} Fehlversuchen).")
+                conn_fail = 0
             # Dieselbe Funktion, die selftest.py prueft — Test und Betrieb rechnen identisch.
             actions, warns = plan_actions(
                 snap["positions"], current,
