@@ -483,6 +483,23 @@ def main():
 
     import MetaTrader5 as mt5
 
+    # ── Hedge-Terminal bei Bedarf selbst starten (15.08.2026, Autostart-Stack) ──
+    # Der Login ist bei MT5 gespeichert; nach einem PC-Neustart muss niemand mehr
+    # klicken. Laeuft es schon, passiert hier nichts (pids-Pruefung — ein zweiter
+    # Start derselben Installation waere ein leeres Fenster mit Login-Dialog).
+    hpath = ref.get("hedge_terminal_path")
+    if hpath and os.name == "nt" and os.path.exists(hpath):
+        try:
+            import provision
+            import subprocess
+            if not provision.terminal_pids(os.path.dirname(os.path.abspath(hpath))):
+                log("Hedge-Terminal laeuft nicht — starte es (Login ist gespeichert)…")
+                subprocess.Popen([hpath], cwd=os.path.dirname(os.path.abspath(hpath)))
+                time.sleep(20)  # Boot + Auto-Login abwarten; notfalls wiederholt die .bat
+        except Exception as e:
+            log(f"⚠ Hedge-Terminal-Autostart fehlgeschlagen ({type(e).__name__}) — "
+                f"initialize() versucht es gleich selbst.")
+
     # ── An das HEDGE-Terminal haengen (genau eines, fuer alle Master) ───────────
     init_kw = {}
     if ref.get("hedge_terminal_path"):
