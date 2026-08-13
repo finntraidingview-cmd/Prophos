@@ -211,6 +211,59 @@ def prov_start(name, login, password, server):
     return True, "gestartet"
 
 
+def _heal_ea(fname, cfg, install_dir, started_ts):
+    """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
+    ob der Snapshot wieder fliesst. Tut er es nach 45 s nicht, fehlt das Lese-EA
+    auf dem Chart (passiert nach unsauberem Beenden — Chart-Stand verloren).
+    Dann: Terminal beenden und mit [StartUp]-Startdatei neu starten, die das EA
+    samt richtigem InpFileName automatisch aufzieht — derselbe Mechanismus wie
+    bei der Provisionierung. Laeuft NUR fuer Terminals, die das Panel selbst
+    gerade gestartet hat (nie gegen ein laufendes Terminal des Nutzers)."""
+    time.sleep(45)
+    snap = str(cfg.get("snapshot_file") or "prophos_master.csv")
+    common = cfg.get("common_files_dir") or os.path.join(
+        os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
+    snap_path = os.path.join(common, snap)
+    try:
+        if os.path.getmtime(snap_path) > started_ts:
+            return  # Snapshot fliesst — EA war noch auf dem Chart, nichts zu tun
+    except OSError:
+        pass  # Datei fehlt ganz -> heilen
+    data_dir = provision.data_dir_for(install_dir)
+    if not data_dir:
+        print(f"[panel] {fname}: Selbstheilung — Datenordner nicht gefunden.", flush=True)
+        return
+    ex5 = os.path.join(data_dir, "MQL5", "Experts", provision.EA_NAME + ".ex5")
+    if not os.path.exists(ex5):
+        print(f"[panel] {fname}: Selbstheilung — {provision.EA_NAME}.ex5 fehlt im "
+              f"Datenordner, bitte einmal im Terminal kompilieren.", flush=True)
+        return
+    name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
+    preset = f"prophos-heal-{name}.set"
+    os.makedirs(os.path.join(data_dir, "MQL5", "Presets"), exist_ok=True)
+    with open(os.path.join(data_dir, "MQL5", "Presets", preset), "w",
+              encoding=provision.SET_ENCODING) as f:
+        f.write(provision.build_preset(snap))
+    print(f"[panel] {fname}: Snapshot fliesst nicht — EA fehlt wohl. Starte Terminal "
+          f"neu und ziehe {provision.EA_NAME} automatisch auf (InpFileName={snap}).", flush=True)
+    for pid in provision.terminal_pids(install_dir):
+        provision._taskkill(pid)
+    ini = os.path.join(install_dir, "prophos-heal.ini")
+    with open(ini, "w", encoding=provision.INI_ENCODING) as f:
+        f.write(provision.build_startup_ini(preset=preset))
+    try:
+        subprocess.Popen([os.path.join(install_dir, "terminal64.exe"),
+                          f"/config:{ini}"], cwd=install_dir)
+    finally:
+        # ini nach dem Start wegraeumen (ein weiterer Start damit haengte das EA
+        # auf einen ZWEITEN Chart)
+        time.sleep(30)
+        try:
+            os.remove(ini)
+        except OSError:
+            pass
+
+
 def start_terminal(fname):
     """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
     nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
@@ -237,7 +290,12 @@ def start_terminal(fname):
         return True, "Terminal läuft schon — Fenster nach vorn geholt"
     try:
         subprocess.Popen([path], cwd=os.path.dirname(path))
-        return True, "Terminal gestartet — Login kommt aus dem MT5-Ordner selbst"
+        # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
+        # wird das EA automatisch per [StartUp] nachgezogen.
+        threading.Thread(target=_heal_ea,
+                         args=(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time()),
+                         daemon=True).start()
+        return True, "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
     except OSError as e:
         return False, f"Start fehlgeschlagen: {e}"
 
