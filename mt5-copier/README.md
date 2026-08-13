@@ -52,7 +52,10 @@ gerechnet wird.
    platform cannot run from the same directory."
    - `C:\MT5-Master` → das Prop-Konto (das, in dem du per Parsec tradest).
    - `C:\MT5-Hedge` → **für den Test ein DEMO-Konto** deines Live-Brokers.
-   Die zweite Installation im *portable* Modus starten (Verknüpfung mit `/portable`).
+   Normal installieren (nicht portable) — zwei verschiedene Zielordner reichen, MT5 legt
+   dann automatisch getrennte Datenordner an. In der Config entsprechend
+   `"hedge_portable": false`. Im MT5-Installer dafür auf **„Einstellungen"** klicken und den
+   Zielordner setzen; **nicht** nach `C:\Program Files` installieren.
 3. **EA installieren:** `ProphosHedgeReader.mq5` im Master-Terminal über MetaEditor
    kompilieren (F7), dann auf einen beliebigen Chart ziehen. Im Journal muss stehen:
    `ProphosHedgeReader gestartet — Konto … (nur lesend)`.
@@ -107,5 +110,13 @@ Noch nicht am Broker getestet: Teil-Schließung und Neustart-Recovery (im Selbst
   an Duplikum pusht.
 - Kein Watchdog/Autostart, solange getestet wird. Für den Dauerbetrieb kommt ein
   Reattach-Watchdog dazu (`-10002`/`-10003` nach Terminal-Neustart).
-- Ein Snapshot-Timeout ist noch nicht scharf: Wenn das EA ausfällt, merkt der Executor es
-  aktuell nur daran, dass die Datei nicht mehr aktualisiert wird. Vor Live-Betrieb ergänzen.
+- Live noch nicht am Broker geprüft: Teil-Schließung und Neustart-Recovery (im Selbsttest grün).
+
+## Seit dem Live-Test ergänzt (Commit 540c434)
+- **Dryrun-Bremse:** im Dryrun wird ein virtueller Hedge-Bestand geführt → jede Aktion wird
+  nur noch einmal geloggt statt alle 0,5 s (verifiziert: 1 Zeile statt 5 über 5 Ticks).
+- **Reopen-Guard:** wird ein gesetzter Hedge nicht wiedererkannt (z.B. Broker hat den
+  Kommentar verändert), wird nach 3 Versuchen gestoppt und laut gewarnt, statt endlos
+  nachzulegen. Plus 3 s Cooldown zwischen Versuchen.
+- **Snapshot-Timeout:** ändert sich die Snapshot-Sequenz 15 s nicht, kommt eine Warnung
+  („läuft das Lese-EA noch?").
