@@ -2216,6 +2216,99 @@
     }
     #dashboard-view .sb-overlay.open{display:block}
   }
+
+  /* ============================================================
+     MT5-COPIER (Etappe 3, 15.08.2026) — eigener Bereich, eigene
+     Logik neben Duplikium. Optik 1:1 aus dem lokalen Copier-Panel
+     uebernommen (das seine Tokens wiederum von hier hat).
+  ============================================================ */
+  #dashboard-view .mtc-chip{display:inline-flex;align-items:center;gap:7px;
+    font-size:12.5px;font-weight:500;color:var(--sub);
+    background:var(--surface-tint);border:1px solid var(--border);border-radius:20px;padding:5px 12px}
+  #dashboard-view .mtc-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  #dashboard-view .mtc-dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(18,183,106,.15)}
+  #dashboard-view .mtc-dot.off{background:var(--danger);box-shadow:0 0 0 3px rgba(240,68,56,.12)}
+  #dashboard-view .mtc-banner{background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);
+    color:#c03128;padding:11px 14px;border-radius:var(--r-md);font-size:13px;margin-bottom:14px;white-space:pre-line}
+  #dashboard-view .mtc-jobbar{background:var(--violet-tint);border:1px solid rgba(84,71,206,.25);
+    color:var(--violet-dark);padding:10px 14px;border-radius:var(--r-md);font-size:13px;
+    margin-bottom:14px;cursor:pointer;display:flex;align-items:center;gap:10px}
+  #dashboard-view .mtc-jobbar.err{background:rgba(240,68,56,.08);border-color:rgba(240,68,56,.35);color:#c03128}
+  #dashboard-view .mtc-spin{width:14px;height:14px;border:2.5px solid rgba(84,71,206,.25);
+    border-top-color:var(--violet);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+  #dashboard-view .mtc-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}
+  #dashboard-view .mtc-card{background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-md);padding:16px;box-shadow:var(--shadow-card);transition:box-shadow .15s var(--ease)}
+  #dashboard-view .mtc-card:hover{box-shadow:var(--shadow-card-hover)}
+  #dashboard-view .mtc-card.live-mode{border-color:rgba(240,68,56,.45)}
+  #dashboard-view .mtc-top{display:flex;align-items:center;gap:8px}
+  #dashboard-view .mtc-name{font-size:15px;font-weight:600;letter-spacing:-.01em}
+  #dashboard-view .mtc-state{margin-left:auto;font-size:12px;color:var(--sub);display:inline-flex;align-items:center;gap:6px}
+  #dashboard-view .mtc-pill{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:20px}
+  #dashboard-view .mtc-pill.dry{background:var(--surface-tint);color:var(--sub);border:1px solid var(--border)}
+  #dashboard-view .mtc-pill.demo{background:rgba(18,183,106,.12);color:#0d9668}
+  #dashboard-view .mtc-pill.live{background:rgba(240,68,56,.12);color:#d92d20}
+  #dashboard-view .mtc-broker{font-size:12.5px;color:var(--sub);margin-top:3px}
+  #dashboard-view .mtc-broker b{color:var(--ink);font-weight:600}
+  #dashboard-view .mtc-route{font-size:12px;color:var(--sub-2);margin-top:1px}
+  #dashboard-view .mtc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  #dashboard-view .mtc-stat{background:var(--surface-tint);border-radius:8px;padding:7px 4px;text-align:center}
+  #dashboard-view .mtc-stat b{display:block;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+  #dashboard-view .mtc-stat span{font-size:10.5px;color:var(--sub)}
+  #dashboard-view .mtc-stat.hot b{color:var(--violet)}
+  #dashboard-view .mtc-acts{display:flex;gap:8px;margin-top:13px;align-items:center;flex-wrap:wrap}
+  #dashboard-view .mtc-warn{background:rgba(247,144,9,.1);border:1px solid rgba(247,144,9,.35);
+    color:#b45309;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
+  #dashboard-view .mtc-details{display:none;border-top:1px solid var(--border-soft);margin-top:14px;padding-top:13px}
+  #dashboard-view .mtc-card.open .mtc-details{display:block}
+  #dashboard-view .mtc-details label{display:block;font-size:11px;font-weight:600;color:var(--sub);
+    margin:10px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+  #dashboard-view .mtc-details input,#dashboard-view .mtc-details select,
+  #dashboard-view .mtc-modal-body input,#dashboard-view .mtc-modal-body select{
+    width:100%;background:var(--surface);border:1px solid var(--border);color:var(--ink);
+    border-radius:8px;padding:8px 10px;font:13px inherit;font-family:inherit;
+    transition:border-color .12s,box-shadow .12s}
+  #dashboard-view .mtc-details input:focus,#dashboard-view .mtc-details select:focus,
+  #dashboard-view .mtc-modal-body input:focus,#dashboard-view .mtc-modal-body select:focus{
+    outline:0;border-color:var(--violet);box-shadow:var(--shadow-input-focus)}
+  #dashboard-view .mtc-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  #dashboard-view .mtc-map{display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center;margin-top:5px}
+  #dashboard-view .mtc-map span{color:var(--sub-2);font-size:12px}
+  #dashboard-view .mtc-x{background:none;border:0;color:var(--sub-2);font-size:15px;padding:0 4px;cursor:pointer}
+  #dashboard-view .mtc-x:hover{color:var(--danger)}
+  #dashboard-view .mtc-msg{font-size:12px;font-family:'JetBrains Mono',monospace;color:#058a50;min-height:16px;flex:1}
+  #dashboard-view .mtc-msg.err{color:#c03128}
+  #dashboard-view .mtc-dirty{font-size:11px;color:#b45309;display:none}
+  #dashboard-view .mtc-card[data-dirty] .mtc-dirty{display:inline}
+  #dashboard-view pre.mtc-log{background:var(--surface-tint);border:1px solid var(--border-soft);
+    border-radius:8px;padding:9px;margin:10px 0 0;font-size:11px;line-height:1.55;
+    font-family:'JetBrains Mono',monospace;max-height:150px;overflow:auto;color:var(--sub);white-space:pre-wrap}
+  #dashboard-view .mtc-modal-body input.big{font-size:24px;font-weight:600;padding:10px 12px;
+    text-align:center;font-variant-numeric:tabular-nums}
+  #dashboard-view .mtc-rule{color:var(--sub-2);font-size:11.5px;margin-top:10px;line-height:1.45}
+  #dashboard-view .mtc-steps{margin-top:14px;display:grid;gap:6px;font-size:13px}
+  #dashboard-view .mtc-step{display:flex;gap:9px;align-items:baseline;color:var(--sub-2)}
+  #dashboard-view .mtc-step .st{width:16px;text-align:center;flex-shrink:0;font-weight:700}
+  #dashboard-view .mtc-step.done{color:#0d9668}
+  #dashboard-view .mtc-step.running{color:#b45309}
+  #dashboard-view .mtc-step.error{color:#c03128}
+  #dashboard-view .mtc-step .note{color:var(--sub-2);font-size:11px}
+  #dashboard-view .mtc-plans{display:grid;gap:14px;grid-template-columns:repeat(3,1fr);margin-top:14px}
+  @media (max-width:1000px){#dashboard-view .mtc-plans{grid-template-columns:1fr}}
+  #dashboard-view .mtc-pcol h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--sub);
+    text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:7px}
+  #dashboard-view .mtc-pcol h4 .cnt{background:var(--surface-tint);border:1px solid var(--border);
+    border-radius:12px;padding:0 7px;font-size:11px;color:var(--sub)}
+  #dashboard-view .mtc-plan{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+    padding:11px 13px;box-shadow:var(--shadow-card);margin-bottom:10px;font-size:13px}
+  #dashboard-view .mtc-plan.laufend{border-color:rgba(18,183,106,.45)}
+  #dashboard-view .mtc-ptop{display:flex;align-items:center;gap:8px}
+  #dashboard-view .mtc-ptop b{font-size:13.5px}
+  #dashboard-view .mtc-ptop .mtc-x{margin-left:auto}
+  #dashboard-view .mtc-pmeta{color:var(--sub);font-size:12px;margin-top:3px}
+  #dashboard-view .mtc-plive{color:#0d9668;font-size:12px;margin-top:4px;font-variant-numeric:tabular-nums}
+  #dashboard-view .mtc-pempty{color:var(--sub-2);font-size:12.5px;padding:12px 4px}
+  #dashboard-view .mtc-offline{max-width:560px}
 </style>
 </head>
 <body>
@@ -2486,6 +2579,14 @@
       <button class="sb-link" data-view="calc">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="13" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="13" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="13" y1="18" x2="16" y2="18"/></svg>
         Lot Rechner
+      </button>
+      <!-- MT5-Copier: eigener Hedge-Copier statt Duplikium (Etappe 3, 15.08.2026).
+           Separater Bereich mit eigener Logik — die Duplikium-Wege bleiben
+           unangetastet und laufen normal weiter. Funktioniert nur, wenn Prophos
+           ueber das lokale app.py laeuft (Copier ist eine Pro-PC-Sache). -->
+      <button class="sb-link" data-view="mt5copier">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
+        MT5-Copier <span class="sb-badge" id="sb-badge-mtc" hidden>0</span>
       </button>
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
@@ -4667,6 +4768,121 @@
       </div>
     </section>
 
+    <!-- MT5-COPIER (Etappe 3, 15.08.2026) — eigener Hedge-Copier, separater
+         Bereich mit eigener Logik. Duplikium bleibt komplett unangetastet.
+         Spricht ueber das LOKALE app.py (/copier/*) mit der Panel-API des PCs;
+         ohne lokales Backend zeigt die View den Offline-Hinweis. -->
+    <section class="view" data-view="mt5copier">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">MT5-Copier</h1>
+          <p class="view-sub">Eigener Hedge-Copier — die Flotte dieses PCs. Duplikium läuft daneben normal weiter.</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="mtc-chip" id="mtc-version" title="Version des Copier-Stacks auf diesem PC" style="display:none"></span>
+          <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
+          <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
+        </div>
+      </div>
+
+      <!-- Offline: Prophos laeuft gerade nicht ueber das lokale app.py -->
+      <div id="mtc-offline" class="ts-card mtc-offline" style="display:none">
+        <h3 style="margin:0 0 6px">Copier auf diesem Gerät nicht erreichbar</h3>
+        <p style="margin:0;font-size:13px;color:var(--sub);line-height:1.6">
+          Der MT5-Copier läuft pro PC. Dieser Bereich funktioniert, wenn Prophos über das
+          <b>lokale Backend</b> läuft (<code>start-local-backend.bat</code> bzw. <code>python app.py</code>
+          auf dem PC, Aufruf über <code>localhost:5000</code>) und dort der Copier-Stack
+          gestartet ist (<code>start-alles.bat</code> in <code>C:\mt5-copier</code>).
+        </p>
+        <div style="margin-top:10px;font-size:12px;color:var(--sub-2)" id="mtc-offline-detail"></div>
+      </div>
+
+      <div id="mtc-notice"></div>
+      <div class="mtc-grid" id="mtc-grid"></div>
+
+      <div class="view-head" style="margin-top:30px" id="mtc-plans-head">
+        <div>
+          <h2 class="view-title" style="font-size:19px">Trade-Pläne</h2>
+          <p class="view-sub">geplant → laufend → beendet — wandert automatisch mit deinen Positionen</p>
+        </div>
+      </div>
+      <div class="mtc-plans" id="mtc-plans"></div>
+    </section>
+
+    <!-- MT5-Copier: Trade-Plan-Modal — dedizierte Verdrahtung (Projektregel:
+         kein Sammel-Handler ueber alle .modal-bg) -->
+    <div class="modal-bg" id="mtcPlanModal">
+      <div class="modal" style="max-width:460px">
+        <div class="modal-head">
+          <h3 id="mtc-plan-title">Trade planen</h3>
+          <button class="modal-x" id="mtc-plan-x" type="button">✕</button>
+        </div>
+        <div class="mtc-modal-body">
+          <p class="modal-sub" id="mtc-plan-sub" style="margin-bottom:14px"></p>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Multiplikator</label>
+          <input class="big" id="mtc-plan-mult" type="number" step="0.001" min="0">
+          <div class="mtc-row" style="margin-top:10px">
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">max Lots pro Hedge</label>
+              <input id="mtc-plan-lots" type="number" step="0.01" min="0">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Modus</label>
+              <select id="mtc-plan-mode">
+                <option value="dryrun">dryrun — nur mitlesen</option>
+                <option value="demo">demo — echte Order, Demo-Konto</option>
+                <option value="live">live — echtes Geld</option>
+              </select>
+            </div>
+          </div>
+          <div class="mtc-rule">Regel: max Lots muss über Multiplikator × größter Master-Position bleiben, sonst verweigert die Sicherheitsgrenze die Order.</div>
+        </div>
+        <div class="modal-actions" style="align-items:center">
+          <span class="mtc-msg" id="mtc-plan-msg"></span>
+          <button class="btn btn-ghost" id="mtc-plan-cancel" type="button">Abbrechen</button>
+          <button class="btn btn-primary" id="mtc-plan-start" type="button">Trade starten</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MT5-Copier: Account-hinzufuegen-Modal — dedizierte Verdrahtung -->
+    <div class="modal-bg" id="mtcAddModal">
+      <div class="modal" style="max-width:460px">
+        <div class="modal-head">
+          <h3>Account hinzufügen</h3>
+          <button class="modal-x" id="mtc-add-x" type="button">✕</button>
+        </div>
+        <div class="mtc-modal-body">
+          <p class="modal-sub" style="margin-bottom:14px">klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch auf diesem PC</p>
+          <div class="mtc-row">
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Name (kurz, nur Buchstaben/Zahlen)</label>
+              <input data-mtcp="name" placeholder="z.B. ftmo1">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Login (Kontonummer)</label>
+              <input data-mtcp="login" placeholder="z.B. 437899">
+            </div>
+          </div>
+          <div class="mtc-row" style="margin-top:8px">
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Passwort (sichtbar — auf Wunsch)</label>
+              <input data-mtcp="password" autocomplete="off" spellcheck="false">
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Server</label>
+              <input data-mtcp="server" placeholder="z.B. FusionMarkets-Demo">
+            </div>
+          </div>
+          <div id="mtc-add-steps"></div>
+        </div>
+        <div class="modal-actions" style="align-items:center">
+          <span class="mtc-msg" id="mtc-add-msg"></span>
+          <button class="btn btn-primary" id="mtc-add-start" type="button">Fertig — automatisch einrichten</button>
+        </div>
+      </div>
+    </div>
+
     <!-- KASSE -->
     <section class="view" data-view="kasse">
       <div class="view-head">
@@ -5853,6 +6069,7 @@
     'account-detail': ['Account', 'Details, Trades & Buchungen'],
     topstep:   ['Topstep Mirror', 'TSX ↔ MT5 hatching'],
     calc:      ['Lot Rechner', 'Hatch-Multiplier zwischen zwei Firms'],
+    mt5copier: ['MT5-Copier', 'Eigener Hedge-Copier — die Flotte dieses PCs'],
     trades:    ['Trades',    'Trade-Log über alle Accounts'],
     livetrades:['Live Trades', 'Offene Positionen'],
     risk:      ['Risk',      'Live-Drawdown & Compliance'],
@@ -20251,6 +20468,410 @@
   } else {
     setTimeout(mgInit, 0)
   }
+})()
+
+/* ============================================================
+   MT5-COPIER (Etappe 3, 15.08.2026)
+   Eigener Hedge-Copier als separater Bereich. Spricht NUR ueber das
+   lokale app.py (/copier/* → Panel-API 127.0.0.1:8770 des PCs).
+   Die Duplikium-Logik wird hier nirgends beruehrt — bewusst eine
+   komplett parallele Schnittstelle (Finns Vorgabe, 15.08.2026).
+   UI/Verhalten 1:1 vom lokalen Copier-Panel uebernommen, das als
+   Prototyp fuer genau diese Etappe gebaut wurde.
+============================================================ */
+;(() => {
+  // Gleiche Basis wie der Topstep-Mirror: lokal = localhost:5000, sonst Railway
+  // (dort gibt es kein Panel → die Route antwortet 502 → Offline-Hinweis).
+  const MTC_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000/copier'
+    : 'https://web-production-bec81.up.railway.app/copier'
+
+  const mtcState = {}
+  const mtcOpen = new Set()
+  let mtcJob = null
+  let mtcSeenOnline = false
+
+  const $ = id => document.getElementById(id)
+  const mtcView = () => document.querySelector('#dashboard-view .view[data-view="mt5copier"]')
+  const mtcActive = () => { const v = mtcView(); return v && v.classList.contains('active') }
+  function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+  function pill(m){ const c = m==='live' ? 'live' : m==='demo' ? 'demo' : 'dry'
+    return `<span class="mtc-pill ${c}">${esc((m||'?').toUpperCase())}</span>` }
+
+  function mapRows(map){
+    const e = Object.entries(map || {})
+    return e.map(([k, v]) => `<div class="mtc-map">
+      <input value="${esc(k)}" data-mtck placeholder="Master-Symbol">
+      <span>→</span>
+      <input value="${esc(v)}" data-mtcv placeholder="Hedge-Symbol">
+      <button class="mtc-x" data-mtcdel title="Zeile entfernen" type="button">×</button></div>`).join('')
+      + `<div class="mtc-map"><input data-mtck placeholder="neues Master-Symbol">
+        <span>→</span><input data-mtcv placeholder="Hedge-Symbol"><span></span></div>`
+  }
+
+  function card(d){
+    const s = d.status || {}, live = d.alive
+    const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
+    const broker = s.master_server || d.master_server || 'Broker unbekannt'
+    const isOpen = mtcOpen.has(d.file)
+    return `<div class="mtc-card${d.mode==='live' ? ' live-mode' : ''}${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
+      <div class="mtc-top"><span class="mtc-name">${esc(d.name)}</span>${pill(d.mode)}
+        <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span></div>
+      <div class="mtc-broker"><b>${esc(broker)}</b></div>
+      <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
+      ${s.note ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
+      ${(s.blocked || []).length ? `<div class="mtc-warn">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>` : ''}
+      <div class="mtc-stats">
+        <div class="mtc-stat${pos ? ' hot' : ''}"><b>${pos}</b><span>Positionen</span></div>
+        <div class="mtc-stat${hed ? ' hot' : ''}"><b>${hed}</b><span>Hedges</span></div>
+        <div class="mtc-stat"><b>×${esc(d.multiplier ?? '–')}</b><span>Multi</span></div>
+        <div class="mtc-stat"><b>${esc(d.max_lots ?? '–')}</b><span>max Lots</span></div>
+      </div>
+      <div class="mtc-acts">
+        <button class="btn btn-primary" style="padding:6px 11px;font-size:12px" data-mtcplan type="button">Trade planen</button>
+        <button class="btn btn-ghost" style="padding:6px 11px;font-size:12px" data-mtctoggle type="button">${isOpen ? 'Details ▴' : 'Details ▾'}</button>
+        <span class="mtc-dirty">ungespeicherte Änderung</span>
+        <span class="mtc-msg"></span>
+      </div>
+      <div class="mtc-details">
+        <div class="mtc-row">
+          <div><label>Multiplikator</label><input type="number" step="0.001" min="0" value="${esc(d.multiplier ?? '')}" data-mtcf="multiplier"></div>
+          <div><label>max Lots pro Hedge</label><input type="number" step="0.01" min="0" value="${esc(d.max_lots ?? '')}" data-mtcf="max_lots_per_hedge"></div>
+        </div>
+        <label>Modus</label>
+        <select data-mtcf="mode">
+          <option value="dryrun" ${d.mode==='dryrun' ? 'selected' : ''}>dryrun — nur mitlesen, keine Order</option>
+          <option value="demo" ${d.mode==='demo' ? 'selected' : ''}>demo — echte Order, nur Demo-Konto</option>
+          <option value="live" ${d.mode==='live' ? 'selected' : ''}>live — echtes Geld</option>
+        </select>
+        <label>Symbol-Mapping (Master → Hedge)</label>
+        <div data-mtcmaps>${mapRows(d.symbol_map)}</div>
+        <div class="mtc-acts">
+          <button class="btn btn-primary" style="padding:6px 11px;font-size:12px" data-mtcsave type="button">Speichern &amp; pushen</button>
+          ${d.has_terminal ? `<button class="btn btn-ghost" style="padding:6px 11px;font-size:12px" data-mtcterm type="button">Terminal öffnen</button>` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--sub-2);margin-top:8px">${esc(d.file)} · magic ${esc(d.magic)} · ${esc(d.snapshot_file || '')}</div>
+        <pre class="mtc-log">${esc((s.log || []).slice(-14).join('\n') || 'noch keine Log-Zeilen')}</pre>
+      </div>
+    </div>`
+  }
+
+  function fmtT(iso){ if(!iso) return ''
+    const d = new Date(iso)
+    return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'}) + ' ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) }
+  function dur(a, b){ if(!a || !b) return ''
+    const m = Math.round((new Date(b) - new Date(a)) / 60000)
+    return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m%60} min` }
+
+  function planCard(p){
+    const d = mtcState[p.file] || {}, s = d.status || {}
+    const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
+    let meta = '', live = ''
+    if(p.status === 'geplant') meta = `geplant ${fmtT(p.armed_at || p.created_at)}`
+    if(p.status === 'laufend'){ meta = `läuft seit ${fmtT(p.started_at)}`
+      live = `<div class="mtc-plive">● ${pos} Position(en) · ${hed} Hedge(s) bewacht</div>` }
+    if(p.status === 'beendet') meta = `${fmtT(p.started_at)} → ${fmtT(p.ended_at)} · ${dur(p.started_at, p.ended_at)}`
+    return `<div class="mtc-plan ${p.status}">
+      <div class="mtc-ptop"><b>${esc(d.name || p.name)}</b>${pill(p.mode)}
+        <button class="mtc-x" data-mtcpdel="${p.id}" data-mtcpstatus="${p.status}" title="Plan löschen" type="button">×</button></div>
+      <div class="mtc-pmeta">×${esc(p.multiplier)} · max ${esc(p.max_lots)} Lots · ${esc(s.master_server || d.master_server || '')}</div>
+      <div class="mtc-pmeta">${esc(meta)}</div>
+      ${live}
+    </div>`
+  }
+
+  function renderPlans(plans){
+    const cols = [['geplant','Geplant'],['laufend','Laufend'],['beendet','Beendet']]
+    $('mtc-plans').innerHTML = cols.map(([k, label]) => {
+      let list = (plans || []).filter(p => p.status === k)
+      if(k === 'beendet') list = list.slice().reverse()
+      return `<div class="mtc-pcol"><h4>${label}<span class="cnt">${list.length}</span></h4>
+        ${list.map(planCard).join('') || `<div class="mtc-pempty">${k==='geplant' ? 'Kein Plan — „Trade planen" auf einer Karte.' : k==='laufend' ? 'Nichts im Markt.' : 'Noch keine abgeschlossenen Trades.'}</div>`}
+      </div>`
+    }).join('')
+  }
+
+  function setOffline(offline, detail){
+    $('mtc-offline').style.display = offline ? '' : 'none'
+    $('mtc-grid').style.display = offline ? 'none' : ''
+    $('mtc-plans').style.display = offline ? 'none' : ''
+    $('mtc-plans-head').style.display = offline ? 'none' : ''
+    $('mtc-notice').style.display = offline ? 'none' : ''
+    if(offline) $('mtc-offline-detail').textContent = detail || ''
+  }
+
+  function jobSteps(job){
+    const mark = s => s.state==='done' ? '✓' : s.state==='running' ? '…' : s.state==='error' ? '✗' : '·'
+    const labels = { pruefen:'Prüfen & Kennwerte vergeben', klonen:'Terminal-Ordner klonen',
+      login:'Erststart — Datenordner anlegen', ea:'Server-Liste + Lese-EA + Preset einlegen',
+      neustart:'Start mit Login + EA (Zugangsdaten-Datei wird danach gelöscht)', config:'Config anlegen' }
+    let h = `<div class="mtc-steps">${job.steps.map(s => `<div class="mtc-step ${s.state}"><span class="st">${mark(s)}</span><span>${labels[s.key] || s.key}${s.note ? ` <span class="note">${esc(s.note)}</span>` : ''}</span></div>`).join('')}`
+    if(job.error) h += `<div class="mtc-step error" style="margin-top:6px"><span class="st">✗</span><span>${esc(job.error)}</span></div>`
+    else if(job.done) h += `<div class="mtc-step done"><span class="st">✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</span></div>`
+    return h + '</div>'
+  }
+  function renderAddJob(){
+    $('mtc-add-steps').innerHTML = mtcJob ? jobSteps(mtcJob) : ''
+    const busy = mtcJob && !mtcJob.done
+    $('mtc-add-start').disabled = !!busy
+    document.querySelectorAll('#mtcAddModal [data-mtcp]').forEach(i => i.disabled = !!busy)
+  }
+
+  // Robuster Fetch: liefert IMMER ein Objekt. Bei Nicht-JSON (z.B. HTML-404 von
+  // Railway oder einem alten Backend ohne /copier-Route) kein Crash, sondern ein
+  // sauberer Fehlertext (Review 15.08.2026, Funde „POST ohne try/catch" +
+  // „Versionsschiefstand Frontend/Backend").
+  async function mtcApi(path, opts){
+    try {
+      const r = await fetch(`${MTC_BASE}/${path}`, opts)
+      const txt = await r.text()
+      let j; try { j = JSON.parse(txt) } catch(_){
+        return { ok:false, copier_offline:true, _httpFail:true,
+                 error: r.ok ? 'Backend-Antwort ist kein JSON (falsche/alte Version?)' : `HTTP ${r.status}` }
+      }
+      return j
+    } catch(e){ return { ok:false, copier_offline:true, _httpFail:true, error:String(e) } }
+  }
+
+  function offlineChip(){
+    $('mtc-copier-chip').innerHTML = `<span class="mtc-dot off"></span>Copier offline`
+    const v = $('mtc-version'); if(v) v.style.display = 'none'
+    const badge = $('sb-badge-mtc'); if(badge){ badge.hidden = true }
+  }
+
+  async function mtcLoad(){
+    const d = await mtcApi('instances')
+    if(d.copier_offline || d._httpFail){ offlineChip(); setOffline(true, d.error || 'unerreichbar'); return }
+    setOffline(false)
+    mtcSeenOnline = true
+    mtcJob = d.job
+    ;(d.instances || []).forEach(x => mtcState[x.file] = x)
+
+    const anyAlive = (d.instances || []).some(x => x.alive)
+    $('mtc-copier-chip').innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
+    const v = $('mtc-version')
+    if(d.version){ v.style.display = ''; v.textContent = 'v' + d.version }
+    const badge = $('sb-badge-mtc')
+    if(badge){ const n = (d.instances || []).length; badge.hidden = !n; badge.textContent = n }
+
+    let n = ''
+    if((d.conflicts || []).length) n += `<div class="mtc-banner">⛔ ${d.conflicts.map(esc).join('\n⛔ ')}</div>`
+    const addOpen = $('mtcAddModal').classList.contains('open')
+    if(d.job && !d.job.done && !addOpen){
+      const cur = d.job.steps.find(s => s.state === 'running')
+      n += `<div class="mtc-jobbar" id="mtc-jobbar"><span class="mtc-spin"></span>Account „${esc(d.job.name)}" wird eingerichtet — ${esc(cur ? cur.key : '…')} … (klicken für Details)</div>`
+    } else if(d.job && d.job.done && d.job.error && !addOpen){
+      n += `<div class="mtc-jobbar err" id="mtc-jobbar">✗ Account „${esc(d.job.name)}": ${esc((d.job.error || '').slice(0, 140))}… (klicken für Details)</div>`
+    }
+    $('mtc-notice').innerHTML = n
+    const jb = $('mtc-jobbar'); if(jb) jb.addEventListener('click', openAdd)
+
+    const grid = $('mtc-grid')
+    if(!(d.instances || []).length){
+      grid.innerHTML = '<div class="mtc-empty-ph" style="color:var(--sub);padding:30px 10px">Keine Accounts auf diesem PC. Oben rechts „＋ Account hinzufügen".</div>'
+    } else {
+      // Leergrid-Platzhalter entfernen, sobald echte Accounts da sind — sonst
+      // stuende er nach der ersten Provisionierung dauerhaft ueber den Karten
+      // (Review 15.08.2026, Onboarding-Pfad).
+      const ph = grid.querySelector('.mtc-empty-ph'); if(ph) ph.remove()
+      const files = new Set(d.instances.map(x => x.file))
+      grid.querySelectorAll('.mtc-card').forEach(c => { if(!files.has(c.getAttribute('data-mtcfile'))) c.remove() })
+      for(const x of d.instances){
+        const cur = grid.querySelector(`.mtc-card[data-mtcfile="${CSS.escape(x.file)}"]`)
+        // Karten mit ungespeicherten Eingaben oder Fokus NICHT ueberschreiben (3s-Reload)
+        if(cur && (cur.hasAttribute('data-dirty') || cur.contains(document.activeElement))) continue
+        const html = card(x)
+        if(cur) cur.outerHTML = html; else grid.insertAdjacentHTML('beforeend', html)
+      }
+    }
+    renderPlans(d.plans)
+    if(addOpen) renderAddJob()
+  }
+
+  // Poll nur, wenn die View sichtbar ist oder ein Copier-Modal offen — die
+  // restliche App soll von diesem Bereich nichts spueren.
+  setInterval(() => {
+    if(mtcActive() || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
+  }, 3000)
+  // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
+  document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
+    b.addEventListener('click', () => setTimeout(mtcLoad, 50)))
+
+  // Dirty-Tracking der Karten
+  $('mtc-grid').addEventListener('input', e => { const c = e.target.closest('.mtc-card'); if(c) c.setAttribute('data-dirty','1') })
+  $('mtc-grid').addEventListener('change', e => { const c = e.target.closest('.mtc-card'); if(c) c.setAttribute('data-dirty','1') })
+
+  /* ── Trade-Plan-Modal (dedizierte Verdrahtung) ── */
+  const planBg = $('mtcPlanModal')
+  // Handle im Scope: sonst ueberlebt der Bereitschafts-Timer das Schliessen des
+  // Modals und meldet spaeter „Bereit" im Kontext eines ANDEREN Accounts
+  // (Review 15.08.2026). Wird in open/close und beim Start-Klick gecleart.
+  let mtcReadyTimer = null
+  function stopReadyTimer(){ if(mtcReadyTimer){ clearInterval(mtcReadyTimer); mtcReadyTimer = null } }
+  function openPlan(file){
+    const d = mtcState[file]; if(!d) return
+    stopReadyTimer()
+    $('mtc-plan-start').disabled = false
+    planBg.dataset.file = file
+    const s = d.status || {}
+    $('mtc-plan-title').textContent = 'Trade planen — ' + d.name
+    $('mtc-plan-sub').textContent = `${s.master_server || d.master_server || ''} · Master ${d.master_expected || '—'} → Hedge ${d.hedge_expected || '—'}`
+    $('mtc-plan-mult').value = d.multiplier ?? ''
+    $('mtc-plan-lots').value = d.max_lots ?? ''
+    $('mtc-plan-mode').value = d.mode || 'dryrun'
+    const m = $('mtc-plan-msg'); m.className = 'mtc-msg'; m.textContent = ''
+    planBg.classList.add('open')
+    $('mtc-plan-mult').focus()
+  }
+  function closePlan(){ stopReadyTimer(); $('mtc-plan-start').disabled = false; planBg.classList.remove('open') }
+  $('mtc-plan-cancel').addEventListener('click', closePlan)
+  $('mtc-plan-x').addEventListener('click', closePlan)
+  $('mtc-plan-start').addEventListener('click', async () => {
+    const file = planBg.dataset.file, d = mtcState[file] || {}
+    const msg = $('mtc-plan-msg')
+    const btn = $('mtc-plan-start')
+    if(btn.disabled) return                 // Mehrfachklick-Schutz (Review 15.08.2026)
+    if(!d.alive){
+      if(!confirm(`Der Copier ist GESTOPPT — deine Trades würden NICHT gehedgt!\n\nAm PC start-alles.bat ausführen, dann hier erneut starten.\n\nTrotzdem fortfahren (nur Werte pushen + Terminal öffnen)?`)){
+        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — erst den Copier starten.'; return }
+    }
+    const patch = { multiplier: $('mtc-plan-mult').value,
+                    max_lots_per_hedge: $('mtc-plan-lots').value,
+                    mode: $('mtc-plan-mode').value }
+    if(!patch.multiplier || !patch.max_lots_per_hedge){
+      msg.className = 'mtc-msg err'; msg.textContent = 'Multiplikator und max Lots ausfüllen.'; return }
+    if(+patch.max_lots_per_hedge <= +patch.multiplier){
+      if(!confirm(`max Lots (${patch.max_lots_per_hedge}) ist nicht größer als der Multiplikator (${patch.multiplier}).\nSchon ab 1.0 Lot Master würde die Sicherheitsgrenze die Order verweigern.\nTrotzdem so starten?`)) return
+    }
+    if(patch.mode === 'live' && d.mode !== 'live'){
+      if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${d.master_expected || '?'}\nHedge: ${d.hedge_expected || '?'}\n\nDuplikum für dieses Paar ist aus?`)){
+        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — nichts geändert'; return }
+    }
+    stopReadyTimer(); btn.disabled = true
+    msg.className = 'mtc-msg'; msg.textContent = 'pushe…'
+    const s = await mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) })
+    if(!s.ok){ msg.className = 'mtc-msg err'; msg.textContent = 'Fehler: ' + (s.msg || s.error); btn.disabled = false; return }
+    await mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ multiplier: patch.multiplier, max_lots: patch.max_lots_per_hedge, mode: patch.mode }) })
+    msg.textContent = 'gepusht — öffne Terminal…'
+    const ts = await mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}' })
+    if(!ts.ok){ msg.className = 'mtc-msg err'; msg.textContent = 'Multiplikator gepusht, aber Terminal: ' + (ts.msg || ts.error); btn.disabled = false; return }
+    // Bereitschafts-Ueberwachung: erst traden, wenn wirklich alles fliesst.
+    const t0 = Date.now()
+    msg.className = 'mtc-msg'; msg.textContent = `⏳ ×${patch.multiplier} gepusht · Terminal startet, Login automatisch…`
+    mtcReadyTimer = setInterval(async () => {
+      // Abbrechen, wenn das Modal zu ist oder inzwischen ein anderer Account
+      // geladen wurde — sonst schreibt dieser Timer in einen fremden Kontext.
+      if(!planBg.classList.contains('open') || planBg.dataset.file !== file){ stopReadyTimer(); return }
+      const dd = await mtcApi('instances')
+      const inst = (dd.instances || []).find(x => x.file === file)
+      const sec = Math.round((Date.now() - t0) / 1000)
+      if(inst && inst.alive && !(inst.status || {}).note){
+        stopReadyTimer(); btn.disabled = false
+        msg.className = 'mtc-msg'
+        msg.textContent = `✓ Bereit — ×${patch.multiplier} aktiv, Hedge bewacht. Jetzt im Terminal traden.`
+        setTimeout(mtcLoad, 1000)
+        return
+      }
+      if(sec > 170){ stopReadyTimer(); btn.disabled = false; msg.className = 'mtc-msg err'
+        msg.textContent = 'Terminal liefert nach 3 Minuten nichts — Details-Log der Karte prüfen.'; return }
+      msg.className = 'mtc-msg'
+      msg.textContent = sec > 50
+        ? `⏳ EA wird geprüft und notfalls automatisch aufgezogen… (${sec}s)`
+        : `⏳ Terminal startet, Login automatisch… (${sec}s)`
+    }, 3000)
+  })
+
+  /* ── Account-hinzufuegen-Modal (dedizierte Verdrahtung) ── */
+  const addBg = $('mtcAddModal')
+  function openAdd(){ addBg.classList.add('open'); renderAddJob() }
+  function closeAdd(){ addBg.classList.remove('open'); mtcLoad() }
+  $('mtc-add-open').addEventListener('click', openAdd)
+  $('mtc-add-x').addEventListener('click', closeAdd)
+  $('mtc-add-start').addEventListener('click', async () => {
+    const get = k => (addBg.querySelector(`[data-mtcp="${k}"]`) || {}).value?.trim() || ''
+    const body = { name: get('name'), login: get('login'),
+                   password: (addBg.querySelector('[data-mtcp="password"]') || {}).value || '',
+                   server: get('server') }
+    const msg = $('mtc-add-msg')
+    if(!body.name || !body.login || !body.password || !body.server){
+      msg.className = 'mtc-msg err'; msg.textContent = 'Alle vier Felder ausfüllen.'; return }
+    if(!/^[A-Za-z0-9]{1,24}$/.test(body.name)){
+      msg.className = 'mtc-msg err'; msg.textContent = 'Name: nur Buchstaben/Zahlen, ohne Leer-/Bindezeichen.'; return }
+    msg.className = 'mtc-msg'; msg.textContent = 'starte…'
+    const d = await mtcApi('provision', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = ''
+    msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
+    msg.textContent = d.ok ? 'läuft — Fortschritt unten' : ('Fehler: ' + (d.msg || d.error))
+    if(d.ok) setTimeout(mtcLoad, 1000)
+  })
+
+  /* ── Karten-Aktionen (delegiert innerhalb des Copier-Grids) ── */
+  $('mtc-grid').addEventListener('click', async e => {
+    const cardEl = e.target.closest('.mtc-card'); if(!cardEl) return
+    const file = cardEl.getAttribute('data-mtcfile')
+    const msg = cardEl.querySelector('.mtc-msg')
+    if(e.target.hasAttribute('data-mtcplan')){ openPlan(file); return }
+    if(e.target.hasAttribute('data-mtctoggle')){
+      if(mtcOpen.has(file)) mtcOpen.delete(file); else mtcOpen.add(file)
+      cardEl.classList.toggle('open')
+      e.target.textContent = cardEl.classList.contains('open') ? 'Details ▴' : 'Details ▾'
+      return
+    }
+    if(e.target.hasAttribute('data-mtcdel')){
+      e.target.closest('.mtc-map').remove()
+      cardEl.setAttribute('data-dirty','1')
+      return
+    }
+    if(e.target.hasAttribute('data-mtcterm')){
+      msg.className = 'mtc-msg'; msg.textContent = 'öffne Terminal…'
+      const d = await mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body:'{}' })
+      msg.className = 'mtc-msg' + (d.ok ? '' : ' err'); msg.textContent = d.ok ? d.msg : ('Fehler: ' + (d.msg || d.error))
+      return
+    }
+    if(!e.target.hasAttribute('data-mtcsave')) return
+    const patch = {}
+    cardEl.querySelectorAll('[data-mtcf]').forEach(el => patch[el.getAttribute('data-mtcf')] = el.value)
+    const map = {}; let bad = null, dup = null
+    cardEl.querySelectorAll('[data-mtcmaps] .mtc-map').forEach(row => {
+      const a = (row.querySelector('[data-mtck]') || {}).value?.trim() || ''
+      const b = (row.querySelector('[data-mtcv]') || {}).value?.trim() || ''
+      if(!a && !b) return
+      if(!a || !b){ bad = a || b; return }
+      if(map[a] !== undefined) dup = a
+      map[a] = b
+    })
+    if(bad){ msg.className = 'mtc-msg err'; msg.textContent = `Mapping-Zeile '${bad}' ist nur halb ausgefüllt`; return }
+    if(dup){ msg.className = 'mtc-msg err'; msg.textContent = `Master-Symbol '${dup}' doppelt im Mapping`; return }
+    patch.symbol_map = map
+    if(patch.mode === 'live' && mtcState[file]?.mode !== 'live'){
+      const s = mtcState[file] || {}
+      if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${s.master_expected || '?'}\nHedge: ${s.hedge_expected || '?'}\n\nDuplikum für dieses Paar ist aus?`)){
+        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — Modus nicht geändert'; return }
+    }
+    msg.className = 'mtc-msg'; msg.textContent = 'speichere…'
+    const d = await mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) })
+    msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
+    msg.textContent = d.ok ? ((d.msg || 'gespeichert') + ' — der Copier übernimmt es in ~2s' + (d.restart ? ' (Neustart läuft automatisch)' : '')) : ('Fehler: ' + (d.msg || d.error))
+    if(d.ok) cardEl.removeAttribute('data-dirty')
+    setTimeout(mtcLoad, 2500)
+  })
+
+  /* ── Plan-Loeschen ── */
+  $('mtc-plans').addEventListener('click', async e => {
+    const pid = e.target.getAttribute && e.target.getAttribute('data-mtcpdel')
+    if(!pid) return
+    if(e.target.getAttribute('data-mtcpstatus') === 'laufend' && !confirm('Dieser Plan LÄUFT gerade (Position offen). Wirklich nur den Plan-Eintrag löschen? Die Position und der Hedge bleiben unberührt.')) return
+    await mtcApi(`plan-delete?id=${encodeURIComponent(pid)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}' })
+    mtcLoad()
+  })
 })()
 </script>
 <!-- ── Coin-Flip Floating Button + Modal ── -->

@@ -246,6 +246,43 @@ def ma_proxy(path):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ── MT5-Copier Panel-Proxy (Etappe 3, 15.08.2026) ──
+# prophos.html erreicht darueber die Panel-API des eigenen Hedge-Copier-Stacks
+# auf DIESEM PC (127.0.0.1:8770, siehe mt5-copier/panel.py). Bewusst nur
+# localhost: der Copier ist eine Pro-PC-Angelegenheit — auf Railway existiert
+# kein Panel, dort antwortet die Route sauber mit 502 und das Frontend zeigt
+# "nur am lokalen PC verfuegbar". Die Duplikium-Logik bleibt komplett
+# unberuehrt; das hier ist die parallele Schnittstelle zum eigenen Copier.
+COPIER_PANEL = "http://127.0.0.1:8770"
+
+@app.route("/copier/<path:path>", methods=["GET","POST","OPTIONS"])
+def copier_proxy(path):
+    if request.method == "OPTIONS": return "", 200
+    # SICHERHEIT (Review 15.08.2026): Das Panel schuetzt sich selbst nur, solange
+    # es direkt angesprochen wird — es bindet an 127.0.0.1 und prueft Host+Origin.
+    # Dieser Proxy darf diese Grenze NICHT aufweichen. Zwei Riegel:
+    #  1) Nur lokale Aufrufer. app.py lauscht auf 0.0.0.0 (Railway/LAN), aber der
+    #     Copier ist eine reine Loopback-Sache. Ein LAN-Geraet (fremde remote_addr)
+    #     darf hier nichts schalten — sonst koennte es Accounts auf 'live' setzen.
+    #  2) Browser-Origin durchreichen, damit die Origin-Pruefung des Panels wieder
+    #     greift (schuetzt gegen Drive-by-POSTs fremder Seiten trotz CORS '*').
+    if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return jsonify({"ok": False, "copier_offline": True,
+                        "error": "Copier ist nur lokal auf dem PC selbst erreichbar."}), 403
+    h = {"Content-Type": "application/json"}
+    origin = request.headers.get("Origin")
+    if origin: h["Origin"] = origin
+    try:
+        r = requests.request(
+            request.method, f"{COPIER_PANEL}/api/{path}",
+            params=request.args,
+            json=request.get_json(silent=True) if request.method == "POST" else None,
+            headers=h, timeout=25)
+        return Response(r.content, status=r.status_code, content_type="application/json")
+    except Exception as e:
+        return jsonify({"ok": False, "copier_offline": True,
+                        "error": f"Copier-Panel auf diesem PC nicht erreichbar ({type(e).__name__})"}), 502
+
 # ── Duplikium Connect (Basic Auth → Token) ──
 @app.route("/duplikum/connect", methods=["POST","OPTIONS"])
 def duplikum_connect():
