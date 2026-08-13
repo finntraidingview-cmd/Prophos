@@ -210,9 +210,11 @@ def prov_start(name, login, password, server):
 
 
 def start_terminal(fname):
-    """Startet das Master-Terminal der Instanz. Pfad kommt AUSSCHLIESSLICH aus der
-    Config-Datei (nicht ueber die API setzbar) und muss eine terminal64.exe sein.
-    MT5 laesst pro Datenordner nur eine Instanz zu — ein zweiter Start schadet nicht."""
+    """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
+    nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
+    Fenster ohne die laufende Sitzung oeffnen, das nach dem Login fragt
+    (Fund 14.08.2026: genau daher kam der stoerende OK-Dialog). Pfad kommt
+    AUSSCHLIESSLICH aus der Config (nicht ueber die API setzbar)."""
     cfg = read_json(os.path.join(HERE, fname), {}) or {}
     path = str(cfg.get("master_terminal_path") or "").strip()
     if not path:
@@ -221,6 +223,16 @@ def start_terminal(fname):
         return False, "master_terminal_path muss auf eine terminal64.exe zeigen"
     if not os.path.exists(path):
         return False, f"nicht gefunden: {path}"
+    pids = provision.terminal_pids(os.path.dirname(path))
+    if pids:
+        # Laeuft schon: NICHT neu starten, nur das Fenster nach vorn holen.
+        try:
+            subprocess.run(["powershell", "-Command",
+                            f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
+                           capture_output=True, timeout=15)
+        except Exception:
+            pass
+        return True, "Terminal läuft schon — Fenster nach vorn geholt"
     try:
         subprocess.Popen([path], cwd=os.path.dirname(path))
         return True, "Terminal gestartet — Login kommt aus dem MT5-Ordner selbst"

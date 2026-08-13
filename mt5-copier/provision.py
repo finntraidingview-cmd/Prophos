@@ -320,20 +320,23 @@ def _journal_tail(data_dir, baseline=None, n=6):
     return " | ".join(lines[-n:]) if lines else "(Journal leer)"
 
 
-def _kill_terminal_at(install_dir):
-    """Beendet ein evtl. noch laufendes Terminal DIESER Installation (z.B. Rest
-    eines vorherigen Fehlversuchs). Ein zweiter Start derselben Installation
-    wuerde nur das laufende Fenster nach vorn holen und die /config ignorieren."""
+def terminal_pids(install_dir):
+    """PIDs laufender terminal64.exe DIESER Installation (leer = laeuft nicht)."""
     exe = os.path.join(install_dir, "terminal64.exe").replace("\\", "\\\\")
     try:
         r = subprocess.run(["wmic", "process", "where",
                             f"ExecutablePath='{exe}'", "get", "ProcessId"],
                            capture_output=True, text=True, timeout=30)
-        for tok in (r.stdout or "").split():
-            if tok.isdigit():
-                _taskkill(int(tok))
+        return [int(t) for t in (r.stdout or "").split() if t.isdigit()]
     except Exception:
-        pass  # wmic fehlt/zickt -> schlimmstenfalls schlaegt der Start unten fehl
+        return []
+
+
+def _kill_terminal_at(install_dir):
+    """Beendet ein evtl. noch laufendes Terminal DIESER Installation (z.B. Rest
+    eines vorherigen Fehlversuchs)."""
+    for pid in terminal_pids(install_dir):
+        _taskkill(pid)
 
 
 def _taskkill(pid, grace_s=15):
