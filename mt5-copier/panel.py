@@ -214,6 +214,32 @@ def delete_plan(pid):
         return True
 
 
+def _instances_snapshot():
+    """Nur die Instanz-Daten (ohne den ganzen API-Payload) — fuer den
+    Plan-Ticker, der die Zustandsmaschine unabhaengig vom Browser treibt."""
+    out = []
+    for inst in instances():
+        st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+        age = None
+        if st.get("updated_at"):
+            try:
+                age = round((datetime.now() - datetime.fromisoformat(st["updated_at"])).total_seconds())
+            except Exception:
+                age = None
+        out.append({"file": inst["config_file"], "status": st, "age": age,
+                    "alive": bool(st.get("running")) and age is not None and age <= 15})
+    return out
+
+
+def _plan_ticker():
+    while True:
+        time.sleep(5)
+        try:
+            advance_plans(_instances_snapshot())
+        except Exception as e:
+            print(f"[panel] plan-ticker: {type(e).__name__}: {e}", flush=True)
+
+
 def advance_plans(instances_data):
     """Zustandsmaschine, bei jedem Status-Abruf ausgefuehrt (idempotent).
     Uebergaenge nur bei frischem, warnungsfreiem Master-Status — ein
@@ -1120,6 +1146,12 @@ def main():
     if v:
         print(f" Version {v} · Selbst-Update aktiv")
         threading.Thread(target=_version_watcher, args=(v,), daemon=True).start()
+    # Plan-Zustandsmaschine unabhaengig vom Browser treiben (Review 15.08.2026):
+    # advance_plans lief bisher nur bei GET /api/instances — sobald aber die
+    # Prophos-View nicht offen ist, pollt niemand, und geplant→laufend→beendet
+    # bliebe stehen (falsche/fehlende Zeitstempel). Ein Daemon-Tick alle 5 s
+    # macht die Uebergaenge unabhaengig davon, ob ein Browser zuschaut.
+    threading.Thread(target=_plan_ticker, daemon=True).start()
     print("=" * 66)
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
