@@ -97,6 +97,7 @@ def snapshot():
             "snapshot_file": cfg.get("snapshot_file"),
             "master_expected": cfg.get("master_expected_login"),
             "hedge_expected": cfg.get("hedge_expected_login"),
+            "master_server": cfg.get("master_server"),
             "has_terminal": bool(cfg.get("master_terminal_path")),
             "status": st,
             "age": age,
@@ -240,71 +241,170 @@ def start_terminal(fname):
         return False, f"Start fehlgeschlagen: {e}"
 
 
-PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
+PAGE = r"""<!doctype html><html lang=de><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Copier-Panel</title><style>
+/* Design-Tokens aus prophos.html uebernommen (14.08.2026) — gleiche Sprache wie Prophos */
+:root{
+  --violet:#5447CE;--violet-dark:#4539b8;--violet-tint:rgba(84,71,206,.08);
+  --ink:#101828;--ink-2:#1D2939;--sub:#667085;--sub-2:#98A2B3;
+  --border:#E5E7EB;--border-soft:#EEF2F6;--surface:#FFFFFF;--surface-tint:#F2F4F7;--bg:#FAFBFC;
+  --good:#12B76A;--warn:#F79009;--danger:#F04438;
+  --r-sm:8px;--r-md:12px;--r-lg:16px;
+  --shadow-card:0 1px 2px rgba(16,24,40,.04);
+  --shadow-card-hover:0 4px 12px rgba(16,24,40,.06);
+  --shadow-input-focus:0 0 0 4px rgba(84,71,206,.12);
+  --ease:cubic-bezier(.4,0,.2,1);
+}
 *{box-sizing:border-box}
-body{margin:0;background:#12141a;color:#e7e9ee;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
-header{padding:14px 20px;border-bottom:1px solid #262a33;display:flex;align-items:center;gap:12px}
-h1{font-size:16px;font-weight:600;margin:0}
-.sub{color:#8b93a3;font-size:12px}
-main{padding:18px 20px;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(430px,1fr))}
-.banner{grid-column:1/-1;background:#251715;border:1px solid #6b3630;color:#ffb3a7;
-        padding:10px 12px;border-radius:10px;font-size:13px;white-space:pre-line}
-.card{background:#181b22;border:1px solid #262a33;border-radius:12px;padding:16px}
-.card.live{border-color:#6b3630}
-.top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
-.name{font-weight:600;font-size:15px}
-.file{color:#6d7484;font-size:11px;margin-bottom:10px}
-.badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid}
-.b-dry{color:#8b93a3;border-color:#3a4150}
-.b-demo{color:#7fd4a8;border-color:#2b5f45;background:#14251d}
-.b-live{color:#ffb3a7;border-color:#6b3630;background:#251715}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-.on{background:#3fbf7f}.off{background:#c2544a}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;color:#aeb6c4;margin-bottom:12px}
-.kv b{color:#e7e9ee;font-weight:500;font-variant-numeric:tabular-nums}
-label{display:block;font-size:11px;color:#8b93a3;margin:10px 0 4px}
-input,select{width:100%;background:#0e1015;border:1px solid #2c313c;color:#e7e9ee;border-radius:7px;padding:7px 9px;font:13px inherit}
-input:focus,select:focus{outline:0;border-color:#5b6ef0}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Inter','Segoe UI',system-ui,sans-serif;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+.mono{font-family:'JetBrains Mono','Consolas',monospace;font-variant-numeric:tabular-nums}
+.tnum{font-variant-numeric:tabular-nums}
+button{font-family:inherit;cursor:pointer}
+
+/* Topbar */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);
+  padding:14px 28px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+.topbar h1{font-size:16px;font-weight:600;margin:0;letter-spacing:-.01em}
+.topbar .sub{font-size:12.5px;color:var(--sub)}
+.copier-chip{margin-left:auto;display:inline-flex;align-items:center;gap:7px;
+  font-size:12.5px;font-weight:500;color:var(--sub);
+  background:var(--surface-tint);border:1px solid var(--border);border-radius:20px;padding:5px 12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(18,183,106,.15)}
+.dot.off{background:var(--danger);box-shadow:0 0 0 3px rgba(240,68,56,.12)}
+
+.wrap{max-width:1340px;margin:0 auto;padding:22px 28px 60px}
+.view-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:16px;flex-wrap:wrap}
+.view-title{font-size:22px;font-weight:600;letter-spacing:-.02em;margin:0}
+.view-sub{font-size:13.5px;color:var(--sub);margin:2px 0 0}
+
+/* Buttons — wie Prophos */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:8px;
+  font-size:13px;font-weight:500;transition:all .15s var(--ease);border:1px solid transparent}
+.btn-primary{background:var(--violet);color:#fff;
+  box-shadow:0 1px 2px rgba(16,24,40,.06),0 2px 6px rgba(84,71,206,.22)}
+.btn-primary:hover{background:var(--violet-dark);transform:translateY(-1px)}
+.btn-primary:disabled{opacity:.55;transform:none;cursor:default}
+.btn-ghost{background:var(--surface);border-color:var(--border);color:var(--ink)}
+.btn-ghost:hover{background:var(--surface-tint)}
+.btn-sm{padding:6px 11px;font-size:12px}
+
+/* Banner */
+.banner{background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);color:#c03128;
+  padding:11px 14px;border-radius:var(--r-md);font-size:13px;margin-bottom:14px;white-space:pre-line}
+.jobbar{background:var(--violet-tint);border:1px solid rgba(84,71,206,.25);color:var(--violet-dark);
+  padding:10px 14px;border-radius:var(--r-md);font-size:13px;margin-bottom:14px;cursor:pointer;
+  display:flex;align-items:center;gap:10px}
+.jobbar .spin{width:14px;height:14px;border:2.5px solid rgba(84,71,206,.25);border-top-color:var(--violet);
+  border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+.jobbar.err{background:rgba(240,68,56,.08);border-color:rgba(240,68,56,.35);color:#c03128}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Account-Grid */
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:16px;box-shadow:var(--shadow-card);transition:box-shadow .15s var(--ease)}
+.card:hover{box-shadow:var(--shadow-card-hover)}
+.card.live-mode{border-color:rgba(240,68,56,.45)}
+.acc-top{display:flex;align-items:center;gap:8px}
+.acc-name{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.acc-state{margin-left:auto;font-size:12px;color:var(--sub);display:inline-flex;align-items:center;gap:6px}
+.pill{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:20px}
+.pill.dry{background:var(--surface-tint);color:var(--sub);border:1px solid var(--border)}
+.pill.demo{background:rgba(18,183,106,.12);color:#0d9668}
+.pill.live{background:rgba(240,68,56,.12);color:#d92d20}
+.acc-broker{font-size:12.5px;color:var(--sub);margin-top:3px}
+.acc-broker b{color:var(--ink);font-weight:600}
+.acc-route{font-size:12px;color:var(--sub-2);margin-top:1px}
+.acc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.stat{background:var(--surface-tint);border-radius:var(--r-sm);padding:7px 4px;text-align:center}
+.stat b{display:block;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.stat span{font-size:10.5px;color:var(--sub)}
+.stat.hot b{color:var(--violet)}
+.acc-acts{display:flex;gap:8px;margin-top:13px;align-items:center;flex-wrap:wrap}
+.warnbox{background:rgba(247,144,9,.1);border:1px solid rgba(247,144,9,.35);color:#b45309;
+  padding:8px 10px;border-radius:var(--r-sm);font-size:12px;margin-top:10px}
+
+/* Details (aufklappbar) */
+.details{display:none;border-top:1px solid var(--border-soft);margin-top:14px;padding-top:13px}
+.card.open .details{display:block}
+label{display:block;font-size:11px;font-weight:600;color:var(--sub);margin:10px 0 4px;
+  text-transform:uppercase;letter-spacing:.05em}
+input,select{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--ink);
+  border-radius:var(--r-sm);padding:8px 10px;font:13px inherit;font-family:inherit;
+  transition:border-color .12s,box-shadow .12s}
+input:focus,select:focus{outline:0;border-color:var(--violet);box-shadow:var(--shadow-input-focus)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .map{display:grid;grid-template-columns:1fr auto 1fr auto;gap:6px;align-items:center;margin-top:5px}
-.map span{color:#6d7484;font-size:12px}
-.x{background:none;border:0;color:#7a818f;cursor:pointer;font-size:15px;padding:0 4px}
-button{background:#5b6ef0;border:0;color:#fff;border-radius:7px;padding:8px 14px;font:600 13px inherit;cursor:pointer}
-button.ghost{background:#20242d;color:#c3c9d6}
-.acts{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
-.msg{font-size:12px;color:#7fd4a8;min-height:16px;flex:1}
-.msg.err{color:#ffb3a7}
-.dirty-hint{font-size:11px;color:#e8c268;display:none}
+.map span{color:var(--sub-2);font-size:12px}
+.x{background:none;border:0;color:var(--sub-2);font-size:15px;padding:0 4px}
+.x:hover{color:var(--danger)}
+.msg{font-size:12px;font-family:'JetBrains Mono','Consolas',monospace;color:#058a50;min-height:16px;flex:1}
+.msg.err{color:#c03128}
+.dirty-hint{font-size:11px;color:#b45309;display:none}
 .card[data-dirty] .dirty-hint{display:inline}
-pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;margin:10px 0 0;font-size:11.5px;
-    max-height:150px;overflow:auto;color:#9fa7b6;white-space:pre-wrap}
-.warn{background:#251715;border:1px solid #6b3630;color:#ffb3a7;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
-.empty{color:#8b93a3;padding:30px 20px}
-.card.add{border-style:dashed;border-color:#3a4150}
-/* Trade-Plan-Dialog — bewusst eigene, dedizierte Verdrahtung (kein Sammel-Handler) */
-#plan-bg{display:none;position:fixed;inset:0;background:rgba(6,8,12,.72);z-index:50;
-         align-items:center;justify-content:center}
-.modal{background:#181b22;border:1px solid #2c313c;border-radius:14px;padding:20px;
-       width:min(440px,92vw);box-shadow:0 18px 60px rgba(0,0,0,.5)}
-.modal h2{margin:0 0 2px;font-size:16px}
-.modal .sub2{color:#8b93a3;font-size:12px;margin-bottom:14px}
-.modal input.big{font-size:22px;font-weight:600;padding:10px 12px;text-align:center}
-.modal .rule{color:#6d7484;font-size:11.5px;margin-top:8px}
-.modal .acts{margin-top:16px}
-.steps{margin-top:12px;font-size:12.5px;display:grid;gap:4px}
-.step{display:flex;gap:8px;align-items:baseline;color:#8b93a3}
-.step .st{width:14px;text-align:center}
-.step.done{color:#7fd4a8}.step.running{color:#e8c268}.step.error{color:#ffb3a7}
-.step .note{color:#6d7484;font-size:11px}
+pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);border-radius:var(--r-sm);
+  padding:9px;margin:10px 0 0;font-size:11px;line-height:1.55;
+  font-family:'JetBrains Mono','Consolas',monospace;
+  max-height:150px;overflow:auto;color:var(--sub);white-space:pre-wrap}
+.empty{color:var(--sub);padding:40px 20px;text-align:center}
+
+/* Modals — wie Prophos */
+.modal-bg{position:fixed;inset:0;background:rgba(16,24,40,.5);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;z-index:200;padding:20px}
+.modal-bg.open{display:flex;animation:fadeIn .15s var(--ease)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:24px 26px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto;
+  box-shadow:0 20px 60px -10px rgba(16,24,40,.25);animation:modalIn .2s var(--ease)}
+@keyframes modalIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+.modal-head h3{margin:0;font-size:18px;font-weight:600;letter-spacing:-.01em}
+.modal-x{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;border:1px solid transparent;border-radius:8px;color:var(--sub);font-size:16px}
+.modal-x:hover{background:rgba(16,24,40,.06);color:var(--ink);border-color:var(--border)}
+.modal-sub{font-size:13px;color:var(--sub);margin:0 0 16px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;align-items:center}
+.modal input.big{font-size:24px;font-weight:600;padding:10px 12px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.rule{color:var(--sub-2);font-size:11.5px;margin-top:10px;line-height:1.45}
+
+/* Provisionierungs-Schritte */
+.steps{margin-top:14px;display:grid;gap:6px;font-size:13px}
+.step{display:flex;gap:9px;align-items:baseline;color:var(--sub-2)}
+.step .st{width:16px;text-align:center;flex-shrink:0;font-weight:700}
+.step.done{color:#0d9668}.step.running{color:#b45309}.step.error{color:#c03128}
+.step .note{color:var(--sub-2);font-size:11px}
 </style></head><body>
-<header><h1>Copier-Panel</h1><span class=sub>lokal auf diesem PC · ein Copier-Prozess für alle Master · Prophos bleibt unangetastet</span></header>
-<main id=app><div class=empty>lade…</div></main>
-<div id=plan-bg>
+
+<div class=topbar>
+  <h1>Copier-Panel</h1>
+  <span class=sub>lokal auf diesem PC · Prophos bleibt unangetastet</span>
+  <span class=copier-chip id=copier-chip><span class="dot off"></span>Copier</span>
+</div>
+
+<div class=wrap>
+  <div class=view-head>
+    <div>
+      <h2 class=view-title>Accounts</h2>
+      <p class=view-sub id=count-sub>–</p>
+    </div>
+    <button class="btn btn-primary" id=add-open>＋ Account hinzufügen</button>
+  </div>
+  <div id=notice></div>
+  <div class=grid id=app><div class=empty>lade…</div></div>
+</div>
+
+<!-- Trade-Plan-Modal — dedizierte Verdrahtung (Projektregel: kein Sammel-Handler) -->
+<div class=modal-bg id=plan-bg>
  <div class=modal>
-  <h2 id=plan-title>Trade planen</h2>
-  <div class=sub2 id=plan-sub></div>
+  <div class=modal-head><h3 id=plan-title>Trade planen</h3>
+    <button class=modal-x id=plan-x>✕</button></div>
+  <p class=modal-sub id=plan-sub></p>
   <label>Multiplikator</label>
   <input class=big id=plan-mult type=number step=0.001 min=0>
   <div class=row style="margin-top:10px">
@@ -317,17 +417,41 @@ pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;ma
       </select></div>
   </div>
   <div class=rule>Regel: max Lots muss über Multiplikator × größter Master-Position bleiben, sonst verweigert die Sicherheitsgrenze die Order.</div>
-  <div class=acts>
-    <button id=plan-start>Trade starten — Terminal öffnen</button>
-    <button class=ghost id=plan-cancel>Abbrechen</button>
+  <div class=modal-actions>
     <span class=msg id=plan-msg></span>
+    <button class="btn btn-ghost" id=plan-cancel>Abbrechen</button>
+    <button class="btn btn-primary" id=plan-start>Trade starten</button>
   </div>
  </div>
 </div>
+
+<!-- Account-hinzufuegen-Modal — dedizierte Verdrahtung -->
+<div class=modal-bg id=add-bg>
+ <div class=modal>
+  <div class=modal-head><h3>Account hinzufügen</h3>
+    <button class=modal-x id=add-x>✕</button></div>
+  <p class=modal-sub>klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch</p>
+  <div class=row>
+    <div><label>Name (kurz, nur Buchstaben/Zahlen)</label><input data-p=name placeholder="z.B. ftmo1"></div>
+    <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 437899"></div>
+  </div>
+  <div class=row style="margin-top:2px">
+    <div><label>Passwort (sichtbar — auf Wunsch)</label><input data-p=password autocomplete=off spellcheck=false></div>
+    <div><label>Server</label><input data-p=server placeholder="z.B. FusionMarkets-Demo"></div>
+  </div>
+  <div id=add-steps></div>
+  <div class=modal-actions>
+    <span class=msg id=add-msg></span>
+    <button class="btn btn-primary" id=add-start>Fertig — automatisch einrichten</button>
+  </div>
+ </div>
+</div>
+
 <script>
-const state={};
+const state={}, openSet=new Set();
+let lastJob=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function badge(m){const c=m==='live'?'b-live':m==='demo'?'b-demo':'b-dry';return `<span class="badge ${c}">${esc((m||'?').toUpperCase())}</span>`}
+function pill(m){const c=m==='live'?'live':m==='demo'?'demo':'dry';return `<span class="pill ${c}">${esc((m||'?').toUpperCase())}</span>`}
 function mapRows(map){
   const e=Object.entries(map);
   return e.map(([k,v])=>`<div class=map>
@@ -341,93 +465,97 @@ function mapRows(map){
 function card(d){
   const s=d.status||{}, live=d.alive;
   const pos=(s.master_positions||[]).length, hed=Object.keys(s.hedges||{}).length;
-  return `<div class="card${d.mode==='live'?' live':''}" data-file="${esc(d.file)}">
-   <div class=top><span class=name>${esc(d.name)}</span>${badge(d.mode)}
-     <span class=sub style="margin-left:auto"><span class="dot ${live?'on':'off'}"></span>${live?'läuft':'gestoppt'}${d.age!=null?` · ${d.age}s`:''}</span></div>
-   <div class=file>${esc(d.file)} · magic ${esc(d.magic)} · ${esc(d.snapshot_file||'?')}</div>
-   <div class=kv>
-     <span>Master</span><b>${esc(s.master_login||d.master_expected||'—')}</b>
-     <span>Hedge</span><b>${esc(s.hedge_login||d.hedge_expected||'—')}</b>
-     <span>Master-Positionen</span><b>${pos}</b>
-     <span>offene Hedges</span><b>${hed}</b>
+  const broker=s.master_server||d.master_server||'Broker unbekannt';
+  const isOpen=openSet.has(d.file);
+  return `<div class="card${d.mode==='live'?' live-mode':''}${isOpen?' open':''}" data-file="${esc(d.file)}">
+   <div class=acc-top><span class=acc-name>${esc(d.name)}</span>${pill(d.mode)}
+     <span class=acc-state><span class="dot ${live?'on':'off'}"></span>${live?'läuft':'gestoppt'}</span></div>
+   <div class=acc-broker><b>${esc(broker)}</b></div>
+   <div class=acc-route><span class=mono>${esc(s.master_login||d.master_expected||'—')}</span> → Hedge <span class=mono>${esc(s.hedge_login||d.hedge_expected||'—')}</span></div>
+   ${s.note?`<div class=warnbox>${esc(s.note)}</div>`:''}
+   ${(s.blocked||[]).length?`<div class=warnbox>Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>`:''}
+   <div class=acc-stats>
+     <div class="stat${pos?' hot':''}"><b>${pos}</b><span>Positionen</span></div>
+     <div class="stat${hed?' hot':''}"><b>${hed}</b><span>Hedges</span></div>
+     <div class=stat><b>×${esc(d.multiplier??'–')}</b><span>Multi</span></div>
+     <div class=stat><b>${esc(d.max_lots??'–')}</b><span>max Lots</span></div>
    </div>
-   ${s.note?`<div class=warn>${esc(s.note)}</div>`:''}
-   ${(s.blocked||[]).length?`<div class=warn>Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>`:''}
-   <div class=row>
-     <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
-     <div><label>max Lots pro Hedge</label><input type=number step=0.01 min=0 value="${esc(d.max_lots??'')}" data-f=max_lots_per_hedge></div>
-   </div>
-   <label>Modus</label>
-   <select data-f=mode>
-     <option value=dryrun ${d.mode==='dryrun'?'selected':''}>dryrun — nur mitlesen, keine Order</option>
-     <option value=demo ${d.mode==='demo'?'selected':''}>demo — echte Order, nur Demo-Konto</option>
-     <option value=live ${d.mode==='live'?'selected':''}>live — echtes Geld</option>
-   </select>
-   <label>Symbol-Mapping (Master → Hedge)</label>
-   <div data-maps>${mapRows(d.symbol_map||{})}</div>
-   <div class=acts><button data-plan>Trade planen</button>
-     <button class=ghost data-save>Speichern &amp; pushen</button>
-     ${d.has_terminal?`<button class=ghost data-term>Terminal starten</button>`:''}
+   <div class=acc-acts>
+     <button class="btn btn-primary btn-sm" data-plan>Trade planen</button>
+     <button class="btn btn-ghost btn-sm" data-toggle>${isOpen?'Details ▴':'Details ▾'}</button>
      <span class=dirty-hint>ungespeicherte Änderung</span>
-     <span class="msg"></span></div>
-   <pre>${esc((s.log||[]).slice(-14).join('\\n')||'noch keine Log-Zeilen')}</pre>
+     <span class=msg></span>
+   </div>
+   <div class=details>
+     <div class=row>
+       <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
+       <div><label>max Lots pro Hedge</label><input type=number step=0.01 min=0 value="${esc(d.max_lots??'')}" data-f=max_lots_per_hedge></div>
+     </div>
+     <label>Modus</label>
+     <select data-f=mode>
+       <option value=dryrun ${d.mode==='dryrun'?'selected':''}>dryrun — nur mitlesen, keine Order</option>
+       <option value=demo ${d.mode==='demo'?'selected':''}>demo — echte Order, nur Demo-Konto</option>
+       <option value=live ${d.mode==='live'?'selected':''}>live — echtes Geld</option>
+     </select>
+     <label>Symbol-Mapping (Master → Hedge)</label>
+     <div data-maps>${mapRows(d.symbol_map||{})}</div>
+     <div class=acc-acts>
+       <button class="btn btn-primary btn-sm" data-save>Speichern &amp; pushen</button>
+       ${d.has_terminal?`<button class="btn btn-ghost btn-sm" data-term>Terminal öffnen</button>`:''}
+     </div>
+     <div style="font-size:11px;color:var(--sub-2);margin-top:8px">${esc(d.file)} · magic ${esc(d.magic)} · ${esc(d.snapshot_file||'')}</div>
+     <pre class=log>${esc((s.log||[]).slice(-14).join('\n')||'noch keine Log-Zeilen')}</pre>
+   </div>
   </div>`;
 }
-function addCard(job){
-  const busy=job&&!job.done;
+function jobSteps(job){
   const mark=s=>s.state==='done'?'✓':s.state==='running'?'…':s.state==='error'?'✗':'·';
   const labels={pruefen:'Prüfen & Kennwerte vergeben',klonen:'Terminal-Ordner klonen',
     login:'Erststart — Datenordner anlegen',
     ea:'Server-Liste + Lese-EA + Preset einlegen',
     neustart:'Start mit Login + EA (Zugangsdaten-Datei wird danach gelöscht)',config:'Config anlegen'};
-  const steps=job?`<div class=steps>${job.steps.map(s=>`<div class="step ${s.state}"><span class=st>${mark(s)}</span>${labels[s.key]||s.key}${s.note?` <span class=note>${esc(s.note)}</span>`:''}</div>`).join('')}</div>`:'';
-  const err=job&&job.error?`<div class=warn>${esc(job.error)}</div>`:'';
-  const okmsg=job&&job.done&&!job.error?`<div class=steps><div class="step done"><span class=st>✓</span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</div></div>`:'';
-  return `<div class="card add" data-file="__add__">
-   <div class=top><span class=name>＋ Account hinzufügen</span></div>
-   <div class=file>klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch</div>
-   <div class=row>
-     <div><label>Name (kurz, nur Buchstaben/Zahlen)</label><input data-p=name placeholder="z.B. ftmo1" ${busy?'disabled':''}></div>
-     <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 437899" ${busy?'disabled':''}></div>
-   </div>
-   <div class=row>
-     <div><label>Passwort (sichtbar — auf Wunsch)</label><input data-p=password autocomplete=off spellcheck=false ${busy?'disabled':''}></div>
-     <div><label>Server</label><input data-p=server placeholder="z.B. FusionMarkets-Demo" ${busy?'disabled':''}></div>
-   </div>
-   <div class=acts><button data-prov ${busy?'disabled':''}>${busy?'läuft…':'Fertig — automatisch einrichten'}</button>
-     <span class=msg id=prov-msg></span></div>
-   ${steps}${err}${okmsg}
-  </div>`;
+  let h=`<div class=steps>${job.steps.map(s=>`<div class="step ${s.state}"><span class=st>${mark(s)}</span><span>${labels[s.key]||s.key}${s.note?` <span class=note>${esc(s.note)}</span>`:''}</span></div>`).join('')}`;
+  if(job.error)h+=`<div class="step error" style="margin-top:6px"><span class=st>✗</span><span>${esc(job.error)}</span></div>`;
+  else if(job.done)h+=`<div class="step done"><span class=st>✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</span></div>`;
+  return h+'</div>';
 }
 async function load(){
   const r=await fetch('/api/instances'); const d=await r.json();
+  lastJob=d.job;
   const app=document.getElementById('app');
-  const banner=d.conflicts.length?`<div class=banner>⛔ ${d.conflicts.map(esc).join('\\n⛔ ')}</div>`:'';
   d.instances.forEach(x=>state[x.file]=x);
-  let b=app.querySelector('.banner'); if(b)b.remove();
-  if(banner)app.insertAdjacentHTML('afterbegin',banner);
-  const empty=app.querySelector('.empty'); if(empty)empty.remove();
-  const files=new Set(d.instances.map(x=>x.file));
-  app.querySelectorAll('.card').forEach(c=>{const f=c.getAttribute('data-file');if(f!=='__add__'&&!files.has(f))c.remove()});
-  for(const x of d.instances){
-    const cur=app.querySelector(`.card[data-file="${CSS.escape(x.file)}"]`);
-    // Karten mit ungespeicherten Eingaben oder aktivem Fokus NICHT überschreiben —
-    // der 3s-Reload hat sonst Dropdown-Auswahl und gelöschte Zeilen zurückgesetzt.
-    if(cur&&(cur.hasAttribute('data-dirty')||cur.contains(document.activeElement)))continue;
-    const html=card(x);
-    if(cur){cur.outerHTML=html}else{
-      const add=app.querySelector('.card.add');
-      if(add)add.insertAdjacentHTML('beforebegin',html); else app.insertAdjacentHTML('beforeend',html);
+  // Kopf: Copier-Status + Zaehler
+  const anyAlive=d.instances.some(x=>x.alive);
+  document.getElementById('copier-chip').innerHTML=`<span class="dot ${anyAlive?'on':'off'}"></span>Copier ${anyAlive?'läuft':'gestoppt'}`;
+  const brokers=new Set(d.instances.map(x=>(x.status||{}).master_server||x.master_server).filter(Boolean));
+  document.getElementById('count-sub').textContent=`${d.instances.length} Accounts · ${brokers.size} Broker · ein Copier-Prozess`;
+  // Hinweise: Konflikte + laufende Provisionierung
+  let n='';
+  if(d.conflicts.length)n+=`<div class=banner>⛔ ${d.conflicts.map(esc).join('\n⛔ ')}</div>`;
+  if(d.job&&!d.job.done&&document.getElementById('add-bg').style.display!=='flex'){
+    const cur=d.job.steps.find(s=>s.state==='running');
+    n+=`<div class=jobbar id=jobbar><span class=spin></span>Account „${esc(d.job.name)}" wird eingerichtet — ${esc(cur?cur.key:'…')} … (klicken für Details)</div>`;
+  }else if(d.job&&d.job.done&&d.job.error&&document.getElementById('add-bg').style.display!=='flex'){
+    n+=`<div class="jobbar err" id=jobbar>✗ Account „${esc(d.job.name)}": ${esc(d.job.error.slice(0,140))}… (klicken für Details)</div>`;
+  }
+  document.getElementById('notice').innerHTML=n;
+  const jb=document.getElementById('jobbar'); if(jb)jb.addEventListener('click',openAdd);
+  // Karten
+  if(!d.instances.length){app.innerHTML='<div class=empty>Keine Accounts. Oben rechts „＋ Account hinzufügen".</div>';}
+  else{
+    const empty=app.querySelector('.empty'); if(empty)empty.remove();
+    const files=new Set(d.instances.map(x=>x.file));
+    app.querySelectorAll('.card').forEach(c=>{if(!files.has(c.getAttribute('data-file')))c.remove()});
+    for(const x of d.instances){
+      const cur=app.querySelector(`.card[data-file="${CSS.escape(x.file)}"]`);
+      // Karten mit ungespeicherten Eingaben oder Fokus NICHT überschreiben (3s-Reload)
+      if(cur&&(cur.hasAttribute('data-dirty')||cur.contains(document.activeElement)))continue;
+      const html=card(x);
+      if(cur)cur.outerHTML=html; else app.insertAdjacentHTML('beforeend',html);
     }
   }
-  // Die Hinzufügen-Karte: nur neu zeichnen, wenn kein Feld fokussiert ist ODER ein Job läuft
-  // Die Hinzufügen-Karte nie überschreiben, solange dort Eingaben stehen (dirty)
-  // oder ein Feld fokussiert ist — nur ein LAUFENDER Job erzwingt das Neuzeichnen
-  // (Felder sind dann eh gesperrt, und die Schritte sollen live ticken).
-  const addCur=app.querySelector('.card.add');
-  const addHtml=addCard(d.job);
-  if(!addCur)app.insertAdjacentHTML('beforeend',addHtml);
-  else if((d.job&&!d.job.done)||(!addCur.hasAttribute('data-dirty')&&!addCur.contains(document.activeElement)))addCur.outerHTML=addHtml;
+  // Add-Modal-Schritte live aktualisieren, wenn offen
+  if(document.getElementById('add-bg').classList.contains('open'))renderAddJob();
 }
 document.getElementById('app').addEventListener('input',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
@@ -435,21 +563,25 @@ document.getElementById('app').addEventListener('input',e=>{
 document.getElementById('app').addEventListener('change',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
 });
-// ── Trade-Plan-Dialog: dedizierte Verdrahtung, wie in Prophos (kein Sammel-Handler) ──
+
+// ── Trade-Plan-Modal ────────────────────────────────────────────────────────
 const planBg=document.getElementById('plan-bg');
 function openPlan(file){
   const d=state[file]; if(!d)return;
   planBg.dataset.file=file;
+  const s=d.status||{};
   document.getElementById('plan-title').textContent='Trade planen — '+d.name;
-  document.getElementById('plan-sub').textContent=`Master ${d.master_expected||'—'} → Hedge ${d.hedge_expected||'—'} · ${d.file}`;
+  document.getElementById('plan-sub').textContent=`${s.master_server||d.master_server||''} · Master ${d.master_expected||'—'} → Hedge ${d.hedge_expected||'—'}`;
   document.getElementById('plan-mult').value=d.multiplier??'';
   document.getElementById('plan-lots').value=d.max_lots??'';
   document.getElementById('plan-mode').value=d.mode||'dryrun';
   const m=document.getElementById('plan-msg'); m.className='msg'; m.textContent='';
-  planBg.style.display='flex';
+  planBg.classList.add('open'); planBg.style.display='flex';
   document.getElementById('plan-mult').focus();
 }
-document.getElementById('plan-cancel').addEventListener('click',()=>{planBg.style.display='none'});
+function closePlan(){planBg.classList.remove('open');planBg.style.display='none'}
+document.getElementById('plan-cancel').addEventListener('click',closePlan);
+document.getElementById('plan-x').addEventListener('click',closePlan);
 document.getElementById('plan-start').addEventListener('click',async()=>{
   const file=planBg.dataset.file, d=state[file]||{};
   const msg=document.getElementById('plan-msg');
@@ -474,40 +606,60 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   const ts=await t.json();
   msg.className='msg'+(ts.ok?'':' err');
   msg.textContent=ts.ok
-    ?`✓ Multiplikator ${patch.multiplier} aktiv (~2 s)${s.restart?' · Copier-Neustart läuft':''} · Terminal offen — jetzt traden`
+    ?`✓ ×${patch.multiplier} aktiv (~2 s)${s.restart?' · Copier-Neustart läuft':''} · ${ts.msg}`
     :('Multiplikator gepusht, aber Terminal: '+ts.msg);
   setTimeout(load,2500);
-  if(ts.ok)setTimeout(()=>{planBg.style.display='none'},2200);
+  if(ts.ok)setTimeout(closePlan,2200);
 });
 
-document.addEventListener('click',async e=>{
-  const cardEl=e.target.closest&&e.target.closest('.card'); if(!cardEl)return;
+// ── Account-hinzufuegen-Modal ───────────────────────────────────────────────
+const addBg=document.getElementById('add-bg');
+function renderAddJob(){
+  document.getElementById('add-steps').innerHTML=lastJob?jobSteps(lastJob):'';
+  const busy=lastJob&&!lastJob.done;
+  document.getElementById('add-start').disabled=!!busy;
+  addBg.querySelectorAll('[data-p]').forEach(i=>i.disabled=!!busy);
+}
+function openAdd(){addBg.classList.add('open');addBg.style.display='flex';renderAddJob()}
+function closeAdd(){addBg.classList.remove('open');addBg.style.display='none';load()}
+document.getElementById('add-open').addEventListener('click',openAdd);
+document.getElementById('add-x').addEventListener('click',closeAdd);
+document.getElementById('add-start').addEventListener('click',async()=>{
+  const get=k=>(addBg.querySelector(`[data-p=${k}]`)||{}).value?.trim()||'';
+  const body={name:get('name'),login:get('login'),password:(addBg.querySelector('[data-p=password]')||{}).value||'',server:get('server')};
+  const msg=document.getElementById('add-msg');
+  if(!body.name||!body.login||!body.password||!body.server){
+    msg.className='msg err';msg.textContent='Alle vier Felder ausfüllen.';return}
+  if(!/^[A-Za-z0-9]{1,24}$/.test(body.name)){
+    msg.className='msg err';msg.textContent='Name: nur Buchstaben/Zahlen, ohne Leer-/Bindezeichen.';return}
+  msg.className='msg';msg.textContent='starte…';
+  const r=await fetch('/api/provision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  const pw=addBg.querySelector('[data-p=password]'); if(pw)pw.value='';
+  msg.className='msg'+(d.ok?'':' err');
+  msg.textContent=d.ok?'läuft — Fortschritt unten':('Fehler: '+d.msg);
+  if(d.ok)setTimeout(load,1000);
+});
+
+// ── Karten-Aktionen (delegiert) ─────────────────────────────────────────────
+document.getElementById('app').addEventListener('click',async e=>{
+  const cardEl=e.target.closest('.card'); if(!cardEl)return;
   const file=cardEl.getAttribute('data-file');
   const msg=cardEl.querySelector('.msg');
   if(e.target.hasAttribute('data-plan')){openPlan(file);return}
+  if(e.target.hasAttribute('data-toggle')){
+    if(openSet.has(file))openSet.delete(file); else openSet.add(file);
+    cardEl.classList.toggle('open');
+    e.target.textContent=cardEl.classList.contains('open')?'Details ▴':'Details ▾';
+    return;
+  }
   if(e.target.hasAttribute('data-del')){
     e.target.closest('.map').remove();
     cardEl.setAttribute('data-dirty','1');
     return;
   }
-  if(e.target.hasAttribute('data-prov')){
-    const get=k=>(cardEl.querySelector(`[data-p=${k}]`)||{}).value?.trim()||'';
-    const body={name:get('name'),login:get('login'),password:(cardEl.querySelector('[data-p=password]')||{}).value||'',server:get('server')};
-    if(!body.name||!body.login||!body.password||!body.server){
-      msg.className='msg err';msg.textContent='Alle vier Felder ausfüllen.';return}
-    if(!/^[A-Za-z0-9]{1,24}$/.test(body.name)){
-      msg.className='msg err';msg.textContent='Name: nur Buchstaben/Zahlen, ohne Leer-/Bindezeichen.';return}
-    msg.className='msg';msg.textContent='starte…';
-    const r=await fetch('/api/provision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d=await r.json();
-    const pw=cardEl.querySelector('[data-p=password]'); if(pw)pw.value='';
-    msg.className='msg'+(d.ok?'':' err');
-    msg.textContent=d.ok?'läuft — Fortschritt unten':('Fehler: '+d.msg);
-    if(d.ok)setTimeout(load,1000);
-    return;
-  }
   if(e.target.hasAttribute('data-term')){
-    msg.className='msg'; msg.textContent='starte Terminal…';
+    msg.className='msg'; msg.textContent='öffne Terminal…';
     const r=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const d=await r.json();
     msg.className='msg'+(d.ok?'':' err'); msg.textContent=d.ok?d.msg:('Fehler: '+d.msg);
@@ -525,15 +677,15 @@ document.addEventListener('click',async e=>{
     if(map[a]!==undefined)dup=a;
     map[a]=b;
   });
-  if(bad){msg.className='msg err';msg.textContent=`Fehler: Mapping-Zeile '${bad}' ist nur halb ausgefüllt`;return}
-  if(dup){msg.className='msg err';msg.textContent=`Fehler: Master-Symbol '${dup}' doppelt im Mapping`;return}
+  if(bad){msg.className='msg err';msg.textContent=`Mapping-Zeile '${bad}' ist nur halb ausgefüllt`;return}
+  if(dup){msg.className='msg err';msg.textContent=`Master-Symbol '${dup}' doppelt im Mapping`;return}
   patch.symbol_map=map;
   if(patch.mode==='live'&&state[file]?.mode!=='live'){
     const s=state[file]||{};
-    if(!confirm(`LIVE schalten — echtes Geld!\\n\\nDatei: ${file}\\nMaster: ${s.master_expected||'?'}\\nHedge: ${s.hedge_expected||'?'}\\n\\nDuplikum für dieses Paar ist aus?`)){
+    if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${s.master_expected||'?'}\nHedge: ${s.hedge_expected||'?'}\n\nDuplikum für dieses Paar ist aus?`)){
       msg.className='msg err';msg.textContent='Abgebrochen — Modus nicht geändert';return}
   }
-  msg.className='msg'; msg.textContent='speichere…';
+  msg.className='msg';msg.textContent='speichere…';
   const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   const d=await r.json();
   msg.className='msg'+(d.ok?'':' err');
