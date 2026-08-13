@@ -258,21 +258,18 @@ def data_dir_for(install_dir, root=None):
     return map_installs(root).get(os.path.normcase(os.path.normpath(install_dir)))
 
 
-def _journal_text(data_dir, since_ts):
-    """Inhalt des Terminal-Journals (<Datenordner>\\logs\\JJJJMMTT.log).
-    Heute UND gestern (Mitternachts-Rollover). Kodierung strikt durchprobieren —
-    errors='replace' beim ersten Versuch wuerde eine ANSI-Datei still zu
-    Zeichensalat dekodieren und die Suche blind machen."""
+def _read_journals(data_dir):
+    """[(pfad, text)] der Terminal-Journale von gestern und heute
+    (<Datenordner>\\logs\\JJJJMMTT.log, Mitternachts-Rollover abgedeckt).
+    Kodierung strikt durchprobieren — errors='replace' beim ersten Versuch
+    wuerde eine ANSI-Datei still zu Zeichensalat dekodieren."""
     import datetime as _dt
     logs = os.path.join(data_dir, "logs")
     out = []
     for d in (1, 0):
         day = (_dt.date.today() - _dt.timedelta(days=d)).strftime("%Y%m%d")
         p = os.path.join(logs, day + ".log")
-        try:
-            if os.path.getmtime(p) < since_ts - 60:
-                continue
-        except OSError:
+        if not os.path.exists(p):
             continue
         text = None
         for enc in ("utf-16", "utf-8", "cp1252"):
@@ -288,20 +285,33 @@ def _journal_text(data_dir, since_ts):
                     text = f.read()
             except OSError:
                 continue
-        out.append(text)
-    return "\n".join(out)
+        out.append((p, text))
+    return out
 
 
-def _journal_says(data_dir, needles, since_ts):
-    low = _journal_text(data_dir, since_ts).lower()
+def journal_baseline(data_dir):
+    """Lesezeichen VOR einer Aktion setzen: {datei: bisherige Textlaenge}.
+    Alles davor ist Vergangenheit und darf die Auswertung nicht beeinflussen —
+    beim The5e-Rerun (14.08.2026) fand die Pruefung sonst die alten
+    authorized/failed-Zeilen der manuellen Versuche von vorhin."""
+    return {p: len(t) for p, t in _read_journals(data_dir)}
+
+
+def _journal_text(data_dir, baseline=None):
+    baseline = baseline or {}
+    return "\n".join(t[baseline.get(p, 0):] for p, t in _read_journals(data_dir))
+
+
+def _journal_says(data_dir, needles, baseline=None):
+    low = _journal_text(data_dir, baseline).lower()
     for n in needles:
         if n.lower() in low:
             return n
     return None
 
 
-def _journal_tail(data_dir, since_ts, n=6):
-    lines = [l.strip() for l in _journal_text(data_dir, since_ts).splitlines() if l.strip()]
+def _journal_tail(data_dir, baseline=None, n=6):
+    lines = [l.strip() for l in _journal_text(data_dir, baseline).splitlines() if l.strip()]
     return " | ".join(lines[-n:]) if lines else "(Journal leer)"
 
 
@@ -454,12 +464,19 @@ def run_provision(*, name, login, password, server, template_exe,
     step("neustart")
     start_ini = os.path.join(target_install, "prophos-start.ini")
     retry_ini = os.path.join(target_install, "prophos-retry.ini")
-    started_ts = time.time()
+    # Lesezeichen im Journal + alten Snapshot entfernen: bei einem Rerun duerfen
+    # weder alte authorized/failed-Zeilen noch eine liegengebliebene
+    # Snapshot-Datei des vorigen Versuchs als frischer Erfolg zaehlen.
+    jbase = journal_baseline(new_data)
+    common = os.path.join(os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal",
+                          "Common", "Files")
+    snap_path = os.path.join(common, ident["snapshot"])
+    try:
+        os.remove(snap_path)
+    except OSError:
+        pass
 
     def _wait_snapshot(seconds):
-        common = os.path.join(os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal",
-                              "Common", "Files")
-        snap_path = os.path.join(common, ident["snapshot"])
         t0 = time.time()
         while time.time() - t0 < seconds:
             if os.path.exists(snap_path):
@@ -483,7 +500,7 @@ def run_provision(*, name, login, password, server, template_exe,
         hinted = False
         while time.time() - t0 < 240:
             verdict = _journal_says(new_data, ["authorization failed", "invalid account",
-                                               "authorized"], started_ts)
+                                               "authorized"], jbase)
             if verdict:
                 break
             if not hinted and time.time() - t0 > 45:
@@ -497,7 +514,7 @@ def run_provision(*, name, login, password, server, template_exe,
                 f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 4 min'}) — "
                 f"Kontonummer/Passwort/Servername pruefen; falls ein Login-Fenster im "
                 f"Terminal offen ist, dort OK klicken und nochmal 'Fertig' druecken. "
-                f"Journal: {_journal_tail(new_data, started_ts)}")
+                f"Journal: {_journal_tail(new_data, jbase)}")
         # … dann der Snapshot: der Beweis, dass auch das EA laeuft — der
         # staerkste Check, den es gibt: unser eigenes EA schreibt ihn.
         if not _wait_snapshot(60):
@@ -516,7 +533,7 @@ def run_provision(*, name, login, password, server, template_exe,
                 raise ProvisionError(
                     f"Login ok, aber Snapshot {ident['snapshot']} kam auch im zweiten "
                     f"Anlauf nicht — im neuen Terminal Reiter 'Experten' pruefen. "
-                    f"Journal: {_journal_tail(new_data, started_ts)}")
+                    f"Journal: {_journal_tail(new_data, jbase)}")
     finally:
         for p in (start_ini, retry_ini):
             try:
