@@ -6099,6 +6099,13 @@
       }
     }
 
+    window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
+
+    function tryUnlock(){
+      if(($('kasse-code').value || '').trim() === CODE){ unlocked = true; showContent() }
+      else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
+    }
+
     async function kasseLoad(){
       try{
         const { data, error } = await supabase.from('kasse_entries')
