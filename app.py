@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-16.2"
+APP_BUILD = "2026-08-16.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2745,7 +2745,8 @@ _FIRM_RULES = [
 # komma-getrennten E-Mails setzen (überschreibt die Vorgabe komplett).
 ADMIN_EXCLUDE_EMAILS = {
     e.strip().lower()
-    for e in (os.environ.get("ADMIN_EXCLUDE") or "elominx@gmail.com").split(",")
+    for e in (os.environ.get("ADMIN_EXCLUDE")
+              or "elominx@gmail.com,finn.traidingview@gmail.com").split(",")
     if e.strip()
 }
 
