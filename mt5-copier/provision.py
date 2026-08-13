@@ -271,21 +271,26 @@ def _read_journals(data_dir):
         p = os.path.join(logs, day + ".log")
         if not os.path.exists(p):
             continue
-        text = None
-        for enc in ("utf-16", "utf-8", "cp1252"):
+        # Kodierung anhand der BYTES entscheiden statt durchprobieren: liest man
+        # die Datei, waehrend MT5 gerade schreibt, kann ein halbes UTF-16-Zeichen
+        # am Ende haengen — striktes Dekodieren kippte dann auf cp1252 und machte
+        # den Text zu NUL-durchsetztem Salat, in dem "authorized" unauffindbar
+        # war (Heisenbug beim The5e-Rerun 14.08.2026). errors='replace' auf der
+        # RICHTIGEN Kodierung macht aus dem halben Zeichen nur ein '?' am Ende.
+        try:
+            with open(p, "rb") as f:
+                raw = f.read()
+        except OSError:
+            continue
+        if raw.startswith(b"\xff\xfe") or b"\x00" in raw[:200]:
+            text = raw.decode("utf-16-le", errors="replace").lstrip("﻿")
+        else:
             try:
-                with open(p, "r", encoding=enc) as f:
-                    text = f.read()
-                break
-            except (UnicodeError, OSError):
-                continue
-        if text is None:
-            try:
-                with open(p, "r", encoding="utf-8", errors="replace") as f:
-                    text = f.read()
-            except OSError:
-                continue
-        out.append((p, text))
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("cp1252", errors="replace")
+        # Sicherheitsnetz: NUL-Reste nie in die Suche lassen.
+        out.append((p, text.replace("\x00", "")))
     return out
 
 
