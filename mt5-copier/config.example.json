@@ -4,11 +4,16 @@
 
   "_2_hedge_terminal": "Das LIVE-Terminal, an dem dieses Programm haengt. Es wird NUR hier gehandelt. Der Prop-Account wird gar nicht von Python beruehrt (dort laeuft das Lese-EA).",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
-  "hedge_portable": true,
 
-  "_3_pflicht_pruefung": "Kontonummern zur Absicherung. hedge_expected_login = das Konto, auf dem gehedged werden DARF. master_expected_login = das Prop-Konto; haengt das Programm versehentlich DORT, bricht es ab. Beides eintragen — es ist der Schutz gegen das bekannte MT5-Problem, dass path= nicht immer greift.",
+  "_2b_portable_WARNUNG": "false lassen. Mehrere MT5-Installationen in eigenen Ordnern brauchen KEINEN portable-Modus — verschiedene Zielordner reichen, MT5 legt selbst getrennte Datenordner an. Wichtiger: im portable-Modus liegt der 'gemeinsame' Ordner INNERHALB der Installation, damit sehen sich Master-EA und Copier nicht mehr — der Snapshot kommt nie an. Die Vorlage hatte hier faelschlich true (korrigiert 13.08.2026).",
+  "hedge_portable": false,
+
+  "_3_pflicht_pruefung": "Kontonummern zur Absicherung. hedge_expected_login = das Konto, auf dem gehedged werden DARF. master_expected_login = das Prop-Konto; haengt das Programm versehentlich DORT, bricht es ab. Beides eintragen — ab ZWEI Mastern ist master_expected_login Pflicht (sonst Abbruch beim Start).",
   "hedge_expected_login": 399464,
   "master_expected_login": 0,
+
+  "_3b_master_terminal": "Optional: Pfad zur terminal64.exe des MASTER-Terminals — nur fuer den 'Terminal starten'-Knopf im Panel. Es werden KEINE Zugangsdaten gespeichert; MT5 merkt sich den Login pro Ordner selbst (einmal manuell einloggen).",
+  "master_terminal_path": "",
 
   "_4_snapshot": "Datei, die das Lese-EA im gemeinsamen Ordner schreibt. common_files_dir nur setzen, wenn der Standardpfad nicht passt (Standard: %APPDATA%\\MetaQuotes\\Terminal\\Common\\Files).",
   "snapshot_file": "prophos_master.csv",
@@ -32,6 +37,8 @@
   "poll_interval": 0.5,
   "deviation_points": 30,
   "filling": "auto",
+
+  "_8_EINDEUTIG_pro_master": "magic und snapshot_file MUESSEN pro config*.json eindeutig sein (der Copier bricht sonst ab). magic ist das Erkennungszeichen der eigenen Hedges — zwei Master mit derselben magic wuerden sich gegenseitig die Hedges schliessen (Audit 13.08.2026). Zweiter Master z.B.: magic 770002, comment_prefix 'P2', snapshot_file 'prophos_master2.csv'.",
   "magic": 770001,
   "comment_prefix": "PH"
 }

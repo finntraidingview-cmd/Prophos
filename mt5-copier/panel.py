@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """
-Prophos Copier-Panel — kleines Web-Frontend für die lokalen MT5-Copier auf DIESEM PC.
+Prophos Copier-Panel — kleines Web-Frontend für den lokalen MT5-Copier auf DIESEM PC.
 
 Zweck: Multiplikator, Symbol-Mapping, max_lots und Modus im Browser setzen statt in der
-Textdatei — für mehrere Prop-Firmen/Accounts gleichzeitig. Zeigt außerdem live, was jeder
-Copier gerade macht (Konten, offene Hedges, Log).
+Textdatei — für mehrere Master/Prop-Firmen gleichzeitig. Zeigt außerdem live, was der
+Copier pro Master gerade macht (Konten, offene Hedges, Log), und kann das jeweilige
+Master-Terminal starten (MT5 merkt sich den Login pro Ordner — hier werden KEINE
+Zugangsdaten gespeichert).
 
 Bewusst eigenständig: Prophos (app.py / prophos.html) wird NICHT angefasst.
 
 Technik:
   · Nur Python-Standardbibliothek — kein pip install, keine Cloud, keine Schlüssel.
   · Bindet ausschließlich an 127.0.0.1 — aus dem Netz nicht erreichbar.
-  · Mehrere Instanzen: jede `config*.json` im Ordner ist eine Instanz
-    (config.json, config-ftmo.json, config-apex.json …). Der Copier für eine bestimmte
-    Config wird per Umgebungsvariable gestartet:  set COPIER_CONFIG=config-ftmo.json
-    Der Status landet automatisch in der passenden `status*.json`.
+  · Jede config*.json im Ordner ist ein Master (config.json, config-master2.json, …).
+    Seit 13.08.2026 bedient EIN copier.py-Prozess alle Configs zugleich; der Status
+    je Master liegt in der passenden status*.json.
 
 Start:  python panel.py     →  http://127.0.0.1:8770
 """
@@ -22,6 +23,7 @@ Start:  python panel.py     →  http://127.0.0.1:8770
 import json
 import os
 import re
+import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -30,23 +32,30 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PANEL_PORT", "8770"))
 
-# Nur diese Felder darf das Panel schreiben. Terminal-Pfade und die erwarteten
+# Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
 WRITABLE = {"multiplier", "symbol_map", "max_lots_per_hedge", "mode"}
 MODES = ("dryrun", "demo", "live")
+# Dieselbe strenge Namensregel wie in copier.py — Explorer-Kopien wie
+# "config - Kopie.json" oder "config (2).json" sind KEINE Instanz (Audit 13.08.2026:
+# solche Karten sahen echt aus, steuerten aber nichts).
+CONFIG_RE = re.compile(r"config(?:[-_][A-Za-z0-9]{1,24})?\.json", re.I)
+TEMPLATES = ("config.example.json", "config.fusion-test.json")
+SYMBOL_RE = re.compile(r"[A-Za-z0-9._#!&\-]{1,32}")
 
 
 def instances():
-    """Alle config*.json im Ordner -> [{name, config_file, status_file}]"""
+    """Alle Master-Configs -> [{name, config_file, status_file}]. Schlüssel für alle
+    API-Aufrufe ist config_file — der abgeleitete Name ist reine Anzeige (Audit-Fund:
+    config-master2.json und config_master2.json ergaben denselben Namen, und der
+    Save traf die falsche Datei)."""
     out = []
     for fn in sorted(os.listdir(HERE)):
-        if not re.fullmatch(r"config.*\.json", fn) or fn.endswith(".tmp"):
-            continue
-        if fn in ("config.example.json", "config.fusion-test.json"):
+        if fn in TEMPLATES or not CONFIG_RE.fullmatch(fn):
             continue
         name = fn[len("config"):-len(".json")].lstrip("-_") or "standard"
         out.append({"name": name, "config_file": fn,
-                    "status_file": fn.replace("config", "status", 1)})
+                    "status_file": re.sub(r"^config", "status", fn, count=1, flags=re.I)})
     return out
 
 
@@ -59,7 +68,8 @@ def read_json(path, default=None):
 
 
 def snapshot():
-    data = []
+    data, conflicts = [], []
+    seen_magic, seen_snap = {}, {}
     for inst in instances():
         cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
         st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
@@ -69,21 +79,36 @@ def snapshot():
                 age = round((datetime.now() - datetime.fromisoformat(st["updated_at"])).total_seconds())
             except Exception:
                 age = None
+        magic = cfg.get("magic", 770001)
+        snapf = str(cfg.get("snapshot_file", "prophos_master.csv")).lower()
+        seen_magic.setdefault(magic, []).append(inst["config_file"])
+        seen_snap.setdefault(snapf, []).append(inst["config_file"])
         data.append({
             "name": inst["name"],
-            "config_file": inst["config_file"],
+            "file": inst["config_file"],
             "mode": cfg.get("mode"),
             "multiplier": cfg.get("multiplier"),
             "max_lots": cfg.get("max_lots_per_hedge"),
             "symbol_map": cfg.get("symbol_map") or {},
+            "magic": magic,
+            "snapshot_file": cfg.get("snapshot_file"),
             "master_expected": cfg.get("master_expected_login"),
             "hedge_expected": cfg.get("hedge_expected_login"),
+            "has_terminal": bool(cfg.get("master_terminal_path")),
             "status": st,
             "age": age,
             # "lebt" = Statusdatei ist frisch. Der Copier schreibt alle ~3s.
             "alive": bool(st.get("running")) and age is not None and age <= 15,
         })
-    return data
+    # Konflikte, die der Copier beim Start mit Abbruch quittieren wuerde — hier
+    # schon anzeigen, BEVOR jemand den Neustart auslöst.
+    for magic, fs in seen_magic.items():
+        if len(fs) > 1:
+            conflicts.append(f"magic {magic} doppelt: {', '.join(fs)} — der Copier startet so nicht.")
+    for snapf, fs in seen_snap.items():
+        if len(fs) > 1:
+            conflicts.append(f"snapshot_file '{snapf}' doppelt: {', '.join(fs)} — der Copier startet so nicht.")
+    return {"instances": data, "conflicts": conflicts}
 
 
 def patch_config(fname, patch):
@@ -108,8 +133,14 @@ def patch_config(fname, patch):
             if v <= 0:
                 return False, f"{k} muss groesser als 0 sein"
         if k == "symbol_map":
-            if not isinstance(v, dict) or not all(isinstance(a, str) and isinstance(b, str) for a, b in v.items()):
+            if not isinstance(v, dict):
                 return False, "symbol_map muss Text→Text sein"
+            for a, b in v.items():
+                if not isinstance(a, str) or not isinstance(b, str) \
+                        or not SYMBOL_RE.fullmatch(a) or not SYMBOL_RE.fullmatch(b):
+                    # Verengt auf Symbolzeichen — haelt auch Anfuehrungszeichen aus dem
+                    # HTML fern (Audit-Fund: ein " im Symbolfeld verdrehte die Karte).
+                    return False, f"Symbol ungueltig: '{a}' → '{b}'"
         if cfg.get(k) != v:
             cfg[k] = v
             changed.append(k)
@@ -122,6 +153,25 @@ def patch_config(fname, patch):
     return True, "gespeichert: " + ", ".join(changed)
 
 
+def start_terminal(fname):
+    """Startet das Master-Terminal der Instanz. Pfad kommt AUSSCHLIESSLICH aus der
+    Config-Datei (nicht ueber die API setzbar) und muss eine terminal64.exe sein.
+    MT5 laesst pro Datenordner nur eine Instanz zu — ein zweiter Start schadet nicht."""
+    cfg = read_json(os.path.join(HERE, fname), {}) or {}
+    path = str(cfg.get("master_terminal_path") or "").strip()
+    if not path:
+        return False, "master_terminal_path ist in der Config nicht gesetzt"
+    if os.path.basename(path).lower() != "terminal64.exe":
+        return False, "master_terminal_path muss auf eine terminal64.exe zeigen"
+    if not os.path.exists(path):
+        return False, f"nicht gefunden: {path}"
+    try:
+        subprocess.Popen([path], cwd=os.path.dirname(path))
+        return True, "Terminal gestartet — Login kommt aus dem MT5-Ordner selbst"
+    except OSError as e:
+        return False, f"Start fehlgeschlagen: {e}"
+
+
 PAGE = """<!doctype html><html lang=de><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Copier-Panel</title><style>
@@ -131,9 +181,13 @@ header{padding:14px 20px;border-bottom:1px solid #262a33;display:flex;align-item
 h1{font-size:16px;font-weight:600;margin:0}
 .sub{color:#8b93a3;font-size:12px}
 main{padding:18px 20px;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(430px,1fr))}
+.banner{grid-column:1/-1;background:#251715;border:1px solid #6b3630;color:#ffb3a7;
+        padding:10px 12px;border-radius:10px;font-size:13px;white-space:pre-line}
 .card{background:#181b22;border:1px solid #262a33;border-radius:12px;padding:16px}
-.top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.card.live{border-color:#6b3630}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:4px}
 .name{font-weight:600;font-size:15px}
+.file{color:#6d7484;font-size:11px;margin-bottom:10px}
 .badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid}
 .b-dry{color:#8b93a3;border-color:#3a4150}
 .b-demo{color:#7fd4a8;border-color:#2b5f45;background:#14251d}
@@ -151,84 +205,134 @@ input:focus,select:focus{outline:0;border-color:#5b6ef0}
 .x{background:none;border:0;color:#7a818f;cursor:pointer;font-size:15px;padding:0 4px}
 button{background:#5b6ef0;border:0;color:#fff;border-radius:7px;padding:8px 14px;font:600 13px inherit;cursor:pointer}
 button.ghost{background:#20242d;color:#c3c9d6}
-.acts{display:flex;gap:8px;margin-top:14px;align-items:center}
+.acts{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
 .msg{font-size:12px;color:#7fd4a8;min-height:16px;flex:1}
 .msg.err{color:#ffb3a7}
+.dirty-hint{font-size:11px;color:#e8c268;display:none}
+.card[data-dirty] .dirty-hint{display:inline}
 pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;margin:10px 0 0;font-size:11.5px;
     max-height:150px;overflow:auto;color:#9fa7b6;white-space:pre-wrap}
 .warn{background:#251715;border:1px solid #6b3630;color:#ffb3a7;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
 .empty{color:#8b93a3;padding:30px 20px}
 </style></head><body>
-<header><h1>Copier-Panel</h1><span class=sub id=hint>lokal auf diesem PC · Prophos bleibt unangetastet</span></header>
+<header><h1>Copier-Panel</h1><span class=sub>lokal auf diesem PC · ein Copier-Prozess für alle Master · Prophos bleibt unangetastet</span></header>
 <main id=app><div class=empty>lade…</div></main>
 <script>
 const state={};
-function badge(m){const c=m==='live'?'b-live':m==='demo'?'b-demo':'b-dry';return `<span class="badge ${c}">${(m||'?').toUpperCase()}</span>`}
-function mapRows(name,map){
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function badge(m){const c=m==='live'?'b-live':m==='demo'?'b-demo':'b-dry';return `<span class="badge ${c}">${esc((m||'?').toUpperCase())}</span>`}
+function mapRows(map){
   const e=Object.entries(map);
-  return e.map(([k,v],i)=>`<div class=map>
-    <input value="${k}" data-mk="${name}" data-i="${i}" placeholder="Master-Symbol">
+  return e.map(([k,v])=>`<div class=map>
+    <input value="${esc(k)}" data-mk placeholder="Master-Symbol">
     <span>→</span>
-    <input value="${v}" data-mv="${name}" data-i="${i}" placeholder="Hedge-Symbol">
-    <button class=x data-del="${name}" data-i="${i}" title="Zeile entfernen">×</button></div>`).join('')
-   +`<div class=map><input data-mk="${name}" data-i="${e.length}" placeholder="neues Master-Symbol">
-     <span>→</span><input data-mv="${name}" data-i="${e.length}" placeholder="Hedge-Symbol"><span></span></div>`;
+    <input value="${esc(v)}" data-mv placeholder="Hedge-Symbol">
+    <button class=x data-del title="Zeile entfernen">×</button></div>`).join('')
+   +`<div class=map><input data-mk placeholder="neues Master-Symbol">
+     <span>→</span><input data-mv placeholder="Hedge-Symbol"><span></span></div>`;
 }
 function card(d){
   const s=d.status||{}, live=d.alive;
   const pos=(s.master_positions||[]).length, hed=Object.keys(s.hedges||{}).length;
-  return `<div class=card data-name="${d.name}">
-   <div class=top><span class=name>${d.name}</span>${badge(d.mode)}
+  return `<div class="card${d.mode==='live'?' live':''}" data-file="${esc(d.file)}">
+   <div class=top><span class=name>${esc(d.name)}</span>${badge(d.mode)}
      <span class=sub style="margin-left:auto"><span class="dot ${live?'on':'off'}"></span>${live?'läuft':'gestoppt'}${d.age!=null?` · ${d.age}s`:''}</span></div>
+   <div class=file>${esc(d.file)} · magic ${esc(d.magic)} · ${esc(d.snapshot_file||'?')}</div>
    <div class=kv>
-     <span>Master</span><b>${s.master_login||d.master_expected||'—'}</b>
-     <span>Hedge</span><b>${s.hedge_login||d.hedge_expected||'—'}</b>
+     <span>Master</span><b>${esc(s.master_login||d.master_expected||'—')}</b>
+     <span>Hedge</span><b>${esc(s.hedge_login||d.hedge_expected||'—')}</b>
      <span>Master-Positionen</span><b>${pos}</b>
      <span>offene Hedges</span><b>${hed}</b>
    </div>
-   ${s.note?`<div class=warn>${s.note}</div>`:''}
-   ${(s.blocked||[]).length?`<div class=warn>Gestoppt für Master-Pos: ${(s.blocked||[]).join(', ')} — im Hedge-Terminal prüfen</div>`:''}
+   ${s.note?`<div class=warn>${esc(s.note)}</div>`:''}
+   ${(s.blocked||[]).length?`<div class=warn>Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>`:''}
    <div class=row>
-     <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${d.multiplier??''}" data-f=multiplier data-n="${d.name}"></div>
-     <div><label>max Lots pro Hedge</label><input type=number step=0.01 min=0 value="${d.max_lots??''}" data-f=max_lots_per_hedge data-n="${d.name}"></div>
+     <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
+     <div><label>max Lots pro Hedge</label><input type=number step=0.01 min=0 value="${esc(d.max_lots??'')}" data-f=max_lots_per_hedge></div>
    </div>
    <label>Modus</label>
-   <select data-f=mode data-n="${d.name}">
+   <select data-f=mode>
      <option value=dryrun ${d.mode==='dryrun'?'selected':''}>dryrun — nur mitlesen, keine Order</option>
      <option value=demo ${d.mode==='demo'?'selected':''}>demo — echte Order, nur Demo-Konto</option>
      <option value=live ${d.mode==='live'?'selected':''}>live — echtes Geld</option>
    </select>
    <label>Symbol-Mapping (Master → Hedge)</label>
-   <div data-maps="${d.name}">${mapRows(d.name,d.symbol_map||{})}</div>
-   <div class=acts><button data-save="${d.name}">Speichern &amp; pushen</button>
-     <span class="msg" id="m-${d.name}"></span></div>
-   <pre>${(s.log||[]).slice(-14).join('\\n')||'noch keine Log-Zeilen'}</pre>
+   <div data-maps>${mapRows(d.symbol_map||{})}</div>
+   <div class=acts><button data-save>Speichern &amp; pushen</button>
+     ${d.has_terminal?`<button class=ghost data-term>Terminal starten</button>`:''}
+     <span class=dirty-hint>ungespeicherte Änderung</span>
+     <span class="msg"></span></div>
+   <pre>${esc((s.log||[]).slice(-14).join('\\n')||'noch keine Log-Zeilen')}</pre>
   </div>`;
 }
 async function load(){
   const r=await fetch('/api/instances'); const d=await r.json();
-  if(!d.length){document.getElementById('app').innerHTML='<div class=empty>Keine <code>config*.json</code> gefunden. Lege eine config.json im Copier-Ordner an.</div>';return}
-  const focus=document.activeElement, keep=focus&&focus.tagName==='INPUT'?focus.getAttribute('data-f')||focus.getAttribute('data-mk')||focus.getAttribute('data-mv'):null;
-  if(!keep) document.getElementById('app').innerHTML=d.map(card).join('');
-  d.forEach(x=>state[x.name]=x);
+  const app=document.getElementById('app');
+  const banner=d.conflicts.length?`<div class=banner>⛔ ${d.conflicts.map(esc).join('\\n⛔ ')}</div>`:'';
+  if(!d.instances.length){app.innerHTML=banner+'<div class=empty>Keine <code>config*.json</code> gefunden. Lege eine config.json im Copier-Ordner an.</div>';return}
+  d.instances.forEach(x=>state[x.file]=x);
+  let b=app.querySelector('.banner'); if(b)b.remove();
+  if(banner)app.insertAdjacentHTML('afterbegin',banner);
+  const empty=app.querySelector('.empty'); if(empty)empty.remove();
+  const files=new Set(d.instances.map(x=>x.file));
+  app.querySelectorAll('.card').forEach(c=>{if(!files.has(c.getAttribute('data-file')))c.remove()});
+  for(const x of d.instances){
+    const cur=app.querySelector(`.card[data-file="${CSS.escape(x.file)}"]`);
+    // Karten mit ungespeicherten Eingaben oder aktivem Fokus NICHT überschreiben —
+    // der 3s-Reload hat sonst Dropdown-Auswahl und gelöschte Zeilen zurückgesetzt.
+    if(cur&&(cur.hasAttribute('data-dirty')||cur.contains(document.activeElement)))continue;
+    const html=card(x);
+    if(cur)cur.outerHTML=html; else app.insertAdjacentHTML('beforeend',html);
+  }
 }
+document.getElementById('app').addEventListener('input',e=>{
+  const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
+});
+document.getElementById('app').addEventListener('change',e=>{
+  const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
+});
 document.addEventListener('click',async e=>{
-  const del=e.target.getAttribute&&e.target.getAttribute('data-del');
-  if(del){const i=+e.target.getAttribute('data-i');const m=state[del].symbol_map;const k=Object.keys(m)[i];delete m[k];
-    document.querySelector(`[data-maps="${del}"]`).innerHTML=mapRows(del,m);return}
-  const name=e.target.getAttribute&&e.target.getAttribute('data-save'); if(!name)return;
-  const card=document.querySelector(`.card[data-name="${name}"]`);
+  const cardEl=e.target.closest&&e.target.closest('.card'); if(!cardEl)return;
+  const file=cardEl.getAttribute('data-file');
+  const msg=cardEl.querySelector('.msg');
+  if(e.target.hasAttribute('data-del')){
+    e.target.closest('.map').remove();
+    cardEl.setAttribute('data-dirty','1');
+    return;
+  }
+  if(e.target.hasAttribute('data-term')){
+    msg.className='msg'; msg.textContent='starte Terminal…';
+    const r=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const d=await r.json();
+    msg.className='msg'+(d.ok?'':' err'); msg.textContent=d.ok?d.msg:('Fehler: '+d.msg);
+    return;
+  }
+  if(!e.target.hasAttribute('data-save'))return;
   const patch={};
-  card.querySelectorAll('[data-f]').forEach(el=>patch[el.getAttribute('data-f')]=el.value);
-  const map={};
-  const ks=[...card.querySelectorAll('[data-mk]')], vs=[...card.querySelectorAll('[data-mv]')];
-  ks.forEach((k,i)=>{const a=k.value.trim(), b=(vs[i]||{}).value?.trim(); if(a&&b) map[a]=b});
+  cardEl.querySelectorAll('[data-f]').forEach(el=>patch[el.getAttribute('data-f')]=el.value);
+  const map={}; let bad=null, dup=null;
+  cardEl.querySelectorAll('[data-maps] .map').forEach(row=>{
+    const a=(row.querySelector('[data-mk]')||{}).value?.trim()||'';
+    const b=(row.querySelector('[data-mv]')||{}).value?.trim()||'';
+    if(!a&&!b)return;
+    if(!a||!b){bad=a||b;return}
+    if(map[a]!==undefined)dup=a;
+    map[a]=b;
+  });
+  if(bad){msg.className='msg err';msg.textContent=`Fehler: Mapping-Zeile '${bad}' ist nur halb ausgefüllt`;return}
+  if(dup){msg.className='msg err';msg.textContent=`Fehler: Master-Symbol '${dup}' doppelt im Mapping`;return}
   patch.symbol_map=map;
-  const msg=document.getElementById('m-'+name); msg.className='msg'; msg.textContent='speichere…';
-  const r=await fetch('/api/save?name='+encodeURIComponent(name),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+  if(patch.mode==='live'&&state[file]?.mode!=='live'){
+    const s=state[file]||{};
+    if(!confirm(`LIVE schalten — echtes Geld!\\n\\nDatei: ${file}\\nMaster: ${s.master_expected||'?'}\\nHedge: ${s.hedge_expected||'?'}\\n\\nDuplikum für dieses Paar ist aus?`)){
+      msg.className='msg err';msg.textContent='Abgebrochen — Modus nicht geändert';return}
+  }
+  msg.className='msg'; msg.textContent='speichere…';
+  const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   const d=await r.json();
   msg.className='msg'+(d.ok?'':' err');
-  msg.textContent=d.ok?(d.msg+' — der Copier übernimmt es in ~2s'+(d.restart?' (Modus: Neustart läuft automatisch)':'')):('Fehler: '+d.msg);
+  msg.textContent=d.ok?(d.msg+' — der Copier übernimmt es in ~2s'+(d.restart?' (Neustart läuft automatisch)':'')):('Fehler: '+d.msg);
+  if(d.ok)cardEl.removeAttribute('data-dirty');
   setTimeout(load,2500);
 });
 load(); setInterval(load,3000);
@@ -245,7 +349,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _local_ok(self):
+        """Host/Origin auf 127.0.0.1|localhost festnageln — schuetzt gegen
+        DNS-Rebinding und Requests fremder Seiten aus dem Browser heraus."""
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        if host not in ("127.0.0.1", "localhost"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            o = urlparse(origin)
+            if (o.hostname or "").lower() not in ("127.0.0.1", "localhost"):
+                return False
+        return True
+
     def do_GET(self):
+        if not self._local_ok():
+            return self._send(403, json.dumps({"error": "nur lokal"}))
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             return self._send(200, PAGE, "text/html; charset=utf-8")
@@ -254,13 +373,24 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        if not self._local_ok():
+            return self._send(403, json.dumps({"ok": False, "msg": "nur lokal"}))
         u = urlparse(self.path)
+        ctype = (self.headers.get("Content-Type") or "")
+        if "application/json" not in ctype:
+            return self._send(400, json.dumps({"ok": False, "msg": "Content-Type muss application/json sein"}))
+        fname = (parse_qs(u.query).get("file") or [""])[0]
+        inst = next((i for i in instances() if i["config_file"] == fname), None)
+        if not inst:
+            return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{fname}' unbekannt"}))
+
+        if u.path == "/api/start-terminal":
+            ok, msg = start_terminal(inst["config_file"])
+            print(f"[panel] {fname}: Terminal-Start → {msg}", flush=True)
+            return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
+
         if u.path != "/api/save":
             return self._send(404, json.dumps({"error": "not found"}))
-        name = (parse_qs(u.query).get("name") or [""])[0]
-        inst = next((i for i in instances() if i["name"] == name), None)
-        if not inst:
-            return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{name}' unbekannt"}))
         try:
             n = int(self.headers.get("Content-Length") or 0)
             patch = json.loads(self.rfile.read(n) or b"{}")
@@ -269,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
         before = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
         ok, msg = patch_config(inst["config_file"], patch)
         restart = ok and str(patch.get("mode", "")).lower() not in ("", str(before.get("mode", "")).lower())
-        print(f"[panel] {name}: {msg}", flush=True)
+        print(f"[panel] {fname}: {msg}", flush=True)
         self._send(200, json.dumps({"ok": ok, "msg": msg, "restart": restart}, ensure_ascii=False))
 
     def log_message(self, *a):
@@ -280,7 +410,12 @@ def main():
     print("=" * 66)
     print(" Prophos Copier-Panel")
     print(f" Ordner: {HERE}")
-    print(f" Instanzen: {', '.join(i['name'] for i in instances()) or '(keine config*.json gefunden)'}")
+    print(f" Master: {', '.join(i['config_file'] for i in instances()) or '(keine config*.json gefunden)'}")
+    ignored = [fn for fn in sorted(os.listdir(HERE))
+               if fn.endswith(".json") and fn.lower().startswith("config")
+               and fn not in TEMPLATES and not CONFIG_RE.fullmatch(fn)]
+    if ignored:
+        print(f" IGNORIERT (kein gueltiger Config-Name): {', '.join(ignored)}")
     print(f" Im Browser oeffnen:  http://127.0.0.1:{PORT}")
     print(" Nur lokal erreichbar. Prophos wird nicht angefasst.")
     print("=" * 66)

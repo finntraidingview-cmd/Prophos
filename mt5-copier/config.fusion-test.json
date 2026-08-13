@@ -4,9 +4,11 @@
   "_1_mode": "Fuer diesen Test 'demo': es werden ECHTE Orders gesendet, aber nur auf ein Demo-Konto. Das Programm bricht ab, falls dort ein Echtgeld-Konto eingeloggt ist. (Wer erst nur zuschauen will: 'dryrun'.)",
   "mode": "demo",
 
-  "_2_AUSFUELLEN_terminal": "Pfad zur terminal64.exe der HEDGE-Installation (Demo-Konto B). Zweite MT5-Installation in einem eigenen Ordner, im portable-Modus gestartet.",
+  "_2_AUSFUELLEN_terminal": "Pfad zur terminal64.exe der HEDGE-Installation (Demo-Konto B). Zweite MT5-Installation in einem EIGENEN Ordner — aber NICHT im portable-Modus (siehe naechster Punkt).",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
-  "hedge_portable": true,
+
+  "_2b_portable_WARNUNG": "false lassen. Im portable-Modus liegt der 'gemeinsame' Ordner innerhalb der Installation — Master-EA und Copier sehen sich dann nicht mehr und der Snapshot kommt nie an. Getrennte Zielordner genuegen, MT5 legt die Datenordner selbst getrennt an. Die Vorlage hatte hier faelschlich true (korrigiert 13.08.2026).",
+  "hedge_portable": false,
 
   "_3_AUSFUELLEN_kontonummern": "Die beiden Fusion-Demo-Kontonummern. hedge_expected_login = Konto B (dort wird gehedged). master_expected_login = Konto A (dort darf NICHTS platziert werden — haengt das Programm versehentlich dort, bricht es ab).",
   "hedge_expected_login": 0,

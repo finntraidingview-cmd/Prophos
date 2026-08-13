@@ -1,16 +1,20 @@
 @echo off
-title MT5-Hedge-Copier (Testversion)
+title MT5-Hedge-Copier (alle Master)
 cd /d "%~dp0"
 
 echo ==========================================================
-echo  MT5-Hedge-Copier - EIGENSTAENDIGE Testversion
+echo  MT5-Hedge-Copier - EIN Prozess fuer ALLE config*.json
 echo  Duplikum laeuft davon unbeeinflusst weiter.
-echo  Modus steht in config.json (Start immer mit "dryrun").
+echo  Modus steht pro Master in seiner config (Start: "dryrun").
 echo  Fenster zu = Copier aus.
 echo ==========================================================
 echo.
 
+:loop
 python copier.py
 echo.
-echo Beendet. Fenster kann geschlossen werden.
-pause
+echo [%date% %time%] Copier beendet - Neustart in 10 Sekunden...
+echo (Absicht bei Modus-/Config-Aenderung: beim Neustart laufen alle
+echo  Startpruefungen erneut. Fenster schliessen beendet endgueltig.)
+timeout /t 10 /nobreak >nul
+goto loop

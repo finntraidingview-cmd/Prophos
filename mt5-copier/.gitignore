@@ -1,3 +1,15 @@
-config.json
+# Configs enthalten echte Kontonummern und Terminal-Pfade des jeweiligen PCs.
+# Vorher stand hier nur "config.json" — das trifft exakt diesen einen Dateinamen.
+# Seit Multi-Master (config-master2.json, config-ftmo.json …) Muster statt
+# Einzelname, sonst landen die Instanz-Configs alle im Repo (13.08.2026).
+# Passwoerter gibt es hier bewusst NIRGENDS: MT5 merkt sich den Login pro
+# Installationsordner selbst, das Panel speichert keine Zugangsdaten.
+config*.json
+!config.example.json
+!config.fusion-test.json
+
+# Status-/Laufzeitdateien des Copiers — pro PC, nie im Repo.
+status*.json
+
 __pycache__/
 *.pyc

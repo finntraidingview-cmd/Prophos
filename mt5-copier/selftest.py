@@ -13,7 +13,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from copier import plan_actions  # noqa: E402
+from copier import plan_actions, check_fleet, compute_startup_skip  # noqa: E402
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
 FUSION = {
@@ -203,6 +203,88 @@ def main():
         {},
         expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 1.0},
                         {"kind": "open", "symbol": "US500", "volume": 0.2}]))
+
+    # ── Flotten-Pruefung (Multi-Master, seit 13.08.2026) ────────────────────────
+    def fleet(name, cfgs, *, expect_error_contains=None, expect_ok=False):
+        errors, _ = check_fleet(cfgs)
+        if expect_ok:
+            ok = not errors
+        else:
+            ok = any(expect_error_contains.lower() in e.lower() for e in errors)
+        print(("✓ " if ok else "✗ ") + name)
+        if not ok:
+            print(f"    Fehler: {errors}")
+        return ok
+
+    BASE = {"hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe", "hedge_expected_login": 437804}
+
+    # 18) Doppelte magic wird als Fehler erkannt (der kritische Audit-Fund)
+    results.append(fleet(
+        "FLOTTE: doppelte magic → Abbruch-Fehler",
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
+         dict(BASE, _file="config-m2.json", magic=770001, snapshot_file="b.csv", master_expected_login=2)],
+        expect_error_contains="magic 770001"))
+
+    # 19) Doppelte snapshot_file wird als Fehler erkannt
+    results.append(fleet(
+        "FLOTTE: doppelte snapshot_file → Abbruch-Fehler",
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="x.csv", master_expected_login=1),
+         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="X.CSV", master_expected_login=2)],
+        expect_error_contains="snapshot_file"))
+
+    # 20) master_expected_login 0 ist ab zwei Mastern verboten
+    results.append(fleet(
+        "FLOTTE: master_expected_login 0 bei zwei Mastern → Abbruch-Fehler",
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=437803),
+         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=0)],
+        expect_error_contains="master_expected_login"))
+
+    # 21) Abweichendes Hedge-Terminal zwischen den Configs → Fehler
+    results.append(fleet(
+        "FLOTTE: unterschiedliche Hedge-Terminals → Abbruch-Fehler",
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=1),
+         {"_file": "config-m2.json", "magic": 770002, "snapshot_file": "b.csv",
+          "master_expected_login": 2, "hedge_terminal_path": "C:\\ANDERES\\terminal64.exe",
+          "hedge_expected_login": 437804}],
+        expect_error_contains="hedge_terminal_path"))
+
+    # 22) Saubere Zwei-Master-Flotte geht durch
+    results.append(fleet(
+        "FLOTTE: saubere Zwei-Master-Config → keine Fehler",
+        [dict(BASE, _file="config.json", magic=770001, snapshot_file="a.csv", master_expected_login=437803),
+         dict(BASE, _file="config-m2.json", magic=770002, snapshot_file="b.csv", master_expected_login=437873)],
+        expect_ok=True))
+
+    # ── Startup-Skip mit Hedge-Adoption (Neustart-Recovery, seit 13.08.2026) ────
+    def skiptest(name, positions, hedges, adopt, expect):
+        got = compute_startup_skip(positions, hedges, adopt)
+        ok = got == expect
+        print(("✓ " if ok else "✗ ") + name)
+        if not ok:
+            print(f"    erwartet {expect}, bekommen {got}")
+        return ok
+
+    # 23) Position MIT bestehendem Hedge wird adoptiert (nicht uebersprungen)
+    results.append(skiptest(
+        "NEUSTART: Position mit Hedge wird adoptiert, ohne Hedge uebersprungen",
+        [{"ident": 30, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0},
+         {"ident": 31, "symbol": "US500", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+        {30: [{"ticket": 950, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+        False, {31}))
+
+    # 24) adopt_existing=true uebernimmt alles
+    results.append(skiptest(
+        "NEUSTART: adopt_existing=true → nichts wird uebersprungen",
+        [{"ident": 32, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
+        {}, True, set()))
+
+    # 25) Adoptierte Position: Teil-Schliessung nach Neustart wird jetzt nachgezogen
+    #     (vorher: Skip-Liste → Hedge blieb auf 1.0 stehen, bis der Master ganz zu war)
+    results.append(run(
+        "NEUSTART: adoptierter Master teil-geschlossen (1.0→0.4) → Hedge folgt",
+        [{"ident": 33, "symbol": "NAS100", "type": 0, "volume": 0.4, "contract_size": 1.0}],
+        {33: [{"ticket": 951, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
+        expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.6}]))
 
     print()
     ok = sum(1 for r in results if r)

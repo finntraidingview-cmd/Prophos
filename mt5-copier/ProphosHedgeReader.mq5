@@ -24,6 +24,20 @@ long   g_seq = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // Instanz-Sperre: das EA darf pro Zieldatei nur EINMAL laufen. Ohne diese
+   // Pruefung schrieben zwei Charts desselben Terminals mit je eigenem g_seq
+   // in dieselbe Datei — der Staleness-Detektor des Copiers wurde dadurch blind
+   // (Audit 13.08.2026).
+   string lockName = "PHR_" + InpFileName;
+   if(GlobalVariableCheck(lockName) && (TimeCurrent() - (datetime)GlobalVariableGet(lockName)) < 30)
+   {
+      PrintFormat("ABBRUCH: ProphosHedgeReader laeuft bereits fuer '%s' (anderer Chart?). "
+                  "Pro Datei nur EINE Instanz aufziehen.", InpFileName);
+      return(INIT_FAILED);
+   }
+   GlobalVariableTemp(lockName);
+   GlobalVariableSet(lockName, (double)TimeCurrent());
+
    if(!EventSetMillisecondTimer(InpTimerMs))
    {
       Print("FEHLER: Timer konnte nicht gesetzt werden");
@@ -38,6 +52,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   GlobalVariableDel("PHR_" + InpFileName);
    Print("ProphosHedgeReader beendet, reason=", reason);
 }
 
@@ -72,7 +87,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 void WriteSnapshot()
 {
    g_seq++;
-   string tmp = InpFileName + ".tmp";
+   // tmp-Name traegt die Kontonummer: vergisst jemand bei einem zweiten Master
+   // den InpFileName zu aendern, kollidieren wenigstens die Zwischendateien
+   // nicht mehr (FileOpen ist exklusiv — zwei EAs auf derselben .tmp hiessen
+   // dauernd fehlgeschlagene Snapshots, genau waehrend des Trades).
+   string tmp = InpFileName + "." + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + ".tmp";
 
    int h = FileOpen(tmp, FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI);
    if(h == INVALID_HANDLE)

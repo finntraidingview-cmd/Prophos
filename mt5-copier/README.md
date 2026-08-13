@@ -6,9 +6,17 @@ gesamten Testphase normal weiterlaufen.
 
 ## Architektur
 
-    PROP-Terminal                gemeinsamer Ordner          LIVE-Terminal
-    ProphosHedgeReader.mq5   →   prophos_master.csv     →    copier.py
-    (nur lesend)                 (Positions-Snapshot)        (setzt den Hedge)
+    MASTER-Terminal 1 ── prophos_master.csv  ──┐
+    MASTER-Terminal 2 ── prophos_master2.csv ──┼──►  copier.py  ──►  HEDGE-Terminal
+    MASTER-Terminal N ── prophos_masterN.csv ──┘   (EIN Prozess)     (ein Live-Konto)
+
+**Seit 13.08.2026 bedient EIN `copier.py`-Prozess ALLE Master dieses PCs.** Jede
+`config*.json` im Ordner ist ein Master. Warum nicht ein Prozess pro Master: Die
+Recherche fand keinen einzigen belastbaren Beleg, dass zwei Python-Prozesse stabil
+am selben MT5-Terminal hängen können (dokumentierte Ausfälle: `-10003`/`-10004`
+IPC-Fehler; Projekte, die es stabil haben, serialisieren alle Aufrufe durch einen
+Prozess). Und das Code-Audit fand 8 kritische Kollisionen zwischen parallelen
+Copier-Prozessen — ein einzelner Prozess kann sich nicht selbst in die Quere kommen.
 
 **Warum die Master-Seite ein EA ist und nicht Python:** Der `path=`-Parameter von
 `mt5.initialize()` greift laut mehreren dokumentierten Fällen nicht zuverlässig — man kann
@@ -114,13 +122,22 @@ Was es kann:
   (Ausnahme Modus: dort beendet sich der Copier bewusst, damit `start-copier.bat` neu startet
   und alle Startprüfungen erneut laufen — ein Wechsel nach `live` im laufenden Prozess würde
   sie umgehen.)
-- **Mehrere Firmen/Accounts gleichzeitig:** jede `config*.json` im Ordner ist eine Instanz —
-  `config.json`, `config-ftmo.json`, `config-apex.json` … Jede bekommt eine eigene Karte.
-  Den Copier für eine bestimmte Config startet man mit
-  `set COPIER_CONFIG=config-ftmo.json` vor `python copier.py` (bzw. eine eigene .bat je Instanz).
-  Der Status landet automatisch in der passenden `status-ftmo.json`.
-- **Live-Anzeige pro Instanz:** Master-/Hedge-Kontonummer, Anzahl Master-Positionen, offene
+- **Mehrere Master gleichzeitig:** jede `config*.json` im Ordner ist ein Master —
+  `config.json`, `config-master2.json`, `config-ftmo.json` … Jede bekommt eine eigene Karte.
+  **EIN** `start-copier.bat` startet **einen** Prozess, der alle bedient; der Status je
+  Master landet automatisch in der passenden `status*.json`. Erlaubte Namen:
+  `config.json` oder `config-<name>.json` (Buchstaben/Zahlen) — Explorer-Kopien wie
+  „config - Kopie.json" werden bewusst ignoriert und beim Panel-Start als ignoriert gelistet.
+- **Live-Anzeige pro Master:** Master-/Hedge-Kontonummer, Anzahl Master-Positionen, offene
   Hedges, Modus-Badge, „läuft/gestoppt" (Statusdatei-Alter) und die letzten Log-Zeilen.
+- **„Terminal starten":** startet die `master_terminal_path`-Exe der Karte. Es werden KEINE
+  Zugangsdaten gespeichert — MT5 merkt sich den Login pro Installationsordner selbst
+  (einmal manuell einloggen, „Zugangsdaten speichern" ✓). Der Pfad ist über die API bewusst
+  NICHT setzbar, nur direkt in der JSON.
+- **Konflikt-Banner:** doppelte `magic` oder `snapshot_file` zwischen den Configs werden rot
+  angezeigt, bevor der Copier beim Start deswegen abbricht.
+- **Live-Rückfrage:** der Wechsel auf `live` verlangt eine Bestätigung mit Dateiname und
+  Kontonummern (Fehlklick-Schutz — die einzige Stelle, an der das Panel Echtgeld anfasst).
 
 Sicherheit (getestet):
 - Bindet **nur an 127.0.0.1** — aus dem Netz nicht erreichbar.
@@ -132,6 +149,30 @@ Sicherheit (getestet):
 - Werte-Prüfung: negative/nicht-numerische Multiplikatoren und unbekannte Modi werden
   abgelehnt, statt in die Config zu wandern.
 - Nur Python-Standardbibliothek — kein `pip install`, keine Cloud, keine Schlüssel auf dem PC.
+
+## Zweiter Master auf dasselbe Hedge-Konto (Schritt für Schritt)
+1. **Terminal-Ordner kopieren** statt neu installieren: `xcopy "C:\MT5-Master" "C:\MT5-Master2" /E /I /H`,
+   dann `C:\MT5-Master2\terminal64.exe` starten, **einmal** mit dem neuen Konto einloggen
+   („Zugangsdaten speichern" ✓). Ab dann gilt: dieser Ordner = dieses Konto.
+2. **EA aufziehen** (Datei → Datenordner öffnen → `MQL5\Experts`, kompilieren, auf einen Chart)
+   und dabei den Input **`InpFileName` ändern**, z.B. `prophos_master2.csv`.
+3. **`config-master2.json`** anlegen (Kopie der config.json) und diese Felder ändern:
+
+   | Feld | muss pro Master EINDEUTIG sein | Beispiel Master 2 |
+   |---|---|---|
+   | `snapshot_file` | ja — identisch mit `InpFileName` im EA | `prophos_master2.csv` |
+   | `magic` | ja — daran erkennt der Copier SEINE Hedges | `770002` |
+   | `comment_prefix` | empfohlen | `P2` |
+   | `master_expected_login` | ja (ab 2 Mastern Pflicht, sonst Abbruch) | die neue Kontonummer |
+   | `master_terminal_path` | ja (für den Terminal-Start-Knopf) | `C:\\MT5-Master2\\terminal64.exe` |
+
+   `hedge_terminal_path` und `hedge_expected_login` bleiben in ALLEN Configs identisch —
+   bei Abweichung bricht der Copier ab.
+4. Der laufende Copier erkennt die neue Datei binnen 5 s, startet sich selbst neu und prüft
+   dabei die ganze Flotte durch. Doppelte `magic`/`snapshot_file` → Abbruch mit klarer Meldung
+   (das war der gefährlichste Audit-Fund: zwei Copier mit gleicher magic schließen sich
+   gegenseitig die Hedges).
+5. Erst mit `"mode": "dryrun"` beobachten, dann auf `demo`/`live` heben.
 
 ## Dauerbetrieb (Autostart + Watchdog)
 Zwei Sicherungsnetze, damit der Copier unbeaufsichtigt laufen kann:
