@@ -150,6 +150,34 @@ Sicherheit (getestet):
   abgelehnt, statt in die Config zu wandern.
 - Nur Python-Standardbibliothek — kein `pip install`, keine Cloud, keine Schlüssel auf dem PC.
 
+## Account hinzufügen — automatisch (Panel-Knopf)
+Im Panel gibt es die Karte **„＋ Account hinzufügen"**: Name (kurz, nur Buchstaben/Zahlen),
+Kontonummer, Passwort, Server → „Fertig". Danach läuft alles von selbst (Fortschritt live
+in der Karte):
+
+1. **Prüfen & Kennwerte vergeben** — magic, comment_prefix und snapshot_file werden
+   fortlaufend vergeben und KÖNNEN nicht mehr kollidieren.
+2. **Klonen** — die Vorlage (`master_terminal_path` aus `config.json`) wird nach
+   `C:\MT5-<name>` kopiert; `Config/`, `logs/`, `Bases/` werden vorsorglich entfernt.
+3. **Erststart + Login** — Start per offizieller MT5-Startdatei (`/config`) mit
+   `KeepPrivate=1`; der Login wird im Terminal-Journal **verifiziert** („authorized"),
+   erst dann geht es weiter. **Die Startdatei mit dem Passwort wird garantiert gelöscht**
+   (auch im Fehlerfall) — dauerhaft speichert die Zugangsdaten nur MT5 selbst,
+   verschlüsselt, wie beim manuellen Login.
+4. **EA + Preset** — die kompilierte `ProphosHedgeReader.ex5` aus dem Vorlage-Terminal
+   wird in den Datenordner des Klons gelegt (gefunden über `origin.txt`, nie über den
+   Hash geraten), dazu ein Preset mit dem eindeutigen Snapshot-Namen.
+5. **Neustart mit `[StartUp]`** — das EA landet automatisch auf einem EURUSD-Chart und
+   bleibt dort dauerhaft (Chart-Persistenz). Bewiesen wird der Schritt über die
+   Snapshot-Datei selbst; die Start-ini wird danach gelöscht (ein zweiter Start damit
+   würde das EA auf einen ZWEITEN Chart duplizieren).
+6. **Config anlegen** — `config-<name>.json` (mode **dryrun**); der laufende Copier
+   nimmt sie binnen 5 s in die Flotte, die Karte erscheint im Panel.
+
+Voraussetzungen: Vorlage-Terminal ist eingerichtet (EA einmal kompiliert),
+`master_terminal_path` steht in der `config.json`, der Account existiert beim Broker.
+Danach: erst im **dryrun** einen Testtrade ansehen, dann per Panel auf `demo`/`live` heben.
+
 ## Zweiter Master auf dasselbe Hedge-Konto (Schritt für Schritt)
 1. **Terminal-Ordner kopieren** statt neu installieren: `xcopy "C:\MT5-Master" "C:\MT5-Master2" /E /I /H`,
    dann `C:\MT5-Master2\terminal64.exe` starten, **einmal** mit dem neuen Konto einloggen

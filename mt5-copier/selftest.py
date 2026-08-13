@@ -286,6 +286,73 @@ def main():
         {33: [{"ticket": 951, "symbol": "NAS100", "type": 1, "volume": 1.0}]},
         expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.6}]))
 
+    # ── Provisionierung: reine Logik (13.08.2026) ───────────────────────────
+    import json as _json
+    import tempfile
+    import provision
+
+    def prov(name, fn):
+        try:
+            ok = bool(fn())
+        except Exception as e:
+            ok = False
+            print(f"    Exception: {type(e).__name__}: {e}")
+        print(("✓ " if ok else "✗ ") + name)
+        return ok
+
+    with tempfile.TemporaryDirectory() as td:
+        base = {"mode": "demo", "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+                "hedge_expected_login": 437804, "master_expected_login": 437803,
+                "snapshot_file": "prophos_master.csv", "magic": 770001,
+                "comment_prefix": "PH", "multiplier": 1.0,
+                "symbol_map": {"NAS100": "NAS100"}, "max_lots_per_hedge": 2.0,
+                "_kommentar": "wird nicht uebernommen"}
+        m2 = dict(base, magic=770002, comment_prefix="P2", snapshot_file="prophos_master2.csv")
+        _json.dump(base, open(os.path.join(td, "config.json"), "w"))
+        _json.dump(m2, open(os.path.join(td, "config-master2.json"), "w"))
+
+        # 26) Vergabe: naechste freie magic 770003, Praefix P3, Snapshot nach Name
+        ident = provision.alloc_identity(td, "ftmo1")
+        results.append(prov(
+            "PROVISION: magic/prefix/snapshot fortlaufend und kollisionsfrei vergeben",
+            lambda: ident == {"magic": 770003, "prefix": "P3",
+                              "snapshot": "prophos_master_ftmo1.csv"}))
+
+        # 27) Neue Config erbt Hedge-Felder, Master-Felder neu, mode hart dryrun
+        cfg = provision.build_master_config(base, name="ftmo1", master_login=555001,
+                                            terminal_path="C:\\MT5-ftmo1\\terminal64.exe",
+                                            ident=ident)
+        results.append(prov(
+            "PROVISION: Config erbt Hedge-Ziel, mode dryrun, keine _kommentare",
+            lambda: cfg["hedge_expected_login"] == 437804
+                    and cfg["mode"] == "dryrun"
+                    and cfg["master_expected_login"] == 555001
+                    and cfg["magic"] == 770003
+                    and "_kommentar" not in cfg))
+
+        # 28) plan_checks faengt die Nutzerfehler ab
+        probs = provision.plan_checks(td, "böse name!", "abc", "", None)
+        results.append(prov(
+            "PROVISION: plan_checks meldet Name/Login/Server/Vorlage-Fehler",
+            lambda: len(probs) >= 4))
+
+        # 29) Vorhandener Account wird nicht ueberschrieben
+        _json.dump({}, open(os.path.join(td, "config-ftmo1.json"), "w"))
+        probs2 = provision.plan_checks(td, "ftmo1", "555001", "Srv", None)
+        results.append(prov(
+            "PROVISION: existierende config-ftmo1.json blockiert das Anlegen",
+            lambda: any("bereits angelegt" in p for p in probs2)))
+
+    # 30) Startdateien: Login-ini transient, StartUp-ini ohne Zugangsdaten
+    ini = provision.build_login_ini(555001, "geheim", "FusionMarkets-Demo")
+    sup = provision.build_startup_ini(preset="prophos-ftmo1.set")
+    results.append(prov(
+        "PROVISION: Login-ini mit KeepPrivate=1, StartUp-ini ohne Passwort",
+        lambda: "Password=geheim" in ini and "Login=555001" in ini
+                and "KeepPrivate=1" in ini
+                and "Password" not in sup and "Expert=ProphosHedgeReader" in sup
+                and "ExpertParameters=prophos-ftmo1.set" in sup))
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

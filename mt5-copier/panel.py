@@ -25,9 +25,12 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
+
+import provision
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PANEL_PORT", "8770"))
@@ -108,7 +111,11 @@ def snapshot():
     for snapf, fs in seen_snap.items():
         if len(fs) > 1:
             conflicts.append(f"snapshot_file '{snapf}' doppelt: {', '.join(fs)} — der Copier startet so nicht.")
-    return {"instances": data, "conflicts": conflicts}
+    job = None
+    if PROV_JOB:
+        job = {"name": PROV_JOB["name"], "done": PROV_JOB["done"], "error": PROV_JOB["error"],
+               "steps": [{"key": k, **PROV_JOB["steps"][k]} for k in PROV_STEPS]}
+    return {"instances": data, "conflicts": conflicts, "job": job}
 
 
 def patch_config(fname, patch):
@@ -151,6 +158,55 @@ def patch_config(fname, patch):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     return True, "gespeichert: " + ", ".join(changed)
+
+
+# ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
+# Ein Job zur Zeit. Das Passwort liegt NUR im Speicher des Worker-Threads und in
+# der transienten Startdatei, die provision.py garantiert loescht — im Job-Status
+# (den der Browser pollt) taucht es nie auf.
+PROV_STEPS = ("pruefen", "klonen", "login", "ea", "neustart", "config")
+PROV_LOCK = threading.Lock()
+PROV_JOB = None  # {"name", "steps": {key: {"state", "note"}}, "error", "done"}
+
+
+def prov_start(name, login, password, server):
+    global PROV_JOB
+    with PROV_LOCK:
+        if PROV_JOB and not PROV_JOB.get("done"):
+            return False, "Es laeuft schon eine Provisionierung — erst fertig laufen lassen."
+        cfg = read_json(os.path.join(HERE, "config.json"), {}) or {}
+        template = cfg.get("master_terminal_path") or ""
+        job = {"name": name, "error": None, "done": False,
+               "steps": {k: {"state": "pending", "note": None} for k in PROV_STEPS}}
+        PROV_JOB = job
+
+    def report(step, state, note=None):
+        st = job["steps"].get(step)
+        if st:
+            st["state"] = state
+            if note:
+                st["note"] = note
+
+    def worker():
+        try:
+            provision.run_provision(name=name, login=login, password=password,
+                                    server=server, template_exe=template,
+                                    folder=HERE, report=report)
+        except provision.ProvisionError as e:
+            job["error"] = str(e)
+            for st in job["steps"].values():
+                if st["state"] == "running":
+                    st["state"] = "error"
+        except Exception as e:  # unerwartet — trotzdem lesbar anzeigen
+            job["error"] = f"{type(e).__name__}: {e}"
+            for st in job["steps"].values():
+                if st["state"] == "running":
+                    st["state"] = "error"
+        finally:
+            job["done"] = True
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True, "gestartet"
 
 
 def start_terminal(fname):
@@ -214,6 +270,12 @@ pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;ma
     max-height:150px;overflow:auto;color:#9fa7b6;white-space:pre-wrap}
 .warn{background:#251715;border:1px solid #6b3630;color:#ffb3a7;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
 .empty{color:#8b93a3;padding:30px 20px}
+.card.add{border-style:dashed;border-color:#3a4150}
+.steps{margin-top:12px;font-size:12.5px;display:grid;gap:4px}
+.step{display:flex;gap:8px;align-items:baseline;color:#8b93a3}
+.step .st{width:14px;text-align:center}
+.step.done{color:#7fd4a8}.step.running{color:#e8c268}.step.error{color:#ffb3a7}
+.step .note{color:#6d7484;font-size:11px}
 </style></head><body>
 <header><h1>Copier-Panel</h1><span class=sub>lokal auf diesem PC · ein Copier-Prozess für alle Master · Prophos bleibt unangetastet</span></header>
 <main id=app><div class=empty>lade…</div></main>
@@ -265,25 +327,57 @@ function card(d){
    <pre>${esc((s.log||[]).slice(-14).join('\\n')||'noch keine Log-Zeilen')}</pre>
   </div>`;
 }
+function addCard(job){
+  const busy=job&&!job.done;
+  const mark=s=>s.state==='done'?'✓':s.state==='running'?'…':s.state==='error'?'✗':'·';
+  const labels={pruefen:'Prüfen & Kennwerte vergeben',klonen:'Terminal-Ordner klonen',
+    login:'Erststart + Login (Zugangsdaten-Datei wird danach gelöscht)',
+    ea:'Lese-EA + Preset einlegen',neustart:'Neustart — EA auf den Chart',config:'Config anlegen'};
+  const steps=job?`<div class=steps>${job.steps.map(s=>`<div class="step ${s.state}"><span class=st>${mark(s)}</span>${labels[s.key]||s.key}${s.note?` <span class=note>${esc(s.note)}</span>`:''}</div>`).join('')}</div>`:'';
+  const err=job&&job.error?`<div class=warn>${esc(job.error)}</div>`:'';
+  const okmsg=job&&job.done&&!job.error?`<div class=steps><div class="step done"><span class=st>✓</span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</div></div>`:'';
+  return `<div class="card add" data-file="__add__">
+   <div class=top><span class=name>＋ Account hinzufügen</span></div>
+   <div class=file>klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch</div>
+   <div class=row>
+     <div><label>Name (kurz, nur Buchstaben/Zahlen)</label><input data-p=name placeholder="z.B. ftmo1" ${busy?'disabled':''}></div>
+     <div><label>Login (Kontonummer)</label><input data-p=login placeholder="z.B. 437899" ${busy?'disabled':''}></div>
+   </div>
+   <div class=row>
+     <div><label>Passwort</label><input type=password data-p=password autocomplete=new-password ${busy?'disabled':''}></div>
+     <div><label>Server</label><input data-p=server placeholder="z.B. FusionMarkets-Demo" ${busy?'disabled':''}></div>
+   </div>
+   <div class=acts><button data-prov ${busy?'disabled':''}>${busy?'läuft…':'Fertig — automatisch einrichten'}</button>
+     <span class=msg id=prov-msg></span></div>
+   ${steps}${err}${okmsg}
+  </div>`;
+}
 async function load(){
   const r=await fetch('/api/instances'); const d=await r.json();
   const app=document.getElementById('app');
   const banner=d.conflicts.length?`<div class=banner>⛔ ${d.conflicts.map(esc).join('\\n⛔ ')}</div>`:'';
-  if(!d.instances.length){app.innerHTML=banner+'<div class=empty>Keine <code>config*.json</code> gefunden. Lege eine config.json im Copier-Ordner an.</div>';return}
   d.instances.forEach(x=>state[x.file]=x);
   let b=app.querySelector('.banner'); if(b)b.remove();
   if(banner)app.insertAdjacentHTML('afterbegin',banner);
   const empty=app.querySelector('.empty'); if(empty)empty.remove();
   const files=new Set(d.instances.map(x=>x.file));
-  app.querySelectorAll('.card').forEach(c=>{if(!files.has(c.getAttribute('data-file')))c.remove()});
+  app.querySelectorAll('.card').forEach(c=>{const f=c.getAttribute('data-file');if(f!=='__add__'&&!files.has(f))c.remove()});
   for(const x of d.instances){
     const cur=app.querySelector(`.card[data-file="${CSS.escape(x.file)}"]`);
     // Karten mit ungespeicherten Eingaben oder aktivem Fokus NICHT überschreiben —
     // der 3s-Reload hat sonst Dropdown-Auswahl und gelöschte Zeilen zurückgesetzt.
     if(cur&&(cur.hasAttribute('data-dirty')||cur.contains(document.activeElement)))continue;
     const html=card(x);
-    if(cur)cur.outerHTML=html; else app.insertAdjacentHTML('beforeend',html);
+    if(cur){cur.outerHTML=html}else{
+      const add=app.querySelector('.card.add');
+      if(add)add.insertAdjacentHTML('beforebegin',html); else app.insertAdjacentHTML('beforeend',html);
+    }
   }
+  // Die Hinzufügen-Karte: nur neu zeichnen, wenn kein Feld fokussiert ist ODER ein Job läuft
+  const addCur=app.querySelector('.card.add');
+  const addHtml=addCard(d.job);
+  if(!addCur)app.insertAdjacentHTML('beforeend',addHtml);
+  else if((d.job&&!d.job.done)||!addCur.contains(document.activeElement))addCur.outerHTML=addHtml;
 }
 document.getElementById('app').addEventListener('input',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
@@ -298,6 +392,22 @@ document.addEventListener('click',async e=>{
   if(e.target.hasAttribute('data-del')){
     e.target.closest('.map').remove();
     cardEl.setAttribute('data-dirty','1');
+    return;
+  }
+  if(e.target.hasAttribute('data-prov')){
+    const get=k=>(cardEl.querySelector(`[data-p=${k}]`)||{}).value?.trim()||'';
+    const body={name:get('name'),login:get('login'),password:(cardEl.querySelector('[data-p=password]')||{}).value||'',server:get('server')};
+    if(!body.name||!body.login||!body.password||!body.server){
+      msg.className='msg err';msg.textContent='Alle vier Felder ausfüllen.';return}
+    if(!/^[A-Za-z0-9]{1,24}$/.test(body.name)){
+      msg.className='msg err';msg.textContent='Name: nur Buchstaben/Zahlen, ohne Leer-/Bindezeichen.';return}
+    msg.className='msg';msg.textContent='starte…';
+    const r=await fetch('/api/provision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    const pw=cardEl.querySelector('[data-p=password]'); if(pw)pw.value='';
+    msg.className='msg'+(d.ok?'':' err');
+    msg.textContent=d.ok?'läuft — Fortschritt unten':('Fehler: '+d.msg);
+    if(d.ok)setTimeout(load,1000);
     return;
   }
   if(e.target.hasAttribute('data-term')){
@@ -379,6 +489,26 @@ class Handler(BaseHTTPRequestHandler):
         ctype = (self.headers.get("Content-Type") or "")
         if "application/json" not in ctype:
             return self._send(400, json.dumps({"ok": False, "msg": "Content-Type muss application/json sein"}))
+        if u.path == "/api/provision":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            name = str(body.get("name") or "").strip()
+            login = str(body.get("login") or "").strip()
+            password = str(body.get("password") or "")
+            server = str(body.get("server") or "").strip()
+            if not (name and login and password and server):
+                return self._send(400, json.dumps({"ok": False, "msg": "Name, Login, Passwort und Server sind Pflicht."}))
+            probs = provision.plan_checks(HERE, name, login, server,
+                                          (read_json(os.path.join(HERE, "config.json"), {}) or {}).get("master_terminal_path"))
+            if probs:
+                return self._send(400, json.dumps({"ok": False, "msg": " · ".join(probs)}, ensure_ascii=False))
+            ok, msg = prov_start(name, login, password, server)
+            print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
+            return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
+
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:
