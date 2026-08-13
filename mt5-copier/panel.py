@@ -271,6 +271,16 @@ pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;ma
 .warn{background:#251715;border:1px solid #6b3630;color:#ffb3a7;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
 .empty{color:#8b93a3;padding:30px 20px}
 .card.add{border-style:dashed;border-color:#3a4150}
+/* Trade-Plan-Dialog — bewusst eigene, dedizierte Verdrahtung (kein Sammel-Handler) */
+#plan-bg{display:none;position:fixed;inset:0;background:rgba(6,8,12,.72);z-index:50;
+         align-items:center;justify-content:center}
+.modal{background:#181b22;border:1px solid #2c313c;border-radius:14px;padding:20px;
+       width:min(440px,92vw);box-shadow:0 18px 60px rgba(0,0,0,.5)}
+.modal h2{margin:0 0 2px;font-size:16px}
+.modal .sub2{color:#8b93a3;font-size:12px;margin-bottom:14px}
+.modal input.big{font-size:22px;font-weight:600;padding:10px 12px;text-align:center}
+.modal .rule{color:#6d7484;font-size:11.5px;margin-top:8px}
+.modal .acts{margin-top:16px}
 .steps{margin-top:12px;font-size:12.5px;display:grid;gap:4px}
 .step{display:flex;gap:8px;align-items:baseline;color:#8b93a3}
 .step .st{width:14px;text-align:center}
@@ -279,6 +289,29 @@ pre{background:#0e1015;border:1px solid #22262f;border-radius:8px;padding:9px;ma
 </style></head><body>
 <header><h1>Copier-Panel</h1><span class=sub>lokal auf diesem PC · ein Copier-Prozess für alle Master · Prophos bleibt unangetastet</span></header>
 <main id=app><div class=empty>lade…</div></main>
+<div id=plan-bg>
+ <div class=modal>
+  <h2 id=plan-title>Trade planen</h2>
+  <div class=sub2 id=plan-sub></div>
+  <label>Multiplikator</label>
+  <input class=big id=plan-mult type=number step=0.001 min=0>
+  <div class=row style="margin-top:10px">
+    <div><label>max Lots pro Hedge</label><input id=plan-lots type=number step=0.01 min=0></div>
+    <div><label>Modus</label>
+      <select id=plan-mode>
+        <option value=dryrun>dryrun — nur mitlesen</option>
+        <option value=demo>demo — echte Order, Demo-Konto</option>
+        <option value=live>live — echtes Geld</option>
+      </select></div>
+  </div>
+  <div class=rule>Regel: max Lots muss über Multiplikator × größter Master-Position bleiben, sonst verweigert die Sicherheitsgrenze die Order.</div>
+  <div class=acts>
+    <button id=plan-start>Trade starten — Terminal öffnen</button>
+    <button class=ghost id=plan-cancel>Abbrechen</button>
+    <span class=msg id=plan-msg></span>
+  </div>
+ </div>
+</div>
 <script>
 const state={};
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -320,7 +353,8 @@ function card(d){
    </select>
    <label>Symbol-Mapping (Master → Hedge)</label>
    <div data-maps>${mapRows(d.symbol_map||{})}</div>
-   <div class=acts><button data-save>Speichern &amp; pushen</button>
+   <div class=acts><button data-plan>Trade planen</button>
+     <button class=ghost data-save>Speichern &amp; pushen</button>
      ${d.has_terminal?`<button class=ghost data-term>Terminal starten</button>`:''}
      <span class=dirty-hint>ungespeicherte Änderung</span>
      <span class="msg"></span></div>
@@ -389,10 +423,56 @@ document.getElementById('app').addEventListener('input',e=>{
 document.getElementById('app').addEventListener('change',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
 });
+// ── Trade-Plan-Dialog: dedizierte Verdrahtung, wie in Prophos (kein Sammel-Handler) ──
+const planBg=document.getElementById('plan-bg');
+function openPlan(file){
+  const d=state[file]; if(!d)return;
+  planBg.dataset.file=file;
+  document.getElementById('plan-title').textContent='Trade planen — '+d.name;
+  document.getElementById('plan-sub').textContent=`Master ${d.master_expected||'—'} → Hedge ${d.hedge_expected||'—'} · ${d.file}`;
+  document.getElementById('plan-mult').value=d.multiplier??'';
+  document.getElementById('plan-lots').value=d.max_lots??'';
+  document.getElementById('plan-mode').value=d.mode||'dryrun';
+  const m=document.getElementById('plan-msg'); m.className='msg'; m.textContent='';
+  planBg.style.display='flex';
+  document.getElementById('plan-mult').focus();
+}
+document.getElementById('plan-cancel').addEventListener('click',()=>{planBg.style.display='none'});
+document.getElementById('plan-start').addEventListener('click',async()=>{
+  const file=planBg.dataset.file, d=state[file]||{};
+  const msg=document.getElementById('plan-msg');
+  const patch={multiplier:document.getElementById('plan-mult').value,
+               max_lots_per_hedge:document.getElementById('plan-lots').value,
+               mode:document.getElementById('plan-mode').value};
+  if(!patch.multiplier||!patch.max_lots_per_hedge){
+    msg.className='msg err';msg.textContent='Multiplikator und max Lots ausfüllen.';return}
+  if(+patch.max_lots_per_hedge<=+patch.multiplier){
+    if(!confirm(`max Lots (${patch.max_lots_per_hedge}) ist nicht größer als der Multiplikator (${patch.multiplier}).\nSchon ab 1.0 Lot Master würde die Sicherheitsgrenze die Order verweigern.\nTrotzdem so starten?`))return;
+  }
+  if(patch.mode==='live'&&d.mode!=='live'){
+    if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${d.master_expected||'?'}\nHedge: ${d.hedge_expected||'?'}\n\nDuplikum für dieses Paar ist aus?`)){
+      msg.className='msg err';msg.textContent='Abgebrochen — nichts geändert';return}
+  }
+  msg.className='msg';msg.textContent='pushe…';
+  const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+  const s=await r.json();
+  if(!s.ok){msg.className='msg err';msg.textContent='Fehler: '+s.msg;return}
+  msg.textContent='gepusht — öffne Terminal…';
+  const t=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  const ts=await t.json();
+  msg.className='msg'+(ts.ok?'':' err');
+  msg.textContent=ts.ok
+    ?`✓ Multiplikator ${patch.multiplier} aktiv (~2 s)${s.restart?' · Copier-Neustart läuft':''} · Terminal offen — jetzt traden`
+    :('Multiplikator gepusht, aber Terminal: '+ts.msg);
+  setTimeout(load,2500);
+  if(ts.ok)setTimeout(()=>{planBg.style.display='none'},2200);
+});
+
 document.addEventListener('click',async e=>{
   const cardEl=e.target.closest&&e.target.closest('.card'); if(!cardEl)return;
   const file=cardEl.getAttribute('data-file');
   const msg=cardEl.querySelector('.msg');
+  if(e.target.hasAttribute('data-plan')){openPlan(file);return}
   if(e.target.hasAttribute('data-del')){
     e.target.closest('.map').remove();
     cardEl.setAttribute('data-dirty','1');
