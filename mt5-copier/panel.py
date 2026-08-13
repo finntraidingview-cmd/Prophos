@@ -118,7 +118,7 @@ def snapshot():
         job = {"name": PROV_JOB["name"], "done": PROV_JOB["done"], "error": PROV_JOB["error"],
                "steps": [{"key": k, **PROV_JOB["steps"][k]} for k in PROV_STEPS]}
     return {"instances": data, "conflicts": conflicts, "job": job,
-            "version": _local_version()}
+            "plans": advance_plans(data), "version": _local_version()}
 
 
 def patch_config(fname, patch):
@@ -161,6 +161,90 @@ def patch_config(fname, patch):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
     return True, "gespeichert: " + ", ".join(changed)
+
+
+# ── Trade-Plaene: geplant -> laufend -> beendet (15.08.2026, Prophos-Logik) ────
+# Ein Plan entsteht beim "Trade starten" (geplant), wechselt AUTOMATISCH auf
+# "laufend", sobald der Master wirklich eine Position oeffnet, und auf
+# "beendet", wenn sie wieder zu ist — getrieben vom Positionsstand aus den
+# status*.json, nicht von Klicks. Ein aktiver Plan (geplant/laufend) pro
+# Account; ein erneuter Start aktualisiert ihn nur.
+PLANS_FILE = os.path.join(HERE, "plans.json")
+PLANS_LOCK = threading.Lock()
+
+
+def _load_plans():
+    return read_json(PLANS_FILE, []) or []
+
+
+def _save_plans(plans):
+    tmp = PLANS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(plans, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, PLANS_FILE)
+
+
+def upsert_plan(file, name, multiplier, max_lots, mode):
+    with PLANS_LOCK:
+        plans = _load_plans()
+        now = datetime.now().isoformat(timespec="seconds")
+        for p in plans:
+            if p["file"] == file and p["status"] in ("geplant", "laufend"):
+                p.update({"multiplier": multiplier, "max_lots": max_lots,
+                          "mode": mode, "armed_at": now})
+                _save_plans(plans)
+                return p
+        pid = max([p["id"] for p in plans], default=0) + 1
+        p = {"id": pid, "file": file, "name": name, "multiplier": multiplier,
+             "max_lots": max_lots, "mode": mode, "created_at": now,
+             "armed_at": now, "started_at": None, "ended_at": None,
+             "status": "geplant"}
+        plans.append(p)
+        _save_plans(plans)
+        return p
+
+
+def delete_plan(pid):
+    with PLANS_LOCK:
+        plans = _load_plans()
+        keep = [p for p in plans if p["id"] != pid]
+        if len(keep) == len(plans):
+            return False
+        _save_plans(keep)
+        return True
+
+
+def advance_plans(instances_data):
+    """Zustandsmaschine, bei jedem Status-Abruf ausgefuehrt (idempotent).
+    Uebergaenge nur bei frischem, warnungsfreiem Master-Status — ein
+    eingefrorener Snapshot darf keinen Plan faelschlich beenden."""
+    with PLANS_LOCK:
+        plans = _load_plans()
+        by_file = {d["file"]: d for d in instances_data}
+        now = datetime.now().isoformat(timespec="seconds")
+        changed = False
+        for p in plans:
+            d = by_file.get(p["file"])
+            if not d or not d.get("alive") or (d.get("status") or {}).get("note"):
+                continue
+            pos = len((d.get("status") or {}).get("master_positions") or [])
+            if p["status"] == "geplant" and pos > 0:
+                p["status"] = "laufend"
+                p["started_at"] = now
+                changed = True
+            elif p["status"] == "laufend" and pos == 0:
+                p["status"] = "beendet"
+                p["ended_at"] = now
+                changed = True
+        # Historie begrenzen: die letzten 50 beendeten reichen
+        done = [p for p in plans if p["status"] == "beendet"]
+        if len(done) > 50:
+            drop = {p["id"] for p in done[:len(done) - 50]}
+            plans = [p for p in plans if p["id"] not in drop]
+            changed = True
+        if changed:
+            _save_plans(plans)
+        return plans
 
 
 # ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
@@ -462,6 +546,22 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
 .rule{color:var(--sub-2);font-size:11.5px;margin-top:10px;line-height:1.45}
 
 /* Provisionierungs-Schritte */
+/* Trade-Plaene: drei Spalten geplant / laufend / beendet */
+.plans-grid{display:grid;gap:14px;grid-template-columns:repeat(3,1fr);margin-top:14px}
+@media (max-width:1000px){.plans-grid{grid-template-columns:1fr}}
+.plan-col h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--sub);
+  text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:7px}
+.plan-col h4 .cnt{background:var(--surface-tint);border:1px solid var(--border);
+  border-radius:12px;padding:0 7px;font-size:11px;color:var(--sub)}
+.plan{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:11px 13px;box-shadow:var(--shadow-card);margin-bottom:10px;font-size:13px}
+.plan.laufend{border-color:rgba(18,183,106,.45)}
+.plan-top{display:flex;align-items:center;gap:8px}
+.plan-top b{font-size:13.5px}
+.plan-top .x{margin-left:auto}
+.plan-meta{color:var(--sub);font-size:12px;margin-top:3px}
+.plan-live{color:#0d9668;font-size:12px;margin-top:4px;font-variant-numeric:tabular-nums}
+.plan-empty{color:var(--sub-2);font-size:12.5px;padding:12px 4px}
 .steps{margin-top:14px;display:grid;gap:6px;font-size:13px}
 .step{display:flex;gap:9px;align-items:baseline;color:var(--sub-2)}
 .step .st{width:16px;text-align:center;flex-shrink:0;font-weight:700}
@@ -486,6 +586,14 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
   </div>
   <div id=notice></div>
   <div class=grid id=app><div class=empty>lade…</div></div>
+
+  <div class=view-head style="margin-top:30px">
+    <div>
+      <h2 class=view-title style="font-size:19px">Trade-Pläne</h2>
+      <p class=view-sub>geplant → laufend → beendet — wandert automatisch mit deinen Positionen</p>
+    </div>
+  </div>
+  <div class=plans-grid id=plans></div>
 </div>
 
 <!-- Trade-Plan-Modal — dedizierte Verdrahtung (Projektregel: kein Sammel-Handler) -->
@@ -644,9 +752,46 @@ async function load(){
       if(cur)cur.outerHTML=html; else app.insertAdjacentHTML('beforeend',html);
     }
   }
+  // Trade-Plaene rendern (keine Eingabefelder darin -> immer neu zeichnen ok)
+  renderPlans(d.plans||[]);
   // Add-Modal-Schritte live aktualisieren, wenn offen
   if(document.getElementById('add-bg').classList.contains('open'))renderAddJob();
 }
+function fmtT(iso){if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}
+function dur(a,b){if(!a||!b)return'';const m=Math.round((new Date(b)-new Date(a))/60000);return m<60?`${m} min`:`${Math.floor(m/60)} h ${m%60} min`}
+function planCard(p){
+  const d=state[p.file]||{}, s=d.status||{};
+  const pos=(s.master_positions||[]).length, hed=Object.keys(s.hedges||{}).length;
+  let meta='', live='';
+  if(p.status==='geplant')meta=`geplant ${fmtT(p.armed_at||p.created_at)}`;
+  if(p.status==='laufend'){meta=`läuft seit ${fmtT(p.started_at)}`;
+    live=`<div class=plan-live>● ${pos} Position(en) · ${hed} Hedge(s) bewacht</div>`}
+  if(p.status==='beendet')meta=`${fmtT(p.started_at)} → ${fmtT(p.ended_at)} · ${dur(p.started_at,p.ended_at)}`;
+  return `<div class="plan ${p.status}">
+    <div class=plan-top><b>${esc(d.name||p.name)}</b>${pill(p.mode)}
+      <button class=x data-plandel="${p.id}" data-planstatus="${p.status}" title="Plan löschen">×</button></div>
+    <div class=plan-meta>×${esc(p.multiplier)} · max ${esc(p.max_lots)} Lots · ${esc((s.master_server||d.master_server||''))}</div>
+    <div class=plan-meta>${esc(meta)}</div>
+    ${live}
+  </div>`;
+}
+function renderPlans(plans){
+  const cols=[['geplant','Geplant'],['laufend','Laufend'],['beendet','Beendet']];
+  document.getElementById('plans').innerHTML=cols.map(([k,label])=>{
+    let list=plans.filter(p=>p.status===k);
+    if(k==='beendet')list=list.slice().reverse();
+    return `<div class=plan-col><h4>${label}<span class=cnt>${list.length}</span></h4>
+      ${list.map(planCard).join('')||`<div class=plan-empty>${k==='geplant'?'Kein Plan — „Trade planen" auf einer Karte.':k==='laufend'?'Nichts im Markt.':'Noch keine abgeschlossenen Trades.'}</div>`}
+    </div>`;
+  }).join('');
+}
+document.getElementById('plans').addEventListener('click',async e=>{
+  const pid=e.target.getAttribute&&e.target.getAttribute('data-plandel');
+  if(!pid)return;
+  if(e.target.getAttribute('data-planstatus')==='laufend'&&!confirm('Dieser Plan LÄUFT gerade (Position offen). Wirklich nur den Plan-Eintrag löschen? Die Position und der Hedge bleiben unberührt.'))return;
+  await fetch('/api/plan-delete?id='+encodeURIComponent(pid),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  load();
+});
 document.getElementById('app').addEventListener('input',e=>{
   const c=e.target.closest('.card'); if(c)c.setAttribute('data-dirty','1');
 });
@@ -699,6 +844,10 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   const s=await r.json();
   if(!s.ok){msg.className='msg err';msg.textContent='Fehler: '+s.msg;return}
+  // Trade-Plan anlegen/aktualisieren: startet als "geplant" und wandert von
+  // selbst nach "laufend"/"beendet", sobald die Position auf-/zugeht.
+  try{await fetch('/api/plan?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({multiplier:patch.multiplier,max_lots:patch.max_lots_per_hedge,mode:patch.mode})});}catch(e){}
   msg.textContent='gepusht — öffne Terminal…';
   const t=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const ts=await t.json();
@@ -876,6 +1025,15 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
+        if u.path == "/api/plan-delete":
+            # braucht keinen file-Parameter — Plan-ID reicht
+            try:
+                pid = int((parse_qs(u.query).get("id") or ["0"])[0])
+            except ValueError:
+                pid = 0
+            ok = delete_plan(pid)
+            return self._send(200, json.dumps({"ok": ok, "msg": "geloescht" if ok else "unbekannt"}))
+
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:
@@ -885,6 +1043,18 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = start_terminal(inst["config_file"])
             print(f"[panel] {fname}: Terminal-Start → {msg}", flush=True)
             return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
+
+        if u.path == "/api/plan":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            p = upsert_plan(inst["config_file"], inst["name"],
+                            body.get("multiplier"), body.get("max_lots"),
+                            str(body.get("mode") or ""))
+            return self._send(200, json.dumps({"ok": True, "plan": p}, ensure_ascii=False))
+
 
         if u.path != "/api/save":
             return self._send(404, json.dumps({"error": "not found"}))

@@ -23,3 +23,6 @@ __pycache__/
 *.prev
 *.newc
 *.newp
+
+# Trade-Plaene des jeweiligen PCs — Laufzeitdaten, nie im Repo
+plans.json
