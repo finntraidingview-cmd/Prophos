@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-15.2"
+APP_BUILD = "2026-08-16.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2755,9 +2755,35 @@ def _firm_norm(name):
 
 
 def _sb_all(table, params):
-    """PostgREST-Select ohne die 1000-Zeilen-Standardgrenze."""
-    p = dict(params); p.setdefault("limit", "50000")
-    return sb_select(table, p)
+    """PostgREST-Select über ALLE Zeilen — seitenweise.
+
+    ACHTUNG (Bug 13.08.2026): Ein simples `limit=50000` reicht NICHT. Supabase
+    deckelt jede Antwort serverseitig bei `db-max-rows` (1000) — der Parameter
+    wird stillschweigend nach unten korrigiert, ohne Fehler und ohne Hinweis.
+    Genau daran hingen falsche Hedge-Summen im Admin-Dashboard: von 1314
+    abgeschlossenen trade_plans sah die Aggregation nur die ersten 1000, also
+    fehlten 314 Trades in den Kosten (bei Pascal 5.792 € statt 8.197 €).
+    Deshalb hier explizit blättern, bis eine Seite kürzer als PAGE ist.
+    """
+    PAGE = 1000
+    out, offset = [], 0
+    while True:
+        p = dict(params)
+        # Ohne feste Sortierung darf Postgres die Reihenfolge zwischen zwei
+        # Seiten ändern — dann fehlen Zeilen bzw. kommen doppelt. Alle vier
+        # hier genutzten Tabellen haben eine id.
+        p.setdefault("order", "id.asc")
+        p["limit"] = str(PAGE)
+        p["offset"] = str(offset)
+        chunk = sb_select(table, p)
+        if not isinstance(chunk, list):
+            return chunk
+        out.extend(chunk)
+        if len(chunk) < PAGE:
+            return out
+        offset += PAGE
+        if offset > 500000:          # Reißleine gegen Endlosschleifen
+            return out
 
 
 def admin_build_overview():
@@ -2772,6 +2798,7 @@ def admin_build_overview():
     # zwischen Profilen historisch vermischt — unkritisch, weil Account-IDs global
     # eindeutig sind: ein fremder Eintrag matcht schlicht keinen eigenen Account.
     archived = set()
+    preds_of = {}          # Nachfolger-ID -> [Vorgänger-IDs]
     for r in arch_rows:
         v = r.get("value")
         if isinstance(v, str):
@@ -2783,6 +2810,11 @@ def admin_build_overview():
                     archived.add(str(acc_id))
                 elif info:
                     archived.add(str(acc_id))
+                # Ein archivierter Account zeigt per successorId auf den Account,
+                # der ihn abgelöst hat (Phase 1 → Phase 2 → Funded). Sein Geld
+                # steckt weiterhin in der Firma — über den Nachfolger.
+                if isinstance(info, dict) and info.get("successorId"):
+                    preds_of.setdefault(str(info["successorId"]), []).append(str(acc_id))
 
     fx = 0.85
     for r in fx_rows:
@@ -2830,18 +2862,49 @@ def admin_build_overview():
     except Exception:
         pass
 
+    def own(aid, a=None):
+        """Eigene Zahlen EINES Accounts (ohne Kette), in EUR."""
+        a = a if a is not None else by_id.get(aid) or {}
+        try: buy = float(a.get("purchase_cost") or 0)
+        except (TypeError, ValueError): buy = 0.0
+        return buy, hedge.get(aid, 0.0), payouts.get(aid, 0.0)
+
+    def chain(aid):
+        """Wie calcReingesteckdEur() im Frontend: eigene Kosten PLUS die komplette
+        Vorgänger-Kette. Ein geblowter Phase-1-Account ist nicht weg — sein Geld
+        steckt über den Nachfolger weiter in derselben Prop-Firma. Genau das ist
+        die Zahl, die die App pro Account als „Gesamtkosten" anzeigt."""
+        b, h, p, n = 0.0, 0.0, 0.0, 0
+        stack, seen = [aid], {aid}
+        while stack:
+            cur = stack.pop()
+            acc = by_id.get(cur)
+            if acc is None or (acc.get("account_type") or "") == "live":
+                continue
+            cb, ch, cp = own(cur, acc)
+            b += cb; h += ch; p += cp
+            if cur != aid:
+                n += 1
+            for prev in preds_of.get(cur, []):
+                if prev not in seen and len(seen) < 200:   # Schutz gegen Zyklen
+                    seen.add(prev); stack.append(prev)
+        return b, h, p, n
+
     # Eine flache Zeile pro Account — die UI filtert/aggregiert daraus selbst
-    # (Person, Firma, aktiv/archiviert). Das hält den Endpoint simpel und macht
-    # jede Zahl im Dashboard bis zum einzelnen Account nachvollziehbar.
+    # (Person, Firma, aktiv/archiviert). Jede Zeile trägt BEIDE Sichten:
+    #   buy/hedge/payouts/parked      = nur dieser Account
+    #   c_buy/c_hedge/c_payouts/c_parked = inkl. Vorgänger-Kette (= „Gesamtkosten")
+    # Warum beide: über AKTIVE Accounts ist die Kettensicht richtig (das Geld der
+    # abgelösten Accounts steckt weiter in der Firma). Zeigt man aktive UND
+    # archivierte zusammen, würde die Kettensicht die Vorgänger doppelt zählen —
+    # dort sind die Eigen-Zahlen richtig. Die UI wählt je nach Filter.
     rows = []
     for a in accounts:
         aid = str(a["id"])
         if (a.get("account_type") or "") == "live":
             continue                                   # Hedge-Broker, keine Prop-Firma
-        try: buy = float(a.get("purchase_cost") or 0)
-        except (TypeError, ValueError): buy = 0.0
-        hg = round(hedge.get(aid, 0.0), 2)
-        po = round(payouts.get(aid, 0.0), 2)
+        buy, hg, po = own(aid, a)
+        cb, ch, cp, npred = chain(aid)
         uid = str(a.get("user_id"))
         rows.append({
             "id": aid,
@@ -2854,9 +2917,14 @@ def admin_build_overview():
             "person": names.get(uid, uid[:8]),
             "archived": aid in archived,
             "buy": round(buy, 2),
-            "hedge": hg,
-            "payouts": po,
+            "hedge": round(hg, 2),
+            "payouts": round(po, 2),
             "parked": round(buy + hg - po, 2),
+            "preds": npred,
+            "c_buy": round(cb, 2),
+            "c_hedge": round(ch, 2),
+            "c_payouts": round(cp, 2),
+            "c_parked": round(cb + ch - cp, 2),
         })
 
     people_list = sorted(

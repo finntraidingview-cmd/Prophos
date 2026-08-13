@@ -761,6 +761,16 @@
     border-bottom:1px solid var(--border-soft);
   }
   #dashboard-view .adm-row:last-child{border-bottom:none}
+  /* Verteilungszeilen sind Buttons (Aufklappen) — Button-Optik komplett weg. */
+  #dashboard-view .adm-row-btn{
+    width:100%;background:none;border:0;border-bottom:1px solid var(--border-soft);
+    font:inherit;color:inherit;text-align:left;cursor:pointer;
+    padding-left:8px;padding-right:8px;margin:0 -8px;width:calc(100% + 16px);
+    border-radius:var(--r-sm);transition:background .12s var(--ease);
+  }
+  #dashboard-view .adm-row-btn:hover{background:var(--surface-tint)}
+  #dashboard-view .adm-row-btn.is-on{background:var(--violet-tint)}
+  #dashboard-view .adm-row-btn.is-on .adm-row-name{color:var(--violet);font-weight:600}
   #dashboard-view .adm-row-name{
     font-size:13px;font-weight:500;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap;
@@ -4724,7 +4734,7 @@
                 <div class="panel-head">
                   <div>
                     <div class="panel-title">Verteilung nach Prop-Firma</div>
-                    <div class="panel-sub">Wie viel Kapital bei welcher Firma liegt</div>
+                    <div class="panel-sub">Zum Aufklappen auf eine Firma klicken</div>
                   </div>
                 </div>
                 <div class="adm-dist" id="adm-firm-dist"></div>
@@ -4733,7 +4743,7 @@
                 <div class="panel-head">
                   <div>
                     <div class="panel-title">Nach Person</div>
-                    <div class="panel-sub">Wer wie viel im Markt hat</div>
+                    <div class="panel-sub">Zum Aufklappen auf eine Person klicken</div>
                   </div>
                 </div>
                 <div class="adm-dist" id="adm-person-dist"></div>
@@ -4762,12 +4772,16 @@
               </div>
             </div>
 
-            <div class="panel" style="margin-top:14px">
+            <!-- Account-Liste: KEINE Dauerliste mehr, sondern die Aufklappung.
+                 Erscheint nur, wenn oben eine Firma/Person angeklickt oder
+                 gesucht wurde — sonst wäre es nur eine lange Tabelle. -->
+            <div class="panel" style="margin-top:14px" id="adm-acc-panel" hidden>
               <div class="panel-head">
                 <div>
-                  <div class="panel-title">Accounts &amp; IDs</div>
+                  <div class="panel-title" id="adm-acc-title">Accounts</div>
                   <div class="panel-sub" id="adm-acc-count">–</div>
                 </div>
+                <button class="btn btn-ghost" id="adm-acc-back" style="padding:7px 12px">Alle anzeigen</button>
               </div>
               <div class="table-wrap adm-scroll">
                 <table class="t">
@@ -4787,6 +4801,7 @@
             </div>
 
             <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+              <b id="adm-mode-note">–</b><br>
               Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
               Firmennamen werden zusammengefasst — z.&nbsp;B. „Apex Trader" → Apex, sonst wäre das Klumpenrisiko zu klein.
             </p>
@@ -5952,11 +5967,25 @@
     }
 
     // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
-    // KPIs, Firmen-, Personen- und Account-Tabelle IMMER überein und reagieren
-    // gemeinsam auf jeden Filter.
-    // Alle Zahlen entstehen hier aus den flachen Account-Zeilen — damit stimmen
     // KPIs, Verteilungen und Tabellen IMMER überein und reagieren gemeinsam auf
     // jeden Filter.
+    //
+    // ── Welche Zahlen gelten? (Finns Definition, 13.08.2026) ──
+    // „Geparkt" ist für einen AKTIVEN Account seine Gesamtkosten — also inklusive
+    // der abgelösten Vorgänger (Phase 1 → Phase 2 → Funded). Das Geld eines
+    // geblowten Phase-1-Accounts ist nicht weg, es steckt über den Nachfolger
+    // weiter in derselben Prop-Firma. Dafür liefert der Endpoint c_* mit.
+    // ABER: zeigt man aktive UND archivierte Accounts zusammen, stünde jeder
+    // Vorgänger zweimal drin — einmal in der Kette seines Nachfolgers, einmal
+    // als eigene Zeile. Dort sind deshalb die Eigen-Zahlen richtig.
+    const admChainMode = () => $('adm-status').value === 'active'
+    function admVals(r){
+      return admChainMode()
+        ? { buy:r.c_buy ?? r.buy, hedge:r.c_hedge ?? r.hedge,
+            payouts:r.c_payouts ?? r.payouts, parked:r.c_parked ?? r.parked }
+        : { buy:r.buy, hedge:r.hedge, payouts:r.payouts, parked:r.parked }
+    }
+
     function admFiltered(){
       const fPerson = $('adm-person').value
       const fFirm   = $('adm-firm').value
@@ -5979,12 +6008,22 @@
       const m = new Map()
       for(const r of rows){
         const k = r[key] || '—'
-        const g = m.get(k) || { label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
-        g.accounts++; g.buy += r.buy; g.hedge += r.hedge; g.payouts += r.payouts; g.parked += r.parked
+        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
+        const v = admVals(r)
+        g.accounts++; g.buy += v.buy; g.hedge += v.hedge; g.payouts += v.payouts; g.parked += v.parked
         m.set(k, g)
       }
       return [...m.values()].sort((a,b) => b.parked - a.parked)
     }
+
+    /* Anteile IMMER gegen die Summe der POSITIVEN Posten rechnen.
+     * Sonst kippt die Prozentrechnung, sobald eine Firma im Plus steht: bei
+     * Apex 2.737 €, Tradeify −1.208 € und Summe 2.927 € kam „Apex 93 %" heraus,
+     * obwohl Apex fast das gesamte tatsächlich gebundene Kapital hält. Eine
+     * Firma im Plus bindet kein Kapital — sie ist kein Klumpenrisiko und
+     * bekommt deshalb gar keinen Anteil, nicht etwa einen negativen. */
+    const admPosTotal = list => list.reduce((a, g) => a + Math.max(0, g.parked), 0)
+    const admShare = (g, posTotal) => posTotal > 0 ? (100 * Math.max(0, g.parked) / posTotal) : 0
 
     // Ampel: ab 25% der Verteilung orange, ab 40% rot — bei einem Firmen-Exit
     // ist genau dieser Anteil auf einen Schlag weg.
@@ -5997,22 +6036,37 @@
       return at > 0 ? s.slice(0, at) : s
     }
 
-    function admDist(el, list, total){
+    /* filterId = das <select>, das ein Klick auf eine Zeile setzt (Aufklappen).
+     * Bewusst über die vorhandenen Filter statt über einen eigenen Drilldown-
+     * Zustand: so bleiben KPIs, Verteilungen und Account-Liste automatisch
+     * konsistent, und „Alle anzeigen" ist einfach das Leeren des Filters. */
+    function admDist(el, list, filterId){
       el.innerHTML = ''
       if(!list.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
+      const posTotal = admPosTotal(list)
+      const active = $(filterId).value
       for(const g of list){
-        const share = total ? (100 * g.parked / total) : 0
-        const row = document.createElement('div')
-        row.className = 'adm-row'
+        const share = admShare(g, posTotal)
+        const imPlus = g.parked < 0
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'adm-row adm-row-btn' + (String(active) === String(g.key) ? ' is-on' : '')
         row.innerHTML =
           '<div class="adm-row-name"></div>' +
-          `<div class="adm-track"><div class="adm-fill" style="width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${admCol(share)}"></div></div>` +
+          `<div class="adm-track"><div class="adm-fill" style="width:${Math.min(100,share).toFixed(1)}%;background:${admCol(share)}"></div></div>` +
           `<div class="adm-val">${admEur.format(g.parked)}</div>` +
-          `<div class="adm-pct">${share.toFixed(0)}%</div>`
+          (imPlus ? '<div class="adm-pct" style="color:var(--good)">im Plus</div>'
+                  : `<div class="adm-pct">${share.toFixed(0)}%</div>`)
         const nm = row.querySelector('.adm-row-name')
         // Wenn kein Anzeigename hinterlegt ist, kommt die E-Mail — die passt nicht in die Spalte.
         nm.textContent = admShortName(g.label)
-        nm.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
+        row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'} — zum Aufklappen klicken`
+        row.addEventListener('click', () => {
+          const sel = $(filterId)
+          sel.value = (String(sel.value) === String(g.key)) ? '' : g.key   // nochmal klicken = zu
+          admRender()
+          if(sel.value) $('adm-acc-panel').scrollIntoView({ behavior:'smooth', block:'nearest' })
+        })
         el.appendChild(row)
       }
     }
@@ -6028,31 +6082,39 @@
     function admRender(){
       if(!admData) return
       const rows = admFiltered()
-      const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0)
+      const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
       const totalParked = sum('parked')
       const nArch = rows.filter(r => r.archived).length
+      const nPred = admChainMode() ? rows.reduce((a, r) => a + (Number(r.preds) || 0), 0) : 0
 
       $('adm-k-parked').textContent = admEur.format(totalParked)
       $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf · ${admEur.format(sum('hedge'))} Hedge`
       $('adm-k-accs').textContent = rows.length
-      $('adm-k-accs-sub').textContent = nArch ? `${rows.length - nArch} aktiv · ${nArch} archiviert` : 'alle aktiv'
+      $('adm-k-accs-sub').textContent = nArch
+        ? `${rows.length - nArch} aktiv · ${nArch} archiviert`
+        : (nPred ? `alle aktiv · ${nPred} abgelöste eingerechnet` : 'alle aktiv')
       $('adm-k-po').textContent = admEur.format(sum('payouts'))
+
+      $('adm-mode-note').textContent = admChainMode()
+        ? `Geparkt = Gesamtkosten je aktivem Account: Kaufpreis + Hedge-Verluste − Payouts, inklusive der abgelösten Vorgänger-Accounts (${nPred} eingerechnet).`
+        : 'Geparkt = Kaufpreis + Hedge-Verluste − Payouts, jeder Account für sich. Vorgänger werden hier NICHT in den Nachfolger gerechnet, sonst stünden sie doppelt drin.'
 
       const byFirm   = admGroup(rows, 'firm', 'firm')
       const byPerson = admGroup(rows, 'user_id', 'person')
 
+      const posTotal = admPosTotal(byFirm)
       const top = byFirm[0]
-      const topShare = (top && totalParked) ? (100 * top.parked / totalParked) : 0
+      const topShare = top ? admShare(top, posTotal) : 0
       $('adm-k-top').textContent = top ? `${topShare.toFixed(0)}%` : '–'
       $('adm-k-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? 'var(--warn)' : 'var(--ink)')
       const bar = $('adm-k-top-bar')
-      bar.style.width = Math.max(0, Math.min(100, topShare)).toFixed(1) + '%'
+      bar.style.width = Math.min(100, topShare).toFixed(1) + '%'
       bar.style.background = admCol(topShare)
       const topLbl = $('adm-k-top').parentElement.querySelector('.kpi-label')
       if(topLbl) topLbl.textContent = top ? `Größtes Klumpenrisiko · ${top.label}` : 'Größtes Klumpenrisiko'
 
-      admDist($('adm-firm-dist'), byFirm, totalParked)
-      admDist($('adm-person-dist'), byPerson, totalParked)
+      admDist($('adm-firm-dist'), byFirm, 'adm-firm')
+      admDist($('adm-person-dist'), byPerson, 'adm-person')
 
       // Kosten-Tabelle je Firma
       const ftb = $('adm-firm-rows'); ftb.innerHTML = ''
@@ -6069,12 +6131,25 @@
         ftb.appendChild(tr)
       }
 
-      // Account-Liste
-      const accs = rows.slice().sort((a,b) => b.parked - a.parked)
+      // Account-Liste — nur als Aufklappung, nicht als Dauerliste.
+      const selFirm = $('adm-firm').value, selPerson = $('adm-person').value
+      const q = ($('adm-search').value || '').trim()
+      const drilled = !!(selFirm || selPerson || q)
+      $('adm-acc-panel').hidden = !drilled
+      if(drilled){
+        const parts = []
+        if(selFirm)   parts.push(selFirm)
+        if(selPerson) parts.push(admShortName((byPerson.find(p => String(p.key) === String(selPerson)) || {}).label || ''))
+        if(q)         parts.push(`„${q}"`)
+        $('adm-acc-title').textContent = parts.join(' · ') || 'Accounts'
+      }
+
+      const accs = rows.slice().sort((a,b) => admVals(b).parked - admVals(a).parked)
       $('adm-acc-count').textContent = accs.length + (accs.length === 1 ? ' Account' : ' Accounts')
       $('adm-acc-empty').hidden = accs.length > 0
       const tb = $('adm-acc-rows'); tb.innerHTML = ''
       for(const r of accs){
+        const v = admVals(r)
         const tr = document.createElement('tr')
         if(r.archived) tr.style.opacity = '.55'
         const initials = (r.firm || '?').slice(0,2).toUpperCase()
@@ -6084,13 +6159,15 @@
             '<div style="min-width:0"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px"></div>' +
             '<div class="adm-sub fm"></div></div>' +
             (r.archived ? '<span class="chip chip-neutral">archiviert</span>' : '') +
+            // Macht sichtbar, WARUM ein Account mehr kostet, als er gekauft hat.
+            (admChainMode() && r.preds ? `<span class="chip chip-neutral" title="Kosten der abgelösten Vorgänger sind eingerechnet">+${r.preds} abgelöst</span>` : '') +
           '</div></td>' +
           '<td><span class="ext" style="font-size:12px;color:var(--sub)"></span></td>' +
           '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
-          `<td class="adm-num" style="color:var(--sub)">${admEur.format(r.buy)}</td>` +
-          admHedgeCell(r.hedge) +
-          `<td class="adm-num" style="color:${r.payouts ? 'var(--good)' : 'var(--sub)'}">${r.payouts ? '−' + admEur.format(r.payouts) : '—'}</td>` +
-          `<td class="adm-num" style="font-weight:600">${admEur.format(r.parked)}</td>`
+          `<td class="adm-num" style="color:var(--sub)">${admEur.format(v.buy)}</td>` +
+          admHedgeCell(v.hedge) +
+          `<td class="adm-num" style="color:${v.payouts ? 'var(--good)' : 'var(--sub)'}">${v.payouts ? '−' + admEur.format(v.payouts) : '—'}</td>` +
+          `<td class="adm-num" style="font-weight:600">${admEur.format(v.parked)}</td>`
         tr.querySelector('.nm').textContent  = r.name || '—'
         tr.querySelector('.fm').textContent  = r.firm
         tr.querySelector('.ext').textContent = r.ext || '—'
@@ -6233,6 +6310,10 @@
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
       $('adm-refresh')?.addEventListener('click', admLoad)
+      $('adm-acc-back')?.addEventListener('click', () => {
+        $('adm-firm').value = ''; $('adm-person').value = ''; $('adm-search').value = ''
+        admRender()
+      })
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
