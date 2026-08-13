@@ -799,6 +799,10 @@
     position:sticky;top:0;
   }
   #dashboard-view .t td{padding:14px 12px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+  /* .t th setzt text-align:left und schlaegt .adm-num (mehr Spezifitaet durch
+     das Element im Selektor). Ohne diese Zeile stehen die Ueberschriften der
+     Zahlenspalten links, die Werte darunter rechts — nichts fluchtet. */
+  #dashboard-view .t th.adm-num{text-align:right}
   #dashboard-view .t tr:last-child td{border-bottom:none}
   #dashboard-view .t tr:hover td{background:var(--surface-tint)}
   #dashboard-view .acct-cell{display:flex;align-items:center;gap:10px;font-weight:500}
