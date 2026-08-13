@@ -585,6 +585,11 @@ document.getElementById('plan-x').addEventListener('click',closePlan);
 document.getElementById('plan-start').addEventListener('click',async()=>{
   const file=planBg.dataset.file, d=state[file]||{};
   const msg=document.getElementById('plan-msg');
+  // Haerteste Falle zuerst: ohne laufenden Copier wird NICHTS gehedgt.
+  if(!d.alive){
+    if(!confirm(`Der Copier ist GESTOPPT — deine Trades würden NICHT gehedgt!\n\nErst start-copier.bat starten, dann hier erneut auf „Trade starten".\n\nTrotzdem fortfahren (nur Werte pushen + Terminal öffnen)?`)){
+      msg.className='msg err';msg.textContent='Abgebrochen — erst den Copier starten.';return}
+  }
   const patch={multiplier:document.getElementById('plan-mult').value,
                max_lots_per_hedge:document.getElementById('plan-lots').value,
                mode:document.getElementById('plan-mode').value};
