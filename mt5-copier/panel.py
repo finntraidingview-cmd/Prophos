@@ -117,7 +117,8 @@ def snapshot():
     if PROV_JOB:
         job = {"name": PROV_JOB["name"], "done": PROV_JOB["done"], "error": PROV_JOB["error"],
                "steps": [{"key": k, **PROV_JOB["steps"][k]} for k in PROV_STEPS]}
-    return {"instances": data, "conflicts": conflicts, "job": job}
+    return {"instances": data, "conflicts": conflicts, "job": job,
+            "version": _local_version()}
 
 
 def patch_config(fname, patch):
@@ -471,6 +472,7 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
 <div class=topbar>
   <h1>Copier-Panel</h1>
   <span class=sub>lokal auf diesem PC · Prophos bleibt unangetastet</span>
+  <span class=sub id=version-chip title="Version — aktualisiert sich selbst von GitHub"></span>
   <span class=copier-chip id=copier-chip><span class="dot off"></span>Copier</span>
 </div>
 
@@ -614,6 +616,7 @@ async function load(){
   // Kopf: Copier-Status + Zaehler
   const anyAlive=d.instances.some(x=>x.alive);
   document.getElementById('copier-chip').innerHTML=`<span class="dot ${anyAlive?'on':'off'}"></span>Copier ${anyAlive?'läuft':'gestoppt'}`;
+  document.getElementById('version-chip').textContent=d.version?('v'+d.version):'';
   const brokers=new Set(d.instances.map(x=>(x.status||{}).master_server||x.master_server).filter(Boolean));
   document.getElementById('count-sub').textContent=`${d.instances.length} Accounts · ${brokers.size} Broker · ein Copier-Prozess`;
   // Hinweise: Konflikte + laufende Provisionierung
