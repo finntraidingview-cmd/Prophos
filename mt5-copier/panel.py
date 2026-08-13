@@ -211,15 +211,36 @@ def prov_start(name, login, password, server):
     return True, "gestartet"
 
 
-def _heal_ea(fname, cfg, install_dir, started_ts):
+# Laufende Heilungen pro Installation — verhindert, dass mehrfaches Klicken
+# mehrere Kill/Restart-Zyklen uebereinanderlegt.
+HEAL_ACTIVE = set()
+HEAL_LOCK = threading.Lock()
+
+
+def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
-    ob der Snapshot wieder fliesst. Tut er es nach 45 s nicht, fehlt das Lese-EA
-    auf dem Chart (passiert nach unsauberem Beenden — Chart-Stand verloren).
-    Dann: Terminal beenden und mit [StartUp]-Startdatei neu starten, die das EA
-    samt richtigem InpFileName automatisch aufzieht — derselbe Mechanismus wie
-    bei der Provisionierung. Laeuft NUR fuer Terminals, die das Panel selbst
-    gerade gestartet hat (nie gegen ein laufendes Terminal des Nutzers)."""
-    time.sleep(45)
+    ob der Snapshot wieder fliesst. Tut er es nicht, fehlt das Lese-EA auf dem
+    Chart (passiert nach unsauberem Beenden — Chart-Stand verloren). Dann:
+    Terminal beenden und mit [StartUp]-Startdatei neu starten, die das EA samt
+    richtigem InpFileName automatisch aufzieht — derselbe Mechanismus wie bei
+    der Provisionierung. Seit dem Abend auch fuer BEREITS LAUFENDE Terminals
+    mit eingefrorenem Snapshot (Fund: Terminal lief noch vom vorigen Versuch,
+    der Start-Knopf holte es nur nach vorn und uebersprang die Heilung — ein
+    Terminal, das nichts liefert, ist zum Kopieren nutzlos, und die Positionen
+    liegen beim Broker, ueberleben den Neustart also)."""
+    with HEAL_LOCK:
+        if install_dir in HEAL_ACTIVE:
+            return
+        HEAL_ACTIVE.add(install_dir)
+    try:
+        _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s)
+    finally:
+        with HEAL_LOCK:
+            HEAL_ACTIVE.discard(install_dir)
+
+
+def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
+    time.sleep(wait_s)
     snap = str(cfg.get("snapshot_file") or "prophos_master.csv")
     common = cfg.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
@@ -280,14 +301,21 @@ def start_terminal(fname):
         return False, f"nicht gefunden: {path}"
     pids = provision.terminal_pids(os.path.dirname(path))
     if pids:
-        # Laeuft schon: NICHT neu starten, nur das Fenster nach vorn holen.
+        # Laeuft schon: nur das Fenster nach vorn holen — ABER auch hier die
+        # Selbstheilung anstossen: liefert das laufende Terminal keinen frischen
+        # Snapshot (EA fehlt), wird es nach kurzer Pruefung neu gestartet und
+        # das EA automatisch aufgezogen.
         try:
             subprocess.run(["powershell", "-Command",
                             f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
                            capture_output=True, timeout=15)
         except Exception:
             pass
-        return True, "Terminal läuft schon — Fenster nach vorn geholt"
+        threading.Thread(target=_heal_ea,
+                         args=(fname, cfg, os.path.dirname(os.path.abspath(path)),
+                               time.time(), 8),
+                         daemon=True).start()
+        return True, "Terminal läuft — EA wird geprüft und notfalls automatisch aufgezogen"
     try:
         subprocess.Popen([path], cwd=os.path.dirname(path))
         # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
