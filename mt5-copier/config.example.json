@@ -1,0 +1,29 @@
+{
+  "_1_mode": "dryrun = nur mitlesen und loggen (Default, null Risiko) · demo = echte Orders, aber nur auf Demo-Hedge-Konto · live = echtes Geld",
+  "mode": "dryrun",
+
+  "_2_terminals": "Pfad zur terminal64.exe der jeweiligen MT5-Installation. Beide Terminals muessen laufen und eingeloggt sein. Zwei getrennte (portable) Installationen, damit beide Accounts parallel offen sein koennen.",
+  "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
+  "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+
+  "_3_hedge": "multiplier = Lots auf dem Hedge pro 1 Lot Master (aus Prophos uebernehmen). symbol_map = Master-Symbol -> Hedge-Symbol.",
+  "multiplier": 1.0,
+  "symbol_map": {
+    "US100.cash": "NAS100",
+    "NDX100": "NAS100",
+    "NAS100": "NAS100",
+    "US500.cash": "US500",
+    "SPX500": "US500"
+  },
+
+  "_4_sicherheit": "max_lots_per_hedge bricht ab, wenn die berechnete Lotgroesse absurd hoch ist. adopt_existing = beim Start schon offene Master-Positionen nachtraeglich hedgen (Default false).",
+  "max_lots_per_hedge": 5.0,
+  "adopt_existing_master_positions": false,
+
+  "_5_technik": "poll_interval in Sekunden. filling IOC oder FOK (broker-abhaengig). magic/comment_prefix kennzeichnen die Hedges eindeutig.",
+  "poll_interval": 0.5,
+  "deviation_points": 30,
+  "filling": "IOC",
+  "magic": 770001,
+  "comment_prefix": "PH"
+}
