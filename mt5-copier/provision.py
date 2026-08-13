@@ -143,20 +143,51 @@ def build_preset(snapshot_file, timer_ms=200):
     return f"InpFileName={snapshot_file}\nInpTimerMs={timer_ms}\n"
 
 
-def build_master_config(base, *, name, master_login, terminal_path, ident):
+def build_master_config(base, *, name, master_login, terminal_path, ident, server=""):
     """Neue Instanz-Config aus der bestehenden config.json abgeleitet — Hedge-
     Felder bleiben identisch (check_fleet erzwingt das), Master-Felder neu.
     mode startet hart auf dryrun: eine frisch angelegte Instanz darf niemals
-    scharf loslaufen."""
+    scharf loslaufen. master_server dient kuenftigen Provisionierungen als
+    Quelle fuer die richtige Server-Liste (The5ers-Fall 14.08.2026)."""
     cfg = {k: v for k, v in base.items() if not k.startswith("_")}
     cfg["mode"] = "dryrun"
     cfg["master_expected_login"] = int(master_login)
     cfg["master_terminal_path"] = terminal_path
+    cfg["master_server"] = server
     cfg["snapshot_file"] = ident["snapshot"]
     cfg["magic"] = ident["magic"]
     cfg["comment_prefix"] = ident["prefix"]
     cfg["_provisioned"] = f"automatisch angelegt fuer '{name}'"
     return cfg
+
+
+def servers_dat_source(folder, server, template_data, root=None):
+    """Welche servers.dat bekommt der Klon? Reihenfolge (The5ers-Fall):
+    1. ein bestehendes Master-Terminal, das auf DEMSELBEN Server laeuft —
+       dessen Liste kennt den Namen garantiert;
+    2. sonst die Vorlage (reicht fuer denselben Broker wie die Vorlage).
+    Rueckgabe: Pfad oder None."""
+    want = (server or "").strip().lower()
+    root = root or terminals_root()
+    if want:
+        for fn in sorted(os.listdir(folder)):
+            if not fn.lower().endswith(".json") or not fn.lower().startswith("config"):
+                continue
+            try:
+                with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if str(cfg.get("master_server", "")).strip().lower() != want:
+                continue
+            tp = cfg.get("master_terminal_path")
+            if not tp:
+                continue
+            dd = data_dir_for(os.path.dirname(tp), root)
+            if dd and os.path.exists(os.path.join(dd, "config", "servers.dat")):
+                return os.path.join(dd, "config", "servers.dat")
+    p = os.path.join(template_data, "config", "servers.dat")
+    return p if os.path.exists(p) else None
 
 
 def plan_checks(folder, name, login, server, template_exe):
@@ -389,12 +420,20 @@ def run_provision(*, name, login, password, server, template_exe,
     # servers.dat der Vorlage enthaelt nur die bekannten Broker-Server (keine
     # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
     step("ea")
-    tpl_servers = os.path.join(tpl_data, "config", "servers.dat")
-    if not os.path.exists(tpl_servers):
-        raise ProvisionError(f"Server-Liste der Vorlage fehlt ({tpl_servers}) — "
-                             f"Vorlage-Terminal einmal starten und wieder schliessen.")
-    os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
-    shutil.copy2(tpl_servers, os.path.join(new_data, "config", "servers.dat"))
+    target_servers = os.path.join(new_data, "config", "servers.dat")
+    if os.path.exists(target_servers):
+        # Schon vorhanden = das Terminal hat den Server bereits gelernt (z.B.
+        # durch einen manuellen Dialog-Login beim vorigen Versuch) — NICHT mit
+        # der Vorlagen-Liste ueberschreiben, sonst verlernt es ihn wieder.
+        servers_note = "servers.dat vorhanden (behalten)"
+    else:
+        src = servers_dat_source(folder, server, tpl_data, root)
+        if not src:
+            raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
+                                 "starten und wieder schliessen.")
+        os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
+        shutil.copy2(src, target_servers)
+        servers_note = "servers.dat"
     experts = os.path.join(new_data, "MQL5", "Experts")
     presets = os.path.join(new_data, "MQL5", "Presets")
     os.makedirs(experts, exist_ok=True)
@@ -403,7 +442,7 @@ def run_provision(*, name, login, password, server, template_exe,
     preset_name = f"prophos-{name}.set"
     with open(os.path.join(presets, preset_name), "w", encoding=SET_ENCODING) as f:
         f.write(build_preset(ident["snapshot"]))
-    report("ea", "done", f"servers.dat + {EA_NAME}.ex5 + {preset_name}")
+    report("ea", "done", f"{servers_note} + {EA_NAME}.ex5 + {preset_name}")
 
     # ── 5. Start mit Login + EA in EINER Startdatei ─────────────────────────
     # Die kombinierte ini ([Common]-Login mit KeepPrivate=1 + [StartUp]-EA) ist
@@ -433,19 +472,31 @@ def run_provision(*, name, login, password, server, template_exe,
             f.write(build_login_ini(login, password, server) + "\n"
                     + build_startup_ini(preset=preset_name))
         subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
-        # Erst den Login im Journal verifizieren …
+        # Erst den Login im Journal verifizieren. Beim ERSTEN Konto eines neuen
+        # Brokers kann die Startdatei den Servernamen nicht aufloesen — MT5
+        # oeffnet dann den vorausgefuellten Login-Dialog (The5ers-Fall
+        # 14.08.2026). Deshalb: nach 45 s den Hinweis anzeigen und geduldig
+        # weiterwarten — EIN OK-Klick des Nutzers macht den Rest, und der
+        # Server ist danach dauerhaft gelernt.
         verdict = None
         t0 = time.time()
-        while time.time() - t0 < 90:
+        hinted = False
+        while time.time() - t0 < 240:
             verdict = _journal_says(new_data, ["authorization failed", "invalid account",
                                                "authorized"], started_ts)
             if verdict:
                 break
+            if not hinted and time.time() - t0 > 45:
+                hinted = True
+                report("neustart", "running",
+                       "Zeigt das neue Terminal ein Login-Fenster? Dann dort einmal "
+                       "OK klicken (neuer Broker — nur beim ersten Konto noetig)")
             time.sleep(3)
         if verdict != "authorized":
             raise ProvisionError(
-                f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 90 s'}) — "
-                f"Kontonummer/Passwort/Servername pruefen. "
+                f"Login nicht bestaetigt ({verdict or 'kein Journal-Eintrag in 4 min'}) — "
+                f"Kontonummer/Passwort/Servername pruefen; falls ein Login-Fenster im "
+                f"Terminal offen ist, dort OK klicken und nochmal 'Fertig' druecken. "
                 f"Journal: {_journal_tail(new_data, started_ts)}")
         # … dann der Snapshot: der Beweis, dass auch das EA laeuft — der
         # staerkste Check, den es gibt: unser eigenes EA schreibt ihn.
@@ -479,7 +530,7 @@ def run_provision(*, name, login, password, server, template_exe,
     with open(os.path.join(folder, "config.json"), "r", encoding="utf-8") as f:
         base = json.load(f)
     cfg = build_master_config(base, name=name, master_login=login,
-                              terminal_path=target_exe, ident=ident)
+                              terminal_path=target_exe, ident=ident, server=server)
     cfg_path = os.path.join(folder, f"config-{name}.json")
     tmp = cfg_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
