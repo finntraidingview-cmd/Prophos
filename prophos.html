@@ -4802,6 +4802,7 @@
 
             <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
               <b id="adm-mode-note">–</b><br>
+              <span id="adm-excluded-note"></span>
               Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
               Firmennamen werden zusammengefasst — z.&nbsp;B. „Apex Trader" → Apex, sonst wäre das Klumpenrisiko zu klein.
             </p>
@@ -5962,6 +5963,18 @@
         for(const r of (d.accounts || [])){ r.email = r.person; r.person = personName(r.user_id, r.person) }
         for(const p of (d.people || [])){ p.email = p.name; p.name = personName(p.user_id, p.email) }
         ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
+
+        // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
+        // Summen, ohne dass man es der Auswertung ansieht. Der Server nennt sie
+        // per E-Mail; der Profil-Umschalter kennt dazu den Namen.
+        const nameByMail = new Map()
+        for(const p of (typeof profList === 'function' ? profList() : [])){
+          if(p && p.email && p.name) nameByMail.set(String(p.email).toLowerCase(), p.name)
+        }
+        const ex = (d.excluded || []).map(m => nameByMail.get(String(m).toLowerCase()) || admShortName(m))
+        $('adm-excluded-note').textContent = ex.length
+          ? `Nicht enthalten: ${ex.join(', ')} — nutzt Prophos eigenständig. `
+          : ''
 
         const selP = $('adm-person'), curP = selP.value
         selP.innerHTML = '<option value="">Alle Personen</option>' +

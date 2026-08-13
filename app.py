@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-16.1"
+APP_BUILD = "2026-08-16.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2737,6 +2737,19 @@ _FIRM_RULES = [
 ]
 
 
+# Personen, die im Admin-Dashboard NICHT auftauchen sollen (16.08.2026).
+# Freunde, die Prophos eigenständig für sich nutzen: ihre Accounts und Kosten
+# gehören ihnen, nicht Finns Kapitalverteilung. Sie arbeiten normal weiter —
+# es geht rein um diese eine Auswertung.
+# Erweitern ohne Code-Änderung: Railway-Variable ADMIN_EXCLUDE mit
+# komma-getrennten E-Mails setzen (überschreibt die Vorgabe komplett).
+ADMIN_EXCLUDE_EMAILS = {
+    e.strip().lower()
+    for e in (os.environ.get("ADMIN_EXCLUDE") or "elominx@gmail.com").split(",")
+    if e.strip()
+}
+
+
 def _firm_norm(name):
     """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
     angezeigt (real vorhanden: 'Apex' vs 'Apex Trader', 'MyFoundedFutures')."""
@@ -2854,13 +2867,29 @@ def admin_build_overview():
 
     # Personen-Labels (E-Mail) über die Auth-Admin-API
     names = {}
+    names_ok = False
     try:
         r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
                          headers=_sb_headers(), timeout=12)
         for u in (r.json() or {}).get("users", []):
             names[str(u.get("id"))] = u.get("email") or str(u.get("id"))[:8]
+        names_ok = bool(names)
     except Exception:
         pass
+
+    # Ausgeblendete Personen auflösen. Die Zuordnung E-Mail → user_id hängt an
+    # der Auth-API; fällt die aus, KANN nicht ausgeblendet werden. Das darf nicht
+    # still passieren, sonst stünden fremde Zahlen unbemerkt in der Auswertung —
+    # deshalb wird in dem Fall die ganze Antwort verweigert.
+    excluded_ids, excluded_names = set(), []
+    if ADMIN_EXCLUDE_EMAILS:
+        if not names_ok:
+            raise RuntimeError("Auth-API nicht erreichbar — Ausblenden von "
+                               "Personen nicht möglich, Auswertung wäre falsch.")
+        for uid, mail in names.items():
+            if str(mail).strip().lower() in ADMIN_EXCLUDE_EMAILS:
+                excluded_ids.add(str(uid))
+                excluded_names.append(mail)
 
     def own(aid, a=None):
         """Eigene Zahlen EINES Accounts (ohne Kette), in EUR."""
@@ -2903,6 +2932,8 @@ def admin_build_overview():
         aid = str(a["id"])
         if (a.get("account_type") or "") == "live":
             continue                                   # Hedge-Broker, keine Prop-Firma
+        if str(a.get("user_id")) in excluded_ids:
+            continue                                   # nutzt Prophos eigenständig
         buy, hg, po = own(aid, a)
         cb, ch, cp, npred = chain(aid)
         uid = str(a.get("user_id"))
@@ -2932,7 +2963,8 @@ def admin_build_overview():
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
     return {"accounts": rows, "people": people_list, "firms": firm_list,
-            "fx_usd_eur": fx, "generated": _wt_now_iso()}
+            "fx_usd_eur": fx, "generated": _wt_now_iso(),
+            "excluded": sorted(excluded_names)}
 
 
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])
