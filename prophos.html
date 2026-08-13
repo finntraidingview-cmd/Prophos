@@ -2473,8 +2473,8 @@
         News <span class="sb-badge" id="sb-badge-news" hidden>0</span>
       </button>
       <button class="sb-link" data-view="kasse">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><circle cx="17" cy="14.5" r="1.4"/></svg>
-        Kasse
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
+        Admin
       </button>
 
       <div class="sb-divider"></div>
@@ -4612,8 +4612,8 @@
     <section class="view" data-view="kasse">
       <div class="view-head">
         <div>
-          <h1 class="view-title">Kasse</h1>
-          <p class="view-sub">Gemeinsame 50 : 50-Kasse — Finn &amp; Pascal</p>
+          <h1 class="view-title">Admin</h1>
+          <p class="view-sub">Kapitalverteilung über alle Personen &amp; gemeinsame Kasse</p>
         </div>
       </div>
 
@@ -4629,6 +4629,62 @@
       </div>
 
       <div id="kasse-content" hidden>
+        <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border)">
+          <button class="btn btn-ghost adm-tab active" data-admtab="overview" style="border:none;border-bottom:2px solid var(--violet);border-radius:0;padding:9px 14px">Übersicht</button>
+          <button class="btn btn-ghost adm-tab" data-admtab="kasse" style="border:none;border-bottom:2px solid transparent;border-radius:0;padding:9px 14px">Kasse</button>
+        </div>
+
+        <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
+        <div id="adm-pane-overview">
+          <div id="adm-msg" style="color:var(--sub);font-size:13px;padding:18px 2px">Lade Übersicht…</div>
+          <div id="adm-body" hidden>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">
+              <div class="card" style="padding:14px">
+                <div style="font-size:12px;color:var(--sub);font-weight:600">Aktiv geparkt</div>
+                <div id="adm-total" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:12px;color:var(--sub);font-weight:600">Aktive Accounts</div>
+                <div id="adm-accs" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+              </div>
+              <div class="card" style="padding:14px">
+                <div style="font-size:12px;color:var(--sub);font-weight:600">Größtes Klumpenrisiko</div>
+                <div id="adm-top" style="font-size:21px;font-weight:750;margin-top:3px">–</div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;margin:0 2px 10px;flex-wrap:wrap">
+              <span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub)">Pro Prop-Firma</span>
+              <select id="adm-person" style="margin-left:auto;padding:6px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--bg);color:var(--ink);font-size:12.5px">
+                <option value="">Alle Personen zusammen</option>
+              </select>
+              <button class="btn btn-ghost" id="adm-refresh" style="font-size:12px;padding:5px 10px">↻</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                  <tr style="text-align:left;color:var(--sub);font-size:11px;text-transform:uppercase;letter-spacing:.05em">
+                    <th style="padding:8px 10px;font-weight:600">Firma</th>
+                    <th style="padding:8px 10px;font-weight:600;text-align:right">Accs</th>
+                    <th style="padding:8px 10px;font-weight:600;text-align:right">Kaufpreise</th>
+                    <th style="padding:8px 10px;font-weight:600;text-align:right">Hedge</th>
+                    <th style="padding:8px 10px;font-weight:600;text-align:right">Payouts</th>
+                    <th style="padding:8px 10px;font-weight:600;text-align:right">Geparkt</th>
+                    <th style="padding:8px 10px;font-weight:600;width:110px">Anteil</th>
+                  </tr>
+                </thead>
+                <tbody id="adm-rows"></tbody>
+              </table>
+            </div>
+            <p style="font-size:11.5px;color:var(--sub);margin:12px 2px 0">
+              Nur <b>aktive</b> Accounts (archivierte/geblowte zählen nicht mit). Geparkt = Kaufpreis + Hedge-Verluste − Payouts.
+              Live-Hedge-Konten sind keine Prop-Firma und bleiben außen vor.
+            </p>
+          </div>
+        </div>
+
+        <!-- KASSE -->
+        <div id="adm-pane-kasse" hidden>
         <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
           Tabelle <code>kasse_entries</code> fehlt noch — bitte <code>sql/2026-08-11_kasse.sql</code> im Supabase SQL-Editor ausführen.
         </div>
@@ -4669,6 +4725,7 @@
         </div>
         <div id="kasse-list" style="display:flex;flex-direction:column;gap:7px"></div>
         <div id="kasse-empty" class="empty" style="display:none"><div class="empty-ico">💸</div><h3>Noch keine Einträge</h3><p>Trag oben die erste Investition ein.</p></div>
+        </div>
       </div>
     </section>
 
@@ -5678,7 +5735,7 @@
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
-    kasse:     ['Kasse', 'Gemeinsame 50 : 50-Kasse'],
+    kasse:     ['Admin', 'Kapitalverteilung & gemeinsame Kasse'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -5747,6 +5804,86 @@
       $('kasse-lock').style.display = 'none'
       $('kasse-content').hidden = false
       kasseLoad()
+      admLoad()
+    }
+
+    /* ── Admin-Übersicht: Kapitalverteilung über ALLE Personen ──
+     * Muss über Railway laufen: die Accounts der anderen Personen sind per RLS
+     * abgeschottet, ein eingeloggter User kann sie NICHT selbst lesen. Der
+     * Endpoint prüft serverseitig das Supabase-Token (nur eingeloggte Prophos-
+     * User), die Aggregation macht er mit dem Service-Key. */
+    let admData = null
+    const admEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:0, maximumFractionDigits:0 })
+
+    async function admLoad(){
+      const msg = $('adm-msg'), body = $('adm-body')
+      if(!msg) return
+      msg.style.display = ''; msg.textContent = 'Lade Übersicht…'; body.hidden = true
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache:'no-store' })
+        const d = await r.json()
+        if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+        admData = d
+        const sel = $('adm-person')
+        const cur = sel.value
+        sel.innerHTML = '<option value="">Alle Personen zusammen</option>' +
+          (d.people || []).map(p => `<option value="${escapeHtml(p.user_id)}">${escapeHtml(p.name)}</option>`).join('')
+        sel.value = cur
+        msg.style.display = 'none'; body.hidden = false
+        admRender()
+      }catch(e){
+        msg.style.display = ''
+        msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
+      }
+    }
+
+    function admRender(){
+      if(!admData) return
+      const uid = $('adm-person').value
+      let firms, total, accs
+      if(uid){
+        const p = (admData.people || []).find(x => String(x.user_id) === String(uid))
+        firms = Object.entries((p && p.firms) || {}).map(([firm, v]) => ({ firm, accounts: v.accounts, parked: v.parked }))
+        firms.sort((a,b) => b.parked - a.parked)
+        total = p ? p.parked : 0; accs = p ? p.accounts : 0
+      }else{
+        firms = (admData.firms || []).slice()
+        total = admData.total_parked; accs = admData.total_accounts
+      }
+      $('adm-total').textContent = admEur.format(total || 0)
+      $('adm-accs').textContent = accs || 0
+      const top = firms[0]
+      const topShare = (top && total) ? Math.round(100 * top.parked / total) : 0
+      $('adm-top').textContent = top ? `${top.firm} ${topShare}%` : '–'
+      $('adm-top').style.color = topShare >= 40 ? 'var(--danger)' : (topShare >= 25 ? '#e0891f' : 'var(--ink)')
+
+      const tb = $('adm-rows'); tb.innerHTML = ''
+      for(const f of firms){
+        const share = total ? (100 * f.parked / total) : 0
+        const col = share >= 40 ? 'var(--danger)' : (share >= 25 ? '#e0891f' : 'var(--violet)')
+        const tr = document.createElement('tr')
+        tr.style.borderTop = '1px solid var(--border)'
+        const cell = (v, extra) => `<td style="padding:9px 10px;text-align:right;${extra||''}">${v}</td>`
+        tr.innerHTML =
+          `<td style="padding:9px 10px;font-weight:600"></td>` +
+          cell(f.accounts) +
+          cell(f.buy != null ? admEur.format(f.buy) : '—', 'color:var(--sub)') +
+          cell(f.hedge != null ? admEur.format(f.hedge) : '—', 'color:var(--sub)') +
+          cell(f.payouts ? '−' + admEur.format(f.payouts) : '—', 'color:var(--sub)') +
+          cell(`<b>${admEur.format(f.parked)}</b>`) +
+          `<td style="padding:9px 10px">
+             <div style="display:flex;align-items:center;gap:7px">
+               <div style="flex:1;height:6px;border-radius:3px;background:var(--bg);overflow:hidden">
+                 <div style="height:100%;width:${Math.max(0,Math.min(100,share)).toFixed(1)}%;background:${col}"></div>
+               </div>
+               <span style="font-size:11.5px;color:var(--sub);min-width:34px;text-align:right">${share.toFixed(0)}%</span>
+             </div></td>`
+        tr.firstElementChild.textContent = f.firm
+        tb.appendChild(tr)
+      }
     }
     window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
 
@@ -5867,6 +6004,20 @@
       $('kasse-note').addEventListener('keydown', e => { if(e.key === 'Enter') kasseAdd() })
       $('kasse-refresh').addEventListener('click', kasseLoad)
       $('kasse-date').value = new Date().toISOString().slice(0,10)
+      // Admin-Tabs (Übersicht / Kasse)
+      document.querySelectorAll('.adm-tab').forEach(t => t.addEventListener('click', () => {
+        const name = t.dataset.admtab
+        document.querySelectorAll('.adm-tab').forEach(x => {
+          const on = x === t
+          x.classList.toggle('active', on)
+          x.style.borderBottomColor = on ? 'var(--violet)' : 'transparent'
+          x.style.color = on ? 'var(--violet)' : ''
+        })
+        $('adm-pane-overview').hidden = name !== 'overview'
+        $('adm-pane-kasse').hidden    = name !== 'kasse'
+      }))
+      $('adm-person')?.addEventListener('change', admRender)
+      $('adm-refresh')?.addEventListener('click', admLoad)
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })

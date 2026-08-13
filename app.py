@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-10.1"
+APP_BUILD = "2026-08-15.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2698,6 +2698,207 @@ def start_watcher():
     _watcher_thread_started = True
     _watcher_info["started"] = True
     threading.Thread(target=watcher_loop, daemon=True).start()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ADMIN-ÜBERSICHT — Kapitalverteilung über ALLE Personen (15.08.2026)
+#
+# Finns Frage: "Wie viele Accounts habe ich pro Prop-Firma und wie viel Geld
+# steckt da jeweils drin?" — personenübergreifend, um Klumpenrisiko zu sehen
+# (Beispiel Alpha Future: wenn eine Firma abraucht, wie viel ist weg?).
+#
+# Warum serverseitig: Prophos-Accounts sind per RLS pro Login abgeschottet.
+# Ein eingeloggter User kann die Zahlen der anderen Personen NICHT lesen. Die
+# Aggregation braucht also den Service-Key — genau wie der Wächter.
+#
+# Zugang: der Aufrufer muss ein gültiges Supabase-Access-Token vorlegen (also
+# ein eingeloggter Prophos-User sein). Der Code im Frontend ist nur das
+# UI-Schloss — prophos.html ist öffentlich lesbar, ein dort eingebettetes
+# Geheimnis wäre keins.
+#
+# "Geparkt" = Kaufpreis + Hedge-Verluste − Payouts, exakt wie
+# calcReingesteckdEur/calcAccountPayoutsEur im Frontend (Payout-Beträge sind
+# bereits EUR, Hedge-P&L wird per FX umgerechnet).
+# Gezählt werden NUR AKTIVE Accounts (Finns Entscheidung 15.08.): archivierte/
+# geblowte fliegen raus, weil bei einem Firmen-Exit nur verloren geht, was
+# noch läuft.
+# ════════════════════════════════════════════════════════════════════════════
+SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY")
+                     or "sb_publishable__LWDlDHJbNIr6X7kRwfqqg_tZcjwaDS").strip()
+
+_FIRM_RULES = [
+    ("apex", "Apex"), ("tradeify", "Tradeify"), ("fundednext", "FundedNext"),
+    ("founded next", "FundedNext"), ("foundednext", "FundedNext"),
+    ("fundingpips", "FundingPips"), ("funding pips", "FundingPips"),
+    ("topstep", "Topstep"), ("ftmo", "FTMO"), ("alpha", "Alpha Future"),
+    ("fusion", "Fusion Markets"), ("lucid", "Lucid Trading"),
+]
+
+
+def _firm_norm(name):
+    """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
+    angezeigt (real vorhanden: 'Apex' vs 'Apex Trader', 'MyFoundedFutures')."""
+    raw = (name or "").strip()
+    f = raw.lower()
+    if not f:
+        return "—"
+    if "5%er" in f or "5ers" in f or "5%ers" in f or "five percent" in f:
+        return "The5%ers"
+    if ("funded" in f or "founded" in f) and "futur" in f:
+        return "MyFundedFutures"
+    for needle, out in _FIRM_RULES:
+        if needle in f:
+            return out
+    return raw
+
+
+def _sb_all(table, params):
+    """PostgREST-Select ohne die 1000-Zeilen-Standardgrenze."""
+    p = dict(params); p.setdefault("limit", "50000")
+    return sb_select(table, p)
+
+
+def admin_build_overview():
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name"})
+    arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
+    fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
+    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
+                                        "status": "eq.completed"})
+    txs       = _sb_all("transactions", {"select": "account_id,amount", "kind": "eq.payout"})
+
+    # Archiv-Status liegt in user_settings (aus dem localStorage gesynct) und ist
+    # zwischen Profilen historisch vermischt — unkritisch, weil Account-IDs global
+    # eindeutig sind: ein fremder Eintrag matcht schlicht keinen eigenen Account.
+    archived = set()
+    for r in arch_rows:
+        v = r.get("value")
+        if isinstance(v, str):
+            try: v = json.loads(v)
+            except Exception: v = None
+        if isinstance(v, dict):
+            for acc_id, info in v.items():
+                if isinstance(info, dict) and info.get("archived"):
+                    archived.add(str(acc_id))
+                elif info:
+                    archived.add(str(acc_id))
+
+    fx = 0.85
+    for r in fx_rows:
+        try:
+            val = r.get("value")
+            if isinstance(val, str): val = json.loads(val)
+            f = float(val if not isinstance(val, dict) else val.get("rate"))
+            if 0.5 < f < 1.5: fx = f; break
+        except Exception:
+            pass
+
+    by_id = {str(a["id"]): a for a in accounts}
+    live_ids = {str(a["id"]) for a in accounts if (a.get("account_type") or "") == "live"}
+
+    # Hedge-Kosten je Master-Account: nur abgeschlossene Trades auf einen LIVE-Slave.
+    # Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −. USD→EUR wie im Frontend.
+    hedge = {}
+    for p in plans:
+        if p.get("slave_pl") is None:
+            continue
+        if str(p.get("slave_account_id")) not in live_ids:
+            continue
+        m = str(p.get("master_account_id"))
+        sl = by_id.get(str(p.get("slave_account_id"))) or {}
+        try: pl = float(p["slave_pl"])
+        except (TypeError, ValueError): continue
+        cur = _firm_norm(sl.get("firm"))
+        pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
+        hedge[m] = hedge.get(m, 0.0) + (-pl_eur)
+
+    payouts = {}
+    for t in txs:
+        a = str(t.get("account_id") or "")
+        if not a: continue
+        try: payouts[a] = payouts.get(a, 0.0) + float(t.get("amount") or 0)
+        except (TypeError, ValueError): pass
+
+    # Personen-Labels (E-Mail) über die Auth-Admin-API
+    names = {}
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+                         headers=_sb_headers(), timeout=12)
+        for u in (r.json() or {}).get("users", []):
+            names[str(u.get("id"))] = u.get("email") or str(u.get("id"))[:8]
+    except Exception:
+        pass
+
+    firms, people, rows = {}, {}, []
+    for a in accounts:
+        aid = str(a["id"])
+        if aid in archived:                        continue   # nur aktive
+        if (a.get("account_type") or "") == "live": continue   # Hedge-Broker, keine Prop-Firma
+        firm = _firm_norm(a.get("firm"))
+        uid  = str(a.get("user_id"))
+        try: buy = float(a.get("purchase_cost") or 0)
+        except (TypeError, ValueError): buy = 0.0
+        hg  = hedge.get(aid, 0.0)
+        po  = payouts.get(aid, 0.0)
+        parked = buy + hg - po
+
+        f = firms.setdefault(firm, {"firm": firm, "accounts": 0, "buy": 0.0,
+                                    "hedge": 0.0, "payouts": 0.0, "parked": 0.0, "people": {}})
+        f["accounts"] += 1; f["buy"] += buy; f["hedge"] += hg
+        f["payouts"] += po; f["parked"] += parked
+        pf = f["people"].setdefault(uid, {"accounts": 0, "parked": 0.0})
+        pf["accounts"] += 1; pf["parked"] += parked
+
+        p = people.setdefault(uid, {"user_id": uid, "name": names.get(uid, uid[:8]),
+                                    "accounts": 0, "parked": 0.0, "firms": {}})
+        p["accounts"] += 1; p["parked"] += parked
+        pfm = p["firms"].setdefault(firm, {"accounts": 0, "parked": 0.0})
+        pfm["accounts"] += 1; pfm["parked"] += parked
+        rows.append({"account_id": aid, "user_id": uid, "firm": firm,
+                     "name": a.get("name"), "parked": round(parked, 2)})
+
+    def r2(d, keys):
+        for k in keys: d[k] = round(d[k], 2)
+        return d
+
+    firm_list = sorted(firms.values(), key=lambda x: -x["parked"])
+    for f in firm_list:
+        f["people"] = {names.get(u, u[:8]): r2(v, ["parked"]) for u, v in f["people"].items()}
+        r2(f, ["buy", "hedge", "payouts", "parked"])
+    people_list = sorted(people.values(), key=lambda x: -x["parked"])
+    for p in people_list:
+        p["firms"] = {k: r2(v, ["parked"]) for k, v in p["firms"].items()}
+        r2(p, ["parked"])
+
+    total = round(sum(f["parked"] for f in firm_list), 2)
+    for f in firm_list:
+        f["share"] = round(100.0 * f["parked"] / total, 1) if total else 0.0
+    return {"firms": firm_list, "people": people_list,
+            "total_parked": total,
+            "total_accounts": sum(f["accounts"] for f in firm_list),
+            "fx_usd_eur": fx, "generated": _wt_now_iso()}
+
+
+@app.route("/admin/overview", methods=["GET", "OPTIONS"])
+def admin_overview():
+    if request.method == "OPTIONS":
+        return "", 200
+    if not SUPABASE_SERVICE_KEY:
+        return jsonify({"error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503
+    token = (request.headers.get("sb-token") or "").strip()
+    if not token:
+        return jsonify({"error": "Nicht angemeldet"}), 401
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        if r.status_code != 200 or not (r.json() or {}).get("id"):
+            return jsonify({"error": "Nicht angemeldet"}), 401
+    except Exception:
+        return jsonify({"error": "Anmeldung nicht prüfbar"}), 502
+    try:
+        return jsonify(admin_build_overview())
+    except Exception as e:
+        print(f"[admin] ⚠️ overview: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
