@@ -212,33 +212,59 @@ def servers_dat_contains(path, server):
     return s.encode("utf-16-le") in blob or s.encode("utf-8") in blob
 
 
-def servers_dat_source(folder, server, template_data, root=None):
-    """Welche servers.dat bekommt der Klon? Reihenfolge (The5ers-Fall):
-    1. ein bestehendes Master-Terminal, das auf DEMSELBEN Server laeuft —
-       dessen Liste kennt den Namen garantiert;
-    2. sonst die Vorlage (reicht fuer denselben Broker wie die Vorlage).
-    Rueckgabe: Pfad oder None."""
-    want = (server or "").strip().lower()
+def servers_dat_master_source(folder, server, root=None):
+    """servers.dat eines BESTEHENDEN Master-Terminals mit DEMSELBEN Server.
+    Diese Quelle ist Gold: das Terminal verbindet sich nachweislich mit genau
+    diesem Server, seine Liste kennt ihn also sicher — egal ob wir die
+    (verschluesselte) Datei lesen koennen oder nicht. Vergleich tolerant
+    (ohne Leerzeichen/Gross-Klein), wegen der Tippfehler-Mails."""
+    want = _server_norm(server)
     root = root or terminals_root()
-    if want:
-        for fn in sorted(os.listdir(folder)):
-            if not fn.lower().endswith(".json") or not fn.lower().startswith("config"):
-                continue
-            try:
-                with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-            except (OSError, ValueError):
-                continue
-            if str(cfg.get("master_server", "")).strip().lower() != want:
-                continue
-            tp = cfg.get("master_terminal_path")
-            if not tp:
-                continue
-            dd = data_dir_for(os.path.dirname(tp), root)
-            if dd and os.path.exists(os.path.join(dd, "config", "servers.dat")):
-                return os.path.join(dd, "config", "servers.dat")
+    if not want:
+        return None
+    for fn in sorted(os.listdir(folder)):
+        if not fn.lower().endswith(".json") or not fn.lower().startswith("config"):
+            continue
+        try:
+            with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if _server_norm(cfg.get("master_server", "")) != want:
+            continue
+        tp = cfg.get("master_terminal_path")
+        if not tp:
+            continue
+        dd = data_dir_for(os.path.dirname(tp), root)
+        if dd and os.path.exists(os.path.join(dd, "config", "servers.dat")):
+            return os.path.join(dd, "config", "servers.dat")
+    return None
+
+
+def servers_dat_source(folder, server, template_data, root=None):
+    """Welche servers.dat bekommt der Klon? 1. bestehender Master mit demselben
+    Server, 2. sonst die Vorlage. Rueckgabe: Pfad oder None."""
+    p = servers_dat_master_source(folder, server, root)
+    if p:
+        return p
     p = os.path.join(template_data, "config", "servers.dat")
     return p if os.path.exists(p) else None
+
+
+def server_name_variants(server):
+    """Schreibweisen-Varianten fuer den Journal-Probelauf: Zugangsdaten-Mails
+    schreiben Servernamen mit angehaengter Ziffer gern falsch
+    ('FundedNext-Server2' vs. echt 'FundedNext-Server 2'). Da servers.dat in
+    neueren MT5-Builds nicht zuverlaessig lesbar ist (verschluesselt), wird
+    nicht geraten, sondern die Variante LIVE gegen das Journal probiert."""
+    s = (server or "").strip()
+    out = []
+    m = re.match(r"^(.*[A-Za-z])[ ]?(\d+)$", s)
+    if m:
+        for cand in (f"{m.group(1)} {m.group(2)}", f"{m.group(1)}{m.group(2)}"):
+            if cand != s and cand not in out:
+                out.append(cand)
+    return out
 
 
 def plan_checks(folder, name, login, server, template_exe):
@@ -475,6 +501,9 @@ def run_provision(*, name, login, password, server, template_exe,
     # Rest eines Fehlversuchs? Ein laufendes Terminal derselben Installation
     # wuerde jeden weiteren Start schlucken (Fenster kommt nur nach vorn).
     _kill_terminal_at(target_install)
+    # Merken, ob der Datenordner schon existierte (Wiederholungslauf) — nur
+    # dann darf eine unlesbar-hand-gelernte servers.dat geschont werden.
+    data_existed_before = data_dir_for(target_install, root) is not None
     proc = subprocess.Popen([target_exe], cwd=target_install)
     new_data = None
     t0 = time.time()
@@ -495,33 +524,50 @@ def run_provision(*, name, login, password, server, template_exe,
     # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
     step("ea")
     target_servers = os.path.join(new_data, "config", "servers.dat")
-    # Nicht raten, AUFLOESEN (15.08.2026): entscheidend ist, ob eine Liste den
-    # Servernamen kennt — und in WELCHER Schreibweise. Zugangsdaten-Mails
-    # schreiben Namen gern falsch ('FundedNext-Server2' statt
-    # 'FundedNext-Server 2'); der ini-Login braucht die exakte Form. Also:
-    # Namen aus der Liste aufloesen (ohne Leerzeichen/Gross-Klein verglichen)
-    # und die EXAKTE Schreibweise fuer Login-ini + Config uebernehmen. Damit
-    # heilen sich auch Terminals aus Fehlversuchen und Tippfehler-Mails selbst.
-    resolved = resolve_server_name(target_servers, server) if os.path.exists(target_servers) else None
-    if resolved:
-        servers_note = f"servers.dat kennt {resolved} schon (behalten)"
-    else:
+    # WICHTIG (Regression-Lehre 15.08.2026): servers.dat ist in neueren
+    # MT5-Builds NICHT zuverlaessig lesbar (verschluesselt) — das Kopieren darf
+    # deshalb NIE davon abhaengen, ob wir den Namen darin wiederfinden. Regeln:
+    # 1. Quelle von einem BESTEHENDEN Master desselben Servers → IMMER kopieren
+    #    (das Terminal verbindet nachweislich; besser geht nicht — auch im
+    #    Wiederholungslauf, dort ersetzt es hoechstens Gleichwertiges).
+    # 2. Sonst, frischer Datenordner → Vorlagen-Liste kopieren (die Standard-
+    #    Liste des Erststarts kennt keine Prop-Broker).
+    # 3. Sonst (Wiederholungslauf ohne Master-Quelle) → behalten: hier kann
+    #    eine hand-gelernte Liste liegen, die wir nicht lesen koennen.
+    # Die Schreibweisen-Korrektur passiert NICHT hier (unlesbare Datei),
+    # sondern in Schritt 5 live gegen das Journal (server_name_variants).
+    src_master = servers_dat_master_source(folder, server, root)
+    if src_master:
+        os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
+        shutil.copy2(src_master, target_servers)
+        servers_note = f"servers.dat von bestehendem {server}-Terminal kopiert"
+    elif not data_existed_before:
         src = servers_dat_source(folder, server, tpl_data, root)
-        resolved = resolve_server_name(src, server) if src else None
-        if resolved:
+        if src:
             os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
             shutil.copy2(src, target_servers)
-            servers_note = f"servers.dat mit {resolved} kopiert"
+            servers_note = "servers.dat der Vorlage kopiert"
         elif os.path.exists(target_servers):
-            servers_note = (f"kein Terminal auf diesem PC kennt {server} — "
-                            f"einmalig im Terminal Broker suchen (Konto eroeffnen)")
+            servers_note = (f"keine Quelle fuer {server} — Standard-Liste bleibt "
+                            f"(ggf. einmalig im Terminal Broker suchen)")
         else:
             raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
                                  "starten und wieder schliessen.")
-    if resolved and resolved != server:
-        servers_note += f" · Servername korrigiert: '{server}' -> '{resolved}'"
-    if resolved:
-        server = resolved
+    elif os.path.exists(target_servers):
+        servers_note = "servers.dat behalten (Wiederholungslauf — evtl. hand-gelernt)"
+    else:
+        src = servers_dat_source(folder, server, tpl_data, root)
+        if not src:
+            raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
+                                 "starten und wieder schliessen.")
+        os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
+        shutil.copy2(src, target_servers)
+        servers_note = "servers.dat der Vorlage kopiert"
+    # Bonus: ist die Liste doch lesbar, exakte Schreibweise direkt uebernehmen.
+    _r = resolve_server_name(target_servers, server)
+    if _r and _r != server:
+        servers_note += f" · Servername korrigiert: '{server}' -> '{_r}'"
+        server = _r
     experts = os.path.join(new_data, "MQL5", "Experts")
     presets = os.path.join(new_data, "MQL5", "Presets")
     os.makedirs(experts, exist_ok=True)
@@ -576,6 +622,7 @@ def run_provision(*, name, login, password, server, template_exe,
         verdict = None
         t0 = time.time()
         hinted = False
+        variant_tried = False
         while time.time() - t0 < 240:
             verdict = _journal_says(new_data, ["authorization failed", "invalid account",
                                                "authorized"], jbase)
@@ -589,6 +636,27 @@ def run_provision(*, name, login, password, server, template_exe,
                        "→ 'Handelskonto eroeffnen' → Broker suchen (z.B. FundedNext) "
                        "→ dann Login. Nur beim ALLERERSTEN Konto eines Brokers noetig "
                        "— danach lernt das System den Broker dauerhaft.")
+            # Namens-Varianten-Probelauf (15.08.2026, FundedNext-Fall): kommt
+            # nach 60 s GAR KEINE Auth-Zeile, hat MT5 den Servernamen sehr
+            # wahrscheinlich nicht aufgeloest (Tippfehler-Mail: 'X-Server2'
+            # statt 'X-Server 2'). Da servers.dat nicht lesbar ist, wird die
+            # Variante LIVE probiert: Terminal neu mit korrigiertem Namen.
+            if (verdict is None and not variant_tried and time.time() - t0 > 60
+                    and server_name_variants(server)):
+                variant_tried = True  # genau EIN Versuch — sonst Flip-Flop der Schreibweisen
+                cand = server_name_variants(server)[0]
+                report("neustart", "running",
+                       f"Servername '{server}' wird nicht aufgeloest — probiere "
+                       f"Schreibweise '{cand}' …")
+                _kill_terminal_at(target_install)
+                server = cand
+                jbase = journal_baseline(new_data)
+                with open(start_ini, "w", encoding=INI_ENCODING) as f:
+                    f.write(build_login_ini(login, password, server) + "\n"
+                            + build_startup_ini(preset=preset_name))
+                subprocess.Popen([target_exe, f"/config:{start_ini}"], cwd=target_install)
+                t0 = time.time()  # Wartefenster fuer die Variante neu starten
+                hinted = False
             time.sleep(3)
         if verdict != "authorized":
             raise ProvisionError(
