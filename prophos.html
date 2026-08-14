@@ -3097,7 +3097,6 @@
                 <tr>
                   <th style="padding-left:20px">Account</th>
                   <th>Broker</th>
-                  <th>Modus</th>
                   <th>Status</th>
                   <th>Multi</th>
                   <th>Verknüpft mit</th>
@@ -11990,7 +11989,11 @@
         // dupCreateAccountInDuplikum sichert selbst ab: nur MT4/MT5, nur vollständige Creds,
         // nur wenn Duplikum verbunden — sonst stiller Skip. Rolle: Live = Slave, sonst Master.
         let dupCreated = false
-        if(newAcc.creds?.login){
+        // Plattform 'mt5' geht seit 15.08.2026 NUR noch in den eigenen Copier
+        // (Finns Ansage: "in Zukunft nur noch zu MT5") — Duplikum-Anlegen
+        // bleibt fuer alles andere unveraendert.
+        const _isMt5Copier = (newAcc.creds?.platform || '').toLowerCase() === 'mt5'
+        if(newAcc.creds?.login && !_isMt5Copier){
           setModalMsg('🔗 Lege Account in Duplikum an…', 'muted')
           const roleType = (newAcc.type === 'live') ? '1' : '0'
           const cr = await dupCreateAccountInDuplikum(newAcc, roleType)
@@ -12262,6 +12265,7 @@
       String((x.status || {}).master_login || x.master_expected || '') === login)
     if(exists){
       if(typeof mt5LinkSet === 'function') await mt5LinkSet(login, String(acc.id))
+      if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink()
       return { ok: true, existing: true }
     }
     const display = String(acc.name || '').replace(/[^A-Za-z0-9 ._\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)
@@ -21837,7 +21841,6 @@
         ${warn}${blocked}
       </td>
       <td>${esc(broker)}</td>
-      <td>${pill(d.mode)}</td>
       <td>
         <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span>
         ${(pos || hed) ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">${pos} Position(en) · ${hed} Hedge(s)</div>` : ''}
@@ -21921,6 +21924,27 @@
         }catch(e){ console.warn('[mtc] Preset-Mapping-Push übersprungen:', e && e.message) }
       }
     }
+    // Selbstheilender Link-Abgleich (15.08.2026, Vorbild dupAutoLink): Instanz-
+    // Login = External-ID/cred_login eines Accounts → automatisch verlinken.
+    // Idempotent und billig — damit kann kein verpasstes Fertig-Signal mehr
+    // eine Verknüpfung verschlucken (Finns "Fusion test"-Fall).
+    try{
+      if(typeof mt5GetLinks === 'function' && typeof mt5LinkSet === 'function'){
+        const _links = mt5GetLinks()
+        const _accs = (typeof accounts !== 'undefined' && accounts) || []
+        for(const inst of (d.instances || [])){
+          const lg = String((inst.status || {}).master_login || inst.master_expected || '')
+          if(!lg || _links[lg]) continue
+          const m = _accs.find(a => !a.archived &&
+            (String(a.externalId || '') === lg || String(a.creds?.login || '') === lg))
+          if(m){
+            mt5LinkSet(lg, String(m.id))
+              .then(() => { if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink() })
+              .catch(err => console.warn('[mt5links] Auto-Abgleich:', err && err.message))
+          }
+        }
+      }
+    }catch(_){}
     // fetchedAt (15.08.2026): Frischebeleg pro Instanz — die MT5-ROUTE-Sektion
     // (Balances/Live-P&L) darf nur bei fetchedAt ≤ 15s "Live" behaupten
     // ('alt ist nicht aktuell'). Erkennungsquelle ist mtcState trotzdem NIE —

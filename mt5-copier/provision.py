@@ -150,7 +150,12 @@ def build_master_config(base, *, name, master_login, terminal_path, ident, serve
     scharf loslaufen. master_server dient kuenftigen Provisionierungen als
     Quelle fuer die richtige Server-Liste (The5ers-Fall 14.08.2026)."""
     cfg = {k: v for k, v in base.items() if not k.startswith("_")}
-    cfg["mode"] = "dryrun"
+    # Modus erbt von der Vorlage, GEDECKELT auf demo (15.08.2026, Finns
+    # "ich brauche keinen Modus"): mit Demo-Hedge kopiert 'demo' sofort echt
+    # sichtbar — aber 'live' entsteht NIE durch Provisionierung, nur durch
+    # bewussten Wechsel im Details-Editor (Warn-Dialog).
+    _bm = str(base.get("mode", "dryrun")).lower()
+    cfg["mode"] = _bm if _bm in ("dryrun", "demo") else "demo"
     cfg["master_expected_login"] = int(master_login)
     cfg["master_terminal_path"] = terminal_path
     cfg["master_server"] = server

@@ -318,14 +318,19 @@ def main():
             lambda: ident == {"magic": 770003, "prefix": "P3",
                               "snapshot": "prophos_master_ftmo1.csv"}))
 
-        # 27) Neue Config erbt Hedge-Felder, Master-Felder neu, mode hart dryrun
+        # 27) Neue Config erbt Hedge-Felder, Master-Felder neu; mode erbt von
+        # der Vorlage, GEDECKELT auf demo (15.08.2026 — live entsteht nie durch
+        # Provisionierung, nur bewusst im Details-Editor)
         cfg = provision.build_master_config(base, name="ftmo1", master_login=555001,
                                             terminal_path="C:\\MT5-ftmo1\\terminal64.exe",
                                             ident=ident)
         results.append(prov(
-            "PROVISION: Config erbt Hedge-Ziel, mode dryrun, keine _kommentare",
+            "PROVISION: Config erbt Hedge-Ziel, mode geerbt (max demo), keine _kommentare",
             lambda: cfg["hedge_expected_login"] == 437804
-                    and cfg["mode"] == "dryrun"
+                    and cfg["mode"] == "demo"
+                    and provision.build_master_config(dict(base, mode="live"), name="x1",
+                        master_login=1, terminal_path="C:\\x\\terminal64.exe",
+                        ident=ident)["mode"] == "demo"
                     and cfg["master_expected_login"] == 555001
                     and cfg["magic"] == 770003
                     and "_kommentar" not in cfg))
