@@ -2351,6 +2351,12 @@ def wt_check_user(uid, creds, memo):
         "user_id": f"eq.{uid}",
         "status": "in.(planned,open,review)",
     })
+    # MT5-Route (15.08.2026): Pläne mit route='mt5' laufen über den lokalen MT5-Copier,
+    # nicht über Duplikum — die gehören der Browser-Zustandsmaschine (mt5PlanPoll in
+    # prophos.html). Filter DIREKT nach dem Select, damit weder die Erkennung unten
+    # noch die review-P&L-Nachversuche (wt_fetch_pnl) solche Pläne anfassen — der
+    # Nachversuchs-Loop würde sonst MT5-Pläne mit fremden Duplikum-Closes bestempeln.
+    plans = [p for p in plans if (p.get("route") or "") != "mt5"]
     active = [p for p in plans if p.get("status") in ("planned", "open")]
     review_missing = [p for p in plans if p.get("status") == "review"
                       and (p.get("master_pl") is None or p.get("slave_pl") is None)]
@@ -3087,6 +3093,85 @@ def start_dup_keepalive():
 
 start_dup_keepalive()
 
+# ── Lokaler Selbst-Update-Watcher (15.08.2026, Etappe 3 MT5-Route) ──
+# Anlass: start-prophos.bat hält app.py auf den PCs jetzt — wie copier.py und
+# panel.py — in einer Download-Schleife. Damit ein gepushtes Update auch WIRKT,
+# muss der laufende Prozess von selbst enden; sonst läuft der alte Stand, bis
+# jemand das Fenster schließt. NUR im Lokal-Modus aktiv (PROPHOS_FRONTEND
+# existiert nur auf den PCs) — Railway darf sich NIE selbst beenden, dort
+# deployt Git. Als Trigger dient mt5-copier/VERSION (derselbe zentrale Bump,
+# der auch Copier und Panel neu startet).
+_LOCAL_UPDATE_URL = ("https://raw.githubusercontent.com/finntraidingview-cmd/"
+                     "Prophos/main/mt5-copier/VERSION")
+
+def _local_fetch_version():
+    try:
+        r = requests.get(_LOCAL_UPDATE_URL, timeout=10)
+        if r.ok:
+            v = r.text.strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return None
+
+def _local_version_watcher():
+    # Boot-Baseline EINMAL holen. Schlägt das fehl (kein Netz beim Start),
+    # bleibt der Watcher komplett inaktiv — ein Vergleich gegen None würde
+    # sonst beim ersten Netz-Flackern Restart-Flattern erzeugen
+    # (Richter-Fix 15.08.2026). Die .bat lädt beim nächsten Start ohnehin frisch.
+    baseline = _local_fetch_version()
+    if baseline is None:
+        print("[update] ℹ️ Baseline-VERSION nicht ladbar — Selbst-Update-Watcher "
+              "inaktiv (nächster .bat-Durchlauf holt trotzdem frische Dateien).")
+        return
+    waiting_logged = False
+    while True:
+        time.sleep(60)
+        rv = _local_fetch_version()
+        if rv is None or rv == baseline:
+            continue
+        # Update da. Exit NUR, wenn keine Mirror-Session scharf ist — ein
+        # os._exit mitten im Spiegeln hieße: offene Position ohne Hedge-Pflege
+        # (gleiches Muster wie copier.py: warten, bis alle Master flach sind).
+        armed = [pid for pid, s in list(mirror_sessions.items()) if s.get("active")]
+        if armed:
+            if not waiting_logged:
+                waiting_logged = True
+                print(f"[update] ↻ {baseline} → {rv} verfügbar — Update wartet, "
+                      f"bis kein Mirror mehr scharf ist ({', '.join(str(p) for p in armed)}).")
+            continue
+        print(f"[update] ↻ {baseline} → {rv} — kein Mirror scharf, beende Prozess "
+              f"(start-prophos.bat lädt die neuen Dateien und startet neu).")
+        os._exit(0)
+
+def _local_port_taken(port):
+    # Doppelstart-Schutz (15.08.2026, nur Lokal-Modus): lauscht schon jemand auf
+    # dem Port, sauber melden statt Flask sterben zu lassen — die 10-s-Schleife
+    # der .bat würde sonst endlos gegen den belegten Port anrennen, und auf den
+    # PCs mit ALTEM Setup (Aufgabenplanungs-Task start-local-backend) gewinnt
+    # sonst still das nie updatende alte Backend.
+    import socket
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=1)
+        s.close()
+        return True
+    except OSError:
+        return False
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    if os.environ.get("PROPHOS_FRONTEND"):
+        # Lokal-Modus (nur auf den PCs gesetzt): Doppelstart-Schutz + Update-Watcher.
+        if _local_port_taken(port):
+            import sys
+            print("=" * 70)
+            print(f"⛔ Port {port} belegt — läuft schon ein Prophos-Backend?")
+            print("   Wenn das alte Setup (C:\\prophos) noch aktiv ist: die ALTE")
+            print("   Aufgabenplanungs-Task (start-local-backend) entfernen, z.B.:")
+            print("   schtasks /delete /tn \"<Name der alten Task>\" /f")
+            print("   (Aufgabenplanung öffnen → Task suchen → löschen.)")
+            print("=" * 70)
+            sys.exit(1)  # sauber raus — die .bat wartet 10 s und probiert erneut
+        threading.Thread(target=_local_version_watcher, daemon=True).start()
     app.run(host="0.0.0.0", port=port)

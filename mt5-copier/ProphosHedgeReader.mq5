@@ -102,15 +102,23 @@ void WriteSnapshot()
 
    int total = PositionsTotal();
 
-   // Kopfzeile: Format-Kennung, Sequenz, Zeit, Konto, Server, Margin-Modus, Anzahl
+   // Kopfzeile: Format-Kennung, Sequenz, Zeit, Konto, Server, Margin-Modus, Anzahl,
+   // Balance, Equity, Waehrung.
+   // v3 (15.08.2026, Etappe 3): Balance/Equity/Waehrung hinten ANGEHAENGT, damit
+   // Prophos den Master-P&L ueber das Balance-Delta beweisen kann. Die Kennung
+   // bleibt PROPHOS1 — der Copier toleriert 7, 9 und 10 Felder, alte EAs im Feld
+   // duerfen nicht brechen.
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
-   FileWrite(h, StringFormat("PROPHOS1;%I64d;%I64d;%I64d;%s;%I64d;%d",
+   FileWrite(h, StringFormat("PROPHOS1;%I64d;%I64d;%I64d;%s;%I64d;%d;%.2f;%.2f;%s",
                              g_seq,
                              (long)TimeCurrent(),
                              AccountInfoInteger(ACCOUNT_LOGIN),
                              AccountInfoString(ACCOUNT_SERVER),
                              marginMode,
-                             total));
+                             total,
+                             AccountInfoDouble(ACCOUNT_BALANCE),
+                             AccountInfoDouble(ACCOUNT_EQUITY),
+                             AccountInfoString(ACCOUNT_CURRENCY)));
 
    // Eine Zeile pro Position. contract_size mitschreiben, weil der Executor
    // die Kontraktgroesse des MASTER-Brokers nicht selbst abfragen kann

@@ -355,7 +355,8 @@ def _taskkill(pid, grace_s=15):
 # ------------------------------------------------------------------- der Job
 
 def run_provision(*, name, login, password, server, template_exe,
-                  folder=HERE, report=lambda step, state, note=None: None):
+                  folder=HERE, report=lambda step, state, note=None: None,
+                  owner=None):
     """Fuehrt die komplette Provisionierung aus. `report(step, state, note)`
     meldet Fortschritt ans Panel ('running' | 'done' | 'error').
 
@@ -561,6 +562,12 @@ def run_provision(*, name, login, password, server, template_exe,
         base = json.load(f)
     cfg = build_master_config(base, name=name, master_login=login,
                               terminal_path=target_exe, ident=ident, server=server)
+    # Besitzer-Stempel (15.08.2026): kommt die Provisionierung aus Prophos, traegt
+    # die Config die User-ID der eingeloggten Person — das Frontend blendet fremde
+    # Instanzen aus (jede Person sieht nur ihre eigenen Accounts, wie bei Duplikum).
+    # Identitaetsfeld: steht bewusst NICHT in der Panel-Schreib-Whitelist.
+    if owner:
+        cfg["prophos_owner"] = owner
     cfg_path = os.path.join(folder, f"config-{name}.json")
     tmp = cfg_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

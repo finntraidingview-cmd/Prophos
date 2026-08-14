@@ -48,6 +48,33 @@ TEMPLATES = ("config.example.json", "config.fusion-test.json")
 SYMBOL_RE = re.compile(r"[A-Za-z0-9._#!&\-]{1,32}")
 
 
+def _pid_alive(pid):
+    """Lebt der Prozess? Fuer den Loesch-Riegel (b2): stale Status heisst nicht
+    toter Copier (Terminal-Ausfall schreibt gar nichts mehr). ACHTUNG Windows:
+    os.kill(pid, 0) wuerde dort den Prozess BEENDEN (TerminateProcess) — deshalb
+    tasklist. Im Zweifel (Fehler) gilt der Prozess als lebend ('unbekannt != leer')."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            return str(pid) in (out or "")
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+
 def instances():
     """Alle Master-Configs -> [{name, config_file, status_file}]. Schlüssel für alle
     API-Aufrufe ist config_file — der abgeleitete Name ist reine Anzeige (Audit-Fund:
@@ -100,6 +127,9 @@ def snapshot():
             "hedge_expected": cfg.get("hedge_expected_login"),
             "master_server": cfg.get("master_server"),
             "has_terminal": bool(cfg.get("master_terminal_path")),
+            # Besitzer-Stempel (Paket E, 15.08.2026): Prophos blendet Instanzen
+            # fremder User aus; ohne Stempel (Bestand) sieht sie jeder auf dem PC.
+            "owner": cfg.get("prophos_owner"),
             "status": st,
             "age": age,
             # "lebt" = Statusdatei ist frisch. Der Copier schreibt alle ~3s.
@@ -282,7 +312,7 @@ PROV_LOCK = threading.Lock()
 PROV_JOB = None  # {"name", "steps": {key: {"state", "note"}}, "error", "done"}
 
 
-def prov_start(name, login, password, server):
+def prov_start(name, login, password, server, owner=None):
     global PROV_JOB
     with PROV_LOCK:
         if PROV_JOB and not PROV_JOB.get("done"):
@@ -304,7 +334,7 @@ def prov_start(name, login, password, server):
         try:
             provision.run_provision(name=name, login=login, password=password,
                                     server=server, template_exe=template,
-                                    folder=HERE, report=report)
+                                    folder=HERE, report=report, owner=owner)
         except provision.ProvisionError as e:
             job["error"] = str(e)
             for st in job["steps"].values():
@@ -1041,13 +1071,19 @@ class Handler(BaseHTTPRequestHandler):
             login = str(body.get("login") or "").strip()
             password = str(body.get("password") or "")
             server = str(body.get("server") or "").strip()
+            # Besitzer-Stempel (Paket E, 15.08.2026): optionale Prophos-User-ID.
+            # Nur UUID-artige Zeichen, sonst verwerfen — landet als prophos_owner
+            # in der Config (Identitaetsfeld, nicht in WRITABLE).
+            owner = str(body.get("owner") or "").strip()[:64]
+            if owner and not re.fullmatch(r"[A-Za-z0-9-]{1,64}", owner):
+                owner = None
             if not (name and login and password and server):
                 return self._send(400, json.dumps({"ok": False, "msg": "Name, Login, Passwort und Server sind Pflicht."}))
             probs = provision.plan_checks(HERE, name, login, server,
                                           (read_json(os.path.join(HERE, "config.json"), {}) or {}).get("master_terminal_path"))
             if probs:
                 return self._send(400, json.dumps({"ok": False, "msg": " · ".join(probs)}, ensure_ascii=False))
-            ok, msg = prov_start(name, login, password, server)
+            ok, msg = prov_start(name, login, password, server, owner=owner)
             print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
@@ -1069,6 +1105,94 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = start_terminal(inst["config_file"])
             print(f"[panel] {fname}: Terminal-Start → {msg}", flush=True)
             return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
+
+        if u.path == "/api/delete":
+            # Config loeschen (15.08.2026, Etappe 3). Geloescht werden AUSSCHLIESSLICH
+            # die aus dem instances()-Lookup abgeleiteten Pfade — nie der rohe
+            # Query-Wert. Vier Verweigerungsgruende (409), weil eine geloeschte
+            # Config den GANZEN Copier-Prozess neu startet und der Neustart keine
+            # offenen Positionen blind stellen darf:
+            data = _instances_snapshot()
+            target = next((d for d in data if d["file"] == inst["config_file"]), None)
+            st = (target or {}).get("status") or {}
+            fresh = bool((target or {}).get("alive"))
+            # (a) Instanz frisch und mitten im Geschehen — offene Master-Positionen
+            #     oder Hedges wuerden beim Neustart als Alt-Bestand uebersprungen.
+            if fresh and ((st.get("master_positions") or []) or (st.get("hedges") or {})):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Instanz hat offene Positionen oder Hedges — erst flach werden, "
+                    "dann loeschen."}, ensure_ascii=False))
+            # (b) Ziel-Status NICHT frisch, aber irgendein Copier-Prozess schreibt
+            #     frische Status-Dateien ('unbekannt != leer': wir koennen nicht
+            #     beweisen, dass niemand diese Config bedient — gleiches
+            #     Frische-Muster wie der Doppelstart-Schutz in copier.py).
+            if not fresh and any(d.get("alive") for d in data):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Status dieser Instanz ist nicht frisch, aber ein Copier-Prozess "
+                    "laeuft — Zustand unklar, nicht geloescht ('unbekannt != leer')."},
+                    ensure_ascii=False))
+            # (b2) Alle Status stale, aber die PID aus einer Status-Datei lebt noch
+            #      (Review-Fund 15.08.2026): bei Hedge-Terminal-Ausfall schreibt die
+            #      Hauptschleife GAR keinen Status mehr (book is None -> continue),
+            #      der Prozess haelt aber offene Hedges. Frische allein reicht als
+            #      Beweis also nicht — die PID muss tot sein.
+            if not fresh:
+                for d in data:
+                    pid = (d.get("status") or {}).get("pid")
+                    if pid and _pid_alive(pid):
+                        return self._send(409, json.dumps({"ok": False, "msg":
+                            f"Copier-Prozess (PID {pid}) lebt noch, schreibt aber keinen "
+                            f"frischen Status (Terminal-Ausfall/Startphase?) — Zustand "
+                            f"unklar, nicht geloescht ('unbekannt != leer')."},
+                            ensure_ascii=False))
+            # (c) Ein LAUFENDER Plan haengt an der file.
+            with PLANS_LOCK:
+                plans = _load_plans()
+            if any(p["file"] == inst["config_file"] and p["status"] == "laufend" for p in plans):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Auf dieser Instanz laeuft ein Trade-Plan — erst beenden, dann "
+                    "loeschen."}, ensure_ascii=False))
+            # (d) Irgendeine ANDERE Instanz ist busy — die Loeschung restartet den
+            #     ganzen Copier-Prozess, und der Neustart darf keine fremden
+            #     offenen Positionen blind stellen.
+            for d in data:
+                if d["file"] == inst["config_file"]:
+                    continue
+                s2 = d.get("status") or {}
+                if d.get("alive") and ((s2.get("master_positions") or []) or (s2.get("hedges") or {})):
+                    return self._send(409, json.dumps({"ok": False, "msg":
+                        f"Andere Instanz ({d['file']}) hat gerade offene Positionen/"
+                        f"Hedges — Loeschen wuerde den ganzen Copier neu starten. "
+                        f"Erst flach werden lassen."}, ensure_ascii=False))
+            # Loeschen: ZUERST die Config — schlaegt das fehl (Windows: Datei
+            # gerade von copier.py/instances() offen, kein FILE_SHARE_DELETE),
+            # wird ABGEBROCHEN statt Erfolg zu melden (Review-Fund 15.08.2026:
+            # sonst waeren Status+Sidecar weg, die Config aber wieder da).
+            # Status + closed-Sidecar erst NACH erfolgreicher Config-Loeschung.
+            closed_file = re.sub(r"^config", "closed", inst["config_file"], count=1, flags=re.I)
+            try:
+                os.remove(os.path.join(HERE, inst["config_file"]))
+            except OSError as e:
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    f"Config gerade in Benutzung ({type(e).__name__}) — kurz warten "
+                    f"und nochmal versuchen."}, ensure_ascii=False))
+            removed = [inst["config_file"]]
+            for fn in (inst["status_file"], closed_file):
+                try:
+                    os.remove(os.path.join(HERE, fn))
+                    removed.append(fn)
+                except OSError:
+                    pass
+            with PLANS_LOCK:
+                plans = _load_plans()
+                keep = [p for p in plans
+                        if not (p["file"] == inst["config_file"] and p["status"] == "geplant")]
+                if len(keep) != len(plans):
+                    _save_plans(keep)
+            print(f"[panel] {fname}: geloescht ({', '.join(removed) or 'nichts zu entfernen'})", flush=True)
+            return self._send(200, json.dumps({"ok": True, "msg":
+                "Config geloescht — der Copier startet neu. Der Terminal-Ordner "
+                "bleibt auf der Platte."}, ensure_ascii=False))
 
         if u.path == "/api/plan":
             try:
