@@ -21949,14 +21949,20 @@
         const _links = mt5GetLinks()
         const _accs = (typeof accounts !== 'undefined' && accounts) || []
         for(const inst of (d.instances || [])){
-          const lg = String((inst.status || {}).master_login || inst.master_expected || '')
-          if(!lg || _links[lg]) continue
-          const m = _accs.find(a => !a.archived &&
-            (String(a.externalId || '') === lg || String(a.creds?.login || '') === lg))
-          if(m){
-            mt5LinkSet(lg, String(m.id))
-              .then(() => { if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink() })
-              .catch(err => console.warn('[mt5links] Auto-Abgleich:', err && err.message))
+          // Master-Login UND Hedge-Login abgleichen (15.08.2026): der Trade-Plan
+          // braucht beide Seiten verlinkt — die Hedge-Seite ist bei allen
+          // Instanzen dasselbe Konto, ein Treffer genügt (links[lg] dedupliziert).
+          const st = inst.status || {}
+          for(const lg of [String(st.master_login || inst.master_expected || ''),
+                           String(st.hedge_login || inst.hedge_expected || '')]){
+            if(!lg || _links[lg]) continue
+            const m = _accs.find(a => !a.archived &&
+              (String(a.externalId || '') === lg || String(a.creds?.login || '') === lg))
+            if(m){
+              mt5LinkSet(lg, String(m.id))
+                .then(() => { if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink() })
+                .catch(err => console.warn('[mt5links] Auto-Abgleich:', err && err.message))
+            }
           }
         }
       }
