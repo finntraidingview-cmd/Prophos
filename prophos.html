@@ -2869,6 +2869,12 @@
           Duplikum
           <span class="subtab-count" id="subtab-count-duplikum">–</span>
         </button>
+        <!-- MT5-Copier: eigener Hedge-Copier dieses PCs (Etappe 3, 15.08.2026).
+             Separater Tab neben Duplikum, Duplikum bleibt unberührt. -->
+        <button class="subtab" data-subtab="mt5">
+          MT5-Copier
+          <span class="subtab-count" id="subtab-count-mt5">–</span>
+        </button>
       </div>
 
       <!-- TAB: Manuell -->
@@ -3049,6 +3055,72 @@
               <pre id="dup-test-out" style="text-align:left;margin-top:14px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;font-size:11px;max-height:280px;overflow:auto;display:none"></pre>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- TAB: MT5-Copier — eigener Hedge-Copier dieses PCs. Tabelle im gleichen
+           Stil wie Manuell/Duplikum. Daten über das lokale app.py (/copier/*).
+           Duplikum-Logik bleibt vollständig unberührt. -->
+      <div class="subtab-pane" data-pane="mt5">
+        <div class="panel" style="padding:0" id="mt5Panel">
+
+          <!-- Kopfzeile: Status + Hinzufügen -->
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;gap:14px;flex-wrap:wrap;border-bottom:1px solid var(--border-soft)">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span class="mtc-chip" id="mt5tab-copier-chip"><span class="mtc-dot off"></span>Copier</span>
+              <span class="mtc-chip" id="mt5tab-version" style="display:none"></span>
+              <span style="font-size:12.5px;color:var(--sub)">Eigener Hedge-Copier — die Flotte dieses PCs. Duplikium läuft daneben normal weiter.</span>
+            </div>
+            <button class="btn btn-primary" id="mt5tab-add-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              MT5-Account hinzufügen
+            </button>
+          </div>
+
+          <!-- Offline: Prophos läuft nicht über das lokale Backend -->
+          <div id="mt5tab-offline" class="empty" style="display:none;border:none;background:transparent;padding:40px 20px">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <h3>Copier auf diesem Gerät nicht erreichbar</h3>
+            <p style="max-width:520px;margin:0 auto">Der MT5-Copier läuft pro PC. Dieser Tab funktioniert, wenn Prophos über das <b>lokale Backend</b> läuft (<code>start-local-backend.bat</code>, Aufruf über <code>localhost:5000</code>) und der Copier-Stack gestartet ist (<code>start-alles.bat</code> in <code>C:\mt5-copier</code>).</p>
+            <div style="font-size:12px;color:var(--sub-2);margin-top:10px" id="mt5tab-offline-detail"></div>
+          </div>
+
+          <!-- Konflikt-Banner (doppelte magic/snapshot) -->
+          <div id="mt5tab-notice" style="padding:0 20px"></div>
+
+          <!-- Accounts-Tabelle -->
+          <div class="table-wrap" id="mt5tab-tablewrap">
+            <table class="t">
+              <thead>
+                <tr>
+                  <th style="padding-left:20px">Account</th>
+                  <th>Broker</th>
+                  <th>Modus</th>
+                  <th>Status</th>
+                  <th>Multi</th>
+                  <th>Verknüpft mit</th>
+                  <th style="padding-right:20px"></th>
+                </tr>
+              </thead>
+              <tbody id="mt5AccountsTable"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="mt5tab-empty" style="display:none;border:none;background:transparent">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            </div>
+            <h3>Noch keine MT5-Accounts auf diesem PC</h3>
+            <p>Oben rechts „MT5-Account hinzufügen" — Prophos klont das Master-Terminal, loggt ein und legt alles automatisch an.</p>
+          </div>
+
+          <!-- Trade-Pläne (geplant → laufend → beendet) -->
+          <div id="mt5tab-plans-head" style="padding:22px 20px 0">
+            <h2 style="font-size:16px;font-weight:600;margin:0;letter-spacing:-.01em">Trade-Pläne</h2>
+            <p style="font-size:12.5px;color:var(--sub);margin:2px 0 0">geplant → laufend → beendet — wandert automatisch mit deinen Positionen</p>
+          </div>
+          <div class="mtc-plans" id="mt5tab-plans" style="padding:14px 20px 20px"></div>
         </div>
       </div>
     </section>
@@ -4571,6 +4643,49 @@
         <div class="modal-foot">
           <button class="btn btn-ghost" id="linkDupCancel2">Abbrechen</button>
           <button class="btn btn-primary" id="linkDupConfirm" disabled>Verknüpfen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MT5-Copier-Account ↔ manueller Account (14.08.2026). Eigenes Modal mit
+         eigener Verdrahtung (Projektregel: keine Sammel-Handler). Bewusst getrennt
+         vom MT5-Tab in der Accounts-View — der entsteht parallel in einer anderen
+         Session; die Integration läuft über window.mt5LinkCellHtml + Delegation
+         (siehe Sektion MT5-COPIER LINKING im JS-Modul). -->
+    <div class="modal-bg" id="linkMt5Modal">
+      <div class="modal" style="max-width:560px">
+        <div class="modal-head">
+          <h3>MT5-Account verknüpfen</h3>
+          <button class="modal-x" id="linkMt5Cancel" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="link-tsx-hero" id="linkMt5Info"></div>
+          <div id="linkMt5LoginWrap" style="display:none;margin:0 0 12px">
+            <div class="link-picker-label">MT5-Login (Kontonummer im Terminal)</div>
+            <input class="input" id="linkMt5LoginInput" inputmode="numeric" placeholder="z.B. 5037941" style="margin-top:6px">
+          </div>
+          <div class="link-picker-label">Mit welchem manuellen Account verknüpfen?</div>
+          <div style="display:flex;gap:10px;margin:8px 0 12px">
+            <select class="input" id="linkMt5FirmFilter" style="flex:1;padding:6px 26px 6px 10px;font-size:12.5px;height:auto">
+              <option value="">Alle Firmen</option>
+            </select>
+            <select class="input" id="linkMt5TypeFilter" style="flex:1;padding:6px 26px 6px 10px;font-size:12.5px;height:auto">
+              <option value="">Alle Typen</option>
+              <option value="challenge">Challenge</option>
+              <option value="phase1">Phase 1</option>
+              <option value="phase2">Phase 2</option>
+              <option value="funded">Funded</option>
+              <option value="live">Live</option>
+            </select>
+          </div>
+          <div class="link-picker" id="linkMt5Picker"></div>
+          <div class="modal-msg" id="linkMt5Msg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="linkMt5Cancel2">Abbrechen</button>
+          <button class="btn btn-primary" id="linkMt5Confirm" disabled>Verknüpfen</button>
         </div>
       </div>
     </div>
@@ -7890,6 +8005,297 @@
   }
   window.dupAutoLink = dupAutoLink  // für DevTools/Debug
 
+  /* ========== MT5-COPIER LINKING (14.08.2026) ==========
+   * MT5-Copier-Account (Hedge-Login) ↔ manueller Prophos-Account.
+   * UI-Muster wie DUPLIKUM LINKING — die Speicherung liegt aber in der
+   * Supabase-TABELLE mt5_links (sql/2026-08-14_mt5_links.sql; Finns Vorgabe
+   * 14.08.2026: echte SQL-Tabelle statt user_settings-Blob). localStorage ist
+   * hier nur der synchrone Lese-Cache für die Render-Pfade.
+   *
+   * Schlüssel ist der MT5-LOGIN, nicht der Instanz-Dateiname des Copiers:
+   * der Login ist PC-übergreifend stabil, die .json-Dateinamen des Copiers nicht.
+   *
+   * Der MT5-Tab in der Accounts-View entsteht parallel in einer anderen Session
+   * (14.08.2026) — dieser Block fasst dessen Render-Code deshalb bewusst NICHT an.
+   * Integration über zwei Nahtstellen, die ohne Absprache funktionieren:
+   *   1) window.mt5LinkCellHtml(login, {name, server}) — fertige "Verknüpft mit"-Zelle
+   *   2) Event-Delegation auf document für data-mt5-link / data-mt5-unlink
+   * Bis der Tab die Zelle rendert, ist die Verknüpfung über die Account-
+   * Detailseite erreichbar (Chip MT5-COPIER bzw. "+ verknüpfen"). */
+  const MT5_LINKS_LS = 'prophos_mt5_links'
+
+  function mt5GetLinks(){
+    try { return JSON.parse(localStorage.getItem(MT5_LINKS_LS) || '{}') }
+    catch { return {} }
+  }
+  function mt5CacheLinks(links){
+    // NUR Cache — der Key steht bewusst nicht in SYNC_KEYS, Quelle ist die Tabelle
+    localStorage.setItem(MT5_LINKS_LS, JSON.stringify(links))
+  }
+
+  // Beim Login/Boot: Tabelle → Cache. Wird aus initialSyncFromSupabase() mitgerufen,
+  // damit Login, Account-Wechsel und der Boot-Fall (Session existierte schon) alle
+  // denselben Weg nehmen wie die SYNC_KEYS.
+  async function mt5LoadLinks(){
+    if(!currentUserId) return
+    const { data, error } = await supabase.from('mt5_links').select('mt5_login,account_id')
+    if(error){ console.warn('[mt5links] Laden fehlgeschlagen:', error.message); return }
+    const links = {}
+    for(const r of (data || [])) links[String(r.mt5_login)] = String(r.account_id)
+    mt5CacheLinks(links)
+    mt5RefreshAfterLink()
+  }
+
+  // Link setzen — löst vorher Alt-Links desselben manuellen Accounts (1 Account ↔
+  // 1 Login, wie beim Duplikum-Verknüpfen). unique(user_id, account_id) in der
+  // Tabelle ist der Backstop, falls zwei Geräte gleichzeitig schreiben.
+  async function mt5LinkSet(login, accountId){
+    if(!currentUserId) throw new Error('Nicht eingeloggt')
+    const del = await supabase.from('mt5_links').delete()
+      .eq('user_id', currentUserId).eq('account_id', accountId).neq('mt5_login', login)
+    if(del.error) throw del.error
+    const up = await supabase.from('mt5_links').upsert({
+      user_id: currentUserId, mt5_login: login, account_id: accountId
+    }, { onConflict: 'user_id,mt5_login' })
+    if(up.error) throw up.error
+    const links = mt5GetLinks()
+    for(const [k, v] of Object.entries(links)){
+      if(String(v) === String(accountId) && k !== login) delete links[k]
+    }
+    links[login] = String(accountId)
+    mt5CacheLinks(links)
+  }
+
+  function mt5RefreshAfterLink(){
+    if(typeof renderAccounts === 'function') renderAccounts()
+    if(typeof renderAccountDetail === 'function' && typeof _detailAccountId !== 'undefined' && _detailAccountId) renderAccountDetail()
+    // Falls der MT5-Tab (parallele Session) mal einen Re-Render exponiert: mitziehen
+    if(typeof window.mt5TabRender === 'function'){ try { window.mt5TabRender() } catch(_){} }
+  }
+
+  async function unlinkMt5(login){
+    // Optimistisch: Cache sofort, UI reagiert ohne Wartezeit — bei DB-Fehler
+    // stellt mt5LoadLinks() den echten Stand wieder her.
+    const links = mt5GetLinks()
+    delete links[String(login)]
+    mt5CacheLinks(links)
+    mt5RefreshAfterLink()
+    if(!currentUserId) return
+    const { error } = await supabase.from('mt5_links').delete()
+      .eq('user_id', currentUserId).eq('mt5_login', String(login))
+    if(error){
+      console.warn('[mt5links] Trennen fehlgeschlagen:', error.message)
+      mt5LoadLinks()
+    }
+  }
+
+  // Fertige Tabellen-Zelle für den MT5-Tab — Pendant zur linkCell in
+  // renderDupAccountsTable. Der Tab rendert nur `<td>${window.mt5LinkCellHtml(login)}</td>`,
+  // die Klicks fängt die Delegation unten — direkte Listener gingen beim
+  // Poll-Re-Render des tbody verloren.
+  function mt5LinkCellHtml(login, meta = {}){
+    const key = String(login || '').trim()
+    if(!key) return '<span style="font-size:11px;color:var(--sub)">—</span>'
+    const links = mt5GetLinks()
+    const linkedManual = links[key] ? (accounts || []).find(m => String(m.id) === String(links[key])) : null
+    if(linkedManual) return `<div style="display:flex;align-items:center;gap:8px">
+        <span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:#22c55e22;color:#16a34a">✓ ${escapeHtml(linkedManual.name)}</span>
+        <button class="btn btn-ghost" data-mt5-unlink="${escapeHtml(key)}" style="padding:4px 8px;font-size:11px" type="button">Trennen</button>
+      </div>`
+    return `<button class="btn btn-ghost" data-mt5-link="${escapeHtml(key)}" data-mt5-name="${escapeHtml(meta.name || '')}" data-mt5-server="${escapeHtml(meta.server || '')}" style="padding:4px 10px;font-size:12px" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Verknüpfen
+      </button>`
+  }
+  window.mt5LinkCellHtml = mt5LinkCellHtml
+  window.mt5GetLinks = mt5GetLinks
+  window.mt5LoadLinks = mt5LoadLinks
+  window.unlinkMt5 = unlinkMt5
+  window.openLinkMt5Modal = openLinkMt5Modal  // hoisted, Definition direkt unten
+
+  let _linkMt5Login = null
+  let _linkMt5TargetId = null
+
+  function openLinkMt5Modal(login, opts = {}){
+    _linkMt5Login = login ? String(login).trim() : null
+    _linkMt5TargetId = opts.presetManualId ? String(opts.presetManualId) : null
+    const meta = opts.meta || {}
+
+    // Hero: bekannter Login (Aufruf aus dem MT5-Tab) oder freie Eingabe
+    // (Aufruf von der Account-Detailseite, solange der Tab noch entsteht)
+    const info = document.getElementById('linkMt5Info')
+    if(info){
+      const title = _linkMt5Login
+        ? (meta.name || `MT5-Login ${_linkMt5Login}`)
+        : 'MT5-Account verknüpfen'
+      const sub = _linkMt5Login
+        ? `MT5-Copier${meta.server ? ' · ' + meta.server : ''}${meta.name ? ' · Login: ' + _linkMt5Login : ''}`
+        : 'Login unten eintragen — die Kontonummer des Hedge-Accounts im MT5-Terminal'
+      info.innerHTML = `
+        <div class="lh-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        </div>
+        <div class="lh-name">${escapeHtml(title)}</div>
+        <div class="lh-meta"><span class="lh-id">${escapeHtml(sub)}</span></div>
+      `
+    }
+
+    const loginWrap = document.getElementById('linkMt5LoginWrap')
+    const loginInput = document.getElementById('linkMt5LoginInput')
+    if(loginWrap) loginWrap.style.display = _linkMt5Login ? 'none' : ''
+    if(loginInput){
+      // Re-Link-Fall von der Detailseite: bestehenden Login des Accounts vorbelegen
+      let preset = ''
+      if(!_linkMt5Login && _linkMt5TargetId){
+        preset = Object.entries(mt5GetLinks()).find(([_, mId]) => String(mId) === String(_linkMt5TargetId))?.[0] || ''
+      }
+      loginInput.value = preset
+    }
+
+    const picker = document.getElementById('linkMt5Picker')
+    const firmFilterEl = document.getElementById('linkMt5FirmFilter')
+    const typeFilterEl = document.getElementById('linkMt5TypeFilter')
+
+    // Firmen-Filter befüllen — gleiche Logik wie im Duplikum-Modal
+    const _allForFirmList = (accounts || []).filter(m => {
+      const arc = (typeof getArchive === 'function') ? getArchive() : {}
+      return !arc[m.id]?.archived
+    })
+    const firmList = [...new Set(_allForFirmList.map(a => a.firm).filter(Boolean))].sort()
+    if(firmFilterEl){
+      firmFilterEl.innerHTML = '<option value="">Alle Firmen</option>' +
+        firmList.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
+      firmFilterEl.value = ''
+    }
+    if(typeFilterEl) typeFilterEl.value = ''
+
+    function currentLoginKey(){
+      return _linkMt5Login || String(loginInput?.value || '').trim()
+    }
+
+    function renderMt5Picker(){
+      const links = mt5GetLinks()
+      const me = currentLoginKey()
+      // Nur Accounts blocken, die mit einem ANDEREN MT5-Login verknüpft sind
+      const linkedManualIds = new Set(
+        Object.entries(links)
+          .filter(([lg]) => lg !== me)
+          .map(([_, manualId]) => String(manualId))
+      )
+      const archive = (typeof getArchive === 'function') ? getArchive() : {}
+      const available = (accounts || []).filter(m => {
+        if(archive[m.id]?.archived) return false
+        if(linkedManualIds.has(String(m.id)) && String(m.id) !== String(_linkMt5TargetId)) return false
+        if(firmFilterEl?.value && (m.firm || '') !== firmFilterEl.value) return false
+        if(typeFilterEl?.value && m.type !== typeFilterEl.value) return false
+        return true
+      })
+      const currentLinkedId = me ? links[me] : null
+
+      if(!available.length){
+        picker.innerHTML = `
+          <div class="link-picker-empty">
+            <strong>Keine manuellen Accounts verfügbar</strong>
+            Filter oben anpassen — oder erst einen Account unter "Accounts" anlegen.
+          </div>
+        `
+        return
+      }
+
+      picker.innerHTML = available.map(m => {
+        const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
+        const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
+        const isSel = String(m.id) === String(_linkMt5TargetId) || (!_linkMt5TargetId && String(m.id) === String(currentLinkedId))
+        return `
+          <button type="button" class="link-picker-card${isSel ? ' selected' : ''}" data-mt5-target="${escapeHtml(m.id)}">
+            <span class="lpc-radio"></span>
+            <div class="lpc-body">
+              <div class="lpc-name">${escapeHtml(m.name)}${String(m.id) === String(currentLinkedId) ? ' <span style="font-size:10px;color:var(--violet);font-weight:600">● aktuell</span>' : ''}</div>
+              <div class="lpc-meta"><span>${escapeHtml(m.firm || '–')}</span><span>·</span><span>${escapeHtml(typeLbl)}</span></div>
+            </div>
+            <span class="lpc-bal">${fmtMoney(bal)}</span>
+          </button>
+        `
+      }).join('')
+
+      // Vorauswahl (Detailseite bzw. bestehender Link) → Confirm direkt aktiv
+      const preSel = _linkMt5TargetId || currentLinkedId
+      if(preSel && available.some(m => String(m.id) === String(preSel))){
+        _linkMt5TargetId = String(preSel)
+        document.getElementById('linkMt5Confirm').disabled = false
+      }
+
+      picker.querySelectorAll('.link-picker-card').forEach(card => {
+        card.addEventListener('click', () => {
+          picker.querySelectorAll('.link-picker-card').forEach(c => c.classList.remove('selected'))
+          card.classList.add('selected')
+          _linkMt5TargetId = card.dataset.mt5Target
+          document.getElementById('linkMt5Confirm').disabled = false
+        })
+      })
+    }
+    renderMt5Picker()
+
+    if(firmFilterEl) firmFilterEl.onchange = renderMt5Picker
+    if(typeFilterEl) typeFilterEl.onchange = renderMt5Picker
+
+    document.getElementById('linkMt5Confirm').disabled = !_linkMt5TargetId
+    document.getElementById('linkMt5Msg').textContent = ''
+    document.getElementById('linkMt5Modal').classList.add('open')
+    if(!_linkMt5Login && loginInput) setTimeout(() => loginInput.focus(), 50)
+  }
+
+  function closeLinkMt5Modal(){
+    document.getElementById('linkMt5Modal').classList.remove('open')
+    _linkMt5Login = null
+    _linkMt5TargetId = null
+  }
+
+  document.getElementById('linkMt5Cancel').addEventListener('click', closeLinkMt5Modal)
+  document.getElementById('linkMt5Cancel2').addEventListener('click', closeLinkMt5Modal)
+  document.getElementById('linkMt5Confirm').addEventListener('click', async () => {
+    const msg = document.getElementById('linkMt5Msg')
+    const loginInput = document.getElementById('linkMt5LoginInput')
+    const login = _linkMt5Login || String(loginInput?.value || '').trim()
+    if(!/^\d{3,}$/.test(login)){
+      msg.textContent = 'Bitte den MT5-Login als Zahl eintragen (Kontonummer im Terminal).'
+      return
+    }
+    if(!_linkMt5TargetId){
+      msg.textContent = 'Bitte einen Account auswählen.'
+      return
+    }
+    const btn = document.getElementById('linkMt5Confirm')
+    btn.disabled = true
+    msg.textContent = '⏳ speichere…'
+    try {
+      await mt5LinkSet(login, String(_linkMt5TargetId))
+      closeLinkMt5Modal()
+      mt5RefreshAfterLink()
+    } catch(e){
+      // Modal offen lassen — der User sieht den Fehler und kann es nochmal versuchen
+      msg.textContent = `✗ Speichern fehlgeschlagen: ${String(e.message || e).slice(0, 80)}`
+      btn.disabled = false
+    }
+  })
+
+  // Delegation: fängt Klicks aus JEDEM Render — auch aus dem parallel
+  // entstehenden MT5-Tab (separater Script-Scope am Dateiende), sobald der
+  // mt5LinkCellHtml benutzt. data-mt5-linkfor ist der Einstieg von der
+  // Account-Detailseite (Login noch unbekannt → Eingabefeld im Modal).
+  document.addEventListener('click', (e) => {
+    const linkBtn = e.target.closest('[data-mt5-link]')
+    if(linkBtn){
+      openLinkMt5Modal(linkBtn.dataset.mt5Link, { meta: { name: linkBtn.dataset.mt5Name || '', server: linkBtn.dataset.mt5Server || '' } })
+      return
+    }
+    const unlinkBtn = e.target.closest('[data-mt5-unlink]')
+    if(unlinkBtn){ unlinkMt5(unlinkBtn.dataset.mt5Unlink); return }
+    const forBtn = e.target.closest('[data-mt5-linkfor]')
+    if(forBtn) openLinkMt5Modal(null, { presetManualId: forBtn.dataset.mt5Linkfor })
+  })
+  /* ========== ENDE MT5-COPIER LINKING ========== */
+
   /* ========== DUPLIKUM SYMBOL-MAPPING + MULTIPLIER HELPERS ==========
    * Bausteine für Auto-Mapping (beim Verknüpfen) und den Trade-Start-Preflight.
    * Payloads bewusst MINIMAL — nur die Felder, die geändert werden (Lehre aus dem
@@ -10573,6 +10979,20 @@
           <span style="font-size:11px;font-weight:700;color:#d97706;background:#f59e0b22;padding:2px 6px;border-radius:4px">DUPLIKUM</span>
           <div><div style="font-size:12.5px;font-weight:600">${escapeHtml(dupAcc.name||dupId)}</div><div style="font-size:11px;color:var(--sub)">Login: ${escapeHtml(dupAcc.login||dupId)}</div></div>
         </div>`)
+      }
+      // MT5-Copier-Verknüpfung (14.08.2026): Login ↔ manueller Account, Pendant zum
+      // DUPLIKUM-Chip. Klicks laufen über die document-Delegation der Sektion
+      // MT5-COPIER LINKING (data-mt5-unlink / data-mt5-linkfor).
+      const mt5Links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+      const mt5Login = Object.entries(mt5Links).find(([_, mId]) => String(mId) === String(acc.id))?.[0]
+      if(mt5Login){
+        chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#3b82f611;border:1px solid #3b82f633;border-radius:8px">
+          <span style="font-size:11px;font-weight:700;color:#2563eb;background:#3b82f622;padding:2px 6px;border-radius:4px">MT5-COPIER</span>
+          <div style="font-size:12.5px;font-weight:600">Login: ${escapeHtml(mt5Login)}</div>
+          <button class="btn btn-ghost" data-mt5-unlink="${escapeHtml(mt5Login)}" style="padding:2px 8px;font-size:11px;margin-left:auto" type="button">Trennen</button>
+        </div>`)
+      } else {
+        chips.push(`<button type="button" class="btn btn-ghost" data-mt5-linkfor="${escapeHtml(String(acc.id))}" style="padding:6px 12px;font-size:11.5px">+ MT5-Copier-Account verknüpfen</button>`)
       }
       if(acc.externalId) chips.push(`<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px">
         <span style="font-size:11px;font-weight:700;color:var(--sub);background:var(--line);padding:2px 6px;border-radius:4px">EXT ID</span>
@@ -17607,6 +18027,9 @@
     'prophos_account_parents',
     'prophos_custom_firms'
   ]
+  // prophos_mt5_links gehört bewusst NICHT hierher: die MT5-Links leben als
+  // echte Tabelle mt5_links (Finns Vorgabe 14.08.2026), localStorage ist dort
+  // nur Lese-Cache — ein Blob-Upload hier wäre eine zweite, driftende Quelle.
 
   // Mapping localStorage-Key ↔ Supabase-key (kürzer)
   const SYNC_KEY_MAP = {
@@ -17732,6 +18155,9 @@
       if(typeof mergeCustomFirmsIntoPresets === 'function') mergeCustomFirmsIntoPresets()
       if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
       if(typeof dupRender === 'function') dupRender()
+      // MT5-Links kommen aus der eigenen Tabelle mt5_links, nicht aus user_settings —
+      // aber über denselben Einstieg, damit Login/Wechsel/Boot identisch laufen.
+      if(typeof mt5LoadLinks === 'function') mt5LoadLinks().catch(e => console.warn('[mt5links] init:', e))
     } finally {
       _syncInProgress = false
     }
@@ -20494,6 +20920,13 @@
   const $ = id => document.getElementById(id)
   const mtcView = () => document.querySelector('#dashboard-view .view[data-view="mt5copier"]')
   const mtcActive = () => { const v = mtcView(); return v && v.classList.contains('active') }
+  // Zweite Darstellung: Sub-Tab „MT5-Copier" in der Accounts-View (neben Duplikum,
+  // Finns Vorgabe 15.08.2026). Gleiche Datenquelle, gleiches Poll — nur als Tabelle.
+  const mt5TabActive = () => {
+    const v = document.querySelector('#dashboard-view .view[data-view="accounts"]')
+    const p = document.querySelector('#dashboard-view .subtab-pane[data-pane="mt5"]')
+    return !!(v && v.classList.contains('active') && p && p.classList.contains('active'))
+  }
   function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
   function pill(m){ const c = m==='live' ? 'live' : m==='demo' ? 'demo' : 'dry'
     return `<span class="mtc-pill ${c}">${esc((m||'?').toUpperCase())}</span>` }
@@ -20582,13 +21015,16 @@
 
   function renderPlans(plans){
     const cols = [['geplant','Geplant'],['laufend','Laufend'],['beendet','Beendet']]
-    $('mtc-plans').innerHTML = cols.map(([k, label]) => {
+    const html = cols.map(([k, label]) => {
       let list = (plans || []).filter(p => p.status === k)
       if(k === 'beendet') list = list.slice().reverse()
       return `<div class="mtc-pcol"><h4>${label}<span class="cnt">${list.length}</span></h4>
         ${list.map(planCard).join('') || `<div class="mtc-pempty">${k==='geplant' ? 'Kein Plan — „Trade planen" auf einer Karte.' : k==='laufend' ? 'Nichts im Markt.' : 'Noch keine abgeschlossenen Trades.'}</div>`}
       </div>`
     }).join('')
+    $('mtc-plans').innerHTML = html
+    // Gleiche Spalten auch im Accounts-Sub-Tab (zweite Darstellung, gleiche Daten)
+    const tp = $('mt5tab-plans'); if(tp) tp.innerHTML = html
   }
 
   function setOffline(offline, detail){
@@ -20637,12 +21073,84 @@
     $('mtc-copier-chip').innerHTML = `<span class="mtc-dot off"></span>Copier offline`
     const v = $('mtc-version'); if(v) v.style.display = 'none'
     const badge = $('sb-badge-mtc'); if(badge){ badge.hidden = true }
+    const tc = $('mt5tab-copier-chip'); if(tc) tc.innerHTML = `<span class="mtc-dot off"></span>Copier offline`
+    const tv = $('mt5tab-version'); if(tv) tv.style.display = 'none'
+    const cnt = $('subtab-count-mt5'); if(cnt) cnt.textContent = '–'
+  }
+
+  /* ── Accounts-Sub-Tab „MT5-Copier": Offline-Zustand + Tabelle ── */
+  function mt5TabOffline(offline, detail){
+    const off = $('mt5tab-offline'); if(!off) return
+    off.style.display = offline ? '' : 'none'
+    $('mt5tab-tablewrap').style.display = offline ? 'none' : ''
+    $('mt5tab-plans').style.display = offline ? 'none' : ''
+    $('mt5tab-plans-head').style.display = offline ? 'none' : ''
+    if(offline){
+      $('mt5tab-empty').style.display = 'none'
+      $('mt5tab-notice').innerHTML = ''
+      $('mt5tab-offline-detail').textContent = detail || ''
+    }
+  }
+
+  function mt5Row(d){
+    const s = d.status || {}, live = d.alive
+    const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
+    const broker = s.master_server || d.master_server || '—'
+    const warn = s.note ? `<div style="font-size:11px;color:#d97706;margin-top:3px;max-width:340px">${esc(s.note)}</div>` : ''
+    const blocked = (s.blocked || []).length
+      ? `<div style="font-size:11px;color:#d97706;margin-top:3px">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))}</div>` : ''
+    return `<tr>
+      <td style="padding-left:20px">
+        <div style="font-weight:600;color:var(--ink)">${esc(d.name)}</div>
+        <div style="font-size:11px;color:var(--sub);margin-top:2px;font-family:var(--mono)">${esc(s.master_login || d.master_expected || '—')} → Hedge ${esc(s.hedge_login || d.hedge_expected || '—')}</div>
+        ${warn}${blocked}
+      </td>
+      <td>${esc(broker)}</td>
+      <td>${pill(d.mode)}</td>
+      <td>
+        <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span>
+        ${(pos || hed) ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">${pos} Position(en) · ${hed} Hedge(s)</div>` : ''}
+      </td>
+      <td><span class="mono">×${esc(d.multiplier ?? '–')}</span></td>
+      <td>${
+        // Nahtstelle zur MT5-COPIER-LINKING-Sektion (parallele Session, 14.08.2026):
+        // fertige Zelle inkl. Klick-Delegation auf document. Schlüssel ist der
+        // Master-Login (Prop-Firm-Kontonummer) — PC-übergreifend stabil.
+        window.mt5LinkCellHtml
+          ? window.mt5LinkCellHtml(String(s.master_login || d.master_expected || ''), { name: d.name, server: broker })
+          : '<span style="color:var(--sub);font-size:11.5px">—</span>'
+      }</td>
+      <td style="padding-right:20px;text-align:right;white-space:nowrap">
+        <span class="mtc-msg" data-mt5msg style="margin-right:8px"></span>
+        <button class="btn btn-primary" style="padding:5px 10px;font-size:12px" data-mt5plan="${esc(d.file)}" type="button">Trade planen</button>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-mt5det="${esc(d.file)}" type="button" title="Große Ansicht mit Log + Symbol-Mapping">Details</button>
+      </td>
+    </tr>`
+  }
+
+  function renderMt5Tab(d, noticeHtml){
+    const tc = $('mt5tab-copier-chip'); if(!tc) return
+    const anyAlive = (d.instances || []).some(x => x.alive)
+    tc.innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
+    const tv = $('mt5tab-version')
+    if(tv && d.version){ tv.style.display = ''; tv.textContent = 'v' + d.version }
+    const cnt = $('subtab-count-mt5'); if(cnt) cnt.textContent = String((d.instances || []).length)
+    // Job-/Konflikt-Banner gespiegelt — eigener Klick-Anker statt id, sonst
+    // stuende dieselbe id zweimal im Dokument (Sidebar-View + Tab).
+    const tn = $('mt5tab-notice')
+    tn.innerHTML = (noticeHtml || '').replace(/ id="mtc-jobbar"/g, ' data-mt5jobbar="1"')
+    const jb = tn.querySelector('[data-mt5jobbar]'); if(jb) jb.addEventListener('click', openAdd)
+    const list = d.instances || []
+    $('mt5tab-tablewrap').style.display = list.length ? '' : 'none'
+    $('mt5tab-empty').style.display = list.length ? 'none' : ''
+    $('mt5AccountsTable').innerHTML = list.map(mt5Row).join('')
   }
 
   async function mtcLoad(){
     const d = await mtcApi('instances')
-    if(d.copier_offline || d._httpFail){ offlineChip(); setOffline(true, d.error || 'unerreichbar'); return }
+    if(d.copier_offline || d._httpFail){ offlineChip(); setOffline(true, d.error || 'unerreichbar'); mt5TabOffline(true, d.error || 'unerreichbar'); return }
     setOffline(false)
+    mt5TabOffline(false)
     mtcSeenOnline = true
     mtcJob = d.job
     ;(d.instances || []).forEach(x => mtcState[x.file] = x)
@@ -20685,13 +21193,14 @@
       }
     }
     renderPlans(d.plans)
+    renderMt5Tab(d, n)
     if(addOpen) renderAddJob()
   }
 
   // Poll nur, wenn die View sichtbar ist oder ein Copier-Modal offen — die
   // restliche App soll von diesem Bereich nichts spueren.
   setInterval(() => {
-    if(mtcActive() || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
+    if(mtcActive() || mt5TabActive() || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
@@ -20863,14 +21372,36 @@
     setTimeout(mtcLoad, 2500)
   })
 
-  /* ── Plan-Loeschen ── */
-  $('mtc-plans').addEventListener('click', async e => {
+  /* ── Plan-Loeschen (Sidebar-View UND Accounts-Sub-Tab) ── */
+  async function planColClick(e){
     const pid = e.target.getAttribute && e.target.getAttribute('data-mtcpdel')
     if(!pid) return
     if(e.target.getAttribute('data-mtcpstatus') === 'laufend' && !confirm('Dieser Plan LÄUFT gerade (Position offen). Wirklich nur den Plan-Eintrag löschen? Die Position und der Hedge bleiben unberührt.')) return
     await mtcApi(`plan-delete?id=${encodeURIComponent(pid)}`, { method:'POST',
       headers:{'Content-Type':'application/json'}, body:'{}' })
     mtcLoad()
+  }
+  $('mtc-plans').addEventListener('click', planColClick)
+  const mt5PlansEl = $('mt5tab-plans'); if(mt5PlansEl) mt5PlansEl.addEventListener('click', planColClick)
+
+  /* ── Accounts-Sub-Tab: Verdrahtung ──
+     Hinzufuegen + Trade planen laufen ueber DIESELBEN Modals wie die
+     Sidebar-View (mtcAddModal/mtcPlanModal) — eine Logik, zwei Einstiege. */
+  const mt5AddBtn = $('mt5tab-add-btn')
+  if(mt5AddBtn) mt5AddBtn.addEventListener('click', openAdd)
+  // Beim Klick auf den Sub-Tab sofort laden (nicht erst nach 3s Poll)
+  document.querySelectorAll('#dashboard-view .subtab[data-subtab="mt5"]').forEach(b =>
+    b.addEventListener('click', () => setTimeout(mtcLoad, 50)))
+  const mt5Table = $('mt5AccountsTable')
+  if(mt5Table) mt5Table.addEventListener('click', e => {
+    const planFile = e.target.getAttribute && e.target.getAttribute('data-mt5plan')
+    const detFile  = e.target.getAttribute && e.target.getAttribute('data-mt5det')
+    if(planFile){ openPlan(planFile); return }
+    if(detFile){
+      // Grosse Ansicht (Karten mit Log + Symbol-Mapping) ueber die normale Navigation
+      const link = document.querySelector('#dashboard-view .sb-link[data-view="mt5copier"]')
+      if(link) link.click()
+    }
   })
 })()
 </script>
