@@ -12004,6 +12004,25 @@
           }
         }
 
+        // Auto-Anlegen im MT5-Copier (15.08.2026, Finns Zielfluss — Spiegelbild
+        // des Duplikum-Blocks oben): Plattform 'mt5' + Zugangsdaten → Terminal
+        // auf DIESEM PC automatisch provisionieren + verlinken. Sichert sich
+        // selbst ab (nur localhost, nie Live-Accounts, Bestand wird nur verlinkt).
+        if(newAcc.creds?.login && typeof mt5CreateAccountInCopier === 'function'){
+          try{
+            const mc = await mt5CreateAccountInCopier(newAcc)
+            if(mc.ok && mc.existing){
+              showSyncBanner(`🔗 „${newAcc.name}" mit bestehendem MT5-Copier-Account verknüpft`, 'ok')
+              hideSyncBannerSoon(5000)
+            }else if(mc.ok){
+              showSyncBanner(`🖥 „${newAcc.name}" wird im MT5-Copier eingerichtet — Fortschritt im MT5-Tab, Verknüpfung folgt automatisch`, 'ok')
+              hideSyncBannerSoon(7000)
+            }else if(mc.error){
+              setModalMsg(`Account gespeichert, aber MT5-Einrichtung fehlgeschlagen: ${mc.error}`, 'err')
+            }
+          }catch(e){ console.warn('[mtc] Auto-Einrichtung übersprungen:', e && e.message) }
+        }
+
         // Neuer Account mit External ID → sofort mit Duplikum verknüpfen (falls dort vorhanden)
         if(!dupCreated && newAcc.externalId && typeof dupState !== 'undefined' && dupState.token){
           const lr = dupAutoLink()
@@ -12216,6 +12235,47 @@
     }
   }
   window._dupCreateAccountInDuplikum = dupCreateAccountInDuplikum
+
+  /* ── Account in MT5-Copier anlegen + verlinken (15.08.2026, Finns Zielfluss) ──
+   * Spiegelbild von dupCreateAccountInDuplikum: der Prophos-Account ist die
+   * QUELLE. Beim Anlegen mit Plattform 'mt5' + vollstaendigen Zugangsdaten wird
+   * auf dem lokalen PC automatisch das Master-Terminal provisioniert und nach
+   * Erfolg per mt5_links verlinkt (Merker loest die Copier-IIFE ein).
+   * Absicherungen: nur localhost (der Copier ist eine PC-Sache), nur mt5,
+   * NIE fuer Live-Accounts (das waere der Hedge — der wird nicht geklont),
+   * existiert die Instanz schon, wird NUR verlinkt. Best effort: scheitert es,
+   * bleibt der Prophos-Account trotzdem gespeichert. */
+  async function mt5CreateAccountInCopier(acc){
+    const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    if(!local) return { skipped: 'nichtlokal' }
+    const plat = (acc.creds?.platform || '').toLowerCase()
+    if(plat !== 'mt5') return { skipped: 'platform' }
+    if(acc.type === 'live') return { skipped: 'live' }
+    if(!acc.creds?.login || !acc.creds?.password || !acc.creds?.server) return { skipped: 'creds' }
+    if(typeof window.mtcApi !== 'function') return { skipped: 'nopanel' }
+    const dd = await window.mtcApi('instances')
+    if(!dd || dd.copier_offline || dd._httpFail) return { skipped: 'offline' }
+    const login = String(acc.creds.login)
+    const exists = (dd.instances || []).some(x =>
+      String((x.status || {}).master_login || x.master_expected || '') === login)
+    if(exists){
+      if(typeof mt5LinkSet === 'function') await mt5LinkSet(login, String(acc.id))
+      return { ok: true, existing: true }
+    }
+    const display = String(acc.name || '').replace(/[^A-Za-z0-9 ._\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)
+    const slug = display.replace(/[^A-Za-z0-9]/g, '').slice(0, 24) || ('mt5' + login.slice(-6))
+    const body = { name: slug, display, login, password: acc.creds.password, server: String(acc.creds.server) }
+    if(typeof currentUserId !== 'undefined' && currentUserId) body.owner = String(currentUserId)
+    const d = await window.mtcApi('provision', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if(!d.ok) return { error: String(d.msg || d.error || 'Fehler') }
+    // Verlinkung nach Job-Ende — die Copier-IIFE loest den Merker ein
+    if(typeof window.mtcQueueAutoLink === 'function'){
+      window.mtcQueueAutoLink({ name: slug, login, accountId: String(acc.id), firm: acc.firm || null })
+    }
+    return { ok: true }
+  }
+  window._mt5CreateAccountInCopier = mt5CreateAccountInCopier
 
   if(accEls.modal)   accEls.modal.addEventListener('click', e => {
     if(e.target === accEls.modal) closeAccountModal()
@@ -21859,44 +21919,6 @@
         }catch(e){ console.warn('[mtc] Preset-Mapping-Push übersprungen:', e && e.message) }
       }
     }
-    // Manueller Weg: Zugangsdaten nach ERFOLG in Supabase sichern (Finns Ansage
-    // 15.08.2026) — Account anlegen, verknüpfen, Liste nachladen. Bei Fehler
-    // verfällt der Merker still (Zugangsdaten bleiben dann nur auf dem PC).
-    if(_mtcPendingCreate && d.job && d.job.done && d.job.name === _mtcPendingCreate.name){
-      const pc = _mtcPendingCreate
-      _mtcPendingCreate = null
-      if(!d.job.error && typeof supabase !== 'undefined' && typeof currentUserId !== 'undefined' && currentUserId){
-        ;(async () => {
-          try{
-            const row = {
-              user_id: currentUserId,
-              name: pc.display,
-              firm: String(pc.server || '').split(/[-_ ]/)[0] || 'MT5',
-              account_type: 'challenge',
-              balance: 0,
-              external_id: String(pc.login),
-              cred_login: String(pc.login),
-              cred_password: pc.password || null,
-              cred_server: String(pc.server),
-              cred_platform: 'mt5',
-              notes: 'Automatisch angelegt bei der MT5-Copier-Einrichtung (15.08.2026) — Firma/Typ bei Bedarf anpassen.'
-            }
-            const { data: acc2, error } = await supabase.from('accounts').insert(row).select('*').single()
-            if(error) throw error
-            if(typeof mt5LinkSet === 'function') await mt5LinkSet(String(pc.login), String(acc2.id))
-            if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase()
-            if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink()
-            if(typeof atToast === 'function') atToast(`✓ „${pc.display}" in Prophos angelegt + verknüpft — Zugangsdaten gespeichert`, 'start')
-          }catch(e){ console.warn('[mtc] Auto-Anlegen fehlgeschlagen:', e && e.message) }
-        })()
-      }
-    }
-    // Pro-Person-Filter (Paket E, 15.08.2026): jede Person sieht nur die eigenen
-    // MT5-Accounts — wie bei Duplikum. Instanzen mit fremdem Besitzer-Stempel
-    // (prophos_owner aus der Provisionierung) werden komplett ausgeblendet;
-    // Bestand ohne Stempel bleibt sichtbar (Finns 6 bestehende Accounts).
-    const _uid = (typeof currentUserId !== 'undefined' && currentUserId) ? String(currentUserId) : null
-    d.instances = (d.instances || []).filter(x => !x.owner || (_uid && String(x.owner) === _uid))
     // fetchedAt (15.08.2026): Frischebeleg pro Instanz — die MT5-ROUTE-Sektion
     // (Balances/Live-P&L) darf nur bei fetchedAt ≤ 15s "Live" behaupten
     // ('alt ist nicht aktuell'). Erkennungsquelle ist mtcState trotzdem NIE —
@@ -21965,7 +21987,7 @@
     // Start — ohne Beobachter würde das Fertig-Signal verpasst und die
     // Zugangsdaten landeten nie in Supabase.
     if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcAddModal').classList.contains('open')
-       || (mtcJob && !mtcJob.done) || _mtcPendingCreate || _mtcPendingLink) mtcLoad()
+       || (mtcJob && !mtcJob.done) || _mtcPendingLink) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
@@ -21986,9 +22008,6 @@
   // ueber job.name eingeloest. Geloescht bei Modal-Schliessen, job.error und
   // nach dem Link — ein Panel-Neustart verliert den Job, dann verfaellt er still.
   let _mtcPendingLink = null
-  // Manueller Mail-Paste-Weg: nach Erfolg Account in Supabase anlegen (cred_*)
-  // und verknüpfen. Passwort lebt bis zur Einlösung nur in dieser Variable.
-  let _mtcPendingCreate = null
 
   // Prefill-Kandidaten: nicht archivierte Prophos-Accounts mit cred_login UND
   // cred_server, Plattform leer oder MT5. Labels laufen durch esc; das Passwort
@@ -22129,15 +22148,11 @@
       const selA = prefillSel ? (accounts || []).find(x => String(x.id) === prefillSel.value) : null
       _mtcPendingLink = (selA && selA.creds && String(selA.creds.login) === body.login)
         ? { name: body.name, login: body.login, accountId: String(selA.id), firm: selA.firm || null } : null
-      // Manueller Weg (Mail-Paste, kein Prophos-Account gewählt): nach ERFOLG
-      // die Zugangsdaten in Supabase sichern — Finns Ansage 15.08.2026 ("das
-      // Passwort wird immer resettet … alles in der Datenbank speichern"):
-      // Prophos legt den Account selbst an (cred_*-Felder) und verknüpft ihn.
-      // Passwort bis dahin NUR in dieser Variable, nie im DOM.
-      _mtcPendingCreate = _mtcPendingLink ? null : {
-        name: body.name, display: body.display || body.name,
-        login: body.login, password: body.password, server: body.server
-      }
+      // Manueller Mail-Paste-Weg legt bewusst KEINEN Prophos-Account mehr an
+      // (Finns Korrektur 15.08.2026): die Quelle ist Prophos — wer den Account
+      // in der Datenbank will, legt ihn im Accounts-Modal an (Plattform mt5),
+      // dann provisioniert und verlinkt Prophos von selbst. Der Tab-Weg hier
+      // bleibt der schnelle PC-only-Weg.
     }
     if(d.ok) setTimeout(mtcLoad, 1000)
   })
@@ -22241,6 +22256,9 @@
   window.mtcInstances = () => mtcState
   window.mtcReload = mtcLoad
   window.mt5TabRender = () => { if(mtcLastRender) renderMt5Tab(mtcLastRender.d, mtcLastRender.n) }
+  // Nahtstelle fuer mt5CreateAccountInCopier (Prophos-Account → Copier-Weg,
+  // 15.08.2026): setzt den Auto-Link-Merker, den mtcLoad bei job.done einloest.
+  window.mtcQueueAutoLink = m => { if(m && m.name && m.login && m.accountId) _mtcPendingLink = m }
 })()
 </script>
 <!-- ── Coin-Flip Floating Button + Modal ── -->
