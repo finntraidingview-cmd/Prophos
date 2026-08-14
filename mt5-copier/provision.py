@@ -424,6 +424,13 @@ def run_provision(*, name, login, password, server, template_exe,
     # Rest eines Fehlversuchs? Ein laufendes Terminal derselben Installation
     # wuerde jeden weiteren Start schlucken (Fenster kommt nur nach vorn).
     _kill_terminal_at(target_install)
+    # VOR dem Erststart merken, ob der Datenordner schon existierte: nur dann
+    # ist eine vorgefundene servers.dat womoeglich hand-gelernt (Retry-Fall).
+    # Ein in DIESEM Lauf frisch angelegter Datenordner bekommt von MT5 eine
+    # Standard-Liste OHNE die Prop-Broker — die darf nie "behalten" werden
+    # (Fund 15.08.2026: genau das zwang Finn bei JEDEM neuen Terminal zur
+    # manuellen Broker-Suche, auch bei Brokern, die die Vorlage laengst kennt).
+    data_existed_before = data_dir_for(target_install, root) is not None
     proc = subprocess.Popen([target_exe], cwd=target_install)
     new_data = None
     t0 = time.time()
@@ -444,19 +451,25 @@ def run_provision(*, name, login, password, server, template_exe,
     # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
     step("ea")
     target_servers = os.path.join(new_data, "config", "servers.dat")
-    if os.path.exists(target_servers):
-        # Schon vorhanden = das Terminal hat den Server bereits gelernt (z.B.
-        # durch einen manuellen Dialog-Login beim vorigen Versuch) — NICHT mit
-        # der Vorlagen-Liste ueberschreiben, sonst verlernt es ihn wieder.
-        servers_note = "servers.dat vorhanden (behalten)"
+    if os.path.exists(target_servers) and data_existed_before:
+        # Datenordner stammt aus einem VORIGEN Versuch — eine vorhandene Liste
+        # kann hand-gelernte Server enthalten (manuelle Broker-Suche), nicht
+        # ueberschreiben, sonst verlernt das Terminal sie wieder.
+        servers_note = "servers.dat vorhanden (behalten, Wiederholungslauf)"
     else:
+        # Frischer Datenordner: die vom Erststart angelegte Standard-Liste
+        # kennt die Prop-Broker NICHT — immer die Quelle drueberkopieren
+        # (bestehender Master desselben Servers, sonst Vorlage).
         src = servers_dat_source(folder, server, tpl_data, root)
-        if not src:
+        if not src and os.path.exists(target_servers):
+            servers_note = "servers.dat: keine Quelle — Standard-Liste bleibt (Broker ggf. einmal von Hand suchen)"
+        elif not src:
             raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
                                  "starten und wieder schliessen.")
-        os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
-        shutil.copy2(src, target_servers)
-        servers_note = "servers.dat"
+        else:
+            os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
+            shutil.copy2(src, target_servers)
+            servers_note = f"servers.dat kopiert ({os.path.basename(os.path.dirname(os.path.dirname(src)))})"
     experts = os.path.join(new_data, "MQL5", "Experts")
     presets = os.path.join(new_data, "MQL5", "Presets")
     os.makedirs(experts, exist_ok=True)
