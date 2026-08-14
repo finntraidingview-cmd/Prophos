@@ -421,16 +421,26 @@ def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45):
 
 
 def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
-    time.sleep(wait_s)
     snap = str(cfg.get("snapshot_file") or "prophos_master.csv")
     common = cfg.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
     snap_path = os.path.join(common, snap)
-    try:
-        if os.path.getmtime(snap_path) > started_ts:
-            return  # Snapshot fliesst — EA war noch auf dem Chart, nichts zu tun
-    except OSError:
-        pass  # Datei fehlt ganz -> heilen
+    # POLLEN statt Ein-Schuss-Check (Fund 15.08.2026, gwgdwd-Trade-Test): der
+    # Zwangs-Start loescht den Alt-Snapshot (_drop_snapshot), und ein Terminal,
+    # das langsamer bootet als die Frist (FundedNext > 45s), sah im Ein-Schuss-
+    # Check aus wie 'Datei fehlt' — die Heilung killte das GESUNDE, noch
+    # bootende Terminal und startete es ohne Login-Zwang neu. Jetzt: bis
+    # Frist + 90s Boot-Puffer alle 5s nachsehen; EIN frischer Schreibvorgang
+    # beendet die Heilung sofort. Gekillt wird nur ein Terminal, das das ganze
+    # Fenster ueber nichts geliefert hat.
+    deadline = time.time() + wait_s + 90
+    while time.time() < deadline:
+        time.sleep(5)
+        try:
+            if os.path.getmtime(snap_path) > started_ts:
+                return  # Snapshot fliesst — EA laeuft, nichts zu tun
+        except OSError:
+            pass  # Datei (noch) nicht da -> weiter warten
     data_dir = provision.data_dir_for(install_dir)
     if not data_dir:
         print(f"[panel] {fname}: Selbstheilung — Datenordner nicht gefunden.", flush=True)

@@ -16180,9 +16180,11 @@
             }, 1200)
             return
           }
-          if(sec > 170){
+          if(sec > 240){
+            // 240s statt 170 (15.08.2026): die Selbstheilung pollt jetzt bis
+            // Frist+90s, bevor sie neu startet — der Ticker muss ihr die Zeit geben.
             _pfMt5StopTimer()
-            _pfSet('m5term', 'err', 'Terminal liefert nach 3 Minuten nichts — Details-Log der Copier-Karte prüfen.')
+            _pfSet('m5term', 'err', 'Terminal liefert nach 4 Minuten nichts — Details-Log der Copier-Karte prüfen (und im Terminal: Reiter „Experten").')
             return
           }
           // Broker-Wartefall (Review-Fund 15.08.2026): der Text 'Login-Fenster …
