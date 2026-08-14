@@ -3,7 +3,7 @@
   "mode": "demo",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
   "hedge_portable": false,
-  "hedge_expected_login": 437884,
+  "hedge_expected_login": 437804,
   "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
   "common_files_dir": "",
   "multiplier": 1.0,
