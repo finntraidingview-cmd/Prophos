@@ -3511,6 +3511,16 @@
         </div>
         <div class="modal-body">
           <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
+            <!-- Routen-Regler (15.08.2026, Finns Ansage): Duplikum ODER eigener
+                 MT5-Copier. Filtert beide Account-Dropdowns auf die jeweils
+                 verlinkten Accounts; bei MT5 ist der Slave fix der Hedge dieses PCs. -->
+            <div class="field" style="grid-column:1 / -1">
+              <label>Weg</label>
+              <div class="seg" id="tp-route-seg">
+                <button type="button" id="tp-route-dup">Duplikum</button>
+                <button type="button" id="tp-route-mt5">MT5-Copier</button>
+              </div>
+            </div>
             <div class="field">
               <label>Master-Account</label>
               <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -15765,6 +15775,11 @@
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
 
+    // Explizite Routen-Wahl aus dem Modal-Regler (15.08.2026): route='mt5' →
+    // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
+    // Fallback für Alt-Pläne ohne gesetzte Route.
+    if(plan.route === 'mt5') return tpPreflightMt5(plan)
+
     // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
     // Duplikum-Checks wären hier sinnlos. Routen-Erkennung: planMirrorRoute().
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
@@ -15772,7 +15787,10 @@
 
     // MT5-Route (15.08.2026): beide Enden in mt5_links verlinkt + lokaler PC →
     // eigener Preflight gegen den lokalen Copier. Mirror behält Vorrang.
-    const mt5Route = (typeof planMt5Route === 'function') ? planMt5Route(plan) : null
+    // route='dup' = EXPLIZITE Duplikum-Wahl aus dem Regler → die MT5-Erkennung
+    // darf einen doppelt verlinkten Plan dann NICHT mehr an sich ziehen.
+    const mt5Route = (plan.route === 'dup') ? null
+      : ((typeof planMt5Route === 'function') ? planMt5Route(plan) : null)
     if(mt5Route) return tpPreflightMt5(plan)
 
     _pfPlanId = planId
@@ -16272,6 +16290,45 @@
   }
 
   // ─────── Trade-Plan-Modal (Create + Edit) ───────
+  /* ── Routen-Regler im Trade-Plan-Modal (15.08.2026, Finns Ansage) ──
+   * Zwei Welten, ein Regler: 'dup' (Duplikum) zeigt nur Duplikum-verlinkte
+   * Accounts, 'mt5' (eigener Copier) nur mt5_links-Accounts — und der Slave
+   * ist bei MT5 fix der Hedge-Account dieses PCs (es wird immer nur auf ihn
+   * gespiegelt). Die Wahl wird beim Speichern als plan.route persistiert. */
+  const TP_ROUTE_LS = 'prophos_tp_route'
+  let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
+  let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
+
+  function tpRouteUpdateSeg(){
+    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5')
+    document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
+    // Bei fixem MT5-Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren
+    const fixed = _tpRoute === 'mt5'
+    const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
+    if(filterRow) filterRow.style.display = fixed ? 'none' : ''
+    const slaveSel = document.getElementById('tp-slave')
+    if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
+  }
+
+  async function tpResolveMt5Hedge(){
+    // Hedge-Login aus der FRISCHEN Instanzliste (alle Instanzen teilen per
+    // check_fleet denselben Hedge), dann mt5_links → Prophos-Account-ID.
+    // Offline/kein Treffer → null; das Slave-Dropdown zeigt dann alle
+    // MT5-verlinkten Accounts (benutzbar bleiben schlägt fixieren).
+    try{
+      if(typeof window.mtcApi !== 'function') return
+      const d = await window.mtcApi('instances')
+      let hLogin = null
+      for(const i of ((d && d.instances) || [])){
+        hLogin = String(((i || {}).status || {}).hedge_login || (i || {}).hedge_expected || '') || null
+        if(hLogin) break
+      }
+      if(!hLogin) return
+      const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+      if(links[hLogin] != null) _tpMt5HedgeAccId = String(links[hLogin])
+    }catch(_){}
+  }
+
   function openTradePlanModal(editId){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
     if(!accounts.length){
@@ -16289,6 +16346,18 @@
     const _editPlan = isEdit ? tradePlans.find(x => String(x.id) === String(editId)) : null
     const startBtn = document.getElementById('tradePlanSaveStart')
     if(startBtn) startBtn.style.display = (!isEdit || _editPlan?.status === 'planned') ? '' : 'none'
+
+    // Routen-Regler initialisieren: beim Bearbeiten aus dem Plan, sonst letzte Wahl
+    _tpRoute = _editPlan ? (_editPlan.route === 'mt5' ? 'mt5' : 'dup')
+                         : (localStorage.getItem(TP_ROUTE_LS) === 'mt5' ? 'mt5' : 'dup')
+    tpRouteUpdateSeg()
+    // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
+    // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
+    const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
+    ;['tp-route-dup', 'tp-route-mt5'].forEach(id => {
+      const b = document.getElementById(id)
+      if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
+    })
 
     // Populate Master & Slave dropdowns from accounts (mit Filter-Support)
     const masterSel = document.getElementById('tp-master')
@@ -16411,12 +16480,30 @@
       }
       // Archivierte Accounts ausschließen (außer geschützt)
       const archive = (typeof getArchive === 'function') ? getArchive() : {}
+      // Routen-Regler (15.08.2026): 'dup' zeigt nur Duplikum-verlinkte Accounts,
+      // 'mt5' nur mt5_links-Accounts — beim MT5-Slave ist es fix der Hedge, und
+      // der Hedge selbst taucht im Master-Dropdown nicht auf (Selbst-Spiegel).
+      const _dupIds = new Set(Object.values((typeof dupGetLinks === 'function') ? dupGetLinks() : {}).map(String))
+      const _mt5Ids = new Set(Object.values((typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}).map(String))
       // Filter-Logik
       const filtered = accounts.filter(a => {
         const isProtected = protectedIds.has(String(a.id))
         if(archive[a.id]?.archived && !isProtected) return false
-        if(firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
-        if(typeFilter && a.type !== typeFilter && !isProtected) return false
+        if(!isProtected){
+          if(_tpRoute === 'mt5'){
+            if(!_mt5Ids.has(String(a.id))) return false
+            if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
+            if(role === 'master' && _tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
+          } else {
+            if(!_dupIds.has(String(a.id))) return false
+          }
+        }
+        // Beim fixen MT5-Slave die (versteckten) Firmen-/Typ-Filter überspringen
+        // (Review-Fund 15.08.2026): ein im dup-Modus gesetzter Filter würde sonst
+        // unsichtbar den Hedge ausfiltern → leeres UND gesperrtes Select.
+        const skipFilters = role === 'slave' && _tpRoute === 'mt5'
+        if(!skipFilters && firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
+        if(!skipFilters && typeFilter && a.type !== typeFilter && !isProtected) return false
         return true
       })
       // Duplikat-Labels + Balance-Lookup vorbereiten
@@ -16510,6 +16597,11 @@
       if(previousValue && filtered.some(a => String(a.id) === String(previousValue))){
         sel.value = previousValue
       }
+      // MT5-Route: Slave ist fix der Hedge dieses PCs — immer vorauswählen
+      if(role === 'slave' && _tpRoute === 'mt5' && _tpMt5HedgeAccId
+         && filtered.some(a => String(a.id) === String(_tpMt5HedgeAccId))){
+        sel.value = String(_tpMt5HedgeAccId)
+      }
     }
 
     // Firma-Filter befüllen (nur Firmen die in accounts vorkommen)
@@ -16558,6 +16650,43 @@
         tf._tpHooked = true
       }
     })
+
+    // Routen-Regler-Listener (idempotent wie die Filter-Listener — die beim
+    // ersten Open gebundene Closure referenziert nur Modul-State + DOM-per-ID)
+    const tpRouteApply = () => {
+      tpRouteUpdateSeg()
+      tpRenderAccountSelect('master')
+      tpRenderAccountSelect('slave')
+      tpNqUpdateToggle()
+      tpRecompute()
+    }
+    ;[['tp-route-dup', 'dup'], ['tp-route-mt5', 'mt5']].forEach(([id, r]) => {
+      const b = document.getElementById(id)
+      if(b && !b._tpHooked){
+        b.addEventListener('click', () => {
+          if(_tpRoute === r) return
+          _tpRoute = r
+          localStorage.setItem(TP_ROUTE_LS, r)
+          tpRouteApply()
+          if(r === 'mt5' && !_tpMt5HedgeAccId){
+            tpResolveMt5Hedge().then(() => {
+              // Open-Check wie beim Kick unten — nicht in ein geschlossenes Modal rendern
+              if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
+            })
+          }
+        })
+        b._tpHooked = true
+      }
+    })
+    // Hedge-Auflösung im Hintergrund anstoßen (nur auf dem lokalen PC sinnvoll).
+    // Bei JEDEM Open neu auflösen, nicht nur bei null (Review-Fund 15.08.2026):
+    // ein für die Session gecachter Hedge würde nach Hedge-/User-Wechsel alle
+    // Slave-Kandidaten wegfiltern. tpResolveMt5Hedge ist idempotent und billig.
+    if(MT5_LOCAL){
+      tpResolveMt5Hedge().then(() => {
+        if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
+      })
+    }
 
     if(isEdit){
       const p = tradePlans.find(x => String(x.id) === String(editId))
@@ -17237,6 +17366,16 @@
         // überschreiben. Fix betrifft nur diesen Speicher-Pfad, die Erkennungslogik selbst
         // bleibt unangetastet.
         const { status: _ignoredStatus, ...updateRow } = planToRow(planObj)
+        // Routen-Wahl aus dem Regler: nur solange der Plan 'planned' ist — ein
+        // Edit während eines laufenden Trades darf die Engine nicht wechseln
+        // (gleiche Falle wie der status-Ausschluss direkt hierüber). 'dup' wird
+        // EXPLIZIT gespeichert (Review-Fund 15.08.2026): null hieße "keine Wahl"
+        // und die Auto-Erkennung dürfte einen bewussten Duplikum-Plan doch in
+        // die MT5-Engine umleiten, wenn beide Accounts doppelt verlinkt sind.
+        const _curPlan = tradePlans.find(x => String(x.id) === String(_editingPlanId))
+        if(!_curPlan || _curPlan.status === 'planned'){
+          updateRow.route = (_tpRoute === 'mt5') ? 'mt5' : 'dup'
+        }
         const { data, error } = await supabase
           .from('trade_plans').update(updateRow).eq('id', _editingPlanId).select('*').single()
         if(error) throw error
@@ -17244,8 +17383,13 @@
         if(idx >= 0) tradePlans[idx] = rowToPlan(data)
         savedPlanId = data.id
       }else{
+        // Routen-Wahl aus dem Regler direkt mitschreiben (planToRow lässt route
+        // bewusst weg, damit Edits laufender Pläne die Engine nicht umziehen —
+        // beim Neuanlegen ist das Mitschreiben genau richtig). 'dup' explizit,
+        // nie null: null = Alt-Plan = Auto-Erkennung darf raten.
+        const insertRow = { ...planToRow(planObj), route: (_tpRoute === 'mt5') ? 'mt5' : 'dup' }
         const { data, error } = await supabase
-          .from('trade_plans').insert(planToRow(planObj)).select('*').single()
+          .from('trade_plans').insert(insertRow).select('*').single()
         if(error) throw error
         tradePlans.unshift(rowToPlan(data))
         savedPlanId = data.id
