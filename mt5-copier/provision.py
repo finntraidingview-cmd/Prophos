@@ -208,11 +208,15 @@ def plan_checks(folder, name, login, server, template_exe):
         if os.path.exists(cfg_path):
             problems.append(f"config-{name}.json existiert schon — Account ist bereits angelegt.")
     if not template_exe or os.path.basename(template_exe).lower() != "terminal64.exe":
-        problems.append("Vorlage muss eine terminal64.exe sein (master_terminal_path der config.json).")
+        problems.append("Vorlage muss eine terminal64.exe sein (master_terminal_path in config.json bzw. config.vorlage.json).")
     elif not os.path.exists(template_exe):
         problems.append(f"Vorlage nicht gefunden: {template_exe}")
-    if not os.path.exists(os.path.join(folder, "config.json")):
-        problems.append("config.json fehlt — daraus werden die Hedge-Felder uebernommen.")
+    # Basis darf auch die reine Vorlage sein (config.vorlage.json, 15.08.2026 —
+    # Finns Von-Null-Test: alle Accounts inkl. config.json geloescht).
+    if not any(os.path.exists(os.path.join(folder, fn))
+               for fn in ("config.json", "config.vorlage.json")):
+        problems.append("Weder config.json noch config.vorlage.json da — daraus "
+                        "werden Hedge-Felder und Vorlage-Terminal uebernommen.")
     return problems
 
 
@@ -558,8 +562,22 @@ def run_provision(*, name, login, password, server, template_exe,
 
     # ── 6. Config anlegen — der laufende Copier nimmt sie binnen 5 s auf ────
     step("config")
-    with open(os.path.join(folder, "config.json"), "r", encoding="utf-8") as f:
-        base = json.load(f)
+    # Basis: config.json (klassisch) ODER config.vorlage.json (reine Vorlage,
+    # kein Account — Finns Von-Null-Test 15.08.2026, bei dem alle Accounts
+    # inkl. config.json geloescht waren und die Provisionierung ins Leere griff).
+    base = None
+    for base_name in ("config.json", "config.vorlage.json"):
+        try:
+            with open(os.path.join(folder, base_name), "r", encoding="utf-8") as f:
+                base = json.load(f)
+            break
+        except (OSError, ValueError):
+            continue
+    if not isinstance(base, dict) or not base:
+        raise ProvisionError(
+            "Keine Vorlage gefunden: config.json oder config.vorlage.json mit den "
+            "Hedge-Feldern (hedge_terminal_path, hedge_expected_login) und "
+            "master_terminal_path anlegen.")
     cfg = build_master_config(base, name=name, master_login=login,
                               terminal_path=target_exe, ident=ident, server=server)
     # Besitzer-Stempel (15.08.2026): kommt die Provisionierung aus Prophos, traegt

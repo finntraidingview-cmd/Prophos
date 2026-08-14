@@ -1,0 +1,16 @@
+{
+  "_hinweis": "REINE VORLAGE fuer die Auto-Provisionierung — ist KEIN Account und taucht nie in der Liste auf (15.08.2026, Von-Null-Test). Pro PC einmal anpassen: hedge_expected_login muss dem Konto im Hedge-Terminal entsprechen (steht in dessen Titelzeile), die Pfade den echten Ordnern. Wird bewusst NICHT automatisch aktualisiert — die Werte gehoeren dem PC.",
+  "mode": "dryrun",
+  "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+  "hedge_portable": false,
+  "hedge_expected_login": 437884,
+  "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
+  "common_files_dir": "",
+  "multiplier": 1.0,
+  "symbol_map": { "NAS100": "NAS100" },
+  "max_lots_per_hedge": 2.0,
+  "adopt_existing_master_positions": false,
+  "poll_interval": 0.5,
+  "deviation_points": 30,
+  "filling": "auto"
+}

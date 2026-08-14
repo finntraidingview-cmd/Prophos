@@ -26,3 +26,4 @@ __pycache__/
 
 # Trade-Plaene des jeweiligen PCs — Laufzeitdaten, nie im Repo
 plans.json
+!config.vorlage.json

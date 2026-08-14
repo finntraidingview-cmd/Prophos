@@ -48,6 +48,20 @@ TEMPLATES = ("config.example.json", "config.fusion-test.json")
 SYMBOL_RE = re.compile(r"[A-Za-z0-9._#!&\-]{1,32}")
 
 
+def base_config():
+    """Basis fuer die Provisionierung (Hedge-Felder + Vorlage-Terminal).
+    Reihenfolge (15.08.2026, Finns Von-Null-Test: er hat ALLE Accounts inkl.
+    config.json geloescht — die war bis dahin heimlich auch die Vorlage):
+    1. config.json (erster Master, klassisch)
+    2. config.vorlage.json — reine Vorlage, ist KEIN Account (CONFIG_RE matcht
+       den Punkt nicht), taucht also nie in der Liste auf. Echtes 'von 0'."""
+    cfg = read_json(os.path.join(HERE, "config.json"), None)
+    if isinstance(cfg, dict) and cfg:
+        return cfg
+    cfg = read_json(os.path.join(HERE, "config.vorlage.json"), None)
+    return cfg if isinstance(cfg, dict) else {}
+
+
 def _pid_alive(pid):
     """Lebt der Prozess? Fuer den Loesch-Riegel (b2): stale Status heisst nicht
     toter Copier (Terminal-Ausfall schreibt gar nichts mehr). ACHTUNG Windows:
@@ -318,7 +332,7 @@ def prov_start(name, login, password, server, owner=None, display=None):
     with PROV_LOCK:
         if PROV_JOB and not PROV_JOB.get("done"):
             return False, "Es laeuft schon eine Provisionierung — erst fertig laufen lassen."
-        cfg = read_json(os.path.join(HERE, "config.json"), {}) or {}
+        cfg = base_config()
         template = cfg.get("master_terminal_path") or ""
         job = {"name": name, "error": None, "done": False,
                "steps": {k: {"state": "pending", "note": None} for k in PROV_STEPS}}
@@ -1085,8 +1099,15 @@ class Handler(BaseHTTPRequestHandler):
                 display = None
             if not (name and login and password and server):
                 return self._send(400, json.dumps({"ok": False, "msg": "Name, Login, Passwort und Server sind Pflicht."}))
+            if not base_config():
+                # Von-Null-Fall (15.08.2026): ohne Basis weiss die Einrichtung weder
+                # Hedge-Konto noch Vorlage-Terminal — klare Ansage statt Folgefehler.
+                return self._send(400, json.dumps({"ok": False, "msg":
+                    "Keine Vorlage auf diesem PC: config.vorlage.json fehlt (traegt "
+                    "Hedge-Konto + Vorlage-Terminal). Einmalig anlegen/herunterladen, "
+                    "dann klappt jedes Hinzufuegen."}, ensure_ascii=False))
             probs = provision.plan_checks(HERE, name, login, server,
-                                          (read_json(os.path.join(HERE, "config.json"), {}) or {}).get("master_terminal_path"))
+                                          base_config().get("master_terminal_path"))
             if probs:
                 return self._send(400, json.dumps({"ok": False, "msg": " · ".join(probs)}, ensure_ascii=False))
             ok, msg = prov_start(name, login, password, server, owner=owner, display=display)
