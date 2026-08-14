@@ -161,6 +161,39 @@ def build_master_config(base, *, name, master_login, terminal_path, ident, serve
     return cfg
 
 
+def servers_dat_names(path):
+    """Alle Servernamen-Kandidaten aus einer servers.dat: UTF-16-LE-Textläufe
+    (MT5 speichert Strings so). Best effort — liefert auch anderen Text der
+    Datei mit, aber fuer den Abgleich unten reicht das voellig."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return set()
+    return {m.group().decode("utf-16-le")
+            for m in re.finditer(rb"(?:[\x20-\x7e]\x00){4,64}", blob)}
+
+
+def _server_norm(s):
+    return re.sub(r"\s+", "", str(s or "")).casefold()
+
+
+def resolve_server_name(path, server):
+    """Exakte Schreibweise des Servernamens aus der servers.dat aufloesen.
+    Anlass (14.08.2026, FundedNext): die Zugangsdaten-Mail schreibt
+    'FundedNext-Server2', der echte Server heisst 'FundedNext-Server 2' —
+    der ini-Login sucht dann einen Server, den es woertlich nicht gibt.
+    Verglichen wird ohne Leerzeichen/Gross-Klein; zurueck kommt der Name
+    EXAKT so, wie er in der Liste steht (None = nicht drin)."""
+    want = _server_norm(server)
+    if not want:
+        return None
+    for name in servers_dat_names(path):
+        if _server_norm(name) == want:
+            return name
+    return None
+
+
 def servers_dat_contains(path, server):
     """Steht der Servername in dieser servers.dat? Best-effort-Byte-Suche
     (MT5 speichert Strings als UTF-16-LE; UTF-8 als Fallback mitgeprueft).
@@ -462,29 +495,33 @@ def run_provision(*, name, login, password, server, template_exe,
     # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
     step("ea")
     target_servers = os.path.join(new_data, "config", "servers.dat")
-    # Nicht raten, PRUEFEN (15.08.2026): entscheidend ist allein, ob die Liste
-    # im Terminal den gewuenschten Servernamen KENNT. Kennt sie ihn, bleibt sie
-    # (schuetzt hand-gelernte Server). Kennt sie ihn nicht, wird eine Quelle
-    # kopiert, die ihn kennt — egal ob frischer Datenordner oder Wiederholung.
-    # Damit heilen sich auch die 'vergifteten' Terminals der Fehlversuche selbst.
-    if os.path.exists(target_servers) and servers_dat_contains(target_servers, server):
-        servers_note = f"servers.dat kennt {server} schon (behalten)"
+    # Nicht raten, AUFLOESEN (15.08.2026): entscheidend ist, ob eine Liste den
+    # Servernamen kennt — und in WELCHER Schreibweise. Zugangsdaten-Mails
+    # schreiben Namen gern falsch ('FundedNext-Server2' statt
+    # 'FundedNext-Server 2'); der ini-Login braucht die exakte Form. Also:
+    # Namen aus der Liste aufloesen (ohne Leerzeichen/Gross-Klein verglichen)
+    # und die EXAKTE Schreibweise fuer Login-ini + Config uebernehmen. Damit
+    # heilen sich auch Terminals aus Fehlversuchen und Tippfehler-Mails selbst.
+    resolved = resolve_server_name(target_servers, server) if os.path.exists(target_servers) else None
+    if resolved:
+        servers_note = f"servers.dat kennt {resolved} schon (behalten)"
     else:
         src = servers_dat_source(folder, server, tpl_data, root)
-        if src and not servers_dat_contains(src, server):
-            # Quelle kennt den Server auch nicht (voellig neuer Broker) —
-            # kopieren wuerde nichts verbessern.
-            src = None
-        if src:
+        resolved = resolve_server_name(src, server) if src else None
+        if resolved:
             os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
             shutil.copy2(src, target_servers)
-            servers_note = f"servers.dat mit {server} kopiert"
+            servers_note = f"servers.dat mit {resolved} kopiert"
         elif os.path.exists(target_servers):
             servers_note = (f"kein Terminal auf diesem PC kennt {server} — "
                             f"einmalig im Terminal Broker suchen (Konto eroeffnen)")
         else:
             raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
                                  "starten und wieder schliessen.")
+    if resolved and resolved != server:
+        servers_note += f" · Servername korrigiert: '{server}' -> '{resolved}'"
+    if resolved:
+        server = resolved
     experts = os.path.join(new_data, "MQL5", "Experts")
     presets = os.path.join(new_data, "MQL5", "Presets")
     os.makedirs(experts, exist_ok=True)
