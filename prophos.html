@@ -4974,26 +4974,34 @@
                der vier statischen Inputs unten (nie innerHTML/Attribute — cred_password
                darf nie im DOM-Markup oder in Logs auftauchen). Optionen befuellt openAdd(). -->
           <div style="margin-bottom:10px">
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Aus Prophos-Account übernehmen (optional)</label>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Aus Prophos-Account übernehmen (optional)</label>
             <select data-mtcp="prefill" id="mtc-add-prefill" style="width:100%"><option value="">— manuell eingeben —</option></select>
+          </div>
+          <!-- Paste-Parser (15.08.2026, Finns Wunsch "wie drüben"): ganze Prop-Firm-Mail
+               reinpasten → acParseCredBlob (dieselbe Funktion wie im Account-Modal)
+               zieht Login/Passwort/Server raus und füllt die Felder unten. -->
+          <div style="margin-bottom:10px">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">📋 Mail reinpasten — Felder füllen sich automatisch</label>
+            <textarea data-mtcp="paste" id="mtc-add-paste" rows="3" style="width:100%;resize:vertical;font-family:var(--mono);font-size:12px" placeholder="Die ganze E-Mail / den Text der Prop-Firma hier reinkopieren — Login, Passwort und Server werden automatisch erkannt."></textarea>
+            <div id="mtc-add-paste-hint" style="font-size:11.5px;color:var(--sub);margin-top:4px;display:none"></div>
           </div>
           <div class="mtc-row">
             <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Name (kurz, nur Buchstaben/Zahlen)</label>
-              <input data-mtcp="name" placeholder="z.B. ftmo1">
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Name (kurz)</label>
+              <input data-mtcp="name" placeholder="z.B. ftmo1" title="Nur Buchstaben/Zahlen, max. 24 Zeichen">
             </div>
             <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Login (Kontonummer)</label>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Login (Kontonummer)</label>
               <input data-mtcp="login" placeholder="z.B. 437899">
             </div>
           </div>
           <div class="mtc-row" style="margin-top:8px">
             <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Passwort (sichtbar — auf Wunsch)</label>
-              <input data-mtcp="password" autocomplete="off" spellcheck="false">
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Passwort</label>
+              <input data-mtcp="password" autocomplete="off" spellcheck="false" title="Wird nur einmal fürs Einloggen gebraucht und nicht gespeichert">
             </div>
             <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Server</label>
+              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Server</label>
               <input data-mtcp="server" placeholder="z.B. FusionMarkets-Demo">
             </div>
           </div>
@@ -12118,7 +12126,11 @@
       /\blogin\b[^\n0-9]*([0-9]{4,12})\b/i
     ])
     out.server = grab([
-      /server(?:\s*name)?\s*[:#=]?\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40})\b/i
+      // Optionaler Zahlen-Suffix nach Leerzeichen: "FundedNext-Server 2" ist ein
+      // ECHTER Servername (Finns FundedNext-Master) — die Regex stoppte vorher am
+      // Leerzeichen und lieferte einen kaputten halben Namen (Fund 15.08.2026).
+      // Bewusst NUR Ziffern als Suffix, sonst würde Folgetext mitgefressen.
+      /server(?:\s*name)?\s*[:#=]?\s*([A-Za-z0-9][A-Za-z0-9._\-]{2,40}(?:[ ][0-9]{1,4})?)\b/i
     ])
     out.password = grab([/(?:master|trading|main|haupt)\s*(?:password|passwort|kennwort)\s*[:#=]?\s*(\S+)/i])
     if(!out.password){
@@ -22108,7 +22120,44 @@
     if(sel.value !== keep) sel.value = ''
   }
   function openAdd(){ mtcPrefillFill(); addBg.classList.add('open'); renderAddJob() }
-  function closeAdd(){ addBg.classList.remove('open'); _mtcPendingLink = null; mtcLoad() }
+  function closeAdd(){
+    addBg.classList.remove('open'); _mtcPendingLink = null
+    // Paste-Feld leeren — da steht die komplette Mail inkl. Passwort drin,
+    // die soll das Modal nicht ueberleben (gleiches Muster wie ac-paste-blob).
+    const _pb = $('mtc-add-paste'); if(_pb) _pb.value = ''
+    const _ph = $('mtc-add-paste-hint'); if(_ph) _ph.style.display = 'none'
+    mtcLoad()
+  }
+
+  // Mail-Paste-Parser (15.08.2026, Finns Wunsch "wie drüben"): DIESELBE Funktion
+  // wie im Account-Modal (acParseCredBlob) — ganze Prop-Firm-Mail rein, Login/
+  // Passwort/Server fallen raus. Nur .value-Property, nie Markup (Passwort!).
+  const mtcPasteEl = $('mtc-add-paste')
+  if(mtcPasteEl) mtcPasteEl.addEventListener('input', () => {
+    if(typeof acParseCredBlob !== 'function') return
+    const parsed = acParseCredBlob(mtcPasteEl.value)
+    const set = (k, v) => { const el = addBg.querySelector(`[data-mtcp="${k}"]`); if(el && v) el.value = v }
+    const found = []
+    if(parsed.login){ set('login', String(parsed.login)); found.push('Login') }
+    if(parsed.password){
+      const pw = addBg.querySelector('[data-mtcp="password"]')
+      if(pw){ pw.value = parsed.password; found.push('Passwort') }
+    }
+    if(parsed.server){ set('server', String(parsed.server)); found.push('Server') }
+    // Name-Vorschlag aus dem Server-Präfix (FusionMarkets-Demo → FusionMarkets…),
+    // nur wenn das Feld noch leer ist — nie eine Eingabe überschreiben.
+    const nameEl = addBg.querySelector('[data-mtcp="name"]')
+    if(parsed.server && nameEl && !nameEl.value.trim()){
+      const base = String(parsed.server).split(/[-_.]/)[0].replace(/[^A-Za-z0-9]/g, '').slice(0, 20)
+      if(base && parsed.login) nameEl.value = (base + String(parsed.login).slice(-4)).slice(0, 24)
+    }
+    const hint = $('mtc-add-paste-hint')
+    if(hint){
+      if(found.length){ hint.style.display = ''; hint.style.color = 'var(--good,#12B76A)'; hint.textContent = '✓ Erkannt: ' + found.join(' · ') + ' — unten prüfen, dann Fertig.' }
+      else if(mtcPasteEl.value.trim().length > 8){ hint.style.display = ''; hint.style.color = 'var(--sub)'; hint.textContent = 'Nichts automatisch erkannt — Felder unten manuell füllen.' }
+      else { hint.style.display = 'none' }
+    }
+  })
   $('mtc-add-open').addEventListener('click', openAdd)
   $('mtc-add-x').addEventListener('click', closeAdd)
   // Prefill-Auswahl: fuellt AUSSCHLIESSLICH die .value-PROPERTY der vier
