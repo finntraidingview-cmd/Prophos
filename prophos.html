@@ -21701,7 +21701,17 @@
     else if(job.done) h += `<div class="mtc-step done"><span class="st">✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</span></div>`
     return h + '</div>'
   }
+  // _mtcAddFresh: das Formular wurde nach einem FERTIGEN Lauf zurückgesetzt —
+  // der 3s-Poll darf die alten Schritte dann nicht wieder reinmalen. Ein neuer
+  // Start hebt das Flag auf.
+  let _mtcAddFresh = false
   function renderAddJob(){
+    if(_mtcAddFresh && mtcJob && mtcJob.done){
+      $('mtc-add-steps').innerHTML = ''
+      $('mtc-add-start').disabled = false
+      document.querySelectorAll('#mtcAddModal [data-mtcp]').forEach(i => i.disabled = false)
+      return
+    }
     $('mtc-add-steps').innerHTML = mtcJob ? jobSteps(mtcJob) : ''
     const busy = mtcJob && !mtcJob.done
     $('mtc-add-start').disabled = !!busy
@@ -21849,6 +21859,38 @@
         }catch(e){ console.warn('[mtc] Preset-Mapping-Push übersprungen:', e && e.message) }
       }
     }
+    // Manueller Weg: Zugangsdaten nach ERFOLG in Supabase sichern (Finns Ansage
+    // 15.08.2026) — Account anlegen, verknüpfen, Liste nachladen. Bei Fehler
+    // verfällt der Merker still (Zugangsdaten bleiben dann nur auf dem PC).
+    if(_mtcPendingCreate && d.job && d.job.done && d.job.name === _mtcPendingCreate.name){
+      const pc = _mtcPendingCreate
+      _mtcPendingCreate = null
+      if(!d.job.error && typeof supabase !== 'undefined' && typeof currentUserId !== 'undefined' && currentUserId){
+        ;(async () => {
+          try{
+            const row = {
+              user_id: currentUserId,
+              name: pc.display,
+              firm: String(pc.server || '').split(/[-_ ]/)[0] || 'MT5',
+              account_type: 'challenge',
+              balance: 0,
+              external_id: String(pc.login),
+              cred_login: String(pc.login),
+              cred_password: pc.password || null,
+              cred_server: String(pc.server),
+              cred_platform: 'mt5',
+              notes: 'Automatisch angelegt bei der MT5-Copier-Einrichtung (15.08.2026) — Firma/Typ bei Bedarf anpassen.'
+            }
+            const { data: acc2, error } = await supabase.from('accounts').insert(row).select('*').single()
+            if(error) throw error
+            if(typeof mt5LinkSet === 'function') await mt5LinkSet(String(pc.login), String(acc2.id))
+            if(typeof loadAccountsFromSupabase === 'function') await loadAccountsFromSupabase()
+            if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink()
+            if(typeof atToast === 'function') atToast(`✓ „${pc.display}" in Prophos angelegt + verknüpft — Zugangsdaten gespeichert`, 'start')
+          }catch(e){ console.warn('[mtc] Auto-Anlegen fehlgeschlagen:', e && e.message) }
+        })()
+      }
+    }
     // Pro-Person-Filter (Paket E, 15.08.2026): jede Person sieht nur die eigenen
     // MT5-Accounts — wie bei Duplikum. Instanzen mit fremdem Besitzer-Stempel
     // (prophos_owner aus der Provisionierung) werden komplett ausgeblendet;
@@ -21939,6 +21981,9 @@
   // ueber job.name eingeloest. Geloescht bei Modal-Schliessen, job.error und
   // nach dem Link — ein Panel-Neustart verliert den Job, dann verfaellt er still.
   let _mtcPendingLink = null
+  // Manueller Mail-Paste-Weg: nach Erfolg Account in Supabase anlegen (cred_*)
+  // und verknüpfen. Passwort lebt bis zur Einlösung nur in dieser Variable.
+  let _mtcPendingCreate = null
 
   // Prefill-Kandidaten: nicht archivierte Prophos-Accounts mit cred_login UND
   // cred_server, Plattform leer oder MT5. Labels laufen durch esc; das Passwort
@@ -21959,7 +22004,27 @@
     sel.value = keep
     if(sel.value !== keep) sel.value = ''
   }
-  function openAdd(){ mtcPrefillFill(); addBg.classList.add('open'); renderAddJob() }
+  function openAdd(){
+    mtcPrefillFill()
+    // Frisches Formular, wenn der letzte Lauf DURCH ist (Finns Wunsch
+    // 15.08.2026): alte Schritte + Felder raus, sonst wirkt der neue Account
+    // wie eine Fortsetzung des alten. Ein LAUFENDER Job bleibt sichtbar.
+    if(mtcJob && mtcJob.done){
+      ;['name','login','password','server'].forEach(k => {
+        const el = addBg.querySelector(`[data-mtcp="${k}"]`); if(el) el.value = ''
+      })
+      const pb = $('mtc-add-paste'); if(pb) pb.value = ''
+      const ph = $('mtc-add-paste-hint'); if(ph) ph.style.display = 'none'
+      const ms = $('mtc-add-msg'); if(ms){ ms.className = 'mtc-msg'; ms.textContent = '' }
+      if(prefillSel) prefillSel.value = ''
+      $('mtc-add-steps').innerHTML = ''
+      _mtcAddFresh = true
+      addBg.classList.add('open')
+      return
+    }
+    addBg.classList.add('open')
+    renderAddJob()
+  }
   function closeAdd(){
     addBg.classList.remove('open'); _mtcPendingLink = null
     // Paste-Feld leeren — da steht die komplette Mail inkl. Passwort drin,
@@ -22050,6 +22115,7 @@
     if(d.ok){ const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = '' }
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? 'läuft — Fortschritt unten' : ('Fehler: ' + (d.msg || d.error))
+    if(d.ok) _mtcAddFresh = false
     // Auto-Link-Merker (Paket D, 15.08.2026): erst NACH ok:true — ein abgelehnter
     // POST (z.B. 409, anderer Job laeuft) darf keinen Link vormerken. Nur wenn
     // der eingereichte Login wirklich zum ausgewaehlten Prophos-Account gehoert
@@ -22058,6 +22124,15 @@
       const selA = prefillSel ? (accounts || []).find(x => String(x.id) === prefillSel.value) : null
       _mtcPendingLink = (selA && selA.creds && String(selA.creds.login) === body.login)
         ? { name: body.name, login: body.login, accountId: String(selA.id), firm: selA.firm || null } : null
+      // Manueller Weg (Mail-Paste, kein Prophos-Account gewählt): nach ERFOLG
+      // die Zugangsdaten in Supabase sichern — Finns Ansage 15.08.2026 ("das
+      // Passwort wird immer resettet … alles in der Datenbank speichern"):
+      // Prophos legt den Account selbst an (cred_*-Felder) und verknüpft ihn.
+      // Passwort bis dahin NUR in dieser Variable, nie im DOM.
+      _mtcPendingCreate = _mtcPendingLink ? null : {
+        name: body.name, display: body.display || body.name,
+        login: body.login, password: body.password, server: body.server
+      }
     }
     if(d.ok) setTimeout(mtcLoad, 1000)
   })
