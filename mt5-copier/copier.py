@@ -837,6 +837,7 @@ def main():
             "hedge_balance": hedge_acc["balance"],
             "hedge_equity": hedge_acc["equity"],
             "hedge_currency": hedge_acc["currency"],
+            "hedge_usd_rate": hedge_acc.get("usd_rate"),
             # Verbuchte Closes aus dem Sidecar-Ring — neustart-fest
             "closed_hedges": m.closed[-50:],
         }
@@ -912,6 +913,19 @@ def main():
                 hedge_acc["currency"] = str(hai.currency) or None
             else:
                 hedge_acc["balance"] = hedge_acc["equity"] = hedge_acc["currency"] = None
+            # USD-Kurs der Hedge-Waehrung fuer die Symmetrie-Anzeige (15.08.2026,
+            # Finns Live-Symmetrie): Hedge fuehrt EUR, Master USD — ohne Kurs
+            # waere das Verhaeltnis um den EURUSD-Abstand verzerrt. Fehlt das
+            # FX-Symbol, bleibt der Wert None und das Frontend laesst das
+            # Prozent einfach weg ('Beweis oder leer', nie raten).
+            hedge_acc["usd_rate"] = None
+            _hcur = hedge_acc.get("currency")
+            if _hcur == "USD":
+                hedge_acc["usd_rate"] = 1.0
+            elif _hcur in ("EUR", "GBP", "AUD", "NZD"):
+                _t = mt5.symbol_info_tick(_hcur + "USD")
+                if _t is not None and _t.bid:
+                    hedge_acc["usd_rate"] = float(_t.bid)
 
             # ── Jeden Master abarbeiten ─────────────────────────────────────────
             for m in masters:

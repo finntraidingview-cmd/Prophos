@@ -89,6 +89,88 @@ def ensure_vorlage():
               f"Hinzufuegen meldet das klar, sobald es gebraucht wird.", flush=True)
 
 
+def ensure_ea_source():
+    """EA-Quelltext aus dem Repo aktuell halten (15.08.2026, Finns Live-Symmetrie):
+    der Snapshot-Header v3 (balance/equity) lag laengst im Repo, aber auf den PCs
+    lief die alte kompilierte .ex5 — Master-P&L blieb deshalb leer. Das Panel
+    laedt die .mq5 beim Start in seinen Ordner; kompiliert wird pro Terminal beim
+    Kalt-Start (_ensure_ea_compiled). Best effort wie ensure_vorlage."""
+    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+           "main/mt5-copier/" + provision.EA_NAME + ".mq5")
+    dst = os.path.join(HERE, provision.EA_NAME + ".mq5")
+    try:
+        import urllib.request
+        data = urllib.request.urlopen(url, timeout=15).read()
+        if len(data) < 500 or b"OnInit" not in data:
+            return
+        old = b""
+        if os.path.exists(dst):
+            with open(dst, "rb") as f:
+                old = f.read()
+        if data != old:
+            tmp = dst + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, dst)
+            print(f"[panel] {provision.EA_NAME}.mq5 aus dem Repo aktualisiert "
+                  f"({len(data)} Bytes) — Terminals kompilieren beim naechsten Kalt-Start.", flush=True)
+    except Exception as e:
+        print(f"[panel] EA-Quelltext-Download fehlgeschlagen ({type(e).__name__}) — "
+              f"kompiliert wird dann mit dem vorhandenen Stand.", flush=True)
+
+
+def _ensure_ea_compiled(fname, install_dir):
+    """EA pro Terminal automatisch kompilieren (15.08.2026): MetaEditor liegt
+    neben jeder terminal64.exe und kann per Kommandozeile kompilieren — der
+    F4→F7-Handgriff entfaellt damit fuer immer, und EA-Updates aus dem Repo
+    erreichen die ganze Flotte von selbst. Laeuft nur beim Kalt-Start (Terminal
+    aus); kompiliert wird, wenn die .ex5 fehlt oder die .mq5 neuer ist."""
+    data_dir = provision.data_dir_for(install_dir)
+    if not data_dir:
+        return
+    experts = os.path.join(data_dir, "MQL5", "Experts")
+    src_repo = os.path.join(HERE, provision.EA_NAME + ".mq5")
+    src = os.path.join(experts, provision.EA_NAME + ".mq5")
+    ex5 = os.path.join(experts, provision.EA_NAME + ".ex5")
+    try:
+        # Repo-Quelle in den Datenordner spiegeln, wenn sie sich unterscheidet
+        if os.path.exists(src_repo):
+            new = open(src_repo, "rb").read()
+            old = open(src, "rb").read() if os.path.exists(src) else b""
+            if new != old:
+                os.makedirs(experts, exist_ok=True)
+                with open(src, "wb") as f:
+                    f.write(new)
+        if not os.path.exists(src):
+            return
+        if os.path.exists(ex5) and os.path.getmtime(ex5) >= os.path.getmtime(src):
+            return  # aktuell — nichts zu tun
+        me = os.path.join(install_dir, "metaeditor64.exe")
+        if not os.path.exists(me):
+            print(f"[panel] {fname}: metaeditor64.exe fehlt in {install_dir} — "
+                  f"EA einmal von Hand kompilieren (F4 -> F7).", flush=True)
+            return
+        logf = src + ".log"
+        subprocess.run([me, f"/compile:{src}", f"/log:{logf}"],
+                       capture_output=True, timeout=90)
+        if os.path.exists(ex5) and os.path.getmtime(ex5) >= os.path.getmtime(src):
+            print(f"[panel] {fname}: {provision.EA_NAME} kompiliert (v-aktuell).", flush=True)
+        else:
+            tail = ""
+            try:
+                # MetaEditor-Logs sind UTF-16
+                with open(logf, "rb") as f:
+                    raw = f.read()
+                tail = raw.decode("utf-16" if raw[:2] == b"\xff\xfe" else "utf-8",
+                                  errors="replace")[-400:]
+            except OSError:
+                pass
+            print(f"[panel] {fname}: EA-Kompilierung NICHT bestaetigt — von Hand pruefen "
+                  f"(F4 -> F7). Log-Ende: {tail}", flush=True)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"[panel] {fname}: EA-Kompilierung fehlgeschlagen ({type(e).__name__}).", flush=True)
+
+
 def _pid_alive(pid):
     """Lebt der Prozess? Fuer den Loesch-Riegel (b2): stale Status heisst nicht
     toter Copier (Terminal-Ausfall schreibt gar nichts mehr). ACHTUNG Windows:
@@ -720,6 +802,9 @@ def start_terminal(fname, creds=None):
             # die Selbstheilung unten faengt den Fehlfall). ASCII ist Pflicht,
             # UTF-16-inis ignoriert MT5 stillschweigend (Fund 14.08.2026).
             _drop_snapshot(cfg)  # Alt-Beweis eines frueheren (Falsch-)Logins entwerten
+            # EA aktuell kompilieren, solange das Terminal aus ist (Master-P&L
+            # braucht den v3-Header — die .ex5 auf den PCs war aelter als die .mq5)
+            _ensure_ea_compiled(fname, install_dir)
             # EA-Sicherstellung, Rangfolge (15.08.2026, reason=4-Fund): ZUERST fest
             # ins Chart-Profil schreiben — nur das ueberlebt das Profil-Laden.
             # Klappt das nicht (frische Installation ohne Profil), klassischer
@@ -1592,6 +1677,8 @@ def main():
     # Von-Null-Selbstheilung: fehlende Vorlage einmalig aus dem Repo holen
     # (blockiert den Start nicht laenger als den Download-Timeout).
     ensure_vorlage()
+    # EA-Quelltext aktuell halten — kompiliert wird pro Terminal beim Kalt-Start
+    ensure_ea_source()
     # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
     # 15.08.2026): der _remove_later-Thread ueberlebt das os._exit des Version-
     # Watchers nicht — beim naechsten Start hier nachziehen.

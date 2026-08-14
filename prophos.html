@@ -8362,7 +8362,9 @@
    * lassen). Frische kommt aus GENAU der Antwort: inst.alive (running + age≤15s)
    * und keine status.note ('warte auf Snapshot…' = Daten nicht beweisfähig). */
   const mt5PlanPoll = {
-    INTERVAL: 10000,
+    // 5s statt 10 (15.08.2026, Finns 'richtig schnell'): lokale API, billig —
+    // Start- und Ende-Erkennung reagieren damit in ~5-10s statt ~10-20s.
+    INTERVAL: 5000,
     streak: new Map(),      // planId → frische 0-Positionen-Messungen in Folge (closeStreak 2 wie atCheck)
     multiWarned: new Set(), // Master-Logins, für die der Mehrfach-Plan-Hinweis schon kam
     // wasOpen: die Engine hat den Trade SELBST mit Positionen gesehen. Ohne das
@@ -8612,14 +8614,28 @@
       const s = inst.status || {}
       const fmtPl = v => `<b style="color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
       const parts = []
+      let masterPl = null
       if(s.master_equity != null && s.master_balance != null){
-        parts.push(`Master ${fmtPl(Number(s.master_equity) - Number(s.master_balance))}`)
+        masterPl = Number(s.master_equity) - Number(s.master_balance)
+        parts.push(`Master ${fmtPl(masterPl)}`)
       }
       let hedgeSum = 0, hedgeSeen = false
       for(const list of Object.values(s.hedges || {})){
         for(const h of (list || [])){ hedgeSeen = true; hedgeSum += Number(h.profit) || 0 }
       }
       if(hedgeSeen) parts.push(`Hedge ${fmtPl(hedgeSum)}`)
+      // Live-Symmetrie (15.08.2026, Finns Ansage): wie exakt spiegelt der Hedge
+      // den Master, waehrend der Trade laeuft? Hedge-P&L in USD umgerechnet
+      // (hedge_usd_rate aus dem Copier — ohne Kurs kein Prozent, nie raten)
+      // gegen das Master-P&L. Erst ab ~0,50 $ Bewegung, sonst ist das
+      // Verhaeltnis nur Rauschen aus Spread und Rundung.
+      if(masterPl != null && hedgeSeen && Math.abs(masterPl) >= 0.5){
+        const rate = Number(s.hedge_usd_rate) || null
+        if(rate){
+          const sym = Math.round(Math.abs(hedgeSum * rate) / Math.abs(masterPl) * 100)
+          parts.push(`<b title="Hedge-P&L in USD ÷ Master-P&L">${sym}% sym</b>`)
+        }
+      }
       if(!parts.length) return ''
       return `<span class="mono" style="font-size:11px;white-space:nowrap" title="Live-P&L vom MT5-Copier">${parts.join(' · ')}</span>`
     }catch(_){ return '' }
