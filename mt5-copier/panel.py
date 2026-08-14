@@ -539,6 +539,72 @@ def _drop_snapshot(cfg):
         pass
 
 
+def _inject_ea_into_profile(fname, cfg, install_dir):
+    """Lese-EA FEST ins Chart-Profil schreiben (15.08.2026, Experten-Log-Beweis:
+    'ProphosHedgeReader beendet, reason=4' = Chart geschlossen). Das /config-
+    [StartUp]-Chart wird beim Fertigladen des gespeicherten Profils ERSETZT —
+    das EA lebte deshalb nur die ersten ~30-90s jedes Starts, dann Freeze.
+    Fix: der <expert>-Block wandert direkt in die chartNN.chr des Profils
+    (Terminal ist beim Kalt-Start aus, die Datei liegt still) — damit ist das
+    EA Profil-Bestandteil und ueberlebt jeden Boot. Backup .prophos-bak,
+    idempotent (Marker-Check), pro Profil genau ein Chart."""
+    data_dir = provision.data_dir_for(install_dir)
+    if not data_dir:
+        return False
+    if not os.path.exists(os.path.join(data_dir, "MQL5", "Experts", provision.EA_NAME + ".ex5")):
+        return False
+    snapf = str(cfg.get("snapshot_file") or "prophos_master.csv")
+    charts_root = os.path.join(data_dir, "MQL5", "Profiles", "Charts")
+    if not os.path.isdir(charts_root):
+        return False
+    block = ("<expert>\r\n"
+             f"name={provision.EA_NAME}\r\n"
+             f"path=Experts\\{provision.EA_NAME}.ex5\r\n"
+             "expertmode=0\r\n"
+             "<inputs>\r\n"
+             f"InpFileName={snapf}\r\n"
+             "InpTimerMs=200\r\n"
+             "</inputs>\r\n"
+             "</expert>\r\n")
+    injected = False
+    for prof in sorted(os.listdir(charts_root)):
+        pdir = os.path.join(charts_root, prof)
+        if not os.path.isdir(pdir):
+            continue
+        for fn in sorted(f for f in os.listdir(pdir) if f.lower().endswith(".chr")):
+            p = os.path.join(pdir, fn)
+            try:
+                with open(p, "rb") as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            enc = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
+            try:
+                txt = raw.decode(enc)
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+            if provision.EA_NAME in txt:
+                injected = True   # Profil traegt das EA schon — nichts zu tun
+                break
+            if "<expert>" in txt:
+                continue          # Chart hat schon ein anderes EA — naechstes
+            idx = txt.rfind("</chart>")
+            if idx < 0:
+                continue
+            try:
+                with open(p + ".prophos-bak", "wb") as f:
+                    f.write(raw)
+                with open(p, "wb") as f:
+                    f.write((txt[:idx] + block + txt[idx:]).encode(enc))
+            except OSError:
+                continue
+            print(f"[panel] {fname}: Lese-EA fest ins Profil geschrieben ({prof}/{fn}, "
+                  f"InpFileName={snapf}).", flush=True)
+            injected = True
+            break
+    return injected
+
+
 def _startup_attach_part(fname, cfg, install_dir):
     """[StartUp]-Teil fuer die Start-ini: zieht das Lese-EA direkt beim Boot auf
     (15.08.2026, gwgdwd-Test #2: das Chart-Profil der Instanz hatte sein EA-Chart
@@ -654,10 +720,14 @@ def start_terminal(fname, creds=None):
             # die Selbstheilung unten faengt den Fehlfall). ASCII ist Pflicht,
             # UTF-16-inis ignoriert MT5 stillschweigend (Fund 14.08.2026).
             _drop_snapshot(cfg)  # Alt-Beweis eines frueheren (Falsch-)Logins entwerten
-            # EA gleich mit aufziehen: der Kalt-Start hat per Definition keinen
-            # frischen Snapshot — und ob das Profil sein EA-Chart noch hat, weiss
-            # niemand (gwgdwd hatte es verloren). Login + [StartUp] in einer ini.
-            startup = _startup_attach_part(fname, cfg, install_dir)
+            # EA-Sicherstellung, Rangfolge (15.08.2026, reason=4-Fund): ZUERST fest
+            # ins Chart-Profil schreiben — nur das ueberlebt das Profil-Laden.
+            # Klappt das nicht (frische Installation ohne Profil), klassischer
+            # [StartUp]-Aufzug als Fallback — der traegt dort, weil es kein
+            # gespeichertes Profil gibt, das sein Chart ersetzen koennte.
+            startup = ""
+            if not _inject_ea_into_profile(fname, cfg, install_dir):
+                startup = _startup_attach_part(fname, cfg, install_dir)
             ini = os.path.join(install_dir, "prophos-login.ini")
             try:
                 with open(ini, "w", encoding=provision.INI_ENCODING) as f:
