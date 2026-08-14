@@ -130,6 +130,7 @@ def snapshot():
             # Besitzer-Stempel (Paket E, 15.08.2026): Prophos blendet Instanzen
             # fremder User aus; ohne Stempel (Bestand) sieht sie jeder auf dem PC.
             "owner": cfg.get("prophos_owner"),
+            "display_name": cfg.get("display_name"),
             "status": st,
             "age": age,
             # "lebt" = Statusdatei ist frisch. Der Copier schreibt alle ~3s.
@@ -312,7 +313,7 @@ PROV_LOCK = threading.Lock()
 PROV_JOB = None  # {"name", "steps": {key: {"state", "note"}}, "error", "done"}
 
 
-def prov_start(name, login, password, server, owner=None):
+def prov_start(name, login, password, server, owner=None, display=None):
     global PROV_JOB
     with PROV_LOCK:
         if PROV_JOB and not PROV_JOB.get("done"):
@@ -334,7 +335,7 @@ def prov_start(name, login, password, server, owner=None):
         try:
             provision.run_provision(name=name, login=login, password=password,
                                     server=server, template_exe=template,
-                                    folder=HERE, report=report, owner=owner)
+                                    folder=HERE, report=report, owner=owner, display=display)
         except provision.ProvisionError as e:
             job["error"] = str(e)
             for st in job["steps"].values():
@@ -1077,13 +1078,18 @@ class Handler(BaseHTTPRequestHandler):
             owner = str(body.get("owner") or "").strip()[:64]
             if owner and not re.fullmatch(r"[A-Za-z0-9-]{1,64}", owner):
                 owner = None
+            # Anzeigename mit Leerzeichen (Finn, 15.08.2026): intern bleibt der
+            # Slug (Dateinamen/Ordner/Regexe), angezeigt wird display_name.
+            display = str(body.get("display") or "").strip()[:40]
+            if display and not re.fullmatch(r"[A-Za-z0-9 ._\-]{1,40}", display):
+                display = None
             if not (name and login and password and server):
                 return self._send(400, json.dumps({"ok": False, "msg": "Name, Login, Passwort und Server sind Pflicht."}))
             probs = provision.plan_checks(HERE, name, login, server,
                                           (read_json(os.path.join(HERE, "config.json"), {}) or {}).get("master_terminal_path"))
             if probs:
                 return self._send(400, json.dumps({"ok": False, "msg": " · ".join(probs)}, ensure_ascii=False))
-            ok, msg = prov_start(name, login, password, server, owner=owner)
+            ok, msg = prov_start(name, login, password, server, owner=owner, display=display)
             print(f"[panel] provision '{name}': {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200 if ok else 409, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 

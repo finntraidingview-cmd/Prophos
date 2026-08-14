@@ -356,7 +356,7 @@ def _taskkill(pid, grace_s=15):
 
 def run_provision(*, name, login, password, server, template_exe,
                   folder=HERE, report=lambda step, state, note=None: None,
-                  owner=None):
+                  owner=None, display=None):
     """Fuehrt die komplette Provisionierung aus. `report(step, state, note)`
     meldet Fortschritt ans Panel ('running' | 'done' | 'error').
 
@@ -568,6 +568,9 @@ def run_provision(*, name, login, password, server, template_exe,
     # Identitaetsfeld: steht bewusst NICHT in der Panel-Schreib-Whitelist.
     if owner:
         cfg["prophos_owner"] = owner
+    # Anzeigename mit Leerzeichen (15.08.2026) — intern laeuft ueberall der Slug
+    if display:
+        cfg["display_name"] = display
     cfg_path = os.path.join(folder, f"config-{name}.json")
     tmp = cfg_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

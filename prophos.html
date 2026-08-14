@@ -3115,12 +3115,12 @@
             <p>Oben rechts „MT5-Account hinzufügen" — Prophos klont das Master-Terminal, loggt ein und legt alles automatisch an.</p>
           </div>
 
-          <!-- Trade-Pläne (geplant → laufend → beendet) -->
-          <div id="mt5tab-plans-head" style="padding:22px 20px 0">
-            <h2 style="font-size:16px;font-weight:600;margin:0;letter-spacing:-.01em">Trade-Pläne</h2>
-            <p style="font-size:12.5px;color:var(--sub);margin:2px 0 0">geplant → laufend → beendet — wandert automatisch mit deinen Positionen</p>
+          <!-- Trade-Pläne wohnen NICHT hier (Finns Ansage 15.08.2026): geplant wird
+               ausschließlich im Trades-Bereich — dort laufen MT5-Trades über die
+               normale Plan-Logik (Route erkennt das verlinkte Paar automatisch). -->
+          <div style="padding:18px 20px;font-size:12.5px;color:var(--sub);border-top:1px solid var(--border-soft)">
+            Trades planst du wie immer unter <b>Trades</b> — Master/Slave aus dem Dropdown wählen, „Speichern &amp; Starten" erkennt den MT5-Weg automatisch.
           </div>
-          <div class="mtc-plans" id="mt5tab-plans" style="padding:14px 20px 20px"></div>
         </div>
       </div>
     </section>
@@ -4915,50 +4915,13 @@
       <div id="mtc-notice"></div>
       <div class="mtc-grid" id="mtc-grid"></div>
 
-      <div class="view-head" style="margin-top:30px" id="mtc-plans-head">
-        <div>
-          <h2 class="view-title" style="font-size:19px">Trade-Pläne</h2>
-          <p class="view-sub">geplant → laufend → beendet — wandert automatisch mit deinen Positionen</p>
-        </div>
+      <!-- Trade-Pläne + Plan-Modal entfernt (Finns Ansage 15.08.2026): geplant
+           wird ausschließlich im Trades-Bereich — die MT5-Route der normalen
+           Plan-Logik übernimmt Preflight, Erkennung und P&L. -->
+      <div style="margin-top:26px;font-size:12.5px;color:var(--sub)">
+        Trades planst du wie immer unter <b>Trades</b> — „Speichern &amp; Starten" erkennt den MT5-Weg am verlinkten Paar automatisch.
       </div>
-      <div class="mtc-plans" id="mtc-plans"></div>
     </section>
-
-    <!-- MT5-Copier: Trade-Plan-Modal — dedizierte Verdrahtung (Projektregel:
-         kein Sammel-Handler ueber alle .modal-bg) -->
-    <div class="modal-bg" id="mtcPlanModal">
-      <div class="modal" style="max-width:460px">
-        <div class="modal-head">
-          <h3 id="mtc-plan-title">Trade planen</h3>
-          <button class="modal-x" id="mtc-plan-x" type="button">✕</button>
-        </div>
-        <div class="mtc-modal-body">
-          <p class="modal-sub" id="mtc-plan-sub" style="margin-bottom:14px"></p>
-          <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Multiplikator</label>
-          <input class="big" id="mtc-plan-mult" type="number" step="0.001" min="0">
-          <div class="mtc-row" style="margin-top:10px">
-            <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">max Lots pro Hedge</label>
-              <input id="mtc-plan-lots" type="number" step="0.01" min="0">
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Modus</label>
-              <select id="mtc-plan-mode">
-                <option value="dryrun">dryrun — nur mitlesen</option>
-                <option value="demo">demo — echte Order, Demo-Konto</option>
-                <option value="live">live — echtes Geld</option>
-              </select>
-            </div>
-          </div>
-          <div class="mtc-rule">Regel: max Lots muss über Multiplikator × größter Master-Position bleiben, sonst verweigert die Sicherheitsgrenze die Order.</div>
-        </div>
-        <div class="modal-actions" style="align-items:center">
-          <span class="mtc-msg" id="mtc-plan-msg"></span>
-          <button class="btn btn-ghost" id="mtc-plan-cancel" type="button">Abbrechen</button>
-          <button class="btn btn-primary" id="mtc-plan-start" type="button">Trade starten</button>
-        </div>
-      </div>
-    </div>
 
     <!-- MT5-Copier: Account-hinzufuegen-Modal — dedizierte Verdrahtung -->
     <div class="modal-bg" id="mtcAddModal">
@@ -4988,7 +4951,7 @@
           <div class="mtc-row">
             <div>
               <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Name (kurz)</label>
-              <input data-mtcp="name" placeholder="z.B. ftmo1" title="Nur Buchstaben/Zahlen, max. 24 Zeichen">
+              <input data-mtcp="name" placeholder="z.B. Fusion Test 1" title="Buchstaben, Zahlen und Leerzeichen — max. 24 Zeichen">
             </div>
             <div>
               <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">Login (Kontonummer)</label>
@@ -21677,7 +21640,7 @@
     const broker = s.master_server || d.master_server || 'Broker unbekannt'
     const isOpen = mtcOpen.has(d.file)
     return `<div class="mtc-card${d.mode==='live' ? ' live-mode' : ''}${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
-      <div class="mtc-top"><span class="mtc-name">${esc(d.name)}</span>${pill(d.mode)}
+      <div class="mtc-top"><span class="mtc-name">${esc(d.display_name || d.name)}</span>${pill(d.mode)}
         <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span></div>
       <div class="mtc-broker"><b>${esc(broker)}</b></div>
       <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
@@ -21690,7 +21653,6 @@
         <div class="mtc-stat"><b>${esc(d.max_lots ?? '–')}</b><span>max Lots</span></div>
       </div>
       <div class="mtc-acts">
-        <button class="btn btn-primary" style="padding:6px 11px;font-size:12px" data-mtcplan type="button">Trade planen</button>
         <button class="btn btn-ghost" style="padding:6px 11px;font-size:12px" data-mtctoggle type="button">${isOpen ? 'Details ▴' : 'Details ▾'}</button>
         <span class="mtc-dirty">ungespeicherte Änderung</span>
         <span class="mtc-msg"></span>
@@ -21718,49 +21680,13 @@
     </div>`
   }
 
-  function fmtT(iso){ if(!iso) return ''
-    const d = new Date(iso)
-    return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'}) + ' ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) }
-  function dur(a, b){ if(!a || !b) return ''
-    const m = Math.round((new Date(b) - new Date(a)) / 60000)
-    return m < 60 ? `${m} min` : `${Math.floor(m/60)} h ${m%60} min` }
-
-  function planCard(p){
-    const d = mtcState[p.file] || {}, s = d.status || {}
-    const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
-    let meta = '', live = ''
-    if(p.status === 'geplant') meta = `geplant ${fmtT(p.armed_at || p.created_at)}`
-    if(p.status === 'laufend'){ meta = `läuft seit ${fmtT(p.started_at)}`
-      live = `<div class="mtc-plive">● ${pos} Position(en) · ${hed} Hedge(s) bewacht</div>` }
-    if(p.status === 'beendet') meta = `${fmtT(p.started_at)} → ${fmtT(p.ended_at)} · ${dur(p.started_at, p.ended_at)}`
-    return `<div class="mtc-plan ${p.status}">
-      <div class="mtc-ptop"><b>${esc(d.name || p.name)}</b>${pill(p.mode)}
-        <button class="mtc-x" data-mtcpdel="${p.id}" data-mtcpstatus="${p.status}" title="Plan löschen" type="button">×</button></div>
-      <div class="mtc-pmeta">×${esc(p.multiplier)} · max ${esc(p.max_lots)} Lots · ${esc(s.master_server || d.master_server || '')}</div>
-      <div class="mtc-pmeta">${esc(meta)}</div>
-      ${live}
-    </div>`
-  }
-
-  function renderPlans(plans){
-    const cols = [['geplant','Geplant'],['laufend','Laufend'],['beendet','Beendet']]
-    const html = cols.map(([k, label]) => {
-      let list = (plans || []).filter(p => p.status === k)
-      if(k === 'beendet') list = list.slice().reverse()
-      return `<div class="mtc-pcol"><h4>${label}<span class="cnt">${list.length}</span></h4>
-        ${list.map(planCard).join('') || `<div class="mtc-pempty">${k==='geplant' ? 'Kein Plan — „Trade planen" auf einer Karte.' : k==='laufend' ? 'Nichts im Markt.' : 'Noch keine abgeschlossenen Trades.'}</div>`}
-      </div>`
-    }).join('')
-    $('mtc-plans').innerHTML = html
-    // Gleiche Spalten auch im Accounts-Sub-Tab (zweite Darstellung, gleiche Daten)
-    const tp = $('mt5tab-plans'); if(tp) tp.innerHTML = html
-  }
+  // planCard/renderPlans entfernt (Finns Ansage 15.08.2026): Trade-Pläne wohnen
+  // ausschließlich im Trades-Bereich (MT5-Route der normalen Plan-Logik).
+  // Die Panel-eigenen Pläne (plans.json) leben nur noch im lokalen Panel auf 8770.
 
   function setOffline(offline, detail){
     $('mtc-offline').style.display = offline ? '' : 'none'
     $('mtc-grid').style.display = offline ? 'none' : ''
-    $('mtc-plans').style.display = offline ? 'none' : ''
-    $('mtc-plans-head').style.display = offline ? 'none' : ''
     $('mtc-notice').style.display = offline ? 'none' : ''
     if(offline) $('mtc-offline-detail').textContent = detail || ''
   }
@@ -21812,8 +21738,6 @@
     const off = $('mt5tab-offline'); if(!off) return
     off.style.display = offline ? '' : 'none'
     $('mt5tab-tablewrap').style.display = offline ? 'none' : ''
-    $('mt5tab-plans').style.display = offline ? 'none' : ''
-    $('mt5tab-plans-head').style.display = offline ? 'none' : ''
     if(offline){
       $('mt5tab-empty').style.display = 'none'
       $('mt5tab-notice').innerHTML = ''
@@ -21836,7 +21760,7 @@
       ? `<div style="font-size:11px;color:#d97706;margin-top:3px">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))}</div>` : ''
     return `<tr>
       <td style="padding-left:20px">
-        <div style="font-weight:600;color:var(--ink)">${esc(d.name)}</div>
+        <div style="font-weight:600;color:var(--ink)">${esc(d.display_name || d.name)}</div>
         <div style="font-size:11px;color:var(--sub);margin-top:2px;font-family:var(--mono)">${esc(s.master_login || d.master_expected || '—')} → Hedge ${esc(s.hedge_login || d.hedge_expected || '—')}</div>
         ${warn}${blocked}
       </td>
@@ -21857,7 +21781,6 @@
       }</td>
       <td style="padding-right:20px;text-align:right;white-space:nowrap">
         <span class="mtc-msg${mt5RowMsg[d.file] ? ' err' : ''}" data-mt5msg style="margin-right:8px">${esc(mt5RowMsg[d.file] || '')}</span>
-        <button class="btn btn-primary" style="padding:5px 10px;font-size:12px" data-mt5plan="${esc(d.file)}" type="button">Trade planen</button>
         <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-mt5det="${esc(d.file)}" type="button" title="Große Ansicht mit Log + Symbol-Mapping">Details</button>
         <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;color:#dc2626" data-mt5del="${esc(d.file)}" type="button" title="Config + Status auf diesem PC entfernen — der Terminal-Ordner bleibt">Löschen</button>
       </td>
@@ -21932,8 +21855,6 @@
     // Bestand ohne Stempel bleibt sichtbar (Finns 6 bestehende Accounts).
     const _uid = (typeof currentUserId !== 'undefined' && currentUserId) ? String(currentUserId) : null
     d.instances = (d.instances || []).filter(x => !x.owner || (_uid && String(x.owner) === _uid))
-    const _visFiles = new Set(d.instances.map(x => x.file))
-    d.plans = (d.plans || []).filter(p => _visFiles.has(p.file))
     // fetchedAt (15.08.2026): Frischebeleg pro Instanz — die MT5-ROUTE-Sektion
     // (Balances/Live-P&L) darf nur bei fetchedAt ≤ 15s "Live" behaupten
     // ('alt ist nicht aktuell'). Erkennungsquelle ist mtcState trotzdem NIE —
@@ -21981,7 +21902,6 @@
         if(cur) cur.outerHTML = html; else grid.insertAdjacentHTML('beforeend', html)
       }
     }
-    renderPlans(d.plans)
     renderMt5Tab(d, n)
     // Letzten Stand merken — window.mt5TabRender (Export unten) rendert den Tab
     // damit sofort nach Link/Unlink neu, statt auf den naechsten 3s-Poll zu warten
@@ -21998,7 +21918,7 @@
   // waere mtcState dort dauerhaft eingefroren und die Anzeige bliebe leer.
   setInterval(() => {
     const mt5RouteWants = (typeof mt5RoutePollWanted === 'function') && mt5RoutePollWanted()
-    if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
+    if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcAddModal').classList.contains('open')) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
@@ -22008,89 +21928,9 @@
   $('mtc-grid').addEventListener('input', e => { const c = e.target.closest('.mtc-card'); if(c) c.setAttribute('data-dirty','1') })
   $('mtc-grid').addEventListener('change', e => { const c = e.target.closest('.mtc-card'); if(c) c.setAttribute('data-dirty','1') })
 
-  /* ── Trade-Plan-Modal (dedizierte Verdrahtung) ── */
-  const planBg = $('mtcPlanModal')
-  // Handle im Scope: sonst ueberlebt der Bereitschafts-Timer das Schliessen des
-  // Modals und meldet spaeter „Bereit" im Kontext eines ANDEREN Accounts
-  // (Review 15.08.2026). Wird in open/close und beim Start-Klick gecleart.
-  let mtcReadyTimer = null
-  function stopReadyTimer(){ if(mtcReadyTimer){ clearInterval(mtcReadyTimer); mtcReadyTimer = null } }
-  function openPlan(file){
-    const d = mtcState[file]; if(!d) return
-    stopReadyTimer()
-    $('mtc-plan-start').disabled = false
-    planBg.dataset.file = file
-    const s = d.status || {}
-    $('mtc-plan-title').textContent = 'Trade planen — ' + d.name
-    $('mtc-plan-sub').textContent = `${s.master_server || d.master_server || ''} · Master ${d.master_expected || '—'} → Hedge ${d.hedge_expected || '—'}`
-    $('mtc-plan-mult').value = d.multiplier ?? ''
-    $('mtc-plan-lots').value = d.max_lots ?? ''
-    $('mtc-plan-mode').value = d.mode || 'dryrun'
-    const m = $('mtc-plan-msg'); m.className = 'mtc-msg'; m.textContent = ''
-    planBg.classList.add('open')
-    $('mtc-plan-mult').focus()
-  }
-  function closePlan(){ stopReadyTimer(); $('mtc-plan-start').disabled = false; planBg.classList.remove('open') }
-  $('mtc-plan-cancel').addEventListener('click', closePlan)
-  $('mtc-plan-x').addEventListener('click', closePlan)
-  $('mtc-plan-start').addEventListener('click', async () => {
-    const file = planBg.dataset.file, d = mtcState[file] || {}
-    const msg = $('mtc-plan-msg')
-    const btn = $('mtc-plan-start')
-    if(btn.disabled) return                 // Mehrfachklick-Schutz (Review 15.08.2026)
-    if(!d.alive){
-      if(!confirm(`Der Copier ist GESTOPPT — deine Trades würden NICHT gehedgt!\n\nAm PC start-alles.bat ausführen, dann hier erneut starten.\n\nTrotzdem fortfahren (nur Werte pushen + Terminal öffnen)?`)){
-        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — erst den Copier starten.'; return }
-    }
-    const patch = { multiplier: $('mtc-plan-mult').value,
-                    max_lots_per_hedge: $('mtc-plan-lots').value,
-                    mode: $('mtc-plan-mode').value }
-    if(!patch.multiplier || !patch.max_lots_per_hedge){
-      msg.className = 'mtc-msg err'; msg.textContent = 'Multiplikator und max Lots ausfüllen.'; return }
-    if(+patch.max_lots_per_hedge <= +patch.multiplier){
-      if(!confirm(`max Lots (${patch.max_lots_per_hedge}) ist nicht größer als der Multiplikator (${patch.multiplier}).\nSchon ab 1.0 Lot Master würde die Sicherheitsgrenze die Order verweigern.\nTrotzdem so starten?`)) return
-    }
-    if(patch.mode === 'live' && d.mode !== 'live'){
-      if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${d.master_expected || '?'}\nHedge: ${d.hedge_expected || '?'}\n\nDuplikum für dieses Paar ist aus?`)){
-        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — nichts geändert'; return }
-    }
-    stopReadyTimer(); btn.disabled = true
-    msg.className = 'mtc-msg'; msg.textContent = 'pushe…'
-    const s = await mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) })
-    if(!s.ok){ msg.className = 'mtc-msg err'; msg.textContent = 'Fehler: ' + (s.msg || s.error); btn.disabled = false; return }
-    await mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ multiplier: patch.multiplier, max_lots: patch.max_lots_per_hedge, mode: patch.mode }) })
-    msg.textContent = 'gepusht — öffne Terminal…'
-    const ts = await mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
-      headers:{'Content-Type':'application/json'}, body:'{}' })
-    if(!ts.ok){ msg.className = 'mtc-msg err'; msg.textContent = 'Multiplikator gepusht, aber Terminal: ' + (ts.msg || ts.error); btn.disabled = false; return }
-    // Bereitschafts-Ueberwachung: erst traden, wenn wirklich alles fliesst.
-    const t0 = Date.now()
-    msg.className = 'mtc-msg'; msg.textContent = `⏳ ×${patch.multiplier} gepusht · Terminal startet, Login automatisch…`
-    mtcReadyTimer = setInterval(async () => {
-      // Abbrechen, wenn das Modal zu ist oder inzwischen ein anderer Account
-      // geladen wurde — sonst schreibt dieser Timer in einen fremden Kontext.
-      if(!planBg.classList.contains('open') || planBg.dataset.file !== file){ stopReadyTimer(); return }
-      const dd = await mtcApi('instances')
-      const inst = (dd.instances || []).find(x => x.file === file)
-      const sec = Math.round((Date.now() - t0) / 1000)
-      if(inst && inst.alive && !(inst.status || {}).note){
-        stopReadyTimer(); btn.disabled = false
-        msg.className = 'mtc-msg'
-        msg.textContent = `✓ Bereit — ×${patch.multiplier} aktiv, Hedge bewacht. Jetzt im Terminal traden.`
-        setTimeout(mtcLoad, 1000)
-        return
-      }
-      if(sec > 170){ stopReadyTimer(); btn.disabled = false; msg.className = 'mtc-msg err'
-        msg.textContent = 'Terminal liefert nach 3 Minuten nichts — Details-Log der Karte prüfen.'; return }
-      msg.className = 'mtc-msg'
-      msg.textContent = sec > 50
-        ? `⏳ EA wird geprüft und notfalls automatisch aufgezogen… (${sec}s)`
-        : `⏳ Terminal startet, Login automatisch… (${sec}s)`
-    }, 3000)
-  })
+  /* ── Trade-Plan-Modal ENTFERNT (Finns Ansage 15.08.2026): Trades werden
+     ausschliesslich im Trades-Bereich geplant — die MT5-Route der normalen
+     Plan-Logik uebernimmt Preflight (tpPreflightMt5), Erkennung und P&L. ── */
 
   /* ── Account-hinzufuegen-Modal (dedizierte Verdrahtung) ── */
   const addBg = $('mtcAddModal')
@@ -22169,7 +22009,8 @@
     const a = (accounts || []).find(x => String(x.id) === prefillSel.value)
     if(!a || !a.creds) return
     const set = (k, v) => { const el = addBg.querySelector(`[data-mtcp="${k}"]`); if(el) el.value = v }
-    const slug = String(a.name || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
+    // Leerzeichen bleiben erhalten (display_name) — nur Sonderzeichen fliegen raus
+    const slug = String(a.name || '').replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24)
     set('name', slug || String(a.creds.login).replace(/[^A-Za-z0-9]/g, '').slice(0, 24))
     set('login', String(a.creds.login))
     // Gespeichertes Passwort NIE sichtbar auf den Schirm bringen (Review-Fund
@@ -22191,8 +22032,16 @@
     const msg = $('mtc-add-msg')
     if(!body.name || !body.login || !body.password || !body.server){
       msg.className = 'mtc-msg err'; msg.textContent = 'Alle vier Felder ausfüllen.'; return }
-    if(!/^[A-Za-z0-9]{1,24}$/.test(body.name)){
-      msg.className = 'mtc-msg err'; msg.textContent = 'Name: nur Buchstaben/Zahlen, ohne Leer-/Bindezeichen.'; return }
+    // Leerzeichen im Namen sind erlaubt (Finn, 15.08.2026: "muss doch erlaubt
+    // sein"): der eingegebene Name wird als display_name angezeigt, intern
+    // (Dateiname config-<name>.json, magic-Vergabe, Ordner) läuft der Slug
+    // ohne Leerzeichen — Windows-Pfade und Regexe bleiben so trivial sicher.
+    if(!/^[A-Za-z0-9][A-Za-z0-9 ]{0,23}$/.test(body.name) || !body.name.trim()){
+      msg.className = 'mtc-msg err'; msg.textContent = 'Name: Buchstaben/Zahlen/Leerzeichen, max. 24 Zeichen.'; return }
+    body.display = body.name.trim().replace(/\s+/g, ' ')
+    body.name = body.display.replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
+    if(!body.name){
+      msg.className = 'mtc-msg err'; msg.textContent = 'Name braucht mindestens einen Buchstaben/eine Zahl.'; return }
     msg.className = 'mtc-msg'; msg.textContent = 'starte…'
     const d = await mtcApi('provision', { method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
@@ -22216,7 +22065,6 @@
     const cardEl = e.target.closest('.mtc-card'); if(!cardEl) return
     const file = cardEl.getAttribute('data-mtcfile')
     const msg = cardEl.querySelector('.mtc-msg')
-    if(e.target.hasAttribute('data-mtcplan')){ openPlan(file); return }
     if(e.target.hasAttribute('data-mtctoggle')){
       if(mtcOpen.has(file)) mtcOpen.delete(file); else mtcOpen.add(file)
       cardEl.classList.toggle('open')
@@ -22264,21 +22112,9 @@
     setTimeout(mtcLoad, 2500)
   })
 
-  /* ── Plan-Loeschen (Sidebar-View UND Accounts-Sub-Tab) ── */
-  async function planColClick(e){
-    const pid = e.target.getAttribute && e.target.getAttribute('data-mtcpdel')
-    if(!pid) return
-    if(e.target.getAttribute('data-mtcpstatus') === 'laufend' && !confirm('Dieser Plan LÄUFT gerade (Position offen). Wirklich nur den Plan-Eintrag löschen? Die Position und der Hedge bleiben unberührt.')) return
-    await mtcApi(`plan-delete?id=${encodeURIComponent(pid)}`, { method:'POST',
-      headers:{'Content-Type':'application/json'}, body:'{}' })
-    mtcLoad()
-  }
-  $('mtc-plans').addEventListener('click', planColClick)
-  const mt5PlansEl = $('mt5tab-plans'); if(mt5PlansEl) mt5PlansEl.addEventListener('click', planColClick)
-
   /* ── Accounts-Sub-Tab: Verdrahtung ──
-     Hinzufuegen + Trade planen laufen ueber DIESELBEN Modals wie die
-     Sidebar-View (mtcAddModal/mtcPlanModal) — eine Logik, zwei Einstiege. */
+     Hinzufuegen laeuft ueber dasselbe Modal wie die Sidebar-View (mtcAddModal).
+     Trade planen: NICHT hier — Trades-Bereich (Finns Ansage 15.08.2026). */
   const mt5AddBtn = $('mt5tab-add-btn')
   if(mt5AddBtn) mt5AddBtn.addEventListener('click', openAdd)
   // Beim Klick auf den Sub-Tab sofort laden (nicht erst nach 3s Poll)
@@ -22304,11 +22140,9 @@
 
   const mt5Table = $('mt5AccountsTable')
   if(mt5Table) mt5Table.addEventListener('click', e => {
-    const planFile = e.target.getAttribute && e.target.getAttribute('data-mt5plan')
     const detFile  = e.target.getAttribute && e.target.getAttribute('data-mt5det')
     const delFile  = e.target.getAttribute && e.target.getAttribute('data-mt5del')
     if(delFile){ mt5DeleteInstance(delFile, e.target); return }
-    if(planFile){ openPlan(planFile); return }
     if(detFile){
       // Grosse Ansicht (Karten mit Log + Symbol-Mapping) ueber die normale Navigation
       const link = document.querySelector('#dashboard-view .sb-link[data-view="mt5copier"]')
