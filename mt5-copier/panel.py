@@ -542,6 +542,9 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
           f"neu und ziehe {provision.EA_NAME} automatisch auf (InpFileName={snap}).", flush=True)
     for pid in provision.terminal_pids(install_dir):
         provision._taskkill(pid)
+    # Terminal ist jetzt aus — EA vor dem Neustart aktuell kompilieren, sonst
+    # zieht die Heilung ein veraltetes EA ohne Balance-Header auf (15.08.2026)
+    _ensure_ea_compiled(fname, install_dir)
     ini = os.path.join(install_dir, "prophos-heal.ini")
     with open(ini, "w", encoding=provision.INI_ENCODING) as f:
         f.write(provision.build_startup_ini(preset=preset))
@@ -782,6 +785,11 @@ def start_terminal(fname, creds=None):
         # Selbstheilung anstossen: liefert das laufende Terminal keinen frischen
         # Snapshot (EA fehlt), wird es nach kurzer Pruefung neu gestartet und
         # das EA automatisch aufgezogen.
+        # EA auch im WARM-Pfad aktuell kompilieren (15.08.2026, Zwei-Plan-Test:
+        # das warm gebliebene test321323-Terminal behielt das alte EA ohne
+        # Balance-Header — Master-P&L fehlte nur dort). MT5 laedt ein neu
+        # kompiliertes EA am laufenden Chart von selbst neu, kein Neustart noetig.
+        _ensure_ea_compiled(fname, install_dir)
         try:
             subprocess.run(["powershell", "-Command",
                             f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
