@@ -515,21 +515,54 @@ def _front_when_up(install_dir):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _snapshot_path(cfg):
+    """Pfad der Snapshot-CSV — Aufloesung identisch zu copier.py."""
+    snapf = str(cfg.get("snapshot_file") or "").strip()
+    if not snapf:
+        return None
+    common = str(cfg.get("common_files_dir") or "").strip() or os.path.join(
+        os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
+    return os.path.join(common, snapf)
+
+
 def _drop_snapshot(cfg):
     """Alt-Snapshot des Masters entwerten (Review-Fund 15.08.2026, Stale-Beweis-
     Livelock): die Snapshot-CSV ueberlebt Terminal-Kill und Kontowechsel, und der
     Copier wuerde daraus weiter 'FALSCHES Konto' stempeln — waehrend das frisch
-    gezwungene Terminal noch bootet. Datei weg → ehrliches 'warte auf Snapshot'.
-    Aufloesung identisch zu copier.py (common_files_dir oder MT5-Common-Ordner)."""
-    snapf = str(cfg.get("snapshot_file") or "").strip()
-    if not snapf:
+    gezwungene Terminal noch bootet. Datei weg → ehrliches 'warte auf Snapshot'."""
+    p = _snapshot_path(cfg)
+    if not p:
         return
-    common = str(cfg.get("common_files_dir") or "").strip() or os.path.join(
-        os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
     try:
-        os.remove(os.path.join(common, snapf))
+        os.remove(p)
     except OSError:
         pass
+
+
+def _startup_attach_part(fname, cfg, install_dir):
+    """[StartUp]-Teil fuer die Start-ini: zieht das Lese-EA direkt beim Boot auf
+    (15.08.2026, gwgdwd-Test #2: das Chart-Profil der Instanz hatte sein EA-Chart
+    verloren — Terminal lief, lieferte aber NIE einen Snapshot, und erst die
+    Heilung nach >2 Minuten haette es gefixt). Login + EA-Aufzug in EINER ini,
+    exakt der Provisionierungs-Weg. Preis: pro Kalt-Start kommt ein weiteres
+    EA-Chart ins Profil — bewusst in Kauf genommen, Daten schlagen Optik.
+    Rueckgabe: ini-Teil oder '' (ex5 fehlt/Datenordner unbekannt)."""
+    data_dir = provision.data_dir_for(install_dir)
+    if not data_dir:
+        print(f"[panel] {fname}: EA-Aufzug uebersprungen — Datenordner nicht gefunden.", flush=True)
+        return ""
+    if not os.path.exists(os.path.join(data_dir, "MQL5", "Experts", provision.EA_NAME + ".ex5")):
+        print(f"[panel] {fname}: {provision.EA_NAME}.ex5 fehlt im Datenordner — bitte einmal "
+              f"im Terminal kompilieren (F4 → MetaEditor → F7), dann Trade neu starten.", flush=True)
+        return ""
+    snapf = str(cfg.get("snapshot_file") or "prophos_master.csv")
+    name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
+    preset = f"prophos-heal-{name}.set"
+    os.makedirs(os.path.join(data_dir, "MQL5", "Presets"), exist_ok=True)
+    with open(os.path.join(data_dir, "MQL5", "Presets", preset), "w",
+              encoding=provision.SET_ENCODING) as f:
+        f.write(provision.build_preset(snapf))
+    return "\n" + provision.build_startup_ini(preset=preset)
 
 
 def start_terminal(fname, creds=None):
@@ -621,17 +654,24 @@ def start_terminal(fname, creds=None):
             # die Selbstheilung unten faengt den Fehlfall). ASCII ist Pflicht,
             # UTF-16-inis ignoriert MT5 stillschweigend (Fund 14.08.2026).
             _drop_snapshot(cfg)  # Alt-Beweis eines frueheren (Falsch-)Logins entwerten
+            # EA gleich mit aufziehen: der Kalt-Start hat per Definition keinen
+            # frischen Snapshot — und ob das Profil sein EA-Chart noch hat, weiss
+            # niemand (gwgdwd hatte es verloren). Login + [StartUp] in einer ini.
+            startup = _startup_attach_part(fname, cfg, install_dir)
             ini = os.path.join(install_dir, "prophos-login.ini")
             try:
                 with open(ini, "w", encoding=provision.INI_ENCODING) as f:
                     f.write(provision.build_login_ini(creds["login"], creds["password"],
-                                                      creds.get("server") or cfg.get("master_server") or ""))
+                                                      creds.get("server") or cfg.get("master_server") or "")
+                            + startup)
                 subprocess.Popen([path, f"/config:{ini}"], cwd=install_dir)
             finally:
                 # Auch bei Write-/Start-Fehlern aufraeumen — nie eine Passwort-ini
                 # ungeplant liegen lassen.
                 _remove_later(ini)
-            msg = "Terminal gestartet — Login ins richtige Konto wird erzwungen; EA wird geprüft und notfalls selbst aufgezogen"
+            msg = ("Terminal gestartet — Login wird erzwungen"
+                   + (", Lese-EA wird direkt aufgezogen" if startup else "")
+                   + "; Selbstheilung wacht im Hintergrund")
         else:
             subprocess.Popen([path], cwd=install_dir)
             msg = "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
