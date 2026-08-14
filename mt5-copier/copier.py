@@ -317,7 +317,7 @@ def norm_vol(si, vol):
     return min(v, float(si.get("volume_max") or 1e9))
 
 
-def plan_actions(positions, hedges, *, multiplier, symbol_map, max_lots, sym_info,
+def plan_actions(positions, hedges, *, multiplier, symbol_map, sym_info,
                  skip_idents=frozenset()):
     """REIN RECHNENDE Funktion — keine MT5-Aufrufe, deshalb testbar (siehe selftest.py).
 
@@ -351,10 +351,9 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, max_lots, sym_inf
         # Exposure statt Lots: derselbe Index hat je Broker andere Kontraktgrößen
         m_cs = float(mp.get("contract_size") or 0) or 1.0
         h_cs = float(si.get("trade_contract_size") or 0) or 1.0
+        # Keine max-Lots-Grenze mehr (15.08.2026, Finns Ansage "komplett weg"):
+        # gedeckelt wird nur noch vom Broker selbst (volume_max in norm_vol).
         v = norm_vol(si, mp["volume"] * multiplier * (m_cs / h_cs))
-        if v > max_lots:
-            warnings.append(f"Sicherheitsgrenze: {v} > max_lots_per_hedge {max_lots} ({hsym})")
-            continue
         if v <= TOL:
             warnings.append(f"Berechnetes Volumen unter Mindest-Lot ({hsym})")
             continue
@@ -463,7 +462,6 @@ class Master:
         self.snapshot_file = str(cfg.get("snapshot_file", "prophos_master.csv"))
         self.master_login = int(cfg.get("master_expected_login") or 0)
         self.multiplier = float(cfg.get("multiplier", 1.0))
-        self.max_lots = float(cfg.get("max_lots_per_hedge", 5.0))
         self.symbol_map = cfg.get("symbol_map", {})
         self.deviation = int(cfg.get("deviation_points", 30))
         self.filling = str(cfg.get("filling", "auto")).upper()
@@ -473,8 +471,8 @@ class Master:
         return cfg
 
     def hot_reload(self):
-        """Panel-Aenderungen im Betrieb uebernehmen. Nur multiplier/symbol_map/
-        max_lots wirken sofort; alles andere (mode, Konten, Pfade, magic) verlangt
+        """Panel-Aenderungen im Betrieb uebernehmen. Nur multiplier/symbol_map
+        wirken sofort; alles andere (mode, Konten, Pfade, magic) verlangt
         einen Neustart des Prozesses, damit die Startpruefungen erneut laufen.
         Rueckgabe: None = nichts, "hot" = uebernommen, "restart" = Neustart noetig."""
         try:
@@ -486,6 +484,9 @@ class Master:
         self.cfg_mtime = m
         new = load_json(self.cfg_path)
         old = self.raw
+        # max_lots_per_hedge bleibt in HOT, obwohl die Grenze abgeschafft ist
+        # (15.08.2026): Alt-Configs tragen das Feld noch, und ein Feld-Loeschen
+        # durch Panel-Save darf keinen unnoetigen Prozess-Neustart ausloesen.
         HOT = {"multiplier", "symbol_map", "max_lots_per_hedge"}
         changed = {k for k in set(old) | set(new)
                    if not k.startswith("_") and old.get(k) != new.get(k)}
@@ -499,8 +500,6 @@ class Master:
         if "symbol_map" in changed:
             self.symbol_map = new.get("symbol_map") or {}; chg.append("Symbol-Mapping")
             self.warned.clear()
-        if "max_lots_per_hedge" in changed:
-            self.max_lots = float(new["max_lots_per_hedge"]); chg.append(f"max_lots {self.max_lots}")
         self.raw = new
         if chg:
             log(f"↻ [{self.file}] Uebernommen: " + ", ".join(chg))
@@ -824,7 +823,7 @@ def main():
             "master_server": (snap or {}).get("server"),
             "hedge_login": int(ai.login), "hedge_server": str(ai.server),
             "magic": m.magic, "comment_prefix": m.prefix,
-            "multiplier": m.multiplier, "max_lots": m.max_lots, "symbol_map": m.symbol_map,
+            "multiplier": m.multiplier, "symbol_map": m.symbol_map,
             "master_positions": (snap or {}).get("positions") or [],
             "hedges": {str(k): v for k, v in (hedges or {}).items()},
             "blocked": sorted(m.blocked),
@@ -1027,7 +1026,7 @@ def main():
 
                 actions, warns = plan_actions(
                     snap["positions"], hedges,
-                    multiplier=m.multiplier, symbol_map=m.symbol_map, max_lots=m.max_lots,
+                    multiplier=m.multiplier, symbol_map=m.symbol_map,
                     sym_info=sym_info, skip_idents=(m.startup_skip or frozenset()))
 
                 for w in warns:

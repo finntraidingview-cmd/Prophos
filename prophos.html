@@ -16011,8 +16011,8 @@
       _pfSet('m5dup', 'ok', _dupConnected ? 'Dieses Paar ist nicht in Duplikum verlinkt.' : 'Duplikum ist nicht verbunden — kein Doppel-Hedge möglich.')
     }
 
-    // ── 4. Werte pushen ──
-    let effMaxLots = null
+    // ── 4. Werte pushen ── (max Lots komplett abgeschafft, 15.08.2026 Finns
+    // Ansage — es gibt keine Sicherheitsgrenze mehr, nur noch Broker-Limits)
     if(hardFail){
       _pfSet('m5push', 'warn', 'Übersprungen — vorherige Checks fehlgeschlagen.')
       _pfSet('m5term', 'warn', 'Übersprungen — vorherige Checks fehlgeschlagen.')
@@ -16023,15 +16023,7 @@
     } else {
       const file = route.inst.file
       const mult = Number(plan.multiplier)
-      const sPf = route.inst.status || {}
       const mapCount = Object.keys(route.inst.symbol_map || {}).length
-      // Untergrenze der Sicherheitsbremse: Multiplier × Master-Kontrakte. Läuft
-      // schon eine Master-Position, deren Volumen einbeziehen (contract_size der
-      // Positionen fließt beim Copier selbst in die Exposure-Rechnung ein).
-      const liveVol = (sPf.master_positions || []).reduce((sum2, p2) => sum2 + (Number(p2.volume) || 0), 0)
-      const contracts = Math.max(Number(plan.masterContracts) || 0, liveVol)
-      const minLots = contracts > 0 ? Math.ceil(mult * contracts * 100) / 100 : null
-      const curMax = Number(route.inst.max_lots)
 
       const pushRes = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(mult) }) })
@@ -16075,32 +16067,12 @@
         _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping unvollständig.')
         hardFail = true
       } else {
-        effMaxLots = isFinite(curMax) ? curMax : null
         const mapOk = expSyms.length
           ? `Mapping deckt <span class="mono">${expSyms.map(escapeHtml).join(', ')}</span> ab ✓`
           : `Mapping <span class="mono">${mapCount}</span> Zeile(n) ✓`
-        if(minLots != null && (!isFinite(curMax) || curMax < minLots)){
-          // Sicherheitsbremse nie stillschweigend: unterschritten → rot + Fix-Button
-          _pfSet('m5push', 'err', `max Lots (<span class="mono">${escapeHtml(String(route.inst.max_lots ?? '–'))}</span>) liegt unter der Untergrenze <span class="mono">${minLots}</span> (×${mult.toFixed(3)} · ${contracts} Kontrakte) — die Sicherheitsbremse würde Hedges verweigern. ${mapOk}<br>
-            <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5lots" style="padding:4px 12px;font-size:11.5px">max Lots auf ${minLots} setzen</button>`)
-          document.getElementById('pf-fix-m5lots')?.addEventListener('click', async () => {
-            const b = document.getElementById('pf-fix-m5lots')
-            if(b){ b.disabled = true; b.textContent = 'setze…' }
-            const fr = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
-              headers:{'Content-Type':'application/json'}, body: JSON.stringify({ max_lots_per_hedge: String(minLots) }) })
-            if(fr.ok){
-              effMaxLots = minLots
-              _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · max Lots auf <span class="mono">${minLots}</span> gesetzt · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
-            } else {
-              _pfSet('m5push', 'err', 'max Lots setzen fehlgeschlagen: ' + escapeHtml(String(fr.msg || fr.error || 'Fehler')))
-            }
-          })
-          softWait = true
-        } else {
-          // GELB, nicht grün: die Untergrenze ist nur eine Schätzung — die
-          // endgültige Lot-Zahl rechnet der Copier exposure-basiert.
-          _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · max Lots <span class="mono">${escapeHtml(String(route.inst.max_lots ?? '–'))}</span>${minLots != null ? ` ≥ Untergrenze <span class="mono">${minLots}</span>` : ''} · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
-        }
+        // GELB, nicht grün: die endgültige Lot-Zahl rechnet der Copier
+        // exposure-basiert (Kontraktgrößen!) — blockt er, steht es im Karten-Log.
+        _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
       }
     }
 
@@ -16141,7 +16113,6 @@
           await window.mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
             headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ multiplier: String(Number(plan.multiplier)),
-                                   max_lots: String(effMaxLots ?? route.inst.max_lots ?? ''),
                                    mode: route.inst.mode || 'dryrun' }) })
         }catch(_){}
 
@@ -21747,7 +21718,6 @@
         <div class="mtc-stat${pos ? ' hot' : ''}"><b>${pos}</b><span>Positionen</span></div>
         <div class="mtc-stat${hed ? ' hot' : ''}"><b>${hed}</b><span>Hedges</span></div>
         <div class="mtc-stat"><b>×${esc(d.multiplier ?? '–')}</b><span>Multi</span></div>
-        <div class="mtc-stat"><b>${esc(d.max_lots ?? '–')}</b><span>max Lots</span></div>
       </div>
       <div class="mtc-acts">
         <button class="btn btn-ghost" style="padding:6px 11px;font-size:12px" data-mtctoggle type="button">${isOpen ? 'Details ▴' : 'Details ▾'}</button>
@@ -21757,7 +21727,6 @@
       <div class="mtc-details">
         <div class="mtc-row">
           <div><label>Multiplikator</label><input type="number" step="0.001" min="0" value="${esc(d.multiplier ?? '')}" data-mtcf="multiplier"></div>
-          <div><label>max Lots pro Hedge</label><input type="number" step="0.01" min="0" value="${esc(d.max_lots ?? '')}" data-mtcf="max_lots_per_hedge"></div>
         </div>
         <label>Modus</label>
         <select data-mtcf="mode">

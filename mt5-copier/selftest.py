@@ -4,7 +4,7 @@ Selbsttest der Copier-Rechenlogik — laeuft OHNE MetaTrader, also auch auf dem 
 
 Prueft plan_actions() aus copier.py gegen die Faelle, die im Alltag vorkommen:
 Oeffnen, Reverse-Richtung, Teil-Schliessung, Komplett-Schliessung, Neustart-Recovery,
-Kontraktgroessen-Umrechnung, Lot-Rundung, Sicherheitsgrenze, fehlendes Mapping.
+Kontraktgroessen-Umrechnung, Lot-Rundung, fehlendes Mapping.
 
 Aufruf:  python3 selftest.py
 """
@@ -31,10 +31,10 @@ def sym(s):
     return FUSION.get(s)
 
 
-def run(name, positions, hedges, *, mult=1.0, max_lots=5.0, expect_actions=None,
+def run(name, positions, hedges, *, mult=1.0, expect_actions=None,
         expect_warn_contains=None, skip=frozenset()):
     actions, warns = plan_actions(positions, hedges, multiplier=mult, symbol_map=MAP,
-                                  max_lots=max_lots, sym_info=sym, skip_idents=skip)
+                                  sym_info=sym, skip_idents=skip)
     ok = True
     detail = []
 
@@ -140,12 +140,13 @@ def main():
         {}, mult=0.427,
         expect_actions=[{"kind": "open", "symbol": "GROB", "volume": 0.4}]))
 
-    # 10) Sicherheitsgrenze: Multiplikator 10 -> 10 Lots > max_lots 5 -> keine Aktion
+    # 10) max-Lots-Grenze abgeschafft (15.08.2026, Finns Ansage): grosse Faktoren
+    #     laufen ungebremst durch — Deckel ist nur noch das Broker-volume_max.
     results.append(run(
-        "Sicherheitsgrenze greift (10 Lots > max 5) → keine Order, Warnung",
+        "Keine Sicherheitsgrenze mehr: Multiplikator 10 → 10 Lots gehen durch",
         [{"ident": 10, "symbol": "NAS100", "type": 0, "volume": 1.0, "contract_size": 1.0}],
-        {}, mult=10.0, max_lots=5.0,
-        expect_actions=[], expect_warn_contains="Sicherheitsgrenze"))
+        {}, mult=10.0,
+        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 10.0}]))
 
     # 11) Fehlendes Symbol-Mapping -> keine Aktion, Warnung
     results.append(run(
@@ -305,7 +306,7 @@ def main():
                 "hedge_expected_login": 437804, "master_expected_login": 437803,
                 "snapshot_file": "prophos_master.csv", "magic": 770001,
                 "comment_prefix": "PH", "multiplier": 1.0,
-                "symbol_map": {"NAS100": "NAS100"}, "max_lots_per_hedge": 2.0,
+                "symbol_map": {"NAS100": "NAS100"},
                 "_kommentar": "wird nicht uebernommen"}
         m2 = dict(base, magic=770002, comment_prefix="P2", snapshot_file="prophos_master2.csv")
         _json.dump(base, open(os.path.join(td, "config.json"), "w"))

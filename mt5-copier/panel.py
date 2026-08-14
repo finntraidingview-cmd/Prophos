@@ -2,7 +2,7 @@
 """
 Prophos Copier-Panel — kleines Web-Frontend für den lokalen MT5-Copier auf DIESEM PC.
 
-Zweck: Multiplikator, Symbol-Mapping, max_lots und Modus im Browser setzen statt in der
+Zweck: Multiplikator, Symbol-Mapping und Modus im Browser setzen statt in der
 Textdatei — für mehrere Master/Prop-Firmen gleichzeitig. Zeigt außerdem live, was der
 Copier pro Master gerade macht (Konten, offene Hedges, Log), und kann das jeweilige
 Master-Terminal starten (MT5 merkt sich den Login pro Ordner — hier werden KEINE
@@ -38,7 +38,9 @@ PORT = int(os.environ.get("PANEL_PORT", "8770"))
 
 # Nur diese Felder darf das Panel schreiben. Terminal-Pfade, magic und die erwarteten
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
-WRITABLE = {"multiplier", "symbol_map", "max_lots_per_hedge", "mode"}
+# max_lots_per_hedge abgeschafft (15.08.2026, Finn: "komplett weg") — Alt-Clients,
+# die es noch schicken, werden vom Save still ignoriert (k not in WRITABLE).
+WRITABLE = {"multiplier", "symbol_map", "mode"}
 MODES = ("dryrun", "demo", "live")
 # Dieselbe strenge Namensregel wie in copier.py — Explorer-Kopien wie
 # "config - Kopie.json" oder "config (2).json" sind KEINE Instanz (Audit 13.08.2026:
@@ -158,7 +160,6 @@ def snapshot():
             "file": inst["config_file"],
             "mode": cfg.get("mode"),
             "multiplier": cfg.get("multiplier"),
-            "max_lots": cfg.get("max_lots_per_hedge"),
             "symbol_map": cfg.get("symbol_map") or {},
             "magic": magic,
             "snapshot_file": cfg.get("snapshot_file"),
@@ -205,7 +206,7 @@ def patch_config(fname, patch):
             v = str(v).lower()
             if v not in MODES:
                 return False, f"Modus '{v}' ungueltig"
-        if k in ("multiplier", "max_lots_per_hedge"):
+        if k == "multiplier":
             try:
                 v = float(v)
             except (TypeError, ValueError):
@@ -254,19 +255,18 @@ def _save_plans(plans):
     os.replace(tmp, PLANS_FILE)
 
 
-def upsert_plan(file, name, multiplier, max_lots, mode):
+def upsert_plan(file, name, multiplier, mode):
     with PLANS_LOCK:
         plans = _load_plans()
         now = datetime.now().isoformat(timespec="seconds")
         for p in plans:
             if p["file"] == file and p["status"] in ("geplant", "laufend"):
-                p.update({"multiplier": multiplier, "max_lots": max_lots,
-                          "mode": mode, "armed_at": now})
+                p.update({"multiplier": multiplier, "mode": mode, "armed_at": now})
                 _save_plans(plans)
                 return p
         pid = max([p["id"] for p in plans], default=0) + 1
         p = {"id": pid, "file": file, "name": name, "multiplier": multiplier,
-             "max_lots": max_lots, "mode": mode, "created_at": now,
+             "mode": mode, "created_at": now,
              "armed_at": now, "started_at": None, "ended_at": None,
              "status": "geplant"}
         plans.append(p)
@@ -811,7 +811,6 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
   <label>Multiplikator</label>
   <input class=big id=plan-mult type=number step=0.001 min=0>
   <div class=row style="margin-top:10px">
-    <div><label>max Lots pro Hedge</label><input id=plan-lots type=number step=0.01 min=0></div>
     <div><label>Modus</label>
       <select id=plan-mode>
         <option value=dryrun>dryrun — nur mitlesen</option>
@@ -819,7 +818,6 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
         <option value=live>live — echtes Geld</option>
       </select></div>
   </div>
-  <div class=rule>Regel: max Lots muss über Multiplikator × größter Master-Position bleiben, sonst verweigert die Sicherheitsgrenze die Order.</div>
   <div class=modal-actions>
     <span class=msg id=plan-msg></span>
     <button class="btn btn-ghost" id=plan-cancel>Abbrechen</button>
@@ -881,7 +879,6 @@ function card(d){
      <div class="stat${pos?' hot':''}"><b>${pos}</b><span>Positionen</span></div>
      <div class="stat${hed?' hot':''}"><b>${hed}</b><span>Hedges</span></div>
      <div class=stat><b>×${esc(d.multiplier??'–')}</b><span>Multi</span></div>
-     <div class=stat><b>${esc(d.max_lots??'–')}</b><span>max Lots</span></div>
    </div>
    <div class=acc-acts>
      <button class="btn btn-primary btn-sm" data-plan>Trade planen</button>
@@ -892,7 +889,6 @@ function card(d){
    <div class=details>
      <div class=row>
        <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
-       <div><label>max Lots pro Hedge</label><input type=number step=0.01 min=0 value="${esc(d.max_lots??'')}" data-f=max_lots_per_hedge></div>
      </div>
      <label>Modus</label>
      <select data-f=mode>
@@ -976,7 +972,7 @@ function planCard(p){
   return `<div class="plan ${p.status}">
     <div class=plan-top><b>${esc(d.name||p.name)}</b>${pill(p.mode)}
       <button class=x data-plandel="${p.id}" data-planstatus="${p.status}" title="Plan löschen">×</button></div>
-    <div class=plan-meta>×${esc(p.multiplier)} · max ${esc(p.max_lots)} Lots · ${esc((s.master_server||d.master_server||''))}</div>
+    <div class=plan-meta>×${esc(p.multiplier)} · ${esc((s.master_server||d.master_server||''))}</div>
     <div class=plan-meta>${esc(meta)}</div>
     ${live}
   </div>`;
@@ -1014,7 +1010,6 @@ function openPlan(file){
   document.getElementById('plan-title').textContent='Trade planen — '+d.name;
   document.getElementById('plan-sub').textContent=`${s.master_server||d.master_server||''} · Master ${d.master_expected||'—'} → Hedge ${d.hedge_expected||'—'}`;
   document.getElementById('plan-mult').value=d.multiplier??'';
-  document.getElementById('plan-lots').value=d.max_lots??'';
   document.getElementById('plan-mode').value=d.mode||'dryrun';
   const m=document.getElementById('plan-msg'); m.className='msg'; m.textContent='';
   planBg.classList.add('open'); planBg.style.display='flex';
@@ -1035,13 +1030,9 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   // Abbruchgrund mehr: Terminal-Start + EA-Selbstheilung erledigen das, und
   // die Bereitschafts-Anzeige unten sagt, wann wirklich getradet werden darf.
   const patch={multiplier:document.getElementById('plan-mult').value,
-               max_lots_per_hedge:document.getElementById('plan-lots').value,
                mode:document.getElementById('plan-mode').value};
-  if(!patch.multiplier||!patch.max_lots_per_hedge){
-    msg.className='msg err';msg.textContent='Multiplikator und max Lots ausfüllen.';return}
-  if(+patch.max_lots_per_hedge<=+patch.multiplier){
-    if(!confirm(`max Lots (${patch.max_lots_per_hedge}) ist nicht größer als der Multiplikator (${patch.multiplier}).\nSchon ab 1.0 Lot Master würde die Sicherheitsgrenze die Order verweigern.\nTrotzdem so starten?`))return;
-  }
+  if(!patch.multiplier){
+    msg.className='msg err';msg.textContent='Multiplikator ausfüllen.';return}
   if(patch.mode==='live'&&d.mode!=='live'){
     if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${d.master_expected||'?'}\nHedge: ${d.hedge_expected||'?'}\n\nDuplikum für dieses Paar ist aus?`)){
       msg.className='msg err';msg.textContent='Abgebrochen — nichts geändert';return}
@@ -1053,7 +1044,7 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   // Trade-Plan anlegen/aktualisieren: startet als "geplant" und wandert von
   // selbst nach "laufend"/"beendet", sobald die Position auf-/zugeht.
   try{await fetch('/api/plan?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({multiplier:patch.multiplier,max_lots:patch.max_lots_per_hedge,mode:patch.mode})});}catch(e){}
+    body:JSON.stringify({multiplier:patch.multiplier,mode:patch.mode})});}catch(e){}
   msg.textContent='gepusht — öffne Terminal…';
   const t=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const ts=await t.json();
@@ -1383,8 +1374,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
             p = upsert_plan(inst["config_file"], inst["name"],
-                            body.get("multiplier"), body.get("max_lots"),
-                            str(body.get("mode") or ""))
+                            body.get("multiplier"), str(body.get("mode") or ""))
             return self._send(200, json.dumps({"ok": True, "plan": p}, ensure_ascii=False))
 
 

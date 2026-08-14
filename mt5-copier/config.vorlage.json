@@ -10,7 +10,6 @@
   "symbol_map": {
     "NAS100": "NAS100"
   },
-  "max_lots_per_hedge": 2.0,
   "adopt_existing_master_positions": false,
   "poll_interval": 0.5,
   "deviation_points": 30,
