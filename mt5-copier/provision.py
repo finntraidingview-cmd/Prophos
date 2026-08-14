@@ -161,6 +161,24 @@ def build_master_config(base, *, name, master_login, terminal_path, ident, serve
     return cfg
 
 
+def servers_dat_contains(path, server):
+    """Steht der Servername in dieser servers.dat? Best-effort-Byte-Suche
+    (MT5 speichert Strings als UTF-16-LE; UTF-8 als Fallback mitgeprueft).
+    Damit wird beim Einlegen der Server-Liste nicht mehr GERATEN (frischer
+    vs. wiederverwendeter Datenordner), sondern GEPRUEFT — Fund 15.08.2026:
+    die Standard-Liste des Erststarts kennt keine Prop-Broker, und ein
+    Wiederholungslauf behielt sie stur, weil sie 'vorhanden' war."""
+    try:
+        with open(path, "rb") as f:
+            blob = f.read()
+    except OSError:
+        return False
+    s = (server or "").strip()
+    if not s:
+        return False
+    return s.encode("utf-16-le") in blob or s.encode("utf-8") in blob
+
+
 def servers_dat_source(folder, server, template_data, root=None):
     """Welche servers.dat bekommt der Klon? Reihenfolge (The5ers-Fall):
     1. ein bestehendes Master-Terminal, das auf DEMSELBEN Server laeuft —
@@ -424,13 +442,6 @@ def run_provision(*, name, login, password, server, template_exe,
     # Rest eines Fehlversuchs? Ein laufendes Terminal derselben Installation
     # wuerde jeden weiteren Start schlucken (Fenster kommt nur nach vorn).
     _kill_terminal_at(target_install)
-    # VOR dem Erststart merken, ob der Datenordner schon existierte: nur dann
-    # ist eine vorgefundene servers.dat womoeglich hand-gelernt (Retry-Fall).
-    # Ein in DIESEM Lauf frisch angelegter Datenordner bekommt von MT5 eine
-    # Standard-Liste OHNE die Prop-Broker — die darf nie "behalten" werden
-    # (Fund 15.08.2026: genau das zwang Finn bei JEDEM neuen Terminal zur
-    # manuellen Broker-Suche, auch bei Brokern, die die Vorlage laengst kennt).
-    data_existed_before = data_dir_for(target_install, root) is not None
     proc = subprocess.Popen([target_exe], cwd=target_install)
     new_data = None
     t0 = time.time()
@@ -451,25 +462,29 @@ def run_provision(*, name, login, password, server, template_exe,
     # Zugangsdaten) — damit kann die Startdatei den Servernamen aufloesen.
     step("ea")
     target_servers = os.path.join(new_data, "config", "servers.dat")
-    if os.path.exists(target_servers) and data_existed_before:
-        # Datenordner stammt aus einem VORIGEN Versuch — eine vorhandene Liste
-        # kann hand-gelernte Server enthalten (manuelle Broker-Suche), nicht
-        # ueberschreiben, sonst verlernt das Terminal sie wieder.
-        servers_note = "servers.dat vorhanden (behalten, Wiederholungslauf)"
+    # Nicht raten, PRUEFEN (15.08.2026): entscheidend ist allein, ob die Liste
+    # im Terminal den gewuenschten Servernamen KENNT. Kennt sie ihn, bleibt sie
+    # (schuetzt hand-gelernte Server). Kennt sie ihn nicht, wird eine Quelle
+    # kopiert, die ihn kennt — egal ob frischer Datenordner oder Wiederholung.
+    # Damit heilen sich auch die 'vergifteten' Terminals der Fehlversuche selbst.
+    if os.path.exists(target_servers) and servers_dat_contains(target_servers, server):
+        servers_note = f"servers.dat kennt {server} schon (behalten)"
     else:
-        # Frischer Datenordner: die vom Erststart angelegte Standard-Liste
-        # kennt die Prop-Broker NICHT — immer die Quelle drueberkopieren
-        # (bestehender Master desselben Servers, sonst Vorlage).
         src = servers_dat_source(folder, server, tpl_data, root)
-        if not src and os.path.exists(target_servers):
-            servers_note = "servers.dat: keine Quelle — Standard-Liste bleibt (Broker ggf. einmal von Hand suchen)"
-        elif not src:
-            raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
-                                 "starten und wieder schliessen.")
-        else:
+        if src and not servers_dat_contains(src, server):
+            # Quelle kennt den Server auch nicht (voellig neuer Broker) —
+            # kopieren wuerde nichts verbessern.
+            src = None
+        if src:
             os.makedirs(os.path.join(new_data, "config"), exist_ok=True)
             shutil.copy2(src, target_servers)
-            servers_note = f"servers.dat kopiert ({os.path.basename(os.path.dirname(os.path.dirname(src)))})"
+            servers_note = f"servers.dat mit {server} kopiert"
+        elif os.path.exists(target_servers):
+            servers_note = (f"kein Terminal auf diesem PC kennt {server} — "
+                            f"einmalig im Terminal Broker suchen (Konto eroeffnen)")
+        else:
+            raise ProvisionError("Keine servers.dat gefunden — Vorlage-Terminal einmal "
+                                 "starten und wieder schliessen.")
     experts = os.path.join(new_data, "MQL5", "Experts")
     presets = os.path.join(new_data, "MQL5", "Presets")
     os.makedirs(experts, exist_ok=True)
