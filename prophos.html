@@ -21960,7 +21960,12 @@
   // waere mtcState dort dauerhaft eingefroren und die Anzeige bliebe leer.
   setInterval(() => {
     const mt5RouteWants = (typeof mt5RoutePollWanted === 'function') && mt5RoutePollWanted()
-    if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcAddModal').classList.contains('open')) mtcLoad()
+    // Auch weiterpollen, solange eine Einrichtung läuft oder ein Speicher-/
+    // Link-Merker offen ist (15.08.2026): Finn schließt das Popup nach dem
+    // Start — ohne Beobachter würde das Fertig-Signal verpasst und die
+    // Zugangsdaten landeten nie in Supabase.
+    if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcAddModal').classList.contains('open')
+       || (mtcJob && !mtcJob.done) || _mtcPendingCreate || _mtcPendingLink) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
