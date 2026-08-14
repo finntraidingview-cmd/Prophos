@@ -22045,7 +22045,9 @@
     msg.className = 'mtc-msg'; msg.textContent = 'starte…'
     const d = await mtcApi('provision', { method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-    const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = ''
+    // Passwort nur bei ERFOLG leeren (15.08.2026): bei einem Fehlversuch (z.B.
+    // fehlende Vorlage) musste Finn sonst alles neu eingeben/pasten.
+    if(d.ok){ const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = '' }
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? 'läuft — Fortschritt unten' : ('Fehler: ' + (d.msg || d.error))
     // Auto-Link-Merker (Paket D, 15.08.2026): erst NACH ok:true — ein abgelehnter

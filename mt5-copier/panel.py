@@ -62,6 +62,31 @@ def base_config():
     return cfg if isinstance(cfg, dict) else {}
 
 
+def ensure_vorlage():
+    """Von-Null-Selbstheilung (15.08.2026): fehlt JEDE Basis (config.json UND
+    config.vorlage.json), holt das Panel die Standard-Vorlage einmalig aus dem
+    Repo — gleiche vertrauenswuerdige Quelle wie das Selbst-Update. Bestehende
+    Dateien werden NIE ueberschrieben (hedge_expected_login & Pfade gehoeren
+    dem PC). Anlass: der manuelle irm-Download ist beim Von-Null-Test zweimal
+    untergegangen — ein Pflichtschritt, den man vergessen kann, ist ein Bug."""
+    if base_config():
+        return
+    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+           "main/mt5-copier/config.vorlage.json")
+    try:
+        import urllib.request
+        data = urllib.request.urlopen(url, timeout=15).read()
+        if len(data) > 200 and isinstance(json.loads(data.decode("utf-8")), dict):
+            tmp = os.path.join(HERE, "config.vorlage.json.tmp")
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, os.path.join(HERE, "config.vorlage.json"))
+            print("[panel] config.vorlage.json fehlte — Standard-Vorlage aus dem Repo geholt.", flush=True)
+    except Exception as e:
+        print(f"[panel] Vorlage-Download fehlgeschlagen ({type(e).__name__}) — "
+              f"Hinzufuegen meldet das klar, sobald es gebraucht wird.", flush=True)
+
+
 def _pid_alive(pid):
     """Lebt der Prozess? Fuer den Loesch-Riegel (b2): stale Status heisst nicht
     toter Copier (Terminal-Ausfall schreibt gar nichts mehr). ACHTUNG Windows:
@@ -1303,6 +1328,9 @@ def main():
     # bliebe stehen (falsche/fehlende Zeitstempel). Ein Daemon-Tick alle 5 s
     # macht die Uebergaenge unabhaengig davon, ob ein Browser zuschaut.
     threading.Thread(target=_plan_ticker, daemon=True).start()
+    # Von-Null-Selbstheilung: fehlende Vorlage einmalig aus dem Repo holen
+    # (blockiert den Start nicht laenger als den Download-Timeout).
+    ensure_vorlage()
     print("=" * 66)
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
