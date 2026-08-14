@@ -5473,8 +5473,8 @@
         <div class="field">
           <label>Passwort</label>
           <div style="position:relative">
-            <input class="input" id="ac-cred-password" type="password" placeholder="••••••••" autocomplete="new-password" style="padding-right:64px">
-            <button type="button" id="ac-cred-pw-toggle" class="btn btn-ghost" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:3px 8px;font-size:11px">Zeigen</button>
+            <input class="input" id="ac-cred-password" type="text" placeholder="Passwort" autocomplete="off" spellcheck="false" style="padding-right:64px">
+            <button type="button" id="ac-cred-pw-toggle" class="btn btn-ghost" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);padding:3px 8px;font-size:11px">Verbergen</button>
           </div>
         </div>
         <div class="field">
@@ -11787,9 +11787,10 @@
       if(accEls.credNotes)    accEls.credNotes.value    = ''
     }
     // Passwort-Feld immer verdeckt starten
-    if(accEls.credPass) accEls.credPass.type = 'password'
+    // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
+    if(accEls.credPass) accEls.credPass.type = 'text'
     const credPwToggle = document.getElementById('ac-cred-pw-toggle')
-    if(credPwToggle) credPwToggle.textContent = 'Zeigen'
+    if(credPwToggle) credPwToggle.textContent = 'Verbergen'
     // Paste-Parser-Feld zurücksetzen
     const _pasteEl = document.getElementById('ac-paste-blob'); if(_pasteEl) _pasteEl.value = ''
     const _pasteHintEl = document.getElementById('ac-paste-hint'); if(_pasteHintEl) _pasteHintEl.style.display = 'none'
@@ -12186,6 +12187,7 @@
       // External ID = Broker-Kontonummer = Login → automatisch mitfüllen (nur wenn leer,
       // damit eine manuell abweichend eingetragene ID nicht überschrieben wird)
       if(parsed.login && accEls.extId && !accEls.extId.value.trim()){ accEls.extId.value = parsed.login; found.push('External ID') }
+      if(parsed.password && accEls.credPass){ accEls.credPass.value = parsed.password; found.push('Passwort') }
       if(parsed.server && accEls.credServer){ accEls.credServer.value = parsed.server; found.push('Server') }
       if(parsed.platform && accEls.credPlatform){ accEls.credPlatform.value = parsed.platform; found.push('Plattform: ' + parsed.platform) }
       if(acPasteHint){
