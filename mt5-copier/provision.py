@@ -608,6 +608,20 @@ def run_provision(*, name, login, password, server, template_exe,
             time.sleep(2)
         return os.path.exists(snap_path)
 
+    def _snapshot_login_ok():
+        """Staerkster Erfolgs-Beweis (15.08.2026): die Snapshot-Datei traegt die
+        Kontonummer im Header — fliesst sie mit DIESEM Login, ist eingeloggt UND
+        EA aktiv bewiesen. Noetig, weil der Login auch schon im Vorstart
+        passieren kann (MT5 verbindet mit gespeicherten Zugangsdaten sofort);
+        das Journal-Lesezeichen liegt dann DANACH und der reine Journal-Warter
+        wartete auf einen Login, der laengst da war."""
+        try:
+            with open(snap_path, "r", encoding="utf-8", errors="ignore") as f:
+                head = (f.readline() or "").strip().split(";")
+            return len(head) >= 4 and head[0] == "PROPHOS1" and head[3] == str(login)
+        except OSError:
+            return False
+
     try:
         with open(start_ini, "w", encoding=INI_ENCODING) as f:
             f.write(build_login_ini(login, password, server) + "\n"
@@ -624,6 +638,11 @@ def run_provision(*, name, login, password, server, template_exe,
         hinted = False
         variant_tried = False
         while time.time() - t0 < 240:
+            if _snapshot_login_ok():
+                # Snapshot mit richtigem Login fliesst = Login + EA bewiesen —
+                # unabhaengig davon, wann das Journal den Login verbucht hat.
+                verdict = "authorized"
+                break
             verdict = _journal_says(new_data, ["authorization failed", "invalid account",
                                                "authorized"], jbase)
             if verdict:
