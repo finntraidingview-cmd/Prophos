@@ -21771,6 +21771,9 @@
   // der 3s-Poll darf die alten Schritte dann nicht wieder reinmalen. Ein neuer
   // Start hebt das Flag auf.
   let _mtcAddFresh = false
+  // Lief die Einrichtung sichtbar im offenen Add-Modal? Nur dann darf das
+  // Fertig-Signal das Modal automatisch schliessen (15.08.2026).
+  let _mtcJobWasRunning = false
   function renderAddJob(){
     if(_mtcAddFresh && mtcJob && mtcJob.done){
       $('mtc-add-steps').innerHTML = ''
@@ -21887,6 +21890,19 @@
     mt5TabOffline(false)
     mtcSeenOnline = true
     mtcJob = d.job
+    // Auto-Schließen des Add-Modals bei Erfolg (Finns Wunsch 15.08.2026):
+    // lief die Einrichtung sichtbar in diesem Modal und wird fertig OHNE
+    // Fehler → Toast + zu. Bei Fehler bleibt es offen (Fehlertext lesbar).
+    const _addOpenNow = $('mtcAddModal').classList.contains('open')
+    if(_addOpenNow && d.job && !d.job.done) _mtcJobWasRunning = true
+    if(d.job && d.job.done){
+      if(_addOpenNow && !d.job.error && _mtcJobWasRunning){
+        _mtcJobWasRunning = false
+        if(typeof atToast === 'function') atToast(`✓ Account „${d.job.name}" eingerichtet`, 'start')
+        closeAdd()
+      }
+      if(d.job.error) _mtcJobWasRunning = false
+    }
     // Auto-Link nach erfolgreicher Provisionierung (Paket D, 15.08.2026): der
     // Merker entsteht im Add-Modal erst NACH ok:true des provision-POSTs; hier
     // wird er genau einmal eingeloest. Merker VOR dem async-Aufruf loeschen,
@@ -22160,9 +22176,9 @@
     msg.className = 'mtc-msg'; msg.textContent = 'starte…'
     const d = await mtcApi('provision', { method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-    // Passwort nur bei ERFOLG leeren (15.08.2026): bei einem Fehlversuch (z.B.
-    // fehlende Vorlage) musste Finn sonst alles neu eingeben/pasten.
-    if(d.ok){ const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = '' }
+    // Passwort bleibt STEHEN (Finns Wunsch 15.08.2026) — geleert wird erst
+    // beim naechsten Oeffnen nach fertigem Lauf (openAdd-Frisch-Zweig); das
+    // Modal schliesst sich bei Erfolg ohnehin automatisch.
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? 'läuft — Fortschritt unten' : ('Fehler: ' + (d.msg || d.error))
     if(d.ok) _mtcAddFresh = false
