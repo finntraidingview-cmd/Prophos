@@ -4969,6 +4969,14 @@
         </div>
         <div class="mtc-modal-body">
           <p class="modal-sub" style="margin-bottom:14px">klont das Master-Vorlage-Terminal, loggt ein, legt EA + Config an — alles automatisch auf diesem PC</p>
+          <!-- Prefill aus Prophos (Paket D, 15.08.2026): Zugangsdaten liegen oft schon
+               in accounts.cred_* — die Auswahl fuellt AUSSCHLIESSLICH die .value-Property
+               der vier statischen Inputs unten (nie innerHTML/Attribute — cred_password
+               darf nie im DOM-Markup oder in Logs auftauchen). Optionen befuellt openAdd(). -->
+          <div style="margin-bottom:10px">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Aus Prophos-Account übernehmen (optional)</label>
+            <select data-mtcp="prefill" id="mtc-add-prefill" style="width:100%"><option value="">— manuell eingeben —</option></select>
+          </div>
           <div class="mtc-row">
             <div>
               <label style="display:block;font-size:11px;font-weight:600;color:var(--sub);margin:0 0 4px;text-transform:uppercase;letter-spacing:.05em">Name (kurz, nur Buchstaben/Zahlen)</label>
@@ -8296,6 +8304,365 @@
   })
   /* ========== ENDE MT5-COPIER LINKING ========== */
 
+  /* ========== MT5-ROUTE (Trade-Lifecycle, 15.08.2026) ==========
+   * Trades über den eigenen lokalen MT5-Hedge-Copier statt Duplikum — Vorbild ist
+   * an JEDER Stelle die Mirror-Route (planMirrorRoute / tpPreflightMirror /
+   * mirrorPlanPoll / _autoPnlFetchMirror). Alles ADDITIV, Duplikium-Logik nach
+   * unten unangetastet (Finns Grundgesetz).
+   *
+   * Routen-Zugehörigkeit ist EXPLIZIT: trade_plans.route === 'mt5' (Migration
+   * 2026-08-15). Die Route entsteht durch den Preflight (tpPreflightMt5) oder den
+   * manuellen "Läuft"-Klick (transitionPlan-Hook) — wie der Mirror durchs
+   * Scharfschalten. Bewusst KEIN struktureller Fallback über die Verlinkung:
+   * sonst liefen zwei Erkennungs-Engines auf demselben Plan (Richter-Panel).
+   * Alle Status-Updates tragen einen Status-Guard; 0 Zeilen = "anderer war
+   * schneller" → Plan still neu laden, kein Toast.
+   *
+   * P&L-Beweis ('Beweis oder leer'): bei planned→open werden master_balance +
+   * hedge_balance aus einer FRISCHEN Copier-Antwort in mt5_baseline eingefroren,
+   * bei der Ende-Erkennung mt5_baseline.final (Balance + Summe der belegten
+   * Hedge-Closes). _autoPnlFetchMt5 rechnet NUR aus diesen eingefrorenen Werten —
+   * nie aus "jetzt"-Balances (Folgetrade/Payout würde das Delta kontaminieren). */
+
+  // Das Localhost-Gate ist der HOSTNAME, nie die Existenz von window.mtcApi —
+  // die Copier-IIFE läuft auch auf pages.dev/Railway (und meldet dort nur offline).
+  const MT5_LOCAL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+
+  // Reverse-Lookup mt5_links: Prophos-Account-ID → MT5-Login (Pendant zu atGetDupId)
+  function mt5LoginForAccount(prophosAccountId){
+    if(!prophosAccountId) return null
+    const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+    for(const [login, accId] of Object.entries(links)){
+      if(String(accId) === String(prophosAccountId)) return String(login)
+    }
+    return null
+  }
+
+  /* Routen-Erkennung (Pendant zu planMirrorRoute): NUR Link-Prüfung + lokaler PC.
+   * Bewusst NICHT von einer geladenen Instanzliste abhängig — mtcState ist auf
+   * der Trades-View eingefroren (3s-Poll läuft nur bei sichtbarer Copier-View;
+   * Richter-Blocker). Wer Instanzen braucht, lädt sie selbst frisch. */
+  function planMt5Route(plan){
+    if(!plan || !MT5_LOCAL) return null
+    const masterLogin = mt5LoginForAccount(plan.masterAccountId)
+    const hedgeLogin  = mt5LoginForAccount(plan.slaveAccountId)
+    if(!masterLogin || !hedgeLogin) return null
+    return { masterLogin, hedgeLogin }
+  }
+
+  // Plan + Instanzliste → konkrete Copier-Instanz. Master-Login matcht gegen
+  // status.master_login (läuft) bzw. master_expected (Config), Hedge analog.
+  function mt5RouteResolve(plan, instances){
+    const linkRoute = planMt5Route(plan)
+    if(!linkRoute) return null
+    const inst = (instances || []).find(x => {
+      if(!x) return false
+      const s = x.status || {}
+      return String(s.master_login || x.master_expected || '') === linkRoute.masterLogin
+          && String(s.hedge_login  || x.hedge_expected  || '') === linkRoute.hedgeLogin
+    }) || null
+    if(!inst) return null
+    return { inst, masterLogin: linkRoute.masterLogin, hedgeLogin: linkRoute.hedgeLogin }
+  }
+
+  // Poll-Bedarf für die Copier-IIFE (Gate-Erweiterung am Modulende): auf der
+  // Trades-View sollen Balances/Live-P&L fließen, solange ein MT5-Plan aktiv ist.
+  function mt5RoutePollWanted(){
+    if(!MT5_LOCAL) return false
+    let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+    return (_tp || []).some(p => p && p.route === 'mt5' && (p.status === 'planned' || p.status === 'open'))
+  }
+
+  /* ── Zustandsmaschine planned→open→review (Pendant zu mirrorPlanPoll) ──
+   * 10s-Takt. Pro Tick ein EIGENER instances-Fetch — NIE mtcState als
+   * Erkennungsquelle (eingefrorene Momentaufnahme hätte Trades nie enden
+   * lassen). Frische kommt aus GENAU der Antwort: inst.alive (running + age≤15s)
+   * und keine status.note ('warte auf Snapshot…' = Daten nicht beweisfähig). */
+  const mt5PlanPoll = {
+    INTERVAL: 10000,
+    streak: new Map(),      // planId → frische 0-Positionen-Messungen in Folge (closeStreak 2 wie atCheck)
+    multiWarned: new Set(), // Master-Logins, für die der Mehrfach-Plan-Hinweis schon kam
+    // wasOpen: die Engine hat den Trade SELBST mit Positionen gesehen. Ohne das
+    // würde ein manueller Läuft-Klick VOR dem echten Einstieg nach 2 flachen
+    // Messungen ein falsches Trade-Ende samt master_pl≈0 erzeugen (Review-Fund
+    // 15.08.2026) — 'beobachtet != beabsichtigt', exakt das atCheck-Muster.
+    wasOpen: new Set(),
+    busy: false
+  }
+
+  async function mt5PlanPollTick(){
+    if(!MT5_LOCAL || mt5PlanPoll.busy) return
+    // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
+    let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+    const plans = (_tp || []).filter(p => p && p.route === 'mt5' && (p.status === 'planned' || p.status === 'open'))
+    if(!plans.length) return
+    if(typeof window.mtcApi !== 'function') return
+    mt5PlanPoll.busy = true
+    try{
+      const dd = await window.mtcApi('instances')
+      if(!dd || dd.copier_offline || dd._httpFail) return
+      const instances = dd.instances || []
+
+      // Mehrere GEPLANTE Pläne auf demselben Master → Auto-Start aussetzen
+      // (die Erkennung könnte den Start keinem Plan beweisbar zuordnen).
+      const plannedByMaster = {}
+      // Läuft auf einem Master schon ein MT5-Plan, gehören dessen Positionen IHM —
+      // ein geplanter Zweitplan darf davon nicht auto-starten (falsches started_at,
+      // Baseline mitten im fremden Trade; Review-Fund 15.08.2026).
+      const openMasters = new Set()
+      for(const p of plans){
+        const r = planMt5Route(p)
+        if(!r) continue
+        if(p.status === 'planned') (plannedByMaster[r.masterLogin] = plannedByMaster[r.masterLogin] || []).push(p)
+        if(p.status === 'open') openMasters.add(r.masterLogin)
+      }
+
+      for(const plan of plans){
+        const route = mt5RouteResolve(plan, instances)
+        if(!route) continue
+        const s = route.inst.status || {}
+        const fresh = !!route.inst.alive && !s.note
+        if(!fresh) continue
+        const posCount = (s.master_positions || []).length
+
+        if(plan.status === 'planned'){
+          if(posCount <= 0) continue
+          if((plannedByMaster[route.masterLogin] || []).length > 1){
+            if(!mt5PlanPoll.multiWarned.has(route.masterLogin)){
+              mt5PlanPoll.multiWarned.add(route.masterLogin)
+              if(typeof atToast === 'function') atToast(`⚠ Mehrere geplante MT5-Pläne auf Master ${route.masterLogin} — Auto-Start ausgesetzt, bitte den richtigen manuell auf „Läuft" setzen`, 'end')
+            }
+            continue
+          }
+          if(openMasters.has(route.masterLogin)){
+            if(!mt5PlanPoll.multiWarned.has('open:' + route.masterLogin)){
+              mt5PlanPoll.multiWarned.add('open:' + route.masterLogin)
+              if(typeof atToast === 'function') atToast(`⚠ Auf Master ${route.masterLogin} läuft schon ein MT5-Trade — der geplante Plan startet erst nach dessen Ende automatisch`, 'end')
+            }
+            continue
+          }
+          mt5PlanPoll.multiWarned.delete('open:' + route.masterLogin)
+          // Baseline NUR, wenn BEIDE Balances in dieser frischen Antwort stehen
+          // (alte EA-Version liefert keine) — sonst Auto-Start trotzdem, aber ohne
+          // Baseline: master_pl bleibt später leer statt geraten ('Beweis oder leer').
+          // Dokumentierte Eigenschaft, kein Bug: die Baseline entsteht bis ~10s
+          // nach dem Open → das Delta ist P&L exklusive der Open-Kommission.
+          // Baseline bei JEDEM Übergang nach open explizit setzen ODER nullen —
+          // ein wiederverwendeter Plan (zurück zu Geplant → erneut gestartet)
+          // würde sonst mit der Baseline des VORIGEN Laufs rechnen: plausible
+          // falsche Zahl statt leer (Review-Fund 15.08.2026).
+          const upd = { status: 'open', started_at: new Date().toISOString() }
+          upd.mt5_baseline = (s.master_balance != null && s.hedge_balance != null)
+            ? { master_balance: Number(s.master_balance),
+                hedge_balance:  Number(s.hedge_balance),
+                at: new Date().toISOString() }
+            : null
+          const { data, error } = await supabase.from('trade_plans').update(upd)
+            .eq('id', plan.id).eq('status', 'planned').select('*')
+          if(error){ console.warn('[mt5Poll] open:', error.message || error); continue }
+          if(!data || !data.length){
+            // Status-Guard griff: anderer Tab/Klick war schneller → still neu laden
+            if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
+            continue
+          }
+          const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+          if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+          // Auto-Start = Positionen wurden gesehen → Ende-Erkennung ist scharf.
+          mt5PlanPoll.wasOpen.add(String(plan.id))
+          if(typeof renderTradePlans === 'function') renderTradePlans()
+          if(typeof atToast === 'function') atToast(`▶ Trade gestartet (MT5): ${plan.masterName || '—'} → ${plan.slaveName || '—'}`, 'start')
+          continue
+        }
+
+        // status === 'open' — Ende-Erkennung. Der Streak zählt NUR für Pläne,
+        // deren Positionen diese Engine selbst gesehen hat (wasOpen, fällt nie
+        // zurück — Muster atCheck 04.08.): ein manueller Läuft-Klick vor dem
+        // echten Einstieg darf kein sofortiges Trade-Ende erzeugen.
+        if(posCount > 0){
+          mt5PlanPoll.wasOpen.add(String(plan.id))
+          mt5PlanPoll.streak.set(String(plan.id), 0)
+          continue
+        }
+        if(!mt5PlanPoll.wasOpen.has(String(plan.id))) continue
+        const n = (mt5PlanPoll.streak.get(String(plan.id)) || 0) + 1
+        mt5PlanPoll.streak.set(String(plan.id), n)
+        if(n < 2) continue
+        mt5PlanPoll.streak.set(String(plan.id), 0)
+
+        /* IM STREAK-MOMENT einfrieren — die Daten sind nachweislich frisch, später
+         * wären sie durch Folgetrades/Ring-Rotation kontaminiert oder weg.
+         * closed_sum = Σ closed_hedges.profit im Fenster started_at ≤ closed_at ≤ jetzt,
+         * OHNE dryrun-Einträge. Nicht beweisbar → null:
+         *  - 'extern_geschlossen'-Marker im Fenster (Stop-Out/Hand-Close, profit unbekannt)
+         *  - Ring voll UND ältester Eintrag jünger als started_at (Kürzungsverdacht —
+         *    Closes vom Trade-Anfang könnten schon herausrotiert sein)
+         *  - gar kein belegter Close im Fenster (nichts zu beweisen) */
+        const startedMs = plan.startedAt ? new Date(plan.startedAt).getTime() : 0
+        const nowMs = Date.now()
+        const ch = Array.isArray(s.closed_hedges) ? s.closed_hedges : []
+        const inWindow = ch.filter(e => {
+          const t = (e && e.closed_at) ? new Date(e.closed_at).getTime() : NaN
+          return isFinite(t) && t >= startedMs && t <= nowMs
+        })
+        const real = inWindow.filter(e => e.note !== 'dryrun')
+        const hasExtern = real.some(e => e.note === 'extern_geschlossen' || e.profit == null)
+        const oldestMs = ch.length
+          ? Math.min(...ch.map(e => (e && e.closed_at) ? (new Date(e.closed_at).getTime() || Infinity) : Infinity))
+          : null
+        const truncated = ch.length >= 50 && oldestMs != null && isFinite(oldestMs) && oldestMs > startedMs && startedMs > 0
+        let closedSum = null
+        if(!hasExtern && !truncated && real.length){
+          closedSum = real.reduce((sum, e) => sum + Number(e.profit || 0), 0)
+        }
+        const fin = {
+          master_balance: s.master_balance != null ? Number(s.master_balance) : null,
+          closed_sum: closedSum != null ? Number(closedSum.toFixed(2)) : null,
+          closed_tickets: real.map(e => e.ticket).filter(t => t != null),
+          at: new Date().toISOString()
+        }
+        const newBase = Object.assign({}, plan.mt5Baseline || {}, { final: fin })
+        const { data, error } = await supabase.from('trade_plans')
+          .update({ mt5_baseline: newBase })
+          .eq('id', plan.id).eq('status', 'open').select('*')
+        if(error){ console.warn('[mt5Poll] final:', error.message || error); continue }
+        if(!data || !data.length){
+          if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
+          continue
+        }
+        const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+        if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+        // OHNE zweites Argument — exakt wie mirrorPlanPoll: der zweite Parameter ist
+        // fromServer und würde atMoveToReview (review-Status + Auto-P&L) unterdrücken.
+        // Den FRISCHEN Plan übergeben, damit _autoPnlFetchMt5 die eben persistierte
+        // final-Baseline sieht (nicht die alte Objekt-Referenz).
+        const freshPlan = (idx >= 0) ? tradePlans[idx] : rowToPlan(data[0])
+        mt5PlanPoll.wasOpen.delete(String(plan.id))
+        mt5PlanPoll.streak.delete(String(plan.id))
+        if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshPlan)
+      }
+    } catch(e){ console.warn('[mt5Poll]', e) }
+    finally { mt5PlanPoll.busy = false }
+  }
+  setInterval(mt5PlanPollTick, mt5PlanPoll.INTERVAL)
+
+  /* ── Auto-P&L der MT5-Route (Pendant zu _autoPnlFetchMirror) ──
+   * Rechnet AUSSCHLIESSLICH aus plan.mt5Baseline + .final. KEIN Live-Fallback,
+   * KEIN "jetzt"-Balance-Lesen: zwischen Erkennung und Modal-Öffnen kann längst
+   * ein Folgetrade oder Payout die Balance verändert haben (Richter-Panel).
+   * Persistiert wird wie beim Vorbild in atMoveToReview (nur leere Felder,
+   * Guard eq(status,'review')) — diese Funktion liefert nur das Ergebnis. */
+  async function _autoPnlFetchMt5(plan){
+    const base = plan?.mt5Baseline || null
+    const fin  = base?.final || null
+    let masterPnl = null
+    if(base && fin && base.master_balance != null && fin.master_balance != null){
+      masterPnl = Number(fin.master_balance) - Number(base.master_balance)
+    }
+    const slavePnl = (fin && fin.closed_sum != null) ? Number(fin.closed_sum) : null
+    // closed_sum null = Hedge extern geschlossen / Ring-Kürzungsverdacht / kein
+    // belegter Close → Feld bleibt leer + Hinweis im Modal (analog _autoPnlAmbiguous,
+    // Text ist dort routen-abhängig).
+    try{
+      if(fin && fin.closed_sum == null) _autoPnlAmbiguous.add(String(plan.id))
+      else _autoPnlAmbiguous.delete(String(plan.id))
+    }catch(_){}
+    if(masterPnl == null && slavePnl == null) return null
+    return { slavePnl, slaveCcy: '', masterPnl, masterCcy: '' }
+  }
+
+  /* ── Live-Balances, 4. Quelle 'MT5-Copier' (immer HINTER Duplikum) ──
+   * NUR aus frischem mtcState (fetchedAt ≤ 15s, inst.alive) — 'alt ist nicht
+   * aktuell': eine eingefrorene Balance darf nie als "Live" angezeigt werden.
+   * Währung IMMER von der jeweiligen Seite (Master-Konto kann USD sein, während
+   * das Hedge-Konto EUR führt — Richter-Panel). */
+  function getMt5BalanceForAccount(prophosAccountId){
+    if(!prophosAccountId || !MT5_LOCAL) return null
+    const login = mt5LoginForAccount(prophosAccountId)
+    if(!login) return null
+    const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
+    if(!state) return null
+    for(const inst of Object.values(state)){
+      if(!inst || !inst.alive) continue
+      if(!(inst.fetchedAt && (Date.now() - inst.fetchedAt) <= 15000)) continue
+      const s = inst.status || {}
+      if(String(s.master_login || inst.master_expected || '') === login){
+        if(s.master_balance == null) return null
+        return {
+          balance: Number(s.master_balance),
+          ccy: s.master_currency || (String(s.master_server || inst.master_server || '').startsWith('Fusion') ? 'EUR' : 'USD')
+        }
+      }
+      if(String(s.hedge_login || inst.hedge_expected || '') === login){
+        if(s.hedge_balance == null) return null
+        return {
+          balance: Number(s.hedge_balance),
+          ccy: s.hedge_currency || (String(s.hedge_server || '').startsWith('Fusion') ? 'EUR' : 'USD')
+        }
+      }
+    }
+    return null
+  }
+
+  // Für die .tc-acc-bal-Badges der Trade-Karten: gleiches Format wie
+  // getDupBalanceForAccount ({balance, currency €/$}), damit fmtDupBalance passt.
+  function getMt5TcBalanceForAccount(prophosAccountId){
+    const r = getMt5BalanceForAccount(prophosAccountId)
+    if(!r) return null
+    return { balance: r.balance, currency: r.ccy === 'EUR' ? '€' : '$' }
+  }
+
+  /* ── Live-P&L-Zeile auf laufenden Karten — NUR route==='mt5' UND frisches
+   * mtcState (fetchedAt ≤ 15s), sonst NICHTS rendern (nie alte Zahlen als live). */
+  // Innerer Teil der Live-P&L-Zeile — getrennt vom Wrapper, damit der Ticker
+  // unten sie im DOM AKTUALISIEREN kann: gerendert wird die Karte nur bei
+  // Datenänderungen, die Zahlen würden sonst auf dem Renderzeitpunkt einfrieren
+  // und trotzdem 'Live' behaupten (Review-Fund 15.08.2026).
+  function mt5LivePnlInner(p){
+    try{
+      if(!p || p.route !== 'mt5' || p.status !== 'open' || !MT5_LOCAL) return ''
+      const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
+      if(!state) return ''
+      const route = mt5RouteResolve(p, Object.values(state))
+      if(!route) return ''
+      const inst = route.inst
+      if(!inst.alive || !(inst.fetchedAt && (Date.now() - inst.fetchedAt) <= 15000)) return ''
+      const s = inst.status || {}
+      const fmtPl = v => `<b style="color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
+      const parts = []
+      if(s.master_equity != null && s.master_balance != null){
+        parts.push(`Master ${fmtPl(Number(s.master_equity) - Number(s.master_balance))}`)
+      }
+      let hedgeSum = 0, hedgeSeen = false
+      for(const list of Object.values(s.hedges || {})){
+        for(const h of (list || [])){ hedgeSeen = true; hedgeSum += Number(h.profit) || 0 }
+      }
+      if(hedgeSeen) parts.push(`Hedge ${fmtPl(hedgeSum)}`)
+      if(!parts.length) return ''
+      return `<span class="mono" style="font-size:11px;white-space:nowrap" title="Live-P&L vom MT5-Copier">${parts.join(' · ')}</span>`
+    }catch(_){ return '' }
+  }
+  function mt5LivePnlHtml(p){
+    // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
+    // dem ersten mtcLoad — der Ticker füllt den Platzhalter nach, sobald frische
+    // Daten da sind.
+    if(!p || p.route !== 'mt5' || p.status !== 'open' || !MT5_LOCAL) return ''
+    return `<span data-mt5live="${escapeHtml(String(p.id))}">${mt5LivePnlInner(p)}</span>`
+  }
+  // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
+  // sind. Nicht-frische Daten leeren die Zeile — nie alte Zahlen als 'live' zeigen.
+  setInterval(() => {
+    try{
+      const nodes = document.querySelectorAll('[data-mt5live]')
+      if(!nodes.length) return
+      let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+      nodes.forEach(el => {
+        const p = (_tp || []).find(x => String(x.id) === el.getAttribute('data-mt5live'))
+        el.innerHTML = p ? mt5LivePnlInner(p) : ''
+      })
+    }catch(_){}
+  }, 5000)
+  /* ========== ENDE MT5-ROUTE ========== */
+
   /* ========== DUPLIKUM SYMBOL-MAPPING + MULTIPLIER HELPERS ==========
    * Bausteine für Auto-Mapping (beim Verknüpfen) und den Trade-Start-Preflight.
    * Payloads bewusst MINIMAL — nur die Felder, die geändert werden (Lehre aus dem
@@ -9647,6 +10014,10 @@
       // irgendwo eine Duplikum-Position zugeht (Slave kann in beiden Systemen verlinkt sein).
       if(typeof planMirrorRoute === 'function' && planMirrorRoute(plan)) continue
 
+      // MT5-Routen-Pläne (15.08.2026) gehören der MT5-Zustandsmaschine (mt5PlanPoll),
+      // nicht Duplikum — gleiche Logik wie der Mirror-Skip eine Zeile drüber.
+      if(plan.route === 'mt5') continue
+
       // Slave UND Master via External ID (dupGetLinks) auflösen
       const dupSlaveId  = atGetDupId(plan.slaveAccountId)
       const dupMasterId = atGetDupId(plan.masterAccountId)
@@ -10093,6 +10464,9 @@
 
     for(const plan of plans){
       if(isMirror(plan)) continue
+      // MT5-Routen-Pläne (15.08.2026): gehören der MT5-Zustandsmaschine des
+      // aktiven lokalen Profils (mt5PlanPoll), nie dem Duplikum-Wächter.
+      if(plan.route === 'mt5') continue
       const dupSlaveId  = dupIdOf(plan.slaveAccountId)
       const dupMasterId = dupIdOf(plan.masterAccountId)
       if(!dupSlaveId) continue
@@ -10881,9 +11255,14 @@
       const _dupId = Object.entries(_dl).find(([_, mId]) => String(mId) === String(acc.id))?.[0]
       const _dupAcc = (_dupId && dupState?.accounts) ? dupState.accounts.find(a => a.account_id === _dupId) : null
       if(_dupAcc && _dupAcc.balance != null){ adLiveBal = Number(_dupAcc.balance); adLiveSrc = 'Duplikum'; adLiveCcy = _dupAcc.ccy || 'USD' }
+      else {
+        // 4. Quelle (15.08.2026): lokaler MT5-Copier — immer HINTER Duplikum
+        const _mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(acc.id) : null
+        if(_mtcBal){ adLiveBal = _mtcBal.balance; adLiveSrc = 'MT5-Copier'; adLiveCcy = _mtcBal.ccy }
+      }
     }
     const adBalStr = adLiveBal != null
-      ? (adLiveSrc === 'Duplikum' ? dupFmtMoney(adLiveBal, adLiveCcy) : fmtMoney(adLiveBal))
+      ? ((adLiveSrc === 'Duplikum' || adLiveSrc === 'MT5-Copier') ? dupFmtMoney(adLiveBal, adLiveCcy) : fmtMoney(adLiveBal))
       : (acc.initialBalance ? fmtMoney(acc.initialBalance) : '—')
 
     // Gesamtkosten (EUR) — die wichtigste Zahl für Challenge/Funded-Accounts.
@@ -11190,11 +11569,16 @@
           liveBal = a.ma.balance; liveSrc = 'MT5'; liveTime = a.ma.lastChecked
         } else if(dupAcc && dupAcc.balance != null){
           liveBal = Number(dupAcc.balance); liveSrc = 'Duplikum'; liveCcy = dupAcc.ccy || 'USD'
+        } else {
+          // 4. Quelle (15.08.2026): lokaler MT5-Copier — immer HINTER Duplikum,
+          // nur mit frischen Daten (fetchedAt ≤ 15s, Prüfung im Helper).
+          const mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(a.id) : null
+          if(mtcBal){ liveBal = mtcBal.balance; liveSrc = 'MT5-Copier'; liveCcy = mtcBal.ccy }
         }
 
         let balCell
         if(liveBal != null){
-          const balFormatted = liveSrc === 'Duplikum' ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)
+          const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier') ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)
           balCell = `
             <div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${balFormatted}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
@@ -11241,6 +11625,9 @@
         if(a.topstep) links.push(`<span class="link-chip tsx" title="Topstep ${escapeHtml(a.topstep.name||'')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Topstep</span>`)
         if(a.ma)      links.push(`<span class="link-chip ma" title="MetaApi ${escapeHtml(a.ma.login||'')}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>MT5</span>`)
         if(dupAcc)    links.push(`<span class="link-chip" title="Duplikum ${escapeHtml(dupAcc.name||'')}" style="background:#f59e0b22;color:#d97706;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>Duplikum</span>`)
+        // MT5-Copier-Chip (15.08.2026) — Verlinkung aus mt5_links, teal wie das ma-Idiom
+        const _mtcLogin = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
+        if(_mtcLogin) links.push(`<span class="link-chip" title="MT5-Copier ${escapeHtml(String(_mtcLogin))}" style="background:#16c8c622;color:#0d9488;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><polyline points="20 6 9 17 4 12"/></svg>MT5-Copier</span>`)
         const linksHtml = links.length ? links.join('') : '<span style="color:var(--sub);font-size:11.5px">—</span>'
 
         // Action-Buttons: archivierte können reaktiviert werden
@@ -13864,10 +14251,22 @@
       resultNotes: row.result_notes,
       completedAt: row.completed_at,
       startedAt:   row.started_at,
-      createdAt:   row.created_at
+      createdAt:   row.created_at,
+      // MT5-Route (Migration 2026-08-15): route=NULL ist Bestand (Duplikum/Mirror),
+      // route='mt5' übergibt den Plan der MT5-ROUTE-Sektion. mt5_baseline trägt die
+      // eingefrorenen Balances (bei planned→open) + final (bei Ende-Erkennung) —
+      // die einzige P&L-Quelle der MT5-Route ('Beweis oder leer').
+      route:       row.route || null,
+      mt5Baseline: row.mt5_baseline || null
     }
   }
   function planToRow(p){
+    // route + mt5_baseline hier bewusst NICHT dabei (15.08.2026): planToRow läuft beim
+    // Modal-Bearbeiten als update — dieselbe Falle wie beim status-Ausschluss unten
+    // (saveTradePlanFromModal): ein Edit während eines laufenden MT5-Trades würde die
+    // von Preflight/Erkennung gesetzte Route + Baseline mit null überschreiben und die
+    // Zustandsmaschine samt P&L-Beweis killen. Die Felder schreiben nur die
+    // MT5-ROUTE-Sektion und tpPreflightMt5 selbst, gezielt mit Status-Guards.
     return {
       user_id: currentUserId,
       master_account_id: p.masterAccountId || null,
@@ -14683,8 +15082,9 @@
     const _s = accounts.find(a => String(a.id) === String(p.slaveAccountId))
     const extOf = acc => acc ? (acc.externalId || acc.topstep?.id || acc.ma?.login || '') : ''
     const mExt = extOf(_m)
-    const mDup = getDupBalanceForAccount(p.masterAccountId)
-    const sDup = getDupBalanceForAccount(p.slaveAccountId)
+    // Liefert Duplikum nichts, speist der lokale MT5-Copier die Badge (15.08.2026)
+    const mDup = getDupBalanceForAccount(p.masterAccountId) || getMt5TcBalanceForAccount(p.masterAccountId)
+    const sDup = getDupBalanceForAccount(p.slaveAccountId)  || getMt5TcBalanceForAccount(p.slaveAccountId)
 
     // Status-Dot
     let dotCls = 'tc2-dot'
@@ -14716,9 +15116,12 @@
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
       } else {
-        metric = p.startedAt
+        // MT5-Route (15.08.2026): Live-P&L aus dem lokalen Copier — rendert nur
+        // bei route==='mt5' UND frischem mtcState, sonst leeren String.
+        const mt5Live = (typeof mt5LivePnlHtml === 'function') ? mt5LivePnlHtml(p) : ''
+        metric = mt5Live + (p.startedAt
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
-          : `<span class="tc2-timer">live</span>`
+          : `<span class="tc2-timer">live</span>`)
       }
     } else if(isReview){
       // Auto-erfasstes P&L zeigen (schon in DB gespeichert) — fehlt es noch, lädt es gerade
@@ -14818,9 +15221,9 @@
     const masterIsLive = masterAcc?.type === 'live'
     const slaveIsLive  = slaveAcc?.type === 'live'
 
-    // Duplikum-Live-Balance
-    const masterDup = getDupBalanceForAccount(p.masterAccountId)
-    const slaveDup  = getDupBalanceForAccount(p.slaveAccountId)
+    // Duplikum-Live-Balance (Fallback: lokaler MT5-Copier, 15.08.2026)
+    const masterDup = getDupBalanceForAccount(p.masterAccountId) || getMt5TcBalanceForAccount(p.masterAccountId)
+    const slaveDup  = getDupBalanceForAccount(p.slaveAccountId)  || getMt5TcBalanceForAccount(p.slaveAccountId)
 
     return `
       <div class="trade-card completed compact" data-plan-id="${p.id}" style="padding:11px 14px;position:relative">
@@ -14899,6 +15302,7 @@
           <span class="tc-live-dot"></span>
           <span class="tc-live-label">Live getrackt</span>
         </div>
+        ${(typeof mt5LivePnlHtml === 'function') ? mt5LivePnlHtml(p) : ''}
         ${startIso ? `<span class="tc-live-timer" data-started="${startIso}">—<span class="tc-live-since"> läuft</span></span>` : ''}
       </div>` : ''
 
@@ -14910,9 +15314,9 @@
 
     const prioLbl = { high:'Hoch', medium:'Mittel', low:'Niedrig' }[p.priority] || 'Mittel'
 
-    // Duplikum-Live-Balance für Master + Slave
-    const masterDup = getDupBalanceForAccount(p.masterAccountId)
-    const slaveDup  = getDupBalanceForAccount(p.slaveAccountId)
+    // Duplikum-Live-Balance für Master + Slave (Fallback: lokaler MT5-Copier, 15.08.2026)
+    const masterDup = getDupBalanceForAccount(p.masterAccountId) || getMt5TcBalanceForAccount(p.masterAccountId)
+    const slaveDup  = getDupBalanceForAccount(p.slaveAccountId)  || getMt5TcBalanceForAccount(p.slaveAccountId)
 
     // Header row
     const _masterAcc = accounts.find(a => String(a.id) === String(p.masterAccountId))
@@ -15325,6 +15729,11 @@
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
     if(mirrorRoute) return tpPreflightMirror(plan, mirrorRoute)
 
+    // MT5-Route (15.08.2026): beide Enden in mt5_links verlinkt + lokaler PC →
+    // eigener Preflight gegen den lokalen Copier. Mirror behält Vorrang.
+    const mt5Route = (typeof planMt5Route === 'function') ? planMt5Route(plan) : null
+    if(mt5Route) return tpPreflightMt5(plan)
+
     _pfPlanId = planId
 
     // Overlay vorbereiten
@@ -15488,6 +15897,260 @@
     _pfFinish(!hardFail, hardFail ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.' : null)
   }
 
+  /* ── Preflight für die MT5-Route (lokaler Hedge-Copier, 15.08.2026) ──
+   * Gleiche Modal-UI wie Duplikum/Mirror-Preflight, geprüft wird die Copier-Welt.
+   * Instanzen werden HIER frisch geladen (eigener mtcApi-Fetch) — mtcState ist
+   * auf der Trades-View eingefroren. Der Check ändert den Plan-Status NICHT:
+   * planned→open macht die Erkennung (mt5PlanPoll), wie bei Duplikum. */
+  let _pfMt5Timer = null
+  function _pfMt5StopTimer(){ if(_pfMt5Timer){ clearInterval(_pfMt5Timer); _pfMt5Timer = null } }
+  async function tpPreflightMt5(plan){
+    _pfMt5StopTimer()
+    _pfPlanId = plan.id
+
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `🖥 MT5-Route · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+
+    let hardFail = false
+    let softWait = false
+
+    _pfAddRow('m5link', 'MT5-Verlinkung')
+    _pfAddRow('m5run',  'Copier läuft')
+    _pfAddRow('m5dup',  'Doppel-Hedge-Schutz')
+    _pfAddRow('m5push', 'Werte pushen')
+    _pfAddRow('m5term', 'Terminal + EA')
+
+    // ── 1. Verlinkung — Resolve gegen die FRISCH geladene Instanzliste ──
+    const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : { ok:false, copier_offline:true }
+    const offline = !dd || dd.copier_offline || dd._httpFail
+    const linkRoute = planMt5Route(plan)
+    const route = offline ? null : mt5RouteResolve(plan, dd.instances || [])
+    if(route){
+      _pfSet('m5link', 'ok', `Master <span class="mono">${escapeHtml(String(route.masterLogin))}</span> → Hedge <span class="mono">${escapeHtml(String(route.hedgeLogin))}</span> · Instanz „${escapeHtml(String(route.inst.name || route.inst.file || ''))}"`)
+    } else {
+      const canFix = !offline
+      _pfSet('m5link', 'err', (offline
+        ? 'Copier-Backend nicht erreichbar — Verlinkung kann nicht gegen die Instanzliste geprüft werden.'
+        : `Keine Copier-Instanz passt zu Master <span class="mono">${escapeHtml(String(linkRoute?.masterLogin || '—'))}</span> → Hedge <span class="mono">${escapeHtml(String(linkRoute?.hedgeLogin || '—'))}</span>.`)
+        + (canFix ? `<br><button class="btn btn-primary pf-fix-btn" id="pf-fix-m5link" style="padding:4px 12px;font-size:11.5px">Verknüpfung korrigieren…</button>` : ''))
+      document.getElementById('pf-fix-m5link')?.addEventListener('click', () => {
+        _pfClose()
+        if(typeof openLinkMt5Modal === 'function') openLinkMt5Modal(linkRoute?.masterLogin || null, {})
+      })
+      hardFail = true
+    }
+
+    // ── 2. Copier läuft ──
+    if(offline){
+      _pfSet('m5run', 'err', 'Copier-Backend antwortet nicht — start-alles.bat auf dem PC ausführen.')
+      hardFail = true
+    } else if(!route){
+      _pfSet('m5run', 'warn', 'Übersprungen — Verlinkung/Instanz fehlt.')
+    } else if(!route.inst.alive){
+      // Kein confirm — die Software kann hier nicht selbst handeln, klare Anweisung.
+      _pfSet('m5run', 'err', 'Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten.')
+      hardFail = true
+    } else {
+      _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten.')
+    }
+
+    // ── 3. Doppel-Hedge-Schutz ── Master ODER Slave zusätzlich Duplikum-verlinkt
+    // UND Duplikum verbunden → beide Systeme würden denselben Trade hedgen.
+    const _dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+    const _dupConnected = (typeof dupState !== 'undefined') && !!dupState.token
+    const _dupLinkedIds = new Set(Object.values(_dupLinks).map(String))
+    if(_dupConnected && (_dupLinkedIds.has(String(plan.masterAccountId)) || _dupLinkedIds.has(String(plan.slaveAccountId)))){
+      _pfSet('m5dup', 'err', 'Master oder Slave ist zusätzlich mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum für dieses Paar ausschalten, sonst wird doppelt gehedgt.')
+      hardFail = true
+    } else {
+      _pfSet('m5dup', 'ok', _dupConnected ? 'Dieses Paar ist nicht in Duplikum verlinkt.' : 'Duplikum ist nicht verbunden — kein Doppel-Hedge möglich.')
+    }
+
+    // ── 4. Werte pushen ──
+    let effMaxLots = null
+    if(hardFail){
+      _pfSet('m5push', 'warn', 'Übersprungen — vorherige Checks fehlgeschlagen.')
+      _pfSet('m5term', 'warn', 'Übersprungen — vorherige Checks fehlgeschlagen.')
+    } else if(plan.multiplier == null || !isFinite(Number(plan.multiplier)) || Number(plan.multiplier) <= 0){
+      _pfSet('m5push', 'err', 'Kein (gültiger) Multiplier am Plan — ohne ihn kann der Copier die Hedge-Größe nicht bestimmen.')
+      _pfSet('m5term', 'warn', 'Übersprungen — kein Multiplier.')
+      hardFail = true
+    } else {
+      const file = route.inst.file
+      const mult = Number(plan.multiplier)
+      const sPf = route.inst.status || {}
+      const mapCount = Object.keys(route.inst.symbol_map || {}).length
+      // Untergrenze der Sicherheitsbremse: Multiplier × Master-Kontrakte. Läuft
+      // schon eine Master-Position, deren Volumen einbeziehen (contract_size der
+      // Positionen fließt beim Copier selbst in die Exposure-Rechnung ein).
+      const liveVol = (sPf.master_positions || []).reduce((sum2, p2) => sum2 + (Number(p2.volume) || 0), 0)
+      const contracts = Math.max(Number(plan.masterContracts) || 0, liveVol)
+      const minLots = contracts > 0 ? Math.ceil(mult * contracts * 100) / 100 : null
+      const curMax = Number(route.inst.max_lots)
+
+      const pushRes = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(mult) }) })
+      // Symbol-Mapping gegen die hinterlegten Firmen-Presets prüfen (Finns Ansage
+      // 15.08.2026: "es ist alles in den Einstellungen" — die Verlinkung sagt uns
+      // die Firma, die Presets ihre Symbole; niemand muss Mappings auswendig
+      // wissen). Reine Preset-Lookups (dupSymbolsForFirm/dupSlaveSymbolForFirm),
+      // kein Duplikum-API-Aufruf.
+      const expSyms = (typeof dupSymbolsForFirm === 'function') ? dupSymbolsForFirm(plan.masterFirm) : []
+      const hedgeSym = (typeof dupSlaveSymbolForFirm === 'function') ? dupSlaveSymbolForFirm(plan.slaveFirm) : null
+      const curMap = route.inst.symbol_map || {}
+      const missingSyms = expSyms.filter(s => !(s in curMap))
+      if(!pushRes.ok){
+        _pfSet('m5push', 'err', 'Multiplier-Push fehlgeschlagen: ' + escapeHtml(String(pushRes.msg || pushRes.error || 'Fehler')))
+        _pfSet('m5term', 'warn', 'Übersprungen — Push fehlgeschlagen.')
+        hardFail = true
+      } else if(!mapCount && !expSyms.length){
+        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber das Symbol-Mapping ist LEER und für „${escapeHtml(String(plan.masterFirm || '—'))}" sind keine Symbole in den Einstellungen hinterlegt — auf der Copier-Karte pflegen (Master-Symbol → Hedge-Symbol).`)
+        _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping fehlt.')
+        hardFail = true
+      } else if(missingSyms.length && hedgeSym){
+        // Fehlende Firmen-Symbole: ein Klick ergänzt sie aus den Presets —
+        // gemergt gepusht (save ersetzt die ganze Map), danach läuft die
+        // Checkliste automatisch neu durch.
+        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt das Firmen-Symbol' : 'fehlen die Firmen-Symbole'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> („${escapeHtml(String(plan.masterFirm || ''))}") — ohne Mapping hedgt der Copier ${missingSyms.length === 1 ? 'dieses Symbol' : 'diese Symbole'} nicht.<br>
+          <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5sym" style="padding:4px 12px;font-size:11.5px">Mapping ergänzen (${missingSyms.map(s => escapeHtml(s) + ' → ' + escapeHtml(hedgeSym)).join(', ')})</button>`)
+        document.getElementById('pf-fix-m5sym')?.addEventListener('click', async () => {
+          const b = document.getElementById('pf-fix-m5sym')
+          if(b){ b.disabled = true; b.textContent = 'ergänze…' }
+          const merged = { ...curMap }
+          missingSyms.forEach(s => { merged[s] = hedgeSym })
+          const fr = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+            headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol_map: merged }) })
+          if(fr.ok){ setTimeout(() => tpPreflightMt5(plan), 300) }
+          else { _pfSet('m5push', 'err', 'Mapping ergänzen fehlgeschlagen: ' + escapeHtml(String(fr.msg || fr.error || 'Fehler'))) }
+        })
+        _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping unvollständig.')
+        hardFail = true
+      } else if(missingSyms.length){
+        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt' : 'fehlen'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> und für die Hedge-Firma „${escapeHtml(String(plan.slaveFirm || '—'))}" ist kein Symbol in den Einstellungen hinterlegt — auf der Copier-Karte von Hand ergänzen.`)
+        _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping unvollständig.')
+        hardFail = true
+      } else {
+        effMaxLots = isFinite(curMax) ? curMax : null
+        const mapOk = expSyms.length
+          ? `Mapping deckt <span class="mono">${expSyms.map(escapeHtml).join(', ')}</span> ab ✓`
+          : `Mapping <span class="mono">${mapCount}</span> Zeile(n) ✓`
+        if(minLots != null && (!isFinite(curMax) || curMax < minLots)){
+          // Sicherheitsbremse nie stillschweigend: unterschritten → rot + Fix-Button
+          _pfSet('m5push', 'err', `max Lots (<span class="mono">${escapeHtml(String(route.inst.max_lots ?? '–'))}</span>) liegt unter der Untergrenze <span class="mono">${minLots}</span> (×${mult.toFixed(3)} · ${contracts} Kontrakte) — die Sicherheitsbremse würde Hedges verweigern. ${mapOk}<br>
+            <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5lots" style="padding:4px 12px;font-size:11.5px">max Lots auf ${minLots} setzen</button>`)
+          document.getElementById('pf-fix-m5lots')?.addEventListener('click', async () => {
+            const b = document.getElementById('pf-fix-m5lots')
+            if(b){ b.disabled = true; b.textContent = 'setze…' }
+            const fr = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+              headers:{'Content-Type':'application/json'}, body: JSON.stringify({ max_lots_per_hedge: String(minLots) }) })
+            if(fr.ok){
+              effMaxLots = minLots
+              _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · max Lots auf <span class="mono">${minLots}</span> gesetzt · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
+            } else {
+              _pfSet('m5push', 'err', 'max Lots setzen fehlgeschlagen: ' + escapeHtml(String(fr.msg || fr.error || 'Fehler')))
+            }
+          })
+          softWait = true
+        } else {
+          // GELB, nicht grün: die Untergrenze ist nur eine Schätzung — die
+          // endgültige Lot-Zahl rechnet der Copier exposure-basiert.
+          _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · max Lots <span class="mono">${escapeHtml(String(route.inst.max_lots ?? '–'))}</span>${minLots != null ? ` ≥ Untergrenze <span class="mono">${minLots}</span>` : ''} · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
+        }
+      }
+    }
+
+    // ── 5. Terminal + EA ──
+    if(!hardFail){
+      const file = route.inst.file
+      const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body:'{}' })
+      if(!ts.ok){
+        _pfSet('m5term', 'err', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String(ts.msg || ts.error || 'Fehler')))
+        hardFail = true
+      } else {
+        // Nach Erfolg: route='mt5' persistieren (nur wenn noch nicht gesetzt; Status
+        // bleibt 'planned' — planned→open macht die Erkennung) + Plan auch ins
+        // PC-Panel pushen, damit der Trade dort ebenfalls sichtbar ist.
+        if(plan.route !== 'mt5'){
+          try{
+            const { data: rd } = await supabase.from('trade_plans')
+              .update({ route: 'mt5' }).eq('id', plan.id).select('*')
+            if(rd && rd.length){
+              const ri = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+              if(ri >= 0) tradePlans[ri] = rowToPlan(rd[0])
+            }
+          }catch(e){ console.warn('[pf/mt5] route persist:', e) }
+        }
+        try{
+          await window.mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ multiplier: String(Number(plan.multiplier)),
+                                   max_lots: String(effMaxLots ?? route.inst.max_lots ?? ''),
+                                   mode: route.inst.mode || 'dryrun' }) })
+        }catch(_){}
+
+        // Bereitschafts-Ticker: eigener instances-Fetch alle 3s, scope-gebunden
+        // (Abbruch bei Modal-Schließen oder Plan-Wechsel), Timeout 170s.
+        _pfSet('m5term', 'warn', '⏳ Terminal startet, Login automatisch…')
+        const t0 = Date.now()
+        _pfMt5Timer = setInterval(async () => {
+          if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
+            _pfMt5StopTimer(); return
+          }
+          const d2 = await window.mtcApi('instances')
+          const inst2 = (d2.instances || []).find(x => x.file === file)
+          const note = String(((inst2 || {}).status || {}).note || '')
+          const sec = Math.round((Date.now() - t0) / 1000)
+          if(inst2 && inst2.alive && !note){
+            _pfMt5StopTimer()
+            _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
+            const fe = document.getElementById('pf-final')
+            if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
+              fe.textContent = '✓ Alles bereit — im MT5-Terminal traden. Der Trade bleibt auf Geplant; die Auto-Erkennung übernimmt beim Einstieg.' }
+            return
+          }
+          if(sec > 170){
+            _pfMt5StopTimer()
+            _pfSet('m5term', 'err', 'Terminal liefert nach 3 Minuten nichts — Details-Log der Copier-Karte prüfen.')
+            return
+          }
+          // Broker-Wartefall (Review-Fund 15.08.2026): der Text 'Login-Fenster …
+          // OK klicken' steht NIE in status.note (dort nur Snapshot-Warnungen),
+          // sondern in den Step-Notes eines laufenden Provisionierungs-JOBS —
+          // dort nachsehen. Zusätzlich ab 50s generisch auf ein mögliches
+          // Login-Fenster hinweisen, denn beim Terminal-Start OHNE Job gibt es
+          // keine Note-Quelle.
+          const jobNote = (d2.job && !d2.job.done)
+            ? String((d2.job.steps || []).map(st => st && st.note || '').find(t => t && t.indexOf('Login-Fenster') !== -1) || '')
+            : ''
+          if(jobNote){
+            _pfSet('m5term', 'warn', escapeHtml(jobNote))
+          } else {
+            const hint = sec > 50 ? ' — hängt es? Im Terminal nachsehen, ggf. Login-Fenster einmal mit OK bestätigen.' : ''
+            _pfSet('m5term', 'warn', `⏳ ${note ? escapeHtml(note) + ' · ' : ''}Terminal startet, Login automatisch… (${sec}s)${escapeHtml(hint)}`)
+          }
+        }, 3000)
+      }
+    }
+
+    _pfCheckStatus[String(plan.id)] = { state: (!hardFail && !softWait) ? 'ready' : 'issue', at: Date.now() }
+    _pfStatusSave()
+    try { renderTradePlans() } catch(_){}
+    if(hardFail){
+      _pfFinish(false, 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.')
+    } else {
+      // NICHT auto-schließen (_pfFinish(true) würde nach 1,6s zumachen und den
+      // Bereitschafts-Ticker unsichtbar machen) — Fuß mit "Schließen" anbieten.
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      if(foot) foot.style.display = 'flex'
+    }
+  }
+
   document.getElementById('pfClose')?.addEventListener('click', _pfClose)
   document.getElementById('pf-cancel')?.addEventListener('click', _pfClose)
   document.getElementById('pf-force')?.addEventListener('click', async () => {
@@ -15511,6 +16174,34 @@
       const _cur = tradePlans.find(x => String(x.id) === String(planId))
       if(newStatus === 'open' && !_cur?.startedAt) updates.started_at = new Date().toISOString()
       if(newStatus === 'planned') updates.started_at = null
+      // MT5-Route (15.08.2026): klickt Finn manuell "Läuft" und das Paar ist über
+      // mt5_links verlinkt (lokaler PC), gehört der Plan der MT5-Zustandsmaschine —
+      // route + Baseline mit ins Update, sonst wüsste weder die Ende-Erkennung noch
+      // der P&L-Beweis von diesem Plan. Baseline nur aus einem EIGENEN frischen
+      // Fetch (mtcState ist auf der Trades-View eingefroren); ohne frische Balances
+      // startet der Trade trotzdem, nur ohne Baseline ('Beweis oder leer').
+      if(newStatus === 'open' && typeof planMt5Route === 'function' && planMt5Route(_cur)){
+        if(_cur?.route !== 'mt5') updates.route = 'mt5'
+        // Nur beim ECHTEN Neustart (kein startedAt) — Reopen aus "Überprüfen"
+        // behält Original-Startzeit UND Original-Baseline. Beim Neustart wird die
+        // Baseline IMMER gesetzt oder explizit genullt: ein wiederverwendeter Plan
+        // würde sonst mit der Baseline des vorigen Laufs rechnen — plausible
+        // falsche Zahl statt leer (Review-Fund 15.08.2026).
+        if(!_cur?.startedAt){
+          let _base = null
+          try{
+            const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+            const r = (dd && !dd.copier_offline && !dd._httpFail)
+              ? mt5RouteResolve(_cur, dd.instances || []) : null
+            const s = r?.inst?.status || {}
+            if(r && r.inst.alive && !s.note && s.master_balance != null && s.hedge_balance != null){
+              _base = { master_balance: Number(s.master_balance), hedge_balance: Number(s.hedge_balance), at: new Date().toISOString() }
+            }
+          }catch(_){}
+          updates.mt5_baseline = _base
+          if(!_base && typeof atToast === 'function') atToast('MT5-Trade ohne Baseline gestartet — P&L bleibt manuell', 'end')
+        }
+      }
       const { data, error } = await supabase
         .from('trade_plans').update(updates).eq('id', planId).select('*').single()
       if(error) throw error
@@ -15624,6 +16315,12 @@
       }
       if(dupBalance != null){
         return { val: dupBalance, src: 'Dup', ccy: dupCcy }
+      }
+      // 4. Quelle (15.08.2026): lokaler MT5-Copier — immer HINTER Duplikum,
+      // Währung von der jeweiligen Seite (Master/Hedge können verschieden führen).
+      const mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(a.id) : null
+      if(mtcBal){
+        return { val: mtcBal.balance, src: 'MT5-Copier', ccy: mtcBal.ccy }
       }
       return { val: a.initialBalance, src: 'init', ccy: 'USD' }
     }
@@ -16744,6 +17441,9 @@
   const _autoPnlAmbiguous = new Set()
 
   async function _autoPnlFetch(plan){
+    // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
+    // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
+    if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
     if(mirrorRoute) return _autoPnlFetchMirror(plan, mirrorRoute)
@@ -16824,7 +17524,10 @@
         if(plan.status === 'completed') return
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
-        if(!isMirrorPlan && (typeof dupState === 'undefined' || !dupState.token)) return
+        // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
+        // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).
+        const isMt5Plan = plan.route === 'mt5'
+        if(!isMirrorPlan && !isMt5Plan && (typeof dupState === 'undefined' || !dupState.token)) return
         const apply = (res) => {
           if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
           if(!res) return false
@@ -16833,7 +17536,17 @@
           if(res.masterPnl != null && mEl && mEl.value === ''){ mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||'')) }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
-            if(msgEl){ msgEl.textContent = '✨ Auto-PnL: ' + filled.join(' · ') + ' — bitte prüfen'; msgEl.className = 'modal-msg ok' }
+            if(msgEl){
+              let _t = '✨ Auto-PnL: ' + filled.join(' · ') + ' — bitte prüfen'
+              // Teilbefüllung bei MT5 (Review-Fund 15.08.2026): ist nur der Master
+              // beweisbar und der Hedge extern geschlossen, muss der Grund fürs
+              // leere Slave-Feld trotzdem sichtbar sein — sonst wirkt es wie
+              // 'lädt noch' und Finn wartet auf eine Zahl, die nie kommt.
+              if(isMt5Plan && _autoPnlAmbiguous.has(String(planId))){
+                _t += ' · ⚠️ Hedge extern geschlossen/nicht belegt — Slave-P&L manuell eintragen'
+              }
+              msgEl.textContent = _t; msgEl.className = 'modal-msg ok'
+            }
             return true
           }
           return false
@@ -16847,7 +17560,7 @@
         // Sind durch den Cache schon beide Felder gefüllt → fertig, kein Live-Nachladen nötig
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
 
-        if(msgEl){ msgEl.textContent = isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        if(msgEl){ msgEl.textContent = isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         _autoPnlFetch(plan).then(res => {
           if(apply(res)) return
           // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
@@ -16860,7 +17573,11 @@
               if(!apply(r2) && msgEl && String(_completingPlanId) === String(planId) && nothingFilled && msgEl.textContent.indexOf('Auto-PnL') !== -1){
                 // Mehrdeutig → ehrlich sagen warum, statt kommentarlos leer zu lassen
                 if(_autoPnlAmbiguous.has(String(planId))){
-                  msgEl.textContent = '⚠️ Mehrere Trades auf diesem Master→Slave-Paar offen — P&L lässt sich nicht sicher zuordnen. Bitte selbst eintragen.'
+                  // Text routen-abhängig: bei MT5 heißt der Flag "Hedge-Close nicht
+                  // belegt" (extern geschlossen / Ring-Kürzung), nicht "mehrdeutig".
+                  msgEl.textContent = isMt5Plan
+                    ? '⚠️ Hedge extern geschlossen oder Close nicht belegt — P&L bitte manuell eintragen.'
+                    : '⚠️ Mehrere Trades auf diesem Master→Slave-Paar offen — P&L lässt sich nicht sicher zuordnen. Bitte selbst eintragen.'
                   msgEl.className = 'modal-msg err'
                 } else {
                   msgEl.textContent = ''
@@ -21092,6 +21809,12 @@
     }
   }
 
+  // Zeilen-Meldungen ueberleben den 3s-Poll (Paket D, 15.08.2026): der Poll
+  // rendert den ganzen tbody neu — ein direkt gesetzter Text (z.B. der 409 vom
+  // Loeschen) waere nach spaetestens 3s wieder weg. Deshalb pro file gemerkt
+  // und von mt5Row mitgerendert; geleert beim naechsten Loesch-Versuch.
+  const mt5RowMsg = {}
+
   function mt5Row(d){
     const s = d.status || {}, live = d.alive
     const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
@@ -21121,9 +21844,10 @@
           : '<span style="color:var(--sub);font-size:11.5px">—</span>'
       }</td>
       <td style="padding-right:20px;text-align:right;white-space:nowrap">
-        <span class="mtc-msg" data-mt5msg style="margin-right:8px"></span>
+        <span class="mtc-msg${mt5RowMsg[d.file] ? ' err' : ''}" data-mt5msg style="margin-right:8px">${esc(mt5RowMsg[d.file] || '')}</span>
         <button class="btn btn-primary" style="padding:5px 10px;font-size:12px" data-mt5plan="${esc(d.file)}" type="button">Trade planen</button>
         <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-mt5det="${esc(d.file)}" type="button" title="Große Ansicht mit Log + Symbol-Mapping">Details</button>
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;color:#dc2626" data-mt5del="${esc(d.file)}" type="button" title="Config + Status auf diesem PC entfernen — der Terminal-Ordner bleibt">Löschen</button>
       </td>
     </tr>`
   }
@@ -21153,7 +21877,56 @@
     mt5TabOffline(false)
     mtcSeenOnline = true
     mtcJob = d.job
-    ;(d.instances || []).forEach(x => mtcState[x.file] = x)
+    // Auto-Link nach erfolgreicher Provisionierung (Paket D, 15.08.2026): der
+    // Merker entsteht im Add-Modal erst NACH ok:true des provision-POSTs; hier
+    // wird er genau einmal eingeloest. Merker VOR dem async-Aufruf loeschen,
+    // sonst verknuepft der 3s-Poll doppelt. job.error raeumt ihn ebenfalls ab.
+    // Panel-Neustart verliert den Job → Merker verfaellt still beim
+    // Modal-Schliessen, Verknuepfung dann manuell ueber die Tab-Zelle.
+    if(_mtcPendingLink && d.job && d.job.done && d.job.name === _mtcPendingLink.name){
+      const pl = _mtcPendingLink
+      _mtcPendingLink = null
+      if(!d.job.error && typeof mt5LinkSet === 'function'){
+        mt5LinkSet(String(pl.login), String(pl.accountId))
+          .then(() => { if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink() })
+          .catch(err => console.warn('[mt5links] Auto-Link fehlgeschlagen:', err && err.message))
+        // Preset-Mapping gleich mitpushen (Finns Ansage 15.08.2026: Symbole kommen
+        // aus den Einstellungen über die Verlinkung). Master-Symbole aus der Firma
+        // des gewählten Prophos-Accounts, Hedge-Seite aus der Firma des Accounts,
+        // der mit dem Hedge-Login der neuen Instanz verlinkt ist. Fehlt eine der
+        // beiden Quellen: still auslassen — der Preflight-Fix-Button fängt es
+        // spätestens beim ersten Trade-Start.
+        try{
+          const inst = (d.instances || []).find(x => x.name === pl.name || (x.file || '').includes(`-${pl.name}.json`))
+          const expSyms = (pl.firm && typeof dupSymbolsForFirm === 'function') ? dupSymbolsForFirm(pl.firm) : []
+          const hLogin = inst ? String((inst.status || {}).hedge_login || inst.hedge_expected || '') : ''
+          const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+          const hAccId = hLogin ? links[hLogin] : null
+          const hAcc = hAccId ? (accounts || []).find(x => String(x.id) === String(hAccId)) : null
+          const hSym = (hAcc && typeof dupSlaveSymbolForFirm === 'function') ? dupSlaveSymbolForFirm(hAcc.firm) : null
+          if(inst && expSyms.length && hSym){
+            const merged = { ...(inst.symbol_map || {}) }
+            let changed = false
+            expSyms.forEach(s => { if(!(s in merged)){ merged[s] = hSym; changed = true } })
+            if(changed) mtcApi(`save?file=${encodeURIComponent(inst.file)}`, { method:'POST',
+              headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol_map: merged }) })
+          }
+        }catch(e){ console.warn('[mtc] Preset-Mapping-Push übersprungen:', e && e.message) }
+      }
+    }
+    // Pro-Person-Filter (Paket E, 15.08.2026): jede Person sieht nur die eigenen
+    // MT5-Accounts — wie bei Duplikum. Instanzen mit fremdem Besitzer-Stempel
+    // (prophos_owner aus der Provisionierung) werden komplett ausgeblendet;
+    // Bestand ohne Stempel bleibt sichtbar (Finns 6 bestehende Accounts).
+    const _uid = (typeof currentUserId !== 'undefined' && currentUserId) ? String(currentUserId) : null
+    d.instances = (d.instances || []).filter(x => !x.owner || (_uid && String(x.owner) === _uid))
+    const _visFiles = new Set(d.instances.map(x => x.file))
+    d.plans = (d.plans || []).filter(p => _visFiles.has(p.file))
+    // fetchedAt (15.08.2026): Frischebeleg pro Instanz — die MT5-ROUTE-Sektion
+    // (Balances/Live-P&L) darf nur bei fetchedAt ≤ 15s "Live" behaupten
+    // ('alt ist nicht aktuell'). Erkennungsquelle ist mtcState trotzdem NIE —
+    // die Zustandsmaschine fetcht pro Tick selbst.
+    ;(d.instances || []).forEach(x => { x.fetchedAt = Date.now(); mtcState[x.file] = x })
 
     const anyAlive = (d.instances || []).some(x => x.alive)
     $('mtc-copier-chip').innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
@@ -21167,7 +21940,11 @@
     const addOpen = $('mtcAddModal').classList.contains('open')
     if(d.job && !d.job.done && !addOpen){
       const cur = d.job.steps.find(s => s.state === 'running')
-      n += `<div class="mtc-jobbar" id="mtc-jobbar"><span class="mtc-spin"></span>Account „${esc(d.job.name)}" wird eingerichtet — ${esc(cur ? cur.key : '…')} … (klicken für Details)</div>`
+      // Step-Note mit in die Bar (Paket D, 15.08.2026): der Broker-Wartefall
+      // ('Login-Fenster ... OK klicken') muss auch ohne offenes Add-Modal sichtbar
+      // sein — renderMt5Tab spiegelt diese Bar 1:1 in den Accounts-Sub-Tab.
+      const curNote = (cur && cur.note) ? ` — ${String(cur.note).slice(0, 120)}` : ''
+      n += `<div class="mtc-jobbar" id="mtc-jobbar"><span class="mtc-spin"></span>Account „${esc(d.job.name)}" wird eingerichtet — ${esc(cur ? cur.key : '…')}${esc(curNote)} … (klicken für Details)</div>`
     } else if(d.job && d.job.done && d.job.error && !addOpen){
       n += `<div class="mtc-jobbar err" id="mtc-jobbar">✗ Account „${esc(d.job.name)}": ${esc((d.job.error || '').slice(0, 140))}… (klicken für Details)</div>`
     }
@@ -21194,13 +21971,22 @@
     }
     renderPlans(d.plans)
     renderMt5Tab(d, n)
+    // Letzten Stand merken — window.mt5TabRender (Export unten) rendert den Tab
+    // damit sofort nach Link/Unlink neu, statt auf den naechsten 3s-Poll zu warten
+    // (bekannter Gap: mt5RefreshAfterLink rief ins Leere, 15.08.2026).
+    mtcLastRender = { d, n }
     if(addOpen) renderAddJob()
   }
+  let mtcLastRender = null
 
   // Poll nur, wenn die View sichtbar ist oder ein Copier-Modal offen — die
   // restliche App soll von diesem Bereich nichts spueren.
+  // Erweiterung 15.08.2026 (MT5-Route): auf der Trades-View muessen Balances und
+  // Live-P&L auch fliessen, solange ein MT5-Plan in planned/open ist — sonst
+  // waere mtcState dort dauerhaft eingefroren und die Anzeige bliebe leer.
   setInterval(() => {
-    if(mtcActive() || mt5TabActive() || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
+    const mt5RouteWants = (typeof mt5RoutePollWanted === 'function') && mt5RoutePollWanted()
+    if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcPlanModal').classList.contains('open') || $('mtcAddModal').classList.contains('open')) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>
@@ -21296,15 +22082,63 @@
 
   /* ── Account-hinzufuegen-Modal (dedizierte Verdrahtung) ── */
   const addBg = $('mtcAddModal')
-  function openAdd(){ addBg.classList.add('open'); renderAddJob() }
-  function closeAdd(){ addBg.classList.remove('open'); mtcLoad() }
+  // Merker fuer den Auto-Link Provisionierung → mt5_links (Paket D, 15.08.2026):
+  // wird ERST gesetzt, wenn der provision-POST ok:true liefert, und in mtcLoad
+  // ueber job.name eingeloest. Geloescht bei Modal-Schliessen, job.error und
+  // nach dem Link — ein Panel-Neustart verliert den Job, dann verfaellt er still.
+  let _mtcPendingLink = null
+
+  // Prefill-Kandidaten: nicht archivierte Prophos-Accounts mit cred_login UND
+  // cred_server, Plattform leer oder MT5. Labels laufen durch esc; das Passwort
+  // taucht hier NIE auf (weder in Optionen noch in Attributen noch in Logs).
+  function mtcPrefillCandidates(){
+    try {
+      return (accounts || []).filter(a => a && a.creds && a.creds.login && a.creds.server
+        && (!a.creds.platform || String(a.creds.platform).toLowerCase() === 'mt5')
+        && !(typeof isAccountArchived === 'function' && isAccountArchived(a.id)))
+    } catch(_){ return [] }
+  }
+  function mtcPrefillFill(){
+    const sel = $('mtc-add-prefill'); if(!sel) return
+    const keep = sel.value
+    sel.innerHTML = '<option value="">— manuell eingeben —</option>' +
+      mtcPrefillCandidates().map(a =>
+        `<option value="${esc(a.id)}">${esc(a.name)} — ${esc(a.creds.login)} @ ${esc(a.creds.server)}</option>`).join('')
+    sel.value = keep
+    if(sel.value !== keep) sel.value = ''
+  }
+  function openAdd(){ mtcPrefillFill(); addBg.classList.add('open'); renderAddJob() }
+  function closeAdd(){ addBg.classList.remove('open'); _mtcPendingLink = null; mtcLoad() }
   $('mtc-add-open').addEventListener('click', openAdd)
   $('mtc-add-x').addEventListener('click', closeAdd)
+  // Prefill-Auswahl: fuellt AUSSCHLIESSLICH die .value-PROPERTY der vier
+  // statischen Inputs (nie innerHTML, nie value=-Attribut, nie data-* — das
+  // Passwort darf nirgends im Markup landen; Paket D, 15.08.2026).
+  // Name-Vorschlag: Slug aus dem Account-Namen, panel.py-Regex-konform.
+  const prefillSel = $('mtc-add-prefill')
+  if(prefillSel) prefillSel.addEventListener('change', () => {
+    const a = (accounts || []).find(x => String(x.id) === prefillSel.value)
+    if(!a || !a.creds) return
+    const set = (k, v) => { const el = addBg.querySelector(`[data-mtcp="${k}"]`); if(el) el.value = v }
+    const slug = String(a.name || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 24)
+    set('name', slug || String(a.creds.login).replace(/[^A-Za-z0-9]/g, '').slice(0, 24))
+    set('login', String(a.creds.login))
+    // Gespeichertes Passwort NIE sichtbar auf den Schirm bringen (Review-Fund
+    // 15.08.2026): beim Prefill auf type=password stellen — wer von Hand tippt,
+    // sieht sein Feld weiter wie gewohnt (Panel-Konvention 'sichtbar auf Wunsch').
+    const _pwEl = addBg.querySelector('[data-mtcp="password"]')
+    if(_pwEl){ _pwEl.type = 'password'; _pwEl.value = a.creds.password || '' }
+    set('server', String(a.creds.server))
+  })
   $('mtc-add-start').addEventListener('click', async () => {
     const get = k => (addBg.querySelector(`[data-mtcp="${k}"]`) || {}).value?.trim() || ''
     const body = { name: get('name'), login: get('login'),
                    password: (addBg.querySelector('[data-mtcp="password"]') || {}).value || '',
                    server: get('server') }
+    // Besitzer-Stempel (Paket E, 15.08.2026): jeder PC/jede Person sieht nur die
+    // eigenen MT5-Accounts — der Stempel kommt vom eingeloggten Prophos-User und
+    // wird vom Panel in die Config geschrieben (Filter beim Rendern in mtcLoad).
+    if(typeof currentUserId !== 'undefined' && currentUserId) body.owner = String(currentUserId)
     const msg = $('mtc-add-msg')
     if(!body.name || !body.login || !body.password || !body.server){
       msg.className = 'mtc-msg err'; msg.textContent = 'Alle vier Felder ausfüllen.'; return }
@@ -21316,6 +22150,15 @@
     const pw = addBg.querySelector('[data-mtcp="password"]'); if(pw) pw.value = ''
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? 'läuft — Fortschritt unten' : ('Fehler: ' + (d.msg || d.error))
+    // Auto-Link-Merker (Paket D, 15.08.2026): erst NACH ok:true — ein abgelehnter
+    // POST (z.B. 409, anderer Job laeuft) darf keinen Link vormerken. Nur wenn
+    // der eingereichte Login wirklich zum ausgewaehlten Prophos-Account gehoert
+    // (Finn kann nach dem Prefill noch von Hand umtippen).
+    if(d.ok){
+      const selA = prefillSel ? (accounts || []).find(x => String(x.id) === prefillSel.value) : null
+      _mtcPendingLink = (selA && selA.creds && String(selA.creds.login) === body.login)
+        ? { name: body.name, login: body.login, accountId: String(selA.id), firm: selA.firm || null } : null
+    }
     if(d.ok) setTimeout(mtcLoad, 1000)
   })
 
@@ -21392,10 +22235,30 @@
   // Beim Klick auf den Sub-Tab sofort laden (nicht erst nach 3s Poll)
   document.querySelectorAll('#dashboard-view .subtab[data-subtab="mt5"]').forEach(b =>
     b.addEventListener('click', () => setTimeout(mtcLoad, 50)))
+  // ── Loeschen im MT5-Tab (Paket D, 15.08.2026) ──
+  // Entfernt NUR Config/Status/Close-Sidecar auf dem PC (panel.py /api/delete,
+  // Paket A5) — der Terminal-Ordner bleibt bewusst auf der Platte (SPEC 'Nicht
+  // bauen': keine Terminal-Ordner-Loeschung per API). Ein 409 (Positionen offen,
+  // Plan laeuft, Status unklar oder fremde Instanz busy) landet in der
+  // Zeilen-msg und ueberlebt dort den Poll via mt5RowMsg.
+  async function mt5DeleteInstance(file, btn){
+    const d = mtcState[file] || {}
+    if(!confirm(`Copier-Account „${d.name || file}" löschen?\n\nConfig-Datei: ${file}\nEntfernt Config, Status und Close-Historie auf diesem PC.\nDer Terminal-Ordner bleibt auf der Platte.`)) return
+    delete mt5RowMsg[file]
+    const sp = (btn && btn.closest('tr')) ? btn.closest('tr').querySelector('[data-mt5msg]') : null
+    if(sp){ sp.className = 'mtc-msg'; sp.textContent = 'lösche…' }
+    const r = await mtcApi(`delete?file=${encodeURIComponent(file)}`, { method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}' })
+    if(!r.ok) mt5RowMsg[file] = String(r.msg || r.error || 'Löschen fehlgeschlagen')
+    mtcLoad()
+  }
+
   const mt5Table = $('mt5AccountsTable')
   if(mt5Table) mt5Table.addEventListener('click', e => {
     const planFile = e.target.getAttribute && e.target.getAttribute('data-mt5plan')
     const detFile  = e.target.getAttribute && e.target.getAttribute('data-mt5det')
+    const delFile  = e.target.getAttribute && e.target.getAttribute('data-mt5del')
+    if(delFile){ mt5DeleteInstance(delFile, e.target); return }
     if(planFile){ openPlan(planFile); return }
     if(detFile){
       // Grosse Ansicht (Karten mit Log + Symbol-Mapping) ueber die normale Navigation
@@ -21403,6 +22266,16 @@
       if(link) link.click()
     }
   })
+
+  /* ── Exporte fuer die MT5-ROUTE-Sektion + Linking (15.08.2026) ──
+   * Die Route-Sektion lebt im Modul-Scope, diese IIFE nicht — window.* ist die
+   * vereinbarte Nahtstelle (gleiches Muster wie window.mt5LinkCellHtml).
+   * mtcInstances liefert den Cache NUR fuer Anzeige-Pfade (Balances, Live-P&L,
+   * Frische via fetchedAt) — die Erkennung fetcht ueber window.mtcApi selbst. */
+  window.mtcApi = mtcApi
+  window.mtcInstances = () => mtcState
+  window.mtcReload = mtcLoad
+  window.mt5TabRender = () => { if(mtcLastRender) renderMt5Tab(mtcLastRender.d, mtcLastRender.n) }
 })()
 </script>
 <!-- ── Coin-Flip Floating Button + Modal ── -->
