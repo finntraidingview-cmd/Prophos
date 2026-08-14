@@ -4905,6 +4905,9 @@
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="mtc-version" title="Version des Copier-Stacks auf diesem PC" style="display:none"></span>
           <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
+          <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
+               start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
+          <button class="btn btn-ghost" id="mtc-restart-stack" title="Copier, Panel und Backend neu starten (start-alles.bat)">🔄 Alles neu starten</button>
           <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
         </div>
       </div>
@@ -22289,6 +22292,30 @@
   })
   $('mtc-add-open').addEventListener('click', openAdd)
   $('mtc-add-x').addEventListener('click', closeAdd)
+  // Stack-Neustart-Knopf (15.08.2026, Finns Wunsch): das Hand-Ritual — CMDs zu,
+  // taskkill, start-alles.bat — als ein Klick. app.py killt den Stack (inkl.
+  // sich selbst) und startet ihn frisch; die Seite lädt danach von selbst neu.
+  const restartBtn = $('mtc-restart-stack')
+  if(restartBtn){
+    if(!MT5_LOCAL) restartBtn.style.display = 'none'
+    restartBtn.addEventListener('click', async () => {
+      if(!confirm('Kompletten Copier-Stack neu starten?\n\nCopier, Panel und Backend starten frisch (wie start-alles.bat). Offene Hedges liegen beim Broker und werden übernommen.')) return
+      restartBtn.disabled = true
+      restartBtn.textContent = '⏳ startet neu…'
+      try{
+        const r = await fetch('/local/restart-stack', { method: 'POST' })
+        const d = await r.json().catch(() => ({}))
+        if(!d.ok){
+          alert('Neustart fehlgeschlagen: ' + (d.msg || 'unbekannt'))
+          restartBtn.disabled = false; restartBtn.textContent = '🔄 Alles neu starten'
+          return
+        }
+      }catch(_){ /* Backend stirbt gleich absichtlich — Fehler hier ist ok */ }
+      restartBtn.textContent = '⏳ Stack startet — Seite lädt gleich neu…'
+      // Backend killt sich in ~4s, start-alles.bat braucht ~15s zum Hochfahren
+      setTimeout(() => location.reload(), 25000)
+    })
+  }
   // Prefill-Auswahl: fuellt AUSSCHLIESSLICH die .value-PROPERTY der vier
   // statischen Inputs (nie innerHTML, nie value=-Attribut, nie data-* — das
   // Passwort darf nirgends im Markup landen; Paket D, 15.08.2026).

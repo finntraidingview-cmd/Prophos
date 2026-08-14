@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-16.4"
+APP_BUILD = "2026-08-16.5"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -282,6 +282,47 @@ def copier_proxy(path):
     except Exception as e:
         return jsonify({"ok": False, "copier_offline": True,
                         "error": f"Copier-Panel auf diesem PC nicht erreichbar ({type(e).__name__})"}), 502
+
+# ── Stack-Neustart per Knopf (15.08.2026, Finns Wunsch) ──
+# Das Hand-Ritual — CMD-Fenster zu, taskkill python, start-alles.bat — als EIN
+# Klick im MT5-Tab. Killt bewusst auch DIESES Backend; die .bat startet alles
+# frisch, laufende Instanzen schuetzen sich selbst (Copier-Status-Sperre,
+# Panel/Backend-Port-Probe). Nur Lokal-Modus + nur Loopback (gleiche Riegel
+# wie der Copier-Proxy — ein LAN-Geraet darf den Stack nicht neu starten).
+@app.route("/local/restart-stack", methods=["POST", "OPTIONS"])
+def local_restart_stack():
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return jsonify({"ok": False, "msg": "Nur lokal auf dem PC selbst erlaubt."}), 403
+    if os.name != "nt" or not (os.environ.get("PROPHOS_FRONTEND") or "").strip():
+        return jsonify({"ok": False, "msg": "Nur im Lokal-Modus (PROPHOS_FRONTEND) verfuegbar."}), 403
+    bat = (os.environ.get("PROPHOS_STACK_BAT") or r"C:\mt5-copier\start-alles.bat").strip()
+    if not os.path.exists(bat):
+        return jsonify({"ok": False, "msg": f"start-alles.bat nicht gefunden: {bat}"})
+    import subprocess
+    import tempfile
+    # Helfer-Bat, DETACHED: erst die alten Loop-Fenster schliessen (die wuerden
+    # gekillte Pythons sonst sofort respawnen), dann alle python.exe (trifft
+    # absichtlich auch dieses Backend — exakt Finns Hand-Ritual), dann frisch
+    # starten. Antwort geht raus, bevor der Kill greift (2s-Puffer).
+    helper = os.path.join(tempfile.gettempdir(), "prophos-restart-stack.bat")
+    with open(helper, "w", encoding="ascii") as f:
+        f.write("@echo off\r\n"
+                "timeout /t 2 /nobreak >nul\r\n"
+                "taskkill /f /fi \"WINDOWTITLE eq MT5-Hedge-Copier*\" >nul 2>&1\r\n"
+                "taskkill /f /fi \"WINDOWTITLE eq Copier-Panel*\" >nul 2>&1\r\n"
+                "taskkill /f /fi \"WINDOWTITLE eq Prophos-Backend*\" >nul 2>&1\r\n"
+                "taskkill /f /im python.exe >nul 2>&1\r\n"
+                "timeout /t 2 /nobreak >nul\r\n"
+                f"start \"\" \"{bat}\"\r\n")
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    subprocess.Popen(["cmd", "/c", helper],
+                     creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                     close_fds=True, cwd=os.path.dirname(bat))
+    print("[stack] Neustart angestossen — dieses Backend wird gleich mitgekillt.", flush=True)
+    return jsonify({"ok": True, "msg": "Stack startet neu."})
 
 # ── Duplikium Connect (Basic Auth → Token) ──
 @app.route("/duplikum/connect", methods=["POST","OPTIONS"])
