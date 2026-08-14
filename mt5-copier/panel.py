@@ -1124,6 +1124,16 @@ class Handler(BaseHTTPRequestHandler):
                 display = None
             if not (name and login and password and server):
                 return self._send(400, json.dumps({"ok": False, "msg": "Name, Login, Passwort und Server sind Pflicht."}))
+            # Selbst-Spiegel-Sperre (15.08.2026, Finns 'Fusion SLAVE TEST'-Fall):
+            # das Hedge-Konto als Master einzurichten hiesse, es auf sich selbst
+            # zu spiegeln — jede Position wuerde ihren eigenen Hedge ausloesen
+            # (Teufelskreis). Wird hier hart verweigert.
+            _hedge_login = str(base_config().get("hedge_expected_login") or "")
+            if _hedge_login and str(login) == _hedge_login:
+                return self._send(400, json.dumps({"ok": False, "msg":
+                    f"Login {login} IST das Hedge-Konto dieses PCs — es wird nicht "
+                    f"als Master eingerichtet (wuerde auf sich selbst spiegeln)."},
+                    ensure_ascii=False))
             if not base_config():
                 # Von-Null-Fall (15.08.2026): ohne Basis weiss die Einrichtung weder
                 # Hedge-Konto noch Vorlage-Terminal — klare Ansage statt Folgefehler.
