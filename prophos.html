@@ -16088,9 +16088,9 @@
         const mapOk = expSyms.length
           ? `Mapping deckt <span class="mono">${expSyms.map(escapeHtml).join(', ')}</span> ab ✓`
           : `Mapping <span class="mono">${mapCount}</span> Zeile(n) ✓`
-        // GELB, nicht grün: die endgültige Lot-Zahl rechnet der Copier
-        // exposure-basiert (Kontraktgrößen!) — blockt er, steht es im Karten-Log.
-        _pfSet('m5push', 'warn', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert (Kontraktgrößen!), blockt er, steht es im Karten-Log.`)
+        // GRÜN (Finns Ansage 15.08.2026, war vorher bewusst gelb): gepusht ist
+        // gepusht — die exposure-basierte Endgröße bleibt als Hinweis im Text.
+        _pfSet('m5push', 'ok', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert.`)
       }
     }
 
@@ -16171,7 +16171,13 @@
             _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
             const fe = document.getElementById('pf-final')
             if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
-              fe.textContent = '✓ Alles bereit — im MT5-Terminal traden. Der Trade bleibt auf Geplant; die Auto-Erkennung übernimmt beim Einstieg.' }
+              fe.textContent = '✓ Alles bereit — im MT5-Terminal traden. Die Auto-Erkennung übernimmt beim Einstieg.' }
+            // Alles grün → Popup schließt sich von selbst (Finns Ansage 15.08.2026;
+            // vorher blieb es bewusst offen, aber der Ticker ist ja durch).
+            setTimeout(() => {
+              if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+                 && String(_pfPlanId) === String(plan.id)) _pfClose()
+            }, 1200)
             return
           }
           if(sec > 170){

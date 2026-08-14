@@ -486,6 +486,25 @@ def _remove_later(path, delay_s=90):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _front_when_up(install_dir):
+    """Frisch gestartetes Terminal nach vorn holen (Finns Ansage 15.08.2026:
+    'das Terminal-Fenster soll auch aufgehen') — der Prozess braucht ein paar
+    Sekunden bis zum Fenster, deshalb pollen statt sofort AppActivate."""
+    def worker():
+        for _ in range(20):
+            time.sleep(2)
+            pids = provision.terminal_pids(install_dir)
+            if pids:
+                try:
+                    subprocess.run(["powershell", "-Command",
+                                    f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
+                                   capture_output=True, timeout=15)
+                except Exception:
+                    pass
+                return
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _drop_snapshot(cfg):
     """Alt-Snapshot des Masters entwerten (Review-Fund 15.08.2026, Stale-Beweis-
     Livelock): die Snapshot-CSV ueberlebt Terminal-Kill und Kontowechsel, und der
@@ -611,6 +630,8 @@ def start_terminal(fname, creds=None):
         threading.Thread(target=_heal_ea,
                          args=(fname, cfg, install_dir, time.time()),
                          daemon=True).start()
+        # Fenster nach vorn, sobald es da ist (sonst startet MT5 hinter dem Browser)
+        _front_when_up(install_dir)
         return True, msg
     except (OSError, ValueError) as e:
         # ValueError deckt UnicodeEncodeError ab (Review-Fund 15.08.2026) —
