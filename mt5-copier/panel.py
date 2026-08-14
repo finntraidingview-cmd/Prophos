@@ -466,12 +466,55 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
             pass
 
 
-def start_terminal(fname):
+def _remove_later(path, delay_s=90):
+    """Passwort-fuehrende Login-ini nach dem Start wegraeumen. 90 s statt 25
+    (Review-Fund 15.08.2026): ein langsamer Terminal-Boot (Defender, VPS) darf
+    die /config-ini nicht verpassen — die Provisionierung haelt ihre ini sogar
+    bis zur Login-Bestaetigung. Mit Retry gegen transiente Windows-Locks; den
+    Prozess-Exit (os._exit des Version-Watchers) ueberlebt der Thread NICHT —
+    dafuer raeumt main() beim naechsten Panel-Start liegengebliebene inis auf."""
+    def worker():
+        time.sleep(delay_s)
+        for _ in range(4):
+            try:
+                os.remove(path)
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                time.sleep(10)
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _drop_snapshot(cfg):
+    """Alt-Snapshot des Masters entwerten (Review-Fund 15.08.2026, Stale-Beweis-
+    Livelock): die Snapshot-CSV ueberlebt Terminal-Kill und Kontowechsel, und der
+    Copier wuerde daraus weiter 'FALSCHES Konto' stempeln — waehrend das frisch
+    gezwungene Terminal noch bootet. Datei weg → ehrliches 'warte auf Snapshot'.
+    Aufloesung identisch zu copier.py (common_files_dir oder MT5-Common-Ordner)."""
+    snapf = str(cfg.get("snapshot_file") or "").strip()
+    if not snapf:
+        return
+    common = str(cfg.get("common_files_dir") or "").strip() or os.path.join(
+        os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
+    try:
+        os.remove(os.path.join(common, snapf))
+    except OSError:
+        pass
+
+
+def start_terminal(fname, creds=None):
     """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
     nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
     Fenster ohne die laufende Sitzung oeffnen, das nach dem Login fragt
     (Fund 14.08.2026: genau daher kam der stoerende OK-Dialog). Pfad kommt
-    AUSSCHLIESSLICH aus der Config (nicht ueber die API setzbar)."""
+    AUSSCHLIESSLICH aus der Config (nicht ueber die API setzbar).
+
+    creds = {login, password, server} (optional, aus Prophos/Supabase): damit
+    wird der Login beim Start ERZWUNGEN — per transienter /config-ini mit
+    KeepPrivate=1, exakt der Provisionierungs-Weg. Ohne Zwang schlaegt MT5 das
+    zuletzt benutzte Konto des Ordners vor (15.08.2026, erster Trade-Test: das
+    Terminal oeffnete mit 437916 statt 438639 und der Trade lief ins Leere)."""
     cfg = read_json(os.path.join(HERE, fname), {}) or {}
     path = str(cfg.get("master_terminal_path") or "").strip()
     if not path:
@@ -480,7 +523,50 @@ def start_terminal(fname):
         return False, "master_terminal_path muss auf eine terminal64.exe zeigen"
     if not os.path.exists(path):
         return False, f"nicht gefunden: {path}"
-    pids = provision.terminal_pids(os.path.dirname(path))
+    expected = int(cfg.get("master_expected_login") or 0)
+    if creds and expected and str(creds.get("login")) != str(expected):
+        # Zugangsdaten fuer ein ANDERES Konto erzwingen waere garantiert falsch —
+        # lieber laut scheitern als leise ins falsche Konto einloggen.
+        return False, (f"Zugangsdaten gehoeren zu Konto {creds.get('login')}, die Instanz "
+                       f"erwartet {expected} — Verlinkung in Prophos pruefen.")
+    if creds and not (creds.get("server") or cfg.get("master_server")):
+        # Ohne Servernamen kein Zwang (leere Server=-Zeile in der ini waere
+        # unberechenbar) — dann lieber der bisherige nackte Start.
+        creds = None
+    if creds and not all(str(creds.get(k) or "").isascii() for k in ("login", "password", "server")):
+        # VOR jedem Kill pruefen (Review-Fund 15.08.2026): die Start-ini ist
+        # zwingend ASCII (UTF-16 ignoriert MT5), und ein UnicodeEncodeError nach
+        # dem Kill liesse das Terminal tot zurueck. Klare Ansage statt Crash.
+        return False, ("Zugangsdaten enthalten Sonderzeichen/Umlaute — die MT5-Start-ini "
+                       "kann nur ASCII. Login einmal von Hand im Terminal machen "
+                       "(Datei → Bei Handelskonto anmelden).")
+    install_dir = os.path.dirname(os.path.abspath(path))
+    pids = provision.terminal_pids(install_dir)
+    wrong = None
+    if pids:
+        # Steht das laufende Terminal nachweislich im FALSCHEN Konto (Snapshot-
+        # Beweis aus dem Copier-Status), hilft Fenster-nach-vorn nicht — nur ein
+        # Neustart mit erzwungenem Login. Nur mit frischem Status-Beweis killen.
+        status_fn = re.sub(r"^config", "status", fname, count=1, flags=re.I)
+        st = read_json(os.path.join(HERE, status_fn), {}) or {}
+        age = None
+        try:
+            age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+        except (ValueError, TypeError):
+            pass
+        if st.get("running") and age is not None and age <= 15:
+            wrong = st.get("wrong_login")
+        if wrong and creds:
+            print(f"[panel] {fname}: Terminal im falschen Konto ({wrong}) — Neustart mit "
+                  f"erzwungenem Login {creds.get('login')}.", flush=True)
+            # Kurze Grace statt der 15 s von _kill_terminal_at: ab 2 PIDs risse
+            # der synchrone Kill sonst den 25-s-Proxy-Timeout von app.py.
+            for pid in provision.terminal_pids(install_dir):
+                provision._taskkill(pid, grace_s=5)
+            # Alt-Snapshot SOFORT entwerten — sonst stempelt der Copier daraus
+            # weiter 'FALSCHES Konto', waehrend das neue Terminal bootet.
+            _drop_snapshot(cfg)
+            pids = []
     if pids:
         # Laeuft schon: nur das Fenster nach vorn holen — ABER auch hier die
         # Selbstheilung anstossen: liefert das laufende Terminal keinen frischen
@@ -493,19 +579,43 @@ def start_terminal(fname):
         except Exception:
             pass
         threading.Thread(target=_heal_ea,
-                         args=(fname, cfg, os.path.dirname(os.path.abspath(path)),
-                               time.time(), 8),
+                         args=(fname, cfg, install_dir, time.time(), 8),
                          daemon=True).start()
+        if wrong and not creds:
+            return True, (f"Terminal läuft, aber im FALSCHEN Konto ({wrong} statt {expected or '?'}) — "
+                          f"im Terminal Datei → „Bei Handelskonto anmelden“ auf das richtige Konto wechseln.")
         return True, "Terminal läuft — EA wird geprüft und notfalls automatisch aufgezogen"
     try:
-        subprocess.Popen([path], cwd=os.path.dirname(path))
+        if creds:
+            # Login-Zwang: [Common]-only-ini (KEIN [StartUp] — das wuerde bei jedem
+            # Start einen weiteren EA-Chart aufziehen; das EA haengt am Profil und
+            # die Selbstheilung unten faengt den Fehlfall). ASCII ist Pflicht,
+            # UTF-16-inis ignoriert MT5 stillschweigend (Fund 14.08.2026).
+            _drop_snapshot(cfg)  # Alt-Beweis eines frueheren (Falsch-)Logins entwerten
+            ini = os.path.join(install_dir, "prophos-login.ini")
+            try:
+                with open(ini, "w", encoding=provision.INI_ENCODING) as f:
+                    f.write(provision.build_login_ini(creds["login"], creds["password"],
+                                                      creds.get("server") or cfg.get("master_server") or ""))
+                subprocess.Popen([path, f"/config:{ini}"], cwd=install_dir)
+            finally:
+                # Auch bei Write-/Start-Fehlern aufraeumen — nie eine Passwort-ini
+                # ungeplant liegen lassen.
+                _remove_later(ini)
+            msg = "Terminal gestartet — Login ins richtige Konto wird erzwungen; EA wird geprüft und notfalls selbst aufgezogen"
+        else:
+            subprocess.Popen([path], cwd=install_dir)
+            msg = "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
         # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
         # wird das EA automatisch per [StartUp] nachgezogen.
         threading.Thread(target=_heal_ea,
-                         args=(fname, cfg, os.path.dirname(os.path.abspath(path)), time.time()),
+                         args=(fname, cfg, install_dir, time.time()),
                          daemon=True).start()
-        return True, "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
-    except OSError as e:
+        return True, msg
+    except (OSError, ValueError) as e:
+        # ValueError deckt UnicodeEncodeError ab (Review-Fund 15.08.2026) —
+        # der ASCII-Wachter oben faengt das normal vorher, aber ein Handler-
+        # Crash ohne JSON-Antwort darf daraus nie wieder werden.
         return False, f"Start fehlgeschlagen: {e}"
 
 
@@ -1164,8 +1274,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{fname}' unbekannt"}))
 
         if u.path == "/api/start-terminal":
-            ok, msg = start_terminal(inst["config_file"])
-            print(f"[panel] {fname}: Terminal-Start → {msg}", flush=True)
+            # Optionale Zugangsdaten im Body (aus Prophos/Supabase): erzwingen den
+            # richtigen Login beim Start. Nur komplett (login+password+server bzw.
+            # Server aus der Config) macht der Zwang Sinn — sonst wie bisher nackt.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception:
+                body = {}
+            creds = {k: str(body.get(k) or "").strip() for k in ("login", "password", "server")}
+            has_creds = bool(creds["login"] and creds["password"])
+            ok, msg = start_terminal(inst["config_file"], creds if has_creds else None)
+            print(f"[panel] {fname}: Terminal-Start → {msg}", flush=True)  # bewusst ohne Zugangsdaten
             return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
         if u.path == "/api/delete":
@@ -1341,6 +1461,17 @@ def main():
     # Von-Null-Selbstheilung: fehlende Vorlage einmalig aus dem Repo holen
     # (blockiert den Start nicht laenger als den Download-Timeout).
     ensure_vorlage()
+    # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
+    # 15.08.2026): der _remove_later-Thread ueberlebt das os._exit des Version-
+    # Watchers nicht — beim naechsten Start hier nachziehen.
+    for inst in instances():
+        _cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+        _p = str(_cfg.get("master_terminal_path") or "").strip()
+        if _p:
+            try:
+                os.remove(os.path.join(os.path.dirname(_p), "prophos-login.ini"))
+            except OSError:
+                pass
     print("=" * 66)
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

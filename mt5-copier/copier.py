@@ -916,8 +916,38 @@ def main():
 
             # ── Jeden Master abarbeiten ─────────────────────────────────────────
             for m in masters:
-                snap = read_snapshot(os.path.join(common, m.snapshot_file),
-                                     expect_login=m.master_login)
+                # Ohne expect_login lesen und SELBST vergleichen (15.08.2026, erster
+                # Trade-Test): das Terminal oeffnete mit fremdem Konto 437916, der
+                # expect_login-Filter machte den Snapshot still zu None — im Preflight
+                # stand nur 'warte auf Snapshot' statt der Wahrheit. Der Mismatch muss
+                # LAUT werden (note + wrong_login), kopiert wird dabei weiterhin nichts.
+                snap_path = os.path.join(common, m.snapshot_file)
+                snap = read_snapshot(snap_path)
+                if snap is not None and m.master_login and int(snap["login"]) != int(m.master_login):
+                    # Anklage nur mit LEBENDEM Beweis (Review-Fund 15.08.2026): eine
+                    # alte Fremd-Datei ueberlebt Terminal-Kill und Kontowechsel — ohne
+                    # mtime-Gate wuerde 'im FALSCHEN Konto eingeloggt' behauptet,
+                    # obwohl laengst nichts mehr (oder das richtige Konto) laeuft,
+                    # und das Panel wuerde das heilende Terminal erneut killen.
+                    try:
+                        file_fresh = (time.time() - os.path.getmtime(snap_path)) <= 15
+                    except OSError:
+                        file_fresh = False
+                    if not file_fresh:
+                        snap = None  # stale Fremd-Datei ist kein Beweis → 'warte auf Snapshot'
+                if snap is not None and m.master_login and int(snap["login"]) != int(m.master_login):
+                    if now - m.last_status > 3.0:
+                        m.last_status = now
+                        if os.path.exists(m.cfg_path):
+                            known = m.virtual if m.mode == "dryrun" else book.get(m.magic, {})
+                            st = master_status(m, None, known, False)
+                            st["note"] = (f"Master-Terminal ist im FALSCHEN Konto eingeloggt: "
+                                          f"{snap['login']} statt {m.master_login} — Trade in "
+                                          f"Prophos neu starten, der Start loggt das Terminal "
+                                          f"automatisch richtig ein.")
+                            st["wrong_login"] = snap["login"]
+                            write_status(m.status_path, st)
+                    continue
                 if snap is None:
                     if now - m.last_status > 3.0:
                         m.last_status = now

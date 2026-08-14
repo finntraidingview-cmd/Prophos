@@ -16107,8 +16107,19 @@
     // ── 5. Terminal + EA ──
     if(!hardFail){
       const file = route.inst.file
+      // Login-Zwang (15.08.2026, erster Trade-Test): das Terminal öffnete mit dem
+      // zuletzt benutzten FREMD-Konto des Ordners (437916 statt 438639) und der
+      // Trade lief ins Leere. Deshalb bekommt das Panel die Zugangsdaten des
+      // Masters mit und erzwingt den Login per transienter /config-ini — aber nur,
+      // wenn die Creds zum verlinkten Login passen; sonst nackt wie bisher.
+      const mAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+      const mc = (mAcc && mAcc.creds) || {}
+      const sendCreds = !!(mc.login && mc.password && String(mc.login) === String(route.masterLogin))
       const ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
-        headers:{'Content-Type':'application/json'}, body:'{}' })
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(sendCreds
+          ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') }
+          : {}) })
       if(!ts.ok){
         _pfSet('m5term', 'err', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String(ts.msg || ts.error || 'Fehler')))
         hardFail = true
@@ -16146,6 +16157,26 @@
           const inst2 = (d2.instances || []).find(x => x.file === file)
           const note = String(((inst2 || {}).status || {}).note || '')
           const sec = Math.round((Date.now() - t0) / 1000)
+          // Falsch-Konto-Beweis vom Copier (15.08.2026): nicht weiter gelb warten,
+          // sondern rot + klare Ansage. Review-Funde eingebaut: (a) Schonfrist bei
+          // erzwungenem Login — direkt nach Kill+Neustart kann noch ein Rest-Beweis
+          // durchscheinen, erst nach 25s ist Rot ein Urteil; (b) ohne mitgeschickte
+          // Zugangsdaten gibt es KEINEN Auto-Fix, dann ehrlich die Hand-Anweisung
+          // zeigen statt eines falschen Heil-Versprechens.
+          const wrongLogin = ((inst2 || {}).status || {}).wrong_login
+          if(wrongLogin){
+            const pair = `(<span class="mono">${escapeHtml(String(wrongLogin))}</span> statt <span class="mono">${escapeHtml(String(route.masterLogin))}</span>)`
+            if(sendCreds && sec <= 25){
+              _pfSet('m5term', 'warn', `⏳ Terminal wird ins richtige Konto gezwungen… (${sec}s)`)
+            } else if(sendCreds){
+              _pfMt5StopTimer()
+              _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — „Speichern & Starten" erneut klicken: der Neustart loggt automatisch ins richtige Konto ein. Hilft das nicht: im Terminal Datei → „Bei Handelskonto anmelden".`)
+            } else {
+              _pfMt5StopTimer()
+              _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — im Terminal: Datei → „Bei Handelskonto anmelden" auf <span class="mono">${escapeHtml(String(route.masterLogin))}</span> wechseln. Tipp: Zugangsdaten am Prophos-Account hinterlegen, dann erzwingt der Start das künftig automatisch.`)
+            }
+            return
+          }
           if(inst2 && inst2.alive && !note){
             _pfMt5StopTimer()
             _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
