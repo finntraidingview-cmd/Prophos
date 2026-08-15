@@ -16511,21 +16511,29 @@
     const msg = document.getElementById('tpOrderMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     const symEl = document.getElementById('tp-order-symbol')
     symEl.value = ''
+    // Symbol-Vorbefüllung aus den FIRMEN-EINSTELLUNGEN (Finns Korrektur
+    // 15.08.2026: die Settings sind die Quelle, nicht die Copier-Karte). Der
+    // Master-Firma ist ihr Symbol dort hinterlegt (FundedNext → NDX100, Fusion
+    // → NAS100) — der Copier spiegelt es über sein Mapping auf das Hedge-Symbol
+    // der Slave-Firma, das ebenfalls aus den Settings kommt.
+    const fromSettings = (typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
+    if(fromSettings.length){ symEl.value = fromSettings[0] }
     document.getElementById('tpOrderModal').classList.add('open')
-    // Symbol-Vorbefüllung: Master-Symbole aus dem Mapping der verlinkten Instanz,
-    // Firmen-Preset gewinnt bei mehreren (z.B. NDX100 bei FundedNext).
-    try{
-      const d = await window.mtcApi('instances')
-      const route = mt5RouteResolve(plan, (d && d.instances) || [])
-      const keys = Object.keys((route && route.inst.symbol_map) || {})
-      // Guard auf DENSELBEN Plan (Review-Fund 15.08.2026): eine langsame Antwort
-      // eines früheren Opens darf das Feld eines neuen Plans nicht befüllen.
-      if(keys.length && document.getElementById('tpOrderModal').classList.contains('open')
-         && String(_tpOrderPlanId) === String(planId) && !symEl.value){
-        const pref = (typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
-        symEl.value = keys.find(k => pref.includes(k)) || keys[0]
-      }
-    }catch(_){}
+    // Fallback nur, falls die Firma keine Settings-Symbole hat: aus dem Mapping
+    // der verlinkten Instanz. Guard auf DENSELBEN Plan (Review-Fund 15.08.2026):
+    // eine langsame Antwort eines früheren Opens darf kein Fremd-Feld füllen.
+    if(!symEl.value){
+      try{
+        const d = await window.mtcApi('instances')
+        const route = mt5RouteResolve(plan, (d && d.instances) || [])
+        const keys = Object.keys((route && route.inst.symbol_map) || {})
+        if(keys.length && document.getElementById('tpOrderModal').classList.contains('open')
+           && String(_tpOrderPlanId) === String(planId) && !symEl.value){
+          symEl.value = keys[0]
+        }
+      }catch(_){}
+    }
   }
 
   document.getElementById('tp-order-buy')?.addEventListener('click', () => tpOrderDirSet('buy'))
