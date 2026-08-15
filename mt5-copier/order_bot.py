@@ -258,21 +258,56 @@ def _finde_terminal(login):
     return None
 
 
-def _finde_order_dialog(hauptfenster, timeout=6.0):
-    """Nach F9: das Order-Dialogfenster desselben Prozesses suchen."""
+def _ist_order_dialog(win):
+    """Ein Fenster als Order-Dialog erkennen: Titel beginnt mit 'Order' ODER es
+    traegt eine ComboBox + mind. 3 Edit-Felder (die Symbol/Volumen/SL/TP-Maske)."""
+    try:
+        t = (win.window_text() or "")
+        if t.strip().lower().startswith("order"):
+            return True
+        combos = win.descendants(control_type="ComboBox")
+        edits = win.descendants(control_type="Edit")
+        return bool(combos) and len(edits) >= 3
+    except Exception:
+        return False
+
+
+def _finde_order_dialog(hauptfenster, timeout=10.0):
+    """Nach F9: den Order-Dialog suchen — als TOP-LEVEL-Fenster UND als
+    Kind-Fenster des Terminals (Fund 15.08.2026: MT5 haengt den F9-Dialog als
+    Child ans Hauptfenster, die reine Top-Level-Suche fand ihn nie, obwohl er
+    sichtbar offen war). Titel 'Order…' oder die typische Feldstruktur."""
     from pywinauto import Desktop
     pid = hauptfenster.element_info.process_id
     ende = time.time() + timeout
     while time.time() < ende:
-        for w in Desktop(backend="uia").windows():
-            try:
-                if (w.element_info.process_id == pid
-                        and w.element_info.class_name != MT5_KLASSE
-                        and w.element_info.control_type == "Window" and w.is_visible()):
-                    return w
-            except Exception:
-                continue
-        time.sleep(0.2)
+        # a) Top-Level-Fenster desselben Prozesses
+        try:
+            for w in Desktop(backend="uia").windows():
+                try:
+                    if w.element_info.process_id == pid and w.is_visible() \
+                            and w.element_info.class_name != MT5_KLASSE \
+                            and _ist_order_dialog(w):
+                        return w
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # b) Kind-/Nachkommen-Fenster des Hauptfensters
+        try:
+            for d in hauptfenster.descendants(control_type="Window"):
+                if _ist_order_dialog(d):
+                    return d
+        except Exception:
+            pass
+        # c) Direkter Griff per Titel-Regex (owned window)
+        try:
+            cand = hauptfenster.child_window(title_re="(?i)^order")
+            if cand.exists(timeout=0.3):
+                return cand.wrapper_object()
+        except Exception:
+            pass
+        time.sleep(0.3)
     return None
 
 
