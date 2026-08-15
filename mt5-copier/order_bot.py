@@ -144,19 +144,64 @@ def _api_lesen(path, expected, symbol=None):
 MT5_KLASSE = "MetaQuotes::MetaTrader::5.00"
 
 
-def _maus_fahren(x, y, schritte=16):
+def _cursor_pos():
+    import ctypes
+    import ctypes.wintypes as wt
+    pt = wt.POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return int(pt.x), int(pt.y)
+
+
+def _cursor_set(x, y):
+    """Cursor per tiefster Windows-API setzen (15.08.2026): SetCursorPos greift
+    auch ueber Parsec zuverlaessig auf den ECHTEN Windows-Cursor — der
+    pywinauto-Weg zeigte ueber Remote-Sitzungen manchmal nur den lokalen
+    Parsec-Cursor, waehrend sich der echte lautlos woanders bewegte."""
+    import ctypes
+    ctypes.windll.user32.SetCursorPos(int(x), int(y))
+
+
+def _maus_fahren(x, y, schritte=18):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
-    Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt."""
-    from pywinauto import mouse
+    Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
+    statt pywinauto.mouse (Parsec-Doppelcursor, s.o.)."""
     try:
-        import win32api
-        cx, cy = win32api.GetCursorPos()
+        cx, cy = _cursor_pos()
     except Exception:
         cx, cy = x, y
     for i in range(1, schritte + 1):
-        mouse.move(coords=(int(cx + (x - cx) * i / schritte),
-                           int(cy + (y - cy) * i / schritte)))
+        try:
+            _cursor_set(int(cx + (x - cx) * i / schritte),
+                        int(cy + (y - cy) * i / schritte))
+        except Exception:
+            break
         time.sleep(0.02)
+
+
+def _bildschirm_mitte():
+    import ctypes
+    return (ctypes.windll.user32.GetSystemMetrics(0) // 2,
+            ctypes.windll.user32.GetSystemMetrics(1) // 2)
+
+
+def _maus_zentrieren():
+    """Anker-Punkt (Finns Wunsch 15.08.2026): der Bot faehrt die Maus SELBST
+    sichtbar in die Bildschirmmitte und haelt kurz — fester Ausgangspunkt, den
+    Finn nicht mehr treffen muss. Rueckgabe: (bewegt?, (x, y)) — bewegt=False
+    heisst, der OS-Cursor liess sich nicht setzen (dann meldet run das klar)."""
+    try:
+        vor = _cursor_pos()
+    except Exception:
+        vor = None
+    mx, my = _bildschirm_mitte()
+    _maus_fahren(mx, my)
+    time.sleep(1.0)  # sichtbar halten
+    try:
+        nach = _cursor_pos()
+        bewegt = (vor is None) or (abs(nach[0] - mx) < 6 and abs(nach[1] - my) < 6)
+        return bewegt, nach
+    except Exception:
+        return True, (mx, my)
 
 
 def _fenster_betreten(w):
@@ -252,7 +297,17 @@ def run(cfg_path, cmd):
                             cmd["sl_usd"], cmd["tp_usd"], digits)
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
 
-    # 2) SICHTBAR: ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
+    # 2a) SICHTBARER ANKER: Maus in die Bildschirmmitte fahren (Finns Wunsch).
+    # Bewegt sich der OS-Cursor NICHT, kann der Bot auch nicht klicken —
+    # dann sofort ehrlich abbrechen (retry_ok, nichts gesendet).
+    bewegt, _pos = _maus_zentrieren()
+    if not bewegt:
+        return {"ok": False, "retry_ok": True,
+                "msg": "Maus liess sich per Windows-API NICHT bewegen (SetCursorPos ohne "
+                       "Wirkung) — laeuft das Panel evtl. ohne Desktop-Rechte? Ohne echte "
+                       "Maussteuerung keine sichtbare Order."}
+
+    # 2b) SICHTBAR: ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     w = _finde_terminal(expected)
     if w is None:
         return {"ok": False, "retry_ok": True,

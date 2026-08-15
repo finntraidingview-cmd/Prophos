@@ -16260,13 +16260,13 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              // Kalibrierungs-Countdown (15.08.2026, Finns Wunsch): fester
-              // Ausgangspunkt — Finn legt die Maus in die Bildschirmmitte,
-              // 3-2-1, dann übernimmt der Bot von dort.
-              _pfSet('m5term', 'ok', '✓ Bereit — Kalibrierung läuft…')
+              // Countdown (15.08.2026, Finns Wunsch): der Bot fährt die Maus
+              // gleich SELBST sichtbar in die Bildschirmmitte (fester Anker) —
+              // Finn muss nichts treffen, nur die Hände weglassen.
+              _pfSet('m5term', 'ok', '✓ Bereit — gleich übernimmt der Bot…')
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
               for(let n = 3; n >= 1; n--){
-                if(fe) fe.textContent = `🖱 KALIBRIERUNG: Maus in die MITTE des Bildschirms legen und loslassen — Bot übernimmt in ${n}…`
+                if(fe) fe.textContent = `🖱 HÄNDE WEG! Der Bot fährt die Maus gleich selbst in die Bildschirm-MITTE und übernimmt von dort — in ${n}…`
                 await new Promise(res => setTimeout(res, 1000))
               }
               // Abbruch-Check nach dem Countdown: Modal zu = Order verworfen
