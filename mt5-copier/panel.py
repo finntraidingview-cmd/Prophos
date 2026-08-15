@@ -1552,6 +1552,26 @@ class Handler(BaseHTTPRequestHandler):
             ok = delete_plan(pid)
             return self._send(200, json.dumps({"ok": ok, "msg": "geloescht" if ok else "unbekannt"}))
 
+        if u.path == "/api/mouse-test":
+            # Isolierter Maus-/Tastatur-Test (15.08.2026, Finns Wunsch): klaert
+            # getrennt von MT5, ob der Bot auf diesem PC den Cursor bewegen und
+            # tippen kann. Braucht keine Instanz.
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            try:
+                p = subprocess.run([sys.executable, bot, "mousetest"],
+                                   capture_output=True, text=True, timeout=60)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "msg": "Maus-Test Timeout (60s)."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "msg": f"Maus-Test-Start fehlgeschlagen: {e}"}
+            print(f"[panel] Maus-Test → {res.get('msg')}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:

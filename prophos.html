@@ -4955,6 +4955,7 @@
           <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
+          <button class="btn btn-ghost" id="mtc-mouse-test" title="Testet isoliert, ob der Bot Maus und Tastatur steuern kann">🖱 Maus-Test</button>
           <button class="btn btn-ghost" id="mtc-restart-stack" title="Copier, Panel und Backend neu starten (start-alles.bat)">🔄 Alles neu starten</button>
           <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
         </div>
@@ -22513,6 +22514,28 @@
   // Stack-Neustart-Knopf (15.08.2026, Finns Wunsch): das Hand-Ritual — CMDs zu,
   // taskkill, start-alles.bat — als ein Klick. app.py killt den Stack (inkl.
   // sich selbst) und startet ihn frisch; die Seite lädt danach von selbst neu.
+  // Maus-Test-Knopf (15.08.2026, Finns Wunsch): isolierter Beweis, dass der Bot
+  // Maus + Tastatur auf dem PC steuern kann — getrennt von MT5.
+  const mouseTestBtn = $('mtc-mouse-test')
+  if(mouseTestBtn){
+    if(!MT5_LOCAL) mouseTestBtn.style.display = 'none'
+    mouseTestBtn.addEventListener('click', async () => {
+      if(!confirm('Maus-Test starten?\n\nDer Bot fährt den Zeiger über den Bildschirm (Mitte → Ecken) und tippt in Notepad. HÄNDE WEG von Maus und Tastatur, bis das Ergebnis kommt (~10s).')) return
+      mouseTestBtn.disabled = true
+      const _t = mouseTestBtn.textContent
+      mouseTestBtn.textContent = '🖱 läuft… Hände weg!'
+      try{
+        const r = await window.mtcApi('mouse-test', { method:'POST',
+          headers:{'Content-Type':'application/json'}, body:'{}' })
+        alert((r && r.ok ? '✅ ' : '⚠️ ') + (r && r.msg ? r.msg : 'keine Antwort'))
+      }catch(e){
+        alert('Maus-Test fehlgeschlagen: ' + (e && e.message || e))
+      }finally{
+        mouseTestBtn.disabled = false
+        mouseTestBtn.textContent = _t
+      }
+    })
+  }
   const restartBtn = $('mtc-restart-stack')
   if(restartBtn){
     if(!MT5_LOCAL) restartBtn.style.display = 'none'

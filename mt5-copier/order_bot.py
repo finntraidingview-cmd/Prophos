@@ -193,10 +193,78 @@ def _maus_fahren(x, y, schritte=18):
         time.sleep(0.02)
 
 
-def _bildschirm_mitte():
+def _bildschirm_groesse():
     import ctypes
-    return (ctypes.windll.user32.GetSystemMetrics(0) // 2,
-            ctypes.windll.user32.GetSystemMetrics(1) // 2)
+    return (ctypes.windll.user32.GetSystemMetrics(0),
+            ctypes.windll.user32.GetSystemMetrics(1))
+
+
+def _bildschirm_mitte():
+    w, h = _bildschirm_groesse()
+    return (w // 2, h // 2)
+
+
+def modus_mousetest():
+    """Isolierter Selbsttest (15.08.2026, Finns Wunsch): bewegt den Cursor
+    sichtbar ueber den Bildschirm und tippt in Notepad — beantwortet die
+    Grundfrage, ob Maus/Tastatur auf diesem PC ueberhaupt steuerbar sind,
+    getrennt von MT5. Liest nach JEDEM Schritt die echte Cursor-Position:
+    stimmt sie mit dem Ziel, bewegt sich der OS-Cursor wirklich (auch wenn
+    AnyDesk/Parsec nur den lokalen Zeiger anzeigt)."""
+    res = {"ok": False, "moves": [], "notepad": None}
+    time.sleep(2.0)  # Haende weg
+    try:
+        W, H = _bildschirm_groesse()
+    except Exception as e:
+        print(json.dumps({"ok": False, "msg": f"Bildschirmgroesse nicht lesbar: {e}"}))
+        return
+    ziele = [(W // 2, H // 2), (60, 60), (W - 60, 60),
+             (W - 60, H - 60), (60, H - 60), (W // 2, H // 2)]
+    for tx, ty in ziele:
+        _maus_fahren(tx, ty)
+        time.sleep(0.6)
+        try:
+            ax, ay = _cursor_pos()
+        except Exception:
+            ax, ay = -1, -1
+        res["moves"].append({"ziel": [tx, ty], "ist": [ax, ay],
+                             "ok": abs(ax - tx) < 8 and abs(ay - ty) < 8})
+    res["cursor_bewegt"] = bool(res["moves"]) and all(m["ok"] for m in res["moves"])
+    # Notepad: Maus hin, Fokus, Zahlen tippen
+    try:
+        import subprocess
+        from pywinauto import Desktop
+        subprocess.Popen(["notepad.exe"])
+        time.sleep(1.8)
+        np = None
+        for w in Desktop(backend="uia").windows():
+            try:
+                if "notepad" in (w.window_text() or "").lower() \
+                        or w.element_info.class_name == "Notepad":
+                    np = w
+                    break
+            except Exception:
+                continue
+        if np:
+            np.set_focus()
+            time.sleep(0.4)
+            try:
+                r = np.rectangle()
+                _maus_fahren(r.mid_point().x, r.mid_point().y)
+            except Exception:
+                pass
+            np.type_keys("123456 Prophos Maus-Test OK", with_spaces=True, set_foreground=True)
+            res["notepad"] = "getippt: '123456 Prophos Maus-Test OK' — im Notepad sichtbar?"
+        else:
+            res["notepad"] = "Notepad-Fenster nicht gefunden"
+    except Exception as e:
+        res["notepad"] = f"Notepad-Test fehlgeschlagen: {type(e).__name__}: {e}"
+    treffer = sum(1 for m in res["moves"] if m["ok"])
+    res["ok"] = res["cursor_bewegt"]
+    res["msg"] = (f"Cursor-Bewegung: {treffer}/{len(res['moves'])} Ziele getroffen "
+                  f"({'OS-Cursor bewegt sich' if res['cursor_bewegt'] else 'OS-Cursor bewegt sich NICHT'}). "
+                  f"Notepad: {res['notepad']}")
+    print(json.dumps(res, ensure_ascii=False))
 
 
 def _maus_zentrieren():
@@ -523,6 +591,9 @@ def modus_inspect(cfg_path):
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
+        modus_mousetest()
+        return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "inspect":
         modus_inspect(sys.argv[2])
         return 0
