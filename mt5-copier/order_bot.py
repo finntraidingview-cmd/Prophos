@@ -273,10 +273,21 @@ def run(cfg_path, cmd):
         combos = dlg.descendants(control_type="ComboBox")
         edits = dlg.descendants(control_type="Edit")
         if not combos or len(edits) < 3:
+            # Selbst-Diagnose (15.08.2026): die Struktur des Dialogs gleich
+            # mitliefern — erspart den separaten inspect-Lauf am PC.
+            probe = []
+            try:
+                for c in dlg.descendants()[:30]:
+                    try:
+                        probe.append(f"{c.element_info.control_type}:"
+                                     f"{(c.window_text() or '')[:18]}")
+                    except Exception:
+                        continue
+            except Exception:
+                pass
             raise RuntimeError(
                 f"Dialog-Felder nicht ansprechbar (ComboBoxen: {len(combos)}, "
-                f"Edits: {len(edits)}) — einmal 'inspect' laufen lassen: "
-                f"python order_bot.py inspect <config> im start-panel-CMD.")
+                f"Edits: {len(edits)}). Struktur: {' | '.join(probe) or 'leer'}")
         felder = [("symbol", combos[0], symbol),
                   ("volumen", edits[0], f"{vol:g}"),
                   ("sl", edits[1], fmt_preis(sl, digits)),

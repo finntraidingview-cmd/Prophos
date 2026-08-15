@@ -16260,9 +16260,20 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              _pfSet('m5term', 'ok', '✓ Bereit — Bot übernimmt jetzt die Maus…')
-              if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
-                fe.textContent = `🤖 Bot übernimmt die Maus: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG von Maus und Tastatur, bis die Bestätigung kommt!` }
+              // Kalibrierungs-Countdown (15.08.2026, Finns Wunsch): fester
+              // Ausgangspunkt — Finn legt die Maus in die Bildschirmmitte,
+              // 3-2-1, dann übernimmt der Bot von dort.
+              _pfSet('m5term', 'ok', '✓ Bereit — Kalibrierung läuft…')
+              if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
+              for(let n = 3; n >= 1; n--){
+                if(fe) fe.textContent = `🖱 KALIBRIERUNG: Maus in die MITTE des Bildschirms legen und loslassen — Bot übernimmt in ${n}…`
+                await new Promise(res => setTimeout(res, 1000))
+              }
+              // Abbruch-Check nach dem Countdown: Modal zu = Order verworfen
+              if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
+                 || String(_pfPlanId) !== String(plan.id)) return
+              _pfSet('m5term', 'ok', '✓ Bot übernimmt jetzt die Maus…')
+              if(fe){ fe.textContent = `🤖 Bot steuert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG von Maus und Tastatur, bis die Bestätigung kommt!` }
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                   headers:{'Content-Type':'application/json'},
