@@ -119,6 +119,36 @@ def ensure_ea_source():
               f"kompiliert wird dann mit dem vorhandenen Stand.", flush=True)
 
 
+def ensure_bot_source():
+    """order_bot.py aus dem Repo holen/aktuell halten (15.08.2026, erster
+    Bot-Test: 'keine Antwort vom Bot' — die Datei lag gar nicht auf dem PC,
+    weil die .bat-Selbst-Update-Loops nur die Dateien verteilen, die sie
+    kennen). Gleiche Mechanik wie ensure_ea_source, laeuft bei jedem
+    Panel-Start — der VERSION-Bump restartet das Panel, also kommt jede
+    Bot-Aenderung automatisch an."""
+    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+           "main/mt5-copier/order_bot.py")
+    dst = os.path.join(HERE, "order_bot.py")
+    try:
+        import urllib.request
+        data = urllib.request.urlopen(url, timeout=15).read()
+        if len(data) < 500 or b"def run(" not in data:
+            return
+        old = b""
+        if os.path.exists(dst):
+            with open(dst, "rb") as f:
+                old = f.read()
+        if data != old:
+            tmp = dst + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, dst)
+            print(f"[panel] order_bot.py aus dem Repo aktualisiert ({len(data)} Bytes).", flush=True)
+    except Exception as e:
+        print(f"[panel] order_bot.py-Download fehlgeschlagen ({type(e).__name__}) — "
+              f"Order-Schritt meldet das klar, wenn er gebraucht wird.", flush=True)
+
+
 def _ensure_ea_compiled(fname, install_dir):
     """EA pro Terminal automatisch kompilieren (15.08.2026): MetaEditor liegt
     neben jeder terminal64.exe und kann per Kommandozeile kompilieren — der
@@ -1538,13 +1568,25 @@ class Handler(BaseHTTPRequestHandler):
                     "Fuer diese Instanz laeuft gerade schon eine Order — warten, "
                     "dann im Terminal pruefen."}, ensure_ascii=False))
             bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                # Nachladen statt raten (15.08.2026): die Datei fehlt auf PCs,
+                # deren Panel vor ihr installiert wurde.
+                ensure_bot_source()
+            if not os.path.exists(bot):
+                lock.release()
+                return self._send(200, json.dumps({"ok": False, "retry_ok": True, "msg":
+                    "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
+                    "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
             try:
                 p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
                                    capture_output=True, text=True, timeout=45)
                 line = (p.stdout or "").strip().splitlines()
-                res = json.loads(line[-1]) if line else {"ok": False, "retry_ok": False,
-                                                         "msg": "keine Antwort vom Bot"}
+                # Stumme Bots sind Diagnose-Killer: stderr-Ende mitgeben (z.B.
+                # Traceback/ImportError), sonst bleibt der Fehler anonym.
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "retry_ok": False,
+                    "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
             except subprocess.TimeoutExpired:
                 res = {"ok": False, "retry_ok": False,
                        "msg": "Order-Bot Timeout (45s) — im Terminal pruefen, "
@@ -1746,6 +1788,8 @@ def main():
     ensure_vorlage()
     # EA-Quelltext aktuell halten — kompiliert wird pro Terminal beim Kalt-Start
     ensure_ea_source()
+    # Order-Bot aktuell halten (die .bat-Loops kennen die Datei nicht)
+    ensure_bot_source()
     # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
     # 15.08.2026): der _remove_later-Thread ueberlebt das os._exit des Version-
     # Watchers nicht — beim naechsten Start hier nachziehen.
