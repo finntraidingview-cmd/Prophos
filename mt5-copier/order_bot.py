@@ -152,6 +152,40 @@ def _api_lesen(path, expected, symbol=None):
         mt5.shutdown()
 
 
+def _sltp_setzen(path, expected, ticket, sl, tp):
+    """SL/TP an eine BEREITS offene Position haengen (15.08.2026, Finns Timing-
+    Loesung): die Order wird per Klick zum echten Marktkurs eroeffnet, DANN liest
+    der Bot den tatsaechlichen Einstiegskurs und setzt SL/TP exakt darauf — keine
+    Drift durch die Sekunden zwischen Kurslesen und Klick. Das aendert nur SL/TP
+    einer manuell eroeffneten Position; wie die Position AUFGING (Handklick) bleibt
+    unveraendert."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return {"ok": False, "msg": "MetaTrader5-Paket fehlt."}
+    if not mt5.initialize(path=path):
+        return {"ok": False, "msg": f"Verbindung fuer SL/TP fehlgeschlagen: {mt5.last_error()}"}
+    try:
+        ai = mt5.account_info()
+        if ai is None or (expected and int(ai.login) != expected):
+            return {"ok": False, "msg": "Falsches/kein Konto beim SL/TP-Setzen."}
+        pos = None
+        for p in (mt5.positions_get() or []):
+            if int(p.ticket) == int(ticket):
+                pos = p
+                break
+        if pos is None:
+            return {"ok": False, "msg": "Position fuer SL/TP nicht gefunden."}
+        r = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "position": int(ticket),
+                            "symbol": pos.symbol, "sl": float(sl), "tp": float(tp)})
+        if r is None:
+            return {"ok": False, "msg": f"SL/TP order_send None: {mt5.last_error()}"}
+        return {"ok": r.retcode == mt5.TRADE_RETCODE_DONE, "retcode": int(r.retcode),
+                "msg": str(getattr(r, "comment", "") or "")}
+    finally:
+        mt5.shutdown()
+
+
 # ---------------------------------------------------------------------------
 # SICHTBARER Klick-Teil (pywinauto) — nur bei run/inspect importiert
 # ---------------------------------------------------------------------------
@@ -468,10 +502,8 @@ def run(cfg_path, cmd):
     lese = _api_lesen(path, expected, symbol=symbol)
     if "fehler" in lese:
         return {"ok": False, "retry_ok": True, "msg": lese["fehler"]}
-    ref = lese["ref_ask"] if kauf else lese["ref_bid"]
     digits = lese["digits"]
-    sl, tp = berechne_sl_tp(cmd["richtung"], ref, vol, lese["contract_size"],
-                            cmd["sl_usd"], cmd["tp_usd"], digits)
+    contract_size = lese["contract_size"]
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
 
     # Schritt-Spur (15.08.2026): jede Station vermerken — steht bei Erfolg UND
@@ -538,35 +570,30 @@ def run(cfg_path, cmd):
                 pass
         trail.append(f"Symbol {'gewaehlt' if gewaehlt else 'NICHT gewaehlt'}: {symbol}")
         time.sleep(0.3)
-        # Felder nach BESCHRIFTUNG zuordnen (Volumen/SL/TP) — der Positions-Index
-        # passte nicht (Preis im Volumen-Feld, TP leer). Fehlt ein Label, Fallback
-        # auf den alten Index. DIREKT setzen (set_edit_text) — cursor-unabhaengig.
-        fmap = _map_felder(dlg)
-        vol_el = fmap.get("volumen", edits[0])
-        sl_el = fmap.get("sl", edits[1])
-        tp_el = fmap.get("tp", edits[2])
-        for el, wert in ((vol_el, f"{vol:g}"),
-                         (sl_el, fmt_preis(sl, digits)),
-                         (tp_el, fmt_preis(tp, digits))):
+        # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
+        # Fill-Kurs (Finns Timing-Loesung: kein Vor-Ausrechnen aus einem Kurs,
+        # der bis zum Klick schon veraltet ist). Feld nach Beschriftung, sonst
+        # Index-Fallback. set_edit_text — cursor-unabhaengig.
+        vol_el = _map_felder(dlg).get("volumen", edits[0])
+        try:
+            r = vol_el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+        except Exception:
+            pass
+        gesetzt = False
+        for setter in ("set_edit_text", "set_text"):
             try:
-                r = el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+                getattr(vol_el, setter)(f"{vol:g}"); gesetzt = True; break
+            except Exception:
+                continue
+        if not gesetzt:
+            try:
+                vol_el.set_focus()
+                vol_el.type_keys("^a{DELETE}" + f"{vol:g}", with_spaces=False, set_foreground=False)
+                gesetzt = True
             except Exception:
                 pass
-            gesetzt = False
-            for setter in ("set_edit_text", "set_text"):
-                try:
-                    getattr(el, setter)(str(wert)); gesetzt = True; break
-                except Exception:
-                    continue
-            if not gesetzt:
-                try:
-                    el.set_focus()
-                    el.type_keys("^a{DELETE}" + str(wert), with_spaces=False, set_foreground=False)
-                    gesetzt = True
-                except Exception:
-                    pass
-            trail.append(f"{'gesetzt' if gesetzt else 'NICHT gesetzt'}: {wert}")
-            time.sleep(0.2)
+        trail.append(f"Volumen {'gesetzt' if gesetzt else 'NICHT gesetzt'}: {vol:g}")
+        time.sleep(0.2)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + " → ".join(trail) + "]"}
@@ -612,17 +639,32 @@ def run(cfg_path, cmd):
         p = finde_neue_position(vorher_tickets, nachher["positionen"], symbol,
                                 cmd["richtung"], vol)
         if p:
-            # Dialog schliessen, falls MT5 ihn nach der Ausfuehrung offen laesst
+            fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
+            trail.append(f"Position offen @ {fill}")
+            # SL/TP jetzt vom echten Fill-Kurs rechnen und an die Position haengen
+            sl, tp = berechne_sl_tp(cmd["richtung"], fill, vol, contract_size,
+                                    cmd["sl_usd"], cmd["tp_usd"], digits)
+            m = _sltp_setzen(path, expected, p["ticket"], sl, tp)
             try:
                 dlg.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
-                    "msg": "per Klick platziert und am Konto bestaetigt",
-                    "trail": " → ".join(trail),
-                    "symbol": symbol, "richtung": "buy" if kauf else "sell",
-                    "volumen": p["volumen"], "price": p["preis"],
-                    "sl": p["sl"] or sl, "tp": p["tp"] or tp, "ticket": p["ticket"]}
+            if m.get("ok"):
+                trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} gesetzt")
+                return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
+                        "msg": "per Klick platziert, SL/TP am echten Einstieg gesetzt",
+                        "trail": " → ".join(trail),
+                        "symbol": symbol, "richtung": "buy" if kauf else "sell",
+                        "volumen": p["volumen"], "price": fill,
+                        "sl": sl, "tp": tp, "ticket": p["ticket"]}
+            # Position IST offen, aber SL/TP fehlgeschlagen — kritisch: klar melden,
+            # NICHT erneut platzieren (retry_ok False), von Hand nachtragen.
+            return {"ok": False, "retry_ok": False,
+                    "msg": f"Position ist OFFEN @ {fill}, aber SL/TP setzen fehlgeschlagen "
+                           f"({m.get('msg')}) — im Terminal SL/TP SOFORT von Hand nachtragen!",
+                    "trail": " → ".join(trail), "symbol": symbol,
+                    "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
+                    "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
     # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
     # kam nicht an. Dialog-Text auf 'geschlossen' pruefen, sonst Struktur mitgeben.
     markt_zu = False
@@ -641,7 +683,7 @@ def run(cfg_path, cmd):
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto. "
                    "Spur: [" + " → ".join(trail) + "] · Dialog: " + _dialog_struktur(dlg),
-            "trail": " → ".join(trail), "sl": sl, "tp": tp, "price": ref}
+            "trail": " → ".join(trail)}
 
 
 def modus_inspect(cfg_path):
