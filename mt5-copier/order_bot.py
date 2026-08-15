@@ -340,6 +340,65 @@ def _ist_order_dialog(win):
         return False
 
 
+def _map_felder(dlg):
+    """Edit-Felder nach ihrer BESCHRIFTUNG zuordnen statt nach Position (Fund
+    15.08.2026: der Positions-Index passte nicht — Preis landete im Volumen-Feld,
+    TP blieb leer). Sucht zu den Labels 'Volumen'/'Stop Loss'/'Take Profit' das
+    naechste Edit-Feld rechts daneben in derselben Zeile. Rueckgabe-Dict; fehlt
+    ein Schluessel, faellt run() fuer den auf den Index zurueck."""
+    def _mitte_y(r):
+        return (r.top + r.bottom) / 2
+    labels = {}
+    try:
+        for t in dlg.descendants(control_type="Text"):
+            txt = (t.window_text() or "").strip().lower().rstrip(":").replace(" ", "")
+            r = t.rectangle()
+            if txt in ("volumen", "volume"):
+                labels["volumen"] = r
+            elif txt in ("stoploss", "s/l", "sl"):
+                labels["sl"] = r
+            elif txt in ("takeprofit", "t/p", "tp"):
+                labels["tp"] = r
+    except Exception:
+        pass
+    edits = []
+    try:
+        for e in dlg.descendants(control_type="Edit"):
+            try:
+                edits.append((e, e.rectangle()))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    out = {}
+    for key, lr in labels.items():
+        best, bestd = None, 1e9
+        for e, er in edits:
+            if er.left >= lr.left - 4 and abs(_mitte_y(er) - _mitte_y(lr)) < 22:
+                d = er.left - lr.left
+                if d < bestd:
+                    bestd, best = d, e
+        if best is not None:
+            out[key] = best
+    return out
+
+
+def _dialog_struktur(dlg):
+    """Kurzer Struktur-Dump fuer die Diagnose: Labels + Edit-Werte."""
+    teile = []
+    try:
+        for c in dlg.descendants():
+            try:
+                ct = c.element_info.control_type
+                if ct in ("Edit", "Text", "ComboBox", "Button"):
+                    teile.append(f"{ct}:{(c.window_text() or '')[:16]}")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return " | ".join(teile[:40])
+
+
 def _finde_order_dialog(hauptfenster, timeout=10.0):
     """Nach F9: den Order-Dialog suchen — als TOP-LEVEL-Fenster UND als
     Kind-Fenster des Terminals (Fund 15.08.2026: MT5 haengt den F9-Dialog als
@@ -479,12 +538,16 @@ def run(cfg_path, cmd):
                 pass
         trail.append(f"Symbol {'gewaehlt' if gewaehlt else 'NICHT gewaehlt'}: {symbol}")
         time.sleep(0.3)
-        # Volumen / SL / TP DIREKT setzen (set_edit_text sendet den Wert per
-        # Fenster-Nachricht ins Control — braucht keinen Cursor, kein Fokus-
-        # Klick, den Parsec verschluckt). type_keys nur als Fallback.
-        for el, wert in ((edits[0], f"{vol:g}"),
-                         (edits[1], fmt_preis(sl, digits)),
-                         (edits[2], fmt_preis(tp, digits))):
+        # Felder nach BESCHRIFTUNG zuordnen (Volumen/SL/TP) — der Positions-Index
+        # passte nicht (Preis im Volumen-Feld, TP leer). Fehlt ein Label, Fallback
+        # auf den alten Index. DIREKT setzen (set_edit_text) — cursor-unabhaengig.
+        fmap = _map_felder(dlg)
+        vol_el = fmap.get("volumen", edits[0])
+        sl_el = fmap.get("sl", edits[1])
+        tp_el = fmap.get("tp", edits[2])
+        for el, wert in ((vol_el, f"{vol:g}"),
+                         (sl_el, fmt_preis(sl, digits)),
+                         (tp_el, fmt_preis(tp, digits))):
             try:
                 r = el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
             except Exception:
@@ -560,11 +623,24 @@ def run(cfg_path, cmd):
                     "symbol": symbol, "richtung": "buy" if kauf else "sell",
                     "volumen": p["volumen"], "price": p["preis"],
                     "sl": p["sl"] or sl, "tp": p["tp"] or tp, "ticket": p["ticket"]}
-    # Kein neuer Positionsstand: der Knopf-Klick kam serverseitig nicht an. Die
-    # Spur zeigt, ob Felder/Knopf ueberhaupt griffen (Parsec/self-drawn-Dialog).
+    # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
+    # kam nicht an. Dialog-Text auf 'geschlossen' pruefen, sonst Struktur mitgeben.
+    markt_zu = False
+    try:
+        for t in dlg.descendants(control_type="Text"):
+            if "geschloss" in (t.window_text() or "").lower() or "closed" in (t.window_text() or "").lower():
+                markt_zu = True
+                break
+    except Exception:
+        pass
+    if markt_zu:
+        return {"ok": False, "retry_ok": True,
+                "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
+                       "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + " → ".join(trail) + "]",
+                "trail": " → ".join(trail)}
     return {"ok": False, "retry_ok": False,
-            "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto. Im "
-                   "Terminal nachsehen. Spur: [" + " → ".join(trail) + "]",
+            "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto. "
+                   "Spur: [" + " → ".join(trail) + "] · Dialog: " + _dialog_struktur(dlg),
             "trail": " → ".join(trail), "sl": sl, "tp": tp, "price": ref}
 
 
