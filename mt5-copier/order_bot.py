@@ -312,17 +312,13 @@ def run(cfg_path, cmd):
                             cmd["sl_usd"], cmd["tp_usd"], digits)
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
 
-    # 2a) SICHTBARER ANKER: Maus in die Bildschirmmitte fahren (Finns Wunsch).
-    # Bewegt sich der OS-Cursor NICHT, kann der Bot auch nicht klicken —
-    # dann sofort ehrlich abbrechen (retry_ok, nichts gesendet).
-    bewegt, _pos = _maus_zentrieren()
-    if not bewegt:
-        return {"ok": False, "retry_ok": True,
-                "msg": "Maus liess sich per Windows-API NICHT bewegen (SetCursorPos ohne "
-                       "Wirkung) — laeuft das Panel evtl. ohne Desktop-Rechte? Ohne echte "
-                       "Maussteuerung keine sichtbare Order."}
+    # 2a) Kosmetischer Anker: Maus in die Bildschirmmitte (kann ueber Parsec
+    # unsichtbar bleiben — Parsec sendet staendig die lokale Mausposition und
+    # ueberschreibt SetCursorPos; deshalb haengt die Ausfuehrung NICHT mehr am
+    # Cursor, s.u. Fund 15.08.2026: Fokus+Tastatur gingen immer, Maus nie).
+    _maus_zentrieren()
 
-    # 2b) SICHTBAR: ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
+    # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     w = _finde_terminal(expected)
     if w is None:
         return {"ok": False, "retry_ok": True,
@@ -358,44 +354,57 @@ def run(cfg_path, cmd):
             raise RuntimeError(
                 f"Dialog-Felder nicht ansprechbar (ComboBoxen: {len(combos)}, "
                 f"Edits: {len(edits)}). Struktur: {' | '.join(probe) or 'leer'}")
-        # Symbol im Dialog-Dropdown auswaehlen (das Symbol ist per symbol_select
-        # schon in der Marktuebersicht, also im Dropdown vorhanden): erst sauber
-        # per select() ueber den Combo-Text, sonst sichtbar anfahren + tippen.
+        # Symbol im Dropdown auswaehlen (per symbol_select schon in der
+        # Marktuebersicht). control-basiert (select) — cursor-unabhaengig, weil
+        # Parsec den Zeiger abfaengt. Maus-Animation nur noch Kosmetik.
         sym_combo = combos[0]
-        r = sym_combo.rectangle()
-        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+        try:
+            r = sym_combo.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+        except Exception:
+            pass
         gewaehlt = False
         try:
             for opt in sym_combo.texts():
                 if symbol.lower() in (opt or "").lower():
-                    sym_combo.select(opt)
-                    gewaehlt = True
-                    break
+                    sym_combo.select(opt); gewaehlt = True; break
         except Exception:
             pass
         if not gewaehlt:
             try:
-                sym_combo.click_input()
-                sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
-                sym_combo.type_keys("{ENTER}", set_foreground=False)
+                sym_combo.select(symbol); gewaehlt = True
             except Exception:
                 pass
         time.sleep(0.3)
-        # Volumen / SL / TP in die Edit-Felder
+        # Volumen / SL / TP DIREKT setzen (set_edit_text sendet den Wert per
+        # Fenster-Nachricht ins Control — braucht keinen Cursor, kein Fokus-
+        # Klick, den Parsec verschluckt). type_keys nur als Fallback.
         for el, wert in ((edits[0], f"{vol:g}"),
                          (edits[1], fmt_preis(sl, digits)),
                          (edits[2], fmt_preis(tp, digits))):
-            r = el.rectangle()
-            _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
-            el.click_input()
-            el.type_keys("^a{DELETE}", set_foreground=False)
-            el.type_keys(str(wert), with_spaces=False, set_foreground=False)
+            try:
+                r = el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+            except Exception:
+                pass
+            gesetzt = False
+            for setter in ("set_edit_text", "set_text"):
+                try:
+                    getattr(el, setter)(str(wert)); gesetzt = True; break
+                except Exception:
+                    continue
+            if not gesetzt:
+                try:
+                    el.set_focus()
+                    el.type_keys("^a{DELETE}" + str(wert), with_spaces=False, set_foreground=False)
+                except Exception:
+                    pass
             time.sleep(0.2)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e}"}
 
-    # 4) SICHTBAR: Maus auf den Buy/Sell-Knopf — der unumkehrbare Schritt
+    # 4) Buy/Sell-Knopf — der unumkehrbare Schritt. .click() sendet die
+    # Klick-Nachricht direkt ans Control (cursor-unabhaengig); click_input als
+    # Fallback. Bleibt ein Terminal-UI-Klick, KEINE Expert-/API-Order.
     muster = "buy" if kauf else "sell"
     knopf = None
     try:
@@ -409,9 +418,18 @@ def run(cfg_path, cmd):
     if knopf is None:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet."}
-    r = knopf.rectangle()
-    _maus_fahren(r.mid_point().x, r.mid_point().y)
-    knopf.click_input()
+    try:
+        r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y)
+    except Exception:
+        pass
+    try:
+        knopf.click()
+    except Exception:
+        try:
+            knopf.click_input()
+        except Exception as e:
+            return {"ok": False, "retry_ok": True,
+                    "msg": f"Buy/Sell-Knopf liess sich nicht ausloesen: {e}"}
 
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     ende = time.time() + 12
