@@ -122,10 +122,25 @@ def _api_lesen(path, expected, symbol=None):
                                       "sl": float(p.sl), "tp": float(p.tp),
                                       "preis": float(p.price_open)})
         if symbol:
+            # Symbol in die Marktuebersicht holen (15.08.2026, Finns Fund: nach
+            # frischem Login ist NASDAQ nie da). symbol_select(..., True) ist eine
+            # reine Watchlist-Aktion — KEINE Order, also keine Expert-Markierung.
+            # Damit taucht das Symbol danach auch im F9-Dialog-Dropdown auf.
+            if mt5.symbol_info(symbol) is None:
+                # Broker kennt diese Schreibweise gar nicht — Mapping pruefen.
+                return {"fehler": f"Broker kennt Symbol '{symbol}' nicht — Schreibweise im "
+                                  f"Symbol-Mapping der Copier-Karte pruefen (z.B. NAS100 vs NDX100)."}
             if not mt5.symbol_select(symbol, True):
-                return {"fehler": f"Symbol '{symbol}' nicht waehlbar (Schreibweise pruefen)."}
+                return {"fehler": f"Symbol '{symbol}' liess sich nicht zur Marktuebersicht "
+                                  f"hinzufuegen."}
             si = mt5.symbol_info(symbol)
             tick = mt5.symbol_info_tick(symbol)
+            # Nach frischem Hinzufuegen kann der erste Tick kurz fehlen — bis 3s
+            # nachfassen, bevor 'Markt zu' gemeldet wird.
+            _t0 = time.time()
+            while (tick is None or not (tick.ask and tick.bid)) and time.time() - _t0 < 3:
+                time.sleep(0.3)
+                tick = mt5.symbol_info_tick(symbol)
             if si is None or tick is None or not (tick.ask and tick.bid):
                 return {"fehler": f"Keine Kurse fuer '{symbol}' (Markt zu?)."}
             out["ref_ask"] = float(tick.ask)
@@ -343,11 +358,33 @@ def run(cfg_path, cmd):
             raise RuntimeError(
                 f"Dialog-Felder nicht ansprechbar (ComboBoxen: {len(combos)}, "
                 f"Edits: {len(edits)}). Struktur: {' | '.join(probe) or 'leer'}")
-        felder = [("symbol", combos[0], symbol),
-                  ("volumen", edits[0], f"{vol:g}"),
-                  ("sl", edits[1], fmt_preis(sl, digits)),
-                  ("tp", edits[2], fmt_preis(tp, digits))]
-        for _name, el, wert in felder:
+        # Symbol im Dialog-Dropdown auswaehlen (das Symbol ist per symbol_select
+        # schon in der Marktuebersicht, also im Dropdown vorhanden): erst sauber
+        # per select() ueber den Combo-Text, sonst sichtbar anfahren + tippen.
+        sym_combo = combos[0]
+        r = sym_combo.rectangle()
+        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+        gewaehlt = False
+        try:
+            for opt in sym_combo.texts():
+                if symbol.lower() in (opt or "").lower():
+                    sym_combo.select(opt)
+                    gewaehlt = True
+                    break
+        except Exception:
+            pass
+        if not gewaehlt:
+            try:
+                sym_combo.click_input()
+                sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
+                sym_combo.type_keys("{ENTER}", set_foreground=False)
+            except Exception:
+                pass
+        time.sleep(0.3)
+        # Volumen / SL / TP in die Edit-Felder
+        for el, wert in ((edits[0], f"{vol:g}"),
+                         (edits[1], fmt_preis(sl, digits)),
+                         (edits[2], fmt_preis(tp, digits))):
             r = el.rectangle()
             _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
             el.click_input()
