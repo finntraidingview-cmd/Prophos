@@ -3501,6 +3501,54 @@
     </section>
 
     <!-- Trade-Plan-Modal (Anlegen + Bearbeiten) -->
+    <!-- Order-Bot-Schritt (15.08.2026, Finns Ansage): kommt im MT5-Modus nach
+         „Weiter" aus dem Trade-Plan-Modal. Buy/Sell + TP/SL in $ + Lots — beim
+         „Starten" läuft der Trade-Start-Check, und bei Grün platziert der Bot
+         die Market-Order automatisch im Master-Terminal. -->
+    <div class="modal-bg" id="tpOrderModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Order einstellen</h3>
+          <button class="modal-x" id="tpOrderCancel" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0 0 12px;font-size:12.5px;color:var(--sub)" id="tp-order-info"></p>
+          <div class="field" style="margin-bottom:14px">
+            <label>Richtung</label>
+            <div style="display:flex;gap:8px">
+              <button type="button" id="tp-order-buy" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">BUY</button>
+              <button type="button" id="tp-order-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
+            </div>
+          </div>
+          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
+            <div class="field">
+              <label>Take Profit ($)</label>
+              <input type="number" class="input mono" id="tp-order-tp" min="0" step="10" placeholder="z.B. 300">
+            </div>
+            <div class="field">
+              <label>Stop Loss ($)</label>
+              <input type="number" class="input mono" id="tp-order-sl" min="0" step="10" placeholder="z.B. 100">
+            </div>
+            <div class="field">
+              <label>Lots</label>
+              <input type="number" class="input mono" id="tp-order-lots" min="0.01" step="0.01" placeholder="z.B. 1.00">
+            </div>
+            <div class="field">
+              <label>Symbol (Master)</label>
+              <input type="text" class="input mono" id="tp-order-symbol" placeholder="z.B. NDX100">
+            </div>
+          </div>
+          <div class="modal-actions" style="margin-top:16px">
+            <span class="modal-msg" id="tpOrderMsg"></span>
+            <button class="btn btn-ghost" id="tpOrderBack">Zurück</button>
+            <button class="btn btn-primary" id="tpOrderStart">Starten →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="tradePlanModal">
       <div class="modal" style="max-width:580px">
         <div class="modal-head">
@@ -15693,6 +15741,10 @@
   function _pfClose(){
     document.getElementById('tpPreflightModal')?.classList.remove('open')
     _pfPlanId = null
+    // Check zu = gemerkte Bot-Order verworfen (Review-Fund 15.08.2026): sonst
+    // würde ein späterer Check/Resume desselben Plans sie unerwartet abfeuern.
+    // Semantik: solange das Check-Popup offen ist, gilt die Order — zu heißt weg.
+    _tpPendingOrder = null
   }
   // WICHTIG: Der Check ändert den Plan-Status NICHT. Der Trade bleibt auf "Geplant" —
   // die bestehende Auto-Erkennung (atCheck) setzt ihn selbst auf "Offen", sobald die
@@ -16157,8 +16209,18 @@
         // (Abbruch bei Modal-Schließen oder Plan-Wechsel), Timeout 170s.
         _pfSet('m5term', 'warn', '⏳ Terminal startet, Login automatisch…')
         const t0 = Date.now()
+        let _pfTickBusy = false
         _pfMt5Timer = setInterval(async () => {
+          // Überlappungs-Riegel (Review-Fund 15.08.2026): dauert ein Tick länger
+          // als 3s (langsamer instances-Fetch), darf kein zweiter parallel laufen —
+          // sonst schließt der eine das Modal, während der andere die Order feuert.
+          if(_pfTickBusy) return
+          _pfTickBusy = true
+          try{
           if(!document.getElementById('tpPreflightModal')?.classList.contains('open') || String(_pfPlanId) !== String(plan.id)){
+            // Abbruch heißt auch: gemerkte Bot-Order verwerfen — sonst würde ein
+            // späterer Check desselben Plans sie unerwartet abfeuern.
+            _tpPendingOrder = null
             _pfMt5StopTimer(); return
           }
           const d2 = await window.mtcApi('instances')
@@ -16178,7 +16240,7 @@
               _pfSet('m5term', 'warn', `⏳ Terminal wird ins richtige Konto gezwungen… (${sec}s)`)
             } else if(sendCreds){
               _pfMt5StopTimer()
-              _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — „Speichern & Starten" erneut klicken: der Neustart loggt automatisch ins richtige Konto ein. Hilft das nicht: im Terminal Datei → „Bei Handelskonto anmelden".`)
+              _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — „Weiter" → „Starten" erneut klicken: der Neustart loggt automatisch ins richtige Konto ein. Hilft das nicht: im Terminal Datei → „Bei Handelskonto anmelden".`)
             } else {
               _pfMt5StopTimer()
               _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — im Terminal: Datei → „Bei Handelskonto anmelden" auf <span class="mono">${escapeHtml(String(route.masterLogin))}</span> wechseln. Tipp: Zugangsdaten am Prophos-Account hinterlegen, dann erzwingt der Start das künftig automatisch.`)
@@ -16187,8 +16249,50 @@
           }
           if(inst2 && inst2.alive && !note){
             _pfMt5StopTimer()
-            _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
             const fe = document.getElementById('pf-final')
+            // Bot-Order gemerkt? Dann übernimmt jetzt der Bot (15.08.2026, Finns
+            // Ansage): Check grün → Market-Order mit TP/SL/Lots automatisch rein.
+            const po = _tpPendingOrder
+            if(po && String(po.planId) === String(plan.id)){
+              _tpPendingOrder = null   // one-shot — nie doppelt abfeuern
+              // Letzter Blick VOR dem Abschuss (Review-Fund 15.08.2026): der Tick
+              // hat gerade auf die instances-Antwort gewartet — hat der User das
+              // Modal währenddessen geschlossen, wird NICHT gefeuert.
+              if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
+                 || String(_pfPlanId) !== String(plan.id)) return
+              _pfSet('m5term', 'ok', '✓ Bereit — Bot platziert die Order…')
+              if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
+                fe.textContent = `🤖 ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} geht raus (TP $${po.tp_usd} · SL $${po.sl_usd})…` }
+              try{
+                const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung,
+                                         volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                if(r && r.ok){
+                  if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price} · SL ${r.sl} · TP ${r.tp}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
+                  setTimeout(() => {
+                    if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+                       && String(_pfPlanId) === String(plan.id)) _pfClose()
+                  }, 1800)
+                } else {
+                  // retry_ok kommt vom Bot: nur bei eindeutig ABGELEHNTEN Retcodes
+                  // zum erneuten Versuch raten — Timeout/unklar heißt: erst ins
+                  // Terminal schauen, sonst droht die Doppel-Order (Review-Blocker).
+                  const retryOk = !!(r && r.retry_ok)
+                  _pfSet('m5term', 'err', 'Order fehlgeschlagen: ' + escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort')))
+                  if(fe){ fe.className = 'pf-final err'
+                    fe.textContent = retryOk
+                      ? '✗ Order abgelehnt — Meldung oben. Erneut „Weiter" → „Starten".'
+                      : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
+                }
+              }catch(e){
+                _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))
+                if(fe){ fe.className = 'pf-final err'
+                  fe.textContent = '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
+              }
+              return
+            }
+            _pfSet('m5term', 'ok', '✓ Bereit — jetzt im Terminal traden.')
             if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
               fe.textContent = '✓ Alles bereit — im MT5-Terminal traden. Die Auto-Erkennung übernimmt beim Einstieg.' }
             // Alles grün → Popup schließt sich von selbst (Finns Ansage 15.08.2026;
@@ -16221,6 +16325,7 @@
             const hint = sec > 50 ? ' — hängt es? Im Terminal nachsehen, ggf. Login-Fenster einmal mit OK bestätigen.' : ''
             _pfSet('m5term', 'warn', `⏳ ${note ? escapeHtml(note) + ' · ' : ''}Terminal startet, Login automatisch… (${sec}s)${escapeHtml(hint)}`)
           }
+          }finally{ _pfTickBusy = false }
         }, 3000)
       }
     }
@@ -16329,6 +16434,10 @@
   function tpRouteUpdateSeg(){
     document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5')
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
+    // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
+    // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
+    const sb = document.getElementById('tradePlanSaveStart')
+    if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →' : 'Speichern & Starten →'
     // Bei fixem MT5-Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren
     const fixed = _tpRoute === 'mt5'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
@@ -16355,6 +16464,86 @@
       if(links[hLogin] != null) _tpMt5HedgeAccId = String(links[hLogin])
     }catch(_){}
   }
+
+  /* ── Order-Bot-Schritt (15.08.2026, Finns Ansage) ──
+   * Im MT5-Modus wird „Speichern & Starten" zu „Weiter": erst Plan speichern,
+   * dann dieses Popup (Buy/Sell, TP/SL in $, Lots, Symbol). „Starten" merkt
+   * sich die Order und lässt den Trade-Start-Check laufen — bei komplett Grün
+   * platziert der Bot die Market-Order automatisch im Master-Terminal. */
+  let _tpPendingOrder = null   // {planId, symbol, richtung, volumen, sl_usd, tp_usd}
+  let _tpOrderPlanId = null
+  let _tpOrderDir = null
+
+  function tpOrderDirSet(dir){
+    _tpOrderDir = dir
+    const b = document.getElementById('tp-order-buy')
+    const s = document.getElementById('tp-order-sell')
+    if(b){ b.style.background = dir === 'buy' ? 'rgba(18,183,106,.12)' : ''
+           b.style.borderColor = dir === 'buy' ? '#12B76A' : ''
+           b.style.color = dir === 'buy' ? '#0E9757' : '' }
+    if(s){ s.style.background = dir === 'sell' ? 'rgba(240,68,56,.10)' : ''
+           s.style.borderColor = dir === 'sell' ? '#F04438' : ''
+           s.style.color = dir === 'sell' ? '#D92D20' : '' }
+  }
+
+  async function openTpOrderModal(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan) return
+    _tpOrderPlanId = planId
+    _tpPendingOrder = null
+    tpOrderDirSet(null)
+    const info = document.getElementById('tp-order-info')
+    if(info) info.textContent = `🖥 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — der Bot platziert die Order im Master, sobald der Check grün ist.`
+    document.getElementById('tp-order-tp').value = ''
+    document.getElementById('tp-order-sl').value = ''
+    document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
+    const msg = document.getElementById('tpOrderMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    const symEl = document.getElementById('tp-order-symbol')
+    symEl.value = ''
+    document.getElementById('tpOrderModal').classList.add('open')
+    // Symbol-Vorbefüllung: Master-Symbole aus dem Mapping der verlinkten Instanz,
+    // Firmen-Preset gewinnt bei mehreren (z.B. NDX100 bei FundedNext).
+    try{
+      const d = await window.mtcApi('instances')
+      const route = mt5RouteResolve(plan, (d && d.instances) || [])
+      const keys = Object.keys((route && route.inst.symbol_map) || {})
+      // Guard auf DENSELBEN Plan (Review-Fund 15.08.2026): eine langsame Antwort
+      // eines früheren Opens darf das Feld eines neuen Plans nicht befüllen.
+      if(keys.length && document.getElementById('tpOrderModal').classList.contains('open')
+         && String(_tpOrderPlanId) === String(planId) && !symEl.value){
+        const pref = (typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
+        symEl.value = keys.find(k => pref.includes(k)) || keys[0]
+      }
+    }catch(_){}
+  }
+
+  document.getElementById('tp-order-buy')?.addEventListener('click', () => tpOrderDirSet('buy'))
+  document.getElementById('tp-order-sell')?.addEventListener('click', () => tpOrderDirSet('sell'))
+  document.getElementById('tpOrderCancel')?.addEventListener('click', () => {
+    document.getElementById('tpOrderModal').classList.remove('open')
+  })
+  document.getElementById('tpOrderBack')?.addEventListener('click', () => {
+    document.getElementById('tpOrderModal').classList.remove('open')
+    if(_tpOrderPlanId) openTradePlanModal(_tpOrderPlanId)
+  })
+  document.getElementById('tpOrderStart')?.addEventListener('click', () => {
+    const msg = document.getElementById('tpOrderMsg')
+    const err = t => { if(msg){ msg.textContent = t; msg.className = 'modal-msg err' } }
+    const plan = tradePlans.find(x => String(x.id) === String(_tpOrderPlanId))
+    if(!plan) return err('Plan nicht gefunden.')
+    const symbol = document.getElementById('tp-order-symbol').value.trim()
+    const tp = parseFloat(document.getElementById('tp-order-tp').value)
+    const sl = parseFloat(document.getElementById('tp-order-sl').value)
+    const lots = parseFloat(document.getElementById('tp-order-lots').value)
+    if(!_tpOrderDir) return err('Richtung wählen — Buy oder Sell.')
+    if(!symbol) return err('Symbol angeben.')
+    if(!(tp > 0) || !(sl > 0)) return err('Take Profit und Stop Loss in $ angeben.')
+    if(!(lots > 0)) return err('Lot-Anzahl angeben.')
+    _tpPendingOrder = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir,
+                        volumen: lots, sl_usd: sl, tp_usd: tp }
+    document.getElementById('tpOrderModal').classList.remove('open')
+    tpPreflightMt5(plan)
+  })
 
   function openTradePlanModal(editId){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
@@ -17424,7 +17613,13 @@
       renderTradePlans()
       closeTradePlanModal()
       if(startAfter && savedPlanId){
-        tpPreflightAndStart(savedPlanId)
+        // MT5-Weg (15.08.2026): „Weiter" führt erst in den Order-Bot-Schritt —
+        // der startet den Check selbst. Duplikum/Mirror wie gehabt direkt.
+        if(_tpRoute === 'mt5' && typeof openTpOrderModal === 'function'){
+          openTpOrderModal(savedPlanId)
+        } else {
+          tpPreflightAndStart(savedPlanId)
+        }
       }
     }catch(e){
       msg('Fehler: ' + (e.message || e), 'err')

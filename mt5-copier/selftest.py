@@ -359,6 +359,29 @@ def main():
                 and "Password" not in sup and "Expert=ProphosHedgeReader" in sup
                 and "ExpertParameters=prophos-ftmo1.set" in sup))
 
+    # ── Order-Bot: reine Rechenlogik (15.08.2026) ──────────────────────────
+    import order_bot
+
+    def chk(name, cond):
+        results.append(cond)
+        print(("✓ " if cond else "✗ ") + name)
+        return cond
+
+    sl, tp = order_bot.berechne_sl_tp("buy", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+    chk("ORDER-BOT: BUY 0.2 @ 20000, SL $100/TP $300 → 19500 / 21500",
+        sl == 19500.0 and tp == 21500.0)
+    sl, tp = order_bot.berechne_sl_tp("sell", 20000.0, 1.0, 10.0, sl_usd=100, tp_usd=300)
+    chk("ORDER-BOT: SELL, Kontraktgroesse 10 → SL 20010 / TP 19970 (gespiegelt)",
+        sl == 20010.0 and tp == 19970.0)
+    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                 "volumen": 0.2, "sl_usd": 100, "tp_usd": 300})
+    chk("ORDER-BOT: vollstaendiger Befehl → keine Fehler", f == [])
+    f = order_bot.pruefe_befehl({"symbol": "", "richtung": "kaufen", "volumen": 0})
+    chk("ORDER-BOT: kaputter Befehl → alle 5 Fehler gemeldet", len(f) == 5)
+    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                 "volumen": float("nan"), "sl_usd": 100, "tp_usd": 300})
+    chk("ORDER-BOT: NaN-Volumen wird abgelehnt (isfinite-Wachter)", len(f) == 1)
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

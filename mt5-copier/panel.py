@@ -479,6 +479,12 @@ def prov_start(name, login, password, server, owner=None, display=None):
 HEAL_ACTIVE = set()
 HEAL_LOCK = threading.Lock()
 
+# Ein Order-Bot pro Instanz zur Zeit (Review-Fund 15.08.2026): der
+# ThreadingHTTPServer bedient POSTs parallel — zwei gleichzeitige
+# master-order-Aufrufe wuerden sonst zwei Orders platzieren.
+MASTER_ORDER_LOCKS = {}
+MASTER_ORDER_GUARD = threading.Lock()
+
 
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
@@ -1497,6 +1503,59 @@ class Handler(BaseHTTPRequestHandler):
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:
             return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{fname}' unbekannt"}))
+
+        if u.path == "/api/master-order":
+            # Order-Bot (15.08.2026, Finns Ansage): platziert die Master-Order per
+            # MetaTrader5-API als kurzlebiger Subprozess. Kommt NUR nach gruenem
+            # Trade-Start-Check aus dem Preflight — hier trotzdem eigene Riegel:
+            # Copier muss frische Daten liefern (sonst bliebe die Order UNGEHEDGET),
+            # und der Bot selbst prueft den Login nochmal vor dem order_send.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            cmd = {"symbol": str(body.get("symbol") or "").strip(),
+                   "richtung": str(body.get("richtung") or "").lower(),
+                   "volumen": body.get("volumen"),
+                   "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd")}
+            if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
+                return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+            age = None
+            try:
+                age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+            except (ValueError, TypeError):
+                pass
+            if not (st.get("running") and age is not None and age <= 15):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Copier liefert keine frischen Daten — die Order wuerde UNGEHEDGET "
+                    "bleiben. Erst den Trade-Start-Check gruen bekommen."}, ensure_ascii=False))
+            with MASTER_ORDER_GUARD:
+                lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
+            if not lock.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
+                    "Fuer diese Instanz laeuft gerade schon eine Order — warten, "
+                    "dann im Terminal pruefen."}, ensure_ascii=False))
+            bot = os.path.join(HERE, "order_bot.py")
+            try:
+                p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
+                                    json.dumps(cmd)],
+                                   capture_output=True, text=True, timeout=45)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {"ok": False, "retry_ok": False,
+                                                         "msg": "keine Antwort vom Bot"}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "retry_ok": False,
+                       "msg": "Order-Bot Timeout (45s) — im Terminal pruefen, "
+                              "ob die Order trotzdem platziert wurde!"}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "retry_ok": False, "msg": f"Order-Bot-Start fehlgeschlagen: {e}"}
+            finally:
+                lock.release()
+            print(f"[panel] {fname}: Master-Order {cmd['richtung']} {cmd['volumen']} "
+                  f"{cmd['symbol']} → {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/start-terminal":
             # Optionale Zugangsdaten im Body (aus Prophos/Supabase): erzwingen den

@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-16.5"
+APP_BUILD = "2026-08-16.6"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -273,11 +273,16 @@ def copier_proxy(path):
     origin = request.headers.get("Origin")
     if origin: h["Origin"] = origin
     try:
+        # master-order braucht mehr Luft als der Rest (Review-Blocker 15.08.2026):
+        # der Order-Bot darf bis 45s laufen — ein 25s-Proxy-Abbruch haette dem
+        # Frontend 'keine Order' gemeldet, waehrend die Order Sekunden spaeter
+        # doch platziert wird (Doppel-Order-Pfad).
+        _tmo = 60 if path == "master-order" else 25
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,
             json=request.get_json(silent=True) if request.method == "POST" else None,
-            headers=h, timeout=25)
+            headers=h, timeout=_tmo)
         return Response(r.content, status=r.status_code, content_type="application/json")
     except Exception as e:
         return jsonify({"ok": False, "copier_offline": True,
