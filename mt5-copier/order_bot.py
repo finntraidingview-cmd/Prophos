@@ -312,11 +312,9 @@ def run(cfg_path, cmd):
                             cmd["sl_usd"], cmd["tp_usd"], digits)
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
 
-    # 2a) Kosmetischer Anker: Maus in die Bildschirmmitte (kann ueber Parsec
-    # unsichtbar bleiben — Parsec sendet staendig die lokale Mausposition und
-    # ueberschreibt SetCursorPos; deshalb haengt die Ausfuehrung NICHT mehr am
-    # Cursor, s.u. Fund 15.08.2026: Fokus+Tastatur gingen immer, Maus nie).
-    _maus_zentrieren()
+    # Schritt-Spur (15.08.2026): jede Station vermerken — steht bei Erfolg UND
+    # Fehler in der Meldung, damit Finn/ich sofort sieht, wo der Bot steht.
+    trail = []
 
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     w = _finde_terminal(expected)
@@ -327,14 +325,16 @@ def run(cfg_path, cmd):
     if str(expected) not in (w.window_text() or ""):
         return {"ok": False, "retry_ok": True,
                 "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck."}
+    trail.append("Terminal betreten")
 
-    # 3) SICHTBAR: F9 -> Dialog -> Felder eintippen (Symbol zuerst = 'ins Asset gehen')
+    # 3) F9 -> Dialog -> Felder direkt setzen (cursor-unabhaengig, s.o. Parsec)
     w.type_keys("{F9}")
     time.sleep(0.9)
     dlg = _finde_order_dialog(w)
     if dlg is None:
         return {"ok": False, "retry_ok": True,
-                "msg": "Order-Dialog (F9) nicht gefunden — Abbruch, nichts gesendet."}
+                "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + " → ".join(trail) + "]"}
+    trail.append("F9-Dialog offen")
     try:
         combos = dlg.descendants(control_type="ComboBox")
         edits = dlg.descendants(control_type="Edit")
@@ -374,6 +374,7 @@ def run(cfg_path, cmd):
                 sym_combo.select(symbol); gewaehlt = True
             except Exception:
                 pass
+        trail.append(f"Symbol {'gewaehlt' if gewaehlt else 'NICHT gewaehlt'}: {symbol}")
         time.sleep(0.3)
         # Volumen / SL / TP DIREKT setzen (set_edit_text sendet den Wert per
         # Fenster-Nachricht ins Control — braucht keinen Cursor, kein Fokus-
@@ -395,12 +396,14 @@ def run(cfg_path, cmd):
                 try:
                     el.set_focus()
                     el.type_keys("^a{DELETE}" + str(wert), with_spaces=False, set_foreground=False)
+                    gesetzt = True
                 except Exception:
                     pass
+            trail.append(f"{'gesetzt' if gesetzt else 'NICHT gesetzt'}: {wert}")
             time.sleep(0.2)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
-                "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e}"}
+                "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + " → ".join(trail) + "]"}
 
     # 4) Buy/Sell-Knopf — der unumkehrbare Schritt. .click() sendet die
     # Klick-Nachricht direkt ans Control (cursor-unabhaengig); click_input als
@@ -422,14 +425,16 @@ def run(cfg_path, cmd):
         r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y)
     except Exception:
         pass
+    klick_weg = None
     try:
-        knopf.click()
+        knopf.click(); klick_weg = ".click()"
     except Exception:
         try:
-            knopf.click_input()
+            knopf.click_input(); klick_weg = "click_input"
         except Exception as e:
             return {"ok": False, "retry_ok": True,
-                    "msg": f"Buy/Sell-Knopf liess sich nicht ausloesen: {e}"}
+                    "msg": f"Buy/Sell-Knopf liess sich nicht ausloesen: {e} [" + " → ".join(trail) + "]"}
+    trail.append(f"{muster}-Knopf ausgeloest ({klick_weg})")
 
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     ende = time.time() + 12
@@ -448,14 +453,16 @@ def run(cfg_path, cmd):
                 pass
             return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                     "msg": "per Klick platziert und am Konto bestaetigt",
+                    "trail": " → ".join(trail),
                     "symbol": symbol, "richtung": "buy" if kauf else "sell",
                     "volumen": p["volumen"], "price": p["preis"],
                     "sl": p["sl"] or sl, "tp": p["tp"] or tp, "ticket": p["ticket"]}
+    # Kein neuer Positionsstand: der Knopf-Klick kam serverseitig nicht an. Die
+    # Spur zeigt, ob Felder/Knopf ueberhaupt griffen (Parsec/self-drawn-Dialog).
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto. Im "
-                   "Terminal nachsehen (Dialog offen? Order abgelehnt? Requote?). "
-                   "NICHT blind wiederholen.",
-            "sl": sl, "tp": tp, "price": ref}
+                   "Terminal nachsehen. Spur: [" + " → ".join(trail) + "]",
+            "trail": " → ".join(trail), "sl": sl, "tp": tp, "price": ref}
 
 
 def modus_inspect(cfg_path):

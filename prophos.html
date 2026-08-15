@@ -16260,20 +16260,21 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              // Countdown (15.08.2026, Finns Wunsch): der Bot fährt die Maus
-              // gleich SELBST sichtbar in die Bildschirmmitte (fester Anker) —
-              // Finn muss nichts treffen, nur die Hände weglassen.
-              _pfSet('m5term', 'ok', '✓ Bereit — gleich übernimmt der Bot…')
+              // Countdown (15.08.2026): über Parsec kann der Bot den Cursor NICHT
+              // sichtbar bewegen (Parsec sendet ständig die lokale Mausposition) —
+              // er füllt den Order-Dialog deshalb DIREKT aus, ohne Mauszeiger.
+              // Ehrlicher Text: keine Maus-Bewegung versprechen.
+              _pfSet('m5term', 'ok', '✓ Bereit — Bot füllt gleich den Order-Dialog…')
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
               for(let n = 3; n >= 1; n--){
-                if(fe) fe.textContent = `🖱 HÄNDE WEG! Der Bot fährt die Maus gleich selbst in die Bildschirm-MITTE und übernimmt von dort — in ${n}…`
+                if(fe) fe.textContent = `⌨ HÄNDE WEG von Maus und Tastatur! Der Bot füllt den Order-Dialog gleich direkt aus (kein sichtbarer Mauszeiger über Parsec) — in ${n}…`
                 await new Promise(res => setTimeout(res, 1000))
               }
               // Abbruch-Check nach dem Countdown: Modal zu = Order verworfen
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              _pfSet('m5term', 'ok', '✓ Bot übernimmt jetzt die Maus…')
-              if(fe){ fe.textContent = `🤖 Bot steuert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG von Maus und Tastatur, bis die Bestätigung kommt!` }
+              _pfSet('m5term', 'ok', '✓ Bot füllt den Order-Dialog…')
+              if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG, bis die Bestätigung kommt!` }
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                   headers:{'Content-Type':'application/json'},
