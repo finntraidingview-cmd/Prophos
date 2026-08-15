@@ -16260,9 +16260,9 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              _pfSet('m5term', 'ok', '✓ Bereit — Bot platziert die Order…')
+              _pfSet('m5term', 'ok', '✓ Bereit — Bot übernimmt jetzt die Maus…')
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'
-                fe.textContent = `🤖 ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} geht raus (TP $${po.tp_usd} · SL $${po.sl_usd})…` }
+                fe.textContent = `🤖 Bot übernimmt die Maus: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG von Maus und Tastatur, bis die Bestätigung kommt!` }
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                   headers:{'Content-Type':'application/json'},

@@ -149,6 +149,29 @@ def ensure_bot_source():
               f"Order-Schritt meldet das klar, wenn er gebraucht wird.", flush=True)
 
 
+def ensure_pywinauto():
+    """Klick-Bot-Abhaengigkeit selbst installieren (15.08.2026, Finns Ansage:
+    die Order muss per SICHTBAREM Mausklick laufen — pywinauto steuert Maus und
+    Dialog). Best effort beim Panel-Start, damit kein Handgriff noetig ist."""
+    if os.name != "nt":
+        return
+    try:
+        import pywinauto  # noqa: F401
+        return
+    except ImportError:
+        pass
+    print("[panel] pywinauto fehlt — installiere einmalig (pip, kann ~1 min dauern)...", flush=True)
+    try:
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "pywinauto"],
+                           capture_output=True, text=True, timeout=300)
+        print("[panel] pywinauto installiert." if r.returncode == 0 else
+              f"[panel] pywinauto-Installation fehlgeschlagen — von Hand: pip install pywinauto "
+              f"({(r.stderr or '').strip()[-160:]})", flush=True)
+    except Exception as e:
+        print(f"[panel] pywinauto-Installation fehlgeschlagen ({type(e).__name__}) — "
+              f"von Hand: pip install pywinauto", flush=True)
+
+
 def _ensure_ea_compiled(fname, install_dir):
     """EA pro Terminal automatisch kompilieren (15.08.2026): MetaEditor liegt
     neben jeder terminal64.exe und kann per Kommandozeile kompilieren — der
@@ -1790,6 +1813,8 @@ def main():
     ensure_ea_source()
     # Order-Bot aktuell halten (die .bat-Loops kennen die Datei nicht)
     ensure_bot_source()
+    # Klick-Bot-Abhaengigkeit (Maus-Steuerung) einmalig installieren
+    threading.Thread(target=ensure_pywinauto, daemon=True).start()
     # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
     # 15.08.2026): der _remove_later-Thread ueberlebt das os._exit des Version-
     # Watchers nicht — beim naechsten Start hier nachziehen.
