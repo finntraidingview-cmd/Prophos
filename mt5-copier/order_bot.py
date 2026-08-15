@@ -159,23 +159,32 @@ def _maus_fahren(x, y, schritte=16):
         time.sleep(0.02)
 
 
-def _taskleiste_klick(login):
-    """Schritt 1 der Choreografie: Maus in die Taskleiste, Terminal-Tab klicken.
-    Klappt das nicht (Tab-Gruppierung o.ae.), faellt der Lauf auf set_focus
-    zurueck — die Order-Schritte danach sind identisch."""
-    from pywinauto import Desktop
+def _fenster_betreten(w):
+    """Schritt 1 der Choreografie: sichtbar INS Terminal gehen (15.08.2026,
+    Finns Fix: NICHT ueber die Taskleiste — deren Tabs wandern je nach Sitzung.
+    Das Terminal ist beim Trade-Start ohnehin schon geoeffnet und nach vorn
+    geholt): Fenster wiederherstellen, Maus sichtbar auf die Titelzeile fahren
+    und hineinklicken. Das Ziel kommt aus dem Fenster-Rechteck selbst —
+    aufloesungs- und tab-unabhaengig, keine festen Pixel."""
     try:
-        tray = Desktop(backend="uia").window(class_name="Shell_TrayWnd")
-        for b in tray.descendants(control_type="Button"):
-            if str(login) in (b.window_text() or ""):
-                r = b.rectangle()
-                _maus_fahren(r.mid_point().x, r.mid_point().y)
-                b.click_input()
-                time.sleep(0.8)
-                return True
+        if w.is_minimized():
+            w.restore()
+            time.sleep(0.4)
     except Exception:
         pass
-    return False
+    w.set_focus()
+    time.sleep(0.4)
+    try:
+        from pywinauto import mouse
+        r = w.rectangle()
+        # linkes Drittel der Titelzeile — weit weg von Minimieren/Schliessen
+        x = int(r.left + (r.right - r.left) * 0.35)
+        y = int(r.top + 14)
+        _maus_fahren(x, y)
+        mouse.click(coords=(x, y))
+        time.sleep(0.3)
+    except Exception:
+        pass  # Fokus steht schon — der Klick ist der sichtbare Uebernahme-Moment
 
 
 def _finde_terminal(login):
@@ -243,20 +252,12 @@ def run(cfg_path, cmd):
                             cmd["sl_usd"], cmd["tp_usd"], digits)
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
 
-    # 2) SICHTBAR: Taskleiste -> Fenster -> Guard
-    if not _taskleiste_klick(expected):
-        w0 = _finde_terminal(expected)
-        if w0 is None:
-            return {"ok": False, "retry_ok": True,
-                    "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden."}
-        w0.set_focus()
-        time.sleep(0.6)
+    # 2) SICHTBAR: ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     w = _finde_terminal(expected)
     if w is None:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden."}
-    w.set_focus()
-    time.sleep(0.5)
+    _fenster_betreten(w)
     if str(expected) not in (w.window_text() or ""):
         return {"ok": False, "retry_ok": True,
                 "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Tastendruck."}
