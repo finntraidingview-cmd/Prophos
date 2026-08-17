@@ -799,6 +799,10 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
                    and r.top >= maus_grenze)
         if maus_ok:
             _maus_fahren(mx, my, schritte=8)
+            # Finns Reihenfolge (18.08.2026, manuell vorgemacht): erst die
+            # Zeile ANKLICKEN (markieren), dann oeffnen
+            _klick_absolut(mx, my)
+            time.sleep(0.2)
 
         def _weg_doppel():
             if not maus_ok or not _klick_absolut(mx, my, doppel=True):
@@ -825,11 +829,13 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
 
-        for name, weg in (("SendInput-Doppelklick", _weg_doppel),
+        # Reihenfolge nach Finns Hand-Weg: Rechtsklick-Menue zuerst, dann
+        # Doppelklick (oeffnet denselben Dialog), dann die synthetischen Wege
+        for name, weg in (("Rechtsklick-Menue", _weg_rechtsklick),
+                          ("SendInput-Doppelklick", _weg_doppel),
                           ("invoke", _weg_invoke),
                           ("DoDefaultAction", _weg_dodefault),
-                          ("Shift-F10-Menue", _weg_menue),
-                          ("Rechtsklick-Menue", _weg_rechtsklick)):
+                          ("Shift-F10-Menue", _weg_menue)):
             try:
                 weg()
             except Exception:
@@ -878,14 +884,38 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
         trail.append("Kontostand-Anker " + ("gefunden" if anker is not None else "NICHT gefunden"))
         if anker is not None and maus_grenze is not None:
             gx = anker.left + 80
+            menue_notiert = False
             for i, dy in enumerate((10, 29, 48), start=1):
                 gy = anker.top - dy
                 if gy < maus_grenze:
                     break
                 _maus_fahren(gx, gy, schritte=6)
-                if not _klick_absolut(gx, gy, doppel=True):
-                    continue
-                d = _finde_aendern_dialog(w, timeout=1.5)
+                # Finns Hand-Weg (18.08.2026, Schritt fuer Schritt vorgemacht):
+                # Zeile ANKLICKEN (markieren) -> RECHTSKLICK -> 'Aendern oder
+                # loeschen' -> Dialog. Der Menuepunkt wird NUR ueber seinen
+                # UIA-Text geklickt — blind mit Pfeiltasten waere 'Position
+                # schliessen' einen Fehltritt entfernt. Liest sich das Menue
+                # nicht, ist der Doppelklick auf die Zeile der zweite Weg
+                # (oeffnet in MT5 denselben Dialog).
+                d = None
+                if _klick_absolut(gx, gy):
+                    time.sleep(0.25)
+                    if _klick_absolut(gx, gy, taste="rechts"):
+                        time.sleep(0.4)
+                        if _kontextmenue_aendern_klicken():
+                            d = _finde_aendern_dialog(w, timeout=1.5)
+                        else:
+                            if not menue_notiert:
+                                menue_notiert = True
+                                trail.append("Kontextmenue per UIA nicht lesbar")
+                            try:
+                                w.type_keys("{ESC}", set_foreground=False)
+                            except Exception:
+                                pass
+                if d is None:
+                    if not _klick_absolut(gx, gy, doppel=True):
+                        continue
+                    d = _finde_aendern_dialog(w, timeout=1.5)
                 if d is None:
                     continue
                 if _dialog_gehoert_zu(d, ticket):
