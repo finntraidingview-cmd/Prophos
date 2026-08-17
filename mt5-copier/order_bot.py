@@ -675,13 +675,13 @@ def _finde_aendern_dialog(hauptfenster, timeout=3.0):
     return None
 
 
-def _kontextmenue_aendern_klicken():
+def _kontextmenue_aendern_klicken(timeout=2.0):
     """Ein offenes Kontextmenue nach 'Aendern...'/'Modify...' absuchen und den
     Punkt ausloesen. Menues sind Standard-Windows-Fenster (#32768) — die sieht
     UIA auch bei MT5. Der Punkt heisst deutsch 'Aendern oder Loeschen', darf
     also NICHT durch den Loeschen-Ausschluss von ist_aendern_knopf laufen."""
     from pywinauto import Desktop
-    ende = time.time() + 2.0
+    ende = time.time() + timeout
     while time.time() < ende:
         try:
             for m in Desktop(backend="uia").windows():
@@ -741,59 +741,59 @@ def _fremde_dialoge_schliessen(hauptfenster):
         pass
 
 
-def _dialog_via_f9(w, ticket, trail):
-    """SL/TP-Weg 0 (18.08.2026, Finns Beobachtung: 'der Klick unten kam nie'
-    — die Handel-Liste ist fuer UIA offenbar komplett unsichtbar, kein Anker,
-    keine Zeile): Der Order-Dialog SELBST hat links den Reiter 'Position
-    aendern', sobald auf dem Symbol eine Position offen ist (Finns
-    Screenshots 18.08.). F9 oeffnen funktioniert bewiesen, die Dialog-
-    Controls sind lesbar — also F9 -> Reiter anklicken -> Ticket
-    gegenpruefen. Kein Klick in die Handel-Liste noetig."""
+def _reihen_scan(w, ticket, trail, maus_grenze):
+    """Finns Weg als Band-Scan, OHNE jeden UIA-Anker (18.08.2026: auf diesem
+    Build sind Handel-Liste, Kontostand-Zeile UND der Position-aendern-Reiter
+    im frischen F9-Dialog fuer UIA unsichtbar — der .58-Lauf hat den Reiter-
+    Weg widerlegt). Die Positions-Zeile liegt irgendwo im unteren Band des
+    Fensters, also wird das Band abgetastet. Pro Punkt: RECHTSKLICK -> nur
+    einen LESBAREN Menuepunkt 'Aendern…' klicken -> Dialog per Ticket
+    gegenpruefen. Rechtsklicks sind in Liste und Chart harmlos (oeffnen nur
+    Menues), geklickt wird nie blind — 'Position schliessen' kann nicht
+    passieren. Zweite Runde als Doppelklick-Scan (oeffnet auf der Zeile
+    denselben Dialog, sonst nichts; Tabs-/Statusleiste bleiben unterhalb des
+    Bands ausgespart). x liegt bei 40 Prozent der Fensterbreite — unterhalb
+    des Charts, weg von Marktuebersicht/Navigator und Ein-Klick-Panel."""
     try:
-        w.type_keys("{F9}")
-        time.sleep(0.9)
-        f9 = _finde_order_dialog(w)
-        if f9 is None:
-            trail.append("F9-Weg: Dialog nicht gefunden")
-            return None
-        schalter = None
-        for c in f9.descendants():
-            try:
-                tt = (c.window_text() or "").strip().lower()
-            except Exception:
+        hr = w.rectangle()
+    except Exception:
+        return None
+    gx = hr.left + int((hr.right - hr.left) * 0.4)
+    ys = []
+    for off in range(60, 400, 24):
+        y = hr.bottom - off
+        if maus_grenze is not None and y < maus_grenze:
+            break
+        ys.append(y)
+    for runde in ("Rechtsklick-Menue", "Doppelklick"):
+        for y in ys:
+            _maus_fahren(gx, y, schritte=3)
+            if runde == "Rechtsklick-Menue":
+                if not _klick_absolut(gx, y, taste="rechts"):
+                    continue
+                time.sleep(0.35)
+                if not _kontextmenue_aendern_klicken(timeout=0.8):
+                    try:
+                        w.type_keys("{ESC}", set_foreground=False)
+                    except Exception:
+                        pass
+                    continue
+            else:
+                if not _klick_absolut(gx, y, doppel=True):
+                    continue
+            d = _finde_aendern_dialog(w, timeout=1.2)
+            if d is None:
                 continue
-            if tt in ("position ändern", "position aendern", "modify position"):
-                schalter = c
-                break
-        if schalter is None:
-            trail.append("F9-Weg: kein 'Position aendern'-Reiter")
-        else:
-            # Reiter anklicken: invoke zuerst, sonst atomarer SendInput-Klick.
-            # Schlimmstenfalls wechselt nur der Order-TYP — ohne Knopf-Klick
-            # passiert dabei nichts.
-            geklickt = False
+            if _dialog_gehoert_zu(d, ticket):
+                trail.append(f"Aendern-Dialog offen ({runde}-Scan, "
+                             f"{hr.bottom - y}px ueber Unterkante)")
+                return d
             try:
-                schalter.invoke()
-                geklickt = True
+                d.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            if not geklickt:
-                try:
-                    rs = schalter.rectangle()
-                    geklickt = _klick_absolut(rs.mid_point().x, rs.mid_point().y)
-                except Exception:
-                    geklickt = False
-            time.sleep(0.6)
-            if geklickt and _ist_aendern_dialog(f9) and _dialog_gehoert_zu(f9, ticket):
-                trail.append("Aendern-Dialog offen (F9 -> Position aendern)")
-                return f9
-            trail.append("F9-Weg: Aendern-Modus nicht bestaetigt")
-        try:
-            f9.type_keys("{ESC}", set_foreground=False)
-        except Exception:
-            pass
-    except Exception:
-        pass
+            _fremde_dialoge_schliessen(w)
+    trail.append("Zeilen-Scan ohne Treffer")
     return None
 
 
@@ -810,8 +810,15 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     #    UIA-Namen der Handel-Zeile). Marktuebersicht-Zeilen (nur Symbolname)
     #    fallen durch die Laengen-Bedingung. Welche Zeile die richtige war,
     #    entscheidet am Ende IMMER der Dialog selbst (_dialog_gehoert_zu).
-    # 0) F9-Weg zuerst — braucht die Handel-Liste gar nicht (s. _dialog_via_f9)
-    dlg = _dialog_via_f9(w, ticket, trail)
+    try:
+        haupt_r = w.rectangle()
+        maus_grenze = haupt_r.top + (haupt_r.bottom - haupt_r.top) // 2
+    except Exception:
+        maus_grenze = None
+    _fremde_dialoge_schliessen(w)
+
+    # 0) Finns Weg als Band-Scan — braucht keinerlei UIA-Anker (s. _reihen_scan)
+    dlg = _reihen_scan(w, ticket, trail, maus_grenze)
 
     kandidaten, ticket_da = [], False
     if dlg is None:
@@ -838,12 +845,6 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     #    (der Weg, den auch die Hand nimmt), dann die synthetischen Wege.
     #    JEDER geoeffnete Dialog wird per Ticket gegengeprueft, bevor getippt
     #    wird — nie die falsche Position anfassen.
-    try:
-        haupt_r = w.rectangle()
-        maus_grenze = haupt_r.top + (haupt_r.bottom - haupt_r.top) // 2
-    except Exception:
-        maus_grenze = None
-    _fremde_dialoge_schliessen(w)
     for zeile in kandidaten[:3]:
         try:
             r = zeile.rectangle()
