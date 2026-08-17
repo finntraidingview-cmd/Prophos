@@ -741,6 +741,62 @@ def _fremde_dialoge_schliessen(hauptfenster):
         pass
 
 
+def _dialog_via_f9(w, ticket, trail):
+    """SL/TP-Weg 0 (18.08.2026, Finns Beobachtung: 'der Klick unten kam nie'
+    — die Handel-Liste ist fuer UIA offenbar komplett unsichtbar, kein Anker,
+    keine Zeile): Der Order-Dialog SELBST hat links den Reiter 'Position
+    aendern', sobald auf dem Symbol eine Position offen ist (Finns
+    Screenshots 18.08.). F9 oeffnen funktioniert bewiesen, die Dialog-
+    Controls sind lesbar — also F9 -> Reiter anklicken -> Ticket
+    gegenpruefen. Kein Klick in die Handel-Liste noetig."""
+    try:
+        w.type_keys("{F9}")
+        time.sleep(0.9)
+        f9 = _finde_order_dialog(w)
+        if f9 is None:
+            trail.append("F9-Weg: Dialog nicht gefunden")
+            return None
+        schalter = None
+        for c in f9.descendants():
+            try:
+                tt = (c.window_text() or "").strip().lower()
+            except Exception:
+                continue
+            if tt in ("position ändern", "position aendern", "modify position"):
+                schalter = c
+                break
+        if schalter is None:
+            trail.append("F9-Weg: kein 'Position aendern'-Reiter")
+        else:
+            # Reiter anklicken: invoke zuerst, sonst atomarer SendInput-Klick.
+            # Schlimmstenfalls wechselt nur der Order-TYP — ohne Knopf-Klick
+            # passiert dabei nichts.
+            geklickt = False
+            try:
+                schalter.invoke()
+                geklickt = True
+            except Exception:
+                pass
+            if not geklickt:
+                try:
+                    rs = schalter.rectangle()
+                    geklickt = _klick_absolut(rs.mid_point().x, rs.mid_point().y)
+                except Exception:
+                    geklickt = False
+            time.sleep(0.6)
+            if geklickt and _ist_aendern_dialog(f9) and _dialog_gehoert_zu(f9, ticket):
+                trail.append("Aendern-Dialog offen (F9 -> Position aendern)")
+                return f9
+            trail.append("F9-Weg: Aendern-Modus nicht bestaetigt")
+        try:
+            f9.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return None
+
+
 def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
@@ -754,31 +810,34 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     #    UIA-Namen der Handel-Zeile). Marktuebersicht-Zeilen (nur Symbolname)
     #    fallen durch die Laengen-Bedingung. Welche Zeile die richtige war,
     #    entscheidet am Ende IMMER der Dialog selbst (_dialog_gehoert_zu).
+    # 0) F9-Weg zuerst — braucht die Handel-Liste gar nicht (s. _dialog_via_f9)
+    dlg = _dialog_via_f9(w, ticket, trail)
+
     kandidaten, ticket_da = [], False
-    try:
-        for ct in ("DataItem", "ListItem", "TreeItem", "Custom", "Text", None):
-            for el in (w.descendants(control_type=ct) if ct else w.descendants()):
-                try:
-                    t = el.window_text() or ""
-                except Exception:
-                    continue
-                if zeile_nennt_ticket(t, ticket):
-                    kandidaten.insert(0, el)
-                    ticket_da = True
-                elif ist_handelszeile(t, symbol) and len(kandidaten) < 3:
-                    kandidaten.append(el)
-            if ticket_da:
-                break
-    except Exception:
-        pass
-    trail.append(f"Zeilen-Kandidaten: {len(kandidaten)}"
-                 + (" (Ticket dabei)" if ticket_da else ""))
+    if dlg is None:
+        try:
+            for ct in ("DataItem", "ListItem", "TreeItem", "Custom", "Text", None):
+                for el in (w.descendants(control_type=ct) if ct else w.descendants()):
+                    try:
+                        t = el.window_text() or ""
+                    except Exception:
+                        continue
+                    if zeile_nennt_ticket(t, ticket):
+                        kandidaten.insert(0, el)
+                        ticket_da = True
+                    elif ist_handelszeile(t, symbol) and len(kandidaten) < 3:
+                        kandidaten.append(el)
+                if ticket_da:
+                    break
+        except Exception:
+            pass
+        trail.append(f"Zeilen-Kandidaten: {len(kandidaten)}"
+                     + (" (Ticket dabei)" if ticket_da else ""))
 
     # 2) Je Kandidat den Aendern-Dialog oeffnen — SendInput-Doppelklick zuerst
     #    (der Weg, den auch die Hand nimmt), dann die synthetischen Wege.
     #    JEDER geoeffnete Dialog wird per Ticket gegengeprueft, bevor getippt
     #    wird — nie die falsche Position anfassen.
-    dlg = None
     try:
         haupt_r = w.rectangle()
         maus_grenze = haupt_r.top + (haupt_r.bottom - haupt_r.top) // 2
