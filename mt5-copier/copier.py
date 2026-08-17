@@ -706,7 +706,11 @@ def main():
             log(f"[{m.file}] ❌ order_send None ({mt5.last_error()}) — {what}")
             return None
         if r.retcode != mt5.TRADE_RETCODE_DONE:
-            log(f"[{m.file}] ❌ abgelehnt retcode={r.retcode} {getattr(r, 'comment', '')} — {what}")
+            hinweis = getattr(r, "comment", "")
+            if int(r.retcode) == 10027:
+                hinweis = ("Algo-Handel im HEDGE-Terminal ist AUS — oben den "
+                           "'Algo-Handel'-Knopf gruen schalten, sonst kann der Copier nicht hedgen!")
+            log(f"[{m.file}] ❌ abgelehnt retcode={r.retcode} {hinweis} — {what}")
             return None
         log(f"[{m.file}] ✅ {what} · deal={r.deal}")
         return r

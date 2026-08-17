@@ -180,8 +180,12 @@ def _sltp_setzen(path, expected, ticket, sl, tp):
                             "symbol": pos.symbol, "sl": float(sl), "tp": float(tp)})
         if r is None:
             return {"ok": False, "msg": f"SL/TP order_send None: {mt5.last_error()}"}
+        msg = str(getattr(r, "comment", "") or "")
+        if int(r.retcode) == 10027:
+            msg = ("Algo-Handel im Master-Terminal ist AUS — oben den 'Algo-Handel'-"
+                   "Knopf gruen schalten, dann laesst sich SL/TP setzen.")
         return {"ok": r.retcode == mt5.TRADE_RETCODE_DONE, "retcode": int(r.retcode),
-                "msg": str(getattr(r, "comment", "") or "")}
+                "msg": msg}
     finally:
         mt5.shutdown()
 
@@ -298,7 +302,7 @@ def modus_mousetest():
     res["msg"] = (f"Cursor-Bewegung: {treffer}/{len(res['moves'])} Ziele getroffen "
                   f"({'OS-Cursor bewegt sich' if res['cursor_bewegt'] else 'OS-Cursor bewegt sich NICHT'}). "
                   f"Notepad: {res['notepad']}")
-    print(json.dumps(res, ensure_ascii=False))
+    print(json.dumps(res))
 
 
 def _maus_zentrieren():
@@ -727,10 +731,10 @@ def main():
     fehler = pruefe_befehl(cmd)
     if fehler:
         print(json.dumps({"ok": False, "retry_ok": True,
-                          "msg": "Befehl unvollstaendig: " + " · ".join(fehler)}, ensure_ascii=False))
+                          "msg": "Befehl unvollstaendig: " + " · ".join(fehler)}))
         return 2
     res = run(sys.argv[1], cmd)
-    print(json.dumps(res, ensure_ascii=False))
+    print(json.dumps(res))
     return 0 if res.get("ok") else 1
 
 

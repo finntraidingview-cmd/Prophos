@@ -1639,7 +1639,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 lock.release()
             print(f"[panel] {fname}: Master-Order {cmd['richtung']} {cmd['volumen']} "
-                  f"{cmd['symbol']} → {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
+                  f"{cmd['symbol']} -> {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/start-terminal":
