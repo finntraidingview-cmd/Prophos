@@ -505,7 +505,21 @@ def _feld_tippen(el, wert, name, trail):
         try:
             el.set_focus()
             time.sleep(0.15)
+            # Feld GARANTIERT leeren (18.08.2026, Finns 22-Einwand: steht vom
+            # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
+            # Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur
+            # eines von beiden. Danach ZURUECKLESEN, ob es wirklich leer ist.
             el.type_keys("^a{DELETE}", set_foreground=False)
+            el.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
+            time.sleep(0.1)
+            rest = (el.window_text() or "").strip()
+            if rest:
+                # Feld fuellt sich selbst wieder (Auto-Format)? Dann alles
+                # markieren und DRUEBERtippen — die Auswahl wird ersetzt, das
+                # Ruecklesen unten beweist das Ergebnis.
+                trail.append(f"{name}-Feld leert nicht ('{rest}') — tippe ueber die Auswahl")
+                el.type_keys("^a", set_foreground=False)
+                el.type_keys("{HOME}+{END}", set_foreground=False)
             el.type_keys(str(wert), with_spaces=False, set_foreground=False)
             time.sleep(0.15)
             ist = el.window_text() or ""
