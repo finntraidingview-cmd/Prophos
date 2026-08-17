@@ -880,22 +880,73 @@ def run(cfg_path, cmd):
     except Exception:
         pass
     if knopf is None:
+        inventar = []
+        try:
+            for b in dlg.descendants(control_type="Button"):
+                inventar.append((b.window_text() or "?")[:24])
+        except Exception:
+            pass
+        try:
+            dlg.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
         return {"ok": False, "retry_ok": True,
-                "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet."}
+                "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
+                       f"Knoepfe: {', '.join(inventar) or 'keine'} [" + " → ".join(trail) + "]"}
     try:
         r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y)
     except Exception:
         pass
-    klick_weg = None
-    try:
-        knopf.click(); klick_weg = ".click()"
-    except Exception:
+
+    def _dialog_weg():
         try:
-            knopf.click_input(); klick_weg = "click_input"
-        except Exception as e:
-            return {"ok": False, "retry_ok": True,
-                    "msg": f"Buy/Sell-Knopf liess sich nicht ausloesen: {e} [" + " → ".join(trail) + "]"}
-    trail.append(f"{muster}-Knopf ausgeloest ({klick_weg})")
+            return not dlg.is_visible()
+        except Exception:
+            return True
+
+    def _schnell_bestaetigt(sekunden=4.0):
+        """Kurzer LESE-Check nach jedem Ausloese-Versuch: neue Position da oder
+        Dialog zu? Nur wenn BEIDES ausbleibt, darf der naechste Weg probiert
+        werden — sonst feuern zwei Wege ZWEI Orders."""
+        ende_s = time.time() + sekunden
+        while time.time() < ende_s:
+            time.sleep(0.6)
+            st = _api_lesen(path, expected)
+            if "fehler" not in st and finde_neue_position(
+                    vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
+                return True
+            if _dialog_weg():
+                return True
+        return False
+
+    # ECHTE Eingabe zuerst (18.08.2026, Live-Fund — dieselbe Lehre wie beim
+    # set_text: MT5 reagiert auf echte Events. Das Volumen stand korrekt im
+    # Dialog, der .click()-Weg verpuffte, der Dialog blieb einfach stehen).
+    # Fokus auf DIESEN Knopf (Fensterbefehl, Parsec-fest) + LEERTASTE als
+    # echter Tastendruck. BEWUSST kein pauschales {ENTER}: Enter drueckt den
+    # Default-Knopf des Dialogs — und der koennte die falsche Richtung sein.
+    ausgeloest = None
+    for weg, tu in (("Fokus+Leertaste",
+                     lambda: (knopf.set_focus(), time.sleep(0.15),
+                              knopf.type_keys("{SPACE}", set_foreground=False))),
+                    (".click()", lambda: knopf.click()),
+                    ("click_input", lambda: knopf.click_input())):
+        try:
+            tu()
+        except Exception:
+            continue
+        trail.append(f"{muster}-Knopf: {weg}")
+        ausgeloest = weg
+        if _schnell_bestaetigt():
+            break
+    if ausgeloest is None:
+        try:
+            dlg.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
+        return {"ok": False, "retry_ok": True,
+                "msg": "Buy/Sell-Knopf liess sich auf keinem Weg ausloesen "
+                       "[" + " → ".join(trail) + "]"}
 
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     ende = time.time() + 12
@@ -962,14 +1013,22 @@ def run(cfg_path, cmd):
                 break
     except Exception:
         pass
+    struktur = _dialog_struktur(dlg)
+    # Dialog nicht offen stehen lassen (18.08.2026, Finns Live-Fund: der Bot
+    # war fertig, aber der Dialog blieb minutenlang stehen — halbkonfigurierte
+    # Order, die jeder versehentlich ausloesen koennte).
+    try:
+        dlg.type_keys("{ESC}", set_foreground=False)
+    except Exception:
+        pass
     if markt_zu:
         return {"ok": False, "retry_ok": True,
                 "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
                        "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + " → ".join(trail) + "]",
                 "trail": " → ".join(trail)}
     return {"ok": False, "retry_ok": False,
-            "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto. "
-                   "Spur: [" + " → ".join(trail) + "] · Dialog: " + _dialog_struktur(dlg),
+            "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto, Dialog "
+                   "geschlossen. Spur: [" + " → ".join(trail) + "] · Dialog: " + struktur,
             "trail": " → ".join(trail)}
 
 
