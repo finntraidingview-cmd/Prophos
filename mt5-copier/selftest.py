@@ -381,6 +381,22 @@ def main():
     f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
                                  "volumen": float("nan"), "sl_usd": 100, "tp_usd": 300})
     chk("ORDER-BOT: NaN-Volumen wird abgelehnt (isfinite-Wachter)", len(f) == 1)
+    # SL/TP-per-Klick-Helfer (18.08.2026): reine Textlogik am Mac testbar
+    chk("ORDER-BOT: Aendern-Knopf erkannt, Abbrechen/Loeschen/Schliessen nicht",
+        order_bot.ist_aendern_knopf("#123 buy 0.20 NAS100 sl: 19500.00 tp: 21500.00 ändern")
+        and order_bot.ist_aendern_knopf("Modify")
+        and not order_bot.ist_aendern_knopf("Abbrechen")
+        and not order_bot.ist_aendern_knopf("Löschen")
+        and not order_bot.ist_aendern_knopf("Close #123 buy 0.20")
+        and not order_bot.ist_aendern_knopf(""))
+    chk("ORDER-BOT: SL/TP-Bestaetigung mit Rundungs-Toleranz, 0.0 faellt durch",
+        order_bot.sltp_bestaetigt(19500.01, 21500.0, 19500.0, 21500.0, 2)
+        and not order_bot.sltp_bestaetigt(0.0, 21500.0, 19500.0, 21500.0, 2)
+        and not order_bot.sltp_bestaetigt(19400.0, 21500.0, 19500.0, 21500.0, 2))
+    chk("ORDER-BOT: Ticket-Suche trifft nur die eigene Zeile",
+        order_bot.zeile_nennt_ticket("123456789 NAS100 buy 0.20", 123456789)
+        and not order_bot.zeile_nennt_ticket("9123456789 NAS100", 123456789)
+        and not order_bot.zeile_nennt_ticket("", 123456789))
 
     print()
     ok = sum(1 for r in results if r)

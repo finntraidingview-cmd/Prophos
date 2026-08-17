@@ -12,10 +12,15 @@ Choreografie (sichtbar, wie mit Finn geuebt):
   4. Maus faehrt auf den Buy/Sell-Knopf und klickt — der einzige unumkehrbare Schritt
   5. Bestaetigung NICHT der UI glauben: Positionsliste des Kontos (nur LESEND
      ueber die MetaTrader5-API — Lesen traegt keine Order-Markierung)
+  6. SL/TP vom ECHTEN Einstiegskurs rechnen und PER KLICK im Aendern-Dialog
+     der Position eintragen (18.08.2026, Finns Ansage: auch die SL/TP-Aenderung
+     muss wie Handarbeit aussehen — der fruehere TRADE_ACTION_SLTP-Weg lief
+     ueber denselben API-Kanal wie ein EA, unnoetiges Restrisiko). Bestaetigt
+     wird auch das nur LESEND am Positionsstand.
 
 Die API wird ausschliesslich LESEND benutzt: aktueller Kurs fuer die
-$->Preis-Umrechnung, Positionsstand vorher/nachher. mt5.order_send existiert
-in dieser Datei bewusst NICHT.
+$->Preis-Umrechnung, Positionsstand vorher/nachher, SL/TP-Kontrolle.
+mt5.order_send existiert in dieser Datei bewusst NICHT.
 
 Aufruf (vom Panel als kurzlebiger Subprozess):
   python order_bot.py <config-datei.json> "<befehl-json>"
@@ -95,6 +100,37 @@ def finde_neue_position(vorher_tickets, positionen, symbol, richtung, volumen, t
     return None
 
 
+def ist_aendern_knopf(text):
+    """Erkennt den Aendern-Knopf des Positions-Dialogs an der Beschriftung —
+    und schliesst alles aus, was loeschen/schliessen/abbrechen koennte. Reine
+    Textlogik, damit der Mac-Selbsttest sie abdeckt."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    for verboten in ("abbre", "cancel", "schlie", "close", "delet", "loesch", "lösch"):
+        if verboten in t:
+            return False
+    return any(k in t for k in ("ändern", "aendern", "modify", "change"))
+
+
+def sltp_bestaetigt(pos_sl, pos_tp, sl, tp, digits):
+    """Traegt die Position die gewuenschten SL/TP? Toleranz: 1.5 Einheiten der
+    letzten Kursstelle (Server normalisieren minimal). 0.0 heisst 'nicht
+    gesetzt' und faellt damit automatisch durch."""
+    tol = 1.5 * (10 ** -int(digits))
+    return (abs(float(pos_sl) - float(sl)) <= tol
+            and abs(float(pos_tp) - float(tp)) <= tol)
+
+
+def zeile_nennt_ticket(text, ticket):
+    """Steht die Ticket-Nummer als eigenstaendige Zahl im Element-Text? So wird
+    die Zeile der Position in der Handel-Liste erkannt, ohne dass 9123456789
+    faelschlich auf 123456789 passt."""
+    import re
+    return bool(re.search(r"(?<!\d)" + re.escape(str(int(ticket))) + r"(?!\d)",
+                          text or ""))
+
+
 # ---------------------------------------------------------------------------
 # LESENDER API-Teil — Kurse + Positionsstand (traegt keine Order-Markierung)
 # ---------------------------------------------------------------------------
@@ -152,42 +188,9 @@ def _api_lesen(path, expected, symbol=None):
         mt5.shutdown()
 
 
-def _sltp_setzen(path, expected, ticket, sl, tp):
-    """SL/TP an eine BEREITS offene Position haengen (15.08.2026, Finns Timing-
-    Loesung): die Order wird per Klick zum echten Marktkurs eroeffnet, DANN liest
-    der Bot den tatsaechlichen Einstiegskurs und setzt SL/TP exakt darauf — keine
-    Drift durch die Sekunden zwischen Kurslesen und Klick. Das aendert nur SL/TP
-    einer manuell eroeffneten Position; wie die Position AUFGING (Handklick) bleibt
-    unveraendert."""
-    try:
-        import MetaTrader5 as mt5
-    except ImportError:
-        return {"ok": False, "msg": "MetaTrader5-Paket fehlt."}
-    if not mt5.initialize(path=path):
-        return {"ok": False, "msg": f"Verbindung fuer SL/TP fehlgeschlagen: {mt5.last_error()}"}
-    try:
-        ai = mt5.account_info()
-        if ai is None or (expected and int(ai.login) != expected):
-            return {"ok": False, "msg": "Falsches/kein Konto beim SL/TP-Setzen."}
-        pos = None
-        for p in (mt5.positions_get() or []):
-            if int(p.ticket) == int(ticket):
-                pos = p
-                break
-        if pos is None:
-            return {"ok": False, "msg": "Position fuer SL/TP nicht gefunden."}
-        r = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "position": int(ticket),
-                            "symbol": pos.symbol, "sl": float(sl), "tp": float(tp)})
-        if r is None:
-            return {"ok": False, "msg": f"SL/TP order_send None: {mt5.last_error()}"}
-        msg = str(getattr(r, "comment", "") or "")
-        if int(r.retcode) == 10027:
-            msg = ("Algo-Handel im Master-Terminal ist AUS — oben den 'Algo-Handel'-"
-                   "Knopf gruen schalten, dann laesst sich SL/TP setzen.")
-        return {"ok": r.retcode == mt5.TRADE_RETCODE_DONE, "retcode": int(r.retcode),
-                "msg": msg}
-    finally:
-        mt5.shutdown()
+# _sltp_setzen (TRADE_ACTION_SLTP) ist am 18.08.2026 bewusst GELOESCHT worden:
+# die Aenderung lief ueber denselben API-Kanal wie ein EA — Finns Ansage: auch
+# SL/TP wird per Klick eingetragen, die API bleibt komplett lesend.
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +479,229 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
     return None
 
 
+def _ist_aendern_dialog(win):
+    """Der Aendern-Dialog einer Position: traegt den langen Aendern-Knopf.
+    Der F9-Neu-Order-Dialog hat keinen solchen Knopf — damit ist verwechseln
+    ausgeschlossen (hier darf NIE ein Buy/Sell-Knopf gedrueckt werden)."""
+    try:
+        for b in win.descendants(control_type="Button"):
+            if ist_aendern_knopf(b.window_text() or ""):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _finde_aendern_dialog(hauptfenster, timeout=3.0):
+    """Wie _finde_order_dialog (Top-Level UND Kind-Fenster — der F9-Fund vom
+    15.08.2026 gilt fuer jeden MT5-Dialog), aber auf den Aendern-Dialog."""
+    from pywinauto import Desktop
+    pid = hauptfenster.element_info.process_id
+    ende = time.time() + timeout
+    while time.time() < ende:
+        try:
+            for w in Desktop(backend="uia").windows():
+                try:
+                    if w.element_info.process_id == pid and w.is_visible() \
+                            and w.element_info.class_name != MT5_KLASSE \
+                            and _ist_aendern_dialog(w):
+                        return w
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        try:
+            for d in hauptfenster.descendants(control_type="Window"):
+                if _ist_aendern_dialog(d):
+                    return d
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return None
+
+
+def _kontextmenue_aendern_klicken():
+    """Ein offenes Kontextmenue nach 'Aendern...'/'Modify...' absuchen und den
+    Punkt ausloesen. Menues sind Standard-Windows-Fenster (#32768) — die sieht
+    UIA auch bei MT5. Der Punkt heisst deutsch 'Aendern oder Loeschen', darf
+    also NICHT durch den Loeschen-Ausschluss von ist_aendern_knopf laufen."""
+    from pywinauto import Desktop
+    ende = time.time() + 2.0
+    while time.time() < ende:
+        try:
+            for m in Desktop(backend="uia").windows():
+                try:
+                    if m.element_info.class_name != "#32768" \
+                            and m.element_info.control_type != "Menu":
+                        continue
+                    for it in m.descendants(control_type="MenuItem"):
+                        t = (it.window_text() or "").lower()
+                        if any(k in t for k in ("ändern", "aendern", "andern", "modify")):
+                            try:
+                                it.invoke()
+                                return True
+                            except Exception:
+                                try:
+                                    it.click_input()
+                                    return True
+                                except Exception:
+                                    pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        time.sleep(0.2)
+    return False
+
+
+def _sltp_klicken(w, ticket, sl_text, tp_text, trail):
+    """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
+    Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
+    oeffnen, die vom echten Fill gerechneten Kurse eintippen, Aendern klicken.
+    Mehrere Oeffnungswege in fester Reihenfolge (cursor-unabhaengig zuerst,
+    Parsec-Fund 16.08.2026); jeder Versuch wird in der Spur vermerkt. Ob es
+    WIRKLICH gegriffen hat, prueft ausschliesslich der Aufrufer — lesend."""
+    # 1) Zeile der Position suchen: erst in den Listen-Controls, dann ueberall
+    zeile = None
+    try:
+        for ct in ("DataItem", "ListItem", "TreeItem", "Custom", "Text", None):
+            kandidaten = (w.descendants(control_type=ct) if ct else w.descendants())
+            for el in kandidaten:
+                try:
+                    if zeile_nennt_ticket(el.window_text() or "", ticket):
+                        zeile = el
+                        break
+                except Exception:
+                    continue
+            if zeile is not None:
+                break
+    except Exception:
+        pass
+    trail.append("Positions-Zeile " + ("gefunden" if zeile is not None else "NICHT gefunden"))
+
+    # 2) Aendern-Dialog oeffnen — Wege der Reihe nach, nach jedem kurz suchen
+    dlg = None
+    if zeile is not None:
+        try:
+            r = zeile.rectangle()
+            _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+        except Exception:
+            pass
+        wege = []
+
+        def _invoke():
+            zeile.invoke()
+        wege.append(("invoke", _invoke))
+
+        def _dodefault():
+            zeile.iface_legacyiaccessible.DoDefaultAction()
+        wege.append(("DoDefaultAction", _dodefault))
+
+        def _tasten_menue():
+            zeile.select()
+            time.sleep(0.2)
+            w.type_keys("+{F10}")
+            time.sleep(0.4)
+            if not _kontextmenue_aendern_klicken():
+                raise RuntimeError("kein Menuepunkt")
+        wege.append(("Shift-F10-Menue", _tasten_menue))
+
+        def _doppelklick():
+            zeile.click_input(double=True)
+        wege.append(("Doppelklick", _doppelklick))
+
+        def _rechtsklick_menue():
+            zeile.click_input(button="right")
+            time.sleep(0.4)
+            if not _kontextmenue_aendern_klicken():
+                raise RuntimeError("kein Menuepunkt")
+        wege.append(("Rechtsklick-Menue", _rechtsklick_menue))
+
+        for name, weg in wege:
+            try:
+                weg()
+            except Exception:
+                continue
+            dlg = _finde_aendern_dialog(w)
+            if dlg is not None:
+                trail.append(f"Aendern-Dialog offen ({name})")
+                break
+            # haengengebliebenes Menue schliessen, bevor der naechste Weg kommt
+            try:
+                w.type_keys("{ESC}", set_foreground=False)
+            except Exception:
+                pass
+    if dlg is None:
+        return {"ok": False, "msg": "Aendern-Dialog liess sich nicht oeffnen"}
+
+    # 3) SL/TP-Felder nach Beschriftung, sonst die ersten beiden Edits
+    try:
+        fmap = _map_felder(dlg)
+        edits = dlg.descendants(control_type="Edit")
+        sl_el = fmap.get("sl", edits[0] if len(edits) >= 2 else None)
+        tp_el = fmap.get("tp", edits[1] if len(edits) >= 2 else None)
+        if sl_el is None or tp_el is None:
+            raise RuntimeError(f"SL/TP-Felder nicht gefunden ({len(edits)} Edits). "
+                               f"Struktur: {_dialog_struktur(dlg)}")
+        for el, wert, name in ((sl_el, sl_text, "SL"), (tp_el, tp_text, "TP")):
+            gesetzt = False
+            for setter in ("set_edit_text", "set_text"):
+                try:
+                    getattr(el, setter)(wert)
+                    gesetzt = True
+                    break
+                except Exception:
+                    continue
+            if not gesetzt:
+                el.set_focus()
+                el.type_keys("^a{DELETE}" + wert, with_spaces=False, set_foreground=False)
+            trail.append(f"{name}-Feld: {wert}")
+        time.sleep(0.3)
+    except Exception as e:
+        try:
+            dlg.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
+        return {"ok": False, "msg": f"Felder nicht befuellbar: {e}"}
+
+    # 4) Aendern-Knopf — .click() zuerst (cursor-unabhaengig), dann click_input
+    knopf = None
+    try:
+        for b in dlg.descendants(control_type="Button"):
+            if ist_aendern_knopf(b.window_text() or ""):
+                knopf = b
+                break
+    except Exception:
+        pass
+    if knopf is None:
+        try:
+            dlg.type_keys("{ESC}", set_foreground=False)
+        except Exception:
+            pass
+        return {"ok": False, "msg": "kein Aendern-Knopf im Dialog"}
+    try:
+        r = knopf.rectangle()
+        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+    except Exception:
+        pass
+    try:
+        knopf.click()
+        trail.append("Aendern-Knopf ausgeloest (.click())")
+    except Exception:
+        try:
+            knopf.click_input()
+            trail.append("Aendern-Knopf ausgeloest (click_input)")
+        except Exception as e:
+            return {"ok": False, "msg": f"Aendern-Knopf liess sich nicht ausloesen: {e}"}
+    # Dialog schliesst sich bei Erfolg selbst; Rest raeumt der Aufrufer per ESC
+    time.sleep(0.5)
+    try:
+        dlg.type_keys("{ESC}", set_foreground=False)
+    except Exception:
+        pass
+    return {"ok": True, "msg": "geklickt"}
+
+
 def run(cfg_path, cmd):
     try:
         with open(cfg_path, encoding="utf-8") as f:
@@ -645,27 +871,46 @@ def run(cfg_path, cmd):
         if p:
             fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
             trail.append(f"Position offen @ {fill}")
-            # SL/TP jetzt vom echten Fill-Kurs rechnen und an die Position haengen
+            # SL/TP vom echten Fill-Kurs rechnen — eingetragen wird PER KLICK
+            # (18.08.2026, Finns Ansage: kein API-Schreibweg mehr). Vorher den
+            # F9-Dialog schliessen, er laege sonst vor der Handel-Liste.
             sl, tp = berechne_sl_tp(cmd["richtung"], fill, vol, contract_size,
                                     cmd["sl_usd"], cmd["tp_usd"], digits)
-            m = _sltp_setzen(path, expected, p["ticket"], sl, tp)
             try:
                 dlg.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            if m.get("ok"):
-                trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} gesetzt")
+            time.sleep(0.4)
+            k = _sltp_klicken(w, p["ticket"], fmt_preis(sl, digits),
+                              fmt_preis(tp, digits), trail)
+            # Bestaetigung NUR lesend: traegt die Position die Werte wirklich?
+            bestaetigt = False
+            ende2 = time.time() + 10
+            while time.time() < ende2 and not bestaetigt:
+                time.sleep(0.8)
+                st = _api_lesen(path, expected)
+                if "fehler" in st:
+                    continue
+                for q in st["positionen"]:
+                    if q["ticket"] == p["ticket"] \
+                            and sltp_bestaetigt(q["sl"], q["tp"], sl, tp, digits):
+                        bestaetigt = True
+                        break
+            if bestaetigt:
+                trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} "
+                             f"per Klick gesetzt")
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
-                        "msg": "per Klick platziert, SL/TP am echten Einstieg gesetzt",
+                        "msg": "per Klick platziert, SL/TP per Klick am echten Einstieg gesetzt",
                         "trail": " → ".join(trail),
                         "symbol": symbol, "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill,
                         "sl": sl, "tp": tp, "ticket": p["ticket"]}
-            # Position IST offen, aber SL/TP fehlgeschlagen — kritisch: klar melden,
-            # NICHT erneut platzieren (retry_ok False), von Hand nachtragen.
+            # Position IST offen, aber SL/TP nicht bestaetigt — kritisch: klar
+            # melden, NICHT erneut platzieren (retry_ok False), von Hand nachtragen.
             return {"ok": False, "retry_ok": False,
-                    "msg": f"Position ist OFFEN @ {fill}, aber SL/TP setzen fehlgeschlagen "
-                           f"({m.get('msg')}) — im Terminal SL/TP SOFORT von Hand nachtragen!",
+                    "msg": f"Position ist OFFEN @ {fill}, aber SL/TP-Klick nicht bestaetigt "
+                           f"({k.get('msg')}) — im Terminal SL {fmt_preis(sl, digits)} / "
+                           f"TP {fmt_preis(tp, digits)} SOFORT von Hand nachtragen!",
                     "trail": " → ".join(trail), "symbol": symbol,
                     "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
                     "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
