@@ -741,7 +741,7 @@ def _fremde_dialoge_schliessen(hauptfenster):
         pass
 
 
-def _reihen_scan(w, ticket, trail, maus_grenze):
+def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
     """Finns Weg als Band-Scan, OHNE jeden UIA-Anker (18.08.2026: auf diesem
     Build sind Handel-Liste, Kontostand-Zeile UND der Position-aendern-Reiter
     im frischen F9-Dialog fuer UIA unsichtbar — der .58-Lauf hat den Reiter-
@@ -759,17 +759,37 @@ def _reihen_scan(w, ticket, trail, maus_grenze):
     except Exception:
         return None
     gx = hr.left + int((hr.right - hr.left) * 0.4)
-    ys = []
-    for off in range(60, 400, 24):
+
+    # Gemerkter Treffer zuerst (18.08.2026, Finns Kalibrier-Idee — nur dass
+    # der Bot selbst mitzaehlt: die Ticket-Pruefung sagt ihm, welcher Klick
+    # der richtige war, und der wird hier gespeichert und beim naechsten
+    # Trade direkt angesprungen). Passt der Anker nicht mehr (Fenster anders,
+    # mehr Zeilen), faellt die Pruefung durch und der Scan uebernimmt.
+    punkte = []
+    if anker_pfad:
+        try:
+            with open(anker_pfad, encoding="utf-8") as f:
+                a = json.load(f)
+            ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
+            ay = hr.bottom - int(a["y_off"])
+            if maus_grenze is None or ay >= maus_grenze:
+                punkte.append(("Anker", ax, ay))
+        except Exception:
+            pass
+    for off in range(60, 400, 16):
         y = hr.bottom - off
         if maus_grenze is not None and y < maus_grenze:
             break
-        ys.append(y)
+        punkte.append((f"-{off}px", gx, y))
+
     for runde in ("Rechtsklick-Menue", "Doppelklick"):
-        for y in ys:
-            _maus_fahren(gx, y, schritte=3)
+        for pname, px_, py_ in punkte:
+            _maus_fahren(px_, py_, schritte=3)
+            # Finns Schritt 1: Zeile markieren, dann erst oeffnen
+            _klick_absolut(px_, py_)
+            time.sleep(0.15)
             if runde == "Rechtsklick-Menue":
-                if not _klick_absolut(gx, y, taste="rechts"):
+                if not _klick_absolut(px_, py_, taste="rechts"):
                     continue
                 time.sleep(0.35)
                 if not _kontextmenue_aendern_klicken(timeout=0.8):
@@ -779,14 +799,27 @@ def _reihen_scan(w, ticket, trail, maus_grenze):
                         pass
                     continue
             else:
-                if not _klick_absolut(gx, y, doppel=True):
+                if not _klick_absolut(px_, py_, doppel=True):
                     continue
             d = _finde_aendern_dialog(w, timeout=1.2)
             if d is None:
+                # Menue hat geklickt, aber kein Dialog (Punkt lag neben der
+                # Zeile, Eintrag ausgegraut) — Menue NICHT offen stehen
+                # lassen (Fund aus Finns Screenshot 18.08.)
+                try:
+                    w.type_keys("{ESC}", set_foreground=False)
+                except Exception:
+                    pass
                 continue
             if _dialog_gehoert_zu(d, ticket):
-                trail.append(f"Aendern-Dialog offen ({runde}-Scan, "
-                             f"{hr.bottom - y}px ueber Unterkante)")
+                trail.append(f"Aendern-Dialog offen ({runde}-Scan @ {pname})")
+                if anker_pfad:
+                    try:
+                        with open(anker_pfad, "w", encoding="utf-8") as f:
+                            json.dump({"x_frac": (px_ - hr.left) / max(1, hr.right - hr.left),
+                                       "y_off": hr.bottom - py_}, f)
+                    except Exception:
+                        pass
                 return d
             try:
                 d.type_keys("{ESC}", set_foreground=False)
@@ -797,7 +830,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze):
     return None
 
 
-def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
+def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
     oeffnen, die vom echten Fill gerechneten Kurse eintippen, Aendern klicken.
@@ -818,7 +851,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     _fremde_dialoge_schliessen(w)
 
     # 0) Finns Weg als Band-Scan — braucht keinerlei UIA-Anker (s. _reihen_scan)
-    dlg = _reihen_scan(w, ticket, trail, maus_grenze)
+    dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
 
     kandidaten, ticket_da = [], False
     if dlg is None:
@@ -1315,8 +1348,13 @@ def run(cfg_path, cmd):
             except Exception:
                 pass
             time.sleep(0.4)
+            # Anker-Datei: gemerkte Treffer-Stelle des Zeilen-Scans. BEWUSST
+            # mit 'anker-'-Praefix, damit sie NIE ins config-*.json-Muster
+            # des Copiers faellt.
+            anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
+                                      "anker-" + os.path.basename(cfg_path))
             k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits),
-                              fmt_preis(tp, digits), trail)
+                              fmt_preis(tp, digits), trail, anker_pfad=anker_pfad)
             # Bestaetigung NUR lesend: traegt die Position die Werte wirklich?
             bestaetigt = False
             ende2 = time.time() + 10
