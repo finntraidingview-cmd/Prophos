@@ -213,6 +213,36 @@ def _api_lesen(path, expected, symbol=None):
 MT5_KLASSE = "MetaQuotes::MetaTrader::5.00"
 
 
+def _klick_absolut(x, y):
+    """Echter Maus-Klick als EIN atomarer SendInput-Batch mit ABSOLUT-
+    Koordinaten (18.08.2026): Bewegen+Druecken+Loslassen in einem Aufruf.
+    pywinautos click_input bewegt erst und klickt dann getrennt — genau in
+    diese Luecke funkt Parsec mit der lokalen Mausposition (Fund 16.08.).
+    Ein Batch laesst dem keinen Raum, und fuer MT5 ist das Ergebnis von
+    einem Hand-Klick nicht unterscheidbar."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    W, H = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    ax = int(round(int(x) * 65535 / max(1, W - 1)))
+    ay = int(round(int(y) * 65535 / max(1, H - 1)))
+    PUL = ctypes.POINTER(ctypes.c_ulong)
+
+    class _MI(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                    ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                    ("time", ctypes.c_ulong), ("dwExtraInfo", PUL)]
+
+    class _INP(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong), ("mi", _MI)]
+
+    MOVE, DOWN, UP, ABS = 0x0001, 0x0002, 0x0004, 0x8000
+    batch = (_INP * 3)()
+    for i, fl in enumerate((MOVE | ABS, MOVE | DOWN | ABS, MOVE | UP | ABS)):
+        batch[i].type = 0  # INPUT_MOUSE
+        batch[i].mi = _MI(ax, ay, 0, fl, 0, None)
+    return user32.SendInput(3, batch, ctypes.sizeof(_INP)) == 3
+
+
 def _cursor_pos():
     import ctypes
     import ctypes.wintypes as wt
@@ -492,6 +522,36 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
     return None
 
 
+def _feld_lesen(el):
+    """Den INHALT eines Felds lesen — window_text() liefert bei UIA oft nur den
+    NAMEN des Felds, also die Beschriftung 'Volumen:' (Fund 18.08.2026 im
+    Trade-Start-Check: das Ruecklesen verglich gegen das Label und brach ab,
+    obwohl das Tippen laengst funktionierte). Deshalb: ValuePattern zuerst,
+    dann Legacy-Value, window_text() nur als letzter Rest."""
+    try:
+        v = el.get_value()
+        if v is not None:
+            return str(v)
+    except Exception:
+        pass
+    try:
+        v = el.iface_value.CurrentValue
+        if v is not None:
+            return str(v)
+    except Exception:
+        pass
+    try:
+        v = (el.legacy_properties() or {}).get("Value")
+        if v is not None:
+            return str(v)
+    except Exception:
+        pass
+    try:
+        return el.window_text() or ""
+    except Exception:
+        return ""
+
+
 def _feld_tippen(el, wert, name, trail):
     """Wert per ECHTEN Tastenanschlaegen eintippen (18.08.2026, Finns Fund am
     PC: set_edit_text/set_text malt den Text nur in den Feld-Speicher — kein
@@ -500,7 +560,10 @@ def _feld_tippen(el, wert, name, trail):
     Deshalb: Fokus OHNE Cursor (set_focus — Fenster-/Tastaturbefehle gehen auch
     ueber Parsec durch, der Parsec-Fund 16.08. betraf nur Maus-Klicks), dann
     tippen wie ein Mensch, dann den Feldtext ZURUECKLESEN und als Zahl
-    vergleichen. Erst wenn das stimmt, uebergibt TAB den Wert an MT5."""
+    vergleichen. KEIN TAB danach (18.08.2026, .53): jedes WM_CHAR aktualisiert
+    MT5s internen Wert schon live (das Label neben dem Feld rechnet beim Tippen
+    mit), und TAB schob den Fokus ins naechste Feld — dort koennte eine
+    spaetere Leertaste landen."""
     for _versuch in (1, 2):
         try:
             el.set_focus()
@@ -512,7 +575,7 @@ def _feld_tippen(el, wert, name, trail):
             el.type_keys("^a{DELETE}", set_foreground=False)
             el.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
             time.sleep(0.1)
-            rest = (el.window_text() or "").strip()
+            rest = (_feld_lesen(el) or "").strip()
             if rest:
                 # Feld fuellt sich selbst wieder (Auto-Format)? Dann alles
                 # markieren und DRUEBERtippen — die Auswahl wird ersetzt, das
@@ -522,9 +585,8 @@ def _feld_tippen(el, wert, name, trail):
                 el.type_keys("{HOME}+{END}", set_foreground=False)
             el.type_keys(str(wert), with_spaces=False, set_foreground=False)
             time.sleep(0.15)
-            ist = el.window_text() or ""
+            ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
-                el.type_keys("{TAB}", set_foreground=False)
                 trail.append(f"{name} getippt: {wert}")
                 return True
             trail.append(f"{name}-Ruecklesen zeigt '{ist.strip()}' statt {wert}")
@@ -833,19 +895,44 @@ def run(cfg_path, cmd):
             r = sym_combo.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
         except Exception:
             pass
-        gewaehlt = False
-        try:
-            for opt in sym_combo.texts():
-                if symbol.lower() in (opt or "").lower():
-                    sym_combo.select(opt); gewaehlt = True; break
-        except Exception:
-            pass
+
+        # Symbol BESTAETIGEN statt nur auswaehlen (18.08.2026, Spur-Fund:
+        # select() schlug still fehl und nur der zufaellig richtige Chart
+        # rettete den Lauf — ohne Bestaetigung ginge die Order aufs falsche
+        # Symbol). Lesen via _feld_lesen (window_text waere nur das Label).
+        def _symbol_drin():
+            return symbol.lower() in (_feld_lesen(sym_combo) or "").lower()
+
+        gewaehlt = _symbol_drin()   # F9 folgt dem aktiven Chart — oft schon richtig
         if not gewaehlt:
             try:
-                sym_combo.select(symbol); gewaehlt = True
+                for opt in sym_combo.texts():
+                    if symbol.lower() in (opt or "").lower():
+                        sym_combo.select(opt)
+                        break
+                else:
+                    sym_combo.select(symbol)
             except Exception:
                 pass
-        trail.append(f"Symbol {'gewaehlt' if gewaehlt else 'NICHT gewaehlt'}: {symbol}")
+            time.sleep(0.3)
+            gewaehlt = _symbol_drin()
+        if not gewaehlt:
+            # Combo ist editierbar: Symbol ECHT eintippen (Autovervollstaendigung),
+            # TAB uebergibt die Eingabe
+            try:
+                sym_combo.set_focus(); time.sleep(0.15)
+                sym_combo.type_keys("^a{DELETE}", set_foreground=False)
+                sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
+                sym_combo.type_keys("{TAB}", set_foreground=False)
+                time.sleep(0.3)
+            except Exception:
+                pass
+            gewaehlt = _symbol_drin()
+        trail.append(f"Symbol {'bestaetigt' if gewaehlt else 'NICHT bestaetigt'}: {symbol}")
+        if not gewaehlt:
+            raise RuntimeError(f"Symbol '{symbol}' steht nicht bestaetigt im Dialog "
+                               f"(gelesen: '{(_feld_lesen(sym_combo) or '')[:40]}') — "
+                               f"Abbruch, sonst ginge die Order aufs falsche Symbol.")
         time.sleep(0.3)
         # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
         # Fill-Kurs (Finns Timing-Loesung). Feld nach Beschriftung, sonst
@@ -922,13 +1009,28 @@ def run(cfg_path, cmd):
     # ECHTE Eingabe zuerst (18.08.2026, Live-Fund — dieselbe Lehre wie beim
     # set_text: MT5 reagiert auf echte Events. Das Volumen stand korrekt im
     # Dialog, der .click()-Weg verpuffte, der Dialog blieb einfach stehen).
-    # Fokus auf DIESEN Knopf (Fensterbefehl, Parsec-fest) + LEERTASTE als
-    # echter Tastendruck. BEWUSST kein pauschales {ENTER}: Enter drueckt den
-    # Default-Knopf des Dialogs — und der koennte die falsche Richtung sein.
+    # BEWUSST kein pauschales {ENTER}: Enter drueckt den Default-Knopf des
+    # Dialogs — und der koennte die falsche Richtung sein.
+    def _weg_leertaste():
+        knopf.set_focus()
+        time.sleep(0.15)
+        try:
+            hat_fokus = bool(knopf.has_keyboard_focus())
+        except Exception:
+            hat_fokus = False
+        if not hat_fokus:
+            # sonst tippte die Leertaste in das gerade fokussierte FELD
+            raise RuntimeError("Knopf nimmt keinen Tastatur-Fokus an")
+        knopf.type_keys("{SPACE}", set_foreground=False)
+
+    def _weg_sendinput():
+        r2 = knopf.rectangle()
+        if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+            raise RuntimeError("SendInput abgelehnt")
+
     ausgeloest = None
-    for weg, tu in (("Fokus+Leertaste",
-                     lambda: (knopf.set_focus(), time.sleep(0.15),
-                              knopf.type_keys("{SPACE}", set_foreground=False))),
+    for weg, tu in (("Fokus+Leertaste", _weg_leertaste),
+                    ("SendInput-Klick", _weg_sendinput),
                     (".click()", lambda: knopf.click()),
                     ("click_input", lambda: knopf.click_input())):
         try:
