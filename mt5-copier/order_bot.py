@@ -38,6 +38,7 @@ VOR dem Buy/Sell-Klick). Nach dem Klick ist jede Unsicherheit retry_ok=False —
 import json
 import math
 import os
+import re
 import sys
 import time
 
@@ -139,7 +140,6 @@ def zeile_nennt_ticket(text, ticket):
     """Steht die Ticket-Nummer als eigenstaendige Zahl im Element-Text? So wird
     die Zeile der Position in der Handel-Liste erkannt, ohne dass 9123456789
     faelschlich auf 123456789 passt."""
-    import re
     return bool(re.search(r"(?<!\d)" + re.escape(str(int(ticket))) + r"(?!\d)",
                           text or ""))
 
@@ -213,13 +213,14 @@ def _api_lesen(path, expected, symbol=None):
 MT5_KLASSE = "MetaQuotes::MetaTrader::5.00"
 
 
-def _klick_absolut(x, y):
+def _klick_absolut(x, y, taste="links", doppel=False):
     """Echter Maus-Klick als EIN atomarer SendInput-Batch mit ABSOLUT-
     Koordinaten (18.08.2026): Bewegen+Druecken+Loslassen in einem Aufruf.
     pywinautos click_input bewegt erst und klickt dann getrennt — genau in
     diese Luecke funkt Parsec mit der lokalen Mausposition (Fund 16.08.).
     Ein Batch laesst dem keinen Raum, und fuer MT5 ist das Ergebnis von
-    einem Hand-Klick nicht unterscheidbar."""
+    einem Hand-Klick nicht unterscheidbar. taste='rechts' fuer Kontextmenues,
+    doppel=True haengt Druecken+Loslassen als Doppelklick an."""
     import ctypes
     user32 = ctypes.windll.user32
     W, H = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
@@ -235,12 +236,16 @@ def _klick_absolut(x, y):
     class _INP(ctypes.Structure):
         _fields_ = [("type", ctypes.c_ulong), ("mi", _MI)]
 
-    MOVE, DOWN, UP, ABS = 0x0001, 0x0002, 0x0004, 0x8000
-    batch = (_INP * 3)()
-    for i, fl in enumerate((MOVE | ABS, MOVE | DOWN | ABS, MOVE | UP | ABS)):
+    MOVE, ABS = 0x0001, 0x8000
+    DOWN, UP = (0x0002, 0x0004) if taste == "links" else (0x0008, 0x0010)
+    folge = [MOVE | ABS, MOVE | DOWN | ABS, MOVE | UP | ABS]
+    if doppel:
+        folge += [MOVE | DOWN | ABS, MOVE | UP | ABS]
+    batch = (_INP * len(folge))()
+    for i, fl in enumerate(folge):
         batch[i].type = 0  # INPUT_MOUSE
         batch[i].mi = _MI(ax, ay, 0, fl, 0, None)
-    return user32.SendInput(3, batch, ctypes.sizeof(_INP)) == 3
+    return user32.SendInput(len(folge), batch, ctypes.sizeof(_INP)) == len(folge)
 
 
 def _cursor_pos():
@@ -609,6 +614,28 @@ def _ist_aendern_dialog(win):
     return False
 
 
+def _dialog_gehoert_zu(dlg, ticket):
+    """Gehoert der Aendern-Dialog wirklich zu UNSERER Position? Der lange
+    Aendern-Knopf traegt die Ticket-Nummer ('#123456789 ... aendern'). Steht
+    irgendwo eine ANDERE lange Nummer und unsere nirgends, ist es der Dialog
+    einer fremden Position — dort darf nichts getippt werden. 7+ Stellen,
+    damit Kurse (29989.33) nicht als Ticket zaehlen; zeigt der Dialog gar
+    keine lange Nummer, gibt es keinen Widerspruch -> weitermachen."""
+    zahlen = []
+    try:
+        for c in dlg.descendants():
+            try:
+                t = c.window_text() or ""
+            except Exception:
+                continue
+            zahlen.extend(re.findall(r"(?<!\d)(\d{7,})(?!\d)", t))
+    except Exception:
+        pass
+    if not zahlen:
+        return True
+    return str(int(ticket)) in zahlen
+
+
 def _finde_aendern_dialog(hauptfenster, timeout=3.0):
     """Wie _finde_order_dialog (Top-Level UND Kind-Fenster — der F9-Fund vom
     15.08.2026 gilt fuer jeden MT5-Dialog), aber auf den Aendern-Dialog."""
@@ -671,83 +698,106 @@ def _kontextmenue_aendern_klicken():
     return False
 
 
-def _sltp_klicken(w, ticket, sl_text, tp_text, trail):
+def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
     oeffnen, die vom echten Fill gerechneten Kurse eintippen, Aendern klicken.
     Mehrere Oeffnungswege in fester Reihenfolge (cursor-unabhaengig zuerst,
     Parsec-Fund 16.08.2026); jeder Versuch wird in der Spur vermerkt. Ob es
     WIRKLICH gegriffen hat, prueft ausschliesslich der Aufrufer — lesend."""
-    # 1) Zeile der Position suchen: erst in den Listen-Controls, dann ueberall
-    zeile = None
+    # 1) Kandidaten-Zeilen suchen: Ticket-Treffer zuerst; sonst Zeilen, die das
+    #    Symbol PLUS weitere Daten tragen (18.08.2026, Live-Fund: der Dialog
+    #    liess sich nie oeffnen — je nach MT5-Build steht das Ticket nicht im
+    #    UIA-Namen der Handel-Zeile). Marktuebersicht-Zeilen (nur Symbolname)
+    #    fallen durch die Laengen-Bedingung. Welche Zeile die richtige war,
+    #    entscheidet am Ende IMMER der Dialog selbst (_dialog_gehoert_zu).
+    kandidaten, ticket_da = [], False
     try:
         for ct in ("DataItem", "ListItem", "TreeItem", "Custom", "Text", None):
-            kandidaten = (w.descendants(control_type=ct) if ct else w.descendants())
-            for el in kandidaten:
+            for el in (w.descendants(control_type=ct) if ct else w.descendants()):
                 try:
-                    if zeile_nennt_ticket(el.window_text() or "", ticket):
-                        zeile = el
-                        break
+                    t = el.window_text() or ""
                 except Exception:
                     continue
-            if zeile is not None:
+                if zeile_nennt_ticket(t, ticket):
+                    kandidaten.insert(0, el)
+                    ticket_da = True
+                elif symbol and symbol.lower() in t.lower() \
+                        and len(t) > len(symbol) + 8 and len(kandidaten) < 3:
+                    kandidaten.append(el)
+            if ticket_da:
                 break
     except Exception:
         pass
-    trail.append("Positions-Zeile " + ("gefunden" if zeile is not None else "NICHT gefunden"))
+    trail.append(f"Zeilen-Kandidaten: {len(kandidaten)}"
+                 + (" (Ticket dabei)" if ticket_da else ""))
 
-    # 2) Aendern-Dialog oeffnen — Wege der Reihe nach, nach jedem kurz suchen
+    # 2) Je Kandidat den Aendern-Dialog oeffnen — SendInput-Doppelklick zuerst
+    #    (der Weg, den auch die Hand nimmt), dann die synthetischen Wege.
+    #    JEDER geoeffnete Dialog wird per Ticket gegengeprueft, bevor getippt
+    #    wird — nie die falsche Position anfassen.
     dlg = None
-    if zeile is not None:
+    for zeile in kandidaten[:3]:
         try:
             r = zeile.rectangle()
-            _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
+            mx, my = r.mid_point().x, r.mid_point().y
         except Exception:
-            pass
-        wege = []
+            mx = my = None
+        if mx is not None:
+            _maus_fahren(mx, my, schritte=8)
 
-        def _invoke():
+        def _weg_doppel():
+            if mx is None or not _klick_absolut(mx, my, doppel=True):
+                raise RuntimeError("kein SendInput-Doppelklick")
+
+        def _weg_invoke():
             zeile.invoke()
-        wege.append(("invoke", _invoke))
 
-        def _dodefault():
+        def _weg_dodefault():
             zeile.iface_legacyiaccessible.DoDefaultAction()
-        wege.append(("DoDefaultAction", _dodefault))
 
-        def _tasten_menue():
+        def _weg_menue():
             zeile.select()
             time.sleep(0.2)
             w.type_keys("+{F10}")
             time.sleep(0.4)
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
-        wege.append(("Shift-F10-Menue", _tasten_menue))
 
-        def _doppelklick():
-            zeile.click_input(double=True)
-        wege.append(("Doppelklick", _doppelklick))
-
-        def _rechtsklick_menue():
-            zeile.click_input(button="right")
+        def _weg_rechtsklick():
+            if mx is None or not _klick_absolut(mx, my, taste="rechts"):
+                raise RuntimeError("kein SendInput-Rechtsklick")
             time.sleep(0.4)
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
-        wege.append(("Rechtsklick-Menue", _rechtsklick_menue))
 
-        for name, weg in wege:
+        for name, weg in (("SendInput-Doppelklick", _weg_doppel),
+                          ("invoke", _weg_invoke),
+                          ("DoDefaultAction", _weg_dodefault),
+                          ("Shift-F10-Menue", _weg_menue),
+                          ("Rechtsklick-Menue", _weg_rechtsklick)):
             try:
                 weg()
             except Exception:
                 continue
-            dlg = _finde_aendern_dialog(w)
-            if dlg is not None:
-                trail.append(f"Aendern-Dialog offen ({name})")
-                break
-            # haengengebliebenes Menue schliessen, bevor der naechste Weg kommt
+            d = _finde_aendern_dialog(w, timeout=1.5)
+            if d is not None:
+                if _dialog_gehoert_zu(d, ticket):
+                    dlg = d
+                    trail.append(f"Aendern-Dialog offen ({name})")
+                    break
+                trail.append(f"Dialog einer ANDEREN Position ({name}) — geschlossen")
+                try:
+                    d.type_keys("{ESC}", set_foreground=False)
+                except Exception:
+                    pass
+            # haengengebliebenes Menue/Fenster schliessen vor dem naechsten Weg
             try:
                 w.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
+        if dlg is not None:
+            break
     if dlg is None:
         return {"ok": False, "msg": "Aendern-Dialog liess sich nicht oeffnen"}
 
@@ -903,19 +953,20 @@ def run(cfg_path, cmd):
         def _symbol_drin():
             return symbol.lower() in (_feld_lesen(sym_combo) or "").lower()
 
-        gewaehlt = _symbol_drin()   # F9 folgt dem aktiven Chart — oft schon richtig
-        if not gewaehlt:
-            try:
-                for opt in sym_combo.texts():
-                    if symbol.lower() in (opt or "").lower():
-                        sym_combo.select(opt)
-                        break
-                else:
-                    sym_combo.select(symbol)
-            except Exception:
-                pass
-            time.sleep(0.3)
-            gewaehlt = _symbol_drin()
+        # IMMER aktiv auswaehlen (18.08.2026, Finns Ansage: der Bot geht
+        # sichtbar ins Asset-Feld und waehlt selbst — nicht nur nachschauen,
+        # was das Chart-Profil vorgibt). Bestaetigt wird trotzdem per Lesen.
+        try:
+            for opt in sym_combo.texts():
+                if symbol.lower() in (opt or "").lower():
+                    sym_combo.select(opt)
+                    break
+            else:
+                sym_combo.select(symbol)
+        except Exception:
+            pass
+        time.sleep(0.3)
+        gewaehlt = _symbol_drin()
         if not gewaehlt:
             # Combo ist editierbar: Symbol ECHT eintippen (Autovervollstaendigung),
             # TAB uebergibt die Eingabe
@@ -1072,7 +1123,7 @@ def run(cfg_path, cmd):
             except Exception:
                 pass
             time.sleep(0.4)
-            k = _sltp_klicken(w, p["ticket"], fmt_preis(sl, digits),
+            k = _sltp_klicken(w, p["ticket"], symbol, fmt_preis(sl, digits),
                               fmt_preis(tp, digits), trail)
             # Bestaetigung NUR lesend: traegt die Position die Werte wirklich?
             bestaetigt = False
