@@ -144,6 +144,17 @@ def zeile_nennt_ticket(text, ticket):
                           text or ""))
 
 
+def ist_handelszeile(text, symbol):
+    """Sieht der UIA-Text wie eine Zeile der HANDEL-Liste aus? Symbol UND
+    buy/sell muessen drinstehen. Fund 18.08.2026: der .54-Filter (Symbol plus
+    Mindestlaenge) traf auch den Chart-Titel ('NAS100,M1: US Tech 100 Index')
+    und den Navigator-Eintrag ('ProphosHedgeReader - NAS100,M1') — der
+    Doppelklick darauf oeffnete den EA-Eigenschaften-Dialog. Beide tragen
+    nie buy/sell."""
+    t = (text or "").lower()
+    return bool(symbol) and symbol.lower() in t and ("buy" in t or "sell" in t)
+
+
 # ---------------------------------------------------------------------------
 # LESENDER API-Teil — Kurse + Positionsstand (traegt keine Order-Markierung)
 # ---------------------------------------------------------------------------
@@ -698,6 +709,38 @@ def _kontextmenue_aendern_klicken():
     return False
 
 
+def _fremde_dialoge_schliessen(hauptfenster):
+    """Versehentlich geoeffnete Fenster (z.B. EA-Eigenschaften) wieder zu —
+    IMMER ueber Abbrechen/ESC, NIE ueber OK (18.08.2026: der .54-Doppelklick
+    traf den Navigator, der ProphosHedgeReader-Dialog ging auf, und das ESC
+    ans Hauptfenster hat ihn nicht geschlossen — er blieb bei Finn stehen).
+    Aendern-Dialoge werden verschont, um die kuemmert sich der Aufrufer."""
+    from pywinauto import Desktop
+    try:
+        pid = hauptfenster.element_info.process_id
+        for d in Desktop(backend="uia").windows():
+            try:
+                if d.element_info.process_id != pid or not d.is_visible() \
+                        or d.element_info.class_name == MT5_KLASSE \
+                        or _ist_aendern_dialog(d):
+                    continue
+                zu = False
+                for b in d.descendants(control_type="Button"):
+                    if (b.window_text() or "").strip().lower() in ("abbrechen", "cancel"):
+                        try:
+                            b.click()
+                            zu = True
+                        except Exception:
+                            pass
+                        break
+                if not zu:
+                    d.type_keys("{ESC}", set_foreground=False)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
@@ -722,8 +765,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
                 if zeile_nennt_ticket(t, ticket):
                     kandidaten.insert(0, el)
                     ticket_da = True
-                elif symbol and symbol.lower() in t.lower() \
-                        and len(t) > len(symbol) + 8 and len(kandidaten) < 3:
+                elif ist_handelszeile(t, symbol) and len(kandidaten) < 3:
                     kandidaten.append(el)
             if ticket_da:
                 break
@@ -737,18 +779,30 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
     #    JEDER geoeffnete Dialog wird per Ticket gegengeprueft, bevor getippt
     #    wird — nie die falsche Position anfassen.
     dlg = None
+    try:
+        haupt_r = w.rectangle()
+        maus_grenze = haupt_r.top + (haupt_r.bottom - haupt_r.top) // 2
+    except Exception:
+        maus_grenze = None
+    _fremde_dialoge_schliessen(w)
     for zeile in kandidaten[:3]:
         try:
             r = zeile.rectangle()
             mx, my = r.mid_point().x, r.mid_point().y
         except Exception:
+            r = None
             mx = my = None
-        if mx is not None:
+        # Maus-Klicks nur im UNTEREN Fensterbereich (Toolbox): oben liegen
+        # Chart und Ein-Klick-Panel — ein Doppelklick dort waere im
+        # schlimmsten Fall eine ORDER (18.08.2026, nach dem Navigator-Fund).
+        maus_ok = (mx is not None and maus_grenze is not None
+                   and r.top >= maus_grenze)
+        if maus_ok:
             _maus_fahren(mx, my, schritte=8)
 
         def _weg_doppel():
-            if mx is None or not _klick_absolut(mx, my, doppel=True):
-                raise RuntimeError("kein SendInput-Doppelklick")
+            if not maus_ok or not _klick_absolut(mx, my, doppel=True):
+                raise RuntimeError("Maus hier nicht erlaubt/fehlgeschlagen")
 
         def _weg_invoke():
             zeile.invoke()
@@ -765,8 +819,8 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
                 raise RuntimeError("kein Menuepunkt")
 
         def _weg_rechtsklick():
-            if mx is None or not _klick_absolut(mx, my, taste="rechts"):
-                raise RuntimeError("kein SendInput-Rechtsklick")
+            if not maus_ok or not _klick_absolut(mx, my, taste="rechts"):
+                raise RuntimeError("Maus hier nicht erlaubt/fehlgeschlagen")
             time.sleep(0.4)
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
@@ -791,14 +845,17 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
                     d.type_keys("{ESC}", set_foreground=False)
                 except Exception:
                     pass
-            # haengengebliebenes Menue/Fenster schliessen vor dem naechsten Weg
+            # haengengebliebene Menues UND versehentlich geoeffnete Fenster
+            # (EA-Dialog!) schliessen, bevor der naechste Weg drankommt
             try:
                 w.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
+            _fremde_dialoge_schliessen(w)
         if dlg is not None:
             break
     if dlg is None:
+        _fremde_dialoge_schliessen(w)
         return {"ok": False, "msg": "Aendern-Dialog liess sich nicht oeffnen"}
 
     # 3) SL/TP-Felder nach Beschriftung, sonst die ersten beiden Edits

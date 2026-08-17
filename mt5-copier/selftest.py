@@ -404,6 +404,12 @@ def main():
         and order_bot.zahl_gleich("19 500,00", "19500.00")
         and not order_bot.zahl_gleich("0.01", "2")
         and not order_bot.zahl_gleich("", "2"))
+    # Handel-Zeile vs. Chart-Titel/Navigator (18.08.2026, EA-Dialog-Vorfall)
+    chk("ORDER-BOT: Handel-Zeile erkannt, Chart-Titel/Navigator nicht",
+        order_bot.ist_handelszeile("nas100, 512309082, buy, 1.00, 29992.33", "NAS100")
+        and not order_bot.ist_handelszeile("NAS100,M1: US Tech 100 Index", "NAS100")
+        and not order_bot.ist_handelszeile("ProphosHedgeReader - NAS100,M1", "NAS100")
+        and not order_bot.ist_handelszeile("", "NAS100"))
 
     print()
     ok = sum(1 for r in results if r)
