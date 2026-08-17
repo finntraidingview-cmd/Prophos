@@ -854,6 +854,51 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail):
             _fremde_dialoge_schliessen(w)
         if dlg is not None:
             break
+
+    if dlg is None:
+        # Geometrie-Fallback (18.08.2026): sieht UIA die Handel-Zeilen nicht,
+        # dient die 'Kontostand'-Zeile als Anker — die Positionen stehen im
+        # Handel-Tab DIREKT darueber. Blind-Doppelklick in die Zeile(n) ueber
+        # dem Anker; ob der RICHTIGE Dialog aufging, entscheidet wie immer
+        # _dialog_gehoert_zu, und die Maus bleibt im unteren Fensterbereich.
+        anker = None
+        try:
+            for ct in ("Text", None):
+                for el in (w.descendants(control_type=ct) if ct else w.descendants()):
+                    try:
+                        if (el.window_text() or "").strip().lower().startswith("kontostand"):
+                            anker = el.rectangle()
+                            break
+                    except Exception:
+                        continue
+                if anker is not None:
+                    break
+        except Exception:
+            pass
+        trail.append("Kontostand-Anker " + ("gefunden" if anker is not None else "NICHT gefunden"))
+        if anker is not None and maus_grenze is not None:
+            gx = anker.left + 80
+            for i, dy in enumerate((10, 29, 48), start=1):
+                gy = anker.top - dy
+                if gy < maus_grenze:
+                    break
+                _maus_fahren(gx, gy, schritte=6)
+                if not _klick_absolut(gx, gy, doppel=True):
+                    continue
+                d = _finde_aendern_dialog(w, timeout=1.5)
+                if d is None:
+                    continue
+                if _dialog_gehoert_zu(d, ticket):
+                    dlg = d
+                    trail.append(f"Aendern-Dialog offen (Geometrie, Zeile -{i})")
+                    break
+                trail.append(f"Geometrie Zeile -{i}: fremder Dialog — geschlossen")
+                try:
+                    d.type_keys("{ESC}", set_foreground=False)
+                except Exception:
+                    pass
+                _fremde_dialoge_schliessen(w)
+
     if dlg is None:
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "msg": "Aendern-Dialog liess sich nicht oeffnen"}
@@ -1209,7 +1254,8 @@ def run(cfg_path, cmd):
             return {"ok": False, "retry_ok": False,
                     "msg": f"Position ist OFFEN @ {fill}, aber SL/TP-Klick nicht bestaetigt "
                            f"({k.get('msg')}) — im Terminal SL {fmt_preis(sl, digits)} / "
-                           f"TP {fmt_preis(tp, digits)} SOFORT von Hand nachtragen!",
+                           f"TP {fmt_preis(tp, digits)} SOFORT von Hand nachtragen! "
+                           f"Spur: [" + " → ".join(trail) + "]",
                     "trail": " → ".join(trail), "symbol": symbol,
                     "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
                     "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
