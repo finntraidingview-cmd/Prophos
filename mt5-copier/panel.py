@@ -1621,9 +1621,15 @@ class Handler(BaseHTTPRequestHandler):
                     "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
                     "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
             try:
+                # 300s statt 45s (18.08.2026, Finns Lauf: der SL/TP-Zeilen-Scan
+                # wurde nach 45s mitten in der Suche abgewuergt — die Position
+                # lag dann OHNE Stop im Markt, ohne dass die Meldung die Werte
+                # nannte). 300s deckt den schlimmsten Scan locker; die Bremse
+                # bleibt, weil an diesem Aufruf das Lock fuer ALLE Trade-Starts
+                # haengt — ein wirklich haengender Bot darf es nicht ewig halten.
                 p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
-                                   capture_output=True, text=True, timeout=45)
+                                   capture_output=True, text=True, timeout=300)
                 line = (p.stdout or "").strip().splitlines()
                 # Stumme Bots sind Diagnose-Killer: stderr-Ende mitgeben (z.B.
                 # Traceback/ImportError), sonst bleibt der Fehler anonym.
@@ -1632,8 +1638,9 @@ class Handler(BaseHTTPRequestHandler):
                     "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
             except subprocess.TimeoutExpired:
                 res = {"ok": False, "retry_ok": False,
-                       "msg": "Order-Bot Timeout (45s) — im Terminal pruefen, "
-                              "ob die Order trotzdem platziert wurde!"}
+                       "msg": "Order-Bot Timeout (300s) — im Terminal pruefen, ob die "
+                              "Order platziert wurde und ob SL/TP an der Position "
+                              "haengen (sonst von Hand nachtragen)!"}
             except (OSError, ValueError) as e:
                 res = {"ok": False, "retry_ok": False, "msg": f"Order-Bot-Start fehlgeschlagen: {e}"}
             finally:
