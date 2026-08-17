@@ -397,6 +397,13 @@ def main():
         order_bot.zeile_nennt_ticket("123456789 NAS100 buy 0.20", 123456789)
         and not order_bot.zeile_nennt_ticket("9123456789 NAS100", 123456789)
         and not order_bot.zeile_nennt_ticket("", 123456789))
+    # Ruecklese-Vergleich (18.08.2026, Feld zeigte '2', MT5 rechnete 0.01):
+    # als Zahl vergleichen, MT5-Umformatierung und Locale duerfen nicht stoeren
+    chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",
+        order_bot.zahl_gleich("2.00", "2")
+        and order_bot.zahl_gleich("19 500,00", "19500.00")
+        and not order_bot.zahl_gleich("0.01", "2")
+        and not order_bot.zahl_gleich("", "2"))
 
     print()
     ok = sum(1 for r in results if r)

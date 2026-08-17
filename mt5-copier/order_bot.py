@@ -8,7 +8,8 @@ aussehen — eine API-Order traegt die Expert-Markierung, ein echter Klick nicht
 Choreografie (sichtbar, wie mit Finn geuebt):
   1. Maus faehrt in die Taskleiste und klickt den Terminal-Tab
   2. Fenster-Guard: Titelzeile MUSS die Kontonummer tragen, sonst Abbruch
-  3. F9 -> Order-Dialog, Symbol/Volumen/SL/TP werden sichtbar eingetippt
+  3. F9 -> Order-Dialog, Symbol waehlen, Volumen ECHT eintippen (Tastatur-
+     Events, kein set_text — s. _feld_tippen) und zuruecklesen
   4. Maus faehrt auf den Buy/Sell-Knopf und klickt — der einzige unumkehrbare Schritt
   5. Bestaetigung NICHT der UI glauben: Positionsliste des Kontos (nur LESEND
      ueber die MetaTrader5-API — Lesen traegt keine Order-Markierung)
@@ -120,6 +121,18 @@ def sltp_bestaetigt(pos_sl, pos_tp, sl, tp, digits):
     tol = 1.5 * (10 ** -int(digits))
     return (abs(float(pos_sl) - float(sl)) <= tol
             and abs(float(pos_tp) - float(tp)) <= tol)
+
+
+def zahl_gleich(text, wert, tol=1e-9):
+    """Zeigt der ZURUECKGELESENE Feldtext wirklich den getippten Wert? Vergleich
+    als Zahl, nicht als String — MT5 formatiert um ('2' -> '2.00') und kann je
+    nach Windows-Locale Komma/Leerzeichen einstreuen."""
+    try:
+        a = float(str(text).strip().replace(" ", "").replace(",", "."))
+        b = float(str(wert).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return False
+    return abs(a - b) <= tol * max(1.0, abs(b)) + 1e-12
 
 
 def zeile_nennt_ticket(text, ticket):
@@ -479,6 +492,34 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
     return None
 
 
+def _feld_tippen(el, wert, name, trail):
+    """Wert per ECHTEN Tastenanschlaegen eintippen (18.08.2026, Finns Fund am
+    PC: set_edit_text/set_text malt den Text nur in den Feld-Speicher — kein
+    WM_CHAR-Event, MT5 parst nie und rechnet intern mit dem ALTEN Wert weiter.
+    Sichtbar stand '2' im Volumen-Feld, das Label daneben rechnete 0.01).
+    Deshalb: Fokus OHNE Cursor (set_focus — Fenster-/Tastaturbefehle gehen auch
+    ueber Parsec durch, der Parsec-Fund 16.08. betraf nur Maus-Klicks), dann
+    tippen wie ein Mensch, dann den Feldtext ZURUECKLESEN und als Zahl
+    vergleichen. Erst wenn das stimmt, uebergibt TAB den Wert an MT5."""
+    for _versuch in (1, 2):
+        try:
+            el.set_focus()
+            time.sleep(0.15)
+            el.type_keys("^a{DELETE}", set_foreground=False)
+            el.type_keys(str(wert), with_spaces=False, set_foreground=False)
+            time.sleep(0.15)
+            ist = el.window_text() or ""
+            if zahl_gleich(ist, wert):
+                el.type_keys("{TAB}", set_foreground=False)
+                trail.append(f"{name} getippt: {wert}")
+                return True
+            trail.append(f"{name}-Ruecklesen zeigt '{ist.strip()}' statt {wert}")
+        except Exception:
+            continue
+    trail.append(f"{name} NICHT uebernommen: {wert}")
+    return False
+
+
 def _ist_aendern_dialog(win):
     """Der Aendern-Dialog einer Position: traegt den langen Aendern-Knopf.
     Der F9-Neu-Order-Dialog hat keinen solchen Knopf — damit ist verwechseln
@@ -643,19 +684,11 @@ def _sltp_klicken(w, ticket, sl_text, tp_text, trail):
         if sl_el is None or tp_el is None:
             raise RuntimeError(f"SL/TP-Felder nicht gefunden ({len(edits)} Edits). "
                                f"Struktur: {_dialog_struktur(dlg)}")
+        # ECHT tippen statt set_text (18.08.2026, gleicher Fund wie beim
+        # Volumen-Feld: gemalter Text kommt bei MT5 nie an, s. _feld_tippen)
         for el, wert, name in ((sl_el, sl_text, "SL"), (tp_el, tp_text, "TP")):
-            gesetzt = False
-            for setter in ("set_edit_text", "set_text"):
-                try:
-                    getattr(el, setter)(wert)
-                    gesetzt = True
-                    break
-                except Exception:
-                    continue
-            if not gesetzt:
-                el.set_focus()
-                el.type_keys("^a{DELETE}" + wert, with_spaces=False, set_foreground=False)
-            trail.append(f"{name}-Feld: {wert}")
+            if not _feld_tippen(el, wert, name, trail):
+                raise RuntimeError(f"{name}-Feld uebernimmt {wert} nicht")
         time.sleep(0.3)
     except Exception as e:
         try:
@@ -801,28 +834,19 @@ def run(cfg_path, cmd):
         trail.append(f"Symbol {'gewaehlt' if gewaehlt else 'NICHT gewaehlt'}: {symbol}")
         time.sleep(0.3)
         # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
-        # Fill-Kurs (Finns Timing-Loesung: kein Vor-Ausrechnen aus einem Kurs,
-        # der bis zum Klick schon veraltet ist). Feld nach Beschriftung, sonst
-        # Index-Fallback. set_edit_text — cursor-unabhaengig.
+        # Fill-Kurs (Finns Timing-Loesung). Feld nach Beschriftung, sonst
+        # Index-Fallback. ECHT tippen statt set_text (18.08.2026, Finns Fund am
+        # PC: gemalter Text kommt bei MT5 nie an, s. _feld_tippen) — und ohne
+        # bestaetigtes Ruecklesen wird NICHT geklickt (sonst handelt der Bot
+        # still den alten Feld-Wert, z.B. 0.01 statt 2).
         vol_el = _map_felder(dlg).get("volumen", edits[0])
         try:
             r = vol_el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
         except Exception:
             pass
-        gesetzt = False
-        for setter in ("set_edit_text", "set_text"):
-            try:
-                getattr(vol_el, setter)(f"{vol:g}"); gesetzt = True; break
-            except Exception:
-                continue
-        if not gesetzt:
-            try:
-                vol_el.set_focus()
-                vol_el.type_keys("^a{DELETE}" + f"{vol:g}", with_spaces=False, set_foreground=False)
-                gesetzt = True
-            except Exception:
-                pass
-        trail.append(f"Volumen {'gesetzt' if gesetzt else 'NICHT gesetzt'}: {vol:g}")
+        if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail):
+            raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
+                               f"Abbruch VOR dem Order-Knopf.")
         time.sleep(0.2)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
