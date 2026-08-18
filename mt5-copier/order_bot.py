@@ -323,7 +323,7 @@ def _maus_fahren(x, y, schritte=18):
                         int(cy + (y - cy) * i / schritte))
         except Exception:
             break
-        time.sleep(0.02)
+        time.sleep(0.012)
 
 
 def _bildschirm_groesse():
@@ -430,11 +430,11 @@ def _fenster_betreten(w):
     try:
         if w.is_minimized():
             w.restore()
-            time.sleep(0.4)
+            time.sleep(0.2)
     except Exception:
         pass
     w.set_focus()
-    time.sleep(0.4)
+    time.sleep(0.25)
     try:
         from pywinauto import mouse
         r = w.rectangle()
@@ -443,7 +443,7 @@ def _fenster_betreten(w):
         y = int(r.top + 14)
         _maus_fahren(x, y)
         mouse.click(coords=(x, y))
-        time.sleep(0.3)
+        time.sleep(0.15)
     except Exception:
         pass  # Fokus steht schon — der Klick ist der sichtbare Uebernahme-Moment
 
@@ -616,14 +616,14 @@ def _feld_tippen(el, wert, name, trail):
     for _versuch in (1, 2):
         try:
             el.set_focus()
-            time.sleep(0.15)
+            time.sleep(0.1)
             # Feld GARANTIERT leeren (18.08.2026, Finns 22-Einwand: steht vom
             # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
             # Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur
             # eines von beiden. Danach ZURUECKLESEN, ob es wirklich leer ist.
             el.type_keys("^a{DELETE}", set_foreground=False)
             el.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
-            time.sleep(0.1)
+            time.sleep(0.08)
             rest = (_feld_lesen(el) or "").strip()
             if rest:
                 # Feld fuellt sich selbst wieder (Auto-Format)? Dann alles
@@ -633,7 +633,7 @@ def _feld_tippen(el, wert, name, trail):
                 el.type_keys("^a", set_foreground=False)
                 el.type_keys("{HOME}+{END}", set_foreground=False)
             el.type_keys(str(wert), with_spaces=False, set_foreground=False)
-            time.sleep(0.15)
+            time.sleep(0.12)
             ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
                 trail.append(f"{name} getippt: {wert}")
@@ -829,7 +829,7 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
             if runde == "Rechtsklick-Menue":
                 if not _klick_absolut(px_, py_, taste="rechts"):
                     continue
-                time.sleep(0.35)
+                time.sleep(0.25)
                 if not _kontextmenue_aendern_klicken(timeout=0.8):
                     try:
                         w.type_keys("{ESC}", set_foreground=False)
@@ -1140,7 +1140,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
 
     def _k_leertaste():
         knopf.set_focus()
-        time.sleep(0.15)
+        time.sleep(0.1)
         try:
             hat = bool(knopf.has_keyboard_focus())
         except Exception:
@@ -1227,7 +1227,7 @@ def run(cfg_path, cmd):
 
     # 3) F9 -> Dialog -> Felder direkt setzen (cursor-unabhaengig, s.o. Parsec)
     w.type_keys("{F9}")
-    time.sleep(0.9)
+    time.sleep(0.4)
     dlg = _finde_order_dialog(w)
     if dlg is None:
         return {"ok": False, "retry_ok": True,
@@ -1280,7 +1280,7 @@ def run(cfg_path, cmd):
                 sym_combo.select(symbol)
         except Exception:
             pass
-        time.sleep(0.3)
+        time.sleep(0.15)
         gewaehlt = _symbol_drin()
         if not gewaehlt:
             # Combo ist editierbar: Symbol ECHT eintippen (Autovervollstaendigung),
@@ -1290,7 +1290,7 @@ def run(cfg_path, cmd):
                 sym_combo.type_keys("^a{DELETE}", set_foreground=False)
                 sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
                 sym_combo.type_keys("{TAB}", set_foreground=False)
-                time.sleep(0.3)
+                time.sleep(0.2)
             except Exception:
                 pass
             gewaehlt = _symbol_drin()
@@ -1363,7 +1363,7 @@ def run(cfg_path, cmd):
         werden — sonst feuern zwei Wege ZWEI Orders."""
         ende_s = time.time() + sekunden
         while time.time() < ende_s:
-            time.sleep(0.6)
+            time.sleep(0.35)
             st = _api_lesen(path, expected)
             if "fehler" not in st and finde_neue_position(
                     vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
@@ -1379,7 +1379,7 @@ def run(cfg_path, cmd):
     # Dialogs — und der koennte die falsche Richtung sein.
     def _weg_leertaste():
         knopf.set_focus()
-        time.sleep(0.15)
+        time.sleep(0.1)
         try:
             hat_fokus = bool(knopf.has_keyboard_focus())
         except Exception:
@@ -1419,7 +1419,7 @@ def run(cfg_path, cmd):
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     ende = time.time() + 12
     while time.time() < ende:
-        time.sleep(0.7)
+        time.sleep(0.4)
         nachher = _api_lesen(path, expected)
         if "fehler" in nachher:
             continue
@@ -1457,7 +1457,7 @@ def run(cfg_path, cmd):
                 dlg.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            time.sleep(0.4)
+            time.sleep(0.2)
             # Anker-Datei: gemerkte Treffer-Stelle des Zeilen-Scans. BEWUSST
             # mit 'anker-'-Praefix, damit sie NIE ins config-*.json-Muster
             # des Copiers faellt.
@@ -1469,7 +1469,7 @@ def run(cfg_path, cmd):
             bestaetigt = False
             ende2 = time.time() + 10
             while time.time() < ende2 and not bestaetigt:
-                time.sleep(0.8)
+                time.sleep(0.5)
                 st = _api_lesen(path, expected)
                 if "fehler" in st:
                     continue
@@ -1539,7 +1539,7 @@ def modus_inspect(cfg_path):
     w.set_focus()
     time.sleep(0.5)
     w.type_keys("{F9}")
-    time.sleep(0.9)
+    time.sleep(0.4)
     dlg = _finde_order_dialog(w)
     if not dlg:
         sys.exit("Kein Order-Dialog gefunden.")

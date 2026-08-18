@@ -8868,18 +8868,23 @@
       const s = inst.status || {}
       // Kompakt-Design (18.08.2026, Finns Wunsch: Symmetrie ist zentral, war
       // aber eine Mini-Textwurst): zwei P&L-Chips + Symmetrie-Farbbalken.
-      const chip = (lbl, v) =>
+      const chip = (lbl, v, lots) =>
         `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
-        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b></span>`
+        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
+        + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lt</span>` : '')
+        + `</span>`
       let masterPl = null
       if(s.master_equity != null && s.master_balance != null){
         masterPl = Number(s.master_equity) - Number(s.master_balance)
       }
-      let hedgeSum = 0, hedgeSeen = false
+      let hedgeSum = 0, hedgeSeen = false, hLots = 0
       for(const list of Object.values(s.hedges || {})){
-        for(const h of (list || [])){ hedgeSeen = true; hedgeSum += Number(h.profit) || 0 }
+        for(const h of (list || [])){ hedgeSeen = true; hedgeSum += Number(h.profit) || 0; hLots += Number(h.volume) || 0 }
       }
+      // Lots beider Seiten (18.08.2026, Finns Wunsch: sehen, wie viele Lots
+      // gerade auf Master und Hedge liegen)
+      const mLots = (s.master_positions || []).reduce((a, p2) => a + (Number(p2.volume) || 0), 0)
       // Live-Symmetrie: Hedge-P&L in USD (hedge_usd_rate — ohne Kurs kein
       // Prozent, nie raten) gegen Master-P&L. Erst ab ~0,50 $ Bewegung, sonst
       // Rauschen. Balken: Mitte = 100% (perfekte Spiegelung), voll = 200%.
@@ -8901,8 +8906,8 @@
       }
       if(masterPl == null && !hedgeSeen) return ''
       return `<span class="mono" style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap" title="Live-P&L vom MT5-Copier">`
-        + (masterPl != null ? chip('MASTER', masterPl) : '')
-        + (hedgeSeen ? chip('HEDGE', hedgeSum) : '')
+        + (masterPl != null ? chip('MASTER', masterPl, mLots) : '')
+        + (hedgeSeen ? chip('HEDGE', hedgeSum, hLots) : '')
         + symEl + `</span>`
     }catch(_){ return '' }
   }
@@ -16499,7 +16504,8 @@
               // Ehrlicher Text: keine Maus-Bewegung versprechen.
               _pfSet('m5term', 'ok', '✓ Bereit — Bot füllt gleich den Order-Dialog…')
               if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
-              for(let n = 3; n >= 1; n--){
+              // Countdown auf 1s verkuerzt (18.08.2026, Finns Tempo-Wunsch)
+              for(let n = 1; n >= 1; n--){
                 if(fe) fe.textContent = `⌨ HÄNDE WEG von Maus und Tastatur! Der Bot füllt den Order-Dialog gleich direkt aus (kein sichtbarer Mauszeiger über Parsec) — in ${n}…`
                 await new Promise(res => setTimeout(res, 1000))
               }
