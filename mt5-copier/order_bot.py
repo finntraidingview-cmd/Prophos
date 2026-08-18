@@ -776,10 +776,15 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
                 punkte.append(("Anker", ax, ay))
         except Exception:
             pass
-    for off in range(60, 400, 16):
+    # Erfahrungswert zuerst (18.08.2026, Finns Treffer beim 17. Punkt =
+    # -316px): die Suche startet dort, wo die Zeile bei Standard-Toolbox
+    # praktisch immer liegt, und faechert von da auf — der pro PC gemerkte
+    # Anker schlaegt das ohnehin.
+    offsets = sorted(range(60, 400, 16), key=lambda o: abs(o - 316))
+    for off in offsets:
         y = hr.bottom - off
         if maus_grenze is not None and y < maus_grenze:
-            break
+            continue
         punkte.append((f"-{off}px", gx, y))
 
     for runde in ("Rechtsklick-Menue", "Doppelklick"):
