@@ -8885,23 +8885,41 @@
       // Lots beider Seiten (18.08.2026, Finns Wunsch: sehen, wie viele Lots
       // gerade auf Master und Hedge liegen)
       const mLots = (s.master_positions || []).reduce((a, p2) => a + (Number(p2.volume) || 0), 0)
-      // Live-Symmetrie: Hedge-P&L in USD (hedge_usd_rate — ohne Kurs kein
-      // Prozent, nie raten) gegen Master-P&L. Erst ab ~0,50 $ Bewegung, sonst
-      // Rauschen. Balken: Mitte = 100% (perfekte Spiegelung), voll = 200%.
-      // Farbband: 85–115 grün, 60–140 orange, sonst rot.
+      // Live-Symmetrie PLAN-RELATIV (18.08.2026, Finns Ansage mit Beispiel:
+      // Ziel 1000€ auf A gegen 100€ auf B — A +500 / B −50 ist PERFEKT, beide
+      // stehen bei 50% IHRES Plans). Identische Normierung wie calcSymmetryPct
+      // im Review-Modal: Master gegen Plan-TP/SL, Hedge gegen die Hedge-
+      // Erwartung — dadurch entfaellt auch die USD-Umrechnung (dimensionslos).
+      // Balken: Mitte = perfekt; die Fuellung KIPPT zur staerkeren Seite
+      // (M = Master links, H = Hedge rechts). 100% = perfekt.
       let symEl = ''
-      if(masterPl != null && hedgeSeen && Math.abs(masterPl) >= 0.5){
-        const rate = Number(s.hedge_usd_rate) || null
-        if(rate){
-          const sym = Math.round(Math.abs(hedgeSum * rate) / Math.abs(masterPl) * 100)
+      const mRisk = Number(p.masterRisk) || 0, sRisk = Number(p.slaveRisk) || 0
+      const mTp = Number(p.masterTp) || 0
+      if(masterPl != null && hedgeSeen && mRisk > 0 && sRisk > 0){
+        const mPct = masterPl >= 0
+          ? (mTp > 0 ? (masterPl / mTp) * 100 : (masterPl / mRisk) * 100)
+          : (Math.abs(masterPl) / mRisk) * 100
+        const ratio = mTp > 0 ? (mTp / mRisk) : null
+        const sPct = hedgeSum >= 0
+          ? (hedgeSum / sRisk) * 100
+          : (Math.abs(hedgeSum) / (ratio ? sRisk * ratio : sRisk)) * 100
+        const absM = Math.abs(mPct), absS = Math.abs(sPct)
+        if(Math.max(absM, absS) >= 1 && absM > 0){
+          const sym = Math.round(absS / absM * 100)
           const farbe = (sym >= 85 && sym <= 115) ? '#12B76A' : ((sym >= 60 && sym <= 140) ? '#F79009' : '#F04438')
-          const fuell = Math.max(4, Math.min(100, sym / 2))
-          symEl = `<span title="Symmetrie: Hedge-P&L (USD) ÷ Master-P&L — 100% = perfekte Spiegelung, Strich = 100%-Marke"`
-            + ` style="display:inline-flex;align-items:center;gap:6px">`
-            + `<span style="position:relative;width:52px;height:6px;border-radius:999px;background:var(--border);display:inline-block">`
-            + `<span style="position:absolute;left:0;top:0;bottom:0;width:${fuell}%;background:${farbe};border-radius:999px"></span>`
+          const d = Math.max(-1, Math.min(1, (absM - absS) / Math.max(absM, absS)))
+          const halb = Math.abs(d) * 50
+          const fuellCss = halb < 3
+            ? 'left:47%;width:6%'                                   // Mitte: perfekt
+            : (d > 0 ? `right:50%;width:${halb}%` : `left:50%;width:${halb}%`)
+          symEl = `<span title="Symmetrie relativ zum Plan: Master ${absM.toFixed(0)}% / Hedge ${absS.toFixed(0)}% des jeweiligen Ziels — Mitte = perfekt, Ausschlag = staerkere Seite"`
+            + ` style="display:inline-flex;align-items:center;gap:5px">`
+            + `<span style="font-size:9px;color:var(--sub);font-weight:700">M</span>`
+            + `<span style="position:relative;width:56px;height:6px;border-radius:999px;background:var(--border);display:inline-block">`
+            + `<span style="position:absolute;top:0;bottom:0;${fuellCss};background:${farbe};border-radius:999px"></span>`
             + `<span style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1.5px;background:var(--sub);opacity:.6"></span>`
-            + `</span><b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
+            + `</span><span style="font-size:9px;color:var(--sub);font-weight:700">H</span>`
+            + `<b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
         }
       }
       if(masterPl == null && !hedgeSeen) return ''
