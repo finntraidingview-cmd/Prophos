@@ -8724,9 +8724,32 @@
           ? Number(s.master_equity) - Number(s.master_balance) : null
         const hPL = (s.hedge_equity != null && s.hedge_balance != null)
           ? Number(s.hedge_equity) - Number(s.hedge_balance) : null
+        // Master-Lots UND Hedge-Lots pro Position (18.08.2026, Finns Wunsch:
+        // sehen, welche Lots zu welcher Position gehoeren)
+        const hedgesMap = s.hedges || {}
+        const hedgeLots = ident => {
+          const hs = hedgesMap[String(ident)]
+          return (Array.isArray(hs) ? hs : []).reduce((a, h) => a + (Number(h.volume) || 0), 0)
+        }
         const posTxt = pos.length
-          ? pos.map(p => `${p.type === 0 ? 'BUY' : 'SELL'} ${Number(p.volume).toFixed(2)} ${esc(p.symbol)}`).join(' · ')
+          ? pos.map(p => {
+              const hv = hedgeLots(p.ident)
+              return `${p.type === 0 ? 'BUY' : 'SELL'} ${Number(p.volume).toFixed(2)} ${esc(p.symbol)}`
+                + ` → Hedge ${hv ? hv.toFixed(2) : '—'}`
+            }).join(' · ')
           : 'flach'
+        // Verwaiste Hedges: Slave-Position, deren Master-Ident nicht (mehr) in
+        // den Master-Positionen steht — genau der Fall 'Order auf dem Slave
+        // ohne Master', den Finn sofort sehen will, um einzugreifen.
+        const masterIdents = new Set(pos.map(p => String(p.ident)))
+        const waisen = Object.entries(hedgesMap)
+          .filter(([k, v]) => !masterIdents.has(String(k)) && (Array.isArray(v) ? v : []).length)
+        const waisenTxt = waisen.length
+          ? `<div style="font-size:12px;margin-top:4px;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
+            + waisen.map(([k, v]) => v.map(h =>
+                `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
+            + ` — im Hedge-Terminal prüfen!</div>`
+          : ''
         const plTxt = mPL != null
           ? ` · Master-P&L ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}` : ''
         const alleine = pos.length && !rows.some(x => x !== r && x.hedge_login === r.hedge_login
@@ -8739,7 +8762,7 @@
           + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
           + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
           + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div></div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}</div>`
       }
       html += '</div>'
       box.innerHTML = html
