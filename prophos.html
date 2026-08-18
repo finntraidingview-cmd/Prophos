@@ -8904,7 +8904,11 @@
           ? (hedgeSum / sRisk) * 100
           : (Math.abs(hedgeSum) / (ratio ? sRisk * ratio : sRisk)) * 100
         const absM = Math.abs(mPct), absS = Math.abs(sPct)
-        if(Math.max(absM, absS) >= 1 && absM > 0){
+        // Rausch-Schwelle ABSOLUT (ab 0,50 $ Master-Bewegung), nicht relativ
+        // zum Plan (18.08.2026, Finns Fund: beim The5ers-Plan mit $20.000
+        // Risiko hätte der Balken erst ab $200 P&L angezeigt — beim kleinen
+        // Fusion-Plan dagegen sofort, darum sah nur EIN Trade „die Charts").
+        if(Math.abs(masterPl) >= 0.5 && absM > 0){
           const sym = Math.round(absS / absM * 100)
           const farbe = (sym >= 85 && sym <= 115) ? '#12B76A' : ((sym >= 60 && sym <= 140) ? '#F79009' : '#F04438')
           const d = Math.max(-1, Math.min(1, (absM - absS) / Math.max(absM, absS)))
