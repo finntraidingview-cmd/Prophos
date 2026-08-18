@@ -132,6 +132,22 @@ def ist_aendern_knopf(text):
     return any(k in t for k in ("ändern", "aendern", "modify", "change"))
 
 
+def ist_bestaetigen_knopf(text):
+    """Der LANGE Bestaetigen-Knopf des Aendern-Dialogs — NICHT der 'Position
+    aendern'-Reiter links (Fund 18.08.2026: ist_aendern_knopf traf im UI-Baum
+    zuerst den Reiter, der Bot drueckte bei jedem Lauf brav den Reiter statt
+    zu bestaetigen — Dialog blieb wirkungslos offen und wurde verworfen).
+    Der Bestaetigen-Knopf traegt die Order-Daten in der Beschriftung:
+    '#<Ticket> buy 1 NAS100 ... sl: ... tp: ... aendern'."""
+    t = (text or "").strip().lower()
+    if not ist_aendern_knopf(t):
+        return False
+    if t in ("position ändern", "position aendern", "modify position"):
+        return False
+    return ("#" in t or "sl:" in t or "tp:" in t
+            or bool(re.search(r"(?<!\d)\d{7,}(?!\d)", t)))
+
+
 def sltp_bestaetigt(pos_sl, pos_tp, sl, tp, digits):
     """Traegt die Position die gewuenschten SL/TP? Toleranz: 1.5 Einheiten der
     letzten Kursstelle (Server normalisieren minimal). 0.0 heisst 'nicht
@@ -1070,21 +1086,42 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             pass
         return {"ok": False, "msg": f"Felder nicht befuellbar: {e}"}
 
-    # 4) Aendern-Knopf — .click() zuerst (cursor-unabhaengig), dann click_input
+    # 4) Den BESTAETIGEN-Knopf finden — nicht den 'Position aendern'-Reiter
+    # (Fund 18.08.2026, s. ist_bestaetigen_knopf). Reihenfolge: Knopf mit
+    # Order-Daten in der Beschriftung; sonst der BREITESTE Aendern-Kandidat
+    # (der blaue Balken spannt die Dialogmitte, der Reiter ist schmal).
     knopf = None
+    kandidaten_k = []
     try:
         for b in dlg.descendants(control_type="Button"):
-            if ist_aendern_knopf(b.window_text() or ""):
+            t = b.window_text() or ""
+            if ist_bestaetigen_knopf(t):
                 knopf = b
                 break
+            tl = t.strip().lower()
+            if ist_aendern_knopf(t) and tl not in (
+                    "position ändern", "position aendern", "modify position"):
+                kandidaten_k.append(b)
     except Exception:
         pass
+    if knopf is None and kandidaten_k:
+        def _breite(b):
+            try:
+                rb = b.rectangle()
+                return rb.right - rb.left
+            except Exception:
+                return 0
+        knopf = max(kandidaten_k, key=_breite)
     if knopf is None:
         try:
             dlg.type_keys("{ESC}", set_foreground=False)
         except Exception:
             pass
-        return {"ok": False, "msg": "kein Aendern-Knopf im Dialog"}
+        return {"ok": False, "msg": "kein Bestaetigen-Knopf im Dialog"}
+    try:
+        trail.append(f"Bestaetigen-Knopf: '{(knopf.window_text() or '')[:40]}'")
+    except Exception:
+        pass
     try:
         r = knopf.rectangle()
         _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)

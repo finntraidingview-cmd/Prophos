@@ -411,6 +411,13 @@ def main():
         and order_bot.zahl_gleich("19 500,00", "19500.00")
         and not order_bot.zahl_gleich("0.01", "2")
         and not order_bot.zahl_gleich("", "2"))
+    # Bestaetigen-Knopf vs. 'Position aendern'-Reiter (18.08.2026)
+    chk("ORDER-BOT: Bestaetigen-Knopf erkannt, Reiter/Abbrechen nicht",
+        order_bot.ist_bestaetigen_knopf(
+            "Ändern #512345477 buy 1 NAS100 30006.46 sl: 30003.46 tp: 30339.46")
+        and not order_bot.ist_bestaetigen_knopf("Position ändern")
+        and not order_bot.ist_bestaetigen_knopf("Abbrechen")
+        and not order_bot.ist_bestaetigen_knopf("Ändern"))
     # Handel-Zeile vs. Chart-Titel/Navigator (18.08.2026, EA-Dialog-Vorfall)
     chk("ORDER-BOT: Handel-Zeile erkannt, Chart-Titel/Navigator nicht",
         order_bot.ist_handelszeile("nas100, 512309082, buy, 1.00, 29992.33", "NAS100")
