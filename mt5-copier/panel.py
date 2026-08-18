@@ -783,6 +783,45 @@ def _startup_attach_part(fname, cfg, install_dir):
     return "\n" + provision.build_startup_ini(preset=preset)
 
 
+def _ok_dialog_watcher(install_dir, dauer_s=75):
+    """Start-Dialoge automatisch bestaetigen (18.08.2026, Finns The5ers-Fund:
+    das Terminal oeffnete mit einem Login-/OK-Dialog, niemand drueckte OK,
+    alles hing). 75s lang nach Standard-Dialogen (#32770) des Terminal-
+    Prozesses suchen und NUR einen OK/Ja/Anmelden-Knopf druecken — nie
+    Abbrechen, kein blindes Enter ans Terminal. Standard-Windows-Dialoge
+    reagieren auf .click(); max. 2 Bestaetigungen pro Start."""
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        return
+    ende = time.time() + dauer_s
+    gedrueckt = 0
+    while time.time() < ende and gedrueckt < 2:
+        time.sleep(2.0)
+        try:
+            pids = set(provision.terminal_pids(install_dir))
+            if not pids:
+                continue
+            for w in Desktop(backend="win32").windows():
+                try:
+                    if w.process_id() not in pids:
+                        continue
+                    if w.element_info.class_name != "#32770":
+                        continue
+                    for b in w.descendants(class_name="Button"):
+                        t = (b.window_text() or "").replace("&", "").strip().lower()
+                        if t in ("ok", "ja", "yes", "anmelden", "login"):
+                            b.click()
+                            gedrueckt += 1
+                            print(f"[panel] {os.path.basename(install_dir)}: Start-Dialog "
+                                  f"('{t}') automatisch bestaetigt.", flush=True)
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+
 def start_terminal(fname, creds=None):
     """Startet das Master-Terminal der Instanz — oder holt das LAUFENDE Fenster
     nach vorn. Ein zweiter Start derselben Installation wuerde ein frisches
@@ -848,21 +887,34 @@ def start_terminal(fname, creds=None):
             _drop_snapshot(cfg)
             pids = []
     if pids:
-        # Laeuft schon: nur das Fenster nach vorn holen — ABER auch hier die
-        # Selbstheilung anstossen: liefert das laufende Terminal keinen frischen
-        # Snapshot (EA fehlt), wird es nach kurzer Pruefung neu gestartet und
-        # das EA automatisch aufgezogen.
+        # Fenster-Beweis (18.08.2026, The5ers-Fund: nach einem Haenger blieb
+        # ein Terminal-Prozess OHNE Fenster zurueck — der zweite Start-Klick
+        # meldete 'laeuft', aber nichts oeffnete sich). AppActivate liefert
+        # False, wenn der Prozess kein aktivierbares Fenster hat: dann Zombie
+        # killen und unten regulaer kalt starten.
+        vorn = False
+        try:
+            pr = subprocess.run(["powershell", "-Command",
+                            f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
+                           capture_output=True, text=True, timeout=15)
+            vorn = "True" in (pr.stdout or "")
+        except Exception:
+            pass
+        if not vorn:
+            print(f"[panel] {fname}: Terminal-Prozess ohne Fenster (Zombie) — "
+                  f"beende und starte kalt neu.", flush=True)
+            for pid in provision.terminal_pids(install_dir):
+                provision._taskkill(pid, grace_s=5)
+            pids = []
+    if pids:
+        # Laeuft schon: Fenster ist vorn — ABER auch hier die Selbstheilung
+        # anstossen: liefert das laufende Terminal keinen frischen Snapshot
+        # (EA fehlt), wird es neu gestartet und das EA automatisch aufgezogen.
         # EA auch im WARM-Pfad aktuell kompilieren (15.08.2026, Zwei-Plan-Test:
         # das warm gebliebene test321323-Terminal behielt das alte EA ohne
         # Balance-Header — Master-P&L fehlte nur dort). MT5 laedt ein neu
         # kompiliertes EA am laufenden Chart von selbst neu, kein Neustart noetig.
         _ensure_ea_compiled(fname, install_dir)
-        try:
-            subprocess.run(["powershell", "-Command",
-                            f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
-                           capture_output=True, timeout=15)
-        except Exception:
-            pass
         threading.Thread(target=_heal_ea,
                          args=(fname, cfg, install_dir, time.time(), 8),
                          daemon=True).start()
@@ -909,6 +961,9 @@ def start_terminal(fname, creds=None):
         # wird das EA automatisch per [StartUp] nachgezogen.
         threading.Thread(target=_heal_ea,
                          args=(fname, cfg, install_dir, time.time()),
+                         daemon=True).start()
+        # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
+        threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),
                          daemon=True).start()
         # Fenster nach vorn, sobald es da ist (sonst startet MT5 hinter dem Browser)
         _front_when_up(install_dir)

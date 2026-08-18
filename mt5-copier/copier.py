@@ -854,7 +854,11 @@ def main():
             # Algo-Handel beider Seiten (18.08.2026): Master aus dem Snapshot
             # (EA v4), Hedge live aus terminal_info. None = nicht pruefbar
             # (altes EA) — der Check blockt nur bei explizitem False.
-            "master_algo": (snap or {}).get("algo"),
+            # NUR bei frischem Snapshot melden (18.08.2026, The5ers-Fund:
+            # Terminal zu -> Snapshot eingefroren -> der Check verkaufte den
+            # ALTEN Algo-aus-Wert als aktuell und verlangte einen Knopf in
+            # einem Terminal, das gar nicht mehr offen war).
+            "master_algo": ((snap or {}).get("algo") if (connected and not note) else None),
             "hedge_algo": hedge_acc.get("algo"),
             # Positionen auf dem Hedge-Konto OHNE Prophos-Magic (None = nicht
             # pruefbar): Finns 'Slave-Order ohne Master'-Alarm im Fleet-Block.

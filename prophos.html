@@ -16333,7 +16333,11 @@
       // Block, nur bei explizitem false.
       const sAlgo = route.inst.status || {}
       const algoAus = []
-      if(sAlgo.master_algo === false) algoAus.push('MASTER-Terminal')
+      // Bei eingefrorenem Snapshot (note gesetzt) KEIN Algo-Urteil — die
+      // Werte waeren alt (18.08.2026, The5ers-Fund: 'Algo AUS'-Meldung fuer
+      // ein Terminal, das gar nicht mehr offen war). Den Zustand meldet dann
+      // der Terminal+EA-Schritt.
+      if(sAlgo.master_algo === false && !sAlgo.note) algoAus.push('MASTER-Terminal')
       if(sAlgo.hedge_algo === false) algoAus.push('HEDGE-Terminal')
       if(algoAus.length){
         _pfSet('m5run', 'err', `Algo-Handel ist AUS im ${algoAus.join(' und im ')} — in MT5 oben den „Algo-Handel"-Knopf grün schalten, sonst bleibt die Order ungehedged. Dann Trade neu starten.`)
