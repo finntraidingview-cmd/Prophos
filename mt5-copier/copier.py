@@ -276,6 +276,14 @@ def read_snapshot(path, expect_login=None):
             currency = head[9]
     except (IndexError, ValueError):
         balance = equity = currency = None
+    # Header v4 (18.08.2026): Algo-Handel-Zustand des Master-Terminals (1/0).
+    # Fehlt das Feld (altes EA), bleibt es None — der Check blockt dann nicht.
+    algo = None
+    try:
+        if len(head) >= 11 and head[10] in ("0", "1"):
+            algo = head[10] == "1"
+    except IndexError:
+        algo = None
     if expect_login and int(expect_login) != login:
         return None
 
@@ -301,7 +309,8 @@ def read_snapshot(path, expect_login=None):
         return None  # halb geschriebene Datei → diesen Tick ueberspringen
     return {"seq": seq, "login": login, "server": server, "margin_mode": margin_mode,
             "positions": positions,
-            "balance": balance, "equity": equity, "currency": currency}
+            "balance": balance, "equity": equity, "currency": currency,
+            "algo": algo}
 
 
 def norm_vol(si, vol):
@@ -639,7 +648,7 @@ def main():
     # Master, account_info() ist ein IPC-Roundtrip ins Terminal. Wandert in jeden
     # master_status; Prophos friert daraus die P&L-Baseline ein. Liefert das
     # Terminal nichts, bleibt es None — nie 0 ('Beweis oder leer').
-    hedge_acc = {"balance": None, "equity": None, "currency": None}
+    hedge_acc = {"balance": None, "equity": None, "currency": None, "algo": None}
 
     def hedge_book():
         """Kompletter Hedge-Bestand, EINMAL pro Tick gelesen und nach magic
@@ -842,6 +851,11 @@ def main():
             "hedge_equity": hedge_acc["equity"],
             "hedge_currency": hedge_acc["currency"],
             "hedge_usd_rate": hedge_acc.get("usd_rate"),
+            # Algo-Handel beider Seiten (18.08.2026): Master aus dem Snapshot
+            # (EA v4), Hedge live aus terminal_info. None = nicht pruefbar
+            # (altes EA) — der Check blockt nur bei explizitem False.
+            "master_algo": (snap or {}).get("algo"),
+            "hedge_algo": hedge_acc.get("algo"),
             # Verbuchte Closes aus dem Sidecar-Ring — neustart-fest
             "closed_hedges": m.closed[-50:],
         }
@@ -917,6 +931,13 @@ def main():
                 hedge_acc["currency"] = str(hai.currency) or None
             else:
                 hedge_acc["balance"] = hedge_acc["equity"] = hedge_acc["currency"] = None
+            # Algo-Handel-Zustand des HEDGE-Terminals pro Tick (18.08.2026,
+            # Finns Fund: Algo wurde NACH dem Copier-Start ausgeschaltet, die
+            # Hedges liefen in retcode=10027 — der Start-Check von damals sieht
+            # das nicht. Jetzt steht der Live-Zustand im Status, der Trade-
+            # Start-Check blockt bei False.)
+            ti_h = mt5.terminal_info()
+            hedge_acc["algo"] = bool(ti_h.trade_allowed) if ti_h is not None else None
             # USD-Kurs der Hedge-Waehrung fuer die Symmetrie-Anzeige (15.08.2026,
             # Finns Live-Symmetrie): Hedge fuehrt EUR, Master USD — ohne Kurs
             # waere das Verhaeltnis um den EURUSD-Abstand verzerrt. Fehlt das

@@ -105,11 +105,14 @@ void WriteSnapshot()
    // Kopfzeile: Format-Kennung, Sequenz, Zeit, Konto, Server, Margin-Modus, Anzahl,
    // Balance, Equity, Waehrung.
    // v3 (15.08.2026, Etappe 3): Balance/Equity/Waehrung hinten ANGEHAENGT, damit
-   // Prophos den Master-P&L ueber das Balance-Delta beweisen kann. Die Kennung
-   // bleibt PROPHOS1 — der Copier toleriert 7, 9 und 10 Felder, alte EAs im Feld
-   // duerfen nicht brechen.
+   // Prophos den Master-P&L ueber das Balance-Delta beweisen kann.
+   // v4 (18.08.2026): Algo-Handel-Zustand des MASTER-Terminals als letztes Feld
+   // (1/0) — Finns Fund: Algo war aus, die Order lief trotzdem, der Copier
+   // konnte nicht hedgen und der Trade-Start-Check sah es nicht. Die Kennung
+   // bleibt PROPHOS1 — der Copier toleriert 7, 9, 10 und 11 Felder, alte EAs
+   // im Feld duerfen nicht brechen.
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
-   FileWrite(h, StringFormat("PROPHOS1;%I64d;%I64d;%I64d;%s;%I64d;%d;%.2f;%.2f;%s",
+   FileWrite(h, StringFormat("PROPHOS1;%I64d;%I64d;%I64d;%s;%I64d;%d;%.2f;%.2f;%s;%d",
                              g_seq,
                              (long)TimeCurrent(),
                              AccountInfoInteger(ACCOUNT_LOGIN),
@@ -118,7 +121,8 @@ void WriteSnapshot()
                              total,
                              AccountInfoDouble(ACCOUNT_BALANCE),
                              AccountInfoDouble(ACCOUNT_EQUITY),
-                             AccountInfoString(ACCOUNT_CURRENCY)));
+                             AccountInfoString(ACCOUNT_CURRENCY),
+                             (int)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)));
 
    // Eine Zeile pro Position. contract_size mitschreiben, weil der Executor
    // die Kontraktgroesse des MASTER-Brokers nicht selbst abfragen kann

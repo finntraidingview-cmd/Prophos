@@ -16256,7 +16256,22 @@
       _pfSet('m5run', 'err', 'Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten.')
       hardFail = true
     } else {
-      _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten.')
+      // Algo-Handel BEIDER Terminals (18.08.2026, Finns Fund: Algo war im
+      // Hedge-Terminal aus, die Order lief trotzdem und blieb ungehedged —
+      // retcode=10027 im Copier-Log). Master-Zustand kommt aus dem EA-Snapshot
+      // (v4), Hedge live aus dem Copier. null = altes EA, nicht prüfbar → kein
+      // Block, nur bei explizitem false.
+      const sAlgo = route.inst.status || {}
+      const algoAus = []
+      if(sAlgo.master_algo === false) algoAus.push('MASTER-Terminal')
+      if(sAlgo.hedge_algo === false) algoAus.push('HEDGE-Terminal')
+      if(algoAus.length){
+        _pfSet('m5run', 'err', `Algo-Handel ist AUS im ${algoAus.join(' und im ')} — in MT5 oben den „Algo-Handel"-Knopf grün schalten, sonst bleibt die Order ungehedged. Dann Trade neu starten.`)
+        hardFail = true
+      } else {
+        _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten'
+          + (sAlgo.master_algo === true && sAlgo.hedge_algo === true ? ' · Algo-Handel beidseitig AN.' : '.'))
+      }
     }
 
     // ── 3. Doppel-Hedge-Schutz ── Master ODER Slave zusätzlich Duplikum-verlinkt
@@ -16902,6 +16917,24 @@
       // der Hedge selbst taucht im Master-Dropdown nicht auf (Selbst-Spiegel).
       const _dupIds = new Set(Object.values((typeof dupGetLinks === 'function') ? dupGetLinks() : {}).map(String))
       const _mt5Ids = new Set(Object.values((typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}).map(String))
+      // Nur Master, die auf DIESEM PC wirklich im Copier hängen (18.08.2026,
+      // Finns Ansage: Links aus einem alten/anderen PC-Setup zeigten Accounts
+      // an, deren Trade-Start dann in 'Keine Copier-Instanz passt' lief).
+      // Ohne lokale Instanz-Daten (Copier offline/noch nicht geladen) wird
+      // NICHT gefiltert — der Trade-Start-Check fängt es dann sauber.
+      let _mt5LokalMasters = null
+      if(_tpRoute === 'mt5' && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL
+         && typeof window.mtcInstances === 'function'){
+        try{
+          const _st = window.mtcInstances()
+          const _s2 = new Set()
+          for(const _inst of Object.values(_st || {})){
+            const _lg = (_inst && _inst.status && _inst.status.master_login) ?? (_inst && _inst.master_expected)
+            if(_lg != null && _lg !== '') _s2.add(String(_lg))
+          }
+          if(_s2.size) _mt5LokalMasters = _s2
+        }catch(_){ }
+      }
       // Filter-Logik
       const filtered = accounts.filter(a => {
         const isProtected = protectedIds.has(String(a.id))
@@ -16911,6 +16944,10 @@
             if(!_mt5Ids.has(String(a.id))) return false
             if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
             if(role === 'master' && _tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
+            if(role === 'master' && _mt5LokalMasters){
+              const _lg = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
+              if(!_lg || !_mt5LokalMasters.has(String(_lg))) return false
+            }
           } else {
             if(!_dupIds.has(String(a.id))) return false
           }
