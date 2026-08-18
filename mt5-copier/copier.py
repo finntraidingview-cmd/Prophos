@@ -856,6 +856,9 @@ def main():
             # (altes EA) — der Check blockt nur bei explizitem False.
             "master_algo": (snap or {}).get("algo"),
             "hedge_algo": hedge_acc.get("algo"),
+            # Positionen auf dem Hedge-Konto OHNE Prophos-Magic (None = nicht
+            # pruefbar): Finns 'Slave-Order ohne Master'-Alarm im Fleet-Block.
+            "hedge_fremde": hedge_acc.get("fremde"),
             # Verbuchte Closes aus dem Sidecar-Ring — neustart-fest
             "closed_hedges": m.closed[-50:],
         }
@@ -938,6 +941,22 @@ def main():
             # Start-Check blockt bei False.)
             ti_h = mt5.terminal_info()
             hedge_acc["algo"] = bool(ti_h.trade_allowed) if ti_h is not None else None
+            # FREMDE Positionen auf dem Hedge-Konto (18.08.2026, Finns Wunsch:
+            # auch eine Slave-Order sehen, die der Copier gar nicht kennt —
+            # z.B. von Hand eroeffnet). 'Fremd' = Magic ausserhalb der
+            # Prophos-Familie 770000-779999: die Hedges der ANDEREN PCs am
+            # selben Hedge-Konto tragen Familien-Magics und sind kein Alarm.
+            fremde = []
+            try:
+                for p_ in (mt5.positions_get() or []):
+                    mg = int(getattr(p_, "magic", 0) or 0)
+                    if 770000 <= mg <= 779999:
+                        continue
+                    fremde.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
+                                   "type": int(p_.type), "volume": float(p_.volume)})
+            except Exception:
+                fremde = None
+            hedge_acc["fremde"] = fremde
             # USD-Kurs der Hedge-Waehrung fuer die Symmetrie-Anzeige (15.08.2026,
             # Finns Live-Symmetrie): Hedge fuehrt EUR, Master USD — ohne Kurs
             # waere das Verhaeltnis um den EURUSD-Abstand verzerrt. Fehlt das

@@ -8663,7 +8663,8 @@
             master_balance: s.master_balance ?? null, master_equity: s.master_equity ?? null,
             master_currency: s.master_currency ?? null,
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
-            hedge_currency: s.hedge_currency ?? null
+            hedge_currency: s.hedge_currency ?? null,
+            hedge_fremde: s.hedge_fremde ?? null
           },
           updated_at: new Date().toISOString()
         }
@@ -8714,6 +8715,7 @@
         filter === 'pc' ? r.pc_name === pc :
         filter === ('id:' + r.master_login))
       html += '<div style="display:flex;flex-direction:column;gap:8px">'
+      const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
       for(const r of sicht){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
@@ -8757,12 +8759,22 @@
         const symTxt = (alleine && hPL != null && mPL != null && Math.abs(mPL) > 0.5)
           ? ` · Hedge ${hPL >= 0 ? '+' : ''}${hPL.toFixed(2)} ${esc(s.hedge_currency || '')} (Symmetrie ${Math.round(Math.abs(hPL / mPL) * 100)}%)`
           : ''
+        // FREMDE Positionen auf dem Hedge-Konto (kein Prophos-Magic): eine
+        // Slave-Order, die zu KEINEM Master gehoert — sofort rot zeigen.
+        let fremdTxt = ''
+        const fr = s.hedge_fremde
+        if(Array.isArray(fr) && fr.length && !fremdGezeigt.has(r.hedge_login)){
+          fremdGezeigt.add(r.hedge_login)
+          fremdTxt = `<div style="font-size:12px;margin-top:4px;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
+            + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
+            + ` — gehört zu KEINEM Master!</div>`
+        }
         html += `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
           + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
           + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}</div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`
       }
       html += '</div>'
       box.innerHTML = html
