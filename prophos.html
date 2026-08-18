@@ -4664,6 +4664,10 @@
       <!-- Hedge-Übersicht -->
       <div id="lt-hedge-overview" style="display:none;margin-bottom:14px"></div>
 
+      <!-- MT5-Flotte (18.08.2026, Finns Fleet-Feature): alle IDs aller PCs
+           aus Supabase mt5_live — Farbe pro Master-ID, Filter-Chips -->
+      <div id="lt-fleet" style="display:none;margin-bottom:14px"></div>
+
       <div id="lt-cards" style="display:flex;flex-direction:column;gap:14px"></div>
 
       <div id="lt-empty" class="empty" style="margin-top:0">
@@ -8616,6 +8620,134 @@
     finally { mt5PlanPoll.busy = false }
   }
   setInterval(mt5PlanPollTick, mt5PlanPoll.INTERVAL)
+
+  /* ── FLEET-LIVE (18.08.2026, Finns Fleet-Feature) ──────────────────────────
+   * Push: jeder PC mit lokalem Copier meldet alle 5s seine Instanzen nach
+   * Supabase (mt5_live — geteilt wie die Kasse, jeder Prophos-User sieht
+   * alles). Pull: die Live-Trades-View zeigt die ganze Flotte — Farbe pro
+   * Master-ID, Filter-Chips, Frische-Grau nach 20s (nie alte Daten als live,
+   * P&L-Beweis-Doktrin). Symmetrie nur, wenn sie beweisbar ist: das Hedge-
+   * Konto ist geteilt, dessen P&L gehört nur dann EINER Instanz, wenn sie als
+   * einzige Positionen hat. */
+  function mt5FleetPcId(){
+    let id = localStorage.getItem('prophos_pc_id')
+    if(!id){
+      id = 'pc-' + Math.random().toString(36).slice(2, 8)
+      localStorage.setItem('prophos_pc_id', id)
+    }
+    return id
+  }
+  let _fleetPushBusy = false
+  async function mt5FleetPushTick(){
+    if(!MT5_LOCAL || _fleetPushBusy || typeof window.mtcApi !== 'function') return
+    _fleetPushBusy = true
+    try{
+      const dd = await window.mtcApi('instances')
+      if(!dd || dd.copier_offline || dd._httpFail) return
+      const pc = mt5FleetPcId()
+      const rows = (dd.instances || []).filter(i => i && i.file).map(inst => {
+        const s = inst.status || {}
+        return {
+          id: pc + ':' + inst.file,
+          pc_name: pc,
+          config_file: inst.file,
+          instance: String(inst.file).replace(/^config-/i, '').replace(/\.json$/i, ''),
+          master_login: String(s.master_login ?? ''),
+          hedge_login: String(s.hedge_login ?? ''),
+          alive: !!inst.alive,
+          status: {
+            note: s.note || null, mode: s.mode || null,
+            multiplier: s.multiplier ?? null,
+            master_positions: s.master_positions || [],
+            hedges: s.hedges || {},
+            master_balance: s.master_balance ?? null, master_equity: s.master_equity ?? null,
+            master_currency: s.master_currency ?? null,
+            hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
+            hedge_currency: s.hedge_currency ?? null
+          },
+          updated_at: new Date().toISOString()
+        }
+      })
+      if(rows.length) await supabase.from('mt5_live').upsert(rows)
+    }catch(_){ /* still — naechster Tick */ }
+    finally{ _fleetPushBusy = false }
+  }
+  setInterval(mt5FleetPushTick, 5000)
+
+  const MT5_FLEET_FARBEN = ['#7C5CFC','#12B76A','#F79009','#F04438','#0BA5EC','#EE46BC','#6172F3','#16B364']
+  function mt5FleetFarbe(login){
+    const s = String(login || '')
+    let h = 0
+    for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+    return MT5_FLEET_FARBEN[h % MT5_FLEET_FARBEN.length]
+  }
+  window._fleetSetFilter = function(f){
+    localStorage.setItem('prophos_fleet_filter', f)
+    mt5FleetRenderTick(true)
+  }
+  let _fleetRenderBusy = false
+  async function mt5FleetRenderTick(force){
+    const box = document.getElementById('lt-fleet')
+    if(!box || (!box.offsetParent && !force) || _fleetRenderBusy) return
+    _fleetRenderBusy = true
+    try{
+      const { data, error } = await supabase.from('mt5_live').select('*')
+        .gte('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+      if(error || !data || !data.length){ box.style.display = 'none'; return }
+      const filter = localStorage.getItem('prophos_fleet_filter') || 'alle'
+      const pc = mt5FleetPcId()
+      const jetzt = Date.now()
+      const rows = data.sort((a, b) => String(a.instance).localeCompare(String(b.instance)))
+      const logins = [...new Set(rows.map(r => r.master_login).filter(Boolean))]
+      const chip = (key, label, farbe) => {
+        const an = filter === key
+        return `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
+               (farbe ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${farbe};margin-right:6px"></span>` : '') +
+               esc(label) + '</button>'
+      }
+      let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">`
+        + `<span style="font-size:12px;font-weight:600;color:var(--sub)">MT5-FLOTTE</span>`
+        + chip('alle', 'Alle') + chip('pc', 'Nur dieser PC')
+        + logins.map(l => chip('id:' + l, l, mt5FleetFarbe(l))).join('') + '</div>'
+      const sicht = rows.filter(r =>
+        filter === 'alle' ? true :
+        filter === 'pc' ? r.pc_name === pc :
+        filter === ('id:' + r.master_login))
+      html += '<div style="display:flex;flex-direction:column;gap:8px">'
+      for(const r of sicht){
+        const s = r.status || {}
+        const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
+        const frisch = r.alive && alterS <= 20 && !s.note
+        const farbe = mt5FleetFarbe(r.master_login)
+        const pos = s.master_positions || []
+        const mPL = (s.master_equity != null && s.master_balance != null)
+          ? Number(s.master_equity) - Number(s.master_balance) : null
+        const hPL = (s.hedge_equity != null && s.hedge_balance != null)
+          ? Number(s.hedge_equity) - Number(s.hedge_balance) : null
+        const posTxt = pos.length
+          ? pos.map(p => `${p.type === 0 ? 'BUY' : 'SELL'} ${Number(p.volume).toFixed(2)} ${esc(p.symbol)}`).join(' · ')
+          : 'flach'
+        const plTxt = mPL != null
+          ? ` · Master-P&L ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}` : ''
+        const alleine = pos.length && !rows.some(x => x !== r && x.hedge_login === r.hedge_login
+          && ((x.status || {}).master_positions || []).length)
+        const symTxt = (alleine && hPL != null && mPL != null && Math.abs(mPL) > 0.5)
+          ? ` · Hedge ${hPL >= 0 ? '+' : ''}${hPL.toFixed(2)} ${esc(s.hedge_currency || '')} (Symmetrie ${Math.round(Math.abs(hPL / mPL) * 100)}%)`
+          : ''
+        html += `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
+          + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
+          + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
+          + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
+          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div></div>`
+      }
+      html += '</div>'
+      box.innerHTML = html
+      box.style.display = ''
+    }catch(_){ /* naechster Tick */ }
+    finally{ _fleetRenderBusy = false }
+  }
+  setInterval(mt5FleetRenderTick, 5000)
 
   /* ── Auto-P&L der MT5-Route (Pendant zu _autoPnlFetchMirror) ──
    * Rechnet AUSSCHLIESSLICH aus plan.mt5Baseline + .final. KEIN Live-Fallback,
