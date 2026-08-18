@@ -588,8 +588,16 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
         return
     ex5 = os.path.join(data_dir, "MQL5", "Experts", provision.EA_NAME + ".ex5")
     if not os.path.exists(ex5):
+        # Fehlt das EA komplett (frisches/nicht provisioniertes Terminal —
+        # 18.08.2026, Finns neue FivePercentOnline-Konten), kann
+        # _ensure_ea_compiled es SELBST installieren: .mq5 aus dem Repo in den
+        # Datenordner spiegeln + per MetaEditor kompilieren. Vorher gab die
+        # Heilung hier grundlos auf ('von Hand kompilieren').
+        _ensure_ea_compiled(fname, install_dir)
+    if not os.path.exists(ex5):
         print(f"[panel] {fname}: Selbstheilung — {provision.EA_NAME}.ex5 fehlt im "
-              f"Datenordner, bitte einmal im Terminal kompilieren.", flush=True)
+              f"Datenordner und liess sich nicht bauen (metaeditor64.exe da?) — "
+              f"einmal im Terminal kompilieren (F4 -> F7).", flush=True)
         return
     name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
     preset = f"prophos-heal-{name}.set"
