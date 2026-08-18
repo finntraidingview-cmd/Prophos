@@ -539,7 +539,7 @@ MASTER_ORDER_LOCKS = {}
 MASTER_ORDER_GUARD = threading.Lock()
 
 
-def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45):
+def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
     ob der Snapshot wieder fliesst. Tut er es nicht, fehlt das Lese-EA auf dem
     Chart (passiert nach unsauberem Beenden — Chart-Stand verloren). Dann:
@@ -555,13 +555,13 @@ def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45):
             return
         HEAL_ACTIVE.add(install_dir)
     try:
-        _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s)
+        _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da)
     finally:
         with HEAL_LOCK:
             HEAL_ACTIVE.discard(install_dir)
 
 
-def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
+def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie_da=False):
     snap = str(cfg.get("snapshot_file") or "prophos_master.csv")
     common = cfg.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
@@ -574,14 +574,26 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s):
     # Frist + 90s Boot-Puffer alle 5s nachsehen; EIN frischer Schreibvorgang
     # beendet die Heilung sofort. Gekillt wird nur ein Terminal, das das ganze
     # Fenster ueber nichts geliefert hat.
+    # Schnell-Pfad (18.08.2026, The5ers-Fund: frisches Konto, EA nie
+    # eingerichtet — die Snapshot-Datei hat NIE existiert, trotzdem wartete
+    # die Heilung die vollen wait_s+90s Boot-Puffer, waehrend Finn vor dem
+    # Zaehler sass). Hat die Datei nie existiert und der Aufrufer erlaubt es
+    # (nur ohne Login-Zwang — der Zwangs-Start loescht die Datei bewusst und
+    # braucht den langen Puffer fuer langsame Boots), wird schon nach wait_s
+    # geheilt: eine Datei, die nie da war, kommt auch nicht von selbst.
+    nie_da = not os.path.exists(snap_path)
+    kurz = time.time() + wait_s
     deadline = time.time() + wait_s + 90
     while time.time() < deadline:
         time.sleep(5)
         try:
             if os.path.getmtime(snap_path) > started_ts:
                 return  # Snapshot fliesst — EA laeuft, nichts zu tun
+            nie_da = False  # Datei existiert (nur alt) — normaler langer Pfad
         except OSError:
             pass  # Datei (noch) nicht da -> weiter warten
+        if schnell_wenn_nie_da and nie_da and time.time() >= kurz:
+            break
     data_dir = provision.data_dir_for(install_dir)
     if not data_dir:
         print(f"[panel] {fname}: Selbstheilung — Datenordner nicht gefunden.", flush=True)
@@ -916,7 +928,7 @@ def start_terminal(fname, creds=None):
         # kompiliertes EA am laufenden Chart von selbst neu, kein Neustart noetig.
         _ensure_ea_compiled(fname, install_dir)
         threading.Thread(target=_heal_ea,
-                         args=(fname, cfg, install_dir, time.time(), 8),
+                         args=(fname, cfg, install_dir, time.time(), 8, True),
                          daemon=True).start()
         if wrong and not creds:
             return True, (f"Terminal läuft, aber im FALSCHEN Konto ({wrong} statt {expected or '?'}) — "
@@ -958,9 +970,10 @@ def start_terminal(fname, creds=None):
             subprocess.Popen([path], cwd=install_dir)
             msg = "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
         # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
-        # wird das EA automatisch per [StartUp] nachgezogen.
+        # wird das EA automatisch per [StartUp] nachgezogen. Schnell-Pfad nur
+        # OHNE Login-Zwang (der Zwangs-Start loescht die Datei bewusst).
         threading.Thread(target=_heal_ea,
-                         args=(fname, cfg, install_dir, time.time()),
+                         args=(fname, cfg, install_dir, time.time(), 45, not creds),
                          daemon=True).start()
         # Start-Dialoge (Login/OK) automatisch bestaetigen — s. _ok_dialog_watcher
         threading.Thread(target=_ok_dialog_watcher, args=(install_dir,),

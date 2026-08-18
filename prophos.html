@@ -16599,7 +16599,12 @@
           if(jobNote){
             _pfSet('m5term', 'warn', escapeHtml(jobNote))
           } else {
-            const hint = sec > 50 ? ' — hängt es? Im Terminal nachsehen, ggf. Login-Fenster einmal mit OK bestätigen.' : ''
+            // Ohne hinterlegte Zugangsdaten dauert der erste Start eines
+            // frischen Kontos 1–2 min (Heilung zieht das EA nach) — das SAGEN,
+            // statt Finn vor einem stummen Zaehler warten zu lassen (18.08.2026)
+            const hint = sec > 50
+              ? ' — hängt es? Im Terminal nachsehen, ggf. Login-Fenster einmal mit OK bestätigen.'
+              : ' · erster Start ohne hinterlegte Zugangsdaten kann 1–2 min dauern (Selbstheilung zieht das EA auf). Tipp: Zugangsdaten am Account hinterlegen, dann geht es sofort.'
             _pfSet('m5term', 'warn', `⏳ ${note ? escapeHtml(note) + ' · ' : ''}Terminal startet, Login automatisch… (${sec}s)${escapeHtml(hint)}`)
           }
           }finally{ _pfTickBusy = false }
