@@ -8430,6 +8430,38 @@
     busy: false
   }
 
+  /* Plan SOFORT auf „Läuft" stellen, sobald der Order-Bot die Position lesend
+   * bestätigt hat (18.08.2026, Finns Punkt: der Check kann mit SL/TP-Scan
+   * Minuten laufen — der Trade ist aber ab dem Fill live und muss so erkannt
+   * werden, nicht erst am Check-Ende). Gleiche Update-Form wie der 5s-Wächter
+   * inkl. Baseline und wasOpen-Markierung (scharfe Ende-Erkennung); der
+   * Status-Guard (eq 'planned') macht Doppel-Aufrufe mit dem Wächter harmlos. */
+  async function mt5PlanAufOpen(planId){
+    try{
+      const plan = tradePlans.find(x => String(x.id) === String(planId))
+      if(!plan || plan.status !== 'planned') return
+      let s = {}
+      try{
+        const dd = await window.mtcApi('instances')
+        const route = mt5RouteResolve(plan, (dd && dd.instances) || [])
+        s = (route && route.inst.status) || {}
+      }catch(_){ }
+      const upd = { status: 'open', started_at: new Date().toISOString() }
+      upd.mt5_baseline = (s.master_balance != null && s.hedge_balance != null)
+        ? { master_balance: Number(s.master_balance),
+            hedge_balance:  Number(s.hedge_balance),
+            at: new Date().toISOString() }
+        : null
+      const { data, error } = await supabase.from('trade_plans').update(upd)
+        .eq('id', plan.id).eq('status', 'planned').select('*')
+      if(error || !data || !data.length) return
+      const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      mt5PlanPoll.wasOpen.add(String(plan.id))
+      if(typeof renderTradePlans === 'function') renderTradePlans()
+    }catch(e){ console.warn('[mt5PlanAufOpen]', e) }
+  }
+
   async function mt5PlanPollTick(){
     if(!MT5_LOCAL || mt5PlanPoll.busy) return
     // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
@@ -16287,6 +16319,10 @@
                   headers:{'Content-Type':'application/json'},
                   body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung,
                                          volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
+                // Position lesend bestätigt → Plan SOFORT auf „Läuft", ohne aufs
+                // Check-Ende zu warten (18.08.2026, Finns Punkt). Gilt auch, wenn
+                // nur SL/TP scheiterte: price+ticket heißt, die Position ist offen.
+                if(r && (r.ok || (r.price && r.ticket))) mt5PlanAufOpen(plan.id)
                 if(r && r.ok){
                   if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}${r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)'}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
                   setTimeout(() => {
