@@ -1090,22 +1090,53 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=8)
     except Exception:
         pass
-    try:
-        knopf.click()
-        trail.append("Aendern-Knopf ausgeloest (.click())")
-    except Exception:
+    # Ausloesen mit ECHTER Eingabe zuerst (18.08.2026, Finns Fund: .click()
+    # verpuffte auch HIER — die Felder waren fertig befuellt, aber der Bot
+    # schloss den Dialog selbst per ESC, 'das Popup geht einfach weg', kein
+    # Bestaetigungssound). Erfolgskriterium: der Dialog schliesst sich VON
+    # SELBST (so wie bei Finns Hand-Test). ESC erst, wenn kein Weg wirkt.
+    def _dialog_zu():
         try:
-            knopf.click_input()
-            trail.append("Aendern-Knopf ausgeloest (click_input)")
-        except Exception as e:
-            return {"ok": False, "msg": f"Aendern-Knopf liess sich nicht ausloesen: {e}"}
-    # Dialog schliesst sich bei Erfolg selbst; Rest raeumt der Aufrufer per ESC
-    time.sleep(0.5)
+            return not dlg.is_visible()
+        except Exception:
+            return True
+
+    def _k_leertaste():
+        knopf.set_focus()
+        time.sleep(0.15)
+        try:
+            hat = bool(knopf.has_keyboard_focus())
+        except Exception:
+            hat = False
+        if not hat:
+            raise RuntimeError("kein Tastatur-Fokus")
+        knopf.type_keys("{SPACE}", set_foreground=False)
+
+    def _k_sendinput():
+        r2 = knopf.rectangle()
+        if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+            raise RuntimeError("SendInput abgelehnt")
+
+    for name, weg in (("Fokus+Leertaste", _k_leertaste),
+                      ("SendInput-Klick", _k_sendinput),
+                      (".click()", lambda: knopf.click()),
+                      ("click_input", lambda: knopf.click_input())):
+        try:
+            weg()
+        except Exception:
+            continue
+        ende_k = time.time() + 2.5
+        while time.time() < ende_k and not _dialog_zu():
+            time.sleep(0.3)
+        if _dialog_zu():
+            trail.append(f"Aendern-Knopf ausgeloest ({name}) — Dialog zu")
+            return {"ok": True, "msg": "geklickt"}
+        trail.append(f"Aendern-Knopf: {name} ohne Wirkung")
     try:
         dlg.type_keys("{ESC}", set_foreground=False)
     except Exception:
         pass
-    return {"ok": True, "msg": "geklickt"}
+    return {"ok": False, "msg": "Aendern-Knopf reagiert auf keinen Weg"}
 
 
 def run(cfg_path, cmd):
