@@ -377,7 +377,14 @@ def main():
                                  "volumen": 0.2, "sl_usd": 100, "tp_usd": 300})
     chk("ORDER-BOT: vollstaendiger Befehl → keine Fehler", f == [])
     f = order_bot.pruefe_befehl({"symbol": "", "richtung": "kaufen", "volumen": 0})
-    chk("ORDER-BOT: kaputter Befehl → alle 5 Fehler gemeldet", len(f) == 5)
+    chk("ORDER-BOT: kaputter Befehl → Symbol/Richtung/Volumen gemeldet (SL/TP optional)",
+        len(f) == 3)
+    # SL/TP-Schalter (18.08.2026): beide weg = ok, nur eines = Fehler
+    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy", "volumen": 0.2})
+    chk("ORDER-BOT: Befehl OHNE SL/TP (Schalter aus) → gueltig", f == [])
+    f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
+                                 "volumen": 0.2, "sl_usd": 100})
+    chk("ORDER-BOT: nur SL ohne TP → genau ein Fehler (nur zusammen)", len(f) == 1)
     f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
                                  "volumen": float("nan"), "sl_usd": 100, "tp_usd": 300})
     chk("ORDER-BOT: NaN-Volumen wird abgelehnt (isfinite-Wachter)", len(f) == 1)

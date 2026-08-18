@@ -3522,12 +3522,18 @@
               <button type="button" id="tp-order-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
             </div>
           </div>
+          <!-- SL/TP-Schalter (18.08.2026, Finns Wunsch): an = Bot trägt SL/TP
+               nach dem Fill automatisch ein, aus = Order pur, SL/TP von Hand -->
+          <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;font-size:13px;cursor:pointer;user-select:none">
+            <span class="switch"><input type="checkbox" id="tp-order-sltp" checked><span class="switch-slider"></span></span>
+            <span>SL/TP automatisch setzen <span style="color:var(--sub)">(aus = Order pur, SL/TP von Hand)</span></span>
+          </label>
           <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
-            <div class="field">
+            <div class="field" id="tp-order-tp-field">
               <label>Take Profit ($)</label>
               <input type="number" class="input mono" id="tp-order-tp" min="0" step="10" placeholder="z.B. 300">
             </div>
-            <div class="field">
+            <div class="field" id="tp-order-sl-field">
               <label>Stop Loss ($)</label>
               <input type="number" class="input mono" id="tp-order-sl" min="0" step="10" placeholder="z.B. 100">
             </div>
@@ -16275,14 +16281,14 @@
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
               _pfSet('m5term', 'ok', '✓ Bot füllt den Order-Dialog…')
-              if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} (TP $${po.tp_usd} · SL $${po.sl_usd}) — HÄNDE WEG, bis die Bestätigung kommt!` }
+              if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} ${po.sl_usd ? `(TP $${po.tp_usd} · SL $${po.sl_usd})` : '(ohne SL/TP — machst du von Hand)'} — HÄNDE WEG, bis die Bestätigung kommt!` }
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
                   headers:{'Content-Type':'application/json'},
                   body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung,
                                          volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd }) })
                 if(r && r.ok){
-                  if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price} · SL ${r.sl} · TP ${r.tp}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
+                  if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}${r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)'}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
                   setTimeout(() => {
                     if(document.getElementById('tpPreflightModal')?.classList.contains('open')
                        && String(_pfPlanId) === String(plan.id)) _pfClose()
@@ -16510,6 +16516,9 @@
     document.getElementById('tp-order-tp').value = ''
     document.getElementById('tp-order-sl').value = ''
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
+    const sltpBox = document.getElementById('tp-order-sltp')
+    if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
+    tpOrderSltpApply()
     const msg = document.getElementById('tpOrderMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     const symEl = document.getElementById('tp-order-symbol')
     symEl.value = ''
@@ -16524,6 +16533,20 @@
     symEl.readOnly = fromSettings.length > 0   // Settings sind die Wahrheit — nicht überschreibbar
     document.getElementById('tpOrderModal').classList.add('open')
   }
+
+  // SL/TP-Schalter: Felder zeigen/verstecken, letzte Wahl merken (18.08.2026)
+  function tpOrderSltpApply(){
+    const an = !!document.getElementById('tp-order-sltp')?.checked
+    const tpF = document.getElementById('tp-order-tp-field')
+    const slF = document.getElementById('tp-order-sl-field')
+    if(tpF) tpF.style.display = an ? '' : 'none'
+    if(slF) slF.style.display = an ? '' : 'none'
+  }
+  document.getElementById('tp-order-sltp')?.addEventListener('change', () => {
+    localStorage.setItem('prophos_tp_order_sltp',
+      document.getElementById('tp-order-sltp')?.checked ? '1' : '0')
+    tpOrderSltpApply()
+  })
 
   document.getElementById('tp-order-buy')?.addEventListener('click', () => tpOrderDirSet('buy'))
   document.getElementById('tp-order-sell')?.addEventListener('click', () => tpOrderDirSet('sell'))
@@ -16545,10 +16568,12 @@
     const lots = parseFloat(document.getElementById('tp-order-lots').value)
     if(!_tpOrderDir) return err('Richtung wählen — Buy oder Sell.')
     if(!symbol) return err('Symbol angeben.')
-    if(!(tp > 0) || !(sl > 0)) return err('Take Profit und Stop Loss in $ angeben.')
+    const autoSltp = !!document.getElementById('tp-order-sltp')?.checked
+    if(autoSltp && (!(tp > 0) || !(sl > 0)))
+      return err('Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
     if(!(lots > 0)) return err('Lot-Anzahl angeben.')
-    _tpPendingOrder = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir,
-                        volumen: lots, sl_usd: sl, tp_usd: tp }
+    _tpPendingOrder = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir, volumen: lots,
+                        sl_usd: autoSltp ? sl : null, tp_usd: autoSltp ? tp : null }
     document.getElementById('tpOrderModal').classList.remove('open')
     tpPreflightMt5(plan)
   })

@@ -56,14 +56,31 @@ def pruefe_befehl(cmd):
         fehler.append("symbol fehlt")
     if str(cmd.get("richtung") or "").lower() not in ("buy", "sell"):
         fehler.append("richtung muss buy oder sell sein")
-    for k in ("volumen", "sl_usd", "tp_usd"):
+    try:
+        v = float(cmd.get("volumen") or 0)
+        # isfinite deckt NaN und Infinity ab ('nan <= 0' waere still False)
+        if not math.isfinite(v) or v <= 0:
+            fehler.append("volumen fehlt oder <= 0")
+    except (TypeError, ValueError):
+        fehler.append("volumen ist keine Zahl")
+    # SL/TP sind OPTIONAL (18.08.2026, Schalter im Order-Popup): beide gesetzt
+    # -> Bot traegt sie nach dem Fill per Klick ein; beide leer -> Order pur,
+    # SL/TP macht Finn von Hand. NUR EINES gesetzt ist ein Fehler.
+    gesetzt = {}
+    for k in ("sl_usd", "tp_usd"):
+        roh = cmd.get(k)
+        if roh in (None, "", 0, "0"):
+            gesetzt[k] = False
+            continue
+        gesetzt[k] = True
         try:
-            v = float(cmd.get(k) or 0)
-            # isfinite deckt NaN und Infinity ab ('nan <= 0' waere still False)
+            v = float(roh)
             if not math.isfinite(v) or v <= 0:
-                fehler.append(f"{k} fehlt oder <= 0")
+                fehler.append(f"{k} <= 0 oder keine Zahl")
         except (TypeError, ValueError):
             fehler.append(f"{k} ist keine Zahl")
+    if gesetzt.get("sl_usd") != gesetzt.get("tp_usd"):
+        fehler.append("sl_usd und tp_usd nur ZUSAMMEN setzen (oder beide weglassen)")
     return fehler
 
 
@@ -1343,6 +1360,26 @@ def run(cfg_path, cmd):
         if p:
             fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
             trail.append(f"Position offen @ {fill}")
+            # Schalter aus (18.08.2026): Order pur, SL/TP macht Finn von Hand —
+            # Dialog zu, fertig, KEIN Scan.
+            mit_sltp = False
+            try:
+                mit_sltp = (float(cmd.get("sl_usd") or 0) > 0
+                            and float(cmd.get("tp_usd") or 0) > 0)
+            except (TypeError, ValueError):
+                pass
+            if not mit_sltp:
+                try:
+                    dlg.type_keys("{ESC}", set_foreground=False)
+                except Exception:
+                    pass
+                trail.append("SL/TP: manuell (Schalter aus)")
+                return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
+                        "msg": "per Klick platziert — SL/TP bewusst NICHT gesetzt "
+                               "(Schalter aus), von Hand nachtragen",
+                        "trail": " → ".join(trail), "symbol": symbol,
+                        "richtung": "buy" if kauf else "sell",
+                        "volumen": p["volumen"], "price": fill, "ticket": p["ticket"]}
             # SL/TP vom echten Fill-Kurs rechnen — eingetragen wird PER KLICK
             # (18.08.2026, Finns Ansage: kein API-Schreibweg mehr). Vorher den
             # F9-Dialog schliessen, er laege sonst vor der Handel-Liste.
