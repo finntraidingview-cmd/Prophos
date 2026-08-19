@@ -795,6 +795,34 @@ def _startup_attach_part(fname, cfg, install_dir):
     return "\n" + provision.build_startup_ini(preset=preset)
 
 
+def _master_positionen_live(cfg):
+    """LIVE am Master-Terminal nachsehen, NUR LESEND (19.08.2026, Finns Fund:
+    der Loesch-Riegel glaubte der Positionsliste aus dem EINGEFRORENEN
+    Snapshot — '1 Position' von gestern blockierte das Loeschen, waehrend das
+    Terminal live 0 zeigte). Rueckgabe: Anzahl offener Positionen oder None
+    (nicht pruefbar — falsches Konto, Terminal nicht erreichbar, Paket fehlt)."""
+    path = str(cfg.get("master_terminal_path") or "").strip()
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+    try:
+        if not mt5.initialize(path=path):
+            return None
+        try:
+            ai = mt5.account_info()
+            exp = int(cfg.get("master_expected_login") or 0)
+            if ai is None or (exp and int(ai.login) != exp):
+                return None
+            return len(mt5.positions_get() or ())
+        finally:
+            mt5.shutdown()
+    except Exception:
+        return None
+
+
 def _ok_dialog_watcher(install_dir, dauer_s=75):
     """Start-Dialoge automatisch bestaetigen (18.08.2026, Finns The5ers-Fund:
     das Terminal oeffnete mit einem Login-/OK-Dialog, niemand drueckte OK,
@@ -1752,10 +1780,24 @@ class Handler(BaseHTTPRequestHandler):
             fresh = bool((target or {}).get("alive"))
             # (a) Instanz frisch und mitten im Geschehen — offene Master-Positionen
             #     oder Hedges wuerden beim Neustart als Alt-Bestand uebersprungen.
+            #     ABER: bei eingefrorenem Snapshot (note gesetzt) ist die
+            #     master_positions-Liste ALT und kein Beweis (19.08.2026, Finns
+            #     Fund: '1 Position' von gestern blockierte das Loeschen). Dann
+            #     zaehlt nur der LIVE-Blick ins laufende Master-Terminal — und
+            #     nur eine beweisbare 0 ohne Hedges laesst durch.
             if fresh and ((st.get("master_positions") or []) or (st.get("hedges") or {})):
-                return self._send(409, json.dumps({"ok": False, "msg":
-                    "Instanz hat offene Positionen oder Hedges — erst flach werden, "
-                    "dann loeschen."}, ensure_ascii=False))
+                beweisbar_flach = False
+                if st.get("note") and not (st.get("hedges") or {}):
+                    cfg_del = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+                    mpath = str(cfg_del.get("master_terminal_path") or "").strip()
+                    if mpath and provision.terminal_pids(os.path.dirname(os.path.abspath(mpath))):
+                        beweisbar_flach = _master_positionen_live(cfg_del) == 0
+                if not beweisbar_flach:
+                    return self._send(409, json.dumps({"ok": False, "msg":
+                        "Instanz hat offene Positionen oder Hedges — erst flach werden, "
+                        "dann loeschen. (Snapshot eingefroren? Master-Terminal oeffnen — "
+                        "dann prueft der Riegel LIVE und laesst bei 0 Positionen durch.)"},
+                        ensure_ascii=False))
             # (b) Ziel-Status NICHT frisch, aber irgendein Copier-Prozess schreibt
             #     frische Status-Dateien ('unbekannt != leer': wir koennen nicht
             #     beweisen, dass niemand diese Config bedient — gleiches
