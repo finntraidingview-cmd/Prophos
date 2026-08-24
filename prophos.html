@@ -5072,6 +5072,7 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
+          <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
         </div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
@@ -5234,6 +5235,112 @@
         </div>
         <div id="kasse-list" style="display:flex;flex-direction:column;gap:7px"></div>
         <div id="kasse-empty" class="empty" style="display:none"><div class="empty-ico">💸</div><h3>Noch keine Einträge</h3><p>Trag oben die erste Investition ein.</p></div>
+        </div>
+
+        <!-- META WALLET (24.08.2026): USDT-Bestände der MetaMask-Wallets aller Personen.
+             Watch-only über die öffentlichen Adressen — hier landen NIE Keys oder Seeds. -->
+        <div id="adm-pane-wallet" hidden>
+          <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+            Tabellen <code>id_wallets</code>/<code>wallet_snapshots</code> fehlen noch — bitte <code>sql/2026-08-24_id_wallets.sql</code> im Supabase SQL-Editor ausführen.
+          </div>
+
+          <div class="adm-toolbar">
+            <select id="wal-person" class="adm-f"><option value="">Alle Personen</option></select>
+            <button class="btn btn-ghost" id="wal-refresh" title="Balances von den Chains neu laden" style="padding:8px 12px">↻</button>
+            <span id="wal-msg" style="font-size:12px;color:var(--sub)"></span>
+          </div>
+
+          <div class="kpis">
+            <div class="kpi">
+              <div class="kpi-label">Gesamt (USDT)</div>
+              <div class="kpi-value" id="wal-k-total">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-total-sub">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Arbitrum</div>
+              <div class="kpi-value" id="wal-k-arbitrum">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-arbitrum-sub">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Solana</div>
+              <div class="kpi-value" id="wal-k-solana">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-solana-sub">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Tron</div>
+              <div class="kpi-value" id="wal-k-tron">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-tron-sub">–</div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Nach Person</div>
+                  <div class="panel-sub">Farben = Chains · klicken filtert</div>
+                </div>
+              </div>
+              <div class="adm-dist" id="wal-person-dist"></div>
+              <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;color:var(--sub)">
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#9945ff;margin-right:5px"></span>Solana</span>
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:5px"></span>Tron</span>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Verlauf</div>
+                  <div class="panel-sub">Summe der gefilterten Wallets, 1 Punkt pro Tag</div>
+                </div>
+              </div>
+              <div style="padding:4px 2px 0">
+                <svg id="wal-history" viewBox="0 0 600 190" style="width:100%;height:auto;display:block"></svg>
+                <div id="wal-history-hint" style="font-size:12px;color:var(--sub);padding:18px 4px" hidden>Der Verlauf entsteht aus einem Tages-Snapshot pro Wallet — ab dem zweiten Tag gibt es hier eine Kurve.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:14px">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Wallets</div>
+                <div class="panel-sub">Pro Person bis zu drei Adressen — Arbitrum, Solana, Tron</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+              <input id="wal-add-person" list="wal-person-names" placeholder="Person" autocomplete="off" style="flex:1;min-width:120px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <datalist id="wal-person-names"></datalist>
+              <select id="wal-add-chain" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+                <option value="arbitrum">Arbitrum</option>
+                <option value="solana">Solana</option>
+                <option value="tron">Tron</option>
+              </select>
+              <input id="wal-add-address" placeholder="Öffentliche Adresse (0x… / Base58 / T…)" autocomplete="off" spellcheck="false" style="flex:2;min-width:220px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:12.5px">
+              <button class="btn btn-primary" id="wal-add">Hinzufügen</button>
+            </div>
+            <div id="wal-add-msg" style="font-size:12.5px;color:var(--danger);min-height:16px;margin-bottom:6px"></div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr>
+                  <th>Person</th>
+                  <th>Chain</th>
+                  <th>Adresse</th>
+                  <th class="adm-num">USDT</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="wal-rows"></tbody>
+              </table>
+            </div>
+            <div class="adm-empty" id="wal-empty" hidden>Noch keine Wallets — oben die erste Adresse eintragen.</div>
+          </div>
+
+          <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+            Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
+            Balances kommen live von den Chains (USDT auf Arbitrum, Solana, Tron) direkt aus dem Browser, ohne API-Key.
+            Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
+          </p>
         </div>
       </div>
     </section>
@@ -6700,6 +6807,312 @@
       })
     }
 
+    /* ── Meta Wallet (24.08.2026): USDT-Bestände der MetaMask-Wallets pro Person ──
+     * Watch-only: gespeichert werden NUR öffentliche Adressen (id_wallets), die
+     * Balances kommen direkt aus dem Browser von öffentlichen Endpoints — kein
+     * API-Key, kein app.py-Umweg, funktioniert damit auch auf pages.dev ohne
+     * lokales Backend. Verlauf: 1 Snapshot pro Wallet und Tag (wallet_snapshots-
+     * Upsert beim Laden), weil Arbitrum/Solana-History sonst einen Key bräuchte. */
+    const WAL_CHAINS = {
+      arbitrum: { label:'Arbitrum', col:'#3b82f6',
+                  usdt:'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',   // USDT (Arbitrum One), 6 Dezimalstellen
+                  rpc:'https://arb1.arbitrum.io/rpc',
+                  explorer: a => 'https://arbiscan.io/address/' + a,
+                  valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
+                  hint:'0x… (42 Zeichen)' },
+      solana:   { label:'Solana', col:'#9945ff',
+                  mint:'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  // USDT-Mint (SPL), 6 Dezimalstellen
+                  // Der offizielle mainnet-beta-RPC blockt Browser-Anfragen (403 "Access
+                  // forbidden", beim Bauen am 24.08.2026 live gesehen) — publicnode ist
+                  // offen und keyless, mainnet-beta bleibt nur als Fallback-Versuch.
+                  rpc:'https://solana-rpc.publicnode.com',
+                  rpcFallback:'https://api.mainnet-beta.solana.com',
+                  explorer: a => 'https://solscan.io/account/' + a,
+                  valid: a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
+                  hint:'Base58 (32–44 Zeichen)' },
+      tron:     { label:'Tron', col:'#ef4444',
+                  usdt:'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',            // USDT (TRC-20), 6 Dezimalstellen
+                  api:'https://api.trongrid.io',
+                  explorer: a => 'https://tronscan.org/#/address/' + a,
+                  valid: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
+                  hint:'T… (34 Zeichen)' }
+    }
+    let wallets = [], walSnaps = [], walOpened = false
+    const walBal = new Map()   // wallet.id → { usdt:Number|null, err:String|null }
+    const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+
+    function walOpen(){
+      if(walOpened){ return }
+      walOpened = true
+      walLoad().then(walRefreshBalances)
+    }
+
+    async function walLoad(){
+      try{
+        const [w, s] = await Promise.all([
+          supabase.from('id_wallets').select('*').order('person_name').order('chain'),
+          supabase.from('wallet_snapshots').select('wallet_id,day,usdt').order('day')
+        ])
+        if(w.error) throw w.error
+        if(s.error) throw s.error
+        wallets = w.data || []
+        walSnaps = s.data || []
+        $('wal-db-warn').style.display = 'none'
+        walRender()
+      }catch(e){
+        const m = e.message || ''
+        if(/(id_wallets|wallet_snapshots)/i.test(m) && /(does not exist|relation|schema cache)/i.test(m)){
+          $('wal-db-warn').style.display = ''
+        } else console.warn('[wallet] load:', m || e)
+      }
+    }
+
+    // Eine Wallet live von ihrer Chain lesen — gibt den USDT-Bestand zurück.
+    async function walFetchBalance(w){
+      const c = WAL_CHAINS[w.chain]
+      if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
+      if(w.chain === 'arbitrum'){
+        // balanceOf(address) per eth_call gegen den USDT-Contract
+        const data = '0x70a08231' + w.address.slice(2).toLowerCase().padStart(64, '0')
+        const r = await fetch(c.rpc, { method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'eth_call', params:[{ to:c.usdt, data }, 'latest'] }) })
+        const d = await r.json()
+        if(d.error) throw new Error(d.error.message || 'RPC-Fehler')
+        return (parseInt(d.result || '0x0', 16) || 0) / 1e6
+      }
+      if(w.chain === 'solana'){
+        // Summe über alle Token-Accounts des Owners mit dem USDT-Mint
+        const body = JSON.stringify({ jsonrpc:'2.0', id:1, method:'getTokenAccountsByOwner',
+          params:[w.address, { mint:c.mint }, { encoding:'jsonParsed' }] })
+        let d = null
+        for(const rpc of [c.rpc, c.rpcFallback]){
+          try{
+            const r = await fetch(rpc, { method:'POST', headers:{ 'Content-Type':'application/json' }, body })
+            d = await r.json()
+            if(!d.error) break
+          }catch(e){ d = { error:{ message: e.message || 'RPC nicht erreichbar' } } }
+        }
+        if(!d || d.error) throw new Error(d?.error?.message || 'RPC-Fehler')
+        return (d.result?.value || []).reduce((a, x) =>
+          a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0)
+      }
+      // Tron: Account-Endpoint liefert alle TRC-20-Bestände als { contract: "rohwert" }
+      const r = await fetch(c.api + '/v1/accounts/' + w.address)
+      const d = await r.json()
+      if(d.success === false) throw new Error(d.error || 'TronGrid-Fehler')
+      const acc = (d.data || [])[0]
+      if(!acc) return 0   // nie benutzte Tron-Adresse ist on-chain noch nicht "aktiviert" → Bestand 0
+      for(const t of (acc.trc20 || [])){ if(t[c.usdt] != null) return Number(t[c.usdt]) / 1e6 }
+      return 0
+    }
+
+    // Alle Balances ziehen + Tages-Snapshot upserten (1 Zeile pro Wallet und Tag).
+    async function walRefreshBalances(){
+      const msgEl = $('wal-msg')
+      if(!wallets.length){ msgEl.textContent = ''; return }
+      msgEl.textContent = 'Lade Balances…'
+      let fail = 0
+      await Promise.all(wallets.map(async w => {
+        try{
+          const b = await walFetchBalance(w)
+          walBal.set(w.id, { usdt:b, err:null })
+          await supabase.from('wallet_snapshots').upsert(
+            { wallet_id:w.id, day:new Date().toISOString().slice(0,10), usdt:b, taken_at:new Date().toISOString() },
+            { onConflict:'wallet_id,day' })
+        }catch(e){
+          walBal.set(w.id, { usdt:null, err:(e.message || String(e)) })
+          fail++
+        }
+        walRender()   // jede fertige Wallet sofort zeigen statt auf die langsamste zu warten
+      }))
+      msgEl.textContent = fail ? `${wallets.length - fail} von ${wallets.length} Wallets geladen` : 'Stand: gerade eben'
+      // Snapshots neu lesen, damit der heutige Punkt direkt im Verlauf auftaucht
+      const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt').order('day')
+      if(data){ walSnaps = data; walRender() }
+    }
+
+    const walFiltered = () => {
+      const p = $('wal-person').value
+      return p ? wallets.filter(w => w.person_name === p) : wallets
+    }
+
+    function walRender(){
+      if(!$('wal-rows')) return
+      const rows = walFiltered()
+
+      // Personen-Filter + Namensvorschläge (Admin-Übersicht + Profile + vorhandene Wallets)
+      const sel = $('wal-person'), cur = sel.value
+      const names = [...new Set(wallets.map(w => w.person_name))].sort((a, b) => a.localeCompare(b, 'de'))
+      sel.innerHTML = '<option value="">Alle Personen</option>' +
+        names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')
+      sel.value = names.includes(cur) ? cur : ''
+      const sugg = new Set(names)
+      for(const p of (admData?.people || [])){ if(p.name) sugg.add(p.name) }
+      for(const p of (typeof profList === 'function' ? profList() : [])){ if(p?.name) sugg.add(p.name) }
+      $('wal-person-names').innerHTML = [...sugg].sort((a, b) => a.localeCompare(b, 'de'))
+        .map(n => `<option value="${escapeHtml(n)}">`).join('')
+
+      // KPIs
+      const bal = w => walBal.get(w.id)?.usdt
+      const sum = ch => rows.reduce((a, w) => (!ch || w.chain === ch) ? a + (bal(w) ?? 0) : a, 0)
+      const loaded = rows.some(w => bal(w) != null)
+      $('wal-k-total').textContent = loaded ? walNf.format(sum()) : '–'
+      $('wal-k-total-sub').textContent = rows.length
+        ? `${rows.length} Wallet${rows.length === 1 ? '' : 's'} · ${new Set(rows.map(w => w.person_name)).size} Person${new Set(rows.map(w => w.person_name)).size === 1 ? '' : 'en'}`
+        : 'noch keine Wallets'
+      for(const ch of Object.keys(WAL_CHAINS)){
+        const n = rows.filter(w => w.chain === ch).length
+        $('wal-k-' + ch).textContent = (loaded && n) ? walNf.format(sum(ch)) : '–'
+        $('wal-k-' + ch + '-sub').textContent = n ? `${n} Wallet${n === 1 ? '' : 's'}` : 'keine Wallet'
+      }
+
+      // Nach Person: gestapelte Balken (Segmente = Chains), Breite = Anteil am Gesamt
+      const byPerson = new Map()
+      for(const w of rows){
+        const g = byPerson.get(w.person_name) || { name:w.person_name, total:0, chains:{ arbitrum:0, solana:0, tron:0 } }
+        g.total += bal(w) ?? 0
+        g.chains[w.chain] += bal(w) ?? 0
+        byPerson.set(w.person_name, g)
+      }
+      const persons = [...byPerson.values()].sort((a, b) => b.total - a.total)
+      const grand = persons.reduce((a, g) => a + g.total, 0)
+      const dist = $('wal-person-dist')
+      dist.innerHTML = ''
+      if(!persons.length){
+        dist.innerHTML = '<div class="adm-empty">Noch keine Wallets.</div>'
+      }
+      for(const g of persons){
+        const share = grand > 0 ? (100 * g.total / grand) : 0
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'adm-row adm-row-btn' + ($('wal-person').value === g.name ? ' is-on' : '')
+        const segs = Object.entries(g.chains).filter(([, v]) => v > 0)
+          .map(([ch, v]) => `<div style="width:${(g.total > 0 ? 100 * v / g.total : 0).toFixed(1)}%;background:${WAL_CHAINS[ch].col}"></div>`)
+          .join('')
+        row.innerHTML =
+          '<div class="adm-row-name"></div>' +
+          `<div class="adm-track"><div style="display:flex;height:100%;width:${Math.min(100, share).toFixed(1)}%">${segs}</div></div>` +
+          `<div class="adm-val">${loaded ? walNf.format(g.total) : '–'}</div>` +
+          `<div class="adm-pct">${share.toFixed(0)}%</div>`
+        row.querySelector('.adm-row-name').textContent = g.name
+        row.title = g.name + ' — klicken filtert'
+        row.addEventListener('click', () => {
+          sel.value = (sel.value === g.name) ? '' : g.name
+          walRender()
+        })
+        dist.appendChild(row)
+      }
+
+      walDrawHistory(rows)
+
+      // Wallet-Tabelle
+      const tb = $('wal-rows')
+      tb.innerHTML = ''
+      $('wal-empty').hidden = !!wallets.length
+      for(const w of rows){
+        const c = WAL_CHAINS[w.chain]
+        const b = walBal.get(w.id)
+        const short = w.address.length > 14 ? w.address.slice(0, 7) + '…' + w.address.slice(-5) : w.address
+        const tr = document.createElement('tr')
+        tr.innerHTML =
+          '<td class="wal-td-person"></td>' +
+          `<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin-right:7px"></span>${c.label}</td>` +
+          `<td><button type="button" class="wal-addr" data-full="${escapeHtml(w.address)}" title="${escapeHtml(w.address)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
+          ` <a href="${c.explorer(w.address)}" target="_blank" rel="noopener" title="Im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
+          `<td class="adm-num">${b?.usdt != null ? walNf.format(b.usdt) : (b?.err ? '<span title="' + escapeHtml(b.err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
+          `<td style="text-align:right"><button type="button" class="wal-del" data-id="${w.id}" title="Wallet entfernen" style="border:none;background:none;color:var(--sub);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px">×</button></td>`
+        tr.querySelector('.wal-td-person').textContent = w.person_name
+        tb.appendChild(tr)
+      }
+    }
+
+    // Verlauf: Summe der gefilterten Wallets pro Tag. Fehlt für einen Tag der
+    // Snapshot einer Wallet, gilt ihr letzter bekannter Wert weiter — sonst
+    // sähe jeder Lade-Lücken-Tag wie ein Einbruch aus.
+    function walDrawHistory(rows){
+      const svg = $('wal-history'), hint = $('wal-history-hint')
+      const ids = new Set(rows.map(w => w.id))
+      const snaps = walSnaps.filter(s => ids.has(s.wallet_id))
+      const days = [...new Set(snaps.map(s => s.day))].sort()
+      if(days.length < 2){
+        svg.style.display = 'none'; hint.hidden = false
+        return
+      }
+      svg.style.display = ''; hint.hidden = true
+      const perWallet = new Map()
+      for(const s of snaps){
+        const m = perWallet.get(s.wallet_id) || new Map()
+        m.set(s.day, Number(s.usdt) || 0)
+        perWallet.set(s.wallet_id, m)
+      }
+      const last = new Map()
+      const series = days.map(d => {
+        let t = 0
+        for(const [wid, m] of perWallet){
+          if(m.has(d)) last.set(wid, m.get(d))
+          t += last.get(wid) || 0
+        }
+        return t
+      })
+      const W = 600, H = 190, padL = 8, padR = 8, padT = 14, padB = 22
+      const min = Math.min(...series), max = Math.max(...series)
+      const span = (max - min) || 1
+      const x = i => padL + (W - padL - padR) * (days.length === 1 ? 0.5 : i / (days.length - 1))
+      const y = v => padT + (H - padT - padB) * (1 - (v - min) / span)
+      const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+      const fmtDay = d => String(d).slice(5).split('-').reverse().join('.')
+      svg.innerHTML =
+        `<polygon points="${x(0).toFixed(1)},${(H - padB)} ${pts} ${x(days.length - 1).toFixed(1)},${(H - padB)}" fill="var(--violet)" opacity="0.12"></polygon>` +
+        `<polyline points="${pts}" fill="none" stroke="var(--violet)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>` +
+        `<circle cx="${x(series.length - 1).toFixed(1)}" cy="${y(series[series.length - 1]).toFixed(1)}" r="3.5" fill="var(--violet)"></circle>` +
+        `<text x="${padL}" y="${H - 6}" font-size="10" fill="var(--sub)">${fmtDay(days[0])}</text>` +
+        `<text x="${W - padR}" y="${H - 6}" font-size="10" fill="var(--sub)" text-anchor="end">${fmtDay(days[days.length - 1])}</text>` +
+        `<text x="${W - padR}" y="${Math.max(padT + 8, y(series[series.length - 1]) - 8).toFixed(1)}" font-size="11" font-weight="600" fill="var(--ink)" text-anchor="end">${walNf.format(series[series.length - 1])}</text>`
+    }
+
+    async function walAdd(){
+      const msgEl = $('wal-add-msg')
+      msgEl.textContent = ''
+      const person = ($('wal-add-person').value || '').trim()
+      const chain = $('wal-add-chain').value
+      const address = ($('wal-add-address').value || '').trim()
+      const c = WAL_CHAINS[chain]
+      if(!person){ msgEl.textContent = 'Person fehlt.'; $('wal-add-person').focus(); return }
+      if(!c.valid(address)){
+        msgEl.textContent = `Das sieht nicht nach einer ${c.label}-Adresse aus — erwartet: ${c.hint}.`
+        $('wal-add-address').focus(); return
+      }
+      if(wallets.some(w => w.chain === chain && w.address.toLowerCase() === address.toLowerCase())){
+        msgEl.textContent = 'Diese Adresse ist schon eingetragen.'; return
+      }
+      // user_id des Profils mitschreiben, wenn der Name bekannt ist (Admin-Übersicht/Profile)
+      const uid = (admData?.people || []).find(p => p.name?.toLowerCase() === person.toLowerCase())?.user_id
+        || (typeof profList === 'function' ? profList() : []).find(p => p?.name?.toLowerCase() === person.toLowerCase())?.userId
+        || null
+      const btn = $('wal-add'); btn.disabled = true
+      try{
+        const { error } = await supabase.from('id_wallets').insert({ person_uid: uid, person_name: person, chain, address })
+        if(error) throw error
+        $('wal-add-address').value = ''
+        await walLoad()
+        walRefreshBalances()
+      }catch(e){
+        msgEl.textContent = 'Konnte nicht speichern: ' + (e.message || e)
+      }finally{ btn.disabled = false }
+    }
+
+    async function walDelete(id){
+      const w = wallets.find(x => String(x.id) === String(id))
+      if(!w) return
+      if(!confirm(`Wallet von ${w.person_name} (${WAL_CHAINS[w.chain]?.label || w.chain}) entfernen?\nDer gespeicherte Verlauf dieser Wallet wird mitgelöscht.`)) return
+      try{
+        const { error } = await supabase.from('id_wallets').delete().eq('id', id)
+        if(error) throw error
+        walBal.delete(id)
+        await walLoad()
+      }catch(e){ console.warn('[wallet] delete:', e.message || e) }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       if(!$('kasse-unlock')) return
       $('kasse-unlock').addEventListener('click', tryUnlock)
@@ -6721,6 +7134,8 @@
         })
         $('adm-pane-overview').hidden = name !== 'overview'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
+        $('adm-pane-wallet').hidden   = name !== 'wallet'
+        if(name === 'wallet') walOpen()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
@@ -6731,6 +7146,23 @@
       })
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
+      })
+      // Meta-Wallet-Tab (24.08.2026)
+      $('wal-refresh')?.addEventListener('click', walRefreshBalances)
+      $('wal-person')?.addEventListener('change', walRender)
+      $('wal-add')?.addEventListener('click', walAdd)
+      $('wal-add-address')?.addEventListener('keydown', e => { if(e.key === 'Enter') walAdd() })
+      $('wal-rows')?.addEventListener('click', ev => {
+        const del = ev.target.closest('.wal-del')
+        if(del){ walDelete(del.dataset.id); return }
+        const ad = ev.target.closest('.wal-addr')
+        if(ad && navigator.clipboard){
+          navigator.clipboard.writeText(ad.dataset.full).then(() => {
+            const old = ad.textContent
+            ad.textContent = 'kopiert ✓'
+            setTimeout(() => { ad.textContent = old }, 900)
+          }).catch(() => {})
+        }
       })
       selectWho('finn')
     })
