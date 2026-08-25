@@ -2,7 +2,7 @@
 """
 Prophos Copier-Panel — kleines Web-Frontend für den lokalen MT5-Copier auf DIESEM PC.
 
-Zweck: Multiplikator, Symbol-Mapping und Modus im Browser setzen statt in der
+Zweck: Multiplikator und Symbol-Mapping im Browser setzen statt in der
 Textdatei — für mehrere Master/Prop-Firmen gleichzeitig. Zeigt außerdem live, was der
 Copier pro Master gerade macht (Konten, offene Hedges, Log), und kann das jeweilige
 Master-Terminal starten (MT5 merkt sich den Login pro Ordner — hier werden KEINE
@@ -40,8 +40,9 @@ PORT = int(os.environ.get("PANEL_PORT", "8770"))
 # Kontonummern bleiben tabu — das sind die Sicherheitsanker des Copiers.
 # max_lots_per_hedge abgeschafft (15.08.2026, Finn: "komplett weg") — Alt-Clients,
 # die es noch schicken, werden vom Save still ignoriert (k not in WRITABLE).
-WRITABLE = {"multiplier", "symbol_map", "mode"}
-MODES = ("dryrun", "demo", "live")
+# mode genauso abgeschafft (25.08.2026, Finn: nur noch live, Modus-Klicks weg) —
+# der Copier sendet immer echt, das Feld in Alt-Configs ist bedeutungslos.
+WRITABLE = {"multiplier", "symbol_map"}
 # Dieselbe strenge Namensregel wie in copier.py — Explorer-Kopien wie
 # "config - Kopie.json" oder "config (2).json" sind KEINE Instanz (Audit 13.08.2026:
 # solche Karten sahen echt aus, steuerten aber nichts).
@@ -293,7 +294,6 @@ def snapshot():
         data.append({
             "name": inst["name"],
             "file": inst["config_file"],
-            "mode": cfg.get("mode"),
             "multiplier": cfg.get("multiplier"),
             "symbol_map": cfg.get("symbol_map") or {},
             "magic": magic,
@@ -337,10 +337,6 @@ def patch_config(fname, patch):
     for k, v in patch.items():
         if k not in WRITABLE:
             continue
-        if k == "mode":
-            v = str(v).lower()
-            if v not in MODES:
-                return False, f"Modus '{v}' ungueltig"
         if k == "multiplier":
             try:
                 v = float(v)
@@ -390,18 +386,18 @@ def _save_plans(plans):
     os.replace(tmp, PLANS_FILE)
 
 
-def upsert_plan(file, name, multiplier, mode):
+def upsert_plan(file, name, multiplier):
     with PLANS_LOCK:
         plans = _load_plans()
         now = datetime.now().isoformat(timespec="seconds")
         for p in plans:
             if p["file"] == file and p["status"] in ("geplant", "laufend"):
-                p.update({"multiplier": multiplier, "mode": mode, "armed_at": now})
+                p.update({"multiplier": multiplier, "armed_at": now})
                 _save_plans(plans)
                 return p
         pid = max([p["id"] for p in plans], default=0) + 1
         p = {"id": pid, "file": file, "name": name, "multiplier": multiplier,
-             "mode": mode, "created_at": now,
+             "created_at": now,
              "armed_at": now, "started_at": None, "ended_at": None,
              "status": "geplant"}
         plans.append(p)
@@ -1083,14 +1079,9 @@ button{font-family:inherit;cursor:pointer}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);
   padding:16px;box-shadow:var(--shadow-card);transition:box-shadow .15s var(--ease)}
 .card:hover{box-shadow:var(--shadow-card-hover)}
-.card.live-mode{border-color:rgba(240,68,56,.45)}
 .acc-top{display:flex;align-items:center;gap:8px}
 .acc-name{font-size:15px;font-weight:600;letter-spacing:-.01em}
 .acc-state{margin-left:auto;font-size:12px;color:var(--sub);display:inline-flex;align-items:center;gap:6px}
-.pill{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:20px}
-.pill.dry{background:var(--surface-tint);color:var(--sub);border:1px solid var(--border)}
-.pill.demo{background:rgba(18,183,106,.12);color:#0d9668}
-.pill.live{background:rgba(240,68,56,.12);color:#d92d20}
 .acc-broker{font-size:12.5px;color:var(--sub);margin-top:3px}
 .acc-broker b{color:var(--ink);font-weight:600}
 .acc-route{font-size:12px;color:var(--sub-2);margin-top:1px}
@@ -1207,14 +1198,6 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
   <p class=modal-sub id=plan-sub></p>
   <label>Multiplikator</label>
   <input class=big id=plan-mult type=number step=0.001 min=0>
-  <div class=row style="margin-top:10px">
-    <div><label>Modus</label>
-      <select id=plan-mode>
-        <option value=dryrun>dryrun — nur mitlesen</option>
-        <option value=demo>demo — echte Order, Demo-Konto</option>
-        <option value=live>live — echtes Geld</option>
-      </select></div>
-  </div>
   <div class=modal-actions>
     <span class=msg id=plan-msg></span>
     <button class="btn btn-ghost" id=plan-cancel>Abbrechen</button>
@@ -1249,7 +1232,6 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
 const state={}, openSet=new Set();
 let lastJob=null;
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function pill(m){const c=m==='live'?'live':m==='demo'?'demo':'dry';return `<span class="pill ${c}">${esc((m||'?').toUpperCase())}</span>`}
 function mapRows(map){
   const e=Object.entries(map);
   return e.map(([k,v])=>`<div class=map>
@@ -1265,8 +1247,8 @@ function card(d){
   const pos=(s.master_positions||[]).length, hed=Object.keys(s.hedges||{}).length;
   const broker=s.master_server||d.master_server||'Broker unbekannt';
   const isOpen=openSet.has(d.file);
-  return `<div class="card${d.mode==='live'?' live-mode':''}${isOpen?' open':''}" data-file="${esc(d.file)}">
-   <div class=acc-top><span class=acc-name>${esc(d.name)}</span>${pill(d.mode)}
+  return `<div class="card${isOpen?' open':''}" data-file="${esc(d.file)}">
+   <div class=acc-top><span class=acc-name>${esc(d.name)}</span>
      <span class=acc-state><span class="dot ${live?'on':'off'}"></span>${live?'läuft':'gestoppt'}</span></div>
    <div class=acc-broker><b>${esc(broker)}</b></div>
    <div class=acc-route><span class=mono>${esc(s.master_login||d.master_expected||'—')}</span> → Hedge <span class=mono>${esc(s.hedge_login||d.hedge_expected||'—')}</span></div>
@@ -1287,12 +1269,6 @@ function card(d){
      <div class=row>
        <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
      </div>
-     <label>Modus</label>
-     <select data-f=mode>
-       <option value=dryrun ${d.mode==='dryrun'?'selected':''}>dryrun — nur mitlesen, keine Order</option>
-       <option value=demo ${d.mode==='demo'?'selected':''}>demo — echte Order, nur Demo-Konto</option>
-       <option value=live ${d.mode==='live'?'selected':''}>live — echtes Geld</option>
-     </select>
      <label>Symbol-Mapping (Master → Hedge)</label>
      <div data-maps>${mapRows(d.symbol_map||{})}</div>
      <div class=acc-acts>
@@ -1312,7 +1288,7 @@ function jobSteps(job){
     neustart:'Start mit Login + EA (Zugangsdaten-Datei wird danach gelöscht)',config:'Config anlegen'};
   let h=`<div class=steps>${job.steps.map(s=>`<div class="step ${s.state}"><span class=st>${mark(s)}</span><span>${labels[s.key]||s.key}${s.note?` <span class=note>${esc(s.note)}</span>`:''}</span></div>`).join('')}`;
   if(job.error)h+=`<div class="step error" style="margin-top:6px"><span class=st>✗</span><span>${esc(job.error)}</span></div>`;
-  else if(job.done)h+=`<div class="step done"><span class=st>✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</span></div>`;
+  else if(job.done)h+=`<div class="step done"><span class=st>✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich</span></div>`;
   return h+'</div>';
 }
 async function load(){
@@ -1367,7 +1343,7 @@ function planCard(p){
     live=`<div class=plan-live>● ${pos} Position(en) · ${hed} Hedge(s) bewacht</div>`}
   if(p.status==='beendet')meta=`${fmtT(p.started_at)} → ${fmtT(p.ended_at)} · ${dur(p.started_at,p.ended_at)}`;
   return `<div class="plan ${p.status}">
-    <div class=plan-top><b>${esc(d.name||p.name)}</b>${pill(p.mode)}
+    <div class=plan-top><b>${esc(d.name||p.name)}</b>
       <button class=x data-plandel="${p.id}" data-planstatus="${p.status}" title="Plan löschen">×</button></div>
     <div class=plan-meta>×${esc(p.multiplier)} · ${esc((s.master_server||d.master_server||''))}</div>
     <div class=plan-meta>${esc(meta)}</div>
@@ -1407,7 +1383,6 @@ function openPlan(file){
   document.getElementById('plan-title').textContent='Trade planen — '+d.name;
   document.getElementById('plan-sub').textContent=`${s.master_server||d.master_server||''} · Master ${d.master_expected||'—'} → Hedge ${d.hedge_expected||'—'}`;
   document.getElementById('plan-mult').value=d.multiplier??'';
-  document.getElementById('plan-mode').value=d.mode||'dryrun';
   const m=document.getElementById('plan-msg'); m.className='msg'; m.textContent='';
   planBg.classList.add('open'); planBg.style.display='flex';
   document.getElementById('plan-mult').focus();
@@ -1426,14 +1401,9 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   // Liefert der Master gerade nichts (Terminal zu / EA fehlt), ist das KEIN
   // Abbruchgrund mehr: Terminal-Start + EA-Selbstheilung erledigen das, und
   // die Bereitschafts-Anzeige unten sagt, wann wirklich getradet werden darf.
-  const patch={multiplier:document.getElementById('plan-mult').value,
-               mode:document.getElementById('plan-mode').value};
+  const patch={multiplier:document.getElementById('plan-mult').value};
   if(!patch.multiplier){
     msg.className='msg err';msg.textContent='Multiplikator ausfüllen.';return}
-  if(patch.mode==='live'&&d.mode!=='live'){
-    if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${d.master_expected||'?'}\nHedge: ${d.hedge_expected||'?'}\n\nDuplikum für dieses Paar ist aus?`)){
-      msg.className='msg err';msg.textContent='Abgebrochen — nichts geändert';return}
-  }
   msg.className='msg';msg.textContent='pushe…';
   const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   const s=await r.json();
@@ -1441,7 +1411,7 @@ document.getElementById('plan-start').addEventListener('click',async()=>{
   // Trade-Plan anlegen/aktualisieren: startet als "geplant" und wandert von
   // selbst nach "laufend"/"beendet", sobald die Position auf-/zugeht.
   try{await fetch('/api/plan?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({multiplier:patch.multiplier,mode:patch.mode})});}catch(e){}
+    body:JSON.stringify({multiplier:patch.multiplier})});}catch(e){}
   msg.textContent='gepusht — öffne Terminal…';
   const t=await fetch('/api/start-terminal?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
   const ts=await t.json();
@@ -1542,11 +1512,6 @@ document.getElementById('app').addEventListener('click',async e=>{
   if(bad){msg.className='msg err';msg.textContent=`Mapping-Zeile '${bad}' ist nur halb ausgefüllt`;return}
   if(dup){msg.className='msg err';msg.textContent=`Master-Symbol '${dup}' doppelt im Mapping`;return}
   patch.symbol_map=map;
-  if(patch.mode==='live'&&state[file]?.mode!=='live'){
-    const s=state[file]||{};
-    if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${s.master_expected||'?'}\nHedge: ${s.hedge_expected||'?'}\n\nDuplikum für dieses Paar ist aus?`)){
-      msg.className='msg err';msg.textContent='Abgebrochen — Modus nicht geändert';return}
-  }
   msg.className='msg';msg.textContent='speichere…';
   const r=await fetch('/api/save?file='+encodeURIComponent(file),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   const d=await r.json();
@@ -1876,8 +1841,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n) or b"{}")
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
-            p = upsert_plan(inst["config_file"], inst["name"],
-                            body.get("multiplier"), str(body.get("mode") or ""))
+            p = upsert_plan(inst["config_file"], inst["name"], body.get("multiplier"))
             return self._send(200, json.dumps({"ok": True, "plan": p}, ensure_ascii=False))
 
 
@@ -1888,11 +1852,12 @@ class Handler(BaseHTTPRequestHandler):
             patch = json.loads(self.rfile.read(n) or b"{}")
         except Exception as e:
             return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
-        before = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
         ok, msg = patch_config(inst["config_file"], patch)
-        restart = ok and str(patch.get("mode", "")).lower() not in ("", str(before.get("mode", "")).lower())
+        # restart bleibt im Payload (immer False), damit gecachte Alt-Frontends
+        # den Schluessel weiter finden — der Moduswechsel als einziger Ausloeser
+        # ist mit dem Modus-Ausbau (25.08.2026) weggefallen.
         print(f"[panel] {fname}: {msg}", flush=True)
-        self._send(200, json.dumps({"ok": ok, "msg": msg, "restart": restart}, ensure_ascii=False))
+        self._send(200, json.dumps({"ok": ok, "msg": msg, "restart": False}, ensure_ascii=False))
 
     def log_message(self, *a):
         pass  # eigenes, ruhigeres Logging oben

@@ -1,9 +1,8 @@
 {
-  "_hinweis": "REINE VORLAGE fuer die Auto-Provisionierung — ist KEIN Account und taucht nie in der Liste auf (15.08.2026, Von-Null-Test). Pro PC einmal anpassen: hedge_expected_login muss dem Konto im Hedge-Terminal entsprechen (steht in dessen Titelzeile), die Pfade den echten Ordnern. mode=demo: neue Accounts kopieren sofort echt auf den (Demo-)Hedge; live nur bewusst im Details-Editor. Wird bewusst NICHT automatisch aktualisiert — die Werte gehoeren dem PC.",
-  "mode": "demo",
+  "_hinweis": "REINE VORLAGE fuer die Auto-Provisionierung — ist KEIN Account und taucht nie in der Liste auf (15.08.2026, Von-Null-Test). Pro PC einmal anpassen: hedge_expected_login muss dem Konto im Hedge-Terminal entsprechen (steht in dessen Titelzeile), die Pfade den echten Ordnern. Seit 25.08.2026 (Modus-Ausbau) kopiert jede Instanz IMMER echt — 488579 ist Finns Fusion-Markets-LIVE-Konto. Wird bewusst NICHT automatisch aktualisiert — die Werte gehoeren dem PC.",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
   "hedge_portable": false,
-  "hedge_expected_login": 437804,
+  "hedge_expected_login": 488579,
   "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
   "common_files_dir": "",
   "multiplier": 1.0,

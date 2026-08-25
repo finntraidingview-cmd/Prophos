@@ -1,6 +1,5 @@
 {
-  "_1_mode": "dryrun = nur mitlesen und loggen (Default, null Risiko) · demo = echte Orders, aber nur auf DEMO-Hedge-Konto · live = echtes Geld",
-  "mode": "dryrun",
+  "_1_hinweis": "Der Copier sendet IMMER echte Orders auf das Hedge-Terminal — die fruehere Modus-Stufe (dryrun/demo/live) ist am 25.08.2026 ausgebaut. Ein 'mode'-Feld in alten Configs wird still ignoriert.",
 
   "_2_hedge_terminal": "Das LIVE-Terminal, an dem dieses Programm haengt. Es wird NUR hier gehandelt. Der Prop-Account wird gar nicht von Python beruehrt (dort laeuft das Lese-EA).",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",

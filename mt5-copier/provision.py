@@ -5,7 +5,7 @@ Auto-Provisionierung: neues MASTER-Terminal per Knopfdruck (13.08.2026, Neubau).
 Der manuelle Ablauf (Ordner klonen, einloggen, EA kompilieren, InpFileName
 setzen, Config anlegen) hat beim zweiten Master ~30 Minuten gedauert und ist
 fehleranfaellig — genau die Handgriffe, die hier wegfallen. Ziel-Fluss im Panel:
-Name + Login + Passwort + Server eintippen, "Fertig", Karte erscheint (dryrun).
+Name + Login + Passwort + Server eintippen, "Fertig", Karte erscheint.
 
 ARCHITEKTUR (bewusst anders als der erste Anlauf, der in addc1e8 entfernt wurde):
   · Geklont wird das MASTER-Vorlage-Terminal. Das HEDGE-Terminal bleibt das
@@ -146,16 +146,11 @@ def build_preset(snapshot_file, timer_ms=200):
 def build_master_config(base, *, name, master_login, terminal_path, ident, server=""):
     """Neue Instanz-Config aus der bestehenden config.json abgeleitet — Hedge-
     Felder bleiben identisch (check_fleet erzwingt das), Master-Felder neu.
-    mode startet hart auf dryrun: eine frisch angelegte Instanz darf niemals
-    scharf loslaufen. master_server dient kuenftigen Provisionierungen als
-    Quelle fuer die richtige Server-Liste (The5ers-Fall 14.08.2026)."""
-    cfg = {k: v for k, v in base.items() if not k.startswith("_")}
-    # Modus erbt von der Vorlage, GEDECKELT auf demo (15.08.2026, Finns
-    # "ich brauche keinen Modus"): mit Demo-Hedge kopiert 'demo' sofort echt
-    # sichtbar — aber 'live' entsteht NIE durch Provisionierung, nur durch
-    # bewussten Wechsel im Details-Editor (Warn-Dialog).
-    _bm = str(base.get("mode", "dryrun")).lower()
-    cfg["mode"] = _bm if _bm in ("dryrun", "demo") else "demo"
+    Kein mode-Feld mehr (25.08.2026, Modus-Ausbau): der Copier sendet immer
+    echt; ein geerbtes mode aus der Basis wird bewusst NICHT uebernommen.
+    master_server dient kuenftigen Provisionierungen als Quelle fuer die
+    richtige Server-Liste (The5ers-Fall 14.08.2026)."""
+    cfg = {k: v for k, v in base.items() if not k.startswith("_") and k != "mode"}
     cfg["master_expected_login"] = int(master_login)
     cfg["master_terminal_path"] = terminal_path
     cfg["master_server"] = server

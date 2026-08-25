@@ -72,25 +72,14 @@ gerechnet wird.
 5. `config.example.json` → `config.json`, ausfüllen. Besonders wichtig:
    `hedge_expected_login` (Konto, auf dem gehedged werden darf) und
    `master_expected_login` (Prop-Konto — hängt das Programm dort, bricht es ab).
-6. `start-copier.bat` doppelklicken. `mode` bleibt zunächst `dryrun`.
+6. `start-copier.bat` doppelklicken.
 
-## Die drei Stufen — in dieser Reihenfolge
-### Stufe 1 · `dryrun` — Schattenbetrieb, null Risiko
-Keine einzige Order, nur Protokoll. Duplikum läuft normal weiter, du tradest wie gewohnt:
-
-    [reader] Snapshot verbunden — Master-Konto 123456 …
-    DRYRUN — wuerde senden: HEDGE OPEN SELL 1.0 NAS100 (Master-Pos 987654)
-
-**Das ist der eigentliche Test:** Vergleiche die Zeile mit dem, was Duplikum tatsächlich
-gemacht hat. Stimmen Richtung, Lots und Symbol, rechnet der Copier korrekt. Auch Schließen
-und Teil-Schließen durchspielen.
-
-### Stufe 2 · `demo` — echte Orders, nur auf Demo
-Hedge-Terminal auf ein Demo-Konto einloggen. Das Programm **verweigert** den Versand, wenn
-dort ein Echtgeld-Konto hängt. Jetzt Öffnen, Teil-Schließen und Schließen real durchlaufen.
-
-### Stufe 3 · `live` — scharf
-Erst wenn Stufe 2 mehrfach sauber war. **Vorher für dieses Master-Paar Duplikum
+## Immer scharf — es gibt keine Stufen mehr
+Der Copier sendet **immer echte Orders** auf das Hedge-Terminal. Die frühere
+Modus-Treppe (`dryrun` → `demo` → `live` samt Echtgeld-Riegel und Bestätigungs-Dialog)
+ist am **25.08.2026** auf Finns Ansage komplett ausgebaut — gearbeitet wird nur noch
+live, die Stufen haben im Alltag nur Klicks gekostet. Ein `mode`-Feld in alten Configs
+wird still ignoriert. Was bleibt: **vor dem Start Duplikum für die Master-Paare
 abschalten** — sonst spiegeln zwei Systeme parallel und der Hedge ist doppelt.
 
 ## Live getestet (13.08.2026, zwei Fusion-Demo-Konten)
@@ -104,10 +93,6 @@ Noch nicht am Broker getestet: Teil-Schließung und Neustart-Recovery (im Selbst
 ## Häufige Stolpersteine
 - **Es passiert nichts?** Reihenfolge: **erst Copier starten, dann traden.** Was beim Start
   schon offen war, wird absichtlich nicht gehedged (`⏭`-Zeile im Log).
-- **Immer noch DRYRUN im Log?** Der Copier liest die Config **nur beim Start** — nach dem
-  Ändern neu starten. Kontrolle: `type config.json`, und im Startblock muss `Modus DEMO` stehen.
-  Zum Umstellen zuverlässiger als Notepad:
-  `powershell -Command "(Get-Content config.json) -replace 'dryrun','demo' | Set-Content config.json"`
 - **„Algo Trading nicht aktiv"** → im **Hedge**-Terminal einschalten (im Master nicht nötig).
 - **`hedge_portable`** muss `false` sein, wenn MT5 normal (nicht portable) installiert wurde.
 
@@ -117,11 +102,8 @@ Eigenständiges Mini-Frontend für die Copier auf **diesem** PC. Prophos wird ni
     python panel.py        (oder start-panel.bat)  →  http://127.0.0.1:8770
 
 Was es kann:
-- **Multiplikator, max Lots, Symbol-Mapping und Modus im Browser setzen** — Änderungen
-  landen in der `config.json` und der Copier übernimmt sie **live in ~2 s**, ohne Neustart.
-  (Ausnahme Modus: dort beendet sich der Copier bewusst, damit `start-copier.bat` neu startet
-  und alle Startprüfungen erneut laufen — ein Wechsel nach `live` im laufenden Prozess würde
-  sie umgehen.)
+- **Multiplikator und Symbol-Mapping im Browser setzen** — Änderungen landen in der
+  `config.json` und der Copier übernimmt sie **live in ~2 s**, ohne Neustart.
 - **Mehrere Master gleichzeitig:** jede `config*.json` im Ordner ist ein Master —
   `config.json`, `config-master2.json`, `config-ftmo.json` … Jede bekommt eine eigene Karte.
   **EIN** `start-copier.bat` startet **einen** Prozess, der alle bedient; der Status je
@@ -129,25 +111,22 @@ Was es kann:
   `config.json` oder `config-<name>.json` (Buchstaben/Zahlen) — Explorer-Kopien wie
   „config - Kopie.json" werden bewusst ignoriert und beim Panel-Start als ignoriert gelistet.
 - **Live-Anzeige pro Master:** Master-/Hedge-Kontonummer, Anzahl Master-Positionen, offene
-  Hedges, Modus-Badge, „läuft/gestoppt" (Statusdatei-Alter) und die letzten Log-Zeilen.
+  Hedges, „läuft/gestoppt" (Statusdatei-Alter) und die letzten Log-Zeilen.
 - **„Terminal starten":** startet die `master_terminal_path`-Exe der Karte. Es werden KEINE
   Zugangsdaten gespeichert — MT5 merkt sich den Login pro Installationsordner selbst
   (einmal manuell einloggen, „Zugangsdaten speichern" ✓). Der Pfad ist über die API bewusst
   NICHT setzbar, nur direkt in der JSON.
 - **Konflikt-Banner:** doppelte `magic` oder `snapshot_file` zwischen den Configs werden rot
   angezeigt, bevor der Copier beim Start deswegen abbricht.
-- **Live-Rückfrage:** der Wechsel auf `live` verlangt eine Bestätigung mit Dateiname und
-  Kontonummern (Fehlklick-Schutz — die einzige Stelle, an der das Panel Echtgeld anfasst).
 
 Sicherheit (getestet):
 - Bindet **nur an 127.0.0.1** — aus dem Netz nicht erreichbar.
-- **Whitelist:** das Panel darf ausschließlich `multiplier`, `symbol_map`,
-  `max_lots_per_hedge` und `mode` schreiben. Terminal-Pfade und die erwarteten
-  Kontonummern (`hedge_expected_login` / `master_expected_login`) sind tabu — das sind die
-  Sicherheitsanker des Copiers. Verifiziert: ein Push mit fremden Kontonummern und Pfad ließ
-  diese Felder unverändert.
-- Werte-Prüfung: negative/nicht-numerische Multiplikatoren und unbekannte Modi werden
-  abgelehnt, statt in die Config zu wandern.
+- **Whitelist:** das Panel darf ausschließlich `multiplier` und `symbol_map` schreiben.
+  Terminal-Pfade und die erwarteten Kontonummern (`hedge_expected_login` /
+  `master_expected_login`) sind tabu — das sind die Sicherheitsanker des Copiers.
+  Verifiziert: ein Push mit fremden Kontonummern und Pfad ließ diese Felder unverändert.
+- Werte-Prüfung: negative/nicht-numerische Multiplikatoren werden abgelehnt, statt in
+  die Config zu wandern.
 - Nur Python-Standardbibliothek — kein `pip install`, keine Cloud, keine Schlüssel auf dem PC.
 
 ## Account hinzufügen — automatisch (Panel-Knopf)
@@ -171,12 +150,12 @@ in der Karte):
    bleibt dort dauerhaft (Chart-Persistenz). Bewiesen wird der Schritt über die
    Snapshot-Datei selbst; die Start-ini wird danach gelöscht (ein zweiter Start damit
    würde das EA auf einen ZWEITEN Chart duplizieren).
-6. **Config anlegen** — `config-<name>.json` (mode **dryrun**); der laufende Copier
+6. **Config anlegen** — `config-<name>.json`; der laufende Copier
    nimmt sie binnen 5 s in die Flotte, die Karte erscheint im Panel.
 
 Voraussetzungen: Vorlage-Terminal ist eingerichtet (EA einmal kompiliert),
 `master_terminal_path` steht in der `config.json`, der Account existiert beim Broker.
-Danach: erst im **dryrun** einen Testtrade ansehen, dann per Panel auf `demo`/`live` heben.
+Achtung: die neue Instanz kopiert ab dem ersten Master-Trade **sofort echt**.
 
 ## Zweiter Master auf dasselbe Hedge-Konto (Schritt für Schritt)
 1. **Terminal-Ordner kopieren** statt neu installieren: `xcopy "C:\MT5-Master" "C:\MT5-Master2" /E /I /H`,
@@ -200,7 +179,6 @@ Danach: erst im **dryrun** einen Testtrade ansehen, dann per Panel auf `demo`/`l
    dabei die ganze Flotte durch. Doppelte `magic`/`snapshot_file` → Abbruch mit klarer Meldung
    (das war der gefährlichste Audit-Fund: zwei Copier mit gleicher magic schließen sich
    gegenseitig die Hedges).
-5. Erst mit `"mode": "dryrun"` beobachten, dann auf `demo`/`live` heben.
 
 ## Dauerbetrieb (Autostart + Watchdog)
 Zwei Sicherungsnetze, damit der Copier unbeaufsichtigt laufen kann:

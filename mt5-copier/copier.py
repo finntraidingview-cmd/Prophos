@@ -27,10 +27,11 @@ Master-Seite bleibt ein reines Lese-EA (ProphosHedgeReader.mq5) — Python haeng
 ausschliesslich am Hedge-Terminal. Begruendung und alle Sicherheitsmechanismen:
 siehe Kommentare im Code und README.
 
-DREI STUFEN pro Master (config "mode"):
-  1. dryrun (Default) — nur protokollieren, KEINE Order.
-  2. demo — echte Orders, aber nur wenn das Hedge-Terminal auf einem DEMO-Konto ist.
-  3. live — echtes Geld. Vorher Duplikum fuer dieses Paar abschalten.
+Der Copier sendet IMMER echte Orders. Die fruehere Modus-Maschinerie
+(dryrun | demo | live samt Echtgeld-Riegel) ist am 25.08.2026 auf Finns
+Ansage komplett ausgebaut — es wird nur noch live gearbeitet, der Umweg
+ueber Modi hat nur Klicks gekostet. Ein "mode"-Feld in Alt-Configs wird
+still ignoriert. Vor dem Start Duplikum fuer die Paare abschalten.
 """
 
 import json
@@ -212,9 +213,6 @@ def check_fleet(cfgs):
         if len(cfgs) > 1 and not int(c.get("master_expected_login") or 0):
             errors.append(f"{f}: master_expected_login fehlt/0 — ab zwei Mastern Pflicht, sonst ist der "
                           f"Schutz gegen vertauschte Snapshots aus.")
-        mode = str(c.get("mode", "dryrun")).lower()
-        if mode not in ("dryrun", "demo", "live"):
-            errors.append(f"{f}: mode '{mode}' ungueltig (dryrun | demo | live)")
     for magic, fs in by_magic.items():
         if len(fs) > 1:
             errors.append(f"magic {magic} in {', '.join(fs)} — MUSS pro Master eindeutig sein "
@@ -424,8 +422,6 @@ class Master:
         self.stale_warned = False
         self.startup_skip = None
         self.warned = set()
-        self.virtual = {}
-        self.virtual_ticket = -1
         # Reopen-Guard, umgebaut 14.08.2026 (Internet-Ausfall-Szenario):
         #   open_last  — letzter Sendeversuch (Cooldown-Anker)
         #   open_fail  — FEHLGESCHLAGENE Sends in Folge (Ablehnung/keine Verbindung).
@@ -465,7 +461,6 @@ class Master:
     def reload(self, initial=False):
         cfg = load_json(self.cfg_path)
         self.cfg_mtime = os.path.getmtime(self.cfg_path)
-        self.mode = str(cfg.get("mode", "dryrun")).lower()
         self.magic = int(cfg.get("magic", 770001))
         self.prefix = str(cfg.get("comment_prefix", "PH"))
         self.snapshot_file = str(cfg.get("snapshot_file", "prophos_master.csv"))
@@ -481,7 +476,7 @@ class Master:
 
     def hot_reload(self):
         """Panel-Aenderungen im Betrieb uebernehmen. Nur multiplier/symbol_map
-        wirken sofort; alles andere (mode, Konten, Pfade, magic) verlangt
+        wirken sofort; alles andere (Konten, Pfade, magic) verlangt
         einen Neustart des Prozesses, damit die Startpruefungen erneut laufen.
         Rueckgabe: None = nichts, "hot" = uebernommen, "restart" = Neustart noetig."""
         try:
@@ -496,7 +491,10 @@ class Master:
         # max_lots_per_hedge bleibt in HOT, obwohl die Grenze abgeschafft ist
         # (15.08.2026): Alt-Configs tragen das Feld noch, und ein Feld-Loeschen
         # durch Panel-Save darf keinen unnoetigen Prozess-Neustart ausloesen.
-        HOT = {"multiplier", "symbol_map", "max_lots_per_hedge"}
+        # mode genauso (25.08.2026, Modus-Ausbau): das Feld ist bedeutungslos,
+        # steht aber noch in Alt-Configs — Aenderungen/Loeschen daran duerfen
+        # keinen Neustart ausloesen.
+        HOT = {"multiplier", "symbol_map", "max_lots_per_hedge", "mode"}
         changed = {k for k in set(old) | set(new)
                    if not k.startswith("_") and old.get(k) != new.get(k)}
         if changed - HOT:
@@ -548,12 +546,10 @@ def main():
     ref = masters[0].raw
     common = ref.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
-    any_armed = any(m.mode != "dryrun" for m in masters)
-
     print("=" * 72)
     print(f" Prophos MT5-Hedge-Executor · {len(masters)} Master, ein Hedge-Terminal")
     for m in masters:
-        print(f"   {m.file:<24} Modus {m.mode.upper():<7} magic {m.magic}  "
+        print(f"   {m.file:<24} magic {m.magic}  "
               f"Master {m.master_login or '?'}  Snapshot {m.snapshot_file}")
     print(" Duplikum / app.py / prophos.html werden nicht angefasst.")
     print("=" * 72)
@@ -621,13 +617,10 @@ def main():
         mt5.shutdown()
         sys.exit(1)
 
+    # Nur noch informativ (25.08.2026, Modus-Ausbau): der fruehere demo-Riegel
+    # ist weg, gearbeitet wird immer echt — egal woran das Terminal haengt.
     is_real = int(ai.trade_mode) == 2
     log(f"Hedge-Konto ist {'ECHTGELD' if is_real else 'DEMO/CONTEST'}")
-    demo_masters = [m.file for m in masters if m.mode == "demo"]
-    if demo_masters and is_real:
-        log(f"⛔ ABBRUCH: Modus 'demo' in {', '.join(demo_masters)}, aber das Hedge-Terminal "
-            f"haengt an einem ECHTGELD-Konto.")
-        mt5.shutdown(); sys.exit(1)
 
     # Hedging-Modus ist Pflicht: im Netting-Modus gibt es nur EINE Position pro
     # Symbol, damit bricht die Zuordnung Master-Position ↔ Hedge-Position.
@@ -636,7 +629,7 @@ def main():
             "Hedging-Konto verwenden.")
         mt5.shutdown(); sys.exit(1)
 
-    if any_armed and not ti.trade_allowed:
+    if not ti.trade_allowed:
         log("⛔ ABBRUCH: 'Algo Trading' ist im Hedge-Terminal nicht aktiv "
             "(Extras → Optionen → Expert Advisors). Aus Python nicht schaltbar.")
         mt5.shutdown(); sys.exit(1)
@@ -707,9 +700,6 @@ def main():
         # ist der einzige beweisfeste Anker fuer die closed_hedges-Verbuchung
         # (vorher wurde r.deal nur geloggt und war weg). Truthiness bleibt fuer
         # alle Aufrufer erhalten: Result/True = ok, None = fehlgeschlagen.
-        if m.mode == "dryrun":
-            log(f"[{m.file}] DRYRUN — wuerde senden: {what}")
-            return True
         r = mt5.order_send(req)
         if r is None:
             log(f"[{m.file}] ❌ order_send None ({mt5.last_error()}) — {what}")
@@ -831,7 +821,7 @@ def main():
                     f"(Chart mit ProphosHedgeReader offen? Sonst neu aufziehen, "
                     f"InpFileName = {m.snapshot_file})")
         return {
-            "running": True, "mode": m.mode, "connected": connected,
+            "running": True, "connected": connected,
             "master_login": (snap or {}).get("login") or m.master_login or None,
             "master_server": (snap or {}).get("server"),
             "hedge_login": int(ai.login), "hedge_server": str(ai.server),
@@ -881,7 +871,7 @@ def main():
                             # KEINEN Status mehr schreiben — sonst legt der Copier die
                             # eben geloeschte Status-Datei binnen 2 s wieder an.
                             if os.path.exists(m.cfg_path):
-                                write_status(m.status_path, {"running": False, "mode": m.mode,
+                                write_status(m.status_path, {"running": False,
                                                              "note": "Neustart wegen Config-Aenderung"})
                             restart = True
                     except Exception as e:
@@ -914,7 +904,7 @@ def main():
                     break
 
             # ── Hedge-Bestand EINMAL pro Tick lesen ─────────────────────────────
-            book = hedge_book() if any_armed else {mg: {} for mg in fleet_magics}
+            book = hedge_book()
             if book is None:
                 conn_fail += 1
                 if conn_fail == 1:
@@ -1000,7 +990,7 @@ def main():
                     if now - m.last_status > 3.0:
                         m.last_status = now
                         if os.path.exists(m.cfg_path):
-                            known = m.virtual if m.mode == "dryrun" else book.get(m.magic, {})
+                            known = book.get(m.magic, {})
                             st = master_status(m, None, known, False)
                             st["note"] = (f"Master-Terminal ist im FALSCHEN Konto eingeloggt: "
                                           f"{snap['login']} statt {m.master_login} — Trade in "
@@ -1022,11 +1012,11 @@ def main():
                             # Loesch-Riegel des Panels wuerde eine Instanz mit
                             # offenen Hedges sonst fuer leer halten. book ist hier
                             # garantiert frisch (Tick waere sonst uebersprungen).
-                            known = m.virtual if m.mode == "dryrun" else book.get(m.magic, {})
+                            known = book.get(m.magic, {})
                             write_status(m.status_path, master_status(m, None, known, False))
                     continue
 
-                hedges = m.virtual if m.mode == "dryrun" else book.get(m.magic, {})
+                hedges = book.get(m.magic, {})
 
                 if m.seen_seq is None:
                     log(f"✓ [{m.file}] Snapshot verbunden — Master {snap['login']} @ {snap['server']}, "
@@ -1058,33 +1048,31 @@ def main():
                 # dann bewusst LEER statt eine plausible falsche Summe zu zeigen.
                 # own_close_mark wird beim eigenen Close gesetzt; der Schwund
                 # daraus erscheint im naechsten Tick (~0,5 s) und wird ueber das
-                # frische Mark erkannt. Dryrun ausgenommen: Virtuelle kann niemand
-                # extern schliessen.
-                if m.mode != "dryrun":
-                    # Schluessel als str: die Baseline kommt JSON-persistiert aus dem
-                    # Sidecar zurueck (Neustart-Fall) und JSON kennt nur str-Keys.
-                    cur_vol = {str(i): sum(h["volume"] for h in hs) for i, hs in hedges.items() if hs}
-                    for ident_, prev_v in m.hedge_last_vol.items():
-                        now_v = cur_vol.get(ident_, 0.0)
-                        if now_v < prev_v - TOL:
-                            try:
-                                ident_i = int(ident_)
-                            except (TypeError, ValueError):
-                                ident_i = ident_
-                            mark = m.own_close_mark.pop(ident_i, 0)
-                            if time.time() - mark > 30:
-                                log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
-                                    f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
-                                    f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
-                                m.closed.append({"ident": ident_i, "note": "extern_geschlossen",
-                                                 "profit": None,
-                                                 "closed_at": datetime.now().isoformat(timespec="seconds")})
-                                del m.closed[:-50]
-                    if cur_vol != m.hedge_last_vol:
-                        # Baseline persistieren, damit der Waechter Neustarts ueberlebt —
-                        # nur bei Aenderung, nicht jeden 0,5-s-Tick.
-                        m.hedge_last_vol = cur_vol
-                        write_closed(m.closed_path, m.closed, m.hedge_last_vol)
+                # frische Mark erkannt.
+                # Schluessel als str: die Baseline kommt JSON-persistiert aus dem
+                # Sidecar zurueck (Neustart-Fall) und JSON kennt nur str-Keys.
+                cur_vol = {str(i): sum(h["volume"] for h in hs) for i, hs in hedges.items() if hs}
+                for ident_, prev_v in m.hedge_last_vol.items():
+                    now_v = cur_vol.get(ident_, 0.0)
+                    if now_v < prev_v - TOL:
+                        try:
+                            ident_i = int(ident_)
+                        except (TypeError, ValueError):
+                            ident_i = ident_
+                        mark = m.own_close_mark.pop(ident_i, 0)
+                        if time.time() - mark > 30:
+                            log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
+                                f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
+                                f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
+                            m.closed.append({"ident": ident_i, "note": "extern_geschlossen",
+                                             "profit": None,
+                                             "closed_at": datetime.now().isoformat(timespec="seconds")})
+                            del m.closed[:-50]
+                if cur_vol != m.hedge_last_vol:
+                    # Baseline persistieren, damit der Waechter Neustarts ueberlebt —
+                    # nur bei Aenderung, nicht jeden 0,5-s-Tick.
+                    m.hedge_last_vol = cur_vol
+                    write_closed(m.closed_path, m.closed, m.hedge_last_vol)
 
                 actions, warns = plan_actions(
                     snap["positions"], hedges,
@@ -1143,15 +1131,6 @@ def main():
                         if ok:
                             m.open_done[ident] = m.open_done.get(ident, 0) + 1
                             m.open_fail.pop(ident, None)
-                            if m.mode == "dryrun":
-                                # profit:0.0 — Virtuelle haben keinen echten Kurs,
-                                # aber das Feld muss dasselbe Format haben wie echte
-                                # Hedges (15.08.2026, Etappe 3)
-                                m.virtual.setdefault(ident, []).append({
-                                    "ticket": m.virtual_ticket, "volume": a["volume"],
-                                    "symbol": a["symbol"], "type": a["hedge_type"],
-                                    "profit": 0.0})
-                                m.virtual_ticket -= 1
                         else:
                             f = m.open_fail[ident] = m.open_fail.get(ident, 0) + 1
                             if f == 1:
@@ -1159,54 +1138,26 @@ def main():
                                     f"es wird weiterversucht (Abstand waechst bis 30s), z.B. bei "
                                     f"kurzem Internet-Ausfall voellig normal.")
                     else:
-                        if m.mode == "dryrun":
-                            hs = m.virtual.get(ident, [])
-                            rest = a["volume"]
-                            for h in list(hs):
-                                if rest <= TOL:
-                                    break
-                                take = min(h["volume"], rest)
-                                h["volume"] = round(h["volume"] - take, 8)
-                                rest -= take
-                                if h["volume"] <= TOL:
-                                    hs.remove(h)
-                            if not hs:
-                                m.virtual.pop(ident, None)
-                            log(f"[{m.file}] DRYRUN — wuerde senden: HEDGE CLOSE {a['volume']} "
-                                f"{a['symbol']} (Master-Pos {ident})")
-                            # Dryrun-Close trotzdem verbuchen (profit:0.0 + note),
-                            # damit die Kette bis in die Prophos-Anzeige testbar
-                            # ist, ohne je als echter P&L zu zaehlen (15.08.2026)
-                            m.closed.append({"ticket": a["ticket"], "deal": None,
-                                             "symbol": a["symbol"], "volume": a["volume"],
-                                             "profit": 0.0, "note": "dryrun",
-                                             "closed_at": datetime.now().isoformat(timespec="seconds")})
-                            del m.closed[:-50]
-                            write_closed(m.closed_path, m.closed, m.hedge_last_vol)
+                        # Auch Closes mit Cooldown wiederholen: waehrend eines
+                        # Ausfalls schlaegt der Close fehl — kein Grund zur
+                        # Panik, der naechste Versuch nach Reconnect sitzt.
+                        if time.time() - m.close_last.get(a["ticket"], 0) < OPEN_COOLDOWN:
+                            continue
+                        m.close_last[a["ticket"]] = time.time()
+                        open_pos = next((h for h in hedges.get(ident, [])
+                                         if h["ticket"] == a["ticket"]), None)
+                        res = close_part(m, open_pos, a["volume"]) if open_pos else None
+                        if res:
+                            m.close_last.pop(a["ticket"], None)
                             m.open_done.pop(ident, None); m.open_last.pop(ident, None)
                             m.open_seen.pop(ident, None)
                             m.blocked.discard(ident)
-                        else:
-                            # Auch Closes mit Cooldown wiederholen: waehrend eines
-                            # Ausfalls schlaegt der Close fehl — kein Grund zur
-                            # Panik, der naechste Versuch nach Reconnect sitzt.
-                            if time.time() - m.close_last.get(a["ticket"], 0) < OPEN_COOLDOWN:
-                                continue
-                            m.close_last[a["ticket"]] = time.time()
-                            open_pos = next((h for h in hedges.get(ident, [])
-                                             if h["ticket"] == a["ticket"]), None)
-                            res = close_part(m, open_pos, a["volume"]) if open_pos else None
-                            if res:
-                                m.close_last.pop(a["ticket"], None)
-                                m.open_done.pop(ident, None); m.open_last.pop(ident, None)
-                                m.open_seen.pop(ident, None)
-                                m.blocked.discard(ident)
-                                # Eigener bestaetigter Close: dem Schwund-Waechter
-                                # melden (sonst saehe der naechste Tick den Schwund
-                                # und stempelte ihn 'extern') und den Deal aus dem
-                                # Result verbuchen (15.08.2026, Etappe 3)
-                                m.own_close_mark[ident] = time.time()
-                                book_close(m, ident, open_pos, res, a["volume"])
+                            # Eigener bestaetigter Close: dem Schwund-Waechter
+                            # melden (sonst saehe der naechste Tick den Schwund
+                            # und stempelte ihn 'extern') und den Deal aus dem
+                            # Result verbuchen (15.08.2026, Etappe 3)
+                            m.own_close_mark[ident] = time.time()
+                            book_close(m, ident, open_pos, res, a["volume"])
 
                 # busy = dieser Master hat offene Positionen ODER offene Hedges —
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
@@ -1228,7 +1179,7 @@ def main():
             # nicht wieder anlegen — der Loesch-Endpunkt hat sie gerade entfernt.
             if not os.path.exists(m.cfg_path):
                 continue
-            write_status(m.status_path, {"running": False, "mode": m.mode})
+            write_status(m.status_path, {"running": False})
         mt5.shutdown()
 
 

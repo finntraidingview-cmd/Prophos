@@ -1,8 +1,7 @@
 {
   "_HINWEIS": "Vorlage fuer den ersten Test mit ZWEI FUSION-DEMO-KONTEN. Kopieren nach config.json und die 4 markierten Werte ausfuellen. Weil beide Konten beim selben Broker liegen, sind Symbolnamen und Kontraktgroessen identisch — das Symbol-Mapping ist deshalb 1:1.",
 
-  "_1_mode": "Fuer diesen Test 'demo': es werden ECHTE Orders gesendet, aber nur auf ein Demo-Konto. Das Programm bricht ab, falls dort ein Echtgeld-Konto eingeloggt ist. (Wer erst nur zuschauen will: 'dryrun'.)",
-  "mode": "demo",
+  "_1_hinweis": "Historische Test-Vorlage vom Fusion-Demo-Test (13.08.2026). Seit dem Modus-Ausbau (25.08.2026) sendet der Copier IMMER echte Orders — es gibt keine dryrun/demo-Stufe mehr.",
 
   "_2_AUSFUELLEN_terminal": "Pfad zur terminal64.exe der HEDGE-Installation (Demo-Konto B). Zweite MT5-Installation in einem EIGENEN Ordner — aber NICHT im portable-Modus (siehe naechster Punkt).",
   "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",

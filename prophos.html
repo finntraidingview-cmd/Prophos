@@ -2240,14 +2240,9 @@
   #dashboard-view .mtc-card{background:var(--surface);border:1px solid var(--border);
     border-radius:var(--r-md);padding:16px;box-shadow:var(--shadow-card);transition:box-shadow .15s var(--ease)}
   #dashboard-view .mtc-card:hover{box-shadow:var(--shadow-card-hover)}
-  #dashboard-view .mtc-card.live-mode{border-color:rgba(240,68,56,.45)}
   #dashboard-view .mtc-top{display:flex;align-items:center;gap:8px}
   #dashboard-view .mtc-name{font-size:15px;font-weight:600;letter-spacing:-.01em}
   #dashboard-view .mtc-state{margin-left:auto;font-size:12px;color:var(--sub);display:inline-flex;align-items:center;gap:6px}
-  #dashboard-view .mtc-pill{font-size:10.5px;font-weight:600;letter-spacing:.04em;padding:2px 8px;border-radius:20px}
-  #dashboard-view .mtc-pill.dry{background:var(--surface-tint);color:var(--sub);border:1px solid var(--border)}
-  #dashboard-view .mtc-pill.demo{background:rgba(18,183,106,.12);color:#0d9668}
-  #dashboard-view .mtc-pill.live{background:rgba(240,68,56,.12);color:#d92d20}
   #dashboard-view .mtc-broker{font-size:12.5px;color:var(--sub);margin-top:3px}
   #dashboard-view .mtc-broker b{color:var(--ink);font-weight:600}
   #dashboard-view .mtc-route{font-size:12px;color:var(--sub-2);margin-top:1px}
@@ -9091,7 +9086,7 @@
           hedge_login: String(s.hedge_login ?? ''),
           alive: !!inst.alive,
           status: {
-            note: s.note || null, mode: s.mode || null,
+            note: s.note || null,
             multiplier: s.multiplier ?? null,
             master_positions: s.master_positions || [],
             hedges: s.hedges || {},
@@ -17012,8 +17007,7 @@
         try{
           await window.mtcApi(`plan?file=${encodeURIComponent(file)}`, { method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ multiplier: String(Number(plan.multiplier)),
-                                   mode: route.inst.mode || 'dryrun' }) })
+            body: JSON.stringify({ multiplier: String(Number(plan.multiplier)) }) })
         }catch(_){}
 
         // Bereitschafts-Ticker: eigener instances-Fetch alle 3s, scope-gebunden
@@ -22923,8 +22917,6 @@
     return !!(v && v.classList.contains('active') && p && p.classList.contains('active'))
   }
   function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
-  function pill(m){ const c = m==='live' ? 'live' : m==='demo' ? 'demo' : 'dry'
-    return `<span class="mtc-pill ${c}">${esc((m||'?').toUpperCase())}</span>` }
 
   function mapRows(map){
     const e = Object.entries(map || {})
@@ -22942,8 +22934,8 @@
     const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
     const broker = s.master_server || d.master_server || 'Broker unbekannt'
     const isOpen = mtcOpen.has(d.file)
-    return `<div class="mtc-card${d.mode==='live' ? ' live-mode' : ''}${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
-      <div class="mtc-top"><span class="mtc-name">${esc(d.display_name || d.name)}</span>${pill(d.mode)}
+    return `<div class="mtc-card${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
+      <div class="mtc-top"><span class="mtc-name">${esc(d.display_name || d.name)}</span>
         <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span></div>
       <div class="mtc-broker"><b>${esc(broker)}</b></div>
       <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
@@ -22963,12 +22955,6 @@
         <div class="mtc-row">
           <div><label>Multiplikator</label><input type="number" step="0.001" min="0" value="${esc(d.multiplier ?? '')}" data-mtcf="multiplier"></div>
         </div>
-        <label>Modus</label>
-        <select data-mtcf="mode">
-          <option value="dryrun" ${d.mode==='dryrun' ? 'selected' : ''}>dryrun — nur mitlesen, keine Order</option>
-          <option value="demo" ${d.mode==='demo' ? 'selected' : ''}>demo — echte Order, nur Demo-Konto</option>
-          <option value="live" ${d.mode==='live' ? 'selected' : ''}>live — echtes Geld</option>
-        </select>
         <label>Symbol-Mapping (Master → Hedge)</label>
         <div data-mtcmaps>${mapRows(d.symbol_map)}</div>
         <div class="mtc-acts">
@@ -22999,7 +22985,7 @@
       neustart:'Start mit Login + EA (Zugangsdaten-Datei wird danach gelöscht)', config:'Config anlegen' }
     let h = `<div class="mtc-steps">${job.steps.map(s => `<div class="mtc-step ${s.state}"><span class="st">${mark(s)}</span><span>${labels[s.key] || s.key}${s.note ? ` <span class="note">${esc(s.note)}</span>` : ''}</span></div>`).join('')}`
     if(job.error) h += `<div class="mtc-step error" style="margin-top:6px"><span class="st">✗</span><span>${esc(job.error)}</span></div>`
-    else if(job.done) h += `<div class="mtc-step done"><span class="st">✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich (dryrun)</span></div>`
+    else if(job.done) h += `<div class="mtc-step done"><span class="st">✓</span><span>fertig — Karte „${esc(job.name)}" erscheint gleich</span></div>`
     return h + '</div>'
   }
   // _mtcAddFresh: das Formular wurde nach einem FERTIGEN Lauf zurückgesetzt —
@@ -23524,11 +23510,6 @@
     if(bad){ msg.className = 'mtc-msg err'; msg.textContent = `Mapping-Zeile '${bad}' ist nur halb ausgefüllt`; return }
     if(dup){ msg.className = 'mtc-msg err'; msg.textContent = `Master-Symbol '${dup}' doppelt im Mapping`; return }
     patch.symbol_map = map
-    if(patch.mode === 'live' && mtcState[file]?.mode !== 'live'){
-      const s = mtcState[file] || {}
-      if(!confirm(`LIVE schalten — echtes Geld!\n\nDatei: ${file}\nMaster: ${s.master_expected || '?'}\nHedge: ${s.hedge_expected || '?'}\n\nDuplikum für dieses Paar ist aus?`)){
-        msg.className = 'mtc-msg err'; msg.textContent = 'Abgebrochen — Modus nicht geändert'; return }
-    }
     msg.className = 'mtc-msg'; msg.textContent = 'speichere…'
     const d = await mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(patch) })
