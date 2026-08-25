@@ -74,13 +74,18 @@ gerechnet wird.
    `master_expected_login` (Prop-Konto — hängt das Programm dort, bricht es ab).
 6. `start-copier.bat` doppelklicken.
 
-## Immer scharf — es gibt keine Stufen mehr
-Der Copier sendet **immer echte Orders** auf das Hedge-Terminal. Die frühere
-Modus-Treppe (`dryrun` → `demo` → `live` samt Echtgeld-Riegel und Bestätigungs-Dialog)
-ist am **25.08.2026** auf Finns Ansage komplett ausgebaut — gearbeitet wird nur noch
-live, die Stufen haben im Alltag nur Klicks gekostet. Ein `mode`-Feld in alten Configs
-wird still ignoriert. Was bleibt: **vor dem Start Duplikum für die Master-Paare
-abschalten** — sonst spiegeln zwei Systeme parallel und der Hedge ist doppelt.
+## Immer echt — aber nur im Trade-Fenster
+Der Copier sendet **echte Orders** (die frühere Modus-Treppe `dryrun`/`demo`/`live`
+ist am **25.08.2026** auf Finns Ansage komplett ausgebaut; ein `mode`-Feld in alten
+Configs wird still ignoriert). **Neue Hedges eröffnet er aber nur im Trade-Fenster**
+(gleicher Tag, nach der Geisterposition auf dem Live-Konto): zwischen „Trade starten"
+in Prophos (Panel-Plan `geplant`, max. 6 h gültig) und dem Trade-Ende (`beendet`).
+Außerhalb des Fensters wird **nie** eröffnet — egal was Snapshot oder Master zeigen
+(Log: `🔒 kein offenes Trade-Fenster`). **Closes laufen immer**, eigene Hedges
+abbauen ist nie falsch. Ebenfalls immer: ein von Hand geschlossener Hedge bleibt zu
+(`✋ Hand-Close wird respektiert`), und eine eingefrorene Snapshot-Datei ist keine
+Order-Basis. Was bleibt: **vor dem Start Duplikum für die Master-Paare abschalten** —
+sonst spiegeln zwei Systeme parallel und der Hedge ist doppelt.
 
 ## Live getestet (13.08.2026, zwei Fusion-Demo-Konten)
 - `✅ HEDGE OPEN SELL 2.0 NAS100 · deal=355572440` — Gegenposition wurde real platziert.

@@ -231,6 +231,33 @@ def check_fleet(cfgs):
     return errors, warnings
 
 
+def plan_armed_files(plans, now):
+    """REIN RECHNEND (testbar): welche config-Dateien haben ein offenes
+    Trade-Fenster?  Finns Ansage 25.08.2026 (nach der Geisterposition auf dem
+    Live-Konto): der Copier soll NICHT 24/7 scharf sein — neue Hedges gibt es
+    nur zwischen 'Trade starten' in Prophos (Panel-Plan 'geplant') und dem
+    Trade-Ende ('beendet'). Regeln:
+      · 'laufend'  → Fenster offen (ein Trade kann Tage laufen)
+      · 'geplant'  → Fenster offen, aber nur 6 h ab armed_at — ein vergessener
+                     geplanter Plan darf den Master nicht dauerhaft scharf halten
+      · alles andere / ohne brauchbare Zeit → Fenster zu
+    Closes bleiben IMMER erlaubt (eigene Hedges abbauen ist nie falsch) —
+    das Fenster gilt nur fuer OPENS."""
+    armed = set()
+    for p in plans or []:
+        st = p.get("status")
+        if st == "laufend":
+            armed.add(p.get("file"))
+        elif st == "geplant":
+            try:
+                age = (now - datetime.fromisoformat(str(p.get("armed_at") or ""))).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age <= 6 * 3600:
+                armed.add(p.get("file"))
+    return armed
+
+
 def compute_startup_skip(positions, hedges, adopt):
     """REIN RECHNEND (testbar): Welche beim Start offenen Master-Positionen werden
     NICHT bedient?  Regel seit 13.08.2026: eine Position, die schon einen eigenen
@@ -422,6 +449,11 @@ class Master:
         self.stale_warned = False
         self.startup_skip = None
         self.warned = set()
+        # Trade-Fenster (25.08.2026): einmalige Log-Zeile pro Master-Pos, wenn
+        # ausserhalb des Fensters nicht gehedgt wird — wird beim naechsten
+        # offenen Fenster geleert, damit ein spaeteres Zu wieder loggt.
+        self.warned_unarmed = set()
+        self.armed = False
         # Reopen-Guard, umgebaut 14.08.2026 (Internet-Ausfall-Szenario):
         #   open_last  — letzter Sendeversuch (Cooldown-Anker)
         #   open_fail  — FEHLGESCHLAGENE Sends in Folge (Ablehnung/keine Verbindung).
@@ -837,6 +869,8 @@ def main():
             standby = (not offene_hedges) and not ((snap or {}).get("positions"))
         return {
             "running": True, "connected": connected,
+            # Trade-Fenster offen? (25.08.2026) — reine Anzeige-Information
+            "armed": bool(getattr(m, "armed", False)),
             "master_login": (snap or {}).get("login") or m.master_login or None,
             "master_server": (snap or {}).get("server"),
             "hedge_login": int(ai.login), "hedge_server": str(ai.server),
@@ -981,8 +1015,22 @@ def main():
                 if _t is not None and _t.bid:
                     hedge_acc["usd_rate"] = float(_t.bid)
 
+            # ── Trade-Fenster aus dem Panel-Plan-Store lesen (25.08.2026) ──────
+            # plans.json pflegt das Panel: Prophos-Trade-Start legt 'geplant' an,
+            # die Zustandsmaschine schiebt nach 'laufend'/'beendet'. Datei fehlt
+            # oder ist unlesbar → KEIN Fenster offen (lieber nicht hedgen als
+            # ausserhalb des Fensters hedgen — genau Finns Ansage).
+            try:
+                armed_files = plan_armed_files(load_json(os.path.join(here, "plans.json")),
+                                               datetime.now())
+            except (OSError, json.JSONDecodeError, ValueError):
+                armed_files = set()
+
             # ── Jeden Master abarbeiten ─────────────────────────────────────────
             for m in masters:
+                m.armed = m.file in armed_files
+                if m.armed:
+                    m.warned_unarmed.clear()
                 # Ohne expect_login lesen und SELBST vergleichen (15.08.2026, erster
                 # Trade-Test): das Terminal oeffnete mit fremdem Konto 437916, der
                 # expect_login-Filter machte den Snapshot still zu None — im Preflight
@@ -1156,6 +1204,15 @@ def main():
                     ident = a["ident"]
                     if a["kind"] == "open":
                         if ident in m.blocked:
+                            continue
+                        # Trade-Fenster zu → keine neuen Hedges (25.08.2026, Finns
+                        # Ansage: scharf nur zwischen 'Trade starten' und Trade-
+                        # Ende). Closes laufen unten bewusst OHNE dieses Gate.
+                        if not m.armed:
+                            if ident not in m.warned_unarmed:
+                                m.warned_unarmed.add(ident)
+                                log(f"🔒 [{m.file}] Master-Pos {ident}: kein offenes Trade-Fenster "
+                                    f"(kein geplanter/laufender Plan) — es wird NICHT gehedgt.")
                             continue
                         # Cooldown waechst mit Fehlversuchen (3s -> 30s): bei
                         # Internet-Ausfall wird geduldig weiterprobiert statt

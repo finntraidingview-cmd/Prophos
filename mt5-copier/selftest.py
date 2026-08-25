@@ -350,6 +350,25 @@ def main():
             "PROVISION: existierende config-ftmo1.json blockiert das Anlegen",
             lambda: any("bereits angelegt" in p for p in probs2)))
 
+    # 29b) Trade-Fenster (25.08.2026, Finns Ansage: Copier nicht 24/7 scharf):
+    # 'laufend' oeffnet immer, 'geplant' nur frisch (<= 6h), 'beendet' und
+    # Eintraege ohne brauchbare Zeit nie.
+    from copier import plan_armed_files
+    from datetime import datetime as _dt
+    _now = _dt(2026, 8, 25, 12, 0, 0)
+    _plans = [
+        {"file": "config-a.json", "status": "laufend", "armed_at": "2026-08-20T00:00:00"},
+        {"file": "config-b.json", "status": "geplant", "armed_at": "2026-08-25T09:00:00"},
+        {"file": "config-c.json", "status": "geplant", "armed_at": "2026-08-24T09:00:00"},
+        {"file": "config-d.json", "status": "beendet", "armed_at": "2026-08-25T11:59:00"},
+        {"file": "config-e.json", "status": "geplant"},
+    ]
+    results.append(prov(
+        "TRADE-FENSTER: laufend immer, geplant nur frisch (6h), beendet/ohne Zeit nie",
+        lambda: plan_armed_files(_plans, _now) == {"config-a.json", "config-b.json"}
+                and plan_armed_files([], _now) == set()
+                and plan_armed_files(None, _now) == set()))
+
     # 30) Startdateien: Login-ini transient, StartUp-ini ohne Zugangsdaten
     ini = provision.build_login_ini(555001, "geheim", "FusionMarkets-Demo")
     sup = provision.build_startup_ini(preset="prophos-ftmo1.set")
