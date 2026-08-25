@@ -9345,8 +9345,11 @@
     // war der Block mangels Daten einmal display:none, lief der Tick nie
     // wieder und der Block konnte nie auftauchen, obwohl laengst Orders
     // liefen (Finns Fund 25.08.2026 abends). Jetzt zaehlt die aktive View.
-    const sichtbar = !!document.querySelector('.view[data-view="trades"].active, .view[data-view="livetrades"].active')
-    if(!sichtbar && !force) return
+    // Flotte lebt NUR im Offen-Reiter des Trades-Tabs (25.08.2026, Finns
+    // letzter Schliff: „nur anzeigen wenn ich auf offen bin"). Der Check gilt
+    // auch fuer force-Renders — auf Geplant/Erledigt bleibt der Block weg.
+    const offenAktiv = !!document.querySelector('.view[data-view="trades"].active .subtab-pane.active[data-tradepane="open"]')
+    if(!offenAktiv){ box.style.display = 'none'; return }
     if(!dupState.token) dupEnsureSession()   // Duplikium-Zeilen selbstheilend
     _fleetRenderBusy = true
     try{
@@ -19625,6 +19628,11 @@
       document.querySelectorAll('[data-tradepane]').forEach(p =>
         p.classList.toggle('active', p.dataset.tradepane === target)
       )
+      // Flotte lebt nur im Offen-Reiter (25.08.2026, Finns letzter Schliff) —
+      // beim Wechsel sofort verstecken/zeigen statt auf den 5s-Tick zu warten.
+      const fleetBox = document.getElementById('lt-fleet')
+      if(fleetBox && target !== 'open') fleetBox.style.display = 'none'
+      if(target === 'open' && typeof mt5FleetRenderTick === 'function') mt5FleetRenderTick(true)
     })
   })
 
