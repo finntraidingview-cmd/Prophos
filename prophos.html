@@ -9411,52 +9411,80 @@
       const seite = s => /sell|short|^1$/i.test(String(s)) ? 'SELL' : 'BUY'
       const fmtPreis = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
 
-      /* ── Duplikium: Master-Positionen mit ihren Kopien paaren (Duplikium
-       * stempelt id_master/masterTicket auf jede Kopie) — daraus werden die
-       * MASTER/SLAVE-Chips wie oben. Der geteilte Slave haengt als Sub-Account
-       * an JEDER E-Mail und zeigt allen dieselben physischen Positionen —
-       * Kopien werden deshalb ueber login+ticket dedupliziert. */
-      const stampOf = p => String(p.id_master || p.master_id || p.masterId || '')
-      const masterListe = []
-      const kopien = new Map()
+      // Personen-Name klein und farbig VOR die Quelle in der Sub-Zeile —
+      // Finns Ansage: auf jeder Karte muss stehen, wessen Trade das ist.
+      const subPerson = pKey => {
+        const pp = personen.get(pKey)
+        return pp ? `<span style="color:${pp.farbe};font-weight:700">${esc(pp.name)}</span> · ` : ''
+      }
+
+      /* ── Duplikium: Rohdaten-Wahrheit (per SQL verifiziert 25.08.2026):
+       * Duplikium stempelt master_id/masterTicket auf JEDE Position.
+       * - MASTER-Original: master_id == eigenes Konto UND ticket == masterTicket.
+       * - Kopie: Querverweis auf fremdes Konto/Ticket — den traegt aber NUR
+       *   die Besitzer-E-Mail; fremde E-Mails sehen dieselbe physische
+       *   Position auf dem GETEILTEN Slave als Selbst-Referenz.
+       * Deshalb: erst alle Sichten pro (login|ticket) zusammenfuehren, der
+       * Querverweis gewinnt; Selbst-Referenzen auf geteilten/slave-Konten
+       * ohne Querverweis = manuell/ohne Master. */
+      const stampAcc = p => String(p.master_id || p.id_master || p.masterId || '')
+      const phys = new Map()
       for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
         const accById = {}
         for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
         const frisch = alterS <= 75            // 2,5× Waechter-Takt
         const uid = String(dr.user_id || '')
-        const pKey = uid ? merken(uid, profName.get(uid) || mailKurz(dr.id))
-                         : merken('mail:' + dr.id, mailKurz(dr.id))
+        const rowPKey = uid ? merken(uid, profName.get(uid) || mailKurz(dr.id))
+                            : merken('mail:' + dr.id, mailKurz(dr.id))
         for(const p of (Array.isArray(dr.positions) ? dr.positions : [])){
           const acc = accById[String(p.account_id)] || {}
-          const accName = acc.name || acc.login || ('Dup-' + p.account_id)
-          if(stampOf(p) || /^slave/i.test(String(acc.name || ''))){
-            const kk = String(acc.login || p.account_id) + '|' + String(p.ticket || '')
-            if(!kopien.has(kk)) kopien.set(kk, { accName, ticket: String(p.ticket || ''),
-              masterTicket: String(p.masterTicket || ''), stamp: stampOf(p),
+          const selfRef = stampAcc(p) === String(p.account_id) && String(p.masterTicket || '') === String(p.ticket || '')
+          const key = String(acc.login || ('acc:' + p.account_id)) + '|' + String(p.ticket || '')
+          let e = phys.get(key)
+          if(!e){
+            e = { accName: acc.name || acc.login || ('Dup-' + p.account_id),
+              accId: String(p.account_id), ticket: String(p.ticket || ''),
               lots: Number(p.amountLot) || 0, side: p.side, symbol: p.symbol || '?',
-              openEpoch: Number(p.open_epoch) || null, frisch, alterS, verbraucht: false })
-          } else {
-            masterListe.push({ pKey, accName, accId: String(p.account_id),
-              ticket: String(p.ticket || ''), lots: Number(p.amountLot) || 0,
-              side: p.side, symbol: p.symbol || '?', openPrice: p.openPrice,
-              openEpoch: Number(p.open_epoch) || null, frisch, alterS })
+              openPrice: p.openPrice, openEpoch: Number(p.open_epoch) || null,
+              frisch, alterS, selfRef: true, refMasterAcc: '', refMasterTicket: '',
+              slaveisch: /^slave/i.test(String(acc.name || '')), pKey: rowPKey,
+              mails: new Set(), verbraucht: false }
+            phys.set(key, e)
+          }
+          e.mails.add(dr.id)
+          if(frisch && (!e.frisch || alterS < e.alterS)){ e.frisch = true; e.alterS = alterS }
+          if(!e.openEpoch && p.open_epoch) e.openEpoch = Number(p.open_epoch) || null
+          if(!selfRef){
+            // Querverweis = autoritative Sicht der Besitzer-E-Mail
+            e.selfRef = false
+            e.accId = String(p.account_id)
+            e.refMasterAcc = stampAcc(p)
+            e.refMasterTicket = String(p.masterTicket || '')
+            e.pKey = rowPKey
           }
         }
       }
-      for(const m of masterListe){
+      const masterEintraege = [], kopienEintraege = [], ohneMaster = []
+      for(const e of phys.values()){
+        if(!e.selfRef) kopienEintraege.push(e)
+        else if(e.mails.size > 1 || e.slaveisch) ohneMaster.push(e)   // geteilt/manuell
+        else masterEintraege.push(e)
+      }
+      for(const m of masterEintraege){
         let slaveLots = 0, slaveName = ''
-        for(const k of kopien.values()){
-          if((k.masterTicket && k.masterTicket === m.ticket) || (!k.masterTicket && k.stamp && k.stamp === m.accId)){
+        for(const k of kopienEintraege){
+          if(k.refMasterTicket === m.ticket && k.refMasterAcc === m.accId){
             k.verbraucht = true; slaveLots += k.lots; slaveName = slaveName || k.accName
           }
         }
         lege(karten, m.pKey, tc2Karte(personen.get(m.pKey).farbe,
           m.accName, slaveName || null,
-          `Duplikium · <b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
+          subPerson(m.pKey) + `Duplikium · <b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
           lotChip('MASTER', m.lots) + lotChip('SLAVE', slaveLots) + zeitChip(m.openEpoch, m.frisch, m.alterS),
           m.frisch))
       }
+      for(const k of kopienEintraege) if(!k.verbraucht) ohneMaster.push(k)
 
       /* ── Echo: eine Karte pro Master-Position, gleiche Optik wie oben ── */
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
@@ -9491,7 +9519,7 @@
             ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}</span>` : ''
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, 'Hedge ' + r.hedge_login,
-            `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
+            subPerson(pKey) + `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
             lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + zeitChip(null, frisch, alterS),
             frisch))
         }
@@ -9515,12 +9543,12 @@
         const pnl = p.pnl != null
           ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? '#15803d' : '#b91c1c'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, String(p.accountName), null,
-          `TopstepX · <b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
+          subPerson(pKey) + `TopstepX · <b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
           lotChip('KT', Number(p.size) || 0) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
           frisch))
       }
 
-      const uebrig = [...kopien.values()].filter(k => !k.verbraucht)
+      const uebrig = ohneMaster
       if(!karten.size && !alarme.size && !uebrig.length){ box.style.display = 'none'; return }
 
       // Ausgabe: eigene Person zuerst, dann alphabetisch — pro Person eine
