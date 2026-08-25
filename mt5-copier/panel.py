@@ -656,21 +656,46 @@ def _remove_later(path, delay_s=90):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _fenster_nach_vorn(pid):
+    """Terminal-Fenster WIRKLICH nach vorn holen (25.08.2026, Finns Live-Test:
+    das Terminal stand nur in der Taskleiste, 'man kommt visuell nicht rein').
+    Zwei Fallen des alten nackten AppActivate:
+      1. Ein frischer MT5-Prozess hat sekundenlang noch KEIN Fenster — der
+         eine Versuch lief ins Leere.
+      2. Windows' Foreground-Lock: ein Hintergrundprozess darf den Vordergrund
+         nicht klauen — AppActivate liess die Taskleiste nur blinken.
+    Fix: erst pruefen, ob ueberhaupt ein Hauptfenster existiert (das bleibt
+    der Zombie-Beweis), dann Alt-Tastendruck (SendKeys '%' — gibt den
+    Foreground-Wechsel frei), dann aktivieren. Nur einfache Quotes im
+    PowerShell-Skript — doppelte zerlegt die Windows-Arg-Quotierung."""
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"$p=Get-Process -Id {int(pid)};"
+        "if($p -and $p.MainWindowHandle -ne 0){"
+        "$ws=New-Object -ComObject WScript.Shell;"
+        "$ws.SendKeys('%');"
+        f"[void]$ws.AppActivate({int(pid)});"
+        "'True'}else{'False'}"
+    )
+    try:
+        pr = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                            capture_output=True, text=True, timeout=15)
+        return "True" in (pr.stdout or "")
+    except Exception:
+        return False
+
+
 def _front_when_up(install_dir):
     """Frisch gestartetes Terminal nach vorn holen (Finns Ansage 15.08.2026:
-    'das Terminal-Fenster soll auch aufgehen') — der Prozess braucht ein paar
-    Sekunden bis zum Fenster, deshalb pollen statt sofort AppActivate."""
+    'das Terminal-Fenster soll auch aufgehen'). Gepollt wird jetzt bis das
+    FENSTER da ist, nicht nur der Prozess (25.08.2026): vorher feuerte der
+    einzige Versuch, sobald die PID existierte — Sekunden bevor MT5 sein
+    Fenster hatte — und kehrte unverrichtet zurueck."""
     def worker():
-        for _ in range(20):
+        for _ in range(30):
             time.sleep(2)
             pids = provision.terminal_pids(install_dir)
-            if pids:
-                try:
-                    subprocess.run(["powershell", "-Command",
-                                    f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
-                                   capture_output=True, timeout=15)
-                except Exception:
-                    pass
+            if pids and _fenster_nach_vorn(pids[0]):
                 return
     threading.Thread(target=worker, daemon=True).start()
 
@@ -928,14 +953,10 @@ def start_terminal(fname, creds=None):
         # meldete 'laeuft', aber nichts oeffnete sich). AppActivate liefert
         # False, wenn der Prozess kein aktivierbares Fenster hat: dann Zombie
         # killen und unten regulaer kalt starten.
-        vorn = False
-        try:
-            pr = subprocess.run(["powershell", "-Command",
-                            f"(New-Object -ComObject WScript.Shell).AppActivate({pids[0]})"],
-                           capture_output=True, text=True, timeout=15)
-            vorn = "True" in (pr.stdout or "")
-        except Exception:
-            pass
+        # Fenster-Beweis + Nach-vorn-holen in einem (25.08.2026): der robuste
+        # Helfer prueft MainWindowHandle (Zombie-Semantik unveraendert) und
+        # ueberwindet den Foreground-Lock per Alt-Tastendruck.
+        vorn = _fenster_nach_vorn(pids[0])
         if not vorn:
             print(f"[panel] {fname}: Terminal-Prozess ohne Fenster (Zombie) — "
                   f"beende und starte kalt neu.", flush=True)
