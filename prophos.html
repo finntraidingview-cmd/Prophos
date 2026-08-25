@@ -9437,6 +9437,12 @@
         for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
         const frisch = alterS <= 75            // 2,5× Waechter-Takt
+        // Eingefrorene Zeile? Der Waechter pollt ein Duplikium-Konto nur,
+        // solange dort etwas zu ueberwachen ist — nach Trade-Ende friert die
+        // Zeile mit dem LETZTEN Snapshot ein, der laengst geschlossene
+        // Positionen enthalten kann (Finns Fund 25.08.: Jacobs beendete
+        // Trades standen noch 2 min in der Flotte). Nicht beweisbar = raus.
+        if(!frisch) continue
         const uid = String(dr.user_id || '')
         const rowPKey = uid ? merken(uid, profName.get(uid) || mailKurz(dr.id))
                             : merken('mail:' + dr.id, mailKurz(dr.id))
