@@ -8605,6 +8605,7 @@
   window.mt5LinkCellHtml = mt5LinkCellHtml
   window.mt5GetLinks = mt5GetLinks
   window.mt5LoadLinks = mt5LoadLinks
+  window.mt5LinkSet = mt5LinkSet   // für Auto-Verknüpfung (🎯-Chip + Plan-Modal, 25.08.2026)
   window.unlinkMt5 = unlinkMt5
   window.openLinkMt5Modal = openLinkMt5Modal  // hoisted, Definition direkt unten
 
@@ -17335,7 +17336,21 @@
       }
       if(!hLogin) return
       const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
-      if(links[hLogin] != null) _tpMt5HedgeAccId = String(links[hLogin])
+      if(links[hLogin] != null){ _tpMt5HedgeAccId = String(links[hLogin]); return }
+      // Auto-Verknüpfung (25.08.2026, Finns Ansage „ich will nicht auswählen"):
+      // fehlt der mt5_links-Eintrag fürs Hedge-Konto (z.B. direkt nach dem
+      // 🎯-Chip-Wechsel), wird EINDEUTIG über External ID / MT5-Login der
+      // manuellen Accounts gematcht und der Link gleich persistiert — dann
+      // steht der Slave ab sofort überall fest. Mehrdeutig oder kein Treffer
+      // → Dropdown bleibt bewusst frei (nie raten).
+      const cand = (accounts || []).filter(a => !a.archived
+        && (String(a.externalId || '') === hLogin || String(a.ma?.login || '') === hLogin))
+      if(cand.length === 1){
+        _tpMt5HedgeAccId = String(cand[0].id)
+        if(typeof window.mt5LinkSet === 'function'){
+          try { await window.mt5LinkSet(hLogin, String(cand[0].id)) } catch(_){}
+        }
+      }
     }catch(_){}
   }
 
@@ -23475,6 +23490,21 @@
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login }) })
       alert((r && r.ok ? '✅ ' : '⚠️ ') + (r && r.msg ? r.msg : 'keine Antwort'))
       mtcLoad()
+      // Verknüpfung direkt mit sicherstellen (25.08.2026, Finns Ansage „ich
+      // will nicht auswählen"): der Slave im Trade-Plan-Modal hängt an
+      // mt5_links[Hedge-Login]. Eindeutiger Treffer über External ID /
+      // MT5-Login → still verknüpfen; sonst einmal den Picker zeigen —
+      // danach steht der Slave überall automatisch fest.
+      if(r && r.ok && typeof window.mt5GetLinks === 'function'
+         && window.mt5GetLinks()[login] == null){
+        const cand = (accounts || []).filter(a => !a.archived
+          && (String(a.externalId || '') === login || String(a.ma?.login || '') === login))
+        if(cand.length === 1 && typeof window.mt5LinkSet === 'function'){
+          try { await window.mt5LinkSet(login, String(cand[0].id)) } catch(_){}
+        } else if(typeof window.openLinkMt5Modal === 'function'){
+          window.openLinkMt5Modal(login, {})
+        }
+      }
     }catch(e){
       alert('Umstellen fehlgeschlagen: ' + (e && e.message || e))
     }
