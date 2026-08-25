@@ -6422,6 +6422,7 @@
     // Er hatte seit dem Sidebar-Ausblenden (14.07.2026) keinen Aufrufer mehr.
     // Die alte Live-Trades-View bleibt per #livetrades-Hash funktionsfaehig.
     if(name === 'trades' || name === 'livetrades'){
+      if(typeof dupEnsureSession === 'function') dupEnsureSession()
       if(typeof ltStart === 'function') ltStart()
       if(typeof mt5FleetRenderTick === 'function') mt5FleetRenderTick(true)
     } else if(typeof ltStop === 'function') ltStop()
@@ -9286,6 +9287,40 @@
     if(p.byName && n && p.byName[n]) return p.byName[n]
     return null
   }
+
+  /* ── Duplikium-Session automatisch holen (25.08.2026, Finns Fund: Lots-
+   * Chips + Flotten-Duplikium-Zeilen starben auf pages.dev, sobald der
+   * localStorage-Token ablief — 401 → dupLogout → alles leer, bis jemand die
+   * Creds neu eintippt). Railway haelt via Auto-Connect-Daemon einen frischen
+   * Token; /duplikum/session reicht ihn an eingeloggte Prophos-User weiter.
+   * Bewusst WATCHER_HOME statt TS_BACKEND: lokale Backends haben keine
+   * DUP-Env-Creds — gleiches Muster wie swProbe. Throttle 60s, damit ein
+   * toter Endpoint nicht jeden 5s-Tick einen Request kostet. */
+  let _dupSessNext = 0
+  async function dupEnsureSession(){
+    if(dupState.token) return true
+    if(Date.now() < _dupSessNext) return false
+    _dupSessNext = Date.now() + 60 * 1000
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const sbTok = session && session.access_token
+      if(!sbTok) return false
+      const r = await fetch(`${WATCHER_HOME}/duplikum/session`, { headers: { 'sb-token': sbTok }, cache: 'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.token) return false
+      dupState.token = d.token
+      dupState.user = d.email || dupState.user
+      localStorage.setItem(DUP_LS.token, d.token)
+      if(d.email) localStorage.setItem(DUP_LS.user, d.email)
+      if(typeof dupRender === 'function') dupRender()
+      // Account-Liste gleich mitziehen — die Flotte braucht sie fuer die
+      // Personen-Zuordnung (Dup-Account → Login/Name → Person).
+      if(!(dupState.accounts || []).length && typeof dupLoadAccounts === 'function'){
+        dupLoadAccounts().catch(() => {})
+      }
+      return true
+    }catch(_){ return false }
+  }
   window._fleetSetFilter = function(f){
     localStorage.setItem('prophos_fleet_filter', f)
     mt5FleetRenderTick(true)
@@ -9293,7 +9328,14 @@
   let _fleetRenderBusy = false
   async function mt5FleetRenderTick(force){
     const box = document.getElementById('lt-fleet')
-    if(!box || (!box.offsetParent && !force) || _fleetRenderBusy) return
+    if(!box || _fleetRenderBusy) return
+    // Frueher haengte der Tick an box.offsetParent — ein Henne-Ei-Problem:
+    // war der Block mangels Daten einmal display:none, lief der Tick nie
+    // wieder und der Block konnte nie auftauchen, obwohl laengst Orders
+    // liefen (Finns Fund 25.08.2026 abends). Jetzt zaehlt die aktive View.
+    const sichtbar = !!document.querySelector('.view[data-view="trades"].active, .view[data-view="livetrades"].active')
+    if(!sichtbar && !force) return
+    if(!dupState.token) dupEnsureSession()   // Duplikium-Zeilen selbstheilend
     _fleetRenderBusy = true
     try{
       const { data, error } = await supabase.from('mt5_live').select('*')

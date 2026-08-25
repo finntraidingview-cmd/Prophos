@@ -427,6 +427,41 @@ def refresh_duplikum_token(email):
         print(f"[duplikum] ⚠️ Refresh error: {e}")
     return None
 
+# ── Duplikium Session-Handout (25.08.2026) ──
+# Flotte + Live-Lots im Frontend brauchen den Duplikium-Token, der aber nur im
+# localStorage des Browsers lebt, der ihn mal per Login geholt hat. Lief er ab
+# (401 -> dupLogout), starben alle Duplikium-Anzeigen auf pages.dev, bis jemand
+# die Creds neu eintippt (Finns Fund 25.08.: Lots-Chips um 19:02 da, 19:52 weg).
+# Railway haelt ueber den Auto-Connect-Daemon ohnehin einen frischen Token —
+# dieser Endpoint reicht ihn an EINGELOGGTE Prophos-User weiter (sb-token-
+# Pruefung wie /admin/overview; ohne Login gibt es nichts).
+@app.route("/duplikum/session", methods=["GET", "OPTIONS"])
+def duplikum_session():
+    if request.method == "OPTIONS":
+        return "", 200
+    if not DUP_EMAIL:
+        return jsonify({"ok": False, "error": "Keine Duplikium-Env-Creds konfiguriert"}), 503
+    token = (request.headers.get("sb-token") or "").strip()
+    if not token:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        if r.status_code != 200 or not (r.json() or {}).get("id"):
+            return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    except Exception:
+        return jsonify({"ok": False, "error": "Anmeldung nicht pruefbar"}), 502
+    s = duplikum_sessions.get(DUP_EMAIL) or {}
+    tok = s.get("token")
+    # Frischer Gunicorn-Worker hat keinen Cache; aeltere Tokens vorsorglich
+    # erneuern statt sie dem Frontend zu geben, das dann doch ein 401 faengt.
+    if not tok or (time.time() - s.get("last_refresh", 0)) > 600:
+        tok = refresh_duplikum_token(DUP_EMAIL) or tok
+    if not tok:
+        return jsonify({"ok": False, "error": "Duplikium-Login fehlgeschlagen"}), 502
+    return jsonify({"ok": True, "token": tok, "email": DUP_EMAIL})
+
+
 # ── Duplikium Generic Proxy ──
 @app.route("/duplikum/<path:path>", methods=["GET","POST","OPTIONS"])
 def duplikum_proxy(path):
