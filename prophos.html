@@ -3537,6 +3537,9 @@
               <button type="button" id="tp-order-buy" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">BUY</button>
               <button type="button" id="tp-order-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
             </div>
+            <!-- Richtungs-Schutz (25.08.2026): läuft bei der Master-Firma schon
+                 ein Trade, wird die Gegenrichtung gesperrt und hier begründet -->
+            <div id="tp-order-dir-hint" style="display:none;margin-top:8px;font-size:12px;color:#B45309;background:rgba(247,144,9,.12);border-radius:6px;padding:7px 10px"></div>
           </div>
           <!-- SL/TP-Schalter (18.08.2026, Finns Wunsch): an = Bot trägt SL/TP
                nach dem Fill automatisch ein, aus = Order pur, SL/TP von Hand -->
@@ -9283,7 +9286,10 @@
       const pName = (uid, mail) => nameById.get(String(uid)) || _fleetKurzName(mail) || String(uid).slice(0, 8)
       const byLogin = {}, byName = {}
       for(const a of (d.accounts || [])){
-        const wer = { uid: String(a.user_id), name: pName(a.user_id, a.person) }
+        // firm mit in die Karte (25.08.2026, Richtungs-Schutz): der Overview
+        // kennt die Prop-Firma JEDES Accounts — auch die der anderen Personen.
+        const wer = { uid: String(a.user_id), name: pName(a.user_id, a.person),
+                      firm: String(a.firm_raw || a.firm || '') }
         if(a.ext) byLogin[String(a.ext).trim()] = wer
         if(a.name) byName[String(a.name).trim().toLowerCase()] = wer
       }
@@ -9301,6 +9307,67 @@
     if(p.byName && n && p.byName[n]) return p.byName[n]
     return null
   }
+
+  /* ── RICHTUNGS-SCHUTZ (25.08.2026, Finns Ansage nach einem echten Vorfall:
+   * er hat sich einmal aus Versehen über zwei Accounts derselben Prop-Firma
+   * selbst gegengehedged): läuft bei einer Firma — egal welche Person, egal
+   * ob über Duplikium oder Echo — schon ein Trade, darf ein neuer Trade dort
+   * nur in DIESELBE Richtung gehen. Quelle ist dieselbe wie die Flotte:
+   * dup_live (Wächter-Spiegel, frisch ≤75s) + mt5_live (Echo-PCs, ≤20s).
+   * Firma pro Position über die /admin/overview-Karte (External ID/Name →
+   * firm) mit Fallback auf die eigene Accounts-Liste. Keine Daten = keine
+   * Warnung — der Schutz ist additiv und blockt nie aus Unwissen. */
+  const _dirNorm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  async function firmLiveRichtungen(firmName){
+    const ziel = _dirNorm(firmName)
+    const out = { long: [], short: [] }        // je Eintrag: {wer, quelle, symbol}
+    if(!ziel) return out
+    try{
+      await fleetPersonen()                    // throttlet selbst (5 min Cache)
+      const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      const [ml, dl] = await Promise.all([
+        supabase.from('mt5_live').select('*').gte('updated_at', grenze),
+        supabase.from('dup_live').select('*').gte('updated_at', grenze)
+      ])
+      const jetzt = Date.now()
+      const firmVon = (login, name) => {
+        const w = fleetWer(login, name)
+        if(w && w.firm) return { firm: _dirNorm(w.firm), wer: w.name }
+        const l = String(login || '').trim(), n = String(name || '').trim().toLowerCase()
+        const a = (accounts || []).find(x => (l && String(x.externalId || '') === l)
+          || (n && String(x.name || '').trim().toLowerCase() === n))
+        return a ? { firm: _dirNorm(a.firm), wer: a.name } : null
+      }
+      const nimm = (side, info, quelle, symbol) => {
+        const dir = /sell|short|^1$/i.test(String(side)) ? 'short' : 'long'
+        out[dir].push({ wer: info.wer || '?', quelle, symbol: symbol || '?' })
+      }
+      // Duplikium: alle Positionen aller Konten (Master wie Kopien zählen —
+      // jede offene Position bei der Ziel-Firma ist eine Richtungs-Wahrheit)
+      for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
+        if(jetzt - Date.parse(dr.updated_at) > 75 * 1000) continue
+        const accById = {}
+        for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
+        for(const p of (Array.isArray(dr.positions) ? dr.positions : [])){
+          const acc = accById[String(p.account_id)] || {}
+          const f = firmVon(acc.login, acc.name)
+          if(f && f.firm === ziel) nimm(p.side, f, 'Duplikium', p.symbol)
+        }
+      }
+      // Echo: nur die MASTER-Positionen (der Fusion-Hedge steht absichtlich
+      // in Gegenrichtung — der zählt hier nicht)
+      for(const r of ((!ml.error && Array.isArray(ml.data)) ? ml.data : [])){
+        const s = r.status || {}
+        if(!r.alive || s.note || jetzt - Date.parse(r.updated_at) > 20 * 1000) continue
+        for(const p of (s.master_positions || [])){
+          const f = firmVon(r.master_login, r.instance)
+          if(f && f.firm === ziel) nimm(p.type, f, 'Echo', p.symbol)
+        }
+      }
+    }catch(_){ /* additiv: nicht prüfbar heißt keine Warnung, nie ein Block */ }
+    return out
+  }
+  window.firmLiveRichtungen = firmLiveRichtungen   // für die Preflight-/Modal-Sektionen (getrennte Scopes)
 
   /* ── Duplikium-Session automatisch holen (25.08.2026, Finns Fund: Lots-
    * Chips + Flotten-Duplikium-Zeilen starben auf pages.dev, sobald der
@@ -17074,6 +17141,7 @@
     _pfAddRow('conn', 'Duplikum-Accounts aktiv & verbunden')
     _pfAddRow('mult', 'Multiplier nach Duplikum pushen')
     _pfAddRow('sym',  'Symbol-Mapping korrekt')
+    _pfAddRow('dir',  'Richtungs-Schutz')
 
     // ── 1. Verknüpfung (Basis) ──
     const connected = !!(typeof dupState !== 'undefined' && dupState.token)
@@ -17108,16 +17176,18 @@
     }
 
     if(hardFail){
-      // Verknüpfung fehlt → die anderen 3 können nicht laufen
+      // Verknüpfung fehlt → die anderen können nicht laufen
       _pfSet('conn', 'warn', 'Übersprungen — Verknüpfung fehlt.')
       _pfSet('mult', 'warn', 'Übersprungen — Verknüpfung fehlt.')
       _pfSet('sym',  'warn', 'Übersprungen — Verknüpfung fehlt.')
+      _pfSet('dir',  'warn', 'Übersprungen — Verknüpfung fehlt.')
     } else {
-      // ── 1b + 2 + 3 GLEICHZEITIG — jede Zeile hakt sich selbst ab, sobald sie fertig ist ──
+      // ── 1b + 2 + 3 + Richtung GLEICHZEITIG — jede Zeile hakt sich selbst ab ──
       const results = await Promise.all([
         pfCheckConn(plan, dupMasterId, dupSlaveId),
         pfCheckMult(plan, dupMasterId, dupSlaveId),
-        pfCheckSym(plan,  dupMasterId, dupSlaveId)
+        pfCheckSym(plan,  dupMasterId, dupSlaveId),
+        pfCheckDir(plan)
       ])
       for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.softWait) softWait = true }
     }
@@ -17128,7 +17198,36 @@
     try { renderTradePlans() } catch(_){}
     _pfFinish(allOk, hardFail
       ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
-      : softWait ? 'Symbol-Mapping prüfen (oder direkt pushen) — der Trade bleibt auf Geplant.' : null)
+      : softWait ? 'Hinweise oben prüfen — der Trade bleibt auf Geplant.' : null)
+  }
+
+  // ── Richtungs-Schutz der Duplikium-Route (25.08.2026, Finns Ansage) ──
+  // Bei Duplikium tradet Finn von Hand — die Richtung seiner kommenden Order
+  // ist hier unbekannt. Läuft bei Master- ODER Slave-Firma (die Kopie landet
+  // dort in derselben Richtung) schon ein Trade, bleibt das Popup mit der
+  // Warnung offen (softWait) statt sich grün zu schließen.
+  async function pfCheckDir(plan){
+    try{
+      const firmen = [...new Set([plan.masterFirm, plan.slaveFirm].filter(Boolean))]
+      const treffer = []
+      for(const f of firmen){
+        const d = await window.firmLiveRichtungen(f)
+        const dir = d.long.length ? 'LONG' : d.short.length ? 'SHORT' : null
+        if(dir){
+          const b = d.long.length ? d.long[0] : d.short[0]
+          treffer.push(`<b>${escapeHtml(f)}</b> läuft bereits <b>${dir}</b> (${escapeHtml(b.wer)} · ${escapeHtml(b.quelle)} ${escapeHtml(b.symbol)})`)
+        }
+      }
+      if(!treffer.length){
+        _pfSet('dir', 'ok', 'Kein laufender Trade bei diesen Firmen — Richtung frei.')
+        return {}
+      }
+      _pfSet('dir', 'warn', `⚠ ${treffer.join('<br>')}<br><b>NUR in dieselbe Richtung handeln</b> — Gegenrichtung wäre Selbst-Hedge über Accounts.`)
+      return { softWait: true }
+    }catch(_){
+      _pfSet('dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.')
+      return {}
+    }
   }
 
   /* ── Preflight für die Mirror-Route (Master=TopstepX, Slave=MetaApi) ──
@@ -17240,6 +17339,7 @@
     _pfAddRow('m5link', 'MT5-Verlinkung')
     _pfAddRow('m5run',  'Copier läuft')
     _pfAddRow('m5dup',  'Doppel-Hedge-Schutz')
+    _pfAddRow('m5dir',  'Richtungs-Schutz')
     _pfAddRow('m5push', 'Werte pushen')
     _pfAddRow('m5term', 'Terminal + EA')
 
@@ -17336,6 +17436,34 @@
     } else {
       _pfSet('m5dup', 'ok', _dupConnected ? 'Dieses Paar ist nicht in Duplikum verlinkt.' : 'Duplikum ist nicht verbunden — kein Doppel-Hedge möglich.')
     }
+
+    // ── 3b. Richtungs-Schutz ── (25.08.2026, Finns Ansage: nie gegen einen
+    // laufenden Trade derselben Prop-Firma stellen — egal welche Person, egal
+    // ob Duplikium oder Echo. Der Fusion-Hedge zählt nicht mit, dessen
+    // Gegenrichtung ist der Zweck — geprüft wird die MASTER-Firma. Mit
+    // gemerkter Bot-Order wird die Gegenrichtung HART geblockt; ohne Order
+    // gibt es die Warnung mit der laufenden Richtung.)
+    try{
+      const dirs = await window.firmLiveRichtungen(plan.masterFirm)
+      const po_ = (_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) ? _tpPendingOrder : null
+      const fName = escapeHtml(plan.masterFirm || '—')
+      const beleg = arr => arr.length ? ` (${escapeHtml(arr[0].wer)} · ${escapeHtml(arr[0].quelle)} ${escapeHtml(arr[0].symbol)})` : ''
+      const laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
+      const laufArr = dirs.long.length ? dirs.long : dirs.short
+      if(!laufDir){
+        _pfSet('m5dir', 'ok', `Kein laufender Trade bei ${fName} — Richtung frei.`)
+      } else if(po_){
+        const gegen = /sell/i.test(po_.richtung) ? dirs.long : dirs.short
+        if(gegen.length){
+          _pfSet('m5dir', 'err', `${fName} läuft bereits <b>${laufDir}</b>${beleg(gegen)} — deine <b>${escapeHtml(po_.richtung.toUpperCase())}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge über Accounts). Abbruch.`)
+          hardFail = true
+        } else {
+          _pfSet('m5dir', 'ok', `${fName} läuft bereits ${laufDir}${beleg(laufArr)} — gleiche Richtung ✓`)
+        }
+      } else {
+        _pfSet('m5dir', 'warn', `⚠ ${fName} läuft bereits <b>${laufDir}</b>${beleg(laufArr)} — nur in dieselbe Richtung handeln, sonst Selbst-Hedge!`)
+      }
+    }catch(_){ _pfSet('m5dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
 
     // ── 4. Werte pushen ── (max Lots komplett abgeschafft, 15.08.2026 Finns
     // Ansage — es gibt keine Sicherheitsgrenze mehr, nur noch Broker-Limits)
@@ -17790,6 +17918,37 @@
       ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
     symEl.value = fromSettings.length ? fromSettings[0] : ''
     symEl.readOnly = fromSettings.length > 0   // Settings sind die Wahrheit — nicht überschreibbar
+    // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
+    // läuft bei der Master-Firma schon ein Trade (egal welche Person, Duplikium
+    // oder Echo), wird die laufende Richtung vorgewählt und die Gegenrichtung
+    // GESPERRT. Erst beide Knöpfe zurücksetzen (der Zustand klebt sonst vom
+    // letzten Öffnen), dann async nachladen — nur anwenden, wenn das Modal
+    // noch offen und derselbe Plan aktiv ist.
+    const dirBuy = document.getElementById('tp-order-buy')
+    const dirSell = document.getElementById('tp-order-sell')
+    const dirHint = document.getElementById('tp-order-dir-hint')
+    for(const b of [dirBuy, dirSell]){ if(b){ b.disabled = false; b.style.opacity = ''; b.title = '' } }
+    if(dirHint){ dirHint.style.display = 'none'; dirHint.innerHTML = '' }
+    if(typeof window.firmLiveRichtungen === 'function'){
+      window.firmLiveRichtungen(plan.masterFirm).then(dirs => {
+        if(String(_tpOrderPlanId) !== String(planId)) return
+        if(!document.getElementById('tpOrderModal')?.classList.contains('open')) return
+        const lauft = dirs.long.length ? 'long' : dirs.short.length ? 'short' : null
+        if(!lauft) return
+        const b0 = dirs[lauft][0] || {}
+        const sperren = lauft === 'long' ? dirSell : dirBuy
+        if(sperren){
+          sperren.disabled = true
+          sperren.style.opacity = '.35'
+          sperren.title = `${plan.masterFirm || 'Firma'} läuft bereits ${lauft.toUpperCase()} — Gegenrichtung gesperrt (Selbst-Hedge-Schutz)`
+        }
+        tpOrderDirSet(lauft === 'long' ? 'buy' : 'sell')
+        if(dirHint){
+          dirHint.style.display = ''
+          dirHint.innerHTML = `⚠ <b>${escapeHtml(plan.masterFirm || '')}</b> läuft bereits <b>${lauft.toUpperCase()}</b> (${escapeHtml(b0.wer || '?')} · ${escapeHtml(b0.quelle || '')} ${escapeHtml(b0.symbol || '')}) — Gegenrichtung ist gesperrt.`
+        }
+      }).catch(() => {})
+    }
     document.getElementById('tpOrderModal').classList.add('open')
   }
 
