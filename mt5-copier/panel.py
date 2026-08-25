@@ -1714,6 +1714,21 @@ class Handler(BaseHTTPRequestHandler):
                         f"'{inst['name']}' hat gerade offene Hedges — erst schliessen, "
                         f"dann das Hedge-Konto wechseln."}, ensure_ascii=False))
             changed = []
+            # Die VORLAGE mit umstellen (25.08.2026, Finns Live-Fund: die
+            # Provisionierung von '100kThe5ers26574775' erbte das alte
+            # Hedge-Konto aus config.vorlage.json — die Flotten-Pruefung brach
+            # in der Schleife ab, weil die neue Config vom Rest abwich. Der
+            # Chip ist die eine Stelle, die das Hedge-Konto dieses PCs pflegt —
+            # also gehoert die Vorlage als Erb-Quelle kuenftiger Accounts dazu.)
+            vor_path = os.path.join(HERE, "config.vorlage.json")
+            vor = read_json(vor_path)
+            if vor is not None and int(vor.get("hedge_expected_login") or 0) != new_login:
+                vor["hedge_expected_login"] = new_login
+                tmp = vor_path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(vor, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, vor_path)
+                changed.append("config.vorlage.json")
             for inst in insts:
                 path = os.path.join(HERE, inst["config_file"])
                 cfg = read_json(path)
