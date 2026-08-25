@@ -9198,6 +9198,10 @@
       const dd = await window.mtcApi('instances')
       if(!dd || dd.copier_offline || dd._httpFail) return
       const pc = mt5FleetPcId()
+      // Wem gehoeren die Instanzen dieses PCs? Dem eingeloggten Profil — die
+      // Flotte gruppiert damit pro PERSON (25.08.2026, Finns Layout-Ansage).
+      let pushUid = ''
+      try { pushUid = String(((((await supabase.auth.getSession()).data || {}).session || {}).user || {}).id || '') } catch(_){}
       const rows = (dd.instances || []).filter(i => i && i.file).map(inst => {
         const s = inst.status || {}
         return {
@@ -9209,6 +9213,7 @@
           hedge_login: String(s.hedge_login ?? ''),
           alive: !!inst.alive,
           status: {
+            user_id: pushUid || null,
             note: s.note || null,
             standby: !!s.standby,
             multiplier: s.multiplier ?? null,
@@ -9331,8 +9336,13 @@
       return true
     }catch(_){ return false }
   }
+  // Gewaehlte Person im Flotten-Block (null = eigene). Bewusst NICHT
+  // persistiert: nach jedem Laden stehen wieder die EIGENEN Trades oben
+  // (25.08.2026, Finns Layout-Ansage); ein Chip-Klick holt eine andere
+  // Person nach oben, mehr Zustand braucht es nicht.
+  let _fleetWahl = null
   window._fleetSetFilter = function(f){
-    localStorage.setItem('prophos_fleet_filter', f)
+    _fleetWahl = f
     mt5FleetRenderTick(true)
   }
   let _fleetRenderBusy = false
@@ -9381,6 +9391,7 @@
             src: 'dup', accountId: p.account_id,
             accountName: acc.name || acc.login || ('Dup-' + p.account_id),
             login: acc.login || '', alterS, frischGrenzeS: 75,   // 2,5× Waechter-Takt
+            uid: String(dr.user_id || ''), mail: dr.id,          // Person: Waechter-user_id, sonst E-Mail
             pos: []
           }
           cloudGrps[key].pos.push({ side: p.side, size: Number(p.amountLot) || 0, symbol: p.symbol || '?', pnl: null, ccy: '' })
@@ -9399,62 +9410,69 @@
 
       if(!rows.length && !cloud.length){ box.style.display = 'none'; return }
 
-      // Bewusst NICHT awaited: die Personen-Karte darf den Render nie
-      // aufhalten (erster Durchlauf faerbt notfalls pro Login, der naechste
-      // Tick in 5s hat die Personen). Vorher blockierte ein haengender
-      // /admin/overview-Abruf hier den kompletten Block (26.08.-Fund).
+      // Bewusst NICHT awaited: nur noch Fallback-Aufloesung fuer alte
+      // Echo-Zeilen ohne user_id — darf den Render nie aufhalten (26.08.-Fund).
       fleetPersonen()
 
-      // Wem gehoert was? MT5-Zeile: Master-Login → External ID. Duplikium:
-      // Login bzw. Name des Dup-Accounts. TopstepX/MetaApi laufen ueber das
-      // EIGENE Profil (RLS zeigt nur eigene Accounts) → aktuelle Person.
-      const werMt5 = r => fleetWer(r.master_login, null)
-      const werCloud = g => g.src === 'dup'
-        ? fleetWer(g.login, g.accountName)   // Login/Name kommen aus dup_live.accounts
-        : (_fleetPers.me || null)
-
-      // Chips: eine Farbe PRO PERSON. Unaufloesbare Zeilen behalten ihre
-      // Login-Farbe und heissen wie ihr Login — nie eine Person raten.
-      const chipMap = new Map()   // key → {label, farbe}
-      const merken = (wer, fallbackLabel, fallbackKey) => {
-        const key = 'p:' + (wer ? wer.uid : fallbackKey)
-        if(!chipMap.has(key)) chipMap.set(key, {
-          label: wer ? wer.name : fallbackLabel,
-          farbe: mt5FleetFarbe(wer ? wer.uid : String(fallbackKey))
-        })
+      /* ── Gruppierung pro PERSON (25.08.2026 spaetabends, Finns Layout-
+       * Ansage): Chips = NUR Personen, eine Farbe pro Person. Oben stehen die
+       * Trades der EIGENEN ID (bzw. der angeklickten Person), darunter alle
+       * anderen. Personen-Schluessel: dup_live traegt die user_id vom Waechter
+       * (aus duplikum_credentials), Echo-Zeilen die des pushenden Browsers im
+       * status; alte Zeilen fallen auf Login-Aufloesung oder E-Mail/PC-Name
+       * zurueck — nie raten. */
+      let meUid = ''
+      try { meUid = String(((((await supabase.auth.getSession()).data || {}).session || {}).user || {}).id || '') } catch(_){}
+      const profName = new Map()
+      for(const p of (typeof profList === 'function' ? profList() : [])){
+        if(p && p.userId && p.name) profName.set(String(p.userId), p.name)
+      }
+      const mailKurz = m => { const s = String(m || ''); const at = s.indexOf('@'); return at > 0 ? s.slice(0, at) : s }
+      const personen = new Map()   // key → {name, farbe}
+      const merken = (key, name) => {
+        if(!personen.has(key)) personen.set(key, { name, farbe: mt5FleetFarbe(key) })
         return key
       }
-      const rowKey = new Map()    // Zeile/Gruppe → Chip-Key
-      for(const r of rows) rowKey.set(r, merken(werMt5(r), String(r.master_login || '?'), 'login:' + r.master_login))
-      for(const g of cloud) rowKey.set(g, merken(werCloud(g), String(g.accountName || g.accountId), 'acc:' + g.src + g.accountId))
-
-      let filter = localStorage.getItem('prophos_fleet_filter') || 'alle'
-      if(filter.startsWith('id:')) filter = 'alle'   // Alt-Format (Farbe pro Login) — still zuruecksetzen
-      if(filter !== 'alle' && filter !== 'pc' && !chipMap.has(filter)) filter = 'alle'
-      const pc = mt5FleetPcId()
-      const chip = (key, label, farbe) => {
-        const an = filter === key
-        return `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
-               (farbe ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${farbe};margin-right:6px"></span>` : '') +
-               esc(label) + '</button>'
+      const rowKey = new Map()     // Zeile/Gruppe → Personen-Key
+      for(const r of rows){
+        const uid = String(((r.status || {}).user_id) || '')
+        if(uid) rowKey.set(r, merken(uid, profName.get(uid) || 'ID ' + uid.slice(0, 6)))
+        else {
+          const wer = fleetWer(r.master_login, null)
+          rowKey.set(r, wer ? merken(wer.uid, wer.name) : merken('pc:' + r.pc_name, 'PC ' + r.pc_name))
+        }
       }
-      const chips = [...chipMap.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label, 'de'))
+      for(const g of cloud){
+        if(g.src === 'dup'){
+          rowKey.set(g, g.uid ? merken(g.uid, profName.get(g.uid) || mailKurz(g.mail))
+                              : merken('mail:' + g.mail, mailKurz(g.mail)))
+        } else {
+          rowKey.set(g, meUid ? merken(meUid, profName.get(meUid) || 'Dieses Profil')
+                              : merken('hier', 'Dieses Profil'))
+        }
+      }
+
+      // Gewaehlte Person oben — Default: die eigene (Profil dieser Sitzung).
+      const wahl = (_fleetWahl && personen.has(_fleetWahl)) ? _fleetWahl : meUid
+      const chip = (key, label, farbe, an) =>
+        `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
+        (farbe ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${farbe};margin-right:6px"></span>` : '') +
+        esc(label) + '</button>'
+      const chips = [...personen.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'de'))
       let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">`
         + `<span style="font-size:12px;font-weight:600;color:var(--sub)">FLOTTE — ALLE PERSONEN</span>`
-        + chip('alle', 'Alle') + chip('pc', 'Nur dieser PC')
-        + chips.map(([key, c]) => chip(key, c.label, c.farbe)).join('') + '</div>'
-      const sicht = rows.filter(r =>
-        filter === 'alle' ? true :
-        filter === 'pc' ? r.pc_name === pc :
-        rowKey.get(r) === filter)
-      html += '<div style="display:flex;flex-direction:column;gap:8px">'
+        + chips.map(([key, c]) => chip(key, c.name, c.farbe, key === wahl)).join('') + '</div>'
+      // Karten erst pro Person sammeln, dann eigene/gewaehlte oben ausgeben.
+      const karten = new Map()
+      const lege = (key, h) => { if(!karten.has(key)) karten.set(key, []); karten.get(key).push(h) }
+      const sicht = rows
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
       for(const r of sicht){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
-        const wer = werMt5(r)
-        const farbe = chipMap.get(rowKey.get(r)).farbe
+        const pers = personen.get(rowKey.get(r))
+        const farbe = pers.farbe
         const pos = s.master_positions || []
         const mPL = (s.master_equity != null && s.master_balance != null)
           ? Number(s.master_equity) - Number(s.master_balance) : null
@@ -9503,34 +9521,40 @@
             + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
             + ` — gehört zu KEINEM Master!</div>`
         }
-        html += `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
+        lege(rowKey.get(r), `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
-          + (wer ? ` <span style="font-size:12px;font-weight:600;color:${farbe}">${esc(wer.name)}</span>` : '')
+          + ` <span style="font-size:12px;font-weight:600;color:${farbe}">${esc(pers.name)}</span>`
           + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
           + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.standby ? 'Standby — Terminal zu' : s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`)
       }
-      // Cloud-Zeilen (Duplikium / TopstepX / MetaApi) — unter „Nur dieser PC"
-      // bewusst leer: sie haengen an der Cloud, nicht an einem PC. Frische
-      // kommt vom Aggregator-Tick (P&L-Beweis-Doktrin: alt = grau, nie live).
-      const cloudSicht = filter === 'pc' ? [] : cloud.filter(g => filter === 'alle' || rowKey.get(g) === filter)
-      for(const g of cloudSicht){
-        const c = chipMap.get(rowKey.get(g))
-        const wer = werCloud(g)
+      // Cloud-Zeilen (Duplikium / TopstepX) — gleiche Sammel-Logik.
+      for(const g of cloud){
+        const pers = personen.get(rowKey.get(g))
         const frisch = g.alterS <= g.frischGrenzeS   // dup: 75s (Waechter-Takt), tsx: 20s
         const posTxt = g.pos.map(p =>
           `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} ${Number(p.size || 0).toFixed(2)} ${esc(String(p.symbol))}`).join(' · ')
         const hatPnl = g.pos.some(p => p.pnl != null)
         const pnlSum = g.pos.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0)
         const pnlTxt = hatPnl ? ` · P&L ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(2)} ${esc(String(g.pos[0].ccy || ''))}` : ''
-        html += `<div style="border:1px solid var(--border);border-left:3px solid ${c.farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
+        lege(rowKey.get(g), `<div style="border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(String(g.accountName))}</b>`
-          + (wer ? ` <span style="font-size:12px;font-weight:600;color:${c.farbe}">${esc(wer.name)}</span>` : '')
+          + ` <span style="font-size:12px;font-weight:600;color:${pers.farbe}">${esc(pers.name)}</span>`
           + ` ${ltSrcBadge(g.src)}</div>`
           + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : 'zuletzt vor ' + g.alterS + 's'}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${pnlTxt}</div></div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${pnlTxt}</div></div>`)
+      }
+      // Ausgabe: gewaehlte Person (Default: die eigene) oben, alle anderen
+      // darunter — Finns Layout-Ansage vom 25.08.2026 spaetabends.
+      html += '<div style="display:flex;flex-direction:column;gap:8px">'
+      const eigene = (karten.get(wahl) || []).join('')
+      html += eigene || `<div style="font-size:12px;color:var(--sub);padding:2px 2px 4px">${esc(((personen.get(wahl) || {}).name) || 'Diese ID')} — keine laufenden Trades</div>`
+      const andere = chips.filter(([k]) => k !== wahl && (karten.get(k) || []).length)
+      if(andere.length){
+        html += `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;margin-top:6px">ANDERE PERSONEN</div>`
+        for(const [k] of andere) html += karten.get(k).join('')
       }
       html += '</div>'
       box.innerHTML = html

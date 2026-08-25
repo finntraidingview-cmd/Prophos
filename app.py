@@ -2312,6 +2312,9 @@ def _wt_memo_positions_locked(email, creds, memo):
                 "id": email,
                 "positions": positions,
                 "accounts": (_dup_accounts_cache.get(email) or {}).get("list", []),
+                # Wem gehoert dieses Duplikium-Konto? Direkt aus der creds-Zeile —
+                # das Frontend gruppiert die Flotte damit pro PERSON (25.08.2026).
+                "user_id": str(creds.get("user_id") or ""),
                 "updated_at": _wt_now_iso(),
             })
         except Exception as e:
