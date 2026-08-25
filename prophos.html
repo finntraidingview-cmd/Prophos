@@ -9552,15 +9552,20 @@
       }
 
       const uebrig = ohneMaster
-      if(!karten.size && !alarme.size && !uebrig.length){ box.style.display = 'none'; return }
+      // Die EIGENE Person nicht nochmal listen (25.08.2026, Finns Schliff:
+      // „sonst sind wir ja doppelt") — ihre Trades stehen als Plan-Karten
+      // direkt darueber. Nur ihre ALARME (Waisen/Fremd-Hedge) muessen
+      // trotzdem erscheinen, die gibt es auf den Plan-Karten nicht.
+      const eigeneAlarme = (alarme.get(meUid) || []).join('')
+      const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
+        .filter(k => k !== meUid)
+        .sort((a, b) => personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
+      if(!reihenfolge.length && !uebrig.length && !eigeneAlarme){ box.style.display = 'none'; return }
 
-      // Ausgabe: eigene Person zuerst, dann alphabetisch — pro Person eine
-      // kleine Ueberschrift in ihrer Farbe, darunter Karten wie oben (die
-      // .trade-cards-Huelle liefert exakt die Abstaende der Plan-Tabs).
-      const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])].sort((a, b) =>
-        a === meUid ? -1 : b === meUid ? 1 :
-        personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
-      let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em">FLOTTE — ALLE PERSONEN</div>`
+      // Ausgabe: pro Person eine kleine Ueberschrift in ihrer Farbe, darunter
+      // Karten wie oben (.trade-cards-Huelle = Abstaende der Plan-Tabs).
+      let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em">FLOTTE — ANDERE PERSONEN</div>`
+        + eigeneAlarme
       for(const k of reihenfolge){
         const pers = personen.get(k)
         html += `<div style="font-size:11.5px;font-weight:700;color:${pers.farbe};margin:10px 0 6px">${esc(pers.name)}</div>`
