@@ -9263,7 +9263,11 @@
       }
       const meUid = String((session.user || {}).id || '')
       if(meUid) _fleetPers.me = { uid: meUid, name: nameById.get(meUid) || _fleetKurzName((session.user || {}).email) || 'Ich' }
-      const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      // 8s-Timeout: /admin/overview aggregiert serverseitig einiges — haengt
+      // der Abruf, darf er nie den Flotten-Render blockieren (26.08.-Fund:
+      // Block blieb komplett unsichtbar, Ursache im Feld nicht sichtbar).
+      const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache: 'no-store',
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined })
       if(!r.ok) throw new Error('HTTP ' + r.status)
       const d = await r.json()
       const pName = (uid, mail) => nameById.get(String(uid)) || _fleetKurzName(mail) || String(uid).slice(0, 8)
@@ -9340,9 +9344,15 @@
     try{
       const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
       const jetzt = Date.now()
+      // 8s-Deckel pro Query: haengt eine Abfrage, wuerde _fleetRenderBusy
+      // sonst nie zurueckgesetzt und der Block bliebe fuer immer unsichtbar —
+      // genau das stille Verschwinden vom 25.08. Ein Timeout landet jetzt
+      // sichtbar im Fehler-Kasten (catch unten).
+      const mitTimeout = (p, ms) => Promise.race([p,
+        new Promise((_, nein) => setTimeout(() => nein(new Error('DB-Timeout nach ' + ms + ' ms')), ms))])
       const [ml, dl] = await Promise.all([
-        supabase.from('mt5_live').select('*').gte('updated_at', grenze),
-        supabase.from('dup_live').select('*').gte('updated_at', grenze)
+        mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000),
+        mitTimeout(supabase.from('dup_live').select('*').gte('updated_at', grenze), 8000)
       ])
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
@@ -9383,7 +9393,11 @@
 
       if(!rows.length && !cloud.length){ box.style.display = 'none'; return }
 
-      await fleetPersonen()   // Personen-Karte auffrischen (gecacht, 5 min)
+      // Bewusst NICHT awaited: die Personen-Karte darf den Render nie
+      // aufhalten (erster Durchlauf faerbt notfalls pro Login, der naechste
+      // Tick in 5s hat die Personen). Vorher blockierte ein haengender
+      // /admin/overview-Abruf hier den kompletten Block (26.08.-Fund).
+      fleetPersonen()
 
       // Wem gehoert was? MT5-Zeile: Master-Login → External ID. Duplikium:
       // Login bzw. Name des Dup-Accounts. TopstepX/MetaApi laufen ueber das
@@ -9515,7 +9529,13 @@
       html += '</div>'
       box.innerHTML = html
       box.style.display = ''
-    }catch(_){ /* naechster Tick */ }
+    }catch(e){
+      // Fehler SICHTBAR machen statt schlucken: der Block war am 25.08. im
+      // Feld unsichtbar und niemand konnte sagen warum — nie wieder stumm.
+      console.warn('[flotte]', e)
+      box.innerHTML = `<div style="border:1px solid var(--border);border-left:3px solid #D92D20;border-radius:10px;padding:10px 12px;font-size:12px;color:#D92D20">Flotte-Fehler: ${esc(String((e && e.message) || e))}</div>`
+      box.style.display = ''
+    }
     finally{ _fleetRenderBusy = false }
   }
   setInterval(mt5FleetRenderTick, 5000)
