@@ -3401,15 +3401,6 @@
         </div>
       </div>
 
-      <!-- FLOTTE (18.08.2026 als MT5-Flotte in Live-Trades geboren, seit
-           25.08.2026 abends HIER — Finns Ansage: alle laufenden Orders aller
-           Personen im Trades-Tab, „Live-Trades ist schon laengst raus"):
-           Copier-Instanzen aller PCs aus Supabase mt5_live PLUS die Cloud-
-           Positionen (Duplikium/TopstepX/MetaApi) aus dem Aggregator.
-           Farbe pro PERSON (Aufloesung via /admin/overview), Filter-Chips.
-           Bleibt unsichtbar, solange nirgendwo etwas laeuft. -->
-      <div id="lt-fleet" style="display:none;margin-bottom:14px"></div>
-
       <!-- Sub-Tabs: Status -->
       <div class="subtabs">
         <button class="subtab active" data-tradetab="planned">
@@ -3515,6 +3506,14 @@
           <p>Sobald du Trades abschließt, taucht hier deine Historie auf — mit P/L pro Seite und Net-Result.</p>
         </div>
       </div>
+
+      <!-- FLOTTE (25.08.2026 nachts, Finns Design-Ansage „viel cleaner"):
+           kompakt UNTER den Trade-Plan-Tabs — Sub-Tabs + eigene Plan-Karten
+           behalten den Platz oben. EINE Zeile pro Person (eigene zuerst),
+           nur Konten MIT Positionen, geteilter Hedge nur einmal. Quellen:
+           Supabase dup_live (Waechter-Spiegel) + mt5_live (Echo-PCs).
+           Bleibt unsichtbar, solange nirgendwo etwas laeuft. -->
+      <div id="lt-fleet" style="display:none;margin-top:16px"></div>
     </section>
 
     <!-- Trade-Plan-Modal (Anlegen + Bearbeiten) -->
@@ -9336,15 +9335,8 @@
       return true
     }catch(_){ return false }
   }
-  // Gewaehlte Person im Flotten-Block (null = eigene). Bewusst NICHT
-  // persistiert: nach jedem Laden stehen wieder die EIGENEN Trades oben
-  // (25.08.2026, Finns Layout-Ansage); ein Chip-Klick holt eine andere
-  // Person nach oben, mehr Zustand braucht es nicht.
-  let _fleetWahl = null
-  window._fleetSetFilter = function(f){
-    _fleetWahl = f
-    mt5FleetRenderTick(true)
-  }
+  // Personen-Chips samt Auswahl sind seit der kompakten Ansicht (25.08.2026
+  // nachts) raus — eine Zeile pro Person braucht keinen Umschalter mehr.
   let _fleetRenderBusy = false
   async function mt5FleetRenderTick(force){
     const box = document.getElementById('lt-fleet')
@@ -9452,109 +9444,109 @@
         }
       }
 
-      // Gewaehlte Person oben — Default: die eigene (Profil dieser Sitzung).
-      const wahl = (_fleetWahl && personen.has(_fleetWahl)) ? _fleetWahl : meUid
-      const chip = (key, label, farbe, an) =>
-        `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
-        (farbe ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${farbe};margin-right:6px"></span>` : '') +
-        esc(label) + '</button>'
-      const chips = [...personen.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'de'))
-      let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">`
-        + `<span style="font-size:12px;font-weight:600;color:var(--sub)">FLOTTE — ALLE PERSONEN</span>`
-        + chips.map(([key, c]) => chip(key, c.name, c.farbe, key === wahl)).join('') + '</div>'
-      // Karten erst pro Person sammeln, dann eigene/gewaehlte oben ausgeben.
-      const karten = new Map()
-      const lege = (key, h) => { if(!karten.has(key)) karten.set(key, []); karten.get(key).push(h) }
-      const sicht = rows
+      /* ── Kompakte Ausgabe (25.08.2026 nachts, Finns Design-Ansage „viel
+       * cleaner": die Karten-Flut hat den Trades-Tab erschlagen): EINE Zeile
+       * pro Person — die eigene zuerst und hervorgehoben —, nur Konten MIT
+       * Positionen, und der von allen geteilte Hedge nur EINMAL ganz unten
+       * statt einmal pro Person. Keine Chips mehr — die Zeile selbst traegt
+       * Farbe und Namen der Person. */
+      const zeilen = new Map()    // personKey → {frag:[], alarm:[], frisch, alterS}
+      const zeile = key => {
+        if(!zeilen.has(key)) zeilen.set(key, { frag: [], alarm: [], frisch: true, alterS: 0 })
+        return zeilen.get(key)
+      }
+      const altern = (z, frisch, alterS) => { if(!frisch){ z.frisch = false; z.alterS = Math.max(z.alterS, alterS) } }
+      const kurzAcc = n => {
+        const s = String(n || '').replace(/^(master|slave)\s*-\s*\w+\s*-\s*/i, '')
+        return s.length > 12 ? '…' + s.slice(-8) : s
+      }
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
-      for(const r of sicht){
+      for(const r of rows){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
-        const pers = personen.get(rowKey.get(r))
-        const farbe = pers.farbe
         const pos = s.master_positions || []
-        const mPL = (s.master_equity != null && s.master_balance != null)
-          ? Number(s.master_equity) - Number(s.master_balance) : null
-        const hPL = (s.hedge_equity != null && s.hedge_balance != null)
-          ? Number(s.hedge_equity) - Number(s.hedge_balance) : null
-        // Master-Lots UND Hedge-Lots pro Position (18.08.2026, Finns Wunsch:
-        // sehen, welche Lots zu welcher Position gehoeren)
+        // Master-Lots UND Hedge-Lots pro Position (18.08.2026, Finns Wunsch)
         const hedgesMap = s.hedges || {}
         const hedgeLots = ident => {
           const hs = hedgesMap[String(ident)]
           return (Array.isArray(hs) ? hs : []).reduce((a, h) => a + (Number(h.volume) || 0), 0)
         }
-        const posTxt = pos.length
-          ? pos.map(p => {
-              const hv = hedgeLots(p.ident)
-              return `${p.type === 0 ? 'BUY' : 'SELL'} ${Number(p.volume).toFixed(2)} ${esc(p.symbol)}`
-                + ` → Hedge ${hv ? hv.toFixed(2) : '—'}`
-            }).join(' · ')
-          : 'flach'
-        // Verwaiste Hedges: Slave-Position, deren Master-Ident nicht (mehr) in
-        // den Master-Positionen steht — genau der Fall 'Order auf dem Slave
-        // ohne Master', den Finn sofort sehen will, um einzugreifen.
+        // Alarme (Waisen/Fremde) bleiben — Finns Eingreif-Faelle. Flache
+        // Instanzen OHNE Alarm sind in der kompakten Ansicht nur Rauschen.
         const masterIdents = new Set(pos.map(p => String(p.ident)))
         const waisen = Object.entries(hedgesMap)
           .filter(([k, v]) => !masterIdents.has(String(k)) && (Array.isArray(v) ? v : []).length)
-        const waisenTxt = waisen.length
-          ? `<div style="font-size:12px;margin-top:4px;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
-            + waisen.map(([k, v]) => v.map(h =>
-                `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
-            + ` — im Hedge-Terminal prüfen!</div>`
-          : ''
-        const plTxt = mPL != null
-          ? ` · Master-P&L ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}` : ''
-        const alleine = pos.length && !rows.some(x => x !== r && x.hedge_login === r.hedge_login
-          && ((x.status || {}).master_positions || []).length)
-        const symTxt = (alleine && hPL != null && mPL != null && Math.abs(mPL) > 0.5)
-          ? ` · Hedge ${hPL >= 0 ? '+' : ''}${hPL.toFixed(2)} ${esc(s.hedge_currency || '')} (Symmetrie ${Math.round(Math.abs(hPL / mPL) * 100)}%)`
-          : ''
-        // FREMDE Positionen auf dem Hedge-Konto (kein Prophos-Magic): eine
-        // Slave-Order, die zu KEINEM Master gehoert — sofort rot zeigen.
-        let fremdTxt = ''
         const fr = s.hedge_fremde
-        if(Array.isArray(fr) && fr.length && !fremdGezeigt.has(r.hedge_login)){
-          fremdGezeigt.add(r.hedge_login)
-          fremdTxt = `<div style="font-size:12px;margin-top:4px;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
-            + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
-            + ` — gehört zu KEINEM Master!</div>`
+        const fremdNeu = Array.isArray(fr) && fr.length && !fremdGezeigt.has(r.hedge_login)
+        if(!pos.length && !waisen.length && !fremdNeu) continue
+        const z = zeile(rowKey.get(r))
+        const mPL = (s.master_equity != null && s.master_balance != null)
+          ? Number(s.master_equity) - Number(s.master_balance) : null
+        for(const p of pos){
+          const hv = hedgeLots(p.ident)
+          z.frag.push(`${p.type === 0 ? 'BUY' : 'SELL'} <b>${Number(p.volume).toFixed(2)}</b> ${esc(p.symbol)}`
+            + (hv ? ` <span style="color:var(--sub)">→ H ${hv.toFixed(2)}</span>` : '')
+            + ` <span style="color:var(--sub);font-size:10.5px" title="Echo · ${esc(r.instance)} · Master ${esc(r.master_login)} · Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}">(${esc(r.instance)}${mPL != null ? ` · ${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}` : ''})</span>`)
         }
-        lege(rowKey.get(r), `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
-          + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
-          + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
-          + ` <span style="font-size:12px;font-weight:600;color:${farbe}">${esc(pers.name)}</span>`
-          + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
-          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.standby ? 'Standby — Terminal zu' : s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`)
+        if(waisen.length) z.alarm.push(`<div style="font-size:11.5px;margin-top:3px;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
+          + waisen.map(([k, v]) => v.map(h =>
+              `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
+          + ` — im Hedge-Terminal prüfen!</div>`)
+        if(fremdNeu){
+          fremdGezeigt.add(r.hedge_login)
+          z.alarm.push(`<div style="font-size:11.5px;margin-top:3px;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
+            + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
+            + ` — gehört zu KEINEM Master!</div>`)
+        }
+        altern(z, frisch, alterS)
       }
-      // Cloud-Zeilen (Duplikium / TopstepX) — gleiche Sammel-Logik.
+      // Duplikium/TSX: geteilte Hedge-Konten (dasselbe Login als Sub-Account
+      // bei MEHREREN Personen) nur EINMAL zeigen — vorher stand der Fusion-
+      // Slave fuenfmal identisch in der Liste (Finns „alles durcheinander").
+      const loginBei = {}
+      for(const g of cloud) if(g.src === 'dup' && g.login)
+        (loginBei[g.login] = loginBei[g.login] || new Set()).add(rowKey.get(g))
+      const geteilt = new Map()   // login → {posHtml, frisch, alterS}
       for(const g of cloud){
-        const pers = personen.get(rowKey.get(g))
         const frisch = g.alterS <= g.frischGrenzeS   // dup: 75s (Waechter-Takt), tsx: 20s
-        const posTxt = g.pos.map(p =>
-          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} ${Number(p.size || 0).toFixed(2)} ${esc(String(p.symbol))}`).join(' · ')
+        const posHtml = g.pos.map(p =>
+          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} <b>${Number(p.size || 0).toFixed(2)}</b> ${esc(String(p.symbol))}`).join(' · ')
+        if(g.src === 'dup' && g.login && loginBei[g.login] && loginBei[g.login].size > 1){
+          if(!geteilt.has(g.login)) geteilt.set(g.login, { posHtml, frisch, alterS: g.alterS })
+          continue
+        }
+        const z = zeile(rowKey.get(g))
         const hatPnl = g.pos.some(p => p.pnl != null)
         const pnlSum = g.pos.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0)
-        const pnlTxt = hatPnl ? ` · P&L ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(2)} ${esc(String(g.pos[0].ccy || ''))}` : ''
-        lege(rowKey.get(g), `<div style="border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
-          + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
-          + `<div><b>${esc(String(g.accountName))}</b>`
-          + ` <span style="font-size:12px;font-weight:600;color:${pers.farbe}">${esc(pers.name)}</span>`
-          + ` ${ltSrcBadge(g.src)}</div>`
-          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : 'zuletzt vor ' + g.alterS + 's'}</div></div>`
-          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${pnlTxt}</div></div>`)
+        z.frag.push(posHtml
+          + ` <span style="color:var(--sub);font-size:10.5px" title="${esc(String(g.accountName))}">(${esc(kurzAcc(g.accountName))}${g.src === 'tsx' ? ' · TSX' : ''}${hatPnl ? ` · ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(0)} ${esc(String(g.pos[0].ccy || ''))}` : ''})</span>`)
+        altern(z, frisch, g.alterS)
       }
-      // Ausgabe: gewaehlte Person (Default: die eigene) oben, alle anderen
-      // darunter — Finns Layout-Ansage vom 25.08.2026 spaetabends.
-      html += '<div style="display:flex;flex-direction:column;gap:8px">'
-      const eigene = (karten.get(wahl) || []).join('')
-      html += eigene || `<div style="font-size:12px;color:var(--sub);padding:2px 2px 4px">${esc(((personen.get(wahl) || {}).name) || 'Diese ID')} — keine laufenden Trades</div>`
-      const andere = chips.filter(([k]) => k !== wahl && (karten.get(k) || []).length)
-      if(andere.length){
-        html += `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;margin-top:6px">ANDERE PERSONEN</div>`
-        for(const [k] of andere) html += karten.get(k).join('')
+
+      if(!zeilen.size && !geteilt.size){ box.style.display = 'none'; return }
+
+      // Ausgabe: eigene Person zuerst (hervorgehoben), dann alphabetisch,
+      // geteilte Hedges als neutrale Schlusszeile.
+      const reihenfolge = [...zeilen.keys()].sort((a, b) =>
+        a === meUid ? -1 : b === meUid ? 1 :
+        personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
+      let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;margin-bottom:6px">FLOTTE — ALLE PERSONEN</div>`
+        + '<div style="display:flex;flex-direction:column;gap:4px">'
+      for(const k of reihenfolge){
+        const pers = personen.get(k), z = zeilen.get(k)
+        const eigene = k === meUid
+        html += `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:8px;padding:6px 10px;${z.frisch ? '' : 'opacity:.55'}${eigene ? 'background:var(--surface);' : ''}">`
+          + `<div style="min-width:0"><span style="font-size:12.5px;font-weight:${eigene ? 700 : 600};color:${pers.farbe}">${esc(pers.name)}</span>`
+          + ` <span style="font-size:12px;font-family:var(--mono)">${z.frag.join(' <span style="color:var(--border)">|</span> ')}</span>`
+          + z.alarm.join('')
+          + `</div><span style="font-size:10.5px;color:var(--sub);flex-shrink:0">${z.frisch ? 'live' : 'vor ' + z.alterS + 's'}</span></div>`
+      }
+      for(const [login, gh] of geteilt){
+        html += `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;border:1px dashed var(--border);border-radius:8px;padding:6px 10px;${gh.frisch ? '' : 'opacity:.55'}">`
+          + `<div style="min-width:0"><span style="font-size:12px;font-weight:600;color:var(--sub)">Hedge ${esc(login)} <span style="font-weight:400">(geteilt)</span></span>`
+          + ` <span style="font-size:12px;font-family:var(--mono)">${gh.posHtml}</span></div>`
+          + `<span style="font-size:10.5px;color:var(--sub);flex-shrink:0">${gh.frisch ? 'live' : 'vor ' + gh.alterS + 's'}</span></div>`
       }
       html += '</div>'
       box.innerHTML = html
