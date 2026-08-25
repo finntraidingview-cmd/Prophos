@@ -1088,14 +1088,28 @@ def main():
                 if m.seen_seq is None:
                     log(f"✓ [{m.file}] Snapshot verbunden — Master {snap['login']} @ {snap['server']}, "
                         f"{len(snap['positions'])} offene Position(en)")
-                    m.startup_skip = compute_startup_skip(snap["positions"], hedges, m.adopt)
-                    adopted = {p["ident"] for p in snap["positions"]} - m.startup_skip
-                    if m.startup_skip:
-                        log(f"⏭ [{m.file}] {len(m.startup_skip)} Position(en) ohne Hedge waren beim "
-                            f"Start schon offen — werden nicht nachtraeglich gehedged.")
-                    if adopted and not m.adopt:
-                        log(f"✓ [{m.file}] {len(adopted)} Position(en) mit bestehendem Hedge "
-                            f"uebernommen (Neustart-Recovery).")
+                    if m.armed:
+                        # Trade-Fenster offen ⇒ KEIN startup_skip (25.08.2026, Finns
+                        # Live-Fund: die Bot-Order kam, waehrend der Copier gerade neu
+                        # startete — die frische Position lag beim ersten Snapshot-
+                        # Connect schon da, wanderte als 'Alt-Bestand' in startup_skip
+                        # und der Hedge kam NIE). Im offenen Fenster ist eine Position
+                        # ohne Hedge genau der geplante Trade: uebernehmen und hedgen.
+                        # Der Alt-Bestand-Schutz gilt weiter fuer Verbindungen OHNE
+                        # offenes Fenster (dort entstehen Positionen nie durch uns).
+                        m.startup_skip = set()
+                        if snap["positions"]:
+                            log(f"▶ [{m.file}] Trade-Fenster offen — {len(snap['positions'])} "
+                                f"Master-Position(en) werden uebernommen und gehedgt.")
+                    else:
+                        m.startup_skip = compute_startup_skip(snap["positions"], hedges, m.adopt)
+                        adopted = {p["ident"] for p in snap["positions"]} - m.startup_skip
+                        if m.startup_skip:
+                            log(f"⏭ [{m.file}] {len(m.startup_skip)} Position(en) ohne Hedge waren beim "
+                                f"Start schon offen — werden nicht nachtraeglich gehedged.")
+                        if adopted and not m.adopt:
+                            log(f"✓ [{m.file}] {len(adopted)} Position(en) mit bestehendem Hedge "
+                                f"uebernommen (Neustart-Recovery).")
                 m.seen_seq = snap["seq"]
 
                 # Staleness pro Master (Fremd-Logins sind schon in read_snapshot raus)
