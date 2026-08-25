@@ -1259,7 +1259,7 @@ function card(d){
    <div class=acc-route><span class=mono>${esc(s.master_login||d.master_expected||'—')}</span> → Hedge <span class=mono>${esc(s.hedge_login||d.hedge_expected||'—')}</span></div>
    ${s.note&&!standby?`<div class=warnbox>${esc(s.note)}</div>`:''}
    ${standby?`<div class=standbybox>Master-Terminal zu — Karte wird aktiv, sobald der Trade-Start es öffnet</div>`:''}
-   ${(s.blocked||[]).length?`<div class=warnbox>Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>`:''}
+   ${(s.blocked||[]).length?`<div class=warnbox>Keine neuen Hedges für Master-Pos: ${esc((s.blocked||[]).join(', '))} (Mehrfach-Hedge-Schutz oder Hand-Close)</div>`:''}
    <div class=acc-stats>
      <div class="stat${pos?' hot':''}"><b>${pos}</b><span>Positionen</span></div>
      <div class="stat${hed?' hot':''}"><b>${hed}</b><span>Hedges</span></div>

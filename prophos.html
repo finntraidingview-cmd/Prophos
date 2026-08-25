@@ -22950,7 +22950,7 @@
       <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
       ${s.note && !standby ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
       ${standby ? `<div class="mtc-standby">Master-Terminal zu — Karte wird aktiv, sobald der Trade-Start es öffnet</div>` : ''}
-      ${(s.blocked || []).length ? `<div class="mtc-warn">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>` : ''}
+      ${(s.blocked || []).length ? `<div class="mtc-warn">Keine neuen Hedges für Master-Pos: ${esc((s.blocked||[]).join(', '))} (Mehrfach-Hedge-Schutz oder Hand-Close)</div>` : ''}
       <div class="mtc-stats">
         <div class="mtc-stat${pos ? ' hot' : ''}"><b>${pos}</b><span>Positionen</span></div>
         <div class="mtc-stat${hed ? ' hot' : ''}"><b>${hed}</b><span>Hedges</span></div>

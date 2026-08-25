@@ -1087,11 +1087,48 @@ def main():
                                              "profit": None,
                                              "closed_at": datetime.now().isoformat(timespec="seconds")})
                             del m.closed[:-50]
+                            # Hand-Close ist endgueltig (25.08.2026, Finns Ansage beim
+                            # ersten Live-Kontakt: von Hand geschlossene Hedges muessen
+                            # zu BLEIBEN — vorher eroeffnete der naechste Tick sofort
+                            # einen neuen). Master-Pos fuer weitere Opens sperren;
+                            # Closes bleiben erlaubt (Teil-Hand-Close: der Rest wird
+                            # beim Master-Close noch sauber zugemacht). Nach einem
+                            # Copier-Neustart haelt startup_skip voll geschlossene
+                            # Positionen weiter fern; nur ein TEIL-geschlossener
+                            # Hedge wuerde wieder adoptiert und aufgestockt.
+                            m.blocked.add(ident_i)
+                            log(f"✋ [{m.file}] Master-Pos {ident_} wird NICHT erneut "
+                                f"gehedgt — Hand-Close wird respektiert.")
                 if cur_vol != m.hedge_last_vol:
                     # Baseline persistieren, damit der Waechter Neustarts ueberlebt —
                     # nur bei Aenderung, nicht jeden 0,5-s-Tick.
                     m.hedge_last_vol = cur_vol
                     write_closed(m.closed_path, m.closed, m.hedge_last_vol)
+
+                # ── Eingefrorener Snapshot = keine Order-Basis (25.08.2026) ─────
+                # Live-Fund beim ersten Echtgeld-Kontakt: Master 26592415 war
+                # laengst flach, aber die stehengebliebene Snapshot-Datei (Lese-EA
+                # tot) listete noch Position 591067191 — der Copier eroeffnete
+                # daraus nach jedem Hand-Close einen frischen Echtgeld-Hedge.
+                # Eine Datei, die seit >15 s nicht mehr geschrieben wird, ist
+                # kein Beweis fuer offene Master-Positionen ('Beweis oder leer'):
+                # Status/Warnung laufen weiter (Karte: 'Snapshot eingefroren'),
+                # aber es werden KEINE Orders mehr daraus abgeleitet. Der
+                # Schwund-Waechter oben bleibt bewusst davor — er haengt am
+                # frischen Hedge-Bestand, nicht am Snapshot.
+                try:
+                    snap_fresh = (time.time() - os.path.getmtime(snap_path)) <= 15
+                except OSError:
+                    snap_fresh = False
+                if not snap_fresh:
+                    # Offene Hedges halten den Selbst-Update-Neustart weiter auf;
+                    # die eingefrorene Positionsliste zaehlt dafuer nicht.
+                    m.busy = bool(hedges)
+                    if time.time() - m.last_status > 3.0:
+                        m.last_status = time.time()
+                        if os.path.exists(m.cfg_path):
+                            write_status(m.status_path, master_status(m, snap, hedges, True))
+                    continue
 
                 actions, warns = plan_actions(
                     snap["positions"], hedges,
