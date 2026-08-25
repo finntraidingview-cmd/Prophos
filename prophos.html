@@ -16899,9 +16899,22 @@
 
     // ── 3. Doppel-Hedge-Schutz ── Master ODER Slave zusätzlich Duplikum-verlinkt
     // UND Duplikum verbunden → beide Systeme würden denselben Trade hedgen.
+    // Karteileichen zählen nicht (25.08.2026, Finns Fund: Konto in Duplikium
+    // gelöscht + gesynct, Accounts-Ansicht zeigte den Link korrekt als weg —
+    // aber der lokale prophos_dup_links-Eintrag blieb stehen und dieser Check
+    // blockierte den Start). Ein Link zählt nur, wenn das Duplikum-Konto in
+    // der frischen Kontenliste noch existiert; ist die Liste nicht ladbar,
+    // zählen konservativ ALLE Links (Doppel-Hedge lieber fälschlich blocken
+    // als übersehen).
     const _dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
     const _dupConnected = (typeof dupState !== 'undefined') && !!dupState.token
-    const _dupLinkedIds = new Set(Object.values(_dupLinks).map(String))
+    if(_dupConnected && !(dupState.accounts || []).length && typeof dupLoadAccounts === 'function'){
+      try { await dupLoadAccounts() } catch(_){}
+    }
+    const _dupAccIds = new Set(((typeof dupState !== 'undefined' && dupState.accounts) || []).map(a => String(a.account_id)))
+    const _dupLinkedIds = new Set(Object.entries(_dupLinks)
+      .filter(([dupId]) => !_dupAccIds.size || _dupAccIds.has(String(dupId)))
+      .map(([, manualId]) => String(manualId)))
     if(_dupConnected && (_dupLinkedIds.has(String(plan.masterAccountId)) || _dupLinkedIds.has(String(plan.slaveAccountId)))){
       _pfSet('m5dup', 'err', 'Master oder Slave ist zusätzlich mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum für dieses Paar ausschalten, sonst wird doppelt gehedgt.')
       hardFail = true
