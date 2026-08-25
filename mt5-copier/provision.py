@@ -736,6 +736,26 @@ def run_provision(*, name, login, password, server, template_exe,
             "Keine Vorlage gefunden: config.json oder config.vorlage.json mit den "
             "Hedge-Feldern (hedge_terminal_path, hedge_expected_login) und "
             "master_terminal_path anlegen.")
+    # Hedge-Felder aus der LEBENDEN Flotte erben, nicht aus der Vorlage
+    # (26.08.2026, Finns Bug vom Vorabend: die Vorlage trug noch ein altes
+    # Hedge-Konto — der frisch provisionierte Account brach die Flotten-
+    # Pruefung und der Copier stand in der Neustart-Schleife). Existierende
+    # Instanzen sind die aktuellere Wahrheit: check_fleet erzwingt ohnehin,
+    # dass alle identisch sind. Die Vorlage bleibt nur der Von-Null-Fall.
+    for _fn in sorted(os.listdir(folder)):
+        if not CONFIG_RE.fullmatch(_fn):
+            continue
+        try:
+            with open(os.path.join(folder, _fn), "r", encoding="utf-8") as f:
+                _inst = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if _inst.get("hedge_expected_login"):
+            base = dict(base)
+            base["hedge_expected_login"] = _inst["hedge_expected_login"]
+            if _inst.get("hedge_terminal_path"):
+                base["hedge_terminal_path"] = _inst["hedge_terminal_path"]
+            break
     cfg = build_master_config(base, name=name, master_login=login,
                               terminal_path=target_exe, ident=ident, server=server)
     # Besitzer-Stempel (15.08.2026): kommt die Provisionierung aus Prophos, traegt

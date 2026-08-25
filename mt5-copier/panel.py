@@ -323,8 +323,14 @@ def snapshot():
     if PROV_JOB:
         job = {"name": PROV_JOB["name"], "done": PROV_JOB["done"], "error": PROV_JOB["error"],
                "steps": [{"key": k, **PROV_JOB["steps"][k]} for k in PROV_STEPS]}
+    # Copier-Log-Spiegel (26.08.2026, Finns Wunsch: CMD-Meldungen in Prophos
+    # lesen) — lebt auch, wenn der Copier beim Start abbricht und deshalb
+    # keine status-*.json schreibt.
+    clog = read_json(os.path.join(HERE, "copier-log.json"), {}) or {}
     return {"instances": data, "conflicts": conflicts, "job": job,
-            "plans": advance_plans(data), "version": _local_version()}
+            "plans": advance_plans(data), "version": _local_version(),
+            "copier_log": clog.get("lines") or [],
+            "copier_log_at": clog.get("updated_at")}
 
 
 def patch_config(fname, patch):

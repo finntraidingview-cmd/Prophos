@@ -84,6 +84,28 @@ TEMPLATES = ("config.example.json", "config.fusion-test.json")
 
 
 _LOG_RING = []
+# Globaler Log-Spiegel (26.08.2026, Finns Wunsch: die CMD-Meldungen direkt in
+# Prophos lesen koennen). Anders als die status-*.json lebt diese Datei auch
+# dann, wenn der Copier beim START abbricht (Flotten-Konflikt, Konto-Guard) —
+# genau die Faelle, in denen das CMD bisher die einzige Fehlerquelle war.
+_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "copier-log.json")
+
+
+def _log_datei_schreiben():
+    try:
+        tmp = _LOG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"lines": _LOG_RING[-120:], "pid": os.getpid(),
+                       "updated_at": datetime.now().isoformat(timespec="seconds")},
+                      f, ensure_ascii=False)
+        for _ in range(3):
+            try:
+                os.replace(tmp, _LOG_PATH)
+                return
+            except PermissionError:
+                time.sleep(0.05)   # Leser-Kollision (Panel) — immer transient
+    except Exception:
+        pass
 
 
 def log(msg):
@@ -92,6 +114,7 @@ def log(msg):
     _LOG_RING.append(line)
     if len(_LOG_RING) > 200:
         del _LOG_RING[:-200]
+    _log_datei_schreiben()
 
 
 def write_status(path, data):

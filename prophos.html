@@ -5011,6 +5011,15 @@
       <div id="mtc-notice"></div>
       <div class="mtc-grid" id="mtc-grid"></div>
 
+      <!-- Copier-Log direkt in Prophos (26.08.2026, Finns Wunsch: Fehler in
+           Echo lesen statt im CMD-Fenster). Quelle: copier-log.json via Panel —
+           lebt auch, wenn der Copier beim Start abbricht und deshalb keine
+           status-*.json schreibt (Flotten-Konflikt, Konto-Guard). -->
+      <details id="mtc-log-box" style="margin-top:16px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--sub);user-select:none;font-weight:600">📜 Copier-Log (live) <span id="mtc-log-at" style="font-weight:400"></span></summary>
+        <pre id="mtc-global-log" class="mtc-log" style="max-height:340px;overflow:auto;margin-top:8px">—</pre>
+      </details>
+
       <!-- Trade-Pläne + Plan-Modal entfernt (Finns Ansage 15.08.2026): geplant
            wird ausschließlich im Trades-Bereich — die MT5-Route der normalen
            Plan-Logik übernimmt Preflight, Erkennung und P&L. -->
@@ -23898,12 +23907,58 @@
         if(cur) cur.outerHTML = html; else grid.insertAdjacentHTML('beforeend', html)
       }
     }
+    // Copier-Log in der View (26.08.2026, Finns Wunsch: Fehler hier lesen
+    // statt im CMD). Nur bei geoeffnetem Kasten ans Ende scrollen.
+    const glog = $('mtc-global-log')
+    if(glog && Array.isArray(d.copier_log)){
+      const neu = d.copier_log.join('\n') || 'noch keine Log-Zeilen'
+      if(glog.textContent !== neu){
+        glog.textContent = neu
+        if($('mtc-log-box')?.open) glog.scrollTop = glog.scrollHeight
+      }
+      const at = $('mtc-log-at')
+      if(at) at.textContent = d.copier_log_at ? `· Stand ${String(d.copier_log_at).slice(11, 19)}` : ''
+    }
+    // Hedge-Chip-Selbstheilung (26.08.2026) — nicht awaited, heilt im Hintergrund
+    echoHedgeGuard(d)
     renderMt5Tab(d, n)
     // Letzten Stand merken — window.mt5TabRender (Export unten) rendert den Tab
     // damit sofort nach Link/Unlink neu, statt auf den naechsten 3s-Poll zu warten
     // (bekannter Gap: mt5RefreshAfterLink rief ins Leere, 15.08.2026).
     mtcLastRender = { d, n }
     if(addOpen) renderAddJob()
+  }
+
+  /* ── Hedge-Chip-Selbstheilung aus Supabase (26.08.2026, Finns Bug: nach
+   * „Account hinzufügen" erbte die neue Config ein altes Hedge-Konto und die
+   * Flotte brach — der Chip-Wert war „weg". Der Chip-Wert lebt jetzt
+   * zusätzlich in echo_hedge (eine Zeile pro PC, sql/2026-08-26_echo_hedge.sql);
+   * weicht irgendeine Config davon ab, stellt das Frontend ihn automatisch
+   * per set-hedge zurück — max. ein Heil-Versuch pro Minute. Tabelle fehlt
+   * oder leer → Guard bleibt still (additiv, blockt nie). */
+  const _echoHedge = { next: 0, wert: null, geladen: 0 }
+  async function echoHedgeGuard(d){
+    try{
+      if(Date.now() < _echoHedge.next) return
+      const insts = (d && d.instances) || []
+      if(!insts.length) return
+      const pc = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null
+      if(!pc) return
+      if(Date.now() - _echoHedge.geladen > 5 * 60 * 1000){
+        _echoHedge.geladen = Date.now()
+        const { data } = await supabase.from('echo_hedge').select('hedge_login')
+          .eq('pc_name', pc).maybeSingle()
+        _echoHedge.wert = (data && data.hedge_login) ? String(data.hedge_login) : null
+      }
+      const soll = _echoHedge.wert
+      if(!soll) return
+      if(!insts.some(x => String(x.hedge_expected || '') !== soll)) return
+      _echoHedge.next = Date.now() + 60 * 1000
+      const r = await window.mtcApi('set-hedge', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: soll }) })
+      console.log('[echo] Hedge-Selbstheilung →', soll, ':', r && r.msg)
+      setTimeout(mtcLoad, 2500)
+    }catch(_){ /* Tabelle fehlt/offline — still bleiben */ }
   }
   let mtcLastRender = null
 
@@ -24043,6 +24098,18 @@
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login }) })
       alert((r && r.ok ? '✅ ' : '⚠️ ') + (r && r.msg ? r.msg : 'keine Antwort'))
       mtcLoad()
+      // Chip-Wert nach Supabase (26.08.2026, Finns Ansage: „in die Datenbank
+      // packen, dass das nie wieder verloren geht") — die Selbstheilung
+      // (echoHedgeGuard) stellt ihn ab jetzt automatisch wieder her, falls
+      // eine Config je davon abweicht (z.B. nach „Account hinzufügen").
+      if(r && r.ok && typeof mt5FleetPcId === 'function'){
+        try{
+          await supabase.from('echo_hedge').upsert({ pc_name: mt5FleetPcId(),
+            hedge_login: login, updated_at: new Date().toISOString() })
+          _echoHedge.wert = login
+          _echoHedge.geladen = Date.now()
+        }catch(_){ console.warn('[echo] echo_hedge-Upsert fehlgeschlagen — sql/2026-08-26_echo_hedge.sql schon ausgeführt?') }
+      }
       // Verknüpfung direkt mit sicherstellen (25.08.2026, Finns Ansage „ich
       // will nicht auswählen"): der Slave im Trade-Plan-Modal hängt an
       // mt5_links[Hedge-Login]. Eindeutiger Treffer über External ID /
