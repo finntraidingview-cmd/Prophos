@@ -6388,6 +6388,9 @@
     if(name === 'trades'){
       const plannedTab = document.querySelector('[data-tradetab="planned"]')
       if(plannedTab && !plannedTab.classList.contains('active')) plannedTab.click()
+      // Duplikium-Live-Lots sofort holen statt bis zu 10s auf den Poller zu warten
+      // (25.08.2026, gehört zur Sektion DUP-ROUTE LIVE-LOTS)
+      if(typeof dupLotsKick === 'function') dupLotsKick()
     }
   }
   // Nur echte Navigations-Buttons (Sidebar + User-Dropdown) — NICHT die View-Sections selbst,
@@ -9386,6 +9389,114 @@
     }catch(_){}
   }, 5000)
   /* ========== ENDE MT5-ROUTE ========== */
+
+  /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
+   * Finns Wunsch: bei laufenden Duplikium-Trades die Lots von Master (Fusion)
+   * und Slave live sehen — das Pendant zu den MASTER/HEDGE-Chips der MT5-Route —
+   * damit sich bei vielen gleichzeitig offenen Orders jede zuordnen lässt.
+   * Duplikium liefert kein Live-P&L (getOpenPositions hat kein profit-Feld),
+   * darum sind die Chips hier reine Lot-Anzeigen. Gleiche Frische-Doktrin wie
+   * mt5LivePnlInner: kein frischer Stand → NICHTS rendern, nie alte Zahlen als
+   * live zeigen. */
+
+  const dupLots = {
+    positions: null,     // letzter getOpenPositions-Stand (Array), nie geraten
+    fetchedAt: 0,
+    inFlight:  false,
+    INTERVAL:  10_000,   // Poll-Takt — app.py cacht Lese-Endpoints 3s (22.07.2026),
+                         // geteilt mit atCheck/Live-Trades → kaum Extra-Last upstream
+    FRESH_MS:  25_000    // 2,5× Intervall; älter gilt als stale und wird geleert
+  }
+
+  // Läuft überhaupt ein Duplikium-Plan? (route='mt5' und Mirror gehören anderen Engines)
+  function dupLotsHasOpenPlan(){
+    let _tp; try { _tp = tradePlans } catch(_){ return false }
+    return (_tp || []).some(p =>
+      p.status === 'open' && p.route !== 'mt5'
+      && !(typeof planMirrorRoute === 'function' && planMirrorRoute(p))
+      && atGetDupId(p.slaveAccountId)
+    )
+  }
+
+  async function dupLotsTick(){
+    if(dupLots.inFlight) return
+    if(!dupState?.token) return
+    if(typeof document !== 'undefined' && document.hidden) return
+    // Nur wenn die Trades-View offen ist — die Chips leben ausschließlich dort
+    if(!document.querySelector('.view[data-view="trades"].active')) return
+    if(!dupLotsHasOpenPlan()) return
+    dupLots.inFlight = true
+    try{
+      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+      if(res.ok){
+        dupLots.positions = res.data?.data || []
+        dupLots.fetchedAt = Date.now()
+        dupLotsRefreshDom()
+      }
+    }catch(_){
+    }finally{ dupLots.inFlight = false }
+  }
+  function dupLotsKick(){ dupLotsTick().catch(() => {}) }
+
+  // Innerer Teil — getrennt vom Wrapper, damit der Ticker die Zahlen im DOM
+  // aktualisieren kann, ohne die ganze Karte neu zu rendern (Muster mt5LivePnlInner).
+  function dupLiveLotsInner(p){
+    try{
+      if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+      if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
+      if(!dupState?.token) return ''
+      if(!Array.isArray(dupLots.positions) || (Date.now() - dupLots.fetchedAt) > dupLots.FRESH_MS) return ''
+      const dupSlaveId  = atGetDupId(p.slaveAccountId)
+      const dupMasterId = atGetDupId(p.masterAccountId)
+      if(!dupSlaveId && !dupMasterId) return ''
+      const masterPos = dupMasterId ? dupLots.positions.filter(x => String(x.account_id) === String(dupMasterId)) : []
+      const slaveAll  = dupSlaveId  ? dupLots.positions.filter(x => String(x.account_id) === String(dupSlaveId))  : []
+      // Attribution bei geteiltem Slave: stempelt Duplikium id_master auf die
+      // kopierte Position, zählen nur die Positionen DIESES Masters (derselbe
+      // Fingerabdruck wie in atCheck) — ohne Stempel ehrlich alle zeigen.
+      const stamped  = dupMasterId ? slaveAll.filter(x => String(x.id_master || x.master_id || x.masterId || '') === String(dupMasterId)) : []
+      const slavePos = stamped.length ? stamped : slaveAll
+      if(!masterPos.length && !slavePos.length) return ''
+      const fmtLots = v => v.toLocaleString('de-DE', { maximumFractionDigits: 2 })
+      const lotsOf  = list => list.reduce((a, x) => a + (Number(x.amountLot) || 0), 0)
+      const tipOf   = list => list.map(x =>
+        `${/sell/i.test(String(x.side)) ? 'SELL' : 'BUY'} ${fmtLots(Number(x.amountLot) || 0)} Lt ${x.symbol || '?'}`
+      ).join(' · ')
+      const chip = (lbl, list) => !list.length ? '' :
+        `<span title="${escapeHtml(tipOf(list))}" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
+        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
+        + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lotsOf(list))} Lt</b>`
+        + (list.length > 1 ? `<span style="font-size:9.5px;color:var(--sub)">· ${list.length} Pos</span>` : '')
+        + `</span>`
+      return `<span class="mono" style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap" title="Live-Lots aus Duplikium">`
+        + chip('MASTER', masterPos)
+        + chip('SLAVE', slavePos)
+        + `</span>`
+    }catch(_){ return '' }
+  }
+  function dupLiveLotsHtml(p){
+    // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
+    // dem ersten Fetch — der Ticker füllt den Platzhalter nach (Muster mt5LivePnlHtml).
+    if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+    if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
+    return `<span data-duplots="${escapeHtml(String(p.id))}">${dupLiveLotsInner(p)}</span>`
+  }
+  function dupLotsRefreshDom(){
+    try{
+      const nodes = document.querySelectorAll('[data-duplots]')
+      if(!nodes.length) return
+      let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+      nodes.forEach(el => {
+        const p = (_tp || []).find(x => String(x.id) === el.getAttribute('data-duplots'))
+        el.innerHTML = p ? dupLiveLotsInner(p) : ''
+      })
+    }catch(_){}
+  }
+  setInterval(() => dupLotsTick().catch(() => {}), dupLots.INTERVAL)
+  // Stale-Wächter: leert die Chips auch ohne neuen Fetch (z.B. nach View-Wechsel),
+  // damit nie alte Lots als live stehen bleiben.
+  setInterval(dupLotsRefreshDom, 5000)
+  /* ========== ENDE DUP-ROUTE LIVE-LOTS ========== */
 
   /* ========== DUPLIKUM SYMBOL-MAPPING + MULTIPLIER HELPERS ==========
    * Bausteine für Auto-Mapping (beim Verknüpfen) und den Trade-Start-Preflight.
@@ -15914,7 +16025,10 @@
         // MT5-Route (15.08.2026): Live-P&L aus dem lokalen Copier — rendert nur
         // bei route==='mt5' UND frischem mtcState, sonst leeren String.
         const mt5Live = (typeof mt5LivePnlHtml === 'function') ? mt5LivePnlHtml(p) : ''
-        metric = mt5Live + (p.startedAt
+        // Duplikium-Route (25.08.2026): Live-Lots Master/Slave — schließt sich
+        // mit der MT5-Zeile gegenseitig aus (je route rendert nur eine).
+        const dupLive = (typeof dupLiveLotsHtml === 'function') ? dupLiveLotsHtml(p) : ''
+        metric = mt5Live + dupLive + (p.startedAt
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
           : `<span class="tc2-timer">live</span>`)
       }
@@ -16098,6 +16212,7 @@
           <span class="tc-live-label">Live getrackt</span>
         </div>
         ${(typeof mt5LivePnlHtml === 'function') ? mt5LivePnlHtml(p) : ''}
+        ${(typeof dupLiveLotsHtml === 'function') ? dupLiveLotsHtml(p) : ''}
         ${startIso ? `<span class="tc-live-timer" data-started="${startIso}">—<span class="tc-live-since"> läuft</span></span>` : ''}
       </div>` : ''
 
