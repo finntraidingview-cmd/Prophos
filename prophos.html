@@ -9386,7 +9386,7 @@
             uid: String(dr.user_id || ''), mail: dr.id,          // Person: Waechter-user_id, sonst E-Mail
             pos: []
           }
-          cloudGrps[key].pos.push({ side: p.side, size: Number(p.amountLot) || 0, symbol: p.symbol || '?', pnl: null, ccy: '' })
+          cloudGrps[key].pos.push({ side: p.side, size: Number(p.amountLot) || 0, symbol: p.symbol || '?', pnl: null, ccy: '', openEpoch: Number(p.open_epoch) || null })
         }
       }
       const ltAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
@@ -9460,6 +9460,24 @@
         const s = String(n || '').replace(/^(master|slave)\s*-\s*\w+\s*-\s*/i, '')
         return s.length > 12 ? '…' + s.slice(-8) : s
       }
+      // „seit 2h 46m" — Laufzeit aus dem Waechter-korrigierten open_epoch
+      // (Duplikium-Uhr ist versetzt, der Waechter kalibriert); fehlt der
+      // Stempel, gibt es KEINE Laufzeit (nie raten — P&L-Beweis-Doktrin).
+      const seitTxt = ep => {
+        if(!ep) return ''
+        const s = Math.max(0, Math.round(jetzt / 1000 - ep))
+        if(s < 60) return 'seit ' + s + 's'
+        const m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24)
+        return 'seit ' + (d ? d + 'd ' + (h % 24) + 'h' : h ? h + 'h ' + (m % 60) + 'm' : m + 'm')
+      }
+      // Eine Zeile pro Trade: links Richtung+Lots+Symbol (mono), daneben das
+      // Konto kurz (voll im Tooltip), rechts die Laufzeit.
+      const tradeRow = (posHtml, titelRoh, accHtml, seit) =>
+        `<div style="display:flex;gap:8px;align-items:baseline;font-size:12px;padding:1.5px 0">`
+        + `<span style="font-family:var(--mono)">${posHtml}</span>`
+        + `<span style="color:var(--sub);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(titelRoh)}">${accHtml}</span>`
+        + `<span style="margin-left:auto;color:var(--sub);font-size:10.5px;flex-shrink:0">${seit}</span>`
+        + `</div>`
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
       for(const r of rows){
         const s = r.status || {}
@@ -9485,9 +9503,12 @@
           ? Number(s.master_equity) - Number(s.master_balance) : null
         for(const p of pos){
           const hv = hedgeLots(p.ident)
-          z.frag.push(`${p.type === 0 ? 'BUY' : 'SELL'} <b>${Number(p.volume).toFixed(2)}</b> ${esc(p.symbol)}`
-            + (hv ? ` <span style="color:var(--sub)">→ H ${hv.toFixed(2)}</span>` : '')
-            + ` <span style="color:var(--sub);font-size:10.5px" title="Echo · ${esc(r.instance)} · Master ${esc(r.master_login)} · Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}">(${esc(r.instance)}${mPL != null ? ` · ${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}` : ''})</span>`)
+          z.frag.push(tradeRow(
+            `${p.type === 0 ? 'BUY' : 'SELL'} <b>${Number(p.volume).toFixed(2)}</b> ${esc(p.symbol)}`
+              + (hv ? ` <span style="color:var(--sub)">→ H ${hv.toFixed(2)}</span>` : ''),
+            `Echo · ${r.instance} · Master ${r.master_login} · Hedge ${r.hedge_login} · ${r.pc_name}`,
+            `${esc(r.instance)} · Echo${mPL != null ? ` · <span style="color:${mPL >= 0 ? '#12B76A' : '#F04438'}">${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}</span>` : ''}`,
+            ''))
         }
         if(waisen.length) z.alarm.push(`<div style="font-size:11.5px;margin-top:3px;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
           + waisen.map(([k, v]) => v.map(h =>
@@ -9507,20 +9528,21 @@
       const loginBei = {}
       for(const g of cloud) if(g.src === 'dup' && g.login)
         (loginBei[g.login] = loginBei[g.login] || new Set()).add(rowKey.get(g))
-      const geteilt = new Map()   // login → {posHtml, frisch, alterS}
+      const geteilt = new Map()   // login → {rowsHtml, frisch, alterS}
       for(const g of cloud){
         const frisch = g.alterS <= g.frischGrenzeS   // dup: 75s (Waechter-Takt), tsx: 20s
-        const posHtml = g.pos.map(p =>
-          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} <b>${Number(p.size || 0).toFixed(2)}</b> ${esc(String(p.symbol))}`).join(' · ')
+        const posRows = g.pos.map(p => tradeRow(
+          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} <b>${Number(p.size || 0).toFixed(2)}</b> ${esc(String(p.symbol))}`
+            + (p.pnl != null ? ` <span style="color:${Number(p.pnl) >= 0 ? '#12B76A' : '#F04438'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)} ${esc(String(p.ccy || ''))}</span>` : ''),
+          String(g.accountName),
+          `${esc(kurzAcc(g.accountName))}${g.src === 'tsx' ? ' · TSX' : ''}`,
+          seitTxt(p.openEpoch)))
         if(g.src === 'dup' && g.login && loginBei[g.login] && loginBei[g.login].size > 1){
-          if(!geteilt.has(g.login)) geteilt.set(g.login, { posHtml, frisch, alterS: g.alterS })
+          if(!geteilt.has(g.login)) geteilt.set(g.login, { rowsHtml: posRows.join(''), frisch, alterS: g.alterS })
           continue
         }
         const z = zeile(rowKey.get(g))
-        const hatPnl = g.pos.some(p => p.pnl != null)
-        const pnlSum = g.pos.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0)
-        z.frag.push(posHtml
-          + ` <span style="color:var(--sub);font-size:10.5px" title="${esc(String(g.accountName))}">(${esc(kurzAcc(g.accountName))}${g.src === 'tsx' ? ' · TSX' : ''}${hatPnl ? ` · ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(0)} ${esc(String(g.pos[0].ccy || ''))}` : ''})</span>`)
+        z.frag.push(...posRows)
         altern(z, frisch, g.alterS)
       }
 
@@ -9532,21 +9554,25 @@
         a === meUid ? -1 : b === meUid ? 1 :
         personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
       let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;margin-bottom:6px">FLOTTE — ALLE PERSONEN</div>`
-        + '<div style="display:flex;flex-direction:column;gap:4px">'
+        + '<div style="display:flex;flex-direction:column;gap:8px">'
       for(const k of reihenfolge){
         const pers = personen.get(k), z = zeilen.get(k)
         const eigene = k === meUid
-        html += `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:8px;padding:6px 10px;${z.frisch ? '' : 'opacity:.55'}${eigene ? 'background:var(--surface);' : ''}">`
-          + `<div style="min-width:0"><span style="font-size:12.5px;font-weight:${eigene ? 700 : 600};color:${pers.farbe}">${esc(pers.name)}</span>`
-          + ` <span style="font-size:12px;font-family:var(--mono)">${z.frag.join(' <span style="color:var(--border)">|</span> ')}</span>`
+        html += `<div style="border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:8px;padding:7px 10px;${z.frisch ? '' : 'opacity:.55'}${eigene ? 'background:var(--surface);' : ''}">`
+          + `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">`
+          + `<span style="font-size:12.5px;font-weight:${eigene ? 700 : 600};color:${pers.farbe}">${esc(pers.name)}</span>`
+          + `<span style="font-size:10.5px;color:var(--sub)">${z.frisch ? 'live' : 'vor ' + z.alterS + 's'}</span></div>`
+          + z.frag.join('')
           + z.alarm.join('')
-          + `</div><span style="font-size:10.5px;color:var(--sub);flex-shrink:0">${z.frisch ? 'live' : 'vor ' + z.alterS + 's'}</span></div>`
+          + `</div>`
       }
       for(const [login, gh] of geteilt){
-        html += `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;border:1px dashed var(--border);border-radius:8px;padding:6px 10px;${gh.frisch ? '' : 'opacity:.55'}">`
-          + `<div style="min-width:0"><span style="font-size:12px;font-weight:600;color:var(--sub)">Hedge ${esc(login)} <span style="font-weight:400">(geteilt)</span></span>`
-          + ` <span style="font-size:12px;font-family:var(--mono)">${gh.posHtml}</span></div>`
-          + `<span style="font-size:10.5px;color:var(--sub);flex-shrink:0">${gh.frisch ? 'live' : 'vor ' + gh.alterS + 's'}</span></div>`
+        html += `<div style="border:1px dashed var(--border);border-radius:8px;padding:7px 10px;${gh.frisch ? '' : 'opacity:.55'}">`
+          + `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">`
+          + `<span style="font-size:12px;font-weight:600;color:var(--sub)">Hedge ${esc(login)} <span style="font-weight:400">(geteilt)</span></span>`
+          + `<span style="font-size:10.5px;color:var(--sub)">${gh.frisch ? 'live' : 'vor ' + gh.alterS + 's'}</span></div>`
+          + gh.rowsHtml
+          + `</div>`
       }
       html += '</div>'
       box.innerHTML = html

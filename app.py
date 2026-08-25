@@ -2308,6 +2308,20 @@ def _wt_memo_positions_locked(email, creds, memo):
     # der Spiegel darf die Erkennung nie ausbremsen.
     if isinstance(positions, list):
         try:
+            # Laufzeit-Anzeige in der Flotte (25.08.2026 nachts, Finns Wunsch
+            # "wie lange laeuft der schon"): openTime ist Duplikums NAIVE
+            # Serverzeit — erst der kalibrierte Uhr-Offset (_dup_clock) macht
+            # daraus echte Epoch-Sekunden. Ohne Kalibrierung KEIN open_epoch,
+            # das Frontend laesst die Laufzeit dann weg (nie raten).
+            off = _dup_clock.get("offset")
+            if off is not None:
+                for p in positions:
+                    ot = _wt_parse_ts(p.get("openTime"))
+                    if ot is not None:
+                        p["open_epoch"] = int(ot - off)
+        except Exception:
+            pass
+        try:
             sb_upsert("dup_live", {
                 "id": email,
                 "positions": positions,
