@@ -5352,6 +5352,8 @@
                   <th>Chain</th>
                   <th>Adresse</th>
                   <th class="adm-num">USDT</th>
+                  <th class="adm-num">Coin</th>
+                  <th class="adm-num">Gesamt</th>
                   <th></th>
                 </tr></thead>
                 <tbody id="wal-rows"></tbody>
@@ -5362,7 +5364,8 @@
 
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
             Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
-            Balances kommen live von den Chains (USDT auf Arbitrum, Polygon, Solana, Tron) direkt aus dem Browser, ohne API-Key.
+            Balances kommen live von den Chains (USDT + Chain-Coin, also ETH/POL/SOL/TRX) direkt aus dem Browser, ohne API-Key;
+            die Coin-Kurse zum Umrechnen in USDT liefert Binance (Fallback: CoinGecko). Alle Summen sind in USDT.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
           </p>
         </div>
@@ -6850,6 +6853,7 @@
      * Upsert beim Laden), weil Arbitrum/Solana-History sonst einen Key bräuchte. */
     const WAL_CHAINS = {
       arbitrum: { label:'Arbitrum', col:'#3b82f6', evm:true,
+                  coin:'ETH', px:'ETHUSDT', gecko:'ethereum',
                   usdt:'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',   // USDT (Arbitrum One), 6 Dezimalstellen
                   rpc:'https://arb1.arbitrum.io/rpc',
                   explorer: a => 'https://arbiscan.io/address/' + a,
@@ -6859,6 +6863,7 @@
       // RPC + USDT-Contract. publicnode zuerst — derselbe keyless Anbieter, der
       // bei Solana schon die Browser-Blockade des offiziellen RPCs umging.
       polygon:  { label:'Polygon', col:'#8247e5', evm:true,
+                  coin:'POL', px:'POLUSDT', gecko:'polygon-ecosystem-token',
                   usdt:'0xc2132D05D31c914a87C6611C10748AEb04B58e8F',   // USDT (PoS), 6 Dezimalstellen
                   rpc:'https://polygon-bor-rpc.publicnode.com',
                   rpcFallback:'https://polygon-rpc.com',
@@ -6866,6 +6871,7 @@
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
       solana:   { label:'Solana', col:'#14f195',
+                  coin:'SOL', px:'SOLUSDT', gecko:'solana',
                   mint:'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  // USDT-Mint (SPL), 6 Dezimalstellen
                   // Der offizielle mainnet-beta-RPC blockt Browser-Anfragen (403 "Access
                   // forbidden", beim Bauen am 24.08.2026 live gesehen) — publicnode ist
@@ -6876,6 +6882,7 @@
                   valid: a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
                   hint:'Base58 (32–44 Zeichen)' },
       tron:     { label:'Tron', col:'#ef4444',
+                  coin:'TRX', px:'TRXUSDT', gecko:'tron',
                   usdt:'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',            // USDT (TRC-20), 6 Dezimalstellen
                   api:'https://api.trongrid.io',
                   explorer: a => 'https://tronscan.org/#/address/' + a,
@@ -6883,8 +6890,9 @@
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
-    const walBal = new Map()   // wallet.id → { usdt:Number|null, err:String|null }
+    const walBal = new Map()   // wallet.id → { usdt, coin, coinUsdt:Number|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+    const coinNf = new Intl.NumberFormat('de-DE', { maximumFractionDigits:4 })   // Coin-Mengen: „0,0042" ETH
 
     function walOpen(){
       if(walOpened){ return }
@@ -6896,7 +6904,7 @@
       try{
         const [w, s] = await Promise.all([
           supabase.from('id_wallets').select('*').order('person_name').order('chain'),
-          supabase.from('wallet_snapshots').select('wallet_id,day,usdt').order('day')
+          supabase.from('wallet_snapshots').select('wallet_id,day,usdt,coin_usdt').order('day')
         ])
         if(w.error) throw w.error
         if(s.error) throw s.error
@@ -6912,50 +6920,76 @@
       }
     }
 
-    // Eine Wallet live von ihrer Chain lesen — gibt den USDT-Bestand zurück.
+    // JSON-RPC-POST mit rpc→rpcFallback-Kette — gemeinsam für EVM- und Solana-Chains.
+    async function walRpc(c, method, params){
+      const body = JSON.stringify({ jsonrpc:'2.0', id:1, method, params })
+      let d = null
+      for(const rpc of [c.rpc, c.rpcFallback].filter(Boolean)){
+        try{
+          const r = await fetch(rpc, { method:'POST', headers:{ 'Content-Type':'application/json' }, body })
+          d = await r.json()
+          if(!d.error) break
+        }catch(e){ d = { error:{ message: e.message || 'RPC nicht erreichbar' } } }
+      }
+      if(!d || d.error) throw new Error(d?.error?.message || 'RPC-Fehler')
+      return d.result
+    }
+
+    /* Kurse der Chain-Coins in USDT (25.08.2026): einmal pro Refresh von Binance
+     * (öffentlicher Ticker, CORS-offen, keyless), Fallback CoinGecko (USD ≈ USDT).
+     * Ohne Kurs zählt der Coin NICHT in die Summen — lieber zu wenig als geraten. */
+    const walPx = {}   // 'ETHUSDT' → Kurs
+    async function walFetchPrices(){
+      const syms = [...new Set(Object.values(WAL_CHAINS).map(c => c.px))]
+      try{
+        const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbols=' + encodeURIComponent(JSON.stringify(syms)))
+        const d = await r.json()
+        if(!Array.isArray(d)) throw new Error(d?.msg || 'Binance-Fehler')
+        for(const t of d){ walPx[t.symbol] = Number(t.price) || 0 }
+      }catch(e){
+        try{
+          const ids = [...new Set(Object.values(WAL_CHAINS).map(c => c.gecko))].join(',')
+          const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=usd')
+          const d = await r.json()
+          for(const c of Object.values(WAL_CHAINS)){ walPx[c.px] = Number(d?.[c.gecko]?.usd) || walPx[c.px] || 0 }
+        }catch(e2){ console.warn('[wallet] Coin-Kurse nicht ladbar:', e2.message || e2) }
+      }
+    }
+
+    // Eine Wallet live von ihrer Chain lesen — USDT-Bestand + nativer Chain-Coin.
     async function walFetchBalance(w){
       const c = WAL_CHAINS[w.chain]
       if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
       if(c.evm){
-        // balanceOf(address) per eth_call gegen den USDT-Contract — ein Pfad für
+        // USDT per balanceOf-eth_call, Coin per eth_getBalance — ein Pfad für
         // alle EVM-Chains (Arbitrum, Polygon), nur RPC + Contract unterscheiden sich.
         const data = '0x70a08231' + w.address.slice(2).toLowerCase().padStart(64, '0')
-        const body = JSON.stringify({ jsonrpc:'2.0', id:1, method:'eth_call', params:[{ to:c.usdt, data }, 'latest'] })
-        let d = null
-        for(const rpc of [c.rpc, c.rpcFallback].filter(Boolean)){
-          try{
-            const r = await fetch(rpc, { method:'POST', headers:{ 'Content-Type':'application/json' }, body })
-            d = await r.json()
-            if(!d.error) break
-          }catch(e){ d = { error:{ message: e.message || 'RPC nicht erreichbar' } } }
-        }
-        if(!d || d.error) throw new Error(d?.error?.message || 'RPC-Fehler')
-        return (parseInt(d.result || '0x0', 16) || 0) / 1e6
+        const [tok, nat] = await Promise.all([
+          walRpc(c, 'eth_call', [{ to:c.usdt, data }, 'latest']),
+          walRpc(c, 'eth_getBalance', [w.address, 'latest'])
+        ])
+        return { usdt:(parseInt(tok || '0x0', 16) || 0) / 1e6,
+                 coin:(parseInt(nat || '0x0', 16) || 0) / 1e18 }
       }
       if(w.chain === 'solana'){
-        // Summe über alle Token-Accounts des Owners mit dem USDT-Mint
-        const body = JSON.stringify({ jsonrpc:'2.0', id:1, method:'getTokenAccountsByOwner',
-          params:[w.address, { mint:c.mint }, { encoding:'jsonParsed' }] })
-        let d = null
-        for(const rpc of [c.rpc, c.rpcFallback]){
-          try{
-            const r = await fetch(rpc, { method:'POST', headers:{ 'Content-Type':'application/json' }, body })
-            d = await r.json()
-            if(!d.error) break
-          }catch(e){ d = { error:{ message: e.message || 'RPC nicht erreichbar' } } }
-        }
-        if(!d || d.error) throw new Error(d?.error?.message || 'RPC-Fehler')
-        return (d.result?.value || []).reduce((a, x) =>
-          a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0)
+        // USDT: Summe über alle Token-Accounts des Owners; SOL: getBalance (Lamports)
+        const [tok, nat] = await Promise.all([
+          walRpc(c, 'getTokenAccountsByOwner', [w.address, { mint:c.mint }, { encoding:'jsonParsed' }]),
+          walRpc(c, 'getBalance', [w.address])
+        ])
+        return { usdt:(tok?.value || []).reduce((a, x) =>
+                   a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0),
+                 coin:(Number(nat?.value) || 0) / 1e9 }
       }
-      // Tron: Account-Endpoint liefert alle TRC-20-Bestände als { contract: "rohwert" }
+      // Tron: Account-Endpoint liefert TRC-20-Bestände + TRX (balance, in SUN) in einer Antwort
       const r = await fetch(c.api + '/v1/accounts/' + w.address)
       const d = await r.json()
       if(d.success === false) throw new Error(d.error || 'TronGrid-Fehler')
       const acc = (d.data || [])[0]
-      if(!acc) return 0   // nie benutzte Tron-Adresse ist on-chain noch nicht "aktiviert" → Bestand 0
-      for(const t of (acc.trc20 || [])){ if(t[c.usdt] != null) return Number(t[c.usdt]) / 1e6 }
-      return 0
+      if(!acc) return { usdt:0, coin:0 }   // nie benutzte Tron-Adresse ist on-chain noch nicht "aktiviert"
+      let usdt = 0
+      for(const t of (acc.trc20 || [])){ if(t[c.usdt] != null){ usdt = Number(t[c.usdt]) / 1e6; break } }
+      return { usdt, coin:(Number(acc.balance) || 0) / 1e6 }
     }
 
     // Alle Balances ziehen + Tages-Snapshot upserten (1 Zeile pro Wallet und Tag).
@@ -6963,23 +6997,27 @@
       const msgEl = $('wal-msg')
       if(!wallets.length){ msgEl.textContent = ''; return }
       msgEl.textContent = 'Lade Balances…'
+      await walFetchPrices()
       let fail = 0
       await Promise.all(wallets.map(async w => {
         try{
           const b = await walFetchBalance(w)
-          walBal.set(w.id, { usdt:b, err:null })
+          const px = walPx[WAL_CHAINS[w.chain].px]
+          const coinUsdt = px ? b.coin * px : null   // ohne Kurs nicht raten
+          walBal.set(w.id, { usdt:b.usdt, coin:b.coin, coinUsdt, err:null })
           await supabase.from('wallet_snapshots').upsert(
-            { wallet_id:w.id, day:new Date().toISOString().slice(0,10), usdt:b, taken_at:new Date().toISOString() },
+            { wallet_id:w.id, day:new Date().toISOString().slice(0,10), usdt:b.usdt,
+              coin_amount:b.coin, coin_usdt:coinUsdt ?? 0, taken_at:new Date().toISOString() },
             { onConflict:'wallet_id,day' })
         }catch(e){
-          walBal.set(w.id, { usdt:null, err:(e.message || String(e)) })
+          walBal.set(w.id, { usdt:null, coin:null, coinUsdt:null, err:(e.message || String(e)) })
           fail++
         }
         walRender()   // jede fertige Wallet sofort zeigen statt auf die langsamste zu warten
       }))
       msgEl.textContent = fail ? `${wallets.length - fail} von ${wallets.length} Wallets geladen` : 'Stand: gerade eben'
       // Snapshots neu lesen, damit der heutige Punkt direkt im Verlauf auftaucht
-      const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt').order('day')
+      const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt,coin_usdt').order('day')
       if(data){ walSnaps = data; walRender() }
     }
 
@@ -7004,8 +7042,8 @@
       $('wal-person-names').innerHTML = [...sugg].sort((a, b) => a.localeCompare(b, 'de'))
         .map(n => `<option value="${escapeHtml(n)}">`).join('')
 
-      // KPIs
-      const bal = w => walBal.get(w.id)?.usdt
+      // KPIs — "Wert" einer Wallet ist USDT + Chain-Coin umgerechnet (seit 25.08.2026)
+      const bal = w => { const b = walBal.get(w.id); return b?.usdt != null ? b.usdt + (b.coinUsdt || 0) : null }
       const sum = ch => rows.reduce((a, w) => (!ch || w.chain === ch) ? a + (bal(w) ?? 0) : a, 0)
       const loaded = rows.some(w => bal(w) != null)
       $('wal-k-total').textContent = loaded ? walNf.format(sum()) : '–'
@@ -7072,6 +7110,8 @@
           `<td><button type="button" class="wal-addr" data-full="${escapeHtml(w.address)}" title="${escapeHtml(w.address)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
           ` <a href="${c.explorer(w.address)}" target="_blank" rel="noopener" title="Im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
           `<td class="adm-num">${b?.usdt != null ? walNf.format(b.usdt) : (b?.err ? '<span title="' + escapeHtml(b.err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
+          `<td class="adm-num">${b?.coin != null ? coinNf.format(b.coin) + ' ' + c.coin + ' <span style="color:var(--sub)">≈ ' + (b.coinUsdt != null ? walNf.format(b.coinUsdt) : '–') + '</span>' : '–'}</td>` +
+          `<td class="adm-num" style="font-weight:650">${b?.usdt != null ? walNf.format(b.usdt + (b.coinUsdt || 0)) : '–'}</td>` +
           `<td style="text-align:right"><button type="button" class="wal-del" data-id="${w.id}" title="Wallet entfernen" style="border:none;background:none;color:var(--sub);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px">×</button></td>`
         tr.querySelector('.wal-td-person').textContent = w.person_name
         tb.appendChild(tr)
@@ -7094,7 +7134,7 @@
       const perWallet = new Map()
       for(const s of snaps){
         const m = perWallet.get(s.wallet_id) || new Map()
-        m.set(s.day, Number(s.usdt) || 0)
+        m.set(s.day, (Number(s.usdt) || 0) + (Number(s.coin_usdt) || 0))
         perWallet.set(s.wallet_id, m)
       }
       const last = new Map()
