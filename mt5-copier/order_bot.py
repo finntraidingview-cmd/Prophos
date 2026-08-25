@@ -1197,6 +1197,17 @@ def run(cfg_path, cmd):
         return {"ok": False, "retry_ok": True,
                 "msg": "pywinauto fehlt — einmal 'Alles neu starten' klicken "
                        "(das Panel installiert es dann selbst)."}
+    # Flotte UIA-Timings (25.08.2026, Finns '3-5 s Pause zwischen den Steps'):
+    # pywinautos Default wartet bei jedem ins Leere laufenden Element-Lookup
+    # volle 5 s (window_find_timeout) — in einer Abfolge mit try/except-Pfaden
+    # summiert sich das zu Kunstpausen. Der Dialog ist zu diesem Zeitpunkt
+    # laengst da; 1 s Puffer reicht, die harten Abbruch-Checks bleiben.
+    try:
+        from pywinauto.timings import Timings
+        Timings.window_find_timeout = 1.0
+        Timings.exists_timeout = 0.3
+    except Exception:
+        pass
 
     symbol = str(cmd["symbol"]).strip()
     kauf = str(cmd["richtung"]).lower() == "buy"
@@ -1271,15 +1282,21 @@ def run(cfg_path, cmd):
         # IMMER aktiv auswaehlen (18.08.2026, Finns Ansage: der Bot geht
         # sichtbar ins Asset-Feld und waehlt selbst — nicht nur nachschauen,
         # was das Chart-Profil vorgibt). Bestaetigt wird trotzdem per Lesen.
+        # Exakter Direkt-Select ZUERST (25.08.2026, Finns Tempo-Fund: das
+        # fruehere sym_combo.texts() enumerierte IMMER die komplette
+        # Marktuebersicht per UIA — bei 250 Symbolen die '5 s Pause' vor der
+        # Asset-Auswahl). Die Listen-Suche ist nur noch Fallback fuer
+        # Broker-Suffixe (z.B. 'NAS100.r').
         try:
-            for opt in sym_combo.texts():
-                if symbol.lower() in (opt or "").lower():
-                    sym_combo.select(opt)
-                    break
-            else:
-                sym_combo.select(symbol)
+            sym_combo.select(symbol)
         except Exception:
-            pass
+            try:
+                for opt in sym_combo.texts():
+                    if symbol.lower() in (opt or "").lower():
+                        sym_combo.select(opt)
+                        break
+            except Exception:
+                pass
         time.sleep(0.15)
         gewaehlt = _symbol_drin()
         if not gewaehlt:
@@ -1299,7 +1316,7 @@ def run(cfg_path, cmd):
             raise RuntimeError(f"Symbol '{symbol}' steht nicht bestaetigt im Dialog "
                                f"(gelesen: '{(_feld_lesen(sym_combo) or '')[:40]}') — "
                                f"Abbruch, sonst ginge die Order aufs falsche Symbol.")
-        time.sleep(0.3)
+        time.sleep(0.1)
         # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
         # Fill-Kurs (Finns Timing-Loesung). Feld nach Beschriftung, sonst
         # Index-Fallback. ECHT tippen statt set_text (18.08.2026, Finns Fund am
@@ -1347,7 +1364,7 @@ def run(cfg_path, cmd):
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
                        f"Knoepfe: {', '.join(inventar) or 'keine'} [" + " → ".join(trail) + "]"}
     try:
-        r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y)
+        r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
     except Exception:
         pass
 
