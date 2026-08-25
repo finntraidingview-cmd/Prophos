@@ -106,7 +106,21 @@ def write_status(path, data):
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
+        # os.replace mit Retry (25.08.2026, Finns Live-Log: sporadischer
+        # WinError 5): Windows verweigert das Ersetzen, solange ein Leser die
+        # Zieldatei offen hat — Panel UND Prophos pollen die Status-Dateien
+        # alle ~3 s, die Kollision ist also normal und IMMER transient
+        # (Lesevorgang < 1 ms). Ohne Retry fiel der ganze Write aus, die Karte
+        # wurde 3 s blind und die Bot-Freigabe (alive-Check) verzoegerte sich.
+        last = None
+        for _ in range(5):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError as e:
+                last = e
+                time.sleep(0.05)
+        raise last
     except Exception as e:
         print(f"[status] konnte {os.path.basename(path)} nicht schreiben: {type(e).__name__}: {e}", flush=True)
 
