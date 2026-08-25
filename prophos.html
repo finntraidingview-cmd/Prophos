@@ -2256,6 +2256,12 @@
   #dashboard-view .mtc-warn{background:rgba(247,144,9,.1);border:1px solid rgba(247,144,9,.35);
     color:#b45309;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
   #dashboard-view .mtc-standby{color:var(--sub);font-size:12px;margin-top:10px}
+  /* Kompakte Status-Chips (25.08.2026, Finns Wunsch: bei 20 Konten keine
+     orangen Textwaende — kleines Feld, Volltext als Tooltip/in den Details) */
+  #dashboard-view .mtc-chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  #dashboard-view .mtc-chip{display:inline-flex;align-items:center;font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:20px;cursor:help;white-space:nowrap}
+  #dashboard-view .mtc-chip.ok{background:rgba(18,183,106,.12);color:#0d9668}
+  #dashboard-view .mtc-chip.warn{background:rgba(247,144,9,.14);color:#d97706}
   #dashboard-view .mtc-details{display:none;border-top:1px solid var(--border-soft);margin-top:14px;padding-top:13px}
   #dashboard-view .mtc-card.open .mtc-details{display:block}
   #dashboard-view .mtc-details label{display:block;font-size:11px;font-weight:600;color:var(--sub);
@@ -22945,6 +22951,38 @@
         <span>→</span><input data-mtcv placeholder="Hedge-Symbol"><span></span></div>`
   }
 
+  /* Kompakter Status-Chip statt langer Warn-Texte (25.08.2026, Finns Wunsch:
+   * „Terminal zu" / „Terminal offen" als kleines Feld — der komplette
+   * Fehlertext haengt als Tooltip am Chip und steht in den Details, damit
+   * die Ansicht bei vielen Konten nicht zutextet). Kein Chip bei
+   * gestopptem Copier — das sagt die Status-Zeile daneben schon. */
+  function mtcStatusChip(d){
+    const s = d.status || {}, live = d.alive
+    const standby = live && !!s.standby
+    const chip = (cls, lbl, tip) =>
+      `<span class="mtc-chip ${cls}"${tip ? ` title="${esc(tip)}"` : ''}>${lbl}</span>`
+    let out = ''
+    if(live && standby){
+      out += chip('warn', 'Terminal zu', 'Master-Terminal ist zu — Karte wird aktiv, sobald der Trade-Start es öffnet.')
+    } else if(live && s.note){
+      const n = String(s.note)
+      const lbl = /FALSCHEN Konto/i.test(n) ? 'Falsches Konto'
+        : /eingefroren/i.test(n) ? 'EA prüfen'
+        : /warte auf Snapshot/i.test(n) ? 'Kein Snapshot'
+        : /Neustart/i.test(n) ? 'Neustart …'
+        : 'Problem'
+      out += chip('warn', lbl, n)
+    } else if(live){
+      out += chip('ok', 'Terminal offen', 'Master-Terminal offen, Snapshot frisch — bereit zu traden.')
+    }
+    const bl = s.blocked || []
+    if(bl.length){
+      out += chip('warn', `✋ ${bl.length} gesperrt`,
+        `Keine neuen Hedges für Master-Pos: ${bl.join(', ')} (Mehrfach-Hedge-Schutz oder Hand-Close)`)
+    }
+    return out ? `<div class="mtc-chips">${out}</div>` : ''
+  }
+
   function card(d){
     const s = d.status || {}, live = d.alive
     // Standby statt Dauer-Warnung (25.08.2026, Finns Einwand: Master-Terminals
@@ -22958,12 +22996,10 @@
     const isOpen = mtcOpen.has(d.file)
     return `<div class="mtc-card${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
       <div class="mtc-top"><span class="mtc-name">${esc(d.display_name || d.name)}</span>
-        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? (standby ? 'Standby' : (s.note ? 'läuft' : 'aktiv')) : 'gestoppt'}</span></div>
+        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span></div>
       <div class="mtc-broker"><b>${esc(broker)}</b></div>
       <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
-      ${s.note && !standby ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
-      ${standby ? `<div class="mtc-standby">Master-Terminal zu — Karte wird aktiv, sobald der Trade-Start es öffnet</div>` : ''}
-      ${(s.blocked || []).length ? `<div class="mtc-warn">Keine neuen Hedges für Master-Pos: ${esc((s.blocked||[]).join(', '))} (Mehrfach-Hedge-Schutz oder Hand-Close)</div>` : ''}
+      ${mtcStatusChip(d)}
       <div class="mtc-stats">
         <div class="mtc-stat${pos ? ' hot' : ''}"><b>${pos}</b><span>Positionen</span></div>
         <div class="mtc-stat${hed ? ' hot' : ''}"><b>${hed}</b><span>Hedges</span></div>
@@ -22984,6 +23020,8 @@
           <button class="btn btn-primary" style="padding:6px 11px;font-size:12px" data-mtcsave type="button">Speichern &amp; pushen</button>
           ${d.has_terminal ? `<button class="btn btn-ghost" style="padding:6px 11px;font-size:12px" data-mtcterm type="button">Terminal öffnen</button>` : ''}
         </div>
+        ${s.note ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
+        ${(s.blocked || []).length ? `<div class="mtc-warn">Keine neuen Hedges für Master-Pos: ${esc((s.blocked||[]).join(', '))} (Mehrfach-Hedge-Schutz oder Hand-Close)</div>` : ''}
         <div style="font-size:11px;color:var(--sub-2);margin-top:8px">${esc(d.file)} · magic ${esc(d.magic)} · ${esc(d.snapshot_file || '')}</div>
         <pre class="mtc-log">${esc((s.log || []).slice(-14).join('\n') || 'noch keine Log-Zeilen')}</pre>
       </div>
@@ -23081,18 +23119,15 @@
     const standby = live && !!s.standby
     const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
     const broker = s.master_server || d.master_server || '—'
-    const warn = (s.note && !standby) ? `<div style="font-size:11px;color:#d97706;margin-top:3px;max-width:340px">${esc(s.note)}</div>` : ''
-    const blocked = (s.blocked || []).length
-      ? `<div style="font-size:11px;color:#d97706;margin-top:3px">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))}</div>` : ''
     return `<tr>
       <td style="padding-left:20px">
         <div style="font-weight:600;color:var(--ink)">${esc(d.display_name || d.name)}</div>
         <div style="font-size:11px;color:var(--sub);margin-top:2px;font-family:var(--mono)">${esc(s.master_login || d.master_expected || '—')} → Hedge ${esc(s.hedge_login || d.hedge_expected || '—')}</div>
-        ${warn}${blocked}
+        ${mtcStatusChip(d)}
       </td>
       <td>${esc(broker)}</td>
       <td>
-        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? (standby ? 'Standby' : (s.note ? 'läuft' : 'aktiv')) : 'gestoppt'}</span>
+        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span>
         ${(pos || hed) ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">${pos} Position(en) · ${hed} Hedge(s)</div>` : ''}
       </td>
       <td><span class="mono">×${esc(d.multiplier ?? '–')}</span></td>
