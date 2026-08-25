@@ -9365,54 +9365,12 @@
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
 
-      // Duplikium kommt seit 25.08.2026 abends aus der DB (dup_live, Waechter-
-      // Spiegel, ~30s-Takt) statt aus dem Browser-Aggregator: der brauchte den
-      // localStorage-Duplikium-Token, der per 401 starb und alle Zeilen mitriss.
-      // Finns Architektur-Ansage: Railway schreibt in die DB, alle User lesen.
-      // TopstepX bleibt Aggregator-Sache (per-Origin-Verbindung); MetaApi-
-      // Zeilen sind raus — dieselben Konten stehen als Slaves in dup_live.
-      const cloudGrps = {}
-      for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
-        const accById = {}
-        for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
-        const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
-        for(const p of (Array.isArray(dr.positions) ? dr.positions : [])){
-          const acc = accById[String(p.account_id)] || {}
-          const key = 'dup::' + p.account_id
-          if(!cloudGrps[key]) cloudGrps[key] = {
-            src: 'dup', accountId: p.account_id,
-            accountName: acc.name || acc.login || ('Dup-' + p.account_id),
-            login: acc.login || '', alterS, frischGrenzeS: 75,   // 2,5× Waechter-Takt
-            uid: String(dr.user_id || ''), mail: dr.id,          // Person: Waechter-user_id, sonst E-Mail
-            pos: []
-          }
-          cloudGrps[key].pos.push({ side: p.side, size: Number(p.amountLot) || 0, symbol: p.symbol || '?', pnl: null, ccy: '', openEpoch: Number(p.open_epoch) || null })
-        }
-      }
-      const ltAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
-      for(const p of (ltState.positions.tsx || [])){
-        const key = 'tsx::' + p.accountId
-        if(!cloudGrps[key]) cloudGrps[key] = {
-          src: 'tsx', accountId: p.accountId, accountName: p.accountName,
-          login: '', alterS: ltAlterS == null ? 9999 : ltAlterS, frischGrenzeS: 20, pos: []
-        }
-        cloudGrps[key].pos.push(p)
-      }
-      const cloud = Object.values(cloudGrps).sort((a, b) => String(a.accountName).localeCompare(String(b.accountName)))
+      // Duplikium kommt aus der DB (dup_live, Waechter-Spiegel ~30s): Railway
+      // schreibt, alle User lesen — kein Browser-Token noetig. TopstepX bleibt
+      // Aggregator-Sache (per-Origin); MetaApi-Zeilen sind raus (Dubletten der
+      // dup_live-Slaves).
+      fleetPersonen()   // nicht awaited — nur Fallback fuer alte Echo-Zeilen
 
-      if(!rows.length && !cloud.length){ box.style.display = 'none'; return }
-
-      // Bewusst NICHT awaited: nur noch Fallback-Aufloesung fuer alte
-      // Echo-Zeilen ohne user_id — darf den Render nie aufhalten (26.08.-Fund).
-      fleetPersonen()
-
-      /* ── Gruppierung pro PERSON (25.08.2026 spaetabends, Finns Layout-
-       * Ansage): Chips = NUR Personen, eine Farbe pro Person. Oben stehen die
-       * Trades der EIGENEN ID (bzw. der angeklickten Person), darunter alle
-       * anderen. Personen-Schluessel: dup_live traegt die user_id vom Waechter
-       * (aus duplikum_credentials), Echo-Zeilen die des pushenden Browsers im
-       * status; alte Zeilen fallen auf Login-Aufloesung oder E-Mail/PC-Name
-       * zurueck — nie raten. */
       let meUid = ''
       try { meUid = String(((((await supabase.auth.getSession()).data || {}).session || {}).user || {}).id || '') } catch(_){}
       const profName = new Map()
@@ -9425,156 +9383,170 @@
         if(!personen.has(key)) personen.set(key, { name, farbe: mt5FleetFarbe(key) })
         return key
       }
-      const rowKey = new Map()     // Zeile/Gruppe → Personen-Key
-      for(const r of rows){
-        const uid = String(((r.status || {}).user_id) || '')
-        if(uid) rowKey.set(r, merken(uid, profName.get(uid) || 'ID ' + uid.slice(0, 6)))
-        else {
-          const wer = fleetWer(r.master_login, null)
-          rowKey.set(r, wer ? merken(wer.uid, wer.name) : merken('pc:' + r.pc_name, 'PC ' + r.pc_name))
+      const karten = new Map()     // personKey → [Karten-HTML]
+      const alarme = new Map()     // personKey → [rote Hinweise]
+      const lege = (map, key, h) => { if(!map.has(key)) map.set(key, []); map.get(key).push(h) }
+
+      /* ── Bausteine im EXAKTEN Design der Plan-Karten oben (tc2-Reihe,
+       * Lots-Chips wie dupLiveLotsInner, tickender tc-live-timer) — Finns
+       * Ansage 25.08. nachts: „genauso aussehen wie oben, nicht noch ein
+       * eigenes Design". Der Status-Punkt links traegt die Personen-Farbe. */
+      const fmtLots = v => Number(v || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+      const lotChip = (lbl, lots) => !lots ? '' :
+        `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
+        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
+        + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lots)} Lt</b></span>`
+      const zeitChip = (ep, frisch, alterS) => !frisch
+        ? `<span class="tc2-timer" style="color:var(--sub)">vor ${alterS}s</span>`
+        : ep ? `<span class="tc2-timer tc-live-timer" data-started="${new Date(ep * 1000).toISOString()}">—<span style="color:var(--sub-2)"> live</span></span>`
+             : `<span class="tc2-timer">live</span>`
+      const tc2Karte = (farbe, links, rechts, sub, metric, frisch) =>
+        `<div class="tc2 tc2-open"${frisch ? '' : ' style="opacity:.55"'}>`
+        + `<span class="tc2-dot tc2-dot-live" style="background:${farbe}"></span>`
+        + `<div class="tc2-main"><div class="tc2-pair">`
+        + `<span class="tc2-name" title="${esc(links)}">${esc(links)}</span>`
+        + (rechts ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${esc(rechts)}">${esc(rechts)}</span>` : '')
+        + `</div><div class="tc2-sub">${sub}</div></div>`
+        + `<div class="tc2-metric">${metric}</div><div class="tc2-actions"></div></div>`
+      const seite = s => /sell|short|^1$/i.test(String(s)) ? 'SELL' : 'BUY'
+      const fmtPreis = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+
+      /* ── Duplikium: Master-Positionen mit ihren Kopien paaren (Duplikium
+       * stempelt id_master/masterTicket auf jede Kopie) — daraus werden die
+       * MASTER/SLAVE-Chips wie oben. Der geteilte Slave haengt als Sub-Account
+       * an JEDER E-Mail und zeigt allen dieselben physischen Positionen —
+       * Kopien werden deshalb ueber login+ticket dedupliziert. */
+      const stampOf = p => String(p.id_master || p.master_id || p.masterId || '')
+      const masterListe = []
+      const kopien = new Map()
+      for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
+        const accById = {}
+        for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
+        const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
+        const frisch = alterS <= 75            // 2,5× Waechter-Takt
+        const uid = String(dr.user_id || '')
+        const pKey = uid ? merken(uid, profName.get(uid) || mailKurz(dr.id))
+                         : merken('mail:' + dr.id, mailKurz(dr.id))
+        for(const p of (Array.isArray(dr.positions) ? dr.positions : [])){
+          const acc = accById[String(p.account_id)] || {}
+          const accName = acc.name || acc.login || ('Dup-' + p.account_id)
+          if(stampOf(p) || /^slave/i.test(String(acc.name || ''))){
+            const kk = String(acc.login || p.account_id) + '|' + String(p.ticket || '')
+            if(!kopien.has(kk)) kopien.set(kk, { accName, ticket: String(p.ticket || ''),
+              masterTicket: String(p.masterTicket || ''), stamp: stampOf(p),
+              lots: Number(p.amountLot) || 0, side: p.side, symbol: p.symbol || '?',
+              openEpoch: Number(p.open_epoch) || null, frisch, alterS, verbraucht: false })
+          } else {
+            masterListe.push({ pKey, accName, accId: String(p.account_id),
+              ticket: String(p.ticket || ''), lots: Number(p.amountLot) || 0,
+              side: p.side, symbol: p.symbol || '?', openPrice: p.openPrice,
+              openEpoch: Number(p.open_epoch) || null, frisch, alterS })
+          }
         }
       }
-      for(const g of cloud){
-        if(g.src === 'dup'){
-          rowKey.set(g, g.uid ? merken(g.uid, profName.get(g.uid) || mailKurz(g.mail))
-                              : merken('mail:' + g.mail, mailKurz(g.mail)))
-        } else {
-          rowKey.set(g, meUid ? merken(meUid, profName.get(meUid) || 'Dieses Profil')
-                              : merken('hier', 'Dieses Profil'))
+      for(const m of masterListe){
+        let slaveLots = 0, slaveName = ''
+        for(const k of kopien.values()){
+          if((k.masterTicket && k.masterTicket === m.ticket) || (!k.masterTicket && k.stamp && k.stamp === m.accId)){
+            k.verbraucht = true; slaveLots += k.lots; slaveName = slaveName || k.accName
+          }
         }
+        lege(karten, m.pKey, tc2Karte(personen.get(m.pKey).farbe,
+          m.accName, slaveName || null,
+          `Duplikium · <b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
+          lotChip('MASTER', m.lots) + lotChip('SLAVE', slaveLots) + zeitChip(m.openEpoch, m.frisch, m.alterS),
+          m.frisch))
       }
 
-      /* ── Kompakte Ausgabe (25.08.2026 nachts, Finns Design-Ansage „viel
-       * cleaner": die Karten-Flut hat den Trades-Tab erschlagen): EINE Zeile
-       * pro Person — die eigene zuerst und hervorgehoben —, nur Konten MIT
-       * Positionen, und der von allen geteilte Hedge nur EINMAL ganz unten
-       * statt einmal pro Person. Keine Chips mehr — die Zeile selbst traegt
-       * Farbe und Namen der Person. */
-      const zeilen = new Map()    // personKey → {frag:[], alarm:[], frisch, alterS}
-      const zeile = key => {
-        if(!zeilen.has(key)) zeilen.set(key, { frag: [], alarm: [], frisch: true, alterS: 0 })
-        return zeilen.get(key)
-      }
-      const altern = (z, frisch, alterS) => { if(!frisch){ z.frisch = false; z.alterS = Math.max(z.alterS, alterS) } }
-      const kurzAcc = n => {
-        const s = String(n || '').replace(/^(master|slave)\s*-\s*\w+\s*-\s*/i, '')
-        return s.length > 12 ? '…' + s.slice(-8) : s
-      }
-      // „seit 2h 46m" — Laufzeit aus dem Waechter-korrigierten open_epoch
-      // (Duplikium-Uhr ist versetzt, der Waechter kalibriert); fehlt der
-      // Stempel, gibt es KEINE Laufzeit (nie raten — P&L-Beweis-Doktrin).
-      const seitTxt = ep => {
-        if(!ep) return ''
-        const s = Math.max(0, Math.round(jetzt / 1000 - ep))
-        if(s < 60) return 'seit ' + s + 's'
-        const m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24)
-        return 'seit ' + (d ? d + 'd ' + (h % 24) + 'h' : h ? h + 'h ' + (m % 60) + 'm' : m + 'm')
-      }
-      // Eine Zeile pro Trade: links Richtung+Lots+Symbol (mono), daneben das
-      // Konto kurz (voll im Tooltip), rechts die Laufzeit.
-      const tradeRow = (posHtml, titelRoh, accHtml, seit) =>
-        `<div style="display:flex;gap:8px;align-items:baseline;font-size:12px;padding:1.5px 0">`
-        + `<span style="font-family:var(--mono)">${posHtml}</span>`
-        + `<span style="color:var(--sub);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(titelRoh)}">${accHtml}</span>`
-        + `<span style="margin-left:auto;color:var(--sub);font-size:10.5px;flex-shrink:0">${seit}</span>`
-        + `</div>`
+      /* ── Echo: eine Karte pro Master-Position, gleiche Optik wie oben ── */
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
       for(const r of rows){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
         const pos = s.master_positions || []
-        // Master-Lots UND Hedge-Lots pro Position (18.08.2026, Finns Wunsch)
         const hedgesMap = s.hedges || {}
         const hedgeLots = ident => {
           const hs = hedgesMap[String(ident)]
           return (Array.isArray(hs) ? hs : []).reduce((a, h) => a + (Number(h.volume) || 0), 0)
         }
         // Alarme (Waisen/Fremde) bleiben — Finns Eingreif-Faelle. Flache
-        // Instanzen OHNE Alarm sind in der kompakten Ansicht nur Rauschen.
+        // Instanzen OHNE Alarm sind nur Rauschen und erscheinen nicht.
         const masterIdents = new Set(pos.map(p => String(p.ident)))
         const waisen = Object.entries(hedgesMap)
           .filter(([k, v]) => !masterIdents.has(String(k)) && (Array.isArray(v) ? v : []).length)
         const fr = s.hedge_fremde
         const fremdNeu = Array.isArray(fr) && fr.length && !fremdGezeigt.has(r.hedge_login)
         if(!pos.length && !waisen.length && !fremdNeu) continue
-        const z = zeile(rowKey.get(r))
+        const uid = String((s.user_id) || '')
+        const wer = uid ? null : fleetWer(r.master_login, null)
+        const pKey = uid ? merken(uid, profName.get(uid) || 'ID ' + uid.slice(0, 6))
+          : wer ? merken(wer.uid, wer.name)
+          : merken('pc:' + r.pc_name, 'PC ' + r.pc_name)
+        const farbe = personen.get(pKey).farbe
         const mPL = (s.master_equity != null && s.master_balance != null)
           ? Number(s.master_equity) - Number(s.master_balance) : null
         for(const p of pos){
-          const hv = hedgeLots(p.ident)
-          z.frag.push(tradeRow(
-            `${p.type === 0 ? 'BUY' : 'SELL'} <b>${Number(p.volume).toFixed(2)}</b> ${esc(p.symbol)}`
-              + (hv ? ` <span style="color:var(--sub)">→ H ${hv.toFixed(2)}</span>` : ''),
-            `Echo · ${r.instance} · Master ${r.master_login} · Hedge ${r.hedge_login} · ${r.pc_name}`,
-            `${esc(r.instance)} · Echo${mPL != null ? ` · <span style="color:${mPL >= 0 ? '#12B76A' : '#F04438'}">${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}</span>` : ''}`,
-            ''))
+          const pnl = (pos.length === 1 && mPL != null)
+            ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}</span>` : ''
+          lege(karten, pKey, tc2Karte(farbe,
+            r.instance, 'Hedge ' + r.hedge_login,
+            `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
+            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + zeitChip(null, frisch, alterS),
+            frisch))
         }
-        if(waisen.length) z.alarm.push(`<div style="font-size:11.5px;margin-top:3px;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
+        if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
           + waisen.map(([k, v]) => v.map(h =>
               `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
           + ` — im Hedge-Terminal prüfen!</div>`)
         if(fremdNeu){
           fremdGezeigt.add(r.hedge_login)
-          z.alarm.push(`<div style="font-size:11.5px;margin-top:3px;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
+          lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ FREMDE Position auf Hedge ${esc(r.hedge_login)}: `
             + fr.map(f => `${f.type === 0 ? 'BUY' : 'SELL'} ${Number(f.volume || 0).toFixed(2)} ${esc(f.symbol)} (Ticket ${esc(String(f.ticket ?? '?'))})`).join(' · ')
             + ` — gehört zu KEINEM Master!</div>`)
         }
-        altern(z, frisch, alterS)
-      }
-      // Duplikium/TSX: geteilte Hedge-Konten (dasselbe Login als Sub-Account
-      // bei MEHREREN Personen) nur EINMAL zeigen — vorher stand der Fusion-
-      // Slave fuenfmal identisch in der Liste (Finns „alles durcheinander").
-      const loginBei = {}
-      for(const g of cloud) if(g.src === 'dup' && g.login)
-        (loginBei[g.login] = loginBei[g.login] || new Set()).add(rowKey.get(g))
-      const geteilt = new Map()   // login → {rowsHtml, frisch, alterS}
-      for(const g of cloud){
-        const frisch = g.alterS <= g.frischGrenzeS   // dup: 75s (Waechter-Takt), tsx: 20s
-        const posRows = g.pos.map(p => tradeRow(
-          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} <b>${Number(p.size || 0).toFixed(2)}</b> ${esc(String(p.symbol))}`
-            + (p.pnl != null ? ` <span style="color:${Number(p.pnl) >= 0 ? '#12B76A' : '#F04438'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)} ${esc(String(p.ccy || ''))}</span>` : ''),
-          String(g.accountName),
-          `${esc(kurzAcc(g.accountName))}${g.src === 'tsx' ? ' · TSX' : ''}`,
-          seitTxt(p.openEpoch)))
-        if(g.src === 'dup' && g.login && loginBei[g.login] && loginBei[g.login].size > 1){
-          if(!geteilt.has(g.login)) geteilt.set(g.login, { rowsHtml: posRows.join(''), frisch, alterS: g.alterS })
-          continue
-        }
-        const z = zeile(rowKey.get(g))
-        z.frag.push(...posRows)
-        altern(z, frisch, g.alterS)
       }
 
-      if(!zeilen.size && !geteilt.size){ box.style.display = 'none'; return }
+      /* ── TopstepX (nur die Verbindung dieser Origin) ── */
+      const ltAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
+      for(const p of (ltState.positions.tsx || [])){
+        const frisch = ltAlterS != null && ltAlterS <= 20
+        const pKey = meUid ? merken(meUid, profName.get(meUid) || 'Dieses Profil') : merken('hier', 'Dieses Profil')
+        const pnl = p.pnl != null
+          ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? '#15803d' : '#b91c1c'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
+        lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, String(p.accountName), null,
+          `TopstepX · <b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
+          lotChip('KT', Number(p.size) || 0) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
+          frisch))
+      }
 
-      // Ausgabe: eigene Person zuerst (hervorgehoben), dann alphabetisch,
-      // geteilte Hedges als neutrale Schlusszeile.
-      const reihenfolge = [...zeilen.keys()].sort((a, b) =>
+      const uebrig = [...kopien.values()].filter(k => !k.verbraucht)
+      if(!karten.size && !alarme.size && !uebrig.length){ box.style.display = 'none'; return }
+
+      // Ausgabe: eigene Person zuerst, dann alphabetisch — pro Person eine
+      // kleine Ueberschrift in ihrer Farbe, darunter Karten wie oben (die
+      // .trade-cards-Huelle liefert exakt die Abstaende der Plan-Tabs).
+      const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])].sort((a, b) =>
         a === meUid ? -1 : b === meUid ? 1 :
         personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
-      let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;margin-bottom:6px">FLOTTE — ALLE PERSONEN</div>`
-        + '<div style="display:flex;flex-direction:column;gap:8px">'
+      let html = `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em">FLOTTE — ALLE PERSONEN</div>`
       for(const k of reihenfolge){
-        const pers = personen.get(k), z = zeilen.get(k)
-        const eigene = k === meUid
-        html += `<div style="border:1px solid var(--border);border-left:3px solid ${pers.farbe};border-radius:8px;padding:7px 10px;${z.frisch ? '' : 'opacity:.55'}${eigene ? 'background:var(--surface);' : ''}">`
-          + `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">`
-          + `<span style="font-size:12.5px;font-weight:${eigene ? 700 : 600};color:${pers.farbe}">${esc(pers.name)}</span>`
-          + `<span style="font-size:10.5px;color:var(--sub)">${z.frisch ? 'live' : 'vor ' + z.alterS + 's'}</span></div>`
-          + z.frag.join('')
-          + z.alarm.join('')
-          + `</div>`
+        const pers = personen.get(k)
+        html += `<div style="font-size:11.5px;font-weight:700;color:${pers.farbe};margin:10px 0 6px">${esc(pers.name)}</div>`
+          + `<div class="trade-cards">${(karten.get(k) || []).join('')}</div>`
+          + (alarme.get(k) || []).join('')
       }
-      for(const [login, gh] of geteilt){
-        html += `<div style="border:1px dashed var(--border);border-radius:8px;padding:7px 10px;${gh.frisch ? '' : 'opacity:.55'}">`
-          + `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">`
-          + `<span style="font-size:12px;font-weight:600;color:var(--sub)">Hedge ${esc(login)} <span style="font-weight:400">(geteilt)</span></span>`
-          + `<span style="font-size:10.5px;color:var(--sub)">${gh.frisch ? 'live' : 'vor ' + gh.alterS + 's'}</span></div>`
-          + gh.rowsHtml
-          + `</div>`
+      // Kopien ohne (sichtbaren) Master: das geteilte Hedge-Konto einmal
+      // statt fuenfmal — plus alles, was von Hand auf dem Slave liegt.
+      if(uebrig.length){
+        html += `<div style="font-size:11.5px;font-weight:700;color:var(--sub);margin:10px 0 6px">Hedge (geteilt / ohne Master)</div><div class="trade-cards">`
+        for(const k of uebrig){
+          html += tc2Karte('var(--sub-2)', k.accName, null,
+            `Duplikium · <b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
+            lotChip('SLAVE', k.lots) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch)
+        }
+        html += '</div>'
       }
-      html += '</div>'
       box.innerHTML = html
       box.style.display = ''
     }catch(e){
