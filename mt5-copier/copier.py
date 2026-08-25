@@ -1085,7 +1085,7 @@ def main():
                     if not file_fresh:
                         snap = None  # stale Fremd-Datei ist kein Beweis → 'warte auf Snapshot'
                 if snap is not None and m.master_login and int(snap["login"]) != int(m.master_login):
-                    if now - m.last_status > 3.0:
+                    if now - m.last_status > 1.0:
                         m.last_status = now
                         if os.path.exists(m.cfg_path):
                             known = book.get(m.magic, {})
@@ -1101,7 +1101,7 @@ def main():
                             write_status(m.status_path, st)
                     continue
                 if snap is None:
-                    if now - m.last_status > 3.0:
+                    if now - m.last_status > 1.0:
                         m.last_status = now
                         # Existenz-Check (15.08.2026): zwischen Panel-/api/delete und
                         # der Restart-Erkennung liegen bis zu 2 s — ein Tick-Write in
@@ -1220,7 +1220,7 @@ def main():
                     # Offene Hedges halten den Selbst-Update-Neustart weiter auf;
                     # die eingefrorene Positionsliste zaehlt dafuer nicht.
                     m.busy = bool(hedges)
-                    if time.time() - m.last_status > 3.0:
+                    if time.time() - m.last_status > 1.0:
                         m.last_status = time.time()
                         if os.path.exists(m.cfg_path):
                             write_status(m.status_path, master_status(m, snap, hedges, True))
@@ -1324,7 +1324,7 @@ def main():
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
                 m.busy = bool(snap["positions"]) or bool(hedges)
 
-                if time.time() - m.last_status > 3.0:
+                if time.time() - m.last_status > 1.0:
                     m.last_status = time.time()
                     # Existenz-Check wie oben (15.08.2026): keine geloeschte
                     # Status-Datei im 2-s-Fenster wieder anlegen.

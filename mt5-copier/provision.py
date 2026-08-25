@@ -126,7 +126,11 @@ def build_login_ini(login, password, server):
     bei jedem spaeteren Normalstart automatisch — ohne die Zeile hinge das am
     UI-Haekchen, dessen Default nirgends zugesichert ist."""
     return (f"[Common]\nLogin={login}\nPassword={password}\nServer={server}\n"
-            f"KeepPrivate=1\n")
+            f"KeepPrivate=1\n"
+            # Algo-Handel beim Start erzwingen (25.08.2026, Finns Fund: der
+            # Taskkill der Heilung verliert den Knopf-Zustand manchmal — das
+            # Terminal kam mit Algo AUS hoch und der Trade-Start-Check blockte).
+            "[Experts]\nEnabled=1\nAllowLiveTrading=1\n")
 
 
 def build_startup_ini(expert=EA_NAME, symbol=STARTUP_SYMBOL, period=STARTUP_PERIOD,
@@ -136,6 +140,8 @@ def build_startup_ini(expert=EA_NAME, symbol=STARTUP_SYMBOL, period=STARTUP_PERI
     lines = ["[StartUp]", f"Expert={expert}", f"Symbol={symbol}", f"Period={period}"]
     if preset:
         lines.append(f"ExpertParameters={preset}")
+    # Algo-Handel erzwingen — gleicher Grund wie in build_login_ini (25.08.2026)
+    lines += ["[Experts]", "Enabled=1", "AllowLiveTrading=1"]
     return "\n".join(lines) + "\n"
 
 

@@ -16908,7 +16908,23 @@
       if(sAlgo.master_algo === false && !sAlgo.note) algoAus.push('MASTER-Terminal')
       if(sAlgo.hedge_algo === false) algoAus.push('HEDGE-Terminal')
       if(algoAus.length){
-        _pfSet('m5run', 'err', `Algo-Handel ist AUS im ${algoAus.join(' und im ')} — in MT5 oben den „Algo-Handel"-Knopf grün schalten, sonst bleibt die Order ungehedged. Dann Trade neu starten.`)
+        // Direkt-Fix-Button (25.08.2026, Finns Wunsch: 'ich habe tausend Ordner —
+        // ich will per Klick ins RICHTIGE Terminal'): öffnet/front das Master-
+        // Terminal (seit .88 kommt das Fenster wirklich nach vorn), Algo-Knopf
+        // schalten, dann „Erneut versuchen". Fürs Hedge-Terminal gibt es keinen
+        // Start-Endpunkt — das startet der Copier selbst.
+        const algoFixBtn = algoAus.includes('MASTER-Terminal')
+          ? `<br><button class="btn btn-primary pf-fix-btn" id="pf-fix-algo" style="padding:4px 12px;font-size:11.5px">Master-Terminal öffnen</button>` : ''
+        _pfSet('m5run', 'err', `Algo-Handel ist AUS im ${algoAus.join(' und im ')} — in MT5 oben den „Algo-Handel"-Knopf grün schalten, sonst bleibt die Order ungehedged. Dann „↻ Erneut versuchen".${algoFixBtn}`)
+        document.getElementById('pf-fix-algo')?.addEventListener('click', async () => {
+          const b = document.getElementById('pf-fix-algo')
+          if(b){ b.disabled = true; b.textContent = 'Öffne …' }
+          try{
+            await window.mtcApi(`start-terminal?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
+              headers:{'Content-Type':'application/json'}, body:'{}' })
+          }catch(_){}
+          if(b){ b.disabled = false; b.textContent = 'Master-Terminal öffnen' }
+        })
         hardFail = true
       } else {
         _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten'
@@ -17045,8 +17061,10 @@
             body: JSON.stringify({ multiplier: String(Number(plan.multiplier)) }) })
         }catch(_){}
 
-        // Bereitschafts-Ticker: eigener instances-Fetch alle 3s, scope-gebunden
-        // (Abbruch bei Modal-Schließen oder Plan-Wechsel), Timeout 170s.
+        // Bereitschafts-Ticker: eigener instances-Fetch alle 1s (25.08.2026,
+        // Finns Tempo-Wunsch — vorher 3s, zusammen mit dem Status-Takt kostete
+        // das bis zu 6s Bot-Verzögerung), scope-gebunden (Abbruch bei
+        // Modal-Schließen oder Plan-Wechsel), Timeout 240s.
         _pfSet('m5term', 'warn', '⏳ Terminal startet, Login automatisch…')
         const t0 = Date.now()
         let _pfTickBusy = false
@@ -17100,21 +17118,12 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
-              // Countdown (15.08.2026): über Parsec kann der Bot den Cursor NICHT
-              // sichtbar bewegen (Parsec sendet ständig die lokale Mausposition) —
-              // er füllt den Order-Dialog deshalb DIREKT aus, ohne Mauszeiger.
-              // Ehrlicher Text: keine Maus-Bewegung versprechen.
-              _pfSet('m5term', 'ok', '✓ Bereit — Bot füllt gleich den Order-Dialog…')
-              if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
-              // Countdown auf 1s verkuerzt (18.08.2026, Finns Tempo-Wunsch)
-              for(let n = 1; n >= 1; n--){
-                if(fe) fe.textContent = `⌨ HÄNDE WEG von Maus und Tastatur! Der Bot füllt den Order-Dialog gleich direkt aus (kein sichtbarer Mauszeiger über Parsec) — in ${n}…`
-                await new Promise(res => setTimeout(res, 1000))
-              }
-              // Abbruch-Check nach dem Countdown: Modal zu = Order verworfen
-              if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
-                 || String(_pfPlanId) !== String(plan.id)) return
+              // KEIN Countdown mehr (25.08.2026, Finns Tempo-Wunsch: 'soll direkt
+              // losgehen') — die HÄNDE-WEG-Ansage steht, während der Bot schon
+              // arbeitet. Über Parsec bewegt er den Cursor ohnehin nicht sichtbar,
+              // er füllt den Order-Dialog direkt aus.
               _pfSet('m5term', 'ok', '✓ Bot füllt den Order-Dialog…')
+              if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok' }
               if(fe){ fe.textContent = `🤖 Bot platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} ${po.sl_usd ? `(TP $${po.tp_usd} · SL $${po.sl_usd})` : '(ohne SL/TP — machst du von Hand)'} — HÄNDE WEG, bis die Bestätigung kommt!` }
               try{
                 const r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
@@ -17188,7 +17197,7 @@
             _pfSet('m5term', 'warn', `⏳ ${note ? escapeHtml(note) + ' · ' : ''}Terminal startet, Login automatisch… (${sec}s)${escapeHtml(hint)}`)
           }
           }finally{ _pfTickBusy = false }
-        }, 3000)
+        }, 1000)
       }
     }
 
