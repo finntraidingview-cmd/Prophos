@@ -9599,13 +9599,28 @@
         const farbe = personen.get(pKey).farbe
         const mPL = (s.master_equity != null && s.master_balance != null)
           ? Number(s.master_equity) - Number(s.master_balance) : null
+        // Hedge-P&L pro Master-Position (26.08.2026, Finns Wunsch vom MacBook:
+        // „beide PNLs anzeigen"): die Cloud-Zeilen tragen die Hedge-Positionen
+        // samt profit schon mit — er wurde nur nie gerendert. Der Master-P&L
+        // bleibt Equity−Balance und damit nur bei EINER Position zuordenbar;
+        // der Hedge-P&L ist pro ident exakt. Kein Symmetrie-Balken hier: der
+        // rechnet PLAN-relativ (Risk/TP), und fremde Pläne sind per RLS
+        // unsichtbar — ein roher Quotient wäre wegen des Multipliers irreführend.
+        const hedgePnl = ident => {
+          const hs = hedgesMap[String(ident)]
+          if(!Array.isArray(hs) || !hs.length) return ''
+          let sum = 0, beweis = false
+          for(const h of hs){ if(h && h.profit != null){ beweis = true; sum += Number(h.profit) || 0 } }
+          if(!beweis) return ''
+          return `<span class="tc2-pnl" style="color:${sum >= 0 ? '#15803d' : '#b91c1c'}">H ${sum >= 0 ? '+' : ''}${sum.toFixed(2)} ${esc(s.hedge_currency || '')}</span>`
+        }
         for(const p of pos){
           const pnl = (pos.length === 1 && mPL != null)
-            ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">${mPL >= 0 ? '+' : ''}${mPL.toFixed(0)} ${esc(s.master_currency || '')}</span>` : ''
+            ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">M ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}</span>` : ''
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, 'Hedge ' + r.hedge_login,
             subPerson(pKey) + `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
-            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + zeitChip(null, frisch, alterS),
+            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + hedgePnl(p.ident) + zeitChip(null, frisch, alterS),
             frisch))
         }
         if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
