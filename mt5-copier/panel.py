@@ -164,7 +164,7 @@ def ensure_pywinauto():
     print("[panel] pywinauto fehlt — installiere einmalig (pip, kann ~1 min dauern)...", flush=True)
     try:
         r = subprocess.run([sys.executable, "-m", "pip", "install", "pywinauto"],
-                           capture_output=True, text=True, timeout=300)
+                           capture_output=True, text=True, errors="replace", timeout=300)
         print("[panel] pywinauto installiert." if r.returncode == 0 else
               f"[panel] pywinauto-Installation fehlgeschlagen — von Hand: pip install pywinauto "
               f"({(r.stderr or '').strip()[-160:]})", flush=True)
@@ -239,7 +239,7 @@ def _pid_alive(pid):
     if os.name == "nt":
         try:
             out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
-                                 capture_output=True, text=True, timeout=5).stdout
+                                 capture_output=True, text=True, errors="replace", timeout=5).stdout
             return str(pid) in (out or "")
         except Exception:
             return True
@@ -688,7 +688,7 @@ def _fenster_nach_vorn(pid):
     )
     try:
         pr = subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, errors="replace", timeout=15)
         return "True" in (pr.stdout or "")
     except Exception:
         return False
@@ -1745,7 +1745,7 @@ class Handler(BaseHTTPRequestHandler):
                 ensure_bot_source()
             try:
                 p = subprocess.run([sys.executable, bot, "mousetest"],
-                                   capture_output=True, text=True, timeout=60)
+                                   capture_output=True, text=True, errors="replace", timeout=60)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
                     "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
@@ -1813,7 +1813,7 @@ class Handler(BaseHTTPRequestHandler):
                 # haengt — ein wirklich haengender Bot darf es nicht ewig halten.
                 p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
                                     json.dumps(cmd)],
-                                   capture_output=True, text=True, timeout=300)
+                                   capture_output=True, text=True, errors="replace", timeout=300)
                 line = (p.stdout or "").strip().splitlines()
                 # Stumme Bots sind Diagnose-Killer: stderr-Ende mitgeben (z.B.
                 # Traceback/ImportError), sonst bleibt der Fehler anonym.

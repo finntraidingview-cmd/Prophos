@@ -413,7 +413,7 @@ def terminal_pids(install_dir):
     try:
         r = subprocess.run(["wmic", "process", "where",
                             f"ExecutablePath='{exe}'", "get", "ProcessId"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, errors="replace", timeout=30)
         return [int(t) for t in (r.stdout or "").split() if t.isdigit()]
     except Exception:
         return []
@@ -431,7 +431,7 @@ def _taskkill(pid, grace_s=15):
     subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True)
     t0 = time.time()
     while time.time() - t0 < grace_s:
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True)
+        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, errors="replace")
         if str(pid) not in (r.stdout or ""):
             return
         time.sleep(1)
