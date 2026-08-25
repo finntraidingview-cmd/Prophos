@@ -689,6 +689,9 @@
   #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
   #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+  /* Meta-Wallet: 5 Karten (Gesamt + 4 Chains, seit Polygon 25.08.2026) — muss VOR der
+     960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt */
+  #adm-pane-wallet .kpis{grid-template-columns:repeat(5,1fr)}
   @media (max-width:960px){#dashboard-view .kpis{grid-template-columns:repeat(2,1fr)}}
   #dashboard-view .kpi{
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
@@ -2595,11 +2598,13 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
       </button>
-      <!-- Live Trades / Risk / AI Advisor / Analytics / Journal: aus der Navigation
-           ausgeblendet (Finn nutzt sie nie, 14.07.2026) — Views + Code bleiben intakt,
-           per URL-Hash (#livetrades etc.) weiter erreichbar. display:none statt löschen,
-           damit Badge-Referenzen (sb-badge-livetrades) nicht brechen. -->
-      <button class="sb-link" data-view="livetrades" style="display:none">
+      <!-- Live Trades: seit 25.08.2026 wieder sichtbar — die Flotte (alle
+           Personen, Echo + Duplikium) wohnt in dieser View und muss auch ueber
+           pages.dev erreichbar sein, nicht nur per #livetrades-Hash.
+           Risk / AI Advisor / Analytics / Journal bleiben ausgeblendet
+           (Finn nutzt sie nie, 14.07.2026) — Views + Code intakt, per Hash
+           erreichbar; display:none statt löschen, damit Referenzen nicht brechen. -->
+      <button class="sb-link" data-view="livetrades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
         Live Trades <span class="sb-badge" id="sb-badge-livetrades" hidden>0</span>
       </button>
@@ -5274,6 +5279,11 @@
               <div class="kpi-delta delta-neutral" id="wal-k-arbitrum-sub">–</div>
             </div>
             <div class="kpi">
+              <div class="kpi-label">Polygon</div>
+              <div class="kpi-value" id="wal-k-polygon">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-polygon-sub">–</div>
+            </div>
+            <div class="kpi">
               <div class="kpi-label">Solana</div>
               <div class="kpi-value" id="wal-k-solana">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-solana-sub">–</div>
@@ -5296,7 +5306,8 @@
               <div class="adm-dist" id="wal-person-dist"></div>
               <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;color:var(--sub)">
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
-                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#9945ff;margin-right:5px"></span>Solana</span>
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8247e5;margin-right:5px"></span>Polygon</span>
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#14f195;margin-right:5px"></span>Solana</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:5px"></span>Tron</span>
               </div>
             </div>
@@ -5318,7 +5329,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Wallets</div>
-                <div class="panel-sub">Pro Person bis zu drei Adressen — Arbitrum, Solana, Tron</div>
+                <div class="panel-sub">Pro Person bis zu vier Adressen — Arbitrum, Polygon, Solana, Tron</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -5326,6 +5337,7 @@
               <datalist id="wal-person-names"></datalist>
               <select id="wal-add-chain" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
                 <option value="arbitrum">Arbitrum</option>
+                <option value="polygon">Polygon</option>
                 <option value="solana">Solana</option>
                 <option value="tron">Tron</option>
               </select>
@@ -5350,7 +5362,7 @@
 
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
             Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
-            Balances kommen live von den Chains (USDT auf Arbitrum, Solana, Tron) direkt aus dem Browser, ohne API-Key.
+            Balances kommen live von den Chains (USDT auf Arbitrum, Polygon, Solana, Tron) direkt aus dem Browser, ohne API-Key.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
           </p>
         </div>
@@ -6395,6 +6407,14 @@
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
+    // Live-Trades: Aggregator (TSX/MetaApi/Duplikium, 5s) nur laufen lassen,
+    // solange die View offen ist. Ohne diesen Start war die View tot — ltStart
+    // hatte seit dem Ausblenden aus der Sidebar (14.07.2026) keinen Aufrufer
+    // mehr; die Flotte (25.08.2026) braucht ihn, auch auf pages.dev.
+    if(name === 'livetrades'){
+      if(typeof ltStart === 'function') ltStart()
+      if(typeof mt5FleetRenderTick === 'function') mt5FleetRenderTick(true)
+    } else if(typeof ltStop === 'function') ltStop()
     // Beim Öffnen der Trades-View immer auf „Geplant" starten (nicht auf dem zuletzt
     // aktiven Tab hängenbleiben — z.B. „Erledigt" nach einem Trade-Abschluss).
     if(name === 'trades'){
@@ -6829,13 +6849,23 @@
      * lokales Backend. Verlauf: 1 Snapshot pro Wallet und Tag (wallet_snapshots-
      * Upsert beim Laden), weil Arbitrum/Solana-History sonst einen Key bräuchte. */
     const WAL_CHAINS = {
-      arbitrum: { label:'Arbitrum', col:'#3b82f6',
+      arbitrum: { label:'Arbitrum', col:'#3b82f6', evm:true,
                   usdt:'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',   // USDT (Arbitrum One), 6 Dezimalstellen
                   rpc:'https://arb1.arbitrum.io/rpc',
                   explorer: a => 'https://arbiscan.io/address/' + a,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
-      solana:   { label:'Solana', col:'#9945ff',
+      // Polygon (25.08.2026): gleiche MetaMask-Adresse wie Arbitrum, nur anderer
+      // RPC + USDT-Contract. publicnode zuerst — derselbe keyless Anbieter, der
+      // bei Solana schon die Browser-Blockade des offiziellen RPCs umging.
+      polygon:  { label:'Polygon', col:'#8247e5', evm:true,
+                  usdt:'0xc2132D05D31c914a87C6611C10748AEb04B58e8F',   // USDT (PoS), 6 Dezimalstellen
+                  rpc:'https://polygon-bor-rpc.publicnode.com',
+                  rpcFallback:'https://polygon-rpc.com',
+                  explorer: a => 'https://polygonscan.com/address/' + a,
+                  valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
+                  hint:'0x… (42 Zeichen)' },
+      solana:   { label:'Solana', col:'#14f195',
                   mint:'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  // USDT-Mint (SPL), 6 Dezimalstellen
                   // Der offizielle mainnet-beta-RPC blockt Browser-Anfragen (403 "Access
                   // forbidden", beim Bauen am 24.08.2026 live gesehen) — publicnode ist
@@ -6886,13 +6916,20 @@
     async function walFetchBalance(w){
       const c = WAL_CHAINS[w.chain]
       if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
-      if(w.chain === 'arbitrum'){
-        // balanceOf(address) per eth_call gegen den USDT-Contract
+      if(c.evm){
+        // balanceOf(address) per eth_call gegen den USDT-Contract — ein Pfad für
+        // alle EVM-Chains (Arbitrum, Polygon), nur RPC + Contract unterscheiden sich.
         const data = '0x70a08231' + w.address.slice(2).toLowerCase().padStart(64, '0')
-        const r = await fetch(c.rpc, { method:'POST', headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'eth_call', params:[{ to:c.usdt, data }, 'latest'] }) })
-        const d = await r.json()
-        if(d.error) throw new Error(d.error.message || 'RPC-Fehler')
+        const body = JSON.stringify({ jsonrpc:'2.0', id:1, method:'eth_call', params:[{ to:c.usdt, data }, 'latest'] })
+        let d = null
+        for(const rpc of [c.rpc, c.rpcFallback].filter(Boolean)){
+          try{
+            const r = await fetch(rpc, { method:'POST', headers:{ 'Content-Type':'application/json' }, body })
+            d = await r.json()
+            if(!d.error) break
+          }catch(e){ d = { error:{ message: e.message || 'RPC nicht erreichbar' } } }
+        }
+        if(!d || d.error) throw new Error(d?.error?.message || 'RPC-Fehler')
         return (parseInt(d.result || '0x0', 16) || 0) / 1e6
       }
       if(w.chain === 'solana'){
@@ -6984,7 +7021,7 @@
       // Nach Person: gestapelte Balken (Segmente = Chains), Breite = Anteil am Gesamt
       const byPerson = new Map()
       for(const w of rows){
-        const g = byPerson.get(w.person_name) || { name:w.person_name, total:0, chains:{ arbitrum:0, solana:0, tron:0 } }
+        const g = byPerson.get(w.person_name) || { name:w.person_name, total:0, chains:{ arbitrum:0, polygon:0, solana:0, tron:0 } }
         g.total += bal(w) ?? 0
         g.chains[w.chain] += bal(w) ?? 0
         byPerson.set(w.person_name, g)
@@ -10749,6 +10786,12 @@
   function ltStop(){
     if(ltState.refreshTimer){ clearInterval(ltState.refreshTimer); ltState.refreshTimer = null }
   }
+  // Refresh-Knopf der View war nie verdrahtet (aufgefallen 25.08.2026, als die
+  // View zurueck in die Sidebar kam) — holt Aggregator UND Flotte sofort frisch.
+  document.getElementById('lt-refresh-btn')?.addEventListener('click', () => {
+    ltRefresh()
+    mt5FleetRenderTick(true)
+  })
 
   /* ========================================================================
    * AUTO TRADE TRACKER — simpel via getSlaveOrders
