@@ -4968,6 +4968,10 @@
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="mtc-version" title="Version des Copier-Stacks auf diesem PC" style="display:none"></span>
+          <!-- Hedge-Konto zentral umstellen (25.08.2026, Finns Wunsch nach dem
+               437804/488579-Haenger): Klick → ID eingeben → Panel schreibt sie
+               in ALLE Configs dieses PCs, Copier startet neu und prueft frisch -->
+          <span class="mtc-chip" id="mtc-hedge-chip" title="Erwartetes Hedge-Konto dieses PCs — Klick zum Ändern" style="display:none;cursor:pointer">🎯 Hedge <b id="mtc-hedge-cur" class="mono" style="margin-left:4px">—</b> ✎</span>
           <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
@@ -23109,6 +23113,7 @@
   function offlineChip(){
     $('mtc-copier-chip').innerHTML = `<span class="mtc-dot off"></span>Copier offline`
     const v = $('mtc-version'); if(v) v.style.display = 'none'
+    const hcOff = $('mtc-hedge-chip'); if(hcOff) hcOff.style.display = 'none'
     const badge = $('sb-badge-mtc'); if(badge){ badge.hidden = true }
     const tc = $('mt5tab-copier-chip'); if(tc) tc.innerHTML = `<span class="mtc-dot off"></span>Copier offline`
     const tv = $('mt5tab-version'); if(tv) tv.style.display = 'none'
@@ -23280,6 +23285,14 @@
     $('mtc-copier-chip').innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
     const v = $('mtc-version')
     if(d.version){ v.style.display = ''; v.textContent = 'v' + d.version }
+    // Hedge-Chip: erwartetes Hedge-Konto aus den Configs (nicht der Live-Login) —
+    // genau der Wert, den der Klick-Editor umstellt. Uneinheitlich = Fleet-Fehler.
+    const hc = $('mtc-hedge-chip'), hcur = $('mtc-hedge-cur')
+    if(hc && hcur){
+      const exps = [...new Set((d.instances || []).map(x => String(x.hedge_expected || '')).filter(Boolean))]
+      if(exps.length){ hc.style.display = ''; hcur.textContent = exps.length === 1 ? exps[0] : '⚠ uneinheitlich' }
+      else hc.style.display = 'none'
+    }
     const badge = $('sb-badge-mtc')
     if(badge){ const n = (d.instances || []).length; badge.hidden = !n; badge.textContent = n }
 
@@ -23443,6 +23456,30 @@
   // Stack-Neustart-Knopf (15.08.2026, Finns Wunsch): das Hand-Ritual — CMDs zu,
   // taskkill, start-alles.bat — als ein Klick. app.py killt den Stack (inkl.
   // sich selbst) und startet ihn frisch; die Seite lädt danach von selbst neu.
+  // Hedge-Konto zentral umstellen (25.08.2026, Finns Wunsch): ID einmal hier
+  // eingeben statt per Hand in jeder config*.json auf dem PC. Die Configs
+  // bleiben der Speicher (EINE Wahrheitsquelle — kein Supabase-Spiegel, das
+  // wäre dieselbe Karteileichen-Falle wie beim Doppel-Hedge-Check heute).
+  // Eigene Verdrahtung (Projektregel: keine Sammel-Handler).
+  const hedgeChipBtn = $('mtc-hedge-chip')
+  if(hedgeChipBtn) hedgeChipBtn.addEventListener('click', async () => {
+    const cur = ($('mtc-hedge-cur') || {}).textContent || ''
+    const raw = window.prompt('Hedge-Kontonummer dieses PCs (das Konto, in dem das Hedge-Terminal eingeloggt ist):',
+      /^\d+$/.test(cur) ? cur : '')
+    if(raw == null) return
+    const login = String(raw).trim()
+    if(!/^\d{1,12}$/.test(login)){ alert('Bitte nur die Kontonummer eingeben, z.B. 488579.'); return }
+    if(!confirm(`Hedge-Konto dieses PCs auf ${login} stellen?\n\nDie Nummer wird in alle Copier-Configs geschrieben; der Copier startet sich neu und prüft gegen das neue Konto. Das Hedge-Terminal muss in genau diesem Konto eingeloggt sein.`)) return
+    try{
+      const r = await window.mtcApi('set-hedge', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login }) })
+      alert((r && r.ok ? '✅ ' : '⚠️ ') + (r && r.msg ? r.msg : 'keine Antwort'))
+      mtcLoad()
+    }catch(e){
+      alert('Umstellen fehlgeschlagen: ' + (e && e.message || e))
+    }
+  })
+
   // Maus-Test-Knopf (15.08.2026, Finns Wunsch): isolierter Beweis, dass der Bot
   // Maus + Tastatur auf dem PC steuern kann — getrennt von MT5.
   const mouseTestBtn = $('mtc-mouse-test')

@@ -1648,6 +1648,76 @@ class Handler(BaseHTTPRequestHandler):
             ok = delete_plan(pid)
             return self._send(200, json.dumps({"ok": ok, "msg": "geloescht" if ok else "unbekannt"}))
 
+        if u.path == "/api/set-hedge":
+            # Hedge-Konto dieses PCs zentral umstellen (25.08.2026, Finns Wunsch
+            # nach dem 437804/488579-Hänger: die ID soll in Prophos eingebbar
+            # sein statt per Hand in jeder config*.json). Schreibt
+            # hedge_expected_login in ALLE Instanz-Configs — check_fleet
+            # verlangt ohnehin, dass sie identisch sind. Der Copier merkt die
+            # Aenderung binnen 2 s (nicht in HOT) und startet sich selbst neu,
+            # damit alle Startpruefungen gegen das neue Konto laufen.
+            # Localhost-only wie alles hier; die Master-Kontonummern bleiben tabu.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            login_raw = str(body.get("login") or "").strip()
+            if not re.fullmatch(r"\d{1,12}", login_raw):
+                return self._send(400, json.dumps({"ok": False, "msg":
+                    "Hedge-Kontonummer muss eine Zahl sein (z.B. 488579)."}, ensure_ascii=False))
+            new_login = int(login_raw)
+            insts = instances()
+            if not insts:
+                return self._send(400, json.dumps({"ok": False, "msg":
+                    "Keine Instanz-Configs auf diesem PC."}, ensure_ascii=False))
+            # Selbst-Spiegel-Sperre, andersherum (Muster /api/provision): das neue
+            # Hedge-Konto darf kein Master dieses PCs sein.
+            for inst in insts:
+                cfg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+                if int(cfg.get("master_expected_login") or 0) == new_login:
+                    return self._send(400, json.dumps({"ok": False, "msg":
+                        f"{new_login} ist der Master von '{inst['name']}' — ein Master kann "
+                        f"nicht das Hedge-Konto sein (wuerde auf sich selbst spiegeln)."},
+                        ensure_ascii=False))
+            # Riegel: bewiesene offene Hedges auf dem ALTEN Konto → erst schliessen.
+            # Nur FRISCHER Status zaehlt als Beweis (Doktrin 'unbekannt ≠ leer' gilt
+            # fuers Loeschen — hier blockt nur ein positiver Beweis, sonst kaeme man
+            # aus einem crashenden Copier nie heraus).
+            for inst in insts:
+                st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+                except (TypeError, ValueError):
+                    age = None
+                if st.get("running") and age is not None and age <= 15 \
+                        and any((st.get("hedges") or {}).values()):
+                    return self._send(409, json.dumps({"ok": False, "msg":
+                        f"'{inst['name']}' hat gerade offene Hedges — erst schliessen, "
+                        f"dann das Hedge-Konto wechseln."}, ensure_ascii=False))
+            changed = []
+            for inst in insts:
+                path = os.path.join(HERE, inst["config_file"])
+                cfg = read_json(path)
+                if cfg is None:
+                    return self._send(500, json.dumps({"ok": False, "msg":
+                        f"{inst['config_file']} nicht lesbar — nichts geaendert."}, ensure_ascii=False))
+                if int(cfg.get("hedge_expected_login") or 0) == new_login:
+                    continue
+                cfg["hedge_expected_login"] = new_login
+                tmp = path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, path)
+                changed.append(inst["config_file"])
+            print(f"[panel] set-hedge: hedge_expected_login -> {new_login} "
+                  f"({', '.join(changed) or 'keine Aenderung'})", flush=True)
+            return self._send(200, json.dumps({"ok": True, "changed": changed, "msg":
+                (f"Hedge-Konto auf {new_login} gestellt ({len(changed)} Config(s)) — der Copier "
+                 f"startet sich in ~10 s neu und prueft gegen das neue Konto. Wichtig: das "
+                 f"Hedge-Terminal muss in genau diesem Konto eingeloggt sein.")
+                if changed else f"Alle Configs standen schon auf {new_login}."}, ensure_ascii=False))
+
         if u.path == "/api/mouse-test":
             # Isolierter Maus-/Tastatur-Test (15.08.2026, Finns Wunsch): klaert
             # getrennt von MT5, ob der Bot auf diesem PC den Cursor bewegen und
