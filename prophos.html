@@ -4004,6 +4004,9 @@
         </div>
         <div class="modal-foot" id="pf-foot" style="display:none">
           <button class="btn btn-ghost" id="pf-cancel">Abbrechen</button>
+          <!-- Erneut versuchen (25.08.2026, Finns Wunsch): Problem fixen und den
+               Check direkt neu laufen lassen, statt Popup zu + Trade neu planen -->
+          <button class="btn btn-primary" id="pf-retry" style="display:none">↻ Erneut versuchen</button>
           <button class="btn btn-primary" id="pf-force">Trotzdem starten</button>
         </div>
       </div>
@@ -16551,7 +16554,9 @@
     const foot = document.getElementById('pf-foot')
     const forceBtn = document.getElementById('pf-force')
     const cancelBtn = document.getElementById('pf-cancel')
+    const retryBtn = document.getElementById('pf-retry')
     if(allOk){
+      if(retryBtn) retryBtn.style.display = 'none'
       if(finalEl){
         finalEl.style.display = 'block'
         finalEl.className = 'pf-final ok'
@@ -16566,6 +16571,9 @@
       }
       if(forceBtn) forceBtn.style.display = 'none'
       if(cancelBtn) cancelBtn.textContent = 'Schließen'
+      // Erneut versuchen (25.08.2026): Problem fixen, direkt neu prüfen —
+      // Popup bleibt offen, die gemerkte Bot-Order bleibt dadurch gültig.
+      if(retryBtn){ retryBtn.style.display = ''; retryBtn.disabled = false; retryBtn.textContent = '↻ Erneut versuchen' }
       if(foot) foot.style.display = 'flex'
     }
   }
@@ -17188,6 +17196,7 @@
       // NICHT auto-schließen (_pfFinish(true) würde nach 1,6s zumachen und den
       // Bereitschafts-Ticker unsichtbar machen) — Fuß mit "Schließen" anbieten.
       const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
       const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
       if(foot) foot.style.display = 'flex'
     }
@@ -17195,6 +17204,18 @@
 
   document.getElementById('pfClose')?.addEventListener('click', _pfClose)
   document.getElementById('pf-cancel')?.addEventListener('click', _pfClose)
+  // Erneut versuchen (25.08.2026, Finns Wunsch): Check für DENSELBEN Plan neu
+  // anwerfen, ohne das Popup zu schließen — _pfClose würde die gemerkte
+  // Bot-Order verwerfen und den Plan-Bezug (_pfPlanId) nullen. Jeder Preflight
+  // baut Zeilen/Fuß beim Start selbst frisch auf, MT5 stoppt seinen alten
+  // Bereitschafts-Ticker selbst (_pfMt5StopTimer am Funktionsanfang).
+  document.getElementById('pf-retry')?.addEventListener('click', () => {
+    const pid = _pfPlanId
+    if(pid == null) return
+    const rb = document.getElementById('pf-retry')
+    if(rb){ rb.disabled = true; rb.textContent = 'Prüfe …' }
+    tpPreflightAndStart(pid)
+  })
   document.getElementById('pf-force')?.addEventListener('click', async () => {
     const pid = _pfPlanId
     _pfClose()
