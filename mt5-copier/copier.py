@@ -813,13 +813,28 @@ def main():
         # EA war nach unsauberem Beenden vom Chart verschwunden, Karte sah gesund
         # aus, Master-Trade blieb ungehedged). Deshalb steht das jetzt als Warnung
         # in der Karte.
+        # standby (25.08.2026, Finns Einwand): die Master-Terminals sind
+        # absichtlich ZU und oeffnen erst beim Trade-Start — fehlender oder
+        # eingefrorener Snapshot ist dann Normalzustand, keine Stoerung. Die
+        # Karte soll dann ruhig "Standby" zeigen statt der Dauer-Warnung.
+        # standby ist ein reiner ANZEIGE-Hinweis: note bleibt in ALLEN
+        # Stale-Faellen gesetzt, denn note ist das Frische-Siegel fuer
+        # Panel-Loesch-Riegel, P&L-Beweis und master_algo — 'alt ist nicht
+        # aktuell' gilt unveraendert. Alarm bleibt Alarm, sobald etwas auf
+        # dem Spiel steht: offene Hedges oder Master-Positionen im letzten
+        # Snapshot (der Fund vom 15.08. — EA weg, Trade ungehedged — faellt
+        # genau NICHT unter standby, weil dort eine Position im Spiel war).
         note = None
+        standby = False
+        offene_hedges = any(hs for hs in (hedges or {}).values())
         if not connected:
             note = "warte auf Snapshot des Master-Terminals"
+            standby = not offene_hedges
         elif m.last_seq is not None and time.time() - m.last_change > 15:
             note = (f"Snapshot eingefroren — Lese-EA im Master-Terminal pruefen! "
                     f"(Chart mit ProphosHedgeReader offen? Sonst neu aufziehen, "
                     f"InpFileName = {m.snapshot_file})")
+            standby = (not offene_hedges) and not ((snap or {}).get("positions"))
         return {
             "running": True, "connected": connected,
             "master_login": (snap or {}).get("login") or m.master_login or None,
@@ -831,6 +846,7 @@ def main():
             "hedges": {str(k): v for k, v in (hedges or {}).items()},
             "blocked": sorted(m.blocked),
             "note": note,
+            "standby": standby,
             # P&L-Beweisdaten (15.08.2026, Etappe 3): Master-Seite aus dem
             # Snapshot-Header v3, Hedge-Seite aus account_info() (einmal pro
             # Tick). Fehlende Quellen bleiben None — nie 0.
@@ -996,6 +1012,9 @@ def main():
                                           f"{snap['login']} statt {m.master_login} — Trade in "
                                           f"Prophos neu starten, der Start loggt das Terminal "
                                           f"automatisch richtig ein.")
+                            # Falscher Login ist nie Standby — das Terminal LAEUFT ja,
+                            # nur im falschen Konto (25.08.2026).
+                            st["standby"] = False
                             st["wrong_login"] = snap["login"]
                             write_status(m.status_path, st)
                     continue

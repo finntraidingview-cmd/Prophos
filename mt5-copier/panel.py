@@ -1046,6 +1046,7 @@ button{font-family:inherit;cursor:pointer}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
 .dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(18,183,106,.15)}
 .dot.off{background:var(--danger);box-shadow:0 0 0 3px rgba(240,68,56,.12)}
+.dot.idle{background:#98A2B3;box-shadow:0 0 0 3px rgba(152,162,179,.15)}
 
 .wrap{max-width:1340px;margin:0 auto;padding:22px 28px 60px}
 .view-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:16px;flex-wrap:wrap}
@@ -1093,6 +1094,7 @@ button{font-family:inherit;cursor:pointer}
 .acc-acts{display:flex;gap:8px;margin-top:13px;align-items:center;flex-wrap:wrap}
 .warnbox{background:rgba(247,144,9,.1);border:1px solid rgba(247,144,9,.35);color:#b45309;
   padding:8px 10px;border-radius:var(--r-sm);font-size:12px;margin-top:10px}
+.standbybox{color:var(--sub);font-size:12px;margin-top:10px}
 
 /* Details (aufklappbar) */
 .details{display:none;border-top:1px solid var(--border-soft);margin-top:14px;padding-top:13px}
@@ -1244,15 +1246,19 @@ function mapRows(map){
 }
 function card(d){
   const s=d.status||{}, live=d.alive;
+  // Standby statt Dauer-Warnung (25.08.2026, wie in prophos.html): Terminal
+  // absichtlich zu + nichts im Spiel -> ruhiger Chip, keine orange Box.
+  const standby=live&&!!s.standby;
   const pos=(s.master_positions||[]).length, hed=Object.keys(s.hedges||{}).length;
   const broker=s.master_server||d.master_server||'Broker unbekannt';
   const isOpen=openSet.has(d.file);
   return `<div class="card${isOpen?' open':''}" data-file="${esc(d.file)}">
    <div class=acc-top><span class=acc-name>${esc(d.name)}</span>
-     <span class=acc-state><span class="dot ${live?'on':'off'}"></span>${live?'läuft':'gestoppt'}</span></div>
+     <span class=acc-state><span class="dot ${live?(standby?'idle':'on'):'off'}"></span>${live?(standby?'Standby':(s.note?'läuft':'aktiv')):'gestoppt'}</span></div>
    <div class=acc-broker><b>${esc(broker)}</b></div>
    <div class=acc-route><span class=mono>${esc(s.master_login||d.master_expected||'—')}</span> → Hedge <span class=mono>${esc(s.hedge_login||d.hedge_expected||'—')}</span></div>
-   ${s.note?`<div class=warnbox>${esc(s.note)}</div>`:''}
+   ${s.note&&!standby?`<div class=warnbox>${esc(s.note)}</div>`:''}
+   ${standby?`<div class=standbybox>Master-Terminal zu — Karte wird aktiv, sobald der Trade-Start es öffnet</div>`:''}
    ${(s.blocked||[]).length?`<div class=warnbox>Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>`:''}
    <div class=acc-stats>
      <div class="stat${pos?' hot':''}"><b>${pos}</b><span>Positionen</span></div>

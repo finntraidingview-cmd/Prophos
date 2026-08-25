@@ -2228,6 +2228,7 @@
   #dashboard-view .mtc-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   #dashboard-view .mtc-dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(18,183,106,.15)}
   #dashboard-view .mtc-dot.off{background:var(--danger);box-shadow:0 0 0 3px rgba(240,68,56,.12)}
+  #dashboard-view .mtc-dot.idle{background:var(--sub-2);box-shadow:0 0 0 3px rgba(152,162,179,.15)}
   #dashboard-view .mtc-banner{background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);
     color:#c03128;padding:11px 14px;border-radius:var(--r-md);font-size:13px;margin-bottom:14px;white-space:pre-line}
   #dashboard-view .mtc-jobbar{background:var(--violet-tint);border:1px solid rgba(84,71,206,.25);
@@ -2254,6 +2255,7 @@
   #dashboard-view .mtc-acts{display:flex;gap:8px;margin-top:13px;align-items:center;flex-wrap:wrap}
   #dashboard-view .mtc-warn{background:rgba(247,144,9,.1);border:1px solid rgba(247,144,9,.35);
     color:#b45309;padding:8px 10px;border-radius:8px;font-size:12px;margin-top:10px}
+  #dashboard-view .mtc-standby{color:var(--sub);font-size:12px;margin-top:10px}
   #dashboard-view .mtc-details{display:none;border-top:1px solid var(--border-soft);margin-top:14px;padding-top:13px}
   #dashboard-view .mtc-card.open .mtc-details{display:block}
   #dashboard-view .mtc-details label{display:block;font-size:11px;font-weight:600;color:var(--sub);
@@ -9087,6 +9089,7 @@
           alive: !!inst.alive,
           status: {
             note: s.note || null,
+            standby: !!s.standby,
             multiplier: s.multiplier ?? null,
             master_positions: s.master_positions || [],
             hedges: s.hedges || {},
@@ -9203,7 +9206,7 @@
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
           + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
-          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
+          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.standby ? 'Standby — Terminal zu' : s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
           + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`
       }
       html += '</div>'
@@ -22931,15 +22934,22 @@
 
   function card(d){
     const s = d.status || {}, live = d.alive
+    // Standby statt Dauer-Warnung (25.08.2026, Finns Einwand: Master-Terminals
+    // sind absichtlich zu, bis der Trade-Start sie oeffnet). Der Copier meldet
+    // standby nur, wenn NICHTS auf dem Spiel steht (keine Hedges, keine
+    // Master-Positionen im letzten Snapshot) — sonst bleibt die orange Warnung.
+    // Alte Copier-Versionen kennen das Feld nicht → Verhalten wie bisher.
+    const standby = live && !!s.standby
     const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
     const broker = s.master_server || d.master_server || 'Broker unbekannt'
     const isOpen = mtcOpen.has(d.file)
     return `<div class="mtc-card${isOpen ? ' open' : ''}" data-mtcfile="${esc(d.file)}">
       <div class="mtc-top"><span class="mtc-name">${esc(d.display_name || d.name)}</span>
-        <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span></div>
+        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? (standby ? 'Standby' : (s.note ? 'läuft' : 'aktiv')) : 'gestoppt'}</span></div>
       <div class="mtc-broker"><b>${esc(broker)}</b></div>
       <div class="mtc-route"><span class="mono">${esc(s.master_login || d.master_expected || '—')}</span> → Hedge <span class="mono">${esc(s.hedge_login || d.hedge_expected || '—')}</span></div>
-      ${s.note ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
+      ${s.note && !standby ? `<div class="mtc-warn">${esc(s.note)}</div>` : ''}
+      ${standby ? `<div class="mtc-standby">Master-Terminal zu — Karte wird aktiv, sobald der Trade-Start es öffnet</div>` : ''}
       ${(s.blocked || []).length ? `<div class="mtc-warn">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))} — im Hedge-Terminal prüfen</div>` : ''}
       <div class="mtc-stats">
         <div class="mtc-stat${pos ? ' hot' : ''}"><b>${pos}</b><span>Positionen</span></div>
@@ -23053,9 +23063,12 @@
 
   function mt5Row(d){
     const s = d.status || {}, live = d.alive
+    // Standby-Logik wie in card() (25.08.2026): Terminal absichtlich zu und
+    // nichts im Spiel → ruhiger Chip statt orange Dauer-Warnung.
+    const standby = live && !!s.standby
     const pos = (s.master_positions || []).length, hed = Object.keys(s.hedges || {}).length
     const broker = s.master_server || d.master_server || '—'
-    const warn = s.note ? `<div style="font-size:11px;color:#d97706;margin-top:3px;max-width:340px">${esc(s.note)}</div>` : ''
+    const warn = (s.note && !standby) ? `<div style="font-size:11px;color:#d97706;margin-top:3px;max-width:340px">${esc(s.note)}</div>` : ''
     const blocked = (s.blocked || []).length
       ? `<div style="font-size:11px;color:#d97706;margin-top:3px">Gestoppt für Master-Pos: ${esc((s.blocked||[]).join(', '))}</div>` : ''
     return `<tr>
@@ -23066,7 +23079,7 @@
       </td>
       <td>${esc(broker)}</td>
       <td>
-        <span class="mtc-state"><span class="mtc-dot ${live ? 'on' : 'off'}"></span>${live ? 'läuft' : 'gestoppt'}</span>
+        <span class="mtc-state"><span class="mtc-dot ${live ? (standby ? 'idle' : 'on') : 'off'}"></span>${live ? (standby ? 'Standby' : (s.note ? 'läuft' : 'aktiv')) : 'gestoppt'}</span>
         ${(pos || hed) ? `<div style="font-size:11px;color:var(--sub);margin-top:2px">${pos} Position(en) · ${hed} Hedge(s)</div>` : ''}
       </td>
       <td><span class="mono">×${esc(d.multiplier ?? '–')}</span></td>
