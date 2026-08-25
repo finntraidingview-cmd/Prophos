@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prophos Copier-Panel — kleines Web-Frontend für den lokalen MT5-Copier auf DIESEM PC.
+Echo-Panel (Prophos) — kleines Web-Frontend für den lokalen MT5-Copier auf DIESEM PC.
 
 Zweck: Multiplikator und Symbol-Mapping im Browser setzen statt in der
 Textdatei — für mehrere Master/Prop-Firmen gleichzeitig. Zeigt außerdem live, was der
@@ -1053,7 +1053,7 @@ def start_terminal(fname, creds=None):
 
 PAGE = r"""<!doctype html><html lang=de><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Copier-Panel</title><style>
+<title>Echo-Panel</title><style>
 /* Design-Tokens aus prophos.html uebernommen (14.08.2026) — gleiche Sprache wie Prophos */
 :root{
   --violet:#5447CE;--violet-dark:#4539b8;--violet-tint:rgba(84,71,206,.08);
@@ -1205,7 +1205,7 @@ pre.log{background:var(--surface-tint);border:1px solid var(--border-soft);borde
 </style></head><body>
 
 <div class=topbar>
-  <h1>Copier-Panel</h1>
+  <h1>Echo-Panel</h1>
   <span class=sub>lokal auf diesem PC · Prophos bleibt unangetastet</span>
   <span class=sub id=version-chip title="Version — aktualisiert sich selbst von GitHub"></span>
   <span class=copier-chip id=copier-chip><span class="dot off"></span>Copier</span>
@@ -2026,7 +2026,7 @@ def _version_watcher(my_version):
 
 def main():
     print("=" * 66)
-    print(" Prophos Copier-Panel")
+    print(" Echo-Panel (Prophos)")
     print(f" Ordner: {HERE}")
     print(f" Master: {', '.join(i['config_file'] for i in instances()) or '(keine config*.json gefunden)'}")
     ignored = [fn for fn in sorted(os.listdir(HERE))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prophos MT5-Hedge-Executor — EIN Prozess bedient ALLE Master-Konten dieses PCs.
+Echo (Prophos) — MT5-Hedge-Executor: EIN Prozess bedient ALLE Master-Konten dieses PCs.
 
 ARCHITEKTUR (Umbau 13.08.2026 nach Multi-Instanz-Audit):
 
@@ -593,7 +593,7 @@ def main():
     common = ref.get("common_files_dir") or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
     print("=" * 72)
-    print(f" Prophos MT5-Hedge-Executor · {len(masters)} Master, ein Hedge-Terminal")
+    print(f" Echo · MT5-Hedge-Executor · {len(masters)} Master, ein Hedge-Terminal")
     for m in masters:
         print(f"   {m.file:<24} magic {m.magic}  "
               f"Master {m.master_login or '?'}  Snapshot {m.snapshot_file}")

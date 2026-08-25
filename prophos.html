@@ -2589,7 +2589,7 @@
            ueber das lokale app.py laeuft (Copier ist eine Pro-PC-Sache). -->
       <button class="sb-link" data-view="mt5copier">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
-        MT5-Copier <span class="sb-badge" id="sb-badge-mtc" hidden>0</span>
+        Echo <span class="sb-badge" id="sb-badge-mtc" hidden>0</span>
       </button>
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
@@ -2875,7 +2875,7 @@
         <!-- MT5-Copier: eigener Hedge-Copier dieses PCs (Etappe 3, 15.08.2026).
              Separater Tab neben Duplikum, Duplikum bleibt unberührt. -->
         <button class="subtab" data-subtab="mt5">
-          MT5-Copier
+          Echo
           <span class="subtab-count" id="subtab-count-mt5">–</span>
         </button>
       </div>
@@ -3575,7 +3575,7 @@
               <label>Weg</label>
               <div class="seg" id="tp-route-seg">
                 <button type="button" id="tp-route-dup">Duplikum</button>
-                <button type="button" id="tp-route-mt5">MT5-Copier</button>
+                <button type="button" id="tp-route-mt5">Echo</button>
               </div>
             </div>
             <div class="field">
@@ -4963,8 +4963,8 @@
     <section class="view" data-view="mt5copier">
       <div class="view-head">
         <div>
-          <h1 class="view-title">MT5-Copier</h1>
-          <p class="view-sub">Eigener Hedge-Copier — die Flotte dieses PCs. Duplikium läuft daneben normal weiter.</p>
+          <h1 class="view-title">Echo</h1>
+          <p class="view-sub">Dein MT5-Hedge-Copier — die Flotte dieses PCs. Duplikium läuft daneben normal weiter.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="mtc-version" title="Version des Copier-Stacks auf diesem PC" style="display:none"></span>
@@ -6351,7 +6351,7 @@
     'account-detail': ['Account', 'Details, Trades & Buchungen'],
     topstep:   ['Topstep Mirror', 'TSX ↔ MT5 hatching'],
     calc:      ['Lot Rechner', 'Hatch-Multiplier zwischen zwei Firms'],
-    mt5copier: ['MT5-Copier', 'Eigener Hedge-Copier — die Flotte dieses PCs'],
+    mt5copier: ['Echo', 'Dein MT5-Hedge-Copier — die Flotte dieses PCs'],
     trades:    ['Trades',    'Trade-Log über alle Accounts'],
     livetrades:['Live Trades', 'Offene Positionen'],
     risk:      ['Risk',      'Live-Drawdown & Compliance'],
@@ -9129,6 +9129,57 @@
     for(let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
     return MT5_FLEET_FARBEN[h % MT5_FLEET_FARBEN.length]
   }
+
+  /* ── Personen-Karte fuer die Flotte (25.08.2026, Finns Ansage: „jede Person
+   * eine Farbe — und ich will ALLE laufenden Orders sehen, Copier UND
+   * Duplikium"). Die einzige Stelle, die die Accounts ALLER Personen kennt,
+   * ist /admin/overview auf Railway (Service-Key; RLS versteckt fremde
+   * Accounts vor dem eingeloggten User). Gemappt wird ueber die External ID
+   * (= MT5-Login) und den Account-Namen; lesbare Namen liefert der Profil-
+   * Umschalter, wie in der Admin-Uebersicht. Faellt der Endpoint aus, faerbt
+   * die Flotte wie bisher pro Login — nie leer, nur weniger schlau. */
+  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null }
+  function _fleetKurzName(mail){
+    const s = String(mail || ''); const at = s.indexOf('@')
+    return at > 0 ? s.slice(0, at) : s
+  }
+  async function fleetPersonen(){
+    if(Date.now() < _fleetPers.next) return _fleetPers
+    _fleetPers.next = Date.now() + 60 * 1000            // Fehlerfall: in 1 min neu
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session && session.access_token
+      if(!tok) return _fleetPers
+      const nameById = new Map()
+      for(const p of (typeof profList === 'function' ? profList() : [])){
+        if(p && p.userId && p.name) nameById.set(String(p.userId), p.name)
+      }
+      const meUid = String((session.user || {}).id || '')
+      if(meUid) _fleetPers.me = { uid: meUid, name: nameById.get(meUid) || _fleetKurzName((session.user || {}).email) || 'Ich' }
+      const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      if(!r.ok) throw new Error('HTTP ' + r.status)
+      const d = await r.json()
+      const pName = (uid, mail) => nameById.get(String(uid)) || _fleetKurzName(mail) || String(uid).slice(0, 8)
+      const byLogin = {}, byName = {}
+      for(const a of (d.accounts || [])){
+        const wer = { uid: String(a.user_id), name: pName(a.user_id, a.person) }
+        if(a.ext) byLogin[String(a.ext).trim()] = wer
+        if(a.name) byName[String(a.name).trim().toLowerCase()] = wer
+      }
+      _fleetPers.byLogin = byLogin
+      _fleetPers.byName = byName
+      _fleetPers.next = Date.now() + 5 * 60 * 1000      // frisch — 5 min Ruhe
+    }catch(_){ /* Login-Farben als Fallback, naechster Versuch in 1 min */ }
+    return _fleetPers
+  }
+  function fleetWer(login, accName){
+    const p = _fleetPers
+    const l = String(login || '').trim()
+    if(p.byLogin && l && p.byLogin[l]) return p.byLogin[l]
+    const n = String(accName || '').trim().toLowerCase()
+    if(p.byName && n && p.byName[n]) return p.byName[n]
+    return null
+  }
   window._fleetSetFilter = function(f){
     localStorage.setItem('prophos_fleet_filter', f)
     mt5FleetRenderTick(true)
@@ -9141,33 +9192,82 @@
     try{
       const { data, error } = await supabase.from('mt5_live').select('*')
         .gte('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-      if(error || !data || !data.length){ box.style.display = 'none'; return }
-      const filter = localStorage.getItem('prophos_fleet_filter') || 'alle'
+      const rows = (!error && Array.isArray(data))
+        ? data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
+
+      // Cloud-Seite (Duplikium + TopstepX + MetaApi): der Live-Trades-
+      // Aggregator holt sie ohnehin alle 5s — hier nur pro Account gebuendelt.
+      // Duplikium ist cloud-global, damit stehen auch die Orders der ANDEREN
+      // Personen hier, nicht nur die des eingeloggten Profils (25.08.2026,
+      // Finns Ansage: alle laufenden Orders an EINEM Ort, Copier + Duplikium).
+      const cloudAlle = [...(ltState.positions.dup || []), ...(ltState.positions.tsx || []), ...(ltState.positions.mt || [])]
+      const cloudGrps = {}
+      for(const p of cloudAlle){
+        const key = p.src + '::' + p.accountId
+        if(!cloudGrps[key]) cloudGrps[key] = { src: p.src, accountId: p.accountId, accountName: p.accountName, pos: [] }
+        cloudGrps[key].pos.push(p)
+      }
+      const cloud = Object.values(cloudGrps).sort((a, b) => String(a.accountName).localeCompare(String(b.accountName)))
+
+      if(!rows.length && !cloud.length){ box.style.display = 'none'; return }
+
+      await fleetPersonen()   // Personen-Karte auffrischen (gecacht, 5 min)
+
+      // Wem gehoert was? MT5-Zeile: Master-Login → External ID. Duplikium:
+      // Login bzw. Name des Dup-Accounts. TopstepX/MetaApi laufen ueber das
+      // EIGENE Profil (RLS zeigt nur eigene Accounts) → aktuelle Person.
+      const werMt5 = r => fleetWer(r.master_login, null)
+      const werCloud = g => {
+        if(g.src === 'dup'){
+          const da = (dupState.accounts || []).find(a => a.account_id === g.accountId) || {}
+          return fleetWer(da.login, da.name || g.accountName)
+        }
+        return _fleetPers.me || null
+      }
+
+      // Chips: eine Farbe PRO PERSON. Unaufloesbare Zeilen behalten ihre
+      // Login-Farbe und heissen wie ihr Login — nie eine Person raten.
+      const chipMap = new Map()   // key → {label, farbe}
+      const merken = (wer, fallbackLabel, fallbackKey) => {
+        const key = 'p:' + (wer ? wer.uid : fallbackKey)
+        if(!chipMap.has(key)) chipMap.set(key, {
+          label: wer ? wer.name : fallbackLabel,
+          farbe: mt5FleetFarbe(wer ? wer.uid : String(fallbackKey))
+        })
+        return key
+      }
+      const rowKey = new Map()    // Zeile/Gruppe → Chip-Key
+      for(const r of rows) rowKey.set(r, merken(werMt5(r), String(r.master_login || '?'), 'login:' + r.master_login))
+      for(const g of cloud) rowKey.set(g, merken(werCloud(g), String(g.accountName || g.accountId), 'acc:' + g.src + g.accountId))
+
+      let filter = localStorage.getItem('prophos_fleet_filter') || 'alle'
+      if(filter.startsWith('id:')) filter = 'alle'   // Alt-Format (Farbe pro Login) — still zuruecksetzen
+      if(filter !== 'alle' && filter !== 'pc' && !chipMap.has(filter)) filter = 'alle'
       const pc = mt5FleetPcId()
       const jetzt = Date.now()
-      const rows = data.sort((a, b) => String(a.instance).localeCompare(String(b.instance)))
-      const logins = [...new Set(rows.map(r => r.master_login).filter(Boolean))]
       const chip = (key, label, farbe) => {
         const an = filter === key
         return `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
                (farbe ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${farbe};margin-right:6px"></span>` : '') +
                esc(label) + '</button>'
       }
+      const chips = [...chipMap.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label, 'de'))
       let html = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">`
-        + `<span style="font-size:12px;font-weight:600;color:var(--sub)">MT5-FLOTTE</span>`
+        + `<span style="font-size:12px;font-weight:600;color:var(--sub)">FLOTTE — ALLE PERSONEN</span>`
         + chip('alle', 'Alle') + chip('pc', 'Nur dieser PC')
-        + logins.map(l => chip('id:' + l, l, mt5FleetFarbe(l))).join('') + '</div>'
+        + chips.map(([key, c]) => chip(key, c.label, c.farbe)).join('') + '</div>'
       const sicht = rows.filter(r =>
         filter === 'alle' ? true :
         filter === 'pc' ? r.pc_name === pc :
-        filter === ('id:' + r.master_login))
+        rowKey.get(r) === filter)
       html += '<div style="display:flex;flex-direction:column;gap:8px">'
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
       for(const r of sicht){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
-        const farbe = mt5FleetFarbe(r.master_login)
+        const wer = werMt5(r)
+        const farbe = chipMap.get(rowKey.get(r)).farbe
         const pos = s.master_positions || []
         const mPL = (s.master_equity != null && s.master_balance != null)
           ? Number(s.master_equity) - Number(s.master_balance) : null
