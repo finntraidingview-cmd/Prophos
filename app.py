@@ -439,27 +439,40 @@ def refresh_duplikum_token(email):
 def duplikum_session():
     if request.method == "OPTIONS":
         return "", 200
-    if not DUP_EMAIL:
-        return jsonify({"ok": False, "error": "Keine Duplikium-Env-Creds konfiguriert"}), 503
     token = (request.headers.get("sb-token") or "").strip()
     if not token:
         return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    uid = ""
     try:
         r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
                          headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
-        if r.status_code != 200 or not (r.json() or {}).get("id"):
+        uid = str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
+        if not uid:
             return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
     except Exception:
         return jsonify({"ok": False, "error": "Anmeldung nicht pruefbar"}), 502
-    s = duplikum_sessions.get(DUP_EMAIL) or {}
-    tok = s.get("token")
-    # Frischer Gunicorn-Worker hat keinen Cache; aeltere Tokens vorsorglich
-    # erneuern statt sie dem Frontend zu geben, das dann doch ein 401 faengt.
-    if not tok or (time.time() - s.get("last_refresh", 0)) > 600:
-        tok = refresh_duplikum_token(DUP_EMAIL) or tok
+    # Token-Quelle ist DIESELBE wie beim Waechter: duplikum_credentials aus
+    # Supabase (ueberlebt Restarts). Der erste Wurf nahm DUP_EMAIL-Env-Creds —
+    # die sind auf Railway aber nie gesetzt (Fund 25.08.: Endpoint gab 503,
+    # waehrend der Waechter munter pollte). Bevorzugt die Zeile des anfragenden
+    # Users, sonst irgendeine — es ist EIN geteiltes Duplikium-Konto.
+    creds = None
+    if SUPABASE_SERVICE_KEY:
+        try:
+            rows = [c for c in sb_select("duplikum_credentials", {"select": "*"})
+                    if (c.get("email") or "").strip()]
+            creds = next((c for c in rows if str(c.get("user_id")) == uid), None) \
+                or (rows[0] if rows else None)
+        except Exception as e:
+            print(f"[duplikum] ⚠️ session creds: {type(e).__name__}: {e}", flush=True)
+    if not creds and DUP_EMAIL:
+        creds = {"email": DUP_EMAIL, "password": DUP_PASSWORD}
+    if not creds:
+        return jsonify({"ok": False, "error": "Keine Duplikium-Zugaenge hinterlegt"}), 503
+    tok = wt_email_token(creds)
     if not tok:
         return jsonify({"ok": False, "error": "Duplikium-Login fehlgeschlagen"}), 502
-    return jsonify({"ok": True, "token": tok, "email": DUP_EMAIL})
+    return jsonify({"ok": True, "token": tok, "email": (creds.get("email") or "").strip()})
 
 
 # ── Duplikium Generic Proxy ──
@@ -1844,6 +1857,7 @@ _dup_budget_hits = {}        # (email, path) -> [epoch, ...]
 _dup_budget_block = {}       # (email, path) -> epoch, bis wann gesperrt (nach 429-artigem Fehler)
 _dup_budget_lock = threading.Lock()
 _dup_acct_count = {}         # email -> {"n": int, "at": epoch}
+_dup_accounts_cache = {}     # email -> {"list": [{account_id,name,login}], "at": epoch} — fuer den dup_live-Spiegel
 
 
 def _dup_limits_for(path, accounts):
@@ -1927,6 +1941,11 @@ def wt_account_count(email, token):
         d = r.json() if r.status_code == 200 else {}
         if isinstance(d, dict) and isinstance(d.get("data"), list):
             n, ok = max(1, len(d["data"])), True
+            # Fuer den dup_live-Spiegel (25.08.2026): Name/Login pro Account —
+            # gleiche Antwort, kein zusaetzlicher Duplikium-Call.
+            _dup_accounts_cache[e] = {"at": time.time(), "list": [
+                {"account_id": a.get("account_id"), "name": a.get("name"), "login": a.get("login")}
+                for a in d["data"] if isinstance(a, dict)]}
     except Exception:
         pass
     if ok:
@@ -1981,6 +2000,15 @@ def sb_update(table, params, body):
                        headers=_sb_headers("return=representation"), timeout=12)
     r.raise_for_status()
     return r.json()
+
+
+def sb_upsert(table, body):
+    """POST mit merge-duplicates = Upsert auf den Primary Key (Service-Key,
+    an RLS vorbei). Fuer den dup_live-Spiegel (25.08.2026)."""
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", json=body,
+                      headers=_sb_headers("resolution=merge-duplicates,return=minimal"),
+                      timeout=12)
+    r.raise_for_status()
 
 
 def dup_login(email, password):
@@ -2265,6 +2293,21 @@ def _wt_memo_positions_locked(email, creds, memo):
             pass
     with _watcher_memo_lock:
         memo[email] = (token, positions)
+    # dup_live-Spiegel (25.08.2026, Finns Architektur-Ansage): die eben geholten
+    # Positionen in die geteilte DB legen — jeder Browser liest sie von dort,
+    # ohne eigenen Duplikium-Token (der starb per 401 und riss Flotte + Lots-
+    # Chips mit). Ein Upsert pro Konto und Zyklus (~30s), Fehler nur loggen —
+    # der Spiegel darf die Erkennung nie ausbremsen.
+    if isinstance(positions, list):
+        try:
+            sb_upsert("dup_live", {
+                "id": email,
+                "positions": positions,
+                "accounts": (_dup_accounts_cache.get(email) or {}).get("list", []),
+                "updated_at": _wt_now_iso(),
+            })
+        except Exception as e:
+            print(f"[watcher] ⚠️ dup_live-Spiegel: {type(e).__name__}: {e}", flush=True)
     return token, positions
 
 

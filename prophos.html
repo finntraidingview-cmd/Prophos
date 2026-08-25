@@ -9338,21 +9338,45 @@
     if(!dupState.token) dupEnsureSession()   // Duplikium-Zeilen selbstheilend
     _fleetRenderBusy = true
     try{
-      const { data, error } = await supabase.from('mt5_live').select('*')
-        .gte('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-      const rows = (!error && Array.isArray(data))
-        ? data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
+      const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+      const jetzt = Date.now()
+      const [ml, dl] = await Promise.all([
+        supabase.from('mt5_live').select('*').gte('updated_at', grenze),
+        supabase.from('dup_live').select('*').gte('updated_at', grenze)
+      ])
+      const rows = (!ml.error && Array.isArray(ml.data))
+        ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
 
-      // Cloud-Seite (Duplikium + TopstepX + MetaApi): der Live-Trades-
-      // Aggregator holt sie ohnehin alle 5s — hier nur pro Account gebuendelt.
-      // Duplikium ist cloud-global, damit stehen auch die Orders der ANDEREN
-      // Personen hier, nicht nur die des eingeloggten Profils (25.08.2026,
-      // Finns Ansage: alle laufenden Orders an EINEM Ort, Copier + Duplikium).
-      const cloudAlle = [...(ltState.positions.dup || []), ...(ltState.positions.tsx || []), ...(ltState.positions.mt || [])]
+      // Duplikium kommt seit 25.08.2026 abends aus der DB (dup_live, Waechter-
+      // Spiegel, ~30s-Takt) statt aus dem Browser-Aggregator: der brauchte den
+      // localStorage-Duplikium-Token, der per 401 starb und alle Zeilen mitriss.
+      // Finns Architektur-Ansage: Railway schreibt in die DB, alle User lesen.
+      // TopstepX bleibt Aggregator-Sache (per-Origin-Verbindung); MetaApi-
+      // Zeilen sind raus — dieselben Konten stehen als Slaves in dup_live.
       const cloudGrps = {}
-      for(const p of cloudAlle){
-        const key = p.src + '::' + p.accountId
-        if(!cloudGrps[key]) cloudGrps[key] = { src: p.src, accountId: p.accountId, accountName: p.accountName, pos: [] }
+      for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
+        const accById = {}
+        for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
+        const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
+        for(const p of (Array.isArray(dr.positions) ? dr.positions : [])){
+          const acc = accById[String(p.account_id)] || {}
+          const key = 'dup::' + p.account_id
+          if(!cloudGrps[key]) cloudGrps[key] = {
+            src: 'dup', accountId: p.account_id,
+            accountName: acc.name || acc.login || ('Dup-' + p.account_id),
+            login: acc.login || '', alterS, frischGrenzeS: 75,   // 2,5× Waechter-Takt
+            pos: []
+          }
+          cloudGrps[key].pos.push({ side: p.side, size: Number(p.amountLot) || 0, symbol: p.symbol || '?', pnl: null, ccy: '' })
+        }
+      }
+      const ltAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
+      for(const p of (ltState.positions.tsx || [])){
+        const key = 'tsx::' + p.accountId
+        if(!cloudGrps[key]) cloudGrps[key] = {
+          src: 'tsx', accountId: p.accountId, accountName: p.accountName,
+          login: '', alterS: ltAlterS == null ? 9999 : ltAlterS, frischGrenzeS: 20, pos: []
+        }
         cloudGrps[key].pos.push(p)
       }
       const cloud = Object.values(cloudGrps).sort((a, b) => String(a.accountName).localeCompare(String(b.accountName)))
@@ -9365,13 +9389,9 @@
       // Login bzw. Name des Dup-Accounts. TopstepX/MetaApi laufen ueber das
       // EIGENE Profil (RLS zeigt nur eigene Accounts) → aktuelle Person.
       const werMt5 = r => fleetWer(r.master_login, null)
-      const werCloud = g => {
-        if(g.src === 'dup'){
-          const da = (dupState.accounts || []).find(a => a.account_id === g.accountId) || {}
-          return fleetWer(da.login, da.name || g.accountName)
-        }
-        return _fleetPers.me || null
-      }
+      const werCloud = g => g.src === 'dup'
+        ? fleetWer(g.login, g.accountName)   // Login/Name kommen aus dup_live.accounts
+        : (_fleetPers.me || null)
 
       // Chips: eine Farbe PRO PERSON. Unaufloesbare Zeilen behalten ihre
       // Login-Farbe und heissen wie ihr Login — nie eine Person raten.
@@ -9392,7 +9412,6 @@
       if(filter.startsWith('id:')) filter = 'alle'   // Alt-Format (Farbe pro Login) — still zuruecksetzen
       if(filter !== 'alle' && filter !== 'pc' && !chipMap.has(filter)) filter = 'alle'
       const pc = mt5FleetPcId()
-      const jetzt = Date.now()
       const chip = (key, label, farbe) => {
         const an = filter === key
         return `<button type="button" onclick="_fleetSetFilter('${key}')" class="btn btn-ghost" style="padding:4px 10px;font-size:12px;${an ? 'border-color:var(--violet);color:var(--violet);' : ''}">` +
@@ -9476,22 +9495,21 @@
       // bewusst leer: sie haengen an der Cloud, nicht an einem PC. Frische
       // kommt vom Aggregator-Tick (P&L-Beweis-Doktrin: alt = grau, nie live).
       const cloudSicht = filter === 'pc' ? [] : cloud.filter(g => filter === 'alle' || rowKey.get(g) === filter)
-      const cloudAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
-      const cloudFrisch = cloudAlterS != null && cloudAlterS <= 20
       for(const g of cloudSicht){
         const c = chipMap.get(rowKey.get(g))
         const wer = werCloud(g)
+        const frisch = g.alterS <= g.frischGrenzeS   // dup: 75s (Waechter-Takt), tsx: 20s
         const posTxt = g.pos.map(p =>
           `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} ${Number(p.size || 0).toFixed(2)} ${esc(String(p.symbol))}`).join(' · ')
         const hatPnl = g.pos.some(p => p.pnl != null)
         const pnlSum = g.pos.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0)
         const pnlTxt = hatPnl ? ` · P&L ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(2)} ${esc(String(g.pos[0].ccy || ''))}` : ''
-        html += `<div style="border:1px solid var(--border);border-left:3px solid ${c.farbe};border-radius:10px;padding:10px 12px;${cloudFrisch ? '' : 'opacity:.55'}">`
+        html += `<div style="border:1px solid var(--border);border-left:3px solid ${c.farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(String(g.accountName))}</b>`
           + (wer ? ` <span style="font-size:12px;font-weight:600;color:${c.farbe}">${esc(wer.name)}</span>` : '')
           + ` ${ltSrcBadge(g.src)}</div>`
-          + `<div style="font-size:11px;color:var(--sub)">${cloudFrisch ? 'live' : (cloudAlterS == null ? 'wartet auf Aggregator' : 'zuletzt vor ' + cloudAlterS + 's')}</div></div>`
+          + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : 'zuletzt vor ' + g.alterS + 's'}</div></div>`
           + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${pnlTxt}</div></div>`
       }
       html += '</div>'
@@ -9683,12 +9701,11 @@
    * live zeigen. */
 
   const dupLots = {
-    positions: null,     // letzter getOpenPositions-Stand (Array), nie geraten
-    fetchedAt: 0,
+    positions: null,     // letzter dup_live-Stand (Array), nie geraten
+    fetchedAt: 0,        // updated_at der DB-Zeile (Schreibzeit des Wächters), nicht Lesezeit
     inFlight:  false,
-    INTERVAL:  10_000,   // Poll-Takt — app.py cacht Lese-Endpoints 3s (22.07.2026),
-                         // geteilt mit atCheck/Live-Trades → kaum Extra-Last upstream
-    FRESH_MS:  25_000    // 2,5× Intervall; älter gilt als stale und wird geleert
+    INTERVAL:  10_000,   // Poll-Takt gegen Supabase — seit 25.08.2026 abends kein Duplikium-Call mehr
+    FRESH_MS:  75_000    // 2,5× Wächter-Takt (30s); älter gilt als stale und wird geleert
   }
 
   // Läuft überhaupt ein Duplikium-Plan? (route='mt5' und Mirror gehören anderen Engines)
@@ -9703,17 +9720,22 @@
 
   async function dupLotsTick(){
     if(dupLots.inFlight) return
-    if(!dupState?.token) return
     if(typeof document !== 'undefined' && document.hidden) return
     // Nur wenn die Trades-View offen ist — die Chips leben ausschließlich dort
     if(!document.querySelector('.view[data-view="trades"].active')) return
     if(!dupLotsHasOpenPlan()) return
     dupLots.inFlight = true
     try{
-      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      if(res.ok){
-        dupLots.positions = res.data?.data || []
-        dupLots.fetchedAt = Date.now()
+      // Seit 25.08.2026 abends aus der geteilten DB (dup_live, Wächter-Spiegel)
+      // statt per Browser-Duplikium-Token: der starb per 401 (dupLogout) und
+      // riss die Chips mit — Finns Fund, um 19:02 da, um 19:52 weg. Kein Token
+      // nötig, funktioniert in jedem Profil auf jeder Origin. Die Positions-
+      // Rohfelder (account_id, id_master, amountLot, side) sind identisch.
+      const { data, error } = await supabase.from('dup_live').select('*')
+        .gte('updated_at', new Date(Date.now() - dupLots.FRESH_MS).toISOString())
+      if(!error && Array.isArray(data) && data.length){
+        dupLots.positions = data.flatMap(r => Array.isArray(r.positions) ? r.positions : [])
+        dupLots.fetchedAt = Math.min(...data.map(r => Date.parse(r.updated_at) || 0))
         dupLotsRefreshDom()
       }
     }catch(_){
@@ -9727,7 +9749,6 @@
     try{
       if(!p || p.status !== 'open' || p.route === 'mt5') return ''
       if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
-      if(!dupState?.token) return ''
       if(!Array.isArray(dupLots.positions) || (Date.now() - dupLots.fetchedAt) > dupLots.FRESH_MS) return ''
       const dupSlaveId  = atGetDupId(p.slaveAccountId)
       const dupMasterId = atGetDupId(p.masterAccountId)
