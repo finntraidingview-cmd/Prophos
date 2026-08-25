@@ -1939,13 +1939,21 @@ def wt_account_count(email, token):
         r = requests.post(f"{DUP_BASE}/account/getAccounts.php", data={"length": "1000"},
                           headers={"Authorization": f"Bearer {token}"}, timeout=15)
         d = r.json() if r.status_code == 200 else {}
-        if isinstance(d, dict) and isinstance(d.get("data"), list):
-            n, ok = max(1, len(d["data"])), True
+        # Duplikium liefert die Liste je nach Endpoint unter "data" ODER
+        # "accounts" — das Frontend liest getAccounts seit jeher als
+        # res.data.accounts. Der alte reine data-Check griff ins Leere: n blieb
+        # ewig auf dem Default und der dup_live-Spiegel ohne Namen (Fund
+        # 25.08.2026: acc_anzahl blieb 0, waehrend die Positionen flossen).
+        lst = None
+        if isinstance(d, dict):
+            lst = d.get("data") if isinstance(d.get("data"), list) else d.get("accounts")
+        if isinstance(lst, list):
+            n, ok = max(1, len(lst)), True
             # Fuer den dup_live-Spiegel (25.08.2026): Name/Login pro Account —
             # gleiche Antwort, kein zusaetzlicher Duplikium-Call.
             _dup_accounts_cache[e] = {"at": time.time(), "list": [
                 {"account_id": a.get("account_id"), "name": a.get("name"), "login": a.get("login")}
-                for a in d["data"] if isinstance(a, dict)]}
+                for a in lst if isinstance(a, dict)]}
     except Exception:
         pass
     if ok:
