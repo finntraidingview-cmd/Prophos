@@ -2598,13 +2598,13 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
       </button>
-      <!-- Live Trades: seit 25.08.2026 wieder sichtbar — die Flotte (alle
-           Personen, Echo + Duplikium) wohnt in dieser View und muss auch ueber
-           pages.dev erreichbar sein, nicht nur per #livetrades-Hash.
-           Risk / AI Advisor / Analytics / Journal bleiben ausgeblendet
-           (Finn nutzt sie nie, 14.07.2026) — Views + Code intakt, per Hash
-           erreichbar; display:none statt löschen, damit Referenzen nicht brechen. -->
-      <button class="sb-link" data-view="livetrades">
+      <!-- Live Trades / Risk / AI Advisor / Analytics / Journal: aus der
+           Navigation ausgeblendet (Finn nutzt sie nie, 14.07.2026; Live Trades
+           war am 25.08.2026 kurz zurueck und flog auf Finns Ansage sofort
+           wieder raus — die Flotte wohnt jetzt im Trades-Tab). Views + Code
+           bleiben intakt, per URL-Hash (#livetrades etc.) weiter erreichbar.
+           display:none statt löschen, damit Referenzen nicht brechen. -->
+      <button class="sb-link" data-view="livetrades" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
         Live Trades <span class="sb-badge" id="sb-badge-livetrades" hidden>0</span>
       </button>
@@ -3400,6 +3400,15 @@
           </button>
         </div>
       </div>
+
+      <!-- FLOTTE (18.08.2026 als MT5-Flotte in Live-Trades geboren, seit
+           25.08.2026 abends HIER — Finns Ansage: alle laufenden Orders aller
+           Personen im Trades-Tab, „Live-Trades ist schon laengst raus"):
+           Copier-Instanzen aller PCs aus Supabase mt5_live PLUS die Cloud-
+           Positionen (Duplikium/TopstepX/MetaApi) aus dem Aggregator.
+           Farbe pro PERSON (Aufloesung via /admin/overview), Filter-Chips.
+           Bleibt unsichtbar, solange nirgendwo etwas laeuft. -->
+      <div id="lt-fleet" style="display:none;margin-bottom:14px"></div>
 
       <!-- Sub-Tabs: Status -->
       <div class="subtabs">
@@ -4675,11 +4684,8 @@
       <!-- Hedge-Übersicht -->
       <div id="lt-hedge-overview" style="display:none;margin-bottom:14px"></div>
 
-      <!-- Flotte (18.08.2026 MT5, erweitert 25.08.2026): ALLE laufenden Orders
-           an einem Ort — Copier-Instanzen aller PCs aus Supabase mt5_live PLUS
-           die Cloud-Positionen (Duplikium/TopstepX/MetaApi) aus dem Aggregator.
-           Farbe pro PERSON (Aufloesung via /admin/overview), Filter-Chips -->
-      <div id="lt-fleet" style="display:none;margin-bottom:14px"></div>
+      <!-- Der Flotten-Block (lt-fleet) wohnt seit 25.08.2026 abends im
+           Trades-Tab — Finns Ansage: „Live-Trades ist schon laengst raus." -->
 
       <div id="lt-cards" style="display:flex;flex-direction:column;gap:14px"></div>
 
@@ -6410,11 +6416,12 @@
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
-    // Live-Trades: Aggregator (TSX/MetaApi/Duplikium, 5s) nur laufen lassen,
-    // solange die View offen ist. Ohne diesen Start war die View tot — ltStart
-    // hatte seit dem Ausblenden aus der Sidebar (14.07.2026) keinen Aufrufer
-    // mehr; die Flotte (25.08.2026) braucht ihn, auch auf pages.dev.
-    if(name === 'livetrades'){
+    // Flotte + Aggregator: der Flotten-Block wohnt seit 25.08.2026 abends im
+    // TRADES-Tab (Finns Ansage: „Live-Trades ist schon laengst raus") — der
+    // 5s-Aggregator (TSX/MetaApi/Duplikium) laeuft, solange Trades offen ist.
+    // Er hatte seit dem Sidebar-Ausblenden (14.07.2026) keinen Aufrufer mehr.
+    // Die alte Live-Trades-View bleibt per #livetrades-Hash funktionsfaehig.
+    if(name === 'trades' || name === 'livetrades'){
       if(typeof ltStart === 'function') ltStart()
       if(typeof mt5FleetRenderTick === 'function') mt5FleetRenderTick(true)
     } else if(typeof ltStop === 'function') ltStop()
@@ -6981,10 +6988,22 @@
                    a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0),
                  coin:(Number(nat?.value) || 0) / 1e9 }
       }
-      // Tron: Account-Endpoint liefert TRC-20-Bestände + TRX (balance, in SUN) in einer Antwort
-      const r = await fetch(c.api + '/v1/accounts/' + w.address)
-      const d = await r.json()
-      if(d.success === false) throw new Error(d.error || 'TronGrid-Fehler')
+      // Tron: Account-Endpoint liefert TRC-20-Bestände + TRX (balance, in SUN) in einer
+      // Antwort. TronGrid drosselt keyless aggressiv: 429 mit { Error:… } OHNE success-Feld
+      // (25.08.2026 live gesehen — wurde vorher als "Konto leer" = 0,00 fehlgedeutet,
+      // obwohl 846 USDT drauf lagen). Deshalb: Fehler werfen statt 0 liefern, bei 429
+      // mit wachsender Pause bis zu 2× neu versuchen.
+      let d = null, status = 0, errMsg = ''
+      for(let i = 0; i < 3; i++){
+        if(i) await new Promise(res => setTimeout(res, 1200 * i))
+        const r = await fetch(c.api + '/v1/accounts/' + w.address)
+        status = r.status
+        const j = await r.json().catch(() => null)
+        if(r.ok && j && j.success !== false){ d = j; break }
+        errMsg = (j && (j.error || j.Error)) || ('HTTP ' + status)
+        if(status !== 429) break   // nur Rate-Limit ist einen Retry wert
+      }
+      if(!d) throw new Error(status === 429 ? 'TronGrid drosselt (429) — gleich nochmal ↻' : 'TronGrid-Fehler: ' + errMsg)
       const acc = (d.data || [])[0]
       if(!acc) return { usdt:0, coin:0 }   // nie benutzte Tron-Adresse ist on-chain noch nicht "aktiviert"
       let usdt = 0
@@ -6993,7 +7012,15 @@
     }
 
     // Alle Balances ziehen + Tages-Snapshot upserten (1 Zeile pro Wallet und Tag).
+    // walBusy: ↻-Hämmern stapelt sonst parallele Läufe — genau das trieb TronGrid
+    // ins Rate-Limit (25.08.2026), ein laufender Refresh reicht.
+    let walBusy = false
     async function walRefreshBalances(){
+      if(walBusy) return
+      walBusy = true
+      try{ await walRefreshBalancesInner() } finally { walBusy = false }
+    }
+    async function walRefreshBalancesInner(){
       const msgEl = $('wal-msg')
       if(!wallets.length){ msgEl.textContent = ''; return }
       msgEl.textContent = 'Lade Balances…'
