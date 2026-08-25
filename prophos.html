@@ -9229,6 +9229,12 @@
   }
   setInterval(mt5FleetPushTick, 5000)
 
+  // esc gab es bisher NUR innerhalb der Echo-Panel-IIFE (Zeile ~23300) — der
+  // Flotten-Code hier im Modul-Scope warf deshalb bei JEDEM Render einen
+  // ReferenceError, den das fruehere catch(_) still verschluckte: der Block
+  // blieb einfach unsichtbar (Finns drei Leer-Screenshots am 25.08.2026,
+  // aufgeklaert erst durch den sichtbaren Fehler-Kasten aus VERSION .107).
+  function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
   const MT5_FLEET_FARBEN = ['#7C5CFC','#12B76A','#F79009','#F04438','#0BA5EC','#EE46BC','#6172F3','#16B364']
   function mt5FleetFarbe(login){
     const s = String(login || '')
