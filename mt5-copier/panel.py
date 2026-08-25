@@ -607,12 +607,6 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
               f"Datenordner und liess sich nicht bauen (metaeditor64.exe da?) — "
               f"einmal im Terminal kompilieren (F4 -> F7).", flush=True)
         return
-    name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
-    preset = f"prophos-heal-{name}.set"
-    os.makedirs(os.path.join(data_dir, "MQL5", "Presets"), exist_ok=True)
-    with open(os.path.join(data_dir, "MQL5", "Presets", preset), "w",
-              encoding=provision.SET_ENCODING) as f:
-        f.write(provision.build_preset(snap))
     print(f"[panel] {fname}: Snapshot fliesst nicht — EA fehlt wohl. Starte Terminal "
           f"neu und ziehe {provision.EA_NAME} automatisch auf (InpFileName={snap}).", flush=True)
     for pid in provision.terminal_pids(install_dir):
@@ -620,6 +614,21 @@ def _heal_ea_inner(fname, cfg, install_dir, started_ts, wait_s, schnell_wenn_nie
     # Terminal ist jetzt aus — EA vor dem Neustart aktuell kompilieren, sonst
     # zieht die Heilung ein veraltetes EA ohne Balance-Header auf (15.08.2026)
     _ensure_ea_compiled(fname, install_dir)
+    # ZUERST fest ins Profil schreiben (25.08.2026, Finns Live-Fund: das
+    # [StartUp]-Chart wird vom gespeicherten Profil ersetzt — das EA lebte nur
+    # bis zum naechsten Boot, jeder Trade-Start zahlte die volle Heilung
+    # erneut). Terminal ist aus, die .chr liegen still. Klappt die Injektion,
+    # reicht der nackte Start; [StartUp] bleibt nur als Fallback (z.B. frische
+    # Installation ohne Profil-Ordner).
+    if _inject_ea_into_profile(fname, cfg, install_dir):
+        subprocess.Popen([os.path.join(install_dir, "terminal64.exe")], cwd=install_dir)
+        return
+    name = os.path.splitext(fname)[0].replace("config", "", 1).strip("-_") or "standard"
+    preset = f"prophos-heal-{name}.set"
+    os.makedirs(os.path.join(data_dir, "MQL5", "Presets"), exist_ok=True)
+    with open(os.path.join(data_dir, "MQL5", "Presets", preset), "w",
+              encoding=provision.SET_ENCODING) as f:
+        f.write(provision.build_preset(snap))
     ini = os.path.join(install_dir, "prophos-heal.ini")
     with open(ini, "w", encoding=provision.INI_ENCODING) as f:
         f.write(provision.build_startup_ini(preset=preset))
@@ -1012,6 +1021,15 @@ def start_terminal(fname, creds=None):
                    + (", Lese-EA wird direkt aufgezogen" if startup else "")
                    + "; Selbstheilung wacht im Hintergrund")
         else:
+            # Auch OHNE hinterlegte Zugangsdaten das EA fest ins Profil schreiben
+            # (25.08.2026, Finns Live-Fund: dieser Zweig startete nackt, die
+            # Heilung hing das EA nur ans temporaere [StartUp]-Chart — das
+            # gespeicherte Profil ersetzte es beim naechsten Boot, jeder
+            # Trade-Start zahlte die volle Heilung erneut und der Bot kam
+            # 'gar nicht oder viel zu spaet'). Terminal ist hier aus, die
+            # .chr-Dateien liegen still — Injektion ist sicher.
+            _ensure_ea_compiled(fname, install_dir)
+            _inject_ea_into_profile(fname, cfg, install_dir)
             subprocess.Popen([path], cwd=install_dir)
             msg = "Terminal gestartet — Login automatisch; EA wird geprüft und notfalls selbst aufgezogen"
         # Selbstheilung im Hintergrund: fliesst der Snapshot in 45 s nicht,
