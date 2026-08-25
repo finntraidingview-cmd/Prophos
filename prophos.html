@@ -4670,8 +4670,10 @@
       <!-- Hedge-Übersicht -->
       <div id="lt-hedge-overview" style="display:none;margin-bottom:14px"></div>
 
-      <!-- MT5-Flotte (18.08.2026, Finns Fleet-Feature): alle IDs aller PCs
-           aus Supabase mt5_live — Farbe pro Master-ID, Filter-Chips -->
+      <!-- Flotte (18.08.2026 MT5, erweitert 25.08.2026): ALLE laufenden Orders
+           an einem Ort — Copier-Instanzen aller PCs aus Supabase mt5_live PLUS
+           die Cloud-Positionen (Duplikium/TopstepX/MetaApi) aus dem Aggregator.
+           Farbe pro PERSON (Aufloesung via /admin/overview), Filter-Chips -->
       <div id="lt-fleet" style="display:none;margin-bottom:14px"></div>
 
       <div id="lt-cards" style="display:flex;flex-direction:column;gap:14px"></div>
@@ -9319,9 +9321,32 @@
         html += `<div style="border:1px solid var(--border);border-left:3px solid ${farbe};border-radius:10px;padding:10px 12px;${frisch ? '' : 'opacity:.55'}">`
           + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
           + `<div><b>${esc(r.instance)}</b> <span style="font-family:var(--mono);font-size:12px;color:${farbe}">${esc(r.master_login)}</span>`
+          + (wer ? ` <span style="font-size:12px;font-weight:600;color:${farbe}">${esc(wer.name)}</span>` : '')
           + ` <span style="font-size:11px;color:var(--sub)">→ Hedge ${esc(r.hedge_login)} · ${esc(r.pc_name)}</span></div>`
           + `<div style="font-size:11px;color:var(--sub)">${frisch ? 'live' : (s.standby ? 'Standby — Terminal zu' : s.note ? esc(String(s.note).slice(0, 60)) : 'zuletzt vor ' + alterS + 's')}</div></div>`
           + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${plTxt}${symTxt}</div>${waisenTxt}${fremdTxt}</div>`
+      }
+      // Cloud-Zeilen (Duplikium / TopstepX / MetaApi) — unter „Nur dieser PC"
+      // bewusst leer: sie haengen an der Cloud, nicht an einem PC. Frische
+      // kommt vom Aggregator-Tick (P&L-Beweis-Doktrin: alt = grau, nie live).
+      const cloudSicht = filter === 'pc' ? [] : cloud.filter(g => filter === 'alle' || rowKey.get(g) === filter)
+      const cloudAlterS = ltState.lastUpdate ? Math.max(0, Math.round((jetzt - ltState.lastUpdate.getTime()) / 1000)) : null
+      const cloudFrisch = cloudAlterS != null && cloudAlterS <= 20
+      for(const g of cloudSicht){
+        const c = chipMap.get(rowKey.get(g))
+        const wer = werCloud(g)
+        const posTxt = g.pos.map(p =>
+          `${/buy|long/i.test(String(p.side)) ? 'BUY' : 'SELL'} ${Number(p.size || 0).toFixed(2)} ${esc(String(p.symbol))}`).join(' · ')
+        const hatPnl = g.pos.some(p => p.pnl != null)
+        const pnlSum = g.pos.reduce((sum, p) => sum + (Number(p.pnl) || 0), 0)
+        const pnlTxt = hatPnl ? ` · P&L ${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(2)} ${esc(String(g.pos[0].ccy || ''))}` : ''
+        html += `<div style="border:1px solid var(--border);border-left:3px solid ${c.farbe};border-radius:10px;padding:10px 12px;${cloudFrisch ? '' : 'opacity:.55'}">`
+          + `<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">`
+          + `<div><b>${esc(String(g.accountName))}</b>`
+          + (wer ? ` <span style="font-size:12px;font-weight:600;color:${c.farbe}">${esc(wer.name)}</span>` : '')
+          + ` ${ltSrcBadge(g.src)}</div>`
+          + `<div style="font-size:11px;color:var(--sub)">${cloudFrisch ? 'live' : (cloudAlterS == null ? 'wartet auf Aggregator' : 'zuletzt vor ' + cloudAlterS + 's')}</div></div>`
+          + `<div style="font-size:12.5px;margin-top:4px;font-family:var(--mono)">${posTxt}${pnlTxt}</div></div>`
       }
       html += '</div>'
       box.innerHTML = html
