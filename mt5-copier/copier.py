@@ -799,30 +799,50 @@ def main():
 
     def book_close(m, ident, h, result, vol):
         """Close-Deal beweisfest verbuchen (15.08.2026, Etappe 3): verbucht wird
-        NUR der Deal mit ticket == result.deal — nie ein geratener profit=0, denn
-        eine plausible falsche Zahl ist schlimmer als ein leeres Feld ('Beweis
-        oder leer'). Die Deal-History kann dem order_send-Result kurz nachhinken,
-        deshalb bis zu 3 Wiederholungen a 0,3 s."""
+        nur ein ECHTER Broker-Deal — nie ein geratener profit=0, denn eine
+        plausible falsche Zahl ist schlimmer als ein leeres Feld ('Beweis oder
+        leer'). Die Deal-History kann dem order_send-Result kurz nachhinken,
+        deshalb bis zu 3 Wiederholungen a 0,3 s.
+        Fusion-Live-Fall (25.08.2026, Finns erster Live-Trade: Hedge-P&L blieb
+        im Ueberpruefen-Tab leer): dieser Broker meldet den Fill asynchron —
+        order_send liefert retcode=DONE, aber deal=0. Der Beweis kommt dann
+        aus der Deal-History der Position: der juengste, noch nicht verbuchte
+        OUT-Deal (bevorzugt mit passendem Volumen). Das bleibt beweisfest —
+        nachgeschlagen statt mitgeliefert, geraten wird weiterhin nie."""
         deal_id = int(getattr(result, "deal", 0) or 0)
-        if not deal_id:
-            log(f"[{m.file}] ⚠ Close ohne deal-Ticket im Result (Master-Pos {ident}) — "
-                f"kein closed_hedges-Eintrag.")
-            return
         seen = m.booked_deals.setdefault(ident, set())
-        if deal_id in seen:
+        if deal_id and deal_id in seen:
             return  # Doppelzaehlungs-Schutz: derselbe Deal wird nie zweimal verbucht
+        # Auch ueber Neustarts hinweg nie doppelt buchen: der Sidecar traegt die
+        # Deal-Tickets aller schon verbuchten Closes (booked_deals ist nur RAM).
+        booked_sidecar = {int(c.get("deal") or 0) for c in m.closed}
         deal = None
         for attempt in range(4):
-            ds = mt5.history_deals_get(position=int(h["ticket"]))
-            if ds:
+            ds = mt5.history_deals_get(position=int(h["ticket"])) or []
+            if deal_id:
                 deal = next((d for d in ds if int(d.ticket) == deal_id), None)
+            else:
+                outs = [d for d in ds
+                        if int(getattr(d, "entry", -1)) in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)
+                        and int(d.ticket) not in seen
+                        and int(d.ticket) not in booked_sidecar]
+                # bevorzugt der Deal mit exakt dem geschlossenen Volumen; gibt es
+                # keinen (Teil-Fill), ist EIN einziger unverbuchter OUT-Deal
+                # ebenfalls eindeutig — mehrdeutig ⇒ lieber leer als falsch.
+                pick = [d for d in outs if abs(float(d.volume) - float(vol)) <= 1e-6] \
+                       or (outs if len(outs) == 1 else [])
+                if pick:
+                    deal = max(pick, key=lambda d: (int(getattr(d, "time_msc", 0) or 0), int(d.ticket)))
             if deal is not None:
                 break
             if attempt < 3:
                 time.sleep(0.3)
         if deal is None:
-            log(f"[{m.file}] ⚠ Close-Deal {deal_id} (Ticket {h['ticket']}) nicht in der "
+            log(f"[{m.file}] ⚠ Close-Deal (Result deal={deal_id}, Ticket {h['ticket']}) nicht in der "
                 f"History gefunden — KEIN closed_hedges-Eintrag (nie profit=0 raten).")
+            return
+        deal_id = int(deal.ticket)
+        if deal_id in seen or deal_id in booked_sidecar:
             return
         seen.add(deal_id)
         m.closed.append({
