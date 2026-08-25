@@ -9213,6 +9213,22 @@
       // Flotte gruppiert damit pro PERSON (25.08.2026, Finns Layout-Ansage).
       let pushUid = ''
       try { pushUid = String(((((await supabase.auth.getSession()).data || {}).session || {}).user || {}).id || '') } catch(_){}
+      // Symmetrie-Normierung mitpushen (26.08.2026, Finns Wunsch: der Balken
+      // auch auf den Flotten-Karten anderer Geräte/Profile). Fremde Pläne sind
+      // per RLS unsichtbar — deshalb reisen NUR die drei Normierungszahlen des
+      // eigenen offenen Plans (Master-Risk/TP, Hedge-Risk) mit der Cloud-Zeile.
+      const symByFile = {}
+      try{
+        let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+        for(const p of (_tp || [])){
+          if(p.status !== 'open' || p.route !== 'mt5') continue
+          const rt = (typeof mt5RouteResolve === 'function') ? mt5RouteResolve(p, dd.instances || []) : null
+          if(rt && rt.inst && rt.inst.file){
+            symByFile[rt.inst.file] = { m_risk: Number(p.masterRisk) || 0,
+              m_tp: Number(p.masterTp) || 0, s_risk: Number(p.slaveRisk) || 0 }
+          }
+        }
+      }catch(_){}
       const rows = (dd.instances || []).filter(i => i && i.file).map(inst => {
         const s = inst.status || {}
         return {
@@ -9234,7 +9250,8 @@
             master_currency: s.master_currency ?? null,
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
             hedge_currency: s.hedge_currency ?? null,
-            hedge_fremde: s.hedge_fremde ?? null
+            hedge_fremde: s.hedge_fremde ?? null,
+            plan_sym: symByFile[inst.file] || null
           },
           updated_at: new Date().toISOString()
         }
@@ -9617,10 +9634,23 @@
         for(const p of pos){
           const pnl = (pos.length === 1 && mPL != null)
             ? `<span class="tc2-pnl" style="color:${mPL >= 0 ? '#15803d' : '#b91c1c'}">M ${mPL >= 0 ? '+' : ''}${mPL.toFixed(2)} ${esc(s.master_currency || '')}</span>` : ''
+          // Symmetrie-Balken auch hier (26.08.2026, Finns Wunsch): die drei
+          // Normierungszahlen des Plans pusht der Besitzer-PC als plan_sym mit —
+          // gerechnet wird mit demselben Helfer wie auf der Plan-Karte. Nur bei
+          // EINER Position (Master-P&L sonst nicht zuordenbar) und nur mit
+          // beweisbarem Hedge-P&L.
+          let symF = ''
+          if(pos.length === 1 && mPL != null && s.plan_sym && typeof symBalkenHtml === 'function'){
+            const hs = hedgesMap[String(p.ident)] || []
+            let hSum = 0, hBeweis = false
+            for(const h of hs){ if(h && h.profit != null){ hBeweis = true; hSum += Number(h.profit) || 0 } }
+            if(hBeweis) symF = symBalkenHtml(mPL, hSum,
+              Number(s.plan_sym.m_risk) || 0, Number(s.plan_sym.m_tp) || 0, Number(s.plan_sym.s_risk) || 0)
+          }
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, 'Hedge ' + r.hedge_login,
             subPerson(pKey) + `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
-            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + hedgePnl(p.ident) + zeitChip(null, frisch, alterS),
+            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
             frisch))
         }
         if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
@@ -9765,6 +9795,42 @@
   // unten sie im DOM AKTUALISIEREN kann: gerendert wird die Karte nur bei
   // Datenänderungen, die Zahlen würden sonst auf dem Renderzeitpunkt einfrieren
   // und trotzdem 'Live' behaupten (Review-Fund 15.08.2026).
+  /* ── Gemeinsamer Symmetrie-Balken (26.08.2026, Finns Wunsch: derselbe
+   * Balken auch auf den Flotten-Karten anderer Geräte). EINE Rechen-Wahrheit
+   * für Plan-Karte und Flotte — Normierung wie calcSymmetryPct: Master gegen
+   * Plan-TP/SL, Hedge gegen die Hedge-Erwartung (dimensionslos, keine
+   * USD-Umrechnung nötig). Mitte = perfekt, Füllung kippt zur stärkeren
+   * Seite. Liefert '' wenn nicht beweisbar rechenbar (fehlende Plan-Zahlen,
+   * Master-Bewegung unter der 0,50-$-Rausch-Schwelle — Schwelle ABSOLUT,
+   * 18.08.2026, Finns Fund mit dem $20.000-The5ers-Plan). */
+  function symBalkenHtml(masterPl, hedgeSum, mRisk, mTp, sRisk){
+    if(masterPl == null || hedgeSum == null || !(mRisk > 0) || !(sRisk > 0)) return ''
+    const mPct = masterPl >= 0
+      ? (mTp > 0 ? (masterPl / mTp) * 100 : (masterPl / mRisk) * 100)
+      : (Math.abs(masterPl) / mRisk) * 100
+    const ratio = mTp > 0 ? (mTp / mRisk) : null
+    const sPct = hedgeSum >= 0
+      ? (hedgeSum / sRisk) * 100
+      : (Math.abs(hedgeSum) / (ratio ? sRisk * ratio : sRisk)) * 100
+    const absM = Math.abs(mPct), absS = Math.abs(sPct)
+    if(!(Math.abs(masterPl) >= 0.5 && absM > 0)) return ''
+    const sym = Math.round(absS / absM * 100)
+    const farbe = (sym >= 85 && sym <= 115) ? '#12B76A' : ((sym >= 60 && sym <= 140) ? '#F79009' : '#F04438')
+    const d = Math.max(-1, Math.min(1, (absM - absS) / Math.max(absM, absS)))
+    const halb = Math.abs(d) * 50
+    const fuellCss = halb < 3
+      ? 'left:47%;width:6%'                                   // Mitte: perfekt
+      : (d > 0 ? `right:50%;width:${halb}%` : `left:50%;width:${halb}%`)
+    return `<span title="Symmetrie relativ zum Plan: Master ${absM.toFixed(0)}% / Hedge ${absS.toFixed(0)}% des jeweiligen Ziels — Mitte = perfekt, Ausschlag = staerkere Seite"`
+      + ` style="display:inline-flex;align-items:center;gap:5px">`
+      + `<span style="font-size:9px;color:var(--sub);font-weight:700">M</span>`
+      + `<span style="position:relative;width:56px;height:6px;border-radius:999px;background:var(--border);display:inline-block">`
+      + `<span style="position:absolute;top:0;bottom:0;${fuellCss};background:${farbe};border-radius:999px"></span>`
+      + `<span style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1.5px;background:var(--sub);opacity:.6"></span>`
+      + `</span><span style="font-size:9px;color:var(--sub);font-weight:700">H</span>`
+      + `<b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
+  }
+
   function mt5LivePnlInner(p){
     try{
       if(!p || p.route !== 'mt5' || p.status !== 'open' || !MT5_LOCAL) return ''
@@ -9801,40 +9867,13 @@
       // Erwartung — dadurch entfaellt auch die USD-Umrechnung (dimensionslos).
       // Balken: Mitte = perfekt; die Fuellung KIPPT zur staerkeren Seite
       // (M = Master links, H = Hedge rechts). 100% = perfekt.
+      // Rechen- und Render-Logik seit 26.08.2026 im gemeinsamen Helfer
+      // symBalkenHtml (weiter unten) — Plan-Karte und Flotten-Karte teilen
+      // sich damit EINE Balken-Wahrheit.
       let symEl = ''
       const mRisk = Number(p.masterRisk) || 0, sRisk = Number(p.slaveRisk) || 0
       const mTp = Number(p.masterTp) || 0
-      if(masterPl != null && hedgeSeen && mRisk > 0 && sRisk > 0){
-        const mPct = masterPl >= 0
-          ? (mTp > 0 ? (masterPl / mTp) * 100 : (masterPl / mRisk) * 100)
-          : (Math.abs(masterPl) / mRisk) * 100
-        const ratio = mTp > 0 ? (mTp / mRisk) : null
-        const sPct = hedgeSum >= 0
-          ? (hedgeSum / sRisk) * 100
-          : (Math.abs(hedgeSum) / (ratio ? sRisk * ratio : sRisk)) * 100
-        const absM = Math.abs(mPct), absS = Math.abs(sPct)
-        // Rausch-Schwelle ABSOLUT (ab 0,50 $ Master-Bewegung), nicht relativ
-        // zum Plan (18.08.2026, Finns Fund: beim The5ers-Plan mit $20.000
-        // Risiko hätte der Balken erst ab $200 P&L angezeigt — beim kleinen
-        // Fusion-Plan dagegen sofort, darum sah nur EIN Trade „die Charts").
-        if(Math.abs(masterPl) >= 0.5 && absM > 0){
-          const sym = Math.round(absS / absM * 100)
-          const farbe = (sym >= 85 && sym <= 115) ? '#12B76A' : ((sym >= 60 && sym <= 140) ? '#F79009' : '#F04438')
-          const d = Math.max(-1, Math.min(1, (absM - absS) / Math.max(absM, absS)))
-          const halb = Math.abs(d) * 50
-          const fuellCss = halb < 3
-            ? 'left:47%;width:6%'                                   // Mitte: perfekt
-            : (d > 0 ? `right:50%;width:${halb}%` : `left:50%;width:${halb}%`)
-          symEl = `<span title="Symmetrie relativ zum Plan: Master ${absM.toFixed(0)}% / Hedge ${absS.toFixed(0)}% des jeweiligen Ziels — Mitte = perfekt, Ausschlag = staerkere Seite"`
-            + ` style="display:inline-flex;align-items:center;gap:5px">`
-            + `<span style="font-size:9px;color:var(--sub);font-weight:700">M</span>`
-            + `<span style="position:relative;width:56px;height:6px;border-radius:999px;background:var(--border);display:inline-block">`
-            + `<span style="position:absolute;top:0;bottom:0;${fuellCss};background:${farbe};border-radius:999px"></span>`
-            + `<span style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1.5px;background:var(--sub);opacity:.6"></span>`
-            + `</span><span style="font-size:9px;color:var(--sub);font-weight:700">H</span>`
-            + `<b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
-        }
-      }
+      if(masterPl != null && hedgeSeen) symEl = symBalkenHtml(masterPl, hedgeSum, mRisk, mTp, sRisk)
       if(masterPl == null && !hedgeSeen) return ''
       return `<span class="mono" style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap" title="Live-P&L vom MT5-Copier">`
         + (masterPl != null ? chip('MASTER', masterPl, mLots) : '')
