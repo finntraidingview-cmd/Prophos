@@ -17195,6 +17195,7 @@
 
     let hardFail = false   // echtes Problem → Buttons statt Auto-Start
     let softWait = false   // Fix-Button angeboten → nicht auto-starten
+    let dirHint  = null    // Richtungs-Schutz hat etwas gefunden → Toast, kein Stopp
 
     // Alle 4 Zeilen SOFORT anlegen (alle mit Spinner). Check 1 (Verknüpfung) ist rein
     // lokal/instant und liefert die Duplikum-IDs, die die anderen 3 brauchen. Danach laufen
@@ -17252,7 +17253,7 @@
         pfCheckSym(plan,  dupMasterId, dupSlaveId),
         pfCheckDir(plan)
       ])
-      for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.softWait) softWait = true }
+      for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.softWait) softWait = true; if(r && r.dirHint) dirHint = r.dirHint }
     }
 
     const allOk = !hardFail && !softWait
@@ -17262,31 +17263,44 @@
     _pfFinish(allOk, hardFail
       ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
       : softWait ? 'Hinweise oben prüfen — der Trade bleibt auf Geplant.' : null)
+
+    // Richtungs-Hinweis (26.08.2026): der Check schließt bei allOk nach 1,6s von
+    // selbst — der Toast kommt bewusst DANACH, sonst steht er hinter dem Popup.
+    // Bleibt das Popup wegen echter Probleme offen, ist die Zeile ohnehin sichtbar.
+    if(dirHint && allOk && typeof atToast === 'function'){
+      setTimeout(() => atToast(dirHint, 'end'), 1750)
+    }
   }
 
   // ── Richtungs-Schutz der Duplikium-Route (25.08.2026, Finns Ansage) ──
   // Bei Duplikium tradet Finn von Hand — die Richtung seiner kommenden Order
-  // ist hier unbekannt. Läuft bei Master- ODER Slave-Firma (die Kopie landet
-  // dort in derselben Richtung) schon ein Trade, bleibt das Popup mit der
-  // Warnung offen (softWait) statt sich grün zu schließen.
+  // ist hier unbekannt.
+  // Zwei Korrekturen am 26.08.2026, beide aus dem echten Popup heraus:
+  // 1. Es zählt NUR die MASTER-Firma. Der Duplikium-Slave ist Finns eigenes
+  //    Fusion-Hedge-Konto — dort läuft per Definition die Gegenrichtung, das
+  //    IST der Zweck. Die Slave-Prüfung hat deshalb in der Praxis nie etwas
+  //    anderes gemeldet als den eigenen Hedge. (Gleiche Regel wie im
+  //    Echo-Preflight, der schon immer nur plan.masterFirm ansieht.)
+  // 2. Ein Treffer ist KEIN Fehler: kein softWait mehr, der Check geht grün
+  //    durch und schließt. Der Hinweis kommt als kurzer Toast unten rechts
+  //    (dirHint) — Finn will nur Bescheid wissen, dass jetzt nur eine Richtung
+  //    geht, und nicht "Erneut versuchen" klicken müssen.
   async function pfCheckDir(plan){
     try{
-      const firmen = [...new Set([plan.masterFirm, plan.slaveFirm].filter(Boolean))]
-      const treffer = []
-      for(const f of firmen){
-        const d = await window.firmLiveRichtungen(f)
-        const dir = d.long.length ? 'LONG' : d.short.length ? 'SHORT' : null
-        if(dir){
-          const b = d.long.length ? d.long[0] : d.short[0]
-          treffer.push(`<b>${escapeHtml(f)}</b> läuft bereits <b>${dir}</b> (${escapeHtml(b.wer)} · ${escapeHtml(b.quelle)} ${escapeHtml(b.symbol)})`)
-        }
-      }
-      if(!treffer.length){
-        _pfSet('dir', 'ok', 'Kein laufender Trade bei diesen Firmen — Richtung frei.')
+      const f = plan.masterFirm
+      if(!f){
+        _pfSet('dir', 'ok', 'Keine Firma am Master hinterlegt — nichts zu prüfen.')
         return {}
       }
-      _pfSet('dir', 'warn', `⚠ ${treffer.join('<br>')}<br><b>NUR in dieselbe Richtung handeln</b> — Gegenrichtung wäre Selbst-Hedge über Accounts.`)
-      return { softWait: true }
+      const d = await window.firmLiveRichtungen(f)
+      const dir = d.long.length ? 'LONG' : d.short.length ? 'SHORT' : null
+      if(!dir){
+        _pfSet('dir', 'ok', `Kein laufender Trade bei ${escapeHtml(f)} — Richtung frei.`)
+        return {}
+      }
+      const b = d.long.length ? d.long[0] : d.short[0]
+      _pfSet('dir', 'warn', `⚠ <b>${escapeHtml(f)}</b> läuft bereits <b>${dir}</b> (${escapeHtml(b.wer)} · ${escapeHtml(b.quelle)} ${escapeHtml(b.symbol)})<br><b>NUR in dieselbe Richtung handeln</b> — Gegenrichtung wäre Selbst-Hedge über Accounts.`)
+      return { dirHint: `↔ ${f} läuft bereits ${dir} — nur ${dir} handeln` }
     }catch(_){
       _pfSet('dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.')
       return {}
