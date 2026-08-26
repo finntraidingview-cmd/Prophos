@@ -9508,7 +9508,17 @@
    * (= MT5-Login) und den Account-Namen; lesbare Namen liefert der Profil-
    * Umschalter, wie in der Admin-Uebersicht. Faellt der Endpoint aus, faerbt
    * die Flotte wie bisher pro Login — nie leer, nur weniger schlau. */
-  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null, exclUids: null }
+  // Ausschluss-Liste aus dem letzten Besuch sofort laden (26.08.2026, Finns
+  // Bug-Report: „dauert immer so 5 sec bis die Orders von Finn weggehen").
+  // Ohne Seed rendert der erste Flotten-Tick, bevor /admin/overview geantwortet
+  // hat — Finns Karten blitzen dann kurz auf, bis die Liste da ist.
+  const _fleetExclSeed = (() => {
+    try{
+      const v = JSON.parse(localStorage.getItem('prophos_fleet_excl') || 'null')
+      return Array.isArray(v) ? new Set(v.map(String)) : null
+    }catch(_){ return null }
+  })()
+  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null, exclUids: _fleetExclSeed }
   function _fleetKurzName(mail){
     const s = String(mail || ''); const at = s.indexOf('@')
     return at > 0 ? s.slice(0, at) : s
@@ -9551,8 +9561,17 @@
       // weil seine Daten nirgends auftauchen — Finns Duplikium-Zeilen stehen
       // aber in dup_live, deshalb braucht es die uid-Liste vom Server.
       _fleetPers.exclUids = new Set((d.excluded_uids || []).map(String))
+      // Für den nächsten Seitenaufruf merken — der erste Render hat die Liste
+      // dann sofort, ohne auf den Server zu warten (kein Aufblitzen mehr).
+      try{ localStorage.setItem('prophos_fleet_excl', JSON.stringify([..._fleetPers.exclUids])) }catch(_){}
       _fleetPers.next = Date.now() + 5 * 60 * 1000      // frisch — 5 min Ruhe
-    }catch(_){ /* Login-Farben als Fallback, naechster Versuch in 1 min */ }
+    }catch(_){
+      /* Login-Farben als Fallback, naechster Versuch in 1 min. Ist die
+       * Ausschluss-Liste noch NIE geladen worden (erster Besuch + Server weg),
+       * auf leer setzen — sonst bliebe die Flotte wegen des Erst-Render-Gates
+       * dauerhaft unsichtbar. Lieber einmal falsch als für immer blind. */
+      if(!_fleetPers.exclUids) _fleetPers.exclUids = new Set()
+    }
     return _fleetPers
   }
   function fleetWer(login, accName){
@@ -9925,10 +9944,14 @@
       // direkt darueber. Nur ihre ALARME (Waisen/Fremd-Hedge) muessen
       // trotzdem erscheinen, die gibt es auf den Plan-Karten nicht.
       // Und die AUSGESCHLOSSENEN (ADMIN_EXCLUDE: Emin + Finn) fliegen ganz
-      // raus (26.08.2026, Finns Ansage). Beim allerersten Render kann die
-      // Liste noch fehlen (fleetPersonen laeuft nicht awaited) — der naechste
-      // Tick raeumt auf.
-      const excl = _fleetPers.exclUids || new Set()
+      // raus (26.08.2026, Finns Ansage). Ist die Liste noch NIE da gewesen
+      // (allererster Besuch, kein localStorage-Seed), lieber diesen Tick gar
+      // nichts zeigen als kurz die falschen Personen — Finns Bug-Report:
+      // „dauert immer so 5 sec bis die Orders von Finn weggehen". Der Render
+      // nach der /admin/overview-Antwort holt alles nach; bei Server-Fehler
+      // setzt fleetPersonen die Liste auf leer, blind bleibt hier also nichts.
+      if(!_fleetPers.exclUids){ box.style.display = 'none'; return }
+      const excl = _fleetPers.exclUids
       const eigeneAlarme = (alarme.get(meUid) || []).join('')
       const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
         .filter(k => k !== meUid && !excl.has(String(k)))
