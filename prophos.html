@@ -9560,13 +9560,17 @@
 
   /* ── RICHTUNGS-SCHUTZ (25.08.2026, Finns Ansage nach einem echten Vorfall:
    * er hat sich einmal aus Versehen über zwei Accounts derselben Prop-Firma
-   * selbst gegengehedged): läuft bei einer Firma — egal welche Person, egal
-   * ob über Duplikium oder Echo — schon ein Trade, darf ein neuer Trade dort
-   * nur in DIESELBE Richtung gehen. Quelle ist dieselbe wie die Flotte:
-   * dup_live (Wächter-Spiegel, frisch ≤75s) + mt5_live (Echo-PCs, ≤20s).
-   * Firma pro Position über die /admin/overview-Karte (External ID/Name →
-   * firm) mit Fallback auf die eigene Accounts-Liste. Keine Daten = keine
-   * Warnung — der Schutz ist additiv und blockt nie aus Unwissen. */
+   * selbst gegengehedged): läuft bei einer Firma schon ein Trade, darf ein
+   * neuer Trade dort nur in DIESELBE Richtung gehen. Quelle ist dieselbe wie
+   * die Flotte: dup_live (Wächter-Spiegel, frisch ≤75s) + mt5_live (Echo-PCs,
+   * ≤20s). Firma pro Position über die /admin/overview-Karte (External ID/
+   * Name → firm) mit Fallback auf die eigene Accounts-Liste. Keine Daten =
+   * keine Warnung — der Schutz ist additiv und blockt nie aus Unwissen.
+   * Korrektur 26.08.2026 (Finns Ansage aus dem Popup heraus): es zählt NUR
+   * die gerade eingeloggte ID. Ursprünglich zählte jede Person („egal welche
+   * Person"), aber das warnte auch, wenn z. B. EzPoker bei FundedNext short
+   * lief und Finn dort long wollte — verschiedene IDs sind für die Firma
+   * verschiedene Kunden, Selbst-Hedge gibt es nur innerhalb derselben ID. */
   const _dirNorm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
   async function firmLiveRichtungen(firmName){
     const ziel = _dirNorm(firmName)
@@ -9574,6 +9578,10 @@
     if(!ziel) return out
     try{
       await fleetPersonen()                    // throttlet selbst (5 min Cache)
+      // Eigene uid direkt aus der Session (nicht aus dem 5-min-Cache der
+      // Flotte) — nach einem Profilwechsel wäre der Cache noch der alte.
+      const { data: { session } } = await supabase.auth.getSession()
+      const meUid = String(session?.user?.id || '')
       const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
       const [ml, dl] = await Promise.all([
         supabase.from('mt5_live').select('*').gte('updated_at', grenze),
@@ -9582,6 +9590,9 @@
       const jetzt = Date.now()
       const firmVon = (login, name) => {
         const w = fleetWer(login, name)
+        // Fremde ID → geht uns nichts an (26.08.2026). Der Fallback über die
+        // eigene Accounts-Liste ist per RLS ohnehin nur das eigene Profil.
+        if(w && w.uid && meUid && String(w.uid) !== meUid) return null
         if(w && w.firm) return { firm: _dirNorm(w.firm), wer: w.name }
         const l = String(login || '').trim(), n = String(name || '').trim().toLowerCase()
         const a = (accounts || []).find(x => (l && String(x.externalId || '') === l)
@@ -17739,8 +17750,10 @@
     }
 
     // ── 3b. Richtungs-Schutz ── (25.08.2026, Finns Ansage: nie gegen einen
-    // laufenden Trade derselben Prop-Firma stellen — egal welche Person, egal
-    // ob Duplikium oder Echo. Der Fusion-Hedge zählt nicht mit, dessen
+    // laufenden Trade derselben Prop-Firma stellen — egal ob Duplikium oder
+    // Echo. Seit 26.08.2026 zählt dabei NUR die eingeloggte ID, fremde
+    // Profile sind für die Firma eigene Kunden (Filter sitzt in
+    // firmLiveRichtungen). Der Fusion-Hedge zählt nicht mit, dessen
     // Gegenrichtung ist der Zweck — geprüft wird die MASTER-Firma. Mit
     // gemerkter Bot-Order wird die Gegenrichtung HART geblockt; ohne Order
     // gibt es die Warnung mit der laufenden Richtung.)
@@ -18220,8 +18233,9 @@
     symEl.value = fromSettings.length ? fromSettings[0] : ''
     symEl.readOnly = fromSettings.length > 0   // Settings sind die Wahrheit — nicht überschreibbar
     // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
-    // läuft bei der Master-Firma schon ein Trade (egal welche Person, Duplikium
-    // oder Echo), wird die laufende Richtung vorgewählt und die Gegenrichtung
+    // läuft bei der Master-Firma schon ein Trade der EINGELOGGTEN ID (Duplikium
+    // oder Echo; nur-eigene-ID seit 26.08.2026, Filter in firmLiveRichtungen),
+    // wird die laufende Richtung vorgewählt und die Gegenrichtung
     // GESPERRT. Erst beide Knöpfe zurücksetzen (der Zustand klebt sonst vom
     // letzten Öffnen), dann async nachladen — nur anwenden, wenn das Modal
     // noch offen und derselbe Plan aktiv ist.
