@@ -6581,16 +6581,30 @@
       })
     }
 
+    /* Geparkt-SUMMEN zaehlen nur die Accounts, die noch Geld binden (26.08.2026,
+     * Finns Ansage am Tradeify-Block): ein Account im Plus hat sein Kapital
+     * zurueckgeholt und darf die anderen nicht gegenrechnen. Konkreter Fall:
+     * Tradeify stand mit −1.047 € da, weil EIN Account (−2.764 €) die vier
+     * anderen (zusammen +1.717 € gebunden) rechnerisch aufgefressen hat — es
+     * sah aus, als binde Tradeify gar nichts. Deshalb je Account bei 0 gekappt.
+     * Dieselbe Regel wie schon bei den Prozent-Anteilen (admPosTotal), nur eine
+     * Ebene tiefer: nicht erst die Firma, sondern schon der Account.
+     * `net` = die ungekappte Summe, nur noch fuer den „im Plus"-Hinweis.
+     * Kauf/Hedge/Payouts bleiben bewusst die echten Summen — sie zeigen, was
+     * tatsaechlich geflossen ist; nur „Geparkt" ist die Frage nach gebundenem Geld. */
     function admGroup(rows, key, labelKey){
       const m = new Map()
       for(const r of rows){
         const k = r[key] || '—'
-        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0 }
+        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0 }
         const v = admVals(r)
-        g.accounts++; g.buy += v.buy; g.hedge += v.hedge; g.payouts += v.payouts; g.parked += v.parked
+        g.accounts++; g.buy += v.buy; g.hedge += v.hedge; g.payouts += v.payouts
+        g.parked += Math.max(0, v.parked)
+        g.net    += v.parked
         m.set(k, g)
       }
-      return [...m.values()].sort((a,b) => b.parked - a.parked)
+      // Gleichstand bei 0 (alle Accounts im Plus): der mit dem groessten Plus nach oben.
+      return [...m.values()].sort((a,b) => (b.parked - a.parked) || (a.net - b.net))
     }
 
     /* Anteile IMMER gegen die Summe der POSITIVEN Posten rechnen.
@@ -6598,7 +6612,10 @@
      * Apex 2.737 €, Tradeify −1.208 € und Summe 2.927 € kam „Apex 93 %" heraus,
      * obwohl Apex fast das gesamte tatsächlich gebundene Kapital hält. Eine
      * Firma im Plus bindet kein Kapital — sie ist kein Klumpenrisiko und
-     * bekommt deshalb gar keinen Anteil, nicht etwa einen negativen. */
+     * bekommt deshalb gar keinen Anteil, nicht etwa einen negativen.
+     * Seit dem 26.08.2026 kappt schon admGroup je Account, g.parked kann also
+     * gar nicht mehr negativ werden — das Math.max hier bleibt als Absicherung
+     * stehen, falls jemand die Gruppierung wieder ungekappt fuettert. */
     const admPosTotal = list => list.reduce((a, g) => a + Math.max(0, g.parked), 0)
     const admShare = (g, posTotal) => posTotal > 0 ? (100 * Math.max(0, g.parked) / posTotal) : 0
 
@@ -6624,7 +6641,9 @@
       const active = $(filterId).value
       for(const g of list){
         const share = admShare(g, posTotal)
-        const imPlus = g.parked < 0
+        // parked ist seit dem Kappen nie negativ — „im Plus" heisst jetzt:
+        // KEIN einziger Account bindet noch Kapital (26.08.2026).
+        const imPlus = g.parked === 0 && g.net < 0
         const row = document.createElement('button')
         row.type = 'button'
         row.className = 'adm-row adm-row-btn' + (String(active) === String(g.key) ? ' is-on' : '')
@@ -6637,7 +6656,9 @@
         const nm = row.querySelector('.adm-row-name')
         // Wenn kein Anzeigename hinterlegt ist, kommt die E-Mail — die passt nicht in die Spalte.
         nm.textContent = admShortName(g.label)
-        row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'} — zum Aufklappen klicken`
+        row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
+          + (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : '')
+          + ' — zum Aufklappen klicken'
         row.addEventListener('click', () => {
           const sel = $(filterId)
           sel.value = (String(sel.value) === String(g.key)) ? '' : g.key   // nochmal klicken = zu
@@ -6660,7 +6681,10 @@
       if(!admData) return
       const rows = admFiltered()
       const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
-      const totalParked = sum('parked')
+      // Gleiche Kappung wie in admGroup: die KPI muss zur Summe der Firmen-/
+      // Personen-Zeilen passen, sonst stimmt die Seite mit sich selbst nicht.
+      const totalParked = rows.reduce((a, r) => a + Math.max(0, Number(admVals(r).parked) || 0), 0)
+      const nPlusAccs   = rows.filter(r => (Number(admVals(r).parked) || 0) < 0).length
       const nArch = rows.filter(r => r.archived).length
       const nPred = admChainMode() ? rows.reduce((a, r) => a + (Number(r.preds) || 0), 0) : 0
 
@@ -6672,9 +6696,13 @@
         : (nPred ? `alle aktiv · ${nPred} abgelöste eingerechnet` : 'alle aktiv')
       $('adm-k-po').textContent = admEur.format(sum('payouts'))
 
-      $('adm-mode-note').textContent = admChainMode()
+      const plusNote = nPlusAccs
+        ? ` ${nPlusAccs} Account${nPlusAccs === 1 ? '' : 's'} steht im Plus und zählt in den Summen mit 0 — wer sein Kapital zurückgeholt hat, verrechnet sich nicht gegen die anderen.`
+        : ''
+      $('adm-mode-note').textContent = (admChainMode()
         ? `Geparkt = Gesamtkosten je aktivem Account: Kaufpreis + Hedge-Verluste − Payouts, inklusive der abgelösten Vorgänger-Accounts (${nPred} eingerechnet).`
         : 'Geparkt = Kaufpreis + Hedge-Verluste − Payouts, jeder Account für sich. Vorgänger werden hier NICHT in den Nachfolger gerechnet, sonst stünden sie doppelt drin.'
+        ) + plusNote
 
       const byFirm   = admGroup(rows, 'firm', 'firm')
       const byPerson = admGroup(rows, 'user_id', 'person')
