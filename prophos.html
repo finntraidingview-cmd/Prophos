@@ -5250,7 +5250,50 @@
                 <div class="kpi-delta delta-neutral" id="adm-b-sum-sub">–</div>
               </div>
             </div>
-            <div class="grid-2" id="adm-buys-grid" style="align-items:start"></div>
+            <div class="grid-2">
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title">Käufe nach Person</div>
+                    <div class="panel-sub">Zum Aufklappen auf eine Person klicken</div>
+                  </div>
+                </div>
+                <div class="adm-dist" id="adm-buys-person-dist"></div>
+              </div>
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <div class="panel-title">Käufe nach Prop-Firma</div>
+                    <div class="panel-sub">Zum Aufklappen auf eine Firma klicken</div>
+                  </div>
+                </div>
+                <div class="adm-dist" id="adm-buys-firm-dist"></div>
+              </div>
+            </div>
+
+            <!-- Account-Liste nur als Aufklappung — gleiche Mechanik wie in der
+                 Übersicht: erscheint erst nach Klick auf Person oder Firma. -->
+            <div class="panel" style="margin-top:14px" id="adm-buys-acc-panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title" id="adm-buys-acc-title">Accounts</div>
+                  <div class="panel-sub" id="adm-buys-acc-count">–</div>
+                </div>
+                <button class="btn btn-ghost" id="adm-buys-back" style="padding:7px 12px">Alle anzeigen</button>
+              </div>
+              <div class="table-wrap adm-scroll">
+                <table class="t">
+                  <thead><tr>
+                    <th>Account</th>
+                    <th>Firma</th>
+                    <th>Person</th>
+                    <th class="adm-num">Kauf</th>
+                  </tr></thead>
+                  <tbody id="adm-buys-acc-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
             <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
               Zählt jeden Account mit Kaufpreis &gt; 0 — auch archivierte, gekauft ist gekauft.
               Kostenlose Nachfolger (Phase&nbsp;2/Funded aus einer Challenge) tauchen deshalb nicht auf.
@@ -6825,50 +6868,108 @@
      * Deshalb: Eigen-Kosten je Account (buy, KEINE Vorgänger-Kette — jeder
      * gekaufte Account ist hier selbst eine Zeile, die Kette würde doppeln),
      * archivierte zählen mit, und die Beträge bleiben in $ — Accounts werden
-     * in USD gekauft, genau wie die Kasse rechnet. */
+     * in USD gekauft, genau wie die Kasse rechnet.
+     * 2. Runde (Finns Feedback, gleicher Tag): keine Personen-Kästchen mehr,
+     * sondern dieselben klickbaren Balken wie in der Übersicht — Person und
+     * Firma nebeneinander, Klick klappt die Account-Liste auf, nochmal klicken
+     * schließt. Feste Farbe je Zeile statt Risiko-Ampel: hier gibt es kein
+     * Klumpenrisiko, die Farbe dient nur der Unterscheidung. */
     const admUsd = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
+    const B_COLORS = ['var(--violet)', '#e0891f', '#0ea5e9', '#16a34a', '#e11d48', '#a855f7', '#f59e0b', '#14b8a6']
+    let bPerson = '', bFirm = ''
+
+    const admBuysRows = () => (admData.accounts || []).filter(r => (Number(r.buy) || 0) > 0)
+
+    function admBuysGroup(rows, key, labelKey){
+      const m = new Map()
+      for(const r of rows){
+        const k = String(r[key] || '—')
+        const g = m.get(k) || { key:k, label: r[labelKey] || k, accs:0, sum:0 }
+        g.accs++; g.sum += Number(r.buy) || 0
+        m.set(k, g)
+      }
+      return [...m.values()].sort((a, b) => b.sum - a.sum)
+    }
+
+    // Farbe je Schlüssel aus der UNGEFILTERTEN Gruppierung — bleibt beim
+    // Filtern stabil, sonst springen die Farben bei jedem Klick um.
+    function admBuysColors(key, labelKey){
+      const m = new Map()
+      admBuysGroup(admBuysRows(), key, labelKey).forEach((g, i) => m.set(g.key, B_COLORS[i % B_COLORS.length]))
+      return m
+    }
+
+    function admBuysDist(el, list, colors, activeKey, onPick){
+      el.innerHTML = ''
+      if(!list.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
+      const total = list.reduce((a, g) => a + g.sum, 0)
+      for(const g of list){
+        const share = total > 0 ? 100 * g.sum / total : 0
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'adm-row adm-row-btn' + (String(activeKey) === String(g.key) ? ' is-on' : '')
+        row.innerHTML =
+          '<div class="adm-row-name"></div>' +
+          `<div class="adm-track"><div class="adm-fill" style="width:${Math.min(100, share).toFixed(1)}%;background:${colors.get(g.key) || 'var(--violet)'}"></div></div>` +
+          `<div class="adm-val">${admUsd.format(g.sum)}</div>` +
+          `<div class="adm-pct">${g.accs}×</div>`
+        row.querySelector('.adm-row-name').textContent = admShortName(g.label)
+        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admUsd.format(g.sum)} — zum Aufklappen klicken`
+        row.addEventListener('click', () => onPick(g))
+        el.appendChild(row)
+      }
+    }
+
     function admBuysRender(){
       if(!admData) return
-      const rows = (admData.accounts || []).filter(r => (Number(r.buy) || 0) > 0)
-      const people = new Map()
-      for(const r of rows){
-        const k = String(r.user_id)
-        const p = people.get(k) || { name: r.person, email: r.email, accs: 0, sum: 0, firms: new Map() }
-        p.accs++; p.sum += Number(r.buy) || 0
-        const f = p.firms.get(r.firm) || { accs: 0, sum: 0 }
-        f.accs++; f.sum += Number(r.buy) || 0
-        p.firms.set(r.firm, f)
-        people.set(k, p)
-      }
-      const list = [...people.values()].sort((a, b) => b.sum - a.sum)
+      const rows = admBuysRows().filter(r =>
+        (!bPerson || String(r.user_id) === String(bPerson)) &&
+        (!bFirm   || r.firm === bFirm))
+
+      const byPerson = admBuysGroup(rows, 'user_id', 'person')
+      const byFirm   = admBuysGroup(rows, 'firm', 'firm')
 
       $('adm-b-accs').textContent = rows.length
-      $('adm-b-accs-sub').textContent = `über ${list.length} Person${list.length === 1 ? '' : 'en'}`
-      $('adm-b-sum').textContent = admUsd.format(list.reduce((a, p) => a + p.sum, 0))
+      $('adm-b-accs-sub').textContent = `über ${byPerson.length} Person${byPerson.length === 1 ? '' : 'en'}`
+      $('adm-b-sum').textContent = admUsd.format(rows.reduce((a, r) => a + (Number(r.buy) || 0), 0))
       const nArch = rows.filter(r => r.archived).length
       $('adm-b-sum-sub').textContent = nArch ? `${rows.length - nArch} aktiv · ${nArch} archiviert` : 'alle aktiv'
 
-      const grid = $('adm-buys-grid'); grid.innerHTML = ''
-      for(const p of list){
-        const firms = [...p.firms.entries()].sort((a, b) => b[1].sum - a[1].sum)
-        const panel = document.createElement('div')
-        panel.className = 'panel'
-        panel.innerHTML =
-          '<div class="panel-head"><div>' +
-            '<div class="panel-title pt"></div>' +
-            `<div class="panel-sub">${p.accs} Account${p.accs === 1 ? '' : 's'} · ${admUsd.format(p.sum)}</div>` +
-          '</div></div>' +
-          '<div class="table-wrap"><table class="t">' +
-            '<thead><tr><th>Firma</th><th class="adm-num">Accs</th><th class="adm-num">Kauf</th></tr></thead>' +
-            '<tbody>' + firms.map(([, v]) =>
-              `<tr><td><span class="fm"></span></td><td class="adm-num">${v.accs}</td><td class="adm-num">${admUsd.format(v.sum)}</td></tr>`
-            ).join('') + '</tbody>' +
-          '</table></div>'
-        panel.querySelector('.pt').textContent = admShortName(p.name)
-        if(p.email && p.email !== p.name) panel.querySelector('.pt').title = p.email
-        const fms = panel.querySelectorAll('.fm')
-        firms.forEach(([f], i) => { fms[i].textContent = f })
-        grid.appendChild(panel)
+      admBuysDist($('adm-buys-person-dist'), byPerson, admBuysColors('user_id', 'person'), bPerson,
+        g => { bPerson = (String(bPerson) === String(g.key)) ? '' : g.key; admBuysRender() })
+      admBuysDist($('adm-buys-firm-dist'), byFirm, admBuysColors('firm', 'firm'), bFirm,
+        g => { bFirm = (bFirm === g.key) ? '' : g.key; admBuysRender() })
+
+      // Aufklappung: gleiche Mechanik wie adm-acc-panel in der Übersicht.
+      const drilled = !!(bPerson || bFirm)
+      $('adm-buys-acc-panel').hidden = !drilled
+      if(drilled){
+        const parts = []
+        if(bFirm)   parts.push(bFirm)
+        if(bPerson) parts.push(admShortName((byPerson.find(p => String(p.key) === String(bPerson)) || {}).label || ''))
+        $('adm-buys-acc-title').textContent = parts.join(' · ') || 'Accounts'
+        $('adm-buys-acc-count').textContent = rows.length + (rows.length === 1 ? ' Account' : ' Accounts')
+        const tb = $('adm-buys-acc-rows'); tb.innerHTML = ''
+        for(const r of rows.slice().sort((a, b) => (Number(b.buy) || 0) - (Number(a.buy) || 0))){
+          const tr = document.createElement('tr')
+          if(r.archived) tr.style.opacity = '.55'
+          const initials = (r.firm || '?').slice(0, 2).toUpperCase()
+          tr.innerHTML =
+            '<td><div class="acct-cell">' +
+              `<div class="acct-logo">${escapeHtml(initials)}</div>` +
+              '<div style="min-width:0"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px"></div></div>' +
+              (r.archived ? '<span class="chip chip-neutral">archiviert</span>' : '') +
+            '</div></td>' +
+            '<td><span class="fm" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+            '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+            `<td class="adm-num" style="font-weight:600">${admUsd.format(Number(r.buy) || 0)}</td>`
+          tr.querySelector('.nm').textContent = r.name || '—'
+          tr.querySelector('.fm').textContent = r.firm
+          const pe = tr.querySelector('.pe')
+          pe.textContent = r.person
+          if(r.email && r.email !== r.person) pe.title = r.email
+          tb.appendChild(tr)
+        }
       }
 
       $('adm-buys-msg').style.display = 'none'
@@ -7397,6 +7498,7 @@
         $('adm-firm').value = ''; $('adm-person').value = ''; $('adm-search').value = ''
         admRender()
       })
+      $('adm-buys-back')?.addEventListener('click', () => { bPerson = ''; bFirm = ''; admBuysRender() })
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
