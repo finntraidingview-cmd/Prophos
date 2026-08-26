@@ -5105,6 +5105,7 @@
       <div id="kasse-content" hidden>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
+          <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
         </div>
@@ -5228,6 +5229,36 @@
             </p>
           </div>
         </div>
+
+        <!-- ACC-KÄUFE (26.08.2026, Finns Wunsch nach der DB-Auswertung): wer hat
+             wie viele Accounts bei welcher Firma gekauft. Reine Kauf-Sicht aus
+             denselben /admin/overview-Zeilen wie die Übersicht — jeder Account
+             mit Kaufpreis > 0 zählt, auch archivierte (gekauft ist gekauft).
+             Bewusst ohne Ketten/Hedge/Payouts: das ist die Frage der Übersicht. -->
+        <div id="adm-pane-buys" hidden>
+          <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
+          <div id="adm-buys-body" hidden>
+            <div class="kpis">
+              <div class="kpi">
+                <div class="kpi-label">Gekaufte Accounts</div>
+                <div class="kpi-value" id="adm-b-accs">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-b-accs-sub">–</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">Kaufkosten gesamt</div>
+                <div class="kpi-value" id="adm-b-sum">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-b-sum-sub">–</div>
+              </div>
+            </div>
+            <div class="grid-2" id="adm-buys-grid" style="align-items:start"></div>
+            <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+              Zählt jeden Account mit Kaufpreis &gt; 0 — auch archivierte, gekauft ist gekauft.
+              Kostenlose Nachfolger (Phase&nbsp;2/Funded aus einer Challenge) tauchen deshalb nicht auf.
+              Beträge in $ wie beim Kauf; die Übersicht rechnet ihre eigene €-Sicht.
+            </p>
+          </div>
+        </div>
+
         <div id="adm-pane-kasse" hidden>
         <div id="kasse-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
           Tabelle <code>kasse_entries</code> fehlt noch — bitte <code>sql/2026-08-11_kasse.sql</code> im Supabase SQL-Editor ausführen.
@@ -6536,9 +6567,14 @@
         selF.value = curF
         msg.style.display = 'none'; body.hidden = false
         admRender()
+        admBuysRender()
       }catch(e){
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
+        // Der Käufe-Tab hängt an denselben Daten — dort denselben Fehler zeigen,
+        // sonst steht da für immer „Lade Übersicht…".
+        const bm = $('adm-buys-msg')
+        if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $('adm-buys-body').hidden = true }
       }
     }
 
@@ -6781,6 +6817,62 @@
         if(r.email && r.email !== r.person) pe.title = r.email   // E-Mail nur noch im Tooltip
         tb.appendChild(tr)
       }
+    }
+
+    /* ── Acc-Käufe: wer hat wie viele Accounts bei welcher Firma gekauft ──
+     * (26.08.2026) Eigener Tab statt Filter in der Übersicht, weil die Frage
+     * eine andere ist: nicht „wo steckt Geld", sondern „was wurde eingekauft".
+     * Deshalb: Eigen-Kosten je Account (buy, KEINE Vorgänger-Kette — jeder
+     * gekaufte Account ist hier selbst eine Zeile, die Kette würde doppeln),
+     * archivierte zählen mit, und die Beträge bleiben in $ — Accounts werden
+     * in USD gekauft, genau wie die Kasse rechnet. */
+    const admUsd = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
+    function admBuysRender(){
+      if(!admData) return
+      const rows = (admData.accounts || []).filter(r => (Number(r.buy) || 0) > 0)
+      const people = new Map()
+      for(const r of rows){
+        const k = String(r.user_id)
+        const p = people.get(k) || { name: r.person, email: r.email, accs: 0, sum: 0, firms: new Map() }
+        p.accs++; p.sum += Number(r.buy) || 0
+        const f = p.firms.get(r.firm) || { accs: 0, sum: 0 }
+        f.accs++; f.sum += Number(r.buy) || 0
+        p.firms.set(r.firm, f)
+        people.set(k, p)
+      }
+      const list = [...people.values()].sort((a, b) => b.sum - a.sum)
+
+      $('adm-b-accs').textContent = rows.length
+      $('adm-b-accs-sub').textContent = `über ${list.length} Person${list.length === 1 ? '' : 'en'}`
+      $('adm-b-sum').textContent = admUsd.format(list.reduce((a, p) => a + p.sum, 0))
+      const nArch = rows.filter(r => r.archived).length
+      $('adm-b-sum-sub').textContent = nArch ? `${rows.length - nArch} aktiv · ${nArch} archiviert` : 'alle aktiv'
+
+      const grid = $('adm-buys-grid'); grid.innerHTML = ''
+      for(const p of list){
+        const firms = [...p.firms.entries()].sort((a, b) => b[1].sum - a[1].sum)
+        const panel = document.createElement('div')
+        panel.className = 'panel'
+        panel.innerHTML =
+          '<div class="panel-head"><div>' +
+            '<div class="panel-title pt"></div>' +
+            `<div class="panel-sub">${p.accs} Account${p.accs === 1 ? '' : 's'} · ${admUsd.format(p.sum)}</div>` +
+          '</div></div>' +
+          '<div class="table-wrap"><table class="t">' +
+            '<thead><tr><th>Firma</th><th class="adm-num">Accs</th><th class="adm-num">Kauf</th></tr></thead>' +
+            '<tbody>' + firms.map(([, v]) =>
+              `<tr><td><span class="fm"></span></td><td class="adm-num">${v.accs}</td><td class="adm-num">${admUsd.format(v.sum)}</td></tr>`
+            ).join('') + '</tbody>' +
+          '</table></div>'
+        panel.querySelector('.pt').textContent = admShortName(p.name)
+        if(p.email && p.email !== p.name) panel.querySelector('.pt').title = p.email
+        const fms = panel.querySelectorAll('.fm')
+        firms.forEach(([f], i) => { fms[i].textContent = f })
+        grid.appendChild(panel)
+      }
+
+      $('adm-buys-msg').style.display = 'none'
+      $('adm-buys-body').hidden = false
     }
 
     window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
@@ -7292,9 +7384,11 @@
           x.style.color = on ? 'var(--violet)' : ''
         })
         $('adm-pane-overview').hidden = name !== 'overview'
+        $('adm-pane-buys').hidden     = name !== 'buys'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         if(name === 'wallet') walOpen()
+        if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
