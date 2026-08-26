@@ -9508,7 +9508,7 @@
    * (= MT5-Login) und den Account-Namen; lesbare Namen liefert der Profil-
    * Umschalter, wie in der Admin-Uebersicht. Faellt der Endpoint aus, faerbt
    * die Flotte wie bisher pro Login — nie leer, nur weniger schlau. */
-  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null }
+  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null, exclUids: null }
   function _fleetKurzName(mail){
     const s = String(mail || ''); const at = s.indexOf('@')
     return at > 0 ? s.slice(0, at) : s
@@ -9545,6 +9545,12 @@
       }
       _fleetPers.byLogin = byLogin
       _fleetPers.byName = byName
+      // Ausgeschlossene Personen (ADMIN_EXCLUDE, aktuell Emin + Finn): die
+      // Flotte blendet sie komplett aus (26.08.2026, Finns Ansage: „mach die
+      // Trades von Finn auch weg, genau wie bei Emin"). Emin fehlte bisher nur,
+      // weil seine Daten nirgends auftauchen — Finns Duplikium-Zeilen stehen
+      // aber in dup_live, deshalb braucht es die uid-Liste vom Server.
+      _fleetPers.exclUids = new Set((d.excluded_uids || []).map(String))
       _fleetPers.next = Date.now() + 5 * 60 * 1000      // frisch — 5 min Ruhe
     }catch(_){ /* Login-Farben als Fallback, naechster Versuch in 1 min */ }
     return _fleetPers
@@ -9918,9 +9924,14 @@
       // „sonst sind wir ja doppelt") — ihre Trades stehen als Plan-Karten
       // direkt darueber. Nur ihre ALARME (Waisen/Fremd-Hedge) muessen
       // trotzdem erscheinen, die gibt es auf den Plan-Karten nicht.
+      // Und die AUSGESCHLOSSENEN (ADMIN_EXCLUDE: Emin + Finn) fliegen ganz
+      // raus (26.08.2026, Finns Ansage). Beim allerersten Render kann die
+      // Liste noch fehlen (fleetPersonen laeuft nicht awaited) — der naechste
+      // Tick raeumt auf.
+      const excl = _fleetPers.exclUids || new Set()
       const eigeneAlarme = (alarme.get(meUid) || []).join('')
       const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
-        .filter(k => k !== meUid)
+        .filter(k => k !== meUid && !excl.has(String(k)))
         .sort((a, b) => personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
       if(!reihenfolge.length && !uebrig.length && !eigeneAlarme){ box.style.display = 'none'; return }
 

@@ -3155,9 +3155,13 @@ def admin_build_overview():
         [{"user_id": u, "name": names.get(u, u[:8])} for u in {r["user_id"] for r in rows}],
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
+    # excluded_uids zusaetzlich zu den E-Mails (26.08.2026): die Flotte im
+    # Frontend blendet diese Personen komplett aus und braucht dafuer die uid —
+    # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.
     return {"accounts": rows, "people": people_list, "firms": firm_list,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
-            "excluded": sorted(excluded_names)}
+            "excluded": sorted(excluded_names),
+            "excluded_uids": sorted(excluded_ids)}
 
 
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])
