@@ -16666,6 +16666,46 @@
     populateTradeFilterAccounts()
     bindTradePlanCardActions()
     try { tcDetectTransitions() } catch(_){}
+    // Richtungs-Hinweise async nachfüllen — die Platzhalter stehen schon im DOM
+    try { tpDirHintsFill() } catch(_){}
+  }
+
+  /* ── Richtungs-Hinweis auf geplanten Karten (27.08.2026, Finns Wunsch:
+   * „das Mittel weg und die Schutz-Warnung mit long/short hinmachen") ──
+   * Läuft bei der Master-Firma auf der EIGENEN ID schon ein Trade, steht das
+   * jetzt direkt auf der Karte statt nur im Start-Check-Toast. Quelle ist
+   * firmLiveRichtungen (dup_live + mt5_live, seit .126 nur die eingeloggte
+   * ID). 20-s-Cache pro Firma: renderTradePlans läuft oft, die Flotten-
+   * Tabellen sollen nicht bei jedem Render neu abgefragt werden. */
+  const _dirHintCache = new Map()   // Firma → {t, dir}
+  let _dirHintRun = 0
+  async function tpDirHintsFill(){
+    const spans = document.querySelectorAll('.tc2-dir-hint')
+    if(!spans.length || typeof window.firmLiveRichtungen !== 'function') return
+    const run = ++_dirHintRun
+    const firms = [...new Set([...spans].map(s => s.dataset.dirFirm).filter(Boolean))]
+    for(const f of firms){
+      let hit = _dirHintCache.get(f)
+      if(!hit || Date.now() - hit.t > 20 * 1000){
+        try{
+          const d = await window.firmLiveRichtungen(f)
+          hit = { t: Date.now(), dir: d.long.length ? 'LONG' : d.short.length ? 'SHORT' : null }
+        }catch(_){ hit = { t: Date.now(), dir: null } }
+        _dirHintCache.set(f, hit)
+      }
+      if(run !== _dirHintRun) return          // inzwischen neu gerendert — der neue Lauf übernimmt
+      document.querySelectorAll('.tc2-dir-hint').forEach(s => {
+        if(s.dataset.dirFirm !== f) return
+        if(hit.dir){
+          s.textContent = `↔ läuft ${hit.dir} — nur ${hit.dir}`
+          s.title = `${f} läuft auf deiner ID bereits ${hit.dir} — Gegenrichtung wäre Selbst-Hedge über Accounts`
+          s.style.display = ''
+        } else {
+          s.style.display = 'none'
+          s.textContent = ''
+        }
+      })
+    }
   }
 
   /* ── Live-Erkennungs-Animation + dezenter Sound ──
@@ -16807,14 +16847,21 @@
     let metric = ''
     if(isPlanned){
       const dateStr = p.plannedFor ? new Date(p.plannedFor).toLocaleDateString('de-DE',{day:'2-digit',month:'short'}) : '—'
-      const prioLbl = { high:'Hoch', medium:'Mittel', low:'Niedrig' }[p.priority] || 'Mittel'
       const pf = _pfCheckStatus[String(p.id)]
       const pfBadge = !pf ? '' : pf.state === 'ready'
         ? `<span class="tc2-chip tc2-chip-ready" title="Preflight-Check bestanden">✓ Ready to start</span>`
         : `<span class="tc2-chip tc2-chip-issue" title="Preflight-Check hatte ein Problem">⚠ Prüfung fehlgeschlagen</span>`
       const mirrorBadge = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id))
         ? `<span class="tc2-chip tc2-chip-mirror" title="Mirror-Engine läuft — wartet auf deinen Einstieg auf Topstep">🪞 Mirror scharf</span>` : ''
-      metric = `${mirrorBadge}${pfBadge}<span class="tc2-chip tc2-prio-${p.priority}">${prioLbl}</span><span class="tc2-date">${dateStr}</span>`
+      // Prio-Chip raus, Richtungs-Hinweis rein (27.08.2026, Finns Wunsch):
+      // die Prio steckt weiterhin im Status-Punkt links (tc2-dot-prio-*), der
+      // Chip-Platz zeigt jetzt, ob die Master-Firma auf der eigenen ID schon
+      // long/short läuft. tpDirHintsFill füllt den Platzhalter asynchron —
+      // dieselbe Quelle wie der Trade-Start-Check (firmLiveRichtungen, seit
+      // .126 nur die eingeloggte ID).
+      metric = `${mirrorBadge}${pfBadge}`
+        + `<span class="tc2-chip tc2-dir-hint" data-dir-firm="${escapeHtml(p.masterFirm || '')}" style="display:none;background:rgba(245,158,11,.14);color:#b45309"></span>`
+        + `<span class="tc2-date">${dateStr}</span>`
     } else if(isOpen){
       if(isPending){
         metric = `<span class="tc2-pending-lbl">🔴 beendet — eintragen</span>`
