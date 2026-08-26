@@ -12755,6 +12755,9 @@
       renderOverviewKpis()
       updateSidebarBadges()
       if(typeof renderPairs === 'function') renderPairs()
+      // Frischen Stand für den nächsten Boot merken (ohne Creds/Tokens) —
+      // damit malt der Profilwechsel sofort statt auf die Kaskade zu warten.
+      if(typeof cacheWrite === 'function') cacheWrite(CACHE_ACC_LS, accounts.map(_cacheStripAcc))
       // Settings-Panel aktualisieren wenn gerade offen
       if(document.querySelector('[data-view="settings"].active') && typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
     }catch(e){
@@ -15997,6 +16000,9 @@
       if(error){ console.error('loadTradePlans:', error); return }
       tradePlans = (data || []).map(rowToPlan).filter(Boolean)
       renderTradePlans()
+      // Frischen Stand für den nächsten Boot merken — Gegenstück zum
+      // Accounts-Cache, gleiche Begründung (schneller Profilwechsel).
+      if(typeof cacheWrite === 'function') cacheWrite(CACHE_PLAN_LS, tradePlans)
     }catch(e){
       console.error('loadTradePlansFromSupabase failed:', e)
     }
@@ -20894,12 +20900,60 @@
   document.getElementById('notesAddBtn')?.addEventListener('click', noteAdd)
 
   /* ========== INITIAL LOAD: Accounts aus Supabase nach Login ========== */
+
+  /* ── Boot-Cache (26.08.2026, Finns Ansage: Profilwechsel dauert ~10 s) ──
+   * Der Reload beim Wechsel bleibt bewusst (Modul-State liest localStorage nur
+   * einmal beim Start) — aber die App malt jetzt SOFORT den letzten bekannten
+   * Stand: Accounts + Trade-Pläne liegen als prophos_cache_* im localStorage
+   * und wandern damit automatisch durch die Profil-Buckets mit. Die frischen
+   * Supabase-Daten ersetzen den Cache, sobald sie da sind (stale-while-
+   * revalidate) — gemessen ist NICHT das Netz das Problem (HTML 0,4 s,
+   * Supabase-RTT 0,5 s), sondern dass vor dem ersten Inhalt die ganze
+   * Lade-Kaskade fertig sein musste.
+   * Passwörter/MetaApi-Tokens werden VOR dem Schreiben entfernt — Buckets
+   * leben lange im localStorage, Klartext-Creds gehören da nicht rein (die
+   * frische Ladung bringt sie nach ~1 s wieder mit).
+   * Jeder Fehlschlag (voll/kaputt/fehlt) heißt nur: kein Cache, alter Weg. */
+  const CACHE_ACC_LS  = 'prophos_cache_accounts'
+  const CACHE_PLAN_LS = 'prophos_cache_plans'
+  const _cacheStripAcc = a => ({ ...a, creds: null, ma: a.ma ? { ...a.ma, token: '' } : null })
+  function cacheWrite(key, arr){
+    try{
+      const s = JSON.stringify(arr)
+      if(s.length > 900 * 1024) return           // localStorage-Budget schonen
+      localStorage.setItem(key, s)
+    }catch(_){}
+  }
+  let _cacheHydrated = false
+  function hydrateFromCache(){
+    // Läuft genau einmal, und bewusst NACH _origShowDashboard: dort sitzt
+    // hydrateUser mit dem Bucket-Abgleich — vorher könnten noch die Keys
+    // eines anderen Profils im localStorage liegen.
+    if(_cacheHydrated) return
+    _cacheHydrated = true
+    try{
+      if(!accounts.length){
+        const a = JSON.parse(localStorage.getItem(CACHE_ACC_LS) || 'null')
+        if(Array.isArray(a) && a.length){
+          accounts = a
+          renderAccounts(); renderOverviewKpis(); updateSidebarBadges()
+          if(typeof renderPairs === 'function') renderPairs()
+        }
+      }
+      if(!tradePlans.length){
+        const p = JSON.parse(localStorage.getItem(CACHE_PLAN_LS) || 'null')
+        if(Array.isArray(p) && p.length){ tradePlans = p; renderTradePlans() }
+      }
+    }catch(_){}
+  }
+
   // Hook in showDashboard: lade Accounts sobald wir wissen wer eingeloggt ist
   const _origShowDashboard = showDashboard
   showDashboard = function(user){
     currentUserId = user?.id || null
     _origShowDashboard.apply(this, arguments)
     if(currentUserId){
+      hydrateFromCache()
       loadAccountsFromSupabase()
       loadTradePlansFromSupabase()
       loadTransactionsFromSupabase()
