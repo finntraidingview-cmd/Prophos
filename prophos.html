@@ -4987,6 +4987,11 @@
                437804/488579-Haenger): Klick → ID eingeben → Panel schreibt sie
                in ALLE Configs dieses PCs, Copier startet neu und prueft frisch -->
           <span class="mtc-chip" id="mtc-hedge-chip" title="Erwartetes Hedge-Konto dieses PCs — Klick zum Ändern" style="display:none;cursor:pointer">🎯 Hedge <b id="mtc-hedge-cur" class="mono" style="margin-left:4px">—</b> ✎</span>
+          <!-- Notfall-SL/TP global (27.08.2026, Finns Ansage „mach eins für alle,
+               nicht für jeden einzelnen einen"): EIN Wert für die ganze Flotte
+               (echo_notfall, key='global') — Klick → Faktor + Puffer eingeben,
+               echoNotfallGuard verteilt es auf alle Configs aller PCs -->
+          <span class="mtc-chip" id="mtc-notfall-chip" title="Notfall-SL/TP auf dem Hedge — gilt für ALLE Accounts der Flotte. Klick zum Ändern" style="cursor:pointer">🛡 Notfall <b id="mtc-notfall-cur" class="mono" style="margin-left:4px">—</b> ✎</span>
           <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
@@ -24334,14 +24339,9 @@
         <div class="mtc-row">
           <div><label>Multiplikator</label><input type="number" step="0.001" min="0" value="${esc(d.multiplier ?? '')}" data-mtcf="multiplier"></div>
         </div>
-        <!-- Notfall-SL/TP (27.08.2026, Finns Ansage: Faktor manuell veraenderbar in
-             Prophos). Der Save-Handler sammelt data-mtcf generisch ein; alte Panels
-             ohne die WRITABLE-Felder ignorieren den Patch still. Fehlt der Wert in
-             der Config, zeigen wir die Copier-Defaults 110 / 100 vorbefuellt. -->
-        <div class="mtc-row">
-          <div><label title="Notfall-SL/TP auf dem Hedge: Puffer hinter dem Master-Level = (Faktor − 100)% der Distanz Entry↔Level. Führt der Broker serverseitig aus, falls Echo ausfällt.">Notfall-Faktor %</label><input type="number" step="1" min="100" max="1000" value="${esc(d.notfall_faktor ?? 110)}" data-mtcf="notfall_faktor"></div>
-          <div><label title="Mindest-Puffer in Broker-Punkten — fängt den Breakeven-SL (Distanz 0), sonst würde ein winziger Kurs-Unterschied zwischen den Brokern sofort füllen.">Mindest-Puffer (Punkte)</label><input type="number" step="1" min="0" value="${esc(d.notfall_puffer_min_punkte ?? 100)}" data-mtcf="notfall_puffer_min_punkte"></div>
-        </div>
+        <!-- Notfall-SL/TP steht bewusst NICHT pro Karte (27.08.2026, Finns
+             Ansage „mach eins für alle"): der 🛡-Chip oben in der Leiste stellt
+             den globalen Wert, echoNotfallGuard verteilt ihn auf alle Configs. -->
         <label>Symbol-Mapping (Master → Hedge)</label>
         <div data-mtcmaps>${mapRows(d.symbol_map)}</div>
         <div class="mtc-acts">
@@ -24595,6 +24595,17 @@
       const exps = [...new Set((d.instances || []).map(x => String(x.hedge_expected || '')).filter(Boolean))]
       if(exps.length){ hc.style.display = ''; hcur.textContent = exps.length === 1 ? exps[0] : '⚠ uneinheitlich' }
       else hc.style.display = 'none'
+    }
+    // 🛡-Chip: globaler Notfall-Wert (27.08.2026). Anzeige-Quelle ist der
+    // Guard-Cache (= DB-Stand); solange der noch nicht geladen ist, die erste
+    // Config, die die Felder schon meldet — sonst die Copier-Defaults.
+    const ncur = $('mtc-notfall-cur')
+    if(ncur){
+      const w = _echoNotfall.wert
+      const inst0 = (d.instances || []).find(x => x.notfall_faktor != null)
+      const f = w ? w.faktor : (inst0 ? Number(inst0.notfall_faktor) : 110)
+      const p = w ? w.puffer : (inst0 ? Number(inst0.notfall_puffer_min_punkte ?? 100) : 100)
+      ncur.textContent = `${f}% / ${p}P`
     }
     const badge = $('sb-badge-mtc')
     if(badge){ const n = (d.instances || []).length; badge.hidden = !n; badge.textContent = n }
@@ -24902,6 +24913,43 @@
     }
   })
 
+  // 🛡 Notfall-SL/TP global umstellen (27.08.2026, Finns Ansage „mach eins für
+  // alle, nicht für jeden einzelnen einen"): EIN Klick stellt Faktor + Puffer
+  // für die GANZE Flotte — Supabase (echo_notfall) ist die Wahrheit, der
+  // echoNotfallGuard verteilt den Wert auf alle Configs (dieser PC binnen
+  // Sekunden, andere PCs bei deren nächstem Poll). Eigene Verdrahtung
+  // (Projektregel: keine Sammel-Handler).
+  const notfallChipBtn = $('mtc-notfall-chip')
+  if(notfallChipBtn) notfallChipBtn.addEventListener('click', async () => {
+    const w = _echoNotfall.wert
+    const rawF = window.prompt('Notfall-Faktor in % (für ALLE Accounts der Flotte):\n\nPuffer hinter dem Master-Level = (Faktor − 100)% der Distanz Entry↔Level. 110 = 10% dahinter.',
+      String(w ? w.faktor : 110))
+    if(rawF == null) return
+    const f = Number(String(rawF).replace(',', '.').trim())
+    if(!isFinite(f) || f < 100 || f > 1000){ alert('Bitte einen Faktor zwischen 100 und 1000 eingeben, z.B. 110.'); return }
+    const rawP = window.prompt('Mindest-Puffer in Broker-Punkten (fängt den Breakeven-SL, wo die Distanz 0 ist):',
+      String(w ? w.puffer : 100))
+    if(rawP == null) return
+    const p = Number(String(rawP).replace(',', '.').trim())
+    if(!isFinite(p) || p < 0){ alert('Bitte einen Puffer ≥ 0 eingeben, z.B. 100.'); return }
+    if(!confirm(`Notfall-SL/TP für die GANZE Flotte auf ${f}% / ${p} Punkte stellen?\n\nDer Wert wird in der Datenbank gespeichert; jede Copier-Config (auch auf den anderen PCs) wird automatisch daraufgestellt.`)) return
+    try{
+      await supabase.from('echo_notfall').upsert({ key: 'global',
+        notfall_faktor: f, notfall_puffer_min_punkte: p,
+        updated_at: new Date().toISOString() })
+      // Guard-Cache sofort umstellen und Drossel lösen — der nächste Poll
+      // heilt die Configs dieses PCs damit ohne Wartezeit.
+      _echoNotfall.wert = { faktor: f, puffer: p }
+      _echoNotfall.geladen = Date.now()
+      _echoNotfall.next = 0
+      const cur = $('mtc-notfall-cur'); if(cur) cur.textContent = `${f}% / ${p}P`
+      if(typeof atToast === 'function') atToast(`🛡 Notfall-SL/TP: ${f}% / ${p} Punkte — wird auf alle Configs verteilt`, 'start')
+      setTimeout(mtcLoad, 300)
+    }catch(e){
+      alert('Speichern fehlgeschlagen (sql/2026-08-27_echo_notfall.sql schon ausgeführt?): ' + (e && e.message || e))
+    }
+  })
+
   // Maus-Test-Knopf (15.08.2026, Finns Wunsch): isolierter Beweis, dass der Bot
   // Maus + Tastatur auf dem PC steuern kann — getrennt von MT5.
   const mouseTestBtn = $('mtc-mouse-test')
@@ -25057,24 +25105,6 @@
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? ((d.msg || 'gespeichert') + ' — der Copier übernimmt es in ~2s' + (d.restart ? ' (Neustart läuft automatisch)' : '')) : ('Fehler: ' + (d.msg || d.error))
     if(d.ok) cardEl.removeAttribute('data-dirty')
-    // Notfall-Werte zusätzlich nach Supabase (27.08.2026, Finns Ansage: „als
-    // sql gleich speichern, dass es da nie Problem später gibt") — EINE
-    // globale Zeile, echoNotfallGuard heilt ab jetzt jede abweichende Config
-    // der ganzen Flotte darauf. Nur bei plausiblen Zahlen schreiben: ein
-    // ALTES Panel meldet ok, obwohl es die Felder ignoriert — ein leerer
-    // Input (Number('') = 0) dürfe die DB-Policy nicht auf 0 stellen.
-    const _nf = Number(patch.notfall_faktor), _np = Number(patch.notfall_puffer_min_punkte)
-    if(d.ok && isFinite(_nf) && _nf >= 100 && isFinite(_np) && _np >= 0){
-      try{
-        await supabase.from('echo_notfall').upsert({ key: 'global',
-          notfall_faktor: _nf, notfall_puffer_min_punkte: _np,
-          updated_at: new Date().toISOString() })
-        // Guard-Cache sofort auf den neuen Stand — sonst würde der 5-min-Cache
-        // die eben gespeicherte Änderung binnen einer Minute zurückheilen.
-        _echoNotfall.wert = { faktor: _nf, puffer: _np }
-        _echoNotfall.geladen = Date.now()
-      }catch(_){ console.warn('[echo] echo_notfall-Upsert fehlgeschlagen — sql/2026-08-27_echo_notfall.sql schon ausgeführt?') }
-    }
     setTimeout(mtcLoad, 2500)
   })
 

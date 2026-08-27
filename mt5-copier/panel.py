@@ -43,7 +43,11 @@ PORT = int(os.environ.get("PANEL_PORT", "8770"))
 # mode genauso abgeschafft (25.08.2026, Finn: nur noch live, Modus-Klicks weg) —
 # der Copier sendet immer echt, das Feld in Alt-Configs ist bedeutungslos.
 # notfall_faktor/notfall_puffer_min_punkte (27.08.2026): Notfall-SL/TP auf dem
-# Hedge — Finns Ansage 'manuell eintippbar / variabel veraenderbar in Prophos'.
+# Hedge. BEWUSST writable, aber OHNE Eingabefeld im Panel (Finns Ansage 'mach
+# eins fuer alle'): der Wert ist eine globale Flotten-Policy — gestellt wird er
+# ueber den 🛡-Chip in Prophos (Supabase echo_notfall), und echoNotfallGuard
+# verteilt ihn per save?file= in jede Config. Ein Panel-Feld wuerde binnen
+# einer Minute zurueckgeheilt und nur verwirren.
 WRITABLE = {"multiplier", "symbol_map", "notfall_faktor", "notfall_puffer_min_punkte"}
 # Dieselbe strenge Namensregel wie in copier.py — Explorer-Kopien wie
 # "config - Kopie.json" oder "config (2).json" sind KEINE Instanz (Audit 13.08.2026:
@@ -1341,10 +1345,6 @@ function card(d){
    <div class=details>
      <div class=row>
        <div><label>Multiplikator</label><input type=number step=0.001 min=0 value="${esc(d.multiplier??'')}" data-f=multiplier></div>
-     </div>
-     <div class=row>
-       <div><label>Notfall-Faktor % <span style="color:var(--sub-2)" title="Notfall-SL/TP auf dem Hedge: Puffer hinter dem Master-Level = (Faktor − 100)% der Distanz Entry↔Level. Der Broker führt sie serverseitig aus, falls Echo ausfällt.">ⓘ</span></label><input type=number step=1 min=100 max=1000 value="${esc(d.notfall_faktor??110)}" data-f=notfall_faktor></div>
-       <div><label>Mindest-Puffer (Punkte)</label><input type=number step=1 min=0 value="${esc(d.notfall_puffer_min_punkte??100)}" data-f=notfall_puffer_min_punkte></div>
      </div>
      <label>Symbol-Mapping (Master → Hedge)</label>
      <div data-maps>${mapRows(d.symbol_map||{})}</div>
