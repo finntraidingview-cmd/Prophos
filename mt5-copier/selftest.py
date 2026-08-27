@@ -13,7 +13,8 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from copier import plan_actions, check_fleet, compute_startup_skip  # noqa: E402
+from copier import (plan_actions, check_fleet, compute_startup_skip,  # noqa: E402
+                    plan_sltp, find_notfall_deals, read_snapshot)
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
 FUSION = {
@@ -444,6 +445,81 @@ def main():
         and not order_bot.ist_handelszeile("NAS100,M1: US Tech 100 Index", "NAS100")
         and not order_bot.ist_handelszeile("ProphosHedgeReader - NAS100,M1", "NAS100")
         and not order_bot.ist_handelszeile("", "NAS100"))
+
+    # ── Notfall-SL/TP (27.08.2026): reine Rechenlogik ──────────────────────
+    # Wichtigster Fall zuerst: der in den GEWINN nachgezogene Master-SL — die
+    # naive Formel 'Entry ± Faktor × Distanz' legte den Level dort VOR den
+    # Master-SL und schloesse den Hedge, bevor der Master ausgestoppt ist.
+    def sltp(mp, faktor=110, puffer=0, point=0.01, digits=2):
+        return plan_sltp(mp, faktor=faktor, min_puffer_punkte=puffer,
+                         point=point, digits=digits)
+
+    chk("NOTFALL: LONG-Master, SL 2490/TP 2520 @ Entry 2500 → Hedge-TP 2489, Hedge-SL 2522 (gekreuzt, 10% dahinter)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 2490.0, "tp": 2520.0})
+        == {"tp": 2489.0, "sl": 2522.0})
+    chk("NOTFALL: SHORT-Master, SL 2510/TP 2480 → Hedge-TP 2511, Hedge-SL 2478 (gespiegelt)",
+        sltp({"type": 1, "price_open": 2500.0, "sl": 2510.0, "tp": 2480.0})
+        == {"tp": 2511.0, "sl": 2478.0})
+    chk("NOTFALL: LONG-SL in den Gewinn nachgezogen (2510 > Entry 2500) → Hedge-TP 2509 liegt DAHINTER (unter dem Master-SL)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 2510.0, "tp": 0.0})
+        == {"tp": 2509.0, "sl": 0.0})
+    chk("NOTFALL: Breakeven-SL (Distanz 0) → Mindest-Puffer 100 Punkte greift (Hedge-TP 2499)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 2500.0, "tp": 0.0}, puffer=100)
+        == {"tp": 2499.0, "sl": 0.0})
+    chk("NOTFALL: Mindest-Puffer schlaegt Prozent-Puffer, wenn er groesser ist (Distanz 1 → 1.0 statt 0.1)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 2499.0, "tp": 0.0}, puffer=100)
+        == {"tp": 2498.0, "sl": 0.0})
+    chk("NOTFALL: Master ohne SL/TP (0.0) → beide Hedge-Level 0.0 (= loeschen)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 0.0, "tp": 0.0})
+        == {"tp": 0.0, "sl": 0.0})
+    chk("NOTFALL: altes EA ohne Felder (None) → None, es wird NICHTS angefasst",
+        sltp({"type": 0, "price_open": None, "sl": None, "tp": None}) is None
+        and sltp({"type": 0, "price_open": 2500.0, "sl": None, "tp": None}) is None)
+    chk("NOTFALL: Rundung auf Broker-Digits (2492.663 → 2492.66)",
+        sltp({"type": 0, "price_open": 2500.0, "sl": 2493.33, "tp": 0.0})
+        == {"tp": 2492.66, "sl": 0.0})
+
+    # Snapshot-Parser v5: Entry/SL/TP werden gelesen, alte 6-Feld-Zeilen
+    # degradieren auf None (nie 0 — 'Beweis oder leer').
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        _v5 = os.path.join(_td, "v5.csv")
+        with open(_v5, "w") as f:
+            f.write("PROPHOS1;7;123;437803;Srv;2;1;10000.00;10000.00;USD;1\n"
+                    "P;101;NAS100;0;1.00000000;1.00000000;20000.00000000;19900.00000000;20200.00000000\n"
+                    "END;7;1\n")
+        _alt = os.path.join(_td, "alt.csv")
+        with open(_alt, "w") as f:
+            f.write("PROPHOS1;3;123;437803;Srv;2;1\n"
+                    "P;102;NAS100;0;1.00000000;1.00000000\n"
+                    "END;3;1\n")
+        s5 = read_snapshot(_v5)
+        sa = read_snapshot(_alt)
+        chk("SNAPSHOT v5: Entry/SL/TP aus der P-Zeile gelesen",
+            s5 is not None and s5["positions"][0]["price_open"] == 20000.0
+            and s5["positions"][0]["sl"] == 19900.0 and s5["positions"][0]["tp"] == 20200.0)
+        chk("SNAPSHOT alt (6 Felder): price_open/sl/tp bleiben None, Rest liest normal",
+            sa is not None and sa["positions"][0]["volume"] == 1.0
+            and sa["positions"][0]["price_open"] is None and sa["positions"][0]["sl"] is None)
+
+    # Notfall-Close-Klassifizierung: nur Broker-SL/TP-Fills (DEAL_REASON 4/5)
+    # auf OUT-Deals zaehlen — Hand-Close (REASON_CLIENT=0) und Stop-Out
+    # (REASON_SO=6) bleiben 'extern', schon verbuchte Deals nie doppelt.
+    from types import SimpleNamespace as _NS
+    _deals = [
+        _NS(ticket=1, entry=1, reason=4),   # SL-Fill  → Notfall
+        _NS(ticket=2, entry=1, reason=5),   # TP-Fill  → Notfall
+        _NS(ticket=3, entry=1, reason=0),   # Hand     → extern
+        _NS(ticket=4, entry=1, reason=6),   # Stop-Out → extern
+        _NS(ticket=5, entry=0, reason=4),   # IN-Deal  → nie
+        _NS(ticket=6, entry=1, reason=5),   # schon verbucht
+    ]
+    _nf = find_notfall_deals(_deals, {6}, out_entries=(1, 2), reason_sl=4, reason_tp=5)
+    chk("NOTFALL-CLOSE: SL/TP-Fills erkannt, Hand/Stop-Out/IN/verbucht aussortiert",
+        [d.ticket for d in _nf] == [1, 2])
+    chk("NOTFALL-CLOSE: leere/None-Deal-Liste → leer",
+        find_notfall_deals(None, set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == []
+        and find_notfall_deals([], set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == [])
 
     print()
     ok = sum(1 for r in results if r)

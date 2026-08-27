@@ -37,6 +37,10 @@
   "deviation_points": 30,
   "filling": "auto",
 
+  "_7b_notfall_sltp": "Notfall-SL/TP auf dem Hedge (27.08.2026): der Broker schliesst den Hedge serverseitig, falls Echo ausfaellt und der Master in SL/TP laeuft. Gekreuzt (Master-SL -> Hedge-TP, Master-TP -> Hedge-SL), Puffer HINTER dem Master-Level = (notfall_faktor - 100)% der Distanz Entry<->Level, mindestens notfall_puffer_min_punkte Broker-Punkte (faengt Breakeven-SL). Braucht das Lese-EA v5 (Neukompilierung) — vorher bleibt das Feature still.",
+  "notfall_faktor": 110,
+  "notfall_puffer_min_punkte": 100,
+
   "_8_EINDEUTIG_pro_master": "magic und snapshot_file MUESSEN pro config*.json eindeutig sein (der Copier bricht sonst ab). magic ist das Erkennungszeichen der eigenen Hedges — zwei Master mit derselben magic wuerden sich gegenseitig die Hedges schliessen (Audit 13.08.2026). Zweiter Master z.B.: magic 770002, comment_prefix 'P2', snapshot_file 'prophos_master2.csv'.",
   "magic": 770001,
   "comment_prefix": "PH"

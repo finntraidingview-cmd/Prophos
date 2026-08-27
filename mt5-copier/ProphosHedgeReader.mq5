@@ -13,8 +13,12 @@
 //| Datei und stellt den Hedge darauf ein.                           |
 //+------------------------------------------------------------------+
 #property copyright "Prophos"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
+// 1.10 (27.08.2026): P-Zeilen tragen Entry/SL/TP (Snapshot v5) — Basis fuer die
+// Notfall-SL/TP-Level auf dem Hedge. Einmalige Neukompilierung je Master-
+// Terminal noetig; bis dahin degradiert der Copier auf 'keine Notfall-Level'
+// (leer statt falsch), wie beim Balance-Header v3.
 
 input string InpFileName   = "prophos_master.csv"; // Datei im gemeinsamen Ordner
 input int    InpTimerMs    = 200;                  // Heartbeat-Intervall (ms)
@@ -127,6 +131,11 @@ void WriteSnapshot()
    // Eine Zeile pro Position. contract_size mitschreiben, weil der Executor
    // die Kontraktgroesse des MASTER-Brokers nicht selbst abfragen kann
    // (er haengt nur am Live-Terminal, anderer Broker, andere Groessen).
+   // v5 (27.08.2026, Notfall-SL/TP): Entry-Preis, SL und TP hinten ANGEHAENGT —
+   // der Copier rechnet daraus die Notfall-Level auf dem Hedge (gekreuzt, mit
+   // Puffer) und zieht sie bei JEDER Aenderung hier nach. SL/TP = 0.0 heisst
+   // 'nicht gesetzt' (so liefert es PositionGetDouble). Alte Copier lesen nur
+   // die ersten 6 Felder und ignorieren den Rest — nichts bricht.
    int written = 0;
    for(int i = 0; i < total; i++)
    {
@@ -139,8 +148,12 @@ void WriteSnapshot()
       double vol    = PositionGetDouble(POSITION_VOLUME);
       long   ident  = PositionGetInteger(POSITION_IDENTIFIER);    // stabiler als Ticket
       double csize  = SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE);
+      double entry  = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl     = PositionGetDouble(POSITION_SL);
+      double tp     = PositionGetDouble(POSITION_TP);
 
-      FileWrite(h, StringFormat("P;%I64d;%s;%I64d;%.8f;%.8f", ident, sym, ptype, vol, csize));
+      FileWrite(h, StringFormat("P;%I64d;%s;%I64d;%.8f;%.8f;%.8f;%.8f;%.8f",
+                                ident, sym, ptype, vol, csize, entry, sl, tp));
       written++;
    }
 

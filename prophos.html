@@ -24334,6 +24334,14 @@
         <div class="mtc-row">
           <div><label>Multiplikator</label><input type="number" step="0.001" min="0" value="${esc(d.multiplier ?? '')}" data-mtcf="multiplier"></div>
         </div>
+        <!-- Notfall-SL/TP (27.08.2026, Finns Ansage: Faktor manuell veraenderbar in
+             Prophos). Der Save-Handler sammelt data-mtcf generisch ein; alte Panels
+             ohne die WRITABLE-Felder ignorieren den Patch still. Fehlt der Wert in
+             der Config, zeigen wir die Copier-Defaults 110 / 100 vorbefuellt. -->
+        <div class="mtc-row">
+          <div><label title="Notfall-SL/TP auf dem Hedge: Puffer hinter dem Master-Level = (Faktor − 100)% der Distanz Entry↔Level. Führt der Broker serverseitig aus, falls Echo ausfällt.">Notfall-Faktor %</label><input type="number" step="1" min="100" max="1000" value="${esc(d.notfall_faktor ?? 110)}" data-mtcf="notfall_faktor"></div>
+          <div><label title="Mindest-Puffer in Broker-Punkten — fängt den Breakeven-SL (Distanz 0), sonst würde ein winziger Kurs-Unterschied zwischen den Brokern sofort füllen.">Mindest-Puffer (Punkte)</label><input type="number" step="1" min="0" value="${esc(d.notfall_puffer_min_punkte ?? 100)}" data-mtcf="notfall_puffer_min_punkte"></div>
+        </div>
         <label>Symbol-Mapping (Master → Hedge)</label>
         <div data-mtcmaps>${mapRows(d.symbol_map)}</div>
         <div class="mtc-acts">

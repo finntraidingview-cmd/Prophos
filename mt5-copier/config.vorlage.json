@@ -12,5 +12,7 @@
   "adopt_existing_master_positions": false,
   "poll_interval": 0.5,
   "deviation_points": 30,
-  "filling": "auto"
+  "filling": "auto",
+  "notfall_faktor": 110,
+  "notfall_puffer_min_punkte": 100
 }

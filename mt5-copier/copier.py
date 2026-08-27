@@ -162,30 +162,38 @@ def closed_path_for(cfg_path):
 
 
 def load_closed(path):
-    """Liefert (closed_ring, last_vol). last_vol ist die persistierte
-    Schwund-Waechter-Baseline {ident(str): Gesamtvolumen} — ohne sie waere der
-    Waechter nach jedem Neustart blind und ein extern geschlossener Hedge in
-    der Copier-Downtime ergaebe spaeter eine plausible falsche closed_sum
-    (Review-Fund 15.08.2026). Altes Format (reine Liste) wird toleriert."""
+    """Liefert (closed_ring, last_vol, last_tickets). last_vol ist die
+    persistierte Schwund-Waechter-Baseline {ident(str): Gesamtvolumen} — ohne
+    sie waere der Waechter nach jedem Neustart blind und ein extern
+    geschlossener Hedge in der Copier-Downtime ergaebe spaeter eine plausible
+    falsche closed_sum (Review-Fund 15.08.2026). last_tickets {ident(str):
+    [Tickets]} kam am 27.08.2026 dazu (Notfall-SL/TP): nur ueber die Tickets
+    kann der Waechter nach einem Schwund in der Deal-History nachschlagen, OB
+    der Broker auf unserem eigenen Notfall-Level geschlossen hat — auch wenn
+    der Fill in eine Copier-Downtime fiel. Alte Formate (reine Liste, dict
+    ohne tickets) werden toleriert."""
     try:
         data = load_json(path)
         if isinstance(data, list):
-            return data, {}
+            return data, {}, {}
         if isinstance(data, dict):
             closed = data.get("closed")
             lv = data.get("last_vol")
+            lt = data.get("last_tickets")
             return (closed if isinstance(closed, list) else []), \
-                   ({str(k): float(v) for k, v in lv.items()} if isinstance(lv, dict) else {})
-        return [], {}
+                   ({str(k): float(v) for k, v in lv.items()} if isinstance(lv, dict) else {}), \
+                   ({str(k): [int(t) for t in v] for k, v in lt.items()} if isinstance(lt, dict) else {})
+        return [], {}, {}
     except Exception:
-        return [], {}
+        return [], {}, {}
 
 
-def write_closed(path, entries, last_vol=None):
+def write_closed(path, entries, last_vol=None, last_tickets=None):
     try:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"closed": entries[-50:], "last_vol": last_vol or {}},
+            json.dump({"closed": entries[-50:], "last_vol": last_vol or {},
+                       "last_tickets": last_tickets or {}},
                       f, ensure_ascii=False, indent=1)
         os.replace(tmp, path)
     except Exception as e:
@@ -355,12 +363,26 @@ def read_snapshot(path, expect_login=None):
         if l.startswith("P;"):
             f_ = l.split(";")
             try:
-                positions.append({
+                pos = {
                     "ident": int(f_[1]), "symbol": f_[2], "type": int(f_[3]),
                     "volume": float(f_[4]), "contract_size": float(f_[5]),
-                })
+                }
             except (IndexError, ValueError):
                 return None
+            # P-Zeile v5 (27.08.2026, Notfall-SL/TP): Entry/SL/TP hinten
+            # angehaengt. Altes EA schreibt 6 Felder — dann bleiben die Werte
+            # None ('Beweis oder leer': ein erfundener 0.0-Entry saehe wie ein
+            # echter Preis aus und ergaebe falsche Notfall-Level). SL/TP 0.0
+            # dagegen ist eine ECHTE Aussage des EAs: 'kein Level gesetzt'.
+            pos["price_open"] = pos["sl"] = pos["tp"] = None
+            try:
+                if len(f_) >= 9:
+                    pos["price_open"] = float(f_[6])
+                    pos["sl"] = float(f_[7])
+                    pos["tp"] = float(f_[8])
+            except (IndexError, ValueError):
+                pos["price_open"] = pos["sl"] = pos["tp"] = None
+            positions.append(pos)
         elif l.startswith("END;"):
             f_ = l.split(";")
             try:
@@ -470,6 +492,70 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, sym_info,
     return actions, warnings
 
 
+# ── Notfall-SL/TP auf dem Hedge (27.08.2026, Finns Ansage) ─────────────────────
+# Das Szenario: Echo faellt aus (PC tot, Copier haengt), der Master laeuft in
+# seinen SL — ohne eigene Level liefe der Hedge endlos weiter. Deshalb bekommt
+# der Hedge Notfall-Level, die der BROKER serverseitig ausfuehrt, auch wenn der
+# ganze PC weg ist. Im Normalfall spiegelt Echo den Close lange vorher.
+def plan_sltp(mp, *, faktor, min_puffer_punkte, point, digits):
+    """REIN RECHNEND (testbar in selftest.py): Notfall-SL/TP fuer die
+    Hedge-Position zu einer Master-Position.
+
+    Gekreuzte Zuordnung, weil der Hedge GEGEN den Master laeuft:
+      Master-SL → Hedge-TP (wo der Master verliert, gewinnt der Hedge)
+      Master-TP → Hedge-SL
+    Der Puffer liegt IMMER in Ausloeserichtung HINTER dem Master-Level.
+    Bewusst NICHT 'Entry ± Faktor × Distanz': bei einem in den Gewinn
+    nachgezogenen Master-SL laege der Level sonst VOR dem Master-SL im
+    Kursverlauf — der Hedge schloesse sich, BEVOR der Master ausgestoppt ist,
+    und liesse einen laufenden Master ohne Hedge zurueck.
+      Puffer = (faktor − 100)% der Distanz Entry↔Level,
+               mindestens min_puffer_punkte × point.
+    Der Mindest-Puffer faengt den Breakeven-SL (Distanz 0): ohne ihn wuerde
+    ein winziger Kurs-Unterschied zwischen den Brokern sofort fuellen.
+    Nebeneffekt der 'dahinter'-Regel: fuellt ein Notfall-Level, ist der
+    Master-Level sicher schon durchschritten — beide Seiten enden zusammen.
+
+    mp braucht price_open/sl/tp aus dem Snapshot (EA v5). None = altes EA
+    ohne die Felder → Rueckgabe None, es wird NICHTS angefasst.
+    sl/tp == 0.0 heisst 'Master hat keinen Level' → der Gegenpart auf dem
+    Hedge wird 0.0 (= loeschen). Sonst {"sl": x, "tp": y} in Hedge-Digits."""
+    entry = mp.get("price_open")
+    msl, mtp = mp.get("sl"), mp.get("tp")
+    if not entry or msl is None or mtp is None:
+        return None
+    # Ausloeserichtung haengt NUR an Positionstyp und Level-Art: der SL einer
+    # BUY-Position fuellt bei fallendem Kurs — auch wenn er im Gewinn steht.
+    lang = int(mp.get("type", 0)) == 0
+
+    def hinter(level, richtung):  # richtung: -1 = fallend, +1 = steigend
+        puffer = max((float(faktor) / 100.0 - 1.0) * abs(float(level) - float(entry)),
+                     float(min_puffer_punkte) * float(point))
+        return max(round(float(level) + richtung * puffer, int(digits)), float(point))
+
+    return {"tp": hinter(msl, -1 if lang else +1) if msl else 0.0,
+            "sl": hinter(mtp, +1 if lang else -1) if mtp else 0.0}
+
+
+def find_notfall_deals(deals, schon_verbucht, *, out_entries, reason_sl, reason_tp):
+    """REIN RECHNEND (testbar): Broker-seitige SL/TP-Fills aus einer Deal-Liste
+    heraussuchen. MT5 stempelt auf jeden Deal, WARUM geschlossen wurde
+    (DEAL_REASON) — nur SL/TP-Fills auf unseren eigenen Notfall-Leveln zaehlen
+    als Notfall-Close; ein Hand-Close (REASON_CLIENT/MOBILE/WEB) und ein
+    Stop-Out (REASON_SO) bleiben 'extern' wie bisher. schon_verbucht haelt
+    die Doppelzaehlung fern (Sidecar + RAM)."""
+    out = []
+    for d in deals or []:
+        if int(getattr(d, "entry", -1)) not in out_entries:
+            continue
+        if int(getattr(d, "reason", -1)) not in (reason_sl, reason_tp):
+            continue
+        if int(d.ticket) in schon_verbucht:
+            continue
+        out.append(d)
+    return out
+
+
 # ── Ein Master = eine config*.json ──────────────────────────────────────────────
 class Master:
     def __init__(self, cfg_path):
@@ -513,12 +599,16 @@ class Master:
         # (adversarische Pruefung 14.08.2026).
         self.open_seen = {}
         self.close_last = {}
+        # Notfall-SL/TP (27.08.2026): letzter Modify-Versuch pro Hedge-Ticket —
+        # Cooldown, damit eine Broker-Ablehnung (z.B. stops_level) den Log
+        # nicht im 0,5-s-Takt flutet.
+        self.sltp_last = {}
         self.blocked = set()
         self.last_status = 0.0
         # closed_hedges (15.08.2026, Etappe 3): Beweisquelle fuer den Hedge-P&L in
         # Prophos. Beim Init aus dem Sidecar geladen — neustart-fest.
         self.closed_path = closed_path_for(cfg_path)
-        self.closed, self.hedge_last_vol = load_closed(self.closed_path)
+        self.closed, self.hedge_last_vol, self.hedge_last_tickets = load_closed(self.closed_path)
         if len(self.closed) > 50:
             del self.closed[:-50]
         self.booked_deals = {}    # ident -> {Deal-Tickets} — nie denselben Deal zweimal verbuchen
@@ -536,6 +626,12 @@ class Master:
         self.master_login = int(cfg.get("master_expected_login") or 0)
         self.multiplier = float(cfg.get("multiplier", 1.0))
         self.symbol_map = cfg.get("symbol_map", {})
+        # Notfall-SL/TP (27.08.2026, Finns Ansage: Faktor manuell veraenderbar
+        # in Prophos). Defaults 110% / 100 Punkte — greifen aber erst, wenn das
+        # Master-EA v5 laeuft und SL/TP im Snapshot liefert; bis zur
+        # Neukompilierung bleibt das Feature still (leer statt falsch).
+        self.notfall_faktor = float(cfg.get("notfall_faktor", 110.0))
+        self.notfall_puffer = float(cfg.get("notfall_puffer_min_punkte", 100.0))
         self.deviation = int(cfg.get("deviation_points", 30))
         self.filling = str(cfg.get("filling", "auto")).upper()
         self.adopt = bool(cfg.get("adopt_existing_master_positions", False))
@@ -563,7 +659,11 @@ class Master:
         # mode genauso (25.08.2026, Modus-Ausbau): das Feld ist bedeutungslos,
         # steht aber noch in Alt-Configs — Aenderungen/Loeschen daran duerfen
         # keinen Neustart ausloesen.
-        HOT = {"multiplier", "symbol_map", "max_lots_per_hedge", "mode"}
+        # notfall_faktor/notfall_puffer_min_punkte (27.08.2026): reine
+        # Rechenwerte wie multiplier — sofort uebernehmen, kein Neustart. Der
+        # naechste Tick zieht die Level auf allen offenen Hedges nach.
+        HOT = {"multiplier", "symbol_map", "max_lots_per_hedge", "mode",
+               "notfall_faktor", "notfall_puffer_min_punkte"}
         changed = {k for k in set(old) | set(new)
                    if not k.startswith("_") and old.get(k) != new.get(k)}
         if changed - HOT:
@@ -576,6 +676,12 @@ class Master:
         if "symbol_map" in changed:
             self.symbol_map = new.get("symbol_map") or {}; chg.append("Symbol-Mapping")
             self.warned.clear()
+        if "notfall_faktor" in changed:
+            self.notfall_faktor = float(new.get("notfall_faktor", 110.0))
+            chg.append(f"Notfall-Faktor {self.notfall_faktor}%")
+        if "notfall_puffer_min_punkte" in changed:
+            self.notfall_puffer = float(new.get("notfall_puffer_min_punkte", 100.0))
+            chg.append(f"Notfall-Mindest-Puffer {self.notfall_puffer} Punkte")
         self.raw = new
         if chg:
             log(f"↻ [{self.file}] Uebernommen: " + ", ".join(chg))
@@ -749,6 +855,11 @@ def main():
                 # schwebender P&L der Position — Prophos zeigt ihn auf laufenden
                 # Trade-Karten live an (15.08.2026, Etappe 3)
                 "profit": float(p.profit),
+                # Ist-Stand der Notfall-Level (27.08.2026): 0.0 = keiner gesetzt.
+                # Der Nachzieh-Block vergleicht dagegen und modifiziert nur bei
+                # echter Abweichung — sonst wuerde jeder Tick senden.
+                "sl": float(getattr(p, "sl", 0.0) or 0.0),
+                "tp": float(getattr(p, "tp", 0.0) or 0.0),
             })
         return book
 
@@ -762,7 +873,12 @@ def main():
         return {"volume_step": float(si.volume_step or 0.01),
                 "volume_min": float(si.volume_min or 0.01),
                 "volume_max": float(si.volume_max or 1e9),
-                "trade_contract_size": float(si.trade_contract_size or 1.0)}
+                "trade_contract_size": float(si.trade_contract_size or 1.0),
+                # point/digits (27.08.2026): Grundlage fuer Mindest-Puffer und
+                # Preis-Rundung der Notfall-Level (10014-Verwandter 'invalid
+                # price' bei zu vielen Nachkommastellen).
+                "point": float(si.point or 0.01),
+                "digits": int(si.digits or 2)}
 
     def send(m, req, what):
         # Rueckgabe seit 15.08.2026 das order_send-Result statt True: result.deal
@@ -877,7 +993,7 @@ def main():
             "closed_at": datetime.now().isoformat(timespec="seconds"),
         })
         del m.closed[:-50]
-        write_closed(m.closed_path, m.closed, m.hedge_last_vol)
+        write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
 
     # ── Hauptschleife ───────────────────────────────────────────────────────────
     poll = float(ref.get("poll_interval", 0.5))
@@ -1190,6 +1306,7 @@ def main():
                 # Schluessel als str: die Baseline kommt JSON-persistiert aus dem
                 # Sidecar zurueck (Neustart-Fall) und JSON kennt nur str-Keys.
                 cur_vol = {str(i): sum(h["volume"] for h in hs) for i, hs in hedges.items() if hs}
+                cur_tickets = {str(i): sorted(h["ticket"] for h in hs) for i, hs in hedges.items() if hs}
                 for ident_, prev_v in m.hedge_last_vol.items():
                     now_v = cur_vol.get(ident_, 0.0)
                     if now_v < prev_v - TOL:
@@ -1199,6 +1316,49 @@ def main():
                             ident_i = ident_
                         mark = m.own_close_mark.pop(ident_i, 0)
                         if time.time() - mark > 30:
+                            # Notfall-Close zuerst (27.08.2026, Finns Ansage: 'sollte es
+                            # passieren, soll der P&L trotzdem richtig eingetragen
+                            # werden'): hat der BROKER auf unserem eigenen Notfall-
+                            # SL/TP geschlossen (News-Kerze schneller als der Spiegel,
+                            # oder Fill waehrend einer Copier-Downtime), traegt der
+                            # Deal DEAL_REASON_SL/TP. Das ist ein ECHTER Broker-Deal —
+                            # beweisfest verbuchen, KEINE Hand-Close-Sperre. Die
+                            # Tickets kommen aus der persistierten Baseline, deshalb
+                            # funktioniert das auch nach einem Neustart.
+                            geb = {int(c.get("deal") or 0) for c in m.closed} \
+                                  | m.booked_deals.get(ident_i, set())
+                            nf = []
+                            for tk in m.hedge_last_tickets.get(ident_, []):
+                                try:
+                                    ds = mt5.history_deals_get(position=int(tk)) or []
+                                except Exception:
+                                    ds = []
+                                nf += [(int(tk), d) for d in find_notfall_deals(
+                                    ds, geb,
+                                    out_entries=(mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY),
+                                    reason_sl=mt5.DEAL_REASON_SL,
+                                    reason_tp=mt5.DEAL_REASON_TP)]
+                            if nf:
+                                for tk, d in nf:
+                                    m.booked_deals.setdefault(ident_i, set()).add(int(d.ticket))
+                                    m.closed.append({
+                                        "ident": ident_i, "ticket": tk, "deal": int(d.ticket),
+                                        "symbol": str(getattr(d, "symbol", "") or ""),
+                                        "volume": float(d.volume),
+                                        "profit": float(d.profit) + float(d.commission) + float(d.swap),
+                                        "note": "notfall_close",
+                                        "closed_at": datetime.now().isoformat(timespec="seconds"),
+                                    })
+                                del m.closed[:-50]
+                                log(f"🛡 [{m.file}] Notfall-Close: Broker hat SL/TP auf dem Hedge "
+                                    f"von Master-Pos {ident_} serverseitig ausgefuehrt — P&L "
+                                    f"verbucht ({len(nf)} Deal(s)), keine Sperre. Genau dafuer "
+                                    f"sind die Notfall-Level da.")
+                                # KEIN m.blocked: laeuft der Master wider Erwarten noch
+                                # (Notfall-Level liegt HINTER dem Master-Level, also ist
+                                # er praktisch sicher auch zu), stellt der naechste Tick
+                                # den Schutz-Hedge bewusst wieder her.
+                                continue
                             log(f"⚠ [{m.file}] Hedge-Bestand von Master-Pos {ident_} extern "
                                 f"geschrumpft ({prev_v} → {now_v}) — Stop-Out oder Hand-Close "
                                 f"im Terminal? P&L dieses Trades ist nicht mehr beweisbar.")
@@ -1218,11 +1378,12 @@ def main():
                             m.blocked.add(ident_i)
                             log(f"✋ [{m.file}] Master-Pos {ident_} wird NICHT erneut "
                                 f"gehedgt — Hand-Close wird respektiert.")
-                if cur_vol != m.hedge_last_vol:
+                if cur_vol != m.hedge_last_vol or cur_tickets != m.hedge_last_tickets:
                     # Baseline persistieren, damit der Waechter Neustarts ueberlebt —
                     # nur bei Aenderung, nicht jeden 0,5-s-Tick.
                     m.hedge_last_vol = cur_vol
-                    write_closed(m.closed_path, m.closed, m.hedge_last_vol)
+                    m.hedge_last_tickets = cur_tickets
+                    write_closed(m.closed_path, m.closed, m.hedge_last_vol, m.hedge_last_tickets)
 
                 # ── Eingefrorener Snapshot = keine Order-Basis (25.08.2026) ─────
                 # Live-Fund beim ersten Echtgeld-Kontakt: Master 26592415 war
@@ -1342,6 +1503,44 @@ def main():
                             # Result verbuchen (15.08.2026, Etappe 3)
                             m.own_close_mark[ident] = time.time()
                             book_close(m, ident, open_pos, res, a["volume"])
+
+                # ── Notfall-SL/TP auf den Hedges nachziehen (27.08.2026) ────────
+                # Bei JEDER Aenderung von SL/TP auf dem Master (EA v5 liefert
+                # sie im Snapshot — Finn verschiebt sie auch waehrend des
+                # Trades) bekommen die Hedges ihre Notfall-Level: gekreuzt und
+                # mit Puffer HINTER dem Master-Level (Formel: plan_sltp).
+                # Laeuft bewusst auch ausserhalb des Trade-Fensters und fuer
+                # blockierte idents — bestehende Hedges absichern ist wie
+                # Closes nie falsch. Altes EA ohne die Felder ⇒ plan_sltp
+                # None ⇒ es wird NICHTS angefasst (auch nichts geloescht).
+                for mp in snap["positions"]:
+                    hs = hedges.get(mp["ident"]) or []
+                    if not hs:
+                        continue
+                    hsym = m.symbol_map.get(mp["symbol"])
+                    si = sym_info(hsym) if hsym else None
+                    if si is None:
+                        continue
+                    ziel = plan_sltp(mp, faktor=m.notfall_faktor,
+                                     min_puffer_punkte=m.notfall_puffer,
+                                     point=si["point"], digits=si["digits"])
+                    if ziel is None:
+                        continue
+                    tol = si["point"] / 2.0
+                    for h in hs:
+                        if abs(float(h.get("sl") or 0.0) - ziel["sl"]) <= tol and \
+                           abs(float(h.get("tp") or 0.0) - ziel["tp"]) <= tol:
+                            continue
+                        if time.time() - m.sltp_last.get(h["ticket"], 0) < 10:
+                            continue  # Broker-Ablehnung nicht im Tick-Takt wiederholen
+                        m.sltp_last[h["ticket"]] = time.time()
+                        if send(m, {"action": mt5.TRADE_ACTION_SLTP,
+                                    "symbol": h["symbol"], "position": h["ticket"],
+                                    "sl": ziel["sl"], "tp": ziel["tp"],
+                                    "magic": m.magic},
+                                f"NOTFALL-LEVEL SL {ziel['sl'] or '—'} / TP {ziel['tp'] or '—'} "
+                                f"{h['symbol']} (Ticket {h['ticket']})"):
+                            m.sltp_last.pop(h["ticket"], None)
 
                 # busy = dieser Master hat offene Positionen ODER offene Hedges —
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
