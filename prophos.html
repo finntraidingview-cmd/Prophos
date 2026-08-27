@@ -24647,6 +24647,8 @@
     }
     // Hedge-Chip-Selbstheilung (26.08.2026) — nicht awaited, heilt im Hintergrund
     echoHedgeGuard(d)
+    // Notfall-SL/TP-Selbstheilung (27.08.2026) — gleiches Muster
+    echoNotfallGuard(d)
     renderMt5Tab(d, n)
     // Letzten Stand merken — window.mt5TabRender (Export unten) rendert den Tab
     // damit sofort nach Link/Unlink neu, statt auf den naechsten 3s-Poll zu warten
@@ -24683,6 +24685,50 @@
       const r = await window.mtcApi('set-hedge', { method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: soll }) })
       console.log('[echo] Hedge-Selbstheilung →', soll, ':', r && r.msg)
+      setTimeout(mtcLoad, 2500)
+    }catch(_){ /* Tabelle fehlt/offline — still bleiben */ }
+  }
+
+  /* ── Notfall-SL/TP-Selbstheilung aus Supabase (27.08.2026, Finns Ansage:
+   * „die 110% etc als sql gleich speichern, dass es da nie Problem später
+   * gibt"). EINE globale Zeile (echo_notfall, key='global',
+   * sql/2026-08-27_echo_notfall.sql) für die ganze Flotte — ohne sie fiele
+   * ein neu provisionierter PC oder eine frische Config still auf die
+   * Code-Defaults zurück. Weicht eine Config ab (auch: Feld fehlt → null),
+   * schreibt der Guard die DB-Werte per save?file= zurück — max. ein
+   * Heil-Versuch pro Minute. Alte Panels, die die Felder noch gar nicht
+   * melden ('notfall_faktor' nicht im Payload), werden übersprungen: ihr
+   * Save würde die Felder ohnehin ignorieren (WRITABLE), das wäre eine
+   * Heil-Schleife ins Leere. Tabelle fehlt/leer → still (additiv). */
+  const _echoNotfall = { next: 0, wert: null, geladen: 0 }
+  async function echoNotfallGuard(d){
+    try{
+      if(Date.now() < _echoNotfall.next) return
+      const insts = (d && d.instances) || []
+      if(!insts.length) return
+      if(Date.now() - _echoNotfall.geladen > 5 * 60 * 1000){
+        _echoNotfall.geladen = Date.now()
+        const { data } = await supabase.from('echo_notfall')
+          .select('notfall_faktor,notfall_puffer_min_punkte').eq('key', 'global').maybeSingle()
+        // numeric kommt aus PostgREST teils als String → hier einmal zu Zahlen
+        _echoNotfall.wert = (data && data.notfall_faktor != null)
+          ? { faktor: Number(data.notfall_faktor), puffer: Number(data.notfall_puffer_min_punkte) }
+          : null
+      }
+      const soll = _echoNotfall.wert
+      if(!soll || !isFinite(soll.faktor) || !isFinite(soll.puffer)) return
+      const abweichend = insts.filter(x => ('notfall_faktor' in x)
+        && (Number(x.notfall_faktor ?? NaN) !== soll.faktor
+         || Number(x.notfall_puffer_min_punkte ?? NaN) !== soll.puffer))
+      if(!abweichend.length) return
+      _echoNotfall.next = Date.now() + 60 * 1000
+      for(const x of abweichend){
+        const r = await window.mtcApi(`save?file=${encodeURIComponent(x.file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ notfall_faktor: soll.faktor,
+                                 notfall_puffer_min_punkte: soll.puffer }) })
+        console.log('[echo] Notfall-Selbstheilung', x.file, '→', soll.faktor, '%/', soll.puffer, 'Punkte:', r && r.msg)
+      }
       setTimeout(mtcLoad, 2500)
     }catch(_){ /* Tabelle fehlt/offline — still bleiben */ }
   }
@@ -25011,6 +25057,24 @@
     msg.className = 'mtc-msg' + (d.ok ? '' : ' err')
     msg.textContent = d.ok ? ((d.msg || 'gespeichert') + ' — der Copier übernimmt es in ~2s' + (d.restart ? ' (Neustart läuft automatisch)' : '')) : ('Fehler: ' + (d.msg || d.error))
     if(d.ok) cardEl.removeAttribute('data-dirty')
+    // Notfall-Werte zusätzlich nach Supabase (27.08.2026, Finns Ansage: „als
+    // sql gleich speichern, dass es da nie Problem später gibt") — EINE
+    // globale Zeile, echoNotfallGuard heilt ab jetzt jede abweichende Config
+    // der ganzen Flotte darauf. Nur bei plausiblen Zahlen schreiben: ein
+    // ALTES Panel meldet ok, obwohl es die Felder ignoriert — ein leerer
+    // Input (Number('') = 0) dürfe die DB-Policy nicht auf 0 stellen.
+    const _nf = Number(patch.notfall_faktor), _np = Number(patch.notfall_puffer_min_punkte)
+    if(d.ok && isFinite(_nf) && _nf >= 100 && isFinite(_np) && _np >= 0){
+      try{
+        await supabase.from('echo_notfall').upsert({ key: 'global',
+          notfall_faktor: _nf, notfall_puffer_min_punkte: _np,
+          updated_at: new Date().toISOString() })
+        // Guard-Cache sofort auf den neuen Stand — sonst würde der 5-min-Cache
+        // die eben gespeicherte Änderung binnen einer Minute zurückheilen.
+        _echoNotfall.wert = { faktor: _nf, puffer: _np }
+        _echoNotfall.geladen = Date.now()
+      }catch(_){ console.warn('[echo] echo_notfall-Upsert fehlgeschlagen — sql/2026-08-27_echo_notfall.sql schon ausgeführt?') }
+    }
     setTimeout(mtcLoad, 2500)
   })
 
