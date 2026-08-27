@@ -9978,9 +9978,16 @@
        * Ansage 25.08. nachts: „genauso aussehen wie oben, nicht noch ein
        * eigenes Design". Der Status-Punkt links traegt die Personen-Farbe. */
       const fmtLots = v => Number(v || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 })
-      const lotChip = (lbl, lots) => !lots ? '' :
+      // Richtung neben den Lots auch hier (27.08.2026, Finns Nachschlag zur
+      // Plan-Karten-Version: „bei den Karten drunter genau das Gleiche").
+      // dir: 'LONG' | 'SHORT' | 'MIX' | null — null heißt ehrlich kein Tag.
+      const dirTag = dir => !dir ? '' :
+        `<b style="font-size:9.5px;font-weight:700;color:${dir === 'MIX' ? '#b45309' : dir === 'SHORT' ? '#b91c1c' : '#15803d'}">${dir}</b>`
+      const dirVon = side => /sell|short|^1$/i.test(String(side)) ? 'SHORT' : 'LONG'
+      const lotChip = (lbl, lots, dir) => !lots ? '' :
         `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
+        + dirTag(dir)
         + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lots)} Lt</b></span>`
       const zeitChip = (ep, frisch, alterS) => !frisch
         ? `<span class="tc2-timer" style="color:var(--sub)">vor ${alterS}s</span>`
@@ -10064,16 +10071,18 @@
         else masterEintraege.push(e)
       }
       for(const m of masterEintraege){
-        let slaveLots = 0, slaveName = ''
+        let slaveLots = 0, slaveName = '', sHasL = false, sHasS = false
         for(const k of kopienEintraege){
           if(k.refMasterTicket === m.ticket && k.refMasterAcc === m.accId){
             k.verbraucht = true; slaveLots += k.lots; slaveName = slaveName || k.accName
+            dirVon(k.side) === 'SHORT' ? sHasS = true : sHasL = true
           }
         }
+        const sDir = (sHasL && sHasS) ? 'MIX' : sHasS ? 'SHORT' : sHasL ? 'LONG' : null
         lege(karten, m.pKey, tc2Karte(personen.get(m.pKey).farbe,
           m.accName, slaveName || null,
           subPerson(m.pKey) + `Duplikium · <b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
-          lotChip('MASTER', m.lots) + lotChip('SLAVE', slaveLots) + zeitChip(m.openEpoch, m.frisch, m.alterS),
+          lotChip('MASTER', m.lots, dirVon(m.side)) + lotChip('SLAVE', slaveLots, sDir) + zeitChip(m.openEpoch, m.frisch, m.alterS),
           m.frisch))
       }
       for(const k of kopienEintraege) if(!k.verbraucht) ohneMaster.push(k)
@@ -10137,10 +10146,16 @@
             if(hBeweis) symF = symBalkenHtml(mPL, hSum,
               Number(s.plan_sym.m_risk) || 0, Number(s.plan_sym.m_tp) || 0, Number(s.plan_sym.s_risk) || 0)
           }
+          // Hedge-Richtung nur, wenn die Einträge ein type-Feld tragen — sonst
+          // ehrlich kein Tag (gleiche Regel wie auf den MT5-Plan-Chips).
+          const hs = (hedgesMap[String(p.ident)] || [])
+          let hHasL = false, hHasS = false
+          for(const h of hs){ if(h && h.type != null){ Number(h.type) === 1 ? hHasS = true : hHasL = true } }
+          const hDir = (hHasL && hHasS) ? 'MIX' : hHasS ? 'SHORT' : hHasL ? 'LONG' : null
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, 'Hedge ' + r.hedge_login,
             subPerson(pKey) + `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
-            lotChip('MASTER', Number(p.volume)) + lotChip('SLAVE', hedgeLots(p.ident)) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
+            lotChip('MASTER', Number(p.volume), p.type === 0 ? 'LONG' : 'SHORT') + lotChip('SLAVE', hedgeLots(p.ident), hDir) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
             frisch))
         }
         if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
@@ -10164,7 +10179,7 @@
           ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? '#15803d' : '#b91c1c'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, String(p.accountName), null,
           subPerson(pKey) + `TopstepX · <b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
-          lotChip('KT', Number(p.size) || 0) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
+          lotChip('KT', Number(p.size) || 0, dirVon(p.side)) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
           frisch))
       }
 
@@ -10205,7 +10220,7 @@
         for(const k of uebrig){
           html += tc2Karte('var(--sub-2)', k.accName, null,
             `Duplikium · <b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
-            lotChip('SLAVE', k.lots) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch)
+            lotChip('SLAVE', k.lots, dirVon(k.side)) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch)
         }
         html += '</div>'
       }
