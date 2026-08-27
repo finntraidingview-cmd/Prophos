@@ -1809,11 +1809,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, json.dumps({"ok": False, "msg": f"Instanz '{fname}' unbekannt"}))
 
         if u.path == "/api/master-order":
-            # Order-Bot (15.08.2026, Finns Ansage): platziert die Master-Order per
-            # MetaTrader5-API als kurzlebiger Subprozess. Kommt NUR nach gruenem
-            # Trade-Start-Check aus dem Preflight — hier trotzdem eigene Riegel:
-            # Copier muss frische Daten liefern (sonst bliebe die Order UNGEHEDGET),
-            # und der Bot selbst prueft den Login nochmal vor dem order_send.
+            # Order-Bot (15.08.2026, Finns Ansage): platziert die Master-Order als
+            # kurzlebiger Subprozess. WICHTIG (Korrektur 28.08.2026, Detection-
+            # Audit): der Bot handelt AUSSCHLIESSLICH ueber die Terminal-UI
+            # (F9-Dialog, echte Tastatur-/SendInput-Events) — die MetaTrader5-API
+            # wird nur LESEND benutzt, ein order_send Richtung Master existiert im
+            # Bot NICHT (order_bot.py Docstring Z. 24, TRADE_ACTION_SLTP am 18.08.
+            # geloescht). Dadurch kommt die Order beim Broker mit Reason=CLIENT an,
+            # wie von Hand. Kommt NUR nach gruenem Trade-Start-Check aus dem
+            # Preflight — hier trotzdem eigene Riegel: Copier muss frische Daten
+            # liefern (sonst bliebe die Order UNGEHEDGET), und der Bot selbst
+            # prueft den Login nochmal vor dem Klick.
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
