@@ -7364,6 +7364,41 @@
       }
     }
 
+    /* Tron-Adresse (Base58Check) → Hex (41…, 21 Bytes). Ohne Checksummen-
+     * Prüfung — wir DEkodieren nur, Tippfehler fängt schon valid() ab. Nötig
+     * für balanceOf am USDT-Contract: das ABI will die rohe Hex-Adresse. */
+    const _B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    function walTronHex(addr){
+      let n = 0n
+      for(const ch of String(addr)){ const i = _B58.indexOf(ch); if(i < 0) return null; n = n * 58n + BigInt(i) }
+      let h = n.toString(16)
+      if(h.length % 2) h = '0' + h
+      h = h.slice(0, -8)                       // 4 Checksummen-Bytes hinten weg
+      return (h.startsWith('41') && h.length === 42) ? h : null
+    }
+    /* USDT einer NICHT aktivierten Tron-Adresse (27.08.2026, Finns Fall: Moritz'
+     * frische Adresse hielt 1.155 USDT, der Tab zeigte Fehler/0): das Konto
+     * existiert on-chain noch nicht — der Account-Endpoint liefert data:[] —
+     * aber der TRC-20-Bestand liegt trotzdem im USDT-Contract. balanceOf über
+     * triggerconstantcontract funktioniert auch für solche Adressen. */
+    async function walTronUsdtContract(c, addr){
+      const hex = walTronHex(addr)
+      if(hex == null) throw new Error('Tron-Adresse nicht dekodierbar')
+      const r = await fetch(c.api + '/wallet/triggerconstantcontract', {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          owner_address: hex,
+          contract_address: walTronHex(c.usdt),
+          function_selector: 'balanceOf(address)',
+          parameter: hex.slice(2).padStart(64, '0')
+        })
+      })
+      const j = await r.json().catch(() => null)
+      const out = j?.constant_result?.[0]
+      if(!r.ok || out == null) throw new Error('TronGrid-Contract-Fehler: HTTP ' + r.status)
+      return (parseInt(out, 16) || 0) / 1e6
+    }
+
     // Eine Wallet live von ihrer Chain lesen — USDT-Bestand + nativer Chain-Coin.
     async function walFetchBalance(w){
       const c = WAL_CHAINS[w.chain]
@@ -7396,7 +7431,10 @@
       // mit wachsender Pause bis zu 2× neu versuchen.
       let d = null, status = 0, errMsg = ''
       for(let i = 0; i < 3; i++){
-        if(i) await new Promise(res => setTimeout(res, 1200 * i))
+        // 5,5 s statt 1,2 s (27.08.2026): TronGrid sperrt bei Überschreitung
+        // volle 5 s — die alten Pausen (1,2/2,4 s) lagen KOMPLETT innerhalb
+        // der Sperre, deshalb liefen alle drei Versuche in denselben Fehler.
+        if(i) await new Promise(res => setTimeout(res, 5500))
         const r = await fetch(c.api + '/v1/accounts/' + w.address)
         status = r.status
         const j = await r.json().catch(() => null)
@@ -7406,7 +7444,12 @@
       }
       if(!d) throw new Error(status === 429 ? 'TronGrid drosselt (429) — gleich nochmal ↻' : 'TronGrid-Fehler: ' + errMsg)
       const acc = (d.data || [])[0]
-      if(!acc) return { usdt:0, coin:0 }   // nie benutzte Tron-Adresse ist on-chain noch nicht "aktiviert"
+      // Leere Antwort = Adresse on-chain noch nicht aktiviert. Früher stand
+      // hier „return 0" — falsch, sobald USDT draufliegt (die Aktivierung
+      // passiert erst mit der ersten TRX-Bewegung, USDT-Empfang reicht nicht).
+      // Deshalb den Bestand direkt am Contract nachschlagen; TRX ist bei so
+      // einer Adresse sicher 0.
+      if(!acc) return { usdt: await walTronUsdtContract(c, w.address), coin: 0 }
       let usdt = 0
       for(const t of (acc.trc20 || [])){ if(t[c.usdt] != null){ usdt = Number(t[c.usdt]) / 1e6; break } }
       return { usdt, coin:(Number(acc.balance) || 0) / 1e6 }
@@ -7427,7 +7470,7 @@
       msgEl.textContent = 'Lade Balances…'
       await walFetchPrices()
       let fail = 0
-      await Promise.all(wallets.map(async w => {
+      const laden = async w => {
         try{
           const b = await walFetchBalance(w)
           const px = walPx[WAL_CHAINS[w.chain].px]
@@ -7442,7 +7485,23 @@
           fail++
         }
         walRender()   // jede fertige Wallet sofort zeigen statt auf die langsamste zu warten
-      }))
+      }
+      // TronGrid erlaubt keyless nur 1 Request/s und sperrt bei Verstoß 5 s
+      // (27.08.2026, Finns Dauerfehler: ZWEI Tron-Wallets parallel → die
+      // zweite lief IMMER in die Sperre, egal wie oft man löscht/neu anlegt).
+      // Deshalb Tron strikt nacheinander mit Abstand — alle anderen Chains
+      // bleiben parallel, die drosseln nicht.
+      const tronWs = wallets.filter(w => w.chain === 'tron')
+      const restWs = wallets.filter(w => w.chain !== 'tron')
+      await Promise.all([
+        ...restWs.map(laden),
+        (async () => {
+          for(let i = 0; i < tronWs.length; i++){
+            if(i) await new Promise(res => setTimeout(res, 1300))
+            await laden(tronWs[i])
+          }
+        })()
+      ])
       msgEl.textContent = fail ? `${wallets.length - fail} von ${wallets.length} Wallets geladen` : 'Stand: gerade eben'
       // Snapshots neu lesen, damit der heutige Punkt direkt im Verlauf auftaucht
       const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt,coin_usdt').order('day')
