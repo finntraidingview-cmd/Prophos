@@ -3058,14 +3058,23 @@ def admin_build_overview():
         try: payouts[a] = payouts.get(a, 0.0) + float(t.get("amount") or 0)
         except (TypeError, ValueError): pass
 
-    # Personen-Labels (E-Mail) über die Auth-Admin-API
+    # Personen-Labels über die Auth-Admin-API. `names` (E-Mail) bleibt die
+    # Wahrheit für die Ausschluss-Liste; für die ANZEIGE zählt seit 28.08.2026
+    # zusätzlich der Name aus den user_metadata ("Pascal", "Moritz", …) — vorher
+    # stand auf PCs ohne lokalen Profil-Umschalter nur das E-Mail-Kürzel in der
+    # Flotte (Finns Ansage: überall dieselben Namen wie auf dem MacBook).
     names = {}
+    disp = {}
     names_ok = False
     try:
         r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
                          headers=_sb_headers(), timeout=12)
         for u in (r.json() or {}).get("users", []):
-            names[str(u.get("id"))] = u.get("email") or str(u.get("id"))[:8]
+            uid = str(u.get("id"))
+            mail = u.get("email") or uid[:8]
+            names[uid] = mail
+            meta_name = str((u.get("user_metadata") or {}).get("name") or "").strip()
+            disp[uid] = meta_name or (mail.split("@")[0] if "@" in mail else mail)
         names_ok = bool(names)
     except Exception:
         pass
@@ -3138,7 +3147,8 @@ def admin_build_overview():
             "firm_raw": (a.get("firm") or "").strip(),
             "type": a.get("account_type") or "",
             "user_id": uid,
-            "person": names.get(uid, uid[:8]),
+            "person": disp.get(uid) or names.get(uid, uid[:8]),
+            "person_mail": names.get(uid, ""),
             "archived": aid in archived,
             "buy": round(buy, 2),
             "hedge": round(hg, 2),
@@ -3152,7 +3162,8 @@ def admin_build_overview():
         })
 
     people_list = sorted(
-        [{"user_id": u, "name": names.get(u, u[:8])} for u in {r["user_id"] for r in rows}],
+        [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
+          "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
     # excluded_uids zusaetzlich zu den E-Mails (26.08.2026): die Flotte im

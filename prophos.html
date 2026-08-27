@@ -6649,17 +6649,19 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
-        // Der Server kennt nur die E-Mail (Auth-API). Die lesbaren Namen
-        // ("Finn", "Finn + Pascal", "EzPoker") stehen im Profil-Umschalter
-        // unter prophos_profiles — hier einmal drübergelegt, danach ziehen
-        // Filter, Balken, Tabelle UND Suche automatisch den Namen.
+        // Lesbare Namen: seit 28.08.2026 liefert der Server die
+        // user_metadata-Namen ("Pascal", "Moritz") direkt als person/name mit
+        // (person_mail/mail = E-Mail daneben) — vorher kannte er nur die
+        // E-Mail. Der lokale Profil-Umschalter (prophos_profiles) gewinnt
+        // weiterhin, wo er die Person kennt; danach ziehen Filter, Balken,
+        // Tabelle UND Suche automatisch den Namen.
         const nameById = new Map()
         for(const p of (typeof profList === 'function' ? profList() : [])){
           if(p && p.userId && p.name) nameById.set(String(p.userId), p.name)
         }
         const personName = (uid, fallback) => nameById.get(String(uid)) || admShortName(fallback || uid)
-        for(const r of (d.accounts || [])){ r.email = r.person; r.person = personName(r.user_id, r.person) }
-        for(const p of (d.people || [])){ p.email = p.name; p.name = personName(p.user_id, p.email) }
+        for(const r of (d.accounts || [])){ r.email = r.person_mail || r.person; r.person = personName(r.user_id, r.person) }
+        for(const p of (d.people || [])){ p.email = p.mail || p.name; p.name = personName(p.user_id, p.name) }
         ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
 
         // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
@@ -9753,7 +9755,7 @@
       return Array.isArray(v) ? new Set(v.map(String)) : null
     }catch(_){ return null }
   })()
-  const _fleetPers = { next: 0, byLogin: null, byName: null, me: null, exclUids: _fleetExclSeed }
+  const _fleetPers = { next: 0, byLogin: null, byName: null, nameByUid: null, me: null, exclUids: _fleetExclSeed }
   function _fleetKurzName(mail){
     const s = String(mail || ''); const at = s.indexOf('@')
     return at > 0 ? s.slice(0, at) : s
@@ -9790,6 +9792,17 @@
       }
       _fleetPers.byLogin = byLogin
       _fleetPers.byName = byName
+      // Server-Namen (user_metadata via /admin/overview) für Personen, die auf
+      // DIESEM Rechner nie im Profil-Umschalter waren — sonst zeigte die Flotte
+      // auf den anderen PCs nur E-Mail-Kürzel statt „Pascal"/„Moritz"
+      // (28.08.2026, Finns Ansage: überall dieselben Namen wie auf dem MacBook).
+      // _fleetKurzName drüber, weil ein ALTER Server hier noch die volle
+      // E-Mail liefert — die soll dann wie bisher zum Kürzel werden.
+      const nbu = new Map()
+      for(const p of (d.people || [])){
+        if(p && p.user_id && p.name) nbu.set(String(p.user_id), _fleetKurzName(p.name))
+      }
+      _fleetPers.nameByUid = nbu
       // Ausgeschlossene Personen (ADMIN_EXCLUDE, aktuell Emin + Finn): die
       // Flotte blendet sie komplett aus (26.08.2026, Finns Ansage: „mach die
       // Trades von Finn auch weg, genau wie bei Emin"). Emin fehlte bisher nur,
@@ -9968,6 +9981,12 @@
       for(const p of (typeof profList === 'function' ? profList() : [])){
         if(p && p.userId && p.name) profName.set(String(p.userId), p.name)
       }
+      // Zweite Quelle: Server-Namen aus fleetPersonen (user_metadata) — der
+      // lokale Profil-Umschalter kennt nur die Profile DIESES Rechners und
+      // gewinnt, wo er etwas weiß; für alle anderen kommt der Name jetzt vom
+      // Server statt als E-Mail-Kürzel (28.08.2026, Finns Ansage: überall
+      // dieselben Namen wie auf dem MacBook).
+      if(_fleetPers.nameByUid) for(const [u, n] of _fleetPers.nameByUid){ if(!profName.has(u)) profName.set(u, n) }
       const mailKurz = m => { const s = String(m || ''); const at = s.indexOf('@'); return at > 0 ? s.slice(0, at) : s }
       const personen = new Map()   // key → {name, farbe}
       const merken = (key, name) => {
