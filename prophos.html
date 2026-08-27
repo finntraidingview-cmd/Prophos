@@ -10342,20 +10342,37 @@
       const s = inst.status || {}
       // Kompakt-Design (18.08.2026, Finns Wunsch: Symmetrie ist zentral, war
       // aber eine Mini-Textwurst): zwei P&L-Chips + Symmetrie-Farbbalken.
-      const chip = (lbl, v, lots) =>
+      const chip = (lbl, v, lots, dir) =>
         `<span style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
+        + (dir || '')
         + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })}</b>`
         + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lt</span>` : '')
         + `</span>`
+      // Richtung neben den Lots (27.08.2026, Finns Wunsch, Gegenstück zur
+      // Duplikium-Route): MT5-Positionen tragen type 0=BUY/1=SELL. Hedge-
+      // Einträge haben nicht immer ein type-Feld — dann ehrlich kein Tag.
+      const _dirTag = (hasL, hasS) => {
+        if(!hasL && !hasS) return ''
+        const d = hasL && hasS ? 'MIX' : hasS ? 'SHORT' : 'LONG'
+        const col = d === 'MIX' ? '#b45309' : d === 'SHORT' ? '#b91c1c' : '#15803d'
+        return `<b style="font-size:9.5px;font-weight:700;color:${col}">${d}</b>`
+      }
+      const mDir = _dirTag(
+        (s.master_positions || []).some(x => Number(x.type) === 0),
+        (s.master_positions || []).some(x => Number(x.type) === 1))
       let masterPl = null
       if(s.master_equity != null && s.master_balance != null){
         masterPl = Number(s.master_equity) - Number(s.master_balance)
       }
-      let hedgeSum = 0, hedgeSeen = false, hLots = 0
+      let hedgeSum = 0, hedgeSeen = false, hLots = 0, hHasL = false, hHasS = false
       for(const list of Object.values(s.hedges || {})){
-        for(const h of (list || [])){ hedgeSeen = true; hedgeSum += Number(h.profit) || 0; hLots += Number(h.volume) || 0 }
+        for(const h of (list || [])){
+          hedgeSeen = true; hedgeSum += Number(h.profit) || 0; hLots += Number(h.volume) || 0
+          if(h.type != null){ Number(h.type) === 1 ? hHasS = true : hHasL = true }
+        }
       }
+      const hDir = _dirTag(hHasL, hHasS)
       // Lots beider Seiten (18.08.2026, Finns Wunsch: sehen, wie viele Lots
       // gerade auf Master und Hedge liegen)
       const mLots = (s.master_positions || []).reduce((a, p2) => a + (Number(p2.volume) || 0), 0)
@@ -10375,8 +10392,8 @@
       if(masterPl != null && hedgeSeen) symEl = symBalkenHtml(masterPl, hedgeSum, mRisk, mTp, sRisk)
       if(masterPl == null && !hedgeSeen) return ''
       return `<span class="mono" style="display:inline-flex;align-items:center;gap:8px;white-space:nowrap" title="Live-P&L vom MT5-Copier">`
-        + (masterPl != null ? chip('MASTER', masterPl, mLots) : '')
-        + (hedgeSeen ? chip('HEDGE', hedgeSum, hLots) : '')
+        + (masterPl != null ? chip('MASTER', masterPl, mLots, mDir) : '')
+        + (hedgeSeen ? chip('HEDGE', hedgeSum, hLots, hDir) : '')
         + symEl + `</span>`
     }catch(_){ return '' }
   }
@@ -10477,9 +10494,24 @@
       const tipOf   = list => list.map(x =>
         `${/sell/i.test(String(x.side)) ? 'SELL' : 'BUY'} ${fmtLots(Number(x.amountLot) || 0)} Lt ${x.symbol || '?'}`
       ).join(' · ')
+      // Richtung neben den Lots (27.08.2026, Finns Wunsch): LONG grün, SHORT
+      // rot — je Seite. Laufen auf einer Seite beide Richtungen gleichzeitig
+      // (kommt bei manuellen Zusatz-Orders vor), ehrlich „MIX" statt raten.
+      const dirOf = list => {
+        const s = list.some(x => /sell|short|^1$/i.test(String(x.side)))
+        const l = list.some(x => !/sell|short|^1$/i.test(String(x.side)))
+        return s && l ? 'MIX' : s ? 'SHORT' : 'LONG'
+      }
+      const dirTag = list => {
+        if(!list.length) return ''
+        const d = dirOf(list)
+        const col = d === 'MIX' ? '#b45309' : d === 'SHORT' ? '#b91c1c' : '#15803d'
+        return `<b style="font-size:9.5px;font-weight:700;color:${col}">${d}</b>`
+      }
       const chip = (lbl, list) => !list.length ? '' :
         `<span title="${escapeHtml(tipOf(list))}" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:rgba(245,158,11,.10)">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">${lbl}</span>`
+        + dirTag(list)
         + `<b style="font-size:12px;color:var(--ink)">${fmtLots(lotsOf(list))} Lt</b>`
         + (list.length > 1 ? `<span style="font-size:9.5px;color:var(--sub)">· ${list.length} Pos</span>` : '')
         + `</span>`
