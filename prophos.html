@@ -5106,6 +5106,7 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
+          <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
         </div>
@@ -5298,6 +5299,74 @@
               Zählt jeden Account mit Kaufpreis &gt; 0 — auch archivierte, gekauft ist gekauft.
               Kostenlose Nachfolger (Phase&nbsp;2/Funded aus einer Challenge) tauchen deshalb nicht auf.
               Beträge in $ wie beim Kauf; die Übersicht rechnet ihre eigene €-Sicht.
+            </p>
+          </div>
+        </div>
+
+        <!-- FINANZEN JE ID (27.08.2026, Finns Wunsch): wie viel ist jede ID
+             aktuell im Minus — der echte Geldfluss (Payouts − Kauf − Hedge),
+             gebündelt an einem Ort. Bewusst ETWAS ANDERES als „Geparkt" in
+             der Übersicht: Geparkt fragt nach gebundenem Kapital und kappt je
+             Account bei 0; hier wird ehrlich saldiert, Plus rechnet gegen. -->
+        <div id="adm-pane-fin" hidden>
+          <div id="adm-fin-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
+          <div id="adm-fin-body" hidden>
+            <div class="kpis">
+              <div class="kpi">
+                <div class="kpi-label">Gesamt-Saldo</div>
+                <div class="kpi-value" id="adm-f-saldo">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-saldo-sub">–</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">Im Minus</div>
+                <div class="kpi-value" id="adm-f-minus">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-minus-sub">–</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">Payouts erhalten</div>
+                <div class="kpi-value" id="adm-f-po">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-po-sub">alle IDs</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Saldo nach Person</div>
+                  <div class="panel-sub">Payouts − Kaufkosten − Hedge · zum Aufklappen auf eine Person klicken</div>
+                </div>
+              </div>
+              <div class="adm-dist" id="adm-fin-person-dist"></div>
+            </div>
+
+            <div class="panel" style="margin-top:14px" id="adm-fin-acc-panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title" id="adm-fin-acc-title">Accounts</div>
+                  <div class="panel-sub" id="adm-fin-acc-count">–</div>
+                </div>
+                <button class="btn btn-ghost" id="adm-fin-back" style="padding:7px 12px">Alle anzeigen</button>
+              </div>
+              <div class="table-wrap adm-scroll">
+                <table class="t">
+                  <thead><tr>
+                    <th>Account</th>
+                    <th>Firma</th>
+                    <th class="adm-num">Kauf</th>
+                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num">Payouts</th>
+                    <th class="adm-num">Saldo</th>
+                  </tr></thead>
+                  <tbody id="adm-fin-acc-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
+              Alle Accounts zählen — aktive wie archivierte, jeder mit seinen eigenen Zahlen
+              (keine Vorgänger-Ketten, sonst stünden sie doppelt drin). Saldo = erhaltene Payouts
+              − Kaufkosten − Hedge-Verluste. Das ist die Geldfluss-Sicht — „Geparkt" in der
+              Übersicht beantwortet die andere Frage nach gebundenem Kapital.
             </p>
           </div>
         </div>
@@ -6611,13 +6680,16 @@
         msg.style.display = 'none'; body.hidden = false
         admRender()
         admBuysRender()
+        admFinRender()
       }catch(e){
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
-        // Der Käufe-Tab hängt an denselben Daten — dort denselben Fehler zeigen,
-        // sonst steht da für immer „Lade Übersicht…".
-        const bm = $('adm-buys-msg')
-        if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $('adm-buys-body').hidden = true }
+        // Käufe- und Finanzen-Tab hängen an denselben Daten — dort denselben
+        // Fehler zeigen, sonst steht da für immer „Lade Übersicht…".
+        for(const [mid, bid] of [['adm-buys-msg', 'adm-buys-body'], ['adm-fin-msg', 'adm-fin-body']]){
+          const bm = $(mid)
+          if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $(bid).hidden = true }
+        }
       }
     }
 
@@ -6974,6 +7046,102 @@
 
       $('adm-buys-msg').style.display = 'none'
       $('adm-buys-body').hidden = false
+    }
+
+    /* ── Finanzen je ID: wie viel ist jede Person aktuell im Minus ──
+     * (27.08.2026, Finns Wunsch) Geldfluss-Sicht über ALLE Accounts einer
+     * Person (aktive + archivierte, Eigen-Zahlen ohne Ketten): Saldo =
+     * Payouts − Kauf − Hedge. Bewusst NICHT die Geparkt-Logik — dort wird je
+     * Account bei 0 gekappt, weil die Frage „gebundenes Kapital" ist. Hier
+     * ist die Frage „steht die ID im Minus?", also wird ehrlich saldiert.
+     * Beträge in € wie die Übersicht (Hedge ist fx-gerechnet in €). */
+    let finPerson = ''
+    function admFinRender(){
+      if(!admData) return
+      const m = new Map()
+      for(const r of (admData.accounts || [])){
+        const k = String(r.user_id)
+        const g = m.get(k) || { key:k, label:r.person, email:r.email, accs:0, buy:0, hedge:0, payouts:0 }
+        g.accs++
+        g.buy += Number(r.buy) || 0
+        g.hedge += Number(r.hedge) || 0
+        g.payouts += Number(r.payouts) || 0
+        m.set(k, g)
+      }
+      const list = [...m.values()]
+      for(const g of list) g.saldo = g.payouts - g.buy - g.hedge
+      list.sort((a, b) => a.saldo - b.saldo)            // tiefstes Minus zuerst
+
+      const totSaldo = list.reduce((a, g) => a + g.saldo, 0)
+      const totBuy   = list.reduce((a, g) => a + g.buy, 0)
+      const totHedge = list.reduce((a, g) => a + g.hedge, 0)
+      const totPo    = list.reduce((a, g) => a + g.payouts, 0)
+      const minusL   = list.filter(g => g.saldo < 0)
+      const totMinus = minusL.reduce((a, g) => a + g.saldo, 0)
+      const colSaldo = v => v < 0 ? '#b91c1c' : '#15803d'
+      const fmtSaldo = v => (v >= 0 ? '+' : '−') + admEur.format(Math.abs(v))
+
+      $('adm-f-saldo').textContent = fmtSaldo(totSaldo)
+      $('adm-f-saldo').style.color = colSaldo(totSaldo)
+      $('adm-f-saldo-sub').textContent = `${admEur.format(totBuy)} Kauf · ${admEur.format(totHedge)} Hedge`
+      $('adm-f-minus').textContent = totMinus ? fmtSaldo(totMinus) : '—'
+      $('adm-f-minus').style.color = totMinus ? '#b91c1c' : 'var(--ink)'
+      $('adm-f-minus-sub').textContent = `${minusL.length} von ${list.length} IDs`
+      $('adm-f-po').textContent = admEur.format(totPo)
+
+      const el = $('adm-fin-person-dist'); el.innerHTML = ''
+      const maxAbs = Math.max(1, ...list.map(g => Math.abs(g.saldo)))
+      for(const g of list){
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'adm-row adm-row-btn' + (String(finPerson) === String(g.key) ? ' is-on' : '')
+        row.innerHTML =
+          '<div class="adm-row-name"></div>' +
+          `<div class="adm-track"><div class="adm-fill" style="width:${(100 * Math.abs(g.saldo) / maxAbs).toFixed(1)}%;background:${g.saldo < 0 ? 'var(--danger)' : 'var(--good)'}"></div></div>` +
+          `<div class="adm-val" style="color:${colSaldo(g.saldo)}">${fmtSaldo(g.saldo)}</div>` +
+          `<div class="adm-pct">${g.accs}×</div>`
+        row.querySelector('.adm-row-name').textContent = admShortName(g.label)
+        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admEur.format(g.payouts)} Payouts − ${admEur.format(g.buy)} Kauf − ${admEur.format(g.hedge)} Hedge — zum Aufklappen klicken`
+        row.addEventListener('click', () => {
+          finPerson = (String(finPerson) === String(g.key)) ? '' : g.key
+          admFinRender()
+        })
+        el.appendChild(row)
+      }
+
+      // Aufklappung: alle Accounts der gewählten Person, tiefstes Minus zuerst
+      $('adm-fin-acc-panel').hidden = !finPerson
+      if(finPerson){
+        const rows = (admData.accounts || []).filter(r => String(r.user_id) === String(finPerson))
+          .map(r => ({ ...r, saldo: (Number(r.payouts) || 0) - (Number(r.buy) || 0) - (Number(r.hedge) || 0) }))
+          .sort((a, b) => a.saldo - b.saldo)
+        const pers = list.find(g => String(g.key) === String(finPerson))
+        $('adm-fin-acc-title').textContent = admShortName(pers?.label || 'Accounts')
+        $('adm-fin-acc-count').textContent = rows.length + (rows.length === 1 ? ' Account' : ' Accounts')
+        const tb = $('adm-fin-acc-rows'); tb.innerHTML = ''
+        for(const r of rows){
+          const tr = document.createElement('tr')
+          if(r.archived) tr.style.opacity = '.55'
+          const initials = (r.firm || '?').slice(0, 2).toUpperCase()
+          tr.innerHTML =
+            '<td><div class="acct-cell">' +
+              `<div class="acct-logo">${escapeHtml(initials)}</div>` +
+              '<div style="min-width:0"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px"></div></div>' +
+              (r.archived ? '<span class="chip chip-neutral">archiviert</span>' : '') +
+            '</div></td>' +
+            '<td><span class="fm" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+            `<td class="adm-num" style="color:var(--sub)">${admEur.format(Number(r.buy) || 0)}</td>` +
+            admHedgeCell(r.hedge) +
+            `<td class="adm-num" style="color:${r.payouts ? 'var(--good)' : 'var(--sub)'}">${r.payouts ? '+' + admEur.format(r.payouts) : '—'}</td>` +
+            `<td class="adm-num" style="font-weight:600;color:${colSaldo(r.saldo)}">${fmtSaldo(r.saldo)}</td>`
+          tr.querySelector('.nm').textContent = r.name || '—'
+          tr.querySelector('.fm').textContent = r.firm
+          tb.appendChild(tr)
+        }
+      }
+
+      $('adm-fin-msg').style.display = 'none'
+      $('adm-fin-body').hidden = false
     }
 
     window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
@@ -7486,10 +7654,12 @@
         })
         $('adm-pane-overview').hidden = name !== 'overview'
         $('adm-pane-buys').hidden     = name !== 'buys'
+        $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
+        if(name === 'fin')  admFinRender()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
@@ -7499,6 +7669,7 @@
         admRender()
       })
       $('adm-buys-back')?.addEventListener('click', () => { bPerson = ''; bFirm = ''; admBuysRender() })
+      $('adm-fin-back')?.addEventListener('click', () => { finPerson = ''; admFinRender() })
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
