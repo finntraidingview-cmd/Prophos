@@ -256,6 +256,18 @@ def _api_lesen(path, expected, symbol=None):
 
 MT5_KLASSE = "MetaQuotes::MetaTrader::5.00"
 
+# Echo-Pause (28.08.2026, Finns Not-Aus): dieselbe Flag-Datei wie der Copier
+# (echo_pause.flag im Bot-Ordner, gelegt vom Panel /api/pause). Ist sie da,
+# steigt der Bot aus seiner SL/TP-Klick-Schleife aus, statt weiter am Terminal
+# herumzuklicken — genau der Fall, den Finn nicht mehr per Task-Manager killen
+# will. Die Order selbst ist da laengst platziert; abgebrochen werden nur die
+# NEUEN Klick-Versuche.
+_PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "echo_pause.flag")
+
+
+def is_paused():
+    return os.path.exists(_PAUSE_FLAG)
+
 
 def _klick_absolut(x, y, taste="links", doppel=False):
     """Echter Maus-Klick als EIN atomarer SendInput-Batch mit ABSOLUT-
@@ -822,6 +834,9 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
 
     for runde in ("Rechtsklick-Menue", "Doppelklick"):
         for pname, px_, py_ in punkte:
+            if is_paused():
+                trail.append("⏸ Echo pausiert — Zeilen-Scan abgebrochen")
+                return None
             _maus_fahren(px_, py_, schritte=3)
             # Finns Schritt 1: Zeile markieren, dann erst oeffnen
             _klick_absolut(px_, py_)
@@ -943,6 +958,13 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
     _handel_tab_aktivieren(w, trail, maus_grenze)
 
+    # Echo pausiert? (28.08.2026, Not-Aus) — dann gar nicht erst anfangen zu
+    # klicken. Die Order ist da laengst platziert; SL/TP traegt Finn von Hand
+    # nach oder nach dem Fortsetzen ein neuer Lauf.
+    if is_paused():
+        trail.append("⏸ Echo pausiert — keine SL/TP-Klicks")
+        return None
+
     # 0) Finns Weg als Band-Scan — braucht keinerlei UIA-Anker (s. _reihen_scan)
     dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
 
@@ -972,6 +994,11 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     #    JEDER geoeffnete Dialog wird per Ticket gegengeprueft, bevor getippt
     #    wird — nie die falsche Position anfassen.
     for zeile in kandidaten[:3]:
+        # Zwischen den Kandidaten pruefen: hat Finn waehrenddessen pausiert,
+        # sofort raus statt weiter am Terminal herumzuklicken (28.08.2026).
+        if is_paused():
+            trail.append("⏸ Echo pausiert — Klick-Versuche abgebrochen")
+            break
         try:
             r = zeile.rectangle()
             mx, my = r.mid_point().x, r.mid_point().y
@@ -1074,6 +1101,9 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             for i, dy in enumerate((10, 29, 48), start=1):
                 gy = anker.top - dy
                 if gy < maus_grenze:
+                    break
+                if is_paused():
+                    trail.append("⏸ Echo pausiert — Geometrie-Fallback abgebrochen")
                     break
                 _maus_fahren(gx, gy, schritte=6)
                 # Finns Hand-Weg (18.08.2026, Schritt fuer Schritt vorgemacht):

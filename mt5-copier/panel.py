@@ -340,7 +340,9 @@ def snapshot():
     return {"instances": data, "conflicts": conflicts, "job": job,
             "plans": advance_plans(data), "version": _local_version(),
             "copier_log": clog.get("lines") or [],
-            "copier_log_at": clog.get("updated_at")}
+            "copier_log_at": clog.get("updated_at"),
+            # Echo-Not-Aus (28.08.2026): Zustand fuers Pause/Start-Chip in Prophos
+            "paused": os.path.exists(os.path.join(HERE, "echo_pause.flag"))}
 
 
 def patch_config(fname, patch):
@@ -1804,6 +1806,36 @@ class Handler(BaseHTTPRequestHandler):
                  f"Hedge-Terminal muss in genau diesem Konto eingeloggt sein.")
                 if changed else f"Alle Configs standen schon auf {new_login}."}, ensure_ascii=False))
 
+        if u.path == "/api/pause":
+            # Echo-Not-Aus (28.08.2026, Finns Wunsch nach dem rumklickenden Bot):
+            # ein Klick in Prophos legt/entfernt echo_pause.flag. Existiert sie,
+            # stoppen Copier UND Order-Bot NUR NEUE Aktionen (keine neuen Hedges,
+            # keine SL/TP-Klicks); Closes und die Absicherung laufender Hedges
+            # laufen weiter. Kein Bestaetigen — bewusst ein einziger Klick.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            flag = os.path.join(HERE, "echo_pause.flag")
+            an = bool(body.get("on"))
+            try:
+                if an:
+                    with open(flag, "w", encoding="utf-8") as f:
+                        f.write(datetime.now().isoformat(timespec="seconds"))
+                else:
+                    if os.path.exists(flag):
+                        os.remove(flag)
+            except OSError as e:
+                return self._send(500, json.dumps({"ok": False, "msg": f"Flag-Datei: {e}"}))
+            print(f"[panel] Echo {'PAUSIERT' if an else 'fortgesetzt'} "
+                  f"(echo_pause.flag {'gelegt' if an else 'entfernt'})", flush=True)
+            return self._send(200, json.dumps({"ok": True, "paused": an, "msg":
+                ("Echo pausiert — keine neuen Hedges/Orders/SL-TP-Klicks. Laufende Hedges "
+                 "bleiben offen, Closes laufen weiter.") if an
+                else "Echo fortgesetzt — Copier und Bot arbeiten wieder normal."},
+                ensure_ascii=False))
+
         if u.path == "/api/mouse-test":
             # Isolierter Maus-/Tastatur-Test (15.08.2026, Finns Wunsch): klaert
             # getrennt von MT5, ob der Bot auf diesem PC den Cursor bewegen und
@@ -1846,6 +1878,11 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            # Echo pausiert? (28.08.2026, Not-Aus) — gar keinen neuen Bot starten.
+            if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Echo ist pausiert — es wird keine neue Order platziert. Erst oben "
+                    "auf Fortsetzen klicken."}, ensure_ascii=False))
             cmd = {"symbol": str(body.get("symbol") or "").strip(),
                    "richtung": str(body.get("richtung") or "").lower(),
                    "volumen": body.get("volumen"),

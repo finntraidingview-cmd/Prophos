@@ -5018,6 +5018,10 @@
                echoNotfallGuard verteilt es auf alle Configs aller PCs -->
           <span class="mtc-chip" id="mtc-notfall-chip" title="Notfall-SL/TP auf dem Hedge — gilt für ALLE Accounts der Flotte. Klick zum Ändern" style="cursor:pointer">🛡 Notfall <b id="mtc-notfall-cur" class="mono" style="margin-left:4px">—</b> ✎</span>
           <span class="mtc-chip" id="mtc-copier-chip"><span class="mtc-dot off"></span>Copier</span>
+          <!-- Echo Not-Aus (28.08.2026, Finns Wunsch nach dem rumklickenden Bot):
+               EIN Klick, kein Bestätigen — stoppt neue Hedges/Orders/SL-TP-Klicks,
+               laufende Hedges bleiben offen, Closes laufen weiter. -->
+          <button class="btn btn-ghost" id="mtc-pause-toggle" title="Echo pausieren: keine neuen Hedges/Orders/SL-TP-Klicks mehr (laufende Hedges bleiben offen). Nochmal klicken = fortsetzen.">⏸ Pause</button>
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
           <button class="btn btn-ghost" id="mtc-mouse-test" title="Testet isoliert, ob der Bot Maus und Tastatur steuern kann">🖱 Maus-Test</button>
@@ -25049,6 +25053,16 @@
       const p = w ? w.puffer : (inst0 ? Number(inst0.notfall_puffer_min_punkte ?? 100) : 100)
       ncur.textContent = `${f}% / ${p}P`
     }
+    // ⏸-Button: Zustand aus d.paused (28.08.2026, Not-Aus). Pausiert →
+    // hervorgehoben + „Fortsetzen"; aktiv → normaler „Pause"-Knopf.
+    const pb = $('mtc-pause-toggle')
+    if(pb){
+      const paused = !!d.paused
+      pb.dataset.paused = paused ? '1' : '0'
+      pb.textContent = paused ? '▶ Fortsetzen' : '⏸ Pause'
+      pb.classList.toggle('btn-primary', paused)
+      pb.classList.toggle('btn-ghost', !paused)
+    }
     const badge = $('sb-badge-mtc')
     if(badge){ const n = (d.instances || []).length; badge.hidden = !n; badge.textContent = n }
 
@@ -25391,6 +25405,42 @@
       alert('Speichern fehlgeschlagen (sql/2026-08-27_echo_notfall.sql schon ausgeführt?): ' + (e && e.message || e))
     }
   })
+
+  // ⏸ Echo-Not-Aus (28.08.2026, Finns Wunsch nach dem rumklickenden Bot): EIN
+  // Klick, KEIN Bestätigen — toggelt echo_pause.flag über /api/pause. Pausiert:
+  // keine neuen Hedges/Orders/SL-TP-Klicks; laufende Hedges bleiben offen,
+  // Closes laufen weiter. Eigene Verdrahtung (Projektregel: keine Sammel-Handler).
+  const pauseBtn = $('mtc-pause-toggle')
+  if(pauseBtn){
+    if(typeof MT5_LOCAL !== 'undefined' && !MT5_LOCAL) pauseBtn.style.display = 'none'
+    pauseBtn.addEventListener('click', async () => {
+      const willPause = pauseBtn.dataset.paused !== '1'   // aktuell aktiv → pausieren
+      pauseBtn.disabled = true
+      // Sofort-Feedback, ohne auf den Poll zu warten
+      pauseBtn.textContent = willPause ? '⏸ pausiere…' : '▶ setze fort…'
+      try{
+        const r = await window.mtcApi('pause', { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ on: willPause }) })
+        if(r && r.ok){
+          pauseBtn.dataset.paused = willPause ? '1' : '0'
+          pauseBtn.textContent = willPause ? '▶ Fortsetzen' : '⏸ Pause'
+          pauseBtn.classList.toggle('btn-primary', willPause)
+          pauseBtn.classList.toggle('btn-ghost', !willPause)
+          if(typeof atToast === 'function')
+            atToast(willPause ? '⏸ Echo pausiert — keine neuen Hedges/Orders/Klicks'
+                              : '▶ Echo fortgesetzt', 'start')
+        }else{
+          alert('⚠️ ' + ((r && r.msg) || 'keine Antwort'))
+        }
+      }catch(e){
+        alert('Pause fehlgeschlagen: ' + (e && e.message || e))
+      }finally{
+        pauseBtn.disabled = false
+        setTimeout(mtcLoad, 500)
+      }
+    })
+  }
 
   // Maus-Test-Knopf (15.08.2026, Finns Wunsch): isolierter Beweis, dass der Bot
   // Maus + Tastatur auf dem PC steuern kann — getrennt von MT5.

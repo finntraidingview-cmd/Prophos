@@ -66,6 +66,20 @@ def local_version():
         return None
 
 
+# ── Echo-Pause (28.08.2026, Finns Not-Aus-Knopf) ───────────────────────────────
+# Ein Klick in Prophos legt/entfernt die Datei echo_pause.flag im Copier-Ordner
+# (Panel /api/pause). Existiert sie, stoppt der Copier NUR NEUE Aktionen: keine
+# neuen Hedges (Opens) und keine neuen Notfall-SL/TP-Modifies. Bewusst NICHT
+# betroffen: Closes (eigene Hedges abbauen ist nie falsch, genau wie ausserhalb
+# des Trade-Fensters) — laufende Hedges bleiben also offen und werden weiter
+# sauber geschlossen, wenn der Master zugeht. Der Order-Bot liest dieselbe Datei.
+_PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "echo_pause.flag")
+
+
+def is_paused():
+    return os.path.exists(_PAUSE_FLAG)
+
+
 def _version_watcher():
     while True:
         try:
@@ -1044,6 +1058,8 @@ def main():
             "running": True, "connected": connected,
             # Trade-Fenster offen? (25.08.2026) — reine Anzeige-Information
             "armed": bool(getattr(m, "armed", False)),
+            # Echo pausiert? (28.08.2026, Not-Aus) — reine Anzeige fuer den Chip
+            "paused": is_paused(),
             "master_login": (snap or {}).get("login") or m.master_login or None,
             "master_server": (snap or {}).get("server"),
             "hedge_login": int(ai.login), "hedge_server": str(ai.server),
@@ -1436,6 +1452,15 @@ def main():
                     ident = a["ident"]
                     if a["kind"] == "open":
                         if ident in m.blocked:
+                            continue
+                        # Echo pausiert (28.08.2026, Finns Not-Aus): keine neuen
+                        # Hedges. Wie das Trade-Fenster ein reines OPEN-Gate —
+                        # Closes unten laufen weiter, laufende Hedges bleiben offen.
+                        if is_paused():
+                            if ident not in m.warned_unarmed:
+                                m.warned_unarmed.add(ident)
+                                log(f"⏸ [{m.file}] Echo pausiert — Master-Pos {ident} wird NICHT "
+                                    f"gehedgt (Closes laufen weiter).")
                             continue
                         # Trade-Fenster zu → keine neuen Hedges (25.08.2026, Finns
                         # Ansage: scharf nur zwischen 'Trade starten' und Trade-
