@@ -2495,6 +2495,38 @@
     #acc-firm-filter{min-width:110px !important}
     #acc-type-filter{min-width:96px !important}
 
+    /* — Trade-Karten (tc2, auch die Flotte-Zeilen) als gestapelte App-
+         Karten statt Desktop-Einzeiler (Finns Screenshots 29.08.: Namen
+         brachen dreizeilig, BUY-Chip lag überm Datum, Buttons quetschten
+         sich daneben). Zeile 1: Dot + Master→Slave + Richtungs-Chip,
+         darunter Sub-Info, Zeile 2: Live-P&L/Timer, Zeile 3: Aktionen
+         rechts mit Touch-Größen. data-plan-*-Handler unberührt. — */
+    #dashboard-view .tc2{
+      flex-wrap:wrap;align-items:flex-start;row-gap:8px;
+      padding:13px 14px;border:none;border-radius:14px;
+      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+    }
+    #dashboard-view .tc2-dot{margin-top:5px}
+    #dashboard-view .tc2-main{flex:1 1 calc(100% - 19px)}
+    #dashboard-view .tc2-pair{flex-wrap:wrap;row-gap:2px}
+    #dashboard-view .tc2-name{font-size:14.5px}
+    #dashboard-view .tc2-sub{white-space:normal}
+    #dashboard-view .tc2-metric{
+      flex:1 1 100%;justify-content:flex-start;flex-wrap:wrap;row-gap:4px;
+      padding-left:19px;
+    }
+    #dashboard-view .tc2-metric:empty{display:none}
+    #dashboard-view .tc2-actions{
+      flex:1 1 100%;justify-content:flex-end;gap:8px;
+      padding-top:10px;border-top:1px solid var(--border-soft);
+    }
+    #dashboard-view .tc2-actions .tc2-btn{padding:8px 14px;font-size:13px;border-radius:10px}
+    #dashboard-view .tc2-actions .tc2-ab{padding:8px 10px}
+
+    /* — Topbar opak: die durchscheinende Blur-Leiste sah beim Scrollen
+         aus wie ein Render-Fehler (halb sichtbare Buttons darunter) — */
+    #dashboard-view .topbar{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
+
     /* — Account-Detail aufgeräumt (Finns Screenshot 28.08.2026 abends):
          Zurück-Pill auf eigene Zeile, Titel links darunter (statt Titel
          neben der Pill über drei Zeilen), Stats als 1+2-Grid statt
