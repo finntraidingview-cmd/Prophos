@@ -3682,6 +3682,10 @@
               <input type="text" class="input mono" id="tp-order-symbol" placeholder="z.B. NDX100">
             </div>
           </div>
+          <!-- Remote-Signal-Status (28.08.2026): läuft Prophos NICHT auf dem PC
+               (Handy/Mac), schreibt „Starten" das Signal nach order_signale —
+               hier steht live, was der PC daraus macht (wartet/läuft/Ergebnis). -->
+          <div id="tp-order-remote" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.5;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3)"></div>
           <div class="modal-actions" style="margin-top:16px">
             <span class="modal-msg" id="tpOrderMsg"></span>
             <button class="btn btn-ghost" id="tpOrderBack">Zurück</button>
@@ -18278,6 +18282,24 @@
     }catch(_){}
   }
 
+  /* ── Remote-Signal-Rückkanal (28.08.2026, Finns Handy-Feature) ──
+   * Gesetzt NUR vom Signal-Empfänger (orderSignalTick) direkt vor seinem
+   * tpPreflightMt5-Aufruf. one-shot: die erste endgültige Meldung gewinnt,
+   * danach ist der Hook weg — nichts kann doppelt melden. armed = die Order
+   * ist bereits unterwegs zum Bot; ab da meldet ausschließlich der Order-Pfad
+   * (ein „Popup zu" darf dann nicht mehr fälschlich „verworfen" melden). */
+  let _pfRemoteHook = null   // { planId, armed, fn }
+  function _pfRemoteMelde(planId, payload){
+    const h = _pfRemoteHook
+    if(!h || String(h.planId) !== String(planId)) return
+    _pfRemoteHook = null
+    try{ h.fn(payload) }catch(e){ console.warn('[signal] Rückmeldung:', e) }
+  }
+  // Fehlertexte des laufenden Checks als Klartext sammeln (28.08.2026): der
+  // Absender am Handy sieht das Check-Popup des PCs nicht — bei hardFail geht
+  // diese Zusammenfassung als ergebnis in die Signal-Zeile zurück.
+  let _pfErrLog = []
+
   function _pfAddRow(id, label){
     const rows = document.getElementById('pf-rows')
     const div = document.createElement('div')
@@ -18295,9 +18317,17 @@
       ico.classList.add(state === 'ok' ? 'pf-ok' : state === 'warn' ? 'pf-warn' : 'pf-err')
       ico.textContent = state === 'ok' ? '✓' : state === 'warn' ? '!' : '✕'
     }
+    if(state === 'err') _pfErrLog.push(String(subHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
     if(sub) sub.innerHTML = subHtml || ''
   }
   function _pfClose(){
+    // Remote-Lauf, dessen Order noch NICHT unterwegs ist? Dann ist „Popup zu"
+    // die ehrliche Antwort ans Handy: verworfen, nichts gesendet (28.08.2026).
+    if(_pfRemoteHook && !_pfRemoteHook.armed && _pfPlanId != null
+       && String(_pfRemoteHook.planId) === String(_pfPlanId)){
+      _pfRemoteMelde(_pfPlanId, { ok:false, verworfen:true,
+        msg:'Check-Popup am PC geschlossen, bevor eine Order gesendet wurde — nichts platziert.' })
+    }
     document.getElementById('tpPreflightModal')?.classList.remove('open')
     _pfPlanId = null
     // Check zu = gemerkte Bot-Order verworfen (Review-Fund 15.08.2026): sonst
@@ -18646,6 +18676,16 @@
   function _pfMt5StopTimer(){ if(_pfMt5Timer){ clearInterval(_pfMt5Timer); _pfMt5Timer = null } }
   async function tpPreflightMt5(plan){
     _pfMt5StopTimer()
+    // Verdrängt dieser Check einen noch offenen Remote-Lauf eines ANDEREN
+    // Plans? Ehrlich ans Handy melden statt still verhungern lassen — und
+    // dessen gemerkte Order darf nie von DIESEM Check abgefeuert werden
+    // (28.08.2026, Remote-Signale).
+    if(_pfRemoteHook && !_pfRemoteHook.armed && String(_pfRemoteHook.planId) !== String(plan.id)){
+      if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(_pfRemoteHook.planId)) _tpPendingOrder = null
+      _pfRemoteMelde(_pfRemoteHook.planId, { ok:false, verworfen:true,
+        msg:'Am PC wurde ein anderer Check gestartet — Signal verworfen, nichts platziert.' })
+    }
+    _pfErrLog = []
     _pfPlanId = plan.id
 
     document.getElementById('pf-rows').innerHTML = ''
@@ -18918,9 +18958,13 @@
             } else if(sendCreds){
               _pfMt5StopTimer()
               _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — „Weiter" → „Starten" erneut klicken: der Neustart loggt automatisch ins richtige Konto ein. Hilft das nicht: im Terminal Datei → „Bei Handelskonto anmelden".`)
+              _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
+                msg:'Terminal ist im FALSCHEN Konto eingeloggt — nichts platziert. Am PC beheben (Check-Popup dort ist offen).' })
             } else {
               _pfMt5StopTimer()
               _pfSet('m5term', 'err', `Terminal ist im FALSCHEN Konto eingeloggt ${pair} — im Terminal: Datei → „Bei Handelskonto anmelden" auf <span class="mono">${escapeHtml(String(route.masterLogin))}</span> wechseln. Tipp: Zugangsdaten am Prophos-Account hinterlegen, dann erzwingt der Start das künftig automatisch.`)
+              _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
+                msg:'Terminal ist im FALSCHEN Konto eingeloggt — nichts platziert. Am PC von Hand ins richtige Konto wechseln.' })
             }
             return
           }
@@ -18937,6 +18981,10 @@
               // Modal währenddessen geschlossen, wird NICHT gefeuert.
               if(!document.getElementById('tpPreflightModal')?.classList.contains('open')
                  || String(_pfPlanId) !== String(plan.id)) return
+              // Remote-Lauf: ab hier ist die Order unterwegs — ein „Popup zu"
+              // meldet nicht mehr „verworfen", das Ergebnis kommt vom Order-
+              // Pfad selbst (28.08.2026, Remote-Signale).
+              if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)) _pfRemoteHook.armed = true
               // KEIN Countdown mehr (25.08.2026, Finns Tempo-Wunsch: 'soll direkt
               // losgehen') — die HÄNDE-WEG-Ansage steht, während der Bot schon
               // arbeitet. Über Parsec bewegt er den Cursor ohnehin nicht sichtbar,
@@ -18955,6 +19003,10 @@
                 if(r && (r.ok || (r.price && r.ticket))) mt5PlanAufOpen(plan.id)
                 if(r && r.ok){
                   if(fe) fe.textContent = `✓ Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}${r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)'}${r.retcode === 10010 ? ' · ⚠ Teilausführung, Größe im Terminal prüfen' : ''} — Auto-Erkennung übernimmt.`
+                  _pfRemoteMelde(plan.id, { ok:true, price: r.price ?? null, ticket: r.ticket ?? null,
+                    msg: `Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}`
+                       + (r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP (von Hand setzen)')
+                       + (r.retcode === 10010 ? ' · ⚠ Teilausführung — Größe im Terminal prüfen' : '') })
                   setTimeout(() => {
                     if(document.getElementById('tpPreflightModal')?.classList.contains('open')
                        && String(_pfPlanId) === String(plan.id)) _pfClose()
@@ -18969,11 +19021,18 @@
                     fe.textContent = retryOk
                       ? '✗ Order abgelehnt — Meldung oben. Erneut „Weiter" → „Starten".'
                       : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
+                  // Ans Handy: inkl. des kritischsten Falls „Position OFFEN, SL/TP
+                  // fehlt" (price+ticket ohne ok) — die Warnung muss ankommen.
+                  _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
+                    offen: !!(r && r.price && r.ticket),
+                    msg: String((r && (r.msg || r.error)) || 'keine Antwort vom Bot') })
                 }
               }catch(e){
                 _pfSet('m5term', 'err', 'Order-Abschuss gestört: ' + escapeHtml(String(e && e.message || e)))
                 if(fe){ fe.className = 'pf-final err'
                   fe.textContent = '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
+                _pfRemoteMelde(plan.id, { ok:false, unklar:true,
+                  msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) + ' — im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut senden.' })
               }
               return
             }
@@ -18993,6 +19052,8 @@
             // Frist+90s, bevor sie neu startet — der Ticker muss ihr die Zeit geben.
             _pfMt5StopTimer()
             _pfSet('m5term', 'err', 'Terminal liefert nach 4 Minuten nichts — Details-Log der Copier-Karte prüfen (und im Terminal: Reiter „Experten").')
+            _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
+              msg:'Terminal liefert nach 4 Minuten nichts — Check hängt am PC, nichts platziert.' })
             return
           }
           // Broker-Wartefall (Review-Fund 15.08.2026): der Text 'Login-Fenster …
@@ -19024,6 +19085,11 @@
     _pfStatusSave()
     try { renderTradePlans() } catch(_){}
     if(hardFail){
+      // Remote-Lauf: die Fehler-Zusammenfassung ans Handy — das Check-Popup am
+      // PC bleibt offen (dort fixen + „Erneut versuchen" wie beim lokalen Lauf).
+      _pfRemoteMelde(plan.id, { ok:false, check_fail:true,
+        msg: 'Trade-Start-Check fehlgeschlagen: ' + (_pfErrLog.slice(0, 4).join(' · ') || 'Details am PC')
+           + ' — nichts platziert. Popup am PC ist offen.' })
       _pfFinish(false, 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.')
     } else {
       // NICHT auto-schließen (_pfFinish(true) würde nach 1,6s zumachen und den
@@ -19209,8 +19275,18 @@
     _tpOrderPlanId = planId
     _tpPendingOrder = null
     tpOrderDirSet(null)
+    // Remote-Zustand zurücksetzen (28.08.2026): altes Signal ggf. stornieren
+    // (nur solange kein PC geclaimt hat), Status-Box zu, Knopf wieder scharf.
+    tpOrderRemoteCancel()
+    const remoteBox = document.getElementById('tp-order-remote')
+    if(remoteBox){ remoteBox.style.display = 'none'; remoteBox.innerHTML = '' }
+    const startBtn = document.getElementById('tpOrderStart')
+    if(startBtn){ startBtn.disabled = false
+      startBtn.textContent = MT5_LOCAL ? 'Starten →' : '📡 Trade automatisch starten' }
     const info = document.getElementById('tp-order-info')
-    if(info) info.textContent = `🖥 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — der Bot platziert die Order im Master, sobald der Check grün ist.`
+    if(info) info.textContent = MT5_LOCAL
+      ? `🖥 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — der Bot platziert die Order im Master, sobald der Check grün ist.`
+      : `📡 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — dieses Gerät ist nicht der PC: „Trade automatisch starten" schickt die Order als Signal an den PC dieser ID; dort läuft der Check und Puls platziert bei Grün.`
     document.getElementById('tp-order-tp').value = ''
     document.getElementById('tp-order-sl').value = ''
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
@@ -19281,9 +19357,11 @@
   document.getElementById('tp-order-buy')?.addEventListener('click', () => tpOrderDirSet('buy'))
   document.getElementById('tp-order-sell')?.addEventListener('click', () => tpOrderDirSet('sell'))
   document.getElementById('tpOrderCancel')?.addEventListener('click', () => {
+    tpOrderRemoteCancel()   // wartendes Remote-Signal stornieren (28.08.2026)
     document.getElementById('tpOrderModal').classList.remove('open')
   })
   document.getElementById('tpOrderBack')?.addEventListener('click', () => {
+    tpOrderRemoteCancel()   // wartendes Remote-Signal stornieren (28.08.2026)
     document.getElementById('tpOrderModal').classList.remove('open')
     if(_tpOrderPlanId) openTradePlanModal(_tpOrderPlanId)
   })
@@ -19302,11 +19380,261 @@
     if(autoSltp && (!(tp > 0) || !(sl > 0)))
       return err('Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
     if(!(lots > 0)) return err('Lot-Anzahl angeben.')
-    _tpPendingOrder = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir, volumen: lots,
-                        sl_usd: autoSltp ? sl : null, tp_usd: autoSltp ? tp : null }
+    const order = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir, volumen: lots,
+                    sl_usd: autoSltp ? sl : null, tp_usd: autoSltp ? tp : null }
+    // Remote-Weg (28.08.2026, Finns Handy-Feature): läuft Prophos NICHT auf dem
+    // PC (pages.dev am Handy/Mac), gibt es hier kein localhost — die Order geht
+    // als Signal nach order_signale, der PC-Tab claimt sie und fährt exakt den
+    // lokalen Weg. Das Modal bleibt offen und zeigt live die Rückmeldung.
+    if(!MT5_LOCAL){
+      tpOrderRemoteSend(plan, order)
+      return
+    }
+    _tpPendingOrder = order
     document.getElementById('tpOrderModal').classList.remove('open')
     tpPreflightMt5(plan)
   })
+
+  /* ══ REMOTE-TRADE-SIGNALE (28.08.2026, Finns Feature „Prophos aufs Handy") ══
+   * Handy/Mac → Supabase (order_signale, Per-User-RLS) → PC-Tab → Puls.
+   * Sender (hier drüber verdrahtet): „Trade automatisch starten" schreibt EINE
+   * Signal-Zeile und pollt sie — kein localhost nötig, das Gerät redet nur mit
+   * Supabase. Empfänger (unten): NUR auf dem PC (MT5_LOCAL), hängt am 5s-Takt,
+   * claimt race-sicher (Update nur solange status='wartet') und fährt dann
+   * EXAKT den lokalen Weg: _tpPendingOrder + tpPreflightMt5 — bei Grün
+   * platziert Puls im Master-Terminal. IP-Bild unverändert (Vault-Doktrin):
+   * die Prop-Firma sieht nur die gewohnte Wohn-IP des PCs.
+   * Frische-Gate BEIDSEITIG (3 min): ein PC, der Stunden später aufwacht,
+   * darf nie eine alte Order feuern; ein Signal ohne PC verfällt sichtbar. */
+  const OS_FRISCHE_S = 180
+  let _tpRemoteSig = null   // Sender: { id, timer, t0 }
+
+  function tpOrderRemoteBox(html, art){
+    const box = document.getElementById('tp-order-remote')
+    if(!box) return
+    box.style.display = ''
+    box.style.background  = art === 'err' ? 'rgba(240,68,56,.08)'  : art === 'ok' ? 'rgba(18,183,106,.08)'  : 'rgba(124,58,237,.08)'
+    box.style.borderColor = art === 'err' ? 'rgba(240,68,56,.35)' : art === 'ok' ? 'rgba(18,183,106,.35)' : 'rgba(124,58,237,.3)'
+    box.innerHTML = html
+  }
+  function tpOrderRemoteStop(){
+    if(_tpRemoteSig && _tpRemoteSig.timer) clearInterval(_tpRemoteSig.timer)
+  }
+  // Abschluss auf Absender-Seite: Knopf nur wieder scharf, wenn ein erneuter
+  // Versuch UNGEFÄHRLICH ist — bei „unklar"/„Position offen" bleibt er gesperrt
+  // (Doppel-Order-Doktrin: erst im Terminal prüfen, nie blind erneut senden).
+  function tpOrderRemoteDone(erg, status){
+    tpOrderRemoteStop()
+    _tpRemoteSig = null
+    const btn = document.getElementById('tpOrderStart')
+    if(!btn) return
+    const retrySicher = status !== 'fertig' && !(erg && (erg.unklar || erg.offen))
+    btn.disabled = !retrySicher
+    if(retrySicher) btn.textContent = '📡 Trade automatisch starten'
+  }
+  // Storno: nur solange KEIN PC geclaimt hat (status='wartet' als Guard im
+  // Update) — läuft der Check schon, läuft er weiter und der Plan springt bei
+  // Erfolg sichtbar auf „Läuft".
+  function tpOrderRemoteCancel(){
+    const sig = _tpRemoteSig
+    tpOrderRemoteStop()
+    _tpRemoteSig = null
+    if(!sig) return
+    supabase.from('order_signale')
+      .update({ status:'verworfen', updated_at: new Date().toISOString(),
+                ergebnis:{ ok:false, msg:'Vom Absender abgebrochen.' } })
+      .eq('id', sig.id).eq('status', 'wartet')
+      .then(() => {}, e => console.warn('[signal] Storno:', e))
+  }
+  async function tpOrderRemoteSend(plan, order){
+    const btn = document.getElementById('tpOrderStart')
+    const msg = document.getElementById('tpOrderMsg')
+    if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    if(btn){ btn.disabled = true; btn.textContent = '📡 sende…' }
+    tpOrderRemoteStop()
+    try{
+      const { data, error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plan.id),
+                  params: { symbol: order.symbol, richtung: order.richtung, volumen: order.volumen,
+                            sl_usd: order.sl_usd, tp_usd: order.tp_usd } })
+        .select('*').single()
+      if(error) throw error
+      _tpRemoteSig = { id: data.id, timer: null, t0: Date.now() }
+      if(btn) btn.textContent = '📡 gesendet'
+      tpOrderRemoteBox(`📡 Signal gesendet — warte auf den PC dieser ID… <span class="mono">(0s)</span><br>Abbrechen: dieses Popup einfach schließen.`, 'wait')
+      _tpRemoteSig.timer = setInterval(tpOrderRemotePoll, 3000)
+    }catch(e){
+      if(btn){ btn.disabled = false; btn.textContent = '📡 Trade automatisch starten' }
+      tpOrderRemoteBox('✗ Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)), 'err')
+    }
+  }
+  async function tpOrderRemotePoll(){
+    const sig = _tpRemoteSig
+    if(!sig) return tpOrderRemoteStop()
+    // Modal zu ohne Storno-Klick (z.B. View-Wechsel): still aufhören zu pollen —
+    // das Ergebnis steht in der DB, der Plan-Status zeigt den Erfolg ohnehin.
+    if(!document.getElementById('tpOrderModal')?.classList.contains('open')) return tpOrderRemoteStop()
+    let row = null
+    try{
+      const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
+      row = data
+    }catch(_){ return }
+    if(!row || !_tpRemoteSig || _tpRemoteSig.id !== sig.id) return
+    const sec = Math.round((Date.now() - sig.t0) / 1000)
+    const erg = row.ergebnis || {}
+    if(row.status === 'wartet'){
+      if(sec > OS_FRISCHE_S){
+        // Kein PC hat übernommen → Signal beidseitig für tot erklären (Guard
+        // eq 'wartet': claimt ein PC exakt jetzt, gewinnt der PC).
+        try{
+          await supabase.from('order_signale')
+            .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
+            .eq('id', sig.id).eq('status', 'wartet')
+        }catch(_){}
+        tpOrderRemoteBox('✗ Kein PC hat übernommen — Signal verfallen. Auf dem PC müssen der Prophos-Tab UND das Copier-Backend laufen (start-alles.bat).', 'err')
+        tpOrderRemoteDone(erg, 'verfallen')
+        return
+      }
+      tpOrderRemoteBox(`📡 Signal gesendet — warte auf den PC dieser ID… <span class="mono">(${sec}s)</span><br>Abbrechen: dieses Popup einfach schließen.`, 'wait')
+    } else if(row.status === 'laeuft'){
+      tpOrderRemoteBox(`🖥 PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen — Trade-Start-Check läuft, bei Grün platziert Puls… <span class="mono">(${sec}s)</span>`, 'wait')
+    } else if(row.status === 'fertig'){
+      tpOrderRemoteBox('✓ ' + escapeHtml(String(erg.msg || 'Order platziert.')) + ' — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".', 'ok')
+      tpOrderRemoteDone(erg, 'fertig')
+    } else {
+      // fehler / verworfen / verfallen — inkl. des kritischsten Falls:
+      // Position ist OFFEN, aber ohne SL/TP (Vault: dreimal real passiert).
+      const offen = !!erg.offen
+      tpOrderRemoteBox((offen ? '🚨 POSITION IST OFFEN: ' : '✗ ')
+        + escapeHtml(String(erg.msg || row.status))
+        + (offen ? '<br><b>SL/TP SOFORT am PC von Hand nachtragen!</b>' : ''), 'err')
+      tpOrderRemoteDone(erg, row.status)
+    }
+  }
+
+  /* ── Empfänger: läuft NUR auf dem PC (MT5_LOCAL), Takt 5s wie die Flotte ── */
+  let _osBusy = false
+  let _osActive = null   // { sigId, planId, timeout } — ein Signal zur Zeit
+
+  async function _osErgebnis(sigId, res){
+    if(_osActive && _osActive.sigId === sigId){
+      if(_osActive.timeout) clearTimeout(_osActive.timeout)
+      _osActive = null
+    }
+    const status = res && res.ok ? 'fertig' : (res && res.verworfen ? 'verworfen' : 'fehler')
+    try{
+      await supabase.from('order_signale')
+        .update({ status, ergebnis: res || {}, updated_at: new Date().toISOString() })
+        .eq('id', sigId)
+    }catch(e){ console.warn('[signal] Ergebnis-Write:', e) }
+  }
+
+  async function orderSignalTick(){
+    if(!MT5_LOCAL || _osBusy || _osActive) return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    if(typeof window.mtcApi !== 'function') return
+    // Manueller Lauf hat IMMER Vorrang: solange am PC ein Check- oder
+    // Order-Popup offen ist, wird nichts geclaimt (das Signal bleibt 'wartet'
+    // und verfällt notfalls ehrlich).
+    if(document.getElementById('tpPreflightModal')?.classList.contains('open')) return
+    if(document.getElementById('tpOrderModal')?.classList.contains('open')) return
+    _osBusy = true
+    try{
+      const { data: sigs, error } = await supabase.from('order_signale')
+        .select('*').eq('status', 'wartet').order('created_at', { ascending: true })
+      if(error || !sigs || !sigs.length) return
+      const dd = await window.mtcApi('instances')
+      if(!dd || dd.copier_offline || dd._httpFail) return
+      for(const sig of sigs){
+        // Frische-Gate: alte Signale werden NIE ausgeführt, nur beerdigt.
+        const alter = (Date.now() - new Date(sig.created_at).getTime()) / 1000
+        if(!(alter < OS_FRISCHE_S)){
+          await supabase.from('order_signale')
+            .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:false, msg:'Signal älter als 3 Minuten — aus Sicherheit NICHT ausgeführt.' } })
+            .eq('id', sig.id).eq('status', 'wartet')
+          continue
+        }
+        // Plan: lokale Liste, sonst frisch aus der DB (am Handy eben erst
+        // erstellte Pläne sind im PC-Tab noch nicht geladen).
+        let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+        let plan = (_tp || []).find(x => String(x.id) === String(sig.plan_id))
+        if(!plan){
+          try{
+            const { data: pr } = await supabase.from('trade_plans').select('*').eq('id', sig.plan_id).maybeSingle()
+            if(pr){
+              plan = rowToPlan(pr)
+              tradePlans.unshift(plan)
+              try{ renderTradePlans() }catch(_){}
+            }
+          }catch(_){}
+        }
+        if(!plan){
+          await supabase.from('order_signale')
+            .update({ status:'fehler', updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:false, msg:'Plan zum Signal nicht gefunden.' } })
+            .eq('id', sig.id).eq('status', 'wartet')
+          continue
+        }
+        if(plan.status !== 'planned'){
+          await supabase.from('order_signale')
+            .update({ status:'fehler', updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:false, msg:`Plan ist nicht mehr „Geplant" (Status: ${plan.status}) — nichts gestartet.` } })
+            .eq('id', sig.id).eq('status', 'wartet')
+          continue
+        }
+        // Params-Sanity — der lokale Handler validiert beim Senden, aber ein
+        // Signal ist Fremdeingabe: lieber hier ablehnen als Puls raten lassen.
+        const p = sig.params || {}
+        const vol = Number(p.volumen)
+        const dirOk = p.richtung === 'buy' || p.richtung === 'sell'
+        const slTpPaar = (p.sl_usd == null) === (p.tp_usd == null)
+        if(!dirOk || !(vol > 0) || !String(p.symbol || '').trim() || !slTpPaar){
+          await supabase.from('order_signale')
+            .update({ status:'fehler', updated_at: new Date().toISOString(),
+                      ergebnis:{ ok:false, msg:'Signal unvollständig (Richtung/Lots/Symbol/SL-TP-Paar) — nichts gestartet.' } })
+            .eq('id', sig.id).eq('status', 'wartet')
+          continue
+        }
+        // Gehört der Plan zu DIESEM PC? Sonst liegen lassen — ein anderer PC
+        // der Flotte (gleiches Profil) kann ihn claimen.
+        const route = mt5RouteResolve(plan, dd.instances || [])
+        if(!route) continue
+        // Race-sicher claimen: Update nur, solange noch 'wartet' — 0 Zeilen
+        // heißt „anderer PC war schneller" (dasselbe Guard-Muster wie die
+        // MT5-Zustandsmaschine).
+        const { data: cl } = await supabase.from('order_signale')
+          .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+                    updated_at: new Date().toISOString() })
+          .eq('id', sig.id).eq('status', 'wartet').select()
+        if(!cl || !cl.length) continue
+        // EXAKT der lokale Weg: Order merken, Rückkanal setzen, Check starten.
+        _tpPendingOrder = { planId: plan.id, symbol: String(p.symbol).trim(), richtung: p.richtung,
+                            volumen: vol, sl_usd: p.sl_usd != null ? Number(p.sl_usd) : null,
+                            tp_usd: p.tp_usd != null ? Number(p.tp_usd) : null }
+        _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
+        _pfRemoteHook = { planId: String(plan.id), armed: false, fn: res => _osErgebnis(sig.id, res) }
+        // Backstop (Timeout-Doktrin: der äußere Timeout ist die Obergrenze der
+        // Wahrheit): meldet der Check binnen 8 min gar nichts, wird das Signal
+        // als UNKLAR beendet — nie still offen lassen.
+        _osActive.timeout = setTimeout(() => {
+          if(_osActive && _osActive.sigId === sig.id){
+            _pfRemoteHook = null
+            _osErgebnis(sig.id, { ok:false, unklar:true,
+              msg:'Keine Rückmeldung vom Check binnen 8 Minuten — am PC im Terminal prüfen, ob die Order liegt. NICHT blind erneut senden.' })
+          }
+        }, 8 * 60 * 1000)
+        if(typeof atToast === 'function') atToast(`📡 Remote-Signal: ${plan.masterName || '—'} → Check startet, Puls übernimmt bei Grün`, 'start')
+        tpPreflightMt5(plan)
+        break   // ein Signal pro Lauf — der nächste wird erst nach Abschluss geclaimt (_osActive-Riegel)
+      }
+    }catch(e){ console.warn('[signal]', e) }
+    finally{ _osBusy = false }
+  }
+  setInterval(orderSignalTick, 5000)
+  /* ══ ENDE REMOTE-TRADE-SIGNALE ══ */
 
   function openTradePlanModal(editId){
     console.log('[Prophos] openTradePlanModal called, accounts.length =', accounts.length, 'editId =', editId)
