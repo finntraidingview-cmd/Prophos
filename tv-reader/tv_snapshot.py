@@ -23,13 +23,24 @@ SYMBOLE = {
 
 
 def root_symbol(tv_symbol):
-    """'CME_MINI:NQ1!' -> 'NQ', 'CME_MINI:MNQ1!' -> 'MNQ'. Unbekannt -> None."""
+    """'CME_MINI:NQ1!' -> 'NQ', 'CME_MINI:MNQ1!' -> 'MNQ',
+    'CME_MINI:MNQU2026' -> 'MNQ' (U = Kontraktmonat). Unbekannt -> None."""
     if not tv_symbol:
         return None
     s = tv_symbol.split(":")[-1]          # Börsen-Präfix weg
     s = s.rstrip("!")                      # Continuous-Marker weg  ('NQ1!' -> 'NQ1')
     s = s.rstrip("0123456789")             # Kontrakt-/Monatsziffer weg  ('NQ1' -> 'NQ')
-    return s if s in SYMBOLE else None
+    if s in SYMBOLE:
+        return s
+    # Echte Kontrakt-Symbole tragen einen Monatsbuchstaben VOR der Jahreszahl
+    # ('MNQU2026' -> nach Ziffern-Strip 'MNQU', U = September). Fund vom
+    # Ersttest auf PC 1 (28.08.2026): die Testfälle kannten nur Continuous-
+    # Symbole, die echte Paper-Position wurde still übersprungen. WICHTIG:
+    # erst der Exakt-Treffer oben, DANN dieser Strip — 'MNQ' endet selbst
+    # auf Q (auch ein Monatscode) und darf nie zu 'MN' schrumpfen.
+    if len(s) >= 2 and s[-1] in "FGHJKMNQUVXZ" and s[:-1] in SYMBOLE:
+        return s[:-1]
+    return None
 
 
 def parse_de_zahl(text):
@@ -136,6 +147,9 @@ def _selftest():
     # Symbol-Normalisierung
     ok(root_symbol("CME_MINI:NQ1!") == "NQ", "NQ normalisiert")
     ok(root_symbol("CME_MINI:MNQ1!") == "MNQ", "MNQ normalisiert")
+    ok(root_symbol("CME_MINI:MNQU2026") == "MNQ", "Kontrakt-Symbol mit Monatsbuchstabe (MNQU2026)")
+    ok(root_symbol("CME_MINI:NQZ2025") == "NQ", "Kontrakt-Symbol mit Monatsbuchstabe (NQZ2025)")
+    ok(root_symbol("CME_MINI:MNQ1") == "MNQ", "MNQ bleibt MNQ (Q ist kein Monats-Strip)")
     ok(root_symbol("FX:EURUSD") is None, "Fremdsymbol -> None")
 
     # Richtung
