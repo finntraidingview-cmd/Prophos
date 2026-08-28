@@ -11420,6 +11420,13 @@
       ])
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
+      // Cloud-Cache für die Live-P&L-Chips der Plan-Karten (29.08.2026, Finns
+      // Fund am Handy: „kein Live-P&L"): mt5LivePnlInner las bisher NUR das
+      // lokale Copier-Panel — auf Handy/Mac blieb die Zeile leer, obwohl
+      // dieselben Zahlen hier gerade aus mt5_live geladen wurden. Der Tick
+      // läuft exakt dann, wenn der Offen-Reiter sichtbar ist — also genau
+      // dann, wenn die Plan-Karten die Daten brauchen.
+      window._mt5CloudRows = rows
 
       // Duplikium kommt aus der DB (dup_live, Waechter-Spiegel ~30s): Railway
       // schreibt, alle User lesen — kein Browser-Token noetig. TopstepX bleibt
@@ -11823,14 +11830,40 @@
 
   function mt5LivePnlInner(p){
     try{
-      if(!p || p.route !== 'mt5' || p.status !== 'open' || !MT5_LOCAL) return ''
-      const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
-      if(!state) return ''
-      const route = mt5RouteResolve(p, Object.values(state))
-      if(!route) return ''
-      const inst = route.inst
-      if(!inst.alive || !(inst.fetchedAt && (Date.now() - inst.fetchedAt) <= 15000)) return ''
-      const s = inst.status || {}
+      if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
+      // Quelle 1 (PC): lokales Copier-Panel — frisch ≤15s, wie immer.
+      let s = null
+      if(MT5_LOCAL){
+        const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
+        if(state){
+          const route = mt5RouteResolve(p, Object.values(state))
+          if(route && route.inst && route.inst.alive
+             && route.inst.fetchedAt && (Date.now() - route.inst.fetchedAt) <= 15000){
+            s = route.inst.status || {}
+          }
+        }
+      }
+      // Quelle 2 (Handy/Mac, 29.08.2026 — Finns Fund „kein Live-P&L am Handy"):
+      // mt5_live aus dem Flotten-Tick (window._mt5CloudRows, 5s-Push der PCs).
+      // Synthetische Instanzen im Format von mtcInstances(), damit derselbe
+      // mt5RouteResolve (Login-Match) greift. Frische 20s wie die Flotte —
+      // nie alte Zahlen als „live" (P&L-Beweis-Doktrin).
+      if(!s){
+        const cloud = []
+        for(const r of (window._mt5CloudRows || [])){
+          if(!r || !r.alive) continue
+          const ts = Date.parse(r.updated_at || '') || 0
+          if(!ts || (Date.now() - ts) > 20000) continue
+          cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
+            status: Object.assign({}, r.status || {},
+              { master_login: r.master_login, hedge_login: r.hedge_login }) })
+        }
+        if(cloud.length){
+          const route = mt5RouteResolve(p, cloud)
+          if(route && route.inst) s = route.inst.status || {}
+        }
+      }
+      if(!s) return ''
       // Kompakt-Design (18.08.2026, Finns Wunsch: Symmetrie ist zentral, war
       // aber eine Mini-Textwurst): zwei P&L-Chips + Symmetrie-Farbbalken.
       const chip = (lbl, v, lots, dir) =>
@@ -11891,8 +11924,10 @@
   function mt5LivePnlHtml(p){
     // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
     // dem ersten mtcLoad — der Ticker füllt den Platzhalter nach, sobald frische
-    // Daten da sind.
-    if(!p || p.route !== 'mt5' || p.status !== 'open' || !MT5_LOCAL) return ''
+    // Daten da sind. Seit 29.08.2026 auch OHNE MT5_LOCAL: am Handy/Mac füllt
+    // der Cloud-Fallback (mt5_live) die Zeile — das Gate hierauf hielt die
+    // Live-P&L-Zeile am Handy dauerhaft leer.
+    if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
     return `<span data-mt5live="${escapeHtml(String(p.id))}">${mt5LivePnlInner(p)}</span>`
   }
   // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
@@ -18674,8 +18709,15 @@
         ${jetztBtn}
         <button class="btn ${jetztBtn ? 'btn-ghost' : 'btn-primary'} tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
     } else if(isOpen){
+      // Remote-Close (28.08.2026, Finns Feature): „Schließen" nur für Echo-
+      // Pläne — lokal schließt Puls direkt im Terminal, am Handy/Mac geht ein
+      // close-Signal an den PC (dasselbe Kanal-Muster wie „Starten").
+      const closeBtn = (p.route === 'mt5' && !isPending)
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:#D92D20">Schließen</button>`
+        : ''
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
+        ${closeBtn}
         <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">${isPending ? 'Abschließen →' : 'Erledigt'}</button>`
     } else if(isReview){
       actions = `
@@ -19042,6 +19084,11 @@
     document.querySelectorAll('[data-plan-jetzt]').forEach(btn => {
       btn.addEventListener('click', () => {
         if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt)
+      })
+    })
+    document.querySelectorAll('[data-plan-schliessen]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(typeof tpPlanSchliessen === 'function') tpPlanSchliessen(btn.dataset.planSchliessen)
       })
     })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
@@ -20581,6 +20628,170 @@
     tick()
   }
 
+  /* ── „Schließen" von der Karte (28.08.2026, Finns Remote-Close) ──────────
+   * Läuft ein Echo-Trade, schließt dieser Knopf die Master-Position: lokal
+   * direkt über /master-close (Puls klickt im Terminal, der Hedge geht über
+   * Echo mit), am Handy/Mac als close-Signal an den PC — dasselbe Kanal-
+   * Muster wie „Starten", nur mit params.aktion='close'. Das TICKET löst
+   * IMMER der ausführende PC frisch aus seinen lokalen Instanz-Daten auf
+   * (nie aus womöglich alten Cloud-Daten — Beweis-Doktrin), und Puls prüft
+   * es lesend nochmal und verlangt GENAU EINE offene Position. */
+  function tpClosePosAufloesen(plan, route, symbol){
+    const st = (route.inst && route.inst.status) || {}
+    let poss = Array.isArray(st.master_positions) ? st.master_positions.slice() : []
+    const sym = String(symbol || '').trim().toLowerCase()
+    if(sym) poss = poss.filter(x => String(x.symbol || '').toLowerCase().includes(sym))
+    if(plan.richtung === 'buy' || plan.richtung === 'sell'){
+      const gef = poss.filter(x => Number(x.type) === (plan.richtung === 'buy' ? 0 : 1))
+      if(gef.length) poss = gef
+    }
+    if(poss.length !== 1){
+      return { fehler: poss.length
+        ? `Position nicht eindeutig (${poss.length} Kandidaten am Master) — im Terminal von Hand schließen.`
+        : 'Keine offene Master-Position gefunden (Copier-Daten frisch? Trade evtl. schon zu).' }
+    }
+    const p = poss[0]
+    return { ticket: Number(p.ident),
+             beschr: `${p.symbol || ''} ${Number(p.type) === 0 ? 'buy' : 'sell'} ${p.volume || ''}`.trim() }
+  }
+
+  async function tpPlanSchliessen(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'open' || plan.route !== 'mt5') return
+    if(_rsAktiv) return   // ein Remote-Lauf zur Zeit (Start ODER Close)
+    const symbol = ((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''
+    // Live-Schritte im vorhandenen Check-Popup — kein neues Design.
+    _pfMt5StopTimer()
+    _pfPlanId = null
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `📡 Schließen · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${symbol ? ` · ${symbol}` : ''}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+    const fertigUi = (ok, text) => {
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
+      if(foot) foot.style.display = 'flex'
+    }
+    const autoZu = () => setTimeout(() => {
+      const fe2 = document.getElementById('pf-final')
+      if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+         && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
+    }, 2400)
+
+    if(MT5_LOCAL){
+      _pfAddRow('cl-pos', 'Position am Master auflösen')
+      _pfAddRow('cl-bot', 'Puls schließt die Position')
+      try{
+        const dd = await window.mtcApi('instances')
+        if(!dd || dd.copier_offline || dd._httpFail) throw new Error('Copier-Backend nicht erreichbar.')
+        const route = mt5RouteResolve(plan, dd.instances || [])
+        if(!route) throw new Error('Plan gehört zu keiner Copier-Instanz auf diesem PC.')
+        const t = tpClosePosAufloesen(plan, route, symbol)
+        if(t.fehler) throw new Error(t.fehler)
+        _pfSet('cl-pos', 'ok', `#${t.ticket} <span class="mono">${escapeHtml(t.beschr)}</span>`)
+        _pfSet('cl-bot', 'warn', '⏳ Puls klickt im Terminal — HÄNDE WEG, bis die Bestätigung kommt!')
+        const r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ ticket: t.ticket, symbol }) })
+        if(r && r.ok){
+          _pfSet('cl-bot', 'ok', escapeHtml(String(r.msg || 'Position geschlossen.')))
+          fertigUi(true, '✓ Position geschlossen — Auto-Erkennung übernimmt, der Plan wandert zu „Beendet".')
+          autoZu()
+        } else {
+          _pfSet('cl-bot', 'err', escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort vom Bot')))
+          fertigUi(false, (r && r.retry_ok)
+            ? '✗ Nicht geschlossen — Meldung oben. Erneut „Schließen" ist ungefährlich (Puls prüft vorher lesend).'
+            : '⚠ Ergebnis UNKLAR — erst im Terminal prüfen, ob die Position noch offen ist.')
+        }
+      }catch(e){
+        _pfSet('cl-pos', 'err', escapeHtml(String(e && e.message || e)))
+        fertigUi(false, '✗ Nicht geschlossen — Meldung oben.')
+      }
+      return
+    }
+
+    // Remote: close-Signal + Live-Schritte (Muster tpRemoteCheck)
+    _pfAddRow('cs-sig',   'Close-Signal senden')
+    _pfAddRow('cs-claim', 'PC übernimmt')
+    _pfAddRow('cs-close', 'Puls schließt die Position')
+    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
+    let sig = null
+    try{
+      const { data, error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plan.id), params: { aktion: 'close', symbol } })
+        .select('*').single()
+      if(error) throw error
+      sig = data
+    }catch(e){
+      _pfSet('cs-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Schließen".')
+      return
+    }
+    _pfSet('cs-sig', 'ok', `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    const stornoFallsWartet = () => {
+      supabase.from('order_signale')
+        .update({ status:'verworfen', updated_at: new Date().toISOString(),
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+        .eq('id', sig.id).eq('status', 'wartet')
+        .then(() => {}, e => console.warn('[signal] Storno:', e))
+    }
+    const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    const tick = async () => {
+      if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      if(zu()){ stornoFallsWartet(); stop(); return }
+      let row = null
+      try{
+        const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
+        row = data
+      }catch(_){ return }
+      if(!row || !_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      const sec = Math.round((Date.now() - _rsAktiv.t0) / 1000)
+      const erg = row.ergebnis || {}
+      if(row.status === 'wartet'){
+        if(sec > OS_FRISCHE_S){
+          try{
+            await supabase.from('order_signale')
+              .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }catch(_){}
+          _pfSet('cs-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          _pfSet('cs-close', 'warn', 'Übersprungen — nichts geschlossen.')
+          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Schließen".')
+          stop(); return
+        }
+        _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+      } else if(row.status === 'laeuft'){
+        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _pfSet('cs-close', 'warn', `⏳ Puls klickt im Terminal — Position schließen… (${sec}s) — HÄNDE WEG am PC!`)
+      } else if(row.status === 'fertig'){
+        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
+        fertigUi(true, '✓ Position geschlossen — Auto-Erkennung übernimmt, der Plan wandert zu „Beendet".')
+        try{ loadTradePlansFromSupabase() }catch(_){}
+        stop()
+        autoZu()
+      } else {
+        // fehler / verworfen / verfallen — Close ist quasi-idempotent, darum
+        // ist die Ansage nach klarer Ablehnung: erneut „Schließen" ist ok.
+        const ziel = (row.status === 'wartet' || !row.pc) ? 'cs-claim' : 'cs-close'
+        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
+        fertigUi(false, erg.unklar
+          ? '⚠ Ergebnis UNKLAR — erst im Terminal prüfen, ob die Position noch offen ist.'
+          : '✗ Nicht geschlossen — Meldung oben. Erneut „Schließen" ist ungefährlich (Puls prüft vorher lesend).')
+        stop()
+      }
+    }
+    _rsAktiv.timer = setInterval(tick, 2000)
+    tick()
+  }
+
   /* ── Empfänger: läuft NUR auf dem PC (MT5_LOCAL), Takt 5s wie die Flotte ── */
   let _osBusy = false
   let _osActive = null   // { sigId, planId, timeout } — ein Signal zur Zeit
@@ -20657,6 +20868,61 @@
                       ergebnis:{ ok:false, msg:'Plan zum Signal nicht gefunden.' } })
             .eq('id', sig.id).eq('status', 'wartet')
           continue
+        }
+        // Remote-Close (28.08.2026): eigener Zweig VOR dem planned-Gate — ein
+        // close-Signal gehört zu einem LAUFENDEN Plan. Alte Builds ohne diesen
+        // Zweig lehnen es doppelt sicher ab (planned-Gate + Params-Sanity ohne
+        // richtung/volumen) — es kann nie als Kauf-Order fehlinterpretiert
+        // werden. Das Ticket wird HIER frisch aus der lokalen Instanz
+        // aufgelöst; Puls verlangt zusätzlich lesend GENAU EINE Position.
+        if(String((sig.params || {}).aktion || '') === 'close'){
+          const pcp = sig.params || {}
+          if(plan.status !== 'open'){
+            await supabase.from('order_signale')
+              .update({ status:'fehler', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg:`Plan läuft nicht (Status: ${plan.status}) — nichts geschlossen.` } })
+              .eq('id', sig.id).eq('status', 'wartet')
+            continue
+          }
+          const routeC = mt5RouteResolve(plan, dd.instances || [])
+          if(!routeC) continue   // gehört einem anderen PC der Flotte
+          const t = tpClosePosAufloesen(plan, routeC, pcp.symbol || '')
+          if(t.fehler){
+            await supabase.from('order_signale')
+              .update({ status:'fehler', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg: t.fehler } })
+              .eq('id', sig.id).eq('status', 'wartet')
+            continue
+          }
+          const { data: clC } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+                      updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clC || !clC.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'claim-close: ' + String(sig.id).slice(0, 8)
+          _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
+          // Backstop (Timeout-Doktrin): nie still offen lassen — der Proxy
+          // erlaubt dem Bot 310s, danach ist jede Stille ein UNKLAR.
+          _osActive.timeout = setTimeout(() => {
+            if(_osActive && _osActive.sigId === sig.id){
+              _osErgebnis(sig.id, { ok:false, unklar:true,
+                msg:'Keine Rückmeldung vom Close binnen 8 Minuten — am PC im Terminal prüfen, ob die Position noch offen ist.' })
+            }
+          }, 8 * 60 * 1000)
+          if(typeof atToast === 'function') atToast(`📡 Remote-Close: ${plan.masterName || '—'} #${t.ticket} — Puls schließt`, 'end')
+          try{
+            const r = await window.mtcApi(`master-close?file=${encodeURIComponent(routeC.inst.file)}`, { method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ ticket: t.ticket, symbol: pcp.symbol || '' }) })
+            _osErgebnis(sig.id, (r && typeof r === 'object')
+              ? { ok: !!r.ok, retry_ok: !!r.retry_ok, profit: (r.profit ?? null), trail: r.trail || null,
+                  msg: String(r.msg || (r.ok ? 'Position geschlossen.' : 'Close fehlgeschlagen.')) }
+              : { ok:false, unklar:true, msg:'keine Antwort vom Close-Bot' })
+          }catch(e){
+            _osErgebnis(sig.id, { ok:false, unklar:true,
+              msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' })
+          }
+          break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
         }
         if(plan.status !== 'planned'){
           await supabase.from('order_signale')
