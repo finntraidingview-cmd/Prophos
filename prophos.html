@@ -5571,16 +5571,44 @@
                 <div class="panel-sub">Datensatz wird beim Erstellen eingefroren — jede Rechnung dokumentiert den Stand zum Erstellzeitpunkt</div>
               </div>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-              <select id="rg-person" class="adm-f" style="flex:1;min-width:160px"><option value="">Person wählen…</option></select>
-              <input id="rg-von" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              <input id="rg-bis" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="Anteil % (leer = ohne)" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:170px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              <button class="btn btn-ghost" id="rg-preview-btn">Vorschau laden</button>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+              <div style="flex:1;min-width:170px">
+                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Person</div>
+                <select id="rg-person" class="adm-f" style="width:100%"><option value="">Person wählen…</option></select>
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Von</div>
+                <input id="rg-von" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Bis</div>
+                <input id="rg-bis" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Anteil %</div>
+                <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="leer = ohne" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:110px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              </div>
+              <button class="btn btn-ghost" id="rg-preview-btn" style="height:40px">Vorschau laden</button>
             </div>
-            <div id="rg-preview" hidden style="margin:4px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg)">
-              <div id="rg-preview-kpis" style="display:flex;gap:22px;flex-wrap:wrap;font-size:13px"></div>
-              <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:6px"></div>
+            <div id="rg-preview" hidden style="margin:2px 0 12px">
+              <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+                <div class="kpi">
+                  <div class="kpi-label">Trades</div>
+                  <div class="kpi-value" id="rg-p-trades">–</div>
+                  <div class="kpi-delta delta-neutral">im Zeitraum</div>
+                </div>
+                <div class="kpi">
+                  <div class="kpi-label">Buchungen</div>
+                  <div class="kpi-value" id="rg-p-buch">–</div>
+                  <div class="kpi-delta delta-neutral" id="rg-p-arten-mini">–</div>
+                </div>
+                <div class="kpi">
+                  <div class="kpi-label">Zeitraum-Saldo</div>
+                  <div class="kpi-value" id="rg-p-saldo">–</div>
+                  <div class="kpi-delta delta-neutral" id="rg-p-anteil">Finanzen-Logik: Summe aller Buchungen</div>
+                </div>
+              </div>
+              <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:8px"></div>
             </div>
             <textarea id="rg-absender" rows="2" placeholder="Absender / Briefkopf (z. B. Firma, Ort — bleibt gemerkt)" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
             <input id="rg-notiz" type="text" maxlength="300" placeholder="Notiz auf der Rechnung (optional, z. B. Auszahlungsweg)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
@@ -7791,9 +7819,10 @@
      * bewusst KEINEN Supabase-Schreibpfad — die Tabelle hat keine Client-
      * Schreib-Policies. Fehler stehen sichtbar im Tab (nie catch(_){} —
      * Lehre aus dem esc-ReferenceError der Flotte, VERSION .108). */
-    let rgOpened = false, rgPreviewOk = false
+    let rgOpened = false, rgPreviewOk = false, rgSaldo = null
     const rgEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR' })
     const rgDatum = iso => iso ? String(iso).slice(0,10).split('-').reverse().join('.') : '–'
+    const RG_LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', manual:'Manuell' }
 
     async function rgApi(path, opts = {}){
       const { data: { session } } = await supabase.auth.getSession()
@@ -7841,13 +7870,15 @@
         const list = d.rechnungen || []
         rows.innerHTML = list.map(r => {
           const s = r.summen || {}
+          const sc = s.saldo > 0.004 ? 'var(--good)' : s.saldo < -0.004 ? 'var(--danger)' : ''
           return `<tr>
             <td class="mono">${escapeHtml(r.nummer)}</td>
             <td>${escapeHtml(r.person_name || '')}</td>
             <td>${rgDatum(r.zeitraum_von)} – ${rgDatum(r.zeitraum_bis)}</td>
-            <td class="adm-num">${s.saldo != null ? rgEur.format(s.saldo) : '–'}</td>
-            <td class="adm-num">${r.anteil_pct != null ? Number(r.anteil_pct) + ' %' : '–'}</td>
-            <td>${rgDatum(r.created_at)}</td>
+            <td class="adm-num" style="font-weight:650;${sc ? 'color:' + sc : ''}">${s.saldo != null ? rgEur.format(s.saldo) : '–'}</td>
+            <td class="adm-num">${r.anteil_pct != null
+              ? `<span style="font-size:11px;border:1px solid var(--border);border-radius:999px;padding:2px 8px">${Number(r.anteil_pct)} %</span>` : '–'}</td>
+            <td style="color:var(--sub)">${rgDatum(r.created_at)}</td>
             <td style="text-align:right"><button class="btn btn-ghost rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
           </tr>`
         }).join('')
@@ -7865,18 +7896,25 @@
       rgPreviewOk = false; $('rg-create-btn').disabled = true
       if(!uid || !von || !bis){ msg.textContent = 'Person und Zeitraum wählen.'; return }
       if(von > bis){ msg.textContent = '„Von" liegt nach „Bis".'; return }
+      msg.style.color = ''
       msg.textContent = 'Lade Vorschau…'
       try{
         const d = await rgApi(`/admin/rechnung-daten?uid=${encodeURIComponent(uid)}&von=${von}&bis=${bis}`)
         const s = d.summen || {}
+        rgSaldo = Number(s.saldo || 0)
         $('rg-preview').hidden = false
-        $('rg-preview-kpis').innerHTML =
-          `<span><b>${s.trades_n ?? 0}</b> Trades</span>` +
-          `<span><b>${(d.buchungen || []).length}</b> Buchungen</span>` +
-          `<span>Zeitraum-Saldo: <b>${rgEur.format(s.saldo || 0)}</b></span>`
-        const LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', manual:'Manuell' }
+        $('rg-p-trades').textContent = s.trades_n ?? 0
+        $('rg-p-buch').textContent = (d.buchungen || []).length
+        const saldoEl = $('rg-p-saldo')
+        saldoEl.textContent = rgEur.format(rgSaldo)
+        saldoEl.style.color = rgSaldo > 0.004 ? 'var(--good)' : rgSaldo < -0.004 ? 'var(--danger)' : ''
+        $('rg-p-arten-mini').textContent = Object.keys(s.je_art || {}).length
+          ? Object.keys(s.je_art).map(k => (RG_LBL[k] || k)).join(' · ') : 'keine'
+        rgAnteilLive()
         $('rg-preview-arten').textContent = Object.entries(s.je_art || {}).map(([k, je]) =>
-          Object.entries(je).map(([c, v]) => `${LBL[k] || k}: ${Number(v).toFixed(2)} ${c}`).join(' · ')
+          Object.entries(je).map(([c, v]) =>
+            `${RG_LBL[k] || k}: ${Number(v).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })} ${c === 'EUR' ? '€' : c}`
+          ).join(' · ')
         ).join(' · ') || 'Keine Buchungen im Zeitraum.'
         rgPreviewOk = true
         $('rg-create-btn').disabled = false
@@ -7885,6 +7923,20 @@
         msg.textContent = (e.message || e)
         console.warn('[rechnungen] vorschau:', e)
       }
+    }
+
+    // Anteils-Zeile unter dem Saldo-KPI — rechnet live mit, wenn Finn den
+    // Prozentwert ändert (der Server rechnet beim Erstellen ohnehin selbst).
+    function rgAnteilLive(){
+      const el = $('rg-p-anteil'); if(!el) return
+      const raw = ($('rg-anteil').value || '').trim()
+      const pct = raw === '' ? null : Number(raw)
+      if(pct === null || isNaN(pct) || pct < 0 || pct > 100 || rgSaldo === null){
+        el.textContent = 'Finanzen-Logik: Summe aller Buchungen'
+        return
+      }
+      const a = rgSaldo * pct / 100
+      el.textContent = `davon ${pct}% Anteil: ${rgEur.format(a)} · verbleibt ${rgEur.format(rgSaldo - a)}`
     }
 
     async function rgCreate(){
@@ -7902,6 +7954,7 @@
       }
       if(!confirm(`Rechnung für ${name} über ${rgDatum(von)} – ${rgDatum(bis)} erstellen?\nDer Datensatz wird dabei eingefroren.`)) return
       $('rg-create-btn').disabled = true
+      msg.style.color = ''
       msg.textContent = 'Erstelle…'
       try{
         localStorage.setItem('prophos_rg_absender', $('rg-absender').value)
@@ -7910,6 +7963,7 @@
           user_id: uid, person_name: name, person_mail: mail, von, bis,
           anteil_pct: anteil, absender: $('rg-absender').value, notiz: $('rg-notiz').value,
         })})
+        msg.style.color = 'var(--good)'
         msg.textContent = `✓ ${d.nummer} erstellt`
         rgPreviewOk = false
         rgLoad()
@@ -7991,6 +8045,8 @@
       for(const id of ['rg-person', 'rg-von', 'rg-bis']){
         $(id)?.addEventListener('change', () => { rgPreviewOk = false; $('rg-create-btn').disabled = true })
       }
+      // Anteil ändert nur den Split, nicht die Daten — rechnet live in der Vorschau mit.
+      $('rg-anteil')?.addEventListener('input', rgAnteilLive)
       // Meta-Wallet-Tab (24.08.2026)
       $('wal-refresh')?.addEventListener('click', walRefreshBalances)
       $('wal-person')?.addEventListener('change', walRender)
@@ -21377,11 +21433,12 @@
       if(!data || !data.length){ panel.hidden = true; return }
       rows.innerHTML = data.map(r => {
         const s = r.summen || {}
+        const sc = s.saldo > 0.004 ? 'var(--good)' : s.saldo < -0.004 ? 'var(--danger)' : ''
         return `<tr>
           <td class="mono">${escapeHtml(r.nummer)}</td>
           <td>${finFmtDate(r.zeitraum_von)} – ${finFmtDate(r.zeitraum_bis)}</td>
-          <td class="adm-num">${s.saldo != null ? finFmt(s.saldo) : '–'}</td>
-          <td>${finFmtDate(r.created_at)}</td>
+          <td class="adm-num" style="font-weight:650;${sc ? 'color:' + sc : ''}">${s.saldo != null ? finFmt(s.saldo) : '–'}</td>
+          <td style="color:var(--sub)">${finFmtDate(r.created_at)}</td>
           <td style="text-align:right"><button class="btn btn-ghost fin-rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
         </tr>`
       }).join('')
