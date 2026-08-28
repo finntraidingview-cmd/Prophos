@@ -4524,7 +4524,13 @@
               <div class="seg" id="tp-route-seg">
                 <button type="button" id="tp-route-dup">Duplikum</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
+                <button type="button" id="tp-route-tvplus">Echo +</button>
               </div>
+              <!-- Echo + im Routen-Regler (28.08.2026, Finns „visuell, eins nach
+                   dem anderen"): reine Info-Route. Echo-+-Trades laufen manuell
+                   in TradingView, Pläne gibt es auf diesem Weg (noch) nicht —
+                   Speichern ist gesperrt, die Box erklärt den Weg. -->
+              <div id="tp-route-tvplus-info" style="display:none;margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.55;background:rgba(124,58,237,.07);border:1px solid rgba(124,58,237,.25)"></div>
             </div>
             <div class="field">
               <label>Master-Account</label>
@@ -20234,12 +20240,38 @@
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
 
   function tpRouteUpdateSeg(){
-    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5')
+    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus')
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
+    document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
     const sb = document.getElementById('tradePlanSaveStart')
     if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →' : 'Speichern & Starten →'
+    // Echo +: reine Info-Route (28.08.2026) — geplant/gestartet wird hier
+    // nichts, du tradest manuell in TradingView und Echo hedgt automatisch.
+    // Beide Speichern-Knöpfe ehrlich sperren statt still fehlschlagen lassen;
+    // die Box erklärt den Weg und verlinkt die Echo-+-Ansicht.
+    const tvplus = _tpRoute === 'tvplus'
+    const info = document.getElementById('tp-route-tvplus-info')
+    if(info){
+      info.style.display = tvplus ? '' : 'none'
+      if(tvplus && !info.innerHTML){
+        info.innerHTML = '<b>Echo +</b> läuft ohne Trade-Plan: Du tradest <b>manuell in TradingView</b> — '
+          + 'der Reader liest die Position direkt aus dem Browser, der Verbinder speist sie als Master ein, '
+          + 'und Echo hedgt sie automatisch über die tvplus-Instanz (immer scharf). '
+          + 'Planen und „Starten" aus Prophos gibt es auf diesem Weg noch nicht — Speichern ist deshalb gesperrt. '
+          + '<button type="button" class="btn btn-ghost" id="tp-route-tvplus-link" style="margin-top:8px;padding:5px 10px;font-size:12px;display:block">→ Zur Echo-+-Ansicht</button>'
+        document.getElementById('tp-route-tvplus-link')?.addEventListener('click', () => {
+          document.getElementById('tradePlanModal')?.classList.remove('open')
+          switchView('echoplus')
+        })
+      }
+    }
+    const saveBtn = document.getElementById('tradePlanSave')
+    for(const b of [sb, saveBtn]){
+      if(b){ b.disabled = tvplus
+             b.title = tvplus ? 'Echo-+-Trades werden direkt in TradingView platziert — es gibt keinen Plan zu speichern.' : '' }
+    }
     // Bei fixem MT5-Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren
     const fixed = _tpRoute === 'mt5'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
@@ -21264,12 +21296,13 @@
 
     // Routen-Regler initialisieren: beim Bearbeiten aus dem Plan, sonst letzte Wahl
     _tpRoute = _editPlan ? (_editPlan.route === 'mt5' ? 'mt5' : 'dup')
-                         : (localStorage.getItem(TP_ROUTE_LS) === 'mt5' ? 'mt5' : 'dup')
+                         : (['mt5', 'tvplus'].includes(localStorage.getItem(TP_ROUTE_LS))
+                            ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     tpRouteUpdateSeg()
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-mt5'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-mt5', 'tp-route-tvplus'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -21597,7 +21630,7 @@
       tpNqUpdateToggle()
       tpRecompute()
     }
-    ;[['tp-route-dup', 'dup'], ['tp-route-mt5', 'mt5']].forEach(([id, r]) => {
+    ;[['tp-route-dup', 'dup'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
@@ -22272,6 +22305,13 @@
       el.textContent = txt; el.className = 'modal-msg' + (kind ? ' '+kind : '')
     }
     msg('')
+
+    // Echo +: kein Plan-Speichern (28.08.2026) — Riegel doppelt zum disabled-
+    // Knopf, falls der Handler auf anderem Weg feuert (Enter im Formular).
+    if(_tpRoute === 'tvplus'){
+      msg('Echo-+-Trades werden direkt in TradingView platziert — es gibt (noch) keinen Plan auf diesem Weg.', 'err')
+      return
+    }
 
     if(!masterId || !slaveId){ msg('Master und Slave müssen gewählt sein.', 'err'); return }
     if(masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
