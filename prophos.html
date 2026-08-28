@@ -141,6 +141,21 @@
   #dashboard-view .tc-live-timer{font-size:11.5px;color:var(--sub);font-family:var(--mono)}
   #dashboard-view .tc-live-since{color:var(--sub-2)}
 
+  /* ── Build-Wächter-Pille (29.08.2026): erscheint, wenn pages.dev einen
+     neueren Build hat als die geladene Seite — Tipp lädt neu. Vor allem
+     fürs Handy (Homescreen-App hält die alte Seite fest). ── */
+  #build-update-pill{
+    /* Zentrierung über auto-Margins statt translateX: die atSlideUp-Animation
+       überschreibt transform und schob die Pille sonst nach rechts raus */
+    position:fixed;top:calc(var(--topbar-h,60px) + 10px);left:14px;right:14px;
+    margin:0 auto;width:max-content;max-width:calc(100% - 28px);
+    z-index:300;border:none;border-radius:999px;padding:10px 16px;
+    background:var(--ink);color:#fff;font:600 13px Inter,system-ui,sans-serif;
+    box-shadow:0 8px 24px rgba(16,24,40,.28);cursor:pointer;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+    animation:atSlideUp .3s cubic-bezier(.2,.9,.3,1.25);
+  }
+
   /* ============================================================
      BOOT SCREEN (shown until session check finishes)
   ============================================================ */
@@ -9316,6 +9331,47 @@
     document.getElementById('sidebar').classList.toggle('open')
     document.getElementById('sbOverlay').classList.toggle('open')
   })
+
+  /* ========== BUILD-WÄCHTER (29.08.2026) ==========
+   * Das Handy lief heute mehrfach still auf einem alten Build (Finns Funde:
+   * „kein Live-P&L", „Schließen-Knopf fehlt" — beides war längst deployt,
+   * die Homescreen-App hielt aber die alte Seite). pages.dev liefert
+   * /mt5-copier/VERSION mit aus: Stand beim Laden merken, beim Zurückkehren
+   * in die App (+ alle 5 min) neu prüfen — weicht er ab, erscheint die
+   * „Neue Version"-Pille, Tipp lädt neu. Auf localhost:5000 existiert die
+   * Route nicht (404) → Feature still aus; die PCs hat eh der
+   * Selbst-Update-Watcher in app.py. */
+  ;(async () => {
+    const holen = async () => {
+      try{
+        const r = await fetch('/mt5-copier/VERSION', { cache: 'no-store' })
+        if(!r.ok) return null
+        const t = (await r.text()).trim()
+        return /^\d{4}-\d{2}-\d{2}\.\d+$/.test(t) ? t : null
+      }catch(_){ return null }
+    }
+    const basis = await holen()
+    if(!basis) return
+    // Ehrlicher Stand im „Mehr"-Sheet statt des statischen „v0.1 · alles live"
+    const foot = document.querySelector('#dashboard-view .sb-foot')
+    if(foot) foot.innerHTML = '<span class="dot"></span> Build ' + basis
+    let pille = null
+    const zeigen = neu => {
+      if(pille) return
+      pille = document.createElement('button')
+      pille.id = 'build-update-pill'
+      pille.type = 'button'
+      pille.textContent = '⬆ Neue Version ' + neu + ' — antippen'
+      pille.addEventListener('click', () => location.reload())
+      document.body.appendChild(pille)
+    }
+    const pruefen = async () => {
+      const v = await holen()
+      if(v && v !== basis) zeigen(v)
+    }
+    document.addEventListener('visibilitychange', () => { if(!document.hidden) pruefen() })
+    setInterval(() => { if(!document.hidden) pruefen() }, 5 * 60 * 1000)
+  })()
 
   /* ========== DASHBOARD MOUNT ========== */
   // Tables und KPIs werden jetzt direkt in renderAccounts() / renderOverviewKpis()
