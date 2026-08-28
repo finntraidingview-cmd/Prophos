@@ -6305,6 +6305,29 @@
               </div>
             </div>
 
+            <!-- Letzte Käufe (28.08.2026, Finns Wunsch): die jüngsten Einkäufe auf
+                 einen Blick — reagiert wie alles in diesem Tab auf die Balken-Filter. -->
+            <div class="panel" style="margin-top:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Letzte Käufe</div>
+                  <div class="panel-sub" id="adm-buys-last-sub">–</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="t">
+                  <thead><tr>
+                    <th>Wann</th>
+                    <th>Account</th>
+                    <th>Firma</th>
+                    <th>Person</th>
+                    <th class="adm-num">Kauf</th>
+                  </tr></thead>
+                  <tbody id="adm-buys-last-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
             <!-- Account-Liste nur als Aufklappung — gleiche Mechanik wie in der
                  Übersicht: erscheint erst nach Klick auf Person oder Firma. -->
             <div class="panel" style="margin-top:14px" id="adm-buys-acc-panel" hidden>
@@ -8180,6 +8203,43 @@
         g => { bPerson = (String(bPerson) === String(g.key)) ? '' : g.key; admBuysRender() })
       admBuysDist($('adm-buys-firm-dist'), byFirm, admBuysColors('firm', 'firm'), bFirm,
         g => { bFirm = (bFirm === g.key) ? '' : g.key; admBuysRender() })
+
+      // Letzte Käufe (28.08.2026, Finns Wunsch): die jüngsten 10 Einkäufe im
+      // aktuellen Filter, neueste zuerst. `created` liefert der Server seit
+      // VERSION .182 (created_at des Accounts = Kaufzeitpunkt-Näherung) — ein
+      // älterer Server liefert es nicht, dann zeigt „Wann" schlicht „–".
+      const lastTb = $('adm-buys-last-rows')
+      if(lastTb){
+        const fmtKauf = iso => iso ? `${String(iso).slice(8, 10)}.${String(iso).slice(5, 7)}.${String(iso).slice(2, 4)}` : '–'
+        const latest = rows.slice()
+          .sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')))
+          .slice(0, 10)
+        $('adm-buys-last-sub').textContent = rows.length
+          ? `die jüngsten ${latest.length} von ${rows.length} Käufen`
+          : 'nichts für diesen Filter'
+        lastTb.innerHTML = ''
+        for(const r of latest){
+          const tr = document.createElement('tr')
+          if(r.archived) tr.style.opacity = '.55'
+          tr.innerHTML =
+            `<td style="white-space:nowrap;color:var(--sub);font-size:12.5px">${fmtKauf(r.created)}</td>` +
+            '<td><div class="acct-cell">' +
+              `<div class="acct-logo">${escapeHtml((r.firm || '?').slice(0, 2).toUpperCase())}</div>` +
+              '<div style="min-width:0"><div class="nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px"></div></div>' +
+              (r.archived ? '<span class="chip chip-neutral">archiviert</span>' : '') +
+            '</div></td>' +
+            '<td><span class="fm" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+            '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
+            `<td class="adm-num" style="font-weight:600">${admUsd.format(Number(r.buy) || 0)}</td>`
+          tr.querySelector('.nm').textContent = r.name || '—'
+          tr.querySelector('.fm').textContent = r.firm
+          const pe = tr.querySelector('.pe')
+          pe.textContent = r.person
+          if(r.email && r.email !== r.person) pe.title = r.email
+          lastTb.appendChild(tr)
+        }
+        if(!latest.length) lastTb.innerHTML = '<tr><td colspan="5" style="color:var(--sub);font-size:12.5px;padding:14px 8px">Nichts für diesen Filter.</td></tr>'
+      }
 
       // Aufklappung: gleiche Mechanik wie adm-acc-panel in der Übersicht.
       const drilled = !!(bPerson || bFirm)

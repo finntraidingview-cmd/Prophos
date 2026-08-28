@@ -3015,7 +3015,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3172,6 +3172,10 @@ def admin_build_overview():
             "person": disp.get(uid) or names.get(uid, uid[:8]),
             "person_mail": names.get(uid, ""),
             "archived": aid in archived,
+            # created_at = Kaufzeitpunkt-Näherung (28.08.2026, „Letzte Käufe" im
+            # Acc-Käufe-Tab): der Account wird beim Kauf in Prophos angelegt,
+            # ein eigenes Kaufdatum-Feld gibt es nicht.
+            "created": a.get("created_at") or "",
             "buy": round(buy, 2),
             "hedge": round(hg, 2),
             "payouts": round(po, 2),
