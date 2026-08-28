@@ -2269,6 +2269,17 @@
     #dashboard-view .view-title{font-size:19px}
     #dashboard-view .table-wrap{-webkit-overflow-scrolling:touch}
 
+    /* — Kein horizontaler Überlauf (Finns Handy-Screenshots 28.08.2026):
+         läuft Inhalt breiter als 375px, weitet iOS den Layout-Viewport auf —
+         die Seite wirkt rausgezoomt und die fixe Tab-Bar hängt „irgendwo".
+         Deshalb: KPI-Reihen kollabieren auf 2×2 (!important schlägt das
+         Inline-repeat(4,1fr) der Finanzen-KPIs), und html/body clippen als
+         Backstop alles, was doch noch übersteht. — */
+    html,body{overflow-x:clip}
+    #dashboard-view .kpis{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+    /* Werte wie „−€13.418,00" sollen in der halben Breite ohne Umbruch stehen */
+    #dashboard-view .kpi-value{font-size:19px;white-space:nowrap}
+
     /* — Inputs: 16px, sonst zoomt iOS beim Fokus in die Seite.
          !important nötig, weil viele Bereichs-Regeln (z.B. .mtc-details input)
          spezifischer sind; .big (Lot-Eingabe, 24px) bleibt ausgenommen — */
