@@ -1,0 +1,16 @@
+{
+  "_hinweis": "Vorlage fuer den TV-Verbinder (Echo +). Kopieren nach verbinder.config.json und master_login ausfuellen. Die Datei gehoert dem PC — nicht committen.",
+  "_1_master_login": "Frei waehlbare Kenn-Nummer dieses TV-Masters (z.B. die Tradovate-Kontonummer). MUSS identisch mit master_expected_login in der Copier-Config (config-tvplus.json) sein — das ist der Schutz gegen vertauschte Snapshots.",
+  "master_login": 0,
+  "server_label": "TV:tradovate",
+  "_2_snapshot": "Dateiname des Snapshots — MUSS identisch mit snapshot_file in config-tvplus.json sein und darf von keiner anderen Instanz benutzt werden.",
+  "snapshot_file": "prophos_tv.csv",
+  "_3_ordner": "Leer = Windows-Standard (%APPDATA%\\MetaQuotes\\Terminal\\Common\\Files), exakt wie copier.py ihn aufloest. Nur setzen, wenn die Copier-Config auch common_files_dir gesetzt hat — dann BEIDE gleich.",
+  "common_files_dir": "",
+  "_4_technik": "Standardwerte. max_datenalter_s: aeltere Reader-Daten gelten als tot -> CSV friert ein, Copier haelt die Hedges (stale != flat).",
+  "reader_url": "http://127.0.0.1:8790/positions",
+  "intervall_s": 0.5,
+  "max_datenalter_s": 10,
+  "_5_sltp_WARNUNG": "false lassen! TradingView liefert FUTURES-Preise, der Fusion-CFD hat eine andere Preisskala — uebernommene Level waeren FALSCHE Notfall-Level auf dem Hedge. Erst umstellen, wenn die Preisskala-Umrechnung gebaut ist.",
+  "sltp_uebernehmen": false
+}

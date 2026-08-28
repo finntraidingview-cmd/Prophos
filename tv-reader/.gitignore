@@ -2,3 +2,5 @@
 positions.json
 reader_aus.flag
 __pycache__/
+# PC-eigene Verbinder-Config (Kontonummer/Pfade gehoeren dem PC)
+verbinder.config.json

@@ -1,0 +1,32 @@
+{
+  "_hinweis": "VORLAGE fuer die Echo-+-Instanz (TV-Verbinder als Master, 28.08.2026) — wird wegen des Punkts im Namen NIE als echte Config erkannt. Auf dem PC kopieren nach config-tvplus.json und die markierten Werte ausfuellen. Der Master ist hier KEIN MT5-Terminal, sondern der TV-Verbinder (tv-reader/tv_verbinder.py), der das Snapshot-CSV aus TradingView speist.",
+  "_1_AUSFUELLEN_login": "Dieselbe Kenn-Nummer wie master_login in tv-reader/verbinder.config.json (z.B. die Tradovate-Kontonummer). Schutz gegen vertauschte Snapshots.",
+  "master_expected_login": 0,
+  "_2_hedge": "EXAKT wie in den anderen Configs dieses PCs — alle Master eines Copier-Prozesses zeigen in dasselbe Hedge-Terminal (check_fleet erzwingt das).",
+  "hedge_terminal_path": "C:\\MT5-Hedge\\terminal64.exe",
+  "hedge_portable": false,
+  "hedge_expected_login": 488579,
+  "_3_kein_master_terminal": "Leer — es gibt kein Master-MT5-Terminal, der Verbinder schreibt den Snapshot direkt.",
+  "master_terminal_path": "",
+  "common_files_dir": "",
+  "_4_snapshot": "MUSS identisch mit snapshot_file in verbinder.config.json sein und eindeutig pro Master dieses PCs.",
+  "snapshot_file": "prophos_tv.csv",
+  "_5_immer_scharf": "Der Kern dieser Instanz: Finn tradet in TradingView MANUELL, ein Prophos-Trade-Fenster gibt es nicht — jede neue Master-Position wird gehedgt (klassisches Copier-Verhalten). Beim Copier-Start gilt trotzdem die Alt-Bestand-Logik: schon offene, unhedgte Positionen werden NICHT nachtraeglich gehedgt (adopt=false).",
+  "immer_scharf": true,
+  "adopt_existing_master_positions": false,
+  "_6_mathe": "hedge_lots = kontrakte x punktwert x multiplier / hedge_contract_size. Der Punktwert steckt schon im Snapshot (NQ 20 USD/Punkt, MNQ 2 USD/Punkt). multiplier 1.0 = voller Dollar-fuer-Dollar-Hedge: 1 NQ = 20 NAS100-Lots, 1 MNQ = 2 Lots (bei Fusion contract_size 1). ERSTER TEST: mit 1 MNQ starten, nicht mit NQ.",
+  "multiplier": 1.0,
+  "symbol_map": {
+    "NQ": "NAS100",
+    "MNQ": "NAS100"
+  },
+  "_7_eindeutigkeit": "magic und comment_prefix muessen pro Master dieses PCs eindeutig sein — 770900er-Block ist fuer Echo + reserviert, die Provisionierung vergibt 770001 aufwaerts.",
+  "magic": 770900,
+  "comment_prefix": "TV",
+  "_8_technik": "Standardwerte wie ueberall. Die Notfall-Werte bleiben wirkungslos, solange der Verbinder SL/TP nullt (Preisskala Futures vs. CFD — siehe verbinder.config).",
+  "poll_interval": 0.5,
+  "deviation_points": 30,
+  "filling": "auto",
+  "notfall_faktor": 110,
+  "notfall_puffer_min_punkte": 100
+}

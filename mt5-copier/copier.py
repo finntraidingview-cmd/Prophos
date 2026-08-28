@@ -649,6 +649,13 @@ class Master:
         self.deviation = int(cfg.get("deviation_points", 30))
         self.filling = str(cfg.get("filling", "auto")).upper()
         self.adopt = bool(cfg.get("adopt_existing_master_positions", False))
+        # immer_scharf (28.08.2026, Echo +): Master ohne Prophos-Plan-Fenster —
+        # der TV-Verbinder speist Finns MANUELLE TradingView-Trades ein, dort
+        # gibt es kein 'Trade starten'. true = jede neue Master-Position wird
+        # gehedgt (wie ein klassischer Copier). Beim Start-Connect gilt trotzdem
+        # die normale Alt-Bestand-Logik (adopt) — nicht das Fenster-Uebernehmen,
+        # sonst wuerde ein Copier-Neustart bewusst unhedgte Positionen nachhedgen.
+        self.immer_scharf = bool(cfg.get("immer_scharf", False))
         self.terminal_path = cfg.get("master_terminal_path") or ""
         self.raw = cfg
         return cfg
@@ -1217,7 +1224,8 @@ def main():
 
             # ── Jeden Master abarbeiten ─────────────────────────────────────────
             for m in masters:
-                m.armed = m.file in armed_files
+                # immer_scharf zaehlt wie ein offenes Fenster (Echo +, 28.08.2026)
+                m.armed = (m.file in armed_files) or m.immer_scharf
                 if m.armed:
                     m.warned_unarmed.clear()
                 # Ohne expect_login lesen und SELBST vergleichen (15.08.2026, erster
@@ -1277,7 +1285,7 @@ def main():
                 if m.seen_seq is None:
                     log(f"✓ [{m.file}] Snapshot verbunden — Master {snap['login']} @ {snap['server']}, "
                         f"{len(snap['positions'])} offene Position(en)")
-                    if m.armed:
+                    if m.armed and not m.immer_scharf:
                         # Trade-Fenster offen ⇒ KEIN startup_skip (25.08.2026, Finns
                         # Live-Fund: die Bot-Order kam, waehrend der Copier gerade neu
                         # startete — die frische Position lag beim ersten Snapshot-
@@ -1285,7 +1293,10 @@ def main():
                         # und der Hedge kam NIE). Im offenen Fenster ist eine Position
                         # ohne Hedge genau der geplante Trade: uebernehmen und hedgen.
                         # Der Alt-Bestand-Schutz gilt weiter fuer Verbindungen OHNE
-                        # offenes Fenster (dort entstehen Positionen nie durch uns).
+                        # offenes Fenster (dort entstehen Positionen nie durch uns) —
+                        # UND fuer immer_scharf-Master (Echo +): dort ist eine beim
+                        # Start unhedgte Position Alt-Bestand/bewusste Entscheidung,
+                        # kein frisch geplanter Trade; es gilt adopt.
                         m.startup_skip = set()
                         if snap["positions"]:
                             log(f"▶ [{m.file}] Trade-Fenster offen — {len(snap['positions'])} "

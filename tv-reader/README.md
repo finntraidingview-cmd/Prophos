@@ -68,8 +68,27 @@ Einschalten**-Knopf — der funktioniert von überall (Handy, Mac), nicht nur am
   Restrisiko ist bewusst getragen (rein lesend, isolierter content-script-Kontext,
   keine Netzwerk-Requests an TradingView → praktisch nicht detektierbar).
 
-## Nächster Schritt
-Der Empfänger hält den Stand unter `GET http://127.0.0.1:8790/positions` und in
-`positions.json`. Der bestehende MT5-Copier (`mt5-copier/copier.py`) liest das und
-setzt/synchronisiert den Fusion-Hedge; SL/TP kommen aus dem Trade-Plan, Airbag-SL
-broker-seitig wie gehabt.
+## Spiegel-Weg: TradingView → Fusion-Hedge (der Verbinder, 28.08.2026)
+`tv_verbinder.py` schließt die Kette auf dem Windows-PC: er liest alle 0,5 s den
+Reader-Stand (Port 8790) und schreibt per `tv_snapshot.py` das PROPHOS1-CSV in
+den Common-Files-Ordner — **der Copier braucht null Änderungen**, der TV-Reader
+ist für ihn ein weiterer Master mit eigener Instanz-Config.
+
+Einrichtung auf dem PC (einmalig, zusätzlich zum Reader-Setup oben):
+1. `verbinder.config.example.json` → `verbinder.config.json` kopieren,
+   `master_login` ausfüllen (z.B. Tradovate-Kontonummer).
+2. In `C:\mt5-copier`: `config.tvplus.vorlage.json` → `config-tvplus.json`
+   kopieren, `master_expected_login` (= derselbe Wert) und die Hedge-Zeilen wie
+   in den anderen Configs des PCs ausfüllen. `immer_scharf: true` ist der Kern:
+   manuelle TradingView-Trades werden ohne Prophos-Trade-Fenster gehedgt.
+3. `start-verbinder.bat` doppelklicken (Reihenfolge egal), Copier neu starten.
+4. **Erster Test mit 1 MNQ** (= 2 NAS100-Lots bei multiplier 1.0), nicht mit NQ.
+
+Sicherheits-Doktrin des Verbinders (stale ≠ flat):
+- Reader **pausiert** / **Daten älter 10 s** / **Server weg** → es wird NICHT
+  geschrieben, das CSV friert ein → der Copier meldet „Snapshot unverändert"
+  und **hält die Hedges**. Kein Zustand des Readers schließt je einen Hedge.
+- **SL/TP werden genullt** (`sltp_uebernehmen: false` lassen): TradingView
+  liefert Futures-Preise, der Fusion-CFD hat eine andere Preisskala — Level
+  1:1 übernommen wären falsche Notfall-Level. Leer statt falsch, bis die
+  Umrechnung gebaut ist.
