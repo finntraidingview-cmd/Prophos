@@ -2387,11 +2387,36 @@
     #dashboard-view [data-pane="manual"] .t td:nth-child(5){grid-column:1;grid-row:3;align-self:center}
     #dashboard-view [data-pane="manual"] .t td:nth-child(6){grid-column:2;grid-row:3;text-align:right !important;white-space:nowrap}
 
-    /* — Trade-Plan-Modal: Master-/Slave-Picker in voller Breite —
-         der Inline-Style „1fr 1fr" am form-grid schlägt die 760px-Query,
-         und 4 Filter-Selects nebeneinander quetschen sich bei 375px. — */
+    /* — Trade-Plan-Modal: Master und Slave als Gruppen-Karten in voller
+         Breite (Inline-„1fr 1fr" am form-grid schlägt die 760px-Query).
+         Finns Urteil zum ersten Wurf: „nicht clean, viel schlechtes
+         Overlay" — daher iOS-Form-Optik: getönte Gruppen, weiße Inputs,
+         Filter-Selects dürfen schrumpfen statt umzubrechen (min-width:0;
+         Safari macht Selects sonst so breit wie ihre längste Option —
+         deshalb stapelte der Slave-Block, der Master aber nicht). — */
     #tradePlanModal .field:has(#tp-master),
-    #tradePlanModal .field:has(#tp-slave){grid-column:1 / -1}
+    #tradePlanModal .field:has(#tp-slave){
+      grid-column:1 / -1;
+      background:var(--surface-tint);border-radius:14px;padding:12px;
+    }
+    #tradePlanModal .field select.input{min-width:0}
+    /* Vorschlag-/Hinweis-Boxen: Rahmen weg, nur weiche Tönung */
+    #tp-slave-suggest,#tp-gesamtkosten-suggest,#tp-vorgaenger-suggest,
+    #tp-master-limits-info{border:none !important;border-radius:12px !important}
+    /* Ergebnis-Boxen (SLAVE KAUFEN / MULTIPLIER): ruhiger — dünner Rand,
+       weniger Leerraum, Zahl eine Stufe kleiner */
+    #dashboard-view .tp-slave-out{
+      border-width:1px;box-shadow:none;padding:14px;gap:2px;
+    }
+    #dashboard-view .tp-slave-value{font-size:32px}
+    /* Weg-Regler als volle Segmented-Control */
+    #dashboard-view .modal .seg{display:flex;width:100%}
+    #dashboard-view .modal .seg button{flex:1;padding:9px 12px;font-size:13.5px}
+    /* Einheitliche App-Form-Labels in allen Modal-Sheets */
+    #dashboard-view .modal .field > label{
+      font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+      color:var(--sub);font-weight:600;
+    }
 
     /* — Finanzen-Buchungen als App-Liste: Account | Betrag rechts,
          darunter Typ-Chip | Datum, darunter Notiz | Löschen.
@@ -2469,6 +2494,23 @@
     /* Firma-/Typ-Filter in eine Zeile (Inline-min-width braucht !important) */
     #acc-firm-filter{min-width:110px !important}
     #acc-type-filter{min-width:96px !important}
+
+    /* — Account-Detail aufgeräumt (Finns Screenshot 28.08.2026 abends):
+         Zurück-Pill auf eigene Zeile, Titel links darunter (statt Titel
+         neben der Pill über drei Zeilen), Stats als 1+2-Grid statt
+         gequetschter flex-wrap-Reihe, die zwei Info-Panels untereinander. — */
+    #dashboard-view [data-view="account-detail"] .view-head{align-items:stretch !important}
+    #dashboard-view [data-view="account-detail"] .view-head > div:first-child{
+      flex-direction:column !important;align-items:flex-start !important;gap:10px;
+    }
+    #dashboard-view [data-view="account-detail"] .view-title{font-size:20px}
+    #ad-stats > div{
+      display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;
+    }
+    #ad-stats .kpi{min-width:0 !important}
+    #ad-stats .kpi:first-child{grid-column:1 / -1}
+    #ad-stats .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #ad-detail-grid{grid-template-columns:1fr !important}
   }
 
   /* ============================================================
