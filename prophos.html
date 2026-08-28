@@ -11164,7 +11164,10 @@
             // Ausgang von orderSignalTick — per SQL aus der Ferne prüfbar, ob
             // der Tab den Empfänger-Build hat und woran ein Skip liegt.
             // typeof-Guard: Idiom gegen Scope-/Reihenfolge-Fallen (esc-Lehre).
-            signal_rx: (typeof _osStand !== 'undefined') ? _osStand : null
+            signal_rx: (typeof _osStand !== 'undefined') ? _osStand : null,
+            // Build-Stempel des TABS (28.08.2026, Remote-Close-Debug) — s.
+            // OS_TAB_BUILD: beweist per SQL, welchen Build dieser PC-Tab fährt.
+            tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null
           },
           updated_at: new Date().toISOString()
         }
@@ -20367,6 +20370,13 @@
    * Frische-Gate BEIDSEITIG (3 min): ein PC, der Stunden später aufwacht,
    * darf nie eine alte Order feuern; ein Signal ohne PC verfällt sichtbar. */
   const OS_FRISCHE_S = 180
+  // Tab-Build-Stempel (28.08.2026, Remote-Close-Debug): wandert im Flotten-
+  // Push als status.tab_build in die Cloud. Hintergrund: die Copier-Version
+  // am PC ist NICHT die Tab-Version (der Tab wechselt nur durch Neuladen),
+  // und ohne Stempel war per SQL nie beweisbar, WELCHEN Build ein PC-Tab
+  // fährt — beim Remote-Close-Test wurde deshalb zweimal blind geraten.
+  // Bei Empfänger-relevanten Änderungen mitbumpen (Versions-Ritual).
+  const OS_TAB_BUILD = '2026-08-28.168'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
