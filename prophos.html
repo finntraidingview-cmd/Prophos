@@ -2390,7 +2390,7 @@
     /* — Buttons: Touch-Höhe + Druck-Feedback. transition:all zwingt bei
          jeder Style-Änderung zum Vergleich ALLER animierbaren Properties —
          auf das Nötige eingedampft. — */
-    #dashboard-view .btn{padding:9px 14px;border-radius:10px;transition:background-color .15s var(--ease),border-color .15s var(--ease),transform .1s var(--ease)}
+    #dashboard-view .btn{padding:9px 14px;border-radius:10px;touch-action:manipulation;transition:background-color .15s var(--ease),border-color .15s var(--ease),transform .1s var(--ease)}
     #dashboard-view .btn:active{transform:scale(.97)}
     #dashboard-view .kpi{transition:box-shadow .2s var(--ease)}
     #dashboard-view .input{transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
@@ -22698,6 +22698,32 @@
   document.getElementById('tradeCompleteCancel2')?.addEventListener('click', closeTradeCompleteModal)
   document.getElementById('tradeCompleteModal')?.addEventListener('click', e => {
     if(e.target === document.getElementById('tradeCompleteModal')) closeTradeCompleteModal()
+  })
+
+  /* iOS-Doppel-Tipp-Fix (29.08.2026, Finns Fund: „muss im P&L-Popup immer
+   * doppelt klicken"): Steht der Fokus noch im Zahlenfeld, löst der erste
+   * Tipp auf „Erledigt" nur das Blur aus — die Tastatur klappt zu, die
+   * Ansicht verschiebt sich, und Safaris nachgereichter Klick landet neben
+   * dem Knopf. pointerup feuert dagegen VOR der Verschiebung, mit dem
+   * Finger noch auf dem Knopf: wir lösen den Klick dort selbst aus und
+   * schlucken den evtl. doch noch treffenden nativen Klick (450ms-Fenster,
+   * Capture-Phase, nur e.isTrusted — der eigene synthetische Klick passiert).
+   * Nur Touch (pointerType), Maus/Desktop bleibt unberührt. Bewusst NUR
+   * dieses Modal verdrahtet (Per-Modal-Doktrin). */
+  ;['tradeCompleteSave', 'tradeCompleteCancel2'].forEach(id => {
+    const b = document.getElementById(id)
+    if(!b) return
+    let griff = 0
+    b.addEventListener('click', e => {
+      if(e.isTrusted && Date.now() - griff < 450){
+        e.stopImmediatePropagation(); e.preventDefault()
+      }
+    }, true)
+    b.addEventListener('pointerup', e => {
+      if(e.pointerType !== 'touch') return
+      griff = Date.now()
+      b.click()
+    })
   })
 
   document.getElementById('tradeCompleteSave')?.addEventListener('click', async () => {
