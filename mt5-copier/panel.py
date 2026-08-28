@@ -542,6 +542,19 @@ def prov_start(name, login, password, server, owner=None, display=None):
 
     def worker():
         try:
+            # Vorlage-EA sicherstellen (28.08.2026, frischer-PC-Provisionierung):
+            # auf einem neu aufgesetzten PC ist das Lese-EA in der Master-Vorlage
+            # noch nie kompiliert — run_provision braeche sonst am ex5-Check ab
+            # ('Kompiliertes EA fehlt'). _ensure_ea_compiled spiegelt die .mq5 in
+            # den Vorlage-Datenordner und kompiliert sie per metaeditor64.exe;
+            # damit entfaellt der MetaEditor-Handgriff auch fuer die Vorlage.
+            # Schlaegt es fehl (kein MetaEditor), meldet run_provision weiterhin
+            # klar 'von Hand kompilieren' — reiner Best-Effort-Vorlauf.
+            if template:
+                try:
+                    _ensure_ea_compiled("vorlage", os.path.dirname(os.path.abspath(template)))
+                except Exception as e:
+                    print(f"[prov] Vorlage-EA-Vorlauf uebersprungen ({type(e).__name__}: {e})", flush=True)
             provision.run_provision(name=name, login=login, password=password,
                                     server=server, template_exe=template,
                                     folder=HERE, report=report, owner=owner, display=display,
