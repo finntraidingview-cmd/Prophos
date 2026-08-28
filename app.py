@@ -280,8 +280,9 @@ def copier_proxy(path):
         # die 60s hier waren am alten 45s-Stand kalibriert und rissen die Kette
         # wieder auf (Offene Punkte 215/221); mit Remote-Signalen (28.08.2026)
         # sitzt dann niemand am PC, der es merkt. Der aeussere Timeout ist die
-        # Obergrenze der Wahrheit: 310s = Bot-Maximum + Puffer.
-        _tmo = 310 if path == "master-order" else 25
+        # Obergrenze der Wahrheit: 310s = Bot-Maximum + Puffer. master-close
+        # (28.08.2026, Remote-Close) faehrt denselben Band-Scan — gleiche Luft.
+        _tmo = 310 if path in ("master-order", "master-close") else 25
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,

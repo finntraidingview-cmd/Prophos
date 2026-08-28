@@ -1944,6 +1944,77 @@ class Handler(BaseHTTPRequestHandler):
                   f"{cmd['symbol']} -> {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/master-close":
+            # Remote-Close (28.08.2026, Finns Feature nach dem ersten Remote-
+            # Erfolg): Position per Klick schliessen — gleicher Rahmen wie
+            # master-order (Pause-Riegel, Frische-Riegel, EIN Lock pro Instanz,
+            # 300s), nur der Befehl traegt aktion=close + ticket. Der Frische-
+            # Riegel bleibt bewusst: ohne frischen Copier wuerde der Hedge das
+            # Master-Close nicht mitgehen und bliebe allein offen.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Echo ist pausiert — es wird nichts geschlossen. Erst oben "
+                    "auf Fortsetzen klicken."}, ensure_ascii=False))
+            try:
+                ticket = int(body.get("ticket") or 0)
+            except (TypeError, ValueError):
+                ticket = 0
+            symbol = str(body.get("symbol") or "").strip()
+            if ticket <= 0:
+                return self._send(400, json.dumps({"ok": False, "msg": "ticket fehlt"}))
+            if symbol and not SYMBOL_RE.fullmatch(symbol):
+                return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+            age = None
+            try:
+                age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+            except (ValueError, TypeError):
+                pass
+            if not (st.get("running") and age is not None and age <= 15):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Copier liefert keine frischen Daten — der Hedge wuerde das Close "
+                    "nicht mitgehen und bliebe allein offen. Erst Copier gruen bekommen."},
+                    ensure_ascii=False))
+            with MASTER_ORDER_GUARD:
+                lock = MASTER_ORDER_LOCKS.setdefault(inst["config_file"], threading.Lock())
+            if not lock.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
+                    "Fuer diese Instanz laeuft gerade schon ein Bot-Lauf — warten, "
+                    "dann im Terminal pruefen."}, ensure_ascii=False))
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            if not os.path.exists(bot):
+                lock.release()
+                return self._send(200, json.dumps({"ok": False, "retry_ok": True, "msg":
+                    "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
+                    "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
+            cmd = {"aktion": "close", "ticket": ticket, "symbol": symbol}
+            try:
+                p = subprocess.run([sys.executable, bot, os.path.join(HERE, inst["config_file"]),
+                                    json.dumps(cmd)],
+                                   capture_output=True, text=True, errors="replace", timeout=300)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "retry_ok": False,
+                    "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "retry_ok": False,
+                       "msg": "Close-Bot Timeout (300s) — im Terminal pruefen, ob die "
+                              "Position noch offen ist!"}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "retry_ok": False, "msg": f"Close-Bot-Start fehlgeschlagen: {e}"}
+            finally:
+                lock.release()
+            print(f"[panel] {fname}: Master-Close #{ticket} {symbol} "
+                  f"-> {res.get('ok')} ({res.get('msg')})", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/start-terminal":
             # Optionale Zugangsdaten im Body (aus Prophos/Supabase): erzwingen den
             # richtigen Login beim Start. Nur komplett (login+password+server bzw.

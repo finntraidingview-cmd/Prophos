@@ -53,6 +53,20 @@ def pruefe_befehl(cmd):
     fehler = []
     if not isinstance(cmd, dict):
         return ["Befehl ist kein JSON-Objekt."]
+    if str(cmd.get("aktion") or "").lower() == "close":
+        # Close-Befehl (28.08.2026, Remote-Close): braucht NUR Ticket + Symbol —
+        # Richtung/Volumen/SL/TP gehoeren zur Eroeffnung. Eigener Zweig, damit
+        # ein Close nie durch die Order-Pflichtfelder rutscht (und umgekehrt
+        # ein alter Bot-Build den unbekannten Befehl an genau diesen Feldern
+        # sauber ablehnt, statt etwas zu raten).
+        try:
+            if int(cmd.get("ticket") or 0) <= 0:
+                fehler.append("ticket fehlt oder <= 0")
+        except (TypeError, ValueError):
+            fehler.append("ticket ist keine Zahl")
+        if not str(cmd.get("symbol") or "").strip():
+            fehler.append("symbol fehlt")
+        return fehler
     if not str(cmd.get("symbol") or "").strip():
         fehler.append("symbol fehlt")
     if str(cmd.get("richtung") or "").lower() not in ("buy", "sell"):
@@ -187,6 +201,37 @@ def ist_handelszeile(text, symbol):
     nie buy/sell."""
     t = (text or "").lower()
     return bool(symbol) and symbol.lower() in t and ("buy" in t or "sell" in t)
+
+
+def ist_close_menuepunkt(text):
+    """Der EINE Kontextmenue-Punkt, den der Close-Weg klicken darf (28.08.2026,
+    Remote-Close). Bisher war 'Position schliessen' der Eintrag, den der Bot
+    NIEMALS treffen durfte (.57: blinde Pfeiltasten = genau dieses Risiko) —
+    jetzt ist er das Ziel, darum besonders strikt: Praefix-Match statt
+    contains, und Alle-/Massen-Varianten sind hart ausgeschlossen (ein 'Alle
+    Positionen schliessen' traefe alles, was auf dem Konto liegt)."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if "alle" in t or "all p" in t or "massen" in t or "bulk" in t:
+        return False
+    # 'schlie' deckt schließen/schliessen samt Encoding-Varianten des ß ab
+    return t.startswith(("position schlie", "close position"))
+
+
+def ist_schliessen_knopf(text, ticket):
+    """Der gelbe Bestaetigen-Balken im Close-Dialog ('Schliessen #123 buy 1.20
+    NAS100 zum Marktpreis' bzw. 'Close #123 ... by Market'). Positiv-Signatur
+    wie beim Bestaetigen-Knopf des Aendern-Dialogs (.65): das Ticket MUSS in
+    der Beschriftung stehen — die Ticket-Gegenpruefung ist damit Teil der
+    Erkennung selbst. Aendern-/Abbrechen-/Loeschen-Knoepfe sind nie Treffer."""
+    t = (text or "").strip().lower()
+    if not t or not zeile_nennt_ticket(t, ticket):
+        return False
+    if any(k in t for k in ("ändern", "aendern", "andern", "modify",
+                            "abbrechen", "cancel", "lösch", "loesch", "delete")):
+        return False
+    return "schlie" in t or "close" in t
 
 
 # Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
@@ -816,6 +861,72 @@ def _kontextmenue_aendern_klicken(timeout=2.0):
             pass
         _warte(0.2, 0.25)
     return False
+
+
+def _kontextmenue_close_klicken(timeout=2.0):
+    """Gegenstueck zu _kontextmenue_aendern_klicken fuer den Close-Weg
+    (28.08.2026, Remote-Close): ausgeloest wird AUSSCHLIESSLICH ein Menuepunkt,
+    der ist_close_menuepunkt besteht — nie ein anderer, nie blind. Die Alle-/
+    Massen-Ausschluesse stecken in der Erkennung selbst."""
+    from pywinauto import Desktop
+    ende = time.time() + timeout
+    while time.time() < ende:
+        try:
+            for m in Desktop(backend="uia").windows():
+                try:
+                    if m.element_info.class_name != "#32768" \
+                            and m.element_info.control_type != "Menu":
+                        continue
+                    for it in m.descendants(control_type="MenuItem"):
+                        if ist_close_menuepunkt(it.window_text()):
+                            try:
+                                it.invoke()
+                                return True
+                            except Exception:
+                                try:
+                                    it.click_input()
+                                    return True
+                                except Exception:
+                                    pass
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        _warte(0.2, 0.25)
+    return False
+
+
+def _finde_close_dialog(hauptfenster, ticket):
+    """Close-Dialog erkennen — ueber den Knopf, der den Close-Auftrag fuer
+    GENAU dieses Ticket traegt (ist_schliessen_knopf: die Ticket-Gegenpruefung
+    ist Teil der Erkennung). Rueckgabe (dialog, knopf) oder (None, None).
+    EIN Durchlauf — die Wiederholung taktet der Aufrufer, weil dort parallel
+    lesend auf 'Position schon weg' geprueft wird (Ein-Klick-Modus)."""
+    from pywinauto import Desktop
+    fenster = []
+    try:
+        pid = hauptfenster.element_info.process_id
+        for w in Desktop(backend="uia").windows():
+            try:
+                if w.element_info.process_id == pid and w.is_visible() \
+                        and w.element_info.class_name != MT5_KLASSE:
+                    fenster.append(w)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    try:
+        fenster.extend(hauptfenster.descendants(control_type="Window"))
+    except Exception:
+        pass
+    for w in fenster:
+        try:
+            for b in w.descendants(control_type="Button"):
+                if ist_schliessen_knopf(b.window_text(), ticket):
+                    return w, b
+        except Exception:
+            continue
+    return None, None
 
 
 def _fremde_dialoge_schliessen(hauptfenster):
@@ -1710,6 +1821,300 @@ def run(cfg_path, cmd):
             "trail": " → ".join(trail)}
 
 
+def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
+    """Position per Klick schliessen — Finns Hand-Weg als Scan (28.08.2026,
+    Remote-Close): Zeile markieren -> Rechtsklick -> NUR den lesbaren Punkt
+    'Position schliessen' klicken. Danach zwei legitime Ausgaenge: der
+    Ein-Klick-Modus schliesst SOFORT (Position verschwindet lesend), sonst
+    oeffnet der Close-Dialog und der Schliessen-Knopf (Ticket in der
+    Beschriftung) wird mit der bewaehrten Kaskade gedrueckt.
+
+    WICHTIG: der Aufrufer hat vorher lesend bewiesen, dass GENAU EINE Position
+    offen ist und sie das Ziel-Ticket traegt — NUR deshalb ist der Band-Scan
+    hier zulaessig. Bei mehreren Positionen koennte ein Fehltreffer auf einer
+    fremden Zeile im Ein-Klick-Modus die falsche Position schliessen.
+
+    Nach dem ERSTEN erfolgreichen Menuepunkt-Klick wird NIE weitergescannt
+    (die Schliessung kann da schon unterwegs sein) — ein Versuch pro Lauf.
+    Rueckgabe: 'zu' | 'knopf' | 'ohne_wirkung' | 'kein_treffer' | 'pause'."""
+    try:
+        hr = w.rectangle()
+        maus_grenze = hr.top + (hr.bottom - hr.top) // 2
+    except Exception:
+        return "kein_treffer"
+    gx = hr.left + int((hr.right - hr.left) * 0.4)
+    _fremde_dialoge_schliessen(w)
+    # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
+    # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
+    _handel_tab_aktivieren(w, trail, maus_grenze)
+    if is_paused():
+        trail.append("⏸ Echo pausiert — kein Close-Klick")
+        return "pause"
+    # Punkte wie _reihen_scan: gemerkter Anker zuerst — bewusst DIESELBE
+    # anker-Datei, die Positions-Zeile ist dieselbe, die der SL/TP-Weg beim
+    # Platzieren schon Ticket-geprueft getroffen hat.
+    punkte = []
+    if anker_pfad:
+        try:
+            with open(anker_pfad, encoding="utf-8") as f:
+                a = json.load(f)
+            ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
+            ay = hr.bottom - int(a["y_off"])
+            if ay >= maus_grenze:
+                punkte.append(("Anker", ax, ay))
+        except Exception:
+            pass
+    for off in sorted(range(60, 400, 16), key=lambda o: abs(o - 316)):
+        y = hr.bottom - off
+        if y < maus_grenze:
+            continue
+        punkte.append((f"-{off}px", gx, y))
+
+    for pname, px_, py_ in punkte:
+        if is_paused():
+            trail.append("⏸ Echo pausiert — Close-Scan abgebrochen")
+            return "pause"
+        _maus_fahren(px_, py_, schritte=3)
+        _klick_absolut(px_, py_)          # Finns Schritt 1: Zeile markieren
+        _warte(0.15, 0.2)
+        if not _klick_absolut(px_, py_, taste="rechts"):
+            continue
+        _warte(0.25, 0.3)
+        if not _kontextmenue_close_klicken(timeout=0.8):
+            # Punkt lag neben der Zeile — Chart/Marktuebersicht haben den
+            # Eintrag nicht. Menue zu, naechster Punkt; geklickt wird nur der
+            # eine lesbare Punkt, nie blind.
+            try:
+                w.type_keys("{ESC}", set_foreground=False)
+            except Exception:
+                pass
+            continue
+        trail.append(f"'Position schliessen' geklickt ({pname})")
+        # Treffer-Stelle merken (dieselbe Datei/Form wie der SL/TP-Scan) —
+        # dass der Menuepunkt existierte, beweist die Positions-Zeile.
+        if anker_pfad:
+            try:
+                with open(anker_pfad, "w", encoding="utf-8") as f:
+                    json.dump({"x_frac": (px_ - hr.left) / max(1, hr.right - hr.left),
+                               "y_off": hr.bottom - py_}, f)
+            except Exception:
+                pass
+        dlg = knopf = None
+        ende = time.time() + 3.0
+        while time.time() < ende:
+            if position_weg():
+                trail.append("Position weg (Ein-Klick-Modus)")
+                return "zu"
+            dlg, knopf = _finde_close_dialog(w, ticket)
+            if knopf is not None:
+                break
+            _warte(0.25, 0.25)
+        if knopf is None:
+            return "ohne_wirkung"
+        try:
+            trail.append(f"Close-Dialog offen, Knopf: '{(knopf.window_text() or '')[:44]}'")
+        except Exception:
+            pass
+        try:
+            r = knopf.rectangle()
+            _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+        except Exception:
+            pass
+
+        # Kaskade wie Buy-/Aendern-Knopf (.52/.64): echte Eingabe zuerst, nach
+        # jedem Weg lesend pruefen — nie zwei Wege blind hintereinander.
+        def _weg_leertaste():
+            knopf.set_focus()
+            _warte(0.1, 0.15)
+            try:
+                hat_fokus = bool(knopf.has_keyboard_focus())
+            except Exception:
+                hat_fokus = False
+            if not hat_fokus:
+                raise RuntimeError("Knopf nimmt keinen Tastatur-Fokus an")
+            knopf.type_keys("{SPACE}", set_foreground=False)
+
+        def _weg_sendinput():
+            r2 = knopf.rectangle()
+            if not _klick_absolut(r2.mid_point().x, r2.mid_point().y):
+                raise RuntimeError("SendInput abgelehnt")
+
+        for wegname, tu in (("Fokus+Leertaste", _weg_leertaste),
+                            ("SendInput-Klick", _weg_sendinput),
+                            (".click()", lambda: knopf.click()),
+                            ("click_input", lambda: knopf.click_input())):
+            try:
+                tu()
+            except Exception:
+                continue
+            trail.append(f"Schliessen-Knopf: {wegname}")
+            ende2 = time.time() + 4.0
+            while time.time() < ende2:
+                _warte(0.35, 0.3)
+                if position_weg():
+                    return "zu"
+                try:
+                    if not dlg.is_visible():
+                        return "knopf"
+                except Exception:
+                    return "knopf"
+        return "knopf"   # alle Wege durch — den Ausgang entscheidet der Aufrufer lesend
+    trail.append("Zeilen-Scan ohne Treffer")
+    return "kein_treffer"
+
+
+def _deal_profit_lesen(path, expected, ticket):
+    """Best-Effort, rein LESEND: realisierter P&L der eben geschlossenen
+    Position aus der Konto-Historie (Ausstiegs-Deals inkl. Swap/Kommission).
+    Liefert die Historie nichts, kommt None — die Meldung bleibt dann ohne
+    P&L, geraten wird nie ('Beweis oder leer')."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return None
+    try:
+        if not mt5.initialize(path=path):
+            return None
+        try:
+            ai = mt5.account_info()
+            if ai is None or (expected and int(ai.login) != expected):
+                return None
+            deals = mt5.history_deals_get(position=int(ticket)) or []
+            raus = [d for d in deals if int(getattr(d, "entry", -1)) == 1]  # DEAL_ENTRY_OUT
+            if not raus:
+                return None
+            return round(sum(float(d.profit)
+                             + float(getattr(d, "swap", 0) or 0)
+                             + float(getattr(d, "commission", 0) or 0) for d in raus), 2)
+        finally:
+            mt5.shutdown()
+    except Exception:
+        return None
+
+
+def run_close(cfg_path, cmd):
+    """Position schliessen (28.08.2026, Finns Remote-Close) — derselbe Rahmen
+    wie run(), aber der unumkehrbare Schritt ist der 'Position schliessen'-
+    Klick. Zwei Eigenheiten gegenueber der Eroeffnung:
+    1. Close ist quasi-idempotent: die Zielposition ist entweder offen oder
+       nicht, lesend pruefbar VOR jedem Klick — ein Wiederholungslauf ist
+       deshalb meist ungefaehrlich (retry_ok oefter True als beim Oeffnen).
+    2. Verwechslungs-Schutz: geklickt wird NUR bei lesend bewiesener GENAU
+       EINER offenen Position mit dem Ziel-Ticket (s. _close_klicken)."""
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError) as e:
+        return {"ok": False, "retry_ok": True, "msg": f"Config nicht lesbar: {e}"}
+    path = str(cfg.get("master_terminal_path") or "").strip()
+    expected = int(cfg.get("master_expected_login") or 0)
+    if not path or not os.path.exists(path):
+        return {"ok": False, "retry_ok": True,
+                "msg": f"master_terminal_path fehlt/nicht gefunden: {path}"}
+    if not expected:
+        return {"ok": False, "retry_ok": True,
+                "msg": "master_expected_login fehlt in der Config — kein Close ohne Login-Guard."}
+    try:
+        import pywinauto  # noqa: F401
+    except ImportError:
+        return {"ok": False, "retry_ok": True,
+                "msg": "pywinauto fehlt — einmal 'Alles neu starten' klicken "
+                       "(das Panel installiert es dann selbst)."}
+    try:
+        from pywinauto.timings import Timings
+        Timings.window_find_timeout = 1.0
+        Timings.exists_timeout = 0.3
+    except Exception:
+        pass
+
+    ticket = int(cmd["ticket"])
+    symbol = str(cmd.get("symbol") or "").strip()
+
+    # 1) LESEND: gibt es die Position ueberhaupt (noch)? Login-Guard inklusive.
+    lese = _api_lesen(path, expected)
+    if "fehler" in lese:
+        return {"ok": False, "retry_ok": True, "msg": lese["fehler"]}
+    pos = next((p for p in lese["positionen"] if p["ticket"] == ticket), None)
+    if pos is None:
+        # Ziel-Zustand erreicht, nichts zu tun — ehrlich als eigener Fall
+        # (macht auch jeden Wiederholungslauf nach Fehlschlag harmlos).
+        return {"ok": True, "retry_ok": False, "schon_zu": True,
+                "msg": f"Position #{ticket} ist nicht (mehr) offen — nichts zu tun."}
+    if symbol and symbol.lower() not in pos["symbol"].lower():
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Ticket #{ticket} traegt {pos['symbol']}, erwartet war {symbol} — "
+                       f"falsches Signal, nichts geklickt."}
+    if len(lese["positionen"]) != 1:
+        andere = ", ".join(f"#{p['ticket']} {p['symbol']}"
+                           for p in lese["positionen"] if p["ticket"] != ticket)
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Verwechslungs-Schutz: {len(lese['positionen'])} Positionen offen "
+                       f"(neben #{ticket} noch {andere}) — der Zeilen-Scan kann die richtige "
+                       f"Zeile nicht sicher treffen, im Terminal von Hand schliessen."}
+
+    trail = []
+    _warte(0.0, 1.2)   # Start-Versatz wie run() (28.08.2026, Flotten-Streuung)
+
+    # 2) Ins Terminal gehen -> Guard
+    w = _finde_terminal(expected)
+    if w is None:
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden."}
+    _fenster_betreten(w)
+    if str(expected) not in (w.window_text() or ""):
+        return {"ok": False, "retry_ok": True,
+                "msg": "Fenster-Guard: Titelzeile passt nicht — Abbruch ohne Klick."}
+    trail.append("Terminal betreten")
+
+    def position_weg():
+        st = _api_lesen(path, expected)
+        return "fehler" not in st and all(p["ticket"] != ticket for p in st["positionen"])
+
+    anker_pfad = os.path.join(os.path.dirname(os.path.abspath(cfg_path)),
+                              "anker-" + os.path.basename(cfg_path))
+    ausgang = _close_klicken(w, ticket, trail, anker_pfad, position_weg)
+
+    if ausgang == "pause":
+        return {"ok": False, "retry_ok": True,
+                "msg": "Echo ist pausiert — nichts geklickt. Fortsetzen, dann erneut. "
+                       "[" + " → ".join(trail) + "]", "trail": " → ".join(trail)}
+    if ausgang == "kein_treffer":
+        _fremde_dialoge_schliessen(w)
+        return {"ok": False, "retry_ok": True,
+                "msg": f"Positions-Zeile #{ticket} nicht gefunden (Zeilen-Scan ohne Treffer) — "
+                       f"nichts geklickt. [" + " → ".join(trail) + "]",
+                "trail": " → ".join(trail)}
+
+    # 3) LESEND bestaetigen: Position weg = zu (bis 12 s, wie die Order-Seite).
+    zu = (ausgang == "zu")
+    ende = time.time() + 12
+    while not zu and time.time() < ende:
+        _warte(0.4, 0.35)
+        if position_weg():
+            zu = True
+    # Result-/Restdialog nie stehen lassen (Abbrechen/ESC, nie OK)
+    _fremde_dialoge_schliessen(w)
+    if zu:
+        profit = _deal_profit_lesen(path, expected, ticket)
+        pl = f" · P&L {profit:+,.2f}" if profit is not None else ""
+        trail.append(f"Position #{ticket} zu{pl}")
+        return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
+                "msg": f"Position #{ticket} ({pos['symbol']}, {pos['volumen']:g} Lots) "
+                       f"per Klick geschlossen{pl}",
+                "trail": " → ".join(trail), "ticket": ticket, "profit": profit}
+    if ausgang == "ohne_wirkung":
+        return {"ok": False, "retry_ok": True,
+                "msg": f"'Position schliessen' geklickt, aber Position #{ticket} liegt noch "
+                       f"und kein Close-Dialog kam — im Terminal nachsehen. Wiederholen ist "
+                       f"ungefaehrlich (der Bot prueft vorher lesend). [" + " → ".join(trail) + "]",
+                "trail": " → ".join(trail)}
+    return {"ok": False, "retry_ok": True,
+            "msg": f"Close-Dialog war offen, aber Position #{ticket} ist nach 12 s weiter "
+                   f"offen — im Terminal pruefen (Dialog wurde geschlossen). Wiederholen ist "
+                   f"ungefaehrlich. [" + " → ".join(trail) + "]",
+            "trail": " → ".join(trail)}
+
+
 def modus_inspect(cfg_path):
     """Diagnose: F9-Dialog oeffnen und alle Steuerelemente dumpen — platziert
     NICHTS. Der Dump entscheidet die Feld-Zuordnung, falls run abbricht."""
@@ -1753,7 +2158,12 @@ def main():
         print(json.dumps({"ok": False, "retry_ok": True,
                           "msg": "Befehl unvollstaendig: " + " · ".join(fehler)}))
         return 2
-    res = run(sys.argv[1], cmd)
+    # Close-Befehle (28.08.2026, Remote-Close) laufen ueber denselben Aufruf —
+    # 'aktion' entscheidet den Weg, pruefe_befehl hat den Zweig schon validiert.
+    if str(cmd.get("aktion") or "").lower() == "close":
+        res = run_close(sys.argv[1], cmd)
+    else:
+        res = run(sys.argv[1], cmd)
     # Ausgangssituation (28.08.2026): nach jedem Lauf zurueck in den Prophos-
     # Tab — hier statt in run(), damit ausnahmslos JEDER Ausgang (Erfolg,
     # Abbruch, SL/TP-Warnung) denselben Heimweg nimmt. mousetest/inspect

@@ -486,6 +486,30 @@ def main():
         not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
         and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
         and not order_bot.ist_prophos_fenster("Prophos", ""))
+    # Remote-Close (28.08.2026): der Menuepunkt, der frueher der verbotene war —
+    # jetzt Ziel, darum Praefix-Match und harter Alle-/Massen-Ausschluss.
+    chk("CLOSE: Menuepunkt 'Position schließen'/'Close position' erkannt (de/en/ss)",
+        order_bot.ist_close_menuepunkt("Position schließen")
+        and order_bot.ist_close_menuepunkt("Position schliessen")
+        and order_bot.ist_close_menuepunkt("Close position"))
+    chk("CLOSE: Alle-/Massen-/Ändern-Punkte sind NIE Treffer",
+        not order_bot.ist_close_menuepunkt("Alle Positionen schließen")
+        and not order_bot.ist_close_menuepunkt("Close all positions")
+        and not order_bot.ist_close_menuepunkt("Massenoperationen")
+        and not order_bot.ist_close_menuepunkt("Ändern oder löschen")
+        and not order_bot.ist_close_menuepunkt("Neue Order")
+        and not order_bot.ist_close_menuepunkt(""))
+    chk("CLOSE: Schliessen-Knopf nur mit EIGENEM Ticket, Ändern/Abbrechen nie",
+        order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis", 596061571)
+        and order_bot.ist_schliessen_knopf("Close #596061571 buy 1.20 NAS100 by Market", 596061571)
+        and not order_bot.ist_schliessen_knopf("Schließen #596061571 buy 1.20 NAS100", 111222333)
+        and not order_bot.ist_schliessen_knopf("Ändern #596061571 buy 1 NAS100 sl: 29349.04 tp: 29570.71", 596061571)
+        and not order_bot.ist_schliessen_knopf("Abbrechen", 596061571)
+        and not order_bot.ist_schliessen_knopf("", 596061571))
+    f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 596061571, "symbol": "NAS100"})
+    chk("CLOSE: Befehl mit Ticket+Symbol → gueltig (ohne Richtung/Lots/SL/TP)", f == [])
+    f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 0, "symbol": ""})
+    chk("CLOSE: Befehl ohne Ticket/Symbol → beide gemeldet", len(f) == 2)
 
     # ── Notfall-SL/TP (27.08.2026): reine Rechenlogik ──────────────────────
     # Wichtigster Fall zuerst: der in den GEWINN nachgezogene Master-SL — die
