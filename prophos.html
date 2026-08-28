@@ -7968,7 +7968,11 @@
         $('rg-von').value = d.toISOString().slice(0, 10)
         msg.textContent = `Zyklus ab ${rgDatum($('rg-von').value)} — letzte Rechnung lief bis ${rgDatum(letzte)}.`
       } else {
-        msg.textContent = 'Noch keine Rechnung für diese Person — Zeitraum frei wählen.'
+        // Erste Rechnung einer Person: ab Jahresbeginn, damit ALLES bisher
+        // Unabgerechnete drin ist — sonst weicht die Rechnung vom Finanzen-
+        // Zyklus ab (Finns Fund 28.08.: Pascal-Vorschau nur August vs. YTD).
+        $('rg-von').value = new Date().getFullYear() + '-01-01'
+        msg.textContent = 'Erste Rechnung dieser Person — Zeitraum ab Jahresbeginn, deckt alles Bisherige ab.'
       }
       $('rg-bis').value = new Date().toISOString().slice(0, 10)
       rgPreviewOk = false; $('rg-create-btn').disabled = true; $('rg-preview').hidden = true
