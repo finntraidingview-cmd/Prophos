@@ -2317,8 +2317,103 @@
       font-size:10px;font-weight:600;color:var(--sub-2);font-family:inherit;
       -webkit-tap-highlight-color:transparent;transition:color .15s var(--ease);
     }
-    #dashboard-view .mob-link svg{width:21px;height:21px}
+    #dashboard-view .mob-link svg{width:21px;height:21px;transition:transform .15s var(--ease)}
     #dashboard-view .mob-link.active{color:var(--violet)}
+    #dashboard-view .mob-link:active svg{transform:scale(.88)}
+
+    /* ————————————————————————————————————————————————————————————
+       APP-POLITUR (28.08.2026, Finn: „RICHTIG clean wie eine App,
+       wie Revolut") — Feinschliff über die Grund-Schicht drüber.
+    ———————————————————————————————————————————————————————————— */
+
+    /* — Topbar: ruhig, nur Titel + Profil — */
+    #dashboard-view .tb-title{font-size:16.5px}
+
+    /* — View-Head: Titel oben, Aktionen als wischbare Zeile darunter
+         (6 Accounts-Buttons wrappten sonst zu einem Klotz) — */
+    /* flex-wrap MUSS hier auf nowrap: column+wrap lässt Kinder auf
+       max-content aufgehen (Sub-Text lief 728px breit aus dem Bild) */
+    #dashboard-view .view-head{flex-direction:column;flex-wrap:nowrap;align-items:stretch;gap:10px;margin-bottom:14px}
+    #dashboard-view .view-head > div:last-child{
+      overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+      padding-bottom:2px;
+    }
+    #dashboard-view .view-head > div:last-child::-webkit-scrollbar{display:none}
+    #dashboard-view .view-head > div:last-child > *{flex-shrink:0}
+    #dashboard-view .view-sub{font-size:13px}
+
+    /* — Buttons: Touch-Höhe + Druck-Feedback — */
+    #dashboard-view .btn{padding:9px 14px;border-radius:10px;transition:all .15s var(--ease),transform .1s var(--ease)}
+    #dashboard-view .btn:active{transform:scale(.97)}
+
+    /* — Sub-Tabs (Accounts/Trades/Finanzen): wischbar statt umbrechen — */
+    #dashboard-view .subtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    #dashboard-view .subtabs::-webkit-scrollbar{display:none}
+    #dashboard-view .subtab{padding:10px 13px;white-space:nowrap;flex-shrink:0}
+
+    /* — Modal-Sheets: Griff-Linie oben, Aktionen in voller Breite — */
+    #dashboard-view .modal::before{
+      content:'';display:block;width:36px;height:4px;border-radius:999px;
+      background:var(--border);margin:0 auto 14px;
+    }
+    #dashboard-view .modal-actions .btn,#dashboard-view .modal-foot .btn{
+      flex:1;justify-content:center;padding:12px 14px;
+    }
+
+    /* — Panels: etwas kompakter, Empty-States luftig aber nicht riesig — */
+    #dashboard-view .panel{padding:16px}
+    #dashboard-view .empty{padding:36px 20px}
+
+    /* — Accounts-Tabelle (Manuell-Tab) wird zur App-Liste:
+         Zeile = Name+Meta | Balance rechts, darunter Firma | Typ-Badge,
+         darunter Verknüpfungs-Chips | Aktionen. Zeilen-Tap öffnet wie
+         gehabt die Detail-View (data-acc-detail bleibt unberührt). — */
+    #dashboard-view [data-pane="manual"] table.t{display:block}
+    #dashboard-view [data-pane="manual"] .t thead{display:none}
+    #dashboard-view [data-pane="manual"] .t tbody{display:block}
+    #dashboard-view [data-pane="manual"] .t tr{
+      display:grid;grid-template-columns:minmax(0,1fr) auto;
+      column-gap:12px;row-gap:5px;align-items:start;
+      padding:13px 16px;border-bottom:1px solid var(--border-soft);
+    }
+    #dashboard-view [data-pane="manual"] .t tr:last-child{border-bottom:none}
+    #dashboard-view [data-pane="manual"] .t td{
+      display:block;padding:0 !important;border:none !important;
+    }
+    #dashboard-view [data-pane="manual"] .t td:nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(2){grid-column:1;grid-row:2;font-size:12px;color:var(--sub)}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(3){grid-column:2;grid-row:2;justify-self:end}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(4){grid-column:2;grid-row:1;text-align:right}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(5){grid-column:1;grid-row:3;align-self:center}
+    #dashboard-view [data-pane="manual"] .t td:nth-child(6){grid-column:2;grid-row:3;text-align:right !important;white-space:nowrap}
+
+    /* — Trade-Plan-Modal: Master-/Slave-Picker in voller Breite —
+         der Inline-Style „1fr 1fr" am form-grid schlägt die 760px-Query,
+         und 4 Filter-Selects nebeneinander quetschen sich bei 375px. — */
+    #tradePlanModal .field:has(#tp-master),
+    #tradePlanModal .field:has(#tp-slave){grid-column:1 / -1}
+
+    /* — Finanzen-Buchungen als App-Liste: Account | Betrag rechts,
+         darunter Typ-Chip | Datum, darunter Notiz | Löschen.
+         :has() nur fürs thead-Ausblenden (iOS ≥15.4 kann das). — */
+    #dashboard-view [data-view="payouts"] table.t:has(#finTable){display:block}
+    #dashboard-view [data-view="payouts"] table.t:has(#finTable) thead{display:none}
+    #finTable{display:block}
+    #finTable tr{
+      display:grid;grid-template-columns:minmax(0,1fr) auto;
+      column-gap:12px;row-gap:4px;align-items:center;
+      padding:12px 16px;border-bottom:1px solid var(--border-soft);
+    }
+    #finTable tr:last-child{border-bottom:none}
+    #finTable td{display:block;padding:0 !important;border:none !important}
+    #finTable td:nth-child(3){grid-column:1;grid-row:1;font-weight:500}
+    #finTable td:nth-child(4){grid-column:2;grid-row:1;text-align:right;font-size:15px}
+    #finTable td:nth-child(2){grid-column:1;grid-row:2}
+    #finTable td:nth-child(1){grid-column:2;grid-row:2;text-align:right;color:var(--sub)}
+    #finTable td:nth-child(5){grid-column:1;grid-row:3}
+    #finTable td:nth-child(6){grid-column:2;grid-row:3;text-align:right}
+    /* Löschen pro Zeile: subtil, ohne Rahmen — die Liste soll ruhig wirken */
+    #finTable .icon-btn{border:none;background:none;box-shadow:none}
   }
 
   /* ============================================================
