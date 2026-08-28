@@ -252,6 +252,23 @@ def ist_prophos_fenster(titel, klasse):
     return t.startswith("prophos") and (klasse or "") in BROWSER_KLASSEN
 
 
+def ist_tradingview_fenster(titel, klasse):
+    """Ist dieses Fenster der Browser mit AKTIVEM TradingView-Tab? (Orbit-Puls
+    Schritt 1, 28.08.2026.) Gleiche Positiv-Signatur wie ist_prophos_fenster:
+    Titel UND Browser-Klasse. Der Fenstertitel ist immer der AKTIVE Tab —
+    haengt TradingView als Hintergrund-Tab im Prophos-Fenster, ist es hier
+    unsichtbar; das Zielbild (Vault, 28.08.2026) ist ohnehin ein EIGENES
+    TV-Fenster/Profil pro Konto. 'tradingview' steht bei TV mitten im Titel
+    (Chart-Titel davor, Browser-Name dahinter), deshalb contains statt
+    startswith — DevTools tragen die URL im Titel und sind explizit raus."""
+    t = (titel or "").strip().lower()
+    if not t or (klasse or "") not in BROWSER_KLASSEN:
+        return False
+    if t.startswith("devtools"):
+        return False
+    return "tradingview" in t
+
+
 # ---------------------------------------------------------------------------
 # LESENDER API-Teil — Kurse + Positionsstand (traegt keine Order-Markierung)
 # ---------------------------------------------------------------------------
@@ -578,6 +595,50 @@ def _zurueck_zu_prophos():
         return "Prophos-Fenster nicht gefunden"
     except Exception as e:
         return f"Rueckkehr zu Prophos fehlgeschlagen ({type(e).__name__})"
+
+
+def modus_tvfokus():
+    """Orbit-Puls, Etappe 3 Schritt 1 (28.08.2026, Finns Ansage 'mehr mal
+    nicht, nur bis dahin'): NUR den TradingView-Tab nach vorn holen — kein
+    Klick in die Seite, keine Order. Ausfuellen/Platzieren kommen als
+    naechste Stufen. BEWUSST kein _zurueck_zu_prophos danach: der Sinn des
+    Schritts IST der Fokuswechsel, der PC soll auf TradingView stehen."""
+    res = {"ok": False, "msg": "", "trail": ""}
+    try:
+        from pywinauto import Desktop
+    except ImportError:
+        res["msg"] = "pywinauto fehlt (nur auf dem PC lauffaehig)."
+        print(json.dumps(res))
+        return
+    _warte(0.1, 0.5)   # Start-Versatz (Jitter-Dauerregel 28.08.2026)
+    try:
+        for w in Desktop(backend="uia").windows():
+            try:
+                if not ist_tradingview_fenster(w.window_text(),
+                                               w.element_info.class_name):
+                    continue
+                titel = (w.window_text() or "").strip()
+                if w.is_minimized():
+                    w.restore()
+                    _warte(0.2, 0.25)
+                # BEWUSST ohne den Titelzeilen-Klick aus _fenster_betreten:
+                # beim Browser sitzt dort die Tab-Leiste, ein Klick koennte
+                # den TV-Tab wegschalten (gleiche Lehre wie _zurueck_zu_prophos).
+                w.set_focus()
+                res["ok"] = True
+                res["trail"] = "TradingView-Tab nach vorn"
+                res["msg"] = f"TradingView ist vorn ({titel[:80]})"
+                print(json.dumps(res))
+                return
+            except Exception:
+                continue
+        res["msg"] = ("Kein Browser-Fenster mit aktivem TradingView-Tab gefunden — "
+                      "TradingView muss in einem eigenen Fenster offen sein und "
+                      "dort der sichtbare Tab.")
+        res["trail"] = "TV-Fenster gesucht, kein Treffer"
+    except Exception as e:
+        res["msg"] = f"TV-Fokus fehlgeschlagen: {type(e).__name__}: {e}"
+    print(json.dumps(res))
 
 
 def _ist_order_dialog(win):
@@ -2140,6 +2201,11 @@ def modus_inspect(cfg_path):
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
         modus_mousetest()
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "tvfokus":
+        # Orbit Schritt 1 (28.08.2026): nur den TradingView-Tab nach vorn —
+        # wie mousetest ohne Config, und ohne den Prophos-Heimweg unten.
+        modus_tvfokus()
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "inspect":
         modus_inspect(sys.argv[2])

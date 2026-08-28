@@ -486,6 +486,20 @@ def main():
         not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
         and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
         and not order_bot.ist_prophos_fenster("Prophos", ""))
+    # Orbit-Puls Schritt 1 (28.08.2026): TradingView-Fenster erkennen. Der
+    # Fenstertitel ist immer der AKTIVE Tab — 'tradingview' steht mitten im
+    # Titel (Chart davor, Browser-Name dahinter), daher contains; DevTools
+    # tragen die URL im Titel und duerfen NIE Treffer sein.
+    chk("ORDER-BOT: TradingView-Fenster erkannt (Chrome/Firefox, Chart-Titel)",
+        order_bot.ist_tradingview_fenster("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
+        and order_bot.ist_tradingview_fenster("TradingView — Track All Markets — Mozilla Firefox", "MozillaWindowClass")
+        and order_bot.ist_tradingview_fenster("(1) MNQ1! 1m CME — TradingView", "Chrome_WidgetWin_1"))
+    chk("ORDER-BOT: DevTools/Prophos/Konsole/MT5 sind KEIN TradingView-Fenster",
+        not order_bot.ist_tradingview_fenster("DevTools - www.tradingview.com/chart", "Chrome_WidgetWin_1")
+        and not order_bot.ist_tradingview_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+        and not order_bot.ist_tradingview_fenster("tradingview", "ConsoleWindowClass")
+        and not order_bot.ist_tradingview_fenster("", "Chrome_WidgetWin_1")
+        and not order_bot.ist_tradingview_fenster("TradingView", order_bot.MT5_KLASSE))
     # Remote-Close (28.08.2026): der Menuepunkt, der frueher der verbotene war —
     # jetzt Ziel, darum Praefix-Match und harter Alle-/Massen-Ausschluss.
     chk("CLOSE: Menuepunkt 'Position schließen'/'Close position' erkannt (de/en/ss)",

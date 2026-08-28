@@ -19619,13 +19619,13 @@
     // Fallback für Alt-Pläne ohne gesetzte Route.
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
 
-    // Orbit (28.08.2026, Etappe 2): „Starten" kommt erst mit dem TV-Puls —
-    // bis dahin wird die Order von Hand in TradingView platziert, der Reader
-    // sieht sie und Echo hedgt. NIE in den Duplikum-Preflight durchfallen.
-    if(plan.route === 'tvplus'){
-      if(typeof atToast === 'function') atToast('Orbit-Plan: Order von Hand in TradingView platzieren — Echo hedgt automatisch. „Starten" per Puls kommt als nächste Ausbaustufe.', 'start')
-      return
-    }
+    // Orbit (28.08.2026, Etappe 3 Schritt 1): „Starten" öffnet das Order-
+    // Popup (Lots/Richtung/SL/TP wie beim MT5-Puls); dessen „Starten" legt
+    // die Werte am Plan ab und der Puls holt am PC NUR den TradingView-Tab
+    // nach vorn — Finns Ansage „mehr mal nicht, nur bis dahin". Ausfüllen/
+    // Platzieren folgen als nächste Stufen. NIE in den Duplikum-Preflight
+    // durchfallen.
+    if(plan.route === 'tvplus') return openTpOrderModal(planId)
 
     // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
     // Duplikum-Checks wären hier sinnlos. Routen-Erkennung: planMirrorRoute().
@@ -20503,6 +20503,7 @@
   let _tpPendingOrder = null   // {planId, symbol, richtung, volumen, sl_usd, tp_usd}
   let _tpOrderPlanId = null
   let _tpOrderDir = null
+  let _tpOrderOrbit = false    // Orbit-Variante des Popups (28.08.2026, Etappe 3 Schritt 1)
 
   function tpOrderDirSet(dir){
     _tpOrderDir = dir
@@ -20521,6 +20522,10 @@
     if(!plan) return
     _tpOrderPlanId = planId
     _tpPendingOrder = null
+    // Orbit-Variante (28.08.2026, Etappe 3 Schritt 1): gleiches Popup, aber
+    // „Starten" speichert die Werte am Plan UND holt am PC den TradingView-
+    // Tab nach vorn — mehr nicht (Finns Ansage „nur bis dahin").
+    _tpOrderOrbit = plan.route === 'tvplus'
     // Speichern-Editor statt Start-Popup (Finns Korrektur 28.08.2026 nach dem
     // ersten Live-Test): hier wird die Order (Richtung/TP/SL/Lots) AM PLAN
     // gespeichert — gestartet wird über „Starten" auf der Karte, mit Live-Check.
@@ -20529,9 +20534,11 @@
     const remoteBox = document.getElementById('tp-order-remote')
     if(remoteBox){ remoteBox.style.display = 'none'; remoteBox.innerHTML = '' }
     const startBtn = document.getElementById('tpOrderStart')
-    if(startBtn){ startBtn.disabled = false; startBtn.textContent = 'Speichern' }
+    if(startBtn){ startBtn.disabled = false; startBtn.textContent = _tpOrderOrbit ? 'Starten →' : 'Speichern' }
     const info = document.getElementById('tp-order-info')
-    if(info) info.textContent = `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
+    if(info) info.textContent = _tpOrderOrbit
+      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab und der Puls wechselt am PC zum TradingView-Tab. Platziert wird dort noch VON HAND (Ausfüllen kommt als nächste Stufe), Echo hedgt automatisch.`
+      : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
     document.getElementById('tp-order-sl').value = plan.masterRisk ?? ''
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
@@ -20649,6 +20656,34 @@
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       renderTradePlans()
+      if(_tpOrderOrbit){
+        // Orbit Schritt 1 (28.08.2026, Finns Ansage „nur bis dahin"): Werte
+        // sind am Plan — jetzt holt der Puls am PC NUR den TradingView-Tab
+        // nach vorn. Kein Ausfüllen, keine Order; das kommt in den nächsten
+        // Stufen. Der Fokus wandert weg vom Prophos-Tab, deshalb schließt
+        // das Popup bei Erfolg sofort (kein stehengebliebenes Modal, wenn
+        // Finn zurückwechselt).
+        if(!MT5_LOCAL || typeof window.mtcApi !== 'function')
+          return err('Order gespeichert — aber der Puls läuft nur am PC-Tab (localhost). Dort „Starten" klicken.')
+        const startBtn = document.getElementById('tpOrderStart')
+        if(startBtn) startBtn.disabled = true
+        if(msg){ msg.textContent = 'Order gespeichert — Puls wechselt zum TradingView-Tab…'; msg.className = 'modal-msg' }
+        try{
+          const r = await window.mtcApi('tv-fokus', { method:'POST',
+            headers:{'Content-Type':'application/json'}, body:'{}' })
+          if(r && r.ok){
+            document.getElementById('tpOrderModal').classList.remove('open')
+            if(typeof atToast === 'function') atToast(`Order gespeichert: ${_tpOrderDir.toUpperCase()} ${lots} ${symbol}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Puls ist am TradingView-Tab, Order dort von Hand platzieren. Echo hedgt.`, 'start')
+          } else {
+            err('Order gespeichert, aber TradingView-Tab nicht erreicht: ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
+          }
+        }catch(e){
+          err('Order gespeichert, aber TradingView-Tab nicht erreicht: ' + (e && e.message || e))
+        }finally{
+          if(startBtn) startBtn.disabled = false
+        }
+        return
+      }
       document.getElementById('tpOrderModal').classList.remove('open')
       if(typeof atToast === 'function') atToast(`Order gespeichert: ${_tpOrderDir.toUpperCase()} ${lots} ${symbol}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Starten über die Karte.`, 'start')
     }catch(e){

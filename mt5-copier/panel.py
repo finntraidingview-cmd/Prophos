@@ -1856,6 +1856,29 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] Maus-Test → {res.get('msg')}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-fokus":
+            # Orbit-Puls Schritt 1 (28.08.2026, Finns Etappe 3): der Bot holt
+            # NUR den TradingView-Tab nach vorn — kein Klick in die Seite,
+            # keine Order. Bewusst OHNE Instanz-Bezug (wie mouse-test): fuer
+            # den Fokuswechsel braucht es keine Config, der Schritt laeuft so
+            # auch auf PCs, deren tvplus-Config noch fehlt. Ein alter Bot ohne
+            # tvfokus-Modus antwortet harmlos mit seiner Aufruf-Hilfe (ok:false).
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            try:
+                p = subprocess.run([sys.executable, bot, "tvfokus"],
+                                   capture_output=True, text=True, errors="replace", timeout=60)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "msg": "TV-Fokus Timeout (60s)."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "msg": f"TV-Fokus-Start fehlgeschlagen: {e}"}
+            print(f"[panel] TV-Fokus -> {res.get('ok')} ({res.get('msg')})", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:
