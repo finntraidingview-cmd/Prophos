@@ -38,6 +38,7 @@ VOR dem Buy/Sell-Klick). Nach dem Klick ist jede Unsicherheit retry_ok=False —
 import json
 import math
 import os
+import random
 import re
 import sys
 import time
@@ -232,7 +233,7 @@ def _api_lesen(path, expected, symbol=None):
             # nachfassen, bevor 'Markt zu' gemeldet wird.
             _t0 = time.time()
             while (tick is None or not (tick.ask and tick.bid)) and time.time() - _t0 < 3:
-                time.sleep(0.3)
+                _warte(0.3, 0.3)
                 tick = mt5.symbol_info_tick(symbol)
             if si is None or tick is None or not (tick.ask and tick.bid):
                 return {"fehler": f"Keine Kurse fuer '{symbol}' (Markt zu?)."}
@@ -267,6 +268,23 @@ _PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "echo_pau
 
 def is_paused():
     return os.path.exists(_PAUSE_FLAG)
+
+
+def _warte(minimum, streuung):
+    """Wartezeit mit Zufalls-Streuung: minimum + 0..streuung Sekunden.
+
+    28.08.2026, Finns Sorge: platziert die Flotte gleichzeitig, tickte bisher
+    JEDER Schritt — F9, Symbol, Volumen, Buy-Klick, SL/TP-Eintrag — auf allen
+    Instanzen im exakt gleichen Sekunden-Raster (fixe sleeps). Die Streuung
+    zieht die Ablaeufe pro Lauf und pro Instanz auseinander; jeder Aufruf
+    wuerfelt neu, dadurch unterscheiden sich auch die Abstaende ZWISCHEN den
+    Schritten eines einzelnen Laufs.
+
+    Das Minimum bleibt unangetastet — es ist die Zeit, die die MT5-UI wirklich
+    braucht (Tempo-Kalibrierung aus .73 gilt weiter), gewuerfelt wird nur
+    OBENDRAUF. Bewusst OHNE Streuung bleiben die 12-ms-Animationsschritte in
+    _maus_fahren (fluessige Bewegung) und die Diagnose-Modi mousetest/inspect."""
+    time.sleep(minimum + random.uniform(0.0, streuung))
 
 
 def _klick_absolut(x, y, taste="links", doppel=False):
@@ -442,11 +460,11 @@ def _fenster_betreten(w):
     try:
         if w.is_minimized():
             w.restore()
-            time.sleep(0.2)
+            _warte(0.2, 0.25)
     except Exception:
         pass
     w.set_focus()
-    time.sleep(0.25)
+    _warte(0.25, 0.3)
     try:
         from pywinauto import mouse
         r = w.rectangle()
@@ -455,7 +473,7 @@ def _fenster_betreten(w):
         y = int(r.top + 14)
         _maus_fahren(x, y)
         mouse.click(coords=(x, y))
-        time.sleep(0.15)
+        _warte(0.15, 0.2)
     except Exception:
         pass  # Fokus steht schon — der Klick ist der sichtbare Uebernahme-Moment
 
@@ -579,7 +597,7 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
                 return cand.wrapper_object()
         except Exception:
             pass
-        time.sleep(0.3)
+        _warte(0.3, 0.3)
     return None
 
 
@@ -628,14 +646,14 @@ def _feld_tippen(el, wert, name, trail):
     for _versuch in (1, 2):
         try:
             el.set_focus()
-            time.sleep(0.1)
+            _warte(0.1, 0.15)
             # Feld GARANTIERT leeren (18.08.2026, Finns 22-Einwand: steht vom
             # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
             # Strg+A UND Pos1+Shift+Ende — je nach Edit-Control greift nur
             # eines von beiden. Danach ZURUECKLESEN, ob es wirklich leer ist.
             el.type_keys("^a{DELETE}", set_foreground=False)
             el.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
-            time.sleep(0.08)
+            _warte(0.08, 0.1)
             rest = (_feld_lesen(el) or "").strip()
             if rest:
                 # Feld fuellt sich selbst wieder (Auto-Format)? Dann alles
@@ -645,7 +663,7 @@ def _feld_tippen(el, wert, name, trail):
                 el.type_keys("^a", set_foreground=False)
                 el.type_keys("{HOME}+{END}", set_foreground=False)
             el.type_keys(str(wert), with_spaces=False, set_foreground=False)
-            time.sleep(0.12)
+            _warte(0.12, 0.15)
             ist = _feld_lesen(el)
             if zahl_gleich(ist, wert):
                 trail.append(f"{name} getippt: {wert}")
@@ -716,7 +734,7 @@ def _finde_aendern_dialog(hauptfenster, timeout=3.0):
                     return d
         except Exception:
             pass
-        time.sleep(0.3)
+        _warte(0.3, 0.3)
     return None
 
 
@@ -750,7 +768,7 @@ def _kontextmenue_aendern_klicken(timeout=2.0):
                     continue
         except Exception:
             pass
-        time.sleep(0.2)
+        _warte(0.2, 0.25)
     return False
 
 
@@ -840,11 +858,11 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
             _maus_fahren(px_, py_, schritte=3)
             # Finns Schritt 1: Zeile markieren, dann erst oeffnen
             _klick_absolut(px_, py_)
-            time.sleep(0.15)
+            _warte(0.15, 0.2)
             if runde == "Rechtsklick-Menue":
                 if not _klick_absolut(px_, py_, taste="rechts"):
                     continue
-                time.sleep(0.25)
+                _warte(0.25, 0.3)
                 if not _kontextmenue_aendern_klicken(timeout=0.8):
                     try:
                         w.type_keys("{ESC}", set_foreground=False)
@@ -938,7 +956,7 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
                 _klick_absolut(cx, cy)
                 if trail is not None:
                     trail.append(f"Handel-Tab geklickt @({cx},{cy})")
-                time.sleep(0.3)
+                _warte(0.3, 0.3)
                 return True
         except Exception:
             continue
@@ -1027,7 +1045,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             # Finns Reihenfolge (18.08.2026, manuell vorgemacht): erst die
             # Zeile ANKLICKEN (markieren), dann oeffnen
             _klick_absolut(mx, my)
-            time.sleep(0.2)
+            _warte(0.2, 0.25)
 
         def _weg_doppel():
             if not maus_ok or not _klick_absolut(mx, my, doppel=True):
@@ -1041,16 +1059,16 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
 
         def _weg_menue():
             zeile.select()
-            time.sleep(0.2)
+            _warte(0.2, 0.25)
             w.type_keys("+{F10}")
-            time.sleep(0.4)
+            _warte(0.4, 0.35)
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
 
         def _weg_rechtsklick():
             if not maus_ok or not _klick_absolut(mx, my, taste="rechts"):
                 raise RuntimeError("Maus hier nicht erlaubt/fehlgeschlagen")
-            time.sleep(0.4)
+            _warte(0.4, 0.35)
             if not _kontextmenue_aendern_klicken():
                 raise RuntimeError("kein Menuepunkt")
 
@@ -1127,9 +1145,9 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                 # (oeffnet in MT5 denselben Dialog).
                 d = None
                 if _klick_absolut(gx, gy):
-                    time.sleep(0.25)
+                    _warte(0.25, 0.3)
                     if _klick_absolut(gx, gy, taste="rechts"):
-                        time.sleep(0.4)
+                        _warte(0.4, 0.35)
                         if _kontextmenue_aendern_klicken():
                             d = _finde_aendern_dialog(w, timeout=1.5)
                         else:
@@ -1175,7 +1193,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         for el, wert, name in ((sl_el, sl_text, "SL"), (tp_el, tp_text, "TP")):
             if not _feld_tippen(el, wert, name, trail):
                 raise RuntimeError(f"{name}-Feld uebernimmt {wert} nicht")
-        time.sleep(0.3)
+        _warte(0.3, 0.3)
     except Exception as e:
         try:
             dlg.type_keys("{ESC}", set_foreground=False)
@@ -1237,7 +1255,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
 
     def _k_leertaste():
         knopf.set_focus()
-        time.sleep(0.1)
+        _warte(0.1, 0.15)
         try:
             hat = bool(knopf.has_keyboard_focus())
         except Exception:
@@ -1261,7 +1279,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             continue
         ende_k = time.time() + 2.5
         while time.time() < ende_k and not _dialog_zu():
-            time.sleep(0.3)
+            _warte(0.3, 0.3)
         if _dialog_zu():
             trail.append(f"Aendern-Knopf ausgeloest ({name}) — Dialog zu")
             return {"ok": True, "msg": "geklickt"}
@@ -1322,6 +1340,12 @@ def run(cfg_path, cmd):
     # Fehler in der Meldung, damit Finn/ich sofort sieht, wo der Bot steht.
     trail = []
 
+    # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
+    # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
+    # beieinander. 0-1.2 s Wuerfel VOR dem ersten sichtbaren Schritt zieht die
+    # Laeufe von Beginn an auseinander.
+    _warte(0.0, 1.2)
+
     # 2b) Ins (vom Check bereits geoeffnete) Terminal gehen -> Guard
     w = _finde_terminal(expected)
     if w is None:
@@ -1335,7 +1359,7 @@ def run(cfg_path, cmd):
 
     # 3) F9 -> Dialog -> Felder direkt setzen (cursor-unabhaengig, s.o. Parsec)
     w.type_keys("{F9}")
-    time.sleep(0.4)
+    _warte(0.4, 0.35)
     dlg = _finde_order_dialog(w)
     if dlg is None:
         return {"ok": False, "retry_ok": True,
@@ -1394,17 +1418,17 @@ def run(cfg_path, cmd):
                         break
             except Exception:
                 pass
-        time.sleep(0.15)
+        _warte(0.15, 0.2)
         gewaehlt = _symbol_drin()
         if not gewaehlt:
             # Combo ist editierbar: Symbol ECHT eintippen (Autovervollstaendigung),
             # TAB uebergibt die Eingabe
             try:
-                sym_combo.set_focus(); time.sleep(0.15)
+                sym_combo.set_focus(); _warte(0.15, 0.2)
                 sym_combo.type_keys("^a{DELETE}", set_foreground=False)
                 sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
                 sym_combo.type_keys("{TAB}", set_foreground=False)
-                time.sleep(0.2)
+                _warte(0.2, 0.25)
             except Exception:
                 pass
             gewaehlt = _symbol_drin()
@@ -1413,7 +1437,7 @@ def run(cfg_path, cmd):
             raise RuntimeError(f"Symbol '{symbol}' steht nicht bestaetigt im Dialog "
                                f"(gelesen: '{(_feld_lesen(sym_combo) or '')[:40]}') — "
                                f"Abbruch, sonst ginge die Order aufs falsche Symbol.")
-        time.sleep(0.1)
+        _warte(0.1, 0.15)
         # NUR Volumen setzen — SL/TP kommen NACH dem Einstieg aus dem echten
         # Fill-Kurs (Finns Timing-Loesung). Feld nach Beschriftung, sonst
         # Index-Fallback. ECHT tippen statt set_text (18.08.2026, Finns Fund am
@@ -1428,7 +1452,7 @@ def run(cfg_path, cmd):
         if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail):
             raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
                                f"Abbruch VOR dem Order-Knopf.")
-        time.sleep(0.2)
+        _warte(0.2, 0.25)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + " → ".join(trail) + "]"}
@@ -1477,7 +1501,7 @@ def run(cfg_path, cmd):
         werden — sonst feuern zwei Wege ZWEI Orders."""
         ende_s = time.time() + sekunden
         while time.time() < ende_s:
-            time.sleep(0.35)
+            _warte(0.35, 0.3)
             st = _api_lesen(path, expected)
             if "fehler" not in st and finde_neue_position(
                     vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
@@ -1493,7 +1517,7 @@ def run(cfg_path, cmd):
     # Dialogs — und der koennte die falsche Richtung sein.
     def _weg_leertaste():
         knopf.set_focus()
-        time.sleep(0.1)
+        _warte(0.1, 0.15)
         try:
             hat_fokus = bool(knopf.has_keyboard_focus())
         except Exception:
@@ -1533,7 +1557,7 @@ def run(cfg_path, cmd):
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
     ende = time.time() + 12
     while time.time() < ende:
-        time.sleep(0.4)
+        _warte(0.4, 0.35)
         nachher = _api_lesen(path, expected)
         if "fehler" in nachher:
             continue
@@ -1571,7 +1595,7 @@ def run(cfg_path, cmd):
                 dlg.type_keys("{ESC}", set_foreground=False)
             except Exception:
                 pass
-            time.sleep(0.2)
+            _warte(0.2, 0.25)
             # Anker-Datei: gemerkte Treffer-Stelle des Zeilen-Scans. BEWUSST
             # mit 'anker-'-Praefix, damit sie NIE ins config-*.json-Muster
             # des Copiers faellt.
@@ -1583,7 +1607,7 @@ def run(cfg_path, cmd):
             bestaetigt = False
             ende2 = time.time() + 10
             while time.time() < ende2 and not bestaetigt:
-                time.sleep(0.5)
+                _warte(0.5, 0.4)
                 st = _api_lesen(path, expected)
                 if "fehler" in st:
                     continue
