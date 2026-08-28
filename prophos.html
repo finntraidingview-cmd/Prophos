@@ -732,9 +732,9 @@
   #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
   #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
-  /* Meta-Wallet: 5 Karten (Gesamt + 4 Chains, seit Polygon 25.08.2026) — muss VOR der
+  /* Meta-Wallet: 6 Karten (Gesamt + 5 Chains, seit BNB 28.08.2026) — muss VOR der
      960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt */
-  #adm-pane-wallet .kpis{grid-template-columns:repeat(5,1fr)}
+  #adm-pane-wallet .kpis{grid-template-columns:repeat(6,1fr)}
   @media (max-width:960px){#dashboard-view .kpis{grid-template-columns:repeat(2,1fr)}}
   #dashboard-view .kpi{
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
@@ -6477,6 +6477,11 @@
               <div class="kpi-delta delta-neutral" id="wal-k-polygon-sub">–</div>
             </div>
             <div class="kpi">
+              <div class="kpi-label">BNB Chain</div>
+              <div class="kpi-value" id="wal-k-bnb">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-bnb-sub">–</div>
+            </div>
+            <div class="kpi">
               <div class="kpi-label">Solana</div>
               <div class="kpi-value" id="wal-k-solana">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-solana-sub">–</div>
@@ -6500,6 +6505,7 @@
               <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;color:var(--sub)">
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8247e5;margin-right:5px"></span>Polygon</span>
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#f0b90b;margin-right:5px"></span>BNB</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#14f195;margin-right:5px"></span>Solana</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ef4444;margin-right:5px"></span>Tron</span>
               </div>
@@ -6522,7 +6528,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Wallets</div>
-                <div class="panel-sub">Pro Person bis zu vier Adressen — Arbitrum, Polygon, Solana, Tron</div>
+                <div class="panel-sub">Pro Person bis zu fünf Adressen — Arbitrum, Polygon, BNB Chain, Solana, Tron</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -6531,6 +6537,7 @@
               <select id="wal-add-chain" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
                 <option value="arbitrum">Arbitrum</option>
                 <option value="polygon">Polygon</option>
+                <option value="bnb">BNB Chain</option>
                 <option value="solana">Solana</option>
                 <option value="tron">Tron</option>
               </select>
@@ -6557,7 +6564,7 @@
 
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
             Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
-            Balances kommen live von den Chains (USDT + USDC + Chain-Coin, also ETH/POL/SOL/TRX) direkt aus dem Browser, ohne API-Key;
+            Balances kommen live von den Chains (USDT + USDC + Chain-Coin, also ETH/POL/BNB/SOL/TRX) direkt aus dem Browser, ohne API-Key;
             die Coin-Kurse zum Umrechnen in USDT liefert Binance (Fallback: CoinGecko). Alle Summen sind in USDT.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
           </p>
@@ -8424,9 +8431,9 @@
     const WAL_CHAINS = {
       /* stables statt einzelnem usdt-Feld (28.08.2026, Finns Fund: 4.499 USDC auf
        * einer Arbitrum-Wallet zählten nicht — der Tab fragte pro Chain nur den einen
-       * USDT-Contract ab). Alle Einträge hier haben 6 Dezimalstellen, deshalb darf
-       * überall /1e6 gerechnet werden; ein Token mit anderen Dezimalen braucht ein
-       * eigenes dec-Feld, bevor er in diese Listen darf. */
+       * USDT-Contract ab). Standard sind 6 Dezimalstellen; Chains, deren Stables
+       * davon abweichen, tragen stableDec (BNB: 18) — die EVM-Leselogik teilt
+       * durch 10**stableDec. Solana/Tron bleiben fix 6-stellig. */
       arbitrum: { label:'Arbitrum', col:'#3b82f6', evm:true,
                   coin:'ETH', px:'ETHUSDT', gecko:'ethereum',
                   stables:{ 'USDT':'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',      // USDT / USD₮0 (Arbitrum One)
@@ -8447,6 +8454,21 @@
                   rpc:'https://polygon-bor-rpc.publicnode.com',
                   rpcFallback:'https://polygon-rpc.com',
                   explorer: a => 'https://polygonscan.com/address/' + a,
+                  valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
+                  hint:'0x… (42 Zeichen)' },
+      // BNB Chain (28.08.2026): gleiche MetaMask-Adresse wie Arbitrum/Polygon.
+      // ACHTUNG: USDT und USDC sind auf BSC 18-stellig (nicht 6 wie überall
+      // sonst) — daher stableDec:18. Sub-Cent-Präzision geht dabei durch
+      // parseInt auf Float verloren, gleiche Klasse wie die ETH/BNB-Balance
+      // selbst (1e18) — für eine 2-Nachkommastellen-Anzeige egal.
+      bnb:      { label:'BNB Chain', col:'#f0b90b', evm:true,
+                  coin:'BNB', px:'BNBUSDT', gecko:'binancecoin',
+                  stableDec:18,
+                  stables:{ 'USDT':'0x55d398326f99059fF775485246999027B3197955',      // USDT (BSC-USD, Binance-Peg)
+                            'USDC':'0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d' },    // USDC (Binance-Peg)
+                  rpc:'https://bsc-rpc.publicnode.com',
+                  rpcFallback:'https://bsc-dataseed.bnbchain.org',
+                  explorer: a => 'https://bscscan.com/address/' + a,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
       solana:   { label:'Solana', col:'#14f195',
@@ -8591,8 +8613,8 @@
           walRpc(c, 'eth_getBalance', [w.address, 'latest']),
           ...labels.map(l => walRpc(c, 'eth_call', [{ to:c.stables[l], data }, 'latest']))
         ])
-        const parts = {}
-        labels.forEach((l, i) => { parts[l] = (parseInt(toks[i] || '0x0', 16) || 0) / 1e6 })
+        const parts = {}, dec = 10 ** (c.stableDec || 6)   // BSC-Stables sind 18-stellig
+        labels.forEach((l, i) => { parts[l] = (parseInt(toks[i] || '0x0', 16) || 0) / dec })
         return { usdt: Object.values(parts).reduce((a, v) => a + v, 0),
                  coin:(parseInt(nat || '0x0', 16) || 0) / 1e18, parts }
       }
@@ -8738,7 +8760,10 @@
       // Nach Person: gestapelte Balken (Segmente = Chains), Breite = Anteil am Gesamt
       const byPerson = new Map()
       for(const w of rows){
-        const g = byPerson.get(w.person_name) || { name:w.person_name, total:0, chains:{ arbitrum:0, polygon:0, solana:0, tron:0 } }
+        // chains dynamisch aus WAL_CHAINS statt hart aufgezählt (28.08.2026, BNB-Einbau:
+        // die harte Liste hätte die fünfte Chain hier still aus den Balken gelassen)
+        const g = byPerson.get(w.person_name) || { name:w.person_name, total:0,
+          chains:Object.fromEntries(Object.keys(WAL_CHAINS).map(k => [k, 0])) }
         g.total += bal(w) ?? 0
         g.chains[w.chain] += bal(w) ?? 0
         byPerson.set(w.person_name, g)
