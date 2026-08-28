@@ -6569,6 +6569,14 @@
   function showLogin(){
     dashboardEl.classList.remove('active')
     loginEl.classList.add('active')
+    // Submit-Knöpfe entriegeln (Finns „lädt unendlich"-Bug, 28.08.2026): nach einem
+    // ERFOLGREICHEN signIn bleibt der Login-Knopf bewusst im Lade-Zustand — das Dashboard
+    // übernimmt ja. Kommt man aber im selben DOM per Logout/Profilwechsel auf diese Maske
+    // zurück, wäre er sonst dauerhaft gesperrt und nur ein Prophos-Neustart half.
+    for(const id of ['loginSubmit','signupSubmit','resetSubmit']){
+      const b = document.getElementById(id)
+      if(b) setLoading(b, false)
+    }
     // Activate sub-screen based on hash, or default to login
     const hash = (location.hash || '').replace('#','')
     const screen = ['signup','reset','login'].includes(hash) ? hash : 'login'
