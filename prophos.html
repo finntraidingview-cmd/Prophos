@@ -4526,11 +4526,6 @@
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-tvplus">Echo +</button>
               </div>
-              <!-- Echo + im Routen-Regler (28.08.2026, Finns „visuell, eins nach
-                   dem anderen"): reine Info-Route. Echo-+-Trades laufen manuell
-                   in TradingView, Pläne gibt es auf diesem Weg (noch) nicht —
-                   Speichern ist gesperrt, die Box erklärt den Weg. -->
-              <div id="tp-route-tvplus-info" style="display:none;margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.55;background:rgba(124,58,237,.07);border:1px solid rgba(124,58,237,.25)"></div>
             </div>
             <div class="field">
               <label>Master-Account</label>
@@ -20271,29 +20266,10 @@
     const sb = document.getElementById('tradePlanSaveStart')
     if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →'
       : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
-    // Echo + ist jetzt eine ECHTE Plan-Route (28.08.2026, Etappe 2): Master =
-    // Futures-Account mit External ID, Slave fix = Hedge des PCs. „Starten"
-    // kommt erst mit dem TV-Puls (Etappe 3) — bis dahin wird die Order von
-    // Hand in TradingView platziert und Echo hedgt automatisch; die Box
-    // erklärt genau das.
-    const tvplus = _tpRoute === 'tvplus'
-    const info = document.getElementById('tp-route-tvplus-info')
-    if(info){
-      info.style.display = tvplus ? '' : 'none'
-      if(tvplus && !info.innerHTML){
-        info.innerHTML = '<b>Echo +</b>: Master ist ein <b>Futures-Account</b> (Firm mit Kontrakte-Spec, External ID nötig), '
-          + 'der Slave ist fix der Hedge dieses PCs — wie bei Echo. Nach dem Speichern platzierst du die Order '
-          + '<b>von Hand in TradingView</b>; der Reader sieht sie und Echo hedgt automatisch. '
-          + '„Starten" per Puls kommt als nächste Ausbaustufe. '
-          + '<button type="button" class="btn btn-ghost" id="tp-route-tvplus-link" style="margin-top:8px;padding:5px 10px;font-size:12px;display:block">→ Zur Echo-+-Ansicht</button>'
-        document.getElementById('tp-route-tvplus-link')?.addEventListener('click', () => {
-          document.getElementById('tradePlanModal')?.classList.remove('open')
-          switchView('echoplus')
-        })
-      }
-    }
-    // Bei fixem MT5-Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren
-    const fixed = _tpRoute === 'mt5'
+    // Bei fixem Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren.
+    // Gilt für Echo UND Echo + (28.08.2026, Finns Ansage „fix wie bei Echo" —
+    // die Info-Box von Etappe 2a ist raus, der Fluss erklärt sich selbst).
+    const fixed = _tpRoute === 'mt5' || _tpRoute === 'tvplus'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
     if(filterRow) filterRow.style.display = fixed ? 'none' : ''
     const slaveSel = document.getElementById('tp-slave')
