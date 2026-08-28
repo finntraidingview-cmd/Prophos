@@ -868,6 +868,58 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
     return None
 
 
+def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
+    """Toolbox auf den 'Handel'-Tab stellen, BEVOR der Bot die Position
+    anklickt (28.08.2026, Finns Live-Fund auf Moritz' PC): nach einem frischen
+    Terminal-Start stand die Toolbox auf 'Posteingang' (die 'neuer Account'-
+    Mail). Die Order ging ueber den F9-Dialog clean durch, aber das SL/TP-
+    Aendern klickte ins Leere, weil die Positionsliste gar nicht sichtbar war —
+    genau Finns Analyse: erst pruefen/auf 'Handel' gehen, dann die Zeile suchen.
+
+    Best-Effort und idempotent: bevorzugt das UIA-Select-Pattern (KEIN
+    Maus-Klick, also nie im Chart-/Ein-Klick-Panel-Bereich, wo ein Klick eine
+    Order waere); der Maus-Fallback klickt nur im UNTEREN Fensterbereich, wo die
+    Tabs strukturell liegen. Findet der Bot den Tab nicht, laeuft der bisherige
+    Positions-Scan unveraendert weiter (nichts wird schlechter)."""
+    def _passt(t):
+        return (t or "").strip().startswith(("Handel", "Trade"))  # MT5 DE/EN
+    try:
+        for ct in ("TabItem", "Custom", "Button"):
+            try:
+                els = w.descendants(control_type=ct)
+            except Exception:
+                continue
+            for el in els:
+                try:
+                    if not _passt(el.window_text()):
+                        continue
+                except Exception:
+                    continue
+                try:
+                    el.select()
+                    if trail is not None:
+                        trail.append(f"Handel-Tab nach vorn ({ct}/select)")
+                    time.sleep(0.3)
+                    return True
+                except Exception:
+                    pass
+                try:
+                    r = el.rectangle()
+                    if maus_grenze is None or r.top >= maus_grenze:
+                        _klick_absolut(r.mid_point().x, r.mid_point().y)
+                        if trail is not None:
+                            trail.append(f"Handel-Tab nach vorn ({ct}/klick)")
+                        time.sleep(0.3)
+                        return True
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    if trail is not None:
+        trail.append("Handel-Tab nicht gefunden — Positions-Scan wie gehabt")
+    return False
+
+
 def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     """SL/TP PER KLICK an die offene Position haengen (18.08.2026, Finns
     Ansage): Zeile der Position in der Handel-Liste finden, Aendern-Dialog
@@ -887,6 +939,9 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     except Exception:
         maus_grenze = None
     _fremde_dialoge_schliessen(w)
+    # Toolbox zuerst auf 'Handel' — sonst ist die Positionsliste unsichtbar
+    # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
+    _handel_tab_aktivieren(w, trail, maus_grenze)
 
     # 0) Finns Weg als Band-Scan — braucht keinerlei UIA-Anker (s. _reihen_scan)
     dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
