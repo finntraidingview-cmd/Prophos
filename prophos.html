@@ -20488,7 +20488,9 @@
    * + Lots (= Anzahl Kontrakte) + Symbol aus den Firmen-Einstellungen.
    * Lokal (PC): exakt der bekannte Weg — Order merken, Trade-Start-Check.
    * Remote (Handy/Mac): Signal + Live-Schritte im Check-Popup:
-   *   Signal senden → PC übernimmt → Check am PC → Puls platziert. */
+   *   Signal senden → PC übernimmt → Check am PC → Puls platziert
+   *   → TP/SL gesetzt → Hedge auf dem Slave (die letzten drei live aus
+   *   mt5_live bewiesen, nicht nur aus dem Signal-Ergebnis — s. tick()). */
   let _rsAktiv = null   // { sigId, timer, t0 } — ein Remote-Check zur Zeit
 
   async function tpJetztStarten(planId){
@@ -20536,10 +20538,17 @@
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `📡 Starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}${order.tp_usd ? ` · TP $${order.tp_usd} / SL $${order.sl_usd}` : ' · ohne SL/TP (Order pur)'}`
     document.getElementById('tpPreflightModal').classList.add('open')
+    // Feinere Live-Verfolgung (28.08.2026, Finns Wunsch nach dem 2. Remote-
+    // Lauf): Order / TP-SL / Hedge als eigene Schritte, jeweils abgehakt,
+    // sobald der Flotten-Puls (mt5_live, 5s-Push des PC-Tabs) sie BEWEIST —
+    // nicht erst, wenn der ganze Puls-Lauf (inkl. Heimweg) fertig meldet.
+    const sltpAn = !!order.tp_usd
     _pfAddRow('rs-sig',   'Signal senden')
     _pfAddRow('rs-claim', 'PC übernimmt')
     _pfAddRow('rs-check', 'Trade-Start-Check am PC')
     _pfAddRow('rs-order', 'Puls platziert die Order')
+    if(sltpAn) _pfAddRow('rs-sltp', 'TP/SL gesetzt')
+    _pfAddRow('rs-hedge', 'Hedge auf dem Slave')
     const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
     const fertigUi = (ok, text) => {
       if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
@@ -20564,6 +20573,34 @@
     }
     _pfSet('rs-sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — die Prop-Firma sieht nur die gewohnte PC-IP.`)
     _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    /* Live-Beweis aus mt5_live: master_positions trägt seit Snapshot v5
+     * SL/TP pro Position, hedges ist nach Master-Ident verschlüsselt. Nur
+     * frische Zeilen (≤25s) zählen — Beweis-Doktrin, nie alte Daten als
+     * live verkaufen. base = Stand der passenden Positionen VOR der Order
+     * (bis zum order-Stempel jeden Tick aufgefrischt), damit eine schon
+     * laufende gleichgerichtete Position nie als „unsere neue" durchgeht.
+     * Fehlt der Beweis (altes EA ohne SL/TP-Felder, eingeschlafener Push),
+     * bleibt der „fertig"-Weg unten die Wahrheit — nichts hängt daran. */
+    const live = { base: null, ident: null, rowId: null, orderOk: false, sltpOk: false, hedgeOk: false }
+    const passt = p => p && String(p.symbol || '').toLowerCase().includes(String(order.symbol || '').toLowerCase())
+      && Number(p.type) === (order.richtung === 'buy' ? 0 : 1)
+    const liveRows = async pc => {
+      try{
+        const grenze = new Date(Date.now() - 25000).toISOString()
+        let q = supabase.from('mt5_live').select('*').gte('updated_at', grenze)
+        if(pc) q = q.eq('pc_name', pc)
+        const { data } = await q
+        return data || []
+      }catch(_){ return [] }
+    }
+    // Merge statt Ersetzen: eine Zeile, deren Push kurz einschläft, behält
+    // ihren Baseline-Stand — sonst sähen ihre ALTEN Positionen nach dem
+    // Aufwachen wie neue aus.
+    const baseMerge = mls => {
+      if(!live.base) live.base = new Map()
+      for(const ml of mls) live.base.set(ml.id,
+        new Set((((ml.status || {}).master_positions) || []).filter(passt).map(p => Number(p.ident))))
+    }
     const stornoFallsWartet = () => {
       supabase.from('order_signale')
         .update({ status:'verworfen', updated_at: new Date().toISOString(),
@@ -20594,22 +20631,89 @@
           _pfSet('rs-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
           _pfSet('rs-check', 'warn', 'Übersprungen.')
           _pfSet('rs-order', 'warn', 'Übersprungen — nichts platziert.')
+          if(sltpAn) _pfSet('rs-sltp', 'warn', 'Übersprungen.')
+          _pfSet('rs-hedge', 'warn', 'Übersprungen.')
           fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Jetzt starten".')
           stop(); return
         }
         _pfSet('rs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+        // Baseline schon JETZT (alle PCs — wer claimt, steht noch nicht fest):
+        // claimt der PC zwischen zwei Ticks und stempelt sofort 'order', wäre
+        // sie sonst leer und eine ALTE gleichgerichtete Position ginge als
+        // „unsere neue" durch.
+        baseMerge(await liveRows(null))
       } else if(row.status === 'laeuft'){
         _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
         if(erg.schritt === 'order'){
           _pfSet('rs-check', 'ok', 'Check grün — Terminal bereit.')
-          _pfSet('rs-order', 'warn', `⏳ Puls füllt den Order-Dialog im Master-Terminal… (${sec}s) — HÄNDE WEG am PC!`)
+          const mls = await liveRows(row.pc)
+          if(!_rsAktiv || _rsAktiv.sigId !== sig.id || zu()) return   // Lage nach await neu prüfen
+          if(!live.orderOk){
+            for(const ml of mls){
+              const neu = (((ml.status || {}).master_positions) || []).find(p => passt(p)
+                && !(live.base && live.base.get(ml.id) && live.base.get(ml.id).has(Number(p.ident))))
+              if(neu){
+                live.orderOk = true; live.ident = Number(neu.ident); live.rowId = ml.id
+                _pfSet('rs-order', 'ok', `Order im Markt — live erkannt: ${escapeHtml(order.richtung.toUpperCase())} ${escapeHtml(String(neu.volume ?? ''))} ${escapeHtml(String(neu.symbol || ''))}${neu.price_open ? ` @ ${escapeHtml(String(neu.price_open))}` : ''}`)
+                break
+              }
+            }
+          }
+          if(!live.orderOk){
+            _pfSet('rs-order', 'warn', `⏳ Puls füllt den Order-Dialog im Master-Terminal… (${sec}s) — HÄNDE WEG am PC!`)
+          } else {
+            const st = ((mls.find(x => x.id === live.rowId) || {}).status) || {}
+            const pos = (st.master_positions || []).find(p => Number(p.ident) === live.ident)
+            if(sltpAn && !live.sltpOk){
+              if(pos && Number(pos.sl) > 0 && Number(pos.tp) > 0){
+                live.sltpOk = true
+                _pfSet('rs-sltp', 'ok', `SL ${escapeHtml(String(pos.sl))} · TP ${escapeHtml(String(pos.tp))} — sitzt im Master-Terminal.`)
+              } else {
+                _pfSet('rs-sltp', 'warn', `⏳ Puls trägt SL/TP ein… (${sec}s) — HÄNDE WEG am PC!`)
+              }
+            }
+            if(!live.hedgeOk){
+              const hs = (st.hedges || {})[String(live.ident)]
+              if(Array.isArray(hs) && hs.length){
+                live.hedgeOk = true
+                const h0 = hs[0] || {}
+                _pfSet('rs-hedge', 'ok', `Echo hat kopiert: ${Number(h0.type) === 0 ? 'BUY' : 'SELL'} ${escapeHtml(String(h0.volume ?? ''))} ${escapeHtml(String(h0.symbol || ''))} auf dem Slave.`)
+              } else {
+                _pfSet('rs-hedge', 'warn', `⏳ Echo kopiert auf den Slave… (${sec}s)`)
+              }
+            }
+            // Kompletter Live-Beweis → Popup darf zu, BEVOR der Bot seinen
+            // Aufräum-Rest (Spur, Heimweg) gemeldet hat (Finns Wunsch: „sobald
+            // TP/SL gesetzt ist, soll das Popup verschwinden"). Das Signal
+            // läuft in der DB normal zu Ende — nur zugucken lohnt nicht mehr.
+            if(live.hedgeOk && (!sltpAn || live.sltpOk)){
+              fertigUi(true, `✓ Live bestätigt: Order im Markt${sltpAn ? ' · TP/SL gesetzt' : ''} · Hedge kopiert — Puls räumt am PC nur noch auf.`)
+              try{ loadTradePlansFromSupabase() }catch(_){}
+              stop()
+              setTimeout(() => {
+                const fe2 = document.getElementById('pf-final')
+                if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+                   && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
+              }, 2400)
+              return
+            }
+          }
         } else {
           _pfSet('rs-check', 'warn', `⏳ Check läuft am PC — Verlinkung, Copier, Richtung, Terminal… (${sec}s)`)
+          // Baseline auffrischen, solange die Order noch nicht unterwegs ist
+          // (der order-Stempel kommt VOR dem ersten Klick von Puls).
+          baseMerge(await liveRows(row.pc))
         }
       } else if(row.status === 'fertig'){
         _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
         _pfSet('rs-check', 'ok', 'Check grün.')
         _pfSet('rs-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
+        // Was der Live-Puls (noch) nicht bewiesen hat, sagt jetzt der Bot:
+        // SL/TP steckt in seiner Bestätigung („offen" wäre im Fehler-Zweig
+        // gelandet); der Hedge ist Echos Job — ohne Live-Sichtung ehrlich
+        // als „prüfen" markieren statt blind abhaken (Beweis-Doktrin).
+        if(sltpAn && !live.sltpOk) _pfSet('rs-sltp', 'ok', 'Laut Puls gesetzt — Werte in der Bestätigung oben.')
+        if(!live.hedgeOk) _pfSet('rs-hedge', 'warn', 'Noch nicht im Flotten-Puls gesehen — auf der Trade-Karte prüfen.')
         fertigUi(true, '✓ Order platziert — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".')
         try{ loadTradePlansFromSupabase() }catch(_){}
         stop()
@@ -20626,6 +20730,9 @@
         const offen = !!erg.offen
         const ziel = (row.status === 'wartet' || !row.pc) ? 'rs-claim' : (erg.schritt === 'order' || erg.unklar || offen) ? 'rs-order' : 'rs-check'
         _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
+        if(sltpAn && !live.sltpOk) _pfSet('rs-sltp', offen ? 'err' : 'warn',
+          offen ? 'NICHT gesetzt — SOFORT am PC von Hand nachtragen!' : 'Übersprungen.')
+        if(!live.hedgeOk) _pfSet('rs-hedge', 'warn', live.orderOk ? 'Auf der Trade-Karte prüfen.' : 'Übersprungen.')
         fertigUi(false, offen
           ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT am PC von Hand nachtragen!'
           : (erg.unklar
