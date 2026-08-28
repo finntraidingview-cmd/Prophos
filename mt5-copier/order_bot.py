@@ -897,41 +897,53 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
     Tabs strukturell liegen. Findet der Bot den Tab nicht, laeuft der bisherige
     Positions-Scan unveraendert weiter (nichts wird schlechter)."""
     def _passt(t):
-        return (t or "").strip().startswith(("Handel", "Trade"))  # MT5 DE/EN
-    try:
-        for ct in ("TabItem", "Custom", "Button"):
+        t = (t or "").strip()
+        return t == "Handel" or t == "Trade" or t.startswith(("Handel", "Trade"))
+    # Breit suchen: je nach MT5-Build ist der Toolbox-Reiter TabItem, Custom,
+    # Button oder Text — notfalls der ganze Baum (None). Alle Treffer sammeln.
+    treffer = []
+    for ct in ("TabItem", "Custom", "Button", "Text", None):
+        try:
+            els = w.descendants(control_type=ct) if ct else w.descendants()
+        except Exception:
+            continue
+        for el in els:
             try:
-                els = w.descendants(control_type=ct)
+                if _passt(el.window_text()):
+                    treffer.append(el)
             except Exception:
                 continue
-            for el in els:
-                try:
-                    if not _passt(el.window_text()):
-                        continue
-                except Exception:
-                    continue
-                try:
-                    el.select()
-                    if trail is not None:
-                        trail.append(f"Handel-Tab nach vorn ({ct}/select)")
-                    time.sleep(0.3)
-                    return True
-                except Exception:
-                    pass
-                try:
-                    r = el.rectangle()
-                    if maus_grenze is None or r.top >= maus_grenze:
-                        _klick_absolut(r.mid_point().x, r.mid_point().y)
-                        if trail is not None:
-                            trail.append(f"Handel-Tab nach vorn ({ct}/klick)")
-                        time.sleep(0.3)
-                        return True
-                except Exception:
-                    pass
-    except Exception:
-        pass
+        if treffer:
+            break
+    if not treffer:
+        if trail is not None:
+            trail.append("Handel-Tab: kein Element gefunden — Positions-Scan wie gehabt")
+        return False
+    # WICHTIG (28.08.2026, Finns Fund: select() wechselte den Reiter auf seinem
+    # Build NICHT, warf aber auch keinen Fehler → alter Code gab faelschlich
+    # 'erledigt' zurueck): select() nur STILL mitnehmen, verlassen tun wir uns
+    # auf den echten Maus-Klick auf den Reiter (der liegt strukturell unten in
+    # der Toolbox, also kein Chart-/Order-Bereich).
+    for el in treffer:
+        try:
+            el.select()
+        except Exception:
+            pass
+        try:
+            r = el.rectangle()
+            unten = (maus_grenze is None) or (r.top >= maus_grenze)
+            if unten and r.width() > 0 and r.height() > 0:
+                cx, cy = r.mid_point().x, r.mid_point().y
+                _maus_fahren(cx, cy, schritte=4)
+                _klick_absolut(cx, cy)
+                if trail is not None:
+                    trail.append(f"Handel-Tab geklickt @({cx},{cy})")
+                time.sleep(0.3)
+                return True
+        except Exception:
+            continue
     if trail is not None:
-        trail.append("Handel-Tab nicht gefunden — Positions-Scan wie gehabt")
+        trail.append(f"Handel-Tab: {len(treffer)} Element(e) gefunden, keins unten klickbar")
     return False
 
 
