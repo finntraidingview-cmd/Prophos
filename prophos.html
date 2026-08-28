@@ -5614,6 +5614,18 @@
                   <div class="kpi-delta delta-neutral" id="rg-p-anteil">Finanzen-Logik: Summe aller Buchungen</div>
                 </div>
               </div>
+              <!-- Charts (28.08.2026, Finns Wunsch „mehr Graphs"): Muster wie
+                   mgRenderChart — Haus-Farben, dezentes Grid, Mono-Ticks. -->
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">
+                <div class="panel" style="margin:0;padding:12px 14px">
+                  <div class="panel-sub" style="margin-bottom:8px">Saldo-Verlauf im Zeitraum (kumuliert)</div>
+                  <div style="height:170px"><canvas id="rg-chart-verlauf"></canvas></div>
+                </div>
+                <div class="panel" style="margin:0;padding:12px 14px">
+                  <div class="panel-sub" style="margin-bottom:8px">Summen je Art</div>
+                  <div style="height:170px"><canvas id="rg-chart-arten"></canvas></div>
+                </div>
+              </div>
               <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:8px"></div>
               <div id="rg-p-warn" hidden style="margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(224,137,31,.09);border:1px solid rgba(224,137,31,.35);font-size:12.5px"></div>
             </div>
@@ -5634,6 +5646,8 @@
               <button class="btn btn-ghost" id="rg-refresh" style="padding:7px 12px">↻</button>
             </div>
             <div id="rg-list-msg" style="color:var(--sub);font-size:13px;padding:14px 2px">Lade…</div>
+            <!-- Beträge im Überblick — erscheint erst ab 2 Rechnungen (Muster mg-chart-card) -->
+            <div id="rg-list-chart-wrap" hidden style="height:130px;margin:2px 0 14px"><canvas id="rg-chart-liste"></canvas></div>
             <div class="table-wrap">
               <table class="t">
                 <thead><tr>
@@ -7841,6 +7855,21 @@
       return pct != null ? s.saldo - s.saldo * Number(pct) / 100 : Number(s.saldo)
     }
 
+    /* Charts (28.08.2026): exakt das mgRenderChart-Muster — Sign-Farben
+     * #12B76A/#F04438, Violet für Verläufe, Grid rgba(102,112,133,.08),
+     * JetBrains-Mono-Ticks, destroy vor jedem Neuaufbau. */
+    const RG_GOOD = '#12B76A', RG_BAD = '#F04438', RG_VIOLET = '#5447CE'
+    const rgCharts = {}
+    function rgChart(name, canvasId, cfg){
+      const c = document.getElementById(canvasId)
+      if(!c || typeof Chart === 'undefined') return
+      if(rgCharts[name]){ try { rgCharts[name].destroy() } catch(_){} rgCharts[name] = null }
+      rgCharts[name] = new Chart(c.getContext('2d'), cfg)
+    }
+    const RG_TICKS = { color:'#667085', font:{ family:'JetBrains Mono', size:9 } }
+    const RG_GRID = 'rgba(102,112,133,.08)'
+    const rgEurKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k €' : Math.round(v) + ' €'
+
     async function rgApi(path, opts = {}){
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token
@@ -7905,6 +7934,33 @@
         }).join('')
         msg.style.display = list.length ? 'none' : ''
         if(!list.length) msg.textContent = 'Noch keine Rechnungen.'
+        // Beträge-Chart über der Liste — erst ab 2 Rechnungen sinnvoll (mg-Muster)
+        const wrap = $('rg-list-chart-wrap')
+        if(wrap){
+          if(list.length >= 2){
+            wrap.hidden = false
+            const chron = list.slice().reverse()   // älteste links
+            const werte = chron.map(r => rgBetragVon(r.summen || {}, r.anteil_pct) ?? 0)
+            const cols = werte.map(v => v >= 0 ? RG_GOOD : RG_BAD)
+            rgChart('liste', 'rg-chart-liste', {
+              type: 'bar',
+              data: { labels: chron.map(r => r.nummer), datasets: [{
+                data: werte, backgroundColor: cols.map(c => c + '30'),
+                borderColor: cols, borderWidth: 1.5, borderRadius: 4
+              }]},
+              options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+                  callbacks: {
+                    title: items => { const r = chron[items[0].dataIndex]; return `${r.nummer} · ${r.person_name || ''}` },
+                    label: ctx => 'Rechnungsbetrag: ' + rgEur.format(ctx.parsed.y)
+                  } } },
+                scales: { x: { grid: { display: false }, ticks: { ...RG_TICKS, maxRotation: 0 } },
+                          y: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, maxTicksLimit: 4, callback: v => rgEurKurz(v) } } } }
+            })
+          } else {
+            wrap.hidden = true
+          }
+        }
       }catch(e){
         msg.textContent = 'Rechnungen nicht verfügbar: ' + (e.message || e)
         console.warn('[rechnungen] liste:', e)
@@ -7937,6 +7993,44 @@
             `${RG_LBL[k] || k}: ${Number(v).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })} ${c === 'EUR' ? '€' : c}`
           ).join(' · ')
         ).join(' · ') || 'Keine Buchungen im Zeitraum.'
+        // Saldo-Verlauf: kumulierte Summe der Buchungen je Tag (eine Serie,
+        // Violet, gefüllt) + Summen je Art als Sign-farbige Balken.
+        const perTag = new Map()
+        for(const b of (d.buchungen || [])) perTag.set(b.datum, (perTag.get(b.datum) || 0) + Number(b.betrag || 0))
+        const tage = [...perTag.keys()].sort()
+        let kum = 0
+        const verlauf = tage.map(t => { kum += perTag.get(t); return +kum.toFixed(2) })
+        rgChart('verlauf', 'rg-chart-verlauf', {
+          type: 'line',
+          data: { labels: tage.map(rgDatum), datasets: [{
+            data: verlauf, borderColor: RG_VIOLET, backgroundColor: 'rgba(84,71,206,.10)',
+            fill: true, borderWidth: 2, pointRadius: 0, pointHitRadius: 10, tension: .25
+          }]},
+          options: { responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+              callbacks: { label: ctx => 'Saldo bis hier: ' + rgEur.format(ctx.parsed.y) } } },
+            scales: { x: { grid: { display: false }, ticks: { ...RG_TICKS, maxTicksLimit: 6, maxRotation: 0 } },
+                      y: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, callback: v => rgEurKurz(v) } } } }
+        })
+        const arten = []
+        for(const k of ['payout', 'account_purchase', 'live_pnl', 'manual']){
+          for(const [cur, v] of Object.entries(s.je_art?.[k] || {})){
+            arten.push({ lbl: (RG_LBL[k] || k) + (cur === 'EUR' ? '' : ' ' + cur), v: Number(v) })
+          }
+        }
+        const artCols = arten.map(a => a.v >= 0 ? RG_GOOD : RG_BAD)
+        rgChart('arten', 'rg-chart-arten', {
+          type: 'bar',
+          data: { labels: arten.map(a => a.lbl), datasets: [{
+            data: arten.map(a => a.v), backgroundColor: artCols.map(c => c + '30'),
+            borderColor: artCols, borderWidth: 1.5, borderRadius: 4
+          }]},
+          options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828',
+              callbacks: { label: ctx => rgEur.format(ctx.parsed.x) } } },
+            scales: { x: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, maxTicksLimit: 5, callback: v => rgEurKurz(v) } },
+                      y: { grid: { display: false }, ticks: { color: '#1D2939', font: { family: 'JetBrains Mono', size: 10, weight: '600' } } } } }
+        })
         // Doppel-Abrechnungs-Schutz: überschneidet sich der Zeitraum mit einer
         // bestehenden Rechnung derselben Person, laut warnen (Info, kein Block —
         // z. B. eine bewusst korrigierte Neu-Rechnung bleibt möglich).
