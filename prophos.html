@@ -5568,69 +5568,77 @@
         <!-- RECHNUNGEN (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs.
              Erstellen NUR über Railway (Service-Key + ADMIN_EMAILS-Gate) — der
              ID-User sieht seine Rechnungen read-only im Finanzen-Tab (RLS). -->
+        <!-- RECHNUNGEN (Umbau 28.08.2026 nach Finns Design-Urteil: exakt die
+             Struktur der Geschwister-Tabs — adm-toolbar, kpis, grid-2-Panels). -->
         <div id="adm-pane-rg" hidden>
+          <div class="adm-toolbar">
+            <select id="rg-person" class="adm-f" style="flex:1;min-width:170px"><option value="">Person wählen…</option></select>
+            <input id="rg-von" type="date" title="Zeitraum von">
+            <span style="color:var(--sub);font-size:12px">–</span>
+            <input id="rg-bis" type="date" title="Zeitraum bis">
+            <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="Anteil %" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:92px">
+            <button class="btn btn-ghost" id="rg-zyklus-btn" title="Von = Tag nach der letzten Rechnung dieser Person, Bis = heute — so wird nichts doppelt abgerechnet" style="padding:8px 12px">↻ Zyklus</button>
+            <button class="btn btn-primary" id="rg-preview-btn" style="padding:8px 14px">Vorschau laden</button>
+          </div>
+
+          <div class="kpis">
+            <div class="kpi">
+              <div class="kpi-label">Trades</div>
+              <div class="kpi-value" id="rg-p-trades">–</div>
+              <div class="kpi-delta delta-neutral">im Zeitraum</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Buchungen</div>
+              <div class="kpi-value" id="rg-p-buch">–</div>
+              <div class="kpi-delta delta-neutral" id="rg-p-arten-mini">–</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Zeitraum-Saldo</div>
+              <div class="kpi-value" id="rg-p-saldo">–</div>
+              <div class="kpi-delta delta-neutral" id="rg-p-anteil">Summe aller Buchungen</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-label">Rechnungsbetrag</div>
+              <div class="kpi-value" id="rg-p-betrag">–</div>
+              <div class="kpi-delta delta-neutral" id="rg-p-betrag-sub">Saldo − Anteil</div>
+            </div>
+          </div>
+
+          <div id="rg-p-warn" hidden style="margin:-4px 0 14px;padding:9px 12px;border-radius:10px;background:rgba(224,137,31,.09);border:1px solid rgba(224,137,31,.35);font-size:12.5px"></div>
+
+          <!-- Charts im mgRenderChart-Haus-Muster; sichtbar sobald eine Vorschau geladen ist -->
+          <div class="grid-2" id="rg-charts" hidden>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Saldo-Verlauf</div>
+                  <div class="panel-sub">Kumulierte Buchungen im Zeitraum</div>
+                </div>
+              </div>
+              <div style="height:200px"><canvas id="rg-chart-verlauf"></canvas></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Summen je Art</div>
+                  <div class="panel-sub">Grün rein, rot raus</div>
+                </div>
+              </div>
+              <div style="height:200px"><canvas id="rg-chart-arten"></canvas></div>
+            </div>
+          </div>
+
           <div class="panel" style="margin-bottom:14px">
             <div class="panel-head">
               <div>
                 <div class="panel-title">Rechnung erstellen</div>
-                <div class="panel-sub">Datensatz wird beim Erstellen eingefroren — jede Rechnung dokumentiert den Stand zum Erstellzeitpunkt</div>
+                <div class="panel-sub" id="rg-create-sub">Erst Vorschau laden — der Datensatz wird beim Erstellen eingefroren</div>
               </div>
             </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
-              <div style="flex:1;min-width:170px">
-                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Person</div>
-                <select id="rg-person" class="adm-f" style="width:100%"><option value="">Person wählen…</option></select>
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Von</div>
-                <input id="rg-von" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Bis</div>
-                <input id="rg-bis" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Anteil %</div>
-                <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="leer = ohne" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:110px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
-              </div>
-              <button class="btn btn-ghost" id="rg-zyklus-btn" title="Von = Tag nach der letzten Rechnung dieser Person, Bis = heute — so wird nichts doppelt abgerechnet" style="height:40px">↻ Aktueller Zyklus</button>
-              <button class="btn btn-ghost" id="rg-preview-btn" style="height:40px">Vorschau laden</button>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px">
+              <textarea id="rg-absender" rows="2" placeholder="Absender / Briefkopf (z. B. Firma, Ort — bleibt gemerkt)" style="font:inherit;font-size:12.5px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);resize:vertical"></textarea>
+              <textarea id="rg-notiz" rows="2" maxlength="300" placeholder="Notiz auf der Rechnung (z. B. Auszahlungsweg)" style="font:inherit;font-size:12.5px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);resize:vertical"></textarea>
             </div>
-            <div id="rg-preview" hidden style="margin:2px 0 12px">
-              <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
-                <div class="kpi">
-                  <div class="kpi-label">Trades</div>
-                  <div class="kpi-value" id="rg-p-trades">–</div>
-                  <div class="kpi-delta delta-neutral">im Zeitraum</div>
-                </div>
-                <div class="kpi">
-                  <div class="kpi-label">Buchungen</div>
-                  <div class="kpi-value" id="rg-p-buch">–</div>
-                  <div class="kpi-delta delta-neutral" id="rg-p-arten-mini">–</div>
-                </div>
-                <div class="kpi">
-                  <div class="kpi-label">Zeitraum-Saldo</div>
-                  <div class="kpi-value" id="rg-p-saldo">–</div>
-                  <div class="kpi-delta delta-neutral" id="rg-p-anteil">Finanzen-Logik: Summe aller Buchungen</div>
-                </div>
-              </div>
-              <!-- Charts (28.08.2026, Finns Wunsch „mehr Graphs"): Muster wie
-                   mgRenderChart — Haus-Farben, dezentes Grid, Mono-Ticks. -->
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">
-                <div class="panel" style="margin:0;padding:12px 14px">
-                  <div class="panel-sub" style="margin-bottom:8px">Saldo-Verlauf im Zeitraum (kumuliert)</div>
-                  <div style="height:170px"><canvas id="rg-chart-verlauf"></canvas></div>
-                </div>
-                <div class="panel" style="margin:0;padding:12px 14px">
-                  <div class="panel-sub" style="margin-bottom:8px">Summen je Art</div>
-                  <div style="height:170px"><canvas id="rg-chart-arten"></canvas></div>
-                </div>
-              </div>
-              <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:8px"></div>
-              <div id="rg-p-warn" hidden style="margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(224,137,31,.09);border:1px solid rgba(224,137,31,.35);font-size:12.5px"></div>
-            </div>
-            <textarea id="rg-absender" rows="2" placeholder="Absender / Briefkopf (z. B. Firma, Ort — bleibt gemerkt)" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
-            <input id="rg-notiz" type="text" maxlength="300" placeholder="Notiz auf der Rechnung (optional, z. B. Auszahlungsweg)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
             <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
               <button class="btn btn-primary" id="rg-create-btn" disabled>Rechnung erstellen</button>
               <span id="rg-msg" style="font-size:12.5px;color:var(--sub)"></span>
@@ -7979,7 +7987,7 @@
         const d = await rgApi(`/admin/rechnung-daten?uid=${encodeURIComponent(uid)}&von=${von}&bis=${bis}`)
         const s = d.summen || {}
         rgSaldo = Number(s.saldo || 0)
-        $('rg-preview').hidden = false
+        $('rg-charts').hidden = false
         $('rg-p-trades').textContent = s.trades_n ?? 0
         $('rg-p-buch').textContent = (d.buchungen || []).length
         const saldoEl = $('rg-p-saldo')
@@ -7988,11 +7996,6 @@
         $('rg-p-arten-mini').textContent = Object.keys(s.je_art || {}).length
           ? Object.keys(s.je_art).map(k => (RG_LBL[k] || k)).join(' · ') : 'keine'
         rgAnteilLive()
-        $('rg-preview-arten').textContent = Object.entries(s.je_art || {}).map(([k, je]) =>
-          Object.entries(je).map(([c, v]) =>
-            `${RG_LBL[k] || k}: ${Number(v).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })} ${c === 'EUR' ? '€' : c}`
-          ).join(' · ')
-        ).join(' · ') || 'Keine Buchungen im Zeitraum.'
         // Saldo-Verlauf: kumulierte Summe der Buchungen je Tag (eine Serie,
         // Violet, gefüllt) + Summen je Art als Sign-farbige Balken.
         const perTag = new Map()
@@ -8073,21 +8076,43 @@
         msg.textContent = 'Erste Rechnung dieser Person — Zeitraum ab Jahresbeginn, deckt alles Bisherige ab.'
       }
       $('rg-bis').value = new Date().toISOString().slice(0, 10)
-      rgPreviewOk = false; $('rg-create-btn').disabled = true; $('rg-preview').hidden = true
+      rgReset()
     }
 
-    // Anteils-Zeile unter dem Saldo-KPI — rechnet live mit, wenn Finn den
+    // Anteil + Rechnungsbetrag-KPI — rechnen live mit, wenn Finn den
     // Prozentwert ändert (der Server rechnet beim Erstellen ohnehin selbst).
     function rgAnteilLive(){
-      const el = $('rg-p-anteil'); if(!el) return
+      const el = $('rg-p-anteil'), bEl = $('rg-p-betrag'), bSub = $('rg-p-betrag-sub')
+      if(!el || !bEl) return
+      if(rgSaldo === null){ return }
       const raw = ($('rg-anteil').value || '').trim()
       const pct = raw === '' ? null : Number(raw)
-      if(pct === null || isNaN(pct) || pct < 0 || pct > 100 || rgSaldo === null){
-        el.textContent = 'Finanzen-Logik: Summe aller Buchungen'
-        return
+      const gueltig = pct !== null && !isNaN(pct) && pct >= 0 && pct <= 100
+      const betrag = gueltig ? rgSaldo - rgSaldo * pct / 100 : rgSaldo
+      bEl.textContent = rgEur.format(betrag)
+      bEl.style.color = betrag > 0.004 ? 'var(--good)' : betrag < -0.004 ? 'var(--danger)' : ''
+      if(gueltig){
+        el.textContent = `davon ${pct}% Anteil: ${rgEur.format(rgSaldo - betrag)}`
+        bSub.textContent = `${100 - pct}% vom Saldo`
+      } else {
+        el.textContent = 'Summe aller Buchungen'
+        bSub.textContent = 'ohne Anteils-Split'
       }
-      const a = rgSaldo * pct / 100
-      el.textContent = `davon ${pct}% Anteil: ${rgEur.format(a)} · verbleibt ${rgEur.format(rgSaldo - a)}`
+    }
+
+    // Auswahl geändert ⇒ Vorschau-Zustand komplett zurücksetzen, damit nie
+    // alte Zahlen zur neuen Auswahl stehen (Finns Fund beim Pascal-Test).
+    function rgReset(){
+      rgPreviewOk = false; rgSaldo = null; rgOverlap = []
+      $('rg-create-btn').disabled = true
+      $('rg-charts').hidden = true
+      $('rg-p-warn').hidden = true
+      for(const id of ['rg-p-trades', 'rg-p-buch', 'rg-p-saldo', 'rg-p-betrag']){
+        const e = $(id); if(e){ e.textContent = '–'; e.style.color = '' }
+      }
+      const am = $('rg-p-arten-mini'); if(am) am.textContent = '–'
+      const an = $('rg-p-anteil'); if(an) an.textContent = 'Summe aller Buchungen'
+      const bs = $('rg-p-betrag-sub'); if(bs) bs.textContent = 'Saldo − Anteil'
     }
 
     async function rgCreate(){
@@ -8198,9 +8223,7 @@
       // eine sichtbare alte Vorschau zur neuen Auswahl hat Finn beim ersten Test
       // sofort verwirrt (Pascal gewählt, Test-Zahlen standen noch da).
       for(const id of ['rg-person', 'rg-von', 'rg-bis']){
-        $(id)?.addEventListener('change', () => {
-          rgPreviewOk = false; $('rg-create-btn').disabled = true; $('rg-preview').hidden = true
-        })
+        $(id)?.addEventListener('change', rgReset)
       }
       // Anteil ändert nur den Split, nicht die Daten — rechnet live in der Vorschau mit.
       $('rg-anteil')?.addEventListener('input', rgAnteilLive)
