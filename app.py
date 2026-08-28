@@ -274,10 +274,14 @@ def copier_proxy(path):
     if origin: h["Origin"] = origin
     try:
         # master-order braucht mehr Luft als der Rest (Review-Blocker 15.08.2026):
-        # der Order-Bot darf bis 45s laufen — ein 25s-Proxy-Abbruch haette dem
-        # Frontend 'keine Order' gemeldet, waehrend die Order Sekunden spaeter
-        # doch platziert wird (Doppel-Order-Pfad).
-        _tmo = 60 if path == "master-order" else 25
+        # ein zu frueher Proxy-Abbruch haette dem Frontend 'keine Order' gemeldet,
+        # waehrend die Order Sekunden spaeter doch platziert wird (Doppel-Order-
+        # Pfad). Seit 287644d darf der Bot bis 300s laufen (SL/TP-Band-Scan) —
+        # die 60s hier waren am alten 45s-Stand kalibriert und rissen die Kette
+        # wieder auf (Offene Punkte 215/221); mit Remote-Signalen (28.08.2026)
+        # sitzt dann niemand am PC, der es merkt. Der aeussere Timeout ist die
+        # Obergrenze der Wahrheit: 310s = Bot-Maximum + Puffer.
+        _tmo = 310 if path == "master-order" else 25
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,
