@@ -189,6 +189,24 @@ def ist_handelszeile(text, symbol):
     return bool(symbol) and symbol.lower() in t and ("buy" in t or "sell" in t)
 
 
+# Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
+# Brave — auch die als App installierte PWA-Huelle) teilen sich eine Klasse,
+# dazu Firefox.
+BROWSER_KLASSEN = ("Chrome_WidgetWin_1", "MozillaWindowClass")
+
+
+def ist_prophos_fenster(titel, klasse):
+    """Ist dieses Fenster der Browser mit dem Prophos-Tab? Positiv-Signatur aus
+    Titel UND Fensterklasse (Lehre vom 18.08., EA-Dialog-Fehlgriff: nie nur ein
+    String-Treffer): start-prophos.bat setzt der Backend-KONSOLE selbst den
+    Titel 'Prophos-Backend' — ein reiner Titel-Match holte also die Konsole
+    nach vorn statt des Browsers. Der Titel beginnt stabil mit 'Prophos'
+    (prophos.html setzt kein dynamisches document.title; startswith haelt
+    ausserdem DevTools-Fenster fern, deren Titel die URL nur ENTHAELT)."""
+    t = (titel or "").strip().lower()
+    return t.startswith("prophos") and (klasse or "") in BROWSER_KLASSEN
+
+
 # ---------------------------------------------------------------------------
 # LESENDER API-Teil — Kurse + Positionsstand (traegt keine Order-Markierung)
 # ---------------------------------------------------------------------------
@@ -487,6 +505,34 @@ def _finde_terminal(login):
         except Exception:
             continue
     return None
+
+
+def _zurueck_zu_prophos():
+    """Ausgangssituation (28.08.2026, Finns Ansage nach dem ersten Remote-
+    Erfolg): nach JEDEM Lauf — Erfolg, Abbruch oder SL/TP-Warnung — wechselt
+    der PC zurueck in den Prophos-Tab. Je mehr remote gefahren wird, desto
+    wichtiger die feste Home-Base: es steht niemand am PC, der den Fokus
+    aufraeumt. Best-Effort — das Order-Ergebnis aendert sich hier NIE mehr.
+    BEWUSST ohne den Titelzeilen-Klick aus _fenster_betreten: beim Browser
+    sitzt dort die Tab-Leiste, ein Klick koennte den Prophos-Tab wegschalten.
+    Rueckgabe: Spur-Text fuers trail-Feld (Panel-Log + ergebnis-jsonb)."""
+    try:
+        from pywinauto import Desktop
+        for w in Desktop(backend="uia").windows():
+            try:
+                if not ist_prophos_fenster(w.window_text(),
+                                           w.element_info.class_name):
+                    continue
+                if w.is_minimized():
+                    w.restore()
+                    _warte(0.2, 0.25)
+                w.set_focus()
+                return "zurueck in Prophos"
+            except Exception:
+                continue
+        return "Prophos-Fenster nicht gefunden"
+    except Exception as e:
+        return f"Rueckkehr zu Prophos fehlgeschlagen ({type(e).__name__})"
 
 
 def _ist_order_dialog(win):
@@ -1708,6 +1754,12 @@ def main():
                           "msg": "Befehl unvollstaendig: " + " · ".join(fehler)}))
         return 2
     res = run(sys.argv[1], cmd)
+    # Ausgangssituation (28.08.2026): nach jedem Lauf zurueck in den Prophos-
+    # Tab — hier statt in run(), damit ausnahmslos JEDER Ausgang (Erfolg,
+    # Abbruch, SL/TP-Warnung) denselben Heimweg nimmt. mousetest/inspect
+    # bleiben bewusst aussen vor: wer diagnostiziert, will am Terminal bleiben.
+    heim = _zurueck_zu_prophos()
+    res["trail"] = (res["trail"] + " → " + heim) if res.get("trail") else heim
     print(json.dumps(res))
     return 0 if res.get("ok") else 1
 

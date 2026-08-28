@@ -471,6 +471,21 @@ def main():
         and not order_bot.ist_handelszeile("NAS100,M1: US Tech 100 Index", "NAS100")
         and not order_bot.ist_handelszeile("ProphosHedgeReader - NAS100,M1", "NAS100")
         and not order_bot.ist_handelszeile("", "NAS100"))
+    # Rueckkehr nach Prophos (28.08.2026, Finns 'Ausgangssituation'): Home-Base
+    # braucht Titel UND Browser-Klasse — die Backend-Konsole heisst selbst
+    # 'Prophos-Backend' (title in start-prophos.bat) und darf NIE Treffer sein.
+    chk("ORDER-BOT: Prophos-Fenster erkannt (Chrome-Tab, PWA-Huelle, Firefox)",
+        order_bot.ist_prophos_fenster("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+        and order_bot.ist_prophos_fenster("Prophos", "Chrome_WidgetWin_1")
+        and order_bot.ist_prophos_fenster("Prophos — Mozilla Firefox", "MozillaWindowClass"))
+    chk("ORDER-BOT: Backend-Konsole/MT5-Terminal sind KEIN Prophos-Fenster",
+        not order_bot.ist_prophos_fenster("Prophos-Backend", "ConsoleWindowClass")
+        and not order_bot.ist_prophos_fenster("Prophos-Backend", "CASCADIA_HOSTING_WINDOW_CLASS")
+        and not order_bot.ist_prophos_fenster("437803: FTMO-Demo", order_bot.MT5_KLASSE))
+    chk("ORDER-BOT: DevTools/leerer Titel/leere Klasse sind KEIN Prophos-Fenster",
+        not order_bot.ist_prophos_fenster("DevTools - prophos.pages.dev/prophos", "Chrome_WidgetWin_1")
+        and not order_bot.ist_prophos_fenster("", "Chrome_WidgetWin_1")
+        and not order_bot.ist_prophos_fenster("Prophos", ""))
 
     # ── Notfall-SL/TP (27.08.2026): reine Rechenlogik ──────────────────────
     # Wichtigster Fall zuerst: der in den GEWINN nachgezogene Master-SL — die
