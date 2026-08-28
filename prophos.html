@@ -2,7 +2,11 @@
 <html lang="de">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- maximum-scale=1 verhindert den iOS-Auto-Zoom beim Input-Fokus, viewport-fit=cover
+     aktiviert die Safe-Area-env()-Werte (Notch/Home-Indicator) für die Mobile-Schicht.
+     Pinch-Zoom bleibt auf iOS trotzdem möglich (Accessibility-Override seit iOS 10). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="%235447CE"/><text x="32" y="44" font-family="Arial,sans-serif" font-size="34" font-weight="700" fill="white" text-anchor="middle">P</text></svg>' />
 <title>Prophos</title>
 <!-- Homescreen-App (28.08.2026): Manifest inline als data:-URL, Icons absolut auf
      pages.dev — prophos.html muss eine einzige Datei bleiben, und die lokalen PCs
@@ -10,6 +14,7 @@
 <meta name="theme-color" content="#FAFBFC" />
 <link rel="manifest" href='data:application/manifest+json,{"name":"Prophos","short_name":"Prophos","start_url":"https://prophos.pages.dev/prophos","display":"standalone","background_color":"#FAFBFC","theme_color":"#FAFBFC","icons":[{"src":"https://prophos.pages.dev/prophos-icon-192.png","sizes":"192x192","type":"image/png","purpose":"any%20maskable"},{"src":"https://prophos.pages.dev/prophos-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any%20maskable"}]}' />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Prophos" />
 <link rel="apple-touch-icon" href="https://prophos.pages.dev/prophos-icon-180.png" />
@@ -2210,23 +2215,99 @@
   #dashboard-view .mg-toast.err{background:var(--danger)}
   #dashboard-view .mg-toast.ok{background:var(--good)}
 
-  /* Mobile dashboard */
+  /* ============================================================
+     MOBILE-APP-SCHICHT (28.08.2026, Finns Wunsch „cleane Handy-App")
+     Prophos läuft am Handy als Home-Screen-App (Metas im <head>) —
+     ohne zweite Datei, Single-File-Doktrin. Unter 820px wird die
+     Shell zur App: Bottom-Tab-Bar mit den vier Haupt-Tabs, „Mehr"
+     öffnet die Sidebar als Bottom-Sheet (ersetzt den alten Links-
+     Drawer samt Hamburger), Modals docken als Sheets unten an,
+     Inputs 16px (sonst zoomt iOS beim Fokus in die Seite).
+  ============================================================ */
   #dashboard-view .mobile-toggle{display:none}
+  #dashboard-view .mob-nav{display:none}
+  @keyframes mob-sheet-in{from{opacity:.5;transform:translateY(26px)}to{opacity:1;transform:none}}
   @media (max-width:820px){
+    :root{--mob-nav-h:58px}
+
+    /* — Sidebar wird zum Bottom-Sheet („Mehr"-Tab öffnet sie) — */
     #dashboard-view .sidebar{
-      position:fixed;top:0;left:0;height:100vh;z-index:50;
-      width:var(--sidebar-w);
-      transform:translateX(-100%);transition:transform .25s var(--ease);
-      box-shadow:0 10px 40px rgba(16,24,40,.15);
+      position:fixed;top:auto;bottom:0;left:0;right:0;z-index:70;
+      width:100%;height:auto;max-height:78vh;
+      overflow-y:auto;-webkit-overflow-scrolling:touch;
+      border-right:none;border-top:1px solid var(--border-soft);
+      border-radius:18px 18px 0 0;
+      padding:8px 14px calc(14px + env(safe-area-inset-bottom));
+      transform:translateY(103%);transition:transform .28s var(--ease);
+      box-shadow:0 -12px 40px rgba(16,24,40,.18);
     }
-    #dashboard-view .sidebar.open{transform:translateX(0)}
-    #dashboard-view .topbar,#dashboard-view .main{grid-column:1}
-    #dashboard-view .tb-search{display:none}
-    #dashboard-view .mobile-toggle{display:grid}
+    #dashboard-view .sidebar.open{transform:translateY(0)}
+    /* Griff-Linie oben im Sheet */
+    #dashboard-view .sidebar::before{
+      content:'';display:block;width:36px;height:4px;border-radius:999px;
+      background:var(--border);margin:4px auto 10px;flex-shrink:0;
+    }
+    #dashboard-view .sb-brand{padding:0 6px 12px}
+    #dashboard-view .sb-nav{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+    #dashboard-view .sb-section,#dashboard-view .sb-divider{grid-column:1 / -1}
+    #dashboard-view .sb-link{padding:11px 10px}
     #dashboard-view .sb-overlay{
-      display:none;position:fixed;inset:0;background:rgba(16,24,40,.4);z-index:45;
+      display:none;position:fixed;inset:0;background:rgba(16,24,40,.4);z-index:65;
     }
     #dashboard-view .sb-overlay.open{display:block}
+
+    /* — Topbar kompakt: nur Titel + Profil (Bell ist statisch-dekorativ) — */
+    #dashboard-view .topbar,#dashboard-view .main{grid-column:1}
+    #dashboard-view .topbar{padding:0 14px;gap:10px}
+    #dashboard-view .tb-search{display:none}
+    #dashboard-view .tb-sub{display:none}
+    #dashboard-view .tb-btn[aria-label="Notifications"]{display:none}
+    #dashboard-view .user-name{max-width:90px}
+
+    /* — Content: engeres Spacing + Platz für die Tab-Bar — */
+    #dashboard-view .main{padding:16px 14px calc(26px + var(--mob-nav-h) + env(safe-area-inset-bottom))}
+    #dashboard-view .view-title{font-size:19px}
+    #dashboard-view .table-wrap{-webkit-overflow-scrolling:touch}
+
+    /* — Inputs: 16px, sonst zoomt iOS beim Fokus in die Seite.
+         !important nötig, weil viele Bereichs-Regeln (z.B. .mtc-details input)
+         spezifischer sind; .big (Lot-Eingabe, 24px) bleibt ausgenommen — */
+    #dashboard-view input:not(.big),#dashboard-view select,#dashboard-view textarea,
+    #login-view input{font-size:16px !important}
+
+    /* — Modals als Bottom-Sheets — */
+    #dashboard-view .modal-bg{align-items:flex-end;padding:0}
+    #dashboard-view .modal{
+      max-width:100%;max-height:88vh;
+      border-radius:18px 18px 0 0;
+      border-left:none;border-right:none;border-bottom:none;
+      padding:20px 16px calc(18px + env(safe-area-inset-bottom));
+      animation:mob-sheet-in .22s var(--ease);
+    }
+
+    /* — Toasts über die Tab-Bar heben — */
+    .at-toast,.at-prompt{
+      left:14px;right:14px;max-width:none;
+      bottom:calc(var(--mob-nav-h) + 16px + env(safe-area-inset-bottom));
+    }
+
+    /* — Bottom-Tab-Bar — */
+    #dashboard-view .mob-nav{
+      display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
+      height:calc(var(--mob-nav-h) + env(safe-area-inset-bottom));
+      padding:0 6px env(safe-area-inset-bottom);
+      background:rgba(255,255,255,.92);
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border-top:1px solid var(--border-soft);
+    }
+    #dashboard-view .mob-link{
+      flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:3px;background:none;border:none;padding:6px 2px 8px;
+      font-size:10px;font-weight:600;color:var(--sub-2);font-family:inherit;
+      -webkit-tap-highlight-color:transparent;transition:color .15s var(--ease);
+    }
+    #dashboard-view .mob-link svg{width:21px;height:21px}
+    #dashboard-view .mob-link.active{color:var(--violet)}
   }
 
   /* ============================================================
@@ -2667,6 +2748,33 @@
     </div>
   </aside>
   <div class="sb-overlay" id="sbOverlay"></div>
+
+  <!-- Bottom-Tab-Bar (28.08.2026, Mobile-App-Schicht): am Handy die vier
+       Haupt-Tabs als App-Navigation, „Mehr" öffnet die Sidebar als Bottom-
+       Sheet. Desktop sieht die Leiste nie (display:none außerhalb <=820px).
+       Icons 1:1 aus den sb-links, damit beides zusammengehört. -->
+  <nav class="mob-nav" id="mobNav">
+    <button class="mob-link active" data-view="accounts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+      Accounts
+    </button>
+    <button class="mob-link" data-view="trades">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
+      Trades
+    </button>
+    <button class="mob-link" data-view="payouts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      Finanzen
+    </button>
+    <button class="mob-link" data-view="news">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
+      News
+    </button>
+    <button class="mob-link" id="mobMore">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      Mehr
+    </button>
+  </nav>
 
   <header class="topbar">
     <button class="tb-btn mobile-toggle" id="sbToggle" aria-label="Menu">
@@ -6708,6 +6816,12 @@
     document.querySelectorAll('#dashboard-view .sb-link').forEach(l =>
       l.classList.toggle('active', l.dataset.view === name)
     )
+    // Bottom-Tab-Bar (Handy) synchron halten: „Mehr" leuchtet, wenn die aktive
+    // View keinen eigenen Tab in der Leiste hat (z.B. Echo, Admin, Settings).
+    const mobMain = ['accounts','trades','payouts','news']
+    document.querySelectorAll('#dashboard-view .mob-link').forEach(l =>
+      l.classList.toggle('active', l.dataset.view ? l.dataset.view === name : !mobMain.includes(name))
+    )
     const [title, sub] = viewTitles[name] || ['', '']
     document.getElementById('topbarTitle').textContent = title
     document.getElementById('topbarSub').textContent = sub
@@ -8311,6 +8425,16 @@
   document.getElementById('sbOverlay').addEventListener('click', () => {
     document.getElementById('sidebar').classList.remove('open')
     document.getElementById('sbOverlay').classList.remove('open')
+  })
+  // Bottom-Tab-Bar (28.08.2026, Mobile-App-Schicht): Haupt-Tabs schalten
+  // direkt, „Mehr" öffnet die Sidebar (am Handy ein Bottom-Sheet). switchView
+  // schließt Sheet + Overlay beim Wechsel ohnehin — kein Extra-Aufräumen nötig.
+  document.querySelectorAll('#dashboard-view .mob-link[data-view]').forEach(btn =>
+    btn.addEventListener('click', () => switchView(btn.dataset.view))
+  )
+  document.getElementById('mobMore').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('open')
+    document.getElementById('sbOverlay').classList.toggle('open')
   })
 
   /* ========== DASHBOARD MOUNT ========== */
@@ -25790,6 +25914,15 @@
     box-shadow: 0 6px 18px rgba(217,119,6,.45), 0 3px 6px rgba(0,0,0,.15);
   }
   #coinflip-fab:active { transform: scale(.95); }
+  /* Am Handy über die Bottom-Tab-Bar heben (28.08.2026, Mobile-App-Schicht) —
+     nur im Dashboard: auf dem Login gibt es keine Leiste, da bleibt er unten.
+     z-index unter Sheet-Overlay (65), damit das „Mehr"-Sheet ihn abdunkelt. */
+  @media (max-width:820px){
+    #dashboard-view.active ~ #coinflip-fab{
+      bottom:calc(var(--mob-nav-h) + 16px + env(safe-area-inset-bottom));
+      z-index:60;
+    }
+  }
 
   #coinflip-modal {
     position: fixed;
