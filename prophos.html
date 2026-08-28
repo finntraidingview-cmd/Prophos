@@ -2400,9 +2400,10 @@
       background:var(--surface-tint);border-radius:14px;padding:12px;
     }
     #tradePlanModal .field select.input{min-width:0}
-    /* Vorschlag-/Hinweis-Boxen: Rahmen weg, nur weiche Tönung */
+    /* Vorschlag-/Hinweis-Boxen: Rahmen weg, nur weiche Tönung
+       (inkl. Remote-Status-Box im Order-Popup) */
     #tp-slave-suggest,#tp-gesamtkosten-suggest,#tp-vorgaenger-suggest,
-    #tp-master-limits-info{border:none !important;border-radius:12px !important}
+    #tp-master-limits-info,#tp-order-remote{border:none !important;border-radius:12px !important}
     /* Ergebnis-Boxen (SLAVE KAUFEN / MULTIPLIER): ruhiger — dünner Rand,
        weniger Leerraum, Zahl eine Stufe kleiner */
     #dashboard-view .tp-slave-out{
@@ -2993,13 +2994,15 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
       Accounts
     </button>
-    <button class="mob-link" data-view="trades">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
-      Trades
-    </button>
     <button class="mob-link" data-view="payouts">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Finanzen
+    </button>
+    <!-- Trades bewusst in der MITTE der Leiste (Finns Ansage 29.08.2026) —
+         der Haupt-Tab sitzt am Daumen-Sweet-Spot. -->
+    <button class="mob-link" data-view="trades">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
+      Trades
     </button>
     <button class="mob-link" data-view="news">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
