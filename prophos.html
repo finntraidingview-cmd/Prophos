@@ -19950,6 +19950,14 @@
         fertigUi(true, '✓ Order platziert — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".')
         try{ loadTradePlansFromSupabase() }catch(_){}
         stop()
+        // Bei Erfolg schließt sich das Popup von selbst (Finns Wunsch nach dem
+        // ersten grünen Durchlauf, 28.08.2026) — NUR bei Erfolg: Fehler und
+        // erst recht „Position offen" bleiben stehen, bis Finn sie gesehen hat.
+        setTimeout(() => {
+          const fe2 = document.getElementById('pf-final')
+          if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+             && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
+        }, 2400)
       } else {
         // fehler / verworfen / verfallen — inkl. „Position OFFEN ohne SL/TP"
         const offen = !!erg.offen
