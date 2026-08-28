@@ -7,6 +7,16 @@ cd /d "%~dp0"
 start "MT5-Hedge-Copier" cmd /c start-copier.bat
 start "Copier-Panel" cmd /c start-panel.bat
 start "Prophos-Backend" cmd /c start-prophos.bat
+rem Echo + (28.08.2026, Fund von PC 1): "Alles neu starten" killt ALLE
+rem python.exe -- auf PCs mit TV-Reader starben Reader + Verbinder mit und
+rem blieben tot, weil sie hier fehlten. Deshalb: mitstarten, wenn der
+rem Ordner existiert. PCs ohne tv-reader bleiben unberuehrt.
+if exist "C:\tv-reader\start-reader.bat" (
+  start "Prophos TV-Reader" cmd /c "C:\tv-reader\start-reader.bat"
+)
+if exist "C:\tv-reader\start-verbinder.bat" (
+  start "Prophos TV-Verbinder" cmd /c "C:\tv-reader\start-verbinder.bat"
+)
 echo.
 echo (15.08.2026) WICHTIG bei PCs mit ALTEM Backend-Setup (C:\prophos):
 echo Nicht nur das alte start-local-backend-Fenster schliessen -- auch die

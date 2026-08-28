@@ -323,6 +323,12 @@ def local_restart_stack():
                 "taskkill /f /fi \"WINDOWTITLE eq MT5-Hedge-Copier*\" >nul 2>&1\r\n"
                 "taskkill /f /fi \"WINDOWTITLE eq Copier-Panel*\" >nul 2>&1\r\n"
                 "taskkill /f /fi \"WINDOWTITLE eq Prophos-Backend*\" >nul 2>&1\r\n"
+                # Echo + (28.08.2026, Fund von PC 1): der python.exe-Kill unten
+                # trifft auch Reader + Verbinder — deren Fenster blieben als
+                # tote Huellen stehen ("Taste druecken..."), waehrend
+                # start-alles.bat sie neu oeffnet. Alte Huellen mit schliessen.
+                "taskkill /f /fi \"WINDOWTITLE eq Prophos TV-Reader*\" >nul 2>&1\r\n"
+                "taskkill /f /fi \"WINDOWTITLE eq Prophos TV-Verbinder*\" >nul 2>&1\r\n"
                 "taskkill /f /im python.exe >nul 2>&1\r\n"
                 "timeout /t 2 /nobreak >nul\r\n"
                 f"start \"\" \"{bat}\"\r\n")
