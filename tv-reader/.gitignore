@@ -1,0 +1,4 @@
+# Laufzeit-Dateien des reader-servers — nie committen
+positions.json
+reader_aus.flag
+__pycache__/

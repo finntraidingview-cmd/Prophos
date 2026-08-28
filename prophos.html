@@ -3470,6 +3470,14 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
         Echo <span class="sb-badge" id="sb-badge-mtc" hidden>0</span>
       </button>
+      <!-- Echo +: Futures-Hedge ueber den TradingView-Browser-Reader (28.08.2026,
+           Finns Taufe). Eigener Bereich, damit Echo (MT5-Master) und Echo +
+           (TradingView-Master) sauber getrennt bleiben — geteilt sind spaeter
+           nur Hedge-Konto, Airbag-SL und die Copier-Logik. -->
+      <button class="sb-link" data-view="echoplus">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>
+        Echo + <span class="sb-badge" id="sb-badge-echoplus" hidden>0</span>
+      </button>
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
@@ -5987,6 +5995,52 @@
       </div>
     </section>
 
+    <!-- Echo +: Futures-Seite (28.08.2026) — der TradingView-Browser-Reader
+         (tv-reader/) als Master-Quelle. Erste Ausbaustufe: SEHEN was der Reader
+         sieht + SCHALTEN (ein/aus), pro Geraet eine Karte. Datenweg wie beim
+         Flotten-Puls: der Prophos-Tab des Reader-Geraets pusht alle 5s nach
+         echoplus_live; zusaetzlich liest die View den lokalen reader-server
+         (127.0.0.1:8790) direkt, wenn er auf DIESEM Geraet laeuft. -->
+    <section class="view" data-view="echoplus">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Echo +</h1>
+          <p class="view-sub">Futures-Hedge über den TradingView-Reader — liest die Master-Positionen direkt aus dem Browser. Erste Stufe: sehen &amp; schalten.</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="mtc-chip" id="ep-lokal-chip" title="Der Reader läuft auf DIESEM Gerät (127.0.0.1:8790 antwortet)" style="display:none"><span class="mtc-dot on"></span>Reader lokal</span>
+        </div>
+      </div>
+
+      <!-- Kein Reader gefunden: Einrichtung zeigen statt leerer Seite -->
+      <div id="ep-offline" class="ts-card mtc-offline" style="display:none">
+        <h3 style="margin:0 0 6px">Kein Reader-Signal</h3>
+        <p style="margin:0;font-size:13px;color:var(--sub);line-height:1.6">
+          Weder auf diesem Gerät (<code>127.0.0.1:8790</code>) noch in der Cloud gibt es frische
+          Reader-Daten. Der Reader läuft auf dem PC, auf dem TradingView im Chrome offen ist —
+          dort müssen <b>Tampermonkey-Script</b> und <b>reader-server.py</b> laufen und
+          <b>ein Prophos-Tab offen sein</b> (der Tab ist die Brücke in die Cloud).
+        </p>
+        <div style="margin-top:10px;font-size:12px;color:var(--sub-2)" id="ep-offline-detail"></div>
+      </div>
+
+      <div id="ep-notice"></div>
+      <div class="mtc-grid" id="ep-grid"></div>
+
+      <!-- Installations-Anleitung (erster Windows-PC) — bewusst direkt in der
+           View, damit die Einrichtung ohne README am PC klappt -->
+      <details id="ep-setup-box" style="margin-top:16px">
+        <summary style="cursor:pointer;font-size:13px;color:var(--sub);user-select:none;font-weight:600">🛠 Installation auf einem PC (einmalig)</summary>
+        <ol style="margin:10px 0 0;padding-left:20px;font-size:13px;color:var(--sub);line-height:1.9">
+          <li><b>Tampermonkey</b> in Chrome installieren, dann in <code>chrome://extensions</code> → Tampermonkey → Details → <b>„Nutzerscripts zulassen"</b> aktivieren (Entwicklermodus an — ohne das läuft kein Userscript).</li>
+          <li>Tampermonkey-Dashboard → <b>Utilities → Import</b> → Inhalt von <code>tv-reader/tv-reader.user.js</code> einfügen → speichern.</li>
+          <li>Empfänger starten: <code>start-reader.bat</code> (Windows) bzw. <code>python3 reader-server.py</code> im Ordner <code>tv-reader/</code>.</li>
+          <li>TradingView öffnen, <b>Positionen-Panel unten sichtbar</b> lassen — unten rechts erscheint der grüne Reader-Badge.</li>
+          <li>Auf dem PC einen <b>Prophos-Tab</b> offen lassen (localhost:5000 wie gehabt) — er pusht den Reader-Stand alle 5s in die Cloud, dann siehst du ihn hier von überall.</li>
+        </ol>
+      </details>
+    </section>
+
     <!-- MT5-Copier: Account-hinzufuegen-Modal — dedizierte Verdrahtung -->
     <div class="modal-bg" id="mtcAddModal">
       <div class="modal" style="max-width:460px">
@@ -7606,6 +7660,7 @@
     topstep:   ['Topstep Mirror', 'TSX ↔ MT5 hatching'],
     calc:      ['Lot Rechner', 'Hatch-Multiplier zwischen zwei Firms'],
     mt5copier: ['Echo', 'Dein MT5-Hedge-Copier — die Flotte dieses PCs'],
+    echoplus:  ['Echo +', 'Futures-Hedge über den TradingView-Reader'],
     trades:    ['Trades',    'Trade-Log über alle Accounts'],
     livetrades:['Live Trades', 'Offene Positionen'],
     risk:      ['Risk',      'Live-Drawdown & Compliance'],
@@ -27723,6 +27778,235 @@
   // Nahtstelle fuer mt5CreateAccountInCopier (Prophos-Account → Copier-Weg,
   // 15.08.2026): setzt den Auto-Link-Merker, den mtcLoad bei job.done einloest.
   window.mtcQueueAutoLink = m => { if(m && m.name && m.login && m.accountId) _mtcPendingLink = m }
+})()
+
+/* ═══════════ ECHO + — TradingView-Reader in Prophos (28.08.2026) ═══════════
+ * Erste Ausbaustufe nach dem End-to-End-Beweis vom Nachmittag: SEHEN, was der
+ * Reader sieht, und SCHALTEN (ein/aus) — von jedem Geraet aus.
+ *
+ * Datenwege (Muster Flotten-Puls, eine Ebene kleiner):
+ *  - Bruecke: laeuft der reader-server auf DIESEM Geraet (127.0.0.1:8790),
+ *    pusht dieser Tab alle 5s die Reader-Daten nach echoplus_live (eine Zeile
+ *    pro Geraet, Key = mt5FleetPcId) und setzt dabei den Fernschalter durch.
+ *  - View: zeigt ALLE frischen echoplus_live-Zeilen als Karten; die Karte des
+ *    eigenen Geraets kommt direkt vom lokalen Server (schneller als die Cloud).
+ *
+ * Fernschalter-Doktrin: soll_an in der Zeile IST der Schalter (sticky, wird
+ * nie geloescht — kein Race-Fenster), an ist der vom Geraet gemeldete Ist.
+ * Die Bruecke setzt soll_an idempotent beim lokalen Server durch; die Karte
+ * zeigt „schaltet…", solange Ist und Soll auseinanderliegen.
+ *
+ * Beweis-Doktrin wie ueberall: Zeilen aelter 25s grau („zuletzt vor Xs"),
+ * aelter 10min gar nicht — nie alte Daten als live. Pausiert = Stand friert
+ * ein (stale != flat, der Server haelt das so). */
+;(() => {
+  const EP_READER = 'http://127.0.0.1:8790'
+  const $ep = id => document.getElementById(id)
+  const epView = () => document.querySelector('#dashboard-view .view[data-view="echoplus"]')
+  const epActive = () => { const v = epView(); return v && v.classList.contains('active') }
+  const epEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+  const epPcId = () => (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : 'pc-unbekannt'
+
+  // Lokaler Reader: Stand + progressiver Backoff (Geraete OHNE Reader sollen
+  // nicht alle 5s eine rote Console-Zeile produzieren — 45s → verdoppeln → max 10min;
+  // Reset bei Erfolg und beim Betreten der View, da schaut ja jemand hin).
+  const epLokal = { stand: null, ab: 0, backoffMs: 45000, naechster: 0 }
+  async function epLokalHolen(){
+    if(Date.now() < epLokal.naechster) return epLokal.stand
+    try{
+      const r = await fetch(EP_READER + '/positions', { cache: 'no-store',
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(1500) : undefined })
+      if(!r.ok) throw new Error('HTTP ' + r.status)
+      epLokal.stand = await r.json()
+      epLokal.ab = Date.now()
+      epLokal.backoffMs = 45000
+      epLokal.naechster = 0
+      return epLokal.stand
+    }catch(_){
+      epLokal.stand = null
+      epLokal.naechster = Date.now() + epLokal.backoffMs
+      epLokal.backoffMs = Math.min(epLokal.backoffMs * 2, 600000)
+      return null
+    }
+  }
+
+  // ── Bruecke: lokaler Reader → Cloud (+ Fernschalter durchsetzen), alle 5s ──
+  let _epPushBusy = false
+  async function epBrueckeTick(){
+    if(_epPushBusy) return
+    _epPushBusy = true
+    try{
+      const d = await epLokalHolen()
+      if(!d) return
+      const pc = epPcId()
+      // Fernschalter: eigenen soll_an lesen und aufs lokale Geraet anwenden.
+      // Bewusst VOR dem Push, damit "an" im Push schon den neuen Ist traegt.
+      try{
+        const { data: zeile } = await supabase.from('echoplus_live')
+          .select('soll_an').eq('id', pc).maybeSingle()
+        const soll = zeile ? zeile.soll_an : null
+        if(typeof soll === 'boolean' && soll !== (d.an !== false)){
+          const r = await fetch(EP_READER + '/schalter', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ an: soll }),
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(1500) : undefined })
+          const rd = await r.json()
+          if(rd && rd.ok) d.an = rd.an
+        }
+      }catch(_){ /* Cloud/Schalter gerade nicht erreichbar — naechster Tick */ }
+      // soll_an wird hier bewusst NICHT mitgeschrieben (sticky Schalter —
+      // den setzen nur die Schalt-Klicks, sonst wuerde die Bruecke ihn platt-pushen)
+      await supabase.from('echoplus_live').upsert({
+        id: pc, pc_name: pc,
+        an: d.an !== false,
+        positionen: d.positionen || [],
+        reader_ts: Number(d.ts) || 0,
+        updated_at: new Date().toISOString()
+      })
+    }catch(_){ /* still — naechster Tick */ }
+    finally{ _epPushBusy = false }
+  }
+  setInterval(epBrueckeTick, 5000)
+
+  // ── Schalten: soll_an schreiben (sticky), lokal zusaetzlich sofort ──
+  async function epSchalten(id, an){
+    try{
+      const { error } = await supabase.from('echoplus_live').update({ soll_an: an }).eq('id', id)
+      if(error) throw error
+      // Ziel ist DIESES Geraet und der Server antwortet lokal → sofort schalten,
+      // nicht erst im naechsten 5s-Brueckentick
+      if(id === epPcId() && epLokal.stand){
+        try{
+          const r = await fetch(EP_READER + '/schalter', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ an }),
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(1500) : undefined })
+          const rd = await r.json()
+          if(rd && rd.ok){
+            if(epLokal.stand) epLokal.stand.an = rd.an
+            await supabase.from('echoplus_live').update({ an: rd.an }).eq('id', id)
+          }
+        }catch(_){ /* Bruecke zieht nach */ }
+      }
+      if(typeof atToast === 'function')
+        atToast(an ? '▶ Echo + wird eingeschaltet' : '⏸ Echo + wird pausiert — Stand friert ein, nichts wird gehedgt', 'start')
+    }catch(e){
+      alert('Schalten fehlgeschlagen (sql/2026-08-28_echoplus_live.sql schon ausgeführt?): ' + (e && e.message || e))
+    }
+    epRenderTick(true)
+  }
+
+  // ── Render: Cloud-Zeilen + lokale Overlay-Karte ──
+  function epAlter(ms){
+    const s = Math.max(0, Math.round(ms / 1000))
+    if(s < 90) return `vor ${s}s`
+    if(s < 5400) return `vor ${Math.round(s / 60)}min`
+    return `vor ${Math.round(s / 3600)}h`
+  }
+  function epPnlHtml(pnl){
+    if(!pnl) return ''
+    const neg = /^\s*[-−]/.test(String(pnl))
+    return `<span class="mono" style="font-weight:700;color:${neg ? 'var(--danger)' : 'var(--good)'}">${epEsc(pnl)}</span>`
+  }
+  function epPosHtml(p){
+    const long = String(p.seite || '').toLowerCase() === 'long'
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--border);flex-wrap:wrap">
+      <span class="mono" style="font-weight:700">${epEsc(p.symbol)}</span>
+      <span class="mtc-chip" style="background:${long ? 'rgba(18,183,106,.12)' : 'rgba(240,68,56,.10)'};color:${long ? 'var(--good)' : 'var(--danger)'}">${epEsc(p.seite || '?')}</span>
+      <span class="mono">${epEsc(p.menge)} @ ${epEsc(p.einstieg || '—')}</span>
+      <span style="font-size:12px;color:var(--sub)">SL <b class="mono">${epEsc(p.sl || '—')}</b> · TP <b class="mono">${epEsc(p.tp || '—')}</b></span>
+      <span style="margin-left:auto">${epPnlHtml(p.pnl)}</span>
+    </div>`
+  }
+  function epKarteHtml(z, istLokal){
+    const jetzt = Date.now()
+    const pushAlt = jetzt - new Date(z.updated_at).getTime()
+    const datenAlt = z.reader_ts ? (jetzt - Number(z.reader_ts)) : null
+    const frisch = pushAlt <= 25000
+    const an = z.an !== false
+    const schaltet = (typeof z.soll_an === 'boolean') && z.soll_an !== an
+    const pos = Array.isArray(z.positionen) ? z.positionen : []
+    const dot = !frisch ? 'idle' : (an ? 'on' : 'off')
+    const statusText = !frisch ? `kein frischer Push (${epAlter(pushAlt)})`
+      : (an ? (pos.length ? `liest live · ${pos.length} Position${pos.length > 1 ? 'en' : ''}` : 'liest live · flat')
+            : 'pausiert — Stand eingefroren')
+    return `<div class="mtc-card" style="${frisch ? '' : 'opacity:.55'}">
+      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+        <span class="mtc-dot ${dot}"></span>
+        <b>${epEsc(z.pc_name || z.id)}</b>
+        ${istLokal ? '<span class="mtc-chip" title="Dieses Gerät — Daten direkt vom lokalen reader-server">💻 dieses Gerät</span>' : ''}
+        <span style="font-size:12px;color:var(--sub)">${epEsc(statusText)}</span>
+        <button class="btn ${an ? 'btn-ghost' : 'btn-primary'}" data-ep-schalter="${epEsc(z.id)}" data-ep-an="${an ? '0' : '1'}"
+          ${schaltet ? 'disabled' : ''} style="margin-left:auto"
+          title="${an ? 'Reader pausieren: Stand friert ein, es wird nichts gehedgt' : 'Reader wieder einschalten'}">
+          ${schaltet ? '⏳ schaltet…' : (an ? '⏸ Pausieren' : '▶ Einschalten')}</button>
+      </div>
+      <div style="margin-top:8px">
+        ${pos.length ? pos.map(epPosHtml).join('') : `<div style="padding:9px 0;border-top:1px solid var(--border);font-size:12.5px;color:var(--sub)">Keine offene Position${an ? '' : ' (Stand vom Pausieren)'}</div>`}
+      </div>
+      <div style="margin-top:6px;font-size:11.5px;color:var(--sub-2)">
+        ${datenAlt !== null ? `Reader-Daten ${epAlter(datenAlt)}` : 'noch keine Reader-Daten'} · Push ${epAlter(pushAlt)}
+      </div>
+    </div>`
+  }
+
+  let _epRenderBusy = false
+  async function epRenderTick(sofort){
+    if(!epActive() && !sofort) return
+    if(_epRenderBusy) return
+    _epRenderBusy = true
+    try{
+      // Cloud: alle Zeilen der letzten 10min (aeltere sind keine Anzeige wert)
+      let rows = []
+      try{
+        const grenze = new Date(Date.now() - 10 * 60 * 1000).toISOString()
+        const { data } = await supabase.from('echoplus_live').select('*').gte('updated_at', grenze)
+        rows = data || []
+      }catch(_){}
+      // Lokales Overlay: eigener Server ist frischer als der eigene Cloud-Push
+      const lokal = await epLokalHolen()
+      const pc = epPcId()
+      if(lokal){
+        const eigene = rows.find(z => z.id === pc)
+        const frischer = { positionen: lokal.positionen || [], an: lokal.an !== false,
+          reader_ts: Number(lokal.ts) || 0, updated_at: new Date().toISOString() }
+        if(eigene) Object.assign(eigene, frischer)
+        else rows.push({ id: pc, pc_name: pc, soll_an: null, ...frischer })
+      }
+      const chip = $ep('ep-lokal-chip')
+      if(chip) chip.style.display = lokal ? '' : 'none'
+      rows.sort((a, b) => String(a.pc_name || a.id).localeCompare(String(b.pc_name || b.id)))
+      const grid = $ep('ep-grid'), off = $ep('ep-offline')
+      if(!grid || !off) return
+      if(!rows.length){
+        grid.innerHTML = ''
+        off.style.display = ''
+        const det = $ep('ep-offline-detail')
+        if(det) det.textContent = 'Zuletzt geprüft: ' + new Date().toLocaleTimeString()
+        const box = $ep('ep-setup-box')
+        if(box) box.open = true
+      }else{
+        off.style.display = 'none'
+        grid.innerHTML = rows.map(z => epKarteHtml(z, z.id === pc && !!lokal)).join('')
+      }
+    }finally{ _epRenderBusy = false }
+  }
+  setInterval(() => epRenderTick(false), 3000)
+
+  // Beim Wechsel in die View sofort rendern + lokalen Backoff zuruecksetzen
+  document.querySelectorAll('#dashboard-view .sb-link[data-view="echoplus"]').forEach(b =>
+    b.addEventListener('click', () => { epLokal.naechster = 0; setTimeout(() => epRenderTick(true), 50) }))
+
+  // Schalter-Klicks — dedizierte Verdrahtung auf dem Echo-+-Grid (Projektregel:
+  // keine Sammel-Handler ueber fremde Bereiche)
+  const epGrid = $ep('ep-grid')
+  if(epGrid) epGrid.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('[data-ep-schalter]')
+    if(!btn) return
+    btn.disabled = true
+    btn.textContent = '⏳ schaltet…'
+    epSchalten(btn.getAttribute('data-ep-schalter'), btn.getAttribute('data-ep-an') === '1')
+  })
 })()
 </script>
 <!-- ── Coin-Flip Floating Button + Modal ── -->
