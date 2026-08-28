@@ -2228,7 +2228,7 @@
   #dashboard-view .mob-nav{display:none}
   @keyframes mob-sheet-in{from{opacity:.5;transform:translateY(26px)}to{opacity:1;transform:none}}
   @media (max-width:820px){
-    :root{--mob-nav-h:58px}
+    :root{--mob-nav-h:58px;--topbar-h:52px}
 
     /* — Sidebar wird zum Bottom-Sheet („Mehr"-Tab öffnet sie) — */
     #dashboard-view .sidebar{
@@ -2412,8 +2412,63 @@
     #finTable td:nth-child(1){grid-column:2;grid-row:2;text-align:right;color:var(--sub)}
     #finTable td:nth-child(5){grid-column:1;grid-row:3}
     #finTable td:nth-child(6){grid-column:2;grid-row:3;text-align:right}
-    /* Löschen pro Zeile: subtil, ohne Rahmen — die Liste soll ruhig wirken */
-    #finTable .icon-btn{border:none;background:none;box-shadow:none}
+    /* Löschen pro Zeile: subtil, ohne Rahmen — die Liste soll ruhig wirken
+       (Spezifität bewusst hoch, damit die v2-Pill-Regel unten nicht greift) */
+    #dashboard-view #finTable .icon-btn{border:none;background:none;box-shadow:none}
+
+    /* ————————————————————————————————————————————————————————————
+       APP-POLITUR v2 (28.08.2026, Finn: „geht noch cleaner") —
+       die letzten Web-Reste raus: doppelte Titel, Erklär-Texte,
+       Rahmen um alles, Unterstrich-Tabs, Tap-Blitz, Scrollbalken.
+    ———————————————————————————————————————————————————————————— */
+
+    /* Ein Titel reicht: die Topbar trägt den Screen-Namen (switchView
+       pflegt ihn eh), die großen h1 + Erklär-Sätze im Inhalt sind Web-
+       Duplikate. Ausnahme account-detail: #ad-title ist der dynamische
+       Account-Name samt Zurück-Kopf — der bleibt. */
+    #dashboard-view .tb-title{font-size:17px}
+    #dashboard-view .view:not([data-view="account-detail"]) .view-title{display:none}
+    #dashboard-view .view:not([data-view="account-detail"]) .view-sub{display:none}
+
+    /* Karten schweben statt Kästchen: Rahmen weg, weicher Schatten */
+    #dashboard-view .panel,#dashboard-view .kpi,#dashboard-view .trade-card,
+    #dashboard-view .mtc-card,#dashboard-view .mg-stat{
+      border:none;
+      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+    }
+
+    /* Sub-Tabs als Pills statt Unterstrich-Tabs */
+    #dashboard-view .subtabs{border-bottom:none;gap:6px;padding-bottom:2px;margin-bottom:12px}
+    #dashboard-view .subtab{
+      border-bottom:none;margin-bottom:0;border-radius:999px;
+      padding:8px 13px;background:var(--surface-tint);
+    }
+    #dashboard-view .subtab.active{background:var(--violet-tint);color:var(--violet)}
+
+    /* Ghost-Buttons als weiße Pills ohne Rahmen */
+    #dashboard-view .btn-ghost{
+      border:none;background:var(--surface);
+      box-shadow:0 1px 2px rgba(16,24,40,.08);
+    }
+
+    /* Tab-Bar randlos mit weichem Schatten nach oben */
+    #dashboard-view .mob-nav{border-top:none;box-shadow:0 -6px 20px rgba(16,24,40,.07)}
+    #dashboard-view .mob-link svg{width:22px;height:22px}
+
+    /* Kein grauer Tap-Blitz, keine sichtbaren Scrollbalken in Scroll-Zeilen */
+    #dashboard-view *{-webkit-tap-highlight-color:transparent}
+    #dashboard-view .table-wrap{scrollbar-width:none}
+    #dashboard-view .table-wrap::-webkit-scrollbar{display:none}
+
+    /* Empty-States ohne gestrichelten Web-Rahmen */
+    #dashboard-view .empty{border:none;background:transparent}
+
+    /* Eingaben eine Spur runder — passt zu Pills und Sheets */
+    #dashboard-view .input{border-radius:12px}
+
+    /* Firma-/Typ-Filter in eine Zeile (Inline-min-width braucht !important) */
+    #acc-firm-filter{min-width:110px !important}
+    #acc-type-filter{min-width:96px !important}
   }
 
   /* ============================================================
