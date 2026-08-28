@@ -7,7 +7,7 @@ cd /d "%~dp0"
 start "MT5-Hedge-Copier" cmd /c start-copier.bat
 start "Copier-Panel" cmd /c start-panel.bat
 start "Prophos-Backend" cmd /c start-prophos.bat
-rem Echo + (28.08.2026, Fund von PC 1): "Alles neu starten" killt ALLE
+rem Orbit (28.08.2026, Fund von PC 1): "Alles neu starten" killt ALLE
 rem python.exe -- auf PCs mit TV-Reader starben Reader + Verbinder mit und
 rem blieben tot, weil sie hier fehlten. Deshalb: mitstarten, wenn der
 rem Ordner existiert. PCs ohne tv-reader bleiben unberuehrt.

@@ -1,5 +1,5 @@
 {
-  "_hinweis": "Vorlage fuer den TV-Verbinder (Echo +). Kopieren nach verbinder.config.json und master_login ausfuellen. Die Datei gehoert dem PC — nicht committen.",
+  "_hinweis": "Vorlage fuer den TV-Verbinder (Orbit). Kopieren nach verbinder.config.json und master_login ausfuellen. Die Datei gehoert dem PC — nicht committen.",
   "_1_master_login": "Frei waehlbare Kenn-Nummer dieses TV-Masters (z.B. die Tradovate-Kontonummer). MUSS identisch mit master_expected_login in der Copier-Config (config-tvplus.json) sein — das ist der Schutz gegen vertauschte Snapshots.",
   "master_login": 0,
   "server_label": "TV:tradovate",

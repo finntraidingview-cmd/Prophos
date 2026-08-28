@@ -1,5 +1,5 @@
 {
-  "_hinweis": "VORLAGE fuer die Echo-+-Instanz (TV-Verbinder als Master, 28.08.2026) — wird wegen des Punkts im Namen NIE als echte Config erkannt. Auf dem PC kopieren nach config-tvplus.json und die markierten Werte ausfuellen. Der Master ist hier KEIN MT5-Terminal, sondern der TV-Verbinder (tv-reader/tv_verbinder.py), der das Snapshot-CSV aus TradingView speist.",
+  "_hinweis": "VORLAGE fuer die Orbit-Instanz (TV-Verbinder als Master, 28.08.2026; Dateiname behaelt das alte tvplus) — wird wegen des Punkts im Namen NIE als echte Config erkannt. Auf dem PC kopieren nach config-tvplus.json und die markierten Werte ausfuellen. Der Master ist hier KEIN MT5-Terminal, sondern der TV-Verbinder (tv-reader/tv_verbinder.py), der das Snapshot-CSV aus TradingView speist.",
   "_1_AUSFUELLEN_login": "Dieselbe Kenn-Nummer wie master_login in tv-reader/verbinder.config.json (z.B. die Tradovate-Kontonummer). Schutz gegen vertauschte Snapshots.",
   "master_expected_login": 0,
   "_2_hedge": "EXAKT wie in den anderen Configs dieses PCs — alle Master eines Copier-Prozesses zeigen in dasselbe Hedge-Terminal (check_fleet erzwingt das).",
@@ -20,7 +20,7 @@
     "NQ": "NAS100",
     "MNQ": "NAS100"
   },
-  "_7_eindeutigkeit": "magic und comment_prefix muessen pro Master dieses PCs eindeutig sein — 770900er-Block ist fuer Echo + reserviert, die Provisionierung vergibt 770001 aufwaerts.",
+  "_7_eindeutigkeit": "magic und comment_prefix muessen pro Master dieses PCs eindeutig sein — 770900er-Block ist fuer Orbit reserviert, die Provisionierung vergibt 770001 aufwaerts.",
   "magic": 770900,
   "comment_prefix": "TV",
   "_8_technik": "Standardwerte wie ueberall. Die Notfall-Werte bleiben wirkungslos, solange der Verbinder SL/TP nullt (Preisskala Futures vs. CFD — siehe verbinder.config).",

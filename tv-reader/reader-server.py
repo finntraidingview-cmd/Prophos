@@ -8,7 +8,7 @@ und gibt ihn als Live-Zeile im Terminal aus.
 Das ist der Andockpunkt fuer den echten Hedge-Copier: der liest entweder
 GET http://127.0.0.1:8790/positions oder direkt die Datei positions.json.
 
-Ein/Aus-Schalter (28.08.2026, Echo-+-View in Prophos): POST /schalter
+Ein/Aus-Schalter (28.08.2026, Orbit-View in Prophos — hiess damals "Echo +"): POST /schalter
 {"an": false} pausiert den Reader — der Stand friert ein (stale != flat:
 ein pausierter Reader meldet NIE "keine Positionen", sonst wuerde ein
 spaeterer Copier-Konsument die Hedges schliessen). Persistiert als
@@ -75,7 +75,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
         # Chrome Private-Network-Access: erlaubt einer HTTPS-Seite (Prophos auf
-        # pages.dev) den Zugriff auf 127.0.0.1 — noetig fuer die Echo-+-View.
+        # pages.dev) den Zugriff auf 127.0.0.1 — noetig fuer die Orbit-View.
         self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def _json(self, code, obj):
@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Schalter (Echo-+-View): POST /schalter {"an": true/false}
+        # Schalter (Orbit-View): POST /schalter {"an": true/false}
         if self.path.rstrip("/") == "/schalter":
             if "an" not in daten:
                 self._json(400, {"ok": False, "msg": "Feld 'an' fehlt"})
@@ -143,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "an": True})
 
     def do_GET(self):
-        # Aktuellen Stand abfragbar machen (fuer den Copier, die Echo-+-View
+        # Aktuellen Stand abfragbar machen (fuer den Copier, die Orbit-View
         # oder zum Reinschauen im Browser) — inkl. Schalter-Zustand.
         self._json(200, _mit_an(_stand))
 

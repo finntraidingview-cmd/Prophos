@@ -649,7 +649,7 @@ class Master:
         self.deviation = int(cfg.get("deviation_points", 30))
         self.filling = str(cfg.get("filling", "auto")).upper()
         self.adopt = bool(cfg.get("adopt_existing_master_positions", False))
-        # immer_scharf (28.08.2026, Echo +): Master ohne Prophos-Plan-Fenster —
+        # immer_scharf (28.08.2026, Orbit): Master ohne Prophos-Plan-Fenster —
         # der TV-Verbinder speist Finns MANUELLE TradingView-Trades ein, dort
         # gibt es kein 'Trade starten'. true = jede neue Master-Position wird
         # gehedgt (wie ein klassischer Copier). Beim Start-Connect gilt trotzdem
@@ -1224,7 +1224,7 @@ def main():
 
             # ── Jeden Master abarbeiten ─────────────────────────────────────────
             for m in masters:
-                # immer_scharf zaehlt wie ein offenes Fenster (Echo +, 28.08.2026)
+                # immer_scharf zaehlt wie ein offenes Fenster (Orbit, 28.08.2026)
                 m.armed = (m.file in armed_files) or m.immer_scharf
                 if m.armed:
                     m.warned_unarmed.clear()
@@ -1294,7 +1294,7 @@ def main():
                         # ohne Hedge genau der geplante Trade: uebernehmen und hedgen.
                         # Der Alt-Bestand-Schutz gilt weiter fuer Verbindungen OHNE
                         # offenes Fenster (dort entstehen Positionen nie durch uns) —
-                        # UND fuer immer_scharf-Master (Echo +): dort ist eine beim
+                        # UND fuer immer_scharf-Master (Orbit): dort ist eine beim
                         # Start unhedgte Position Alt-Bestand/bewusste Entscheidung,
                         # kein frisch geplanter Trade; es gilt adopt.
                         m.startup_skip = set()

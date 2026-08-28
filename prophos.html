@@ -3485,13 +3485,16 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>
         Echo <span class="sb-badge" id="sb-badge-mtc" hidden>0</span>
       </button>
-      <!-- Echo +: Futures-Hedge ueber den TradingView-Browser-Reader (28.08.2026,
-           Finns Taufe). Eigener Bereich, damit Echo (MT5-Master) und Echo +
-           (TradingView-Master) sauber getrennt bleiben — geteilt sind spaeter
-           nur Hedge-Konto, Airbag-SL und die Copier-Logik. -->
+      <!-- Orbit (bis 28.08.2026 „Echo +" — Umtaufe noch am selben Tag, Finns
+           Ansage: zu leicht mit Echo zu verwechseln): Futures-Hedge ueber den
+           TradingView-Browser-Reader. Eigener Bereich, damit Echo (MT5-Master)
+           und Orbit (TradingView-Master) sauber getrennt bleiben — geteilt sind
+           spaeter nur Hedge-Konto, Airbag-SL und die Copier-Logik. Interne
+           Kennungen (view echoplus, route tvplus, Tabelle echoplus_live) behalten
+           bewusst die alten Namen — kein Migrations-Risiko fuer eine Umbenennung. -->
       <button class="sb-link" data-view="echoplus">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>
-        Echo + <span class="sb-badge" id="sb-badge-echoplus" hidden>0</span>
+        Orbit <span class="sb-badge" id="sb-badge-echoplus" hidden>0</span>
       </button>
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
@@ -4524,7 +4527,7 @@
               <div class="seg" id="tp-route-seg">
                 <button type="button" id="tp-route-dup">Duplikum</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
-                <button type="button" id="tp-route-tvplus">Echo +</button>
+                <button type="button" id="tp-route-tvplus">Orbit</button>
               </div>
             </div>
             <div class="field">
@@ -6011,7 +6014,7 @@
       </div>
     </section>
 
-    <!-- Echo +: Futures-Seite (28.08.2026) — der TradingView-Browser-Reader
+    <!-- Orbit (frueher „Echo +"): Futures-Seite (28.08.2026) — der TradingView-Browser-Reader
          (tv-reader/) als Master-Quelle. Erste Ausbaustufe: SEHEN was der Reader
          sieht + SCHALTEN (ein/aus), pro Geraet eine Karte. Datenweg wie beim
          Flotten-Puls: der Prophos-Tab des Reader-Geraets pusht alle 5s nach
@@ -6020,7 +6023,7 @@
     <section class="view" data-view="echoplus">
       <div class="view-head">
         <div>
-          <h1 class="view-title">Echo +</h1>
+          <h1 class="view-title">Orbit</h1>
           <p class="view-sub">Futures-Hedge über den TradingView-Reader — liest die Master-Positionen direkt aus dem Browser. Erste Stufe: sehen &amp; schalten.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
@@ -7676,7 +7679,7 @@
     topstep:   ['Topstep Mirror', 'TSX ↔ MT5 hatching'],
     calc:      ['Lot Rechner', 'Hatch-Multiplier zwischen zwei Firms'],
     mt5copier: ['Echo', 'Dein MT5-Hedge-Copier — die Flotte dieses PCs'],
-    echoplus:  ['Echo +', 'Futures-Hedge über den TradingView-Reader'],
+    echoplus:  ['Orbit', 'Futures-Hedge über den TradingView-Reader'],
     trades:    ['Trades',    'Trade-Log über alle Accounts'],
     livetrades:['Live Trades', 'Offene Positionen'],
     risk:      ['Risk',      'Live-Drawdown & Compliance'],
@@ -11980,7 +11983,7 @@
       // mt5RouteResolve (Login-Match) greift — MIT remoteOk (28.08.2026,
       // Finns Fund „nur auf dem Windows-PC": ohne das Flag lief der Resolver
       // auf pages.dev in sein Localhost-Gate und dieser ganze Zweig war tot).
-      // Frische 25s statt 20 (Echo+-Doktrin): 5s-Push + 5s-Pull + 5s-Render-
+      // Frische 25s statt 20 (Orbit-Doktrin): 5s-Push + 5s-Pull + 5s-Render-
       // Tick + Query-Latenz — 20s warf bei EINEM verpassten Tick schon
       // frische Daten weg (das „Manchmal" in Finns Bericht). Nie alte Zahlen
       // als „live" (P&L-Beweis-Doktrin) gilt unverändert.
@@ -13566,7 +13569,7 @@
 
       // MT5-Routen-Pläne (15.08.2026) gehören der MT5-Zustandsmaschine (mt5PlanPoll),
       // nicht Duplikum — gleiche Logik wie der Mirror-Skip eine Zeile drüber.
-      // Echo-+-Pläne (28.08.2026) genauso: die laufen über den TV-Reader, der
+      // Orbit-Pläne (28.08.2026) genauso: die laufen über den TV-Reader, der
       // Duplikum-Count-Fallback würde sie fälschlich beenden.
       if(plan.route === 'mt5' || plan.route === 'tvplus') continue
 
@@ -14018,7 +14021,7 @@
       if(isMirror(plan)) continue
       // MT5-Routen-Pläne (15.08.2026): gehören der MT5-Zustandsmaschine des
       // aktiven lokalen Profils (mt5PlanPoll), nie dem Duplikum-Wächter.
-      // Echo-+-Pläne (28.08.2026) ebenso — TV-Reader-Welt, kein Duplikum.
+      // Orbit-Pläne (28.08.2026) ebenso — TV-Reader-Welt, kein Duplikum.
       if(plan.route === 'mt5' || plan.route === 'tvplus') continue
       const dupSlaveId  = dupIdOf(plan.slaveAccountId)
       const dupMasterId = dupIdOf(plan.masterAccountId)
@@ -18897,7 +18900,7 @@
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
             ${p.route === 'tvplus'
-              ? `<span class="tc2-chip" style="background:rgba(124,58,237,.12);color:#7C3AED" title="Echo + — Order läuft von Hand in TradingView, Echo hedgt automatisch">Echo +</span>`
+              ? `<span class="tc2-chip" style="background:rgba(124,58,237,.12);color:#7C3AED" title="Orbit — Order läuft von Hand in TradingView, Echo hedgt automatisch">Orbit</span>`
               : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
@@ -19497,11 +19500,11 @@
     // Fallback für Alt-Pläne ohne gesetzte Route.
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
 
-    // Echo + (28.08.2026, Etappe 2): „Starten" kommt erst mit dem TV-Puls —
+    // Orbit (28.08.2026, Etappe 2): „Starten" kommt erst mit dem TV-Puls —
     // bis dahin wird die Order von Hand in TradingView platziert, der Reader
     // sieht sie und Echo hedgt. NIE in den Duplikum-Preflight durchfallen.
     if(plan.route === 'tvplus'){
-      if(typeof atToast === 'function') atToast('Echo-+-Plan: Order von Hand in TradingView platzieren — Echo hedgt automatisch. „Starten" per Puls kommt als nächste Ausbaustufe.', 'start')
+      if(typeof atToast === 'function') atToast('Orbit-Plan: Order von Hand in TradingView platzieren — Echo hedgt automatisch. „Starten" per Puls kommt als nächste Ausbaustufe.', 'start')
       return
     }
 
@@ -20264,10 +20267,10 @@
   let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
 
-  // Echo + (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
+  // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
   // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
   // getrieben aus den Settings statt Hardcode-Liste; neue Firma dort anlegen
-  // reicht, damit ihre Accounts im Echo-+-Master-Dropdown auftauchen.
+  // reicht, damit ihre Accounts im Orbit-Master-Dropdown auftauchen.
   function tpFirmIstFutures(firm){
     try{ return (getCustomFirms() || []).some(f => f && f.name === firm && f.unit === 'Kontrakte') }
     catch(_){ return false }
@@ -20283,7 +20286,7 @@
     if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →'
       : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
     // Bei fixem Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren.
-    // Gilt für Echo UND Echo + (28.08.2026, Finns Ansage „fix wie bei Echo" —
+    // Gilt für Echo UND Orbit (28.08.2026, Finns Ansage „fix wie bei Echo" —
     // die Info-Box von Etappe 2a ist raus, der Fluss erklärt sich selbst).
     const fixed = _tpRoute === 'mt5' || _tpRoute === 'tvplus'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
@@ -21477,7 +21480,7 @@
               if(!_lg || !_mt5LokalMasters.has(String(_lg))) return false
             }
           } else if(_tpRoute === 'tvplus'){
-            // Echo + (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
+            // Orbit (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
             // MIT External ID — die ID ist später das Konto-Matching im
             // TradingView-Panel. Slave fix = Hedge des PCs, wie beim MT5-Weg.
             if(role === 'master'){
@@ -22635,7 +22638,7 @@
     // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
     if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
-    // Echo + (28.08.2026): eigener P&L-Weg existiert noch nicht — ehrlich null
+    // Orbit (28.08.2026): eigener P&L-Weg existiert noch nicht — ehrlich null
     // statt in den Duplikum-Pfad zu fallen (der kennt diese Trades nicht).
     if(plan.route === 'tvplus') return null
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
@@ -27915,7 +27918,9 @@
   window.mtcQueueAutoLink = m => { if(m && m.name && m.login && m.accountId) _mtcPendingLink = m }
 })()
 
-/* ═══════════ ECHO + — TradingView-Reader in Prophos (28.08.2026) ═══════════
+/* ═══════════ ORBIT — TradingView-Reader in Prophos (28.08.2026) ═══════════
+ * (Bis 28.08.2026 abends „Echo +" — Umtaufe auf Finns Ansage: zu leicht mit
+ * Echo zu verwechseln. Interne Namen echoplus/tvplus/echoplus_live bleiben.)
  * Erste Ausbaustufe nach dem End-to-End-Beweis vom Nachmittag: SEHEN, was der
  * Reader sieht, und SCHALTEN (ein/aus) — von jedem Geraet aus.
  *
@@ -28024,7 +28029,7 @@
         }catch(_){ /* Bruecke zieht nach */ }
       }
       if(typeof atToast === 'function')
-        atToast(an ? '▶ Echo + wird eingeschaltet' : '⏸ Echo + wird pausiert — Stand friert ein, nichts wird gehedgt', 'start')
+        atToast(an ? '▶ Orbit wird eingeschaltet' : '⏸ Orbit wird pausiert — Stand friert ein, nichts wird gehedgt', 'start')
     }catch(e){
       alert('Schalten fehlgeschlagen (sql/2026-08-28_echoplus_live.sql schon ausgeführt?): ' + (e && e.message || e))
     }
@@ -28132,7 +28137,7 @@
   document.querySelectorAll('#dashboard-view .sb-link[data-view="echoplus"]').forEach(b =>
     b.addEventListener('click', () => { epLokal.naechster = 0; setTimeout(() => epRenderTick(true), 50) }))
 
-  // Schalter-Klicks — dedizierte Verdrahtung auf dem Echo-+-Grid (Projektregel:
+  // Schalter-Klicks — dedizierte Verdrahtung auf dem Orbit-Grid (Projektregel:
   // keine Sammel-Handler ueber fremde Bereiche)
   const epGrid = $ep('ep-grid')
   if(epGrid) epGrid.addEventListener('click', e => {

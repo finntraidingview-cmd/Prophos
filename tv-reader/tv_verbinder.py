@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prophos TV-Verbinder — Echo +: Reader-Stand -> PROPHOS1-Snapshot fuer copier.py.
+"""Prophos TV-Verbinder — Orbit (bis 28.08.2026 "Echo +"): Reader-Stand -> PROPHOS1-Snapshot fuer copier.py.
 
 Das fehlende Kettenglied des einfachen Spiegel-Wegs (28.08.2026, Finns Ansage:
 "TradingView-Order vom Windows-PC lesen + auf das Windows-MT5-Terminal
@@ -124,7 +124,7 @@ def main():
                  f"copier.py die Snapshots liest).")
 
     print("=" * 72)
-    print(" Echo + · TV-Verbinder · Reader -> PROPHOS1-Snapshot")
+    print(" Orbit · TV-Verbinder · Reader -> PROPHOS1-Snapshot")
     print(f"   Reader   {cfg['reader_url']}")
     print(f"   Ziel     {ziel}")
     print(f"   Master   {cfg['master_login']} @ {cfg['server_label']}")

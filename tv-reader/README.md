@@ -31,10 +31,11 @@ Reader sieht sie in < 1 s, schließen → sofort weg.
    Auf dem Windows-PC: einfach `start-reader.bat` doppelklicken.
 4. **Prophos-Tab offen lassen** (auf dem PC wie gehabt `localhost:5000`): der Tab
    ist die Brücke in die Cloud — er pusht den Reader-Stand alle 5s nach
-   `echoplus_live`, damit die **Echo-+-View** ihn von jedem Gerät zeigt.
+   `echoplus_live`, damit die **Orbit-View** ihn von jedem Gerät zeigt.
 
-## Ein/Aus — die Echo-+-View in Prophos
-Prophos hat einen eigenen Navigations-Punkt **Echo +**: eine Karte pro Gerät,
+## Ein/Aus — die Orbit-View in Prophos
+Prophos hat einen eigenen Navigations-Punkt **Orbit** (bis 28.08.2026 „Echo +" —
+umgetauft, weil zu leicht mit Echo zu verwechseln): eine Karte pro Gerät,
 darauf live die Positionen, die der Reader sieht, plus ein **Pausieren/
 Einschalten**-Knopf — der funktioniert von überall (Handy, Mac), nicht nur am PC:
 - Der Knopf schreibt den Wunsch (`soll_an`) in die Cloud; der Prophos-Tab des
