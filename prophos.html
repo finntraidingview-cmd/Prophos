@@ -14304,7 +14304,19 @@
     saveParents(par)
   }
   function getParent(accountId){
-    return getParents()[accountId] || null
+    const direct = getParents()[accountId]
+    if(direct) return direct
+    // Fallback übers Archiv: dieselbe Kette steckt dort invertiert (archive[Vorgänger].successorId
+    // = Nachfolger). Nötig seit 28.08.2026: die parents-Map wird als GANZER Blob über user_settings
+    // gesynct und der localStorage ist zwischen Finns Profilen geteilt — dabei sind die Einträge
+    // der Phase-2-Wechsel vom 18.08. und 26.08. verloren gegangen (Map enthielt nur noch Paare des
+    // anderen Profils), die Fixkosten-Box im Trade-Plan-Modal und der Vorgänger-Chip auf der
+    // Detail-Seite blieben unsichtbar. Das Archiv hat die Kette nachweislich robust — die
+    // Gesamtkosten-Berechnung (calcReingesteckdEur) läuft seit jeher darüber.
+    const hit = Object.entries(getArchive()).find(([, info]) =>
+      info?.successorId && String(info.successorId) === String(accountId)
+    )
+    return hit ? hit[0] : null
   }
 
   /* ========== TRADE-COMPLETE: Status-Optionen ========== */
@@ -15105,7 +15117,11 @@
       accEls.table.innerHTML = visible.map(a => {
         const archInfo = archive[a.id] || null
         const isArchived = !!archInfo?.archived
-        const parentId = parents[a.id] || null
+        // Gleicher Archiv-Fallback wie getParent() (28.08.2026, verlorene parents-Map-Einträge) —
+        // hier inline über das bereits geparste archive-Objekt statt pro Zeile neu aus localStorage.
+        const parentId = parents[a.id]
+          || Object.entries(archive).find(([, info]) => info?.successorId && String(info.successorId) === String(a.id))?.[0]
+          || null
         const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
         // Successor: irgendein archivierter Account dessen successorId === a.id
         const successorOf = Object.entries(archive).find(([_, info]) => info?.successorId === a.id)
