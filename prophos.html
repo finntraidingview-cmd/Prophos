@@ -10444,7 +10444,12 @@
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
             hedge_currency: s.hedge_currency ?? null,
             hedge_fremde: s.hedge_fremde ?? null,
-            plan_sym: symByFile[inst.file] || null
+            plan_sym: symByFile[inst.file] || null,
+            // Empfänger-Puls der Remote-Signale (28.08.2026): letzter Tick-
+            // Ausgang von orderSignalTick — per SQL aus der Ferne prüfbar, ob
+            // der Tab den Empfänger-Build hat und woran ein Skip liegt.
+            // typeof-Guard: Idiom gegen Scope-/Reihenfolge-Fallen (esc-Lehre).
+            signal_rx: (typeof _osStand !== 'undefined') ? _osStand : null
           },
           updated_at: new Date().toISOString()
         }
@@ -19649,6 +19654,12 @@
   /* ── Empfänger: läuft NUR auf dem PC (MT5_LOCAL), Takt 5s wie die Flotte ── */
   let _osBusy = false
   let _osActive = null   // { sigId, planId, timeout } — ein Signal zur Zeit
+  // Empfänger-Puls (28.08.2026, erster Live-Test): der letzte Tick-Ausgang
+  // wandert per Flotten-Push (mt5_live.status.signal_rx) in die Cloud — damit
+  // ist aus der Ferne per SQL sichtbar, OB der Empfänger auf einem PC lebt
+  // und WORAN ein Skip liegt (Schritt-Spur-Doktrin; beim ersten Test war
+  // nicht unterscheidbar „alter Build im Tab" vs. „Logik-Fehler").
+  let _osStand = 'boot'
 
   async function _osErgebnis(sigId, res){
     if(_osActive && _osActive.sigId === sigId){
@@ -19664,22 +19675,27 @@
   }
 
   async function orderSignalTick(){
-    if(!MT5_LOCAL || _osBusy || _osActive) return
+    if(!MT5_LOCAL) return
+    if(_osBusy || _osActive){ _osStand = 'lauf-aktiv'; return }
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
-    if(!uid) return
-    if(typeof window.mtcApi !== 'function') return
+    if(!uid){ _osStand = 'kein-login'; return }
+    if(typeof window.mtcApi !== 'function'){ _osStand = 'kein-copier-proxy'; return }
     // Manueller Lauf hat IMMER Vorrang: solange am PC ein Check- oder
     // Order-Popup offen ist, wird nichts geclaimt (das Signal bleibt 'wartet'
     // und verfällt notfalls ehrlich).
-    if(document.getElementById('tpPreflightModal')?.classList.contains('open')) return
-    if(document.getElementById('tpOrderModal')?.classList.contains('open')) return
+    if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+       || document.getElementById('tpOrderModal')?.classList.contains('open')){
+      _osStand = 'popup-offen'; return
+    }
     _osBusy = true
     try{
       const { data: sigs, error } = await supabase.from('order_signale')
         .select('*').eq('status', 'wartet').order('created_at', { ascending: true })
-      if(error || !sigs || !sigs.length) return
+      if(error){ _osStand = 'db-fehler: ' + String(error.message || error.code || '?').slice(0, 60); return }
+      if(!sigs || !sigs.length){ _osStand = 'ok-leer'; return }
       const dd = await window.mtcApi('instances')
-      if(!dd || dd.copier_offline || dd._httpFail) return
+      if(!dd || dd.copier_offline || dd._httpFail){ _osStand = 'copier-offline'; return }
+      _osStand = 'kein-instanz-match'   // wird beim Claim/Beerdigen überschrieben
       for(const sig of sigs){
         // Frische-Gate: alte Signale werden NIE ausgeführt, nur beerdigt.
         const alter = (Date.now() - new Date(sig.created_at).getTime()) / 1000
@@ -19688,6 +19704,7 @@
             .update({ status:'verfallen', updated_at: new Date().toISOString(),
                       ergebnis:{ ok:false, msg:'Signal älter als 3 Minuten — aus Sicherheit NICHT ausgeführt.' } })
             .eq('id', sig.id).eq('status', 'wartet')
+          _osStand = 'verfallen-beerdigt'
           continue
         }
         // Plan: lokale Liste, sonst frisch aus der DB (am Handy eben erst
@@ -19742,7 +19759,8 @@
           .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
                     updated_at: new Date().toISOString() })
           .eq('id', sig.id).eq('status', 'wartet').select()
-        if(!cl || !cl.length) continue
+        if(!cl || !cl.length){ _osStand = 'claim-verloren'; continue }
+        _osStand = 'claim: ' + String(sig.id).slice(0, 8)
         // EXAKT der lokale Weg: Order merken, Rückkanal setzen, Check starten.
         _tpPendingOrder = { planId: plan.id, symbol: String(p.symbol).trim(), richtung: p.richtung,
                             volumen: vol, sl_usd: p.sl_usd != null ? Number(p.sl_usd) : null,
@@ -19763,7 +19781,10 @@
         tpPreflightMt5(plan)
         break   // ein Signal pro Lauf — der nächste wird erst nach Abschluss geclaimt (_osActive-Riegel)
       }
-    }catch(e){ console.warn('[signal]', e) }
+    }catch(e){
+      _osStand = 'tick-fehler: ' + String(e && e.message || e).slice(0, 80)
+      console.warn('[signal]', e)
+    }
     finally{ _osBusy = false }
   }
   setInterval(orderSignalTick, 5000)
