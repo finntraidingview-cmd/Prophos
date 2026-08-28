@@ -18013,17 +18013,17 @@
     const svgDel  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
     let actions = ''
     if(isPlanned){
-      // „Jetzt starten" (28.08.2026, Finns Flow): nur für Echo-Pläne — lokal
-      // startet es direkt den Trade-Start-Check, am Handy/Mac geht das Signal
-      // an den PC und Puls platziert. Validierung (Richtung/TP/SL/Lots) macht
-      // tpJetztStarten selbst und schickt sonst zurück ins Plan-Modal.
+      // „Starten" (28.08.2026, Finns Flow): nur für Echo-Pläne — die Order
+      // (Richtung/TP/SL/Lots) ist per Order-Popup AM PLAN gespeichert; dieser
+      // Knopf löst sie aus: lokal direkt der Trade-Start-Check, am Handy/Mac
+      // als Signal mit Live-Schritten. Fehlt etwas am Plan → Toast + Modal.
       const jetztBtn = (p.route === 'mt5')
-        ? `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Jetzt starten</button>`
+        ? `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
         : ''
       actions = `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}">Läuft</button>
+        <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
         ${jetztBtn}
         <button class="btn ${jetztBtn ? 'btn-ghost' : 'btn-primary'} tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
     } else if(isOpen){
@@ -18049,6 +18049,9 @@
             <span class="tc2-name" title="${escapeHtml(masterName)}">${escapeHtml(masterName)}</span>
             <i class="tc2-arrow">→</i>
             <span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>
+            ${(p.route === 'mt5' && (p.richtung === 'buy' || p.richtung === 'sell'))
+              ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
+              : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
         </div>
@@ -19413,12 +19416,10 @@
     if(filterRow) filterRow.style.display = fixed ? 'none' : ''
     const slaveSel = document.getElementById('tp-slave')
     if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
-    // Jetzt-starten-Felder (28.08.2026): TP + Richtung nur im Echo-Modus zeigen —
-    // damit ist die Order komplett beim Planen erfasst, die Karte löst sie aus.
-    const tpRow = document.getElementById('tp-master-tp-row')
-    if(tpRow) tpRow.style.display = fixed ? '' : 'none'
-    const dirRow = document.getElementById('tp-dir-row')
-    if(dirRow) dirRow.style.display = fixed ? '' : 'none'
+    // TP/Richtung bleiben im Plan-Modal VERSTECKT (Finns Korrektur nach dem
+    // ersten Test, 28.08.2026): eingestellt wird die Order im zweiten Popup
+    // („Weiter →"), das sie per „Speichern" AM PLAN ablegt — gestartet wird
+    // ausschließlich über „Starten" auf der Karte.
   }
 
   // Richtung im Plan-Modal (28.08.2026, Finns Jetzt-starten-Flow) — gleiche
@@ -19524,21 +19525,19 @@
     if(!plan) return
     _tpOrderPlanId = planId
     _tpPendingOrder = null
-    tpOrderDirSet(null)
-    // Remote-Zustand zurücksetzen (28.08.2026): altes Signal ggf. stornieren
-    // (nur solange kein PC geclaimt hat), Status-Box zu, Knopf wieder scharf.
+    // Speichern-Editor statt Start-Popup (Finns Korrektur 28.08.2026 nach dem
+    // ersten Live-Test): hier wird die Order (Richtung/TP/SL/Lots) AM PLAN
+    // gespeichert — gestartet wird über „Starten" auf der Karte, mit Live-Check.
+    tpOrderDirSet(plan.richtung || null)
     tpOrderRemoteCancel()
     const remoteBox = document.getElementById('tp-order-remote')
     if(remoteBox){ remoteBox.style.display = 'none'; remoteBox.innerHTML = '' }
     const startBtn = document.getElementById('tpOrderStart')
-    if(startBtn){ startBtn.disabled = false
-      startBtn.textContent = MT5_LOCAL ? 'Starten →' : '📡 Trade automatisch starten' }
+    if(startBtn){ startBtn.disabled = false; startBtn.textContent = 'Speichern' }
     const info = document.getElementById('tp-order-info')
-    if(info) info.textContent = MT5_LOCAL
-      ? `🖥 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — der Bot platziert die Order im Master, sobald der Check grün ist.`
-      : `📡 ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — dieses Gerät ist nicht der PC: „Trade automatisch starten" schickt die Order als Signal an den PC dieser ID; dort läuft der Check und Puls platziert bei Grün.`
-    document.getElementById('tp-order-tp').value = ''
-    document.getElementById('tp-order-sl').value = ''
+    if(info) info.textContent = `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
+    document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
+    document.getElementById('tp-order-sl').value = plan.masterRisk ?? ''
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
@@ -19615,7 +19614,7 @@
     document.getElementById('tpOrderModal').classList.remove('open')
     if(_tpOrderPlanId) openTradePlanModal(_tpOrderPlanId)
   })
-  document.getElementById('tpOrderStart')?.addEventListener('click', () => {
+  document.getElementById('tpOrderStart')?.addEventListener('click', async () => {
     const msg = document.getElementById('tpOrderMsg')
     const err = t => { if(msg){ msg.textContent = t; msg.className = 'modal-msg err' } }
     const plan = tradePlans.find(x => String(x.id) === String(_tpOrderPlanId))
@@ -19630,19 +19629,35 @@
     if(autoSltp && (!(tp > 0) || !(sl > 0)))
       return err('Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
     if(!(lots > 0)) return err('Lot-Anzahl angeben.')
-    const order = { planId: _tpOrderPlanId, symbol, richtung: _tpOrderDir, volumen: lots,
-                    sl_usd: autoSltp ? sl : null, tp_usd: autoSltp ? tp : null }
-    // Remote-Weg (28.08.2026, Finns Handy-Feature): läuft Prophos NICHT auf dem
-    // PC (pages.dev am Handy/Mac), gibt es hier kein localhost — die Order geht
-    // als Signal nach order_signale, der PC-Tab claimt sie und fährt exakt den
-    // lokalen Weg. Das Modal bleibt offen und zeigt live die Rückmeldung.
-    if(!MT5_LOCAL){
-      tpOrderRemoteSend(plan, order)
-      return
+    // SPEICHERN statt Starten (Finns Korrektur 28.08.2026): die Order wandert
+    // AN DEN PLAN (richtung/master_tp/master_risk/master_contracts) — Schalter
+    // aus = „Order pur": master_tp wird genullt, „Starten" schickt dann ohne
+    // SL/TP. Multiplier wird wie beim Plan-Speichern neu gerechnet, damit
+    // Risk/Lots-Änderungen die Hedge-Größe nicht stillschweigend desyncen.
+    // Status-Guard eq 'planned': läuft der Plan schon, wird nichts überschrieben.
+    const neuRisk = autoSltp ? sl : Number(plan.masterRisk)
+    const upd = {
+      richtung: _tpOrderDir,
+      master_contracts: lots,
+      master_tp: autoSltp ? tp : null,
+      master_risk: neuRisk,
+      multiplier: (typeof tpCalcMultiplier === 'function')
+        ? tpCalcMultiplier(plan.masterFirm, plan.slaveFirm, neuRisk, lots, Number(plan.slaveRisk))
+        : plan.multiplier
     }
-    _tpPendingOrder = order
-    document.getElementById('tpOrderModal').classList.remove('open')
-    tpPreflightMt5(plan)
+    try{
+      const { data, error } = await supabase.from('trade_plans').update(upd)
+        .eq('id', plan.id).eq('status', 'planned').select('*')
+      if(error) throw error
+      if(!data || !data.length) return err('Plan läuft schon — nichts überschrieben.')
+      const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      renderTradePlans()
+      document.getElementById('tpOrderModal').classList.remove('open')
+      if(typeof atToast === 'function') atToast(`Order gespeichert: ${_tpOrderDir.toUpperCase()} ${lots} ${symbol}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Starten über die Karte.`, 'start')
+    }catch(e){
+      err('Speichern fehlgeschlagen: ' + (e && e.message || e))
+    }
   })
 
   /* ══ REMOTE-TRADE-SIGNALE (28.08.2026, Finns Feature „Prophos aufs Handy") ══
@@ -19781,17 +19796,20 @@
     const tp = Number(plan.masterTp)
     const symbol = ((typeof dupSymbolsForFirm === 'function')
       ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''
+    // TP am Plan = SL/TP automatisch; ohne TP = „Order pur" (Schalter-aus im
+    // Order-Popup nullt master_tp) — dieselbe Semantik wie beim lokalen Weg.
+    const sltpAn = tp > 0
     if(!dir) fehlt.push('Richtung (Buy/Sell)')
-    if(!(lots > 0)) fehlt.push('Anzahl Kontrakte')
-    if(!(sl > 0)) fehlt.push('Risiko Master ($) = Stop Loss')
-    if(!(tp > 0)) fehlt.push('Take Profit ($)')
+    if(!(lots > 0)) fehlt.push('Lots')
+    if(sltpAn && !(sl > 0)) fehlt.push('Stop Loss (= Risiko Master $)')
     if(!symbol) fehlt.push(`Firmen-Symbol für „${plan.masterFirm || '—'}" (Settings)`)
     if(fehlt.length){
-      if(typeof atToast === 'function') atToast('Im Plan fehlt: ' + fehlt.join(', ') + ' — bitte nachtragen.', 'end')
-      openTradePlanModal(planId)
+      if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
+      openTpOrderModal(planId)
       return
     }
-    const order = { planId: plan.id, symbol, richtung: dir, volumen: lots, sl_usd: sl, tp_usd: tp }
+    const order = { planId: plan.id, symbol, richtung: dir, volumen: lots,
+                    sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null }
     if(MT5_LOCAL){
       _tpPendingOrder = order
       tpPreflightMt5(plan)
@@ -19811,7 +19829,7 @@
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
     const info = document.getElementById('pf-plan-info')
-    if(info) info.textContent = `📡 Jetzt starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol} · TP $${order.tp_usd} / SL $${order.sl_usd}`
+    if(info) info.textContent = `📡 Starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}${order.tp_usd ? ` · TP $${order.tp_usd} / SL $${order.sl_usd}` : ' · ohne SL/TP (Order pur)'}`
     document.getElementById('tpPreflightModal').classList.add('open')
     _pfAddRow('rs-sig',   'Signal senden')
     _pfAddRow('rs-claim', 'PC übernimmt')
