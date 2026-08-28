@@ -4,6 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Prophos</title>
+<!-- Homescreen-App (28.08.2026): Manifest inline als data:-URL, Icons absolut auf
+     pages.dev — prophos.html muss eine einzige Datei bleiben, und die lokalen PCs
+     laden sie über localhost:5000; relative Icon-Pfade liefen dort ins Leere. -->
+<meta name="theme-color" content="#FAFBFC" />
+<link rel="manifest" href='data:application/manifest+json,{"name":"Prophos","short_name":"Prophos","start_url":"https://prophos.pages.dev/prophos","display":"standalone","background_color":"#FAFBFC","theme_color":"#FAFBFC","icons":[{"src":"https://prophos.pages.dev/prophos-icon-192.png","sizes":"192x192","type":"image/png","purpose":"any%20maskable"},{"src":"https://prophos.pages.dev/prophos-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any%20maskable"}]}' />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Prophos" />
+<link rel="apple-touch-icon" href="https://prophos.pages.dev/prophos-icon-180.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
