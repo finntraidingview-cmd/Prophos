@@ -10966,9 +10966,17 @@
   /* Routen-Erkennung (Pendant zu planMirrorRoute): NUR Link-Prüfung + lokaler PC.
    * Bewusst NICHT von einer geladenen Instanzliste abhängig — mtcState ist auf
    * der Trades-View eingefroren (3s-Poll läuft nur bei sichtbarer Copier-View;
-   * Richter-Blocker). Wer Instanzen braucht, lädt sie selbst frisch. */
-  function planMt5Route(plan){
-    if(!plan || !MT5_LOCAL) return null
+   * Richter-Blocker). Wer Instanzen braucht, lädt sie selbst frisch.
+   *
+   * remoteOk (28.08.2026, Finns Fund „Live-P&L nur auf dem Windows-PC"): der
+   * Cloud-Fallback der Plan-Karten las mt5_live, kam aber nie an — dieses
+   * Localhost-Gate machte mt5RouteResolve auf pages.dev IMMER null, der
+   * Fallback war totes Code. Die Zuordnung braucht den PC gar nicht: die
+   * mt5_links-Tabelle liegt auf jedem Gerät im Cache. Nur ANZEIGE-Aufrufer
+   * setzen remoteOk — Zustandsmaschine und Preflight bleiben bewusst hinter
+   * dem Gate (eine Erkennungs-Engine, Richter-Doktrin). */
+  function planMt5Route(plan, remoteOk){
+    if(!plan || (!MT5_LOCAL && !remoteOk)) return null
     const masterLogin = mt5LoginForAccount(plan.masterAccountId)
     const hedgeLogin  = mt5LoginForAccount(plan.slaveAccountId)
     if(!masterLogin || !hedgeLogin) return null
@@ -10977,8 +10985,8 @@
 
   // Plan + Instanzliste → konkrete Copier-Instanz. Master-Login matcht gegen
   // status.master_login (läuft) bzw. master_expected (Config), Hedge analog.
-  function mt5RouteResolve(plan, instances){
-    const linkRoute = planMt5Route(plan)
+  function mt5RouteResolve(plan, instances, remoteOk){
+    const linkRoute = planMt5Route(plan, remoteOk)
     if(!linkRoute) return null
     const inst = (instances || []).find(x => {
       if(!x) return false
@@ -11910,10 +11918,17 @@
    * Balken auch auf den Flotten-Karten anderer Geräte). EINE Rechen-Wahrheit
    * für Plan-Karte und Flotte — Normierung wie calcSymmetryPct: Master gegen
    * Plan-TP/SL, Hedge gegen die Hedge-Erwartung (dimensionslos, keine
-   * USD-Umrechnung nötig). Mitte = perfekt, Füllung kippt zur stärkeren
-   * Seite. Liefert '' wenn nicht beweisbar rechenbar (fehlende Plan-Zahlen,
-   * Master-Bewegung unter der 0,50-$-Rausch-Schwelle — Schwelle ABSOLUT,
-   * 18.08.2026, Finns Fund mit dem $20.000-The5ers-Plan). */
+   * USD-Umrechnung nötig). Liefert '' wenn nicht beweisbar rechenbar
+   * (fehlende Plan-Zahlen, Master-Bewegung unter der 0,50-$-Rausch-Schwelle
+   * — Schwelle ABSOLUT, 18.08.2026, Finns Fund mit dem $20.000-The5ers-Plan).
+   *
+   * Darstellung seit 28.08.2026 (Finns Fund: „der Balken krampft, die
+   * Symmetrie fehlt"): statt EINER Füllung, die zur stärkeren Seite kippt
+   * (bei 54% ein einzelner Klecks neben der Mitte — als Symmetrie nicht
+   * lesbar), wachsen jetzt ZWEI Füllungen von der Mitte nach außen: links
+   * Master, rechts Hedge, die stärkere Seite steht immer voll, die
+   * schwächere proportional. Gleich lange Seiten = symmetrisch — das Bild
+   * sagt jetzt dasselbe wie die Zahl. Rechenweg und Gates unverändert. */
   function symBalkenHtml(masterPl, hedgeSum, mRisk, mTp, sRisk){
     if(masterPl == null || hedgeSum == null || !(mRisk > 0) || !(sRisk > 0)) return ''
     const mPct = masterPl >= 0
@@ -11927,16 +11942,17 @@
     if(!(Math.abs(masterPl) >= 0.5 && absM > 0)) return ''
     const sym = Math.round(absS / absM * 100)
     const farbe = (sym >= 85 && sym <= 115) ? '#12B76A' : ((sym >= 60 && sym <= 140) ? '#F79009' : '#F04438')
-    const d = Math.max(-1, Math.min(1, (absM - absS) / Math.max(absM, absS)))
-    const halb = Math.abs(d) * 50
-    const fuellCss = halb < 3
-      ? 'left:47%;width:6%'                                   // Mitte: perfekt
-      : (d > 0 ? `right:50%;width:${halb}%` : `left:50%;width:${halb}%`)
-    return `<span title="Symmetrie relativ zum Plan: Master ${absM.toFixed(0)}% / Hedge ${absS.toFixed(0)}% des jeweiligen Ziels — Mitte = perfekt, Ausschlag = staerkere Seite"`
-      + ` style="display:inline-flex;align-items:center;gap:5px">`
+    // Beide Halbseiten relativ zur stärkeren normieren; min. 8% Stummel,
+    // damit eine fast tote Seite sichtbar bleibt (ehrlich: „kaum bewegt").
+    const staerkste = Math.max(absM, absS)
+    const mHalb = Math.max(8, Math.round(absM / staerkste * 50))
+    const sHalb = Math.max(8, Math.round(absS / staerkste * 50))
+    return `<span title="Symmetrie relativ zum Plan: Master ${absM.toFixed(0)}% / Hedge ${absS.toFixed(0)}% des jeweiligen Ziels — beide Seiten gleich lang = symmetrisch"`
+      + ` style="display:inline-flex;align-items:center;gap:6px;flex:none">`
       + `<span style="font-size:9px;color:var(--sub);font-weight:700">M</span>`
-      + `<span style="position:relative;width:56px;height:6px;border-radius:999px;background:var(--border);display:inline-block">`
-      + `<span style="position:absolute;top:0;bottom:0;${fuellCss};background:${farbe};border-radius:999px"></span>`
+      + `<span style="position:relative;width:72px;height:6px;border-radius:999px;background:var(--border);display:inline-block;flex:none">`
+      + `<span style="position:absolute;top:0;bottom:0;right:50%;width:${mHalb}%;background:${farbe};border-radius:999px 0 0 999px"></span>`
+      + `<span style="position:absolute;top:0;bottom:0;left:50%;width:${sHalb}%;background:${farbe};border-radius:0 999px 999px 0"></span>`
       + `<span style="position:absolute;left:50%;top:-2px;bottom:-2px;width:1.5px;background:var(--sub);opacity:.6"></span>`
       + `</span><span style="font-size:9px;color:var(--sub);font-weight:700">H</span>`
       + `<b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
@@ -11960,20 +11976,25 @@
       // Quelle 2 (Handy/Mac, 29.08.2026 — Finns Fund „kein Live-P&L am Handy"):
       // mt5_live aus dem Flotten-Tick (window._mt5CloudRows, 5s-Push der PCs).
       // Synthetische Instanzen im Format von mtcInstances(), damit derselbe
-      // mt5RouteResolve (Login-Match) greift. Frische 20s wie die Flotte —
-      // nie alte Zahlen als „live" (P&L-Beweis-Doktrin).
+      // mt5RouteResolve (Login-Match) greift — MIT remoteOk (28.08.2026,
+      // Finns Fund „nur auf dem Windows-PC": ohne das Flag lief der Resolver
+      // auf pages.dev in sein Localhost-Gate und dieser ganze Zweig war tot).
+      // Frische 25s statt 20 (Echo+-Doktrin): 5s-Push + 5s-Pull + 5s-Render-
+      // Tick + Query-Latenz — 20s warf bei EINEM verpassten Tick schon
+      // frische Daten weg (das „Manchmal" in Finns Bericht). Nie alte Zahlen
+      // als „live" (P&L-Beweis-Doktrin) gilt unverändert.
       if(!s){
         const cloud = []
         for(const r of (window._mt5CloudRows || [])){
           if(!r || !r.alive) continue
           const ts = Date.parse(r.updated_at || '') || 0
-          if(!ts || (Date.now() - ts) > 20000) continue
+          if(!ts || (Date.now() - ts) > 25000) continue
           cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
             status: Object.assign({}, r.status || {},
               { master_login: r.master_login, hedge_login: r.hedge_login }) })
         }
         if(cloud.length){
-          const route = mt5RouteResolve(p, cloud)
+          const route = mt5RouteResolve(p, cloud, true)
           if(route && route.inst) s = route.inst.status || {}
         }
       }
@@ -12019,10 +12040,10 @@
       // stehen bei 50% IHRES Plans). Identische Normierung wie calcSymmetryPct
       // im Review-Modal: Master gegen Plan-TP/SL, Hedge gegen die Hedge-
       // Erwartung — dadurch entfaellt auch die USD-Umrechnung (dimensionslos).
-      // Balken: Mitte = perfekt; die Fuellung KIPPT zur staerkeren Seite
-      // (M = Master links, H = Hedge rechts). 100% = perfekt.
+      // Balken: zwei Fuellungen von der Mitte nach aussen (M links, H
+      // rechts), beide Seiten gleich lang = symmetrisch. 100% = perfekt.
       // Rechen- und Render-Logik seit 26.08.2026 im gemeinsamen Helfer
-      // symBalkenHtml (weiter unten) — Plan-Karte und Flotten-Karte teilen
+      // symBalkenHtml (weiter oben) — Plan-Karte und Flotten-Karte teilen
       // sich damit EINE Balken-Wahrheit.
       let symEl = ''
       const mRisk = Number(p.masterRisk) || 0, sRisk = Number(p.slaveRisk) || 0
