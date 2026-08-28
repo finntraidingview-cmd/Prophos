@@ -19232,12 +19232,39 @@
     // Offline/kein Treffer → null; das Slave-Dropdown zeigt dann alle
     // MT5-verlinkten Accounts (benutzbar bleiben schlägt fixieren).
     try{
-      if(typeof window.mtcApi !== 'function') return
-      const d = await window.mtcApi('instances')
       let hLogin = null
-      for(const i of ((d && d.instances) || [])){
-        hLogin = String(((i || {}).status || {}).hedge_login || (i || {}).hedge_expected || '') || null
-        if(hLogin) break
+      // 1) Lokale Instanzliste (PC) — wie bisher die erste Wahl.
+      if(typeof window.mtcApi === 'function'){
+        try{
+          const d = await window.mtcApi('instances')
+          for(const i of ((d && d.instances) || [])){
+            hLogin = String(((i || {}).status || {}).hedge_login || (i || {}).hedge_expected || '') || null
+            if(hLogin) break
+          }
+        }catch(_){}
+      }
+      // 2) Cloud-Fallback (28.08.2026, Finns Mac-Fund „sehe hier kein Slave"):
+      //    am Handy/Mac gibt es keine lokale Instanzliste — der Hedge-Login
+      //    der eigenen Flotte steht aber in mt5_live (5s-Push der PCs, mit
+      //    status.user_id des dort eingeloggten Profils). Frischeste eigene
+      //    Zeile gewinnt; danach echo_hedge (🎯-Chip, eine Zeile pro PC) als
+      //    letzte Rückfalllinie. Kein Treffer → Dropdown bleibt frei, nie raten.
+      if(!hLogin){
+        try{
+          const { data } = await supabase.from('mt5_live')
+            .select('hedge_login,status,updated_at')
+            .order('updated_at', { ascending: false }).limit(40)
+          const eigene = (data || []).filter(r => String(((r || {}).status || {}).user_id || '') === String(currentUserId || ''))
+          hLogin = String(((eigene.find(r => r.hedge_login) || {}).hedge_login) || '') || null
+        }catch(_){}
+      }
+      if(!hLogin){
+        try{
+          const { data } = await supabase.from('echo_hedge')
+            .select('hedge_login,updated_at')
+            .order('updated_at', { ascending: false }).limit(1)
+          hLogin = String((((data || [])[0] || {}).hedge_login) || '') || null
+        }catch(_){}
       }
       if(!hLogin) return
       const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
@@ -20018,15 +20045,16 @@
         b._tpHooked = true
       }
     })
-    // Hedge-Auflösung im Hintergrund anstoßen (nur auf dem lokalen PC sinnvoll).
-    // Bei JEDEM Open neu auflösen, nicht nur bei null (Review-Fund 15.08.2026):
-    // ein für die Session gecachter Hedge würde nach Hedge-/User-Wechsel alle
-    // Slave-Kandidaten wegfiltern. tpResolveMt5Hedge ist idempotent und billig.
-    if(MT5_LOCAL){
-      tpResolveMt5Hedge().then(() => {
-        if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
-      })
-    }
+    // Hedge-Auflösung im Hintergrund anstoßen — seit 28.08.2026 auf JEDEM
+    // Gerät (Cloud-Fallback über mt5_live/echo_hedge), vorher nur MT5_LOCAL:
+    // am Mac blieb das Slave-Dropdown sonst unvorbelegt (Finns Fund beim
+    // ersten Remote-Test). Bei JEDEM Open neu auflösen, nicht nur bei null
+    // (Review-Fund 15.08.2026): ein für die Session gecachter Hedge würde
+    // nach Hedge-/User-Wechsel alle Slave-Kandidaten wegfiltern.
+    // tpResolveMt5Hedge ist idempotent und billig.
+    tpResolveMt5Hedge().then(() => {
+      if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
+    })
 
     if(isEdit){
       const p = tradePlans.find(x => String(x.id) === String(editId))
