@@ -6447,7 +6447,7 @@
         <div id="kasse-empty" class="empty" style="display:none"><div class="empty-ico">💸</div><h3>Noch keine Einträge</h3><p>Trag oben die erste Investition ein.</p></div>
         </div>
 
-        <!-- META WALLET (24.08.2026): USDT-Bestände der MetaMask-Wallets aller Personen.
+        <!-- META WALLET (24.08.2026): Stable-Bestände (USDT + USDC) der MetaMask-Wallets aller Personen.
              Watch-only über die öffentlichen Adressen — hier landen NIE Keys oder Seeds. -->
         <div id="adm-pane-wallet" hidden>
           <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
@@ -6544,7 +6544,7 @@
                   <th>Person</th>
                   <th>Chain</th>
                   <th>Adresse</th>
-                  <th class="adm-num">USDT</th>
+                  <th class="adm-num" title="USDT + USDC (+ USDC.e) — Aufschlüsselung im Tooltip der Zelle">Stables</th>
                   <th class="adm-num">Coin</th>
                   <th class="adm-num">Gesamt</th>
                   <th></th>
@@ -6557,7 +6557,7 @@
 
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
             Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
-            Balances kommen live von den Chains (USDT + Chain-Coin, also ETH/POL/SOL/TRX) direkt aus dem Browser, ohne API-Key;
+            Balances kommen live von den Chains (USDT + USDC + Chain-Coin, also ETH/POL/SOL/TRX) direkt aus dem Browser, ohne API-Key;
             die Coin-Kurse zum Umrechnen in USDT liefert Binance (Fallback: CoinGecko). Alle Summen sind in USDT.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
           </p>
@@ -8415,16 +8415,23 @@
       })
     }
 
-    /* ── Meta Wallet (24.08.2026): USDT-Bestände der MetaMask-Wallets pro Person ──
+    /* ── Meta Wallet (24.08.2026): Stable-Bestände (USDT + USDC) der Wallets pro Person ──
      * Watch-only: gespeichert werden NUR öffentliche Adressen (id_wallets), die
      * Balances kommen direkt aus dem Browser von öffentlichen Endpoints — kein
      * API-Key, kein app.py-Umweg, funktioniert damit auch auf pages.dev ohne
      * lokales Backend. Verlauf: 1 Snapshot pro Wallet und Tag (wallet_snapshots-
      * Upsert beim Laden), weil Arbitrum/Solana-History sonst einen Key bräuchte. */
     const WAL_CHAINS = {
+      /* stables statt einzelnem usdt-Feld (28.08.2026, Finns Fund: 4.499 USDC auf
+       * einer Arbitrum-Wallet zählten nicht — der Tab fragte pro Chain nur den einen
+       * USDT-Contract ab). Alle Einträge hier haben 6 Dezimalstellen, deshalb darf
+       * überall /1e6 gerechnet werden; ein Token mit anderen Dezimalen braucht ein
+       * eigenes dec-Feld, bevor er in diese Listen darf. */
       arbitrum: { label:'Arbitrum', col:'#3b82f6', evm:true,
                   coin:'ETH', px:'ETHUSDT', gecko:'ethereum',
-                  usdt:'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',   // USDT (Arbitrum One), 6 Dezimalstellen
+                  stables:{ 'USDT':'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',      // USDT / USD₮0 (Arbitrum One)
+                            'USDC':'0xaf88d065e77c8cC2239327C5EDb3A432268e5831',      // USDC (nativ, Circle)
+                            'USDC.e':'0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' },  // USDC.e (gebridgt)
                   rpc:'https://arb1.arbitrum.io/rpc',
                   explorer: a => 'https://arbiscan.io/address/' + a,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
@@ -8434,7 +8441,9 @@
       // bei Solana schon die Browser-Blockade des offiziellen RPCs umging.
       polygon:  { label:'Polygon', col:'#8247e5', evm:true,
                   coin:'POL', px:'POLUSDT', gecko:'polygon-ecosystem-token',
-                  usdt:'0xc2132D05D31c914a87C6611C10748AEb04B58e8F',   // USDT (PoS), 6 Dezimalstellen
+                  stables:{ 'USDT':'0xc2132D05D31c914a87C6611C10748AEb04B58e8F',      // USDT (PoS)
+                            'USDC':'0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',      // USDC (nativ, Circle)
+                            'USDC.e':'0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },  // USDC.e (PoS, gebridgt)
                   rpc:'https://polygon-bor-rpc.publicnode.com',
                   rpcFallback:'https://polygon-rpc.com',
                   explorer: a => 'https://polygonscan.com/address/' + a,
@@ -8442,7 +8451,8 @@
                   hint:'0x… (42 Zeichen)' },
       solana:   { label:'Solana', col:'#14f195',
                   coin:'SOL', px:'SOLUSDT', gecko:'solana',
-                  mint:'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  // USDT-Mint (SPL), 6 Dezimalstellen
+                  stables:{ 'USDT':'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',    // USDT-Mint (SPL)
+                            'USDC':'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },  // USDC-Mint (SPL)
                   // Der offizielle mainnet-beta-RPC blockt Browser-Anfragen (403 "Access
                   // forbidden", beim Bauen am 24.08.2026 live gesehen) — publicnode ist
                   // offen und keyless, mainnet-beta bleibt nur als Fallback-Versuch.
@@ -8453,14 +8463,15 @@
                   hint:'Base58 (32–44 Zeichen)' },
       tron:     { label:'Tron', col:'#ef4444',
                   coin:'TRX', px:'TRXUSDT', gecko:'tron',
-                  usdt:'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',            // USDT (TRC-20), 6 Dezimalstellen
+                  stables:{ 'USDT':'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',              // USDT (TRC-20)
+                            'USDC':'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8' },            // USDC (TRC-20)
                   api:'https://api.trongrid.io',
                   explorer: a => 'https://tronscan.org/#/address/' + a,
                   valid: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
-    const walBal = new Map()   // wallet.id → { usdt, coin, coinUsdt:Number|null, err:String|null }
+    const walBal = new Map()   // wallet.id → { usdt:Summe aller Stables, coin, coinUsdt:Number|null, parts:{USDT,USDC,…}|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     const coinNf = new Intl.NumberFormat('de-DE', { maximumFractionDigits:4 })   // Coin-Mengen: „0,0042" ETH
 
@@ -8538,27 +8549,33 @@
       h = h.slice(0, -8)                       // 4 Checksummen-Bytes hinten weg
       return (h.startsWith('41') && h.length === 42) ? h : null
     }
-    /* USDT einer NICHT aktivierten Tron-Adresse (27.08.2026, Finns Fall: Moritz'
+    /* Stables einer NICHT aktivierten Tron-Adresse (27.08.2026, Finns Fall: Moritz'
      * frische Adresse hielt 1.155 USDT, der Tab zeigte Fehler/0): das Konto
      * existiert on-chain noch nicht — der Account-Endpoint liefert data:[] —
-     * aber der TRC-20-Bestand liegt trotzdem im USDT-Contract. balanceOf über
-     * triggerconstantcontract funktioniert auch für solche Adressen. */
-    async function walTronUsdtContract(c, addr){
+     * aber die TRC-20-Bestände liegen trotzdem in den Stable-Contracts. balanceOf
+     * über triggerconstantcontract funktioniert auch für solche Adressen.
+     * Strikt nacheinander mit Abstand — TronGrid erlaubt keyless nur 1 Request/s. */
+    async function walTronStablesContract(c, addr){
       const hex = walTronHex(addr)
       if(hex == null) throw new Error('Tron-Adresse nicht dekodierbar')
-      const r = await fetch(c.api + '/wallet/triggerconstantcontract', {
-        method:'POST', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          owner_address: hex,
-          contract_address: walTronHex(c.usdt),
-          function_selector: 'balanceOf(address)',
-          parameter: hex.slice(2).padStart(64, '0')
+      const parts = {}, labels = Object.keys(c.stables)
+      for(let i = 0; i < labels.length; i++){
+        if(i) await new Promise(res => setTimeout(res, 1300))
+        const r = await fetch(c.api + '/wallet/triggerconstantcontract', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            owner_address: hex,
+            contract_address: walTronHex(c.stables[labels[i]]),
+            function_selector: 'balanceOf(address)',
+            parameter: hex.slice(2).padStart(64, '0')
+          })
         })
-      })
-      const j = await r.json().catch(() => null)
-      const out = j?.constant_result?.[0]
-      if(!r.ok || out == null) throw new Error('TronGrid-Contract-Fehler: HTTP ' + r.status)
-      return (parseInt(out, 16) || 0) / 1e6
+        const j = await r.json().catch(() => null)
+        const out = j?.constant_result?.[0]
+        if(!r.ok || out == null) throw new Error('TronGrid-Contract-Fehler: HTTP ' + r.status)
+        parts[labels[i]] = (parseInt(out, 16) || 0) / 1e6
+      }
+      return { sum: Object.values(parts).reduce((a, v) => a + v, 0), parts }
     }
 
     // Eine Wallet live von ihrer Chain lesen — USDT-Bestand + nativer Chain-Coin.
@@ -8566,25 +8583,31 @@
       const c = WAL_CHAINS[w.chain]
       if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
       if(c.evm){
-        // USDT per balanceOf-eth_call, Coin per eth_getBalance — ein Pfad für
-        // alle EVM-Chains (Arbitrum, Polygon), nur RPC + Contract unterscheiden sich.
+        // Jeder Stable per balanceOf-eth_call, Coin per eth_getBalance — ein Pfad für
+        // alle EVM-Chains (Arbitrum, Polygon), nur RPC + Contracts unterscheiden sich.
         const data = '0x70a08231' + w.address.slice(2).toLowerCase().padStart(64, '0')
-        const [tok, nat] = await Promise.all([
-          walRpc(c, 'eth_call', [{ to:c.usdt, data }, 'latest']),
-          walRpc(c, 'eth_getBalance', [w.address, 'latest'])
+        const labels = Object.keys(c.stables)
+        const [nat, ...toks] = await Promise.all([
+          walRpc(c, 'eth_getBalance', [w.address, 'latest']),
+          ...labels.map(l => walRpc(c, 'eth_call', [{ to:c.stables[l], data }, 'latest']))
         ])
-        return { usdt:(parseInt(tok || '0x0', 16) || 0) / 1e6,
-                 coin:(parseInt(nat || '0x0', 16) || 0) / 1e18 }
+        const parts = {}
+        labels.forEach((l, i) => { parts[l] = (parseInt(toks[i] || '0x0', 16) || 0) / 1e6 })
+        return { usdt: Object.values(parts).reduce((a, v) => a + v, 0),
+                 coin:(parseInt(nat || '0x0', 16) || 0) / 1e18, parts }
       }
       if(w.chain === 'solana'){
-        // USDT: Summe über alle Token-Accounts des Owners; SOL: getBalance (Lamports)
-        const [tok, nat] = await Promise.all([
-          walRpc(c, 'getTokenAccountsByOwner', [w.address, { mint:c.mint }, { encoding:'jsonParsed' }]),
-          walRpc(c, 'getBalance', [w.address])
+        // Je Stable die Summe über alle Token-Accounts des Owners; SOL: getBalance (Lamports)
+        const labels = Object.keys(c.stables)
+        const [nat, ...toks] = await Promise.all([
+          walRpc(c, 'getBalance', [w.address]),
+          ...labels.map(l => walRpc(c, 'getTokenAccountsByOwner', [w.address, { mint:c.stables[l] }, { encoding:'jsonParsed' }]))
         ])
-        return { usdt:(tok?.value || []).reduce((a, x) =>
-                   a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0),
-                 coin:(Number(nat?.value) || 0) / 1e9 }
+        const parts = {}
+        labels.forEach((l, i) => { parts[l] = (toks[i]?.value || []).reduce((a, x) =>
+          a + (Number(x.account?.data?.parsed?.info?.tokenAmount?.uiAmount) || 0), 0) })
+        return { usdt: Object.values(parts).reduce((a, v) => a + v, 0),
+                 coin:(Number(nat?.value) || 0) / 1e9, parts }
       }
       // Tron: Account-Endpoint liefert TRC-20-Bestände + TRX (balance, in SUN) in einer
       // Antwort. TronGrid drosselt keyless aggressiv: 429 mit { Error:… } OHNE success-Feld
@@ -8611,10 +8634,17 @@
       // passiert erst mit der ersten TRX-Bewegung, USDT-Empfang reicht nicht).
       // Deshalb den Bestand direkt am Contract nachschlagen; TRX ist bei so
       // einer Adresse sicher 0.
-      if(!acc) return { usdt: await walTronUsdtContract(c, w.address), coin: 0 }
-      let usdt = 0
-      for(const t of (acc.trc20 || [])){ if(t[c.usdt] != null){ usdt = Number(t[c.usdt]) / 1e6; break } }
-      return { usdt, coin:(Number(acc.balance) || 0) / 1e6 }
+      if(!acc){
+        const via = await walTronStablesContract(c, w.address)
+        return { usdt: via.sum, coin: 0, parts: via.parts }
+      }
+      const parts = {}
+      for(const [label, contract] of Object.entries(c.stables)){
+        parts[label] = 0
+        for(const t of (acc.trc20 || [])){ if(t[contract] != null){ parts[label] = Number(t[contract]) / 1e6; break } }
+      }
+      return { usdt: Object.values(parts).reduce((a, v) => a + v, 0),
+               coin:(Number(acc.balance) || 0) / 1e6, parts }
     }
 
     // Alle Balances ziehen + Tages-Snapshot upserten (1 Zeile pro Wallet und Tag).
@@ -8637,7 +8667,7 @@
           const b = await walFetchBalance(w)
           const px = walPx[WAL_CHAINS[w.chain].px]
           const coinUsdt = px ? b.coin * px : null   // ohne Kurs nicht raten
-          walBal.set(w.id, { usdt:b.usdt, coin:b.coin, coinUsdt, err:null })
+          walBal.set(w.id, { usdt:b.usdt, coin:b.coin, coinUsdt, parts:b.parts || null, err:null })
           await supabase.from('wallet_snapshots').upsert(
             { wallet_id:w.id, day:new Date().toISOString().slice(0,10), usdt:b.usdt,
               coin_amount:b.coin, coin_usdt:coinUsdt ?? 0, taken_at:new Date().toISOString() },
@@ -8752,13 +8782,17 @@
         const c = WAL_CHAINS[w.chain]
         const b = walBal.get(w.id)
         const short = w.address.length > 14 ? w.address.slice(0, 7) + '…' + w.address.slice(-5) : w.address
+        // Aufschlüsselung als Tooltip (28.08.2026): die Spalte zeigt die Stable-Summe,
+        // der title sagt, was drinsteckt (z.B. „USDT 9,30 · USDC 4.499,00").
+        const partsTitle = b?.parts ? Object.entries(b.parts).filter(([, v]) => v >= 0.005)
+          .map(([k, v]) => k + ' ' + walNf.format(v)).join(' · ') : ''
         const tr = document.createElement('tr')
         tr.innerHTML =
           '<td class="wal-td-person"></td>' +
           `<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin-right:7px"></span>${c.label}</td>` +
           `<td><button type="button" class="wal-addr" data-full="${escapeHtml(w.address)}" title="${escapeHtml(w.address)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
           ` <a href="${c.explorer(w.address)}" target="_blank" rel="noopener" title="Im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
-          `<td class="adm-num">${b?.usdt != null ? walNf.format(b.usdt) : (b?.err ? '<span title="' + escapeHtml(b.err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
+          `<td class="adm-num"${partsTitle ? ' title="' + escapeHtml(partsTitle) + '"' : ''}>${b?.usdt != null ? walNf.format(b.usdt) : (b?.err ? '<span title="' + escapeHtml(b.err) + '" style="color:var(--danger)">Fehler</span>' : '–')}</td>` +
           `<td class="adm-num">${b?.coin != null ? coinNf.format(b.coin) + ' ' + c.coin + ' <span style="color:var(--sub)">≈ ' + (b.coinUsdt != null ? walNf.format(b.coinUsdt) : '–') + '</span>' : '–'}</td>` +
           `<td class="adm-num" style="font-weight:650">${b?.usdt != null ? walNf.format(b.usdt + (b.coinUsdt || 0)) : '–'}</td>` +
           `<td style="text-align:right"><button type="button" class="wal-del" data-id="${w.id}" title="Wallet entfernen" style="border:none;background:none;color:var(--sub);font-size:16px;line-height:1;cursor:pointer;padding:2px 5px">×</button></td>`
