@@ -89,18 +89,29 @@ def used_values(folder):
     return magics, snapshots, prefixes
 
 
-def next_magic(magics):
-    n = MAGIC_BASE + 1
+# magic_base pro PC (27.08.2026, Finns Ansage "ein Fusion-Konto fuer alle wegen
+# der Marge"): teilen sich MEHRERE PCs dasselbe Hedge-Konto, MUSS jeder PC seine
+# magics in einem EIGENEN Block vergeben — sonst sieht der Copier des einen PCs
+# die Hedges des anderen als eigene (gleiche magic) und schliesst sie weg (der
+# teuerste Audit-Fund, PC-uebergreifend). Ein PC = ein 1000er-Block:
+#   770000 (Default/erster PC) · 771000 · 772000 … · 779000  (10 Bloecke)
+# Der ganze Bereich bleibt in der Familie 770000-779999 (hedge_fremde-Grenze im
+# Copier), fremde PCs loesen also weiterhin keinen Fehlalarm aus. Fehlt der Wert
+# in der Config, gilt MAGIC_BASE (770000) — Bestands-PCs bleiben unveraendert.
+def next_magic(magics, base=MAGIC_BASE):
+    n = base + 1
     while n in magics:
         n += 1
     return n
 
 
-def prefix_for(magic, taken):
-    """P2, P3, P4 … ('PH' gehoert dem ersten Master). Der Copier sucht den Token
-    als Praefix '<prefix>-<identifier>'; 'P2-' faengt nicht mit 'PH-' an, die
-    Praefixe sind also trennscharf."""
-    idx = magic - MAGIC_BASE
+def prefix_for(magic, taken, base=MAGIC_BASE):
+    """P2, P3, P4 … ('PH' gehoert dem ersten Master des Blocks). Der Copier sucht
+    den Token als Praefix '<prefix>-<identifier>'; 'P2-' faengt nicht mit 'PH-'
+    an, die Praefixe sind also trennscharf. Der Praefix darf pro PC wieder bei
+    PH anfangen — die magic ist der Primaerfilter, an dem der Copier fremde
+    PC-Bloecke schon vorher aussortiert."""
+    idx = magic - base
     cand = "PH" if idx <= 1 else f"P{idx}"
     while cand in taken:
         idx += 1
@@ -108,11 +119,12 @@ def prefix_for(magic, taken):
     return cand
 
 
-def alloc_identity(folder, name):
-    """Eindeutige Kennwerte fuer den neuen Master — vergeben, nicht getippt."""
+def alloc_identity(folder, name, magic_base=MAGIC_BASE):
+    """Eindeutige Kennwerte fuer den neuen Master — vergeben, nicht getippt.
+    magic_base verschiebt den Nummernblock dieses PCs (s.o.)."""
     magics, snapshots, prefixes = used_values(folder)
-    magic = next_magic(magics)
-    prefix = prefix_for(magic, prefixes)
+    magic = next_magic(magics, magic_base)
+    prefix = prefix_for(magic, prefixes, magic_base)
     snapshot = f"prophos_master_{name.lower()}.csv"
     if snapshot in snapshots:
         raise ProvisionError(f"snapshot_file '{snapshot}' ist schon vergeben — Name aendern.")
@@ -443,7 +455,7 @@ def _taskkill(pid, grace_s=15):
 
 def run_provision(*, name, login, password, server, template_exe,
                   folder=HERE, report=lambda step, state, note=None: None,
-                  owner=None, display=None):
+                  owner=None, display=None, magic_base=MAGIC_BASE):
     """Fuehrt die komplette Provisionierung aus. `report(step, state, note)`
     meldet Fortschritt ans Panel ('running' | 'done' | 'error').
 
@@ -476,7 +488,7 @@ def run_provision(*, name, login, password, server, template_exe,
                             f"den MetaEditor oeffnen und {EA_NAME} kompilieren.")
     if problems:
         raise ProvisionError(" · ".join(problems))
-    ident = alloc_identity(folder, name)
+    ident = alloc_identity(folder, name, magic_base)
     report("pruefen", "done", f"magic {ident['magic']} · {ident['snapshot']}")
 
     # ── 2. klonen ───────────────────────────────────────────────────────────

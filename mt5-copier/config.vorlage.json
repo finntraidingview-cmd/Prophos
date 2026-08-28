@@ -5,6 +5,8 @@
   "hedge_expected_login": 488579,
   "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
   "common_files_dir": "",
+  "_magic_base_hinweis": "NUR setzen, wenn dieser PC sich das Fusion-Hedge-Konto mit ANDEREN PCs teilt (27.08.2026). Jeder PC braucht dann einen eigenen 1000er-Block, sonst schliessen sich die Copier gegenseitig die Hedges: erster PC 770000 (= Default, Feld weglassen), zweiter PC 771000, dritter 772000 … bis 779000. Neu provisionierte Accounts bekommen ihre magic dann in diesem Block.",
+  "magic_base": 770000,
   "multiplier": 1.0,
   "symbol_map": {
     "NAS100": "NAS100"

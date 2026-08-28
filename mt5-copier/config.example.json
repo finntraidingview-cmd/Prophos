@@ -43,5 +43,8 @@
 
   "_8_EINDEUTIG_pro_master": "magic und snapshot_file MUESSEN pro config*.json eindeutig sein (der Copier bricht sonst ab). magic ist das Erkennungszeichen der eigenen Hedges — zwei Master mit derselben magic wuerden sich gegenseitig die Hedges schliessen (Audit 13.08.2026). Zweiter Master z.B.: magic 770002, comment_prefix 'P2', snapshot_file 'prophos_master2.csv'.",
   "magic": 770001,
-  "comment_prefix": "PH"
+  "comment_prefix": "PH",
+
+  "_9_magic_base": "NUR relevant, wenn MEHRERE PCs sich EIN Hedge-Konto teilen (27.08.2026, Finns Ein-Konto-fuer-alle wegen der Marge). Dann braucht jeder PC einen eigenen 1000er-Block, sonst raeumen sich die Copier verschiedener PCs gegenseitig die Hedges (magic ist der Primaerfilter, gleiche magic = fremder Hedge wird fuer eigen gehalten). Erster PC 770000 (Default, Feld weglassen), zweiter 771000, dritter 772000 … bis 779000. Die Provisionierung vergibt neue magics dann ab magic_base+1. Alles bleibt in der Familie 770000-779999, fremde PC-Bloecke loesen also keinen Fremd-Alarm aus.",
+  "magic_base": 770000
 }

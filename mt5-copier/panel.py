@@ -522,6 +522,13 @@ def prov_start(name, login, password, server, owner=None, display=None):
             return False, "Es laeuft schon eine Provisionierung — erst fertig laufen lassen."
         cfg = base_config()
         template = cfg.get("master_terminal_path") or ""
+        # magic_base pro PC (27.08.2026): teilen sich mehrere PCs dasselbe
+        # Hedge-Konto, vergibt jeder in seinem eigenen 1000er-Block. Fehlt der
+        # Wert, gilt der Default 770000 (Bestands-PC bleibt wie bisher).
+        try:
+            magic_base = int(cfg.get("magic_base") or provision.MAGIC_BASE)
+        except (TypeError, ValueError):
+            magic_base = provision.MAGIC_BASE
         job = {"name": name, "error": None, "done": False,
                "steps": {k: {"state": "pending", "note": None} for k in PROV_STEPS}}
         PROV_JOB = job
@@ -537,7 +544,8 @@ def prov_start(name, login, password, server, owner=None, display=None):
         try:
             provision.run_provision(name=name, login=login, password=password,
                                     server=server, template_exe=template,
-                                    folder=HERE, report=report, owner=owner, display=display)
+                                    folder=HERE, report=report, owner=owner, display=display,
+                                    magic_base=magic_base)
         except provision.ProvisionError as e:
             job["error"] = str(e)
             for st in job["steps"].values():

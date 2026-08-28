@@ -338,6 +338,32 @@ def main():
                     and cfg["magic"] == 770003
                     and "_kommentar" not in cfg))
 
+        # 27b) magic_base pro PC (27.08.2026): teilt sich der PC das Hedge-Konto
+        # mit anderen, vergibt die Provisionierung im eigenen 1000er-Block.
+        # Reine Blocklogik (base verschiebt Start + Praefix zaehlt im Block):
+        magic_base_logik = (
+            provision.next_magic(set(), 771000) == 771001
+            and provision.next_magic({771001, 771002}, 771000) == 771003
+            and provision.prefix_for(771001, set(), 771000) == "PH"
+            and provision.prefix_for(771002, {"PH"}, 771000) == "P2"
+            # Bestands-PC ohne magic_base bleibt exakt wie bisher (Default 770000):
+            and provision.next_magic({770001, 770002}) == 770003)
+        # Und end-zu-end an einem FRISCHEN Ordner (= Moritz' eigener PC, eigener
+        # Ordner): der erste Account landet sauber im 771000er-Block mit PH.
+        with tempfile.TemporaryDirectory() as td2:
+            # Vorlage ohne magic/comment_prefix — genau wie die echte
+            # config.vorlage.json (die ist kein Account).
+            _json.dump({"hedge_expected_login": 488579,
+                        "master_terminal_path": "C:\\MT5-Master\\terminal64.exe",
+                        "magic_base": 771000},
+                       open(os.path.join(td2, "config.vorlage.json"), "w"))
+            ident_block1 = provision.alloc_identity(td2, "moritz1", magic_base=771000)
+        results.append(prov(
+            "PROVISION: magic_base verschiebt den Block; frischer PC → magic 771001, Praefix PH",
+            lambda: magic_base_logik
+                    and ident_block1 == {"magic": 771001, "prefix": "PH",
+                                         "snapshot": "prophos_master_moritz1.csv"}))
+
         # 28) plan_checks faengt die Nutzerfehler ab
         probs = provision.plan_checks(td, "böse name!", "abc", "", None)
         results.append(prov(
