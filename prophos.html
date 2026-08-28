@@ -3960,10 +3960,23 @@
 
             <!-- Take-Profit Master + Slave-Hedge-Auswertung — AUSGEBLENDET (09.07.2026, Finns
                  Wunsch: "brauch ich nicht"). Felder bleiben im DOM (display:none), weil
-                 tpRecompute()/Save-Code sie lesen/beschreiben. -->
-            <div class="field" style="grid-column:span 2;display:none">
-              <label>Take-Profit Master ($)</label>
-              <input type="number" class="input mono" id="tp-master-tp" min="0" step="10" placeholder="optional, z.B. 3600">
+                 tpRecompute()/Save-Code sie lesen/beschreiben.
+                 Seit 28.08.2026 im ECHO-Modus wieder sichtbar (tpRouteUpdateSeg):
+                 Finns Jetzt-starten-Flow — TP/SL/Lots/Richtung komplett beim Planen. -->
+            <div class="field" id="tp-master-tp-row" style="grid-column:span 2;display:none">
+              <label>Take Profit ($) <span style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
+              <input type="number" class="input mono" id="tp-master-tp" min="0" step="10" placeholder="z.B. 100">
+            </div>
+            <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
+                 sichtbar. Mit TP ($), SL (= Risiko Master $) und Lots (= Anzahl
+                 Kontrakte) ist die Order damit KOMPLETT beim Planen erfasst —
+                 die Karte kann sie per „Jetzt starten" direkt auslösen. -->
+            <div class="field" id="tp-dir-row" style="grid-column:span 2;display:none">
+              <label>Richtung <span style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
+              <div style="display:flex;gap:8px">
+                <button type="button" id="tp-dir-buy" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">BUY</button>
+                <button type="button" id="tp-dir-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
+              </div>
             </div>
 
             <div class="field" style="grid-column:span 2;display:none">
@@ -16995,7 +17008,10 @@
       // eingefrorenen Balances (bei planned→open) + final (bei Ende-Erkennung) —
       // die einzige P&L-Quelle der MT5-Route ('Beweis oder leer').
       route:       row.route || null,
-      mt5Baseline: row.mt5_baseline || null
+      mt5Baseline: row.mt5_baseline || null,
+      // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
+      // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
+      richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null
     }
   }
   function planToRow(p){
@@ -17024,7 +17040,8 @@
       priority:    p.priority || 'medium',
       planned_for: p.plannedFor || null,
       notes:       p.notes || null,
-      status:      p.status || 'planned'
+      status:      p.status || 'planned',
+      richtung:    (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
     }
   }
 
@@ -17941,11 +17958,19 @@
     const svgDel  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`
     let actions = ''
     if(isPlanned){
+      // „Jetzt starten" (28.08.2026, Finns Flow): nur für Echo-Pläne — lokal
+      // startet es direkt den Trade-Start-Check, am Handy/Mac geht das Signal
+      // an den PC und Puls platziert. Validierung (Richtung/TP/SL/Lots) macht
+      // tpJetztStarten selbst und schickt sonst zurück ins Plan-Modal.
+      const jetztBtn = (p.route === 'mt5')
+        ? `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Jetzt starten</button>`
+        : ''
       actions = `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
         <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}">Läuft</button>
-        <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
+        ${jetztBtn}
+        <button class="btn ${jetztBtn ? 'btn-ghost' : 'btn-primary'} tc2-btn" data-plan-complete="${p.id}">Erledigt</button>`
     } else if(isOpen){
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
@@ -18308,6 +18333,11 @@
     // "Läuft"-Button: bewusst wieder das alte 1:1-Verhalten (manueller Override auf "offen").
     // Der Preflight-Check läuft nur beim "Speichern & Starten" im Modal — und ändert dort
     // den Status NICHT (Auto-Erkennung übernimmt den planned→open-Übergang).
+    document.querySelectorAll('[data-plan-jetzt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt)
+      })
+    })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planStart, 'open'))
     })
@@ -19094,8 +19124,12 @@
                  || String(_pfPlanId) !== String(plan.id)) return
               // Remote-Lauf: ab hier ist die Order unterwegs — ein „Popup zu"
               // meldet nicht mehr „verworfen", das Ergebnis kommt vom Order-
-              // Pfad selbst (28.08.2026, Remote-Signale).
-              if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)) _pfRemoteHook.armed = true
+              // Pfad selbst; der Absender sieht den Schritt „Puls platziert…"
+              // live (28.08.2026, Remote-Signale).
+              if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)){
+                _pfRemoteHook.armed = true
+                try{ _pfRemoteHook.schritt && _pfRemoteHook.schritt('order') }catch(_){}
+              }
               // KEIN Countdown mehr (25.08.2026, Finns Tempo-Wunsch: 'soll direkt
               // losgehen') — die HÄNDE-WEG-Ansage steht, während der Bot schon
               // arbeitet. Über Parsec bewegt er den Cursor ohnehin nicht sichtbar,
@@ -19324,7 +19358,30 @@
     if(filterRow) filterRow.style.display = fixed ? 'none' : ''
     const slaveSel = document.getElementById('tp-slave')
     if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
+    // Jetzt-starten-Felder (28.08.2026): TP + Richtung nur im Echo-Modus zeigen —
+    // damit ist die Order komplett beim Planen erfasst, die Karte löst sie aus.
+    const tpRow = document.getElementById('tp-master-tp-row')
+    if(tpRow) tpRow.style.display = fixed ? '' : 'none'
+    const dirRow = document.getElementById('tp-dir-row')
+    if(dirRow) dirRow.style.display = fixed ? '' : 'none'
   }
+
+  // Richtung im Plan-Modal (28.08.2026, Finns Jetzt-starten-Flow) — gleiche
+  // Optik wie die Buy/Sell-Knöpfe im Order-Popup (tpOrderDirSet).
+  let _tpDir = null
+  function tpDirSet(dir){
+    _tpDir = (dir === 'buy' || dir === 'sell') ? dir : null
+    const b = document.getElementById('tp-dir-buy')
+    const s = document.getElementById('tp-dir-sell')
+    if(b){ b.style.background = _tpDir === 'buy' ? 'rgba(18,183,106,.12)' : ''
+           b.style.borderColor = _tpDir === 'buy' ? '#12B76A' : ''
+           b.style.color = _tpDir === 'buy' ? '#0E9757' : '' }
+    if(s){ s.style.background = _tpDir === 'sell' ? 'rgba(240,68,56,.10)' : ''
+           s.style.borderColor = _tpDir === 'sell' ? '#F04438' : ''
+           s.style.color = _tpDir === 'sell' ? '#D92D20' : '' }
+  }
+  document.getElementById('tp-dir-buy')?.addEventListener('click', () => tpDirSet('buy'))
+  document.getElementById('tp-dir-sell')?.addEventListener('click', () => tpDirSet('sell'))
 
   async function tpResolveMt5Hedge(){
     // Hedge-Login aus der FRISCHEN Instanzliste (alle Instanzen teilen per
@@ -19651,6 +19708,150 @@
     }
   }
 
+  /* ── „Jetzt starten" von der Plan-Karte (28.08.2026, Finns Flow) ──────────
+   * Order KOMPLETT aus dem Plan: Richtung + TP ($) + SL (= Risiko Master $)
+   * + Lots (= Anzahl Kontrakte) + Symbol aus den Firmen-Einstellungen.
+   * Lokal (PC): exakt der bekannte Weg — Order merken, Trade-Start-Check.
+   * Remote (Handy/Mac): Signal + Live-Schritte im Check-Popup:
+   *   Signal senden → PC übernimmt → Check am PC → Puls platziert. */
+  let _rsAktiv = null   // { sigId, timer, t0 } — ein Remote-Check zur Zeit
+
+  async function tpJetztStarten(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'planned') return
+    const fehlt = []
+    const dir = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
+    const lots = Number(plan.masterContracts)
+    const sl = Number(plan.masterRisk)
+    const tp = Number(plan.masterTp)
+    const symbol = ((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''
+    if(!dir) fehlt.push('Richtung (Buy/Sell)')
+    if(!(lots > 0)) fehlt.push('Anzahl Kontrakte')
+    if(!(sl > 0)) fehlt.push('Risiko Master ($) = Stop Loss')
+    if(!(tp > 0)) fehlt.push('Take Profit ($)')
+    if(!symbol) fehlt.push(`Firmen-Symbol für „${plan.masterFirm || '—'}" (Settings)`)
+    if(fehlt.length){
+      if(typeof atToast === 'function') atToast('Im Plan fehlt: ' + fehlt.join(', ') + ' — bitte nachtragen.', 'end')
+      openTradePlanModal(planId)
+      return
+    }
+    const order = { planId: plan.id, symbol, richtung: dir, volumen: lots, sl_usd: sl, tp_usd: tp }
+    if(MT5_LOCAL){
+      _tpPendingOrder = order
+      tpPreflightMt5(plan)
+      return
+    }
+    tpRemoteCheck(plan, order)
+  }
+
+  /* Live-Schritte auf Absender-Seite — bewusst im vorhandenen Check-Popup
+   * (pf-rows/_pfAddRow/_pfSet), kein neues Design. Popup zu = Storno,
+   * solange kein PC geclaimt hat (dieselbe Semantik wie überall). */
+  async function tpRemoteCheck(plan, order){
+    if(_rsAktiv) return   // ein Remote-Check zur Zeit
+    _pfMt5StopTimer()
+    _pfPlanId = null      // kein lokaler Check-Lauf — Zeilen gehören uns
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `📡 Jetzt starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol} · TP $${order.tp_usd} / SL $${order.sl_usd}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+    _pfAddRow('rs-sig',   'Signal senden')
+    _pfAddRow('rs-claim', 'PC übernimmt')
+    _pfAddRow('rs-check', 'Trade-Start-Check am PC')
+    _pfAddRow('rs-order', 'Puls platziert die Order')
+    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
+    const fertigUi = (ok, text) => {
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
+      if(foot) foot.style.display = 'flex'
+    }
+    let sig = null
+    try{
+      const { data, error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plan.id),
+                  params: { symbol: order.symbol, richtung: order.richtung, volumen: order.volumen,
+                            sl_usd: order.sl_usd, tp_usd: order.tp_usd } })
+        .select('*').single()
+      if(error) throw error
+      sig = data
+    }catch(e){
+      _pfSet('rs-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Jetzt starten".')
+      return
+    }
+    _pfSet('rs-sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — die Prop-Firma sieht nur die gewohnte PC-IP.`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    const stornoFallsWartet = () => {
+      supabase.from('order_signale')
+        .update({ status:'verworfen', updated_at: new Date().toISOString(),
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+        .eq('id', sig.id).eq('status', 'wartet')
+        .then(() => {}, e => console.warn('[signal] Storno:', e))
+    }
+    const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    const tick = async () => {
+      if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      if(zu()){ stornoFallsWartet(); stop(); return }
+      let row = null
+      try{
+        const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
+        row = data
+      }catch(_){ return }
+      if(!row || !_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      const sec = Math.round((Date.now() - _rsAktiv.t0) / 1000)
+      const erg = row.ergebnis || {}
+      if(row.status === 'wartet'){
+        if(sec > OS_FRISCHE_S){
+          try{
+            await supabase.from('order_signale')
+              .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }catch(_){}
+          _pfSet('rs-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          _pfSet('rs-check', 'warn', 'Übersprungen.')
+          _pfSet('rs-order', 'warn', 'Übersprungen — nichts platziert.')
+          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Jetzt starten".')
+          stop(); return
+        }
+        _pfSet('rs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+      } else if(row.status === 'laeuft'){
+        _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        if(erg.schritt === 'order'){
+          _pfSet('rs-check', 'ok', 'Check grün — Terminal bereit.')
+          _pfSet('rs-order', 'warn', `⏳ Puls füllt den Order-Dialog im Master-Terminal… (${sec}s) — HÄNDE WEG am PC!`)
+        } else {
+          _pfSet('rs-check', 'warn', `⏳ Check läuft am PC — Verlinkung, Copier, Richtung, Terminal… (${sec}s)`)
+        }
+      } else if(row.status === 'fertig'){
+        _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('rs-check', 'ok', 'Check grün.')
+        _pfSet('rs-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
+        fertigUi(true, '✓ Order platziert — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".')
+        try{ loadTradePlansFromSupabase() }catch(_){}
+        stop()
+      } else {
+        // fehler / verworfen / verfallen — inkl. „Position OFFEN ohne SL/TP"
+        const offen = !!erg.offen
+        const ziel = (row.status === 'wartet' || !row.pc) ? 'rs-claim' : (erg.schritt === 'order' || erg.unklar || offen) ? 'rs-order' : 'rs-check'
+        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
+        fertigUi(false, offen
+          ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT am PC von Hand nachtragen!'
+          : (erg.unklar
+            ? '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, NICHT blind erneut starten.'
+            : '✗ Nicht platziert — Meldung oben, am PC beheben und erneut „Jetzt starten".'))
+        stop()
+      }
+    }
+    _rsAktiv.timer = setInterval(tick, 2000)
+    tick()
+  }
+
   /* ── Empfänger: läuft NUR auf dem PC (MT5_LOCAL), Takt 5s wie die Flotte ── */
   let _osBusy = false
   let _osActive = null   // { sigId, planId, timeout } — ein Signal zur Zeit
@@ -19766,7 +19967,16 @@
                             volumen: vol, sl_usd: p.sl_usd != null ? Number(p.sl_usd) : null,
                             tp_usd: p.tp_usd != null ? Number(p.tp_usd) : null }
         _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
-        _pfRemoteHook = { planId: String(plan.id), armed: false, fn: res => _osErgebnis(sig.id, res) }
+        _pfRemoteHook = { planId: String(plan.id), armed: false, fn: res => _osErgebnis(sig.id, res),
+          // Fortschritts-Stempel (28.08.2026, Finns Live-Schritte): 'order' =
+          // Check grün, Puls füllt den Dialog — der Absender schaltet damit
+          // seine Schritt-Zeile um. Fire-and-forget, nur solange 'laeuft'.
+          schritt: st => {
+            supabase.from('order_signale')
+              .update({ ergebnis: { schritt: st }, updated_at: new Date().toISOString() })
+              .eq('id', sig.id).eq('status', 'laeuft')
+              .then(() => {}, () => {})
+          } }
         // Backstop (Timeout-Doktrin: der äußere Timeout ist die Obergrenze der
         // Wahrheit): meldet der Check binnen 8 min gar nichts, wird das Signal
         // als UNKLAR beendet — nie still offen lassen.
@@ -20182,6 +20392,7 @@
         document.getElementById('tp-master-qty').value  = p.masterContracts ?? 1
         document.getElementById('tp-slave-risk').value  = p.slaveRisk ?? ''
         document.getElementById('tp-master-tp').value   = p.masterTp ?? ''
+        if(typeof tpDirSet === 'function') tpDirSet(p.richtung)
         document.getElementById('tp-planned-for').value = p.plannedFor || ''
         document.getElementById('tp-notes').value       = p.notes || ''
         // Priority
@@ -20195,6 +20406,7 @@
       document.getElementById('tp-master-qty').value  = 1
       document.getElementById('tp-slave-risk').value  = ''
       document.getElementById('tp-master-tp').value   = ''
+      if(typeof tpDirSet === 'function') tpDirSet(null)
       document.getElementById('tp-notes').value       = ''
       // Default: morgen
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
@@ -20836,6 +21048,9 @@
       slaveFirm:  slave.firm,
       masterRisk, masterContracts: masterQty, slaveRisk, multiplier: mult,
       masterTp,
+      // Richtung nur im Echo-Modus erfassen (28.08.2026, Jetzt-starten-Flow) —
+      // beim Speichern keine Pflicht, „Jetzt starten" validiert selbst.
+      richtung: (_tpRoute === 'mt5' && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
       priority, plannedFor, notes,
       status: 'planned'
     }
