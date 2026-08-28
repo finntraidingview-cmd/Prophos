@@ -581,7 +581,12 @@
     max-width:100%;min-width:0;
   }
   #dashboard-view .view{display:none;opacity:0}
-  #dashboard-view .view.active{display:block;animation:fadeUp .3s var(--ease) forwards}
+  /* fadeUpView statt fadeUp (29.08.2026, Mobile-Audit): „forwards" ließ
+     translateY(0) dauerhaft stehen — ein Transform ≠ none macht die View zum
+     Containing Block für position:fixed-Kinder (Modal-Sheets!) und hält einen
+     Compositor-Layer offen. Endet auf transform:none, Desktop-Optik identisch. */
+  @keyframes fadeUpView{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  #dashboard-view .view.active{display:block;animation:fadeUpView .3s var(--ease) forwards}
 
   #dashboard-view .view-head{
     display:flex;justify-content:space-between;align-items:center;
@@ -633,7 +638,9 @@
     transition:opacity .25s var(--ease);
   }
   .cosmos-fixedlayer.on{opacity:1}
-  @media (min-width:769px){.cosmos-fixedlayer{left:var(--sidebar-w)}}
+  /* 821: unter 820px ist die Sidebar ein Bottom-Sheet, kein 240px-Rail —
+     der alte 769er-Breakpoint schob den Hero auf iPads 240px nach rechts */
+  @media (min-width:821px){.cosmos-fixedlayer{left:var(--sidebar-w)}}
   .cosmos-svg{position:absolute;inset:0;width:100%;height:140%;top:-8%;display:block;transition:transform .05s linear}
   .cosmos-scene{
     position:relative;z-index:1;min-height:100vh;
@@ -667,13 +674,20 @@
   .cosmos-candles line{stroke:rgba(84,71,206,.9);stroke-width:1}
   .cosmos-candles{animation:hcFlicker 6s ease-in-out infinite}
   @keyframes hcFlicker{0%,100%{opacity:.05}50%{opacity:.12}}
-  @media (max-width:720px){
+  @media (max-width:820px){
     .cosmos-scroll{min-height:320vh}
     .cosmos-tagline{font-size:26px}
   }
   @media (prefers-reduced-motion:reduce){
     .cosmos-scroll *{animation:none !important;transition:none !important}
     .cosmos-svg{transform:none !important}
+    /* App-weit (29.08.2026 nachgezogen — der Block deckte nur den Hero ab):
+       iOS-„Bewegung reduzieren" schaltet jetzt alle Dauer-Pulse und
+       Übergänge ab, statt nur die Overview-Grafik. */
+    #dashboard-view *,#login-view *{
+      animation-duration:.01ms !important;animation-iteration-count:1 !important;
+      transition-duration:.01ms !important;scroll-behavior:auto !important;
+    }
   }
   /* Notizzettel */
   #dashboard-view .notes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
@@ -2228,7 +2242,12 @@
   #dashboard-view .mob-nav{display:none}
   @keyframes mob-sheet-in{from{opacity:.5;transform:translateY(26px)}to{opacity:1;transform:none}}
   @media (max-width:820px){
-    :root{--mob-nav-h:58px;--topbar-h:52px}
+    :root{
+      --mob-nav-h:58px;--topbar-h:52px;
+      /* Eine Karten-Erhebung für die ganze Mobile-Schicht (stand vorher
+         wortgleich an mehreren Stellen) */
+      --shadow-mob-card:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+    }
 
     /* — Sidebar wird zum Bottom-Sheet („Mehr"-Tab öffnet sie) — */
     #dashboard-view .sidebar{
@@ -2237,7 +2256,7 @@
       overflow-y:auto;-webkit-overflow-scrolling:touch;
       border-right:none;border-top:1px solid var(--border-soft);
       border-radius:18px 18px 0 0;
-      padding:8px 14px calc(14px + env(safe-area-inset-bottom));
+      padding:8px calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
       transform:translateY(103%);transition:transform .28s var(--ease);
       box-shadow:0 -12px 40px rgba(16,24,40,.18);
     }
@@ -2265,9 +2284,16 @@
     #dashboard-view .user-name{max-width:90px}
 
     /* — Content: engeres Spacing + Platz für die Tab-Bar — */
-    #dashboard-view .main{padding:16px 14px calc(26px + var(--mob-nav-h) + env(safe-area-inset-bottom))}
-    #dashboard-view .view-title{font-size:19px}
+    #dashboard-view .main{padding:16px calc(14px + env(safe-area-inset-right)) calc(26px + var(--mob-nav-h) + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left))}
     #dashboard-view .table-wrap{-webkit-overflow-scrolling:touch}
+    /* View-Wechsel am Handy nur faden: der Slide zieht sonst die komplette
+       Liste durch den Compositor — das war das Hängen beim Tab-Tap.
+       forwards ist Pflicht: .view hat Basis-opacity:0, ohne fill-mode
+       fiele die View nach der Animation zurück ins Unsichtbare. */
+    #dashboard-view .view.active{animation:fadeIn .18s var(--ease) forwards}
+    /* Parallax-Grafik direkt setzen: die 50ms-Transition wurde pro
+       Scroll-Frame neu gestartet (Compositor-Doppelarbeit) */
+    .cosmos-svg{transition:none}
 
     /* — Kein horizontaler Überlauf (Finns Handy-Screenshots 28.08.2026):
          läuft Inhalt breiter als 375px, weitet iOS den Layout-Viewport auf —
@@ -2292,24 +2318,47 @@
       max-width:100%;max-height:88vh;
       border-radius:18px 18px 0 0;
       border-left:none;border-right:none;border-bottom:none;
-      padding:20px 16px calc(18px + env(safe-area-inset-bottom));
+      padding:20px calc(16px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
       animation:mob-sheet-in .22s var(--ease);
+      /* Sheet klebt am Rand: der Desktop-Karten-Schatten wäre unsichtbar
+         und kostet nur Paint — nach oben genügt eine weiche Kante */
+      box-shadow:0 -12px 40px rgba(16,24,40,.18);
     }
 
-    /* — Toasts über die Tab-Bar heben — */
+    /* — Toasts über die Tab-Bar heben. bottom wird bewusst NICHT gesetzt:
+         mpToast() schreibt es inline (Stapel-Offset) und Inline schlägt die
+         Media-Query. margin-bottom addiert sich dagegen auf jeden
+         bottom-Wert — Stapelung bleibt, der Hub greift immer. — */
     .at-toast,.at-prompt{
-      left:14px;right:14px;max-width:none;
+      left:calc(14px + env(safe-area-inset-left));
+      right:calc(14px + env(safe-area-inset-right));max-width:none;
+      margin-bottom:calc(var(--mob-nav-h) + env(safe-area-inset-bottom) - 12px);
+    }
+    /* mg-Toast (Manager/Admin) war beim ersten Wurf vergessen — lag auf der Leiste */
+    #dashboard-view .mg-toast{
+      left:14px;right:14px;text-align:center;
       bottom:calc(var(--mob-nav-h) + 16px + env(safe-area-inset-bottom));
     }
+    /* News-Toasts: lagen per Inline-Style (top:16/right:16, 340px breit) auf
+       Topbar + Profil-Chip und blockten mit pointer-events bis zu 60s jeden
+       Tap darauf. Unter die Topbar, volle Breite, durchlässig, unter das
+       Sheet-Overlay (65). */
+    #news-toasts{
+      top:calc(var(--topbar-h) + 10px) !important;
+      left:12px !important;right:12px !important;
+      max-width:none !important;z-index:60 !important;
+    }
+    #news-toasts > div{pointer-events:none !important}
 
     /* — Bottom-Tab-Bar — */
     #dashboard-view .mob-nav{
       display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
       height:calc(var(--mob-nav-h) + env(safe-area-inset-bottom));
-      padding:0 6px env(safe-area-inset-bottom);
-      background:rgba(255,255,255,.92);
-      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-      border-top:1px solid var(--border-soft);
+      padding:0 calc(6px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(6px + env(safe-area-inset-left));
+      /* Opak wie die Topbar: Live-Blur müsste bei jedem Scroll-Frame den
+         Backdrop neu rechnen — auf langen Listen der zweitgrößte Lag-Posten
+         (29.08.2026, Performance-Audit). Der Schatten trägt die Abhebung. */
+      background:var(--surface);
     }
     #dashboard-view .mob-link{
       flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -2326,9 +2375,6 @@
        wie Revolut") — Feinschliff über die Grund-Schicht drüber.
     ———————————————————————————————————————————————————————————— */
 
-    /* — Topbar: ruhig, nur Titel + Profil — */
-    #dashboard-view .tb-title{font-size:16.5px}
-
     /* — View-Head: Titel oben, Aktionen als wischbare Zeile darunter
          (6 Accounts-Buttons wrappten sonst zu einem Klotz) — */
     /* flex-wrap MUSS hier auf nowrap: column+wrap lässt Kinder auf
@@ -2340,16 +2386,20 @@
     }
     #dashboard-view .view-head > div:last-child::-webkit-scrollbar{display:none}
     #dashboard-view .view-head > div:last-child > *{flex-shrink:0}
-    #dashboard-view .view-sub{font-size:13px}
 
-    /* — Buttons: Touch-Höhe + Druck-Feedback — */
-    #dashboard-view .btn{padding:9px 14px;border-radius:10px;transition:all .15s var(--ease),transform .1s var(--ease)}
+    /* — Buttons: Touch-Höhe + Druck-Feedback. transition:all zwingt bei
+         jeder Style-Änderung zum Vergleich ALLER animierbaren Properties —
+         auf das Nötige eingedampft. — */
+    #dashboard-view .btn{padding:9px 14px;border-radius:10px;transition:background-color .15s var(--ease),border-color .15s var(--ease),transform .1s var(--ease)}
     #dashboard-view .btn:active{transform:scale(.97)}
+    #dashboard-view .kpi{transition:box-shadow .2s var(--ease)}
+    #dashboard-view .input{transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+    #dashboard-view .sb-link{transition:background-color .15s var(--ease),color .15s var(--ease)}
 
     /* — Sub-Tabs (Accounts/Trades/Finanzen): wischbar statt umbrechen — */
     #dashboard-view .subtabs{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
     #dashboard-view .subtabs::-webkit-scrollbar{display:none}
-    #dashboard-view .subtab{padding:10px 13px;white-space:nowrap;flex-shrink:0}
+    #dashboard-view .subtab{white-space:nowrap;flex-shrink:0}
 
     /* — Modal-Sheets: Griff-Linie oben, Aktionen in voller Breite — */
     #dashboard-view .modal::before{
@@ -2458,9 +2508,9 @@
 
     /* Karten schweben statt Kästchen: Rahmen weg, weicher Schatten */
     #dashboard-view .panel,#dashboard-view .kpi,#dashboard-view .trade-card,
-    #dashboard-view .mtc-card,#dashboard-view .mg-stat{
+    #dashboard-view .mtc-card,#dashboard-view .mg-stat,#dashboard-view .mg-empty{
       border:none;
-      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+      box-shadow:var(--shadow-mob-card);
     }
 
     /* Sub-Tabs als Pills statt Unterstrich-Tabs */
@@ -2481,16 +2531,24 @@
     #dashboard-view .mob-nav{border-top:none;box-shadow:0 -6px 20px rgba(16,24,40,.07)}
     #dashboard-view .mob-link svg{width:22px;height:22px}
 
-    /* Kein grauer Tap-Blitz, keine sichtbaren Scrollbalken in Scroll-Zeilen */
-    #dashboard-view *{-webkit-tap-highlight-color:transparent}
+    /* Kein grauer Tap-Blitz (Property ist vererbt — ein Selektor genügt;
+       der frühere *-Selektor lief bei jedem Style-Recalc über den DOM) */
+    #dashboard-view{-webkit-tap-highlight-color:transparent}
     #dashboard-view .table-wrap{scrollbar-width:none}
     #dashboard-view .table-wrap::-webkit-scrollbar{display:none}
 
     /* Empty-States ohne gestrichelten Web-Rahmen */
     #dashboard-view .empty{border:none;background:transparent}
 
-    /* Eingaben eine Spur runder — passt zu Pills und Sheets */
-    #dashboard-view .input{border-radius:12px}
+    /* Radius-System der Mobile-Schicht: 18 Sheets · 14 Karten · 12 Inputs
+       · 10 Buttons · 999 Pills. Vorher liefen 16/12/8/5 quer dazwischen. */
+    #dashboard-view .input,
+    #dashboard-view .mtc-details input,#dashboard-view .mtc-details select,
+    #dashboard-view .mtc-modal-body input,#dashboard-view .mtc-modal-body select{border-radius:12px}
+    #dashboard-view .panel,#dashboard-view .kpi,#dashboard-view .trade-card,
+    #dashboard-view .mg-stat,#dashboard-view .empty{border-radius:14px}
+    #dashboard-view .tc2-chip,#dashboard-view .tc2-sym{border-radius:6px}
+    #dashboard-view .mtc-stat,#dashboard-view pre.mtc-log{border-radius:10px}
 
     /* Firma-/Typ-Filter in eine Zeile (Inline-min-width braucht !important) */
     #acc-firm-filter{min-width:110px !important}
@@ -2505,7 +2563,10 @@
     #dashboard-view .tc2{
       flex-wrap:wrap;align-items:flex-start;row-gap:8px;
       padding:13px 14px;border:none;border-radius:14px;
-      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+      box-shadow:var(--shadow-mob-card);
+      /* Layout-/Paint-Containment: der 5s-Ticker tauscht Spans in einzelnen
+         Karten — ohne contain invalidiert das die ganze Seite */
+      contain:layout paint;
     }
     #dashboard-view .tc2-dot{margin-top:5px}
     #dashboard-view .tc2-main{flex:1 1 calc(100% - 19px)}
@@ -2544,6 +2605,455 @@
     #ad-stats .kpi:first-child{grid-column:1 / -1}
     #ad-stats .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     #ad-detail-grid{grid-template-columns:1fr !important}
+
+    /* ————————————————————————————————————————————————————————————
+       VOLL-AUDIT-RUNDE (29.08.2026, Finns Auftrag „geh ALLES einzeln
+       durch, ein Agent pro Tab") — konsolidierte Fixes aus 8 parallelen
+       Read-only-Audits. Gruppiert nach Tab.
+    ———————————————————————————————————————————————————————————— */
+
+    /* ······ SHELL: leere Titel-Wrapper und tote Kopfzeilen ······
+       v2 versteckt .view-title/.view-sub — der Wrapper-Div blieb aber als
+       Flex-Kind stehen und erzeugte 10px Geisterlücke. account-detail ist
+       automatisch ausgenommen (dessen Titel ist kein Direktkind). */
+    #dashboard-view .view-head > div:first-child:has(> .view-title){display:none}
+    /* topstep/calc/settings haben im Kopf NUR den Titel-Block → ganz weg */
+    #dashboard-view [data-view="topstep"] .view-head,
+    #dashboard-view [data-view="calc"] .view-head,
+    #dashboard-view [data-view="settings"] .view-head{display:none}
+
+    /* ······ TRADES: Live-P&L, Karten-Aktionen, Filter, Modals ······ */
+    /* Live-Zeilen offener Trades: die Renderer setzen inline nowrap für den
+       Desktop-Einzeiler — bei ~300px wurde der Symmetriebalken von
+       overflow:hidden stumm abgeschnitten. Eigene Reihe, Umbruch erlaubt. */
+    #dashboard-view .tc2-metric > [data-mt5live],
+    #dashboard-view .tc2-metric > [data-duplots]{flex:1 1 100%;min-width:0}
+    #dashboard-view .tc2-metric > [data-mt5live]:empty,
+    #dashboard-view .tc2-metric > [data-duplots]:empty{display:none}
+    #dashboard-view .tc2-metric [data-mt5live] > .mono,
+    #dashboard-view .tc2-metric [data-duplots] > .mono{
+      display:flex !important;flex-wrap:wrap !important;
+      white-space:normal !important;row-gap:5px;
+    }
+    /* Flotte-Karten liefern eine LEERE Aktionszeile — ohne Guard stand
+       unter jeder Karte eine Trennlinie ins Nichts */
+    #dashboard-view .tc2-actions:empty{display:none}
+    /* Fünf Aktionen (✎ 🗑 Läuft Starten Erledigt) passen nicht in eine
+       Zeile; nowrap + overflow:hidden schnitt links die Icons ab */
+    #dashboard-view .tc2-actions{flex-wrap:wrap;row-gap:8px}
+    /* Erledigt-Filter: Safari macht Selects so breit wie die längste Option */
+    #trade-filter-account,#trade-filter-sym{
+      flex:1 1 140px;width:auto !important;min-width:0 !important;max-width:100%;
+    }
+    #trade-filter-reset{margin-left:0 !important;flex:1 1 100%}
+    /* Filterleiste: gleiche schwebende Optik wie die Karten + Touch-Pills */
+    #tradeFilterBar{
+      border:none !important;border-radius:14px !important;
+      box-shadow:var(--shadow-mob-card);
+    }
+    #tradeFilterBar .trade-filter-date-pill{padding:8px 12px !important;font-size:12px !important}
+    /* NQ/MNQ-Toggles: Doppel-Labels (~200px) bliesen die 164px-Spalte auf
+       → Querscroll im Sheet. Volle Zeile + Touch-Höhe. */
+    #tradePlanModal #tp-nq-toggle-master,
+    #tradePlanModal #tp-nq-toggle-slave{grid-column:1 / -1}
+    #tradePlanModal #tp-nq-toggle-slave-placeholder{display:none !important}
+    #tradePlanModal #tp-nq-mnq,#tradePlanModal #tp-nq-nq,
+    #tradePlanModal #tp-nqs-mnq,#tradePlanModal #tp-nqs-nq{
+      flex:1;justify-content:center;padding:9px 10px !important;
+    }
+    /* Symmetrie-Kasten im Erledigt-Modal: die space-between-Zeile zerfaserte
+       bei 295px in Textsäulen — untereinander, Zahlen linksbündig */
+    #dashboard-view #tc-net-display > div:last-child{
+      flex-direction:column !important;align-items:stretch !important;gap:6px;
+    }
+    #dashboard-view #tc-net-display > div:last-child > div:last-child{text-align:left !important}
+    /* Nachfolger-Modal: 3-Spalten-Limits stapeln, 3-Button-Fuß stapeln */
+    #successorModal .field:has(#suc-max-daily-dd),
+    #successorModal .field:has(#suc-max-loss-trade),
+    #successorModal .field:has(#suc-max-profit-trade){grid-column:1 / -1}
+    #successorModal .modal-foot{flex-direction:column;align-items:stretch;gap:8px}
+    #successorModal .modal-foot .btn{flex:0 0 auto}
+    /* Vorschlags-„Übernehmen" + Check-Popup-Fix-Knöpfe: 4px-Padding war
+       unter der Touch-Schwelle (Inline → !important) */
+    #dashboard-view #tp-slave-suggest-apply,
+    #dashboard-view #tp-gesamtkosten-apply,
+    #dashboard-view #tp-vorgaenger-apply,
+    #dashboard-view .pf-fix-btn,
+    #dashboard-view [data-pf-edit-acc]{padding:9px 14px !important;font-size:12.5px !important}
+    /* Order-Popup: Meldung auf eigene Zeile, Knöpfe volle Breite */
+    #tpOrderModal .modal-actions{flex-wrap:wrap;row-gap:10px}
+    #tpOrderModal .modal-actions .modal-msg{flex:1 1 100%;margin-top:0;order:-1}
+    /* Auto-Erkennung-Haken: 14px war als Tap-Ziel zu klein */
+    #dashboard-view .at-toggle input[type=checkbox]{width:20px;height:20px}
+
+    /* ······ ACCOUNTS: die drei Nachbar-Listen als App-Listen ······
+       (analog Manuell-Tab — 6-7-spaltige Tabellen waren nur seitwärts
+       wischbar, mit versteckten Scrollbalken ohne jeden Hinweis) */
+    #dashboard-view [data-pane="topstep"] table.t,
+    #dashboard-view [data-pane="duplikum"] table.t,
+    #dashboard-view [data-pane="mt5"] table.t{display:block}
+    #dashboard-view [data-pane="topstep"] .t thead,
+    #dashboard-view [data-pane="duplikum"] .t thead,
+    #dashboard-view [data-pane="mt5"] .t thead{display:none}
+    #dashboard-view [data-pane="topstep"] .t tbody,
+    #dashboard-view [data-pane="duplikum"] .t tbody,
+    #dashboard-view [data-pane="mt5"] .t tbody{display:block}
+    #dashboard-view [data-pane="topstep"] .t tr,
+    #dashboard-view [data-pane="duplikum"] .t tr,
+    #dashboard-view [data-pane="mt5"] .t tr{
+      display:grid;grid-template-columns:minmax(0,1fr) auto;
+      column-gap:12px;row-gap:5px;align-items:start;
+      padding:13px 14px;border-bottom:1px solid var(--border-soft);
+    }
+    #dashboard-view [data-pane="topstep"] .t tr:last-child,
+    #dashboard-view [data-pane="duplikum"] .t tr:last-child,
+    #dashboard-view [data-pane="mt5"] .t tr:last-child{border-bottom:none}
+    #dashboard-view [data-pane="topstep"] .t td,
+    #dashboard-view [data-pane="duplikum"] .t td,
+    #dashboard-view [data-pane="mt5"] .t td{
+      display:block;padding:0 !important;border:none !important;min-width:0;
+    }
+    #dashboard-view [data-pane="topstep"] .t tr:hover td,
+    #dashboard-view [data-pane="duplikum"] .t tr:hover td,
+    #dashboard-view [data-pane="mt5"] .t tr:hover td{background:transparent}
+    /* Topstep: Name/ID | Balance · Verknüpft | Trading · Sync | Aktion */
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(2){grid-column:2;grid-row:1;text-align:right}
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(4){grid-column:1;grid-row:2}
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(3){grid-column:2;grid-row:2;justify-self:end}
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(5){grid-column:1;grid-row:3;align-self:center;font-size:12px}
+    #dashboard-view [data-pane="topstep"] .t td:nth-child(6){grid-column:2;grid-row:3;justify-self:end}
+    /* Duplikum: Name/Login | Balance · Typ | Status · Plattform | ID, Link voll */
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(5){grid-column:2;grid-row:1;text-align:right}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(2){grid-column:1;grid-row:2}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(4){grid-column:2;grid-row:2;justify-self:end;font-size:12px}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(3){grid-column:1;grid-row:3;font-size:12px}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(7){grid-column:2;grid-row:3;font-size:11px}
+    #dashboard-view [data-pane="duplikum"] .t td:nth-child(6){grid-column:1 / -1;grid-row:4;margin-top:4px}
+    /* Echo-Pane: Name+Chips | Status · Broker | Multi, Link + Meldung voll */
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(3){grid-column:2;grid-row:1;justify-self:end;text-align:right}
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(2){grid-column:1;grid-row:2;font-size:12px;color:var(--sub)}
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(4){grid-column:2;grid-row:2;justify-self:end}
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(5){grid-column:1 / -1;grid-row:3;margin-top:2px}
+    #dashboard-view [data-pane="mt5"] .t td:nth-child(6){
+      grid-column:1 / -1;grid-row:4;white-space:normal !important;margin-top:4px;
+    }
+    /* Duplikum-Pane: Web-Kasten raus, Status-Zeile umbruchfähig, Liste randlos */
+    #dashboard-view #dup-disconnected{margin:0 !important;border:none;padding:16px 14px}
+    #dashboard-view #dup-connected{margin:0 !important;padding:14px 14px 0}
+    #dashboard-view #dup-connected .ts-status-card{flex-wrap:wrap;gap:12px;padding:14px 16px}
+    #dashboard-view #dup-connected .ts-status-card > div:last-child{flex:1 1 100%}
+    #dashboard-view #dup-connected .ts-status-card .btn{flex:1;justify-content:center}
+    #dashboard-view #dup-conn-info{word-break:break-all}
+    #dashboard-view #dupTableWrap{margin:14px -14px 0 !important}
+    #dashboard-view #dupNoAccounts{margin-top:8px !important}
+    /* Trade-Limits-Blöcke (Inline-„1fr 1fr 1fr") stapeln */
+    #addAccountModal .modal > div[style*="1fr 1fr 1fr"],
+    #bulkAddModal   .modal > div[style*="1fr 1fr 1fr"]{grid-template-columns:1fr !important}
+    /* Bulk-Formular: Inline-„1fr 1fr" schlug die 760px-Stapelregel */
+    #bulkAddModal .form-grid{grid-template-columns:1fr !important}
+    /* Selects dürfen schrumpfen (Safari-Options-Breite) + Filter deckeln */
+    #linkTopstepModal .modal-body select.input,
+    #linkDupModal     .modal-body select.input,
+    #linkMt5Modal     .modal-body select.input,
+    #bulk-template-select{min-width:0}
+    #acc-firm-filter,#acc-type-filter{max-width:40vw !important;text-overflow:ellipsis}
+    /* Touch-Höhe für Zeilen-Aktionen (Inline-Paddings der JS-Templates
+       schlagen die .btn-Regel — nur vertikal anheben) */
+    #dashboard-view [data-pane="manual"] .t .btn,
+    #dashboard-view [data-pane="topstep"] .btn,
+    #dashboard-view [data-pane="duplikum"] .btn,
+    #dashboard-view [data-pane="mt5"] .btn,
+    #dashboard-view #ad-links-list .btn,
+    #dashboard-view #credModalBody .btn{
+      min-height:38px !important;padding-top:0 !important;padding-bottom:0 !important;
+    }
+    /* Account-Detail: --line/--bg2 sind global undefiniert — die Inline-
+       Trennlinien/Chip-Flächen rendern deshalb NICHT. Mobil nachziehen. */
+    #dashboard-view #ad-data-list > div,
+    #dashboard-view #ad-activity-list > div{border-bottom:1px solid var(--border-soft) !important}
+    #dashboard-view #ad-data-list > div:last-child,
+    #dashboard-view #ad-activity-list > div:last-child{border-bottom:none !important}
+    #dashboard-view #ad-links-list > div[style*="--bg2"]{
+      background:var(--surface-tint) !important;border-radius:10px;
+    }
+    /* Bulk-Footer wie alle anderen Sheets: Aktionen in voller Breite */
+    #bulkAddModal .modal > div:last-child{flex-wrap:wrap}
+    #bulkAddModal .modal > div:last-child > div:last-child{flex:1 1 100%;gap:10px}
+    #bulkAddModal #bulk-cancel,#bulkAddModal #bulk-save{flex:1;justify-content:center;padding:12px 14px}
+    /* Haupt-Aktion zuerst in der Wisch-Zeile (stand als 6. Button außerhalb) */
+    #dashboard-view [data-view="accounts"] #addAccountBtn{order:-1}
+    /* Letzte Web-Reste in den Accounts-Sheets */
+    #dashboard-view .link-picker-empty{border:none}
+    #dashboard-view .link-tsx-hero{border:none}
+
+    /* ······ FINANZEN ······ */
+    /* Payout-Sheet: Inline-„1fr 1fr" + Safari-Select (Account-Optionen mit
+       Name · Firma · Balance) sprengten das Sheet */
+    #finModal .form-grid{grid-template-columns:1fr !important}
+    #finModal .field select.input{min-width:0}
+    /* Abrechnungs-Historie: das 386px-Sechs-Spalten-Raster lief 100px aus
+       dem Bild (Löschen unerreichbar). Zweizeilig + echte Trennlinien
+       (var(--line) existiert nicht → border renderte nie). */
+    #dashboard-view .fin-history-item{
+      grid-template-columns:minmax(0,1fr) auto auto;
+      column-gap:10px;row-gap:2px;padding:10px 0;
+      border-bottom:1px solid var(--border-soft);
+    }
+    #dashboard-view .fin-history-item > *:nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view .fin-history-item > *:nth-child(2){grid-column:1;grid-row:2}
+    #dashboard-view .fin-history-item > *:nth-child(3){grid-column:2;grid-row:1}
+    #dashboard-view .fin-history-item > *:nth-child(4){grid-column:3;grid-row:1;font-size:11px}
+    #dashboard-view .fin-history-item > *:nth-child(5){grid-column:2;grid-row:2}
+    #dashboard-view .fin-history-item > *:nth-child(6){grid-column:3;grid-row:2;justify-self:end}
+    #dashboard-view #fin-history-list > div:last-child{
+      flex-direction:column;gap:4px;align-items:flex-start;
+    }
+    /* „Meine Rechnungen" als App-Liste (Muster #finTable) */
+    #dashboard-view #fin-rg-panel .panel-sub{display:none}
+    #dashboard-view #fin-rg-panel table.t{display:block}
+    #dashboard-view #fin-rg-panel table.t thead{display:none}
+    #dashboard-view #fin-rg-rows{display:block}
+    #dashboard-view #fin-rg-rows tr{
+      display:grid;grid-template-columns:minmax(0,1fr) auto;
+      column-gap:12px;row-gap:4px;align-items:center;
+      padding:12px 0;border-bottom:1px solid var(--border-soft);
+    }
+    #dashboard-view #fin-rg-rows tr:last-child{border-bottom:none}
+    #dashboard-view #fin-rg-rows td{display:block;padding:0;border:none}
+    #dashboard-view #fin-rg-rows td:nth-child(1){grid-column:1;grid-row:1;font-weight:600}
+    #dashboard-view #fin-rg-rows td:nth-child(4){grid-column:2;grid-row:1;font-size:15px}
+    #dashboard-view #fin-rg-rows td:nth-child(2){grid-column:1;grid-row:2;font-size:12px;color:var(--sub)}
+    #dashboard-view #fin-rg-rows td:nth-child(3){grid-column:2;grid-row:2;font-size:12px}
+    #dashboard-view #fin-rg-rows td:nth-child(5){grid-column:1;grid-row:3;font-size:11px}
+    #dashboard-view #fin-rg-rows td:nth-child(6){grid-column:2;grid-row:3}
+    /* Zeitraum-Leiste: var(--card)/var(--bg2) existieren nicht → Leiste und
+       aktive Pill waren unsichtbar; der Einzeiler brach dreizeilig um. */
+    #dashboard-view [data-view="payouts"] .kpis + div{
+      gap:12px !important;padding:14px !important;
+      border:none !important;background:var(--surface) !important;
+      border-radius:14px;box-shadow:var(--shadow-mob-card);
+    }
+    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(1){
+      flex:1 0 100%;background:var(--surface-tint) !important;
+    }
+    #dashboard-view .fin-range-pill{flex:1;padding:8px 6px !important;font-size:12.5px !important}
+    #dashboard-view .fin-range-pill.active{
+      background:var(--surface) !important;box-shadow:0 1px 2px rgba(16,24,40,.08);
+    }
+    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(2){flex:1 0 100%}
+    #dashboard-view #fin-range-from,#dashboard-view #fin-range-to{flex:1 1 auto;min-width:0}
+    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(3){display:none}
+    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(4),
+    #dashboard-view [data-view="payouts"] .kpis + div > div:nth-child(5){
+      flex:1 1 0;text-align:left !important;margin-left:0 !important;
+    }
+    /* Zyklus-Karte: doppelte Polsterung raus, Abrechnen-Knopf volle Breite */
+    #dashboard-view #fin-settle-card{padding:0}
+    #dashboard-view #fin-settle-btn{width:100%;justify-content:center}
+    /* Abrechnungs-Sheet: unsichtbare var(--bg2)-Boxen als getönte Gruppen */
+    #finSettleModal .modal-body > div:nth-child(1),
+    #finSettleModal .modal-body > div:nth-child(3){
+      background:var(--surface-tint) !important;border-radius:12px !important;
+    }
+    #dashboard-view #fin-settle-pct{font-size:18px !important}
+    /* Finanzen-KPIs: sechsstellige Beträge brauchen die 20px Reserve */
+    #dashboard-view [data-view="payouts"] .kpi{padding:14px}
+    #dashboard-view [data-view="payouts"] .kpi-value{font-variant-numeric:tabular-nums}
+
+    /* ······ NEWS + NOTIZZETTEL ······ */
+    /* Kalender-Zeilen: Desktop-Einzeiler → Zeit·Impact·Titel / F/P darunter.
+       background gesetzt, weil das Inline-var(--bg2) undefiniert ist. */
+    #news-cal > div > div{
+      display:grid !important;
+      grid-template-columns:auto auto minmax(0,1fr);
+      column-gap:10px;row-gap:3px;
+      align-items:center !important;
+      padding:11px 13px !important;
+      background:var(--surface) !important;
+      box-shadow:0 1px 2px rgba(16,24,40,.06);
+    }
+    #news-cal > div > div > span:nth-child(3){grid-column:3;grid-row:1}
+    #news-cal > div > div > span:nth-child(4){grid-column:3;grid-row:2;white-space:nowrap}
+    #news-cal > div > div > span:nth-child(4):empty{display:none}
+    /* Alert-Karte randlos, Countdown bleibt rechts */
+    #news-next-banner{
+      border:none !important;box-shadow:var(--shadow-mob-card);
+      flex-wrap:nowrap !important;padding:12px 14px !important;
+    }
+    #news-next-title{font-size:14px !important}
+    #news-next-countdown{font-size:20px !important;white-space:nowrap}
+    /* News-Kopfzeile: Schalter als Pills mit echtem Touch-Ziel */
+    #dashboard-view [data-view="news"] .view-head > div:last-child{gap:8px}
+    #dashboard-view [data-view="news"] .view-head label{
+      min-height:40px;padding:0 13px;border-radius:999px;
+      background:var(--surface-tint);font-size:13px;
+    }
+    #news-alerts-on,#news-incl-medium{width:19px !important;height:19px !important;accent-color:var(--violet)}
+    #news-test-sound,#news-refresh{min-height:40px;padding:9px 14px !important;font-size:13px !important}
+    /* Notizzettel: Karten wie alle Mobile-Karten, Fuß-Buttons Touch-tauglich */
+    #dashboard-view .note-card{border:none;box-shadow:var(--shadow-mob-card)}
+    #dashboard-view .note-foot{padding:6px 10px 8px}
+    #dashboard-view .note-actions{gap:8px}
+    #dashboard-view .note-btn{
+      border:none;background:var(--surface-tint);border-radius:999px;
+      min-height:36px;padding:0 14px;font-size:12.5px;
+    }
+    #dashboard-view .note-btn svg{width:14px;height:14px}
+    #dashboard-view .note-btn-del{padding:0 13px;color:var(--danger)}
+    #dashboard-view .note-ta{min-height:128px;padding:12px 13px 6px}
+    /* Empty-States: Markup nutzt „empty-ico", CSS definiert „empty-icon" —
+       die Emojis standen unformatiert in Textgröße da */
+    #dashboard-view .empty-ico{font-size:32px;line-height:1;margin-bottom:10px}
+
+    /* ······ ADMIN (kasse) + TOPSTEP MANAGER ······ */
+    /* Manager-Tabellen wischbar statt geclippt (overflow:hidden versteckte
+       G/V-Spalte und Löschen-Button komplett) */
+    #dashboard-view .mg-table-wrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    #dashboard-view .mg-table-wrap::-webkit-scrollbar{display:none}
+    #dashboard-view .mg-table td,#dashboard-view .mg-table th{padding-left:8px;padding-right:8px}
+    /* Verteilungszeilen: Desktop-Raster brauchte 317-340px bei 315px Panel */
+    #dashboard-view .adm-row{
+      grid-template-columns:minmax(0,1.2fr) minmax(34px,1fr) auto auto;gap:10px;
+    }
+    #dashboard-view .adm-row-name{font-size:12.5px}
+    #dashboard-view .adm-pct{font-size:11px}
+    /* Manager-Zyklus-Karte + Historie (386px-Raster → zweizeilig) */
+    #dashboard-view #mg-settle-card{padding:0}
+    #dashboard-view .mg-history-item{
+      grid-template-columns:minmax(0,1fr) auto auto 26px;
+      column-gap:8px;row-gap:2px;padding:9px 2px;
+    }
+    #dashboard-view .mg-history-item > :nth-child(1){grid-column:1;grid-row:1}
+    #dashboard-view .mg-history-item > :nth-child(2){grid-column:1;grid-row:2}
+    #dashboard-view .mg-history-item > :nth-child(3){grid-column:2 / 4;grid-row:1;text-align:right}
+    #dashboard-view .mg-history-item > :nth-child(4){grid-column:2;grid-row:2}
+    #dashboard-view .mg-history-item > :nth-child(5){grid-column:3;grid-row:2}
+    #dashboard-view .mg-history-item > :nth-child(6){grid-column:4;grid-row:1 / span 2;align-self:center}
+    #dashboard-view #mg-history-list > div:last-child{flex-direction:column;gap:4px}
+    #dashboard-view #mg-settle-btn{flex:1 0 100%;justify-content:center;margin-top:4px}
+    /* Account-Karten-Stats als festes 4er-Raster statt ausgefranstem Wrap */
+    #dashboard-view .mg-acct-stats{
+      display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;width:100%;margin-left:0;padding-top:2px;
+    }
+    #dashboard-view .mg-acct-stat{align-items:flex-start;min-width:0}
+    #dashboard-view .mg-acct-stat-lbl{font-size:9px}
+    #dashboard-view .mg-acct-stat-val,
+    #dashboard-view .mg-acct-stat.primary .mg-acct-stat-val{font-size:12.5px;white-space:nowrap}
+    /* Rechnung erstellen: Absender + Notiz untereinander */
+    #dashboard-view #rg-absender,#dashboard-view #rg-notiz{grid-column:1 / -1}
+    /* Rechnungs-Toolbar als Raster (der „–"-Trenner ergab gestapelt keinen Sinn) */
+    #dashboard-view #adm-pane-rg .adm-toolbar{
+      display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;
+    }
+    #dashboard-view #adm-pane-rg .adm-toolbar > *{min-width:0}
+    #dashboard-view #adm-pane-rg .adm-toolbar > span{display:none}
+    #dashboard-view #rg-person{grid-column:1 / -1}
+    #dashboard-view #rg-anteil{width:auto !important}
+    #dashboard-view #rg-preview-btn{grid-column:1 / -1;justify-content:center}
+    /* .card ist im ganzen Stylesheet nirgends definiert — die Kasse-Karten
+       hatten nie Fläche/Radius. Kein border: die Inline-Akzent-Kanten
+       (violett/orange border-top) sollen sichtbar bleiben. */
+    #dashboard-view .card{
+      background:var(--surface);border-radius:var(--r-lg);
+      box-shadow:var(--shadow-mob-card);
+    }
+    /* Aufklapp-Listen im Seitenfluss statt Scroller-im-Scroller */
+    #dashboard-view .adm-scroll{max-height:none}
+
+    /* ······ LOT RECHNER + SETTINGS + LOGIN ······ */
+    /* Grid-Kinder dürfen ihre Spur nicht sprengen (Safari: Select-Breite =
+       längste Option, z.B. „MNQ Futures (Topstep/Tradeify/Alpha/Apex)") */
+    #dashboard-view .calc-grid > *,
+    #dashboard-view .calc-dup-row > *,
+    #dashboard-view .calib-trade-grid > *{min-width:0}
+    /* „Prop Firm hinzufügen": Inline-„1fr 1fr" + Inline-„span 2" */
+    #customFirmModal .form-grid{grid-template-columns:1fr !important}
+    #customFirmModal .form-grid > .field{grid-column:1 / -1 !important;min-width:0}
+    /* Firmen-Liste: Umbenennen-Zeile hat kein flex-wrap — Input auf eigene Zeile */
+    #firmsPanelList .fp-rename-wrap{flex-wrap:wrap}
+    #firmsPanelList .fp-rename-input{flex:1 1 100% !important;min-width:0}
+    /* Kalibrierungs-Aktionen untereinander („Alle Distanzen zurücksetzen"
+       brach sonst mehrzeilig um) */
+    #dashboard-view .calib-actions{flex-direction:column-reverse;gap:8px}
+    #dashboard-view .calib-actions .btn{width:100%;justify-content:center;padding:12px 14px}
+    /* Touch-Höhe für Buttons mit Inline-Padding */
+    #calc-nq-toggle-row .btn,
+    #firmsPanelList .btn,
+    #customFirmAddBtn,
+    #dashboard-view .calib-preview-head .btn{padding:9px 14px !important;font-size:12.5px !important}
+    /* Lot-Rechner + Kalibrierung: letzte Web-Kästen → schwebende Karten */
+    #dashboard-view .calc-grid,
+    #dashboard-view .calc-dup-push,
+    #dashboard-view .calib-panel{
+      border:none;padding:16px;box-shadow:var(--shadow-mob-card);
+    }
+    #dashboard-view .calc-multiplier-output{border:none;padding:14px 16px}
+    #dashboard-view .calc-slave-output{padding:24px 16px}
+    #dashboard-view .calib-trade-block,
+    #dashboard-view .calib-preview{border:none;padding:12px;background:var(--surface-tint)}
+    #dashboard-view .calc-slave-value{font-size:clamp(38px,14vw,56px)}
+    /* Mehr-Sheet: „Topstep Manager" + Badge brauchten mehr als die 125px */
+    #dashboard-view .sidebar .sb-link{gap:8px;font-size:13px;padding:11px 9px}
+    #dashboard-view .sidebar .sb-badge{margin-left:auto;padding:2px 6px}
+    /* Login-Fuß über den Home-Indicator */
+    #login-view .side{padding-bottom:calc(22px + env(safe-area-inset-bottom))}
+
+    /* ······ KONSISTENZ + iOS-GEFÜHL ······ */
+    /* Einheitlicher Listen-Rhythmus: 13px vertikal, 14px horizontal */
+    #dashboard-view [data-pane="manual"] .t tr{padding:13px 14px}
+    #finTable tr{padding:13px 14px}
+    /* Touch-Ziele Richtung 44pt (Apple HIG) — über min-height, damit die
+       optische Dichte bleibt */
+    #dashboard-view .btn,#dashboard-view .tc2-btn,#dashboard-view .tc2-ab{min-height:42px}
+    /* iOS behält :hover bis zum nächsten Tap — Effekte „klebten" sonst an
+       der zuletzt getippten Karte/Zeile */
+    #dashboard-view .tc2:hover{border-color:transparent;background:var(--surface)}
+    #dashboard-view .trade-card:hover,#dashboard-view .kpi:hover,
+    #dashboard-view .mtc-card:hover{box-shadow:var(--shadow-mob-card)}
+    #dashboard-view .sb-link:hover,#dashboard-view .subtab:hover:not(:disabled),
+    #dashboard-view .icon-btn:hover{background:none;color:inherit}
+    /* Dauer-Pulse entschärfen: box-shadow-Animationen rastern jeden Frame
+       neu. Status bleibt an der FARBE ablesbar, Live-Dots als statischer Ring. */
+    #dashboard-view .tc2-dot-live,
+    #dashboard-view .tc2-dot-pending,
+    #dashboard-view .tc2-chip-issue,
+    #dashboard-view .mlog-dot.on,
+    #dashboard-view .trade-card.is-open,
+    #dashboard-view .calc-slave-output,
+    #dashboard-view .calc-slave-output::after{animation:none}
+    #dashboard-view .tc2-dot-live{box-shadow:0 0 0 3px rgba(16,185,129,.22)}
+    #dashboard-view .tc2-dot-pending{box-shadow:0 0 0 3px rgba(245,158,11,.22)}
+    /* Listen-Zeilen-Containment: 5s-Ticker invalidiert nur die Zeile */
+    #dashboard-view [data-pane="manual"] .t tr,#finTable tr{contain:layout}
+
+    /* ······ TOPSTEP MIRROR ······ */
+    /* Verbindungs-/Offline-Karten (.ts-card) wie die übrigen App-Karten:
+       24px-Polster + Rahmen — genau die Kacheln, die Finn offline sieht */
+    #dashboard-view .ts-card{padding:16px;border:none;box-shadow:var(--shadow-mob-card)}
+    /* Kopfzeile darf schrumpfen: .pair-head-info ist nowrap und als
+       Flex-Item unschrumpfbar — „Starten/Löschen" wurden rausgeschoben */
+    #dashboard-view .pair-head-info{min-width:0;flex:1 1 auto}
+    /* Master/Slave untereinander (Safari-Select-Breite) */
+    #dashboard-view .pair-selects{grid-template-columns:1fr;gap:10px}
+    #dashboard-view .pair-select{min-width:0}
+    /* Konfig: 140px-Label + 80px-Input + Hinweis passten nicht in 313px */
+    #dashboard-view .pair-config{grid-template-columns:1fr;gap:12px}
+    #dashboard-view .pair-field-row{flex-wrap:wrap;row-gap:6px}
+    #dashboard-view .pair-field-label{width:auto;flex:1 1 100%}
+    #dashboard-view .pair-field-input{width:96px;flex-shrink:0}
+    #dashboard-view .pair-field-hint{flex:1 1 0;min-width:0;font-size:11px}
+    #dashboard-view .pair-field-slider{flex:1 1 0;min-width:0}
+    #dashboard-view .pair-example{min-width:0}
+    /* Live-Log niedriger — 250px waren ein Drittel des Screens */
+    #dashboard-view .mlog-body{height:170px}
+    /* „Mirror Pairs"-Kopf (Inline-Flex) stapeln */
+    #ts-pairs-wrap > div:first-child{
+      flex-direction:column;align-items:stretch !important;gap:10px;
+    }
   }
 
   /* ============================================================
@@ -2641,6 +3151,46 @@
   #dashboard-view .mtc-plive{color:#0d9668;font-size:12px;margin-top:4px;font-variant-numeric:tabular-nums}
   #dashboard-view .mtc-pempty{color:var(--sub-2);font-size:12.5px;padding:12px 4px}
   #dashboard-view .mtc-offline{max-width:560px}
+
+  /* ============================================================
+     MOBILE — ECHO (mt5copier), 29.08.2026 Voll-Audit.
+     Muss NACH dem MT5-COPIER-Block stehen: dessen Regeln haben
+     dieselbe Spezifität wie die Mobile-Schicht und gewinnen sonst
+     per Quellreihenfolge (deshalb war die randlose mtc-Karte aus
+     der APP-POLITUR v2 bisher wirkungslos).
+  ============================================================ */
+  @media (max-width:820px){
+    /* Karten schweben statt Kästchen (holt die v2-Regel nach) */
+    #dashboard-view .mtc-card{
+      border:none;border-radius:14px;
+      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04);
+    }
+    #dashboard-view .mtc-card:hover{box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04)}
+    #dashboard-view .mtc-plan{border:none;border-radius:14px;
+      box-shadow:0 1px 3px rgba(16,24,40,.07),0 1px 2px rgba(16,24,40,.04)}
+    /* Hinweis-Boxen: nur Tönung, kein Rahmen */
+    #dashboard-view .mtc-banner,#dashboard-view .mtc-jobbar,
+    #dashboard-view .mtc-warn{border:none;border-radius:12px}
+    /* Eine Karte pro Zeile — minmax(330px,…) sprengt schmale Geräte */
+    #dashboard-view .mtc-grid{grid-template-columns:1fr}
+    /* card() liefert genau drei Kacheln — die vierte Spur war immer leer */
+    #dashboard-view .mtc-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+    /* Zwei-Spalter stapeln: ein Input ist von Haus aus ~20 Zeichen breit
+       (bei 16px ~200px) und als Grid-Item die Mindestbreite seiner Spur */
+    #dashboard-view .mtc-row{grid-template-columns:minmax(0,1fr)}
+    /* Symbol-Mapping: Spuren dürfen unter die Input-Eigenbreite, sonst
+       liegt der Löschen-Knopf unerreichbar außerhalb der Karte */
+    #dashboard-view .mtc-map{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}
+    #dashboard-view .mtc-map input{min-width:0}
+    /* Log: lange Windows-Pfade brechen statt quer zu scrollen */
+    #dashboard-view pre.mtc-log{overflow-wrap:anywhere;max-height:190px}
+    #mtc-global-log{max-height:220px !important}
+    /* Echo-Modal: Inline-nowrap-Labels breiter als der Sheet */
+    #mtcAddModal .mtc-modal-body label{white-space:normal !important}
+    /* Aktionszeile: .mtc-msg{flex:1} halbierte die Zeile auch leer */
+    #mtcAddModal .modal-actions{flex-wrap:wrap}
+    #mtcAddModal .mtc-msg{flex:1 0 100%;order:-1;margin-bottom:2px}
+  }
 </style>
 </head>
 <body>
@@ -5353,7 +5903,10 @@
           <button class="btn btn-ghost" id="news-refresh" style="font-size:12px;padding:6px 11px">↻ Aktualisieren</button>
         </div>
       </div>
-      <div id="news-next-banner" style="display:none;margin-bottom:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(90deg,rgba(239,68,68,.10),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.28);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <!-- Nur EIN display im Style: das doppelte display:flex gewann früher
+           gegen das display:none davor — der leere Alarm-Banner stand dadurch
+           bis zum ersten newsTick (10s) sichtbar da. newsTick setzt flex selbst. -->
+      <div id="news-next-banner" style="display:none;margin-bottom:16px;padding:13px 16px;border-radius:11px;background:linear-gradient(90deg,rgba(239,68,68,.10),rgba(239,68,68,.03));border:1px solid rgba(239,68,68,.28);align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)">Nächste High-Impact-News (USD)</div>
           <div id="news-next-title" style="font-size:15px;font-weight:700;margin-top:2px">–</div>
@@ -8653,10 +9206,19 @@
     const scrollWrap = document.getElementById('cosmosScroll')
     const fixedLayer = document.getElementById('cosmosFixedLayer')
     const svgEl = fixedLayer ? fixedLayer.querySelector('.cosmos-svg') : null
+    // Die View, in der der Hero lebt — einmal auflösen statt pro Scroll-Frame
+    // (29.08.2026, Mobile-Performance-Audit: der Handler lief auf JEDER View).
+    const cosmosOwnView = scrollWrap ? scrollWrap.closest('.view') : null
     let ticking = false
     function onCosmosScroll(){
       ticking = false
       if(!scrollWrap || !svgEl || !fixedLayer) return
+      // Overview versteckt? Dann gar nicht erst messen — getBoundingClientRect
+      // erzwingt sonst pro Scroll-Frame ein Layout über den ganzen Dashboard-DOM.
+      if(cosmosOwnView && !cosmosOwnView.classList.contains('active')){
+        if(fixedLayer.classList.contains('on')) fixedLayer.classList.remove('on')
+        return
+      }
       const rect = scrollWrap.getBoundingClientRect()
       const onScreen = rect.bottom > 0 && rect.top < window.innerHeight
       fixedLayer.classList.toggle('on', onScreen)
@@ -18234,6 +18796,7 @@
     return `${s}s`
   }
   function tickLiveTimers(){
+    if(document.hidden) return  // Hintergrund → kein DOM-Scan pro Sekunde (Akku)
     document.querySelectorAll('.tc-live-timer[data-started]').forEach(el => {
       const start = new Date(el.dataset.started)
       if(isNaN(start)) return
@@ -26784,8 +27347,28 @@
   @media (max-width:820px){
     #dashboard-view.active ~ #coinflip-fab{
       bottom:calc(var(--mob-nav-h) + 16px + env(safe-area-inset-bottom));
+      right:calc(24px + env(safe-area-inset-right));
       z-index:60;
     }
+    /* Kein sticky :hover-Zoom: iOS behält hover bis zum nächsten Tap —
+       der FAB blieb nach jedem Tap vergrößert stehen */
+    #coinflip-fab:hover{transform:none;box-shadow:0 4px 12px rgba(217,119,6,.35),0 2px 4px rgba(0,0,0,.1)}
+    /* Sheet-Optik wie alle anderen Modals — die Sheet-Regeln sind auf
+       #dashboard-view gescopt, dieses Modal liegt als body-Kind daneben */
+    #coinflip-modal{align-items:flex-end;padding:0}
+    #coinflip-modal .cf-content{
+      width:100%;min-width:0;
+      border-radius:18px 18px 0 0;
+      padding:20px 16px calc(18px + env(safe-area-inset-bottom));
+    }
+    #coinflip-modal .cf-content::before{
+      content:'';display:block;width:36px;height:4px;border-radius:999px;
+      background:var(--border,#E5E7EB);margin:0 auto 14px;
+    }
+    #coinflip-modal .cf-stage{height:170px}
+    #coinflip-modal .cf-coin{width:120px;height:120px}
+    #coinflip-modal .cf-face{font-size:40px}
+    #coinflip-modal .cf-actions .cf-btn{flex:1;padding:12px 14px}
   }
 
   #coinflip-modal {
