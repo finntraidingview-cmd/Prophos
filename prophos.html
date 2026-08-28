@@ -18563,41 +18563,28 @@
       _pfSet('m5run', 'err', 'Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten.')
       hardFail = true
     } else {
-      // Algo-Handel BEIDER Terminals (18.08.2026, Finns Fund: Algo war im
-      // Hedge-Terminal aus, die Order lief trotzdem und blieb ungehedged —
-      // retcode=10027 im Copier-Log). Master-Zustand kommt aus dem EA-Snapshot
-      // (v4), Hedge live aus dem Copier. null = altes EA, nicht prüfbar → kein
-      // Block, nur bei explizitem false.
+      // NUR der HEDGE-Algo ist relevant (28.08.2026, Finns Fund: der frühere
+      // MASTER-Algo-Check meldete oft fälschlich „aus" und blockierte den Trade,
+      // obwohl der Knopf grün war — Toggle behob es). Warum der Master-Algo NICHT
+      // geprüft werden darf:
+      //  · Der Order-Bot platziert die Master-Order per F9-KLICK = manuelle Order
+      //    (Reason=CLIENT). Die läuft IMMER, auch bei ausgeschaltetem „Algo
+      //    Trading" — der Knopf betrifft nur EA-/Skript-Auto-Orders.
+      //  · Das Lese-EA braucht kein Algo (schreibt nur Dateien); der README
+      //    empfiehlt sogar, Master-Algo AUS zu lassen.
+      //  · TERMINAL_TRADE_ALLOWED (was der EA für master_algo liest) ist kurz
+      //    nach dem Terminal-Start unzuverlässig (false trotz grünem Knopf) —
+      //    exakt Finns Symptom.
+      // Gehedged wird per API auf dem HEDGE-Terminal — DORT ist Algo Pflicht
+      // (retcode 10027 sonst, Finns eigentlicher 18.08.-Fund). Der Copier liest
+      // hedge_algo live aus terminal_info, stabil (kein Snapshot-Timing).
       const sAlgo = route.inst.status || {}
-      const algoAus = []
-      // Bei eingefrorenem Snapshot (note gesetzt) KEIN Algo-Urteil — die
-      // Werte waeren alt (18.08.2026, The5ers-Fund: 'Algo AUS'-Meldung fuer
-      // ein Terminal, das gar nicht mehr offen war). Den Zustand meldet dann
-      // der Terminal+EA-Schritt.
-      if(sAlgo.master_algo === false && !sAlgo.note) algoAus.push('MASTER-Terminal')
-      if(sAlgo.hedge_algo === false) algoAus.push('HEDGE-Terminal')
-      if(algoAus.length){
-        // Direkt-Fix-Button (25.08.2026, Finns Wunsch: 'ich habe tausend Ordner —
-        // ich will per Klick ins RICHTIGE Terminal'): öffnet/front das Master-
-        // Terminal (seit .88 kommt das Fenster wirklich nach vorn), Algo-Knopf
-        // schalten, dann „Erneut versuchen". Fürs Hedge-Terminal gibt es keinen
-        // Start-Endpunkt — das startet der Copier selbst.
-        const algoFixBtn = algoAus.includes('MASTER-Terminal')
-          ? `<br><button class="btn btn-primary pf-fix-btn" id="pf-fix-algo" style="padding:4px 12px;font-size:11.5px">Master-Terminal öffnen</button>` : ''
-        _pfSet('m5run', 'err', `Algo-Handel ist AUS im ${algoAus.join(' und im ')} — in MT5 oben den „Algo-Handel"-Knopf grün schalten, sonst bleibt die Order ungehedged. Dann „↻ Erneut versuchen".${algoFixBtn}`)
-        document.getElementById('pf-fix-algo')?.addEventListener('click', async () => {
-          const b = document.getElementById('pf-fix-algo')
-          if(b){ b.disabled = true; b.textContent = 'Öffne …' }
-          try{
-            await window.mtcApi(`start-terminal?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
-              headers:{'Content-Type':'application/json'}, body:'{}' })
-          }catch(_){}
-          if(b){ b.disabled = false; b.textContent = 'Master-Terminal öffnen' }
-        })
+      if(sAlgo.hedge_algo === false){
+        _pfSet('m5run', 'err', 'Algo-Handel ist AUS im HEDGE-Terminal — der Copier kann so nicht hedgen. Oben im Hedge-Terminal (Fusion) den „Algo-Handel"-Knopf grün schalten, dann „↻ Erneut versuchen".')
         hardFail = true
       } else {
         _pfSet('m5run', 'ok', 'Copier läuft und liefert frische Daten'
-          + (sAlgo.master_algo === true && sAlgo.hedge_algo === true ? ' · Algo-Handel beidseitig AN.' : '.'))
+          + (sAlgo.hedge_algo === true ? ' · Hedge-Algo AN.' : '.'))
       }
     }
 
