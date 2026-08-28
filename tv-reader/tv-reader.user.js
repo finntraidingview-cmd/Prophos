@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.2.0
+// @version      0.2.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Kein NinjaTrader, kein zweiter Tradovate-Login, keine zusaetzliche Session.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
+// @downloadURL  https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
 // ==/UserScript==
 
 // Warum GM_xmlhttpRequest statt fetch: umgeht CORS/Mixed-Content sauber
@@ -24,15 +26,28 @@
   // Die TradingView-Positionstabelle ist eine ka-table: jede Zelle traegt ein
   // stabiles data-label (Spaltentitel). Daran haengt der Reader auf, NICHT an
   // den gehashten CSS-Klassen (die aendern sich bei TV-Updates).
+  // TV MUSS auf Deutsch laufen: nicht nur die data-labels sind lokalisiert,
+  // auch das ZAHLENFORMAT haengt an der Sprache — der Verbinder parst
+  // deutsche Zahlen (parse_de_zahl: "29.618,25"). Englisch wuerde also still
+  // 0 Positionen liefern und spaeter falsche Preise. Deshalb wird die
+  // englische Positionstabelle ERKANNT und als Warnung gemeldet statt
+  // mitgelesen (Fund 28.08.2026, PC 1: TV lief auf Englisch, Reader stumm
+  // bei offener Position).
+  let spracheFremd = false;
+
   function lesePositionen() {
     const rows = new Map();
+    const labels = new Set();
     document.querySelectorAll('td[data-label]').forEach((td) => {
       const tr = td.closest('tr');
       if (!tr) return;
       if (!rows.has(tr)) rows.set(tr, {});
+      const label = td.getAttribute('data-label');
+      labels.add(label);
       // \s+ -> ' ': TradingView bricht manche Zellen um ("+190,00\nUSD") — Zeilenumbrueche raus
-      rows.get(tr)[td.getAttribute('data-label')] = td.innerText.replace(/\s+/g, ' ').trim();
+      rows.get(tr)[label] = td.innerText.replace(/\s+/g, ' ').trim();
     });
+    spracheFremd = labels.has('Unrealized P&L') && !labels.has('Unrealisierter G&V');
     // Nur echte OFFENE Positionen: die tragen 'Unrealisierter G&V'.
     // Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
     return [...rows.values()]
@@ -81,8 +96,9 @@
       onload: (r) => {
         let an = true;
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
-        if (an) setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
-        else    setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
+        if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
+        else if (spracheFremd) setBadge('⚠ TradingView ist nicht auf Deutsch — Reader liest die deutschen Spalten. Profilmenü → Sprache → Deutsch, dann F5', 'warn');
+        else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),
       ontimeout: () => setBadge(`● Reader · ${positionen.length} Pos · Timeout`, 'warn'),
