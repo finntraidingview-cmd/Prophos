@@ -4321,6 +4321,7 @@
               <th>Nummer</th>
               <th>Zeitraum</th>
               <th class="adm-num">Saldo</th>
+              <th class="adm-num">Betrag</th>
               <th>Erstellt</th>
               <th></th>
             </tr></thead>
@@ -5588,6 +5589,7 @@
                 <div style="font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:4px">Anteil %</div>
                 <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="leer = ohne" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:110px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
               </div>
+              <button class="btn btn-ghost" id="rg-zyklus-btn" title="Von = Tag nach der letzten Rechnung dieser Person, Bis = heute — so wird nichts doppelt abgerechnet" style="height:40px">↻ Aktueller Zyklus</button>
               <button class="btn btn-ghost" id="rg-preview-btn" style="height:40px">Vorschau laden</button>
             </div>
             <div id="rg-preview" hidden style="margin:2px 0 12px">
@@ -5609,6 +5611,7 @@
                 </div>
               </div>
               <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:8px"></div>
+              <div id="rg-p-warn" hidden style="margin-top:8px;padding:9px 12px;border-radius:10px;background:rgba(224,137,31,.09);border:1px solid rgba(224,137,31,.35);font-size:12.5px"></div>
             </div>
             <textarea id="rg-absender" rows="2" placeholder="Absender / Briefkopf (z. B. Firma, Ort — bleibt gemerkt)" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
             <input id="rg-notiz" type="text" maxlength="300" placeholder="Notiz auf der Rechnung (optional, z. B. Auszahlungsweg)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
@@ -5635,6 +5638,7 @@
                   <th>Zeitraum</th>
                   <th class="adm-num">Saldo</th>
                   <th class="adm-num">Anteil</th>
+                  <th class="adm-num">Betrag</th>
                   <th>Erstellt</th>
                   <th></th>
                 </tr></thead>
@@ -7820,9 +7824,18 @@
      * Schreib-Policies. Fehler stehen sichtbar im Tab (nie catch(_){} —
      * Lehre aus dem esc-ReferenceError der Flotte, VERSION .108). */
     let rgOpened = false, rgPreviewOk = false, rgSaldo = null
+    let rgList = []          // zuletzt geladene Rechnungen — für Zyklus + Überschneidungs-Warnung
+    let rgOverlap = []       // Rechnungen, mit denen sich der gewählte Zeitraum überschneidet
     const rgEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR' })
     const rgDatum = iso => iso ? String(iso).slice(0,10).split('-').reverse().join('.') : '–'
     const RG_LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', manual:'Manuell' }
+    // Rechnungsbetrag = Saldo − Personen-Anteil. Neue Rechnungen tragen ihn
+    // eingefroren in summen.betrag; Alt-Zeilen (vor .143) rechnen ihn hier nach.
+    const rgBetragVon = (s, pct) => {
+      if(s?.betrag != null) return Number(s.betrag)
+      if(s?.saldo == null) return null
+      return pct != null ? s.saldo - s.saldo * Number(pct) / 100 : Number(s.saldo)
+    }
 
     async function rgApi(path, opts = {}){
       const { data: { session } } = await supabase.auth.getSession()
@@ -7868,16 +7881,20 @@
       try{
         const d = await rgApi('/admin/rechnungen')
         const list = d.rechnungen || []
+        rgList = list
         rows.innerHTML = list.map(r => {
           const s = r.summen || {}
           const sc = s.saldo > 0.004 ? 'var(--good)' : s.saldo < -0.004 ? 'var(--danger)' : ''
+          const betrag = rgBetragVon(s, r.anteil_pct)
+          const bc = betrag > 0.004 ? 'var(--good)' : betrag < -0.004 ? 'var(--danger)' : ''
           return `<tr>
             <td class="mono">${escapeHtml(r.nummer)}</td>
             <td>${escapeHtml(r.person_name || '')}</td>
             <td>${rgDatum(r.zeitraum_von)} – ${rgDatum(r.zeitraum_bis)}</td>
-            <td class="adm-num" style="font-weight:650;${sc ? 'color:' + sc : ''}">${s.saldo != null ? rgEur.format(s.saldo) : '–'}</td>
+            <td class="adm-num" style="${sc ? 'color:' + sc : ''}">${s.saldo != null ? rgEur.format(s.saldo) : '–'}</td>
             <td class="adm-num">${r.anteil_pct != null
               ? `<span style="font-size:11px;border:1px solid var(--border);border-radius:999px;padding:2px 8px">${Number(r.anteil_pct)} %</span>` : '–'}</td>
+            <td class="adm-num" style="font-weight:700;${bc ? 'color:' + bc : ''}">${betrag != null ? rgEur.format(betrag) : '–'}</td>
             <td style="color:var(--sub)">${rgDatum(r.created_at)}</td>
             <td style="text-align:right"><button class="btn btn-ghost rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
           </tr>`
@@ -7916,6 +7933,17 @@
             `${RG_LBL[k] || k}: ${Number(v).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })} ${c === 'EUR' ? '€' : c}`
           ).join(' · ')
         ).join(' · ') || 'Keine Buchungen im Zeitraum.'
+        // Doppel-Abrechnungs-Schutz: überschneidet sich der Zeitraum mit einer
+        // bestehenden Rechnung derselben Person, laut warnen (Info, kein Block —
+        // z. B. eine bewusst korrigierte Neu-Rechnung bleibt möglich).
+        rgOverlap = rgList.filter(r => String(r.user_id) === uid && r.zeitraum_von <= bis && r.zeitraum_bis >= von)
+        const warn = $('rg-p-warn')
+        if(rgOverlap.length){
+          warn.hidden = false
+          warn.textContent = `⚠ Zeitraum überschneidet sich mit ${rgOverlap.map(r => `${r.nummer} (${rgDatum(r.zeitraum_von)} – ${rgDatum(r.zeitraum_bis)})`).join(', ')} — diese Buchungen wären doppelt abgerechnet. Tipp: „↻ Aktueller Zyklus".`
+        } else {
+          warn.hidden = true
+        }
         rgPreviewOk = true
         $('rg-create-btn').disabled = false
         msg.textContent = ''
@@ -7923,6 +7951,27 @@
         msg.textContent = (e.message || e)
         console.warn('[rechnungen] vorschau:', e)
       }
+    }
+
+    // „Aktueller Zyklus" (28.08.2026, Finns Wunsch — wie der Zyklus in Finanzen):
+    // Von = Tag nach der letzten Rechnung dieser Person, Bis = heute. So schließt
+    // jede Rechnung nahtlos an die vorige an und nichts wird doppelt abgerechnet.
+    function rgZyklus(){
+      const uid = $('rg-person').value
+      const msg = $('rg-msg')
+      msg.style.color = ''
+      if(!uid){ msg.textContent = 'Erst Person wählen.'; return }
+      const letzte = rgList.filter(r => String(r.user_id) === uid).map(r => r.zeitraum_bis).sort().pop()
+      if(letzte){
+        const d = new Date(letzte + 'T00:00:00Z')
+        d.setUTCDate(d.getUTCDate() + 1)
+        $('rg-von').value = d.toISOString().slice(0, 10)
+        msg.textContent = `Zyklus ab ${rgDatum($('rg-von').value)} — letzte Rechnung lief bis ${rgDatum(letzte)}.`
+      } else {
+        msg.textContent = 'Noch keine Rechnung für diese Person — Zeitraum frei wählen.'
+      }
+      $('rg-bis').value = new Date().toISOString().slice(0, 10)
+      rgPreviewOk = false; $('rg-create-btn').disabled = true; $('rg-preview').hidden = true
     }
 
     // Anteils-Zeile unter dem Saldo-KPI — rechnet live mit, wenn Finn den
@@ -7952,7 +8001,10 @@
       if(anteil !== null && (isNaN(anteil) || anteil < 0 || anteil > 100)){
         msg.textContent = 'Anteil muss zwischen 0 und 100 liegen (oder leer bleiben).'; return
       }
-      if(!confirm(`Rechnung für ${name} über ${rgDatum(von)} – ${rgDatum(bis)} erstellen?\nDer Datensatz wird dabei eingefroren.`)) return
+      const overlapTxt = rgOverlap.length
+        ? `\n\n⚠ ACHTUNG: Zeitraum überschneidet sich mit ${rgOverlap.map(r => r.nummer).join(', ')} — Buchungen wären doppelt abgerechnet!`
+        : ''
+      if(!confirm(`Rechnung für ${name} über ${rgDatum(von)} – ${rgDatum(bis)} erstellen?\nDer Datensatz wird dabei eingefroren.${overlapTxt}`)) return
       $('rg-create-btn').disabled = true
       msg.style.color = ''
       msg.textContent = 'Erstelle…'
@@ -8040,13 +8092,17 @@
       $('rg-rows')?.addEventListener('click', ev => {
         const b = ev.target.closest('.rg-pdf'); if(b) rgOpenPdf(b.dataset.id, b)
       })
-      // Person/Zeitraum nach der Vorschau geändert ⇒ Vorschau ungültig — sonst
-      // friert die Rechnung andere Daten ein, als der Admin gesehen hat.
+      // Person/Zeitraum nach der Vorschau geändert ⇒ Vorschau ungültig UND weg —
+      // eine sichtbare alte Vorschau zur neuen Auswahl hat Finn beim ersten Test
+      // sofort verwirrt (Pascal gewählt, Test-Zahlen standen noch da).
       for(const id of ['rg-person', 'rg-von', 'rg-bis']){
-        $(id)?.addEventListener('change', () => { rgPreviewOk = false; $('rg-create-btn').disabled = true })
+        $(id)?.addEventListener('change', () => {
+          rgPreviewOk = false; $('rg-create-btn').disabled = true; $('rg-preview').hidden = true
+        })
       }
       // Anteil ändert nur den Split, nicht die Daten — rechnet live in der Vorschau mit.
       $('rg-anteil')?.addEventListener('input', rgAnteilLive)
+      $('rg-zyklus-btn')?.addEventListener('click', rgZyklus)
       // Meta-Wallet-Tab (24.08.2026)
       $('wal-refresh')?.addEventListener('click', walRefreshBalances)
       $('wal-person')?.addEventListener('change', walRender)
@@ -21427,17 +21483,22 @@
     if(!panel || !rows || !currentUserId) return
     try{
       const { data, error } = await supabase.from('rechnungen')
-        .select('id,nummer,zeitraum_von,zeitraum_bis,created_at,summen:daten->summen')
+        .select('id,nummer,zeitraum_von,zeitraum_bis,anteil_pct,created_at,summen:daten->summen')
         .order('created_at', { ascending:false })
       if(error) throw error
       if(!data || !data.length){ panel.hidden = true; return }
       rows.innerHTML = data.map(r => {
         const s = r.summen || {}
         const sc = s.saldo > 0.004 ? 'var(--good)' : s.saldo < -0.004 ? 'var(--danger)' : ''
+        // Rechnungsbetrag: eingefroren in summen.betrag (ab .143), Alt-Zeilen nachrechnen
+        const betrag = s.betrag != null ? Number(s.betrag)
+          : (s.saldo != null ? (r.anteil_pct != null ? s.saldo - s.saldo * Number(r.anteil_pct) / 100 : Number(s.saldo)) : null)
+        const bc = betrag > 0.004 ? 'var(--good)' : betrag < -0.004 ? 'var(--danger)' : ''
         return `<tr>
           <td class="mono">${escapeHtml(r.nummer)}</td>
           <td>${finFmtDate(r.zeitraum_von)} – ${finFmtDate(r.zeitraum_bis)}</td>
-          <td class="adm-num" style="font-weight:650;${sc ? 'color:' + sc : ''}">${s.saldo != null ? finFmt(s.saldo) : '–'}</td>
+          <td class="adm-num" style="${sc ? 'color:' + sc : ''}">${s.saldo != null ? finFmt(s.saldo) : '–'}</td>
+          <td class="adm-num" style="font-weight:700;${bc ? 'color:' + bc : ''}">${betrag != null ? finFmt(betrag) : '–'}</td>
           <td style="color:var(--sub)">${finFmtDate(r.created_at)}</td>
           <td style="text-align:right"><button class="btn btn-ghost fin-rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
         </tr>`

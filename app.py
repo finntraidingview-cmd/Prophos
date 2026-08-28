@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-28.2"
+APP_BUILD = "2026-08-28.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -3380,32 +3380,42 @@ def rechnung_pdf(meta, daten):
     W = doc.width
     el = []
 
-    # ── Kopf ──
+    # ── Kopf: Titel links, Absender-Briefkopf rechts ──
     absender = (meta.get("absender") or "").strip()
     kopf_r = Paragraph(esc(absender).replace("\n", "<br/>"), st_sub) if absender else Paragraph("", st_sub)
-    el.append(Table([[Paragraph("ABRECHNUNG", st_h1), kopf_r]],
+    el.append(Table([[Paragraph("RECHNUNG", st_h1), kopf_r]],
                     colWidths=[W*0.55, W*0.45],
                     style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                       ("ALIGN", (1, 0), (1, 0), "RIGHT"),
                                       ("LEFTPADDING", (0, 0), (-1, -1), 0),
                                       ("RIGHTPADDING", (0, 0), (-1, -1), 0)])))
-    el.append(Spacer(0, 6))
+    el.append(Spacer(0, 14))
+
+    # ── Anschriftenfeld links, Rechnungs-Meta rechts — klassisches Rechnungs-Layout ──
     von_de = ".".join(reversed(meta["von"].split("-")))
     bis_de = ".".join(reversed(meta["bis"].split("-")))
+    empf = Paragraph(
+        "<font color='#6b7080' size='7.5'>RECHNUNG AN</font><br/>"
+        + f"<font size='11'><b>{esc(meta['person_name'])}</b></font>"
+        + (f"<br/><font color='#6b7080'>{esc(meta['person_mail'])}</font>" if meta.get("person_mail") else ""),
+        st_txt)
     meta_rows = [
         ["Rechnungs-Nr.", meta["nummer"]],
-        ["Empfänger", meta["person_name"] + (f"  ·  {meta['person_mail']}" if meta.get("person_mail") else "")],
-        ["Zeitraum", f"{von_de} – {bis_de}"],
-        ["Erstellt am", time.strftime("%d.%m.%Y")],
+        ["Rechnungsdatum", time.strftime("%d.%m.%Y")],
+        ["Leistungszeitraum", f"{von_de} – {bis_de}"],
     ]
-    el.append(Table([[Paragraph(f"<font color='#6b7080'>{k}</font>", st_txt), Paragraph(esc(v), st_txt)]
-                     for k, v in meta_rows],
-                    colWidths=[W*0.22, W*0.78],
-                    style=TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0),
-                                      ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                                      ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                                      ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)])))
-    el.append(Spacer(0, 4))
+    meta_tbl = Table([[Paragraph(f"<font color='#6b7080'>{k}</font>", st_txt), Paragraph(esc(v), st_txt)]
+                      for k, v in meta_rows],
+                     colWidths=[W*0.20, W*0.25],
+                     style=TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                       ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                       ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                                       ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]))
+    el.append(Table([[empf, meta_tbl]], colWidths=[W*0.55, W*0.45],
+                    style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                      ("RIGHTPADDING", (0, 0), (-1, -1), 0)])))
+    el.append(Spacer(0, 8))
     el.append(HRFlowable(width="100%", thickness=0.8, color=INK))
 
     def tabelle(head, rows, widths, aligns):
@@ -3471,8 +3481,8 @@ def rechnung_pdf(meta, daten):
     else:
         el.append(Paragraph("Keine Buchungen im Zeitraum.", st_txt))
 
-    # ── Summen ──
-    el.append(Paragraph("3 · SUMMEN", st_cap))
+    # ── Abrechnung: Summen je Art → Saldo → Anteil → RECHNUNGSBETRAG ──
+    el.append(Paragraph("3 · ABRECHNUNG", st_cap))
     srows = []
     for kind in ("payout", "account_purchase", "live_pnl", "manual"):
         for cur, v in sorted((s["je_art"].get(kind) or {}).items()):
@@ -3481,8 +3491,12 @@ def rechnung_pdf(meta, daten):
     anteil = meta.get("anteil_pct")
     if anteil is not None:
         a_amt = s["saldo"] * float(anteil) / 100.0
-        srows.append([f"Anteil {meta['person_name']} ({float(anteil):g} %)", _rg_fmt(a_amt, "€")])
-        srows.append([f"Verbleibt ({100 - float(anteil):g} %)", _rg_fmt(s["saldo"] - a_amt, "€")])
+        betrag = s["saldo"] - a_amt
+        srows.append([f"abzüglich Anteil {meta['person_name']} ({float(anteil):g} %)", _rg_fmt(-a_amt, "€")])
+        betrag_lbl = f"RECHNUNGSBETRAG ({100 - float(anteil):g} % vom Zeitraum-Saldo)"
+    else:
+        betrag = s["saldo"]
+        betrag_lbl = "RECHNUNGSBETRAG (Zeitraum-Saldo)"
     n = len(srows)
     stt = Table(srows, colWidths=[W*0.7, W*0.3], style=TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
@@ -3493,11 +3507,23 @@ def rechnung_pdf(meta, daten):
         ("LEFTPADDING", (0, 0), (-1, -1), 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ("LINEBELOW", (0, 0), (-1, -2), 0.3, LINE),
-        ("FONTNAME", (0, n - 1 - (2 if anteil is not None else 0)), (-1, n - 1), "Helvetica-Bold"),
-        ("LINEABOVE", (0, n - 1 - (2 if anteil is not None else 0)), (-1, n - 1 - (2 if anteil is not None else 0)), 0.8, INK),
+        ("FONTNAME", (0, n - 1 - (1 if anteil is not None else 0)), (-1, n - 1 - (1 if anteil is not None else 0)), "Helvetica-Bold"),
+        ("LINEABOVE", (0, n - 1 - (1 if anteil is not None else 0)), (-1, n - 1 - (1 if anteil is not None else 0)), 0.8, INK),
         ("TEXTCOLOR", (1, 0), (1, -1), INK),
     ]))
     el.append(stt)
+    el.append(Spacer(0, 10))
+    # Der Betrag, um den es geht — als hervorgehobener Kasten, wie auf einer echten Rechnung.
+    el.append(Table([[Paragraph(f"<b>{esc(betrag_lbl)}</b>", ParagraphStyle("bl", fontName="Helvetica-Bold", fontSize=9.5, leading=13, textColor=INK)),
+                      Paragraph(f"<b>{esc(_rg_fmt(betrag, '€'))}</b>", ParagraphStyle("bv", fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=INK, alignment=2))]],
+                    colWidths=[W*0.62, W*0.38],
+                    style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), ZEBRA),
+                                      ("BOX", (0, 0), (-1, -1), 0.8, INK),
+                                      ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                      ("TOPPADDING", (0, 0), (-1, -1), 9),
+                                      ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                                      ("RIGHTPADDING", (0, 0), (-1, -1), 10)])))
 
     if (meta.get("notiz") or "").strip():
         el.append(Paragraph("NOTIZ", st_cap))
@@ -3560,6 +3586,12 @@ def admin_rechnung_create():
             return jsonify({"error": "anteil_pct muss zwischen 0 und 100 liegen"}), 400
     try:
         daten = rechnung_daten(uid, von, bis)
+        # Rechnungsbetrag mit einfrieren (28.08.2026): Saldo minus Personen-Anteil —
+        # das ist die Zahl, die auf der Rechnung steht, und die Listen zeigen sie mit.
+        saldo = daten["summen"]["saldo"]
+        anteil_amt = round(saldo * anteil / 100.0, 2) if anteil is not None else None
+        daten["summen"]["anteil_amt"] = anteil_amt
+        daten["summen"]["betrag"] = round(saldo - (anteil_amt or 0.0), 2)
         # Fortlaufende Nummer pro Jahr — ein Admin, keine Race-Gefahr; die
         # unique-Constraint auf nummer fängt den theoretischen Doppelfall laut ab.
         year = time.strftime("%Y")
