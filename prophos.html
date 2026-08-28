@@ -12107,7 +12107,7 @@
   function dupLotsHasOpenPlan(){
     let _tp; try { _tp = tradePlans } catch(_){ return false }
     return (_tp || []).some(p =>
-      p.status === 'open' && p.route !== 'mt5'
+      p.status === 'open' && p.route !== 'mt5' && p.route !== 'tvplus'
       && !(typeof planMirrorRoute === 'function' && planMirrorRoute(p))
       && atGetDupId(p.slaveAccountId)
     )
@@ -12142,7 +12142,7 @@
   // aktualisieren kann, ohne die ganze Karte neu zu rendern (Muster mt5LivePnlInner).
   function dupLiveLotsInner(p){
     try{
-      if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+      if(!p || p.status !== 'open' || p.route === 'mt5' || p.route === 'tvplus') return ''
       if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
       if(!Array.isArray(dupLots.positions) || (Date.now() - dupLots.fetchedAt) > dupLots.FRESH_MS) return ''
       const dupSlaveId  = atGetDupId(p.slaveAccountId)
@@ -12191,7 +12191,7 @@
   function dupLiveLotsHtml(p){
     // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
     // dem ersten Fetch — der Ticker füllt den Platzhalter nach (Muster mt5LivePnlHtml).
-    if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+    if(!p || p.status !== 'open' || p.route === 'mt5' || p.route === 'tvplus') return ''
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
     return `<span data-duplots="${escapeHtml(String(p.id))}">${dupLiveLotsInner(p)}</span>`
   }
@@ -13571,7 +13571,9 @@
 
       // MT5-Routen-Pläne (15.08.2026) gehören der MT5-Zustandsmaschine (mt5PlanPoll),
       // nicht Duplikum — gleiche Logik wie der Mirror-Skip eine Zeile drüber.
-      if(plan.route === 'mt5') continue
+      // Echo-+-Pläne (28.08.2026) genauso: die laufen über den TV-Reader, der
+      // Duplikum-Count-Fallback würde sie fälschlich beenden.
+      if(plan.route === 'mt5' || plan.route === 'tvplus') continue
 
       // Slave UND Master via External ID (dupGetLinks) auflösen
       const dupSlaveId  = atGetDupId(plan.slaveAccountId)
@@ -14021,7 +14023,8 @@
       if(isMirror(plan)) continue
       // MT5-Routen-Pläne (15.08.2026): gehören der MT5-Zustandsmaschine des
       // aktiven lokalen Profils (mt5PlanPoll), nie dem Duplikum-Wächter.
-      if(plan.route === 'mt5') continue
+      // Echo-+-Pläne (28.08.2026) ebenso — TV-Reader-Welt, kein Duplikum.
+      if(plan.route === 'mt5' || plan.route === 'tvplus') continue
       const dupSlaveId  = dupIdOf(plan.slaveAccountId)
       const dupMasterId = dupIdOf(plan.masterAccountId)
       if(!dupSlaveId) continue
@@ -18882,6 +18885,9 @@
             ${(p.route === 'mt5' && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
+            ${p.route === 'tvplus'
+              ? `<span class="tc2-chip" style="background:rgba(124,58,237,.12);color:#7C3AED" title="Echo + — Order läuft von Hand in TradingView, Echo hedgt automatisch">Echo +</span>`
+              : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
         </div>
@@ -19479,6 +19485,14 @@
     // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
     // Fallback für Alt-Pläne ohne gesetzte Route.
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
+
+    // Echo + (28.08.2026, Etappe 2): „Starten" kommt erst mit dem TV-Puls —
+    // bis dahin wird die Order von Hand in TradingView platziert, der Reader
+    // sieht sie und Echo hedgt. NIE in den Duplikum-Preflight durchfallen.
+    if(plan.route === 'tvplus'){
+      if(typeof atToast === 'function') atToast('Echo-+-Plan: Order von Hand in TradingView platzieren — Echo hedgt automatisch. „Starten" per Puls kommt als nächste Ausbaustufe.', 'start')
+      return
+    }
 
     // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
     // Duplikum-Checks wären hier sinnlos. Routen-Erkennung: planMirrorRoute().
@@ -20239,6 +20253,15 @@
   let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
 
+  // Echo + (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
+  // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
+  // getrieben aus den Settings statt Hardcode-Liste; neue Firma dort anlegen
+  // reicht, damit ihre Accounts im Echo-+-Master-Dropdown auftauchen.
+  function tpFirmIstFutures(firm){
+    try{ return (getCustomFirms() || []).some(f => f && f.name === firm && f.unit === 'Kontrakte') }
+    catch(_){ return false }
+  }
+
   function tpRouteUpdateSeg(){
     document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus')
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
@@ -20246,31 +20269,28 @@
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
     const sb = document.getElementById('tradePlanSaveStart')
-    if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →' : 'Speichern & Starten →'
-    // Echo +: reine Info-Route (28.08.2026) — geplant/gestartet wird hier
-    // nichts, du tradest manuell in TradingView und Echo hedgt automatisch.
-    // Beide Speichern-Knöpfe ehrlich sperren statt still fehlschlagen lassen;
-    // die Box erklärt den Weg und verlinkt die Echo-+-Ansicht.
+    if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →'
+      : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
+    // Echo + ist jetzt eine ECHTE Plan-Route (28.08.2026, Etappe 2): Master =
+    // Futures-Account mit External ID, Slave fix = Hedge des PCs. „Starten"
+    // kommt erst mit dem TV-Puls (Etappe 3) — bis dahin wird die Order von
+    // Hand in TradingView platziert und Echo hedgt automatisch; die Box
+    // erklärt genau das.
     const tvplus = _tpRoute === 'tvplus'
     const info = document.getElementById('tp-route-tvplus-info')
     if(info){
       info.style.display = tvplus ? '' : 'none'
       if(tvplus && !info.innerHTML){
-        info.innerHTML = '<b>Echo +</b> läuft ohne Trade-Plan: Du tradest <b>manuell in TradingView</b> — '
-          + 'der Reader liest die Position direkt aus dem Browser, der Verbinder speist sie als Master ein, '
-          + 'und Echo hedgt sie automatisch über die tvplus-Instanz (immer scharf). '
-          + 'Planen und „Starten" aus Prophos gibt es auf diesem Weg noch nicht — Speichern ist deshalb gesperrt. '
+        info.innerHTML = '<b>Echo +</b>: Master ist ein <b>Futures-Account</b> (Firm mit Kontrakte-Spec, External ID nötig), '
+          + 'der Slave ist fix der Hedge dieses PCs — wie bei Echo. Nach dem Speichern platzierst du die Order '
+          + '<b>von Hand in TradingView</b>; der Reader sieht sie und Echo hedgt automatisch. '
+          + '„Starten" per Puls kommt als nächste Ausbaustufe. '
           + '<button type="button" class="btn btn-ghost" id="tp-route-tvplus-link" style="margin-top:8px;padding:5px 10px;font-size:12px;display:block">→ Zur Echo-+-Ansicht</button>'
         document.getElementById('tp-route-tvplus-link')?.addEventListener('click', () => {
           document.getElementById('tradePlanModal')?.classList.remove('open')
           switchView('echoplus')
         })
       }
-    }
-    const saveBtn = document.getElementById('tradePlanSave')
-    for(const b of [sb, saveBtn]){
-      if(b){ b.disabled = tvplus
-             b.title = tvplus ? 'Echo-+-Trades werden direkt in TradingView platziert — es gibt keinen Plan zu speichern.' : '' }
     }
     // Bei fixem MT5-Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren
     const fixed = _tpRoute === 'mt5'
@@ -21295,7 +21315,7 @@
     if(startBtn) startBtn.style.display = (!isEdit || _editPlan?.status === 'planned') ? '' : 'none'
 
     // Routen-Regler initialisieren: beim Bearbeiten aus dem Plan, sonst letzte Wahl
-    _tpRoute = _editPlan ? (_editPlan.route === 'mt5' ? 'mt5' : 'dup')
+    _tpRoute = _editPlan ? (['mt5', 'tvplus'].includes(_editPlan.route) ? _editPlan.route : 'dup')
                          : (['mt5', 'tvplus'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     tpRouteUpdateSeg()
@@ -21464,6 +21484,16 @@
               const _lg = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
               if(!_lg || !_mt5LokalMasters.has(String(_lg))) return false
             }
+          } else if(_tpRoute === 'tvplus'){
+            // Echo + (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
+            // MIT External ID — die ID ist später das Konto-Matching im
+            // TradingView-Panel. Slave fix = Hedge des PCs, wie beim MT5-Weg.
+            if(role === 'master'){
+              if(!tpFirmIstFutures(a.firm)) return false
+              if(!String(a.externalId || '').trim()) return false
+              if(_tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
+            }
+            if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
           } else {
             if(!_dupIds.has(String(a.id))) return false
           }
@@ -21471,7 +21501,7 @@
         // Beim fixen MT5-Slave die (versteckten) Firmen-/Typ-Filter überspringen
         // (Review-Fund 15.08.2026): ein im dup-Modus gesetzter Filter würde sonst
         // unsichtbar den Hedge ausfiltern → leeres UND gesperrtes Select.
-        const skipFilters = role === 'slave' && _tpRoute === 'mt5'
+        const skipFilters = role === 'slave' && (_tpRoute === 'mt5' || _tpRoute === 'tvplus')
         if(!skipFilters && firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
         if(!skipFilters && typeFilter && a.type !== typeFilter && !isProtected) return false
         return true
@@ -21638,7 +21668,7 @@
           _tpRoute = r
           localStorage.setItem(TP_ROUTE_LS, r)
           tpRouteApply()
-          if(r === 'mt5' && !_tpMt5HedgeAccId){
+          if((r === 'mt5' || r === 'tvplus') && !_tpMt5HedgeAccId){
             tpResolveMt5Hedge().then(() => {
               // Open-Check wie beim Kick unten — nicht in ein geschlossenes Modal rendern
               if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
@@ -22306,13 +22336,6 @@
     }
     msg('')
 
-    // Echo +: kein Plan-Speichern (28.08.2026) — Riegel doppelt zum disabled-
-    // Knopf, falls der Handler auf anderem Weg feuert (Enter im Formular).
-    if(_tpRoute === 'tvplus'){
-      msg('Echo-+-Trades werden direkt in TradingView platziert — es gibt (noch) keinen Plan auf diesem Weg.', 'err')
-      return
-    }
-
     if(!masterId || !slaveId){ msg('Master und Slave müssen gewählt sein.', 'err'); return }
     if(masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
     if(!masterRisk || !masterQty || !slaveRisk){
@@ -22357,7 +22380,7 @@
         // die MT5-Engine umleiten, wenn beide Accounts doppelt verlinkt sind.
         const _curPlan = tradePlans.find(x => String(x.id) === String(_editingPlanId))
         if(!_curPlan || _curPlan.status === 'planned'){
-          updateRow.route = (_tpRoute === 'mt5') ? 'mt5' : 'dup'
+          updateRow.route = (_tpRoute === 'mt5' || _tpRoute === 'tvplus') ? _tpRoute : 'dup'
         }
         const { data, error } = await supabase
           .from('trade_plans').update(updateRow).eq('id', _editingPlanId).select('*').single()
@@ -22370,7 +22393,7 @@
         // bewusst weg, damit Edits laufender Pläne die Engine nicht umziehen —
         // beim Neuanlegen ist das Mitschreiben genau richtig). 'dup' explizit,
         // nie null: null = Alt-Plan = Auto-Erkennung darf raten.
-        const insertRow = { ...planToRow(planObj), route: (_tpRoute === 'mt5') ? 'mt5' : 'dup' }
+        const insertRow = { ...planToRow(planObj), route: (_tpRoute === 'mt5' || _tpRoute === 'tvplus') ? _tpRoute : 'dup' }
         const { data, error } = await supabase
           .from('trade_plans').insert(insertRow).select('*').single()
         if(error) throw error
@@ -22620,6 +22643,9 @@
     // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
     if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
+    // Echo + (28.08.2026): eigener P&L-Weg existiert noch nicht — ehrlich null
+    // statt in den Duplikum-Pfad zu fallen (der kennt diese Trades nicht).
+    if(plan.route === 'tvplus') return null
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
     if(mirrorRoute) return _autoPnlFetchMirror(plan, mirrorRoute)
