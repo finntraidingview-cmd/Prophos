@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-28.1"
+APP_BUILD = "2026-08-28.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2942,6 +2942,17 @@ ADMIN_EXCLUDE_EMAILS = {
     if e.strip()
 }
 
+# Wer darf RECHNUNGEN erstellen (28.08.2026)? Erste echte Rollen-Prüfung in
+# Prophos: /admin/overview lässt bewusst jeden eingeloggten User lesen, aber
+# Rechnungen SCHREIBEN dürfen nur die hier gelisteten E-Mails. Ohne gesetzte
+# Railway-Variable ADMIN_EMAILS bleibt das Erstellen komplett gesperrt (503) —
+# lieber ein toter Knopf als eine stille offene Tür.
+ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in (os.environ.get("ADMIN_EMAILS") or "").split(",")
+    if e.strip()
+}
+
 
 def _firm_norm(name):
     """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
@@ -3195,6 +3206,428 @@ def admin_overview():
         return jsonify(admin_build_overview())
     except Exception as e:
         print(f"[admin] ⚠️ overview: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# RECHNUNGEN für die Abrechnungen der gemanagten IDs (28.08.2026, Finns Wunsch).
+# Erstellen nur für Admins (ADMIN_EMAILS), die ID-Person liest ihre Rechnungen
+# per RLS direkt aus Supabase. Der Datensatz wird beim Erstellen EINGEFROREN
+# (jsonb + fertiges PDF) — für die Steuer zählt der Stand zum Erstellzeitpunkt.
+# Zahlen-Doktrin: der Zeitraum-Saldo ist EXAKT die Finanzen-Zyklus-Logik
+# (Summe aller transactions-Beträge, keine Umrechnung — wie finCalcCycleNetto
+# im Frontend). Die Trades-Tabelle ist der Nachweis dazu, keine zweite Rechnung.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _admin_auth():
+    """Gemeinsames Gate der Rechnungs-Endpoints: eingeloggt UND in ADMIN_EMAILS.
+    Gibt (email, None) oder (None, (response, status)) zurück."""
+    if not SUPABASE_SERVICE_KEY:
+        return None, (jsonify({"error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503)
+    token = (request.headers.get("sb-token") or "").strip()
+    if not token:
+        return None, (jsonify({"error": "Nicht angemeldet"}), 401)
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        u = r.json() or {}
+        if r.status_code != 200 or not u.get("id"):
+            return None, (jsonify({"error": "Nicht angemeldet"}), 401)
+        mail = str(u.get("email") or "").strip().lower()
+    except Exception:
+        return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
+    if not ADMIN_EMAILS:
+        return None, (jsonify({"error": "Rechnungen gesperrt — Railway-Variable ADMIN_EMAILS "
+                                        "(komma-getrennte Admin-E-Mails) setzen"}), 503)
+    if mail not in ADMIN_EMAILS:
+        return None, (jsonify({"error": "Nur für Admins"}), 403)
+    return mail, None
+
+
+def sb_insert(table, body):
+    """POST mit return=representation → die eingefügte Zeile zurück.
+    Hier lokal statt bei sb_upsert, um den Wächter-Codepfad nicht anzufassen."""
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", json=body,
+                      headers=_sb_headers("return=representation"), timeout=20)
+    r.raise_for_status()
+    d = r.json()
+    return d[0] if isinstance(d, list) and d else d
+
+
+def _rg_cur_sym(cur):
+    return {"EUR": "€", "USD": "$", "GBP": "£"}.get(str(cur or "").upper(), str(cur or ""))
+
+
+def _rg_fmt(v, sym="€"):
+    """Deutsche Zahlenformatierung: 1.234,56 €. Vorzeichen als echtes Minus."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "–"
+    s = f"{abs(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return ("−" if v < -0.004 else "") + s + " " + sym
+
+
+def rechnung_daten(uid, von, bis):
+    """Alle Positionen einer Person im Zeitraum — die Datenbasis jeder Rechnung.
+
+    trades:    abgeschlossene trade_plans (completed_at zählt). Master-P&L ist $
+               (Prop-Konten laufen in USD, so bucht es auch der Trade-Abschluss),
+               Hedge-P&L trägt die Währung der Slave-Firma (Fusion ⇒ €) — gleiche
+               Regel wie admin_build_overview.
+    buchungen: transactions (occurred_at zählt) — Payouts, Account-Käufe,
+               Live-P&L, Manuell, jede mit ihrer gespeicherten Währung.
+    summen:    je Art pro Währung + saldo = Summe ALLER Buchungen (Zyklus-Logik).
+    """
+    plans = _sb_all("trade_plans", {
+        "select": "id,master_name,master_firm,slave_name,slave_firm,master_pl,slave_pl,blown,completed_at",
+        "user_id": f"eq.{uid}", "status": "eq.completed",
+        "and": f"(completed_at.gte.{von}T00:00:00Z,completed_at.lte.{bis}T23:59:59Z)",
+        "order": "completed_at.asc"})
+    txs = _sb_all("transactions", {
+        "select": "id,kind,amount,currency,occurred_at,account_name,account_firm,notes,auto_generated",
+        "user_id": f"eq.{uid}",
+        "and": f"(occurred_at.gte.{von},occurred_at.lte.{bis})",
+        "order": "occurred_at.asc"})
+
+    trades = []
+    t_master = 0.0
+    t_hedge = {}                                   # Währung -> Summe
+    for p in plans:
+        try: mpl = float(p.get("master_pl")) if p.get("master_pl") is not None else None
+        except (TypeError, ValueError): mpl = None
+        try: spl = float(p.get("slave_pl")) if p.get("slave_pl") is not None else None
+        except (TypeError, ValueError): spl = None
+        h_cur = "EUR" if _firm_norm(p.get("slave_firm")) == "Fusion Markets" else "USD"
+        if mpl is not None: t_master += mpl
+        if spl is not None: t_hedge[h_cur] = t_hedge.get(h_cur, 0.0) + spl
+        trades.append({
+            "datum": (p.get("completed_at") or "")[:10],
+            "master": p.get("master_name") or "", "master_firm": p.get("master_firm") or "",
+            "slave": p.get("slave_name") or "", "slave_firm": p.get("slave_firm") or "",
+            "master_pl": mpl, "slave_pl": spl, "hedge_cur": h_cur,
+            "blown": bool(p.get("blown")),
+        })
+
+    buchungen = []
+    je_art = {}                                    # kind -> {Währung -> Summe}
+    saldo = 0.0                                    # Finanzen-Logik: raw sum, keine Umrechnung
+    for t in txs:
+        try: amt = float(t.get("amount") or 0)
+        except (TypeError, ValueError): continue
+        kind = t.get("kind") or "manual"
+        cur = str(t.get("currency") or "EUR").upper()
+        je_art.setdefault(kind, {})
+        je_art[kind][cur] = je_art[kind].get(cur, 0.0) + amt
+        saldo += amt
+        buchungen.append({
+            "datum": t.get("occurred_at") or "", "kind": kind,
+            "account": t.get("account_name") or "", "firm": t.get("account_firm") or "",
+            "betrag": amt, "cur": cur, "notiz": t.get("notes") or "",
+            "auto": bool(t.get("auto_generated")),
+        })
+
+    return {
+        "trades": trades, "buchungen": buchungen,
+        "summen": {
+            "trades_n": len(trades),
+            "trades_master": round(t_master, 2),
+            "trades_hedge": {k: round(v, 2) for k, v in t_hedge.items()},
+            "je_art": {k: {c: round(v, 2) for c, v in d.items()} for k, d in je_art.items()},
+            "saldo": round(saldo, 2),
+        },
+    }
+
+
+_RG_KIND_LBL = {"payout": "Payout", "account_purchase": "Account-Kauf",
+                "live_pnl": "Live-P&L", "manual": "Manuell"}
+
+
+def rechnung_pdf(meta, daten):
+    """Rendert die Rechnung als PDF (reportlab). Bewusst schlicht: Helvetica,
+    dünne Linien, rechtsbündige Zahlen — „richtig clean" heißt bei Finn die
+    vorhandene Designsprache, keine Verzierung."""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                    TableStyle, HRFlowable)
+
+    INK = colors.HexColor("#16171d")
+    SUB = colors.HexColor("#6b7080")
+    LINE = colors.HexColor("#d9dbe3")
+    ZEBRA = colors.HexColor("#f4f5f8")
+    RED = colors.HexColor("#c02626")
+
+    # Paragraph parst HTML — Nutzertext (Absender, Notiz, Namen) deshalb immer
+    # escapen, sonst bricht ein „&" oder „<" im Firmennamen das Rendering.
+    def esc(s):
+        return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    st_h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=19, leading=23, textColor=INK)
+    st_sub = ParagraphStyle("sub", fontName="Helvetica", fontSize=8.5, leading=12, textColor=SUB)
+    st_cap = ParagraphStyle("cap", fontName="Helvetica-Bold", fontSize=8, leading=11,
+                            textColor=SUB, spaceBefore=14, spaceAfter=4)
+    st_txt = ParagraphStyle("txt", fontName="Helvetica", fontSize=9.5, leading=13.5, textColor=INK)
+    st_fine = ParagraphStyle("fine", fontName="Helvetica", fontSize=7.5, leading=10.5, textColor=SUB)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm,
+                            topMargin=16*mm, bottomMargin=16*mm,
+                            title=f"Abrechnung {meta['nummer']}")
+    W = doc.width
+    el = []
+
+    # ── Kopf ──
+    absender = (meta.get("absender") or "").strip()
+    kopf_r = Paragraph(esc(absender).replace("\n", "<br/>"), st_sub) if absender else Paragraph("", st_sub)
+    el.append(Table([[Paragraph("ABRECHNUNG", st_h1), kopf_r]],
+                    colWidths=[W*0.55, W*0.45],
+                    style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                      ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                                      ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                      ("RIGHTPADDING", (0, 0), (-1, -1), 0)])))
+    el.append(Spacer(0, 6))
+    von_de = ".".join(reversed(meta["von"].split("-")))
+    bis_de = ".".join(reversed(meta["bis"].split("-")))
+    meta_rows = [
+        ["Rechnungs-Nr.", meta["nummer"]],
+        ["Empfänger", meta["person_name"] + (f"  ·  {meta['person_mail']}" if meta.get("person_mail") else "")],
+        ["Zeitraum", f"{von_de} – {bis_de}"],
+        ["Erstellt am", time.strftime("%d.%m.%Y")],
+    ]
+    el.append(Table([[Paragraph(f"<font color='#6b7080'>{k}</font>", st_txt), Paragraph(esc(v), st_txt)]
+                     for k, v in meta_rows],
+                    colWidths=[W*0.22, W*0.78],
+                    style=TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                      ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                      ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                                      ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)])))
+    el.append(Spacer(0, 4))
+    el.append(HRFlowable(width="100%", thickness=0.8, color=INK))
+
+    def tabelle(head, rows, widths, aligns):
+        data = [head] + rows
+        sty = [
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+            ("TEXTCOLOR", (0, 0), (-1, 0), SUB),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+            ("TEXTCOLOR", (0, 1), (-1, -1), INK),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.7, LINE),
+            ("LINEBELOW", (0, 1), (-1, -2), 0.3, LINE),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA]),
+        ]
+        for i, a in enumerate(aligns):
+            sty.append(("ALIGN", (i, 0), (i, -1), a))
+        return Table(data, colWidths=widths, repeatRows=1, style=TableStyle(sty))
+
+    # ── Abschnitt 1: Trades (Nachweis) ──
+    s = daten["summen"]
+    el.append(Paragraph("1 · TRADES IM ZEITRAUM", st_cap))
+    if daten["trades"]:
+        rows = []
+        for t in daten["trades"]:
+            d_de = ".".join(reversed((t["datum"] or "").split("-"))) if t["datum"] else "–"
+            master = t["master"] + (f" ({t['master_firm']})" if t["master_firm"] else "")
+            slave = t["slave"] + (f" ({t['slave_firm']})" if t["slave_firm"] else "")
+            # Kein Unicode-Symbol: Helvetica kennt ⚑ nicht, das würde als
+            # schwarzes Kästchen drucken (im ersten Test-PDF live gesehen).
+            if t["blown"]: master += "  — BLOWN"
+            rows.append([d_de, master,
+                         _rg_fmt(t["master_pl"], "$") if t["master_pl"] is not None else "–",
+                         slave,
+                         _rg_fmt(t["slave_pl"], _rg_cur_sym(t["hedge_cur"])) if t["slave_pl"] is not None else "–"])
+        hedge_sum = "   ".join(_rg_fmt(v, _rg_cur_sym(c)) for c, v in sorted(s["trades_hedge"].items())) or "–"
+        rows.append(["", f"Σ {s['trades_n']} Trades", _rg_fmt(s["trades_master"], "$"), "", hedge_sum])
+        tb = tabelle(["Datum", "Master (Prop)", "P&L Master", "Hedge", "P&L Hedge"],
+                     rows, [W*0.11, W*0.31, W*0.14, W*0.30, W*0.14],
+                     ["LEFT", "LEFT", "RIGHT", "LEFT", "RIGHT"])
+        tb.setStyle(TableStyle([("FONTNAME", (0, len(rows)), (-1, len(rows)), "Helvetica-Bold"),
+                                ("LINEABOVE", (0, len(rows)), (-1, len(rows)), 0.7, INK)]))
+        el.append(tb)
+    else:
+        el.append(Paragraph("Keine abgeschlossenen Trades im Zeitraum.", st_txt))
+
+    # ── Abschnitt 2: Buchungen (die Geld-Wahrheit) ──
+    el.append(Paragraph("2 · BUCHUNGEN IM ZEITRAUM (FINANZEN)", st_cap))
+    if daten["buchungen"]:
+        rows = []
+        for b in daten["buchungen"]:
+            d_de = ".".join(reversed((b["datum"] or "").split("-"))) if b["datum"] else "–"
+            acc = b["account"] + (f" ({b['firm']})" if b["firm"] else "")
+            rows.append([d_de, _RG_KIND_LBL.get(b["kind"], b["kind"]), acc,
+                         (b["notiz"] or "")[:48], _rg_fmt(b["betrag"], _rg_cur_sym(b["cur"]))])
+        el.append(tabelle(["Datum", "Art", "Account", "Notiz", "Betrag"],
+                          rows, [W*0.11, W*0.15, W*0.30, W*0.29, W*0.15],
+                          ["LEFT", "LEFT", "LEFT", "LEFT", "RIGHT"]))
+    else:
+        el.append(Paragraph("Keine Buchungen im Zeitraum.", st_txt))
+
+    # ── Summen ──
+    el.append(Paragraph("3 · SUMMEN", st_cap))
+    srows = []
+    for kind in ("payout", "account_purchase", "live_pnl", "manual"):
+        for cur, v in sorted((s["je_art"].get(kind) or {}).items()):
+            srows.append([_RG_KIND_LBL[kind], _rg_fmt(v, _rg_cur_sym(cur))])
+    srows.append(["Zeitraum-Saldo (Summe aller Buchungen)", _rg_fmt(s["saldo"], "€")])
+    anteil = meta.get("anteil_pct")
+    if anteil is not None:
+        a_amt = s["saldo"] * float(anteil) / 100.0
+        srows.append([f"Anteil {meta['person_name']} ({float(anteil):g} %)", _rg_fmt(a_amt, "€")])
+        srows.append([f"Verbleibt ({100 - float(anteil):g} %)", _rg_fmt(s["saldo"] - a_amt, "€")])
+    n = len(srows)
+    stt = Table(srows, colWidths=[W*0.7, W*0.3], style=TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.3, LINE),
+        ("FONTNAME", (0, n - 1 - (2 if anteil is not None else 0)), (-1, n - 1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, n - 1 - (2 if anteil is not None else 0)), (-1, n - 1 - (2 if anteil is not None else 0)), 0.8, INK),
+        ("TEXTCOLOR", (1, 0), (1, -1), INK),
+    ]))
+    el.append(stt)
+
+    if (meta.get("notiz") or "").strip():
+        el.append(Paragraph("NOTIZ", st_cap))
+        el.append(Paragraph(esc(meta["notiz"].strip()).replace("\n", "<br/>"), st_txt))
+
+    el.append(Spacer(0, 14))
+    el.append(HRFlowable(width="100%", thickness=0.4, color=LINE))
+    el.append(Spacer(0, 4))
+    # &amp; statt & — Paragraph parst HTML-Entities, ein nacktes „P&L" frisst
+    # sonst Zeichen bis zum nächsten Semikolon (im ersten Test-PDF live gesehen).
+    el.append(Paragraph(
+        "Beträge wie in Prophos erfasst, keine Währungsumrechnung. Der Zeitraum-Saldo ist die Summe aller "
+        "Finanzen-Buchungen des Zeitraums (Payouts + Live-P&amp;L ± Manuell − Account-Käufe) — die "
+        "Live-P&amp;L-Buchungen in Abschnitt 2 sind die verbuchte Hedge-Seite der Trades aus Abschnitt 1 "
+        "und stehen deshalb nicht doppelt in den Summen. Datenstand eingefroren am Erstelldatum.", st_fine))
+    el.append(Paragraph(esc(f"Erstellt mit Prophos · {meta['nummer']} · von {meta.get('created_by', '')}"), st_fine))
+
+    doc.build(el)
+    return buf.getvalue()
+
+
+@app.route("/admin/rechnung-daten", methods=["GET", "OPTIONS"])
+def admin_rechnung_daten():
+    """Vorschau-Daten für den Erstellen-Dialog — exakt dieselbe Funktion, die
+    beim Erstellen eingefroren wird: was der Admin sieht, steht auf der Rechnung."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err: return err
+    uid = (request.args.get("uid") or "").strip()
+    von = (request.args.get("von") or "").strip()
+    bis = (request.args.get("bis") or "").strip()
+    if not (uid and von and bis):
+        return jsonify({"error": "uid, von, bis erforderlich"}), 400
+    try:
+        return jsonify(rechnung_daten(uid, von, bis))
+    except Exception as e:
+        print(f"[rechnung] ⚠️ daten: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/rechnung", methods=["POST", "OPTIONS"])
+def admin_rechnung_create():
+    if request.method == "OPTIONS":
+        return "", 200
+    mail, err = _admin_auth()
+    if err: return err
+    b = request.get_json(silent=True) or {}
+    uid = str(b.get("user_id") or "").strip()
+    von = str(b.get("von") or "").strip()
+    bis = str(b.get("bis") or "").strip()
+    if not (uid and von and bis):
+        return jsonify({"error": "user_id, von, bis erforderlich"}), 400
+    anteil = b.get("anteil_pct")
+    if anteil is not None:
+        try:
+            anteil = float(anteil)
+            if not (0 <= anteil <= 100): raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "anteil_pct muss zwischen 0 und 100 liegen"}), 400
+    try:
+        daten = rechnung_daten(uid, von, bis)
+        # Fortlaufende Nummer pro Jahr — ein Admin, keine Race-Gefahr; die
+        # unique-Constraint auf nummer fängt den theoretischen Doppelfall laut ab.
+        year = time.strftime("%Y")
+        vorhanden = sb_select("rechnungen", {"select": "nummer", "nummer": f"like.RG-{year}-%"})
+        n = 0
+        for r in vorhanden:
+            try: n = max(n, int(str(r.get("nummer", "")).rsplit("-", 1)[-1]))
+            except ValueError: pass
+        nummer = f"RG-{year}-{n + 1:04d}"
+        meta = {
+            "nummer": nummer, "von": von, "bis": bis,
+            "person_name": str(b.get("person_name") or "").strip() or uid[:8],
+            "person_mail": str(b.get("person_mail") or "").strip(),
+            "absender": str(b.get("absender") or "").strip(),
+            "notiz": str(b.get("notiz") or "").strip(),
+            "anteil_pct": anteil, "created_by": mail,
+        }
+        pdf = rechnung_pdf(meta, daten)
+        row = sb_insert("rechnungen", {
+            "nummer": nummer, "user_id": uid,
+            "person_name": meta["person_name"], "person_mail": meta["person_mail"],
+            "zeitraum_von": von, "zeitraum_bis": bis,
+            "absender": meta["absender"], "notiz": meta["notiz"] or None,
+            "anteil_pct": anteil, "daten": daten,
+            "pdf_b64": base64.b64encode(pdf).decode("ascii"),
+            "created_by": mail,
+        })
+        return jsonify({"ok": True, "id": row.get("id"), "nummer": nummer,
+                        "saldo": daten["summen"]["saldo"]})
+    except Exception as e:
+        print(f"[rechnung] ⚠️ create: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/rechnungen", methods=["GET", "OPTIONS"])
+def admin_rechnungen_list():
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err: return err
+    try:
+        rows = sb_select("rechnungen", {
+            "select": "id,nummer,user_id,person_name,person_mail,zeitraum_von,zeitraum_bis,anteil_pct,created_by,created_at,daten->summen",
+            "order": "created_at.desc", "limit": "500"})
+        return jsonify({"rechnungen": rows})
+    except Exception as e:
+        print(f"[rechnung] ⚠️ list: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/admin/rechnung-pdf", methods=["GET", "OPTIONS"])
+def admin_rechnung_pdf():
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err: return err
+    rid = (request.args.get("id") or "").strip()
+    if not rid:
+        return jsonify({"error": "id erforderlich"}), 400
+    try:
+        rows = sb_select("rechnungen", {"select": "nummer,pdf_b64", "id": f"eq.{rid}"})
+        if not rows:
+            return jsonify({"error": "Rechnung nicht gefunden"}), 404
+        pdf = base64.b64decode(rows[0]["pdf_b64"])
+        return Response(pdf, mimetype="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="{rows[0]["nummer"]}.pdf"'})
+    except Exception as e:
+        print(f"[rechnung] ⚠️ pdf: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
 
 

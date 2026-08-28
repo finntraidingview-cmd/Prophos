@@ -4305,6 +4305,30 @@
         <div id="fin-history-list" style="display:none;padding:0 18px 16px"></div>
       </div>
 
+      <!-- MEINE RECHNUNGEN (28.08.2026): read-only — erstellt werden Rechnungen
+           nur im Admin-Bereich, RLS zeigt hier ausschließlich die eigenen.
+           Ohne Rechnungen bleibt das Panel komplett unsichtbar. -->
+      <div class="panel" id="fin-rg-panel" hidden style="margin-bottom:14px">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Meine Rechnungen</div>
+            <div class="panel-sub">Abrechnungen als PDF — jede mit allen Trades, Payouts und Kosten des Zeitraums</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="t">
+            <thead><tr>
+              <th>Nummer</th>
+              <th>Zeitraum</th>
+              <th class="adm-num">Saldo</th>
+              <th>Erstellt</th>
+              <th></th>
+            </tr></thead>
+            <tbody id="fin-rg-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- KPIs -->
       <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
         <div class="kpi">
@@ -5114,6 +5138,7 @@
           <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
+          <button class="subtab adm-tab" data-admtab="rg">Rechnungen</button>
         </div>
 
         <!-- ÜBERSICHT: Kapitalverteilung über alle Personen -->
@@ -5533,6 +5558,62 @@
             die Coin-Kurse zum Umrechnen in USDT liefert Binance (Fallback: CoinGecko). Alle Summen sind in USDT.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
           </p>
+        </div>
+
+        <!-- RECHNUNGEN (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs.
+             Erstellen NUR über Railway (Service-Key + ADMIN_EMAILS-Gate) — der
+             ID-User sieht seine Rechnungen read-only im Finanzen-Tab (RLS). -->
+        <div id="adm-pane-rg" hidden>
+          <div class="panel" style="margin-bottom:14px">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Rechnung erstellen</div>
+                <div class="panel-sub">Datensatz wird beim Erstellen eingefroren — jede Rechnung dokumentiert den Stand zum Erstellzeitpunkt</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              <select id="rg-person" class="adm-f" style="flex:1;min-width:160px"><option value="">Person wählen…</option></select>
+              <input id="rg-von" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <input id="rg-bis" type="date" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <input id="rg-anteil" type="number" inputmode="decimal" min="0" max="100" step="1" placeholder="Anteil % (leer = ohne)" title="Anteil der Person am Zeitraum-Saldo — leer lassen für eine Rechnung ohne Split" style="width:170px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+              <button class="btn btn-ghost" id="rg-preview-btn">Vorschau laden</button>
+            </div>
+            <div id="rg-preview" hidden style="margin:4px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg)">
+              <div id="rg-preview-kpis" style="display:flex;gap:22px;flex-wrap:wrap;font-size:13px"></div>
+              <div id="rg-preview-arten" style="font-size:12px;color:var(--sub);margin-top:6px"></div>
+            </div>
+            <textarea id="rg-absender" rows="2" placeholder="Absender / Briefkopf (z. B. Firma, Ort — bleibt gemerkt)" style="width:100%;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink);resize:vertical"></textarea>
+            <input id="rg-notiz" type="text" maxlength="300" placeholder="Notiz auf der Rechnung (optional, z. B. Auszahlungsweg)" style="width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+            <div style="display:flex;gap:10px;align-items:center;margin-top:10px">
+              <button class="btn btn-primary" id="rg-create-btn" disabled>Rechnung erstellen</button>
+              <span id="rg-msg" style="font-size:12.5px;color:var(--sub)"></span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Alle Rechnungen</div>
+                <div class="panel-sub">Jede Person sieht ihre eigenen zusätzlich read-only im Finanzen-Tab</div>
+              </div>
+              <button class="btn btn-ghost" id="rg-refresh" style="padding:7px 12px">↻</button>
+            </div>
+            <div id="rg-list-msg" style="color:var(--sub);font-size:13px;padding:14px 2px">Lade…</div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr>
+                  <th>Nummer</th>
+                  <th>Person</th>
+                  <th>Zeitraum</th>
+                  <th class="adm-num">Saldo</th>
+                  <th class="adm-num">Anteil</th>
+                  <th>Erstellt</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="rg-rows"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -6575,6 +6656,9 @@
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
+    // Eigene Rechnungen beim Betreten der Finanzen laden (28.08.2026) — über
+    // window, weil finRgLoad in der Modul-Reihenfolge erst später definiert wird.
+    if(name === 'payouts' && typeof window.finRgLoad === 'function') window.finRgLoad()
     // Flotte + Aggregator: der Flotten-Block wohnt seit 25.08.2026 abends im
     // TRADES-Tab (Finns Ansage: „Live-Trades ist schon laengst raus") — der
     // 5s-Aggregator (TSX/MetaApi/Duplikium) laeuft, solange Trades offen ist.
@@ -7699,6 +7783,160 @@
       }catch(e){ console.warn('[wallet] delete:', e.message || e) }
     }
 
+    /* ── Rechnungen (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs ──
+     * Erstellen läuft KOMPLETT über Railway (/admin/rechnung*): der Endpoint
+     * prüft die E-Mail des Anfragenden gegen die Railway-Variable ADMIN_EMAILS
+     * (erste echte Rollen-Prüfung in Prophos), rendert das PDF serverseitig
+     * und friert den Datensatz in der Tabelle rechnungen ein. Hier gibt es
+     * bewusst KEINEN Supabase-Schreibpfad — die Tabelle hat keine Client-
+     * Schreib-Policies. Fehler stehen sichtbar im Tab (nie catch(_){} —
+     * Lehre aus dem esc-ReferenceError der Flotte, VERSION .108). */
+    let rgOpened = false, rgPreviewOk = false
+    const rgEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR' })
+    const rgDatum = iso => iso ? String(iso).slice(0,10).split('-').reverse().join('.') : '–'
+
+    async function rgApi(path, opts = {}){
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}${path}`, {
+        cache: 'no-store', ...opts,
+        headers: { 'sb-token': tok, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+      })
+      if(opts.raw) return r
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      return d
+    }
+
+    function rgOpen(){
+      if(!rgOpened){
+        rgOpened = true
+        const heute = new Date()
+        $('rg-von').value = `${heute.getFullYear()}-${String(heute.getMonth() + 1).padStart(2, '0')}-01`
+        $('rg-bis').value = heute.toISOString().slice(0, 10)
+        $('rg-absender').value = localStorage.getItem('prophos_rg_absender') || ''
+        const a = localStorage.getItem('prophos_rg_anteil')
+        if(a) $('rg-anteil').value = a
+      }
+      rgFillPersons()
+      rgLoad()
+    }
+
+    function rgFillPersons(){
+      const sel = $('rg-person'); if(!sel) return
+      const cur = sel.value
+      sel.innerHTML = '<option value="">Person wählen…</option>' +
+        ((admData?.people) || []).map(p =>
+          `<option value="${escapeHtml(p.user_id)}" data-mail="${escapeHtml(p.email || '')}">${escapeHtml(p.name)}</option>`).join('')
+      sel.value = cur
+    }
+
+    async function rgLoad(){
+      const msg = $('rg-list-msg'), rows = $('rg-rows')
+      if(!msg) return
+      msg.style.display = ''; msg.textContent = 'Lade…'
+      try{
+        const d = await rgApi('/admin/rechnungen')
+        const list = d.rechnungen || []
+        rows.innerHTML = list.map(r => {
+          const s = r.summen || {}
+          return `<tr>
+            <td class="mono">${escapeHtml(r.nummer)}</td>
+            <td>${escapeHtml(r.person_name || '')}</td>
+            <td>${rgDatum(r.zeitraum_von)} – ${rgDatum(r.zeitraum_bis)}</td>
+            <td class="adm-num">${s.saldo != null ? rgEur.format(s.saldo) : '–'}</td>
+            <td class="adm-num">${r.anteil_pct != null ? Number(r.anteil_pct) + ' %' : '–'}</td>
+            <td>${rgDatum(r.created_at)}</td>
+            <td style="text-align:right"><button class="btn btn-ghost rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
+          </tr>`
+        }).join('')
+        msg.style.display = list.length ? 'none' : ''
+        if(!list.length) msg.textContent = 'Noch keine Rechnungen.'
+      }catch(e){
+        msg.textContent = 'Rechnungen nicht verfügbar: ' + (e.message || e)
+        console.warn('[rechnungen] liste:', e)
+      }
+    }
+
+    async function rgPreview(){
+      const uid = $('rg-person').value, von = $('rg-von').value, bis = $('rg-bis').value
+      const msg = $('rg-msg')
+      rgPreviewOk = false; $('rg-create-btn').disabled = true
+      if(!uid || !von || !bis){ msg.textContent = 'Person und Zeitraum wählen.'; return }
+      if(von > bis){ msg.textContent = '„Von" liegt nach „Bis".'; return }
+      msg.textContent = 'Lade Vorschau…'
+      try{
+        const d = await rgApi(`/admin/rechnung-daten?uid=${encodeURIComponent(uid)}&von=${von}&bis=${bis}`)
+        const s = d.summen || {}
+        $('rg-preview').hidden = false
+        $('rg-preview-kpis').innerHTML =
+          `<span><b>${s.trades_n ?? 0}</b> Trades</span>` +
+          `<span><b>${(d.buchungen || []).length}</b> Buchungen</span>` +
+          `<span>Zeitraum-Saldo: <b>${rgEur.format(s.saldo || 0)}</b></span>`
+        const LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', manual:'Manuell' }
+        $('rg-preview-arten').textContent = Object.entries(s.je_art || {}).map(([k, je]) =>
+          Object.entries(je).map(([c, v]) => `${LBL[k] || k}: ${Number(v).toFixed(2)} ${c}`).join(' · ')
+        ).join(' · ') || 'Keine Buchungen im Zeitraum.'
+        rgPreviewOk = true
+        $('rg-create-btn').disabled = false
+        msg.textContent = ''
+      }catch(e){
+        msg.textContent = (e.message || e)
+        console.warn('[rechnungen] vorschau:', e)
+      }
+    }
+
+    async function rgCreate(){
+      if(!rgPreviewOk) return
+      const sel = $('rg-person')
+      const uid = sel.value
+      const name = sel.selectedOptions[0]?.textContent || ''
+      const mail = sel.selectedOptions[0]?.dataset.mail || ''
+      const von = $('rg-von').value, bis = $('rg-bis').value
+      const anteilRaw = $('rg-anteil').value.trim()
+      const anteil = anteilRaw === '' ? null : Number(anteilRaw)
+      const msg = $('rg-msg')
+      if(anteil !== null && (isNaN(anteil) || anteil < 0 || anteil > 100)){
+        msg.textContent = 'Anteil muss zwischen 0 und 100 liegen (oder leer bleiben).'; return
+      }
+      if(!confirm(`Rechnung für ${name} über ${rgDatum(von)} – ${rgDatum(bis)} erstellen?\nDer Datensatz wird dabei eingefroren.`)) return
+      $('rg-create-btn').disabled = true
+      msg.textContent = 'Erstelle…'
+      try{
+        localStorage.setItem('prophos_rg_absender', $('rg-absender').value)
+        if(anteilRaw !== '') localStorage.setItem('prophos_rg_anteil', anteilRaw)
+        const d = await rgApi('/admin/rechnung', { method:'POST', body: JSON.stringify({
+          user_id: uid, person_name: name, person_mail: mail, von, bis,
+          anteil_pct: anteil, absender: $('rg-absender').value, notiz: $('rg-notiz').value,
+        })})
+        msg.textContent = `✓ ${d.nummer} erstellt`
+        rgPreviewOk = false
+        rgLoad()
+      }catch(e){
+        msg.textContent = 'Fehler: ' + (e.message || e)
+        $('rg-create-btn').disabled = false
+        console.warn('[rechnungen] erstellen:', e)
+      }
+    }
+
+    async function rgOpenPdf(id, btn){
+      // Als Blob öffnen, nicht als Link: der Endpoint braucht den sb-token-
+      // Header, den ein <a href> nicht tragen kann.
+      const old = btn?.textContent
+      if(btn) btn.textContent = '…'
+      try{
+        const r = await rgApi(`/admin/rechnung-pdf?id=${encodeURIComponent(id)}`, { raw:true })
+        if(!r.ok){ const d = await r.json().catch(() => ({})); throw new Error(d.error || ('HTTP ' + r.status)) }
+        window.open(URL.createObjectURL(await r.blob()), '_blank')
+      }catch(e){
+        alert('PDF nicht ladbar: ' + (e.message || e))
+        console.warn('[rechnungen] pdf:', e)
+      }finally{
+        if(btn) btn.textContent = old
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       if(!$('kasse-unlock')) return
       $('kasse-unlock').addEventListener('click', tryUnlock)
@@ -7723,9 +7961,11 @@
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
+        $('adm-pane-rg').hidden       = name !== 'rg'
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
+        if(name === 'rg')   rgOpen()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
@@ -7739,6 +7979,18 @@
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
+      // Rechnungen-Tab (28.08.2026)
+      $('rg-preview-btn')?.addEventListener('click', rgPreview)
+      $('rg-create-btn')?.addEventListener('click', rgCreate)
+      $('rg-refresh')?.addEventListener('click', rgLoad)
+      $('rg-rows')?.addEventListener('click', ev => {
+        const b = ev.target.closest('.rg-pdf'); if(b) rgOpenPdf(b.dataset.id, b)
+      })
+      // Person/Zeitraum nach der Vorschau geändert ⇒ Vorschau ungültig — sonst
+      // friert die Rechnung andere Daten ein, als der Admin gesehen hat.
+      for(const id of ['rg-person', 'rg-von', 'rg-bis']){
+        $(id)?.addEventListener('change', () => { rgPreviewOk = false; $('rg-create-btn').disabled = true })
+      }
       // Meta-Wallet-Tab (24.08.2026)
       $('wal-refresh')?.addEventListener('click', walRefreshBalances)
       $('wal-person')?.addEventListener('change', walRender)
@@ -21106,6 +21358,55 @@
     finDefaultPct = housePct
     finCloseSettleModal()
     renderFinanzen()
+  })
+
+  /* ── Meine Rechnungen (28.08.2026): read-only für die ID-Person ──
+   * Erstellt werden Rechnungen nur im Admin-Bereich (Railway, ADMIN_EMAILS);
+   * die RLS-Policy auf `rechnungen` zeigt hier ausschließlich die eigenen
+   * Zeilen. Keine Rechnungen (oder Tabelle fehlt) ⇒ Panel bleibt unsichtbar,
+   * Fehler landen sichtbar in der Konsole (nie catch(_){} — Lehre aus .108). */
+  async function finRgLoad(){
+    const panel = document.getElementById('fin-rg-panel')
+    const rows = document.getElementById('fin-rg-rows')
+    if(!panel || !rows || !currentUserId) return
+    try{
+      const { data, error } = await supabase.from('rechnungen')
+        .select('id,nummer,zeitraum_von,zeitraum_bis,created_at,summen:daten->summen')
+        .order('created_at', { ascending:false })
+      if(error) throw error
+      if(!data || !data.length){ panel.hidden = true; return }
+      rows.innerHTML = data.map(r => {
+        const s = r.summen || {}
+        return `<tr>
+          <td class="mono">${escapeHtml(r.nummer)}</td>
+          <td>${finFmtDate(r.zeitraum_von)} – ${finFmtDate(r.zeitraum_bis)}</td>
+          <td class="adm-num">${s.saldo != null ? finFmt(s.saldo) : '–'}</td>
+          <td>${finFmtDate(r.created_at)}</td>
+          <td style="text-align:right"><button class="btn btn-ghost fin-rg-pdf" data-id="${escapeHtml(r.id)}" style="padding:5px 10px;font-size:12px">PDF</button></td>
+        </tr>`
+      }).join('')
+      panel.hidden = false
+    }catch(e){
+      panel.hidden = true
+      console.warn('[rechnungen] eigene:', e.message || e)
+    }
+  }
+  window.finRgLoad = finRgLoad
+
+  document.getElementById('fin-rg-rows')?.addEventListener('click', async ev => {
+    const b = ev.target.closest('.fin-rg-pdf'); if(!b) return
+    const old = b.textContent; b.textContent = '…'
+    try{
+      // pdf_b64 erst beim Klick laden — die Liste bleibt dadurch klein.
+      const { data, error } = await supabase.from('rechnungen')
+        .select('pdf_b64').eq('id', b.dataset.id).single()
+      if(error) throw error
+      const bytes = Uint8Array.from(atob(data.pdf_b64), c => c.charCodeAt(0))
+      window.open(URL.createObjectURL(new Blob([bytes], { type:'application/pdf' })), '_blank')
+    }catch(e){
+      alert('PDF nicht ladbar: ' + (e.message || e))
+      console.warn('[rechnungen] pdf:', e)
+    }finally{ b.textContent = old }
   })
 
   /* ═══════════════════════════════════════════════════════════════════════
