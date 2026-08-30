@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.0
+// @version      0.3.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -275,6 +275,16 @@
 
     return {
       ts: Date.now(),
+      // Seitentitel + Adresse (0.3.1, 30.08.2026): der Puls sucht den
+      // TradingView-Tab in der Chrome-Tableiste. Bis .192 suchte er nach dem
+      // Wort "tradingview" — an Finns PC steht im Tab aber nur
+      // "NQU2026 29.491,75 ▼ −0,69 %", und er fand nichts. Statt zu raten,
+      // sagt die Seite jetzt selbst, wie sie heisst; Puls nimmt daraus den
+      // stabilen Teil (das erste Wort, also das Symbol) als Suchbegriff —
+      // der Preis im Titel tickt sekuendlich, ein Volltext-Vergleich waere
+      // also praktisch nie ein Treffer.
+      titel: document.title || '',
+      url: location.href || '',
       // Selbst-Kalibrierung: Puls rechnet CSS-Pixel in Bildschirm-Pixel um.
       // devicePixelRatio traegt in Chrome BEIDES — Windows-Skalierung und
       // Seiten-Zoom —, deshalb ist es der einzige noetige Faktor; die

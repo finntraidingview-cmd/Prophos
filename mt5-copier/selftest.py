@@ -521,6 +521,18 @@ def main():
         and not order_bot.tv_symbol_passt("MNQ1!", "NQ")
         and not order_bot.tv_symbol_passt("NQZ2026", "MNQ")
         and not order_bot.tv_symbol_passt("", "MNQ"))
+    # Tab-Suchbegriff (30.08.2026, Finns erster Live-Lauf): der Bot suchte den
+    # Tab am Wort 'tradingview' und fand nichts — bei ihm heisst der Tab
+    # 'NQU2026 29.491,75 ▼ −0,69 %'. Jetzt meldet die Seite ihren Titel selbst.
+    chk("TV: Tab-Suchbegriff ist das Symbol, nicht der tickende Preis",
+        order_bot.tv_tab_suchbegriff("NQU2026 29.491,75 ▼ −0,69 %") == "NQU2026"
+        and order_bot.tv_tab_suchbegriff("MNQ1! 1m CME — TradingView") == "MNQ1!"
+        and order_bot.tv_tab_suchbegriff("TradingView — Track All Markets") == "TradingView")
+    chk("TV: Zaehler-Praefixe und Leeres ergeben KEINEN Suchbegriff",
+        order_bot.tv_tab_suchbegriff("(1) NQU2026 29.491,75") == "NQU2026"
+        and order_bot.tv_tab_suchbegriff("") == ""
+        and order_bot.tv_tab_suchbegriff(None) == ""
+        and order_bot.tv_tab_suchbegriff("(3) 7 %") == "")
     chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
         order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
         and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
