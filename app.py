@@ -335,6 +335,22 @@ def local_restart_stack():
                 "taskkill /f /fi \"WINDOWTITLE eq Prophos TV-Verbinder*\" >nul 2>&1\r\n"
                 "taskkill /f /im python.exe >nul 2>&1\r\n"
                 "timeout /t 2 /nobreak >nul\r\n"
+                # start-alles.bat aktualisiert alles ausser sich selbst
+                # (30.08.2026, Finns Ansage "mach alles in start-alles rein"):
+                # eine laufende Batchdatei darf man nicht ueberschreiben, also
+                # kann sie es nicht sein, die sich holt. HIER geht es: dieser
+                # Helfer laeuft aus %TEMP%, und der Kill oben hat gerade alles
+                # beendet -- start-alles.bat ist in diesem Moment garantiert
+                # nicht offen. Damit schliesst sich die letzte Luecke der
+                # Update-Kette. Best effort: schlaegt der Download fehl oder
+                # kommt er zu kurz an, bleibt schlicht der alte Stand.
+                "powershell -NoProfile -Command \"$ProgressPreference='SilentlyContinue';"
+                "try{Invoke-RestMethod 'https://raw.githubusercontent.com/"
+                "finntraidingview-cmd/Prophos/main/mt5-copier/start-alles.bat' "
+                f"-OutFile '{bat}.newh' -TimeoutSec 20}}catch{{}}\" >nul 2>&1\r\n"
+                f"if exist \"{bat}.newh\" for %%F in (\"{bat}.newh\") do "
+                f"if %%~zF GEQ 700 (move /y \"{bat}.newh\" \"{bat}\" >nul)\r\n"
+                f"if exist \"{bat}.newh\" del \"{bat}.newh\" >nul 2>&1\r\n"
                 f"start \"\" \"{bat}\"\r\n")
     DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
