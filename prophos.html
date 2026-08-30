@@ -18025,10 +18025,18 @@
       mt5Baseline: row.mt5_baseline || null,
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
       // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
-      richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null
+      richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null,
+      // Symbol-Override (Migration 2026-08-30, Finns Wunsch: am Wochenende ist
+      // z.B. nur BTC offen — Tests brauchen ein anderes Symbol als das der
+      // Firma). NULL = Standard, Symbol kommt zur Laufzeit aus den Firmen-
+      // Einstellungen. Geschrieben nur vom Order-Popup (Guard eq 'planned') —
+      // deshalb wie route bewusst NICHT in planToRow (Edit darf es nicht killen).
+      masterSymbol: (typeof row.master_symbol === 'string' && row.master_symbol.trim()) ? row.master_symbol.trim() : null
     }
   }
   function planToRow(p){
+    // master_symbol fehlt hier ebenfalls bewusst (30.08.2026): schreibt nur das
+    // Order-Popup mit Status-Guard — ein Modal-Edit darf das Override nicht nullen.
     // route + mt5_baseline hier bewusst NICHT dabei (15.08.2026): planToRow läuft beim
     // Modal-Bearbeiten als update — dieselbe Falle wie beim status-Ausschluss unten
     // (saveTradePlanFromModal): ein Edit während eines laufenden MT5-Trades würde die
@@ -20019,7 +20027,13 @@
       // die Firma, die Presets ihre Symbole; niemand muss Mappings auswendig
       // wissen). Reine Preset-Lookups (dupSymbolsForFirm/dupSlaveSymbolForFirm),
       // kein Duplikum-API-Aufruf.
-      const expSyms = (typeof dupSymbolsForFirm === 'function') ? dupSymbolsForFirm(plan.masterFirm) : []
+      let expSyms = (typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
+      // Symbol-Override am Plan (30.08.2026): weicht das Plan-Symbol vom
+      // Settings-Standard ab (Wochenend-/BTC-Tests), muss das Mapping GENAU
+      // dieses Symbol decken — sonst platziert Puls ein Symbol, das Echo nie
+      // hedgt (stiller No-Hedge, exakt die Fehlerklasse dieses Checks).
+      if(plan.masterSymbol && !expSyms.some(s => String(s).toUpperCase() === plan.masterSymbol.toUpperCase()))
+        expSyms = [plan.masterSymbol, ...expSyms]
       const hedgeSym = (typeof dupSlaveSymbolForFirm === 'function') ? dupSlaveSymbolForFirm(plan.slaveFirm) : null
       const curMap = route.inst.symbol_map || {}
       const missingSyms = expSyms.filter(s => !(s in curMap))
@@ -20548,15 +20562,19 @@
     const msg = document.getElementById('tpOrderMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     const symEl = document.getElementById('tp-order-symbol')
     symEl.value = ''
-    // Symbol IMMER aus den FIRMEN-EINSTELLUNGEN (Finns Ansage 15.08.2026: eine
-    // Quelle, kein Fallback auf die Copier-Karte — genau wie bei Duplikum). Der
-    // Master-Firma ist ihr Symbol dort hinterlegt (FundedNext → NDX100, Fusion
-    // → NAS100). Fehlt es dort, bleibt das Feld leer und der Trade-Precheck
-    // wirft den Fehler — NICHT heimlich von der Karte nachladen.
+    // Symbol: STANDARD aus den FIRMEN-EINSTELLUNGEN (Finns Ansage 15.08.2026:
+    // eine Quelle, kein Fallback auf die Copier-Karte — genau wie bei Duplikum;
+    // FundedNext → NDX100, Fusion → NAS100). Seit 30.08.2026 aber EDITIERBAR
+    // (Finns Wunsch: am Wochenende ist z.B. nur BTC offen — zum Testen/Bugfixen
+    // muss das Symbol abweichen dürfen). Eine Abweichung wandert beim Speichern
+    // als master_symbol an den Plan; steht das Feld auf dem Settings-Symbol,
+    // wird das Override genullt — Settings bleiben der Standard, spätere
+    // Settings-Änderungen greifen dann weiter durch. Fehlt beides, bleibt das
+    // Feld leer und der Trade-Precheck wirft den Fehler.
     const fromSettings = (typeof dupSymbolsForFirm === 'function')
       ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
-    symEl.value = fromSettings.length ? fromSettings[0] : ''
-    symEl.readOnly = fromSettings.length > 0   // Settings sind die Wahrheit — nicht überschreibbar
+    symEl.value = plan.masterSymbol || (fromSettings.length ? fromSettings[0] : '')
+    symEl.readOnly = false   // war bis 30.08.2026 gesperrt, sobald Settings ein Symbol hatten
     // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
     // läuft bei der Master-Firma schon ein Trade der EINGELOGGTEN ID (Duplikium
     // oder Echo; nur-eigene-ID seit 26.08.2026, Filter in firmLiveRichtungen),
@@ -20639,11 +20657,17 @@
     // Risk/Lots-Änderungen die Hedge-Größe nicht stillschweigend desyncen.
     // Status-Guard eq 'planned': läuft der Plan schon, wird nichts überschrieben.
     const neuRisk = autoSltp ? sl : Number(plan.masterRisk)
+    // Symbol-Override (30.08.2026): nur eine ABWEICHUNG vom Settings-Standard
+    // wird am Plan gespeichert — Standardfall bleibt NULL, damit die Firmen-
+    // Einstellungen die eine Quelle bleiben (Ansage 15.08.2026).
+    const stdSym = (((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
     const upd = {
       richtung: _tpOrderDir,
       master_contracts: lots,
       master_tp: autoSltp ? tp : null,
       master_risk: neuRisk,
+      master_symbol: symbol.toUpperCase() === stdSym.toUpperCase() ? null : symbol,
       multiplier: (typeof tpCalcMultiplier === 'function')
         ? tpCalcMultiplier(plan.masterFirm, plan.slaveFirm, neuRisk, lots, Number(plan.slaveRisk))
         : plan.multiplier
@@ -20834,8 +20858,10 @@
     const lots = Number(plan.masterContracts)
     const sl = Number(plan.masterRisk)
     const tp = Number(plan.masterTp)
-    const symbol = ((typeof dupSymbolsForFirm === 'function')
-      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''
+    // Symbol: Override am Plan zuerst (30.08.2026, Wochenend-/BTC-Tests),
+    // sonst wie immer der Settings-Standard der Master-Firma.
+    const symbol = plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
     // TP am Plan = SL/TP automatisch; ohne TP = „Order pur" (Schalter-aus im
     // Order-Popup nullt master_tp) — dieselbe Semantik wie beim lokalen Weg.
     const sltpAn = tp > 0
@@ -21109,8 +21135,11 @@
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'open' || plan.route !== 'mt5') return
     if(_rsAktiv) return   // ein Remote-Lauf zur Zeit (Start ODER Close)
-    const symbol = ((typeof dupSymbolsForFirm === 'function')
-      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''
+    // Symbol: Override am Plan zuerst (30.08.2026) — ein BTC-Testtrade muss
+    // auch über das BTC-Symbol gefunden und geschlossen werden, nicht über
+    // das Settings-Standard-Symbol der Firma.
+    const symbol = plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
     // Live-Schritte im vorhandenen Check-Popup — kein neues Design.
     _pfMt5StopTimer()
     _pfPlanId = null
