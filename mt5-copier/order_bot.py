@@ -1361,22 +1361,50 @@ def modus_tvorder(cmd):
     trail.append(f"Chart zeigt {ziel_sym}")
 
     # --- Schritt 5a: Order-Ticket oeffnen ----------------------------------
+    # TASTE statt Klick (30.08.2026, Finns Fund im TradingView-Kontextmenue:
+    # "Add order on NQU2026 at 29.510,75 …  Shift + T"). Eine Tastenkombination
+    # ist jedem geratenen Knopf-Klick ueberlegen: sie braucht keinen Selektor,
+    # kann nicht danebenklicken und ueberlebt einen TV-Umbau. Genau derselbe
+    # Grund, aus dem der MT5-Puls den Order-Dialog mit F9 oeffnet statt ihn zu
+    # suchen. Der Klick auf den Panel-Knopf bleibt nur der Notweg fuer den
+    # Fall, dass sich die Taste ueberhaupt nicht senden laesst.
     richtung = str(cmd["richtung"]).lower()
-    knopf = _tv_element(bf, "panel", "kaufen" if richtung == "buy" else "verkaufen")
-    if not knopf:
-        return raus(f"{'Kaufen' if richtung == 'buy' else 'Verkaufen'}-Knopf im "
-                    "Handelspanel nicht eindeutig gefunden — Order von Hand "
-                    "platzieren. (Der naechste Versuch bringt einen "
-                    "Kandidaten-Dump mit.)", "ticket")
-    ok, f = _tv_klick(knopf["rect"], bf["geo"], klient(),
-                      "Kaufen" if richtung == "buy" else "Verkaufen", trail)
-    if not ok:
-        return raus(f, "ticket")
-    _warte(0.9, 0.6)
-    bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
-    if not (bf.get("ticket") or {}).get("offen"):
-        return raus("Order-Ticket ging nicht auf — im TradingView nachsehen, ob "
-                    "ein Dialog haengt.", "ticket")
+    geoeffnet = False
+    t_taste = time.time()
+    try:
+        from pywinauto import keyboard
+        keyboard.send_keys("+t")
+        trail.append("Order-Ticket per Shift+T angefordert")
+        _warte(0.9, 0.6)
+        bf = _tv_bf(nach=t_taste + 0.9, timeout=8.0) or bf
+        geoeffnet = bool((bf.get("ticket") or {}).get("offen"))
+        if not geoeffnet:
+            # BEWUSST kein Blind-Klick hinterher: die Taste ist raus, und wenn
+            # das Ticket trotzdem nicht erkannt wird, liegt es viel eher an
+            # meinen geratenen Ticket-Selektoren als daran, dass nichts aufging.
+            # Ein Knopf-Klick obendrauf koennte ein zweites Ticket oeffnen oder
+            # etwas ganz anderes treffen. Also anhalten — der Dump ist scharf.
+            return raus("Shift+T ist raus, aber das Order-Ticket wird nicht "
+                        "erkannt. Steht es offen, liegt es an meinen Ticket-"
+                        "Selektoren, nicht am Oeffnen. Der Kandidaten-Dump ist "
+                        "jetzt 60 s scharf: http://127.0.0.1:8790/bedienfeld "
+                        "abrufen und schicken.", "ticket")
+    except Exception:
+        trail.append("Shift+T liess sich nicht senden — Notweg ueber den Panel-Knopf")
+        knopf = _tv_element(bf, "panel", "kaufen" if richtung == "buy" else "verkaufen")
+        if not knopf:
+            return raus(f"{'Kaufen' if richtung == 'buy' else 'Verkaufen'}-Knopf im "
+                        "Handelspanel nicht eindeutig gefunden, und Shift+T ging "
+                        "auch nicht — Order von Hand platzieren.", "ticket")
+        ok, f = _tv_klick(knopf["rect"], bf["geo"], klient(),
+                          "Kaufen" if richtung == "buy" else "Verkaufen", trail)
+        if not ok:
+            return raus(f, "ticket")
+        _warte(0.9, 0.6)
+        bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
+        if not (bf.get("ticket") or {}).get("offen"):
+            return raus("Order-Ticket ging nicht auf — im TradingView nachsehen, "
+                        "ob ein Dialog haengt.", "ticket")
     trail.append("Order-Ticket offen")
 
     # --- Schritt 5b: Menge, TP, SL -----------------------------------------
