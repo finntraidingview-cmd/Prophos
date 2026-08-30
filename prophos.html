@@ -20037,6 +20037,19 @@
       const hedgeSym = (typeof dupSlaveSymbolForFirm === 'function') ? dupSlaveSymbolForFirm(plan.slaveFirm) : null
       const curMap = route.inst.symbol_map || {}
       const missingSyms = expSyms.filter(s => !(s in curMap))
+      // Ziel-Symbol je fehlender Zeile (30.08.2026, Finns Fund nach dem BTC-Test:
+      // „er denkt BTC → NAS100"). Der Ein-Klick-Fix bot bis eben für JEDES
+      // fehlende Symbol das Index-Symbol der Hedge-Firma an — für die Firmen-
+      // Presets richtig (NDX100 → NAS100 ist dasselbe Instrument, anders
+      // benannt), für ein Override-Symbol grober Unfug: „hedge Bitcoin mit
+      // einer NAS100-Position" ist kein Hedge, sondern eine zweite, völlig
+      // unkorrelierte Wette. Ein Override-Symbol heisst auf der Hedge-Seite
+      // deshalb ZUERST genauso; weicht der Broker im Namen ab (Suffixe wie
+      // 'BTCUSD.r'), wird die Zeile auf der Copier-Karte von Hand korrigiert —
+      // raten wäre hier dasselbe stille Danebenliegen, nur andersherum.
+      const zielSym = s => (plan.masterSymbol
+        && String(s).toUpperCase() === plan.masterSymbol.toUpperCase()) ? s : hedgeSym
+      const fixBar = missingSyms.length && missingSyms.every(s => !!zielSym(s))
       if(!pushRes.ok){
         _pfSet('m5push', 'err', 'Multiplier-Push fehlgeschlagen: ' + escapeHtml(String(pushRes.msg || pushRes.error || 'Fehler')))
         _pfSet('m5term', 'warn', 'Übersprungen — Push fehlgeschlagen.')
@@ -20045,17 +20058,18 @@
         _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber das Symbol-Mapping ist LEER und für „${escapeHtml(String(plan.masterFirm || '—'))}" sind keine Symbole in den Einstellungen hinterlegt — auf der Copier-Karte pflegen (Master-Symbol → Hedge-Symbol).`)
         _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping fehlt.')
         hardFail = true
-      } else if(missingSyms.length && hedgeSym){
+      } else if(fixBar){
         // Fehlende Firmen-Symbole: ein Klick ergänzt sie aus den Presets —
         // gemergt gepusht (save ersetzt die ganze Map), danach läuft die
-        // Checkliste automatisch neu durch.
+        // Checkliste automatisch neu durch. Ziel je Zeile über zielSym (s.o.),
+        // NICHT pauschal das Index-Symbol der Hedge-Firma.
         _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt das Firmen-Symbol' : 'fehlen die Firmen-Symbole'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> („${escapeHtml(String(plan.masterFirm || ''))}") — ohne Mapping hedgt der Copier ${missingSyms.length === 1 ? 'dieses Symbol' : 'diese Symbole'} nicht.<br>
-          <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5sym" style="padding:4px 12px;font-size:11.5px">Mapping ergänzen (${missingSyms.map(s => escapeHtml(s) + ' → ' + escapeHtml(hedgeSym)).join(', ')})</button>`)
+          <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5sym" style="padding:4px 12px;font-size:11.5px">Mapping ergänzen (${missingSyms.map(s => escapeHtml(s) + ' → ' + escapeHtml(zielSym(s))).join(', ')})</button>`)
         document.getElementById('pf-fix-m5sym')?.addEventListener('click', async () => {
           const b = document.getElementById('pf-fix-m5sym')
           if(b){ b.disabled = true; b.textContent = 'ergänze…' }
           const merged = { ...curMap }
-          missingSyms.forEach(s => { merged[s] = hedgeSym })
+          missingSyms.forEach(s => { merged[s] = zielSym(s) })
           const fr = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
             headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol_map: merged }) })
           if(fr.ok){ setTimeout(() => tpPreflightMt5(plan), 300) }
@@ -20739,7 +20753,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-30.186'
+  const OS_TAB_BUILD = '2026-08-30.187'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
