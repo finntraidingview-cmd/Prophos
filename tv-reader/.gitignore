@@ -4,3 +4,6 @@ reader_aus.flag
 __pycache__/
 # PC-eigene Verbinder-Config (Kontonummer/Pfade gehoeren dem PC)
 verbinder.config.json
+# Selbst-Update-Reste (30.08.2026, start-reader.bat/start-verbinder.bat)
+*.newc
+*.prev

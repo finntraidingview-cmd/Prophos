@@ -157,6 +157,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "bis_s": 60})
             return
 
+        # Ab hier gilt: NUR /positions ist ein Positions-Stand (30.08.2026,
+        # Fund an Finns PC). Vorher nahm dieser Handler JEDEN unbekannten Pfad
+        # als Positionsdaten an — ein Userscript 0.3, das an einen alten Server
+        # ohne /bedienfeld sendet, ueberschrieb damit alle 500 ms den echten
+        # Stand mit einem Objekt ohne 'positionen'. Ergebnis: positions.json
+        # meldet "flat", der Verbinder friert nicht ein (die Daten sind ja
+        # frisch!), und der Copier schliesst die Hedges — der schlimmste
+        # denkbare Ausgang, ausgeloest von einer Nachricht, die der Server gar
+        # nicht verstand. Unbekannte Pfade werden jetzt ehrlich abgelehnt.
+        if self.path.rstrip("/") not in ("/positions", ""):
+            self._json(404, {"ok": False, "msg":
+                f"Unbekannter Pfad {self.path!r} — dieser reader-server kennt "
+                "/positions, /schalter, /bedienfeld, /dump-an. Aeltere Version?"})
+            return
+
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
         # (Badge zeigt es), der Stand friert ein — stale != flat.
         if not _an:
