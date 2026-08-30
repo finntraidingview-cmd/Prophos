@@ -1898,7 +1898,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
             if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "echo_pausiert", "msg":
                     "Echo ist pausiert — es wird keine neue Order platziert. Erst oben "
                     "auf Fortsetzen klicken."}, ensure_ascii=False))
             cmd = {"ext_id": str(body.get("ext_id") or "").strip(),
@@ -1922,7 +1923,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not str(c.get("master_terminal_path") or "").strip() and c.get("snapshot_file"):
                     orbit.append(i)
             if len(orbit) != 1:
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "keine_orbit_instanz", "msg":
                     (f"{len(orbit)} Orbit-Copier-Instanzen auf diesem PC gefunden — "
                      "erwartet wird genau eine. Ohne sie bliebe die Order UNGEHEDGET."
                      if orbit else
@@ -1936,7 +1938,8 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 pass
             if not (st.get("running") and age is not None and age <= 15):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "copier_alt", "msg":
                     "Orbit-Copier liefert keine frischen Daten — die Order wuerde "
                     "UNGEHEDGET bleiben. Erst den Stack gruen bekommen."}, ensure_ascii=False))
 
@@ -2003,8 +2006,17 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
             # Echo pausiert? (28.08.2026, Not-Aus) — gar keinen neuen Bot starten.
+            # retry_ok=True und ein maschinenlesbares 'grund' (30.08.2026, Finns
+            # Fund am PC): hier ist BEWEISBAR nichts gesendet worden, der Aufruf
+            # endet vor dem Bot-Start. Ohne retry_ok las das Frontend die Absage
+            # als "unklar" und warnte "erst im Master-Terminal pruefen, ob die
+            # Order liegt" — eine Falschaussage, die genau die Vorsicht abstumpft,
+            # die sie erzeugen soll. 'grund' gibt es, damit das Frontend den Fall
+            # nicht am Meldungstext erkennen muss (Textvergleiche brechen still,
+            # sobald jemand die Formulierung anfasst).
             if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "echo_pausiert", "msg":
                     "Echo ist pausiert — es wird keine neue Order platziert. Erst oben "
                     "auf Fortsetzen klicken."}, ensure_ascii=False))
             cmd = {"symbol": str(body.get("symbol") or "").strip(),
@@ -2020,7 +2032,8 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 pass
             if not (st.get("running") and age is not None and age <= 15):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "copier_alt", "msg":
                     "Copier liefert keine frischen Daten — die Order wuerde UNGEHEDGET "
                     "bleiben. Erst den Trade-Start-Check gruen bekommen."}, ensure_ascii=False))
             with MASTER_ORDER_GUARD:
@@ -2081,7 +2094,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
             if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "echo_pausiert", "msg":
                     "Echo ist pausiert — es wird nichts geschlossen. Erst oben "
                     "auf Fortsetzen klicken."}, ensure_ascii=False))
             try:
@@ -2100,7 +2114,8 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, TypeError):
                 pass
             if not (st.get("running") and age is not None and age <= 15):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                    "grund": "copier_alt", "msg":
                     "Copier liefert keine frischen Daten — der Hedge wuerde das Close "
                     "nicht mitgehen und bliebe allein offen. Erst Copier gruen bekommen."},
                     ensure_ascii=False))

@@ -4972,6 +4972,13 @@
           <!-- Erneut versuchen (25.08.2026, Finns Wunsch): Problem fixen und den
                Check direkt neu laufen lassen, statt Popup zu + Trade neu planen -->
           <button class="btn btn-primary" id="pf-retry" style="display:none">↻ Erneut versuchen</button>
+          <!-- Echo-Not-Aus aufheben, ohne das Popup zu verlassen (30.08.2026,
+               Finns Fund am PC: der Check lief bis zur Order durch und scheiterte
+               an „Echo ist pausiert" — der Fortsetzen-Knopf lag in einer anderen
+               Ansicht, also Popup zu, Ansicht wechseln, fortsetzen, Trade neu
+               planen. Ein Fehler, der sich mit EINEM Klick beheben lässt, gehört
+               dorthin, wo er auftritt.) -->
+          <button class="btn btn-primary" id="pf-echo-resume" style="display:none">▶ Echo fortsetzen &amp; neu starten</button>
           <button class="btn btn-primary" id="pf-force">Trotzdem starten</button>
         </div>
       </div>
@@ -19675,6 +19682,7 @@
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
     document.getElementById('tpPreflightModal').classList.add('open')
@@ -19803,6 +19811,7 @@
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `🪞 Mirror-Route · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
     document.getElementById('tpPreflightModal').classList.add('open')
@@ -19902,6 +19911,7 @@
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `🖥 MT5-Route · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
     document.getElementById('tpPreflightModal').classList.add('open')
@@ -20251,11 +20261,23 @@
                   // zum erneuten Versuch raten — Timeout/unklar heißt: erst ins
                   // Terminal schauen, sonst droht die Doppel-Order (Review-Blocker).
                   const retryOk = !!(r && r.retry_ok)
-                  _pfSet('m5term', 'err', 'Order fehlgeschlagen: ' + escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort')))
+                  const echoAus = _pfEchoPausiert(r)
+                  _pfSet('m5term', 'err', (echoAus ? 'Nichts platziert: ' : 'Order fehlgeschlagen: ')
+                    + escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort')))
                   if(fe){ fe.className = 'pf-final err'
-                    fe.textContent = retryOk
+                    fe.textContent = echoAus
+                      ? '⏸ Echo ist pausiert — es wurde NICHTS gesendet. Unten fortsetzen, dann läuft der Check sofort neu.'
+                      : retryOk
                       ? '✗ Order abgelehnt — Meldung oben. Erneut „Weiter" → „Starten".'
                       : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.' }
+                  // Der Fuß steht hier schon (mit „Schließen") — es fehlt nur der
+                  // eine Knopf, der den Not-Aus aufhebt und direkt neu startet.
+                  if(echoAus){
+                    _pfEchoKnopf(true, () => tpPreflightAndStart(plan.id))
+                    const _fo = document.getElementById('pf-foot'); if(_fo) _fo.style.display = 'flex'
+                    const _cb = document.getElementById('pf-cancel'); if(_cb) _cb.textContent = 'Schließen'
+                    const _fb = document.getElementById('pf-force'); if(_fb) _fb.style.display = 'none'
+                  }
                   // Ans Handy: inkl. des kritischsten Falls „Position OFFEN, SL/TP
                   // fehlt" (price+ticket ohne ok) — die Warnung muss ankommen.
                   _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk,
@@ -20335,6 +20357,59 @@
       if(foot) foot.style.display = 'flex'
     }
   }
+
+  /* „Echo fortsetzen & neu starten" (30.08.2026, Finns Wunsch): erscheint NUR,
+   * wenn die Order am Not-Aus gescheitert ist — dann ist beweisbar nichts
+   * gesendet worden (Panel meldet grund='echo_pausiert', retry_ok=true), und
+   * genau ein Klick trennt Finn vom nächsten Versuch. */
+  const PF_ECHO_LABEL = '▶ Echo fortsetzen & neu starten'
+  // Der Knopf merkt sich SELBST, welcher Lauf zu wiederholen ist — Order-Start
+  // und Schließen sind zwei verschiedene Funktionen, und tpPlanSchliessen nullt
+  // _pfPlanId gleich zu Beginn (der Knopf könnte sich den Plan also nicht von
+  // dort holen). Deshalb kommt die Wiederholung als Rückruf mit.
+  let _pfEchoRerun = null
+  function _pfEchoKnopf(zeigen, rerun){
+    _pfEchoRerun = zeigen ? (rerun || null) : null
+    const b = document.getElementById('pf-echo-resume')
+    if(!b) return
+    b.style.display = zeigen ? '' : 'none'
+    b.disabled = false
+    b.textContent = PF_ECHO_LABEL
+  }
+  // Not-Aus-Fall erkennen: das Panel meldet ihn seit .189 maschinenlesbar
+  // (grund='echo_pausiert'). Der Textvergleich fängt nur PCs ab, deren
+  // Selbst-Update das neue Panel noch nicht geholt hat — er ist bewusst der
+  // Notnagel, nicht der Weg (Textvergleiche brechen still, sobald jemand die
+  // Formulierung anfasst).
+  function _pfEchoPausiert(r){
+    return !!(r && (r.grund === 'echo_pausiert'
+      || /Echo ist pausiert/i.test(String(r.msg || ''))))
+  }
+
+  document.getElementById('pf-echo-resume')?.addEventListener('click', async () => {
+    const rerun = _pfEchoRerun
+    if(typeof rerun !== 'function') return
+    const b = document.getElementById('pf-echo-resume')
+    if(b){ b.disabled = true; b.textContent = '▶ setze fort …' }
+    try{
+      const r = await window.mtcApi('pause', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ on:false }) })
+      if(!(r && r.ok)) throw new Error((r && (r.msg || r.error)) || 'keine Antwort')
+      // Den Pause-Knopf der Echo-Ansicht mitziehen, falls er gerade gerendert
+      // ist — sonst behauptet er weiter „Fortsetzen", während Echo längst läuft
+      // (der Ansichts-Poll korrigiert das erst Sekunden später).
+      const pb = document.getElementById('mtc-pause-toggle')
+      if(pb){ pb.dataset.paused = '0'; pb.textContent = '⏸ Pause'
+              pb.classList.remove('btn-primary'); pb.classList.add('btn-ghost') }
+      if(typeof atToast === 'function') atToast('▶ Echo fortgesetzt — Check läuft neu', 'start')
+      // Derselbe Weg wie „Erneut versuchen": Popup bleibt offen, damit die
+      // gemerkte Bot-Order (_tpPendingOrder) gültig bleibt.
+      rerun()
+    }catch(e){
+      if(b){ b.disabled = false; b.textContent = PF_ECHO_LABEL }
+      alert('Echo fortsetzen fehlgeschlagen: ' + (e && e.message || e))
+    }
+  })
 
   document.getElementById('pfClose')?.addEventListener('click', _pfClose)
   document.getElementById('pf-cancel')?.addEventListener('click', _pfClose)
@@ -20796,7 +20871,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-30.188'
+  const OS_TAB_BUILD = '2026-08-30.189'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -20957,6 +21032,7 @@
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `📡 Starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}${order.tp_usd ? ` · TP $${order.tp_usd} / SL $${order.sl_usd}` : ' · ohne SL/TP (Order pur)'}`
     document.getElementById('tpPreflightModal').classList.add('open')
@@ -21209,6 +21285,7 @@
     document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `📡 Schließen · ${plan.masterName || '—'} → ${plan.slaveName || '—'}${symbol ? ` · ${symbol}` : ''}`
     document.getElementById('tpPreflightModal').classList.add('open')
@@ -21246,6 +21323,14 @@
           autoZu()
         } else {
           _pfSet('cl-bot', 'err', escapeHtml(String((r && (r.msg || r.error)) || 'keine Antwort vom Bot')))
+          if(_pfEchoPausiert(r)){
+            // Not-Aus trifft das Schließen genauso wie den Start — und der
+            // Ausweg ist derselbe eine Klick (fertigUi räumt den Fuß auf,
+            // deshalb erst danach einblenden).
+            fertigUi(false, '⏸ Echo ist pausiert — es wurde NICHTS geschlossen. Unten fortsetzen, dann läuft das Schließen sofort neu.')
+            _pfEchoKnopf(true, () => tpPlanSchliessen(planId))
+            return
+          }
           fertigUi(false, (r && r.retry_ok)
             ? '✗ Nicht geschlossen — Meldung oben. Erneut „Schließen" ist ungefährlich (Puls prüft vorher lesend).'
             : '⚠ Ergebnis UNKLAR — erst im Terminal prüfen, ob die Position noch offen ist.')
