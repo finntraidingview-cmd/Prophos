@@ -1001,7 +1001,42 @@ def tv_tab_suchbegriff(titel):
     return ""
 
 
-def _tv_tab_suchen(w, begriff, gesehen):
+def tv_tab_passt(name, begriff, symbol):
+    """Ist dieser Tab-Name der TradingView-Tab? Drei unabhaengige Wege, in
+    dieser Reihenfolge (30.08.2026, nach Finns Fehlversuch mit voller Spur):
+
+    1. 'tradingview' im Namen — der urspruengliche Weg. Bei Finn traf er nicht:
+       sein Tab heisst 'NQU2026 29,491.75 ▼ −0.69% Unnamed', der Produktname
+       kommt gar nicht vor.
+    2. Der Suchbegriff aus dem Seitentitel, den das Userscript meldet (0.3.1+).
+    3. Die Symbol-WURZEL des Befehls selbst — 'NQU6' und 'NQU2026' sind
+       beide NQ. Dieser Weg braucht weder Userscript noch Titel und ist
+       deshalb der einzige, der immer verfuegbar ist; er kam dazu, weil Weg 2
+       eine Userscript-Version voraussetzt, die auf dem PC erst ankommen muss.
+
+    Chrome haengt an Tab-Namen Zusaetze an ('… - Arbeitsspeichernutzung -
+    303 MB'), deshalb wird nie auf Gleichheit geprueft, sondern auf das erste
+    symbolartige Wort. DevTools sind ueberall ausgeschlossen."""
+    n = (name or "").strip()
+    if not n:
+        return False
+    low = n.lower()
+    if low.startswith("devtools"):
+        return False
+    if "tradingview" in low:
+        return True
+    b = (begriff or "").strip().lower()
+    if b and b in low:
+        return True
+    ziel = tv_symbol_root(symbol)
+    if ziel:
+        erst = tv_tab_suchbegriff(n)
+        if erst and tv_symbol_root(erst) == ziel:
+            return True
+    return False
+
+
+def _tv_tab_suchen(w, begriff, symbol, gesehen):
     """Das TabItem mit TradingView in der Tableiste dieses Browser-Fensters.
     Deckt den Fall ab, den Schritt 1 (tvfokus) noch nicht konnte: TradingView
     als HINTERGRUND-Tab — der Fenstertitel zeigt immer nur den aktiven Tab.
@@ -1019,7 +1054,6 @@ def _tv_tab_suchen(w, begriff, gesehen):
             kinder = w.descendants(control_type="TabItem")
         except Exception:
             return None
-    b = (begriff or "").strip().lower()
     treffer = []
     for it in kinder:
         try:
@@ -1030,7 +1064,7 @@ def _tv_tab_suchen(w, begriff, gesehen):
             continue
         if len(gesehen) < 12:
             gesehen.append(n[:60])
-        if "tradingview" in n.lower() or (b and b in n.lower()):
+        if tv_tab_passt(n, begriff, symbol):
             treffer.append(it)
     if not treffer:
         return None
@@ -1047,14 +1081,13 @@ def _tv_tab_suchen(w, begriff, gesehen):
     return treffer[0]
 
 
-def _tv_fenster_holen(trail, begriff=""):
+def _tv_fenster_holen(trail, begriff="", symbol=""):
     """Browser-Fenster mit TradingView nach vorn — Titel zuerst (aktiver Tab),
     sonst ueber die Tableiste. (fenster, fehlertext)."""
     from pywinauto import Desktop
     kandidaten = []
     fenster_namen = []
     tab_namen = []
-    b = (begriff or "").strip().lower()
     for w in Desktop(backend="uia").windows():
         try:
             titel = w.window_text() or ""
@@ -1067,8 +1100,7 @@ def _tv_fenster_holen(trail, begriff=""):
             fenster_namen.append((titel or "?")[:60])
         # Aktiver Tab: 'tradingview' im Titel ODER das gemeldete Symbol —
         # bei Finns PC steht im Titel nur 'NQU2026 29.491,75 ...'.
-        if ist_tradingview_fenster(titel, klasse) or (b and b in titel.lower()
-                                                      and not titel.lower().startswith("devtools")):
+        if ist_tradingview_fenster(titel, klasse) or tv_tab_passt(titel, begriff, symbol):
             try:
                 if w.is_minimized():
                     w.restore()
@@ -1081,7 +1113,7 @@ def _tv_fenster_holen(trail, begriff=""):
         kandidaten.append(w)
 
     for w in kandidaten:
-        tab = _tv_tab_suchen(w, begriff, tab_namen)
+        tab = _tv_tab_suchen(w, begriff, symbol, tab_namen)
         if not tab:
             continue
         try:
@@ -1105,11 +1137,13 @@ def _tv_fenster_holen(trail, begriff=""):
     # Selbst-Diagnose statt 'nicht gefunden': WAS hat er gesehen? Daran haengt,
     # ob der Suchbegriff falsch war (Tabs sind da, passen nur nicht) oder ob
     # die Tableiste per UIA gar nicht lesbar ist (Liste leer).
-    trail.append(f"Suchbegriff '{begriff or '-'}'"
+    trail.append(f"Suchbegriff '{begriff or '-'}' / Symbol-Wurzel "
+                 f"'{tv_symbol_root(symbol) or '-'}'"
                  f" · Browser-Fenster: {fenster_namen or 'keine'}"
                  f" · Tabs: {tab_namen or 'keine gelesen'}")
     return None, ("Kein Browser-Fenster mit TradingView gefunden. Gesucht wurde nach "
-                  f"'{begriff or 'tradingview'}'. Gesehen: "
+                  f"'{begriff or 'tradingview'}' bzw. der Symbol-Wurzel "
+                  f"'{tv_symbol_root(symbol) or '-'}'. Gesehen: "
                   f"{len(fenster_namen)} Browser-Fenster {fenster_namen}, "
                   f"Tab-Namen {tab_namen or '(keine lesbar)'}. "
                   "Steht dort der TradingView-Tab nicht dabei, kann die Tableiste "
@@ -1225,7 +1259,7 @@ def modus_tvorder(cmd):
     bf0 = _tv_bf(timeout=4.0) or {}
     begriff = tv_tab_suchbegriff(bf0.get("titel"))
     trail.append(f"Tab-Suchbegriff: {begriff or '(kein Bedienfeld — Fallback tradingview)'}")
-    w, f = _tv_fenster_holen(trail, begriff)
+    w, f = _tv_fenster_holen(trail, begriff, cmd["symbol"])
     if not w:
         return raus(f, "fenster")
     try:

@@ -533,6 +533,26 @@ def main():
         and order_bot.tv_tab_suchbegriff("") == ""
         and order_bot.tv_tab_suchbegriff(None) == ""
         and order_bot.tv_tab_suchbegriff("(3) 7 %") == "")
+    # Tab-Treffer (30.08.2026, Finns Fehlversuch MIT voller Spur): sein Tab
+    # heisst 'NQU2026 29,491.75 ▼ −0.69% Unnamed' — kein 'tradingview' drin.
+    # Der dritte Weg (Symbol-Wurzel aus dem Befehl) braucht weder Userscript
+    # noch Titel und muss genau diesen Namen treffen.
+    chk("TV: Tab per Symbol-Wurzel getroffen (NQU6 findet NQU2026-Tab)",
+        order_bot.tv_tab_passt("NQU2026 29,491.75 ▼ −0.69% Unnamed", "", "NQU6")
+        and order_bot.tv_tab_passt("MNQU2026 29,491.75", "", "MNQ")
+        and order_bot.tv_tab_passt("MNQ1! 1m CME — TradingView", "", "")
+        and order_bot.tv_tab_passt("NQU2026 …", "NQU2026", ""))
+    chk("TV: fremde Tabs sind NIE der TradingView-Tab",
+        not order_bot.tv_tab_passt("Prophos\xa0- Arbeitsspeichernutzung\xa0- 303 MB", "", "NQU6")
+        and not order_bot.tv_tab_passt("Echo-Panel – Speicherauslastung – 37,3 MB", "", "NQU6")
+        and not order_bot.tv_tab_passt("127.0.0.1:8770/api/instances", "", "NQU6")
+        and not order_bot.tv_tab_passt("DevTools - www.tradingview.com/chart", "", "NQU6")
+        and not order_bot.tv_tab_passt("", "", "NQU6"))
+    # MNQ-Plan darf NIE den NQ-Tab greifen (und umgekehrt) — dieselbe Trennung
+    # wie beim Instrument-Vergleich, hier nur eine Ebene frueher.
+    chk("TV: MNQ und NQ greifen sich auch bei der Tab-Suche nicht gegenseitig",
+        not order_bot.tv_tab_passt("NQU2026 29,491.75", "", "MNQ")
+        and not order_bot.tv_tab_passt("MNQU2026 29,491.75", "", "NQU6"))
     chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
         order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
         and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
