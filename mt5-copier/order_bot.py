@@ -377,9 +377,19 @@ def _klick_absolut(x, y, taste="links", doppel=False):
     doppel=True haengt Druecken+Loslassen als Doppelklick an."""
     import ctypes
     user32 = ctypes.windll.user32
-    W, H = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-    ax = int(round(int(x) * 65535 / max(1, W - 1)))
-    ay = int(round(int(y) * 65535 / max(1, H - 1)))
+    # Virtueller Desktop statt Primaer-Monitor (30.08.2026, SL/TP-Fehlklick-
+    # Suche): MOUSEEVENTF_ABSOLUTE allein normiert auf den PRIMAER-Monitor —
+    # liegt MT5 auf einem Zweitmonitor, landen alle Batch-Klicks daneben,
+    # waehrend die Maus-ANIMATION (SetCursorPos, echte Koordinaten) weiter
+    # stimmt und den Fehler perfekt versteckt. VIRTUALDESK + Virtual-Screen-
+    # Metriken treffen jeden Monitor; mit einem einzelnen Monitor ist das
+    # Ergebnis Bit fuer Bit dasselbe wie vorher.
+    vx = user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+    vy = user32.GetSystemMetrics(77)   # SM_YVIRTUALSCREEN
+    vw = user32.GetSystemMetrics(78)   # SM_CXVIRTUALSCREEN
+    vh = user32.GetSystemMetrics(79)   # SM_CYVIRTUALSCREEN
+    ax = int(round((int(x) - vx) * 65535 / max(1, vw - 1)))
+    ay = int(round((int(y) - vy) * 65535 / max(1, vh - 1)))
     PUL = ctypes.POINTER(ctypes.c_ulong)
 
     class _MI(ctypes.Structure):
@@ -390,7 +400,7 @@ def _klick_absolut(x, y, taste="links", doppel=False):
     class _INP(ctypes.Structure):
         _fields_ = [("type", ctypes.c_ulong), ("mi", _MI)]
 
-    MOVE, ABS = 0x0001, 0x8000
+    MOVE, ABS = 0x0001, 0x8000 | 0x4000   # ABSOLUTE + VIRTUALDESK (s.o.)
     DOWN, UP = (0x0002, 0x0004) if taste == "links" else (0x0008, 0x0010)
     folge = [MOVE | ABS, MOVE | DOWN | ABS, MOVE | UP | ABS]
     if doppel:
@@ -890,11 +900,78 @@ def _finde_aendern_dialog(hauptfenster, timeout=3.0):
     return None
 
 
+def _menue_offen():
+    """Steht irgendwo noch ein Popup-Menue (#32768/Menu) offen? Der Beweis-
+    Check fuer _menuepunkt_ausloesen: nur ein GESCHLOSSENES Menue belegt,
+    dass der Punkt-Klick wirklich gezuendet hat."""
+    from pywinauto import Desktop
+    try:
+        for m in Desktop(backend="uia").windows():
+            try:
+                if m.element_info.class_name == "#32768" \
+                        or m.element_info.control_type == "Menu":
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+def _menuepunkt_ausloesen(it):
+    """Einen gefundenen Menuepunkt WIRKLICH ausloesen — mit Beweis (30.08.2026,
+    Finns Fund an beiden PCs: Kontextmenue offen, 'Aendern oder Loeschen'
+    markiert, und nichts passiert; genau dieser eingefrorene Zustand stand auf
+    seinem Screenshot). Der alte Weg meldete nach invoke() blind Erfolg, und
+    der click_input-Fallback ist das getrennte Bewegen-dann-Klicken aus dem
+    Parsec-Fund vom 16.08.2026 — im restlichen Bot laengst verboten, nur hier
+    hatte die Lehre gefehlt. Deshalb: nach JEDEM Versuch pruefen, ob das Menue
+    zu ist — nur DAS beweist den Klick. Zuendet invoke() nicht, klickt der
+    Haus-Weg _klick_absolut (EIN atomarer SendInput-Batch) auf die Punkt-Mitte;
+    geklickt wird dabei nur, solange das Menue nachweislich noch offen ist
+    (nie ein Streuklick in den Chart darunter). click_input bleibt letzte
+    Reserve. True = Menue zu, Klick bewiesen."""
+    try:
+        it.invoke()
+    except Exception:
+        pass
+    _warte(0.25, 0.2)
+    if not _menue_offen():
+        return True
+    try:
+        r = it.rectangle()
+        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=3)
+        _klick_absolut(r.mid_point().x, r.mid_point().y)
+        _warte(0.25, 0.2)
+        if not _menue_offen():
+            return True
+    except Exception:
+        pass
+    try:
+        it.click_input()
+        _warte(0.25, 0.2)
+        return not _menue_offen()
+    except Exception:
+        return False
+
+
 def _kontextmenue_aendern_klicken(timeout=2.0):
     """Ein offenes Kontextmenue nach 'Aendern...'/'Modify...' absuchen und den
     Punkt ausloesen. Menues sind Standard-Windows-Fenster (#32768) — die sieht
     UIA auch bei MT5. Der Punkt heisst deutsch 'Aendern oder Loeschen', darf
-    also NICHT durch den Loeschen-Ausschluss von ist_aendern_knopf laufen."""
+    also NICHT durch den Loeschen-Ausschluss von ist_aendern_knopf laufen.
+
+    Rueckgabe seit 30.08.2026 dreiwertig statt bool — der Zeilen-Scan braucht
+    den Unterschied fuer seine Selbst-Diagnose:
+      'geklickt'   Punkt ausgeloest, Menue nachweislich zu
+      'ausgegraut' Menue offen, aber der Punkt ist deaktiviert — der
+                   Rechtsklick lag NEBEN der Positions-Zeile (leere Liste /
+                   Kontostand-Zeile). Vorher hat der Bot solche Punkte blind
+                   'geklickt', Erfolg gemeldet und 1,2 s auf einen Dialog
+                   gewartet, der nie kommen konnte.
+      'kein_menue' gar kein Menue(-Punkt) innerhalb des Timeouts gefunden,
+                   ODER der Punkt liess sich trotz aller drei Klick-Wege
+                   nicht ausloesen."""
     from pywinauto import Desktop
     ende = time.time() + timeout
     while time.time() < ende:
@@ -908,27 +985,26 @@ def _kontextmenue_aendern_klicken(timeout=2.0):
                         t = (it.window_text() or "").lower()
                         if any(k in t for k in ("ändern", "aendern", "andern", "modify")):
                             try:
-                                it.invoke()
-                                return True
+                                if not it.is_enabled():
+                                    return "ausgegraut"
                             except Exception:
-                                try:
-                                    it.click_input()
-                                    return True
-                                except Exception:
-                                    pass
+                                pass
+                            return "geklickt" if _menuepunkt_ausloesen(it) else "kein_menue"
                 except Exception:
                     continue
         except Exception:
             pass
         _warte(0.2, 0.25)
-    return False
+    return "kein_menue"
 
 
 def _kontextmenue_close_klicken(timeout=2.0):
     """Gegenstueck zu _kontextmenue_aendern_klicken fuer den Close-Weg
     (28.08.2026, Remote-Close): ausgeloest wird AUSSCHLIESSLICH ein Menuepunkt,
     der ist_close_menuepunkt besteht — nie ein anderer, nie blind. Die Alle-/
-    Massen-Ausschluesse stecken in der Erkennung selbst."""
+    Massen-Ausschluesse stecken in der Erkennung selbst. Rueckgabe dreiwertig
+    wie beim Aendern-Weg (30.08.2026): 'geklickt' | 'ausgegraut' | 'kein_menue',
+    Ausloesen mit Beweis ueber _menuepunkt_ausloesen."""
     from pywinauto import Desktop
     ende = time.time() + timeout
     while time.time() < ende:
@@ -941,20 +1017,17 @@ def _kontextmenue_close_klicken(timeout=2.0):
                     for it in m.descendants(control_type="MenuItem"):
                         if ist_close_menuepunkt(it.window_text()):
                             try:
-                                it.invoke()
-                                return True
+                                if not it.is_enabled():
+                                    return "ausgegraut"
                             except Exception:
-                                try:
-                                    it.click_input()
-                                    return True
-                                except Exception:
-                                    pass
+                                pass
+                            return "geklickt" if _menuepunkt_ausloesen(it) else "kein_menue"
                 except Exception:
                     continue
         except Exception:
             pass
         _warte(0.2, 0.25)
-    return False
+    return "kein_menue"
 
 
 def _finde_close_dialog(hauptfenster, ticket):
@@ -1060,14 +1133,19 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
     # Erfahrungswert zuerst (18.08.2026, Finns Treffer beim 17. Punkt =
     # -316px): die Suche startet dort, wo die Zeile bei Standard-Toolbox
     # praktisch immer liegt, und faechert von da auf — der pro PC gemerkte
-    # Anker schlaegt das ohnehin.
-    offsets = sorted(range(60, 400, 16), key=lambda o: abs(o - 316))
+    # Anker schlaegt das ohnehin. Band bis zur HALBEN Fensterhoehe statt hart
+    # 400px (30.08.2026, beide PCs trafen nie): eine hoehere Toolbox/andere
+    # Aufloesung darf die Zeile nicht aus dem Band schieben; nach oben
+    # deckelt ohnehin maus_grenze (untere Fensterhaelfte).
+    band_max = max(400, (hr.bottom - hr.top) // 2)
+    offsets = sorted(range(60, band_max, 16), key=lambda o: abs(o - 316))
     for off in offsets:
         y = hr.bottom - off
         if maus_grenze is not None and y < maus_grenze:
             continue
         punkte.append((f"-{off}px", gx, y))
 
+    grau = 0   # Punkte, deren Menue offen war, aber 'Aendern' ausgegraut = neben der Zeile
     for runde in ("Rechtsklick-Menue", "Doppelklick"):
         for pname, px_, py_ in punkte:
             if is_paused():
@@ -1081,7 +1159,10 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
                 if not _klick_absolut(px_, py_, taste="rechts"):
                     continue
                 _warte(0.25, 0.3)
-                if not _kontextmenue_aendern_klicken(timeout=0.8):
+                st_menue = _kontextmenue_aendern_klicken(timeout=0.8)
+                if st_menue != "geklickt":
+                    if st_menue == "ausgegraut":
+                        grau += 1
                     try:
                         w.type_keys("{ESC}", set_foreground=False)
                     except Exception:
@@ -1115,7 +1196,12 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
             except Exception:
                 pass
             _fremde_dialoge_schliessen(w)
-    trail.append("Zeilen-Scan ohne Treffer")
+    # Selbst-Diagnose in die Spur (30.08.2026): Geometrie + Ausgegraut-Zaehler
+    # sagen beim naechsten Fehlversuch sofort, WORAN es lag — nur ausgegraute
+    # Punkte = alle Klicks lagen neben der Zeile (Geometrie/Band), gar keine
+    # Menues = die Rechtsklicks kommen nicht an (Klick-Weg).
+    trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
+                 f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
     return None
 
 
@@ -1280,14 +1366,14 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
             _warte(0.2, 0.25)
             w.type_keys("+{F10}")
             _warte(0.4, 0.35)
-            if not _kontextmenue_aendern_klicken():
+            if _kontextmenue_aendern_klicken() != "geklickt":
                 raise RuntimeError("kein Menuepunkt")
 
         def _weg_rechtsklick():
             if not maus_ok or not _klick_absolut(mx, my, taste="rechts"):
                 raise RuntimeError("Maus hier nicht erlaubt/fehlgeschlagen")
             _warte(0.4, 0.35)
-            if not _kontextmenue_aendern_klicken():
+            if _kontextmenue_aendern_klicken() != "geklickt":
                 raise RuntimeError("kein Menuepunkt")
 
         # Reihenfolge nach Finns Hand-Weg: Rechtsklick-Menue zuerst, dann
@@ -1366,7 +1452,7 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
                     _warte(0.25, 0.3)
                     if _klick_absolut(gx, gy, taste="rechts"):
                         _warte(0.4, 0.35)
-                        if _kontextmenue_aendern_klicken():
+                        if _kontextmenue_aendern_klicken() == "geklickt":
                             d = _finde_aendern_dialog(w, timeout=1.5)
                         else:
                             if not menue_notiert:
@@ -1925,12 +2011,16 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
                 punkte.append(("Anker", ax, ay))
         except Exception:
             pass
-    for off in sorted(range(60, 400, 16), key=lambda o: abs(o - 316)):
+    # Band bis zur halben Fensterhoehe statt hart 400px — gleicher Grund wie
+    # im SL/TP-Scan (30.08.2026, s. _reihen_scan).
+    band_max = max(400, (hr.bottom - hr.top) // 2)
+    for off in sorted(range(60, band_max, 16), key=lambda o: abs(o - 316)):
         y = hr.bottom - off
         if y < maus_grenze:
             continue
         punkte.append((f"-{off}px", gx, y))
 
+    grau = 0
     for pname, px_, py_ in punkte:
         if is_paused():
             trail.append("⏸ Echo pausiert — Close-Scan abgebrochen")
@@ -1941,10 +2031,13 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         if not _klick_absolut(px_, py_, taste="rechts"):
             continue
         _warte(0.25, 0.3)
-        if not _kontextmenue_close_klicken(timeout=0.8):
-            # Punkt lag neben der Zeile — Chart/Marktuebersicht haben den
-            # Eintrag nicht. Menue zu, naechster Punkt; geklickt wird nur der
-            # eine lesbare Punkt, nie blind.
+        st_menue = _kontextmenue_close_klicken(timeout=0.8)
+        if st_menue != "geklickt":
+            # Punkt lag neben der Zeile (Menue da, Eintrag ausgegraut) oder
+            # gar kein Menue — Chart/Marktuebersicht haben den Eintrag nicht.
+            # Menue zu, naechster Punkt; geklickt wird nur lesbar, nie blind.
+            if st_menue == "ausgegraut":
+                grau += 1
             try:
                 w.type_keys("{ESC}", set_foreground=False)
             except Exception:
@@ -2020,7 +2113,8 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
                 except Exception:
                     return "knopf"
         return "knopf"   # alle Wege durch — den Ausgang entscheidet der Aufrufer lesend
-    trail.append("Zeilen-Scan ohne Treffer")
+    trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
+                 f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
     return "kein_treffer"
 
 
