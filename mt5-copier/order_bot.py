@@ -1349,6 +1349,23 @@ def modus_tvorder(cmd):
                     "alles ist ausgefuellt, der letzte Klick fehlt. Im "
                     "TradingView selbst bestaetigen.", "senden")
 
+    # Probelauf (30.08.2026, Finns erster Test fiel auf einen geschlossenen
+    # Markt): die GANZE Kette laufen lassen — Tab, Konto, Symbol, Ticket,
+    # Menge, SL/TP, Ruecklesen, und sogar den Senden-Knopf suchen — nur nicht
+    # klicken. Genau hier, NACH der Senden-Suche: ein Probelauf, der den
+    # letzten Fund auslaesst, hat die interessanteste Frage nicht beantwortet.
+    # Das Ticket bleibt danach ausgefuellt und offen; wegklicken ist Handarbeit
+    # (ein Abbruch-Klick waere wieder ein geratener Klick).
+    if cmd.get("probe"):
+        res["ok"] = True
+        res["probe"] = True
+        return raus("Probelauf durch: Tab, Konto, Symbol, Ticket, Menge"
+                    + (" und SL/TP" if mit_sltp else "")
+                    + " sitzen — der Senden-Knopf wurde gefunden und ABSICHTLICH "
+                      "nicht geklickt. Nichts platziert. Das Ticket steht "
+                      "ausgefuellt offen und kann von Hand geschlossen werden.",
+                    "probe", retry_ok=True)
+
     # ═══ AB HIER UNUMKEHRBAR ═══════════════════════════════════════════════
     ok, f = _tv_klick(senden["rect"], bf["geo"], klient(), "Order senden", trail)
     if not ok:

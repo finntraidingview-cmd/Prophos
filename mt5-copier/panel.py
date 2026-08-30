@@ -1906,7 +1906,12 @@ class Handler(BaseHTTPRequestHandler):
                    "symbol": str(body.get("symbol") or "").strip(),
                    "richtung": str(body.get("richtung") or "").lower(),
                    "volumen": body.get("volumen"),
-                   "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd")}
+                   "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd"),
+                   # Probelauf (30.08.2026): faehrt die ganze Kette, klickt den
+                   # Senden-Knopf aber nicht. Gedacht fuer den ersten Lauf auf
+                   # einem PC — und fuer geschlossene Maerkte, wo ein echter
+                   # Versuch nur eine unklare Lage erzeugen wuerde.
+                   "probe": bool(body.get("probe"))}
             if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
 
