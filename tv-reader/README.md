@@ -49,6 +49,36 @@ Einschalten**-Knopf — der funktioniert von überall (Handy, Mac), nicht nur am
 - Der Tampermonkey-Badge zeigt Pausiert grau an (`⏸ Reader pausiert`); das
   Script liest lokal weiter mit, damit Wiedereinschalten sofort greift.
 
+## Bedienfeld — die Augen für den Puls (0.3.0, 30.08.2026)
+Seit Userscript-Version **0.3.0** meldet der Reader neben den Positionen auch das
+**Bedienfeld**: wo Konto-Umschalter, Symbol-Suche, Order-Ticket und die
+Kaufen/Verkaufen-Knöpfe gerade auf dem Bildschirm liegen (Rechtecke in
+CSS-Pixeln, plus `innerWidth`/`innerHeight`/`devicePixelRatio` zur Kalibrierung).
+
+Arbeitsteilung, bewusst so geschnitten:
+- **Userscript = Augen.** Findet die Steuerelemente, misst sie, klickt **nie**.
+- **Puls (`order_bot.py tvorder`) = Hände und Kopf.** Entscheidet (passt das
+  Konto? das Symbol?) und klickt mit **echter Maus** (`_klick_absolut`).
+
+Warum der Umweg: ein `element.click()` aus dem Userscript trüge `isTrusted=false`.
+Die Puls-Doktrin (15.08.2026) ist „muss wie ein Handklick aussehen" — auf der
+MT5-Seite wegen der Expert-Markierung, hier aus demselben Reflex.
+
+Routen am `reader-server`:
+- `POST /bedienfeld` — Userscript schickt den Stand (alle 500 ms).
+- `GET /bedienfeld` — Puls holt ihn ab; `alter_s` sagt, wie alt er ist. Puls
+  wartet nach jedem Klick auf einen Stand, der **jünger** ist als sein Klick —
+  Beweis statt Vermutung, dieselbe Regel wie beim MT5-Puls.
+- `POST /dump-an` — schaltet für 60 s den **Kandidaten-Dump** scharf (alle
+  sichtbaren Knöpfe/Felder mit `data-name`, `aria-label`, Text und Rechteck).
+  Der Puls ruft das bei jedem Fehlversuch selbst auf. Das ist das Gegenstück zu
+  `order_bot.py inspect` beim MT5-Weg: **Dump an Claude schicken, daraus wird
+  die Zuordnung gehärtet.** Anschauen: `http://127.0.0.1:8790/bedienfeld`.
+
+Findet der Puls ein Steuerelement **nicht eindeutig**, bricht er ab, statt einen
+von mehreren Kandidaten zu erwischen — auf einer Trading-Seite ist ein
+danebengegangener Klick kein harmloser Fehlversuch.
+
 ## Test
 1. TradingView öffnen, das **Positionen-Panel unten sichtbar** halten (das DOM ist
    nur da, wenn das Panel gerendert ist — siehe Einschränkung).
