@@ -589,6 +589,12 @@ HEAL_LOCK = threading.Lock()
 MASTER_ORDER_LOCKS = {}
 MASTER_ORDER_GUARD = threading.Lock()
 
+# Orbit-Puls (30.08.2026): EIN Lock fuer den ganzen TradingView-Weg, nicht pro
+# Instanz. Der MT5-Bot bedient je ein eigenes Terminal, der TV-Bot bedient
+# Browser und Maus — davon gibt es genau eines. Zwei parallele Laeufe wuerden
+# sich die Klicks gegenseitig wegziehen, mitten im Order-Ticket.
+TV_ORDER_LOCK = threading.Lock()
+
 
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
@@ -1877,6 +1883,101 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError) as e:
                 res = {"ok": False, "msg": f"TV-Fokus-Start fehlgeschlagen: {e}"}
             print(f"[panel] TV-Fokus -> {res.get('ok')} ({res.get('msg')})", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
+        if u.path == "/api/tv-order":
+            # Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf 1-5): der Bot faehrt
+            # die ganze Kette in TradingView — Tab nach vorn, Unterkonto per
+            # External ID, Symbol, Order-Ticket ausfuellen, platzieren. Gleiche
+            # Bauart wie /api/tv-fokus (OHNE Instanz-Bezug im Aufruf, der Weg
+            # fuehrt durch den Browser statt durch ein MT5-Terminal), aber mit
+            # den Riegeln von /api/master-order — hier wird echtes Geld bewegt.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            if os.path.exists(os.path.join(HERE, "echo_pause.flag")):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Echo ist pausiert — es wird keine neue Order platziert. Erst oben "
+                    "auf Fortsetzen klicken."}, ensure_ascii=False))
+            cmd = {"ext_id": str(body.get("ext_id") or "").strip(),
+                   "symbol": str(body.get("symbol") or "").strip(),
+                   "richtung": str(body.get("richtung") or "").lower(),
+                   "volumen": body.get("volumen"),
+                   "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd")}
+            if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
+                return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+
+            # Hedge-Riegel, das Gegenstueck zum Frische-Check von master-order:
+            # ohne laufende Orbit-Copier-Instanz bliebe die Futures-Position
+            # UNGEHEDGET. Die Orbit-Instanz erkennt man daran, dass sie KEIN
+            # Master-Terminal hat (der TV-Verbinder speist das Snapshot-CSV) und
+            # immer scharf ist. Genau EINE muss es sein — mehrere waeren der
+            # Mehrkonten-Fall, und der ist bewusst noch nicht gebaut (Finns
+            # Vorgabe 30.08.2026: "erstmal nur 1 tap nur 1 acc").
+            orbit = []
+            for i in instances():
+                c = read_json(os.path.join(HERE, i["config_file"]), {}) or {}
+                if not str(c.get("master_terminal_path") or "").strip() and c.get("snapshot_file"):
+                    orbit.append(i)
+            if len(orbit) != 1:
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    (f"{len(orbit)} Orbit-Copier-Instanzen auf diesem PC gefunden — "
+                     "erwartet wird genau eine. Ohne sie bliebe die Order UNGEHEDGET."
+                     if orbit else
+                     "Keine Orbit-Copier-Instanz auf diesem PC (config-tvplus.json) — "
+                     "die Order bliebe UNGEHEDGET. Erst den Orbit-Stack einrichten.")},
+                    ensure_ascii=False))
+            st = read_json(os.path.join(HERE, orbit[0]["status_file"]), {}) or {}
+            age = None
+            try:
+                age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+            except (ValueError, TypeError):
+                pass
+            if not (st.get("running") and age is not None and age <= 15):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Orbit-Copier liefert keine frischen Daten — die Order wuerde "
+                    "UNGEHEDGET bleiben. Erst den Stack gruen bekommen."}, ensure_ascii=False))
+
+            # EIN Lock fuer den ganzen TV-Weg (nicht pro Instanz wie bei
+            # master-order): es gibt genau einen Browser und genau eine Maus —
+            # zwei gleichzeitige Laeufe wuerden sich gegenseitig die Klicks
+            # wegziehen, und das mitten in einem Order-Ticket.
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "retry_ok": False, "msg":
+                    "Es laeuft schon ein TradingView-Order-Lauf — warten, dann in "
+                    "TradingView nachsehen."}, ensure_ascii=False))
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            if not os.path.exists(bot):
+                TV_ORDER_LOCK.release()
+                return self._send(200, json.dumps({"ok": False, "retry_ok": True, "msg":
+                    "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
+                    "einmal 'Alles neu starten' klicken, dann erneut."}, ensure_ascii=False))
+            try:
+                # 180s: die Kette hat vier Warte-Etappen (Tab, Konto, Symbol,
+                # Ticket) plus 25s Bestaetigungsfenster; der Rest ist Puffer.
+                # Kuerzer waere die Fehlerklasse von 18.08.2026 — ein Abbruch
+                # mitten im Ablauf, bei dem niemand weiss, wie weit er kam.
+                p = subprocess.run([sys.executable, bot, "tvorder", json.dumps(cmd)],
+                                   capture_output=True, text=True, errors="replace", timeout=180)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "retry_ok": False,
+                    "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "retry_ok": False,
+                       "msg": "TV-Order Timeout (180s) — in TradingView pruefen, ob die "
+                              "Order liegt, bevor irgendetwas wiederholt wird!"}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "retry_ok": False, "msg": f"TV-Order-Start fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] TV-Order {cmd['richtung']} {cmd['volumen']} {cmd['symbol']} "
+                  f"@{cmd['ext_id']} -> {res.get('ok')} ({res.get('schritt')}: {res.get('msg')})",
+                  flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
         fname = (parse_qs(u.query).get("file") or [""])[0]

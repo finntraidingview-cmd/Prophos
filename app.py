@@ -282,7 +282,11 @@ def copier_proxy(path):
         # sitzt dann niemand am PC, der es merkt. Der aeussere Timeout ist die
         # Obergrenze der Wahrheit: 310s = Bot-Maximum + Puffer. master-close
         # (28.08.2026, Remote-Close) faehrt denselben Band-Scan — gleiche Luft.
-        _tmo = 310 if path in ("master-order", "master-close") else 25
+        # tv-order (30.08.2026, Orbit-Puls Schritt 2) gehoert in dieselbe
+        # Klasse: der Bot darf 180s laufen (vier Warte-Etappen im Browser plus
+        # 25s Bestaetigungsfenster), ein frueher Proxy-Abbruch waere hier
+        # derselbe Doppel-Order-Pfad wie bei master-order.
+        _tmo = 310 if path in ("master-order", "master-close", "tv-order") else 25
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,

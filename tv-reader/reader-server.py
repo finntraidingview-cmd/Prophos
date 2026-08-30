@@ -8,6 +8,17 @@ und gibt ihn als Live-Zeile im Terminal aus.
 Das ist der Andockpunkt fuer den echten Hedge-Copier: der liest entweder
 GET http://127.0.0.1:8790/positions oder direkt die Datei positions.json.
 
+Bedienfeld (30.08.2026, Orbit-Puls Schritt 2): POST /bedienfeld nimmt die
+Steuerelement-Geometrie des Userscripts entgegen (Konto-Umschalter, Symbol-
+Suche, Order-Ticket, Kaufen/Verkaufen — je mit Rechteck in CSS-Pixeln), GET
+/bedienfeld gibt sie an den Puls. Der Puls klickt daraus mit ECHTER Maus; das
+Userscript klickt bewusst nie selbst (isTrusted-Doktrin, s. tv-reader.user.js).
+Der Stand wird NICHT in eine Datei geschrieben: er ist Sekunden-frisch relevant
+und waere auf Platte nur eine Quelle fuer alte Koordinaten.
+POST /dump-an schaltet den Kandidaten-Dump des Userscripts fuer 60 s scharf —
+die Ferndiagnose, wenn Puls ein Steuerelement nicht findet (gleiche Rolle wie
+modus_inspect beim MT5-Puls).
+
 Ein/Aus-Schalter (28.08.2026, Orbit-View in Prophos — hiess damals "Echo +"): POST /schalter
 {"an": false} pausiert den Reader — der Stand friert ein (stale != flat:
 ein pausierter Reader meldet NIE "keine Positionen", sonst wuerde ein
@@ -31,6 +42,15 @@ AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
 # Letzter bekannter Stand (wird von POST gesetzt, von GET/Datei gelesen)
 _stand = {"ts": 0, "positionen": []}
 _an = not os.path.exists(AUS_FLAG)
+
+# Bedienfeld: letzter Stand der Steuerelement-Geometrie + Empfangszeit.
+# empfangen_s ist die SERVER-Zeit — das Userscript schickt seine eigene
+# Browser-Zeit mit (ts), und die beiden Uhren muessen sich nicht einig sein.
+# Puls braucht "juenger als mein letzter Klick", also zaehlt hier die Uhr,
+# die auch der Puls liest.
+_bedienfeld = None
+_bedienfeld_s = 0.0
+_dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 
 
 def _schreibe_datei(stand):
@@ -91,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global _stand
+        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -111,6 +131,30 @@ class Handler(BaseHTTPRequestHandler):
             zeit = time.strftime("%H:%M:%S")
             print(f"\n[{zeit}] Schalter: Reader {'AN' if _an else 'PAUSIERT'}")
             self._json(200, {"ok": True, "an": _an})
+            return
+
+        # Bedienfeld-Geometrie vom Userscript (30.08.2026, Orbit-Puls
+        # Schritt 2). BEWUSST VOR dem Pause-Gate: der Schalter friert die
+        # POSITIONEN ein (stale != flat), er blendet nicht die Augen ab —
+        # Geometrie ist harmlos und ohne sie kaeme der Puls nie zu einer
+        # ehrlichen Fehlermeldung. Ob ueberhaupt geordert werden darf,
+        # entscheidet der Puls selbst am Feld 'an' von GET /positions.
+        if self.path.rstrip("/") == "/bedienfeld":
+            _bedienfeld = daten
+            _bedienfeld_s = time.time()
+            # dump-Anforderung zurueckgeben: das Userscript haengt beim
+            # NAECHSTEN Tick den Kandidaten-Dump an (nie im Dauerbetrieb —
+            # der Dump laeuft durchs ganze DOM).
+            self._json(200, {"ok": True, "dump": time.time() < _dump_bis})
+            return
+
+        # Kandidaten-Dump scharfschalten (Ferndiagnose, 60 s): der Puls ruft
+        # das selbst auf, wenn er ein Steuerelement nicht eindeutig findet —
+        # der naechste Fehlversuch bringt dann die Beweise gleich mit.
+        if self.path.rstrip("/") == "/dump-an":
+            _dump_bis = time.time() + 60.0
+            print("\n[info] Kandidaten-Dump fuer 60 s scharf")
+            self._json(200, {"ok": True, "bis_s": 60})
             return
 
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
@@ -143,6 +187,22 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "an": True})
 
     def do_GET(self):
+        # Bedienfeld: das holt sich der Puls vor jedem Klick. 'alter_s' ist
+        # das einzige Feld, auf das er sich verlaesst — er wartet auf einen
+        # Stand, der JUENGER ist als sein letzter Klick, statt zu hoffen,
+        # dass sich die Seite inzwischen aktualisiert hat.
+        if self.path.rstrip("/") == "/bedienfeld":
+            if _bedienfeld is None:
+                self._json(200, {"ok": False, "msg":
+                    "Noch kein Bedienfeld empfangen — laeuft das Userscript "
+                    "(Version 0.3+) im TradingView-Tab?"})
+                return
+            out = dict(_bedienfeld)
+            out["ok"] = True
+            out["alter_s"] = round(time.time() - _bedienfeld_s, 3)
+            self._json(200, out)
+            return
+
         # Aktuellen Stand abfragbar machen (fuer den Copier, die Orbit-View
         # oder zum Reinschauen im Browser) — inkl. Schalter-Zustand.
         self._json(200, _mit_an(_stand))

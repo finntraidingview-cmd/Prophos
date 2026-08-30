@@ -11180,6 +11180,27 @@
     }catch(e){ console.warn('[mt5PlanAufOpen]', e) }
   }
 
+  /* Orbit-Route: Plan auf „Läuft", nachdem Puls die Order in TradingView
+   * platziert hat (30.08.2026, Schritt 2). Bewusst NICHT mt5PlanAufOpen
+   * mitbenutzt (Doktrin „keine generischen Handler"): dort wird eine
+   * mt5_baseline aus Master-/Hedge-Balance eingefroren — auf dieser Route gibt
+   * es gar kein Master-MT5-Terminal, der Master ist ein Tradovate-Konto hinter
+   * TradingView. Eine Baseline zu schreiben, die nur die Hedge-Seite kennt,
+   * wäre eine halbe Wahrheit im P&L; die Orbit-P&L ist bis heute ehrlich null. */
+  async function tvPlanAufOpen(planId){
+    try{
+      const plan = tradePlans.find(x => String(x.id) === String(planId))
+      if(!plan || plan.status !== 'planned') return
+      const { data, error } = await supabase.from('trade_plans')
+        .update({ status: 'open', started_at: new Date().toISOString() })
+        .eq('id', plan.id).eq('status', 'planned').select('*')
+      if(error || !data || !data.length) return
+      const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      if(typeof renderTradePlans === 'function') renderTradePlans()
+    }catch(e){ console.warn('[tvPlanAufOpen]', e) }
+  }
+
   async function mt5PlanPollTick(){
     if(!MT5_LOCAL || mt5PlanPoll.busy) return
     // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
@@ -20551,8 +20572,9 @@
     _tpOrderPlanId = planId
     _tpPendingOrder = null
     // Orbit-Variante (28.08.2026, Etappe 3 Schritt 1): gleiches Popup, aber
-    // „Starten" speichert die Werte am Plan UND holt am PC den TradingView-
-    // Tab nach vorn — mehr nicht (Finns Ansage „nur bis dahin").
+    // „Starten" speichert die Werte am Plan und übergibt dann an den Puls, der
+    // in TradingView die ganze Kette fährt (30.08.2026, Schritt 2): Tab nach
+    // vorn → Unterkonto per External ID → Symbol → Order-Ticket → platzieren.
     _tpOrderOrbit = plan.route === 'tvplus'
     // Speichern-Editor statt Start-Popup (Finns Korrektur 28.08.2026 nach dem
     // ersten Live-Test): hier wird die Order (Richtung/TP/SL/Lots) AM PLAN
@@ -20565,7 +20587,7 @@
     if(startBtn){ startBtn.disabled = false; startBtn.textContent = _tpOrderOrbit ? 'Starten →' : 'Speichern' }
     const info = document.getElementById('tp-order-info')
     if(info) info.textContent = _tpOrderOrbit
-      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab und der Puls wechselt am PC zum TradingView-Tab. Platziert wird dort noch VON HAND (Ausfüllen kommt als nächste Stufe), Echo hedgt automatisch.`
+      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab, dann übernimmt der Puls am PC: TradingView-Tab → Unterkonto (External ID) → Symbol → Order-Ticket → platzieren. HÄNDE WEG, bis die Bestätigung kommt. Echo hedgt automatisch.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
     document.getElementById('tp-order-sl').value = plan.masterRisk ?? ''
@@ -20695,28 +20717,49 @@
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       renderTradePlans()
       if(_tpOrderOrbit){
-        // Orbit Schritt 1 (28.08.2026, Finns Ansage „nur bis dahin"): Werte
-        // sind am Plan — jetzt holt der Puls am PC NUR den TradingView-Tab
-        // nach vorn. Kein Ausfüllen, keine Order; das kommt in den nächsten
-        // Stufen. Der Fokus wandert weg vom Prophos-Tab, deshalb schließt
-        // das Popup bei Erfolg sofort (kein stehengebliebenes Modal, wenn
-        // Finn zurückwechselt).
+        // Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf: „1. Puls öffnet im
+        // gleichen chrome browser den Tradingview tap … 5. er öffnet das Trade-
+        // starten-Popup und gibt die lot anzahl ein + tp/sl in $ und öffnet
+        // schließlich die order"). Bis hierhin ist alles wie auf der Echo-Route
+        // — Plan planen, zwei Popups; erst dieser Knopf trennt die Wege.
+        // Der Fokus wandert weg vom Prophos-Tab und BLEIBT auf TradingView
+        // (der Reader wird im Hintergrund-Tab von Chrome gedrosselt), deshalb
+        // schließt das Popup bei Erfolg sofort.
         if(!MT5_LOCAL || typeof window.mtcApi !== 'function')
           return err('Order gespeichert — aber der Puls läuft nur am PC-Tab (localhost). Dort „Starten" klicken.')
+        // Das Unterkonto wählt Puls über die External ID (Finn: „name = EXT ID").
+        // Ohne sie würde er im Tradovate-Dropdown raten — auf einem Prop-Login
+        // liegen mehrere Konten nebeneinander, und der Fehlgriff wäre eine
+        // Order auf dem falschen Konto. Also lieber hier ehrlich stoppen.
+        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+        const extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
+        if(!extId)
+          return err(`Order gespeichert — aber „${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches Tradovate-Unterkonto er wählen soll: unter Accounts nachtragen.`)
         const startBtn = document.getElementById('tpOrderStart')
         if(startBtn) startBtn.disabled = true
-        if(msg){ msg.textContent = 'Order gespeichert — Puls wechselt zum TradingView-Tab…'; msg.className = 'modal-msg' }
+        if(msg){ msg.textContent = `Puls übernimmt: TradingView-Tab → Konto ${extId} → ${symbol} → Order-Ticket. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
         try{
-          const r = await window.mtcApi('tv-fokus', { method:'POST',
-            headers:{'Content-Type':'application/json'}, body:'{}' })
+          const r = await window.mtcApi('tv-order', { method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ ext_id: extId, symbol, richtung: _tpOrderDir,
+                                   volumen: lots,
+                                   sl_usd: autoSltp ? sl : null,
+                                   tp_usd: autoSltp ? tp : null }) })
           if(r && r.ok){
+            await tvPlanAufOpen(plan.id)
             document.getElementById('tpOrderModal').classList.remove('open')
-            if(typeof atToast === 'function') atToast(`Order gespeichert: ${_tpOrderDir.toUpperCase()} ${lots} ${symbol}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Puls ist am TradingView-Tab, Order dort von Hand platzieren. Echo hedgt.`, 'start')
+            if(typeof atToast === 'function') atToast(`✓ Order platziert: ${_tpOrderDir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Echo hedgt. Puls bleibt auf TradingView.`, 'start')
           } else {
-            err('Order gespeichert, aber TradingView-Tab nicht erreicht: ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
+            // retry_ok kommt vom Bot: false heißt „es kann gesendet worden
+            // sein". Dieselbe Regel wie auf der MT5-Route (18.08.2026) — bei
+            // Unklarheit erst nachsehen, nie blind wiederholen, sonst steht
+            // die Order zweimal im Markt.
+            const unklar = !!(r && r.retry_ok === false)
+            err((unklar ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten. · ' : 'Order gespeichert, aber nicht platziert: ')
+                + ((r && (r.msg || r.error)) || 'keine Antwort'))
           }
         }catch(e){
-          err('Order gespeichert, aber TradingView-Tab nicht erreicht: ' + (e && e.message || e))
+          err('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
         }finally{
           if(startBtn) startBtn.disabled = false
         }
@@ -20753,7 +20796,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-30.187'
+  const OS_TAB_BUILD = '2026-08-30.188'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

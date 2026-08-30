@@ -26,6 +26,7 @@ mt5.order_send existiert in dieser Datei bewusst NICHT.
 Aufruf (vom Panel als kurzlebiger Subprozess):
   python order_bot.py <config-datei.json> "<befehl-json>"
   python order_bot.py inspect <config-datei.json>     (Dialog-Dump, platziert nichts)
+  python order_bot.py tvorder "<befehl-json>"         (Orbit: Order auf TradingView)
 Befehl:  {"symbol": "NDX100", "richtung": "buy", "volumen": 0.2,
           "sl_usd": 100, "tp_usd": 300}
 Antwort: EINE JSON-Zeile auf stdout.
@@ -267,6 +268,231 @@ def ist_tradingview_fenster(titel, klasse):
     if t.startswith("devtools"):
         return False
     return "tradingview" in t
+
+
+# ---------------------------------------------------------------------------
+# ORBIT-PULS (30.08.2026) — rein rechnender Teil, ohne Windows testbar
+#
+# Der Puls klickt auf TradingView mit ECHTER Maus. Das Userscript (tv-reader
+# 0.3+) liefert dafuer die Rechtecke der Steuerelemente in CSS-Pixeln relativ
+# zum Viewport; hier stehen die Funktionen, die daraus Bildschirm-Pixel machen
+# und die entscheiden, ob Konto und Symbol ueberhaupt die richtigen sind.
+# Bewusst getrennt vom Klick-Teil: genau diese Entscheidungen sind es, die
+# still danebenliegen koennen — sie gehoeren in den Selftest.
+# ---------------------------------------------------------------------------
+
+# Kontrakt-Monatsbuchstaben (CME) — nur fuer die Wurzel-Erkennung
+_MONATE = "FGHJKMNQUVXZ"
+
+
+def tv_symbol_root(s):
+    """Wurzel eines Futures-Symbols: 'CME_MINI:MNQ1!' und 'MNQZ2025' und 'MNQ'
+    sind DASSELBE Instrument. TradingView schreibt je nach Stelle anders —
+    Chart-Knopf zeigt den Dauerkontrakt ('MNQ1!'), die Positionstabelle den
+    konkreten Monat ('MNQZ2025'), der Plan nur 'MNQ'.
+
+    Reihenfolge ist wichtig: das '1!' des Dauerkontrakts MUSS vor der Monats-
+    Regel weg, sonst frisst die Monatsregel das Q aus MNQ1! ('Q1' sieht aus wie
+    Monat+Jahr) und uebrig bliebe 'MN' — ein Symbol, das es nicht gibt, und der
+    Vergleich waere still falsch statt laut."""
+    s = (s or "").strip().upper()
+    if not s:
+        return ""
+    s = s.split()[0]                 # 'MNQ1! · 1m · CME' -> 'MNQ1!'
+    if ":" in s:
+        s = s.split(":")[-1]         # 'CME_MINI:MNQ1!' -> 'MNQ1!'
+    s = re.sub(r"[^A-Z0-9!]", "", s)
+    if s.endswith("!"):
+        return re.sub(r"\d+!$", "", s).rstrip("!")        # MNQ1! -> MNQ
+    m = re.match(r"^([A-Z]{1,4})[" + _MONATE + r"]\d{1,4}$", s)
+    if m:
+        return m.group(1)                                 # MNQZ2025 -> MNQ
+    return re.sub(r"\d+$", "", s)                         # Rest: Ziffern weg
+
+
+def tv_symbol_passt(aktiv, ziel):
+    """Zeigt der Chart schon das geplante Instrument? Verglichen wird die
+    Wurzel — der Kontraktmonat ist TradingViews Sache, nicht Finns."""
+    a, z = tv_symbol_root(aktiv), tv_symbol_root(ziel)
+    return bool(a) and bool(z) and a == z
+
+
+def _nur_alnum(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").strip().lower())
+
+
+def tv_konto_passt(text, ext_id):
+    """Traegt dieser Konto-Eintrag die External ID des Plans? Ein Tradovate-
+    Login hat bei Prop-Firmen mehrere Unterkonten; der Kontoname IST die
+    External ID (Finns Ansage 30.08.2026), steht im Dropdown aber mit Beiwerk
+    ('PA-1234567 · Tradeify · $50k'). Deshalb Teilstring — aber auf
+    alphanumerisch normalisiert, damit Bindestriche/Punkte/Leerzeichen nicht
+    entscheiden.
+
+    Riegel: External IDs unter 3 Zeichen werden NIE gematcht. Eine '12' faende
+    sonst jedes Konto, und ein Fehlgriff hier bedeutet: Order auf dem falschen
+    Prop-Konto."""
+    e = _nur_alnum(ext_id)
+    if len(e) < 3:
+        return False
+    return e in _nur_alnum(text)
+
+
+def tv_de_zahl(text):
+    """Deutsche Zahl aus der TradingView-Oberflaeche in float ('1.234,5' ->
+    1234.5). Gibt None zurueck, wenn nichts Zaehlbares drinsteht — ein
+    stillschweigendes 0.0 waere hier gefaehrlich (Mengen-Vergleich)."""
+    if text is None:
+        return None
+    s = str(text).strip()
+    s = re.sub(r"[^0-9,.\-]", "", s)
+    if not s or s in ("-", ",", "."):
+        return None
+    s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def tv_seite_passt(seite, richtung):
+    """'Long'/'Short' aus der Positionstabelle gegen buy/sell des Befehls."""
+    s = (seite or "").strip().lower()
+    r = (richtung or "").strip().lower()
+    if r == "buy":
+        return s.startswith("long") or s.startswith("kauf")
+    if r == "sell":
+        return s.startswith("short") or s.startswith("verkauf")
+    return False
+
+
+def tv_menge_summe(positionen, symbol, richtung):
+    """Summierte Kontraktzahl fuer (Symbol-Wurzel, Richtung) im Reader-Stand.
+
+    Summiert statt 'die eine Position gesucht': Tradovate NETTET pro Symbol,
+    und mehrere Monatskontrakte derselben Wurzel koennen nebeneinander liegen.
+    Die Bestaetigung nach dem Klick ist deshalb ein DIFFERENZ-Vergleich
+    (vorher/nachher), nicht 'gibt es eine Position' — sonst wuerde eine bereits
+    offene Position eine gar nicht ausgefuehrte Order 'bestaetigen'."""
+    root = tv_symbol_root(symbol)
+    summe = 0.0
+    for p in (positionen or []):
+        if tv_symbol_root(p.get("symbol")) != root:
+            continue
+        if not tv_seite_passt(p.get("seite"), richtung):
+            continue
+        m = tv_de_zahl(p.get("menge"))
+        if m is not None:
+            summe += abs(m)
+    return summe
+
+
+def tv_bildschirm_punkt(rect, geo, klient):
+    """CSS-Rechteck (Viewport) -> Bildschirm-Pixel-MITTE. (punkt, grund).
+
+    rect   = [x, y, breite, hoehe] in CSS-Pixeln, relativ zum Viewport
+    geo    = {'innerWidth','innerHeight','dpr'} vom Userscript
+    klient = (left, top, breite, hoehe) des Browser-KLIENTbereichs in echten
+             Pixeln, von Puls selbst per UIA gemessen
+
+    Rechenweg: devicePixelRatio traegt in Chrome BEIDES — Windows-Skalierung
+    und Seiten-Zoom —, ist also der einzige Faktor. Der Viewport klebt links am
+    Klientrand (innerWidth schliesst die Scrollleiste ein) und unten am
+    Klientrand; alles, was vertikal uebrig bleibt, ist Browser-Dekoration
+    (Tableiste + Adressleiste) und sitzt OBEN.
+
+    Der Breiten-Abgleich ist die Plausibilitaetsprobe: passt innerWidth*dpr
+    nicht zur gemessenen Klientbreite, stimmt eine der Annahmen nicht (DevTools
+    seitlich angedockt, falsches Fenster gemessen, Prozess nicht DPI-bewusst) —
+    dann wird ABGEBROCHEN statt geklickt. Ein danebenliegender Klick auf einer
+    Trading-Seite ist kein harmloser Fehlversuch."""
+    try:
+        rx, ry, rw, rh = [float(v) for v in rect[:4]]
+        dpr = float(geo.get("dpr") or 1) or 1.0
+        iw = float(geo.get("innerWidth") or 0)
+        ih = float(geo.get("innerHeight") or 0)
+        kl, kt, kb, kh = [float(v) for v in klient[:4]]
+    except (TypeError, ValueError, IndexError):
+        return None, "Geometrie unvollstaendig"
+    if iw <= 0 or ih <= 0 or kb <= 0 or kh <= 0:
+        return None, "Geometrie leer"
+    if abs(kb - iw * dpr) > 40:
+        return None, (f"Breiten-Abgleich schlaegt fehl: Fenster {int(kb)} px, "
+                      f"Seite {int(iw * dpr)} px (DevTools seitlich angedockt?)")
+    deko = kh - ih * dpr
+    if deko < -4 or deko > 400:
+        return None, (f"Browser-Dekoration unplausibel ({int(deko)} px) — "
+                      "Vollbild/geteiltes Fenster?")
+    x = kl + (rx + rw / 2.0) * dpr
+    y = kt + max(0.0, deko) + (ry + rh / 2.0) * dpr
+    if not (kl <= x <= kl + kb and kt <= y <= kt + kh):
+        return None, "Zielpunkt liegt ausserhalb des Browser-Fensters"
+    return (int(round(x)), int(round(y))), ""
+
+
+def tv_einheit_ist_geld(text):
+    """Steht der Einheiten-Umschalter des TP/SL-Felds auf Geld? Finn gibt TP/SL
+    in $ an — steht die Einheit auf Ticks oder %, waere derselbe getippte Wert
+    eine voellig andere Distanz. Deshalb wird sie gelesen und bei Zweifel
+    abgebrochen, statt eine Zahl in ein Feld unbekannter Bedeutung zu tippen."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    return ("$" in t or "usd" in t or "geld" in t or "money" in t
+            or "waehrung" in t or "währung" in t or "currency" in t)
+
+
+def tv_zahl_text(x):
+    """Zahl so schreiben, wie eine deutsche TradingView-Oberflaeche sie liest:
+    Komma als Dezimaltrenner, ganze Zahlen ohne Nachkomma (Kontrakte sind
+    ganzzahlig — '2,0' hat TV frueher schon als '20' missverstanden, gleiche
+    Fehlerklasse wie Finns 22-Einwand am MT5-Volumenfeld 18.08.2026)."""
+    f = float(x)
+    if abs(f - round(f)) < 1e-9:
+        return str(int(round(f)))
+    return ("%.4f" % f).rstrip("0").rstrip(".").replace(".", ",")
+
+
+def pruefe_tv_befehl(cmd):
+    """Liste von Fehlertexten; leer = Befehl ok. Eigene Pruefung statt
+    pruefe_befehl: der Orbit-Befehl braucht die External ID (welches Unterkonto)
+    und kennt keine MT5-Lots, sondern ganze Kontrakte."""
+    fehler = []
+    if not isinstance(cmd, dict):
+        return ["Befehl ist kein JSON-Objekt."]
+    if not str(cmd.get("ext_id") or "").strip():
+        fehler.append("ext_id fehlt (welches Unterkonto?)")
+    elif len(_nur_alnum(cmd.get("ext_id"))) < 3:
+        fehler.append("ext_id zu kurz — koennte das falsche Konto treffen")
+    if not str(cmd.get("symbol") or "").strip():
+        fehler.append("symbol fehlt")
+    if str(cmd.get("richtung") or "").lower() not in ("buy", "sell"):
+        fehler.append("richtung muss buy oder sell sein")
+    try:
+        v = float(cmd.get("volumen") or 0)
+        if not math.isfinite(v) or v <= 0:
+            fehler.append("volumen fehlt oder <= 0")
+        elif abs(v - round(v)) > 1e-9:
+            fehler.append("volumen muss ganze Kontrakte sein")
+    except (TypeError, ValueError):
+        fehler.append("volumen ist keine Zahl")
+    # SL/TP sind optional (Schalter im Order-Popup) — aber nur GEMEINSAM.
+    # Ein einzelner Wert waere eine halbe Absicherung, und welche Haelfte
+    # fehlt, sieht man am PC nicht mehr.
+    hat_sl = cmd.get("sl_usd") not in (None, "", 0)
+    hat_tp = cmd.get("tp_usd") not in (None, "", 0)
+    if hat_sl != hat_tp:
+        fehler.append("sl_usd und tp_usd nur gemeinsam (oder beide weglassen)")
+    for feld in ("sl_usd", "tp_usd"):
+        if cmd.get(feld) in (None, "", 0):
+            continue
+        try:
+            f = float(cmd[feld])
+            if not math.isfinite(f) or f <= 0:
+                fehler.append(f"{feld} muss > 0 sein")
+        except (TypeError, ValueError):
+            fehler.append(f"{feld} ist keine Zahl")
+    return fehler
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +875,525 @@ def modus_tvfokus():
     except Exception as e:
         res["msg"] = f"TV-Fokus fehlgeschlagen: {type(e).__name__}: {e}"
     print(json.dumps(res))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ORBIT-PULS SCHRITT 2 (30.08.2026) — die Order auf TradingView platzieren
+#
+# Finns Ablauf (wortwoertlich, 30.08.2026): "1. Puls oeffnet im gleichen chrome
+# browser den Tradingview tap  2. (wir sind in tradovate schon eingeloggt)
+# 3. er oeffnet den richtigen acc (name = EXT ID)  4. er oeffnet das richtige
+# asset (NQ/MNQ)  5. er oeffnet das Trade-starten-Popup, gibt Lots + TP/SL in $
+# ein und oeffnet schliesslich die order."
+#
+# Arbeitsteilung: das Userscript sind die AUGEN (findet die Steuerelemente,
+# meldet Rechtecke), der Puls sind HAENDE UND KOPF (entscheidet, klickt mit
+# echter Maus). Warum nicht das Userscript klicken lassen: ein element.click()
+# traegt isTrusted=false — die ganze Puls-Doktrin vom 15.08.2026 ist
+# "muss wie ein Handklick aussehen".
+#
+# ZWEI Doktrinen aus dem MT5-Puls gelten hier unveraendert:
+#  - Bestaetigung NIE aus der UI, sondern aus dem Positions-Snapshot des
+#    Readers (dort, wo beim MT5-Bot der Lese-EA steht).
+#  - retry_ok=True nur, solange sicher NICHTS gesendet wurde. Ab dem Klick auf
+#    den Senden-Knopf ist jede Unsicherheit retry_ok=False.
+#
+# Der PC bleibt am Ende BEWUSST auf TradingView stehen (kein Prophos-Heimweg
+# wie bei den MT5-Modi): Chrome drosselt setInterval in Hintergrund-Tabs auf
+# ~1/s und friert sie nach Minuten ganz ein — der Reader ist dann blind und
+# der Hedge haengt. Wer Prophos daneben braucht, gibt TradingView ein EIGENES
+# Fenster (dann laufen beide sichtbar weiter).
+# ═══════════════════════════════════════════════════════════════════════════
+
+_TV_BASIS = "http://127.0.0.1:8790"
+
+
+def _tv_http(pfad, daten=None, timeout=3.0):
+    """Kurzer JSON-Aufruf an den lokalen Reader-Server. None = nicht erreichbar."""
+    import urllib.request
+    try:
+        roh = json.dumps(daten).encode("utf-8") if daten is not None else None
+        req = urllib.request.Request(
+            _TV_BASIS + pfad, data=roh,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def _tv_bf(nach=None, timeout=8.0):
+    """Bedienfeld holen — optional erst einen Stand, der NACH dem Zeitpunkt
+    'nach' beim Server ankam. Das ist der Beweis-Mechanismus des ganzen Modus:
+    nach jedem Klick wird nicht gehofft, dass die Seite reagiert hat, sondern
+    auf einen frisch gelesenen Stand gewartet."""
+    ende = time.time() + timeout
+    letzt = None
+    while time.time() < ende:
+        d = _tv_http("/bedienfeld")
+        if d and d.get("ok"):
+            letzt = d
+            empfangen = time.time() - float(d.get("alter_s") or 0.0)
+            if nach is None or empfangen >= nach:
+                return d
+        time.sleep(0.15)
+    return letzt if nach is None else None
+
+
+def _tv_positionen(timeout=3.0):
+    """(positionen, an) aus dem Reader — (None, None) wenn er nicht antwortet."""
+    d = _tv_http("/positions", timeout=timeout)
+    if not d:
+        return None, None
+    return (d.get("positionen") or []), (d.get("an") is not False)
+
+
+def _klient_rechteck(hwnd):
+    """(left, top, breite, hoehe) des KLIENTbereichs in echten Bildschirm-
+    Pixeln. Bewusst nicht w.rectangle(): das Fenster-Rechteck enthaelt unter
+    Windows 10/11 die unsichtbaren Anfass-Raender (~8 px links/rechts/unten) —
+    damit waere jeder Klick um diese 8 px verschoben, und zwar lautlos."""
+    import ctypes
+    import ctypes.wintypes as wt
+    r = wt.RECT()
+    ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(r))
+    pt = wt.POINT(0, 0)
+    ctypes.windll.user32.ClientToScreen(hwnd, ctypes.byref(pt))
+    return (int(pt.x), int(pt.y), int(r.right - r.left), int(r.bottom - r.top))
+
+
+def _dpi_bewusst():
+    """Prozess DPI-bewusst machen — NUR in diesem Modus (eigener kurzlebiger
+    Subprozess, die MT5-Wege bleiben unberuehrt). Ohne das liefert Windows
+    virtualisierte, also gelogene Fenster-Koordinaten, sobald die Anzeige auf
+    125/150 % steht — und der Breiten-Abgleich in tv_bildschirm_punkt wuerde
+    genau daran scheitern (laut, immerhin)."""
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # PER_MONITOR_DPI_AWARE
+        return True
+    except Exception:
+        pass
+    try:
+        return bool(ctypes.windll.user32.SetProcessDPIAware())
+    except Exception:
+        return False
+
+
+def _tv_tab_suchen(w):
+    """Das TabItem mit TradingView in der Tableiste dieses Browser-Fensters.
+    Deckt den Fall ab, den Schritt 1 (tvfokus) noch nicht konnte: TradingView
+    als HINTERGRUND-Tab — der Fenstertitel zeigt immer nur den aktiven Tab."""
+    try:
+        kinder = w.descendants(control_type="TabItem", depth=12)
+    except Exception:
+        try:
+            kinder = w.descendants(control_type="TabItem")
+        except Exception:
+            return None
+    for it in kinder:
+        try:
+            n = (it.window_text() or "").strip().lower()
+        except Exception:
+            continue
+        if not n or n.startswith("devtools"):
+            continue
+        if "tradingview" in n:
+            return it
+    return None
+
+
+def _tv_fenster_holen(trail):
+    """Browser-Fenster mit TradingView nach vorn — Titel zuerst (aktiver Tab),
+    sonst ueber die Tableiste. (fenster, fehlertext)."""
+    from pywinauto import Desktop
+    kandidaten = []
+    for w in Desktop(backend="uia").windows():
+        try:
+            titel = w.window_text() or ""
+            klasse = w.element_info.class_name
+        except Exception:
+            continue
+        if (klasse or "") not in BROWSER_KLASSEN:
+            continue
+        if ist_tradingview_fenster(titel, klasse):
+            try:
+                if w.is_minimized():
+                    w.restore()
+                    _warte(0.2, 0.25)
+                w.set_focus()
+            except Exception:
+                pass
+            trail.append("TradingView war schon der aktive Tab")
+            return w, ""
+        kandidaten.append(w)
+
+    for w in kandidaten:
+        tab = _tv_tab_suchen(w)
+        if not tab:
+            continue
+        try:
+            if w.is_minimized():
+                w.restore()
+                _warte(0.25, 0.3)
+            w.set_focus()
+            _warte(0.2, 0.25)
+            r = tab.rectangle()
+            x = int((r.left + r.right) / 2)
+            y = int((r.top + r.bottom) / 2)
+            _maus_fahren(x, y)
+            _klick_absolut(x, y)
+            _warte(0.5, 0.4)
+            trail.append(f"TradingView-Tab angeklickt ({(tab.window_text() or '')[:50]})")
+            return w, ""
+        except Exception as e:
+            trail.append(f"Tab-Klick fehlgeschlagen ({type(e).__name__})")
+            continue
+
+    return None, ("Kein Browser-Fenster mit TradingView gefunden — weder als "
+                  "aktiver Tab noch in einer Tableiste. Laeuft Chrome mit "
+                  "offenem TradingView?")
+
+
+def _tv_klick(rect, geo, klient, name, trail, doppel=False):
+    """Ein gemeldetes Steuerelement anklicken: Punkt rechnen, Maus sichtbar
+    hinfahren, EIN SendInput-Batch (Parsec-Lehre 16.08.). (ok, fehlertext)."""
+    punkt, grund = tv_bildschirm_punkt(rect, geo, klient)
+    if not punkt:
+        trail.append(f"{name}: {grund}")
+        return False, f"{name} nicht anklickbar — {grund}"
+    _maus_fahren(*punkt)
+    if not _klick_absolut(punkt[0], punkt[1], doppel=doppel):
+        trail.append(f"{name}: SendInput abgelehnt")
+        return False, f"Klick auf {name} wurde von Windows abgelehnt"
+    trail.append(f"{name} geklickt @{punkt[0]},{punkt[1]}")
+    return True, ""
+
+
+def _tv_tippen(wert, name, trail):
+    """In das zuvor angeklickte Feld tippen — echte Tastatur-Events (SendInput),
+    Feld vorher garantiert leeren. Ruecklesen passiert NICHT hier, sondern eine
+    Ebene hoeher am naechsten Bedienfeld-Stand: das Userscript liest den
+    tatsaechlichen value aus dem DOM, was hier keine UIA-Abfrage koennte."""
+    try:
+        from pywinauto import keyboard
+    except ImportError:
+        return False, "pywinauto fehlt"
+    try:
+        keyboard.send_keys("^a{DELETE}")
+        _warte(0.1, 0.12)
+        keyboard.send_keys(str(wert), with_spaces=False)
+        _warte(0.15, 0.15)
+        trail.append(f"{name} getippt: {wert}")
+        return True, ""
+    except Exception as e:
+        trail.append(f"{name} tippen fehlgeschlagen: {type(e).__name__}")
+        return False, f"{name} liess sich nicht eintippen"
+
+
+def _tv_element(bf, *pfad):
+    """Ein Steuerelement aus dem Bedienfeld holen — nur wenn es EINDEUTIG
+    gefunden wurde. Ein Treffer mit 'fehlt' (mehrdeutige Signatur) gilt
+    ausdruecklich als NICHT gefunden: lieber ehrlich abbrechen als auf gut
+    Glueck einen von mehreren Kandidaten anklicken."""
+    d = bf or {}
+    for k in pfad:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    if isinstance(d, dict) and d.get("rect") and not d.get("fehlt"):
+        return d
+    return None
+
+
+def modus_tvorder(cmd):
+    """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
+    bevor der naechste beginnt."""
+    trail = []
+    res = {"ok": False, "retry_ok": True, "msg": "", "trail": "",
+           "schritt": "start"}
+
+    def raus(msg, schritt, retry_ok=True):
+        res["msg"] = msg
+        res["schritt"] = schritt
+        res["retry_ok"] = retry_ok
+        res["trail"] = " → ".join(trail)
+        # Fehlversuch = Beweise fuer die naechste Runde sammeln (gleiche Rolle
+        # wie modus_inspect beim MT5-Puls, nur fuer eine Webseite): der Server
+        # laesst das Userscript 60 s lang seinen Kandidaten-Dump mitschicken.
+        if not res["ok"]:
+            _tv_http("/dump-an", {})
+        print(json.dumps(res))
+        return
+
+    fehler = pruefe_tv_befehl(cmd)
+    if fehler:
+        return raus("Befehl unvollstaendig: " + " · ".join(fehler), "befehl")
+
+    if is_paused():
+        return raus("Echo ist pausiert — es wird keine Order platziert.", "pause")
+
+    try:
+        from pywinauto import Desktop  # noqa: F401  (nur Verfuegbarkeits-Probe)
+    except ImportError:
+        return raus("pywinauto fehlt (nur auf dem PC lauffaehig).", "start")
+
+    _dpi_bewusst()
+    _warte(0.1, 0.5)   # Start-Versatz (Jitter-Dauerregel 28.08.2026)
+
+    # --- Schritt 0: der Reader MUSS leben ---------------------------------
+    # Vor dem Fensterwechsel geprueft: ohne Reader gaebe es hinterher keine
+    # Bestaetigung, und eine unbestaetigte Order ist genau der Zustand, den
+    # die ganze Doktrin vermeiden will.
+    pos_vorher, an = _tv_positionen()
+    if pos_vorher is None:
+        return raus("TV-Reader antwortet nicht (127.0.0.1:8790) — erst "
+                    "reader-server starten.", "reader")
+    if not an:
+        return raus("TV-Reader ist pausiert — er wuerde die neue Position nie "
+                    "melden. Erst in der Orbit-Ansicht fortsetzen.", "reader")
+    menge_vorher = tv_menge_summe(pos_vorher, cmd["symbol"], cmd["richtung"])
+    trail.append(f"Reader lebt, {len(pos_vorher)} Pos, Ausgangsmenge {menge_vorher:g}")
+
+    # --- Schritt 1: TradingView-Tab nach vorn ------------------------------
+    w, f = _tv_fenster_holen(trail)
+    if not w:
+        return raus(f, "fenster")
+    try:
+        hwnd = w.handle
+    except Exception:
+        return raus("Browser-Fenster ohne Handle — Fenster neu oeffnen.", "fenster")
+
+    def klient():
+        return _klient_rechteck(hwnd)
+
+    t0 = time.time()
+    bf = _tv_bf(nach=t0, timeout=8.0)
+    if not bf:
+        return raus("Kein frisches Bedienfeld vom TradingView-Tab — laeuft das "
+                    "Userscript in Version 0.3+? (Tampermonkey-Badge unten "
+                    "rechts muss gruen sein.)", "bedienfeld")
+    if not isinstance(bf.get("geo"), dict) or not bf["geo"].get("innerWidth"):
+        # Das Userscript meldet bei einem internen Fehler nur {ts, fehler} —
+        # ohne geo{} waere jede Koordinatenrechnung geraten. Lieber hier laut
+        # abbrechen als spaeter irgendwohin klicken.
+        return raus("Bedienfeld ohne Geometrie" +
+                    (f" ({bf.get('fehler')})" if bf.get("fehler") else "") +
+                    " — Userscript-Version pruefen (0.3+) und TradingView neu laden.",
+                    "bedienfeld")
+    if bf.get("sprache_fremd"):
+        return raus("TradingView laeuft nicht auf Deutsch — der Reader liest "
+                    "die deutschen Spalten. Profilmenue → Sprache → Deutsch, "
+                    "dann F5.", "sprache")
+
+    # --- Schritt 3: richtiges Unterkonto -----------------------------------
+    ext = str(cmd["ext_id"]).strip()
+    if not tv_konto_passt(bf.get("konto", {}).get("aktiv"), ext):
+        schalter = _tv_element(bf, "konto", "schalter")
+        if not schalter:
+            return raus(f"Konto steht auf '{bf.get('konto', {}).get('aktiv') or '?'}', "
+                        f"nicht auf {ext} — und der Konto-Umschalter wurde nicht "
+                        "eindeutig gefunden. Konto von Hand umstellen.", "konto")
+        ok, f = _tv_klick(schalter["rect"], bf["geo"], klient(), "Konto-Umschalter", trail)
+        if not ok:
+            return raus(f, "konto")
+        _warte(0.5, 0.4)
+        t1 = time.time()
+        bf = _tv_bf(nach=t1, timeout=6.0) or bf
+        treffer = [e for e in (bf.get("konto", {}).get("eintraege") or [])
+                   if tv_konto_passt(e.get("text"), ext)]
+        if len(treffer) != 1:
+            return raus(f"Konto {ext} in der Liste nicht eindeutig gefunden "
+                        f"({len(treffer)} Treffer bei "
+                        f"{len(bf.get('konto', {}).get('eintraege') or [])} Eintraegen). "
+                        "Konto von Hand waehlen.", "konto")
+        ok, f = _tv_klick(treffer[0]["rect"], bf["geo"], klient(),
+                          f"Konto {ext}", trail)
+        if not ok:
+            return raus(f, "konto")
+        _warte(0.8, 0.5)
+        bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
+        if not tv_konto_passt(bf.get("konto", {}).get("aktiv"), ext):
+            return raus(f"Konto liess sich nicht auf {ext} umstellen (steht auf "
+                        f"'{bf.get('konto', {}).get('aktiv') or '?'}'). Von Hand "
+                        "umstellen.", "konto")
+    trail.append(f"Konto steht auf {ext}")
+
+    # --- Schritt 4: richtiges Instrument -----------------------------------
+    ziel_sym = str(cmd["symbol"]).strip()
+    if not tv_symbol_passt(bf.get("symbol", {}).get("aktiv"), ziel_sym):
+        knopf = _tv_element(bf, "symbol", "knopf")
+        if not knopf:
+            return raus(f"Chart zeigt '{bf.get('symbol', {}).get('aktiv') or '?'}', "
+                        f"statt {ziel_sym} — und die Symbol-Suche wurde nicht "
+                        "eindeutig gefunden. Symbol von Hand wechseln.", "symbol")
+        ok, f = _tv_klick(knopf["rect"], bf["geo"], klient(), "Symbol-Suche", trail)
+        if not ok:
+            return raus(f, "symbol")
+        _warte(0.6, 0.4)
+        bf = _tv_bf(nach=time.time(), timeout=6.0) or bf
+        feld = _tv_element(bf, "symbol", "suchfeld")
+        if feld:
+            ok, f = _tv_klick(feld["rect"], bf["geo"], klient(), "Suchfeld", trail)
+            if not ok:
+                return raus(f, "symbol")
+        # Ohne Klick ins Feld tippen ist der Normalfall: TradingView setzt den
+        # Fokus beim Oeffnen der Suche selbst ins Eingabefeld.
+        ok, f = _tv_tippen(ziel_sym.upper(), "Symbol", trail)
+        if not ok:
+            return raus(f, "symbol")
+        _warte(0.8, 0.5)
+        try:
+            from pywinauto import keyboard
+            keyboard.send_keys("{ENTER}")
+        except Exception:
+            return raus("Enter liess sich nicht senden — Symbol von Hand waehlen.",
+                        "symbol")
+        _warte(1.0, 0.6)
+        bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
+        if not tv_symbol_passt(bf.get("symbol", {}).get("aktiv"), ziel_sym):
+            return raus(f"Symbol liess sich nicht auf {ziel_sym} stellen (Chart "
+                        f"zeigt '{bf.get('symbol', {}).get('aktiv') or '?'}'). "
+                        "Von Hand wechseln.", "symbol")
+    trail.append(f"Chart zeigt {ziel_sym}")
+
+    # --- Schritt 5a: Order-Ticket oeffnen ----------------------------------
+    richtung = str(cmd["richtung"]).lower()
+    knopf = _tv_element(bf, "panel", "kaufen" if richtung == "buy" else "verkaufen")
+    if not knopf:
+        return raus(f"{'Kaufen' if richtung == 'buy' else 'Verkaufen'}-Knopf im "
+                    "Handelspanel nicht eindeutig gefunden — Order von Hand "
+                    "platzieren. (Der naechste Versuch bringt einen "
+                    "Kandidaten-Dump mit.)", "ticket")
+    ok, f = _tv_klick(knopf["rect"], bf["geo"], klient(),
+                      "Kaufen" if richtung == "buy" else "Verkaufen", trail)
+    if not ok:
+        return raus(f, "ticket")
+    _warte(0.9, 0.6)
+    bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
+    if not (bf.get("ticket") or {}).get("offen"):
+        return raus("Order-Ticket ging nicht auf — im TradingView nachsehen, ob "
+                    "ein Dialog haengt.", "ticket")
+    trail.append("Order-Ticket offen")
+
+    # --- Schritt 5b: Menge, TP, SL -----------------------------------------
+    menge_el = _tv_element(bf, "ticket", "menge")
+    if not menge_el:
+        return raus("Mengenfeld im Order-Ticket nicht eindeutig gefunden — "
+                    "Ticket steht offen, Order NICHT platziert. Von Hand "
+                    "ausfuellen oder abbrechen.", "menge")
+    ok, f = _tv_klick(menge_el["rect"], bf["geo"], klient(), "Mengenfeld", trail)
+    if not ok:
+        return raus(f, "menge")
+    ok, f = _tv_tippen(tv_zahl_text(cmd["volumen"]), "Menge", trail)
+    if not ok:
+        return raus(f, "menge")
+
+    mit_sltp = cmd.get("sl_usd") not in (None, "", 0)
+    if mit_sltp:
+        for feld, einheit, wert, name in (
+                ("sl", "sl_einheit", cmd["sl_usd"], "Stop Loss"),
+                ("tp", "tp_einheit", cmd["tp_usd"], "Take Profit")):
+            # Pro Feld ein FRISCHER Stand: das Ticket rendert nach jeder
+            # Eingabe neu (Bracket-Zeilen klappen auf, Zahlen formatieren
+            # sich), ein Rechteck von vor zwei Klicks waere dann verschoben.
+            bf = _tv_bf(nach=time.time(), timeout=6.0) or bf
+            el = _tv_element(bf, "ticket", feld)
+            if not el:
+                return raus(f"{name}-Feld im Order-Ticket nicht gefunden — Ticket "
+                            "steht offen, Order NICHT platziert. Entweder von "
+                            "Hand ausfuellen oder den SL/TP-Schalter im Order-"
+                            "Popup ausschalten.", "sltp")
+            eh = (bf.get("ticket") or {}).get(einheit) or {}
+            if not tv_einheit_ist_geld(eh.get("text")):
+                return raus(f"{name} steht nicht auf Geld/$ (Einheit: "
+                            f"'{(eh.get('text') or '?')[:20]}') — {wert} waere "
+                            "dort eine ganz andere Distanz. Einheit im Ticket "
+                            "auf $ stellen, dann erneut. Order NICHT platziert.",
+                            "sltp")
+            ok, f = _tv_klick(el["rect"], bf["geo"], klient(), f"{name}-Feld", trail)
+            if not ok:
+                return raus(f, "sltp")
+            ok, f = _tv_tippen(tv_zahl_text(wert), name, trail)
+            if not ok:
+                return raus(f, "sltp")
+
+    # --- Schritt 5c: alles ZURUECKLESEN, bevor geklickt wird ---------------
+    # Das Userscript liest den echten DOM-value. Erst wenn Menge (und ggf.
+    # SL/TP) beweisbar drinstehen, faellt der unumkehrbare Klick.
+    bf = _tv_bf(nach=time.time(), timeout=8.0)
+    if not bf:
+        return raus("Kein frischer Bedienfeld-Stand zum Ruecklesen — Order NICHT "
+                    "platziert, Ticket steht offen.", "ruecklesen")
+    soll = float(cmd["volumen"])
+    ist = tv_de_zahl(((bf.get("ticket") or {}).get("menge") or {}).get("wert"))
+    if ist is None or abs(ist - soll) > 1e-9:
+        return raus(f"Menge im Ticket steht auf '{ist if ist is not None else '?'}' "
+                    f"statt {tv_zahl_text(soll)} — Order NICHT platziert.",
+                    "ruecklesen")
+    trail.append(f"Menge zurueckgelesen: {tv_zahl_text(ist)}")
+    if mit_sltp:
+        for feld, wert, name in (("sl", cmd["sl_usd"], "Stop Loss"),
+                                 ("tp", cmd["tp_usd"], "Take Profit")):
+            ist = tv_de_zahl(((bf.get("ticket") or {}).get(feld) or {}).get("wert"))
+            if ist is None or abs(ist - float(wert)) > 0.01:
+                return raus(f"{name} im Ticket steht auf "
+                            f"'{ist if ist is not None else '?'}' statt "
+                            f"{tv_zahl_text(wert)} — Order NICHT platziert.",
+                            "ruecklesen")
+            trail.append(f"{name} zurueckgelesen: {tv_zahl_text(ist)}")
+
+    senden = _tv_element(bf, "ticket", "senden")
+    if not senden:
+        return raus("Senden-Knopf im Order-Ticket nicht eindeutig gefunden — "
+                    "alles ist ausgefuellt, der letzte Klick fehlt. Im "
+                    "TradingView selbst bestaetigen.", "senden")
+
+    # ═══ AB HIER UNUMKEHRBAR ═══════════════════════════════════════════════
+    ok, f = _tv_klick(senden["rect"], bf["geo"], klient(), "Order senden", trail)
+    if not ok:
+        # Der Klick kam nachweislich nicht raus (SendInput abgelehnt oder Punkt
+        # unplausibel) — also ist nichts gesendet und retry_ok bleibt True.
+        return raus(f, "senden")
+    res["retry_ok"] = False
+    trail.append("Senden geklickt — ab hier zaehlt nur noch der Reader")
+
+    # --- Bestaetigung: NUR aus dem Positions-Snapshot -----------------------
+    ende = time.time() + 25.0
+    while time.time() < ende:
+        _warte(0.4, 0.3)
+        pos, an2 = _tv_positionen()
+        if pos is None:
+            continue
+        jetzt = tv_menge_summe(pos, cmd["symbol"], cmd["richtung"])
+        if jetzt - menge_vorher >= soll - 1e-9:
+            res["ok"] = True
+            res["menge"] = jetzt - menge_vorher
+            treffer = next((p for p in pos
+                            if tv_symbol_root(p.get("symbol")) == tv_symbol_root(cmd["symbol"])
+                            and tv_seite_passt(p.get("seite"), cmd["richtung"])), {})
+            res["einstieg"] = treffer.get("einstieg")
+            res["tv_symbol"] = treffer.get("symbol")
+            trail.append(f"Position bestaetigt: +{jetzt - menge_vorher:g} @ "
+                         f"{treffer.get('einstieg') or '?'}")
+            return raus(f"Order platziert: {richtung.upper()} "
+                        f"{tv_zahl_text(soll)} {treffer.get('symbol') or ziel_sym}"
+                        f" @ {treffer.get('einstieg') or '?'}"
+                        + (f" · TP ${tv_zahl_text(cmd['tp_usd'])} / SL "
+                           f"${tv_zahl_text(cmd['sl_usd'])}" if mit_sltp
+                           else " · ohne SL/TP"),
+                        "fertig", retry_ok=False)
+
+    # Kein Positionszuwachs in 25 s. Das kann Ablehnung sein, ein zweiter
+    # Bestaetigungsschritt im Ticket oder eine haengende Verbindung — welches
+    # davon, kann der Bot NICHT wissen, und genau deshalb nie "nochmal".
+    bf_ende = _tv_bf(timeout=3.0) or {}
+    offen = (bf_ende.get("ticket") or {}).get("offen")
+    return raus("Ergebnis UNKLAR: 25 s nach dem Senden meldet der Reader keine "
+                "neue Position" + (" und das Order-Ticket steht noch offen "
+                "(Bestaetigungsschritt?)" if offen else "") +
+                ". Erst in TradingView nachsehen, ob die Order liegt — NICHT "
+                "blind erneut starten.", "unklar", retry_ok=False)
 
 
 def _ist_order_dialog(win):
@@ -2300,6 +3045,31 @@ def main():
         # Orbit Schritt 1 (28.08.2026): nur den TradingView-Tab nach vorn —
         # wie mousetest ohne Config, und ohne den Prophos-Heimweg unten.
         modus_tvfokus()
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
+        # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView
+        # platzieren. Wie tvfokus OHNE Config-Datei — der Weg fuehrt durch den
+        # Browser, nicht durch ein MT5-Terminal; das Zielkonto steht als
+        # ext_id IM BEFEHL. Und wie tvfokus ohne den Prophos-Heimweg unten:
+        # der PC muss auf TradingView stehen bleiben, sonst drosselt Chrome
+        # den Reader im Hintergrund-Tab und der Hedge wird blind.
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "retry_ok": True,
+                              "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvorder(cmd)
+        except Exception as e:
+            # Ein stummer Bot ist der Diagnose-Killer (Lehre 15.08.2026) — und
+            # hier ist er zusaetzlich gefaehrlich: das Panel wuesste nicht, ob
+            # vor oder nach dem Senden-Klick abgebrochen wurde. Deshalb ist
+            # retry_ok bei einem UNERWARTETEN Fehler immer False.
+            print(json.dumps({"ok": False, "retry_ok": False, "schritt": "absturz",
+                              "msg": f"TV-Order abgebrochen: {type(e).__name__}: {e} — "
+                                     "erst in TradingView nachsehen, ob eine Order "
+                                     "liegt, bevor irgendetwas wiederholt wird."}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "inspect":
         modus_inspect(sys.argv[2])

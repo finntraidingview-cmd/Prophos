@@ -500,6 +500,108 @@ def main():
         and not order_bot.ist_tradingview_fenster("tradingview", "ConsoleWindowClass")
         and not order_bot.ist_tradingview_fenster("", "Chrome_WidgetWin_1")
         and not order_bot.ist_tradingview_fenster("TradingView", order_bot.MT5_KLASSE))
+
+    # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
+    # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
+    # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
+    chk("TV: Symbol-Wurzel — Dauerkontrakt, Monatskontrakt, Boerse, blanke Wurzel",
+        order_bot.tv_symbol_root("MNQ1!") == "MNQ"
+        and order_bot.tv_symbol_root("CME_MINI:MNQ1!") == "MNQ"
+        and order_bot.tv_symbol_root("MNQZ2025") == "MNQ"
+        and order_bot.tv_symbol_root("NQZ2026") == "NQ"
+        and order_bot.tv_symbol_root("MNQ") == "MNQ"
+        and order_bot.tv_symbol_root("MNQ1! 1m CME") == "MNQ"
+        and order_bot.tv_symbol_root("") == "")
+    # Die Falle, an der eine naive Monatsregel scheitert: in 'MNQ1!' sieht 'Q1'
+    # aus wie Monat+Jahr — uebrig bliebe 'MN', und der Vergleich waere still
+    # falsch statt laut.
+    chk("TV: MNQ und NQ sind NIE dasselbe Instrument",
+        order_bot.tv_symbol_passt("MNQ1!", "MNQ")
+        and order_bot.tv_symbol_passt("MNQZ2025", "MNQ")
+        and not order_bot.tv_symbol_passt("MNQ1!", "NQ")
+        and not order_bot.tv_symbol_passt("NQZ2026", "MNQ")
+        and not order_bot.tv_symbol_passt("", "MNQ"))
+    chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
+        order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
+        and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
+        and not order_bot.tv_konto_passt("PA-1234567", "PA-7654321"))
+    chk("TV: zu kurze External ID trifft NIE ein Konto (Fehlgriff = falsches Konto)",
+        not order_bot.tv_konto_passt("PA-12", "12")
+        and not order_bot.tv_konto_passt("PA-1234567", "")
+        and not order_bot.tv_konto_passt("PA-1234567", None))
+    chk("TV: deutsche Zahlen aus der Oberflaeche, Leeres bleibt None",
+        order_bot.tv_de_zahl("1.234,5") == 1234.5
+        and order_bot.tv_de_zahl("2") == 2.0
+        and order_bot.tv_de_zahl("-3") == -3.0
+        and order_bot.tv_de_zahl("") is None
+        and order_bot.tv_de_zahl("-") is None
+        and order_bot.tv_de_zahl(None) is None)
+    _POS = [{"symbol": "MNQZ2025", "seite": "Long",  "menge": "2"},
+            {"symbol": "MNQH2026", "seite": "Long",  "menge": "1"},
+            {"symbol": "MNQZ2025", "seite": "Short", "menge": "5"},
+            {"symbol": "NQZ2025",  "seite": "Long",  "menge": "9"}]
+    chk("TV: Mengen-Summe zaehlt nur gleiche Wurzel UND gleiche Richtung",
+        order_bot.tv_menge_summe(_POS, "MNQ", "buy") == 3.0
+        and order_bot.tv_menge_summe(_POS, "MNQ", "sell") == 5.0
+        and order_bot.tv_menge_summe(_POS, "NQ", "buy") == 9.0
+        and order_bot.tv_menge_summe([], "MNQ", "buy") == 0.0)
+    # Koordinaten: dpr traegt Windows-Skalierung UND Seiten-Zoom, die
+    # Browser-Dekoration sitzt oben, der Viewport klebt links am Klientrand.
+    _P, _G = order_bot.tv_bildschirm_punkt(
+        [100, 50, 40, 20],
+        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 100, 1920, 980))
+    chk("TV: CSS-Punkt -> Bildschirm (100 % Skalierung, 80 px Browser-Kopf)", _P == (120, 240))
+    _P, _G = order_bot.tv_bildschirm_punkt(
+        [100, 50, 40, 20],
+        {"dpr": 1.5, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 2880, 1500))
+    chk("TV: CSS-Punkt -> Bildschirm (150 % Skalierung)", _P == (180, 240))
+    # Der Breiten-Abgleich ist der Riegel gegen den lautlosen Fehlklick: passt
+    # innerWidth*dpr nicht zur gemessenen Klientbreite, stimmt eine Annahme
+    # nicht (DevTools seitlich, falsches Fenster, Prozess nicht DPI-bewusst).
+    _P, _G = order_bot.tv_bildschirm_punkt(
+        [100, 50, 40, 20],
+        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1000, 980))
+    chk("TV: Breiten-Abgleich schlaegt fehl -> KEIN Klick, mit Begruendung",
+        _P is None and "Breiten" in _G)
+    _P, _G = order_bot.tv_bildschirm_punkt(
+        [100, 50, 40, 20],
+        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 1500))
+    chk("TV: unplausible Browser-Dekoration -> KEIN Klick", _P is None and "Dekoration" in _G)
+    _P, _G = order_bot.tv_bildschirm_punkt(
+        [5000, 50, 40, 20],
+        {"dpr": 1, "innerWidth": 1920, "innerHeight": 900}, (0, 0, 1920, 980))
+    chk("TV: Ziel ausserhalb des Fensters -> KEIN Klick", _P is None)
+    chk("TV: TP/SL-Einheit muss Geld sein — Ticks/Prozent zaehlen NIE",
+        order_bot.tv_einheit_ist_geld("$")
+        and order_bot.tv_einheit_ist_geld("USD")
+        and order_bot.tv_einheit_ist_geld("Geld")
+        and not order_bot.tv_einheit_ist_geld("Ticks")
+        and not order_bot.tv_einheit_ist_geld("%")
+        and not order_bot.tv_einheit_ist_geld(""))
+    chk("TV: Zahlen deutsch schreiben — ganze Kontrakte ohne Nachkomma",
+        order_bot.tv_zahl_text(2) == "2"
+        and order_bot.tv_zahl_text(2.0) == "2"
+        and order_bot.tv_zahl_text(300) == "300"
+        and order_bot.tv_zahl_text(2.5) == "2,5")
+    chk("TV: gueltiger Orbit-Befehl (mit und ohne SL/TP)",
+        order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                    "richtung": "buy", "volumen": 2,
+                                    "sl_usd": 100, "tp_usd": 300}) == []
+        and order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                        "richtung": "sell", "volumen": 1}) == [])
+    chk("TV: fehlende/zu kurze External ID wird gemeldet",
+        len(order_bot.pruefe_tv_befehl({"symbol": "MNQ", "richtung": "buy", "volumen": 1})) == 1
+        and len(order_bot.pruefe_tv_befehl({"ext_id": "12", "symbol": "MNQ",
+                                            "richtung": "buy", "volumen": 1})) == 1)
+    chk("TV: halbe Absicherung (nur SL oder nur TP) wird abgelehnt",
+        len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                        "richtung": "buy", "volumen": 1,
+                                        "sl_usd": 100})) == 1)
+    chk("TV: Bruchteil-Kontrakte und 0/negativ werden abgelehnt",
+        len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                        "richtung": "buy", "volumen": 1.5})) == 1
+        and len(order_bot.pruefe_tv_befehl({"ext_id": "PA-1234567", "symbol": "MNQ",
+                                            "richtung": "kauf", "volumen": 0})) == 2)
     # Remote-Close (28.08.2026): der Menuepunkt, der frueher der verbotene war —
     # jetzt Ziel, darum Praefix-Match und harter Alle-/Massen-Ausschluss.
     chk("CLOSE: Menuepunkt 'Position schließen'/'Close position' erkannt (de/en/ss)",
