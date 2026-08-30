@@ -3496,6 +3496,10 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>
         Orbit <span class="sb-badge" id="sb-badge-echoplus" hidden>0</span>
       </button>
+      <button class="sb-link" data-view="markt">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-7 4 5"/><path d="M3 21h18"/></svg>
+        Markt
+      </button>
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
         Trades
@@ -5955,6 +5959,25 @@
       </div>
     </section>
 
+    <!-- MARKT (30.08.2026, Finns Wunsch „NQ-Live-Stand ablesen") — reine
+         ANZEIGE der beiden Instrumente, die Orbit hedgt. Bewusst keine
+         Signale, keine Schwellen, keine Empfehlung: Prophos ist
+         Ausfuehrungs-Infrastruktur, kein Ratgeber. -->
+    <section class="view" data-view="markt">
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Markt</h1>
+          <p class="view-sub">NQ und MNQ — Kurs, Tagesveränderung und Verlauf der letzten 30 Stunden.</p>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span id="mk-stand" style="font-size:12px;color:var(--sub)"></span>
+          <button class="btn btn-ghost" id="mk-refresh" style="font-size:12px;padding:6px 11px">↻ Aktualisieren</button>
+        </div>
+      </div>
+      <div id="mk-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px"></div>
+      <div id="mk-hinweis" style="margin-top:14px;font-size:12px;color:var(--sub-2);line-height:1.6"></div>
+    </section>
+
     <!-- MT5-COPIER (Etappe 3, 15.08.2026) — eigener Hedge-Copier, separater
          Bereich mit eigener Logik. Duplikium bleibt komplett unangetastet.
          Spricht ueber das LOKALE app.py (/copier/*) mit der Panel-API des PCs;
@@ -7726,6 +7749,7 @@
     journal:   ['Journal',   'Trades reflektieren'],
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
+    markt:     ['Markt', 'NQ & MNQ — Kurs, Tagesveränderung, Verlauf'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung & gemeinsame Kasse'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
@@ -20871,7 +20895,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-30.195'
+  const OS_TAB_BUILD = '2026-08-30.196'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28478,6 +28502,131 @@
     btn.textContent = '⏳ schaltet…'
     epSchalten(btn.getAttribute('data-ep-schalter'), btn.getAttribute('data-ep-an') === '1')
   })
+})()
+</script>
+<!-- ── MARKT: NQ & MNQ (30.08.2026, Finns Wunsch) ──────────────────────────
+     Eigener Block wie der Orbit-Nachtrag: eigene IIFE, eigene Verdrahtung
+     (Projektregel „keine Sammel-Handler"). Holt die Kurse ueber app.py
+     (/markt/futures) — Yahoo schickt keine CORS-Header, ein direkter fetch
+     aus dem Browser scheitert also; ueber das Backend geht derselbe Weg
+     ausserdem vom Handy, ohne dass ein PC laufen muss. -->
+<script>
+(function(){
+  'use strict'
+  const MK_BACKEND = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:5000'
+    : 'https://web-production-bec81.up.railway.app'
+  const MK_TAKT = 20000        // = MARKT_TTL im Backend; schneller zu pollen
+                               // holt nur denselben Cache-Eintrag nochmal
+  const $mk = id => document.getElementById(id)
+  const mkView = () => document.querySelector('#dashboard-view .view[data-view="markt"]')
+  const mkAktiv = () => { const v = mkView(); return v && v.classList.contains('active') }
+  const mkEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+
+  const mkZahl = (x, n) => (x === null || x === undefined || !isFinite(x))
+    ? '–' : Number(x).toLocaleString('de-DE', { minimumFractionDigits: n, maximumFractionDigits: n })
+
+  function mkAlter(sekunden){
+    if(!sekunden && sekunden !== 0) return ''
+    const m = Math.max(0, Math.round((Date.now() / 1000 - sekunden) / 60))
+    if(m < 1)   return 'gerade eben'
+    if(m < 90)  return `vor ${m} min`
+    const h = Math.round(m / 60)
+    return h < 48 ? `vor ${h} h` : `vor ${Math.round(h / 24)} Tagen`
+  }
+
+  /* Mini-Chart als SVG-Pfad. Bewusst ohne Achsen und ohne Gitter: die Karte
+   * soll die Richtung zeigen, nicht zum Ablesen einladen — abgelesen wird im
+   * Chart, der die echte Auflösung hat. viewBox 0..100 x 0..30, damit die
+   * Kurve jede Kartenbreite mitmacht. */
+  function mkSparkline(kurse, farbe){
+    const w = kurse.filter(v => isFinite(v))
+    if(w.length < 2) return '<div style="height:44px"></div>'
+    const min = Math.min(...w), max = Math.max(...w)
+    const spanne = (max - min) || 1
+    const pt = w.map((v, i) => [
+      (i / (w.length - 1)) * 100,
+      30 - ((v - min) / spanne) * 28 - 1
+    ])
+    const linie = pt.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ')
+    const flaeche = `${linie} L100,30 L0,30 Z`
+    const id = 'mkgrad' + Math.random().toString(36).slice(2, 8)
+    return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;height:44px;display:block">
+      <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${farbe}" stop-opacity=".18"/>
+        <stop offset="100%" stop-color="${farbe}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${flaeche}" fill="url(#${id})"/>
+      <path d="${linie}" fill="none" stroke="${farbe}" stroke-width="1.2"
+            vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`
+  }
+
+  function mkKarte(m){
+    const hoch = (m.diff ?? 0) >= 0
+    const farbe = hoch ? 'var(--good)' : 'var(--danger)'
+    const vz = hoch ? '+' : '−'
+    const betrag = Math.abs(m.diff ?? 0)
+    const pct = Math.abs(m.diff_pct ?? 0)
+    return `<div class="ts-card" style="padding:16px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+        <div style="font-size:15px;font-weight:700">${mkEsc(m.key)}</div>
+        <div style="font-size:11.5px;color:var(--sub-2)">${mkEsc(m.boerse || '')} · ${mkZahl(m.punktwert, 0)} $/Punkt</div>
+      </div>
+      <div style="font-size:12px;color:var(--sub);margin-top:1px">${mkEsc(m.name)}</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-top:12px">
+        <div class="mono" style="font-size:26px;font-weight:800;letter-spacing:-.02em">${mkZahl(m.preis, 2)}</div>
+        <div class="mono" style="font-size:13px;font-weight:700;color:${farbe}">
+          ${vz}${mkZahl(betrag, 2)} (${vz}${mkZahl(pct, 2)} %)
+        </div>
+      </div>
+      <div style="margin-top:10px">${mkSparkline(m.kurse || [], hoch ? '#12B76A' : '#F04438')}</div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:11.5px;color:var(--sub-2)">
+        <span>Vortag ${mkZahl(m.vortag, 2)}</span>
+        <span>Kurs ${mkEsc(mkAlter(m.tick_zeit))}</span>
+      </div>
+    </div>`
+  }
+
+  let _mkBusy = false
+  async function mkLaden(sichtbar){
+    if(_mkBusy) return
+    _mkBusy = true
+    const grid = $mk('mk-grid'), stand = $mk('mk-stand'), hinweis = $mk('mk-hinweis')
+    if(sichtbar && grid && !grid.innerHTML) grid.innerHTML =
+      '<div style="font-size:13px;color:var(--sub)">lädt …</div>'
+    try{
+      const r = await fetch(`${MK_BACKEND}/markt/futures`, { cache: 'no-store' })
+      const d = await r.json()
+      const m = d.maerkte || []
+      if(!m.length) throw new Error((d.fehler || []).join(' · ') || 'keine Daten')
+      if(grid) grid.innerHTML = m.map(mkKarte).join('')
+      if(stand) stand.textContent = d.stale ? 'Backend hat keine frischen Daten — alter Stand'
+                                            : `aktualisiert ${mkAlter(d.fetched)}`
+      // Die Verzögerung gehört sichtbar dazu, nicht ins Kleingedruckte: ein
+      // Kurs ohne Altersangabe hält man für live, bis es teuer wird.
+      if(hinweis) hinweis.innerHTML =
+        'Quelle: Yahoo Finance über das Prophos-Backend — CME-Futures sind dort für Gratis-Nutzer '
+        + '<b>verzögert</b> (typisch ~10 min). Das Alter steht an jeder Karte. '
+        + 'Für Echtzeit wäre der Orbit-Reader der Weg: der liest TradingViews Watchlist mit deinem eigenen CME-Abo.'
+        + ((d.fehler && d.fehler.length) ? `<br>Nicht geladen: ${mkEsc(d.fehler.join(' · '))}` : '')
+    }catch(e){
+      if(grid && !grid.querySelector('.ts-card')) grid.innerHTML =
+        `<div style="font-size:13px;color:var(--danger)">Kurse nicht erreichbar: ${mkEsc(e && e.message || e)}</div>`
+      if(stand) stand.textContent = 'Abruf fehlgeschlagen'
+    }finally{ _mkBusy = false }
+  }
+
+  // Takt läuft nur, solange die View offen ist — ein Kurs-Poller im
+  // Hintergrund kostet Backend-Aufrufe für etwas, das niemand ansieht.
+  setInterval(() => { if(mkAktiv()) mkLaden(false) }, MK_TAKT)
+  document.querySelectorAll('#dashboard-view .sb-link[data-view="markt"]').forEach(b =>
+    b.addEventListener('click', () => setTimeout(() => mkLaden(true), 50)))
+  const mkBtn = $mk('mk-refresh')
+  if(mkBtn) mkBtn.addEventListener('click', () => mkLaden(true))
+  // Direkter Einstieg über #markt (Lesezeichen) — der Sidebar-Klick fehlt dann.
+  if(location.hash === '#markt') setTimeout(() => mkLaden(true), 400)
 })()
 </script>
 <!-- ── Coin-Flip Floating Button + Modal ── -->

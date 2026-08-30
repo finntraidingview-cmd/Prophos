@@ -39,7 +39,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-28.3"
+APP_BUILD = "2026-08-30.4"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -95,6 +95,97 @@ def news_calendar():
     with _news_lock:
         _news_cache["data"] = payload
         _news_cache["ts"] = now
+    return jsonify(payload)
+
+# ── Futures-Kurse NQ / MNQ (30.08.2026, Finns Wunsch „NQ-Live-Stand ablesen") ──
+# Quelle ist der oeffentliche Yahoo-Chart-Endpoint: kein Schluessel, kein Konto,
+# CME-Futures unter NQ=F / MNQ=F. Warum ueberhaupt ein Proxy: Yahoo schickt
+# keine CORS-Header, ein direkter fetch aus dem Browser scheitert also — und
+# ueber app.py greift derselbe Weg auch vom Handy, ohne dass ein PC laufen muss.
+#
+# EHRLICHKEIT ZUR VERZOEGERUNG: Yahoo liefert CME-Futures fuer Gratis-Nutzer
+# verzoegert (~10 min). Deshalb wandert 'tick_zeit' ungefiltert mit nach vorn
+# und die Oberflaeche zeigt das Alter an — ein Kurs ohne sichtbares Alter waere
+# genau die Sorte Zahl, die man fuer live haelt, bis es teuer wird. Fuer einen
+# Ueberblick reicht das; wer daran spaeter Ausfuehrung haengen will, braucht
+# eine echte Live-Quelle (naheliegend: der Orbit-Reader liest TradingViews
+# Watchlist mit Finns eigenem CME-Abo).
+_markt_cache = {"ts": 0, "data": None}
+_markt_lock = threading.Lock()
+MARKT_TTL = 20            # Sekunden — Yahoo ist ohnehin verzoegert
+MARKT_PUNKTE = 120        # letzte 120 Kerzen (a 15 min) fuer den Mini-Chart
+MARKT_SYMBOLE = [
+    {"key": "NQ",  "yahoo": "NQ=F",  "name": "E-mini Nasdaq-100",       "punktwert": 20},
+    {"key": "MNQ", "yahoo": "MNQ=F", "name": "Micro E-mini Nasdaq-100", "punktwert": 2},
+]
+
+
+def _markt_hole(sym):
+    """Einen Kontrakt bei Yahoo holen. Wirft bei Problemen — der Aufrufer
+    entscheidet, ob er alten Stand liefert."""
+    r = requests.get(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{sym['yahoo']}",
+        params={"range": "5d", "interval": "15m"},
+        headers={"User-Agent": "Mozilla/5.0 (Prophos)"}, timeout=12)
+    r.raise_for_status()
+    res = ((r.json() or {}).get("chart") or {}).get("result") or []
+    if not res:
+        raise ValueError(f"Yahoo ohne Ergebnis fuer {sym['yahoo']}")
+    m = res[0].get("meta") or {}
+    ts = res[0].get("timestamp") or []
+    q = ((res[0].get("indicators") or {}).get("quote") or [{}])[0]
+    closes = q.get("close") or []
+    # Luecken (None) fallen raus — Yahoo liefert sie fuer Zeiten ohne Handel.
+    # Zeit und Kurs muessen dabei PAARWEISE wegfallen, sonst verschiebt sich
+    # die Zeitachse still gegen die Kurse.
+    punkte = [(t, c) for t, c in zip(ts, closes) if c is not None]
+    punkte = punkte[-MARKT_PUNKTE:]
+    preis = m.get("regularMarketPrice")
+    vortag = m.get("chartPreviousClose") or m.get("previousClose")
+    diff = (preis - vortag) if (preis is not None and vortag) else None
+    return {
+        "key": sym["key"], "yahoo": sym["yahoo"], "name": sym["name"],
+        "punktwert": sym["punktwert"],
+        "kurzname": m.get("shortName"), "waehrung": m.get("currency"),
+        "boerse": m.get("exchangeName"),
+        "preis": preis, "vortag": vortag, "diff": diff,
+        "diff_pct": (diff / vortag * 100) if (diff is not None and vortag) else None,
+        "tick_zeit": m.get("regularMarketTime"),
+        "zeiten": [p[0] for p in punkte],
+        "kurse": [round(p[1], 2) for p in punkte],
+    }
+
+
+@app.route("/markt/futures", methods=["GET", "OPTIONS"])
+def markt_futures():
+    if request.method == "OPTIONS":
+        return "", 200
+    now = time.time()
+    with _markt_lock:
+        if _markt_cache["data"] is not None and (now - _markt_cache["ts"]) < MARKT_TTL:
+            return jsonify(_markt_cache["data"])
+    maerkte, fehler = [], []
+    for sym in MARKT_SYMBOLE:
+        try:
+            maerkte.append(_markt_hole(sym))
+        except Exception as e:
+            fehler.append(f"{sym['key']}: {type(e).__name__}")
+    if not maerkte:
+        # Nichts Neues bekommen: lieber den alten Stand mit seinem Alter zeigen
+        # als eine leere Oberflaeche — dieselbe Regel wie beim News-Kalender,
+        # und dieselbe wie ueberall im Stack: stale ist eine Aussage, leer nicht.
+        with _markt_lock:
+            if _markt_cache["data"] is not None:
+                alt = dict(_markt_cache["data"])
+                alt["stale"] = True
+                alt["fehler"] = fehler
+                return jsonify(alt)
+        return jsonify({"maerkte": [], "fehler": fehler, "fetched": now}), 502
+    payload = {"maerkte": maerkte, "fetched": now, "stale": False,
+               "fehler": fehler, "quelle": "Yahoo Finance (verzoegert)"}
+    with _markt_lock:
+        _markt_cache["data"] = payload
+        _markt_cache["ts"] = now
     return jsonify(payload)
 
 TSX_BASE = "https://api.topstepx.com"
