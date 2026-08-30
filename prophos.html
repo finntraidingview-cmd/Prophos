@@ -20732,8 +20732,14 @@
   // am PC ist NICHT die Tab-Version (der Tab wechselt nur durch Neuladen),
   // und ohne Stempel war per SQL nie beweisbar, WELCHEN Build ein PC-Tab
   // fährt — beim Remote-Close-Test wurde deshalb zweimal blind geraten.
-  // Bei Empfänger-relevanten Änderungen mitbumpen (Versions-Ritual).
-  const OS_TAB_BUILD = '2026-08-28.168'
+  // IMMER zusammen mit mt5-copier/VERSION bumpen, ausnahmslos (Korrektur
+  // 30.08.2026): „nur bei Empfänger-relevanten Änderungen" war zu weich —
+  // der Stempel stand nach zwei Frontend-Commits noch auf .168, während die
+  // PC-Tabs nachweislich .184 fuhren (sie schrieben master_symbol, das es in
+  // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
+  // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
+  // geschlossen und am falschen Ende gesucht.
+  const OS_TAB_BUILD = '2026-08-30.186'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
