@@ -21042,7 +21042,10 @@
       ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab, dann übernimmt der Puls am PC: TradingView-Tab → Unterkonto (External ID) → Symbol → Order-Ticket → platzieren. HÄNDE WEG, bis die Bestätigung kommt. Echo hedgt automatisch.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
-    document.getElementById('tp-order-sl').value = plan.masterRisk ?? ''
+    // SL dieser ORDER (31.08.2026, Finns Fund): steht seit heute in master_sl,
+    // nicht mehr in master_risk. Fallback auf master_risk fuer alle Plaene, die
+    // vor der Trennung gespeichert wurden — dort WAR der SL das Risiko.
+    document.getElementById('tp-order-sl').value = plan.masterSl ?? plan.masterRisk ?? ''
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
@@ -21150,12 +21153,27 @@
       return err('Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
     if(!(lots > 0)) return err('Lot-Anzahl angeben.')
     // SPEICHERN statt Starten (Finns Korrektur 28.08.2026): die Order wandert
-    // AN DEN PLAN (richtung/master_tp/master_risk/master_contracts) — Schalter
+    // AN DEN PLAN (richtung/master_tp/master_sl/master_contracts) — Schalter
     // aus = „Order pur": master_tp wird genullt, „Starten" schickt dann ohne
-    // SL/TP. Multiplier wird wie beim Plan-Speichern neu gerechnet, damit
-    // Risk/Lots-Änderungen die Hedge-Größe nicht stillschweigend desyncen.
+    // SL/TP.
+    // MULTIPLIER BLEIBT HIER UNANGETASTET (Finns Fund 31.08.2026: „das 2. Popup
+    // überschreibt den Multiplikator vom 1."). Bis eben schrieb dieses Popup den
+    // SL nach master_risk und rechnete den Multiplier daraus neu — mit der
+    // Begründung, Risk-Änderungen dürften die Hedge-Größe nicht desyncen. Die
+    // Begründung war falsch, und zwar teuer: der Multiplier ist
+    //     slave_risk / master_risk × master_ppl / slave_ppl
+    // also ein VERHÄLTNIS — er sagt „hedge X % dessen, was der Master verliert"
+    // und ist von der Stop-Distanz unabhängig (die Kontrakte kürzen sich raus).
+    // Wer das Plan-Risiko ($6.000) durch den Order-Stop ($750) ersetzt, lässt
+    // das Verhältnis von 9 % auf 75 % springen: aus ×2,220 wurde ×17,760, also
+    // die achtfache Hedge-Größe — gepusht, ohne dass irgendwo eine Zahl anders
+    // aussah. Genau der Fall aus Finns Screenshot.
+    // Deshalb: Risiko-Basis und Multiplier gehören dem Plan-Popup, SL und TP
+    // dieser Order gehören hier her. Getrennte Spalte master_sl (war bisher
+    // ungenutzt, 0 von 1697 Zeilen) statt master_risk — sonst stünde beim
+    // nächsten Öffnen des Plan-Popups der Order-Stop im Risiko-Feld und die
+    // Rechnung liefe über denselben Umweg wieder auseinander.
     // Status-Guard eq 'planned': läuft der Plan schon, wird nichts überschrieben.
-    const neuRisk = autoSltp ? sl : Number(plan.masterRisk)
     // Symbol-Override (30.08.2026): nur eine ABWEICHUNG vom Settings-Standard
     // wird am Plan gespeichert — Standardfall bleibt NULL, damit die Firmen-
     // Einstellungen die eine Quelle bleiben (Ansage 15.08.2026).
@@ -21165,12 +21183,12 @@
       richtung: _tpOrderDir,
       master_contracts: lots,
       master_tp: autoSltp ? tp : null,
-      master_risk: neuRisk,
-      master_symbol: symbol.toUpperCase() === stdSym.toUpperCase() ? null : symbol,
-      multiplier: (typeof tpCalcMultiplier === 'function')
-        ? tpCalcMultiplier(plan.masterFirm, plan.slaveFirm, neuRisk, lots, Number(plan.slaveRisk))
-        : plan.multiplier
+      master_symbol: symbol.toUpperCase() === stdSym.toUpperCase() ? null : symbol
     }
+    // Nur bei eingeschaltetem Schalter überschreiben: „Order pur" soll den
+    // zuletzt eingetippten Stop nicht stillschweigend wegwerfen — ob mit oder
+    // ohne SL/TP gestartet wird, entscheidet ohnehin master_tp (s. tpJetztStarten).
+    if(autoSltp) upd.master_sl = sl
     try{
       const { data, error } = await supabase.from('trade_plans').update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
@@ -21259,7 +21277,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.215'
+  const OS_TAB_BUILD = '2026-08-31.216'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -21367,7 +21385,8 @@
   }
 
   /* ── „Jetzt starten" von der Plan-Karte (28.08.2026, Finns Flow) ──────────
-   * Order KOMPLETT aus dem Plan: Richtung + TP ($) + SL (= Risiko Master $)
+   * Order KOMPLETT aus dem Plan: Richtung + TP ($) + SL ($, aus dem Order-
+   * Popup — seit 31.08.2026 eigenes Feld, NICHT mehr das Risiko des Plans)
    * + Lots (= Anzahl Kontrakte) + Symbol aus den Firmen-Einstellungen.
    * Lokal (PC): exakt der bekannte Weg — Order merken, Trade-Start-Check.
    * Remote (Handy/Mac): Signal + Live-Schritte im Check-Popup:
@@ -21382,7 +21401,7 @@
     const fehlt = []
     const dir = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
     const lots = Number(plan.masterContracts)
-    const sl = Number(plan.masterRisk)
+    const sl = Number(plan.masterSl ?? plan.masterRisk)   // Fallback: Plaene vor der Trennung
     const tp = Number(plan.masterTp)
     // Symbol: Override am Plan zuerst (30.08.2026, Wochenend-/BTC-Tests),
     // sonst wie immer der Settings-Standard der Master-Firma.
@@ -21393,7 +21412,7 @@
     const sltpAn = tp > 0
     if(!dir) fehlt.push('Richtung (Buy/Sell)')
     if(!(lots > 0)) fehlt.push('Lots')
-    if(sltpAn && !(sl > 0)) fehlt.push('Stop Loss (= Risiko Master $)')
+    if(sltpAn && !(sl > 0)) fehlt.push('Stop Loss ($) — im Order-Popup')
     if(!symbol) fehlt.push(`Firmen-Symbol für „${plan.masterFirm || '—'}" (Settings)`)
     if(fehlt.length){
       if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
@@ -23129,6 +23148,13 @@
       slaveFirm:  slave.firm,
       masterRisk, masterContracts: masterQty, slaveRisk, multiplier: mult,
       masterTp,
+      // Der Order-SL gehoert NICHT diesem Formular (31.08.2026) — beim
+      // Bearbeiten unveraendert durchreichen. Ohne diese Zeile schreibt
+      // planToRow master_sl auf null, und der naechste Plan-Edit loescht den
+      // Stop der bereits gespeicherten Order still weg.
+      masterSl: (_editingPlanId
+        ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
+        : null),
       // Richtung nur im Echo-Modus erfassen (28.08.2026, Jetzt-starten-Flow) —
       // beim Speichern keine Pflicht, „Jetzt starten" validiert selbst.
       richtung: (_tpRoute === 'mt5' && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
