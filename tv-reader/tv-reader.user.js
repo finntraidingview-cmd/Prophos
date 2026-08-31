@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.5
+// @version      0.3.6
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -294,23 +294,29 @@
    * Dump immer schon beim Server, auch wenn der Tab seit einer Weile
    * eingefroren ist -- ein Abruf genuegt, ohne Timing und ohne Tabwechsel.
    * Begrenzt auf die zwei Zonen, um die es geht: obere Werkzeugleiste
-   * (Symbol-Suche) und rechte Spalte (Konto + Order-Panel).
+   * (Symbol-Suche), rechte Spalte (Order-Panel) und unterer Bereich
+   * (Broker-Panel mit Konto-Umschalter und Positionstabelle).
    * Seit 0.3.3 auch die element-id: bei TradingView ist sie der stabilste
    * Anker (header-toolbar-symbol-search &c.), und mehrere Knoepfe der
    * Werkzeugleiste tragen ueberhaupt kein data-name. */
   function dumpKompakt() {
     const out = [];
     const grenzeX = window.innerWidth * 0.6;
+    // Unterer Bereich = das Broker-Panel (Tradovate) mit dem KONTO-Umschalter.
+    // Fehlte bis 0.3.5 und war damit der tote Winkel, der Puls am Konto-Schritt
+    // scheitern liess: er meldete "Konto steht auf '?'" -- nicht weil das Konto
+    // falsch war, sondern weil er es nicht LESEN konnte (Finns Lauf 31.08.2026).
+    const grenzeY = window.innerHeight * 0.6;
     let els;
     try {
       els = [...document.querySelectorAll(
         'button,[role="button"],[role="option"],[role="tab"],input,select,[data-name]')];
     } catch (_) { return out; }
     for (const e of els) {
-      if (out.length >= 90) break;
+      if (out.length >= 130) break;
       if (!sichtbar(e)) continue;
       const r = e.getBoundingClientRect();
-      if (!(r.top < 70 || r.left > grenzeX)) continue;
+      if (!(r.top < 70 || r.left > grenzeX || r.top > grenzeY)) continue;
       const t = txt(e).slice(0, 45);
       const dn = e.getAttribute('data-name') || '';
       const al = e.getAttribute('aria-label') || '';
