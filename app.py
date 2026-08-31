@@ -11,6 +11,7 @@ import time
 import uuid
 import logging
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, Response, send_from_directory
 import os
 from signalrcore.hub_connection_builder import HubConnectionBuilder
@@ -39,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-30.4"
+APP_BUILD = "2026-08-31.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -3787,6 +3788,156 @@ def admin_rechnung_pdf():
     except Exception as e:
         print(f"[rechnung] ⚠️ pdf: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# KAUFPLAN (31.08.2026, Finns Wunsch) — welche Accounts sollen kuenftig auf
+# welcher ID gekauft werden. Loest die Google-Keep-Notiz ab, in der das bisher
+# als Freitext stand ("Finn / Apex Funded (1k - revolut) / Tradeify Funded ...").
+#
+# Warum ueber app.py und nicht direkt aus dem Browser wie die Kasse: der Plan
+# sagt, was fuer FREMDE IDs gekauft werden soll und was es kosten darf. Die
+# Kasse teilen sich alle Eingeloggten absichtlich, dieser Plan nicht — er haengt
+# deshalb an _admin_auth() (ADMIN_EMAILS) und die Tabelle hat gar keine
+# RLS-Policy, kommt also fuer keinen Client direkt in Frage.
+# ════════════════════════════════════════════════════════════════════════════
+
+ACC_PLAN_STATUS = ("geplant", "gekauft", "verworfen")
+# Nur diese Felder duerfen vom Client kommen. Whitelist statt Durchreichen:
+# ein spaeter zugefuegtes Spaltenfeld (etwa created_by) soll sich nicht
+# ueberschreiben lassen, nur weil es im Body steht.
+ACC_PLAN_FELDER = ("firma", "bezeichnung", "anzahl", "kosten", "zahlweg", "notiz", "status")
+
+
+def _acc_plan_body(daten, neu):
+    """Rohes JSON -> saubere Spaltenwerte. (body, fehlertext)."""
+    out = {}
+    if neu:
+        uid = str(daten.get("user_id") or "").strip()
+        if len(uid) < 10:
+            return None, "user_id fehlt"
+        out["user_id"] = uid
+    for f in ACC_PLAN_FELDER:
+        if f not in daten:
+            continue
+        v = daten[f]
+        if f == "anzahl":
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                return None, "anzahl ist keine Zahl"
+            if n < 1:
+                return None, "anzahl muss mindestens 1 sein"
+            out[f] = n
+        elif f == "kosten":
+            try:
+                k = float(v)
+            except (TypeError, ValueError):
+                return None, "kosten ist keine Zahl"
+            if not (k >= 0) or k != k:      # k != k faengt NaN
+                return None, "kosten muss 0 oder groesser sein"
+            out[f] = k
+        elif f == "status":
+            s = str(v or "").strip().lower()
+            if s not in ACC_PLAN_STATUS:
+                return None, f"status muss {' / '.join(ACC_PLAN_STATUS)} sein"
+            out[f] = s
+            # Das Kaufdatum gehoert an den Statuswechsel, nicht an einen
+            # separaten Klick — sonst steht spaeter "gekauft" ohne Datum da.
+            out["gekauft_am"] = datetime.now(timezone.utc).isoformat() if s == "gekauft" else None
+        else:
+            out[f] = str(v if v is not None else "").strip()[:200]
+    if neu and not out.get("firma") and not out.get("bezeichnung"):
+        return None, "Firma oder Bezeichnung angeben"
+    return out, None
+
+
+def _acc_plan_personen():
+    """[{user_id, name, mail}] — alle Personen, die Accounts besitzen.
+    Genau die kommen als Ziel eines geplanten Kaufs in Frage; ein Login ohne
+    Account waere im Dropdown nur Rauschen. Ausgeblendete Personen
+    (ADMIN_EXCLUDE_EMAILS) fliegen hier genauso raus wie in der Uebersicht,
+    sonst waere der Kaufplan das Schlupfloch an der Ausblendung vorbei."""
+    accs = sb_select("accounts", {"select": "user_id"})
+    ids = {str(a.get("user_id")) for a in accs if a.get("user_id")}
+    namen, mails = {}, {}
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+                         headers=_sb_headers(), timeout=12)
+        for u in (r.json() or {}).get("users", []):
+            uid = str(u.get("id"))
+            mail = str(u.get("email") or "")
+            mails[uid] = mail
+            meta = str((u.get("user_metadata") or {}).get("name") or "").strip()
+            namen[uid] = meta or (mail.split("@")[0] if "@" in mail else uid[:8])
+    except Exception:
+        pass
+    out = []
+    for uid in ids:
+        if str(mails.get(uid, "")).strip().lower() in ADMIN_EXCLUDE_EMAILS:
+            continue
+        out.append({"user_id": uid, "name": namen.get(uid, uid[:8]), "mail": mails.get(uid, "")})
+    return sorted(out, key=lambda p: p["name"].lower())
+
+
+@app.route("/admin/acc-plan", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
+def admin_acc_plan():
+    if request.method == "OPTIONS":
+        return "", 200
+    mail, err = _admin_auth()
+    if err:
+        return err
+
+    if request.method == "GET":
+        try:
+            eintraege = sb_select("acc_plan", {
+                "select": "*", "order": "created_at.desc", "limit": "500"})
+            return jsonify({"eintraege": eintraege, "personen": _acc_plan_personen()})
+        except Exception as e:
+            print(f"[accplan] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": f"Kaufplan nicht ladbar ({type(e).__name__})"}), 502
+
+    daten = request.get_json(silent=True) or {}
+
+    if request.method == "POST":
+        body, f = _acc_plan_body(daten, neu=True)
+        if f:
+            return jsonify({"error": f}), 400
+        body["created_by"] = mail
+        try:
+            return jsonify({"eintrag": sb_insert("acc_plan", body)})
+        except Exception as e:
+            print(f"[accplan] ⚠️ anlegen: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": f"Nicht angelegt ({type(e).__name__})"}), 502
+
+    pid = str(daten.get("id") or request.args.get("id") or "").strip()
+    if len(pid) < 10:
+        return jsonify({"error": "id fehlt"}), 400
+
+    if request.method == "DELETE":
+        try:
+            requests.delete(f"{SUPABASE_URL}/rest/v1/acc_plan",
+                            params={"id": f"eq.{pid}"},
+                            headers=_sb_headers(), timeout=12).raise_for_status()
+            return jsonify({"ok": True})
+        except Exception as e:
+            print(f"[accplan] ⚠️ loeschen: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": f"Nicht geloescht ({type(e).__name__})"}), 502
+
+    body, f = _acc_plan_body(daten, neu=False)
+    if f:
+        return jsonify({"error": f}), 400
+    if not body:
+        return jsonify({"error": "Nichts zu aendern"}), 400
+    body["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        zeilen = sb_update("acc_plan", {"id": f"eq.{pid}"}, body)
+        if not zeilen:
+            return jsonify({"error": "Eintrag nicht gefunden"}), 404
+        return jsonify({"eintrag": zeilen[0]})
+    except Exception as e:
+        print(f"[accplan] ⚠️ aendern: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Nicht geaendert ({type(e).__name__})"}), 502
 
 
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
