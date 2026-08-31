@@ -2130,7 +2130,31 @@ def _finde_close_dialog(hauptfenster, ticket):
     return None, None
 
 
-def _einklick_haftung_annehmen(hauptfenster, trail):
+def _einklick_kennzeichen(w):
+    """Traegt dieses Fenster das Kennzeichen des Ein-Klick-Haftungsausschlusses?
+    Titel ODER sichtbarer Text (01.09.2026, zweiter Anlauf): der Titel allein
+    als Pflicht-Haelfte war zu streng — liefert UIA fuer ein KIND-Fenster keine
+    oder eine andere Beschriftung, faellt die Erkennung still aus, und still
+    ausfallen ist hier dasselbe wie gar nicht da sein. Der Fliesstext des
+    Dialogs nennt 'Ein-Klick-Handel'/'One Click Trading' ohnehin mehrfach."""
+    try:
+        if ist_einklick_dialog(w.window_text()):
+            return True
+    except Exception:
+        pass
+    for typ in ("Text", "Document", "Edit"):
+        try:
+            for t in w.descendants(control_type=typ):
+                x = (t.window_text() or "").lower()
+                if ("ein-klick" in x or "ein klick" in x or "one click" in x
+                        or "one-click" in x):
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def _einklick_haftung_annehmen(hauptfenster, trail, melden=False):
     """Den Ein-Klick-Haftungsausschluss durch ZUSTIMMEN wegbekommen (Finns
     Auftrag 01.09.2026: "sollte diese Meldung kommen, er okay drueckt und dann
     neu aufs x drueckt").
@@ -2142,53 +2166,91 @@ def _einklick_haftung_annehmen(hauptfenster, trail):
     Klick. Getroffen wird ueber die eigene Knopf-Signatur, nie ueber Position
     oder Reihenfolge im Dialog.
 
-    Erkannt wird aus ZWEI Haelften: Fenstertitel ('Ein-Klick-Handel' / 'One
-    Click Trading') UND Knopfbeschriftung. Andere Zustimmungs-Dialoge von MT5
-    (Broker-AGB beim Login, Algo-Handel) sollen NICHT mitbestaetigt werden —
-    die traegt der Bot nichts an. Einzige Lockerung: liefert UIA gar keinen
-    Titel, entscheidet der Knopf allein, sonst waere ein leerer Titel ein
-    stiller Totalausfall.
+    Gesucht wird in DENSELBEN ZWEI QUELLEN wie beim Close-Dialog
+    (_finde_close_dialog): Top-Level-Fenster des Terminal-Prozesses UND
+    Kind-Fenster des Hauptfensters. Die erste Fassung sah nur die erste Quelle
+    und traf bei Finn nicht — und dieser Dialog hat auf demselben PC auch schon
+    die Abbrechen-Runde von _fremde_dialoge_schliessen ueberlebt, die genauso
+    nur dort nachsieht. Zwei Wege, ein Fund: die Vermutung "Kind-Fenster" ist
+    damit die einzige, die beides erklaert.
 
-    Beweis wie ueberall: angenommen ist er erst, wenn das Fenster WEG ist.
-    Rueckgabe: 'angenommen' | 'gescheitert' | 'keiner'."""
+    Erkannt wird aus zwei Haelften: Knopf-Signatur UND Kennzeichen des Fensters
+    (_einklick_kennzeichen). Andere Zustimmungs-Dialoge von MT5 — Broker-AGB
+    beim Login, Algo-Handel — traegt der Bot damit nicht mit an.
+
+    Beweis wie ueberall: angenommen ist er erst, wenn Dialog UND Knopf WEG
+    sind. Rueckgabe: 'angenommen' | 'gescheitert' | 'keiner'."""
     from pywinauto import Desktop
     try:
         pid = hauptfenster.element_info.process_id
     except Exception:
         return "keiner"
-    dlg = knopf = None
+
+    fenster, gesehen = [], []
     try:
         for d in Desktop(backend="uia").windows():
             try:
-                if d.element_info.process_id != pid or not d.is_visible() \
-                        or d.element_info.class_name == MT5_KLASSE:
-                    continue
-                titel = (d.window_text() or "").strip()
-                if titel and not ist_einklick_dialog(titel):
-                    continue
-                for b in d.descendants(control_type="Button"):
-                    if ist_einklick_akzeptieren_knopf(b.window_text()):
-                        dlg, knopf = d, b
-                        break
+                if d.element_info.process_id == pid and d.is_visible() \
+                        and d.element_info.class_name != MT5_KLASSE:
+                    fenster.append(d)
             except Exception:
                 continue
-            if knopf is not None:
-                break
     except Exception:
-        return "keiner"
+        pass
+    try:
+        fenster.extend(hauptfenster.descendants(control_type="Window"))
+    except Exception:
+        pass
+
+    dlg = knopf = None
+    for d in fenster:
+        try:
+            titel = (d.window_text() or "").strip()
+            treffer = None
+            for b in d.descendants(control_type="Button"):
+                if ist_einklick_akzeptieren_knopf(b.window_text()):
+                    treffer = b
+                    break
+            if treffer is None:
+                if melden and titel:
+                    gesehen.append(titel[:28])
+                continue
+            if not _einklick_kennzeichen(d):
+                # Zustimmen-Knopf ohne Ein-Klick-Kennzeichen: ein anderer
+                # Vertrag. Nicht anfassen, aber in die Spur schreiben — sonst
+                # sieht "kein Dialog gefunden" wie Abwesenheit aus.
+                trail.append(f"Zustimmungs-Dialog OHNE Ein-Klick-Kennzeichen "
+                             f"uebergangen ('{titel[:28]}')")
+                continue
+            dlg, knopf = d, treffer
+            break
+        except Exception:
+            continue
+
     if knopf is None:
+        if melden:
+            trail.append("kein Haftungsausschluss offen"
+                         + (f" (Fenster im Prozess: {', '.join(gesehen[:6])})"
+                            if gesehen else " (keine Nebenfenster)"))
         return "keiner"
     try:
         trail.append(f"Ein-Klick-Haftungsausschluss offen "
-                     f"('{(dlg.window_text() or '')[:32]}')")
+                     f"('{(dlg.window_text() or '?')[:32]}')")
     except Exception:
         pass
 
     def _zu():
+        """Weg ist er, wenn der Knopf nicht mehr da ist — der Dialog kann als
+        Kind-Fenster im Baum stehenbleiben, der Knopf verschwindet aber."""
+        try:
+            if not knopf.is_visible():
+                return True
+        except Exception:
+            return True   # Element nicht mehr ansprechbar = weg
         try:
             return not dlg.is_visible()
         except Exception:
-            return True   # Fenster nicht mehr ansprechbar = weg
+            return True
 
     def _weg_leertaste():
         knopf.set_focus()
@@ -2203,14 +2265,17 @@ def _einklick_haftung_annehmen(hauptfenster, trail):
 
     # Dieselbe Kaskade wie beim Schliessen-/Aendern-Knopf (.52/.64): echte
     # Eingabe zuerst, nach jedem Weg lesend pruefen — nie zwei Wege blind
-    # hintereinander.
+    # hintereinander. Der Grund fuer JEDEN gescheiterten Weg geht in die Spur
+    # (Lehre 31.08.2026): ein Bot, der den Grund kennt und wegwirft, schickt
+    # die naechste Ferndiagnose in die falsche Richtung.
     for wegname, tu in (("Fokus+Leertaste", _weg_leertaste),
                         ("SendInput-Klick", _weg_sendinput),
                         (".click()", lambda: knopf.click()),
                         ("click_input", lambda: knopf.click_input())):
         try:
             tu()
-        except Exception:
+        except Exception as e:
+            trail.append(f"Zustimmen {wegname}: {type(e).__name__}")
             continue
         ende = time.time() + 2.0
         while time.time() < ende:
@@ -2218,6 +2283,7 @@ def _einklick_haftung_annehmen(hauptfenster, trail):
             if _zu():
                 trail.append(f"Haftungsausschluss angenommen ({wegname})")
                 return "angenommen"
+        trail.append(f"Zustimmen {wegname}: ohne Wirkung")
     trail.append("Haftungsausschluss liess sich nicht annehmen")
     return "gescheitert"
 
@@ -3174,7 +3240,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     # Haftungsausschluss ZUERST, dann erst die Abbrechen/ESC-Runde: ein Rest
     # aus einem frueheren Lauf soll angenommen werden, nicht abgebrochen —
     # sonst steht er beim naechsten Close-Klick sofort wieder da.
-    _einklick_haftung_annehmen(w, trail)
+    _einklick_haftung_annehmen(w, trail, melden=True)
     _fremde_dialoge_schliessen(w)
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').

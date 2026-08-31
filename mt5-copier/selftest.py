@@ -713,6 +713,36 @@ def main():
         and order_bot.ist_einklick_dialog("One Click Trading")
         and not order_bot.ist_einklick_dialog("26645308 - FivePercentOnline-Real: Demokonto - Hedge")
         and not order_bot.ist_einklick_dialog(""))
+    # Kennzeichen des Dialogs (01.09.2026, zweiter Anlauf): der Titel allein
+    # war zu streng — ein Kind-Fenster ohne lesbare Beschriftung fiel still
+    # durch. Jetzt zaehlt Titel ODER Fliesstext, und ein fremder Vertrag ohne
+    # Ein-Klick-Kennzeichen bleibt draussen.
+    class _FakeText:
+        def __init__(self, text):
+            self._t = text
+
+        def window_text(self):
+            return self._t
+
+    class _FakeFenster:
+        def __init__(self, titel, texte=()):
+            self._titel = titel
+            self._texte = [_FakeText(t) for t in texte]
+
+        def window_text(self):
+            return self._titel
+
+        def descendants(self, control_type=None):
+            return self._texte if control_type == "Text" else []
+
+    chk("CLOSE: Ein-Klick-Kennzeichen greift ueber Titel ODER Fliesstext",
+        order_bot._einklick_kennzeichen(_FakeFenster("Ein-Klick-Handel"))
+        and order_bot._einklick_kennzeichen(_FakeFenster("", [
+            "Haftungsausschluss",
+            'Sie sind dabei das Handeln mit einem Klick ("One Click Trading") zu aktivieren.']))
+        and not order_bot._einklick_kennzeichen(_FakeFenster("Vertrag", [
+            "Ich bestaetige die Geschaeftsbedingungen des Brokers gelesen zu haben."]))
+        and not order_bot._einklick_kennzeichen(_FakeFenster("")))
     f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 596061571, "symbol": "NAS100"})
     chk("CLOSE: Befehl mit Ticket+Symbol → gueltig (ohne Richtung/Lots/SL/TP)", f == [])
     f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 0, "symbol": ""})
