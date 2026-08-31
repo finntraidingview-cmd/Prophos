@@ -6180,6 +6180,10 @@
       </div>
 
       <div id="kasse-content" hidden>
+        <div style="display:flex;justify-content:flex-end;margin:-6px 0 -2px">
+          <button id="kasse-sperren" title="Admin wieder mit Code sperren"
+                  style="border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:11.5px;padding:4px 2px">🔒 sperren</button>
+        </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
@@ -7754,6 +7758,9 @@
       // Bewusstes Ausloggen → gespeicherte Sitzung dieses Profils verwerfen
       if(_lid) localStorage.removeItem(PROF_SESSION + _lid)
     }catch(_){}
+    // Admin-Freischaltung vergessen (31.08.2026): sie haengt am Profil, und wer
+    // sich abmeldet, soll sie beim naechsten Login nicht geerbt bekommen.
+    try{ if(typeof window.kasseVergessen === 'function') window.kasseVergessen() }catch(_){}
     // scope:'local' — nur dieser Browser. Global würde auch Handy/andere Geräte
     // abmelden und die gespeicherten Sitzungen der anderen Profile mitreißen.
     await supabase.auth.signOut({ scope: 'local' })
@@ -7861,12 +7868,35 @@
   /* ========== KASSE — gemeinsame 50:50-Kasse (profilübergreifend) ==========
    * Eine geteilte Tabelle kasse_entries (keine user_id-Trennung), damit die
    * Kasse über alle Profile hinweg dieselbe ist. Zugriffscode 7856 sitzt hier
-   * als UI-Gate; die Freischaltung gilt bis zum nächsten Reload (in-memory).
+   * als UI-Gate; die Freischaltung wird seit 31.08.2026 pro Profil im
+   * localStorage gemerkt (Flag, nicht der Code) und beim Abmelden verworfen.
    * Tabelle fehlt (Migration nicht ausgeführt) → Hinweis-Banner statt Absturz. */
   ;(function(){
     const CODE = '7856'
+    /* Freischaltung ueberlebt jetzt den Reload (31.08.2026, Finns Ansage: „mach
+     * das ich nicht immer bei admin den code eingeben muss, das ist mega
+     * nervig"). Gespeichert wird ein FLAG, nie der Code selbst — der Code
+     * gehoert nicht in den localStorage, auch nicht ein vierstelliger.
+     * Der Schluessel haengt am aktiven PROFIL: auf demselben Browser laeuft
+     * mehr als eine Prophos-Identitaet, und eine Freischaltung von Finns
+     * Profil darf nicht fuer Moritz gelten. Beim Abmelden wird das Flag
+     * geloescht. Das bleibt ein UI-Gate gegen fremde Blicke auf einem offenen
+     * Bildschirm — echte Absicherung ist es nicht und war es nie (die Daten
+     * schuetzt RLS bzw. der Admin-Endpoint). */
+    const KASSE_FREI = 'prophos_kasse_frei'
+    const kasseSchluessel = () =>
+      KASSE_FREI + ':' + (localStorage.getItem('prophos_active_profile') || 'default')
+    const kasseFreiLesen = () => {
+      try { return localStorage.getItem(kasseSchluessel()) === '1' } catch(_){ return false }
+    }
+    const kasseFreiSetzen = an => {
+      try { an ? localStorage.setItem(kasseSchluessel(), '1')
+                : localStorage.removeItem(kasseSchluessel()) } catch(_){}
+    }
+    window.kasseVergessen = () => kasseFreiSetzen(false)   // beim Abmelden gerufen
+
     const FINN = 'var(--violet)', PASCAL = '#e0891f', EVEN = '#16a34a'
-    let unlocked = false, who = 'finn', entries = []
+    let unlocked = kasseFreiLesen(), who = 'finn', entries = []
     const eur = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:2 })
     const $ = id => document.getElementById(id)
 
@@ -8442,11 +8472,31 @@
       $('adm-fin-body').hidden = false
     }
 
-    window.kasseOnEnter = function(){ unlocked ? showContent() : showLocked() }
+    window.kasseOnEnter = function(){
+      // JEDES Mal aus dem Speicher lesen, nicht nur beim Modul-Start: auf
+      // demselben Browser laeuft mehr als ein Prophos-Profil, und beim
+      // Umschalten blieb der Admin sonst offen, weil die Variable noch die
+      // Freischaltung des VORIGEN Profils trug (live gefunden 31.08.2026).
+      // Der Speicher ist die Wahrheit, die Variable nur ihr Zwischenspeicher.
+      unlocked = kasseFreiLesen()
+      unlocked ? showContent() : showLocked()
+    }
 
     function tryUnlock(){
-      if(($('kasse-code').value || '').trim() === CODE){ unlocked = true; showContent() }
+      if(($('kasse-code').value || '').trim() === CODE){
+        unlocked = true
+        kasseFreiSetzen(true)
+        showContent()
+      }
       else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
+    }
+
+    // Wieder zusperren — das Gegenstueck zum Merken. Ohne diesen Knopf gaebe
+    // es keinen Weg zurueck ausser Abmelden.
+    function kasseSperren(){
+      unlocked = false
+      kasseFreiSetzen(false)
+      showLocked()
     }
 
     async function kasseLoad(){
@@ -9516,6 +9566,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       if(!$('kasse-unlock')) return
       $('kasse-unlock').addEventListener('click', tryUnlock)
+      $('kasse-sperren')?.addEventListener('click', kasseSperren)
       $('kasse-code').addEventListener('keydown', e => { if(e.key === 'Enter') tryUnlock() })
       document.querySelectorAll('.kasse-seg').forEach(b => b.addEventListener('click', () => selectWho(b.dataset.who)))
       $('kasse-add').addEventListener('click', kasseAdd)
@@ -21145,7 +21196,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.201'
+  const OS_TAB_BUILD = '2026-08-31.203'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
