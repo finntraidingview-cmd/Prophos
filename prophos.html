@@ -5982,7 +5982,7 @@
       <div class="view-head">
         <div>
           <h1 class="view-title">Markt</h1>
-          <p class="view-sub">NQ und MNQ — Kurs, Tagesveränderung und Verlauf der letzten 30 Stunden.</p>
+          <p class="view-sub">NQ und MNQ — Kurs, Tagesveränderung und Verlauf. Karte anklicken schaltet den großen Chart um.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span id="mk-stand" style="font-size:12px;color:var(--sub)"></span>
@@ -5990,6 +5990,18 @@
         </div>
       </div>
       <div id="mk-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px"></div>
+
+      <!-- Grosser Verlauf, umschaltbar per Klick auf eine Karte (31.08.2026,
+           Finns Wunsch: „das ich unten in groß den chart sehe von NQ / MNQ
+           je nachdem wo ich drauf drücke"). -->
+      <div class="card" id="mk-chart-wrap" hidden style="margin-top:14px;padding:14px 16px 10px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px">
+          <div style="font-size:13.5px;font-weight:650" id="mk-chart-titel">–</div>
+          <div style="font-size:11.5px;color:var(--sub-2)" id="mk-chart-sub"></div>
+        </div>
+        <div style="height:320px"><canvas id="mk-chart"></canvas></div>
+      </div>
+
       <div id="mk-hinweis" style="margin-top:14px;font-size:12px;color:var(--sub-2);line-height:1.6"></div>
     </section>
 
@@ -21196,7 +21208,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.203'
+  const OS_TAB_BUILD = '2026-08-31.204'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28817,8 +28829,11 @@
   const MK_BACKEND = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:5000'
     : 'https://web-production-bec81.up.railway.app'
-  const MK_TAKT = 20000        // = MARKT_TTL im Backend; schneller zu pollen
-                               // holt nur denselben Cache-Eintrag nochmal
+  const MK_TAKT = 10000        // = MARKT_TTL im Backend; schneller zu pollen
+                               // holt nur denselben Cache-Eintrag nochmal.
+                               // ACHTUNG: oefter holen macht die Quelle nicht
+                               // schneller — Yahoo liefert ~10 min verzoegert,
+                               // das steht deshalb an jeder Karte.
   const $mk = id => document.getElementById(id)
   const mkView = () => document.querySelector('#dashboard-view .view[data-view="markt"]')
   const mkAktiv = () => { const v = mkView(); return v && v.classList.contains('active') }
@@ -28864,13 +28879,21 @@
     </svg>`
   }
 
+  let mkWahl = null            // welches Instrument der grosse Chart zeigt
+  let mkChart = null           // Chart.js-Instanz — wird aktualisiert, nicht neu gebaut
+  let mkDaten = null           // letzte Backend-Antwort, damit ein Klick nicht neu laden muss
+
   function mkKarte(m){
     const hoch = (m.diff ?? 0) >= 0
     const farbe = hoch ? 'var(--good)' : 'var(--danger)'
     const vz = hoch ? '+' : '−'
     const betrag = Math.abs(m.diff ?? 0)
     const pct = Math.abs(m.diff_pct ?? 0)
-    return `<div class="ts-card" style="padding:16px">
+    const gewaehlt = mkWahl === m.key
+    // Die ganze Karte ist der Schalter — ein extra Knopf waere ein zweites
+    // Bedienelement fuer dieselbe Sache.
+    return `<div class="ts-card mk-karte" data-mk-key="${mkEsc(m.key)}" role="button" tabindex="0"
+      style="padding:16px;cursor:pointer${gewaehlt ? ';border-color:var(--violet);box-shadow:0 0 0 1px var(--violet)' : ''}">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <div style="font-size:15px;font-weight:700">${mkEsc(m.key)}</div>
         <div style="font-size:11.5px;color:var(--sub-2)">${mkEsc(m.boerse || '')} · ${mkZahl(m.punktwert, 0)} $/Punkt</div>
@@ -28882,12 +28905,68 @@
           ${vz}${mkZahl(betrag, 2)} (${vz}${mkZahl(pct, 2)} %)
         </div>
       </div>
-      <div style="margin-top:10px">${mkSparkline(m.kurse || [], hoch ? '#12B76A' : '#F04438')}</div>
+      <div style="margin-top:10px">${mkSparkline((m.kurse || []).slice(-120), hoch ? '#12B76A' : '#F04438')}</div>
       <div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px;font-size:11.5px;color:var(--sub-2)">
         <span>Vortag ${mkZahl(m.vortag, 2)}</span>
         <span>Kurs ${mkEsc(mkAlter(m.tick_zeit))}</span>
       </div>
     </div>`
+  }
+
+  // Grosser Verlauf. Chart.js liegt ohnehin schon im Kopf der Seite (fuer die
+  // Rechnungen), also kein zweiter Zeichen-Weg. Die Instanz wird beim 10s-Takt
+  // AKTUALISIERT statt neu gebaut — sonst blitzt der Chart alle zehn Sekunden.
+  function mkChartZeichnen(m){
+    const wrap = $mk('mk-chart-wrap'), cv = $mk('mk-chart')
+    if(!wrap || !cv || typeof Chart === 'undefined') return
+    if(!m || !(m.kurse || []).length){ wrap.hidden = true; return }
+    wrap.hidden = false
+
+    const hoch = (m.diff ?? 0) >= 0
+    const farbe = hoch ? '#12B76A' : '#F04438'
+    const labels = (m.zeiten || []).map(t => new Date(t * 1000)
+      .toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }))
+
+    $mk('mk-chart-titel').textContent = `${m.key} · ${m.name}`
+    $mk('mk-chart-sub').textContent =
+      `${m.kurse.length} Punkte à 5 min · Kurs ${mkAlter(m.tick_zeit)}`
+
+    if(mkChart && mkChart._mkKey === m.key){
+      mkChart.data.labels = labels
+      mkChart.data.datasets[0].data = m.kurse
+      mkChart.data.datasets[0].borderColor = farbe
+      mkChart.data.datasets[0].backgroundColor = farbe + '1f'
+      mkChart.update('none')
+      return
+    }
+    if(mkChart) mkChart.destroy()
+    mkChart = new Chart(cv.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [{
+        data: m.kurse, borderColor: farbe, backgroundColor: farbe + '1f',
+        borderWidth: 1.6, pointRadius: 0, pointHitRadius: 12, fill: true, tension: .15 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: c => c.parsed.y.toLocaleString('de-DE',
+                { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            }
+          }
+        },
+        scales: {
+          x: { grid: { display: false },
+               ticks: { maxTicksLimit: 8, color: '#98A2B3', font: { size: 10 } } },
+          y: { position: 'right', grid: { color: 'rgba(102,112,133,.10)' },
+               ticks: { color: '#98A2B3', font: { size: 10 },
+                        callback: v => Number(v).toLocaleString('de-DE') } }
+        }
+      }
+    })
+    mkChart._mkKey = m.key
   }
 
   let _mkBusy = false
@@ -28900,9 +28979,13 @@
     try{
       const r = await fetch(`${MK_BACKEND}/markt/futures`, { cache: 'no-store' })
       const d = await r.json()
+      mkDaten = d
       const m = d.maerkte || []
       if(!m.length) throw new Error((d.fehler || []).join(' · ') || 'keine Daten')
+      // Beim ersten Laden das erste Instrument waehlen, sonst die Wahl halten.
+      if(!mkWahl || !m.some(x => x.key === mkWahl)) mkWahl = m[0].key
       if(grid) grid.innerHTML = m.map(mkKarte).join('')
+      mkChartZeichnen(m.find(x => x.key === mkWahl))
       if(stand) stand.textContent = d.stale ? 'Backend hat keine frischen Daten — alter Stand'
                                             : `aktualisiert ${mkAlter(d.fetched)}`
       // Die Verzögerung gehört sichtbar dazu, nicht ins Kleingedruckte: ein
@@ -28926,6 +29009,26 @@
     b.addEventListener('click', () => setTimeout(() => mkLaden(true), 50)))
   const mkBtn = $mk('mk-refresh')
   if(mkBtn) mkBtn.addEventListener('click', () => mkLaden(true))
+
+  // Eigener Handler NUR auf dem Markt-Raster (Projektregel: keine Sammel-Handler).
+  function mkWaehle(key){
+    const m = (mkDaten && mkDaten.maerkte) || []
+    if(!key || !m.length) return
+    mkWahl = key
+    const grid = $mk('mk-grid')
+    if(grid) grid.innerHTML = m.map(mkKarte).join('')
+    mkChartZeichnen(m.find(x => x.key === key))
+  }
+  $mk('mk-grid')?.addEventListener('click', ev => {
+    const k = ev.target.closest && ev.target.closest('[data-mk-key]')
+    if(k) mkWaehle(k.getAttribute('data-mk-key'))
+  })
+  // Tastatur: die Karten sind role="button", also muessen Enter/Leertaste gehen.
+  $mk('mk-grid')?.addEventListener('keydown', ev => {
+    if(ev.key !== 'Enter' && ev.key !== ' ') return
+    const k = ev.target.closest && ev.target.closest('[data-mk-key]')
+    if(k){ ev.preventDefault(); mkWaehle(k.getAttribute('data-mk-key')) }
+  })
   // Direkter Einstieg über #markt (Lesezeichen) — der Sidebar-Klick fehlt dann.
   if(location.hash === '#markt') setTimeout(() => mkLaden(true), 400)
 })()

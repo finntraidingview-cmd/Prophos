@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-31.4"
+APP_BUILD = "2026-08-31.5"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -113,8 +113,13 @@ def news_calendar():
 # Watchlist mit Finns eigenem CME-Abo).
 _markt_cache = {"ts": 0, "data": None}
 _markt_lock = threading.Lock()
-MARKT_TTL = 20            # Sekunden — Yahoo ist ohnehin verzoegert
-MARKT_PUNKTE = 120        # letzte 120 Kerzen (a 15 min) fuer den Mini-Chart
+MARKT_TTL = 10            # Sekunden — Finn will es so frisch wie moeglich; an
+                          # Yahoos ~10 min Verzoegerung aendert das nichts, es
+                          # holt den verzoegerten Stand nur oefter nach.
+MARKT_PUNKTE = 600        # 5-Minuten-Kerzen: ~50 Handelsstunden. Feiner als die
+                          # frueheren 15-Minuten-Kerzen, weil daraus jetzt auch
+                          # der grosse Chart gezeichnet wird — die Sparkline auf
+                          # der Karte nimmt sich davon clientseitig das Ende.
 MARKT_SYMBOLE = [
     {"key": "NQ",  "yahoo": "NQ=F",  "name": "E-mini Nasdaq-100",       "punktwert": 20},
     {"key": "MNQ", "yahoo": "MNQ=F", "name": "Micro E-mini Nasdaq-100", "punktwert": 2},
@@ -126,7 +131,7 @@ def _markt_hole(sym):
     entscheidet, ob er alten Stand liefert."""
     r = requests.get(
         f"https://query1.finance.yahoo.com/v8/finance/chart/{sym['yahoo']}",
-        params={"range": "5d", "interval": "15m"},
+        params={"range": "5d", "interval": "5m"},
         headers={"User-Agent": "Mozilla/5.0 (Prophos)"}, timeout=12)
     r.raise_for_status()
     res = ((r.json() or {}).get("chart") or {}).get("result") or []
