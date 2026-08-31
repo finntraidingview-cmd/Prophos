@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-31.3"
+APP_BUILD = "2026-08-31.4"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -278,7 +278,11 @@ def cors(r):
     # sb-token gehört dazu, sonst blockt der Browser den Admin-Endpoint schon im
     # Preflight ("Failed to fetch", 15.08.2026 live aufgetreten).
     r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, ma-token, ma-account, dup-token, dup-user, sb-token"
-    r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    # PATCH/DELETE seit 31.08.2026: der Kaufplan aendert und loescht Zeilen, und
+    # ohne die Methoden hier scheitert schon der Preflight — der Browser meldet
+    # nur "Failed to fetch", was wie ein Netzfehler aussieht und keiner ist.
+    # Exakt dieselbe Falle wie beim sb-token-Header eine Zeile drueber.
+    r.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     return r
 
 @app.route("/")
@@ -3803,7 +3807,7 @@ def admin_rechnung_pdf():
 # ════════════════════════════════════════════════════════════════════════════
 
 # Nur diese Felder duerfen vom Client kommen — Whitelist statt Durchreichen.
-ACC_PLAN_FELDER = ("firma", "notiz")
+ACC_PLAN_FELDER = ("firma", "notiz", "erledigt")
 
 
 def acc_plan_stand(accs, user_id, firma, archiviert):
@@ -3838,7 +3842,14 @@ def _acc_plan_body(daten, neu):
             return None, "user_id fehlt"
         out["user_id"] = uid
     for f in ACC_PLAN_FELDER:
-        if f in daten:
+        if f not in daten:
+            continue
+        if f == "erledigt":
+            out[f] = bool(daten[f])
+            # Datum haengt am Haken, nicht an einem zweiten Klick — sonst steht
+            # spaeter "erledigt" ohne Zeitpunkt da.
+            out["erledigt_am"] = datetime.now(timezone.utc).isoformat() if out[f] else None
+        else:
             out[f] = str(daten[f] if daten[f] is not None else "").strip()[:400]
     if neu and not out.get("firma"):
         return None, "Firma angeben"

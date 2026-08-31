@@ -3795,6 +3795,21 @@
         </div>
       </div>
 
+      <!-- TODO fuer diese ID (31.08.2026, Finns Wunsch: "mach das es bei der
+           jeweiligen person dann auch angezeigt wird im dashboard seine trade
+           todoo + das er sie abhaken kann"). Kommt DIREKT aus Supabase, nicht
+           ueber app.py: die Person darf per RLS genau ihre eigenen Zeilen
+           lesen und daran nur den Haken setzen (Spalten-Grant auf erledigt /
+           erledigt_am). Ist nichts eingetragen, bleibt die Karte komplett weg
+           statt eine leere Ueberschrift zu zeigen. -->
+      <div class="card" id="todoCard" hidden style="margin-bottom:16px;padding:16px 18px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:4px">
+          <h3 style="margin:0;font-size:15px">Was noch geparkt werden soll</h3>
+          <span id="todoCount" style="font-size:12px;color:var(--sub)"></span>
+        </div>
+        <div id="todoList"></div>
+      </div>
+
       <!-- Sync status banner -->
       <div class="sync-banner" id="syncBanner" hidden></div>
 
@@ -9177,14 +9192,24 @@
     }
 
     function planZeile(z){
-      return `<div style="display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-top:1px solid var(--border-soft)">
+      const ab = !!z.erledigt
+      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--border-soft)${ab ? ';opacity:.55' : ''}">
+        <input type="checkbox" class="plan-hak" data-plan-id="${planEsc(z.id)}" ${ab ? 'checked' : ''}
+               title="Erledigt" style="width:16px;height:16px;margin-top:3px;cursor:pointer">
         <div style="flex:1;min-width:0">
-          <div style="font-size:14.5px;font-weight:600">${planEsc(z.firma) || '—'}</div>
+          <div style="font-size:14.5px;font-weight:600${ab ? ';text-decoration:line-through' : ''}">${planEsc(z.firma) || '—'}</div>
           ${z.notiz ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">${planEsc(z.notiz)}</div>` : ''}
           <div style="font-size:12px;color:var(--sub-2);margin-top:3px">aktuell dort: ${planEsc(planStandText(z.stand))}</div>
         </div>
         <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(z.id)}" style="padding:4px 9px;font-size:12px" title="Eintrag löschen">🗑</button>
       </div>`
+    }
+
+    async function planHaken(id, erledigt){
+      try{
+        await rgApi('/admin/acc-plan', { method:'PATCH', body: JSON.stringify({ id, erledigt }) })
+        await planLoad()
+      }catch(e){ planSetMsg('Haken nicht gespeichert: ' + (e && e.message || e), 'err') }
     }
 
     async function planAdd(){
@@ -9542,7 +9567,9 @@
       $('plan-notiz')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
       $('plan-groups')?.addEventListener('click', ev => {
         const del = ev.target.closest('.plan-del')
-        if(del) planDelete(del.dataset.planId)
+        if(del) return planDelete(del.dataset.planId)
+        const hak = ev.target.closest('.plan-hak')
+        if(hak) planHaken(hak.dataset.planId, hak.checked)
       })
 
       // Rechnungen-Tab (28.08.2026)
@@ -15383,8 +15410,65 @@
     }
   }
 
+  /* ══ „Was noch geparkt werden soll" — die eigene Sicht auf den Kaufplan ══
+   * (31.08.2026, Finns Wunsch). Bewusst DIREKT gegen Supabase statt über
+   * app.py: die Person darf per RLS genau ihre eigenen Zeilen lesen und daran
+   * nur den Haken setzen (Spalten-Grant auf erledigt/erledigt_am). Über den
+   * Admin-Endpoint ginge es gar nicht — der verlangt ADMIN_EMAILS.
+   * Eigene Verdrahtung, kein Sammel-Handler (Projektregel). */
+  let _todoBusy = false
+  async function todoLaden(){
+    const karte = document.getElementById('todoCard'); if(!karte || _todoBusy) return
+    _todoBusy = true
+    try{
+      const { data, error } = await supabase.from('acc_plan')
+        .select('id,firma,notiz,erledigt').order('created_at', { ascending: false })
+      if(error) throw error
+      const zeilen = data || []
+      // Nichts eingetragen? Karte komplett weg — eine leere Überschrift ist
+      // schlechter als gar keine Karte.
+      if(!zeilen.length){ karte.hidden = true; return }
+      const offen = zeilen.filter(z => !z.erledigt).length
+      karte.hidden = false
+      document.getElementById('todoCount').textContent =
+        offen ? `${offen} offen` : 'alles erledigt'
+      document.getElementById('todoList').innerHTML = zeilen.map(z => `
+        <label style="display:flex;align-items:flex-start;gap:11px;padding:10px 0;border-top:1px solid var(--border-soft);cursor:pointer${z.erledigt ? ';opacity:.5' : ''}">
+          <input type="checkbox" class="todo-hak" data-todo-id="${escapeHtml(String(z.id))}" ${z.erledigt ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;cursor:pointer">
+          <span style="flex:1;min-width:0">
+            <span style="font-size:14px;font-weight:600${z.erledigt ? ';text-decoration:line-through' : ''}">${escapeHtml(z.firma || '—')}</span>
+            ${z.notiz ? `<span style="display:block;font-size:13px;color:var(--sub);margin-top:1px">${escapeHtml(z.notiz)}</span>` : ''}
+          </span>
+        </label>`).join('')
+    }catch(e){
+      // Fehlt die Tabelle oder das Recht, bleibt die Karte einfach weg —
+      // ein roter Kasten im Accounts-Dashboard hilft der Person nicht.
+      console.warn('[todo]', e)
+      karte.hidden = true
+    }finally{ _todoBusy = false }
+  }
+
+  async function todoHaken(id, erledigt){
+    try{
+      const { error } = await supabase.from('acc_plan')
+        .update({ erledigt, erledigt_am: erledigt ? new Date().toISOString() : null })
+        .eq('id', id)
+      if(error) throw error
+      todoLaden()
+    }catch(e){
+      alert('Haken nicht gespeichert: ' + (e && e.message || e))
+      todoLaden()
+    }
+  }
+
+  document.getElementById('todoList')?.addEventListener('change', ev => {
+    const h = ev.target.closest('.todo-hak')
+    if(h) todoHaken(h.dataset.todoId, h.checked)
+  })
+
   function renderAccounts(){
     if(!accEls.table) return
+    todoLaden()
 
     // Wenn die Detail-View gerade offen ist, parallel neu rendern
     // (z.B. nach Live-Balance-Sync, Archive-Toggle, Edit-Save)
@@ -21065,7 +21149,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.199'
+  const OS_TAB_BUILD = '2026-08-31.200'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
