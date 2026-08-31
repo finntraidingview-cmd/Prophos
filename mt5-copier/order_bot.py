@@ -453,6 +453,39 @@ def tv_zahl_text(x):
     return ("%.4f" % f).rstrip("0").rstrip(".").replace(".", ",")
 
 
+def tv_senden_text_passt(text, richtung, menge):
+    """Traegt der Senden-Knopf wirklich das, was wir gleich ausloesen?
+
+    TradingViews Knopf beschriftet sich selbst mit Richtung, Menge, Symbol und
+    Orderart -- "Kauf 3 NQU6 MARKT" (Fund im Panel-Dump 31.08.2026). Das ist
+    die belastbarste Ruecklese-Probe im ganzen Ablauf: sie prueft nicht ein
+    Eingabefeld, sondern das, was das Panel selbst zu tun glaubt. Deshalb faellt
+    der unumkehrbare Klick erst, wenn dieser Text stimmt.
+
+    Reihenfolge zaehlt: 'Verkauf' ENTHAELT 'kauf'. Wer auf 'kauf' prueft, ohne
+    'verkauf' vorher auszuschliessen, haelt einen Verkauf fuer einen Kauf --
+    das waere die Richtungsverwechslung, gegen die der ganze Rest abgesichert
+    ist."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False, "Senden-Knopf ohne Beschriftung"
+    if "markt" not in t and "market" not in t:
+        return False, f"Orderart steht nicht auf Markt ('{text[:40]}')"
+    ist_verkauf = ("verkauf" in t) or ("sell" in t)
+    ist_kauf = (not ist_verkauf) and (("kauf" in t) or ("buy" in t))
+    r = (richtung or "").lower()
+    if r == "buy" and not ist_kauf:
+        return False, f"Knopf zeigt nicht Kauf ('{text[:40]}')"
+    if r == "sell" and not ist_verkauf:
+        return False, f"Knopf zeigt nicht Verkauf ('{text[:40]}')"
+    # Menge als EIGENES Wort — '3' darf nicht in '30' oder im Symbol treffen.
+    soll = tv_zahl_text(menge)
+    if soll not in re.findall(r"[0-9][0-9.,]*", t.replace(".", "").replace(",", "")) \
+       and not re.search(r"(?<![0-9])" + re.escape(soll) + r"(?![0-9])", t):
+        return False, f"Menge {soll} steht nicht auf dem Knopf ('{text[:40]}')"
+    return True, ""
+
+
 def pruefe_tv_befehl(cmd):
     """Liste von Fehlertexten; leer = Befehl ok. Eigene Pruefung statt
     pruefe_befehl: der Orbit-Befehl braucht die External ID (welches Unterkonto)
@@ -1364,142 +1397,92 @@ def modus_tvorder(cmd):
                         "Von Hand wechseln.", "symbol")
     trail.append(f"Chart zeigt {ziel_sym}")
 
-    # --- Schritt 5a: Order-Ticket oeffnen ----------------------------------
-    # TASTE statt Klick (30.08.2026, Finns Fund im TradingView-Kontextmenue:
-    # "Add order on NQU2026 at 29.510,75 …  Shift + T"). Eine Tastenkombination
-    # ist jedem geratenen Knopf-Klick ueberlegen: sie braucht keinen Selektor,
-    # kann nicht danebenklicken und ueberlebt einen TV-Umbau. Genau derselbe
-    # Grund, aus dem der MT5-Puls den Order-Dialog mit F9 oeffnet statt ihn zu
-    # suchen. Der Klick auf den Panel-Knopf bleibt nur der Notweg fuer den
-    # Fall, dass sich die Taste ueberhaupt nicht senden laesst.
+    # --- Schritt 5: das Handelspanel bedienen ------------------------------
+    # Es wird NICHTS geoeffnet: bei TradingView ist das "Order-Ticket" kein
+    # Dialog, sondern das fest angedockte Panel rechts (Fund aus Finns
+    # Panel-Dump 31.08.2026 -- Shift+T aus .195 war ein Irrweg, das erzeugt eine
+    # Order-Linie im Chart). Ist der Trade-Bereich zugeklappt, gibt es das
+    # Element gar nicht.
     richtung = str(cmd["richtung"]).lower()
-    geoeffnet = False
-    t_taste = time.time()
-    try:
-        from pywinauto import keyboard
-        keyboard.send_keys("+t")
-        trail.append("Order-Ticket per Shift+T angefordert")
-        _warte(0.9, 0.6)
-        bf = _tv_bf(nach=t_taste + 0.9, timeout=8.0) or bf
-        geoeffnet = bool((bf.get("ticket") or {}).get("offen"))
-        if not geoeffnet:
-            # BEWUSST kein Blind-Klick hinterher: die Taste ist raus, und wenn
-            # das Ticket trotzdem nicht erkannt wird, liegt es viel eher an
-            # meinen geratenen Ticket-Selektoren als daran, dass nichts aufging.
-            # Ein Knopf-Klick obendrauf koennte ein zweites Ticket oeffnen oder
-            # etwas ganz anderes treffen. Also anhalten — der Dump ist scharf.
-            return raus("Shift+T ist raus, aber das Order-Ticket wird nicht "
-                        "erkannt. Steht es offen, liegt es an meinen Ticket-"
-                        "Selektoren, nicht am Oeffnen. Der Kandidaten-Dump ist "
-                        "jetzt 60 s scharf: http://127.0.0.1:8790/bedienfeld "
-                        "abrufen und schicken.", "ticket")
-    except Exception:
-        trail.append("Shift+T liess sich nicht senden — Notweg ueber den Panel-Knopf")
-        knopf = _tv_element(bf, "panel", "kaufen" if richtung == "buy" else "verkaufen")
-        if not knopf:
-            return raus(f"{'Kaufen' if richtung == 'buy' else 'Verkaufen'}-Knopf im "
-                        "Handelspanel nicht eindeutig gefunden, und Shift+T ging "
-                        "auch nicht — Order von Hand platzieren.", "ticket")
-        ok, f = _tv_klick(knopf["rect"], bf["geo"], klient(),
-                          "Kaufen" if richtung == "buy" else "Verkaufen", trail)
-        if not ok:
-            return raus(f, "ticket")
-        _warte(0.9, 0.6)
-        bf = _tv_bf(nach=time.time(), timeout=8.0) or bf
-        if not (bf.get("ticket") or {}).get("offen"):
-            return raus("Order-Ticket ging nicht auf — im TradingView nachsehen, "
-                        "ob ein Dialog haengt.", "ticket")
-    trail.append("Order-Ticket offen")
+    mit_sltp = cmd.get("sl_usd") not in (None, "", 0)
 
-    # --- Schritt 5b: Menge, TP, SL -----------------------------------------
+    if not (bf.get("ticket") or {}).get("offen"):
+        return raus("Das TradingView-Handelspanel ist zu. Oben rechts auf 'Trade' "
+                    "klicken, sodass rechts Markt/Limit/Stop, Einheiten und der "
+                    "Kauf-Knopf stehen — dann erneut starten. Puls klappt es "
+                    "BEWUSST nicht selbst auf: ein Klick auf einen Knopf, den er "
+                    "nicht sicher erkennt, ist auf dieser Seite kein harmloser "
+                    "Fehlversuch.", "panel")
+
+    if mit_sltp:
+        # Die TP/SL-Wertfelder im Panel tragen weder id noch data-name -- sie
+        # sind nur ueber ihre Lage zu finden. Raten waere hier besonders teuer:
+        # eine Zahl im falschen Feld ist ein falscher Stop. Also ehrlich
+        # anhalten, statt die Order ohne Absicherung durchzuschieben.
+        return raus("SL/TP kann Puls im Handelspanel noch nicht setzen — die "
+                    "Wertfelder dort haben keine eindeutige Kennung. Entweder im "
+                    "Order-Popup den SL/TP-Schalter ausschalten und von Hand "
+                    "setzen, oder auf die naechste Stufe warten. Es wurde NICHTS "
+                    "platziert.", "sltp")
+
+    # Orderart auf Markt. Ein Klick auf einen bereits aktiven Reiter ist
+    # folgenlos, deshalb wird nicht erst geprueft, ob er schon steht.
+    markt = _tv_element(bf, "ticket", "markt")
+    if not markt:
+        return raus("Der Reiter 'Markt' im Handelspanel wurde nicht gefunden. "
+                    "Steht das Panel auf Limit/Stop? Von Hand auf Markt stellen.",
+                    "markt")
+    ok, f = _tv_klick(markt["rect"], bf["geo"], klient(), "Reiter Markt", trail)
+    if not ok:
+        return raus(f, "markt")
+    _warte(0.4, 0.3)
+
+    # Menge
+    bf = _tv_bf(nach=time.time(), timeout=6.0) or bf
     menge_el = _tv_element(bf, "ticket", "menge")
     if not menge_el:
-        return raus("Mengenfeld im Order-Ticket nicht eindeutig gefunden — "
-                    "Ticket steht offen, Order NICHT platziert. Von Hand "
-                    "ausfuellen oder abbrechen.", "menge")
-    ok, f = _tv_klick(menge_el["rect"], bf["geo"], klient(), "Mengenfeld", trail)
+        return raus("Das Einheiten-Feld im Handelspanel wurde nicht gefunden — "
+                    "nichts platziert.", "menge")
+    ok, f = _tv_klick(menge_el["rect"], bf["geo"], klient(), "Einheiten-Feld", trail)
     if not ok:
         return raus(f, "menge")
-    ok, f = _tv_tippen(tv_zahl_text(cmd["volumen"]), "Menge", trail)
+    ok, f = _tv_tippen(tv_zahl_text(cmd["volumen"]), "Einheiten", trail)
     if not ok:
         return raus(f, "menge")
+    _warte(0.3, 0.3)
 
-    mit_sltp = cmd.get("sl_usd") not in (None, "", 0)
-    if mit_sltp:
-        for feld, einheit, wert, name in (
-                ("sl", "sl_einheit", cmd["sl_usd"], "Stop Loss"),
-                ("tp", "tp_einheit", cmd["tp_usd"], "Take Profit")):
-            # Pro Feld ein FRISCHER Stand: das Ticket rendert nach jeder
-            # Eingabe neu (Bracket-Zeilen klappen auf, Zahlen formatieren
-            # sich), ein Rechteck von vor zwei Klicks waere dann verschoben.
-            bf = _tv_bf(nach=time.time(), timeout=6.0) or bf
-            el = _tv_element(bf, "ticket", feld)
-            if not el:
-                return raus(f"{name}-Feld im Order-Ticket nicht gefunden — Ticket "
-                            "steht offen, Order NICHT platziert. Entweder von "
-                            "Hand ausfuellen oder den SL/TP-Schalter im Order-"
-                            "Popup ausschalten.", "sltp")
-            eh = (bf.get("ticket") or {}).get(einheit) or {}
-            if not tv_einheit_ist_geld(eh.get("text")):
-                return raus(f"{name} steht nicht auf Geld/$ (Einheit: "
-                            f"'{(eh.get('text') or '?')[:20]}') — {wert} waere "
-                            "dort eine ganz andere Distanz. Einheit im Ticket "
-                            "auf $ stellen, dann erneut. Order NICHT platziert.",
-                            "sltp")
-            ok, f = _tv_klick(el["rect"], bf["geo"], klient(), f"{name}-Feld", trail)
-            if not ok:
-                return raus(f, "sltp")
-            ok, f = _tv_tippen(tv_zahl_text(wert), name, trail)
-            if not ok:
-                return raus(f, "sltp")
+    # Richtung waehlen (Kauf-/Verkauf-Kachel oben im Panel). Das platziert noch
+    # nichts -- es stellt nur ein, was der grosse Knopf unten tun wird.
+    bf = _tv_bf(nach=time.time(), timeout=6.0) or bf
+    seite_el = _tv_element(bf, "panel", "kaufen" if richtung == "buy" else "verkaufen")
+    if not seite_el:
+        return raus(f"Die {'Kauf' if richtung == 'buy' else 'Verkauf'}-Kachel im "
+                    "Handelspanel wurde nicht gefunden — nichts platziert.", "seite")
+    ok, f = _tv_klick(seite_el["rect"], bf["geo"], klient(),
+                      "Kauf" if richtung == "buy" else "Verkauf", trail)
+    if not ok:
+        return raus(f, "seite")
+    _warte(0.5, 0.4)
 
-    # --- Schritt 5c: alles ZURUECKLESEN, bevor geklickt wird ---------------
-    # Das Userscript liest den echten DOM-value. Erst wenn Menge (und ggf.
-    # SL/TP) beweisbar drinstehen, faellt der unumkehrbare Klick.
+    # --- Ruecklesen am Senden-Knopf, bevor geklickt wird -------------------
+    # Der Knopf beschriftet sich selbst mit Richtung, Menge, Symbol und
+    # Orderart ("Kauf 3 NQU6 MARKT"). Das prueft nicht ein Eingabefeld,
+    # sondern das, was das Panel selbst zu tun glaubt -- die belastbarste
+    # Probe im ganzen Ablauf.
     bf = _tv_bf(nach=time.time(), timeout=8.0)
     if not bf:
-        return raus("Kein frischer Bedienfeld-Stand zum Ruecklesen — Order NICHT "
-                    "platziert, Ticket steht offen.", "ruecklesen")
-    soll = float(cmd["volumen"])
-    ist = tv_de_zahl(((bf.get("ticket") or {}).get("menge") or {}).get("wert"))
-    if ist is None or abs(ist - soll) > 1e-9:
-        return raus(f"Menge im Ticket steht auf '{ist if ist is not None else '?'}' "
-                    f"statt {tv_zahl_text(soll)} — Order NICHT platziert.",
-                    "ruecklesen")
-    trail.append(f"Menge zurueckgelesen: {tv_zahl_text(ist)}")
-    if mit_sltp:
-        for feld, wert, name in (("sl", cmd["sl_usd"], "Stop Loss"),
-                                 ("tp", cmd["tp_usd"], "Take Profit")):
-            ist = tv_de_zahl(((bf.get("ticket") or {}).get(feld) or {}).get("wert"))
-            if ist is None or abs(ist - float(wert)) > 0.01:
-                return raus(f"{name} im Ticket steht auf "
-                            f"'{ist if ist is not None else '?'}' statt "
-                            f"{tv_zahl_text(wert)} — Order NICHT platziert.",
-                            "ruecklesen")
-            trail.append(f"{name} zurueckgelesen: {tv_zahl_text(ist)}")
-
+        return raus("Kein frischer Bedienfeld-Stand zum Ruecklesen — nichts "
+                    "platziert.", "ruecklesen")
     senden = _tv_element(bf, "ticket", "senden")
     if not senden:
-        return raus("Senden-Knopf im Order-Ticket nicht eindeutig gefunden — "
-                    "alles ist ausgefuellt, der letzte Klick fehlt. Im "
-                    "TradingView selbst bestaetigen.", "senden")
-
-    # Probelauf (30.08.2026, Finns erster Test fiel auf einen geschlossenen
-    # Markt): die GANZE Kette laufen lassen — Tab, Konto, Symbol, Ticket,
-    # Menge, SL/TP, Ruecklesen, und sogar den Senden-Knopf suchen — nur nicht
-    # klicken. Genau hier, NACH der Senden-Suche: ein Probelauf, der den
-    # letzten Fund auslaesst, hat die interessanteste Frage nicht beantwortet.
-    # Das Ticket bleibt danach ausgefuellt und offen; wegklicken ist Handarbeit
-    # (ein Abbruch-Klick waere wieder ein geratener Klick).
-    if cmd.get("probe"):
-        res["ok"] = True
-        res["probe"] = True
-        return raus("Probelauf durch: Tab, Konto, Symbol, Ticket, Menge"
-                    + (" und SL/TP" if mit_sltp else "")
-                    + " sitzen — der Senden-Knopf wurde gefunden und ABSICHTLICH "
-                      "nicht geklickt. Nichts platziert. Das Ticket steht "
-                      "ausgefuellt offen und kann von Hand geschlossen werden.",
-                    "probe", retry_ok=True)
+        return raus("Der Senden-Knopf im Handelspanel wurde nicht gefunden — "
+                    "alles eingestellt, der letzte Klick fehlt. In TradingView "
+                    "selbst ausloesen.", "senden")
+    passt, grund = tv_senden_text_passt(senden.get("text"), richtung, cmd["volumen"])
+    if not passt:
+        return raus(f"Senden-Knopf zeigt nicht die geplante Order: {grund}. "
+                    "NICHTS platziert.", "ruecklesen")
+    trail.append(f"Senden-Knopf zurueckgelesen: '{(senden.get('text') or '')[:40]}'")
 
     # ═══ AB HIER UNUMKEHRBAR ═══════════════════════════════════════════════
     ok, f = _tv_klick(senden["rect"], bf["geo"], klient(), "Order senden", trail)

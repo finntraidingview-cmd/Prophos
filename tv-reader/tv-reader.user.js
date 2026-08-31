@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.4
+// @version      0.3.5
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -202,67 +202,62 @@
   // aria-Label, dann Text. Beim Haerten nach dem ersten PC-Lauf wird hier eine
   // Zeile ergaenzt — nichts anderes muss sich aendern.
 
+  /* ECHTE Anker, aus Finns Panel-Dump vom 31.08.2026 gelesen -- bis 0.3.4
+   * standen hier Vermutungen. Die geratenen Signaturen bleiben als zweite
+   * Reihe stehen: faellt TradingView eine Umbenennung ein, greift der Text-Weg
+   * weiter, und der Dump sagt, was sich geaendert hat. */
   const SIG_SYMBOL_KNOPF = [
     { q: 'id:header-toolbar-symbol-search', sel: '#header-toolbar-symbol-search' },
-    { q: 'data-name:symbol-search',         sel: '[data-name="symbol-search"]' },
-    { q: 'aria:Symbol-Suche',               sel: 'button[aria-label*="ymbol"]' },
+    { q: 'aria:Symbol aendern',             sel: 'button[aria-label^="Symbol"]' },
   ];
   const SIG_SUCHFELD = [
     { q: 'data-role:search',        sel: 'input[data-role="search"]' },
     { q: 'dialog>input',            sel: '[data-name="symbol-search-items-dialog"] input' },
-    { q: 'aria:Suche',              sel: 'input[aria-label*="uch"], input[placeholder*="uch"]' },
+    { q: 'aria/placeholder:Suche',  sel: 'input[aria-label*="uch"], input[placeholder*="uch"]' },
   ];
   const SIG_KONTO_SCHALTER = [
     { q: 'data-name:account-select', sel: '[data-name="account-manager-account-select"]' },
     { q: 'data-name*account',        sel: '[data-name*="account"][role="button"], [data-name*="account"] button' },
-    { q: 'class*accountSelect',      sel: '[class*="accountSelect"] button, button[class*="accountSelect"]' },
   ];
   const SIG_KONTO_EINTRAEGE = [
     { q: 'role:option',   sel: '[role="listbox"] [role="option"], [data-name="menu-inner"] [role="option"]' },
     { q: 'role:menuitem', sel: '[data-name="popup-menu-container"] [role="menuitem"]' },
-    { q: 'menu-item',     sel: '[data-name="popup-menu-container"] [data-name="menu-item"]' },
   ];
+  // Das "Ticket" ist bei TradingView kein Dialog, sondern das fest angedockte
+  // Handelspanel rechts. Ist der Trade-Bereich zugeklappt, gibt es das Element
+  // nicht -- dann meldet Puls genau das, statt irgendwo hinzuklicken.
   const SIG_TICKET = [
-    { q: 'data-name:order-ticket', sel: '[data-name="order-ticket"]' },
-    { q: 'dialog-name*order',      sel: '[data-dialog-name*="rder"]' },
-    { q: 'role:dialog+Order',      sel: '[role="dialog"]', text: /order|kaufen|verkaufen|buy|sell/i },
+    { q: 'data-name:order-panel', sel: '[data-name="order-panel"]' },
   ];
   const SIG_PANEL_KAUFEN = [
-    { q: 'data-name:buy-button', sel: '[data-name="buy-button"]' },
-    { q: 'text:Kaufen',          sel: 'button, [role="button"]', text: /^(kaufen|buy)\b/i },
+    { q: 'data-name:side-control-buy',  sel: '[data-name="side-control-buy"]' },
   ];
   const SIG_PANEL_VERKAUFEN = [
-    { q: 'data-name:sell-button', sel: '[data-name="sell-button"]' },
-    { q: 'text:Verkaufen',        sel: 'button, [role="button"]', text: /^(verkaufen|sell)\b/i },
+    { q: 'data-name:side-control-sell', sel: '[data-name="side-control-sell"]' },
   ];
-  // Felder INNERHALB des Order-Tickets (Wurzel = Ticket-Element, deshalb duerfen
-  // die Selektoren hier grob sein — der Kontext macht sie eindeutig).
+  const SIG_MARKT_REITER = [
+    { q: 'id:Market', sel: '#Market' },
+    { q: 'tab:Markt', sel: '[role="tab"]', text: /^(markt|market)$/i },
+  ];
   const SIG_MENGE = [
-    { q: 'data-name:quantity', sel: '[data-name="quantity"] input, input[data-name="quantity"]' },
-    { q: 'aria:Menge',         sel: 'input[aria-label*="eng"], input[aria-label*="uantit"], input[aria-label*="Qty"]' },
-    { q: 'erstes input',       sel: 'input[type="text"], input[inputmode="numeric"]' },
+    { q: 'id:quantity-field', sel: '#quantity-field' },
+    { q: 'aria:Menge',        sel: 'input[aria-label*="eng"], input[aria-label*="uantit"]' },
   ];
-  const SIG_TP_FELD = [
-    { q: 'data-name:take-profit', sel: '[data-name*="take-profit"] input, [data-name*="takeProfit"] input' },
-    { q: 'aria:TakeProfit',       sel: 'input[aria-label*="ake"], input[aria-label*="Gewinn"]' },
-  ];
-  const SIG_SL_FELD = [
-    { q: 'data-name:stop-loss', sel: '[data-name*="stop-loss"] input, [data-name*="stopLoss"] input' },
-    { q: 'aria:StopLoss',       sel: 'input[aria-label*="top"], input[aria-label*="erlust"]' },
-  ];
-  // Einheiten-Umschalter der Bracket-Felder (Ticks / Preis / % / Geld). Finn
-  // gibt TP/SL in $ an — steht die Einheit auf Ticks, waere derselbe getippte
-  // Wert eine voellig andere Distanz. Deshalb wird die Einheit MITGELESEN und
-  // Puls bricht ab, wenn sie nicht auf Geld steht (statt still danebenzuliegen).
-  const SIG_TP_EINHEIT = [
-    { q: 'data-name:tp-unit', sel: '[data-name*="take-profit"] [role="button"], [data-name*="takeProfit"] [role="button"]' },
-  ];
-  const SIG_SL_EINHEIT = [
-    { q: 'data-name:sl-unit', sel: '[data-name*="stop-loss"] [role="button"], [data-name*="stopLoss"] [role="button"]' },
-  ];
+  // Der Senden-Knopf traegt Richtung, Menge, Symbol und Orderart IM TEXT
+  // ("Kauf 3 NQU6 MARKT"). Das ist die beste Ruecklese-Probe im ganzen Ablauf:
+  // Puls prueft den Text, bevor er den unumkehrbaren Klick macht.
   const SIG_TICKET_SENDEN = [
-    { q: 'data-name:place-order', sel: '[data-name="place-order"], [data-name*="submit"]' },
-    { q: 'text:Kaufen/Verkaufen', sel: 'button, [role="button"]', text: /^(kaufen|verkaufen|buy|sell)\b/i },
+    { q: 'data-name:place-and-modify-button', sel: '[data-name="place-and-modify-button"]' },
+  ];
+  // TP/SL: die Schalter tragen den Text "Take Profit, $" / "Stop-Loss, $", die
+  // Wertfelder daneben haben WEDER id NOCH data-name -- sie sind nur ueber
+  // ihre Lage im Panel zu finden. Deshalb bleibt SL/TP eine eigene Stufe;
+  // gemeldet wird hier nur, ob die Schalter da sind.
+  const SIG_TP_SCHALTER = [
+    { q: 'text:TakeProfit', sel: '[data-name="order-panel"] button', text: /take\s*profit/i },
+  ];
+  const SIG_SL_SCHALTER = [
+    { q: 'text:StopLoss',   sel: '[data-name="order-panel"] button', text: /stop[-\s]?loss/i },
   ];
 
   /* Kandidaten-Dump fuer die Ferndiagnose — NUR auf Anforderung (der Server
@@ -387,12 +382,11 @@
       },
       ticket: {
         offen: !!ticketEl,
+        markt: ticketEl ? suche(SIG_MARKT_REITER) : null,   // Reiter liegt ausserhalb des Panels
         menge: ticketEl ? suche(SIG_MENGE, ticketEl) : null,
-        tp: ticketEl ? suche(SIG_TP_FELD, ticketEl) : null,
-        sl: ticketEl ? suche(SIG_SL_FELD, ticketEl) : null,
-        tp_einheit: ticketEl ? suche(SIG_TP_EINHEIT, ticketEl) : null,
-        sl_einheit: ticketEl ? suche(SIG_SL_EINHEIT, ticketEl) : null,
         senden: ticketEl ? suche(SIG_TICKET_SENDEN, ticketEl) : null,
+        tp_schalter: ticketEl ? suche(SIG_TP_SCHALTER) : null,
+        sl_schalter: ticketEl ? suche(SIG_SL_SCHALTER) : null,
       },
       dump: dumpAn ? dumpKandidaten() : null,   // voll, nur auf Anforderung
       panel: dumpKompakt(),                     // Werkzeugleiste + rechte Spalte, immer

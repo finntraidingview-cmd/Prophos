@@ -572,6 +572,25 @@ def main():
     chk("TV: MNQ und NQ greifen sich beim SYMBOL-Rang nicht gegenseitig",
         order_bot.tv_tab_rang("NQU2026 29,491.75", "", "MNQ") == 0
         and order_bot.tv_tab_rang("MNQU2026 29,491.75", "", "NQU6") == 0)
+    # Senden-Knopf-Text (31.08.2026, aus Finns Panel-Dump): TradingView
+    # beschriftet den Knopf mit "Kauf 3 NQU6 MARKT" -- Richtung, Menge, Symbol
+    # und Orderart in einem String. Das ist die letzte Probe vor dem
+    # unumkehrbaren Klick, also gehoert jeder Fall hier her.
+    chk("TV: Senden-Knopf bestaetigt die geplante Order (de + en)",
+        order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "buy", 3)[0]
+        and order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "sell", 3)[0]
+        and order_bot.tv_senden_text_passt("Buy 3 NQU6 MARKET", "buy", 3)[0]
+        and order_bot.tv_senden_text_passt("Sell 2 MNQU6 MARKET", "sell", 2)[0])
+    # 'Verkauf' ENTHAELT 'kauf' — wer darauf nicht achtet, haelt einen Verkauf
+    # fuer einen Kauf. Das ist die Richtungsverwechslung, gegen die der ganze
+    # Rest der Kette abgesichert ist.
+    chk("TV: Richtungsverwechslung wird erkannt (Verkauf enthaelt 'kauf')",
+        not order_bot.tv_senden_text_passt("Verkauf 3 NQU6 MARKT", "buy", 3)[0]
+        and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 MARKT", "sell", 3)[0])
+    chk("TV: falsche Menge und falsche Orderart stoppen den Klick",
+        not order_bot.tv_senden_text_passt("Kauf 30 NQU6 MARKT", "buy", 3)[0]
+        and not order_bot.tv_senden_text_passt("Kauf 3 NQU6 LIMIT", "buy", 3)[0]
+        and not order_bot.tv_senden_text_passt("", "buy", 3)[0])
     chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
         order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
         and order_bot.tv_konto_passt("APEX-987654", "apex 987654")
