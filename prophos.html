@@ -11150,6 +11150,21 @@
         Verknüpfen
       </button>`
   }
+  /* Name des Prophos-Accounts, mit dem dieser Master-Login verknuepft ist.
+   * Fuer den Echo-Tab (31.08.2026, Finns Wunsch "dass die acc automatisch den
+   * namen von ihrem verknuepfer kriegen"): die Instanz heisst dort sonst wie
+   * ihre Config-Datei ("FundedNext5594", "tvplus") — ein Name, den nur der PC
+   * kennt. Verknuepft ist sie aber mit einem Account, der in ganz Prophos
+   * denselben Namen traegt. Zwei Namen fuer dieselbe Sache sind einer zu viel. */
+  function mt5LinkedName(login){
+    const key = String(login || '').trim()
+    if(!key) return null
+    const id = mt5GetLinks()[key]
+    if(!id) return null
+    const acc = (accounts || []).find(m => String(m.id) === String(id))
+    return acc ? acc.name : null
+  }
+  window.mt5LinkedName = mt5LinkedName
   window.mt5LinkCellHtml = mt5LinkCellHtml
   window.mt5GetLinks = mt5GetLinks
   window.mt5LoadLinks = mt5LoadLinks
@@ -21244,7 +21259,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.214'
+  const OS_TAB_BUILD = '2026-08-31.215'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27931,7 +27946,18 @@
     const broker = s.master_server || d.master_server || '—'
     return `<tr>
       <td style="padding-left:20px">
-        <div style="font-weight:600;color:var(--ink)">${esc(d.display_name || d.name)}</div>
+        ${(() => {
+          // Verknuepfter Prophos-Account gewinnt als Anzeigename; die
+          // Config-Bezeichnung wandert klein darunter, damit die Zuordnung
+          // zur Datei nicht verlorengeht.
+          const vn = window.mt5LinkedName
+            ? window.mt5LinkedName(String(s.master_login || d.master_expected || '')) : null
+          const eigen = esc(d.display_name || d.name)
+          return vn
+            ? `<div style="font-weight:600;color:var(--ink)">${esc(vn)}</div>
+               <div style="font-size:11px;color:var(--sub-2);margin-top:1px">${eigen}</div>`
+            : `<div style="font-weight:600;color:var(--ink)">${eigen}</div>`
+        })()}
         <div style="font-size:11px;color:var(--sub);margin-top:2px;font-family:var(--mono)">${esc(s.master_login || d.master_expected || '—')} → Hedge ${esc(s.hedge_login || d.hedge_expected || '—')}</div>
         ${mtcStatusChip(d)}
       </td>
@@ -28655,8 +28681,23 @@
     delete mt5RowMsg[file]
     const sp = (btn && btn.closest('tr')) ? btn.closest('tr').querySelector('[data-mt5msg]') : null
     if(sp){ sp.className = 'mtc-msg'; sp.textContent = 'lösche…' }
-    const r = await mtcApi(`delete?file=${encodeURIComponent(file)}`, { method:'POST',
+    let r = await mtcApi(`delete?file=${encodeURIComponent(file)}`, { method:'POST',
       headers:{'Content-Type':'application/json'}, body:'{}' })
+    // Nur EIN Riegel ist überstimmbar: „andere Instanz ist busy" (31.08.2026,
+    // Finns Ansage „dass ich immer den acc löschen kann"). Der meldet sich mit
+    // erzwingbar:true. Die drei anderen betreffen die Instanz SELBST — offene
+    // Positionen, unklarer Status, laufender Plan — und bleiben hart.
+    if(!r.ok && r.erzwingbar){
+      const ok = confirm(`${r.msg}\n\nTrotzdem löschen?\n\n`
+        + `Der Copier startet dabei neu. Beim Neustart gelten schon offene Positionen `
+        + `als Alt-Bestand: bestehende Hedges bleiben stehen, werden aber nicht mehr `
+        + `mitgeführt und auch nicht automatisch geschlossen. Du müsstest sie dann `
+        + `selbst im Hedge-Terminal beobachten.`)
+      if(!ok){ mt5RowMsg[file] = 'Löschen abgebrochen'; mtcLoad(); return }
+      if(sp) sp.textContent = 'lösche erzwungen…'
+      r = await mtcApi(`delete?file=${encodeURIComponent(file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ force: true }) })
+    }
     if(!r.ok) mt5RowMsg[file] = String(r.msg || r.error || 'Löschen fehlgeschlagen')
     mtcLoad()
   }

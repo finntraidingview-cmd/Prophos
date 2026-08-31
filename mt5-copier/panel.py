@@ -2175,6 +2175,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": ok, "msg": msg}, ensure_ascii=False))
 
         if u.path == "/api/delete":
+            # Body eigenstaendig lesen: das body aus dem start-terminal-Zweig
+            # darueber existiert hier NICHT (der Zweig kehrt zurueck). Ohne
+            # diese Zeilen waere force ein NameError zur Laufzeit.
+            try:
+                _n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(_n) or b"{}") if _n else {}
+            except Exception:
+                body = {}
             # Config loeschen (15.08.2026, Etappe 3). Geloescht werden AUSSCHLIESSLICH
             # die aus dem instances()-Lookup abgeleiteten Pfade — nie der rohe
             # Query-Wert. Vier Verweigerungsgruende (409), weil eine geloeschte
@@ -2237,15 +2245,25 @@ class Handler(BaseHTTPRequestHandler):
             # (d) Irgendeine ANDERE Instanz ist busy — die Loeschung restartet den
             #     ganzen Copier-Prozess, und der Neustart darf keine fremden
             #     offenen Positionen blind stellen.
-            for d in data:
-                if d["file"] == inst["config_file"]:
-                    continue
-                s2 = d.get("status") or {}
-                if d.get("alive") and ((s2.get("master_positions") or []) or (s2.get("hedges") or {})):
-                    return self._send(409, json.dumps({"ok": False, "msg":
-                        f"Andere Instanz ({d['file']}) hat gerade offene Positionen/"
-                        f"Hedges — Loeschen wuerde den ganzen Copier neu starten. "
-                        f"Erst flach werden lassen."}, ensure_ascii=False))
+            # UEBERSTIMMBAR seit 31.08.2026 (Finns Ansage "dass ich immer den acc
+            # loeschen kann"): der Riegel bleibt der Normalfall, aber er ist
+            # kein Naturgesetz -- eine tote Testinstanz muss loeschbar sein,
+            # auch wenn nebenan etwas offen ist. Mit force=true wird nur der
+            # ZWEITE Riegel uebergangen; die drei davor (eigene Positionen,
+            # unklarer Status, laufender Trade-Plan) bleiben hart, weil die die
+            # zu loeschende Instanz SELBST betreffen. Das Frontend fragt vorher
+            # mit der ganzen Konsequenz im Klartext nach.
+            if not bool(body.get("force")):
+                for d in data:
+                    if d["file"] == inst["config_file"]:
+                        continue
+                    s2 = d.get("status") or {}
+                    if d.get("alive") and ((s2.get("master_positions") or []) or (s2.get("hedges") or {})):
+                        return self._send(409, json.dumps({"ok": False,
+                            "erzwingbar": True,
+                            "msg": f"Andere Instanz ({d['file']}) hat gerade offene "
+                                   f"Positionen/Hedges — Loeschen startet den ganzen "
+                                   f"Copier neu."}, ensure_ascii=False))
             # Loeschen: ZUERST die Config — schlaegt das fehl (Windows: Datei
             # gerade von copier.py/instances() offen, kein FILE_SHARE_DELETE),
             # wird ABGEBROCHEN statt Erfolg zu melden (Review-Fund 15.08.2026:
