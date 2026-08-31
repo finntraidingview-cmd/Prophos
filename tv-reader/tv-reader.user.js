@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.6
+// @version      0.3.7
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -19,6 +19,12 @@
 (function () {
   'use strict';
 
+  // Version doppelt: einmal im @version-Kopf fuer Tampermonkey, einmal hier
+  // fuer die Ferndiagnose. Klingt redundant, ist es nicht -- an Finns PC wurde
+  // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
+  // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
+  // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
+  const VERSION    = '0.3.7';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -348,6 +354,7 @@
 
     return {
       ts: Date.now(),
+      version: VERSION,
       // Seitentitel + Adresse (0.3.1, 30.08.2026): der Puls sucht den
       // TradingView-Tab in der Chrome-Tableiste. Bis .192 suchte er nach dem
       // Wort "tradingview" — an Finns PC steht im Tab aber nur
