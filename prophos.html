@@ -21244,7 +21244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.209'
+  const OS_TAB_BUILD = '2026-08-31.210'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28667,8 +28667,14 @@
     if(typeof window.mtcApi !== 'function') return null
     try{
       const d = await window.mtcApi('instances')
-      epOrbitInst = ((d && d.instances) || []).find(i =>
-        !String(i.master_terminal_path || '').trim() && i.snapshot_file) || null
+      // has_terminal===false ist das Merkmal der Orbit-Instanz: ihr Master ist
+      // der TV-Verbinder, kein MT5-Terminal. NICHT master_terminal_path — das
+      // Feld gibt es nur in der Config-DATEI, die Panel-API liefert es nicht.
+      // Mit dem falschen Feld war die Bedingung fuer JEDE Instanz wahr und die
+      // Karte zeigte den Multiplier von EchoDemoMaster (0,0991); ein Klick auf
+      // Speichern haette Echos Wert ueberschrieben. Von Finn im Screenshot
+      // entdeckt, bevor er gespeichert hat (31.08.2026).
+      epOrbitInst = ((d && d.instances) || []).find(i => i.has_terminal === false) || null
     }catch(_){ epOrbitInst = null }
     return epOrbitInst
   }
@@ -28817,6 +28823,54 @@
    * hängt: ein zum Testen kleingestellter Multiplier sieht später völlig normal
    * aus und hedgt trotzdem praktisch nichts. Die Umrechnung ist dieselbe wie in
    * der Copier-Config: Kontrakte × Punktwert × Multiplier. */
+  /* Multiplier aus Risiko rechnen — dieselbe Formel wie tpCalcMultiplier im
+   * Trade-Plan-Popup (31.08.2026, Finns Wunsch: "die gleiche Logik wie beim
+   * ersten Popup"). Bewusst eigene kleine Fassung statt Aufruf der anderen:
+   * tpCalcMultiplier zieht den Punktwert aus dem globalen MNQ/NQ-Schalter des
+   * Plan-Modals — den hier zu setzen waere eine Fernwirkung zwischen zwei
+   * Ansichten, und genau solche stillen Kopplungen sind spaeter nicht mehr
+   * nachvollziehbar. Die Karte hat deshalb ihren eigenen Schalter.
+   *
+   * Rechenweg: Risiko Master / (Punktwert x Kontrakte) = Stop-Distanz in
+   * Punkten. Der Slave soll bei derselben Distanz sein eigenes Risiko treffen,
+   * also Lots = Risiko Slave / (1 $/Punkt x Distanz). Der Copier rechnet
+   * hedge_lots = Kontrakte x Punktwert x Multiplier -- der Multiplier ist
+   * damit Lots / (Kontrakte x Punktwert). Keine Waehrungsumrechnung, genau
+   * wie im Plan-Popup. */
+  const EP_SLAVE_PPL = 1        // Fusion NAS100: 1 $ je Punkt und Lot
+  let epPplWahl = 2             // 2 = MNQ, 20 = NQ
+
+  function epMultRechnen(risikoM, kontrakte, risikoS, pplMaster){
+    if(!(risikoM > 0 && kontrakte > 0 && risikoS > 0 && pplMaster > 0)) return null
+    const stop = risikoM / (pplMaster * kontrakte)
+    if(!(stop > 0) || !isFinite(stop)) return null
+    const slaveLots = risikoS / (EP_SLAVE_PPL * stop)
+    const m = slaveLots / (kontrakte * pplMaster)
+    return isFinite(m) && m > 0 ? m : null
+  }
+
+  function epRechnerHtml(){
+    const g = id => Number(($ep(id) || {}).value)
+    const m = epMultRechnen(g('ep-r-master'), g('ep-r-lots'), g('ep-r-slave'), epPplWahl)
+    return `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+      <div style="font-size:11.5px;color:var(--sub-2);margin-bottom:5px">Multiplier aus Risiko rechnen</div>
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px">
+        <input id="ep-r-master" type="number" min="0" step="10" placeholder="Risiko Master $" title="Was der Trade auf dem Prop-Konto kosten darf"
+          value="${epEsc(String(($ep('ep-r-master') || {}).value || ''))}" style="width:104px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink)">
+        <input id="ep-r-lots" type="number" min="1" step="1" placeholder="Kontrakte" title="Wie viele Kontrakte auf dem Master"
+          value="${epEsc(String(($ep('ep-r-lots') || {}).value || '1'))}" style="width:82px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink)">
+        <input id="ep-r-slave" type="number" min="0" step="10" placeholder="Risiko Slave €" title="Was der Hedge auf Fusion kosten darf"
+          value="${epEsc(String(($ep('ep-r-slave') || {}).value || ''))}" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink)">
+        <button class="btn btn-ghost" data-ep-ppl="2"  style="padding:4px 10px;font-size:11.5px;${epPplWahl === 2  ? 'border-color:var(--violet);color:var(--violet)' : ''}">MNQ</button>
+        <button class="btn btn-ghost" data-ep-ppl="20" style="padding:4px 10px;font-size:11.5px;${epPplWahl === 20 ? 'border-color:var(--violet);color:var(--violet)' : ''}">NQ</button>
+        ${m === null
+          ? '<span style="font-size:11.5px;color:var(--sub-2)">alle drei Felder ausfüllen</span>'
+          : `<span style="font-size:12px;font-family:var(--mono)">→ ${m.toLocaleString('de-DE', { maximumFractionDigits: 4 })}</span>
+             <button class="btn btn-ghost" data-ep-mult-uebernehmen="${m}" style="padding:4px 10px;font-size:11.5px">Übernehmen</button>`}
+      </div>
+    </div>`
+  }
+
   function epMultHtml(inst){
     const m = Number(inst.multiplier)
     const mnq = isFinite(m) ? (m * 2) : null
@@ -28831,7 +28885,8 @@
         ${mnq === null ? '' : `1 MNQ → ${mnq.toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots · 1 NQ → ${nq.toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots`}
         ${winzig ? ' — Test-Größe, praktisch ungehedgt' : ''}
       </span>
-    </div>`
+    </div>
+    ${epRechnerHtml()}`
   }
 
   let _epRenderBusy = false
@@ -28882,6 +28937,23 @@
   document.querySelectorAll('#dashboard-view .sb-link[data-view="echoplus"]').forEach(b =>
     b.addEventListener('click', () => { epLokal.naechster = 0; setTimeout(() => epRenderTick(true), 50) }))
 
+  // Nur den Rechner-Block neu zeichnen. Die ganze Karte neu zu bauen wuerde
+  // bei jedem Tastendruck den Fokus aus dem Feld werfen.
+  function epRechnerNeu(){
+    const alt = document.querySelector('#ep-grid [data-ep-ppl]')
+    const box = alt && alt.closest('div').parentElement
+    if(!box) return
+    const werte = ['ep-r-master', 'ep-r-lots', 'ep-r-slave'].map(id => ($ep(id) || {}).value)
+    box.outerHTML = epRechnerHtml()
+    ;['ep-r-master', 'ep-r-lots', 'ep-r-slave'].forEach((id, i) => {
+      const el = $ep(id); if(el) el.value = werte[i]
+    })
+  }
+  const epGridFuerEingaben = $ep('ep-grid')
+  if(epGridFuerEingaben) epGridFuerEingaben.addEventListener('input', e => {
+    if(e.target && /^ep-r-(master|lots|slave)$/.test(e.target.id)) epRechnerNeu()
+  })
+
   async function epMultSpeichern(file, btn){
     const el = $ep('ep-mult'); if(!el || !file) return
     const wert = Number(el.value)
@@ -28906,6 +28978,16 @@
   if(epGrid) epGrid.addEventListener('click', e => {
     const save = e.target.closest && e.target.closest('[data-ep-mult-save]')
     if(save) return epMultSpeichern(save.getAttribute('data-ep-mult-save'), save)
+    const ppl = e.target.closest && e.target.closest('[data-ep-ppl]')
+    if(ppl){ epPplWahl = Number(ppl.getAttribute('data-ep-ppl')); return epRechnerNeu() }
+    const ueb = e.target.closest && e.target.closest('[data-ep-mult-uebernehmen]')
+    if(ueb){
+      const f = $ep('ep-mult')
+      // Nur ins Feld schreiben, NICHT speichern: der Rechner schlaegt vor,
+      // gespeichert wird bewusst mit einem zweiten, eigenen Klick.
+      if(f) f.value = Number(ueb.getAttribute('data-ep-mult-uebernehmen')).toFixed(4)
+      return
+    }
     const btn = e.target.closest && e.target.closest('[data-ep-schalter]')
     if(!btn) return
     btn.disabled = true
