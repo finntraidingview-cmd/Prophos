@@ -12399,6 +12399,31 @@
     return login ? (_mt5BalCache.get(String(login)) || null) : null
   }
 
+  /* Wer den Cache braucht, stösst ihn an (31.08.2026). EIN Einstieg statt
+   * verstreuter Ladeaufrufe: gerufen wird er aus renderAccounts und beim Öffnen
+   * des Trade-planen-Modals — damit deckt er Boot, Ansichtswechsel und jeden
+   * anderen Render-Anlass ab, ohne dass irgendwo ein zweiter Lade-Weg entsteht.
+   * Höchstens einmal pro Minute: hier steht die Frage „wie viel liegt auf dem
+   * Konto", nicht „was macht die Position gerade" — dafür gibt es die
+   * Live-P&L-Zeile mit ihren 25 Sekunden. */
+  let _mt5BalZuletzt = 0, _mt5BalLaeuft = false
+  function mt5BalCacheAnstossen(){
+    if(_mt5BalLaeuft || Date.now() - _mt5BalZuletzt < 60000) return
+    _mt5BalLaeuft = true
+    const vorher = _mt5BalCache.size
+    mt5BalCacheLaden().finally(() => {
+      _mt5BalLaeuft = false
+      _mt5BalZuletzt = Date.now()
+      // Neu zeichnen NUR, wenn wirklich Logins dazugekommen sind — also beim
+      // ersten Füllen nach dem Laden. Ein Repaint im Minutentakt würde beim
+      // Scrollen stören, und die Zahl trägt ihren Zeitstempel ohnehin sichtbar.
+      if(_mt5BalCache.size > vorher && typeof renderAccounts === 'function'
+         && typeof accounts !== 'undefined' && accounts && accounts.length){
+        try{ renderAccounts() }catch(_){}
+      }
+    })
+  }
+
   // Für die .tc-acc-bal-Badges der Trade-Karten: gleiches Format wie
   // getDupBalanceForAccount ({balance, currency €/$}), damit fmtDupBalance passt.
   // BEWUSST weiter über getMt5BalanceForAccount (frisches Panel, ≤15s): auf
@@ -15598,6 +15623,11 @@
   function renderAccounts(){
     if(!accEls.table) return
     todoLaden()
+    // Echo-Kontostände bereitstellen (31.08.2026) — gedrosselt, zeichnet nach
+    // dem ersten Füllen einmal neu. Ohne diesen Anstoss stünde der Cache nur
+    // nach dem Öffnen des Trade-planen-Modals zur Verfügung, und genau deshalb
+    // war die Tabelle hier weiter auf $0.
+    if(typeof mt5BalCacheAnstossen === 'function') mt5BalCacheAnstossen()
 
     // Wenn die Detail-View gerade offen ist, parallel neu rendern
     // (z.B. nach Live-Balance-Sync, Archive-Toggle, Edit-Save)
@@ -15704,14 +15734,39 @@
           const mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(a.id) : null
           if(mtcBal){ liveBal = mtcBal.balance; liveSrc = 'MT5-Copier'; liveCcy = mtcBal.ccy }
         }
+        // 5. Quelle (31.08.2026, Finn: „das mit der Live-Balance bei Echo-Accs
+        // geht sowohl am Mac als auch am Windows-PC noch nicht"): letzter
+        // bekannter Stand aus mt5_live. Ich hatte die Quelle gestern NUR ins
+        // Trade-planen-Dropdown gehängt — diese Tabelle führt ihre eigene,
+        // identisch aufgebaute Kette, und genau die stand noch auf vier.
+        // Warum es auch am WINDOWS-PC fehlte, obwohl es dort ein Panel gibt:
+        // getMt5BalanceForAccount liest mtcState, und dessen 3s-Poll läuft nur
+        // bei sichtbarer Echo-View. Auf der Accounts-Seite ist der Stand
+        // deshalb älter als 15 s — der Helfer liefert dann korrekt null, und
+        // die Zeile fiel auf die Startbalance zurück. Die Cloud-Quelle hängt
+        // an keiner View und an keinem Gerät und schliesst beide Lücken.
+        if(liveBal == null && typeof mt5BalFuerAccount === 'function'){
+          const cloudBal = mt5BalFuerAccount(a.id)
+          if(cloudBal){
+            liveBal = cloudBal.bal; liveSrc = 'MT5-Cloud'
+            liveCcy = cloudBal.ccy; liveTime = cloudBal.at
+          }
+        }
 
         let balCell
         if(liveBal != null){
-          const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier') ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)
+          const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud')
+            ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)
+          // „Live" nur, wenn es das auch ist (31.08.2026): ein aus der Cloud
+          // nachgeladener Stand ist die richtige Antwort auf „wie viel liegt
+          // auf dem Konto", aber er behauptet nicht „jetzt gerade" — ab einer
+          // Minute heisst er ehrlich „Stand". Die Zeitangabe daneben stand hier
+          // schon immer, sie trägt die Aussage jetzt mit.
+          const cloudAlt = liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000
           balCell = `
             <div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${balFormatted}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
-              <span style="color:var(--violet);font-weight:500">Live · ${liveSrc}</span>
+              <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc}</span>
               ${liveTime ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : ''}
             </div>
             <div style="font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px">
@@ -21489,7 +21544,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.223'
+  const OS_TAB_BUILD = '2026-08-31.226'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22617,6 +22672,8 @@
     // der Offen-Reiter der Trades-View sichtbar ist — beim Öffnen dieses Modals
     // also im Regelfall gar nicht, und sein 10-Minuten-Fenster wirft genau die
     // Zeilen weg, um die es hier geht (PC seit Stunden aus).
+    // Hier BEWUSST der ungedrosselte Weg: das Modal geht selten auf, und wer es
+    // öffnet, will die Zahlen jetzt sehen — nicht erst, wenn die Minute um ist.
     if(typeof mt5BalCacheLaden === 'function') mt5BalCacheLaden().then(tpSelectsNeu)
 
     // Filter-Listener (idempotent — bind nur einmal pro Modal-Open)
