@@ -20469,8 +20469,14 @@
           ? `Mapping deckt <span class="mono">${expSyms.map(escapeHtml).join(', ')}</span> ab ✓`
           : `Mapping <span class="mono">${mapCount}</span> Zeile(n) ✓`
         // GRÜN (Finns Ansage 15.08.2026, war vorher bewusst gelb): gepusht ist
-        // gepusht — die exposure-basierte Endgröße bleibt als Hinweis im Text.
-        _pfSet('m5push', 'ok', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — endgültige Lots rechnet der Copier exposure-basiert.`)
+        // Der Zusatz „exposure-basiert" stand hier bis 31.08.2026 und war die
+        // sichtbare Seite eines doppelt gerechneten Faktors: der Copier legte
+        // die Kontraktgröße des Masters NOCH EINMAL drauf, obwohl sie in den
+        // Punktwerten dieses Multiplikators längst steckt (FundingPips NDX100
+        // cs 20 → zwanzigfacher Hedge, siehe copier.py plan_actions).
+        // Jetzt gilt, was hier steht: der Copier nimmt die Lots so, wie sie
+        // aus diesem Verhältnis fallen.
+        _pfSet('m5push', 'ok', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — Slave-Lots je Master-Lot, der Copier rechnet nicht nach.`)
       }
     }
 
@@ -21277,7 +21283,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.216'
+  const OS_TAB_BUILD = '2026-08-31.217'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

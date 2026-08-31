@@ -25,7 +25,9 @@ FUSION = {
     # Broker mit grobem Lot-Raster
     "GROB":   {"volume_step": 0.1,  "volume_min": 0.1,  "volume_max": 100.0, "trade_contract_size": 1.0},
 }
-MAP = {"NAS100": "NAS100", "US500": "US500", "MASTER_IDX": "IDX10", "MASTER_GROB": "GROB"}
+MAP = {"NAS100": "NAS100", "US500": "US500", "MASTER_IDX": "IDX10", "MASTER_GROB": "GROB",
+       # Finns echtes Mapping (FundingPips -> Fusion), fuer die Regression 7b
+       "NDX100": "NAS100"}
 
 
 def sym(s):
@@ -120,12 +122,26 @@ def main():
         {6: [{"ticket": 903, "symbol": "NAS100", "type": 1, "volume": 0.8}]},
         expect_actions=[{"kind": "close", "symbol": "NAS100", "volume": 0.8}]))
 
-    # 7) Kontraktgroessen-Umrechnung: Master cs=1, Hedge cs=10 -> 1.0 wird 0.1
+    # 7) Kontraktgroessen werden NICHT mehr nachkorrigiert (31.08.2026):
+    #    der Multiplikator ist ein Lot-Verhaeltnis, die Kontraktgroesse steckt
+    #    schon in den Punktwerten, aus denen Prophos ihn rechnet. Bis heute
+    #    stand hier 0.1 (Master cs 1 / Hedge cs 10) -- diese zweite Korrektur
+    #    hat Finns Live-Lauf um Faktor 20 zu gross gemacht.
     results.append(run(
-        "Kontraktgroesse Master 1 vs Hedge 10 → 1.0 Lot wird 0.1",
+        "Kontraktgroesse Hedge 10 aendert das Lot NICHT mehr → 1.0 bleibt 1.0",
         [{"ident": 7, "symbol": "MASTER_IDX", "type": 0, "volume": 1.0, "contract_size": 1.0}],
         {},
-        expect_actions=[{"kind": "open", "symbol": "IDX10", "volume": 0.1}]))
+        expect_actions=[{"kind": "open", "symbol": "IDX10", "volume": 1.0}]))
+
+    # 7b) Der echte Fall vom 31.08.2026, mit Finns Zahlen aus mt5_live:
+    #     FundingPips NDX100 0,4 Lot (contract_size 20) -> Fusion NAS100,
+    #     gepusht x2,2239. Gewollt 0,89 Lot; die alte Formel rechnete 17,79
+    #     und lief in retcode 10019 "No money".
+    results.append(run(
+        "Regression 31.08.: 0,4 Lot cs=20 x2,2239 → 0,89 Lot (nicht 17,79)",
+        [{"ident": 71, "symbol": "NDX100", "type": 1, "volume": 0.4, "contract_size": 20.0}],
+        {}, mult=2.2239,
+        expect_actions=[{"kind": "open", "symbol": "NAS100", "volume": 0.89}]))
 
     # 8) Multiplikator 0.427 auf 1.0 Lot -> 0.43 (auf 0.01 gerundet)
     results.append(run(
