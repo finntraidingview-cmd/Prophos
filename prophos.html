@@ -3802,10 +3802,10 @@
            lesen und daran nur den Haken setzen (Spalten-Grant auf erledigt /
            erledigt_am). Ist nichts eingetragen, bleibt die Karte komplett weg
            statt eine leere Ueberschrift zu zeigen. -->
-      <div class="card" id="todoCard" hidden style="margin-bottom:16px;padding:16px 18px">
-        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:4px">
-          <h3 style="margin:0;font-size:15px">Was noch geparkt werden soll</h3>
-          <span id="todoCount" style="font-size:12px;color:var(--sub)"></span>
+      <div class="card" id="todoCard" hidden style="margin-bottom:14px;padding:10px 16px 12px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+          <h3 style="margin:0;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650">Was noch geparkt werden soll</h3>
+          <span id="todoCount" style="font-size:11.5px;color:var(--sub-2)"></span>
         </div>
         <div id="todoList"></div>
       </div>
@@ -9179,29 +9179,26 @@
       }
       const liste = [...gruppen.values()].sort((a, b) => a.name.localeCompare(b.name))
 
-      g.innerHTML = liste.map(grp => `
-        <div class="panel" style="margin-bottom:14px">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">${planEsc(grp.name)}</div>
-              <div class="panel-sub">${grp.zeilen.length} Eintrag${grp.zeilen.length === 1 ? '' : 'e'}</div>
-            </div>
-          </div>
-          <div style="padding:2px 0">${grp.zeilen.map(planZeile).join('')}</div>
-        </div>`).join('')
+      // EINE Karte für alles, Personen nur als schlanke Zwischenzeile. Vorher
+      // bekam jede Person einen eigenen Kasten mit Kopf und Unterzeile, und
+      // jeder Eintrag drei Zeilen Höhe — bei fünf Personen war die Liste
+      // dreimal so hoch wie ihr Inhalt (Finn: „design viel zu fett hässlich").
+      g.innerHTML = `<div class="card" style="padding:4px 14px 10px">` + liste.map(grp => `
+        <div style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650;padding:14px 0 2px">${planEsc(grp.name)}</div>
+        ${grp.zeilen.map(planZeile).join('')}`).join('') + `</div>`
     }
 
     function planZeile(z){
       const ab = !!z.erledigt
-      return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--border-soft)${ab ? ';opacity:.55' : ''}">
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft)${ab ? ';opacity:.45' : ''}">
         <input type="checkbox" class="plan-hak" data-plan-id="${planEsc(z.id)}" ${ab ? 'checked' : ''}
-               title="Erledigt" style="width:16px;height:16px;margin-top:3px;cursor:pointer">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:14.5px;font-weight:600${ab ? ';text-decoration:line-through' : ''}">${planEsc(z.firma) || '—'}</div>
-          ${z.notiz ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">${planEsc(z.notiz)}</div>` : ''}
-          <div style="font-size:12px;color:var(--sub-2);margin-top:3px">aktuell dort: ${planEsc(planStandText(z.stand))}</div>
-        </div>
-        <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(z.id)}" style="padding:4px 9px;font-size:12px" title="Eintrag löschen">🗑</button>
+               title="Erledigt" style="width:15px;height:15px;flex:none;cursor:pointer">
+        <span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis${ab ? ';text-decoration:line-through' : ''}">
+          <b style="font-weight:650">${planEsc(z.firma) || '—'}</b>${z.notiz ? ' · ' + planEsc(z.notiz) : ''}
+        </span>
+        <span style="flex:none;font-size:11.5px;color:var(--sub-2);white-space:nowrap">${planEsc(planStandText(z.stand))}</span>
+        <button class="plan-del" data-plan-id="${planEsc(z.id)}" title="Löschen"
+                style="flex:none;border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:13px;line-height:1;padding:3px 4px">✕</button>
       </div>`
     }
 
@@ -15433,11 +15430,10 @@
       document.getElementById('todoCount').textContent =
         offen ? `${offen} offen` : 'alles erledigt'
       document.getElementById('todoList').innerHTML = zeilen.map(z => `
-        <label style="display:flex;align-items:flex-start;gap:11px;padding:10px 0;border-top:1px solid var(--border-soft);cursor:pointer${z.erledigt ? ';opacity:.5' : ''}">
-          <input type="checkbox" class="todo-hak" data-todo-id="${escapeHtml(String(z.id))}" ${z.erledigt ? 'checked' : ''} style="width:16px;height:16px;margin-top:2px;cursor:pointer">
-          <span style="flex:1;min-width:0">
-            <span style="font-size:14px;font-weight:600${z.erledigt ? ';text-decoration:line-through' : ''}">${escapeHtml(z.firma || '—')}</span>
-            ${z.notiz ? `<span style="display:block;font-size:13px;color:var(--sub);margin-top:1px">${escapeHtml(z.notiz)}</span>` : ''}
+        <label style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft);cursor:pointer${z.erledigt ? ';opacity:.45' : ''}">
+          <input type="checkbox" class="todo-hak" data-todo-id="${escapeHtml(String(z.id))}" ${z.erledigt ? 'checked' : ''} style="width:15px;height:15px;flex:none;cursor:pointer">
+          <span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis${z.erledigt ? ';text-decoration:line-through' : ''}">
+            <b style="font-weight:650">${escapeHtml(z.firma || '—')}</b>${z.notiz ? ' · ' + escapeHtml(z.notiz) : ''}
           </span>
         </label>`).join('')
     }catch(e){
@@ -21149,7 +21145,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.200'
+  const OS_TAB_BUILD = '2026-08-31.201'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
