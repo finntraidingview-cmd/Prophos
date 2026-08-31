@@ -1484,6 +1484,22 @@ def modus_tvorder(cmd):
                     "NICHTS platziert.", "ruecklesen")
     trail.append(f"Senden-Knopf zurueckgelesen: '{(senden.get('text') or '')[:40]}'")
 
+    # --- Probelauf: alles ausser dem Klick ---------------------------------
+    # {"probe": true} faehrt die VOLLE Kette -- Tab, Konto, Symbol, Markt-Reiter,
+    # Menge, Richtung -- und haelt genau hier an. Der Halt sitzt bewusst NACH
+    # dem Ruecklesen: ein Probelauf, der ausgerechnet die letzte Pruefung
+    # auslaesst, beantwortet die interessanteste Frage nicht. Das Panel bleibt
+    # danach ausgefuellt stehen; wegklicken ist Handarbeit, weil ein
+    # Abbruch-Klick wieder ein geratener Klick waere.
+    if cmd.get("probe"):
+        res["ok"] = True
+        res["probe"] = True
+        res["senden_text"] = senden.get("text")
+        return raus("PROBELAUF: alles eingestellt und zurueckgelesen, NICHT "
+                    f"geklickt. Der Knopf zeigt '{(senden.get('text') or '')[:40]}'. "
+                    "Das Panel bleibt so stehen — von Hand ausloesen oder aendern.",
+                    "probe", retry_ok=True)
+
     # ═══ AB HIER UNUMKEHRBAR ═══════════════════════════════════════════════
     ok, f = _tv_klick(senden["rect"], bf["geo"], klient(), "Order senden", trail)
     if not ok:
