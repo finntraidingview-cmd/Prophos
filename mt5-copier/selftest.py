@@ -772,6 +772,167 @@ def main():
         find_notfall_deals(None, set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == []
         and find_notfall_deals([], set(), out_entries=(1, 2), reason_sl=4, reason_tp=5) == [])
 
+    # ── Order-Bot: offene Terminal-Verbindung (31.08.2026, Finns Tempo-Frage) ──
+    # Gegen ein FAKE-MetaTrader5 statt gegen Vermutungen: die eine Zahl, um die
+    # es geht, ist "wie oft wird initialize() gerufen" — ein Anschluss ans
+    # Terminal kostet auf den PCs 0,5-2 s, sechs davon waren Finns Pausen.
+    # Das echte Paket gibt es auf dem Mac nicht; die Attrappe reicht, weil hier
+    # NUR das Verbindungs-Verhalten geprueft wird, nicht MT5 selbst.
+    import types as _types
+
+    class _FakeMT5:
+        def __init__(self):
+            self.init_calls = self.shutdown_calls = 0
+            self.verbunden = False
+            self.login = 14190828
+            self.ai_none_mal = 0
+            self.init_ok = True
+
+        def initialize(self, path=None, **kw):
+            self.init_calls += 1
+            self.verbunden = bool(self.init_ok)
+            return self.init_ok
+
+        def shutdown(self):
+            self.shutdown_calls += 1
+            self.verbunden = False
+
+        def last_error(self):
+            return (-1, "fake")
+
+        def account_info(self):
+            if not self.verbunden:
+                return None
+            if self.ai_none_mal > 0:
+                self.ai_none_mal -= 1
+                return None
+            return _types.SimpleNamespace(login=self.login)
+
+        def positions_get(self):
+            return []
+
+    def _fake_an():
+        fake = _FakeMT5()
+        sys.modules["MetaTrader5"] = fake
+        order_bot._MT5_PFAD = None      # Attrappe startet immer unverbunden
+        order_bot._api_stat_reset()
+        return fake
+
+    _P = r"C:\MT5\terminal64.exe"
+    try:
+        fk = _fake_an()
+        for _ in range(6):
+            _r = order_bot._api_lesen(_P, 14190828)
+        chk("ORDER-BOT: 6 Lesevorgaenge docken nur EINMAL an (vorher 6x)",
+            fk.init_calls == 1 and fk.shutdown_calls == 0 and "positionen" in _r)
+        chk("ORDER-BOT: Spur weist die API-Bilanz aus",
+            "API-Lesen 6x" in order_bot._spur(["X"]))
+        order_bot._api_trennen()
+        order_bot._api_lesen(_P, 14190828)
+        chk("ORDER-BOT: nach _api_trennen wird frisch angedockt",
+            fk.shutdown_calls == 1 and fk.init_calls == 2)
+
+        fk = _fake_an()
+        order_bot._api_lesen(_P, 14190828)
+        fk.ai_none_mal = 1                      # Verbindung stirbt mittendrin
+        _r = order_bot._api_lesen(_P, 14190828)
+        chk("ORDER-BOT: Verbindungsabriss → genau ein Wiederanlauf, Lesen klappt",
+            "positionen" in _r and fk.init_calls == 2)
+
+        fk = _fake_an(); fk.init_ok = False
+        _r = order_bot._api_lesen(_P, 14190828)
+        chk("ORDER-BOT: Terminal weg → Fehlertext wie bisher, hoechstens 2 Versuche",
+            _r.get("fehler", "").startswith("Terminal-Verbindung") and fk.init_calls == 2)
+
+        fk = _fake_an(); fk.login = 999999
+        _r = order_bot._api_lesen(_P, 14190828)
+        chk("ORDER-BOT: falsches Konto bleibt harter Riegel (kein Wiederanlauf)",
+            "FALSCHEN Konto" in _r.get("fehler", "") and fk.init_calls == 1)
+
+        fk = _fake_an()
+        order_bot._api_lesen(r"C:\MT5-A\terminal64.exe", 14190828)
+        order_bot._api_lesen(r"C:\MT5-B\terminal64.exe", 14190828)
+        chk("ORDER-BOT: Pfadwechsel haengt sauber um (trennen, neu andocken)",
+            fk.init_calls == 2 and fk.shutdown_calls == 1)
+    finally:
+        sys.modules.pop("MetaTrader5", None)
+        order_bot._MT5_PFAD = None
+        order_bot._api_stat_reset()
+
+    # ── Order-Bot: SL/TP-Feld — Ausnahme sichtbar + Klick-Anlauf (31.08.2026) ──
+    # Finns Fall: "5x geklappt, beim 6. nicht", und die Spur endete stumm mit
+    # "SL NICHT uebernommen". Geprueft wird deshalb genau das: landet der Grund
+    # in der Spur, und hilft der zweite Anlauf ueberhaupt?
+    class _FakeRect:
+        def __init__(self, l, t, r, b):
+            self.left, self.top, self.right, self.bottom = l, t, r, b
+
+        def mid_point(self):
+            return _types.SimpleNamespace(x=(self.left + self.right) // 2,
+                                          y=(self.top + self.bottom) // 2)
+
+    class _FakeFeld:
+        """set_focus wirft, bis 'heilt_ab' erreicht ist; danach nimmt das Feld
+        den getippten Wert an."""
+        def __init__(self, heilt_ab=99, rect=(10, 10, 100, 30)):
+            self.heilt_ab = heilt_ab
+            self.versuch = 0
+            self.inhalt = ""
+            self.fokussiert = False
+            self._rect = _FakeRect(*rect)
+
+        def set_focus(self):
+            self.versuch += 1
+            if self.versuch < self.heilt_ab:
+                raise RuntimeError("Fenster nicht im Vordergrund")
+            self.fokussiert = True
+
+        def rectangle(self):
+            return self._rect
+
+        def type_keys(self, tasten, **kw):
+            # Ohne Fokus kommt beim echten MT5 nichts an — die Attrappe haelt
+            # sich daran, sonst wuerde der Test Erfolg zeigen, wo keiner ist.
+            if not self.fokussiert:
+                return
+            if "DELETE" in tasten:
+                self.inhalt = ""
+            elif not tasten.startswith("^") and not tasten.startswith("{"):
+                self.inhalt += tasten
+
+        def get_value(self):
+            return self.inhalt
+
+    _rahmen = _types.SimpleNamespace(rectangle=lambda: _FakeRect(0, 0, 500, 400))
+    _echt_klick, _echt_warte = order_bot._klick_absolut, order_bot._warte
+    _klicks = []
+    order_bot._klick_absolut = lambda x, y, **kw: (_klicks.append((x, y)) or True)
+    order_bot._warte = lambda a, b: None
+    try:
+        _sp = []
+        _f = _FakeFeld(heilt_ab=99)          # Feld nimmt nie Fokus an
+        _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+        chk("ORDER-BOT: SL-Fehlschlag nennt jetzt den GRUND statt nur 'NICHT uebernommen'",
+            _ok is False
+            and any("SL-Versuch 1 abgebrochen: RuntimeError" in z for z in _sp)
+            and any("SL NICHT uebernommen" in z for z in _sp))
+
+        _sp, _klicks[:] = [], []
+        _f = _FakeFeld(heilt_ab=2)           # zweiter Anlauf klappt
+        _ok = order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+        chk("ORDER-BOT: zweiter Anlauf klickt ins Feld und traegt den Wert ein",
+            _ok is True and len(_klicks) == 1
+            and any("SL-Feld angeklickt (Versuch 2)" in z for z in _sp)
+            and _f.inhalt == "29311.07")
+
+        _sp, _klicks[:] = [], []
+        _f = _FakeFeld(heilt_ab=2, rect=(900, 900, 980, 920))   # ausserhalb
+        order_bot._feld_tippen(_f, "29311.07", "SL", _sp, rahmen=_rahmen)
+        chk("ORDER-BOT: Feld ausserhalb des Dialogs wird NICHT blind geklickt",
+            not _klicks and any("ausserhalb des Dialogs" in z for z in _sp))
+    finally:
+        order_bot._klick_absolut, order_bot._warte = _echt_klick, _echt_warte
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

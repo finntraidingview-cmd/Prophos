@@ -6034,7 +6034,7 @@
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
           <button class="btn btn-ghost" id="mtc-mouse-test" title="Testet isoliert, ob der Bot Maus und Tastatur steuern kann">🖱 Maus-Test</button>
-          <button class="btn btn-ghost" id="mtc-restart-stack" title="Copier, Panel und Backend neu starten (start-alles.bat)">🔄 Alles neu starten</button>
+          <button class="btn btn-ghost" id="mtc-restart-stack" title="Schließt ALLE offenen CMD-Fenster dieses PCs und fährt Copier, Panel und Backend frisch hoch (start-alles.bat)">🔄 Alles schließen &amp; neu starten</button>
           <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
         </div>
       </div>
@@ -11996,6 +11996,10 @@
       // läuft exakt dann, wenn der Offen-Reiter sichtbar ist — also genau
       // dann, wenn die Plan-Karten die Daten brauchen.
       window._mt5CloudRows = rows
+      // Denselben Zug für die Konto-Auswahl mitnehmen (31.08.2026): die Zeilen
+      // liegen hier ohnehin schon vor, der Cache ist dann beim Öffnen des
+      // Trade-planen-Modals bereits gefüllt statt erst nach seiner Abfrage.
+      if(typeof mt5BalCacheFuellen === 'function') mt5BalCacheFuellen(rows)
 
       // Duplikium kommt aus der DB (dup_live, Waechter-Spiegel ~30s): Railway
       // schreibt, alle User lesen — kein Browser-Token noetig. TopstepX bleibt
@@ -12347,8 +12351,59 @@
     return null
   }
 
+  /* ── Letzter bekannter Stand der Echo-Konten (31.08.2026) ────────────────
+   * Finns Frage vom Mac: „ist es möglich, hier immer den Live-P&L reinzubekommen?
+   * Muss nicht live sein, aber wo der Acc halt grad ist — wie es bei Duplikum war."
+   * Genau daran lag es: getMt5BalanceForAccount() oben hängt an MT5_LOCAL und am
+   * lokalen Copier-Panel. Auf dem Mac gibt es beides nicht, also fiel jedes
+   * Echo-Konto im Dropdown auf initialBalance zurück — bei seinen Accounts 0,
+   * daher zehnmal „· $0". Duplikum-Konten sahen richtig aus, weil deren Zahl aus
+   * einer Cloud-API kommt, die vom PC unabhängig ist.
+   * Die Echo-Zahlen liegen längst in der Cloud: die PC-Tabs pushen alle 5 s
+   * master_/hedge_balance nach mt5_live. Sie wurden nur nirgends für die
+   * Konto-AUSWAHL gelesen.
+   * BEWUSST OHNE Zeitfilter — anders als der Flotten-Tick (10-Min-Fenster) und
+   * die Live-P&L-Zeile (25 s). Deren Doktrin „nie alte Zahlen als live" gilt für
+   * eine LAUFENDE Position; hier geht es um die Frage „wie viel liegt auf dem
+   * Konto", und da ist der Stand von heute Mittag die richtige Antwort, wenn der
+   * PC seitdem aus ist. Falsch wäre nur, ihn als frisch AUSZUGEBEN — deshalb
+   * trägt jeder Eintrag seinen Zeitstempel, und das Dropdown schreibt ihn
+   * daneben, sobald er nicht mehr frisch ist. */
+  const _mt5BalCache = new Map()   // login -> { bal, ccy, at }
+  function mt5BalCacheFuellen(rows){
+    for(const r of (rows || [])){
+      const at = Date.parse((r && r.updated_at) || '') || 0
+      if(!at) continue
+      const s = (r && r.status) || {}
+      const setze = (login, bal, ccy) => {
+        const lg = String(login || '')
+        if(!lg || bal == null) return
+        const alt = _mt5BalCache.get(lg)
+        if(alt && alt.at >= at) return        // nur die jüngste Zeile je Login
+        _mt5BalCache.set(lg, { bal: Number(bal), ccy: ccy || 'USD', at })
+      }
+      setze(r.master_login, s.master_balance, s.master_currency)
+      setze(r.hedge_login,  s.hedge_balance,  s.hedge_currency)
+    }
+  }
+  async function mt5BalCacheLaden(){
+    try{
+      const { data, error } = await supabase.from('mt5_live')
+        .select('master_login,hedge_login,status,updated_at')
+        .order('updated_at', { ascending: false }).limit(300)
+      if(!error) mt5BalCacheFuellen(data)
+    }catch(_){ /* still — das Dropdown zeigt dann wie bisher initialBalance */ }
+  }
+  function mt5BalFuerAccount(prophosAccountId){
+    const login = mt5LoginForAccount(prophosAccountId)
+    return login ? (_mt5BalCache.get(String(login)) || null) : null
+  }
+
   // Für die .tc-acc-bal-Badges der Trade-Karten: gleiches Format wie
   // getDupBalanceForAccount ({balance, currency €/$}), damit fmtDupBalance passt.
+  // BEWUSST weiter über getMt5BalanceForAccount (frisches Panel, ≤15s): auf
+  // einer LAUFENDEN Karte wäre ein alter Stand eine Lüge — dort gilt die
+  // P&L-Beweis-Doktrin, nicht die Konto-Auswahl-Logik von oben.
   function getMt5TcBalanceForAccount(prophosAccountId){
     const r = getMt5BalanceForAccount(prophosAccountId)
     if(!r) return null
@@ -20246,6 +20301,40 @@
    * planned→open macht die Erkennung (mt5PlanPoll), wie bei Duplikum. */
   let _pfMt5Timer = null
   function _pfMt5StopTimer(){ if(_pfMt5Timer){ clearInterval(_pfMt5Timer); _pfMt5Timer = null } }
+
+  /* Warum der Copier nicht läuft — die WAHRE Antwort statt „start-alles.bat"
+   * (31.08.2026, Finns Fall: im Fusion-Hedge-Terminal war das falsche Konto
+   * eingeloggt). Der Check sah davon nur alive=false und schickte ihn zur .bat.
+   * Die lief da längst: start-copier.bat startet copier.py in einer Schleife —
+   * der Copier bricht beim Konto-Guard ab, wartet 10 s, bricht wieder ab. Der
+   * Rat war damit nicht bloß nutzlos, er führte vom Fehler WEG; die Wahrheit
+   * stand eine Ebene tiefer im Copier-Log („Erwartet war Hedge-Konto X,
+   * verbunden ist aber Y"), wo Finn sie sich selbst holen musste.
+   * Diese Zeilen liegen längst im selben /api/instances-Payload (copier_log,
+   * seit 26.08.2026) — der Check las sie nur nie.
+   * Warum das TAIL-Fenster reicht: copier-log.json wird von JEDEM Copier-Start
+   * neu geschrieben (_LOG_RING ist beim Prozessstart leer), enthält also nur
+   * den letzten Lauf, und ein Abbruch ist das Letzte, was ein Prozess schreibt.
+   * Läuft der Copier normal, stehen am Ende Tick-Zeilen ohne ⛔ und es wird
+   * nichts zitiert — kein Risiko, einen alten Grund als aktuell auszugeben. */
+  function _pfCopierAbbruch(dd){
+    const lines = Array.isArray(dd && dd.copier_log) ? dd.copier_log : []
+    const zeilen = lines.slice(-12)
+      .filter(l => String(l).indexOf('⛔') >= 0)
+      .map(l => String(l).replace(/^\[\d\d:\d\d:\d\d\]\s*/, '').replace(/^⛔\s*/, '').trim())
+      // Die Schluss-Zeile jedes Abbruchs nennt keine Ursache, nur die Folge.
+      .filter(z => z && !/^ABBRUCH — keine Order gesendet\.?$/i.test(z))
+      // Führendes „ABBRUCH: " weg — dass er abbricht, steht schon im Satz davor
+      // (31.08.2026, Finns Algo-Fall: „…ab. Grund laut Copier-Log: ABBRUCH: …").
+      .map(z => z.replace(/^ABBRUCH:\s*/i, ''))
+      .slice(-4)
+    if(!zeilen.length) return null
+    // Stand des Log-Spiegels als FAKT, nicht als Deutung: frisch heißt „scheitert
+    // gerade wieder", alt heißt „Fenster zu" — beides ändert nichts daran, dass
+    // erst die Ursache weg muss, bevor ein Neustart etwas bringt.
+    const at = dd && dd.copier_log_at ? String(dd.copier_log_at).slice(11, 19) : ''
+    return { zeilen, stand: at }
+  }
   async function tpPreflightMt5(plan){
     _pfMt5StopTimer()
     // Verdrängt dieser Check einen noch offenen Remote-Lauf eines ANDEREN
@@ -20306,7 +20395,12 @@
       _pfSet('m5run', 'warn', 'Übersprungen — Verlinkung/Instanz fehlt.')
     } else if(!route.inst.alive){
       // Kein confirm — die Software kann hier nicht selbst handeln, klare Anweisung.
-      _pfSet('m5run', 'err', 'Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten.')
+      const ab = _pfCopierAbbruch(dd)
+      _pfSet('m5run', 'err', ab
+        ? `Copier für diese Instanz GESTOPPT — er bricht beim Start ab. Grund laut Copier-Log${ab.stand ? ' (Stand ' + escapeHtml(ab.stand) + ')' : ''}:<br>`
+          + ab.zeilen.map(z => `<b>${escapeHtml(z)}</b>`).join('<br>')
+          + '<br>Erst diese Ursache beheben — start-alles.bat startet den Copier sonst nur in denselben Abbruch.'
+        : 'Copier für diese Instanz GESTOPPT — start-alles.bat auf dem PC ausführen, dann den Trade neu starten.')
       hardFail = true
     } else {
       // NUR der HEDGE-Algo ist relevant (28.08.2026, Finns Fund: der frühere
@@ -21395,7 +21489,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.219'
+  const OS_TAB_BUILD = '2026-08-31.223'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22253,7 +22347,26 @@
       if(mtcBal){
         return { val: mtcBal.balance, src: 'MT5-Copier', ccy: mtcBal.ccy }
       }
+      // 5. Quelle (31.08.2026, Finns Frage vom Mac): letzter bekannter Stand aus
+      // mt5_live. Greift überall dort, wo es kein lokales Copier-Panel gibt —
+      // Mac, Handy, zweiter PC. Trägt seinen Zeitstempel mit, damit die Anzeige
+      // einen alten Stand als alt kennzeichnen kann statt ihn als live auszugeben.
+      const echoBal = (typeof mt5BalFuerAccount === 'function') ? mt5BalFuerAccount(a.id) : null
+      if(echoBal){
+        return { val: echoBal.bal, src: 'MT5-Cloud', ccy: echoBal.ccy, at: echoBal.at }
+      }
       return { val: a.initialBalance, src: 'init', ccy: 'USD' }
+    }
+
+    /* „Stand" eines nachgeladenen Kontostands, so kurz wie möglich (31.08.2026):
+     * heute nur die Uhrzeit, sonst Tag und Monat dazu — sonst steht im Dropdown
+     * eine Zeit, von der niemand weiß, ob sie von heute ist. */
+    function tpStandKurz(at){
+      if(!at) return ''
+      const d = new Date(at), n = new Date()
+      const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+      return d.toDateString() === n.toDateString()
+        ? uhr : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + uhr
     }
 
     function tpFormatBalance(b){
@@ -22412,8 +22525,16 @@
         const name   = labels[a.id] || a.name || '—'
         const bal    = tpGetDisplayBalance(a)
         const balStr = tpFormatBalance(bal)
-        const liveMarker = bal.src === 'init' ? '' : '●'  // Punkt = live verknüpft
-        const balPart = liveMarker ? `${liveMarker} ${balStr}` : balStr
+        // Punkt = live verknüpft. Ein aus der Cloud nachgeladener Stand (Mac/
+        // Handy, 31.08.2026) bekommt ihn nur, solange er FRISCH ist; sonst steht
+        // die Uhrzeit daneben. Der Punkt behauptet „jetzt gerade" — das darf ein
+        // zwei Stunden alter Wert nicht, auch wenn er die richtige Antwort auf
+        // „wo steht das Konto" ist.
+        const alter   = (bal.src === 'MT5-Cloud' && bal.at) ? (Date.now() - bal.at) : 0
+        const standTxt = alter > 60000 ? tpStandKurz(bal.at) : ''
+        const liveMarker = (bal.src === 'init' || standTxt) ? '' : '●'
+        const balPart = standTxt ? `${balStr} (${standTxt})`
+                      : liveMarker ? `${liveMarker} ${balStr}` : balStr
         // External ID suffix: Tradovate ID > MT5 login
         const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
@@ -22473,9 +22594,9 @@
     tpRenderAccountSelect('master')
     tpRenderAccountSelect('slave')
 
-    // Live-Balances kommen oft asynchron — nochmal nach 1,5s re-rendern
-    // damit das Modal die neuesten Werte zeigt. Behält die User-Auswahl bei.
-    setTimeout(() => {
+    // Live-Balances kommen oft asynchron — nochmal re-rendern, damit das Modal
+    // die neuesten Werte zeigt. Behält die User-Auswahl bei.
+    const tpSelectsNeu = () => {
       try {
         if(document.getElementById('tradePlanModal')?.classList.contains('open')){
           const prevMaster = document.getElementById('tp-master')?.value
@@ -22489,7 +22610,14 @@
           tpRecompute()
         }
       } catch(_){}
-    }, 1500)
+    }
+    setTimeout(tpSelectsNeu, 1500)
+    // Echo-Kontostände aus mt5_live nachladen (31.08.2026, Finns Frage vom Mac).
+    // Eigene Abfrage statt Mitnutzung des Flotten-Ticks: der läuft NUR, während
+    // der Offen-Reiter der Trades-View sichtbar ist — beim Öffnen dieses Modals
+    // also im Regelfall gar nicht, und sein 10-Minuten-Fenster wirft genau die
+    // Zeilen weg, um die es hier geht (PC seit Stunden aus).
+    if(typeof mt5BalCacheLaden === 'function') mt5BalCacheLaden().then(tpSelectsNeu)
 
     // Filter-Listener (idempotent — bind nur einmal pro Modal-Open)
     ;['master','slave'].forEach(role => {
@@ -28195,28 +28323,12 @@
         mt5LinkSet(String(pl.login), String(pl.accountId))
           .then(() => { if(typeof mt5RefreshAfterLink === 'function') mt5RefreshAfterLink() })
           .catch(err => console.warn('[mt5links] Auto-Link fehlgeschlagen:', err && err.message))
-        // Preset-Mapping gleich mitpushen (Finns Ansage 15.08.2026: Symbole kommen
-        // aus den Einstellungen über die Verlinkung). Master-Symbole aus der Firma
-        // des gewählten Prophos-Accounts, Hedge-Seite aus der Firma des Accounts,
-        // der mit dem Hedge-Login der neuen Instanz verlinkt ist. Fehlt eine der
-        // beiden Quellen: still auslassen — der Preflight-Fix-Button fängt es
-        // spätestens beim ersten Trade-Start.
-        try{
-          const inst = (d.instances || []).find(x => x.name === pl.name || (x.file || '').includes(`-${pl.name}.json`))
-          const expSyms = (pl.firm && typeof dupSymbolsForFirm === 'function') ? dupSymbolsForFirm(pl.firm) : []
-          const hLogin = inst ? String((inst.status || {}).hedge_login || inst.hedge_expected || '') : ''
-          const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
-          const hAccId = hLogin ? links[hLogin] : null
-          const hAcc = hAccId ? (accounts || []).find(x => String(x.id) === String(hAccId)) : null
-          const hSym = (hAcc && typeof dupSlaveSymbolForFirm === 'function') ? dupSlaveSymbolForFirm(hAcc.firm) : null
-          if(inst && expSyms.length && hSym){
-            const merged = { ...(inst.symbol_map || {}) }
-            let changed = false
-            expSyms.forEach(s => { if(!(s in merged)){ merged[s] = hSym; changed = true } })
-            if(changed) mtcApi(`save?file=${encodeURIComponent(inst.file)}`, { method:'POST',
-              headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol_map: merged }) })
-          }
-        }catch(e){ console.warn('[mtc] Preset-Mapping-Push übersprungen:', e && e.message) }
+        // Das Preset-Mapping stand bis 31.08.2026 HIER — als Einmal-Schuss an
+        // genau dieser Stelle. Es ist nach unten in mtcHealSymbolMaps gewandert
+        // (dort begründet): dieser Zweig läuft nur in dem einen Poll, in dem
+        // job.done und der Merker zusammentreffen, und schwieg still, sobald
+        // eine seiner vier Quellen fehlte — Finn bekam deshalb den fehlenden
+        // NDX100 trotzdem bei jedem neuen Account (31.08.2026).
       }
     }
     // Selbstheilender Link-Abgleich (15.08.2026, Vorbild dupAutoLink): Instanz-
@@ -28246,6 +28358,11 @@
         }
       }
     }catch(_){}
+    // Mapping im selben Takt nachziehen — BEWUSST danach: die Zuordnung
+    // Instanz→Prophos-Account ist die Quelle der Firmen-Symbole.
+    // .catch statt try/catch: die Funktion ist async, ein try drumherum finge
+    // nur den synchronen Teil — der Rest würde als unhandled rejection landen.
+    mtcHealSymbolMaps(d).catch(e => console.warn('[mtc] Mapping-Abgleich übersprungen:', e && e.message))
     // fetchedAt (15.08.2026): Frischebeleg pro Instanz — die MT5-ROUTE-Sektion
     // (Balances/Live-P&L) darf nur bei fetchedAt ≤ 15s "Live" behaupten
     // ('alt ist nicht aktuell'). Erkennungsquelle ist mtcState trotzdem NIE —
@@ -28690,7 +28807,12 @@
   if(restartBtn){
     if(!MT5_LOCAL) restartBtn.style.display = 'none'
     restartBtn.addEventListener('click', async () => {
-      if(!confirm('Kompletten Copier-Stack neu starten?\n\nCopier, Panel und Backend starten frisch (wie start-alles.bat). Offene Hedges liegen beim Broker und werden übernommen.')) return
+      // Der Text nennt beide Hälften, weil die erste seit 31.08.2026 mehr tut
+      // als früher: es werden ALLE Konsolen geschlossen, nicht nur die fünf, die
+      // start-alles.bat selbst geöffnet hat (Finn musste den Rest von Hand
+      // wegklicken). Wer hier gerade etwas anderes in einem CMD laufen hat, muss
+      // das vorher wissen — deshalb steht es im Klartext im Bestätigen-Dialog.
+      if(!confirm('Alles schließen und neu starten?\n\n1. ALLE offenen CMD-Fenster dieses PCs werden geschlossen — auch solche, die nicht zu Prophos gehören.\n2. Copier, Panel und Backend fahren frisch hoch (wie start-alles.bat).\n\nOffene Hedges liegen beim Broker und werden übernommen.')) return
       restartBtn.disabled = true
       restartBtn.textContent = '⏳ startet neu…'
       try{
@@ -28698,13 +28820,15 @@
         const d = await r.json().catch(() => ({}))
         if(!d.ok){
           alert('Neustart fehlgeschlagen: ' + (d.msg || 'unbekannt'))
-          restartBtn.disabled = false; restartBtn.textContent = '🔄 Alles neu starten'
+          restartBtn.disabled = false; restartBtn.textContent = '🔄 Alles schließen & neu starten'
           return
         }
       }catch(_){ /* Backend stirbt gleich absichtlich — Fehler hier ist ok */ }
-      restartBtn.textContent = '⏳ Stack startet — Seite lädt gleich neu…'
-      // Backend killt sich in ~4s, start-alles.bat braucht ~15s zum Hochfahren
-      setTimeout(() => location.reload(), 25000)
+      restartBtn.textContent = '⏳ Konsolen zu, Stack startet — Seite lädt gleich neu…'
+      // 2s Puffer + Kill + 2s + bis zu 20s Selbst-Update von start-alles.bat +
+      // ~15s Hochfahren. 25s (bis 31.08.2026) waren zu knapp, sobald der
+      // Download wirklich lange brauchte — dann lud die Seite ins tote Backend.
+      setTimeout(() => location.reload(), 40000)
     })
   }
   // Prefill-Auswahl: fuellt AUSSCHLIESSLICH die .value-PROPERTY der vier
@@ -28883,6 +29007,102 @@
   window.mtcApi = mtcApi
   window.mtcInstances = () => mtcState
   window.mtcReload = mtcLoad
+  /* ── Symbol-Mapping halten, nicht erinnern (31.08.2026) ──────────────────
+   * Finns Ansage nach dem dritten „im Mapping fehlt NDX100": „Das Mapping ist
+   * bei jedem Profil immer das Gleiche. Bei FundedNext wird sich das nie
+   * ändern — mach das gleich beim Hinzufügen."
+   * Automatisch war es seit dem 15.08.2026 schon, nur an der falschen Stelle:
+   * als EINMAL-Schuss in dem einen mtcLoad-Durchlauf, in dem job.done und der
+   * Auto-Link-Merker zusammenfielen. Der Merker existiert nur im Add-Fluss,
+   * wird vor dem async-Aufruf gelöscht und verfällt beim Modal-Schliessen; und
+   * die vier Quellen (Merker, Instanz in der Antwort, Firmen-Preset, verlinkter
+   * Hedge-Account) mussten in GENAU diesem Moment alle vier dastehen, sonst
+   * wurde still ausgelassen. Ein Treffer daneben, und das Mapping fehlte für
+   * immer — sichtbar erst im Trade-Start-Check, Trades später.
+   * Deshalb dieselbe Bauart wie der selbstheilende Link-Abgleich darüber:
+   * läuft in JEDEM Poll, idempotent, und ergänzt NUR fehlende Zeilen. Damit
+   * heilen auch die Instanzen, die den Einmal-Schuss verpasst haben — Finns
+   * zehn bestehende Karten — ohne dass er irgendwo klicken muss.
+   * DREI Riegel, weil das hier fremde Configs schreibt:
+   *  · Nur Instanzen mit einem verlinkten Prophos-Account (die Verlinkung ist
+   *    die Aussage „dieser Login gehört zu dieser Firma" — ohne sie wird nicht
+   *    geraten).
+   *  · Nur ERGÄNZEN. Eine vorhandene Zeile wird nie überschrieben; ein von Hand
+   *    korrigiertes Broker-Symbol (Suffixe wie 'NAS100.r') bleibt stehen.
+   *  · Nur auf RUHENDEN Instanzen (keine offene Master-Position). Ein Mapping
+   *    ist die Erlaubnis zu hedgen — es im Hintergrund über eine laufende
+   *    Position zu legen, könnte einen Hedge auslösen, den niemand angestossen
+   *    hat. Der laufende Fall gehört dem Ein-Klick-Fix im Trade-Start-Check,
+   *    den Finn bewusst drückt. */
+  const _mtcMapGeheilt = new Set()   // pro Datei einmal je Sitzung — ein
+                                     // fehlgeschlagener save darf nicht alle 3s
+                                     // erneut feuern
+  async function mtcHealSymbolMaps(d){
+    if(typeof dupSymbolsForFirm !== 'function' || typeof mt5GetLinks !== 'function') return
+    const insts = (d && d.instances) || []
+    if(!insts.length) return
+    const links = mt5GetLinks()
+    const accs = (typeof accounts !== 'undefined' && accounts) || []
+    const accVon = id => id ? accs.find(a => String(a.id) === String(id)) : null
+
+    /* Hedge-Symbol — zwei Quellen, in dieser Reihenfolge:
+     * 1) Firmen-Preset des verlinkten Hedge-Accounts (Fusion → NAS100). Das ist
+     *    dieselbe Quelle, die auch der Trade-Start-Check benutzt.
+     * 2) Wohin die übrige Flotte schon hedgt. Das ist kein Raten, sondern der
+     *    BEWEIS, welcher Symbolname beim Hedge-Broker funktioniert — und es
+     *    trägt den Fall, in dem der Hedge-Login (noch) mit keinem Account
+     *    verlinkt ist. Genau daran ist der Einmal-Schuss vermutlich gestorben. */
+    let hSym = null, hQuelle = ''
+    for(const i of insts){
+      const hl = String((i.status || {}).hedge_login || i.hedge_expected || '')
+      const ha = accVon(links[hl])
+      if(ha && typeof dupSlaveSymbolForFirm === 'function'){
+        hSym = dupSlaveSymbolForFirm(ha.firm)
+        if(hSym){ hQuelle = 'Preset ' + (ha.firm || ''); break }
+      }
+    }
+    if(!hSym){
+      const zaehl = {}
+      insts.forEach(i => Object.values(i.symbol_map || {}).forEach(v => {
+        if(v) zaehl[v] = (zaehl[v] || 0) + 1 }))
+      const top = Object.entries(zaehl).sort((a, b) => b[1] - a[1])[0]
+      if(top){ hSym = top[0]; hQuelle = 'Flotte' }
+    }
+    if(!hSym) return
+
+    const offen = []
+    for(const inst of insts){
+      if(_mtcMapGeheilt.has(inst.file)) continue
+      const st = inst.status || {}
+      const acc = accVon(links[String(st.master_login || inst.master_expected || '')])
+      if(!acc) continue
+      const fehlend = (dupSymbolsForFirm(acc.firm) || []).filter(sym => !(sym in (inst.symbol_map || {})))
+      if(!fehlend.length) continue
+      if((st.master_positions || []).length) continue   // Riegel 3
+      offen.push({ inst, fehlend, firm: acc.firm })
+    }
+    if(!offen.length) return
+
+    const fertig = []
+    for(const o of offen){
+      _mtcMapGeheilt.add(o.inst.file)
+      const merged = { ...(o.inst.symbol_map || {}) }
+      o.fehlend.forEach(sym => { merged[sym] = hSym })
+      const r = await mtcApi(`save?file=${encodeURIComponent(o.inst.file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol_map: merged }) })
+      if(r && r.ok) fertig.push(`${o.fehlend.join('/')} → ${hSym}`)
+      else console.warn('[mtc] Mapping-Ergänzung fehlgeschlagen für', o.inst.file, r && (r.msg || r.error))
+    }
+    // EINE Meldung für den ganzen Durchgang: beim ersten Laden heilen unter
+    // Umständen mehrere Karten auf einmal, zehn Toasts wären Krach. Still
+    // schreiben wäre aber falsch — eine Config hat sich geändert.
+    if(fertig.length && typeof atToast === 'function'){
+      atToast(`✓ Symbol-Mapping ergänzt: ${[...new Set(fertig)].join(', ')}`
+        + (fertig.length > 1 ? ` (${fertig.length} Instanzen)` : ''), 'start')
+    }
+    if(fertig.length) mtcLoad()
+  }
+
   window.mt5TabRender = () => { if(mtcLastRender) renderMt5Tab(mtcLastRender.d, mtcLastRender.n) }
   // Nahtstelle fuer mt5CreateAccountInCopier (Prophos-Account → Copier-Weg,
   // 15.08.2026): setzt den Auto-Link-Merker, den mtcLoad bei job.done einloest.

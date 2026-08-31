@@ -404,6 +404,27 @@ def copier_proxy(path):
 # frisch, laufende Instanzen schuetzen sich selbst (Copier-Status-Sperre,
 # Panel/Backend-Port-Probe). Nur Lokal-Modus + nur Loopback (gleiche Riegel
 # wie der Copier-Proxy — ein LAN-Geraet darf den Stack nicht neu starten).
+#
+# 31.08.2026 (Finn: "bau mal einen Button, der alle offenen CMD schliesst — ich
+# muss die immer von Hand schliessen"): der Kill war bis heute eine WHITELIST
+# von fuenf Fenstertiteln. Die trifft genau die Fenster, die start-alles.bat
+# selbst mit "start <Titel> cmd /c ..." oeffnet — und sonst keines. Alles
+# andere ueberlebt und stapelt sich: das Fenster von start-alles.bat SELBST
+# (autostart-einrichten.bat startet es mit LEEREM Titel, es laeuft also unter
+# dem Standardtitel), jedes von Hand doppelgeklickte .bat, und jede Huelle,
+# deren Titel sich seit dem Start geaendert hat. Auf Finns Screenshot standen
+# sieben Konsolen; nach "Alles neu starten" blieben die titellosen stehen.
+# Eine Whitelist kann das prinzipiell nicht loesen — sie kennt nur, was sie
+# selbst geoeffnet hat. Deshalb jetzt umgekehrt: ALLE cmd.exe, egal woher.
+# Das ist Finns Ansage ("alle sieben Fenster, egal welche") und auf diesen PCs
+# auch richtig: was dort in einer Konsole laeuft, gehoert zum Stack und wird
+# im selben Zug neu gestartet.
+# Der Helfer ist deshalb ein POWERSHELL-Skript und kein .bat mehr: ein .bat
+# laeuft selbst in einer cmd.exe und wuerde sich beim Blanko-Kill als Erstes
+# selbst beenden — start-alles.bat wuerde nie erreicht. powershell.exe ist vom
+# cmd-Kill nicht betroffen und ueberlebt ihn. Die Datei liegt bewusst im
+# Klartext in %TEMP% (kein -EncodedCommand), damit auf dem PC nachlesbar
+# bleibt, was der Knopf getan hat.
 @app.route("/local/restart-stack", methods=["POST", "OPTIONS"])
 def local_restart_stack():
     if request.method == "OPTIONS":
@@ -415,51 +436,54 @@ def local_restart_stack():
     bat = (os.environ.get("PROPHOS_STACK_BAT") or r"C:\mt5-copier\start-alles.bat").strip()
     if not os.path.exists(bat):
         return jsonify({"ok": False, "msg": f"start-alles.bat nicht gefunden: {bat}"})
+    if "'" in bat:
+        # Ein einfaches Anfuehrungszeichen wuerde das PS-Literal unten aufbrechen.
+        return jsonify({"ok": False, "msg": "Pfad mit ' wird nicht unterstuetzt: " + bat})
     import subprocess
     import tempfile
-    # Helfer-Bat, DETACHED: erst die alten Loop-Fenster schliessen (die wuerden
-    # gekillte Pythons sonst sofort respawnen), dann alle python.exe (trifft
-    # absichtlich auch dieses Backend — exakt Finns Hand-Ritual), dann frisch
-    # starten. Antwort geht raus, bevor der Kill greift (2s-Puffer).
-    helper = os.path.join(tempfile.gettempdir(), "prophos-restart-stack.bat")
-    with open(helper, "w", encoding="ascii") as f:
-        f.write("@echo off\r\n"
-                "timeout /t 2 /nobreak >nul\r\n"
-                "taskkill /f /fi \"WINDOWTITLE eq MT5-Hedge-Copier*\" >nul 2>&1\r\n"
-                "taskkill /f /fi \"WINDOWTITLE eq Copier-Panel*\" >nul 2>&1\r\n"
-                "taskkill /f /fi \"WINDOWTITLE eq Prophos-Backend*\" >nul 2>&1\r\n"
-                # Orbit (28.08.2026, Fund von PC 1): der python.exe-Kill unten
-                # trifft auch Reader + Verbinder — deren Fenster blieben als
-                # tote Huellen stehen ("Taste druecken..."), waehrend
-                # start-alles.bat sie neu oeffnet. Alte Huellen mit schliessen.
-                "taskkill /f /fi \"WINDOWTITLE eq Prophos TV-Reader*\" >nul 2>&1\r\n"
-                "taskkill /f /fi \"WINDOWTITLE eq Prophos TV-Verbinder*\" >nul 2>&1\r\n"
-                "taskkill /f /im python.exe >nul 2>&1\r\n"
-                "timeout /t 2 /nobreak >nul\r\n"
-                # start-alles.bat aktualisiert alles ausser sich selbst
-                # (30.08.2026, Finns Ansage "mach alles in start-alles rein"):
-                # eine laufende Batchdatei darf man nicht ueberschreiben, also
-                # kann sie es nicht sein, die sich holt. HIER geht es: dieser
-                # Helfer laeuft aus %TEMP%, und der Kill oben hat gerade alles
-                # beendet -- start-alles.bat ist in diesem Moment garantiert
-                # nicht offen. Damit schliesst sich die letzte Luecke der
-                # Update-Kette. Best effort: schlaegt der Download fehl oder
-                # kommt er zu kurz an, bleibt schlicht der alte Stand.
-                "powershell -NoProfile -Command \"$ProgressPreference='SilentlyContinue';"
-                "try{Invoke-RestMethod 'https://raw.githubusercontent.com/"
-                "finntraidingview-cmd/Prophos/main/mt5-copier/start-alles.bat' "
-                f"-OutFile '{bat}.newh' -TimeoutSec 20}}catch{{}}\" >nul 2>&1\r\n"
-                f"if exist \"{bat}.newh\" for %%F in (\"{bat}.newh\") do "
-                f"if %%~zF GEQ 700 (move /y \"{bat}.newh\" \"{bat}\" >nul)\r\n"
-                f"if exist \"{bat}.newh\" del \"{bat}.newh\" >nul 2>&1\r\n"
-                f"start \"\" \"{bat}\"\r\n")
+    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+           "main/mt5-copier/start-alles.bat")
+    helper = os.path.join(tempfile.gettempdir(), "prophos-restart-stack.ps1")
+    skript = f"""# Von Prophos erzeugt — Knopf "Alles schliessen & neu starten".
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+# Antwort ans Frontend rausgehen lassen, bevor das Backend stirbt.
+Start-Sleep -Seconds 2
+# 1) ALLE Konsolenfenster — und zwar ZUERST: start-copier.bat & Co. sind
+#    Neustart-Schleifen, ein zuerst beendetes python.exe waere in 10 s zurueck.
+Get-Process cmd | Stop-Process -Force
+# 2) Danach die Prozesse selbst. Trifft absichtlich auch dieses Backend.
+Get-Process python, pythonw | Stop-Process -Force
+Start-Sleep -Seconds 2
+# 3) start-alles.bat haelt alles ausser sich selbst aktuell — eine LAUFENDE
+#    Batchdatei darf man nicht ueberschreiben, sie kann es also nicht selbst
+#    tun. Hier geht es: der Kill oben hat gerade alles beendet, die Datei ist
+#    garantiert nicht offen. Best effort — schlaegt der Download fehl oder
+#    kommt er zu kurz an, bleibt schlicht der alte Stand.
+$bat = '{bat}'
+try {{ Invoke-RestMethod '{url}' -OutFile "$bat.newh" -TimeoutSec 20 }} catch {{ }}
+if (Test-Path "$bat.newh") {{
+  if ((Get-Item "$bat.newh").Length -ge 700) {{ Move-Item -Force "$bat.newh" $bat }}
+  else {{ Remove-Item -Force "$bat.newh" }}
+}}
+# 4) Frisch hochfahren.
+Start-Process -FilePath $bat -WorkingDirectory (Split-Path -Parent $bat)
+"""
+    # utf-8-SIG (mit BOM): Windows PowerShell 5.1 liest eine .ps1 OHNE BOM als
+    # ANSI und verstuemmelt dabei die Umlaute/Gedankenstriche in den Kommentaren.
+    # Harmlos waere das nur, solange nichts davon je aus einem Kommentar rutscht
+    # — der BOM macht die Frage gegenstandslos.
+    with open(helper, "w", encoding="utf-8-sig") as f:
+        f.write(skript)
     DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
-    subprocess.Popen(["cmd", "/c", helper],
+    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                      "-WindowStyle", "Hidden", "-File", helper],
                      creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                      close_fds=True, cwd=os.path.dirname(bat))
-    print("[stack] Neustart angestossen — dieses Backend wird gleich mitgekillt.", flush=True)
-    return jsonify({"ok": True, "msg": "Stack startet neu."})
+    print("[stack] Neustart angestossen — ALLE Konsolen werden geschlossen, "
+          "dieses Backend wird mitgekillt.", flush=True)
+    return jsonify({"ok": True, "msg": "Alle Konsolen werden geschlossen, Stack startet neu."})
 
 # ── Duplikium Connect (Basic Auth → Token) ──
 @app.route("/duplikum/connect", methods=["POST","OPTIONS"])

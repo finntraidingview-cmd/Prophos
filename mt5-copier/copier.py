@@ -779,13 +779,22 @@ def main():
     # eingeloggten Account. mt5.login() wird NIE aufgerufen — das wuerde ein
     # Terminal auf ein anderes Konto umschalten.
     if not mt5.initialize(**init_kw):
-        sys.exit(f"initialize() fehlgeschlagen: {mt5.last_error()} — laeuft das Hedge-Terminal?")
+        # Grund in den Log-SPIEGEL, nicht nur nach stderr (31.08.2026): stirbt der
+        # Copier hier, sieht Prophos nur noch alive=false und riet bisher pauschal
+        # zu start-alles.bat. Genau die laeuft in diesem Moment aber schon:
+        # start-copier.bat startet copier.py in einer Endlosschleife. Nur was
+        # ueber log() geht, landet in copier-log.json und damit in Prophos.
+        log(f"⛔ initialize() fehlgeschlagen: {mt5.last_error()} — laeuft das Hedge-Terminal?")
+        log("⛔ ABBRUCH — keine Order gesendet.")
+        sys.exit(1)
 
     ti = mt5.terminal_info()
     ai = mt5.account_info()
     if ti is None or ai is None:
+        log("⛔ terminal_info()/account_info() leer — Terminal offen und eingeloggt?")
+        log("⛔ ABBRUCH — keine Order gesendet.")
         mt5.shutdown()
-        sys.exit("terminal_info()/account_info() leer — Terminal offen und eingeloggt?")
+        sys.exit(1)
 
     # ── HARTE PRUEFUNG: haengen wir am richtigen Terminal/Konto? ────────────────
     log(f"Verbunden mit Terminal: {ti.path}")

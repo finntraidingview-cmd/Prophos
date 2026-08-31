@@ -532,57 +532,148 @@ def pruefe_tv_befehl(cmd):
 # LESENDER API-Teil — Kurse + Positionsstand (traegt keine Order-Markierung)
 # ---------------------------------------------------------------------------
 
+# ── Terminal-Verbindung EINMAL pro Lauf (31.08.2026, Finns Tempo-Frage) ─────
+# "zwischen den jeweiligen Steps ist immer so 2-3 s Pause, das ist schon lang."
+# Die Pausen sind NICHT die _warte()-Wuerfel (0,2-0,5 s) — sie sind das hier:
+# _api_lesen() machte bis heute bei JEDEM Aufruf mt5.initialize() … shutdown().
+# Ein initialize() ist keine Funktion, sondern ein IPC-Anschluss ans laufende
+# Terminal — Handshake, Konto-Sync, Abbau. Auf Finns PCs kostet das je nach
+# Terminal-Last 0,5-2 s. Der Bot ruft _api_lesen im Normalfall sechsmal:
+# Kurs holen, Schnell-Check nach dem Knopf, Positions-Bestaetigung, SL/TP-
+# Bestaetigung — jede dieser "Pausen zwischen den Schritten" war zum groessten
+# Teil ein neuer Anschluss an dasselbe Terminal.
+# Jetzt: einmal andocken, fuer die Dauer des Laufs verbunden bleiben, am Ende
+# trennen. Der Pfad ist pro Lauf konstant; wechselt er doch, wird sauber
+# umgehaengt. Faellt die Verbindung zwischendurch weg, faellt der Leser NICHT
+# auf die Nase: er trennt und versucht es genau EINMAL mit frischem
+# initialize() — damit ist das Verhalten im schlechtesten Fall exakt das alte.
+# An der Doktrin aendert das nichts: der API-Kanal bleibt rein LESEND, es
+# wandert kein einziger Schreibaufruf hier durch (Order und SL/TP gehen
+# weiterhin ausschliesslich per sichtbarem Klick).
+_MT5_PFAD = None            # Terminal, an dem dieser Prozess gerade haengt
+_API_STAT = {"n": 0, "ms": 0.0}   # Bilanz fuer die Spur — Beweis statt Gefuehl
+
+
+def _api_verbinden(mt5, path):
+    global _MT5_PFAD
+    if _MT5_PFAD == path:
+        return True
+    _api_trennen(mt5)
+    if not mt5.initialize(path=path):
+        return False
+    _MT5_PFAD = path
+    return True
+
+
+def _api_trennen(mt5=None):
+    """Verbindung loesen. Am Ende jedes Laufs und bei jedem Verdacht auf eine
+    tote Verbindung — danach docket der naechste Aufruf frisch an."""
+    global _MT5_PFAD
+    if _MT5_PFAD is None:
+        return
+    try:
+        if mt5 is None:
+            import MetaTrader5 as mt5
+        mt5.shutdown()
+    except Exception:
+        pass
+    _MT5_PFAD = None
+
+
+def _api_stat_reset():
+    _API_STAT["n"] = 0
+    _API_STAT["ms"] = 0.0
+
+
+def _spur(trail):
+    """Spur als Text, mit angehaengter API-Bilanz (31.08.2026). Die Zahl
+    beantwortet Finns Tempo-Frage aus einem ECHTEN Lauf statt aus meiner
+    Schaetzung: steht dort '6x 0,4s', liegt die verbleibende Zeit woanders."""
+    n, ms = _API_STAT["n"], _API_STAT["ms"]
+    zusatz = [f"API-Lesen {n}x {ms / 1000:.1f}s"] if n else []
+    return " → ".join(list(trail) + zusatz)
+
+
 def _api_lesen(path, expected, symbol=None):
-    """Einmal andocken, lesen, sofort trennen. Rueckgabe:
+    """Lesen ueber die (offen gehaltene) Terminal-Verbindung. Rueckgabe:
     {"login", "positionen": [...], "ref_ask", "ref_bid", "contract_size",
      "digits"} oder {"fehler": ...}."""
     try:
         import MetaTrader5 as mt5
     except ImportError:
         return {"fehler": "MetaTrader5-Paket fehlt (nur auf dem PC lauffaehig)."}
-    if not mt5.initialize(path=path):
-        return {"fehler": f"Terminal-Verbindung fehlgeschlagen: {mt5.last_error()}"}
+    _t0 = time.time()
     try:
-        ai = mt5.account_info()
-        if ai is None:
-            return {"fehler": "Kein Konto verbunden (account_info leer)."}
-        if expected and int(ai.login) != expected:
-            return {"fehler": f"Terminal ist im FALSCHEN Konto ({ai.login} statt {expected})."}
-        out = {"login": int(ai.login), "positionen": []}
-        for p in (mt5.positions_get() or []):
-            out["positionen"].append({"ticket": int(p.ticket), "symbol": str(p.symbol),
-                                      "typ": int(p.type), "volumen": float(p.volume),
-                                      "sl": float(p.sl), "tp": float(p.tp),
-                                      "preis": float(p.price_open)})
-        if symbol:
-            # Symbol in die Marktuebersicht holen (15.08.2026, Finns Fund: nach
-            # frischem Login ist NASDAQ nie da). symbol_select(..., True) ist eine
-            # reine Watchlist-Aktion — KEINE Order, also keine Expert-Markierung.
-            # Damit taucht das Symbol danach auch im F9-Dialog-Dropdown auf.
-            if mt5.symbol_info(symbol) is None:
-                # Broker kennt diese Schreibweise gar nicht — Mapping pruefen.
-                return {"fehler": f"Broker kennt Symbol '{symbol}' nicht — Schreibweise im "
-                                  f"Symbol-Mapping der Copier-Karte pruefen (z.B. NAS100 vs NDX100)."}
-            if not mt5.symbol_select(symbol, True):
-                return {"fehler": f"Symbol '{symbol}' liess sich nicht zur Marktuebersicht "
-                                  f"hinzufuegen."}
-            si = mt5.symbol_info(symbol)
-            tick = mt5.symbol_info_tick(symbol)
-            # Nach frischem Hinzufuegen kann der erste Tick kurz fehlen — bis 3s
-            # nachfassen, bevor 'Markt zu' gemeldet wird.
-            _t0 = time.time()
-            while (tick is None or not (tick.ask and tick.bid)) and time.time() - _t0 < 3:
-                _warte(0.3, 0.3)
-                tick = mt5.symbol_info_tick(symbol)
-            if si is None or tick is None or not (tick.ask and tick.bid):
-                return {"fehler": f"Keine Kurse fuer '{symbol}' (Markt zu?)."}
-            out["ref_ask"] = float(tick.ask)
-            out["ref_bid"] = float(tick.bid)
-            out["contract_size"] = float(getattr(si, "trade_contract_size", 0) or 0) or 1.0
-            out["digits"] = int(getattr(si, "digits", 2) or 2)
-        return out
+        for versuch in (1, 2):
+            if not _api_verbinden(mt5, path):
+                _api_trennen(mt5)
+                if versuch == 2:
+                    return {"fehler": f"Terminal-Verbindung fehlgeschlagen: {mt5.last_error()}"}
+                continue
+            try:
+                erg = _api_lesen_einmal(mt5, expected, symbol)
+            except Exception as e:
+                # Ausnahme heisst hier immer: Verbindung hin. Trennen und genau
+                # einmal frisch andocken — das ist der alte Zustand.
+                _api_trennen(mt5)
+                if versuch == 2:
+                    return {"fehler": f"Lesen fehlgeschlagen ({type(e).__name__}): {e}"}
+                continue
+            if erg is None:          # account_info leer = Verbindung tot
+                _api_trennen(mt5)
+                if versuch == 2:
+                    return {"fehler": "Kein Konto verbunden (account_info leer)."}
+                continue
+            return erg
+        return {"fehler": "Terminal nicht lesbar."}
     finally:
-        mt5.shutdown()
+        _API_STAT["n"] += 1
+        _API_STAT["ms"] += (time.time() - _t0) * 1000.0
+
+
+def _api_lesen_einmal(mt5, expected, symbol=None):
+    """Ein Lesedurchgang auf bestehender Verbindung. None = Verbindung tot
+    (der Aufrufer haengt dann neu an); dict = Ergebnis oder Sachfehler."""
+    ai = mt5.account_info()
+    if ai is None:
+        return None      # Verbindung tot — der Aufrufer haengt neu an
+    if expected and int(ai.login) != expected:
+        return {"fehler": f"Terminal ist im FALSCHEN Konto ({ai.login} statt {expected})."}
+    out = {"login": int(ai.login), "positionen": []}
+    for p in (mt5.positions_get() or []):
+        out["positionen"].append({"ticket": int(p.ticket), "symbol": str(p.symbol),
+                                  "typ": int(p.type), "volumen": float(p.volume),
+                                  "sl": float(p.sl), "tp": float(p.tp),
+                                  "preis": float(p.price_open)})
+    if symbol:
+        # Symbol in die Marktuebersicht holen (15.08.2026, Finns Fund: nach
+        # frischem Login ist NASDAQ nie da). symbol_select(..., True) ist eine
+        # reine Watchlist-Aktion — KEINE Order, also keine Expert-Markierung.
+        # Damit taucht das Symbol danach auch im F9-Dialog-Dropdown auf.
+        if mt5.symbol_info(symbol) is None:
+            # Broker kennt diese Schreibweise gar nicht — Mapping pruefen.
+            return {"fehler": f"Broker kennt Symbol '{symbol}' nicht — Schreibweise im "
+                              f"Symbol-Mapping der Copier-Karte pruefen (z.B. NAS100 vs NDX100)."}
+        if not mt5.symbol_select(symbol, True):
+            return {"fehler": f"Symbol '{symbol}' liess sich nicht zur Marktuebersicht "
+                              f"hinzufuegen."}
+        si = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+        # Nach frischem Hinzufuegen kann der erste Tick kurz fehlen — bis 3s
+        # nachfassen, bevor 'Markt zu' gemeldet wird. Erst PRUEFEN, dann warten
+        # (31.08.2026): der Tick ist meistens sofort da, die alte Reihenfolge
+        # verschenkte trotzdem jedes Mal die volle Wartezeit.
+        _t0 = time.time()
+        while (tick is None or not (tick.ask and tick.bid)) and time.time() - _t0 < 3:
+            _warte(0.12, 0.15)
+            tick = mt5.symbol_info_tick(symbol)
+        if si is None or tick is None or not (tick.ask and tick.bid):
+            return {"fehler": f"Keine Kurse fuer '{symbol}' (Markt zu?)."}
+        out["ref_ask"] = float(tick.ask)
+        out["ref_bid"] = float(tick.bid)
+        out["contract_size"] = float(getattr(si, "trade_contract_size", 0) or 0) or 1.0
+        out["digits"] = int(getattr(si, "digits", 2) or 2)
+    return out
 
 
 # _sltp_setzen (TRADE_ACTION_SLTP) ist am 18.08.2026 bewusst GELOESCHT worden:
@@ -1249,7 +1340,7 @@ def modus_tvorder(cmd):
         res["msg"] = msg
         res["schritt"] = schritt
         res["retry_ok"] = retry_ok
-        res["trail"] = " → ".join(trail)
+        res["trail"] = _spur(trail)
         # Fehlversuch = Beweise fuer die naechste Runde sammeln (gleiche Rolle
         # wie modus_inspect beim MT5-Puls, nur fuer eine Webseite): der Server
         # laesst das Userscript 60 s lang seinen Kandidaten-Dump mitschicken.
@@ -1689,7 +1780,7 @@ def _feld_lesen(el):
         return ""
 
 
-def _feld_tippen(el, wert, name, trail):
+def _feld_tippen(el, wert, name, trail, rahmen=None):
     """Wert per ECHTEN Tastenanschlaegen eintippen (18.08.2026, Finns Fund am
     PC: set_edit_text/set_text malt den Text nur in den Feld-Speicher — kein
     WM_CHAR-Event, MT5 parst nie und rechnet intern mit dem ALTEN Wert weiter.
@@ -1701,9 +1792,53 @@ def _feld_tippen(el, wert, name, trail):
     MT5s internen Wert schon live (das Label neben dem Feld rechnet beim Tippen
     mit), und TAB schob den Fokus ins naechste Feld — dort koennte eine
     spaetere Leertaste landen."""
-    for _versuch in (1, 2):
+    # 31.08.2026, Finns Frage "wie kann es sein, dass er manchmal den TP/SL
+    # einfach nicht trifft? 5x geklappt, beim 6. nicht":
+    # Seine Spur endete mit "SL NICHT uebernommen: 29311.07" — und DAVOR stand
+    # nichts. Genau das ist die Auskunft: schlaegt nur das Ruecklesen fehl,
+    # steht dort "SL-Ruecklesen zeigt 'X' statt Y"; fuellt sich das Feld selbst,
+    # steht "SL-Feld leert nicht". Beide Zeilen fehlten. Es sind also beide
+    # Versuche in einer AUSNAHME gelandet — und die verschwand hier im
+    # 'except Exception: continue', ohne dass irgendwo stand, welche.
+    # Zwei Konsequenzen:
+    #  (1) Die Ausnahme wandert in die Spur. Ohne sie ist jede Ursachensuche
+    #      Raten — dieselbe Lehre wie beim Copier-Log heute frueh.
+    #  (2) Ein Wiederholungsversuch, der EXAKT dasselbe tut, hilft nur gegen
+    #      Zufall. Der wahrscheinlichste Grund fuer ein fehlgeschlagenes
+    #      set_focus() ist, dass in diesem Moment ein anderes Fenster den
+    #      Vordergrund hat — bei fuenf offenen MT5-Terminals plus Browser auf
+    #      dem PC keine Seltenheit, und es erklaert genau das Muster
+    #      "meistens gut, manchmal nicht". Deshalb gehen Versuch 2 und 3 den
+    #      MENSCHEN-Weg: kurz Luft holen und ins Feld KLICKEN.
+    # Geklickt wird nur, wenn das Feld nachweislich INNERHALB des Dialogs
+    # liegt (rahmen): ein veraltetes UIA-Element koennte sonst ein Rechteck
+    # von irgendwo liefern, und ein Klick ins Blaue ist im Terminal das
+    # Letzte, was man will.
+    def _ins_feld_klicken():
+        r = el.rectangle()
+        if rahmen is not None:
+            try:
+                rr = rahmen.rectangle()
+                if not (rr.left <= r.left and r.right <= rr.right
+                        and rr.top <= r.top and r.bottom <= rr.bottom):
+                    trail.append(f"{name}-Feld liegt ausserhalb des Dialogs — nicht geklickt")
+                    return False
+            except Exception:
+                return False
+        return _klick_absolut(r.mid_point().x, r.mid_point().y)
+
+    for _versuch in (1, 2, 3):
         try:
-            el.set_focus()
+            if _versuch == 1:
+                el.set_focus()
+            else:
+                _warte(0.25, 0.25)      # dem Vordergrund-Wechsel Zeit geben
+                try:
+                    el.set_focus()
+                except Exception:
+                    pass
+                if _ins_feld_klicken():
+                    trail.append(f"{name}-Feld angeklickt (Versuch {_versuch})")
             _warte(0.1, 0.15)
             # Feld GARANTIERT leeren (18.08.2026, Finns 22-Einwand: steht vom
             # letzten Trade noch '2' drin und es kommt '2' dazu, sind es 22).
@@ -1727,7 +1862,10 @@ def _feld_tippen(el, wert, name, trail):
                 trail.append(f"{name} getippt: {wert}")
                 return True
             trail.append(f"{name}-Ruecklesen zeigt '{ist.strip()}' statt {wert}")
-        except Exception:
+        except Exception as e:
+            # Die Ausnahme IST die Antwort — sie darf nicht hier verschwinden.
+            trail.append(f"{name}-Versuch {_versuch} abgebrochen: "
+                         f"{type(e).__name__}: {str(e)[:70]}")
             continue
     trail.append(f"{name} NICHT uebernommen: {wert}")
     return False
@@ -2391,7 +2529,9 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         # ECHT tippen statt set_text (18.08.2026, gleicher Fund wie beim
         # Volumen-Feld: gemalter Text kommt bei MT5 nie an, s. _feld_tippen)
         for el, wert, name in ((sl_el, sl_text, "SL"), (tp_el, tp_text, "TP")):
-            if not _feld_tippen(el, wert, name, trail):
+            # rahmen=dlg: erlaubt _feld_tippen den Klick-Anlauf, aber nur
+            # innerhalb DIESES Dialogs (31.08.2026, s. dort).
+            if not _feld_tippen(el, wert, name, trail, rahmen=dlg):
                 raise RuntimeError(f"{name}-Feld uebernimmt {wert} nicht")
         _warte(0.3, 0.3)
     except Exception as e:
@@ -2563,7 +2703,7 @@ def run(cfg_path, cmd):
     dlg = _finde_order_dialog(w)
     if dlg is None:
         return {"ok": False, "retry_ok": True,
-                "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + " → ".join(trail) + "]"}
+                "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"}
     trail.append("F9-Dialog offen")
     try:
         combos = dlg.descendants(control_type="ComboBox")
@@ -2649,13 +2789,13 @@ def run(cfg_path, cmd):
             r = vol_el.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
         except Exception:
             pass
-        if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail):
+        if not _feld_tippen(vol_el, f"{vol:g}", "Volumen", trail, rahmen=dlg):
             raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
                                f"Abbruch VOR dem Order-Knopf.")
         _warte(0.2, 0.25)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
-                "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + " → ".join(trail) + "]"}
+                "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + _spur(trail) + "]"}
 
     # 4) Buy/Sell-Knopf — der unumkehrbare Schritt. .click() sendet die
     # Klick-Nachricht direkt ans Control (cursor-unabhaengig); click_input als
@@ -2683,7 +2823,7 @@ def run(cfg_path, cmd):
             pass
         return {"ok": False, "retry_ok": True,
                 "msg": f"Kein {muster}-Knopf im Dialog gefunden — Abbruch, nichts gesendet. "
-                       f"Knoepfe: {', '.join(inventar) or 'keine'} [" + " → ".join(trail) + "]"}
+                       f"Knoepfe: {', '.join(inventar) or 'keine'} [" + _spur(trail) + "]"}
     try:
         r = knopf.rectangle(); _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
     except Exception:
@@ -2699,16 +2839,24 @@ def run(cfg_path, cmd):
         """Kurzer LESE-Check nach jedem Ausloese-Versuch: neue Position da oder
         Dialog zu? Nur wenn BEIDES ausbleibt, darf der naechste Weg probiert
         werden — sonst feuern zwei Wege ZWEI Orders."""
+        # ERST pruefen, DANN warten (31.08.2026, Finns Tempo-Frage): die Order
+        # ist beim ersten Blick meistens schon da. Die alte Reihenfolge legte
+        # trotzdem jedes Mal die volle Wartezeit davor — und weil _api_lesen
+        # damals pro Aufruf neu ans Terminal andockte, war der erste Blick
+        # ohnehin ueber eine Sekunde entfernt. Der Takt darunter ist jetzt
+        # kurz, weil ein Lesen auf offener Verbindung nur noch Millisekunden
+        # kostet. Was NICHT kuerzer wird: das Zeitfenster insgesamt.
         ende_s = time.time() + sekunden
-        while time.time() < ende_s:
-            _warte(0.35, 0.3)
+        while True:
             st = _api_lesen(path, expected)
             if "fehler" not in st and finde_neue_position(
                     vorher_tickets, st["positionen"], symbol, cmd["richtung"], vol):
                 return True
             if _dialog_weg():
                 return True
-        return False
+            if time.time() >= ende_s:
+                return False
+            _warte(0.12, 0.15)
 
     # ECHTE Eingabe zuerst (18.08.2026, Live-Fund — dieselbe Lehre wie beim
     # set_text: MT5 reagiert auf echte Events. Das Volumen stand korrekt im
@@ -2752,12 +2900,18 @@ def run(cfg_path, cmd):
             pass
         return {"ok": False, "retry_ok": True,
                 "msg": "Buy/Sell-Knopf liess sich auf keinem Weg ausloesen "
-                       "[" + " → ".join(trail) + "]"}
+                       "[" + _spur(trail) + "]"}
 
     # 5) LESEND: Bestaetigung am Positionsstand (bis 12 s), nie der UI glauben.
+    # Erster Blick sofort, erst danach im kurzen Takt nachfassen (31.08.2026) —
+    # das 12-s-Fenster bleibt unveraendert, nur die Leerzeit davor faellt weg.
     ende = time.time() + 12
+    _erster_blick = True
     while time.time() < ende:
-        _warte(0.4, 0.35)
+        if _erster_blick:
+            _erster_blick = False
+        else:
+            _warte(0.15, 0.2)
         nachher = _api_lesen(path, expected)
         if "fehler" in nachher:
             continue
@@ -2783,7 +2937,7 @@ def run(cfg_path, cmd):
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                         "msg": "per Klick platziert — SL/TP bewusst NICHT gesetzt "
                                "(Schalter aus), von Hand nachtragen",
-                        "trail": " → ".join(trail), "symbol": symbol,
+                        "trail": _spur(trail), "symbol": symbol,
                         "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill, "ticket": p["ticket"]}
             # SL/TP vom echten Fill-Kurs rechnen — eingetragen wird PER KLICK
@@ -2806,8 +2960,12 @@ def run(cfg_path, cmd):
             # Bestaetigung NUR lesend: traegt die Position die Werte wirklich?
             bestaetigt = False
             ende2 = time.time() + 10
+            _erster2 = True
             while time.time() < ende2 and not bestaetigt:
-                _warte(0.5, 0.4)
+                if _erster2:
+                    _erster2 = False   # sofort nachsehen, s. Schritt 5
+                else:
+                    _warte(0.15, 0.2)
                 st = _api_lesen(path, expected)
                 if "fehler" in st:
                     continue
@@ -2821,7 +2979,7 @@ def run(cfg_path, cmd):
                              f"per Klick gesetzt")
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                         "msg": "per Klick platziert, SL/TP per Klick am echten Einstieg gesetzt",
-                        "trail": " → ".join(trail),
+                        "trail": _spur(trail),
                         "symbol": symbol, "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill,
                         "sl": sl, "tp": tp, "ticket": p["ticket"]}
@@ -2831,8 +2989,8 @@ def run(cfg_path, cmd):
                     "msg": f"Position ist OFFEN @ {fill}, aber SL/TP-Klick nicht bestaetigt "
                            f"({k.get('msg')}) — im Terminal SL {fmt_preis(sl, digits)} / "
                            f"TP {fmt_preis(tp, digits)} SOFORT von Hand nachtragen! "
-                           f"Spur: [" + " → ".join(trail) + "]",
-                    "trail": " → ".join(trail), "symbol": symbol,
+                           f"Spur: [" + _spur(trail) + "]",
+                    "trail": _spur(trail), "symbol": symbol,
                     "richtung": "buy" if kauf else "sell", "volumen": p["volumen"],
                     "price": fill, "sl": sl, "tp": tp, "ticket": p["ticket"]}
     # Kein neuer Positionsstand: entweder Markt zu (Wochenende) oder der Klick
@@ -2856,12 +3014,12 @@ def run(cfg_path, cmd):
     if markt_zu:
         return {"ok": False, "retry_ok": True,
                 "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
-                       "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + " → ".join(trail) + "]",
-                "trail": " → ".join(trail)}
+                       "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + _spur(trail) + "]",
+                "trail": _spur(trail)}
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto, Dialog "
-                   "geschlossen. Spur: [" + " → ".join(trail) + "] · Dialog: " + struktur,
-            "trail": " → ".join(trail)}
+                   "geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur,
+            "trail": _spur(trail)}
 
 
 def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
@@ -3128,13 +3286,13 @@ def run_close(cfg_path, cmd):
     if ausgang == "pause":
         return {"ok": False, "retry_ok": True,
                 "msg": "Echo ist pausiert — nichts geklickt. Fortsetzen, dann erneut. "
-                       "[" + " → ".join(trail) + "]", "trail": " → ".join(trail)}
+                       "[" + _spur(trail) + "]", "trail": _spur(trail)}
     if ausgang == "kein_treffer":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,
                 "msg": f"Positions-Zeile #{ticket} nicht gefunden (Zeilen-Scan ohne Treffer) — "
-                       f"nichts geklickt. [" + " → ".join(trail) + "]",
-                "trail": " → ".join(trail)}
+                       f"nichts geklickt. [" + _spur(trail) + "]",
+                "trail": _spur(trail)}
 
     # 3) LESEND bestaetigen: Position weg = zu (bis 12 s, wie die Order-Seite).
     zu = (ausgang == "zu")
@@ -3152,18 +3310,18 @@ def run_close(cfg_path, cmd):
         return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                 "msg": f"Position #{ticket} ({pos['symbol']}, {pos['volumen']:g} Lots) "
                        f"per Klick geschlossen{pl}",
-                "trail": " → ".join(trail), "ticket": ticket, "profit": profit}
+                "trail": _spur(trail), "ticket": ticket, "profit": profit}
     if ausgang == "ohne_wirkung":
         return {"ok": False, "retry_ok": True,
                 "msg": f"'Position schliessen' geklickt, aber Position #{ticket} liegt noch "
                        f"und kein Close-Dialog kam — im Terminal nachsehen. Wiederholen ist "
-                       f"ungefaehrlich (der Bot prueft vorher lesend). [" + " → ".join(trail) + "]",
-                "trail": " → ".join(trail)}
+                       f"ungefaehrlich (der Bot prueft vorher lesend). [" + _spur(trail) + "]",
+                "trail": _spur(trail)}
     return {"ok": False, "retry_ok": True,
             "msg": f"Close-Dialog war offen, aber Position #{ticket} ist nach 12 s weiter "
                    f"offen — im Terminal pruefen (Dialog wurde geschlossen). Wiederholen ist "
-                   f"ungefaehrlich. [" + " → ".join(trail) + "]",
-            "trail": " → ".join(trail)}
+                   f"ungefaehrlich. [" + _spur(trail) + "]",
+            "trail": _spur(trail)}
 
 
 def modus_inspect(cfg_path):
@@ -3241,10 +3399,17 @@ def main():
         return 2
     # Close-Befehle (28.08.2026, Remote-Close) laufen ueber denselben Aufruf —
     # 'aktion' entscheidet den Weg, pruefe_befehl hat den Zweig schon validiert.
-    if str(cmd.get("aktion") or "").lower() == "close":
-        res = run_close(sys.argv[1], cmd)
-    else:
-        res = run(sys.argv[1], cmd)
+    _api_stat_reset()
+    try:
+        if str(cmd.get("aktion") or "").lower() == "close":
+            res = run_close(sys.argv[1], cmd)
+        else:
+            res = run(sys.argv[1], cmd)
+    finally:
+        # Die offen gehaltene Terminal-Verbindung sauber loesen (31.08.2026) —
+        # hier statt in run(), damit JEDER Ausgang sie loest, auch der Absturz.
+        # Ohne das haenge der Prozess bis zu seinem Ende am Terminal.
+        _api_trennen()
     # Ausgangssituation (28.08.2026): nach jedem Lauf zurueck in den Prophos-
     # Tab — hier statt in run(), damit ausnahmslos JEDER Ausgang (Erfolg,
     # Abbruch, SL/TP-Warnung) denselben Heimweg nimmt. mousetest/inspect
