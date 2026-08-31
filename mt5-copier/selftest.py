@@ -550,9 +550,28 @@ def main():
         and not order_bot.tv_tab_passt("", "", "NQU6"))
     # MNQ-Plan darf NIE den NQ-Tab greifen (und umgekehrt) — dieselbe Trennung
     # wie beim Instrument-Vergleich, hier nur eine Ebene frueher.
-    chk("TV: MNQ und NQ greifen sich auch bei der Tab-Suche nicht gegenseitig",
-        not order_bot.tv_tab_passt("NQU2026 29,491.75", "", "MNQ")
-        and not order_bot.tv_tab_passt("MNQU2026 29,491.75", "", "NQU6"))
+    # Der Rang loest Finns zweiten Fehlversuch (31.08.2026): Plan stand auf NQ,
+    # sein Chart auf MNQ -- der Tab wurde deshalb gar nicht gefunden, obwohl er
+    # offen war. Den Chart umzustellen ist aber Schritt 4 der Kette, die Suche
+    # darf ihn also nicht voraussetzen. Finns ECHTER Tab-Name aus der Spur:
+    _FINN_TAB = "MNQU2026 29.455,50 ▼ −0.12% Unnamed\xa0– Arbeitsspeichernutzung"
+    chk("TV: Chart-Tab wird auch bei ANDEREM Symbol gefunden (Pfeil + Prozent)",
+        order_bot.tv_tab_rang(_FINN_TAB, "", "NQU6") == 1
+        and order_bot.tv_tab_rang(_FINN_TAB, "", "MNQ") == 3)
+    chk("TV: passendes Symbol schlaegt blossen Chart-Titel (Rang 3 > 1)",
+        order_bot.tv_tab_rang("NQU2026 29.491,75 ▼ −0,69%", "", "NQU6") == 3
+        and order_bot.tv_tab_rang("MNQU2026 29.455,50 ▼ −0.12%", "", "NQU6") == 1
+        and order_bot.tv_tab_rang("MNQ1! — TradingView", "", "NQU6") == 2)
+    chk("TV: gewoehnliche Tabs bleiben bei Rang 0",
+        order_bot.tv_tab_rang("Prophos\xa0– Arbeitsspeichernutzung\xa0– 149 MB", "", "NQU6") == 0
+        and order_bot.tv_tab_rang("Cockpit | Duplikium Trade Copier", "", "NQU6") == 0
+        and order_bot.tv_tab_rang("Tradeify Futures - User Dashboard", "", "NQU6") == 0
+        and order_bot.tv_tab_rang("FundedNext - Prop Trading Firm for CFDs and Futures", "", "NQU6") == 0
+        and order_bot.tv_tab_rang("DevTools - www.tradingview.com/chart", "", "NQU6") == 0
+        and order_bot.tv_tab_rang("DAX -0,87%", "", "NQU6") == 0)
+    chk("TV: MNQ und NQ greifen sich beim SYMBOL-Rang nicht gegenseitig",
+        order_bot.tv_tab_rang("NQU2026 29,491.75", "", "MNQ") == 0
+        and order_bot.tv_tab_rang("MNQU2026 29,491.75", "", "NQU6") == 0)
     chk("TV: Konto per External ID — Beiwerk egal, Trennzeichen egal",
         order_bot.tv_konto_passt("PA-1234567 · Tradeify · $50k", "PA1234567")
         and order_bot.tv_konto_passt("APEX-987654", "apex 987654")

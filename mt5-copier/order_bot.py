@@ -1001,39 +1001,54 @@ def tv_tab_suchbegriff(titel):
     return ""
 
 
-def tv_tab_passt(name, begriff, symbol):
-    """Ist dieser Tab-Name der TradingView-Tab? Drei unabhaengige Wege, in
-    dieser Reihenfolge (30.08.2026, nach Finns Fehlversuch mit voller Spur):
+def tv_tab_rang(name, begriff, symbol):
+    """Wie gut passt dieser Tab-Name? 0 = gar nicht, hoeher = besser.
 
-    1. 'tradingview' im Namen — der urspruengliche Weg. Bei Finn traf er nicht:
-       sein Tab heisst 'NQU2026 29,491.75 ▼ −0.69% Unnamed', der Produktname
-       kommt gar nicht vor.
-    2. Der Suchbegriff aus dem Seitentitel, den das Userscript meldet (0.3.1+).
-    3. Die Symbol-WURZEL des Befehls selbst — 'NQU6' und 'NQU2026' sind
-       beide NQ. Dieser Weg braucht weder Userscript noch Titel und ist
-       deshalb der einzige, der immer verfuegbar ist; er kam dazu, weil Weg 2
-       eine Userscript-Version voraussetzt, die auf dem PC erst ankommen muss.
+    Vier Wege, absteigend nach Verlaesslichkeit (31.08.2026, nach Finns
+    zweitem Fehlversuch MIT Spur):
+      3  Symbol-Wurzel des Befehls steckt im Namen — der beste Treffer, weil
+         der Chart dann schon auf dem geplanten Instrument steht.
+      2  'tradingview' im Namen. Bei Finn trifft das nie: sein Tab heisst
+         'MNQU2026 29.455,50 ▼ −0.12% Unnamed', der Produktname fehlt.
+      2  Der Titel, den das Userscript meldet (0.3.1+).
+      1  Der Name SIEHT AUS wie ein TradingView-Chart-Titel: Kurs-Pfeil
+         (▲/▼) UND Prozentzeichen. Das ist der Weg, der Finns Fall loest.
 
-    Chrome haengt an Tab-Namen Zusaetze an ('… - Arbeitsspeichernutzung -
-    303 MB'), deshalb wird nie auf Gleichheit geprueft, sondern auf das erste
-    symbolartige Wort. DevTools sind ueberall ausgeschlossen."""
+    Warum Rang statt "erster Treffer": bis .195 war die Symbol-Wurzel die
+    einzige verlaessliche Spur — damit fand der Bot den Tab NUR, wenn der
+    Chart schon auf dem richtigen Instrument stand. Den Chart umzustellen ist
+    aber Schritt 4 der Kette; die Suche darf ihn also nicht voraussetzen.
+    Bei Finn stand der Plan auf NQ und der Chart auf MNQ, und der Bot fand
+    folgerichtig gar nichts. Jetzt findet er den Chart-Tab trotzdem — und
+    stellt das Symbol danach selbst um. Der Rang sorgt dabei dafuer, dass bei
+    ZWEI offenen Chart-Tabs der mit dem passenden Symbol gewinnt."""
     n = (name or "").strip()
     if not n:
-        return False
+        return 0
     low = n.lower()
     if low.startswith("devtools"):
-        return False
-    if "tradingview" in low:
-        return True
-    b = (begriff or "").strip().lower()
-    if b and b in low:
-        return True
+        return 0
     ziel = tv_symbol_root(symbol)
     if ziel:
         erst = tv_tab_suchbegriff(n)
         if erst and tv_symbol_root(erst) == ziel:
-            return True
-    return False
+            return 3
+    if "tradingview" in low:
+        return 2
+    b = (begriff or "").strip().lower()
+    if b and b in low:
+        return 2
+    # Chart-Titel-Signatur: TradingView schreibt Symbol, Kurs, Richtungspfeil
+    # und Prozent in den Titel. Zwei unabhaengige Merkmale zusammen (Pfeil UND
+    # Prozent) — ein einzelnes waere zu weit (Prozent steht in vielen Titeln).
+    if ("▲" in n or "▼" in n) and "%" in n:
+        return 1
+    return 0
+
+
+def tv_tab_passt(name, begriff, symbol):
+    """Ist dieser Tab-Name ueberhaupt ein Kandidat? (Duenne Huelle um den Rang.)"""
+    return tv_tab_rang(name, begriff, symbol) > 0
 
 
 def _tv_tab_suchen(w, begriff, symbol, gesehen):
@@ -1054,7 +1069,7 @@ def _tv_tab_suchen(w, begriff, symbol, gesehen):
             kinder = w.descendants(control_type="TabItem")
         except Exception:
             return None
-    treffer = []
+    bester, bester_rang = None, 0
     for it in kinder:
         try:
             n = (it.window_text() or "").strip()
@@ -1064,21 +1079,10 @@ def _tv_tab_suchen(w, begriff, symbol, gesehen):
             continue
         if len(gesehen) < 12:
             gesehen.append(n[:60])
-        if tv_tab_passt(n, begriff, symbol):
-            treffer.append(it)
-    if not treffer:
-        return None
-    if len(treffer) > 1:
-        # Mehrere Kandidaten: den mit 'tradingview' bevorzugen, sonst den
-        # ersten. Anders als beim Order-Klick ist das vertretbar — ein
-        # Tabwechsel ist folgenlos und sofort sichtbar.
-        for it in treffer:
-            try:
-                if "tradingview" in (it.window_text() or "").lower():
-                    return it
-            except Exception:
-                continue
-    return treffer[0]
+        r = tv_tab_rang(n, begriff, symbol)
+        if r > bester_rang:
+            bester, bester_rang = it, r
+    return bester
 
 
 def _tv_fenster_holen(trail, begriff="", symbol=""):
@@ -1100,7 +1104,7 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
             fenster_namen.append((titel or "?")[:60])
         # Aktiver Tab: 'tradingview' im Titel ODER das gemeldete Symbol —
         # bei Finns PC steht im Titel nur 'NQU2026 29.491,75 ...'.
-        if ist_tradingview_fenster(titel, klasse) or tv_tab_passt(titel, begriff, symbol):
+        if ist_tradingview_fenster(titel, klasse) or tv_tab_rang(titel, begriff, symbol) > 0:
             try:
                 if w.is_minimized():
                     w.restore()
