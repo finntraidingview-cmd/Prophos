@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.2
+// @version      0.3.3
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -247,7 +247,8 @@
       const dn = e.getAttribute('data-name') || e.getAttribute('data-dialog-name') || '';
       const al = e.getAttribute('aria-label') || '';
       if (!t && !dn && !al && e.tagName !== 'INPUT') continue;
-      out.push({ tag: e.tagName.toLowerCase(), dn, al, rolle: e.getAttribute('role') || '',
+      out.push({ tag: e.tagName.toLowerCase(), id: e.id || '', dn, al,
+                 rolle: e.getAttribute('role') || '',
                  text: t, wert: wert(e).slice(0, 30), rect: rectOf(e) });
     }
     return out;
@@ -263,7 +264,10 @@
    * Dump immer schon beim Server, auch wenn der Tab seit einer Weile
    * eingefroren ist -- ein Abruf genuegt, ohne Timing und ohne Tabwechsel.
    * Begrenzt auf die zwei Zonen, um die es geht: obere Werkzeugleiste
-   * (Symbol-Suche) und rechte Spalte (Konto + Order-Panel). */
+   * (Symbol-Suche) und rechte Spalte (Konto + Order-Panel).
+   * Seit 0.3.3 auch die element-id: bei TradingView ist sie der stabilste
+   * Anker (header-toolbar-symbol-search &c.), und mehrere Knoepfe der
+   * Werkzeugleiste tragen ueberhaupt kein data-name. */
   function dumpKompakt() {
     const out = [];
     const grenzeX = window.innerWidth * 0.6;
@@ -281,7 +285,8 @@
       const dn = e.getAttribute('data-name') || '';
       const al = e.getAttribute('aria-label') || '';
       if (!t && !dn && !al && e.tagName !== 'INPUT') continue;
-      out.push({ tag: e.tagName.toLowerCase(), dn, al, rolle: e.getAttribute('role') || '',
+      out.push({ tag: e.tagName.toLowerCase(), id: e.id || '', dn, al,
+                 rolle: e.getAttribute('role') || '',
                  text: t, wert: wert(e).slice(0, 24), rect: rectOf(e) });
     }
     return out;
