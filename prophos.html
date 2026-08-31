@@ -20953,11 +20953,63 @@
   document.getElementById('tp-dir-buy')?.addEventListener('click', () => tpDirSet('buy'))
   document.getElementById('tp-dir-sell')?.addEventListener('click', () => tpDirSet('sell'))
 
+  /* Der einmal gefundene Hedge-Account gehoert in die DATENBANK, nicht in die
+   * Telemetrie (31.08.2026, Finns Fund am MacBook: "warum wird mir hier der
+   * Slave nicht angezeigt? Der soll in der DB gespeichert sein und auf allen
+   * Geraeten angezeigt werden").
+   * Bis eben wurde er auf JEDEM Geraet neu aus Live-Daten HERGELEITET:
+   *   PC   → lokale Instanzliste des Panels  (steht sofort, deshalb fiel nichts auf)
+   *   Mac  → mt5_live-Zeilen des eigenen Profils, sonst echo_hedge
+   * Genau diese Herleitung ist am Mac gescheitert, und zwar an zwei Stellen
+   * gleichzeitig: die einzige mt5_live-Zeile dieses Profils kam von einem
+   * toten PC und hatte hedge_login = "" (alive:false), und die letzte
+   * Rueckfalllinie echo_hedge hat ueberhaupt KEINE user_id -- sie nimmt die
+   * global juengste PC-Zeile, das war die eines FREMDEN Rechners (430095
+   * statt 488579). Der fremde Login fand in mt5_links des Profils nichts,
+   * also blieb das Dropdown leer.
+   * Eine Herleitung, die von der Frische fremder Telemetrie abhaengt, ist als
+   * Speicher ungeeignet -- sie ist genau dann still falsch, wenn der PC aus
+   * ist. Deshalb jetzt: Ergebnis EINMAL in user_settings ablegen (wie
+   * fx_usd_eur und lot_calibration) und ueberall von dort lesen. Die
+   * Live-Wege bleiben davor, damit ein echter Hedge-Wechsel am PC sofort
+   * greift und den gespeicherten Wert ueberschreibt. */
+  const TP_HEDGE_KEY = 'echo_hedge_account'
+
+  async function tpHedgeAusDb(){
+    if(!currentUserId) return null
+    try{
+      const { data } = await supabase.from('user_settings').select('value')
+        .eq('user_id', currentUserId).eq('key', TP_HEDGE_KEY).maybeSingle()
+      const id = data && data.value && data.value.accountId
+      return id ? String(id) : null
+    }catch(_){ return null }
+  }
+
+  async function tpHedgeInDb(accId, hLogin){
+    if(!currentUserId || !accId) return
+    if(String(_tpHedgeDbStand || '') === String(accId)) return   // nichts Neues
+    try{
+      const { error } = await supabase.from('user_settings').upsert({
+        user_id: currentUserId, key: TP_HEDGE_KEY,
+        value: { accountId: String(accId), hedgeLogin: hLogin ? String(hLogin) : null }
+      }, { onConflict: 'user_id,key' })
+      if(!error) _tpHedgeDbStand = String(accId)
+    }catch(_){}
+  }
+  let _tpHedgeDbStand = null   // was zuletzt in der DB stand/geschrieben wurde
+
   async function tpResolveMt5Hedge(){
     // Hedge-Login aus der FRISCHEN Instanzliste (alle Instanzen teilen per
     // check_fleet denselben Hedge), dann mt5_links → Prophos-Account-ID.
-    // Offline/kein Treffer → null; das Slave-Dropdown zeigt dann alle
-    // MT5-verlinkten Accounts (benutzbar bleiben schlägt fixieren).
+    // Offline/kein Treffer → gespeicherter Wert aus der DB.
+    // 0) Gespeicherter Stand ZUERST — damit am Mac sofort etwas dasteht, auch
+    //    wenn gerade kein PC laeuft. Die Live-Wege unten duerfen ihn danach
+    //    ueberschreiben; sie sind die frischere Wahrheit, wenn es sie gibt.
+    const gespeichert = await tpHedgeAusDb()
+    if(gespeichert){
+      _tpHedgeDbStand = gespeichert
+      if(!_tpMt5HedgeAccId) _tpMt5HedgeAccId = gespeichert
+    }
     try{
       let hLogin = null
       // 1) Lokale Instanzliste (PC) — wie bisher die erste Wahl.
@@ -20983,9 +21035,28 @@
             .order('updated_at', { ascending: false }).limit(40)
           const eigene = (data || []).filter(r => String(((r || {}).status || {}).user_id || '') === String(currentUserId || ''))
           hLogin = String(((eigene.find(r => r.hedge_login) || {}).hedge_login) || '') || null
+          // Zweiter Durchgang ueber DIESELBEN Zeilen (31.08.2026): der PC pusht
+          // mt5_live unter dem Profil, das DORT eingeloggt ist — das muss nicht
+          // dasselbe sein wie am Mac. Genau so lag Finns Fall: die einzige
+          // Zeile seines Mac-Profils kam von einem toten PC (hedge_login "")
+          // waehrend der laufende PC unter einem anderen Profil pushte.
+          // Sicher ist das trotzdem, weil NUR ein Login akzeptiert wird, fuer
+          // den DIESES Profil eine eigene mt5_links-Zeile hat — die Verknuepfung
+          // ist die Aussage "dieser MT5-Login ist mein Account". Ohne Link
+          // bleibt es beim Nichts; geraten wird nie.
+          if(!hLogin){
+            const meine = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+            hLogin = String((((data || []).find(r => r.hedge_login && meine[String(r.hedge_login)] != null)) || {}).hedge_login || '') || null
+          }
         }catch(_){}
       }
-      if(!hLogin){
+      // echo_hedge hat KEINE user_id (31.08.2026 nachgesehen): die Abfrage
+      // liefert die global juengste PC-Zeile, notfalls die eines fremden
+      // Rechners. Deshalb nur noch, wenn nichts gespeichert ist — und der
+      // Treffer wird unten ohnehin gegen mt5_links DIESES Profils geprueft,
+      // ein fremder Login faellt dort durch. Ohne diesen Riegel waere es
+      // Raten mit dem Hedge-Konto einer anderen Person.
+      if(!hLogin && !gespeichert){
         try{
           const { data } = await supabase.from('echo_hedge')
             .select('hedge_login,updated_at')
@@ -20995,7 +21066,11 @@
       }
       if(!hLogin) return
       const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
-      if(links[hLogin] != null){ _tpMt5HedgeAccId = String(links[hLogin]); return }
+      if(links[hLogin] != null){
+        _tpMt5HedgeAccId = String(links[hLogin])
+        await tpHedgeInDb(_tpMt5HedgeAccId, hLogin)   // ab jetzt auf jedem Geraet
+        return
+      }
       // Auto-Verknüpfung (25.08.2026, Finns Ansage „ich will nicht auswählen"):
       // fehlt der mt5_links-Eintrag fürs Hedge-Konto (z.B. direkt nach dem
       // 🎯-Chip-Wechsel), wird EINDEUTIG über External ID / MT5-Login der
@@ -21009,6 +21084,7 @@
         if(typeof window.mt5LinkSet === 'function'){
           try { await window.mt5LinkSet(hLogin, String(cand[0].id)) } catch(_){}
         }
+        await tpHedgeInDb(_tpMt5HedgeAccId, hLogin)
       }
     }catch(_){}
   }
@@ -21319,7 +21395,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.218'
+  const OS_TAB_BUILD = '2026-08-31.219'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22453,7 +22529,12 @@
           if((r === 'mt5' || r === 'tvplus') && !_tpMt5HedgeAccId){
             tpResolveMt5Hedge().then(() => {
               // Open-Check wie beim Kick unten — nicht in ein geschlossenes Modal rendern
-              if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
+              // Orbit MUSS hier mit rein (31.08.2026): die Aufloesung laeuft
+              // async, und ohne tvplus im Vergleich wurde das Ergebnis auf dem
+              // Orbit-Weg nie ins Dropdown gezeichnet — es sah aus, als fehle
+              // der Slave, dabei stand er laengst in _tpMt5HedgeAccId.
+              if(document.getElementById('tradePlanModal')?.classList.contains('open')
+                 && (_tpRoute === 'mt5' || _tpRoute === 'tvplus')) tpRouteApply()
             })
           }
         })
@@ -22468,7 +22549,8 @@
     // nach Hedge-/User-Wechsel alle Slave-Kandidaten wegfiltern.
     // tpResolveMt5Hedge ist idempotent und billig.
     tpResolveMt5Hedge().then(() => {
-      if(document.getElementById('tradePlanModal')?.classList.contains('open') && _tpRoute === 'mt5') tpRouteApply()
+      if(document.getElementById('tradePlanModal')?.classList.contains('open')
+         && (_tpRoute === 'mt5' || _tpRoute === 'tvplus')) tpRouteApply()
     })
 
     if(isEdit){
