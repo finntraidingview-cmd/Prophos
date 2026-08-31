@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.3
+// @version      0.3.4
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -40,6 +40,38 @@
   // mitgelesen (Fund 28.08.2026, PC 1: TV lief auf Englisch, Reader stumm
   // bei offener Position).
   let spracheFremd = false;
+  let spaltenGesehen = [];      // fuer die Ferndiagnose: was die Tabelle WIRKLICH anbietet
+
+  /* Spaltentitel sind NICHT stabil (Fund 31.08.2026 an Finns PC): die Tabelle
+   * hiess auf Deutsch mal "Menge / Durchschn. Ausfuehrungspreis /
+   * Unrealisierter G&V" und heisst jetzt "Anz. / Durchschnittlicher
+   * Erfuellungspreis / Profit". Der Reader hat deshalb 0 Positionen gemeldet,
+   * waehrend 3 Kontrakte short offen waren -- und "0 Positionen" ist die
+   * gefaehrlichste Falschaussage, die dieser Reader treffen kann.
+   *
+   * Deshalb ab 0.3.4: pro Feld eine LISTE moeglicher Titel, erster Treffer
+   * gewinnt. Neue Schreibweisen kosten hier eine Zeile statt eines Ausfalls.
+   * Englisch steht bewusst mit drin -- lieber lesen wir die Position auch auf
+   * Englisch, als sie zu uebersehen; die Sprachwarnung bleibt trotzdem, weil
+   * der Verbinder deutsche ZAHLEN parst. */
+  const SPALTEN = {
+    symbol:   ['Symbol'],
+    seite:    ['Seite', 'Side'],
+    menge:    ['Menge', 'Anz.', 'Anzahl', 'Qty', 'Quantity'],
+    einstieg: ['Durchschn. Ausführungspreis', 'Durchschnittlicher Erfüllungspreis',
+               'Ø Ausführungspreis', 'Avg Fill Price'],
+    pnl:      ['Unrealisierter G&V', 'Profit', 'Unrealized P&L', 'P&L'],
+    sl:       ['Stop Loss', 'Stop-Loss'],
+    tp:       ['Take Profit', 'Take-Profit'],
+  };
+
+  function feld(zeile, namen) {
+    for (const n of namen) {
+      const v = zeile[n];
+      if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+    }
+    return null;
+  }
 
   function lesePositionen() {
     const rows = new Map();
@@ -53,20 +85,23 @@
       // \s+ -> ' ': TradingView bricht manche Zellen um ("+190,00\nUSD") — Zeilenumbrueche raus
       rows.get(tr)[label] = td.innerText.replace(/\s+/g, ' ').trim();
     });
-    spracheFremd = labels.has('Unrealized P&L') && !labels.has('Unrealisierter G&V');
-    // Nur echte OFFENE Positionen: die tragen 'Unrealisierter G&V'.
-    // Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
+    spaltenGesehen = [...labels];
+    // Englisch erkennen an einem Titel, den es auf Deutsch NICHT gibt. "Profit"
+    // taugt dafuer nicht — das Wort steht in beiden Sprachen so da.
+    spracheFremd = labels.has('Unrealized P&L') || labels.has('Avg Fill Price');
+    // Eine Zeile ist eine offene Position, wenn sie Symbol UND einen G&V-Wert
+    // traegt. Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
     return [...rows.values()]
-      .filter((r) => r['Unrealisierter G&V'] && r['Symbol'])
-      .map((p) => ({
-        symbol:   p['Symbol'],
-        seite:    p['Seite'],                          // Long / Short
-        menge:    p['Menge'],
-        einstieg: p['Durchschn. Ausführungspreis'],
-        sl:       p['Stop Loss']   || null,
-        tp:       p['Take Profit'] || null,
-        pnl:      p['Unrealisierter G&V'],
-      }));
+      .map((r) => ({
+        symbol:   feld(r, SPALTEN.symbol),
+        seite:    feld(r, SPALTEN.seite),
+        menge:    feld(r, SPALTEN.menge),
+        einstieg: feld(r, SPALTEN.einstieg),
+        sl:       feld(r, SPALTEN.sl),
+        tp:       feld(r, SPALTEN.tp),
+        pnl:      feld(r, SPALTEN.pnl),
+      }))
+      .filter((p) => p.symbol && p.pnl !== null);
   }
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -333,6 +368,9 @@
         dpr: window.devicePixelRatio || 1,
       },
       sprache_fremd: spracheFremd,
+      // Was die Positionstabelle WIRKLICH an Spalten anbietet. Genau diese
+      // Liste haette den Blind-Fall vom 31.08.2026 sofort erklaert.
+      spalten: spaltenGesehen,
       konto: {
         aktiv: kontoSchalter && kontoSchalter.text ? kontoSchalter.text : '',
         schalter: kontoSchalter,
