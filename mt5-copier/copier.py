@@ -455,36 +455,12 @@ def plan_actions(positions, hedges, *, multiplier, symbol_map, sym_info,
         if si is None:
             warnings.append(f"Symbol {hsym} im Hedge-Terminal nicht gefunden")
             continue
-        # DER MULTIPLIKATOR IST EIN LOT-VERHAELTNIS, keine Exposure-Zahl
-        # (31.08.2026, Finns Live-Lauf FundingPips -> Fusion). Bis eben stand
-        # hier zusaetzlich * (m_cs / h_cs) mit der Begruendung "derselbe Index
-        # hat je Broker andere Kontraktgroessen". Das ist richtig -- aber es
-        # war die ZWEITE Stelle, die dieselbe Korrektur angewandt hat:
-        # Prophos rechnet den Multiplikator aus den Punktwerten je Firma
-        # (FundingPips NDX100 = $20/Pkt/Lot, Fusion NAS100 = 0,85 EUR/Pkt/Lot),
-        # und in genau diesen Punktwerten steckt die Kontraktgroesse bereits.
-        # Der gepushte Wert ist also schon "Slave-Lots je Master-Lot"; hier noch
-        # einmal mit m_cs/h_cs zu multiplizieren heisst, die Kontraktgroesse des
-        # Masters ein zweites Mal draufzurechnen.
-        # Was das kostete: Master 0,4 Lot NDX100 (contract_size 20), gepusht
-        # x2,2239 -> gewollt 0,89 Lot NAS100, gerechnet 0,4 * 2,2239 * 20/1 =
-        # 17,79 Lot. Zwanzigfach. Aufgefallen ist es nur, weil der Broker
-        # ablehnte (retcode 10019 "No money") -- auf einem groesseren
-        # Hedge-Konto waere die Order durchgegangen.
-        # Warum es zwei Wochen niemand sah: bei The5%ers und Fusion ist die
-        # Kontraktgroesse auf beiden Seiten 1, m_cs/h_cs also 1,0 -- die
-        # doppelte Korrektur war rechnerisch unsichtbar. Sie schlaegt erst zu,
-        # wenn Master und Hedge sich unterscheiden, und dann sofort um den
-        # vollen Faktor.
-        # Warum die Korrektur HIER faellt und nicht in Prophos: die Punktwerte
-        # je Firma sind ohnehin die eine Stelle, an der Prophos die
-        # Kontraktgroesse fuehrt -- sie steht im Plan-Popup, ist dort sichtbar
-        # und wird dort geprueft. Passt sie nicht zur Realitaet des Brokers,
-        # zeigt schon das Popup falsche Lots. Eine halbe Nachkorrektur unterwegs
-        # wuerde diesen Fehler verstecken statt ihn zu zeigen.
+        # Exposure statt Lots: derselbe Index hat je Broker andere Kontraktgrößen
+        m_cs = float(mp.get("contract_size") or 0) or 1.0
+        h_cs = float(si.get("trade_contract_size") or 0) or 1.0
         # Keine max-Lots-Grenze mehr (15.08.2026, Finns Ansage "komplett weg"):
         # gedeckelt wird nur noch vom Broker selbst (volume_max in norm_vol).
-        v = norm_vol(si, mp["volume"] * multiplier)
+        v = norm_vol(si, mp["volume"] * multiplier * (m_cs / h_cs))
         if v <= TOL:
             warnings.append(f"Berechnetes Volumen unter Mindest-Lot ({hsym})")
             continue

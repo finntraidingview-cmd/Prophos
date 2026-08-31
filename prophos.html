@@ -20398,13 +20398,49 @@
       _pfSet('m5push', 'err', 'Kein (gültiger) Multiplier am Plan — ohne ihn kann der Copier die Hedge-Größe nicht bestimmen.')
       _pfSet('m5term', 'warn', 'Übersprungen — kein Multiplier.')
       hardFail = true
+    } else if(!(tpMasterPpl(plan.masterFirm) > 0)){
+      // Eigener Zweig statt Abbruch mitten im Push-Block: die Kette darf nicht
+      // per return verlassen werden, sonst fehlt dem Popup die Zusammenfassung
+      // am Ende (und der Nutzer sieht ein halb gelaufenes Fenster).
+      _pfSet('m5push', 'err', `Kein Punktwert für „${escapeHtml(String(plan.masterFirm || '—'))}" hinterlegt — ohne ihn lässt sich der Plan-Multiplier nicht in die Copier-Config umrechnen. In den Einstellungen bei der Firma nachtragen.`)
+      _pfSet('m5term', 'warn', 'Übersprungen — kein Punktwert.')
+      hardFail = true
     } else {
       const file = route.inst.file
       const mult = Number(plan.multiplier)
       const mapCount = Object.keys(route.inst.symbol_map || {}).length
 
+      /* UMRECHNUNG PLAN → CONFIG (31.08.2026, Finns Live-Lauf FundingPips):
+       * Das Plan-Popup rechnet SLAVE-LOTS JE MASTER-LOT — der Punktwert der
+       * Master-Firma steckt da schon drin (FundingPips NDX100 $20/Pkt/Lot).
+       * Der Copier meint mit "multiplier" etwas anderes:
+       *     hedge_lots = master_lots × multiplier × master_cs / hedge_cs
+       * Er legt die Kontraktgroesse also SELBST drauf — und tut das zu Recht,
+       * denn er liest sie live aus dem Snapshot bzw. beim Broker, waehrend
+       * Prophos nur das Firmen-Preset kennt.
+       * Ungeteilt gepusht wird der Punktwert damit ZWEIMAL gerechnet: Finns
+       * 0,4 Lot NDX100 (cs 20) mit ×2,2239 ergaben 17,79 statt 0,89 Lot NAS100
+       * — zwanzigfach. Sichtbar wurde es nur, weil der Broker ablehnte
+       * (retcode 10019 "No money"); auf einem groesseren Hedge-Konto waere die
+       * Order durchgegangen und haette wie ein normaler Hedge ausgesehen.
+       * Zwei Wochen unsichtbar, weil bei The5%ers→Fusion beide Kontraktgroessen
+       * 1 sind und der Faktor damit exakt 1,0 war.
+       * Es ist EXAKT dieselbe Umrechnung, die tpOrbitMultPush seit dem
+       * 31.08.2026 fuer Orbit macht (dort: Plan-Wert / Punktwert des Kontrakts).
+       * Sie fehlte hier nur, weil die MT5-Route bisher nie ein Paar mit
+       * unterschiedlichen Kontraktgroessen gefahren hat.
+       * BEWUSST hier und nicht im Copier: der Copier bedient BEIDE Engines aus
+       * derselben plan_actions(); nimmt man ihm die Korrektur weg, faellt Orbit
+       * um denselben Faktor in die Gegenrichtung (1 NQ haette 1 statt 20 Lots
+       * gehedgt). Die Korrektur gehoert dorthin, wo die Punktwerte stehen. */
+      const mPpl = tpMasterPpl(plan.masterFirm)   // > 0, s. Zweig oben
+      const cfgMult = mult / mPpl
+      // Beide Zahlen im Text: Finn kennt den Plan-Wert aus dem Popup, in der
+      // Config und auf der Echo-Karte steht ab jetzt der geteilte.
+      const multTxt = `<span class="mono">×${mult.toFixed(3)}</span> (Config <span class="mono">×${cfgMult.toFixed(4)}</span>, Punktwert ${mPpl})`
+
       const pushRes = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(mult) }) })
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(cfgMult) }) })
       // Symbol-Mapping gegen die hinterlegten Firmen-Presets prüfen (Finns Ansage
       // 15.08.2026: "es ist alles in den Einstellungen" — die Verlinkung sagt uns
       // die Firma, die Presets ihre Symbole; niemand muss Mappings auswendig
@@ -20438,7 +20474,7 @@
         _pfSet('m5term', 'warn', 'Übersprungen — Push fehlgeschlagen.')
         hardFail = true
       } else if(!mapCount && !expSyms.length){
-        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber das Symbol-Mapping ist LEER und für „${escapeHtml(String(plan.masterFirm || '—'))}" sind keine Symbole in den Einstellungen hinterlegt — auf der Copier-Karte pflegen (Master-Symbol → Hedge-Symbol).`)
+        _pfSet('m5push', 'err', `${multTxt} gepusht, aber das Symbol-Mapping ist LEER und für „${escapeHtml(String(plan.masterFirm || '—'))}" sind keine Symbole in den Einstellungen hinterlegt — auf der Copier-Karte pflegen (Master-Symbol → Hedge-Symbol).`)
         _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping fehlt.')
         hardFail = true
       } else if(fixBar){
@@ -20446,7 +20482,7 @@
         // gemergt gepusht (save ersetzt die ganze Map), danach läuft die
         // Checkliste automatisch neu durch. Ziel je Zeile über zielSym (s.o.),
         // NICHT pauschal das Index-Symbol der Hedge-Firma.
-        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt das Firmen-Symbol' : 'fehlen die Firmen-Symbole'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> („${escapeHtml(String(plan.masterFirm || ''))}") — ohne Mapping hedgt der Copier ${missingSyms.length === 1 ? 'dieses Symbol' : 'diese Symbole'} nicht.<br>
+        _pfSet('m5push', 'err', `${multTxt} gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt das Firmen-Symbol' : 'fehlen die Firmen-Symbole'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> („${escapeHtml(String(plan.masterFirm || ''))}") — ohne Mapping hedgt der Copier ${missingSyms.length === 1 ? 'dieses Symbol' : 'diese Symbole'} nicht.<br>
           <button class="btn btn-primary pf-fix-btn" id="pf-fix-m5sym" style="padding:4px 12px;font-size:11.5px">Mapping ergänzen (${missingSyms.map(s => escapeHtml(s) + ' → ' + escapeHtml(zielSym(s))).join(', ')})</button>`)
         document.getElementById('pf-fix-m5sym')?.addEventListener('click', async () => {
           const b = document.getElementById('pf-fix-m5sym')
@@ -20461,7 +20497,7 @@
         _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping unvollständig.')
         hardFail = true
       } else if(missingSyms.length){
-        _pfSet('m5push', 'err', `<span class="mono">×${mult.toFixed(3)}</span> gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt' : 'fehlen'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> und für die Hedge-Firma „${escapeHtml(String(plan.slaveFirm || '—'))}" ist kein Symbol in den Einstellungen hinterlegt — auf der Copier-Karte von Hand ergänzen.`)
+        _pfSet('m5push', 'err', `${multTxt} gepusht, aber im Mapping ${missingSyms.length === 1 ? 'fehlt' : 'fehlen'} <span class="mono">${missingSyms.map(escapeHtml).join(', ')}</span> und für die Hedge-Firma „${escapeHtml(String(plan.slaveFirm || '—'))}" ist kein Symbol in den Einstellungen hinterlegt — auf der Copier-Karte von Hand ergänzen.`)
         _pfSet('m5term', 'warn', 'Übersprungen — Symbol-Mapping unvollständig.')
         hardFail = true
       } else {
@@ -20476,7 +20512,7 @@
         // cs 20 → zwanzigfacher Hedge, siehe copier.py plan_actions).
         // Jetzt gilt, was hier steht: der Copier nimmt die Lots so, wie sie
         // aus diesem Verhältnis fallen.
-        _pfSet('m5push', 'ok', `<span class="mono">×${mult.toFixed(3)}</span> gepusht · ${mapOk} — Slave-Lots je Master-Lot, der Copier rechnet nicht nach.`)
+        _pfSet('m5push', 'ok', `${multTxt} gepusht · ${mapOk} — der Copier legt die Kontraktgröße live drauf und landet bei den Lots aus dem Popup.`)
       }
     }
 
@@ -21283,7 +21319,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.217'
+  const OS_TAB_BUILD = '2026-08-31.218'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22690,11 +22726,22 @@
     return p ? p.ppl : null
   }
 
+  /* Punktwert der Master-Firma ($ je Punkt und Lot/Kontrakt) — EINE Quelle fuer
+   * beide Verwendungen (31.08.2026): das Plan-Popup rechnet damit den
+   * Multiplikator, und der Trade-Start-Check rechnet ihn damit wieder heraus,
+   * bevor er in die Copier-Config geht. Standen die beiden getrennt im Code,
+   * waere ein Preset-Wechsel an einer Stelle stillschweigend an der anderen
+   * vorbeigelaufen — und das Ergebnis waere ein falsch grosser Hedge. */
+  function tpMasterPpl(firm){
+    const p = FIRM_PRESETS[firmToPreset(firm)] || FIRM_PRESETS.projectx
+    return tpNqGetMasterPpl(firm) ?? p.ppl
+  }
+  window.tpMasterPpl = tpMasterPpl
+
   function tpCalcMultiplier(masterFirm, slaveFirm, masterRisk, masterQty, slaveRisk){
-    const m = FIRM_PRESETS[firmToPreset(masterFirm)] || FIRM_PRESETS.projectx
     const s = FIRM_PRESETS[firmToPreset(slaveFirm)]  || FIRM_PRESETS.projectx
     return tpMultiplierAusRisiko(masterRisk, masterQty, slaveRisk,
-      tpNqGetMasterPpl(masterFirm) ?? m.ppl,
+      tpMasterPpl(masterFirm),
       tpNqGetSlavePpl(slaveFirm)  ?? s.ppl)
   }
 
