@@ -21244,7 +21244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.212'
+  const OS_TAB_BUILD = '2026-08-31.213'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22296,8 +22296,15 @@
       if(previousValue && filtered.some(a => String(a.id) === String(previousValue))){
         sel.value = previousValue
       }
-      // MT5-Route: Slave ist fix der Hedge dieses PCs — immer vorauswählen
-      if(role === 'slave' && _tpRoute === 'mt5' && _tpMt5HedgeAccId
+      // Fixer Hedge: Slave ist immer der Hedge dieses PCs — vorauswählen.
+      // Gilt fuer Echo UND ORBIT (31.08.2026): bis .212 stand hier nur 'mt5',
+      // auf der Orbit-Route blieb das Feld deshalb dauerhaft auf "— wählen —"
+      // und der Multiplier auf "Master und Slave wählen". Das sah nach einem
+      // langsamen Ladevorgang aus (Finn: "dauert immer, bis der Slave wirklich
+      // fest ausgewählt wird") — tatsaechlich passierte es nie, er hat jedes
+      // Mal selbst geklickt. Beide Routen teilen denselben Hedge, die
+      // Zeile daneben sperrt das Feld ja bereits fuer beide.
+      if(role === 'slave' && (_tpRoute === 'mt5' || _tpRoute === 'tvplus') && _tpMt5HedgeAccId
          && filtered.some(a => String(a.id) === String(_tpMt5HedgeAccId))){
         sel.value = String(_tpMt5HedgeAccId)
       }
