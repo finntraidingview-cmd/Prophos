@@ -21244,7 +21244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.213'
+  const OS_TAB_BUILD = '2026-08-31.214'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -23164,7 +23164,7 @@
       // wandert beim Speichern direkt in die Orbit-Copier-Config. Vorher musste
       // man ihn dort von Hand nachtragen — zwei Zahlen fuer dieselbe Sache, und
       // eine davon veraltet stillschweigend.
-      if(_tpRoute === 'tvplus') await tpOrbitMultPush(multiplier)
+      if(_tpRoute === 'tvplus') await tpOrbitMultPush(mult)
       closeTradePlanModal()
       if(startAfter && savedPlanId){
         // MT5-Weg (15.08.2026): „Weiter" führt erst in den Order-Bot-Schritt —
