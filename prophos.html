@@ -20966,6 +20966,31 @@
   let _tpOrderDir = null
   let _tpOrderOrbit = false    // Orbit-Variante des Popups (28.08.2026, Etappe 3 Schritt 1)
 
+  /* Aktueller Front-Monat der CME-Quartalskontrakte als TradingView-Code
+   * ('U6' = September 2026). Gerechnet statt notiert: ein fest eingetragenes
+   * „U6" wäre nach dem Verfall im September stillschweigend falsch, und ein
+   * falsches Symbol ist auf dieser Route kein Schönheitsfehler — es wäre der
+   * Trade auf dem falschen Kontrakt.
+   * Verfall ≈ 3. Freitag des Kontraktmonats; gesucht wird der erste
+   * Quartalsmonat (H/M/U/Z), dessen Verfall noch vor uns liegt. */
+  function tpFuturesFrontcode(jetzt){
+    const d = jetzt || new Date()
+    const MON = { 3:'H', 6:'M', 9:'U', 12:'Z' }
+    const dritterFreitag = (jahr, monat) => {
+      const erster = new Date(Date.UTC(jahr, monat - 1, 1))
+      const bisFreitag = (5 - erster.getUTCDay() + 7) % 7     // 5 = Freitag
+      return new Date(Date.UTC(jahr, monat - 1, 1 + bisFreitag + 14))
+    }
+    for(let i = 0; i < 13; i++){
+      const roh = d.getUTCMonth() + i
+      const jahr = d.getUTCFullYear() + Math.floor(roh / 12)
+      const monat = (roh % 12) + 1
+      if(!MON[monat]) continue
+      if(dritterFreitag(jahr, monat) > d) return MON[monat] + (jahr % 10)
+    }
+    return ''
+  }
+
   function tpOrderDirSet(dir){
     _tpOrderDir = dir
     const b = document.getElementById('tp-order-buy')
@@ -21021,7 +21046,18 @@
     // Feld leer und der Trade-Precheck wirft den Fehler.
     const fromSettings = (typeof dupSymbolsForFirm === 'function')
       ? (dupSymbolsForFirm(plan.masterFirm) || []) : []
-    symEl.value = plan.masterSymbol || (fromSettings.length ? fromSettings[0] : '')
+    // ORBIT: das Symbol folgt dem Instrument-Schalter aus Popup 1 (31.08.2026,
+    // Finns Ansage: „wenn ich hier schon NQ nehm, soll im zweiten Popup als
+    // Master-Symbol auch schon NQ drin sein"). Auf dieser Route führt das
+    // Symbol nach TradingView, nicht zu Duplikum — die Firmen-Einstellungen
+    // (NDX100/NAS100) wären hier schlicht das falsche Vokabular.
+    // Der Kontraktcode wird GERECHNET, nicht eingetragen: heute NQU6, nach dem
+    // September-Verfall von selbst NQZ6. Ein hart notiertes „U6" wäre im
+    // Dezember stillschweigend falsch.
+    const orbitSym = _tpOrderOrbit
+      ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()
+      : ''
+    symEl.value = plan.masterSymbol || orbitSym || (fromSettings.length ? fromSettings[0] : '')
     symEl.readOnly = false   // war bis 30.08.2026 gesperrt, sobald Settings ein Symbol hatten
     // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
     // läuft bei der Master-Firma schon ein Trade der EINGELOGGTEN ID (Duplikium
@@ -21208,7 +21244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.205'
+  const OS_TAB_BUILD = '2026-08-31.206'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.1
+// @version      0.3.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -253,7 +253,39 @@
     return out;
   }
 
-  let dumpAn = false;   // vom Server gesetzt (Antwort auf /bedienfeld)
+  let dumpAn = false;   // vom Server gesetzt (Antwort auf /bedienfeld) -> VOLLER Dump
+
+  /* Kompakt-Dump, IMMER dabei (0.3.2, 31.08.2026). Vorher gab es den Dump nur
+   * auf Anforderung: Server setzt ein Flag, das Userscript liefert beim
+   * UEBERNAECHSTEN Tick. Genau daran ist Finn zweimal gescheitert -- ist der
+   * TradingView-Tab verdeckt, drosselt Chrome auf einen Lauf pro Minute, und
+   * der Hin- und Rueckweg dauert dann Minuten statt Sekunden. Jetzt liegt der
+   * Dump immer schon beim Server, auch wenn der Tab seit einer Weile
+   * eingefroren ist -- ein Abruf genuegt, ohne Timing und ohne Tabwechsel.
+   * Begrenzt auf die zwei Zonen, um die es geht: obere Werkzeugleiste
+   * (Symbol-Suche) und rechte Spalte (Konto + Order-Panel). */
+  function dumpKompakt() {
+    const out = [];
+    const grenzeX = window.innerWidth * 0.6;
+    let els;
+    try {
+      els = [...document.querySelectorAll(
+        'button,[role="button"],[role="option"],[role="tab"],input,select,[data-name]')];
+    } catch (_) { return out; }
+    for (const e of els) {
+      if (out.length >= 90) break;
+      if (!sichtbar(e)) continue;
+      const r = e.getBoundingClientRect();
+      if (!(r.top < 70 || r.left > grenzeX)) continue;
+      const t = txt(e).slice(0, 45);
+      const dn = e.getAttribute('data-name') || '';
+      const al = e.getAttribute('aria-label') || '';
+      if (!t && !dn && !al && e.tagName !== 'INPUT') continue;
+      out.push({ tag: e.tagName.toLowerCase(), dn, al, rolle: e.getAttribute('role') || '',
+                 text: t, wert: wert(e).slice(0, 24), rect: rectOf(e) });
+    }
+    return out;
+  }
 
   function liesBedienfeld() {
     const ticketTreffer = suche(SIG_TICKET);
@@ -319,7 +351,8 @@
         sl_einheit: ticketEl ? suche(SIG_SL_EINHEIT, ticketEl) : null,
         senden: ticketEl ? suche(SIG_TICKET_SENDEN, ticketEl) : null,
       },
-      dump: dumpAn ? dumpKandidaten() : null,
+      dump: dumpAn ? dumpKandidaten() : null,   // voll, nur auf Anforderung
+      panel: dumpKompakt(),                     // Werkzeugleiste + rechte Spalte, immer
     };
   }
 
