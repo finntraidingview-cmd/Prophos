@@ -692,6 +692,27 @@ def main():
         and not order_bot.ist_schliessen_knopf("Ändern #596061571 buy 1 NAS100 sl: 29349.04 tp: 29570.71", 596061571)
         and not order_bot.ist_schliessen_knopf("Abbrechen", 596061571)
         and not order_bot.ist_schliessen_knopf("", 596061571))
+    # Ein-Klick-Haftungsausschluss (01.09.2026): der EINE fremde Dialog, den
+    # der Bot bestaetigen darf — entsprechend eng muss die Signatur sein.
+    chk("CLOSE: Zustimmen-Knopf des Ein-Klick-Haftungsausschlusses erkannt (de/en)",
+        order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschäftsbedingungen")
+        and order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die allgemeinen Geschaeftsbedingungen")
+        and order_bot.ist_einklick_akzeptieren_knopf("I accept the terms and conditions")
+        and order_bot.ist_einklick_akzeptieren_knopf("I agree to the Terms and Conditions"))
+    chk("CLOSE: Abbrechen/Ablehnen und halbe Treffer sind NIE Zustimmung",
+        not order_bot.ist_einklick_akzeptieren_knopf("Abbrechen")
+        and not order_bot.ist_einklick_akzeptieren_knopf("Cancel")
+        and not order_bot.ist_einklick_akzeptieren_knopf("Ich akzeptiere die Bedingungen NICHT")
+        and not order_bot.ist_einklick_akzeptieren_knopf("I do not accept the terms")
+        and not order_bot.ist_einklick_akzeptieren_knopf("Akzeptieren")
+        and not order_bot.ist_einklick_akzeptieren_knopf("Geschäftsbedingungen")
+        and not order_bot.ist_einklick_akzeptieren_knopf("Schließen #596061571 buy 1.20 NAS100 zum Marktpreis")
+        and not order_bot.ist_einklick_akzeptieren_knopf(""))
+    chk("CLOSE: Haftungs-Fenster am Titel erkannt, MT5-Hauptfenster nie",
+        order_bot.ist_einklick_dialog("Ein-Klick-Handel")
+        and order_bot.ist_einklick_dialog("One Click Trading")
+        and not order_bot.ist_einklick_dialog("26645308 - FivePercentOnline-Real: Demokonto - Hedge")
+        and not order_bot.ist_einklick_dialog(""))
     f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 596061571, "symbol": "NAS100"})
     chk("CLOSE: Befehl mit Ticket+Symbol → gueltig (ohne Richtung/Lots/SL/TP)", f == [])
     f = order_bot.pruefe_befehl({"aktion": "close", "ticket": 0, "symbol": ""})

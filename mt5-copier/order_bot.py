@@ -235,6 +235,39 @@ def ist_schliessen_knopf(text, ticket):
     return "schlie" in t or "close" in t
 
 
+def ist_einklick_dialog(titel):
+    """Der Haftungsausschluss, den MT5 vor dem ERSTEN Ein-Klick-Handel eines
+    Terminals dazwischenschiebt (Finn 01.09.2026: "ich habe grad per 'Order
+    schliessen' Puls die Aufgabe gegeben zu schliessen, aber hier kam dann die
+    Meldung"). Er verschluckt den Close: geklickt wurde, passiert ist nichts.
+    Erkennung ueber den Fenstertitel — ergaenzend zur Knopf-Signatur, die die
+    eigentliche Zustimmung traegt."""
+    t = (titel or "").strip().lower()
+    return ("ein-klick" in t or "ein klick" in t or "einklick" in t
+            or "one click" in t or "one-click" in t)
+
+
+def ist_einklick_akzeptieren_knopf(text):
+    """Der Zustimmen-Knopf dieses Haftungsausschlusses ('Ich akzeptiere die
+    allgemeinen Geschaeftsbedingungen' / 'I accept the terms and conditions').
+    Positiv-Signatur aus BEIDEN Haelften — Zustimmung UND Bedingungen —, damit
+    kein beliebiger Knopf mit 'akzeptieren' im Text getroffen wird; Abbrechen
+    und jede Ablehnung sind hart ausgeschlossen. Reine Textlogik, damit der
+    Mac-Selbsttest sie abdeckt."""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    for verboten in ("abbre", "cancel", "nicht", "ablehn", "decline",
+                     "reject", "disagree", "do not", "don't"):
+        if verboten in t:
+            return False
+    zustimmung = any(k in t for k in ("akzeptier", "zustimm", "einverstanden",
+                                      "accept", "agree"))
+    bedingungen = any(k in t for k in ("bedingung", "geschäft", "geschaeft",
+                                       "terms", "conditions"))
+    return zustimmung and bedingungen
+
+
 # Fensterklassen der Browser (28.08.2026): alle Chromium-Ableger (Chrome, Edge,
 # Brave — auch die als App installierte PWA-Huelle) teilen sich eine Klasse,
 # dazu Firefox.
@@ -2097,6 +2130,98 @@ def _finde_close_dialog(hauptfenster, ticket):
     return None, None
 
 
+def _einklick_haftung_annehmen(hauptfenster, trail):
+    """Den Ein-Klick-Haftungsausschluss durch ZUSTIMMEN wegbekommen (Finns
+    Auftrag 01.09.2026: "sollte diese Meldung kommen, er okay drueckt und dann
+    neu aufs x drueckt").
+
+    Das ist die EINZIGE Stelle, an der der Bot einen fremden Dialog bestaetigt
+    statt ihn per Abbrechen/ESC wegzuraeumen (_fremde_dialoge_schliessen).
+    Erlaubt ist sie, weil dieser Dialog NICHTS ausloest: er schaltet nur den
+    Ein-Klick-Modus frei, der Close selbst braucht danach ohnehin einen neuen
+    Klick. Getroffen wird ueber die eigene Knopf-Signatur, nie ueber Position
+    oder Reihenfolge im Dialog.
+
+    Erkannt wird aus ZWEI Haelften: Fenstertitel ('Ein-Klick-Handel' / 'One
+    Click Trading') UND Knopfbeschriftung. Andere Zustimmungs-Dialoge von MT5
+    (Broker-AGB beim Login, Algo-Handel) sollen NICHT mitbestaetigt werden —
+    die traegt der Bot nichts an. Einzige Lockerung: liefert UIA gar keinen
+    Titel, entscheidet der Knopf allein, sonst waere ein leerer Titel ein
+    stiller Totalausfall.
+
+    Beweis wie ueberall: angenommen ist er erst, wenn das Fenster WEG ist.
+    Rueckgabe: 'angenommen' | 'gescheitert' | 'keiner'."""
+    from pywinauto import Desktop
+    try:
+        pid = hauptfenster.element_info.process_id
+    except Exception:
+        return "keiner"
+    dlg = knopf = None
+    try:
+        for d in Desktop(backend="uia").windows():
+            try:
+                if d.element_info.process_id != pid or not d.is_visible() \
+                        or d.element_info.class_name == MT5_KLASSE:
+                    continue
+                titel = (d.window_text() or "").strip()
+                if titel and not ist_einklick_dialog(titel):
+                    continue
+                for b in d.descendants(control_type="Button"):
+                    if ist_einklick_akzeptieren_knopf(b.window_text()):
+                        dlg, knopf = d, b
+                        break
+            except Exception:
+                continue
+            if knopf is not None:
+                break
+    except Exception:
+        return "keiner"
+    if knopf is None:
+        return "keiner"
+    try:
+        trail.append(f"Ein-Klick-Haftungsausschluss offen "
+                     f"('{(dlg.window_text() or '')[:32]}')")
+    except Exception:
+        pass
+
+    def _zu():
+        try:
+            return not dlg.is_visible()
+        except Exception:
+            return True   # Fenster nicht mehr ansprechbar = weg
+
+    def _weg_leertaste():
+        knopf.set_focus()
+        _warte(0.1, 0.15)
+        knopf.type_keys("{SPACE}", set_foreground=False)
+
+    def _weg_sendinput():
+        r = knopf.rectangle()
+        _maus_fahren(r.mid_point().x, r.mid_point().y, schritte=6)
+        if not _klick_absolut(r.mid_point().x, r.mid_point().y):
+            raise RuntimeError("SendInput abgelehnt")
+
+    # Dieselbe Kaskade wie beim Schliessen-/Aendern-Knopf (.52/.64): echte
+    # Eingabe zuerst, nach jedem Weg lesend pruefen — nie zwei Wege blind
+    # hintereinander.
+    for wegname, tu in (("Fokus+Leertaste", _weg_leertaste),
+                        ("SendInput-Klick", _weg_sendinput),
+                        (".click()", lambda: knopf.click()),
+                        ("click_input", lambda: knopf.click_input())):
+        try:
+            tu()
+        except Exception:
+            continue
+        ende = time.time() + 2.0
+        while time.time() < ende:
+            _warte(0.2, 0.2)
+            if _zu():
+                trail.append(f"Haftungsausschluss angenommen ({wegname})")
+                return "angenommen"
+    trail.append("Haftungsausschluss liess sich nicht annehmen")
+    return "gescheitert"
+
+
 def _fremde_dialoge_schliessen(hauptfenster):
     """Versehentlich geoeffnete Fenster (z.B. EA-Eigenschaften) wieder zu —
     IMMER ueber Abbrechen/ESC, NIE ueber OK (18.08.2026: der .54-Doppelklick
@@ -3037,13 +3162,19 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
 
     Nach dem ERSTEN erfolgreichen Menuepunkt-Klick wird NIE weitergescannt
     (die Schliessung kann da schon unterwegs sein) — ein Versuch pro Lauf.
-    Rueckgabe: 'zu' | 'knopf' | 'ohne_wirkung' | 'kein_treffer' | 'pause'."""
+    Rueckgabe: 'zu' | 'knopf' | 'ohne_wirkung' | 'kein_treffer' | 'pause' |
+    'haftung' (Ein-Klick-Haftungsausschluss stand im Weg und liess sich nicht
+    annehmen)."""
     try:
         hr = w.rectangle()
         maus_grenze = hr.top + (hr.bottom - hr.top) // 2
     except Exception:
         return "kein_treffer"
     gx = hr.left + int((hr.right - hr.left) * 0.4)
+    # Haftungsausschluss ZUERST, dann erst die Abbrechen/ESC-Runde: ein Rest
+    # aus einem frueheren Lauf soll angenommen werden, nicht abgebrochen —
+    # sonst steht er beim naechsten Close-Klick sofort wieder da.
+    _einklick_haftung_annehmen(w, trail)
     _fremde_dialoge_schliessen(w)
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
@@ -3074,18 +3205,26 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             continue
         punkte.append((f"-{off}px", gx, y))
 
+    def _punkt_klicken(px_, py_):
+        """Finns Handgriff auf EINEM Punkt: Zeile markieren -> Rechtsklick ->
+        nur den LESBAREN 'Position schliessen' klicken. Als eigene Funktion,
+        weil der Nachklick nach dem Haftungsausschluss exakt dasselbe tun muss
+        (01.09.2026) — zwei Kopien derselben Klickfolge waeren genau die Art
+        Stelle, an der spaeter nur eine von beiden gepflegt wird."""
+        _maus_fahren(px_, py_, schritte=3)
+        _klick_absolut(px_, py_)          # Finns Schritt 1: Zeile markieren
+        _warte(0.15, 0.2)
+        if not _klick_absolut(px_, py_, taste="rechts"):
+            return "kein_menue"
+        _warte(0.25, 0.3)
+        return _kontextmenue_close_klicken(timeout=0.8)
+
     grau = 0
     for pname, px_, py_ in punkte:
         if is_paused():
             trail.append("⏸ Echo pausiert — Close-Scan abgebrochen")
             return "pause"
-        _maus_fahren(px_, py_, schritte=3)
-        _klick_absolut(px_, py_)          # Finns Schritt 1: Zeile markieren
-        _warte(0.15, 0.2)
-        if not _klick_absolut(px_, py_, taste="rechts"):
-            continue
-        _warte(0.25, 0.3)
-        st_menue = _kontextmenue_close_klicken(timeout=0.8)
+        st_menue = _punkt_klicken(px_, py_)
         if st_menue != "geklickt":
             # Punkt lag neben der Zeile (Menue da, Eintrag ausgegraut) oder
             # gar kein Menue — Chart/Marktuebersicht haben den Eintrag nicht.
@@ -3108,6 +3247,11 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             except Exception:
                 pass
         dlg = knopf = None
+        # Der Haftungsausschluss wird pro Lauf genau EINMAL behandelt: MT5
+        # zeigt ihn nur beim allerersten Ein-Klick-Handel eines Terminals, und
+        # ein Nachklick, der sich wiederholen darf, waere ein blinder
+        # Mehrfach-Close.
+        haftung_offen = True
         ende = time.time() + 3.0
         while time.time() < ende:
             if position_weg():
@@ -3116,6 +3260,29 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
             dlg, knopf = _finde_close_dialog(w, ticket)
             if knopf is not None:
                 break
+            if haftung_offen:
+                st_haft = _einklick_haftung_annehmen(w, trail)
+                if st_haft != "keiner":
+                    haftung_offen = False
+                if st_haft == "gescheitert":
+                    return "haftung"
+                if st_haft == "angenommen":
+                    # Zustimmung hat den Close verschluckt — derselbe Punkt
+                    # noch einmal. Zulaessig, weil dieser Punkt sich eben
+                    # durch den lesbaren Menuepunkt als Positions-Zeile
+                    # ausgewiesen hat und der Aufrufer lesend geprueft hat,
+                    # dass GENAU EINE Position offen ist.
+                    if is_paused():
+                        trail.append("⏸ Echo pausiert — kein zweiter Close-Klick")
+                        return "pause"
+                    if _punkt_klicken(px_, py_) != "geklickt":
+                        trail.append("Nach der Zustimmung kam der Menuepunkt "
+                                     "nicht mehr — nichts nachgeklickt")
+                        return "ohne_wirkung"
+                    trail.append(f"'Position schliessen' nach der Zustimmung "
+                                 f"erneut geklickt ({pname})")
+                    ende = time.time() + 3.0
+                    continue
             _warte(0.25, 0.25)
         if knopf is None:
             return "ohne_wirkung"
@@ -3287,6 +3454,17 @@ def run_close(cfg_path, cmd):
         return {"ok": False, "retry_ok": True,
                 "msg": "Echo ist pausiert — nichts geklickt. Fortsetzen, dann erneut. "
                        "[" + _spur(trail) + "]", "trail": _spur(trail)}
+    if ausgang == "haftung":
+        # Der Dialog wird trotzdem weggeraeumt (Abbrechen/ESC): ein stehendes
+        # modales Fenster blockiert das Terminal, an dem das Lesen haengt.
+        _fremde_dialoge_schliessen(w)
+        return {"ok": False, "retry_ok": True,
+                "msg": "MT5 wollte vor dem Schliessen erst den Haftungsausschluss zum "
+                       "Ein-Klick-Handel bestaetigt haben, und der Zustimmen-Knopf liess "
+                       "sich nicht druecken — nichts geschlossen. Einmal im Terminal von "
+                       "Hand eine Position per Rechtsklick schliessen und dabei zustimmen, "
+                       "danach fragt MT5 nie wieder. [" + _spur(trail) + "]",
+                "trail": _spur(trail)}
     if ausgang == "kein_treffer":
         _fremde_dialoge_schliessen(w)
         return {"ok": False, "retry_ok": True,
