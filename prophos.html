@@ -21244,7 +21244,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.208'
+  const OS_TAB_BUILD = '2026-08-31.209'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28655,6 +28655,23 @@
   // nicht alle 5s eine rote Console-Zeile produzieren — 45s → verdoppeln → max 10min;
   // Reset bei Erfolg und beim Betreten der View, da schaut ja jemand hin).
   const epLokal = { stand: null, ab: 0, backoffMs: 45000, naechster: 0 }
+
+  /* Die Orbit-Copier-Instanz dieses PCs (31.08.2026, Finns Wunsch: den
+   * Multiplier hier einstellen statt im Copier-Panel). Erkannt wie im Backend:
+   * eine Config OHNE Master-Terminal, aber MIT Snapshot-Datei — der Master ist
+   * hier der TV-Verbinder, kein MT5. Nur am lokalen PC sichtbar; aus der Ferne
+   * gibt es die Panel-API nicht. */
+  let epOrbitInst = null
+  async function epOrbitInstHolen(){
+    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL) return null
+    if(typeof window.mtcApi !== 'function') return null
+    try{
+      const d = await window.mtcApi('instances')
+      epOrbitInst = ((d && d.instances) || []).find(i =>
+        !String(i.master_terminal_path || '').trim() && i.snapshot_file) || null
+    }catch(_){ epOrbitInst = null }
+    return epOrbitInst
+  }
   async function epLokalHolen(){
     if(Date.now() < epLokal.naechster) return epLokal.stand
     try{
@@ -28788,9 +28805,32 @@
       <div style="margin-top:8px">
         ${pos.length ? pos.map(epPosHtml).join('') : `<div style="padding:9px 0;border-top:1px solid var(--border);font-size:12.5px;color:var(--sub)">Keine offene Position${an ? '' : ' (Stand vom Pausieren)'}</div>`}
       </div>
+      ${istLokal && epOrbitInst ? epMultHtml(epOrbitInst) : ''}
       <div style="margin-top:6px;font-size:11.5px;color:var(--sub-2)">
         ${datenAlt !== null ? `Reader-Daten ${epAlter(datenAlt)}` : 'noch keine Reader-Daten'} · Push ${epAlter(pushAlt)}
       </div>
+    </div>`
+  }
+
+  /* Multiplier direkt auf der Orbit-Karte. Danebengeschrieben steht, was die
+   * Zahl KONKRET bedeutet (1 MNQ → x Lots), weil genau daran der teure Fehler
+   * hängt: ein zum Testen kleingestellter Multiplier sieht später völlig normal
+   * aus und hedgt trotzdem praktisch nichts. Die Umrechnung ist dieselbe wie in
+   * der Copier-Config: Kontrakte × Punktwert × Multiplier. */
+  function epMultHtml(inst){
+    const m = Number(inst.multiplier)
+    const mnq = isFinite(m) ? (m * 2) : null
+    const nq  = isFinite(m) ? (m * 20) : null
+    const winzig = isFinite(m) && m > 0 && m < 0.05
+    return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--sub)">Multiplier</span>
+      <input id="ep-mult" type="number" step="0.001" min="0" value="${epEsc(String(inst.multiplier ?? ''))}"
+        style="width:96px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--ink);font-family:var(--mono);font-size:12.5px">
+      <button class="btn btn-ghost" data-ep-mult-save="${epEsc(inst.file)}" style="padding:5px 11px;font-size:12px">Speichern</button>
+      <span style="font-size:11.5px;color:${winzig ? 'var(--warn)' : 'var(--sub-2)'}">
+        ${mnq === null ? '' : `1 MNQ → ${mnq.toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots · 1 NQ → ${nq.toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots`}
+        ${winzig ? ' — Test-Größe, praktisch ungehedgt' : ''}
+      </span>
     </div>`
   }
 
@@ -28800,6 +28840,7 @@
     if(_epRenderBusy) return
     _epRenderBusy = true
     try{
+      await epOrbitInstHolen()
       // Cloud: alle Zeilen der letzten 10min (aeltere sind keine Anzeige wert)
       let rows = []
       try{
@@ -28841,10 +28882,30 @@
   document.querySelectorAll('#dashboard-view .sb-link[data-view="echoplus"]').forEach(b =>
     b.addEventListener('click', () => { epLokal.naechster = 0; setTimeout(() => epRenderTick(true), 50) }))
 
+  async function epMultSpeichern(file, btn){
+    const el = $ep('ep-mult'); if(!el || !file) return
+    const wert = Number(el.value)
+    if(!isFinite(wert) || wert <= 0){ alert('Multiplier muss größer als 0 sein.'); return }
+    btn.disabled = true; const alt = btn.textContent; btn.textContent = 'speichert…'
+    try{
+      // Der Copier liest den Multiplier live nach (~2 s) — kein Neustart nötig.
+      const r = await window.mtcApi(`save?file=${encodeURIComponent(file)}`, { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(wert) }) })
+      if(!(r && r.ok)) throw new Error((r && (r.msg || r.error)) || 'keine Antwort')
+      if(typeof atToast === 'function')
+        atToast(`Multiplier ${wert} gespeichert — 1 MNQ ergibt ${(wert * 2).toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots. Greift in ~2 s.`, 'start')
+      setTimeout(() => epRenderTick(true), 2200)
+    }catch(err){
+      alert('Multiplier nicht gespeichert: ' + (err && err.message || err))
+    }finally{ btn.disabled = false; btn.textContent = alt }
+  }
+
   // Schalter-Klicks — dedizierte Verdrahtung auf dem Orbit-Grid (Projektregel:
   // keine Sammel-Handler ueber fremde Bereiche)
   const epGrid = $ep('ep-grid')
   if(epGrid) epGrid.addEventListener('click', e => {
+    const save = e.target.closest && e.target.closest('[data-ep-mult-save]')
+    if(save) return epMultSpeichern(save.getAttribute('data-ep-mult-save'), save)
     const btn = e.target.closest && e.target.closest('[data-ep-schalter]')
     if(!btn) return
     btn.disabled = true
