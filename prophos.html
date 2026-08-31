@@ -6741,42 +6741,48 @@
         <div id="adm-pane-plan" hidden>
           <div class="adm-toolbar">
             <select id="plan-person" class="adm-f" style="flex:1;min-width:150px"><option value="">Person…</option></select>
-            <input id="plan-firma" placeholder="Firma" title="Apex, Tradeify, Topstep …" style="width:120px">
-            <input id="plan-bez" placeholder="Was" title="Funded, neuer 100k, next 100k …" style="flex:1;min-width:130px">
-            <input id="plan-anzahl" type="number" inputmode="numeric" min="1" step="1" value="1" title="Anzahl" style="width:64px">
-            <input id="plan-kosten" type="number" inputmode="decimal" min="0" step="50" placeholder="$ / Stück" title="Preis pro Stück in USD" style="width:104px">
-            <input id="plan-zahlweg" placeholder="Zahlweg" title="Revolut, Karte …" style="width:110px">
-            <button class="btn btn-primary" id="plan-add" style="padding:8px 14px">Eintragen</button>
+            <input id="plan-firma" placeholder="Firma" title="Tradeify, Apex, Topstep …" style="width:130px">
+            <select id="plan-typ" class="adm-f" style="width:130px" title="Welcher Zustand soll dort stehen">
+              <option value="funded" selected>Funded</option>
+              <option value="phase2">Phase 2</option>
+              <option value="phase1">Phase 1</option>
+              <option value="challenge">Challenge</option>
+              <option value="live">Live</option>
+            </select>
+            <input id="plan-groesse" placeholder="Größe" title="z.B. 150k — leer lassen, wenn die Größe egal ist" style="width:92px">
+            <input id="plan-anzahl" type="number" inputmode="numeric" min="1" step="1" value="1" title="Wie viele davon sollen dort stehen" style="width:64px">
+            <input id="plan-gewinn" type="number" inputmode="decimal" min="0" step="100" placeholder="$ Plus" title="Nur als Notiz — Prophos kennt die Salden von Tradeify/Apex nicht, kann das also nicht selbst prüfen" style="width:96px">
+            <button class="btn btn-primary" id="plan-add" style="padding:8px 14px">Ziel setzen</button>
             <button class="btn btn-ghost" id="plan-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
           </div>
 
           <div class="kpis">
             <div class="kpi">
-              <div class="kpi-label">Offen geplant</div>
+              <div class="kpi-label">Offene Ziele</div>
               <div class="kpi-value" id="plan-k-offen">–</div>
-              <div class="kpi-delta delta-neutral" id="plan-k-offen-sub">–</div>
+              <div class="kpi-delta delta-neutral" id="plan-k-offen-sub">noch nicht erreicht</div>
             </div>
             <div class="kpi">
-              <div class="kpi-label">Summe offen</div>
-              <div class="kpi-value" id="plan-k-sum">–</div>
-              <div class="kpi-delta delta-neutral">was der Plan kosten würde</div>
+              <div class="kpi-label">Noch zu holen</div>
+              <div class="kpi-value" id="plan-k-fehlt">–</div>
+              <div class="kpi-delta delta-neutral">Accounts bis alle Ziele stehen</div>
             </div>
             <div class="kpi">
-              <div class="kpi-label">Schon gekauft</div>
-              <div class="kpi-value" id="plan-k-gek">–</div>
-              <div class="kpi-delta delta-neutral" id="plan-k-gek-sub">aus diesem Plan</div>
+              <div class="kpi-label">Erreicht</div>
+              <div class="kpi-value" id="plan-k-fertig">–</div>
+              <div class="kpi-delta delta-neutral" id="plan-k-fertig-sub">von allen Zielen</div>
             </div>
             <div class="kpi">
               <div class="kpi-label">Personen</div>
               <div class="kpi-value" id="plan-k-pers">–</div>
-              <div class="kpi-delta delta-neutral">mit offenen Posten</div>
+              <div class="kpi-delta delta-neutral">mit offenen Zielen</div>
             </div>
           </div>
 
-          <div style="display:flex;align-items:center;gap:14px;margin:2px 0 10px">
+          <div style="display:flex;align-items:center;gap:14px;margin:2px 0 10px;flex-wrap:wrap">
             <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer">
               <input type="checkbox" id="plan-nur-offen" checked style="width:15px;height:15px">
-              nur offene Posten
+              nur offene Ziele
             </label>
             <span id="plan-msg" style="font-size:12.5px;color:var(--sub)"></span>
           </div>
@@ -9108,25 +9114,40 @@
     }
 
     /* ══ KAUFPLAN (31.08.2026, Finns Wunsch) ═══════════════════════════════
-     * „bau ein feature wo ich als admin so acc planen kann die in zukunft bei
-     * der jeweiligen id gekauft werden sollen — weil aktuell mach ich das immer
-     * in google sheets etc". Ersetzt genau diese Notiz:
-     *     Finn / Apex Funded (1k - revolut) / Tradeify Funded (1.5k)
-     *     pascal / neuer Tradeify funded (1.5k) / next 100k (2x kaufe) (1k)
-     * Deshalb sind Anzahl und Zahlweg eigene Felder — beides stand dort schon
-     * drin und ginge in einem reinen Notizfeld sofort wieder verloren.
+     * Nicht "kauf 3 Accounts", sondern ein ZIELZUSTAND je ID. Finn wörtlich:
+     *   „Ich sage zum Beispiel Pascals ID: so lange Accounts kaufen, bis da
+     *    ein 100k Funded ist … ich weiß ja nicht, wenn ich zwei Accounts
+     *    kaufe, ob ich beide blowe."
+     * Deshalb steht hier keine Stückzahl an Käufen, sondern was am Ende da
+     * stehen soll — und deshalb gibt es AUSDRÜCKLICH keinen Haken zum
+     * Abhaken (Finn: „nicht so abhaken wie bei Google Keep"). Der Ist-Stand
+     * kommt bei jedem Laden aus den echten Accounts; ein Haken wäre eine
+     * zweite Wahrheit daneben, und die beiden würden auseinanderlaufen.
      *
-     * Läuft über app.py (rgApi → /admin/acc-plan), NICHT direkt gegen Supabase
-     * wie die Kasse: die Tabelle hat bewusst keine RLS-Policy, weil hier steht,
-     * was für FREMDE IDs geplant ist und was es kosten darf. Gate ist
-     * ADMIN_EMAILS, dasselbe wie bei den Rechnungen. */
+     * Läuft über app.py (rgApi → /admin/acc-plan): die Tabelle hat bewusst
+     * keine RLS-Policy, weil hier steht, was für FREMDE IDs geplant ist. */
     const planUsd = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
-    let planData = null          // { eintraege, personen }
+    const PLAN_TYP_LBL = { funded:'Funded', phase2:'Phase 2', phase1:'Phase 1', challenge:'Challenge', live:'Live' }
+    let planData = null
     let planGeladen = false
 
     const planEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-    const planSumme = e => (Number(e.anzahl) || 0) * (Number(e.kosten) || 0)
+
+    // „150k" und „150000" sollen beide gehen — Finn denkt in k, die Accounts
+    // heißen so, und eine Eingabe abzulehnen, die er überall sonst benutzt,
+    // wäre reine Schikane.
+    function planGroesseLesen(text){
+      const t = String(text || '').trim().toLowerCase().replace(/\s+/g, '')
+      if(!t) return null
+      const m = t.match(/^(\d+(?:[.,]\d+)?)(k?)$/)
+      if(!m) return NaN
+      const z = parseFloat(m[1].replace(',', '.'))
+      if(!isFinite(z)) return NaN
+      return m[2] === 'k' ? z * 1000 : z
+    }
+    const planGroesseZeigen = g => (g == null) ? 'jede Größe'
+      : (Number(g) >= 1000 ? (Number(g) / 1000) + 'k' : String(Number(g)))
 
     function planSetMsg(text, art){
       const el = $('plan-msg'); if(!el) return
@@ -9148,8 +9169,6 @@
     }
 
     function planOpen(){
-      // Personen-Auswahl einmal füllen, danach nur noch neu laden — die Liste
-      // ändert sich nur, wenn jemand einen Account anlegt.
       if(!planGeladen){ planGeladen = true; planLoad() }
       else planRender()
     }
@@ -9160,7 +9179,6 @@
       const personen = planData.personen || []
       const nameVon = new Map(personen.map(p => [String(p.user_id), p.name]))
 
-      // Personen-Dropdown befüllen (Auswahl beibehalten)
       const sel = $('plan-person')
       if(sel && sel.options.length !== personen.length + 1){   // +1 = Platzhalter
         const vorher = sel.value
@@ -9169,116 +9187,122 @@
         if(vorher) sel.value = vorher
       }
 
-      const alle = planData.eintraege || []
-      const offen = alle.filter(e => e.status === 'geplant')
-      const gekauft = alle.filter(e => e.status === 'gekauft')
-      const sichtbar = nurOffen ? offen : alle
+      const alle = (planData.eintraege || []).filter(z => z.aktiv !== false)
+      const offen = alle.filter(z => !z.erfuellt)
+      const sichtbar = nurOffen ? offen : (planData.eintraege || [])
 
-      $('plan-k-offen').textContent = offen.reduce((a, e) => a + (Number(e.anzahl) || 0), 0)
-      $('plan-k-offen-sub').textContent = `${offen.length} Posten`
-      $('plan-k-sum').textContent = planUsd.format(offen.reduce((a, e) => a + planSumme(e), 0))
-      $('plan-k-gek').textContent = planUsd.format(gekauft.reduce((a, e) => a + planSumme(e), 0))
-      $('plan-k-gek-sub').textContent = `${gekauft.length} Posten erledigt`
-      $('plan-k-pers').textContent = new Set(offen.map(e => String(e.user_id))).size
+      // „Noch zu holen" ist die Zahl, um die es Finn geht: wie viele Accounts
+      // fehlen noch, bis alle Ziele stehen.
+      const fehlt = offen.reduce((a, z) => a + Math.max(0, (Number(z.ziel_anzahl) || 1) - (Number(z.ist) || 0)), 0)
+      $('plan-k-offen').textContent = offen.length
+      $('plan-k-fehlt').textContent = fehlt
+      $('plan-k-fertig').textContent = alle.length - offen.length
+      $('plan-k-fertig-sub').textContent = `von ${alle.length} aktiven Ziel${alle.length === 1 ? '' : 'en'}`
+      $('plan-k-pers').textContent = new Set(offen.map(z => String(z.user_id))).size
 
       if(!sichtbar.length){
         g.innerHTML = '<div class="adm-empty">' + (nurOffen
-          ? 'Nichts offen geplant. Oben eintragen — oder den Haken wegnehmen, um Erledigtes zu sehen.'
-          : 'Noch nichts geplant.') + '</div>'
+          ? 'Kein offenes Ziel — alles erreicht oder noch nichts gesetzt.'
+          : 'Noch kein Ziel gesetzt.') + '</div>'
         return
       }
 
-      // Gruppieren pro Person, teuerste Gruppe zuerst — die Frage beim
-      // Draufschauen ist „wo liegt das meiste Geld", nicht „wer heißt wie".
+      // Gruppen: die Person mit den meisten fehlenden Accounts zuerst — das ist
+      // die, bei der als Nächstes gekauft wird.
       const gruppen = new Map()
-      for(const e of sichtbar){
-        const k = String(e.user_id)
-        const grp = gruppen.get(k) || { key:k, name: nameVon.get(k) || k.slice(0, 8), zeilen:[], sum:0 }
-        grp.zeilen.push(e)
-        if(e.status === 'geplant') grp.sum += planSumme(e)
+      for(const z of sichtbar){
+        const k = String(z.user_id)
+        const grp = gruppen.get(k) || { key:k, name: nameVon.get(k) || k.slice(0, 8), ziele:[], fehlt:0 }
+        grp.ziele.push(z)
+        if(!z.erfuellt && z.aktiv !== false)
+          grp.fehlt += Math.max(0, (Number(z.ziel_anzahl) || 1) - (Number(z.ist) || 0))
         gruppen.set(k, grp)
       }
-      const liste = [...gruppen.values()].sort((a, b) => b.sum - a.sum)
+      const liste = [...gruppen.values()].sort((a, b) => b.fehlt - a.fehlt)
 
       g.innerHTML = liste.map(grp => `
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head">
             <div>
               <div class="panel-title">${planEsc(grp.name)}</div>
-              <div class="panel-sub">${grp.zeilen.length} Posten${grp.sum > 0 ? ' · offen ' + planUsd.format(grp.sum) : ''}</div>
+              <div class="panel-sub">${grp.fehlt > 0
+                ? `noch <b>${grp.fehlt}</b> Account${grp.fehlt === 1 ? '' : 's'} zu holen`
+                : 'alle Ziele erreicht'}</div>
             </div>
           </div>
-          <div class="table-wrap">
-            <table class="t">
-              <thead><tr>
-                <th>Firma</th><th>Was</th>
-                <th class="adm-num">Anzahl</th><th class="adm-num">$ / Stück</th><th class="adm-num">Summe</th>
-                <th>Zahlweg</th><th>Status</th><th></th>
-              </tr></thead>
-              <tbody>${grp.zeilen.map(e => planZeile(e)).join('')}</tbody>
-            </table>
-          </div>
+          <div style="padding:2px 0">${grp.ziele.map(planZiel).join('')}</div>
         </div>`).join('')
     }
 
-    function planZeile(e){
-      const erledigt = e.status !== 'geplant'
-      const stil = erledigt ? 'opacity:.55' : ''
-      const label = e.status === 'gekauft' ? '✓ gekauft'
-                  : e.status === 'verworfen' ? '✕ verworfen' : 'geplant'
-      return `<tr style="${stil}">
-        <td>${planEsc(e.firma) || '—'}</td>
-        <td>${planEsc(e.bezeichnung) || '—'}</td>
-        <td class="adm-num">${Number(e.anzahl) || 1}×</td>
-        <td class="adm-num">${planUsd.format(Number(e.kosten) || 0)}</td>
-        <td class="adm-num">${planUsd.format(planSumme(e))}</td>
-        <td>${planEsc(e.zahlweg) || '—'}</td>
-        <td style="font-size:12px;color:var(--sub)">${label}</td>
-        <td style="text-align:right;white-space:nowrap">
-          ${erledigt
-            ? `<button class="btn btn-ghost plan-akt" data-plan-status="geplant" data-plan-id="${planEsc(e.id)}" style="padding:4px 9px;font-size:12px">zurück</button>`
-            : `<button class="btn btn-ghost plan-akt" data-plan-status="gekauft" data-plan-id="${planEsc(e.id)}" style="padding:4px 9px;font-size:12px" title="Als gekauft abhaken">✓</button>
-               <button class="btn btn-ghost plan-akt" data-plan-status="verworfen" data-plan-id="${planEsc(e.id)}" style="padding:4px 9px;font-size:12px" title="Verwerfen">✕</button>`}
-          <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(e.id)}" style="padding:4px 9px;font-size:12px" title="Zeile löschen">🗑</button>
-        </td>
-      </tr>`
+    function planZiel(z){
+      const soll = Number(z.ziel_anzahl) || 1
+      const ist = Number(z.ist) || 0
+      const stillgelegt = z.aktiv === false
+      const fertig = !!z.erfuellt
+      const farbe = stillgelegt ? 'var(--sub-2)' : fertig ? 'var(--good)' : 'var(--warn)'
+      const status = stillgelegt ? 'stillgelegt'
+                   : fertig ? '✓ erreicht'
+                   : `noch ${soll - ist} kaufen`
+      // Die Treffer stehen bewusst dabei: der Plan behauptet „erreicht" — dann
+      // muss er auch zeigen, WORAN er das festmacht, sonst ist es nicht prüfbar.
+      const belege = (z.treffer || []).map(t => planEsc(t.name || '—')).join(' · ')
+      return `<div style="display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-top:1px solid var(--border-soft)${stillgelegt ? ';opacity:.55' : ''}">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14.5px;font-weight:600">
+            ${soll}× ${planEsc(PLAN_TYP_LBL[z.ziel_typ] || z.ziel_typ)}
+            ${z.ziel_groesse != null ? planEsc(planGroesseZeigen(z.ziel_groesse)) : ''}
+            bei ${planEsc(z.firma) || '—'}
+          </div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">
+            ${ist} von ${soll} vorhanden${belege ? ' · ' + belege : ''}
+          </div>
+          ${z.gewinn_ziel ? `<div style="font-size:12px;color:var(--sub-2);margin-top:2px">Wunsch: mindestens ${planUsd.format(z.gewinn_ziel)} im Plus — prüft Prophos nicht selbst</div>` : ''}
+          ${z.notiz ? `<div style="font-size:12px;color:var(--sub-2);margin-top:2px">${planEsc(z.notiz)}</div>` : ''}
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-size:12.5px;font-weight:650;color:${farbe}">${status}</div>
+          <div style="margin-top:6px">
+            <button class="btn btn-ghost plan-akt" data-plan-id="${planEsc(z.id)}" data-plan-aktiv="${stillgelegt ? '1' : '0'}" style="padding:4px 9px;font-size:12px" title="${stillgelegt ? 'Wieder aufnehmen' : 'Stilllegen — bleibt sichtbar, zählt nicht mehr'}">${stillgelegt ? '▶' : '⏸'}</button>
+            <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(z.id)}" style="padding:4px 9px;font-size:12px" title="Ziel löschen">🗑</button>
+          </div>
+        </div>
+      </div>`
     }
 
     async function planAdd(){
       const uid = $('plan-person').value
       if(!uid) return planSetMsg('Erst die Person wählen, auf deren ID gekauft wird.', 'err')
       const firma = $('plan-firma').value.trim()
-      const bez = $('plan-bez').value.trim()
-      if(!firma && !bez) return planSetMsg('Firma oder „Was" ausfüllen.', 'err')
+      if(!firma) return planSetMsg('Firma angeben — sie ist der Anker des Abgleichs.', 'err')
+      const gr = planGroesseLesen($('plan-groesse').value)
+      if(Number.isNaN(gr)) return planSetMsg('Größe nicht verstanden — „150k" oder „150000".', 'err')
       const btn = $('plan-add'); btn.disabled = true
       try{
         await rgApi('/admin/acc-plan', { method:'POST', body: JSON.stringify({
-          user_id: uid, firma, bezeichnung: bez,
-          anzahl: Number($('plan-anzahl').value) || 1,
-          kosten: Number($('plan-kosten').value) || 0,
-          zahlweg: $('plan-zahlweg').value.trim() }) })
-        // Nur die Textfelder leeren: Person und Zahlweg bleiben stehen, weil
-        // man typischerweise mehrere Posten für dieselbe ID hintereinander
-        // einträgt — genau so sah die Keep-Notiz auch aus.
-        $('plan-firma').value = ''; $('plan-bez').value = ''
-        $('plan-anzahl').value = '1'; $('plan-kosten').value = ''
+          user_id: uid, firma,
+          ziel_typ: $('plan-typ').value,
+          ziel_groesse: gr,
+          ziel_anzahl: Number($('plan-anzahl').value) || 1,
+          gewinn_ziel: $('plan-gewinn').value === '' ? null : Number($('plan-gewinn').value) }) })
+        // Person und Firma bleiben stehen — man setzt oft mehrere Ziele für
+        // dieselbe ID hintereinander.
+        $('plan-groesse').value = ''; $('plan-anzahl').value = '1'; $('plan-gewinn').value = ''
         await planLoad()
       }catch(e){
-        planSetMsg('Nicht eingetragen: ' + (e && e.message || e), 'err')
+        planSetMsg('Ziel nicht gesetzt: ' + (e && e.message || e), 'err')
       }finally{ btn.disabled = false }
     }
 
-    async function planStatus(id, status){
+    async function planAktiv(id, aktiv){
       try{
-        await rgApi('/admin/acc-plan', { method:'PATCH', body: JSON.stringify({ id, status }) })
+        await rgApi('/admin/acc-plan', { method:'PATCH', body: JSON.stringify({ id, aktiv }) })
         await planLoad()
       }catch(e){ planSetMsg('Nicht geändert: ' + (e && e.message || e), 'err') }
     }
 
     async function planDelete(id){
-      // Löschen ist die einzige Aktion ohne Rückweg — „verworfen" bleibt
-      // sichtbar, gelöscht ist weg. Deshalb hier eine Rückfrage und sonst nirgends.
-      if(!confirm('Diese Zeile ganz löschen?\n\nZum Ausblenden reicht „✕ verworfen" — das bleibt nachvollziehbar.')) return
+      // Rückfrage nur hier: Stilllegen bleibt sichtbar, Löschen ist weg.
+      if(!confirm('Dieses Ziel ganz löschen?\n\nZum Pausieren reicht ⏸ — das bleibt nachvollziehbar.')) return
       try{
         await rgApi('/admin/acc-plan?id=' + encodeURIComponent(id), { method:'DELETE' })
         await planLoad()
@@ -9612,10 +9636,10 @@
       $('plan-add')?.addEventListener('click', planAdd)
       $('plan-refresh')?.addEventListener('click', planLoad)
       $('plan-nur-offen')?.addEventListener('change', planRender)
-      $('plan-bez')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
+      $('plan-groesse')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
       $('plan-groups')?.addEventListener('click', ev => {
         const akt = ev.target.closest('.plan-akt')
-        if(akt) return planStatus(akt.dataset.planId, akt.dataset.planStatus)
+        if(akt) return planAktiv(akt.dataset.planId, akt.dataset.planAktiv === '1')
         const del = ev.target.closest('.plan-del')
         if(del) planDelete(del.dataset.planId)
       })
@@ -21140,7 +21164,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.197'
+  const OS_TAB_BUILD = '2026-08-31.198'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

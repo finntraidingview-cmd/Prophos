@@ -5,6 +5,7 @@ import calendar
 import concurrent.futures
 import base64
 import json
+import re
 import hashlib
 import hmac
 import time
@@ -40,7 +41,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-31.1"
+APP_BUILD = "2026-08-31.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -3802,11 +3803,47 @@ def admin_rechnung_pdf():
 # RLS-Policy, kommt also fuer keinen Client direkt in Frage.
 # ════════════════════════════════════════════════════════════════════════════
 
-ACC_PLAN_STATUS = ("geplant", "gekauft", "verworfen")
-# Nur diese Felder duerfen vom Client kommen. Whitelist statt Durchreichen:
-# ein spaeter zugefuegtes Spaltenfeld (etwa created_by) soll sich nicht
-# ueberschreiben lassen, nur weil es im Body steht.
-ACC_PLAN_FELDER = ("firma", "bezeichnung", "anzahl", "kosten", "zahlweg", "notiz", "status")
+ACC_PLAN_TYPEN = ("challenge", "phase1", "phase2", "funded", "live")
+# Nur diese Felder duerfen vom Client kommen — Whitelist statt Durchreichen.
+ACC_PLAN_FELDER = ("firma", "ziel_typ", "ziel_groesse", "ziel_anzahl",
+                   "gewinn_ziel", "notiz", "aktiv")
+
+_ACC_PLAN_GROESSE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*k", re.I)
+
+
+def acc_plan_groesse(name):
+    """Kontogroesse aus dem Account-NAMEN lesen: '150k Tradeify FTDFY…' -> 150000.
+
+    Warum aus dem Namen und nicht aus accounts.account_size: die Spalte ist bei
+    3 von 432 Accounts gefuellt, der Name traegt die Groesse dagegen bei 382.
+    Wer hier die Spalte nimmt, baut eine Auswertung, die fast immer 'unbekannt'
+    sagt. Erste k-Zahl gewinnt — bei 'bestanden … FTDFYSLX150193761925 150k'
+    steht die Kontonummer davor, die traegt aber kein k."""
+    m = _ACC_PLAN_GROESSE_RE.search(str(name or ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ".")) * 1000
+    except ValueError:
+        return None
+
+
+def acc_plan_passt(acc, ziel):
+    """Zaehlt dieser Account auf dieses Ziel ein? Rein rechnend, damit die Regel
+    an EINER Stelle steht und nicht zwischen Backend und Anzeige auseinanderlaeuft."""
+    if _firm_norm(acc.get("firm")) != _firm_norm(ziel.get("firma")):
+        return False
+    if str(acc.get("account_type") or "") != str(ziel.get("ziel_typ") or ""):
+        return False
+    gr = ziel.get("ziel_groesse")
+    if gr:
+        ist = acc_plan_groesse(acc.get("name"))
+        # Unbekannte Groesse zaehlt NICHT mit: lieber ein Ziel meldet zu wenig
+        # und Finn schaut nach, als dass ein fremder Account es faelschlich
+        # erfuellt und er hoert auf zu kaufen.
+        if ist is None or abs(ist - float(gr)) > 1:
+            return False
+    return True
 
 
 def _acc_plan_body(daten, neu):
@@ -3821,44 +3858,43 @@ def _acc_plan_body(daten, neu):
         if f not in daten:
             continue
         v = daten[f]
-        if f == "anzahl":
+        if f == "ziel_anzahl":
             try:
                 n = int(v)
             except (TypeError, ValueError):
-                return None, "anzahl ist keine Zahl"
+                return None, "Anzahl ist keine Zahl"
             if n < 1:
-                return None, "anzahl muss mindestens 1 sein"
+                return None, "Anzahl muss mindestens 1 sein"
             out[f] = n
-        elif f == "kosten":
+        elif f in ("ziel_groesse", "gewinn_ziel"):
+            if v in (None, ""):
+                out[f] = None
+                continue
             try:
-                k = float(v)
+                z = float(v)
             except (TypeError, ValueError):
-                return None, "kosten ist keine Zahl"
-            if not (k >= 0) or k != k:      # k != k faengt NaN
-                return None, "kosten muss 0 oder groesser sein"
-            out[f] = k
-        elif f == "status":
-            s = str(v or "").strip().lower()
-            if s not in ACC_PLAN_STATUS:
-                return None, f"status muss {' / '.join(ACC_PLAN_STATUS)} sein"
-            out[f] = s
-            # Das Kaufdatum gehoert an den Statuswechsel, nicht an einen
-            # separaten Klick — sonst steht spaeter "gekauft" ohne Datum da.
-            out["gekauft_am"] = datetime.now(timezone.utc).isoformat() if s == "gekauft" else None
+                return None, f"{f} ist keine Zahl"
+            if not (z >= 0) or z != z:
+                return None, f"{f} muss 0 oder groesser sein"
+            out[f] = z
+        elif f == "ziel_typ":
+            t = str(v or "").strip().lower()
+            if t not in ACC_PLAN_TYPEN:
+                return None, "Zielzustand unbekannt"
+            out[f] = t
+        elif f == "aktiv":
+            out[f] = bool(v)
         else:
             out[f] = str(v if v is not None else "").strip()[:200]
-    if neu and not out.get("firma") and not out.get("bezeichnung"):
-        return None, "Firma oder Bezeichnung angeben"
+    if neu and not out.get("firma"):
+        return None, "Firma angeben"
     return out, None
 
 
-def _acc_plan_personen():
+def _acc_plan_personen(accs):
     """[{user_id, name, mail}] — alle Personen, die Accounts besitzen.
-    Genau die kommen als Ziel eines geplanten Kaufs in Frage; ein Login ohne
-    Account waere im Dropdown nur Rauschen. Ausgeblendete Personen
-    (ADMIN_EXCLUDE_EMAILS) fliegen hier genauso raus wie in der Uebersicht,
-    sonst waere der Kaufplan das Schlupfloch an der Ausblendung vorbei."""
-    accs = sb_select("accounts", {"select": "user_id"})
+    Ausgeblendete Personen (ADMIN_EXCLUDE_EMAILS) fliegen raus, sonst waere der
+    Kaufplan das Schlupfloch an der Ausblendung vorbei."""
     ids = {str(a.get("user_id")) for a in accs if a.get("user_id")}
     namen, mails = {}, {}
     try:
@@ -3880,6 +3916,44 @@ def _acc_plan_personen():
     return sorted(out, key=lambda p: p["name"].lower())
 
 
+def _acc_plan_archiviert():
+    """Menge archivierter Account-IDs — derselbe Weg wie in /admin/overview
+    (user_settings key='archive', aus dem localStorage gesynct)."""
+    aus = set()
+    try:
+        for r in _sb_all("user_settings", {"select": "value", "key": "eq.archive"}):
+            v = r.get("value")
+            if isinstance(v, str):
+                try: v = json.loads(v)
+                except Exception: v = None
+            if isinstance(v, dict):
+                for acc_id, info in v.items():
+                    if (isinstance(info, dict) and info.get("archived")) or (info and not isinstance(info, dict)):
+                        aus.add(str(acc_id))
+    except Exception as e:
+        print(f"[accplan] ⚠️ Archiv-Status: {type(e).__name__}: {e}", flush=True)
+    return aus
+
+
+def acc_plan_fortschritt(ziele, accs, archiviert):
+    """Jedem Ziel seine ERFUELLENDEN Accounts anhaengen. Bewusst mit Namen, nicht
+    nur als Zahl: der Kaufplan behauptet 'Ziel erreicht' — dann muss er auch
+    zeigen, WORAN er das festmacht, sonst ist die Zahl nicht pruefbar."""
+    out = []
+    for z in ziele:
+        treffer = [a for a in accs
+                   if str(a.get("user_id")) == str(z.get("user_id"))
+                   and str(a.get("id")) not in archiviert
+                   and acc_plan_passt(a, z)]
+        d = dict(z)
+        d["ist"] = len(treffer)
+        d["erfuellt"] = len(treffer) >= int(z.get("ziel_anzahl") or 1)
+        d["treffer"] = [{"id": a.get("id"), "name": a.get("name"),
+                         "balance": a.get("balance")} for a in treffer[:12]]
+        out.append(d)
+    return out
+
+
 @app.route("/admin/acc-plan", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_acc_plan():
     if request.method == "OPTIONS":
@@ -3890,9 +3964,13 @@ def admin_acc_plan():
 
     if request.method == "GET":
         try:
-            eintraege = sb_select("acc_plan", {
+            ziele = sb_select("acc_plan", {
                 "select": "*", "order": "created_at.desc", "limit": "500"})
-            return jsonify({"eintraege": eintraege, "personen": _acc_plan_personen()})
+            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,balance"})
+            return jsonify({
+                "eintraege": acc_plan_fortschritt(ziele, accs, _acc_plan_archiviert()),
+                "personen": _acc_plan_personen(accs),
+                "typen": list(ACC_PLAN_TYPEN)})
         except Exception as e:
             print(f"[accplan] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": f"Kaufplan nicht ladbar ({type(e).__name__})"}), 502
