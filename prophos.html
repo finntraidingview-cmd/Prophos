@@ -6740,50 +6740,15 @@
              Kapital- oder Risiko-Auswertung mitzählen. -->
         <div id="adm-pane-plan" hidden>
           <div class="adm-toolbar">
-            <select id="plan-person" class="adm-f" style="flex:1;min-width:150px"><option value="">Person…</option></select>
-            <input id="plan-firma" placeholder="Firma" title="Tradeify, Apex, Topstep …" style="width:130px">
-            <select id="plan-typ" class="adm-f" style="width:130px" title="Welcher Zustand soll dort stehen">
-              <option value="funded" selected>Funded</option>
-              <option value="phase2">Phase 2</option>
-              <option value="phase1">Phase 1</option>
-              <option value="challenge">Challenge</option>
-              <option value="live">Live</option>
-            </select>
-            <input id="plan-groesse" placeholder="Größe" title="z.B. 150k — leer lassen, wenn die Größe egal ist" style="width:92px">
-            <input id="plan-anzahl" type="number" inputmode="numeric" min="1" step="1" value="1" title="Wie viele davon sollen dort stehen" style="width:64px">
-            <input id="plan-gewinn" type="number" inputmode="decimal" min="0" step="100" placeholder="$ Plus" title="Nur als Notiz — Prophos kennt die Salden von Tradeify/Apex nicht, kann das also nicht selbst prüfen" style="width:96px">
-            <button class="btn btn-primary" id="plan-add" style="padding:8px 14px">Ziel setzen</button>
+            <select id="plan-person" class="adm-f" style="min-width:150px"><option value="">ID wählen…</option></select>
+            <input id="plan-firma" list="plan-firmen" placeholder="Prop-Firma" style="width:160px">
+            <datalist id="plan-firmen"></datalist>
+            <input id="plan-notiz" placeholder="Was soll dort geparkt werden?" style="flex:1;min-width:220px">
+            <button class="btn btn-primary" id="plan-add" style="padding:8px 14px">Eintragen</button>
             <button class="btn btn-ghost" id="plan-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
           </div>
 
-          <div class="kpis">
-            <div class="kpi">
-              <div class="kpi-label">Offene Ziele</div>
-              <div class="kpi-value" id="plan-k-offen">–</div>
-              <div class="kpi-delta delta-neutral" id="plan-k-offen-sub">noch nicht erreicht</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-label">Noch zu holen</div>
-              <div class="kpi-value" id="plan-k-fehlt">–</div>
-              <div class="kpi-delta delta-neutral">Accounts bis alle Ziele stehen</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-label">Erreicht</div>
-              <div class="kpi-value" id="plan-k-fertig">–</div>
-              <div class="kpi-delta delta-neutral" id="plan-k-fertig-sub">von allen Zielen</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-label">Personen</div>
-              <div class="kpi-value" id="plan-k-pers">–</div>
-              <div class="kpi-delta delta-neutral">mit offenen Zielen</div>
-            </div>
-          </div>
-
-          <div style="display:flex;align-items:center;gap:14px;margin:2px 0 10px;flex-wrap:wrap">
-            <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer">
-              <input type="checkbox" id="plan-nur-offen" checked style="width:15px;height:15px">
-              nur offene Ziele
-            </label>
+          <div style="margin:2px 0 12px">
             <span id="plan-msg" style="font-size:12.5px;color:var(--sub)"></span>
           </div>
 
@@ -9114,40 +9079,27 @@
     }
 
     /* ══ KAUFPLAN (31.08.2026, Finns Wunsch) ═══════════════════════════════
-     * Nicht "kauf 3 Accounts", sondern ein ZIELZUSTAND je ID. Finn wörtlich:
-     *   „Ich sage zum Beispiel Pascals ID: so lange Accounts kaufen, bis da
-     *    ein 100k Funded ist … ich weiß ja nicht, wenn ich zwei Accounts
-     *    kaufe, ob ich beide blowe."
-     * Deshalb steht hier keine Stückzahl an Käufen, sondern was am Ende da
-     * stehen soll — und deshalb gibt es AUSDRÜCKLICH keinen Haken zum
-     * Abhaken (Finn: „nicht so abhaken wie bei Google Keep"). Der Ist-Stand
-     * kommt bei jedem Laden aus den echten Accounts; ein Haken wäre eine
-     * zweite Wahrheit daneben, und die beiden würden auseinanderlaufen.
+     * Drei Felder, mehr nicht: ID, Prop-Firma, Notiz. Finn wörtlich, nachdem
+     * die erste Fassung zu viel wollte: „einfach nur id auswählen und dann
+     * prop firm auswählen und dann ein notiz feld was für ein acc da geparkt
+     * werden soll … das mit dropdown, plus etc is overkill."
+     *
+     * Was trotzdem bleibt, weil es kein Eingabefeld kostet: neben jeder Zeile
+     * steht, was auf dieser ID bei dieser Firma GERADE liegt — aus den echten
+     * Accounts gelesen, archivierte raus. Das ist die Antwort auf Finns
+     * ursprüngliche Frage („so lange kaufen, bis da …"), ohne dass er dafür
+     * irgendetwas konfigurieren muss. Und deshalb gibt es auch hier keinen
+     * Haken zum Abhaken: der Stand kommt aus den Accounts, nicht aus einem
+     * zweiten Klick, der danebenlaufen könnte.
      *
      * Läuft über app.py (rgApi → /admin/acc-plan): die Tabelle hat bewusst
      * keine RLS-Policy, weil hier steht, was für FREMDE IDs geplant ist. */
-    const planUsd = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
     const PLAN_TYP_LBL = { funded:'Funded', phase2:'Phase 2', phase1:'Phase 1', challenge:'Challenge', live:'Live' }
     let planData = null
     let planGeladen = false
 
     const planEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-
-    // „150k" und „150000" sollen beide gehen — Finn denkt in k, die Accounts
-    // heißen so, und eine Eingabe abzulehnen, die er überall sonst benutzt,
-    // wäre reine Schikane.
-    function planGroesseLesen(text){
-      const t = String(text || '').trim().toLowerCase().replace(/\s+/g, '')
-      if(!t) return null
-      const m = t.match(/^(\d+(?:[.,]\d+)?)(k?)$/)
-      if(!m) return NaN
-      const z = parseFloat(m[1].replace(',', '.'))
-      if(!isFinite(z)) return NaN
-      return m[2] === 'k' ? z * 1000 : z
-    }
-    const planGroesseZeigen = g => (g == null) ? 'jede Größe'
-      : (Number(g) >= 1000 ? (Number(g) / 1000) + 'k' : String(Number(g)))
 
     function planSetMsg(text, art){
       const el = $('plan-msg'); if(!el) return
@@ -9156,7 +9108,7 @@
     }
 
     async function planLoad(){
-      planSetMsg('Lade Kaufplan…')
+      planSetMsg('Lade…')
       try{
         planData = await rgApi('/admin/acc-plan')
         planSetMsg('')
@@ -9173,136 +9125,88 @@
       else planRender()
     }
 
+    // „2× Funded · 1× Phase 1" — leer heißt: dort liegt gerade nichts.
+    function planStandText(stand){
+      const e = Object.entries(stand || {}).filter(([, n]) => n > 0)
+      if(!e.length) return 'dort liegt gerade nichts'
+      return e.sort((a, b) => b[1] - a[1])
+        .map(([t, n]) => `${n}× ${PLAN_TYP_LBL[t] || t}`).join(' · ')
+    }
+
     function planRender(){
       const g = $('plan-groups'); if(!g || !planData) return
-      const nurOffen = !!$('plan-nur-offen')?.checked
       const personen = planData.personen || []
       const nameVon = new Map(personen.map(p => [String(p.user_id), p.name]))
 
       const sel = $('plan-person')
       if(sel && sel.options.length !== personen.length + 1){   // +1 = Platzhalter
         const vorher = sel.value
-        sel.innerHTML = '<option value="">Person…</option>' + personen.map(p =>
+        sel.innerHTML = '<option value="">ID wählen…</option>' + personen.map(p =>
           `<option value="${planEsc(p.user_id)}">${planEsc(p.name)}</option>`).join('')
         if(vorher) sel.value = vorher
       }
+      const dl = $('plan-firmen')
+      if(dl) dl.innerHTML = (planData.firmen || []).map(f =>
+        `<option value="${planEsc(f)}"></option>`).join('')
 
-      const alle = (planData.eintraege || []).filter(z => z.aktiv !== false)
-      const offen = alle.filter(z => !z.erfuellt)
-      const sichtbar = nurOffen ? offen : (planData.eintraege || [])
-
-      // „Noch zu holen" ist die Zahl, um die es Finn geht: wie viele Accounts
-      // fehlen noch, bis alle Ziele stehen.
-      const fehlt = offen.reduce((a, z) => a + Math.max(0, (Number(z.ziel_anzahl) || 1) - (Number(z.ist) || 0)), 0)
-      $('plan-k-offen').textContent = offen.length
-      $('plan-k-fehlt').textContent = fehlt
-      $('plan-k-fertig').textContent = alle.length - offen.length
-      $('plan-k-fertig-sub').textContent = `von ${alle.length} aktiven Ziel${alle.length === 1 ? '' : 'en'}`
-      $('plan-k-pers').textContent = new Set(offen.map(z => String(z.user_id))).size
-
-      if(!sichtbar.length){
-        g.innerHTML = '<div class="adm-empty">' + (nurOffen
-          ? 'Kein offenes Ziel — alles erreicht oder noch nichts gesetzt.'
-          : 'Noch kein Ziel gesetzt.') + '</div>'
+      const zeilen = planData.eintraege || []
+      if(!zeilen.length){
+        g.innerHTML = '<div class="adm-empty">Noch nichts geplant. Oben ID und Firma wählen, dazuschreiben was dort stehen soll.</div>'
         return
       }
 
-      // Gruppen: die Person mit den meisten fehlenden Accounts zuerst — das ist
-      // die, bei der als Nächstes gekauft wird.
       const gruppen = new Map()
-      for(const z of sichtbar){
+      for(const z of zeilen){
         const k = String(z.user_id)
-        const grp = gruppen.get(k) || { key:k, name: nameVon.get(k) || k.slice(0, 8), ziele:[], fehlt:0 }
-        grp.ziele.push(z)
-        if(!z.erfuellt && z.aktiv !== false)
-          grp.fehlt += Math.max(0, (Number(z.ziel_anzahl) || 1) - (Number(z.ist) || 0))
+        const grp = gruppen.get(k) || { key:k, name: nameVon.get(k) || k.slice(0, 8), zeilen:[] }
+        grp.zeilen.push(z)
         gruppen.set(k, grp)
       }
-      const liste = [...gruppen.values()].sort((a, b) => b.fehlt - a.fehlt)
+      const liste = [...gruppen.values()].sort((a, b) => a.name.localeCompare(b.name))
 
       g.innerHTML = liste.map(grp => `
         <div class="panel" style="margin-bottom:14px">
           <div class="panel-head">
             <div>
               <div class="panel-title">${planEsc(grp.name)}</div>
-              <div class="panel-sub">${grp.fehlt > 0
-                ? `noch <b>${grp.fehlt}</b> Account${grp.fehlt === 1 ? '' : 's'} zu holen`
-                : 'alle Ziele erreicht'}</div>
+              <div class="panel-sub">${grp.zeilen.length} Eintrag${grp.zeilen.length === 1 ? '' : 'e'}</div>
             </div>
           </div>
-          <div style="padding:2px 0">${grp.ziele.map(planZiel).join('')}</div>
+          <div style="padding:2px 0">${grp.zeilen.map(planZeile).join('')}</div>
         </div>`).join('')
     }
 
-    function planZiel(z){
-      const soll = Number(z.ziel_anzahl) || 1
-      const ist = Number(z.ist) || 0
-      const stillgelegt = z.aktiv === false
-      const fertig = !!z.erfuellt
-      const farbe = stillgelegt ? 'var(--sub-2)' : fertig ? 'var(--good)' : 'var(--warn)'
-      const status = stillgelegt ? 'stillgelegt'
-                   : fertig ? '✓ erreicht'
-                   : `noch ${soll - ist} kaufen`
-      // Die Treffer stehen bewusst dabei: der Plan behauptet „erreicht" — dann
-      // muss er auch zeigen, WORAN er das festmacht, sonst ist es nicht prüfbar.
-      const belege = (z.treffer || []).map(t => planEsc(t.name || '—')).join(' · ')
-      return `<div style="display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-top:1px solid var(--border-soft)${stillgelegt ? ';opacity:.55' : ''}">
+    function planZeile(z){
+      return `<div style="display:flex;align-items:flex-start;gap:14px;padding:12px 0;border-top:1px solid var(--border-soft)">
         <div style="flex:1;min-width:0">
-          <div style="font-size:14.5px;font-weight:600">
-            ${soll}× ${planEsc(PLAN_TYP_LBL[z.ziel_typ] || z.ziel_typ)}
-            ${z.ziel_groesse != null ? planEsc(planGroesseZeigen(z.ziel_groesse)) : ''}
-            bei ${planEsc(z.firma) || '—'}
-          </div>
-          <div style="font-size:12px;color:var(--sub);margin-top:2px">
-            ${ist} von ${soll} vorhanden${belege ? ' · ' + belege : ''}
-          </div>
-          ${z.gewinn_ziel ? `<div style="font-size:12px;color:var(--sub-2);margin-top:2px">Wunsch: mindestens ${planUsd.format(z.gewinn_ziel)} im Plus — prüft Prophos nicht selbst</div>` : ''}
-          ${z.notiz ? `<div style="font-size:12px;color:var(--sub-2);margin-top:2px">${planEsc(z.notiz)}</div>` : ''}
+          <div style="font-size:14.5px;font-weight:600">${planEsc(z.firma) || '—'}</div>
+          ${z.notiz ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">${planEsc(z.notiz)}</div>` : ''}
+          <div style="font-size:12px;color:var(--sub-2);margin-top:3px">aktuell dort: ${planEsc(planStandText(z.stand))}</div>
         </div>
-        <div style="text-align:right;white-space:nowrap">
-          <div style="font-size:12.5px;font-weight:650;color:${farbe}">${status}</div>
-          <div style="margin-top:6px">
-            <button class="btn btn-ghost plan-akt" data-plan-id="${planEsc(z.id)}" data-plan-aktiv="${stillgelegt ? '1' : '0'}" style="padding:4px 9px;font-size:12px" title="${stillgelegt ? 'Wieder aufnehmen' : 'Stilllegen — bleibt sichtbar, zählt nicht mehr'}">${stillgelegt ? '▶' : '⏸'}</button>
-            <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(z.id)}" style="padding:4px 9px;font-size:12px" title="Ziel löschen">🗑</button>
-          </div>
-        </div>
+        <button class="btn btn-ghost plan-del" data-plan-id="${planEsc(z.id)}" style="padding:4px 9px;font-size:12px" title="Eintrag löschen">🗑</button>
       </div>`
     }
 
     async function planAdd(){
       const uid = $('plan-person').value
-      if(!uid) return planSetMsg('Erst die Person wählen, auf deren ID gekauft wird.', 'err')
+      if(!uid) return planSetMsg('Erst die ID wählen.', 'err')
       const firma = $('plan-firma').value.trim()
-      if(!firma) return planSetMsg('Firma angeben — sie ist der Anker des Abgleichs.', 'err')
-      const gr = planGroesseLesen($('plan-groesse').value)
-      if(Number.isNaN(gr)) return planSetMsg('Größe nicht verstanden — „150k" oder „150000".', 'err')
+      if(!firma) return planSetMsg('Prop-Firma angeben.', 'err')
       const btn = $('plan-add'); btn.disabled = true
       try{
         await rgApi('/admin/acc-plan', { method:'POST', body: JSON.stringify({
-          user_id: uid, firma,
-          ziel_typ: $('plan-typ').value,
-          ziel_groesse: gr,
-          ziel_anzahl: Number($('plan-anzahl').value) || 1,
-          gewinn_ziel: $('plan-gewinn').value === '' ? null : Number($('plan-gewinn').value) }) })
-        // Person und Firma bleiben stehen — man setzt oft mehrere Ziele für
-        // dieselbe ID hintereinander.
-        $('plan-groesse').value = ''; $('plan-anzahl').value = '1'; $('plan-gewinn').value = ''
+          user_id: uid, firma, notiz: $('plan-notiz').value.trim() }) })
+        // ID und Firma bleiben stehen — man schreibt oft mehrere Zeilen für
+        // dieselbe Kombination hintereinander.
+        $('plan-notiz').value = ''
         await planLoad()
       }catch(e){
-        planSetMsg('Ziel nicht gesetzt: ' + (e && e.message || e), 'err')
+        planSetMsg('Nicht eingetragen: ' + (e && e.message || e), 'err')
       }finally{ btn.disabled = false }
     }
 
-    async function planAktiv(id, aktiv){
-      try{
-        await rgApi('/admin/acc-plan', { method:'PATCH', body: JSON.stringify({ id, aktiv }) })
-        await planLoad()
-      }catch(e){ planSetMsg('Nicht geändert: ' + (e && e.message || e), 'err') }
-    }
-
     async function planDelete(id){
-      // Rückfrage nur hier: Stilllegen bleibt sichtbar, Löschen ist weg.
-      if(!confirm('Dieses Ziel ganz löschen?\n\nZum Pausieren reicht ⏸ — das bleibt nachvollziehbar.')) return
+      if(!confirm('Diesen Eintrag löschen?')) return
       try{
         await rgApi('/admin/acc-plan?id=' + encodeURIComponent(id), { method:'DELETE' })
         await planLoad()
@@ -9635,11 +9539,8 @@
       // haengen NUR am Kaufplan-Grid, nicht global (Projektregel).
       $('plan-add')?.addEventListener('click', planAdd)
       $('plan-refresh')?.addEventListener('click', planLoad)
-      $('plan-nur-offen')?.addEventListener('change', planRender)
-      $('plan-groesse')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
+      $('plan-notiz')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
       $('plan-groups')?.addEventListener('click', ev => {
-        const akt = ev.target.closest('.plan-akt')
-        if(akt) return planAktiv(akt.dataset.planId, akt.dataset.planAktiv === '1')
         const del = ev.target.closest('.plan-del')
         if(del) planDelete(del.dataset.planId)
       })
@@ -21164,7 +21065,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-08-31.198'
+  const OS_TAB_BUILD = '2026-08-31.199'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
