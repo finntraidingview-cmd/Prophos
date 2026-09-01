@@ -14,7 +14,8 @@ Daten"):
   · Reader pausiert (an=false)  -> es wird NICHT geschrieben
   · Reader-Daten aelter 10 s    -> es wird NICHT geschrieben
   · reader-server nicht erreichbar -> es wird NICHT geschrieben
-  In allen drei Faellen friert das CSV ein (seq bleibt stehen) — der Copier
+  · Reader meldet blind (01.09.2026) -> es wird NICHT geschrieben
+  In allen vier Faellen friert das CSV ein (seq bleibt stehen) — der Copier
   meldet nach 15 s "Snapshot unveraendert" und laesst die Hedges STEHEN.
   Ein pausierter/toter Reader schliesst also nie einen Hedge.
 
@@ -91,6 +92,18 @@ def pruefe_stand(stand, *, max_alter_s, jetzt_ms=None):
         return False, "reader offline"
     if stand.get("an") is False:
         return False, "pausiert"
+    # Blind (01.09.2026): der Reader hat gelesen, aber nichts bewiesen —
+    # verdeckter Tab mit leeren Tabellenzellen, zugeklapptes Panel. Der
+    # reader-server friert solche Staende schon selbst ein; die Regel steht
+    # hier ein zweites Mal, weil Reader-Server und Verbinder getrennt
+    # aktualisiert werden (zwei .bat-Dateien) und ein alter Server sonst
+    # blinde Staende durchreichen wuerde.
+    if stand.get("blind"):
+        return False, "Reader blind (" + str(stand.get("blind_grund") or "Grund unbekannt") + ")"
+    # Eine Antwort OHNE Positionsliste ist kein Beweis fuer 'flach', sondern
+    # Unwissen — nie als Flachstellung lesen.
+    if not isinstance(stand.get("positionen"), list):
+        return False, "Antwort ohne Positionsliste"
     ts = stand.get("ts") or 0
     jetzt = jetzt_ms if jetzt_ms is not None else time.time() * 1000
     if not ts or jetzt - float(ts) > max_alter_s * 1000:
@@ -183,6 +196,19 @@ def _selftest():
     # altes reader-server-Format ohne 'an' (v0.1): kein an-Feld heisst AN
     ok(pruefe_stand({"ts": jetzt, "positionen": []},
                     max_alter_s=10, jetzt_ms=jetzt)[0] is True, "ohne an-Feld -> an")
+    # Blind-Riegel (01.09.2026): frisch UND leer UND blind -> nicht schreiben.
+    # Das ist genau die Kombination, die vor dem Fix den Hedge zugemacht hat.
+    ok(pruefe_stand({"an": True, "ts": jetzt, "positionen": [], "blind": True,
+                     "blind_grund": "Tabellenzellen kamen leer zurueck"},
+                    max_alter_s=10, jetzt_ms=jetzt)[0] is False,
+       "blind -> nicht schreiben, obwohl frisch")
+    ok(pruefe_stand({"an": True, "ts": jetzt}, max_alter_s=10, jetzt_ms=jetzt)[0] is False,
+       "Antwort ohne Positionsliste -> nicht schreiben")
+    # Gegenprobe, damit der Riegel keine echte Flachstellung verschluckt:
+    # Tabelle war da, wirklich 0 Positionen -> der Hedge MUSS zugehen duerfen.
+    ok(pruefe_stand({"an": True, "ts": jetzt, "positionen": [], "blind": False},
+                    max_alter_s=10, jetzt_ms=jetzt) == (True, "liest live"),
+       "echte Flachstellung geht weiter durch")
 
     # SL/TP-Nullung (Preisskala-Riegel)
     stand = {"an": True, "ts": jetzt, "positionen": [

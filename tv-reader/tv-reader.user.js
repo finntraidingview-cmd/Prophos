@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.3.7
+// @version      0.4.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,7 +24,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.3.7';
+  const VERSION    = '0.4.0';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -47,6 +47,10 @@
   // bei offener Position).
   let spracheFremd = false;
   let spaltenGesehen = [];      // fuer die Ferndiagnose: was die Tabelle WIRKLICH anbietet
+  // Was der letzte Lesevorgang WIRKLICH vorgefunden hat (0.4.0) — Grundlage
+  // fuer die Blind-Entscheidung in tick(). zeilen/zellen/tabelle statt eines
+  // blossen "0 Positionen".
+  let leseBefund = { zeilen: 0, zellen: 0, tabelle: false };
 
   /* Spaltentitel sind NICHT stabil (Fund 31.08.2026 an Finns PC): die Tabelle
    * hiess auf Deutsch mal "Menge / Durchschn. Ausfuehrungspreis /
@@ -79,6 +83,46 @@
     return null;
   }
 
+  /* Zellen-Text OHNE Layout (0.4.0, 01.09.2026 — der Tabwechsel-Fund).
+   * Bis 0.3.7 stand hier td.innerText. innerText ist der GERENDERTE Text: er
+   * braucht ein aktuelles Layout und liefert fuer uebersprungene Teilbaeume
+   * (content-visibility) einen LEEREN String. Genau das passiert, sobald der
+   * TradingView-Tab in den Hintergrund geht — Chrome haelt Rendering und
+   * Layout des verdeckten Tabs an. Die Zeilen standen also weiter im DOM,
+   * aber jede Zelle kam leer zurueck, der Filter unten warf sie raus, und der
+   * Reader meldete mit FRISCHEM Zeitstempel "0 Positionen". Ein frisches
+   * "flat" ist fuer die ganze Kette ein Beweis: der Verbinder friert nicht
+   * ein (die Daten sind ja frisch!), und der Copier schliesst den Hedge.
+   * Beim naechsten Tick war die Zelle wieder lesbar -> Hedge wieder auf.
+   * Das war Finns Sekundentakt-Flattern vom 01.09.2026.
+   * textContent haengt an keinem Layout und liest im verdeckten Tab genauso
+   * wie im sichtbaren. Die Umbruch-Normalisierung unten macht ohnehin schon
+   * das, wofuer innerText hier ueberhaupt gebraucht wurde. */
+  function zellText(td) {
+    return (td.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  /* Beweis, dass die Positionstabelle ueberhaupt DA ist (0.4.0).
+   * Wichtig, weil "keine Zeilen" zwei voellig verschiedene Dinge heissen kann:
+   *   · Konto ist flach          -> echte Aussage, Hedge MUSS zugehen
+   *   · Panel weg/zugeklappt/leer -> Unwissen, Hedge MUSS stehenbleiben
+   * Ohne diesen Anker kann der Reader die beiden nicht auseinanderhalten —
+   * und "0 Positionen" ist die gefaehrlichste Falschaussage, die er treffen
+   * kann. Anker ist das Broker-Panel (der Konto-Umschalter aus Finns Dump
+   * vom 31.08.2026 lebt darin); zusaetzlich zaehlen sichtbare Datenzeilen
+   * selbst als Beweis. */
+  function tabelleDa() {
+    const anker = [
+      '[data-name="account-manager-account-select"]',
+      '[data-name^="account-manager"]',
+      '[class*="accountManager"]',
+    ];
+    for (const s of anker) {
+      try { if (document.querySelector(s)) return true; } catch (_) {}
+    }
+    return document.querySelector('td[data-label]') !== null;
+  }
+
   function lesePositionen() {
     const rows = new Map();
     const labels = new Set();
@@ -89,12 +133,19 @@
       const label = td.getAttribute('data-label');
       labels.add(label);
       // \s+ -> ' ': TradingView bricht manche Zellen um ("+190,00\nUSD") — Zeilenumbrueche raus
-      rows.get(tr)[label] = td.innerText.replace(/\s+/g, ' ').trim();
+      rows.get(tr)[label] = zellText(td);
     });
     spaltenGesehen = [...labels];
     // Englisch erkennen an einem Titel, den es auf Deutsch NICHT gibt. "Profit"
     // taugt dafuer nicht — das Wort steht in beiden Sprachen so da.
     spracheFremd = labels.has('Unrealized P&L') || labels.has('Avg Fill Price');
+    // Zeilen da, aber ALLE Zellen leer = gelesen, nichts verstanden (0.4.0).
+    // Das ist Unwissen, keine Flachstellung — siehe zellText().
+    let zellen = 0;
+    for (const r of rows.values()) {
+      for (const k in r) if (r[k]) zellen++;
+    }
+    leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa() };
     // Eine Zeile ist eine offene Position, wenn sie Symbol UND einen G&V-Wert
     // traegt. Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
     return [...rows.values()]
@@ -449,9 +500,37 @@
     });
   }
 
+  /* Blind-Pruefung (0.4.0, 01.09.2026). Gibt den GRUND zurueck, warum dieser
+   * Lesevorgang nicht als Aussage taugt — oder null, wenn er es tut.
+   *
+   * Die Regel dahinter ist dieselbe wie ueberall in Prophos ("Beweis oder
+   * leer"), nur an der einen Stelle, an der sie bisher fehlte: der Reader
+   * durfte "0 Positionen" sagen, ohne zu wissen, ob er die Tabelle ueberhaupt
+   * gesehen hat. Der Server nimmt einen blinden Stand nicht an, der Stand
+   * friert ein, und die Frische-Doktrin des Verbinders haelt den Hedge —
+   * stale != flat. Ein blinder Reader schliesst nie einen Hedge.
+   *
+   * WICHTIG: nur der LEERE Fall wird blockiert. Sieht der Reader Positionen,
+   * gehen sie durch — auch bei zugeklapptem Panel. Und ist die Tabelle
+   * nachweislich da und wirklich leer, ist das eine echte Flachstellung und
+   * der Hedge geht zu wie bisher. */
+  function blindGrund(positionen) {
+    if (positionen.length) return null;                  // Positionen = Beweis genug
+    if (!leseBefund.tabelle) return 'Positionstabelle nicht auffindbar (Panel zu?)';
+    if (leseBefund.zeilen && !leseBefund.zellen) return 'Tabellenzellen kamen leer zurueck';
+    return null;                                          // Tabelle da, wirklich flach
+  }
+
   function tick() {
     const positionen = lesePositionen();
-    const payload = JSON.stringify({ ts: Date.now(), positionen });
+    const blind = blindGrund(positionen);
+    // Auch blind wird GESENDET — der Server soll den Grund kennen (und die
+    // Orbit-Karte spaeter auch). Er uebernimmt den Stand dann nur nicht.
+    const payload = JSON.stringify({
+      ts: Date.now(), positionen, version: VERSION,
+      blind: !!blind, blind_grund: blind || '',
+      sichtbar: document.visibilityState === 'visible',
+    });
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
 
@@ -465,6 +544,7 @@
         let an = true;
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
+        else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
         else if (spracheFremd) setBadge('⚠ TradingView ist nicht auf Deutsch — Reader liest die deutschen Spalten. Profilmenü → Sprache → Deutsch, dann F5', 'warn');
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
@@ -473,6 +553,32 @@
     });
   }
 
-  setInterval(tick, INTERVALMS);
+  /* Takt aus einem Web Worker (0.4.0, 01.09.2026 — zweite Haelfte des
+   * Tabwechsel-Funds). setInterval im Seiten-Kontext wird von Chrome gedrosselt,
+   * sobald der Tab verdeckt ist: erst auf 1 Lauf/Sekunde, nach 5 Minuten auf
+   * 1 Lauf/MINUTE. Mit dem 10-s-Frischefenster des Verbinders heisst das:
+   * Orbit steht 50 von 60 Sekunden eingefroren, nur weil Finn in Prophos
+   * schaut. Timer in einem eigenen Worker unterliegen dieser Drosselung nicht;
+   * der Worker schickt nur einen Weckruf, gelesen und gesendet wird weiter im
+   * Seiten-Kontext (GM_xmlhttpRequest gibt es nur dort).
+   *
+   * Faellt der Worker aus (TradingView-CSP verbietet blob:-Worker), bleibt es
+   * beim gedrosselten setInterval — langsamer, aber durch die Blind-/Frische-
+   * Regeln oben weiterhin sicher. Deshalb Fallback statt Abbruch. */
+  function starteTakt() {
+    try {
+      const quelle = `let id=null;onmessage=e=>{if(id)clearInterval(id);` +
+                     `id=setInterval(()=>postMessage(0),e.data)}`;
+      const w = new Worker(URL.createObjectURL(new Blob([quelle], { type: 'text/javascript' })));
+      w.onmessage = tick;
+      w.postMessage(INTERVALMS);
+      return 'worker';
+    } catch (_) {
+      setInterval(tick, INTERVALMS);
+      return 'interval';
+    }
+  }
+
+  starteTakt();
   tick();
 })();

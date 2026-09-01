@@ -11,8 +11,10 @@ Reader sieht sie in < 1 s, schließen → sofort weg.
 
 ## Bausteine
 - `tv-reader.user.js` — Tampermonkey-Userscript, läuft auf tradingview.com, liest
-  jede Sekunde die Positionstabelle (hängt an den stabilen `data-label`-Attributen
-  der ka-table, nicht an gehashten CSS-Klassen) und POSTet sie an den Empfänger.
+  viermal pro Sekunde die Positionstabelle (hängt an den stabilen
+  `data-label`-Attributen der ka-table, nicht an gehashten CSS-Klassen) und POSTet
+  sie an den Empfänger. Seit 0.4.0 aus einem Web Worker getaktet und mit
+  Blind-Erkennung — siehe „Der verdeckte Tab" weiter unten.
 - `reader-server.py` — lokaler Empfänger (nur Python-Standardbibliothek). Nimmt die
   Daten an, hält den Stand, schreibt `positions.json` (atomar) und zeigt eine
   Live-Zeile im Terminal.
@@ -32,6 +34,47 @@ Reader sieht sie in < 1 s, schließen → sofort weg.
 4. **Prophos-Tab offen lassen** (auf dem PC wie gehabt `localhost:5000`): der Tab
    ist die Brücke in die Cloud — er pusht den Reader-Stand alle 5s nach
    `echoplus_live`, damit die **Orbit-View** ihn von jedem Gerät zeigt.
+
+## Der verdeckte Tab (01.09.2026) — warum „0 Positionen" ein Beweis braucht
+
+Finns Fund beim Zwei-Konten-Test: Order in TradingView platziert, sauber
+gespiegelt — und sobald er den **Tab von TradingView auf Prophos wechselte**,
+ging der Hedge im Sekundentakt zu und wieder auf.
+
+Die Ursache lag in einer einzigen Zeile: der Reader las die Tabellenzellen mit
+`td.innerText`. `innerText` ist der **gerenderte** Text — er braucht ein
+aktuelles Layout. Chrome hält Rendering und Layout eines verdeckten Tabs an,
+also kamen die Zellen **leer** zurück, obwohl die Zeilen weiter im DOM standen.
+Der Reader meldete daraufhin „0 Positionen" — mit **frischem Zeitstempel**.
+
+Und das ist der einzige Fall, in dem die Frische-Doktrin der ganzen Kette
+versagt: der Verbinder friert nicht ein, weil die Daten ja frisch *sind*, das
+CSV meldet ehrlich „flat", und der Copier macht den Hedge zu. Beim nächsten
+Tick war die Zelle wieder lesbar → Hedge wieder auf. Das Flattern.
+
+Drei Riegel, alle in dieser Reihenfolge:
+
+1. **`textContent` statt `innerText`** (Userscript 0.4.0) — hängt an keinem
+   Layout und liest im verdeckten Tab genauso wie im sichtbaren.
+2. **Blind-Flag.** Der Reader unterscheidet jetzt „Tabelle gesehen, wirklich
+   flach" von „Tabelle nicht lesbar". Nur der erste Fall ist eine Aussage; im
+   zweiten sendet er `blind:true`, der Empfänger friert den Stand ein, und der
+   Verbinder schreibt nicht → der Copier hält die Hedges. *Stale != flat*,
+   jetzt auch für den Lesevorgang selbst.
+3. **Struktur-Riegel im Empfänger.** Eine Nachricht ohne Feld `positionen`
+   (Liste) wird abgelehnt statt als „flat" gelesen.
+
+Dazu läuft der Takt seit 0.4.0 aus einem **Web Worker**: `setInterval` im
+Seiten-Kontext drosselt Chrome im verdeckten Tab auf 1 Lauf/Sekunde und nach
+fünf Minuten auf 1 Lauf/**Minute** — mit dem 10-s-Frischefenster des Verbinders
+stünde Orbit dann 50 von 60 Sekunden eingefroren, nur weil jemand woanders
+hinschaut. Worker-Timer unterliegen dieser Drosselung nicht. Verbietet die
+TradingView-CSP den Worker, fällt es auf `setInterval` zurück — langsamer, aber
+durch die drei Riegel oben weiterhin sicher.
+
+**Am Badge ablesbar:** `● Reader · n Pos · Copier ok` = liest.
+`⚠ Reader blind: … — Stand eingefroren, Hedge bleibt stehen` = sieht nichts und
+behauptet auch nichts.
 
 ## Ein/Aus — die Orbit-View in Prophos
 Prophos hat einen eigenen Navigations-Punkt **Orbit** (bis 28.08.2026 „Echo +" —

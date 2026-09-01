@@ -26,6 +26,15 @@ spaeterer Copier-Konsument die Hedges schliessen). Persistiert als
 reader_aus.flag, ueberlebt also einen Neustart des Servers. Jeder Konsument
 von positions.json MUSS das Feld "an" pruefen: an=false -> nicht syncen.
 
+Blind-Riegel (01.09.2026, Finns Tabwechsel-Fund): meldet das Userscript
+{"blind": true}, wird der Stand NICHT uebernommen — er friert ein, wie bei
+Pause. Grund: ein verdeckter Chrome-Tab liefert leere Tabellenzellen, und
+daraus wurde bis 0.3.7 ein frisches "0 Positionen" — der einzige Fall, in dem
+die Frische-Doktrin der ganzen Kette versagt, weil die Daten ja frisch SIND.
+Der Copier schloss den Hedge und riss ihn im naechsten Tick wieder auf.
+Dazu ein Struktur-Riegel: eine Nachricht ohne Feld 'positionen' (Liste) wird
+abgelehnt statt als "flat" gelesen.
+
 Nur Python-Standardbibliothek — kein pip, keine Cloud, keine Schluessel.
 Laeuft auf Mac/Windows/Linux gleich.
 """
@@ -52,6 +61,14 @@ _bedienfeld = None
 _bedienfeld_s = 0.0
 _dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 
+# Blind-Zustand (01.09.2026): das Userscript ab 0.4.0 sagt selbst, wenn sein
+# Lesevorgang nichts beweist (Tabelle nicht auffindbar, Zellen leer). Solche
+# Staende werden NICHT uebernommen — _stand friert ein, und die Frische-
+# Doktrin des Verbinders haelt daraufhin den Hedge. Der Grund wird trotzdem
+# gemerkt, damit Terminal und Ferndiagnose ihn zeigen koennen.
+_blind_grund = ""
+_blind_seit = 0.0
+
 
 def _schreibe_datei(stand):
     """Atomar schreiben, damit ein mitlesender Copier nie eine halbe Datei sieht."""
@@ -66,6 +83,10 @@ def _mit_an(stand):
     damit kein Konsument den Schalter uebersehen kann."""
     out = dict(stand)
     out["an"] = _an
+    # blind gehoert in JEDE Ausgabe, aus demselben Grund wie 'an': ein
+    # Konsument darf nicht uebersehen koennen, dass dieser Stand steht.
+    out["blind"] = bool(_blind_grund)
+    out["blind_grund"] = _blind_grund
     return out
 
 
@@ -111,7 +132,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis
+        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -177,6 +198,43 @@ class Handler(BaseHTTPRequestHandler):
         if not _an:
             self._json(200, {"ok": True, "an": False})
             return
+
+        # Struktur-Riegel (01.09.2026): eine Nachricht OHNE Positionsliste ist
+        # kein Positions-Stand. Der Pfad-Riegel vom 30.08. deckt den bekannten
+        # Fall ab (Userscript 0.3 an altem Server); dieser hier deckt jeden
+        # kuenftigen ab — eine leere Liste darf nur ankommen, wenn wirklich
+        # eine Liste geschickt wurde.
+        if not isinstance(daten.get("positionen"), list):
+            self._json(400, {"ok": False, "msg":
+                "Feld 'positionen' fehlt oder ist keine Liste — wird NICHT als "
+                "Stand uebernommen (ein fehlendes Feld ist kein 'flat')."})
+            return
+
+        # Blind-Riegel (01.09.2026, Finns Tabwechsel-Fund): das Userscript ab
+        # 0.4.0 meldet selbst, wenn sein Lesevorgang nichts beweist — Tab
+        # verdeckt und die Zellen kamen leer zurueck, Panel zugeklappt, Tabelle
+        # weg. Vorher wurde daraus ein FRISCHES "0 Positionen", der Verbinder
+        # sah frische Daten, und der Copier machte den Hedge zu — im naechsten
+        # Tick wieder auf. Genau dieses Flattern. Blinde Staende frieren den
+        # Stand jetzt ein, statt ihn platt zu schreiben.
+        if daten.get("blind"):
+            _blind_grund = str(daten.get("blind_grund") or "Reader meldet blind")
+            if not _blind_seit:
+                _blind_seit = time.time()
+                print(f"\n[{time.strftime('%H:%M:%S')}] Reader BLIND: {_blind_grund} — "
+                      f"Stand eingefroren, Hedges bleiben stehen.")
+            try:
+                _schreibe_datei(_mit_an(_stand))
+            except Exception as e:
+                print(f"\n[WARN] positions.json nicht schreibbar: {e}")
+            self._json(200, {"ok": True, "an": True, "blind": True})
+            return
+
+        if _blind_grund:
+            print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder "
+                  f"(war {round(time.time() - _blind_seit, 1)}s blind).")
+            _blind_grund = ""
+            _blind_seit = 0.0
 
         _stand = daten
         try:
