@@ -218,8 +218,25 @@ class Handler(BaseHTTPRequestHandler):
         # sah frische Daten, und der Copier machte den Hedge zu — im naechsten
         # Tick wieder auf. Genau dieses Flattern. Blinde Staende frieren den
         # Stand jetzt ein, statt ihn platt zu schreiben.
-        if daten.get("blind"):
-            _blind_grund = str(daten.get("blind_grund") or "Reader meldet blind")
+        #
+        # Versions-Riegel (gleicher Abend): ein Userscript VOR 0.4 schickt im
+        # /positions-Payload gar kein 'version'-Feld — und kann per Bauart
+        # blind sein, ohne es zu wissen. Meldet so ein Script ploetzlich flat,
+        # waehrend der letzte Stand Positionen hatte, ist das keine Aussage,
+        # sondern der ungefixte Tabwechsel-Bug. Der haeufigste Weg dahin:
+        # Update eingespielt, aber der TradingView-Tab nie mit F5 neu geladen
+        # — im offenen Tab laeuft dann still der alte Code weiter, und genau
+        # das war von aussen bisher nicht erkennbar.
+        alt_und_ploetzlich_flach = ("version" not in daten
+                                    and not daten.get("positionen")
+                                    and _stand.get("positionen"))
+        if daten.get("blind") or alt_und_ploetzlich_flach:
+            if daten.get("blind"):
+                _blind_grund = str(daten.get("blind_grund") or "Reader meldet blind")
+            else:
+                _blind_grund = ("Userscript ohne Versionsfeld (aelter als 0.4) meldet "
+                                "ploetzlich flat — im TradingView-Tab laeuft noch der "
+                                "alte Code. Tab mit F5 neu laden!")
             if not _blind_seit:
                 _blind_seit = time.time()
                 print(f"\n[{time.strftime('%H:%M:%S')}] Reader BLIND: {_blind_grund} — "

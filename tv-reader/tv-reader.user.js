@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.4.0
+// @version      0.4.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,7 +24,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.4.0';
+  const VERSION    = '0.4.1';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -500,8 +500,9 @@
     });
   }
 
-  /* Blind-Pruefung (0.4.0, 01.09.2026). Gibt den GRUND zurueck, warum dieser
-   * Lesevorgang nicht als Aussage taugt — oder null, wenn er es tut.
+  /* Blind-Pruefung (0.4.0, 01.09.2026; verschaerft 0.4.1 am selben Abend).
+   * Gibt den GRUND zurueck, warum dieser Lesevorgang nicht als Aussage
+   * taugt — oder null, wenn er es tut.
    *
    * Die Regel dahinter ist dieselbe wie ueberall in Prophos ("Beweis oder
    * leer"), nur an der einen Stelle, an der sie bisher fehlte: der Reader
@@ -510,20 +511,47 @@
    * friert ein, und die Frische-Doktrin des Verbinders haelt den Hedge —
    * stale != flat. Ein blinder Reader schliesst nie einen Hedge.
    *
-   * WICHTIG: nur der LEERE Fall wird blockiert. Sieht der Reader Positionen,
-   * gehen sie durch — auch bei zugeklapptem Panel. Und ist die Tabelle
-   * nachweislich da und wirklich leer, ist das eine echte Flachstellung und
-   * der Hedge geht zu wie bisher. */
+   * 0.4.1, warum die 0.4.0-Pruefung NICHT gereicht hat (Finns Lauf vom
+   * selben Abend, Flattern trotz Fix): sie kannte nur "Zeilen da, Zellen
+   * leer". Nimmt TradingView die Zeilen im verdeckten Tab aber KOMPLETT aus
+   * dem DOM (Virtualisierung/Unmount), ist der Befund "Anker da, 0 Zeilen" —
+   * und das fiel als "Tabelle da, wirklich flach" durch. textContent liest
+   * dann auch nichts mehr, weil es nichts zu lesen GIBT. Deshalb jetzt die
+   * haertere Invariante: EIN VERDECKTER TAB DARF NIE EINEN WECHSEL AUF
+   * "FLACH" BEHAUPTEN. Massstab ist die letzte SICHTBARE Lesung: waren da
+   * Positionen offen, ist ein leerer Befund im verdeckten Tab Unwissen —
+   * egal, welchen DOM-Trick Chrome oder TradingView diesmal spielt.
+   *
+   * WICHTIG, beide Richtungen bleiben offen: Positionen gehen IMMER durch
+   * (auch im verdeckten Tab — Zeilen im DOM sind Beweis genug), und ein
+   * SICHTBARER Tab mit vorhandener Tabelle darf weiter flach melden (echte
+   * Closes muessen den Hedge zumachen). War die letzte sichtbare Lesung
+   * schon flach, darf auch der verdeckte Tab flach bleiben. */
+  let sichtbarePosZahl = null;   // Positionszahl der letzten SICHTBAREN, nicht blinden Lesung
+
   function blindGrund(positionen) {
     if (positionen.length) return null;                  // Positionen = Beweis genug
     if (!leseBefund.tabelle) return 'Positionstabelle nicht auffindbar (Panel zu?)';
     if (leseBefund.zeilen && !leseBefund.zellen) return 'Tabellenzellen kamen leer zurueck';
+    if (document.visibilityState !== 'visible') {
+      if (sichtbarePosZahl === null)
+        return 'Tab verdeckt, noch keine sichtbare Lesung als Massstab';
+      if (sichtbarePosZahl > 0)
+        return 'Tab verdeckt — zuletzt sichtbar waren ' + sichtbarePosZahl +
+               ' Position(en) offen, ein leerer Befund beweist hier nichts';
+    }
     return null;                                          // Tabelle da, wirklich flach
   }
 
   function tick() {
     const positionen = lesePositionen();
     const blind = blindGrund(positionen);
+    // Massstab fuer die Verdeckt-Regel nachfuehren: NUR sichtbare, nicht
+    // blinde Lesungen zaehlen. Eine Lesung im verdeckten Tab veraendert den
+    // Massstab nie — sonst wuerde ein einzelner leerer Befund sich selbst
+    // zum neuen "Normal" erklaeren und die Regel aushebeln.
+    if (!blind && document.visibilityState === 'visible')
+      sichtbarePosZahl = positionen.length;
     // Auch blind wird GESENDET — der Server soll den Grund kennen (und die
     // Orbit-Karte spaeter auch). Er uebernimmt den Stand dann nur nicht.
     const payload = JSON.stringify({
