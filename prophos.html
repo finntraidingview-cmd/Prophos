@@ -4568,6 +4568,7 @@
               <label>Weg</label>
               <div class="seg" id="tp-route-seg">
                 <button type="button" id="tp-route-dup">Duplikum</button>
+                <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-tvplus">Orbit</button>
               </div>
@@ -21129,7 +21130,8 @@
   }
 
   function tpRouteUpdateSeg(){
-    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus')
+    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep')
+    document.getElementById('tp-route-topstep')?.classList.toggle('active', _tpRoute === 'topstep')
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
@@ -21610,7 +21612,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.234'
+  const OS_TAB_BUILD = '2026-09-01.236'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22469,15 +22471,21 @@
     const startBtn = document.getElementById('tradePlanSaveStart')
     if(startBtn) startBtn.style.display = (!isEdit || _editPlan?.status === 'planned') ? '' : 'none'
 
-    // Routen-Regler initialisieren: beim Bearbeiten aus dem Plan, sonst letzte Wahl
-    _tpRoute = _editPlan ? (['mt5', 'tvplus'].includes(_editPlan.route) ? _editPlan.route : 'dup')
-                         : (['mt5', 'tvplus'].includes(localStorage.getItem(TP_ROUTE_LS))
+    // Routen-Regler initialisieren: beim Bearbeiten aus dem Plan, sonst letzte Wahl.
+    // Topstep-Mirror-Pläne stehen in der DB als route='dup' (die Engine erkennt
+    // sie per Struktur, siehe planMirrorRoute) — beim Bearbeiten soll der Regler
+    // aber ehrlich "Topstep" zeigen, sonst filtert der dup-Weg den TSX-Master
+    // aus dem Dropdown und die Auswahl wirkt kaputt (01.09.2026).
+    _tpRoute = _editPlan ? (['mt5', 'tvplus'].includes(_editPlan.route) ? _editPlan.route
+                            : (typeof planMirrorRoute === 'function' && planMirrorRoute(_editPlan)) ? 'topstep'
+                            : 'dup')
+                         : (['mt5', 'tvplus', 'topstep'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     tpRouteUpdateSeg()
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-mt5', 'tp-route-tvplus'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -22625,7 +22633,25 @@
       // Routen-Regler (15.08.2026): 'dup' zeigt nur Duplikum-verlinkte Accounts,
       // 'mt5' nur mt5_links-Accounts — beim MT5-Slave ist es fix der Hedge, und
       // der Hedge selbst taucht im Master-Dropdown nicht auf (Selbst-Spiegel).
-      const _dupIds = new Set(Object.values((typeof dupGetLinks === 'function') ? dupGetLinks() : {}).map(String))
+      const _dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const _dupIds = new Set(Object.values(_dupLinks).map(String))
+      // Duplikum kennt GENAU EINEN Slave (01.09.2026, Finn: "es ist IMMER nur
+      // 1 Slave in Duplikium, und zwar mein Fusion-Live-Account"). Der Slave-
+      // Dropdown auf dem Dup-Weg zeigt deshalb nur Accounts, deren Duplikium-
+      // Gegenstück wirklich als Slave (type=1) angelegt ist — vorher standen
+      // dort ALLE verknüpften Accounts, also auch Master. Ohne geladene
+      // Duplikium-Liste (nicht verbunden / noch am Laden) bleibt der alte
+      // Filter aktiv, sonst wäre das Dropdown bis zum Laden leer.
+      let _dupSlaveIds = null
+      try{
+        const _dAccs = (typeof dupState !== 'undefined' && dupState.accounts) || []
+        const _s = new Set()
+        for(const [_dupId, _pid] of Object.entries(_dupLinks)){
+          const _d = _dAccs.find(x => String(x.account_id) === String(_dupId))
+          if(_d && Number(_d.type) === 1) _s.add(String(_pid))
+        }
+        if(_s.size) _dupSlaveIds = _s
+      }catch(_){ }
       const _mt5Ids = new Set(Object.values((typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}).map(String))
       // Nur Master, die auf DIESEM PC wirklich im Copier hängen (18.08.2026,
       // Finns Ansage: Links aus einem alten/anderen PC-Setup zeigten Accounts
@@ -22658,6 +22684,15 @@
               const _lg = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(a.id) : null
               if(!_lg || !_mt5LokalMasters.has(String(_lg))) return false
             }
+          } else if(_tpRoute === 'topstep'){
+            // Topstep-Mirror (01.09.2026, Finns Wunsch "wieder wie früher"):
+            // Master = TSX-API-verknüpfter Account, Slave = MetaApi-verknüpfter
+            // Account — exakt die Struktur, die planMirrorRoute() als Mirror
+            // erkennt. Vor dem Routen-Regler (14.08.) entstanden diese Pläne
+            // einfach durch die Account-Wahl; der Regler-dup-Filter (nur
+            // Duplikum-Links) hatte diese Paarung unmöglich gemacht.
+            if(role === 'master' && !a.topstep?.id) return false
+            if(role === 'slave' && !(a.ma?.token && a.ma?.accountId)) return false
           } else if(_tpRoute === 'tvplus'){
             // Orbit (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
             // MIT External ID — die ID ist später das Konto-Matching im
@@ -22670,6 +22705,10 @@
             if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
           } else {
             if(!_dupIds.has(String(a.id))) return false
+            // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
+            // nie Master sein (gleiches Selbst-Spiegel-Prinzip wie beim Hedge).
+            if(role === 'slave'  && _dupSlaveIds && !_dupSlaveIds.has(String(a.id))) return false
+            if(role === 'master' && _dupSlaveIds &&  _dupSlaveIds.has(String(a.id))) return false
           }
         }
         // Beim fixen MT5-Slave die (versteckten) Firmen-/Typ-Filter überspringen
@@ -22791,6 +22830,14 @@
          && filtered.some(a => String(a.id) === String(_tpMt5HedgeAccId))){
         sel.value = String(_tpMt5HedgeAccId)
       }
+      // Dup-Weg: es gibt genau EINEN Duplikium-Slave (s. _dupSlaveIds oben) →
+      // direkt vorauswählen statt jedes Mal "— wählen —" klicken zu lassen.
+      // Greift nur, wenn nicht schon eine Auswahl wiederhergestellt wurde.
+      if(role === 'slave' && _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep'
+         && !sel.value && _dupSlaveIds && _dupSlaveIds.size === 1){
+        const _einziger = [..._dupSlaveIds][0]
+        if(filtered.some(a => String(a.id) === String(_einziger))) sel.value = _einziger
+      }
     }
 
     // Firma-Filter befüllen (nur Firmen die in accounts vorkommen)
@@ -22858,7 +22905,7 @@
       tpNqUpdateToggle()
       tpRecompute()
     }
-    ;[['tp-route-dup', 'dup'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus']].forEach(([id, r]) => {
+    ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
