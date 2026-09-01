@@ -14,7 +14,10 @@ und legt einen kompletten Tages-Schnappschuss ab:
 ├── accounts.csv                     ← eine CSV pro Tabelle (für Wiederherstellung)
 ├── trade_plans.csv
 ├── …
-├── Prophos-Backup_2026-09-01.xlsx   ← alles in EINER Excel-Mappe (zum Reinschauen)
+├── Prophos-Backup_2026-09-01.xlsx   ← alles in EINER Excel-Mappe (für Google
+│                                      Sheets: auf sheets.google.com reinziehen)
+├── _ANSEHEN.html                    ← alle Tabellen im Browser (der Mac hat kein
+│                                      Tabellenprogramm — das hier öffnet überall)
 └── _INFO.txt                        ← Zeilenzahlen + etwaige Fehler
 ```
 

@@ -16,8 +16,11 @@
 #
 # Ablage: ~/Prophos-Backups/JJJJ-MM-TT/  (PRIMÄR, lokal)
 #   - eine CSV pro Tabelle (maschinenlesbar, für Wiederherstellung/Import)
-#   - EINE Excel-Mappe mit allen Tabellen als Blätter (zum Reinschauen;
-#     öffnet auch in Google Sheets und Numbers)
+#   - EINE Excel-Mappe mit allen Tabellen als Blätter (für Google Sheets:
+#     einfach auf sheets.google.com reinziehen)
+#   - _ANSEHEN.html — alle Tabellen im Browser, weil auf dem Mac KEIN
+#     Tabellenprogramm installiert ist (festgestellt 01.09.2026: kein Numbers,
+#     kein Excel — die xlsx ging schlicht nicht auf)
 #   - _INFO.txt mit Zeilenzahlen und etwaigen Fehlern
 #   Danach Spiegel-Versuch nach iCloud Drive/Prophos-Backups (überlebt einen
 #   Mac-Ausfall). WICHTIG: macOS verweigert launchd-Hintergrundjobs den
@@ -36,6 +39,7 @@
 import csv
 import datetime
 import decimal
+import html
 import json
 import os
 import re
@@ -142,6 +146,50 @@ def nach_icloud_spiegeln(heute):
         log(f"WARNUNG: iCloud-Spiegel fehlgeschlagen: {e}")
 
 
+def ansicht_schreiben(ziel, heute, daten, ergebnis):
+    """_ANSEHEN.html: alle Tabellen als eine Browser-Seite. Der Mac hat kein
+    Tabellenprogramm (kein Numbers/Excel, 01.09.2026) — das hier öffnet überall."""
+    esc = lambda v: html.escape(str(v))
+    teile = ["""<!doctype html><html lang="de"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prophos-Backup """ + heute + """</title>
+<style>
+  body { font: 14px -apple-system, sans-serif; margin: 0; background: #f5f6f8; color: #1c1e21; }
+  header { padding: 18px 24px 6px; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .meta { color: #667; font-size: 13px; }
+  nav { padding: 8px 24px 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+  nav a { background: #fff; border: 1px solid #d5d9e0; border-radius: 14px;
+          padding: 3px 10px; text-decoration: none; color: #234; font-size: 12.5px; }
+  nav a span { color: #889; }
+  section { margin: 0 24px 26px; }
+  h2 { font-size: 15px; margin: 0 0 6px; }
+  h2 span { color: #889; font-weight: normal; font-size: 13px; }
+  .wrap { overflow-x: auto; background: #fff; border: 1px solid #d5d9e0; border-radius: 8px; }
+  table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
+  th, td { padding: 4px 10px; border-bottom: 1px solid #eceff3; text-align: left;
+           max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  th { position: sticky; top: 0; background: #f0f2f5; font-weight: 600; }
+  tr:hover td { background: #f7fafd; }
+</style>
+<header><h1>Prophos-Backup """ + heute + "</h1><div class='meta'>"
+             + esc(f"{len(daten)} Tabellen · {sum(len(z) for _, z in daten.values())} Zeilen"
+                   + " · vollständige Daten in den CSVs daneben") + "</div></header><nav>"]
+    for tab, z, _ in ergebnis:
+        if tab in daten:
+            teile.append(f"<a href='#{esc(tab)}'>{esc(tab)} <span>{z}</span></a>")
+    teile.append("</nav>")
+    for tab, (spalten, zeilen) in daten.items():
+        teile.append(f"<section><h2 id='{esc(tab)}'>{esc(tab)} <span>{len(zeilen)} Zeilen</span></h2>"
+                     "<div class='wrap'><table><tr>"
+                     + "".join(f"<th>{esc(s)}</th>" for s in spalten) + "</tr>")
+        for z in zeilen:
+            teile.append("<tr>" + "".join(f"<td>{esc(v)}</td>" for v in z) + "</tr>")
+        teile.append("</table></div></section>")
+    with open(os.path.join(ziel, "_ANSEHEN.html"), "w", encoding="utf-8") as f:
+        f.write("".join(teile))
+
+
 def main():
     cfg = json.load(open(KONFIG))
 
@@ -158,6 +206,7 @@ def main():
     mappe = Workbook()
     mappe.remove(mappe.active)  # openpyxl legt sonst ein leeres "Sheet" an
     vergebene_blaetter = set()
+    daten = {}      # tabelle -> (spalten, textzeilen) für die Browser-Ansicht
     ergebnis = []   # (tabelle, zeilen | None, fehlertext)
     fehler = 0
 
@@ -170,21 +219,22 @@ def main():
             except Exception:
                 zeilen = conn.run(f'select * from public."{tab}"')
             spalten = [c["name"] for c in conn.columns]
+            textzeilen = [[als_text(v) for v in z] for z in zeilen]
 
             with open(os.path.join(ziel, f"{tab}.csv"), "w", newline="",
                       encoding="utf-8-sig") as f:   # BOM: Excel zeigt Umlaute korrekt
                 w = csv.writer(f)
                 w.writerow(spalten)
-                for z in zeilen:
-                    w.writerow([als_text(v) for v in z])
+                w.writerows(textzeilen)
 
             blatt = mappe.create_sheet(blattname(tab, vergebene_blaetter))
             blatt.append(spalten)
-            for z in zeilen:
-                blatt.append([als_text(v) for v in z])
+            for z in textzeilen:
+                blatt.append(z)
             blatt.freeze_panes = "A2"
 
-            ergebnis.append((tab, len(zeilen), ""))
+            daten[tab] = (spalten, textzeilen)
+            ergebnis.append((tab, len(textzeilen), ""))
         except Exception as e:
             fehler += 1
             ergebnis.append((tab, None, str(e)))
@@ -195,6 +245,8 @@ def main():
     if not mappe.sheetnames:   # alle Tabellen gescheitert — leere Mappe wäre invalide
         mappe.create_sheet("leer")
     mappe.save(os.path.join(ziel, f"Prophos-Backup_{heute}.xlsx"))
+
+    ansicht_schreiben(ziel, heute, daten, ergebnis)
 
     gesamt = sum(z for _, z, _ in ergebnis if z is not None)
     with open(os.path.join(ziel, "_INFO.txt"), "w", encoding="utf-8") as f:
