@@ -21636,7 +21636,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.238'
+  const OS_TAB_BUILD = '2026-09-01.239'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22600,17 +22600,6 @@
       return { val: a.initialBalance, src: 'init', ccy: 'USD' }
     }
 
-    /* „Stand" eines nachgeladenen Kontostands, so kurz wie möglich (31.08.2026):
-     * heute nur die Uhrzeit, sonst Tag und Monat dazu — sonst steht im Dropdown
-     * eine Zeit, von der niemand weiß, ob sie von heute ist. */
-    function tpStandKurz(at){
-      if(!at) return ''
-      const d = new Date(at), n = new Date()
-      const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-      return d.toDateString() === n.toDateString()
-        ? uhr : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + uhr
-    }
-
     function tpFormatBalance(b){
       // Volle Präzision mit Tausender-Trennzeichen: 154247.50 → "$154.247"
       const v = Number(b.val) || 0
@@ -22840,15 +22829,14 @@
         const bal    = tpGetDisplayBalance(a)
         const balStr = tpFormatBalance(bal)
         // Punkt = live verknüpft. Ein aus der Cloud nachgeladener Stand (Mac/
-        // Handy, 31.08.2026) bekommt ihn nur, solange er FRISCH ist; sonst steht
-        // die Uhrzeit daneben. Der Punkt behauptet „jetzt gerade" — das darf ein
-        // zwei Stunden alter Wert nicht, auch wenn er die richtige Antwort auf
-        // „wo steht das Konto" ist.
+        // Handy, 31.08.2026) bekommt ihn nur, solange er FRISCH ist. Die
+        // Uhrzeit, die bis 01.09.2026 bei altem Stand daneben stand, ist raus
+        // (Finn: "kannst du das 21:08 - also die uhrzeit da weglassen") —
+        // der fehlende Punkt allein kennzeichnet den Stand als nicht-live.
         const alter   = (bal.src === 'MT5-Cloud' && bal.at) ? (Date.now() - bal.at) : 0
-        const standTxt = alter > 60000 ? tpStandKurz(bal.at) : ''
-        const liveMarker = (bal.src === 'init' || standTxt) ? '' : '●'
-        const balPart = standTxt ? `${balStr} (${standTxt})`
-                      : liveMarker ? `${liveMarker} ${balStr}` : balStr
+        const veraltet = alter > 60000
+        const liveMarker = (bal.src === 'init' || veraltet) ? '' : '●'
+        const balPart = liveMarker ? `${liveMarker} ${balStr}` : balStr
         // External ID suffix: Tradovate ID > MT5 login
         const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
