@@ -6057,6 +6057,10 @@
           <!-- Finns Ansage 15.08.2026: das Update-Ritual (CMDs zu, taskkill,
                start-alles.bat) als EIN Klick — app.py stößt den Neustart an -->
           <button class="btn btn-ghost" id="mtc-mouse-test" title="Testet isoliert, ob der Bot Maus und Tastatur steuern kann">🖱 Maus-Test</button>
+          <!-- Slave-/Hedge-Terminal starten (01.09.2026, Finns Wunsch: "falls ich
+               es mal aus Versehen schließe"): Panel startet die terminal64.exe aus
+               hedge_terminal_path — läuft sie schon, kommt nur das Fenster nach vorn -->
+          <button class="btn btn-ghost" id="mtc-start-slave" title="Startet das Slave-/Hedge-Terminal (MT5) dieses PCs, falls es geschlossen wurde — läuft es schon, wird nur das Fenster nach vorn geholt">🖥 Slave-Terminal starten</button>
           <button class="btn btn-ghost" id="mtc-restart-stack" title="Schließt ALLE offenen CMD-Fenster dieses PCs und fährt Copier, Panel und Backend frisch hoch (start-alles.bat)">🔄 Alles schließen &amp; neu starten</button>
           <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
         </div>
@@ -21606,7 +21610,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.232'
+  const OS_TAB_BUILD = '2026-09-01.233'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29008,6 +29012,29 @@
       }finally{
         mouseTestBtn.disabled = false
         mouseTestBtn.textContent = _t
+      }
+    })
+  }
+  // Slave-Terminal-Knopf (01.09.2026, Finns Wunsch: "falls ich es mal aus
+  // Versehen schliesse"): startet die Hedge-terminal64.exe ueber das Panel —
+  // laeuft sie schon, holt das Panel nur das Fenster nach vorn. Eigene
+  // Verdrahtung (Projektregel: keine Sammel-Handler).
+  const slaveBtn = $('mtc-start-slave')
+  if(slaveBtn){
+    if(!MT5_LOCAL) slaveBtn.style.display = 'none'
+    slaveBtn.addEventListener('click', async () => {
+      slaveBtn.disabled = true
+      const _t = slaveBtn.textContent
+      slaveBtn.textContent = '⏳ startet…'
+      try{
+        const r = await window.mtcApi('start-hedge-terminal', { method:'POST',
+          headers:{'Content-Type':'application/json'}, body:'{}' })
+        alert((r && r.ok ? '✅ ' : '⚠️ ') + ((r && (r.msg || r.error)) || 'keine Antwort'))
+      }catch(e){
+        alert('Slave-Terminal-Start fehlgeschlagen: ' + (e && e.message || e))
+      }finally{
+        slaveBtn.disabled = false
+        slaveBtn.textContent = _t
       }
     })
   }

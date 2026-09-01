@@ -2040,6 +2040,46 @@ class Handler(BaseHTTPRequestHandler):
                   flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/start-hedge-terminal":
+            # Slave-/Hedge-Terminal per Knopf starten (01.09.2026, Finns Wunsch:
+            # "falls ich es mal aus Versehen schliesse"). Braucht keinen file-
+            # Parameter — das Hedge-Terminal ist eine Pro-PC-Sache, check_fleet
+            # erzwingt ohnehin denselben Pfad in allen Configs. Pfad kommt
+            # AUSSCHLIESSLICH aus der Config (nicht ueber die API setzbar).
+            # Kein Login-Zwang wie bei start_terminal: der Login ist im Hedge-
+            # Terminal gespeichert (derselbe Weg wie der Copier-Autostart), und
+            # der Copier prueft hedge_expected_login beim Verbinden selbst hart.
+            hpath = str(base_config().get("hedge_terminal_path") or "").strip()
+            if not hpath:
+                return self._send(200, json.dumps({"ok": False, "msg":
+                    "hedge_terminal_path ist in der Config nicht gesetzt"}, ensure_ascii=False))
+            if os.path.basename(hpath).lower() != "terminal64.exe":
+                return self._send(200, json.dumps({"ok": False, "msg":
+                    "hedge_terminal_path muss auf eine terminal64.exe zeigen"}, ensure_ascii=False))
+            if not os.path.exists(hpath):
+                return self._send(200, json.dumps({"ok": False, "msg":
+                    f"nicht gefunden: {hpath}"}, ensure_ascii=False))
+            install_dir = os.path.dirname(os.path.abspath(hpath))
+            pids = provision.terminal_pids(install_dir)
+            if pids:
+                # Zweiter Start derselben Installation waere ein frisches Fenster
+                # mit Login-Dialog (Fund 14.08.2026) — laeuft es, nur nach vorn
+                # holen. Prozess OHNE Fenster ist ein Zombie (Muster
+                # start_terminal, 18.08.2026): beenden und unten kalt starten.
+                if _fenster_nach_vorn(pids[0]):
+                    print(f"[panel] Hedge-Terminal laeuft (PID {pids[0]}) — Fenster nach vorn.", flush=True)
+                    return self._send(200, json.dumps({"ok": True, "msg":
+                        "Slave-Terminal läuft schon — Fenster ist vorn"}, ensure_ascii=False))
+                print("[panel] Hedge-Terminal-Prozess ohne Fenster (Zombie) — beende und starte kalt neu.", flush=True)
+                for pid in provision.terminal_pids(install_dir):
+                    provision._taskkill(pid, grace_s=5)
+            subprocess.Popen([hpath], cwd=install_dir)
+            _front_when_up(install_dir)
+            print(f"[panel] Hedge-Terminal gestartet: {hpath}", flush=True)
+            return self._send(200, json.dumps({"ok": True, "msg":
+                "Slave-Terminal gestartet — Login ist gespeichert, das Fenster kommt gleich nach vorn"},
+                ensure_ascii=False))
+
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)
         if not inst:
