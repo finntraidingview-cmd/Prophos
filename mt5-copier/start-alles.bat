@@ -1,9 +1,52 @@
 @echo off
+title Prophos-Start
 rem Ein Klick startet den ganzen Stack: Copier-Fenster + Panel-Fenster + Backend.
 rem Das Hedge-Terminal startet der Copier selbst, falls es nicht laeuft.
 rem NUR EINMAL klicken -- laufende Instanzen schuetzen sich selbst
 rem (Copier: Status-Sperre, Panel: Port belegt, Backend: Port-Probe).
 cd /d "%~dp0"
+
+rem ── Vorpruefung (01.09.2026, Finns neuer PC) ────────────────────────────
+rem Bisher hat dieser Starter blind drei cmd-Fenster aufgemacht. Fehlt auf
+rem einem frischen Rechner eine Voraussetzung, sterben die drei sofort MIT
+rem ihrem Fehlertext -- uebrig bleibt ein PC, auf dem "einfach nichts
+rem passiert". Das ist der teuerste Zustand, den eine Software haben kann:
+rem sie kennt den Grund und zeigt ihn niemandem.
+where python >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo   ============================================================
+  echo    PYTHON FEHLT auf diesem PC.
+  echo   ============================================================
+  echo   Backend, Panel und Copier sind Python-Programme -- ohne Python
+  echo   startet keines davon. Auf einem neuen Rechner ist das der
+  echo   Normalfall, es ist nichts kaputt.
+  echo.
+  echo   Eine Taste druecken = Python jetzt installieren.
+  echo   Fenster schliessen  = nichts tun.
+  echo.
+  pause
+  winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
+  echo.
+  echo   Installation durch. WICHTIG: dieses Fenster schliessen und
+  echo   start-alles.bat erneut doppelklicken -- der Suchpfad fuer python
+  echo   wird erst in einem NEUEN Fenster wirksam.
+  echo.
+  pause
+  exit /b
+)
+if not exist "start-prophos.bat" (
+  echo.
+  echo   ============================================================
+  echo    FALSCHER ORDNER.
+  echo   ============================================================
+  echo   Neben start-alles.bat muessen start-prophos.bat, start-panel.bat
+  echo   und start-copier.bat liegen. Hier liegt: %CD%
+  echo.
+  pause
+  exit /b
+)
+
 start "MT5-Hedge-Copier" cmd /c start-copier.bat
 start "Copier-Panel" cmd /c start-panel.bat
 start "Prophos-Backend" cmd /c start-prophos.bat
@@ -36,15 +79,72 @@ if exist "C:\tv-reader\start-reader.bat" (
 if exist "C:\tv-reader\start-verbinder.bat" (
   start "Prophos TV-Verbinder" cmd /c "C:\tv-reader\start-verbinder.bat"
 )
+rem (15.08.2026) Nur PCs mit ALTEM Backend-Setup betrifft das -- seit 01.09.2026
+rem steht der Hinweis deshalb hinter einer Pruefung, statt auf jedem frischen
+rem Rechner Ratlosigkeit zu stiften (Finn am neuen PC: "warum geht es nicht mehr").
+if exist "C:\prophos" (
+  echo.
+  echo   ACHTUNG, alter Backend-Ordner C:\prophos gefunden:
+  echo   Nicht nur das alte start-local-backend-Fenster schliessen -- auch die
+  echo   Aufgabenplanungs-Task des alten Starts LOESCHEN (Aufgabenplanung
+  echo   oeffnen, Task suchen, loeschen). Sonst rennen nach dem naechsten
+  echo   Reboot ZWEI app.py um Port 5000, und das alte (nie updatende) gewinnt.
+)
+
 echo.
-echo (15.08.2026) WICHTIG bei PCs mit ALTEM Backend-Setup (C:\prophos):
-echo Nicht nur das alte start-local-backend-Fenster schliessen -- auch die
-echo Aufgabenplanungs-Task des alten Starts LOESCHEN (Aufgabenplanung
-echo oeffnen, Task suchen, loeschen). Sonst rennen nach dem naechsten
-echo Reboot ZWEI app.py um Port 5000, und das alte (nie updatende) gewinnt.
+echo   Warte auf das Backend (Port 5000)...
+echo   Beim ERSTEN Start auf einem neuen PC dauert das ein paar Minuten --
+echo   das Backend-Fenster zieht sich flask/requests/signalrcore selbst nach.
 echo.
-timeout /t 15 >nul
+call :warten
+if errorlevel 1 (
+  echo.
+  echo   ============================================================
+  echo    BACKEND LAEUFT NICHT.
+  echo   ============================================================
+  echo   Der Grund steht im Fenster "Prophos-Backend" -- das Fenster hier
+  echo   bleibt offen, damit nichts mehr wegklappt.
+  echo.
+  echo   Ist das Fenster "Prophos-Backend" gar nicht da, ist es sofort
+  echo   gestorben. Dann in diesem Ordner start-prophos.bat einzeln
+  echo   doppelklicken: dort bleibt der Fehlertext stehen.
+  echo.
+  pause
+  exit /b
+)
+echo.
+echo   ============================================================
+echo    Backend laeuft:  http://localhost:5000
+echo    Copier-Panel:    http://127.0.0.1:8770
+echo   ============================================================
+echo.
+start "" http://localhost:5000
+timeout /t 8 >nul
 exit /b
+
+:warten
+rem Bis zu 90 Sekunden auf den lauschenden Port 5000 warten (01.09.2026).
+rem Vorher hat dieser Starter drei Fenster aufgemacht und sich nach 15
+rem Sekunden selbst geschlossen -- ob davon etwas ueberlebt hat, sah man nie.
+rem Genau das ist Finn am neuen PC passiert: "eine Datei doppelklicken und es
+rem faehrt hoch" hat gestimmt, solange die Voraussetzungen da waren, und ist
+rem stillschweigend nichts getan, als sie fehlten. Ein Starter, der nicht
+rem nachsieht, ob er etwas gestartet hat, ist nur ein Wunsch.
+rem Geprueft wird mit python statt mit netstat: die Zustandsspalte von netstat
+rem ist UEBERSETZT ("ABHOEREN" auf deutschem Windows), ein Filter auf
+rem "LISTENING" haette hier nie gegriffen und immer Misserfolg gemeldet.
+rem Ein echter Verbindungsversuch beweist ausserdem mehr als ein offener Port:
+rem er beweist, dass jemand ANNIMMT. Python ist an dieser Stelle sicher da,
+rem die Vorpruefung oben laesst sonst gar nicht durch.
+set _n=0
+:warteschleife
+python -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',5000))==0 else 1)" >nul 2>&1
+if not errorlevel 1 exit /b 0
+set /a _n+=1
+if %_n% GEQ 18 exit /b 1
+echo   ... noch nicht da (Versuch %_n% von 18)
+timeout /t 5 /nobreak >nul
+goto warteschleife
 
 :swap
 rem Ersetzt %1 durch %1.newa, wenn der Download mindestens %2 Bytes hat.

@@ -126,6 +126,58 @@ def ensure_ea_source():
               f"kompiliert wird dann mit dem vorhandenen Stand.", flush=True)
 
 
+def ensure_starter_source():
+    """start-alles.bat aus dem Repo aktuell halten (01.09.2026, Finns neuer PC).
+
+    Die .py-Dateien ziehen sich seit jeher selbst nach — die .bat NIE. Auf jedem
+    PC lief deshalb der Starter vom Tag der Einrichtung weiter, und eine
+    Verbesserung am Start-Weg erreichte genau die Rechner nicht, auf denen der
+    Start klemmt. Finn am neuen PC: "ich will einfach eine Datei oeffnen und
+    das Backend faehrt hoch, SO WIE ES IMMER WAR" — das stimmte auch, solange
+    die Voraussetzungen da waren; fehlte eine, tat der Starter stillschweigend
+    nichts.
+
+    VERZOEGERT um drei Minuten, und das ist der ganze Trick an dieser Funktion:
+    das Panel wird VON start-alles.bat gestartet, und die Batchdatei laeuft in
+    den ersten ~90 Sekunden noch (sie wartet auf den Backend-Port). Eine
+    laufende .bat zu ueberschreiben ist unter Windows undefiniert — cmd liest
+    sie zeilenweise per Dateiposition weiter. Nach drei Minuten ist sie sicher
+    durch, und gebraucht wird die neue Fassung ohnehin erst beim naechsten
+    Start."""
+    def _spaeter():
+        time.sleep(180)
+        url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
+               "main/mt5-copier/start-alles.bat")
+        dst = os.path.join(HERE, "start-alles.bat")
+        try:
+            import urllib.request
+            data = urllib.request.urlopen(url, timeout=15).read()
+            # Positiv-Signatur statt blossem Groessencheck: eine halb geladene
+            # oder falsche Datei darf den einzigen Startweg nicht ersetzen.
+            if len(data) < 800 or b"start-prophos.bat" not in data:
+                return
+            old = b""
+            if os.path.exists(dst):
+                with open(dst, "rb") as f:
+                    old = f.read()
+            if data == old:
+                return
+            if old:
+                with open(dst + ".prev", "wb") as f:
+                    f.write(old)
+            tmp = dst + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, dst)
+            print(f"[panel] start-alles.bat aus dem Repo aktualisiert "
+                  f"({len(data)} Bytes) — wirkt ab dem naechsten Start.", flush=True)
+        except Exception as e:
+            print(f"[panel] start-alles.bat-Download fehlgeschlagen "
+                  f"({type(e).__name__}) — der vorhandene Starter bleibt.", flush=True)
+
+    threading.Thread(target=_spaeter, daemon=True).start()
+
+
 def ensure_bot_source():
     """order_bot.py aus dem Repo holen/aktuell halten (15.08.2026, erster
     Bot-Test: 'keine Antwort vom Bot' — die Datei lag gar nicht auf dem PC,
@@ -2382,6 +2434,8 @@ def main():
     ensure_ea_source()
     # Order-Bot aktuell halten (die .bat-Loops kennen die Datei nicht)
     ensure_bot_source()
+    # Starter aktuell halten — verzoegert, s. Funktionskommentar
+    ensure_starter_source()
     # Klick-Bot-Abhaengigkeit (Maus-Steuerung) einmalig installieren
     threading.Thread(target=ensure_pywinauto, daemon=True).start()
     # Liegengebliebene Login-inis mit Klartext-Passwort aufraeumen (Review-Fund
