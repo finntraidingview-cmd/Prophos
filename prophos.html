@@ -18135,7 +18135,11 @@
   function closeLinkTopstepModal(){
     _linkTsxId = null
     _linkTargetId = null
-    document.getElementById('linkTopstepModal').classList.remove('open')
+    const lm = document.getElementById('linkTopstepModal')
+    lm.classList.remove('open')
+    // z-index-Anhebung aus dem Trade-Plan-Kontext zurücknehmen (01.09.2026) —
+    // im normalen Accounts-Flow ist das ein No-op.
+    lm.style.zIndex = ''
   }
   document.getElementById('linkTopstepCancel').addEventListener('click', closeLinkTopstepModal)
   document.getElementById('linkTopstepCancel2').addEventListener('click', closeLinkTopstepModal)
@@ -18164,7 +18168,15 @@
       if(idx >= 0) accounts[idx] = rowToAccount(data)
       renderAccounts()
       const linkedName = accounts[idx]?.name || ''
+      // Vor closeLinkTopstepModal sichern — das nullt _linkTargetId. Das
+      // Trade-Plan-Modal (Topstep-Weg) hört auf dieses Event und wählt den
+      // frisch verknüpften Account direkt als Master vor (01.09.2026).
+      const _linkedAccId = String(_linkTargetId)
       closeLinkTopstepModal()
+      try{
+        document.dispatchEvent(new CustomEvent('prophos:tsx-linked',
+          { detail: { tsxId: String(tsx.id), accountId: _linkedAccId } }))
+      }catch(_){ }
       showSyncBanner(`✓ "${tsx.name}" verknüpft mit "${linkedName}"`, 'ok')
       hideSyncBannerSoon()
     }catch(e){
@@ -21147,6 +21159,10 @@
     if(filterRow) filterRow.style.display = fixed ? 'none' : ''
     const slaveSel = document.getElementById('tp-slave')
     if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
+    // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
+    // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
+    const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
+    if(masterFilterRow) masterFilterRow.style.display = _tpRoute === 'topstep' ? 'none' : ''
     // TP/Richtung bleiben im Plan-Modal VERSTECKT (Finns Korrektur nach dem
     // ersten Test, 28.08.2026): eingestellt wird die Order im zweiten Popup
     // („Weiter →"), das sie per „Speichern" AM PLAN ablegt — gestartet wird
@@ -21612,7 +21628,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.236'
+  const OS_TAB_BUILD = '2026-09-01.237'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22618,6 +22634,50 @@
       const firmFilter = document.getElementById(`tp-${role}-firm-filter`)?.value || ''
       const typeFilter = document.getElementById(`tp-${role}-type-filter`)?.value || ''
       const previousValue = sel.value
+      // Topstep-Weg, Master: Quelle ist die LIVE TSX-API-Liste — wie auf der
+      // Mirror-Seite, NICHT die Prophos-Verknüpfungen (01.09.2026, Finns
+      // zweiter Anlauf: "da sollen ja alle acc sein die ich per topstep API
+      // da ha"; der erste Wurf zeigte nur bereits verlinkte Accounts, und
+      // die waren alt/archiviert). Verlinkte tragen als value die Prophos-ID
+      // (der Plan braucht sie für Struktur-Erkennung, P&L und Kette),
+      // unverlinkte tragen 'tsx:<id>' — ihre Wahl öffnet das bestehende
+      // Verknüpfen-Modal, danach kommen sie vorausgewählt zurück.
+      if(_tpRoute === 'topstep' && role === 'master'){
+        if(!tsState.token){
+          sel.innerHTML = '<option value="">— erst mit TopstepX verbinden (Topstep Mirror) —</option>'
+          return
+        }
+        const tsxAccs = tsState.accounts || []
+        if(!tsxAccs.length){
+          sel.innerHTML = '<option value="">— keine handelbaren TSX-Accounts in der API —</option>'
+          return
+        }
+        let mHtml = '<option value="">— wählen —</option>'
+        for(const t of tsxAccs){
+          const linked = (accounts || []).find(a => a.topstep && String(a.topstep.id) === String(t.id))
+          const balStr = fmtMoney(t.balance)
+          if(linked){
+            mHtml += `<option value="${linked.id}">${escapeHtml(t.name || '–')}  ·  ${escapeHtml(balStr)}  ·  ✓ ${escapeHtml(linked.name)}</option>`
+          } else {
+            mHtml += `<option value="tsx:${t.id}">${escapeHtml(t.name || '–')}  ·  ${escapeHtml(balStr)}  ·  noch nicht verlinkt</option>`
+          }
+        }
+        // Edit eines Mirror-Plans, dessen Master nicht mehr in der API-Liste
+        // steht (Account abgelaufen/rotiert): trotzdem anbieten, sonst wirkt
+        // der gespeicherte Plan unbearbeitbar.
+        if(_editingPlanId){
+          const p = tradePlans.find(x => String(x.id) === String(_editingPlanId))
+          const m = p && (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+          if(m?.topstep?.id && !tsxAccs.some(t => String(t.id) === String(m.topstep.id))){
+            mHtml += `<option value="${m.id}">${escapeHtml(m.topstep.name || m.name)}  ·  nicht mehr in der API-Liste</option>`
+          }
+        }
+        sel.innerHTML = mHtml
+        if(previousValue && [...sel.options].some(o => String(o.value) === String(previousValue))){
+          sel.value = previousValue
+        }
+        return
+      }
       // Beim Edit: aktuell verknüpfte Account-IDs sind "geschützt" und werden auch
       // angezeigt, selbst wenn sie archiviert sind (sonst kann man den Plan nicht bearbeiten)
       let protectedIds = new Set()
@@ -22686,12 +22746,9 @@
             }
           } else if(_tpRoute === 'topstep'){
             // Topstep-Mirror (01.09.2026, Finns Wunsch "wieder wie früher"):
-            // Master = TSX-API-verknüpfter Account, Slave = MetaApi-verknüpfter
-            // Account — exakt die Struktur, die planMirrorRoute() als Mirror
-            // erkennt. Vor dem Routen-Regler (14.08.) entstanden diese Pläne
-            // einfach durch die Account-Wahl; der Regler-dup-Filter (nur
-            // Duplikum-Links) hatte diese Paarung unmöglich gemacht.
-            if(role === 'master' && !a.topstep?.id) return false
+            // Slave = MetaApi-verknüpfter Account — exakt die Struktur, die
+            // planMirrorRoute() als Mirror erkennt. Der Master kommt hier gar
+            // nicht an: er wird oben direkt aus der TSX-API-Liste gebaut.
             if(role === 'slave' && !(a.ma?.token && a.ma?.accountId)) return false
           } else if(_tpRoute === 'tvplus'){
             // Orbit (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
@@ -22830,6 +22887,12 @@
          && filtered.some(a => String(a.id) === String(_tpMt5HedgeAccId))){
         sel.value = String(_tpMt5HedgeAccId)
       }
+      // Topstep-Weg: genau EIN MetaApi-Slave (Finns Fusion) → vorauswählen,
+      // gleiche Bequemlichkeit wie der fixe Hedge bei Echo/Orbit (01.09.2026,
+      // Finns zweiter Anlauf: "+ der slave mein fusion").
+      if(role === 'slave' && _tpRoute === 'topstep' && !sel.value && filtered.length === 1){
+        sel.value = String(filtered[0].id)
+      }
       // Dup-Weg: es gibt genau EINEN Duplikium-Slave (s. _dupSlaveIds oben) →
       // direkt vorauswählen statt jedes Mal "— wählen —" klicken zu lassen.
       // Greift nur, wenn nicht schon eine Auswahl wiederhergestellt wurde.
@@ -22928,6 +22991,45 @@
         b._tpHooked = true
       }
     })
+    // Topstep-Weg: Wahl eines UNVERLINKTEN TSX-Accounts ('tsx:<id>') öffnet
+    // das bestehende Verknüpfen-Modal — eigene Verdrahtung, kein Sammel-
+    // Handler (01.09.2026). Nach dem Verknüpfen meldet sich der Confirm-
+    // Handler per 'prophos:tsx-linked' und der Account ist vorausgewählt.
+    // Einmal-Bindung nach dem _tpHooked-Muster: die Closure referenziert nur
+    // Modul-State + DOM-per-ID, genau wie die Filter-Listener hierüber.
+    if(masterSel && !masterSel._tpTsxHooked){
+      masterSel.addEventListener('change', () => {
+        if(_tpRoute !== 'topstep') return
+        const v = String(masterSel.value || '')
+        if(v.startsWith('tsx:') && typeof openLinkTopstepModal === 'function'){
+          // Beide Modals teilen z-index 200, DOM-Reihenfolge entscheidet —
+          // linkTopstepModal steht FRÜHER im DOM und läge sonst HINTER dem
+          // Plan-Modal. Gezielt anheben; closeLinkTopstepModal räumt auf.
+          const lm = document.getElementById('linkTopstepModal')
+          if(lm) lm.style.zIndex = '210'
+          openLinkTopstepModal(v.slice(4))
+        }
+      })
+      masterSel._tpTsxHooked = true
+    }
+    const _tpmEl = document.getElementById('tradePlanModal')
+    if(_tpmEl && !_tpmEl._tsxLinkedHooked){
+      document.addEventListener('prophos:tsx-linked', ev => {
+        if(_tpRoute !== 'topstep') return
+        if(!document.getElementById('tradePlanModal')?.classList.contains('open')) return
+        tpRenderAccountSelect('master')
+        const accId = ev?.detail?.accountId
+        const ms = document.getElementById('tp-master')
+        if(accId && ms && [...ms.options].some(o => String(o.value) === String(accId))){
+          ms.value = String(accId)
+        }
+        tpNqUpdateToggle()
+        tpRecompute()
+        if(typeof tpUpdateMasterDailyDdInfo === 'function') tpUpdateMasterDailyDdInfo()
+      })
+      _tpmEl._tsxLinkedHooked = true
+    }
+
     // Hedge-Auflösung im Hintergrund anstoßen — seit 28.08.2026 auf JEDEM
     // Gerät (Cloud-Fallback über mt5_live/echo_hedge), vorher nur MT5_LOCAL:
     // am Mac blieb das Slave-Dropdown sonst unvorbelegt (Finns Fund beim
@@ -23652,6 +23754,12 @@
     msg('')
 
     if(!masterId || !slaveId){ msg('Master und Slave müssen gewählt sein.', 'err'); return }
+    // Topstep-Weg: 'tsx:<id>' ist ein noch UNVERLINKTER API-Account — ohne
+    // Prophos-Account dahinter gibt es keinen Plan (Struktur-Erkennung, P&L,
+    // Kette). Die Wahl im Dropdown öffnet das Verknüpfen-Fenster.
+    if(String(masterId).startsWith('tsx:')){
+      msg('Dieser Topstep-Account ist noch nicht verknüpft — wähle ihn im Dropdown an, dann öffnet sich das Verknüpfen-Fenster.', 'err'); return
+    }
     if(masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
     if(!masterRisk || !masterQty || !slaveRisk){
       msg('Risiko und Anzahl ausfüllen.', 'err'); return
