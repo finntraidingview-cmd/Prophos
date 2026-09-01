@@ -19472,7 +19472,15 @@
     const _m = accounts.find(a => String(a.id) === String(p.masterAccountId))
     const _s = accounts.find(a => String(a.id) === String(p.slaveAccountId))
     const extOf = acc => acc ? (acc.externalId || acc.topstep?.id || acc.ma?.login || '') : ''
-    const mExt = extOf(_m)
+    // Topstep-verlinkter Master: die API-Nummer (#27174223) sagt in der
+    // TopstepX-Oberfläche nichts — dort identifiziert der Account-NAME, und
+    // der unterscheidet sich nur am ENDE (…-60090618 vs …-93679420). Deshalb
+    // das letzte Namens-Segment zeigen, voller Name im Hover (01.09.2026,
+    // Finn: "das ich hie bei den geplanten trades immer die ID vom acc sehe
+    // — das ich weiß welchen ich traden muss").
+    const _mTsxName = _m?.topstep?.name ? String(_m.topstep.name) : ''
+    const mExt = _mTsxName ? ('…' + (_mTsxName.split('-').pop() || _mTsxName)) : extOf(_m)
+    const mExtTitle = _mTsxName || String(mExt || '')
     // Liefert Duplikum nichts, speist der lokale MT5-Copier die Badge (15.08.2026)
     const mDup = getDupBalanceForAccount(p.masterAccountId) || getMt5TcBalanceForAccount(p.masterAccountId)
     const sDup = getDupBalanceForAccount(p.slaveAccountId)  || getMt5TcBalanceForAccount(p.slaveAccountId)
@@ -19485,7 +19493,7 @@
     else if(isPlanned) dotCls += ' tc2-dot-prio-' + (p.priority || 'medium')
 
     // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
-    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6">#${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
+    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
       + ` · ×<b style="color:var(--violet)">${mult}</b>`
       + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`
       + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
@@ -21628,7 +21636,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.237'
+  const OS_TAB_BUILD = '2026-09-01.238'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
