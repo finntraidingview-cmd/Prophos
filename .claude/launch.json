@@ -1,0 +1,123 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prophos",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "app.py"
+      ],
+      "port": 5000
+    },
+    {
+      "name": "prophos-static-check",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5050"
+      ],
+      "port": 5050
+    },
+    {
+      "name": "prophos-static-check-2",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5057"
+      ],
+      "port": 5057
+    },
+    {
+      "name": "prophos-static-check-3",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5061"
+      ],
+      "port": 5061
+    },
+    {
+      "name": "prophos-static-check-4",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5069"
+      ],
+      "port": 5069
+    },
+    {
+      "name": "prophos-static-check-5",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5073"
+      ],
+      "port": 5073
+    },
+    {
+      "name": "prophos-static-check-6",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5081"
+      ],
+      "port": 5081
+    },
+    {
+      "name": "prophos-static-check-7",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5087"
+      ],
+      "port": 5087
+    },
+    {
+      "name": "prophos-static-check-8",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5091"
+      ],
+      "port": 5091
+    },
+    {
+      "name": "prophos-static-check-9",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5099"
+      ],
+      "port": 5099
+    },
+    {
+      "name": "prophos-static-check-10",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5103"
+      ],
+      "port": 5103
+    },
+    {
+      "name": "prophos-static-check-11",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5107"
+      ],
+      "port": 5107
+    }
+  ]
+}

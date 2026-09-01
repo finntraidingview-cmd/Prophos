@@ -11782,6 +11782,10 @@
             // der Tab den Empfänger-Build hat und woran ein Skip liegt.
             // typeof-Guard: Idiom gegen Scope-/Reihenfolge-Fallen (esc-Lehre).
             signal_rx: (typeof _osStand !== 'undefined') ? _osStand : null,
+            // Hintergrund-Riegel (01.09.2026): „vorn/open" oder „versteckt/open"
+            // heißt, der Tab tickt auch ungedrosselt weiter — „…/aus" oder
+            // „…/closed" heißt, er ist zurück in Chromes Drosselung gefallen.
+            signal_wach: (typeof _osWachStand === 'function') ? _osWachStand() : null,
             // Build-Stempel des TABS (28.08.2026, Remote-Close-Debug) — s.
             // OS_TAB_BUILD: beweist per SQL, welchen Build dieser PC-Tab fährt.
             tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null
@@ -21602,7 +21606,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.231'
+  const OS_TAB_BUILD = '2026-09-01.232'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22161,6 +22165,91 @@
   // nicht unterscheidbar „alter Build im Tab" vs. „Logik-Fehler").
   let _osStand = 'boot'
 
+  /* ── Hintergrund-Riegel (01.09.2026, Finns Fund: „funktioniert echt perfekt,
+   *    nur wenn der Windows-PC im Prophos-Tab drin ist") ──
+   *
+   * Chrome drosselt Timer einer VERSTECKTEN Seite: erst auf 1x/Sekunde, und
+   * nach 5 Minuten im Hintergrund auf 1x/MINUTE („intensive throttling").
+   * Genau daran starb der Remote-Start, sobald auf dem PC ein anderer Tab
+   * vorne war — an zwei Stellen gleichzeitig:
+   *   - der 5s-Empfänger unten lief nur noch minütlich und kam damit ans
+   *     Frische-Gate (OS_FRISCHE_S = 180s), statt in Sekunden zu claimen;
+   *   - schlimmer: der 1s-Bereitschafts-Ticker im Check (tpPreflightMt5)
+   *     schaffte in seinen 240s Timeout nur noch 4 Runden statt 240 — ein
+   *     bereits geclaimtes Signal verhungerte also mitten im Check.
+   *
+   * Chrome nimmt Seiten mit aktiver WebRTC-Verbindung ausdrücklich von der
+   * intensiven Drosselung aus (RTCPeerConnection mit offenem DataChannel).
+   * Also genau das: eine Verbindung des Tabs MIT SICH SELBST. Zwei lokale
+   * Peers, leere iceServers-Liste — nur Host-Kandidaten, kein STUN/TURN,
+   * es verlässt nichts den Rechner und es fragt nichts um Erlaubnis.
+   * Übrig bleibt die normale 1x/Sekunde-Drosselung; alle Timer im Signal-Pfad
+   * sind >= 1000ms, laufen also unverändert weiter.
+   *
+   * NICHT der stille Audio-Track: das ist der bekanntere Trick, aber Chrome
+   * zählt einen stillen Track ausdrücklich nicht als Ton — er wirkt nicht.
+   *
+   * Nur auf den PCs (MT5_LOCAL). Handy und Mac senden bloß, deren Tab ist
+   * beim Senden ohnehin vorne. */
+  let _osWach = null   // { a, b, kanal }
+
+  async function _osWachStart(){
+    if(_osWach || !MT5_LOCAL || typeof RTCPeerConnection !== 'function') return
+    try{
+      const a = new RTCPeerConnection({ iceServers: [] })
+      const b = new RTCPeerConnection({ iceServers: [] })
+      // Kandidaten direkt über Kreuz reichen — es gibt keine Gegenstelle,
+      // die das sonst täte.
+      a.onicecandidate = e => { if(e.candidate) b.addIceCandidate(e.candidate).catch(() => {}) }
+      b.onicecandidate = e => { if(e.candidate) a.addIceCandidate(e.candidate).catch(() => {}) }
+      const kanal = a.createDataChannel('prophos-wach')
+      _osWach = { a, b, kanal }
+      const angebot = await a.createOffer()
+      await a.setLocalDescription(angebot)
+      await b.setRemoteDescription(angebot)
+      const antwort = await b.createAnswer()
+      await b.setLocalDescription(antwort)
+      await a.setRemoteDescription(antwort)
+    }catch(e){
+      _osWachStop()
+      console.warn('[signal] Hintergrund-Riegel nicht gestartet:', e)
+    }
+  }
+
+  function _osWachStop(){
+    if(!_osWach) return
+    try{ _osWach.kanal.close() }catch(_){}
+    try{ _osWach.a.close() }catch(_){}
+    try{ _osWach.b.close() }catch(_){}
+    _osWach = null
+  }
+
+  /* Zustand für den Flotten-Push — damit vom Mac aus per SQL BEWEISBAR ist,
+   * dass der Riegel steht und der Tab trotz Hintergrund weiterläuft
+   * (Schritt-Spur-Doktrin, wie signal_rx daneben). Form: „versteckt/open". */
+  function _osWachStand(){
+    const sicht = (typeof document !== 'undefined' && document.hidden) ? 'versteckt' : 'vorn'
+    let k = 'aus'
+    try{ if(_osWach && _osWach.kanal) k = String(_osWach.kanal.readyState) }catch(_){}
+    return sicht + '/' + k
+  }
+
+  /* Wächter: schließt der Kanal (Windows-Standby, Netzwechsel, Chrome räumt
+   * auf), fällt der Tab still in die Drosselung zurück — das wäre exakt der
+   * alte Fehler, nur unsichtbar. Also nachbauen. Läuft der Wächter selbst
+   * gedrosselt, repariert er eben binnen einer Minute statt binnen 30s.
+   * „connecting" wird in Ruhe gelassen — sonst baut er endlos neu. */
+  function _osWachPruefen(){
+    if(!MT5_LOCAL) return
+    if(!_osWach){ _osWachStart(); return }
+    let tot = false
+    try{
+      tot = _osWach.kanal.readyState === 'closed'
+            || ['failed', 'closed', 'disconnected'].includes(String(_osWach.a.connectionState))
+    }catch(_){ tot = true }
+    if(tot){ _osWachStop(); _osWachStart() }
+  }
+
   async function _osErgebnis(sigId, res){
     if(_osActive && _osActive.sigId === sigId){
       if(_osActive.timeout) clearTimeout(_osActive.timeout)
@@ -22352,6 +22441,10 @@
     finally{ _osBusy = false }
   }
   setInterval(orderSignalTick, 5000)
+  // Riegel VOR dem ersten Tick hochziehen — er muss stehen, bevor der Tab
+  // überhaupt in den Hintergrund geraten kann.
+  _osWachStart()
+  setInterval(_osWachPruefen, 30000)
   /* ══ ENDE REMOTE-TRADE-SIGNALE ══ */
 
   function openTradePlanModal(editId){
