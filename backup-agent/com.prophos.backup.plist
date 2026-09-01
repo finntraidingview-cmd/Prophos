@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Eingerichtet 01.09.2026: tägliches Supabase-Voll-Backup nach iCloud Drive
+         (backup-agent/backup.py). 06:30, damit es vor dem Handelstag durch ist.
+         RunAtLoad zusätzlich, damit ein über Nacht ausgeschalteter Mac das
+         Backup beim nächsten Hochfahren nachholt (idempotent — der Tagesordner
+         wird einfach überschrieben). Diese Datei ist die Repo-Kopie; die aktive
+         liegt unter ~/Library/LaunchAgents/. -->
+    <key>Label</key>
+    <string>com.prophos.backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin exec python3 -u /Applications/Prophos/backup-agent/backup.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/finnhermann/Library/Logs/prophos-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/finnhermann/Library/Logs/prophos-backup.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Applications/Prophos</string>
+</dict>
+</plist>
