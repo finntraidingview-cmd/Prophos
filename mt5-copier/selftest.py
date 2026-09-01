@@ -984,6 +984,35 @@ def main():
     finally:
         order_bot._klick_absolut, order_bot._warte = _echt_klick, _echt_warte
 
+    # ── Order-Bot: Anker-Merge + Stempel-Spur (01.09.2026, Tempo-Umbau) ────
+    # Der Handel-Tab speichert seinen Klickpunkt jetzt in DERSELBEN Anker-Datei
+    # wie der Zeilen-Scan. Geprueft wird genau der Unfall, der ohne Merge
+    # passiert waere: ein Zeilen-Treffer (SL/TP oder Close) wischt den
+    # Tab-Punkt weg — und umgekehrt.
+    import tempfile as _tempfile
+    with _tempfile.TemporaryDirectory() as _td:
+        _ap = os.path.join(_td, "anker-config.json")
+        chk("ORDER-BOT: Anker-Lesen ohne Datei → leeres dict, kein Fehler",
+            order_bot._anker_lesen(_ap) == {} and order_bot._anker_lesen(None) == {})
+        order_bot._anker_schreiben(_ap, x_frac=0.4, y_off=316)
+        order_bot._anker_schreiben(_ap, handel_x_frac=0.3, handel_y_off=42)
+        order_bot._anker_schreiben(_ap, x_frac=0.5, y_off=300)
+        _a = order_bot._anker_lesen(_ap)
+        chk("ORDER-BOT: Anker-Schreiben MERGED — Tab-Punkt ueberlebt den Zeilen-Treffer",
+            _a.get("x_frac") == 0.5 and _a.get("y_off") == 300
+            and _a.get("handel_x_frac") == 0.3 and _a.get("handel_y_off") == 42)
+        with open(_ap, "w", encoding="utf-8") as _f:
+            _f.write("kaputt{")
+        chk("ORDER-BOT: kaputte Anker-Datei → leeres dict statt Absturz",
+            order_bot._anker_lesen(_ap) == {})
+
+    _sp = order_bot._StempelSpur()
+    _sp.append("Terminal betreten")
+    _sp.append("F9-Dialog offen")
+    chk("ORDER-BOT: Stempel-Spur traegt Sekunden pro Station, _spur liest sie wie bisher",
+        all("s·" in z for z in _sp) and _sp[0].endswith("Terminal betreten")
+        and "Terminal betreten → " in order_bot._spur(_sp))
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

@@ -627,6 +627,23 @@ def _spur(trail):
     return " → ".join(list(trail) + zusatz)
 
 
+class _StempelSpur(list):
+    """Spur-Liste, die jeden Eintrag mit der Sekunde seit Lauf-Start stempelt
+    (01.09.2026, Finns Tempo-Beschwerde: 'Popup offen, dann 10 Sekunden bis
+    zum naechsten Schritt'). Die API-Bilanz in _spur() beziffert nur das
+    API-Lesen — WO die uebrige Zeit zwischen den Stationen blieb, war weiter
+    Schaetzung. Jetzt traegt jede Station ihre Sekunde: '14.2s·Aendern-Dialog
+    offen' direkt nach '3.1s·Position offen' zeigt den Fresser ohne Raten.
+    Alle Helfer haengen unveraendert per append() an und bekommen den Stempel
+    geschenkt; _spur() und das Panel-Log lesen die Liste wie bisher."""
+    def __init__(self):
+        super().__init__()
+        self._t0 = time.time()
+
+    def append(self, s):
+        super().append(f"{time.time() - self._t0:.1f}s·{s}")
+
+
 def _api_lesen(path, expected, symbol=None):
     """Lesen ueber die (offen gehaltene) Terminal-Verbindung. Rueckgabe:
     {"login", "positionen": [...], "ref_ask", "ref_bid", "contract_size",
@@ -1365,7 +1382,7 @@ def _tv_element(bf, *pfad):
 def modus_tvorder(cmd):
     """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
     bevor der naechste beginnt."""
-    trail = []
+    trail = _StempelSpur()
     res = {"ok": False, "retry_ok": True, "msg": "", "trail": "",
            "schritt": "start"}
 
@@ -2320,7 +2337,34 @@ def _fremde_dialoge_schliessen(hauptfenster):
         pass
 
 
-def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
+def _anker_lesen(pfad):
+    """Anker-Datei als dict lesen — fehlt/kaputt = leeres dict."""
+    if not pfad:
+        return {}
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _anker_schreiben(pfad, **felder):
+    """Felder in die Anker-Datei MERGEN statt sie zu ueberschreiben
+    (01.09.2026): seit der Handel-Tab seinen Klickpunkt mitspeichert, darf
+    der Zeilen-Anker den Tab-Punkt nicht mehr wegschreiben — und umgekehrt."""
+    if not pfad:
+        return
+    d = _anker_lesen(pfad)
+    d.update(felder)
+    try:
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+
+def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False):
     """Finns Weg als Band-Scan, OHNE jeden UIA-Anker (18.08.2026: auf diesem
     Build sind Handel-Liste, Kontostand-Zeile UND der Position-aendern-Reiter
     im frischen F9-Dialog fuer UIA unsichtbar — der .58-Lauf hat den Reiter-
@@ -2345,30 +2389,36 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
     # Trade direkt angesprungen). Passt der Anker nicht mehr (Fenster anders,
     # mehr Zeilen), faellt die Pruefung durch und der Scan uebernimmt.
     punkte = []
-    if anker_pfad:
-        try:
-            with open(anker_pfad, encoding="utf-8") as f:
-                a = json.load(f)
-            ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
-            ay = hr.bottom - int(a["y_off"])
-            if maus_grenze is None or ay >= maus_grenze:
-                punkte.append(("Anker", ax, ay))
-        except Exception:
-            pass
-    # Erfahrungswert zuerst (18.08.2026, Finns Treffer beim 17. Punkt =
-    # -316px): die Suche startet dort, wo die Zeile bei Standard-Toolbox
-    # praktisch immer liegt, und faechert von da auf — der pro PC gemerkte
-    # Anker schlaegt das ohnehin. Band bis zur HALBEN Fensterhoehe statt hart
-    # 400px (30.08.2026, beide PCs trafen nie): eine hoehere Toolbox/andere
-    # Aufloesung darf die Zeile nicht aus dem Band schieben; nach oben
-    # deckelt ohnehin maus_grenze (untere Fensterhaelfte).
-    band_max = max(400, (hr.bottom - hr.top) // 2)
-    offsets = sorted(range(60, band_max, 16), key=lambda o: abs(o - 316))
-    for off in offsets:
-        y = hr.bottom - off
-        if maus_grenze is not None and y < maus_grenze:
-            continue
-        punkte.append((f"-{off}px", gx, y))
+    try:
+        a = _anker_lesen(anker_pfad)
+        ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
+        ay = hr.bottom - int(a["y_off"])
+        if maus_grenze is None or ay >= maus_grenze:
+            punkte.append(("Anker", ax, ay))
+    except Exception:
+        pass
+    # Anker-SCHNELLWEG (01.09.2026, Finns Tempo-Beschwerde): nur_anker=True
+    # probiert AUSSCHLIESSLICH den gemerkten Punkt — sitzt er (Normalfall:
+    # Terminal blieb offen, Zeile liegt wo sie beim letzten Trade lag), ist
+    # der Dialog nach einem Rechtsklick offen. Ohne gemerkten Anker gibt es
+    # nichts zu probieren: sofort zurueck, der Aufrufer faehrt den vollen Weg.
+    if nur_anker and not punkte:
+        return None
+    if not nur_anker:
+        # Erfahrungswert zuerst (18.08.2026, Finns Treffer beim 17. Punkt =
+        # -316px): die Suche startet dort, wo die Zeile bei Standard-Toolbox
+        # praktisch immer liegt, und faechert von da auf — der pro PC gemerkte
+        # Anker schlaegt das ohnehin. Band bis zur HALBEN Fensterhoehe statt hart
+        # 400px (30.08.2026, beide PCs trafen nie): eine hoehere Toolbox/andere
+        # Aufloesung darf die Zeile nicht aus dem Band schieben; nach oben
+        # deckelt ohnehin maus_grenze (untere Fensterhaelfte).
+        band_max = max(400, (hr.bottom - hr.top) // 2)
+        offsets = sorted(range(60, band_max, 16), key=lambda o: abs(o - 316))
+        for off in offsets:
+            y = hr.bottom - off
+            if maus_grenze is not None and y < maus_grenze:
+                continue
+            punkte.append((f"-{off}px", gx, y))
 
     grau = 0   # Punkte, deren Menue offen war, aber 'Aendern' ausgegraut = neben der Zeile
     for runde in ("Rechtsklick-Menue", "Doppelklick"):
@@ -2408,13 +2458,9 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
                 continue
             if _dialog_gehoert_zu(d, ticket):
                 trail.append(f"Aendern-Dialog offen ({runde}-Scan @ {pname})")
-                if anker_pfad:
-                    try:
-                        with open(anker_pfad, "w", encoding="utf-8") as f:
-                            json.dump({"x_frac": (px_ - hr.left) / max(1, hr.right - hr.left),
-                                       "y_off": hr.bottom - py_}, f)
-                    except Exception:
-                        pass
+                _anker_schreiben(anker_pfad,
+                                 x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
+                                 y_off=hr.bottom - py_)
                 return d
             try:
                 d.type_keys("{ESC}", set_foreground=False)
@@ -2425,12 +2471,15 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None):
     # sagen beim naechsten Fehlversuch sofort, WORAN es lag — nur ausgegraute
     # Punkte = alle Klicks lagen neben der Zeile (Geometrie/Band), gar keine
     # Menues = die Rechtsklicks kommen nicht an (Klick-Weg).
-    trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
-                 f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
+    if nur_anker:
+        trail.append(f"Anker-Schnellweg ohne Treffer ({grau}x ausgegraut)")
+    else:
+        trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
+                     f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
     return None
 
 
-def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
+def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None):
     """Toolbox auf den 'Handel'-Tab stellen, BEVOR der Bot die Position
     anklickt (28.08.2026, Finns Live-Fund auf Moritz' PC): nach einem frischen
     Terminal-Start stand die Toolbox auf 'Posteingang' (die 'neuer Account'-
@@ -2446,6 +2495,29 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
     def _passt(t):
         t = (t or "").strip()
         return t == "Handel" or t == "Trade" or t.startswith(("Handel", "Trade"))
+    # Gemerkter Tab-Klickpunkt ZUERST (01.09.2026, Finns Tempo-Beschwerde
+    # '10 Sekunden pro Schritt'): die Element-Suche unten enumeriert
+    # schlimmstenfalls den KOMPLETTEN UIA-Baum des Terminals — Marktuebersicht,
+    # Navigator, Charts — und auf Builds, deren Toolbox fuer UIA unsichtbar
+    # ist (18.08.), laufen ALLE fuenf Durchgaenge jedes Mal ins Leere. Der
+    # Reiter sitzt aber fest in der Toolbox-Leiste, also wird sein einmal
+    # gefundener Punkt pro PC in der Anker-Datei gemerkt und direkt
+    # angeklickt. Ein Klick auf den bereits aktiven Reiter ist folgenlos;
+    # ob der RICHTIGE Dialog aufgeht, prueft ohnehin der Aufrufer per Ticket.
+    try:
+        a = _anker_lesen(anker_pfad)
+        wr = w.rectangle()
+        tx = wr.left + int((wr.right - wr.left) * float(a["handel_x_frac"]))
+        ty = wr.bottom - int(a["handel_y_off"])
+        if maus_grenze is None or ty >= maus_grenze:
+            _maus_fahren(tx, ty, schritte=4)
+            _klick_absolut(tx, ty)
+            if trail is not None:
+                trail.append(f"Handel-Tab per Anker geklickt @({tx},{ty})")
+            _warte(0.3, 0.3)
+            return True
+    except Exception:
+        pass
     # Breit suchen: je nach MT5-Build ist der Toolbox-Reiter TabItem, Custom,
     # Button oder Text — notfalls der ganze Baum (None). Alle Treffer sammeln.
     treffer = []
@@ -2485,6 +2557,16 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None):
                 _klick_absolut(cx, cy)
                 if trail is not None:
                     trail.append(f"Handel-Tab geklickt @({cx},{cy})")
+                # Punkt fuer den naechsten Lauf merken (01.09.2026, s.o.) —
+                # relativ zum Fenster wie der Zeilen-Anker, damit er einen
+                # Resize ueberlebt.
+                try:
+                    wr = w.rectangle()
+                    _anker_schreiben(anker_pfad,
+                                     handel_x_frac=(cx - wr.left) / max(1, wr.right - wr.left),
+                                     handel_y_off=wr.bottom - cy)
+                except Exception:
+                    pass
                 _warte(0.3, 0.3)
                 return True
         except Exception:
@@ -2513,9 +2595,6 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     except Exception:
         maus_grenze = None
     _fremde_dialoge_schliessen(w)
-    # Toolbox zuerst auf 'Handel' — sonst ist die Positionsliste unsichtbar
-    # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
-    _handel_tab_aktivieren(w, trail, maus_grenze)
 
     # Echo pausiert? (28.08.2026, Not-Aus) — dann gar nicht erst anfangen zu
     # klicken. Die Order ist da laengst platziert; SL/TP traegt Finn von Hand
@@ -2524,8 +2603,24 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
         trail.append("⏸ Echo pausiert — keine SL/TP-Klicks")
         return None
 
-    # 0) Finns Weg als Band-Scan — braucht keinerlei UIA-Anker (s. _reihen_scan)
-    dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
+    # 0) Anker-SCHNELLWEG zuerst (01.09.2026, Finns Tempo-Beschwerde: 'von
+    # Popup oeffnen bis SL setzen soll das grob in 10 Sekunden gehen'). Die
+    # Tab-Aktivierung stand bisher VOR jedem Scan und bezahlte auf Builds mit
+    # UIA-unsichtbarer Toolbox jeden Lauf mit mehreren vollen Baum-Durchlaeufen
+    # — der Hauptteil der '10 Sekunden pro Schritt'. Im Normalfall (Terminal
+    # blieb offen, Toolbox steht noch auf 'Handel', Anker vom letzten Trade
+    # sitzt) ist der Aendern-Dialog nach EINEM Rechtsklick offen. Nur wenn der
+    # Schnellweg leer ausgeht (frischer Start, Posteingang-Fall vom 28.08.,
+    # verschobene Zeile), laeuft die Reparatur: Toolbox auf 'Handel', dann der
+    # volle Band-Scan. Sicherheit unveraendert: geklickt wird nie blind, und
+    # ob der RICHTIGE Dialog offen ist, entscheidet weiter _dialog_gehoert_zu.
+    dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad,
+                       nur_anker=True)
+    if dlg is None:
+        # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar
+        # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
+        _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
+        dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
 
     kandidaten, ticket_da = [], False
     if dlg is None:
@@ -2869,7 +2964,8 @@ def run(cfg_path, cmd):
 
     # Schritt-Spur (15.08.2026): jede Station vermerken — steht bei Erfolg UND
     # Fehler in der Meldung, damit Finn/ich sofort sieht, wo der Bot steht.
-    trail = []
+    # Seit 01.09.2026 mit Sekunden-Stempel pro Station (s. _StempelSpur).
+    trail = _StempelSpur()
 
     # Start-Versatz (28.08.2026, Finns Sorge): starten mehrere Flotten-Instanzen
     # im selben Moment, blieben sie trotz gestreuter Einzelschritte anfangs eng
@@ -3244,7 +3340,8 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     _fremde_dialoge_schliessen(w)
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
-    _handel_tab_aktivieren(w, trail, maus_grenze)
+    # Mit anker_pfad: der gemerkte Tab-Punkt erspart die Baum-Suche (01.09.2026).
+    _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
     if is_paused():
         trail.append("⏸ Echo pausiert — kein Close-Klick")
         return "pause"
@@ -3252,16 +3349,14 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     # anker-Datei, die Positions-Zeile ist dieselbe, die der SL/TP-Weg beim
     # Platzieren schon Ticket-geprueft getroffen hat.
     punkte = []
-    if anker_pfad:
-        try:
-            with open(anker_pfad, encoding="utf-8") as f:
-                a = json.load(f)
-            ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
-            ay = hr.bottom - int(a["y_off"])
-            if ay >= maus_grenze:
-                punkte.append(("Anker", ax, ay))
-        except Exception:
-            pass
+    try:
+        a = _anker_lesen(anker_pfad)
+        ax = hr.left + int((hr.right - hr.left) * float(a["x_frac"]))
+        ay = hr.bottom - int(a["y_off"])
+        if ay >= maus_grenze:
+            punkte.append(("Anker", ax, ay))
+    except Exception:
+        pass
     # Band bis zur halben Fensterhoehe statt hart 400px — gleicher Grund wie
     # im SL/TP-Scan (30.08.2026, s. _reihen_scan).
     band_max = max(400, (hr.bottom - hr.top) // 2)
@@ -3305,13 +3400,11 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         trail.append(f"'Position schliessen' geklickt ({pname})")
         # Treffer-Stelle merken (dieselbe Datei/Form wie der SL/TP-Scan) —
         # dass der Menuepunkt existierte, beweist die Positions-Zeile.
-        if anker_pfad:
-            try:
-                with open(anker_pfad, "w", encoding="utf-8") as f:
-                    json.dump({"x_frac": (px_ - hr.left) / max(1, hr.right - hr.left),
-                               "y_off": hr.bottom - py_}, f)
-            except Exception:
-                pass
+        # MERGEN statt roh schreiben (01.09.2026): sonst wischte der Close den
+        # gemerkten Handel-Tab-Punkt wieder weg.
+        _anker_schreiben(anker_pfad,
+                         x_frac=(px_ - hr.left) / max(1, hr.right - hr.left),
+                         y_off=hr.bottom - py_)
         dlg = knopf = None
         # Der Haftungsausschluss wird pro Lauf genau EINMAL behandelt: MT5
         # zeigt ihn nur beim allerersten Ein-Klick-Handel eines Terminals, und
@@ -3494,7 +3587,7 @@ def run_close(cfg_path, cmd):
                        f"(neben #{ticket} noch {andere}) — der Zeilen-Scan kann die richtige "
                        f"Zeile nicht sicher treffen, im Terminal von Hand schliessen."}
 
-    trail = []
+    trail = _StempelSpur()
     _warte(0.0, 1.2)   # Start-Versatz wie run() (28.08.2026, Flotten-Streuung)
 
     # 2) Ins Terminal gehen -> Guard
