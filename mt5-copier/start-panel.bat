@@ -10,7 +10,12 @@ echo  Fenster zu = Panel aus (die Copier laufen weiter).
 echo =========================================================
 echo.
 
-start "" http://127.0.0.1:8770
+rem (01.09.2026) Kein Browser-Start mehr von hier. "start" oeffnet den
+rem STANDARDBROWSER -- auf Finns PCs Edge, und der ging bei jedem Start mit
+rem der 127.0.0.1-Adresse auf, obwohl er in Chrome arbeitet. Das Panel ist
+rem eine Nebenoberflaeche; wer sie braucht, hat die Adresse oben im Banner.
+rem Die eine Seite, die automatisch aufgehen soll, macht start-alles.bat --
+rem gezielt in Chrome und mit localhost.
 
 :loop
 call :update

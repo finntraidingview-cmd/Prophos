@@ -47,6 +47,21 @@ if not exist "start-prophos.bat" (
   exit /b
 )
 
+rem ── Geschwister-.bat auffrischen, BEVOR sie starten (01.09.2026) ────────
+rem Die drei Starter hatten nie ein Selbst-Update: sie laufen in Endlos-
+rem schleifen, und eine LAUFENDE Batchdatei zu ersetzen ist unter Windows
+rem undefiniert (cmd liest sie zeilenweise per Dateiposition weiter). Hier
+rem ist der einzige sichere Moment -- gleich starten sie erst. Antwortet
+rem trotzdem schon jemand auf 5000 oder 8770, laeuft der Stack bereits und
+rem es wird NICHTS ersetzt.
+set _frisch=1
+call :portbelegt 5000
+if not errorlevel 1 set _frisch=0
+call :portbelegt 8770
+if not errorlevel 1 set _frisch=0
+if "%_frisch%"=="1" call :bat_auffrischen
+if "%_frisch%"=="0" echo   (Panel/Backend laufen schon - Starter-Dateien bleiben unangetastet)
+
 start "MT5-Hedge-Copier" cmd /c start-copier.bat
 start "Copier-Panel" cmd /c start-panel.bat
 start "Prophos-Backend" cmd /c start-prophos.bat
@@ -118,8 +133,29 @@ echo    Backend laeuft:  http://localhost:5000
 echo    Copier-Panel:    http://127.0.0.1:8770
 echo   ============================================================
 echo.
-start "" http://localhost:5000
+rem Gezielt CHROME statt "start <url>" (01.09.2026, Finns Ansage): "start"
+rem nimmt den Standardbrowser, und der ist auf diesen PCs Edge. Nur wenn
+rem Chrome nirgends liegt, bleibt der Standardbrowser als Rueckfalllinie --
+rem lieber der falsche Browser als gar keine Oberflaeche.
+set _chrome=
+if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" set _chrome=%ProgramFiles%\Google\Chrome\Application\chrome.exe
+if exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" set _chrome=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe
+if exist "%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe" set _chrome=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe
+if defined _chrome start "" "%_chrome%" "http://localhost:5000"
+if not defined _chrome start "" "http://localhost:5000"
 timeout /t 8 >nul
+exit /b
+
+:portbelegt
+rem Antwortet auf 127.0.0.1:%1 jemand? errorlevel 0 = ja.
+python -c "import socket,sys;s=socket.socket();s.settimeout(1);sys.exit(0 if s.connect_ex(('127.0.0.1',%1))==0 else 1)" >nul 2>&1
+exit /b
+
+:bat_auffrischen
+powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/mt5-copier/';foreach($f in @('start-copier.bat','start-panel.bat','start-prophos.bat')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newa') -TimeoutSec 25}catch{}}"
+call :swap "start-copier.bat" 500
+call :swap "start-panel.bat" 500
+call :swap "start-prophos.bat" 500
 exit /b
 
 :warten
