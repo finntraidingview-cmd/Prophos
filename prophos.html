@@ -1302,6 +1302,26 @@
   #dashboard-view .tc2-chip-issue{background:rgba(240,68,56,.12);color:#F04438;animation:tc2PulseIssue 1.6s ease-in-out infinite}
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
+
+  /* — System-Sticker links oben auf der Trade-Karte (01.09.2026, Finns Ansage:
+       „oben links ins Eck so ein kleiner Sticker, wo jeweils drauf steht, was
+       die sind"). Er sagt, WELCHE Engine den Trade faehrt — Duplikium / Echo /
+       Orbit / Mirror / TopstepX. Den Kopf-Streifen bekommen nur Karten MIT
+       Sticker (tc2-has-sys); alles ohne bleibt exakt so hoch wie bisher, damit
+       die Erledigt-Liste nicht um 276 Zeilen waechst. — */
+  #dashboard-view .tc2-sys{
+    position:absolute;left:0;top:0;display:inline-flex;align-items:center;gap:4px;
+    padding:2px 9px 3px 8px;border-radius:9px 0 8px 0;
+    font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    line-height:1.35;white-space:nowrap
+  }
+  #dashboard-view .tc2-sys::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
+  #dashboard-view .tc2.tc2-has-sys{padding-top:21px}
+  #dashboard-view .tc2-sys-dup{background:rgba(37,99,235,.12);color:#2563EB}
+  #dashboard-view .tc2-sys-mt5{background:rgba(14,151,149,.15);color:#0E7A78}
+  #dashboard-view .tc2-sys-tvplus{background:rgba(124,58,237,.12);color:#7C3AED}
+  #dashboard-view .tc2-sys-mirror{background:rgba(136,124,252,.17);color:#5B4EE0}
+  #dashboard-view .tc2-sys-tsx{background:rgba(71,85,105,.11);color:#475569}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
   #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
@@ -2584,6 +2604,9 @@
       contain:layout paint;
     }
     #dashboard-view .tc2-dot{margin-top:5px}
+    /* Sticker mit dem groesseren Mobil-Radius (14px) buendig in die Ecke */
+    #dashboard-view .tc2-sys{border-radius:13px 0 10px 0;font-size:10px;padding:3px 11px 4px 10px}
+    #dashboard-view .tc2.tc2-has-sys{padding-top:27px}
     #dashboard-view .tc2-main{flex:1 1 calc(100% - 19px)}
     #dashboard-view .tc2-pair{flex-wrap:wrap;row-gap:2px}
     #dashboard-view .tc2-name{font-size:14.5px}
@@ -11659,6 +11682,34 @@
   }
   setInterval(mt5PlanPollTick, mt5PlanPoll.INTERVAL)
 
+  /* ── SYSTEM-STICKER (01.09.2026, Finns Ansage: „oben links ins Eck so ein
+   * kleiner Sticker, wo jeweils drauf steht, was die sind ... dass man ein
+   * bisschen cleaner sieht, fuer welchem System laufen die Trades gerade") ──
+   * Auf jeder Trade-Karte steht jetzt links oben, WELCHE Engine sie faehrt.
+   * Die Zuordnung ist bewusst dieselbe Reihenfolge wie in tpPreflightAndStart
+   * und dupLotsHasOpenPlan: explizite route gewinnt, Mirror per Struktur-
+   * Erkennung, alles uebrige ist Duplikium. Wuerde der Sticker anders raten
+   * als diese beiden, behauptete er neben den Live-Chips etwas Falsches. */
+  const SYS_STICKER = {
+    dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
+    mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
+    tvplus: ['Orbit',     'Orbit — Order läuft von Hand in TradingView, Echo hedgt automatisch'],
+    mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
+    tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
+  }
+  function sysStickerHtml(key){
+    const cfg = SYS_STICKER[key]
+    if(!cfg) return ''
+    return `<span class="tc2-sys tc2-sys-${key}" title="${esc(cfg[1])}">${esc(cfg[0])}</span>`
+  }
+  function planSysKey(p){
+    if(!p) return 'dup'
+    if(p.route === 'mt5')    return 'mt5'
+    if(p.route === 'tvplus') return 'tvplus'
+    if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return 'mirror'
+    return 'dup'
+  }
+
   /* ── FLEET-LIVE (18.08.2026, Finns Fleet-Feature) ──────────────────────────
    * Push: jeder PC mit lokalem Copier meldet alle 5s seine Instanzen nach
    * Supabase (mt5_live — geteilt wie die Kasse, jeder Prophos-User sieht
@@ -12049,8 +12100,12 @@
         ? `<span class="tc2-timer" style="color:var(--sub)">vor ${alterS}s</span>`
         : ep ? `<span class="tc2-timer tc-live-timer" data-started="${new Date(ep * 1000).toISOString()}">—<span style="color:var(--sub-2)"> live</span></span>`
              : `<span class="tc2-timer">live</span>`
-      const tc2Karte = (farbe, links, rechts, sub, metric, frisch) =>
-        `<div class="tc2 tc2-open"${frisch ? '' : ' style="opacity:.55"'}>`
+      // sys = Schluessel aus SYS_STICKER; die Quelle stand bisher nur als Wort
+      // in der Sub-Zeile — jetzt traegt sie der Sticker und die Sub-Zeile wird
+      // um genau dieses Wort kuerzer (01.09.2026).
+      const tc2Karte = (farbe, links, rechts, sub, metric, frisch, sys) =>
+        `<div class="tc2 tc2-open${sys ? ' tc2-has-sys' : ''}"${frisch ? '' : ' style="opacity:.55"'}>`
+        + sysStickerHtml(sys)
         + `<span class="tc2-dot tc2-dot-live" style="background:${farbe}"></span>`
         + `<div class="tc2-main"><div class="tc2-pair">`
         + `<span class="tc2-name" title="${esc(links)}">${esc(links)}</span>`
@@ -12137,9 +12192,9 @@
         const sDir = (sHasL && sHasS) ? 'MIX' : sHasS ? 'SHORT' : sHasL ? 'LONG' : null
         lege(karten, m.pKey, tc2Karte(personen.get(m.pKey).farbe,
           m.accName, slaveName || null,
-          subPerson(m.pKey) + `Duplikium · <b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
+          subPerson(m.pKey) + `<b>${seite(m.side)}</b> ${esc(String(m.symbol))}${m.openPrice ? ` @ ${fmtPreis(m.openPrice)}` : ''}`,
           lotChip('MASTER', m.lots, dirVon(m.side)) + lotChip('SLAVE', slaveLots, sDir) + zeitChip(m.openEpoch, m.frisch, m.alterS),
-          m.frisch))
+          m.frisch, 'dup'))
       }
       for(const k of kopienEintraege) if(!k.verbraucht) ohneMaster.push(k)
 
@@ -12210,9 +12265,9 @@
           const hDir = (hHasL && hHasS) ? 'MIX' : hHasS ? 'SHORT' : hHasL ? 'LONG' : null
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, 'Hedge ' + r.hedge_login,
-            subPerson(pKey) + `Echo · <b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
+            subPerson(pKey) + `<b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
             lotChip('MASTER', Number(p.volume), p.type === 0 ? 'LONG' : 'SHORT') + lotChip('SLAVE', hedgeLots(p.ident), hDir) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
-            frisch))
+            frisch, 'mt5'))
         }
         if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
           + waisen.map(([k, v]) => v.map(h =>
@@ -12234,9 +12289,9 @@
         const pnl = p.pnl != null
           ? `<span class="tc2-pnl" style="color:${Number(p.pnl) >= 0 ? '#15803d' : '#b91c1c'}">${Number(p.pnl) >= 0 ? '+' : ''}${Number(p.pnl).toFixed(0)}</span>` : ''
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, String(p.accountName), null,
-          subPerson(pKey) + `TopstepX · <b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
+          subPerson(pKey) + `<b>${seite(p.side)}</b> ${esc(String(p.symbol))}`,
           lotChip('KT', Number(p.size) || 0, dirVon(p.side)) + pnl + zeitChip(null, frisch, ltAlterS == null ? 0 : ltAlterS),
-          frisch))
+          frisch, 'tsx'))
       }
 
       const uebrig = ohneMaster
@@ -12275,8 +12330,8 @@
         html += `<div style="font-size:11.5px;font-weight:700;color:var(--sub);margin:10px 0 6px">Hedge (geteilt / ohne Master)</div><div class="trade-cards">`
         for(const k of uebrig){
           html += tc2Karte('var(--sub-2)', k.accName, null,
-            `Duplikium · <b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
-            lotChip('SLAVE', k.lots, dirVon(k.side)) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch)
+            `<b>${seite(k.side)}</b> ${esc(String(k.symbol))}`,
+            lotChip('SLAVE', k.lots, dirVon(k.side)) + zeitChip(k.openEpoch, k.frisch, k.alterS), k.frisch, 'dup')
         }
         html += '</div>'
       }
@@ -19382,6 +19437,11 @@
     const isCompleted = p.status === 'completed'
     const isPending   = isOpen && autoTrack?.pendingFinish?.has(String(p.id))
 
+    // System-Sticker links oben (01.09.2026, Finns Ansage). Bewusst NUR auf
+    // den aktiven Karten: „fuer welchem System laufen die Trades gerade" —
+    // die Erledigt-Liste (276 Zeilen) bleibt dadurch so kompakt wie bisher.
+    const sysBadge = isCompleted ? '' : sysStickerHtml(planSysKey(p))
+
     const masterName = p.masterName || '— gelöscht —'
     const slaveName  = p.slaveName  || '— gelöscht —'
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
@@ -19504,9 +19564,10 @@
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>`
     }
 
-    const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}`
+    const cls = `tc2 tc2-${p.status}${isPending ? ' tc2-is-pending' : ''}${sysBadge ? ' tc2-has-sys' : ''}`
     return `
       <div class="${cls}" data-plan-id="${p.id}">
+        ${sysBadge}
         <span class="${dotCls}"></span>
         <div class="tc2-main">
           <div class="tc2-pair">
@@ -19515,9 +19576,6 @@
             <span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>
             ${(p.route === 'mt5' && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
-              : ''}
-            ${p.route === 'tvplus'
-              ? `<span class="tc2-chip" style="background:rgba(124,58,237,.12);color:#7C3AED" title="Orbit — Order läuft von Hand in TradingView, Echo hedgt automatisch">Orbit</span>`
               : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
@@ -21544,7 +21602,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.230'
+  const OS_TAB_BUILD = '2026-09-01.231'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
