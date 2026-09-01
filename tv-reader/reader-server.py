@@ -68,6 +68,7 @@ _dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 # gemerkt, damit Terminal und Ferndiagnose ihn zeigen koennen.
 _blind_grund = ""
 _blind_seit = 0.0
+_letzte_zahl = None   # letzte gemeldete Positionszahl (Beweisspur)
 
 
 def _schreibe_datei(stand):
@@ -132,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit
+        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -245,6 +246,18 @@ class Handler(BaseHTTPRequestHandler):
 
         pos = daten.get("positionen", [])
         zeit = time.strftime("%H:%M:%S")
+        # Beweisspur bei jeder Aenderung der Positionszahl (01.09.2026).
+        # Die Live-Zeile unten ueberschreibt sich selbst — ein Wechsel auf
+        # "flat" war damit nach 0,25 s nicht mehr nachweisbar, obwohl genau
+        # daraus der Copier einen Close ableitet. Wechsel bleiben jetzt stehen,
+        # inklusive der Userscript-Version: so ist von aussen belegbar, welcher
+        # Stand die Aussage getroffen hat (der Grund, warum VERSION im
+        # Userscript ueberhaupt doppelt steht).
+        if _letzte_zahl is None or len(pos) != _letzte_zahl:
+            print(f"\n[{zeit}] Positionen {_letzte_zahl} -> {len(pos)}"
+                  f" (Userscript {daten.get('version') or 'unbekannt'},"
+                  f" Tab {'vorn' if daten.get('sichtbar') else 'verdeckt/unbekannt'})")
+            _letzte_zahl = len(pos)
         if pos:
             zeilen = " · ".join(
                 f"{p.get('symbol')} {p.get('seite')} {p.get('menge')}"

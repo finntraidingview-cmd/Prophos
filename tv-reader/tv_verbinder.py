@@ -146,6 +146,7 @@ def main():
 
     seq = 0
     zustand = None       # letzter Anzeige-Zustand — Wechsel kommen als eigene Zeile
+    letzte_n = None      # letzte geschriebene Positionszahl (Beweisspur, 01.09.2026)
     while True:
         stand = hole_stand(cfg["reader_url"])
         ok, grund = pruefe_stand(stand, max_alter_s=float(cfg["max_datenalter_s"]))
@@ -166,6 +167,30 @@ def main():
                 print(f"\n[WARN] Snapshot nicht schreibbar: {e}")
             n = csv.count("\nP;")
             uebersprungen = f" · {len(skips)} uebersprungen" if skips else ""
+            # ── Beweisspur bei JEDER Aenderung der Positionszahl (01.09.2026) ──
+            # Bis hierher lief alles ueber die eine \r-Zeile, die sich selbst
+            # ueberschreibt: ein Snapshot mit 0 Positionen — also der Befehl,
+            # den Hedge zuzumachen — war nach 0,5 s spurlos weg. Genau die
+            # Krankheit aus den Arbeits-Learnings ("die Software kennt den
+            # Grund und wirft ihn weg"), nur hier besonders teuer: der Copier
+            # handelt danach. Wechsel bleiben jetzt als eigene Zeile stehen,
+            # MIT dem Rohbefund des Readers, aus dem sie entstanden sind.
+            if n != letzte_n:
+                roh = stand.get("positionen") or []
+                alter = round(time.time() - float(stand.get("ts") or 0) / 1000.0, 1)
+                print(f"\n[{time.strftime('%H:%M:%S')}] Positionszahl {letzte_n} -> {n}"
+                      f" (seq {seq}) · Reader meldete {len(roh)} Zeile(n),"
+                      f" ts {alter}s alt, blind={bool(stand.get('blind'))}"
+                      + (f", Grund: {stand.get('blind_grund')}" if stand.get("blind_grund") else ""))
+                if skips:
+                    print(f"           uebersprungen: "
+                          + " · ".join(f"{s[0]} ({s[1]})" for s in skips[:5]))
+                if roh and n == 0:
+                    # Der gefaehrlichste Fall: der Reader SIEHT Zeilen, aber
+                    # keine davon wird zur Position. Dann liegt es an Symbol,
+                    # Richtung oder Menge — und der Hedge geht trotzdem zu.
+                    print(f"           ROHZEILEN: {json.dumps(roh[:3], ensure_ascii=False)}")
+                letzte_n = n
             print(f"\r[{time.strftime('%H:%M:%S')}] seq {seq} · {n} Pos{uebersprungen}"
                   .ljust(100)[:100], end="", flush=True)
         time.sleep(float(cfg["intervall_s"]))
