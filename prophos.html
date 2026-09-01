@@ -19271,7 +19271,18 @@
       }else if(lane.status === 'review'){
         list.sort((a,b) => new Date(b.startedAt||0) - new Date(a.startedAt||0))
       }else{
+        // Erst nach System gruppiert (01.09.2026, Finn: „zuerst alle Echo-
+        // Trades, dann alle Duplikium-Trades — nicht durchmischt"), innerhalb
+        // der Gruppe wie bisher Prio, dann Datum. Gruppen-Schlüssel ist
+        // planSysKey — dieselbe Zuordnung wie der System-Sticker links oben,
+        // sonst könnte eine Karte im falschen Block stehen. Vorberechnet in
+        // eine Map, weil planSysKey per planMirrorRoute Struktur prüft und
+        // der Comparator O(n·log n) mal läuft.
+        const sysOrder = { mt5:0, tvplus:1, mirror:2, tsx:3, dup:4 }
+        const sysOf = new Map(list.map(p => [p, sysOrder[planSysKey(p)] ?? 9]))
         list.sort((a,b) => {
+          const so = sysOf.get(a) - sysOf.get(b)
+          if(so !== 0) return so
           const pw = priorityWeight(a.priority) - priorityWeight(b.priority)
           if(pw !== 0) return pw
           return new Date(a.plannedFor||0) - new Date(b.plannedFor||0)
@@ -21636,7 +21647,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.239'
+  const OS_TAB_BUILD = '2026-09-01.240'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
