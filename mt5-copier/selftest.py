@@ -1022,6 +1022,15 @@ def main():
         all("s·" in z for z in _sp) and _sp[0].endswith("Terminal betreten")
         and "Terminal betreten → " in order_bot._spur(_sp))
 
+    # UAC-/Update-Hinweis (02.09.2026): NUR bei Terminal-nicht-erreichbar, nie
+    # bei Konto-/Symbol-Sachfehlern — sonst schickt er Finn an den PC, obwohl
+    # gar keine Windows-Abfrage offen ist.
+    chk("ORDER-BOT: UAC-Hinweis bei Verbindungsfehler, nicht bei Konto/Symbol",
+        order_bot._ist_verbindungsfehler("Terminal-Verbindung fehlgeschlagen: (-1, 'x')")
+        and order_bot._ist_verbindungsfehler("Kein Konto verbunden (account_info leer).")
+        and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 14190828).")
+        and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

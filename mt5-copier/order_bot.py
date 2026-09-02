@@ -753,6 +753,30 @@ def is_paused():
     return os.path.exists(_PAUSE_FLAG)
 
 
+# Hinweistext fuer den Fall "Terminal reagiert nicht" (02.09.2026, Finns
+# Screenshot der Windows-Benutzerkontensteuerung: "Moechten Sie zulassen, dass
+# durch diese App Aenderungen … — Client Terminal AVX2"). Diese Abfrage kommt
+# vom MT5-SELBST-UPDATE, wenn ein Terminal nach laengerer Downtime startet und
+# MetaQuotes einen neuen Build hat — sie steht auf dem SICHEREN DESKTOP, den
+# KEIN Programm (auch der Bot nicht) per SendInput erreichen darf; das ist der
+# Sinn der UAC. Der Bot kann sie also nicht wegklicken — aber er kann die Lage
+# BENENNEN, statt still an einem nie erscheinenden Fenster zu scheitern. Genau
+# das war Finns Wunsch: nicht auto-klicken, sondern klar melden.
+_UAC_HINWEIS = ("Evtl. steht am PC eine Windows-Abfrage offen (MT5-Update / "
+                "Benutzerkontensteuerung 'Client Terminal…') — einmal auf 'Ja' "
+                "klicken, dann laeuft das Terminal. Das kann der Bot nicht "
+                "abnehmen (Windows-Sicherheitsabfrage).")
+
+
+def _ist_verbindungsfehler(txt):
+    """Riecht der Lese-Fehler nach 'Terminal nicht erreichbar' (dann passt der
+    UAC/Update-Hinweis) statt nach Konto-/Symbol-Sachfehler (dann waere er
+    irrefuehrend)?"""
+    t = (txt or "").lower()
+    return any(k in t for k in ("terminal-verbindung", "kein konto verbunden",
+                                "terminal nicht lesbar", "lesen fehlgeschlagen"))
+
+
 def _warte(minimum, streuung):
     """Wartezeit mit Zufalls-Streuung: minimum + 0..streuung Sekunden.
 
@@ -3035,7 +3059,10 @@ def run(cfg_path, cmd):
     # 1) LESEND: Kurs + Positionsstand VORHER (+ Login-Kontrolle)
     lese = _api_lesen(path, expected, symbol=symbol)
     if "fehler" in lese:
-        return {"ok": False, "retry_ok": True, "msg": lese["fehler"]}
+        msg = lese["fehler"]
+        if _ist_verbindungsfehler(msg):
+            msg += " — " + _UAC_HINWEIS
+        return {"ok": False, "retry_ok": True, "msg": msg}
     digits = lese["digits"]
     contract_size = lese["contract_size"]
     vorher_tickets = {p["ticket"] for p in lese["positionen"]}
@@ -3055,7 +3082,8 @@ def run(cfg_path, cmd):
     w = _finde_terminal(expected)
     if w is None:
         return {"ok": False, "retry_ok": True,
-                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden."}
+                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden. "
+                       + _UAC_HINWEIS}
     _fenster_betreten(w)
     if str(expected) not in (w.window_text() or ""):
         return {"ok": False, "retry_ok": True,
@@ -3692,7 +3720,10 @@ def run_close(cfg_path, cmd):
     # 1) LESEND: gibt es die Position ueberhaupt (noch)? Login-Guard inklusive.
     lese = _api_lesen(path, expected)
     if "fehler" in lese:
-        return {"ok": False, "retry_ok": True, "msg": lese["fehler"]}
+        msg = lese["fehler"]
+        if _ist_verbindungsfehler(msg):
+            msg += " — " + _UAC_HINWEIS
+        return {"ok": False, "retry_ok": True, "msg": msg}
     pos = next((p for p in lese["positionen"] if p["ticket"] == ticket), None)
     if pos is None:
         # Ziel-Zustand erreicht, nichts zu tun — ehrlich als eigener Fall
@@ -3718,7 +3749,8 @@ def run_close(cfg_path, cmd):
     w = _finde_terminal(expected)
     if w is None:
         return {"ok": False, "retry_ok": True,
-                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden."}
+                "msg": f"Kein MT5-Fenster mit Konto {expected} gefunden. "
+                       + _UAC_HINWEIS}
     _fenster_betreten(w)
     if str(expected) not in (w.window_text() or ""):
         return {"ok": False, "retry_ok": True,
