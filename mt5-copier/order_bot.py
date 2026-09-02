@@ -3070,6 +3070,12 @@ def run(cfg_path, cmd):
         return {"ok": False, "retry_ok": True,
                 "msg": "F9-Dialog nicht gefunden — Abbruch, nichts gesendet. [" + _spur(trail) + "]"}
     trail.append("F9-Dialog offen")
+    # Kurze Setz-Zeit NACH dem Fund (02.09.2026, Finns Fund direkt nach dem
+    # Tempo-Umbau: "manchmal vertippt er sich beim Asset und findet es nicht —
+    # seit heute"). Vorher lieferte die sekundenlange Baum-Suche dem frisch
+    # geoeffneten Dialog ungewollt Zeit, seine Felder zu verdrahten; seit der
+    # Sucher in Millisekunden traf, griff der Bot ins noch bootende Feld.
+    _warte(0.3, 0.25)
     try:
         combos = dlg.descendants(control_type="ComboBox")
         edits = dlg.descendants(control_type="Edit")
@@ -3125,18 +3131,44 @@ def run(cfg_path, cmd):
                 pass
         _warte(0.15, 0.2)
         gewaehlt = _symbol_drin()
-        if not gewaehlt:
-            # Combo ist editierbar: Symbol ECHT eintippen (Autovervollstaendigung),
-            # TAB uebergibt die Eingabe
+        # Tipp-Weg mit Beweis und Wiederholung (02.09.2026, Finns "Vertippen"-
+        # Fund): der alte Weg tippte GENAU EINMAL, in voller Geschwindigkeit
+        # und ohne Leer-Beweis — MT5s Autovervollstaendigung legt aber mitten
+        # im Tippen eigenen Text ins Feld, und bei vollem Tempo gewinnt mal
+        # der Bot, mal die Vervollstaendigung: genau das sichtbare
+        # "Vertippen". Jetzt wie in _feld_tippen: leeren UND leer nachlesen,
+        # mit Tasten-Pause tippen (die Vervollstaendigung kommt mit), TAB,
+        # ruecklesen — bis zu drei Anlaeufe, und jeder Fehlversuch schreibt
+        # den ECHTEN Feldinhalt in die Spur statt still zu scheitern.
+        for _sv in (1, 2, 3):
+            if gewaehlt:
+                break
             try:
                 sym_combo.set_focus(); _warte(0.15, 0.2)
                 sym_combo.type_keys("^a{DELETE}", set_foreground=False)
-                sym_combo.type_keys(symbol, with_spaces=False, set_foreground=False)
+                sym_combo.type_keys("{HOME}+{END}{DELETE}", set_foreground=False)
+                _warte(0.1, 0.12)
+                if (_feld_lesen(sym_combo) or "").strip():
+                    # Feld leert nicht (Vervollstaendigung fuellt nach) —
+                    # alles markieren und DRUEBERtippen, wie in _feld_tippen
+                    sym_combo.type_keys("^a", set_foreground=False)
+                # Tasten-Pause pro Anschlag, pro Versuch neu gewuerfelt
+                # (Jitter-Doktrin; das fixe 12-ms-Muster gilt nur fuer die
+                # Maus-Animation)
+                sym_combo.type_keys(symbol, with_spaces=False,
+                                    set_foreground=False,
+                                    pause=0.05 + random.uniform(0.0, 0.04))
+                _warte(0.12, 0.15)
                 sym_combo.type_keys("{TAB}", set_foreground=False)
                 _warte(0.2, 0.25)
-            except Exception:
-                pass
+            except Exception as e:
+                trail.append(f"Symbol-Tippversuch {_sv} abgebrochen: "
+                             f"{type(e).__name__}: {str(e)[:60]}")
+                continue
             gewaehlt = _symbol_drin()
+            if not gewaehlt:
+                trail.append(f"Symbol-Tippversuch {_sv}: Feld zeigt "
+                             f"'{(_feld_lesen(sym_combo) or '').strip()[:24]}'")
         trail.append(f"Symbol {'bestaetigt' if gewaehlt else 'NICHT bestaetigt'}: {symbol}")
         if not gewaehlt:
             raise RuntimeError(f"Symbol '{symbol}' steht nicht bestaetigt im Dialog "
