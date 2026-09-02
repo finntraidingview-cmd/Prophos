@@ -3332,6 +3332,41 @@ def admin_build_overview():
             "c_parked": round(cb + ch - cp, 2),
         })
 
+    # Payouts unterwegs (02.09.2026, Finns Wunsch: „das ich im Admin dashboard
+    # dazu eine cleane übersicht habe"): alle OFFENEN Anfragen aus
+    # pending_payouts über alle Personen. Zählt bewusst in keine der Summen
+    # oben rein — angefragtes Geld ist noch kein Geld, es wird nur GEZEIGT.
+    pending_rows = []
+    try:
+        for t in _sb_all("pending_payouts", {
+                "select": "id,user_id,account_name,account_firm,amount,currency,"
+                          "liegt_bei,requested_at,notes",
+                "status": "eq.pending"}):
+            uid = str(t.get("user_id"))
+            if uid in excluded_ids:
+                continue
+            try:
+                amt = float(t.get("amount") or 0)
+            except (TypeError, ValueError):
+                continue
+            pending_rows.append({
+                "user_id": uid,
+                "person": disp.get(uid) or names.get(uid, uid[:8]),
+                "person_mail": names.get(uid, ""),
+                "amount": round(amt, 2),
+                "currency": t.get("currency") or "EUR",
+                "liegt_bei": t.get("liegt_bei") or "",
+                "requested_at": t.get("requested_at") or "",
+                "account_name": t.get("account_name") or "",
+                "account_firm": t.get("account_firm") or "",
+                "notes": t.get("notes") or "",
+            })
+        pending_rows.sort(key=lambda r: r["requested_at"])
+    except Exception as e:
+        # Tabelle (noch) nicht da oder Query kaputt → Übersicht trotzdem
+        # liefern, aber hörbar — nie catch-und-schweigen (Lehre aus .108).
+        print(f"[admin] ⚠️ pending_payouts: {type(e).__name__}: {e}", flush=True)
+
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
@@ -3341,6 +3376,7 @@ def admin_build_overview():
     # Frontend blendet diese Personen komplett aus und braucht dafuer die uid —
     # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.
     return {"accounts": rows, "people": people_list, "firms": firm_list,
+            "pending_payouts": pending_rows,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids)}

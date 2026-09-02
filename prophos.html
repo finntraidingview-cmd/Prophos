@@ -5304,6 +5304,38 @@
         <div id="fin-history-list" style="display:none;padding:0 18px 16px"></div>
       </div>
 
+      <!-- PAYOUTS UNTERWEGS (02.09.2026, Finns Pending-Flow): angefragt, aber
+           noch nicht auf dem Konto — zählt in KEINER Summe mit, erst der Klick
+           auf ✓ Erhalten bucht die echte transactions-Zeile. Die Chips darüber
+           beantworten Finns eigentliche Frage: „wo liegt gerade Geld rum".
+           Ohne offene Anfragen bleibt das Panel komplett unsichtbar. -->
+      <div class="panel" id="fin-pending-panel" hidden style="margin-bottom:14px">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Payouts unterwegs</div>
+            <div class="panel-sub">Angefragt, aber noch nicht auf dem Konto — zählt erst mit ✓ Erhalten</div>
+          </div>
+          <div style="text-align:right">
+            <div class="tnum" id="fin-pending-sum" style="font-size:20px;font-weight:800;color:#d97706">–</div>
+            <div style="font-size:11px;color:var(--sub)" id="fin-pending-count">–</div>
+          </div>
+        </div>
+        <div id="fin-pending-where" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 12px"></div>
+        <div class="table-wrap">
+          <table class="t">
+            <thead><tr>
+              <th style="padding-left:20px">Angefragt</th>
+              <th>Account</th>
+              <th>Liegt bei</th>
+              <th>Betrag</th>
+              <th>Notiz</th>
+              <th style="padding-right:20px"></th>
+            </tr></thead>
+            <tbody id="fin-pending-rows"></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- MEINE RECHNUNGEN (28.08.2026): read-only — erstellt werden Rechnungen
            nur im Admin-Bereich, RLS zeigt hier ausschließlich die eigenen.
            Ohne Rechnungen bleibt das Panel komplett unsichtbar. -->
@@ -5445,6 +5477,21 @@
                 <option value="account_purchase">Account-Kauf (raus)</option>
                 <option value="manual">Manuell (sonstiges)</option>
               </select>
+            </div>
+            <!-- Nur bei Payouts (02.09.2026, Finns Pending-Flow): Default ist
+                 „Angefragt" — die Anfrage landet in pending_payouts und zählt
+                 NICHT als Geld; gebucht wird erst beim ✓ Erhalten im Panel. -->
+            <div class="field" id="fin-po-status-row">
+              <label>Status</label>
+              <select class="input" id="fin-po-status">
+                <option value="pending">Angefragt — noch nicht erhalten</option>
+                <option value="received">Bereits erhalten</option>
+              </select>
+            </div>
+            <div class="field" id="fin-liegt-bei-row">
+              <label>Liegt bei / kommt von</label>
+              <input class="input" id="fin-liegt-bei" list="fin-liegt-bei-list" placeholder="z.B. Pascal, Rumänen">
+              <datalist id="fin-liegt-bei-list"></datalist>
             </div>
             <div class="field" style="grid-column:span 2">
               <label>Account (optional)</label>
@@ -6472,6 +6519,37 @@
                 <div class="kpi-label">Payouts erhalten</div>
                 <div class="kpi-value" id="adm-f-po">–</div>
                 <div class="kpi-delta delta-neutral" id="adm-f-po-sub">alle IDs</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">Payouts unterwegs</div>
+                <div class="kpi-value" id="adm-f-pend">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-pend-sub">angefragt, noch nicht da</div>
+              </div>
+            </div>
+
+            <!-- PAYOUTS UNTERWEGS über ALLE Personen (02.09.2026, Finns Wunsch
+                 nach der Admin-Übersicht): jede offene Anfrage aus
+                 pending_payouts, Service-Key-Aggregation wie der Rest des Tabs.
+                 Ohne offene Anfragen bleibt das Panel unsichtbar. -->
+            <div class="panel" id="adm-f-pend-panel" hidden style="margin-bottom:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Payouts unterwegs</div>
+                  <div class="panel-sub">Angefragt, aber noch nicht auf dem Konto — über alle Personen</div>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="t">
+                  <thead><tr>
+                    <th>Person</th>
+                    <th>Angefragt</th>
+                    <th>Account</th>
+                    <th>Liegt bei</th>
+                    <th class="adm-num">Betrag</th>
+                    <th>Notiz</th>
+                  </tr></thead>
+                  <tbody id="adm-f-pend-rows"></tbody>
+                </table>
               </div>
             </div>
 
@@ -7986,6 +8064,7 @@
         const personName = (uid, fallback) => nameById.get(String(uid)) || admShortName(fallback || uid)
         for(const r of (d.accounts || [])){ r.email = r.person_mail || r.person; r.person = personName(r.user_id, r.person) }
         for(const p of (d.people || [])){ p.email = p.mail || p.name; p.name = personName(p.user_id, p.name) }
+        for(const t of (d.pending_payouts || [])){ t.person = personName(t.user_id, t.person) }
         ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
 
         // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
@@ -8456,6 +8535,45 @@
       $('adm-f-minus').style.color = totMinus ? '#b91c1c' : 'var(--ink)'
       $('adm-f-minus-sub').textContent = `${minusL.length} von ${list.length} IDs`
       $('adm-f-po').textContent = admEur.format(totPo)
+
+      // Payouts unterwegs über alle Personen (02.09.2026): angefragt, aber
+      // noch nicht auf dem Konto — reine Anzeige, rechnet in keine Summe rein.
+      const pend = admData.pending_payouts || []
+      const pendSum = pend.reduce((a, t) => a + (Number(t.amount) || 0), 0)
+      $('adm-f-pend').textContent = pend.length ? admEur.format(pendSum) : '—'
+      $('adm-f-pend').style.color = pend.length ? '#d97706' : 'var(--ink)'
+      $('adm-f-pend-sub').textContent = pend.length
+        ? `${pend.length} Anfrage${pend.length === 1 ? '' : 'n'} offen`
+        : 'angefragt, noch nicht da'
+      const pendPanel = $('adm-f-pend-panel')
+      if(pendPanel){
+        pendPanel.hidden = !pend.length
+        const tb = $('adm-f-pend-rows')
+        if(tb){
+          tb.innerHTML = ''
+          for(const t of pend){
+            const d = t.requested_at ? new Date(t.requested_at) : null
+            const days = d ? Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000)) : null
+            const daysStr = days == null ? '' : (days === 0 ? 'heute' : `vor ${days} Tag${days === 1 ? '' : 'en'}`)
+            const tr = document.createElement('tr')
+            tr.innerHTML =
+              '<td><span class="pp-person" style="font-weight:600"></span></td>' +
+              `<td style="color:var(--sub);font-size:12.5px">${d ? d.toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'}` +
+              (daysStr ? ` <span style="color:${days >= 14 ? 'var(--danger)' : 'var(--sub)'};font-size:11px">· ${daysStr}</span>` : '') + '</td>' +
+              '<td><span class="pp-acc" style="font-size:12.5px"></span></td>' +
+              '<td><span class="pp-bei"></span></td>' +
+              `<td class="adm-num" style="font-weight:600;color:#d97706">${admEur.format(Number(t.amount) || 0)}</td>` +
+              '<td style="color:var(--sub);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pp-note"></span></td>'
+            tr.querySelector('.pp-person').textContent = admShortName(t.person || '—')
+            tr.querySelector('.pp-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
+            tr.querySelector('.pp-bei').textContent = t.liegt_bei || '—'
+            tr.querySelector('.pp-note').textContent = t.notes || ''
+            const noteTd = tr.querySelector('.pp-note').closest('td')
+            if(noteTd) noteTd.title = t.notes || ''
+            tb.appendChild(tr)
+          }
+        }
+      }
 
       const el = $('adm-fin-person-dist'); el.innerHTML = ''
       const maxAbs = Math.max(1, ...list.map(g => Math.abs(g.saldo)))
@@ -24600,6 +24718,7 @@
   let finSettlements = []
   let finHistoryOpen = false
   let finDefaultPct = 100  // "Du behältst %" — eigenes Geld, Default 100% falls noch nie abgerechnet
+  let finPending = []      // pending_payouts mit status=pending — zählt NIRGENDS als Geld (02.09.2026)
 
   function rowToTransaction(row){
     if(!row) return null
@@ -24615,6 +24734,22 @@
       notes:      row.notes,
       autoGenerated: row.auto_generated,
       createdAt:  row.created_at
+    }
+  }
+
+  function rowToPending(row){
+    if(!row) return null
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      accountName: row.account_name,
+      accountFirm: row.account_firm,
+      amount:     Number(row.amount),
+      currency:   row.currency || 'EUR',
+      liegtBei:   row.liegt_bei,
+      requestedAt: row.requested_at,
+      notes:      row.notes,
+      status:     row.status
     }
   }
 
@@ -24707,17 +24842,25 @@
   async function loadTransactionsFromSupabase(){
     if(!currentUserId) return
     try{
-      const [{ data, error }, { data: setts, error: e2 }] = await Promise.all([
+      const [{ data, error }, { data: setts, error: e2 }, { data: pend, error: e3 }] = await Promise.all([
         supabase.from('transactions').select('*')
           .eq('user_id', currentUserId)
           .order('occurred_at', { ascending: false })
           .order('created_at', { ascending: false }),
         supabase.from('finanzen_settlements').select('*')
           .eq('user_id', currentUserId)
-          .order('settled_at', { ascending: true })
+          .order('settled_at', { ascending: true }),
+        supabase.from('pending_payouts').select('*')
+          .eq('user_id', currentUserId)
+          .eq('status', 'pending')
+          .order('requested_at', { ascending: true })
       ])
       if(error){ console.error('loadTransactions:', error); return }
       if(e2){ console.error('loadFinanzenSettlements:', e2); return }
+      // Pending-Fehler killt die Finanzen NICHT — die Anfragen sind ein Zusatz,
+      // die Buchungen darunter müssen trotzdem stehen (Fehler bleibt sichtbar).
+      if(e3){ console.error('loadPendingPayouts:', e3); finPending = [] }
+      else finPending = (pend || []).map(rowToPending).filter(Boolean)
       transactions = (data || []).map(rowToTransaction).filter(Boolean)
       finSettlements = setts || []
       if(finSettlements.length){
@@ -24885,9 +25028,117 @@
     renderFinRangeStats()
   })()
 
+  /* ── Payouts unterwegs (02.09.2026, Finns Pending-Flow): angefragte Payouts
+   * aus pending_payouts. Zählen in KEINER Summe mit — erst der Klick auf
+   * ✓ Erhalten bucht die echte transactions-Zeile und stellt die Anfrage auf
+   * status='received' (Zeile bleibt in der DB: so bleibt ablesbar, wie lange
+   * ein Payout unterwegs war und bei wem er lag). ── */
+  function renderFinPending(){
+    const panel = document.getElementById('fin-pending-panel')
+    if(!panel) return
+    if(!finPending.length){ panel.hidden = true; return }
+    panel.hidden = false
+
+    const fmtEur = n => '€' + Number(n).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+    const sum = finPending.reduce((s,p) => s + Number(p.amount || 0), 0)
+    document.getElementById('fin-pending-sum').textContent = fmtEur(sum)
+    document.getElementById('fin-pending-count').textContent =
+      finPending.length + (finPending.length === 1 ? ' Payout offen' : ' Payouts offen')
+
+    // „Wo liegt Geld" — Gruppierung nach liegt_bei, größter Batzen zuerst
+    const byWhere = new Map()
+    for(const p of finPending){
+      const k = (p.liegtBei || '').trim() || 'Unbekannt'
+      byWhere.set(k, (byWhere.get(k) || 0) + Number(p.amount || 0))
+    }
+    document.getElementById('fin-pending-where').innerHTML = [...byWhere.entries()]
+      .sort((a,b) => b[1] - a[1])
+      .map(([k,v]) => `<span class="chip chip-warn">${escapeHtml(k)} · ${fmtEur(v)}</span>`)
+      .join('')
+
+    const rows = document.getElementById('fin-pending-rows')
+    rows.innerHTML = finPending.map(p => {
+      const d = new Date(p.requestedAt)
+      const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
+      const dateStr = d.toLocaleDateString('de-DE', { day:'2-digit', month:'short' })
+      // Ab 14 Tagen färbt die Wartezeit rot — genau der Rumänen-Fall, der
+      // sonst in Vergessenheit versickert.
+      const daysStr = days === 0 ? 'heute' : `vor ${days} Tag${days === 1 ? '' : 'en'}`
+      const accStr = p.accountName
+        ? `${escapeHtml(p.accountName)}<div style="font-size:11px;color:var(--sub)">${escapeHtml(p.accountFirm||'–')}</div>`
+        : '<span style="color:var(--sub)">—</span>'
+      return `
+        <tr>
+          <td style="padding-left:20px;font-family:var(--mono);font-size:12.5px">${dateStr}
+            <div style="font-size:10.5px;color:${days >= 14 ? 'var(--danger)' : 'var(--sub)'}">${daysStr}</div></td>
+          <td>${accStr}</td>
+          <td>${p.liegtBei ? escapeHtml(p.liegtBei) : '<span style="color:var(--sub)">—</span>'}</td>
+          <td class="mono" style="font-weight:600">${fmtEur(p.amount)}</td>
+          <td style="color:var(--sub);font-size:12.5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.notes||'')}">${escapeHtml(p.notes||'')}</td>
+          <td style="padding-right:20px;text-align:right;white-space:nowrap">
+            <button class="btn btn-primary" data-pp-receive="${p.id}" style="padding:5px 10px;font-size:12px">✓ Erhalten</button>
+            <button class="btn btn-ghost icon-btn" data-pp-del="${p.id}" title="Anfrage löschen (bucht nichts)" style="padding:5px 8px">×</button>
+          </td>
+        </tr>
+      `
+    }).join('')
+
+    rows.querySelectorAll('[data-pp-receive]').forEach(btn => {
+      btn.addEventListener('click', () => finReceivePending(btn.dataset.ppReceive))
+    })
+    rows.querySelectorAll('[data-pp-del]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.ppDel
+        if(!confirm('Payout-Anfrage wirklich löschen? Es wird nichts gebucht.')) return
+        const { error } = await supabase.from('pending_payouts').delete().eq('id', id)
+        if(error){ alert('Fehler: ' + error.message); return }
+        finPending = finPending.filter(p => String(p.id) !== String(id))
+        renderFinPending()
+      })
+    })
+  }
+
+  async function finReceivePending(id){
+    const p = finPending.find(x => String(x.id) === String(id))
+    if(!p) return
+    const amtStr = '€' + Number(p.amount).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
+    if(!confirm(`${amtStr} als erhalten buchen? Ab jetzt zählt der Betrag in den Finanzen.`)) return
+    try{
+      const today = new Date().toISOString().slice(0,10)
+      // Herkunft bleibt an der Buchung ablesbar: wann angefragt, wo es lag
+      const herkunft = `angefragt ${finFmtDate(p.requestedAt)}${p.liegtBei ? ' · lag bei ' + p.liegtBei : ''}`
+      const row = {
+        user_id: currentUserId,
+        account_id:   p.accountId,
+        account_name: p.accountName,
+        account_firm: p.accountFirm,
+        kind: 'payout',
+        amount: Math.abs(Number(p.amount)),
+        currency: p.currency || 'EUR',
+        occurred_at: today,               // erhalten zählt am Empfangstag, nicht am Anfrage-Tag
+        notes: p.notes ? `${p.notes} · ${herkunft}` : herkunft,
+        auto_generated: false
+      }
+      const { data, error } = await supabase.from('transactions').insert(row).select('*').single()
+      if(error) throw error
+      // Anfrage NICHT löschen, nur umstellen — die Historie (Wartezeit, wo es
+      // lag) bleibt in der DB nachlesbar, auch wenn die UI sie ausblendet.
+      const { error: e2 } = await supabase.from('pending_payouts')
+        .update({ status: 'received', received_at: today, received_tx_id: data.id, updated_at: new Date().toISOString() })
+        .eq('id', id)
+      if(e2) throw e2
+      transactions.unshift(rowToTransaction(data))
+      finPending = finPending.filter(x => String(x.id) !== String(id))
+      renderFinanzen()
+    }catch(e){
+      alert('Fehler: ' + (e.message || e))
+    }
+  }
+
   function renderFinanzen(){
     finRenderSettlement()
     renderFinRangeStats()
+    renderFinPending()
 
     const tbody = document.getElementById('finTable')
     const empty = document.getElementById('finEmpty')
@@ -25019,8 +25270,21 @@
     document.getElementById('fin-date').value = new Date().toISOString().slice(0,10)
     document.getElementById('fin-notes').value = ''
     document.getElementById('finModalMsg').textContent = ''
+    // Payout-Default ist ANGEFRAGT (02.09.2026, Finns Pending-Flow) — erhalten
+    // wird erst im Unterwegs-Panel per ✓ gebucht. Datalist aus den offenen
+    // Anfragen, damit „Pascal"/„Rumänen" nicht jedes Mal neu getippt werden.
+    const poStatus = document.getElementById('fin-po-status')
+    if(poStatus) poStatus.value = 'pending'
+    const liegtBei = document.getElementById('fin-liegt-bei')
+    if(liegtBei) liegtBei.value = ''
+    const dl = document.getElementById('fin-liegt-bei-list')
+    if(dl){
+      const seen = [...new Set(finPending.map(p => (p.liegtBei || '').trim()).filter(Boolean))]
+      dl.innerHTML = seen.map(v => `<option value="${escapeHtml(v)}"></option>`).join('')
+    }
     updateFinSignHint()
     updateFinTitle()
+    updateFinPayoutFields()
     document.getElementById('finModal').classList.add('open')
   }
   function closeFinModal(){
@@ -25042,7 +25306,18 @@
     const c = document.getElementById('fin-currency').value
     document.getElementById('fin-cur-label').textContent = currencySign(c)
   }
-  document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint() })
+  // Status + Liegt-bei gibt es nur bei Payouts; Liegt-bei nur solange die
+  // Anfrage offen ist (bei „Bereits erhalten" ist das Geld ja schon da).
+  function updateFinPayoutFields(){
+    const isPayout = document.getElementById('fin-kind').value === 'payout'
+    const isPending = document.getElementById('fin-po-status')?.value === 'pending'
+    const statusRow = document.getElementById('fin-po-status-row')
+    const liegtRow  = document.getElementById('fin-liegt-bei-row')
+    if(statusRow) statusRow.style.display = isPayout ? '' : 'none'
+    if(liegtRow)  liegtRow.style.display  = (isPayout && isPending) ? '' : 'none'
+  }
+  document.getElementById('fin-kind')?.addEventListener('change', () => { updateFinTitle(); updateFinSignHint(); updateFinPayoutFields() })
+  document.getElementById('fin-po-status')?.addEventListener('change', updateFinPayoutFields)
   document.getElementById('fin-currency')?.addEventListener('change', updateFinCurLabel)
 
   // Add-Button-Bindings
@@ -25077,6 +25352,34 @@
     // 'manual': beibehalten wie eingegeben
 
     const acc = accountId ? accounts.find(a => String(a.id) === String(accountId)) : null
+
+    // ANGEFRAGT (02.09.2026, Finns Pending-Flow): nur die Anfrage speichern —
+    // das Datum ist hier der Anfrage-Tag. Gebucht wird erst beim ✓ Erhalten.
+    if(kind === 'payout' && document.getElementById('fin-po-status')?.value === 'pending'){
+      try{
+        const row = {
+          user_id: currentUserId,
+          account_id:   accountId,
+          account_name: acc?.name || null,
+          account_firm: acc?.firm || null,
+          amount,
+          currency,
+          liegt_bei: (document.getElementById('fin-liegt-bei')?.value || '').trim() || null,
+          requested_at: occurredAt,
+          notes
+        }
+        const { data, error } = await supabase
+          .from('pending_payouts').insert(row).select('*').single()
+        if(error) throw error
+        finPending.push(rowToPending(data))
+        finPending.sort((a,b) => String(a.requestedAt).localeCompare(String(b.requestedAt)))
+        renderFinPending()
+        closeFinModal()
+      }catch(e){
+        msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
+      }
+      return
+    }
 
     try{
       const row = {
