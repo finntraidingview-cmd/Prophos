@@ -2352,11 +2352,17 @@ def _anker_lesen(pfad):
 def _anker_schreiben(pfad, **felder):
     """Felder in die Anker-Datei MERGEN statt sie zu ueberschreiben
     (01.09.2026): seit der Handel-Tab seinen Klickpunkt mitspeichert, darf
-    der Zeilen-Anker den Tab-Punkt nicht mehr wegschreiben — und umgekehrt."""
+    der Zeilen-Anker den Tab-Punkt nicht mehr wegschreiben — und umgekehrt.
+    Wert None LOESCHT den Schluessel (02.09.2026): ein Anker, der bewiesen
+    danebenlag, muss raus, sonst klickt jeder Lauf denselben Fehlpunkt."""
     if not pfad:
         return
     d = _anker_lesen(pfad)
-    d.update(felder)
+    for k, v in felder.items():
+        if v is None:
+            d.pop(k, None)
+        else:
+            d[k] = v
     try:
         with open(pfad, "w", encoding="utf-8") as f:
             json.dump(d, f)
@@ -2479,7 +2485,8 @@ def _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=None, nur_anker=False
     return None
 
 
-def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None):
+def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None,
+                           anker_nutzen=True):
     """Toolbox auf den 'Handel'-Tab stellen, BEVOR der Bot die Position
     anklickt (28.08.2026, Finns Live-Fund auf Moritz' PC): nach einem frischen
     Terminal-Start stand die Toolbox auf 'Posteingang' (die 'neuer Account'-
@@ -2501,23 +2508,30 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None):
     # Navigator, Charts — und auf Builds, deren Toolbox fuer UIA unsichtbar
     # ist (18.08.), laufen ALLE fuenf Durchgaenge jedes Mal ins Leere. Der
     # Reiter sitzt aber fest in der Toolbox-Leiste, also wird sein einmal
-    # gefundener Punkt pro PC in der Anker-Datei gemerkt und direkt
-    # angeklickt. Ein Klick auf den bereits aktiven Reiter ist folgenlos;
-    # ob der RICHTIGE Dialog aufgeht, prueft ohnehin der Aufrufer per Ticket.
-    try:
-        a = _anker_lesen(anker_pfad)
-        wr = w.rectangle()
-        tx = wr.left + int((wr.right - wr.left) * float(a["handel_x_frac"]))
-        ty = wr.bottom - int(a["handel_y_off"])
-        if maus_grenze is None or ty >= maus_grenze:
-            _maus_fahren(tx, ty, schritte=4)
-            _klick_absolut(tx, ty)
-            if trail is not None:
-                trail.append(f"Handel-Tab per Anker geklickt @({tx},{ty})")
-            _warte(0.3, 0.3)
-            return True
-    except Exception:
-        pass
+    # gefundener Punkt pro PC in der Anker-Datei gemerkt und direkt angeklickt.
+    # X ABSOLUT vom linken Rand, nicht als Breiten-Anteil (02.09.2026, Finns
+    # Fund am VPS: der Bot klickte 'Belastung' statt 'Handel' — die Reiter
+    # sitzen links FEST und skalieren nicht mit der Fensterbreite; der
+    # x_frac-Punkt vom Vortag wanderte bei anderer RDP-Breite genau einen
+    # Reiter nach rechts). Alte handel_x_frac-Eintraege werden ignoriert und
+    # beim naechsten Suche-Treffer geloescht. Ob der Klick WIRKLICH in der
+    # Handel-Liste gelandet ist, beweist der Aufrufer lesend (Rechtsklick-Menue
+    # mit 'Aendern'-Punkt) — schlaegt das fehl, verwirft er diesen Anker.
+    if anker_nutzen:
+        try:
+            a = _anker_lesen(anker_pfad)
+            wr = w.rectangle()
+            tx = wr.left + int(a["handel_x_off"])
+            ty = wr.bottom - int(a["handel_y_off"])
+            if maus_grenze is None or ty >= maus_grenze:
+                _maus_fahren(tx, ty, schritte=4)
+                _klick_absolut(tx, ty)
+                if trail is not None:
+                    trail.append(f"Handel-Tab per Anker geklickt @({tx},{ty})")
+                _warte(0.3, 0.3)
+                return "anker"
+        except Exception:
+            pass
     # Breit suchen: je nach MT5-Build ist der Toolbox-Reiter TabItem, Custom,
     # Button oder Text — notfalls der ganze Baum (None). Alle Treffer sammeln.
     treffer = []
@@ -2557,18 +2571,20 @@ def _handel_tab_aktivieren(w, trail=None, maus_grenze=None, anker_pfad=None):
                 _klick_absolut(cx, cy)
                 if trail is not None:
                     trail.append(f"Handel-Tab geklickt @({cx},{cy})")
-                # Punkt fuer den naechsten Lauf merken (01.09.2026, s.o.) —
-                # relativ zum Fenster wie der Zeilen-Anker, damit er einen
-                # Resize ueberlebt.
+                # Punkt fuer den naechsten Lauf merken (01.09.2026, s.o.):
+                # x absolut vom linken Rand (Reiter sitzen links fest),
+                # y vom unteren Rand (Toolbox haengt unten) — der stale
+                # x_frac-Schluessel fliegt dabei raus (02.09.2026).
                 try:
                     wr = w.rectangle()
                     _anker_schreiben(anker_pfad,
-                                     handel_x_frac=(cx - wr.left) / max(1, wr.right - wr.left),
-                                     handel_y_off=wr.bottom - cy)
+                                     handel_x_off=cx - wr.left,
+                                     handel_y_off=wr.bottom - cy,
+                                     handel_x_frac=None)
                 except Exception:
                     pass
                 _warte(0.3, 0.3)
-                return True
+                return "suche"
         except Exception:
             continue
     if trail is not None:
@@ -2619,8 +2635,23 @@ def _sltp_klicken(w, ticket, symbol, sl_text, tp_text, trail, anker_pfad=None):
     if dlg is None:
         # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar
         # (28.08.2026, frischer Terminal-Start stand auf 'Posteingang', s.o.).
-        _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
+        tab_weg = _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
         dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
+        if dlg is None and tab_weg == "anker":
+            # Der gemerkte Tab-Punkt hat NICHT in die Handel-Liste gefuehrt
+            # (02.09.2026, Finns Fund: der Anker-Klick traf 'Belastung' statt
+            # 'Handel', und ab da lief der Scan in der falschen Liste — 'ab
+            # dann war der Wurm drin'). Der Scan ist der lesende BEWEIS fuer
+            # den Tab-Klick: kein 'Aendern'-Menuepunkt = falsche Liste. Also:
+            # verdaechtigen Punkt LOESCHEN (nie zweimal denselben Fehlklick),
+            # einmal ECHT per Element-Suche aktivieren, und nur wenn die
+            # wirklich einen Reiter geklickt hat, ein zweiter Scan.
+            _anker_schreiben(anker_pfad, handel_x_off=None, handel_y_off=None,
+                             handel_x_frac=None)
+            trail.append("Tab-Anker verworfen (Scan fand nach Anker-Klick keine Handel-Zeile)")
+            if _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad,
+                                      anker_nutzen=False) == "suche":
+                dlg = _reihen_scan(w, ticket, trail, maus_grenze, anker_pfad=anker_pfad)
 
     kandidaten, ticket_da = [], False
     if dlg is None:
@@ -3341,7 +3372,7 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
     # Toolbox auf 'Handel' — sonst ist die Positionsliste unsichtbar (gleicher
     # Fund wie beim SL/TP-Weg: frischer Terminal-Start steht auf 'Posteingang').
     # Mit anker_pfad: der gemerkte Tab-Punkt erspart die Baum-Suche (01.09.2026).
-    _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
+    tab_weg = _handel_tab_aktivieren(w, trail, maus_grenze, anker_pfad=anker_pfad)
     if is_paused():
         trail.append("⏸ Echo pausiert — kein Close-Klick")
         return "pause"
@@ -3495,6 +3526,15 @@ def _close_klicken(w, ticket, trail, anker_pfad, position_weg):
         return "knopf"   # alle Wege durch — den Ausgang entscheidet der Aufrufer lesend
     trail.append(f"Zeilen-Scan ohne Treffer (Fenster {hr.right - hr.left}x{hr.bottom - hr.top}, "
                  f"Band -60..-{band_max}px, x={gx}, {len(punkte)} Punkte, {grau}x ausgegraut)")
+    if tab_weg == "anker":
+        # Gleiche Lehre wie im SL/TP-Weg (02.09.2026, Belastung-Fehlklick):
+        # kein einziger lesbarer 'Position schliessen'-Punkt nach einem
+        # Anker-Tab-Klick heisst, der gemerkte Punkt ist verdaechtig — raus
+        # damit, der naechste Lauf sucht den Reiter frisch. Bewusst KEIN
+        # zweiter Scan hier: der Close bleibt ein Versuch pro Lauf.
+        _anker_schreiben(anker_pfad, handel_x_off=None, handel_y_off=None,
+                         handel_x_frac=None)
+        trail.append("Tab-Anker verworfen (kein Schliessen-Menuepunkt nach Anker-Klick)")
     return "kein_treffer"
 
 

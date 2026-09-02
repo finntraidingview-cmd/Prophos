@@ -995,12 +995,21 @@ def main():
         chk("ORDER-BOT: Anker-Lesen ohne Datei → leeres dict, kein Fehler",
             order_bot._anker_lesen(_ap) == {} and order_bot._anker_lesen(None) == {})
         order_bot._anker_schreiben(_ap, x_frac=0.4, y_off=316)
-        order_bot._anker_schreiben(_ap, handel_x_frac=0.3, handel_y_off=42)
+        order_bot._anker_schreiben(_ap, handel_x_off=61, handel_y_off=42)
         order_bot._anker_schreiben(_ap, x_frac=0.5, y_off=300)
         _a = order_bot._anker_lesen(_ap)
         chk("ORDER-BOT: Anker-Schreiben MERGED — Tab-Punkt ueberlebt den Zeilen-Treffer",
             _a.get("x_frac") == 0.5 and _a.get("y_off") == 300
-            and _a.get("handel_x_frac") == 0.3 and _a.get("handel_y_off") == 42)
+            and _a.get("handel_x_off") == 61 and _a.get("handel_y_off") == 42)
+        # None loescht (02.09.2026, Belastung-Fehlklick): ein verworfener
+        # Tab-Punkt muss WIRKLICH aus der Datei — sonst klickt der naechste
+        # Lauf denselben Fehlpunkt, waehrend der Zeilen-Anker bleiben soll.
+        order_bot._anker_schreiben(_ap, handel_x_off=None, handel_y_off=None,
+                                   handel_x_frac=None)
+        _a = order_bot._anker_lesen(_ap)
+        chk("ORDER-BOT: Anker-Wert None LOESCHT den Schluessel, Rest bleibt",
+            "handel_x_off" not in _a and "handel_y_off" not in _a
+            and _a.get("x_frac") == 0.5 and _a.get("y_off") == 300)
         with open(_ap, "w", encoding="utf-8") as _f:
             _f.write("kaputt{")
         chk("ORDER-BOT: kaputte Anker-Datei → leeres dict statt Absturz",
