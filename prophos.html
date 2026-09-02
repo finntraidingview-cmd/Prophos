@@ -7139,10 +7139,9 @@
             <option value="live">Live-Account</option>
           </select>
         </div>
-        <div class="field">
-          <label>Anfangs-Balance ($)</label>
-          <input class="input mono" id="ac-balance" type="number" step="0.01" placeholder="50000" autocomplete="off">
-        </div>
+        <!-- Anfangs-Balance raus aus dem Modal (Finn 02.09.2026, "Felder löschen"):
+             neue Accounts starten mit 0 wie bisher bei leerem Feld, beim Bearbeiten
+             traegt saveAccount() den bestehenden Wert unveraendert weiter. -->
         <div class="field">
           <label>Kaufpreis (€, optional)</label>
           <input class="input mono" id="ac-purchase-cost" type="number" step="0.01" placeholder="z.B. 450" autocomplete="off">
@@ -7219,36 +7218,18 @@
             <option value="Andere">Andere</option>
           </select>
         </div>
-        <div class="field" style="grid-column:1/-1">
-          <label>Notiz</label>
-          <textarea class="input" id="ac-cred-notes" rows="2" placeholder="z.B. Broker, E-Mail, weitere Infos…"></textarea>
-        </div>
+        <!-- Notiz-Feld raus (Finn 02.09.2026) — bestehende Notizen bleiben in der DB
+             und werden beim Bearbeiten unveraendert weitergetragen. -->
       </div>
 
       <!-- Auto-Anlegen in Duplikum läuft ohne UI-Box: sobald Login-Daten (MT4/MT5) eingetragen
            sind und Duplikum verbunden ist, wird der Account beim Speichern automatisch dort
            angelegt & verknüpft (Rolle: Live = Slave, sonst Master). Box entfernt 28.07.2026. -->
 
-      <!-- Trade-Limits — bewusst eigener Block ganz unten, getrennt von den Zugangsdaten -->
-      <div class="modal-divider" style="color:#d97706">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Trade-Limits (optional)
-      </div>
-      <div style="font-size:11.5px;color:var(--sub);margin:-4px 0 8px">Werden im Trade-Plan-Modal und beim Trade-Start angezeigt — gegen Daily-Loss-Fehler.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-        <div class="field">
-          <label>Max Daily Loss ($)</label>
-          <input class="input mono" id="ac-max-daily-drawdown" type="number" step="50" placeholder="z.B. 3000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Max Loss / Trade ($)</label>
-          <input class="input mono" id="ac-max-loss-trade" type="number" step="50" placeholder="z.B. 1000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Max Profit / Trade ($)</label>
-          <input class="input mono" id="ac-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
-        </div>
-      </div>
+      <!-- Trade-Limits-Block raus (Finn 02.09.2026, "Felder löschen") — die Werte
+           existieren weiter in der DB (Bulk-Add und alte Accounts), werden im
+           Trade-Plan/Trade-Start weiter angezeigt und beim Bearbeiten unveraendert
+           weitergetragen; nur die Eingabe hier ist weg. -->
 
       <div class="modal-msg" id="ac-msg"></div>
 
@@ -15420,12 +15401,11 @@
     name:     document.getElementById('ac-name'),
     firm:     document.getElementById('ac-firm'),
     type:     document.getElementById('ac-type'),
-    bal:      document.getElementById('ac-balance'),
+    // Anfangs-Balance, Trade-Limits und Notiz sind seit 02.09.2026 aus dem
+    // Modal raus (Finn: "Felder löschen") — saveAccount() traegt bestehende
+    // Werte beim Bearbeiten unveraendert weiter, das Bulk-Add hat eigene Felder.
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
-    maxDailyDd: document.getElementById('ac-max-daily-drawdown'),
-    maxLossTrade:   document.getElementById('ac-max-loss-trade'),
-    maxProfitTrade: document.getElementById('ac-max-profit-trade'),
     extId:    document.getElementById('ac-ext-id'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
@@ -15434,7 +15414,6 @@
     credPass:     document.getElementById('ac-cred-password'),
     credServer:   document.getElementById('ac-cred-server'),
     credPlatform: document.getElementById('ac-cred-platform'),
-    credNotes:    document.getElementById('ac-cred-notes'),
     msg:      document.getElementById('ac-msg'),
     cancel:   document.getElementById('ac-cancel'),
     save:     document.getElementById('ac-save'),
@@ -16146,12 +16125,8 @@
       accEls.name.value = editAccount.name || ''
       accEls.firm.value = editAccount.firm || ''
       accEls.type.value = editAccount.type || 'phase1'
-      accEls.bal.value  = editAccount.initialBalance != null ? editAccount.initialBalance : ''
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
-      if(accEls.maxDailyDd) accEls.maxDailyDd.value = editAccount.maxDailyDrawdown != null ? editAccount.maxDailyDrawdown : ''
-      if(accEls.maxLossTrade)   accEls.maxLossTrade.value   = editAccount.maxLossPerTrade   != null ? editAccount.maxLossPerTrade   : ''
-      if(accEls.maxProfitTrade) accEls.maxProfitTrade.value = editAccount.maxProfitPerTrade != null ? editAccount.maxProfitPerTrade : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
@@ -16161,17 +16136,12 @@
       if(accEls.credPass)     accEls.credPass.value     = editAccount.creds?.password || ''
       if(accEls.credServer)   accEls.credServer.value   = editAccount.creds?.server   || ''
       if(accEls.credPlatform) accEls.credPlatform.value = editAccount.creds?.platform || ''
-      if(accEls.credNotes)    accEls.credNotes.value    = editAccount.creds?.notes    || ''
     }else{
       accEls.name.value = ''
       accEls.firm.value = ''
       accEls.type.value = prefillType || 'phase1'
-      accEls.bal.value  = ''
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
-      if(accEls.maxDailyDd) accEls.maxDailyDd.value = ''
-      if(accEls.maxLossTrade)   accEls.maxLossTrade.value   = ''
-      if(accEls.maxProfitTrade) accEls.maxProfitTrade.value = ''
       if(accEls.extId) accEls.extId.value = ''
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
@@ -16179,7 +16149,6 @@
       if(accEls.credPass)     accEls.credPass.value     = ''
       if(accEls.credServer)   accEls.credServer.value   = ''
       if(accEls.credPlatform) accEls.credPlatform.value = 'MT5'  // Default: Finns häufigster Fall
-      if(accEls.credNotes)    accEls.credNotes.value    = ''
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -16234,13 +16203,19 @@
     const name = accEls.name.value.trim()
     const firm = accEls.firm.value.trim()
     const type = accEls.type.value
-    const initialBalance = parseFloat(accEls.bal.value) || 0
     const purchaseCost = parseFloat(accEls.purchase.value)
     const maxDrawdown = parseFloat(accEls.maxDd.value)
-    const maxDailyDrawdown = parseFloat(accEls.maxDailyDd?.value)
-    const maxLossPerTrade   = parseFloat(accEls.maxLossTrade?.value)
-    const maxProfitPerTrade = parseFloat(accEls.maxProfitTrade?.value)
     const isEdit = !!_editingAccountId
+    // Anfangs-Balance, Trade-Limits und Notiz haben seit 02.09.2026 keine
+    // Eingabefelder mehr (Finn: "Felder löschen"). Beim Bearbeiten MUESSEN die
+    // bestehenden Werte weitergetragen werden — sonst wischt jeder Namens-Edit
+    // Balance auf 0 und die Limits auf null. Neue Accounts starten wie bisher
+    // bei leerem Feld: Balance 0, Limits null, Notiz leer.
+    const vorher = isEdit ? (accounts||[]).find(x => String(x.id) === String(_editingAccountId)) : null
+    const initialBalance = vorher?.initialBalance != null ? vorher.initialBalance : 0
+    const maxDailyDrawdown  = vorher?.maxDailyDrawdown  != null ? vorher.maxDailyDrawdown  : NaN
+    const maxLossPerTrade   = vorher?.maxLossPerTrade   != null ? vorher.maxLossPerTrade   : NaN
+    const maxProfitPerTrade = vorher?.maxProfitPerTrade != null ? vorher.maxProfitPerTrade : NaN
 
     if(!name){ setModalMsg('Name ist Pflicht.', 'err'); return }
     if(!firm){ setModalMsg('Firm ist Pflicht.', 'err'); return }
@@ -16253,7 +16228,7 @@
       password: accEls.credPass?.value            || '',
       server:   accEls.credServer?.value.trim()   || '',
       platform: accEls.credPlatform?.value        || '',
-      notes:    accEls.credNotes?.value.trim()    || ''
+      notes:    vorher?.creds?.notes              || ''
     }
     const hasCreds = credObj.login || credObj.password || credObj.server || credObj.platform || credObj.notes
     const acc = {
@@ -21765,7 +21740,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-01.240'
+  const OS_TAB_BUILD = '2026-09-02.245'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
