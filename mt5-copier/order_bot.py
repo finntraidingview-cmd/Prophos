@@ -643,6 +643,9 @@ class _StempelSpur(list):
     def append(self, s):
         super().append(f"{time.time() - self._t0:.1f}s·{s}")
 
+    def sekunden(self):
+        return time.time() - self._t0
+
 
 def _api_lesen(path, expected, symbol=None):
     """Lesen ueber die (offen gehaltene) Terminal-Verbindung. Rueckgabe:
@@ -1761,11 +1764,51 @@ def _dialog_struktur(dlg):
     return " | ".join(teile[:40])
 
 
+def _kind_fenster(hauptfenster, voll=False):
+    """Kind-'Window'-Elemente des Hauptfensters — Standard: nur Kinder und
+    Enkel, NIE der volle Baum (02.09.2026, Finns '10 Sekunden zwischen jedem
+    Step' trotz Anker: descendants() ueber das MT5-HAUPTfenster kostet auf
+    seinem Build Sekunden PRO AUFRUF, und die Dialog-Sucher riefen es in
+    ihren Poll-Schleifen nach jedem F9/Rechtsklick erneut. MT5 haengt seine
+    Dialoge als DIREKTE Kinder ans Hauptfenster — Fund 15.08.2026 — die
+    Enkel-Ebene ist nur Sicherheitsmarge aus je einem billigen
+    Children-Aufruf pro Kind). voll=True ist der eine Abschluss-Versuch,
+    bevor ein Sucher endgueltig aufgibt."""
+    if voll:
+        try:
+            return hauptfenster.descendants(control_type="Window")
+        except Exception:
+            return []
+    out = []
+    try:
+        kinder = hauptfenster.children()
+    except Exception:
+        return out
+    for k in kinder:
+        try:
+            if (k.element_info.control_type or "") == "Window":
+                out.append(k)
+        except Exception:
+            pass
+    # Enkel IMMER mitnehmen, nicht nur wenn oben nichts kam: Chart-Fenster
+    # sind selbst 'Window'-Kinder — ein Dialog unter dem MDI-Bereich waere
+    # sonst unsichtbar, obwohl Kinder gefunden wurden.
+    for k in kinder:
+        try:
+            out.extend(k.children(control_type="Window"))
+        except Exception:
+            continue
+    return out
+
+
 def _finde_order_dialog(hauptfenster, timeout=10.0):
     """Nach F9: den Order-Dialog suchen — als TOP-LEVEL-Fenster UND als
     Kind-Fenster des Terminals (Fund 15.08.2026: MT5 haengt den F9-Dialog als
     Child ans Hauptfenster, die reine Top-Level-Suche fand ihn nie, obwohl er
-    sichtbar offen war). Titel 'Order…' oder die typische Feldstruktur."""
+    sichtbar offen war). Titel 'Order…' oder die typische Feldstruktur.
+    Kind-Suche seit 02.09.2026 billig (s. _kind_fenster); der fruehere
+    title_re-Griff ist raus — er lief als Regex-Suche jeden Schleifendurchlauf
+    durch den ganzen Baum und fand nie etwas, das a/b nicht auch finden."""
     from pywinauto import Desktop
     pid = hauptfenster.element_info.process_id
     ende = time.time() + timeout
@@ -1782,21 +1825,23 @@ def _finde_order_dialog(hauptfenster, timeout=10.0):
                     continue
         except Exception:
             pass
-        # b) Kind-/Nachkommen-Fenster des Hauptfensters
+        # b) Kind-/Enkel-Fenster des Hauptfensters (billig)
         try:
-            for d in hauptfenster.descendants(control_type="Window"):
+            for d in _kind_fenster(hauptfenster):
                 if _ist_order_dialog(d):
                     return d
         except Exception:
             pass
-        # c) Direkter Griff per Titel-Regex (owned window)
-        try:
-            cand = hauptfenster.child_window(title_re="(?i)^order")
-            if cand.exists(timeout=0.3):
-                return cand.wrapper_object()
-        except Exception:
-            pass
         _warte(0.3, 0.3)
+    # Abschluss: EINMAL der volle Baum — falls der Dialog je tiefer haengt
+    # als Kinder/Enkel (bisher nie beobachtet), kostet das einen Durchlauf
+    # statt eines Fehllaufs.
+    try:
+        for d in _kind_fenster(hauptfenster, voll=True):
+            if _ist_order_dialog(d):
+                return d
+    except Exception:
+        pass
     return None
 
 
@@ -1958,7 +2003,10 @@ def _dialog_gehoert_zu(dlg, ticket):
 
 def _finde_aendern_dialog(hauptfenster, timeout=3.0):
     """Wie _finde_order_dialog (Top-Level UND Kind-Fenster — der F9-Fund vom
-    15.08.2026 gilt fuer jeden MT5-Dialog), aber auf den Aendern-Dialog."""
+    15.08.2026 gilt fuer jeden MT5-Dialog), aber auf den Aendern-Dialog.
+    Kind-Suche billig (02.09.2026, s. _kind_fenster) — dieser Sucher laeuft
+    im Zeilen-Scan nach JEDEM Rechtsklick, der volle Baum-Durchlauf hier war
+    ein Kern der '10 Sekunden pro Schritt'."""
     from pywinauto import Desktop
     pid = hauptfenster.element_info.process_id
     ende = time.time() + timeout
@@ -1975,7 +2023,7 @@ def _finde_aendern_dialog(hauptfenster, timeout=3.0):
         except Exception:
             pass
         try:
-            for d in hauptfenster.descendants(control_type="Window"):
+            for d in _kind_fenster(hauptfenster):
                 if _ist_aendern_dialog(d):
                     return d
         except Exception:
@@ -2119,7 +2167,9 @@ def _finde_close_dialog(hauptfenster, ticket):
     GENAU dieses Ticket traegt (ist_schliessen_knopf: die Ticket-Gegenpruefung
     ist Teil der Erkennung). Rueckgabe (dialog, knopf) oder (None, None).
     EIN Durchlauf — die Wiederholung taktet der Aufrufer, weil dort parallel
-    lesend auf 'Position schon weg' geprueft wird (Ein-Klick-Modus)."""
+    lesend auf 'Position schon weg' geprueft wird (Ein-Klick-Modus).
+    Kind-Suche billig statt voller Baum (02.09.2026, s. _kind_fenster) —
+    dieser Sucher laeuft in der Aufrufer-Schleife im Sekundentakt."""
     from pywinauto import Desktop
     fenster = []
     try:
@@ -2133,10 +2183,7 @@ def _finde_close_dialog(hauptfenster, ticket):
                 continue
     except Exception:
         pass
-    try:
-        fenster.extend(hauptfenster.descendants(control_type="Window"))
-    except Exception:
-        pass
+    fenster.extend(_kind_fenster(hauptfenster))
     for w in fenster:
         try:
             for b in w.descendants(control_type="Button"):
@@ -2214,10 +2261,10 @@ def _einklick_haftung_annehmen(hauptfenster, trail, melden=False):
                 continue
     except Exception:
         pass
-    try:
-        fenster.extend(hauptfenster.descendants(control_type="Window"))
-    except Exception:
-        pass
+    # Kind-/Enkel-Suche statt vollem Baum (02.09.2026, s. _kind_fenster) —
+    # der Haftungs-Dialog wurde am 01.09. als Kind-Fenster bewiesen, tiefer
+    # hing er nie; der volle Durchlauf lief bei JEDEM Close zweimal mit.
+    fenster.extend(_kind_fenster(hauptfenster))
 
     dlg = knopf = None
     for d in fenster:
@@ -3254,7 +3301,8 @@ def run(cfg_path, cmd):
                 trail.append("SL/TP: manuell (Schalter aus)")
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
                         "msg": "per Klick platziert — SL/TP bewusst NICHT gesetzt "
-                               "(Schalter aus), von Hand nachtragen",
+                               "(Schalter aus), von Hand nachtragen "
+                               f"· {trail.sekunden():.0f}s",
                         "trail": _spur(trail), "symbol": symbol,
                         "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill, "ticket": p["ticket"]}
@@ -3296,7 +3344,11 @@ def run(cfg_path, cmd):
                 trail.append(f"SL {fmt_preis(sl, digits)} / TP {fmt_preis(tp, digits)} "
                              f"per Klick gesetzt")
                 return {"ok": True, "retry_ok": False, "verified": True, "mode": "click",
-                        "msg": "per Klick platziert, SL/TP per Klick am echten Einstieg gesetzt",
+                        # Dauer in der Meldung (02.09.2026, Finns '10 sec pro
+                        # Step, total 1-2 min'): die Sekunde steht damit direkt
+                        # im Prophos-Toast, die Stationen in der Panel-Spur.
+                        "msg": "per Klick platziert, SL/TP per Klick am echten "
+                               f"Einstieg gesetzt · {trail.sekunden():.0f}s",
                         "trail": _spur(trail),
                         "symbol": symbol, "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill,

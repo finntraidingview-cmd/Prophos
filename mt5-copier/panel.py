@@ -2176,6 +2176,11 @@ class Handler(BaseHTTPRequestHandler):
                 lock.release()
             print(f"[panel] {fname}: Master-Order {cmd['richtung']} {cmd['volumen']} "
                   f"{cmd['symbol']} -> {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
+            # Stempel-Spur immer ins Log (02.09.2026, Finns '10 sec pro Step'):
+            # bei Erfolg steht die Spur sonst NIRGENDS — genau dann braucht
+            # man sie aber, um zu sehen, welche Station die Zeit gefressen hat.
+            if res.get("trail"):
+                print(f"[panel] {fname}: Spur: {res['trail']}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/master-close":
@@ -2249,6 +2254,8 @@ class Handler(BaseHTTPRequestHandler):
                 lock.release()
             print(f"[panel] {fname}: Master-Close #{ticket} {symbol} "
                   f"-> {res.get('ok')} ({res.get('msg')})", flush=True)
+            if res.get("trail"):
+                print(f"[panel] {fname}: Spur: {res['trail']}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/start-terminal":
