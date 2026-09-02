@@ -3104,6 +3104,20 @@ def run(cfg_path, cmd):
     # geoeffneten Dialog ungewollt Zeit, seine Felder zu verdrahten; seit der
     # Sucher in Millisekunden traf, griff der Bot ins noch bootende Feld.
     _warte(0.3, 0.25)
+
+    # SL/TP-Schalter EINMAL oben bestimmen (frueher in Schritt 5 lokal) — der
+    # F9-Direktweg (02.09.2026, Finns Idee) braucht ihn schon beim Tippen.
+    mit_sltp = False
+    try:
+        mit_sltp = (float(cmd.get("sl_usd") or 0) > 0
+                    and float(cmd.get("tp_usd") or 0) > 0)
+    except (TypeError, ValueError):
+        mit_sltp = False
+    # Vor dem try definiert, damit Schritt 5 sie sicher sieht, auch wenn das
+    # Tippen sie nie erreicht.
+    sl_f9 = tp_f9 = None
+    f9_getippt = False
+
     try:
         combos = dlg.descendants(control_type="ComboBox")
         edits = dlg.descendants(control_type="Edit")
@@ -3218,6 +3232,49 @@ def run(cfg_path, cmd):
             raise RuntimeError(f"Volumen-Feld uebernimmt {vol:g} nicht — "
                                f"Abbruch VOR dem Order-Knopf.")
         _warte(0.2, 0.25)
+
+        # SL/TP SCHON HIER in den F9-Dialog tippen (02.09.2026, Finns Idee):
+        # der Bot liest den Live-Kurs (ref_ask/ref_bid) ohnehin lesend vor dem
+        # Platzieren, rechnet SL/TP daraus und tippt sie in die Dialogfelder —
+        # dieselbe getippte Mechanik wie beim Volumen, die API bleibt lesend.
+        # Nimmt der Broker sie in der Markt-Order an, entfaellt der ganze
+        # fehleranfaellige Nachtrag-Weg (Zeilen-Scan/Aendern-Dialog). Der SL/TP-
+        # Kurs vom Vor-Fill weicht nur um den Spread vom echten Fill ab — bei
+        # $-Abstaenden vernachlaessigbar (Finns Tempo-vor-Cent-Abwaegung).
+        # WICHTIG als Sicherung: schlaegt das Tippen nicht sauber an, werden
+        # BEIDE Felder wieder auf 0 gesetzt — eine halb gesetzte Order koennte
+        # der Broker sonst komplett ablehnen (kein Fill). Bei 0/0 laeuft alles
+        # exakt wie bisher, der Nachtrag nach dem Fill uebernimmt.
+        if mit_sltp:
+            ref = lese.get("ref_ask") if kauf else lese.get("ref_bid")
+            if not ref:
+                trail.append("kein Live-Kurs fuer F9-SL/TP — Nachtrag nach Fill")
+            else:
+                try:
+                    sl_f9, tp_f9 = berechne_sl_tp(cmd["richtung"], ref, vol,
+                                                  contract_size, cmd["sl_usd"],
+                                                  cmd["tp_usd"], digits)
+                    fmap = _map_felder(dlg)
+                    sl_el, tp_el = fmap.get("sl"), fmap.get("tp")
+                    if sl_el is None or tp_el is None:
+                        trail.append("F9-SL/TP-Felder nicht gefunden — Nachtrag nach Fill")
+                    else:
+                        ok_sl = _feld_tippen(sl_el, fmt_preis(sl_f9, digits),
+                                             "F9-SL", trail, rahmen=dlg)
+                        ok_tp = _feld_tippen(tp_el, fmt_preis(tp_f9, digits),
+                                             "F9-TP", trail, rahmen=dlg)
+                        f9_getippt = bool(ok_sl and ok_tp)
+                        if not f9_getippt:
+                            # Beide auf 0 zuruecksetzen — keine halb gesetzte
+                            # Order (sonst evtl. komplette Ablehnung).
+                            _feld_tippen(sl_el, "0", "F9-SL-Reset", trail, rahmen=dlg)
+                            _feld_tippen(tp_el, "0", "F9-TP-Reset", trail, rahmen=dlg)
+                            trail.append("F9-SL/TP nicht sicher — Felder auf 0, Nachtrag nach Fill")
+                except Exception as _fe:
+                    sl_f9 = tp_f9 = None
+                    f9_getippt = False
+                    trail.append(f"F9-SL/TP uebersprungen ({type(_fe).__name__}) — Nachtrag nach Fill")
+            _warte(0.15, 0.2)
     except Exception as e:
         return {"ok": False, "retry_ok": True,
                 "msg": f"Abbruch VOR dem Order-Knopf (nichts platziert): {e} [" + _spur(trail) + "]"}
@@ -3346,13 +3403,7 @@ def run(cfg_path, cmd):
             fill = p["preis"]   # ECHTER Einstiegskurs der offenen Position
             trail.append(f"Position offen @ {fill}")
             # Schalter aus (18.08.2026): Order pur, SL/TP macht Finn von Hand —
-            # Dialog zu, fertig, KEIN Scan.
-            mit_sltp = False
-            try:
-                mit_sltp = (float(cmd.get("sl_usd") or 0) > 0
-                            and float(cmd.get("tp_usd") or 0) > 0)
-            except (TypeError, ValueError):
-                pass
+            # Dialog zu, fertig, KEIN Scan. (mit_sltp steht seit 02.09. oben.)
             if not mit_sltp:
                 try:
                     dlg.type_keys("{ESC}", set_foreground=False)
@@ -3366,6 +3417,33 @@ def run(cfg_path, cmd):
                         "trail": _spur(trail), "symbol": symbol,
                         "richtung": "buy" if kauf else "sell",
                         "volumen": p["volumen"], "price": fill, "ticket": p["ticket"]}
+            # F9-DIREKTWEG (02.09.2026, Finns Idee): hat der Broker die im
+            # F9-Dialog getippten SL/TP in die Markt-Order uebernommen, traegt
+            # die frische Position sie schon (ein Deal traegt seine Stops
+            # atomar). Dann ist der ganze Nachtrag-Weg unnoetig — der Fall, der
+            # fast alle Klick-Probleme der letzten Tage erspart.
+            if f9_getippt and sl_f9 is not None and tp_f9 is not None \
+                    and sltp_bestaetigt(p["sl"], p["tp"], sl_f9, tp_f9, digits):
+                try:
+                    dlg.type_keys("{ESC}", set_foreground=False)
+                except Exception:
+                    pass
+                trail.append(f"SL {fmt_preis(sl_f9, digits)} / TP {fmt_preis(tp_f9, digits)} "
+                             f"direkt im F9-Dialog gesetzt")
+                return {"ok": True, "retry_ok": False, "verified": True, "mode": "f9",
+                        "msg": "per Klick platziert, SL/TP direkt im Order-Dialog "
+                               f"gesetzt · {trail.sekunden():.0f}s",
+                        "trail": _spur(trail),
+                        "symbol": symbol, "richtung": "buy" if kauf else "sell",
+                        "volumen": p["volumen"], "price": fill,
+                        "sl": sl_f9, "tp": tp_f9, "ticket": p["ticket"]}
+            if f9_getippt:
+                # SL/TP getippt, aber die Position traegt sie nicht: dieser
+                # Broker nimmt SL/TP in der Markt-Order nicht an (IOC). Einmal
+                # in die Spur — das ist der Beweis, ob der Direktweg hier geht —
+                # dann uebernimmt der bewaehrte Nachtrag per Klick.
+                trail.append("F9-SL/TP nicht an der Position — Broker nimmt sie in "
+                             "der Markt-Order nicht; Nachtrag per Klick")
             # SL/TP vom echten Fill-Kurs rechnen — eingetragen wird PER KLICK
             # (18.08.2026, Finns Ansage: kein API-Schreibweg mehr). Vorher den
             # F9-Dialog schliessen, er laege sonst vor der Handel-Liste.
@@ -3446,9 +3524,18 @@ def run(cfg_path, cmd):
                 "msg": "Markt ist geschlossen (Wochenende/ausserhalb der Handelszeit) — "
                        "die Order kann jetzt nicht ausgefuehrt werden. Spur: [" + _spur(trail) + "]",
                 "trail": _spur(trail)}
+    # F9-SL/TP-Verdacht (02.09.2026): wurde SL/TP direkt in den Order-Dialog
+    # getippt und kam GAR KEINE Position, kann der Broker die Markt-Order wegen
+    # der Stops komplett abgelehnt haben (statt sie nur zu ignorieren). Das ist
+    # der Fall, den der Direktweg riskiert — beim Test klar benennen, damit wir
+    # ihn sofort erkennen und den Direktweg ggf. abschalten.
+    f9_hinweis = (" · Hinweis: SL/TP wurden direkt in den Order-Dialog getippt — "
+                  "moeglich, dass dieser Broker sie in der Markt-Order ablehnt und "
+                  "deshalb keine Position kam." if f9_getippt else "")
     return {"ok": False, "retry_ok": False,
             "msg": "KEINE Bestaetigung binnen 12 s — Position nicht am Konto, Dialog "
-                   "geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur,
+                   "geschlossen. Spur: [" + _spur(trail) + "] · Dialog: " + struktur
+                   + f9_hinweis,
             "trail": _spur(trail)}
 
 

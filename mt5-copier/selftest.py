@@ -420,6 +420,16 @@ def main():
     sl, tp = order_bot.berechne_sl_tp("sell", 20000.0, 1.0, 10.0, sl_usd=100, tp_usd=300)
     chk("ORDER-BOT: SELL, Kontraktgroesse 10 → SL 20010 / TP 19970 (gespiegelt)",
         sl == 20010.0 and tp == 19970.0)
+    # F9-Direktweg (02.09.2026): SL/TP werden schon im Order-Dialog aus dem
+    # Vor-Fill-Kurs gerechnet — BUY vom Ask, SELL vom Bid. Nagelt die Ref-Wahl
+    # fest, damit ein Umbau sie nicht still vertauscht (waere SL/TP am falschen
+    # Kursende). Ask=20002, Bid=20000, Spread 2.
+    slb, tpb = order_bot.berechne_sl_tp("buy", 20002.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+    chk("ORDER-BOT: F9-BUY rechnet vom Ask (SL unter, TP ueber dem Ask)",
+        slb < 20002.0 < tpb)
+    sls, tps = order_bot.berechne_sl_tp("sell", 20000.0, 0.2, 1.0, sl_usd=100, tp_usd=300)
+    chk("ORDER-BOT: F9-SELL rechnet vom Bid (SL ueber, TP unter dem Bid)",
+        tps < 20000.0 < sls)
     f = order_bot.pruefe_befehl({"symbol": "NDX100", "richtung": "buy",
                                  "volumen": 0.2, "sl_usd": 100, "tp_usd": 300})
     chk("ORDER-BOT: vollstaendiger Befehl → keine Fehler", f == [])
