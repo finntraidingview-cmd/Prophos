@@ -31,3 +31,10 @@ __pycache__/
 plans.json
 !config.vorlage.json
 !config.tvplus.vorlage.json
+
+# Gelernte Klickpunkte des Order-Bots (Zeilen-Anker + Handel-Tab-Punkt) —
+# pro PC und pro Instanz gelernt, gelten NUR fuer genau dieses Fenster auf
+# genau diesem PC (Finns Frage 02.09.2026: "ueberschreibt Moritz' Bot die
+# Sachen von Jakob?" — nein, und damit sie auch nie versehentlich ueber das
+# Repo wandern koennen, stehen sie hier).
+anker-*.json
