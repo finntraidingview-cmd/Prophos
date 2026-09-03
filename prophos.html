@@ -6274,7 +6274,6 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
-          <button class="subtab adm-tab" data-admtab="plan">Kaufplan</button>
           <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
@@ -6719,7 +6718,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Wallets</div>
-                <div class="panel-sub">Pro Person bis zu fünf Adressen — Arbitrum, Polygon, BNB Chain, Solana, Tron</div>
+                <div class="panel-sub">Pro Person bis zu fünf Adressen — Arbitrum, Polygon, BNB Chain, Solana, Tron · Zeile anklicken zeigt die letzten Transfers</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
@@ -6751,6 +6750,34 @@
               </table>
             </div>
             <div class="adm-empty" id="wal-empty" hidden>Noch keine Wallets — oben die erste Adresse eintragen.</div>
+          </div>
+
+          <!-- LETZTE TRANSFERS (03.09.2026, Finns Wunsch am Meta-Wallet-Screenshot):
+               Wallet in der Tabelle anklicken → wohin die letzten Überweisungen
+               geflossen sind. Gleiche Doktrin wie die Balances: keyless, direkt
+               aus dem Browser — Quellen je Chain stehen im JS bei walTxFetch. -->
+          <div class="panel" style="margin-top:14px" id="wal-tx-panel" hidden>
+            <div class="panel-head">
+              <div>
+                <div class="panel-title" id="wal-tx-title">Letzte Transfers</div>
+                <div class="panel-sub" id="wal-tx-sub">–</div>
+              </div>
+              <button class="btn btn-ghost" id="wal-tx-close" style="padding:7px 12px">Schließen</button>
+            </div>
+            <div id="wal-tx-msg" style="color:var(--sub);font-size:13px;padding:8px 2px" hidden></div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr>
+                  <th>Wann</th>
+                  <th>Richtung</th>
+                  <th class="adm-num">Betrag</th>
+                  <th>Gegenseite</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="wal-tx-rows"></tbody>
+              </table>
+            </div>
+            <div id="wal-tx-note" style="font-size:11.5px;color:var(--sub);margin-top:8px" hidden></div>
           </div>
 
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
@@ -6870,27 +6897,6 @@
           </div>
         </div>
 
-        <!-- KAUFPLAN (31.08.2026, Finns Wunsch) — was soll künftig auf welcher
-             ID gekauft werden. Löst die Google-Keep-Notiz ab. Bewusst getrennt
-             vom Acc-Käufe-Tab: der schaut zurück auf `accounts`, das hier nach
-             vorn — ein geplanter Kauf ist noch kein Account und darf in keiner
-             Kapital- oder Risiko-Auswertung mitzählen. -->
-        <div id="adm-pane-plan" hidden>
-          <div class="adm-toolbar">
-            <select id="plan-person" class="adm-f" style="min-width:150px"><option value="">ID wählen…</option></select>
-            <input id="plan-firma" list="plan-firmen" placeholder="Prop-Firma" style="width:160px">
-            <datalist id="plan-firmen"></datalist>
-            <input id="plan-notiz" placeholder="Was soll dort geparkt werden?" style="flex:1;min-width:220px">
-            <button class="btn btn-primary" id="plan-add" style="padding:8px 14px">Eintragen</button>
-            <button class="btn btn-ghost" id="plan-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
-          </div>
-
-          <div style="margin:2px 0 12px">
-            <span id="plan-msg" style="font-size:12.5px;color:var(--sub)"></span>
-          </div>
-
-          <div id="plan-groups"></div>
-        </div>
       </div>
     </section>
 
@@ -8758,7 +8764,9 @@
                             'USDC':'0xaf88d065e77c8cC2239327C5EDb3A432268e5831',      // USDC (nativ, Circle)
                             'USDC.e':'0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' },  // USDC.e (gebridgt)
                   rpc:'https://arb1.arbitrum.io/rpc',
+                  txApi:'https://arbitrum.blockscout.com',
                   explorer: a => 'https://arbiscan.io/address/' + a,
+                  tx: h => 'https://arbiscan.io/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
       // Polygon (25.08.2026): gleiche MetaMask-Adresse wie Arbitrum, nur anderer
@@ -8771,7 +8779,9 @@
                             'USDC.e':'0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174' },  // USDC.e (PoS, gebridgt)
                   rpc:'https://polygon-bor-rpc.publicnode.com',
                   rpcFallback:'https://polygon-rpc.com',
+                  txApi:'https://polygon.blockscout.com',
                   explorer: a => 'https://polygonscan.com/address/' + a,
+                  tx: h => 'https://polygonscan.com/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
       // BNB Chain (28.08.2026): gleiche MetaMask-Adresse wie Arbitrum/Polygon.
@@ -8787,6 +8797,7 @@
                   rpc:'https://bsc-rpc.publicnode.com',
                   rpcFallback:'https://bsc-dataseed.bnbchain.org',
                   explorer: a => 'https://bscscan.com/address/' + a,
+                  tx: h => 'https://bscscan.com/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
                   hint:'0x… (42 Zeichen)' },
       solana:   { label:'Solana', col:'#14f195',
@@ -8799,6 +8810,7 @@
                   rpc:'https://solana-rpc.publicnode.com',
                   rpcFallback:'https://api.mainnet-beta.solana.com',
                   explorer: a => 'https://solscan.io/account/' + a,
+                  tx: h => 'https://solscan.io/tx/' + h,
                   valid: a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
                   hint:'Base58 (32–44 Zeichen)' },
       tron:     { label:'Tron', col:'#ef4444',
@@ -8807,6 +8819,7 @@
                             'USDC':'TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8' },            // USDC (TRC-20)
                   api:'https://api.trongrid.io',
                   explorer: a => 'https://tronscan.org/#/address/' + a,
+                  tx: h => 'https://tronscan.org/#/transaction/' + h,
                   valid: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
                   hint:'T… (34 Zeichen)' }
     }
@@ -9130,6 +9143,12 @@
         const partsTitle = b?.parts ? Object.entries(b.parts).filter(([, v]) => v >= 0.005)
           .map(([k, v]) => k + ' ' + walNf.format(v)).join(' · ') : ''
         const tr = document.createElement('tr')
+        // Zeile anklicken = letzte Transfers (03.09.2026) — Kopier-Knopf,
+        // Explorer-Link und ×-Knopf behalten ihre eigene Bedeutung.
+        tr.dataset.wid = w.id
+        tr.style.cursor = 'pointer'
+        tr.title = 'Klicken: letzte Transfers dieser Wallet'
+        if(walTxSel === w.id) tr.style.background = 'rgba(84,71,206,.07)'
         tr.innerHTML =
           '<td class="wal-td-person"></td>' +
           `<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin-right:7px"></span>${c.label}</td>` +
@@ -9227,8 +9246,243 @@
         const { error } = await supabase.from('id_wallets').delete().eq('id', id)
         if(error) throw error
         walBal.delete(id)
+        if(walTxSel === id) walTxClose()
         await walLoad()
       }catch(e){ console.warn('[wallet] delete:', e.message || e) }
+    }
+
+    /* ── LETZTE TRANSFERS (03.09.2026, Finns Wunsch am Meta-Wallet-Screenshot:
+     * „auf die Wallets draufdrücken … sehen, wo die letzten Überweisungen
+     * hingeflossen sind") — gleiche Doktrin wie die Balances: keyless, direkt
+     * aus dem Browser, kein app.py-Umweg, nie Keys. Quellen je Chain, alle am
+     * 03.09.2026 live aus dem Browser geprüft:
+     *   Arbitrum/Polygon  Blockscout API v2 (offen, CORS-frei; Arbiscan/
+     *                     Etherscan V2 verlangen inzwischen API-Keys)
+     *   BNB Chain         KEIN offener Verlaufs-Endpoint (Etherscan V2: „Free
+     *                     API access is not supported for this chain", Routescan:
+     *                     „chain not supported"). Deshalb eth_getLogs rückwärts
+     *                     in 3.800er-Block-Fenstern, bis der RPC die Archiv-
+     *                     Grenze meldet (publicnode keyless: nur ein paar
+     *                     Stunden) — ehrlich benannt statt geraten, der Rest
+     *                     steht im Explorer.
+     *   Solana            getSignaturesForAddress + getTransaction (jsonParsed);
+     *                     Beträge aus pre/postTokenBalances-Deltas, SOL aus
+     *                     pre/postBalances (Fee beim Signer rausgerechnet).
+     *   Tron              TronGrid /transactions/trc20 (keyless, 1 Request —
+     *                     dieselbe 429-Vorsicht wie bei den Balances). */
+    const WAL_TX_N = 12
+    let walTxSel = null, walTxLauf = 0
+    const walTxCache = new Map()   // wallet.id → { t, res } — 60 s, schont TronGrid & Co.
+    const WAL_TX_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+
+    async function walTxEvmBlockscout(c, w){
+      const r = await fetch(c.txApi + '/api/v2/addresses/' + w.address + '/token-transfers?type=ERC-20')
+      if(!r.ok) throw new Error('Blockscout: HTTP ' + r.status)
+      const d = await r.json()
+      const me = w.address.toLowerCase()
+      const list = (d.items || []).map(t => {
+        const from = t.from?.hash || '', to = t.to?.hash || ''
+        const raus = from.toLowerCase() === me
+        const dec = Number(t.total?.decimals ?? t.token?.decimals ?? 6)
+        return { ts: t.timestamp ? Date.parse(t.timestamp) : null,
+                 dir: raus ? 'raus' : 'rein',
+                 amount: (Number(t.total?.value) || 0) / 10 ** dec,
+                 sym: t.token?.symbol || '?',
+                 other: raus ? to : from,
+                 hash: t.transaction_hash || t.tx_hash || '' }
+      }).slice(0, WAL_TX_N)
+      return { list, note: null }
+    }
+
+    async function walTxBnbLogs(c, w){
+      const meTopic = '0x000000000000000000000000' + w.address.slice(2).toLowerCase()
+      const me = w.address.toLowerCase()
+      const symVon = Object.fromEntries(Object.entries(c.stables).map(([s, a]) => [a.toLowerCase(), s]))
+      const contracts = Object.values(c.stables)
+      const bHex = n => '0x' + n.toString(16)
+      const latest = parseInt(await walRpc(c, 'eth_blockNumber', []), 16)
+      const roh = []
+      let bis = latest, chunks = 0, grenze = false
+      while(chunks < 8 && roh.length < WAL_TX_N && bis > 0){
+        const von = Math.max(0, bis - 3800)
+        let raus, rein
+        try{
+          ;[raus, rein] = await Promise.all([
+            walRpc(c, 'eth_getLogs', [{ address: contracts, fromBlock: bHex(von), toBlock: bHex(bis), topics: [WAL_TX_TRANSFER_TOPIC, meTopic] }]),
+            walRpc(c, 'eth_getLogs', [{ address: contracts, fromBlock: bHex(von), toBlock: bHex(bis), topics: [WAL_TX_TRANSFER_TOPIC, null, meTopic] }])
+          ])
+        }catch(e){ grenze = true; break }   // Archiv-Grenze des keyless RPCs erreicht
+        for(const [dir, logs] of [['raus', raus], ['rein', rein]]){
+          for(const l of logs){
+            const from = '0x' + String(l.topics[1]).slice(-40), to = '0x' + String(l.topics[2]).slice(-40)
+            if(dir === 'rein' && from === me) continue   // Selbst-Transfer steckt schon im raus-Lauf
+            roh.push({ bn: parseInt(l.blockNumber, 16), dir,
+                       amount: (parseInt(l.data, 16) || 0) / 10 ** (c.stableDec || 6),
+                       sym: symVon[String(l.address).toLowerCase()] || '?',
+                       other: dir === 'raus' ? to : from, hash: l.transactionHash || '' }) }
+        }
+        bis = von - 1; chunks++
+      }
+      roh.sort((a, b) => b.bn - a.bn)
+      const list = roh.slice(0, WAL_TX_N)
+      // Echte Blockzeiten für die angezeigten Zeilen — keine hochgerechneten Stempel
+      const bns = [...new Set(list.map(x => x.bn))]
+      const zeit = new Map(await Promise.all(bns.map(bn =>
+        walRpc(c, 'eth_getBlockByNumber', [bHex(bn), false])
+          .then(b => [bn, (parseInt(b?.timestamp, 16) || 0) * 1000 || null])
+          .catch(() => [bn, null]))))
+      for(const e of list) e.ts = zeit.get(e.bn) || null
+      const stunden = Math.max(1, Math.round((latest - bis) * 0.75 / 3600))
+      return { list, note: `BNB Chain hat keinen schlüsselfreien Verlaufs-Endpoint — lesbar sind nur die letzten ~${stunden} Stunden${grenze ? ' (Archiv-Grenze des RPCs)' : ''}. Kompletter Verlauf: Explorer-Link ↗ in der Wallet-Zeile.` }
+    }
+
+    async function walTxSolana(c, w){
+      const sigs = (await walRpc(c, 'getSignaturesForAddress', [w.address, { limit: 10 }])) || []
+      const mintSym = Object.fromEntries(Object.entries(c.stables).map(([s, m]) => [m, s]))
+      const txs = await Promise.all(sigs.map(s =>
+        walRpc(c, 'getTransaction', [s.signature, { encoding:'jsonParsed', maxSupportedTransactionVersion:0 }]).catch(() => null)))
+      const list = []
+      txs.forEach((tx, i) => {
+        if(!tx?.meta) return
+        const ts = ((tx.blockTime || sigs[i].blockTime || 0) * 1000) || null
+        const hash = sigs[i].signature
+        // Stable-/Token-Deltas: eigener Owner vs. fremde Owner je Mint
+        const je = new Map()
+        const sammle = (arr, sign) => { for(const b of (arr || [])){
+          const amt = Number(b.uiTokenAmount?.uiAmount) || 0
+          const d = je.get(b.mint) || { me: 0, andere: new Map() }
+          if(b.owner === w.address) d.me += sign * amt
+          else d.andere.set(b.owner, (d.andere.get(b.owner) || 0) + sign * amt)
+          je.set(b.mint, d)
+        } }
+        sammle(tx.meta.postTokenBalances, +1); sammle(tx.meta.preTokenBalances, -1)
+        let getroffen = false
+        for(const [mint, d] of je){
+          if(Math.abs(d.me) < 1e-9) continue
+          getroffen = true
+          let other = '', best = 0
+          for(const [o, v] of d.andere){ if(Math.sign(v) !== Math.sign(d.me) && Math.abs(v) > best){ best = Math.abs(v); other = o } }
+          list.push({ ts, dir: d.me > 0 ? 'rein' : 'raus', amount: Math.abs(d.me),
+                      sym: mintSym[mint] || 'SPL', other, hash })
+        }
+        if(!getroffen){
+          // Kein Token-Delta ⇒ SOL-Bewegung; Fee beim Signer rausrechnen, sonst
+          // sähe jede selbst signierte Tx wie „raus" aus.
+          const keys = tx.transaction?.message?.accountKeys || []
+          const i0 = keys.findIndex(k => (k?.pubkey || k) === w.address)
+          if(i0 >= 0){
+            let d = ((tx.meta.postBalances?.[i0] ?? 0) - (tx.meta.preBalances?.[i0] ?? 0)) / 1e9
+            if(i0 === 0) d += (tx.meta.fee || 0) / 1e9
+            if(Math.abs(d) > 1e-6){
+              let other = '', best = 0
+              keys.forEach((k, ki) => { if(ki === i0) return
+                const v = ((tx.meta.postBalances?.[ki] ?? 0) - (tx.meta.preBalances?.[ki] ?? 0)) / 1e9
+                if(Math.sign(v) !== Math.sign(d) && Math.abs(v) > best){ best = Math.abs(v); other = k?.pubkey || k } })
+              list.push({ ts, dir: d > 0 ? 'rein' : 'raus', amount: Math.abs(d), sym: 'SOL', other, hash })
+            }
+          }
+        }
+      })
+      return { list: list.slice(0, WAL_TX_N), note: null }
+    }
+
+    async function walTxTron(c, w){
+      const r = await fetch(c.api + '/v1/accounts/' + w.address + '/transactions/trc20?limit=' + (WAL_TX_N + 5) + '&order_by=block_timestamp,desc')
+      const j = await r.json().catch(() => null)
+      if(!r.ok || !j || j.success === false){
+        throw new Error(r.status === 429 ? 'TronGrid drosselt (429) — gleich nochmal versuchen'
+          : 'TronGrid-Fehler: ' + ((j && (j.error || j.Error)) || ('HTTP ' + r.status)))
+      }
+      const list = (j.data || []).map(t => {
+        const raus = t.from === w.address
+        return { ts: t.block_timestamp || null, dir: raus ? 'raus' : 'rein',
+                 amount: (Number(t.value) || 0) / 10 ** Number(t.token_info?.decimals ?? 6),
+                 sym: t.token_info?.symbol || 'TRC20',
+                 other: raus ? t.to : t.from, hash: t.transaction_id || '' }
+      }).slice(0, WAL_TX_N)
+      return { list, note: 'TRC-20-Transfers (USDT & Co.) — reine TRX-Bewegungen zeigt der Explorer ↗ in der Wallet-Zeile.' }
+    }
+
+    function walTxFetch(w){
+      const c = WAL_CHAINS[w.chain]
+      if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
+      if(c.txApi) return walTxEvmBlockscout(c, w)
+      if(w.chain === 'bnb') return walTxBnbLogs(c, w)
+      if(w.chain === 'solana') return walTxSolana(c, w)
+      return walTxTron(c, w)
+    }
+
+    const walTxZeit = ts => {
+      if(!ts) return '–'
+      const d = new Date(ts)
+      const p = n => String(n).padStart(2, '0')
+      return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`
+    }
+
+    function walTxRender(w, res){
+      const c = WAL_CHAINS[w.chain]
+      const msg = $('wal-tx-msg'), note = $('wal-tx-note'), tb = $('wal-tx-rows')
+      tb.innerHTML = ''
+      note.hidden = !res.note
+      note.textContent = res.note || ''
+      if(!res.list.length){
+        msg.hidden = false
+        msg.textContent = 'Keine Transfers gefunden.'
+        return
+      }
+      msg.hidden = true
+      for(const e of res.list){
+        const stable = e.sym === 'USDT' || e.sym === 'USDC' || e.sym === 'USDC.e'
+        const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
+        const tr = document.createElement('tr')
+        tr.innerHTML =
+          `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
+          `<td>${e.dir === 'rein'
+            ? '<span style="color:var(--good);font-weight:650">↓ rein</span>'
+            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}</td>` +
+          `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
+          `<td>${e.other
+            ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
+              ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
+            : '<span style="color:var(--sub)">–</span>'}</td>` +
+          `<td style="text-align:right">${e.hash
+            ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
+        tb.appendChild(tr)
+      }
+    }
+
+    function walTxClose(){
+      walTxSel = null
+      $('wal-tx-panel').hidden = true
+      walRender()
+    }
+
+    async function walTxOpen(w){
+      if(walTxSel === w.id){ walTxClose(); return }   // zweiter Klick auf dieselbe Zeile = zu
+      walTxSel = w.id
+      const c = WAL_CHAINS[w.chain]
+      $('wal-tx-panel').hidden = false
+      $('wal-tx-title').textContent = `Letzte Transfers — ${w.person_name} · ${c.label}`
+      $('wal-tx-sub').textContent = w.address.length > 14 ? w.address.slice(0, 7) + '…' + w.address.slice(-5) : w.address
+      walRender()   // Zeilen-Markierung in der Wallet-Tabelle
+      const lauf = ++walTxLauf
+      const cached = walTxCache.get(w.id)
+      if(cached && Date.now() - cached.t < 60000){ walTxRender(w, cached.res); return }
+      $('wal-tx-rows').innerHTML = ''
+      $('wal-tx-note').hidden = true
+      const msg = $('wal-tx-msg')
+      msg.hidden = false
+      msg.textContent = 'Lade Transfers von der Chain…'
+      try{
+        const res = await walTxFetch(w)
+        walTxCache.set(w.id, { t: Date.now(), res })
+        if(lauf !== walTxLauf) return   // inzwischen andere Wallet angeklickt
+        walTxRender(w, res)
+      }catch(e){
+        if(lauf !== walTxLauf) return
+        msg.hidden = false
+        msg.textContent = 'Transfers nicht ladbar: ' + (e.message || e)
+      }
     }
 
     /* ── Rechnungen (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs ──
@@ -9282,147 +9536,9 @@
       return d
     }
 
-    /* ══ KAUFPLAN (31.08.2026, Finns Wunsch) ═══════════════════════════════
-     * Drei Felder, mehr nicht: ID, Prop-Firma, Notiz. Finn wörtlich, nachdem
-     * die erste Fassung zu viel wollte: „einfach nur id auswählen und dann
-     * prop firm auswählen und dann ein notiz feld was für ein acc da geparkt
-     * werden soll … das mit dropdown, plus etc is overkill."
-     *
-     * Was trotzdem bleibt, weil es kein Eingabefeld kostet: neben jeder Zeile
-     * steht, was auf dieser ID bei dieser Firma GERADE liegt — aus den echten
-     * Accounts gelesen, archivierte raus. Das ist die Antwort auf Finns
-     * ursprüngliche Frage („so lange kaufen, bis da …"), ohne dass er dafür
-     * irgendetwas konfigurieren muss. Und deshalb gibt es auch hier keinen
-     * Haken zum Abhaken: der Stand kommt aus den Accounts, nicht aus einem
-     * zweiten Klick, der danebenlaufen könnte.
-     *
-     * Läuft über app.py (rgApi → /admin/acc-plan): die Tabelle hat bewusst
-     * keine RLS-Policy, weil hier steht, was für FREMDE IDs geplant ist. */
-    const PLAN_TYP_LBL = { funded:'Funded', phase2:'Phase 2', phase1:'Phase 1', challenge:'Challenge', live:'Live' }
-    let planData = null
-    let planGeladen = false
-
-    const planEsc = s => String(s ?? '').replace(/[&<>"']/g, c =>
-      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-
-    function planSetMsg(text, art){
-      const el = $('plan-msg'); if(!el) return
-      el.textContent = text || ''
-      el.style.color = art === 'err' ? 'var(--danger)' : 'var(--sub)'
-    }
-
-    async function planLoad(){
-      planSetMsg('Lade…')
-      try{
-        planData = await rgApi('/admin/acc-plan')
-        planSetMsg('')
-        planRender()
-      }catch(e){
-        planData = null
-        planSetMsg('Kaufplan nicht ladbar: ' + (e && e.message || e), 'err')
-        const g = $('plan-groups'); if(g) g.innerHTML = ''
-      }
-    }
-
-    function planOpen(){
-      if(!planGeladen){ planGeladen = true; planLoad() }
-      else planRender()
-    }
-
-    // „2× Funded · 1× Phase 1" — leer heißt: dort liegt gerade nichts.
-    function planStandText(stand){
-      const e = Object.entries(stand || {}).filter(([, n]) => n > 0)
-      if(!e.length) return 'dort liegt gerade nichts'
-      return e.sort((a, b) => b[1] - a[1])
-        .map(([t, n]) => `${n}× ${PLAN_TYP_LBL[t] || t}`).join(' · ')
-    }
-
-    function planRender(){
-      const g = $('plan-groups'); if(!g || !planData) return
-      const personen = planData.personen || []
-      const nameVon = new Map(personen.map(p => [String(p.user_id), p.name]))
-
-      const sel = $('plan-person')
-      if(sel && sel.options.length !== personen.length + 1){   // +1 = Platzhalter
-        const vorher = sel.value
-        sel.innerHTML = '<option value="">ID wählen…</option>' + personen.map(p =>
-          `<option value="${planEsc(p.user_id)}">${planEsc(p.name)}</option>`).join('')
-        if(vorher) sel.value = vorher
-      }
-      const dl = $('plan-firmen')
-      if(dl) dl.innerHTML = (planData.firmen || []).map(f =>
-        `<option value="${planEsc(f)}"></option>`).join('')
-
-      const zeilen = planData.eintraege || []
-      if(!zeilen.length){
-        g.innerHTML = '<div class="adm-empty">Noch nichts geplant. Oben ID und Firma wählen, dazuschreiben was dort stehen soll.</div>'
-        return
-      }
-
-      const gruppen = new Map()
-      for(const z of zeilen){
-        const k = String(z.user_id)
-        const grp = gruppen.get(k) || { key:k, name: nameVon.get(k) || k.slice(0, 8), zeilen:[] }
-        grp.zeilen.push(z)
-        gruppen.set(k, grp)
-      }
-      const liste = [...gruppen.values()].sort((a, b) => a.name.localeCompare(b.name))
-
-      // EINE Karte für alles, Personen nur als schlanke Zwischenzeile. Vorher
-      // bekam jede Person einen eigenen Kasten mit Kopf und Unterzeile, und
-      // jeder Eintrag drei Zeilen Höhe — bei fünf Personen war die Liste
-      // dreimal so hoch wie ihr Inhalt (Finn: „design viel zu fett hässlich").
-      g.innerHTML = `<div class="card" style="padding:4px 14px 10px">` + liste.map(grp => `
-        <div style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--sub-2);font-weight:650;padding:14px 0 2px">${planEsc(grp.name)}</div>
-        ${grp.zeilen.map(planZeile).join('')}`).join('') + `</div>`
-    }
-
-    function planZeile(z){
-      const ab = !!z.erledigt
-      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft)${ab ? ';opacity:.45' : ''}">
-        <input type="checkbox" class="plan-hak" data-plan-id="${planEsc(z.id)}" ${ab ? 'checked' : ''}
-               title="Erledigt" style="width:15px;height:15px;flex:none;cursor:pointer">
-        <span style="flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis${ab ? ';text-decoration:line-through' : ''}">
-          <b style="font-weight:650">${planEsc(z.firma) || '—'}</b>${z.notiz ? ' · ' + planEsc(z.notiz) : ''}
-        </span>
-        <span style="flex:none;font-size:11.5px;color:var(--sub-2);white-space:nowrap">${planEsc(planStandText(z.stand))}</span>
-        <button class="plan-del" data-plan-id="${planEsc(z.id)}" title="Löschen"
-                style="flex:none;border:0;background:none;color:var(--sub-2);cursor:pointer;font-size:13px;line-height:1;padding:3px 4px">✕</button>
-      </div>`
-    }
-
-    async function planHaken(id, erledigt){
-      try{
-        await rgApi('/admin/acc-plan', { method:'PATCH', body: JSON.stringify({ id, erledigt }) })
-        await planLoad()
-      }catch(e){ planSetMsg('Haken nicht gespeichert: ' + (e && e.message || e), 'err') }
-    }
-
-    async function planAdd(){
-      const uid = $('plan-person').value
-      if(!uid) return planSetMsg('Erst die ID wählen.', 'err')
-      const firma = $('plan-firma').value.trim()
-      if(!firma) return planSetMsg('Prop-Firma angeben.', 'err')
-      const btn = $('plan-add'); btn.disabled = true
-      try{
-        await rgApi('/admin/acc-plan', { method:'POST', body: JSON.stringify({
-          user_id: uid, firma, notiz: $('plan-notiz').value.trim() }) })
-        // ID und Firma bleiben stehen — man schreibt oft mehrere Zeilen für
-        // dieselbe Kombination hintereinander.
-        $('plan-notiz').value = ''
-        await planLoad()
-      }catch(e){
-        planSetMsg('Nicht eingetragen: ' + (e && e.message || e), 'err')
-      }finally{ btn.disabled = false }
-    }
-
-    async function planDelete(id){
-      if(!confirm('Diesen Eintrag löschen?')) return
-      try{
-        await rgApi('/admin/acc-plan?id=' + encodeURIComponent(id), { method:'DELETE' })
-        await planLoad()
-      }catch(e){ planSetMsg('Nicht gelöscht: ' + (e && e.message || e), 'err') }
-    }
+    /* Kaufplan-Tab entfernt (03.09.2026, Finns Wunsch am Screenshot: „Kaufplan
+     * komplett rauslöschen"). Die Tabelle acc_plan und /admin/acc-plan in app.py
+     * bleiben unangetastet — nur die Oberfläche ist weg. */
 
     function rgOpen(){
       if(!rgOpened){
@@ -9728,12 +9844,10 @@
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
-        $('adm-pane-plan').hidden     = name !== 'plan'
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
         if(name === 'rg')   rgOpen()
-        if(name === 'plan') planOpen()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
@@ -9747,18 +9861,6 @@
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
-      // Kaufplan-Tab (31.08.2026) — eigene Verdrahtung; die zwei Klick-Handler
-      // haengen NUR am Kaufplan-Grid, nicht global (Projektregel).
-      $('plan-add')?.addEventListener('click', planAdd)
-      $('plan-refresh')?.addEventListener('click', planLoad)
-      $('plan-notiz')?.addEventListener('keydown', ev => { if(ev.key === 'Enter') planAdd() })
-      $('plan-groups')?.addEventListener('click', ev => {
-        const del = ev.target.closest('.plan-del')
-        if(del) return planDelete(del.dataset.planId)
-        const hak = ev.target.closest('.plan-hak')
-        if(hak) planHaken(hak.dataset.planId, hak.checked)
-      })
-
       // Rechnungen-Tab (28.08.2026)
       $('rg-preview-btn')?.addEventListener('click', rgPreview)
       $('rg-create-btn')?.addEventListener('click', rgCreate)
@@ -9780,17 +9882,32 @@
       $('wal-person')?.addEventListener('change', walRender)
       $('wal-add')?.addEventListener('click', walAdd)
       $('wal-add-address')?.addEventListener('keydown', e => { if(e.key === 'Enter') walAdd() })
+      // Adress-Kopieren gilt in der Wallet- UND der Transfer-Tabelle (gleiche .wal-addr-Knöpfe)
+      const walAddrKopieren = ad => {
+        if(!navigator.clipboard) return
+        navigator.clipboard.writeText(ad.dataset.full).then(() => {
+          const old = ad.textContent
+          ad.textContent = 'kopiert ✓'
+          setTimeout(() => { ad.textContent = old }, 900)
+        }).catch(() => {})
+      }
       $('wal-rows')?.addEventListener('click', ev => {
         const del = ev.target.closest('.wal-del')
         if(del){ walDelete(del.dataset.id); return }
         const ad = ev.target.closest('.wal-addr')
-        if(ad && navigator.clipboard){
-          navigator.clipboard.writeText(ad.dataset.full).then(() => {
-            const old = ad.textContent
-            ad.textContent = 'kopiert ✓'
-            setTimeout(() => { ad.textContent = old }, 900)
-          }).catch(() => {})
+        if(ad){ walAddrKopieren(ad); return }
+        if(ev.target.closest('a')) return   // Explorer-Link bleibt Explorer-Link
+        // Klick irgendwo sonst in der Zeile: letzte Transfers dieser Wallet (03.09.2026)
+        const tr = ev.target.closest('tr[data-wid]')
+        if(tr){
+          const w = wallets.find(x => String(x.id) === String(tr.dataset.wid))
+          if(w) walTxOpen(w)
         }
+      })
+      $('wal-tx-close')?.addEventListener('click', walTxClose)
+      $('wal-tx-rows')?.addEventListener('click', ev => {
+        const ad = ev.target.closest('.wal-addr')
+        if(ad) walAddrKopieren(ad)
       })
       selectWho('finn')
     })
@@ -21740,7 +21857,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-02.248'
+  const OS_TAB_BUILD = '2026-09-03.249'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
