@@ -531,6 +531,7 @@ def advance_plans(instances_data):
     """Zustandsmaschine, bei jedem Status-Abruf ausgefuehrt (idempotent).
     Uebergaenge nur bei frischem, warnungsfreiem Master-Status — ein
     eingefrorener Snapshot darf keinen Plan faelschlich beenden."""
+    ende_files = []
     with PLANS_LOCK:
         plans = _load_plans()
         by_file = {d["file"]: d for d in instances_data}
@@ -549,6 +550,9 @@ def advance_plans(instances_data):
                 p["status"] = "beendet"
                 p["ended_at"] = now
                 changed = True
+                # Trade-Ende = Terminal-Zu anstossen (03.09.2026, Finns Wunsch).
+                # Erst NACH dem Lock — der Worker liest plans.json selbst.
+                ende_files.append(p["file"])
         # Historie begrenzen: die letzten 50 beendeten reichen
         done = [p for p in plans if p["status"] == "beendet"]
         if len(done) > 50:
@@ -557,7 +561,112 @@ def advance_plans(instances_data):
             changed = True
         if changed:
             _save_plans(plans)
-        return plans
+    for f in ende_files:
+        _terminal_zu_starten(f, "Trade-Ende")
+    return plans
+
+
+# ── Master-Terminal zu, wenn kein Trade aktiv (03.09.2026, Finns Wunsch) ───────
+# Die Master-Terminals sind laut Doktrin (25.08.2026, standby) absichtlich ZU
+# und oeffnen erst beim Trade-Start — praktisch blieb aber jedes Terminal nach
+# dem Trade offen, weil niemand es von Hand schliesst: die Flotte lief faktisch
+# 24/7 wie ein VPS. Zwei Wege dagegen: (1) endet ein Trade-Plan (laufend →
+# beendet), schliesst ein Worker das Master-Terminal der Instanz von selbst;
+# (2) der Prophos-Knopf „Terminals ohne Trade schliessen" raeumt per
+# /api/close-idle-terminals alles auf, was ohne Position/Hedge offen ist.
+# Geschlossen wird NUR mit frischem, warnungsfreiem Copier-Status als Beweis —
+# und nie, solange der Copier noch einen Hedge abzubauen hat (der Copier haengt
+# am Hedge-Terminal, aber der finale 0-Positionen-Snapshot des Masters muss
+# geschrieben und verarbeitet sein, bevor das Terminal verschwinden darf).
+# Das Slave-/Hedge-Terminal bleibt immer offen: dort haengt der Copier, und es
+# ist Finns eigenes Broker-Konto, keine Prop-Firm.
+_TERMINAL_ZU_LOCK = threading.Lock()
+_TERMINAL_ZU_AKTIV = set()   # config_files mit laufendem Zu-Worker
+
+
+def terminal_schliessbar(cfg, st, age, plan_status=None):
+    """Reine Entscheidung (testbar, ohne I/O): darf das MASTER-Terminal dieser
+    Instanz jetzt geschlossen werden? → (ja/nein, grund). Dieselbe strenge
+    Beweis-Doktrin wie der Loesch-Riegel: ohne frischen Status keine Aktion."""
+    if not str(cfg.get("master_terminal_path") or "").strip():
+        return False, "kein Master-Terminal (Orbit/TV-Instanz oder Pfad fehlt)"
+    if plan_status:
+        return False, f"Trade-Plan ist '{plan_status}'"
+    frisch = bool(st.get("running")) and age is not None and age <= 15
+    if not frisch:
+        return False, "Copier-Status nicht frisch — ob ein Trade laeuft, ist nicht beweisbar"
+    if st.get("note"):
+        return False, f"Status-Warnung: {st.get('note')}"
+    pos = len(st.get("master_positions") or [])
+    if pos:
+        return False, f"{pos} offene Master-Position(en)"
+    hed = sum(1 for hs in (st.get("hedges") or {}).values() if hs)
+    if hed:
+        return False, f"{hed} offene(r) Hedge(s) — Copier baut erst ab"
+    return True, "kein Trade aktiv"
+
+
+def _terminal_zu_starten(fname, ausloeser):
+    """Startet den Zu-Worker fuer eine Instanz — hoechstens einen zur Zeit."""
+    cfg = read_json(os.path.join(HERE, fname), {}) or {}
+    if not str(cfg.get("master_terminal_path") or "").strip():
+        return  # Orbit/TV-Instanzen: der Master ist ein Browser, kein Terminal
+    with _TERMINAL_ZU_LOCK:
+        if fname in _TERMINAL_ZU_AKTIV:
+            return
+        _TERMINAL_ZU_AKTIV.add(fname)
+    threading.Thread(target=_terminal_zu_worker, args=(fname, ausloeser), daemon=True).start()
+
+
+def _terminal_zu_worker(fname, ausloeser):
+    """Wartet (bis 3 min), bis die Instanz beweisbar flach ist — der Copier
+    braucht nach dem Master-Close ein paar Sekunden, um den Hedge abzubauen —
+    und schliesst dann das Master-Terminal. Bricht ab, sobald ein neuer Plan
+    scharf wird oder wieder Positionen auftauchen (naechster Trade laeuft an;
+    dessen eigenes Trade-Ende startet einen frischen Worker)."""
+    grund = "?"
+    try:
+        status_fn = re.sub(r"^config", "status", fname, count=1, flags=re.I)
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            cfg = read_json(os.path.join(HERE, fname), {}) or {}
+            st = read_json(os.path.join(HERE, status_fn), {}) or {}
+            age = None
+            try:
+                age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+            except (ValueError, TypeError):
+                pass
+            plan_status = next((p["status"] for p in _load_plans()
+                                if p["file"] == fname and p["status"] in ("geplant", "laufend")), None)
+            if plan_status:
+                print(f"[panel] {fname}: Terminal-Zu abgebrochen — neuer Trade-Plan ist "
+                      f"'{plan_status}'.", flush=True)
+                return
+            frisch = bool(st.get("running")) and age is not None and age <= 15
+            if frisch and not st.get("note") and (st.get("master_positions") or []):
+                print(f"[panel] {fname}: Terminal-Zu abgebrochen — Master hat wieder "
+                      f"Positionen.", flush=True)
+                return
+            ok, grund = terminal_schliessbar(cfg, st, age, plan_status)
+            if ok:
+                install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
+                pids = provision.terminal_pids(install_dir)
+                if not pids:
+                    print(f"[panel] {fname}: Terminal war schon zu ({ausloeser}).", flush=True)
+                    return
+                for pid in pids:
+                    provision._taskkill(pid, grace_s=5)
+                print(f"[panel] {fname}: Master-Terminal geschlossen ({ausloeser}).", flush=True)
+                return
+            time.sleep(5)
+        # Ehrlich benennen statt still aufgeben (Muster TronGrid-429, 25.08.2026)
+        print(f"[panel] {fname}: Terminal-Zu nach {ausloeser} aufgegeben — zuletzt: {grund}.",
+              flush=True)
+    except Exception as e:
+        print(f"[panel] {fname}: Terminal-Zu-Fehler: {type(e).__name__}: {e}", flush=True)
+    finally:
+        with _TERMINAL_ZU_LOCK:
+            _TERMINAL_ZU_AKTIV.discard(fname)
 
 
 # ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
@@ -2079,6 +2188,58 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": True, "msg":
                 "Slave-Terminal gestartet — Login ist gespeichert, das Fenster kommt gleich nach vorn"},
                 ensure_ascii=False))
+
+        if u.path == "/api/close-idle-terminals":
+            # „Terminals ohne Trade schliessen" (03.09.2026, Finns Wunsch: die
+            # Master-Terminals laufen sonst 24/7 weiter, obwohl die Doktrin seit
+            # 25.08. 'Terminal nur im Trade offen' heisst). Flotten-Endpoint ohne
+            # file-Parameter — geprueft wird jede Instanz einzeln, geschlossen
+            # nur mit frischem Status-Beweis (terminal_schliessbar). Die Kills
+            # laufen im Hintergrund: bei mehreren Terminals wuerde das hoefliche
+            # WM_CLOSE (5 s Grace je PID) sonst den 25-s-Proxy-Timeout von
+            # app.py reissen. Die Antwort nennt die ENTSCHEIDUNG je Instanz;
+            # das tatsaechliche Zu folgt binnen Sekunden (naechster Poll zeigt's).
+            plans_akt = {}
+            with PLANS_LOCK:
+                for p in _load_plans():
+                    if p["status"] in ("geplant", "laufend"):
+                        plans_akt[p["file"]] = p["status"]
+            geschlossen, uebersprungen, bereits_zu, zu_killen = [], [], [], []
+            for i in instances():
+                cfg = read_json(os.path.join(HERE, i["config_file"]), {}) or {}
+                if not str(cfg.get("master_terminal_path") or "").strip():
+                    continue  # Orbit/TV-Instanzen: kein Master-Terminal
+                anzeige = cfg.get("display_name") or i["name"]
+                install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
+                if not provision.terminal_pids(install_dir):
+                    bereits_zu.append(anzeige)
+                    continue
+                st = read_json(os.path.join(HERE, i["status_file"]), {}) or {}
+                age = None
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+                except (ValueError, TypeError):
+                    pass
+                ok, grund = terminal_schliessbar(cfg, st, age, plans_akt.get(i["config_file"]))
+                if ok:
+                    geschlossen.append(anzeige)
+                    zu_killen.append((i["config_file"], install_dir))
+                else:
+                    uebersprungen.append({"name": anzeige, "grund": grund})
+            if zu_killen:
+                def _killer(kandidaten=zu_killen):
+                    for kf, kdir in kandidaten:
+                        try:
+                            for pid in provision.terminal_pids(kdir):
+                                provision._taskkill(pid, grace_s=5)
+                            print(f"[panel] {kf}: Master-Terminal geschlossen (Knopf).", flush=True)
+                        except Exception as e:
+                            print(f"[panel] {kf}: Terminal-Zu-Fehler: {type(e).__name__}: {e}", flush=True)
+                threading.Thread(target=_killer, daemon=True).start()
+            print(f"[panel] Terminals ohne Trade schliessen: {len(geschlossen)} zu, "
+                  f"{len(uebersprungen)} uebersprungen, {len(bereits_zu)} schon zu.", flush=True)
+            return self._send(200, json.dumps({"ok": True, "geschlossen": geschlossen,
+                "bereits_zu": bereits_zu, "uebersprungen": uebersprungen}, ensure_ascii=False))
 
         fname = (parse_qs(u.query).get("file") or [""])[0]
         inst = next((i for i in instances() if i["config_file"] == fname), None)

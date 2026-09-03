@@ -1041,6 +1041,24 @@ def main():
         and not order_bot._ist_verbindungsfehler("Terminal ist im FALSCHEN Konto (999 statt 14190828).")
         and not order_bot._ist_verbindungsfehler("Broker kennt Symbol 'NDX100' nicht"))
 
+    # ── Panel: Terminal-Zu-Entscheidung (03.09.2026) ───────────────────────
+    # Geschlossen wird NUR bei frischem, warnungsfreiem Status ohne Position,
+    # ohne Hedge und ohne aktiven Plan — jede einzelne Bedingung muss blocken.
+    import panel
+    _cfgT = {"master_terminal_path": "C:\\MT5-X\\terminal64.exe"}
+    _stOK = {"running": True, "master_positions": [], "hedges": {"1": []}}
+    chk("PANEL: Terminal-Zu nur bei frischem Status ohne Position/Hedge/Plan",
+        panel.terminal_schliessbar(_cfgT, _stOK, 5, None)[0] is True
+        and panel.terminal_schliessbar(_cfgT, _stOK, 99, None)[0] is False
+        and panel.terminal_schliessbar(_cfgT, dict(_stOK, running=False), 5, None)[0] is False
+        and panel.terminal_schliessbar(_cfgT, dict(_stOK, master_positions=[{"i": 1}]), 5, None)[0] is False
+        and panel.terminal_schliessbar(_cfgT, dict(_stOK, hedges={"7": [{"ticket": 1}]}), 5, None)[0] is False
+        and panel.terminal_schliessbar(_cfgT, _stOK, 5, "geplant")[0] is False
+        and panel.terminal_schliessbar(_cfgT, _stOK, 5, "laufend")[0] is False
+        and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
+    chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
+        panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

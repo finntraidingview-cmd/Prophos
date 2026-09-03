@@ -6109,6 +6109,13 @@
                es mal aus Versehen schließe"): Panel startet die terminal64.exe aus
                hedge_terminal_path — läuft sie schon, kommt nur das Fenster nach vorn -->
           <button class="btn btn-ghost" id="mtc-start-slave" title="Startet das Slave-/Hedge-Terminal (MT5) dieses PCs, falls es geschlossen wurde — läuft es schon, wird nur das Fenster nach vorn geholt">🖥 Slave-Terminal starten</button>
+          <!-- Terminals ohne Trade schliessen (03.09.2026, Finns Wunsch: die
+               Master-Terminals bleiben nach dem Trade offen, weil niemand sie
+               von Hand schliesst — die Flotte laeuft dann 24/7 wie ein VPS.
+               Endet ein Trade, schliesst das Panel das Terminal seit heute
+               automatisch; dieser Knopf raeumt zusaetzlich alles auf, was ohne
+               Position/Hedge offen ist. Slave-Terminal bleibt immer offen. -->
+          <button class="btn btn-ghost" id="mtc-close-idle" title="Schließt alle MASTER-Terminals dieses PCs, in denen keine Position offen und kein Hedge mehr abzubauen ist. Das Slave-/Hedge-Terminal bleibt offen; beim nächsten Trade-Start öffnet das Terminal wieder von selbst.">🌙 Terminals ohne Trade schließen</button>
           <button class="btn btn-ghost" id="mtc-restart-stack" title="Schließt ALLE offenen CMD-Fenster dieses PCs und fährt Copier, Panel und Backend frisch hoch (start-alles.bat)">🔄 Alles schließen &amp; neu starten</button>
           <button class="btn btn-primary" id="mtc-add-open">＋ Account hinzufügen</button>
         </div>
@@ -21857,7 +21864,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-03.249'
+  const OS_TAB_BUILD = '2026-09-03.250'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29592,6 +29599,41 @@
       }finally{
         slaveBtn.disabled = false
         slaveBtn.textContent = _t
+      }
+    })
+  }
+  // 🌙 Terminals ohne Trade schliessen (03.09.2026, Finns Wunsch: „nicht
+  // aussehen, als wäre das Terminal ein VPS-Server, der 24/7 läuft"). Das Panel
+  // entscheidet pro Instanz mit frischem Status-Beweis (keine Position, kein
+  // Hedge, kein aktiver Plan) und schließt im Hintergrund — die Antwort nennt
+  // die Entscheidung je Instanz. Kein Bestätigen (Muster Pause-Knopf): schlimm-
+  // stenfalls geht ein Terminal zu, das der nächste Trade-Start eh neu öffnet.
+  // Eigene Verdrahtung (Projektregel: keine Sammel-Handler).
+  const idleBtn = $('mtc-close-idle')
+  if(idleBtn){
+    if(!MT5_LOCAL) idleBtn.style.display = 'none'
+    idleBtn.addEventListener('click', async () => {
+      idleBtn.disabled = true
+      const _t = idleBtn.textContent
+      idleBtn.textContent = '⏳ prüfe & schließe…'
+      try{
+        const r = await window.mtcApi('close-idle-terminals', { method:'POST',
+          headers:{'Content-Type':'application/json'}, body:'{}' })
+        if(r && r.ok){
+          const teile = []
+          if((r.geschlossen || []).length) teile.push('Wird geschlossen: ' + r.geschlossen.join(', '))
+          if((r.bereits_zu || []).length)  teile.push('Schon zu: ' + r.bereits_zu.join(', '))
+          for(const u of (r.uebersprungen || [])) teile.push(`Bleibt offen: ${u.name} — ${u.grund}`)
+          alert('🌙 ' + (teile.join('\n') || 'Keine Master-Terminals auf diesem PC gefunden.'))
+        }else{
+          alert('⚠️ ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
+        }
+      }catch(e){
+        alert('Terminals-Schließen fehlgeschlagen: ' + (e && e.message || e))
+      }finally{
+        idleBtn.disabled = false
+        idleBtn.textContent = _t
+        setTimeout(mtcLoad, 1500)
       }
     })
   }
