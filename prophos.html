@@ -20798,8 +20798,16 @@
       }
     }
 
-    // ── 3. Doppel-Hedge-Schutz ── Master ODER Slave zusätzlich Duplikum-verlinkt
-    // UND Duplikum verbunden → beide Systeme würden denselben Trade hedgen.
+    // ── 3. Doppel-Hedge-Schutz ── NUR der MASTER zählt (Korrektur 04.09.2026,
+    // Finns Fund am ersten Echo-Trade von Emins PC: der Check prüfte Master
+    // ODER Slave — aber der Echo-Slave IST konstruktionsbedingt auch der
+    // Duplikum-Slave desselben PCs, der Fusion-Hedge bedient beide Systeme.
+    // Der Slave-Teil blockierte damit JEDEN Echo-Trade, sobald Duplikum
+    // verbunden war — ein Dauer-Fehlalarm, kein Schutz). Doppelt gehedgt
+    // wird genau dann, wenn der MASTER zusätzlich per Duplikum gespiegelt
+    // wird: dann kopieren Echo UND Duplikum denselben Master-Trade. Ein
+    // Duplikum-Link am Slave heißt nur, dass dort auch andere Master
+    // hineinkopieren — anderes Paar, kein Doppel-Hedge dieses Trades.
     // Karteileichen zählen nicht (25.08.2026, Finns Fund: Konto in Duplikium
     // gelöscht + gesynct, Accounts-Ansicht zeigte den Link korrekt als weg —
     // aber der lokale prophos_dup_links-Eintrag blieb stehen und dieser Check
@@ -20816,11 +20824,11 @@
     const _dupLinkedIds = new Set(Object.entries(_dupLinks)
       .filter(([dupId]) => !_dupAccIds.size || _dupAccIds.has(String(dupId)))
       .map(([, manualId]) => String(manualId)))
-    if(_dupConnected && (_dupLinkedIds.has(String(plan.masterAccountId)) || _dupLinkedIds.has(String(plan.slaveAccountId)))){
-      _pfSet('m5dup', 'err', 'Master oder Slave ist zusätzlich mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum für dieses Paar ausschalten, sonst wird doppelt gehedgt.')
+    if(_dupConnected && _dupLinkedIds.has(String(plan.masterAccountId))){
+      _pfSet('m5dup', 'err', 'Der MASTER ist zusätzlich mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum für diesen Master ausschalten, sonst hedgen Echo UND Duplikum denselben Trade.')
       hardFail = true
     } else {
-      _pfSet('m5dup', 'ok', _dupConnected ? 'Dieses Paar ist nicht in Duplikum verlinkt.' : 'Duplikum ist nicht verbunden — kein Doppel-Hedge möglich.')
+      _pfSet('m5dup', 'ok', _dupConnected ? 'Der Master ist nicht in Duplikum verlinkt — kein Doppel-Hedge. (Der Slave darf Duplikum-Slave sein, das ist sein Job.)' : 'Duplikum ist nicht verbunden — kein Doppel-Hedge möglich.')
     }
 
     // ── 3b. Richtungs-Schutz ── (25.08.2026, Finns Ansage: nie gegen einen
@@ -21864,7 +21872,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-04.251'
+  const OS_TAB_BUILD = '2026-09-04.252'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
