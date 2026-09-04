@@ -1058,6 +1058,10 @@ def main():
         and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
     chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
         panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
+    # Zufalls-Streuung (04.09.2026): Auto-Zu wuerfelt 1-60 min — nie sofort
+    # (immer gleicher Abstand waere selbst ein Muster), nie ueber eine Stunde.
+    chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 60 min",
+        all(60 <= panel._zufalls_verzoegerung() <= 3600 for _ in range(200)))
 
     print()
     ok = sum(1 for r in results if r)

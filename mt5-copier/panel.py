@@ -22,6 +22,7 @@ Start:  python panel.py     →  http://127.0.0.1:8770
 
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -618,16 +619,32 @@ def _terminal_zu_starten(fname, ausloeser):
     threading.Thread(target=_terminal_zu_worker, args=(fname, ausloeser), daemon=True).start()
 
 
+def _zufalls_verzoegerung():
+    """Zufaellige Wartezeit vor dem Auto-Zu (04.09.2026, Finn: 'Zufallsintervall
+    zwischen 1 und 5 Minuten … oder 1 bis 1 Stunde, sodass es nicht immer so
+    auffaellig ist'): 1 bis 60 Minuten, pro Trade neu gewuerfelt. Ein Terminal,
+    das nach JEDEM Trade im immer gleichen Sekunden-Abstand zugeht, waere selbst
+    ein Muster — dieselbe Jitter-Doktrin wie bei allen Puls-Wartezeiten. Ein
+    Mensch schliesst mal gleich, mal erst nach dem Kaffee; laenger als eine
+    Stunde offen bleiben ist nie verdaechtig, sofort zu IMMER gleich schon."""
+    return random.uniform(60, 3600)
+
+
 def _terminal_zu_worker(fname, ausloeser):
-    """Wartet (bis 3 min), bis die Instanz beweisbar flach ist — der Copier
-    braucht nach dem Master-Close ein paar Sekunden, um den Hedge abzubauen —
-    und schliesst dann das Master-Terminal. Bricht ab, sobald ein neuer Plan
-    scharf wird oder wieder Positionen auftauchen (naechster Trade laeuft an;
-    dessen eigenes Trade-Ende startet einen frischen Worker)."""
+    """Wuerfelt erst eine Zufalls-Verzoegerung (s. _zufalls_verzoegerung), wartet
+    dann (bis 3 min), bis die Instanz beweisbar flach ist — der Copier braucht
+    nach dem Master-Close ein paar Sekunden, um den Hedge abzubauen — und
+    schliesst dann das Master-Terminal. Bricht ab, sobald ein neuer Plan scharf
+    wird oder wieder Positionen auftauchen (naechster Trade laeuft an; dessen
+    eigenes Trade-Ende startet einen frischen Worker)."""
     grund = "?"
     try:
         status_fn = re.sub(r"^config", "status", fname, count=1, flags=re.I)
-        deadline = time.time() + 180
+        warte_s = _zufalls_verzoegerung()
+        print(f"[panel] {fname}: Terminal-Zu in ~{max(1, round(warte_s / 60))} min "
+              f"geplant ({ausloeser} + Zufalls-Streuung).", flush=True)
+        frei_ab = time.time() + warte_s
+        deadline = frei_ab + 180
         while time.time() < deadline:
             cfg = read_json(os.path.join(HERE, fname), {}) or {}
             st = read_json(os.path.join(HERE, status_fn), {}) or {}
@@ -647,6 +664,11 @@ def _terminal_zu_worker(fname, ausloeser):
                 print(f"[panel] {fname}: Terminal-Zu abgebrochen — Master hat wieder "
                       f"Positionen.", flush=True)
                 return
+            # Zufalls-Streuung noch nicht um: nur die Abbruch-Wachen laufen,
+            # geschlossen wird erst nach Ablauf der gewuerfelten Wartezeit.
+            if time.time() < frei_ab:
+                time.sleep(5)
+                continue
             ok, grund = terminal_schliessbar(cfg, st, age, plan_status)
             if ok:
                 install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
