@@ -21963,7 +21963,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-07.254'
+  const OS_TAB_BUILD = '2026-09-07.255'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24462,7 +24462,14 @@
       String(p.account_id) === String(dupMasterId) && masterTix.has(String(p.ticket)))
     const slaveParts  = hits.map(p => num(p.profitCcy)).filter(v => v != null)
     const masterParts = masterRows.map(p => num(p.profitCcy)).filter(v => v != null)
-    if(!slaveParts.length && !masterParts.length){ _autoPnlAmbiguous.add(String(plan.id)); return null }
+    if(!slaveParts.length && !masterParts.length){
+      // Mehrdeutig-Flag NUR, wenn es Closes dieses Paars gibt, aber keiner
+      // beweisbar ist (Crosscheck-Fund 07.09.2026): eine komplett leere
+      // Kandidatenliste heißt "noch nicht in getClosedPositions" — dafür die
+      // Mehrere-Trades-Warnung zu zeigen wäre eine falsche Diagnose.
+      if(cands.length) _autoPnlAmbiguous.add(String(plan.id))
+      return null
+    }
     _autoPnlAmbiguous.delete(String(plan.id))
     const slavePnl  = slaveParts.length  ? Number(slaveParts.reduce((a, b) => a + b, 0).toFixed(2))  : null
     const masterPnl = masterParts.length ? Number(masterParts.reduce((a, b) => a + b, 0).toFixed(2)) : null

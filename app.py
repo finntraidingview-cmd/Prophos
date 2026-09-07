@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-07.1"
+APP_BUILD = "2026-09-07.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -2495,8 +2495,12 @@ def _wt_memo_positions_locked(email, creds, memo):
 
 
 def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None,
-                 email=None, accounts=None):
+                 email=None, accounts=None, fresh_within=None):
     """P&L der zu DIESEM Plan gehörenden geschlossenen Position.
+
+    fresh_within (Sekunden, optional): Sofort-Bestätigungs-Modus — ein Treffer
+    zählt nur, wenn mindestens eine bewiesene Zeile FRISCH geschlossen wurde
+    (Uhr-Offset-korrigiert). Nur für den ⚡-Pfad in wt_check_user, siehe dort.
 
     Rückgabe (status, pnl):
       ('ok',  {master, slave})  Treffer
@@ -2556,8 +2560,6 @@ def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None,
     # Summe bleibt also beweisfest.
     hits = [p for p in cands
             if str(p.get("masterTicket")) in ticket_set or str(p.get("ticket")) in ticket_set]
-    slave_parts = [v for v in (_pnl_of(p) for p in hits) if v is not None]
-    slave_pnl = round(sum(slave_parts), 2) if slave_parts else None
 
     # Master DIREKT über den Ticket-Beweis (Fix 07.09.2026): bisher wurde die
     # Master-Zeile nur über die Slave-Kopie gefunden (masterTicket der einen
@@ -2568,14 +2570,39 @@ def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None,
     # Ticketnummer, Hauptsache nicht der Slave") ist RAUS — Ticketnummern
     # verschiedener Broker können kollidieren, das war der letzte Pfad, der
     # eine falsche Geld-Zahl raten konnte.
-    master_pnl = None
+    master_rows = []
     if dup_master:
         master_rows = [p for p in lst
                        if str(p.get("account_id")) == str(dup_master)
                        and str(p.get("ticket")) in ticket_set]
-        master_parts = [v for v in (_pnl_of(p) for p in master_rows) if v is not None]
-        if master_parts:
-            master_pnl = round(sum(master_parts), 2)
+
+    # Frische-Gate für die Sofort-Bestätigung (Crosscheck-Fund 07.09.2026):
+    # eine geschlossene Zeile mit dem gemerkten Ticket beweist, dass EIN TEIL
+    # des Trades zu ist — nicht, dass der Trade zu Ende ist. Bei Scale-out
+    # (Teilschließung vor Stunden, Rest läuft) hätte eine einzige fehlerhafte
+    # Leer-Antwort von getOpenPositions (07.07.-Klasse) den LAUFENDEN Trade
+    # sofort auf review geschoben — mit dem P&L nur der bisherigen Teilstücke,
+    # und da die Felder dann gefüllt sind, käme nie ein Nachtrag. Deshalb gilt
+    # der Sofort-Beweis nur, wenn mindestens eine bewiesene Zeile FRISCH
+    # geschlossen wurde. Unkalibrierte Uhr = kein Sofort-Beweis → der
+    # 2-Tick-Schutz übernimmt wie bisher. Die SUMME unten rechnet weiterhin
+    # über ALLE bewiesenen Zeilen — das Gate entscheidet nur über das OB.
+    if fresh_within is not None:
+        off = _dup_clock.get("offset")
+        if off is None:
+            return "none", None
+        newest = None
+        for p in hits + master_rows:
+            ct = _wt_parse_ts(p.get("closeTime"))
+            if ct is not None and (newest is None or ct > newest):
+                newest = ct
+        if newest is None or (newest - off) < time.time() - fresh_within:
+            return "none", None
+
+    slave_parts = [v for v in (_pnl_of(p) for p in hits) if v is not None]
+    slave_pnl = round(sum(slave_parts), 2) if slave_parts else None
+    master_parts = [v for v in (_pnl_of(p) for p in master_rows) if v is not None]
+    master_pnl = round(sum(master_parts), 2) if master_parts else None
 
     if slave_pnl is None and master_pnl is None:
         return "none", None
@@ -2955,8 +2982,13 @@ def wt_check_user(uid, creds, memo):
         if closed and not close_confirmed and not prev["notified"] and prev["was_open"] \
            and _plan_tickets(plan, prev.get("tickets")):
             try:
+                # fresh_within (Crosscheck-Fund 07.09.2026): nur eine FRISCH
+                # geschlossene Beweis-Zeile bestätigt sofort — ein alter
+                # Scale-out-Teilclose darf einen laufenden Trade nicht beenden
+                # (Begründung im Frische-Gate von wt_fetch_pnl).
                 st_q, pnl_q = wt_fetch_pnl(token, d_slave, d_master, started_epoch_of(plan),
-                                           _plan_tickets(plan, prev.get("tickets")), dup_email, n_acc)
+                                           _plan_tickets(plan, prev.get("tickets")), dup_email, n_acc,
+                                           fresh_within=WATCHER_INTERVAL * 3 + 30)
                 if st_q == "ok" and pnl_q:
                     close_confirmed, pnl_now = True, pnl_q
                     print(f"[watcher] ⚡ {label}: Close per Ticket-Treffer sofort bestätigt", flush=True)
