@@ -13741,13 +13741,46 @@
     return out
   }
 
-  // ── Duplikium: alle offenen Positionen per V4 ──
+  // ── Duplikium: alle offenen Positionen aus dem dup_live-Spiegel ──
+  // Fix 07.09.2026: diese View pollte alle 5s position/getOpenPositions DIREKT
+  // gegen Duplikium. Deren Limit skaliert mit der Kontoanzahl (min(2×n,30)/min,
+  // min(30×n,900)/h) — bei kleinen Konten (Jakob: n=2 ⇒ 4/min, 60/h!) hat die
+  // offene View das komplette Stundenbudget in ~5 Minuten verbrannt. Danach bekam
+  // auch der Railway-Wächter nur noch Limit-Antworten: Trade-Starts/-Enden wurden
+  // nicht oder viel zu spät erkannt, und die View selbst zeigte "keine Positionen"
+  // (genau Finns "Duplikum-Trades werden nicht erkannt"; live belegt am 07.09.:
+  // Jakobs dup_live-Spiegel hing 8 min hinterher, während er hier zusah).
+  // Deshalb dieselbe Doktrin wie dupLots (25.08.): aus der geteilten DB lesen,
+  // die der Wächter ~alle 30s befüllt — 0 Duplikium-Last aus dem Browser.
+  // Nur wenn der Spiegel stale ist (Wächter down), EIN direkter Duplikium-Call,
+  // gedrosselt auf alle 30s, mit gemerktem letzten Stand gegen Flackern.
+  const _ltDupFallback = { at: 0, MIN_MS: 30_000, last: [] }
+  const LT_DUP_FRESH_MS = 180_000   // 6× Wächter-Takt: überlebt Budget-Drosselung kleiner Konten
   async function ltFetchDupPositions(){
     if(!dupState.token) return []
     try {
-      const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
-      if(!res.ok) return []
-      const list = (res.data && res.data.data) ? res.data.data : []
+      let list = null
+      try {
+        const { data, error } = await supabase.from('dup_live').select('positions,updated_at')
+          .eq('id', String(dupState.user || '').trim().toLowerCase()).maybeSingle()
+        if(!error && data && Array.isArray(data.positions)
+           && (Date.now() - (Date.parse(data.updated_at) || 0)) <= LT_DUP_FRESH_MS){
+          list = data.positions
+        }
+      } catch(_){}
+      if(list === null){
+        // Spiegel fehlt/stale → Wächter läuft gerade nicht. Direkt nachfragen,
+        // aber höchstens alle 30s — sonst frisst die View wieder das Budget.
+        if(Date.now() - _ltDupFallback.at < _ltDupFallback.MIN_MS){
+          list = _ltDupFallback.last
+        } else {
+          _ltDupFallback.at = Date.now()
+          const res = await dupApi('POST', 'position/getOpenPositions.php', { length: 1000 })
+          if(!res.ok) return []
+          list = (res.data && res.data.data) ? res.data.data : []
+          _ltDupFallback.last = list
+        }
+      }
       const accMap = {}
       for(const a of (dupState.accounts || [])) accMap[a.account_id] = a
 
@@ -14708,27 +14741,31 @@
     const res  = await mpDupApi(dup, 'position/getClosedPositions.php', { length: 1000 })
     const list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : []
     if(!list.length) return null
-    const ct = t => new Date(String(t || '').replace(' ', 'T')).getTime() || 0
     const cands = list.filter(p =>
       String(p.account_id) === String(dupSlaveId) &&
       String(p.master_id) === String(dupMasterId)
     )
-    if(!cands.length) return null
-    cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
     // Nur bei Ticket-Beweis oder eindeutigem Einzelkandidaten — sonst leer lassen.
+    // SUMME über alle bewiesenen Teil-Closes + Master direkt über den Ticket-Beweis
+    // (Fix 07.09.2026, exakt wie _autoPnlFetch und wt_fetch_pnl — Begründung dort).
+    const num = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const proof = Array.isArray(plan.watchTickets) ? plan.watchTickets.map(String) : []
-    const slavePos = proof.length
-      ? cands.find(p => proof.includes(String(p.masterTicket)) || proof.includes(String(p.ticket)))
-      : (cands.length === 1 ? cands[0] : null)
-    if(!slavePos) return null
-    const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
-    let masterPnl = null
-    if(slavePos.masterTicket != null){
-      const mt = String(slavePos.masterTicket)
-      const masterPos = list.find(p => String(p.account_id) === String(dupMasterId) && String(p.ticket) === mt)
-                     || list.find(p => String(p.ticket) === mt && String(p.account_id) !== String(dupSlaveId))
-      if(masterPos && masterPos.profitCcy != null && masterPos.profitCcy !== '') masterPnl = Number(masterPos.profitCcy)
+    let hits = []
+    if(proof.length){
+      hits = cands.filter(p => proof.includes(String(p.masterTicket)) || proof.includes(String(p.ticket)))
+    } else if(cands.length === 1){
+      hits = [cands[0]]
     }
+    const masterTix = new Set(proof.length
+      ? proof
+      : hits.map(h => String(h.masterTicket)).filter(t => t && t !== 'null' && t !== 'undefined'))
+    const masterRows = list.filter(p =>
+      String(p.account_id) === String(dupMasterId) && masterTix.has(String(p.ticket)))
+    const slaveParts  = hits.map(p => num(p.profitCcy)).filter(v => v != null)
+    const masterParts = masterRows.map(p => num(p.profitCcy)).filter(v => v != null)
+    if(!slaveParts.length && !masterParts.length) return null
+    const slavePnl  = slaveParts.length  ? Number(slaveParts.reduce((a, b) => a + b, 0).toFixed(2))  : null
+    const masterPnl = masterParts.length ? Number(masterParts.reduce((a, b) => a + b, 0).toFixed(2)) : null
     return { slavePnl, masterPnl }
   }
 
@@ -15071,6 +15108,11 @@
   }
   function archiveAccount(accountId, reason, successorId){
     const arch = getArchive()
+    // Merker VOR dem Überschreiben: der Nachfolger-Wizard archiviert erst mit
+    // 'passed_pending' und später nochmal mit 'passed' — der Echo-Löschauftrag
+    // soll dabei nur EINMAL entstehen (sonst würde der zweite Aufruf einen
+    // längst erledigten Auftrag wieder auf offen zurücksetzen).
+    const warSchonArchiviert = !!arch[accountId]?.archived
     arch[accountId] = {
       archived: true,
       reason: reason || 'manual',
@@ -15082,6 +15124,17 @@
     // asynchron, blockiert das Archivieren nicht. Nur bei 'blown' (nicht bei 'passed'/'manual').
     if(reason === 'blown' && typeof dupDeleteAccountForProphos === 'function'){
       dupDeleteAccountForProphos(accountId)
+    }
+    // Archivierter Echo-Account → Terminal-Löschauftrag (07.09.2026, Finn: „wenn
+    // der Account archiviert wird — geblowet oder bestanden — soll automatisch in
+    // Unterecho dieses Terminal gelöscht werden, weil ich sonst irgendwann 1000
+    // Terminals rumliegen habe"). 'blown', 'passed' UND 'passed_pending' — in
+    // allen drei Fällen ist der Prop-Account endgültig durch. 'manual' bewusst
+    // nicht: Umsortieren/Aufräumen ist kein Account-Ende.
+    if(!warSchonArchiviert
+       && (reason === 'blown' || reason === 'passed' || reason === 'passed_pending')
+       && typeof echoLoeschAuftrag === 'function'){
+      echoLoeschAuftrag(accountId, reason)
     }
   }
 
@@ -15106,6 +15159,44 @@
     }catch(e){ console.warn('[dupDelete]', e) }
   }
   window._dupDeleteAccountForProphos = dupDeleteAccountForProphos
+
+  /* ── Echo-Terminal-Löschauftrag beim Archivieren (07.09.2026) ──
+   * Gegenstück zum Duplikum-Löschen darüber, aber als AUFTRAG in Supabase
+   * (echo_loesch_auftraege, sql/2026-09-07_echo_loesch_auftraege.sql) statt
+   * als Direkt-Call — aus zwei Gründen:
+   *  · Das Terminal liegt auf einem Windows-PC, archiviert wird aber womöglich
+   *    am Mac oder unter einem anderen Profil. Der Auftrag wartet, bis der
+   *    Prophos-Tab des RICHTIGEN PCs ihn sieht (echoLoeschGuard in mtcLoad).
+   *  · Direkt nach dem Trade-Ende baut der Copier oft noch den Hedge ab — der
+   *    Lösch-Riegel in panel.py sagt dann zu Recht 409. Der Auftrag bleibt
+   *    liegen, der Guard versucht es beim nächsten Poll wieder — neustartfest,
+   *    ohne Retry-Gefrickel im Browser-Tab.
+   * Schlüssel ist der Master-Login (mt5_links) — PC-übergreifend stabil. Kein
+   * Login-Link = kein Echo-Account (z.B. reiner TopstepX-Account) = kein Auftrag. */
+  async function echoLoeschAuftrag(accountId, grund){
+    try{
+      const links = (typeof mt5GetLinks === 'function') ? mt5GetLinks() : {}
+      const login = Object.entries(links).find(([, aId]) => String(aId) === String(accountId))?.[0]
+      if(!login) return
+      const acc = (accounts || []).find(a => String(a.id) === String(accountId))
+      const { error } = await supabase.from('echo_loesch_auftraege').upsert({
+        mt5_login: String(login), grund,
+        account_name: acc?.name || null,
+        angelegt_am: new Date().toISOString(),
+        erledigt_am: null, erledigt_info: null
+      })
+      if(error) throw error
+      // Der Echo-Poll läuft nur bei sichtbarer Echo-UI — nach dem Archivieren
+      // (meist im Trades-Bereich) 10 min weiterpollen, damit der Auftrag auf
+      // DIESEM PC sofort ausgeführt wird, sobald der Hedge abgebaut ist.
+      window._echoLoeschPollBis = Date.now() + 10 * 60 * 1000
+      if(typeof showSyncBanner === 'function'){
+        showSyncBanner('🗑 Echo-Terminal des Accounts wird gelöscht, sobald die Instanz frei ist (Auftrag gespeichert)', 'ok')
+        if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(6000)
+      }
+    }catch(e){ console.warn('[echoLoesch] Auftrag fehlgeschlagen:', (e && e.message) || e) }
+  }
+
   function unarchiveAccount(accountId){
     const arch = getArchive()
     delete arch[accountId]
@@ -21872,7 +21963,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-04.252'
+  const OS_TAB_BUILD = '2026-09-07.253'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24331,14 +24422,11 @@
       list = (res && res.data && Array.isArray(res.data.data)) ? res.data.data : []
     } catch(e){ console.warn('[AutoPnL] getClosedPositions:', e); return null }
     if(!list.length) return null
-    const ct = t => new Date(String(t||'').replace(' ', 'T')).getTime() || 0
     // Slave-Kandidaten: dieser Slave + genau dieser Master
-    let cands = list.filter(p =>
+    const cands = list.filter(p =>
       String(p.account_id) === String(dupSlaveId) &&
       String(p.master_id) === String(dupMasterId)
     )
-    if(!cands.length) return null
-    cands.sort((a, b) => ct(b.closeTime) - ct(a.closeTime))
     /* BEWEIS-DOKTRIN (07.08.2026) — dieselbe Regel wie auf dem Server:
      * Es wird NUR vorgeschlagen, was über die Ticket-Nummer bewiesen ist.
      * Der Wächter merkt sich beim Trade-Start die Master-Tickets und legt sie in
@@ -24347,30 +24435,39 @@
      * statt einen "neuesten Close" zu raten — genau das hat wochenlang falsche
      * und doppelte Beträge erzeugt (zwei Pläne desselben Paars bekamen denselben
      * Wert; bei überlappenden Trades wurden sie vertauscht).
-     * Ein leeres Feld sieht Finn sofort — eine plausible falsche Zahl nicht. */
+     * Ein leeres Feld sieht Finn sofort — eine plausible falsche Zahl nicht.
+     *
+     * SUMME statt Einzel-Zeile (Fix 07.09.2026, wie wt_fetch_pnl auf dem Server):
+     * Teil-Schließungen (Scale-out) und Kopie-Splits erzeugen MEHRERE geschlossene
+     * Zeilen mit demselben Ticket-Beweis — nur eine zu nehmen ergab zu kleine,
+     * plausibel falsche Beträge. Tickets sind broker-eindeutig, die Summe bleibt
+     * beweisfest. Und der Master wird DIREKT über den Ticket-Beweis gefunden,
+     * nicht mehr nur über die Slave-Kopie: scheiterte die Kopie, blieben sonst
+     * BEIDE Felder leer. Der Quer-Fallback auf fremde Konten mit zufällig
+     * gleicher Ticketnummer ist raus (Kollisionsrisiko zwischen Brokern). */
+    const num = v => (v != null && v !== '' && isFinite(Number(v))) ? Number(v) : null
     const proof = Array.isArray(plan.watchTickets) ? plan.watchTickets.map(String) : []
-    let slavePos = null
+    let hits = []
     if(proof.length){
-      slavePos = cands.find(p => proof.includes(String(p.masterTicket)) || proof.includes(String(p.ticket))) || null
+      hits = cands.filter(p => proof.includes(String(p.masterTicket)) || proof.includes(String(p.ticket)))
     } else if(cands.length === 1){
       // Kein Ticket-Beweis, aber es gibt überhaupt nur EINEN geschlossenen Trade
       // dieses Master→Slave-Paars — dann ist die Zuordnung eindeutig.
-      slavePos = cands[0]
+      hits = [cands[0]]
     }
-    if(!slavePos){ _autoPnlAmbiguous.add(String(plan.id)); return null }
+    const masterTix = new Set(proof.length
+      ? proof
+      : hits.map(h => String(h.masterTicket)).filter(t => t && t !== 'null' && t !== 'undefined'))
+    const masterRows = list.filter(p =>
+      String(p.account_id) === String(dupMasterId) && masterTix.has(String(p.ticket)))
+    const slaveParts  = hits.map(p => num(p.profitCcy)).filter(v => v != null)
+    const masterParts = masterRows.map(p => num(p.profitCcy)).filter(v => v != null)
+    if(!slaveParts.length && !masterParts.length){ _autoPnlAmbiguous.add(String(plan.id)); return null }
     _autoPnlAmbiguous.delete(String(plan.id))
-    const slavePnl = (slavePos.profitCcy != null && slavePos.profitCcy !== '') ? Number(slavePos.profitCcy) : null
-    const slaveCcy = slavePos.ccy || ''
-    // Master-Position über masterTicket (der Master-Trade hat ticket === masterTicket der Slave-Kopie)
-    let masterPnl = null, masterCcy = ''
-    if(slavePos.masterTicket != null){
-      const mt = String(slavePos.masterTicket)
-      const masterPos = list.find(p => String(p.account_id) === String(dupMasterId) && String(p.ticket) === mt)
-                     || list.find(p => String(p.ticket) === mt && String(p.account_id) !== String(dupSlaveId))
-      if(masterPos && masterPos.profitCcy != null && masterPos.profitCcy !== ''){
-        masterPnl = Number(masterPos.profitCcy); masterCcy = masterPos.ccy || ''
-      }
-    }
+    const slavePnl  = slaveParts.length  ? Number(slaveParts.reduce((a, b) => a + b, 0).toFixed(2))  : null
+    const masterPnl = masterParts.length ? Number(masterParts.reduce((a, b) => a + b, 0).toFixed(2)) : null
+    const slaveCcy  = (hits[0] && hits[0].ccy) || ''
+    const masterCcy = (masterRows[0] && masterRows[0].ccy) || ''
     return { slavePnl, slaveCcy, masterPnl, masterCcy }
   }
 
@@ -29239,6 +29336,8 @@
     echoHedgeGuard(d)
     // Notfall-SL/TP-Selbstheilung (27.08.2026) — gleiches Muster
     echoNotfallGuard(d)
+    // Terminal-Löschaufträge archivierter Accounts (07.09.2026) — gleiches Muster
+    echoLoeschGuard(d)
     renderMt5Tab(d, n)
     // Letzten Stand merken — window.mt5TabRender (Export unten) rendert den Tab
     // damit sofort nach Link/Unlink neu, statt auf den naechsten 3s-Poll zu warten
@@ -29322,6 +29421,57 @@
       setTimeout(mtcLoad, 2500)
     }catch(_){ /* Tabelle fehlt/offline — still bleiben */ }
   }
+
+  /* ── Terminal-Löschaufträge archivierter Accounts (07.09.2026) ────────────
+   * Finn: „Wenn der Account archiviert wird — geblowet oder bestanden — soll
+   * automatisch in Unterecho dieses Terminal gelöscht werden, sonst liegen
+   * irgendwann 1000 Terminals rum." Der Auftrag entsteht in archiveAccount
+   * (echoLoeschAuftrag → Tabelle echo_loesch_auftraege, geteilt wie
+   * echo_notfall: der PC mit dem Terminal kann ein anderer sein als der, an
+   * dem archiviert wird). Hier wird er ausgeführt: offene Aufträge gegen die
+   * Instanzen DIESES PCs matchen (Schlüssel Master-Login, PC-übergreifend
+   * stabil — gleiche Wahl wie mt5LinkCellHtml) und per delete?file= mit
+   * terminal_zu:true löschen — das Panel schließt dabei auch die
+   * terminal64.exe der Installation (sonst liefe sie nach der Config-Löschung
+   * kopflos weiter, der Terminal-Zu-Worker bricht bei gelöschter Config ab).
+   * Alle vier Lösch-Riegel des Panels bleiben unangetastet: ein 409 (Hedge
+   * baut noch ab, Nachbar-Instanz im Trade) ist kein Fehler, sondern „noch
+   * nicht" — der nächste Lauf versucht es wieder, bis der Riegel durchlässt.
+   * Kein force, niemals. Tabelle fehlt/offline → still (additiv). */
+  const _echoLoesch = { next: 0 }
+  async function echoLoeschGuard(d){
+    try{
+      if(Date.now() < _echoLoesch.next) return
+      const insts = (d && d.instances) || []
+      if(!insts.length) return
+      _echoLoesch.next = Date.now() + 30 * 1000
+      const { data } = await supabase.from('echo_loesch_auftraege')
+        .select('mt5_login,grund,account_name').is('erledigt_am', null)
+      if(!data || !data.length) return
+      for(const auf of data){
+        const inst = insts.find(x =>
+          String((x.status || {}).master_login || x.master_expected || '') === String(auf.mt5_login))
+        if(!inst) continue   // Terminal liegt nicht auf diesem PC — dessen Guard übernimmt
+        const r = await mtcApi(`delete?file=${encodeURIComponent(inst.file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ terminal_zu: true }) })
+        if(r && r.ok){
+          await supabase.from('echo_loesch_auftraege')
+            .update({ erledigt_am: new Date().toISOString(), erledigt_info: inst.file })
+            .eq('mt5_login', auf.mt5_login)
+          if(typeof showSyncBanner === 'function'){
+            showSyncBanner(`🗑 Echo-Terminal „${inst.display_name || inst.name}" gelöscht — Account ${auf.grund === 'blown' ? 'geblowet' : 'bestanden'}, Terminal wird geschlossen`, 'ok')
+            if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(6000)
+          }
+          setTimeout(mtcLoad, 2500)
+        } else if(r && r.msg){
+          // Ehrlich benennen statt still schlucken — aber nur ins Log: der
+          // Riegel-Grund (Hedge-Abbau, Nachbar-Trade) erledigt sich von selbst,
+          // der nächste Lauf versucht es wieder.
+          console.log('[echo] Löschauftrag', auf.mt5_login, 'wartet:', r.msg)
+        }
+      }
+    }catch(_){ /* Tabelle fehlt/offline — still bleiben */ }
+  }
   let mtcLastRender = null
 
   // Poll nur, wenn die View sichtbar ist oder ein Copier-Modal offen — die
@@ -29335,8 +29485,13 @@
     // Link-Merker offen ist (15.08.2026): Finn schließt das Popup nach dem
     // Start — ohne Beobachter würde das Fertig-Signal verpasst und die
     // Zugangsdaten landeten nie in Supabase.
+    // Frischer Echo-Löschauftrag (07.09.2026): nach dem Archivieren 10 min
+    // weiterpollen, auch wenn keine Echo-UI sichtbar ist — sonst würde der
+    // Auftrag auf DIESEM PC erst beim nächsten Echo-Besuch ausgeführt.
+    // window.* als Nahtstelle, weil archiveAccount außerhalb dieser IIFE lebt.
+    const loeschWants = window._echoLoeschPollBis && Date.now() < window._echoLoeschPollBis
     if(mtcActive() || mt5TabActive() || mt5RouteWants || $('mtcAddModal').classList.contains('open')
-       || (mtcJob && !mtcJob.done) || _mtcPendingLink) mtcLoad()
+       || (mtcJob && !mtcJob.done) || _mtcPendingLink || loeschWants) mtcLoad()
   }, 3000)
   // Beim Wechsel in die View sofort laden (nicht erst nach 3s)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="mt5copier"]').forEach(b =>

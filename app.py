@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-08-31.5"
+APP_BUILD = "2026-09-07.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1975,6 +1975,8 @@ WATCHER_DISABLED = bool(os.environ.get("WATCHER_DISABLED"))
 
 _watcher_state = {}       # (uid, plan_id) -> {was_open, notified, baseline, streak, base_tickets, tickets}
 _watcher_pnl_tries = {}   # (uid, plan_id) -> Anzahl P&L-Nachversuche
+_watcher_pnl_next = {}    # (uid, plan_id) -> Epoch, ab wann der nächste gedrosselte
+                          # P&L-Nachversuch erlaubt ist (nach den 10 schnellen)
 _watcher_backoff = {}     # EMAIL -> {"until": epoch, "fails": n} — Login-Backoff (pro Duplikum-Konto)
 _watcher_meta = {}        # uid -> {"links":..., "accs":..., "at": epoch} — 60s-Cache für dup_links/accounts
 _watcher_tokens = {}      # EMAIL -> {"token":..., "at": epoch} — EIN Token pro Duplikum-Konto,
@@ -2531,38 +2533,50 @@ def wt_fetch_pnl(token, dup_slave, dup_master, started_epoch=None, tickets=None,
     cands = [p for p in lst
              if str(p.get("account_id")) == str(dup_slave)
              and (not dup_master or str(p.get("master_id")) == str(dup_master))]
-    if not cands:
-        return "none", None
+
+    def _pnl_of(p):
+        if p.get("profitCcy") in (None, ""):
+            return None
+        try:
+            return float(p["profitCcy"])
+        except (TypeError, ValueError):
+            return None
 
     # `tickets` sind die beobachteten MASTER-Tickets; die Slave-Kopie trägt genau
     # diese Nummer in `masterTicket` (live verifiziert 06.08.2026: Slave 205666039
     # ↔ masterTicket 258231486). `ticket` wird zusätzlich geprüft, falls der
     # Fallback-Pfad (Master nicht verknüpft) Slave-Tickets gemerkt hat.
+    #
+    # SUMME statt Einzel-Zeile (Fix 07.09.2026): schließt der Master in Teilen
+    # (Scale-out) oder splittet Duplikum die Kopie, stehen MEHRERE geschlossene
+    # Zeilen mit demselben Ticket-Beweis in der Liste. hits[0] nahm bisher nur
+    # die jüngste — der P&L war dann ein Bruchteil des echten Werts (plausibel
+    # falsche Zahl, Finns "PNL buggt"). Tickets sind broker-eindeutig, ein
+    # späterer Trade desselben Paars kann nie dasselbe Ticket tragen — die
+    # Summe bleibt also beweisfest.
     hits = [p for p in cands
             if str(p.get("masterTicket")) in ticket_set or str(p.get("ticket")) in ticket_set]
-    if not hits:
-        return "none", None
-    hits.sort(key=lambda p: str(p.get("closeTime") or ""), reverse=True)
-    sp = hits[0]
+    slave_parts = [v for v in (_pnl_of(p) for p in hits) if v is not None]
+    slave_pnl = round(sum(slave_parts), 2) if slave_parts else None
 
-    slave_pnl = None
-    if sp.get("profitCcy") not in (None, ""):
-        try:
-            slave_pnl = float(sp["profitCcy"])
-        except (TypeError, ValueError):
-            slave_pnl = None
+    # Master DIREKT über den Ticket-Beweis (Fix 07.09.2026): bisher wurde die
+    # Master-Zeile nur über die Slave-Kopie gefunden (masterTicket der einen
+    # Treffer-Zeile). Scheiterte die Kopie oder fehlte ihre Zeile, blieben BEIDE
+    # Felder leer, obwohl die Master-Zeile mit exakt dem gemerkten Ticket in
+    # derselben Antwort stand (Fall 28.08.2026: FundedNext-Review-Plan blieb
+    # 10 Tage ohne P&L). Der alte Quer-Fallback ("irgendein Konto mit derselben
+    # Ticketnummer, Hauptsache nicht der Slave") ist RAUS — Ticketnummern
+    # verschiedener Broker können kollidieren, das war der letzte Pfad, der
+    # eine falsche Geld-Zahl raten konnte.
     master_pnl = None
-    if sp.get("masterTicket") is not None:
-        mts = str(sp["masterTicket"])
-        mp = next((p for p in lst if str(p.get("account_id")) == str(dup_master)
-                   and str(p.get("ticket")) == mts), None) \
-             or next((p for p in lst if str(p.get("ticket")) == mts
-                      and str(p.get("account_id")) != str(dup_slave)), None)
-        if mp and mp.get("profitCcy") not in (None, ""):
-            try:
-                master_pnl = float(mp["profitCcy"])
-            except (TypeError, ValueError):
-                master_pnl = None
+    if dup_master:
+        master_rows = [p for p in lst
+                       if str(p.get("account_id")) == str(dup_master)
+                       and str(p.get("ticket")) in ticket_set]
+        master_parts = [v for v in (_pnl_of(p) for p in master_rows) if v is not None]
+        if master_parts:
+            master_pnl = round(sum(master_parts), 2)
+
     if slave_pnl is None and master_pnl is None:
         return "none", None
     return "ok", {"master": master_pnl, "slave": slave_pnl}
@@ -2661,7 +2675,10 @@ def wt_check_user(uid, creds, memo):
     # prophos.html). Filter DIREKT nach dem Select, damit weder die Erkennung unten
     # noch die review-P&L-Nachversuche (wt_fetch_pnl) solche Pläne anfassen — der
     # Nachversuchs-Loop würde sonst MT5-Pläne mit fremden Duplikum-Closes bestempeln.
-    plans = [p for p in plans if (p.get("route") or "") != "mt5"]
+    # Orbit-Pläne (route='tvplus') genauso (Lücke gefunden 07.09.2026): der Browser
+    # filtert sie seit 28.08. überall, NUR dieser Server-Filter fehlte — ein Orbit-
+    # Plan mit dup-verlinktem Slave wäre hier in den Zählwerk-Fallback gelaufen.
+    plans = [p for p in plans if (p.get("route") or "") not in ("mt5", "tvplus")]
     active = [p for p in plans if p.get("status") in ("planned", "open")]
     review_missing = [p for p in plans if p.get("status") == "review"
                       and (p.get("master_pl") is None or p.get("slave_pl") is None)]
@@ -2675,6 +2692,7 @@ def wt_check_user(uid, creds, memo):
         _watcher_state.pop(k, None)
     for k in [k for k in list(_watcher_pnl_tries) if k[0] == uid and k[1] not in live_ids]:
         _watcher_pnl_tries.pop(k, None)
+        _watcher_pnl_next.pop(k, None)
 
     if not active and not review_missing:
         return
@@ -2744,15 +2762,22 @@ def wt_check_user(uid, creds, memo):
         if not d_slave:
             continue
         se = started_epoch_of(plan)
-        # Zeitfenster (Review-Finding): nur junge Pläne nachversorgen. Der Zähler ist
-        # In-Memory und wird bei jedem Deploy zurückgesetzt — ohne absolute Grenze
-        # bekämen tagelang hängende Review-Pläne irgendwann den P&L eines SPÄTEREN
-        # Trades desselben Paars eingestempelt.
-        if not se or (time.time() - se) > 6 * 3600:
+        # 48h statt 6h (Fix 07.09.2026): das enge Fenster stammt aus der Zeit des
+        # Zeitfenster-Fallbacks, der nach einem Deploy den P&L eines SPÄTEREN
+        # Trades desselben Paars stempeln konnte. Seit die Zuordnung AUSSCHLIESSLICH
+        # über den Ticket-Beweis läuft (07.08.), kann ein späterer Trade nie matchen —
+        # das 6h-Fenster hat nur noch legitime Nachträge abgeschnitten (z.B. Review-
+        # Plan vom Nachmittag, den Finn abends prüft: P&L kam nie mehr).
+        if not se or (time.time() - se) > 48 * 3600:
             continue
         key = (uid, str(plan["id"]))
         tries = _watcher_pnl_tries.get(key, 0)
-        if tries >= 10:
+        # Nach 10 schnellen Versuchen (~5 min) NICHT mehr endgültig aufgeben
+        # (Fall 28.08.2026: Review-Plan blieb dauerhaft leer, Finns "egal wie
+        # lange ich warte") — stattdessen gedrosselt weiter: ein Versuch alle
+        # 10 min, bis das 48h-Fenster zu ist. Gezählt werden weiterhin nur echte
+        # 'none'-Antworten; Netz-/Rate-Limit-Fehler kosten keinen Versuch.
+        if tries >= 10 and time.time() < _watcher_pnl_next.get(key, 0):
             continue
         try:
             st, pnl = wt_fetch_pnl(token, d_slave, dup_id_of(plan.get("master_account_id")),
@@ -2766,9 +2791,12 @@ def wt_check_user(uid, creds, memo):
             if st == "err":
                 continue   # Netz/Rate-Limit — Versuch zählt nicht
             _watcher_pnl_tries[key] = tries + 1
+            if tries + 1 >= 10:
+                _watcher_pnl_next[key] = time.time() + 600   # Drossel-Phase: alle 10 min
             if st == "ok" and pnl and wt_write_pnl(uid, plan, pnl):
                 print(f"[watcher] 💰 {label}: P&L nachgetragen für Plan {plan['id']}", flush=True)
                 _watcher_pnl_tries[key] = 10   # fertig
+                _watcher_pnl_next[key] = time.time() + 600
         except Exception as e:
             print(f"[watcher] ⚠️ {label}: P&L-Retry: {e}", flush=True)
 
@@ -2980,6 +3008,8 @@ def watcher_cycle():
         _watcher_state.pop(k, None)
     for k in [k for k in _watcher_pnl_tries if k[0] not in known_uids]:
         _watcher_pnl_tries.pop(k, None)
+    for k in [k for k in _watcher_pnl_next if k[0] not in known_uids]:
+        _watcher_pnl_next.pop(k, None)
     for u in [u for u in _watcher_meta if u not in known_uids]:
         _watcher_meta.pop(u, None)
     for e in [e for e in list(_watcher_backoff) if e.split("|")[0] not in known_emails]:
