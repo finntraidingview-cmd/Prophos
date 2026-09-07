@@ -607,6 +607,34 @@ def terminal_schliessbar(cfg, st, age, plan_status=None):
     return True, "kein Trade aktiv"
 
 
+def loesch_terminal_dir(cfg, andere_cfgs):
+    """Reine Entscheidung (testbar, ohne I/O): welcher Master-Terminal-Ordner
+    darf nach dem Loeschen DIESER Config mit geschlossen werden? None = keiner.
+    (07.09.2026, Archiv-Loeschauftrag: Finn will beim Archivieren das Terminal
+    des Accounts loswerden — ohne diesen Schritt liefe die terminal64.exe nach
+    der Config-Loeschung kopflos weiter, denn der Terminal-Zu-Worker bricht
+    bei geloeschter Config bewusst ab.)
+    Die Beweis-Last (flach, kein Hedge, kein laufender Plan) tragen die
+    Loesch-Riegel des Aufrufers — hier geht es nur darum, NIE ein Terminal zu
+    schiessen, das jemand anders braucht: das Hedge-/Slave-Terminal (dort
+    haengt der Copier, und es ist Finns eigenes Broker-Konto) oder die
+    Installation einer ANDEREN Instanz (sollte es per Provisionierung nie
+    geben — Klon pro Account — aber 'sollte nie' ist kein Riegel)."""
+    def _dir(p):
+        p = str(p or "").strip()
+        return os.path.normcase(os.path.dirname(os.path.abspath(p))) if p else None
+    d = _dir((cfg or {}).get("master_terminal_path"))
+    if not d:
+        return None  # Orbit/TV-Instanz oder Pfad fehlt
+    if d == _dir((cfg or {}).get("hedge_terminal_path")):
+        return None  # Master- und Hedge-Pfad im selben Ordner (Fehlkonfiguration)
+    for c in (andere_cfgs or []):
+        for key in ("master_terminal_path", "hedge_terminal_path"):
+            if d == _dir((c or {}).get(key)):
+                return None  # Ordner wird von einer anderen Config genutzt
+    return d
+
+
 def _terminal_zu_starten(fname, ausloeser):
     """Startet den Zu-Worker fuer eine Instanz — hoechstens einen zur Zeit."""
     cfg = read_json(os.path.join(HERE, fname), {}) or {}
@@ -647,6 +675,14 @@ def _terminal_zu_worker(fname, ausloeser):
         deadline = frei_ab + 180
         while time.time() < deadline:
             cfg = read_json(os.path.join(HERE, fname), {}) or {}
+            if not cfg:
+                # Config weg = Instanz geloescht (Archiv-Loeschauftrag 07.09.2026).
+                # Die Loeschung schliesst das Terminal selbst (terminal_zu) — bis
+                # dahin lief dieser Worker ins Leere ('kein Master-Terminal') und
+                # gab erst an der Deadline auf. Ehrlich benennen und sofort raus.
+                print(f"[panel] {fname}: Terminal-Zu abgebrochen — Config geloescht.",
+                      flush=True)
+                return
             st = read_json(os.path.join(HERE, status_fn), {}) or {}
             age = None
             try:
@@ -2546,6 +2582,10 @@ class Handler(BaseHTTPRequestHandler):
                             "msg": f"Andere Instanz ({d['file']}) hat gerade offene "
                                    f"Positionen/Hedges — Loeschen startet den ganzen "
                                    f"Copier neu."}, ensure_ascii=False))
+            # Master-Terminal-Ordner JETZT merken — nach os.remove ist die Config
+            # weg (07.09.2026, Archiv-Loeschauftrag: das Terminal soll mit zu,
+            # sonst laeuft die terminal64.exe nach der Loeschung kopflos weiter).
+            cfg_weg = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
             # Loeschen: ZUERST die Config — schlaegt das fehl (Windows: Datei
             # gerade von copier.py/instances() offen, kein FILE_SHARE_DELETE),
             # wird ABGEBROCHEN statt Erfolg zu melden (Review-Fund 15.08.2026:
@@ -2572,9 +2612,38 @@ class Handler(BaseHTTPRequestHandler):
                 if len(keep) != len(plans):
                     _save_plans(keep)
             print(f"[panel] {fname}: geloescht ({', '.join(removed) or 'nichts zu entfernen'})", flush=True)
+            # Auf ausdruecklichen Wunsch des Aufrufers (terminal_zu, Archiv-
+            # Loeschauftrag 07.09.2026) das Master-Terminal der geloeschten
+            # Instanz mit schliessen. Die Beweis-Last haben die Riegel oben
+            # schon getragen (keine eigenen Positionen/Hedges, kein laufender
+            # Plan); loesch_terminal_dir prueft nur noch rein, dass kein
+            # ANDERER den Ordner nutzt (Hedge-Terminal, fremde Instanz).
+            # Kill im Hintergrund — Muster close-idle-terminals (03.09.2026):
+            # die Grace-Periode darf nicht den 25s-Proxy-Timeout von app.py
+            # reissen. Der manuelle Loeschen-Knopf schickt kein terminal_zu
+            # und verhaelt sich exakt wie bisher.
+            zu_msg = ""
+            if bool(body.get("terminal_zu")):
+                andere = [read_json(os.path.join(HERE, i2["config_file"]), {}) or {}
+                          for i2 in instances()]
+                zu_dir = loesch_terminal_dir(cfg_weg, andere)
+                if zu_dir:
+                    def _nach_loeschung_zu(d=zu_dir, fn=fname):
+                        try:
+                            pids = provision.terminal_pids(d)
+                            for pid in pids:
+                                provision._taskkill(pid, grace_s=5)
+                            if pids:
+                                print(f"[panel] {fn}: Master-Terminal nach Loeschung "
+                                      f"geschlossen.", flush=True)
+                        except Exception as e:
+                            print(f"[panel] {fn}: Terminal-Zu nach Loeschung: "
+                                  f"{type(e).__name__}: {e}", flush=True)
+                    threading.Thread(target=_nach_loeschung_zu, daemon=True).start()
+                    zu_msg = " Master-Terminal wird geschlossen;"
             return self._send(200, json.dumps({"ok": True, "msg":
-                "Config geloescht — der Copier startet neu. Der Terminal-Ordner "
-                "bleibt auf der Platte."}, ensure_ascii=False))
+                "Config geloescht — der Copier startet neu." + zu_msg +
+                " Der Terminal-Ordner bleibt auf der Platte."}, ensure_ascii=False))
 
         if u.path == "/api/plan":
             try:

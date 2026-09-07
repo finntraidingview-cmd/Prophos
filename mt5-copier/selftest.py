@@ -1063,6 +1063,30 @@ def main():
     chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 60 min",
         all(60 <= panel._zufalls_verzoegerung() <= 3600 for _ in range(200)))
 
+    # ── Panel: Terminal-Zu nach Config-Loeschung (07.09.2026, Archiv-Auftrag) ──
+    # Nach dem Loeschen einer Instanz darf NUR der eigene Master-Ordner
+    # geschossen werden — nie das Hedge-Terminal, nie der Ordner einer anderen
+    # Config. Pfade forward-slash, damit der Test auf Mac UND Windows laeuft.
+    _cfgL  = {"master_terminal_path": "/mt5/acc1/terminal64.exe",
+              "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
+    _fremd = {"master_terminal_path": "/mt5/acc2/terminal64.exe",
+              "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"}
+    chk("PANEL: Loesch-Terminal-Zu trifft den eigenen Master-Ordner",
+        panel.loesch_terminal_dir(_cfgL, [_fremd]) is not None
+        and panel.loesch_terminal_dir(_cfgL, []) is not None
+        and panel.loesch_terminal_dir(_cfgL, None) is not None)
+    chk("PANEL: Loesch-Terminal-Zu — ohne Master-Pfad (Orbit/TV) nie schiessen",
+        panel.loesch_terminal_dir({}, []) is None
+        and panel.loesch_terminal_dir({"master_terminal_path": "  "}, []) is None
+        and panel.loesch_terminal_dir(None, []) is None)
+    chk("PANEL: Loesch-Terminal-Zu — Master==Hedge-Ordner (Fehlkonfig) nie schiessen",
+        panel.loesch_terminal_dir({"master_terminal_path": "/mt5/hedge/terminal64.exe",
+                                   "hedge_terminal_path":  "/mt5/hedge/terminal64.exe"},
+                                  []) is None)
+    chk("PANEL: Loesch-Terminal-Zu — Ordner einer ANDEREN Config nie schiessen",
+        panel.loesch_terminal_dir(_cfgL, [{"master_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None
+        and panel.loesch_terminal_dir(_cfgL, [{"hedge_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None)
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")

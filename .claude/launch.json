@@ -128,6 +128,28 @@
         "5113"
       ],
       "port": 5113
+    },
+    {
+      "name": "prophos-static-check-13",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5127"
+      ],
+      "port": 5127
+    },
+    {
+      "name": "finn-tools",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5121",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/26590bfc-7fd4-498b-bac1-fa179fdfd463/scratchpad"
+      ],
+      "port": 5121
     }
   ]
 }
