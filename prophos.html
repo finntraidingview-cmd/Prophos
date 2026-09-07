@@ -4928,6 +4928,50 @@
             </div>
           </div>
 
+          <!-- Zugangsdaten des NEUEN Broker-Kontos (07.09.2026, Finns Wunsch: „bei den
+               Accounts, die von Echo kamen, direkt die Accountdaten — quasi alles —
+               reinpasten"). Nur sichtbar, wenn der Vorgänger ein Echo-/MT5-Account ist
+               (mt5_links-Eintrag oder eigene Creds) — bei TopstepX-Nachfolgern gibt es
+               keine Broker-Mail. Gleicher Paste-Parser wie im Account- und Echo-Add-Modal
+               (acParseCredBlob), Felder danach frei bearbeitbar. Mit Creds taucht der
+               neue Account sofort im Echo-„Account hinzufügen"-Prefill auf. -->
+          <div id="suc-creds-block" style="display:none">
+            <div class="modal-divider" style="margin-top:14px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              Zugangsdaten des neuen Kontos (optional)
+            </div>
+            <div class="field" style="margin-bottom:10px">
+              <label>📋 Mail reinpasten — Felder füllen sich automatisch</label>
+              <textarea class="input" id="suc-paste-blob" rows="3" placeholder="Die ganze E-Mail / den Text der Prop-Firma hier reinkopieren — Prophos zieht Login, Passwort und Server automatisch raus (danach unten frei bearbeitbar)."></textarea>
+              <div id="suc-paste-hint" style="font-size:11.5px;color:var(--sub);margin-top:4px;display:none"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field">
+                <label>Login / Kontonr.</label>
+                <input class="input mono" id="suc-cred-login" placeholder="z.B. 511290232" autocomplete="off">
+              </div>
+              <div class="field">
+                <label>Passwort</label>
+                <input class="input" id="suc-cred-password" type="text" placeholder="Passwort" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="field">
+                <label>Server</label>
+                <input class="input mono" id="suc-cred-server" placeholder="z.B. FusionMarkets-Live" autocomplete="off">
+              </div>
+              <div class="field">
+                <label>Plattform</label>
+                <select class="input" id="suc-cred-platform">
+                  <option value="">—</option>
+                  <option value="MT5">MT5</option>
+                  <option value="MT4">MT4</option>
+                  <option value="cTrader">cTrader</option>
+                  <option value="Tradovate">Tradovate</option>
+                  <option value="Andere">Andere</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <!-- Trade-Limits — eigener Block, vorbelegt vom Vorgänger -->
           <div class="modal-divider" style="color:#d97706;margin-top:14px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -15341,6 +15385,26 @@
     document.getElementById('suc-max-profit-trade').value = acc.maxProfitPerTrade != null ? acc.maxProfitPerTrade : ''
     document.getElementById('suc-extid').value = ''
 
+    // Zugangsdaten-Block (07.09.2026): nur zeigen, wenn der Vorgänger ein
+    // Echo-/MT5-Account ist — erkennbar am mt5_links-Eintrag oder an eigenen
+    // Broker-Creds. Bei TopstepX-Nachfolgern gibt es keine Broker-Mail zum
+    // Reinpasten, dort bleibt das Modal so schlank wie bisher.
+    const istEchoVorgaenger =
+      (typeof mt5GetLinks === 'function'
+        && Object.values(mt5GetLinks()).some(id => String(id) === String(acc.id)))
+      || !!(acc.creds && acc.creds.login)
+    const credsBlock = document.getElementById('suc-creds-block')
+    if(credsBlock) credsBlock.style.display = istEchoVorgaenger ? '' : 'none'
+    for(const fid of ['suc-paste-blob', 'suc-cred-login', 'suc-cred-password', 'suc-cred-server']){
+      const el = document.getElementById(fid); if(el) el.value = ''
+    }
+    const sucPlat = document.getElementById('suc-cred-platform')
+    // MT5 vorbelegen, wenn der Vorgänger schon MT5 war (der Nachfolger läuft
+    // praktisch immer beim selben Broker weiter) — sonst leer lassen.
+    if(sucPlat) sucPlat.value = (acc.creds?.platform === 'MT5' || istEchoVorgaenger) ? 'MT5' : ''
+    const sucHint = document.getElementById('suc-paste-hint')
+    if(sucHint) sucHint.style.display = 'none'
+
     // Name-Vorschlag basierend auf aktuellem Typ
     let suggested = acc.name
     if(/phase\s*1/i.test(acc.name)) suggested = acc.name.replace(/phase\s*1/i, 'Phase 2')
@@ -15368,6 +15432,34 @@
     _successorParentAccId = null
     _afterSuccessorCallback = null
   }
+
+  // Paste-Parser im Nachfolger-Wizard (07.09.2026): dieselbe Mechanik wie im
+  // Account-Modal (ac-paste-blob) und im Echo-Add-Modal — acParseCredBlob ist
+  // die EINE Quelle fürs Erkennen, hier nur die Verdrahtung auf die suc-Felder.
+  // External ID = Broker-Kontonummer = Login → mitfüllen, aber nur wenn leer
+  // (eine manuell abweichend eingetragene ID wird nie überschrieben).
+  const sucPasteBlob = document.getElementById('suc-paste-blob')
+  if(sucPasteBlob) sucPasteBlob.addEventListener('input', () => {
+    if(typeof acParseCredBlob !== 'function') return
+    const parsed = acParseCredBlob(sucPasteBlob.value)
+    const found = []
+    const setVal = (fid, val, label) => {
+      const el = document.getElementById(fid)
+      if(el && val){ el.value = val; found.push(label) }
+    }
+    setVal('suc-cred-login', parsed.login, 'Login')
+    const extEl = document.getElementById('suc-extid')
+    if(parsed.login && extEl && !extEl.value.trim()){ extEl.value = parsed.login; found.push('External ID') }
+    setVal('suc-cred-password', parsed.password, 'Passwort')
+    setVal('suc-cred-server', parsed.server, 'Server')
+    if(parsed.platform){ const p = document.getElementById('suc-cred-platform'); if(p){ p.value = parsed.platform; found.push('Plattform: ' + parsed.platform) } }
+    const hint = document.getElementById('suc-paste-hint')
+    if(hint){
+      if(found.length){ hint.style.display = ''; hint.style.color = 'var(--good,#12B76A)'; hint.textContent = '✓ Erkannt: ' + found.join(' · ') + ' — unten prüfen/korrigieren.' }
+      else if(sucPasteBlob.value.trim().length > 8){ hint.style.display = ''; hint.style.color = 'var(--sub)'; hint.textContent = 'Nichts automatisch erkannt — bitte die Felder unten manuell füllen.' }
+      else { hint.style.display = 'none' }
+    }
+  })
 
   document.getElementById('successorCancel')?.addEventListener('click', closeSuccessorWizard)
   document.getElementById('successorCancel2')?.addEventListener('click', closeSuccessorWizard)
@@ -15439,6 +15531,17 @@
         maxLossPerTrade: !isNaN(sucMaxLossTrade) && sucMaxLossTrade > 0 ? sucMaxLossTrade : null,
         maxProfitPerTrade: !isNaN(sucMaxProfitTrade) && sucMaxProfitTrade > 0 ? sucMaxProfitTrade : null,
         externalId
+      }
+      // Zugangsdaten aus dem Paste-Block (07.09.2026) — optional; accountToRow
+      // trägt sie in die cred_*-Spalten. Mit Login+Server erscheint der neue
+      // Account sofort im Echo-„Account hinzufügen"-Prefill (mtcPrefillCandidates).
+      const sucCredLogin  = document.getElementById('suc-cred-login')?.value.trim()  || ''
+      const sucCredPass   = document.getElementById('suc-cred-password')?.value.trim() || ''
+      const sucCredServer = document.getElementById('suc-cred-server')?.value.trim() || ''
+      const sucCredPlat   = document.getElementById('suc-cred-platform')?.value || ''
+      if(sucCredLogin || sucCredPass || sucCredServer){
+        newAcc.creds = { login: sucCredLogin, password: sucCredPass,
+                         server: sucCredServer, platform: sucCredPlat, notes: '' }
       }
       const row = accountToRow(newAcc)
       const { data, error } = await supabase.from('accounts').insert(row).select('*').single()
@@ -21963,7 +22066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-07.255'
+  const OS_TAB_BUILD = '2026-09-07.256'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
