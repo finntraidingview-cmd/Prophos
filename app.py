@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-08.2"
+APP_BUILD = "2026-09-08.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1213,6 +1213,12 @@ def run_mirror_realtime(pair_id):
                            # (hub gestoppt statt 2s-Dauerhämmern — die Reconnect-Stürme haben
                            # am 21.07. serverseitig HTTP 429 provoziert; Kopien laufen über
                            # den 1s-Abgleich weiter)
+    last_pos_evt = [0.0]   # Zeitpunkt des letzten GatewayUserPosition-Events (08.09.2026):
+                           # solange Positions-Events fließen (<30s alt), sind SIE die
+                           # Wahrheitsquelle und der Trade-Event-Pfad mutiert net NICHT mehr —
+                           # Positions-Events tragen ABSOLUTE Größen, Trade-Events Deltas;
+                           # beide gleichzeitig zu verrechnen würde Fills doppelt zählen
+                           # (Adoption per Positions-Event + nachlaufendes Fill-Event).
 
     # SignalR-interne Logs (INFO+) in die Pair-Konsole spiegeln — wenn der SERVER die
     # Verbindung aktiv trennt, nennt er den Grund in einer Close-Message, die die Library
@@ -1281,6 +1287,9 @@ def run_mirror_realtime(pair_id):
             if data is None: return
             stream_events[0] += 1
             closes_noevent[0] = 0  # Stream liefert — kein Sturm (mehr)
+            if time.time() - last_pos_evt[0] < 30:
+                return  # Positions-Stream lebt und ist die Wahrheitsquelle (absolute Größen) —
+                        # Trade-Deltas zusätzlich zu verrechnen würde doppelt zählen
             if not first_event_logged[0]:
                 first_event_logged[0] = True
                 log_msg(pair_id, f"📡 Erstes Trade-Event empfangen: {json.dumps(data)[:220]}")
@@ -1340,19 +1349,103 @@ def run_mirror_realtime(pair_id):
         except Exception as e:
             log_msg(pair_id, f"⚠️ Fehler beim Verarbeiten eines Trade-Events: {type(e).__name__}: {str(e)[:120]}")
 
-    def sync_baseline(heal=False):
+    def on_position(h, args):
+        """GatewayUserPosition als Push-Quelle (08.09.2026, Finns '<0,5s'-Vorgabe):
+        Positions-Events tragen die ABSOLUTE Ist-Größe (size, type 1=Long/2=Short;
+        size 0 = Position zu) — genau die Information, die der 1s-Abgleich bisher
+        per REST zusammensammeln musste. Der Handler spielt bewusst NUR die Rolle
+        des Abgleichs: übernehmen / schließen / drehen über dieselben Locks und
+        Refs wie Trade-Pfad und Heal — kommt für denselben Übergang zusätzlich ein
+        Trade-Event, findet es den Zustand schon korrekt vor und tut nichts (bzw.
+        ist per last_pos_evt ganz abgeschaltet, solange Positions-Events fließen).
+        Zweiter Grund für diesen Kanal: der Server killt seit Juli jede Verbindung
+        als Reaktion auf SubscribeTrades — ob POSITIONS-Abos durchgelassen werden,
+        entscheidet sich hiermit; wenn ja, ist der Sub-Sekunden-Pfad offen, auch
+        ohne Trade-Events."""
+        try:
+            if not session_alive() or not hub_is_current(h):
+                return
+            data = None
+            if args and isinstance(args[0], dict): data = args[0]
+            elif args and len(args) > 1 and isinstance(args[1], dict): data = args[1]
+            if data is None: return
+            if "contractId" not in data and isinstance(data.get("data"), dict):
+                data = data["data"]  # Payload kommt je nach Gateway-Version auch verschachtelt
+            evt_acc = data.get("accountId")
+            if evt_acc is not None and str(evt_acc) != str(s.get("tsxAccountId")):
+                return
+            contract = data.get("contractId", "")
+            if not contract:
+                return
+            stream_events[0] += 1
+            closes_noevent[0] = 0
+            last_pos_evt[0] = time.time()
+            if not first_event_logged[0]:
+                first_event_logged[0] = True
+                log_msg(pair_id, f"📡 Erstes Positions-Event empfangen: {json.dumps(data)[:220]}")
+            size = int(float(data.get("size", 0) or 0))
+            ptype = data.get("type", 0)
+            is_buy = ptype in (1, "1", "Long", "long", "Buy", "buy")
+            with pos_lock:
+                tracked = net.get(contract, 0)
+                if size == 0 and tracked != 0:
+                    rid = ref.pop(contract, None)
+                    net[contract] = 0
+                    opened_at.pop(contract, None)
+                    log_msg(pair_id, f"🔚 TSX Position zu (Positions-Event): {contract}")
+                    if rid:
+                        log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
+                        close_hedge(pair_id, rid)
+                elif size > 0 and tracked == 0 and contract not in ref:
+                    net[contract] = size if is_buy else -size
+                    rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                    ref[contract] = rid
+                    opened_at[contract] = time.time()
+                    log_msg(pair_id, f"🆕 TSX Position offen (Positions-Event): {'Buy' if is_buy else 'Sell'} {size}× {contract}")
+                    risk = float(data.get("initialRisk", 0) or 0) or (fetch_risk_for_contract(contract) if target_eur > 0 else 0)
+                    log_msg(pair_id, "➡️ Spiegle nach MT5…")
+                    open_hedge(pair_id, rid, 0 if is_buy else 1, contract, size, risk)
+                elif size > 0 and tracked != 0:
+                    signed = size if is_buy else -size
+                    if (signed > 0) != (tracked > 0):
+                        rid_old = ref.pop(contract, None)
+                        if rid_old:
+                            log_msg(pair_id, f"🔁 TSX Position gedreht (Positions-Event): {contract} — schließe alten Hedge…")
+                            close_hedge(pair_id, rid_old)
+                        rid_new = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
+                        ref[contract] = rid_new
+                        opened_at[contract] = time.time()
+                        net[contract] = signed
+                        risk = fetch_risk_for_contract(contract) if target_eur > 0 else 0
+                        log_msg(pair_id, "➡️ Öffne gedrehten Hedge auf MT5…")
+                        open_hedge(pair_id, rid_new, 0 if signed > 0 else 1, contract, abs(signed), risk)
+                    elif signed != tracked:
+                        # Absolute Größe ist autoritativ — net syncen, Hedge-Policy wie im
+                        # Trade-Pfad: Größenänderung wird geloggt, nicht nachjustiert.
+                        net[contract] = signed
+                        log_msg(pair_id, f"ℹ️ Positionsgröße geändert (Positions-Event): {contract} {tracked}→{signed} (Hedge bleibt wie beim Opening)")
+        except Exception as e:
+            log_msg(pair_id, f"⚠️ Fehler beim Verarbeiten eines Positions-Events: {type(e).__name__}: {str(e)[:120]}")
+
+    def sync_baseline(heal=False, snapshot=None):
         """Bereits offene TSX-Positionen (offen vor Verbindungsaufbau, oder während eines
         Reconnects/Stream-Ausfalls verpasst) per REST übernehmen — der Event-Stream liefert
         nur NEUE Fills. Läuft bei jedem (Re-)Connect UND als Heal aus der Reconciliation;
-        bereits getrackte Contracts werden übersprungen. heal=True ändert nur die Log-Texte."""
+        bereits getrackte Contracts werden übersprungen. heal=True ändert nur die Log-Texte.
+        snapshot: bereits vorliegende searchOpen-Positionsliste (08.09.2026) — der Heal-Pfad
+        hatte die Liste 300ms vorher selbst gezogen und sync_baseline zog sie NOCHMAL;
+        auf Finns '<0,5s'-Jagd zählt jeder gesparte Roundtrip."""
         try:
-            r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
-                headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
-                json={"accountId": int(s["tsxAccountId"])}, timeout=10)
-            if not r.ok:
-                log_msg(pair_id, f"⚠️ Baseline-Sync: HTTP {r.status_code} — {r.text[:80]}", "warn")
-                return 0
-            positions = r.json().get("positions", r.json().get("data", []))
+            if snapshot is not None:
+                positions = snapshot
+            else:
+                r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
+                    headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
+                    json={"accountId": int(s["tsxAccountId"])}, timeout=10)
+                if not r.ok:
+                    log_msg(pair_id, f"⚠️ Baseline-Sync: HTTP {r.status_code} — {r.text[:80]}", "warn")
+                    return 0
+                positions = r.json().get("positions", r.json().get("data", []))
             taken = 0
             with pos_lock:
                 for pos in positions:
@@ -1395,31 +1488,46 @@ def run_mirror_realtime(pair_id):
                 return  # schon abonniert auf DIESER Verbindung — ein zweites SubscribeTrades
                         # würde jedes Event doppelt zustellen (→ falsche net-Stände)
             try:
+                # ALLE VIER Kanäle abonnieren (08.09.2026): Das offizielle ProjectX-Beispiel
+                # abonniert immer Accounts+Orders+Positions+Trades zusammen — wir schickten
+                # seit Juli nur SubscribeTrades, und der Server schloss JEDE Verbindung als
+                # Reaktion darauf (beide Verbindungsmodi, nie eine Completion). Ob er
+                # Teil-Abos als ungültigen Client wertet oder nur den Trades-Kanal sperrt:
+                # die Einzel-Bestätigungen unten machen es erstmals sichtbar. Positions ist
+                # dabei der wichtigste Kanal — on_position trägt seit heute den Sub-Sekunden-
+                # Pfad auch ohne Trade-Events.
                 # on_invocation: Server-Completion abwarten — nur so wissen wir sicher,
-                # ob das Abonnement überhaupt akzeptiert wurde (Ablehnung käme als
-                # Error-Completion und landet über on_error in der Konsole).
-                def _sub_confirmed(completion, hh=h):
-                    if hub_is_current(hh):
-                        hh._pph_sub_confirmed = True
-                        log_msg(pair_id, "✅ Subscription vom Server bestätigt")
-                h._pph_sub_confirmed = False
-                h.send("SubscribeTrades", [int(s["tsxAccountId"])], on_invocation=_sub_confirmed)
+                # ob ein Abonnement akzeptiert wurde (Ablehnung käme als Error-Completion
+                # und landet über on_error in der Konsole).
+                acc_id = int(s["tsxAccountId"])
+                h._pph_sub_ok = set()
+                def _mk_conf(name, hh=h):
+                    def _cb(completion):
+                        if hub_is_current(hh):
+                            hh._pph_sub_ok.add(name)
+                            log_msg(pair_id, f"✅ {name} vom Server bestätigt")
+                    return _cb
+                h.send("SubscribeAccounts", [], on_invocation=_mk_conf("SubscribeAccounts"))
+                h.send("SubscribeOrders", [acc_id], on_invocation=_mk_conf("SubscribeOrders"))
+                h.send("SubscribePositions", [acc_id], on_invocation=_mk_conf("SubscribePositions"))
+                h.send("SubscribeTrades", [acc_id], on_invocation=_mk_conf("SubscribeTrades"))
                 h._pph_subscribed = True
                 # 3s-Wächter (08.09.2026): Beim Mac-Live-Test kam NIE eine Bestätigung —
-                # der Server schloss die Verbindung, STATT das Abo abzuschließen. Ohne
-                # diese Zeile ist im Log nicht unterscheidbar, ob der Close eine Reaktion
-                # aufs Abo ist (Server mag uns nicht) oder ein Netz-/Transportproblem
-                # (offener Punkt "Klartext-Close-Reason" vom 21.07.).
+                # der Server schloss die Verbindung, STATT das Abo abzuschließen. Mit den
+                # Einzel-Bestätigungen zeigt der Wächter jetzt, WELCHER Kanal hängt.
                 def _sub_check(hh=h):
-                    if session_alive() and hub_is_current(hh) and not getattr(hh, "_pph_sub_confirmed", False):
-                        log_msg(pair_id, "⚠️ Keine Abo-Bestätigung nach 3s — der Server schließt offenbar als REAKTION aufs Abonnement (nicht wegen Netz/Transport)", "warn")
+                    if not (session_alive() and hub_is_current(hh)):
+                        return
+                    fehlend = {"SubscribeAccounts", "SubscribeOrders", "SubscribePositions", "SubscribeTrades"} - getattr(hh, "_pph_sub_ok", set())
+                    if fehlend:
+                        log_msg(pair_id, f"⚠️ Ohne Server-Bestätigung nach 3s: {', '.join(sorted(fehlend))} — der Close ist vermutlich die Server-Reaktion darauf", "warn")
                 _t = threading.Timer(3.0, _sub_check)
                 _t.daemon = True
                 _t.start()
             except Exception as e:
                 log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
                 return
-        log_msg(pair_id, "🔌 Verbunden & auf Trades abonniert (User Hub)")
+        log_msg(pair_id, "🔌 Verbunden & abonniert: Accounts, Orders, Positions, Trades (User Hub)")
         sync_baseline()
 
     def on_hub_reopen(h):
@@ -1465,6 +1573,7 @@ def run_mirror_realtime(pair_id):
         # sonst steht nur der Objektname im Log statt der Server-Begründung.
         h.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(getattr(e, 'error', None) or e)[:150]}", "warn"))
         h.on("GatewayUserTrade", lambda args: on_trade(h, args))
+        h.on("GatewayUserPosition", lambda args: on_position(h, args))
         return h
 
     def rebuild_connection(reason, flip_mode=False):
@@ -1565,7 +1674,7 @@ def run_mirror_realtime(pair_id):
 
                 if missing_locally:
                     log_msg(pair_id, f"🛟 Abgleich: {len(missing_locally)} TSX-Position(en) ohne Hedge ({', '.join(list(missing_locally)[:3])}) — übernehme automatisch…", "warn")
-                    if sync_baseline(heal=True) > 0:
+                    if sync_baseline(heal=True, snapshot=positions) > 0:
                         healed = True
 
                 # Phantom = lokal getrackt, auf TSX weg → Hedge schließen. EIN Pass reicht,
