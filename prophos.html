@@ -17908,6 +17908,56 @@
   function mirrorPairIdFor(plan){ return `plan-mirror-${plan.masterAccountId}-${plan.slaveAccountId}` }
   function mirrorPlanIsArmed(planId){ return !!mirrorArmedMap()[String(planId)] }
 
+  /* ── Wo läuft die Engine? (08.09.2026, Finns Ansage: Topstep-Kopien über das
+   * LOKALE Backend, Amsterdam-IP raus) ──
+   * Auf localhost zeigt TS_BACKEND ohnehin auf das lokale app.py — das ist der
+   * Normalfall auf den Trading-PCs, start-alles.bat öffnet Chrome genau dort.
+   * Läuft Prophos aber über pages.dev (Bookmark-Gewohnheit), ging das Arming
+   * bisher STILL an Railway. Deshalb sucht das Arming jetzt zuerst ein lokales
+   * Backend (GET /version, kurzer Timeout) und startet die Engine dort, wenn
+   * es antwortet. GRENZE, live gemessen 08.09.2026: Chrome blockt Anfragen
+   * einer ÖFFENTLICHEN Seite ins lokale Netz (Local Network Access,
+   * ERR_BLOCKED_BY_CLIENT), solange der Nutzer es der Seite nicht ausdrücklich
+   * erlaubt hat. Die Probe ist also Best-Effort: erlaubt = pages.dev nutzt das
+   * lokale Backend automatisch, geblockt = sauberer Fallback auf Railway — und
+   * die Preflight-Zeile "Engine-Standort" macht das VOR dem Arming sichtbar,
+   * statt still Amsterdam zu nehmen. Verlässlich lokal ist die localhost-
+   * Oberfläche selbst.
+   * Die Basis wird PRO PAIR gemerkt (prophos_mirror_base): Status-Poller und
+   * Auto-P&L müssen das Backend fragen, auf dem die Engine WIRKLICH läuft —
+   * nicht das, worauf TS_BACKEND aus Sicht der Seite gerade zeigt. */
+  const MIRROR_LOCAL_BASE   = 'http://localhost:5000'
+  const MIRROR_RAILWAY_BASE = 'https://web-production-bec81.up.railway.app'
+  const MIRROR_BASE_LS = 'prophos_mirror_base'     // { pairId: baseUrl }
+  function mirrorBaseIstLokal(base){ return /^https?:\/\/(localhost|127\.0\.0\.1)/.test(base || '') }
+  let _mirrorBaseProbe = { base: null, ts: 0 }
+  async function mirrorResolveBase(){
+    if(mirrorBaseIstLokal(TS_BACKEND)) return TS_BACKEND
+    // 10s-Cache: Preflight-Anzeige und Arming lösen kurz nacheinander auf —
+    // beide sollen garantiert dieselbe Antwort sehen.
+    if(_mirrorBaseProbe.base && Date.now() - _mirrorBaseProbe.ts < 10000) return _mirrorBaseProbe.base
+    let base = TS_BACKEND
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 1500)
+      const r = await fetch(`${MIRROR_LOCAL_BASE}/version`, { signal: ctrl.signal, cache: 'no-store' })
+      clearTimeout(t)
+      if(r.ok) base = MIRROR_LOCAL_BASE
+    } catch(_){}
+    _mirrorBaseProbe = { base, ts: Date.now() }
+    return base
+  }
+  function mirrorBaseMap(){
+    try { return JSON.parse(localStorage.getItem(MIRROR_BASE_LS) || '{}') } catch { return {} }
+  }
+  function mirrorBaseFor(pairId){ return mirrorBaseMap()[pairId] || TS_BACKEND }
+  function mirrorBaseSave(pairId, base){
+    const m = mirrorBaseMap(); m[pairId] = base; localStorage.setItem(MIRROR_BASE_LS, JSON.stringify(m))
+  }
+  function mirrorBaseDrop(pairId){
+    const m = mirrorBaseMap(); delete m[pairId]; localStorage.setItem(MIRROR_BASE_LS, JSON.stringify(m))
+  }
+
   async function mirrorArmPlan(plan, master, slave){
     const pairId = mirrorPairIdFor(plan)
     // Kontrakt-Basis des Plan-Multipliers (MNQ oder NQ) — kommt aus dem Instrument-
@@ -17916,16 +17966,23 @@
     // mit dem der Multiplier berechnet wurde). Die Engine rechnet Fills auf dem
     // Schwester-Kontrakt damit automatisch um Faktor 10 um.
     const baseInstrument = (typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'
+    const base = await mirrorResolveBase()
     // Immer Stop→Start statt Wiederverwenden: /mirror/start aktualisiert bei
     // "Already running" den Multiplier nicht. Seit dem Zombie-Fix ist das racefrei.
-    try {
-      await fetch(`${TS_BACKEND}/mirror/stop`, {
+    // Der Stop geht an ALLE bekannten Backends, nicht nur an das, wo gleich
+    // gestartet wird (08.09.2026): ein früher über Railway armiertes Pair liefe
+    // sonst dort unsichtbar weiter — zwei Engines auf demselben TSX-Account
+    // heißt Doppel-Hedges (genau die Warnung aus topstep-agent/README). Ein
+    // Backend, das es nicht gibt, antwortet schnell mit Connection-Fehler und
+    // wird ignoriert.
+    await Promise.all([...new Set([base, MIRROR_LOCAL_BASE, MIRROR_RAILWAY_BASE, TS_BACKEND])].map(stopBase =>
+      fetch(`${stopBase}/mirror/stop`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ pairId })
-      })
-    } catch(_){}
+      }).catch(() => {})
+    ))
     await new Promise(r => setTimeout(r, 400))
-    const r = await fetch(`${TS_BACKEND}/mirror/start`, {
+    const r = await fetch(`${base}/mirror/start`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         pairId,
@@ -17947,6 +18004,7 @@
     const m = mirrorArmedMap()
     m[String(plan.id)] = pairId
     mirrorSaveArmed(m)
+    mirrorBaseSave(pairId, base)
     mirrorPlanPollStart()
     return baseInstrument
   }
@@ -17958,14 +18016,18 @@
     delete m[String(planId)]
     mirrorSaveArmed(m)
     mirrorPlanPoll.state.delete(String(planId))
-    // Pair nur stoppen, wenn kein anderer scharfer Plan es noch hält
+    // Pair nur stoppen, wenn kein anderer scharfer Plan es noch hält.
+    // Stop an alle bekannten Backends (08.09.2026, gleiches Muster wie beim
+    // Arming): die Engine läuft auf der gemerkten Basis, aber ein verwaistes
+    // Pair auf dem jeweils anderen Backend soll hier gleich mitsterben.
     if(!Object.values(m).includes(pairId)){
-      try {
-        await fetch(`${TS_BACKEND}/mirror/stop`, {
+      await Promise.all([...new Set([mirrorBaseFor(pairId), MIRROR_LOCAL_BASE, MIRROR_RAILWAY_BASE, TS_BACKEND])].map(stopBase =>
+        fetch(`${stopBase}/mirror/stop`, {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ pairId })
-        })
-      } catch(_){}
+        }).catch(() => {})
+      ))
+      mirrorBaseDrop(pairId)
     }
     if(typeof renderTradePlans === 'function') renderTradePlans()
   }
@@ -17973,7 +18035,14 @@
   /* ── Auto-Erkennung für Mirror-Pläne (Gegenstück zu atCheck, aber über die
    * eigene Engine): /mirror/status.positions wird nur nach ECHTEM Hedge-Open/-Close
    * verändert, deshalb reicht eine einzelne Beobachtung (kein 2-Streak nötig). ── */
-  const mirrorPlanPoll = { timer: null, INTERVAL: 2500, state: new Map() }  // planId -> {sawOpen}
+  const mirrorPlanPoll = { timer: null, INTERVAL: 2500, state: new Map() }  // planId -> {sawOpen, engineTot}
+  // Für die Plan-Karten-Chips: hat der Poller für diesen scharfen Plan zuletzt
+  // eine TOTE Engine gesehen (active:false)? Lebt nur im RAM dieser Seite —
+  // nach Reload entscheidet der nächste Poll-Tick neu.
+  function mirrorPlanEngineTot(planId){
+    const st = mirrorPlanPoll.state.get(String(planId))
+    return !!(st && st.engineTot)
+  }
 
   function mirrorPlanPollStart(){
     if(mirrorPlanPoll.timer) return
@@ -17997,11 +18066,19 @@
     for(const [pairId, planIds] of Object.entries(byPair)){
       let d = null
       try {
-        const r = await fetch(`${TS_BACKEND}/mirror/status?pairId=${encodeURIComponent(pairId)}`)
+        // Status vom Backend, auf dem die Engine WIRKLICH läuft (gemerkte Basis) —
+        // nicht von dem, worauf TS_BACKEND aus Sicht dieser Seite zeigt (08.09.2026).
+        const r = await fetch(`${mirrorBaseFor(pairId)}/mirror/status?pairId=${encodeURIComponent(pairId)}`)
         if(r.ok) d = await r.json()
       } catch(_){}
       if(!d) continue
       const openCount = Object.keys(d.positions || {}).length
+      // active:false bei scharfem Plan = die Engine ist WEG (Backend-Neustart
+      // verliert mirror_sessions, sie leben nur im RAM). Bisher lief das auf
+      // zwei stille Fehler hinaus (08.09.2026, Finns "gar nicht kopiert, egal
+      // wie lange ich warte"): (1) niemand erfuhr, dass nichts mehr spiegelt,
+      // (2) ein offener Plan bekam aus positions:{} ein FALSCHES Trade-Ende.
+      const engineTot = d.active === false
 
       for(const planId of planIds){
         const plan = (tradePlans || []).find(p => String(p.id) === String(planId))
@@ -18015,6 +18092,28 @@
         // bisher beim Bestätigen (tradeCompleteSave → mirrorReleasePlan).
         if(plan.status === 'review') continue
         const st = mirrorPlanPoll.state.get(String(planId)) || { sawOpen: false }
+        if(engineTot){
+          // Aus einem toten Status werden KEINE Übergänge abgeleitet — weder
+          // Open noch Ende. Nur laut werden (einmal pro Plan) + Chip umfärben.
+          if(!st.engineTot){
+            st.engineTot = true
+            mirrorPlanPoll.state.set(String(planId), st)
+            // Beim OFFENEN Trade nicht blind zum Neustart raten: die Engine hat
+            // ihre positions-Map verloren, ein Re-Arm adoptiert die TSX-Position
+            // per Baseline-Sync und eröffnet einen NEUEN Hedge — der alte liegt
+            // aber womöglich noch im MT5. Erst prüfen, dann starten.
+            atToast(plan.status === 'open'
+              ? `🪞 Mirror-Engine für „${plan.masterName || '—'}" läuft NICHT mehr (Backend neu gestartet?) — Trade ist UNGESPIEGELT. Vor dem Neustart im MT5 prüfen, ob der alte Hedge noch offen ist.`
+              : `🪞 Mirror-Engine für „${plan.masterName || '—'}" läuft NICHT mehr (Backend neu gestartet?) — Plan bitte erneut starten.`, 'warn')
+            try { renderTradePlans() } catch(_){}
+          }
+          continue
+        }
+        if(st.engineTot){
+          st.engineTot = false
+          mirrorPlanPoll.state.set(String(planId), st)
+          try { renderTradePlans() } catch(_){}
+        }
 
         if(plan.status === 'planned' && openCount > 0 && !st.sawOpen){
           st.sawOpen = true
@@ -19930,7 +20029,9 @@
         ? `<span class="tc2-chip tc2-chip-ready" title="Preflight-Check bestanden">✓ Ready to start</span>`
         : `<span class="tc2-chip tc2-chip-issue" title="Preflight-Check hatte ein Problem">⚠ Prüfung fehlgeschlagen</span>`
       const mirrorBadge = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id))
-        ? `<span class="tc2-chip tc2-chip-mirror" title="Mirror-Engine läuft — wartet auf deinen Einstieg auf Topstep">🪞 Mirror scharf</span>` : ''
+        ? (mirrorPlanEngineTot(p.id)
+          ? `<span class="tc2-chip tc2-chip-issue" title="Der Poller bekommt active:false — die Engine ist weg (Backend neu gestartet?). Plan erneut starten.">🪞 Mirror NICHT aktiv</span>`
+          : `<span class="tc2-chip tc2-chip-mirror" title="Mirror-Engine läuft — wartet auf deinen Einstieg auf Topstep">🪞 Mirror scharf</span>`) : ''
       // Prio-Chip raus, Richtungs-Hinweis rein (27.08.2026, Finns Wunsch):
       // die Prio steckt weiterhin im Status-Punkt links (tc2-dot-prio-*), der
       // Chip-Platz zeigt jetzt, ob die Master-Firma auf der eigenen ID schon
@@ -19950,7 +20051,12 @@
         // Duplikium-Route (25.08.2026): Live-Lots Master/Slave — schließt sich
         // mit der MT5-Zeile gegenseitig aus (je route rendert nur eine).
         const dupLive = (typeof dupLiveLotsHtml === 'function') ? dupLiveLotsHtml(p) : ''
-        metric = mt5Live + dupLive + (p.startedAt
+        // Mirror-Route (08.09.2026): tote Engine bei OFFENEM Trade ist der
+        // teuerste Fall (Position läuft ungespiegelt weiter) — deshalb hier
+        // genauso laut wie auf der geplanten Karte.
+        const mirrorTot = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id) && mirrorPlanEngineTot(p.id))
+          ? `<span class="tc2-chip tc2-chip-issue" title="Die Mirror-Engine ist weg (Backend neu gestartet?) — der Trade läuft UNGESPIEGELT. Vor einem Neustart im MT5 prüfen, ob der alte Hedge noch offen ist.">🪞 UNGESPIEGELT</span>` : ''
+        metric = mirrorTot + mt5Live + dupLive + (p.startedAt
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
           : `<span class="tc2-timer">live</span>`)
       }
@@ -20815,11 +20921,26 @@
       }
     }
 
-    // ── 3. Slave-MetaApi erreichbar ──
+    // ── 2b. Wo läuft die Engine? (08.09.2026, Finns Ansage: Kopien über das
+    // lokale Backend — die Amsterdam-IP soll bei TopstepX nicht mehr auftauchen.
+    // Die Zeile macht sichtbar, was bisher still im Hintergrund entschieden
+    // wurde; Railway bleibt bewusst nur WARN, kein Abbruch: vom Mac aus ist er
+    // der einzige Weg, und der Hedge ist wichtiger als das IP-Bild.) ──
+    _pfAddRow('mwo', 'Engine-Standort (IP-Herkunft)')
+    await _pfSleep(300)
+    const mBase = await mirrorResolveBase()
+    if(mirrorBaseIstLokal(mBase)){
+      _pfSet('mwo', 'ok', 'Lokales Backend auf diesem PC — TopstepX sieht die Wohn-IP dieses Rechners.')
+    } else {
+      _pfSet('mwo', 'warn', 'Kein lokales Backend erreichbar — Engine läuft über Railway (Amsterdam-IP). Für die Wohn-IP: Prophos auf dem Trading-PC über <span class="mono">http://localhost:5000</span> öffnen (start-alles.bat macht das automatisch). Fragt Chrome nach „Zugriff auf lokales Netzwerk", einmal zulassen — dann findet auch pages.dev das lokale Backend.')
+    }
+
+    // ── 3. Slave-MetaApi erreichbar ── (über die Basis, auf der die Engine
+    // gleich laufen wird — der Check soll DEN Rechner beweisen, der hedgen muss)
     _pfAddRow('mslave', 'Slave-MetaApi erreichbar')
     await _pfSleep(400)
     try {
-      const r = await fetch(`${TS_BACKEND}/ma/positions`, {
+      const r = await fetch(`${mBase}/ma/positions`, {
         headers: { 'ma-token': route.slave.ma.token, 'ma-account': route.slave.ma.accountId }
       })
       if(r.ok){
@@ -22066,7 +22187,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-07.256'
+  const OS_TAB_BUILD = '2026-09-08.257'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24374,14 +24495,17 @@
     const startISO = new Date(startedAt.getTime() - 5 * 60 * 1000).toISOString()
     const endISO   = new Date(Date.now() + 60 * 1000).toISOString()
 
-    // Slave (Fusion, echtes Geld): Deals der geschlossenen Hedges summieren
+    // Slave (Fusion, echtes Geld): Deals der geschlossenen Hedges summieren.
+    // closedHedges liegen NUR auf dem Backend, auf dem die Engine lief —
+    // deshalb die pro Pair gemerkte Basis statt TS_BACKEND (08.09.2026).
     let slavePnl = null
     try {
       const pairId = mirrorPairIdFor(plan)
-      const st = await fetch(`${TS_BACKEND}/mirror/status?pairId=${encodeURIComponent(pairId)}`).then(r => r.json()).catch(() => null)
+      const mBase = mirrorBaseFor(pairId)
+      const st = await fetch(`${mBase}/mirror/status?pairId=${encodeURIComponent(pairId)}`).then(r => r.json()).catch(() => null)
       const hedgeIds = new Set((st?.closedHedges || []).map(h => String(h.mtPosId)))
       if(hedgeIds.size){
-        const r = await fetch(`${TS_BACKEND}/ma/history-deals/time/${encodeURIComponent(startISO)}/${encodeURIComponent(endISO)}`, {
+        const r = await fetch(`${mBase}/ma/history-deals/time/${encodeURIComponent(startISO)}/${encodeURIComponent(endISO)}`, {
           headers: { 'ma-token': route.slave.ma.token, 'ma-account': route.slave.ma.accountId }
         })
         if(r.ok){
