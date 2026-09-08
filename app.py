@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-08.3"
+APP_BUILD = "2026-09-08.4"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1010,6 +1010,115 @@ def mirror_status():
     for pid, s in mirror_sessions.items():
         result[pid] = {"active": s["active"], "log": s["log"][-50:], "positions": s["positions"]}
     return jsonify(result)
+
+# ── Mirror-Diagnose: Wer killt den Stream? (08.09.2026) ──
+# Der User-Hub schließt seit Juli jede Verbindung als Reaktion aufs Abonnieren —
+# kommentarlos (CloseMessage ohne Grund), in beiden Verbindungsmodi, kein Kanal
+# bekommt je eine Completion (Mac-Live-Messungen .258–.260). Dieser Lauf beantwortet
+# die Streitfrage HART, Stufe für Stufe auf frischen Einzelverbindungen:
+#   idle      — nackte Verbindung, KEIN Abo, 12s: stirbt schon die? → Verbindungs-/
+#               Sitz-Policy (zweiter Client auf dem Login), kein Abo-Thema
+#   accounts / positions / trades — jeweils genau EIN Abo: welcher Kanal triggert?
+#   market    — KONTROLLGRUPPE: Market-Hub (hubs/market, SubscribeContractQuotes):
+#               läuft der, sind Token, Client-Bibliothek und Netz bewiesen gesund
+#               und das Problem ist User-Hub-spezifisch.
+# POST /mirror/diagnose {pairId?} kopiert Token/Account aus dem scharfen Pair,
+# STOPPT das Pair (saubere Messung ohne parallelen Reconnect-Sturm der Engine;
+# Re-Arm danach über den Starten-Knopf) und fährt die Stufen im Hintergrund-Thread;
+# GET /mirror/diagnose liefert den Bericht.
+_diag_state = {"running": False, "report": None, "started": 0}
+
+def _diag_run_stage(name, hub_url, subs, events, dauer):
+    res = {"stufe": name, "verbunden": False, "bestaetigt": [], "events": 0,
+           "close_nach_s": None, "fehler": None}
+    t0 = [0.0]; closed_at = [None]; ev_count = [0]
+    done = threading.Event()
+    try:
+        h = HubConnectionBuilder()\
+            .with_url(hub_url, options={"skip_negotiation": True})\
+            .configure_logging(logging.CRITICAL)\
+            .build()
+        def _on_open():
+            res["verbunden"] = True
+            t0[0] = time.time()
+            for method, args in subs:
+                def _mk(mname):
+                    def _cb(c):
+                        res["bestaetigt"].append(mname)
+                    return _cb
+                try:
+                    h.send(method, args, on_invocation=_mk(method))
+                except Exception as e:
+                    res["fehler"] = f"send {method}: {str(e)[:80]}"
+        def _on_close():
+            if closed_at[0] is None:
+                closed_at[0] = (time.time() - t0[0]) if t0[0] else 0.0
+            done.set()
+        h.on_open(_on_open)
+        h.on_close(_on_close)
+        for ev in events:
+            h.on(ev, lambda args: ev_count.__setitem__(0, ev_count[0] + 1))
+        h.start()
+        done.wait(dauer)
+        res["events"] = ev_count[0]
+        res["close_nach_s"] = round(closed_at[0], 1) if closed_at[0] is not None else None
+        try:
+            h.stop()
+        except Exception:
+            pass
+    except Exception as e:
+        res["fehler"] = f"{type(e).__name__}: {str(e)[:120]}"
+    return res
+
+def _diag_runner(token, acc_id, contract_id):
+    user_url = f"{RTC_BASE}/hubs/user?access_token={token}"
+    market_url = f"{RTC_BASE}/hubs/market?access_token={token}"
+    stufen = []
+    stufen.append(_diag_run_stage("idle — Verbindung ohne jedes Abo", user_url, [],
+        ["GatewayUserTrade", "GatewayUserPosition"], 12))
+    stufen.append(_diag_run_stage("nur SubscribeAccounts", user_url,
+        [("SubscribeAccounts", [])], ["GatewayUserAccount"], 8))
+    stufen.append(_diag_run_stage("nur SubscribePositions", user_url,
+        [("SubscribePositions", [acc_id])], ["GatewayUserPosition"], 8))
+    stufen.append(_diag_run_stage("nur SubscribeTrades", user_url,
+        [("SubscribeTrades", [acc_id])], ["GatewayUserTrade"], 8))
+    stufen.append(_diag_run_stage("KONTROLLE Market-Hub (Quotes)", market_url,
+        [("SubscribeContractQuotes", [contract_id])], ["GatewayQuote"], 8))
+    _diag_state["report"] = {"fertig": True, "kontrakt": contract_id,
+        "stufen": stufen, "ts": time.strftime("%H:%M:%S")}
+    _diag_state["running"] = False
+
+@app.route("/mirror/diagnose", methods=["POST", "OPTIONS", "GET"])
+def mirror_diagnose():
+    if request.method == "OPTIONS":
+        return "", 200
+    if request.method == "GET":
+        return jsonify({"running": _diag_state["running"], "report": _diag_state["report"]})
+    if _diag_state["running"]:
+        return jsonify({"ok": False, "error": "Diagnose läuft bereits"}), 409
+    data = request.get_json(silent=True) or {}
+    pair_id = data.get("pairId")
+    s = mirror_sessions.get(pair_id) if pair_id else next(iter(mirror_sessions.values()), None)
+    if not s:
+        return jsonify({"ok": False, "error": "Kein scharfes Pair als Token-Quelle — erst Mirror starten"}), 400
+    token = s["tsxToken"]
+    acc_id = int(s["tsxAccountId"])
+    contract_id = data.get("contractId") or "CON.F.US.MNQ.U26"
+    pid = pair_id or next((k for k, v in mirror_sessions.items() if v is s), None)
+    if pid:
+        mirror_sessions[pid]["active"] = False
+        mirror_sessions.pop(pid, None)
+        hub = mirror_hubs.pop(pid, None)
+        if hub:
+            try:
+                hub.stop()
+            except Exception:
+                pass
+    _diag_state["running"] = True
+    _diag_state["report"] = None
+    _diag_state["started"] = time.time()
+    threading.Thread(target=_diag_runner, args=(token, acc_id, contract_id), daemon=True).start()
+    return jsonify({"ok": True, "hinweis": "Diagnose läuft ~50s — Ergebnis per GET /mirror/diagnose; Pair wurde gestoppt, danach neu scharfschalten"})
 
 # ── Mirror Logic (Polling) TSX → MT5 ──
 def run_mirror(pair_id):
