@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-08.1"
+APP_BUILD = "2026-09-08.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1428,6 +1428,12 @@ def run_mirror_realtime(pair_id):
         with sub_lock:
             h._pph_subscribed = False
         reconnects[0] += 1
+        # Sturm-Zähler HIER, nicht in on_hub_close (08.09.2026, zweiter Mac-Live-Test):
+        # signalrcore feuert on_close bei Auto-Reconnects NIE (on_socket_close biegt
+        # vorher in handle_reconnect ab) — der Zähler blieb 0 und Flip/Parken griffen
+        # nicht. Jeder Reconnect beweist aber einen vorausgegangenen Close.
+        if hub_is_current(h) and session_alive():
+            closes_noevent[0] += 1
         log_msg(pair_id, f"🔁 Stream-Reconnect #{reconnects[0]}", "warn")
         do_subscribe(h)
 
