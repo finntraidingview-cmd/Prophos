@@ -124,6 +124,35 @@
   .pf-final.ok{background:rgba(16,185,129,.12);color:#0d9668;border:1px solid rgba(16,185,129,.3)}
   .pf-final.warn{background:rgba(245,158,11,.10);color:#b45309;border:1px solid rgba(245,158,11,.3)}
 
+  /* ── Auto-Start-Warteschlange (08.09.2026, Finns Wunsch: „Starten" darf
+     nicht mehr blockieren — Trades reihen sich ein, das nächste Signal geht
+     automatisch raus, sobald das vorige fertig ist). Festes Panel unten
+     rechts, gleiche Optik wie .at-prompt; z-index UNTER den Modals, damit
+     ein offenes Plan-Modal das Panel ehrlich überdeckt. ── */
+  #rs-queue{
+    position:fixed;bottom:28px;right:28px;z-index:950;width:340px;max-height:62vh;
+    overflow-y:auto;background:var(--surface);border:1px solid var(--border);
+    border-radius:16px;box-shadow:0 14px 44px rgba(16,24,40,.22);font-size:13px;
+    animation:atSlideUp .3s cubic-bezier(.2,.9,.3,1.25);
+  }
+  #rs-queue::before{content:'';display:block;height:3px;background:linear-gradient(90deg,#7c3aed,#16C8C6)}
+  .rsq-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px 8px;font-weight:700;color:var(--ink)}
+  .rsq-halt{margin:0 14px 8px;padding:8px 10px;border-radius:10px;font-size:12px;font-weight:600;line-height:1.45;background:rgba(239,68,68,.10);color:#b42318;border:1px solid rgba(239,68,68,.25)}
+  .rsq-item{padding:9px 14px;border-top:1px solid var(--line)}
+  .rsq-title{display:flex;align-items:center;gap:7px;font-weight:600;color:var(--ink);font-size:12.5px;line-height:1.4}
+  .rsq-x{margin-left:auto;flex-shrink:0;background:none;border:0;cursor:pointer;color:var(--sub);font-size:14px;line-height:1;padding:2px 5px;border-radius:6px}
+  .rsq-x:hover{background:rgba(239,68,68,.10);color:#ef4444}
+  .rsq-steps{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .rsq-chip{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--line);color:var(--sub)}
+  .rsq-chip.ok{background:rgba(16,185,129,.14);color:#0d9668}
+  .rsq-chip.warn{background:rgba(245,158,11,.14);color:#b45309}
+  .rsq-chip.err{background:rgba(239,68,68,.14);color:#ef4444}
+  .rsq-msg{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.45}
+  .rsq-done-ok{color:#0d9668;font-weight:700}
+  .rsq-done-err{color:#ef4444;font-weight:700}
+  .rsq-wait .rsq-title{color:var(--sub);font-weight:500}
+  @media (max-width:640px){ #rs-queue{left:12px;right:12px;width:auto;bottom:12px;max-height:46vh} }
+
   /* ── Live Trade Card Animations ── */
   @keyframes tcLivePulse{
     0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}
@@ -5069,6 +5098,18 @@
           <button class="btn btn-primary" id="pf-force">Trotzdem starten</button>
         </div>
       </div>
+    </div>
+
+    <!-- AUTO-START-WARTESCHLANGE (08.09.2026): nicht-blockierendes Panel für
+         Remote-Starts — ersetzt für den „Starten"-Weg das Check-Popup, damit
+         Finn während des Platzierens schon die nächsten Trades einreihen kann.
+         Verdrahtung bei den REMOTE-TRADE-SIGNALEN (eigene Handler, Modal-Regel). -->
+    <div id="rs-queue" style="display:none">
+      <div class="rsq-head"><span>📡 Auto-Start</span>
+        <button class="btn btn-ghost" id="rsq-stop" style="font-size:11.5px;padding:4px 10px">Alle stoppen</button>
+      </div>
+      <div id="rsq-halt" class="rsq-halt" style="display:none"></div>
+      <div id="rsq-items"></div>
     </div>
 
     <!-- RISK -->
@@ -10096,7 +10137,8 @@
 
   const TS_LS = {
     token: 'prophos_tsx_token',
-    user:  'prophos_tsx_user'
+    user:  'prophos_tsx_user',
+    day:   'prophos_tsx_day'    // DE-Datum des letzten Connects — für den 00:00-Auto-Disconnect
   }
   const tsState = {
     token:    localStorage.getItem(TS_LS.token) || '',
@@ -10152,6 +10194,8 @@
       tsState.user  = userName
       localStorage.setItem(TS_LS.token, token)
       localStorage.setItem(TS_LS.user,  userName)
+      localStorage.setItem(TS_LS.day,   _deDateStr())   // heute verbunden — 00:00-Reset-Anker
+      tsSaveCredsToDb(userName, apiKey)                  // Zugang am Prophos-User merken (1-Klick-Reconnect)
       tsEls.key.value = ''
       tsRender()
       tsLoadAccounts()
@@ -10196,11 +10240,82 @@
     tsState.accounts = []
     localStorage.removeItem(TS_LS.token)
     localStorage.removeItem(TS_LS.user)
+    localStorage.removeItem(TS_LS.day)
     tsEls.user.value = ''
     tsEls.key.value = ''
     tsSetError('')
     tsRender()
+    // Zugang bleibt in Supabase — Felder gleich wieder vorfüllen, damit auch nach
+    // manuellem Trennen ein Klick auf „Verbinden" reicht.
+    tsInitFromDb()
   }
+
+  /* ── TopstepX-Zugang am Prophos-User (Supabase) ──────────────────────────────
+   * Vorher hing der Zugang am Browser: der API-Key wurde nach dem Verbinden
+   * verworfen, nur der Token lag in localStorage. Auf jedem neuen Gerät / nach
+   * Reset musste alles neu getippt werden. Jetzt liegt der Zugang pro Prophos-User
+   * in `topstep_credentials` (RLS: nur die eigene Zeile) → die Mirror-Seite füllt
+   * Username + API-Key automatisch vor, ein Klick genügt.
+   * Fehlt die Tabelle (Migration noch nicht ausgeführt), laufen alle Funktionen
+   * geräuschlos ins Leere — das alte Verhalten bleibt erhalten. */
+  const _tsNoTableMsg = e => /topstep_credentials/i.test(e?.message || '') &&
+                             /(does not exist|schema cache|relation)/i.test(e?.message || '')
+
+  async function tsSaveCredsToDb(username, apiKey){
+    if(typeof currentUserId === 'undefined' || !currentUserId || !username || !apiKey) return
+    try{
+      const { error } = await supabase.from('topstep_credentials').upsert({
+        user_id: currentUserId, username, api_key: apiKey
+      }, { onConflict: 'user_id' })
+      if(error) throw error
+    }catch(e){
+      if(_tsNoTableMsg(e)) console.warn('[topstep] Tabelle topstep_credentials fehlt — Migration ausführen')
+      else console.warn('[topstep] Zugang speichern fehlgeschlagen:', e.message || e)
+    }
+  }
+
+  async function tsLoadCredsFromDb(){
+    if(typeof currentUserId === 'undefined' || !currentUserId) return null
+    try{
+      const { data, error } = await supabase.from('topstep_credentials')
+        .select('username, api_key').eq('user_id', currentUserId).maybeSingle()
+      if(error) throw error
+      return data || null
+    }catch(e){
+      if(!_tsNoTableMsg(e)) console.warn('[topstep] Zugang laden fehlgeschlagen:', e.message || e)
+      return null
+    }
+  }
+
+  /* Füllt Username + API-Key aus der DB vor — nur wenn NICHT verbunden und die
+   * Felder leer sind (nie über eine gerade getippte Eingabe drüberschreiben). */
+  async function tsInitFromDb(){
+    const creds = await tsLoadCredsFromDb()
+    if(!creds) return
+    if(tsState.token) return
+    if(tsEls.user && !tsEls.user.value) tsEls.user.value = creds.username || ''
+    if(tsEls.key  && !tsEls.key.value)  tsEls.key.value  = creds.api_key  || ''
+  }
+  window.tsInitFromDb = tsInitFromDb   // aus showDashboard-Hook aufrufbar
+
+  /* Nächtlicher Auto-Disconnect (00:00 DE-Zeit): trennt nur den Token (TopstepX-Token
+   * lebt eh ~24h), der Zugang bleibt in Supabase. Datums-basiert wie „heute schon
+   * getradet" — greift auch, wenn der Rechner um Mitternacht aus war. */
+  function tsMidnightCheck(){
+    if(!tsState.token) return
+    const day = localStorage.getItem(TS_LS.day)
+    if(!day){ localStorage.setItem(TS_LS.day, _deDateStr()); return }
+    if(day === _deDateStr()) return
+    // Tageswechsel → Verbindung lösen, Zugang behalten, Felder für 1-Klick vorfüllen
+    tsState.token = ''
+    tsState.accounts = []
+    localStorage.removeItem(TS_LS.token)
+    localStorage.removeItem(TS_LS.day)
+    tsRender()
+    tsInitFromDb()
+    console.log('[topstep] 🕛 Tageswechsel — automatisch getrennt, Zugang bleibt gespeichert')
+  }
+  window.tsMidnightCheck = tsMidnightCheck
 
   tsEls.connectBtn.addEventListener('click', tsConnect)
   tsEls.discBtn.addEventListener('click', tsLogout)
@@ -10210,7 +10325,9 @@
 
   // Auto-restore on load
   tsRender()
+  tsMidnightCheck()                       // über Nacht offen geblieben? dann jetzt trennen
   if(tsState.token) tsLoadAccounts()
+  setInterval(tsMidnightCheck, 60_000)    // greift auch, wenn der Tab über 00:00 offen bleibt
 
   /* ========== DUPLIKUM CONNECTION ========== */
   const DUP_LS = {
@@ -22187,7 +22304,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-08.263'
+  const OS_TAB_BUILD = '2026-09-08.264'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22299,15 +22416,14 @@
    * Popup — seit 31.08.2026 eigenes Feld, NICHT mehr das Risiko des Plans)
    * + Lots (= Anzahl Kontrakte) + Symbol aus den Firmen-Einstellungen.
    * Lokal (PC): exakt der bekannte Weg — Order merken, Trade-Start-Check.
-   * Remote (Handy/Mac): Signal + Live-Schritte im Check-Popup:
-   *   Signal senden → PC übernimmt → Check am PC → Puls platziert
-   *   → TP/SL gesetzt → Hedge auf dem Slave (die letzten drei live aus
-   *   mt5_live bewiesen, nicht nur aus dem Signal-Ergebnis — s. tick()). */
-  let _rsAktiv = null   // { sigId, timer, t0 } — ein Remote-Check zur Zeit
+   * Remote (Handy/Mac): seit 08.09.2026 über die Auto-Start-Warteschlange
+   * (Panel unten rechts, s. unten) statt des blockierenden Check-Popups. */
+  let _rsAktiv = null   // { sigId, planId, timer, t0, cancel, storno, planLabel, steps, lastMsg } — ein Remote-Lauf zur Zeit (Start ODER Close)
 
-  async function tpJetztStarten(planId){
-    const plan = tradePlans.find(x => String(x.id) === String(planId))
-    if(!plan || plan.status !== 'planned') return
+  // Order-Werte IMMER frisch aus dem Plan bauen (08.09.2026): die Warteschlange
+  // merkt sich nur Plan-IDs — wird ein Plan zwischen Einreihen und Senden noch
+  // bearbeitet, zählt der Stand beim SENDEN, nie ein alter Schnappschuss.
+  function _tpOrderAusPlan(plan){
     const fehlt = []
     const dir = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
     const lots = Number(plan.masterContracts)
@@ -22324,54 +22440,199 @@
     if(!(lots > 0)) fehlt.push('Lots')
     if(sltpAn && !(sl > 0)) fehlt.push('Stop Loss ($) — im Order-Popup')
     if(!symbol) fehlt.push(`Firmen-Symbol für „${plan.masterFirm || '—'}" (Settings)`)
+    if(fehlt.length) return { order: null, fehlt }
+    return { order: { planId: plan.id, symbol, richtung: dir, volumen: lots,
+                      sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null }, fehlt: [] }
+  }
+
+  async function tpJetztStarten(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'planned') return
+    const { order, fehlt } = _tpOrderAusPlan(plan)
     if(fehlt.length){
       if(typeof atToast === 'function') atToast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — über „Weiter →" im Plan speichern.', 'end')
       openTpOrderModal(planId)
       return
     }
-    const order = { planId: plan.id, symbol, richtung: dir, volumen: lots,
-                    sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null }
     if(MT5_LOCAL){
       _tpPendingOrder = order
       tpPreflightMt5(plan)
       return
     }
-    tpRemoteCheck(plan, order)
+    _rsQueueAdd(plan)
   }
 
-  /* Live-Schritte auf Absender-Seite — bewusst im vorhandenen Check-Popup
-   * (pf-rows/_pfAddRow/_pfSet), kein neues Design. Popup zu = Storno,
-   * solange kein PC geclaimt hat (dieselbe Semantik wie überall). */
-  async function tpRemoteCheck(plan, order){
-    if(_rsAktiv) return   // ein Remote-Check zur Zeit
-    _pfMt5StopTimer()
-    _pfPlanId = null      // kein lokaler Check-Lauf — Zeilen gehören uns
-    document.getElementById('pf-rows').innerHTML = ''
-    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
-    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
-    _pfEchoKnopf(false)
-    const info = document.getElementById('pf-plan-info')
-    if(info) info.textContent = `📡 Starten · ${plan.masterName || '—'} → ${plan.slaveName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}${order.tp_usd ? ` · TP $${order.tp_usd} / SL $${order.sl_usd}` : ' · ohne SL/TP (Order pur)'}`
-    document.getElementById('tpPreflightModal').classList.add('open')
-    // Feinere Live-Verfolgung (28.08.2026, Finns Wunsch nach dem 2. Remote-
-    // Lauf): Order / TP-SL / Hedge als eigene Schritte, jeweils abgehakt,
-    // sobald der Flotten-Puls (mt5_live, 5s-Push des PC-Tabs) sie BEWEIST —
-    // nicht erst, wenn der ganze Puls-Lauf (inkl. Heimweg) fertig meldet.
-    const sltpAn = !!order.tp_usd
-    _pfAddRow('rs-sig',   'Signal senden')
-    _pfAddRow('rs-claim', 'PC übernimmt')
-    _pfAddRow('rs-check', 'Trade-Start-Check am PC')
-    _pfAddRow('rs-order', 'Puls platziert die Order')
-    if(sltpAn) _pfAddRow('rs-sltp', 'TP/SL gesetzt')
-    _pfAddRow('rs-hedge', 'Hedge auf dem Slave')
-    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
-    const fertigUi = (ok, text) => {
-      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
-      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
-      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
-      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
-      if(foot) foot.style.display = 'flex'
+  /* ══ AUTO-START-WARTESCHLANGE (08.09.2026, Finns Wunsch: „dann kann ich
+   * direkt, während die Order noch platziert wird, den zweiten Trade in die
+   * Warteschlange machen — unlimited") ═════════════════════════════════════
+   * Die Schlange lebt auf dem ABSENDER-Gerät und schickt das nächste Signal
+   * erst, wenn das vorige beendet ist — bewusst KEIN Cloud-Stapel: das
+   * Frische-Gate (OS_FRISCHE_S, beidseitig 3 min) bleibt unangetastet, jedes
+   * Signal ist beim Claim nachweislich frisch, und der PC-Empfänger
+   * (orderSignalTick arbeitet ohnehin eines nach dem anderen ab) braucht
+   * NULL Änderung — nicht mal einen Tab-Reload am PC. Konsequenz ehrlich:
+   * Mac-Tab zu = Rest der Schlange wird nie gesendet (nichts Gefährliches,
+   * es startet einfach nichts mehr).
+   * Anzeige im festen Panel unten rechts (#rs-queue) statt im blockierenden
+   * Check-Popup — Beweise unverändert (mt5_live, nie alte Daten). Fehler
+   * HALTEN die Schlange an (Doppel-Order-Doktrin: nie blind das nächste
+   * Signal hinterherschicken); nur Erfolg und bewusster Abbruch rücken auf. */
+  let _rsQueue = []        // [planId] — nur Referenzen, Werte kommen beim Senden frisch aus dem Plan
+  let _rsQueueHalt = null  // Klartext, warum die Schlange steht (null = läuft)
+  let _rsqDone = []        // erledigte Läufe fürs Panel: { ok, label, msg }
+  let _rsSende = false     // Riegel, solange das Insert eines Starts unterwegs ist (Doppelklick-Race)
+
+  function _rsPlanLabel(plan, pid){
+    if(!plan) return 'Plan ' + String(pid).slice(0, 8)
+    const { order } = _tpOrderAusPlan(plan)
+    return order ? `${plan.masterName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}`
+                 : (plan.masterName || '—')
+  }
+
+  function _rsqDonePush(ok, label, msg){
+    const d = { ok, label, msg }
+    _rsqDone.push(d)
+    // Grüne Zeilen räumen sich selbst weg — rote bleiben stehen, bis Finn
+    // sie gesehen hat („Alle stoppen" leert alles).
+    if(ok) setTimeout(() => {
+      const i = _rsqDone.indexOf(d)
+      if(i !== -1){ _rsqDone.splice(i, 1); _rsQueueRender() }
+    }, 8000)
+  }
+
+  function _rsqStepsPaint(){
+    if(!_rsAktiv || !_rsAktiv.steps) return
+    const chips = document.getElementById('rsq-run-steps')
+    if(chips) chips.innerHTML = _rsAktiv.steps.map(s =>
+      `<span class="rsq-chip ${s.state}">${s.state === 'ok' ? '✓ ' : s.state === 'warn' ? '⏳ ' : s.state === 'err' ? '✕ ' : ''}${s.label}</span>`).join('')
+    const msg = document.getElementById('rsq-run-msg')
+    if(msg) msg.innerHTML = _rsAktiv.lastMsg || ''
+  }
+  // state: '' (offen) | ok | warn | err · html null = letzte Meldung behalten
+  function _rsqStep(key, state, html){
+    if(!_rsAktiv || !_rsAktiv.steps) return
+    const s = _rsAktiv.steps.find(x => x.key === key)
+    if(s) s.state = state
+    if(html != null) _rsAktiv.lastMsg = html
+    _rsqStepsPaint()
+  }
+
+  function _rsQueueRender(){
+    const box = document.getElementById('rs-queue')
+    const items = document.getElementById('rsq-items')
+    if(!box || !items) return
+    // Ein Close-Lauf belegt _rsAktiv auch, gehört aber dem Check-Popup —
+    // das Panel zeigt nur Start-Läufe (erkennbar am planLabel).
+    const aktiv = !!(_rsAktiv && _rsAktiv.planLabel)
+    if(!aktiv && !_rsQueue.length && !_rsqDone.length && !_rsQueueHalt){ box.style.display = 'none'; return }
+    box.style.display = ''
+    const halt = document.getElementById('rsq-halt')
+    if(halt){
+      halt.style.display = _rsQueueHalt ? '' : 'none'
+      if(_rsQueueHalt) halt.innerHTML = escapeHtml(String(_rsQueueHalt))
+        + '<div style="margin-top:7px"><button class="btn btn-primary" id="rsq-weiter" style="font-size:11.5px;padding:4px 10px">▶ Weiter</button></div>'
     }
+    let h = ''
+    for(const d of _rsqDone){
+      h += `<div class="rsq-item"><div class="rsq-title"><span class="${d.ok ? 'rsq-done-ok' : 'rsq-done-err'}">${d.ok ? '✓' : '✗'}</span> ${escapeHtml(d.label)}</div>`
+        + (d.msg ? `<div class="rsq-msg">${d.msg}</div>` : '') + '</div>'
+    }
+    if(aktiv){
+      h += `<div class="rsq-item"><div class="rsq-title">▶ ${escapeHtml(_rsAktiv.planLabel)}`
+        + `<button class="rsq-x" id="rsq-run-x" title="Abbrechen — geht nur, solange kein PC übernommen hat">✕</button></div>`
+        + `<div class="rsq-steps" id="rsq-run-steps"></div><div class="rsq-msg" id="rsq-run-msg"></div></div>`
+    }
+    _rsQueue.forEach((pid, i) => {
+      const p = (typeof tradePlans !== 'undefined' ? tradePlans : []).find(x => String(x.id) === String(pid))
+      h += `<div class="rsq-item rsq-wait"><div class="rsq-title">${i + 1}. ${escapeHtml(_rsPlanLabel(p, pid))}`
+        + `<button class="rsq-x" data-qx="${escapeHtml(String(pid))}" title="Aus der Warteschlange nehmen">✕</button></div></div>`
+    })
+    items.innerHTML = h
+    if(aktiv) _rsqStepsPaint()
+  }
+
+  function _rsQueueAdd(plan){
+    const pid = String(plan.id)
+    if((_rsAktiv && String(_rsAktiv.planId || '') === pid) || _rsQueue.some(x => String(x) === pid)){
+      if(typeof atToast === 'function') atToast('Dieser Trade ist schon in der Warteschlange.', 'end')
+      return
+    }
+    _rsQueue.push(pid)
+    _rsQueueRender()
+    if(_rsAktiv || _rsQueueHalt){
+      if(typeof atToast === 'function') atToast(`In der Warteschlange (Platz ${_rsQueue.length}) — startet automatisch, sobald der PC frei ist.`, 'start')
+    }
+    _rsQueuePump()
+  }
+
+  function _rsQueuePump(){
+    if(_rsSende || _rsAktiv || _rsQueueHalt || !_rsQueue.length) return
+    const pid = _rsQueue.shift()
+    const plan = (typeof tradePlans !== 'undefined' ? tradePlans : []).find(x => String(x.id) === String(pid))
+    if(!plan || plan.status !== 'planned'){
+      // Kein Halt: der Plan wurde zwischenzeitlich gestartet/gelöscht — das
+      // ist kein PC-Problem, die übrigen dürfen weiter.
+      _rsqDonePush(false, _rsPlanLabel(plan, pid), 'Übersprungen — Plan ist nicht mehr „Geplant".')
+      _rsQueueRender()
+      _rsQueuePump()
+      return
+    }
+    const { order, fehlt } = _tpOrderAusPlan(plan)
+    if(!order){
+      // Unvollständig → anhalten statt still überspringen: Finn soll es sehen
+      // und entweder fixen (▶ Weiter versucht denselben Plan erneut) oder ihn
+      // per ✕ aus der Schlange nehmen.
+      _rsQueue.unshift(pid)
+      _rsQueueHalt = `⏸ Angehalten — „${plan.masterName || '—'}" unvollständig: ${fehlt.join(', ')}`
+      _rsQueueRender()
+      return
+    }
+    tpRemoteCheck(plan, order)
+  }
+  // Auffang-Takt: deckt jeden Weg ab, auf dem _rsAktiv frei wird (Close-Lauf
+  // aus dem Popup, Abbruch, Sonderfälle) — kostet nichts, wenn nichts ansteht.
+  setInterval(_rsQueuePump, 3000)
+
+  // Panel-Verdrahtung — bewusst EIGENE Handler (Modal-Regel: keine Sammler).
+  document.getElementById('rsq-stop')?.addEventListener('click', () => {
+    _rsQueue = []
+    _rsqDone = []
+    _rsQueueHalt = null
+    if(_rsAktiv && _rsAktiv.planLabel){
+      _rsAktiv.cancel = true
+      if(_rsAktiv.storno) _rsAktiv.storno()   // greift nur, solange 'wartet'
+    }
+    _rsQueueRender()
+  })
+  document.getElementById('rsq-halt')?.addEventListener('click', ev => {
+    if(!ev.target.closest('#rsq-weiter')) return
+    _rsQueueHalt = null
+    _rsQueueRender()
+    _rsQueuePump()
+  })
+  document.getElementById('rsq-items')?.addEventListener('click', ev => {
+    const xq = ev.target.closest('[data-qx]')
+    if(xq){
+      _rsQueue = _rsQueue.filter(p => String(p) !== String(xq.dataset.qx))
+      _rsQueueRender()
+      return
+    }
+    if(ev.target.closest('#rsq-run-x') && _rsAktiv && _rsAktiv.planLabel){
+      _rsAktiv.cancel = true
+      if(_rsAktiv.storno) _rsAktiv.storno()
+    }
+  })
+
+  /* Der eigentliche Remote-Lauf — Logik und Beweise unverändert (Signal →
+   * Claim → Check → Order → TP/SL → Hedge, live aus mt5_live), nur das Ziel
+   * der Anzeige ist seit 08.09.2026 das Panel statt des blockierenden Popups.
+   * Abbruch: ✕ am laufenden Eintrag statt „Popup zu" — Storno wie immer nur,
+   * solange kein PC geclaimt hat. */
+  async function tpRemoteCheck(plan, order){
+    if(_rsSende || _rsAktiv) return   // ein Remote-Lauf zur Zeit
+    _rsSende = true
+    const sltpAn = !!order.tp_usd
+    const label = `${plan.masterName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}`
     let sig = null
     try{
       const { data, error } = await supabase.from('order_signale')
@@ -22382,12 +22643,23 @@
       if(error) throw error
       sig = data
     }catch(e){
-      _pfSet('rs-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
-      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Jetzt starten".')
+      _rsSende = false
+      _rsqDonePush(false, label, '✗ Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      _rsQueueHalt = '⏸ Angehalten — Verbindung prüfen, dann ▶ Weiter.'
+      _rsQueueRender()
       return
     }
-    _pfSet('rs-sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — die Prop-Firma sieht nur die gewohnte PC-IP.`)
-    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    _rsAktiv = { sigId: sig.id, planId: String(plan.id), timer: null, t0: Date.now(),
+                 cancel: false, storno: null, planLabel: label, lastMsg: '',
+                 steps: [ { key:'sig',   state:'ok', label:'Signal' },
+                          { key:'claim', state:'',   label:'PC' },
+                          { key:'check', state:'',   label:'Check' },
+                          { key:'order', state:'',   label:'Order' },
+                          ...(sltpAn ? [{ key:'sltp', state:'', label:'TP/SL' }] : []),
+                          { key:'hedge', state:'',   label:'Hedge' } ] }
+    _rsSende = false
+    _rsQueueRender()
+    _rsqStep('sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — die Prop-Firma sieht nur die gewohnte PC-IP.`)
     /* Live-Beweis aus mt5_live: master_positions trägt seit Snapshot v5
      * SL/TP pro Position, hedges ist nach Master-Ident verschlüsselt. Nur
      * frische Zeilen (≤25s) zählen — Beweis-Doktrin, nie alte Daten als
@@ -22419,14 +22691,25 @@
     const stornoFallsWartet = () => {
       supabase.from('order_signale')
         .update({ status:'verworfen', updated_at: new Date().toISOString(),
-                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen.' } })
         .eq('id', sig.id).eq('status', 'wartet')
         .then(() => {}, e => console.warn('[signal] Storno:', e))
     }
+    _rsAktiv.storno = stornoFallsWartet   // fürs ✕ im Panel (greift nur bei 'wartet')
     const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    // Abschluss: Zeile ins Panel; haltMsg gesetzt = Schlange anhalten (nie
+    // blind das nächste Signal hinterherschicken — Doppel-Order-Doktrin).
+    // Ohne haltMsg (Erfolg/bewusster Abbruch) rückt der nächste Trade nach.
+    const fertig = (ok, msg, haltMsg) => {
+      stop()
+      _rsqDonePush(ok, label, msg)
+      if(haltMsg) _rsQueueHalt = haltMsg
+      _rsQueueRender()
+      try{ loadTradePlansFromSupabase() }catch(_){}
+      if(!haltMsg) setTimeout(_rsQueuePump, 900)
+    }
     const tick = async () => {
       if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
-      if(zu()){ stornoFallsWartet(); stop(); return }
       let row = null
       try{
         const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
@@ -22443,48 +22726,50 @@
                         ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
               .eq('id', sig.id).eq('status', 'wartet')
           }catch(_){}
-          _pfSet('rs-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
-          _pfSet('rs-check', 'warn', 'Übersprungen.')
-          _pfSet('rs-order', 'warn', 'Übersprungen — nichts platziert.')
-          if(sltpAn) _pfSet('rs-sltp', 'warn', 'Übersprungen.')
-          _pfSet('rs-hedge', 'warn', 'Übersprungen.')
-          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Jetzt starten".')
-          stop(); return
+          _rsqStep('claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          fertig(false, '✗ Signal verfallen — nichts platziert.',
+                 '⏸ Angehalten — kein PC hat übernommen. Am PC Tab neu laden (Strg+F5), dann ▶ Weiter.')
+          return
         }
-        _pfSet('rs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+        _rsqStep('claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s)`)
         // Baseline schon JETZT (alle PCs — wer claimt, steht noch nicht fest):
         // claimt der PC zwischen zwei Ticks und stempelt sofort 'order', wäre
         // sie sonst leer und eine ALTE gleichgerichtete Position ginge als
         // „unsere neue" durch.
         baseMerge(await liveRows(null))
       } else if(row.status === 'laeuft'){
-        _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        if(_rsAktiv.cancel){
+          // Storno kam zu spät — der PC hat schon geclaimt, der Lauf gehört ihm.
+          _rsAktiv.cancel = false
+          if(typeof atToast === 'function') atToast('PC hat schon übernommen — dieser Trade läuft zu Ende.', 'end')
+        }
+        _rsqStep('claim', 'ok', null)
         if(erg.schritt === 'order'){
-          _pfSet('rs-check', 'ok', 'Check grün — Terminal bereit.')
+          _rsqStep('check', 'ok', null)
           const mls = await liveRows(row.pc)
-          if(!_rsAktiv || _rsAktiv.sigId !== sig.id || zu()) return   // Lage nach await neu prüfen
+          if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return   // Lage nach await neu prüfen
           if(!live.orderOk){
             for(const ml of mls){
               const neu = (((ml.status || {}).master_positions) || []).find(p => passt(p)
                 && !(live.base && live.base.get(ml.id) && live.base.get(ml.id).has(Number(p.ident))))
               if(neu){
                 live.orderOk = true; live.ident = Number(neu.ident); live.rowId = ml.id
-                _pfSet('rs-order', 'ok', `Order im Markt — live erkannt: ${escapeHtml(order.richtung.toUpperCase())} ${escapeHtml(String(neu.volume ?? ''))} ${escapeHtml(String(neu.symbol || ''))}${neu.price_open ? ` @ ${escapeHtml(String(neu.price_open))}` : ''}`)
+                _rsqStep('order', 'ok', `Order im Markt — live erkannt: ${escapeHtml(order.richtung.toUpperCase())} ${escapeHtml(String(neu.volume ?? ''))} ${escapeHtml(String(neu.symbol || ''))}${neu.price_open ? ` @ ${escapeHtml(String(neu.price_open))}` : ''}`)
                 break
               }
             }
           }
           if(!live.orderOk){
-            _pfSet('rs-order', 'warn', `⏳ Puls füllt den Order-Dialog im Master-Terminal… (${sec}s) — HÄNDE WEG am PC!`)
+            _rsqStep('order', 'warn', `⏳ Puls füllt den Order-Dialog im Master-Terminal… (${sec}s) — HÄNDE WEG am PC!`)
           } else {
             const st = ((mls.find(x => x.id === live.rowId) || {}).status) || {}
             const pos = (st.master_positions || []).find(p => Number(p.ident) === live.ident)
             if(sltpAn && !live.sltpOk){
               if(pos && Number(pos.sl) > 0 && Number(pos.tp) > 0){
                 live.sltpOk = true
-                _pfSet('rs-sltp', 'ok', `SL ${escapeHtml(String(pos.sl))} · TP ${escapeHtml(String(pos.tp))} — sitzt im Master-Terminal.`)
+                _rsqStep('sltp', 'ok', `SL ${escapeHtml(String(pos.sl))} · TP ${escapeHtml(String(pos.tp))} — sitzt im Master-Terminal.`)
               } else {
-                _pfSet('rs-sltp', 'warn', `⏳ Puls trägt SL/TP ein… (${sec}s) — HÄNDE WEG am PC!`)
+                _rsqStep('sltp', 'warn', `⏳ Puls trägt SL/TP ein… (${sec}s) — HÄNDE WEG am PC!`)
               }
             }
             if(!live.hedgeOk){
@@ -22492,68 +22777,57 @@
               if(Array.isArray(hs) && hs.length){
                 live.hedgeOk = true
                 const h0 = hs[0] || {}
-                _pfSet('rs-hedge', 'ok', `Echo hat kopiert: ${Number(h0.type) === 0 ? 'BUY' : 'SELL'} ${escapeHtml(String(h0.volume ?? ''))} ${escapeHtml(String(h0.symbol || ''))} auf dem Slave.`)
+                _rsqStep('hedge', 'ok', `Echo hat kopiert: ${Number(h0.type) === 0 ? 'BUY' : 'SELL'} ${escapeHtml(String(h0.volume ?? ''))} ${escapeHtml(String(h0.symbol || ''))} auf dem Slave.`)
               } else {
-                _pfSet('rs-hedge', 'warn', `⏳ Echo kopiert auf den Slave… (${sec}s)`)
+                _rsqStep('hedge', 'warn', `⏳ Echo kopiert auf den Slave… (${sec}s)`)
               }
             }
-            // Kompletter Live-Beweis → Popup darf zu, BEVOR der Bot seinen
-            // Aufräum-Rest (Spur, Heimweg) gemeldet hat (Finns Wunsch: „sobald
-            // TP/SL gesetzt ist, soll das Popup verschwinden"). Das Signal
-            // läuft in der DB normal zu Ende — nur zugucken lohnt nicht mehr.
+            // Kompletter Live-Beweis → dieser Lauf ist fürs Zugucken fertig,
+            // BEVOR der Bot seinen Aufräum-Rest (Spur, Heimweg) gemeldet hat.
+            // Das Signal läuft in der DB normal zu Ende — und der NÄCHSTE
+            // Trade aus der Schlange darf schon los (der PC-Empfänger claimt
+            // ihn ohnehin erst, wenn sein eigener Riegel frei ist).
             if(live.hedgeOk && (!sltpAn || live.sltpOk)){
-              fertigUi(true, `✓ Live bestätigt: Order im Markt${sltpAn ? ' · TP/SL gesetzt' : ''} · Hedge kopiert — Puls räumt am PC nur noch auf.`)
-              try{ loadTradePlansFromSupabase() }catch(_){}
-              stop()
-              setTimeout(() => {
-                const fe2 = document.getElementById('pf-final')
-                if(document.getElementById('tpPreflightModal')?.classList.contains('open')
-                   && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
-              }, 2400)
+              fertig(true, `✓ Live bestätigt: Order im Markt${sltpAn ? ' · TP/SL gesetzt' : ''} · Hedge kopiert — Puls räumt am PC nur noch auf.`, null)
               return
             }
           }
         } else {
-          _pfSet('rs-check', 'warn', `⏳ Check läuft am PC — Verlinkung, Copier, Richtung, Terminal… (${sec}s)`)
+          _rsqStep('check', 'warn', `⏳ Check läuft am PC — Verlinkung, Copier, Richtung, Terminal… (${sec}s)`)
           // Baseline auffrischen, solange die Order noch nicht unterwegs ist
           // (der order-Stempel kommt VOR dem ersten Klick von Puls).
           baseMerge(await liveRows(row.pc))
         }
       } else if(row.status === 'fertig'){
-        _pfSet('rs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
-        _pfSet('rs-check', 'ok', 'Check grün.')
-        _pfSet('rs-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
+        _rsqStep('claim', 'ok', null)
+        _rsqStep('check', 'ok', null)
+        _rsqStep('order', 'ok', null)
         // Was der Live-Puls (noch) nicht bewiesen hat, sagt jetzt der Bot:
         // SL/TP steckt in seiner Bestätigung („offen" wäre im Fehler-Zweig
         // gelandet); der Hedge ist Echos Job — ohne Live-Sichtung ehrlich
         // als „prüfen" markieren statt blind abhaken (Beweis-Doktrin).
-        if(sltpAn && !live.sltpOk) _pfSet('rs-sltp', 'ok', 'Laut Puls gesetzt — Werte in der Bestätigung oben.')
-        if(!live.hedgeOk) _pfSet('rs-hedge', 'warn', 'Noch nicht im Flotten-Puls gesehen — auf der Trade-Karte prüfen.')
-        fertigUi(true, '✓ Order platziert — Auto-Erkennung übernimmt, der Plan springt auf „Läuft".')
-        try{ loadTradePlansFromSupabase() }catch(_){}
-        stop()
-        // Bei Erfolg schließt sich das Popup von selbst (Finns Wunsch nach dem
-        // ersten grünen Durchlauf, 28.08.2026) — NUR bei Erfolg: Fehler und
-        // erst recht „Position offen" bleiben stehen, bis Finn sie gesehen hat.
-        setTimeout(() => {
-          const fe2 = document.getElementById('pf-final')
-          if(document.getElementById('tpPreflightModal')?.classList.contains('open')
-             && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
-        }, 2400)
+        if(sltpAn && !live.sltpOk) _rsqStep('sltp', 'ok', null)
+        if(!live.hedgeOk) _rsqStep('hedge', 'warn', null)
+        fertig(true, '✓ ' + escapeHtml(String(erg.msg || 'Order platziert.'))
+          + (!live.hedgeOk ? ' · Hedge noch nicht im Flotten-Puls gesehen — auf der Trade-Karte prüfen.' : ''), null)
+      } else if(row.status === 'verworfen'){
+        // Bewusster Abbruch (✕ hier oder von einem anderen Gerät) — kein
+        // PC-Problem, die Schlange darf ohne Halt weiter.
+        _rsqStep('claim', 'err', null)
+        fertig(false, escapeHtml(String(erg.msg || 'Abgebrochen — nichts platziert.')), null)
       } else {
-        // fehler / verworfen / verfallen — inkl. „Position OFFEN ohne SL/TP"
+        // fehler / verfallen — inkl. „Position OFFEN ohne SL/TP"
         const offen = !!erg.offen
-        const ziel = (row.status === 'wartet' || !row.pc) ? 'rs-claim' : (erg.schritt === 'order' || erg.unklar || offen) ? 'rs-order' : 'rs-check'
-        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
-        if(sltpAn && !live.sltpOk) _pfSet('rs-sltp', offen ? 'err' : 'warn',
-          offen ? 'NICHT gesetzt — SOFORT am PC von Hand nachtragen!' : 'Übersprungen.')
-        if(!live.hedgeOk) _pfSet('rs-hedge', 'warn', live.orderOk ? 'Auf der Trade-Karte prüfen.' : 'Übersprungen.')
-        fertigUi(false, offen
-          ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT am PC von Hand nachtragen!'
-          : (erg.unklar
-            ? '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, NICHT blind erneut starten.'
-            : '✗ Nicht platziert — Meldung oben, am PC beheben und erneut „Jetzt starten".'))
-        stop()
+        const ziel = (!row.pc) ? 'claim' : (erg.schritt === 'order' || erg.unklar || offen) ? 'order' : 'check'
+        _rsqStep(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
+        if(sltpAn && !live.sltpOk) _rsqStep('sltp', offen ? 'err' : 'warn', null)
+        fertig(false,
+          offen ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT am PC von Hand nachtragen! ' + escapeHtml(String(erg.msg || ''))
+                : (erg.unklar ? '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen: ' + escapeHtml(String(erg.msg || ''))
+                              : '✗ ' + escapeHtml(String(erg.msg || row.status))),
+          offen ? '🚨 Angehalten — POSITION OFFEN ohne SL/TP, SOFORT am PC klären, erst dann ▶ Weiter!'
+                : (erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst am PC/Terminal prüfen, NICHT blind weiter.'
+                              : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.'))
       }
     }
     _rsAktiv.timer = setInterval(tick, 2000)
@@ -22590,7 +22864,12 @@
   async function tpPlanSchliessen(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan || plan.status !== 'open' || plan.route !== 'mt5') return
-    if(_rsAktiv) return   // ein Remote-Lauf zur Zeit (Start ODER Close)
+    if(_rsAktiv){   // ein Remote-Lauf zur Zeit (Start ODER Close) — seit der
+      // Warteschlange (08.09.2026) nicht mehr still schlucken, sonst wirkt
+      // der Knopf kaputt, während der Auto-Start läuft.
+      if(typeof atToast === 'function') atToast('Gerade läuft ein Auto-Start — „Schließen" gleich danach erneut versuchen.', 'end')
+      return
+    }
     // Symbol: Override am Plan zuerst (30.08.2026) — ein BTC-Testtrade muss
     // auch über das BTC-Symbol gefunden und geschlossen werden, nicht über
     // das Settings-Standard-Symbol der Firma.
@@ -26248,6 +26527,10 @@
       // Account-Wechsel nicht jedes Mal manuell verbunden werden muss.
       if(typeof dupConnectFromDb === 'function'){
         setTimeout(() => { dupConnectFromDb(false).catch(() => {}) }, 600)
+      }
+      // TopstepX-Zugang aus Supabase vorfüllen → auf der Mirror-Seite reicht 1 Klick.
+      if(typeof tsInitFromDb === 'function'){
+        setTimeout(() => { tsInitFromDb().catch(() => {}) }, 600)
       }
     }
   }
