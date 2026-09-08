@@ -22187,7 +22187,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-08.262'
+  const OS_TAB_BUILD = '2026-09-08.263'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -23205,7 +23205,11 @@
           const linked = (accounts || []).find(a => a.topstep && String(a.topstep.id) === String(t.id))
           const balStr = fmtMoney(t.balance)
           if(linked){
-            mHtml += `<option value="${linked.id}">${escapeHtml(t.name || '–')}  ·  ${escapeHtml(balStr)}  ·  ✓ ${escapeHtml(linked.name)}</option>`
+            // Tages-P&L auch hier (08.09.2026): geht nur bei verlinkten Accounts,
+            // weil nur die eine Prophos-ID haben, an der die Pläne hängen.
+            const tagesPl = (typeof tagesPlLabel === 'function') ? tagesPlLabel(linked.id, 'USD') : ''
+            const tagesPart = tagesPl ? `  ·  ${tagesPl} heute` : ''
+            mHtml += `<option value="${linked.id}">${escapeHtml(t.name || '–')}  ·  ${escapeHtml(balStr)}${escapeHtml(tagesPart)}  ·  ✓ ${escapeHtml(linked.name)}</option>`
           } else {
             mHtml += `<option value="tsx:${t.id}">${escapeHtml(t.name || '–')}  ·  ${escapeHtml(balStr)}  ·  noch nicht verlinkt</option>`
           }
@@ -23394,7 +23398,11 @@
         const busyPart = busy[String(a.id)] ? `  ·  ${busy[String(a.id)]}` : ''
         const warnPart = dupWarn[String(a.id)] ? `  ·  ${dupWarn[String(a.id)]}` : ''
         const tradedPart = (typeof isTradedToday === 'function' && isTradedToday(a.id)) ? '  ·  🚫 heute schon getradet' : ''
-        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}${escapeHtml(tradedPart)}</option>`
+        // Tages-P&L direkt rechts neben der Live-Balance (08.09.2026, Finns
+        // Wunsch): grün/rot als Ampel, ob heute noch Spielraum ist.
+        const tagesPl = (typeof tagesPlLabel === 'function') ? tagesPlLabel(a.id, bal.ccy) : ''
+        const tagesPart = tagesPl ? `  ·  ${tagesPl} heute` : ''
+        return `<option value="${a.id}">${escapeHtml(name)}${escapeHtml(idPart)}  ·  ${escapeHtml(status)}  ·  ${escapeHtml(balPart)}${escapeHtml(tagesPart)}${escapeHtml(busyPart)}${escapeHtml(warnPart)}${escapeHtml(tradedPart)}</option>`
       }
 
       // HTML zusammenbauen — sortiert
@@ -24417,6 +24425,52 @@
     // Aufräumen: alle Einträge, die nicht von heute sind, wegwerfen (das ist der Mitternacht-Reset)
     for(const k of Object.keys(m)){ if(m[k] !== today) delete m[k] }
     localStorage.setItem(TRADED_TODAY_LS, JSON.stringify(m))
+  }
+
+  /* ── Tages-P&L pro Account (08.09.2026, Finns Wunsch: im Trade-planen-Dropdown
+   * neben der Live-Balance sehen, was der Account HEUTE schon gemacht hat) ──
+   * Summe der heute realisierten Plan-P&Ls (completed + review) des Accounts.
+   * Gleiche Mitternachts-Logik wie "heute schon getradet": DE-Datum vergleichen,
+   * kein Timer — resettet sich um Mitternacht von selbst. Quelle sind die
+   * trade_plans aus Supabase, damit Mac/PC/Handy dieselbe Zahl sehen und alle
+   * Wege (Duplikum, Topstep, Echo, Orbit) abgedeckt sind — jede Route schreibt
+   * ihr Ergebnis in master_pl/slave_pl. review zählt mit: dort hat der
+   * Auto-Tracker die P&L schon erfasst, nur Finns Bestätigung fehlt — fürs
+   * "kann ich heute noch einen Trade machen?" ist das Geld aber bereits
+   * verdient/verloren. null = heute keine realisierten Trades (Anzeige leer). */
+  function tagesPlFuer(accountId){
+    if(!accountId) return null
+    const heute = _deTodayStr()
+    let summe = 0, treffer = false
+    for(const p of (tradePlans || [])){
+      if(p.status !== 'completed' && p.status !== 'review') continue
+      const istMaster = String(p.masterAccountId) === String(accountId)
+      const istSlave  = !istMaster && String(p.slaveAccountId) === String(accountId)
+      if(!istMaster && !istSlave) continue
+      const pl = istMaster ? p.masterPl : p.slavePl
+      if(pl == null) continue
+      // review-Pläne haben meist noch KEIN completedAt (kommt erst mit der
+      // Bestätigung) — dann zählt der Trade-Start als Tages-Anker.
+      const wann = p.completedAt || p.startedAt || p.createdAt
+      if(!wann) continue
+      let tag = null
+      try{ tag = new Date(wann).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
+      if(tag !== heute) continue
+      summe += Number(pl) || 0
+      treffer = true
+    }
+    return treffer ? summe : null
+  }
+
+  /* Kurzformat fürs Dropdown: "🟢 +$230" / "🔴 −€57". Emoji statt CSS-Farbe,
+   * weil native <option>s keine Teil-Färbung können — gleiche Sprache wie die
+   * übrigen Dropdown-Marker (🔴 läuft, ⛔ OFF, 🚫). Leerstring = nichts zeigen. */
+  function tagesPlLabel(accountId, ccy){
+    const pl = tagesPlFuer(accountId)
+    if(pl == null) return ''
+    const sym = ccy === 'EUR' ? '€' : (ccy === 'GBP' ? '£' : '$')
+    const abs = Math.round(Math.abs(pl)).toLocaleString('de-DE')
+    return (pl >= 0 ? '🟢 +' : '🔴 −') + sym + abs
   }
 
   function openTradeCompleteModal(planId, preFillSlavePl){
