@@ -152,6 +152,13 @@
   .rsq-done-err{color:#ef4444;font-weight:700}
   .rsq-wait .rsq-title{color:var(--sub);font-weight:500}
   @media (max-width:640px){ #rs-queue{left:12px;right:12px;width:auto;bottom:12px;max-height:46vh} }
+  /* Karten-Zustände (09.09.2026): „Starten" wird auf der Plan-Karte zu
+     „⏳ Nr. N in der Warteschlange" (Klick = raus) bzw. „📡 startet gerade…" */
+  @keyframes rsqCardPulse{0%,100%{opacity:1}50%{opacity:.55}}
+  .rsq-card-run{display:inline-flex;align-items:center;white-space:nowrap;font-size:11px;font-weight:700;
+    color:#b45309;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.25);
+    padding:4px 10px;border-radius:20px;animation:rsqCardPulse 2s ease-in-out infinite}
+  .rsq-card-wait{color:#7c3aed;border-color:rgba(124,58,237,.35);white-space:nowrap}
 
   /* ── Live Trade Card Animations ── */
   @keyframes tcLivePulse{
@@ -20208,9 +20215,16 @@
       // (Richtung/TP/SL/Lots) ist per Order-Popup AM PLAN gespeichert; dieser
       // Knopf löst sie aus: lokal direkt der Trade-Start-Check, am Handy/Mac
       // als Signal mit Live-Schritten. Fehlt etwas am Plan → Toast + Modal.
-      const jetztBtn = (p.route === 'mt5')
-        ? `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
-        : ''
+      // Seit 09.09.2026 (Finns Wunsch „dann kommt ‚Nummer 2 in der Warte-
+      // schlange'"): der Knopf spiegelt den Schlangen-Stand direkt auf der
+      // Karte — läuft gerade / ⏳ Nr. N (Klick nimmt ihn raus) / Starten.
+      const qs = (typeof _rsQueueStatusFuer === 'function') ? _rsQueueStatusFuer(p.id) : null
+      const jetztBtn = (p.route !== 'mt5') ? ''
+        : (qs && qs.laeuft)
+          ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
+          : qs
+            ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
+            : `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
       actions = `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
@@ -20594,6 +20608,13 @@
     document.querySelectorAll('[data-plan-jetzt]').forEach(btn => {
       btn.addEventListener('click', () => {
         if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt)
+      })
+    })
+    // Warteschlangen-Knopf auf der Karte (09.09.2026): Klick = wieder raus,
+    // solange nichts gesendet ist — dasselbe wie das ✕ im Panel.
+    document.querySelectorAll('[data-plan-unqueue]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(typeof _rsQueueEntfernen === 'function') _rsQueueEntfernen(btn.dataset.planUnqueue)
       })
     })
     document.querySelectorAll('[data-plan-schliessen]').forEach(btn => {
@@ -22304,7 +22325,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-08.264'
+  const OS_TAB_BUILD = '2026-09-09.265'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -22489,6 +22510,27 @@
                  : (plan.masterName || '—')
   }
 
+  // Karten-Sicht (09.09.2026, Finns Wunsch „Nummer 2 in der Warteschlange"):
+  // Position aus Finns Perspektive — der gerade laufende Trade ist Nr. 1,
+  // der erste Wartende Nr. 2 usw. null = Plan hat nichts mit der Schlange zu tun.
+  function _rsQueueStatusFuer(planId){
+    const pid = String(planId)
+    if(_rsAktiv && _rsAktiv.planLabel && String(_rsAktiv.planId || '') === pid) return { laeuft: true, pos: 1 }
+    const i = _rsQueue.findIndex(x => String(x) === pid)
+    if(i === -1) return null
+    return { laeuft: false, pos: i + ((_rsAktiv && _rsAktiv.planLabel) ? 2 : 1) }
+  }
+
+  // Rausnehmen, solange nichts gesendet ist — ein Weg für beide Oberflächen
+  // (✕ im Panel, ⏳-Knopf auf der Karte).
+  function _rsQueueEntfernen(planId){
+    const pid = String(planId)
+    const vorher = _rsQueue.length
+    _rsQueue = _rsQueue.filter(p => String(p) !== pid)
+    if(_rsQueue.length !== vorher && typeof atToast === 'function') atToast('Aus der Warteschlange genommen — nichts gesendet.', 'end')
+    _rsQueueRender()
+  }
+
   function _rsqDonePush(ok, label, msg){
     const d = { ok, label, msg }
     _rsqDone.push(d)
@@ -22549,6 +22591,10 @@
     })
     items.innerHTML = h
     if(aktiv) _rsqStepsPaint()
+    // Karten spiegeln den Schlangen-Stand (Starten ↔ ⏳ Nr. N ↔ startet
+    // gerade) — jede Schlangen-Änderung läuft hier durch, also reicht der
+    // eine Aufruf. renderTradePlans ruft NICHT zurück (keine Schleife).
+    try{ if(typeof renderTradePlans === 'function') renderTradePlans() }catch(_){}
   }
 
   function _rsQueueAdd(plan){
@@ -22613,8 +22659,7 @@
   document.getElementById('rsq-items')?.addEventListener('click', ev => {
     const xq = ev.target.closest('[data-qx]')
     if(xq){
-      _rsQueue = _rsQueue.filter(p => String(p) !== String(xq.dataset.qx))
-      _rsQueueRender()
+      _rsQueueEntfernen(xq.dataset.qx)
       return
     }
     if(ev.target.closest('#rsq-run-x') && _rsAktiv && _rsAktiv.planLabel){
