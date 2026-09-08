@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-07.2"
+APP_BUILD = "2026-09-08.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1202,6 +1202,17 @@ def run_mirror_realtime(pair_id):
                            # keine Events (Heal nötig, 0 Events), wird beim Neuaufbau auf
                            # Negotiation gewechselt — Verdacht: Load-Balancer hinter
                            # rtc.topstepx.com braucht das Handshake für korrektes Routing.
+    closes_noevent = [0]   # Server-Closes seit dem letzten empfangenen Event (08.09.2026):
+                           # Live vom Mac gemessen: Server schickt ~2s nach JEDEM Abonnieren
+                           # eine CloseMessage ohne Grund, Library reconnectet, endlos —
+                           # 44+ Reconnects, 0 Events, und der alte Modus-Flip hing am Heal,
+                           # der bei flachem Konto nie feuert. Dieser Zähler erkennt den
+                           # Sturm auch OHNE offene Position.
+    flip_tries = [0]       # Modus-Wechsel wegen Close-Sturm (nach 4 vergeblichen: parken)
+    stream_parked = [0]    # 0 = Stream aktiv; sonst Unix-Zeit, bis zu der der Stream pausiert
+                           # (hub gestoppt statt 2s-Dauerhämmern — die Reconnect-Stürme haben
+                           # am 21.07. serverseitig HTTP 429 provoziert; Kopien laufen über
+                           # den 1s-Abgleich weiter)
 
     # SignalR-interne Logs (INFO+) in die Pair-Konsole spiegeln — wenn der SERVER die
     # Verbindung aktiv trennt, nennt er den Grund in einer Close-Message, die die Library
@@ -1269,6 +1280,7 @@ def run_mirror_realtime(pair_id):
             elif args and len(args) > 1 and isinstance(args[1], dict): data = args[1]
             if data is None: return
             stream_events[0] += 1
+            closes_noevent[0] = 0  # Stream liefert — kein Sturm (mehr)
             if not first_event_logged[0]:
                 first_event_logged[0] = True
                 log_msg(pair_id, f"📡 Erstes Trade-Event empfangen: {json.dumps(data)[:220]}")
@@ -1388,9 +1400,22 @@ def run_mirror_realtime(pair_id):
                 # Error-Completion und landet über on_error in der Konsole).
                 def _sub_confirmed(completion, hh=h):
                     if hub_is_current(hh):
+                        hh._pph_sub_confirmed = True
                         log_msg(pair_id, "✅ Subscription vom Server bestätigt")
+                h._pph_sub_confirmed = False
                 h.send("SubscribeTrades", [int(s["tsxAccountId"])], on_invocation=_sub_confirmed)
                 h._pph_subscribed = True
+                # 3s-Wächter (08.09.2026): Beim Mac-Live-Test kam NIE eine Bestätigung —
+                # der Server schloss die Verbindung, STATT das Abo abzuschließen. Ohne
+                # diese Zeile ist im Log nicht unterscheidbar, ob der Close eine Reaktion
+                # aufs Abo ist (Server mag uns nicht) oder ein Netz-/Transportproblem
+                # (offener Punkt "Klartext-Close-Reason" vom 21.07.).
+                def _sub_check(hh=h):
+                    if session_alive() and hub_is_current(hh) and not getattr(hh, "_pph_sub_confirmed", False):
+                        log_msg(pair_id, "⚠️ Keine Abo-Bestätigung nach 3s — der Server schließt offenbar als REAKTION aufs Abonnement (nicht wegen Netz/Transport)", "warn")
+                _t = threading.Timer(3.0, _sub_check)
+                _t.daemon = True
+                _t.start()
             except Exception as e:
                 log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
                 return
@@ -1410,6 +1435,7 @@ def run_mirror_realtime(pair_id):
         with sub_lock:
             h._pph_subscribed = False
         if session_alive() and hub_is_current(h):
+            closes_noevent[0] += 1
             log_msg(pair_id, "🔌 Verbindung getrennt — automatischer Reconnect läuft…", "warn")
 
     def build_hub(token):
@@ -1490,6 +1516,33 @@ def run_mirror_realtime(pair_id):
             n_open = len(ref)
             log_msg(pair_id, f"💓 Mirror läuft (Echtzeit) — {n_open} offene Position{'en' if n_open != 1 else ''} · {reconnects[0]} Reconnects bisher")
             last_heartbeat = time.time()
+
+        # ── Close-Sturm-Behandlung (08.09.2026, Mac-Live-Befund) ──
+        # Server schließt ~2s nach jedem Abonnieren (CloseMessage ohne Grund, keine
+        # Abo-Bestätigung), Library reconnectet endlos — Events kommen NIE durch, die
+        # 1s-Reconciliation macht die eigentliche Kopier-Arbeit (Finns "1-3s zu langsam").
+        # Der Heal-gebundene Modus-Flip feuerte bei flachem Konto nie. Jetzt: nach 5
+        # Closes ohne ein einziges Event Modus wechseln (direct↔negotiate); haben beide
+        # Modi zusammen 4 Wechsel verloren, wird der Stream 60s GEPARKT (hub.stop() statt
+        # Dauerhämmern → kein 429-Risiko) und danach frisch versucht. Kopien laufen in
+        # der Park-Zeit unverändert über den 1s-Abgleich.
+        if stream_parked[0]:
+            if time.time() >= stream_parked[0]:
+                stream_parked[0] = 0
+                closes_noevent[0] = 0
+                rebuild_connection("Stream-Pause vorbei — neuer Versuch")
+        elif closes_noevent[0] >= 5 and stream_events[0] == 0:
+            flip_tries[0] += 1
+            if flip_tries[0] >= 4:
+                log_msg(pair_id, "⏸️ Beide Verbindungsmodi werden vom Server sofort geschlossen (0 Events) — Stream 60s pausiert, der 1s-Abgleich kopiert weiter. Häufigste Ursache: ein ZWEITER Client auf demselben TSX-Login hält den User-Hub (andere Mirror-Engine auf einem anderen Backend/PC, oder ein Tool mit demselben API-Key).", "warn")
+                stream_parked[0] = time.time() + 60
+                flip_tries[0] = 0
+                closes_noevent[0] = 0
+                try: hub.stop()
+                except Exception: pass
+            else:
+                closes_noevent[0] = 0
+                rebuild_connection(f"Close-Sturm ohne Events — Modus-Wechsel #{flip_tries[0]}", flip_mode=True)
 
         try:
             r = http.post(f"{TSX_BASE}/api/Position/searchOpen",
