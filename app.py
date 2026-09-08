@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-08.4"
+APP_BUILD = "2026-09-08.5"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1030,7 +1030,7 @@ _diag_state = {"running": False, "report": None, "started": 0}
 
 def _diag_run_stage(name, hub_url, subs, events, dauer):
     res = {"stufe": name, "verbunden": False, "bestaetigt": [], "events": 0,
-           "close_nach_s": None, "fehler": None}
+           "close_nach_s": None, "logout": False, "fehler": None}
     t0 = [0.0]; closed_at = [None]; ev_count = [0]
     done = threading.Event()
     try:
@@ -1056,6 +1056,8 @@ def _diag_run_stage(name, hub_url, subs, events, dauer):
             done.set()
         h.on_open(_on_open)
         h.on_close(_on_close)
+        # GatewayLogout getrennt erfassen — das ist der Beweis für Session-Verdrängung
+        h.on("GatewayLogout", lambda args: res.__setitem__("logout", True))
         for ev in events:
             h.on(ev, lambda args: ev_count.__setitem__(0, ev_count[0] + 1))
         h.start()
@@ -1683,6 +1685,13 @@ def run_mirror_realtime(pair_id):
         h.on_error(lambda e: log_msg(pair_id, f"⚠️ Hub-Fehler: {str(getattr(e, 'error', None) or e)[:150]}", "warn"))
         h.on("GatewayUserTrade", lambda args: on_trade(h, args))
         h.on("GatewayUserPosition", lambda args: on_position(h, args))
+        # GatewayLogout (08.09.2026): Der Server schickt dieses Event laut project-x-py
+        # (Issue #100) unmittelbar VOR einem bewussten Session-Abbruch — genau unser
+        # Muster (leere CloseMessage im 2s-Takt). Ohne Handler blieb es unsichtbar und
+        # der Close wirkte grundlos. Jetzt beweist es Session-Verdrängung SCHWARZ AUF
+        # WEISS: ein zweiter Consumer desselben ProjectX-Users (anderes Backend, zweiter
+        # Prophos-Tab mit eigenem loginKey, TopstepX-Plattform) hat uns hinausgeworfen.
+        h.on("GatewayLogout", lambda args: log_msg(pair_id, f"🚪 SERVER-LOGOUT — die TSX-Session wurde serverseitig beendet (anderer Login/Consumer auf demselben ProjectX-User). Nutzlast: {json.dumps(args)[:150]}", "err"))
         return h
 
     def rebuild_connection(reason, flip_mode=False):
