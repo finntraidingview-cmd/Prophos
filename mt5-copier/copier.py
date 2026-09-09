@@ -750,6 +750,18 @@ def main():
     print(" Duplikum / app.py / prophos.html werden nicht angefasst.")
     print("=" * 72)
 
+    # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
+    # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
+    # Docstring von provision.uac_haken_entfernen). VOR dem Hedge-Autostart
+    # unten, damit schon dieser Start ohne Ja-Klick durchlaeuft. Die Copier-
+    # .bat-Schleife holt provision.py vor jedem Start frisch; der try faengt
+    # trotzdem alles, ein fehlender Helfer darf den Copier nie aufhalten.
+    try:
+        import provision
+        provision.uac_haken_entfernen()
+    except Exception:
+        pass
+
     import MetaTrader5 as mt5
 
     # ── Hedge-Terminal bei Bedarf selbst starten (15.08.2026, Autostart-Stack) ──

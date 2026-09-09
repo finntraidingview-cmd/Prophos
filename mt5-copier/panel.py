@@ -2726,6 +2726,14 @@ def main():
     # bliebe stehen (falsche/fehlende Zeitstempel). Ein Daemon-Tick alle 5 s
     # macht die Uebergaenge unabhaengig davon, ob ein Browser zuschaut.
     threading.Thread(target=_plan_ticker, daemon=True).start()
+    # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
+    # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
+    # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die
+    # Panel-.bat-Schleife nur panel.py holt, provision.py aber nur die
+    # Copier-Schleife: ein frisches Panel darf auf einem alten provision-Stand
+    # nicht mit AttributeError sterben — der naechste Copier-Zyklus zieht
+    # provision.py nach, dann greift der Lauf von selbst.
+    getattr(provision, "uac_haken_entfernen", lambda: None)()
     # Von-Null-Selbstheilung: fehlende Vorlage einmalig aus dem Repo holen
     # (blockiert den Start nicht laenger als den Download-Timeout).
     ensure_vorlage()

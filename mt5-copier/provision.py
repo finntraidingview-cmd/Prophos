@@ -451,6 +451,74 @@ def _taskkill(pid, grace_s=15):
     time.sleep(2)
 
 
+def uac_haken_entfernen():
+    """Entfernt den "Als Administrator ausfuehren"-Haken aller terminal64.exe.
+
+    09.09.2026, Finns Fund am PC: startet Echo ein Terminal frisch, kam
+    "relativ oft" die Benutzerkontensteuerung ("Client Terminal AVX2",
+    MetaQuotes) und Finn musste von Hand auf Ja druecken. Von UNS kommt keine
+    Admin-Anforderung — alle Terminal-Starts hier, in panel.py und copier.py
+    sind nackte Popen. Der Prompt entsteht durch den Kompatibilitaets-Haken
+    an der Exe, der als RUNASADMIN-Wert in der Registry liegt
+    (AppCompatFlags\\Layers — pro Benutzer in HKCU, "fuer alle Benutzer" in
+    HKLM). Selbst auf Ja druecken kann KEIN Programm: das UAC-Fenster lebt
+    auf dem Secure Desktop, von dem User-Prozesse ausgesperrt sind
+    (bewusstes Windows-Design, sonst wuerde sich Software selbst Rechte
+    erteilen). Deshalb raeumt dieser Lauf die URSACHE weg — bei jedem Start,
+    fuer ALLE Terminals auf einmal, damit Finn nicht pro Installation von
+    Hand in die Exe-Eigenschaften muss. MT5 braucht keine Adminrechte (die
+    Installationen liegen in benutzer-schreibbaren Ordnern wie C:\\MT5-...).
+    Nebeneffekt: ein nicht mehr erhoehtes MT5 blockt auch die Tastatur des
+    Puls nicht mehr (UIPI laesst Eingaben von unten nach oben nicht durch).
+    Idempotent und still, solange kein Haken gesetzt ist. HKLM ist ohne
+    Adminrechte nicht schreibbar — so ein Eintrag wird BENANNT statt still
+    geschluckt, dann ist genau EIN Handgriff noetig statt Raetselraten.
+    """
+    if os.name != "nt":
+        return
+    import winreg
+    layers = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
+    admin_flags = {"RUNASADMIN", "ELEVATECREATEPROCESS"}
+    for wurzel, hive in ((winreg.HKEY_CURRENT_USER, "HKCU"),
+                         (winreg.HKEY_LOCAL_MACHINE, "HKLM")):
+        try:
+            funde = []
+            try:
+                with winreg.OpenKey(wurzel, layers) as k:
+                    i = 0
+                    while True:
+                        try:
+                            name, wert, typ = winreg.EnumValue(k, i)
+                        except OSError:
+                            break
+                        i += 1
+                        if typ == winreg.REG_SZ and name.lower().endswith("terminal64.exe"):
+                            rest = [t for t in wert.split() if t.upper() not in admin_flags]
+                            if rest != wert.split():
+                                funde.append((name, rest))
+            except OSError:
+                continue  # Layers-Schluessel existiert nicht = nie ein Haken gesetzt
+            for name, rest in funde:
+                try:
+                    with winreg.OpenKey(wurzel, layers, 0, winreg.KEY_SET_VALUE) as k:
+                        # Bleibt nur das "~" der Kompatibilitaets-Seite uebrig,
+                        # ist der ganze Eintrag gegenstandslos -> loeschen.
+                        if rest and rest != ["~"]:
+                            winreg.SetValueEx(k, name, 0, winreg.REG_SZ, " ".join(rest))
+                        else:
+                            winreg.DeleteValue(k, name)
+                    print(f"[uac] Admin-Haken entfernt: {name}", flush=True)
+                except OSError:
+                    print(f"[uac] Haken in {hive} braucht Adminrechte — einmal von Hand: "
+                          f"Rechtsklick {name} > Eigenschaften > Kompatibilitaet > "
+                          f"'Als Administrator ausfuehren' abwaehlen (Knopf 'fuer alle "
+                          f"Benutzer aendern').", flush=True)
+        except Exception as e:
+            # Darf einen Start NIE verhindern — schlimmstenfalls bleibt der
+            # Haken und Finn drueckt wie bisher selbst auf Ja.
+            print(f"[uac] Pruefung uebersprungen ({type(e).__name__}: {e})", flush=True)
+
+
 # ------------------------------------------------------------------- der Job
 
 def run_provision(*, name, login, password, server, template_exe,
