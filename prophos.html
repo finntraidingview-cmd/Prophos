@@ -7283,18 +7283,14 @@
           <label>Ziel (Tage)</label>
           <input class="input mono" id="ac-goal-target" type="number" step="1" min="1" placeholder="5" autocomplete="off">
         </div>
-        <div class="field">
-          <label>Min-Gewinn pro Tag ($, optional)</label>
-          <input class="input mono" id="ac-goal-minprofit" type="number" step="10" placeholder="z.B. 50 (Apex)" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Schon erledigt (Tage, optional)</label>
-          <input class="input mono" id="ac-goal-offset" type="number" step="1" placeholder="z.B. 2" autocomplete="off">
-        </div>
+        <!-- Min-Gewinn pro Tag + Schon erledigt raus (Finn 10.09.2026, "das da weg") —
+             bestehende Werte bleiben in der DB und werden beim Bearbeiten unveraendert
+             weitergetragen (gleiches Muster wie die Trade-Limits vom 02.09.); die
+             Zaehlung in zielFortschritt beruecksichtigt sie weiterhin, falls gesetzt. -->
         <div class="field" style="grid-column:1/-1">
           <label>Zählt ab (optional)</label>
           <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L (bzw. ≥ Min-Gewinn). Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. „Zählt ab" nach einem Payout auf heute setzen; „Schon erledigt" für Tage, die vor Prophos schon geschafft waren.</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L. Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. „Zählt ab" nach einem Payout auf heute setzen, dann startet der Zähler neu.</div>
         </div>
       </div>
 
@@ -15905,8 +15901,6 @@
     extId:    document.getElementById('ac-ext-id'),
     goalKind:      document.getElementById('ac-goal-kind'),
     goalTarget:    document.getElementById('ac-goal-target'),
-    goalMinProfit: document.getElementById('ac-goal-minprofit'),
-    goalOffset:    document.getElementById('ac-goal-offset'),
     goalSince:     document.getElementById('ac-goal-since'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
@@ -16640,12 +16634,10 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
-      // Fortschritts-Ziel vorausfüllen
-      if(accEls.goalKind)      accEls.goalKind.value      = editAccount.goalKind || ''
-      if(accEls.goalTarget)    accEls.goalTarget.value    = editAccount.goalTarget    != null ? editAccount.goalTarget    : ''
-      if(accEls.goalMinProfit) accEls.goalMinProfit.value = editAccount.goalMinProfit != null ? editAccount.goalMinProfit : ''
-      if(accEls.goalOffset)    accEls.goalOffset.value    = editAccount.goalDoneOffset != null ? editAccount.goalDoneOffset : ''
-      if(accEls.goalSince)     accEls.goalSince.value     = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
+      // Fortschritts-Ziel vorausfüllen (Min-Gewinn/Schon-erledigt seit 10.09. ohne Feld)
+      if(accEls.goalKind)   accEls.goalKind.value   = editAccount.goalKind || ''
+      if(accEls.goalTarget) accEls.goalTarget.value = editAccount.goalTarget != null ? editAccount.goalTarget : ''
+      if(accEls.goalSince)  accEls.goalSince.value  = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -16667,11 +16659,9 @@
       if(accEls.credPass)     accEls.credPass.value     = ''
       if(accEls.credServer)   accEls.credServer.value   = ''
       if(accEls.credPlatform) accEls.credPlatform.value = 'MT5'  // Default: Finns häufigster Fall
-      if(accEls.goalKind)      accEls.goalKind.value      = ''
-      if(accEls.goalTarget)    accEls.goalTarget.value    = ''
-      if(accEls.goalMinProfit) accEls.goalMinProfit.value = ''
-      if(accEls.goalOffset)    accEls.goalOffset.value    = ''
-      if(accEls.goalSince)     accEls.goalSince.value     = ''
+      if(accEls.goalKind)   accEls.goalKind.value   = ''
+      if(accEls.goalTarget) accEls.goalTarget.value = ''
+      if(accEls.goalSince)  accEls.goalSince.value  = ''
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -16748,10 +16738,11 @@
     // Fortschritts-Ziel (10.09.2026): ohne Zieltyp werden alle goal_*-Felder
     // geleert — das ist der bewusste Weg, ein Ziel wieder zu entfernen.
     // Leeres Ziel-Feld bei gesetztem Typ = 5 (Finn: "es sind ja immer 5").
+    // Min-Gewinn/Schon-erledigt haben seit 10.09.2026 KEINE Eingabefelder mehr
+    // (Finn: "das da weg") — bestehende DB-Werte werden beim Bearbeiten
+    // unveraendert weitergetragen, solange der Zieltyp gesetzt bleibt.
     const goalKindVal   = accEls.goalKind?.value || null
     const goalTargetNum = parseInt(accEls.goalTarget?.value, 10)
-    const goalMinPNum   = parseFloat(accEls.goalMinProfit?.value)
-    const goalOffsetNum = parseInt(accEls.goalOffset?.value, 10)
     const goalSinceVal  = accEls.goalSince?.value || null
     // Zugangsdaten einlesen (optional)
     const credObj = {
@@ -16772,8 +16763,8 @@
       maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
       goalKind: goalKindVal,
       goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
-      goalMinProfit:  goalKindVal && !isNaN(goalMinPNum) && goalMinPNum > 0 ? goalMinPNum : null,
-      goalDoneOffset: goalKindVal && !isNaN(goalOffsetNum) && goalOffsetNum !== 0 ? goalOffsetNum : null,
+      goalMinProfit:  goalKindVal && vorher?.goalMinProfit  != null ? vorher.goalMinProfit  : null,
+      goalDoneOffset: goalKindVal && vorher?.goalDoneOffset != null ? vorher.goalDoneOffset : null,
       goalSince:      goalKindVal ? goalSinceVal : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
@@ -22428,7 +22419,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-10.267'
+  const OS_TAB_BUILD = '2026-09-10.268'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
