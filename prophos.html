@@ -7263,6 +7263,41 @@
         </div>
       </div>
 
+      <!-- Fortschritts-Ziel (10.09.2026, Finn: "man weiß nie, wie viele Winning Days
+           mir noch fehlen") — Zählung läuft im Frontend live aus den trade_plans,
+           hier steht nur die Konfiguration (Spalten goal_* in accounts). -->
+      <div class="modal-divider">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+        Fortschritts-Ziel <span style="font-weight:400;color:var(--sub);font-size:11.5px">(optional)</span>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label>Zieltyp</label>
+          <select class="input" id="ac-goal-kind">
+            <option value="">— kein Ziel —</option>
+            <option value="winning_days">Winning Days</option>
+            <option value="trading_days">Trading Days</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Ziel (Tage)</label>
+          <input class="input mono" id="ac-goal-target" type="number" step="1" min="1" placeholder="5" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Min-Gewinn pro Tag ($, optional)</label>
+          <input class="input mono" id="ac-goal-minprofit" type="number" step="10" placeholder="z.B. 50 (Apex)" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Schon erledigt (Tage, optional)</label>
+          <input class="input mono" id="ac-goal-offset" type="number" step="1" placeholder="z.B. 2" autocomplete="off">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label>Zählt ab (optional)</label>
+          <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L (bzw. ≥ Min-Gewinn). Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. „Zählt ab" nach einem Payout auf heute setzen; „Schon erledigt" für Tage, die vor Prophos schon geschafft waren.</div>
+        </div>
+      </div>
+
       <!-- MetaApi section, only visible when type === 'live' -->
       <div id="ac-ma-section" hidden>
         <div class="modal-divider">
@@ -14397,6 +14432,7 @@
       const fresh = data.map(rowToPlan).filter(Boolean)
       const oldById = new Map((tradePlans || []).map(p => [String(p.id), p]))
       let changed = fresh.length !== (tradePlans || []).length
+      const zielCheckIds = []   // Fortschritts-Ziel: nach dem Übernehmen prüfen
       for(const np of fresh){
         const op = oldById.get(String(np.id))
         if(!op){ changed = true; continue }
@@ -14414,11 +14450,18 @@
             // nur Banner/Popup zeigen, nichts erneut schreiben oder fetchen.
             atShowEndPrompt(np, true)
           }
+          // Fortschritts-Ziel (10.09.2026): fertige P&L kann einen Winning/
+          // Trading Day abhaken — Prüfung erst NACH tradePlans=fresh (s.u.),
+          // sonst rechnet zielFortschritt auf dem alten Stand.
+          if(np.status === 'review' || np.status === 'completed')
+            zielCheckIds.push(np.id)
         }
       }
       if(changed){
         tradePlans = fresh
         renderTradePlans()
+        if(typeof zielNachTradeCheck === 'function')
+          zielCheckIds.forEach(id => { try{ zielNachTradeCheck(id) }catch(_){} })
       }
     }catch(_){
     }finally{ planPoll.inFlight = false }
@@ -15748,6 +15791,12 @@
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
+      // Fortschritts-Ziel (10.09.2026): "3 von 5 Winning Days" pro Account
+      goalKind:       row.goal_kind || null,
+      goalTarget:     row.goal_target      != null ? Number(row.goal_target)      : null,
+      goalMinProfit:  row.goal_min_profit  != null ? Number(row.goal_min_profit)  : null,
+      goalDoneOffset: row.goal_done_offset != null ? Number(row.goal_done_offset) : null,
+      goalSince:      row.goal_since || null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -15785,7 +15834,12 @@
       max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
       max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null,
       max_loss_per_trade:   a.maxLossPerTrade   != null ? a.maxLossPerTrade   : null,
-      max_profit_per_trade: a.maxProfitPerTrade != null ? a.maxProfitPerTrade : null
+      max_profit_per_trade: a.maxProfitPerTrade != null ? a.maxProfitPerTrade : null,
+      goal_kind:        a.goalKind       || null,
+      goal_target:      a.goalTarget     != null ? a.goalTarget     : null,
+      goal_min_profit:  a.goalMinProfit  != null ? a.goalMinProfit  : null,
+      goal_done_offset: a.goalDoneOffset != null ? a.goalDoneOffset : null,
+      goal_since:       a.goalSince      || null
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -15849,6 +15903,11 @@
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
     extId:    document.getElementById('ac-ext-id'),
+    goalKind:      document.getElementById('ac-goal-kind'),
+    goalTarget:    document.getElementById('ac-goal-target'),
+    goalMinProfit: document.getElementById('ac-goal-minprofit'),
+    goalOffset:    document.getElementById('ac-goal-offset'),
+    goalSince:     document.getElementById('ac-goal-since'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -15987,6 +16046,9 @@
     const adIsBlown = adArchive[acc.id]?.reason === 'blown'
     const adGainLoss = (adIsBlown && typeof calcAccountGainLossEur === 'function') ? calcAccountGainLossEur(acc) : null
 
+    // Fortschritts-Ziel (10.09.2026): "3/5 Winning Days" als eigene Kachel
+    const adZiel = (typeof zielFortschritt === 'function') ? zielFortschritt(acc) : null
+
     const statsEl = document.getElementById('ad-stats')
     if(statsEl) statsEl.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -16012,6 +16074,11 @@
           <div class="kpi-label">P/L realisiert</div>
           <div class="kpi-value tnum ${totalPl>=0?'delta-pos':'delta-neg'}" style="font-size:18px">${totalPl>=0?'+':''}$${totalPl.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
         </div>
+        ${adZiel ? `<div class="kpi" style="flex:1;min-width:135px;padding:14px 18px">
+          <div class="kpi-label">🏆 ${zielLabel(acc)}</div>
+          <div class="kpi-value tnum" style="font-size:18px;color:${adZiel.done ? 'var(--good)' : 'var(--violet)'}">${Math.min(adZiel.count, adZiel.target)}/${adZiel.target}${adZiel.done ? ' ✓' : ''}</div>
+          <div style="margin-top:5px;margin-left:-6px">${zielDotsHtml(adZiel)}</div>
+        </div>` : ''}
         ${adGainLoss ? `<div class="kpi" style="flex:1;min-width:110px;padding:14px 18px">
           <div class="kpi-label">💀 Plus (Live)</div>
           <div class="kpi-value tnum delta-pos" style="font-size:18px">+${adGainLoss.gainEur.toLocaleString('de-DE',{minimumFractionDigits:0,maximumFractionDigits:0})} €</div>
@@ -16388,6 +16455,9 @@
         }else if(dupAcc){
           metaParts.push(`<span style="font-family:var(--mono)">Dup ${escapeHtml(dupAcc.login||dupAcc.account_id||'')}</span>`)
         }
+        // Fortschritts-Ziel (10.09.2026): "🏆 3/5 Winning Days ●●●○○"
+        const zielHtml = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
+        if(zielHtml) metaParts.push(zielHtml)
         // Parent-/Successor-Chain
         if(parentAcc){
           metaParts.push(`<span style="color:var(--violet)">↳ Nachfolger von <a href="#" data-acc-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a></span>`)
@@ -16570,6 +16640,12 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
+      // Fortschritts-Ziel vorausfüllen
+      if(accEls.goalKind)      accEls.goalKind.value      = editAccount.goalKind || ''
+      if(accEls.goalTarget)    accEls.goalTarget.value    = editAccount.goalTarget    != null ? editAccount.goalTarget    : ''
+      if(accEls.goalMinProfit) accEls.goalMinProfit.value = editAccount.goalMinProfit != null ? editAccount.goalMinProfit : ''
+      if(accEls.goalOffset)    accEls.goalOffset.value    = editAccount.goalDoneOffset != null ? editAccount.goalDoneOffset : ''
+      if(accEls.goalSince)     accEls.goalSince.value     = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -16591,6 +16667,11 @@
       if(accEls.credPass)     accEls.credPass.value     = ''
       if(accEls.credServer)   accEls.credServer.value   = ''
       if(accEls.credPlatform) accEls.credPlatform.value = 'MT5'  // Default: Finns häufigster Fall
+      if(accEls.goalKind)      accEls.goalKind.value      = ''
+      if(accEls.goalTarget)    accEls.goalTarget.value    = ''
+      if(accEls.goalMinProfit) accEls.goalMinProfit.value = ''
+      if(accEls.goalOffset)    accEls.goalOffset.value    = ''
+      if(accEls.goalSince)     accEls.goalSince.value     = ''
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -16664,6 +16745,14 @@
     if(!currentUserId){ setModalMsg('Nicht eingeloggt — bitte Seite neu laden.', 'err'); return }
 
     const externalIdVal = accEls.extId?.value.trim() || null
+    // Fortschritts-Ziel (10.09.2026): ohne Zieltyp werden alle goal_*-Felder
+    // geleert — das ist der bewusste Weg, ein Ziel wieder zu entfernen.
+    // Leeres Ziel-Feld bei gesetztem Typ = 5 (Finn: "es sind ja immer 5").
+    const goalKindVal   = accEls.goalKind?.value || null
+    const goalTargetNum = parseInt(accEls.goalTarget?.value, 10)
+    const goalMinPNum   = parseFloat(accEls.goalMinProfit?.value)
+    const goalOffsetNum = parseInt(accEls.goalOffset?.value, 10)
+    const goalSinceVal  = accEls.goalSince?.value || null
     // Zugangsdaten einlesen (optional)
     const credObj = {
       login:    accEls.credLogin?.value.trim()    || '',
@@ -16681,6 +16770,11 @@
       maxDailyDrawdown: !isNaN(maxDailyDrawdown) && maxDailyDrawdown > 0 ? maxDailyDrawdown : null,
       maxLossPerTrade: !isNaN(maxLossPerTrade) && maxLossPerTrade > 0 ? maxLossPerTrade : null,
       maxProfitPerTrade: !isNaN(maxProfitPerTrade) && maxProfitPerTrade > 0 ? maxProfitPerTrade : null,
+      goalKind: goalKindVal,
+      goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
+      goalMinProfit:  goalKindVal && !isNaN(goalMinPNum) && goalMinPNum > 0 ? goalMinPNum : null,
+      goalDoneOffset: goalKindVal && !isNaN(goalOffsetNum) && goalOffsetNum !== 0 ? goalOffsetNum : null,
+      goalSince:      goalKindVal ? goalSinceVal : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -16744,6 +16838,11 @@
           max_loss_per_trade: acc.maxLossPerTrade,
           max_profit_per_trade: acc.maxProfitPerTrade,
           external_id: acc.externalId,
+          goal_kind:        acc.goalKind,
+          goal_target:      acc.goalTarget,
+          goal_min_profit:  acc.goalMinProfit,
+          goal_done_offset: acc.goalDoneOffset,
+          goal_since:       acc.goalSince,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
           cred_password: acc.creds?.password || null,
@@ -19277,6 +19376,10 @@
       if(error){ console.error('loadTradePlans:', error); return }
       tradePlans = (data || []).map(rowToPlan).filter(Boolean)
       renderTradePlans()
+      // Fortschritts-Ziel (10.09.2026): die Accounts-Tabelle rendert beim Boot
+      // evtl. VOR der Plan-Hydration — dann stünde das 🏆-Badge auf 0. Einmal
+      // nachziehen, sobald die Pläne da sind.
+      if(typeof renderAccounts === 'function') renderAccounts()
       // Frischen Stand für den nächsten Boot merken — Gegenstück zum
       // Accounts-Cache, gleiche Begründung (schneller Profilwechsel).
       if(typeof cacheWrite === 'function') cacheWrite(CACHE_PLAN_LS, tradePlans)
@@ -22325,7 +22428,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-09.266'
+  const OS_TAB_BUILD = '2026-09-10.267'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24797,6 +24900,104 @@
     return (pl >= 0 ? '🟢 +' : '🔴 −') + sym + abs
   }
 
+  /* ── Fortschritts-Ziel pro Account (10.09.2026, Finns Wunsch: "man weiß nie,
+   * wie viele Winning Days mir noch fehlen") ─────────────────────────────────
+   * Zwei Zieltypen: winning_days (Tag zählt, wenn der realisierte Tages-P&L
+   * positiv ist — bzw. ≥ Min-Gewinn, z.B. Apex $50) und trading_days (jeder
+   * Tag mit mindestens einem realisierten Trade zählt — auch 0,01-Evertrades).
+   * Quelle sind die trade_plans (completed + review) wie bei tagesPlFuer:
+   * jede Route schreibt master_pl/slave_pl, Mac/PC/Handy sehen dieselbe Zahl.
+   * Der Zählstand wird bewusst NICHT persistiert — abgeleitet ist er immer
+   * konsistent mit den Plänen und kann nie auseinanderlaufen.
+   * goalSince (z.B. nach einem Payout auf heute setzen) blendet ältere Tage
+   * aus; goalDoneOffset addiert außerhalb von Prophos erreichte Tage (darf
+   * negativ sein, Ergebnis wird bei 0 gekappt). */
+  function zielFortschritt(a){
+    if(!a || !a.goalKind || !(a.goalTarget > 0)) return null
+    const proTag = {}   // 'YYYY-MM-DD' (Berlin) → realisierte Tagessumme
+    for(const p of (tradePlans || [])){
+      if(p.status !== 'completed' && p.status !== 'review') continue
+      const istMaster = String(p.masterAccountId) === String(a.id)
+      const istSlave  = !istMaster && String(p.slaveAccountId) === String(a.id)
+      if(!istMaster && !istSlave) continue
+      const pl = istMaster ? p.masterPl : p.slavePl
+      if(pl == null) continue
+      const wann = p.completedAt || p.startedAt || p.createdAt
+      if(!wann) continue
+      let tag = null
+      try{ tag = new Date(wann).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
+      if(a.goalSince && tag < String(a.goalSince).slice(0,10)) continue
+      proTag[tag] = (proTag[tag] || 0) + (Number(pl) || 0)
+    }
+    const minP = a.goalMinProfit > 0 ? a.goalMinProfit : 0
+    const heute = _deTodayStr()
+    let count = 0, heuteAbgehakt = false
+    for(const [tag, summe] of Object.entries(proTag)){
+      const zaehlt = a.goalKind === 'winning_days' ? (minP > 0 ? summe >= minP : summe > 0) : true
+      if(!zaehlt) continue
+      count++
+      if(tag === heute) heuteAbgehakt = true
+    }
+    count = Math.max(0, count + (Number(a.goalDoneOffset) || 0))
+    return { count, target: a.goalTarget, done: count >= a.goalTarget, heuteAbgehakt }
+  }
+
+  function zielLabel(a){ return a.goalKind === 'winning_days' ? 'Winning Days' : 'Trading Days' }
+
+  // Punkte-Reihe ●●●○○ — nur bis 10 Ziel-Tage, darüber trägt die Zahl allein
+  function zielDotsHtml(f){
+    if(!f || f.target > 10) return ''
+    const farbe = f.done ? 'var(--good)' : 'var(--violet)'
+    let s = '<span style="display:inline-flex;gap:3px;align-items:center;margin-left:6px;vertical-align:middle">'
+    for(let i = 0; i < f.target; i++){
+      s += `<span style="width:6px;height:6px;border-radius:50%;background:${i < f.count ? farbe : 'var(--border)'}"></span>`
+    }
+    return s + '</span>'
+  }
+
+  // Zeile für die Accounts-Tabelle (meta unter dem Namen): "🏆 3/5 Winning Days ●●●○○"
+  function zielBadgeHtml(a){
+    const f = zielFortschritt(a)
+    if(!f) return ''
+    const farbe = f.done ? 'var(--good)' : 'var(--violet)'
+    const stand = `${Math.min(f.count, f.target)}/${f.target}`
+    return `<span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${f.done ? ' ✓' : ''}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}`
+  }
+
+  /* Toast "Winning Day abgehakt" nach Trade-Ende — einmal pro Account pro Tag
+   * (localStorage-Merker, gleiches Aufräum-Muster wie setTradedToday). Hängt an
+   * allen drei Fertig-Pfaden: Server-Wächter-Poll (planPollTick), Browser-
+   * Tracker (atMoveToReview) und manueller Abschluss (tradeCompleteSave). */
+  const ZIEL_TOAST_LS = 'prophos_ziel_toast'
+  function zielNachTradeCheck(planId){
+    const p = (tradePlans || []).find(x => String(x.id) === String(planId))
+    if(!p) return
+    let m = {}
+    try{ m = JSON.parse(localStorage.getItem(ZIEL_TOAST_LS) || '{}') }catch(_){}
+    const heute = _deTodayStr()
+    let neu = false
+    for(const accId of [p.masterAccountId, p.slaveAccountId]){
+      if(!accId) continue
+      const a = (accounts || []).find(x => String(x.id) === String(accId))
+      if(!a) continue
+      const f = zielFortschritt(a)
+      if(!f || !f.heuteAbgehakt) continue
+      if(m[String(accId)] === heute) continue   // heute schon gemeldet
+      m[String(accId)] = heute
+      neu = true
+      const tagName = a.goalKind === 'winning_days' ? 'Winning Day' : 'Trading Day'
+      if(typeof atToast === 'function')
+        atToast(`🏆 ${tagName} abgehakt — ${Math.min(f.count, f.target)}/${f.target} · ${a.name}`, 'start')
+    }
+    if(neu){
+      for(const k of Object.keys(m)){ if(m[k] !== heute) delete m[k] }   // Mitternacht-Reset
+      localStorage.setItem(ZIEL_TOAST_LS, JSON.stringify(m))
+    }
+    // Accountübersicht zieht immer nach — eine spätere Verlust-P&L kann einen
+    // schon gezählten Tag auch wieder unter die Schwelle drücken.
+    if(typeof renderAccounts === 'function') renderAccounts()
+  }
+
   function openTradeCompleteModal(planId, preFillSlavePl){
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
@@ -24994,6 +25195,9 @@
         }
       }
     }catch(_){}
+    // Fortschritts-Ziel (10.09.2026): die frisch erfasste P&L kann den heutigen
+    // Winning/Trading Day abhaken (Toast + Badge in der Accountübersicht)
+    if(moved && typeof zielNachTradeCheck === 'function'){ try{ zielNachTradeCheck(plan.id) }catch(_){} }
     return moved
   }
 
@@ -25490,6 +25694,9 @@
       if(_ttCb && masterAcc?.id) setTradedToday(masterAcc.id, !!_ttCb.checked)
 
       renderTradePlans()
+      // Fortschritts-Ziel (10.09.2026): bestätigte P&L kann den heutigen
+      // Winning/Trading Day abhaken (Toast + Badge in der Accountübersicht)
+      if(typeof zielNachTradeCheck === 'function'){ try{ zielNachTradeCheck(p.id) }catch(_){} }
       // Bewusst KEIN Tab-Wechsel nach dem Speichern (Finn 01.08.2026): der Trade wandert
       // sowieso in "Erledigt" — die Ansicht soll da bleiben, wo man gerade arbeitet.
       closeTradeCompleteModal()
