@@ -21394,7 +21394,32 @@
       const laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
       const laufArr = dirs.long.length ? dirs.long : dirs.short
       if(!laufDir){
-        _pfSet('m5dir', 'ok', `Kein laufender Trade bei ${fName} — Richtung frei.`)
+        // Nichts live → GESPEICHERTE Pläne zählen (10.09.2026, Finns Bug — das
+        // Popup sperrt seit heute genauso). Wichtig für die Warteschlange:
+        // Plan 1 ist beim Start von Plan 2 evtl. noch 'planned' oder die
+        // Position noch nicht in mt5_live sichtbar. Nur OHNE Live-Wahrheit —
+        // liegt live etwas vor, ist das die stärkere Quelle (Zweige unten).
+        // Widersprechen sich die gespeicherten Pläne selbst (LONG und SHORT),
+        // gibt es keine verlässliche Richtung → nur Warnung, kein Block.
+        const gep = (typeof firmGeplanteRichtungen === 'function')
+          ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
+        const gepDir = (gep.long.length && gep.short.length) ? null
+          : gep.long.length ? 'LONG' : gep.short.length ? 'SHORT' : null
+        const gepArr = gepDir === 'LONG' ? gep.long : gep.short
+        if(gepDir && po_){
+          if((/sell/i.test(po_.richtung) ? 'LONG' : 'SHORT') === gepDir){
+            _pfSet('m5dir', 'err', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b>${beleg(gepArr)} — deine <b>${escapeHtml(po_.richtung.toUpperCase())}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge, sobald beide laufen). Abbruch — erst den anderen Plan ändern oder löschen.`)
+            hardFail = true
+          } else {
+            _pfSet('m5dir', 'ok', `Kein laufender Trade bei ${fName} — gespeicherter Plan steht ebenfalls auf ${gepDir}${beleg(gepArr)} ✓`)
+          }
+        } else if(gepDir){
+          _pfSet('m5dir', 'warn', `⚠ ${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b>${beleg(gepArr)} — nur in dieselbe Richtung handeln, sonst Selbst-Hedge, sobald beide laufen!`)
+        } else if(gep.long.length && gep.short.length){
+          _pfSet('m5dir', 'warn', `⚠ Gespeicherte Pläne bei ${fName} widersprechen sich (LONG und SHORT) — Richtung selbst im Blick behalten.`)
+        } else {
+          _pfSet('m5dir', 'ok', `Kein laufender Trade bei ${fName} — Richtung frei.`)
+        }
       } else if(po_){
         const gegen = /sell/i.test(po_.richtung) ? dirs.long : dirs.short
         if(gegen.length){
@@ -22148,6 +22173,39 @@
     return ''
   }
 
+  /* ── Richtungs-Wahrheit aus GESPEICHERTEN Plänen (10.09.2026, Finns Bug:
+   * „wenn der erste Trade nur gespeichert ist, aber nicht gestartet, dann kann
+   * ich hier rein Long auch drücken") ──
+   * firmLiveRichtungen sieht nur LIVE-Positionen — ein Plan, dessen Order per
+   * „Speichern" bereits am Plan liegt (richtung in trade_plans), aber noch
+   * nicht gestartet ist, zählte bisher nicht. Genau der Warteschlangen-Fall:
+   * Plan 1 SHORT gespeichert, Plan 2 durfte trotzdem LONG — Selbst-Hedge,
+   * sobald beide laufen. Diese Funktion liefert die gespeicherten Richtungen
+   * derselben Master-Firma, synchron aus tradePlans (per RLS ohnehin nur die
+   * eigene ID — dieselbe Nur-eigene-ID-Doktrin wie im Live-Schutz seit 26.08.).
+   * 'open' zählt mit: schließt die ~20s-Lücke, bis mt5_live die frische
+   * Position zeigt (bzw. deckt stale Live-Daten ab). 'review'/'completed'
+   * nicht — ein beendeter Short verbietet keinen Long mehr. Der eigene Plan
+   * (ohnePlanId) zählt nie: die eigene gespeicherte Richtung darf man im
+   * Popup jederzeit ändern. Duplikum-Pläne tragen nie eine richtung → dort
+   * greift wie bisher nur der Live-Schutz. */
+  function firmGeplanteRichtungen(firmName, ohnePlanId){
+    const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const ziel = norm(firmName)
+    const out = { long: [], short: [] }
+    if(!ziel) return out
+    for(const p of (tradePlans || [])){
+      if(ohnePlanId != null && String(p.id) === String(ohnePlanId)) continue
+      if(p.status !== 'planned' && p.status !== 'open') continue
+      if(p.richtung !== 'buy' && p.richtung !== 'sell') continue
+      if(norm(p.masterFirm) !== ziel) continue
+      out[p.richtung === 'buy' ? 'long' : 'short'].push({
+        wer: p.masterName || '?', quelle: 'Plan', symbol: p.masterSymbol || ''
+      })
+    }
+    return out
+  }
+
   function tpOrderDirSet(dir){
     _tpOrderDir = dir
     const b = document.getElementById('tp-order-buy')
@@ -22222,33 +22280,58 @@
     // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
     // läuft bei der Master-Firma schon ein Trade der EINGELOGGTEN ID (Duplikium
     // oder Echo; nur-eigene-ID seit 26.08.2026, Filter in firmLiveRichtungen),
-    // wird die laufende Richtung vorgewählt und die Gegenrichtung
-    // GESPERRT. Erst beide Knöpfe zurücksetzen (der Zustand klebt sonst vom
-    // letzten Öffnen), dann async nachladen — nur anwenden, wenn das Modal
-    // noch offen und derselbe Plan aktiv ist.
+    // wird die laufende Richtung vorgewählt und die Gegenrichtung GESPERRT.
+    // Seit 10.09.2026 zählen auch GESPEICHERTE, noch nicht gestartete Pläne
+    // (Finns Bug: Plan 1 SHORT nur gespeichert → Plan 2 durfte trotzdem LONG).
+    // Reihenfolge: erst beide Knöpfe zurücksetzen (der Zustand klebt sonst vom
+    // letzten Öffnen), dann SOFORT die gespeicherte Wahrheit (synchron aus
+    // tradePlans), dann async die Live-Wahrheit — Live gewinnt bei Widerspruch,
+    // eine offene Position ist die stärkere Quelle als ein gespeicherter Plan.
     const dirBuy = document.getElementById('tp-order-buy')
     const dirSell = document.getElementById('tp-order-sell')
     const dirHint = document.getElementById('tp-order-dir-hint')
-    for(const b of [dirBuy, dirSell]){ if(b){ b.disabled = false; b.style.opacity = ''; b.title = '' } }
-    if(dirHint){ dirHint.style.display = 'none'; dirHint.innerHTML = '' }
+    const dirFrei = () => {
+      for(const b of [dirBuy, dirSell]){ if(b){ b.disabled = false; b.style.opacity = ''; b.title = '' } }
+      if(dirHint){ dirHint.style.display = 'none'; dirHint.innerHTML = '' }
+    }
+    // Eine Sperre anwenden: lauft = 'long'|'short', b0 = Beleg-Eintrag,
+    // live = true (offene Position) | false (gespeicherter Plan). Setzt immer
+    // erst zurück — die Live-Antwort muss eine evtl. widersprechende
+    // Plan-Sperre sauber ablösen können statt beide Knöpfe tot zu machen.
+    const dirSperren = (lauft, b0, live) => {
+      dirFrei()
+      const wort = live ? 'läuft bereits' : 'hat einen gespeicherten Plan auf'
+      const sperren = lauft === 'long' ? dirSell : dirBuy
+      if(sperren){
+        sperren.disabled = true
+        sperren.style.opacity = '.35'
+        sperren.title = `${plan.masterFirm || 'Firma'} ${wort} ${lauft.toUpperCase()} — Gegenrichtung gesperrt (Selbst-Hedge-Schutz)`
+      }
+      tpOrderDirSet(lauft === 'long' ? 'buy' : 'sell')
+      if(dirHint){
+        dirHint.style.display = ''
+        dirHint.innerHTML = `⚠ <b>${escapeHtml(plan.masterFirm || '')}</b> ${wort} <b>${lauft.toUpperCase()}</b> (${escapeHtml(b0.wer || '?')} · ${escapeHtml(b0.quelle || '')} ${escapeHtml(b0.symbol || '')}) — Gegenrichtung ist gesperrt.`
+      }
+    }
+    dirFrei()
+    const gep = firmGeplanteRichtungen(plan.masterFirm, plan.id)
+    const gepDir = (gep.long.length && gep.short.length) ? null
+      : gep.long.length ? 'long' : gep.short.length ? 'short' : null
+    if(gepDir){
+      dirSperren(gepDir, gep[gepDir][0] || {}, false)
+    } else if(gep.long.length && gep.short.length && dirHint){
+      // Widersprüchliche gespeicherte Pläne (LONG und SHORT nebeneinander):
+      // keine Seite sperren — beide tot wäre eine Sackgasse. Nur ehrlich sagen.
+      dirHint.style.display = ''
+      dirHint.innerHTML = `⚠ Gespeicherte Pläne bei <b>${escapeHtml(plan.masterFirm || '')}</b> widersprechen sich (LONG und SHORT) — Richtung selbst prüfen, einer der Pläne gehört korrigiert.`
+    }
     if(typeof window.firmLiveRichtungen === 'function'){
       window.firmLiveRichtungen(plan.masterFirm).then(dirs => {
         if(String(_tpOrderPlanId) !== String(planId)) return
         if(!document.getElementById('tpOrderModal')?.classList.contains('open')) return
         const lauft = dirs.long.length ? 'long' : dirs.short.length ? 'short' : null
-        if(!lauft) return
-        const b0 = dirs[lauft][0] || {}
-        const sperren = lauft === 'long' ? dirSell : dirBuy
-        if(sperren){
-          sperren.disabled = true
-          sperren.style.opacity = '.35'
-          sperren.title = `${plan.masterFirm || 'Firma'} läuft bereits ${lauft.toUpperCase()} — Gegenrichtung gesperrt (Selbst-Hedge-Schutz)`
-        }
-        tpOrderDirSet(lauft === 'long' ? 'buy' : 'sell')
-        if(dirHint){
-          dirHint.style.display = ''
-          dirHint.innerHTML = `⚠ <b>${escapeHtml(plan.masterFirm || '')}</b> läuft bereits <b>${lauft.toUpperCase()}</b> (${escapeHtml(b0.wer || '?')} · ${escapeHtml(b0.quelle || '')} ${escapeHtml(b0.symbol || '')}) — Gegenrichtung ist gesperrt.`
-        }
+        if(!lauft) return   // nichts live → eine evtl. Plan-Sperre bleibt stehen
+        dirSperren(lauft, dirs[lauft][0] || {}, true)
       }).catch(() => {})
     }
     document.getElementById('tpOrderModal').classList.add('open')
@@ -22419,7 +22502,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-10.268'
+  const OS_TAB_BUILD = '2026-09-10.269'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24758,9 +24841,15 @@
       masterSl: (_editingPlanId
         ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
         : null),
-      // Richtung nur im Echo-Modus erfassen (28.08.2026, Jetzt-starten-Flow) —
+      // Richtung nur auf den Routen mit Jetzt-starten-Flow (28.08.2026) —
       // beim Speichern keine Pflicht, „Jetzt starten" validiert selbst.
-      richtung: (_tpRoute === 'mt5' && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
+      // tvplus zählt seit 10.09.2026 mit: das Order-Popup speichert die
+      // Richtung auch bei Orbit am Plan — nur 'mt5' hieße, ein simpler
+      // Plan-Edit nullt die gespeicherte Orbit-Richtung still in der DB
+      // (dieselbe Falle, vor der der masterSl-Kommentar hierüber warnt),
+      // und der neue Gespeicherte-Pläne-Richtungs-Schutz verlöre seine
+      // Wahrheit. _tpDir ist beim Bearbeiten immer aus p.richtung vorbelegt.
+      richtung: ((_tpRoute === 'mt5' || _tpRoute === 'tvplus') && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
       priority, plannedFor, notes,
       status: 'planned'
     }
