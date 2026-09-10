@@ -22502,7 +22502,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-10.269'
+  const OS_TAB_BUILD = '2026-09-10.270'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25078,6 +25078,41 @@
     if(typeof renderAccounts === 'function') renderAccounts()
   }
 
+  /* Payout angefragt → Winning-Day-Zähler des Accounts startet neu (10.09.2026,
+   * Finn: "wenn ich ein Payout anfrage, sollen die Winning Days resetet werden").
+   * Mechanik: goal_since auf MORGEN (Berlin) — bewusst nicht heute, weil der
+   * heutige Winning Day zum ALTEN Zyklus gehört (er hat den Payout ja gerade
+   * qualifiziert); mit goal_since=heute stünde direkt nach der Anfrage wieder
+   * 1/5 statt 0/5. Nur goalKind='winning_days': Trading-Day-Ziele sind
+   * Phasen-Anforderungen (CFD) und haben mit Payout-Zyklen nichts zu tun.
+   * Beim ✓ Erhalten passiert bewusst NICHTS — der Reset gehört zur Anfrage,
+   * sonst wischte er die zwischen Anfrage und Eingang gesammelten Tage weg.
+   * Fehler werden BENANNT (Toast mit Handgriff) statt still geschluckt. */
+  async function zielPayoutReset(accountId){
+    if(!accountId) return
+    const a = (accounts || []).find(x => String(x.id) === String(accountId))
+    if(!a || a.goalKind !== 'winning_days') return
+    // Morgen als Berlin-Datum, DST-fest: heutiges Berlin-Datum als UTC-Mittag
+    // parsen und einen Kalendertag addieren (kein +24h über die Uhrzeit).
+    const d = new Date(_deTodayStr() + 'T12:00:00Z')
+    d.setUTCDate(d.getUTCDate() + 1)
+    const morgen = d.toISOString().slice(0,10)
+    try{
+      const { data, error } = await supabase
+        .from('accounts').update({ goal_since: morgen }).eq('id', a.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(a.id))
+      if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof atToast === 'function')
+        atToast(`🔄 Winning Days zurückgesetzt — 0/${a.goalTarget || 5} · ${a.name}`, 'end')
+    }catch(e){
+      console.warn('[ziel] Payout-Reset fehlgeschlagen:', e.message || e)
+      if(typeof atToast === 'function')
+        atToast(`⚠ Winning-Day-Reset für ${a.name} fehlgeschlagen — „Zählt ab" im Account-Modal von Hand auf morgen setzen`, 'end')
+    }
+  }
+
   function openTradeCompleteModal(planId, preFillSlavePl){
     const p = tradePlans.find(x => String(x.id) === String(planId))
     if(!p) return
@@ -26478,6 +26513,8 @@
         finPending.sort((a,b) => String(a.requestedAt).localeCompare(String(b.requestedAt)))
         renderFinPending()
         closeFinModal()
+        // Winning-Day-Zähler des Accounts neu starten (10.09.2026, Finns Wunsch)
+        if(typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
       }catch(e){
         msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
       }
@@ -26503,6 +26540,10 @@
       transactions.unshift(rowToTransaction(data))
       renderFinanzen()
       closeFinModal()
+      // Payout DIREKT gebucht (ohne Anfrage-Umweg) = derselbe Zyklus-Moment →
+      // Winning-Day-Reset auch hier. Das ✓ Erhalten einer Anfrage läuft NICHT
+      // hierüber (finReceivePending) und resettet bewusst nicht nochmal.
+      if(kind === 'payout' && typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
     }catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
     }
