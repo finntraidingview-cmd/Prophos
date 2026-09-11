@@ -290,6 +290,38 @@ def check_fleet(cfgs):
     return errors, warnings
 
 
+# ── Gezielter Magic-Umzug (11.09.2026, Jakobs The5ers-Vorfall) ─────────────────
+# Live-Fund 10./11.09.2026: Hedges der Master 26674215/26674216 wurden am
+# GEMEINSAMEN Fusion-Hedge-Konto sofort wieder geschlossen (oeffnen → fremd-
+# schliessen → oeffnen → …, danach griffen Hand-Close-Sperre bzw. Mehrfach-
+# Hedge-Schutz und es wurde gar nicht mehr gehedgt). Ursache: ein Copier auf
+# einem ANDEREN PC traegt dieselbe magic — alle PCs vergeben ab dem Default-
+# Block 770000, die magic_base-Bloecke aus provision.py wurden nie pro PC
+# gesetzt. Das ist exakt der check_fleet-Fall "gleiche magic → Copier
+# schliessen sich gegenseitig die Hedges", nur PC-uebergreifend, wo keine
+# Startpruefung hinsieht. Finns Ansage: NUR diese zwei Accounts anfassen,
+# sonst nichts — deshalb eine feste Liste statt einer Flotten-Umstellung.
+# Ziel = 779000er-Block, aus dem Login abgeleitet: bleibt in der Prophos-
+# Familie 770000-779999 (hedge_fremde zaehlt weiter richtig) und kollidiert
+# weder mit Bestand noch mit einer kuenftigen Block-Vergabe (779000 waere
+# erst der zehnte PC).
+MAGIC_UMZUG = {26674215: 779215, 26674216: 779216}
+
+
+def magic_umzug_ziel(master_login, magic, belegte_magics):
+    """REIN RECHNEND (testbar): neue magic fuer einen Umzugs-Kandidaten oder
+    None. Zieht nur um, wenn der Master in MAGIC_UMZUG steht, die alte magic
+    noch im Default-Block liegt (< 771000 — schon umgezogene oder bewusst
+    hoeher gesetzte Configs bleiben unangetastet) und das Ziel auf DIESEM PC
+    frei ist (nie einen neuen lokalen Konflikt erzeugen)."""
+    ziel = MAGIC_UMZUG.get(int(master_login or 0))
+    if not ziel or int(magic) == ziel or int(magic) >= 771000:
+        return None
+    if ziel in belegte_magics:
+        return None
+    return ziel
+
+
 def plan_armed_files(plans, now):
     """REIN RECHNEND (testbar): welche config-Dateien haben ein offenes
     Trade-Fenster?  Finns Ansage 25.08.2026 (nach der Geisterposition auf dem
@@ -850,6 +882,41 @@ def main():
         log("⛔ ABBRUCH: 'Algo Trading' ist im Hedge-Terminal nicht aktiv "
             "(Extras → Optionen → Expert Advisors). Aus Python nicht schaltbar.")
         mt5.shutdown(); sys.exit(1)
+
+    # ── Gezielter Magic-Umzug (11.09.2026, s. Kommentar an MAGIC_UMZUG) ─────────
+    # Bewusst erst NACH dem Hedge-Connect: umgezogen wird nur, wenn auf dem
+    # Hedge-Konto KEINE Position mit der alten magic liegt — sonst wuerde ein
+    # laufender Hedge zur unsichtbaren Waise (die Familie 770000-779999 loest
+    # keinen hedge_fremde-Alarm aus). Blockiert eine Position (auch die eines
+    # fremden PCs mit Kollisions-magic), versucht es der naechste Copier-
+    # Neustart wieder. Ein Fehler hier darf den Copier nie aufhalten.
+    try:
+        for m in masters:
+            ziel = magic_umzug_ziel(m.master_login, m.magic,
+                                    {x.magic for x in masters if x is not m})
+            if not ziel:
+                continue
+            raw = mt5.positions_get()
+            offen = [p for p in (raw or []) if int(getattr(p, "magic", 0)) == m.magic]
+            if raw is None or offen:
+                grund = ("Hedge-Bestand nicht lesbar" if raw is None
+                         else f"{len(offen)} offene Position(en) mit alter magic {m.magic}")
+                log(f"↻ [{m.file}] Magic-Umzug auf {ziel} VERSCHOBEN — {grund}; "
+                    f"der naechste Copier-Neustart versucht es wieder.")
+                continue
+            cfg = load_json(m.cfg_path)
+            cfg["magic"] = ziel
+            tmp = m.cfg_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, m.cfg_path)
+            alte = m.magic
+            m.reload()
+            log(f"✅ [{m.file}] Magic-Umzug: {alte} → {ziel} (Master {m.master_login}) — "
+                f"die magic-Kollision mit einem fremden PC am gemeinsamen Hedge-Konto "
+                f"ist damit fuer diesen Account beendet.")
+    except Exception as e:
+        log(f"⚠ Magic-Umzug uebersprungen ({type(e).__name__}: {e}) — Copier laeuft normal weiter.")
 
     # ── Hilfsfunktionen ─────────────────────────────────────────────────────────
     fleet_magics = {m.magic: m for m in masters}

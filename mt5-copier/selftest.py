@@ -14,7 +14,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from copier import (plan_actions, check_fleet, compute_startup_skip,  # noqa: E402
-                    plan_sltp, find_notfall_deals, read_snapshot)
+                    plan_sltp, find_notfall_deals, read_snapshot,
+                    magic_umzug_ziel)
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
 FUSION = {
@@ -1086,6 +1087,23 @@ def main():
     chk("PANEL: Loesch-Terminal-Zu — Ordner einer ANDEREN Config nie schiessen",
         panel.loesch_terminal_dir(_cfgL, [{"master_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None
         and panel.loesch_terminal_dir(_cfgL, [{"hedge_terminal_path": "/mt5/acc1/terminal64.exe"}]) is None)
+
+    # ── Magic-Umzug 11.09.2026 (Jakobs The5ers-Kollision — NUR 2 Accounts) ────
+    # PC-uebergreifende magic-Kollision am gemeinsamen Hedge-Konto: fremder
+    # Copier schloss die frischen Hedges sofort. Der Umzug darf ausschliesslich
+    # die zwei benannten Master treffen und nie einen neuen Konflikt erzeugen.
+    chk("Magic-Umzug trifft NUR die zwei benannten Master",
+        magic_umzug_ziel(26674215, 770005, set()) == 779215
+        and magic_umzug_ziel(26674216, 770006, set()) == 779216
+        and magic_umzug_ziel(26651693, 770007, set()) is None
+        and magic_umzug_ziel(0, 770005, set()) is None
+        and magic_umzug_ziel(None, 770005, set()) is None)
+    chk("Magic-Umzug ist idempotent und respektiert hoehere Bloecke",
+        magic_umzug_ziel(26674215, 779215, set()) is None
+        and magic_umzug_ziel(26674215, 771003, set()) is None)
+    chk("Magic-Umzug weicht belegtem Ziel aus (nie neuer lokaler Konflikt)",
+        magic_umzug_ziel(26674215, 770005, {779215}) is None
+        and magic_umzug_ziel(26674216, 770006, {779215}) == 779216)
 
     print()
     ok = sum(1 for r in results if r)
