@@ -15,7 +15,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from copier import (plan_actions, check_fleet, compute_startup_skip,  # noqa: E402
                     plan_sltp, find_notfall_deals, read_snapshot,
-                    magic_umzug_ziel)
+                    magic_umzug_ziel, MAGIC_UMZUG, FAMILIE_MIN, FAMILIE_MAX)
 
 # Fusion-Markets-typische Symboldaten (beide Testkonten beim selben Broker)
 FUSION = {
@@ -1104,6 +1104,18 @@ def main():
     chk("Magic-Umzug weicht belegtem Ziel aus (nie neuer lokaler Konflikt)",
         magic_umzug_ziel(26674215, 770005, {779215}) is None
         and magic_umzug_ziel(26674216, 770006, {779215}) == 779216)
+
+    # ── Magic-Familie 11.09.2026 nachmittags (Erweiterung auf 760000-779999) ──
+    # Die Flotte hatte alle Bestands-Bloecke 770000-776000 vergeben; erweitert
+    # wurde nach UNTEN, damit Bestand und 779er-Umzugs-Reservat exakt so
+    # weiterlaufen wie vorher. Der Check nagelt die Grenzen fest und beweist,
+    # dass die Umzugs-Ziele in der Familie liegen — laegen sie draussen,
+    # wuerden Jakobs umgezogene Hedges auf jedem anderen PC als FREMDE
+    # Position alarmiert.
+    chk("Magic-Familie: 760000-779999, Bestand + Umzugs-Reservat innerhalb",
+        FAMILIE_MIN == 760000 and FAMILIE_MAX == 779999
+        and all(FAMILIE_MIN <= z <= FAMILIE_MAX for z in MAGIC_UMZUG.values())
+        and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
 
     print()
     ok = sum(1 for r in results if r)

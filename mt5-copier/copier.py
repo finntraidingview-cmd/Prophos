@@ -307,6 +307,16 @@ def check_fleet(cfgs):
 # erst der zehnte PC).
 MAGIC_UMZUG = {26674215: 779215, 26674216: 779216}
 
+# Prophos-Magic-Familie am geteilten Hedge-Konto: alles in diesem Bereich gilt
+# als "einer von uns" (anderer PC der Flotte) und loest keinen hedge_fremde-
+# Alarm aus. 11.09.2026 nachmittags nach UNTEN auf 760000 erweitert (Finns
+# Flotten-Umzug: alle 7 Bestands-PCs haben 770000-776000 belegt, 777/778 sind
+# die letzten freien Bloecke) — nach unten, damit Bestand UND 779er-Umzugs-
+# Reservat exakt unangetastet bleiben. Neue PC-Bloecke ab jetzt in dieser
+# Reihenfolge: 777000, 778000, dann 760000, 761000, … 769000.
+FAMILIE_MIN = 760000
+FAMILIE_MAX = 779999
+
 
 def magic_umzug_ziel(master_login, magic, belegte_magics):
     """REIN RECHNEND (testbar): neue magic fuer einen Umzugs-Kandidaten oder
@@ -886,7 +896,7 @@ def main():
     # ── Gezielter Magic-Umzug (11.09.2026, s. Kommentar an MAGIC_UMZUG) ─────────
     # Bewusst erst NACH dem Hedge-Connect: umgezogen wird nur, wenn auf dem
     # Hedge-Konto KEINE Position mit der alten magic liegt — sonst wuerde ein
-    # laufender Hedge zur unsichtbaren Waise (die Familie 770000-779999 loest
+    # laufender Hedge zur unsichtbaren Waise (die Familie 760000-779999 loest
     # keinen hedge_fremde-Alarm aus). Blockiert eine Position (auch die eines
     # fremden PCs mit Kollisions-magic), versucht es der naechste Copier-
     # Neustart wieder. Ein Fehler hier darf den Copier nie aufhalten.
@@ -1272,13 +1282,14 @@ def main():
             # FREMDE Positionen auf dem Hedge-Konto (18.08.2026, Finns Wunsch:
             # auch eine Slave-Order sehen, die der Copier gar nicht kennt —
             # z.B. von Hand eroeffnet). 'Fremd' = Magic ausserhalb der
-            # Prophos-Familie 770000-779999: die Hedges der ANDEREN PCs am
-            # selben Hedge-Konto tragen Familien-Magics und sind kein Alarm.
+            # Prophos-Familie FAMILIE_MIN-FAMILIE_MAX (seit 11.09.2026
+            # 760000-779999): die Hedges der ANDEREN PCs am selben
+            # Hedge-Konto tragen Familien-Magics und sind kein Alarm.
             fremde = []
             try:
                 for p_ in (mt5.positions_get() or []):
                     mg = int(getattr(p_, "magic", 0) or 0)
-                    if 770000 <= mg <= 779999:
+                    if FAMILIE_MIN <= mg <= FAMILIE_MAX:
                         continue
                     fremde.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
                                    "type": int(p_.type), "volume": float(p_.volume)})
