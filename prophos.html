@@ -6651,6 +6651,35 @@
               </div>
             </div>
 
+            <!-- PAYOUTS ERHALTEN — wo sie ankamen (11.09.2026, Finns Wunsch:
+                 das KPI oben zeigt nur die nackte Summe). Chips = Summe pro
+                 Person (die Kurzantwort), Tabelle = jede gebuchte Payout-
+                 Buchung, neueste zuerst; Herkunft („lag bei …") steht beim
+                 Pending-Flow in der Notiz. Auch Buchungen OHNE Account sind
+                 drin — die fehlen im KPI (das summiert je Account), sind aber
+                 trotzdem angekommenes Geld. Ohne Payouts unsichtbar. -->
+            <div class="panel" id="adm-f-recv-panel" hidden style="margin-bottom:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Payouts erhalten</div>
+                  <div class="panel-sub">Wo die Payouts ankamen — über alle Personen, neueste zuerst</div>
+                </div>
+              </div>
+              <div id="adm-f-recv-where" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 12px"></div>
+              <div class="table-wrap adm-scroll">
+                <table class="t">
+                  <thead><tr>
+                    <th>Person</th>
+                    <th>Erhalten</th>
+                    <th>Account</th>
+                    <th class="adm-num">Betrag</th>
+                    <th>Notiz</th>
+                  </tr></thead>
+                  <tbody id="adm-f-recv-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
             <div class="panel">
               <div class="panel-head">
                 <div>
@@ -8686,6 +8715,48 @@
             tr.querySelector('.pp-bei').textContent = t.liegt_bei || '—'
             tr.querySelector('.pp-note').textContent = t.notes || ''
             const noteTd = tr.querySelector('.pp-note').closest('td')
+            if(noteTd) noteTd.title = t.notes || ''
+            tb.appendChild(tr)
+          }
+        }
+      }
+
+      // Payouts erhalten — wo sie ankamen (11.09.2026, Finns Wunsch): jede
+      // gebuchte Payout-Buchung aus /admin/overview, Chips summieren pro
+      // Person. Reine Anzeige — die Summen oben rechnen unverändert. Kann
+      // mehr zeigen als das KPI: Buchungen ohne Account zählen dort nicht.
+      const recv = admData.payouts_received || []
+      const recvPanel = $('adm-f-recv-panel')
+      if(recvPanel){
+        recvPanel.hidden = !recv.length
+        const chips = $('adm-f-recv-where')
+        if(chips){
+          const byP = new Map()
+          for(const t of recv){
+            const k = admShortName(t.person || '—')
+            byP.set(k, (byP.get(k) || 0) + (Number(t.amount) || 0))
+          }
+          chips.innerHTML = [...byP.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `<span class="chip chip-good">${escapeHtml(k)} · ${admEur.format(v)}</span>`)
+            .join('')
+        }
+        const tb = $('adm-f-recv-rows')
+        if(tb){
+          tb.innerHTML = ''
+          for(const t of recv){
+            const d = t.occurred_at ? new Date(t.occurred_at) : null
+            const tr = document.createElement('tr')
+            tr.innerHTML =
+              '<td><span class="pr-person" style="font-weight:600"></span></td>' +
+              `<td style="color:var(--sub);font-size:12.5px">${d ? d.toLocaleDateString('de-DE', { day:'2-digit', month:'short', year:'2-digit' }) : '—'}</td>` +
+              '<td><span class="pr-acc" style="font-size:12.5px"></span></td>' +
+              `<td class="adm-num" style="font-weight:600;color:var(--good)">+${admEur.format(Number(t.amount) || 0)}</td>` +
+              '<td style="color:var(--sub);font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="pr-note"></span></td>'
+            tr.querySelector('.pr-person').textContent = admShortName(t.person || '—')
+            tr.querySelector('.pr-acc').textContent = t.account_name ? `${t.account_name} · ${t.account_firm || '–'}` : '—'
+            tr.querySelector('.pr-note').textContent = t.notes || ''
+            const noteTd = tr.querySelector('.pr-note').closest('td')
             if(noteTd) noteTd.title = t.notes || ''
             tb.appendChild(tr)
           }
@@ -22502,7 +22573,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-11.272'
+  const OS_TAB_BUILD = '2026-09-11.273'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

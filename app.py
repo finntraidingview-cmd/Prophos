@@ -3513,7 +3513,13 @@ def admin_build_overview():
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
                                         "status": "eq.completed"})
-    txs       = _sb_all("transactions", {"select": "account_id,amount", "kind": "eq.payout"})
+    # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
+    # Finn: „man soll auch sehen, wo die ganzen Payouts ankamen"): dieselben
+    # Zeilen speisen jetzt zusätzlich die Empfangs-Liste im Finanzen-Tab
+    # (Person, Datum, Account, Notiz) — ein zweiter Fetch wäre doppelt.
+    txs       = _sb_all("transactions", {"select": "account_id,user_id,account_name,"
+                                                   "account_firm,amount,currency,occurred_at,notes",
+                                         "kind": "eq.payout"})
 
     # Archiv-Status liegt in user_settings (aus dem localStorage gesynct) und ist
     # zwischen Profilen historisch vermischt — unkritisch, weil Account-IDs global
@@ -3715,6 +3721,34 @@ def admin_build_overview():
         # liefern, aber hörbar — nie catch-und-schweigen (Lehre aus .108).
         print(f"[admin] ⚠️ pending_payouts: {type(e).__name__}: {e}", flush=True)
 
+    # Payouts ERHALTEN — wo sie ankamen (11.09.2026, Finns Wunsch nach dem
+    # KPI „Payouts erhalten", das nur eine nackte Summe zeigt): jede gebuchte
+    # payout-Buchung über alle Personen. Bewusst AUCH Buchungen ohne
+    # account_id — die fehlen oben in den Account-Summen (dort braucht es
+    # einen Account als Anker), sind aber trotzdem angekommenes Geld und
+    # gehören in die Empfangs-Liste. Beim Pending-Flow steht die Herkunft
+    # („angefragt … · lag bei …") in den Notes, die kommen mit.
+    recv_rows = []
+    for t in txs:
+        uid = str(t.get("user_id") or "")
+        if uid in excluded_ids:
+            continue
+        try:
+            amt = float(t.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        recv_rows.append({
+            "user_id": uid,
+            "person": disp.get(uid) or names.get(uid, uid[:8] or "—"),
+            "amount": round(amt, 2),
+            "currency": t.get("currency") or "EUR",
+            "occurred_at": t.get("occurred_at") or "",
+            "account_name": t.get("account_name") or "",
+            "account_firm": t.get("account_firm") or "",
+            "notes": t.get("notes") or "",
+        })
+    recv_rows.sort(key=lambda r: r["occurred_at"], reverse=True)   # neueste zuerst
+
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
@@ -3725,6 +3759,7 @@ def admin_build_overview():
     # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.
     return {"accounts": rows, "people": people_list, "firms": firm_list,
             "pending_payouts": pending_rows,
+            "payouts_received": recv_rows,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids)}
