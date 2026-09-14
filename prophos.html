@@ -4549,6 +4549,10 @@
             <!-- Richtungs-Schutz (25.08.2026): läuft bei der Master-Firma schon
                  ein Trade, wird die Gegenrichtung gesperrt und hier begründet -->
             <div id="tp-order-dir-hint" style="display:none;margin-top:8px;font-size:12px;color:#B45309;background:rgba(247,144,9,.12);border-radius:6px;padding:7px 10px"></div>
+            <!-- Letzte 5 Orders (15.09.2026, Finns Wunsch): nur die nackte
+                 Richtung der zuletzt GESTARTETEN Pläne, egal welche Route
+                 (Duplikum/Echo/Orbit) — reine Anzeige, keine Empfehlung -->
+            <div id="tp-order-letzte" style="display:none;margin-top:8px;font-size:12px;color:var(--sub);line-height:1.6"></div>
           </div>
           <!-- SL/TP-Schalter (18.08.2026, Finns Wunsch): an = Bot trägt SL/TP
                nach dem Fill automatisch ein, aus = Order pur, SL/TP von Hand -->
@@ -14765,10 +14769,29 @@
         // Neue Slave-Position + Master OK → Auto-Start
         autoTrack.state.set(plan.id, { wasOpen: true, notified: false, baselineCount: currentCount })
         autoTrack.inProgress.add(plan.id)
+        // Richtung mitschreiben (15.09.2026): Duplikum-Pläne trugen bisher nie
+        // eine richtung — die „Letzte 5 Orders"-Leiste im Order-Popup blieb bei
+        // ihnen ein graues „?". Master-Position sichtbar (MT5-Master) → deren
+        // Seite. Master nicht sichtbar (Tradovate) → die kopierte Slave-Position
+        // UMGEDREHT, weil bei Finn jedes Duplikum-Paar ausnahmslos Reverse
+        // Trading fährt (siehe Mapping-Push, negativer Multiplikator). Nichts
+        // Belastbares → null, nie raten. Eine per Popup gespeicherte Richtung
+        // bleibt unangetastet.
+        const atRichtung = (() => {
+          if(plan.richtung === 'buy' || plan.richtung === 'sell') return plan.richtung
+          const seite = s => /sell|short|^1$/i.test(String(s ?? '')) ? 'sell' : 'buy'
+          const mPos = positions.find(p => String(p.account_id) === String(dupMasterId) && p.side != null)
+          if(mPos) return seite(mPos.side)
+          const sPos = slavePositions.find(p =>
+            String(p.id_master||p.master_id||p.masterId||'') === String(dupMasterId) && p.side != null)
+          if(sPos) return seite(sPos.side) === 'sell' ? 'buy' : 'sell'
+          return null
+        })()
         try {
           const { data, error } = await supabase
             .from('trade_plans')
-            .update({ status: 'open', started_at: new Date().toISOString() })
+            .update({ status: 'open', started_at: new Date().toISOString(),
+                      ...(atRichtung ? { richtung: atRichtung } : {}) })
             .eq('id', plan.id).select('*').single()
           if(!error){
             const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
@@ -22319,10 +22342,39 @@
            s.style.color = dir === 'sell' ? '#D92D20' : '' }
   }
 
+  /* Letzte 5 Orders als Richtungs-Chips (15.09.2026, Finns Wunsch: „ganz kurz
+   * sehen, ob die letzten fünf Orders long oder short waren"). Quelle sind
+   * die zuletzt GESTARTETEN Pläne (startedAt), egal welche Route — Duplikum
+   * wie Echo wie Orbit. Reine Anzeige, neueste links; kein Urteil dazu.
+   * Ohne bekannte Richtung (Duplikum-Pläne vor dem 15.09.2026) ein graues „?"
+   * statt einer geratenen Seite. */
+  function tpOrderLetzteRender(ohnePlanId){
+    const box = document.getElementById('tp-order-letzte')
+    if(!box) return
+    const letzte = (tradePlans || [])
+      .filter(p => p && p.startedAt && String(p.id) !== String(ohnePlanId))
+      .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+      .slice(0, 5)
+    if(!letzte.length){ box.style.display = 'none'; box.innerHTML = ''; return }
+    const chip = p => {
+      const dir = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
+      const st = dir === 'buy'  ? 'background:rgba(18,183,106,.12);color:#0E9757'
+               : dir === 'sell' ? 'background:rgba(240,68,56,.10);color:#D92D20'
+               : 'background:rgba(120,120,140,.12);color:var(--sub)'
+      let wann = ''
+      try{ wann = new Date(p.startedAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }catch(_){}
+      const tip = [p.masterName || '—', p.masterSymbol || '', wann, dir ? '' : 'Richtung nicht erfasst'].filter(Boolean).join(' · ')
+      return `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${st}" title="${escapeHtml(tip)}">${dir === 'buy' ? 'BUY' : dir === 'sell' ? 'SELL' : '?'}</span>`
+    }
+    box.style.display = ''
+    box.innerHTML = `Letzte ${letzte.length} Orders <span style="color:var(--sub-2)">(neueste zuerst)</span> &nbsp;${letzte.map(chip).join(' ')}`
+  }
+
   async function openTpOrderModal(planId){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
     _tpOrderPlanId = planId
+    tpOrderLetzteRender(planId)
     _tpPendingOrder = null
     // Orbit-Variante (28.08.2026, Etappe 3 Schritt 1): gleiches Popup, aber
     // „Starten" speichert die Werte am Plan und übergibt dann an den Puls, der
@@ -22603,7 +22655,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.274'
+  const OS_TAB_BUILD = '2026-09-15.275'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
