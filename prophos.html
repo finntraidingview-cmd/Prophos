@@ -13297,11 +13297,30 @@
 
   // Duplikum-Master-Symbol(e) der Firma (aus den Prop-Firm-Specs) — kommagetrennt, → Array.
   // Beispiel: Futures-Firmen handeln "NQ, MNQ" → für jedes wird ein eigenes Mapping gebraucht.
+  /* Hinterlegte Futures-Symbole auf den aktuellen Front-Monat drehen
+   * (15.09.2026, Finns Fund: „Duplikum nimmt NQU6 nicht mehr, nur noch NQZ6").
+   * In firm_specs.dup_symbol steht bei den Futures-Firmen ein KONKRETER
+   * Kontrakt („NQU6") — der war seit dem Roll am 10.09. tot, und beim
+   * nächsten Roll (Dezember → H7) wäre er es wieder. Statt alle 36 Zeilen
+   * jedes Quartal von Hand nachzuziehen, wird der Monatscode hier beim
+   * Lesen gegen tpFuturesFrontcode() getauscht — dieselbe Rechnung wie auf
+   * der Orbit-Route, beide Routen stehen damit immer auf demselben Kontrakt.
+   * Nur die CME-Index-Quartalskontrakte (NQ/ES/YM/RTY samt Micros); CFD-
+   * Symbole (NAS100, US100.cash, NDX100) und Monatskontrakte bleiben
+   * unangetastet. Ein Symbol OHNE Monatscode wird nicht ergänzt — wer „NQ"
+   * einträgt, bekommt „NQ". */
+  function dupFuturesRollen(sym){
+    const m = /^(MNQ|NQ|MES|ES|MYM|YM|M2K|RTY)([HMUZ])(\d)$/i.exec(String(sym || '').trim())
+    if(!m || typeof tpFuturesFrontcode !== 'function') return sym
+    const code = tpFuturesFrontcode()
+    return code ? m[1].toUpperCase() + code : sym
+  }
+
   function dupSymbolsForFirm(firmName){
     if(!firmName) return []
     const p = FIRM_PRESETS[firmToPreset(firmName)]
     if(!p || !p.dupSymbol) return []
-    return String(p.dupSymbol).split(',').map(s => s.trim()).filter(Boolean)
+    return String(p.dupSymbol).split(',').map(s => dupFuturesRollen(s.trim())).filter(Boolean)
   }
 
   // Hinterlegter MT-Server einer Firma (aus firm_specs) — für Auto-Prefill beim Account-Add.
@@ -19455,16 +19474,18 @@
   // Person, eigener Account) bekommt das beim ersten Öffnen automatisch als Zeilen
   // in firm_specs eingetragen — danach ganz normal editierbar/löschbar pro Account,
   // kein Hardcode-Zwang. Werte 1:1 aus Finns eigener Liste (20.07.2026).
+  // Futures-Kontrakt seit 15.09.2026 gerechnet (bis dahin stand hier „NQU6"
+  // fest — jeder neue Login hätte ab dem Roll einen toten Kontrakt geseedet).
   const DEFAULT_FIRM_SPECS = [
-    { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
-    { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
+    { name:'Alpha Future',  symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
+    { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'$', dupSymbol:'US100.cash' },
     { name:'FundedNext',    symbol:'',       unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NDX100' },
     { name:'FundingPips',   symbol:'',       unit:'Lots',      ppl:20.00, currency:'$', dupSymbol:'NDX100' },
     { name:'Fusion Markets',symbol:'',       unit:'Lots',      ppl:0.85,  currency:'€', dupSymbol:'NAS100' },
-    { name:'Lucid Trading', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' },
+    { name:'Lucid Trading', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'The5%ers',      symbol:'',       unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'NAS100' },
-    { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQU6' }
+    { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() }
   ]
   function getCustomFirms(){ return customFirms }
   function rowToFirmSpec(row){
@@ -22224,8 +22245,16 @@
    * „U6" wäre nach dem Verfall im September stillschweigend falsch, und ein
    * falsches Symbol ist auf dieser Route kein Schönheitsfehler — es wäre der
    * Trade auf dem falschen Kontrakt.
-   * Verfall ≈ 3. Freitag des Kontraktmonats; gesucht wird der erste
-   * Quartalsmonat (H/M/U/Z), dessen Verfall noch vor uns liegt. */
+   * Verfall ≈ 3. Freitag des Kontraktmonats. Gesucht wird der erste
+   * Quartalsmonat (H/M/U/Z), dessen ROLL-Datum noch vor uns liegt — nicht
+   * der Verfall: die Börse rollt den Front-Monat acht Tage VOR dem Verfall
+   * (Roll-Donnerstag, CME-Konvention für die Index-Futures). Bis 15.09.2026
+   * stand hier der Verfallstag — Duplikum nahm NQU6 aber schon ab dem
+   * 10.09. nicht mehr an, nur noch NQZ6 (Finns Fund 15.09.: „NQU6 geht
+   * nicht mehr, nur noch NQZ6"); die Rechnung hätte bis zum 18.09. noch
+   * U6 geliefert. Gleicher Schalter für Orbit (TradingView) und Duplikum
+   * (dupSymbolsForFirm), damit beide Routen nie auf verschiedenen
+   * Kontrakten stehen. */
   function tpFuturesFrontcode(jetzt){
     const d = jetzt || new Date()
     const MON = { 3:'H', 6:'M', 9:'U', 12:'Z' }
@@ -22239,7 +22268,8 @@
       const jahr = d.getUTCFullYear() + Math.floor(roh / 12)
       const monat = (roh % 12) + 1
       if(!MON[monat]) continue
-      if(dritterFreitag(jahr, monat) > d) return MON[monat] + (jahr % 10)
+      const roll = new Date(dritterFreitag(jahr, monat).getTime() - 8 * 86400000)
+      if(roll > d) return MON[monat] + (jahr % 10)
     }
     return ''
   }
@@ -22340,9 +22370,9 @@
     // Master-Symbol auch schon NQ drin sein"). Auf dieser Route führt das
     // Symbol nach TradingView, nicht zu Duplikum — die Firmen-Einstellungen
     // (NDX100/NAS100) wären hier schlicht das falsche Vokabular.
-    // Der Kontraktcode wird GERECHNET, nicht eingetragen: heute NQU6, nach dem
-    // September-Verfall von selbst NQZ6. Ein hart notiertes „U6" wäre im
-    // Dezember stillschweigend falsch.
+    // Der Kontraktcode wird GERECHNET, nicht eingetragen: ab dem Roll-
+    // Donnerstag (8 Tage vor Verfall) von selbst der nächste Quartalsmonat.
+    // Ein hart notiertes „U6" wäre im Dezember stillschweigend falsch.
     const orbitSym = _tpOrderOrbit
       ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()
       : ''
@@ -22573,7 +22603,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-11.273'
+  const OS_TAB_BUILD = '2026-09-15.274'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
