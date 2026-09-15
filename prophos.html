@@ -8922,6 +8922,14 @@
         if(box){
           box.innerHTML = ''
           const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+          // Balance-Text (15.09.2026 abends, Finn: „bei den CFD auch immer
+          // Balance") — Quelle aus dem Backend (TSX/MT5/Duplikum/manuell),
+          // ganze Beträge in Konto-Währung; manuell = Startbalance, kein Live-Wert.
+          const balText = r => {
+            if(r.balance == null) return ''
+            try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: r.balance_ccy || 'USD', maximumFractionDigits: 0 }).format(r.balance) }
+            catch(_){ return `${Number(r.balance).toFixed(0)} ${r.balance_ccy || ''}` }
+          }
           const byDay = new Map()
           const wd = []   // Futures: manuell gezählte Winning Days (ohne Datum)
           for(const r of cal){
@@ -8951,7 +8959,16 @@
               const c = document.createElement('span')
               c.className = 'chip ' + chipCls
               c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'}${r.account_firm ? ' · ' + r.account_firm : ''}`
-              c.title = r.ext ? `#${r.ext}` : ''
+              const bt = balText(r)
+              if(bt){
+                const b = document.createElement('span')
+                b.className = 'mono'
+                b.style.cssText = 'font-weight:700;margin-left:6px' + (r.balance_src === 'manuell' ? ';opacity:.7' : '')
+                b.textContent = '· ' + bt + (r.balance_src === 'manuell' ? ' (manuell)' : '')
+                b.title = r.balance_src === 'manuell' ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src
+                c.appendChild(b)
+              }
+              c.title = [r.ext ? `#${r.ext}` : '', bt ? 'Balance ' + bt + ' · ' + (r.balance_src || '') : ''].filter(Boolean).join(' · ')
               right.appendChild(c)
             }
             row.appendChild(left); row.appendChild(right)
@@ -8985,10 +9002,8 @@
             // Account hat") — Quelle aus dem Backend (TSX/MT5/Duplikum/manuell),
             // „manuell" gedaempft mit Hinweis, weil das die Startbalance ist.
             const balHtml = r => {
-              if(r.balance == null) return '<span style="color:var(--sub)">—</span>'
-              let txt
-              try{ txt = new Intl.NumberFormat('de-DE', { style:'currency', currency: r.balance_ccy || 'USD', maximumFractionDigits: 0 }).format(r.balance) }
-              catch(_){ txt = `${Number(r.balance).toFixed(0)} ${r.balance_ccy || ''}` }
+              const txt = balText(r)
+              if(!txt) return '<span style="color:var(--sub)">—</span>'
               const manuell = r.balance_src === 'manuell'
               return `<span class="mono" style="font-weight:600;color:${manuell ? 'var(--sub)' : 'var(--ink)'}" title="${manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src}">${txt}</span>${manuell ? '<div style="font-size:10.5px;color:var(--sub)">manuell</div>' : ''}`
             }
@@ -23051,7 +23066,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.284'
+  const OS_TAB_BUILD = '2026-09-15.285'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
