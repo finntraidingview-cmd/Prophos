@@ -7023,7 +7023,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Alle Transfers</div>
-                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B"</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px">
                 <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
@@ -10106,9 +10106,26 @@
       }
       // neueste zuerst; Einträge ohne Zeitstempel (Archiv-Grenze) ans Ende
       alle.sort((a, b) => (b.e.ts || 0) - (a.e.ts || 0))
+      // Umbuchungen zwischen eigenen Wallets (Finn 15.09.2026: „manchmal gleichen
+      // sich Wallets untereinander Geld aus … eine Sekunde raus bei A, direkt rein
+      // bei B — das muss man mit einem Pfeil verlinken"): beide Seiten derselben
+      // Tx (Chain + Hash + Betrag/Symbol + Richtung A→B) werden zu EINER Zeile
+      // „A → B" — auch wenn nur eine Seite geladen ist (Filter, Fehler, Limit),
+      // bleibt sie als intern markiert. Fehlt der Hash (BNB-Archivgrenze), zählt
+      // Betrag + Minute als Schlüssel.
+      const gesehen = new Set(), zeilen = []
+      for(const x of alle){
+        const eig = x.e.other ? eigene.get(x.w.chain + ':' + x.e.other.toLowerCase()) : null
+        if(!eig || eig.id === x.w.id){ zeilen.push(x); continue }
+        const from = x.e.dir === 'raus' ? x.w : eig, to = x.e.dir === 'raus' ? eig : x.w
+        const key = [x.w.chain, x.e.hash || Math.round((x.e.ts || 0) / 60000), x.e.sym, x.e.amount.toFixed(6), from.id, to.id].join(':')
+        if(gesehen.has(key)) continue
+        gesehen.add(key)
+        zeilen.push({ ...x, intern:{ from, to } })
+      }
       const geladen = rows.filter(w => walFeed.has(w.id)).length
       tb.innerHTML = ''
-      $('wal-feed-empty').hidden = !!alle.length || !geladen
+      $('wal-feed-empty').hidden = !!zeilen.length || !geladen
       $('wal-feed-empty').textContent = rows.length ? 'Keine Transfers gefunden.' : 'Noch keine Wallets.'
       const msgEl = $('wal-feed-msg')
       if(!walFeedBusy && msgEl){
@@ -10116,12 +10133,30 @@
         msgEl.textContent = fehler ? `${stand} · ${fehler} Wallet${fehler === 1 ? '' : 's'} nicht ladbar` : stand
         msgEl.title = fehler ? rows.filter(w => walFeed.get(w.id)?.err).map(w => `${w.person_name} · ${WAL_CHAINS[w.chain].label}: ${walFeed.get(w.id).err}`).join('\n') : ''
       }
-      for(const { e, w } of alle.slice(0, walFeedShown)){
+      for(const { e, w, intern } of zeilen.slice(0, walFeedShown)){
         const c = WAL_CHAINS[w.chain]
         const stable = walTxStable(e.sym)
-        const eig = e.other ? eigene.get(w.chain + ':' + e.other.toLowerCase()) : null
         const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
         const tr = document.createElement('tr')
+        if(intern){
+          // Interne Umbuchung: EINE Zeile „A → B", violett (Design-Token --violet),
+          // statt rot „raus" bei A und grün „rein" bei B.
+          tr.style.background = 'var(--violet-tint)'
+          tr.title = `Umbuchung zwischen eigenen Wallets: ${intern.from.person_name} → ${intern.to.person_name}`
+          tr.innerHTML =
+            `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
+            `<td style="white-space:nowrap"><span class="wal-feed-person"></span> <span style="color:var(--sub)">·</span> <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin:0 5px 0 2px"></span>${c.label}</td>` +
+            `<td><span style="color:var(--violet);font-weight:650">⇄ intern</span></td>` +
+            `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
+            `<td style="white-space:nowrap"><span style="color:var(--violet);font-weight:650">→</span> <span class="wal-feed-eig" title="${escapeHtml(intern.to.address)} — eigene Wallet" style="font-weight:600"></span>` +
+              ` <a href="${c.explorer(intern.to.address)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
+            `<td style="text-align:right">${e.hash
+              ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
+          tr.querySelector('.wal-feed-person').textContent = intern.from.person_name
+          tr.querySelector('.wal-feed-eig').textContent = intern.to.person_name
+          tb.appendChild(tr)
+          continue
+        }
         tr.innerHTML =
           `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
           `<td style="white-space:nowrap"><span class="wal-feed-person"></span> <span style="color:var(--sub)">·</span> <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin:0 5px 0 2px"></span>${c.label}</td>` +
@@ -10130,21 +10165,17 @@
             : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}</td>` +
           `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
           `<td>${e.other
-            ? (eig
-                ? `<span class="wal-feed-eig" title="${escapeHtml(e.other)} — eigene Wallet" style="font-weight:600"></span>` +
-                  ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
-                : `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
-                  ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`)
+            ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
+              ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
             : '<span style="color:var(--sub)">–</span>'}</td>` +
           `<td style="text-align:right">${e.hash
             ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
         tr.querySelector('.wal-feed-person').textContent = w.person_name
-        if(eig) tr.querySelector('.wal-feed-eig').textContent = `${eig.person_name} · ${WAL_CHAINS[eig.chain].label}`
         tb.appendChild(tr)
       }
       const more = $('wal-feed-more')
-      more.hidden = alle.length <= walFeedShown
-      more.textContent = `Mehr anzeigen (${Math.min(walFeedShown, alle.length)} von ${alle.length})`
+      more.hidden = zeilen.length <= walFeedShown
+      more.textContent = `Mehr anzeigen (${Math.min(walFeedShown, zeilen.length)} von ${zeilen.length})`
       const note = $('wal-feed-note')
       note.hidden = !notes.size
       note.textContent = [...notes].join(' ')
@@ -23271,7 +23302,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.288'
+  const OS_TAB_BUILD = '2026-09-15.289'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
