@@ -7023,7 +7023,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Alle Transfers</div>
-                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B"</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B" · CoinPayments wird erkannt: Acc-Kauf / Payout</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px">
                 <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
@@ -9356,6 +9356,16 @@
                   hint:'T… (34 Zeichen)' }
     }
     let wallets = [], walSnaps = [], walOpened = false
+    /* Gegenseiten-Labels (15.09.2026, Finn: „CoinPayments-Dinge validieren … Anzeige
+     * für Account-Käufe"). Tabelle wallet_labels, Schlüssel chain:adresse (klein).
+     * kind: coinpayments_hot (Sammel-/Auszahlungs-Wallet 0x2dF9b935…, Seed per SQL),
+     * coinpayments_deposit (Einzahlungsadresse, die nachweislich dorthin sweept —
+     * lernt walLernen), extern (geprüft, kein CoinPayments). Explorer-Labels sind
+     * keyless nicht erreichbar, deshalb Erkennung über das Verhalten. */
+    const walLabels = new Map()   // 'arbitrum:0x…' → { chain, address, kind, label }
+    const walLabelKey = (chain, addr) => chain + ':' + String(addr || '').toLowerCase()
+    const walLabelVon = (chain, addr) => walLabels.get(walLabelKey(chain, addr)) || null
+    const walIstCp = row => !!row && (row.kind === 'coinpayments_hot' || row.kind === 'coinpayments_deposit')
     const walBal = new Map()   // wallet.id → { usdt:Summe aller Stables, coin, coinUsdt:Number|null, parts:{USDT,USDC,…}|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     const coinNf = new Intl.NumberFormat('de-DE', { maximumFractionDigits:4 })   // Coin-Mengen: „0,0042" ETH
@@ -9378,6 +9388,14 @@
         wallets = w.data || []
         walSnaps = s.data || []
         $('wal-db-warn').style.display = 'none'
+        // Labels getrennt und tolerant: fehlt die Tabelle (SQL noch nicht eingespielt),
+        // laufen Wallets/Balances trotzdem — nur die CoinPayments-Anzeige fehlt dann.
+        try{
+          const l = await supabase.from('wallet_labels').select('chain,address,kind,label')
+          if(l.error) throw l.error
+          walLabels.clear()
+          for(const r of (l.data || [])) walLabels.set(walLabelKey(r.chain, r.address), r)
+        }catch(e){ console.warn('[wallet] labels:', e.message || e) }
         walRender()
       }catch(e){
         const m = e.message || ''
@@ -9818,7 +9836,17 @@
       if(!r.ok) throw new Error('Blockscout: HTTP ' + r.status)
       const d = await r.json()
       const me = w.address.toLowerCase()
-      const list = (d.items || []).map(t => {
+      // Nur die bekannten Stable-Contracts der Chain zählen (15.09.2026, Befund an
+      // Moritz' Wallet: nach jeder echten 239-USDC-Zahlung tauchten Fake-Token
+      // „UႽD‌C" mit Lookalike-Adressen auf — Adress-Poisoning). Fremde Token
+      // werden gezählt und als Hinweis genannt, nie als echte Zahlung gezeigt.
+      const bekannt = new Set(Object.values(c.stables).map(a => a.toLowerCase()))
+      let fremd = 0
+      const list = (d.items || []).filter(t => {
+        const ok = bekannt.has(String(t.token?.address || t.token?.address_hash || '').toLowerCase())
+        if(!ok) fremd++
+        return ok
+      }).map(t => {
         const from = t.from?.hash || '', to = t.to?.hash || ''
         const raus = from.toLowerCase() === me
         const dec = Number(t.total?.decimals ?? t.token?.decimals ?? 6)
@@ -9829,7 +9857,7 @@
                  other: raus ? to : from,
                  hash: t.transaction_hash || t.tx_hash || '' }
       }).slice(0, WAL_TX_N)
-      return { list, note: null }
+      return { list, note: fremd ? `${fremd} Transfer${fremd === 1 ? '' : 's'} unbekannter Token ausgeblendet — nur USDT/USDC-Contracts zählen (Schutz vor Adress-Poisoning: nie Adressen aus der Historie kopieren).` : null }
     }
 
     async function walTxBnbLogs(c, w){
@@ -9957,6 +9985,69 @@
       return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`
     }
 
+    // CoinPayments-Anzeige für eine Transfer-Zeile (Feed + Einzel-Panel):
+    // Gegenseite „CoinPayments" statt Adresse, dazu Chip „Acc-Kauf" (raus) bzw.
+    // „Payout" (rein). Ohne Label: normale Adresse, kein Chip.
+    function walCpHtml(w, e, c){
+      const row = e.other ? walLabelVon(w.chain, e.other) : null
+      if(!walIstCp(row)) return null
+      const was = row.kind === 'coinpayments_hot' ? 'Sammel-/Auszahlungs-Wallet' : 'Einzahlungsadresse (leitet an die Sammeladresse weiter)'
+      return {
+        gegen: `<span style="font-weight:600" title="${escapeHtml(e.other)} — CoinPayments ${was}">${escapeHtml(row.label || 'CoinPayments')}</span>` +
+               ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`,
+        chip: `<span class="chip" style="background:var(--violet-tint);color:var(--violet);margin-left:6px;padding:1px 7px;font-size:10.5px">${e.dir === 'raus' ? 'Acc-Kauf' : 'Payout'}</span>`
+      }
+    }
+
+    /* Einzahlungsadressen lernen (15.09.2026): eine unbekannte Gegenseite einer
+     * AUSGEHENDEN Zahlung ist CoinPayments, wenn sie selbst an die Sammeladresse
+     * weiterleitet — an 7 echten Einzahlungsadressen geprüft, alle 28 Weiter-
+     * leitungen gingen an 0x2dF9b935…, meist binnen 5 Minuten. Pro Adresse EIN
+     * Blockscout-Call, Ergebnis (auch „extern") landet in wallet_labels, damit
+     * es nie wieder kostet. Nur Chains mit txApi (Ethereum/Arbitrum/Polygon);
+     * BNB/Solana/Tron kennen nur, was schon in der Tabelle steht. */
+    let walLernBusy = false
+    async function walLernen(){
+      if(walLernBusy) return
+      walLernBusy = true
+      try{
+        const offen = new Map()   // key → { chain, address, c }
+        for(const w of wallets){
+          const c = WAL_CHAINS[w.chain]
+          const f = walFeed.get(w.id)
+          if(!c?.txApi || !f?.res) continue
+          const hot = [...walLabels.values()].some(r => r.chain === w.chain && r.kind === 'coinpayments_hot')
+          if(!hot) continue   // ohne bekannte Sammeladresse auf dieser Chain gibt es nichts zu prüfen
+          for(const e of f.res.list){
+            if(e.dir !== 'raus' || !e.other) continue
+            const key = walLabelKey(w.chain, e.other)
+            if(walLabels.has(key) || offen.has(key)) continue
+            if(wallets.some(x => x.chain === w.chain && x.address.toLowerCase() === e.other.toLowerCase())) continue
+            offen.set(key, { chain:w.chain, address:e.other.toLowerCase(), c })
+          }
+        }
+        let n = 0, neu = 0
+        for(const { chain, address, c } of offen.values()){
+          if(n++ >= 25) break   // pro Lauf gedeckelt — der Rest beim nächsten Öffnen
+          const hots = new Set([...walLabels.values()].filter(r => r.chain === chain && r.kind === 'coinpayments_hot').map(r => r.address.toLowerCase()))
+          let kind = 'extern'
+          try{
+            const r = await fetch(c.txApi + '/api/v2/addresses/' + address + '/token-transfers?type=ERC-20')
+            if(!r.ok) continue   // Blockscout-Fehler: nicht als „extern" festschreiben
+            const d = await r.json()
+            if((d.items || []).some(t => String(t.from?.hash || '').toLowerCase() === address && hots.has(String(t.to?.hash || '').toLowerCase()))) kind = 'coinpayments_deposit'
+          }catch(_){ continue }
+          const row = { chain, address, kind, label: kind === 'coinpayments_deposit' ? 'CoinPayments' : null, source:'auto' }
+          walLabels.set(walLabelKey(chain, address), row)
+          if(kind === 'coinpayments_deposit') neu++
+          supabase.from('wallet_labels').upsert(row, { onConflict:'chain,address' }).then(({ error }) => { if(error) console.warn('[wallet] label speichern:', error.message) })
+          if(neu) walFeedRender()   // erkannte Adressen sofort zeigen
+          await new Promise(res => setTimeout(res, 250))   // Blockscout nicht hämmern
+        }
+        walFeedRender()
+      }finally{ walLernBusy = false }
+    }
+
     function walTxRender(w, res){
       const c = WAL_CHAINS[w.chain]
       const msg = $('wal-tx-msg'), note = $('wal-tx-note'), tb = $('wal-tx-rows')
@@ -9972,14 +10063,15 @@
       for(const e of res.list){
         const stable = walTxStable(e.sym)
         const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
+        const cp = walCpHtml(w, e, c)
         const tr = document.createElement('tr')
         tr.innerHTML =
           `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
-          `<td>${e.dir === 'rein'
+          `<td style="white-space:nowrap">${e.dir === 'rein'
             ? '<span style="color:var(--good);font-weight:650">↓ rein</span>'
-            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}</td>` +
+            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}${cp ? cp.chip : ''}</td>` +
           `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
-          `<td>${e.other
+          `<td>${cp ? cp.gegen : e.other
             ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
               ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
             : '<span style="color:var(--sub)">–</span>'}</td>` +
@@ -10076,6 +10168,7 @@
         walFeedStand = new Date()
         walFeedRender()
       }finally{ walFeedBusy = false }
+      walLernen()   // unbekannte Gegenseiten prüfen (CoinPayments-Sweep), läuft im Hintergrund
     }
 
     function walFeedRender(){
@@ -10157,14 +10250,15 @@
           tb.appendChild(tr)
           continue
         }
+        const cp = walCpHtml(w, e, c)
         tr.innerHTML =
           `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
           `<td style="white-space:nowrap"><span class="wal-feed-person"></span> <span style="color:var(--sub)">·</span> <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin:0 5px 0 2px"></span>${c.label}</td>` +
-          `<td>${e.dir === 'rein'
+          `<td style="white-space:nowrap">${e.dir === 'rein'
             ? '<span style="color:var(--good);font-weight:650">↓ rein</span>'
-            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}</td>` +
+            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}${cp ? cp.chip : ''}</td>` +
           `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
-          `<td>${e.other
+          `<td>${cp ? cp.gegen : e.other
             ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
               ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
             : '<span style="color:var(--sub)">–</span>'}</td>` +
@@ -23302,7 +23396,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.289'
+  const OS_TAB_BUILD = '2026-09-15.290'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
