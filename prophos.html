@@ -13303,7 +13303,18 @@
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
-        const pos = s.master_positions || []
+        // Eingefrorener Snapshot (s.note gesetzt) ist KEIN Beweis für Master-
+        // Positionen — die Liste ist die von damals (Finn 15.09.2026 am Screen-
+        // shot: Aurels FundedNext5503 stand tagelang als „BUY NDX100 · MASTER
+        // LONG 2 Lt · M -90.20 USD · vor 6s" in der Flotte, obwohl das Konto
+        // längst zu war — der Copier pusht die stehengebliebene Positionsliste
+        // alle 5 s frisch, „vor 6s" war das Alter des Pushs, nicht der Daten).
+        // Gleiche Regel wie firmLiveRichtungen und der Copier selbst
+        // ('Beweis oder leer', 25.08.): bei note zählen nur die live vom Hedge-
+        // Konto gelesenen Hedges — die laufen dann als Waisen in den Alarm.
+        // Die Eingefroren-Warnung selbst wohnt weiter auf dem Copier-Panel
+        // des Besitzers, dort lässt sie sich auch beheben.
+        const pos = s.note ? [] : (s.master_positions || [])
         const hedgesMap = s.hedges || {}
         const hedgeLots = ident => {
           const hs = hedgesMap[String(ident)]
@@ -13368,7 +13379,7 @@
             lotChip('MASTER', Number(p.volume), p.type === 0 ? 'LONG' : 'SHORT') + lotChip('SLAVE', hedgeLots(p.ident), hDir) + pnl + hedgePnl(p.ident) + symF + zeitChip(null, frisch, alterS),
             frisch, 'mt5'))
         }
-        if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ Hedge OHNE Master: `
+        if(waisen.length) lege(alarme, pKey, `<div style="font-size:11.5px;margin:3px 0;color:#D92D20;font-weight:600">⚠ ${s.note ? 'Hedge bei EINGEFRORENEM Master-Snapshot' : 'Hedge OHNE Master'} (${esc(r.instance)}): `
           + waisen.map(([k, v]) => v.map(h =>
               `${Number(h.volume || 0).toFixed(2)} Lots (Ticket ${esc(String(h.ticket ?? '?'))})`).join(', ')).join(' · ')
           + ` — im Hedge-Terminal prüfen!</div>`)
@@ -23396,7 +23407,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.290'
+  const OS_TAB_BUILD = '2026-09-16.291'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
