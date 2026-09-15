@@ -6629,6 +6629,23 @@
               </div>
             </div>
 
+            <!-- NÄCHSTE PAYOUTS — Kalender (15.09.2026, Finns Wunsch: „im Admin
+                 unter Payouts sehen, an welchen Tagen die nächsten Payouts
+                 angefragt werden können"). Quelle accounts.payout_ready_at über
+                 alle Personen (Service-Key-Aggregation wie der Rest des Tabs),
+                 ein Block pro Datum, darin Person · Account · Firma. Überfällige
+                 Termine stehen oben in Orange, heute in Grün. Ohne Termine
+                 bleibt das Panel unsichtbar. -->
+            <div class="panel" id="adm-f-cal-panel" hidden style="margin-bottom:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Nächste Payouts</div>
+                  <div class="panel-sub">Ab wann je Account der Payout angefragt werden kann — über alle Personen</div>
+                </div>
+              </div>
+              <div id="adm-f-cal-rows" style="padding:0 18px 14px;display:flex;flex-direction:column;gap:10px"></div>
+            </div>
+
             <!-- PAYOUTS UNTERWEGS über ALLE Personen (02.09.2026, Finns Wunsch
                  nach der Admin-Übersicht): jede offene Anfrage aus
                  pending_payouts, Service-Key-Aggregation wie der Rest des Tabs.
@@ -7324,6 +7341,25 @@
           <label>Zählt ab (optional)</label>
           <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L. Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. „Zählt ab" nach einem Payout auf heute setzen, dann startet der Zähler neu.</div>
+        </div>
+      </div>
+
+      <!-- Payout-Termin (15.09.2026, Finn: "bei CFD-Accounts direkt ein Feld, an
+           welchem Datum ich den Payout anfragen kann") — CFD-Firmen zahlen in
+           Zeitfenstern, das nächste Fenster steht hier (Spalte payout_ready_at).
+           Nur bei CFD sichtbar: Live-Broker und Futures-Firmen (Einheit Kontrakte)
+           blenden den Block aus, siehe toggleAcPayoutSection(). -->
+      <div id="ac-payout-section">
+        <div class="modal-divider">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Payout <span style="font-weight:400;color:var(--sub);font-size:11.5px">(optional)</span>
+        </div>
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1">
+            <label>Payout anfragbar ab</label>
+            <input class="input mono" id="ac-payout-ready" type="date" autocomplete="off">
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Ab wann der nächste Payout angefragt werden kann. Steht auf der Account-Karte und im Admin-Kalender (Finanzen → Nächste Payouts). Beim Anfragen wird das Datum geleert — den nächsten Termin danach hier neu setzen.</div>
+          </div>
         </div>
       </div>
 
@@ -8763,6 +8799,53 @@
             const noteTd = tr.querySelector('.pr-note').closest('td')
             if(noteTd) noteTd.title = t.notes || ''
             tb.appendChild(tr)
+          }
+        }
+      }
+
+      // Nächste Payouts — Kalender (15.09.2026): accounts.payout_ready_at über
+      // alle Personen, gruppiert nach Datum. Reine Anzeige, rechnet nirgends rein.
+      const cal = admData.payout_ready || []
+      const calPanel = $('adm-f-cal-panel')
+      if(calPanel){
+        calPanel.hidden = !cal.length
+        const box = $('adm-f-cal-rows')
+        if(box){
+          box.innerHTML = ''
+          const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+          const byDay = new Map()
+          for(const r of cal){
+            const k = String(r.ready_at || '').slice(0,10)
+            if(!k) continue
+            if(!byDay.has(k)) byDay.set(k, [])
+            byDay.get(k).push(r)
+          }
+          for(const [tag, list] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))){
+            const tage = Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
+            const d = new Date(tag + 'T12:00:00Z')
+            const datum = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'short', timeZone:'UTC' })
+            const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen`
+              : tage === -1 ? 'seit gestern anfragbar' : `seit ${-tage} Tagen anfragbar`
+            const farbe = tage < 0 ? '#b6690a' : tage === 0 ? '#058a50' : 'var(--ink)'
+            const chipCls = tage < 0 ? 'chip-warn' : tage === 0 ? 'chip-good' : 'chip-neutral'
+            const row = document.createElement('div')
+            row.style.cssText = 'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'
+            const left = document.createElement('div')
+            left.style.cssText = 'min-width:118px;flex:0 0 auto'
+            left.innerHTML = `<div style="font-weight:600;font-size:13px;color:${farbe}"></div><div style="font-size:11px;color:var(--sub)"></div>`
+            left.children[0].textContent = datum
+            left.children[1].textContent = rel
+            const right = document.createElement('div')
+            right.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;flex:1 1 200px'
+            for(const r of list){
+              const c = document.createElement('span')
+              c.className = 'chip ' + chipCls
+              c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'}${r.account_firm ? ' · ' + r.account_firm : ''}`
+              c.title = r.ext ? `#${r.ext}` : ''
+              right.appendChild(c)
+            }
+            row.appendChild(left); row.appendChild(right)
+            box.appendChild(row)
           }
         }
       }
@@ -15906,6 +15989,8 @@
       goalMinProfit:  row.goal_min_profit  != null ? Number(row.goal_min_profit)  : null,
       goalDoneOffset: row.goal_done_offset != null ? Number(row.goal_done_offset) : null,
       goalSince:      row.goal_since || null,
+      // Payout-Termin (15.09.2026): ab wann der nächste Payout angefragt werden kann
+      payoutReadyAt:  row.payout_ready_at || null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
         login:    row.cred_login    || '',
         password: row.cred_password || '',
@@ -15948,7 +16033,8 @@
       goal_target:      a.goalTarget     != null ? a.goalTarget     : null,
       goal_min_profit:  a.goalMinProfit  != null ? a.goalMinProfit  : null,
       goal_done_offset: a.goalDoneOffset != null ? a.goalDoneOffset : null,
-      goal_since:       a.goalSince      || null
+      goal_since:       a.goalSince      || null,
+      payout_ready_at:  a.payoutReadyAt  || null
     }
     if(a.creds){
       row.cred_login    = a.creds.login    || null
@@ -16015,6 +16101,8 @@
     goalKind:      document.getElementById('ac-goal-kind'),
     goalTarget:    document.getElementById('ac-goal-target'),
     goalSince:     document.getElementById('ac-goal-since'),
+    payoutReady:   document.getElementById('ac-payout-ready'),
+    payoutSec:     document.getElementById('ac-payout-section'),
     maSec:    document.getElementById('ac-ma-section'),
     maTok:    document.getElementById('ac-ma-token'),
     maAcc:    document.getElementById('ac-ma-account'),
@@ -16565,6 +16653,9 @@
         // Fortschritts-Ziel (10.09.2026): "🏆 3/5 Winning Days ●●●○○"
         const zielHtml = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
         if(zielHtml) metaParts.push(zielHtml)
+        // Payout-Termin (15.09.2026): "💸 Payout ab 22.09. · in 7 Tagen" / "anfragbar seit …"
+        const payoutHtml = (typeof payoutReadyBadgeHtml === 'function') ? payoutReadyBadgeHtml(a) : ''
+        if(payoutHtml) metaParts.push(payoutHtml)
         // Parent-/Successor-Chain
         if(parentAcc){
           metaParts.push(`<span style="color:var(--violet)">↳ Nachfolger von <a href="#" data-acc-jump="${escapeHtml(parentAcc.id)}" style="color:var(--violet);text-decoration:underline">${escapeHtml(parentAcc.name)}</a></span>`)
@@ -16751,6 +16842,7 @@
       if(accEls.goalKind)   accEls.goalKind.value   = editAccount.goalKind || ''
       if(accEls.goalTarget) accEls.goalTarget.value = editAccount.goalTarget != null ? editAccount.goalTarget : ''
       if(accEls.goalSince)  accEls.goalSince.value  = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
+      if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
       accEls.maAcc.value = editAccount.ma?.accountId || ''
@@ -16775,6 +16867,7 @@
       if(accEls.goalKind)   accEls.goalKind.value   = ''
       if(accEls.goalTarget) accEls.goalTarget.value = ''
       if(accEls.goalSince)  accEls.goalSince.value  = ''
+      if(accEls.payoutReady) accEls.payoutReady.value = ''
     }
     // Passwort-Feld immer verdeckt starten
     // Passwort standardmäßig SICHTBAR (Finn, 15.08.2026) — Toggle kann weiter verbergen
@@ -16788,6 +16881,7 @@
     accEls.msg.textContent = ''
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
+    toggleAcPayoutSection()
     if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
@@ -16802,6 +16896,17 @@
 
   function toggleMaSection(){
     accEls.maSec.hidden = accEls.type.value !== 'live'
+  }
+
+  // Payout-Block nur bei CFD (15.09.2026): Live-Broker zahlen nichts aus,
+  // Futures-Firmen (Firm-Spec mit Einheit 'Kontrakte', gleiche Erkennung wie
+  // Orbit) laufen nicht über Zeitfenster. Erkennung über den getippten Firm-
+  // Namen — deshalb an type UND firm gehängt.
+  function toggleAcPayoutSection(){
+    if(!accEls.payoutSec) return
+    const firm = accEls.firm?.value.trim() || ''
+    const istFutures = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(firm) : false
+    accEls.payoutSec.hidden = accEls.type.value === 'live' || istFutures
   }
 
   function setModalMsg(text, kind){
@@ -16857,6 +16962,9 @@
     const goalKindVal   = accEls.goalKind?.value || null
     const goalTargetNum = parseInt(accEls.goalTarget?.value, 10)
     const goalSinceVal  = accEls.goalSince?.value || null
+    // Payout-Termin (15.09.2026): nur für CFD-Accounts sinnvoll — bei Live-
+    // Broker und Futures-Firmen ist der Block ausgeblendet und wird geleert.
+    const payoutReadyVal = (accEls.payoutSec && !accEls.payoutSec.hidden) ? (accEls.payoutReady?.value || null) : null
     // Zugangsdaten einlesen (optional)
     const credObj = {
       login:    accEls.credLogin?.value.trim()    || '',
@@ -16879,6 +16987,7 @@
       goalMinProfit:  goalKindVal && vorher?.goalMinProfit  != null ? vorher.goalMinProfit  : null,
       goalDoneOffset: goalKindVal && vorher?.goalDoneOffset != null ? vorher.goalDoneOffset : null,
       goalSince:      goalKindVal ? goalSinceVal : null,
+      payoutReadyAt:  type !== 'live' ? payoutReadyVal : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -16947,6 +17056,7 @@
           goal_min_profit:  acc.goalMinProfit,
           goal_done_offset: acc.goalDoneOffset,
           goal_since:       acc.goalSince,
+          payout_ready_at:  acc.payoutReadyAt,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
           cred_password: acc.creds?.password || null,
@@ -17094,6 +17204,7 @@
   if(accEls.cancel)  accEls.cancel.addEventListener('click', closeAccountModal)
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
+  if(accEls.type)    accEls.type.addEventListener('change', toggleAcPayoutSection)
 
   /* ── Server automatisch vorausfüllen, sobald die Firma gewählt ist (Punkt 2, 24.07.2026) ──
    * Bleibt frei bearbeitbar: hat der User den Server selbst angefasst, wird nicht überschrieben.
@@ -17108,6 +17219,8 @@
   if(accEls.firm){
     accEls.firm.addEventListener('input',  acMaybeFillServer)
     accEls.firm.addEventListener('change', acMaybeFillServer)
+    accEls.firm.addEventListener('input',  toggleAcPayoutSection)
+    accEls.firm.addEventListener('change', toggleAcPayoutSection)
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -22655,7 +22768,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.275'
+  const OS_TAB_BUILD = '2026-09-15.276'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25197,6 +25310,59 @@
     return `<span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${f.done ? ' ✓' : ''}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}`
   }
 
+  /* Payout-Termin (15.09.2026, Finn: "bei CFD-Accounts ein Feld, an welchem
+   * Datum ich den Payout anfragen kann"). Rein rechnend: Tage bis zum Termin
+   * in Berlin-Kalendertagen (UTC-Mittag-Trick wie zielPayoutReset, DST-fest).
+   * Live-Broker haben keinen Termin. Kein Urteil, keine Empfehlung — nur die
+   * Frage „ab wann geht's" beantwortet. */
+  function payoutReadyInfo(a){
+    if(!a || !a.payoutReadyAt || a.type === 'live') return null
+    const tag = String(a.payoutReadyAt).slice(0,10)
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return null
+    const heute = _deTodayStr()
+    const tage = Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
+    const d = new Date(tag + 'T12:00:00Z')
+    const kurz = d.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', timeZone:'UTC' })
+    const lang = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' })
+    const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen`
+      : tage === -1 ? 'seit gestern' : `seit ${-tage} Tagen`
+    return { tag, tage, kurz, lang, rel, faellig: tage <= 0 }
+  }
+
+  // Zeile für die Accounts-Tabelle (meta unter dem Namen)
+  function payoutReadyBadgeHtml(a){
+    const i = payoutReadyInfo(a)
+    if(!i) return ''
+    const farbe = i.faellig ? 'var(--good)' : 'var(--violet)'
+    const text = i.faellig ? `Payout anfragbar · ${i.rel}` : `Payout ab ${i.kurz} · ${i.rel}`
+    return `<span style="color:${farbe};font-weight:600" title="Payout anfragbar ab ${i.lang}">💸 ${text}</span>`
+  }
+
+  /* Payout angefragt → Termin ist verbraucht (15.09.2026). Läuft an denselben
+   * zwei Stellen wie zielPayoutReset (Anfrage-Flow + Direktbuchung). Das
+   * Datum wird geleert, nicht weitergerechnet — den Zyklus der Firma kennt
+   * Prophos nicht, den nächsten Termin setzt Finn im Account-Modal. Fehler
+   * werden BENANNT (Toast mit Handgriff) statt still geschluckt. */
+  async function payoutReadyClear(accountId){
+    if(!accountId) return
+    const a = (accounts || []).find(x => String(x.id) === String(accountId))
+    if(!a || !a.payoutReadyAt) return
+    try{
+      const { data, error } = await supabase
+        .from('accounts').update({ payout_ready_at: null }).eq('id', a.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(a.id))
+      if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof atToast === 'function')
+        atToast(`💸 Payout-Termin geleert · ${a.name} — nächsten Termin im Account-Modal setzen`, 'end')
+    }catch(e){
+      console.warn('[payout] Termin leeren fehlgeschlagen:', e.message || e)
+      if(typeof atToast === 'function')
+        atToast(`⚠ Payout-Termin für ${a.name} konnte nicht geleert werden — „Payout anfragbar ab" im Account-Modal von Hand leeren`, 'end')
+    }
+  }
+
   /* Toast "Winning Day abgehakt" nach Trade-Ende — einmal pro Account pro Tag
    * (localStorage-Merker, gleiches Aufräum-Muster wie setTradedToday). Hängt an
    * allen drei Fertig-Pfaden: Server-Wächter-Poll (planPollTick), Browser-
@@ -26668,6 +26834,8 @@
         closeFinModal()
         // Winning-Day-Zähler des Accounts neu starten (10.09.2026, Finns Wunsch)
         if(typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
+        // Payout-Termin ist verbraucht (15.09.2026) — leeren, nächsten setzt Finn
+        if(typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
       }catch(e){
         msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
       }
@@ -26697,6 +26865,7 @@
       // Winning-Day-Reset auch hier. Das ✓ Erhalten einer Anfrage läuft NICHT
       // hierüber (finReceivePending) und resettet bewusst nicht nochmal.
       if(kind === 'payout' && typeof zielPayoutReset === 'function') await zielPayoutReset(accountId)
+      if(kind === 'payout' && typeof payoutReadyClear === 'function') await payoutReadyClear(accountId)
     }catch(e){
       msgEl.textContent = 'Fehler: ' + (e.message || e); msgEl.className = 'modal-msg err'
     }

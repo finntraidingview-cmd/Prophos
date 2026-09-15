@@ -3508,7 +3508,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3749,6 +3749,34 @@ def admin_build_overview():
         })
     recv_rows.sort(key=lambda r: r["occurred_at"], reverse=True)   # neueste zuerst
 
+    # NÄCHSTE PAYOUTS — Kalender (15.09.2026, Finns Wunsch: „im Admin unter
+    # Payouts sehen, an welchen Tagen die nächsten Payouts angefragt werden
+    # können"). Quelle ist accounts.payout_ready_at, das Finn beim Anlegen /
+    # Bearbeiten eines CFD-Accounts einträgt. Archivierte Accounts und Live-
+    # Broker raus, ausgeblendete Personen wie überall. Auch VERGANGENE Termine
+    # bleiben drin — ein überfälliger Termin ist genau die Information, die
+    # der Kalender liefern soll (angefragt = Datum wird im Frontend geleert).
+    payout_ready = []
+    for a in accounts:
+        d = (a.get("payout_ready_at") or "").strip()
+        if not d:
+            continue
+        aid = str(a["id"])
+        uid = str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live" or aid in archived or uid in excluded_ids:
+            continue
+        payout_ready.append({
+            "account_id": aid,
+            "user_id": uid,
+            "person": disp.get(uid) or names.get(uid, uid[:8]),
+            "account_name": a.get("name") or "",
+            "account_firm": (a.get("firm") or "").strip(),
+            "ext": a.get("external_id") or "",
+            "type": a.get("account_type") or "",
+            "ready_at": d[:10],
+        })
+    payout_ready.sort(key=lambda r: (r["ready_at"], r["person"], r["account_name"]))
+
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
@@ -3760,6 +3788,7 @@ def admin_build_overview():
     return {"accounts": rows, "people": people_list, "firms": firm_list,
             "pending_payouts": pending_rows,
             "payouts_received": recv_rows,
+            "payout_ready": payout_ready,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids)}
