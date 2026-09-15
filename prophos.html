@@ -768,9 +768,11 @@
   #dashboard-view .note-btn.copied{background:rgba(16,185,129,.12);color:#0f9c7a;border-color:transparent}
   #dashboard-view .note-btn-del:hover{background:rgba(240,68,56,.1);color:#F04438;border-color:transparent}
   #dashboard-view .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
-  /* Meta-Wallet: 6 Karten (Gesamt + 5 Chains, seit BNB 28.08.2026) — muss VOR der
-     960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt */
-  #adm-pane-wallet .kpis{grid-template-columns:repeat(6,1fr)}
+  /* Meta-Wallet: 7 Karten (Gesamt + 6 Chains, seit Ethereum 15.09.2026) — muss VOR der
+     960px-Media-Query stehen, damit mobil weiterhin die 2-Spalten-Regel gewinnt.
+     auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
+     nebeneinander, darunter bricht die letzte Karte um statt die Beträge abzuschneiden. */
+  #adm-pane-wallet .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
   @media (max-width:960px){#dashboard-view .kpis{grid-template-columns:repeat(2,1fr)}}
   #dashboard-view .kpi{
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
@@ -6881,6 +6883,11 @@
               <div class="kpi-delta delta-neutral" id="wal-k-total-sub">–</div>
             </div>
             <div class="kpi">
+              <div class="kpi-label">Ethereum</div>
+              <div class="kpi-value" id="wal-k-ethereum">–</div>
+              <div class="kpi-delta delta-neutral" id="wal-k-ethereum-sub">–</div>
+            </div>
+            <div class="kpi">
               <div class="kpi-label">Arbitrum</div>
               <div class="kpi-value" id="wal-k-arbitrum">–</div>
               <div class="kpi-delta delta-neutral" id="wal-k-arbitrum-sub">–</div>
@@ -6917,6 +6924,7 @@
               </div>
               <div class="adm-dist" id="wal-person-dist"></div>
               <div style="display:flex;gap:14px;margin-top:10px;font-size:11.5px;color:var(--sub)">
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#627eea;margin-right:5px"></span>Ethereum</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:5px"></span>Arbitrum</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#8247e5;margin-right:5px"></span>Polygon</span>
                 <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#f0b90b;margin-right:5px"></span>BNB</span>
@@ -6942,13 +6950,14 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Wallets</div>
-                <div class="panel-sub">Pro Person bis zu fünf Adressen — Arbitrum, Polygon, BNB Chain, Solana, Tron · Zeile anklicken zeigt die letzten Transfers</div>
+                <div class="panel-sub">Pro Person bis zu sechs Adressen — Ethereum, Arbitrum, Polygon, BNB Chain, Solana, Tron · Zeile anklicken zeigt die letzten Transfers</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">
               <input id="wal-add-person" list="wal-person-names" placeholder="Person" autocomplete="off" style="flex:1;min-width:120px;padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
               <datalist id="wal-person-names"></datalist>
               <select id="wal-add-chain" style="padding:9px 11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
+                <option value="ethereum">Ethereum</option>
                 <option value="arbitrum">Arbitrum</option>
                 <option value="polygon">Polygon</option>
                 <option value="bnb">BNB Chain</option>
@@ -9226,6 +9235,24 @@
        * USDT-Contract ab). Standard sind 6 Dezimalstellen; Chains, deren Stables
        * davon abweichen, tragen stableDec (BNB: 18) — die EVM-Leselogik teilt
        * durch 10**stableDec. Solana/Tron bleiben fix 6-stellig. */
+      // Ethereum Mainnet (15.09.2026, Finn: „füg eth dazu"): gleiche MetaMask-
+      // Adresse wie Arbitrum/Polygon/BNB, nur RPC + Contracts unterscheiden sich.
+      // USDT/USDC sind hier 6-stellig (Standard), Coin ist ETH — teilt sich Preis
+      // (ETHUSDT) und Gecko-ID mit Arbitrum, walPx dedupliziert das. Transfers
+      // über Blockscout wie Arbitrum/Polygon (eth.blockscout.com, keyless).
+      ethereum: { label:'Ethereum', col:'#627eea', evm:true,
+                  coin:'ETH', px:'ETHUSDT', gecko:'ethereum',
+                  stables:{ 'USDT':'0xdAC17F958D2ee523a2206206994597C13D831ec7',      // USDT (Tether, ERC-20)
+                            'USDC':'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' },    // USDC (Circle, ERC-20)
+                  // Fallback drpc statt cloudflare-eth: Cloudflare antwortet keyless nur
+                  // noch mit -32046 „Cannot fulfill request" (15.09.2026 live geprüft).
+                  rpc:'https://ethereum-rpc.publicnode.com',
+                  rpcFallback:'https://eth.drpc.org',
+                  txApi:'https://eth.blockscout.com',
+                  explorer: a => 'https://etherscan.io/address/' + a,
+                  tx: h => 'https://etherscan.io/tx/' + h,
+                  valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
+                  hint:'0x… (42 Zeichen)' },
       arbitrum: { label:'Arbitrum', col:'#3b82f6', evm:true,
                   coin:'ETH', px:'ETHUSDT', gecko:'ethereum',
                   stables:{ 'USDT':'0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',      // USDT / USD₮0 (Arbitrum One)
@@ -9405,7 +9432,7 @@
       if(!c) throw new Error('Unbekannte Chain: ' + w.chain)
       if(c.evm){
         // Jeder Stable per balanceOf-eth_call, Coin per eth_getBalance — ein Pfad für
-        // alle EVM-Chains (Arbitrum, Polygon), nur RPC + Contracts unterscheiden sich.
+        // alle EVM-Chains (Ethereum, Arbitrum, Polygon, BNB), nur RPC + Contracts unterscheiden sich.
         const data = '0x70a08231' + w.address.slice(2).toLowerCase().padStart(64, '0')
         const labels = Object.keys(c.stables)
         const [nat, ...toks] = await Promise.all([
@@ -9724,7 +9751,7 @@
      * hingeflossen sind") — gleiche Doktrin wie die Balances: keyless, direkt
      * aus dem Browser, kein app.py-Umweg, nie Keys. Quellen je Chain, alle am
      * 03.09.2026 live aus dem Browser geprüft:
-     *   Arbitrum/Polygon  Blockscout API v2 (offen, CORS-frei; Arbiscan/
+     *   Ethereum/Arbitrum/Polygon  Blockscout API v2 (offen, CORS-frei; Arbiscan/
      *                     Etherscan V2 verlangen inzwischen API-Keys)
      *   BNB Chain         KEIN offener Verlaufs-Endpoint (Etherscan V2: „Free
      *                     API access is not supported for this chain", Routescan:
@@ -23066,7 +23093,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.285'
+  const OS_TAB_BUILD = '2026-09-15.286'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
