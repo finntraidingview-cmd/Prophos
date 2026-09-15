@@ -4889,6 +4889,17 @@
                 <select class="input" id="tc-status-account"></select>
               </div>
             </div>
+            <!-- Manueller Winning Day (15.09.2026, Finn: "bei jedem Trade ein
+                 Kästchen 'Dieser Trade war ein Winning Day', +1 pro Klick").
+                 Nur sichtbar, wenn ein Account des Plans manuell zählt
+                 (tcWinningDayPrepare); heute schon abgehakt = Haken gesperrt. -->
+            <div class="field" style="grid-column:span 2" id="tc-winning-day-wrap" hidden>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+                <input type="checkbox" id="tc-winning-day" style="width:16px;height:16px;flex-shrink:0">
+                <span style="color:var(--ink);font-weight:500" id="tc-winning-day-label">🏆 Dieser Trade war ein Winning Day</span>
+              </label>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-winning-day-hint"></div>
+            </div>
             <div class="field" style="grid-column:span 2">
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
@@ -5398,6 +5409,35 @@
           <span id="fin-history-chev" style="transition:transform .15s;display:inline-block">›</span> <span id="fin-history-label">Historie</span>
         </button>
         <div id="fin-history-list" style="display:none;padding:0 18px 16px"></div>
+      </div>
+
+      <!-- PAYOUT-STATUS JE ACCOUNT (15.09.2026, Finn: „unter Finanzen sehe ich
+           die CFD-Accounts, wo die Payouts sind, und alle Future-Accounts, wie
+           viele Winning Days ich habe"). Alle aktiven Funded-Accounts: CFD mit
+           Payout-Termin (accounts.payout_ready_at), Futures mit Winning-Day-
+           Stand (zielFortschritt) — anfragbare zuerst. Reine Anzeige.
+           Ohne Funded-Accounts bleibt das Panel unsichtbar. -->
+      <div class="panel" id="fin-status-panel" hidden style="margin-bottom:14px">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Payout-Status je Account</div>
+            <div class="panel-sub">CFD: ab wann der Payout angefragt werden kann · Futures: Winning Days bis zum Payout</div>
+          </div>
+          <div style="text-align:right">
+            <div class="tnum" id="fin-status-ready" style="font-size:20px;font-weight:800;color:var(--good)">–</div>
+            <div style="font-size:11px;color:var(--sub)">anfragbar</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="t">
+            <thead><tr>
+              <th style="padding-left:20px">Account</th>
+              <th>Firma</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody id="fin-status-rows"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- PAYOUTS UNTERWEGS (02.09.2026, Finns Pending-Flow): angefragt, aber
@@ -7368,11 +7408,27 @@
           <label>Ziel (Tage)</label>
           <input class="input mono" id="ac-goal-target" type="number" step="1" min="1" placeholder="5" autocomplete="off">
         </div>
+        <!-- Zählweise (15.09.2026, Finn: "bei Futures ein Kästchen 'Dieser Trade war
+             ein Winning Day', +1 pro Klick") — manuell = Stand in goal_done_offset,
+             +1 über das Häkchen im Trade-Abschluss (einmal pro Tag); automatisch =
+             Tages-P&L aus den trade_plans wie seit 10.09. Futures-Firmen starten
+             manuell (Master-P&L kommt dort nicht verlässlich an). -->
+        <div class="field">
+          <label>Zählweise</label>
+          <select class="input" id="ac-goal-mode">
+            <option value="auto">Automatisch (Tages-P&L aus Trades)</option>
+            <option value="manual">Manuell (Häkchen beim Trade-Abschluss)</option>
+          </select>
+        </div>
+        <div class="field" id="ac-goal-count-wrap">
+          <label>Stand (bisher)</label>
+          <input class="input mono" id="ac-goal-count" type="number" step="1" min="0" placeholder="0" autocomplete="off">
+        </div>
         <!-- Min-Gewinn pro Tag + Schon erledigt raus (Finn 10.09.2026, "das da weg") —
              bestehende Werte bleiben in der DB und werden beim Bearbeiten unveraendert
              weitergetragen (gleiches Muster wie die Trade-Limits vom 02.09.); die
              Zaehlung in zielFortschritt beruecksichtigt sie weiterhin, falls gesetzt. -->
-        <div class="field" style="grid-column:1/-1">
+        <div class="field" style="grid-column:1/-1" id="ac-goal-since-wrap">
           <label>Zählt ab (optional)</label>
           <input class="input mono" id="ac-goal-since" type="date" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Winning Day = Tag mit positivem Tages-P&L. Trading Day = jeder Tag mit mindestens einem abgeschlossenen Trade — auch 0,01-Evertrades. „Zählt ab" nach einem Payout auf heute setzen, dann startet der Zähler neu.</div>
@@ -8849,9 +8905,10 @@
           box.innerHTML = ''
           const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
           const byDay = new Map()
+          const wd = []   // Futures: manuell gezählte Winning Days (ohne Datum)
           for(const r of cal){
             const k = String(r.ready_at || '').slice(0,10)
-            if(!k) continue
+            if(!k){ if(r.wd_target > 0) wd.push(r); continue }
             if(!byDay.has(k)) byDay.set(k, [])
             byDay.get(k).push(r)
           }
@@ -8877,6 +8934,27 @@
               c.className = 'chip ' + chipCls
               c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'}${r.account_firm ? ' · ' + r.account_firm : ''}`
               c.title = r.ext ? `#${r.ext}` : ''
+              right.appendChild(c)
+            }
+            row.appendChild(left); row.appendChild(right)
+            box.appendChild(row)
+          }
+          // Winning Days (15.09.2026 abends): eine Zeile für alle Futures-
+          // Accounts mit manueller Zählung — anfragbare zuerst, grün.
+          if(wd.length){
+            wd.sort((a, b) => (b.wd_ready - a.wd_ready) || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target)))
+            const row = document.createElement('div')
+            row.style.cssText = 'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding-top:6px;border-top:1px solid var(--border)'
+            const left = document.createElement('div')
+            left.style.cssText = 'min-width:118px;flex:0 0 auto'
+            left.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink)">Winning Days</div><div style="font-size:11px;color:var(--sub)">Futures · manuell gezählt</div>'
+            const right = document.createElement('div')
+            right.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;flex:1 1 200px'
+            for(const r of wd){
+              const c = document.createElement('span')
+              c.className = 'chip ' + (r.wd_ready ? 'chip-good' : 'chip-neutral')
+              c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'} · 🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}${r.wd_ready ? ' · anfragbar' : ''}`
+              c.title = r.account_firm || ''
               right.appendChild(c)
             }
             row.appendChild(left); row.appendChild(right)
@@ -16024,6 +16102,9 @@
       goalMinProfit:  row.goal_min_profit  != null ? Number(row.goal_min_profit)  : null,
       goalDoneOffset: row.goal_done_offset != null ? Number(row.goal_done_offset) : null,
       goalSince:      row.goal_since || null,
+      // Manuelle Zählung (15.09.2026): Stand = goalDoneOffset, +1 per Häkchen
+      goalManual:     !!row.goal_manual,
+      goalManualLast: row.goal_manual_last || null,
       // Payout-Termin (15.09.2026): ab wann der nächste Payout angefragt werden kann
       payoutReadyAt:  row.payout_ready_at || null,
       creds: (row.cred_login || row.cred_password || row.cred_server || row.cred_platform || row.cred_notes) ? {
@@ -16069,6 +16150,8 @@
       goal_min_profit:  a.goalMinProfit  != null ? a.goalMinProfit  : null,
       goal_done_offset: a.goalDoneOffset != null ? a.goalDoneOffset : null,
       goal_since:       a.goalSince      || null,
+      goal_manual:      !!a.goalManual,
+      goal_manual_last: a.goalManualLast || null,
       payout_ready_at:  a.payoutReadyAt  || null
     }
     if(a.creds){
@@ -16136,6 +16219,10 @@
     goalKind:      document.getElementById('ac-goal-kind'),
     goalTarget:    document.getElementById('ac-goal-target'),
     goalSince:     document.getElementById('ac-goal-since'),
+    goalSinceWrap: document.getElementById('ac-goal-since-wrap'),
+    goalMode:      document.getElementById('ac-goal-mode'),
+    goalCount:     document.getElementById('ac-goal-count'),
+    goalCountWrap: document.getElementById('ac-goal-count-wrap'),
     payoutReady:   document.getElementById('ac-payout-ready'),
     payoutSec:     document.getElementById('ac-payout-section'),
     maSec:    document.getElementById('ac-ma-section'),
@@ -16877,6 +16964,9 @@
       if(accEls.goalKind)   accEls.goalKind.value   = editAccount.goalKind || ''
       if(accEls.goalTarget) accEls.goalTarget.value = editAccount.goalTarget != null ? editAccount.goalTarget : ''
       if(accEls.goalSince)  accEls.goalSince.value  = editAccount.goalSince ? String(editAccount.goalSince).slice(0,10) : ''
+      if(accEls.goalMode)   accEls.goalMode.value   = editAccount.goalManual ? 'manual' : 'auto'
+      if(accEls.goalCount)  accEls.goalCount.value  = editAccount.goalDoneOffset != null ? Math.max(0, editAccount.goalDoneOffset) : ''
+      _acGoalModeManual = true   // Bestand: Zählweise nie ungefragt umstellen
       if(accEls.payoutReady) accEls.payoutReady.value = editAccount.payoutReadyAt ? String(editAccount.payoutReadyAt).slice(0,10) : ''
       // MetaApi-Felder vorausfüllen wenn vorhanden
       accEls.maTok.value = editAccount.ma?.token     || ''
@@ -16902,6 +16992,9 @@
       if(accEls.goalKind)   accEls.goalKind.value   = ''
       if(accEls.goalTarget) accEls.goalTarget.value = ''
       if(accEls.goalSince)  accEls.goalSince.value  = ''
+      if(accEls.goalMode)   accEls.goalMode.value   = 'auto'
+      if(accEls.goalCount)  accEls.goalCount.value  = ''
+      _acGoalModeManual = false  // neu: Futures-Firma darf auf „manuell" vorbelegen
       if(accEls.payoutReady) accEls.payoutReady.value = ''
     }
     // Passwort-Feld immer verdeckt starten
@@ -16917,6 +17010,7 @@
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
     toggleAcPayoutSection()
+    toggleAcGoalMode()
     if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
@@ -16937,6 +17031,23 @@
   // Futures-Firmen (Firm-Spec mit Einheit 'Kontrakte', gleiche Erkennung wie
   // Orbit) laufen nicht über Zeitfenster. Erkennung über den getippten Firm-
   // Namen — deshalb an type UND firm gehängt.
+  // Zählweise (15.09.2026): manuell → „Stand" sichtbar, „Zählt ab" weg (zählt
+  // dort nichts); automatisch → umgekehrt. Beim NEUEN Account stellt eine
+  // Futures-Firma auf manuell vor, solange Finn die Zählweise nicht selbst
+  // angefasst hat (_acGoalModeManual) — Bestand wird nie umgestellt.
+  let _acGoalModeManual = false
+  function toggleAcGoalMode(){
+    if(!accEls.goalMode) return
+    if(!_acGoalModeManual && !_editingAccountId){
+      const firm = accEls.firm?.value.trim() || ''
+      const istFutures = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(firm) : false
+      accEls.goalMode.value = istFutures ? 'manual' : 'auto'
+    }
+    const manual = accEls.goalMode.value === 'manual'
+    if(accEls.goalCountWrap) accEls.goalCountWrap.hidden = !manual
+    if(accEls.goalSinceWrap) accEls.goalSinceWrap.hidden = manual
+  }
+
   function toggleAcPayoutSection(){
     if(!accEls.payoutSec) return
     const firm = accEls.firm?.value.trim() || ''
@@ -16997,6 +17108,10 @@
     const goalKindVal   = accEls.goalKind?.value || null
     const goalTargetNum = parseInt(accEls.goalTarget?.value, 10)
     const goalSinceVal  = accEls.goalSince?.value || null
+    // Manuelle Zählung (15.09.2026): Stand kommt aus dem Feld, sonst bleibt der
+    // Bestandswert (goal_done_offset) wie seit 10.09. unangetastet.
+    const goalManualVal = accEls.goalMode?.value === 'manual'
+    const goalCountNum  = parseInt(accEls.goalCount?.value, 10)
     // Payout-Termin (15.09.2026): nur für CFD-Accounts sinnvoll — bei Live-
     // Broker und Futures-Firmen ist der Block ausgeblendet und wird geleert.
     const payoutReadyVal = (accEls.payoutSec && !accEls.payoutSec.hidden) ? (accEls.payoutReady?.value || null) : null
@@ -17020,8 +17135,12 @@
       goalKind: goalKindVal,
       goalTarget:     goalKindVal ? (!isNaN(goalTargetNum) && goalTargetNum > 0 ? goalTargetNum : 5) : null,
       goalMinProfit:  goalKindVal && vorher?.goalMinProfit  != null ? vorher.goalMinProfit  : null,
-      goalDoneOffset: goalKindVal && vorher?.goalDoneOffset != null ? vorher.goalDoneOffset : null,
+      goalDoneOffset: !goalKindVal ? null
+                      : goalManualVal ? (!isNaN(goalCountNum) && goalCountNum >= 0 ? goalCountNum : 0)
+                      : (vorher?.goalDoneOffset != null ? vorher.goalDoneOffset : null),
       goalSince:      goalKindVal ? goalSinceVal : null,
+      goalManual:     !!goalKindVal && goalManualVal,
+      goalManualLast: goalKindVal && goalManualVal ? (vorher?.goalManualLast || null) : null,
       payoutReadyAt:  type !== 'live' ? payoutReadyVal : null,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
@@ -17091,6 +17210,8 @@
           goal_min_profit:  acc.goalMinProfit,
           goal_done_offset: acc.goalDoneOffset,
           goal_since:       acc.goalSince,
+          goal_manual:      acc.goalManual,
+          goal_manual_last: acc.goalManualLast,
           payout_ready_at:  acc.payoutReadyAt,
           // Zugangsdaten immer mit-updaten (auch Leeren möglich)
           cred_login:    acc.creds?.login    || null,
@@ -17240,6 +17361,7 @@
   if(accEls.save)    accEls.save.addEventListener('click', saveAccount)
   if(accEls.type)    accEls.type.addEventListener('change', toggleMaSection)
   if(accEls.type)    accEls.type.addEventListener('change', toggleAcPayoutSection)
+  if(accEls.goalMode) accEls.goalMode.addEventListener('change', () => { _acGoalModeManual = true; toggleAcGoalMode() })
 
   /* ── Server automatisch vorausfüllen, sobald die Firma gewählt ist (Punkt 2, 24.07.2026) ──
    * Bleibt frei bearbeitbar: hat der User den Server selbst angefasst, wird nicht überschrieben.
@@ -17256,6 +17378,8 @@
     accEls.firm.addEventListener('change', acMaybeFillServer)
     accEls.firm.addEventListener('input',  toggleAcPayoutSection)
     accEls.firm.addEventListener('change', toggleAcPayoutSection)
+    accEls.firm.addEventListener('input',  toggleAcGoalMode)
+    accEls.firm.addEventListener('change', toggleAcGoalMode)
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -22803,7 +22927,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.277'
+  const OS_TAB_BUILD = '2026-09-15.278'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25295,6 +25419,13 @@
    * negativ sein, Ergebnis wird bei 0 gekappt). */
   function zielFortschritt(a){
     if(!a || !a.goalKind || !(a.goalTarget > 0)) return null
+    // Manuelle Zählung (15.09.2026, Futures): Stand ist goal_done_offset, +1
+    // kommt über das Häkchen im Trade-Abschluss — trade_plans zählen hier nicht.
+    if(a.goalManual){
+      const count = Math.max(0, Number(a.goalDoneOffset) || 0)
+      return { count, target: a.goalTarget, done: count >= a.goalTarget,
+               heuteAbgehakt: !!a.goalManualLast && String(a.goalManualLast).slice(0,10) === _deTodayStr(), manual: true }
+    }
     const proTag = {}   // 'YYYY-MM-DD' (Berlin) → realisierte Tagessumme
     for(const p of (tradePlans || [])){
       if(p.status !== 'completed' && p.status !== 'review') continue
@@ -25342,7 +25473,10 @@
     if(!f) return ''
     const farbe = f.done ? 'var(--good)' : 'var(--violet)'
     const stand = `${Math.min(f.count, f.target)}/${f.target}`
-    return `<span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${f.done ? ' ✓' : ''}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}`
+    // Ziel erreicht + Winning Days = Payout-Fenster offen (15.09.2026, Finn:
+    // „sobald ich bei 5 angekommen bin, ist der Payout anfragbar")
+    const fertig = f.done ? (a.goalKind === 'winning_days' ? ' ✓ · Payout anfragbar' : ' ✓') : ''
+    return `<span style="color:${farbe};font-weight:600">🏆 ${stand} ${zielLabel(a)}${fertig}${!f.done && f.heuteAbgehakt ? ' · heute abgehakt' : ''}</span>${zielDotsHtml(f)}`
   }
 
   /* Payout-Termin (15.09.2026, Finn: "bei CFD-Accounts ein Feld, an welchem
@@ -25414,7 +25548,7 @@
     for(const accId of [p.masterAccountId, p.slaveAccountId]){
       if(!accId) continue
       const a = (accounts || []).find(x => String(x.id) === String(accId))
-      if(!a) continue
+      if(!a || a.goalManual) continue           // manuell: Toast kommt aus zielManuellPlus
       const f = zielFortschritt(a)
       if(!f || !f.heuteAbgehakt) continue
       if(m[String(accId)] === heute) continue   // heute schon gemeldet
@@ -25452,9 +25586,12 @@
     const d = new Date(_deTodayStr() + 'T12:00:00Z')
     d.setUTCDate(d.getUTCDate() + 1)
     const morgen = d.toISOString().slice(0,10)
+    // Manuelle Zählung (15.09.2026): Stand auf 0, letzter Haken weg — der
+    // heutige Tag darf nach der Anfrage wieder abgehakt werden (neuer Zyklus).
+    const patch = a.goalManual ? { goal_done_offset: 0, goal_manual_last: null } : { goal_since: morgen }
     try{
       const { data, error } = await supabase
-        .from('accounts').update({ goal_since: morgen }).eq('id', a.id).select('*').single()
+        .from('accounts').update(patch).eq('id', a.id).select('*').single()
       if(error) throw error
       const idx = accounts.findIndex(x => String(x.id) === String(a.id))
       if(idx >= 0) accounts[idx] = rowToAccount(data)
@@ -25465,6 +25602,67 @@
       console.warn('[ziel] Payout-Reset fehlgeschlagen:', e.message || e)
       if(typeof atToast === 'function')
         atToast(`⚠ Winning-Day-Reset für ${a.name} fehlgeschlagen — „Zählt ab" im Account-Modal von Hand auf morgen setzen`, 'end')
+    }
+  }
+
+  /* Manueller Winning Day +1 (15.09.2026, Finn: „wenn ich drauf drücke, wird
+   * +1 addiert"). Höchstens einmal pro Berlin-Tag (goal_manual_last) — zwei
+   * Trades am selben Tag sind EIN Winning Day. Toast meldet den Stand, bei
+   * erreichtem Ziel „Payout anfragbar". Fehler werden benannt. */
+  async function zielManuellPlus(accountId){
+    const a = (accounts || []).find(x => String(x.id) === String(accountId))
+    if(!a || !a.goalManual || !a.goalKind) return
+    const heute = _deTodayStr()
+    if(a.goalManualLast && String(a.goalManualLast).slice(0,10) === heute) return
+    const neu = Math.max(0, Number(a.goalDoneOffset) || 0) + 1
+    try{
+      const { data, error } = await supabase
+        .from('accounts').update({ goal_done_offset: neu, goal_manual_last: heute }).eq('id', a.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(a.id))
+      if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof renderFinanzen === 'function'){ try{ renderFinanzen() }catch(_){} }
+      const ziel = a.goalTarget || 5
+      if(typeof atToast === 'function')
+        atToast(neu >= ziel
+          ? `🏆 ${Math.min(neu, ziel)}/${ziel} — Payout anfragbar · ${a.name}`
+          : `🏆 Winning Day abgehakt — ${neu}/${ziel} · ${a.name}`, 'start')
+    }catch(e){
+      console.warn('[ziel] Winning Day +1 fehlgeschlagen:', e.message || e)
+      if(typeof atToast === 'function')
+        atToast(`⚠ Winning Day für ${a.name} nicht gezählt — „Stand" im Account-Modal von Hand um 1 erhöhen`, 'end')
+    }
+  }
+
+  // Trade-Abschluss: welcher Account des Plans zählt manuell? Master zuerst
+  // (Prop-Account), sonst Slave — ein Plan hat praktisch nie zwei.
+  let _tcWinningAccId = null
+  function tcWinningDayPrepare(p){
+    const wrap = document.getElementById('tc-winning-day-wrap')
+    const cb = document.getElementById('tc-winning-day')
+    const lbl = document.getElementById('tc-winning-day-label')
+    const hint = document.getElementById('tc-winning-day-hint')
+    _tcWinningAccId = null
+    if(!wrap || !cb || !lbl) return
+    const a = [p.masterAccountId, p.slaveAccountId]
+      .map(id => (accounts || []).find(x => String(x.id) === String(id)))
+      .find(x => x && x.goalManual && x.goalKind === 'winning_days' && x.goalTarget > 0)
+    if(!a){ wrap.hidden = true; return }
+    _tcWinningAccId = a.id
+    const f = zielFortschritt(a)
+    const stand = f ? `${Math.min(f.count, f.target)}/${f.target}` : ''
+    wrap.hidden = false
+    if(f && f.heuteAbgehakt){
+      cb.checked = true; cb.disabled = true
+      lbl.textContent = `🏆 Winning Day heute schon abgehakt — ${stand} · ${a.name}`
+      if(hint) hint.textContent = 'Ein Tag zählt nur einmal, egal wie viele Trades.'
+    }else{
+      cb.checked = false; cb.disabled = false
+      lbl.textContent = `🏆 Dieser Trade war ein Winning Day — ${stand} · ${a.name}`
+      if(hint) hint.textContent = f && f.count + 1 >= f.target
+        ? 'Damit ist das Ziel erreicht — Payout anfragbar.'
+        : 'Zählt +1 auf den Stand des Accounts (einmal pro Tag).'
     }
   }
 
@@ -25516,6 +25714,9 @@
     // "Heute schon getradet"-Haken den aktuellen Stand des Master-Accounts spiegeln
     const ttCb = document.getElementById('tc-traded-today')
     if(ttCb) ttCb.checked = isTradedToday(p.masterAccountId)
+    // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
+    // Plans manuell zählt — sonst bleibt die Box unsichtbar.
+    tcWinningDayPrepare(p)
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
@@ -26162,6 +26363,12 @@
       // "Heute schon getradet"-Haken auf den Master-Account anwenden (Reset autom. um Mitternacht DE)
       const _ttCb = document.getElementById('tc-traded-today')
       if(_ttCb && masterAcc?.id) setTradedToday(masterAcc.id, !!_ttCb.checked)
+      // Manueller Winning Day +1 (15.09.2026) — nur wenn Finn den Haken gesetzt
+      // hat und er nicht schon (disabled) für heute stand.
+      const _wdCb = document.getElementById('tc-winning-day')
+      if(_wdCb && _wdCb.checked && !_wdCb.disabled && _tcWinningAccId){
+        try{ await zielManuellPlus(_tcWinningAccId) }catch(_){}
+      }
 
       renderTradePlans()
       // Fortschritts-Ziel (10.09.2026): bestätigte P&L kann den heutigen
@@ -26692,10 +26899,51 @@
     }
   }
 
+  /* Payout-Status je Account (15.09.2026): eine Zeile pro aktivem Funded-
+   * Account. CFD → Payout-Termin (payoutReadyInfo), Futures/manuell → Winning-
+   * Day-Stand (zielFortschritt). Reihenfolge: anfragbar, dann nach Nähe zum
+   * Payout. Nur Anzeige — angefragt wird wie bisher über „Payout anfragen". */
+  function renderFinPayoutStatus(){
+    const panel = document.getElementById('fin-status-panel')
+    if(!panel) return
+    const arch = (typeof getArchive === 'function') ? getArchive() : {}
+    const list = (accounts || []).filter(a => a.type === 'funded' && !arch[a.id]?.archived)
+    if(!list.length){ panel.hidden = true; return }
+    const rows = list.map(a => {
+      const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
+      const f  = (typeof zielFortschritt === 'function') ? zielFortschritt(a) : null
+      let html = '<span style="color:var(--sub)">— kein Termin, kein Ziel</span>', ready = false, sort = 9e9
+      if(pi){
+        ready = pi.faellig; sort = pi.tage
+        html = pi.faellig
+          ? `<span style="color:var(--good);font-weight:600">💸 Payout anfragbar · ${pi.rel}</span>`
+          : `<span style="color:var(--violet);font-weight:600">💸 Payout ab ${pi.kurz}</span> <span style="color:var(--sub)">· ${pi.rel}</span>`
+      }else if(f){
+        ready = f.done && a.goalKind === 'winning_days'
+        sort = ready ? -1e9 : (f.target - f.count) * 1000
+        html = (typeof zielBadgeHtml === 'function') ? zielBadgeHtml(a) : ''
+      }
+      return { a, html, ready, sort }
+    })
+    rows.sort((x, y) => (x.ready === y.ready ? x.sort - y.sort : (x.ready ? -1 : 1)) || x.a.name.localeCompare(y.a.name))
+    panel.hidden = false
+    const nReady = rows.filter(r => r.ready).length
+    const readyEl = document.getElementById('fin-status-ready')
+    if(readyEl){ readyEl.textContent = String(nReady); readyEl.style.color = nReady ? 'var(--good)' : 'var(--sub)' }
+    const tb = document.getElementById('fin-status-rows')
+    if(tb) tb.innerHTML = rows.map(r => `
+        <tr>
+          <td style="padding-left:20px;font-weight:600">${escapeHtml(r.a.name || '')}${r.a.externalId ? `<div style="font-size:11px;color:var(--sub);font-family:var(--mono)">#${escapeHtml(String(r.a.externalId))}</div>` : ''}</td>
+          <td style="color:var(--sub)">${escapeHtml(r.a.firm || '–')}</td>
+          <td style="font-size:12.5px">${r.html}</td>
+        </tr>`).join('')
+  }
+
   function renderFinanzen(){
     finRenderSettlement()
     renderFinRangeStats()
     renderFinPending()
+    renderFinPayoutStatus()
 
     const tbody = document.getElementById('finTable')
     const empty = document.getElementById('finEmpty')

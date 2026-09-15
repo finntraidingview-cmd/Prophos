@@ -3508,7 +3508,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3756,15 +3756,30 @@ def admin_build_overview():
     # Broker raus, ausgeblendete Personen wie überall. Auch VERGANGENE Termine
     # bleiben drin — ein überfälliger Termin ist genau die Information, die
     # der Kalender liefern soll (angefragt = Datum wird im Frontend geleert).
+    # Zwei Sorten Einträge (15.09.2026 abends, Finn: „das Gleiche für die
+    # Future-Logik"): CFD mit Datum (ready_at) UND Futures-Accounts mit
+    # manuell gezählten Winning Days (goal_manual, Stand = goal_done_offset,
+    # ready_at leer, dafür count/target) — bei count >= target ist der Payout
+    # anfragbar. Die automatische Zählung (Tages-P&L) bleibt dem Frontend
+    # vorbehalten, sie bräuchte hier alle trade_plans.
     payout_ready = []
     for a in accounts:
-        d = (a.get("payout_ready_at") or "").strip()
-        if not d:
-            continue
         aid = str(a["id"])
         uid = str(a.get("user_id"))
         if (a.get("account_type") or "") == "live" or aid in archived or uid in excluded_ids:
             continue
+        d = (a.get("payout_ready_at") or "").strip()
+        manual = bool(a.get("goal_manual")) and (a.get("goal_kind") or "") == "winning_days"
+        if not d and not manual:
+            continue
+        try:
+            target = int(a.get("goal_target") or 0)
+        except (TypeError, ValueError):
+            target = 0
+        try:
+            count = max(0, int(a.get("goal_done_offset") or 0))
+        except (TypeError, ValueError):
+            count = 0
         payout_ready.append({
             "account_id": aid,
             "user_id": uid,
@@ -3773,9 +3788,12 @@ def admin_build_overview():
             "account_firm": (a.get("firm") or "").strip(),
             "ext": a.get("external_id") or "",
             "type": a.get("account_type") or "",
-            "ready_at": d[:10],
+            "ready_at": d[:10] if d else "",
+            "wd_count": count if manual else None,
+            "wd_target": target if manual else None,
+            "wd_ready": bool(manual and target > 0 and count >= target),
         })
-    payout_ready.sort(key=lambda r: (r["ready_at"], r["person"], r["account_name"]))
+    payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
