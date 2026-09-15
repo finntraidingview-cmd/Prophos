@@ -3762,20 +3762,37 @@ def admin_build_overview():
     # ready_at leer, dafür count/target) — bei count >= target ist der Payout
     # anfragbar. Die automatische Zählung (Tages-P&L) bleibt dem Frontend
     # vorbehalten, sie bräuchte hier alle trade_plans.
+    # Futures-Firmen = Firm-Specs mit Einheit 'Kontrakte' (dieselbe Erkennung
+    # wie tpFirmIstFutures im Frontend, hier über alle Personen aus firm_specs).
+    # Jeder Futures-FUNDED-Account zählt Winning Days manuell — auch ohne
+    # gespeichertes Ziel (implizit, 15.09.2026 abends): Stand goal_done_offset
+    # (leer = 0), Ziel goal_target (leer = 5). Schlägt der Spec-Read fehl,
+    # bleiben nur die explizit gespeicherten (goal_manual) übrig — hörbar.
+    futures_firms = set()
+    try:
+        for f in _sb_all("firm_specs", {"select": "name,unit"}):
+            if (f.get("unit") or "").strip().lower() == "kontrakte":
+                futures_firms.add(_firm_norm(f.get("name")))
+    except Exception as e:
+        print(f"[admin] ⚠️ firm_specs: {type(e).__name__}: {e}", flush=True)
     payout_ready = []
     for a in accounts:
         aid = str(a["id"])
         uid = str(a.get("user_id"))
-        if (a.get("account_type") or "") == "live" or aid in archived or uid in excluded_ids:
+        typ = a.get("account_type") or ""
+        if typ == "live" or aid in archived or uid in excluded_ids:
             continue
         d = (a.get("payout_ready_at") or "").strip()
-        manual = bool(a.get("goal_manual")) and (a.get("goal_kind") or "") == "winning_days"
+        implizit = typ == "funded" and _firm_norm(a.get("firm")) in futures_firms
+        manual = implizit or (bool(a.get("goal_manual")) and (a.get("goal_kind") or "") == "winning_days")
         if not d and not manual:
             continue
         try:
             target = int(a.get("goal_target") or 0)
         except (TypeError, ValueError):
             target = 0
+        if manual and target <= 0:
+            target = 5
         try:
             count = max(0, int(a.get("goal_done_offset") or 0))
         except (TypeError, ValueError):
