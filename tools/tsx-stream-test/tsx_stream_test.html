@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TSX Stream-Test (JS)</title>
+<!-- Offizieller Microsoft-SignalR-Client, UMD-Build, Version gepinnt (globales Objekt `signalR`).
+     Einzige externe Ressource dieser Seite. Läuft per file:// oder aus dem Browser-Pane. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 16px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #0f1216; color: #d8dce2; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: #8a919c; margin: 0 0 12px; font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  label { font-size: 12px; color: #8a919c; }
+  input[type=text] { flex: 1 1 220px; min-width: 120px; padding: 6px 8px; border: 1px solid #2a2f37; border-radius: 6px;
+          background: #161a20; color: #e6e9ee; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  input.short { flex: 0 1 140px; }
+  button { padding: 6px 12px; border: 1px solid #2a2f37; border-radius: 6px; background: #1c2129; color: #e6e9ee;
+           cursor: pointer; font-size: 12px; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: #2f6fed; border-color: #2f6fed; color: #fff; }
+  .chk { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; color: #b8bec8; }
+  #status { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #161a20; color: #8a919c; }
+  #status.on { color: #3ccf7a; } #status.off { color: #e5534b; }
+  pre { margin: 0; padding: 10px; background: #0a0c0f; border: 1px solid #2a2f37; border-radius: 6px;
+        height: 60vh; overflow: auto; font: 11.5px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+  .t { color: #6b7280; } .SEND { color: #7fb3ff; } .RECV, .EVENT { color: #3ccf7a; } .ERR { color: #ff6b63; }
+  .CLOSE { color: #ffb454; font-weight: 600; } .LIB { color: #8a919c; } .HUB { color: #c7a4ff; } .DONE { color: #e6e9ee; font-weight: 600; }
+  #sum { margin-top: 8px; padding: 10px; background: #161a20; border-radius: 6px; font-size: 12px; white-space: pre-wrap; display: none; }
+</style>
+</head>
+<body>
+<h1>TopstepX User-Hub — Stream-Test mit dem offiziellen JS-Client</h1>
+<p class="sub">@microsoft/signalr 8.0.7 · Optionen exakt wie die ProjectX-Doku: skipNegotiation, WebSockets, accessTokenFactory, timeout 10000, withAutomaticReconnect.
+Bekommt DIESE Seite Events und Python nicht → Python-Library. Bekommt auch sie den 2-s-Close → Server/Sitzung.</p>
+
+<div class="row">
+  <label for="jwt">JWT</label><input type="text" id="jwt" placeholder="eyJ… (Bearer-Token, wird nirgends gespeichert)" autocomplete="off" spellcheck="false">
+  <label for="acc">accountId</label><input type="text" id="acc" class="short" placeholder="z.B. 12345" inputmode="numeric">
+</div>
+<div class="row">
+  <label for="url">Hub-URL</label><input type="text" id="url" value="https://rtc.topstepx.com/hubs/user" spellcheck="false">
+</div>
+<div class="row">
+  <span class="chk"><input type="checkbox" id="skipneg" checked><label for="skipneg">skipNegotiation</label></span>
+  <span class="chk"><input type="checkbox" id="autorec" checked><label for="autorec">withAutomaticReconnect</label></span>
+  <span class="chk"><input type="checkbox" id="trace" checked><label for="trace">Client-Trace (Handshake/Close intern)</label></span>
+  <span class="chk"><input type="checkbox" id="autosub"><label for="autosub">nach Verbinden sofort abonnieren</label></span>
+</div>
+<div class="row">
+  <button id="btnConnect" class="primary">Verbinden</button>
+  <button id="btnSub" disabled>Abonnieren (Accounts · Orders · Positions · Trades)</button>
+  <button id="btnDisc" disabled>Trennen</button>
+  <button id="btnClear">Log leeren</button>
+  <button id="btnCopy">Log kopieren</button>
+  <span id="status">nicht verbunden</span>
+</div>
+<pre id="log"></pre>
+<div id="sum"></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log"), sumEl = $("sum"), statusEl = $("status");
+  var conn = null, t0 = 0, S = null;
+
+  function now() { return performance.now(); }
+  function ts() {
+    var d = new Date();
+    var hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0"),
+        ss = String(d.getSeconds()).padStart(2, "0"), ms = String(d.getMilliseconds()).padStart(3, "0");
+    var rel = t0 ? ((now() - t0) / 1000).toFixed(3).padStart(8) : "   0.000";
+    return "[" + hh + ":" + mm + ":" + ss + "." + ms + " +" + rel + "s]";
+  }
+  function short(x, n) {
+    n = n || 260;
+    var s;
+    if (typeof x === "string") s = x; else { try { s = JSON.stringify(x); } catch (e) { s = String(x); } }
+    if (s === undefined) s = String(x);
+    return s.length > n ? s.slice(0, n) + "… (" + s.length + " Zeichen)" : s;
+  }
+  function log(tag, msg) {
+    var line = document.createElement("div");
+    line.className = tag;
+    line.innerHTML = '<span class="t">' + ts() + "</span> " + tag.padEnd(6) + " ";
+    line.appendChild(document.createTextNode(msg));
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function setStatus(txt, cls) { statusEl.textContent = txt; statusEl.className = cls || ""; }
+  function fresh() {
+    return { connectedAt: null, connectionId: null, sent: {}, confirmed: {}, events: {}, firstEvent: null,
+             closedAt: null, closeErr: null, reconnecting: 0 };
+  }
+  function summary() {
+    if (!S) return;
+    var lines = [];
+    lines.push("ZUSAMMENFASSUNG");
+    lines.push("verbunden:      " + (S.connectedAt ? "ja (connectionId " + S.connectionId + ")" : "NEIN"));
+    var names = Object.keys(S.sent);
+    if (names.length) {
+      names.forEach(function (n) {
+        var c = S.confirmed[n];
+        lines.push("  " + n.padEnd(19) + (c ? (c.ok ? "bestätigt nach " + c.dt.toFixed(3) + " s" : "ABGELEHNT: " + c.err) : "OHNE Completion"));
+      });
+    } else lines.push("Abonnements:    keine gesendet");
+    var ev = Object.keys(S.events);
+    lines.push("Events:         " + (ev.length ? ev.map(function (k) { return k + "×" + S.events[k]; }).join(", ") : "KEINE"));
+    lines.push("Reconnects:     " + S.reconnecting);
+    if (S.closedAt !== null) {
+      lines.push("Close:          nach " + ((S.closedAt - (S.connectedAt || t0)) / 1000).toFixed(3) + " s seit Verbindung — Fehler: " + (S.closeErr || "keiner (sauberer Close ohne Grund)"));
+    } else lines.push("Close:          noch offen");
+    sumEl.textContent = lines.join("\n");
+    sumEl.style.display = "block";
+  }
+
+  // Eigener Logger: die Client-internen Meldungen (Handshake, Close-Grund, Reconnect) mit unseren Zeitstempeln
+  var traceLogger = {
+    log: function (level, message) {
+      if (!$("trace").checked && level < signalR.LogLevel.Warning) return;
+      var lv = ["Trace", "Debug", "Info", "Warn", "Error", "Crit"][level] || level;
+      log(level >= signalR.LogLevel.Warning ? "ERR" : "LIB", "[" + lv + "] " + message);
+    }
+  };
+
+  function build() {
+    var url = $("url").value.trim();
+    var token = $("jwt").value.trim();
+    var b = new signalR.HubConnectionBuilder()
+      .withUrl(url, {
+        skipNegotiation: $("skipneg").checked,
+        transport: signalR.HttpTransportType.WebSockets,
+        accessTokenFactory: function () { return token; },
+        timeout: 10000
+      })
+      .configureLogging(traceLogger);
+    if ($("autorec").checked) b = b.withAutomaticReconnect();
+    var c = b.build();
+
+    ["GatewayUserAccount", "GatewayUserOrder", "GatewayUserPosition", "GatewayUserTrade", "GatewayLogout"].forEach(function (ev) {
+      c.on(ev, function () {
+        var args = Array.prototype.slice.call(arguments);
+        S.events[ev] = (S.events[ev] || 0) + 1;
+        if (S.firstEvent === null) S.firstEvent = now();
+        log("EVENT", ev + " " + short(args.length === 1 ? args[0] : args));
+      });
+    });
+    c.onclose(function (err) {
+      S.closedAt = now(); S.closeErr = err ? String(err) : null;
+      log("CLOSE", "onclose — error: " + (err ? String(err) : "keiner") + " · state=" + c.state);
+      setStatus("getrennt", "off");
+      $("btnSub").disabled = true; $("btnDisc").disabled = true; $("btnConnect").disabled = false;
+      summary();
+    });
+    c.onreconnecting(function (err) {
+      S.reconnecting++;
+      log("CLOSE", "onreconnecting #" + S.reconnecting + " — error: " + (err ? String(err) : "keiner"));
+      setStatus("reconnecting…", "off");
+    });
+    c.onreconnected(function (id) {
+      log("HUB", "onreconnected — neue connectionId " + id + " (Abos sind serverseitig weg, neu abonnieren!)");
+      setStatus("verbunden (nach Reconnect)", "on");
+    });
+    return c;
+  }
+
+  function invoke(name, args) {
+    var t = now();
+    S.sent[name] = t;
+    log("SEND", "invoke " + name + "(" + args.map(function (a) { return JSON.stringify(a); }).join(", ") + ")");
+    return conn.invoke.apply(conn, [name].concat(args)).then(function (res) {
+      S.confirmed[name] = { ok: true, dt: (now() - t) / 1000 };
+      log("RECV", "Completion " + name + " resolved nach " + ((now() - t) / 1000).toFixed(3) + " s" + (res !== undefined ? " · result " + short(res) : ""));
+    }, function (err) {
+      S.confirmed[name] = { ok: false, err: String(err) };
+      log("ERR", "Completion " + name + " REJECTED nach " + ((now() - t) / 1000).toFixed(3) + " s: " + String(err));
+    });
+  }
+
+  function subscribeAll() {
+    var acc = parseInt($("acc").value.trim(), 10);
+    if (!(acc > 0)) { log("ERR", "accountId fehlt oder ist keine Zahl"); return; }
+    // Reihenfolge wie das ProjectX-Beispiel: Accounts, Orders, Positions, Trades — alle vier parallel abgeschickt
+    invoke("SubscribeAccounts", []);
+    invoke("SubscribeOrders", [acc]);
+    invoke("SubscribePositions", [acc]);
+    invoke("SubscribeTrades", [acc]);
+  }
+
+  $("btnConnect").onclick = function () {
+    if (typeof signalR === "undefined") { log("ERR", "signalr.min.js wurde nicht geladen (cdnjs erreichbar?)"); return; }
+    if (!$("jwt").value.trim()) { log("ERR", "JWT fehlt"); return; }
+    S = fresh(); sumEl.style.display = "none";
+    t0 = now();
+    conn = build();
+    $("btnConnect").disabled = true;
+    setStatus("verbinde…");
+    log("HUB", "start() → " + $("url").value.trim() + " · skipNegotiation=" + $("skipneg").checked + " · WebSockets · autoReconnect=" + $("autorec").checked
+        + " · Browser-Origin=" + (location.origin === "null" ? "null (file://)" : location.origin));
+    conn.start().then(function () {
+      S.connectedAt = now(); S.connectionId = conn.connectionId;
+      log("HUB", "connected — connectionId " + conn.connectionId + " · state=" + conn.state);
+      setStatus("verbunden", "on");
+      $("btnSub").disabled = false; $("btnDisc").disabled = false;
+      if ($("autosub").checked) subscribeAll();
+    }, function (err) {
+      log("ERR", "start() fehlgeschlagen: " + String(err));
+      setStatus("Fehler", "off");
+      $("btnConnect").disabled = false;
+      summary();
+    });
+  };
+  $("btnSub").onclick = subscribeAll;
+  $("btnDisc").onclick = function () {
+    if (!conn) return;
+    log("HUB", "stop() vom Nutzer");
+    conn.stop();
+  };
+  $("btnClear").onclick = function () { logEl.textContent = ""; sumEl.style.display = "none"; };
+  $("btnCopy").onclick = function () {
+    var txt = logEl.innerText + (sumEl.style.display === "block" ? "\n\n" + sumEl.textContent : "");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { log("HUB", "Log in die Zwischenablage kopiert"); },
+                                              function () { log("ERR", "Kopieren nicht erlaubt — Text markieren und manuell kopieren"); });
+    } else log("ERR", "Clipboard-API nicht verfügbar — Text markieren und manuell kopieren");
+  };
+
+  window.addEventListener("load", function () {
+    if (typeof signalR === "undefined") log("ERR", "signalr.min.js nicht geladen — ohne Netz zu cdnjs.cloudflare.com läuft die Seite nicht");
+    else log("HUB", "@microsoft/signalr " + (signalR.VERSION || "8.0.7") + " geladen · bereit");
+  });
+})();
+</script>
+</body>
+</html>
