@@ -16097,9 +16097,59 @@
       // Vorgänger archivieren mit Successor-ID
       archiveAccount(parentId, 'passed', created.id)
 
+      // Auto-Anlegen in Duplikum / im MT5-Copier (Echo) — 15.09.2026, Finn:
+      // „bei Echo wird der Account dann nicht hinzugefügt". Der Wizard hat die
+      // Zugangsdaten zwar seit 07.09. in die cred_*-Spalten geschrieben, aber
+      // anders als saveAccount() (normales „Account hinzufügen") nie die beiden
+      // Provisionierungs-Blöcke aufgerufen — der Nachfolger lag also in Prophos,
+      // tauchte in Echo aber erst nach einem manuellen „Account hinzufügen" auf.
+      // Jetzt exakt dieselbe Logik wie in saveAccount(): Plattform 'mt5' geht
+      // NUR in den eigenen Copier (Regel 15.08.), alles andere mit Login nach
+      // Duplikum. Beide Funktionen sichern sich selbst ab (nur lokal, nur mit
+      // vollständigen Creds, nie Live) — sonst stiller Skip, der Account bleibt
+      // in jedem Fall angelegt und archiviert.
+      let dupCreated = false
+      const _isMt5Copier = (created.creds?.platform || '').toLowerCase() === 'mt5'
+      if(created.creds?.login && !_isMt5Copier && typeof dupCreateAccountInDuplikum === 'function'){
+        msgEl.textContent = '🔗 Lege Account in Duplikum an…'
+        msgEl.className = 'modal-msg muted'
+        const roleType = (created.type === 'live') ? '1' : '0'
+        const cr = await dupCreateAccountInDuplikum(created, roleType)
+        if(cr.ok){
+          dupCreated = true
+          if(typeof showSyncBanner === 'function'){
+            showSyncBanner(`🔗 „${created.name}" in Duplikum angelegt${cr.dupId ? ' & verknüpft' : ''}`, 'ok')
+            if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+          }
+          if(typeof dupAutoPushSymbolMappings === 'function'){ try { dupAutoPushSymbolMappings([created.name]) } catch(_){} }
+        }else if(cr.error && typeof showSyncBanner === 'function'){
+          showSyncBanner(`Nachfolger gespeichert, aber Duplikum-Anlegen fehlgeschlagen: ${cr.error}`, 'err')
+          if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(8000)
+        }
+      }
+      if(created.creds?.login && typeof mt5CreateAccountInCopier === 'function'){
+        try{
+          msgEl.textContent = '🖥 Richte Account in Echo ein…'
+          msgEl.className = 'modal-msg muted'
+          const mc = await mt5CreateAccountInCopier(created)
+          if(typeof showSyncBanner === 'function'){
+            if(mc.ok && mc.existing){
+              showSyncBanner(`🔗 „${created.name}" mit bestehendem Echo-Account verknüpft`, 'ok')
+              if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000)
+            }else if(mc.ok){
+              showSyncBanner(`🖥 „${created.name}" wird in Echo eingerichtet — Fortschritt im Echo-Tab, Verknüpfung folgt automatisch`, 'ok')
+              if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(7000)
+            }else if(mc.error){
+              showSyncBanner(`Nachfolger gespeichert, aber Echo-Einrichtung fehlgeschlagen: ${mc.error}`, 'err')
+              if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(8000)
+            }
+          }
+        }catch(e){ console.warn('[mtc] Auto-Einrichtung (Nachfolger) übersprungen:', e && e.message) }
+      }
+
       // Neuer Account mit External ID → sofort mit Duplikum verknüpfen (falls dort vorhanden),
       // gleiches Verhalten wie beim normalen Account-Anlegen
-      if(created.externalId && typeof dupState !== 'undefined' && dupState.token && typeof dupAutoLink === 'function'){
+      if(!dupCreated && created.externalId && typeof dupState !== 'undefined' && dupState.token && typeof dupAutoLink === 'function'){
         const lr = dupAutoLink()
         if(lr?.newLinks > 0 && typeof showSyncBanner === 'function'){
           showSyncBanner(`🔗 „${created.name}" automatisch mit Duplikum verknüpft`, 'ok')
@@ -23001,7 +23051,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.283'
+  const OS_TAB_BUILD = '2026-09-15.284'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
