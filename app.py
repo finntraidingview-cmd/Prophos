@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-08.5"
+APP_BUILD = "2026-09-15.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -219,6 +219,55 @@ mirror_sessions = {}
 # Iteration zu warten (bis zu 8s Fenster, in dem die alte Verbindung noch weiter
 # mitgespiegelt hätte — echter Bug, hat zu doppelten Hedge-Orders geführt, 21.07.2026).
 mirror_hubs = {}
+
+def _hub_kill(h):
+    """Hub-Verbindung ENDGÜLTIG beenden — nicht nur hub.stop() (15.09.2026, Mac-Befund).
+    signalrcore 1.0.2: stop() kehrt sofort zurück, wenn der Transport gerade im Zustand
+    'disconnected' steht (nach einem Socket-Fehler ist das für einen Moment der Fall) —
+    OHNE manually_closing zu setzen. Der nächste on_socket_close reconnectet dann munter
+    weiter, und zwar SOFORT (die Intervalle greifen nur im Exception-Pfad). Ergebnis auf
+    dem Mac: tausende Zombie-Hubs aus einer Woche Neuaufbauten (Modus-Flips, Parken,
+    Token-Rebuilds), jede reconnectete im 2s-Takt weiter, /mirror/stop half nicht mehr,
+    das launchd-Log wuchs auf 43 GB. Deshalb: Reconnect-Sperre selbst setzen, Ping-
+    Wächter und Socket direkt schließen, dann stop() — jeder Schritt best-effort."""
+    if h is None:
+        return
+    t = getattr(h, "transport", None)
+    if t is not None:
+        try: t.manually_closing = True
+        except Exception: pass
+        try: t.connection_checker.stop()
+        except Exception: pass
+        c = getattr(t, "_client", None)
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    try: h.stop()
+    except Exception: pass
+
+# Gemeinsamer Null-Handler für die Diagnose-Hubs: configure_logging() hängt bei JEDEM
+# Aufruf einen Handler an den globalen 'SignalRCoreClient'-Logger (Logger.addHandler
+# dedupliziert nur dasselbe Objekt) — ein neues StreamHandler-Objekt pro Verbindungsaufbau
+# war die zweite Hälfte des 43-GB-Logs: jede Zeile wurde so oft gedruckt, wie je ein Hub
+# gebaut worden war.
+_SR_NULL_HANDLER = logging.NullHandler()
+
+def _token_tot_beenden(pair_id, s):
+    """Token endgültig abgelaufen (401 bei /Auth/validate) → das Pair beendet sich selbst.
+    Bisher lief die Schleife weiter und probierte den Refresh in JEDER Iteration (1×/s
+    gegen die TSX-API, eine Woche lang), der Stream-Neuaufbau hämmerte mit dem toten Token
+    im 2s-Takt weiter — kopieren konnte das Pair längst nichts mehr. Ehrlicher Zustand:
+    active=False, Eintrag bleibt (die Konsole zeigt den Grund), das Frontend kippt den
+    Plan auf '🪞 Mirror NICHT aktiv' bzw. '🪞 UNGESPIEGELT' (Tot-Erkennung seit .257).
+    Ein 401-Token kommt nie zurück — den frischen bringt nur ein neuer Login + erneutes
+    Scharfschalten."""
+    if not s.get("tokenDead"):
+        return False
+    if not s.get("tokenDeadLogged"):
+        s["tokenDeadLogged"] = True
+        log_msg(pair_id, "⛔ TSX-Token endgültig abgelaufen (401) — dieses Pair beendet sich selbst. Neu einloggen und den Plan erneut scharfschalten.", "err")
+    s["active"] = False
+    return True
 
 # Duplikium credential cache (in-memory): user_email -> {token, password, last_refresh}
 # Hinweis: Passwort wird nur in Memory gehalten, NICHT auf Disk geschrieben.
@@ -853,6 +902,7 @@ def refresh_tsx_token(pair_id, session_obj, max_retries=3):
             # 401 → Token komplett abgelaufen, kein Retry sinnvoll
             if r.status_code == 401:
                 log_msg(pair_id, "🔒 Token-Refresh: 401 — Token endgültig abgelaufen, neuer Login nötig")
+                s["tokenDead"] = True  # die Worker-Schleifen beenden das Pair damit selbst (15.09.2026)
                 return False
             # 5xx → Server-seitig, Retry macht Sinn
             if 500 <= r.status_code < 600:
@@ -912,7 +962,11 @@ def mirror_start():
     engine = data.get("engine", "polling")
 
     if pair_id in mirror_sessions:
-        return jsonify({"ok": True, "msg": "Already running"})
+        if mirror_sessions[pair_id].get("active"):
+            return jsonify({"ok": True, "msg": "Already running"})
+        # Selbst beendeter Eintrag (Token tot, 15.09.2026) — darf ein Re-Arm nicht blockieren
+        mirror_sessions.pop(pair_id, None)
+        _hub_kill(mirror_hubs.pop(pair_id, None))
 
     session = {
         "pairId": pair_id,
@@ -983,10 +1037,7 @@ def mirror_stop():
     # Echtzeit-Hub SOFORT trennen (nicht erst nächste Loop-Iteration) — sonst spiegelt
     # die alte SignalR-Verbindung noch bis zu 8s weiter, während schon ein Neustart
     # eine zweite Verbindung aufbaut → doppelte Hedge-Orders.
-    hub = mirror_hubs.pop(pair_id, None)
-    if hub:
-        try: hub.stop()
-        except Exception: pass
+    _hub_kill(mirror_hubs.pop(pair_id, None))
     return jsonify({"ok": True})
 
 @app.route("/mirror/status", methods=["GET"])
@@ -1036,7 +1087,7 @@ def _diag_run_stage(name, hub_url, subs, events, dauer):
     try:
         h = HubConnectionBuilder()\
             .with_url(hub_url, options={"skip_negotiation": True})\
-            .configure_logging(logging.CRITICAL)\
+            .configure_logging(logging.CRITICAL, handler=_SR_NULL_HANDLER)\
             .build()
         def _on_open():
             res["verbunden"] = True
@@ -1064,10 +1115,7 @@ def _diag_run_stage(name, hub_url, subs, events, dauer):
         done.wait(dauer)
         res["events"] = ev_count[0]
         res["close_nach_s"] = round(closed_at[0], 1) if closed_at[0] is not None else None
-        try:
-            h.stop()
-        except Exception:
-            pass
+        _hub_kill(h)
     except Exception as e:
         res["fehler"] = f"{type(e).__name__}: {str(e)[:120]}"
     return res
@@ -1110,12 +1158,7 @@ def mirror_diagnose():
     if pid:
         mirror_sessions[pid]["active"] = False
         mirror_sessions.pop(pid, None)
-        hub = mirror_hubs.pop(pid, None)
-        if hub:
-            try:
-                hub.stop()
-            except Exception:
-                pass
+        _hub_kill(mirror_hubs.pop(pid, None))
     _diag_state["running"] = True
     _diag_state["report"] = None
     _diag_state["started"] = time.time()
@@ -1151,6 +1194,8 @@ def run_mirror(pair_id):
     # existiert unter derselben pair_id eine NEUE Session, und der alte Thread würde sonst
     # als Zombie ewig weiterlaufen und parallel spiegeln (Doppel-Orders, 21.07.2026).
     while mirror_sessions.get(pair_id) is s and s.get("active"):
+        if _token_tot_beenden(pair_id, s):
+            break
         # Proaktiver Token Refresh alle 20 min
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             refresh_tsx_token(pair_id, http)
@@ -1671,7 +1716,7 @@ def run_mirror_realtime(pair_id):
         log_msg(pair_id, f"🔧 Verbindungsmodus: {'Negotiation-Handshake' if use_negotiate else 'Direkt (skip negotiation)'}")
         h = HubConnectionBuilder()\
             .with_url(f"{RTC_BASE}/hubs/user?access_token={token}", options={"skip_negotiation": not use_negotiate}) \
-            .configure_logging(logging.INFO) \
+            .configure_logging(logging.INFO, handler=_sr_bridge) \
             .with_automatic_reconnect({
                 "type": "interval",
                 "keep_alive_interval": 10,
@@ -1704,8 +1749,7 @@ def run_mirror_realtime(pair_id):
         old = hub
         hub = build_hub(s["tsxToken"])
         mirror_hubs[pair_id] = hub
-        try: old.stop()
-        except Exception: pass
+        _hub_kill(old)
         try:
             hub.start()
         except Exception as e:
@@ -1740,6 +1784,8 @@ def run_mirror_realtime(pair_id):
     last_heartbeat = time.time()
     HEARTBEAT_INTERVAL = 120
     while session_alive():
+        if _token_tot_beenden(pair_id, s):
+            break
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             if refresh_tsx_token(pair_id, http):
                 # Frischer Token → Hub braucht neue Verbindung (access_token steckt in der URL)
@@ -1771,8 +1817,7 @@ def run_mirror_realtime(pair_id):
                 stream_parked[0] = time.time() + 60
                 flip_tries[0] = 0
                 closes_noevent[0] = 0
-                try: hub.stop()
-                except Exception: pass
+                _hub_kill(hub)
             else:
                 closes_noevent[0] = 0
                 rebuild_connection(f"Close-Sturm ohne Events — Modus-Wechsel #{flip_tries[0]}", flip_mode=True)
@@ -1831,10 +1876,7 @@ def run_mirror_realtime(pair_id):
 
     if mirror_hubs.get(pair_id) is hub:
         mirror_hubs.pop(pair_id, None)
-    try:
-        hub.stop()
-    except Exception:
-        pass
+    _hub_kill(hub)
     try:
         _sr_logger.removeHandler(_sr_bridge)
     except Exception:
@@ -2000,6 +2042,8 @@ def run_mirror_mt_to_tsx(pair_id):
 
     # Session-Identität statt nur active-Flag — siehe Kommentar in run_mirror (Zombie-Bug)
     while mirror_sessions.get(pair_id) is s and s.get("active"):
+        if _token_tot_beenden(pair_id, s):
+            break
         # TSX Token auch hier refreshen (brauchen wir für close orders)
         if time.time() - s.get("lastTokenRefresh", 0) > TOKEN_REFRESH_INTERVAL:
             refresh_tsx_token(pair_id, http)
