@@ -7023,7 +7023,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Alle Transfers</div>
-                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px">
                 <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
@@ -9806,6 +9806,9 @@
      *   Tron              TronGrid /transactions/trc20 (keyless, 1 Request —
      *                     dieselbe 429-Vorsicht wie bei den Balances). */
     const WAL_TX_N = 12
+    // Stable-Symbol? USDT, USDC, USDC.e, USDT0/USD₮0 (Arbitrum) — bisher harte
+    // Dreierliste, USDT0 lief deshalb als „Coin" mit 4 Nachkommastellen (15.09.2026)
+    const walTxStable = sym => /^USD[T₮C]/i.test(String(sym || ''))
     let walTxSel = null, walTxLauf = 0
     const walTxCache = new Map()   // wallet.id → { t, res } — 60 s, schont TronGrid & Co.
     const WAL_TX_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
@@ -9967,7 +9970,7 @@
       }
       msg.hidden = true
       for(const e of res.list){
-        const stable = e.sym === 'USDT' || e.sym === 'USDC' || e.sym === 'USDC.e'
+        const stable = walTxStable(e.sym)
         const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
         const tr = document.createElement('tr')
         tr.innerHTML =
@@ -10084,12 +10087,22 @@
       const eigene = new Map(wallets.map(w => [w.chain + ':' + w.address.toLowerCase(), w]))
       const alle = [], notes = new Set()
       let fehler = 0
+      // Staub raus (Finn 15.09.2026: „mach alles unter 1 USDT weg" — Gas-Reste
+      // wie 0,0145 USDT0 und 0,00-USDC-Zeilen verstopften den Feed): Stables
+      // direkt, Coins über den Balance-Kurs (walPx) in USDT; ohne bekannten
+      // Kurs bleibt die Zeile lieber drin, als still zu verschwinden.
+      const WAL_FEED_MIN = 1
+      const wertUsdt = (e, w) => walTxStable(e.sym) ? e.amount : (walPx[WAL_CHAINS[w.chain].px] ? e.amount * walPx[WAL_CHAINS[w.chain].px] : null)
       for(const w of rows){
         const f = walFeed.get(w.id)
         if(!f) continue
         if(f.err){ fehler++; continue }
         if(f.res.note) notes.add(f.res.note)
-        for(const e of f.res.list) alle.push({ e, w })
+        for(const e of f.res.list){
+          const v = wertUsdt(e, w)
+          if(v != null && v < WAL_FEED_MIN) continue
+          alle.push({ e, w })
+        }
       }
       // neueste zuerst; Einträge ohne Zeitstempel (Archiv-Grenze) ans Ende
       alle.sort((a, b) => (b.e.ts || 0) - (a.e.ts || 0))
@@ -10105,7 +10118,7 @@
       }
       for(const { e, w } of alle.slice(0, walFeedShown)){
         const c = WAL_CHAINS[w.chain]
-        const stable = e.sym === 'USDT' || e.sym === 'USDC' || e.sym === 'USDC.e'
+        const stable = walTxStable(e.sym)
         const eig = e.other ? eigene.get(w.chain + ':' + e.other.toLowerCase()) : null
         const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
         const tr = document.createElement('tr')
@@ -23258,7 +23271,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.287'
+  const OS_TAB_BUILD = '2026-09-15.288'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
