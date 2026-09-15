@@ -2439,8 +2439,13 @@ def wt_account_count(email, token):
             n, ok = max(1, len(lst)), True
             # Fuer den dup_live-Spiegel (25.08.2026): Name/Login pro Account —
             # gleiche Antwort, kein zusaetzlicher Duplikium-Call.
+            # balance/ccy seit 15.09.2026 mit im Spiegel (Finn: Balance neben
+            # den Winning-Days-Accounts im Admin) — dieselbe Antwort, kein
+            # zusaetzlicher Call; /admin/overview loest darueber die Balance
+            # von Tradovate-Mastern auf (login = external_id des Accounts).
             _dup_accounts_cache[e] = {"at": time.time(), "list": [
-                {"account_id": a.get("account_id"), "name": a.get("name"), "login": a.get("login")}
+                {"account_id": a.get("account_id"), "name": a.get("name"), "login": a.get("login"),
+                 "balance": a.get("balance"), "ccy": a.get("ccy")}
                 for a in lst if isinstance(a, dict)]}
     except Exception:
         pass
@@ -3552,7 +3557,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3819,6 +3824,46 @@ def admin_build_overview():
                 futures_firms.add(_firm_norm(f.get("name")))
     except Exception as e:
         print(f"[admin] ⚠️ firm_specs: {type(e).__name__}: {e}", flush=True)
+    # Balance je Account (15.09.2026 abends, Finn: „schreib die aktuelle
+    # Balance daneben, damit man weiss, wie viel der Account hat"). Gleiche
+    # Rangfolge wie die Account-Karte: Topstep-Sync → MetaApi → Duplikum-
+    # Spiegel (dup_live.accounts, login = external_id; traegt balance erst
+    # seit diesem Build, davor bleibt der Eintrag leer) → manuelle Balance.
+    dup_bal = {}
+    try:
+        for row in _sb_all("dup_live", {"select": "accounts"}):
+            for da in (row.get("accounts") or []):
+                if not isinstance(da, dict) or da.get("balance") in (None, ""):
+                    continue
+                lg = str(da.get("login") or "").strip()
+                if lg:
+                    dup_bal[lg] = (da.get("balance"), da.get("ccy") or "USD")
+    except Exception as e:
+        print(f"[admin] ⚠️ dup_live-Balances: {type(e).__name__}: {e}", flush=True)
+
+    def _acc_balance(a):
+        def num(v):
+            try:
+                f = float(v)
+                return f if f == f else None
+            except (TypeError, ValueError):
+                return None
+        b = num(a.get("topstep_balance"))
+        if b is not None:
+            return b, "USD", "TSX"
+        b = num(a.get("meta_api_balance"))
+        if b is not None:
+            return b, "USD", "MT5"
+        hit = dup_bal.get(str(a.get("external_id") or "").strip())
+        if hit:
+            b = num(hit[0])
+            if b is not None:
+                return b, hit[1], "Duplikum"
+        b = num(a.get("balance"))
+        if b is not None and b > 0:
+            return b, "USD", "manuell"
+        return None, None, None
+
     payout_ready = []
     for a in accounts:
         aid = str(a["id"])
@@ -3853,6 +3898,12 @@ def admin_build_overview():
             "wd_count": count if manual else None,
             "wd_target": target if manual else None,
             "wd_ready": bool(manual and target > 0 and count >= target),
+        })
+        bal, ccy, src = _acc_balance(a)
+        payout_ready[-1].update({
+            "balance": round(bal, 2) if bal is not None else None,
+            "balance_ccy": ccy,
+            "balance_src": src,
         })
     payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 

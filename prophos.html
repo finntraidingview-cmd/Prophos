@@ -8981,7 +8981,18 @@
                 h += `<span style="width:6px;height:6px;border-radius:50%;background:${k < r.wd_count ? farbe : 'var(--border)'}"></span>`
               return h + '</span>'
             }
-            wrap.innerHTML = '<table class="t"><thead><tr><th>Person</th><th>Account</th><th>Firma</th><th>Stand</th><th></th></tr></thead><tbody></tbody></table>'
+            // Balance (15.09.2026 abends, Finn: „damit man weiss, wie viel der
+            // Account hat") — Quelle aus dem Backend (TSX/MT5/Duplikum/manuell),
+            // „manuell" gedaempft mit Hinweis, weil das die Startbalance ist.
+            const balHtml = r => {
+              if(r.balance == null) return '<span style="color:var(--sub)">—</span>'
+              let txt
+              try{ txt = new Intl.NumberFormat('de-DE', { style:'currency', currency: r.balance_ccy || 'USD', maximumFractionDigits: 0 }).format(r.balance) }
+              catch(_){ txt = `${Number(r.balance).toFixed(0)} ${r.balance_ccy || ''}` }
+              const manuell = r.balance_src === 'manuell'
+              return `<span class="mono" style="font-weight:600;color:${manuell ? 'var(--sub)' : 'var(--ink)'}" title="${manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src}">${txt}</span>${manuell ? '<div style="font-size:10.5px;color:var(--sub)">manuell</div>' : ''}`
+            }
+            wrap.innerHTML = '<table class="t"><thead><tr><th>Person</th><th>Account</th><th>Firma</th><th class="adm-num">Balance</th><th>Stand</th><th></th></tr></thead><tbody></tbody></table>'
             const tb = wrap.querySelector('tbody')
             for(const r of wd){
               const tr = document.createElement('tr')
@@ -8990,6 +9001,7 @@
                 '<td><span class="wd-person" style="font-weight:600"></span></td>' +
                 '<td><span class="wd-acc" style="font-size:12.5px"></span>' + (r.ext ? '<div class="wd-ext" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div>' : '') + '</td>' +
                 '<td><span class="wd-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
+                `<td class="adm-num" style="white-space:nowrap">${balHtml(r)}</td>` +
                 `<td style="white-space:nowrap"><span style="color:${farbe};font-weight:600">🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}</span>${dots(r)}</td>` +
                 `<td style="white-space:nowrap">${r.wd_ready ? '<span class="chip chip-good">Payout anfragbar</span>' : ''}</td>`
               tr.querySelector('.wd-person').textContent = admShortName(r.person || '—')
@@ -22989,7 +23001,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.282'
+  const OS_TAB_BUILD = '2026-09-15.283'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
