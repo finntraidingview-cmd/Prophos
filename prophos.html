@@ -8957,26 +8957,48 @@
             row.appendChild(left); row.appendChild(right)
             box.appendChild(row)
           }
-          // Winning Days (15.09.2026 abends): eine Zeile für alle Futures-
-          // Accounts mit manueller Zählung — anfragbare zuerst, grün.
+          // Winning Days (15.09.2026 abends): Futures-Accounts mit manueller
+          // Zählung als TABELLE, ein Account pro Zeile (Finn: „eine Zeile nach
+          // der anderen, sauber strukturiert" — die Chips wurden bei zehn
+          // Accounts mit langen Namen unlesbar). Anfragbare zuerst, dann nach
+          // Stand absteigend, dann Person.
           if(wd.length){
-            wd.sort((a, b) => (b.wd_ready - a.wd_ready) || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target)))
-            const row = document.createElement('div')
-            row.style.cssText = 'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding-top:6px;border-top:1px solid var(--border)'
-            const left = document.createElement('div')
-            left.style.cssText = 'min-width:118px;flex:0 0 auto'
-            left.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink)">Winning Days</div><div style="font-size:11px;color:var(--sub)">Futures · manuell gezählt</div>'
-            const right = document.createElement('div')
-            right.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;flex:1 1 200px'
-            for(const r of wd){
-              const c = document.createElement('span')
-              c.className = 'chip ' + (r.wd_ready ? 'chip-good' : 'chip-neutral')
-              c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'} · 🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}${r.wd_ready ? ' · anfragbar' : ''}`
-              c.title = r.account_firm || ''
-              right.appendChild(c)
+            wd.sort((a, b) => (b.wd_ready - a.wd_ready)
+              || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target))
+              || String(a.person || '').localeCompare(String(b.person || '')))
+            const head = document.createElement('div')
+            head.style.cssText = 'padding-top:10px;border-top:1px solid var(--border)'
+            head.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink)">Winning Days</div><div style="font-size:11px;color:var(--sub)">Futures · manuell gezählt · bei erreichtem Ziel ist der Payout anfragbar</div>'
+            box.appendChild(head)
+            const wrap = document.createElement('div')
+            wrap.className = 'table-wrap'
+            wrap.style.cssText = 'margin:0 -18px'
+            const dots = r => {
+              if(r.wd_target > 10) return ''
+              const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
+              let h = '<span style="display:inline-flex;gap:3px;align-items:center;margin-left:8px;vertical-align:middle">'
+              for(let k = 0; k < r.wd_target; k++)
+                h += `<span style="width:6px;height:6px;border-radius:50%;background:${k < r.wd_count ? farbe : 'var(--border)'}"></span>`
+              return h + '</span>'
             }
-            row.appendChild(left); row.appendChild(right)
-            box.appendChild(row)
+            wrap.innerHTML = '<table class="t"><thead><tr><th>Person</th><th>Account</th><th>Firma</th><th>Stand</th><th></th></tr></thead><tbody></tbody></table>'
+            const tb = wrap.querySelector('tbody')
+            for(const r of wd){
+              const tr = document.createElement('tr')
+              const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
+              tr.innerHTML =
+                '<td><span class="wd-person" style="font-weight:600"></span></td>' +
+                '<td><span class="wd-acc" style="font-size:12.5px"></span>' + (r.ext ? '<div class="wd-ext" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div>' : '') + '</td>' +
+                '<td><span class="wd-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
+                `<td style="white-space:nowrap"><span style="color:${farbe};font-weight:600">🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}</span>${dots(r)}</td>` +
+                `<td style="white-space:nowrap">${r.wd_ready ? '<span class="chip chip-good">Payout anfragbar</span>' : ''}</td>`
+              tr.querySelector('.wd-person').textContent = admShortName(r.person || '—')
+              tr.querySelector('.wd-acc').textContent = r.account_name || '—'
+              const ext = tr.querySelector('.wd-ext'); if(ext) ext.textContent = '#' + r.ext
+              tr.querySelector('.wd-firm').textContent = r.account_firm || '–'
+              tb.appendChild(tr)
+            }
+            box.appendChild(wrap)
           }
         }
       }
@@ -22967,7 +22989,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.280'
+  const OS_TAB_BUILD = '2026-09-15.281'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
