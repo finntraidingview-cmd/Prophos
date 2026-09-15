@@ -7013,6 +7013,43 @@
             <div id="wal-tx-note" style="font-size:11.5px;color:var(--sub);margin-top:8px" hidden></div>
           </div>
 
+          <!-- ALLE TRANSFERS (15.09.2026, Finn: „unten immer über alle Wallets die
+               letzten Transaktionen sehen … wenn Geld reingeht oder rausgeht"):
+               ein Feed über alle Wallets, neueste zuerst. Nutzt dieselben Chain-
+               Leser wie das Einzel-Panel (walTxFetch) — pro Wallet ein Aufruf,
+               Ergebnisse zusammengeführt. Gegenseite, die selbst eine eingetragene
+               Wallet ist, steht mit Namen statt Adresse (interne Umbuchungen). -->
+          <div class="panel" style="margin-top:14px" id="wal-feed-panel">
+            <div class="panel-head">
+              <div>
+                <div class="panel-title">Alle Transfers</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
+                <button class="btn btn-ghost" id="wal-feed-refresh" title="Transfers aller Wallets neu von den Chains laden" style="padding:7px 12px">↻</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="t">
+                <thead><tr>
+                  <th>Wann</th>
+                  <th>Wallet</th>
+                  <th>Richtung</th>
+                  <th class="adm-num">Betrag</th>
+                  <th>Gegenseite</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="wal-feed-rows"></tbody>
+              </table>
+            </div>
+            <div class="adm-empty" id="wal-feed-empty" hidden>Noch keine Transfers geladen.</div>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+              <button class="btn btn-ghost" id="wal-feed-more" style="padding:6px 12px" hidden>Mehr anzeigen</button>
+              <div id="wal-feed-note" style="font-size:11.5px;color:var(--sub)" hidden></div>
+            </div>
+          </div>
+
           <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
             Watch-only: gespeichert werden nur die <b>öffentlichen</b> Adressen — niemals Keys oder Seed-Phrases.
             Balances kommen live von den Chains (USDT + USDC + Chain-Coin, also ETH/POL/BNB/SOL/TRX) direkt aus dem Browser, ohne API-Key;
@@ -9326,7 +9363,8 @@
     function walOpen(){
       if(walOpened){ return }
       walOpened = true
-      walLoad().then(walRefreshBalances)
+      // Feed erst nach den Balances — beide reden mit TronGrid (1 Req/s keyless)
+      walLoad().then(walRefreshBalances).then(() => walFeedLoad(false))
     }
 
     async function walLoad(){
@@ -9656,6 +9694,7 @@
         tr.querySelector('.wal-td-person').textContent = w.person_name
         tb.appendChild(tr)
       }
+      walFeedRender()   // Alle-Transfers-Feed folgt demselben Personen-Filter (15.09.2026)
     }
 
     // Verlauf: Summe der gefilterten Wallets pro Tag. Fehlt für einen Tag der
@@ -9727,7 +9766,7 @@
         if(error) throw error
         $('wal-add-address').value = ''
         await walLoad()
-        walRefreshBalances()
+        walRefreshBalances().then(() => walFeedLoad(false))   // nur die neue Wallet fehlt im Feed
       }catch(e){
         msgEl.textContent = 'Konnte nicht speichern: ' + (e.message || e)
       }finally{ btn.disabled = false }
@@ -9741,6 +9780,7 @@
         const { error } = await supabase.from('id_wallets').delete().eq('id', id)
         if(error) throw error
         walBal.delete(id)
+        walFeed.delete(id)
         if(walTxSel === id) walTxClose()
         await walLoad()
       }catch(e){ console.warn('[wallet] delete:', e.message || e) }
@@ -9978,6 +10018,123 @@
         msg.hidden = false
         msg.textContent = 'Transfers nicht ladbar: ' + (e.message || e)
       }
+    }
+
+    /* ── ALLE TRANSFERS (15.09.2026, Finn: „unten immer über alle Wallets die
+     * letzten Transaktionen sehen … wenn entweder Geld reingeht oder rausgeht,
+     * will ich da alles überblicken können") — ein Feed über alle Wallets.
+     * Keine neue Chain-Logik: pro Wallet derselbe walTxFetch wie beim Klick auf
+     * eine Zeile, Ergebnisse in walFeed (wallet.id → { res | err }) gesammelt,
+     * beim Rendern zusammengeführt und nach Zeit sortiert. Der Personen-Filter
+     * greift nur beim Rendern — geladen wird immer alles, damit ein Filter-
+     * Wechsel keine neuen Chain-Anfragen auslöst.
+     * Drosselung wie bei den Balances: Tron strikt nacheinander mit 1,3 s
+     * Abstand (TronGrid keyless 1 Req/s), alle anderen Chains parallel. Der
+     * Feed startet erst NACH dem Balance-Lauf (walOpen), damit sich beide nicht
+     * bei TronGrid in die Quere kommen. walTxCache (60 s) wird mitbefüllt, der
+     * Klick auf eine Zeile ist danach sofort da. */
+    const walFeed = new Map()   // wallet.id → { res:{list,note}|null, err:String|null }
+    let walFeedBusy = false, walFeedShown = 25, walFeedStand = null
+    const WAL_FEED_STEP = 25
+
+    async function walFeedLoad(force){
+      if(walFeedBusy) return
+      walFeedBusy = true
+      const msgEl = $('wal-feed-msg')
+      try{
+        const todo = wallets.filter(w => force || !walFeed.has(w.id))
+        if(!todo.length){ walFeedRender(); return }
+        let done = 0
+        const laden = async w => {
+          try{
+            const cached = walTxCache.get(w.id)
+            const res = (!force && cached && Date.now() - cached.t < 60000) ? cached.res : await walTxFetch(w)
+            walTxCache.set(w.id, { t: Date.now(), res })
+            walFeed.set(w.id, { res, err:null })
+          }catch(e){
+            walFeed.set(w.id, { res:null, err:(e.message || String(e)) })
+          }
+          done++
+          if(msgEl) msgEl.textContent = `Lade Transfers… ${done}/${todo.length}`
+          walFeedRender()   // jede fertige Wallet sofort einsortieren
+        }
+        if(msgEl) msgEl.textContent = `Lade Transfers… 0/${todo.length}`
+        const tronWs = todo.filter(w => w.chain === 'tron')
+        const restWs = todo.filter(w => w.chain !== 'tron')
+        await Promise.all([
+          ...restWs.map(laden),
+          (async () => {
+            for(let i = 0; i < tronWs.length; i++){
+              if(i) await new Promise(res => setTimeout(res, 1300))
+              await laden(tronWs[i])
+            }
+          })()
+        ])
+        walFeedStand = new Date()
+        walFeedRender()
+      }finally{ walFeedBusy = false }
+    }
+
+    function walFeedRender(){
+      const tb = $('wal-feed-rows')
+      if(!tb) return
+      const rows = walFiltered()
+      const ids = new Set(rows.map(w => w.id))
+      // Eigene Adressen → Name, damit interne Umbuchungen als „Jacob · Arbitrum" statt 0x… stehen
+      const eigene = new Map(wallets.map(w => [w.chain + ':' + w.address.toLowerCase(), w]))
+      const alle = [], notes = new Set()
+      let fehler = 0
+      for(const w of rows){
+        const f = walFeed.get(w.id)
+        if(!f) continue
+        if(f.err){ fehler++; continue }
+        if(f.res.note) notes.add(f.res.note)
+        for(const e of f.res.list) alle.push({ e, w })
+      }
+      // neueste zuerst; Einträge ohne Zeitstempel (Archiv-Grenze) ans Ende
+      alle.sort((a, b) => (b.e.ts || 0) - (a.e.ts || 0))
+      const geladen = rows.filter(w => walFeed.has(w.id)).length
+      tb.innerHTML = ''
+      $('wal-feed-empty').hidden = !!alle.length || !geladen
+      $('wal-feed-empty').textContent = rows.length ? 'Keine Transfers gefunden.' : 'Noch keine Wallets.'
+      const msgEl = $('wal-feed-msg')
+      if(!walFeedBusy && msgEl){
+        const stand = walFeedStand ? `Stand: ${String(walFeedStand.getHours()).padStart(2, '0')}:${String(walFeedStand.getMinutes()).padStart(2, '0')}` : ''
+        msgEl.textContent = fehler ? `${stand} · ${fehler} Wallet${fehler === 1 ? '' : 's'} nicht ladbar` : stand
+        msgEl.title = fehler ? rows.filter(w => walFeed.get(w.id)?.err).map(w => `${w.person_name} · ${WAL_CHAINS[w.chain].label}: ${walFeed.get(w.id).err}`).join('\n') : ''
+      }
+      for(const { e, w } of alle.slice(0, walFeedShown)){
+        const c = WAL_CHAINS[w.chain]
+        const stable = e.sym === 'USDT' || e.sym === 'USDC' || e.sym === 'USDC.e'
+        const eig = e.other ? eigene.get(w.chain + ':' + e.other.toLowerCase()) : null
+        const short = e.other && e.other.length > 14 ? e.other.slice(0, 7) + '…' + e.other.slice(-5) : (e.other || '–')
+        const tr = document.createElement('tr')
+        tr.innerHTML =
+          `<td style="white-space:nowrap;color:var(--sub)">${walTxZeit(e.ts)}</td>` +
+          `<td style="white-space:nowrap"><span class="wal-feed-person"></span> <span style="color:var(--sub)">·</span> <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c.col};margin:0 5px 0 2px"></span>${c.label}</td>` +
+          `<td>${e.dir === 'rein'
+            ? '<span style="color:var(--good);font-weight:650">↓ rein</span>'
+            : '<span style="color:var(--danger);font-weight:650">↑ raus</span>'}</td>` +
+          `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
+          `<td>${e.other
+            ? (eig
+                ? `<span class="wal-feed-eig" title="${escapeHtml(e.other)} — eigene Wallet" style="font-weight:600"></span>` +
+                  ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
+                : `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
+                  ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`)
+            : '<span style="color:var(--sub)">–</span>'}</td>` +
+          `<td style="text-align:right">${e.hash
+            ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
+        tr.querySelector('.wal-feed-person').textContent = w.person_name
+        if(eig) tr.querySelector('.wal-feed-eig').textContent = `${eig.person_name} · ${WAL_CHAINS[eig.chain].label}`
+        tb.appendChild(tr)
+      }
+      const more = $('wal-feed-more')
+      more.hidden = alle.length <= walFeedShown
+      more.textContent = `Mehr anzeigen (${Math.min(walFeedShown, alle.length)} von ${alle.length})`
+      const note = $('wal-feed-note')
+      note.hidden = !notes.size
+      note.textContent = [...notes].join(' ')
     }
 
     /* ── Rechnungen (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs ──
@@ -10401,6 +10558,14 @@
       })
       $('wal-tx-close')?.addEventListener('click', walTxClose)
       $('wal-tx-rows')?.addEventListener('click', ev => {
+        const ad = ev.target.closest('.wal-addr')
+        if(ad) walAddrKopieren(ad)
+      })
+      // Alle-Transfers-Feed (15.09.2026): eigener ↻ (Balances-↻ bleibt Balances),
+      // „Mehr anzeigen" in 25er-Schritten, Adress-Kopieren wie in den Geschwister-Tabellen
+      $('wal-feed-refresh')?.addEventListener('click', () => walFeedLoad(true))
+      $('wal-feed-more')?.addEventListener('click', () => { walFeedShown += WAL_FEED_STEP; walFeedRender() })
+      $('wal-feed-rows')?.addEventListener('click', ev => {
         const ad = ev.target.closest('.wal-addr')
         if(ad) walAddrKopieren(ad)
       })
@@ -23093,7 +23258,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.286'
+  const OS_TAB_BUILD = '2026-09-15.287'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
