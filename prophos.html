@@ -5631,6 +5631,41 @@
       </div>
     </div>
 
+    <!-- FINANZEN: PAYOUT ERHALTEN (15.09.2026, Finn: "wenn der Payout wirklich
+         ankam, direkt das Datum für den nächsten Payout angeben können") —
+         ersetzt das nackte confirm() beim ✓ Erhalten. Das Datum landet in
+         accounts.payout_ready_at (Karte + Admin-Kalender), die Buchung selbst
+         ist unverändert. Eigene Verdrahtung (Regel: keine Sammel-Handler). -->
+    <div class="modal-bg" id="finReceiveModal">
+      <div class="modal" style="max-width:440px">
+        <div class="modal-head">
+          <h3>Payout erhalten</h3>
+          <button class="modal-x" id="finReceiveClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <span id="fin-receive-acc" style="font-size:12.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">–</span>
+            <span class="mono" id="fin-receive-amt" style="font-size:16px;font-weight:700;color:var(--good,#12B76A);flex:0 0 auto">–</span>
+          </div>
+          <p class="modal-sub" style="margin-top:10px">Ab jetzt zählt der Betrag in den Finanzen.</p>
+
+          <div class="field" style="margin-top:12px">
+            <label>Nächster Payout anfragbar ab <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+            <input class="input mono" id="fin-receive-next" type="date" autocomplete="off">
+            <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird am Account gespeichert — steht dann auf der Account-Karte und im Admin-Kalender „Nächste Payouts". Leer lassen = kein Termin.</div>
+          </div>
+
+          <div class="modal-msg" id="finReceiveMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="finReceiveCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="finReceiveSave">✓ Erhalten buchen</button>
+        </div>
+      </div>
+    </div>
+
     <!-- FINANZEN: ABRECHNUNG -->
     <div class="modal-bg" id="finSettleModal">
       <div class="modal" style="max-width:440px">
@@ -22768,7 +22803,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-15.276'
+  const OS_TAB_BUILD = '2026-09-15.277'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25341,7 +25376,8 @@
   /* Payout angefragt → Termin ist verbraucht (15.09.2026). Läuft an denselben
    * zwei Stellen wie zielPayoutReset (Anfrage-Flow + Direktbuchung). Das
    * Datum wird geleert, nicht weitergerechnet — den Zyklus der Firma kennt
-   * Prophos nicht, den nächsten Termin setzt Finn im Account-Modal. Fehler
+   * Prophos nicht, den nächsten Termin setzt Finn im Account-Modal oder direkt
+   * beim ✓ Erhalten der Anfrage (finReceiveConfirm, seit 15.09.2026). Fehler
    * werden BENANNT (Toast mit Handgriff) statt still geschluckt. */
   async function payoutReadyClear(accountId){
     if(!accountId) return
@@ -26555,11 +26591,48 @@
     })
   }
 
-  async function finReceivePending(id){
+  /* ✓ Erhalten läuft seit 15.09.2026 über ein eigenes Modal statt confirm():
+   * Finn will beim Eingang direkt den Termin für den NÄCHSTEN Payout setzen
+   * (CFD-Zeitfenster, der Termin wurde beim Anfragen geleert). Vorbelegt mit
+   * dem aktuellen accounts.payout_ready_at, falls doch einer steht; ohne
+   * Account (alte Anfragen ohne account_id) ist das Feld gesperrt. */
+  let _finReceiveId = null
+  function finReceivePending(id){
     const p = finPending.find(x => String(x.id) === String(id))
     if(!p) return
+    _finReceiveId = id
     const amtStr = '€' + Number(p.amount).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
-    if(!confirm(`${amtStr} als erhalten buchen? Ab jetzt zählt der Betrag in den Finanzen.`)) return
+    document.getElementById('fin-receive-amt').textContent = amtStr
+    const accEl = document.getElementById('fin-receive-acc')
+    accEl.textContent = p.accountName ? `${p.accountName} · ${p.accountFirm || '–'}` : 'Ohne Account'
+    accEl.title = accEl.textContent
+    const acc = (accounts || []).find(a => String(a.id) === String(p.accountId))
+    const nextEl = document.getElementById('fin-receive-next')
+    nextEl.value = acc?.payoutReadyAt ? String(acc.payoutReadyAt).slice(0,10) : ''
+    nextEl.disabled = !acc
+    const msg = document.getElementById('finReceiveMsg'); msg.textContent = ''; msg.className = 'modal-msg'
+    const saveBtn = document.getElementById('finReceiveSave'); saveBtn.disabled = false
+    document.getElementById('finReceiveModal').classList.add('open')
+  }
+  function finCloseReceiveModal(){
+    _finReceiveId = null
+    document.getElementById('finReceiveModal').classList.remove('open')
+  }
+  document.getElementById('finReceiveClose')?.addEventListener('click', finCloseReceiveModal)
+  document.getElementById('finReceiveCancel')?.addEventListener('click', finCloseReceiveModal)
+  document.getElementById('finReceiveModal')?.addEventListener('click', e => {
+    if(e.target === document.getElementById('finReceiveModal')) finCloseReceiveModal()
+  })
+  document.getElementById('finReceiveSave')?.addEventListener('click', () => finReceiveConfirm())
+
+  async function finReceiveConfirm(){
+    const id = _finReceiveId
+    const p = finPending.find(x => String(x.id) === String(id))
+    if(!p) return
+    const msg = document.getElementById('finReceiveMsg')
+    const saveBtn = document.getElementById('finReceiveSave')
+    const nextVal = document.getElementById('fin-receive-next')?.value || null
+    saveBtn.disabled = true
     try{
       const today = new Date().toISOString().slice(0,10)
       // Herkunft bleibt an der Buchung ablesbar: wann angefragt, wo es lag
@@ -26588,7 +26661,34 @@
       finPending = finPending.filter(x => String(x.id) !== String(id))
       renderFinanzen()
     }catch(e){
-      alert('Fehler: ' + (e.message || e))
+      // Buchung ist NICHT durch — Modal bleibt offen, Fehler steht drin
+      msg.textContent = 'Fehler: ' + (e.message || e); msg.className = 'modal-msg err'
+      saveBtn.disabled = false
+      return
+    }
+    finCloseReceiveModal()
+    // Nächster Payout-Termin am Account (15.09.2026) — erst NACH der Buchung,
+    // damit ein Fehler hier die Buchung nie mitreißt. Nur schreiben, wenn sich
+    // etwas ändert; Leeren ist erlaubt (Termin bewusst entfernen).
+    const acc = (accounts || []).find(a => String(a.id) === String(p.accountId))
+    if(acc){
+      const vorher = acc.payoutReadyAt ? String(acc.payoutReadyAt).slice(0,10) : null
+      if(nextVal !== vorher){
+        try{
+          const { data: accRow, error: e3 } = await supabase
+            .from('accounts').update({ payout_ready_at: nextVal }).eq('id', acc.id).select('*').single()
+          if(e3) throw e3
+          const idx = accounts.findIndex(x => String(x.id) === String(acc.id))
+          if(idx >= 0) accounts[idx] = rowToAccount(accRow)
+          if(typeof renderAccounts === 'function') renderAccounts()
+          if(typeof atToast === 'function' && nextVal)
+            atToast(`💸 Nächster Payout ab ${finFmtDate(nextVal)} · ${acc.name}`, 'start')
+        }catch(e){
+          console.warn('[payout] Termin nach Eingang speichern fehlgeschlagen:', e.message || e)
+          if(typeof atToast === 'function')
+            atToast(`⚠ Payout gebucht, aber der nächste Termin für ${acc.name} wurde nicht gespeichert — „Payout anfragbar ab" im Account-Modal setzen`, 'end')
+        }
+      }
     }
   }
 
