@@ -17004,10 +17004,16 @@
           const otherCcy = isMaster ? ((FIRM_PRESETS[firmToPreset(p.slaveFirm)]||FIRM_PRESETS.projectx).currency) : '$'
           const otherLabel = isMaster ? 'Slave' : 'Master'
           const otherCls = otherPl>=0?'color:#16a34a':'color:#dc2626'
-          return `<div style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)">
+          // Klick öffnet „Trade bearbeiten" (16.09.2026, Finn: „auf die Trades
+          // drücken und im Nachhinein P&L bearbeiten — Finanzen sollen sich
+          // anpassen"). Dasselbe Modal wie der Stift auf der Erledigt-Karte;
+          // dessen Speichern zieht die Live-P/L-Buchungen über die Plan-
+          // Kennung im Notiz-Feld nach (upsertAutoTransaction), die Finanzen
+          // folgen also von selbst. Eigene Verdrahtung unten, kein Sammel-Handler.
+          return `<div data-ad-plan="${escapeHtml(String(p.id))}" title="Klicken: Trade bearbeiten (P&L, Notiz)" style="display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer">
             <span style="width:8px;height:8px;border-radius:50%;background:${pl>=0?'#16a34a':'#dc2626'};margin-top:5px;flex-shrink:0"></span>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:13px">${escapeHtml(isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${isMaster?'Slave':'Master'}</span></div>
+              <div style="font-weight:600;font-size:13px">${escapeHtml(isMaster?(p.slaveName||'—'):(p.masterName||'—'))} <span style="font-size:11px;color:var(--sub);font-weight:400">→ ${isMaster?'Slave':'Master'}</span> <span style="font-size:11px;color:var(--sub-2);font-weight:400">✎</span></div>
               <div style="font-size:11.5px;color:var(--sub);margin-top:2px">${escapeHtml(p.status==='completed'?'Erledigt':'Offen')} · ${dateLabel}</div>
             </div>
             <div style="text-align:right">
@@ -17030,6 +17036,12 @@
           </div>`
         }
       }).join('') : '<div style="padding:24px;text-align:center;color:var(--sub);font-size:12.5px">Noch keine Aktivität für diesen Account.</div>'
+      // Trade-Zeilen → „Trade bearbeiten" (16.09.2026, s. Kommentar oben)
+      actEl.querySelectorAll('[data-ad-plan]').forEach(el => {
+        el.addEventListener('click', () => {
+          if(typeof openTradeCompleteModal === 'function') openTradeCompleteModal(el.dataset.adPlan)
+        })
+      })
     }
   }
 
@@ -23466,7 +23478,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-16.294'
+  const OS_TAB_BUILD = '2026-09-16.295'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26936,6 +26948,12 @@
       }
 
       renderTradePlans()
+      // Account-Detailseite offen? Dann Aktivität + Buchungen nachziehen
+      // (16.09.2026: das Modal ist jetzt auch von dort erreichbar — ohne
+      // Re-Render stünde der alte P&L in der Liste, bis man die Seite wechselt).
+      if(document.querySelector('.view[data-view="account-detail"].active') && typeof renderAccountDetail === 'function'){
+        try{ renderAccountDetail() }catch(_){}
+      }
       // Fortschritts-Ziel (10.09.2026): bestätigte P&L kann den heutigen
       // Winning/Trading Day abhaken (Toast + Badge in der Accountübersicht)
       if(typeof zielNachTradeCheck === 'function'){ try{ zielNachTradeCheck(p.id) }catch(_){} }
