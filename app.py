@@ -3557,7 +3557,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3627,6 +3627,13 @@ def admin_build_overview():
         if not a: continue
         try: payouts[a] = payouts.get(a, 0.0) + float(t.get("amount") or 0)
         except (TypeError, ValueError): pass
+    # Anzahl Payouts je Account (17.09.2026, FundedNext-Refund beim ERSTEN
+    # Payout): erhaltene Buchungen + offene Anfragen (unten) — beides
+    # „verbraucht" den ersten Payout, der Refund zählt dann nicht mehr.
+    payout_n = {}
+    for t in txs:
+        a = str(t.get("account_id") or "")
+        if a: payout_n[a] = payout_n.get(a, 0) + 1
 
     # Personen-Labels über die Auth-Admin-API. `names` (E-Mail) bleibt die
     # Wahrheit für die Ausschluss-Liste; für die ANZEIGE zählt seit 28.08.2026
@@ -3742,12 +3749,14 @@ def admin_build_overview():
     pending_rows = []
     try:
         for t in _sb_all("pending_payouts", {
-                "select": "id,user_id,account_name,account_firm,amount,currency,"
+                "select": "id,user_id,account_id,account_name,account_firm,amount,currency,"
                           "liegt_bei,requested_at,notes",
                 "status": "eq.pending"}):
             uid = str(t.get("user_id"))
             if uid in excluded_ids:
                 continue
+            pa = str(t.get("account_id") or "")
+            if pa: payout_n[pa] = payout_n.get(pa, 0) + 1
             try:
                 amt = float(t.get("amount") or 0)
             except (TypeError, ValueError):
@@ -3841,28 +3850,56 @@ def admin_build_overview():
     except Exception as e:
         print(f"[admin] ⚠️ dup_live-Balances: {type(e).__name__}: {e}", flush=True)
 
+    # Echo-Snapshot (17.09.2026, Finn: „Bei Balance wird überall 0 angezeigt —
+    # du musst dich auf die Echo-Live-Balance beziehen"): die PC-Tabs pushen
+    # alle 5 s master_balance nach mt5_live (master_login = external_id).
+    # Jüngste Zeile je Login gewinnt. Ein eingefrorener Snapshot ist als
+    # KONTOSTAND weiter richtig (Doktrin 31.08.: alt ist okay, nur nie als
+    # frisch ausgeben) — deshalb wandert updated_at als balance_at mit.
+    echo_bal = {}
+    try:
+        for row in _sb_all("mt5_live", {"select": "master_login,updated_at,"
+                                                  "bal:status->>master_balance,ccy:status->>master_currency"}):
+            lg = str(row.get("master_login") or "").strip()
+            if not lg or row.get("bal") in (None, ""):
+                continue
+            at = str(row.get("updated_at") or "")
+            if lg not in echo_bal or at > echo_bal[lg][2]:
+                echo_bal[lg] = (row.get("bal"), row.get("ccy") or "USD", at)
+    except Exception as e:
+        print(f"[admin] ⚠️ mt5_live-Balances: {type(e).__name__}: {e}", flush=True)
+
     def _acc_balance(a):
+        """(balance, ccy, quelle, stand). 0 gilt bei JEDER Quelle als unbekannt —
+        ein Funded-Account steht nie auf 0, das ist der leere Sync/Default
+        (17.09.2026: Topstep-Sync lieferte 0.00, die Tabelle zeigte „0 $")."""
         def num(v):
             try:
                 f = float(v)
-                return f if f == f else None
+                return f if f == f and f > 0 else None
             except (TypeError, ValueError):
                 return None
         b = num(a.get("topstep_balance"))
         if b is not None:
-            return b, "USD", "TSX"
+            return b, "USD", "TSX", a.get("topstep_last_check") or ""
         b = num(a.get("meta_api_balance"))
         if b is not None:
-            return b, "USD", "MT5"
-        hit = dup_bal.get(str(a.get("external_id") or "").strip())
+            return b, "USD", "MT5", a.get("meta_api_last_check") or ""
+        login = str(a.get("external_id") or "").strip()
+        hit = echo_bal.get(login)
         if hit:
             b = num(hit[0])
             if b is not None:
-                return b, hit[1], "Duplikum"
+                return b, hit[1], "Echo", hit[2]
+        hit = dup_bal.get(login)
+        if hit:
+            b = num(hit[0])
+            if b is not None:
+                return b, hit[1], "Duplikum", ""
         b = num(a.get("balance"))
-        if b is not None and b > 0:
-            return b, "USD", "manuell"
-        return None, None, None
+        if b is not None:
+            return b, "USD", "manuell", ""
+        return None, None, None, ""
 
     def _pnum(v):
         try:
@@ -3870,6 +3907,19 @@ def admin_build_overview():
             return f if f == f else None
         except (TypeError, ValueError):
             return None
+
+    # Balance + Payout-Rechnungsfelder auch an die Übersichts-Zeilen (17.09.2026,
+    # „Wert in Funded-Accounts"): exakt dieselbe Quelle wie der Kalender unten.
+    for r in rows:
+        a = by_id.get(r["id"]) or {}
+        bal, ccy, src, at = _acc_balance(a)
+        r.update({
+            "balance": round(bal, 2) if bal is not None else None,
+            "balance_ccy": ccy, "balance_src": src, "balance_at": at,
+            "payout_pct": _pnum(a.get("payout_pct")),
+            "payout_override": _pnum(a.get("payout_override")),
+            "payouts_n": payout_n.get(r["id"], 0),
+        })
 
     payout_ready = []
     for a in accounts:
@@ -3906,11 +3956,16 @@ def admin_build_overview():
             "wd_target": target if manual else None,
             "wd_ready": bool(manual and target > 0 and count >= target),
         })
-        bal, ccy, src = _acc_balance(a)
+        bal, ccy, src, at = _acc_balance(a)
         payout_ready[-1].update({
             "balance": round(bal, 2) if bal is not None else None,
             "balance_ccy": ccy,
             "balance_src": src,
+            "balance_at": at,
+            # Kaufpreis + Payout-Zähler (17.09.2026): FundedNext-Refund 150 %
+            # vom Kaufpreis beim ERSTEN Payout — rechnet das Frontend.
+            "buy": _pnum(a.get("purchase_cost")) or 0,
+            "payouts_n": payout_n.get(aid, 0),
             # Payout-Rechnung (17.09.2026, Finn: „wie viel Geld das bei dem
             # Payout ist"): Prozent (leer = 80) und fester Betrag, beide über
             # /admin/payout-calc gesetzt. Gerechnet wird im Frontend — die

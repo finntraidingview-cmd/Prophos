@@ -6543,6 +6543,40 @@
               </div>
             </div>
 
+            <!-- WERT IN FUNDED-ACCOUNTS (17.09.2026, Finn: „wie viel Wert ich an
+                 Accounts habe … ein 150k-Account auf 157.000, da sind potenziell
+                 7.000 $ drin"). Gegenstück zu „geparkt": nicht was reingesteckt
+                 ist, sondern was aus den Funded-Accounts noch rauskommen kann.
+                 Balance aus dem Echo-Snapshot (mt5_live) / TSX / Duplikum, Größe
+                 aus dem Namen, Rechnung wie im Payout-Kalender (admPayoutCalc:
+                 Profit-Share je Firma, FundedNext-Refund beim ersten Payout).
+                 Folgt dem Personen-/Firmen-Filter oben. Reine Anzeige. -->
+            <div class="panel" style="margin-top:14px" id="adm-wert-panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Wert in Funded-Accounts</div>
+                  <div class="panel-sub">Balance − Größe = Gewinn · × Profit-Share (FundedNext 80 %, Tradeify 90 %) + FundedNext-Refund 150 % beim ersten Payout = potenziell · anpassen im Payout-Kalender unter Finanzen</div>
+                </div>
+                <div id="adm-wert-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
+              </div>
+              <div id="adm-wert-personen" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 0 12px"></div>
+              <div class="table-wrap adm-scroll">
+                <table class="t">
+                  <thead><tr>
+                    <th>Person</th>
+                    <th>Account</th>
+                    <th>Firma</th>
+                    <th class="adm-num">Balance</th>
+                    <th class="adm-num">Größe</th>
+                    <th class="adm-num">Gewinn</th>
+                    <th class="adm-num">Potenziell</th>
+                  </tr></thead>
+                  <tbody id="adm-wert-rows"></tbody>
+                </table>
+              </div>
+              <div class="adm-empty" id="adm-wert-empty" hidden>Keine Funded-Accounts für diesen Filter.</div>
+            </div>
+
             <!-- Account-Liste: KEINE Dauerliste mehr, sondern die Aufklappung.
                  Erscheint nur, wenn oben eine Firma/Person angeklickt oder
                  gesucht wurde — sonst wäre es nur eine lange Tabelle. -->
@@ -6717,12 +6751,13 @@
                  Kalender, viel cleaner — und wie viel Geld das bei dem Payout
                  ist"): 4-Wochen-Raster mit Summe je Tag, darunter EINE Tabelle
                  für CFD-Termine und Futures-Winning-Days, Spalte Payout =
-                 (Balance − Größe) × Prozent, per Klick anpassbar. -->
+                 (Balance − Größe) × Profit-Share (+ FundedNext-Refund beim
+                 ersten Payout, seit .297), per Klick anpassbar. -->
             <div class="panel" id="adm-f-cal-panel" hidden style="margin-bottom:14px">
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Nächste Payouts</div>
-                  <div class="panel-sub">Termin je Account und was der Payout bringt · (Balance − Größe) × Prozent · Betrag anklicken zum Anpassen</div>
+                  <div class="panel-sub">Termin je Account und was der Payout bringt · (Balance − Größe) × Profit-Share + FundedNext-Refund beim ersten Payout · Betrag anklicken zum Anpassen</div>
                 </div>
                 <div id="adm-f-cal-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
@@ -8599,8 +8634,139 @@
         : `<td class="adm-num" style="color:var(--sub)">${admEur.format(n)}</td>`
     }
 
+    /* ── Payout-Rechnung je Account (17.09.2026) — EINE Stelle für den
+     * Payout-Kalender (Finanzen) und „Wert in Funded-Accounts" (Übersicht).
+     * Größe aus dem Account-Namen („100k …"; account_size/starting_balance
+     * sind in der DB bei allen leer), Gewinn = Balance − Größe, Profit-Share
+     * je Firma (Finn 17.09.: Tradeify 90/10, sonst 80/20 — „80 ist nur noch
+     * FundedNext"), per Klick im Kalender überschreibbar (payout_pct).
+     * FundedNext-Refund: Finn kauft dort immer mit 150 %-Refund-Aktion — beim
+     * ERSTEN Payout kommen 150 % des Kaufpreises mit (payouts_n = erhaltene +
+     * angefragte Payouts des Accounts, 0 → Refund zählt). Fester Betrag
+     * (payout_override) gewinnt über alles. Balance-Quelle und Stand-Zeit
+     * kommen vom Backend (Echo-Snapshot → TSX → Duplikum → manuell). */
+    const admPayoutPctDefault = firm => /tradeify/i.test(String(firm || '')) ? 90 : 80
+    const admIstFundedNext = firm => /f(ou|u)nded\s*next/i.test(String(firm || ''))
+    function admAccGroesse(name, balance){
+      const m = String(name || '').match(/(\d{2,3})\s*k\b/i)
+      if(m) return Number(m[1]) * 1000
+      const b = Number(balance)
+      if(!(b > 0)) return null
+      const std = [5000, 10000, 25000, 50000, 100000, 150000, 200000, 250000, 300000]
+      return std.reduce((best, x) => Math.abs(x - b) < Math.abs(best - b) ? x : best, std[0])
+    }
+    function admPayoutCalc(r){
+      const firm = r.account_firm || r.firm_raw || r.firm || ''
+      const size = admAccGroesse(r.account_name || r.name || '', r.balance)
+      const bal = r.balance == null ? null : Number(r.balance)
+      const pct = r.payout_pct == null ? admPayoutPctDefault(firm) : Number(r.payout_pct)
+      const profit = (size != null && bal != null) ? bal - size : null
+      const anteil = profit == null ? null : Math.max(0, profit) * pct / 100
+      const buy = Number(r.buy) || 0
+      const refund = (admIstFundedNext(firm) && !(Number(r.payouts_n) > 0) && buy > 0) ? buy * 1.5 : 0
+      const berechnet = anteil == null ? (refund || null) : anteil + refund
+      const manuell = r.payout_override != null
+      const betrag = manuell ? Number(r.payout_override) : berechnet
+      const balAt = Date.parse(r.balance_at || '') || 0
+      return { size, bal, pct, profit, anteil, refund, buy, berechnet, betrag, manuell,
+               ccy: r.balance_ccy || 'USD', balAt, balAlt: balAt ? (Date.now() - balAt) > 3600e3 : false }
+    }
+    const admGeld = (v, ccy) => {
+      try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits: 0 }).format(v) }
+      catch(_){ return `${Math.round(v)} ${ccy || ''}` }
+    }
+    // Summen je Währung als Text („4.800 $ · 300 €") — nie über Währungen addieren
+    const admGeldMap = m => [...m.entries()].map(([c, v]) => admGeld(v, c)).join(' · ') || '—'
+    function admPayoutHerleitung(c){
+      const refund = c.refund ? ` + Refund ${admGeld(c.refund, c.ccy)}` : ''
+      if(c.manuell) return 'manuell' + (c.berechnet != null ? ' · ber. ' + admGeld(c.berechnet, c.ccy) : '')
+      if(c.profit == null) return (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + c.pct + ' %' + refund
+      return (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy) + ' × ' + c.pct + ' %' + refund
+    }
+    // Balance-Zelle: Quelle im Tooltip, „manuell" = Startbalance gedämpft,
+    // Stand-Zeit sichtbar, sobald der Snapshot älter als eine Stunde ist
+    // (Doktrin 31.08.: alter Kontostand ist okay, nur nie als frisch ausgeben).
+    function admBalanceZelle(td, r, c){
+      if(c.bal == null){ td.textContent = '—'; td.style.color = 'var(--sub)'; td.title = 'Keine Balance-Quelle (Echo/TSX/Duplikum), manuell leer oder 0'; return }
+      const manuell = r.balance_src === 'manuell'
+      const stand = c.balAt ? new Date(c.balAt).toLocaleString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin' }) : ''
+      td.innerHTML = '<span class="mono" style="font-weight:600"></span><div style="font-size:10.5px;color:var(--sub)"></div>'
+      td.children[0].textContent = admGeld(c.bal, c.ccy)
+      td.children[0].style.color = manuell ? 'var(--sub)' : 'var(--ink)'
+      td.children[1].textContent = manuell ? 'manuell' : (c.balAlt && stand ? `${r.balance_src || ''} · ${stand}` : (r.balance_src || ''))
+      td.title = manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : `${r.balance_src || ''}${stand ? ' · Stand ' + stand : ''}`
+    }
+
+    /* ── Wert in Funded-Accounts (17.09.2026, Finn: „wie viel Wert ich an
+     * Accounts habe … 150k auf 157.000 = potenziell 7.000 $ drin"). Nur
+     * Funded, nicht archiviert, folgt dem Filter wie „geparkt". ── */
+    function admWertRender(){
+      const panel = $('adm-wert-panel'); if(!panel || !admData) return
+      const tb = $('adm-wert-rows'), sums = $('adm-wert-sums'), pers = $('adm-wert-personen'), empty = $('adm-wert-empty')
+      if(!tb || !sums || !pers) return
+      const rows = admFiltered().filter(r => r.type === 'funded' && !r.archived)
+      tb.innerHTML = ''; sums.innerHTML = ''; pers.innerHTML = ''
+      if(empty) empty.hidden = rows.length > 0
+      const add = (m, c, v) => { if(v != null) m.set(c, (m.get(c) || 0) + v) }
+      for(const r of rows) r.wert = admPayoutCalc(r)
+      rows.sort((a, b) => ((b.wert.betrag ?? -1) - (a.wert.betrag ?? -1)) || String(a.person || '').localeCompare(String(b.person || ''), 'de'))
+      const sGewinn = new Map(), sPot = new Map(), perPerson = new Map()
+      let ohne = 0
+      for(const r of rows){
+        const c = r.wert
+        if(c.bal == null) ohne++
+        add(sGewinn, c.ccy, c.profit); add(sPot, c.ccy, c.betrag)
+        const pm = perPerson.get(r.person) || new Map(); add(pm, c.ccy, c.betrag); perPerson.set(r.person, pm)
+      }
+      for(const [lbl, m, farbe] of [['Potenziell', sPot, 'var(--good)'], ['Gewinn (Balance − Größe)', sGewinn, 'var(--ink)']]){
+        const d = document.createElement('div')
+        d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
+        d.children[0].style.color = farbe
+        d.children[0].textContent = admGeldMap(m)
+        d.children[1].textContent = lbl + (lbl === 'Potenziell' ? ` · ${rows.length} Funded${ohne ? ` · ${ohne} ohne Balance` : ''}` : '')
+        sums.appendChild(d)
+      }
+      for(const [person, m] of [...perPerson.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'de'))){
+        const chip = document.createElement('span')
+        chip.className = 'chip chip-neutral'
+        chip.textContent = `${admShortName(person || '—')} · ${admGeldMap(m)}`
+        pers.appendChild(chip)
+      }
+      for(const r of rows){
+        const c = r.wert
+        const tr = document.createElement('tr')
+        tr.innerHTML =
+          '<td><span class="w-p" style="font-weight:600"></span></td>' +
+          '<td><span class="w-a" style="font-size:12.5px"></span><div class="w-e" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div></td>' +
+          '<td><span class="w-f" style="color:var(--sub);font-size:12.5px"></span></td>' +
+          '<td class="adm-num w-b" style="white-space:nowrap"></td>' +
+          '<td class="adm-num w-s" style="color:var(--sub)"></td>' +
+          '<td class="adm-num w-g" style="white-space:nowrap;font-weight:600"></td>' +
+          '<td class="adm-num w-po" style="white-space:nowrap"></td>'
+        tr.querySelector('.w-p').textContent = admShortName(r.person || '—')
+        tr.querySelector('.w-a').textContent = r.name || '—'
+        const e = tr.querySelector('.w-e'); if(r.ext) e.textContent = '#' + r.ext; else e.remove()
+        tr.querySelector('.w-f').textContent = r.firm_raw || r.firm || '–'
+        admBalanceZelle(tr.querySelector('.w-b'), r, c)
+        tr.querySelector('.w-s').textContent = c.size != null ? (c.size / 1000) + 'k' : '—'
+        const g = tr.querySelector('.w-g')
+        if(c.profit == null){ g.textContent = '—'; g.style.color = 'var(--sub)' }
+        else{
+          g.textContent = (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy)
+          g.style.color = c.profit > 0 ? 'var(--good)' : c.profit < 0 ? 'var(--danger)' : 'var(--sub)'
+        }
+        const po = tr.querySelector('.w-po')
+        po.innerHTML = '<div class="tnum" style="font-weight:700;font-size:13px"></div><div style="font-size:10.5px;color:var(--sub)"></div>'
+        po.children[0].textContent = c.betrag != null ? admGeld(c.betrag, c.ccy) : '—'
+        po.children[0].style.color = c.betrag > 0 ? 'var(--good)' : 'var(--sub)'
+        po.children[1].textContent = admPayoutHerleitung(c)
+        tb.appendChild(tr)
+      }
+    }
+
     function admRender(){
       if(!admData) return
+      admWertRender()
       const rows = admFiltered()
       const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
       // Gleiche Kappung wie in admGroup: die KPI muss zur Summe der Firmen-/
@@ -8986,7 +9152,8 @@
       // CFD-Termine als Tages-Gruppen (überfällige zuerst), Futures-Winning-
       // Days als letzte Gruppe. Die Chip-Blöcke von vorher waren bei zehn
       // Accounts unlesbar (Lehre 15.09. abends).
-      // Betrag = (Balance − Größe) × Prozent, Prozent leer = 80. Die Größe
+      // Betrag = (Balance − Größe) × Profit-Share (Tradeify 90, sonst 80) +
+      // FundedNext-Refund beim ersten Payout — zentral in admPayoutCalc. Die Größe
       // steht im Account-Namen („100k funded …", „funded next 200k") —
       // account_size/starting_balance sind in der DB bei ALLEN Accounts leer
       // (per SQL geprüft 17.09.), Finn trägt sie nie ein; Fallback ist die
@@ -9008,33 +9175,15 @@
         tb.innerHTML = ''; grid.innerHTML = ''; sums.innerHTML = ''
         const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
         const tageBis = tag => Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
-        const geld = (v, ccy) => {
-          try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits: 0 }).format(v) }
-          catch(_){ return `${Math.round(v)} ${ccy || ''}` }
-        }
-        // Summen je Währung („4.800 $ · 300 €") — nie über Währungen addieren
-        const geldMap = m => [...m.entries()].map(([c, v]) => geld(v, c)).join(' · ') || '—'
+        const geld = admGeld, geldMap = admGeldMap
         const addTo = (m, r) => { if(r.calc.betrag != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.betrag) }
-        const groesse = r => {
-          const m = String(r.account_name || '').match(/(\d{2,3})\s*k\b/i)
-          if(m) return Number(m[1]) * 1000
-          const b = Number(r.balance)
-          if(!(b > 0)) return null
-          const std = [5000, 10000, 25000, 50000, 100000, 150000, 200000, 250000, 300000]
-          return std.reduce((best, x) => Math.abs(x - b) < Math.abs(best - b) ? x : best, std[0])
-        }
+        // Rechnung zentral (admPayoutCalc: Größe, Profit-Share je Firma,
+        // FundedNext-Refund, Override) — hier kommt nur der Termin dazu.
         for(const r of cal){
-          const size = groesse(r)
-          const bal = r.balance == null ? null : Number(r.balance)
-          const pct = r.payout_pct == null ? 80 : Number(r.payout_pct)
-          const profit = (size != null && bal != null) ? bal - size : null
-          const berechnet = profit == null ? null : Math.max(0, profit) * pct / 100
-          const manuell = r.payout_override != null
-          const betrag = manuell ? Number(r.payout_override) : berechnet
           const tag = String(r.ready_at || '').slice(0, 10)
           const tage = tag ? tageBis(tag) : null
           const faellig = tag ? tage <= 0 : !!r.wd_ready
-          r.calc = { size, bal, pct, profit, berechnet, betrag, manuell, tag, tage, faellig, ccy: r.balance_ccy || 'USD' }
+          r.calc = Object.assign(admPayoutCalc(r), { tag, tage, faellig })
         }
 
         // Kopf: anfragbar jetzt · nächste 7 Tage · gesamt offen
@@ -9159,16 +9308,7 @@
             const d = dots(r); if(d) st.appendChild(d)
             if(r.wd_ready){ const chip = document.createElement('span'); chip.className = 'chip chip-good'; chip.style.marginLeft = '8px'; chip.textContent = 'anfragbar'; st.appendChild(chip) }
           }
-          // Balance wie bisher: Live-Quelle im Tooltip, „manuell" = Startbalance gedämpft
-          const bt = tr.querySelector('.c-bal')
-          if(c.bal == null){ bt.textContent = '—'; bt.style.color = 'var(--sub)' }
-          else{
-            const manuell = r.balance_src === 'manuell'
-            bt.innerHTML = '<span class="mono" style="font-weight:600"></span>' + (manuell ? '<div style="font-size:10.5px;color:var(--sub)">manuell</div>' : '')
-            bt.children[0].textContent = geld(c.bal, c.ccy)
-            bt.children[0].style.color = manuell ? 'var(--sub)' : 'var(--ink)'
-            bt.title = manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src
-          }
+          admBalanceZelle(tr.querySelector('.c-bal'), r, c)
           tr.querySelector('.c-size').textContent = c.size != null ? (c.size / 1000) + 'k' : '—'
           admCalPayoutCell(tr.querySelector('.c-po'), r)
           return tr
@@ -9203,9 +9343,7 @@
         v.textContent = c.betrag != null ? geld(c.betrag) : '—'
         const sub = document.createElement('div')
         sub.style.cssText = 'font-size:10.5px;color:var(--sub)'
-        sub.textContent = c.manuell ? 'manuell' + (c.berechnet != null ? ' · ber. ' + geld(c.berechnet) : '')
-          : c.profit == null ? (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + c.pct + ' %'
-          : (c.profit >= 0 ? '+' : '−') + geld(Math.abs(c.profit)) + ' × ' + c.pct + ' %'
+        sub.textContent = admPayoutHerleitung(c)
         b.appendChild(v); b.appendChild(sub)
         b.addEventListener('click', () => admCalPayoutEdit(td, r))
         td.appendChild(b)
@@ -23663,7 +23801,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.296'
+  const OS_TAB_BUILD = '2026-09-17.297'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
