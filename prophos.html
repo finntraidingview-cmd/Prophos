@@ -8663,13 +8663,18 @@
       const profit = (size != null && bal != null) ? bal - size : null
       const anteil = profit == null ? null : Math.max(0, profit) * pct / 100
       const buy = Number(r.buy) || 0
-      const refund = (admIstFundedNext(firm) && !(Number(r.payouts_n) > 0) && buy > 0) ? buy * 1.5 : 0
+      const ccy = r.balance_ccy || 'USD'
+      // Kaufpreis ist in € erfasst, der Refund kommt aber mit dem $-Payout —
+      // Umrechnung über denselben Kurs wie „geparkt" (fx_usd_eur, USD→EUR).
+      const fx = Number(admData && admData.fx_usd_eur) || 0.85
+      const refundEur = (admIstFundedNext(firm) && !(Number(r.payouts_n) > 0) && buy > 0) ? buy * 1.5 : 0
+      const refund = ccy === 'EUR' ? refundEur : refundEur / fx
       const berechnet = anteil == null ? (refund || null) : anteil + refund
       const manuell = r.payout_override != null
       const betrag = manuell ? Number(r.payout_override) : berechnet
       const balAt = Date.parse(r.balance_at || '') || 0
-      return { size, bal, pct, profit, anteil, refund, buy, berechnet, betrag, manuell,
-               ccy: r.balance_ccy || 'USD', balAt, balAlt: balAt ? (Date.now() - balAt) > 3600e3 : false }
+      return { size, bal, pct, profit, anteil, refund, refundEur, buy, berechnet, betrag, manuell,
+               ccy, balAt, balAlt: balAt ? (Date.now() - balAt) > 3600e3 : false }
     }
     const admGeld = (v, ccy) => {
       try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits: 0 }).format(v) }
@@ -8678,7 +8683,9 @@
     // Summen je Währung als Text („4.800 $ · 300 €") — nie über Währungen addieren
     const admGeldMap = m => [...m.entries()].map(([c, v]) => admGeld(v, c)).join(' · ') || '—'
     function admPayoutHerleitung(c){
-      const refund = c.refund ? ` + Refund ${admGeld(c.refund, c.ccy)}` : ''
+      const refund = c.refund
+        ? (c.ccy === 'EUR' ? ` + Refund ${admGeld(c.refund, 'EUR')}` : ` + Refund ${admGeld(c.refundEur, 'EUR')} ≈ ${admGeld(c.refund, c.ccy)}`)
+        : ''
       if(c.manuell) return 'manuell' + (c.berechnet != null ? ' · ber. ' + admGeld(c.berechnet, c.ccy) : '')
       if(c.profit == null) return (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + c.pct + ' %' + refund
       return (c.profit >= 0 ? '+' : '−') + admGeld(Math.abs(c.profit), c.ccy) + ' × ' + c.pct + ' %' + refund
@@ -8876,14 +8883,18 @@
      * eine andere ist: nicht „wo steckt Geld", sondern „was wurde eingekauft".
      * Deshalb: Eigen-Kosten je Account (buy, KEINE Vorgänger-Kette — jeder
      * gekaufte Account ist hier selbst eine Zeile, die Kette würde doppeln),
-     * archivierte zählen mit, und die Beträge bleiben in $ — Accounts werden
-     * in USD gekauft, genau wie die Kasse rechnet.
+     * archivierte zählen mit; Beträge in € (Kaufpreise werden in Euro
+     * erfasst — Korrektur 17.09.2026, vorher stand hier fälschlich $).
      * 2. Runde (Finns Feedback, gleicher Tag): keine Personen-Kästchen mehr,
      * sondern dieselben klickbaren Balken wie in der Übersicht — Person und
      * Firma nebeneinander, Klick klappt die Account-Liste auf, nochmal klicken
      * schließt. Feste Farbe je Zeile statt Risiko-Ampel: hier gibt es kein
      * Klumpenrisiko, die Farbe dient nur der Unterscheidung. */
-    const admUsd = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
+    // WÄHRUNG (17.09.2026, Finn am Screenshot: „stell hier alles in EUR um, wir
+    // geben ja immer den EUR-Betrag an"): purchase_cost wird in Euro erfasst —
+    // die $-Formatierung vom 26.08. war eine falsche Annahme. Dieselbe
+    // Formatierung wie die Übersicht (admEur).
+    const admKaufEur = admEur
     const B_COLORS = ['var(--violet)', '#e0891f', '#0ea5e9', '#16a34a', '#e11d48', '#a855f7', '#f59e0b', '#14b8a6']
     let bPerson = '', bFirm = ''
 
@@ -8920,10 +8931,10 @@
         row.innerHTML =
           '<div class="adm-row-name"></div>' +
           `<div class="adm-track"><div class="adm-fill" style="width:${Math.min(100, share).toFixed(1)}%;background:${colors.get(g.key) || 'var(--violet)'}"></div></div>` +
-          `<div class="adm-val">${admUsd.format(g.sum)}</div>` +
+          `<div class="adm-val">${admKaufEur.format(g.sum)}</div>` +
           `<div class="adm-pct">${g.accs}×</div>`
         row.querySelector('.adm-row-name').textContent = admShortName(g.label)
-        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admUsd.format(g.sum)} — zum Aufklappen klicken`
+        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admKaufEur.format(g.sum)} — zum Aufklappen klicken`
         row.addEventListener('click', () => onPick(g))
         el.appendChild(row)
       }
@@ -8940,7 +8951,7 @@
 
       $('adm-b-accs').textContent = rows.length
       $('adm-b-accs-sub').textContent = `über ${byPerson.length} Person${byPerson.length === 1 ? '' : 'en'}`
-      $('adm-b-sum').textContent = admUsd.format(rows.reduce((a, r) => a + (Number(r.buy) || 0), 0))
+      $('adm-b-sum').textContent = admKaufEur.format(rows.reduce((a, r) => a + (Number(r.buy) || 0), 0))
       const nArch = rows.filter(r => r.archived).length
       $('adm-b-sum-sub').textContent = nArch ? `${rows.length - nArch} aktiv · ${nArch} archiviert` : 'alle aktiv'
 
@@ -8975,7 +8986,7 @@
             '</div></td>' +
             '<td><span class="fm" style="font-size:12.5px;color:var(--sub)"></span></td>' +
             '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
-            `<td class="adm-num" style="font-weight:600">${admUsd.format(Number(r.buy) || 0)}</td>`
+            `<td class="adm-num" style="font-weight:600">${admKaufEur.format(Number(r.buy) || 0)}</td>`
           tr.querySelector('.nm').textContent = r.name || '—'
           tr.querySelector('.fm').textContent = r.firm
           const pe = tr.querySelector('.pe')
@@ -9008,7 +9019,7 @@
             '</div></td>' +
             '<td><span class="fm" style="font-size:12.5px;color:var(--sub)"></span></td>' +
             '<td><span class="pe" style="font-size:12.5px;color:var(--sub)"></span></td>' +
-            `<td class="adm-num" style="font-weight:600">${admUsd.format(Number(r.buy) || 0)}</td>`
+            `<td class="adm-num" style="font-weight:600">${admKaufEur.format(Number(r.buy) || 0)}</td>`
           tr.querySelector('.nm').textContent = r.name || '—'
           tr.querySelector('.fm').textContent = r.firm
           const pe = tr.querySelector('.pe')
@@ -23801,7 +23812,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.297'
+  const OS_TAB_BUILD = '2026-09-17.298'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
