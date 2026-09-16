@@ -6712,15 +6712,35 @@
                  alle Personen (Service-Key-Aggregation wie der Rest des Tabs),
                  ein Block pro Datum, darin Person · Account · Firma. Überfällige
                  Termine stehen oben in Orange, heute in Grün. Ohne Termine
-                 bleibt das Panel unsichtbar. -->
+                 bleibt das Panel unsichtbar.
+                 UMBAU 17.09.2026 (Finn: „die Übersicht viel besser, evtl. mit
+                 Kalender, viel cleaner — und wie viel Geld das bei dem Payout
+                 ist"): 4-Wochen-Raster mit Summe je Tag, darunter EINE Tabelle
+                 für CFD-Termine und Futures-Winning-Days, Spalte Payout =
+                 (Balance − Größe) × Prozent, per Klick anpassbar. -->
             <div class="panel" id="adm-f-cal-panel" hidden style="margin-bottom:14px">
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Nächste Payouts</div>
-                  <div class="panel-sub">Ab wann je Account der Payout angefragt werden kann — über alle Personen</div>
+                  <div class="panel-sub">Termin je Account und was der Payout bringt · (Balance − Größe) × Prozent · Betrag anklicken zum Anpassen</div>
                 </div>
+                <div id="adm-f-cal-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
               </div>
-              <div id="adm-f-cal-rows" style="padding:0 18px 14px;display:flex;flex-direction:column;gap:10px"></div>
+              <div id="adm-f-cal-grid" style="padding:0 18px 14px"></div>
+              <div class="table-wrap">
+                <table class="t">
+                  <thead><tr>
+                    <th>Person</th>
+                    <th>Account</th>
+                    <th>Firma</th>
+                    <th>Stand</th>
+                    <th class="adm-num">Balance</th>
+                    <th class="adm-num">Größe</th>
+                    <th class="adm-num">Payout</th>
+                  </tr></thead>
+                  <tbody id="adm-f-cal-rows"></tbody>
+                </table>
+              </div>
             </div>
 
             <!-- PAYOUTS UNTERWEGS über ALLE Personen (02.09.2026, Finns Wunsch
@@ -8958,122 +8978,287 @@
         }
       }
 
-      // Nächste Payouts — Kalender (15.09.2026): accounts.payout_ready_at über
-      // alle Personen, gruppiert nach Datum. Reine Anzeige, rechnet nirgends rein.
-      const cal = admData.payout_ready || []
-      const calPanel = $('adm-f-cal-panel')
-      if(calPanel){
+      // Nächste Payouts — Kalender (15.09.2026, UMBAU 17.09.2026, Finn: „die
+      // Übersicht viel besser, evtl. mit Kalender, viel cleaner — und wie viel
+      // Geld das bei dem Payout ist"). Quelle bleibt admData.payout_ready
+      // (accounts.payout_ready_at + Winning Days, über alle Personen).
+      // Layout: 4-Wochen-Raster mit Summe je Tag, darunter EINE Tabelle —
+      // CFD-Termine als Tages-Gruppen (überfällige zuerst), Futures-Winning-
+      // Days als letzte Gruppe. Die Chip-Blöcke von vorher waren bei zehn
+      // Accounts unlesbar (Lehre 15.09. abends).
+      // Betrag = (Balance − Größe) × Prozent, Prozent leer = 80. Die Größe
+      // steht im Account-Namen („100k funded …", „funded next 200k") —
+      // account_size/starting_balance sind in der DB bei ALLEN Accounts leer
+      // (per SQL geprüft 17.09.), Finn trägt sie nie ein; Fallback ist die
+      // Standardgröße, die der Balance am nächsten liegt. Klick auf den
+      // Betrag: Prozent oder fester Betrag, gespeichert über
+      // /admin/payout-calc (Service-Key, weil die Accounts anderen Personen
+      // gehören). Reine Übersicht — bucht nichts, rechnet in keine
+      // Finanzen-Summe hinein.
+      admCalRender()
+
+      function admCalRender(){
+        const cal = (admData && admData.payout_ready) || []
+        const calPanel = $('adm-f-cal-panel')
+        if(!calPanel) return
         calPanel.hidden = !cal.length
-        const box = $('adm-f-cal-rows')
-        if(box){
-          box.innerHTML = ''
-          const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
-          // Balance-Text (15.09.2026 abends, Finn: „bei den CFD auch immer
-          // Balance") — Quelle aus dem Backend (TSX/MT5/Duplikum/manuell),
-          // ganze Beträge in Konto-Währung; manuell = Startbalance, kein Live-Wert.
-          const balText = r => {
-            if(r.balance == null) return ''
-            try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: r.balance_ccy || 'USD', maximumFractionDigits: 0 }).format(r.balance) }
-            catch(_){ return `${Number(r.balance).toFixed(0)} ${r.balance_ccy || ''}` }
+        if(!cal.length) return
+        const tb = $('adm-f-cal-rows'), grid = $('adm-f-cal-grid'), sums = $('adm-f-cal-sums')
+        if(!tb || !grid || !sums) return
+        tb.innerHTML = ''; grid.innerHTML = ''; sums.innerHTML = ''
+        const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' })
+        const tageBis = tag => Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
+        const geld = (v, ccy) => {
+          try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits: 0 }).format(v) }
+          catch(_){ return `${Math.round(v)} ${ccy || ''}` }
+        }
+        // Summen je Währung („4.800 $ · 300 €") — nie über Währungen addieren
+        const geldMap = m => [...m.entries()].map(([c, v]) => geld(v, c)).join(' · ') || '—'
+        const addTo = (m, r) => { if(r.calc.betrag != null) m.set(r.calc.ccy, (m.get(r.calc.ccy) || 0) + r.calc.betrag) }
+        const groesse = r => {
+          const m = String(r.account_name || '').match(/(\d{2,3})\s*k\b/i)
+          if(m) return Number(m[1]) * 1000
+          const b = Number(r.balance)
+          if(!(b > 0)) return null
+          const std = [5000, 10000, 25000, 50000, 100000, 150000, 200000, 250000, 300000]
+          return std.reduce((best, x) => Math.abs(x - b) < Math.abs(best - b) ? x : best, std[0])
+        }
+        for(const r of cal){
+          const size = groesse(r)
+          const bal = r.balance == null ? null : Number(r.balance)
+          const pct = r.payout_pct == null ? 80 : Number(r.payout_pct)
+          const profit = (size != null && bal != null) ? bal - size : null
+          const berechnet = profit == null ? null : Math.max(0, profit) * pct / 100
+          const manuell = r.payout_override != null
+          const betrag = manuell ? Number(r.payout_override) : berechnet
+          const tag = String(r.ready_at || '').slice(0, 10)
+          const tage = tag ? tageBis(tag) : null
+          const faellig = tag ? tage <= 0 : !!r.wd_ready
+          r.calc = { size, bal, pct, profit, berechnet, betrag, manuell, tag, tage, faellig, ccy: r.balance_ccy || 'USD' }
+        }
+
+        // Kopf: anfragbar jetzt · nächste 7 Tage · gesamt offen
+        const sJetzt = new Map(), s7 = new Map(), sAll = new Map()
+        let ueberfaellig = 0
+        for(const r of cal){
+          addTo(sAll, r)
+          if(r.calc.faellig) addTo(sJetzt, r)
+          if(r.calc.tag && r.calc.tage > 0 && r.calc.tage <= 7) addTo(s7, r)
+          if(r.calc.tag && r.calc.tage < 0) ueberfaellig++
+        }
+        for(const [lbl, m, farbe] of [['Anfragbar jetzt', sJetzt, 'var(--good)'], ['Nächste 7 Tage', s7, 'var(--ink)'], ['Gesamt offen', sAll, 'var(--ink)']]){
+          const d = document.createElement('div')
+          d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
+          d.children[0].style.color = farbe
+          d.children[0].textContent = geldMap(m)
+          d.children[1].textContent = lbl + (lbl === 'Anfragbar jetzt' && ueberfaellig ? ` · ${ueberfaellig} überfällig` : '')
+          sums.appendChild(d)
+        }
+
+        // 4-Wochen-Raster ab Montag dieser Woche; Klick springt zur Tages-Gruppe
+        const byDay = new Map()
+        for(const r of cal){ if(r.calc.tag){ if(!byDay.has(r.calc.tag)) byDay.set(r.calc.tag, []); byDay.get(r.calc.tag).push(r) } }
+        const start = new Date(heute + 'T12:00:00Z')
+        start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7))
+        const g = document.createElement('div')
+        g.style.cssText = 'display:grid;grid-template-columns:repeat(7,1fr);gap:4px'
+        for(const w of ['Mo','Di','Mi','Do','Fr','Sa','So']){
+          const h = document.createElement('div')
+          h.style.cssText = 'font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;font-weight:600;text-align:center;padding-bottom:2px'
+          h.textContent = w; g.appendChild(h)
+        }
+        for(let i = 0; i < 28; i++){
+          const d = new Date(start); d.setUTCDate(start.getUTCDate() + i)
+          const key = d.toISOString().slice(0, 10)
+          const list = byDay.get(key) || []
+          const istHeute = key === heute, vergangen = key < heute
+          const cell = document.createElement(list.length ? 'button' : 'div')
+          if(list.length) cell.type = 'button'
+          cell.style.cssText = 'min-height:46px;padding:5px 6px;border-radius:8px;border:1px solid var(--border);background:var(--surface);text-align:left;font:inherit;color:var(--ink)'
+            + (vergangen ? ';opacity:.45' : '') + (istHeute ? ';box-shadow:inset 0 0 0 1.5px var(--violet)' : '')
+            + (list.length ? ';cursor:pointer;background:rgba(5,138,80,.07);border-color:rgba(5,138,80,.35)' : '')
+          const top = document.createElement('div')
+          top.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;color:var(--sub)'
+          top.innerHTML = '<span></span><span></span>'
+          top.children[0].textContent = d.getUTCDate() + ((d.getUTCDate() === 1 || i === 0) ? '. ' + d.toLocaleDateString('de-DE', { month:'short', timeZone:'UTC' }) : '.')
+          if(list.length) top.children[1].textContent = list.length + ' Acc'
+          cell.appendChild(top)
+          if(list.length){
+            const m = new Map(); list.forEach(r => addTo(m, r))
+            const v = document.createElement('div')
+            v.className = 'tnum'; v.style.cssText = 'font-size:12.5px;font-weight:700;color:var(--good);margin-top:2px'
+            v.textContent = geldMap(m)
+            cell.appendChild(v)
+            cell.title = list.map(r => `${admShortName(r.person || '—')} · ${r.account_name || '—'}`).join('\n')
+            cell.addEventListener('click', () => {
+              const ziel = tb.querySelector(`[data-cal-tag="${key}"]`)
+              if(ziel) ziel.scrollIntoView({ behavior:'smooth', block:'center' })
+            })
           }
-          const byDay = new Map()
-          const wd = []   // Futures: manuell gezählte Winning Days (ohne Datum)
-          for(const r of cal){
-            const k = String(r.ready_at || '').slice(0,10)
-            if(!k){ if(r.wd_target > 0) wd.push(r); continue }
-            if(!byDay.has(k)) byDay.set(k, [])
-            byDay.get(k).push(r)
+          g.appendChild(cell)
+        }
+        grid.appendChild(g)
+
+        // Tabelle: Tages-Gruppen aufsteigend (überfällige damit oben), dann Winning Days
+        const gruppen = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+        const wd = cal.filter(r => !r.calc.tag && r.wd_target > 0)
+          .sort((a, b) => (b.wd_ready - a.wd_ready) || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target)) || String(a.person || '').localeCompare(String(b.person || '')))
+        if(wd.length) gruppen.push(['wd', wd])
+
+        const kopfZeile = (titel, sub, list, farbe, key) => {
+          const tr = document.createElement('tr')
+          tr.dataset.calTag = key
+          const m = new Map(); list.forEach(r => addTo(m, r))
+          tr.innerHTML = '<td colspan="6" style="padding-top:12px;background:var(--bg2)"><span style="font-weight:700;font-size:13px"></span> <span style="color:var(--sub);font-size:11.5px;margin-left:6px"></span></td>'
+            + '<td class="adm-num tnum" style="background:var(--bg2);font-weight:700;padding-top:12px"></td>'
+          tr.children[0].children[0].textContent = titel
+          tr.children[0].children[0].style.color = farbe
+          tr.children[0].children[1].textContent = `${sub} · ${list.length} Account${list.length === 1 ? '' : 's'}`
+          tr.children[1].textContent = geldMap(m)
+          return tr
+        }
+        const dots = r => {
+          if(!(r.wd_target > 0) || r.wd_target > 10) return null
+          const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
+          const s = document.createElement('span')
+          s.style.cssText = 'display:inline-flex;gap:3px;align-items:center;margin-left:8px;vertical-align:middle'
+          for(let k = 0; k < r.wd_target; k++){
+            const p = document.createElement('span')
+            p.style.cssText = `width:6px;height:6px;border-radius:50%;background:${k < r.wd_count ? farbe : 'var(--border)'}`
+            s.appendChild(p)
           }
-          for(const [tag, list] of [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]))){
-            const tage = Math.round((Date.parse(tag + 'T12:00:00Z') - Date.parse(heute + 'T12:00:00Z')) / 86400000)
-            const d = new Date(tag + 'T12:00:00Z')
+          return s
+        }
+        const zeile = r => {
+          const c = r.calc
+          const tr = document.createElement('tr')
+          tr.innerHTML =
+            '<td><span class="c-person" style="font-weight:600"></span></td>' +
+            '<td><span class="c-acc" style="font-size:12.5px"></span><div class="c-ext" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div></td>' +
+            '<td><span class="c-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
+            '<td class="c-stand" style="white-space:nowrap"></td>' +
+            '<td class="adm-num c-bal" style="white-space:nowrap"></td>' +
+            '<td class="adm-num c-size" style="white-space:nowrap;color:var(--sub)"></td>' +
+            '<td class="adm-num c-po" style="white-space:nowrap"></td>'
+          tr.querySelector('.c-person').textContent = admShortName(r.person || '—')
+          tr.querySelector('.c-acc').textContent = r.account_name || '—'
+          const ext = tr.querySelector('.c-ext'); if(r.ext) ext.textContent = '#' + r.ext; else ext.remove()
+          tr.querySelector('.c-firm').textContent = r.account_firm || '–'
+          // Stand: CFD = relativer Termin, Futures = Winning Days
+          const st = tr.querySelector('.c-stand')
+          if(c.tag){
+            const chip = document.createElement('span')
+            chip.className = 'chip ' + (c.tage < 0 ? 'chip-warn' : c.tage === 0 ? 'chip-good' : 'chip-neutral')
+            chip.textContent = c.tage === 0 ? 'heute anfragbar' : c.tage === 1 ? 'morgen' : c.tage > 1 ? `in ${c.tage} Tagen` : c.tage === -1 ? 'seit gestern anfragbar' : `seit ${-c.tage} Tagen anfragbar`
+            st.appendChild(chip)
+          }else{
+            const s = document.createElement('span')
+            s.style.cssText = `font-weight:600;color:${r.wd_ready ? 'var(--good)' : 'var(--violet)'}`
+            s.textContent = `🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}`
+            st.appendChild(s)
+            const d = dots(r); if(d) st.appendChild(d)
+            if(r.wd_ready){ const chip = document.createElement('span'); chip.className = 'chip chip-good'; chip.style.marginLeft = '8px'; chip.textContent = 'anfragbar'; st.appendChild(chip) }
+          }
+          // Balance wie bisher: Live-Quelle im Tooltip, „manuell" = Startbalance gedämpft
+          const bt = tr.querySelector('.c-bal')
+          if(c.bal == null){ bt.textContent = '—'; bt.style.color = 'var(--sub)' }
+          else{
+            const manuell = r.balance_src === 'manuell'
+            bt.innerHTML = '<span class="mono" style="font-weight:600"></span>' + (manuell ? '<div style="font-size:10.5px;color:var(--sub)">manuell</div>' : '')
+            bt.children[0].textContent = geld(c.bal, c.ccy)
+            bt.children[0].style.color = manuell ? 'var(--sub)' : 'var(--ink)'
+            bt.title = manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src
+          }
+          tr.querySelector('.c-size').textContent = c.size != null ? (c.size / 1000) + 'k' : '—'
+          admCalPayoutCell(tr.querySelector('.c-po'), r)
+          return tr
+        }
+        for(const [key, list] of gruppen){
+          if(key === 'wd'){
+            tb.appendChild(kopfZeile('Winning Days', 'Futures · manuell gezählt · bei erreichtem Ziel anfragbar', list, 'var(--ink)', 'wd'))
+          }else{
+            const tage = tageBis(key)
+            const d = new Date(key + 'T12:00:00Z')
             const datum = d.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'short', timeZone:'UTC' })
-            const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen`
-              : tage === -1 ? 'seit gestern anfragbar' : `seit ${-tage} Tagen anfragbar`
-            const farbe = tage < 0 ? '#b6690a' : tage === 0 ? '#058a50' : 'var(--ink)'
-            const chipCls = tage < 0 ? 'chip-warn' : tage === 0 ? 'chip-good' : 'chip-neutral'
-            const row = document.createElement('div')
-            row.style.cssText = 'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'
-            const left = document.createElement('div')
-            left.style.cssText = 'min-width:118px;flex:0 0 auto'
-            left.innerHTML = `<div style="font-weight:600;font-size:13px;color:${farbe}"></div><div style="font-size:11px;color:var(--sub)"></div>`
-            left.children[0].textContent = datum
-            left.children[1].textContent = rel
-            const right = document.createElement('div')
-            right.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;flex:1 1 200px'
-            for(const r of list){
-              const c = document.createElement('span')
-              c.className = 'chip ' + chipCls
-              c.textContent = `${admShortName(r.person || '—')} · ${r.account_name || '—'}${r.account_firm ? ' · ' + r.account_firm : ''}`
-              const bt = balText(r)
-              if(bt){
-                const b = document.createElement('span')
-                b.className = 'mono'
-                b.style.cssText = 'font-weight:700;margin-left:6px' + (r.balance_src === 'manuell' ? ';opacity:.7' : '')
-                b.textContent = '· ' + bt + (r.balance_src === 'manuell' ? ' (manuell)' : '')
-                b.title = r.balance_src === 'manuell' ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src
-                c.appendChild(b)
-              }
-              c.title = [r.ext ? `#${r.ext}` : '', bt ? 'Balance ' + bt + ' · ' + (r.balance_src || '') : ''].filter(Boolean).join(' · ')
-              right.appendChild(c)
-            }
-            row.appendChild(left); row.appendChild(right)
-            box.appendChild(row)
+            const rel = tage === 0 ? 'heute' : tage === 1 ? 'morgen' : tage > 1 ? `in ${tage} Tagen` : tage === -1 ? 'seit gestern anfragbar' : `seit ${-tage} Tagen anfragbar`
+            tb.appendChild(kopfZeile(datum, rel, list, tage < 0 ? '#b6690a' : tage === 0 ? '#058a50' : 'var(--ink)', key))
           }
-          // Winning Days (15.09.2026 abends): Futures-Accounts mit manueller
-          // Zählung als TABELLE, ein Account pro Zeile (Finn: „eine Zeile nach
-          // der anderen, sauber strukturiert" — die Chips wurden bei zehn
-          // Accounts mit langen Namen unlesbar). Anfragbare zuerst, dann nach
-          // Stand absteigend, dann Person.
-          if(wd.length){
-            wd.sort((a, b) => (b.wd_ready - a.wd_ready)
-              || ((b.wd_count / b.wd_target) - (a.wd_count / a.wd_target))
-              || String(a.person || '').localeCompare(String(b.person || '')))
-            const head = document.createElement('div')
-            head.style.cssText = 'padding-top:10px;border-top:1px solid var(--border)'
-            head.innerHTML = '<div style="font-weight:600;font-size:13px;color:var(--ink)">Winning Days</div><div style="font-size:11px;color:var(--sub)">Futures · manuell gezählt · bei erreichtem Ziel ist der Payout anfragbar</div>'
-            box.appendChild(head)
-            const wrap = document.createElement('div')
-            wrap.className = 'table-wrap'
-            wrap.style.cssText = 'margin:0 -18px'
-            const dots = r => {
-              if(r.wd_target > 10) return ''
-              const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
-              let h = '<span style="display:inline-flex;gap:3px;align-items:center;margin-left:8px;vertical-align:middle">'
-              for(let k = 0; k < r.wd_target; k++)
-                h += `<span style="width:6px;height:6px;border-radius:50%;background:${k < r.wd_count ? farbe : 'var(--border)'}"></span>`
-              return h + '</span>'
-            }
-            // Balance (15.09.2026 abends, Finn: „damit man weiss, wie viel der
-            // Account hat") — Quelle aus dem Backend (TSX/MT5/Duplikum/manuell),
-            // „manuell" gedaempft mit Hinweis, weil das die Startbalance ist.
-            const balHtml = r => {
-              const txt = balText(r)
-              if(!txt) return '<span style="color:var(--sub)">—</span>'
-              const manuell = r.balance_src === 'manuell'
-              return `<span class="mono" style="font-weight:600;color:${manuell ? 'var(--sub)' : 'var(--ink)'}" title="${manuell ? 'Manuell eingetragene Balance (kein Live-Wert)' : 'Live · ' + r.balance_src}">${txt}</span>${manuell ? '<div style="font-size:10.5px;color:var(--sub)">manuell</div>' : ''}`
-            }
-            wrap.innerHTML = '<table class="t"><thead><tr><th>Person</th><th>Account</th><th>Firma</th><th class="adm-num">Balance</th><th>Stand</th><th></th></tr></thead><tbody></tbody></table>'
-            const tb = wrap.querySelector('tbody')
-            for(const r of wd){
-              const tr = document.createElement('tr')
-              const farbe = r.wd_ready ? 'var(--good)' : 'var(--violet)'
-              tr.innerHTML =
-                '<td><span class="wd-person" style="font-weight:600"></span></td>' +
-                '<td><span class="wd-acc" style="font-size:12.5px"></span>' + (r.ext ? '<div class="wd-ext" style="font-size:11px;color:var(--sub);font-family:var(--mono)"></div>' : '') + '</td>' +
-                '<td><span class="wd-firm" style="color:var(--sub);font-size:12.5px"></span></td>' +
-                `<td class="adm-num" style="white-space:nowrap">${balHtml(r)}</td>` +
-                `<td style="white-space:nowrap"><span style="color:${farbe};font-weight:600">🏆 ${Math.min(r.wd_count, r.wd_target)}/${r.wd_target}</span>${dots(r)}</td>` +
-                `<td style="white-space:nowrap">${r.wd_ready ? '<span class="chip chip-good">Payout anfragbar</span>' : ''}</td>`
-              tr.querySelector('.wd-person').textContent = admShortName(r.person || '—')
-              tr.querySelector('.wd-acc').textContent = r.account_name || '—'
-              const ext = tr.querySelector('.wd-ext'); if(ext) ext.textContent = '#' + r.ext
-              tr.querySelector('.wd-firm').textContent = r.account_firm || '–'
-              tb.appendChild(tr)
-            }
-            box.appendChild(wrap)
+          for(const r of list) tb.appendChild(zeile(r))
+        }
+      }
+
+      // Payout-Zelle: Betrag + Herleitung; Klick öffnet Prozent/Betrag zum
+      // Anpassen. Eigene Verdrahtung je Zelle — kein Sammel-Handler (Regel).
+      function admCalPayoutCell(td, r){
+        const c = r.calc
+        const geld = v => { try{ return new Intl.NumberFormat('de-DE', { style:'currency', currency: c.ccy, maximumFractionDigits: 0 }).format(v) } catch(_){ return Math.round(v) + ' ' + c.ccy } }
+        td.innerHTML = ''
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.style.cssText = 'font:inherit;background:transparent;border:0;padding:0;cursor:pointer;text-align:right;color:inherit'
+        b.title = 'Klicken zum Anpassen — Prozent oder fester Betrag'
+        const v = document.createElement('div')
+        v.className = 'tnum'
+        v.style.cssText = 'font-weight:700;font-size:13px;color:' + (c.betrag > 0 ? 'var(--good)' : 'var(--sub)')
+        v.textContent = c.betrag != null ? geld(c.betrag) : '—'
+        const sub = document.createElement('div')
+        sub.style.cssText = 'font-size:10.5px;color:var(--sub)'
+        sub.textContent = c.manuell ? 'manuell' + (c.berechnet != null ? ' · ber. ' + geld(c.berechnet) : '')
+          : c.profit == null ? (c.size == null ? 'Größe unklar' : 'keine Balance') + ' · ' + c.pct + ' %'
+          : (c.profit >= 0 ? '+' : '−') + geld(Math.abs(c.profit)) + ' × ' + c.pct + ' %'
+        b.appendChild(v); b.appendChild(sub)
+        b.addEventListener('click', () => admCalPayoutEdit(td, r))
+        td.appendChild(b)
+      }
+      function admCalPayoutEdit(td, r){
+        const c = r.calc
+        td.innerHTML = ''
+        const box = document.createElement('div')
+        box.style.cssText = 'display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end'
+        const inPct = document.createElement('input'); inPct.type = 'number'; inPct.min = 0; inPct.max = 100; inPct.step = 1
+        inPct.className = 'input'; inPct.style.cssText = 'width:58px;padding:4px 6px;font-size:12px;height:auto'
+        inPct.value = c.pct; inPct.title = 'Prozent vom Gewinn (Standard 80)'
+        const pctLbl = document.createElement('span'); pctLbl.textContent = '%'; pctLbl.style.cssText = 'font-size:12px;color:var(--sub)'
+        const inBetrag = document.createElement('input'); inBetrag.type = 'number'; inBetrag.min = 0; inBetrag.step = 1
+        inBetrag.className = 'input'; inBetrag.style.cssText = 'width:92px;padding:4px 6px;font-size:12px;height:auto'
+        inBetrag.placeholder = c.berechnet != null ? String(Math.round(c.berechnet)) : 'Betrag'
+        inBetrag.value = c.manuell ? String(Math.round(c.betrag)) : ''
+        inBetrag.title = 'Fester Betrag — leer lassen, dann gilt die Rechnung'
+        const ok = document.createElement('button'); ok.type = 'button'; ok.className = 'btn btn-primary'; ok.style.cssText = 'padding:4px 8px;font-size:11.5px'; ok.textContent = '✓'
+        const nein = document.createElement('button'); nein.type = 'button'; nein.className = 'btn btn-ghost'; nein.style.cssText = 'padding:4px 8px;font-size:11.5px'; nein.textContent = '✕'
+        const msg = document.createElement('div'); msg.style.cssText = 'font-size:10.5px;color:var(--danger);width:100%;text-align:right'
+        box.append(inPct, pctLbl, inBetrag, ok, nein, msg)
+        td.appendChild(box)
+        inBetrag.focus()
+        const abbrechen = () => admCalPayoutCell(td, r)
+        const speichern = async () => {
+          const pct = inPct.value === '' ? null : Number(inPct.value)
+          const betrag = inBetrag.value === '' ? null : Number(inBetrag.value)
+          if(pct != null && !(pct >= 0 && pct <= 100)){ msg.textContent = 'Prozent 0–100'; return }
+          if(betrag != null && !(betrag >= 0)){ msg.textContent = 'Betrag ≥ 0'; return }
+          ok.disabled = true; msg.textContent = ''
+          try{
+            const { data: { session } } = await supabase.auth.getSession()
+            const tok = session?.access_token
+            if(!tok) throw new Error('nicht angemeldet')
+            const res = await fetch(`${WATCHER_HOME}/admin/payout-calc`, {
+              method:'PATCH', headers: { 'sb-token': tok, 'Content-Type':'application/json' },
+              body: JSON.stringify({ account_id: r.account_id, payout_pct: pct === 80 ? null : pct, payout_override: betrag })
+            })
+            const d = await res.json().catch(() => ({}))
+            if(!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+            r.payout_pct = d.account?.payout_pct ?? null
+            r.payout_override = d.account?.payout_override ?? null
+            admCalRender()
+          }catch(e){
+            ok.disabled = false
+            msg.textContent = 'Nicht gespeichert: ' + (e.message || e)
           }
         }
+        ok.addEventListener('click', speichern)
+        nein.addEventListener('click', abbrechen)
+        for(const el of [inPct, inBetrag])
+          el.addEventListener('keydown', e => { if(e.key === 'Enter') speichern(); else if(e.key === 'Escape') abbrechen() })
       }
 
       const el = $('adm-fin-person-dist'); el.innerHTML = ''
@@ -23478,7 +23663,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-16.295'
+  const OS_TAB_BUILD = '2026-09-17.296'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

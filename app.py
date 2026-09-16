@@ -3557,7 +3557,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -3864,6 +3864,13 @@ def admin_build_overview():
             return b, "USD", "manuell"
         return None, None, None
 
+    def _pnum(v):
+        try:
+            f = float(v)
+            return f if f == f else None
+        except (TypeError, ValueError):
+            return None
+
     payout_ready = []
     for a in accounts:
         aid = str(a["id"])
@@ -3904,6 +3911,12 @@ def admin_build_overview():
             "balance": round(bal, 2) if bal is not None else None,
             "balance_ccy": ccy,
             "balance_src": src,
+            # Payout-Rechnung (17.09.2026, Finn: „wie viel Geld das bei dem
+            # Payout ist"): Prozent (leer = 80) und fester Betrag, beide über
+            # /admin/payout-calc gesetzt. Gerechnet wird im Frontend — die
+            # Größe steht im Account-Namen („100k …"), nicht in der DB.
+            "payout_pct": _pnum(a.get("payout_pct")),
+            "payout_override": _pnum(a.get("payout_override")),
         })
     payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 
@@ -4576,6 +4589,54 @@ def admin_acc_plan():
     except Exception as e:
         print(f"[accplan] ⚠️ aendern: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Nicht geaendert ({type(e).__name__})"}), 502
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PAYOUT-RECHNUNG im Admin-Kalender (17.09.2026, Finn: „wie viel Geld das bei
+# dem Payout ist … dass ich selber diese Summe bearbeiten kann"). Zwei Felder
+# an accounts (sql/2026-09-17_payout-calc.sql): payout_pct (leer = 80 %) und
+# payout_override (leer = Rechnung gilt). Admin-only über den Service-Key —
+# die Accounts gehören verschiedenen Personen, per RLS dürfte der Admin-
+# Client sonst nicht schreiben. Reine Anzeige-Hilfe: bucht nichts und geht
+# in keine Finanzen-Summe ein.
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.route("/admin/payout-calc", methods=["PATCH", "OPTIONS"])
+def admin_payout_calc():
+    if request.method == "OPTIONS":
+        return "", 200
+    _, err = _admin_auth()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    aid = str(b.get("account_id") or "").strip()
+    if len(aid) < 10:
+        return jsonify({"error": "account_id fehlt"}), 400
+    body = {}
+    for key, lo, hi in (("payout_pct", 0, 100), ("payout_override", 0, 10_000_000)):
+        if key not in b:
+            continue
+        v = b.get(key)
+        if v in (None, ""):
+            body[key] = None
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"{key} muss eine Zahl sein"}), 400
+        if not (lo <= v <= hi):
+            return jsonify({"error": f"{key} muss zwischen {lo} und {hi} liegen"}), 400
+        body[key] = v
+    if not body:
+        return jsonify({"error": "Nichts zu aendern"}), 400
+    try:
+        zeilen = sb_update("accounts", {"id": f"eq.{aid}", "select": "id,payout_pct,payout_override"}, body)
+        if not zeilen:
+            return jsonify({"error": "Account nicht gefunden"}), 404
+        return jsonify({"ok": True, "account": zeilen[0]})
+    except Exception as e:
+        print(f"[payout-calc] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Nicht gespeichert ({type(e).__name__})"}), 502
 
 
 @app.route("/watcher/status", methods=["GET", "OPTIONS"])
