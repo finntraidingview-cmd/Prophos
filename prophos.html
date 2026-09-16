@@ -23104,19 +23104,44 @@
            s.style.color = dir === 'sell' ? '#D92D20' : '' }
   }
 
-  /* Letzte 5 Orders als Richtungs-Chips (15.09.2026, Finns Wunsch: „ganz kurz
-   * sehen, ob die letzten fünf Orders long oder short waren"). Quelle sind
-   * die zuletzt GESTARTETEN Pläne (startedAt), egal welche Route — Duplikum
-   * wie Echo wie Orbit. Reine Anzeige, neueste links; kein Urteil dazu.
-   * Ohne bekannte Richtung (Duplikum-Pläne vor dem 15.09.2026) ein graues „?"
-   * statt einer geratenen Seite. */
+  /* Letzte 10 Orders als Richtungs-Chips — NUR dieser Master-Account samt
+   * Vorgänger-Kette (16.09.2026, Finns Bug: „da fehlen oft Dinger, obwohl
+   * schon mehr Trades gemacht wurden … ist da ein Supabase-Datenleck?").
+   * BISHER (15.09.) die letzten 5 über ALLE Pläne des Logins, egal welcher
+   * Account — bei mehreren parallel gehandelten Accounts schoben fremde
+   * Orders die eigenen aus den fünf Plätzen, und Pläne ohne erfasste
+   * Richtung („?") belegten Plätze mit. KEIN Datenverlust in Supabase
+   * (16.09. geprüft: loadTradePlansFromSupabase holt alle Pläne ohne Limit,
+   * kein Login nahe der 1000-Zeilen-Grenze) — es war die Auswahl.
+   * Quelle bleiben die zuletzt GESTARTETEN Pläne (startedAt), egal welche
+   * Route — Duplikum wie Echo wie Orbit. Kette = Master-Account des Plans +
+   * alle Vorgänger (getParent läuft parents-Map und Archiv ab): Phase 2 zeigt
+   * die Phase-1-Orders mit, bis eigene nachrücken — „einfach immer die
+   * letzten 10". Reine Anzeige, neueste links; kein Urteil dazu. Ohne
+   * bekannte Richtung (Duplikum-Pläne vor dem 15.09.2026) ein graues „?"
+   * statt einer geratenen Seite. Ohne Master-Account am Plan (sollte nicht
+   * vorkommen) Fallback auf alle Pläne wie bisher. */
+  function tpOrderKettenIds(accountId){
+    const ids = new Set()
+    let cur = (accountId != null && accountId !== '') ? String(accountId) : ''
+    let safety = 0
+    while(cur && !ids.has(cur) && safety++ < 50){   // Sicherheitslimit gegen zyklische Ketten
+      ids.add(cur)
+      const eltern = (typeof getParent === 'function') ? getParent(cur) : null
+      cur = (eltern != null && eltern !== '') ? String(eltern) : ''
+    }
+    return ids
+  }
   function tpOrderLetzteRender(ohnePlanId){
     const box = document.getElementById('tp-order-letzte')
     if(!box) return
+    const eigener = (tradePlans || []).find(p => p && String(p.id) === String(ohnePlanId))
+    const kette = tpOrderKettenIds(eigener ? eigener.masterAccountId : null)
     const letzte = (tradePlans || [])
       .filter(p => p && p.startedAt && String(p.id) !== String(ohnePlanId))
+      .filter(p => !kette.size || kette.has(String(p.masterAccountId)))
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
-      .slice(0, 5)
+      .slice(0, 10)
     if(!letzte.length){ box.style.display = 'none'; box.innerHTML = ''; return }
     const chip = p => {
       const dir = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
@@ -23129,7 +23154,8 @@
       return `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${st}" title="${escapeHtml(tip)}">${dir === 'buy' ? 'BUY' : dir === 'sell' ? 'SELL' : '?'}</span>`
     }
     box.style.display = ''
-    box.innerHTML = `Letzte ${letzte.length} Orders <span style="color:var(--sub-2)">(neueste zuerst)</span> &nbsp;${letzte.map(chip).join(' ')}`
+    const umfang = kette.size > 1 ? 'Account + Vorgänger' : kette.size === 1 ? 'dieser Account' : 'alle Accounts'
+    box.innerHTML = `Letzte ${letzte.length} Orders <span style="color:var(--sub-2)">(${umfang} · neueste zuerst)</span> &nbsp;${letzte.map(chip).join(' ')}`
   }
 
   async function openTpOrderModal(planId){
@@ -23417,7 +23443,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-16.292'
+  const OS_TAB_BUILD = '2026-09-16.293'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
