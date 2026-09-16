@@ -13907,10 +13907,9 @@
   // Beispiel: Futures-Firmen handeln "NQ, MNQ" → für jedes wird ein eigenes Mapping gebraucht.
   /* Hinterlegte Futures-Symbole auf den aktuellen Front-Monat drehen
    * (15.09.2026). In firm_specs.dup_symbol steht bei den Futures-Firmen ein
-   * KONKRETER Kontrakt („NQU6") — nach dem Verfall (18.09.2026) wäre er
-   * tot, und beim nächsten Roll (Dezember → H7) wieder. Der Schalter ist der
-   * Verfallstag aus tpFuturesFrontcode (der „Roll-Donnerstag" von Build .274
-   * war ein Irrtum, Duplikum lief weiter auf NQU6). Statt alle 36 Zeilen
+   * KONKRETER Kontrakt („NQZ6") — nach dem nächsten Roll (Dezember → H7)
+   * wäre er tot. Der Schalter ist der Roll-Donnerstag aus tpFuturesFrontcode
+   * (Historie der Hin-und-Her-Wechsel vom 15./16.09. dort). Statt alle 36 Zeilen
    * jedes Quartal von Hand nachzuziehen, wird der Monatscode hier beim
    * Lesen gegen tpFuturesFrontcode() getauscht — dieselbe Rechnung wie auf
    * der Orbit-Route, beide Routen stehen damit immer auf demselben Kontrakt.
@@ -23022,15 +23021,25 @@
    * falsches Symbol ist auf dieser Route kein Schönheitsfehler — es wäre der
    * Trade auf dem falschen Kontrakt.
    * Verfall ≈ 3. Freitag des Kontraktmonats. Gesucht wird der erste
-   * Quartalsmonat (H/M/U/Z), dessen Verfall noch vor uns liegt.
-   * IRRWEG 15.09.2026 (Build .274, am selben Tag zurückgedreht): kurz stand
-   * hier der „Roll-Donnerstag" (Verfall minus 8 Tage), weil Finn glaubte,
-   * Duplikum nähme NQU6 nicht mehr — stimmte nicht, Duplikum lief weiter
-   * auf NQU6/MNQU6 (Finn 15.09. abends: „zurück auf MNQU6 und NQU6, war
-   * ein Fehler, ist noch NQU"). Der Schalter ist also wieder der Verfallstag;
-   * am 18.09.2026 wird daraus Z6. Gleicher Schalter für Orbit (TradingView)
-   * und Duplikum (dupSymbolsForFirm), damit beide Routen nie auf
-   * verschiedenen Kontrakten stehen. */
+   * Quartalsmonat (H/M/U/Z), dessen ROLL-Datum noch vor uns liegt — der
+   * Roll-Donnerstag acht Tage vor dem Verfall (CME-Konvention Index-Futures).
+   * HISTORIE DES SCHALTERS (Verfallswoche September 2026, drei Wechsel in
+   * zwei Tagen — deshalb steht das hier so ausführlich):
+   *   31.08. Verfallstag (f1b7028)
+   *   15.09. früh  → Roll-Donnerstag, Z6 (Build .274: „Duplikum nimmt NQU6
+   *                nicht mehr")
+   *   15.09. abends → zurück Verfallstag, U6 (Build .280: „war ein Fehler,
+   *                ist noch NQU")
+   *   16.09.       → wieder Roll-Donnerstag, Z6 (Build .292, Finn: „bitte
+   *                wieder zu NQZ ändern alles")
+   * Lehre: in der Verfallswoche ist der Front-Monat der NÄCHSTE Kontrakt —
+   * der alte ist illiquide und die Plattformen stellen um. Ab dem Roll-
+   * Donnerstag steht Prophos deshalb auf dem neuen Kontrakt; das Mapping-
+   * Push ergänzt nur (löscht nie), in der Roll-Woche liegen in Duplikum also
+   * beide Mappings und ein Master-Trade auf dem alten Kontrakt kopiert
+   * weiter. Gleicher Schalter für Orbit (TradingView) und Duplikum
+   * (dupSymbolsForFirm), damit beide Routen nie auf verschiedenen
+   * Kontrakten stehen. */
   function tpFuturesFrontcode(jetzt){
     const d = jetzt || new Date()
     const MON = { 3:'H', 6:'M', 9:'U', 12:'Z' }
@@ -23044,7 +23053,8 @@
       const jahr = d.getUTCFullYear() + Math.floor(roh / 12)
       const monat = (roh % 12) + 1
       if(!MON[monat]) continue
-      if(dritterFreitag(jahr, monat) > d) return MON[monat] + (jahr % 10)
+      const roll = new Date(dritterFreitag(jahr, monat).getTime() - 8 * 86400000)
+      if(roll > d) return MON[monat] + (jahr % 10)
     }
     return ''
   }
@@ -23407,7 +23417,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-16.291'
+  const OS_TAB_BUILD = '2026-09-16.292'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
