@@ -19605,6 +19605,11 @@
         pollInterval: 0.5,
         direction: 'tsx_to_mt',
         engine: 'realtime',
+        // Ein Plan = ein Trade (17.09.2026): nach dem ersten Trade sperrt die Engine
+        // neue Opens, bleibt aber für Closes + Auto-P&L (closedHedges) am Leben. Bisher
+        // kopierte das bei „Überprüfen" bewusst offen gehaltene Pair den NÄCHSTEN
+        // Topstep-Trade einfach wieder mit. Alte Backends ignorieren das Feld.
+        oneShot: true,
         baseInstrument,
         symbolMap: SYMBOL_MAP
       })
@@ -24000,7 +24005,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.303'
+  const OS_TAB_BUILD = '2026-09-17.304'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

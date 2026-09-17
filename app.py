@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-17.1"
+APP_BUILD = "2026-09-17.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -979,6 +979,15 @@ def mirror_start():
         "pollInterval": float(data.get("pollInterval", 0.5)),
         "direction": data.get("direction", "tsx_to_mt"),
         "engine": engine,
+        # EIN PLAN = EIN TRADE (17.09.2026, Finn: 'Trade beendet, Plan steht bei Überprüfen,
+        # dann starte ich in Topstep noch einen Trade — und der wird wieder kopiert').
+        # Plan-Pairs aus dem Trades-Tab schicken oneShot:true; manuelle Pairs der Mirror-
+        # Seite spiegeln weiter dauerhaft. Wirkung nur in der Echtzeit-Engine (die Plan-
+        # Pairs immer fahren): sobald nach dem ersten Hedge alles wieder flach ist, werden
+        # KEINE neuen Opens mehr gespiegelt (opensBlocked) — die Session lebt weiter, weil
+        # der Auto-P&L closedHedges aus ihr liest. Der nächste 'Starten' schaltet frisch scharf.
+        "oneShot": bool(data.get("oneShot")),
+        "opensBlocked": False,
         # Kontrakt-Basis, auf die sich der Multiplier bezieht ("MNQ" oder "NQ").
         # Fällt der echte Fill auf dem jeweils anderen Kontrakt der Familie, rechnet
         # open_hedge den Faktor 10 automatisch um (Finn handelt mal MNQ, mal NQ —
@@ -1052,6 +1061,7 @@ def mirror_status():
         return jsonify({
             "active": s.get("active", False),
             "engine": s.get("engine", "polling"),
+            "opensBlocked": bool(s.get("opensBlocked")),
             "log": s.get("log", [])[-200:],  # neue Log-Konsole zeigt die volle Historie scrollbar
             "positions": s.get("positions", {}),
             "closedHedges": s.get("closedHedges", [])[-20:]
@@ -1370,6 +1380,8 @@ def run_mirror_realtime(pair_id):
                            # am 21.07. serverseitig HTTP 429 provoziert; Kopien laufen über
                            # den 1s-Abgleich weiter)
     baseline_done = [False]  # Connect-Baseline nur einmal (17.09.2026, s. do_subscribe)
+    had_pos = [False]        # oneShot: gab es in dieser Session schon einen Hedge?
+    blocked_logged = set()   # oneShot: pro Contract nur EINE 'nicht gespiegelt'-Zeile
     rec_warn = [0.0]         # letzter 'Abgleich blind'-Hinweis (Drossel 30s)
     last_pos_evt = [0.0]   # Zeitpunkt des letzten GatewayUserPosition-Events (08.09.2026):
                            # solange Positions-Events fließen (<30s alt), sind SIE die
@@ -1406,6 +1418,22 @@ def run_mirror_realtime(pair_id):
 
     def hub_is_current(h):
         return mirror_hubs.get(pair_id) is h
+
+    def pruef_one_shot():
+        """Nach jedem Close (und pro Schleifenrunde) aufgerufen: war schon ein Hedge offen
+        und ist jetzt alles flach, sperrt ein oneShot-Pair neue Opens. Bewusst KEIN Stop:
+        Closes/closedHedges/Status bleiben, und am Kopierpfad selbst ändert sich nichts."""
+        if s.get("oneShot") and had_pos[0] and not ref and not s.get("opensBlocked"):
+            s["opensBlocked"] = True
+            log_msg(pair_id, "⏸️ Trade beendet — ein Plan, ein Trade: weitere TSX-Trades auf diesem Account werden NICHT mehr gespiegelt, bis der nächste Plan gestartet wird.", "ok")
+
+    def open_gesperrt(contract):
+        if not s.get("opensBlocked"):
+            return False
+        if contract not in blocked_logged:
+            blocked_logged.add(contract)
+            log_msg(pair_id, f"⏸️ Neuer TSX-Trade auf {contract} NICHT gespiegelt — der Plan dieses Pairs ist beendet (Überprüfen). Nächsten Plan starten, dann wird wieder gespiegelt.", "warn")
+        return True
 
     def fetch_risk_for_contract(contract_id):
         """Best-effort: initialRisk für eine gerade neu erkannte Position nachladen,
@@ -1468,8 +1496,11 @@ def run_mirror_realtime(pair_id):
                 new = prev + signed
                 net[contract] = new
 
-                if prev == 0 and new != 0:
+                if prev == 0 and new != 0 and open_gesperrt(contract):
+                    net[contract] = 0   # nicht tracken — sonst sähe der spätere Close wie unser Hedge aus
+                elif prev == 0 and new != 0:
                     # Neue Position
+                    had_pos[0] = True
                     rid = ref.get(contract) or f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                     ref[contract] = rid
                     opened_at[contract] = time.time()
@@ -1486,6 +1517,7 @@ def run_mirror_realtime(pair_id):
                     if rid:
                         log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
                         close_hedge(pair_id, rid)
+                    pruef_one_shot()
                 elif prev != 0 and new != 0 and (prev > 0) != (new > 0):
                     # Durchgerutscht (Long→Short direkt ohne 0-Zwischenstand) — alten Hedge zu,
                     # neuen auf. Seltener Fall (ein einzelner großer Gegen-Trade).
@@ -1554,7 +1586,11 @@ def run_mirror_realtime(pair_id):
                     if rid:
                         log_msg(pair_id, "➡️ Schließe Hedge auf MT5…")
                         close_hedge(pair_id, rid)
+                    pruef_one_shot()
+                elif size > 0 and tracked == 0 and contract not in ref and open_gesperrt(contract):
+                    pass
                 elif size > 0 and tracked == 0 and contract not in ref:
+                    had_pos[0] = True
                     net[contract] = size if is_buy else -size
                     rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
                     ref[contract] = rid
@@ -1614,6 +1650,8 @@ def run_mirror_realtime(pair_id):
                     is_buy = raw_type == 1 or raw_side in (0, "0", "Buy", "buy", "BUY", "Long")
                     qty = int(pos.get("size", pos.get("quantity", 1)) or 0)
                     if qty <= 0: continue
+                    if open_gesperrt(contract): continue
+                    had_pos[0] = True
                     tsx_risk = float(pos.get("initialRisk", pos.get("risk", 0)) or 0)
                     net[contract] = qty if is_buy else -qty
                     rid = f"rt-{contract}-{uuid.uuid4().hex[:8]}"
@@ -1866,6 +1904,9 @@ def run_mirror_realtime(pair_id):
                 with pos_lock:
                     tracked_contracts = {c for c, q in net.items() if q != 0}
                 missing_locally = rest_contracts - tracked_contracts    # TSX hat's, wir nicht
+                if s.get("opensBlocked") and missing_locally:
+                    for c in missing_locally: open_gesperrt(c)   # einmal pro Contract sagen …
+                    missing_locally = set()                      # … aber nichts übernehmen/neu aufbauen
                 phantom_locally = tracked_contracts - rest_contracts    # wir haben's, TSX nicht mehr
                 healed = False
 
@@ -1890,6 +1931,7 @@ def run_mirror_realtime(pair_id):
                     if rid:
                         close_hedge(pair_id, rid)
                     healed = True
+                pruef_one_shot()
 
                 if healed:
                     # Nach 3 Neuaufbau-Versuchen ohne dass der Stream je geliefert hat:
