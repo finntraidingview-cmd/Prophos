@@ -19406,8 +19406,20 @@
     const m = mirrorBaseMap(); delete m[pairId]; localStorage.setItem(MIRROR_BASE_LS, JSON.stringify(m))
   }
 
+  // Pairs, die GERADE scharfgeschaltet werden (17.09.2026, Finns Screenshot von
+  // Chriss' PC: Trade-Start-Check komplett grün, gleichzeitig Toast „Mirror-Engine
+  // läuft NICHT mehr"). Das Arming fährt bewusst Stop → 400 ms → Start; war der Plan
+  // schon einmal scharf, läuft der 2,5-s-Poller nebenher und erwischt genau diese
+  // Lücke als active:false — Fehlalarm. Solange ein Pair hier steht, leitet der
+  // Poller nichts daraus ab.
+  const _mirrorArmingPairs = new Set()
   async function mirrorArmPlan(plan, master, slave){
     const pairId = mirrorPairIdFor(plan)
+    _mirrorArmingPairs.add(pairId)
+    try { return await _mirrorArmPlanInner(plan, master, slave, pairId) }
+    finally { _mirrorArmingPairs.delete(pairId) }
+  }
+  async function _mirrorArmPlanInner(plan, master, slave, pairId){
     // Kontrakt-Basis des Plan-Multipliers (MNQ oder NQ) — kommt aus dem Instrument-
     // Toggle des Plan-Modals (_tpNqMode, nicht in der DB persistiert; beim üblichen
     // "Speichern & Starten" direkt nach dem Planen ist der Toggle-Stand exakt der,
@@ -19512,6 +19524,7 @@
     for(const [planId, pairId] of entries) (byPair[pairId] = byPair[pairId] || []).push(planId)
 
     for(const [pairId, planIds] of Object.entries(byPair)){
+      if(_mirrorArmingPairs.has(pairId)) continue  // Stop→Start-Lücke des Armings, kein Befund
       let d = null
       try {
         // Status vom Backend, auf dem die Engine WIRKLICH läuft (gemerkte Basis) —
@@ -22433,7 +22446,12 @@
     } else {
       try {
         const baseInstr = await mirrorArmPlan(plan, route.master, route.slave)
-        _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)} je ${escapeHtml(baseInstr)}</span> — wartet auf deinen Einstieg auf Topstep. Fills auf ${escapeHtml(baseInstr === 'NQ' ? 'MNQ' : 'NQ')} werden automatisch ÷/×10 umgerechnet.`)
+        // Kontrakt MIT Monat nennen (17.09.2026, Finn: „warum steht da noch NQ oder
+        // MNQ") — reine Anzeige: die Engine kopiert jeden Monat der Familie, der
+        // Monatscode kommt aus demselben Schalter wie Order-Popup/Orbit/Duplikum.
+        const _fc = (typeof tpFuturesFrontcode === 'function') ? tpFuturesFrontcode() : ''
+        const _andere = baseInstr === 'NQ' ? 'MNQ' : 'NQ'
+        _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)} je ${escapeHtml(baseInstr + _fc)}</span> — wartet auf deinen Einstieg auf Topstep. Fills auf ${escapeHtml(_andere + _fc)} werden automatisch ÷/×10 umgerechnet.`)
       } catch(e){
         _pfSet('marm', 'err', escapeHtml(String(e.message || e).slice(0, 120)))
         hardFail = true
@@ -23825,7 +23843,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.299'
+  const OS_TAB_BUILD = '2026-09-17.300'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
