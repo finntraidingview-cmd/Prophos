@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-15.1"
+APP_BUILD = "2026-09-17.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -1369,6 +1369,8 @@ def run_mirror_realtime(pair_id):
                            # (hub gestoppt statt 2s-Dauerhämmern — die Reconnect-Stürme haben
                            # am 21.07. serverseitig HTTP 429 provoziert; Kopien laufen über
                            # den 1s-Abgleich weiter)
+    baseline_done = [False]  # Connect-Baseline nur einmal (17.09.2026, s. do_subscribe)
+    rec_warn = [0.0]         # letzter 'Abgleich blind'-Hinweis (Drossel 30s)
     last_pos_evt = [0.0]   # Zeitpunkt des letzten GatewayUserPosition-Events (08.09.2026):
                            # solange Positions-Events fließen (<30s alt), sind SIE die
                            # Wahrheitsquelle und der Trade-Event-Pfad mutiert net NICHT mehr —
@@ -1684,7 +1686,14 @@ def run_mirror_realtime(pair_id):
                 log_msg(pair_id, f"⚠️ Subscribe fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}", "warn")
                 return
         log_msg(pair_id, "🔌 Verbunden & abonniert: Accounts, Orders, Positions, Trades (User Hub)")
-        sync_baseline()
+        # Baseline nur beim ERSTEN Connect (17.09.2026): do_subscribe läuft im Empfangs-
+        # Thread der Library; im Close-Sturm (Reconnect alle ~2s) zog jeder Reconnect hier
+        # ein eigenes searchOpen — zusätzlich zum 1s-Abgleich, der dieselbe Übernahme
+        # ohnehin binnen 1s macht. Das verdoppelte die Request-Last Richtung Rate-Limit
+        # (200/60s) und blockierte den Empfangs-Thread bis zu 10s.
+        if not baseline_done[0]:
+            baseline_done[0] = True
+            sync_baseline()
 
     def on_hub_reopen(h):
         # Nach einem Reconnect ist es serverseitig eine NEUE Verbindung — Subscription
@@ -1750,24 +1759,42 @@ def run_mirror_realtime(pair_id):
         hub = build_hub(s["tsxToken"])
         mirror_hubs[pair_id] = hub
         _hub_kill(old)
-        try:
-            hub.start()
-        except Exception as e:
-            log_msg(pair_id, f"❌ Stream-Neuaufbau fehlgeschlagen: {str(e)[:120]}", "err")
+        start_hub_async(hub)
+
+    # STREAM-AUFBAU NIE IN DER KOPIER-SCHLEIFE (17.09.2026, Finn: 'es funktioniert
+    # nicht … such den Fehler' — zwei Test-Trades auf Chriss' PC bei grünem Start-Check
+    # nicht gespiegelt). In der Nachstellung (Schein-TSX/-Hub/-MetaApi gegen die ECHTE
+    # Engine) gefunden: signalrcore 1.0.2 baut Verbindungen OHNE jeden Timeout auf
+    # (socket.create_connection + blockierendes recv auf die Upgrade-Antwort, negotiate
+    # ebenso). hub.start() lief bisher SYNCHRON in dieser Worker-Schleife — bei jedem
+    # Neuaufbau (Modus-Flip alle ~10s im Sturm, Parken, Heal, Token). Antwortet der
+    # Server einmal nicht, steht die GANZE Schleife: kein Abgleich, keine Kopie, kein
+    # Heartbeat — und das Pair zeigt weiter 'scharf'. Zweiter Fehler an derselben
+    # Stelle: scheiterte der ALLERERSTE Aufbau mit einer Exception, machte die Engine
+    # 'return' — Session blieb active, kopiert hat nichts mehr ('gar nicht kopiert,
+    # egal wie lange ich warte'). Die Kopien hängen aber gar nicht am Stream, sondern
+    # am 1s-Abgleich. Deshalb: start() in einem eigenen Daemon-Thread; Fehler und
+    # Hänger (20s-Wächter in der Schleife) parken nur den STREAM, nie das Kopieren.
+    hub_start = {"t": 0.0, "done": True}
+    def start_hub_async(h):
+        hub_start["t"] = time.time()
+        hub_start["done"] = False
+        def _run():
+            try:
+                h.start()
+            except Exception as e:
+                if session_alive() and hub_is_current(h):
+                    log_msg(pair_id, f"❌ Stream-Aufbau fehlgeschlagen: {type(e).__name__}: {str(e)[:120]} — der 1s-Abgleich kopiert weiter, nächster Stream-Versuch in 60s", "warn")
+                    stream_parked[0] = time.time() + 60
+                    closes_noevent[0] = 0
+            finally:
+                if hub_is_current(h):
+                    hub_start["done"] = True
+        threading.Thread(target=_run, daemon=True).start()
 
     hub = build_hub(s["tsxToken"])
     mirror_hubs[pair_id] = hub  # VOR start() registrieren — on_open kann sofort feuern
-    try:
-        hub.start()
-    except Exception as e:
-        log_msg(pair_id, f"❌ Verbindungsaufbau fehlgeschlagen: {type(e).__name__}: {str(e)[:150]}", "err")
-        if mirror_hubs.get(pair_id) is hub:
-            mirror_hubs.pop(pair_id, None)
-        try:
-            _sr_logger.removeHandler(_sr_bridge)
-        except Exception:
-            pass
-        return
+    start_hub_async(hub)
 
     # Reconciliation-Watchdog mit SELBSTHEILUNG (21.07.2026): der Live-Test hat gezeigt,
     # dass der SignalR-Stream de facto ausfallen kann (Reconnect-Burst beim Start, danach
@@ -1805,6 +1832,13 @@ def run_mirror_realtime(pair_id):
         # Modi zusammen 4 Wechsel verloren, wird der Stream 60s GEPARKT (hub.stop() statt
         # Dauerhämmern → kein 429-Risiko) und danach frisch versucht. Kopien laufen in
         # der Park-Zeit unverändert über den 1s-Abgleich.
+        if not hub_start["done"] and not stream_parked[0] and time.time() - hub_start["t"] > 20:
+            hub_start["done"] = True
+            log_msg(pair_id, "⏳ Stream-Aufbau hängt seit 20s (Server antwortet nicht) — abgebrochen, Stream 60s geparkt. Der 1s-Abgleich kopiert unverändert weiter.", "warn")
+            stream_parked[0] = time.time() + 60
+            closes_noevent[0] = 0
+            _hub_kill(hub)
+
         if stream_parked[0]:
             if time.time() >= stream_parked[0]:
                 stream_parked[0] = 0
@@ -1869,8 +1903,18 @@ def run_mirror_realtime(pair_id):
                         # ist der Modus selbst verdächtig → beim Neuaufbau auf den anderen wechseln
                         # (direct ↔ negotiate). Kamen früher schon Events, Modus beibehalten.
                         rebuild_connection("Stream hat Events verpasst", flip_mode=(stream_events[0] == 0))
-        except Exception:
-            pass  # Reconciliation ist nur ein Sicherheitsnetz, Fehler hier sollen den Mirror nicht stoppen
+            elif time.time() - rec_warn[0] > 30:
+                # Bisher STILL verschluckt (17.09.2026): antwortet TSX mit 429 (Rate-Limit)
+                # oder 5xx, ist der Abgleich — und damit das gesamte Kopieren — blind,
+                # ohne dass irgendwo eine Zeile stand. Gedrosselt auf 1×/30s.
+                rec_warn[0] = time.time()
+                log_msg(pair_id, f"⚠️ Abgleich blind: TSX antwortet HTTP {r.status_code} auf Position/searchOpen{' (Rate-Limit)' if r.status_code == 429 else ''} — solange wird NICHT kopiert. {r.text[:80]}", "warn")
+        except Exception as e:
+            # Der Abgleich IST das Kopieren (solange der Stream keine Events liefert) —
+            # Fehler stoppen den Mirror weiter nicht, bleiben aber nicht mehr unsichtbar.
+            if time.time() - rec_warn[0] > 30:
+                rec_warn[0] = time.time()
+                log_msg(pair_id, f"⚠️ Abgleich-Fehler: {type(e).__name__}: {str(e)[:100]} — solange wird NICHT kopiert", "warn")
 
         time.sleep(RT_RECONCILE_INTERVAL)
 
