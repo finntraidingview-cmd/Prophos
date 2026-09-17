@@ -24175,7 +24175,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.307'
+  const OS_TAB_BUILD = '2026-09-18.308'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26192,7 +26192,16 @@
       const parentId = master && typeof getParent === 'function' ? getParent(master.id) : null
       const parentAcc = parentId ? accounts.find(x => String(x.id) === String(parentId)) : null
       if(parentAcc){
-        const vgEur = calcReingesteckdEur(parentAcc, { netPayouts: true })
+        // + eigener Kaufpreis des Nachfolgers (Finn 18.09.2026: „Account 100 €, beim letzten Trade
+        // kommt die Activation von 100 € dazu — die wird zu den Fixkosten nicht dazugezählt, das
+        // ist ein Fehler"). Die Activation Fee aus dem Nachfolger-Wizard („Kosten") liegt als
+        // purchaseCost am NEUEN Account, die Box las aber nur die Kette des Vorgängers. Sie ist
+        // genauso eingefroren wie der Rest (einmal beim Phasenwechsel bezahlt). Bewusst NUR der
+        // Kaufpreis — eigene Hedge-Ergebnisse/Payouts des Nachfolgers bleiben draußen, sonst wäre
+        // der Wert nicht mehr fix (dafür gibt es die Gesamtkosten-Box darüber).
+        const vgParentEur = calcReingesteckdEur(parentAcc, { netPayouts: true })
+        const vgOwnEur    = Number(master.purchaseCost) || 0
+        const vgEur       = vgParentEur + vgOwnEur
         if(vgEur > 0){
           vgEl.style.display = 'block'
           let vgDisplay = vgEur
@@ -26207,6 +26216,7 @@
           }
           vgVal.textContent = `${vgCur}${vgDisplay.toLocaleString('de-DE', {maximumFractionDigits: 2, minimumFractionDigits: 2})}`
           vgDet.innerHTML = `Gesamtkosten von „${escapeHtml(parentAcc.name)}" zum Zeitpunkt des Phasenwechsels — verändert sich NICHT mehr mit der eigenen Performance dieses Accounts, in EUR: <span class="mono">€${vgEur.toLocaleString('de-DE', {maximumFractionDigits: 2})}</span>`
+            + (vgOwnEur > 0.005 ? ` <span style="color:var(--sub)">(€${vgParentEur.toLocaleString('de-DE', {maximumFractionDigits: 2})} Vorgänger + €${vgOwnEur.toLocaleString('de-DE', {maximumFractionDigits: 2})} Kaufpreis/Activation dieses Accounts)</span>` : '')
           vgEl.dataset.suggestedVgEur = vgEur.toFixed(2)
         } else {
           vgEl.style.display = 'none'
