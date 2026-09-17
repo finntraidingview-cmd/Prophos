@@ -4263,6 +4263,20 @@
           </div>
         </div>
       </div>
+
+      <!-- ENGINE-LOG (17.09.2026): ALLE Sessions des Backends dieses PCs — auch die
+           Plan-Pairs aus dem Trades-Tab, die oben keine eigene Karte haben. Bewusst
+           außerhalb von #ts-connected: zur Fehlersuche auch ohne TSX-Login sichtbar. -->
+      <div id="ts-englog" style="margin-top:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+          <div>
+            <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--ink)">Engine-Log</h3>
+            <p style="font-size:12.5px;color:var(--sub);margin:2px 0 0" id="ts-englog-sub">Backend wird abgefragt…</p>
+          </div>
+          <button class="btn btn-ghost" id="ts-englog-copy" type="button">Log kopieren</button>
+        </div>
+        <div id="ts-englog-list"></div>
+      </div>
     </section>
 
     <!-- LOT RECHNER -->
@@ -19406,6 +19420,142 @@
     const m = mirrorBaseMap(); delete m[pairId]; localStorage.setItem(MIRROR_BASE_LS, JSON.stringify(m))
   }
 
+  /* ── ENGINE-LOG (17.09.2026, Finn: „bau mal ein Log unter Topstep Mirror ein, dass
+   * wir nachher schneller in die Bugfixes kommen") ──
+   * Anlass: zwei Test-Trades auf Chriss' PC liefen nicht durch, und die einzige
+   * Zeile, die den Grund nennt, stand in der Pair-Konsole im RAM des LOKALEN
+   * Backends — für Plan-Pairs aus dem Trades-Tab gab es auf der Mirror-Seite gar
+   * keine Konsole, und von außen war nichts einsehbar. Obendrein lief dort
+   * unbemerkt ein altes Backend (das Selbst-Update wartet, solange ein Mirror
+   * scharf ist). Dieses Panel zeigt deshalb (1) Build + Erreichbarkeit jedes
+   * bekannten Backends, mit Warnung wenn es hinter dem ausgelieferten Stand
+   * (Railway) liegt, (2) JEDE Session mit voller Konsole, (3) „Log kopieren" als
+   * Klartext, und (4) spiegelt den Stand nach Supabase (mirror_logs, RLS, ohne
+   * Token) — damit die Fehlersuche nicht mehr am fremden PC hängt.
+   * Läuft, solange die Mirror-Seite offen ist ODER ein Plan scharf ist. */
+  const engLog = { snap: [], sollBuild: null, sollTs: 0, pushTs: 0, pushSig: '', busy: false }
+  function engLogFetch(url, ms){
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 3000)
+    return fetch(url, { signal: c.signal }).then(r => r.ok ? r.json() : null).catch(() => null).finally(() => clearTimeout(t))
+  }
+  function engLogBases(){
+    return [...new Set([TS_BACKEND, MIRROR_LOCAL_BASE, ...Object.values(mirrorBaseMap())].filter(Boolean))]
+  }
+  function engLogSichtbar(){
+    const v = document.querySelector('#dashboard-view .view[data-view="topstep"]')
+    return !!(v && v.offsetParent !== null)
+  }
+  async function engLogTick(){
+    if(engLog.busy || !currentUserId) return
+    const scharf = Object.keys(mirrorArmedMap()).length > 0
+    if(!engLogSichtbar() && !scharf) return
+    engLog.busy = true
+    try {
+      // Soll-Stand = was Railway fährt (deployt aus demselben Commit). Alle 5 min.
+      if(Date.now() - engLog.sollTs > 5 * 60 * 1000){
+        engLog.sollTs = Date.now()
+        const v = await engLogFetch(`${MIRROR_RAILWAY_BASE}/version`, 5000)
+        if(v && v.build) engLog.sollBuild = v.build
+      }
+      const snap = []
+      for(const base of engLogBases()){
+        const ver = await engLogFetch(`${base}/version`)
+        const all = ver ? await engLogFetch(`${base}/mirror/status`) : null
+        const sessions = []
+        for(const pid of Object.keys(all || {})){
+          const d = await engLogFetch(`${base}/mirror/status?pairId=${encodeURIComponent(pid)}`)
+          sessions.push({ pairId: pid, active: d ? d.active : all[pid].active, engine: (d && d.engine) || '',
+            positions: (d && d.positions) || all[pid].positions || {}, log: (d && d.log) || all[pid].log || [] })
+        }
+        snap.push({ base, erreichbar: !!ver, build: ver ? (ver.build || '?') : null, sessions })
+      }
+      engLog.snap = snap
+      if(engLogSichtbar()) engLogRender()
+      engLogPush()
+    } finally { engLog.busy = false }
+  }
+  function engLogRender(){
+    const list = document.getElementById('ts-englog-list'), sub = document.getElementById('ts-englog-sub')
+    if(!list || !sub) return
+    const n = engLog.snap.reduce((a, b) => a + b.sessions.length, 0)
+    sub.textContent = `${n} Session${n === 1 ? '' : 's'} · Frontend ${OS_TAB_BUILD} · ${mt5FleetPcId()}`
+    // Scroll-Stand je Konsole merken — sonst springt das Log alle 5 s ans Ende
+    const scroll = {}
+    list.querySelectorAll('[data-englog-body]').forEach(b => {
+      scroll[b.dataset.englogBody] = (b.scrollHeight - b.scrollTop - b.clientHeight < 30) ? -1 : b.scrollTop })
+    list.innerHTML = engLog.snap.map(b => {
+      const alt = b.erreichbar && engLog.sollBuild && b.base !== MIRROR_RAILWAY_BASE && b.build !== engLog.sollBuild
+      const kopf = `<div class="mlog" style="margin-top:0;margin-bottom:10px"><div class="mlog-head">
+          <span class="mlog-dot ${b.erreichbar ? 'on' : ''}"></span>
+          <span class="mlog-title">${escapeHtml(b.base.replace(/^https?:\/\//, ''))}</span>
+          <span class="mlog-chip ${b.erreichbar ? 'mlog-chip-rt' : 'mlog-chip-poll'}">${b.erreichbar ? 'BUILD ' + escapeHtml(b.build) : 'NICHT ERREICHBAR'}</span>
+          ${alt ? `<span class="mlog-errchip" title="Ausgeliefert ist ${escapeHtml(engLog.sollBuild)}. Das Selbst-Update wartet, solange ein Mirror scharf ist — Plan freigeben oder Backend-Fenster neu starten.">VERALTET · aktuell ist ${escapeHtml(engLog.sollBuild)}</span>` : ''}
+          <span class="mlog-count">${b.sessions.length} Session${b.sessions.length === 1 ? '' : 's'}</span></div></div>`
+      const sess = b.sessions.map(x => {
+        const key = b.base + '|' + x.pairId
+        const errs = x.log.filter(l => l.kind === 'err').length
+        return `<div class="mlog" style="margin-top:0;margin-bottom:10px"><div class="mlog-head">
+          <span class="mlog-dot ${x.active ? 'on' : ''}"></span>
+          <span class="mlog-title" title="${escapeHtml(x.pairId)}">${escapeHtml(x.pairId.length > 34 ? x.pairId.slice(0, 16) + '…' + x.pairId.slice(-12) : x.pairId)}</span>
+          <span class="mlog-chip ${x.engine === 'realtime' ? 'mlog-chip-rt' : 'mlog-chip-poll'}">${escapeHtml((x.engine || '?').toUpperCase())}</span>
+          <span class="mlog-chip mlog-chip-poll">${x.active ? 'AKTIV' : 'BEENDET'} · ${Object.keys(x.positions || {}).length} POS</span>
+          ${errs ? `<span class="mlog-errchip">${errs} Fehler</span>` : ''}
+          <span class="mlog-count">${x.log.length} Zeilen</span></div>
+          <div class="mlog-body" data-englog-body="${escapeHtml(key)}">${x.log.length
+            ? x.log.map(l => `<div class="mlog-line ${escapeHtml(l.kind || 'info')}"><span class="mlog-ts">${escapeHtml(l.ts || '')}</span><span class="mlog-msg">${escapeHtml(l.msg || '')}</span></div>`).join('')
+            : '<div class="mlog-line info"><span class="mlog-msg">Noch keine Zeilen.</span></div>'}</div></div>`
+      }).join('')
+      return kopf + sess
+    }).join('') || '<div class="mlog" style="margin-top:0"><div class="mlog-head"><span class="mlog-title">Kein Backend bekannt</span></div></div>'
+    list.querySelectorAll('[data-englog-body]').forEach(b => {
+      const st = scroll[b.dataset.englogBody]
+      b.scrollTop = (st === undefined || st === -1) ? b.scrollHeight : st })
+  }
+  function engLogText(){
+    const z = [`PROPHOS MIRROR-LOG · ${new Date().toLocaleString('de-DE')} · Frontend ${OS_TAB_BUILD} · ${mt5FleetPcId()} · Seite ${location.origin}`]
+    for(const b of engLog.snap){
+      z.push('', `== Backend ${b.base} · ${b.erreichbar ? 'Build ' + b.build : 'NICHT ERREICHBAR'}${engLog.sollBuild ? ' · ausgeliefert ' + engLog.sollBuild : ''} · ${b.sessions.length} Session(s)`)
+      for(const x of b.sessions){
+        z.push(`-- ${x.pairId} · active=${x.active} · engine=${x.engine || '?'} · positions=${JSON.stringify(x.positions || {})}`)
+        for(const l of x.log) z.push(`${l.ts || ''} [${l.kind || 'info'}] ${l.msg || ''}`)
+      }
+    }
+    return z.join('\n')
+  }
+  async function engLogPush(){
+    // Nach Supabase spiegeln: höchstens alle 10 s und nur bei Änderung. Fehler sind
+    // egal (reines Diagnose-Netz) — aber nie still die App stören.
+    if(Date.now() - engLog.pushTs < 10000) return
+    const rows = []
+    for(const b of engLog.snap){
+      rows.push({ user_id: currentUserId, pc_id: mt5FleetPcId(), pair_id: '_backend:' + b.base.replace(/^https?:\/\//, ''),
+        base: b.base, backend_build: b.build, frontend_build: OS_TAB_BUILD, active: b.erreichbar, engine: null,
+        positions: { sessions: b.sessions.length, soll_build: engLog.sollBuild }, log: [], updated_at: new Date().toISOString() })
+      for(const x of b.sessions) rows.push({ user_id: currentUserId, pc_id: mt5FleetPcId(), pair_id: x.pairId,
+        base: b.base, backend_build: b.build, frontend_build: OS_TAB_BUILD, active: !!x.active, engine: x.engine || null,
+        positions: x.positions || {}, log: (x.log || []).slice(-200), updated_at: new Date().toISOString() })
+    }
+    const sig = JSON.stringify(rows.map(r => [r.pair_id, r.backend_build, r.active, Object.keys(r.positions).length, r.log.length, (r.log[r.log.length - 1] || {}).ts, (r.log[r.log.length - 1] || {}).msg]))
+    if(sig === engLog.pushSig) return
+    engLog.pushTs = Date.now()
+    try {
+      const { error } = await supabase.from('mirror_logs').upsert(rows, { onConflict: 'user_id,pc_id,pair_id' })
+      if(!error) engLog.pushSig = sig
+    } catch(_){}
+  }
+  // Eigene Verdrahtung des einen Knopfs (kein Sammel-Handler).
+  document.getElementById('ts-englog-copy')?.addEventListener('click', async () => {
+    await engLogTick()
+    const txt = engLogText()
+    try { await navigator.clipboard.writeText(txt); atToast('📋 Mirror-Log kopiert — einfach in den Chat einfügen.', 'ok') }
+    catch(_){
+      const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select()
+      try { document.execCommand('copy'); atToast('📋 Mirror-Log kopiert.', 'ok') } catch(__){ atToast('Kopieren nicht möglich — Log steht in der Konsole (F12).', 'warn'); console.log(txt) }
+      ta.remove()
+    }
+  })
+  setInterval(() => { engLogTick().catch(() => {}) }, 5000)
+
   // Pairs, die GERADE scharfgeschaltet werden (17.09.2026, Finns Screenshot von
   // Chriss' PC: Trade-Start-Check komplett grün, gleichzeitig Toast „Mirror-Engine
   // läuft NICHT mehr"). Das Arming fährt bewusst Stop → 400 ms → Start; war der Plan
@@ -23850,7 +24000,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.302'
+  const OS_TAB_BUILD = '2026-09-17.303'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
