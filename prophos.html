@@ -22449,7 +22449,8 @@
         // Kontrakt MIT Monat nennen (17.09.2026, Finn: „warum steht da noch NQ oder
         // MNQ") — reine Anzeige: die Engine kopiert jeden Monat der Familie, der
         // Monatscode kommt aus demselben Schalter wie Order-Popup/Orbit/Duplikum.
-        const _fc = (typeof tpFuturesFrontcode === 'function') ? tpFuturesFrontcode() : ''
+        // .301: doch OHNE Monat — TopstepX kennt nur /NQ und /MNQ (s. Order-Popup).
+        const _fc = ''
         const _andere = baseInstr === 'NQ' ? 'MNQ' : 'NQ'
         _pfSet('marm', 'ok', `Engine läuft mit <span class="mono">×${Number(plan.multiplier).toFixed(3)} je ${escapeHtml(baseInstr + _fc)}</span> — wartet auf deinen Einstieg auf Topstep. Fills auf ${escapeHtml(_andere + _fc)} werden automatisch ÷/×10 umgerechnet.`)
       } catch(e){
@@ -23613,8 +23614,14 @@
     // Erkennung per Struktur (planMirrorRoute), weil Mirror-Pläne route='dup'
     // tragen. Da es keinen Settings-Standard gibt, speichert der Save-Handler
     // das Symbol als master_symbol am Plan — Karte und Start lesen es von dort.
+    // KORREKTUR 17.09.2026 mittags (.301, Finns Screenshots aus TopstepX): dort
+    // gibt es in der Symbol-Suche NUR „/NQ" und „/MNQ" — der Monat wird von der
+    // Plattform selbst gewählt und heißt in ihrer Anzeige „MNQZ26" (zweistelliges
+    // Jahr), nie „MNQZ6"; eine Suche nach dem Monatscode findet nichts. Der
+    // Monatscode aus .299 war also das falsche Vokabular (das von TradingView/
+    // Duplikum). Beim Topstep-Weg steht hier dauerhaft die nackte Familie.
     const mirrorSym = (!_tpOrderOrbit && typeof planMirrorRoute === 'function' && planMirrorRoute(plan))
-      ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()
+      ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ')
       : ''
     symEl.value = plan.masterSymbol || orbitSym || mirrorSym || (fromSettings.length ? fromSettings[0] : '')
     symEl.readOnly = false   // war bis 30.08.2026 gesperrt, sobald Settings ein Symbol hatten
@@ -23843,7 +23850,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.300'
+  const OS_TAB_BUILD = '2026-09-17.301'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
