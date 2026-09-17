@@ -11283,8 +11283,76 @@
         return a.canTrade === true
       })
       tsRender()
+      tsAutoLinkSoon()
     }catch(e){
       console.warn('TSX accounts load failed:', e)
+    }
+  }
+
+  /* ── AUTO-VERLINKUNG per External ID (17.09.2026) ──
+   * Finn: „Wenn ich Topstep-Accounts anlege, gebe ich als External ID immer genau den
+   * TopstepX-Namen ein (EXPRESS-V2-679005-57119155). Dann sollen sich die Accounts
+   * automatisch verlinken — wenn ich den Account hinzufüge, und wenn ich mit Topstep
+   * verbinde." Bisher ging das nur von Hand über das Verknüpfen-Modal (13 von 33
+   * Topstep-Accounts verlinkt, Stand heute).
+   * Regel, bewusst eng — eine falsche Verlinkung spiegelt den falschen Account:
+   *   - External ID == TopstepX-Accountname (ohne Leerzeichen, Groß/Klein egal), EXAKT;
+   *   - genau EIN Prophos-Account trägt diese External ID (bei Dubletten: nichts tun);
+   *   - der Prophos-Account hat noch KEINE Topstep-Verknüpfung (nie überschreiben);
+   *   - der TSX-Account ist noch mit keinem anderen Prophos-Account verknüpft.
+   * Auslöser: nach dem Laden der TSX-Accounts und nach jedem renderAccounts() (deckt
+   * Anlegen, Bearbeiten, Bulk-Add und Import ab, ohne fünf Stellen einzeln zu
+   * verdrahten) — entprellt, mit Lauf-Sperre; findet ein Lauf nichts, endet die Kette.
+   * Schreibt exakt dieselben Spalten wie das Verknüpfen-Modal und feuert dasselbe
+   * Event, damit das Trade-Plan-Modal den frischen Master kennt. */
+  const _tsNorm = v => String(v || '').replace(/\s+/g, '').toUpperCase()
+  let _tsAutoLinkTimer = null, _tsAutoLinkBusy = false
+  function tsAutoLinkSoon(){
+    clearTimeout(_tsAutoLinkTimer)
+    _tsAutoLinkTimer = setTimeout(() => { tsAutoLink().catch(e => console.warn('[tsAutoLink]', e)) }, 800)
+  }
+  function tsAutoLinkKandidaten(tsxAccounts, accs){
+    // REIN RECHNEND (testbar): liefert [{ acc, tsx }]
+    const out = []
+    const vergeben = new Set((accs || []).filter(a => a.topstep && a.topstep.id).map(a => String(a.topstep.id)))
+    for(const tsx of (tsxAccounts || [])){
+      const name = _tsNorm(tsx.name)
+      if(!name || vergeben.has(String(tsx.id))) continue
+      const treffer = (accs || []).filter(a => _tsNorm(a.externalId) === name)
+      if(treffer.length !== 1) continue            // keiner oder Dublette → Finger weg
+      if(treffer[0].topstep && treffer[0].topstep.id) continue
+      out.push({ acc: treffer[0], tsx })
+    }
+    return out
+  }
+  async function tsAutoLink(){
+    if(_tsAutoLinkBusy || !currentUserId) return
+    if(!tsState.token || !(tsState.accounts || []).length || !(accounts || []).length) return
+    const kand = tsAutoLinkKandidaten(tsState.accounts, accounts)
+    if(!kand.length) return
+    _tsAutoLinkBusy = true
+    const ok = []
+    try {
+      for(const { acc, tsx } of kand){
+        const { data, error } = await supabase.from('accounts').update({
+          topstep_account_id:   String(tsx.id),
+          topstep_account_name: tsx.name || null,
+          topstep_balance:      tsx.balance != null ? tsx.balance : null,
+          topstep_can_trade:    !!tsx.canTrade,
+          topstep_last_check:   new Date().toISOString()
+        }).eq('id', acc.id).is('topstep_account_id', null).select('*').maybeSingle()
+        if(error){ console.warn('[tsAutoLink]', acc.name, error.message); continue }
+        if(!data) continue                          // inzwischen anderswo verlinkt
+        const idx = accounts.findIndex(a => String(a.id) === String(acc.id))
+        if(idx >= 0) accounts[idx] = rowToAccount(data)
+        ok.push(tsx.name)
+        try { document.dispatchEvent(new CustomEvent('prophos:tsx-linked', { detail: { tsxId: String(tsx.id), accountId: String(acc.id) } })) } catch(_){}
+      }
+    } finally { _tsAutoLinkBusy = false }
+    if(ok.length){
+      renderAccounts()
+      if(typeof renderPairs === 'function') renderPairs()
+      if(typeof atToast === 'function') atToast(`🔗 Topstep automatisch verknüpft: ${ok.join(', ')}`, 'ok')
     }
   }
 
@@ -17450,6 +17518,7 @@
 
   function renderAccounts(){
     if(!accEls.table) return
+    if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
     todoLaden()
     // Echo-Kontostände bereitstellen (31.08.2026) — gedrosselt, zeichnet nach
     // dem ersten Füllen einmal neu. Ohne diesen Anstoss stünde der Cache nur
@@ -24024,7 +24093,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.305'
+  const OS_TAB_BUILD = '2026-09-17.306'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
