@@ -13369,14 +13369,30 @@
       const d = await r.json()
       const pName = (uid, mail) => nameById.get(String(uid)) || _fleetKurzName(mail) || String(uid).slice(0, 8)
       const byLogin = {}, byName = {}
+      // Mehrdeutigkeit (17.09.2026, Finns Bug-Report „Trades von verschiedenen
+      // Personen vertauscht"): bisher gewann schlicht der LETZTE Account mit
+      // derselben External ID / demselben Namen — „Live Acc", „Fusion Live",
+      // „Echo Demo (Master)" gibt es aber bei mehreren Personen. Jetzt: aktiv
+      // schlägt archiviert; tragen danach noch ZWEI Personen denselben
+      // Schlüssel, gilt er als nicht beweisbar (null) und der Aufrufer nimmt
+      // seinen Fallback. Gleiche Person doppelt (Vorgänger/Nachfolger) ist ok.
+      const setze = (map, key, wer, arch) => {
+        if(!key) return
+        const alt = map[key]
+        if(alt === undefined){ map[key] = { wer, arch }; return }
+        if(alt.arch && !arch){ map[key] = { wer, arch }; return }
+        if(!alt.arch && arch) return
+        if(alt.wer && alt.wer.uid !== wer.uid) map[key] = { wer: null, arch }
+      }
       for(const a of (d.accounts || [])){
         // firm mit in die Karte (25.08.2026, Richtungs-Schutz): der Overview
         // kennt die Prop-Firma JEDES Accounts — auch die der anderen Personen.
         const wer = { uid: String(a.user_id), name: pName(a.user_id, a.person),
                       firm: String(a.firm_raw || a.firm || '') }
-        if(a.ext) byLogin[String(a.ext).trim()] = wer
-        if(a.name) byName[String(a.name).trim().toLowerCase()] = wer
+        setze(byLogin, String(a.ext || '').trim(), wer, !!a.archived)
+        setze(byName, String(a.name || '').trim().toLowerCase(), wer, !!a.archived)
       }
+      for(const m of [byLogin, byName]) for(const k of Object.keys(m)) m[k] = m[k].wer
       _fleetPers.byLogin = byLogin
       _fleetPers.byName = byName
       // Server-Namen (user_metadata via /admin/overview) für Personen, die auf
@@ -13571,7 +13587,12 @@
       // schreibt, alle User lesen — kein Browser-Token noetig. TopstepX bleibt
       // Aggregator-Sache (per-Origin); MetaApi-Zeilen sind raus (Dubletten der
       // dup_live-Slaves).
-      fleetPersonen()   // nicht awaited — nur Fallback fuer alte Echo-Zeilen
+      // Die Personen-Karte ist seit 17.09.2026 die ERSTE Quelle für „wessen
+      // Trade ist das" (s. besitzerKey unten), nicht mehr nur Fallback. Beim
+      // allerersten Tick deshalb einmal abwarten (der Abruf deckelt sich selbst
+      // auf 8 s und wirft nie) — danach läuft er wie bisher nebenher im Cache.
+      if(!_fleetPers.byLogin) await fleetPersonen()
+      else fleetPersonen()
 
       let meUid = ''
       try { meUid = String(((((await supabase.auth.getSession()).data || {}).session || {}).user || {}).id || '') } catch(_){}
@@ -13594,6 +13615,22 @@
       const karten = new Map()     // personKey → [Karten-HTML]
       const alarme = new Map()     // personKey → [rote Hinweise]
       const lege = (map, key, h) => { if(!map.has(key)) map.set(key, []); map.get(key).push(h) }
+      /* Wessen Trade ist das? (17.09.2026, Finns Bug-Report: „Trades von
+       * verschiedenen Personen werden ganz oft vertauscht".) Per SQL belegt:
+       * zwei Profile teilen sich EIN Duplikium-Login (pascal.hermann.22) — der
+       * Wächter stempelt dup_live.user_id mit dem Profil, dessen creds-Zeile er
+       * zuletzt gelesen hat, die Zeile kippte zwischen zwei Abfragen (21 s) von
+       * 7b1bc9a3 auf 728b4d23 und mit ihr ALLE Karten dieses Logins. Dasselbe
+       * Muster bei Echo: mt5_live.status.user_id ist, wer auf dem PC gerade
+       * eingeloggt ist — ein Profilwechsel dort hängt alle Instanzen um.
+       * Wahrheit ist deshalb der BESITZER des Master-Accounts (External ID →
+       * Person, aus /admin/overview). Nur wenn der nicht beweisbar ist (Account
+       * nicht in Prophos, mehrdeutig, Overview nicht erreichbar), gilt der
+       * Zeilen-Stempel wie bisher. */
+      const besitzerKey = (login, fallbackKey) => {
+        const w = fleetWer(login, null)
+        return (w && w.uid) ? merken(w.uid, profName.get(w.uid) || w.name) : fallbackKey()
+      }
 
       /* ── Bausteine im EXAKTEN Design der Plan-Karten oben (tc2-Reihe,
        * Lots-Chips wie dupLiveLotsInner, tickender tc-live-timer) — Finns
@@ -13648,7 +13685,16 @@
        * ohne Querverweis = manuell/ohne Master. */
       const stampAcc = p => String(p.master_id || p.id_master || p.masterId || '')
       const phys = new Map()
-      for(const dr of ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])){
+      // Feste Reihenfolge (17.09.2026): die Abfrage kommt unsortiert — wer ein
+      // geteiltes Konto „zuerst" sah, wechselte von Tick zu Tick, und mit ihm
+      // Karten-Reihenfolge und Slave-Name.
+      const dupZeilen = ((!dl.error && Array.isArray(dl.data)) ? dl.data : [])
+        .slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      // Hedge-Konten der Echo-Instanzen: eine Position dort ist NIE ein
+      // Duplikium-Master, auch wenn nur EINE E-Mail das Konto sieht (Fund
+      // 17.09.: Echo-Hedges auf 430095 standen zusätzlich als „MASTER"-Karte da).
+      const echoHedgeLogins = new Set(rows.map(r => String(r.hedge_login || '')).filter(Boolean))
+      for(const dr of dupZeilen){
         const accById = {}
         for(const a of (Array.isArray(dr.accounts) ? dr.accounts : [])) accById[String(a.account_id)] = a
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(dr.updated_at)) / 1000))
@@ -13673,11 +13719,14 @@
               lots: Number(p.amountLot) || 0, side: p.side, symbol: p.symbol || '?',
               openPrice: p.openPrice, openEpoch: Number(p.open_epoch) || null,
               frisch, alterS, selfRef: true, refMasterAcc: '', refMasterTicket: '',
-              slaveisch: /^slave/i.test(String(acc.name || '')), pKey: rowPKey,
+              slaveisch: false, login: String(acc.login || ''),
+              pKey: besitzerKey(acc.login, () => rowPKey),
               mails: new Set(), verbraucht: false }
             phys.set(key, e)
           }
           e.mails.add(dr.id)
+          // über ALLE Sichten sammeln, nicht nur die zuerst gesehene
+          if(/^slave/i.test(String(acc.name || '')) || echoHedgeLogins.has(String(acc.login || ''))) e.slaveisch = true
           if(frisch && (!e.frisch || alterS < e.alterS)){ e.frisch = true; e.alterS = alterS }
           if(!e.openEpoch && p.open_epoch) e.openEpoch = Number(p.open_epoch) || null
           if(!selfRef){
@@ -13687,13 +13736,20 @@
             e.refMasterAcc = stampAcc(p)
             e.refMasterTicket = String(p.masterTicket || '')
             e.pKey = rowPKey
+            // Name aus der Besitzer-Sicht — sonst hieß derselbe Slave je nach
+            // Tick „Fusion (P + F)", „Fusion Live" oder „slave - mt5 - …".
+            if(acc.name) e.accName = acc.name
           }
         }
       }
+      // Ein Konto, auf das irgendeine Kopie zeigt, ist ein Slave — eine
+      // Selbst-Referenz dort ist von Hand eröffnet, kein Master (17.09.2026).
+      const kopieZiele = new Set()
+      for(const e of phys.values()) if(!e.selfRef && e.login) kopieZiele.add(e.login)
       const masterEintraege = [], kopienEintraege = [], ohneMaster = []
       for(const e of phys.values()){
         if(!e.selfRef) kopienEintraege.push(e)
-        else if(e.mails.size > 1 || e.slaveisch) ohneMaster.push(e)   // geteilt/manuell
+        else if(e.mails.size > 1 || e.slaveisch || kopieZiele.has(e.login)) ohneMaster.push(e)   // geteilt/manuell
         else masterEintraege.push(e)
       }
       for(const m of masterEintraege){
@@ -13715,7 +13771,29 @@
 
       /* ── Echo: eine Karte pro Master-Position, gleiche Optik wie oben ── */
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
+      // Dieselbe Instanz von ZWEI PCs gepusht (17.09.2026, per SQL belegt:
+      // pc-o7wfb9 + pc-pw1put und pc-sukzo8 + pc-40mali melden dieselben
+      // Master-Logins) → jede Karte und jeder Alarm stand doppelt da, der
+      // Zähler zählte doppelt. Pro Master+Hedge gewinnt EINE Zeile: beweisbar
+      // frisch vor eingefroren, dann die jüngere. Nur für die Anzeige —
+      // window._mt5CloudRows bleibt vollständig.
+      const echoGuete = r => {
+        const s = r.status || {}
+        const alt = jetzt - Date.parse(r.updated_at)
+        return (r.alive && alt <= 20 * 1000 && !s.note) ? 2 : (r.alive && alt <= 20 * 1000) ? 1 : 0
+      }
+      const echoBeste = new Map()
       for(const r of rows){
+        const k = r.master_login ? String(r.master_login) + '|' + String(r.hedge_login || '') : 'id:' + r.id
+        const alt = echoBeste.get(k)
+        // Gleichstand unter Lebenden: feste Wahl über die id — „die jüngere"
+        // würde bei zwei 5-s-Pushern jeden Tick den PC wechseln.
+        const gr = echoGuete(r), ga = alt ? echoGuete(alt) : -1
+        if(!alt || gr > ga
+          || (gr === ga && (gr > 0 ? String(r.id) < String(alt.id)
+                                   : Date.parse(r.updated_at) > Date.parse(alt.updated_at)))) echoBeste.set(k, r)
+      }
+      for(const r of echoBeste.values()){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
         const frisch = r.alive && alterS <= 20 && !s.note
@@ -13744,11 +13822,12 @@
         const fr = s.hedge_fremde
         const fremdNeu = Array.isArray(fr) && fr.length && !fremdGezeigt.has(r.hedge_login)
         if(!pos.length && !waisen.length && !fremdNeu) continue
+        // Besitzer des Master-Accounts zuerst, der Push-Stempel (= wer auf dem
+        // PC gerade eingeloggt ist) nur noch als Fallback — s. besitzerKey.
         const uid = String((s.user_id) || '')
-        const wer = uid ? null : fleetWer(r.master_login, null)
-        const pKey = uid ? merken(uid, profName.get(uid) || 'ID ' + uid.slice(0, 6))
-          : wer ? merken(wer.uid, wer.name)
-          : merken('pc:' + r.pc_name, 'PC ' + r.pc_name)
+        const pKey = besitzerKey(r.master_login, () =>
+          uid ? merken(uid, profName.get(uid) || 'ID ' + uid.slice(0, 6))
+              : merken('pc:' + r.pc_name, 'PC ' + r.pc_name))
         const farbe = personen.get(pKey).farbe
         const mPL = (s.master_equity != null && s.master_balance != null)
           ? Number(s.master_equity) - Number(s.master_balance) : null
@@ -13820,7 +13899,6 @@
           frisch, 'tsx'))
       }
 
-      const uebrig = ohneMaster
       // Die EIGENE Person nicht nochmal listen (25.08.2026, Finns Schliff:
       // „sonst sind wir ja doppelt") — ihre Trades stehen als Plan-Karten
       // direkt darueber. Nur ihre ALARME (Waisen/Fremd-Hedge) muessen
@@ -13834,6 +13912,10 @@
       // setzt fleetPersonen die Liste auf leer, blind bleibt hier also nichts.
       if(!_fleetPers.exclUids){ box.style.display = 'none'; return }
       const excl = _fleetPers.exclUids
+      // „Hedge (geteilt / ohne Master)": Positionen auf einem Konto, das nur
+      // EINE E-Mail sieht, gehören eindeutig dieser Person — für die eigene und
+      // die ausgeschlossenen gilt dann dieselbe Regel wie für ihre Karten.
+      const uebrig = ohneMaster.filter(e => !(e.mails.size === 1 && (e.pKey === meUid || excl.has(String(e.pKey)))))
       const eigeneAlarme = (alarme.get(meUid) || []).join('')
       const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
         .filter(k => k !== meUid && !excl.has(String(k)))
@@ -24093,7 +24175,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.306'
+  const OS_TAB_BUILD = '2026-09-17.307'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
