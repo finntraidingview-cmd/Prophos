@@ -23585,7 +23585,20 @@
     const orbitSym = _tpOrderOrbit
       ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()
       : ''
-    symEl.value = plan.masterSymbol || orbitSym || (fromSettings.length ? fromSettings[0] : '')
+    // TOPSTEP-MIRROR (17.09.2026, Finns erste Testorder auf Chriss' PC: „kannst du
+    // fixen, dass MNQZ/NQZ jetzt bei Topstep Mirror auch zeigt"): Topstep hat
+    // KEINEN Firm-Spec (weder Default noch firm_specs — der Weg läuft über die
+    // TSX-API, nicht über Duplikum), fromSettings war also leer, das Feld blieb
+    // leer und „Speichern" scheiterte an „Symbol angeben". Gleiche Lösung wie bei
+    // Orbit: Instrument aus dem Schalter von Popup 1, Kontraktmonat GERECHNET
+    // (tpFuturesFrontcode — derselbe Schalter wie Orbit/Duplikum, seit .292 Z6).
+    // Erkennung per Struktur (planMirrorRoute), weil Mirror-Pläne route='dup'
+    // tragen. Da es keinen Settings-Standard gibt, speichert der Save-Handler
+    // das Symbol als master_symbol am Plan — Karte und Start lesen es von dort.
+    const mirrorSym = (!_tpOrderOrbit && typeof planMirrorRoute === 'function' && planMirrorRoute(plan))
+      ? ((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()
+      : ''
+    symEl.value = plan.masterSymbol || orbitSym || mirrorSym || (fromSettings.length ? fromSettings[0] : '')
     symEl.readOnly = false   // war bis 30.08.2026 gesperrt, sobald Settings ein Symbol hatten
     // Richtungs-Schutz (25.08.2026, Finns Ansage nach dem Selbst-Hedge-Vorfall):
     // läuft bei der Master-Firma schon ein Trade der EINGELOGGTEN ID (Duplikium
@@ -23812,7 +23825,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.298'
+  const OS_TAB_BUILD = '2026-09-17.299'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
