@@ -19577,6 +19577,16 @@
     // Schwester-Kontrakt damit automatisch um Faktor 10 um.
     const baseInstrument = (typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'
     const base = await mirrorResolveBase()
+    // Echo-Notfall-Policy lesen (eine globale Zeile). Best-Effort mit 2,5-s-Deckel —
+    // das Scharfschalten darf nie an dieser Abfrage hängen.
+    let notfall = { faktor: 110, puffer: 100 }
+    try {
+      const q = supabase.from('echo_notfall').select('notfall_faktor,notfall_puffer_min_punkte').eq('key', 'global').maybeSingle()
+      const res = await Promise.race([q, new Promise(r => setTimeout(() => r(null), 2500))])
+      const d = res && res.data
+      if(d && isFinite(Number(d.notfall_faktor)) && isFinite(Number(d.notfall_puffer_min_punkte)))
+        notfall = { faktor: Number(d.notfall_faktor), puffer: Number(d.notfall_puffer_min_punkte) }
+    } catch(_){}
     // Immer Stop→Start statt Wiederverwenden: /mirror/start aktualisiert bei
     // "Already running" den Multiplier nicht. Seit dem Zombie-Fix ist das racefrei.
     // Der Stop geht an ALLE bekannten Backends, nicht nur an das, wo gleich
@@ -19610,6 +19620,15 @@
         // kopierte das bei „Überprüfen" bewusst offen gehaltene Pair den NÄCHSTEN
         // Topstep-Trade einfach wieder mit. Alte Backends ignorieren das Feld.
         oneShot: true,
+        // Notfall-SL/TP wie bei Echo (17.09.2026, Finn: „wenn ich auf Topstep SL und TP
+        // per Drag & Drop verschiebe, sollen sie auf Fusion in diesem Verhältnis
+        // mitwandern"): die Engine liest die Master-Level alle 2 s in einem EIGENEN
+        // Thread (Kopierpfad unberührt) und legt sie gekreuzt, mit Puffer HINTER dem
+        // Master-Level, auf den Hedge. Werte = dieselbe globale Policy wie Echo
+        // (echo_notfall); fehlt die Zeile, greifen die Echo-Defaults 110 % / 100 Punkte.
+        sltpSync: true,
+        notfallFaktor: notfall.faktor,
+        notfallPufferPunkte: notfall.puffer,
         baseInstrument,
         symbolMap: SYMBOL_MAP
       })
@@ -24005,7 +24024,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-17.304'
+  const OS_TAB_BUILD = '2026-09-17.305'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-17.2"
+APP_BUILD = "2026-09-17.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -921,6 +921,7 @@ def refresh_tsx_token(pair_id, session_obj, max_retries=3):
                 s["tsxToken"] = d["newToken"]
                 s["lastTokenRefresh"] = time.time()
                 log_msg(pair_id, "🔄 TSX Token refreshed")
+                _sessions_save()
                 return True
             log_msg(pair_id, f"⚠️ Token-Refresh: {d.get('errorMessage', d)}")
             return False
@@ -945,62 +946,120 @@ def refresh_tsx_token(pair_id, session_obj, max_retries=3):
             return False
     return False
 
-# ── Mirror Control ──
-@app.route("/mirror/start", methods=["POST","OPTIONS"])
-def mirror_start():
-    if request.method == "OPTIONS": return "", 200
-    data = request.get_json()
-    pair_id     = data.get("pairId")
-    tsx_token   = data.get("tsxToken")
-    tsx_acc_id  = data.get("tsxAccountId")
-    ma_token    = data.get("maToken")
-    ma_acc_id   = data.get("maAccountId")
-    multiplier  = float(data.get("multiplier", 0.5))
-    symbol_map  = data.get("symbolMap", {"MNQ": "NAS100", "NQ": "NAS100", "ES": "US500", "MES": "US500"})
-    # "polling" (Default, bewährt) oder "realtime" (SignalR/GatewayUserTrade, 20.07.2026,
-    # noch nicht live-getestet) — Alt bleibt unangetastet als Fallback erreichbar.
-    engine = data.get("engine", "polling")
+# ── Sessions überleben einen Backend-Neustart (17.09.2026) ──
+# Finn: 'Die Updates bitte einfach immer direkt deployen … nicht warten, nichts per Hand
+# starten, so wie beim Frontend.' Bisher lebten mirror_sessions NUR im RAM: jedes Update
+# hätte scharfe Pläne still entwaffnet — deshalb wartete das Selbst-Update, solange
+# irgendein Mirror scharf war, und Chriss' PC hing am 17.09. den ganzen Vormittag auf
+# einem zwei Tage alten Backend. Jetzt: aktive Echtzeit-Sessions stehen in einer Sidecar-
+# Datei AUSSERHALB des Repos (~/.prophos/mirror-sessions.json, chmod 600 — enthält Token,
+# gleiche Vertrauensstufe wie die lokalen Copier-Configs) und werden beim Boot wieder
+# scharfgeschaltet, inkl. der laufenden Hedge-Zuordnung (refState), damit eine offene
+# Position NICHT ein zweites Mal gehedgt wird. Nur Echtzeit-Sessions: Polling- und
+# MT→TSX-Pairs kennen ihre Positionen nur lokal im Thread — für die wartet das Update
+# weiter. Auf Railway aus (flüchtiges Dateisystem, dort laufen keine Pairs).
+_SIDECAR = os.environ.get("PROPHOS_SIDECAR") or os.path.join(os.path.expanduser("~"), ".prophos", "mirror-sessions.json")  # env nur für die Nachstellung (tools/tsx-stream-test/sim)
+_SIDECAR_ON = not (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or os.environ.get("RAILWAY_ENVIRONMENT"))
+_sidecar_lock = threading.Lock()
+_SIDECAR_KEYS = ("pairId", "tsxToken", "tsxAccountId", "maToken", "maAccountId", "multiplier",
+    "targetRiskEur", "pollInterval", "direction", "engine", "oneShot", "opensBlocked", "hadPos",
+    "baseInstrument", "symbolMap", "positions", "closedHedges", "refState", "lastTokenRefresh",
+    "sltpSync", "notfallFaktor", "notfallPufferPunkte")
 
+def _sessions_save():
+    if not _SIDECAR_ON:
+        return
+    try:
+        out = {}
+        for pid, ss in list(mirror_sessions.items()):
+            if ss.get("active") and ss.get("engine") == "realtime" and ss.get("direction") != "mt_to_tsx":
+                out[pid] = {k: ss.get(k) for k in _SIDECAR_KEYS if k in ss}
+                out[pid]["savedAt"] = time.time()
+        with _sidecar_lock:
+            os.makedirs(os.path.dirname(_SIDECAR), exist_ok=True)
+            tmp = _SIDECAR + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(out, f)
+            try: os.chmod(tmp, 0o600)
+            except Exception: pass
+            os.replace(tmp, _SIDECAR)
+    except Exception as e:
+        print(f"[sidecar] ⚠️ Speichern fehlgeschlagen: {type(e).__name__}: {e}")
+
+def _sessions_resume():
+    if not _SIDECAR_ON or not os.path.exists(_SIDECAR):
+        return
+    try:
+        with open(_SIDECAR, encoding="utf-8") as f:
+            alt = json.load(f)
+    except Exception as e:
+        print(f"[sidecar] ⚠️ Lesen fehlgeschlagen: {type(e).__name__}: {e}")
+        return
+    for pid, d in (alt or {}).items():
+        # Älter als 20 h: der TSX-Token (24 h) ist ohne Refresh sicher tot — nicht raten.
+        if time.time() - float(d.get("savedAt") or 0) > 20 * 3600:
+            print(f"[sidecar] ⏭ {pid}: Stand älter als 20 h — nicht wieder scharfgeschaltet")
+            continue
+        ok, msg = _mirror_session_create(d, resumed=d)
+        print(f"[sidecar] ↻ {pid}: {'wieder scharf' if ok else 'NICHT wieder scharf — ' + str(msg)}")
+    _sessions_save()
+
+def _mirror_session_create(data, resumed=None):
+    pair_id = data.get("pairId")
+    engine  = data.get("engine", "polling")
+    if not pair_id:
+        return False, "pairId fehlt"
     if pair_id in mirror_sessions:
         if mirror_sessions[pair_id].get("active"):
-            return jsonify({"ok": True, "msg": "Already running"})
+            return True, "Already running"
         # Selbst beendeter Eintrag (Token tot, 15.09.2026) — darf ein Re-Arm nicht blockieren
         mirror_sessions.pop(pair_id, None)
         _hub_kill(mirror_hubs.pop(pair_id, None))
 
     session = {
         "pairId": pair_id,
-        "tsxToken": tsx_token,
-        "tsxAccountId": tsx_acc_id,
-        "maToken": ma_token,
-        "maAccountId": ma_acc_id,
-        "multiplier": multiplier,
+        "tsxToken": data.get("tsxToken"),
+        "tsxAccountId": data.get("tsxAccountId"),
+        "maToken": data.get("maToken"),
+        "maAccountId": data.get("maAccountId"),
+        "multiplier": float(data.get("multiplier", 0.5)),
         "targetRiskEur": float(data.get("targetRiskEur", 0)),
         "pollInterval": float(data.get("pollInterval", 0.5)),
         "direction": data.get("direction", "tsx_to_mt"),
+        # "polling" (Default, bewährt) oder "realtime" (SignalR/GatewayUserTrade, 20.07.2026)
         "engine": engine,
         # EIN PLAN = EIN TRADE (17.09.2026, Finn: 'Trade beendet, Plan steht bei Überprüfen,
         # dann starte ich in Topstep noch einen Trade — und der wird wieder kopiert').
         # Plan-Pairs aus dem Trades-Tab schicken oneShot:true; manuelle Pairs der Mirror-
-        # Seite spiegeln weiter dauerhaft. Wirkung nur in der Echtzeit-Engine (die Plan-
-        # Pairs immer fahren): sobald nach dem ersten Hedge alles wieder flach ist, werden
-        # KEINE neuen Opens mehr gespiegelt (opensBlocked) — die Session lebt weiter, weil
-        # der Auto-P&L closedHedges aus ihr liest. Der nächste 'Starten' schaltet frisch scharf.
+        # Seite spiegeln weiter dauerhaft. Wirkung nur in der Echtzeit-Engine: sobald nach
+        # dem ersten Hedge alles wieder flach ist, werden KEINE neuen Opens mehr gespiegelt
+        # (opensBlocked) — die Session lebt weiter, weil der Auto-P&L closedHedges aus ihr
+        # liest. Der nächste 'Starten' schaltet frisch scharf.
         "oneShot": bool(data.get("oneShot")),
-        "opensBlocked": False,
+        "opensBlocked": bool((resumed or {}).get("opensBlocked")),
+        "hadPos": bool((resumed or {}).get("hadPos")),
+        # NOTFALL-SL/TP (17.09.2026, wie Echo): Master-SL/TP auf TSX werden gekreuzt und
+        # mit Puffer HINTER dem Master-Level auf den Hedge gelegt und nachgezogen.
+        "sltpSync": bool(data.get("sltpSync")),
+        "notfallFaktor": float(data.get("notfallFaktor") or 110.0),
+        "notfallPufferPunkte": float(data.get("notfallPufferPunkte") or 100.0),
         # Kontrakt-Basis, auf die sich der Multiplier bezieht ("MNQ" oder "NQ").
         # Fällt der echte Fill auf dem jeweils anderen Kontrakt der Familie, rechnet
         # open_hedge den Faktor 10 automatisch um (Finn handelt mal MNQ, mal NQ —
         # ein stur angewendeter Multiplier wäre dann ein 10x-Fehler im Hedge).
         "baseInstrument": str(data.get("baseInstrument") or "MNQ").upper(),
-        "symbolMap": symbol_map,
+        "symbolMap": data.get("symbolMap") or {"MNQ": "NAS100", "NQ": "NAS100", "ES": "US500", "MES": "US500"},
         "reverseSymbolMap": {"NAS100": "MNQ", "US500": "MES", "US30": "MYM", "OIL": "CL", "XAUUSD": "GC"},
         "active": True,
-        "positions": {},
+        "positions": dict((resumed or {}).get("positions") or {}),
+        "closedHedges": list((resumed or {}).get("closedHedges") or []),
+        "refState": dict((resumed or {}).get("refState") or {}),
         "log": [],
-        "lastTokenRefresh": time.time(),
+        "lastTokenRefresh": float((resumed or {}).get("lastTokenRefresh") or time.time()),
     }
     mirror_sessions[pair_id] = session
+    if resumed:
+        log_msg(pair_id, f"↻ Session nach Backend-Neustart wiederhergestellt (Build {APP_BUILD}) — {len(session['refState'])} laufende Hedge-Zuordnung(en) übernommen", "ok")
 
     if session["direction"] == "mt_to_tsx":
         worker_fn = run_mirror_mt_to_tsx
@@ -1009,18 +1068,16 @@ def mirror_start():
     else:
         worker_fn = run_mirror
 
-    # Watchdog: falls der Worker durch eine unerwartete Exception crasht
-    # (sollte mit den neuen except-Klauseln nicht mehr passieren, aber zur Sicherheit),
-    # startet er sich automatisch neu — solange SEINE Session (Identität, nicht nur
-    # pair_id — Zombie-Bug 21.07.2026) noch aktiv ist.
+    # Watchdog: falls der Worker durch eine unerwartete Exception crasht, startet er
+    # sich automatisch neu — solange SEINE Session (Identität, nicht nur pair_id —
+    # Zombie-Bug 21.07.2026) noch aktiv ist.
     def watchdog(pid, fn, sess):
         max_restarts = 5
         restarts = 0
         while mirror_sessions.get(pid) is sess and sess.get("active") and restarts <= max_restarts:
             try:
                 fn(pid)
-                # Worker ist sauber returnt (z.B. weil active=False) → Loop verlassen
-                break
+                break  # Worker ist sauber returnt (z.B. weil active=False)
             except Exception as e:
                 restarts += 1
                 log_msg(pid, f"💥 Worker crashed ({type(e).__name__}: {str(e)[:100]}) — Auto-Restart {restarts}/{max_restarts}")
@@ -1030,10 +1087,18 @@ def mirror_start():
             if mirror_sessions.get(pid) is sess:
                 sess["active"] = False
 
-    thread = threading.Thread(target=watchdog, args=(pair_id, worker_fn, session), daemon=True)
-    thread.start()
+    threading.Thread(target=watchdog, args=(pair_id, worker_fn, session), daemon=True).start()
+    _sessions_save()
+    return True, None
 
-    return jsonify({"ok": True})
+# ── Mirror Control ──
+@app.route("/mirror/start", methods=["POST","OPTIONS"])
+def mirror_start():
+    if request.method == "OPTIONS": return "", 200
+    ok, msg = _mirror_session_create(request.get_json() or {})
+    if msg == "Already running":
+        return jsonify({"ok": True, "msg": msg})
+    return jsonify({"ok": True}) if ok else (jsonify({"ok": False, "error": msg}), 400)
 
 @app.route("/mirror/stop", methods=["POST","OPTIONS"])
 def mirror_stop():
@@ -1047,6 +1112,7 @@ def mirror_stop():
     # die alte SignalR-Verbindung noch bis zu 8s weiter, während schon ein Neustart
     # eine zweite Verbindung aufbaut → doppelte Hedge-Orders.
     _hub_kill(mirror_hubs.pop(pair_id, None))
+    _sessions_save()
     return jsonify({"ok": True})
 
 @app.route("/mirror/status", methods=["GET"])
@@ -1347,6 +1413,14 @@ def run_mirror_realtime(pair_id):
     seen_trades = {}   # trade-id -> ts. Dedup gegen doppelt zugestellte Events (z.B. nach
                        # Reconnect oder falls serverseitig je doppelt abonniert) — ein doppelt
                        # verarbeiteter Fill würde net verfälschen und falsche Hedges auslösen.
+    for _c, _st in (s.get("refState") or {}).items():
+        # Wiederaufnahme nach Backend-Neustart: die laufende Hedge-Zuordnung übernehmen,
+        # sonst sähe der Abgleich die offene TSX-Position als 'ohne Hedge' und eröffnete
+        # einen ZWEITEN. Ist die TSX-Position inzwischen zu, schließt der Abgleich den
+        # Hedge über den normalen Phantom-Pfad.
+        if _st.get("rid") in (s.get("positions") or {}):
+            net[_c] = int(_st.get("net") or 0)
+            ref[_c] = _st["rid"]
     sub_lock = threading.Lock()
     # pos_lock serialisiert ALLE net/ref-Mutationen inkl. Hedge-Auslösung — Event-Thread
     # (on_trade) und Worker-Thread (Baseline/Heal) dürfen nie gleichzeitig dieselbe
@@ -1380,7 +1454,9 @@ def run_mirror_realtime(pair_id):
                            # am 21.07. serverseitig HTTP 429 provoziert; Kopien laufen über
                            # den 1s-Abgleich weiter)
     baseline_done = [False]  # Connect-Baseline nur einmal (17.09.2026, s. do_subscribe)
-    had_pos = [False]        # oneShot: gab es in dieser Session schon einen Hedge?
+    had_pos = [bool(s.get("hadPos"))]  # oneShot: gab es in dieser Session schon einen Hedge?
+    snapshot = [0.0, []]     # letzter searchOpen-Stand des Abgleichs (für den SL/TP-Thread)
+    state_sig = [""]         # zuletzt gesicherte Hedge-Zuordnung (Sidecar)
     blocked_logged = set()   # oneShot: pro Contract nur EINE 'nicht gespiegelt'-Zeile
     rec_warn = [0.0]         # letzter 'Abgleich blind'-Hinweis (Drossel 30s)
     last_pos_evt = [0.0]   # Zeitpunkt des letzten GatewayUserPosition-Events (08.09.2026):
@@ -1425,6 +1501,7 @@ def run_mirror_realtime(pair_id):
         Closes/closedHedges/Status bleiben, und am Kopierpfad selbst ändert sich nichts."""
         if s.get("oneShot") and had_pos[0] and not ref and not s.get("opensBlocked"):
             s["opensBlocked"] = True
+            _sessions_save()
             log_msg(pair_id, "⏸️ Trade beendet — ein Plan, ein Trade: weitere TSX-Trades auf diesem Account werden NICHT mehr gespiegelt, bis der nächste Plan gestartet wird.", "ok")
 
     def open_gesperrt(contract):
@@ -1834,6 +1911,9 @@ def run_mirror_realtime(pair_id):
     mirror_hubs[pair_id] = hub  # VOR start() registrieren — on_open kann sofort feuern
     start_hub_async(hub)
 
+    if s.get("sltpSync"):
+        threading.Thread(target=_sltp_worker, args=(pair_id, s, ref, pos_lock, snapshot), daemon=True).start()
+
     # Reconciliation-Watchdog mit SELBSTHEILUNG (21.07.2026): der Live-Test hat gezeigt,
     # dass der SignalR-Stream de facto ausfallen kann (Reconnect-Burst beim Start, danach
     # nominell verbunden, aber keine Events mehr) — reine Warnungen halfen Finn nicht,
@@ -1900,6 +1980,7 @@ def run_mirror_realtime(pair_id):
                 json={"accountId": int(s["tsxAccountId"])}, timeout=10)
             if r.ok:
                 positions = r.json().get("positions", r.json().get("data", []))
+                snapshot[0], snapshot[1] = time.time(), positions
                 rest_contracts = {p.get("contractId") for p in positions if p.get("contractId")}
                 with pos_lock:
                     tracked_contracts = {c for c, q in net.items() if q != 0}
@@ -1932,6 +2013,14 @@ def run_mirror_realtime(pair_id):
                         close_hedge(pair_id, rid)
                     healed = True
                 pruef_one_shot()
+                # Hedge-Zuordnung für den Neustart sichern — nur bei Änderung
+                with pos_lock:
+                    _rs = {c: {"rid": ref[c], "net": net.get(c, 0)} for c in ref}
+                _sig = json.dumps(_rs, sort_keys=True) + str(had_pos[0])
+                if _sig != state_sig[0]:
+                    state_sig[0] = _sig
+                    s["refState"], s["hadPos"] = _rs, had_pos[0]
+                    _sessions_save()
 
                 if healed:
                     # Nach 3 Neuaufbau-Versuchen ohne dass der Stream je geliefert hat:
@@ -1969,6 +2058,120 @@ def run_mirror_realtime(pair_id):
         pass
     http.close()
     log_msg(pair_id, "Mirror gestoppt")
+
+# ── NOTFALL-SL/TP für den Topstep-Mirror (17.09.2026) ──
+# Finn: 'Das Gleiche wie bei den Notfall-TP und -SL bei Echo: ich verschiebe auf Topstep
+# SL und TP per Drag & Drop (öfter pro Trade) — dann sollen auf Fusion SL und TP
+# automatisch in diesem Verhältnis mitwandern.'
+# RECHNUNG = Echo (mt5-copier/copier.py plan_sltp), bewusst dieselbe Doktrin:
+#   gekreuzt (Master-SL → Hedge-TP, Master-TP → Hedge-SL), Puffer IMMER in Auslöse-
+#   richtung HINTER dem Master-Level: (faktor−100)% der Distanz Entry↔Level, mindestens
+#   puffer_min_punkte × point. NIE 'Entry ± Faktor × Distanz' (bricht beim SL im Gewinn).
+# EIN UNTERSCHIED zu Echo, erzwungen durch die Sache: Master ist ein FUTURE (NQ/MNQ),
+#   der Hedge ein Kassa-CFD (NAS100) — die Kurse liegen dauerhaft um die Basis auseinander.
+#   Absolute Level lassen sich also nicht übernehmen. Übertragen wird der ABSTAND zum
+#   Entry: Hedge-Level = Hedge-Entry + (Level − Master-Entry). Weil der Hedge ~1 s nach
+#   dem Master eröffnet, steckt in dieser Basis ein Fehler von ein paar Punkten — deshalb
+#   hier ein Mindest-Puffer-BODEN in Indexpunkten, unabhängig von den Echo-Werten. Sonst
+#   könnte ein Hedge-Level knapp VOR dem Master-Level liegen und der Hedge schlösse,
+#   während der Master weiterläuft.
+# LÄUFT IN EINEM EIGENEN THREAD (Finns Ansage 'an der Latenz nichts ändern'): die Kopier-
+#   Schleife wird weder um Requests noch um Wartezeit verlängert. Einziger Zusatz-Request:
+#   Order/searchOpen alle 2 s und NUR solange ein Hedge offen ist.
+MIRROR_SLTP_INTERVAL = 2.0
+MIRROR_SLTP_PUFFER_BODEN = 5.0   # Indexpunkte, s.o.
+
+def mirror_plan_sltp(*, lang, entry_m, msl, mtp, entry_h, faktor, min_puffer, digits):
+    """REIN RECHNEND (testbar). lang = Master ist Long. msl/mtp = Master-SL/TP oder None.
+    Rückgabe {'tp': x|None, 'sl': y|None} in Hedge-Kursen (None = Level entfernen)."""
+    def hinter(level, richtung):  # richtung: -1 = löst bei fallendem Kurs aus, +1 = steigend
+        puffer = max((float(faktor) / 100.0 - 1.0) * abs(float(level) - float(entry_m)), float(min_puffer))
+        ziel_m = float(level) + richtung * puffer
+        return round(float(entry_h) + (ziel_m - float(entry_m)), int(digits))
+    return {"tp": hinter(msl, -1 if lang else +1) if msl else None,
+            "sl": hinter(mtp, +1 if lang else -1) if mtp else None}
+
+def _sltp_worker(pair_id, s, ref, pos_lock, snapshot):
+    http = requests.Session(); http.verify = False
+    spec = {}      # mt_symbol -> {"digits": n, "point": x}
+    hedge = {}     # mtPosId -> {"open": preis}
+    last = {}      # mtPosId -> (sl, tp) zuletzt gesetzt
+    warn_ts = [0.0]
+    def warn(msg):
+        if time.time() - warn_ts[0] > 30:
+            warn_ts[0] = time.time()
+            log_msg(pair_id, msg, "warn")
+    ma = lambda path: f"{MA_BASE}/users/current/accounts/{s['maAccountId']}{path}"
+    mah = {"auth-token": s["maToken"], "Content-Type": "application/json"}
+    log_msg(pair_id, f"🎯 Notfall-SL/TP aktiv: Faktor {s.get('notfallFaktor')}% · Mindest-Puffer {s.get('notfallPufferPunkte')} Punkte (Boden {MIRROR_SLTP_PUFFER_BODEN} Indexpunkte) — Master-Level werden alle {int(MIRROR_SLTP_INTERVAL)} s gelesen")
+    while mirror_sessions.get(pair_id) is s and s.get("active"):
+        time.sleep(MIRROR_SLTP_INTERVAL)
+        try:
+            with pos_lock:
+                offen = {c: s["positions"].get(rid) for c, rid in ref.items()}
+            offen = {c: pid for c, pid in offen.items() if pid}
+            if not offen:
+                continue
+            if time.time() - snapshot[0] > 10:
+                continue  # Abgleich blind/alt → kein belastbarer Master-Entry, nichts anfassen
+            r = http.post(f"{TSX_BASE}/api/Order/searchOpen",
+                headers={"Authorization": f"Bearer {s['tsxToken']}", "Content-Type": "application/json"},
+                json={"accountId": int(s["tsxAccountId"])}, timeout=8)
+            if not r.ok:
+                warn(f"⚠️ Notfall-SL/TP: TSX Order/searchOpen HTTP {r.status_code} — Level bleiben, wie sie sind")
+                continue
+            orders = [o for o in (r.json().get("orders") or []) if o.get("status") in (1, None)]
+            for c, pid in offen.items():
+                mpos = next((p for p in snapshot[1] if p.get("contractId") == c), None)
+                if not mpos or not mpos.get("averagePrice"):
+                    continue
+                lang = mpos.get("type") == 1
+                entry_m = float(mpos["averagePrice"])
+                gegen = 1 if lang else 0   # Seite der Schutz-Orders: Long → Sell(1), Short → Buy(0)
+                eig = [o for o in orders if o.get("contractId") == c and o.get("side") == gegen]
+                stops  = [float(o["stopPrice"])  for o in eig if o.get("type") in (4, 5) and o.get("stopPrice")]
+                limits = [float(o["limitPrice"]) for o in eig if o.get("type") == 1 and o.get("limitPrice")]
+                # Mehrere Level (Teil-Ausstiege): das ENTFERNTESTE zählt — der Hedge behält
+                # seine Größe bis zum vollen Master-Close, also darf kein früheres Teilziel
+                # den ganzen Hedge schließen.
+                msl = (min(stops) if lang else max(stops)) if stops else None
+                mtp = (max(limits) if lang else min(limits)) if limits else None
+
+                parts = c.split(".")
+                base = parts[3] if len(parts) > 3 else (parts[2] if len(parts) > 2 else c[:3])
+                sym = s["symbolMap"].get(base, "NAS100")
+                if sym not in spec:
+                    rs = http.get(ma(f"/symbols/{sym}/specification"), headers=mah, timeout=10)
+                    if not rs.ok:
+                        warn(f"⚠️ Notfall-SL/TP: Symbol-Spezifikation {sym} HTTP {rs.status_code}")
+                        continue
+                    d = rs.json()
+                    dg = int(d.get("digits", 2))
+                    spec[sym] = {"digits": dg, "point": float(d.get("point") or 10 ** (-dg))}
+                if pid not in hedge:
+                    rp = http.get(ma(f"/positions/{pid}"), headers=mah, timeout=10)
+                    if not rp.ok or not rp.json().get("openPrice"):
+                        warn(f"⚠️ Notfall-SL/TP: Hedge-Position {pid} nicht lesbar (HTTP {rp.status_code}) — nächster Versuch in {int(MIRROR_SLTP_INTERVAL)} s")
+                        continue
+                    hedge[pid] = {"open": float(rp.json()["openPrice"])}
+                min_puffer = max(float(s.get("notfallPufferPunkte") or 0) * spec[sym]["point"], MIRROR_SLTP_PUFFER_BODEN)
+                ziel = mirror_plan_sltp(lang=lang, entry_m=entry_m, msl=msl, mtp=mtp, entry_h=hedge[pid]["open"],
+                    faktor=s.get("notfallFaktor") or 110.0, min_puffer=min_puffer, digits=spec[sym]["digits"])
+                neu = (ziel["sl"], ziel["tp"])
+                if last.get(pid, (None, None)) == neu:
+                    continue
+                body = {"actionType": "POSITION_MODIFY", "positionId": pid}
+                if ziel["sl"] is not None: body["stopLoss"] = ziel["sl"]
+                if ziel["tp"] is not None: body["takeProfit"] = ziel["tp"]
+                rm = http.post(ma("/trade"), headers=mah, json=body, timeout=15)
+                if rm.ok:
+                    last[pid] = neu
+                    log_msg(pair_id, f"🎯 Notfall-SL/TP gesetzt: Hedge-TP {ziel['tp'] if ziel['tp'] is not None else '—'} (Master-SL {msl if msl is not None else '—'}) · Hedge-SL {ziel['sl'] if ziel['sl'] is not None else '—'} (Master-TP {mtp if mtp is not None else '—'}) · Basis {hedge[pid]['open'] - entry_m:+.2f}", "ok")
+                else:
+                    warn(f"⚠️ Notfall-SL/TP: MetaApi lehnt ab — HTTP {rm.status_code} {rm.text[:120]}")
+        except Exception as e:
+            warn(f"⚠️ Notfall-SL/TP: {type(e).__name__}: {str(e)[:100]}")
+    http.close()
 
 def _instr_scale(fill_base, plan_base):
     """Micro/Mini-Umrechnung innerhalb einer Kontrakt-Familie (Faktor 10).
@@ -2063,6 +2266,7 @@ def close_hedge(pair_id, ref_id):
             s.setdefault("closedHedges", []).append({"mtPosId": str(pos_id), "ts": time.time()})
             if len(s["closedHedges"]) > 50:
                 s["closedHedges"] = s["closedHedges"][-50:]
+            _sessions_save()
         else:
             # Wenn die Position auf MT-Seite schon weg ist (404 oder 4xx-Fehler), trotzdem aus dem Tracking entfernen
             err_text = r.text[:100]
@@ -4838,6 +5042,9 @@ def start_dup_keepalive():
     print("[duplikum] 🚀 Keepalive-Daemon gestartet")
 
 start_dup_keepalive()
+# Scharfe Echtzeit-Pairs nach einem Neustart/Selbst-Update wieder aufnehmen (17.09.2026).
+# Verzögert, damit Flask/Threads stehen; als Timer, damit der Boot nie daran hängt.
+threading.Timer(3.0, _sessions_resume).start()
 
 # ── Lokaler Selbst-Update-Watcher (15.08.2026, Etappe 3 MT5-Route) ──
 # Anlass: start-prophos.bat hält app.py auf den PCs jetzt — wie copier.py und
@@ -4880,15 +5087,23 @@ def _local_version_watcher():
         # Update da. Exit NUR, wenn keine Mirror-Session scharf ist — ein
         # os._exit mitten im Spiegeln hieße: offene Position ohne Hedge-Pflege
         # (gleiches Muster wie copier.py: warten, bis alle Master flach sind).
-        armed = [pid for pid, s in list(mirror_sessions.items()) if s.get("active")]
+        # 17.09.2026 (Finn: 'Updates immer direkt deployen, nichts per Hand'): Echtzeit-
+        # Sessions überleben den Neustart (Sidecar + _sessions_resume) — gewartet wird nur
+        # noch, solange WIRKLICH eine Position offen ist (der Neustart kostet ~15 s, in
+        # denen ein Master-Close nicht gespiegelt würde), oder ein Polling-/MT→TSX-Pair
+        # läuft (deren Positionsstand ist nicht wiederherstellbar).
+        armed = [pid for pid, s in list(mirror_sessions.items()) if s.get("active") and (
+            s.get("positions") or s.get("engine") != "realtime" or s.get("direction") == "mt_to_tsx")]
         if armed:
             if not waiting_logged:
                 waiting_logged = True
                 print(f"[update] ↻ {baseline} → {rv} verfügbar — Update wartet, "
-                      f"bis kein Mirror mehr scharf ist ({', '.join(str(p) for p in armed)}).")
+                      f"bis keine Mirror-Position mehr offen ist ({', '.join(str(p) for p in armed)}).")
             continue
-        print(f"[update] ↻ {baseline} → {rv} — kein Mirror scharf, beende Prozess "
-              f"(start-prophos.bat lädt die neuen Dateien und startet neu).")
+        print(f"[update] ↻ {baseline} → {rv} — keine Position offen, beende Prozess "
+              f"(start-prophos.bat lädt die neuen Dateien und startet neu; scharfe "
+              f"Echtzeit-Pairs kommen aus der Sidecar-Datei von selbst zurück).")
+        _sessions_save()
         os._exit(0)
 
 def _local_port_taken(port):
