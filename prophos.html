@@ -773,6 +773,10 @@
      auto-fit statt fester Spaltenzahl: 7 Karten à 150px passen ab ~1.150px Inhaltsbreite
      nebeneinander, darunter bricht die letzte Karte um statt die Beträge abzuschneiden. */
   #adm-pane-wallet .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  /* „Mehr anzeigen" blieb trotz hidden sichtbar und zeigte „(4 von 4)" — .btn setzt
+     display:flex und schlägt damit das hidden-Attribut (18.09.2026 beim Transfer-Feed
+     gesehen). Bewusst nur dieser Knopf, nicht alle .btn[hidden] global. */
+  #dashboard-view #wal-feed-more[hidden]{display:none}
   @media (max-width:960px){#dashboard-view .kpis{grid-template-columns:repeat(2,1fr)}}
   #dashboard-view .kpi{
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
@@ -7074,6 +7078,7 @@
                   <th>Richtung</th>
                   <th class="adm-num">Betrag</th>
                   <th>Gegenseite</th>
+                  <th>Zweck</th>
                   <th></th>
                 </tr></thead>
                 <tbody id="wal-tx-rows"></tbody>
@@ -7092,7 +7097,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Alle Transfers</div>
-                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B" · CoinPayments wird erkannt: Acc-Kauf / Payout</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B" · CoinPayments wird erkannt: Acc-Kauf / Payout · Spalte „Zweck": Kommentar pro Transaktion, liegt in der Datenbank</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px">
                 <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
@@ -7107,6 +7112,7 @@
                   <th>Richtung</th>
                   <th class="adm-num">Betrag</th>
                   <th>Gegenseite</th>
+                  <th>Zweck</th>
                   <th></th>
                 </tr></thead>
                 <tbody id="wal-feed-rows"></tbody>
@@ -7124,6 +7130,8 @@
             Balances kommen live von den Chains (USDT + USDC + Chain-Coin, also ETH/POL/BNB/SOL/TRX) direkt aus dem Browser, ohne API-Key;
             die Coin-Kurse zum Umrechnen in USDT liefert Binance (Fallback: CoinGecko). Alle Summen sind in USDT.
             Der Verlauf entsteht aus einem Snapshot pro Wallet und Tag, immer wenn dieser Tab geöffnet oder aktualisiert wird.
+            Jeder einmal gesehene Transfer wandert in die Tabelle <code>wallet_tx</code> — auch dann noch sichtbar, wenn die Chain ihn keyless nicht mehr hergibt;
+            Zweck und Kommentar hängen an dieser Zeile.
           </p>
         </div>
 
@@ -7238,6 +7246,55 @@
 
       </div>
     </section>
+
+    <!-- WALLET-TRANSFER: ZWECK/KOMMENTAR (18.09.2026, Finn: „ich kann jeder
+         Transaktion so einen Kommentar draufklicken und sagen, was es war …
+         gern auch schon mit voreingestellten Jobs"). Eigene Verdrahtung, kein
+         Sammel-Handler — die Regel steht seit den Modal-Kollisionen. -->
+    <div class="modal-bg" id="walKommModal">
+      <div class="modal" style="max-width:480px">
+        <div class="modal-head">
+          <h3>Was war das?</h3>
+          <button class="modal-x" id="walKommClose" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px 14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+              <span id="wal-komm-wer" style="font-size:12.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">–</span>
+              <span class="mono" id="wal-komm-betrag" style="font-size:16px;font-weight:700;flex:0 0 auto">–</span>
+            </div>
+            <div id="wal-komm-gegen" class="mono" style="font-size:11.5px;color:var(--sub);margin-top:6px;word-break:break-all">–</div>
+          </div>
+
+          <div class="field" style="margin-top:14px">
+            <label>Zweck <span style="font-weight:400;color:var(--sub)">(Vorlage anklicken — nochmal klicken hebt auf)</span></label>
+            <div id="wal-komm-kats" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+
+          <div class="field" style="margin-top:12px">
+            <label>Kommentar <span style="font-weight:400;color:var(--sub)">(optional)</span></label>
+            <input class="input" id="wal-komm-text" placeholder="z.B. Payout Kunde Meier, per Bank weitergeleitet" autocomplete="off">
+          </div>
+
+          <div class="field" style="margin-top:12px">
+            <label>Neue Vorlage <span style="font-weight:400;color:var(--sub)">(steht danach bei jeder Transaktion zur Auswahl)</span></label>
+            <div style="display:flex;gap:8px">
+              <input class="input" id="wal-komm-neu" placeholder="Name der Vorlage" autocomplete="off" style="flex:1">
+              <button class="btn btn-ghost" id="wal-komm-neu-add" style="padding:8px 14px">＋</button>
+            </div>
+          </div>
+
+          <div class="modal-msg" id="walKommMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="walKommDel" style="margin-right:auto" hidden>Kommentar entfernen</button>
+          <button class="btn btn-ghost" id="walKommCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="walKommSave">Speichern</button>
+        </div>
+      </div>
+    </div>
 
     <!-- SETTINGS -->
     <section class="view" data-view="settings">
@@ -9714,6 +9771,39 @@
     const walLabelKey = (chain, addr) => chain + ':' + String(addr || '').toLowerCase()
     const walLabelVon = (chain, addr) => walLabels.get(walLabelKey(chain, addr)) || null
     const walIstCp = row => !!row && (row.kind === 'coinpayments_hot' || row.kind === 'coinpayments_deposit')
+    /* Transfer-Archiv + Kommentar je Transaktion (18.09.2026, Finn: „ich kann
+     * jeder Transaktion so einen Kommentar draufklicken und sagen, was es war …
+     * wir ziehen oft Geld von der Wallet runter auf die Bank, weil wir Kunden-
+     * Payouts über die Bank schicken … alles in die Datenbank").
+     * WARUM ARCHIV: die Chains geben nur ein kurzes Fenster her (BNB keyless ~
+     * Stunden, TronGrid 10 Zeilen, Blockscout ~25) — ohne Archiv wäre eine
+     * kommentierte Zeile am nächsten Tag aus dem Feed verschwunden und der
+     * Kommentar mit ihr. Deshalb wandert jede einmal gesehene Zeile nach
+     * wallet_tx (Insert mit ignoreDuplicates: ein Lade-Lauf fasst bestehende
+     * Kommentare NIE an), und der Feed zeigt Chain- UND Archiv-Zeilen.
+     * Schlüssel: chain|hash-oder-ts-Minute|wallet|richtung|symbol|betrag(6) —
+     * nicht der Hash allein, denn eine Solana-Tx kann mehrere Bewegungen haben
+     * und dieselbe Tx taucht bei Sender UND Empfänger auf, wenn beide Wallets
+     * in Prophos stehen. Genau diese Formel steht auch in der SQL-Datei. */
+    const walTxDb = new Map()   // tx_key → Zeile aus wallet_tx
+    let walKats = []            // Vorlagen aus wallet_tx_kategorien
+    let walTxDbOk = true        // false = SQL noch nicht eingespielt (Tabellen fehlen)
+    const walTxKey = (w, e) => [
+      w.chain,
+      e.hash || ('ts' + Math.round((e.ts || 0) / 60000)),
+      w.id, e.dir, e.sym || '', (Number(e.amount) || 0).toFixed(6)
+    ].join('|')
+    // Archiv-Zeile → dieselbe Form, die die Chain-Leser liefern (walTxFetch)
+    const walTxEintrag = r => ({ ts: r.ts ? Date.parse(r.ts) : null, dir: r.dir,
+      amount: Number(r.amount) || 0, sym: r.sym || '', other: r.other || '', hash: r.hash || '' })
+    const walKatFarbe = name => {
+      const k = walKats.find(x => x.name === name)
+      return { violet:'var(--violet)', good:'var(--good)', danger:'var(--danger)', sub:'var(--sub)' }[k?.farbe || 'sub'] || 'var(--sub)'
+    }
+    const walKatTint = name => {
+      const k = walKats.find(x => x.name === name)
+      return { violet:'var(--violet-tint)', good:'rgba(18,183,106,.1)', danger:'rgba(240,68,56,.1)', sub:'var(--surface-tint)' }[k?.farbe || 'sub'] || 'var(--surface-tint)'
+    }
     const walBal = new Map()   // wallet.id → { usdt:Summe aller Stables, coin, coinUsdt:Number|null, parts:{USDT,USDC,…}|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
     const coinNf = new Intl.NumberFormat('de-DE', { maximumFractionDigits:4 })   // Coin-Mengen: „0,0042" ETH
@@ -9744,6 +9834,23 @@
           walLabels.clear()
           for(const r of (l.data || [])) walLabels.set(walLabelKey(r.chain, r.address), r)
         }catch(e){ console.warn('[wallet] labels:', e.message || e) }
+        // Archiv + Zweck-Vorlagen (18.09.2026) — genauso tolerant: fehlt das SQL,
+        // laufen Wallets, Balances und Feed weiter, nur die Zweck-Spalte sagt es.
+        try{
+          const [tx, kat] = await Promise.all([
+            supabase.from('wallet_tx').select('*').order('ts', { ascending:false, nullsFirst:false }).limit(3000),
+            supabase.from('wallet_tx_kategorien').select('*').eq('aktiv', true).order('sort')
+          ])
+          if(tx.error) throw tx.error
+          if(kat.error) throw kat.error
+          walTxDb.clear()
+          for(const r of (tx.data || [])) walTxDb.set(r.tx_key, r)
+          walKats = kat.data || []
+          walTxDbOk = true
+        }catch(e){
+          walTxDbOk = false
+          console.warn('[wallet] wallet_tx:', e.message || e)
+        }
         walRender()
       }catch(e){
         const m = e.message || ''
@@ -10396,6 +10503,72 @@
       }finally{ walLernBusy = false }
     }
 
+    /* Neue Zeilen ins Archiv (18.09.2026). EIN Insert pro Lauf mit
+     * ignoreDuplicates — bestehende Zeilen (und damit Kommentare) bleiben
+     * unangetastet. Zeilen ohne Hash UND ohne Zeitstempel (jenseits der
+     * BNB-Archivgrenze) bekommen keinen stabilen Schlüssel und würden bei
+     * jedem Lauf als neue Zeile landen — die schreiben wir bewusst nicht. */
+    async function walTxArchiv(){
+      if(!walTxDbOk) return
+      const neu = [], kommt = new Set()
+      for(const w of wallets){
+        const f = walFeed.get(w.id)
+        if(!f?.res) continue
+        for(const e of f.res.list){
+          if(!e.hash && !e.ts) continue
+          const key = walTxKey(w, e)
+          if(walTxDb.has(key) || kommt.has(key)) continue
+          kommt.add(key)
+          neu.push({ tx_key:key, wallet_id:w.id, chain:w.chain, address:w.address,
+                     person_name:w.person_name, hash:e.hash || null,
+                     ts: e.ts ? new Date(e.ts).toISOString() : null,
+                     dir:e.dir, amount:Number(e.amount) || 0, sym:e.sym || '', other:e.other || null })
+        }
+      }
+      if(!neu.length) return
+      const { data, error } = await supabase.from('wallet_tx')
+        .upsert(neu, { onConflict:'tx_key', ignoreDuplicates:true }).select('*')
+      if(error){ walTxDbOk = false; console.warn('[wallet] Archiv schreiben:', error.message); walFeedRender(); return }
+      for(const r of (data || [])) walTxDb.set(r.tx_key, r)
+      // Was es schon gab, gibt ignoreDuplicates nicht zurück — die Zeile steht
+      // dann ohne Kommentar in der Map und wird beim nächsten Laden vollständig.
+      for(const r of neu) if(!walTxDb.has(r.tx_key)) walTxDb.set(r.tx_key, r)
+      walFeedRender()
+    }
+
+    /* Kommentar einer Transfer-Zeile finden. Interne Umbuchungen stehen als
+     * EINE Zeile im Feed — welche der beiden Seiten das ist, hängt an der
+     * Sortierung, also zählt auch der Kommentar der Gegenseite. */
+    function walKommVon(w, e, intern){
+      const hat = r => !!r && !!(r.kategorie || r.kommentar)
+      const eigen = walTxDb.get(walTxKey(w, e))
+      if(hat(eigen) || !intern) return eigen || null
+      // Beide Seiten stehen im Archiv — die eigene Zeile ohne Kommentar darf die
+      // kommentierte Gegenseite nicht verdecken (18.09.2026, im Stub-Lauf gesehen).
+      const p = intern.from.id === w.id ? intern.to : intern.from
+      const gegen = walTxDb.get(walTxKey(p, { ...e, dir: e.dir === 'raus' ? 'rein' : 'raus' }))
+      return hat(gegen) ? gegen : (eigen || null)
+    }
+
+    /* Zweck-Zelle. walTxIndex hält die gerenderten Zeilen, damit das Modal aus
+     * dem Schlüssel wieder Wallet + Transfer bekommt (bewusst nicht geleert:
+     * die Einzel-Panel-Tabelle und der Feed füllen dieselbe Map). */
+    const walTxIndex = new Map()   // tx_key → { w, e, intern }
+    function walKommZelle(w, e, intern){
+      if(!walTxDbOk) return '<td style="color:var(--sub);font-size:11.5px" title="Tabellen wallet_tx / wallet_tx_kategorien fehlen — sql/2026-09-18_wallet_tx.sql im Supabase SQL-Editor ausführen">–</td>'
+      const key = walTxKey(w, e)
+      walTxIndex.set(key, { w, e, intern: intern || null })
+      const r = walKommVon(w, e, intern)
+      if(!r || (!r.kategorie && !r.kommentar)){
+        return `<td><button type="button" class="wal-komm" data-key="${escapeHtml(key)}" title="Zweck/Kommentar setzen" style="border:1px dashed var(--border);background:none;border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--sub);cursor:pointer">＋ Zweck</button></td>`
+      }
+      const titel = [r.kategorie, r.kommentar].filter(Boolean).join(' · ')
+      return `<td><button type="button" class="wal-komm" data-key="${escapeHtml(key)}" title="${escapeHtml(titel)} — klicken zum Ändern" style="border:none;background:none;padding:0;cursor:pointer;text-align:left;max-width:240px">` +
+        (r.kategorie ? `<span class="chip" style="background:${walKatTint(r.kategorie)};color:${walKatFarbe(r.kategorie)};padding:1px 8px;font-size:10.5px">${escapeHtml(r.kategorie)}</span>` : '') +
+        (r.kommentar ? `<span style="display:block;font-size:11.5px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.kommentar)}</span>` : '') +
+        '</button></td>'
+    }
+
     function walTxRender(w, res){
       const c = WAL_CHAINS[w.chain]
       const msg = $('wal-tx-msg'), note = $('wal-tx-note'), tb = $('wal-tx-rows')
@@ -10423,6 +10596,7 @@
             ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
               ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
             : '<span style="color:var(--sub)">–</span>'}</td>` +
+          walKommZelle(w, e, null) +
           `<td style="text-align:right">${e.hash
             ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
         tb.appendChild(tr)
@@ -10516,6 +10690,7 @@
         walFeedStand = new Date()
         walFeedRender()
       }finally{ walFeedBusy = false }
+      walTxArchiv()   // neu gesehene Zeilen ins Archiv (18.09.2026), läuft im Hintergrund
       walLernen()   // unbekannte Gegenseiten prüfen (CoinPayments-Sweep), läuft im Hintergrund
     }
 
@@ -10544,6 +10719,21 @@
           if(v != null && v < WAL_FEED_MIN) continue
           alle.push({ e, w })
         }
+      }
+      /* Archiv dazu (18.09.2026): was die Chain nicht mehr hergibt, steht in
+       * wallet_tx — sonst wäre eine kommentierte Zeile am nächsten Tag weg.
+       * Dieselbe Form wie die Chain-Zeilen, also greifen Staub-Filter, interne
+       * Zusammenfassung und Sortierung unverändert. */
+      const liveKeys = new Set(alle.map(x => walTxKey(x.w, x.e)))
+      const wById = new Map(wallets.map(w => [String(w.id), w]))
+      for(const r of walTxDb.values()){
+        const w = wById.get(String(r.wallet_id || ''))
+        if(!w || !ids.has(w.id)) continue
+        const e = walTxEintrag(r)
+        if(liveKeys.has(walTxKey(w, e))) continue
+        const v = wertUsdt(e, w)
+        if(v != null && v < WAL_FEED_MIN) continue
+        alle.push({ e, w })
       }
       // neueste zuerst; Einträge ohne Zeitstempel (Archiv-Grenze) ans Ende
       alle.sort((a, b) => (b.e.ts || 0) - (a.e.ts || 0))
@@ -10591,6 +10781,7 @@
             `<td class="adm-num" style="font-weight:650">${(stable ? walNf : coinNf).format(e.amount)} ${escapeHtml(e.sym)}</td>` +
             `<td style="white-space:nowrap"><span style="color:var(--violet);font-weight:650">→</span> <span class="wal-feed-eig" title="${escapeHtml(intern.to.address)} — eigene Wallet" style="font-weight:600"></span>` +
               ` <a href="${c.explorer(intern.to.address)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a></td>` +
+            walKommZelle(w, e, intern) +
             `<td style="text-align:right">${e.hash
               ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
           tr.querySelector('.wal-feed-person').textContent = intern.from.person_name
@@ -10610,6 +10801,7 @@
             ? `<button type="button" class="wal-addr" data-full="${escapeHtml(e.other)}" title="${escapeHtml(e.other)} — klicken kopiert" style="border:none;background:none;padding:0;cursor:pointer;color:var(--ink);font-family:var(--mono);font-size:12.5px">${escapeHtml(short)}</button>` +
               ` <a href="${c.explorer(e.other)}" target="_blank" rel="noopener" title="Adresse im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">↗</a>`
             : '<span style="color:var(--sub)">–</span>'}</td>` +
+          walKommZelle(w, e, null) +
           `<td style="text-align:right">${e.hash
             ? `<a href="${c.tx(e.hash)}" target="_blank" rel="noopener" title="Transaktion im Explorer öffnen" style="color:var(--sub);text-decoration:none;font-size:12px">Tx ↗</a>` : ''}</td>`
         tr.querySelector('.wal-feed-person').textContent = w.person_name
@@ -10621,6 +10813,123 @@
       const note = $('wal-feed-note')
       note.hidden = !notes.size
       note.textContent = [...notes].join(' ')
+    }
+
+    /* ── ZWECK/KOMMENTAR-MODAL (18.09.2026, Finn: „ich kann jeder Transaktion
+     * so einen Kommentar draufklicken und sagen, was es war") ──
+     * Eigene Verdrahtung, kein Sammel-Handler über .modal-bg (Hausregel seit
+     * den Modal-Kollisionen). Gespeichert wird in wallet_tx: existiert die
+     * Zeile noch nicht im Archiv (Klick schneller als der Archiv-Lauf), legt
+     * der Upsert sie mit an. */
+    let walKommKey = null, walKommKat = null
+
+    function walKommKatsRender(){
+      const box = $('wal-komm-kats'); if(!box) return
+      box.innerHTML = walKats.map(k => {
+        const an = k.name === walKommKat
+        return `<button type="button" class="wal-kat" data-name="${escapeHtml(k.name)}" ` +
+          `style="border:1px solid ${an ? walKatFarbe(k.name) : 'var(--border)'};background:${an ? walKatTint(k.name) : 'transparent'};` +
+          `color:${an ? walKatFarbe(k.name) : 'var(--ink)'};border-radius:999px;padding:5px 11px;font-size:12px;` +
+          `font-weight:${an ? '650' : '500'};cursor:pointer">${escapeHtml(k.name)}</button>`
+      }).join('') || '<span style="font-size:12px;color:var(--sub)">Noch keine Vorlagen — unten eine anlegen.</span>'
+    }
+
+    function walKommOpen(key){
+      const x = walTxIndex.get(key)
+      if(!x) return
+      const r = walKommVon(x.w, x.e, x.intern)
+      walKommKey = key
+      walKommKat = r?.kategorie || null
+      const c = WAL_CHAINS[x.w.chain]
+      const stable = walTxStable(x.e.sym)
+      $('wal-komm-wer').textContent = `${walTxZeit(x.e.ts)} · ${x.w.person_name} · ${c.label}`
+      const bet = $('wal-komm-betrag')
+      bet.textContent = `${x.intern ? '⇄ ' : x.e.dir === 'rein' ? '+' : '−'}${(stable ? walNf : coinNf).format(x.e.amount)} ${x.e.sym}`
+      bet.style.color = x.intern ? 'var(--violet)' : x.e.dir === 'rein' ? 'var(--good)' : 'var(--danger)'
+      $('wal-komm-gegen').textContent = x.intern
+        ? `Umbuchung zwischen eigenen Wallets: ${x.intern.from.person_name} → ${x.intern.to.person_name}`
+        : (x.e.other || 'Gegenseite unbekannt')
+      $('wal-komm-text').value = r?.kommentar || ''
+      $('wal-komm-neu').value = ''
+      const msg = $('walKommMsg'); msg.textContent = ''; msg.className = 'modal-msg'
+      $('walKommDel').hidden = !(r && (r.kategorie || r.kommentar))
+      $('walKommSave').disabled = false
+      walKommKatsRender()
+      $('walKommModal').classList.add('open')
+      setTimeout(() => $('wal-komm-text')?.focus(), 40)
+    }
+
+    function walKommClose(){
+      walKommKey = null; walKommKat = null
+      $('walKommModal').classList.remove('open')
+    }
+
+    // Nach dem Speichern beide Tabellen neu zeichnen — das Einzel-Panel nur,
+    // wenn es gerade offen ist (sonst fehlt der Cache-Stand).
+    function walTxPanelRefresh(){
+      if(!walTxSel) return
+      const w = wallets.find(x => String(x.id) === String(walTxSel))
+      const cached = w && walTxCache.get(w.id)
+      if(w && cached) walTxRender(w, cached.res)
+    }
+
+    async function walKommSpeichern(loeschen){
+      const x = walTxIndex.get(walKommKey)
+      if(!x) return
+      const msg = $('walKommMsg'), btn = $('walKommSave')
+      btn.disabled = true
+      try{
+        // Hing der Kommentar schon an der Gegenseite einer internen Umbuchung,
+        // bleibt er dort — sonst stünden am Ende zwei halbe Wahrheiten.
+        const alt = walKommVon(x.w, x.e, x.intern)
+        const kat = loeschen ? null : walKommKat
+        const txt = loeschen ? null : ($('wal-komm-text').value.trim() || null)
+        let mail = null
+        try{ mail = (await supabase.auth.getSession()).data?.session?.user?.email || null }catch(_){}
+        const basis = alt || { tx_key: walTxKey(x.w, x.e), wallet_id:x.w.id, chain:x.w.chain,
+          address:x.w.address, person_name:x.w.person_name, hash:x.e.hash || null,
+          ts: x.e.ts ? new Date(x.e.ts).toISOString() : null, dir:x.e.dir,
+          amount:Number(x.e.amount) || 0, sym:x.e.sym || '', other:x.e.other || null }
+        const row = { ...basis, kategorie:kat, kommentar:txt,
+          komm_von:(kat || txt) ? mail : null,
+          komm_at:(kat || txt) ? new Date().toISOString() : null }
+        delete row.id; delete row.created_at; delete row.seen_at
+        const { data, error } = await supabase.from('wallet_tx')
+          .upsert(row, { onConflict:'tx_key' }).select('*').single()
+        if(error) throw error
+        walTxDb.set(data.tx_key, data)
+        walKommClose()
+        walFeedRender()
+        walTxPanelRefresh()
+      }catch(e){
+        btn.disabled = false
+        msg.className = 'modal-msg err'
+        msg.textContent = 'Nicht gespeichert: ' + (e.message || e)
+      }
+    }
+
+    // Eigene Vorlage anlegen — steht danach bei jeder Transaktion zur Auswahl.
+    async function walKatNeu(){
+      const inp = $('wal-komm-neu'), name = (inp.value || '').trim()
+      if(!name) return
+      const da = walKats.find(k => k.name.toLowerCase() === name.toLowerCase())
+      if(da){ walKommKat = da.name; inp.value = ''; walKommKatsRender(); return }
+      const msg = $('walKommMsg')
+      try{
+        const sort = Math.max(0, ...walKats.map(k => Number(k.sort) || 0)) + 10
+        const { data, error } = await supabase.from('wallet_tx_kategorien')
+          .insert({ name, farbe:'violet', sort, source:'manuell' }).select('*').single()
+        if(error) throw error
+        walKats.push(data)
+        walKats.sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0))
+        walKommKat = data.name
+        inp.value = ''
+        msg.textContent = ''; msg.className = 'modal-msg'
+        walKommKatsRender()
+      }catch(e){
+        msg.className = 'modal-msg err'
+        msg.textContent = 'Vorlage nicht angelegt: ' + (e.message || e)
+      }
     }
 
     /* ── Rechnungen (28.08.2026): Abrechnungs-PDFs für die gemanagten IDs ──
@@ -11044,6 +11353,8 @@
       })
       $('wal-tx-close')?.addEventListener('click', walTxClose)
       $('wal-tx-rows')?.addEventListener('click', ev => {
+        const kb = ev.target.closest('.wal-komm')
+        if(kb){ walKommOpen(kb.dataset.key); return }
         const ad = ev.target.closest('.wal-addr')
         if(ad) walAddrKopieren(ad)
       })
@@ -11052,9 +11363,25 @@
       $('wal-feed-refresh')?.addEventListener('click', () => walFeedLoad(true))
       $('wal-feed-more')?.addEventListener('click', () => { walFeedShown += WAL_FEED_STEP; walFeedRender() })
       $('wal-feed-rows')?.addEventListener('click', ev => {
+        const kb = ev.target.closest('.wal-komm')
+        if(kb){ walKommOpen(kb.dataset.key); return }
         const ad = ev.target.closest('.wal-addr')
         if(ad) walAddrKopieren(ad)
       })
+      // Zweck/Kommentar-Modal (18.09.2026) — eigene Verdrahtung, kein Sammel-Handler
+      $('walKommClose')?.addEventListener('click', walKommClose)
+      $('walKommCancel')?.addEventListener('click', walKommClose)
+      $('walKommModal')?.addEventListener('click', ev => { if(ev.target === $('walKommModal')) walKommClose() })
+      $('walKommSave')?.addEventListener('click', () => walKommSpeichern(false))
+      $('walKommDel')?.addEventListener('click', () => walKommSpeichern(true))
+      $('wal-komm-kats')?.addEventListener('click', ev => {
+        const b = ev.target.closest('.wal-kat'); if(!b) return
+        walKommKat = (walKommKat === b.dataset.name) ? null : b.dataset.name   // zweiter Klick hebt auf
+        walKommKatsRender()
+      })
+      $('wal-komm-neu-add')?.addEventListener('click', walKatNeu)
+      $('wal-komm-neu')?.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); walKatNeu() } })
+      $('wal-komm-text')?.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); walKommSpeichern(false) } })
       selectWho('finn')
     })
   })()
@@ -24175,7 +24502,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-18.308'
+  const OS_TAB_BUILD = '2026-09-18.309'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
