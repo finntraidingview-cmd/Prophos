@@ -13,8 +13,8 @@
 -- der Schritt bleibt umkehrbar. Nur source = 'seed' — selbst angelegte Vorlagen
 -- (source = 'manuell') fasst ein erneuter Lauf nie an.
 --
--- Farben = Design-Token wie gehabt: raus = danger, rein = good, intern = violet
--- (dieselbe Farbe, die interne Umbuchungen im Feed ohnehin tragen).
+-- Farben hier nur als Startwert für eine frische DB — die endgültigen (jede
+-- Vorlage eine eigene) setzt sql/2026-09-20_wallet_tx_kategorien_farben.sql.
 -- Im Supabase SQL Editor einfügen und auf "Run" klicken. Idempotent.
 -- ============================================================================
 
@@ -24,7 +24,7 @@ insert into public.wallet_tx_kategorien (name, farbe, sort, aktiv, source) value
   ('Account Kauf',      'danger', 30, true, 'seed'),
   ('Interner Transfer', 'violet', 40, true, 'seed')
 on conflict (name) do update
-  set farbe = excluded.farbe, sort = excluded.sort, aktiv = true;
+  set sort = excluded.sort, aktiv = true;   -- farbe bewusst NICHT: die setzt 2026-09-20_wallet_tx_kategorien_farben.sql
 
 update public.wallet_tx_kategorien
    set aktiv = false

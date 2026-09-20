@@ -7097,7 +7097,7 @@
             <div class="panel-head">
               <div>
                 <div class="panel-title">Alle Transfers</div>
-                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B" · CoinPayments wird erkannt: Acc-Kauf / Payout · Spalte „Zweck": Kommentar pro Transaktion, liegt in der Datenbank</div>
+                <div class="panel-sub">Letzte Bewegungen über alle Wallets, neueste zuerst · Personen-Filter oben gilt mit · Beträge unter 1 USDT ausgeblendet · Umbuchungen zwischen eigenen Wallets als eine Zeile „A → B" · CoinPayments wird erkannt: Acc-Kauf / Payout · Spalte „Zweck": Kommentar pro Transaktion, liegt in der Datenbank · CoinPayments raus wird automatisch „Account Kauf"</div>
               </div>
               <div style="display:flex;align-items:center;gap:10px">
                 <span id="wal-feed-msg" style="font-size:12px;color:var(--sub)"></span>
@@ -9796,13 +9796,18 @@
     // Archiv-Zeile → dieselbe Form, die die Chain-Leser liefern (walTxFetch)
     const walTxEintrag = r => ({ ts: r.ts ? Date.parse(r.ts) : null, dir: r.dir,
       amount: Number(r.amount) || 0, sym: r.sym || '', other: r.other || '', hash: r.hash || '' })
+    // blue/teal/warn seit 20.09.2026 (Finn: „mach die Zwecke alle in einer anderen
+    // Farbe, nicht alles rot") — bestehende Tokens aus :root, Tints = dieselbe
+    // Farbe mit 10 % wie bei good/danger. Unbekannter Wert fällt auf sub zurück.
     const walKatFarbe = name => {
       const k = walKats.find(x => x.name === name)
-      return { violet:'var(--violet)', good:'var(--good)', danger:'var(--danger)', sub:'var(--sub)' }[k?.farbe || 'sub'] || 'var(--sub)'
+      return { violet:'var(--violet)', good:'var(--good)', danger:'var(--danger)', sub:'var(--sub)',
+               blue:'var(--blue)', teal:'var(--teal)', warn:'var(--warn)' }[k?.farbe || 'sub'] || 'var(--sub)'
     }
     const walKatTint = name => {
       const k = walKats.find(x => x.name === name)
-      return { violet:'var(--violet-tint)', good:'rgba(18,183,106,.1)', danger:'rgba(240,68,56,.1)', sub:'var(--surface-tint)' }[k?.farbe || 'sub'] || 'var(--surface-tint)'
+      return { violet:'var(--violet-tint)', good:'rgba(18,183,106,.1)', danger:'rgba(240,68,56,.1)', sub:'var(--surface-tint)',
+               blue:'rgba(73,150,255,.1)', teal:'rgba(22,200,198,.1)', warn:'rgba(247,144,9,.1)' }[k?.farbe || 'sub'] || 'var(--surface-tint)'
     }
     const walBal = new Map()   // wallet.id → { usdt:Summe aller Stables, coin, coinUsdt:Number|null, parts:{USDT,USDC,…}|null, err:String|null }
     const walNf = new Intl.NumberFormat('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
@@ -10500,6 +10505,7 @@
           await new Promise(res => setTimeout(res, 250))   // Blockscout nicht hämmern
         }
         walFeedRender()
+        if(neu) walAutoKat()   // neu erkannte Einzahlungsadressen → Zweck nachziehen (20.09.2026)
       }finally{ walLernBusy = false }
     }
 
@@ -10525,7 +10531,7 @@
                      dir:e.dir, amount:Number(e.amount) || 0, sym:e.sym || '', other:e.other || null })
         }
       }
-      if(!neu.length) return
+      if(!neu.length){ walAutoKat(); return }   // nichts Neues — Altbestand ohne Zweck trotzdem prüfen
       const { data, error } = await supabase.from('wallet_tx')
         .upsert(neu, { onConflict:'tx_key', ignoreDuplicates:true }).select('*')
       if(error){ walTxDbOk = false; console.warn('[wallet] Archiv schreiben:', error.message); walFeedRender(); return }
@@ -10534,6 +10540,55 @@
       // dann ohne Kommentar in der Map und wird beim nächsten Laden vollständig.
       for(const r of neu) if(!walTxDb.has(r.tx_key)) walTxDb.set(r.tx_key, r)
       walFeedRender()
+      walAutoKat()   // frisch archivierte CoinPayments-Zahlungen bekommen ihren Zweck
+    }
+
+    /* CoinPayments raus = Account Kauf, automatisch (20.09.2026, Finn: „coin
+     * Payments bitte automatisch zu acc kauf machen"). Die Erkennung selbst ist
+     * die bestehende (wallet_labels: coinpayments_hot / _deposit, siehe walCpHtml
+     * + walLernen) — hier wird nur der Zweck daraus gesetzt.
+     * BEWUSST ENG: nur AUSGEHEND (eingehend von CoinPayments ist ein Payout,
+     * danach war nicht gefragt), nur Zeilen OHNE Zweck UND OHNE Kommentar — was
+     * Finn von Hand gesetzt hat, gewinnt immer. Der Riegel steht zusätzlich in
+     * der DB (.is null), falls ein zweiter Tab gerade kommentiert.
+     * Läuft über das ARCHIV, nicht über den Chain-Feed: so bekommen auch alte
+     * Zeilen den Zweck, deren Gegenseite walLernen erst später erkennt.
+     * Folge, die man kennen muss: „Kommentar entfernen" an so einer Zeile hält
+     * nur bis zum nächsten Laden — wer einen anderen Zweck will, wählt ihn aus.
+     * Ist die Vorlage deaktiviert oder umbenannt, passiert nichts. */
+    const WAL_KAT_CP_KAUF = 'Account Kauf'
+    function walAutoKatKandidaten(){
+      if(!walKats.some(k => k.name === WAL_KAT_CP_KAUF)) return []
+      const out = []
+      for(const r of walTxDb.values()){
+        if(!r.id || r.dir !== 'raus' || !r.other) continue   // ohne id: Zeile kommt erst beim nächsten Laden vollständig
+        if(r.kategorie || r.kommentar) continue
+        if(walIstCp(walLabelVon(r.chain, r.other))) out.push(r)
+      }
+      return out
+    }
+    let walAutoKatBusy = false, walAutoKatNochmal = false
+    async function walAutoKat(){
+      if(!walTxDbOk) return
+      // Archiv und walLernen rufen beide — der zweite Ruf wartet nicht, er
+      // hängt genau EINEN Nachlauf an.
+      if(walAutoKatBusy){ walAutoKatNochmal = true; return }
+      walAutoKatBusy = true
+      try{
+        const ids = walAutoKatKandidaten().map(r => r.id)
+        let n = 0
+        for(let i = 0; i < ids.length; i += 80){   // ids stehen in der URL — in Blöcken
+          const { data, error } = await supabase.from('wallet_tx')
+            .update({ kategorie: WAL_KAT_CP_KAUF, komm_von: 'auto · CoinPayments', komm_at: new Date().toISOString() })
+            .in('id', ids.slice(i, i + 80)).is('kategorie', null).is('kommentar', null).select('*')
+          if(error){ console.warn('[wallet] Auto-Zweck:', error.message); break }
+          for(const r of (data || [])){ walTxDb.set(r.tx_key, r); n++ }
+        }
+        if(n){ walFeedRender(); walTxPanelRefresh() }
+      }finally{
+        walAutoKatBusy = false
+        if(walAutoKatNochmal){ walAutoKatNochmal = false; walAutoKat() }
+      }
     }
 
     /* Kommentar einer Transfer-Zeile finden. Interne Umbuchungen stehen als
@@ -24502,7 +24557,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-18.309'
+  const OS_TAB_BUILD = '2026-09-20.310'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
