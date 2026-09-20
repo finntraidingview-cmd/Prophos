@@ -29,4 +29,6 @@ on conflict (name) do update
 update public.wallet_tx_kategorien
    set aktiv = false
  where source = 'seed'
-   and name not in ('Fusion Deposit', 'Payout', 'Account Kauf', 'Interner Transfer');
+   and name not in ('Fusion Deposit', 'Payout', 'Account Kauf', 'Interner Transfer',
+                    -- Nachtrag: die beiden aus …_intern_bank.sql darf ein erneuter Lauf nicht abschalten
+                    'Interner Transfer (Krypto)', 'Interner Transfer auf Bank');
