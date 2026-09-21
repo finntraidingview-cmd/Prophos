@@ -1850,6 +1850,70 @@ def _tv_uia_sammel(w, typen):
         return None
 
 
+class _FeldSchnapp:
+    """Ein Eingabefeld aus der Sammelabfrage — gleiche Schnittstelle wie der
+    pywinauto-Wrapper, soweit der Puls sie braucht, aber alles schon gelesen."""
+    def __init__(self, rect, wert, passwort, fokus, bedienbar):
+        self._rect, self._wert = rect, wert
+        self._pw, self._fokus, self._an = bool(passwort), bool(fokus), bool(bedienbar)
+        self.iface_value = type("V", (), {"CurrentValue": wert})()
+        self.element_info = type("I", (), {"element": type("E", (), {"CurrentIsPassword": self._pw})()})()
+
+    def rectangle(self):
+        l, t, r, b = self._rect
+        return type("R", (), {"left": l, "top": t, "right": r, "bottom": b})()
+
+    def is_visible(self):
+        return True
+
+    def is_enabled(self):
+        return self._an
+
+    def has_keyboard_focus(self):
+        return self._fokus
+
+
+def _tv_uia_felder(w):
+    """Alle sichtbaren Eingabefelder eines Fensters in EINEM Aufruf (22.09.2026,
+    Finn: 'hier ist immer noch sehr viel Leerzeit, der macht hier so 5 sec nix').
+    Bisher holte pywinauto die Felder ueber einen Gang durch den ganzen Baum und
+    fragte dann Wert, Passwort-Kennzeichen und Fokus einzeln ab — auf der
+    Anmeldeseite mehrfach hintereinander. -> Liste von _FeldSchnapp, oder None,
+    wenn der Weg nicht geht (dann faehrt der Aufrufer den alten).
+    Vom Passwortfeld wird weiter nur gebraucht, DASS es gefuellt ist."""
+    if _UIA_SAMMEL["geht"] is False:
+        return None
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        dll = u.UIA_dll
+        P_OFF, P_PW = dll.UIA_IsOffscreenPropertyId, dll.UIA_IsPasswordPropertyId
+        P_WERT, P_FOKUS, P_AN = dll.UIA_ValueValuePropertyId, dll.UIA_HasKeyboardFocusPropertyId, dll.UIA_IsEnabledPropertyId
+        anfrage = u.iuia.CreateCacheRequest()
+        for pid in (dll.UIA_BoundingRectanglePropertyId, P_OFF, P_PW, P_WERT, P_FOKUS, P_AN):
+            anfrage.AddProperty(pid)
+        bed = u.iuia.CreatePropertyCondition(dll.UIA_ControlTypePropertyId, _UIA_TYPID["Edit"])
+        feld = w.element_info.element.FindAllBuildCache(u.tree_scope["descendants"], bed, anfrage)
+        out = []
+        for i in range(feld.Length):
+            e = feld.GetElement(i)
+            try:
+                if e.GetCachedPropertyValue(P_OFF):
+                    continue
+                r = e.CachedBoundingRectangle
+                if r.right - r.left < 3 or r.bottom - r.top < 3:
+                    continue
+                out.append(_FeldSchnapp((r.left, r.top, r.right, r.bottom),
+                                        str(e.GetCachedPropertyValue(P_WERT) or ""),
+                                        e.GetCachedPropertyValue(P_PW), e.GetCachedPropertyValue(P_FOKUS),
+                                        e.GetCachedPropertyValue(P_AN)))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return None
+
+
 def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     """AUGEN OHNE USERSCRIPT (21.09.2026, Finn: 'nein, ohne Tampermonkey — das
     bekommen wir doch auch so hin'): die Kontonummern direkt aus Chromes
@@ -2995,11 +3059,13 @@ def modus_tvkonto(cmd):
                 hineingeklickt und getippt. Deshalb ueber die Lage: Anker ist das
                 Passwortfeld (IsPassword), Username ist das Feld DIREKT DARUEBER —
                 gleiche linke Kante, kleinster Abstand nach oben."""
-                try:
-                    eds = [e for e in tw.descendants(control_type="Edit")
-                           if not hasattr(e, "is_visible") or e.is_visible()]
-                except Exception:
-                    return None, None
+                eds = _tv_uia_felder(tw)            # EIN Aufruf; None = Weg geht nicht -> alter Weg
+                if eds is None:
+                    try:
+                        eds = [e for e in tw.descendants(control_type="Edit")
+                               if not hasattr(e, "is_visible") or e.is_visible()]
+                    except Exception:
+                        return None, None
                 pw = next((e for e in eds if _tv_ist_passwortfeld(e)), None)
                 if pw is None:
                     return None, None
@@ -3038,8 +3104,13 @@ def modus_tvkonto(cmd):
             # sind sie leer UND unveraendert — genau der Moment VOR Chromes
             # Vorbefuellen (die Simulation hat diese Luecke in der ersten Fassung
             # der Regel gefunden, bevor sie live zuschlagen konnte).
+            # Steht der RICHTIGE Login samt Passwort schon drin, wird gar nicht ins
+            # Feld geklickt — dann gibt es auch nichts, was ein Neuaufbau der
+            # Seite verschlucken koennte: sofort weiter zu 'Anmelden' (22.09.2026,
+            # Finn: '5 sec nix', obwohl TDFYU… schon vorbelegt war).
+            schon_richtig = bewiesen()
             letzter, seit, t_r = None, time.time(), time.time()
-            while time.time() - t_r < 9.0:
+            while not schon_richtig and time.time() - t_r < 9.0:
                 u2, p2 = felder()
                 jetzt = (_tv_edit_wert(u2) if u2 else None, len(_tv_edit_wert(p2)) if p2 else None)
                 if jetzt != letzter:
@@ -3664,11 +3735,13 @@ def tv_order_schritt(w, cmd, trail):
 
     # --- Felder ueber ihre Lage zur Beschriftung -----------------------------
     def felder():
-        try:
-            eds = [e for e in w.descendants(control_type="Edit")
-                   if not hasattr(e, "is_visible") or e.is_visible()]
-        except Exception:
-            return [], []
+        eds = _tv_uia_felder(w)                 # EIN Aufruf; None = Weg geht nicht -> alter Weg
+        if eds is None:
+            try:
+                eds = [e for e in w.descendants(control_type="Edit")
+                       if not hasattr(e, "is_visible") or e.is_visible()]
+            except Exception:
+                return [], []
         rs = []
         for e in eds:
             try:
