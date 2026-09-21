@@ -1406,6 +1406,161 @@ def _tv_element(bf, *pfad):
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FUTURES-PULS, NEUAUFBAU SCHRITT 1 (21.09.2026) — TradingView starten
+#
+# Finn 21.09.2026: der tvorder-Bau vom 30.08. "hat echt gebuggt", der neue
+# Futures-Puls wird "step nach step" aufgebaut. Schritt 1, woertlich: "als
+# Erstes soll gecheckt werden, ob TradingView offen ist. Wenn nicht, soll
+# TradingView gestartet werden" — denn TradingView soll "nicht ohne Grund
+# offen sein" (gleiche Linie wie die Master-Terminals seit 03.09.: nur im
+# Trade offen, nicht 24/7).
+#
+# Der Modus ist bewusst EIN Baustein: der Knopf in Prophos ruft ihn direkt,
+# und die spaetere Kette ruft tv_sicherstellen() als ihren ersten Schritt.
+# Hier wird NICHTS in der Seite geklickt und keine Order angefasst.
+# ═══════════════════════════════════════════════════════════════════════════
+
+TV_START_URL = "https://www.tradingview.com/chart/"
+_CHROME_ORTE = (
+    r"%ProgramFiles%\Google\Chrome\Application\chrome.exe",
+    r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+    r"%LocalAppData%\Google\Chrome\Application\chrome.exe",
+)
+
+
+def tv_start_url(url):
+    """Die Start-URL — nur https und nur tradingview.com. Der Wert kommt aus
+    einer Config-Datei; ein Tippfehler dort soll nicht irgendeine Seite in
+    einem Browser oeffnen, in dem Prop-Konten eingeloggt sind. Alles andere
+    faellt still auf den Standard zurueck."""
+    u = str(url or "").strip()
+    low = u.lower()
+    for anfang in ("https://www.tradingview.com/", "https://tradingview.com/",
+                   "https://de.tradingview.com/"):
+        if low.startswith(anfang) and not any(c.isspace() for c in u):
+            return u
+    return TV_START_URL
+
+
+def tv_start_befehl(chrome, url, profil=""):
+    """Aufrufzeile fuer Chrome. --new-window ist Absicht: TradingView gehoert
+    in ein EIGENES Fenster — in einem verdeckten Tab drosselt Chrome das
+    Userscript (Fund 30.08./01.09.2026), und der Fenstertitel ist dann
+    zugleich der Tab, an dem die Erkennung haengt. Laeuft Chrome schon,
+    reicht der Aufruf die URL an den laufenden Prozess weiter und endet."""
+    cmd = [chrome]
+    p = str(profil or "").strip()
+    if p:
+        cmd.append("--profile-directory=" + p)
+    cmd += ["--new-window", tv_start_url(url)]
+    return cmd
+
+
+def _chrome_pfad(wunsch=""):
+    """chrome.exe finden: Config-Wunsch, dann Registry (App Paths), dann die
+    drei Standard-Orte. '' = nicht gefunden."""
+    w = os.path.expandvars(str(wunsch or "").strip().strip('"'))
+    if w and os.path.exists(w):
+        return w
+    try:
+        import winreg
+        for wurzel in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(wurzel, r"SOFTWARE\Microsoft\Windows\CurrentVersion"
+                                            r"\App Paths\chrome.exe") as k:
+                    p = str(winreg.QueryValue(k, None) or "").strip().strip('"')
+                    if p and os.path.exists(p):
+                        return p
+            except OSError:
+                continue
+    except ImportError:
+        pass
+    for ort in _CHROME_ORTE:
+        p = os.path.expandvars(ort)
+        if os.path.exists(p):
+            return p
+    return ""
+
+
+def tv_sicherstellen(trail, cfg=None, warten_s=12.0):
+    """Ist TradingView offen? Wenn nicht: starten. -> (ok, msg, gestartet)
+
+    Beweis 'offen' ist das Browser-Fenster selbst (Titel des aktiven Tabs,
+    sonst die UIA-Tableiste) — NICHT der Reader: dessen letztes Bedienfeld
+    liegt auch dann noch beim Server, wenn der Tab laengst zu ist. Der
+    Seitentitel daraus dient nur als Suchbegriff.
+    Nach dem Start gilt zusaetzlich ein Bedienfeld, das NACH dem Start ankam:
+    das Userscript laeuft nur auf tradingview.com, ein frischer Stand heisst
+    also 'Seite geladen UND Reader lebt' — mehr, als der Fenstertitel sagt."""
+    cfg = cfg or {}
+    bf0 = _tv_http("/bedienfeld", timeout=1.5) or {}
+    begriff = tv_tab_suchbegriff(bf0.get("titel")) if bf0.get("ok") else ""
+    w, _ = _tv_fenster_holen(trail, begriff, "")
+    if w:
+        return True, "TradingView war schon offen — Fenster ist vorn.", False
+
+    chrome = _chrome_pfad(cfg.get("tv_browser_path"))
+    if not chrome:
+        return False, ("TradingView ist nicht offen, und chrome.exe wurde nicht "
+                       "gefunden — Pfad als tv_browser_path in die config.json "
+                       "schreiben."), False
+    befehl = tv_start_befehl(chrome, cfg.get("tv_url"), cfg.get("tv_chrome_profil"))
+    import subprocess
+    # Losgeloest starten: das Panel wartet mit capture_output auf diesen Bot —
+    # ein Kind, das dessen Pipes erbt, liesse den Aufruf haengen, bis Chrome
+    # wieder zugeht.
+    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    except OSError as e:
+        return False, f"Chrome-Start fehlgeschlagen: {e}", False
+    start = time.time()
+    trail.append("TradingView nicht offen -> Chrome gestartet (" + befehl[-1] + ")")
+
+    ende = start + float(warten_s)
+    while time.time() < ende:
+        _warte(1.2, 0.6)   # Jitter-Dauerregel 28.08.2026
+        bf = _tv_http("/bedienfeld", timeout=1.5) or {}
+        if bf.get("ok") and (time.time() - float(bf.get("alter_s") or 0.0)) >= start:
+            trail.append("Reader meldet sich aus dem neuen Tab")
+            return True, "TradingView gestartet — Seite ist geladen, der Reader meldet sich.", True
+        probe = []
+        w, _ = _tv_fenster_holen(probe, tv_tab_suchbegriff(bf.get("titel")) if bf.get("ok") else "", "")
+        if w:
+            trail.append("TradingView-Fenster erkannt")
+            return True, "TradingView gestartet — Fenster ist vorn.", True
+    # Kein Beweis ist kein Fehlschlag des Starts: Chrome IST gestartet, ein
+    # kalter PC braucht nur laenger als das Zeitfenster des Knopfs (der Proxy
+    # in app.py gibt 25 s, davon gehen die Fenster-Scans vorn und hinten ab —
+    # deshalb 12 s Standard; die spaetere Kette darf laenger warten). Ehrlich
+    # melden statt 'ok' zu behaupten.
+    return False, (f"Chrome wurde gestartet, TradingView war nach {int(warten_s)} s aber "
+                   "noch nicht zu erkennen — laedt vermutlich noch. Gleich noch "
+                   "einmal klicken: ist es dann offen, kommt 'war schon offen'."), True
+
+
+def modus_tvstart(cfg=None):
+    res = {"ok": False, "msg": "", "trail": "", "gestartet": False}
+    try:
+        from pywinauto import Desktop  # noqa: F401  (nur Verfuegbarkeits-Probe)
+    except ImportError:
+        res["msg"] = "pywinauto fehlt (nur auf dem PC lauffaehig)."
+        print(json.dumps(res))
+        return
+    _dpi_bewusst()
+    _warte(0.1, 0.4)   # Start-Versatz (Jitter-Dauerregel 28.08.2026)
+    trail = []
+    try:
+        res["ok"], res["msg"], res["gestartet"] = tv_sicherstellen(trail, cfg)
+    except Exception as e:
+        res["msg"] = f"TV-Start fehlgeschlagen: {type(e).__name__}: {e}"
+    res["trail"] = " > ".join(trail)
+    print(json.dumps(res))
+
+
 def modus_tvorder(cmd):
     """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
     bevor der naechste beginnt."""
@@ -3934,6 +4089,18 @@ def main():
         # Orbit Schritt 1 (28.08.2026): nur den TradingView-Tab nach vorn —
         # wie mousetest ohne Config, und ohne den Prophos-Heimweg unten.
         modus_tvfokus()
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] == "tvstart":
+        # Futures-Puls Neuaufbau Schritt 1 (21.09.2026): pruefen, ob
+        # TradingView offen ist — wenn nicht, starten. Optionales JSON mit
+        # tv_url / tv_browser_path / tv_chrome_profil (kommt vom Panel aus der
+        # Config). Wie tvfokus ohne Prophos-Heimweg: der PC soll danach auf
+        # TradingView stehen.
+        try:
+            cfg = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
+        except ValueError:
+            cfg = {}
+        modus_tvstart(cfg if isinstance(cfg, dict) else {})
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
         # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView

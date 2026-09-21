@@ -512,6 +512,25 @@ def main():
         and not order_bot.ist_tradingview_fenster("", "Chrome_WidgetWin_1")
         and not order_bot.ist_tradingview_fenster("TradingView", order_bot.MT5_KLASSE))
 
+    # ── Futures-Puls Neuaufbau Schritt 1 (21.09.2026): TradingView starten ──
+    # Die URL kommt aus einer Config-Datei und landet in einem Browser, in dem
+    # Prop-Konten eingeloggt sind — alles ausser https://…tradingview.com/ muss
+    # still auf den Standard zurueckfallen.
+    chk("TV-START: URL — nur https + tradingview.com, sonst Standard",
+        order_bot.tv_start_url("") == order_bot.TV_START_URL
+        and order_bot.tv_start_url(None) == order_bot.TV_START_URL
+        and order_bot.tv_start_url("https://www.tradingview.com/chart/AbC123/") == "https://www.tradingview.com/chart/AbC123/"
+        and order_bot.tv_start_url("https://de.tradingview.com/chart/") == "https://de.tradingview.com/chart/"
+        and order_bot.tv_start_url("http://www.tradingview.com/chart/") == order_bot.TV_START_URL
+        and order_bot.tv_start_url("https://www.tradingview.com.evil.io/chart/") == order_bot.TV_START_URL
+        and order_bot.tv_start_url("https://evil.io/?x=https://www.tradingview.com/") == order_bot.TV_START_URL
+        and order_bot.tv_start_url("https://www.tradingview.com/chart/ --remote-debugging-port=1") == order_bot.TV_START_URL)
+    chk("TV-START: Chrome-Aufruf — eigenes Fenster, Profil nur wenn gesetzt, URL zuletzt",
+        order_bot.tv_start_befehl("C:/c.exe", "") == ["C:/c.exe", "--new-window", order_bot.TV_START_URL]
+        and order_bot.tv_start_befehl("C:/c.exe", "", "Profile 2")
+            == ["C:/c.exe", "--profile-directory=Profile 2", "--new-window", order_bot.TV_START_URL]
+        and order_bot.tv_start_befehl("C:/c.exe", "ftp://x", "  ")[-1] == order_bot.TV_START_URL)
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

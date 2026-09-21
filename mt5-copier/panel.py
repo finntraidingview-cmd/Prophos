@@ -2141,6 +2141,38 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] TV-Fokus -> {res.get('ok')} ({res.get('msg')})", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-start":
+            # Futures-Puls Neuaufbau Schritt 1 (21.09.2026, Finn: "als Erstes
+            # soll gecheckt werden, ob TradingView offen ist. Wenn nicht, soll
+            # TradingView gestartet werden"). Instanzlos wie /api/tv-fokus —
+            # TradingView ist eine Pro-PC-Sache. URL, Browser-Pfad und Chrome-
+            # Profil kommen AUSSCHLIESSLICH aus der Config (Muster
+            # start-hedge-terminal: nichts davon ist ueber die API setzbar —
+            # dieser Aufruf startet ein Programm). Alle drei sind optional,
+            # ohne sie gilt: Chrome am Standard-Ort, tradingview.com/chart/.
+            # Bewusst KEIN Echo-Pause-Riegel: hier wird keine Order angefasst.
+            bc = base_config()
+            tvcfg = {k: str(bc.get(k) or "").strip()
+                     for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            bot = os.path.join(HERE, "order_bot.py")
+            if not os.path.exists(bot):
+                ensure_bot_source()
+            try:
+                # 24s: der Proxy in app.py gibt dieser Route 25 s. Der Bot
+                # wartet hoechstens 12 s auf den Beweis (plus Fenster-Scans) und meldet sonst
+                # ehrlich "laedt noch" — der Start selbst ist dann schon passiert.
+                p = subprocess.run([sys.executable, bot, "tvstart", json.dumps(tvcfg)],
+                                   capture_output=True, text=True, errors="replace", timeout=24)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "msg": "TV-Start Timeout (24s) — nachsehen, ob TradingView aufgegangen ist."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "msg": f"TV-Start fehlgeschlagen: {e}"}
+            print(f"[panel] TV-Start -> {res.get('ok')} ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/tv-order":
             # Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf 1-5): der Bot faehrt
             # die ganze Kette in TradingView — Tab nach vorn, Unterkonto per

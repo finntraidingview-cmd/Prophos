@@ -6358,6 +6358,8 @@
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="ep-lokal-chip" title="Der Reader läuft auf DIESEM Gerät (127.0.0.1:8790 antwortet)" style="display:none"><span class="mtc-dot on"></span>Reader lokal</span>
+          <span id="ep-tv-msg" style="font-size:12px;color:var(--sub);max-width:340px;text-align:right"></span>
+          <button class="btn btn-ghost" id="ep-tv-start" style="display:none" title="Prüft, ob TradingView auf diesem PC offen ist — wenn nicht, startet Chrome mit TradingView in einem eigenen Fenster; läuft es schon, kommt nur das Fenster nach vorn">📈 TradingView starten</button>
         </div>
       </div>
 
@@ -24572,7 +24574,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.313'
+  const OS_TAB_BUILD = '2026-09-21.314'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -33692,6 +33694,41 @@
     }catch(err){
       alert('Multiplier nicht gespeichert: ' + (err && err.message || err))
     }finally{ btn.disabled = false; btn.textContent = alt }
+  }
+
+  // 📈 TradingView starten (21.09.2026, Futures-Puls Neuaufbau Schritt 1 —
+  // Finn: „als Erstes soll gecheckt werden, ob TradingView offen ist. Wenn
+  // nicht, soll TradingView gestartet werden"; TradingView soll „nicht ohne
+  // Grund offen sein"). Das Panel lässt den Puls prüfen und bei Bedarf Chrome
+  // mit TradingView im eigenen Fenster starten — derselbe Baustein wird später
+  // der erste Schritt der Order-Kette. Nur am PC-Tab sichtbar (aus der Ferne
+  // gibt es die Panel-API nicht). Eigene Verdrahtung, Muster Slave-Terminal-Knopf.
+  const epTvBtn = $ep('ep-tv-start')
+  if(epTvBtn && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL){
+    epTvBtn.style.display = ''
+    epTvBtn.addEventListener('click', async () => {
+      // Ergebnis als Zeile neben dem Knopf, BEWUSST kein alert() wie beim
+      // Slave-Terminal: nach dem Start steht TradingView vorn, ein alert hinge
+      // ungesehen im Prophos-Tab und hielte dort alle Timer an (Reader-Brücke,
+      // Plan-Polls) — genau dann, wenn gleich ein Trade beginnt.
+      const out = $ep('ep-tv-msg')
+      const sag = (ok, txt) => { if(out){ out.textContent = (ok ? '✓ ' : '⚠ ') + txt; out.style.color = ok ? 'var(--good)' : 'var(--warn)' } }
+      if(typeof window.mtcApi !== 'function') return sag(false, 'Panel-API nicht erreichbar.')
+      epTvBtn.disabled = true
+      const _t = epTvBtn.textContent
+      epTvBtn.textContent = '⏳ prüfe…'
+      if(out) out.textContent = ''
+      try{
+        const r = await window.mtcApi('tv-start', { method:'POST',
+          headers:{'Content-Type':'application/json'}, body:'{}' })
+        sag(!!(r && r.ok), (r && (r.msg || r.error)) || 'keine Antwort')
+      }catch(e){
+        sag(false, 'TradingView-Start fehlgeschlagen: ' + (e && e.message || e))
+      }finally{
+        epTvBtn.disabled = false
+        epTvBtn.textContent = _t
+      }
+    })
   }
 
   // Schalter-Klicks — dedizierte Verdrahtung auf dem Orbit-Grid (Projektregel:
