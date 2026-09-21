@@ -2875,6 +2875,14 @@ def modus_tvkonto(cmd):
             verbunden — dann merkt sich TradingView diese eine Sitzung eben noch.
             Der Zustand wird gelesen (kein blinder Klick, der einen gesetzten
             Haken wieder entfernt)."""
+            # WARTESCHLANGE (Finns Notiz 22.09.2026, fuer spaeter): steht als
+            # NAECHSTES ein Trade DERSELBEN Firma an, soll der Haken NICHT
+            # gesetzt werden — dann merkt sich TradingView den Login, und der
+            # naechste Start verbindet sich von selbst mit dem richtigen (nur
+            # lesen + Dropdown, kein Anmelden). Kommt eine ANDERE Firma, bleibt
+            # es beim Haken. Der Aufrufer sagt es ueber cmd['sitzung_merken'];
+            # fehlt das Feld, gilt wie bisher: Haken setzen.
+            soll_gesetzt = not bool(cmd.get("sitzung_merken"))
             kasten = None
             try:
                 for cb in w.descendants(control_type="CheckBox"):
@@ -2893,6 +2901,19 @@ def modus_tvkonto(cmd):
                 except Exception:
                     return None
 
+            if not soll_gesetzt:
+                # Sitzung SOLL gemerkt werden: nur eingreifen, wenn der Haken
+                # nachweislich gesetzt ist (Standard im Dialog ist AUS).
+                if kasten is not None and zustand_kasten() == 1:
+                    try:
+                        r = kasten.rectangle()
+                        _tv_uia_klick({"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)},
+                                      "Don't remember me (entfernen)", trail)
+                        _warte(0.3, 0.3)
+                    except Exception:
+                        pass
+                trail.append("Sitzung wird gemerkt (naechster Trade: gleiche Firma)")
+                return
             if kasten is not None:
                 z = zustand_kasten()
                 if z == 1:

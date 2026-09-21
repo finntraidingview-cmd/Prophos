@@ -2241,6 +2241,9 @@ class Handler(BaseHTTPRequestHandler):
             cmd["ext_id"] = str(body.get("ext_id") or "").strip()
             cmd["tv_username"] = str(body.get("tv_username") or "").strip()
             cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            # Warteschlangen-Schalter (Finns Notiz 22.09.2026): true = als Naechstes
+            # kommt ein Trade DERSELBEN Firma -> "Don't remember me" NICHT setzen.
+            cmd["sitzung_merken"] = bool(body.get("sitzung_merken"))
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
