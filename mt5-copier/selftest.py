@@ -663,6 +663,37 @@ def main():
         and order_bot.tv_uia_filtern([("APEX6416990000024", None), ("APEX6416990000024", ("a", 1, 2, 3))], _ids, _F) == []
         and order_bot.tv_uia_filtern(None, _ids, _F) == [])
 
+    # Schritt 2b (21.09.2026 nachts): Tradovate-Login wechseln. Gefunden wird
+    # ueber sichtbare NAMEN — die Muster muessen eng sein, denn daneben stehen
+    # Knoepfe, die NIE getroffen werden duerfen.
+    chk("TV-LOGIN: Login-Knopf nur EXAKT — nie 'Sign in with Google/Apple'",
+        all(order_bot.TV_RX_LOGIN.search(x) for x in ("Login", "Log in", "Sign in", "Anmelden", "login"))
+        and not any(order_bot.TV_RX_LOGIN.search(x) for x in
+                    ("Sign in with Google", "Sign in with Apple", "Login help", "Need help?", "Mit Google anmelden")))
+    chk("TV-LOGIN: Abmelden / Connect / Demo / Broker — deutsch und englisch, nichts Benachbartes",
+        all(order_bot.TV_RX_LOGOUT.search(x) for x in ("Log out", "Logout", "Sign out", "Abmelden", "Disconnect", "Verbindung trennen"))
+        and not any(order_bot.TV_RX_LOGOUT.search(x) for x in ("Login", "Trading settings", "Go to broker", "Abbrechen"))
+        and all(order_bot.TV_RX_CONNECT.search(x) for x in ("Connect", "Connect broker", "Verbinden"))
+        and not any(order_bot.TV_RX_CONNECT.search(x) for x in ("Cannot connect to broker? Let us know", "Connected", "Disconnect"))
+        and order_bot.TV_RX_DEMO.search("Demo") and not order_bot.TV_RX_DEMO.search("Demo account info")
+        and order_bot.TV_RX_BROKER.search("Tradovate") and not order_bot.TV_RX_BROKER.search("Tradovate GOLD")
+        and order_bot.TV_RX_KACHELSICHT.search("Paper Trading") and not order_bot.TV_RX_TRADE.search("Trade with your broker"))
+    _N = [("Tradovate", (70, 850, 190, 880), "Button"), ("Tradovate", (100, 856, 170, 874), "Text"),
+          ("Tradovate", (900, 300, 1000, 330), "Text"), ("Trade", (1700, 10, 1760, 40), "Button"),
+          ("Unsichtbar", None, "Button"), ("Tradovate", (5000, 850, 5100, 880), "Button")]
+    chk("TV-LOGIN: Namens-Filter — Bereich (unten/oben), innerstes Element, rect=None und ausserhalb raus",
+        [e["r"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(100, 856, 170, 874)]
+        and len(order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_BROKER, _F)) == 2
+        and [e["punkt"] for e in order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_bis=0.15)] == [(1730, 25)]
+        and order_bot.tv_uia_namen_filtern(_N, order_bot.TV_RX_TRADE, _F, y_von=0.5) == [])
+    chk("TV-LOGIN: Tasten-Escape — Sonderzeichen im Username werden nicht zu Tastenkombinationen",
+        order_bot.tv_tasten_escape("APEX_641699") == "APEX_641699"
+        and order_bot.tv_tasten_escape("max+apex(1)") == "max{+}apex{(}1{)}"
+        and order_bot.tv_tasten_escape("a^b%c~d") == "a{^}b{%}c{~}d")
+    chk("TV-LOGIN: Diagnose-Inventar — kurz, ohne Doppelte, lange Texte (News) raus",
+        order_bot.tv_uia_inventar(_N + [("x" * 60, (1, 1, 9, 9), "Text")]) ==
+            ["Button:Tradovate@70,850", "Text:Tradovate@100,856", "Button:Trade@1700,10", "Button:Unsichtbar"])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

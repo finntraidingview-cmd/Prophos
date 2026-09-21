@@ -2204,15 +2204,18 @@ class Handler(BaseHTTPRequestHandler):
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):
                     ensure_bot_source()
-                # 120s: bis 45 s Start-Beweis + bis 40 s, bis der Broker nach
-                # einem frischen Start wieder verbunden ist, + Dump + Puffer.
+                # 260s (seit 2b, 21.09.2026 nachts): Start-Beweis (45) + Broker
+                # lesen (40) + abmelden (20) + verbinden (25) + Tradovate-Fenster
+                # und Autofill (50) + Fenster zu (35) + neu lesen (45) — im
+                # Normalfall ist nach wenigen Sekunden Schluss, die Zahl ist die
+                # Obergrenze des laengsten Wegs.
                 p = subprocess.run([sys.executable, bot, "tvkonto", json.dumps(cmd)],
-                                   capture_output=True, text=True, errors="replace", timeout=120)
+                                   capture_output=True, text=True, errors="replace", timeout=260)
                 line = (p.stdout or "").strip().splitlines()
                 res = json.loads(line[-1]) if line else {
                     "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
             except subprocess.TimeoutExpired:
-                res = {"ok": False, "msg": "TV-Konto-Pruefung Timeout (120s)."}
+                res = {"ok": False, "msg": "TV-Konto-Pruefung Timeout (260s) — in TradingView nachsehen, wie weit er kam."}
             except (OSError, ValueError) as e:
                 res = {"ok": False, "msg": f"TV-Konto-Pruefung fehlgeschlagen: {e}"}
             finally:

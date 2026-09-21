@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-21.2"
+APP_BUILD = "2026-09-21.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -438,10 +438,10 @@ def copier_proxy(path):
         # derselbe Doppel-Order-Pfad wie bei master-order.
         # tv-konto (21.09.2026, Futures-Puls Neuaufbau Schritt 2): startet bei
         # Bedarf TradingView und wartet, bis der Broker wieder verbunden ist —
-        # das Panel gibt dem Bot 120 s. Hier wird nichts gesendet, ein frueher
+        # das Panel gibt dem Bot 260 s (seit 2b: ab-/anmelden). Hier wird nichts gesendet, ein frueher
         # Abbruch waere also kein Doppel-Order-Pfad, aber eine falsche Absage.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order")
-                else 130 if path == "tv-konto" else 25)
+                else 270 if path == "tv-konto" else 25)
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,

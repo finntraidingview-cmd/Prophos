@@ -1828,6 +1828,146 @@ def _tv_uia_klick(el, name, trail):
     return True, ""
 
 
+# ---------------------------------------------------------------------------
+# SCHRITT 2b (21.09.2026 nachts) — fremder Tradovate-Login: abmelden, Connect,
+# Tradovate-Fenster, Autofill, Login. Finn: "ich lass dich mal zaubern, dann
+# teste ich." Sein Handweg: "auf Login druecken, dann einmal auf ein Feld, dann
+# sehe ich die Autofill-Vorschlaege, und daneben druecke ich auf Login."
+#
+# Alles ueber Windows-UIA (das Auge, das sich am selben Abend live bewaehrt
+# hat) — das Tradovate-Fenster ist ohnehin eine eigene Seite, auf der das
+# Userscript nicht laeuft. Gefunden wird ueber sichtbare NAMEN, deutsch und
+# englisch, und immer nur bei GENAU EINEM Treffer.
+#
+# WAS BEWIESEN IST (am 21.09. am echten TradingView/Tradovate nachgesehen):
+#   - Broker-Dialog: Kachel "Tradovate" -> Dialog mit Live/Demo (Radio) und
+#     Knopf "Connect" (aria-label "Connect broker"); KEINE Username-Felder.
+#   - Tradovate-Seite: zwei Eingabefelder (#name-input, #password-input) und
+#     ein Knopf "Login"; daneben "Sign in with Google/Apple" — deshalb matcht
+#     der Login-Knopf nur EXAKT.
+# WAS GERATEN IST und sich im ersten Lauf beweisen muss: wo "Abmelden" sitzt
+# (Annahme: Menue am Broker-Knopf "Tradovate" im unteren Panel), und wie
+# Chromes Autofill-Liste in UIA heisst. Jede Stelle bricht bei 0 oder >=2
+# Treffern ab und legt ein Inventar der sichtbaren Namen in die Diagnose.
+#
+# DAS PASSWORT fasst der Bot nie an: er waehlt den Autofill-Vorschlag bzw.
+# tippt nur den USERNAMEN; vom Passwortfeld wird einzig geprueft, DASS es
+# gefuellt ist (Laenge > 0) — der Wert wird weder gelesen noch geloggt.
+# Vor dem Login-Klick muessen Username UND gefuelltes Passwort bewiesen sein:
+# kein Fehlversuch bei Tradovate (Sperre/Captcha nach wiederholten Logins).
+# ---------------------------------------------------------------------------
+
+TV_RX_BROKER = re.compile(r"^tradovate$", re.I)
+TV_RX_KACHELSICHT = re.compile(r"^(paper trading|brokerage simulator)", re.I)
+TV_RX_LOGOUT = re.compile(r"^(log ?out|sign ?out|abmelden|ausloggen|disconnect|"
+                          r"(verbindung )?trennen)\b", re.I)
+TV_RX_TRADE = re.compile(r"^(trade|handeln|traden)$", re.I)
+TV_RX_DEMO = re.compile(r"^demo$", re.I)
+TV_RX_CONNECT = re.compile(r"^(connect( broker)?|(broker )?verbinden)$", re.I)
+TV_RX_LOGIN = re.compile(r"^(log ?in|sign ?in|anmelden|einloggen)$", re.I)
+
+_TV_UIA_KLICKBAR = ("Button", "MenuItem", "ListItem", "RadioButton", "Hyperlink",
+                    "TabItem", "CheckBox", "ComboBox", "Text")
+
+
+def tv_uia_namen_filtern(roh, muster, fenster=None, y_von=0.0, y_bis=1.0):
+    """(name, (l,t,r,b), typ)-Tripel -> sichtbare Elemente, deren NAME auf das
+    Muster passt; innerste zuerst gefiltert (Knopf + sein Text tragen denselben
+    Namen -> ein Element). y_von/y_bis: Anteil der Fensterhoehe, in dem die
+    Mitte liegen muss (0 = oben, 1 = unten)."""
+    kand = []
+    for eintrag in roh or ():
+        try:
+            name, r = eintrag[0], eintrag[1]
+            typ = eintrag[2] if len(eintrag) > 2 else ""
+            l, t, rr, b = (int(v) for v in r)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if rr - l < 3 or b - t < 3 or not muster.search(str(name or "").strip()):
+            continue
+        mx, my = (l + rr) // 2, (t + b) // 2
+        if fenster:
+            fl, ft, fr, fb = fenster
+            if not (fl <= mx <= fr and ft <= my <= fb):
+                continue
+            h = max(1, fb - ft)
+            if not (ft + h * y_von <= my <= ft + h * y_bis):
+                continue
+        kand.append({"text": str(name).strip()[:80], "typ": typ, "r": (l, t, rr, b), "punkt": (mx, my)})
+    out = []
+    for a in kand:
+        ar = a["r"]
+        huelle = any(b is not a and b["r"] != ar
+                     and b["r"][0] >= ar[0] - 2 and b["r"][1] >= ar[1] - 2
+                     and b["r"][2] <= ar[2] + 2 and b["r"][3] <= ar[3] + 2 for b in kand)
+        if huelle or any(c["r"] == ar for c in out):
+            continue
+        out.append(a)
+    return out
+
+
+def tv_tasten_escape(text):
+    """Text fuer pywinauto.send_keys entschaerfen: + ^ % ~ ( ) { } [ ] sind dort
+    Steuerzeichen — ein Username 'max+apex' wuerde sonst als Shift-Kombination
+    getippt."""
+    return "".join("{" + c + "}" if c in "+^%~(){}[]" else c for c in str(text))
+
+
+def _tv_uia_roh(w, typen=_TV_UIA_KLICKBAR, max_je_typ=2500, muster=()):
+    """Benannte Elemente der genannten Typen: [(name, rect|None, typ)].
+    'muster' (Regex-Tupel) ist der Vorfilter: Sichtbarkeit und Rechteck kosten
+    je Element zwei weitere COM-Aufrufe, und eine TradingView-Seite hat ein
+    paar tausend Textknoten — abgefragt werden sie deshalb nur fuer Namen, die
+    auf eines der Muster passen. Alle anderen kommen mit rect=None zurueck
+    (reichen fuers Diagnose-Inventar, fallen in den Filtern von selbst raus)."""
+    roh = []
+    for typ in typen:
+        try:
+            els = w.descendants(control_type=typ)
+        except Exception:
+            continue
+        for e in els[:max_je_typ]:
+            try:
+                n = (e.window_text() or "").strip()
+                if not n or len(n) > 120:
+                    continue
+                if muster and not any(m.search(n) for m in muster):
+                    roh.append((n, None, typ))
+                    continue
+                if hasattr(e, "is_visible") and not e.is_visible():
+                    continue
+                r = e.rectangle()
+                roh.append((n, (r.left, r.top, r.right, r.bottom), typ))
+            except Exception:
+                continue
+    return roh
+
+
+def _tv_fenster_rect(w):
+    try:
+        r = w.rectangle()
+        return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        return None
+
+
+def tv_uia_inventar(roh, max_n=90):
+    """Kurzliste fuer die Diagnose: was war an benannten Bedienelementen zu
+    sehen? (Texte nur kurze — lange sind News/Beschreibungen.)"""
+    out, gesehen = [], set()
+    for name, r, typ in roh or ():
+        if typ == "Text" and len(name) > 28:
+            continue
+        k = (name[:40], typ)
+        if k in gesehen:
+            continue
+        gesehen.add(k)
+        out.append(f"{typ}:{name[:40]}" + (f"@{r[0]},{r[1]}" if r else ""))
+        if len(out) >= max_n:
+            break
+    return out
+
+
 def tv_version_min(version, minimum):
     """'0.4.2' >= '0.4.2'? Unlesbare Version = False (dann lieber zum Update raten)."""
     def teile(v):
@@ -1952,6 +2092,55 @@ def _tv_dump_sichern(trail):
     return "", tv_diagnose(letzt)
 
 
+def _tv_browser_fenster():
+    """Alle Browser-Hauptfenster: [(handle, titel, wrapper)]"""
+    from pywinauto import Desktop
+    out = []
+    for w in Desktop(backend="uia").windows():
+        try:
+            klasse = w.element_info.class_name or ""
+            if klasse in BROWSER_KLASSEN or klasse.startswith("Chrome_WidgetWin"):
+                out.append((w.handle, w.window_text() or "", w))
+        except Exception:
+            continue
+    return out
+
+
+def _tv_edit_wert(e):
+    try:
+        return str(e.iface_value.CurrentValue or "")
+    except Exception:
+        try:
+            return str(e.get_value() or "")
+        except Exception:
+            return ""
+
+
+def _tv_ist_passwortfeld(e):
+    try:
+        return bool(e.element_info.element.CurrentIsPassword)
+    except Exception:
+        return False
+
+
+def _tv_autofill_vorschlag(username):
+    """Chromes Autofill-Liste haengt als eigenes Popup-Fenster am Browser. Gesucht
+    wird in ALLEN Chrome-Fenstern nach einem Nicht-Eingabe-Element, dessen Name
+    den Username traegt. -> Liste (innerste), meist 0 oder 1."""
+    nadel = _nur_alnum(username)
+    if len(nadel) < 3:
+        return []
+    class _Nadel:                       # Vorfilter mit derselben Schnittstelle wie ein Regex
+        @staticmethod
+        def search(name):
+            return nadel in _nur_alnum(name)
+    roh = []
+    for _h, _t, w in _tv_browser_fenster():
+        roh += [x for x in _tv_uia_roh(w, ("ListItem", "MenuItem", "Button", "DataItem", "Text"),
+                                        600, muster=(_Nadel,)) if x[1]]
+    return tv_uia_namen_filtern(roh, _Nadel)
+
+
 def modus_tvkonto(cmd):
     res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
@@ -2041,38 +2230,285 @@ def modus_tvkonto(cmd):
         return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
 
     ziel = (f"Login '{cmd.get('tv_username')}', " if cmd.get("tv_username") else "") + f"Konto {ext}"
-    if zustand != "gleicher_login":
+
+    def ab(msg, schritt="wechsel"):
         diagnose()
-        if zustand == "falsch":
-            return raus(f"Falscher Tradovate-Login: aktiv ist '{aktiv[:60]}', und das "
-                        f"kennt Prophos bei dieser Firma nicht — gebraucht wird {ziel}. "
-                        "Ab- und Anmelden klickt Puls noch nicht (Teil 2b).", "konto")
-        return raus(f"Im TradingView-Panel ist kein Konto zu erkennen — gebraucht wird "
-                    f"{ziel}. Ist unten das Broker-Panel offen und Tradovate verbunden? "
-                    "Das Anmelden klickt Puls noch nicht (Teil 2b)."
-                    + ("" if bf else " (Der Reader meldet sich nicht — gelesen wurde nur "
-                       "ueber Windows-UIA.)"), "konto")
+        return raus(msg, schritt)
+
+    def esc():
+        try:
+            from pywinauto import keyboard
+            keyboard.send_keys("{ESC}")
+        except Exception:
+            pass
+
+    def flach_pruefen(wozu):
+        """Riegel vor JEDEM Kontowechsel (Dropdown wie Ab-/Anmelden): das
+        aktive Konto muss flach sein. Der Reader kennt nur "das Konto im
+        Panel" — danach meldet er die Positionen des NEUEN Kontos als
+        denselben Master, und der Orbit-Copier schloesse den Hedge der
+        laufenden Position (Gefahren-Fund 28.08.2026). -> Fehltext oder ''"""
+        pos, _an = _tv_positionen()
+        if pos is None:
+            return (f"Reader liefert keine Positionen — ohne den Beweis, dass das aktive "
+                    f"Konto flach ist, wird nicht {wozu}.")
+        if pos:
+            return (f"Auf dem aktiven Konto ist noch eine Position offen ({len(pos)}). Erst "
+                    f"schliessen — sonst verliert der Reader die Sicht darauf.")
+        return ""
+
+    # --- Schritt 2b: anderer Tradovate-Login -> abmelden, verbinden, anmelden --
+    if zustand != "gleicher_login":
+        username = str(cmd.get("tv_username") or "").strip()
+        if not username:
+            return ab(f"Im TradingView-Panel steht keines der Konten dieser Firma — dafuer muss "
+                      f"der Tradovate-Login gewechselt werden, aber fuer die Firma ist kein "
+                      "Username hinterlegt (Einstellungen > Prop Firms > Firma bearbeiten > "
+                      "'Tradovate-Username fuer TradingView').", "login")
+        f = flach_pruefen("ab- und angemeldet")
+        if f:
+            return ab(f, "login")
+        w = tv_fenster()
+        if not w:
+            return ab("TradingView-Fenster nicht gefunden.", "login")
+        inventar = uia_info.setdefault("inventar", {})
+
+        def sicht():
+            roh = _tv_uia_roh(w, muster=(TV_RX_KACHELSICHT, TV_RX_BROKER, TV_RX_LOGOUT))
+            fr = _tv_fenster_rect(w)
+            kacheln = any(r and TV_RX_KACHELSICHT.search(n) for n, r, _t in roh)
+            broker_unten = tv_uia_namen_filtern(roh, TV_RX_BROKER, fr, y_von=0.5)
+            return roh, fr, kacheln, broker_unten
+
+        def warte_auf(muster, sek, stelle, y_von=0.0, y_bis=1.0, quelle=None):
+            """Pollt, bis GENAU EIN Element passt. -> (el|None, anzahl)"""
+            ende_w = time.time() + sek
+            n, roh = 0, []
+            while time.time() < ende_w:
+                q = quelle or w
+                roh = _tv_uia_roh(q, muster=(muster,))
+                els = tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis)
+                n = len(els)
+                if n == 1:
+                    return els[0], 1
+                if n > 1:
+                    break
+                _warte(0.5, 0.3)
+            inventar[stelle] = tv_uia_inventar(roh)
+            return None, n
+
+        roh, fr, kacheln, broker_unten = sicht()
+        verbunden = bool(broker_unten) and not kacheln
+        trail.append("Broker verbunden (fremder Login)" if verbunden else "kein Broker verbunden")
+
+        if verbunden:
+            if len(broker_unten) != 1:
+                inventar["broker_knopf"] = tv_uia_inventar(roh)
+                return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
+                          f"({len(broker_unten)} Treffer).", "login")
+            ok, f = _tv_uia_klick(broker_unten[0], "Broker-Menue", trail)
+            if not ok:
+                return ab(f, "login")
+            _warte(0.6, 0.4)
+            el, n = warte_auf(TV_RX_LOGOUT, 5.0, "logout_menue")
+            if not el:
+                esc()
+                return ab(f"Broker-Menue geoeffnet, aber 'Abmelden/Log out' darin nicht eindeutig "
+                          f"gefunden ({n} Treffer).", "login")
+            ok, f = _tv_uia_klick(el, "Abmelden", trail)
+            if not ok:
+                return ab(f, "login")
+            # Manche Oberflaechen fragen nach ("Wirklich abmelden?") — dann steht
+            # ein ZWEITER Knopf mit demselben Verb da. Genau einmal nachklicken.
+            ende_l, nachgefragt = time.time() + 14.0, False
+            while time.time() < ende_l:
+                _warte(0.8, 0.4)
+                roh, fr, kacheln, broker_unten = sicht()
+                if kacheln or not broker_unten:
+                    break
+                if not nachgefragt:
+                    best = [e for e in tv_uia_namen_filtern(roh, TV_RX_LOGOUT, fr) if e["typ"] == "Button"]
+                    if len(best) == 1:
+                        nachgefragt = True
+                        _tv_uia_klick(best[0], "Abmelden bestaetigen", trail)
+            else:
+                inventar["nach_logout"] = tv_uia_inventar(roh)
+                return ab("'Abmelden' geklickt, aber der Broker ist danach noch verbunden.", "login")
+            trail.append("abgemeldet")
+
+        # Broker-Kacheln: nach dem Abmelden zeigt TradingView sie meist von selbst
+        # im unteren Panel; sonst oeffnet der Knopf "Trade" oben rechts den Dialog.
+        roh, fr, kacheln, _b = sicht()
+        if not kacheln:
+            el, n = warte_auf(TV_RX_TRADE, 4.0, "trade_knopf", y_bis=0.15)
+            if not el:
+                return ab(f"Broker-Auswahl ist nicht offen, und der Knopf 'Trade' oben wurde nicht "
+                          f"eindeutig gefunden ({n} Treffer).", "login")
+            ok, f = _tv_uia_klick(el, "Trade", trail)
+            if not ok:
+                return ab(f, "login")
+            _warte(0.8, 0.5)
+        el, n = warte_auf(TV_RX_BROKER, 8.0, "broker_kachel")
+        if not el:
+            esc()
+            return ab(f"Die Kachel 'Tradovate' in der Broker-Auswahl wurde nicht eindeutig gefunden "
+                      f"({n} Treffer).", "login")
+        ok, f = _tv_uia_klick(el, "Kachel Tradovate", trail)
+        if not ok:
+            return ab(f, "login")
+        _warte(0.8, 0.5)
+        # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
+        # ohne bewiesenen Demo-Schalter wird nicht verbunden.
+        el, n = warte_auf(TV_RX_DEMO, 8.0, "demo_schalter")
+        if not el:
+            esc()
+            return ab(f"Im Tradovate-Dialog wurde der Schalter 'Demo' nicht eindeutig gefunden "
+                      f"({n} Treffer).", "login")
+        ok, f = _tv_uia_klick(el, "Demo", trail)
+        if not ok:
+            return ab(f, "login")
+        _warte(0.4, 0.3)
+        el, n = warte_auf(TV_RX_CONNECT, 5.0, "connect_knopf")
+        if not el:
+            esc()
+            return ab(f"Der Knopf 'Connect' im Tradovate-Dialog wurde nicht eindeutig gefunden "
+                      f"({n} Treffer).", "login")
+        vorher = {h for h, _t, _w in _tv_browser_fenster()}
+        ok, f = _tv_uia_klick(el, "Connect", trail)
+        if not ok:
+            return ab(f, "login")
+
+        # Tradovate-Anmeldefenster (eigenes Popup — oder ein neuer Tab, dann traegt
+        # das Browser-Fenster selbst den Titel).
+        tw, ende_t = None, time.time() + 25.0
+        while time.time() < ende_t and tw is None:
+            _warte(0.8, 0.4)
+            kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if "tradovate" in t.lower()]
+            neu_f = [k for k in kand if k[0] not in vorher]
+            if neu_f or kand:
+                tw = (neu_f or kand)[0][2]
+        if tw is None:
+            return ab("Nach 'Connect' ist kein Tradovate-Anmeldefenster erschienen.", "login")
+        tw_handle = tw.handle
+        try:
+            tw.set_focus()
+        except Exception:
+            pass
+        trail.append("Tradovate-Fenster da")
+
+        def felder():
+            try:
+                eds = [e for e in tw.descendants(control_type="Edit")
+                       if not hasattr(e, "is_visible") or e.is_visible()]
+            except Exception:
+                return None, None
+            pw = next((e for e in eds if _tv_ist_passwortfeld(e)), None)
+            un = next((e for e in eds if e is not pw), None)
+            if pw is None and len(eds) >= 2:
+                un, pw = eds[0], eds[1]
+            return un, pw
+
+        def bewiesen():
+            un, pw = felder()
+            if not un or not pw:
+                return False
+            return (_nur_alnum(_tv_edit_wert(un)) == _nur_alnum(username)
+                    and len(_tv_edit_wert(pw)) > 0)       # nur DASS gefuellt, nie WAS
+
+        un, pw = None, None
+        ende_f = time.time() + 20.0
+        while time.time() < ende_f and not (un and pw):
+            un, pw = felder()
+            if not (un and pw):
+                _warte(0.7, 0.4)
+        if not (un and pw):
+            inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
+            return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
+
+        if not bewiesen():
+            try:
+                r = un.rectangle()
+                punkt = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
+            except Exception:
+                return ab("Username-Feld ohne Rechteck.", "login")
+            ok, f = _tv_uia_klick(punkt, "Username-Feld", trail)
+            if not ok:
+                return ab(f, "login")
+            _warte(0.9, 0.5)
+            vor = _tv_autofill_vorschlag(username)
+            if len(vor) != 1:
+                # Liste zeigt den Login nicht (oder mehrere): Username tippen —
+                # Chrome filtert die Vorschlaege dann auf genau diesen.
+                _tv_tippen(tv_tasten_escape(username), "Username", trail)
+                _warte(1.0, 0.5)
+                vor = _tv_autofill_vorschlag(username)
+            if len(vor) == 1:
+                ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
+                if not ok:
+                    return ab(f, "login")
+            else:
+                try:
+                    from pywinauto import keyboard
+                    keyboard.send_keys("{DOWN}")
+                    _warte(0.25, 0.2)
+                    keyboard.send_keys("{ENTER}")
+                    trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
+                except Exception:
+                    return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
+            ende_b = time.time() + 5.0
+            while time.time() < ende_b and not bewiesen():
+                _warte(0.5, 0.3)
+        if not bewiesen():
+            inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
+            return ab(f"Im Tradovate-Fenster stehen Username '{username}' und ein gefuelltes "
+                      "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
+                      "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
+        trail.append("Username + gefuelltes Passwort bewiesen")
+        el, n = warte_auf(TV_RX_LOGIN, 5.0, "login_knopf", quelle=tw)
+        if not el:
+            return ab(f"Der Knopf 'Login' im Tradovate-Fenster wurde nicht eindeutig gefunden "
+                      f"({n} Treffer).", "login")
+        ok, f = _tv_uia_klick(el, "Login", trail)
+        if not ok:
+            return ab(f, "login")
+
+        # Das Fenster muss verschwinden (bzw. der Tab den Titel verlieren).
+        ende_z = time.time() + 35.0
+        noch_da = True
+        while time.time() < ende_z and noch_da:
+            _warte(1.0, 0.5)
+            noch_da = any(h == tw_handle and "tradovate" in t.lower() for h, t, _x in _tv_browser_fenster())
+        if noch_da:
+            inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
+            return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — steht dort eine "
+                      "Fehlermeldung oder eine Rueckfrage?", "login")
+        trail.append("angemeldet, Tradovate-Fenster zu")
+
+        # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
+        # Firma dastehen.
+        fenster[0] = None
+        start = time.time()
+        ende = time.time() + 45.0
+        while True:
+            zustand, aktiv, bf, uia_el = lies()
+            if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
+                break
+            _warte(1.0, 0.5)
+        res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+        trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}")
+        if zustand == "richtig":
+            res["ok"] = True
+            return raus(f"Tradovate-Login gewechselt ({username}) — aktiv ist {aktiv[:60]}.", "login")
+        if zustand != "gleicher_login":
+            return ab(f"Mit '{username}' angemeldet, aber im Panel steht keines der Konten dieser "
+                      f"Firma (gebraucht: {ext}). Gehoert der Username wirklich zu dieser Firma?", "login")
 
     # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
     # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
     # Drop-Down draufdruecken und den Account switchen."
-    def ab(msg):
-        diagnose()
-        return raus(msg, "wechsel")
-
-    # Riegel VOR dem Wechsel: das aktive Konto muss flach sein. Der Reader kennt
-    # nur "das Konto im Panel" — nach dem Umschalten meldet er die Positionen
-    # des NEUEN Kontos als denselben Master, und der Orbit-Copier schloesse den
-    # Hedge der laufenden Position ("Master weg"; Gefahren-Fund 28.08.2026:
-    # nie umschalten mit offenem Trade).
-    pos, _an = _tv_positionen()
-    if pos is None:
-        return ab("Reader liefert keine Positionen — ohne den Beweis, dass "
-                  f"'{aktiv[:40]}' flach ist, wird das Konto nicht gewechselt.")
-    if pos:
-        return raus(f"Auf dem aktiven Konto '{aktiv[:40]}' ist noch eine Position offen "
-                    f"({len(pos)}). Erst schliessen — ein Kontowechsel wuerde dem Reader "
-                    "die Sicht darauf nehmen.", "wechsel")
+    f = flach_pruefen("das Konto gewechselt")
+    if f:
+        return ab(f)
 
     w = tv_fenster()
     if not w:
