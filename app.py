@@ -40,7 +40,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-17.3"
+APP_BUILD = "2026-09-21.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -3806,6 +3806,15 @@ def _firm_norm(name):
         return "—"
     if "5%er" in f or "5ers" in f or "5%ers" in f or "five percent" in f:
         return "The5%ers"
+    # 21.09.2026 (Finn: „beide werden zur gleichen Propfirm gezählt, obwohl es
+    # zwei verschiedene sind"): „FundedNext Futures" enthält „funded" + „futur"
+    # und fiel damit in die MyFundedFutures-Regel darunter — der Account stand
+    # im Admin unter der falschen Firma. Eigene Gruppe, und bewusst NICHT
+    # „FundedNext" (CFD): andere Plattform, anderes Regelwerk, eigener Topf.
+    # Muss VOR der MFFU-Regel und VOR _FIRM_RULES („fundednext") stehen.
+    if "futur" in f and any(n in f for n in ("fundednext", "funded next",
+                                             "foundednext", "founded next")):
+        return "FundedNext Futures"
     if ("funded" in f or "founded" in f) and "futur" in f:
         return "MyFundedFutures"
     for needle, out in _FIRM_RULES:
