@@ -2479,7 +2479,7 @@ def tv_feld_darueber(felder, anker, anker_r, toleranz=40, max_abstand=260):
     return bestes
 
 
-def _tv_autofill_vorschlag(username, ohne=None):
+def _tv_autofill_vorschlag(username, ohne=None, anmelde_handle=None):
     """Chromes Autofill-Liste haengt als eigenes Popup-Fenster am Browser. Gesucht
     wird in allen Chrome-Fenstern AUSSER dem TradingView-Fenster ('ausser' =
     Handles) nach einem Nicht-Eingabe-Element, das den Username als GANZES WORT
@@ -2501,7 +2501,15 @@ def _tv_autofill_vorschlag(username, ohne=None):
     # Fenster wird deshalb ausgenommen; vor der Kontonummer schuetzt der
     # Ganzwort-Vergleich. Ausgenommen ist nur das Username-Feld selbst ('ohne'):
     # steht der Name schon drin, truege dessen Text denselben Namen.
-    fenster = _tv_browser_fenster()
+    # Nur dort suchen, wo die Liste sein KANN: im Anmelde-Fenster selbst und in
+    # kleinen Chrome-Popups (die Liste ist ein eigenes kleines Fenster). Das
+    # grosse Prophos-Fenster u.a. abzusuchen kostete nur Zeit (22.09.2026).
+    fenster = []
+    for h, t, fw in _tv_browser_fenster():
+        fr = _tv_fenster_rect(fw)
+        klein = bool(fr) and (fr[2] - fr[0]) <= 900 and (fr[3] - fr[1]) <= 700
+        if h == anmelde_handle or klein or anmelde_handle is None:
+            fenster.append((h, t, fw))
     roh = []
     if _UIA_SAMMEL["geht"] is not True:             # 1) gezielt: Name == Username — nur solange
         for _h, _t, w in fenster:                   #    die Sammelabfrage (22.09.2026) nicht laeuft;
@@ -2517,7 +2525,7 @@ def _tv_autofill_vorschlag(username, ohne=None):
 def modus_tvkonto(cmd):
     res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
-    trail = []
+    trail = _StempelSpur()      # jeder Eintrag traegt seine Sekunde seit Lauf-Start
 
     def raus(msg, schritt):
         res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
@@ -2630,7 +2638,10 @@ def modus_tvkonto(cmd):
 
     def ab(msg, schritt="wechsel"):
         diagnose()
-        return raus(msg, schritt)
+        # Die letzten Stationen MIT Sekunden gehoeren in den Meldungstext: Finn
+        # schickt den Text, nicht die Diagnose — und 'wo blieb er haengen, wie
+        # lange' war am 22.09. zweimal nur zu raten.
+        return raus(msg + " | Zuletzt: " + " > ".join(list(trail)[-4:]), schritt)
 
     def esc():
         try:
@@ -2994,40 +3005,107 @@ def modus_tvkonto(cmd):
                 inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
 
+            # ERST WENN DIE SEITE RUHIG IST (22.09.2026, Finns Lauf direkt nach dem
+            # Tempo-Umbau: Feld nie angeklickt, 'NICHT nachweislich drin'). Seit die
+            # Suche ~1 s statt ~20 s braucht, war der Bot VOR der Seite da: Chrome
+            # fuellt den zuletzt benutzten Login erst kurz nach dem Laden ein, und
+            # Tradovate baut die Felder dabei neu — ein Klick davor verliert den
+            # Fokus samt Vorschlagsliste, und das Tippen danach geht ins Leere. Die
+            # langsame Fassung hatte genau diese Sekunden zufaellig mitgewartet.
+            # Ruhig = Feldinhalte 1,2 s lang unveraendert (hoechstens 9 s warten).
+            # LEERE Felder gelten erst nach 6 s als ruhig: direkt nach dem Laden
+            # sind sie leer UND unveraendert — genau der Moment VOR Chromes
+            # Vorbefuellen (die Simulation hat diese Luecke in der ersten Fassung
+            # der Regel gefunden, bevor sie live zuschlagen konnte).
+            letzter, seit, t_r = None, time.time(), time.time()
+            while time.time() - t_r < 9.0:
+                u2, p2 = felder()
+                jetzt = (_tv_edit_wert(u2) if u2 else None, len(_tv_edit_wert(p2)) if p2 else None)
+                if jetzt != letzter:
+                    letzter, seit = jetzt, time.time()
+                elif time.time() - seit >= 1.2 and (jetzt[0] or time.time() - t_r >= 6.0):
+                    break
+                _warte(0.3, 0.2)
+            trail.append("Anmeldeseite ruhig")
+
+            def ins_feld():
+                """Username-Feld anklicken, bis es den Tastaturfokus HAT. -> (ok, rect)"""
+                rect = None
+                for _versuch in range(3):
+                    u3, _p3 = felder()
+                    if not u3:
+                        _warte(0.5, 0.3)
+                        continue
+                    try:
+                        r = u3.rectangle()
+                        rect = (r.left, r.top, r.right, r.bottom)
+                    except Exception:
+                        continue
+                    ok_k, _f = _tv_uia_klick({"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)},
+                                             "Username-Feld", trail)
+                    _warte(0.6, 0.4)
+                    try:
+                        if u3.has_keyboard_focus():
+                            return True, rect
+                    except Exception:
+                        return ok_k, rect          # Fokus nicht lesbar -> dem Klick glauben
+                return False, rect
+
             if not bewiesen():
-                try:
-                    r = un.rectangle()
-                    un_r = (r.left, r.top, r.right, r.bottom)
-                    punkt = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
-                except Exception:
-                    return ab("Username-Feld ohne Rechteck.", "login")
-                ok, f = _tv_uia_klick(punkt, "Username-Feld", trail)
-                if not ok:
-                    return ab(f, "login")
-                _warte(0.9, 0.5)
-                vor = _tv_autofill_vorschlag(username, ohne=un_r)
+                hat_fokus, un_r = ins_feld()
+                if not hat_fokus:
+                    return ab("Das Benutzername-Feld im Tradovate-Fenster nimmt den Klick nicht an "
+                              "(kein Tastaturfokus nach drei Versuchen).", "login")
+                vor = _tv_autofill_vorschlag(username, ohne=un_r, anmelde_handle=tw_handle)
                 if len(vor) != 1:
-                    # Liste zeigt den Login nicht (oder mehrere): Username tippen —
-                    # Chrome filtert die Vorschlaege dann auf genau diesen.
-                    _tv_tippen(tv_tasten_escape(username), "Username", trail)
-                    _warte(1.0, 0.5)
-                    vor = _tv_autofill_vorschlag(username, ohne=un_r)
+                    # Liste nicht (mehr) offen? Pfeil-runter oeffnet sie im Feld.
+                    try:
+                        from pywinauto import keyboard
+                        keyboard.send_keys("{DOWN}")
+                        _warte(0.6, 0.3)
+                    except Exception:
+                        pass
+                    vor = _tv_autofill_vorschlag(username, ohne=un_r, anmelde_handle=tw_handle)
                 if len(vor) == 1:
                     ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
                     if not ok:
                         return ab(f, "login")
                 else:
+                    # Liste fuer UIA unsichtbar: Username tippen — Chrome filtert die
+                    # Vorschlaege dann auf genau diesen — und den ersten nehmen. Nur
+                    # mit bewiesenem Fokus, und erst wenn der getippte Name im Feld
+                    # STEHT (sonst ginge Pfeil+Enter auf irgendeinen Vorschlag).
                     try:
                         from pywinauto import keyboard
-                        keyboard.send_keys("{DOWN}")
-                        _warte(0.25, 0.2)
-                        keyboard.send_keys("{ENTER}")
-                        trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
+                        keyboard.send_keys("{ESC}")           # evtl. offene Liste zu, Feld behaelt den Fokus
                     except Exception:
-                        return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
-                ende_b = time.time() + 5.0
+                        pass
+                    hat_fokus, un_r = ins_feld()
+                    if not hat_fokus:
+                        return ab("Benutzername-Feld hat den Fokus verloren.", "login")
+                    _tv_tippen(tv_tasten_escape(username), "Username", trail)
+                    _warte(0.9, 0.4)
+                    u4, _p4 = felder()
+                    if not u4 or _nur_alnum(_tv_edit_wert(u4)) != _nur_alnum(username):
+                        return ab(f"Der Username '{username}' liess sich nicht ins Feld tippen "
+                                  f"(dort steht '{_tv_edit_wert(u4)[:30] if u4 else '?'}').", "login")
+                    vor = _tv_autofill_vorschlag(username, ohne=un_r, anmelde_handle=tw_handle)
+                    if len(vor) == 1:
+                        ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
+                        if not ok:
+                            return ab(f, "login")
+                    else:
+                        try:
+                            from pywinauto import keyboard
+                            keyboard.send_keys("{DOWN}")
+                            _warte(0.3, 0.2)
+                            keyboard.send_keys("{ENTER}")
+                            trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
+                        except Exception:
+                            return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
+                ende_b = time.time() + 6.0
                 while time.time() < ende_b and not bewiesen():
-                    _warte(0.5, 0.3)
+                    _warte(0.4, 0.3)
             if not bewiesen():
                 inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab(f"Im Tradovate-Fenster stehen Username '{username}' und ein gefuelltes "
@@ -3035,12 +3113,24 @@ def modus_tvkonto(cmd):
                           "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
             trail.append("Username + gefuelltes Passwort bewiesen")
             el, n = warte_auf(TV_NAMEN_LOGIN, TV_RX_LOGIN, 6.0, "login_knopf", quelle=tw)
-            if not el:
-                return ab(f"Der Knopf 'Login' im Tradovate-Fenster wurde nicht eindeutig gefunden "
-                          f"({n} Treffer)." + spur[0], "login")
-            ok, f = _tv_uia_klick(el, "Login", trail)
-            if not ok:
-                return ab(f, "login")
+            if el:
+                ok, f = _tv_uia_klick(el, "Login", trail)
+                if not ok:
+                    return ab(f, "login")
+            else:
+                # Knopf nicht eindeutig -> Enter im Passwortfeld schickt das Formular
+                # ab. Erlaubt, weil Username + gefuelltes Passwort oben BEWIESEN sind.
+                _u5, p5 = felder()
+                try:
+                    r = p5.rectangle()
+                    _tv_uia_klick({"punkt": (r.left + 40, (r.top + r.bottom) // 2)}, "Passwortfeld", trail)
+                    _warte(0.3, 0.2)
+                    from pywinauto import keyboard
+                    keyboard.send_keys("{ENTER}")
+                    trail.append(f"'Anmelden' nicht eindeutig ({n}) -> Enter im Passwortfeld")
+                except Exception:
+                    return ab(f"Der Knopf 'Anmelden' im Tradovate-Fenster wurde nicht eindeutig gefunden "
+                              f"({n} Treffer)." + spur[0], "login")
 
             # Das Fenster muss verschwinden (bzw. der Tab den Titel verlieren).
             ende_z = time.time() + 35.0
