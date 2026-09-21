@@ -24542,14 +24542,24 @@
         // anderes Konto, das hier bei DERSELBEN Firma geführt wird, ist es
         // derselbe Login — Puls wechselt dann nur im Dropdown. Accounts liegen
         // pro Prophos-Login, „dieselbe Firma im selben Profil" ist also genau
-        // die Gruppe eines Tradovate-Logins. Archivierte zählen nicht mit.
+        // die Gruppe eines Tradovate-Logins.
         // Der Username ist damit hier KEINE Pflicht mehr — gebraucht wird er
         // erst fürs Ab-/Anmelden bei einem fremden Login (nächster Teilschritt).
+        // Nachtrag gleicher Abend (Finn: „nicht nur die aktiven, sondern auch die
+        // letzten 10 inaktiven — manchmal sind Accounts, die schon geblowed
+        // sind, trotzdem noch im Dropdown auswählbar"): steht so ein Konto im
+        // Panel, ist es trotzdem derselbe Login. Ohne sie würde Puls dann
+        // „fremder Login" melden. Genommen werden ALLE aktiven plus die 10
+        // zuletzt archivierten derselben Firma (nach Archiv-Zeitpunkt `at`) —
+        // gedeckelt, weil alte External IDs sonst unbegrenzt mitwandern.
         const _arch = (typeof getArchive === 'function') ? getArchive() : {}
-        const geschwister = (accounts || [])
-          .filter(a => String(a.id) !== String(plan.masterAccountId)
-            && String(a.firm||'').trim().toLowerCase() === firmName.toLowerCase()
-            && a.externalId && !(_arch[a.id] && _arch[a.id].archived))
+        const _gleicheFirma = (accounts || []).filter(a => String(a.id) !== String(plan.masterAccountId)
+          && String(a.firm||'').trim().toLowerCase() === firmName.toLowerCase() && a.externalId)
+        const _istArch = a => !!(_arch[a.id] && _arch[a.id].archived)
+        const _inaktiv = _gleicheFirma.filter(_istArch)
+          .sort((a, b) => String(_arch[b.id].at || '').localeCompare(String(_arch[a.id].at || '')))
+          .slice(0, 10)
+        const geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
           .map(a => String(a.externalId).trim())
         const startBtn = document.getElementById('tpOrderStart')
         if(startBtn) startBtn.disabled = true
@@ -24601,7 +24611,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.316'
+  const OS_TAB_BUILD = '2026-09-21.317'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
