@@ -3657,6 +3657,59 @@ def tv_order_plan(cmd):
             "tp": tp if tp and tp > 0 else None, "sl": sl if sl and sl > 0 else None}, ""
 
 
+TV_RX_POS_SYMBOL = re.compile(r"^symbol$", re.I)
+TV_RX_POS_SEITE = re.compile(r"^(side|seite)\b", re.I)
+TV_RX_POS_MENGE = re.compile(r"^(qty|quantity|menge|anzahl)\b", re.I)
+TV_RX_POS_LONGSHORT = {"buy": re.compile(r"^(long|buy|kauf)", re.I), "sell": re.compile(r"^(short|sell|verkauf)", re.I)}
+
+
+def tv_positions_tabelle(roh, symbol, richtung):
+    """Positions-Tabelle unten im TradingView-Konto-Bereich lesen (4b, 22.09.2026,
+    Finns erster scharfer Lauf: "es drueckt nicht drauf" — der Klick hing am
+    Positions-Reader, und der ist bei ihm PAUSIERT, weil Duplikium kopiert. Der
+    Beweis darf deshalb nicht am Reader haengen).
+    Anker wie beim Order-Panel: die Kopfzeile 'Symbol … Side … Qty' auf EINER
+    Zeile (die Watchlist rechts hat auch 'Symbol', aber kein 'Side' daneben).
+    Zeile = Text mit der Symbol-Wurzel in der Symbol-Spalte unter dem Kopf, auf
+    derselben Hoehe Long/Short passend zur Richtung.
+    -> {'menge': Summe, 'zeilen': n} oder None, wenn die Kopfzeile nicht zu sehen ist."""
+    els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
+    mitte_y = lambda r: (r[1] + r[3]) // 2
+    kopf = None
+    for ns, rs in els:
+        if not TV_RX_POS_SYMBOL.search(ns):
+            continue
+        seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
+        mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
+        if seiten and mengen:
+            rd = min(seiten, key=lambda r: r[0])
+            rq = min((r for r in mengen if r[0] > rd[0]), key=lambda r: r[0], default=None)
+            if rq:
+                kopf = (rs, rd, rq)
+                break
+    if not kopf:
+        return None
+    rs, rd, rq = kopf
+    root = tv_symbol_root(symbol)
+    summe, zeilen, gesehen = 0.0, 0, []
+    for n, r in els:
+        y = mitte_y(r)
+        if y <= mitte_y(rs) + 8 or not (rs[0] - 30 <= r[0] < rd[0] - 10):
+            continue
+        if " " in n or tv_symbol_root(n) != root or any(abs(y - g) <= 10 for g in gesehen):
+            continue
+        if not any(TV_RX_POS_LONGSHORT[richtung].search(n2) and abs(mitte_y(r2) - y) <= 12 and rd[0] - 30 <= r2[0] < rq[0] - 10
+                   for n2, r2 in els):
+            continue
+        gesehen.append(y)
+        zeilen += 1
+        # Menge: der Text auf derselben Zeile, der der Qty-Spalte am naechsten steht
+        kand = [(abs(r2[0] - rq[0]), tv_zahl_lesen(n2)) for n2, r2 in els
+                if abs(mitte_y(r2) - y) <= 12 and abs(r2[0] - rq[0]) <= 90 and tv_zahl_lesen(n2) is not None]
+        summe += abs(min(kand)[1]) if kand else 0.0
+    return {"menge": summe, "zeilen": zeilen}
+
+
 def tv_ist_scharf(cmd):
     """Schritt 4b (22.09.2026): scharf NUR mit der ausdruecklichen Marke 'scharf'
     — und nie, wenn 'probe' gesetzt ist. Die Marke schickt erst das Frontend,
@@ -3845,18 +3898,27 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     # hinterher keine Bestaetigung, und eine unbestaetigte Order ist genau der
     # Zustand, den der ganze Ablauf vermeiden will. Bestaetigt wird spaeter per
     # DIFFERENZ (vorher/nachher), nie per 'es gibt eine Position'.
+    # ERSTER SCHARFER LAUF (22.09.2026 01:12, Finn: "es drueckt nicht drauf" —
+    # Meldung 'TV-Reader ist pausiert … NICHT gesendet'): der Reader ist bei ihm
+    # mit Absicht PAUSIERT (Duplikium kopiert; ein laufender Reader wuerde den
+    # Orbit-Copier ein zweites Mal hedgen lassen). Der Klick darf also nicht am
+    # Reader haengen. Beweis-Quellen, in dieser Reihenfolge: (1) Reader, wenn er
+    # lebt UND an ist; (2) die Positions-Tabelle unten in TradingView, gelesen
+    # mit demselben UIA-Auge wie das Panel; (3) keine → es wird TROTZDEM
+    # geklickt, das Ergebnis heisst dann ehrlich 'gesendet, nicht bewiesen'.
     scharf = tv_ist_scharf(cmd)
-    menge_vorher = 0.0
+    typen_pos = typen + ("DataItem", "HeaderItem", "Header", "Custom")
+    quelle, vorher = None, None
     if scharf:
         pos_vorher, reader_an = _tv_positionen()
-        if pos_vorher is None:
-            return False, ("TV-Reader antwortet nicht — ohne ihn liesse sich die Order hinterher nicht "
-                           "beweisen. Panel ist ausgefuellt, NICHT gesendet.")
-        if not reader_an:
-            return False, ("TV-Reader ist pausiert — er wuerde die neue Position nie melden. Panel ist "
-                           "ausgefuellt, NICHT gesendet.")
-        menge_vorher = tv_menge_summe(pos_vorher, cmd.get("symbol"), plan["richtung"])
-        trail.append(f"Reader lebt, {len(pos_vorher)} Pos, Ausgangsmenge {menge_vorher:g}")
+        if pos_vorher is not None and reader_an:
+            quelle = "reader"
+            vorher = {"menge": tv_menge_summe(pos_vorher, cmd.get("symbol"), plan["richtung"]), "zeilen": 0}
+        else:
+            vorher = tv_positions_tabelle(_tv_uia_roh(w, typen_pos), cmd.get("symbol"), plan["richtung"])
+            quelle = "tabelle" if vorher else None
+        trail.append(f"Beweis-Quelle: {quelle or 'KEINE (Reader aus, Positions-Tabelle nicht zu sehen)'}"
+                     + (f", vorher {vorher['menge']:g}" if vorher else ""))
 
     # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
     roh, _b = blick()
@@ -3889,30 +3951,46 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Der Klick kam nachweislich nicht raus (SendInput abgelehnt) — nichts gesendet.
         return False, f + " — NICHT gesendet."
     erg["gesendet"] = True
-    trail.append("Senden geklickt — ab hier zaehlt nur noch der Reader")
-    ende = time.time() + 25.0
+    trail.append("Senden geklickt — ab hier zaehlt nur noch der Beweis")
+    ende = time.time() + (25.0 if quelle else 0.0)
     while time.time() < ende:
         _warte(0.4, 0.3)
-        pos, _an = _tv_positionen()
-        if pos is None:
-            continue
-        jetzt = tv_menge_summe(pos, cmd.get("symbol"), plan["richtung"])
-        if jetzt - menge_vorher >= plan["menge"] - 1e-9:
+        if quelle == "reader":
+            pos, _an = _tv_positionen()
+            if pos is None:
+                continue
+            jetzt = {"menge": tv_menge_summe(pos, cmd.get("symbol"), plan["richtung"]), "zeilen": 0}
             treffer = next((p for p in pos
                             if tv_symbol_root(p.get("symbol")) == tv_symbol_root(cmd.get("symbol"))
                             and tv_seite_passt(p.get("seite"), plan["richtung"])), {})
-            erg.update(bestaetigt=True, menge=jetzt - menge_vorher,
-                       einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
-            trail.append(f"Position bestaetigt: +{jetzt - menge_vorher:g} @ {treffer.get('einstieg') or '?'}")
+        else:
+            jetzt = tv_positions_tabelle(_tv_uia_roh(w, typen_pos), cmd.get("symbol"), plan["richtung"])
+            treffer = {}
+            if jetzt is None:
+                continue
+        # Bestaetigt wird nur der ZUWACHS: mehr Kontrakte — oder (Tabelle) eine neue Zeile.
+        if jetzt["menge"] - vorher["menge"] >= plan["menge"] - 1e-9 or jetzt["zeilen"] > vorher["zeilen"]:
+            zuwachs = jetzt["menge"] - vorher["menge"]
+            erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
+            trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "
-                          f"{treffer.get('symbol') or cmd.get('symbol')} @ {treffer.get('einstieg') or '?'} · {tpsl}")
-    # Kein Positionszuwachs in 25 s: Ablehnung, eine Rueckfrage von TradingView
-    # oder eine haengende Verbindung — welches davon, kann der Bot NICHT wissen.
-    # Eine Rueckfrage wird bewusst NICHT geraten weggeklickt: was zu sehen ist,
-    # steht in der Meldung, daraus wird der naechste Schritt gebaut.
-    roh, _b = blick()
-    return False, ("Ergebnis UNKLAR: 25 s nach dem Kauf-Klick meldet der Reader keine neue Position. Erst in "
-                   "TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Gesehen: "
+                          f"{treffer.get('symbol') or cmd.get('symbol')}"
+                          + (f" @ {treffer['einstieg']}" if treffer.get("einstieg") else "")
+                          + f" · {tpsl} (bewiesen: {'Reader' if quelle == 'reader' else 'Positions-Tabelle'})")
+    # Kein Zuwachs in 25 s (oder gar keine Beweis-Quelle): Ablehnung, eine
+    # Rueckfrage von TradingView oder eine haengende Verbindung — welches davon,
+    # kann der Bot NICHT wissen. Eine Rueckfrage wird bewusst NICHT geraten
+    # weggeklickt: was zu sehen ist, steht in der Meldung.
+    roh = _tv_uia_roh(w, typen_pos)
+    if not quelle:
+        return False, ("Kauf-Klick ist RAUS, aber nicht beweisbar: der Reader ist aus/pausiert und die "
+                       "Positions-Tabelle unten in TradingView (Reiter 'Positions', Kopf 'Symbol · Side · Qty') "
+                       "war nicht zu lesen. In TradingView nachsehen — NICHT blind erneut starten. Gesehen: "
+                       + (" | ".join(tv_uia_inventar([x for x in roh if x[1] and (
+                           TV_RX_POS_SYMBOL.search(x[0]) or TV_RX_POS_SEITE.search(x[0]) or TV_RX_POS_MENGE.search(x[0])
+                           or re.search(r"^(positions?|orders?)\b", x[0], re.I))], 10)) or "nichts Einschlaegiges"))
+    return False, (f"Ergebnis UNKLAR: 25 s nach dem Kauf-Klick zeigt die Quelle '{quelle}' keine neue Position. "
+                   "Erst in TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Gesehen: "
                    + tv_uia_spur(roh))
 
 
