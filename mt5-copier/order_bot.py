@@ -502,7 +502,7 @@ def tv_senden_text_passt(text, richtung, menge):
     t = (text or "").strip().lower()
     if not t:
         return False, "Senden-Knopf ohne Beschriftung"
-    if "markt" not in t and "market" not in t:
+    if "markt" not in t and "market" not in t and not re.search(r"\bmkt\b", t):
         return False, f"Orderart steht nicht auf Markt ('{text[:40]}')"
     ist_verkauf = ("verkauf" in t) or ("sell" in t)
     ist_kauf = (not ist_verkauf) and (("kauf" in t) or ("buy" in t))
@@ -3446,6 +3446,296 @@ def tv_asset_schritt(w, symbol, trail):
                    f"'{(w.window_text() or '')[:40]}' statt {ziel}.")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FUTURES-PULS, SCHRITT 4a (22.09.2026) — Order-Panel ausfuellen und BEWEISEN
+#
+# Finns Ablauf (22.09.2026): Buy oder Sell nach Plan → immer Market → Take
+# Profit: Schalter an, $-Wert 1:1 wie beim Trade-Planen → Stop Loss NUR wenn
+# in Prophos einer steht; sonst den SL-Schalter AUS stellen, falls er an ist
+# ("mein Stop Loss ist oft die Auto-Liquidation").
+#
+# 4a = PROBELAUF: alles eintragen, alles zuruecklesen, den Text des Kauf-Knopfs
+# pruefen — und NICHT klicken. Der scharfe Klick kommt als eigener Schritt,
+# wenn Finn den Probelauf am PC gesehen hat: hier wird echtes Geld bewegt.
+#
+# DAS PANEL (Finns Screenshot 22.09., englische Oberflaeche): Kopf 'MNQZ6' ·
+# Reiter Order/DOM · Seiten-Kasten 'Sell <Kurs> | Buy <Kurs>' · Reiter
+# 'Market  Limit  Stop  Stop Limit' · 'Units' + Feld · 'Exits' mit
+# 'Take profit, $' + Schalter + Wertfeld, 'Stop loss, $' + Schalter + Wertfeld ·
+# unten der Knopf ('Start creating order', nach Seitenwahl 'Buy 1 MNQZ6 …').
+# Links oben im CHART stehen zusaetzlich die Schnell-Knoepfe 'SELL'/'BUY' —
+# die duerfen NIE getroffen werden. Deshalb wird alles am Panel VERANKERT:
+# die Reiter-Zeile 'Market … Stop Limit' gibt den x-Bereich des Panels, jede
+# weitere Stelle muss darin liegen.
+# Felder und Schalter tragen bei TradingView keine Namen — sie werden ueber
+# ihre LAGE zur Beschriftung gefunden (Wertfeld = erstes Eingabefeld direkt
+# unter der Beschriftung; Schalter = selbe Zeile, rechts). Ob ein Schalter AN
+# ist, zeigt das Wertfeld: aus = ausgegraut (nicht bedienbar).
+# ═══════════════════════════════════════════════════════════════════════════
+
+TV_RX_MARKET = re.compile(r"^(market|markt)$", re.I)
+TV_RX_STOPLIMIT = re.compile(r"^stop[- ]?limit$", re.I)
+TV_RX_UNITS = re.compile(r"^(units|einheiten|menge|kontrakte|quantity)\b", re.I)
+TV_RX_TP = re.compile(r"^take[- ]?profit", re.I)
+TV_RX_SL = re.compile(r"^stop[- ]?loss", re.I)
+# Seiten-Kasten: 'Buy' als Textknoten — oder, falls nur der Kasten selbst benannt
+# ist, 'Buy 30,827.75' (Name + Kurs).
+TV_RX_SEITE = {"buy": re.compile(r"^(buy|kauf|kaufen)(\s+[\d.,]+)?$", re.I),
+               "sell": re.compile(r"^(sell|verkauf|verkaufen)(\s+[\d.,]+)?$", re.I)}
+TV_RX_SENDEN = re.compile(r"^(buy|sell|kauf|verkauf)\w*\s+\d", re.I)
+
+
+def tv_zahl_lesen(text):
+    """Zahl aus einem TradingView-Feld, egal ob englisch ('1,875.00') oder
+    deutsch ('1.875,00') geschrieben. None, wenn nichts Zaehlbares drinsteht."""
+    t = re.sub(r"[^0-9,.\-]", "", str(text or ""))
+    if not re.search(r"\d", t):
+        return None
+    if "," in t and "." in t:
+        dez = "," if t.rfind(",") > t.rfind(".") else "."
+        t = t.replace("." if dez == "," else ",", "").replace(dez, ".")
+    elif re.fullmatch(r"-?\d{1,3}([.,]\d{3})+", t):
+        t = t.replace(",", "").replace(".", "")       # reine Tausender-Gruppen ('1,875' / '1.875')
+    else:
+        t = t.replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def tv_panel_bereich(roh):
+    """x-/y-Anker des Order-Panels aus der Reiter-Zeile. -> dict oder None.
+    'Market' und 'Stop Limit' muessen auf EINER Zeile stehen — das gibt es nur
+    im Order-Panel."""
+    markt = [e for e in roh or () if e[1] and TV_RX_MARKET.search(str(e[0]).strip())]
+    stopl = [e for e in roh or () if e[1] and TV_RX_STOPLIMIT.search(str(e[0]).strip())]
+    for m in markt:
+        for sl in stopl:
+            if abs((m[1][1] + m[1][3]) - (sl[1][1] + sl[1][3])) <= 24 and sl[1][0] > m[1][0]:
+                return {"links": m[1][0] - 30, "rechts": sl[1][2] + 30, "reiter_y": (m[1][1] + m[1][3]) // 2,
+                        "market": {"text": m[0], "r": tuple(m[1]), "punkt": ((m[1][0] + m[1][2]) // 2, (m[1][1] + m[1][3]) // 2)}}
+    return None
+
+
+def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
+    """Elemente im x-Bereich des Panels, deren Name passt; innerste, ohne Doppelte."""
+    kand = []
+    for e in roh or ():
+        if not e[1] or not muster.search(str(e[0]).strip()):
+            continue
+        l, t, r, b = e[1]
+        mx, my = (l + r) // 2, (t + b) // 2
+        if not (bereich["links"] <= mx <= bereich["rechts"]):
+            continue
+        if (y_von is not None and my < y_von) or (y_bis is not None and my > y_bis):
+            continue
+        kand.append({"text": str(e[0]).strip()[:80], "typ": e[2] if len(e) > 2 else "", "r": (l, t, r, b), "punkt": (mx, my)})
+    out = []
+    for a in kand:
+        ar = a["r"]
+        if any(x is not a and x["r"] != ar and x["r"][0] >= ar[0] - 2 and x["r"][1] >= ar[1] - 2
+               and x["r"][2] <= ar[2] + 2 and x["r"][3] <= ar[3] + 2 for x in kand):
+            continue
+        if not any(c["r"] == ar for c in out):
+            out.append(a)
+    return out
+
+
+def tv_feld_unter(felder_r, label_r, bereich, max_abstand=70):
+    """Index des Eingabefelds DIREKT UNTER einer Beschriftung: im Panel, Oberkante
+    bis max_abstand unter der Beschriftung; bei mehreren das LINKE (rechts daneben
+    steht das Umrechnungsfeld 'price'/'ticks'). -> Index oder None"""
+    bestes, schluessel = None, None
+    for i, r in enumerate(felder_r or ()):
+        if not r:
+            continue
+        l, t, rr, b = r
+        if not (bereich["links"] <= (l + rr) // 2 <= bereich["rechts"]):
+            continue
+        abstand = t - label_r[3]
+        if abstand < -6 or abstand > max_abstand:
+            continue
+        k = (abstand // 12, l)
+        if schluessel is None or k < schluessel:
+            bestes, schluessel = i, k
+    return bestes
+
+
+def tv_order_plan(cmd):
+    """Befehl -> (plan, fehler). plan = {'richtung','menge','tp','sl'}; tp/sl None = aus."""
+    r = str(cmd.get("richtung") or "").strip().lower()
+    if r not in ("buy", "sell"):
+        return None, "Richtung fehlt (buy/sell)"
+    menge = tv_zahl_lesen(cmd.get("volumen"))
+    if not menge or menge <= 0 or abs(menge - round(menge)) > 1e-9:
+        return None, f"Menge '{cmd.get('volumen')}' ist keine ganze Kontraktzahl"
+    tp, sl = tv_zahl_lesen(cmd.get("tp_usd")), tv_zahl_lesen(cmd.get("sl_usd"))
+    return {"richtung": r, "menge": int(round(menge)),
+            "tp": tp if tp and tp > 0 else None, "sl": sl if sl and sl > 0 else None}, ""
+
+
+def tv_order_schritt(w, cmd, trail):
+    """Order-Panel ausfuellen und beweisen — OHNE den Kauf-Klick (Schritt 4a).
+    -> (ok, msg)"""
+    plan, fehler = tv_order_plan(cmd)
+    if not plan:
+        return False, fehler
+    try:
+        from pywinauto import keyboard
+    except ImportError:
+        return False, "pywinauto fehlt"
+    typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem")
+
+    def blick():
+        roh = _tv_uia_roh(w, typen)
+        return roh, tv_panel_bereich(roh)
+
+    # --- Panel offen? sonst Shift+T (offizieller TradingView-Hotkey, UMSCHALTER:
+    # nur druecken, wenn das Panel nachweislich fehlt) ------------------------
+    roh, ber = blick()
+    if not ber:
+        fr = _tv_fenster_rect(w)
+        if not fr:
+            return False, "TradingView-Fenster ohne Rechteck."
+        # in den Chart klicken, damit der Hotkey dort ankommt — mittig-links, weit weg
+        # von den Schnell-Knoepfen SELL/BUY oben links
+        _tv_uia_klick({"punkt": (fr[0] + int((fr[2] - fr[0]) * 0.35), fr[1] + int((fr[3] - fr[1]) * 0.6))},
+                      "Chart (Fokus)", trail)
+        _warte(0.4, 0.3)
+        keyboard.send_keys("+t")
+        trail.append("Order-Panel per Shift+T geoeffnet")
+        ende = time.time() + 6.0
+        while time.time() < ende and not ber:
+            _warte(0.6, 0.3)
+            roh, ber = blick()
+        if not ber:
+            return False, ("Das Order-Panel ist nicht zu sehen (Reiter 'Market … Stop Limit' fehlen), auch "
+                           "nach Shift+T nicht. Gesehen: " + tv_uia_spur(roh))
+
+    # --- Market --------------------------------------------------------------
+    ok, f = _tv_uia_klick(ber["market"], "Reiter Market", trail)
+    if not ok:
+        return False, f
+    _warte(0.5, 0.3)
+
+    # --- Seite: Buy/Sell im Seiten-Kasten UEBER der Reiter-Zeile -------------
+    roh, ber2 = blick()
+    ber = ber2 or ber
+    seite = tv_im_panel(roh, ber, TV_RX_SEITE[plan["richtung"]], y_von=ber["reiter_y"] - 150, y_bis=ber["reiter_y"] - 12)
+    if len(seite) != 1:
+        return False, (f"'{plan['richtung'].upper()}' im Seiten-Kasten des Order-Panels nicht eindeutig "
+                       f"({len(seite)} Treffer). Gesehen: " + tv_uia_spur(roh))
+    ok, f = _tv_uia_klick(seite[0], f"Seite {plan['richtung'].upper()}", trail)
+    if not ok:
+        return False, f
+    _warte(0.6, 0.4)
+
+    # --- Felder ueber ihre Lage zur Beschriftung -----------------------------
+    def felder():
+        try:
+            eds = [e for e in w.descendants(control_type="Edit")
+                   if not hasattr(e, "is_visible") or e.is_visible()]
+        except Exception:
+            return [], []
+        rs = []
+        for e in eds:
+            try:
+                r = e.rectangle()
+                rs.append((r.left, r.top, r.right, r.bottom))
+            except Exception:
+                rs.append(None)
+        return eds, rs
+
+    def feld_zu(muster, name):
+        roh_, _b = blick()
+        labels = tv_im_panel(roh_, ber, muster, y_von=ber["reiter_y"])
+        if len(labels) != 1:
+            return None, None, f"Beschriftung '{name}' im Order-Panel nicht eindeutig ({len(labels)} Treffer)."
+        eds, rs = felder()
+        i = tv_feld_unter(rs, labels[0]["r"], ber)
+        if i is None:
+            return None, labels[0], f"Eingabefeld unter '{name}' nicht gefunden."
+        return (eds[i], rs[i]), labels[0], ""
+
+    def an(feld):
+        try:
+            return bool(feld[0].is_enabled())
+        except Exception:
+            return None
+
+    def setze_wert(feld, wert, name):
+        r = feld[1]
+        _tv_uia_klick({"punkt": (r[0] + max(12, (r[2] - r[0]) // 4), (r[1] + r[3]) // 2)}, f"Feld {name}", trail)
+        _warte(0.3, 0.2)
+        text = str(int(wert)) if abs(wert - round(wert)) < 1e-9 else ("%.2f" % wert)
+        _tv_tippen(text, name, trail)
+        keyboard.send_keys("{TAB}")
+        _warte(0.5, 0.3)
+
+    # Units
+    feld, _lab, f = feld_zu(TV_RX_UNITS, "Units")
+    if not feld:
+        return False, f
+    if tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
+        setze_wert(feld, float(plan["menge"]), "Units")
+        feld, _lab, f = feld_zu(TV_RX_UNITS, "Units")
+        if not feld or tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
+            return False, f"Menge {plan['menge']} steht nicht im Feld 'Units' (dort: '{_tv_edit_wert(feld[0]) if feld else '?'}')."
+    trail.append(f"Units = {plan['menge']}")
+
+    # Take Profit / Stop Loss
+    for muster, name, soll in ((TV_RX_TP, "Take profit", plan["tp"]), (TV_RX_SL, "Stop loss", plan["sl"])):
+        feld, lab, f = feld_zu(muster, name)
+        if not feld:
+            return False, f
+        if soll is not None and "$" not in lab["text"]:
+            # Einheit MUSS Geld sein: '300' in Ticks oder % waere eine voellig andere Distanz
+            return False, f"'{lab['text']}' steht nicht auf $ — der Wert {soll} waere dort etwas anderes. Im Panel auf $ stellen."
+        ist_an = an(feld)
+        will_an = soll is not None
+        if ist_an is None:
+            return False, f"Schalter-Zustand von '{name}' nicht lesbar."
+        if ist_an != will_an:
+            # Schalter = selbe Zeile wie die Beschriftung, am rechten Panelrand
+            sx, sy = ber["rechts"] - 52, lab["punkt"][1]
+            _tv_uia_klick({"punkt": (sx, sy)}, f"Schalter {name} {'AN' if will_an else 'AUS'}", trail)
+            _warte(0.6, 0.3)
+            feld, lab, f = feld_zu(muster, name)
+            if not feld or an(feld) != will_an:
+                return False, (f"Schalter '{name}' liess sich nicht auf {'AN' if will_an else 'AUS'} stellen "
+                               f"(Klick bei {sx},{sy}).")
+        if will_an:
+            if tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(soll):
+                setze_wert(feld, float(soll), name)
+                feld, lab, f = feld_zu(muster, name)
+                ist = tv_zahl_lesen(_tv_edit_wert(feld[0])) if feld else None
+                if ist is None or abs(ist - float(soll)) > 0.005:
+                    return False, f"{name}: im Feld steht '{_tv_edit_wert(feld[0]) if feld else '?'}' statt {soll}."
+            trail.append(f"{name} = {soll} $")
+        else:
+            trail.append(f"{name} AUS")
+
+    # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
+    roh, _b = blick()
+    # UNTER der Stop-Loss-Zeile suchen: der Seiten-Kasten oben heisst sonst auch
+    # 'Buy 30,827.75' und saehe aus wie ein Kauf-Knopf.
+    knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=lab["r"][3])
+    if len(knopf) != 1:
+        return False, (f"Der Kauf-Knopf unten im Panel ist nicht eindeutig ({len(knopf)} Treffer). "
+                       "Gesehen: " + tv_uia_spur(roh))
+    ok, f = tv_senden_text_passt(knopf[0]["text"], plan["richtung"], plan["menge"])
+    if not ok:
+        return False, f
+    ziel = tv_symbol_root(cmd.get("symbol"))
+    if ziel and not any(tv_symbol_root(wort) == ziel for wort in knopf[0]["text"].split()):
+        return False, f"Auf dem Knopf steht nicht {ziel} ('{knopf[0]['text'][:40]}')."
+    trail.append(f"Knopf: '{knopf[0]['text'][:50]}'")
+    return True, (f"PROBELAUF: Order-Panel steht — Knopf zeigt '{knopf[0]['text'][:50]}', "
+                  f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}. "
+                  "NICHT gesendet.")
+
+
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe")
 
 
@@ -3505,12 +3795,21 @@ def modus_tvkette(cmd):
             ok, msg = tv_asset_schritt(w, symbol, trail)
         except Exception as e:
             ok, msg = False, f"Asset-Schritt abgebrochen: {type(e).__name__}: {e}"
+    if ok and str(cmd.get("richtung") or "").strip():
+        # Schritt 4a: Order-Panel ausfuellen + beweisen, NICHT senden.
+        asset_msg = msg
+        try:
+            ok, msg = tv_order_schritt(w, cmd, trail)
+        except Exception as e:
+            ok, msg = False, f"Order-Schritt abgebrochen: {type(e).__name__}: {e}"
+        msg = f"{asset_msg} · {msg}" if ok else f"Asset steht, aber: {msg}"
+        res["schritt_order"] = True
     res["konto_msg"] = res.get("msg")
     res["ok"] = bool(ok)
-    res["schritt"] = "asset"
+    res["schritt"] = "order" if res.get("schritt_order") else "asset"
     res["msg"] = (f"{res.get('msg')} · {msg}" if ok else
                   f"Konto steht ({res.get('konto_aktiv')}), aber: {msg} | Zuletzt: " + " > ".join(list(trail)[-3:]))
-    res["trail"] = str(res.get("trail") or "") + " || Asset: " + " > ".join(trail)
+    res["trail"] = str(res.get("trail") or "") + " || Asset/Order: " + " > ".join(trail)
     print(json.dumps(res))
 
 

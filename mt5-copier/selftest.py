@@ -818,6 +818,51 @@ def main():
         order_bot.tv_bruecke_auspacken({"symbol": "NQZ6", "geschwister": ["@symbol=MNQZ6"]})["symbol"] == "NQZ6"
         and order_bot.tv_bruecke_auspacken({"geschwister": None})["geschwister"] == [])
 
+    # Schritt 4a (22.09.2026): Order-Panel ausfuellen. Nachgestellt nach Finns
+    # Screenshot — inklusive der Schnell-Knoepfe SELL/BUY links im Chart, die
+    # NIE getroffen werden duerfen.
+    _OP = [("SELL", (70, 275, 150, 310), "Button"), ("BUY", (188, 275, 270, 310), "Button"),
+           ("Market", (1337, 415, 1383, 435), "Text"), ("Limit", (1418, 415, 1452, 435), "Text"),
+           ("Stop", (1494, 415, 1523, 435), "Text"), ("Stop Limit", (1550, 415, 1617, 435), "Text"),
+           ("Sell 30,827.25", (1326, 345, 1470, 398), "Button"), ("Sell", (1335, 350, 1360, 366), "Text"),
+           ("Buy 30,827.75", (1472, 345, 1618, 398), "Button"), ("Buy", (1584, 350, 1608, 366), "Text"),
+           ("Stop loss, $", (1325, 700, 1400, 718), "Text"), ("Market open", (1675, 911, 1750, 929), "Text"),
+           ("Buy 1 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
+    _ber = order_bot.tv_panel_bereich(_OP)
+    chk("TV-ORDER: Panel-Anker aus der Reiter-Zeile; ohne 'Stop Limit' auf derselben Zeile kein Panel",
+        _ber is not None and _ber["links"] == 1307 and _ber["rechts"] == 1647 and _ber["market"]["punkt"] == (1360, 425)
+        and order_bot.tv_panel_bereich([x for x in _OP if x[0] != "Stop Limit"]) is None
+        and order_bot.tv_panel_bereich([("Market", (1337, 415, 1383, 435), "Text"), ("Stop Limit", (1550, 700, 1617, 720), "Text")]) is None)
+    chk("TV-ORDER: Seite nur IM Panel und nur ueber der Reiter-Zeile — nie die Schnell-Knoepfe im Chart, innerstes Element",
+        [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["buy"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1584, 350, 1608, 366)]
+        and [e["r"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SEITE["sell"], y_von=_ber["reiter_y"] - 150, y_bis=_ber["reiter_y"] - 12)] == [(1335, 350, 1360, 366)])
+    chk("TV-ORDER: Kauf-Knopf nur UNTER der Stop-Loss-Zeile — der Seiten-Kasten 'Buy 30,827.75' ist keiner",
+        [e["text"] for e in order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=718)] == ["Buy 1 MNQZ6 MARKET"]
+        and len(order_bot.tv_im_panel(_OP, _ber, order_bot.TV_RX_SENDEN, y_von=_ber["reiter_y"] - 150)) == 3)
+    _FR = [(1326, 485, 1460, 520), (1326, 643, 1460, 678), (1500, 643, 1617, 678), (1326, 730, 1460, 765), (160, 160, 1400, 190), None]
+    chk("TV-ORDER: Wertfeld = direkt unter der Beschriftung, das LINKE; nie das Umrechnungsfeld, nie die Adressleiste",
+        order_bot.tv_feld_unter(_FR, (1325, 612, 1415, 630), _ber) == 1
+        and order_bot.tv_feld_unter(_FR, (1325, 700, 1400, 718), _ber) == 3
+        and order_bot.tv_feld_unter(_FR, (1325, 462, 1360, 480), _ber) == 0
+        and order_bot.tv_feld_unter(_FR, (1325, 900, 1400, 918), _ber) is None)
+    chk("TV-ORDER: Zahlen lesen — englisch, deutsch, mit Einheit; nichts Zaehlbares = None",
+        order_bot.tv_zahl_lesen("17.00") == 17.0 and order_bot.tv_zahl_lesen("1,875.00") == 1875.0
+        and order_bot.tv_zahl_lesen("1.875,00") == 1875.0 and order_bot.tv_zahl_lesen("12,5") == 12.5
+        and order_bot.tv_zahl_lesen("1,875") == 1875.0 and order_bot.tv_zahl_lesen("25 ticks") == 25.0
+        and order_bot.tv_zahl_lesen("") is None and order_bot.tv_zahl_lesen("abc") is None)
+    chk("TV-ORDER: Plan — leerer SL heisst AUS (Finns Regel), Menge muss ganze Kontrakte sein",
+        order_bot.tv_order_plan({"richtung": "SELL", "volumen": "1", "tp_usd": "300", "sl_usd": ""})[0] == {"richtung": "sell", "menge": 1, "tp": 300.0, "sl": None}
+        and order_bot.tv_order_plan({"richtung": "buy", "volumen": 2, "tp_usd": None, "sl_usd": "0"})[0] == {"richtung": "buy", "menge": 2, "tp": None, "sl": None}
+        and order_bot.tv_order_plan({"richtung": "buy", "volumen": "1.5"})[0] is None
+        and order_bot.tv_order_plan({"richtung": "", "volumen": "1"})[0] is None
+        and order_bot.tv_order_plan({"richtung": "buy", "volumen": "0"})[0] is None)
+    chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
+        order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
+        and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
+        and not order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "buy", 1)[0]
+        and not order_bot.tv_senden_text_passt("Buy 1 BTCU6 @ 86,740 LIMIT", "buy", 1)[0]
+        and not order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 1)[0])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
