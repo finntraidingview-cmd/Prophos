@@ -7429,6 +7429,14 @@
                 <input class="input mono" id="cf-server" placeholder="z.B. FundingPips-Server, FivePercentOnline-Real" autocomplete="off">
                 <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird beim „Account hinzufügen" automatisch als Server vorausgefüllt, sobald diese Firma gewählt ist (bleibt frei bearbeitbar).</div>
               </div>
+              <!-- Futures-Puls Schritt 2 (21.09.2026): mit welchem Tradovate-Login
+                   diese Firma in TradingView angemeldet wird. NUR der Username —
+                   das Passwort setzt Chromes Passwort-Manager ein. -->
+              <div class="field" style="grid-column:1/-1">
+                <label>Tradovate-Username für TradingView (optional)</label>
+                <input class="input mono" id="cf-tvuser" placeholder="z.B. TDFY_finn123" autocomplete="off" spellcheck="false">
+                <div style="font-size:11px;color:var(--sub);margin-top:4px">Nur für Futures-Firmen auf Tradovate: der Login-Name, den Chrome im Tradovate-Anmeldefenster als Vorschlag zeigt. Puls meldet damit in TradingView das richtige Konto an, wenn ein Orbit-Plan dieser Firma startet. Kein Passwort — das bleibt in Chrome.</div>
+              </div>
             </div>
             <p style="font-size:11.5px;color:var(--sub);margin-top:10px;line-height:1.5">
               <strong>Tipp:</strong> Wähl oben eine Vorlage und die Felder darunter werden automatisch ausgefüllt. Du kannst sie danach noch anpassen falls die Firma eigene Werte hat.
@@ -21365,10 +21373,10 @@
   ]
   function getCustomFirms(){ return customFirms }
   function rowToFirmSpec(row){
-    return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'', server: row.server||'' }
+    return { id: row.id, name: row.name, symbol: row.symbol||'', unit: row.unit||'Lots', ppl: Number(row.ppl), currency: row.currency||'$', dupSymbol: row.dup_symbol||'', server: row.server||'', tvUsername: row.tv_username||'' }
   }
   function firmSpecToRow(f){
-    return { name: f.name, symbol: f.symbol||null, unit: f.unit||'Lots', ppl: f.ppl, currency: f.currency||'$', dup_symbol: f.dupSymbol||null, server: f.server||null }
+    return { name: f.name, symbol: f.symbol||null, unit: f.unit||'Lots', ppl: f.ppl, currency: f.currency||'$', dup_symbol: f.dupSymbol||null, server: f.server||null, tv_username: (f.tvUsername||'').trim()||null }
   }
   // Falls die firm_specs.server-Migration noch nicht gelaufen ist, würde ein Write mit
   // server-Feld an einer „column does not exist"-Meldung scheitern → dann Feld weglassen
@@ -21569,7 +21577,7 @@
       const cfEntry = customFirms.find(f=>f.name===firmName)
       const isOrphan = count === 0  // nur in custom_firms, kein Account mit diesem Namen
       const specsText = cfEntry
-        ? `${escapeHtml(cfEntry.symbol||'—')} · ${escapeHtml(cfEntry.unit||'—')} · ${cfEntry.ppl} ${escapeHtml(cfEntry.currency||'')} / Pkt${cfEntry.dupSymbol ? ` · 🔗 Duplikum: ${escapeHtml(cfEntry.dupSymbol)}` : ''}`
+        ? `${escapeHtml(cfEntry.symbol||'—')} · ${escapeHtml(cfEntry.unit||'—')} · ${cfEntry.ppl} ${escapeHtml(cfEntry.currency||'')} / Pkt${cfEntry.dupSymbol ? ` · 🔗 Duplikum: ${escapeHtml(cfEntry.dupSymbol)}` : ''}${cfEntry.tvUsername ? ` · 📈 TV-Login: ${escapeHtml(cfEntry.tvUsername)}` : ''}`
         : null
 
       const row = document.createElement('div')
@@ -21729,6 +21737,7 @@
       document.getElementById('cf-currency').value = /fusion/i.test(f.name||'') ? '€' : (f.currency||'$')
       document.getElementById('cf-dupsymbol').value = f.dupSymbol||''
       document.getElementById('cf-server').value = f.server||''
+      document.getElementById('cf-tvuser').value = f.tvUsername||''
       document.getElementById('cf-template').value = ''
     } else {
       document.getElementById('customFirmModalTitle').textContent = prefillName ? `Specs für ${prefillName}` : 'Prop Firm hinzufügen'
@@ -21739,6 +21748,7 @@
       document.getElementById('cf-currency').value  = '$'
       document.getElementById('cf-dupsymbol').value = ''
       document.getElementById('cf-server').value = ''
+      document.getElementById('cf-tvuser').value = ''
       document.getElementById('cf-template').value  = ''
       // Name-Feld sperren wenn wir Specs für bestehende Firma hinzufügen
       const nameField = document.getElementById('cf-name')
@@ -21763,14 +21773,15 @@
     const currency=document.getElementById('cf-currency').value
     const dupSymbol=document.getElementById('cf-dupsymbol').value.trim()
     const server=document.getElementById('cf-server').value.trim()
+    const tvUsername=document.getElementById('cf-tvuser').value.trim()
     const msg=document.getElementById('customFirmMsg')
     if(!name){if(msg)msg.textContent='Name ist Pflicht.';return}
     if(isNaN(ppl)||ppl<=0){if(msg)msg.textContent='$ pro Punkt muss > 0 sein.';return}
     const saveBtn = document.getElementById('customFirmSave')
     saveBtn.disabled = true
     try{
-      if(_cfEditId) await updateFirmSpec(_cfEditId, {name,symbol,unit,ppl,currency,dupSymbol,server})
-      else await addFirmSpec({name,symbol,unit,ppl,currency,dupSymbol,server})
+      if(_cfEditId) await updateFirmSpec(_cfEditId, {name,symbol,unit,ppl,currency,dupSymbol,server,tvUsername})
+      else await addFirmSpec({name,symbol,unit,ppl,currency,dupSymbol,server,tvUsername})
       // Name-Feld wieder freigeben
       const nf = document.getElementById('cf-name'); if(nf) nf.readOnly = false
       mergeCustomFirmsIntoPresets(); renderFirmsPanel(); closeCustomFirmModal()
@@ -24513,31 +24524,34 @@
         const extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
         if(!extId)
           return err(`Order gespeichert — aber „${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches Tradovate-Unterkonto er wählen soll: unter Accounts nachtragen.`)
+        // FUTURES-PULS NEUAUFBAU (21.09.2026, Finn: der tv-order-Bau vom 30.08.
+        // „hat echt gebuggt — lass mich den neuen Bot step nach step aufbauen").
+        // Dieser Knopf fährt deshalb NICHT mehr die alte Kette, sondern die neue,
+        // so weit sie steht: Schritt 1 TradingView öffnen/nach vorn, Schritt 2a
+        // prüfen, ob das richtige Tradovate-Konto aktiv ist. Eine Order wird
+        // hier noch NICHT platziert — der Plan bleibt deshalb „geplant".
+        // Welcher Tradovate-Login zur Firma gehört, steht in den Firmen-
+        // Einstellungen (firm_specs.tv_username); mitgeschickt wird nur der
+        // Name, das Passwort bleibt in Chromes Passwort-Manager.
+        const firmName = String((masterAcc && masterAcc.firm) || plan.masterFirm || '').trim()
+        const firmSpec = (getCustomFirms() || []).find(f => String(f.name||'').trim().toLowerCase() === firmName.toLowerCase())
+        const tvUser = firmSpec && firmSpec.tvUsername ? String(firmSpec.tvUsername).trim() : ''
+        if(!tvUser)
+          return err(`Order gespeichert — aber für „${firmName || '?'}" ist kein Tradovate-Username hinterlegt. Einstellungen → Prop Firms → Firma bearbeiten → „Tradovate-Username für TradingView".`)
         const startBtn = document.getElementById('tpOrderStart')
         if(startBtn) startBtn.disabled = true
-        if(msg){ msg.textContent = `Puls übernimmt: TradingView-Tab → Konto ${extId} → ${symbol} → Order-Ticket. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
+        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} (${tvUser}) prüfen. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
         try{
-          const r = await window.mtcApi('tv-order', { method:'POST',
+          const r = await window.mtcApi('tv-konto', { method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ ext_id: extId, symbol, richtung: _tpOrderDir,
-                                   volumen: lots,
-                                   sl_usd: autoSltp ? sl : null,
-                                   tp_usd: autoSltp ? tp : null }) })
+            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName }) })
           if(r && r.ok){
-            await tvPlanAufOpen(plan.id)
-            document.getElementById('tpOrderModal').classList.remove('open')
-            if(typeof atToast === 'function') atToast(`✓ Order platziert: ${_tpOrderDir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'} — Echo hedgt. Puls bleibt auf TradingView.`, 'start')
+            if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Symbol und Order sind die nächsten Bau-Schritte — hier wurde noch nichts platziert.`; msg.className = 'modal-msg ok' }
           } else {
-            // retry_ok kommt vom Bot: false heißt „es kann gesendet worden
-            // sein". Dieselbe Regel wie auf der MT5-Route (18.08.2026) — bei
-            // Unklarheit erst nachsehen, nie blind wiederholen, sonst steht
-            // die Order zweimal im Markt.
-            const unklar = !!(r && r.retry_ok === false)
-            err((unklar ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten. · ' : 'Order gespeichert, aber nicht platziert: ')
-                + ((r && (r.msg || r.error)) || 'keine Antwort'))
+            err('Order gespeichert, nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
           }
         }catch(e){
-          err('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
+          err('Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Es wurde nichts platziert (dieser Schritt klickt noch keine Order).')
         }finally{
           if(startBtn) startBtn.disabled = false
         }
@@ -24574,7 +24588,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.314'
+  const OS_TAB_BUILD = '2026-09-21.315'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

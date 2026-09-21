@@ -2173,6 +2173,49 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[panel] TV-Start -> {res.get('ok')} ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-konto":
+            # Futures-Puls Neuaufbau Schritt 2a (21.09.2026): TradingView
+            # sicherstellen und pruefen, ob das Tradovate-Konto des Plans aktiv
+            # ist. Der Aufruf bringt NUR Username + External ID mit (nie ein
+            # Passwort — das liegt in Chromes Passwort-Manager); URL/Browser/
+            # Profil kommen wie bei tv-start ausschliesslich aus der Config.
+            # Unter dem TV-Lock: es gibt einen Browser und eine Maus, und ein
+            # paralleler tv-order-Lauf duerfte hier nicht dazwischenfunken.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            bc = base_config()
+            cmd = {k: str(bc.get(k) or "").strip()
+                   for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            cmd["ext_id"] = str(body.get("ext_id") or "").strip()
+            cmd["tv_username"] = str(body.get("tv_username") or "").strip()
+            cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "msg":
+                    "Es laeuft schon ein TradingView-Lauf — kurz warten."}, ensure_ascii=False))
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                # 120s: bis 45 s Start-Beweis + bis 40 s, bis der Broker nach
+                # einem frischen Start wieder verbunden ist, + Dump + Puffer.
+                p = subprocess.run([sys.executable, bot, "tvkonto", json.dumps(cmd)],
+                                   capture_output=True, text=True, errors="replace", timeout=120)
+                line = (p.stdout or "").strip().splitlines()
+                res = json.loads(line[-1]) if line else {
+                    "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "msg": "TV-Konto-Pruefung Timeout (120s)."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "msg": f"TV-Konto-Pruefung fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] TV-Konto {cmd['firma']} @{cmd['ext_id']} -> {res.get('ok')} "
+                  f"[{res.get('zustand')}] ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/tv-order":
             # Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf 1-5): der Bot faehrt
             # die ganze Kette in TradingView — Tab nach vorn, Unterkonto per

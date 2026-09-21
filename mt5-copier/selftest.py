@@ -531,6 +531,26 @@ def main():
             == ["C:/c.exe", "--profile-directory=Profile 2", "--new-window", order_bot.TV_START_URL]
         and order_bot.tv_start_befehl("C:/c.exe", "ftp://x", "  ")[-1] == order_bot.TV_START_URL)
 
+    # ── Futures-Puls Neuaufbau Schritt 2a (21.09.2026): richtiges Konto? ──
+    # Ein Fehlurteil 'richtig' hiesse spaeter: Order auf dem falschen Prop-Konto.
+    _bf = lambda aktiv, schalter=True: {"konto": {"aktiv": aktiv, "schalter": ({"x": 1} if schalter else None)}}
+    chk("TV-KONTO: Zustand — richtig / falsch / kein Broker",
+        order_bot.tv_konto_zustand(_bf("FNFTCH-150k-4711 · Demo"), "FNFTCH150K4711") == ("richtig", "FNFTCH-150k-4711 · Demo")
+        and order_bot.tv_konto_zustand(_bf("TDFYSL50K99"), "FNFTCH150K4711")[0] == "falsch"
+        and order_bot.tv_konto_zustand(_bf("", schalter=False), "FNFTCH150K4711") == ("kein_broker", "")
+        and order_bot.tv_konto_zustand({}, "FNFTCH150K4711")[0] == "kein_broker"
+        and order_bot.tv_konto_zustand(None, "FNFTCH150K4711")[0] == "kein_broker"
+        # Schalter da, Text leer: es STEHT etwas da, nur nicht lesbar -> nie 'richtig'
+        and order_bot.tv_konto_zustand(_bf(""), "FNFTCH150K4711")[0] == "falsch"
+        # zu kurze External ID matcht nie (Riegel aus tv_konto_passt)
+        and order_bot.tv_konto_zustand(_bf("PA-12"), "12")[0] == "falsch")
+    chk("TV-KONTO: Befehl — External ID und Username Pflicht, Username ohne Leer-/Steuerzeichen",
+        order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "FNF_finn"}) == []
+        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "12", "tv_username": ""})) == 2
+        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a b"})) == 1
+        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a\tb"})) == 1
+        and order_bot.pruefe_tv_konto_befehl("x") != [])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

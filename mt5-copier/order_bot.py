@@ -1561,6 +1561,156 @@ def modus_tvstart(cfg=None):
     print(json.dumps(res))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FUTURES-PULS, NEUAUFBAU SCHRITT 2 (21.09.2026) — das richtige Konto
+#
+# Finn 21.09.2026: "jede Prop-Firm hat bei TradingView ihren eigenen Username
+# … in den Einstellungen hinterlege ich den jeweiligen Username der Firma …
+# der Puls weiss dann automatisch, welchen Account er auswaehlen muss. Ich muss
+# hier immer nur draufdruecken: auf Login, dann einmal auf ein Feld, dann sehe
+# ich die Autofill-Vorschlaege, und daneben druecke ich auf Login."
+#
+# TEIL 2a (dieser Stand) — LESEN UND BEWEISEN, noch kein Klick:
+#   1. TradingView sicherstellen (Schritt 1).
+#   2. Aus dem Bedienfeld des Userscripts lesen, welches Konto im Broker-Panel
+#      steht, und gegen die External ID des Plans pruefen (tv_konto_passt —
+#      der Kontoname IST die External ID, Finns Ansage 30.08.2026).
+#   3. Passt es nicht: NICHT raten, sondern den Kandidaten-Dump sichern.
+#
+# Warum nicht gleich ab- und anmelden: am 21.09. am echten TradingView
+# nachgesehen — der Tradovate-Dialog ([data-name="broker-login-dialog"]) hat
+# KEINE Username-Felder, nur Live/Demo + button[name="broker-login-submit-
+# button"]. Der eigentliche Login (#name-input / #password-input, dort sitzt
+# Chromes Autofill) laeuft in einem EIGENEN Tradovate-Fenster, in dem das
+# Userscript nicht laeuft. Und wo im verbundenen Panel "Abmelden" sitzt, ist
+# von hier aus nicht zu sehen. Am 30.08. wurden genau solche Stellen geraten —
+# keiner der Selektoren existierte. Deshalb liefert der erste Lauf mit
+# falschem Konto die Unterlagen, und Teil 2b klickt danach auf Bewiesenes.
+#
+# Das Passwort fasst der Bot in KEINEM Teil an: es liegt in Chromes Passwort-
+# Manager. Uebergeben wird nur der Username.
+# ═══════════════════════════════════════════════════════════════════════════
+
+TV_KONTO_DUMP = "tv-konto-dump.json"
+
+
+def pruefe_tv_konto_befehl(cmd):
+    """Fehlerliste fuer den tvkonto-Befehl (leer = in Ordnung)."""
+    fehler = []
+    if not isinstance(cmd, dict):
+        return ["Befehl ist kein Objekt"]
+    if len(_nur_alnum(cmd.get("ext_id"))) < 3:
+        fehler.append("External ID fehlt oder ist kuerzer als 3 Zeichen")
+    u = str(cmd.get("tv_username") or "").strip()
+    if not u:
+        fehler.append("Tradovate-Username der Firma fehlt (Einstellungen > Prop Firms)")
+    elif len(u) > 80 or any(c.isspace() or ord(c) < 32 for c in u):
+        fehler.append("Tradovate-Username enthaelt Leer- oder Steuerzeichen")
+    return fehler
+
+
+def tv_konto_zustand(bf, ext_id):
+    """Was sagt das Bedienfeld ueber das Konto? -> (zustand, aktiv_text)
+       'richtig'     das angezeigte Konto traegt die External ID
+       'falsch'      es steht ein Konto da, aber ein anderes
+       'kein_broker' kein Konto-Umschalter gefunden — kein Broker verbunden
+                     oder das Broker-Panel unten ist zugeklappt"""
+    konto = (bf or {}).get("konto") or {}
+    aktiv = str(konto.get("aktiv") or "").strip()
+    if not aktiv and not konto.get("schalter"):
+        return "kein_broker", ""
+    if tv_konto_passt(aktiv, ext_id):
+        return "richtig", aktiv
+    return "falsch", aktiv
+
+
+def _tv_dump_sichern(trail):
+    """Kandidaten-Dump anfordern und neben dem Bot ablegen. -> Pfad oder ''"""
+    _tv_http("/dump-an", {})
+    ende = time.time() + 8.0
+    while time.time() < ende:
+        bf = _tv_http("/bedienfeld") or {}
+        if bf.get("ok") and bf.get("dump"):
+            pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)), TV_KONTO_DUMP)
+            try:
+                with open(pfad, "w", encoding="utf-8") as f:
+                    json.dump({"zeit": time.strftime("%Y-%m-%d %H:%M:%S"),
+                               "titel": bf.get("titel"), "version": bf.get("version"),
+                               "konto": bf.get("konto"), "panel": bf.get("panel"),
+                               "dump": bf.get("dump")}, f, ensure_ascii=False, indent=1)
+                trail.append("Dump gesichert")
+                return pfad
+            except OSError as e:
+                trail.append(f"Dump nicht schreibbar ({e})")
+                return ""
+        time.sleep(0.3)
+    trail.append("kein Dump vom Userscript bekommen")
+    return ""
+
+
+def modus_tvkonto(cmd):
+    res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
+           "zustand": "", "konto_aktiv": "", "dump": ""}
+    trail = []
+
+    def raus(msg, schritt):
+        res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
+        print(json.dumps(res))
+
+    fehler = pruefe_tv_konto_befehl(cmd)
+    if fehler:
+        return raus("Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
+    try:
+        from pywinauto import Desktop  # noqa: F401  (nur Verfuegbarkeits-Probe)
+    except ImportError:
+        return raus("pywinauto fehlt (nur auf dem PC lauffaehig).", "start")
+    _dpi_bewusst()
+    _warte(0.1, 0.4)   # Start-Versatz (Jitter-Dauerregel 28.08.2026)
+
+    # --- Schritt 1: TradingView offen? sonst starten ----------------------
+    start = time.time()
+    ok, msg, gestartet = tv_sicherstellen(trail, cmd, warten_s=45.0)
+    if not ok:
+        return raus(msg, "tradingview")
+
+    # --- Schritt 2: welches Konto steht im Broker-Panel? ------------------
+    # Nach einem frischen Start braucht TradingView, bis der Broker wieder
+    # verbunden ist — deshalb nicht der erste Stand, sondern so lange lesen,
+    # bis ein Konto dasteht (oder die Zeit um ist). Ein Stand von VOR diesem
+    # Lauf zaehlt nie: er koennte aus einem inzwischen geschlossenen Tab sein.
+    ende = time.time() + (40.0 if gestartet else 12.0)
+    bf, zustand, aktiv = None, "", ""
+    while time.time() < ende:
+        b = _tv_bf(nach=start, timeout=4.0)
+        if b:
+            bf = b
+            zustand, aktiv = tv_konto_zustand(b, cmd["ext_id"])
+            if zustand != "kein_broker":
+                break
+        _warte(0.8, 0.5)
+    if not bf:
+        return raus("TradingView ist offen, aber der Reader meldet kein Bedienfeld "
+                    "(127.0.0.1:8790) — laeuft reader-server, und ist das "
+                    "Userscript im TradingView-Tab aktiv (gruener Badge)?", "reader")
+    res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
+
+    if zustand == "richtig":
+        res["ok"] = True
+        return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
+
+    res["dump"] = _tv_dump_sichern(trail)
+    ziel = f"Login '{cmd['tv_username']}', Konto {cmd['ext_id']}"
+    if zustand == "falsch":
+        return raus(f"Falsches Konto aktiv: '{aktiv[:60]}' — gebraucht wird {ziel}. "
+                    "Den Wechsel klickt Puls noch nicht (Teil 2b). Bitte die Datei "
+                    f"{TV_KONTO_DUMP} aus dem mt5-copier-Ordner schicken.", "konto")
+    return raus(f"Kein verbundener Broker im TradingView-Panel zu sehen — gebraucht wird "
+                f"{ziel}. Ist unten das Broker-Panel offen? Das Anmelden klickt Puls "
+                f"noch nicht (Teil 2b). Bitte die Datei {TV_KONTO_DUMP} aus dem "
+                "mt5-copier-Ordner schicken.", "konto")
+
+
 def modus_tvorder(cmd):
     """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
     bevor der naechste beginnt."""
@@ -4101,6 +4251,21 @@ def main():
         except ValueError:
             cfg = {}
         modus_tvstart(cfg if isinstance(cfg, dict) else {})
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvkonto":
+        # Futures-Puls Neuaufbau Schritt 2a (21.09.2026): TradingView
+        # sicherstellen, dann pruefen, ob das richtige Tradovate-Konto aktiv
+        # ist. Liest nur — kein Klick in die Seite, keine Order.
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvkonto(cmd)
+        except Exception as e:
+            print(json.dumps({"ok": False, "schritt": "absturz",
+                              "msg": f"TV-Konto-Pruefung abgebrochen: {type(e).__name__}: {e}"}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
         # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView
