@@ -1100,6 +1100,11 @@
   }
   #dashboard-view .modal-divider svg{width:13px;height:13px;color:#12B76A}
   #dashboard-view .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+  /* Order-Popup (21.09.2026, Finns Screenshot): die Puls-Meldungen sind hier
+     mehrzeilig — neben den Knöpfen stehend zogen sie „Starten →" auf fünf
+     Zeilen Höhe. Meldung deshalb in eigener Zeile ÜBER den Knöpfen. */
+  #dashboard-view #tpOrderModal .modal-actions{flex-wrap:wrap;row-gap:10px}
+  #dashboard-view #tpOrderModal .modal-actions .modal-msg{flex:1 1 100%;order:-1;margin-top:0;line-height:1.5}
   #dashboard-view .modal-msg{
     margin-top:10px;font-size:12.5px;font-family:var(--mono);
     min-height:18px;
@@ -24303,7 +24308,7 @@
     if(startBtn){ startBtn.disabled = false; startBtn.textContent = _tpOrderOrbit ? 'Starten →' : 'Speichern' }
     const info = document.getElementById('tp-order-info')
     if(info) info.textContent = _tpOrderOrbit
-      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab, dann übernimmt der Puls am PC: TradingView-Tab → Unterkonto (External ID) → Symbol → Order-Ticket → platzieren. HÄNDE WEG, bis die Bestätigung kommt. Echo hedgt automatisch.`
+      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab, dann übernimmt der Puls am PC: TradingView öffnen → richtiges Konto (External ID) wählen. Symbol und Order-Ticket sind noch im Bau — platziert wird hier noch nichts. HÄNDE WEG, solange er läuft.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
     // SL dieser ORDER (31.08.2026, Finns Fund): steht seit heute in master_sl,
@@ -24572,6 +24577,23 @@
             if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Symbol und Order sind die nächsten Bau-Schritte — hier wurde noch nichts platziert.`; msg.className = 'modal-msg ok' }
           } else {
             err('Order gespeichert, nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
+            // Diagnose kopieren (21.09.2026): der Bot schickt mit, was das
+            // Userscript im Broker-Panel sieht. Ein Klick legt es in die
+            // Zwischenablage — statt eine Datei vom PC holen zu müssen.
+            if(msg && r && r.diagnose){
+              const kb = document.createElement('button')
+              kb.type = 'button'; kb.className = 'btn btn-ghost'
+              kb.style.cssText = 'display:block;margin-top:8px;padding:4px 10px;font-size:12px'
+              kb.textContent = '📋 Diagnose kopieren'
+              kb.addEventListener('click', async () => {
+                const text = JSON.stringify({ build: (typeof OS_TAB_BUILD !== 'undefined' ? OS_TAB_BUILD : ''), ext_id: extId, geschwister,
+                  msg: r.msg, zustand: r.zustand, konto_aktiv: r.konto_aktiv, schritt: r.schritt,
+                  trail: r.trail, diagnose: r.diagnose }, null, 1)
+                try{ await navigator.clipboard.writeText(text); kb.textContent = '✓ kopiert — an Claude schicken' }
+                catch(_){ kb.textContent = 'Kopieren blockiert — Datei tv-konto-dump.json im mt5-copier-Ordner' }
+              })
+              msg.appendChild(kb)
+            }
           }
         }catch(e){
           err('Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Es wurde nichts platziert (dieser Schritt klickt noch keine Order).')
@@ -24611,7 +24633,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.317'
+  const OS_TAB_BUILD = '2026-09-21.318'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

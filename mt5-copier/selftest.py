@@ -577,6 +577,42 @@ def main():
         and order_bot.tv_konto_eintrag([{"text": "APEX-123-01"}], "APEX-123-01", _g) == (None, 0)
         and order_bot.tv_konto_eintrag(None, "APEX-123-01", _g) == (None, 0))
 
+    # Finns erster PC-Lauf 21.09.2026: richtiges Konto sichtbar im Panel, Bot
+    # meldete 'kein Broker' — die data-name-Anker des Userscripts trafen nichts.
+    # Nachgestellt: konto{} leer, die Kontonummer steht nur in der panel-Liste,
+    # dreifach verschachtelt (Huelle > Knopf > Textspanne), Fenster 1900x990.
+    _G = {"innerWidth": 1900, "innerHeight": 990, "dpr": 1}
+    _P = lambda *els: {"geo": _G, "konto": {"aktiv": "", "schalter": None, "eintraege": []}, "panel": list(els)}
+    _el = lambda text, x, y, w, h: {"tag": "div", "text": text, "rect": [x, y, w, h]}
+    _finn = _P(_el("Tradovate", 70, 850, 120, 30),
+               _el("APEX6416990000024 USD", 72, 905, 200, 34),      # Huelle
+               _el("APEX6416990000024 USD", 76, 908, 190, 28),      # Knopf
+               _el("APEX6416990000024", 84, 912, 130, 20),           # Textspanne
+               _el("Positions", 75, 950, 80, 28))
+    chk("TV-KONTO: Kontonummer im Panel-Text schlaegt fehlenden Anker (Finns Lauf 21.09.)",
+        order_bot.tv_konto_zustand(_finn, "APEX6416990000024", [])[0] == "richtig"
+        and order_bot.tv_konto_zustand(_finn, "APEX6416990000031", ["APEX6416990000024"])[0] == "gleicher_login"
+        and order_bot.tv_konto_zustand(_finn, "TDFY123456", ["TDFY999999"])[0] == "kein_broker")
+    chk("TV-KONTO: Text-Suche — verschachtelte Treffer werden EIN Element (das innerste)",
+        [e["rect"] for e in order_bot.tv_konto_per_text(_finn, ["APEX6416990000024"])] == [[84, 912, 130, 20]])
+    # Offene Aufklappliste: zwei bekannte Konten sichtbar -> welcher aktiv ist,
+    # sagt der Text nicht -> NIE 'richtig' aus dem Text-Weg.
+    _offen = _P(_el("APEX6416990000024 USD", 76, 908, 190, 28), _el("APEX6416990000031 USD", 76, 860, 190, 28))
+    chk("TV-KONTO: Text-Suche — zwei bekannte Konten sichtbar = kein Urteil",
+        order_bot.tv_konto_zustand(_offen, "APEX6416990000024", ["APEX6416990000031"])[0] == "kein_broker")
+    chk("TV-KONTO: Text-Suche — Nummer in der oberen Fensterhaelfte zaehlt nicht, fuer Listeneintraege doch",
+        order_bot.tv_konto_per_text(_P(_el("APEX6416990000024", 300, 200, 150, 20)), ["APEX6416990000024"]) == []
+        and len(order_bot.tv_konto_per_text(_P(_el("APEX6416990000024", 300, 200, 150, 20)), ["APEX6416990000024"], ueberall=True)) == 1)
+    chk("TV-KONTO: Text-Suche — Listeneintrag nur das ZIEL, nie der Umschalter selbst",
+        [e["text"] for e in order_bot.tv_konto_per_text(_offen, ["APEX6416990000024", "APEX6416990000031"],
+            nur_ziel="APEX6416990000031", ohne=(76, 908, 190, 28), ueberall=True)] == ["APEX6416990000031 USD"]
+        and order_bot.tv_konto_per_text(_offen, ["APEX6416990000024"], nur_ziel="APEX6416990000024",
+            ohne=(76, 908, 190, 28), ueberall=True) == [])
+    chk("TV-KONTO: Diagnose — nur der untere Bereich, ohne Doppelte, klein genug fuer die Zwischenablage",
+        [e["text"] for e in order_bot.tv_diagnose(dict(_finn, dump=_finn["panel"] + [_el("Trade", 1700, 20, 60, 30)]))["unten"]]
+            == ["Tradovate", "APEX6416990000024 USD", "APEX6416990000024 USD", "APEX6416990000024", "Positions"]
+        and order_bot.tv_diagnose(None)["unten"] == [])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

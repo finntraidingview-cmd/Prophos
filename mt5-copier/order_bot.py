@@ -1632,6 +1632,86 @@ def tv_konto_bestes(text, ids):
     return bestes
 
 
+def _tv_rect4(e):
+    r = (e or {}).get("rect")
+    if isinstance(r, (list, tuple)) and len(r) == 4:
+        try:
+            x, y, w, h = (float(v) for v in r)
+        except (TypeError, ValueError):
+            return None
+        return (x, y, w, h) if w >= 3 and h >= 3 else None
+    return None
+
+
+def _tv_rect_in(a, b):
+    """Liegt Rechteck a (x,y,w,h) ganz in b? (2 px Toleranz — Rundung im Userscript)"""
+    return (a[0] >= b[0] - 2 and a[1] >= b[1] - 2
+            and a[0] + a[2] <= b[0] + b[2] + 2 and a[1] + a[3] <= b[1] + b[3] + 2)
+
+
+def tv_konto_per_text(bf, ids, nur_ziel=None, ohne=None, ueberall=False):
+    """Konto-Elemente ueber ihren TEXT finden statt ueber TradingViews Anker.
+
+    21.09.2026, Finns erster Lauf von Schritt 2 (PC mit englischem
+    TradingView): im Panel stand sichtbar 'APEX6416990000024 USD' — das
+    RICHTIGE Konto —, der Bot meldete trotzdem 'kein Broker'. Beide Signaturen
+    des Userscripts ([data-name="account-manager-account-select"] und
+    [data-name*="account"]) hatten null Treffer: TradingView hat die Anker
+    umbenannt, zum zweiten Mal (31.08.: Spaltentitel). Der Bot KENNT aber die
+    External IDs — und eine 17-stellige Kontonummer im Broker-Panel ist ein
+    besserer Anker als jeder data-name, weil TradingView sie nicht umbenennen
+    kann. Quelle sind die Element-Listen, die das Userscript ohnehin schickt
+    ('panel' immer, 'dump' auf Anforderung) — kein Userscript-Update noetig.
+
+    Verschachtelte Treffer (Huelle + Knopf + Textspanne tragen denselben Text)
+    werden auf den INNERSTEN reduziert; dessen Mitte liegt in allen Huellen,
+    ein Klick dort trifft also auch den Knopf.
+    nur_ziel: nur Elemente, deren beste ID diese ist. ohne: Rechteck, das
+    nicht (nochmal) getroffen werden soll — der Umschalter selbst, wenn nach
+    Listeneintraegen gesucht wird.
+    -> Liste {rect, text, id}, innerste zuerst gefiltert, unten im Fenster."""
+    geo = (bf or {}).get("geo") or {}
+    try:
+        hoehe = float(geo.get("innerHeight") or 0)
+    except (TypeError, ValueError):
+        hoehe = 0.0
+    roh = []
+    for quelle in ("panel", "dump"):
+        for e in ((bf or {}).get(quelle) or []):
+            if not isinstance(e, dict):
+                continue
+            r = _tv_rect4(e)
+            text = str(e.get("text") or "")
+            if not r or not text:
+                continue
+            # Broker-Panel und seine Aufklappliste liegen in der unteren
+            # Fensterhaelfte; oben stuende dieselbe Nummer hoechstens in einer
+            # Chart-Beschriftung, und die ist kein Bedienelement.
+            # (ueberall=True fuer die Aufklappliste: sie klappt vom unteren
+            # Rand nach OBEN und kann bei vielen Konten weit hinaufreichen.)
+            if not ueberall and hoehe and r[1] + r[3] / 2 < hoehe * 0.45:
+                continue
+            bestes = tv_konto_bestes(text, ids)
+            if not bestes:
+                continue
+            if nur_ziel is not None and _nur_alnum(bestes) != _nur_alnum(nur_ziel):
+                continue
+            if ohne and (_tv_rect_in(r, ohne) or _tv_rect_in(ohne, r)):
+                continue
+            roh.append({"rect": [int(v) for v in r], "text": text[:80], "id": bestes, "_r": r})
+    # doppelte (panel + dump liefern dasselbe Element) und Huellen raus
+    innerste = []
+    for a in roh:
+        if any(b is not a and _tv_rect_in(b["_r"], a["_r"]) and b["_r"] != a["_r"] for b in roh):
+            continue
+        if any(a["_r"] == c["_r"] for c in innerste):
+            continue
+        innerste.append(a)
+    for a in innerste:
+        a.pop("_r", None)
+    return innerste
+
+
 def tv_konto_zustand(bf, ext_id, geschwister=()):
     """Was sagt das Bedienfeld ueber das Konto? -> (zustand, aktiv_text)
        'richtig'        das angezeigte Konto IST das Zielkonto
@@ -1650,9 +1730,18 @@ def tv_konto_zustand(bf, ext_id, geschwister=()):
     Login und nur das falsche Unterkonto."""
     konto = (bf or {}).get("konto") or {}
     aktiv = str(konto.get("aktiv") or "").strip()
+    ids = [ext_id] + list(geschwister or ())
+    if not tv_konto_bestes(aktiv, ids):
+        # Der Anker des Userscripts hat nichts (oder nichts Bekanntes)
+        # geliefert — dann entscheidet der Text im Panel. Genau EIN Element
+        # darf es sein: bei offener Aufklappliste stehen mehrere Konten da,
+        # und welches davon aktiv ist, sagt der Text allein nicht.
+        per_text = tv_konto_per_text(bf, ids)
+        if len(per_text) == 1:
+            aktiv = per_text[0]["text"]
     if not aktiv and not konto.get("schalter"):
         return "kein_broker", ""
-    bestes = tv_konto_bestes(aktiv, [ext_id] + list(geschwister or ()))
+    bestes = tv_konto_bestes(aktiv, ids)
     if bestes and _nur_alnum(bestes) == _nur_alnum(ext_id):
         return "richtig", aktiv
     if bestes:
@@ -1672,12 +1761,46 @@ def tv_konto_eintrag(eintraege, ext_id, geschwister=()):
     return (treffer[0] if len(treffer) == 1 else None), len(treffer)
 
 
+def tv_diagnose(bf):
+    """Kompakte Unterlagen fuer die Ferndiagnose: was das Userscript im UNTEREN
+    Fensterbereich (Broker-Panel) sieht. Geht mit der Antwort nach Prophos und
+    laesst sich dort per Knopf kopieren — Finn musste am 21.09.2026 fuer die
+    erste Diagnose eine Datei von einem Remote-PC holen, und hat stattdessen
+    (verstaendlich) Screenshots geschickt."""
+    bf = bf or {}
+    geo = bf.get("geo") or {}
+    try:
+        hoehe = float(geo.get("innerHeight") or 0)
+    except (TypeError, ValueError):
+        hoehe = 0.0
+    unten, gesehen = [], set()
+    for quelle in ("panel", "dump"):
+        for e in (bf.get(quelle) or []):
+            r = _tv_rect4(e) if isinstance(e, dict) else None
+            if not r or (hoehe and r[1] < hoehe * 0.45):
+                continue
+            k = (tuple(r), str(e.get("text") or "")[:20])
+            if k in gesehen or len(unten) >= 110:
+                continue
+            gesehen.add(k)
+            unten.append({f: e.get(f) for f in ("tag", "id", "dn", "al", "rolle", "text", "rect")
+                          if e.get(f) not in (None, "")})
+    return {"version": bf.get("version"), "titel": str(bf.get("titel") or "")[:60],
+            "geo": {f: geo.get(f) for f in ("innerWidth", "innerHeight", "dpr")},
+            "sprache_fremd": bf.get("sprache_fremd"), "konto": bf.get("konto"),
+            "panel_n": len(bf.get("panel") or []), "dump_n": len(bf.get("dump") or []),
+            "unten": unten}
+
+
 def _tv_dump_sichern(trail):
-    """Kandidaten-Dump anfordern und neben dem Bot ablegen. -> Pfad oder ''"""
+    """Kandidaten-Dump anfordern und neben dem Bot ablegen. -> (pfad, diagnose)"""
     _tv_http("/dump-an", {})
     ende = time.time() + 8.0
+    letzt = None
     while time.time() < ende:
         bf = _tv_http("/bedienfeld") or {}
+        if bf.get("ok"):
+            letzt = bf
         if bf.get("ok") and bf.get("dump"):
             pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)), TV_KONTO_DUMP)
             try:
@@ -1687,18 +1810,18 @@ def _tv_dump_sichern(trail):
                                "konto": bf.get("konto"), "panel": bf.get("panel"),
                                "dump": bf.get("dump")}, f, ensure_ascii=False, indent=1)
                 trail.append("Dump gesichert")
-                return pfad
+                return pfad, tv_diagnose(bf)
             except OSError as e:
                 trail.append(f"Dump nicht schreibbar ({e})")
-                return ""
+                return "", tv_diagnose(bf)
         time.sleep(0.3)
     trail.append("kein Dump vom Userscript bekommen")
-    return ""
+    return "", tv_diagnose(letzt)
 
 
 def modus_tvkonto(cmd):
     res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
-           "zustand": "", "konto_aktiv": "", "dump": ""}
+           "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
     trail = []
 
     def raus(msg, schritt):
@@ -1752,23 +1875,21 @@ def modus_tvkonto(cmd):
 
     ziel = (f"Login '{cmd.get('tv_username')}', " if cmd.get("tv_username") else "") + f"Konto {ext}"
     if zustand != "gleicher_login":
-        res["dump"] = _tv_dump_sichern(trail)
+        res["dump"], res["diagnose"] = _tv_dump_sichern(trail)
         if zustand == "falsch":
             return raus(f"Falscher Tradovate-Login: aktiv ist '{aktiv[:60]}', und das "
                         f"kennt Prophos bei dieser Firma nicht — gebraucht wird {ziel}. "
-                        "Ab- und Anmelden klickt Puls noch nicht (Teil 2b). Bitte die "
-                        f"Datei {TV_KONTO_DUMP} aus dem mt5-copier-Ordner schicken.", "konto")
-        return raus(f"Kein verbundener Broker im TradingView-Panel zu sehen — gebraucht "
-                    f"wird {ziel}. Ist unten das Broker-Panel offen? Das Anmelden klickt "
-                    f"Puls noch nicht (Teil 2b). Bitte die Datei {TV_KONTO_DUMP} aus "
-                    "dem mt5-copier-Ordner schicken.", "konto")
+                        "Ab- und Anmelden klickt Puls noch nicht (Teil 2b).", "konto")
+        return raus(f"Im TradingView-Panel ist kein Konto zu erkennen — gebraucht wird "
+                    f"{ziel}. Ist unten das Broker-Panel offen und Tradovate verbunden? "
+                    "Das Anmelden klickt Puls noch nicht (Teil 2b).", "konto")
 
     # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
     # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
     # Drop-Down draufdruecken und den Account switchen."
     def ab(msg):
-        res["dump"] = _tv_dump_sichern(trail)
-        return raus(msg + (f" (Unterlagen: {TV_KONTO_DUMP})" if res["dump"] else ""), "wechsel")
+        res["dump"], res["diagnose"] = _tv_dump_sichern(trail)
+        return raus(msg, "wechsel")
 
     # Riegel VOR dem Wechsel: das aktive Konto muss flach sein. Der Reader kennt
     # nur "das Konto im Panel" — nach dem Umschalten meldet er die Positionen
@@ -1796,10 +1917,19 @@ def modus_tvkonto(cmd):
         return ab("Browser-Fenster ohne Handle — Fenster neu oeffnen.")
     _warte(0.3, 0.3)
 
+    ids = [ext] + geschwister
     schalter = _tv_element(bf, "konto", "schalter")
+    if not schalter:
+        # Anker des Userscripts leer -> der Umschalter ist das EINE Element im
+        # Broker-Panel, das eine bekannte Kontonummer zeigt.
+        per_text = tv_konto_per_text(bf, ids)
+        if len(per_text) == 1:
+            schalter = per_text[0]
+            trail.append("Umschalter ueber Kontonummer gefunden")
     if not schalter:
         return ab(f"Konto steht auf '{aktiv[:40]}' statt {ext} — der Konto-Umschalter "
                   "wurde aber nicht eindeutig gefunden.")
+    schalter_r = _tv_rect4(schalter)
     ok, f = _tv_klick(schalter["rect"], bf["geo"], _klient_rechteck(hwnd), "Konto-Umschalter", trail)
     if not ok:
         return ab(f)
@@ -1816,6 +1946,13 @@ def modus_tvkonto(cmd):
             liste = (b.get("konto") or {}).get("eintraege") or []
             gesehen = len(liste)
             eintrag, anzahl = tv_konto_eintrag(liste, ext, geschwister)
+            if not eintrag and not anzahl:
+                # Listen-Anker leer -> Eintrag ueber die Kontonummer des ZIELS,
+                # ueberall im Fenster, nur nicht der Umschalter selbst.
+                per_text = tv_konto_per_text(b, ids, nur_ziel=ext, ohne=schalter_r, ueberall=True)
+                anzahl = len(per_text)
+                eintrag = per_text[0] if anzahl == 1 else None
+                gesehen = max(gesehen, anzahl)
     if not eintrag:
         # Dropdown wieder schliessen, sonst bleibt es ueber dem Chart haengen.
         try:
