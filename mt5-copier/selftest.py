@@ -641,6 +641,28 @@ def main():
         and not order_bot.tv_version_min("0.4.1", "0.4.2") and not order_bot.tv_version_min(None, "0.4.2")
         and not order_bot.tv_version_min("abc", "0.4.2"))
 
+    # Augen ohne Userscript (21.09.2026, Finn: 'ohne Tampermonkey'): Chromes
+    # Accessibility-Baum ueber Windows-UIA. Rechtecke sind echte Bildschirm-Pixel
+    # (l,t,r,b). Nachgestellt: Fenster 0,0-1920,1040, Umschalter unten links,
+    # offene Liste darueber, jeder Eintrag als ListItem-Huelle + Text.
+    _F = (0, 0, 1920, 1040)
+    _sw = ("APEX6416990000031 USD", (84, 960, 260, 984))
+    _li = [("APEX6416990000024", (90, 700, 300, 728)), ("APEX6416990000024", (96, 704, 230, 724)),
+           ("APEX6416990000031", (90, 740, 300, 768)), ("APEX6416990000031", (96, 744, 230, 764)),
+           ("APEX6416990000047", (90, 780, 300, 808)), ("TDFY000123456", (90, 820, 300, 848))]
+    chk("TV-UIA: geschlossene Liste = genau ein Element = Urteil moeglich; Klickpunkt = Mitte in Bildschirm-Pixeln",
+        [(e["id"], e["punkt"]) for e in order_bot.tv_uia_filtern([_sw], _ids, _F)] == [("APEX6416990000031", (172, 972))])
+    chk("TV-UIA: offene Liste — Ziel genau einmal (innerstes Element), Umschalter ausgenommen, fremdes Konto nie",
+        [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX6416990000024", ohne=_sw[1])] == [(96, 704, 230, 724)]
+        and [e["r"] for e in order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="APEX6416990000031", ohne=_sw[1])] == [(96, 744, 230, 764)]
+        and order_bot.tv_uia_filtern([_sw] + _li, _ids, _F, nur_ziel="TDFY000123456") == []
+        and len(order_bot.tv_uia_filtern([_sw] + _li, _ids, _F)) == 4)
+    chk("TV-UIA: ausserhalb des Fensters / Nullgroesse / kaputtes Rechteck zaehlt nie",
+        order_bot.tv_uia_filtern([("APEX6416990000024", (2500, 700, 2700, 728))], _ids, _F) == []
+        and order_bot.tv_uia_filtern([("APEX6416990000024", (90, 700, 90, 728))], _ids, _F) == []
+        and order_bot.tv_uia_filtern([("APEX6416990000024", None), ("APEX6416990000024", ("a", 1, 2, 3))], _ids, _F) == []
+        and order_bot.tv_uia_filtern(None, _ids, _F) == [])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

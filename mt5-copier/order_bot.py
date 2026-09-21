@@ -1718,6 +1718,116 @@ def tv_konto_per_text(bf, ids, nur_ziel=None, ohne=None, ueberall=False):
     return innerste
 
 
+def tv_uia_filtern(roh, ids, fenster=None, nur_ziel=None, ohne=None):
+    """Aus (text, (l,t,r,b))-Paaren der Windows-UI-Automation die Konto-Elemente
+    machen. Koordinaten sind hier ECHTE Bildschirm-Pixel — kein CSS, kein dpr,
+    keine Browser-Dekoration: der Klickpunkt ist einfach die Mitte.
+    fenster: (l,t,r,b) des Browser-Fensters — was ausserhalb liegt, ist nicht
+    klickbar. nur_ziel/ohne wie bei tv_konto_per_text (ohne = Rechteck des
+    Umschalters, damit er nicht als Listeneintrag durchgeht).
+    Huellen (ListItem um seinen Text) werden auf das innerste reduziert."""
+    kand = []
+    for text, r in roh or ():
+        try:
+            l, t, rr, b = (int(v) for v in r)
+        except (TypeError, ValueError):
+            continue
+        if rr - l < 3 or b - t < 3:
+            continue
+        mx, my = (l + rr) // 2, (t + b) // 2
+        if fenster and not (fenster[0] <= mx <= fenster[2] and fenster[1] <= my <= fenster[3]):
+            continue
+        bestes = tv_konto_bestes(text, ids)
+        if not bestes:
+            continue
+        if nur_ziel is not None and _nur_alnum(bestes) != _nur_alnum(nur_ziel):
+            continue
+        if ohne and not (rr <= ohne[0] or l >= ohne[2] or b <= ohne[1] or t >= ohne[3]):
+            continue          # ueberlappt den Umschalter
+        kand.append({"text": str(text)[:80], "id": bestes, "r": (l, t, rr, b), "punkt": (mx, my)})
+    out = []
+    for a in kand:
+        ar = a["r"]
+        huelle = any(b is not a and b["r"] != ar
+                     and b["r"][0] >= ar[0] - 2 and b["r"][1] >= ar[1] - 2
+                     and b["r"][2] <= ar[2] + 2 and b["r"][3] <= ar[3] + 2 for b in kand)
+        if huelle or any(c["r"] == ar for c in out):
+            continue
+        out.append(a)
+    return out
+
+
+# Reihenfolge = Wahrscheinlichkeit: Chrome legt fuer jeden sichtbaren Textknoten
+# ein Text-Element an; die uebrigen Typen sind der Rueckfall, falls TradingView
+# den Namen nur am Eintrag selbst traegt.
+_TV_UIA_TYPEN = ("Text", "ListItem", "MenuItem", "Button", "ComboBox", "DataItem")
+
+
+def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
+    """AUGEN OHNE USERSCRIPT (21.09.2026, Finn: 'nein, ohne Tampermonkey — das
+    bekommen wir doch auch so hin'): die Kontonummern direkt aus Chromes
+    Accessibility-Baum lesen, ueber dieselbe Windows-UI-Automation, mit der
+    der Puls seit 30.08. die Tableiste liest. Vorteile gegenueber dem
+    Userscript: nichts zu installieren oder zu aktualisieren, keine Kappung
+    (die Aufklappliste am DOM-Ende ist ein ganz normaler Teil des Baums), und
+    die Rechtecke sind schon Bildschirm-Pixel.
+    Chrome baut den Seiten-Baum erst auf, wenn ein UIA-Client danach fragt —
+    der erste Abruf kann deshalb leer sein; die Aufrufer fragen mehrfach."""
+    info = info if info is not None else {}
+    try:
+        fr = w.rectangle()
+        fenster = (fr.left, fr.top, fr.right, fr.bottom)
+    except Exception:
+        fenster = None
+    roh, gescannt = [], 0
+    # Fuer die Ferndiagnose: Namen, die WIE eine Kontonummer aussehen (>= 6
+    # Ziffern am Stueck), auch wenn sie zu keiner bekannten ID passen. Zeigt im
+    # Fehlfall sofort, ob der Baum die Seite ueberhaupt enthaelt und wie
+    # TradingView die Nummer dort schreibt.
+    aehnlich = info.setdefault("aehnlich", [])
+    for typ in _TV_UIA_TYPEN:
+        try:
+            els = w.descendants(control_type=typ)
+        except Exception as e:
+            info["fehler"] = f"{typ}: {type(e).__name__}"
+            continue
+        for e in els[:6000]:
+            gescannt += 1
+            try:
+                n = e.window_text() or ""
+            except Exception:
+                continue
+            if not (3 <= len(n) <= 200):
+                continue
+            if not tv_konto_bestes(n, ids):
+                if len(aehnlich) < 20 and re.search(r"\d{6,}", n) and n[:50] not in aehnlich:
+                    aehnlich.append(n[:50])
+                continue
+            try:
+                r = e.rectangle()
+                if hasattr(e, "is_visible") and not e.is_visible():
+                    continue
+                roh.append((n, (r.left, r.top, r.right, r.bottom)))
+            except Exception:
+                continue
+        if roh:
+            break               # Text-Elemente haben geliefert -> Rueckfall-Typen sparen
+    info["gescannt"] = gescannt
+    info["roh"] = [(t[:40], list(r)) for t, r in roh[:12]]
+    return tv_uia_filtern(roh, ids, fenster, nur_ziel=nur_ziel, ohne=ohne)
+
+
+def _tv_uia_klick(el, name, trail):
+    """UIA-Element anklicken — Punkt ist schon Bildschirm-Pixel. (ok, fehler)"""
+    x, y = el["punkt"]
+    _maus_fahren(x, y)
+    if not _klick_absolut(x, y):
+        trail.append(f"{name}: SendInput abgelehnt")
+        return False, f"Klick auf {name} wurde von Windows abgelehnt"
+    trail.append(f"{name} geklickt @{x},{y} (UIA)")
+    return True, ""
+
+
 def tv_version_min(version, minimum):
     """'0.4.2' >= '0.4.2'? Unlesbare Version = False (dann lieber zum Update raten)."""
     def teile(v):
@@ -1730,10 +1840,6 @@ def tv_version_min(version, minimum):
 
 
 TV_USERSCRIPT_MIN = "0.4.2"
-TV_USERSCRIPT_RAT = ("Userscript aktualisieren: Tampermonkey-Symbol > Dashboard > 'Prophos "
-                     "TV-Reader' > Haken setzen > 'Updates suchen' (oder einen Tag warten), "
-                     "dann den TradingView-Tab mit F5 neu laden. Unten rechts im Badge "
-                     "bzw. in der Diagnose steht die Version.")
 
 
 def tv_konto_zustand(bf, ext_id, geschwister=()):
@@ -1875,34 +1981,60 @@ def modus_tvkonto(cmd):
         return raus(msg, "tradingview")
 
     # --- Schritt 2: welches Konto steht im Broker-Panel? ------------------
-    # Nach einem frischen Start braucht TradingView, bis der Broker wieder
-    # verbunden ist — deshalb nicht der erste Stand, sondern so lange lesen,
-    # bis ein Konto dasteht (oder die Zeit um ist). Ein Stand von VOR diesem
-    # Lauf zaehlt nie: er koennte aus einem inzwischen geschlossenen Tab sein.
+    # ZWEI AUGEN, gleichberechtigt (21.09.2026 abends, Finn: 'ohne Tampermonkey
+    # bekommen wir das doch auch hin'):
+    #   a) das Bedienfeld des Userscripts (wenn es laeuft),
+    #   b) Chromes Accessibility-Baum ueber Windows-UIA — braucht nichts ausser
+    #      dem offenen Fenster, sieht auch die Aufklappliste, liefert echte
+    #      Bildschirm-Pixel.
+    # Jede Aussage reicht, wenn sie eindeutig ist. Ein Stand von VOR diesem
+    # Lauf zaehlt nie (er koennte aus einem geschlossenen Tab stammen).
     ext = str(cmd["ext_id"]).strip()
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
                    if len(_nur_alnum(x)) >= 3][:60]
-    # Dem Userscript sagen, wonach es suchen soll (0.4.2+, 90 s scharf). Ein
-    # alter reader-server kennt /suche nicht und antwortet 404 — dann bleibt
-    # es beim gekappten panel-Weg, und die Meldungen unten raten zum Update.
-    such_ok = bool(_tv_http("/suche", {"texte": [ext] + geschwister}))
-    trail.append("Text-Suche scharf" if such_ok else "reader-server ohne /suche (alt)")
-    ende = time.time() + (40.0 if gestartet else 12.0)
-    bf, zustand, aktiv = None, "", ""
-    while time.time() < ende:
-        b = _tv_bf(nach=start, timeout=4.0)
-        if b:
-            bf = b
-            zustand, aktiv = tv_konto_zustand(b, ext, geschwister)
-            if zustand != "kein_broker":
-                break
+    ids = [ext] + geschwister
+    _tv_http("/suche", {"texte": ids}, timeout=1.5)   # nur fuer Userscript 0.4.2+, sonst wirkungslos
+
+    uia_info = {}
+    fenster = [None]
+
+    def tv_fenster():
+        if fenster[0] is None:
+            bf_t = _tv_http("/bedienfeld", timeout=1.5) or {}
+            w, _f = _tv_fenster_holen([], tv_tab_suchbegriff(bf_t.get("titel")) if bf_t.get("ok") else "", "")
+            fenster[0] = w or False
+        return fenster[0] or None
+
+    def lies():
+        """-> (zustand, aktiv_text, bf, uia_element|None)"""
+        b = _tv_bf(nach=start, timeout=2.5)
+        z, a = tv_konto_zustand(b, ext, geschwister) if b else ("kein_broker", "")
+        if z in ("richtig", "gleicher_login"):
+            return z, a, b, None
+        w = tv_fenster()
+        if w:
+            els = _tv_uia_konten(w, ids, uia_info)
+            if len(els) == 1:          # zwei sichtbare Konten = offene Liste = kein Urteil
+                e = els[0]
+                z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
+                return z2, e["text"], b, e
+        return z, a, b, None
+
+    ende = time.time() + (40.0 if gestartet else 14.0)
+    zustand, aktiv, bf, uia_el = "kein_broker", "", None, None
+    while True:
+        zustand, aktiv, bf, uia_el = lies()
+        if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
+            break
         _warte(0.8, 0.5)
-    if not bf:
-        return raus("TradingView ist offen, aber der Reader meldet kein Bedienfeld "
-                    "(127.0.0.1:8790) — laeuft reader-server, und ist das "
-                    "Userscript im TradingView-Tab aktiv (gruener Badge)?", "reader")
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
-    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
+    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
+                 + (" (UIA)" if uia_el else ""))
+
+    def diagnose():
+        pfad, d = _tv_dump_sichern(trail) if bf else ("", tv_diagnose(None))
+        d["uia"] = uia_info
+        res["dump"], res["diagnose"] = pfad, d
 
     if zustand == "richtig":
         res["ok"] = True
@@ -1910,20 +2042,22 @@ def modus_tvkonto(cmd):
 
     ziel = (f"Login '{cmd.get('tv_username')}', " if cmd.get("tv_username") else "") + f"Konto {ext}"
     if zustand != "gleicher_login":
-        res["dump"], res["diagnose"] = _tv_dump_sichern(trail)
+        diagnose()
         if zustand == "falsch":
             return raus(f"Falscher Tradovate-Login: aktiv ist '{aktiv[:60]}', und das "
                         f"kennt Prophos bei dieser Firma nicht — gebraucht wird {ziel}. "
                         "Ab- und Anmelden klickt Puls noch nicht (Teil 2b).", "konto")
         return raus(f"Im TradingView-Panel ist kein Konto zu erkennen — gebraucht wird "
                     f"{ziel}. Ist unten das Broker-Panel offen und Tradovate verbunden? "
-                    "Das Anmelden klickt Puls noch nicht (Teil 2b).", "konto")
+                    "Das Anmelden klickt Puls noch nicht (Teil 2b)."
+                    + ("" if bf else " (Der Reader meldet sich nicht — gelesen wurde nur "
+                       "ueber Windows-UIA.)"), "konto")
 
     # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
     # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
     # Drop-Down draufdruecken und den Account switchen."
     def ab(msg):
-        res["dump"], res["diagnose"] = _tv_dump_sichern(trail)
+        diagnose()
         return raus(msg, "wechsel")
 
     # Riegel VOR dem Wechsel: das aktive Konto muss flach sein. Der Reader kennt
@@ -1940,10 +2074,7 @@ def modus_tvkonto(cmd):
                     f"({len(pos)}). Erst schliessen — ein Kontowechsel wuerde dem Reader "
                     "die Sicht darauf nehmen.", "wechsel")
 
-    if not isinstance(bf.get("geo"), dict) or not bf["geo"].get("innerWidth"):
-        return ab("Bedienfeld ohne Geometrie — Userscript-Version pruefen, TradingView neu laden.")
-    probe = []
-    w, f = _tv_fenster_holen(probe, tv_tab_suchbegriff(bf.get("titel")), "")
+    w = tv_fenster()
     if not w:
         return ab("TradingView-Fenster fuer den Klick nicht gefunden.")
     try:
@@ -1952,73 +2083,81 @@ def modus_tvkonto(cmd):
         return ab("Browser-Fenster ohne Handle — Fenster neu oeffnen.")
     _warte(0.3, 0.3)
 
-    ids = [ext] + geschwister
-    schalter = _tv_element(bf, "konto", "schalter")
-    if not schalter:
-        # Anker des Userscripts leer -> der Umschalter ist das EINE Element im
-        # Broker-Panel, das eine bekannte Kontonummer zeigt.
-        per_text = tv_konto_per_text(bf, ids)
-        if len(per_text) == 1:
-            schalter = per_text[0]
-            trail.append("Umschalter ueber Kontonummer gefunden")
-    if not schalter:
-        return ab(f"Konto steht auf '{aktiv[:40]}' statt {ext} — der Konto-Umschalter "
-                  "wurde aber nicht eindeutig gefunden.")
-    schalter_r = _tv_rect4(schalter)
-    _tv_http("/suche", {"texte": [ext] + geschwister})   # 90-s-Fenster frisch aufziehen
-    ok, f = _tv_klick(schalter["rect"], bf["geo"], _klient_rechteck(hwnd), "Konto-Umschalter", trail)
+    # Umschalter anklicken — mit dem Auge, das ihn gesehen hat.
+    schalter_css, schalter_uia = None, None
+    if uia_el:
+        schalter_uia = uia_el
+        ok, f = _tv_uia_klick(uia_el, "Konto-Umschalter", trail)
+    else:
+        geo_ok = isinstance((bf or {}).get("geo"), dict) and bf["geo"].get("innerWidth")
+        el = _tv_element(bf, "konto", "schalter") if geo_ok else None
+        if not el and geo_ok:
+            per_text = tv_konto_per_text(bf, ids)
+            el = per_text[0] if len(per_text) == 1 else None
+        if el:
+            schalter_css = _tv_rect4(el)
+            ok, f = _tv_klick(el["rect"], bf["geo"], _klient_rechteck(hwnd), "Konto-Umschalter", trail)
+        else:
+            els = _tv_uia_konten(w, ids, uia_info)
+            if len(els) != 1:
+                return ab(f"Konto steht auf '{aktiv[:40]}' statt {ext} — der Konto-Umschalter "
+                          "wurde aber nicht eindeutig gefunden.")
+            schalter_uia = els[0]
+            ok, f = _tv_uia_klick(els[0], "Konto-Umschalter", trail)
     if not ok:
         return ab(f)
-    _warte(0.6, 0.5)
+    _warte(0.7, 0.5)
 
-    # Liste lesen — sie baut sich nach dem Klick erst auf, deshalb ein paar
-    # frische Staende lang suchen statt nur den ersten zu nehmen.
-    eintrag, anzahl, gesehen = None, 0, 0
-    ende = time.time() + 6.0
-    while time.time() < ende and not eintrag:
-        b = _tv_bf(nach=time.time(), timeout=3.0)
-        if b:
-            bf = b
-            liste = (b.get("konto") or {}).get("eintraege") or []
-            gesehen = len(liste)
-            eintrag, anzahl = tv_konto_eintrag(liste, ext, geschwister)
-            if not eintrag and not anzahl:
-                # Listen-Anker leer -> Eintrag ueber die Kontonummer des ZIELS,
-                # ueberall im Fenster, nur nicht der Umschalter selbst.
-                per_text = tv_konto_per_text(b, ids, nur_ziel=ext, ohne=schalter_r, ueberall=True)
-                anzahl = len(per_text)
-                eintrag = per_text[0] if anzahl == 1 else None
-                gesehen = max(gesehen, anzahl)
-    if not eintrag:
+    # Zieleintrag in der offenen Liste suchen: erst das Userscript (nur 0.4.2+
+    # sieht die Liste — 'treffer'), sonst UIA. Die Liste baut sich nach dem
+    # Klick erst auf und Chrome reicht neue Knoten verzoegert in den Baum,
+    # deshalb mehrere Anlaeufe.
+    eintrag, eintrag_uia, anzahl = None, None, 0
+    ende = time.time() + 9.0
+    while time.time() < ende and not (eintrag or eintrag_uia):
+        b = _tv_bf(nach=time.time(), timeout=1.5)
+        if b and isinstance(b.get("treffer"), list):
+            per_text = tv_konto_per_text(b, ids, nur_ziel=ext, ohne=schalter_css, ueberall=True)
+            anzahl = len(per_text)
+            if anzahl == 1:
+                eintrag, bf = per_text[0], b
+                break
+        els = _tv_uia_konten(w, ids, uia_info, nur_ziel=ext,
+                             ohne=(schalter_uia or {}).get("r"))
+        anzahl = max(anzahl, len(els))
+        if len(els) == 1:
+            eintrag_uia = els[0]
+            break
+        if len(els) > 1:
+            break                  # mehrdeutig wird durch Warten nicht besser
+        _warte(0.5, 0.4)
+    if not (eintrag or eintrag_uia):
         # Dropdown wieder schliessen, sonst bleibt es ueber dem Chart haengen.
         try:
             from pywinauto import keyboard
             keyboard.send_keys("{ESC}")
         except Exception:
             pass
-        if not anzahl and not tv_version_min((bf or {}).get("version"), TV_USERSCRIPT_MIN):
-            # Ehrlich sagen, WARUM nichts gefunden wurde: das alte Userscript
-            # sieht die Aufklappliste gar nicht (Kappung) — das ist kein Befund
-            # ueber das Konto.
-            return ab(f"Dropdown geoeffnet, aber das Userscript {(bf or {}).get('version') or '?'} "
-                      f"kann die Liste nicht lesen (noetig: {TV_USERSCRIPT_MIN}). " + TV_USERSCRIPT_RAT)
-        return ab(f"Konto {ext} in der Dropdown-Liste nicht eindeutig gefunden "
-                  f"({anzahl} Treffer). Liegt es wirklich unter diesem Tradovate-Login?")
-    ok, f = _tv_klick(eintrag["rect"], bf["geo"], _klient_rechteck(hwnd), f"Konto {ext}", trail)
+        return ab(f"Dropdown geoeffnet, aber Konto {ext} steht darin nicht eindeutig "
+                  f"({anzahl} Treffer). Liegt es wirklich unter diesem Tradovate-Login? "
+                  "Falls ja: bitte 'Diagnose kopieren' und schicken.")
+    if eintrag_uia:
+        ok, f = _tv_uia_klick(eintrag_uia, f"Konto {ext}", trail)
+    else:
+        ok, f = _tv_klick(eintrag["rect"], bf["geo"], _klient_rechteck(hwnd), f"Konto {ext}", trail)
     if not ok:
         return ab(f)
 
     # Beweis: das Panel muss danach nachweislich das Zielkonto zeigen.
-    ende = time.time() + 10.0
+    start = time.time()            # nur Staende NACH dem Klick zaehlen
+    ende = time.time() + 12.0
     while time.time() < ende:
-        _warte(0.6, 0.4)
-        b = _tv_bf(nach=time.time(), timeout=3.0)
-        if b:
-            zustand, aktiv = tv_konto_zustand(b, ext, geschwister)
-            if zustand == "richtig":
-                res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
-                trail.append(f"Konto steht auf {ext}")
-                return raus(f"Konto gewechselt — aktiv ist jetzt {aktiv[:60]}.", "wechsel")
+        _warte(0.7, 0.4)
+        zustand, aktiv, _b, _e = lies()
+        if zustand == "richtig":
+            res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
+            trail.append(f"Konto steht auf {ext}")
+            return raus(f"Konto gewechselt — aktiv ist jetzt {aktiv[:60]}.", "wechsel")
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
     return ab(f"Konto liess sich nicht auf {ext} umstellen — das Panel zeigt "
               f"'{aktiv[:40] or '?'}'.")
