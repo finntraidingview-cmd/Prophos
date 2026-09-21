@@ -22916,7 +22916,9 @@
     if(r.ok){ _pfSet('mult', 'ok', `<span class="mono">${Number(plan.multiplier).toFixed(3)}×</span> erfolgreich gepusht.`); return {} }
     _pfSet('mult', 'err', escapeHtml(r.error || 'Push fehlgeschlagen')); return { hardFail: true }
   }
-  async function pfCheckSym(plan, dupMasterId, dupSlaveId){
+  // onFixed (22.09.2026): meldet dem laufenden Check, dass „Jetzt pushen" durch ist —
+  // der schließt dann selbst ab (grün + Popup zu), statt auf „Erneut versuchen" zu warten.
+  async function pfCheckSym(plan, dupMasterId, dupSlaveId, onFixed){
     // Leicht versetzt starten: läuft parallel zu pfCheckMult, das ebenfalls getSettings
     // aufruft — zwei gleichzeitige Calls reißen Duplikums 2/Sekunde-Limit (als-200-
     // getarnter Rate-Limit-Fehler). 900ms Versatz + Retry im Helper entschärfen das.
@@ -22950,7 +22952,10 @@
         const pr = await dupPushSymbolMapping(dupMasterId, dupSlaveId, sm, symSlave)
         if(!pr.ok) failed.push(`${sm}: ${pr.error || 'Fehler'}`)
       }
-      if(!failed.length) _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
+      if(!failed.length){
+        _pfSet('sym', 'ok', `<span class="mono">${escapeHtml(missing.join(', '))} → ${escapeHtml(symSlave)}</span> gepusht ✓`)
+        if(typeof onFixed === 'function') onFixed()
+      }
       else _pfSet('sym', 'err', escapeHtml(failed.join(' · ')))
     })
     return { softWait: true }
@@ -23005,6 +23010,28 @@
     let hardFail = false   // echtes Problem → Buttons statt Auto-Start
     let softWait = false   // Fix-Button angeboten → nicht auto-starten
     let dirHint  = null    // Richtungs-Schutz hat etwas gefunden → Toast, kein Stopp
+    let checksDone = false // Promise.all unten ist durch → ab da schließt der Sym-Push selbst ab
+    let symFixed   = false // „Jetzt pushen" war erfolgreich (ggf. schon vor Promise.all)
+
+    // Mapping per „Jetzt pushen" nachgezogen (Finn 22.09.2026, Duplikum + Orbit: „wird
+    // zwar erfolgreich gepusht, aber das Popup bleibt stehen — da muss ich immer noch
+    // mal erneut Starten drücken"). Bis .346 färbte der Knopf nur die Zeile grün; das
+    // Popup stand weiter auf „Hinweise oben prüfen". Jetzt: war das Mapping das einzige
+    // Hindernis, schließt der Check ab wie ein grüner Durchlauf (Status ready, Karte
+    // neu, Popup zu nach 1,6 s). Rote Zeilen bleiben stehen — dann gilt weiter „Erneut
+    // versuchen". Klickt Finn, bevor die anderen Zeilen fertig sind, übernimmt die
+    // Aggregation nach Promise.all (softWait ist dann schon zurückgesetzt).
+    const onSymFixed = () => {
+      symFixed = true
+      softWait = false
+      if(!checksDone || hardFail) return
+      if(_pfPlanId == null || String(_pfPlanId) !== String(planId)) return   // Popup zu oder anderer Plan
+      _pfCheckStatus[String(planId)] = { state: 'ready', at: Date.now() }
+      _pfStatusSave()
+      try { renderTradePlans() } catch(_){}
+      _pfFinish(true)
+      if(dirHint && typeof atToast === 'function') setTimeout(() => atToast(dirHint, 'end'), 1750)
+    }
 
     // Alle 4 Zeilen SOFORT anlegen (alle mit Spinner). Check 1 (Verknüpfung) ist rein
     // lokal/instant und liefert die Duplikum-IDs, die die anderen 3 brauchen. Danach laufen
@@ -23059,11 +23086,15 @@
       const results = await Promise.all([
         pfCheckConn(plan, dupMasterId, dupSlaveId),
         pfCheckMult(plan, dupMasterId, dupSlaveId),
-        pfCheckSym(plan,  dupMasterId, dupSlaveId),
+        pfCheckSym(plan,  dupMasterId, dupSlaveId, onSymFixed),
         pfCheckDir(plan)
       ])
-      for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.softWait) softWait = true; if(r && r.dirHint) dirHint = r.dirHint }
+      // softWait NICHT blind aus dem Sym-Ergebnis übernehmen: wurde das Mapping schon
+      // während der Checks gepusht, hat onSymFixed es bereits zurückgesetzt.
+      for(const r of results){ if(r && r.hardFail) hardFail = true; if(r && r.dirHint) dirHint = r.dirHint }
+      if(results[2] && results[2].softWait && !symFixed) softWait = true
     }
+    checksDone = true
 
     const allOk = !hardFail && !softWait
     _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
@@ -24568,7 +24599,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.346'
+  const OS_TAB_BUILD = '2026-09-22.347'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
