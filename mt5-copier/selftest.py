@@ -900,6 +900,22 @@ def main():
         and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
         and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
         and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
+    # Schalter + Meldung (22.09.2026 01:50, Finns Lauf: SL vergessen, weil 'Feld bedienbar'
+    # als 'Schalter an' galt). Umschalter = gleiche Zeile, rechts, der aeusserste im Panel.
+    _BER = {"links": 1300, "rechts": 1630}
+    _SCH = [((1580, 612, 1615, 630), False), ((1580, 700, 1615, 718), True), ((1470, 703, 1490, 717), True), ((1800, 702, 1830, 718), False)]
+    chk("TV-ORDER 4b: Umschalter zur Beschriftung — gleiche Zeile, ganz rechts im Panel, nie ausserhalb",
+        order_bot.tv_schalter_zu(_SCH, (1325, 612, 1415, 630), _BER) == ((1580, 612, 1615, 630), False)
+        and order_bot.tv_schalter_zu(_SCH, (1325, 700, 1400, 718), _BER) == ((1580, 700, 1615, 718), True)
+        and order_bot.tv_schalter_zu(_SCH, (1325, 462, 1360, 480), _BER) == (None, None)
+        and order_bot.tv_schalter_zu(None, (1325, 612, 1415, 630), _BER) == (None, None))
+    _TO = [("Take Profit order placed on MNQZ6", (130, 1100, 420, 1120), "Text"), ("Sell 2 at 30,858.25", (130, 1125, 300, 1140), "Text"),
+           ("Order filled: Buy 1 NQZ2026", (130, 1150, 400, 1170), "Text"), ("Start creating order", (1325, 920, 1618, 978), "Button"),
+           ("Take Profit order placed on ESZ6", None, "Text")]
+    chk("TV-ORDER 4b: TradingViews Order-Meldungen — nur mit der Symbol-Wurzel des Plans, nie Unsichtbares oder der Kauf-Knopf",
+        order_bot.tv_order_meldungen(_TO, "MNQZ6") == ["Take Profit order placed on MNQZ6"]
+        and order_bot.tv_order_meldungen(_TO, "NQZ6") == ["Order filled: Buy 1 NQZ2026"]
+        and order_bot.tv_order_meldungen(_TO, "ESZ6") == [])
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]

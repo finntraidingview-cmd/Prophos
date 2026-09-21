@@ -1914,6 +1914,60 @@ def _tv_uia_felder(w):
         return None
 
 
+def _tv_uia_schalter(w):
+    """Alle Umschalter (Toggle-Muster) eines Fensters in EINEM Aufruf (22.09.2026
+    01:50, Finns Lauf: 'er platziert nur einen TP, SL vergisst er komplett' —
+    Trail: 'Stop loss = 22.0 $' OHNE Tippen und OHNE 'Schalter AN'. Der alte
+    Wert 22 stand noch im Feld, das Feld war laut UIA BEDIENBAR — und genau das
+    galt bis dahin als 'Schalter an'. Bei TradingView ist das Feld aber auch bei
+    AUS bedienbar; der Schalter selbst war aus, die Order ging ohne SL raus. Beim
+    TP hatte nur das TIPPEN den Schalter angeknipst).
+    -> [((l,t,r,b), an: bool|None)] oder None, wenn der Weg nicht geht."""
+    if _UIA_SAMMEL["geht"] is False:
+        return None
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        dll = u.UIA_dll
+        P_OFF, P_TOG = dll.UIA_IsOffscreenPropertyId, dll.UIA_ToggleToggleStatePropertyId
+        anfrage = u.iuia.CreateCacheRequest()
+        for pid in (dll.UIA_BoundingRectanglePropertyId, P_OFF, P_TOG):
+            anfrage.AddProperty(pid)
+        bed = u.iuia.CreatePropertyCondition(dll.UIA_IsTogglePatternAvailablePropertyId, True)
+        feld = w.element_info.element.FindAllBuildCache(u.tree_scope["descendants"], bed, anfrage)
+        out = []
+        for i in range(feld.Length):
+            e = feld.GetElement(i)
+            try:
+                if e.GetCachedPropertyValue(P_OFF):
+                    continue
+                r = e.CachedBoundingRectangle
+                if r.right - r.left < 3 or r.bottom - r.top < 3:
+                    continue
+                z = e.GetCachedPropertyValue(P_TOG)
+                out.append(((r.left, r.top, r.right, r.bottom), True if z == 1 else False if z == 0 else None))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return None
+
+
+def tv_schalter_zu(schalter, label_r, bereich):
+    """Der Umschalter ZU einer Beschriftung: gleiche Zeile (Mitte +-14 px), rechts
+    von ihr, im Panel — bei mehreren der am weitesten rechts (der Schalter sitzt
+    am rechten Panelrand). -> (rect, an) oder (None, None)"""
+    ly = (label_r[1] + label_r[3]) // 2
+    best = None
+    for r, an in schalter or ():
+        my = (r[1] + r[3]) // 2
+        if abs(my - ly) > 14 or r[0] <= label_r[2] or r[2] > bereich["rechts"] + 10:
+            continue
+        if best is None or r[0] > best[0][0]:
+            best = (r, an)
+    return best if best else (None, None)
+
+
 def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     """AUGEN OHNE USERSCRIPT (21.09.2026, Finn: 'nein, ohne Tampermonkey — das
     bekommen wir doch auch so hin'): die Kontonummern direkt aus Chromes
@@ -3750,6 +3804,25 @@ def tv_positions_zone(roh, max_n=24):
     return " | ".join(out) or "nichts unter dem Reiter"
 
 
+TV_RX_MELDUNG = re.compile(r"\b(order (placed|filled|executed)|position opened|filled)\b", re.I)
+
+
+def tv_order_meldungen(roh, symbol):
+    """TradingViews eigene Order-Meldungen (Toasts) mit der Symbol-Wurzel des Plans.
+    -> Liste der Texte. Rein rechnend."""
+    root = tv_symbol_root(symbol)
+    out = []
+    for e in roh or ():
+        n = str(e[0]).strip()
+        if not e[1] or not TV_RX_MELDUNG.search(n):
+            continue
+        if root and not any(tv_symbol_root(wort) == root for wort in re.findall(r"[A-Za-z0-9!:._-]+", n)):
+            continue
+        if n not in out:
+            out.append(n)
+    return out
+
+
 def tv_ist_scharf(cmd):
     """Schritt 4b (22.09.2026): scharf NUR mit der ausdruecklichen Marke 'scharf'
     — und nie, wenn 'probe' gesetzt ist. Die Marke schickt erst das Frontend,
@@ -3875,6 +3948,16 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             return None, labels[0], f"Eingabefeld unter '{name}' nicht gefunden ({len(labels)} Beschriftungen)."
         return (eds[i], rs[i]), lab, ""
 
+    def schalter(lab):
+        """Echter Schalter-Zustand zur Beschriftung. -> (an|None, rect|None).
+        None = kein Umschalter lesbar -> Rueckfall auf 'Feld bedienbar' (alte,
+        unsichere Regel; sie wird dann in der Spur genannt)."""
+        sch = _tv_uia_schalter(w)
+        if sch is None:
+            return None, None
+        r, z = tv_schalter_zu(sch, lab["r"], ber)
+        return (z, r) if r else (None, None)
+
     def an(feld):
         try:
             return bool(feld[0].is_enabled())
@@ -3909,27 +3992,49 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         if soll is not None and "$" not in lab["text"]:
             # Einheit MUSS Geld sein: '300' in Ticks oder % waere eine voellig andere Distanz
             return False, f"'{lab['text']}' steht nicht auf $ — der Wert {soll} waere dort etwas anderes. Im Panel auf $ stellen."
-        ist_an = an(feld)
         will_an = soll is not None
-        if ist_an is None:
-            return False, f"Schalter-Zustand von '{name}' nicht lesbar."
-        if ist_an != will_an:
-            # Schalter = selbe Zeile wie die Beschriftung, am rechten Panelrand
-            sx, sy = ber["rechts"] - 52, lab["punkt"][1]
-            _tv_uia_klick({"punkt": (sx, sy)}, f"Schalter {name} {'AN' if will_an else 'AUS'}", trail)
-            _warte(0.6, 0.3)
-            feld, lab, f = feld_zu(muster, name)
-            if not feld or an(feld) != will_an:
-                return False, (f"Schalter '{name}' liess sich nicht auf {'AN' if will_an else 'AUS'} stellen "
-                               f"(Klick bei {sx},{sy}).")
+        ist_an, sch_r = schalter(lab)
+        echt = ist_an is not None
+        if not echt:
+            # kein Umschalter lesbar: alte Regel 'Feld bedienbar' — unsicher (bei
+            # TradingView ist das Feld auch bei AUS bedienbar), wird in der Spur genannt.
+            ist_an = an(feld)
+            trail.append(f"Schalter {name}: kein Umschalter lesbar, Feld {'bedienbar' if ist_an else 'gesperrt'}")
+            if ist_an is None:
+                return False, f"Schalter-Zustand von '{name}' nicht lesbar."
         if will_an:
-            if tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(soll):
+            # AN = ins Feld klicken + Wert tippen (Finn 22.09.2026 01:5x: 'man muss nur
+            # einmal in das Input-Feld reindruecken, dann zaehlt das schon als aktiv' —
+            # genau so ging der TP im Lauf davor an). Uebersprungen NUR, wenn der
+            # Schalter nachweislich AN ist und der Wert schon stimmt.
+            if not (echt and ist_an and tv_zahl_lesen(_tv_edit_wert(feld[0])) == float(soll)):
                 setze_wert(feld, float(soll), name)
                 feld, lab, f = feld_zu(muster, name)
                 ist = tv_zahl_lesen(_tv_edit_wert(feld[0])) if feld else None
                 if ist is None or abs(ist - float(soll)) > 0.005:
                     return False, f"{name}: im Feld steht '{_tv_edit_wert(feld[0]) if feld else '?'}' statt {soll}."
-            trail.append(f"{name} = {soll} $")
+            nach, _r = schalter(lab)
+            if nach is False:
+                return False, f"'{name}' steht auf {soll} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus."
+            trail.append(f"{name} = {soll} $ (Schalter {'AN' if nach else 'unlesbar, ins Feld getippt'})")
+        elif ist_an:
+            # AUS: den Umschalter selbst klicken (echte Lage, sonst Schaetzung am rechten
+            # Panelrand) und den Zustand zurueckerlesen.
+            if sch_r:
+                sx, sy = (sch_r[0] + sch_r[2]) // 2, (sch_r[1] + sch_r[3]) // 2
+            else:
+                sx, sy = ber["rechts"] - 52, lab["punkt"][1]
+            _tv_uia_klick({"punkt": (sx, sy)}, f"Schalter {name} AUS", trail)
+            _warte(0.6, 0.3)
+            feld, lab, f = feld_zu(muster, name)
+            if not feld:
+                return False, f
+            nach, _r = schalter(lab)
+            if nach is None:
+                nach = an(feld)
+            if nach:
+                return False, f"Schalter '{name}' liess sich nicht AUS stellen (Klick bei {sx},{sy})."
+            trail.append(f"{name} AUS (Schalter geklickt)")
         else:
             trail.append(f"{name} AUS")
 
@@ -3959,6 +4064,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             quelle = "tabelle" if vorher else None
         trail.append(f"Beweis-Quelle: {quelle or 'KEINE (Reader aus, Positions-Tabelle nicht zu sehen)'}"
                      + (f", vorher {vorher['menge']:g}" if vorher else ""))
+        # Dritter Beweis (22.09.2026 01:50, Finns Screenshot: TradingView meldet unten
+        # links selbst 'Take Profit order placed on MNQZ6 · Sell 2 at 30,858.25'; die
+        # Positions-Tabelle war da hinter 'Show more' verdeckt): TradingViews EIGENE
+        # Meldung nach dem Klick. Gezaehlt werden nur Meldungen, die es VOR dem Klick
+        # noch nicht gab (alte bleiben minutenlang stehen).
+        toasts_vorher = set(tv_order_meldungen(_tv_uia_roh(w, typen), cmd.get("symbol")))
 
     # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
     roh, _b = blick()
@@ -3992,9 +4103,18 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         return False, f + " — NICHT gesendet."
     erg["gesendet"] = True
     trail.append("Senden geklickt — ab hier zaehlt nur noch der Beweis")
-    ende = time.time() + (25.0 if quelle else 0.0)
+    ende = time.time() + 25.0
     while time.time() < ende:
         _warte(0.4, 0.3)
+        roh_t = _tv_uia_roh(w, typen)
+        neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
+        if neu_t:
+            erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=None, tv_symbol=None)
+            trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
+            return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {cmd.get('symbol')} · {tpsl} "
+                          f"(bewiesen: TradingView-Meldung '{neu_t[0][:60]}')")
+        if not quelle:
+            continue
         if quelle == "reader":
             pos, _an = _tv_positionen()
             if pos is None:
@@ -4009,7 +4129,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             if jetzt is None:
                 continue
         # Bestaetigt wird nur der ZUWACHS: mehr Kontrakte — oder (Tabelle) eine neue Zeile.
-        if jetzt["menge"] - vorher["menge"] >= plan["menge"] - 1e-9 or jetzt["zeilen"] > vorher["zeilen"]:
+        if vorher is not None and (jetzt["menge"] - vorher["menge"] >= plan["menge"] - 1e-9 or jetzt["zeilen"] > vorher["zeilen"]):
             zuwachs = jetzt["menge"] - vorher["menge"]
             erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
             trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
