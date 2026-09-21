@@ -864,6 +864,18 @@ def main():
         and order_bot.tv_order_plan({"richtung": "buy", "volumen": "1.5"})[0] is None
         and order_bot.tv_order_plan({"richtung": "", "volumen": "1"})[0] is None
         and order_bot.tv_order_plan({"richtung": "buy", "volumen": "0"})[0] is None)
+    # Schritt 4b (22.09.2026): der Kauf-Klick haengt an EINER ausdruecklichen Marke.
+    chk("TV-ORDER 4b: scharf nur mit Marke (bool oder Bruecken-Text '1') — nie bei 'false'/'0'/leer, nie mit probe",
+        order_bot.tv_ist_scharf({"scharf": True}) and order_bot.tv_ist_scharf({"scharf": "1"})
+        and not order_bot.tv_ist_scharf({}) and not order_bot.tv_ist_scharf({"scharf": False})
+        and not order_bot.tv_ist_scharf({"scharf": "false"}) and not order_bot.tv_ist_scharf({"scharf": "0"})
+        and not order_bot.tv_ist_scharf({"scharf": ""}) and not order_bot.tv_ist_scharf({"scharf": None})
+        and not order_bot.tv_ist_scharf({"scharf": True, "probe": True})
+        and not order_bot.tv_ist_scharf({"scharf": "1", "probe": "1"}))
+    chk("TV-ORDER 4b: die Marke reist ueber die Bruecke (altes Panel) und ist nie eine Kontonummer",
+        order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"scharf": False, "geschwister": ["@scharf=1", "APEX1"]}))
+        and order_bot.tv_bruecke_auspacken({"geschwister": ["@scharf=1", "APEX1"]})["geschwister"] == ["APEX1"]
+        and not order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"geschwister": ["APEX1"]})))
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]

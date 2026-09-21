@@ -2256,6 +2256,9 @@ class Handler(BaseHTTPRequestHandler):
             for _f in ("volumen", "tp_usd", "sl_usd"):
                 cmd[_f] = body.get(_f) if isinstance(body.get(_f), (int, float, str)) else None
             cmd["probe"] = bool(body.get("probe"))
+            # Schritt 4b (22.09.2026): NUR mit dieser Marke klickt der Bot den Kauf-Knopf.
+            # Ein altes Panel kennt sie nicht — dann reist sie ueber die Bruecke (@scharf=1).
+            cmd["scharf"] = body.get("scharf") is True
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
@@ -2280,6 +2283,9 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": False, "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
             except subprocess.TimeoutExpired:
                 res = {"ok": False, "msg": "TV-Konto-Pruefung Timeout (260s) — in TradingView nachsehen, wie weit er kam."}
+                if cmd.get("scharf"):
+                    # 4b: der Kauf-Klick KANN schon raus sein — nie blind wiederholen.
+                    res["retry_ok"] = False
             except (OSError, ValueError) as e:
                 res = {"ok": False, "msg": f"TV-Konto-Pruefung fehlgeschlagen: {e}"}
             finally:

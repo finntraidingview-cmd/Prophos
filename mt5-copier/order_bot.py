@@ -3657,9 +3657,25 @@ def tv_order_plan(cmd):
             "tp": tp if tp and tp > 0 else None, "sl": sl if sl and sl > 0 else None}, ""
 
 
-def tv_order_schritt(w, cmd, trail):
-    """Order-Panel ausfuellen und beweisen — OHNE den Kauf-Klick (Schritt 4a).
+def tv_ist_scharf(cmd):
+    """Schritt 4b (22.09.2026): scharf NUR mit der ausdruecklichen Marke 'scharf'
+    — und nie, wenn 'probe' gesetzt ist. Die Marke schickt erst das Frontend,
+    das auch 'Order wird platziert' anzeigt: ein am PC noch altes Frontend
+    (Text 'Probelauf, kein Kauf-Klick') loest so mit dem neuen Bot KEINE Order
+    aus. Ueber die Bruecke kommt der Wert als Text ('1'), vom Panel als bool —
+    'false'/'0'/leer zaehlen nie als ja."""
+    def ja(v):
+        return v is True or str(v).strip().lower() in ("1", "true", "ja")
+    return ja(cmd.get("scharf")) and not ja(cmd.get("probe"))
+
+
+def tv_order_schritt(w, cmd, trail, erg=None):
+    """Order-Panel ausfuellen und beweisen (4a) — und NUR mit der Marke 'scharf'
+    den Kauf-Knopf genau EINMAL klicken und die Position beweisen (4b).
+    erg (dict) bekommt 'gesendet'/'bestaetigt'/'menge'/'einstieg'/'tv_symbol'.
     -> (ok, msg)"""
+    if erg is None:
+        erg = {}
     plan, fehler = tv_order_plan(cmd)
     if not plan:
         return False, fehler
@@ -3824,6 +3840,24 @@ def tv_order_schritt(w, cmd, trail):
         else:
             trail.append(f"{name} AUS")
 
+    # --- 4b: Vorher-Stand der Positionen, BEVOR irgendetwas gesendet wird -----
+    # Gleiche Doktrin wie im alten tvorder-Bau: ohne lebenden Reader gaebe es
+    # hinterher keine Bestaetigung, und eine unbestaetigte Order ist genau der
+    # Zustand, den der ganze Ablauf vermeiden will. Bestaetigt wird spaeter per
+    # DIFFERENZ (vorher/nachher), nie per 'es gibt eine Position'.
+    scharf = tv_ist_scharf(cmd)
+    menge_vorher = 0.0
+    if scharf:
+        pos_vorher, reader_an = _tv_positionen()
+        if pos_vorher is None:
+            return False, ("TV-Reader antwortet nicht — ohne ihn liesse sich die Order hinterher nicht "
+                           "beweisen. Panel ist ausgefuellt, NICHT gesendet.")
+        if not reader_an:
+            return False, ("TV-Reader ist pausiert — er wuerde die neue Position nie melden. Panel ist "
+                           "ausgefuellt, NICHT gesendet.")
+        menge_vorher = tv_menge_summe(pos_vorher, cmd.get("symbol"), plan["richtung"])
+        trail.append(f"Reader lebt, {len(pos_vorher)} Pos, Ausgangsmenge {menge_vorher:g}")
+
     # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
     roh, _b = blick()
     # UNTER der Stop-Loss-Zeile suchen: der Seiten-Kasten oben heisst sonst auch
@@ -3839,12 +3873,50 @@ def tv_order_schritt(w, cmd, trail):
     if ziel and not any(tv_symbol_root(wort) == ziel for wort in knopf[0]["text"].split()):
         return False, f"Auf dem Knopf steht nicht {ziel} ('{knopf[0]['text'][:40]}')."
     trail.append(f"Knopf: '{knopf[0]['text'][:50]}'")
-    return True, (f"PROBELAUF: Order-Panel steht — Knopf zeigt '{knopf[0]['text'][:50]}', "
-                  f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}. "
-                  "NICHT gesendet.")
+    tpsl = f"TP {str(plan['tp']) + ' $' if plan['tp'] else 'aus'}, SL {str(plan['sl']) + ' $' if plan['sl'] else 'aus'}"
+    if not scharf:
+        return True, (f"PROBELAUF: Order-Panel steht — Knopf zeigt '{knopf[0]['text'][:50]}', {tpsl}. "
+                      "NICHT gesendet.")
+
+    # ═══ AB HIER UNUMKEHRBAR (4b, Finn 22.09.2026: "dass nachdem alles
+    # eingegeben wurde, TP/SL etc., am Ende Buy/Sell gedrueckt wird") ═════════
+    # Geklickt wird GENAU der Knopf, dessen Beschriftung eben bewiesen wurde —
+    # derselbe Blick, kein neues Suchen dazwischen — und genau EINMAL. Nach dem
+    # Klick gibt es keinen zweiten Versuch: ob die Order liegt, sagt nur der
+    # Reader.
+    ok, f = _tv_uia_klick(knopf[0], "Order senden", trail)
+    if not ok:
+        # Der Klick kam nachweislich nicht raus (SendInput abgelehnt) — nichts gesendet.
+        return False, f + " — NICHT gesendet."
+    erg["gesendet"] = True
+    trail.append("Senden geklickt — ab hier zaehlt nur noch der Reader")
+    ende = time.time() + 25.0
+    while time.time() < ende:
+        _warte(0.4, 0.3)
+        pos, _an = _tv_positionen()
+        if pos is None:
+            continue
+        jetzt = tv_menge_summe(pos, cmd.get("symbol"), plan["richtung"])
+        if jetzt - menge_vorher >= plan["menge"] - 1e-9:
+            treffer = next((p for p in pos
+                            if tv_symbol_root(p.get("symbol")) == tv_symbol_root(cmd.get("symbol"))
+                            and tv_seite_passt(p.get("seite"), plan["richtung"])), {})
+            erg.update(bestaetigt=True, menge=jetzt - menge_vorher,
+                       einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
+            trail.append(f"Position bestaetigt: +{jetzt - menge_vorher:g} @ {treffer.get('einstieg') or '?'}")
+            return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "
+                          f"{treffer.get('symbol') or cmd.get('symbol')} @ {treffer.get('einstieg') or '?'} · {tpsl}")
+    # Kein Positionszuwachs in 25 s: Ablehnung, eine Rueckfrage von TradingView
+    # oder eine haengende Verbindung — welches davon, kann der Bot NICHT wissen.
+    # Eine Rueckfrage wird bewusst NICHT geraten weggeklickt: was zu sehen ist,
+    # steht in der Meldung, daraus wird der naechste Schritt gebaut.
+    roh, _b = blick()
+    return False, ("Ergebnis UNKLAR: 25 s nach dem Kauf-Klick meldet der Reader keine neue Position. Erst in "
+                   "TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Gesehen: "
+                   + tv_uia_spur(roh))
 
 
-TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe")
+TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf")
 
 
 def tv_bruecke_auspacken(cmd):
@@ -3904,17 +3976,32 @@ def modus_tvkette(cmd):
         except Exception as e:
             ok, msg = False, f"Asset-Schritt abgebrochen: {type(e).__name__}: {e}"
     if ok and str(cmd.get("richtung") or "").strip():
-        # Schritt 4a: Order-Panel ausfuellen + beweisen, NICHT senden.
+        # Schritt 4a: Order-Panel ausfuellen + beweisen. 4b (22.09.2026): mit der
+        # Marke 'scharf' danach der EINE Kauf-Klick + Beweis ueber den Reader.
         asset_msg = msg
+        erg = {}
         try:
-            ok, msg = tv_order_schritt(w, cmd, trail)
+            ok, msg = tv_order_schritt(w, cmd, trail, erg)
         except Exception as e:
             ok, msg = False, f"Order-Schritt abgebrochen: {type(e).__name__}: {e}"
+            if erg.get("gesendet"):
+                msg = ("Ergebnis UNKLAR: der Kauf-Klick ging raus, danach brach der Bot ab "
+                       f"({type(e).__name__}). Erst in TradingView nachsehen — NICHT blind erneut starten.")
         msg = f"{asset_msg} · {msg}" if ok else f"Asset steht, aber: {msg}"
         res["schritt_order"] = True
+        res["scharf"] = tv_ist_scharf(cmd)
+        if erg.get("gesendet"):
+            # retry_ok=False heisst wie auf der MT5-Route (18.08.2026): es KANN
+            # gesendet worden sein — nie blind wiederholen.
+            res["gesendet"] = True
+            res["retry_ok"] = False
+            res["bestaetigt"] = bool(erg.get("bestaetigt"))
+            for _k in ("menge", "einstieg", "tv_symbol"):
+                res[_k] = erg.get(_k)
     res["konto_msg"] = res.get("msg")
     res["ok"] = bool(ok)
-    res["schritt"] = "order" if res.get("schritt_order") else "asset"
+    res["schritt"] = ("fertig" if res.get("bestaetigt") else "unklar" if res.get("gesendet")
+                      else "order" if res.get("schritt_order") else "asset")
     res["msg"] = (f"{res.get('msg')} · {msg}" if ok else
                   f"Konto steht ({res.get('konto_aktiv')}), aber: {msg} | Zuletzt: " + " > ".join(list(trail)[-3:]))
     res["trail"] = str(res.get("trail") or "") + " || Asset/Order: " + " > ".join(trail)

@@ -24533,8 +24533,10 @@
         // „hat echt gebuggt — lass mich den neuen Bot step nach step aufbauen").
         // Dieser Knopf fährt deshalb NICHT mehr die alte Kette, sondern die neue,
         // so weit sie steht: Schritt 1 TradingView öffnen/nach vorn, Schritt 2a
-        // prüfen, ob das richtige Tradovate-Konto aktiv ist. Eine Order wird
-        // hier noch NICHT platziert — der Plan bleibt deshalb „geplant".
+        // prüfen, ob das richtige Tradovate-Konto aktiv ist, 3 Asset, 4a Order-
+        // Panel ausfüllen + beweisen. Seit 4b (22.09.2026) klickt Puls am Ende
+        // den Kauf-Knopf; „Läuft" wird der Plan erst, wenn der Reader die
+        // Position bestätigt hat.
         // Welcher Tradovate-Login zur Firma gehört, steht in den Firmen-
         // Einstellungen (firm_specs.tv_username); mitgeschickt wird nur der
         // Name, das Passwort bleibt in Chromes Passwort-Manager.
@@ -24568,7 +24570,7 @@
           .map(a => String(a.externalId).trim())
         const startBtn = document.getElementById('tpOrderStart')
         if(startBtn) startBtn.disabled = true
-        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} (bei Bedarf Dropdown oder Tradovate-Login${tvUser ? ` ${tvUser}` : ''}) → Asset ${symbol} über die Watchlist → Order-Panel ausfüllen (Probelauf, kein Kauf-Klick). HÄNDE WEG. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
+        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} (bei Bedarf Dropdown oder Tradovate-Login${tvUser ? ` ${tvUser}` : ''}) → Asset ${symbol} über die Watchlist → Order-Panel ausfüllen → ${_tpOrderDir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
         try{
           const r = await window.mtcApi('tv-konto', { method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -24578,12 +24580,26 @@
             // geschwister-Liste. Die reicht jedes Panel seit .316 durch — ein am PC noch
             // altes Panel (langsamster Teil der Auslieferung) schluckte sonst neue Felder
             // wie symbol, und der Schritt lief still nicht. Der Bot packt sie wieder aus.
-            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol,
+            // scharf (22.09.2026, Schritt 4b, Finn: „dass nachdem alles eingegeben wurde, TP/SL etc.,
+            // am Ende Buy/Sell gedrückt wird"): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
+            // genau einmal, danach zählt nur der Positions-Reader.
+            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
               // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
-              geschwister: ['@symbol=' + symbol, '@richtung=' + _tpOrderDir, '@volumen=' + lots,
+              geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + _tpOrderDir, '@volumen=' + lots,
                 '@tp_usd=' + (autoSltp && tp ? tp : ''), '@sl_usd=' + (autoSltp && sl ? sl : ''), ...geschwister] }) })
-          if(r && r.ok){
-            if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Gesendet wurde NICHTS — der Kauf-Klick ist der nächste Bau-Schritt.`; msg.className = 'modal-msg ok' }
+          if(r && r.ok && r.gesendet){
+            // Position vom Reader bestätigt → Plan auf „Läuft" (eigener Orbit-Handler, s. tvPlanAufOpen).
+            await tvPlanAufOpen(plan.id)
+            document.getElementById('tpOrderModal').classList.remove('open')
+            if(typeof atToast === 'function') atToast(`✓ Order platziert: ${_tpOrderDir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'}`, 'start')
+          } else if(r && r.ok){
+            // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
+            if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Gesendet wurde NICHTS — der Puls am PC ist noch der alte Stand. Kurz warten, dann erneut „Starten".`; msg.className = 'modal-msg ok' }
+          } else if(r && r.retry_ok === false){
+            // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
+            // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
+            // Order zweimal im Markt.
+            err('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten. · ' + (r.msg || r.error || ''))
           } else {
             err('Order gespeichert, nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
             // Diagnose kopieren (21.09.2026): der Bot schickt mit, was das
@@ -24605,7 +24621,7 @@
             }
           }
         }catch(e){
-          err('Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Es wurde nichts platziert (dieser Schritt klickt noch keine Order).')
+          err('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
         }finally{
           if(startBtn) startBtn.disabled = false
         }
@@ -24642,7 +24658,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.339'
+  const OS_TAB_BUILD = '2026-09-22.340'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
