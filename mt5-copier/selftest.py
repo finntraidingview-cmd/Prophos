@@ -1059,10 +1059,40 @@ def main():
         and panel.terminal_schliessbar({}, _stOK, 5, None)[0] is False)
     chk("PANEL: Status-Warnung (note) blockt Terminal-Zu — Alt-Snapshot ist kein Beweis",
         panel.terminal_schliessbar(_cfgT, dict(_stOK, note="Snapshot eingefroren"), 5, None)[0] is False)
-    # Zufalls-Streuung (04.09.2026): Auto-Zu wuerfelt 1-60 min — nie sofort
-    # (immer gleicher Abstand waere selbst ein Muster), nie ueber eine Stunde.
-    chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 60 min",
-        all(60 <= panel._zufalls_verzoegerung() <= 3600 for _ in range(200)))
+    # Zufalls-Streuung: Auto-Zu wuerfelt 1-2 min (21.09.2026, vorher 1-60 min)
+    # — nie sofort und nie im immer gleichen Abstand (waere selbst ein Muster).
+    _vz = [panel._zufalls_verzoegerung() for _ in range(200)]
+    chk("PANEL: Terminal-Zu-Verzoegerung wuerfelt immer zwischen 60 s und 120 s",
+        all(60 <= v <= 120 for v in _vz) and len(set(round(v) for v in _vz)) > 10)
+
+    # Zu-Auftrag ueberlebt den Panel-Neustart (21.09.2026): Trade-Ende schreibt
+    # 'terminal_zu: offen' nach plans.json, der Panel-Start holt ihn nach, der
+    # Worker loescht den Vermerk am Ende wieder.
+    _pf_alt, _zs_alt = panel.PLANS_FILE, panel._terminal_zu_starten
+    with tempfile.TemporaryDirectory() as _td:
+        try:
+            panel.PLANS_FILE = os.path.join(_td, "plans.json")
+            _gestartet = []
+            panel._terminal_zu_starten = lambda f, a: _gestartet.append((f, a))
+            panel._save_plans([{"id": 1, "file": "config.json", "name": "X", "multiplier": 1,
+                                "status": "laufend", "started_at": "x", "ended_at": None}])
+            panel.advance_plans([{"file": "config.json", "alive": True,
+                                  "status": {"running": True, "master_positions": []}}])
+            _pl = panel._load_plans()
+            chk("PANEL: Trade-Ende vermerkt den Terminal-Zu-Auftrag auf Platte und startet den Worker",
+                _pl[0]["status"] == "beendet" and _pl[0].get("terminal_zu") == "offen"
+                and _gestartet == [("config.json", "Trade-Ende")])
+            _gestartet.clear()
+            panel.terminal_zu_nachholen()
+            chk("PANEL: Panel-Start holt den offenen Terminal-Zu-Auftrag genau einmal nach",
+                len(_gestartet) == 1 and _gestartet[0][0] == "config.json")
+            panel._terminal_zu_erledigt("config.json")
+            _gestartet.clear()
+            panel.terminal_zu_nachholen()
+            chk("PANEL: erledigter Terminal-Zu-Auftrag wird nicht noch einmal nachgeholt",
+                _gestartet == [] and "terminal_zu" not in panel._load_plans()[0])
+        finally:
+            panel.PLANS_FILE, panel._terminal_zu_starten = _pf_alt, _zs_alt
 
     # ── Panel: Terminal-Zu nach Config-Loeschung (07.09.2026, Archiv-Auftrag) ──
     # Nach dem Loeschen einer Instanz darf NUR der eigene Master-Ordner

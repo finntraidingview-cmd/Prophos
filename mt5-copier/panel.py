@@ -550,6 +550,12 @@ def advance_plans(instances_data):
             elif p["status"] == "laufend" and pos == 0:
                 p["status"] = "beendet"
                 p["ended_at"] = now
+                # Auftrag AUF PLATTE vermerken (21.09.2026): der Zu-Worker lebt
+                # nur im Speicher, und jeder VERSION-Bump beendet das Panel per
+                # os._exit — der wartende Auftrag war dann weg und das Terminal
+                # blieb offen (Finn: 'das hat nicht funktioniert'). Mit dem
+                # Vermerk holt der naechste Panel-Start ihn nach.
+                p["terminal_zu"] = "offen"
                 changed = True
                 # Trade-Ende = Terminal-Zu anstossen (03.09.2026, Finns Wunsch).
                 # Erst NACH dem Lock — der Worker liest plans.json selbst.
@@ -639,7 +645,9 @@ def _terminal_zu_starten(fname, ausloeser):
     """Startet den Zu-Worker fuer eine Instanz — hoechstens einen zur Zeit."""
     cfg = read_json(os.path.join(HERE, fname), {}) or {}
     if not str(cfg.get("master_terminal_path") or "").strip():
-        return  # Orbit/TV-Instanzen: der Master ist ein Browser, kein Terminal
+        # Orbit/TV-Instanzen: der Master ist ein Browser, kein Terminal
+        _terminal_zu_erledigt(fname)
+        return
     with _TERMINAL_ZU_LOCK:
         if fname in _TERMINAL_ZU_AKTIV:
             return
@@ -648,14 +656,38 @@ def _terminal_zu_starten(fname, ausloeser):
 
 
 def _zufalls_verzoegerung():
-    """Zufaellige Wartezeit vor dem Auto-Zu (04.09.2026, Finn: 'Zufallsintervall
-    zwischen 1 und 5 Minuten … oder 1 bis 1 Stunde, sodass es nicht immer so
-    auffaellig ist'): 1 bis 60 Minuten, pro Trade neu gewuerfelt. Ein Terminal,
-    das nach JEDEM Trade im immer gleichen Sekunden-Abstand zugeht, waere selbst
-    ein Muster — dieselbe Jitter-Doktrin wie bei allen Puls-Wartezeiten. Ein
-    Mensch schliesst mal gleich, mal erst nach dem Kaffee; laenger als eine
-    Stunde offen bleiben ist nie verdaechtig, sofort zu IMMER gleich schon."""
-    return random.uniform(60, 3600)
+    """Zufaellige Wartezeit vor dem Auto-Zu: 1 bis 2 Minuten, pro Trade neu
+    gewuerfelt (21.09.2026, Finn: 'wenn der Trade in Take Profit oder Stop Loss
+    ist, nach ein, zwei Minuten einfach das Terminal schliessen' — die offenen
+    Terminals ziehen Leistung vom PC). Vorher 1-60 min (04.09.2026): so lange
+    ueberlebte der Auftrag praktisch nie, weil jeder VERSION-Bump das Panel
+    neu startet. Gewuerfelt bleibt es — ein Terminal, das nach JEDEM Trade im
+    immer gleichen Sekunden-Abstand zugeht, waere selbst ein Muster (dieselbe
+    Jitter-Doktrin wie bei allen Puls-Wartezeiten)."""
+    return random.uniform(60, 120)
+
+
+def _terminal_zu_erledigt(fname):
+    """Loescht den 'offen'-Vermerk aller beendeten Plaene dieser Instanz — egal
+    wie der Worker endete (zu, schon zu, abgebrochen, aufgegeben): ein zweiter
+    Anlauf nach dem naechsten Panel-Start wuerde sonst ein Terminal schliessen,
+    das Finn inzwischen bewusst von Hand geoeffnet hat."""
+    with PLANS_LOCK:
+        plans = _load_plans()
+        treffer = [p for p in plans if p.get("file") == fname and p.get("terminal_zu")]
+        for p in treffer:
+            p.pop("terminal_zu", None)
+        if treffer:
+            _save_plans(plans)
+
+
+def terminal_zu_nachholen():
+    """Beim Panel-Start: Zu-Auftraege nachholen, die ein Neustart (Selbst-Update,
+    Absturz, PC-Reboot) mitten in der Wartezeit abgeschnitten hat. Der Worker
+    prueft alles selbst neu — neuer Plan, offene Position, frischer Status."""
+    for fname in sorted({p["file"] for p in _load_plans()
+                         if p.get("status") == "beendet" and p.get("terminal_zu") == "offen"}):
+        _terminal_zu_starten(fname, "Trade-Ende, nachgeholt nach Panel-Neustart")
 
 
 def _terminal_zu_worker(fname, ausloeser):
@@ -725,6 +757,11 @@ def _terminal_zu_worker(fname, ausloeser):
     finally:
         with _TERMINAL_ZU_LOCK:
             _TERMINAL_ZU_AKTIV.discard(fname)
+        try:
+            _terminal_zu_erledigt(fname)
+        except Exception as e:
+            print(f"[panel] {fname}: Terminal-Zu-Vermerk nicht loeschbar: "
+                  f"{type(e).__name__}: {e}", flush=True)
 
 
 # ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
@@ -2726,6 +2763,11 @@ def main():
     # bliebe stehen (falsche/fehlende Zeitstempel). Ein Daemon-Tick alle 5 s
     # macht die Uebergaenge unabhaengig davon, ob ein Browser zuschaut.
     threading.Thread(target=_plan_ticker, daemon=True).start()
+    # Vom Neustart abgeschnittene Terminal-Zu-Auftraege nachholen (21.09.2026)
+    try:
+        terminal_zu_nachholen()
+    except Exception as e:
+        print(f"[panel] Terminal-Zu nachholen: {type(e).__name__}: {e}", flush=True)
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die
