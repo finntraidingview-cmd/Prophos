@@ -3332,10 +3332,13 @@ def wt_check_user(uid, creds, memo):
     # prophos.html). Filter DIREKT nach dem Select, damit weder die Erkennung unten
     # noch die review-P&L-Nachversuche (wt_fetch_pnl) solche Pläne anfassen — der
     # Nachversuchs-Loop würde sonst MT5-Pläne mit fremden Duplikum-Closes bestempeln.
-    # Orbit-Pläne (route='tvplus') genauso (Lücke gefunden 07.09.2026): der Browser
-    # filtert sie seit 28.08. überall, NUR dieser Server-Filter fehlte — ein Orbit-
-    # Plan mit dup-verlinktem Slave wäre hier in den Zählwerk-Fallback gelaufen.
-    plans = [p for p in plans if (p.get("route") or "") not in ("mt5", "tvplus")]
+    # Orbit-Pläne (route='tvplus') waren vom 07.09. bis 22.09.2026 hier ebenfalls
+    # ausgefiltert — damals hedgte sie der Orbit-Copier ueber den TV-Reader.
+    # KEHRTWENDE 22.09.2026 (Finn: "Orbit = Duplikum mit automatisch Trades platzieren"):
+    # Orbit-Plaene werden seitdem von DUPLIKUM kopiert (Slave = Duplikum-Slave, der
+    # Orbit-Copier/TV-Reader ist aus) — sie gehoeren also genau in diesen Waechter.
+    # Ausgenommen bleibt nur noch die MT5-Route.
+    plans = [p for p in plans if (p.get("route") or "") != "mt5"]
     active = [p for p in plans if p.get("status") in ("planned", "open")]
     review_missing = [p for p in plans if p.get("status") == "review"
                       and (p.get("master_pl") is None or p.get("slave_pl") is None)]

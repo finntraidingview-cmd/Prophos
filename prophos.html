@@ -13606,7 +13606,7 @@
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
-    tvplus: ['Orbit',     'Orbit — Order läuft von Hand in TradingView, Echo hedgt automatisch'],
+    tvplus: ['Orbit',     'Orbit — Duplikum kopiert, Puls platziert die Order automatisch in TradingView'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
   }
@@ -14716,7 +14716,7 @@
   function dupLotsHasOpenPlan(){
     let _tp; try { _tp = tradePlans } catch(_){ return false }
     return (_tp || []).some(p =>
-      p.status === 'open' && p.route !== 'mt5' && p.route !== 'tvplus'
+      p.status === 'open' && p.route !== 'mt5'   // Orbit zählt mit (22.09.2026: Orbit = Duplikum + automatische Order)
       && !(typeof planMirrorRoute === 'function' && planMirrorRoute(p))
       && atGetDupId(p.slaveAccountId)
     )
@@ -14751,7 +14751,7 @@
   // aktualisieren kann, ohne die ganze Karte neu zu rendern (Muster mt5LivePnlInner).
   function dupLiveLotsInner(p){
     try{
-      if(!p || p.status !== 'open' || p.route === 'mt5' || p.route === 'tvplus') return ''
+      if(!p || p.status !== 'open' || p.route === 'mt5') return ''
       if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
       if(!Array.isArray(dupLots.positions) || (Date.now() - dupLots.fetchedAt) > dupLots.FRESH_MS) return ''
       const dupSlaveId  = atGetDupId(p.slaveAccountId)
@@ -14800,7 +14800,7 @@
   function dupLiveLotsHtml(p){
     // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
     // dem ersten Fetch — der Ticker füllt den Platzhalter nach (Muster mt5LivePnlHtml).
-    if(!p || p.status !== 'open' || p.route === 'mt5' || p.route === 'tvplus') return ''
+    if(!p || p.status !== 'open' || p.route === 'mt5') return ''
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
     return `<span data-duplots="${escapeHtml(String(p.id))}">${dupLiveLotsInner(p)}</span>`
   }
@@ -16240,9 +16240,10 @@
 
       // MT5-Routen-Pläne (15.08.2026) gehören der MT5-Zustandsmaschine (mt5PlanPoll),
       // nicht Duplikum — gleiche Logik wie der Mirror-Skip eine Zeile drüber.
-      // Orbit-Pläne (28.08.2026) genauso: die laufen über den TV-Reader, der
-      // Duplikum-Count-Fallback würde sie fälschlich beenden.
-      if(plan.route === 'mt5' || plan.route === 'tvplus') continue
+      // Orbit-Pläne waren vom 28.08. bis 22.09.2026 ebenfalls ausgenommen (TV-Reader-
+      // Welt). Seit Finns Ansage 22.09.2026 — „Orbit = Duplikum mit automatisch Trades
+      // platzieren" — kopiert Duplikum sie, also gehören sie genau HIERHER.
+      if(plan.route === 'mt5') continue
 
       // Slave UND Master via External ID (dupGetLinks) auflösen
       const dupSlaveId  = atGetDupId(plan.slaveAccountId)
@@ -16715,8 +16716,8 @@
       if(isMirror(plan)) continue
       // MT5-Routen-Pläne (15.08.2026): gehören der MT5-Zustandsmaschine des
       // aktiven lokalen Profils (mt5PlanPoll), nie dem Duplikum-Wächter.
-      // Orbit-Pläne (28.08.2026) ebenso — TV-Reader-Welt, kein Duplikum.
-      if(plan.route === 'mt5' || plan.route === 'tvplus') continue
+      // Orbit-Pläne zählen seit 22.09.2026 mit (Orbit = Duplikum + automatische Order).
+      if(plan.route === 'mt5') continue
       const dupSlaveId  = dupIdOf(plan.slaveAccountId)
       const dupMasterId = dupIdOf(plan.masterAccountId)
       if(!dupSlaveId) continue
@@ -23979,9 +23980,10 @@
     if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →'
       : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
     // Bei fixem Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren.
-    // Gilt für Echo UND Orbit (28.08.2026, Finns Ansage „fix wie bei Echo" —
-    // die Info-Box von Etappe 2a ist raus, der Fluss erklärt sich selbst).
-    const fixed = _tpRoute === 'mt5' || _tpRoute === 'tvplus'
+    // NUR Echo. Orbit war vom 28.08. bis 22.09.2026 auch fix (Hedge des PCs über den
+    // Orbit-Copier); seit Finns Ansage „Orbit soll 1zu1 wie Duplikum werden, nur
+    // automatisch — da soll auch der Duplikum-Slave sein" wählt man den Slave wie dort.
+    const fixed = _tpRoute === 'mt5'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
     if(filterRow) filterRow.style.display = fixed ? 'none' : ''
     const slaveSel = document.getElementById('tp-slave')
@@ -24566,7 +24568,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.343'
+  const OS_TAB_BUILD = '2026-09-22.344'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26180,17 +26182,14 @@
             // planMirrorRoute() als Mirror erkennt. Der Master kommt hier gar
             // nicht an: er wird oben direkt aus der TSX-API-Liste gebaut.
             if(role === 'slave' && !(a.ma?.token && a.ma?.accountId)) return false
-          } else if(_tpRoute === 'tvplus'){
-            // Orbit (28.08.2026): Master = Futures-Account (Kontrakte-Spec)
-            // MIT External ID — die ID ist später das Konto-Matching im
-            // TradingView-Panel. Slave fix = Hedge des PCs, wie beim MT5-Weg.
-            if(role === 'master'){
+          } else {
+            // ORBIT = Duplikum + automatische Order (22.09.2026): dieselben Duplikum-Regeln
+            // wie darunter, der Master zusätzlich Futures-Account (Kontrakte-Spec) MIT
+            // External ID — die ID ist das Konto-Matching im TradingView-Panel.
+            if(_tpRoute === 'tvplus' && role === 'master'){
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
-              if(_tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
             }
-            if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
-          } else {
             if(!_dupIds.has(String(a.id))) return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
             // nie Master sein (gleiches Selbst-Spiegel-Prinzip wie beim Hedge).
@@ -26201,7 +26200,7 @@
         // Beim fixen MT5-Slave die (versteckten) Firmen-/Typ-Filter überspringen
         // (Review-Fund 15.08.2026): ein im dup-Modus gesetzter Filter würde sonst
         // unsichtbar den Hedge ausfiltern → leeres UND gesperrtes Select.
-        const skipFilters = role === 'slave' && (_tpRoute === 'mt5' || _tpRoute === 'tvplus')
+        const skipFilters = role === 'slave' && _tpRoute === 'mt5'
         if(!skipFilters && firmFilter && (a.firm || '') !== firmFilter && !isProtected) return false
         if(!skipFilters && typeFilter && a.type !== typeFilter && !isProtected) return false
         return true
@@ -26316,7 +26315,7 @@
       // fest ausgewählt wird") — tatsaechlich passierte es nie, er hat jedes
       // Mal selbst geklickt. Beide Routen teilen denselben Hedge, die
       // Zeile daneben sperrt das Feld ja bereits fuer beide.
-      if(role === 'slave' && (_tpRoute === 'mt5' || _tpRoute === 'tvplus') && _tpMt5HedgeAccId
+      if(role === 'slave' && _tpRoute === 'mt5' && _tpMt5HedgeAccId   // Orbit seit 22.09.2026 nicht mehr: Duplikum-Slave
          && filtered.some(a => String(a.id) === String(_tpMt5HedgeAccId))){
         sel.value = String(_tpMt5HedgeAccId)
       }
@@ -26329,7 +26328,7 @@
       // Dup-Weg: es gibt genau EINEN Duplikium-Slave (s. _dupSlaveIds oben) →
       // direkt vorauswählen statt jedes Mal "— wählen —" klicken zu lassen.
       // Greift nur, wenn nicht schon eine Auswahl wiederhergestellt wurde.
-      if(role === 'slave' && _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep'
+      if(role === 'slave' && _tpRoute !== 'mt5' && _tpRoute !== 'topstep'   // gilt auch für Orbit
          && !sel.value && _dupSlaveIds && _dupSlaveIds.size === 1){
         const _einziger = [..._dupSlaveIds][0]
         if(filtered.some(a => String(a.id) === String(_einziger))) sel.value = _einziger
@@ -26409,7 +26408,7 @@
           _tpRoute = r
           localStorage.setItem(TP_ROUTE_LS, r)
           tpRouteApply()
-          if((r === 'mt5' || r === 'tvplus') && !_tpMt5HedgeAccId){
+          if(r === 'mt5' && !_tpMt5HedgeAccId){
             tpResolveMt5Hedge().then(() => {
               // Open-Check wie beim Kick unten — nicht in ein geschlossenes Modal rendern
               // Orbit MUSS hier mit rein (31.08.2026): die Aufloesung laeuft
@@ -27146,38 +27145,6 @@
   // startAfter=true → nach dem Speichern schließt das Modal und der Trade-Start-Preflight
   // (3 Checks: Verknüpfung, Multiplier-Push, Symbol-Mapping) läuft direkt an — alles grün
   // startet den Trade automatisch, Probleme zeigen kurzes Feedback.
-  /* Plan-Multiplier -> Orbit-Copier-Config. Die UMRECHNUNG ist der Kern und
-   * darf nicht verlorengehen: das Popup rechnet SLAVE-LOTS JE MASTER-EINHEIT,
-   * die Orbit-Config meint mit "multiplier" etwas anderes —
-   *     hedge_lots = Kontrakte × Punktwert × multiplier.
-   * Also multiplier = Plan-Wert / Punktwert (MNQ 2, NQ 20). Ohne das waere der
-   * Hedge bei MNQ doppelt und bei NQ zwanzigfach zu gross. Der Punktwert kommt
-   * aus demselben Instrument-Schalter, mit dem das Popup gerechnet hat. */
-  async function tpOrbitMultPush(planMultiplier){
-    if(typeof MT5_LOCAL === 'undefined' || !MT5_LOCAL) return
-    if(typeof window.mtcApi !== 'function' || !(planMultiplier > 0)) return
-    const ppl = (typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 20 : 2
-    const wert = planMultiplier / ppl
-    try{
-      const d = await window.mtcApi('instances')
-      const inst = ((d && d.instances) || []).find(i => i.has_terminal === false)
-      if(!inst){
-        if(typeof atToast === 'function')
-          atToast('Plan gespeichert — aber keine Orbit-Copier-Instanz auf diesem PC, Multiplier nicht gepusht.', 'warn')
-        return
-      }
-      const r = await window.mtcApi(`save?file=${encodeURIComponent(inst.file)}`, { method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ multiplier: String(wert) }) })
-      if(!(r && r.ok)) throw new Error((r && (r.msg || r.error)) || 'keine Antwort')
-      if(typeof atToast === 'function')
-        atToast(`Orbit-Multiplier auf ${wert.toLocaleString('de-DE', { maximumFractionDigits: 4 })} gesetzt — `
-              + `1 ${ppl === 20 ? 'NQ' : 'MNQ'} ergibt ${(ppl * wert).toLocaleString('de-DE', { maximumFractionDigits: 3 })} Lots NAS100. Greift in ~2 s.`, 'start')
-    }catch(e){
-      if(typeof atToast === 'function')
-        atToast('Plan gespeichert, aber Orbit-Multiplier nicht gepusht: ' + (e && e.message || e), 'warn')
-    }
-  }
-
   async function saveTradePlanFromModal(startAfter){
     const masterId = document.getElementById('tp-master').value
     const slaveId  = document.getElementById('tp-slave').value
@@ -27280,11 +27247,8 @@
         savedPlanId = data.id
       }
       renderTradePlans()
-      // ORBIT (31.08.2026, Finns Ansage): der im Popup gerechnete Multiplier
-      // wandert beim Speichern direkt in die Orbit-Copier-Config. Vorher musste
-      // man ihn dort von Hand nachtragen — zwei Zahlen fuer dieselbe Sache, und
-      // eine davon veraltet stillschweigend.
-      if(_tpRoute === 'tvplus') await tpOrbitMultPush(mult)
+      // Orbit (22.09.2026): KEIN Push mehr an den Orbit-Copier — Duplikum kopiert, und den
+      // Multiplier pusht der Duplikum-Check nach Popup 2 (wie auf der Duplikum-Route).
       closeTradePlanModal()
       if(startAfter && savedPlanId){
         // MT5-Weg (15.08.2026): „Weiter" führt erst in den Order-Bot-Schritt —
@@ -27869,9 +27833,7 @@
     // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
     if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
-    // Orbit (28.08.2026): eigener P&L-Weg existiert noch nicht — ehrlich null
-    // statt in den Duplikum-Pfad zu fallen (der kennt diese Trades nicht).
-    if(plan.route === 'tvplus') return null
+    // Orbit (seit 22.09.2026): Duplikum kopiert diese Trades — P&L wie auf der Duplikum-Route.
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
     if(mirrorRoute) return _autoPnlFetchMirror(plan, mirrorRoute)
