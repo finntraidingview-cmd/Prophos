@@ -24566,7 +24566,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.342'
+  const OS_TAB_BUILD = '2026-09-22.343'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24718,14 +24718,41 @@
    * Werte kommen vom PLAN (Popup 2 hat sie gespeichert). SL ohne Rückfall auf master_risk:
    * Finns Regel „kein SL → SL-Schalter AUS" — das Plan-Risiko ist kein Order-Stop. */
   let _tpOrbitLaeuft = false
-  async function tpOrbitStarten(planId){
+  // Order-Werte eines Orbit-Plans. 'aus' (optional) = Werte aus einem Remote-Signal — sie
+  // gewinnen, weil der Absender sie beim SENDEN frisch aus seinem Plan-Stand gebaut hat
+  // (der PC-Tab kann den Plan noch im alten Stand geladen haben).
+  function tpOrbitWerte(plan, aus){
+    const q = aus || {}
+    const r0 = aus ? q.richtung : plan.richtung
+    const dir = (r0 === 'buy' || r0 === 'sell') ? r0 : null
+    const lots = Number(aus ? q.volumen : plan.masterContracts)
+    const tp = Number(aus ? q.tp_usd : plan.masterTp), sl = Number(aus ? q.sl_usd : plan.masterSl)
+    // Symbol wie _tpOrderAusPlan: Override am Plan zuerst; NULL heißt „gleich dem
+    // Settings-Standard der Firma" (so speichert es Popup 2), also von dort.
+    const symbol = String((aus ? q.symbol : null) || plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')).trim()
+    const fehlt = []
+    if(!dir) fehlt.push('Richtung (Buy/Sell)')
+    if(!(lots > 0) || Math.abs(lots - Math.round(lots)) > 1e-9) fehlt.push('Lots (ganze Kontrakte)')
+    if(!symbol || !/^[A-Za-z0-9!._:-]{1,24}$/.test(symbol)) fehlt.push('Symbol')
+    return { dir, lots, tp: tp > 0 ? tp : 0, sl: sl > 0 ? sl : 0, symbol, fehlt }
+  }
+  // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
+  // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
+  // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
+  async function tpOrbitStarten(planId, fern){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
-    if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft) return
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
+    if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
+      if(fern) fern.melde({ ok:false, msg: _tpOrbitLaeuft ? 'Am PC läuft schon ein Orbit-Start — nichts gesendet.' : 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' })
+      return
+    }
     let extId = '', geschwister = []
     // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
     // und dort sitzt auch „Diagnose kopieren".
     const fehler = async (text, r) => {
+      if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
+                                   msg: text, trail: (r && r.trail) || null })
       await openTpOrderModal(planId)
       const msg = document.getElementById('tpOrderMsg')
       if(!msg) return toast(text, 'end')
@@ -24745,24 +24772,19 @@
         msg.appendChild(kb)
       }
     }
-    const dir = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
-    const lots = Number(plan.masterContracts)
-    const tp = Number(plan.masterTp), sl = Number(plan.masterSl)
-    // Symbol wie _tpOrderAusPlan: Override am Plan zuerst; NULL heißt „gleich dem
-    // Settings-Standard der Firma" (so speichert es Popup 2), also von dort.
-    const symbol = String(plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function')
-      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')).trim()
-    const fehlt = []
-    if(!dir) fehlt.push('Richtung (Buy/Sell)')
-    if(!(lots > 0)) fehlt.push('Lots')
-    if(!symbol) fehlt.push('Symbol')
-    if(fehlt.length){
-      toast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — im Order-Popup speichern.', 'end')
+    const w = tpOrbitWerte(plan, fern && fern.werte)
+    const { dir, lots, tp, sl, symbol } = w
+    if(w.fehlt.length){
+      if(fern) return fern.melde({ ok:false, msg:'Für den Start fehlt: ' + w.fehlt.join(', ') + ' — nichts gestartet.' })
+      toast('Für „Starten" fehlt: ' + w.fehlt.join(', ') + ' — im Order-Popup speichern.', 'end')
       openTpOrderModal(planId)
       return
     }
-    if(!MT5_LOCAL || typeof window.mtcApi !== 'function')
-      return toast('Der Puls läuft nur am PC-Tab (localhost) — dort „Starten" klicken.', 'end')
+    // HANDY/MAC (22.09.2026, Finn: „dass ich auch über die Prophos-URL die Trades starten
+    // kann wie bei Echo"): kein localhost → Signal an den PC, Live-Schritte im Check-Popup.
+    if(!MT5_LOCAL && !fern) return tpOrbitRemote(plan, w)
+    if(typeof window.mtcApi !== 'function')
+      return fehler('Copier-Backend am PC nicht erreichbar — nichts gestartet.')
     const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
     extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
     if(!extId)
@@ -24822,6 +24844,8 @@
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Plan auf „Läuft" (eigener Orbit-Handler, s. tvPlanAufOpen).
         await tvPlanAufOpen(plan.id)
+        if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
+                              msg: String(r.msg || 'Order platziert.') })
         toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
       } else if(r && r.ok){
         // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
@@ -24839,6 +24863,119 @@
     }finally{
       _tpOrbitLaeuft = false
     }
+  }
+
+  /* ORBIT vom Handy/Mac (22.09.2026): Signal → PC-Tab → Puls in TradingView. Anzeige wie beim
+   * Remote-Schließen im vorhandenen Check-Popup (kein neues Design), gleicher Kanal
+   * (order_signale, Per-User-RLS), gleiche Frische-Regel (3 min), gleicher Riegel (_rsAktiv:
+   * ein Remote-Lauf zur Zeit). Storno nur, solange kein PC übernommen hat. Eine Warteschlange
+   * gibt es hier bewusst nicht (Finn: „lassen wir mal offen"). */
+  async function tpOrbitRemote(plan, w){
+    if(_rsAktiv){
+      if(typeof atToast === 'function') atToast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
+      return
+    }
+    _pfMt5StopTimer()
+    _pfPlanId = null
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `📡 Orbit-Start · ${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}${w.tp > 0 ? ` · TP $${w.tp}${w.sl > 0 ? ` / SL $${w.sl}` : ''}` : ' · ohne SL/TP'}`
+    document.getElementById('tpPreflightModal').classList.add('open')
+    const fertigUi = (ok, text) => {
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
+      if(foot) foot.style.display = 'flex'
+    }
+    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
+    _pfAddRow('ob-sig',   'Signal senden')
+    _pfAddRow('ob-claim', 'PC übernimmt')
+    _pfAddRow('ob-order', 'Puls platziert in TradingView')
+    let sig = null
+    try{
+      // Werte unter params.orbit (NICHT oben als richtung/volumen): ein PC-Tab mit altem Build
+      // lehnt das Signal dann ab, statt es als Echo-/MT5-Order zu behandeln.
+      const { data, error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plan.id),
+                  params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
+                                                     tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null } } })
+        .select('*').single()
+      if(error) throw error
+      sig = data
+    }catch(e){
+      _pfSet('ob-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Starten".')
+      return
+    }
+    _pfSet('ob-sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    const stornoFallsWartet = () => {
+      supabase.from('order_signale')
+        .update({ status:'verworfen', updated_at: new Date().toISOString(),
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+        .eq('id', sig.id).eq('status', 'wartet')
+        .then(() => {}, e => console.warn('[signal] Storno:', e))
+    }
+    const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    const tick = async () => {
+      if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      if(zu()){ stornoFallsWartet(); stop(); return }
+      let row = null
+      try{
+        const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
+        row = data
+      }catch(_){ return }
+      if(!row || !_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      const sec = Math.round((Date.now() - _rsAktiv.t0) / 1000)
+      const erg = row.ergebnis || {}
+      if(row.status === 'wartet'){
+        if(sec > OS_FRISCHE_S){
+          try{
+            await supabase.from('order_signale')
+              .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }catch(_){}
+          _pfSet('ob-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          _pfSet('ob-order', 'warn', 'Übersprungen — nichts platziert.')
+          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Starten".')
+          stop(); return
+        }
+        _pfSet('ob-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+      } else if(row.status === 'laeuft'){
+        _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _pfSet('ob-order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
+      } else if(row.status === 'fertig'){
+        _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('ob-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
+        fertigUi(true, '✓ Order platziert — der Plan steht auf „Läuft".')
+        try{ loadTradePlansFromSupabase() }catch(_){}
+        stop()
+        setTimeout(() => {
+          const fe2 = document.getElementById('pf-final')
+          if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+             && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
+        }, 2400)
+      } else {
+        // fehler / verworfen / verfallen. unklar = der Kauf-Klick KANN raus sein — nie blind
+        // erneut senden (Doppel-Order-Doktrin), erst am PC in TradingView nachsehen.
+        const ziel = !row.pc ? 'ob-claim' : 'ob-order'
+        const altTab = /unvollständig/i.test(String(erg.msg || ''))
+        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status))
+          + (altTab ? '<br>Der PC-Tab fährt noch einen alten Build — am PC neu laden (Strg+F5).' : ''))
+        if(ziel === 'ob-claim') _pfSet('ob-order', 'warn', 'Übersprungen — nichts platziert.')
+        fertigUi(false, erg.unklar
+          ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie: „Läuft" auf der Karte).'
+          : '✗ Nichts platziert — Meldung oben. Erneut „Starten" ist ungefährlich.')
+        stop()
+      }
+    }
+    _rsAktiv.timer = setInterval(tick, 2000)
+    tick()
   }
 
   async function tpJetztStarten(planId){
@@ -25650,6 +25787,48 @@
             _osErgebnis(sig.id, { ok:false, unklar:true,
               msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' })
           }
+          break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
+        }
+        // ORBIT-Remote (22.09.2026, Finn: „dass ich auch über die Prophos-URL die Trades
+        // starten kann wie bei Echo"): eigener Zweig VOR der Echo-Prüfung. Die Order-Werte
+        // stehen bewusst unter params.orbit und NICHT als richtung/volumen oben im Signal —
+        // ein PC-Tab mit altem Build lehnt es so an der Params-Sanity ab („Signal
+        // unvollständig") und kann es nie als MT5-Order durch den Echo-Weg schicken
+        // (dasselbe Muster wie beim close-Signal). Konto, Firma, Tradovate-Username und
+        // Geschwister löst tpOrbitStarten HIER am PC aus den eigenen Daten auf — aus dem
+        // Signal kommen nur Symbol/Richtung/Lots/TP/SL, und die werden dort geprüft.
+        // Welcher PC? Jeder PC-Tab dieses Profils mit erreichbarem Copier-Backend — pro ID
+        // gibt es einen PC mit TradingView; fehlt dort die TV-Einrichtung, sagt es der Bot.
+        if(String((sig.params || {}).aktion || '') === 'orbit'){
+          const absage = async text => {
+            await supabase.from('order_signale')
+              .update({ status:'fehler', updated_at: new Date().toISOString(), ergebnis:{ ok:false, msg: text } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }
+          if(plan.status !== 'planned' || plan.route !== 'tvplus'){
+            await absage(`Plan ist kein geplanter Orbit-Trade (Status: ${plan.status}, Weg: ${plan.route || '—'}) — nichts gestartet.`)
+            continue
+          }
+          if(typeof tpOrbitStarten !== 'function'){ await absage('Dieser PC-Tab kann Orbit noch nicht starten — am PC neu laden.'); continue }
+          const { data: clO } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+                      updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clO || !clO.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'claim-orbit: ' + String(sig.id).slice(0, 8)
+          _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
+          // Backstop (Timeout-Doktrin): der Proxy gibt dem Bot 260 s — danach ist Stille ein UNKLAR.
+          _osActive.timeout = setTimeout(() => {
+            if(_osActive && _osActive.sigId === sig.id){
+              _osErgebnis(sig.id, { ok:false, unklar:true,
+                msg:'Keine Rückmeldung vom Orbit-Start binnen 8 Minuten — am PC in TradingView prüfen, ob die Order liegt. NICHT blind erneut senden.' })
+            }
+          }, 8 * 60 * 1000)
+          if(typeof atToast === 'function') atToast(`📡 Remote-Signal (Orbit): ${plan.masterName || '—'} — Puls übernimmt in TradingView`, 'start')
+          // Nicht awaiten: der Tick gibt _osBusy frei, _osActive hält den Riegel bis zum Ergebnis.
+          tpOrbitStarten(plan.id, { werte: (sig.params || {}).orbit || {}, melde: res => _osErgebnis(sig.id, res) })
+            .catch(e => _osErgebnis(sig.id, { ok:false, unklar:true,
+              msg:'Orbit-Start am PC abgebrochen: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Order liegt.' }))
           break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
         }
         if(plan.status !== 'planned'){
