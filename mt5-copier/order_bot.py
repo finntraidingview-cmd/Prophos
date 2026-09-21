@@ -2065,6 +2065,69 @@ def _tv_adresse_oeffnen(w, url, trail):
     return True, ""
 
 
+def tv_tab_schliessbar(titel, klasse, begriff=""):
+    """Darf Strg+W in DIESES Fenster? Nur wenn der aktive Tab nachweislich
+    TradingView ist — und nie, wenn er nach Prophos aussieht. Ein Strg+W in den
+    Prophos-Tab naehme dem PC die Oberflaeche samt Reader-Bruecke weg."""
+    if (klasse or "") not in BROWSER_KLASSEN or ist_prophos_fenster(titel, klasse):
+        return False
+    return ist_tradingview_fenster(titel, klasse) or tv_tab_rang(titel, begriff, "") > 0
+
+
+def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
+    """FINNS WEG (22.09.2026, von Hand geprueft): "das mit Log out ist dumm …
+    der Tab wird geschlossen, dann oeffnet sich ein neuer Tab mit dem Link —
+    dann kommt man JEDES MAL zu dem Connect." Im verbundenen Tab laedt die
+    Direkt-Adresse die Seite nur neu; nach Schliessen + Neu-Oeffnen kommt der
+    Tradovate-Dialog. Kein Menue, kein 'Log out', nichts zu suchen.
+    Geoeffnet wird ueber denselben Chrome-Start wie in Schritt 1 (live
+    bewiesen) — das deckt auch den Fall, dass der TradingView-Tab der einzige
+    im Fenster war und Strg+W das ganze Fenster schliesst. (ok, fehlertext)"""
+    try:
+        from pywinauto import keyboard
+        import subprocess
+    except ImportError:
+        return False, "pywinauto fehlt"
+    try:
+        w.set_focus()
+    except Exception:
+        pass
+    _warte(0.4, 0.3)
+    try:
+        titel, klasse = w.window_text() or "", w.element_info.class_name
+    except Exception:
+        return False, "TradingView-Fenster nicht mehr lesbar."
+    if not tv_tab_schliessbar(titel, klasse, begriff):
+        return False, (f"Der aktive Tab sieht nicht nach TradingView aus ('{titel[:50]}') — "
+                       "es wird nichts geschlossen.")
+    try:
+        import ctypes
+        if int(ctypes.windll.user32.GetForegroundWindow()) != int(w.handle):
+            return False, "TradingView-Fenster steht nicht im Vordergrund — es wird nichts geschlossen."
+    except Exception:
+        pass                      # ohne die Probe (kein Windows) entscheidet set_focus
+    chrome = _chrome_pfad((cfg or {}).get("tv_browser_path"))
+    if not chrome:
+        return False, "chrome.exe nicht gefunden (tv_browser_path in der config.json setzen) — Tab bleibt offen."
+    try:
+        keyboard.send_keys("^w")
+    except Exception as e:
+        return False, f"Tab liess sich nicht schliessen ({type(e).__name__})"
+    trail.append("TradingView-Tab geschlossen")
+    _warte(1.2, 0.6)
+    befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")),
+                             (cfg or {}).get("tv_chrome_profil"))
+    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    except OSError as e:
+        return False, f"Chrome-Start fehlgeschlagen: {e}"
+    trail.append("TradingView neu mit Direkt-Adresse geoeffnet")
+    return True, ""
+
+
 def tv_uia_spur(roh, max_n=12):
     """Was stand an einschlaegigen Namen da? Kommt direkt in die FEHLERMELDUNG:
     Finn schickt Screenshots und den Meldungstext, nicht die Diagnose — also
@@ -2570,61 +2633,31 @@ def modus_tvkonto(cmd):
                     _warte(0.4, 0.3)
                     trail.append("Zielkonto nicht in der Liste -> anderer Login noetig")
 
-            # ABMELDEN: Broker-Knopf -> Menue ("Trading settings… / Connect
-            # another broker… / Log out", Finns Screenshots) -> "Log out".
-            ok, f = _tv_uia_klick(broker_unten[0], "Broker-Menue", trail)
-            if not ok:
-                return ab(f, "login")
-            _warte(0.6, 0.4)
-            el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
-            if not el:
-                # PFLICHT (22.09.2026, Finn hat es von Hand geprueft): ist schon
-                # ein Broker verbunden, laedt die Direkt-Adresse die Seite nur
-                # neu — der Dialog kommt NICHT. Ein neuer Tab hilft auch nicht:
-                # TradingView merkt sich die Broker-Verbindung pro TradingView-
-                # Login, der zweite Tab waere sofort wieder verbunden (und eine
-                # zweite Tradovate-Session). Ohne Abmelden geht es also nicht
-                # weiter — dann lieber hier ehrlich stoppen, mit dem, was im
-                # Menue wirklich stand. (.324 hatte das Abmelden optional
-                # gemacht; das war nach diesem Befund falsch.)
-                esc()
-                return ab("Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
-                          f"({n} Treffer) — ohne Abmelden oeffnet die Direkt-Adresse den "
-                          "Tradovate-Dialog nicht." + spur[0], "login")
-            ok, f = _tv_uia_klick(el, "Log out", trail)
-            if not ok:
-                return ab(f, "login")
-            # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
-            # Knopf mit demselben Verb da — genau einmal nachklicken.
-            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, False
-            while time.time() < ende_l:
-                _warte(0.8, 0.4)
-                if not broker_knopf():
-                    getrennt = True
-                    break
-                if not nachgefragt:
-                    best, _r = finde(TV_NAMEN_LOGOUT, TV_RX_LOGOUT)
-                    best = [e for e in best if e["typ"] == "Button"]
-                    if len(best) == 1:
-                        nachgefragt = True
-                        _tv_uia_klick(best[0], "Log out bestaetigen", trail)
-            if not getrennt:
-                return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach noch "
-                          "im Panel — verbunden laedt die Direkt-Adresse die Seite nur neu.", "login")
-            trail.append("abgemeldet")
-
-        # VERBINDEN ueber die Direkt-Adresse: kein Knopf "Trade", keine Kachel.
-        _tv_fenster_holen([], "", "")            # TradingView-Tab sicher vorn (klickt ihn notfalls an)
-        ok, f = _tv_adresse_oeffnen(w, tv_trade_now_url(cmd.get("tv_url")), trail)
+        # ANDERER LOGIN NOETIG -> Finns Weg: TradingView-Tab schliessen, neu mit
+        # der Direkt-Adresse oeffnen (siehe _tv_tab_neu_mit_link).
+        bf_t = _tv_http("/bedienfeld", timeout=1.5) or {}
+        begriff = tv_tab_suchbegriff(bf_t.get("titel")) if bf_t.get("ok") else ""
+        _tv_fenster_holen([], begriff, "")       # TradingView-Tab sicher vorn (klickt ihn notfalls an)
+        ok, f = _tv_tab_neu_mit_link(w, cmd, begriff, trail)
         if not ok:
             return ab(f, "login")
-        _warte(2.0, 1.0)
+        # Das neue Fenster suchen — der alte Wrapper zeigt auf ein Fenster, das
+        # es womoeglich nicht mehr gibt.
+        w, ende_n = None, time.time() + 40.0
+        while time.time() < ende_n and w is None:
+            _warte(1.2, 0.6)
+            fenster[0] = None
+            w = tv_fenster()
+        if w is None:
+            return ab("TradingView wurde neu geoeffnet, das Fenster ist aber nach 40 s nicht zu "
+                      "finden.", "login")
+        _warte(1.5, 1.0)
         # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
         # ohne bewiesenen Demo-Schalter wird nicht verbunden. 30 s: die Seite
         # laedt nach der Adresse komplett neu.
         el, n = warte_auf(TV_NAMEN_DEMO, TV_RX_DEMO, 30.0, "demo_schalter")
         if not el:
-            return ab(f"Nach der Direkt-Adresse ist der Tradovate-Dialog nicht erschienen (Schalter "
+            return ab(f"TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen (Schalter "
                       f"'Demo' nicht eindeutig, {n} Treffer)." + spur[0], "login")
         ok, f = _tv_uia_klick(el, "Demo", trail)
         if not ok:

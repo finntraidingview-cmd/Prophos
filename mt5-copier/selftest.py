@@ -760,6 +760,18 @@ def main():
         and order_bot.tv_feld_darueber([_adr, _such, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
         and order_bot.tv_feld_darueber([], _pw, (1081, 554, 1518, 596)) is None)
 
+    # Finns Weg (22.09.2026): TradingView-Tab schliessen, neu mit dem Link
+    # oeffnen. Strg+W darf NUR in einen Tab gehen, der nachweislich TradingView
+    # ist — nie in den Prophos-Tab.
+    chk("TV-LOGIN: Strg+W nur in TradingView — nie Prophos, nie irgendein anderer Tab",
+        order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed - Google Chrome", "Chrome_WidgetWin_1")
+        and order_bot.tv_tab_schliessbar("NQZ2026 Chart — TradingView - Google Chrome", "Chrome_WidgetWin_1")
+        and not order_bot.tv_tab_schliessbar("Prophos - Google Chrome", "Chrome_WidgetWin_1")
+        and not order_bot.tv_tab_schliessbar("Tradeify Futures - User Dashboard - Google Chrome", "Chrome_WidgetWin_1")
+        and not order_bot.tv_tab_schliessbar("Cockpit | Duplikium Trade Copier - Google Chrome", "Chrome_WidgetWin_1")
+        and not order_bot.tv_tab_schliessbar("", "Chrome_WidgetWin_1")
+        and not order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed", "ConsoleWindowClass"))
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
