@@ -1784,6 +1784,72 @@ def tv_uia_filtern(roh, ids, fenster=None, nur_ziel=None, ohne=None):
 _TV_UIA_TYPEN = ("Text", "ListItem", "MenuItem", "Button", "ComboBox", "DataItem")
 
 
+# ── SAMMELABFRAGE (22.09.2026, Finn nach dem ersten kompletten Live-Durchlauf:
+# "es ist noch sooo langsam, gefuehlt 20 s pro Step — bekommst du das schneller,
+# VIEL schneller?") ───────────────────────────────────────────────────────────
+# WOHER DIE 20 s KAMEN: der bisherige Scan holte ueber pywinauto alle Elemente
+# eines Typs und fragte dann JEDES EINZELN bei Chrome nach Name, Sichtbarkeit
+# und Rechteck — jede Frage ein eigener Aufruf ueber die Prozessgrenze. Eine
+# TradingView-Seite hat ein paar tausend Textknoten, also tausende Aufrufe pro
+# Durchgang, und jede Warteschleife fuhr mehrere Durchgaenge.
+# JETZT: Windows-UIA kann Eigenschaften VORAB mitliefern (CacheRequest). EIN
+# Aufruf (FindAllBuildCache) bringt alle Elemente der gesuchten Typen samt
+# Name, Rechteck, Sichtbarkeit und Typ; gelesen wird danach nur noch lokal.
+# Geht der Weg auf einem PC nicht (Ausnahme), bleibt es beim alten Scan —
+# schlimmstenfalls ist es also so schnell wie vorher.
+_UIA_TYPID = {"Button": 50000, "CheckBox": 50002, "ComboBox": 50003, "Edit": 50004,
+              "Hyperlink": 50005, "Image": 50006, "ListItem": 50007, "MenuItem": 50011,
+              "RadioButton": 50013, "TabItem": 50019, "Text": 50020, "Group": 50026,
+              "DataItem": 50029}
+_UIA_SAMMEL = {"geht": None}      # None = noch nicht probiert, True/False = Ergebnis
+
+
+def _tv_uia_sammel(w, typen):
+    """Alle Elemente der Typen in EINEM Aufruf. -> [(name, (l,t,r,b)|None, typ)]
+    mit rect=None fuer Unsichtbares; None, wenn der Weg nicht geht."""
+    if _UIA_SAMMEL["geht"] is False:
+        return None
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        dll = u.UIA_dll
+        anfrage = u.iuia.CreateCacheRequest()
+        for pid in (dll.UIA_NamePropertyId, dll.UIA_BoundingRectanglePropertyId,
+                    dll.UIA_IsOffscreenPropertyId, dll.UIA_ControlTypePropertyId):
+            anfrage.AddProperty(pid)
+        bed = None
+        for t in typen:
+            tid = _UIA_TYPID.get(t)
+            if not tid:
+                continue
+            c = u.iuia.CreatePropertyCondition(dll.UIA_ControlTypePropertyId, tid)
+            bed = c if bed is None else u.iuia.CreateOrCondition(bed, c)
+        if bed is None:
+            return []
+        feld = w.element_info.element.FindAllBuildCache(u.tree_scope["descendants"], bed, anfrage)
+        name_von = {v: k for k, v in _UIA_TYPID.items()}
+        roh = []
+        for i in range(feld.Length):
+            e = feld.GetElement(i)
+            try:
+                n = str(e.CachedName or "").strip()
+                if not n or len(n) > 200:
+                    continue
+                typ = name_von.get(e.CachedControlType, "")
+                if e.CachedIsOffscreen:
+                    roh.append((n, None, typ))
+                    continue
+                r = e.CachedBoundingRectangle
+                roh.append((n, (r.left, r.top, r.right, r.bottom), typ))
+            except Exception:
+                continue
+        _UIA_SAMMEL["geht"] = True
+        return roh
+    except Exception:
+        _UIA_SAMMEL["geht"] = False
+        return None
+
+
 def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     """AUGEN OHNE USERSCRIPT (21.09.2026, Finn: 'nein, ohne Tampermonkey — das
     bekommen wir doch auch so hin'): die Kontonummern direkt aus Chromes
@@ -1806,6 +1872,20 @@ def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     # Fehlfall sofort, ob der Baum die Seite ueberhaupt enthaelt und wie
     # TradingView die Nummer dort schreibt.
     aehnlich = info.setdefault("aehnlich", [])
+    sammel = _tv_uia_sammel(w, ("Text", "ListItem", "MenuItem", "Button", "ComboBox"))
+    if sammel is not None:
+        info["weg"] = "sammel"
+        info["gescannt"] = len(sammel)
+        for n, r, _typ in sammel:
+            if not tv_konto_bestes(n, ids):
+                if len(aehnlich) < 20 and re.search(r"\d{6,}", n) and n[:50] not in aehnlich:
+                    aehnlich.append(n[:50])
+                continue
+            if r:
+                roh.append((n, r))
+        info["roh"] = [(t[:40], list(r)) for t, r in roh[:12]]
+        return tv_uia_filtern(roh, ids, fenster, nur_ziel=nur_ziel, ohne=ohne)
+    info["weg"] = "einzeln"
     for typ in _TV_UIA_TYPEN:
         try:
             els = w.descendants(control_type=typ)
@@ -2170,6 +2250,12 @@ def _tv_uia_roh(w, typen=_TV_UIA_KLICKBAR, max_je_typ=12000, muster=()):
     paar tausend Textknoten — abgefragt werden sie deshalb nur fuer Namen, die
     auf eines der Muster passen. Alle anderen kommen mit rect=None zurueck
     (reichen fuers Diagnose-Inventar, fallen in den Filtern von selbst raus)."""
+    sammel = _tv_uia_sammel(w, typen)
+    if sammel is not None:
+        # Gleiche Rueckgabe wie der Einzel-Scan: was auf kein Muster passt,
+        # traegt rect=None (reicht fuers Inventar, faellt in den Filtern raus).
+        return [(n, (r if (not muster or any(m.search(n) for m in muster)) else None), typ)
+                for n, r, typ in sammel if len(n) <= 120]
     roh = []
     for typ in typen:
         try:
@@ -2417,8 +2503,9 @@ def _tv_autofill_vorschlag(username, ohne=None):
     # steht der Name schon drin, truege dessen Text denselben Namen.
     fenster = _tv_browser_fenster()
     roh = []
-    for _h, _t, w in fenster:                       # 1) gezielt: Name == Username
-        roh += _tv_uia_nativ(w, (str(username).strip(),)) or []
+    if _UIA_SAMMEL["geht"] is not True:             # 1) gezielt: Name == Username — nur solange
+        for _h, _t, w in fenster:                   #    die Sammelabfrage (22.09.2026) nicht laeuft;
+            roh += _tv_uia_nativ(w, (str(username).strip(),)) or []   # mit ihr ist Schritt 2 ohnehin ein Aufruf je Fenster
     roh = [x for x in roh if x[2] != "Edit"]
     if not roh:                                     # 2) Scan: Username als ganzes Wort im Namen
         for _h, _t, w in fenster:
@@ -2593,6 +2680,15 @@ def modus_tvkonto(cmd):
             -> (elemente, roh)"""
             q = quelle or w
             t_scan = time.time()
+            # SCHNELLSTER WEG zuerst: die Sammelabfrage sieht in EINEM Aufruf
+            # alles — Treffer wie Nicht-Treffer sind damit gleich billig, und es
+            # braucht keine zweite Suche als Gegenprobe.
+            if _UIA_SAMMEL["geht"] is not False:
+                sm = _tv_uia_sammel(q, _TV_UIA_KLICKBAR)
+                if sm is not None:
+                    roh = [(n, (r if muster.search(n) else None), t) for n, r, t in sm if len(n) <= 120]
+                    uia_info["scan"] = {"weg": "sammel", "n": len(roh), "s": round(time.time() - t_scan, 2)}
+                    return tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne), roh
             roh = _tv_uia_nativ(q, namen)
             weg = "nativ"
             els = tv_uia_namen_filtern(roh or [], muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne)
@@ -2620,7 +2716,7 @@ def modus_tvkonto(cmd):
                     return els[0], 1
                 if n > 1 or (time.time() >= ende_w and runde >= 3):
                     break
-                _warte(0.5, 0.3)
+                _warte(0.3, 0.25)
             inventar[stelle] = tv_uia_inventar(roh)
             if not roh:                      # gezielt nichts gefunden -> fuer die Meldung einmal breit schauen
                 roh = _tv_uia_roh(quelle or w, ("Button", "MenuItem", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,))
