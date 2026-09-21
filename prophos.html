@@ -24568,7 +24568,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.344'
+  const OS_TAB_BUILD = '2026-09-22.345'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26112,12 +26112,14 @@
       }
       // Beim Edit: aktuell verknüpfte Account-IDs sind "geschützt" und werden auch
       // angezeigt, selbst wenn sie archiviert sind (sonst kann man den Plan nicht bearbeiten)
+      // ROLLENBEZOGEN (22.09.2026, Finns Screenshot: im Slave-Dropdown stand der
+      // Tradeify-MASTER des Plans): geschützt ist nur der Account der EIGENEN Rolle.
       let protectedIds = new Set()
       if(_editingPlanId){
         const p = tradePlans.find(x => String(x.id) === String(_editingPlanId))
         if(p){
-          if(p.masterAccountId) protectedIds.add(String(p.masterAccountId))
-          if(p.slaveAccountId)  protectedIds.add(String(p.slaveAccountId))
+          if(role === 'master' && p.masterAccountId) protectedIds.add(String(p.masterAccountId))
+          if(role === 'slave'  && p.slaveAccountId)  protectedIds.add(String(p.slaveAccountId))
         }
       }
       // Archivierte Accounts ausschließen (außer geschützt)
@@ -26164,8 +26166,16 @@
         }catch(_){ }
       }
       // Filter-Logik
+      // ORBIT-SLAVE (22.09.2026, Finn: „mach, dass ich nur den Duplikum-Slave nehmen
+      // kann!"): im Slave-Dropdown stehen NUR Accounts, die in Duplikum als Slave
+      // angelegt sind — kein Schutz für einen alten gespeicherten Slave (der Testplan
+      // trug noch den Echo-Hedge aus der Orbit-Copier-Zeit), kein Rückfall auf „alle
+      // verknüpften", solange die Duplikum-Liste nicht geladen ist (dann bleibt das
+      // Dropdown leer und sagt warum, statt falsche Konten anzubieten).
+      const orbitSlaveStreng = role === 'slave' && _tpRoute === 'tvplus'
       const filtered = accounts.filter(a => {
-        const isProtected = protectedIds.has(String(a.id))
+        const isProtected = protectedIds.has(String(a.id)) && !orbitSlaveStreng
+        if(orbitSlaveStreng && !(_dupSlaveIds && _dupSlaveIds.has(String(a.id)))) return false
         if(archive[a.id]?.archived && !isProtected) return false
         if(!isProtected){
           if(_tpRoute === 'mt5'){
@@ -26286,7 +26296,10 @@
       const groups = Object.keys(byFirm).sort()
       let html = '<option value="">— wählen —</option>'
       if(!filtered.length){
-        html += '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
+        html += orbitSlaveStreng
+          ? (_dupSlaveIds ? '<option value="" disabled>(Kein Duplikum-Slave — Accounts → Duplikum verknüpfen)</option>'
+                          : '<option value="" disabled>(Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden)</option>')
+          : '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
       } else if(groups.length === 1){
         // Nur eine Firma → keine Gruppe nötig, flache Liste
         for(const a of byFirm[groups[0]]){
