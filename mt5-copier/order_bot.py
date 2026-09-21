@@ -2422,6 +2422,7 @@ def modus_tvkonto(cmd):
         # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
         _tv_http("/suche", {"texte": []}, timeout=1.5)
         print(json.dumps(res))
+        return "fertig"       # fuer die inneren Ablaeufe: 'es ist alles gesagt, nichts mehr tun'
 
     fehler = pruefe_tv_konto_befehl(cmd)
     if fehler:
@@ -2608,76 +2609,114 @@ def modus_tvkonto(cmd):
             els, _roh = finde(TV_NAMEN_BROKER, TV_RX_BROKER, y_von=0.5)
             return els
 
-        # War TradingView schon offen: erst Dropdown pruefen, sonst Tab zu und neu
-        # mit dem Link. Frisch MIT dem Link gestartet: der Dialog steht schon da.
-        if frisch_mit_link:
-            trail.append("TradingView frisch mit Direkt-Adresse gestartet")
-        else:
-            broker_unten = broker_knopf()
-            verbunden = bool(broker_unten)
-            trail.append("Broker verbunden" if verbunden else "kein Broker verbunden")
+        def dialog_oder_verbunden(sek):
+            """Was zeigt TradingView? -> ('dialog', demo_element) | ('verbunden', None)
+            | ('nichts', None). Der Dialog zaehlt zuerst: steht er da, ist die
+            Frage 'verbunden?' erledigt."""
+            ende_d = time.time() + sek
+            while True:
+                els, _r = finde(TV_NAMEN_DEMO, TV_RX_DEMO)
+                if len(els) == 1:
+                    return "dialog", els[0]
+                if broker_knopf():
+                    return "verbunden", None
+                if time.time() >= ende_d:
+                    return "nichts", None
+                _warte(0.8, 0.4)
 
-            if verbunden:
-                if len(broker_unten) != 1:
-                    return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
-                              f"({len(broker_unten)} Treffer).", "login")
-                broker_r = broker_unten[0]["r"]
+        def dropdown_pruefen(broker_el):
+            """Unbekanntes Konto aktiv -> erst ins Dropdown schauen (Finns Lauf
+            21.09.2026: 'PAAPEX…008' war derselbe Apex-Login). -> 'fertig' |
+            'weiter' (Ziel steht nicht drin, anderer Login noetig)."""
+            nonlocal start, zustand, aktiv
+            broker_r = broker_el["r"]
+            roh_k = _tv_uia_roh(w, ("Text",), muster=(TV_RX_KONTOARTIG,))
+            kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.5)
+                    if 0 <= e["r"][1] - broker_r[1] <= 160 and abs(e["r"][0] - broker_r[0]) <= 200]
+            if len(kand) == 1:
+                trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
+                ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
+                if ok:
+                    _warte(0.7, 0.5)
+                    eintrag_x, ende_x, runde = None, time.time() + 6.0, 0
+                    while not eintrag_x:
+                        runde += 1
+                        els = _tv_uia_konten(w, ids, uia_info, nur_ziel=ext, ohne=kand[0]["r"])
+                        if len(els) == 1:
+                            eintrag_x = els[0]
+                        elif len(els) > 1 or (time.time() >= ende_x and runde >= 2):
+                            break
+                        else:
+                            _warte(0.5, 0.3)
+                    if eintrag_x:
+                        ok, f = _tv_uia_klick(eintrag_x, f"Konto {ext}", trail)
+                        if not ok:
+                            return ab(f)
+                        start = time.time()
+                        ende_x = time.time() + 12.0
+                        while time.time() < ende_x:
+                            _warte(0.7, 0.4)
+                            zustand, aktiv, _b, _e = lies()
+                            if zustand == "richtig":
+                                res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
+                                return raus(f"Konto gewechselt — aktiv ist jetzt {aktiv[:60]}. (Das "
+                                            "vorher aktive Konto kennt Prophos nicht; es lag aber im "
+                                            "selben Tradovate-Login.)", "wechsel")
+                        return ab(f"Zielkonto in der Liste angeklickt, aber das Panel zeigt danach "
+                                  f"'{aktiv[:40] or '?'}'.")
+                    esc()
+                    _warte(0.4, 0.3)
+                    trail.append("Zielkonto nicht in der Liste -> anderer Login noetig")
 
-                # ERST INS DROPDOWN SCHAUEN (Finns Lauf 21.09.2026: aktiv war
-                # 'PAAPEX…008' — ein PA-Konto, das Prophos nicht kennt, aber sehr
-                # wahrscheinlich DERSELBE Apex-Login). Ein unbekanntes aktives Konto
-                # heisst nicht "fremder Login": liegt das Zielkonto in der Liste,
-                # genuegt der Dropdown-Griff und niemand muss sich neu anmelden.
-                # Der Umschalter ist das kontonummer-artige Element knapp UNTER dem
-                # Broker-Knopf (dessen Name ist unbekannt -> hier der langsame Scan).
-                roh_k = _tv_uia_roh(w, ("Text",), muster=(TV_RX_KONTOARTIG,))
-                kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.5)
-                        if 0 <= e["r"][1] - broker_r[1] <= 160 and abs(e["r"][0] - broker_r[0]) <= 200]
-                if len(kand) == 1:
-                    trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
-                    ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
-                    if ok:
-                        _warte(0.7, 0.5)
-                        eintrag_x, ende_x, runde = None, time.time() + 6.0, 0
-                        while not eintrag_x:
-                            runde += 1
-                            els = _tv_uia_konten(w, ids, uia_info, nur_ziel=ext, ohne=kand[0]["r"])
-                            if len(els) == 1:
-                                eintrag_x = els[0]
-                            elif len(els) > 1 or (time.time() >= ende_x and runde >= 2):
-                                break
-                            else:
-                                _warte(0.5, 0.3)
-                        if eintrag_x:
-                            ok, f = _tv_uia_klick(eintrag_x, f"Konto {ext}", trail)
-                            if not ok:
-                                return ab(f)
-                            start = time.time()
-                            ende_x = time.time() + 12.0
-                            while time.time() < ende_x:
-                                _warte(0.7, 0.4)
-                                zustand, aktiv, _b, _e = lies()
-                                if zustand == "richtig":
-                                    res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
-                                    return raus(f"Konto gewechselt — aktiv ist jetzt {aktiv[:60]}. (Das "
-                                                "vorher aktive Konto kennt Prophos nicht; es lag aber im "
-                                                "selben Tradovate-Login.)", "wechsel")
-                            return ab(f"Zielkonto in der Liste angeklickt, aber das Panel zeigt danach "
-                                      f"'{aktiv[:40] or '?'}'.")
-                        esc()
-                        _warte(0.4, 0.3)
-                        trail.append("Zielkonto nicht in der Liste -> anderer Login noetig")
+            return "weiter"
 
-            # ANDERER LOGIN NOETIG -> Finns Weg: TradingView-Tab schliessen, neu mit
-            # der Direkt-Adresse oeffnen (siehe _tv_tab_neu_mit_link).
+        def abmelden(broker_el):
+            """FINN 22.09.2026, nach dem Beweis-Lauf ('TradingView startet, Tradeify
+            ist eingeloggt, nix passiert'): "dann muss sich der Puls selber
+            abmelden und danach den Tab neu mit der URL oeffnen … er muss dieses
+            Dropdown ueber dem, wo die Accountnamen stehen, druecken und dann auf
+            Log out." TradingView MERKT sich die Broker-Sitzung: auch ein frisch
+            mit dem Link gestartetes Fenster verbindet sich von selbst wieder —
+            Schliessen/Neu-Oeffnen allein fuehrt nie zum Dialog. -> 'ok' | 'fertig'"""
+            ok, f = _tv_uia_klick(broker_el, "Broker-Menue", trail)
+            if not ok:
+                return ab(f, "login")
+            _warte(0.6, 0.4)
+            el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
+            if not el:
+                esc()
+                return ab("Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
+                          f"({n} Treffer)." + spur[0], "login")
+            ok, f = _tv_uia_klick(el, "Log out", trail)
+            if not ok:
+                return ab(f, "login")
+            # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
+            # Knopf mit demselben Verb da — genau einmal nachklicken.
+            ende_l, nachgefragt = time.time() + 16.0, False
+            while time.time() < ende_l:
+                _warte(0.8, 0.4)
+                if not broker_knopf():
+                    trail.append("abgemeldet")
+                    return "ok"
+                if not nachgefragt:
+                    best, _r = finde(TV_NAMEN_LOGOUT, TV_RX_LOGOUT)
+                    best = [e for e in best if e["typ"] == "Button"]
+                    if len(best) == 1:
+                        nachgefragt = True
+                        _tv_uia_klick(best[0], "Log out bestaetigen", trail)
+            return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach noch im "
+                      "Panel.", "login")
+
+        def neu_mit_link():
+            """TradingView-Tab schliessen, neu mit der Direkt-Adresse oeffnen, das
+            neue Fenster wiederfinden. -> 'ok' | 'fertig'"""
+            nonlocal w
             bf_t = _tv_http("/bedienfeld", timeout=1.5) or {}
             begriff = tv_tab_suchbegriff(bf_t.get("titel")) if bf_t.get("ok") else ""
             _tv_fenster_holen([], begriff, "")       # TradingView-Tab sicher vorn (klickt ihn notfalls an)
             ok, f = _tv_tab_neu_mit_link(w, cmd, begriff, trail)
             if not ok:
                 return ab(f, "login")
-            # Das neue Fenster suchen — der alte Wrapper zeigt auf ein Fenster, das
-            # es womoeglich nicht mehr gibt.
             w, ende_n = None, time.time() + 40.0
             while time.time() < ende_n and w is None:
                 _warte(1.2, 0.6)
@@ -2685,166 +2724,224 @@ def modus_tvkonto(cmd):
                 w = tv_fenster()
             if w is None:
                 return ab("TradingView wurde neu geoeffnet, das Fenster ist aber nach 40 s nicht zu "
-                          "finden.", "login")
+                          "finden. " + fenster_gesehen[0], "login")
             _warte(1.5, 1.0)
-        # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
-        # ohne bewiesenen Demo-Schalter wird nicht verbunden. 30 s: die Seite
-        # laedt nach der Adresse komplett neu.
-        el, n = warte_auf(TV_NAMEN_DEMO, TV_RX_DEMO, 30.0, "demo_schalter")
-        if not el:
-            return ab(f"TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen (Schalter "
-                      f"'Demo' nicht eindeutig, {n} Treffer). Ist in einem ANDEREN Chrome-Fenster noch "
-                      "ein TradingView-Tab offen? Dann verbindet sich der neue von selbst." + spur[0], "login")
-        ok, f = _tv_uia_klick(el, "Demo", trail)
-        if not ok:
-            return ab(f, "login")
-        _warte(0.4, 0.3)
-        el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
-        if not el:
-            esc()
-            return ab(f"Der Knopf 'Connect' im Tradovate-Dialog wurde nicht eindeutig gefunden "
-                      f"({n} Treffer)." + spur[0], "login")
-        vorher = {h for h, _t, _w in _tv_browser_fenster()}
-        ok, f = _tv_uia_klick(el, "Connect", trail)
-        if not ok:
-            return ab(f, "login")
+            return "ok"
 
-        # Tradovate-Anmeldefenster (eigenes Popup — oder ein neuer Tab, dann traegt
-        # das Browser-Fenster selbst den Titel).
-        tw, ende_t = None, time.time() + 25.0
-        while time.time() < ende_t and tw is None:
-            _warte(0.8, 0.4)
-            kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if "tradovate" in t.lower()]
-            neu_f = [k for k in kand if k[0] not in vorher]
-            if neu_f or kand:
-                tw = (neu_f or kand)[0][2]
-        if tw is None:
-            return ab("Nach 'Connect' ist kein Tradovate-Anmeldefenster erschienen.", "login")
-        tw_handle = tw.handle
-        try:
-            tw.set_focus()
-        except Exception:
-            pass
-        trail.append("Tradovate-Fenster da")
-
-        def felder():
-            """(username_feld, passwort_feld). Finns Screenshots 21.09.2026
-            22:04: die Tradovate-Anmeldung oeffnet als TAB im selben Fenster —
-            damit liegt auch Chromes ADRESSLEISTE als Eingabefeld im Baum, und
-            zwar VOR den Feldern der Seite. 'Das erste Feld, das kein Passwort
-            ist' waere die Adressleiste gewesen: der Bot haette dort
-            hineingeklickt und getippt. Deshalb ueber die Lage: Anker ist das
-            Passwortfeld (IsPassword), Username ist das Feld DIREKT DARUEBER —
-            gleiche linke Kante, kleinster Abstand nach oben."""
-            try:
-                eds = [e for e in tw.descendants(control_type="Edit")
-                       if not hasattr(e, "is_visible") or e.is_visible()]
-            except Exception:
-                return None, None
-            pw = next((e for e in eds if _tv_ist_passwortfeld(e)), None)
-            if pw is None:
-                return None, None
-            try:
-                pr = pw.rectangle()
-            except Exception:
-                return None, None
-            return tv_feld_darueber(eds, pw, (pr.left, pr.top, pr.right, pr.bottom)), pw
-
-        def bewiesen():
-            un, pw = felder()
-            if not un or not pw:
-                return False
-            return (_nur_alnum(_tv_edit_wert(un)) == _nur_alnum(username)
-                    and len(_tv_edit_wert(pw)) > 0)       # nur DASS gefuellt, nie WAS
-
-        un, pw = None, None
-        ende_f = time.time() + 20.0
-        while time.time() < ende_f and not (un and pw):
-            un, pw = felder()
-            if not (un and pw):
-                _warte(0.7, 0.4)
-        if not (un and pw):
-            inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
-            return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
-
-        if not bewiesen():
-            try:
-                r = un.rectangle()
-                un_r = (r.left, r.top, r.right, r.bottom)
-                punkt = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
-            except Exception:
-                return ab("Username-Feld ohne Rechteck.", "login")
-            ok, f = _tv_uia_klick(punkt, "Username-Feld", trail)
+        def anmelden(el):
+            """Dialog steht da: Demo -> Connect -> Tradovate-Tab -> Autofill ->
+            Beweis -> Anmelden -> Tab zu -> Panel neu lesen.
+            -> 'fertig' | 'dropdown' (Geschwister-Konto aktiv, Schritt 3 macht weiter)"""
+            nonlocal start, zustand, aktiv, bf, uia_el
+            # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
+            # ohne bewiesenen Demo-Schalter wird nicht verbunden.
+            ok, f = _tv_uia_klick(el, "Demo", trail)
             if not ok:
                 return ab(f, "login")
-            _warte(0.9, 0.5)
-            vor = _tv_autofill_vorschlag(username, ohne=un_r)
-            if len(vor) != 1:
-                # Liste zeigt den Login nicht (oder mehrere): Username tippen —
-                # Chrome filtert die Vorschlaege dann auf genau diesen.
-                _tv_tippen(tv_tasten_escape(username), "Username", trail)
-                _warte(1.0, 0.5)
-                vor = _tv_autofill_vorschlag(username, ohne=un_r)
-            if len(vor) == 1:
-                ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
+            _warte(0.4, 0.3)
+            el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
+            if not el:
+                esc()
+                return ab(f"Der Knopf 'Connect' im Tradovate-Dialog wurde nicht eindeutig gefunden "
+                          f"({n} Treffer)." + spur[0], "login")
+            vorher = {h for h, _t, _w in _tv_browser_fenster()}
+            ok, f = _tv_uia_klick(el, "Connect", trail)
+            if not ok:
+                return ab(f, "login")
+
+            # Tradovate-Anmeldefenster (eigenes Popup — oder ein neuer Tab, dann traegt
+            # das Browser-Fenster selbst den Titel).
+            tw, ende_t = None, time.time() + 25.0
+            while time.time() < ende_t and tw is None:
+                _warte(0.8, 0.4)
+                kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if "tradovate" in t.lower()]
+                neu_f = [k for k in kand if k[0] not in vorher]
+                if neu_f or kand:
+                    tw = (neu_f or kand)[0][2]
+            if tw is None:
+                return ab("Nach 'Connect' ist kein Tradovate-Anmeldefenster erschienen.", "login")
+            tw_handle = tw.handle
+            try:
+                tw.set_focus()
+            except Exception:
+                pass
+            trail.append("Tradovate-Fenster da")
+
+            def felder():
+                """(username_feld, passwort_feld). Finns Screenshots 21.09.2026
+                22:04: die Tradovate-Anmeldung oeffnet als TAB im selben Fenster —
+                damit liegt auch Chromes ADRESSLEISTE als Eingabefeld im Baum, und
+                zwar VOR den Feldern der Seite. 'Das erste Feld, das kein Passwort
+                ist' waere die Adressleiste gewesen: der Bot haette dort
+                hineingeklickt und getippt. Deshalb ueber die Lage: Anker ist das
+                Passwortfeld (IsPassword), Username ist das Feld DIREKT DARUEBER —
+                gleiche linke Kante, kleinster Abstand nach oben."""
+                try:
+                    eds = [e for e in tw.descendants(control_type="Edit")
+                           if not hasattr(e, "is_visible") or e.is_visible()]
+                except Exception:
+                    return None, None
+                pw = next((e for e in eds if _tv_ist_passwortfeld(e)), None)
+                if pw is None:
+                    return None, None
+                try:
+                    pr = pw.rectangle()
+                except Exception:
+                    return None, None
+                return tv_feld_darueber(eds, pw, (pr.left, pr.top, pr.right, pr.bottom)), pw
+
+            def bewiesen():
+                un, pw = felder()
+                if not un or not pw:
+                    return False
+                return (_nur_alnum(_tv_edit_wert(un)) == _nur_alnum(username)
+                        and len(_tv_edit_wert(pw)) > 0)       # nur DASS gefuellt, nie WAS
+
+            un, pw = None, None
+            ende_f = time.time() + 20.0
+            while time.time() < ende_f and not (un and pw):
+                un, pw = felder()
+                if not (un and pw):
+                    _warte(0.7, 0.4)
+            if not (un and pw):
+                inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
+                return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
+
+            if not bewiesen():
+                try:
+                    r = un.rectangle()
+                    un_r = (r.left, r.top, r.right, r.bottom)
+                    punkt = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
+                except Exception:
+                    return ab("Username-Feld ohne Rechteck.", "login")
+                ok, f = _tv_uia_klick(punkt, "Username-Feld", trail)
                 if not ok:
                     return ab(f, "login")
-            else:
-                try:
-                    from pywinauto import keyboard
-                    keyboard.send_keys("{DOWN}")
-                    _warte(0.25, 0.2)
-                    keyboard.send_keys("{ENTER}")
-                    trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
-                except Exception:
-                    return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
-            ende_b = time.time() + 5.0
-            while time.time() < ende_b and not bewiesen():
-                _warte(0.5, 0.3)
-        if not bewiesen():
-            inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
-            return ab(f"Im Tradovate-Fenster stehen Username '{username}' und ein gefuelltes "
-                      "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
-                      "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
-        trail.append("Username + gefuelltes Passwort bewiesen")
-        el, n = warte_auf(TV_NAMEN_LOGIN, TV_RX_LOGIN, 6.0, "login_knopf", quelle=tw)
-        if not el:
-            return ab(f"Der Knopf 'Login' im Tradovate-Fenster wurde nicht eindeutig gefunden "
-                      f"({n} Treffer)." + spur[0], "login")
-        ok, f = _tv_uia_klick(el, "Login", trail)
-        if not ok:
-            return ab(f, "login")
+                _warte(0.9, 0.5)
+                vor = _tv_autofill_vorschlag(username, ohne=un_r)
+                if len(vor) != 1:
+                    # Liste zeigt den Login nicht (oder mehrere): Username tippen —
+                    # Chrome filtert die Vorschlaege dann auf genau diesen.
+                    _tv_tippen(tv_tasten_escape(username), "Username", trail)
+                    _warte(1.0, 0.5)
+                    vor = _tv_autofill_vorschlag(username, ohne=un_r)
+                if len(vor) == 1:
+                    ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
+                    if not ok:
+                        return ab(f, "login")
+                else:
+                    try:
+                        from pywinauto import keyboard
+                        keyboard.send_keys("{DOWN}")
+                        _warte(0.25, 0.2)
+                        keyboard.send_keys("{ENTER}")
+                        trail.append(f"Autofill per Pfeil+Enter ({len(vor)} sichtbare Vorschlaege)")
+                    except Exception:
+                        return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
+                ende_b = time.time() + 5.0
+                while time.time() < ende_b and not bewiesen():
+                    _warte(0.5, 0.3)
+            if not bewiesen():
+                inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
+                return ab(f"Im Tradovate-Fenster stehen Username '{username}' und ein gefuelltes "
+                          "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
+                          "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
+            trail.append("Username + gefuelltes Passwort bewiesen")
+            el, n = warte_auf(TV_NAMEN_LOGIN, TV_RX_LOGIN, 6.0, "login_knopf", quelle=tw)
+            if not el:
+                return ab(f"Der Knopf 'Login' im Tradovate-Fenster wurde nicht eindeutig gefunden "
+                          f"({n} Treffer)." + spur[0], "login")
+            ok, f = _tv_uia_klick(el, "Login", trail)
+            if not ok:
+                return ab(f, "login")
 
-        # Das Fenster muss verschwinden (bzw. der Tab den Titel verlieren).
-        ende_z = time.time() + 35.0
-        noch_da = True
-        while time.time() < ende_z and noch_da:
-            _warte(1.0, 0.5)
-            noch_da = any(h == tw_handle and "tradovate" in t.lower() for h, t, _x in _tv_browser_fenster())
-        if noch_da:
-            inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
-            return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — steht dort eine "
-                      "Fehlermeldung oder eine Rueckfrage?", "login")
-        trail.append("angemeldet, Tradovate-Fenster zu")
+            # Das Fenster muss verschwinden (bzw. der Tab den Titel verlieren).
+            ende_z = time.time() + 35.0
+            noch_da = True
+            while time.time() < ende_z and noch_da:
+                _warte(1.0, 0.5)
+                noch_da = any(h == tw_handle and "tradovate" in t.lower() for h, t, _x in _tv_browser_fenster())
+            if noch_da:
+                inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
+                return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — steht dort eine "
+                          "Fehlermeldung oder eine Rueckfrage?", "login")
+            trail.append("angemeldet, Tradovate-Fenster zu")
 
-        # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
-        # Firma dastehen.
-        fenster[0] = None
-        start = time.time()
-        ende = time.time() + 45.0
-        while True:
-            zustand, aktiv, bf, uia_el = lies()
-            if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
-                break
-            _warte(1.0, 0.5)
-        res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
-        trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}")
-        if zustand == "richtig":
-            res["ok"] = True
-            return raus(f"Tradovate-Login gewechselt ({username}) — aktiv ist {aktiv[:60]}.", "login")
-        if zustand != "gleicher_login":
-            return ab(f"Mit '{username}' angemeldet, aber im Panel steht keines der Konten dieser "
-                      f"Firma (gebraucht: {ext}). Gehoert der Username wirklich zu dieser Firma?", "login")
+            # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
+            # Firma dastehen.
+            fenster[0] = None
+            start = time.time()
+            ende = time.time() + 45.0
+            while True:
+                zustand, aktiv, bf, uia_el = lies()
+                if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
+                    break
+                _warte(1.0, 0.5)
+            res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+            trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}")
+            if zustand == "richtig":
+                res["ok"] = True
+                return raus(f"Tradovate-Login gewechselt ({username}) — aktiv ist {aktiv[:60]}.", "login")
+            if zustand != "gleicher_login":
+                return ab(f"Mit '{username}' angemeldet, aber im Panel steht keines der Konten dieser "
+                          f"Firma (gebraucht: {ext}). Gehoert der Username wirklich zu dieser Firma?", "login")
+
+            return "dropdown"
+
+        # ---- Ablauf -----------------------------------------------------------
+        login_noetig = True
+        if frisch_mit_link:
+            trail.append("TradingView frisch mit Direkt-Adresse gestartet")
+            art, el_demo = dialog_oder_verbunden(40.0)
+        else:
+            art, el_demo = ("verbunden" if broker_knopf() else "nichts"), None
+
+        if art == "verbunden":
+            if frisch_mit_link:
+                # Gemerkte Sitzung hat sich von selbst verbunden — vielleicht ist es
+                # ja der richtige Login: erst lesen, dann handeln.
+                trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
+                ende_v = time.time() + 25.0
+                while True:
+                    zustand, aktiv, bf, uia_el = lies()
+                    if zustand in ("richtig", "gleicher_login") or time.time() >= ende_v:
+                        break
+                    _warte(0.8, 0.5)
+                res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+                trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
+                if zustand == "richtig":
+                    res["ok"] = True
+                    return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
+                if zustand == "gleicher_login":
+                    login_noetig = False
+                else:
+                    f = flach_pruefen("ab- und angemeldet")
+                    if f:
+                        return ab(f, "login")
+            if login_noetig:
+                broker = broker_knopf()
+                if len(broker) != 1:
+                    return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
+                              f"({len(broker)} Treffer).", "login")
+                trail.append("Broker verbunden, Zielkonto nicht im Panel")
+                if dropdown_pruefen(broker[0]) == "fertig":
+                    return
+                if abmelden(broker[0]) == "fertig":
+                    return
+
+        if login_noetig:
+            if art != "dialog":
+                if neu_mit_link() == "fertig":
+                    return
+                art, el_demo = dialog_oder_verbunden(40.0)
+                if art != "dialog":
+                    gesehen = tv_uia_spur(_tv_uia_roh(w, ("Button", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,)))
+                    return ab("TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen"
+                              + (" — es hat sich wieder von selbst verbunden." if art == "verbunden" else ".")
+                              + " Ist in einem ANDEREN Chrome-Fenster noch ein TradingView-Tab offen? "
+                              f"Gesehen: {gesehen}", "login")
+            if anmelden(el_demo) == "fertig":
+                return
 
     # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
     # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
