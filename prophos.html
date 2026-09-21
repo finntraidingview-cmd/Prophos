@@ -7525,6 +7525,8 @@
             <option value="Fusion Markets"></option>
             <option value="FundingPips"></option>
             <option value="FundedNext"></option>
+            <option value="FundedNext Futures"></option>
+            <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
             <option value="Apex"></option>
             <option value="The5%ers"></option>
@@ -7776,6 +7778,8 @@
             <option value="Fusion Markets"></option>
             <option value="FundingPips"></option>
             <option value="FundedNext"></option>
+            <option value="FundedNext Futures"></option>
+            <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
             <option value="Apex"></option>
             <option value="The5%ers"></option>
@@ -21345,9 +21349,15 @@
     { name:'Apex Trader',   symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FTMO',          symbol:'NAS100', unit:'Lots',      ppl:0.85,  currency:'$', dupSymbol:'US100.cash' },
     { name:'FundedNext',    symbol:'',       unit:'Lots',      ppl:10.00, currency:'$', dupSymbol:'NDX100' },
+    // 21.09.2026 (Finn: „neue Propfirm … FundedNext Futures … Mapping mit NQ/MNQ
+    // genau wie bei Tradeify … für alle IDs" + „MyFundedFutures bitte auch"):
+    // für die 11 bestehenden Logins per sql/2026-09-21_firmen_… eingespielt,
+    // hier für jeden NEUEN Login. Werte 1:1 Tradeify.
+    { name:'FundedNext Futures', symbol:'MNQ', unit:'Kontrakte', ppl:2.00, currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'FundingPips',   symbol:'',       unit:'Lots',      ppl:20.00, currency:'$', dupSymbol:'NDX100' },
     { name:'Fusion Markets',symbol:'',       unit:'Lots',      ppl:0.85,  currency:'€', dupSymbol:'NAS100' },
     { name:'Lucid Trading', symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
+    { name:'MyFundedFutures', symbol:'MNQ',  unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() },
     { name:'The5%ers',      symbol:'',       unit:'Lots',      ppl:1.00,  currency:'$', dupSymbol:'NAS100' },
     { name:'Tradeify',      symbol:'MNQ',    unit:'Kontrakte', ppl:2.00,  currency:'$', dupSymbol:'NQ' + tpFuturesFrontcode() }
   ]
@@ -21457,7 +21467,7 @@
    * tatsächlich auf Accounts verwendeten Firmennamen — dedupliziert, alphabetisch.
    */
   function refreshFirmDatalist(){
-    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','Tradeify','Apex','The5%ers']
+    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex','The5%ers']
     const seen = new Map()  // lowercase → Original-Schreibweise (erste gesehene gewinnt)
     const addName = (name) => {
       const n = (name || '').trim()
@@ -21791,6 +21801,11 @@
     }
     // Heuristik für Standard-Firms
     if(f.includes('topstep') || f.includes('tradeify') || f.includes('alpha') || f.includes('apex') || f === 'projectx') return 'projectx'
+    // 21.09.2026: „FundedNext Futures" enthält „fundednext" — ohne diese Zeile fiele
+    // die Firma bei fehlender Custom-Zeile ins CFD-Preset (NDX100, Lots, $10/Pkt)
+    // und der Multiplier würde mit Lots statt Kontrakten rechnen. Normalfall bleibt
+    // der exakte Custom-Treffer oben; das hier ist nur das Netz darunter.
+    if(f.includes('fundednext') && f.includes('futur')) return 'projectx'
     if(f.includes('fundednext')) return 'fundednext'
     if(f.includes('fundingpips') || f.includes('funding pips')) return 'fundingpips'
     if(f.includes('5%ers') || f.includes('5ers') || f.includes('the5')) return 'the5ers'
@@ -24557,7 +24572,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.311'
+  const OS_TAB_BUILD = '2026-09-21.312'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
