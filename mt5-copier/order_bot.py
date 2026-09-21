@@ -2577,24 +2577,27 @@ def modus_tvkonto(cmd):
                 return ab(f, "login")
             _warte(0.6, 0.4)
             el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
-            abgemeldet = False
             if not el:
-                # KEIN Abbruch (22.09.2026, Finns Ablauf: "jedes Mal direkt der
-                # Link, dann Connect"): die Direkt-Adresse oeffnet den Dialog
-                # auch so. Das Abmelden davor ist der saubere Weg, aber nicht
-                # der einzige — an dieser Stelle ist der Bot schon zweimal
-                # haengengeblieben.
+                # PFLICHT (22.09.2026, Finn hat es von Hand geprueft): ist schon
+                # ein Broker verbunden, laedt die Direkt-Adresse die Seite nur
+                # neu — der Dialog kommt NICHT. Ein neuer Tab hilft auch nicht:
+                # TradingView merkt sich die Broker-Verbindung pro TradingView-
+                # Login, der zweite Tab waere sofort wieder verbunden (und eine
+                # zweite Tradovate-Session). Ohne Abmelden geht es also nicht
+                # weiter — dann lieber hier ehrlich stoppen, mit dem, was im
+                # Menue wirklich stand. (.324 hatte das Abmelden optional
+                # gemacht; das war nach diesem Befund falsch.)
                 esc()
-                trail.append(f"'Log out' nicht gefunden ({n}) -> weiter ueber die Direkt-Adresse")
-            else:
-                ok, f = _tv_uia_klick(el, "Log out", trail)
-                if not ok:
-                    return ab(f, "login")
-                abgemeldet = True
+                return ab("Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
+                          f"({n} Treffer) — ohne Abmelden oeffnet die Direkt-Adresse den "
+                          "Tradovate-Dialog nicht." + spur[0], "login")
+            ok, f = _tv_uia_klick(el, "Log out", trail)
+            if not ok:
+                return ab(f, "login")
             # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
             # Knopf mit demselben Verb da — genau einmal nachklicken.
-            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, not abgemeldet
-            while abgemeldet and time.time() < ende_l:
+            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, False
+            while time.time() < ende_l:
                 _warte(0.8, 0.4)
                 if not broker_knopf():
                     getrennt = True
@@ -2606,9 +2609,9 @@ def modus_tvkonto(cmd):
                         nachgefragt = True
                         _tv_uia_klick(best[0], "Log out bestaetigen", trail)
             if not getrennt:
-                trail.append("Broker-Knopf nach 'Log out' noch da -> trotzdem weiter ueber die Direkt-Adresse")
-            elif abgemeldet:
-                trail.append("abgemeldet")
+                return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach noch "
+                          "im Panel — verbunden laedt die Direkt-Adresse die Seite nur neu.", "login")
+            trail.append("abgemeldet")
 
         # VERBINDEN ueber die Direkt-Adresse: kein Knopf "Trade", keine Kachel.
         _tv_fenster_holen([], "", "")            # TradingView-Tab sicher vorn (klickt ihn notfalls an)
