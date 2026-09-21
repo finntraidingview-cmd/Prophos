@@ -24633,7 +24633,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.328'
+  const OS_TAB_BUILD = '2026-09-22.329'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32429,6 +32429,18 @@
   // Railway oder einem alten Backend ohne /copier-Route) kein Crash, sondern ein
   // sauberer Fehlertext (Review 15.08.2026, Funde „POST ohne try/catch" +
   // „Versionsschiefstand Frontend/Backend").
+  // Bot-Stand im Versions-Chip (22.09.2026, Finn: „warum dauert das Selbst-
+  // Update immer so lange"). Der Puls (order_bot.py) wird seit heute OHNE
+  // Neustart getauscht, ~15 s nach dem Push — er kann dem Panel/Copier also
+  // voraus sein, die erst neu starten, wenn GitHubs Zwischenspeicher (5 min)
+  // nachgezogen hat und alle Master flach sind. Der Chip zeigt deshalb beides,
+  // sobald es auseinanderliegt: „v….327 · Puls .328".
+  function mtcBotStand(d){
+    const b = d && d.bot_version ? String(d.bot_version) : ''
+    if(!b || b === String(d.version || '')) return ''
+    return ' · Puls .' + b.split('.').pop()
+  }
+
   async function mtcApi(path, opts){
     try {
       const r = await fetch(`${MTC_BASE}/${path}`, opts)
@@ -32520,7 +32532,7 @@
     const anyAlive = (d.instances || []).some(x => x.alive)
     tc.innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
     const tv = $('mt5tab-version')
-    if(tv && d.version){ tv.style.display = ''; tv.textContent = 'v' + d.version }
+    if(tv && d.version){ tv.style.display = ''; tv.textContent = 'v' + d.version + mtcBotStand(d) }
     const cnt = $('subtab-count-mt5'); if(cnt) cnt.textContent = String((d.instances || []).length)
     // Job-/Konflikt-Banner gespiegelt — eigener Klick-Anker statt id, sonst
     // stuende dieselbe id zweimal im Dokument (Sidebar-View + Tab).
@@ -32615,7 +32627,7 @@
     const anyAlive = (d.instances || []).some(x => x.alive)
     $('mtc-copier-chip').innerHTML = `<span class="mtc-dot ${anyAlive ? 'on' : 'off'}"></span>Copier ${anyAlive ? 'läuft' : 'gestoppt'}`
     const v = $('mtc-version')
-    if(d.version){ v.style.display = ''; v.textContent = 'v' + d.version }
+    if(d.version){ v.style.display = ''; v.textContent = 'v' + d.version + mtcBotStand(d) }
     // Hedge-Chip: erwartetes Hedge-Konto aus den Configs (nicht der Live-Login) —
     // genau der Wert, den der Klick-Editor umstellt. Uneinheitlich = Fleet-Fehler.
     const hc = $('mtc-hedge-chip'), hcur = $('mtc-hedge-cur')

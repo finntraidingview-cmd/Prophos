@@ -179,34 +179,81 @@ def ensure_starter_source():
     threading.Thread(target=_spaeter, daemon=True).start()
 
 
-def ensure_bot_source():
+# ── SCHNELLES UPDATE (22.09.2026, Finn: "warum dauert das Selbst-Update immer so
+# lange … ich warte immer 2-5 min") ────────────────────────────────────────────
+# BEFUND: raw.githubusercontent.com liefert JEDE Datei mit 'cache-control:
+# max-age=300' — bis zu fuenf Minuten alter Stand, pro Datei mit EIGENER Uhr.
+# Dazu kam die Pruefung nur einmal pro Minute. Und schlimmer als das Warten:
+# ensure_bot_source lud order_bot.py beim Panel-Start genau EINMAL von 'main'.
+# War die VERSION-Datei schon frisch, order_bot.py aber noch im Zwischenspeicher,
+# lief der ALTE Bot unter der NEUEN Versionsnummer — bis zum naechsten Neustart,
+# und von aussen nicht zu erkennen.
+# LOESUNG: den neuesten Stand (Commit-Kennung) ueber GitHubs Git-Schnittstelle
+# fragen — dieselbe Abfrage wie 'git ls-remote', ohne Zwischenspeicher, ohne
+# API-Kontingent, ~0,3 s. Dateien werden dann ueber die Adresse MIT dieser
+# Kennung geladen: deren Inhalt kann sich nie aendern, ein Zwischenspeicher
+# kann also nichts Falsches liefern.
+_REPO = "finntraidingview-cmd/Prophos"
+BOT_STAND = {"sha": None, "version": None}
+
+
+def repo_sha(timeout=8):
+    """Kennung des neuesten Commits auf main — oder None (kein Netz o.ae.)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
+            headers={"User-Agent": "git/2.40"})
+        roh = urllib.request.urlopen(req, timeout=timeout).read()
+        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", roh)
+        return m.group(1).decode("ascii") if m else None
+    except Exception:
+        return None
+
+
+def repo_datei(pfad, sha=None, timeout=15):
+    """Datei aus dem Repo — mit sha aus genau diesem Stand, sonst von main."""
+    import urllib.request
+    url = f"https://raw.githubusercontent.com/{_REPO}/{sha or 'main'}/{pfad}"
+    return urllib.request.urlopen(url, timeout=timeout).read()
+
+
+def ensure_bot_source(sha=None):
     """order_bot.py aus dem Repo holen/aktuell halten (15.08.2026, erster
-    Bot-Test: 'keine Antwort vom Bot' — die Datei lag gar nicht auf dem PC,
-    weil die .bat-Selbst-Update-Loops nur die Dateien verteilen, die sie
-    kennen). Gleiche Mechanik wie ensure_ea_source, laeuft bei jedem
-    Panel-Start — der VERSION-Bump restartet das Panel, also kommt jede
-    Bot-Aenderung automatisch an."""
-    url = ("https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/"
-           "main/mt5-copier/order_bot.py")
+    Bot-Test: 'keine Antwort vom Bot' — die Datei lag gar nicht auf dem PC).
+    Seit 22.09.2026 an den NEUESTEN STAND gebunden statt an 'main' (siehe
+    oben) und nur ersetzt, wenn der neue Inhalt fehlerfrei uebersetzt — der
+    Bot wird bei jedem Aufruf frisch gestartet, ein Austausch wirkt also
+    sofort, OHNE Panel-Neustart. -> True, wenn ersetzt wurde."""
     dst = os.path.join(HERE, "order_bot.py")
     try:
-        import urllib.request
-        data = urllib.request.urlopen(url, timeout=15).read()
+        sha = sha or repo_sha()
+        data = repo_datei("mt5-copier/order_bot.py", sha)
         if len(data) < 500 or b"def run(" not in data:
-            return
+            return False
+        compile(data, "order_bot.py", "exec")      # kaputte Datei ersetzt nie eine laufende
         old = b""
         if os.path.exists(dst):
             with open(dst, "rb") as f:
                 old = f.read()
+        if sha:
+            BOT_STAND["sha"] = sha
+            try:
+                BOT_STAND["version"] = repo_datei("mt5-copier/VERSION", sha, 10).decode("utf-8", "replace").strip()[:30]
+            except Exception:
+                pass
         if data != old:
             tmp = dst + ".tmp"
             with open(tmp, "wb") as f:
                 f.write(data)
             os.replace(tmp, dst)
-            print(f"[panel] order_bot.py aus dem Repo aktualisiert ({len(data)} Bytes).", flush=True)
+            print(f"[panel] order_bot.py aktualisiert ({len(data)} Bytes, Stand "
+                  f"{(sha or 'main')[:7]}, {BOT_STAND.get('version') or '?'}).", flush=True)
+            return True
     except Exception as e:
         print(f"[panel] order_bot.py-Download fehlgeschlagen ({type(e).__name__}) — "
               f"Order-Schritt meldet das klar, wenn er gebraucht wird.", flush=True)
+    return False
 
 
 def ensure_pywinauto():
@@ -392,6 +439,8 @@ def snapshot():
     clog = read_json(os.path.join(HERE, "copier-log.json"), {}) or {}
     return {"instances": data, "conflicts": conflicts, "job": job,
             "plans": advance_plans(data), "version": _local_version(),
+            # Stand des Bots (kann dem Panel voraus sein — er wird ohne Neustart getauscht)
+            "bot_version": BOT_STAND.get("version"),
             "copier_log": clog.get("lines") or [],
             "copier_log_at": clog.get("updated_at"),
             # Echo-Not-Aus (28.08.2026): Zustand fuers Pause/Start-Chip in Prophos
@@ -2809,12 +2858,28 @@ def _local_version():
 
 
 def _version_watcher(my_version):
-    import urllib.request
+    """Zwei Geschwindigkeiten (22.09.2026):
+    SCHNELL — alle 15 s den neuesten Stand fragen (repo_sha). Hat er sich
+    geaendert, wird order_bot.py sofort aus GENAU diesem Stand getauscht. Das
+    ist die Datei, an der gerade gebaut wird, und sie braucht keinen Neustart:
+    Bot-Aenderungen sind damit in ~15-20 s am PC, egal ob Master flach sind.
+    LANGSAM — der Panel-Neustart wie bisher, aber erst, wenn AUCH 'main' die
+    neue VERSION zeigt: die start-panel.bat laedt panel.py von dort. Ein
+    Neustart vorher bekaeme den alten Stand aus dem Zwischenspeicher und
+    startete im Kreis, bis der abgelaufen ist."""
+    letzter = BOT_STAND.get("sha")
+    runde = 0
     while True:
-        time.sleep(60)
+        time.sleep(15)
+        runde += 1
+        sha = repo_sha()
+        if sha and sha != letzter:
+            letzter = sha
+            ensure_bot_source(sha)
+        if runde % 2:                 # 'main' reicht alle 30 s
+            continue
         try:
-            with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
-                remote = r.read().decode("utf-8", "replace").strip()
+            remote = repo_datei("mt5-copier/VERSION", None, 10).decode("utf-8", "replace").strip()
         except Exception:
             continue
         if remote and remote != my_version:
