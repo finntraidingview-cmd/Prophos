@@ -845,6 +845,14 @@ def main():
         and order_bot.tv_feld_unter(_FR, (1325, 700, 1400, 718), _ber) == 3
         and order_bot.tv_feld_unter(_FR, (1325, 462, 1360, 480), _ber) == 0
         and order_bot.tv_feld_unter(_FR, (1325, 900, 1400, 918), _ber) is None)
+    # Finns Lauf 22.09.: "'Units' nicht eindeutig (2 Treffer)" — Text + Name des Auswahlmenues.
+    _L2 = [{"text": "Units", "r": (1325, 462, 1360, 480), "punkt": (1342, 471)},
+           {"text": "Units", "r": (1500, 300, 1560, 318), "punkt": (1530, 309)}]
+    chk("TV-ORDER: doppelte Beschriftung — es zaehlt die MIT Eingabefeld darunter, sonst keine",
+        order_bot.tv_label_mit_feld(_L2, _FR, _ber)[0]["r"] == (1325, 462, 1360, 480)
+        and order_bot.tv_label_mit_feld(_L2, _FR, _ber)[1] == 0
+        and order_bot.tv_label_mit_feld([_L2[1]], _FR, _ber) == (None, None)
+        and order_bot.tv_label_mit_feld([], _FR, _ber) == (None, None))
     chk("TV-ORDER: Zahlen lesen — englisch, deutsch, mit Einheit; nichts Zaehlbares = None",
         order_bot.tv_zahl_lesen("17.00") == 17.0 and order_bot.tv_zahl_lesen("1,875.00") == 1875.0
         and order_bot.tv_zahl_lesen("1.875,00") == 1875.0 and order_bot.tv_zahl_lesen("12,5") == 12.5

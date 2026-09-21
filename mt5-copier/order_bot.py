@@ -1526,7 +1526,7 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
 
     ende = start + float(warten_s)
     while time.time() < ende:
-        _warte(1.2, 0.6)   # Jitter-Dauerregel 28.08.2026
+        _warte(0.5, 0.3)   # Jitter-Dauerregel 28.08.2026
         bf = _tv_http("/bedienfeld", timeout=1.5) or {}
         if bf.get("ok") and (time.time() - float(bf.get("alter_s") or 0.0)) >= start:
             trail.append("Reader meldet sich aus dem neuen Tab")
@@ -2214,7 +2214,7 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     except Exception as e:
         return False, f"Tab liess sich nicht schliessen ({type(e).__name__})"
     trail.append("TradingView-Tab geschlossen")
-    _warte(1.2, 0.6)
+    _warte(0.5, 0.3)
     befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")),
                              (cfg or {}).get("tv_chrome_profil"))
     flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -2596,7 +2596,7 @@ def modus_tvkonto(cmd):
             else:
                 fenster_gesehen[0] = (spur_f[-1] if spur_f else "")[:300]
                 if runde < versuche:
-                    _warte(1.0, 0.5)
+                    _warte(0.4, 0.3)
         return fenster[0]
 
     def lies():
@@ -2620,7 +2620,7 @@ def modus_tvkonto(cmd):
         zustand, aktiv, bf, uia_el = lies()
         if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
             break
-        _warte(0.8, 0.5)
+        _warte(0.35, 0.25)
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
                  + (" (UIA)" if uia_el else ""))
@@ -2751,7 +2751,7 @@ def modus_tvkonto(cmd):
                     return "verbunden", None
                 if time.time() >= ende_d:
                     return "nichts", None
-                _warte(0.8, 0.4)
+                _warte(0.35, 0.25)
 
         def dropdown_pruefen(broker_el):
             """Unbekanntes Konto aktiv -> erst ins Dropdown schauen (Finns Lauf
@@ -2766,7 +2766,7 @@ def modus_tvkonto(cmd):
                 trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
                 ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
                 if ok:
-                    _warte(0.7, 0.5)
+                    _warte(0.4, 0.3)
                     eintrag_x, ende_x, runde = None, time.time() + 6.0, 0
                     while not eintrag_x:
                         runde += 1
@@ -2784,7 +2784,7 @@ def modus_tvkonto(cmd):
                         start = time.time()
                         ende_x = time.time() + 12.0
                         while time.time() < ende_x:
-                            _warte(0.7, 0.4)
+                            _warte(0.4, 0.3)
                             zustand, aktiv, _b, _e = lies()
                             if zustand == "richtig":
                                 res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
@@ -2828,7 +2828,7 @@ def modus_tvkonto(cmd):
             # Knopf mit demselben Verb da — genau einmal nachklicken.
             ende_l, nachgefragt = time.time() + 16.0, False
             while time.time() < ende_l:
-                _warte(0.8, 0.4)
+                _warte(0.35, 0.25)
                 if not broker_knopf():
                     trail.append("abgemeldet")
                     return "ok"
@@ -2853,13 +2853,13 @@ def modus_tvkonto(cmd):
                 return ab(f, "login")
             w, ende_n = None, time.time() + 40.0
             while time.time() < ende_n and w is None:
-                _warte(1.2, 0.6)
+                _warte(0.5, 0.3)
                 fenster[0] = None
                 w = tv_fenster()
             if w is None:
                 return ab("TradingView wurde neu geoeffnet, das Fenster ist aber nach 40 s nicht zu "
                           "finden. " + fenster_gesehen[0], "login")
-            _warte(1.5, 1.0)
+            _warte(0.6, 0.4)
             return "ok"
 
         def nicht_merken():
@@ -2972,7 +2972,7 @@ def modus_tvkonto(cmd):
             # das Browser-Fenster selbst den Titel).
             tw, ende_t = None, time.time() + 25.0
             while time.time() < ende_t and tw is None:
-                _warte(0.8, 0.4)
+                _warte(0.35, 0.25)
                 kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if "tradovate" in t.lower()]
                 neu_f = [k for k in kand if k[0] not in vorher]
                 if neu_f or kand:
@@ -3021,7 +3021,7 @@ def modus_tvkonto(cmd):
             while time.time() < ende_f and not (un and pw):
                 un, pw = felder()
                 if not (un and pw):
-                    _warte(0.7, 0.4)
+                    _warte(0.4, 0.3)
             if not (un and pw):
                 inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
@@ -3044,7 +3044,7 @@ def modus_tvkonto(cmd):
                 jetzt = (_tv_edit_wert(u2) if u2 else None, len(_tv_edit_wert(p2)) if p2 else None)
                 if jetzt != letzter:
                     letzter, seit = jetzt, time.time()
-                elif time.time() - seit >= 1.2 and (jetzt[0] or time.time() - t_r >= 6.0):
+                elif time.time() - seit >= 0.8 and (jetzt[0] or time.time() - t_r >= 6.0):
                     break
                 _warte(0.3, 0.2)
             trail.append("Anmeldeseite ruhig")
@@ -3105,7 +3105,7 @@ def modus_tvkonto(cmd):
                     if not hat_fokus:
                         return ab("Benutzername-Feld hat den Fokus verloren.", "login")
                     _tv_tippen(tv_tasten_escape(username), "Username", trail)
-                    _warte(0.9, 0.4)
+                    _warte(0.5, 0.3)
                     u4, _p4 = felder()
                     if not u4 or _nur_alnum(_tv_edit_wert(u4)) != _nur_alnum(username):
                         return ab(f"Der Username '{username}' liess sich nicht ins Feld tippen "
@@ -3157,7 +3157,7 @@ def modus_tvkonto(cmd):
             ende_z = time.time() + 35.0
             noch_da = True
             while time.time() < ende_z and noch_da:
-                _warte(1.0, 0.5)
+                _warte(0.4, 0.3)
                 noch_da = any(h == tw_handle and "tradovate" in t.lower() for h, t, _x in _tv_browser_fenster())
             if noch_da:
                 inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
@@ -3174,7 +3174,7 @@ def modus_tvkonto(cmd):
                 zustand, aktiv, bf, uia_el = lies()
                 if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
                     break
-                _warte(1.0, 0.5)
+                _warte(0.4, 0.3)
             res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
             trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}")
             if zustand == "richtig":
@@ -3213,7 +3213,7 @@ def modus_tvkonto(cmd):
                         zustand, aktiv, bf, uia_el = lies()
                         if zustand in ("richtig", "gleicher_login") or time.time() >= ende_v:
                             break
-                        _warte(0.8, 0.5)
+                        _warte(0.35, 0.25)
                     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
                     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
                     if zustand == "richtig":
@@ -3289,7 +3289,7 @@ def modus_tvkonto(cmd):
             ok, f = _tv_uia_klick(els[0], "Konto-Umschalter", trail)
     if not ok:
         return ab(f)
-    _warte(0.7, 0.5)
+    _warte(0.4, 0.3)
 
     # Zieleintrag in der offenen Liste suchen: erst das Userscript (nur 0.4.2+
     # sieht die Liste — 'treffer'), sonst UIA. Die Liste baut sich nach dem
@@ -3335,7 +3335,7 @@ def modus_tvkonto(cmd):
     start = time.time()            # nur Staende NACH dem Klick zaehlen
     ende = time.time() + 12.0
     while time.time() < ende:
-        _warte(0.7, 0.4)
+        _warte(0.4, 0.3)
         zustand, aktiv, _b, _e = lies()
         if zustand == "richtig":
             res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
@@ -3438,9 +3438,10 @@ def tv_asset_schritt(w, symbol, trail):
         return False, f
     ende = time.time() + 10.0
     while time.time() < ende:
-        _warte(0.5, 0.3)
+        _warte(0.4, 0.3)
         if titel_wurzel() == ziel:
             trail.append(f"Chart steht auf {ziel} (Tab-Titel)")
+            _warte(0.35, 0.25)      # das Order-Panel baut sich nach dem Wechsel neu auf
             return True, f"Asset {el['text']} gewaehlt."
     return False, (f"Watchlist-Zeile {el['text']} angeklickt, aber der Tab-Titel zeigt danach "
                    f"'{(w.window_text() or '')[:40]}' statt {ziel}.")
@@ -3562,6 +3563,16 @@ def tv_feld_unter(felder_r, label_r, bereich, max_abstand=70):
     return bestes
 
 
+def tv_label_mit_feld(labels, felder_r, bereich):
+    """Aus mehreren gleichnamigen Beschriftungen die nehmen, unter der ein
+    Eingabefeld sitzt — bei mehreren die oberste. -> (label, feld_index) oder (None, None)"""
+    for lab in sorted(labels or (), key=lambda e: e["r"][1]):
+        i = tv_feld_unter(felder_r, lab["r"], bereich)
+        if i is not None:
+            return lab, i
+    return None, None
+
+
 def tv_order_plan(cmd):
     """Befehl -> (plan, fehler). plan = {'richtung','menge','tp','sl'}; tp/sl None = aus."""
     r = str(cmd.get("richtung") or "").strip().lower()
@@ -3593,7 +3604,27 @@ def tv_order_schritt(w, cmd, trail):
 
     # --- Panel offen? sonst Shift+T (offizieller TradingView-Hotkey, UMSCHALTER:
     # nur druecken, wenn das Panel nachweislich fehlt) ------------------------
+    # UMSCHALTER-FALLE (22.09.2026, Finns Lauf + seine Diagnose: "vllt war das
+    # Order-Panel schon da und er hat es dann weg gemacht" — genau so war es):
+    # direkt nach dem Watchlist-Klick baut TradingView das Panel NEU auf; ein
+    # einzelner Blick in diesem Moment sah keine Reiter, Shift+T hat das OFFENE
+    # Panel geschlossen. Ein zweiter Start oeffnete es wieder — die Erkennung
+    # selbst stimmt also. Deshalb: 'Panel fehlt' gilt erst nach VIER leeren
+    # Blicken ueber mindestens 3 s, und NIE, solange irgendeine Panel-
+    # Beschriftung (Take profit / Stop loss / Units) zu sehen ist.
     roh, ber = blick()
+    t_leer, leer = time.time(), 0
+    while not ber:
+        teile = any(x[1] and (TV_RX_TP.search(str(x[0])) or TV_RX_SL.search(str(x[0])) or TV_RX_UNITS.search(str(x[0])))
+                    for x in roh)
+        leer = 0 if teile else leer + 1
+        if teile and time.time() - t_leer > 10.0:
+            return False, ("Vom Order-Panel sind Beschriftungen zu sehen, aber die Reiter-Zeile 'Market … Stop "
+                           "Limit' nicht — es wird NICHT umgeschaltet. Gesehen: " + tv_uia_spur(roh))
+        if leer >= 4 and time.time() - t_leer >= 3.0:
+            break
+        _warte(0.5, 0.3)
+        roh, ber = blick()
     if not ber:
         fr = _tv_fenster_rect(w)
         if not fr:
@@ -3650,13 +3681,17 @@ def tv_order_schritt(w, cmd, trail):
     def feld_zu(muster, name):
         roh_, _b = blick()
         labels = tv_im_panel(roh_, ber, muster, y_von=ber["reiter_y"])
-        if len(labels) != 1:
-            return None, None, f"Beschriftung '{name}' im Order-Panel nicht eindeutig ({len(labels)} Treffer)."
+        if not labels:
+            return None, None, f"Beschriftung '{name}' im Order-Panel nicht gefunden."
         eds, rs = felder()
-        i = tv_feld_unter(rs, labels[0]["r"], ber)
-        if i is None:
-            return None, labels[0], f"Eingabefeld unter '{name}' nicht gefunden."
-        return (eds[i], rs[i]), labels[0], ""
+        # MEHRERE Treffer sind normal (22.09.2026, Finns Lauf: "'Units' nicht eindeutig
+        # (2 Treffer)" — TradingView fuehrt die Beschriftung als Text UND als Name des
+        # Auswahlmenues daneben). Es zaehlt die Beschriftung, unter der wirklich ein
+        # Eingabefeld sitzt; bei mehreren die OBERSTE.
+        lab, i = tv_label_mit_feld(labels, rs, ber)
+        if lab is None:
+            return None, labels[0], f"Eingabefeld unter '{name}' nicht gefunden ({len(labels)} Beschriftungen)."
+        return (eds[i], rs[i]), lab, ""
 
     def an(feld):
         try:

@@ -2900,6 +2900,13 @@ def _version_watcher(my_version):
         if remote and remote != my_version:
             if PROV_JOB and not PROV_JOB.get("done"):
                 continue  # nie mitten in einer Provisionierung
+            # NIE mitten in einem Bot-Lauf (22.09.2026, Finns Lauf: 'Copier-Panel auf
+            # diesem PC nicht erreichbar (ConnectionError)' — mein Push hatte das Panel
+            # neu gestartet, WAEHREND der Puls in TradingView klickte; die Antwort ging
+            # verloren, der Bot lief verwaist weiter). Solange der TradingView-Lauf
+            # oder eine Master-Order ihre Sperre haelt, wird der Neustart vertagt.
+            if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+                continue
             print(f"[panel] Update {my_version} → {remote} — Neustart durch start-panel.bat.", flush=True)
             os._exit(0)
 
