@@ -3346,6 +3346,146 @@ def modus_tvkonto(cmd):
               f"'{aktiv[:40] or '?'}'.")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FUTURES-PULS, SCHRITT 3 (22.09.2026) — das richtige Asset ueber die Watchlist
+#
+# Finn 22.09.2026: "Rechts in der Favoritenleiste wird auf jeder ID immer ganz
+# oben NQ sein und darunter MNQ. Je nachdem, ob ich im Trade-Plan NQ oder MNQ
+# waehle, wird in der Watchlist auf NQ oder MNQ gedrueckt. Dann switcht
+# automatisch der Chart dazu — plus rechts das Order-Terminal."
+#
+# FINDEN: Watchlist-Zeile = Textelement in der RECHTEN Fensterhaelfte, dessen
+# Symbol-WURZEL (tv_symbol_root: 'NQZ6' aus Prophos == 'NQZ2026' in TradingView
+# == 'NQ') die gesuchte ist. Die Wurzel trennt NQ und MNQ sauber. Dieselbe
+# Schreibweise steht rechts auch im Detail-Kasten UNTER der Watchlist — genommen
+# wird deshalb die OBERSTE Fundstelle; liegen zwei auf derselben Hoehe, ist es
+# mehrdeutig und es wird nicht geklickt.
+# BEWEIS: der Fenstertitel. TradingView schreibt das Chart-Symbol als erstes
+# Wort in den Tab ('NQZ2026 30,787.00 ▲ +0.01% Unnamed') — das ist unabhaengig
+# von jedem Seitenelement und liess sich schon am 30.08. sicher lesen.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def tv_titel_wurzel(titel):
+    """Symbol-Wurzel aus dem Fenstertitel ('NQZ2026 30,787 ▲ … - Google Chrome' -> 'NQ')."""
+    return tv_symbol_root(tv_tab_suchbegriff(titel))
+
+
+def tv_watchlist_zeile(roh, ziel_wurzel, fenster):
+    """Aus (name, rect, typ)-Tripeln die Watchlist-Zeile des Ziel-Symbols.
+    -> (element|None, anzahl_kandidaten). Siehe Kopfkommentar."""
+    if not ziel_wurzel or not fenster:
+        return None, 0
+    fl, ft, fr, fb = fenster
+    grenze_x = fl + (fr - fl) * 0.55
+    kand = []
+    for eintrag in roh or ():
+        try:
+            name, r = eintrag[0], eintrag[1]
+            if not r:
+                continue
+            l, t, rr, b = (int(v) for v in r)
+        except (TypeError, ValueError, IndexError):
+            continue
+        n = str(name or "").strip()
+        # nur ein einzelnes Wort, das wie ein Kontrakt aussieht — keine Saetze,
+        # keine Beschreibungen ('E-mini Nasdaq-100 Futures …')
+        if not n or " " in n or len(n) > 24 or rr - l < 3 or b - t < 3:
+            continue
+        if (l + rr) // 2 < grenze_x or not (ft <= (t + b) // 2 <= fb):
+            continue
+        if tv_symbol_root(n) != ziel_wurzel:
+            continue
+        kand.append({"text": n, "r": (l, t, rr, b), "punkt": ((l + rr) // 2, (t + b) // 2)})
+    if not kand:
+        return None, 0
+    kand.sort(key=lambda e: e["r"][1])
+    oben = kand[0]
+    if len(kand) > 1 and abs(kand[1]["r"][1] - oben["r"][1]) <= 10 and kand[1]["r"] != oben["r"]:
+        return None, len(kand)                 # zwei auf derselben Hoehe -> mehrdeutig
+    return oben, len(kand)
+
+
+def tv_asset_schritt(w, symbol, trail):
+    """Chart (und damit das Order-Panel) auf das Symbol des Plans stellen.
+    -> (ok, msg)"""
+    ziel = tv_symbol_root(symbol)
+    if not ziel:
+        return False, f"Symbol '{symbol}' ist nicht lesbar."
+
+    def titel_wurzel():
+        try:
+            return tv_titel_wurzel(w.window_text() or "")
+        except Exception:
+            return ""
+
+    if titel_wurzel() == ziel:
+        trail.append(f"Chart steht schon auf {ziel}")
+        return True, f"Asset {ziel} steht schon."
+    el, n = None, 0
+    for _runde in range(4):
+        roh = _tv_uia_roh(w, ("Text", "ListItem", "DataItem", "Button"))
+        el, n = tv_watchlist_zeile(roh, ziel, _tv_fenster_rect(w))
+        if el or n > 1:
+            break
+        _warte(0.6, 0.4)
+    if not el:
+        gesehen = sorted({str(x[0]) for x in (roh or []) if x[1] and " " not in str(x[0])
+                          and 2 <= len(str(x[0])) <= 12 and tv_symbol_root(str(x[0])) in ("NQ", "MNQ", ziel)})[:8]
+        return False, (f"{ziel} in der Watchlist rechts nicht eindeutig gefunden ({n} Treffer). Ist die "
+                       f"Watchlist offen und steht {ziel} drin? Gesehen: {', '.join(gesehen) or 'nichts Passendes'}")
+    ok, f = _tv_uia_klick(el, f"Watchlist {el['text']}", trail)
+    if not ok:
+        return False, f
+    ende = time.time() + 10.0
+    while time.time() < ende:
+        _warte(0.5, 0.3)
+        if titel_wurzel() == ziel:
+            trail.append(f"Chart steht auf {ziel} (Tab-Titel)")
+            return True, f"Asset {el['text']} gewaehlt."
+    return False, (f"Watchlist-Zeile {el['text']} angeklickt, aber der Tab-Titel zeigt danach "
+                   f"'{(w.window_text() or '')[:40]}' statt {ziel}.")
+
+
+def modus_tvkette(cmd):
+    """Die neue Kette, so weit sie steht: Schritt 1+2 (modus_tvkonto, live
+    bewiesen) und bei Erfolg Schritt 3. modus_tvkonto bleibt dafuer
+    UNANGETASTET — seine Ausgabe wird abgefangen statt umgebaut."""
+    import io
+    puffer, echt = io.StringIO(), sys.stdout
+    sys.stdout = puffer
+    try:
+        modus_tvkonto(cmd)
+    finally:
+        sys.stdout = echt
+    zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
+    try:
+        res = json.loads(zeilen[-1])
+    except (ValueError, IndexError):
+        print(json.dumps({"ok": False, "schritt": "absturz",
+                          "msg": "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer")}))
+        return
+    symbol = str(cmd.get("symbol") or "").strip()
+    if not res.get("ok") or not symbol:
+        print(json.dumps(res))
+        return
+    trail = _StempelSpur()
+    w, f = _tv_fenster_holen([], "", "")
+    if not w:
+        ok, msg = False, "TradingView-Fenster fuer den Asset-Schritt nicht gefunden."
+    else:
+        try:
+            ok, msg = tv_asset_schritt(w, symbol, trail)
+        except Exception as e:
+            ok, msg = False, f"Asset-Schritt abgebrochen: {type(e).__name__}: {e}"
+    res["konto_msg"] = res.get("msg")
+    res["ok"] = bool(ok)
+    res["schritt"] = "asset"
+    res["msg"] = (f"{res.get('msg')} · {msg}" if ok else
+                  f"Konto steht ({res.get('konto_aktiv')}), aber: {msg} | Zuletzt: " + " > ".join(list(trail)[-3:]))
+    res["trail"] = str(res.get("trail") or "") + " || Asset: " + " > ".join(trail)
+    print(json.dumps(res))
+
+
 def modus_tvorder(cmd):
     """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
     bevor der naechste beginnt."""
@@ -5897,10 +6037,10 @@ def main():
             print(json.dumps({"ok": False, "msg": f"Befehl kein gueltiges JSON: {e}"}))
             return 2
         try:
-            modus_tvkonto(cmd)
+            modus_tvkette(cmd)      # Schritt 1+2, mit 'symbol' im Befehl auch Schritt 3
         except Exception as e:
             print(json.dumps({"ok": False, "schritt": "absturz",
-                              "msg": f"TV-Konto-Pruefung abgebrochen: {type(e).__name__}: {e}"}))
+                              "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
         # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView

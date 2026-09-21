@@ -780,6 +780,31 @@ def main():
                     ("Remember me", "Connect", "Demo", "Cannot connect to broker? Let us know."))
         and all(order_bot.TV_RX_NICHT_MERKEN.search(n) for n in order_bot.TV_NAMEN_NICHT_MERKEN))
 
+    # Schritt 3 (22.09.2026): Asset ueber die Watchlist. Nachgestellt nach Finns
+    # Screenshot: Fenster 0,107-2000,1190; Watchlist rechts oben mit NQZ2026 /
+    # MNQZ2026, darunter der Detail-Kasten mit demselben Symbol, links oben der
+    # Symbol-Knopf des Charts, im Order-Panel der Kontrakt.
+    _WF = (0, 107, 2000, 1190)
+    _WL = [("BTC1!", (70, 205, 130, 230), "Button"),                       # Chart-Symbol links oben
+           ("NQZ2026", (1680, 333, 1740, 353), "Text"), ("MNQZ2026", (1680, 365, 1748, 385), "Text"),
+           ("E-mini Nasdaq-100 Futures (Dec 2026)", (1656, 770, 1900, 790), "Text"),
+           ("NQZ2026", (1690, 733, 1752, 755), "Text"),                    # Detail-Kasten UNTER der Watchlist
+           ("30,787.00", (1745, 333, 1808, 353), "Text"), ("Watchlist", (1656, 256, 1720, 276), "Text")]
+    chk("TV-ASSET: Watchlist — NQ und MNQ sauber getrennt, oberste Fundstelle gewinnt, nie der Chart-Knopf links",
+        order_bot.tv_watchlist_zeile(_WL, "NQ", _WF)[0]["r"] == (1680, 333, 1740, 353)
+        and order_bot.tv_watchlist_zeile(_WL, "MNQ", _WF)[0]["r"] == (1680, 365, 1748, 385)
+        and order_bot.tv_watchlist_zeile(_WL, "ES", _WF) == (None, 0)
+        and order_bot.tv_watchlist_zeile([("NQZ2026", (70, 205, 130, 230), "Button")], "NQ", _WF) == (None, 0)
+        and order_bot.tv_watchlist_zeile(_WL, "", _WF) == (None, 0)
+        and order_bot.tv_watchlist_zeile(None, "NQ", _WF) == (None, 0))
+    chk("TV-ASSET: zwei Treffer auf derselben Hoehe = mehrdeutig, kein Klick",
+        order_bot.tv_watchlist_zeile([("NQZ2026", (1680, 333, 1740, 353), "Text"), ("NQZ6", (1850, 335, 1900, 355), "Text")], "NQ", _WF) == (None, 2))
+    chk("TV-ASSET: Beweis am Fenstertitel — Prophos-Symbol und TradingView-Symbol haben dieselbe Wurzel",
+        order_bot.tv_titel_wurzel("NQZ2026 30,787.00 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("NQZ6") == "NQ"
+        and order_bot.tv_titel_wurzel("MNQZ2026 30,786.25 ▲ +0.01% Unnamed - Google Chrome") == order_bot.tv_symbol_root("MNQZ6") == "MNQ"
+        and order_bot.tv_titel_wurzel("BTC1! 86,680 ▲ +0.1% Unnamed - Google Chrome") == "BTC"
+        and order_bot.tv_titel_wurzel("(1) NQZ2026 30,787.00 ▼ −0.2% Unnamed") == "NQ")
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

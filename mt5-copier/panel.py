@@ -2244,6 +2244,12 @@ class Handler(BaseHTTPRequestHandler):
             # Warteschlangen-Schalter (Finns Notiz 22.09.2026): true = als Naechstes
             # kommt ein Trade DERSELBEN Firma -> "Don't remember me" NICHT setzen.
             cmd["sitzung_merken"] = bool(body.get("sitzung_merken"))
+            # Schritt 3 (22.09.2026): Symbol des Plans -> Watchlist-Klick. Dieselbe
+            # Zeichenpruefung wie bei tv-order; ohne Symbol bleibt es bei Schritt 1+2.
+            sym = str(body.get("symbol") or "").strip()
+            if sym and not SYMBOL_RE.fullmatch(sym):
+                return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            cmd["symbol"] = sym
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
