@@ -4610,7 +4610,7 @@
           <div class="modal-actions" style="margin-top:16px">
             <span class="modal-msg" id="tpOrderMsg"></span>
             <button class="btn btn-ghost" id="tpOrderBack">Zurück</button>
-            <button class="btn btn-primary" id="tpOrderStart">Starten →</button>
+            <button class="btn btn-primary" id="tpOrderStart">Speichern</button>
           </div>
         </div>
       </div>
@@ -4632,10 +4632,11 @@
             <div class="field" style="grid-column:1 / -1">
               <label>Weg</label>
               <div class="seg" id="tp-route-seg">
-                <button type="button" id="tp-route-dup">Duplikum</button>
+                <!-- Reihenfolge 22.09.2026 (Finn: „ich will Orbit und Duplikum tauschen") -->
+                <button type="button" id="tp-route-tvplus">Orbit</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
-                <button type="button" id="tp-route-tvplus">Orbit</button>
+                <button type="button" id="tp-route-dup">Duplikum</button>
               </div>
             </div>
             <div class="field">
@@ -18759,7 +18760,7 @@
       _pfResumePlanId = null
       setTimeout(closeAccountModal, type === 'live' ? 700 : 0)
       if(_resumePid){
-        setTimeout(() => tpPreflightAndStart(_resumePid), type === 'live' ? 900 : 350)
+        setTimeout(() => tpPreflightAndStart(_resumePid, { nurDup: true }), type === 'live' ? 900 : 350)
       }
     }catch(e){
       const isNet = /failed to fetch|networkerror|load failed/i.test(e.message || '')
@@ -22302,7 +22303,10 @@
       // schlange'"): der Knopf spiegelt den Schlangen-Stand direkt auf der
       // Karte — läuft gerade / ⏳ Nr. N (Klick nimmt ihn raus) / Starten.
       const qs = (typeof _rsQueueStatusFuer === 'function') ? _rsQueueStatusFuer(p.id) : null
-      const jetztBtn = (p.route !== 'mt5') ? ''
+      // ORBIT (22.09.2026, Finn: „wie bei Echo auf Starten drücken"): eigener Knopf mit
+      // eigener Verdrahtung (data-plan-orbit-start → tpOrbitStarten) — ohne Warteschlange.
+      const orbitBtn = `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
+      const jetztBtn = (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -22693,6 +22697,13 @@
         if(typeof tpJetztStarten === 'function') tpJetztStarten(btn.dataset.planJetzt)
       })
     })
+    // Orbit-„Starten" (22.09.2026): fährt die Puls-Kette in TradingView. Doppelklick-Schutz
+    // sitzt in tpOrbitStarten (_tpOrbitLaeuft) — es gibt genau eine Maus.
+    document.querySelectorAll('[data-plan-orbit-start]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(typeof tpOrbitStarten === 'function') tpOrbitStarten(btn.dataset.planOrbitStart)
+      })
+    })
     // Warteschlangen-Knopf auf der Karte (09.09.2026): Klick = wieder raus,
     // solange nichts gesendet ist — dasselbe wie das ✕ im Panel.
     document.querySelectorAll('[data-plan-unqueue]').forEach(btn => {
@@ -22944,33 +22955,38 @@
     return { softWait: true }
   }
 
-  async function tpPreflightAndStart(planId){
+  async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
+    // ORBIT + DUPLIKIUM (22.09.2026, Finns Ablauf: Popup 2 „Speichern" → „dann kommt
+    // der Duplikum-Trade-Cross-Check, genau das Gleiche wie beim Duplikum-Trade → Popup
+    // verschwindet, Trade ist ready to start"). Auf Orbit platziert Puls die Order in
+    // TradingView, KOPIERT wird aber von Duplikium (kein TV-Reader) — also derselbe
+    // Check wie auf der Duplikum-Route. nurDup wirkt NUR bei Orbit-Plänen; für alle
+    // anderen bleibt die Routen-Erkennung unten unverändert.
+    const orbitDup = plan.route === 'tvplus' && !!(opts && opts.nurDup)
 
     // Explizite Routen-Wahl aus dem Modal-Regler (15.08.2026): route='mt5' →
     // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
     // Fallback für Alt-Pläne ohne gesetzte Route.
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
 
-    // Orbit (28.08.2026, Etappe 3 Schritt 1): „Starten" öffnet das Order-
-    // Popup (Lots/Richtung/SL/TP wie beim MT5-Puls); dessen „Starten" legt
-    // die Werte am Plan ab und der Puls holt am PC NUR den TradingView-Tab
-    // nach vorn — Finns Ansage „mehr mal nicht, nur bis dahin". Ausfüllen/
-    // Platzieren folgen als nächste Stufen. NIE in den Duplikum-Preflight
-    // durchfallen.
-    if(plan.route === 'tvplus') return openTpOrderModal(planId)
+    // Orbit: aus Popup 1 („Speichern") geht es ins Order-Popup (Richtung/TP/SL/Lots).
+    // Erst DESSEN „Speichern" kommt mit nurDup hierher zurück und fährt den Duplikum-Check
+    // (22.09.2026) — bis dahin galt „NIE in den Duplikum-Preflight durchfallen", weil der
+    // Orbit-Copier hedgte; heute kopiert Duplikum.
+    if(plan.route === 'tvplus' && !orbitDup) return openTpOrderModal(planId)
 
     // Mirror-Route? (Master=TopstepX-API, Slave=MetaApi) → eigener Preflight,
     // Duplikum-Checks wären hier sinnlos. Routen-Erkennung: planMirrorRoute().
-    const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
+    const mirrorRoute = orbitDup ? null : ((typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null)
     if(mirrorRoute) return tpPreflightMirror(plan, mirrorRoute)
 
     // MT5-Route (15.08.2026): beide Enden in mt5_links verlinkt + lokaler PC →
     // eigener Preflight gegen den lokalen Copier. Mirror behält Vorrang.
     // route='dup' = EXPLIZITE Duplikum-Wahl aus dem Regler → die MT5-Erkennung
     // darf einen doppelt verlinkten Plan dann NICHT mehr an sich ziehen.
-    const mt5Route = (plan.route === 'dup') ? null
+    const mt5Route = (plan.route === 'dup' || orbitDup) ? null
       : ((typeof planMt5Route === 'function') ? planMt5Route(plan) : null)
     if(mt5Route) return tpPreflightMt5(plan)
 
@@ -23856,7 +23872,7 @@
     if(pid == null) return
     const rb = document.getElementById('pf-retry')
     if(rb){ rb.disabled = true; rb.textContent = 'Prüfe …' }
-    tpPreflightAndStart(pid)
+    tpPreflightAndStart(pid, { nurDup: true })   // nurDup wirkt nur bei Orbit-Plänen
   })
   document.getElementById('pf-force')?.addEventListener('click', async () => {
     const pid = _pfPlanId
@@ -24305,10 +24321,10 @@
     const remoteBox = document.getElementById('tp-order-remote')
     if(remoteBox){ remoteBox.style.display = 'none'; remoteBox.innerHTML = '' }
     const startBtn = document.getElementById('tpOrderStart')
-    if(startBtn){ startBtn.disabled = false; startBtn.textContent = _tpOrderOrbit ? 'Starten →' : 'Speichern' }
+    if(startBtn){ startBtn.disabled = false; startBtn.textContent = 'Speichern' }
     const info = document.getElementById('tp-order-info')
     if(info) info.textContent = _tpOrderOrbit
-      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Starten" legt die Order am Plan ab, dann übernimmt der Puls am PC: TradingView öffnen → richtiges Konto (External ID) wählen, nötigenfalls mit dem Tradovate-Login der Firma neu anmelden → Asset über die Watchlist. Das Order-Ticket ist noch im Bau — platziert wird hier noch nichts. HÄNDE WEG, solange er läuft.`
+      ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab, danach läuft der Duplikum-Check (Duplikum kopiert). Gestartet wird über „Starten" auf der Karte: Puls öffnet TradingView → Konto → Asset → Order-Panel → Buy/Sell.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
     // SL dieser ORDER (31.08.2026, Finns Fund): steht seit heute in master_sl,
@@ -24511,120 +24527,12 @@
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       renderTradePlans()
       if(_tpOrderOrbit){
-        // Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf: „1. Puls öffnet im
-        // gleichen chrome browser den Tradingview tap … 5. er öffnet das Trade-
-        // starten-Popup und gibt die lot anzahl ein + tp/sl in $ und öffnet
-        // schließlich die order"). Bis hierhin ist alles wie auf der Echo-Route
-        // — Plan planen, zwei Popups; erst dieser Knopf trennt die Wege.
-        // Der Fokus wandert weg vom Prophos-Tab und BLEIBT auf TradingView
-        // (der Reader wird im Hintergrund-Tab von Chrome gedrosselt), deshalb
-        // schließt das Popup bei Erfolg sofort.
-        if(!MT5_LOCAL || typeof window.mtcApi !== 'function')
-          return err('Order gespeichert — aber der Puls läuft nur am PC-Tab (localhost). Dort „Starten" klicken.')
-        // Das Unterkonto wählt Puls über die External ID (Finn: „name = EXT ID").
-        // Ohne sie würde er im Tradovate-Dropdown raten — auf einem Prop-Login
-        // liegen mehrere Konten nebeneinander, und der Fehlgriff wäre eine
-        // Order auf dem falschen Konto. Also lieber hier ehrlich stoppen.
-        const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
-        const extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
-        if(!extId)
-          return err(`Order gespeichert — aber „${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches Tradovate-Unterkonto er wählen soll: unter Accounts nachtragen.`)
-        // FUTURES-PULS NEUAUFBAU (21.09.2026, Finn: der tv-order-Bau vom 30.08.
-        // „hat echt gebuggt — lass mich den neuen Bot step nach step aufbauen").
-        // Dieser Knopf fährt deshalb NICHT mehr die alte Kette, sondern die neue,
-        // so weit sie steht: Schritt 1 TradingView öffnen/nach vorn, Schritt 2a
-        // prüfen, ob das richtige Tradovate-Konto aktiv ist, 3 Asset, 4a Order-
-        // Panel ausfüllen + beweisen. Seit 4b (22.09.2026) klickt Puls am Ende
-        // den Kauf-Knopf; „Läuft" wird der Plan erst, wenn der Reader die
-        // Position bestätigt hat.
-        // Welcher Tradovate-Login zur Firma gehört, steht in den Firmen-
-        // Einstellungen (firm_specs.tv_username); mitgeschickt wird nur der
-        // Name, das Passwort bleibt in Chromes Passwort-Manager.
-        const firmName = String((masterAcc && masterAcc.firm) || plan.masterFirm || '').trim()
-        const firmSpec = (getCustomFirms() || []).find(f => String(f.name||'').trim().toLowerCase() === firmName.toLowerCase())
-        const tvUser = firmSpec && firmSpec.tvUsername ? String(firmSpec.tvUsername).trim() : ''
-        // Geschwister (21.09.2026 abends, Finns Korrektur: im TradingView-
-        // Dropdown steht nie der Tradovate-Username, nur der Kontoname): ob der
-        // richtige LOGIN aktiv ist, beweist die Datenbank. Steht im Panel ein
-        // anderes Konto, das hier bei DERSELBEN Firma geführt wird, ist es
-        // derselbe Login — Puls wechselt dann nur im Dropdown. Accounts liegen
-        // pro Prophos-Login, „dieselbe Firma im selben Profil" ist also genau
-        // die Gruppe eines Tradovate-Logins.
-        // Der Username ist damit hier KEINE Pflicht mehr — gebraucht wird er
-        // erst fürs Ab-/Anmelden bei einem fremden Login (nächster Teilschritt).
-        // Nachtrag gleicher Abend (Finn: „nicht nur die aktiven, sondern auch die
-        // letzten 10 inaktiven — manchmal sind Accounts, die schon geblowed
-        // sind, trotzdem noch im Dropdown auswählbar"): steht so ein Konto im
-        // Panel, ist es trotzdem derselbe Login. Ohne sie würde Puls dann
-        // „fremder Login" melden. Genommen werden ALLE aktiven plus die 10
-        // zuletzt archivierten derselben Firma (nach Archiv-Zeitpunkt `at`) —
-        // gedeckelt, weil alte External IDs sonst unbegrenzt mitwandern.
-        const _arch = (typeof getArchive === 'function') ? getArchive() : {}
-        const _gleicheFirma = (accounts || []).filter(a => String(a.id) !== String(plan.masterAccountId)
-          && String(a.firm||'').trim().toLowerCase() === firmName.toLowerCase() && a.externalId)
-        const _istArch = a => !!(_arch[a.id] && _arch[a.id].archived)
-        const _inaktiv = _gleicheFirma.filter(_istArch)
-          .sort((a, b) => String(_arch[b.id].at || '').localeCompare(String(_arch[a.id].at || '')))
-          .slice(0, 10)
-        const geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
-          .map(a => String(a.externalId).trim())
-        const startBtn = document.getElementById('tpOrderStart')
-        if(startBtn) startBtn.disabled = true
-        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} (bei Bedarf Dropdown oder Tradovate-Login${tvUser ? ` ${tvUser}` : ''}) → Asset ${symbol} über die Watchlist → Order-Panel ausfüllen → ${_tpOrderDir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
-        try{
-          const r = await window.mtcApi('tv-konto', { method:'POST',
-            headers:{'Content-Type':'application/json'},
-            // symbol (22.09.2026, Schritt 3): das im Popup gewählte Master-Symbol (NQZ6 / MNQZ6) —
-            // Puls klickt damit die passende Watchlist-Zeile und beweist den Chart am Tab-Titel.
-            // BRÜCKE (22.09.2026): dieselben Felder ZUSÄTZLICH als „@feld=wert" in der
-            // geschwister-Liste. Die reicht jedes Panel seit .316 durch — ein am PC noch
-            // altes Panel (langsamster Teil der Auslieferung) schluckte sonst neue Felder
-            // wie symbol, und der Schritt lief still nicht. Der Bot packt sie wieder aus.
-            // scharf (22.09.2026, Schritt 4b, Finn: „dass nachdem alles eingegeben wurde, TP/SL etc.,
-            // am Ende Buy/Sell gedrückt wird"): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
-            // genau einmal, danach zählt nur der Positions-Reader.
-            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
-              // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
-              geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + _tpOrderDir, '@volumen=' + lots,
-                '@tp_usd=' + (autoSltp && tp ? tp : ''), '@sl_usd=' + (autoSltp && sl ? sl : ''), ...geschwister] }) })
-          if(r && r.ok && r.gesendet){
-            // Position vom Reader bestätigt → Plan auf „Läuft" (eigener Orbit-Handler, s. tvPlanAufOpen).
-            await tvPlanAufOpen(plan.id)
-            document.getElementById('tpOrderModal').classList.remove('open')
-            if(typeof atToast === 'function') atToast(`✓ Order platziert: ${_tpOrderDir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${autoSltp ? ` · TP $${tp} / SL $${sl}` : ' · ohne SL/TP'}`, 'start')
-          } else if(r && r.ok){
-            // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
-            if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Gesendet wurde NICHTS — der Puls am PC ist noch der alte Stand. Kurz warten, dann erneut „Starten".`; msg.className = 'modal-msg ok' }
-          } else if(r && r.retry_ok === false){
-            // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
-            // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
-            // Order zweimal im Markt.
-            err('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten. · ' + (r.msg || r.error || ''))
-          } else {
-            err('Order gespeichert, nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'))
-            // Diagnose kopieren (21.09.2026): der Bot schickt mit, was das
-            // Userscript im Broker-Panel sieht. Ein Klick legt es in die
-            // Zwischenablage — statt eine Datei vom PC holen zu müssen.
-            if(msg && r && r.diagnose){
-              const kb = document.createElement('button')
-              kb.type = 'button'; kb.className = 'btn btn-ghost'
-              kb.style.cssText = 'display:block;margin-top:8px;padding:4px 10px;font-size:12px'
-              kb.textContent = '📋 Diagnose kopieren'
-              kb.addEventListener('click', async () => {
-                const text = JSON.stringify({ build: (typeof OS_TAB_BUILD !== 'undefined' ? OS_TAB_BUILD : ''), ext_id: extId, geschwister,
-                  msg: r.msg, zustand: r.zustand, konto_aktiv: r.konto_aktiv, schritt: r.schritt,
-                  trail: r.trail, diagnose: r.diagnose }, null, 1)
-                try{ await navigator.clipboard.writeText(text); kb.textContent = '✓ kopiert — an Claude schicken' }
-                catch(_){ kb.textContent = 'Kopieren blockiert — Datei tv-konto-dump.json im mt5-copier-Ordner' }
-              })
-              msg.appendChild(kb)
-            }
-          }
-        }catch(e){
-          err('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
-        }finally{
-          if(startBtn) startBtn.disabled = false
-        }
+        // ORBIT (22.09.2026, Finns Ablauf): Popup 2 SPEICHERT nur noch — wie bei Echo.
+        // Danach derselbe Check wie beim Duplikum-Trade (Duplikum kopiert, kein TV-Reader);
+        // ist er grün, steht die Karte auf „✓ Ready to start". Die Puls-Kette (TradingView →
+        // Konto → Asset → Order → Buy/Sell) fährt erst „Starten" auf der Karte: tpOrbitStarten.
+        document.getElementById('tpOrderModal').classList.remove('open')
+        tpPreflightAndStart(plan.id, { nurDup: true })
         return
       }
       document.getElementById('tpOrderModal').classList.remove('open')
@@ -24658,7 +24566,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.341'
+  const OS_TAB_BUILD = '2026-09-22.342'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24797,6 +24705,140 @@
     if(fehlt.length) return { order: null, fehlt }
     return { order: { planId: plan.id, symbol, richtung: dir, volumen: lots,
                       sl_usd: sltpAn ? sl : null, tp_usd: sltpAn ? tp : null }, fehlt: [] }
+  }
+
+  /* ORBIT „Starten" auf der Karte (22.09.2026, Finns Ablauf: „wenn ich dann wie bei Echo
+   * auf Starten drücke, wird die Reihenfolge gemacht"). Bis .341 fuhr der Knopf in Popup 2
+   * die Kette; jetzt speichert Popup 2 nur noch (+ Duplikum-Check), und DIESER Knopf fährt
+   * sie: TradingView → Konto (External ID, nötigenfalls Tradovate-Login) → Asset über die
+   * Watchlist → Order-Panel → Buy/Sell (scharf, genau EIN Klick). Eigene Funktion statt
+   * tpJetztStarten mitzubenutzen (Doktrin „keine generischen Handler"): dort hängen der
+   * MT5-Preflight und die Echo-Warteschlange dran. Eine Orbit-Warteschlange gibt es
+   * bewusst noch nicht (Finn: „lassen wir mal offen").
+   * Werte kommen vom PLAN (Popup 2 hat sie gespeichert). SL ohne Rückfall auf master_risk:
+   * Finns Regel „kein SL → SL-Schalter AUS" — das Plan-Risiko ist kein Order-Stop. */
+  let _tpOrbitLaeuft = false
+  async function tpOrbitStarten(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft) return
+    const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
+    let extId = '', geschwister = []
+    // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
+    // und dort sitzt auch „Diagnose kopieren".
+    const fehler = async (text, r) => {
+      await openTpOrderModal(planId)
+      const msg = document.getElementById('tpOrderMsg')
+      if(!msg) return toast(text, 'end')
+      msg.textContent = text; msg.className = 'modal-msg err'
+      if(r && r.diagnose){
+        const kb = document.createElement('button')
+        kb.type = 'button'; kb.className = 'btn btn-ghost'
+        kb.style.cssText = 'display:block;margin-top:8px;padding:4px 10px;font-size:12px'
+        kb.textContent = '📋 Diagnose kopieren'
+        kb.addEventListener('click', async () => {
+          const text2 = JSON.stringify({ build: (typeof OS_TAB_BUILD !== 'undefined' ? OS_TAB_BUILD : ''), ext_id: extId, geschwister,
+            msg: r.msg, zustand: r.zustand, konto_aktiv: r.konto_aktiv, schritt: r.schritt,
+            trail: r.trail, diagnose: r.diagnose }, null, 1)
+          try{ await navigator.clipboard.writeText(text2); kb.textContent = '✓ kopiert — an Claude schicken' }
+          catch(_){ kb.textContent = 'Kopieren blockiert — Datei tv-konto-dump.json im mt5-copier-Ordner' }
+        })
+        msg.appendChild(kb)
+      }
+    }
+    const dir = (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : null
+    const lots = Number(plan.masterContracts)
+    const tp = Number(plan.masterTp), sl = Number(plan.masterSl)
+    // Symbol wie _tpOrderAusPlan: Override am Plan zuerst; NULL heißt „gleich dem
+    // Settings-Standard der Firma" (so speichert es Popup 2), also von dort.
+    const symbol = String(plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function')
+      ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')).trim()
+    const fehlt = []
+    if(!dir) fehlt.push('Richtung (Buy/Sell)')
+    if(!(lots > 0)) fehlt.push('Lots')
+    if(!symbol) fehlt.push('Symbol')
+    if(fehlt.length){
+      toast('Für „Starten" fehlt: ' + fehlt.join(', ') + ' — im Order-Popup speichern.', 'end')
+      openTpOrderModal(planId)
+      return
+    }
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function')
+      return toast('Der Puls läuft nur am PC-Tab (localhost) — dort „Starten" klicken.', 'end')
+    const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    extId = (masterAcc && masterAcc.externalId) ? String(masterAcc.externalId).trim() : ''
+    if(!extId)
+      return fehler(`„${plan.masterName}" hat keine External ID. Puls wüsste nicht, welches Tradovate-Unterkonto er wählen soll: unter Accounts nachtragen.`)
+    // FUTURES-PULS NEUAUFBAU (21.09.2026, Finn: der tv-order-Bau vom 30.08.
+    // „hat echt gebuggt — lass mich den neuen Bot step nach step aufbauen").
+    // Dieser Knopf fährt deshalb NICHT mehr die alte Kette, sondern die neue,
+    // so weit sie steht: Schritt 1 TradingView öffnen/nach vorn, Schritt 2a
+    // prüfen, ob das richtige Tradovate-Konto aktiv ist, 3 Asset, 4a Order-
+    // Panel ausfüllen + beweisen. Seit 4b (22.09.2026) klickt Puls am Ende
+    // den Kauf-Knopf; „Läuft" wird der Plan erst, wenn die Position
+    // bewiesen ist (Reader, sonst Positions-Tabelle in TradingView).
+    // Welcher Tradovate-Login zur Firma gehört, steht in den Firmen-
+    // Einstellungen (firm_specs.tv_username); mitgeschickt wird nur der
+    // Name, das Passwort bleibt in Chromes Passwort-Manager.
+    const firmName = String((masterAcc && masterAcc.firm) || plan.masterFirm || '').trim()
+    const firmSpec = (getCustomFirms() || []).find(f => String(f.name||'').trim().toLowerCase() === firmName.toLowerCase())
+    const tvUser = firmSpec && firmSpec.tvUsername ? String(firmSpec.tvUsername).trim() : ''
+    // Geschwister (21.09.2026 abends, Finns Korrektur: im TradingView-
+    // Dropdown steht nie der Tradovate-Username, nur der Kontoname): ob der
+    // richtige LOGIN aktiv ist, beweist die Datenbank. Steht im Panel ein
+    // anderes Konto, das hier bei DERSELBEN Firma geführt wird, ist es
+    // derselbe Login — Puls wechselt dann nur im Dropdown. Accounts liegen
+    // pro Prophos-Login, „dieselbe Firma im selben Profil" ist also genau
+    // die Gruppe eines Tradovate-Logins.
+    // Der Username ist damit hier KEINE Pflicht mehr — gebraucht wird er
+    // erst fürs Ab-/Anmelden bei einem fremden Login (nächster Teilschritt).
+    // Nachtrag gleicher Abend (Finn: „nicht nur die aktiven, sondern auch die
+    // letzten 10 inaktiven — manchmal sind Accounts, die schon geblowed
+    // sind, trotzdem noch im Dropdown auswählbar"): steht so ein Konto im
+    // Panel, ist es trotzdem derselbe Login. Ohne sie würde Puls dann
+    // „fremder Login" melden. Genommen werden ALLE aktiven plus die 10
+    // zuletzt archivierten derselben Firma (nach Archiv-Zeitpunkt `at`) —
+    // gedeckelt, weil alte External IDs sonst unbegrenzt mitwandern.
+    const _arch = (typeof getArchive === 'function') ? getArchive() : {}
+    const _gleicheFirma = (accounts || []).filter(a => String(a.id) !== String(plan.masterAccountId)
+      && String(a.firm||'').trim().toLowerCase() === firmName.toLowerCase() && a.externalId)
+    const _istArch = a => !!(_arch[a.id] && _arch[a.id].archived)
+    const _inaktiv = _gleicheFirma.filter(_istArch)
+      .sort((a, b) => String(_arch[b.id].at || '').localeCompare(String(_arch[a.id].at || '')))
+      .slice(0, 10)
+    geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
+      .map(a => String(a.externalId).trim())
+    _tpOrbitLaeuft = true
+    toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
+    try{
+      const r = await window.mtcApi('tv-konto', { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        // scharf (22.09.2026, Schritt 4b): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
+        // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
+        // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
+        // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
+        body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
+          // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
+          geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] }) })
+      if(r && r.ok && r.gesendet){
+        // Position bewiesen → Plan auf „Läuft" (eigener Orbit-Handler, s. tvPlanAufOpen).
+        await tvPlanAufOpen(plan.id)
+        toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
+      } else if(r && r.ok){
+        // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
+        await fehler(`${r.msg || ''} Gesendet wurde NICHTS — der Puls am PC ist noch der alte Stand. Kurz warten, dann erneut „Starten".`, r)
+      } else if(r && r.retry_ok === false){
+        // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
+        // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
+        // Order zweimal im Markt. Liegt sie: „Läuft" auf der Karte.
+        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie: „Läuft" auf der Karte). · ' + (r.msg || r.error || ''), r)
+      } else {
+        await fehler('Nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'), r)
+      }
+    }catch(e){
+      await fehler('⚠ Ergebnis UNKLAR — Verbindung zum Puls abgerissen: ' + (e && e.message || e) + ' · Erst in TradingView nachsehen, ob die Order liegt.')
+    }finally{
+      _tpOrbitLaeuft = false
+    }
   }
 
   async function tpJetztStarten(planId){
