@@ -3108,6 +3108,14 @@ def modus_tvkonto(cmd):
             # Feld geklickt — dann gibt es auch nichts, was ein Neuaufbau der
             # Seite verschlucken koennte: sofort weiter zu 'Anmelden' (22.09.2026,
             # Finn: '5 sec nix', obwohl TDFYU… schon vorbelegt war).
+            # LEER-REGEL 6 s -> 2 s (22.09.2026 01:39, Finns Remote-Lauf, Trail:
+            # 'Tradovate-Fenster da' 25,3 s -> 'Anmeldeseite ruhig' 33,0 s; Finn: 'das
+            # ist meistens schon geladen, dann dauert es 5-10 s, wo nichts passiert').
+            # Chrome zeigt den vorbelegten Login nur als VORSCHAU — der Feldwert bleibt
+            # fuer UIA leer, bis jemand ins Feld klickt. Die Felder waren also 'leer und
+            # unveraendert' und liefen in die volle 6-s-Wartezeit, obwohl die Seite
+            # laengst stand. Der Klick danach ist ohnehin abgesichert (Fokus-Beweis,
+            # drei Versuche, Liste per Pfeil-runter, Tipp-Rueckfall).
             schon_richtig = bewiesen()
             letzter, seit, t_r = None, time.time(), time.time()
             while not schon_richtig and time.time() - t_r < 9.0:
@@ -3115,7 +3123,7 @@ def modus_tvkonto(cmd):
                 jetzt = (_tv_edit_wert(u2) if u2 else None, len(_tv_edit_wert(p2)) if p2 else None)
                 if jetzt != letzter:
                     letzter, seit = jetzt, time.time()
-                elif time.time() - seit >= 0.8 and (jetzt[0] or time.time() - t_r >= 6.0):
+                elif time.time() - seit >= 0.8 and (jetzt[0] or time.time() - t_r >= 2.0):
                     break
                 _warte(0.3, 0.2)
             trail.append("Anmeldeseite ruhig")
@@ -3663,51 +3671,83 @@ TV_RX_POS_MENGE = re.compile(r"^(qty|quantity|menge|anzahl)\b", re.I)
 TV_RX_POS_LONGSHORT = {"buy": re.compile(r"^(long|buy|kauf)", re.I), "sell": re.compile(r"^(short|sell|verkauf)", re.I)}
 
 
+TV_RX_POS_TAB = re.compile(r"^positions?$", re.I)
+
+
 def tv_positions_tabelle(roh, symbol, richtung):
     """Positions-Tabelle unten im TradingView-Konto-Bereich lesen (4b, 22.09.2026,
     Finns erster scharfer Lauf: "es drueckt nicht drauf" — der Klick hing am
     Positions-Reader, und der ist bei ihm PAUSIERT, weil Duplikium kopiert. Der
     Beweis darf deshalb nicht am Reader haengen).
-    Anker wie beim Order-Panel: die Kopfzeile 'Symbol … Side … Qty' auf EINER
-    Zeile (die Watchlist rechts hat auch 'Symbol', aber kein 'Side' daneben).
-    Zeile = Text mit der Symbol-Wurzel in der Symbol-Spalte unter dem Kopf, auf
-    derselben Hoehe Long/Short passend zur Richtung.
-    -> {'menge': Summe, 'zeilen': n} oder None, wenn die Kopfzeile nicht zu sehen ist."""
+    ANKER (seit dem Remote-Lauf 22.09.2026 01:39: Chrome meldete den Kopf
+    'Symbol' als DataItem, 'Side'/'Qty' aber unter KEINEM Namen — der Klick war
+    raus, die Order lag, der Beweis sagte 'nicht lesbar'): die Zelle 'Symbol' in
+    der UNTEREN Fensterhaelfte, ueber der ein Reiter 'Positions' steht. Die
+    Watchlist rechts hat auch 'Symbol', aber keinen Positions-Reiter darueber.
+    'Side' und 'Qty' auf derselben Zeile sind OPTIONAL: mit ihnen wird Richtung
+    und Menge gelesen, ohne sie zaehlt jede Zeile mit der Symbol-Wurzel in der
+    Symbol-Spalte (Tradovate nettet pro Symbol — eine NEUE Zeile ist eine neue
+    Position; die Gegenrichtung auf einer bestehenden gibt keine neue Zeile und
+    damit ehrlich UNKLAR).
+    -> {'menge': Summe, 'zeilen': n, 'spalten': bool} oder None ohne Anker."""
     els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
     mitte_y = lambda r: (r[1] + r[3]) // 2
+    tabs = [r for n, r in els if TV_RX_POS_TAB.search(n)]
     kopf = None
     for ns, rs in els:
         if not TV_RX_POS_SYMBOL.search(ns):
             continue
+        # ein Positions-Reiter DARUEBER (hoechstens 120 px), grob gleiche linke Kante
+        if not any(0 < mitte_y(rs) - mitte_y(t) <= 120 and abs(t[0] - rs[0]) <= 120 for t in tabs):
+            continue
         seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
         mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
-        if seiten and mengen:
-            rd = min(seiten, key=lambda r: r[0])
-            rq = min((r for r in mengen if r[0] > rd[0]), key=lambda r: r[0], default=None)
-            if rq:
-                kopf = (rs, rd, rq)
-                break
+        rd = min(seiten, key=lambda r: r[0]) if seiten else None
+        rq = min((r for r in mengen if not rd or r[0] > rd[0]), key=lambda r: r[0], default=None)
+        kopf = (rs, rd, rq)
+        break
     if not kopf:
         return None
     rs, rd, rq = kopf
+    spalten = bool(rd and rq)
     root = tv_symbol_root(symbol)
     summe, zeilen, gesehen = 0.0, 0, []
+    x_bis = (rd[0] - 10) if rd else (rs[0] + 160)
     for n, r in els:
         y = mitte_y(r)
-        if y <= mitte_y(rs) + 8 or not (rs[0] - 30 <= r[0] < rd[0] - 10):
+        if y <= mitte_y(rs) + 8 or not (rs[0] - 30 <= r[0] < x_bis):
             continue
         if " " in n or tv_symbol_root(n) != root or any(abs(y - g) <= 10 for g in gesehen):
             continue
-        if not any(TV_RX_POS_LONGSHORT[richtung].search(n2) and abs(mitte_y(r2) - y) <= 12 and rd[0] - 30 <= r2[0] < rq[0] - 10
-                   for n2, r2 in els):
+        if spalten and not any(TV_RX_POS_LONGSHORT[richtung].search(n2) and abs(mitte_y(r2) - y) <= 12
+                               and rd[0] - 30 <= r2[0] < rq[0] - 10 for n2, r2 in els):
             continue
         gesehen.append(y)
         zeilen += 1
-        # Menge: der Text auf derselben Zeile, der der Qty-Spalte am naechsten steht
-        kand = [(abs(r2[0] - rq[0]), tv_zahl_lesen(n2)) for n2, r2 in els
-                if abs(mitte_y(r2) - y) <= 12 and abs(r2[0] - rq[0]) <= 90 and tv_zahl_lesen(n2) is not None]
-        summe += abs(min(kand)[1]) if kand else 0.0
-    return {"menge": summe, "zeilen": zeilen}
+        if spalten:
+            # Menge: der Text auf derselben Zeile, der der Qty-Spalte am naechsten steht
+            kand = [(abs(r2[0] - rq[0]), tv_zahl_lesen(n2)) for n2, r2 in els
+                    if abs(mitte_y(r2) - y) <= 12 and abs(r2[0] - rq[0]) <= 90 and tv_zahl_lesen(n2) is not None]
+            summe += abs(min(kand)[1]) if kand else 0.0
+    return {"menge": summe, "zeilen": zeilen, "spalten": spalten}
+
+
+def tv_positions_zone(roh, max_n=24):
+    """Fuer die Meldung: ALLE Namen im Band der Positions-Tabelle (ab dem Reiter
+    'Positions' abwaerts, linke Fensterhaelfte) — damit der naechste Anker aus
+    Finns Meldungstext nachgezogen werden kann, statt zu raten."""
+    els = [(str(e[0]).strip(), e[1], e[2] if len(e) > 2 else "") for e in roh or () if e[1]]
+    tabs = [r for n, r, _t in els if TV_RX_POS_TAB.search(n)]
+    if not tabs:
+        return "kein Reiter 'Positions' zu sehen"
+    t = min(tabs, key=lambda r: r[1])
+    out = []
+    for n, r, typ in sorted(els, key=lambda e: (e[1][1], e[1][0])):
+        if r[1] >= t[1] - 4 and r[0] < t[0] + 900 and len(n) <= 30:
+            out.append(f"{typ}:{n}@{r[0]},{r[1]}")
+        if len(out) >= max_n:
+            break
+    return " | ".join(out) or "nichts unter dem Reiter"
 
 
 def tv_ist_scharf(cmd):
@@ -3984,14 +4024,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     roh = _tv_uia_roh(w, typen_pos)
     if not quelle:
         return False, ("Kauf-Klick ist RAUS, aber nicht beweisbar: der Reader ist aus/pausiert und die "
-                       "Positions-Tabelle unten in TradingView (Reiter 'Positions', Kopf 'Symbol · Side · Qty') "
-                       "war nicht zu lesen. In TradingView nachsehen — NICHT blind erneut starten. Gesehen: "
-                       + (" | ".join(tv_uia_inventar([x for x in roh if x[1] and (
-                           TV_RX_POS_SYMBOL.search(x[0]) or TV_RX_POS_SEITE.search(x[0]) or TV_RX_POS_MENGE.search(x[0])
-                           or re.search(r"^(positions?|orders?)\b", x[0], re.I))], 10)) or "nichts Einschlaegiges"))
+                       "Positions-Tabelle unten in TradingView (Reiter 'Positions', Kopf 'Symbol') "
+                       "war nicht zu lesen. In TradingView nachsehen — NICHT blind erneut starten. Tabellen-Zone: "
+                       + tv_positions_zone(roh))
     return False, (f"Ergebnis UNKLAR: 25 s nach dem Kauf-Klick zeigt die Quelle '{quelle}' keine neue Position. "
-                   "Erst in TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Gesehen: "
-                   + tv_uia_spur(roh))
+                   "Erst in TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Tabellen-Zone: "
+                   + tv_positions_zone(roh))
 
 
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf")

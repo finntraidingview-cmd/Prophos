@@ -877,20 +877,29 @@ def main():
         and order_bot.tv_bruecke_auspacken({"geschwister": ["@scharf=1", "APEX1"]})["geschwister"] == ["APEX1"]
         and not order_bot.tv_ist_scharf(order_bot.tv_bruecke_auspacken({"geschwister": ["APEX1"]})))
     # 4b-Beweis ohne Reader (22.09.2026, Finns Lauf: Reader pausiert, Duplikium kopiert):
-    # die Positions-Tabelle unten in TradingView, verankert an 'Symbol · Side · Qty'.
+    # die Positions-Tabelle unten in TradingView. Anker = Kopf 'Symbol' unter dem Reiter
+    # 'Positions'; Side/Qty optional (Finns Remote-Lauf 01:39: Chrome nannte nur 'Symbol').
     _PT = [("Symbol", (1656, 297, 1700, 315), "Text"),                      # Watchlist-Kopf: nie der Anker
-           ("Symbol", (75, 1137, 120, 1155), "Text"), ("Side", (213, 1137, 240, 1155), "Text"), ("Qty", (433, 1137, 456, 1155), "Text"),
-           ("MNQZ6", (75, 1175, 125, 1193), "Text"), ("Short", (213, 1175, 250, 1193), "Text"), ("-3", (433, 1175, 445, 1193), "Text"),
-           ("NQZ6", (75, 1209, 125, 1227), "Text"), ("Long", (213, 1209, 250, 1227), "Text"), ("2", (433, 1209, 445, 1227), "Text"),
+           ("Positions", (72, 932, 130, 950), "TabItem"), ("Orders", (154, 932, 200, 950), "TabItem"),
+           ("Symbol", (56, 979, 120, 997), "DataItem"), ("Side", (213, 979, 240, 997), "Text"), ("Qty", (433, 979, 456, 997), "Text"),
+           ("MNQZ6", (75, 1020, 125, 1038), "Text"), ("Short", (213, 1020, 250, 1038), "Text"), ("-3", (433, 1020, 445, 1038), "Text"),
+           ("NQZ6", (75, 1054, 125, 1072), "Text"), ("Long", (213, 1054, 250, 1072), "Text"), ("2", (433, 1054, 445, 1072), "Text"),
            ("MNQZ2026", (1680, 365, 1748, 385), "Text")]
     chk("TV-ORDER 4b: Positions-Tabelle — Zeile nur bei passender Wurzel UND Seite, MNQ nie NQ, Watchlist zaehlt nie",
-        order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell") == {"menge": 3.0, "zeilen": 1}
-        and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy") == {"menge": 0.0, "zeilen": 0}
-        and order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy") == {"menge": 2.0, "zeilen": 1}
-        and order_bot.tv_positions_tabelle(_PT[:4], "MNQZ6", "sell") == {"menge": 0.0, "zeilen": 0})
-    chk("TV-ORDER 4b: ohne Kopfzeile 'Symbol · Side · Qty' gibt es KEINEN Tabellen-Beweis (None, nicht 'flach')",
-        order_bot.tv_positions_tabelle(_PT[:1] + _PT[4:], "MNQZ6", "sell") is None
-        and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None)
+        order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell") == {"menge": 3.0, "zeilen": 1, "spalten": True}
+        and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy") == {"menge": 0.0, "zeilen": 0, "spalten": True}
+        and order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy") == {"menge": 2.0, "zeilen": 1, "spalten": True}
+        and order_bot.tv_positions_tabelle(_PT[:6], "MNQZ6", "sell") == {"menge": 0.0, "zeilen": 0, "spalten": True})
+    _PT2 = [x for x in _PT if x[0] not in ("Side", "Qty")]              # Finns Lauf: nur 'Symbol' benannt
+    chk("TV-ORDER 4b: ohne Side/Qty zaehlen Zeilen mit der Symbol-Wurzel in der Symbol-Spalte (Menge unbekannt)",
+        order_bot.tv_positions_tabelle(_PT2, "MNQZ6", "sell") == {"menge": 0.0, "zeilen": 1, "spalten": False}
+        and order_bot.tv_positions_tabelle(_PT2, "NQZ6", "sell") == {"menge": 0.0, "zeilen": 1, "spalten": False}
+        and order_bot.tv_positions_tabelle(_PT2, "ESZ6", "sell") == {"menge": 0.0, "zeilen": 0, "spalten": False})
+    chk("TV-ORDER 4b: ohne Reiter 'Positions' ueber dem Kopf gibt es KEINEN Tabellen-Beweis (None, nicht 'flach')",
+        order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
+        and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
+        and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
+        and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
