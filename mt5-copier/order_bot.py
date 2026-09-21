@@ -3446,11 +3446,39 @@ def tv_asset_schritt(w, symbol, trail):
                    f"'{(w.window_text() or '')[:40]}' statt {ziel}.")
 
 
+TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe")
+
+
+def tv_bruecke_auspacken(cmd):
+    """BRUECKE AM PANEL VORBEI (22.09.2026, Finns Lauf: Schritt 3 'ist glaube
+    noch gar nicht live' — stimmte: Bot und Frontend waren neu, das PANEL am PC
+    noch alt und reichte 'symbol' nicht durch. Das Panel ist der langsame Teil
+    der Auslieferung, bis ~5 min, und kann sich sogar eine veraltete Datei
+    holen). Das Frontend legt neue Felder deshalb ZUSAETZLICH als markierte
+    Eintraege '@feld=wert' in die 'geschwister'-Liste — die reicht JEDES Panel
+    seit .316 durch. Hier werden sie wieder herausgenommen: sie duerfen nie als
+    Kontonummer gelten, und ein echtes Feld im Befehl gewinnt immer."""
+    if not isinstance(cmd, dict):
+        return cmd
+    rest = []
+    for x in (cmd.get("geschwister") or []):
+        t = str(x)
+        if t.startswith("@") and "=" in t:
+            feld, wert = t[1:].split("=", 1)
+            if feld in TV_BRUECKE_FELDER and cmd.get(feld) in (None, "", False):
+                cmd[feld] = wert.strip()
+            continue
+        rest.append(x)
+    cmd["geschwister"] = rest
+    return cmd
+
+
 def modus_tvkette(cmd):
     """Die neue Kette, so weit sie steht: Schritt 1+2 (modus_tvkonto, live
     bewiesen) und bei Erfolg Schritt 3. modus_tvkonto bleibt dafuer
     UNANGETASTET — seine Ausgabe wird abgefangen statt umgebaut."""
     import io
+    cmd = tv_bruecke_auspacken(cmd)
     puffer, echt = io.StringIO(), sys.stdout
     sys.stdout = puffer
     try:

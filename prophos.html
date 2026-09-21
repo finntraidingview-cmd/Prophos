@@ -24574,7 +24574,14 @@
             headers:{'Content-Type':'application/json'},
             // symbol (22.09.2026, Schritt 3): das im Popup gewählte Master-Symbol (NQZ6 / MNQZ6) —
             // Puls klickt damit die passende Watchlist-Zeile und beweist den Chart am Tab-Titel.
-            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, geschwister, symbol }) })
+            // BRÜCKE (22.09.2026): dieselben Felder ZUSÄTZLICH als „@feld=wert" in der
+            // geschwister-Liste. Die reicht jedes Panel seit .316 durch — ein am PC noch
+            // altes Panel (langsamster Teil der Auslieferung) schluckte sonst neue Felder
+            // wie symbol, und der Schritt lief still nicht. Der Bot packt sie wieder aus.
+            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol,
+              // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
+              geschwister: ['@symbol=' + symbol, '@richtung=' + _tpOrderDir, '@volumen=' + lots,
+                '@tp_usd=' + (autoSltp && tp ? tp : ''), '@sl_usd=' + (autoSltp && sl ? sl : ''), ...geschwister] }) })
           if(r && r.ok){
             if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Die Order ist der nächste Bau-Schritt — hier wurde noch nichts platziert.`; msg.className = 'modal-msg ok' }
           } else {
@@ -24635,7 +24642,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.335'
+  const OS_TAB_BUILD = '2026-09-22.336'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

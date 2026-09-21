@@ -2250,6 +2250,12 @@ class Handler(BaseHTTPRequestHandler):
             if sym and not SYMBOL_RE.fullmatch(sym):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
             cmd["symbol"] = sym
+            # Felder fuer Schritt 4 (Order) schon JETZT durchreichen, damit der naechste
+            # Bau-Schritt keinen Panel-Neustart mehr braucht (der ist der langsame Teil).
+            cmd["richtung"] = str(body.get("richtung") or "").strip().lower()[:8]
+            for _f in ("volumen", "tp_usd", "sl_usd"):
+                cmd[_f] = body.get(_f) if isinstance(body.get(_f), (int, float, str)) else None
+            cmd["probe"] = bool(body.get("probe"))
             # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
             # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
             # Tradovate-Login und der Bot wechselt nur im Dropdown.
@@ -2898,7 +2904,49 @@ def _version_watcher(my_version):
             os._exit(0)
 
 
+def _selbst_auffrischen():
+    """VERALTETES PANEL ERKENNEN UND BEHEBEN (22.09.2026). Die start-panel.bat
+    laedt panel.py von '…/main/…' — GitHub haelt dort JEDE Datei bis zu fuenf
+    Minuten im Zwischenspeicher, jede mit eigener Uhr. Ist VERSION schon frisch,
+    panel.py aber noch alt, startet das ALTE Panel unter der NEUEN Versionsnummer
+    — und weil die Nummern dann uebereinstimmen, aktualisiert es sich nie mehr
+    (Finns Lauf: Schritt 3 lief still nicht, das Panel reichte 'symbol' nicht
+    durch). Gegenmittel: beim Start den Quelltext aus dem NEUESTEN STAND holen
+    (Adresse mit Commit-Kennung — kann nie alt sein). Weicht er ab, laeuft der
+    frische Code in DIESEM Prozess weiter (runpy). Bewusst kein Neustart: die
+    .bat wuerde die frische Datei sofort wieder mit der alten ueberschreiben.
+    Jede Stoerung fuehrt einfach zum normalen Start."""
+    if os.environ.get("PROPHOS_PANEL_FRISCH") == "1":
+        return
+    try:
+        sha = repo_sha()
+        if not sha:
+            return
+        neu = repo_datei("mt5-copier/panel.py", sha)
+        with open(os.path.abspath(__file__), "rb") as f:
+            alt = f.read()
+        glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+        if glatt(neu) == glatt(alt) or len(neu) < 10000 or b"def main():" not in neu:
+            return
+        compile(neu, "panel.py", "exec")
+        ziel = os.path.join(HERE, "panel_frisch.py")
+        with open(ziel + ".tmp", "wb") as f:
+            f.write(neu)
+        os.replace(ziel + ".tmp", ziel)
+        os.environ["PROPHOS_PANEL_FRISCH"] = "1"
+        print(f"[panel] panel.py auf der Platte ist VERALTET (Zwischenspeicher) — fahre den "
+              f"frischen Stand {sha[:7]} in diesem Prozess.", flush=True)
+        import runpy
+        runpy.run_path(ziel, run_name="__main__")
+        os._exit(0)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[panel] Selbst-Auffrischen uebersprungen ({type(e).__name__}) — normaler Start.", flush=True)
+
+
 def main():
+    _selbst_auffrischen()
     print("=" * 66)
     print(" Echo-Panel (Prophos)")
     print(f" Ordner: {HERE}")

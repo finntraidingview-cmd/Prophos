@@ -805,6 +805,19 @@ def main():
         and order_bot.tv_titel_wurzel("BTC1! 86,680 ▲ +0.1% Unnamed - Google Chrome") == "BTC"
         and order_bot.tv_titel_wurzel("(1) NQZ2026 30,787.00 ▼ −0.2% Unnamed") == "NQ")
 
+    # Bruecke am Panel vorbei (22.09.2026): neue Felder reisen als '@feld=wert'
+    # in der geschwister-Liste. Sie duerfen NIE als Kontonummer gelten.
+    _br = order_bot.tv_bruecke_auspacken({"ext_id": "APEX1", "geschwister":
+          ["@symbol=MNQZ6", "@richtung=sell", "@volumen=1", "@tp_usd=", "@boese=1", "APEX6416990000031", "@kaputt"]})
+    chk("TV-BRUECKE: Marken werden Felder, verschwinden aus der Liste, Unbekanntes wird verworfen",
+        _br["symbol"] == "MNQZ6" and _br["richtung"] == "sell" and _br["volumen"] == "1"
+        and _br.get("tp_usd") in (None, "") and "boese" not in _br
+        and _br["geschwister"] == ["APEX6416990000031", "@kaputt"]
+        and order_bot.tv_konto_zustand(_bf("MNQZ6"), "APEX1XX", _br["geschwister"])[0] == "falsch")
+    chk("TV-BRUECKE: ein echtes Feld im Befehl gewinnt gegen die Marke",
+        order_bot.tv_bruecke_auspacken({"symbol": "NQZ6", "geschwister": ["@symbol=MNQZ6"]})["symbol"] == "NQZ6"
+        and order_bot.tv_bruecke_auspacken({"geschwister": None})["geschwister"] == [])
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
