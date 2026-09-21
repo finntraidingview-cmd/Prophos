@@ -2290,7 +2290,27 @@ def _tv_ist_passwortfeld(e):
         return False
 
 
-def _tv_autofill_vorschlag(username, ausser=()):
+def tv_feld_darueber(felder, anker, anker_r, toleranz=40, max_abstand=260):
+    """Aus Eingabefeldern das waehlen, das DIREKT UEBER dem Anker liegt: linke
+    Kante gleich (± toleranz), Oberkante darueber, naechstes zuerst; weiter als
+    max_abstand entfernt zaehlt nicht (Adressleiste, Suchfelder). -> Feld|None"""
+    bestes, bester_abstand = None, None
+    for e in felder or ():
+        if e is anker:
+            continue
+        try:
+            r = e.rectangle()
+        except Exception:
+            continue
+        abstand = anker_r[1] - r.top
+        if abs(r.left - anker_r[0]) > toleranz or abstand <= 0 or abstand > max_abstand:
+            continue
+        if bester_abstand is None or abstand < bester_abstand:
+            bestes, bester_abstand = e, abstand
+    return bestes
+
+
+def _tv_autofill_vorschlag(username, ohne=None):
     """Chromes Autofill-Liste haengt als eigenes Popup-Fenster am Browser. Gesucht
     wird in allen Chrome-Fenstern AUSSER dem TradingView-Fenster ('ausser' =
     Handles) nach einem Nicht-Eingabe-Element, das den Username als GANZES WORT
@@ -2308,13 +2328,20 @@ def _tv_autofill_vorschlag(username, ausser=()):
         @staticmethod
         def search(name):
             return tv_konto_wort_passt(name, username)
+    # Die Anmeldung kann ein Tab im TradingView-FENSTER sein (Finns PC) — kein
+    # Fenster wird deshalb ausgenommen; vor der Kontonummer schuetzt der
+    # Ganzwort-Vergleich. Ausgenommen ist nur das Username-Feld selbst ('ohne'):
+    # steht der Name schon drin, truege dessen Text denselben Namen.
+    fenster = _tv_browser_fenster()
     roh = []
-    for h, _t, w in _tv_browser_fenster():
-        if h in ausser:
-            continue
-        roh += [x for x in _tv_uia_roh(w, ("ListItem", "MenuItem", "Button", "DataItem", "Text"),
-                                        600, muster=(_Nadel,)) if x[1]]
-    return tv_uia_namen_filtern(roh, _Nadel, typ_vorrang=None)
+    for _h, _t, w in fenster:                       # 1) gezielt: Name == Username
+        roh += _tv_uia_nativ(w, (str(username).strip(),)) or []
+    roh = [x for x in roh if x[2] != "Edit"]
+    if not roh:                                     # 2) Scan: Username als ganzes Wort im Namen
+        for _h, _t, w in fenster:
+            roh += [x for x in _tv_uia_roh(w, ("ListItem", "MenuItem", "Button", "DataItem", "Text"),
+                                            600, muster=(_Nadel,)) if x[1]]
+    return tv_uia_namen_filtern(roh, _Nadel, typ_vorrang=None, ohne=ohne)
 
 
 def modus_tvkonto(cmd):
@@ -2550,17 +2577,24 @@ def modus_tvkonto(cmd):
                 return ab(f, "login")
             _warte(0.6, 0.4)
             el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
+            abgemeldet = False
             if not el:
+                # KEIN Abbruch (22.09.2026, Finns Ablauf: "jedes Mal direkt der
+                # Link, dann Connect"): die Direkt-Adresse oeffnet den Dialog
+                # auch so. Das Abmelden davor ist der saubere Weg, aber nicht
+                # der einzige — an dieser Stelle ist der Bot schon zweimal
+                # haengengeblieben.
                 esc()
-                return ab(f"Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
-                          f"({n} Treffer)." + spur[0], "login")
-            ok, f = _tv_uia_klick(el, "Log out", trail)
-            if not ok:
-                return ab(f, "login")
+                trail.append(f"'Log out' nicht gefunden ({n}) -> weiter ueber die Direkt-Adresse")
+            else:
+                ok, f = _tv_uia_klick(el, "Log out", trail)
+                if not ok:
+                    return ab(f, "login")
+                abgemeldet = True
             # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
             # Knopf mit demselben Verb da — genau einmal nachklicken.
-            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, False
-            while time.time() < ende_l:
+            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, not abgemeldet
+            while abgemeldet and time.time() < ende_l:
                 _warte(0.8, 0.4)
                 if not broker_knopf():
                     getrennt = True
@@ -2572,9 +2606,9 @@ def modus_tvkonto(cmd):
                         nachgefragt = True
                         _tv_uia_klick(best[0], "Log out bestaetigen", trail)
             if not getrennt:
-                return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach "
-                          "noch im Panel.", "login")
-            trail.append("abgemeldet")
+                trail.append("Broker-Knopf nach 'Log out' noch da -> trotzdem weiter ueber die Direkt-Adresse")
+            elif abgemeldet:
+                trail.append("abgemeldet")
 
         # VERBINDEN ueber die Direkt-Adresse: kein Knopf "Trade", keine Kachel.
         _tv_fenster_holen([], "", "")            # TradingView-Tab sicher vorn (klickt ihn notfalls an)
@@ -2622,16 +2656,27 @@ def modus_tvkonto(cmd):
         trail.append("Tradovate-Fenster da")
 
         def felder():
+            """(username_feld, passwort_feld). Finns Screenshots 21.09.2026
+            22:04: die Tradovate-Anmeldung oeffnet als TAB im selben Fenster —
+            damit liegt auch Chromes ADRESSLEISTE als Eingabefeld im Baum, und
+            zwar VOR den Feldern der Seite. 'Das erste Feld, das kein Passwort
+            ist' waere die Adressleiste gewesen: der Bot haette dort
+            hineingeklickt und getippt. Deshalb ueber die Lage: Anker ist das
+            Passwortfeld (IsPassword), Username ist das Feld DIREKT DARUEBER —
+            gleiche linke Kante, kleinster Abstand nach oben."""
             try:
                 eds = [e for e in tw.descendants(control_type="Edit")
                        if not hasattr(e, "is_visible") or e.is_visible()]
             except Exception:
                 return None, None
             pw = next((e for e in eds if _tv_ist_passwortfeld(e)), None)
-            un = next((e for e in eds if e is not pw), None)
-            if pw is None and len(eds) >= 2:
-                un, pw = eds[0], eds[1]
-            return un, pw
+            if pw is None:
+                return None, None
+            try:
+                pr = pw.rectangle()
+            except Exception:
+                return None, None
+            return tv_feld_darueber(eds, pw, (pr.left, pr.top, pr.right, pr.bottom)), pw
 
         def bewiesen():
             un, pw = felder()
@@ -2653,6 +2698,7 @@ def modus_tvkonto(cmd):
         if not bewiesen():
             try:
                 r = un.rectangle()
+                un_r = (r.left, r.top, r.right, r.bottom)
                 punkt = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
             except Exception:
                 return ab("Username-Feld ohne Rechteck.", "login")
@@ -2660,13 +2706,13 @@ def modus_tvkonto(cmd):
             if not ok:
                 return ab(f, "login")
             _warte(0.9, 0.5)
-            vor = _tv_autofill_vorschlag(username, ausser=(getattr(w, 'handle', None),))
+            vor = _tv_autofill_vorschlag(username, ohne=un_r)
             if len(vor) != 1:
                 # Liste zeigt den Login nicht (oder mehrere): Username tippen —
                 # Chrome filtert die Vorschlaege dann auf genau diesen.
                 _tv_tippen(tv_tasten_escape(username), "Username", trail)
                 _warte(1.0, 0.5)
-                vor = _tv_autofill_vorschlag(username, ausser=(getattr(w, 'handle', None),))
+                vor = _tv_autofill_vorschlag(username, ohne=un_r)
             if len(vor) == 1:
                 ok, f = _tv_uia_klick(vor[0], "Autofill-Vorschlag", trail)
                 if not ok:

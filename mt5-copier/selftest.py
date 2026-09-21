@@ -747,6 +747,19 @@ def main():
         and all(order_bot.TV_RX_DEMO.search(n) for n in order_bot.TV_NAMEN_DEMO)
         and all(order_bot.TV_RX_BROKER.search(n) for n in order_bot.TV_NAMEN_BROKER))
 
+    # Finns Screenshots 21.09.2026 22:04: die Tradovate-Anmeldung ist ein TAB im
+    # selben Fenster — Chromes Adressleiste liegt als ERSTES Eingabefeld im Baum.
+    class _Fd:
+        def __init__(s, l, t, r, b): s._r = (l, t, r, b)
+        def rectangle(s):
+            return type("R", (), dict(left=s._r[0], top=s._r[1], right=s._r[2], bottom=s._r[3]))()
+    _adr, _usr, _pw, _such = _Fd(160, 160, 1400, 190), _Fd(1081, 467, 1518, 508), _Fd(1081, 554, 1518, 596), _Fd(1090, 300, 1400, 330)
+    chk("TV-LOGIN: Username-Feld = direkt UEBER dem Passwortfeld — nie die Adressleiste, nie ein entferntes Feld",
+        order_bot.tv_feld_darueber([_adr, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
+        and order_bot.tv_feld_darueber([_adr, _pw], _pw, (1081, 554, 1518, 596)) is None
+        and order_bot.tv_feld_darueber([_adr, _such, _usr, _pw], _pw, (1081, 554, 1518, 596)) is _usr
+        and order_bot.tv_feld_darueber([], _pw, (1081, 554, 1518, 596)) is None)
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
