@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.4.1
+// @version      0.4.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,7 +24,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.4.1';
+  const VERSION    = '0.4.2';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -343,6 +343,50 @@
 
   let dumpAn = false;   // vom Server gesetzt (Antwort auf /bedienfeld) -> VOLLER Dump
 
+  /* Text-Suche auf Anforderung (0.4.2, 21.09.2026 — Futures-Puls Schritt 2).
+   * Der Puls nennt ueber den Server Texte (die External IDs der Konten), hier
+   * werden sie im GANZEN DOM gesucht und mit Rechteck zurueckgemeldet.
+   * Warum: Finns erster Lauf am 21.09. — der Konto-Umschalter stand sichtbar
+   * im Panel, beide data-name-Signaturen hatten null Treffer (TradingView hat
+   * umbenannt), und die Aufklappliste haengt am ENDE des DOM, hinter der
+   * 130er-Kappung von dumpKompakt. Eine 17-stellige Kontonummer ist dagegen
+   * ein Anker, der UNS gehoert: TradingView kann ihn nicht umbenennen.
+   * Verglichen wird nur-alphanumerisch (wie _nur_alnum im Puls), gesucht ueber
+   * TEXTKNOTEN — das liefert von selbst das innerste Element statt aller
+   * Huellen. Nur solange der Server Texte mitschickt (90 s), nie im
+   * Dauerbetrieb. Geklickt wird auch hier NIE — das bleibt die echte Maus. */
+  let suchTexte = [];
+  const nurAlnum = (x) => String(x == null ? '' : x).replace(/[^a-z0-9]/gi, '').toUpperCase();
+
+  function sucheTexte() {
+    const nadeln = suchTexte.map(nurAlnum).filter((n) => n.length >= 3);
+    const out = [];
+    if (!nadeln.length || !document.body) return out;
+    const gesehen = new Set();
+    const lauf = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let knoten;
+    while ((knoten = lauf.nextNode()) && out.length < 40) {
+      const roh = knoten.nodeValue;
+      if (!roh || roh.length < 3) continue;
+      const norm = nurAlnum(roh);
+      if (norm.length < 3 || !nadeln.some((n) => norm.includes(n))) continue;
+      const el = knoten.parentElement;
+      if (!el || gesehen.has(el) || !sichtbar(el)) continue;
+      if (el.closest('script,style,noscript')) continue;
+      gesehen.add(el);
+      const rolle = el.closest('[role]');
+      out.push({
+        rect: rectOf(el), text: txt(el).slice(0, 80),
+        rolle: rolle ? (rolle.getAttribute('role') || '') : '',
+        // Liegt der Treffer in einer Aufklappliste? Der Puls unterscheidet
+        // daran nicht hart (die Rollen koennen sich aendern wie die
+        // data-names), aber die Ferndiagnose sieht es sofort.
+        liste: !!el.closest('[role="listbox"],[role="menu"],[data-name="menu-inner"],[data-name="popup-menu-container"]'),
+      });
+    }
+    return out;
+  }
+
   /* Kompakt-Dump, IMMER dabei (0.3.2, 31.08.2026). Vorher gab es den Dump nur
    * auf Anforderung: Server setzt ein Flag, das Userscript liefert beim
    * UEBERNAECHSTEN Tick. Genau daran ist Finn zweimal gescheitert -- ist der
@@ -453,6 +497,10 @@
         sl_schalter: ticketEl ? suche(SIG_SL_SCHALTER) : null,
       },
       dump: dumpAn ? dumpKandidaten() : null,   // voll, nur auf Anforderung
+      // Text-Treffer (0.4.2): null = es wurde nichts gesucht, [] = gesucht und
+      // nichts gefunden. Der Unterschied zaehlt — "nicht gesucht" darf beim
+      // Puls nie als "steht nicht da" ankommen.
+      treffer: suchTexte.length ? sucheTexte() : null,
       panel: dumpKompakt(),                     // Werkzeugleiste + rechte Spalte, immer
     };
   }
@@ -493,7 +541,11 @@
       headers: { 'Content-Type': 'application/json' },
       data: JSON.stringify(bf), timeout: 2500,
       onload: (r) => {
-        try { dumpAn = JSON.parse(r.responseText).dump === true; } catch (_) { dumpAn = false; }
+        try {
+          const a = JSON.parse(r.responseText);
+          dumpAn = a.dump === true;
+          suchTexte = Array.isArray(a.suche) ? a.suche.slice(0, 60) : [];
+        } catch (_) { dumpAn = false; suchTexte = []; }
       },
       onerror: () => {},      // alter reader-server ohne /bedienfeld: still ignorieren
       ontimeout: () => {},

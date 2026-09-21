@@ -613,6 +613,34 @@ def main():
             == ["Tradovate", "APEX6416990000024 USD", "APEX6416990000024 USD", "APEX6416990000024", "Positions"]
         and order_bot.tv_diagnose(None)["unten"] == [])
 
+    # Finns ZWEITER Lauf 21.09.2026: Dropdown ging auf, "0 Eintraege" — die
+    # Liste haengt am Ende des DOM, hinter der Kappung von panel/dump. Seit
+    # Userscript 0.4.2 kommt 'treffer' (gezielte Suche im ganzen DOM); ist das
+    # Feld da, gilt NUR es — auch leer.
+    _T = lambda treffer, *panel: dict(_P(*panel), treffer=treffer, version="0.4.2")
+    _tr = lambda text, x, y, w=190, h=28: {"rect": [x, y, w, h], "text": text, "rolle": "option", "liste": True}
+    _zu = _T([_tr("APEX6416990000031", 84, 912, 130, 20)])
+    _auf = _T([_tr("APEX6416990000031", 84, 912, 130, 20),                 # Umschalter
+               _tr("APEX6416990000024", 90, 300), _tr("APEX6416990000031", 90, 340),
+               _tr("APEX6416990000047", 90, 380)])
+    _ids = ["APEX6416990000024", "APEX6416990000031", "APEX6416990000047"]
+    chk("TV-KONTO: 'treffer' — Zustand bei geschlossener Liste, Zieleintrag bei offener (auch oben im Fenster)",
+        order_bot.tv_konto_zustand(_zu, "APEX6416990000024", _ids[1:])[0] == "gleicher_login"
+        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX6416990000024",
+             ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 300, 190, 28]]
+        # aktives Konto steht ZWEIMAL da (Umschalter + Liste): als Ziel gesucht
+        # bleibt nur der Listeneintrag, der Umschalter ist ausgenommen
+        and [e["rect"] for e in order_bot.tv_konto_per_text(_auf, _ids, nur_ziel="APEX6416990000031",
+             ohne=(84, 912, 130, 20), ueberall=True)] == [[90, 340, 190, 28]])
+    chk("TV-KONTO: 'treffer' vorhanden aber leer schlaegt die gekappte panel-Liste (nie beides mischen)",
+        order_bot.tv_konto_per_text(_T([], _el("APEX6416990000024", 84, 912, 130, 20)), _ids) == []
+        and len(order_bot.tv_konto_per_text(dict(_P(_el("APEX6416990000024", 84, 912, 130, 20)), treffer=None), _ids)) == 1)
+    chk("TV-KONTO: Userscript-Mindestversion",
+        order_bot.tv_version_min("0.4.2", "0.4.2") and order_bot.tv_version_min("0.5.0", "0.4.2")
+        and order_bot.tv_version_min("0.4.10", "0.4.2")
+        and not order_bot.tv_version_min("0.4.1", "0.4.2") and not order_bot.tv_version_min(None, "0.4.2")
+        and not order_bot.tv_version_min("abc", "0.4.2"))
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

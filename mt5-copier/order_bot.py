@@ -1676,7 +1676,13 @@ def tv_konto_per_text(bf, ids, nur_ziel=None, ohne=None, ueberall=False):
     except (TypeError, ValueError):
         hoehe = 0.0
     roh = []
-    for quelle in ("panel", "dump"):
+    # 'treffer' (Userscript 0.4.2+) ist die gezielte Suche im GANZEN DOM — ist
+    # sie da (auch als leere Liste!), gilt NUR sie: 'panel'/'dump' sind bei 130
+    # bzw. 150 Elementen gekappt und sehen die Aufklappliste am Ende des DOM
+    # nicht (Finns zweiter Lauf 21.09.2026: Dropdown offen, "0 Eintraege").
+    # Fehlt das Feld (altes Userscript), bleibt der gekappte Weg als Notbehelf.
+    quellen = ("treffer",) if isinstance((bf or {}).get("treffer"), list) else ("panel", "dump")
+    for quelle in quellen:
         for e in ((bf or {}).get(quelle) or []):
             if not isinstance(e, dict):
                 continue
@@ -1710,6 +1716,24 @@ def tv_konto_per_text(bf, ids, nur_ziel=None, ohne=None, ueberall=False):
     for a in innerste:
         a.pop("_r", None)
     return innerste
+
+
+def tv_version_min(version, minimum):
+    """'0.4.2' >= '0.4.2'? Unlesbare Version = False (dann lieber zum Update raten)."""
+    def teile(v):
+        try:
+            return tuple(int(x) for x in str(v).strip().split("."))
+        except ValueError:
+            return None
+    a, b = teile(version), teile(minimum)
+    return bool(a and b and a >= b)
+
+
+TV_USERSCRIPT_MIN = "0.4.2"
+TV_USERSCRIPT_RAT = ("Userscript aktualisieren: Tampermonkey-Symbol > Dashboard > 'Prophos "
+                     "TV-Reader' > Haken setzen > 'Updates suchen' (oder einen Tag warten), "
+                     "dann den TradingView-Tab mit F5 neu laden. Unten rechts im Badge "
+                     "bzw. in der Diagnose steht die Version.")
 
 
 def tv_konto_zustand(bf, ext_id, geschwister=()):
@@ -1789,6 +1813,9 @@ def tv_diagnose(bf):
             "geo": {f: geo.get(f) for f in ("innerWidth", "innerHeight", "dpr")},
             "sprache_fremd": bf.get("sprache_fremd"), "konto": bf.get("konto"),
             "panel_n": len(bf.get("panel") or []), "dump_n": len(bf.get("dump") or []),
+            # Text-Treffer des Userscripts 0.4.2+ (None = altes Userscript bzw.
+            # nichts gesucht, [] = gesucht und nichts gefunden)
+            "treffer": bf.get("treffer"),
             "unten": unten}
 
 
@@ -1826,6 +1853,9 @@ def modus_tvkonto(cmd):
 
     def raus(msg, schritt):
         res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
+        # Text-Suche wieder aus: sie laeuft durchs ganze DOM und soll nie im
+        # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
+        _tv_http("/suche", {"texte": []}, timeout=1.5)
         print(json.dumps(res))
 
     fehler = pruefe_tv_konto_befehl(cmd)
@@ -1852,6 +1882,11 @@ def modus_tvkonto(cmd):
     ext = str(cmd["ext_id"]).strip()
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
                    if len(_nur_alnum(x)) >= 3][:60]
+    # Dem Userscript sagen, wonach es suchen soll (0.4.2+, 90 s scharf). Ein
+    # alter reader-server kennt /suche nicht und antwortet 404 — dann bleibt
+    # es beim gekappten panel-Weg, und die Meldungen unten raten zum Update.
+    such_ok = bool(_tv_http("/suche", {"texte": [ext] + geschwister}))
+    trail.append("Text-Suche scharf" if such_ok else "reader-server ohne /suche (alt)")
     ende = time.time() + (40.0 if gestartet else 12.0)
     bf, zustand, aktiv = None, "", ""
     while time.time() < ende:
@@ -1930,6 +1965,7 @@ def modus_tvkonto(cmd):
         return ab(f"Konto steht auf '{aktiv[:40]}' statt {ext} — der Konto-Umschalter "
                   "wurde aber nicht eindeutig gefunden.")
     schalter_r = _tv_rect4(schalter)
+    _tv_http("/suche", {"texte": [ext] + geschwister})   # 90-s-Fenster frisch aufziehen
     ok, f = _tv_klick(schalter["rect"], bf["geo"], _klient_rechteck(hwnd), "Konto-Umschalter", trail)
     if not ok:
         return ab(f)
@@ -1960,9 +1996,14 @@ def modus_tvkonto(cmd):
             keyboard.send_keys("{ESC}")
         except Exception:
             pass
+        if not anzahl and not tv_version_min((bf or {}).get("version"), TV_USERSCRIPT_MIN):
+            # Ehrlich sagen, WARUM nichts gefunden wurde: das alte Userscript
+            # sieht die Aufklappliste gar nicht (Kappung) — das ist kein Befund
+            # ueber das Konto.
+            return ab(f"Dropdown geoeffnet, aber das Userscript {(bf or {}).get('version') or '?'} "
+                      f"kann die Liste nicht lesen (noetig: {TV_USERSCRIPT_MIN}). " + TV_USERSCRIPT_RAT)
         return ab(f"Konto {ext} in der Dropdown-Liste nicht eindeutig gefunden "
-                  f"({anzahl} Treffer bei {gesehen} Eintraegen). Liegt es wirklich "
-                  "unter diesem Tradovate-Login?")
+                  f"({anzahl} Treffer). Liegt es wirklich unter diesem Tradovate-Login?")
     ok, f = _tv_klick(eintrag["rect"], bf["geo"], _klient_rechteck(hwnd), f"Konto {ext}", trail)
     if not ok:
         return ab(f)

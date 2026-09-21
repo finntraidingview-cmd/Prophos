@@ -61,6 +61,16 @@ _bedienfeld = None
 _bedienfeld_s = 0.0
 _dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 
+# Text-Suche (21.09.2026, Futures-Puls Schritt 2): der Puls nennt Texte (die
+# External IDs der Konten), das Userscript (0.4.2+) sucht sie im GANZEN DOM und
+# meldet die Rechtecke im Bedienfeld unter 'treffer'. Grund: TradingView hat
+# die data-name-Anker des Konto-Umschalters umbenannt, und die Aufklappliste
+# haengt am Ende des DOM — hinter der Kappung der Element-Listen. Die eigene
+# Kontonummer ist der eine Anker, den TradingView nicht umbenennen kann.
+# Zeitlich begrenzt wie der Dump: nie im Dauerbetrieb durchs ganze DOM.
+_such_texte = []
+_such_bis = 0.0
+
 # Blind-Zustand (01.09.2026): das Userscript ab 0.4.0 sagt selbst, wenn sein
 # Lesevorgang nichts beweist (Tabelle nicht auffindbar, Zellen leer). Solche
 # Staende werden NICHT uebernommen — _stand friert ein, und die Frische-
@@ -134,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global _stand, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
+        global _such_texte, _such_bis
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -167,7 +178,23 @@ class Handler(BaseHTTPRequestHandler):
             # dump-Anforderung zurueckgeben: das Userscript haengt beim
             # NAECHSTEN Tick den Kandidaten-Dump an (nie im Dauerbetrieb —
             # der Dump laeuft durchs ganze DOM).
-            self._json(200, {"ok": True, "dump": time.time() < _dump_bis})
+            self._json(200, {"ok": True, "dump": time.time() < _dump_bis,
+                             "suche": _such_texte if time.time() < _such_bis else []})
+            return
+
+        # Text-Suche scharfschalten: POST /suche {"texte": [...]} — 90 s lang
+        # bekommt das Userscript die Liste in jeder /bedienfeld-Antwort mit.
+        # Leere Liste = sofort aus.
+        if self.path.rstrip("/") == "/suche":
+            roh_texte = daten.get("texte") if isinstance(daten, dict) else None
+            texte = []
+            for t in (roh_texte if isinstance(roh_texte, list) else []):
+                t = str(t).strip()[:60]
+                if len(t) >= 3 and t not in texte:
+                    texte.append(t)
+            _such_texte = texte[:60]
+            _such_bis = time.time() + 90.0 if _such_texte else 0.0
+            self._json(200, {"ok": True, "texte": len(_such_texte), "bis_s": 90 if _such_texte else 0})
             return
 
         # Kandidaten-Dump scharfschalten (Ferndiagnose, 60 s): der Puls ruft
@@ -191,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") not in ("/positions", ""):
             self._json(404, {"ok": False, "msg":
                 f"Unbekannter Pfad {self.path!r} — dieser reader-server kennt "
-                "/positions, /schalter, /bedienfeld, /dump-an. Aeltere Version?"})
+                "/positions, /schalter, /bedienfeld, /dump-an, /suche. Aeltere Version?"})
             return
 
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
