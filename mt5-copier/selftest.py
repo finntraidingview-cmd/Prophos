@@ -732,6 +732,21 @@ def main():
         and not order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "APEX_641699")
         and not order_bot.tv_konto_wort_passt("APEX_6416990", "APEX_641699"))
 
+    # Direkt-Adresse zum Tradovate-Dialog (am echten TradingView bewiesen,
+    # 21.09.2026 nachts) — ersetzt Knopf "Trade" + Kachel-Suche.
+    chk("TV-LOGIN: trade-now-Adresse — Layout bleibt, fremde Parameter fallen weg, fremde Domain nie",
+        order_bot.tv_trade_now_url("") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
+        and order_bot.tv_trade_now_url("https://www.tradingview.com/chart/BRKeE9Lw/?symbol=CME_MINI%3ANQU2026")
+            == "https://www.tradingview.com/chart/BRKeE9Lw/?trade-now=TRADOVATE"
+        and order_bot.tv_trade_now_url("https://evil.io/chart/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE"
+        and order_bot.tv_trade_now_url("https://www.tradingview.com/symbols/NQ/") == "https://www.tradingview.com/chart/?trade-now=TRADOVATE")
+    chk("TV-LOGIN: Namenslisten der gezielten Suche passen zu ihren Mustern (sonst findet die eine, was der Filter verwirft)",
+        all(order_bot.TV_RX_LOGOUT.search(n) for n in order_bot.TV_NAMEN_LOGOUT)
+        and all(order_bot.TV_RX_CONNECT.search(n) for n in order_bot.TV_NAMEN_CONNECT)
+        and all(order_bot.TV_RX_LOGIN.search(n) for n in order_bot.TV_NAMEN_LOGIN)
+        and all(order_bot.TV_RX_DEMO.search(n) for n in order_bot.TV_NAMEN_DEMO)
+        and all(order_bot.TV_RX_BROKER.search(n) for n in order_bot.TV_NAMEN_BROKER))
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.

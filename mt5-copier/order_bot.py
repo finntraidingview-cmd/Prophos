@@ -1899,7 +1899,7 @@ TV_RX_LOGIN = re.compile(r"^(log ?in|sign ?in|anmelden|einloggen)$", re.I)
 # mehrere tausend Textknoten — mit 2500 lag die Broker-Auswahl vermutlich
 # hinter der Kappung (die Kontonummern-Suche mit 6000 fand ihre Liste).
 _TV_UIA_KLICKBAR = ("Button", "MenuItem", "ListItem", "RadioButton", "Hyperlink",
-                    "TabItem", "CheckBox", "ComboBox", "Text", "Image", "Group")
+                    "TabItem", "CheckBox", "ComboBox", "Text")
 
 
 def tv_uia_namen_filtern(roh, muster, fenster=None, y_von=0.0, y_bis=1.0, ohne=None,
@@ -1953,6 +1953,116 @@ def tv_tasten_escape(text):
     Steuerzeichen — ein Username 'max+apex' wuerde sonst als Shift-Kombination
     getippt."""
     return "".join("{" + c + "}" if c in "+^%~(){}[]" else c for c in str(text))
+
+
+# DIREKT-ADRESSE ZUM BROKER-LOGIN (21.09.2026 nachts, Finns Frage: "gibt es
+# irgendeinen anderen Weg … weil die Kachel immer woanders ist"). Am echten
+# TradingView nachgesehen: diese Adresse laedt den Chart und oeffnet SOFORT den
+# Tradovate-Dialog ([data-name="broker-login-dialog"], Live/Demo + Connect) —
+# ohne Knopf "Trade", ohne Broker-Auswahl, ohne Kachel. Damit faellt die eine
+# Stelle weg, deren Lage sich aendert (Favoriten, Reihenfolge, Fenstergroesse).
+TV_TRADE_NOW = "?trade-now=TRADOVATE"
+
+TV_NAMEN_BROKER = ("Tradovate",)
+TV_NAMEN_LOGOUT = ("Log out", "Logout", "Sign out", "Abmelden", "Ausloggen", "Disconnect", "Trennen")
+TV_NAMEN_DEMO = ("Demo",)
+TV_NAMEN_CONNECT = ("Connect broker", "Connect", "Broker verbinden", "Verbinden")
+TV_NAMEN_LOGIN = ("Login", "Log in", "Sign in", "Anmelden", "Einloggen")
+
+_UIA_TYPNAME = {50000: "Button", 50002: "CheckBox", 50003: "ComboBox", 50004: "Edit",
+                50005: "Hyperlink", 50006: "Image", 50007: "ListItem", 50011: "MenuItem",
+                50013: "RadioButton", 50019: "TabItem", 50020: "Text", 50026: "Group"}
+
+
+def tv_trade_now_url(basis=""):
+    """Chart-Adresse + trade-now. Die Basis kommt aus der Config (tv_url) und
+    laeuft durch denselben Riegel wie beim Start: nur https + tradingview.com.
+    Eine Layout-Adresse (/chart/AbC123/) bleibt erhalten, vorhandene Parameter
+    fallen weg — trade-now soll der einzige sein."""
+    u = tv_start_url(basis).split("?", 1)[0].split("#", 1)[0]
+    if "/chart" not in u:
+        u = TV_START_URL
+    return u.rstrip("/") + "/" + TV_TRADE_NOW
+
+
+def _tv_uia_nativ(w, namen):
+    """GEZIELTE Suche: Windows selbst sucht im Baum nach Elementen mit genau
+    diesen Namen (Gross/Klein egal) und liefert NUR die Treffer.
+    -> [(name, rect, typ)] oder None, wenn der Weg auf diesem PC nicht geht.
+
+    Warum (21.09.2026 nachts, Finns dritter 2b-Lauf: Menue war sichtbar offen,
+    der Bot fand darin nichts): der bisherige Weg holte ALLE Elemente eines
+    Typs und fragte jedes einzeln nach seinem Namen — auf einer TradingView-
+    Seite mehrere tausend Aufrufe, viele Sekunden pro Durchgang. In ein
+    4-Sekunden-Fenster passte genau EIN Durchgang, und der lief direkt nach dem
+    Klick, bevor Chrome das neue Menue in den Baum gereicht hatte. Die gezielte
+    Suche dauert Bruchteile einer Sekunde — sie kann oft genug wiederholt
+    werden, bis das Menue da ist."""
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        pid = u.UIA_dll.UIA_NamePropertyId
+        bed = None
+        for n in namen:
+            try:
+                c = u.iuia.CreatePropertyConditionEx(pid, n, 1)      # 1 = IgnoreCase
+            except Exception:
+                c = u.iuia.CreatePropertyCondition(pid, n)
+            bed = c if bed is None else u.iuia.CreateOrCondition(bed, c)
+        feld = w.element_info.element.FindAll(u.tree_scope["descendants"], bed)
+        roh = []
+        for i in range(feld.Length):
+            e = feld.GetElement(i)
+            try:
+                if e.CurrentIsOffscreen:
+                    continue
+                r = e.CurrentBoundingRectangle
+                roh.append((str(e.CurrentName or ""), (r.left, r.top, r.right, r.bottom),
+                            _UIA_TYPNAME.get(e.CurrentControlType, str(e.CurrentControlType))))
+            except Exception:
+                continue
+        return roh
+    except Exception:
+        return None
+
+
+def _tv_adresse_oeffnen(w, url, trail):
+    """Im TradingView-Tab eine Adresse oeffnen — per Tastatur (Strg+L, tippen,
+    Enter), im BESTEHENDEN Tab: ein zweiter TradingView-Tab waere eine zweite
+    Tradovate-Session und ein zweites Userscript. Getippt wird nur, wenn das
+    TradingView-Fenster nachweislich im Vordergrund steht — Tastendruecke in
+    ein fremdes Fenster sind der eine Fehler, den dieser Weg machen koennte.
+    (ok, fehlertext)"""
+    try:
+        from pywinauto import keyboard
+        import ctypes
+    except ImportError:
+        return False, "pywinauto fehlt"
+    try:
+        w.set_focus()
+    except Exception:
+        pass
+    _warte(0.4, 0.3)
+    try:
+        vorn = ctypes.windll.user32.GetForegroundWindow()
+        if int(vorn) != int(w.handle):
+            return False, "TradingView-Fenster steht nicht im Vordergrund — Adresse wird nicht getippt."
+    except Exception:
+        pass                      # ohne die Probe (kein Windows) entscheidet set_focus
+    try:
+        keyboard.send_keys("^l")
+        _warte(0.35, 0.3)
+        keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+        _warte(0.25, 0.2)
+        # Chrome ergaenzt beim Tippen gern aus dem Verlauf (markierter Rest) —
+        # Entf wirft die Ergaenzung weg, getippt bleibt genau die Adresse.
+        keyboard.send_keys("{DELETE}")
+        _warte(0.15, 0.15)
+        keyboard.send_keys("{ENTER}")
+    except Exception as e:
+        return False, f"Adresse liess sich nicht tippen ({type(e).__name__})"
+    trail.append("Adresse geoeffnet: …" + url[-28:])
+    return True, ""
 
 
 def tv_uia_spur(roh, max_n=12):
@@ -2339,46 +2449,54 @@ def modus_tvkonto(cmd):
             return ab("TradingView-Fenster nicht gefunden.", "login")
         inventar = uia_info.setdefault("inventar", {})
 
-        def sicht():
-            roh = _tv_uia_roh(w, muster=(TV_RX_KACHELSICHT, TV_RX_BROKER, TV_RX_LOGOUT, TV_RX_KONTOARTIG))
-            fr = _tv_fenster_rect(w)
-            kacheln = any(r and TV_RX_KACHELSICHT.search(n) for n, r, _t in roh)
-            broker_unten = tv_uia_namen_filtern(roh, TV_RX_BROKER, fr, y_von=0.5)
-            return roh, fr, kacheln, broker_unten
-
         spur = [""]
 
-        def warte_auf(muster, sek, stelle, y_von=0.0, y_bis=1.0, quelle=None, ohne=None):
-            """Pollt, bis GENAU EIN Element passt. -> (el|None, anzahl)"""
+        def finde(namen, muster, y_von=0.0, y_bis=1.0, quelle=None, ohne=None):
+            """Ein Durchgang: gezielt (schnell), sonst der langsame Typ-Scan.
+            -> (elemente, roh)"""
+            q = quelle or w
+            t_scan = time.time()
+            roh = _tv_uia_nativ(q, namen)
+            weg = "nativ"
+            if roh is None:
+                roh, weg = _tv_uia_roh(q, muster=(muster,)), "scan"
+            uia_info["scan"] = {"weg": weg, "n": len(roh), "s": round(time.time() - t_scan, 1)}
+            return tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne), roh
+
+        def warte_auf(namen, muster, sek, stelle, y_von=0.0, y_bis=1.0, quelle=None, ohne=None):
+            """Pollt, bis GENAU EIN Element passt — mindestens drei Durchgaenge,
+            auch wenn einer laenger dauert als das Zeitfenster (Chrome reicht
+            neue Knoten verzoegert in den Baum). -> (el|None, anzahl)"""
             ende_w = time.time() + sek
-            n, roh = 0, []
+            n, roh, runde = 0, [], 0
             while True:
-                q = quelle or w
-                t_scan = time.time()
-                roh = _tv_uia_roh(q, muster=(muster,))
-                uia_info["scan"] = {"stelle": stelle, "n": len(roh), "s": round(time.time() - t_scan, 1)}
-                els = tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne)
+                runde += 1
+                els, roh = finde(namen, muster, y_von, y_bis, quelle, ohne)
                 n = len(els)
                 if n == 1:
                     return els[0], 1
-                if n > 1 or time.time() >= ende_w:
+                if n > 1 or (time.time() >= ende_w and runde >= 3):
                     break
                 _warte(0.5, 0.3)
             inventar[stelle] = tv_uia_inventar(roh)
-            spur[0] = f" Gesehen ({len(roh)} Elemente): {tv_uia_spur(roh)}"
+            if not roh:                      # gezielt nichts gefunden -> fuer die Meldung einmal breit schauen
+                roh = _tv_uia_roh(quelle or w, ("Button", "MenuItem", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,))
+            spur[0] = f" Gesehen ({uia_info.get('scan', {}).get('weg')}, {len(roh)}): {tv_uia_spur(roh)}"
             return None, n
 
-        roh, fr, kacheln, broker_unten = sicht()
-        verbunden = bool(broker_unten) and not kacheln
-        trail.append("Broker verbunden (fremder Login)" if verbunden else "kein Broker verbunden")
+        def broker_knopf():
+            els, _roh = finde(TV_NAMEN_BROKER, TV_RX_BROKER, y_von=0.5)
+            return els
 
-        broker_r = broker_unten[0]["r"] if len(broker_unten) == 1 else None
-        dialog_offen = False
+        broker_unten = broker_knopf()
+        verbunden = bool(broker_unten)
+        trail.append("Broker verbunden" if verbunden else "kein Broker verbunden")
+
         if verbunden:
             if len(broker_unten) != 1:
-                inventar["broker_knopf"] = tv_uia_inventar(roh)
                 return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
-                          f"({len(broker_unten)} Treffer). Gesehen: {tv_uia_spur(roh)}", "login")
+                          f"({len(broker_unten)} Treffer).", "login")
+            broker_r = broker_unten[0]["r"]
 
             # ERST INS DROPDOWN SCHAUEN (Finns Lauf 21.09.2026: aktiv war
             # 'PAAPEX…008' — ein PA-Konto, das Prophos nicht kennt, aber sehr
@@ -2386,20 +2504,22 @@ def modus_tvkonto(cmd):
             # heisst nicht "fremder Login": liegt das Zielkonto in der Liste,
             # genuegt der Dropdown-Griff und niemand muss sich neu anmelden.
             # Der Umschalter ist das kontonummer-artige Element knapp UNTER dem
-            # Broker-Knopf.
-            kand = [e for e in tv_uia_namen_filtern(roh, TV_RX_KONTOARTIG, fr, y_von=0.5)
+            # Broker-Knopf (dessen Name ist unbekannt -> hier der langsame Scan).
+            roh_k = _tv_uia_roh(w, ("Text",), muster=(TV_RX_KONTOARTIG,))
+            kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.5)
                     if 0 <= e["r"][1] - broker_r[1] <= 160 and abs(e["r"][0] - broker_r[0]) <= 200]
             if len(kand) == 1:
                 trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
                 ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
                 if ok:
                     _warte(0.7, 0.5)
-                    eintrag_x, ende_x = None, time.time() + 6.0
-                    while time.time() < ende_x and not eintrag_x:
+                    eintrag_x, ende_x, runde = None, time.time() + 6.0, 0
+                    while not eintrag_x:
+                        runde += 1
                         els = _tv_uia_konten(w, ids, uia_info, nur_ziel=ext, ohne=kand[0]["r"])
                         if len(els) == 1:
                             eintrag_x = els[0]
-                        elif len(els) > 1:
+                        elif len(els) > 1 or (time.time() >= ende_x and runde >= 2):
                             break
                         else:
                             _warte(0.5, 0.3)
@@ -2423,84 +2543,57 @@ def modus_tvkonto(cmd):
                     _warte(0.4, 0.3)
                     trail.append("Zielkonto nicht in der Liste -> anderer Login noetig")
 
-            # Finns Handweg: Broker-Knopf -> "Connect another broker…" -> Kachel.
-            # Rueckfall, falls der Punkt fehlt: "Log out" (dann zeigt TradingView
-            # die Broker-Auswahl von selbst bzw. ueber den Knopf "Trade").
+            # ABMELDEN: Broker-Knopf -> Menue ("Trading settings… / Connect
+            # another broker… / Log out", Finns Screenshots) -> "Log out".
             ok, f = _tv_uia_klick(broker_unten[0], "Broker-Menue", trail)
             if not ok:
                 return ab(f, "login")
             _warte(0.6, 0.4)
-            el, n = warte_auf(TV_RX_ANDERER_BROKER, 4.0, "broker_menue")
-            if el:
-                ok, f = _tv_uia_klick(el, "Connect another broker", trail)
-                if not ok:
-                    return ab(f, "login")
-                dialog_offen = True
-                _warte(0.9, 0.5)
-            else:
-                el, n = warte_auf(TV_RX_LOGOUT, 3.0, "logout_menue")
-                if not el:
-                    esc()
-                    return ab("Broker-Menue geoeffnet, aber weder 'Connect another broker' noch "
-                              f"'Log out' darin eindeutig gefunden ({n} Treffer)." + spur[0], "login")
-                ok, f = _tv_uia_klick(el, "Abmelden", trail)
-                if not ok:
-                    return ab(f, "login")
-                ende_l, nachgefragt = time.time() + 14.0, False
-                while time.time() < ende_l:
-                    _warte(0.8, 0.4)
-                    roh, fr, kacheln, broker_unten = sicht()
-                    if kacheln or not broker_unten:
-                        break
-                    if not nachgefragt:
-                        best = [e for e in tv_uia_namen_filtern(roh, TV_RX_LOGOUT, fr) if e["typ"] == "Button"]
-                        if len(best) == 1:
-                            nachgefragt = True
-                            _tv_uia_klick(best[0], "Abmelden bestaetigen", trail)
-                else:
-                    inventar["nach_logout"] = tv_uia_inventar(roh)
-                    return ab("'Log out' geklickt, aber der Broker ist danach noch verbunden. "
-                              f"Gesehen: {tv_uia_spur(roh)}", "login")
-                broker_r = None
-                trail.append("abgemeldet")
+            el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
+            if not el:
+                esc()
+                return ab(f"Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
+                          f"({n} Treffer)." + spur[0], "login")
+            ok, f = _tv_uia_klick(el, "Log out", trail)
+            if not ok:
+                return ab(f, "login")
+            # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
+            # Knopf mit demselben Verb da — genau einmal nachklicken.
+            ende_l, nachgefragt, getrennt = time.time() + 16.0, False, False
+            while time.time() < ende_l:
+                _warte(0.8, 0.4)
+                if not broker_knopf():
+                    getrennt = True
+                    break
+                if not nachgefragt:
+                    best, _r = finde(TV_NAMEN_LOGOUT, TV_RX_LOGOUT)
+                    best = [e for e in best if e["typ"] == "Button"]
+                    if len(best) == 1:
+                        nachgefragt = True
+                        _tv_uia_klick(best[0], "Log out bestaetigen", trail)
+            if not getrennt:
+                return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach "
+                          "noch im Panel.", "login")
+            trail.append("abgemeldet")
 
-        # Broker-Kacheln: nach dem Abmelden zeigt TradingView sie meist von selbst
-        # im unteren Panel; sonst oeffnet der Knopf "Trade" oben rechts den Dialog.
-        if not dialog_offen:
-            roh, fr, kacheln, _b = sicht()
-            if not kacheln:
-                el, n = warte_auf(TV_RX_TRADE, 4.0, "trade_knopf", y_bis=0.15)
-                if not el:
-                    return ab(f"Broker-Auswahl ist nicht offen, und der Knopf 'Trade' oben wurde nicht "
-                              f"eindeutig gefunden ({n} Treffer)." + spur[0], "login")
-                ok, f = _tv_uia_klick(el, "Trade", trail)
-                if not ok:
-                    return ab(f, "login")
-                _warte(0.8, 0.5)
-        # Die Kachel liegt im Dialog in der Fenstermitte (erste Reihe). Der
-        # Broker-Knopf des unteren Panels heisst genauso und bleibt hinter dem
-        # Dialog im Baum — er ist ueber sein Rechteck und den Bereich ausgenommen.
-        el, n = warte_auf(TV_RX_BROKER, 10.0, "broker_kachel", y_von=0.08, y_bis=0.78, ohne=broker_r)
-        if not el:
-            esc()
-            return ab(f"Die Kachel 'Tradovate' in der Broker-Auswahl wurde nicht eindeutig gefunden "
-                      f"({n} Treffer)." + spur[0], "login")
-        ok, f = _tv_uia_klick(el, "Kachel Tradovate", trail)
+        # VERBINDEN ueber die Direkt-Adresse: kein Knopf "Trade", keine Kachel.
+        _tv_fenster_holen([], "", "")            # TradingView-Tab sicher vorn (klickt ihn notfalls an)
+        ok, f = _tv_adresse_oeffnen(w, tv_trade_now_url(cmd.get("tv_url")), trail)
         if not ok:
             return ab(f, "login")
-        _warte(0.8, 0.5)
+        _warte(2.0, 1.0)
         # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
-        # ohne bewiesenen Demo-Schalter wird nicht verbunden.
-        el, n = warte_auf(TV_RX_DEMO, 8.0, "demo_schalter")
+        # ohne bewiesenen Demo-Schalter wird nicht verbunden. 30 s: die Seite
+        # laedt nach der Adresse komplett neu.
+        el, n = warte_auf(TV_NAMEN_DEMO, TV_RX_DEMO, 30.0, "demo_schalter")
         if not el:
-            esc()
-            return ab(f"Im Tradovate-Dialog wurde der Schalter 'Demo' nicht eindeutig gefunden "
-                      f"({n} Treffer)." + spur[0], "login")
+            return ab(f"Nach der Direkt-Adresse ist der Tradovate-Dialog nicht erschienen (Schalter "
+                      f"'Demo' nicht eindeutig, {n} Treffer)." + spur[0], "login")
         ok, f = _tv_uia_klick(el, "Demo", trail)
         if not ok:
             return ab(f, "login")
         _warte(0.4, 0.3)
-        el, n = warte_auf(TV_RX_CONNECT, 5.0, "connect_knopf")
+        el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
         if not el:
             esc()
             return ab(f"Der Knopf 'Connect' im Tradovate-Dialog wurde nicht eindeutig gefunden "
@@ -2596,7 +2689,7 @@ def modus_tvkonto(cmd):
                       "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
                       "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
         trail.append("Username + gefuelltes Passwort bewiesen")
-        el, n = warte_auf(TV_RX_LOGIN, 5.0, "login_knopf", quelle=tw)
+        el, n = warte_auf(TV_NAMEN_LOGIN, TV_RX_LOGIN, 6.0, "login_knopf", quelle=tw)
         if not el:
             return ab(f"Der Knopf 'Login' im Tradovate-Fenster wurde nicht eindeutig gefunden "
                       f"({n} Treffer)." + spur[0], "login")
