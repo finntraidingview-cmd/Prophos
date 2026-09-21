@@ -2192,6 +2192,11 @@ class Handler(BaseHTTPRequestHandler):
             cmd["ext_id"] = str(body.get("ext_id") or "").strip()
             cmd["tv_username"] = str(body.get("tv_username") or "").strip()
             cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            # Geschwister = External IDs der anderen aktiven Konten DERSELBEN
+            # Firma (aus Prophos). Steht eines davon im Panel, ist es derselbe
+            # Tradovate-Login und der Bot wechselt nur im Dropdown.
+            g = body.get("geschwister")
+            cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 return self._send(409, json.dumps({"ok": False, "msg":
                     "Es laeuft schon ein TradingView-Lauf — kurz warten."}, ensure_ascii=False))

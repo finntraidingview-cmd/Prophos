@@ -1570,12 +1570,19 @@ def modus_tvstart(cfg=None):
 # hier immer nur draufdruecken: auf Login, dann einmal auf ein Feld, dann sehe
 # ich die Autofill-Vorschlaege, und daneben druecke ich auf Login."
 #
-# TEIL 2a (dieser Stand) — LESEN UND BEWEISEN, noch kein Klick:
+# TEIL 2a (dieser Stand):
 #   1. TradingView sicherstellen (Schritt 1).
 #   2. Aus dem Bedienfeld des Userscripts lesen, welches Konto im Broker-Panel
 #      steht, und gegen die External ID des Plans pruefen (tv_konto_passt —
 #      der Kontoname IST die External ID, Finns Ansage 30.08.2026).
-#   3. Passt es nicht: NICHT raten, sondern den Kandidaten-Dump sichern.
+#   3. Finns Korrektur 21.09.2026 abends: im Dropdown steht NIE der Tradovate-
+#      Username, nur der Kontoname. Ob der LOGIN stimmt, beweist deshalb die
+#      Datenbank: steht ein anderes Konto da, das Prophos bei DERSELBEN Firma
+#      fuehrt ('geschwister'), ist es derselbe Login -> Dropdown oeffnen,
+#      Zielkonto anklicken, am Panel beweisen. Nur wenn das aktive Konto
+#      flach ist.
+#   4. Steht ein Konto da, das Prophos bei der Firma NICHT kennt (anderer
+#      Login), oder gar keins: NICHT raten, sondern den Kandidaten-Dump sichern.
 #
 # Warum nicht gleich ab- und anmelden: am 21.09. am echten TradingView
 # nachgesehen — der Tradovate-Dialog ([data-name="broker-login-dialog"]) hat
@@ -1601,27 +1608,68 @@ def pruefe_tv_konto_befehl(cmd):
         return ["Befehl ist kein Objekt"]
     if len(_nur_alnum(cmd.get("ext_id"))) < 3:
         fehler.append("External ID fehlt oder ist kuerzer als 3 Zeichen")
+    # Der Username ist seit 2a-Dropdown (21.09.2026 abends) KEINE Pflicht mehr:
+    # liegt das Zielkonto im selben Login, braucht es ihn nie. Gebraucht wird
+    # er erst fuers Ab-/Anmelden (Teil 2b) — ist er gesetzt, muss er sauber sein.
     u = str(cmd.get("tv_username") or "").strip()
-    if not u:
-        fehler.append("Tradovate-Username der Firma fehlt (Einstellungen > Prop Firms)")
-    elif len(u) > 80 or any(c.isspace() or ord(c) < 32 for c in u):
+    if u and (len(u) > 80 or any(c.isspace() or ord(c) < 32 for c in u)):
         fehler.append("Tradovate-Username enthaelt Leer- oder Steuerzeichen")
+    g = cmd.get("geschwister")
+    if g is not None and not isinstance(g, list):
+        fehler.append("geschwister muss eine Liste sein")
     return fehler
 
 
-def tv_konto_zustand(bf, ext_id):
+def tv_konto_bestes(text, ids):
+    """Welche der bekannten External IDs MEINT dieser Konto-Text? Die LAENGSTE,
+    die passt — tv_konto_passt ist ein Teilstring-Vergleich, und 'APEX-123-01'
+    steckt auch in 'APEX-123-011'. Ohne diese Regel wuerde das laengere
+    Geschwister-Konto als das kuerzere Zielkonto durchgehen. '' = keine passt."""
+    bestes = ""
+    for i in ids or ():
+        if tv_konto_passt(text, i) and len(_nur_alnum(i)) > len(_nur_alnum(bestes)):
+            bestes = str(i)
+    return bestes
+
+
+def tv_konto_zustand(bf, ext_id, geschwister=()):
     """Was sagt das Bedienfeld ueber das Konto? -> (zustand, aktiv_text)
-       'richtig'     das angezeigte Konto traegt die External ID
-       'falsch'      es steht ein Konto da, aber ein anderes
-       'kein_broker' kein Konto-Umschalter gefunden — kein Broker verbunden
-                     oder das Broker-Panel unten ist zugeklappt"""
+       'richtig'        das angezeigte Konto IST das Zielkonto
+       'gleicher_login' ein anderes Konto — aber eines, das laut Prophos zur
+                        selben Firma gehoert: also derselbe Tradovate-Login,
+                        ein Griff ins Dropdown genuegt
+       'falsch'         ein Konto, das Prophos bei dieser Firma nicht kennt —
+                        vermutlich ein anderer Tradovate-Login
+       'kein_broker'    kein Konto-Umschalter gefunden — kein Broker verbunden
+                        oder das Broker-Panel unten ist zugeklappt
+
+    Finn 21.09.2026: im Dropdown steht nie der Tradovate-Username, nur der
+    Kontoname (= External ID). Ob der Login stimmt, laesst sich deshalb nur
+    ueber die Datenbank beweisen: "der AE-Account gehoert in der Datenbank ja
+    trotzdem zu Apex" — steht AE da und AC ist gewollt, ist es der richtige
+    Login und nur das falsche Unterkonto."""
     konto = (bf or {}).get("konto") or {}
     aktiv = str(konto.get("aktiv") or "").strip()
     if not aktiv and not konto.get("schalter"):
         return "kein_broker", ""
-    if tv_konto_passt(aktiv, ext_id):
+    bestes = tv_konto_bestes(aktiv, [ext_id] + list(geschwister or ()))
+    if bestes and _nur_alnum(bestes) == _nur_alnum(ext_id):
         return "richtig", aktiv
+    if bestes:
+        return "gleicher_login", aktiv
     return "falsch", aktiv
+
+
+def tv_konto_eintrag(eintraege, ext_id, geschwister=()):
+    """Der EINE Dropdown-Eintrag des Zielkontos — oder None. Gleiche
+    Laengste-ID-Regel wie oben; bei 0 oder >=2 Treffern None (nie einer von
+    mehreren Kandidaten). -> (eintrag, anzahl_treffer)"""
+    ids = [ext_id] + list(geschwister or ())
+    ziel = _nur_alnum(ext_id)
+    treffer = [e for e in (eintraege or [])
+               if isinstance(e, dict) and e.get("rect") and not e.get("fehlt")
+               and _nur_alnum(tv_konto_bestes(e.get("text"), ids)) == ziel]
+    return (treffer[0] if len(treffer) == 1 else None), len(treffer)
 
 
 def _tv_dump_sichern(trail):
@@ -1678,13 +1726,16 @@ def modus_tvkonto(cmd):
     # verbunden ist — deshalb nicht der erste Stand, sondern so lange lesen,
     # bis ein Konto dasteht (oder die Zeit um ist). Ein Stand von VOR diesem
     # Lauf zaehlt nie: er koennte aus einem inzwischen geschlossenen Tab sein.
+    ext = str(cmd["ext_id"]).strip()
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
+                   if len(_nur_alnum(x)) >= 3][:60]
     ende = time.time() + (40.0 if gestartet else 12.0)
     bf, zustand, aktiv = None, "", ""
     while time.time() < ende:
         b = _tv_bf(nach=start, timeout=4.0)
         if b:
             bf = b
-            zustand, aktiv = tv_konto_zustand(b, cmd["ext_id"])
+            zustand, aktiv = tv_konto_zustand(b, ext, geschwister)
             if zustand != "kein_broker":
                 break
         _warte(0.8, 0.5)
@@ -1699,16 +1750,100 @@ def modus_tvkonto(cmd):
         res["ok"] = True
         return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
 
-    res["dump"] = _tv_dump_sichern(trail)
-    ziel = f"Login '{cmd['tv_username']}', Konto {cmd['ext_id']}"
-    if zustand == "falsch":
-        return raus(f"Falsches Konto aktiv: '{aktiv[:60]}' — gebraucht wird {ziel}. "
-                    "Den Wechsel klickt Puls noch nicht (Teil 2b). Bitte die Datei "
-                    f"{TV_KONTO_DUMP} aus dem mt5-copier-Ordner schicken.", "konto")
-    return raus(f"Kein verbundener Broker im TradingView-Panel zu sehen — gebraucht wird "
-                f"{ziel}. Ist unten das Broker-Panel offen? Das Anmelden klickt Puls "
-                f"noch nicht (Teil 2b). Bitte die Datei {TV_KONTO_DUMP} aus dem "
-                "mt5-copier-Ordner schicken.", "konto")
+    ziel = (f"Login '{cmd.get('tv_username')}', " if cmd.get("tv_username") else "") + f"Konto {ext}"
+    if zustand != "gleicher_login":
+        res["dump"] = _tv_dump_sichern(trail)
+        if zustand == "falsch":
+            return raus(f"Falscher Tradovate-Login: aktiv ist '{aktiv[:60]}', und das "
+                        f"kennt Prophos bei dieser Firma nicht — gebraucht wird {ziel}. "
+                        "Ab- und Anmelden klickt Puls noch nicht (Teil 2b). Bitte die "
+                        f"Datei {TV_KONTO_DUMP} aus dem mt5-copier-Ordner schicken.", "konto")
+        return raus(f"Kein verbundener Broker im TradingView-Panel zu sehen — gebraucht "
+                    f"wird {ziel}. Ist unten das Broker-Panel offen? Das Anmelden klickt "
+                    f"Puls noch nicht (Teil 2b). Bitte die Datei {TV_KONTO_DUMP} aus "
+                    "dem mt5-copier-Ordner schicken.", "konto")
+
+    # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
+    # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
+    # Drop-Down draufdruecken und den Account switchen."
+    def ab(msg):
+        res["dump"] = _tv_dump_sichern(trail)
+        return raus(msg + (f" (Unterlagen: {TV_KONTO_DUMP})" if res["dump"] else ""), "wechsel")
+
+    # Riegel VOR dem Wechsel: das aktive Konto muss flach sein. Der Reader kennt
+    # nur "das Konto im Panel" — nach dem Umschalten meldet er die Positionen
+    # des NEUEN Kontos als denselben Master, und der Orbit-Copier schloesse den
+    # Hedge der laufenden Position ("Master weg"; Gefahren-Fund 28.08.2026:
+    # nie umschalten mit offenem Trade).
+    pos, _an = _tv_positionen()
+    if pos is None:
+        return ab("Reader liefert keine Positionen — ohne den Beweis, dass "
+                  f"'{aktiv[:40]}' flach ist, wird das Konto nicht gewechselt.")
+    if pos:
+        return raus(f"Auf dem aktiven Konto '{aktiv[:40]}' ist noch eine Position offen "
+                    f"({len(pos)}). Erst schliessen — ein Kontowechsel wuerde dem Reader "
+                    "die Sicht darauf nehmen.", "wechsel")
+
+    if not isinstance(bf.get("geo"), dict) or not bf["geo"].get("innerWidth"):
+        return ab("Bedienfeld ohne Geometrie — Userscript-Version pruefen, TradingView neu laden.")
+    probe = []
+    w, f = _tv_fenster_holen(probe, tv_tab_suchbegriff(bf.get("titel")), "")
+    if not w:
+        return ab("TradingView-Fenster fuer den Klick nicht gefunden.")
+    try:
+        hwnd = w.handle
+    except Exception:
+        return ab("Browser-Fenster ohne Handle — Fenster neu oeffnen.")
+    _warte(0.3, 0.3)
+
+    schalter = _tv_element(bf, "konto", "schalter")
+    if not schalter:
+        return ab(f"Konto steht auf '{aktiv[:40]}' statt {ext} — der Konto-Umschalter "
+                  "wurde aber nicht eindeutig gefunden.")
+    ok, f = _tv_klick(schalter["rect"], bf["geo"], _klient_rechteck(hwnd), "Konto-Umschalter", trail)
+    if not ok:
+        return ab(f)
+    _warte(0.6, 0.5)
+
+    # Liste lesen — sie baut sich nach dem Klick erst auf, deshalb ein paar
+    # frische Staende lang suchen statt nur den ersten zu nehmen.
+    eintrag, anzahl, gesehen = None, 0, 0
+    ende = time.time() + 6.0
+    while time.time() < ende and not eintrag:
+        b = _tv_bf(nach=time.time(), timeout=3.0)
+        if b:
+            bf = b
+            liste = (b.get("konto") or {}).get("eintraege") or []
+            gesehen = len(liste)
+            eintrag, anzahl = tv_konto_eintrag(liste, ext, geschwister)
+    if not eintrag:
+        # Dropdown wieder schliessen, sonst bleibt es ueber dem Chart haengen.
+        try:
+            from pywinauto import keyboard
+            keyboard.send_keys("{ESC}")
+        except Exception:
+            pass
+        return ab(f"Konto {ext} in der Dropdown-Liste nicht eindeutig gefunden "
+                  f"({anzahl} Treffer bei {gesehen} Eintraegen). Liegt es wirklich "
+                  "unter diesem Tradovate-Login?")
+    ok, f = _tv_klick(eintrag["rect"], bf["geo"], _klient_rechteck(hwnd), f"Konto {ext}", trail)
+    if not ok:
+        return ab(f)
+
+    # Beweis: das Panel muss danach nachweislich das Zielkonto zeigen.
+    ende = time.time() + 10.0
+    while time.time() < ende:
+        _warte(0.6, 0.4)
+        b = _tv_bf(nach=time.time(), timeout=3.0)
+        if b:
+            zustand, aktiv = tv_konto_zustand(b, ext, geschwister)
+            if zustand == "richtig":
+                res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
+                trail.append(f"Konto steht auf {ext}")
+                return raus(f"Konto gewechselt — aktiv ist jetzt {aktiv[:60]}.", "wechsel")
+    res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+    return ab(f"Konto liess sich nicht auf {ext} umstellen — das Panel zeigt "
+              f"'{aktiv[:40] or '?'}'.")
 
 
 def modus_tvorder(cmd):

@@ -24536,15 +24536,28 @@
         const firmName = String((masterAcc && masterAcc.firm) || plan.masterFirm || '').trim()
         const firmSpec = (getCustomFirms() || []).find(f => String(f.name||'').trim().toLowerCase() === firmName.toLowerCase())
         const tvUser = firmSpec && firmSpec.tvUsername ? String(firmSpec.tvUsername).trim() : ''
-        if(!tvUser)
-          return err(`Order gespeichert — aber für „${firmName || '?'}" ist kein Tradovate-Username hinterlegt. Einstellungen → Prop Firms → Firma bearbeiten → „Tradovate-Username für TradingView".`)
+        // Geschwister (21.09.2026 abends, Finns Korrektur: im TradingView-
+        // Dropdown steht nie der Tradovate-Username, nur der Kontoname): ob der
+        // richtige LOGIN aktiv ist, beweist die Datenbank. Steht im Panel ein
+        // anderes Konto, das hier bei DERSELBEN Firma geführt wird, ist es
+        // derselbe Login — Puls wechselt dann nur im Dropdown. Accounts liegen
+        // pro Prophos-Login, „dieselbe Firma im selben Profil" ist also genau
+        // die Gruppe eines Tradovate-Logins. Archivierte zählen nicht mit.
+        // Der Username ist damit hier KEINE Pflicht mehr — gebraucht wird er
+        // erst fürs Ab-/Anmelden bei einem fremden Login (nächster Teilschritt).
+        const _arch = (typeof getArchive === 'function') ? getArchive() : {}
+        const geschwister = (accounts || [])
+          .filter(a => String(a.id) !== String(plan.masterAccountId)
+            && String(a.firm||'').trim().toLowerCase() === firmName.toLowerCase()
+            && a.externalId && !(_arch[a.id] && _arch[a.id].archived))
+          .map(a => String(a.externalId).trim())
         const startBtn = document.getElementById('tpOrderStart')
         if(startBtn) startBtn.disabled = true
-        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} (${tvUser}) prüfen. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
+        if(msg){ msg.textContent = `Puls übernimmt: TradingView öffnen → Konto ${extId} prüfen, bei Bedarf im Dropdown wechseln. HÄNDE WEG von Maus und Tastatur.`; msg.className = 'modal-msg' }
         try{
           const r = await window.mtcApi('tv-konto', { method:'POST',
             headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName }) })
+            body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, geschwister }) })
           if(r && r.ok){
             if(msg){ msg.textContent = `✓ ${r.msg || 'Richtiges Konto ist aktiv.'} Symbol und Order sind die nächsten Bau-Schritte — hier wurde noch nichts platziert.`; msg.className = 'modal-msg ok' }
           } else {
@@ -24588,7 +24601,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-21.315'
+  const OS_TAB_BUILD = '2026-09-21.316'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -544,12 +544,38 @@ def main():
         and order_bot.tv_konto_zustand(_bf(""), "FNFTCH150K4711")[0] == "falsch"
         # zu kurze External ID matcht nie (Riegel aus tv_konto_passt)
         and order_bot.tv_konto_zustand(_bf("PA-12"), "12")[0] == "falsch")
-    chk("TV-KONTO: Befehl — External ID und Username Pflicht, Username ohne Leer-/Steuerzeichen",
+    chk("TV-KONTO: Befehl — External ID Pflicht, Username optional aber sauber, geschwister = Liste",
         order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "FNF_finn"}) == []
-        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "12", "tv_username": ""})) == 2
+        and order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711"}) == []
+        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "12", "tv_username": ""})) == 1
         and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a b"})) == 1
         and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "tv_username": "a\tb"})) == 1
+        and len(order_bot.pruefe_tv_konto_befehl({"ext_id": "FNFTCH4711", "geschwister": "x"})) == 1
         and order_bot.pruefe_tv_konto_befehl("x") != [])
+    # Finns Korrektur 21.09.2026: im Dropdown steht nur der Kontoname. Derselbe
+    # Login wird ueber die Geschwister-Konten derselben Firma bewiesen.
+    _g = ["APEX-123-02", "APEX-123-011"]
+    chk("TV-KONTO: Geschwister — gleicher Login erkannt, fremdes Konto bleibt 'falsch'",
+        order_bot.tv_konto_zustand(_bf("APEX-123-02 · PA"), "APEX-123-01", _g)[0] == "gleicher_login"
+        and order_bot.tv_konto_zustand(_bf("APEX-123-01 · PA"), "APEX-123-01", _g)[0] == "richtig"
+        and order_bot.tv_konto_zustand(_bf("TDFY-999-01"), "APEX-123-01", _g)[0] == "falsch"
+        and order_bot.tv_konto_zustand(_bf("APEX-123-02"), "APEX-123-01", [])[0] == "falsch")
+    # Teilstring-Falle: 'APEX-123-01' steckt in 'APEX-123-011'. Ohne die
+    # Laengste-ID-Regel gaelte das Geschwister-Konto als das Zielkonto — und
+    # die Order ginge spaeter aufs falsche Konto.
+    chk("TV-KONTO: laengste passende ID gewinnt (…-01 ist nicht …-011)",
+        order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-01", _g)[0] == "gleicher_login"
+        and order_bot.tv_konto_zustand(_bf("APEX-123-011"), "APEX-123-011", ["APEX-123-01"])[0] == "richtig"
+        and order_bot.tv_konto_bestes("APEX-123-011 · PA", ["APEX-123-01", "APEX-123-011"]) == "APEX-123-011"
+        and order_bot.tv_konto_bestes("TDFY", ["APEX-123-01"]) == "")
+    _e = lambda t, **k: dict({"text": t, "rect": {"x": 1, "y": 1, "w": 9, "h": 9}}, **k)
+    chk("TV-KONTO: Dropdown-Eintrag — genau einer, nie der laengere Namensvetter, nie ein mehrdeutiger",
+        order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g)[0]["text"] == "APEX-123-01"
+        and order_bot.tv_konto_eintrag([_e("APEX-123-011"), _e("APEX-123-02")], "APEX-123-01", _g) == (None, 0)
+        and order_bot.tv_konto_eintrag([_e("APEX-123-01"), _e("APEX-123-01 (2)")], "APEX-123-01", _g) == (None, 2)
+        and order_bot.tv_konto_eintrag([_e("APEX-123-01", fehlt=True)], "APEX-123-01", _g) == (None, 0)
+        and order_bot.tv_konto_eintrag([{"text": "APEX-123-01"}], "APEX-123-01", _g) == (None, 0)
+        and order_bot.tv_konto_eintrag(None, "APEX-123-01", _g) == (None, 0))
 
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
