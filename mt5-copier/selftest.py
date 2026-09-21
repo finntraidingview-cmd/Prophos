@@ -676,7 +676,8 @@ def main():
         and all(order_bot.TV_RX_CONNECT.search(x) for x in ("Connect", "Connect broker", "Verbinden"))
         and not any(order_bot.TV_RX_CONNECT.search(x) for x in ("Cannot connect to broker? Let us know", "Connected", "Disconnect"))
         and order_bot.TV_RX_DEMO.search("Demo") and not order_bot.TV_RX_DEMO.search("Demo account info")
-        and order_bot.TV_RX_BROKER.search("Tradovate") and not order_bot.TV_RX_BROKER.search("Tradovate GOLD")
+        and order_bot.TV_RX_BROKER.search("Tradovate") and order_bot.TV_RX_BROKER.search("Tradovate 4.4")
+        and not order_bot.TV_RX_BROKER.search("Tradovated") and not order_bot.TV_RX_BROKER.search("Connect Tradovate")
         and order_bot.TV_RX_KACHELSICHT.search("Paper Trading") and not order_bot.TV_RX_TRADE.search("Trade with your broker"))
     _N = [("Tradovate", (70, 850, 190, 880), "Button"), ("Tradovate", (100, 856, 170, 874), "Text"),
           ("Tradovate", (900, 300, 1000, 330), "Text"), ("Trade", (1700, 10, 1760, 40), "Button"),
@@ -693,6 +694,43 @@ def main():
     chk("TV-LOGIN: Diagnose-Inventar — kurz, ohne Doppelte, lange Texte (News) raus",
         order_bot.tv_uia_inventar(_N + [("x" * 60, (1, 1, 9, 9), "Text")]) ==
             ["Button:Tradovate@70,850", "Text:Tradovate@100,856", "Button:Trade@1700,10", "Button:Unsichtbar"])
+
+    # Finns erster 2b-Lauf (21.09.2026 nachts): aktiv war 'PAAPEX6416990000008' —
+    # darin steckt 'APEX6416990000008' als Teilstring. Zwei verschiedene Konten.
+    chk("TV-KONTO: ganze Woerter statt Teilstring — PAAPEX…008 ist NICHT APEX…008",
+        not order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "APEX6416990000008")
+        and order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "PAAPEX6416990000008")
+        and order_bot.tv_konto_wort_passt("APEX6416990000024 USD", "APEX6416990000024")
+        and order_bot.tv_konto_wort_passt("APEX-123-01 · PA", "APEX12301")
+        and order_bot.tv_konto_wort_passt("Konto (APEX-123-01)", "APEX-123-01")
+        and not order_bot.tv_konto_wort_passt("APEX-123-011", "APEX-123-01")
+        and not order_bot.tv_konto_wort_passt("PA-12", "12")
+        and order_bot.tv_konto_zustand(_bf("PAAPEX6416990000008 USD"), "APEX6416990000008", [])[0] == "falsch")
+    chk("TV-LOGIN: Menuepunkt 'Connect another broker…' und kontonummer-artige Namen",
+        order_bot.TV_RX_ANDERER_BROKER.search("Connect another broker…")
+        and order_bot.TV_RX_ANDERER_BROKER.search("Anderen Broker verbinden…")
+        and not order_bot.TV_RX_ANDERER_BROKER.search("Connect broker")
+        and not order_bot.TV_RX_ANDERER_BROKER.search("Trading settings…")
+        and all(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("PAAPEX6416990000008 USD", "APEX6416990000024", "TDFY-123456-01 EUR"))
+        and not any(order_bot.TV_RX_KONTOARTIG.search(x) for x in ("Account Balance", "157,501.40", "NQU2026", "Tradovate", "29,613.75 USD")))
+    _K = [("Tradovate", (640, 470, 740, 500), "Text"), ("Tradovate", (660, 400, 720, 460), "Image"),
+          ("Tradovate", (110, 970, 180, 995), "Text"), ("Tradovate", (80, 965, 210, 1000), "Button")]
+    chk("TV-LOGIN: Kachel — Bild-Alt neben dem Text ist EIN Ding (Typ-Vorrang), Broker-Knopf unten ausgenommen",
+        [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, 0.08, 0.78, ohne=(80, 965, 210, 1000))] == [(640, 470, 740, 500)]
+        and [e["r"] for e in order_bot.tv_uia_namen_filtern(_K, order_bot.TV_RX_BROKER, _F, y_von=0.5)] == [(110, 970, 180, 995)])
+    chk("TV-LOGIN: Spur fuer die Fehlermeldung — nur Einschlaegiges, kurz",
+        order_bot.tv_uia_spur([("Trade", None, "Button"), ("Indicators", None, "Button"), ("Tradovate", (1, 1, 9, 9), "Text"),
+                               ("Log out", None, "MenuItem"), ("x" * 50 + "broker", None, "Text")]) == "Button:Trade | Text:Tradovate | MenuItem:Log out"
+        and order_bot.tv_uia_spur([]) == "nichts Einschlaegiges")
+
+    # Fund der Simulation (21.09.2026 nachts): der Username steckt als Teilstring
+    # in einer Kontonummer — der Autofill-Vorschlag darf nur als GANZES WORT passen.
+    chk("TV-LOGIN: Autofill — Username nur als ganzes Wort, nie in 'PAAPEX6416990000008'",
+        order_bot.tv_konto_wort_passt("APEX_641699", "APEX_641699")
+        and order_bot.tv_konto_wort_passt("APEX_641699, ••••••••", "APEX_641699")
+        and order_bot.tv_konto_wort_passt("apex_641699 tradovate.com", "APEX_641699")
+        and not order_bot.tv_konto_wort_passt("PAAPEX6416990000008 USD", "APEX_641699")
+        and not order_bot.tv_konto_wort_passt("APEX_6416990", "APEX_641699"))
 
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
