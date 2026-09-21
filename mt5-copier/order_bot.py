@@ -1967,6 +1967,10 @@ def tv_tasten_escape(text):
 # Stelle weg, deren Lage sich aendert (Favoriten, Reihenfolge, Fenstergroesse).
 TV_TRADE_NOW = "?trade-now=TRADOVATE"
 
+# "Don't remember me" im Connect-Dialog (am echten TradingView gesehen, 21.09.).
+TV_RX_NICHT_MERKEN = re.compile(r"(don.?t|do not|nicht)\s+(remember|merken|speichern|erinnern)", re.I)
+TV_NAMEN_NICHT_MERKEN = ("Don't remember me", "Don’t remember me", "Do not remember me",
+                         "Nicht merken", "Nicht speichern")
 TV_NAMEN_BROKER = ("Tradovate",)
 TV_NAMEN_LOGOUT = ("Log out", "Logout", "Sign out", "Abmelden", "Ausloggen", "Disconnect", "Trennen")
 TV_NAMEN_DEMO = ("Demo",)
@@ -2698,16 +2702,21 @@ def modus_tvkonto(cmd):
             Schliessen/Neu-Oeffnen allein fuehrt nie zum Dialog. -> 'ok' | 'fertig'"""
             ok, f = _tv_uia_klick(broker_el, "Broker-Menue", trail)
             if not ok:
-                return ab(f, "login")
+                trail.append("Broker-Menue nicht klickbar")
+                return "nicht"
             _warte(0.6, 0.4)
             el, n = warte_auf(TV_NAMEN_LOGOUT, TV_RX_LOGOUT, 8.0, "logout_menue")
             if not el:
+                # Kein Abbruch mehr (22.09.2026): seit Puls "Don't remember me"
+                # setzt, genuegt Tab zu + neu mit Link. Nur die EINE noch
+                # gemerkte Alt-Sitzung braucht ein Abmelden — klappt es hier
+                # nicht, sagt es die Schluss-Meldung.
                 esc()
-                return ab("Broker-Menue geoeffnet, aber 'Log out' darin nicht eindeutig gefunden "
-                          f"({n} Treffer)." + spur[0], "login")
+                trail.append(f"'Log out' im Menue nicht gefunden ({n})" + spur[0][:160])
+                return "nicht"
             ok, f = _tv_uia_klick(el, "Log out", trail)
             if not ok:
-                return ab(f, "login")
+                return "nicht"
             # Fragt TradingView nach ("Wirklich abmelden?"), steht ein ZWEITER
             # Knopf mit demselben Verb da — genau einmal nachklicken.
             ende_l, nachgefragt = time.time() + 16.0, False
@@ -2722,8 +2731,8 @@ def modus_tvkonto(cmd):
                     if len(best) == 1:
                         nachgefragt = True
                         _tv_uia_klick(best[0], "Log out bestaetigen", trail)
-            return ab("'Log out' geklickt, aber der Broker-Knopf 'Tradovate' steht danach noch im "
-                      "Panel.", "login")
+            trail.append("'Log out' geklickt, Broker-Knopf steht aber noch da")
+            return "nicht"
 
         def neu_mit_link():
             """TradingView-Tab schliessen, neu mit der Direkt-Adresse oeffnen, das
@@ -2746,6 +2755,69 @@ def modus_tvkonto(cmd):
             _warte(1.5, 1.0)
             return "ok"
 
+        def nicht_merken():
+            """FINNS IDEE (22.09.2026, nach drei Laeufen, in denen das Abmelden
+            nicht griff): "bei TradingView gibt's beim Connecten diesen Button
+            'Konto merken oder nicht merken'" — den Haken "Don't remember me"
+            bei JEDEM Verbinden setzen. Dann merkt sich TradingView die
+            Tradovate-Verbindung nicht mehr (das TradingView-Konto selbst bleibt
+            unberuehrt): jeder Start mit der Direkt-Adresse landet im Connect-
+            Dialog — genau der Weg, der am 22.09. live durchgelaufen ist. Das
+            Abmelden wird damit ueberfluessig.
+            Nie ein Abbruchgrund: klappt der Haken nicht, wird trotzdem
+            verbunden — dann merkt sich TradingView diese eine Sitzung eben noch.
+            Der Zustand wird gelesen (kein blinder Klick, der einen gesetzten
+            Haken wieder entfernt)."""
+            kasten = None
+            try:
+                for cb in w.descendants(control_type="CheckBox"):
+                    try:
+                        if TV_RX_NICHT_MERKEN.search((cb.window_text() or "").strip()) and cb.is_visible():
+                            kasten = cb
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                kasten = None
+
+            def zustand_kasten():
+                try:
+                    return int(kasten.get_toggle_state())      # 1 = gesetzt
+                except Exception:
+                    return None
+
+            if kasten is not None:
+                z = zustand_kasten()
+                if z == 1:
+                    trail.append("'Don't remember me' war schon gesetzt")
+                    return
+                try:
+                    r = kasten.rectangle()
+                    ziel_k = {"punkt": ((r.left + r.right) // 2, (r.top + r.bottom) // 2)}
+                except Exception:
+                    ziel_k = None
+                if ziel_k:
+                    _tv_uia_klick(ziel_k, "Don't remember me", trail)
+                    _warte(0.3, 0.3)
+                    z2 = zustand_kasten()
+                    if z2 == 1:
+                        trail.append("'Don't remember me' gesetzt (bewiesen)")
+                    elif z2 == 0 and z is None:
+                        # Zustand vorher unlesbar, jetzt AUS: der Klick hat einen
+                        # gesetzten Haken entfernt -> einmal zurueck.
+                        _tv_uia_klick(ziel_k, "Don't remember me (zurueck)", trail)
+                    else:
+                        trail.append("'Don't remember me' geklickt (Zustand nicht lesbar)")
+                    return
+            # Kein Kontrollkaestchen im Baum: die Beschriftung anklicken — sie
+            # schaltet den Haken. Standard im frisch geoeffneten Dialog ist AUS.
+            els, _r = finde(TV_NAMEN_NICHT_MERKEN, TV_RX_NICHT_MERKEN)
+            if len(els) == 1:
+                _tv_uia_klick(els[0], "Don't remember me (Beschriftung)", trail)
+                _warte(0.3, 0.3)
+            else:
+                trail.append(f"'Don't remember me' nicht gefunden ({len(els)}) — Sitzung wird gemerkt")
+
         def anmelden(el):
             """Dialog steht da: Demo -> Connect -> Tradovate-Tab -> Autofill ->
             Beweis -> Anmelden -> Tab zu -> Panel neu lesen.
@@ -2757,6 +2829,7 @@ def modus_tvkonto(cmd):
             if not ok:
                 return ab(f, "login")
             _warte(0.4, 0.3)
+            nicht_merken()
             el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
             if not el:
                 esc()
@@ -2952,8 +3025,7 @@ def modus_tvkonto(cmd):
                 trail.append("Broker verbunden, Zielkonto nicht im Panel")
                 if runde == 1 and dropdown_pruefen(broker[0]) == "fertig":
                     return
-                if abmelden(broker[0]) == "fertig":
-                    return
+                abmelden(broker[0])          # 'nicht' ist kein Abbruch — weiter mit Tab zu + neu
             if neu_mit_link() == "fertig":
                 return
             art, el_demo = dialog_oder_verbunden(40.0)
@@ -2962,9 +3034,12 @@ def modus_tvkonto(cmd):
             if art != "dialog":
                 gesehen = tv_uia_spur(_tv_uia_roh(w, ("Button", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,)))
                 return ab("TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen"
-                          + (" — es hat sich wieder von selbst verbunden." if art == "verbunden" else ".")
-                          + " Ist in einem ANDEREN Chrome-Fenster noch ein TradingView-Tab offen? "
-                          f"Gesehen: {gesehen}", "login")
+                          + (" — es hat sich wieder von selbst mit dem alten Login verbunden (gemerkte "
+                             "Sitzung). EINMAL von Hand: unten 'Tradovate' > 'Log out', dann erneut "
+                             "starten. Ab dann setzt Puls bei jedem Verbinden 'Don't remember me', und "
+                             "es passiert nicht wieder." if art == "verbunden" else
+                             ". Ist in einem ANDEREN Chrome-Fenster noch ein TradingView-Tab offen?")
+                          + f" Gesehen: {gesehen}", "login")
             if anmelden(el_demo) == "fertig":
                 return
 

@@ -772,6 +772,14 @@ def main():
         and not order_bot.tv_tab_schliessbar("", "Chrome_WidgetWin_1")
         and not order_bot.tv_tab_schliessbar("NQU2026 29,613.75 ▲ +0.57% Unnamed", "ConsoleWindowClass"))
 
+    # Finns Idee 22.09.2026: "Don't remember me" bei jedem Verbinden setzen.
+    chk("TV-LOGIN: 'Don't remember me' — erkannt in allen Schreibweisen, nichts Benachbartes",
+        all(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
+            ("Don't remember me", "Don’t remember me", "Do not remember me", "Nicht merken", "Nicht speichern"))
+        and not any(order_bot.TV_RX_NICHT_MERKEN.search(x) for x in
+                    ("Remember me", "Connect", "Demo", "Cannot connect to broker? Let us know."))
+        and all(order_bot.TV_RX_NICHT_MERKEN.search(n) for n in order_bot.TV_NAMEN_NICHT_MERKEN))
+
     # ── Orbit-Puls Schritt 2 (30.08.2026): Order auf TradingView platzieren ──
     # Der Puls klickt hier nach Koordinaten, die eine Webseite meldet — jede
     # dieser Rechnungen kann still danebenliegen, deshalb stehen sie alle hier.
