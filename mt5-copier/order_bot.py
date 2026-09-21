@@ -2008,9 +2008,21 @@ def _tv_uia_nativ(w, namen):
         pid = u.UIA_dll.UIA_NamePropertyId
         bed = None
         for n in namen:
-            try:
-                c = u.iuia.CreatePropertyConditionEx(pid, n, 1)      # 1 = IgnoreCase
-            except Exception:
+            # 3 = IgnoreCase + MatchSubstring: TradingView setzt um manche Namen
+            # Leerraum ('Tradovate ' am Broker-Knopf — Finns Lauf 22.09.2026:
+            # exakt 'Tradovate' fand NICHTS, der Bot hielt ein verbundenes
+            # TradingView fuer unverbunden). Die genaue Pruefung macht danach
+            # ohnehin das Muster in tv_uia_namen_filtern, auf dem gestrippten
+            # Namen. Aeltere Windows kennen die Teilstring-Suche nicht -> stufen-
+            # weise zurueck.
+            c = None
+            for flags in (3, 1):
+                try:
+                    c = u.iuia.CreatePropertyConditionEx(pid, n, flags)
+                    break
+                except Exception:
+                    continue
+            if c is None:
                 c = u.iuia.CreatePropertyCondition(pid, n)
             bed = c if bed is None else u.iuia.CreateOrCondition(bed, c)
         feld = w.element_info.element.FindAll(u.tree_scope["descendants"], bed)
@@ -2021,7 +2033,7 @@ def _tv_uia_nativ(w, namen):
                 if e.CurrentIsOffscreen:
                     continue
                 r = e.CurrentBoundingRectangle
-                roh.append((str(e.CurrentName or ""), (r.left, r.top, r.right, r.bottom),
+                roh.append((str(e.CurrentName or "").strip(), (r.left, r.top, r.right, r.bottom),
                             _UIA_TYPNAME.get(e.CurrentControlType, str(e.CurrentControlType))))
             except Exception:
                 continue
@@ -2579,10 +2591,16 @@ def modus_tvkonto(cmd):
             t_scan = time.time()
             roh = _tv_uia_nativ(q, namen)
             weg = "nativ"
-            if roh is None:
-                roh, weg = _tv_uia_roh(q, muster=(muster,)), "scan"
+            els = tv_uia_namen_filtern(roh or [], muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne)
+            if not els:
+                # Kein Treffer ist beim gezielten Weg KEIN Beweis (22.09.2026: der
+                # Broker-Knopf war da, die exakte Namenssuche sah ihn nicht) — der
+                # langsame Scan hat genau dieses Element am 21.09. gefunden, also
+                # hat er das letzte Wort. Kostet Sekunden, aber nur wenn noetig.
+                roh, weg = _tv_uia_roh(q, muster=(muster,)), ("scan" if roh is None else "nativ+scan")
+                els = tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne)
             uia_info["scan"] = {"weg": weg, "n": len(roh), "s": round(time.time() - t_scan, 1)}
-            return tv_uia_namen_filtern(roh, muster, _tv_fenster_rect(q), y_von, y_bis, ohne=ohne), roh
+            return els, roh
 
         def warte_auf(namen, muster, sek, stelle, y_von=0.0, y_bis=1.0, quelle=None, ohne=None):
             """Pollt, bis GENAU EIN Element passt — mindestens drei Durchgaenge,
@@ -2889,57 +2907,64 @@ def modus_tvkonto(cmd):
             return "dropdown"
 
         # ---- Ablauf -----------------------------------------------------------
+        # Bis zu ZWEI Runden (22.09.2026, Finns Lauf: verbundenes TradingView nicht
+        # erkannt -> Tab zu, neu, wieder selbst verbunden -> Ende). Steht nach dem
+        # Neu-Oeffnen ein verbundener Broker da, wird er in der zweiten Runde
+        # abgemeldet, statt aufzugeben.
         login_noetig = True
         if frisch_mit_link:
             trail.append("TradingView frisch mit Direkt-Adresse gestartet")
             art, el_demo = dialog_oder_verbunden(40.0)
         else:
             art, el_demo = ("verbunden" if broker_knopf() else "nichts"), None
+        gelesen = not frisch_mit_link          # war TradingView schon offen, wurde oben gelesen
 
-        if art == "verbunden":
-            if frisch_mit_link:
-                # Gemerkte Sitzung hat sich von selbst verbunden — vielleicht ist es
-                # ja der richtige Login: erst lesen, dann handeln.
-                trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
-                ende_v = time.time() + 25.0
-                while True:
-                    zustand, aktiv, bf, uia_el = lies()
-                    if zustand in ("richtig", "gleicher_login") or time.time() >= ende_v:
+        for runde in (1, 2):
+            if art == "dialog" or not login_noetig:
+                break
+            if art == "verbunden":
+                if not gelesen:
+                    # Gemerkte Sitzung hat sich von selbst verbunden — vielleicht ist
+                    # es ja der richtige Login: erst lesen, dann handeln.
+                    gelesen = True
+                    trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
+                    ende_v = time.time() + 25.0
+                    while True:
+                        zustand, aktiv, bf, uia_el = lies()
+                        if zustand in ("richtig", "gleicher_login") or time.time() >= ende_v:
+                            break
+                        _warte(0.8, 0.5)
+                    res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
+                    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
+                    if zustand == "richtig":
+                        res["ok"] = True
+                        return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
+                    if zustand == "gleicher_login":
+                        login_noetig = False
                         break
-                    _warte(0.8, 0.5)
-                res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
-                trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
-                if zustand == "richtig":
-                    res["ok"] = True
-                    return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
-                if zustand == "gleicher_login":
-                    login_noetig = False
-                else:
-                    f = flach_pruefen("ab- und angemeldet")
-                    if f:
-                        return ab(f, "login")
-            if login_noetig:
+                f = flach_pruefen("ab- und angemeldet")
+                if f:
+                    return ab(f, "login")
                 broker = broker_knopf()
                 if len(broker) != 1:
                     return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
                               f"({len(broker)} Treffer).", "login")
                 trail.append("Broker verbunden, Zielkonto nicht im Panel")
-                if dropdown_pruefen(broker[0]) == "fertig":
+                if runde == 1 and dropdown_pruefen(broker[0]) == "fertig":
                     return
                 if abmelden(broker[0]) == "fertig":
                     return
+            if neu_mit_link() == "fertig":
+                return
+            art, el_demo = dialog_oder_verbunden(40.0)
 
         if login_noetig:
             if art != "dialog":
-                if neu_mit_link() == "fertig":
-                    return
-                art, el_demo = dialog_oder_verbunden(40.0)
-                if art != "dialog":
-                    gesehen = tv_uia_spur(_tv_uia_roh(w, ("Button", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,)))
-                    return ab("TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen"
-                              + (" — es hat sich wieder von selbst verbunden." if art == "verbunden" else ".")
-                              + " Ist in einem ANDEREN Chrome-Fenster noch ein TradingView-Tab offen? "
-                              f"Gesehen: {gesehen}", "login")
+                gesehen = tv_uia_spur(_tv_uia_roh(w, ("Button", "RadioButton", "Text"), 3000, muster=(TV_RX_SPUR,)))
+                return ab("TradingView ist neu offen, aber der Tradovate-Dialog ist nicht erschienen"
+                          + (" — es hat sich wieder von selbst verbunden." if art == "verbunden" else ".")
+                          + " Ist in einem ANDEREN Chrome-Fenster noch ein TradingView-Tab offen? "
+                          f"Gesehen: {gesehen}", "login")
             if anmelden(el_demo) == "fertig":
                 return
 
