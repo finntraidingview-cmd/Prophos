@@ -1803,6 +1803,13 @@ def tv_uia_filtern(roh, ids, fenster=None, nur_ziel=None, ohne=None):
         mx, my = (l + rr) // 2, (t + b) // 2
         if fenster and not (fenster[0] <= mx <= fenster[2] and fenster[1] <= my <= fenster[3]):
             continue
+        # KLEMMEN (22.09.2026 12:33, Finns PC: der Konto-Umschalter ragt unter den
+        # Fensterrand, nur ein Streifen ist sichtbar; die Element-MITTE (y=2074) lag
+        # in Chromes unsichtbarem Anfass-Rand am Fensterboden — der Klick traf nichts,
+        # 'der Knopf wurde noch nie gedrueckt'). Der Punkt bleibt mindestens 12 px
+        # ueber dem Fensterboden und im oberen Teil des Elements.
+        if fenster:
+            my = max(t + 3, min(my, fenster[3] - 12))
         bestes = tv_konto_bestes(text, ids)
         if not bestes:
             continue
@@ -2909,18 +2916,8 @@ def modus_tvkonto(cmd):
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
     trail = _StempelSpur()      # jeder Eintrag traegt seine Sekunde seit Lauf-Start
     fenster = [None]
-    maximiert = [False]         # Panel per 'Maximize panel' offen -> vor dem Ende 'Restore panel'
 
     def raus(msg, schritt):
-        # Maximiertes Panel IMMER zuruecknehmen — auch bei Absage: sonst bleibt der
-        # Chart verdeckt, und der Asset-Schritt faende Watchlist und Order-Panel nicht.
-        if maximiert[0]:
-            maximiert[0] = False
-            try:
-                if fenster[0]:
-                    _tv_panel_wiederherstellen(fenster[0], trail)
-            except Exception:
-                pass
         res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
         # Text-Suche wieder aus: sie laeuft durchs ganze DOM und soll nie im
         # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
@@ -2969,7 +2966,6 @@ def modus_tvkonto(cmd):
     _tv_http("/suche", {"texte": ids}, timeout=1.5)   # nur fuer Userscript 0.4.2+, sonst wirkungslos
 
     uia_info = {}
-    aufgezogen = [False]        # Tradovate-Panel schon aufgezogen? (einmal pro Lauf)
 
     fenster_gesehen = [""]
 
@@ -3012,19 +3008,10 @@ def modus_tvkonto(cmd):
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
                 return z2, e["text"], b, e
-            # Panel unten zu flach (Finns PC, 22.09.2026: eingeklappt, oder offen, aber
-            # ohne Platz fuer die Konto-Liste): einmal pro Tab aufziehen, dann weiterlesen.
-            # Unabhaengig davon, ob ein Konto zu sehen ist — im zweiten Lauf WAR eines zu
-            # sehen, und die Liste dahinter blieb trotzdem abgeschnitten.
-            if not aufgezogen[0]:
-                aufgezogen[0] = True
-                try:
-                    if _tv_panel_aufziehen(w, trail):
-                        maximiert[0] = True
-                        _warte(0.8, 0.3)
-                        return lies()
-                except Exception as e_:
-                    trail.append(f"Panel aufziehen: {type(e_).__name__}")
+            # (Das Aufziehen/Maximieren des Panels aus .356-.359 ist NICHT mehr verdrahtet —
+            # Finn 22.09.2026 12:33: der Umschalter unten links reicht, die Liste klappt nach
+            # OBEN auf; das eigentliche Problem war der Klickpunkt unter dem Fensterrand,
+            # s. tv_uia_filtern.)
         return z, a, b, None
 
     ende = time.time() + (40.0 if gestartet else 14.0)
@@ -3604,7 +3591,6 @@ def modus_tvkonto(cmd):
             # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
             # Firma dastehen.
             fenster[0] = None
-            aufgezogen[0] = False       # neuer Tab: das Panel kann wieder eingeklappt laden
             start = time.time()
             ende = time.time() + 45.0
             while True:
@@ -3645,7 +3631,6 @@ def modus_tvkonto(cmd):
                     # es ja der richtige Login: erst lesen, dann handeln.
                     gelesen = True
                     trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
-                    aufgezogen[0] = False
                     ende_v = time.time() + 25.0
                     while True:
                         zustand, aktiv, bf, uia_el = lies()
@@ -3692,14 +3677,6 @@ def modus_tvkonto(cmd):
     w = tv_fenster(versuche=8)
     if not w:
         return ab("TradingView-Fenster fuer den Klick nicht gefunden. " + fenster_gesehen[0])
-    # Vor dem Dropdown: Panel muss Platz fuer die Liste haben (Finns PC, 22.09.2026 —
-    # 'Dropdown geoeffnet … 0 Treffer'). Kein Aufwand, wenn es schon offen ist.
-    try:
-        if _tv_panel_aufziehen(w, trail):
-            maximiert[0] = True
-            _warte(0.8, 0.3)
-    except Exception as e_:
-        trail.append(f"Panel aufziehen: {type(e_).__name__}")
     try:
         hwnd = w.handle
     except Exception:
@@ -3738,7 +3715,7 @@ def modus_tvkonto(cmd):
     eintrag, eintrag_uia, anzahl = None, None, 0
     ende = time.time() + 9.0
     while time.time() < ende and not (eintrag or eintrag_uia):
-        b = _tv_bf(nach=time.time(), timeout=1.5)
+        b = _tv_bf(nach=time.time(), timeout=0.3)      # Userscript laeuft bei Finn nicht — nicht 1,5 s je Runde warten
         if b and isinstance(b.get("treffer"), list):
             per_text = tv_konto_per_text(b, ids, nur_ziel=ext, ohne=schalter_css, ueberall=True)
             anzahl = len(per_text)

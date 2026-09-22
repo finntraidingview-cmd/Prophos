@@ -969,6 +969,10 @@ def main():
         order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1030, 1116, 1048), "Text"), ("Equity", (1150, 1030, 1190, 1048), "Text")], _FR) is None
         and order_bot.tv_panel_eingeklappt([("Symbol", (1656, 297, 1700, 315), "Text")], _FR) is None
         and order_bot.tv_panel_eingeklappt(_PK, None) is None)
+    # Klickpunkt am Fensterrand (22.09.2026 12:33, Finns PC): Umschalter ragt unter den Rand
+    chk("TV-UIA: Klickpunkt bleibt 12 px ueber dem Fensterboden, wenn das Element darunter hinausragt",
+        order_bot.tv_uia_filtern([("FNFTCHFINNSAMUELHERM11892 USD", (80, 1165, 330, 1200))], ["FNFTCHFINNSAMUELHERM11892"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)
+        and order_bot.tv_uia_filtern([("FNFTCHFINNSAMUELHERM11892 USD", (80, 900, 330, 930))], ["FNFTCHFINNSAMUELHERM11892"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 915))
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
