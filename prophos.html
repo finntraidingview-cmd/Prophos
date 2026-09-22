@@ -1208,38 +1208,39 @@
   #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
   #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
   #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
-  #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
   #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:rgba(0,0,0,.025)}
   #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(42,157,92,.07)}
   #adm-pane-wd .wd-ablauf-tab tr.offen td{background:rgba(99,91,255,.06);border-bottom:0}
-  #adm-pane-wd .wd-ablauf-tab td.pfeil{width:14px;color:var(--sub)}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 10px 18px;background:rgba(99,91,255,.03)}
   #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px}
-  #adm-pane-wd .wd-aus-chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:999px;padding:1px 4px 1px 9px;font-size:12px}
-  #adm-pane-wd .btn-xs{padding:1px 7px;font-size:11px;height:auto;line-height:1.5}
-  #adm-pane-wd .wd-konten{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
-  #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
-  #adm-pane-wd .wd-konten td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle}
-  #adm-pane-wd .wd-konten tr:last-child td{border-bottom:0}
-  #adm-pane-wd .wd-konten tr.aus td{opacity:.5}
-  #adm-pane-wd .wd-konten tr.aus td:first-child{opacity:1}
-  #adm-pane-wd .wd-konten .wd-in{width:70px}
-  #adm-pane-wd .wd-hedge-kopf{font-weight:600;font-size:13px;margin:14px 0 6px}
-  #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
-  #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
-  #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
-  #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(42,157,92,.07)}
-  #adm-pane-wd .wd-konten{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
-  #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
-  #adm-pane-wd .wd-konten td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle}
-  #adm-pane-wd .wd-konten tr:last-child td{border-bottom:0}
-  #adm-pane-wd .wd-konten tr.aus td{opacity:.5}
-  #adm-pane-wd .wd-konten tr.aus td:first-child{opacity:1}
-  #adm-pane-wd .wd-konten .wd-in{width:70px}
-  #adm-pane-wd .wd-hedge-kopf{font-weight:600;font-size:13px;margin:14px 0 6px}
-  #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
-  #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
-  #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
+  /* Einstellungen als drei Karten (23.09.2026, Finn: „unten auch draufdrücken, mehr Farben, Firma anklicken und
+     die Werte schnell eingeben, Tabelle größer — nicht alles hingeschmissen") */
+  #adm-pane-wd .wd-set-grid{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
+  @media (max-width:1180px){#adm-pane-wd .wd-set-grid{grid-template-columns:1fr}}
+  #adm-pane-wd .wd-set-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px 14px;background:var(--surface,#fff)}
+  #adm-pane-wd .wd-set-card h4{font-size:13.5px;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  #adm-pane-wd .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px}
+  #adm-pane-wd .wd-feld label{display:block;font-size:11px;color:var(--sub);margin-bottom:3px}
+  #adm-pane-wd .wd-feld .input{width:100%;text-align:left;font-size:13px;padding:6px 9px;height:auto}
+  #adm-pane-wd .wd-feld .at-toggle{font-size:12.5px;color:var(--ink)}
+  #adm-pane-wd .wd-firma{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;cursor:pointer;border:1px solid transparent;transition:background .12s}
+  #adm-pane-wd .wd-firma:hover{background:rgba(0,0,0,.03)}
+  #adm-pane-wd .wd-firma.offen{background:rgba(99,91,255,.06);border-color:var(--violet)}
+  #adm-pane-wd .wd-firma .punkt{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
+  #adm-pane-wd .wd-firma .fn{font-weight:600;font-size:13.5px}
+  #adm-pane-wd .wd-firma .fz{margin-left:auto;font-family:var(--mono,ui-monospace,monospace);font-size:12.5px;font-weight:600}
+  #adm-pane-wd .wd-firma-edit{display:none;padding:6px 10px 12px 30px;gap:12px;align-items:end;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:4px}
+  #adm-pane-wd .wd-firma.offen + .wd-firma-edit{display:flex}
+  #adm-pane-wd .wd-firma-edit .wd-feld{width:110px}
+  #adm-pane-wd .wd-stufe{display:grid;grid-template-columns:8px 100px 1fr 118px 28px;gap:8px;align-items:center;padding:4px 0}
+  #adm-pane-wd .wd-stufe.kopf{font-size:11px;color:var(--sub);padding-bottom:2px}
+  #adm-pane-wd .wd-stufe .balken{width:8px;height:28px;border-radius:4px}
+  #adm-pane-wd .wd-stufe .input{font-size:13px;padding:6px 8px;text-align:right;width:100%;height:auto}
+  #adm-pane-wd .wd-ablauf-tab td{padding:9px 10px 9px 0;font-size:13px}
+  #adm-pane-wd .wd-ablauf-tab th{padding:6px 10px 8px 0}
+  #adm-pane-wd .wd-blk{display:inline-block;min-width:26px;text-align:center;padding:2px 8px;border-radius:7px;background:rgba(99,91,255,.1);color:var(--violet);font-weight:600;font-size:12px}
+  #adm-pane-wd .wd-bar{display:inline-block;width:54px;height:6px;border-radius:3px;background:rgba(0,0,0,.08);vertical-align:middle;margin-left:8px;overflow:hidden}
+  #adm-pane-wd .wd-bar i{display:block;height:100%;border-radius:3px;background:#2a9d5c}
   /* WD-Anbau (23.09.2026): Scharf-Leiste oben + Zeitstrahl mit einer Zeile je ID — eigene Knoten, laufen
      neben dem WD-Block der parallelen Session, fassen dessen Markup nicht an. */
   #ws-leiste{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin:0 0 12px;border-radius:12px;border:1px solid var(--line);background:rgba(220,60,60,.05)}
@@ -7347,47 +7348,42 @@
               <div class="panel-title">IDs <span style="font-weight:400;color:var(--sub);font-size:12px">· eine Zeile je ID in Block-Reihenfolge · anklicken zeigt die Konten der ID</span></div>
               <div class="vp-zeile">
                 <input type="search" class="input vp-in" id="wd-such" placeholder="ID / Konto / Firma suchen" style="width:190px;text-align:left">
-                <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm"><span>nur IDs mit Konten drin</span></label>
+                <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm" checked><span>nur IDs mit Konten drin</span></label>
                 <span class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub);margin-left:10px"></span>
               </div>
             </div>
             <div id="wd-ablauf"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
           </div>
+          <!-- Einstellungen als drei Karten (23.09.2026, Finn: „unten auch draufdrücken, mehr Farben, auf eine Firma
+               drücken und die Werte schnell eingeben, Tabelle größer") — gleiche IDs wie zuvor, damit Laden/Speichern
+               (wdRegelnInsFormular / wdRegelnSpeichern / wdHedgeSpeichern) unverändert greifen. -->
           <div class="panel" style="margin:0 0 12px">
-            <div class="panel-title" style="margin-bottom:8px">Einstellungen <span style="font-weight:400;color:var(--sub);font-size:12px">· gelten für alle PC-Tabs</span></div>
-            <div class="vp-zeile" id="wd-regeln">
-              <label class="at-toggle" style="margin-right:4px"><input type="checkbox" id="wd-aktiv"><span>Automatik (nachts um 00:10 von allein würfeln)</span></label>
-              <span style="margin-left:6px">Start ab</span> <input type="time" class="input mono vp-in" id="wd-start" style="width:86px;text-align:left" value="02:00"> <span style="color:var(--sub)">Dubai</span>
-              <span style="margin-left:6px">Pause zwischen Blöcken</span> <input type="number" class="input mono vp-in" id="wd-pause-min" min="0" step="5" value="15"> – <input type="number" class="input mono vp-in" id="wd-pause-max" min="0" step="5" value="60"> <span style="color:var(--sub)">min</span>
-              <span style="margin-left:6px">Abstand zwischen Konten</span> <input type="number" class="input mono vp-in" id="wd-abst-min" min="0" step="1" value="2"> – <input type="number" class="input mono vp-in" id="wd-abst-max" min="0" step="1" value="4"> <span style="color:var(--sub)">min</span>
-              <button class="btn btn-ghost btn-mini" id="wdRegelnSave">Speichern</button>
+            <div class="wd-panel-kopf">
+              <div class="panel-title">Einstellungen <span style="font-weight:400;color:var(--sub);font-size:12px">· gelten für alle PC-Tabs · Firma oder Stufe anklicken, Werte eingeben, speichern</span></div>
             </div>
-            <div class="vp-zeile" id="wd-ids-aus" style="margin-top:8px"></div>
-            <!-- Hedge-Tabelle (23.09.2026, Finn: „die Tabelle, wie viel gegengehedgt wird, steht nirgendwo und ich kann sie
-                 nirgends überarbeiten") — dieselben Regeln wie „Futures vorplanen" (wd_farmer_regeln.vorplan) -->
-            <div class="wd-hedge-kopf">Hedge-Tabelle <span style="font-weight:400;color:var(--sub);font-size:12px">· Slave-Betrag nach Stand über der Kontogröße · TP je Firma (zufällig aus der Spanne, außer das Konto hat eine TP-Vorgabe)</span></div>
-            <div class="wd-hedge-zeile">
-              <div>
-                <table class="wd-tab wd-hedge" id="wd-staffel">
-                  <thead><tr><th>ab Stand über Kontogröße ($)</th><th></th><th>Slave (€)</th><th></th></tr></thead>
-                  <tbody id="wd-staffel-body"></tbody>
-                </table>
-                <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add" style="margin-top:6px">+ Zeile</button>
+            <div class="wd-set-grid">
+              <div class="wd-set-card">
+                <h4>Ablauf <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
+                <div class="wd-felder">
+                  <div class="wd-feld" style="grid-column:1/-1"><label class="at-toggle"><input type="checkbox" id="wd-aktiv"><span>Automatik: nachts um 00:10 von allein würfeln und planen</span></label></div>
+                  <div class="wd-feld"><label>Start ab (Dubai)</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
+                  <div class="wd-feld"><label>Instrument · Kontrakte</label><div style="display:flex;gap:6px"><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" style="width:64px;flex:0 0 64px"></div></div>
+                  <div class="wd-feld"><label>Pause zwischen Blöcken (min)</label><div style="display:flex;gap:6px;align-items:center"><input type="number" class="input mono" id="wd-pause-min" min="0" step="5" value="15"><span class="kf">–</span><input type="number" class="input mono" id="wd-pause-max" min="0" step="5" value="60"></div></div>
+                  <div class="wd-feld"><label>Abstand zwischen Konten (min)</label><div style="display:flex;gap:6px;align-items:center"><input type="number" class="input mono" id="wd-abst-min" min="0" step="1" value="2"><span class="kf">–</span><input type="number" class="input mono" id="wd-abst-max" min="0" step="1" value="4"></div></div>
+                  <div class="wd-feld" style="grid-column:1/-1"><label>Immer weglassen</label><div class="vp-zeile" id="wd-ids-aus"></div></div>
+                </div>
               </div>
-              <table class="wd-tab wd-hedge">
-                <thead><tr><th>Firma</th><th>TP von ($)</th><th>TP bis ($)</th></tr></thead>
-                <tbody>
-                  <tr><td>Tradeify</td><td><input type="number" class="input mono vp-in" data-wd-fu="tradeify-von" min="0" step="5"></td><td><input type="number" class="input mono vp-in" data-wd-fu="tradeify-bis" min="0" step="5"></td></tr>
-                  <tr><td>Apex</td><td><input type="number" class="input mono vp-in" data-wd-fu="apex-von" min="0" step="5"></td><td><input type="number" class="input mono vp-in" data-wd-fu="apex-bis" min="0" step="5"></td></tr>
-                  <tr><td>Topstep</td><td><input type="number" class="input mono vp-in" data-wd-fu="topstep-von" min="0" step="5"></td><td><input type="number" class="input mono vp-in" data-wd-fu="topstep-bis" min="0" step="5"></td></tr>
-                  <tr><td>andere</td><td><input type="number" class="input mono vp-in" data-wd-fu="sonst-von" min="0" step="5"></td><td><input type="number" class="input mono vp-in" data-wd-fu="sonst-bis" min="0" step="5"></td></tr>
-                </tbody>
-              </table>
-              <div class="vp-zeile" style="align-self:flex-start">
-                <span>Instrument</span> <select class="input mono vp-in" id="wd-instr" style="width:74px;text-align:left"><option value="mnq">MNQ</option><option value="nq">NQ</option></select>
-                <span style="margin-left:6px">Kontrakte</span> <input type="number" class="input mono vp-in" id="wd-kt" min="1" step="1" value="1">
-                <button class="btn btn-ghost btn-mini" id="wdHedgeSave">Hedge-Tabelle speichern</button>
+              <div class="wd-set-card">
+                <h4>Firmen · TP je Gewinntag <button class="btn btn-ghost btn-xs" id="wdHedgeSave">Speichern</button></h4>
+                <div id="wd-firmen"></div>
+                <div class="kf" style="margin-top:8px">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
+              </div>
+              <div class="wd-set-card">
+                <h4>Hedge-Staffel · Slave-Betrag <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
+                <div class="kf" style="margin-bottom:6px">nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)</div>
+                <div id="wd-staffel-body"></div>
+                <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add" style="margin-top:8px">+ Zeile</button>
               </div>
             </div>
           </div>
@@ -25569,7 +25565,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.406'
+  const OS_TAB_BUILD = '2026-09-22.407'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29796,19 +29792,54 @@
   }
   function wdStaffelLesen(){
     const out = []
-    document.querySelectorAll('#wd-staffel-body tr').forEach(tr => {
-      const v = parseFloat(tr.querySelector('[data-wd-sv]')?.value), e = parseFloat(tr.querySelector('[data-wd-se]')?.value)
+    document.querySelectorAll('#wd-staffel-body .wd-stufe:not(.kopf)').forEach(z => {
+      const v = parseFloat(z.querySelector('[data-wd-sv]')?.value), e = parseFloat(z.querySelector('[data-wd-se]')?.value)
       out.push({ von: isFinite(v) ? Math.max(0, Math.round(v)) : 0, bis: null, eur: isFinite(e) ? Math.max(0, Math.round(e * 100) / 100) : 0 })
     })
     out.sort((a, b) => a.von - b.von)
     out.forEach((z, i) => { z.bis = i + 1 < out.length ? out[i + 1].von : null })
     return out
   }
+  // Farbige Stufen (Finn: „mehr Farben reinbringen"): unten grün, oben rot — je höher der Stand, desto mehr Hedge
   function wdStaffelRender(liste){
-    const tb = document.getElementById('wd-staffel-body'); if(!tb) return
-    tb.innerHTML = liste.map((z, i) => `<tr><td><input type="number" class="input mono vp-in" data-wd-sv="${i}" value="${z.von}" min="0" step="100" style="width:82px"></td><td class="mono kf">${i + 1 < liste.length ? 'bis ' + wdDe(liste[i + 1].von) : 'offen'}</td><td><input type="number" class="input mono vp-in" data-wd-se="${i}" value="${z.eur}" min="0" step="5"></td><td><button type="button" class="btn btn-ghost btn-xs" data-wd-sx="${i}" title="Zeile entfernen">✕</button></td></tr>`).join('')
-    tb.querySelectorAll('[data-wd-sx]').forEach(b => b.addEventListener('click', () => { const l = wdStaffelLesen(); l.splice(+b.dataset.wdSx, 1); wdStaffelRender(l) }))
-    tb.querySelectorAll('[data-wd-sv]').forEach(el => el.addEventListener('change', () => wdStaffelRender(wdStaffelLesen())))
+    const box = document.getElementById('wd-staffel-body'); if(!box) return
+    const farbe = (i, n) => { const t = n > 1 ? i / (n - 1) : 0; return `hsl(${Math.round(145 - 145 * t)} 62% ${Math.round(52 - 6 * t)}%)` }
+    box.innerHTML = `<div class="wd-stufe kopf"><span></span><span>ab Stand ($)</span><span></span><span>Slave (€)</span><span></span></div>` + liste.map((z, i) => `<div class="wd-stufe">
+      <span class="balken" style="background:${farbe(i, liste.length)}"></span>
+      <input type="number" class="input mono" data-wd-sv="${i}" value="${z.von}" min="0" step="100">
+      <span class="kf">${i + 1 < liste.length ? 'bis ' + wdDe(liste[i + 1].von) + ' $' : 'und mehr'}</span>
+      <span style="display:flex;align-items:center;gap:6px"><input type="number" class="input mono" data-wd-se="${i}" value="${z.eur}" min="0" step="5"><span class="kf">€</span></span>
+      <button type="button" class="btn btn-ghost btn-xs" data-wd-sx="${i}" title="Zeile entfernen">✕</button></div>`).join('')
+    box.querySelectorAll('[data-wd-sx]').forEach(b => b.addEventListener('click', () => { const l = wdStaffelLesen(); l.splice(+b.dataset.wdSx, 1); wdStaffelRender(l) }))
+    box.querySelectorAll('[data-wd-sv]').forEach(el => el.addEventListener('change', () => wdStaffelRender(wdStaffelLesen())))
+  }
+  // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
+  const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'FundedNext Futures, MFFU, Lucid …'] }
+  function wdFirmenRender(fu){
+    const box = document.getElementById('wd-firmen'); if(!box) return
+    const konten = (_wd.daten && _wd.daten.konten) || [], offen = _wd.firmaOffen || null
+    box.innerHTML = TP_VP_FIRMEN.map(k => {
+      const [name, farbe, hint] = WD_FIRMEN[k] || [k, '#636e72', ''], sp = Array.isArray(fu[k]) ? fu[k] : TP_VP_VORGABE.fu[k]
+      const ges = konten.filter(q => tpVorplanFirmaKey(q.firm) === k), n = ges.filter(q => q.wd_farm).length
+      return `<div class="wd-firma ${offen === k ? 'offen' : ''}" data-wd-firma="${k}" title="anklicken: TP-Spanne bearbeiten">
+          <span class="punkt" style="background:${farbe}"></span><span class="fn">${escapeHtml(name)}</span>
+          <span class="kf">${n} Konto/Konten im Farm${ges.length > n ? ` · ${ges.length - n} aus` : ''}${hint ? ' · ' + escapeHtml(hint) : ''}</span>
+          <span class="fz" data-wd-fz="${k}">TP ${wdDe(sp[0])}–${wdDe(sp[1])} $</span><span class="kf pfeil">${offen === k ? '▾' : '▸'}</span></div>
+        <div class="wd-firma-edit">
+          <div class="wd-feld"><label>TP von ($)</label><input type="number" class="input mono" data-wd-fu="${k}-von" min="0" step="5" value="${sp[0]}"></div>
+          <div class="wd-feld"><label>TP bis ($)</label><input type="number" class="input mono" data-wd-fu="${k}-bis" min="0" step="5" value="${sp[1]}"></div>
+          <div class="kf" style="align-self:center">zufällig je Konto aus dieser Spanne · dann oben „Speichern"</div>
+        </div>`
+    }).join('')
+    box.querySelectorAll('[data-wd-firma]').forEach(el => el.addEventListener('click', () => {
+      _wd.firmaOffen = _wd.firmaOffen === el.dataset.wdFirma ? null : el.dataset.wdFirma
+      box.querySelectorAll('[data-wd-firma]').forEach(x => { const an = x.dataset.wdFirma === _wd.firmaOffen; x.classList.toggle('offen', an); const pf = x.querySelector('.pfeil'); if(pf) pf.textContent = an ? '▾' : '▸' })
+    }))
+    box.querySelectorAll('[data-wd-fu]').forEach(inp => inp.addEventListener('input', () => {
+      const k = inp.dataset.wdFu.split('-')[0]
+      const v = parseFloat(box.querySelector(`[data-wd-fu="${k}-von"]`)?.value) || 0, b2 = parseFloat(box.querySelector(`[data-wd-fu="${k}-bis"]`)?.value) || v
+      const fz = box.querySelector(`[data-wd-fz="${k}"]`); if(fz) fz.textContent = `TP ${wdDe(v)}–${wdDe(Math.max(v, b2))} $`
+    }))
   }
   document.getElementById('wd-staffel-add')?.addEventListener('click', () => {
     const l = wdStaffelLesen(), last = l[l.length - 1]
@@ -29828,11 +29859,7 @@
     if(g('wd-instr')) g('wd-instr').value = vp.instr
     if(g('wd-kt')) g('wd-kt').value = vp.kt
     wdStaffelRender(wdStaffelListe(vp.regeln.staffel))
-    for(const k of TP_VP_FIRMEN){
-      const sp = Array.isArray(fu[k]) ? fu[k] : TP_VP_VORGABE.fu[k]
-      const a = document.querySelector(`#adm-pane-wd [data-wd-fu="${k}-von"]`), b = document.querySelector(`#adm-pane-wd [data-wd-fu="${k}-bis"]`)
-      if(a) a.value = sp[0]; if(b) b.value = sp[1]
-    }
+    wdFirmenRender(fu)
     wdStatus()
   }
   async function wdHedgeSpeichern(){
@@ -29997,12 +30024,12 @@
         const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
         const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
         const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
-          <td class="pfeil">${offen ? '▾' : '▸'}</td><td class="mono">${x.reihenfolge ? 'Block ' + x.reihenfolge : '—'}</td>
+          <td class="pfeil">${offen ? '▾' : '▸'}</td><td>${x.reihenfolge ? `<span class="wd-blk">${x.reihenfolge}</span>` : '<span class="kf">—</span>'}</td>
           <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
           <td>${x.richtung === 'buy' ? '<span class="chip chip-good">▲ BUY</span>' : x.richtung === 'sell' ? '<span class="chip chip-bad">▼ SELL</span>' : '<span class="kf">—</span>'}</td>
-          <td class="mono">${n}<span class="kf"> / ${k.length}</span></td><td class="mono">${wdSum}</td>
-          <td class="mono">${mitPlan}${n && mitPlan < n ? `<span style="color:var(--danger)"> / ${n}</span>` : ''}</td>
+          <td class="mono">${n}<span class="kf"> / ${k.length}</span><span class="wd-bar"><i style="width:${k.length ? Math.round(n / k.length * 100) : 0}%"></i></span></td><td class="mono">${wdSum}</td>
+          <td class="mono">${n ? `<span style="color:${mitPlan >= n ? '#2a9d5c' : 'var(--danger)'};font-weight:600">${mitPlan}</span><span class="kf"> / ${n}</span>` : '<span class="kf">—</span>'}</td>
           <td>${chipHtml}${gestartet ? `<span class="kf"> · ${gestartet} gestartet</span>` : ''}</td></tr>`
         return zeile + (offen ? `<tr class="wd-detail"><td colspan="9">${wdKarte(x, erw)}</td></tr>` : '')
       }).join('') + '</tbody></table>'
@@ -30154,7 +30181,8 @@
       else window._wdTabPending = true
     }, 60)
   })
-  document.getElementById('wdRegelnSave')?.addEventListener('click', () => wdRegelnSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
+  document.getElementById('wdRegelnSave')?.addEventListener('click', () => wdRegelnSpeichern().then(() => wdHedgeSpeichern()).catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
+  document.getElementById('wdHedgeSave2')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdReload')?.addEventListener('click', () => { wdNeuLaden(); wdVerlauf() })
   document.getElementById('wd-tag')?.addEventListener('change', wdNeuLaden)
