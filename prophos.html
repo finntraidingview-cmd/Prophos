@@ -25582,7 +25582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.412'
+  const OS_TAB_BUILD = '2026-09-22.413'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30009,7 +30009,8 @@
   const wdChip = st => { const [t, k] = ({ geplant: ['⏰ geplant', 'neutral'], leer: ['— nichts drin', 'neutral'], laeuft: ['▶ läuft', 'good'], fertig: ['✓ fertig', 'good'], verpasst: ['✗ verpasst', 'bad'], erwartet: ['noch nicht eingetragen', 'warn'] }[st] || [st, 'neutral']); return `<span class="chip chip-${k}">${escapeHtml(t)}</span>` }
   function wdStand(k){
     const de = wdDe
-    if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Haken setzen, dann speichern</span>`
+    if(k.archiviert && !k.plan_id) return `<span style="color:var(--sub)">archiviert — im Konto-Archiv, fährt nicht mit</span>`
+    if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Klick auf die Zeile nimmt es rein</span>`
     if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
     if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? '<span style="color:var(--sub)">noch kein Plan — „Würfeln"</span>' : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
@@ -30029,13 +30030,15 @@
     const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
     // Nur Konten mit Farm-Haken zeigen (Finn: „sonst sehe ich jeden Funded, bei dem manche noch rumchillen") —
     // die ohne Haken zusammengeklappt in einer Zeile, auf Wunsch einblenden
-    const zeigOhne = (_wd.zeigOhne || {})[uid] !== false   // Standard: alle zeigen, die ohne Haken grau (Finn 23.09.2026)
-    const ohne = (x.konten || []).filter(k => !k.farm && !k.plan_id), sichtbar = (x.konten || []).filter(k => k.farm || k.plan_id || zeigOhne)
+    // Archivierte Konten (Konto-Archiv) standardmäßig weg — bei Moritz 13 von 16 (Finn 23.09.2026: „da müssen ganz viele
+    // archivierte sein, da kann nicht gar nichts sein"); Konten ohne Haken bleiben sichtbar (grau)
+    const zeigArch = !!(_wd.zeigArch || {})[uid]
+    const ohne = (x.konten || []).filter(k => k.archiviert && !k.plan_id), sichtbar = (x.konten || []).filter(k => !k.archiviert || k.plan_id || zeigArch)
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
       const planFest = (k.plan_id && k.status && k.status !== 'planned') || k.gestartet
-      const sperren = erw || fest || planFest || (!k.ext && !k.plan_id)
+      const sperren = erw || fest || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = k.plan_id ? (k.sl || '') : (kd.sl_vorgabe || '')
@@ -30053,7 +30056,7 @@
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
         <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}</td></tr>`
     }).join('')
-    const ohneZeile = ohne.length ? `<tr class="wd-ohne"><td></td><td colspan="9"><button type="button" class="btn btn-ghost btn-xs" data-wd-ohne="${uid}">${zeigOhne ? '▾ ' + ohne.length + ' ohne Haken ausblenden' : '▸ ' + ohne.length + ' weitere ohne Haken einblenden'}</button></td></tr>` : ''
+    const ohneZeile = ohne.length ? `<tr class="wd-ohne"><td></td><td colspan="9"><button type="button" class="btn btn-ghost btn-xs" data-wd-ohne="${uid}">${zeigArch ? '▾ ' + ohne.length + ' archivierte ausblenden' : '▸ ' + ohne.length + ' archivierte einblenden (fahren nicht mit)'}</button></td></tr>` : ''
     const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
     const nAkt = (x.konten || []).filter(wdAktiv).length
     return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
@@ -30148,7 +30151,7 @@
       })
     })
     box.querySelectorAll('[data-wd-ohne]').forEach(b => b.addEventListener('click', () => {
-      _wd.zeigOhne = _wd.zeigOhne || {}; _wd.zeigOhne[b.dataset.wdOhne] = ((_wd.zeigOhne[b.dataset.wdOhne]) !== false) ? false : true
+      _wd.zeigArch = _wd.zeigArch || {}; _wd.zeigArch[b.dataset.wdOhne] = !_wd.zeigArch[b.dataset.wdOhne]
       wdAblauf(_wd.rows || [], wdFehlend())
     }))
     // ID-Haken: alle Konten des Blocks rein/raus (nur die, die sich noch ändern lassen)
@@ -30301,13 +30304,10 @@
       const konten = []
       for(const k0 of (x.konten || [])){
         const k = { ...k0 }, cb = el.querySelector(`[data-wd-konto="${CSS.escape(String(k.id))}"]`), kd = wdKontoDaten(k.id)
-        if(cb && !cb.disabled){
-          const an = !!cb.checked
-          if(an !== !!k.farm || (!an && k.aktiv !== false) || (an && k.aktiv === false)){
-            if(an !== !!k.farm){ const { error } = await supabase.rpc('wd_konto_setzen', { p_account: k.id, p_wd_farm: an }); if(error) return wdSay('Haken nicht gespeichert: ' + error.message, 'err'); haken++; if(kd) kd.wd_farm = an }
-            k.farm = an; k.aktiv = an && !!k.ext; k.hinweis = an ? (k.ext ? '' : WD_HINWEIS_EXT) : WD_HINWEIS_FARM
-          }
-        }
+        // Haken: seit .412 sofort beim Klick gespeichert (wdKontoHaken) — hier NICHT mehr aus dem Kaestchen schreiben.
+        // 23.09.2026: genau das hatte die Haken fast aller IDs auf false gesetzt, weil die Zeilen einen alten Stand
+        // (Kaestchen leer) trugen und „Aenderungen speichern" ihn als Wahrheit in die DB schrieb.
+        void cb
         const tpEl = el.querySelector(`[data-wd-tp="${CSS.escape(String(k.id))}"]`), slEl = el.querySelector(`[data-wd-sl="${CSS.escape(String(k.id))}"]`)
         if(kd && (tpEl || slEl)){
           const tp = tpEl ? num(tpEl) : kd.tp_vorgabe, sl = slEl ? num(slEl) : kd.sl_vorgabe
