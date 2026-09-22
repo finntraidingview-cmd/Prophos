@@ -7550,7 +7550,6 @@
                 <button type="button" class="kp-fchip" data-kp-session="prelondon">Pre-London</button>
                 <button type="button" class="kp-fchip" data-kp-session="london">London</button>
                 <button type="button" class="kp-fchip" data-kp-session="ny">New York</button>
-                <button type="button" class="kp-fchip" data-kp-session="ny_update">NY-Update</button>
                 <button type="button" class="kp-fchip" data-kp-session="hourly">Stündlich</button>
               </div>
             </div>
@@ -25736,7 +25735,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.422'
+  const OS_TAB_BUILD = '2026-09-22.423'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30468,7 +30467,9 @@
   const KP_URL = 'https://kompass-api.pascal-hermann-22.workers.dev?category=k%3Aideas'
   const KP_SESSIONS = [['update vor trigger','ny_update'],['asia','asia'],['pre-london','prelondon'],['london','london'],['new york','ny'],['hourly','hourly']]
   const KP_NAMEN = { asia: 'Asia Open', prelondon: 'Pre-London', london: 'London', ny: 'New York', ny_update: 'NY · Update vor Open', hourly: 'Stündlich', sonst: 'Sonstige' }
-  const KP_REIHE = ['ny', 'ny_update', 'london', 'prelondon', 'asia', 'hourly']
+  // ny_update (23.09.2026, Finn: „die eine von vor 49 Tagen kann komplett raus, wird nie wieder gemacht") bleibt in der DB,
+  // taucht aber weder oben noch in den Balken auf.
+  const KP_REIHE = ['ny', 'london', 'prelondon', 'asia', 'hourly']
   const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false, lastCheck: 0, tick: null, metrik: 'sess' }
 
   function kpSession(ctx){ const c = String(ctx || '').toLowerCase(); for(const [k, n] of KP_SESSIONS){ if(c.includes(k)) return n } return 'sonst' }
