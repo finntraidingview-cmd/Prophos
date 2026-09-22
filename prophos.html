@@ -25733,7 +25733,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.420'
+  const OS_TAB_BUILD = '2026-09-22.421'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28263,6 +28263,12 @@
         document.getElementById('tp-master-risk').value = p.masterRisk ?? ''
         document.getElementById('tp-master-qty').value  = p.masterContracts ?? 1
         document.getElementById('tp-slave-risk').value  = p.slaveRisk ?? ''
+        // Bestehender Plan mit Slave-Risiko: der GESPEICHERTE Master gilt als „schon
+        // übernommen", damit das Öffnen den Wert nicht überschreibt — wechselt Finn im
+        // Dropdown auf einen anderen Master, greift die Automatik wieder (23.09.2026,
+        // Finn: „wenn ich den Account switche, bleiben die Gesamtkosten trotzdem gleich
+        // … die Inputs sollen zum richtigen Account").
+        _tpRiskAuto.master = (Number(p.slaveRisk) > 0) ? String(p.masterAccountId || '') : null
         document.getElementById('tp-master-tp').value   = p.masterTp ?? ''
         if(typeof tpDirSet === 'function') tpDirSet(p.richtung)
         document.getElementById('tp-planned-for').value = p.plannedFor || ''
@@ -28718,7 +28724,9 @@
     // muss": CFD Phase 1 → Auto-Vorschlag (Kaufkosten), CFD Phase 2 (Nachfolger mit
     // Vorgänger) → Fixkosten bei Phasenwechsel, Futures → Gesamtkosten — manuell bleibt
     // alles umschaltbar). Einmal je gewähltem Master; nie, wenn Finn das Feld selbst
-    // angefasst hat oder ein bestehender Plan mit Slave-Risiko bearbeitet wird.
+    // angefasst hat. Beim Bearbeiten eines Plans mit Slave-Risiko ist der gespeicherte
+    // Master schon beim Öffnen als „angewendet" vorbelegt (s. openTradePlanModal) — ein
+    // Wechsel im Dropdown holt die Werte des NEUEN Masters (23.09.2026).
     // FUTURES: nur die Gesamtkosten-Box (22.09.2026, Finn: „Auto-Vorschlag und Fixkosten bei
     // Phasenwechsel brauche ich bei Futures nie") — die beiden anderen bleiben ausgeblendet,
     // auch wenn sie rechnerisch etwas haetten.
@@ -28728,14 +28736,11 @@
     }
     if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
       _tpRiskAuto.master = String(master.id)
-      const bearbeitetMitWert = !!(_editingPlanId && slaveRisk > 0)
-      if(!bearbeitetMitWert){
-        const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(master.firm)
-        const vgSichtbar = vgEl && vgEl.style.display !== 'none' && parseFloat(vgEl.dataset.suggestedVgEur || '') > 0
-        const knopf = istFut ? 'tp-gesamtkosten-apply' : vgSichtbar ? 'tp-vorgaenger-apply' : 'tp-slave-suggest-apply'
-        // nach dem laufenden Recompute (die Knöpfe rechnen selbst neu)
-        setTimeout(() => document.getElementById(knopf)?.click(), 0)
-      }
+      const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(master.firm)
+      const vgSichtbar = vgEl && vgEl.style.display !== 'none' && parseFloat(vgEl.dataset.suggestedVgEur || '') > 0
+      const knopf = istFut ? 'tp-gesamtkosten-apply' : vgSichtbar ? 'tp-vorgaenger-apply' : 'tp-slave-suggest-apply'
+      // nach dem laufenden Recompute (die Knöpfe rechnen selbst neu)
+      setTimeout(() => document.getElementById(knopf)?.click(), 0)
     }
 
     // Slave currency-symbol updaten
@@ -28845,7 +28850,13 @@
     return true
   }
   document.getElementById('tp-master')?.addEventListener('change', () => {
-    if(tpFillMasterRiskFromDD()) tpRecompute()
+    // Neuer Master = neuer Kontext: eine vorher von Hand getippte Slave-Zahl gehörte zum
+    // alten Account, die Automatik darf wieder übernehmen. Und IMMER neu rechnen — vorher
+    // nur, wenn der neue Master einen Max-Drawdown hatte; ohne DD blieben Kosten-Box und
+    // Multiplier auf dem alten Account stehen (23.09.2026).
+    _tpRiskAuto.manuell = false
+    tpFillMasterRiskFromDD()
+    tpRecompute()
     tpUpdateMasterDailyDdInfo()
   })
 
