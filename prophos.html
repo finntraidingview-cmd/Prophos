@@ -5081,7 +5081,7 @@
             <div class="field" style="grid-column:1 / -1">
               <label>Start um <span style="color:var(--sub);font-weight:400">(optional — der PC-Tab startet dann von selbst)</span></label>
               <div style="display:flex;gap:8px;align-items:center">
-                <input type="datetime-local" class="input mono" id="tp-order-start-um" style="flex:0 0 240px">
+                <input type="time" class="input mono" id="tp-order-start-um" style="flex:0 0 130px">
                 <button type="button" class="btn btn-ghost" id="tp-order-start-um-x" style="padding:6px 10px;font-size:12px">✕</button>
                 <span id="tp-order-start-um-hint" style="font-size:12px;color:var(--sub)"></span>
               </div>
@@ -25114,9 +25114,12 @@
     // Start um: gespeicherte Zeit ins Feld (lokale Zeit des Geräts, gespeichert wird UTC)
     const _suEl = document.getElementById('tp-order-start-um')
     if(_suEl){
-      _suEl.value = plan.startUm ? tpStartUmLokal(plan.startUm) : ''
-      const _h = document.getElementById('tp-order-start-um-hint')
-      if(_h) _h.textContent = plan.startUmGestartetAt ? 'wurde bereits ausgelöst' : ''
+      _suEl.value = plan.startUm ? tpStartUmZeit(plan.startUm) : ''
+      tpStartUmHinweis()
+      if(plan.startUmGestartetAt){
+        const _h = document.getElementById('tp-order-start-um-hint')
+        if(_h) _h.textContent = 'wurde bereits ausgelöst'
+      }
     }
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
@@ -25315,8 +25318,9 @@
     if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
     // Geplante Startzeit (22.09.2026): leer = NULL; eine neue Zeit setzt den Claim zurück.
     const _suVal = document.getElementById('tp-order-start-um')?.value || ''
-    const _suIso = _suVal ? new Date(_suVal).toISOString() : null
-    if(_suVal && !(new Date(_suVal).getTime() > Date.now() - 60000)) return err('„Start um" liegt in der Vergangenheit.')
+    const _suDate = _suVal ? tpStartUmAusZeit(_suVal) : null
+    if(_suVal && !_suDate) return err('„Start um": Uhrzeit nicht lesbar (hh:mm).')
+    const _suIso = _suDate ? _suDate.toISOString() : null
     upd.start_um = _suIso
     if(_suIso !== (plan.startUm ? new Date(plan.startUm).toISOString() : null)) upd.start_um_gestartet_at = null
     try{
@@ -25367,7 +25371,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.387'
+  const OS_TAB_BUILD = '2026-09-22.388'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26922,6 +26926,27 @@
    * Zufall (kein festes Muster) EXAKT der Weg des „Starten"-Klicks: Orbit tpOrbitStarten
    * (Duplikum-Check → Puls), Echo tpJetztStarten (Check → Puls). Mehr als 10 min verspätet
    * (Tab war zu) wird NICHT nachgefeuert — Chip zeigt „verpasst", Finn startet von Hand. ══ */
+  /* Uhrzeit → Zeitpunkt (22.09.2026, Finn: „Datum immer weglassen, immer das aktuelle Datum
+   * nehmen; immer die Zeit vom Gerät, an dem ich es eintippe"). Gerechnet wird in der
+   * Zeitzone DIESES Geräts (MacBook = Dubai); gespeichert wird der absolute Moment (UTC),
+   * der PC in Deutschland feuert also im selben Augenblick. Liegt die Uhrzeit heute schon
+   * mehr als eine Minute zurück, ist MORGEN gemeint — sonst könnte man 00:10 nie planen.
+   * Rein rechnend (jetzt als Parameter, damit testbar). -> Date oder null */
+  function tpStartUmAusZeit(hhmm, jetzt){
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim())
+    if(!m) return null
+    const h = +m[1], min = +m[2]
+    if(h > 23 || min > 59) return null
+    const n = jetzt ? new Date(jetzt) : new Date()
+    const d = new Date(n.getFullYear(), n.getMonth(), n.getDate(), h, min, 0, 0)
+    if(d.getTime() < n.getTime() - 60000) d.setDate(d.getDate() + 1)
+    return d
+  }
+  function tpStartUmZeit(iso){
+    const d = new Date(iso); if(!isFinite(d)) return ''
+    const z = n => String(n).padStart(2, '0')
+    return `${z(d.getHours())}:${z(d.getMinutes())}`
+  }
   function tpStartUmLokal(iso){
     const d = new Date(iso); if(!isFinite(d)) return ''
     const z = n => String(n).padStart(2, '0')
@@ -26943,8 +26968,23 @@
       if(data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]); renderTradePlans() }
     }catch(e){ if(typeof atToast === 'function') atToast('Startzeit nicht entfernt: ' + (e.message || e), 'end') }
   }
+  // Hinweis unter dem Feld: welcher Tag ist gemeint, in welcher Zeitzone (Gerät)
+  function tpStartUmHinweis(){
+    const el = document.getElementById('tp-order-start-um')
+    const h = document.getElementById('tp-order-start-um-hint')
+    if(!el || !h) return
+    const d = tpStartUmAusZeit(el.value)
+    if(!d){ h.textContent = ''; return }
+    let tz = ''
+    try{ tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '' }catch(_){}
+    const heute = d.toDateString() === new Date().toDateString()
+    h.textContent = `→ ${heute ? 'heute' : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })} `
+      + `${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${tz ? ' (' + tz + ')' : ''}`
+  }
+  document.getElementById('tp-order-start-um')?.addEventListener('input', tpStartUmHinweis)
   document.getElementById('tp-order-start-um-x')?.addEventListener('click', () => {
     const el = document.getElementById('tp-order-start-um'); if(el) el.value = ''
+    tpStartUmHinweis()
   })
   let _suLaeuft = false
   async function tpStartUmTick(){
