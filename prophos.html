@@ -1168,21 +1168,24 @@
   #adm-pane-kompass .kp-chip.ok{color:#2a9d5c;border-color:#2a9d5c;background:rgba(42,157,92,.08)}
   #adm-pane-kompass .kp-chip.warn{color:var(--danger);border-color:var(--danger);background:rgba(220,60,60,.06)}
   #adm-pane-kompass .kp-status{font-size:12.5px;color:var(--sub);margin-top:8px;line-height:1.45}
-  #adm-pane-kompass .kp-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
-  #adm-pane-kompass .kp-karte{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface,#fff);cursor:pointer}
-  #adm-pane-kompass .kp-karte.leer{opacity:.6;cursor:default;border-style:dashed}
-  #adm-pane-kompass .kp-karte.alt{opacity:.7}
-  #adm-pane-kompass .kp-karte-kopf{display:flex;justify-content:space-between;align-items:center;gap:8px}
-  #adm-pane-kompass .kp-session{font-size:12px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-  #adm-pane-kompass .kp-bias{font-size:20px;font-weight:700;letter-spacing:-.01em;margin-top:4px}
+  #adm-pane-kompass .kp-kopf-klein{margin:0 0 10px}
+  #adm-pane-kompass .kp-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  #adm-pane-kompass .kp-karte{border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:var(--surface,#fff);cursor:pointer;min-width:0}
+  #adm-pane-kompass .kp-karte:hover{border-color:var(--violet)}
+  #adm-pane-kompass .kp-karte.leer{opacity:.55;cursor:default;border-style:dashed}
+  #adm-pane-kompass .kp-karte.alt .kp-bias{opacity:.55}
+  #adm-pane-kompass .kp-karte-kopf{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  #adm-pane-kompass .kp-session{font-size:10.5px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-kompass .kp-bias{font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1.15;margin-top:2px}
   #adm-pane-kompass .kp-bias.long{color:#2a9d5c}
   #adm-pane-kompass .kp-bias.short{color:var(--danger)}
-  #adm-pane-kompass .kp-konf{font-size:13px;letter-spacing:.08em;color:var(--sub)}
+  #adm-pane-kompass .kp-konf{font-size:11px;letter-spacing:.06em;color:var(--sub);white-space:nowrap}
   #adm-pane-kompass .kp-konf b{color:var(--ink)}
   #adm-pane-kompass .kp-konf.hoch b{color:#2a9d5c}
-  #adm-pane-kompass .kp-alter{font-size:11.5px;color:var(--sub);margin-top:4px;font-variant-numeric:tabular-nums}
-  #adm-pane-kompass .kp-text{font-size:12.5px;line-height:1.5;margin-top:8px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  #adm-pane-kompass .kp-karte.offen .kp-text{display:block;-webkit-line-clamp:unset}
+  #adm-pane-kompass .kp-alter{font-size:11px;color:var(--sub);margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-kompass .kp-text{display:none;font-size:12.5px;line-height:1.5;margin-top:8px;color:var(--ink);white-space:normal}
+  #adm-pane-kompass .kp-karte.offen{grid-column:1 / -1}
+  #adm-pane-kompass .kp-karte.offen .kp-text{display:block}
   #adm-pane-kompass .kp-chips{display:flex;gap:6px;flex-wrap:wrap}
   #adm-pane-kompass .kp-fchip{border:1px solid var(--line);background:none;color:var(--sub);border-radius:999px;padding:3px 10px;font-size:11.5px;cursor:pointer}
   #adm-pane-kompass .kp-fchip.active{color:var(--violet);border-color:var(--violet)}
@@ -7500,17 +7503,17 @@
              kompass_forecasts. Der Tab holt den Worker-Feed selbst und trägt fehlende Zeilen in die DB
              nach — unabhängig vom Railway-Sammler. Eigene Verdrahtung (kein Sammel-Handler). -->
         <div id="adm-pane-kompass" hidden>
-          <div class="panel" style="margin:0 0 12px">
-            <div class="kp-kopf-zeile">
-              <div class="panel-title">Kompass <span style="font-weight:400;color:var(--sub);font-size:12px">· Nasdaq-100-Forecasts von Pascals Research-Agent</span></div>
-              <div class="vp-zeile">
-                <span class="mono" id="kp-tick" style="font-size:11.5px;color:var(--sub)"></span>
-                <span class="kp-chip" id="kp-chip">—</span>
-                <button class="btn btn-ghost btn-mini" id="kpHolen" title="läuft von allein alle 20 s — hier nur, wenn du nicht warten willst">Jetzt prüfen</button>
-              </div>
+          <!-- Kopf (23.09.2026, Finn: „oben den ganzen Quatsch weglassen, kleiner, einfach sagen was der Bot gerade
+               sagt — die langen Texte jucken mich nicht"): eine Zeile, Status im Tooltip des Chips. -->
+          <div class="kp-kopf-zeile kp-kopf-klein">
+            <div class="panel-title">Kompass <span style="font-weight:400;color:var(--sub);font-size:12px">· Pascals Bot</span></div>
+            <div class="vp-zeile">
+              <span class="mono" id="kp-tick" style="font-size:11.5px;color:var(--sub)"></span>
+              <span class="kp-chip" id="kp-chip" title="">—</span>
+              <button class="btn btn-ghost btn-mini" id="kpHolen" title="läuft von allein alle 20 s — hier nur, wenn du nicht warten willst">Jetzt prüfen</button>
             </div>
-            <div class="kp-status" id="kp-status">Lade …</div>
           </div>
+          <div class="kp-status" id="kp-status" hidden></div>
           <div class="kp-karten" id="kp-karten"></div>
           <!-- Wie gut ist der Bot (23.09.2026, Finn: „is der Bot von meinem Bruder, will sehen wie gut der is" · dann
                „das ist so hässlich, erkennt gar nichts — mit draufdrücken, ein bisschen Farben, übersichtlich wie der
@@ -25733,7 +25736,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.421'
+  const OS_TAB_BUILD = '2026-09-22.422'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30607,7 +30610,7 @@
         return `<div class="kp-woche" title="Woche ab ${k} · ${w.hit} von ${w.n} Treffer"><div class="pz">${q} %</div><div class="stab${kl}" style="height:${Math.max(4, q * 0.5)}px"></div><div class="kw">${k.slice(8, 10)}.${k.slice(5, 7)}.</div></div>` }).join('')
     }
   }
-  function kpSay(t, art){ const el = document.getElementById('kp-status'); if(el){ el.textContent = t || ''; el.style.color = art === 'err' ? 'var(--danger)' : '' } }
+  function kpSay(t, art){ const el = document.getElementById('kp-status'); if(el){ el.textContent = t || ''; el.style.color = art === 'err' ? 'var(--danger)' : '' } const c = document.getElementById('kp-chip'); if(c) c.title = t || '' }
 
   async function kpFeedHolen(){
     // Feed direkt aus dem Browser (der Worker schickt CORS-Header — signal.html macht dasselbe von pages.dev aus)
@@ -30698,14 +30701,14 @@
     const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
     box.innerHTML = KP_REIHE.map(s => {
       const r = neueste[s]
-      if(!r) return `<div class="kp-karte leer"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div><div class="kp-bias" style="color:var(--sub)">—</div><div class="kp-alter">noch kein Forecast</div></div>`
+      if(!r) return `<div class="kp-karte leer"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div><div class="kp-bias" style="color:var(--sub)">—</div><div class="kp-alter">noch keiner</div></div>`
       const alt = r.datum && r.datum < heute
-      return `<div class="kp-karte${alt ? ' alt' : ''}${_kp.offen === r.id ? ' offen' : ''}" data-kp-id="${kpEsc(r.id)}" title="Klick: Text auf-/zuklappen">
-        <div class="kp-karte-kopf"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div>${kpKonf(r.konfidenz)}</div>
+      // Kompakt (23.09.2026): Session · Richtung groß · Konfidenz · Alter. Text nur nach Klick.
+      return `<div class="kp-karte${alt ? ' alt' : ''}${_kp.offen === r.id ? ' offen' : ''}" data-kp-id="${kpEsc(r.id)}" title="${kpEsc(kpStamp(r))} · Klick zeigt die Begründung">
+        <div class="kp-karte-kopf"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div>${kpKonf(r.konfidenz, true)}</div>
         <div class="kp-bias ${r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''}">${kpEsc(r.bias || '?')}</div>
-        <div class="kp-alter">${kpEsc(kpStamp(r))} · ${kpEsc(kpAlter(r))}${alt ? ' · <b>alt</b>' : ''}</div>
-        <div class="kp-alter">Session ${kpErgM(r, 'sess')} · 1 h ${kpErg(r, 1)} · 4 h ${kpErg(r, 4)}</div>
-        <div class="kp-text">${kpEsc(r.text || r.titel || '')}</div>
+        <div class="kp-alter">${kpEsc(kpAlter(r))}${alt ? ' · alt' : ''}</div>
+        <div class="kp-text">${kpEsc(r.text || r.titel || '')}<div style="margin-top:6px;color:var(--sub)">Session ${kpErgM(r, 'sess')} · 1 h ${kpErg(r, 1)} · 4 h ${kpErg(r, 4)}</div></div>
       </div>`
     }).join('')
     kpStatRender()
