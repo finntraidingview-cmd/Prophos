@@ -2577,7 +2577,7 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
         w.set_focus()
     except Exception:
         pass
-    _warte(0.4, 0.3)
+    _warte(0.15, 0.1)
     try:
         titel, klasse = w.window_text() or "", w.element_info.class_name
     except Exception:
@@ -2861,6 +2861,9 @@ def _tv_dump_sichern(trail):
     return "", tv_diagnose(letzt)
 
 
+TV_RX_TRADOVATE_TITEL = re.compile(r"tradovate|login to your account|anmeldung bei|sign in to your account", re.I)
+
+
 def _tv_browser_fenster():
     """Alle Browser-Hauptfenster: [(handle, titel, wrapper)]"""
     from pywinauto import Desktop
@@ -3125,7 +3128,9 @@ def modus_tvkonto(cmd):
         # zu warten, das nie kommt. Zweimal, weil ein einzelner Blick in die
         # Ladephase fallen kann (Regel seit .327: nie aus EINEM Blick urteilen).
         fremd = tv_fremdes_konto(uia_info.get("aehnlich"), ids) if not (gestartet and time.time() - start < 6.0) else ""
-        if fremd and fremd == fremd_vor:
+        # EIN Blick reicht, wenn TradingView schon stand (22.09.2026 18:4x, Spur: 8,4 s bis
+        # 'falsch' fuer zwei Leserunden); zwei Blicke nur nach frischem Start (Ladephase).
+        if fremd and (fremd == fremd_vor or not gestartet):
             zustand, aktiv = "falsch", fremd
             break
         fremd_vor = fremd
@@ -3377,9 +3382,10 @@ def modus_tvkonto(cmd):
             """TradingView-Tab schliessen, neu mit der Direkt-Adresse oeffnen, das
             neue Fenster wiederfinden. -> 'ok' | 'fertig'"""
             nonlocal w
-            bf_t = _tv_http("/bedienfeld", timeout=1.5) or {}
+            bf_t = _tv_http("/bedienfeld", timeout=0.4) or {}
             begriff = tv_tab_suchbegriff(bf_t.get("titel")) if bf_t.get("ok") else ""
-            _tv_fenster_holen([], begriff, "")       # TradingView-Tab sicher vorn (klickt ihn notfalls an)
+            if not fenster[0]:
+                _tv_fenster_holen([], begriff, "")   # TradingView-Tab sicher vorn (klickt ihn notfalls an)
             ok, f = _tv_tab_neu_mit_link(w, cmd, begriff, trail)
             if not ok:
                 return ab(f, "login")
@@ -3505,7 +3511,10 @@ def modus_tvkonto(cmd):
             tw, ende_t = None, time.time() + 25.0
             while time.time() < ende_t and tw is None:
                 _warte(0.35, 0.25)
-                kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if "tradovate" in t.lower()]
+                # Titel der Anmeldeseite (22.09.2026 18:4x, Finns Screenshot + Spur 'Connect → Tradovate-
+                # Fenster da: 11,5 s'): der Tab heisst 'Login to your Account' — 'tradovate' steht erst
+                # spaeter im Titel. Beide Schreibweisen zaehlen, deutsch wie englisch.
+                kand = [(h, t, x) for h, t, x in _tv_browser_fenster() if TV_RX_TRADOVATE_TITEL.search(t)]
                 neu_f = [k for k in kand if k[0] not in vorher]
                 if neu_f or kand:
                     tw = (neu_f or kand)[0][2]
@@ -3591,7 +3600,7 @@ def modus_tvkonto(cmd):
                 jetzt = (_tv_edit_wert(u2) if u2 else None, len(_tv_edit_wert(p2)) if p2 else None)
                 if jetzt != letzter:
                     letzter, seit = jetzt, time.time()
-                elif time.time() - seit >= 0.8 and (jetzt[0] or time.time() - t_r >= 2.0):
+                elif time.time() - seit >= 0.6 and (jetzt[0] or time.time() - t_r >= 1.2):
                     break
                 _warte(0.3, 0.2)
             trail.append("Anmeldeseite ruhig")
@@ -3705,7 +3714,7 @@ def modus_tvkonto(cmd):
             noch_da = True
             while time.time() < ende_z and noch_da:
                 _warte(0.4, 0.3)
-                noch_da = any(h == tw_handle and "tradovate" in t.lower() for h, t, _x in _tv_browser_fenster())
+                noch_da = any(h == tw_handle and TV_RX_TRADOVATE_TITEL.search(t) for h, t, _x in _tv_browser_fenster())
             if noch_da:
                 inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — steht dort eine "
@@ -4429,11 +4438,11 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     def setze_wert(feld, wert, name):
         r = feld[1]
         _tv_uia_klick({"punkt": (r[0] + max(12, (r[2] - r[0]) // 4), (r[1] + r[3]) // 2)}, f"Feld {name}", trail)
-        _warte(0.3, 0.2)
+        _warte(0.15, 0.1)
         text = str(int(wert)) if abs(wert - round(wert)) < 1e-9 else ("%.2f" % wert)
         _tv_tippen(text, name, trail)
         keyboard.send_keys("{TAB}")
-        _warte(0.5, 0.3)
+        _warte(0.3, 0.15)
 
     # Units
     feld, _lab, f = feld_zu(TV_RX_UNITS, "Units")
@@ -4522,7 +4531,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             quelle = "reader"
             vorher = {"menge": tv_menge_summe(pos_vorher, cmd.get("symbol"), plan["richtung"]), "zeilen": 0}
         else:
-            vorher = tv_positions_tabelle(_tv_uia_roh(w, typen_pos), cmd.get("symbol"), plan["richtung"])
+            roh_p = _tv_uia_roh(w, typen_pos)          # EIN Scan fuer Tabelle UND Meldungen (22.09.2026 18:4x: 2,2 s → ~1 s)
+            vorher = tv_positions_tabelle(roh_p, cmd.get("symbol"), plan["richtung"])
             quelle = "tabelle" if vorher else None
         trail.append(f"Beweis-Quelle: {quelle or 'KEINE (Reader aus, Positions-Tabelle nicht zu sehen)'}"
                      + (f", vorher {vorher['menge']:g}" if vorher else ""))
@@ -4531,7 +4541,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Positions-Tabelle war da hinter 'Show more' verdeckt): TradingViews EIGENE
         # Meldung nach dem Klick. Gezaehlt werden nur Meldungen, die es VOR dem Klick
         # noch nicht gab (alte bleiben minutenlang stehen).
-        roh_v = _tv_uia_roh(w, typen)
+        roh_v = roh_p if quelle != "reader" else _tv_uia_roh(w, typen)
         toasts_vorher = set(tv_order_meldungen(roh_v, cmd.get("symbol")))
         namen_vorher = {str(e[0]).strip() for e in roh_v if e[1]}
 
