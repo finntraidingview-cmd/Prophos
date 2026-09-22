@@ -3481,6 +3481,9 @@
     }
     #dashboard-view .panel{padding:16px}
     #dashboard-view .panel-title{font-size:13px;font-weight:650;letter-spacing:-.01em}
+    /* Kopfzeile darf umbrechen: „Benachrichtigungen aufs Handy" + Statuswort
+       standen bei 358px ineinander (22.09.2026). */
+    #dashboard-view .panel-head{flex-wrap:wrap;row-gap:2px}
     #dashboard-view .kpi{padding:14px 15px;border-radius:var(--m-r-card)}
     #dashboard-view .kpi-label{
       font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
@@ -9008,6 +9011,7 @@
       if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
       if(typeof renderAccountFirmsList === 'function') renderAccountFirmsList()
       if(typeof window.acOnEnterSettings === 'function') window.acOnEnterSettings()   // Auto-Close (22.09.2026)
+      if(typeof window.pushOnEnterSettings === 'function') window.pushOnEnterSettings()  // Handy-Push (22.09.2026)
     }
     if(name === 'news' && typeof newsOnEnterView === 'function') newsOnEnterView()
     if(name === 'kasse' && typeof kasseOnEnter === 'function') kasseOnEnter()
@@ -25402,7 +25406,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.390'
+  const OS_TAB_BUILD = '2026-09-22.391'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27022,6 +27026,10 @@
       await _pushSpeichern(sub)
     }catch(e){ console.warn('[push] Abgleich', e) }
   }
+
+  // Beim Betreten der Einstellungen neu zeichnen — Status und Geraeteliste
+  // sind sonst leer, bis man irgendetwas drueckt. switchView ruft das auf.
+  window.pushOnEnterSettings = pushPanelZeichnen
 
   document.getElementById('pushAn')?.addEventListener('click', pushEinschalten)
   document.getElementById('pushAus')?.addEventListener('click', pushAbmelden)

@@ -2807,6 +2807,276 @@ def sb_upsert(table, body):
     r.raise_for_status()
 
 
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# HANDY-BENACHRICHTIGUNGEN (Web Push) — 22.09.2026
+#
+# Finn: „gehts nicht ans handy" — und auf die Rueckfrage: „prophos liegt auf
+# meinem home bildschrim". Damit war der letzte Blocker weg.
+#
+# BEFUND vorher: prophos.html hat an zwei Stellen `new Notification(...)`
+# benutzt (News-Alerts, Auto-Close). Das feuert nur aus einem OFFENEN Tab —
+# und auf iOS gar nicht, auch nicht in der auf dem Home-Bildschirm
+# installierten Web-App: dort zeigt ausschliesslich ein Service Worker etwas
+# an. Die Erlaubnis-Abfrage kam, danach passierte nichts. Auto-Close laeuft
+# ohnehin nur am PC-Tab, ging also nie ans Handy, auch nicht theoretisch.
+#
+# JETZT: echtes Web Push. Das Geraet meldet sich beim Push-Dienst seines
+# Herstellers an (Apple/Google/Mozilla) und hinterlegt Adresse + zwei
+# Schluessel in push_geraete. Der Server verschluesselt die Nachricht gegen
+# diese Schluessel und legt sie beim Dienst ab — das Geraet bekommt sie,
+# auch wenn Prophos komplett geschlossen ist.
+#
+# SICHERHEIT — die eine Entscheidung, auf die es hier ankommt:
+# /push/send nimmt KEINE Empfaenger-Angabe entgegen. Gesendet wird immer an
+# die Geraete des AUFRUFERS, ermittelt aus seinem sb-token (dasselbe Muster
+# wie /duplikum/session und /admin/overview). Ein Feld „user_id" im Rumpf
+# waere ein offener Kanal, ueber den jeder eingeloggte Prophos-User jedem
+# anderen etwas aufs Sperrbildschirm schreiben koennte — genau die
+# Rollen-Luecke, die im Vault seit 28.08.2026 als offener Punkt steht. Der
+# Waechter im selben Prozess ruft push_an_user() direkt auf; die Funktion ist
+# NICHT als Route erreichbar.
+#
+# OHNE VAPID-SCHLUESSEL ist alles hier still aus (Endpunkte antworten 503).
+# Die PCs und der Waechter laufen unveraendert weiter.
+# ════════════════════════════════════════════════════════════════════════════
+VAPID_PUBLIC_KEY  = (os.environ.get("VAPID_PUBLIC_KEY") or "").strip()
+VAPID_PRIVATE_KEY = (os.environ.get("VAPID_PRIVATE_KEY") or "").strip()
+# mailto: ist vom Standard vorgeschrieben — die Push-Dienste nutzen es, um bei
+# Problemen den Absender zu erreichen. Ein falscher Wert fuehrt bei manchen
+# Diensten zu 403, deshalb per Env ueberschreibbar.
+VAPID_SUBJECT = (os.environ.get("VAPID_SUBJECT") or "mailto:finn.hermann1@icloud.com").strip()
+
+try:
+    from pywebpush import webpush, WebPushException
+    _PUSH_LIB = True
+except Exception:                                            # pragma: no cover
+    _PUSH_LIB = False
+    print("[push] ℹ️ pywebpush nicht installiert — Handy-Benachrichtigungen aus.", flush=True)
+
+
+def push_bereit():
+    return bool(_PUSH_LIB and VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY and SUPABASE_SERVICE_KEY)
+
+
+def push_uid(req):
+    """sb-token → Supabase-User-ID, oder "" wenn nicht angemeldet.
+    Gleiches Muster wie /duplikum/session — ein Token, das Supabase selbst
+    bestaetigt; wir pruefen die Signatur bewusst nicht selbst nach."""
+    token = (req.headers.get("sb-token") or "").strip()
+    if not token:
+        return ""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        return str((r.json() or {}).get("id") or "") if r.status_code == 200 else ""
+    except Exception:
+        return ""
+
+
+def _push_an_geraet(row, payload):
+    """Eine Nachricht an ein Geraet. Rueckgabe: (ok, meldung, tot)
+    tot=True heisst: die Anmeldung ist endgueltig weg (Handy zurueckgesetzt,
+    App geloescht, Berechtigung entzogen) — die Zeile gehoert geloescht.
+    Sonst wuerde jede kuenftige Runde erneut gegen einen toten Endpunkt
+    laufen und die Sende-Schleife unnoetig verlangsamen."""
+    try:
+        webpush(
+            subscription_info={
+                "endpoint": row["endpoint"],
+                "keys": {"p256dh": row["p256dh"], "auth": row["auth"]},
+            },
+            data=json.dumps(payload, ensure_ascii=False),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_SUBJECT},
+            timeout=12,
+        )
+        return True, "", False
+    except WebPushException as e:
+        code = getattr(getattr(e, "response", None), "status_code", 0) or 0
+        return False, f"HTTP {code}: {str(e)[:160]}", code in (404, 410)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:160]}", False
+
+
+def push_an_user(uid, titel, text, url=None, tag=None, renotify=False):
+    """An ALLE Geraete dieses Logins. Rueckgabe: (zugestellt, versucht).
+
+    Wird sowohl von der Route /push/send (Frontend-Ereignisse) als auch
+    direkt vom Waechter-Thread aufgerufen. Wirft nie — eine fehlgeschlagene
+    Benachrichtigung darf niemals den Waechter-Zyklus abbrechen; der Zyklus
+    bewegt Geld, die Meldung ist nur Beiwerk."""
+    if not push_bereit() or not uid:
+        return 0, 0
+    try:
+        rows = sb_select("push_geraete", {"select": "*", "user_id": f"eq.{uid}"})
+    except Exception as e:
+        print(f"[push] ⚠️ Geraete lesen: {type(e).__name__}: {e}", flush=True)
+        return 0, 0
+    if not rows:
+        return 0, 0
+    payload = {"titel": str(titel or "Prophos")[:80],
+               "text": str(text or "")[:220],
+               "url": url or "https://prophos.pages.dev/prophos",
+               "tag": tag or "prophos",
+               "renotify": bool(renotify)}
+    ok_n = 0
+    for row in rows:
+        ok, meldung, tot = _push_an_geraet(row, payload)
+        try:
+            if tot:
+                requests.delete(f"{SUPABASE_URL}/rest/v1/push_geraete",
+                                params={"id": f"eq.{row['id']}"},
+                                headers=_sb_headers("return=minimal"), timeout=10)
+                print(f"[push] 🧹 tote Anmeldung entfernt ({(row.get('geraet') or '—')[:24]})", flush=True)
+                continue
+            sb_update("push_geraete", {"id": f"eq.{row['id']}"},
+                      {"zuletzt_ok_at": _wt_now_iso() if ok else row.get("zuletzt_ok_at"),
+                       "letzter_fehler": "" if ok else meldung})
+        except Exception:
+            pass          # Buchhaltung darf das Senden nicht kippen
+        if ok:
+            ok_n += 1
+    return ok_n, len(rows)
+
+
+@app.route("/push/vapid-public", methods=["GET", "OPTIONS"])
+def push_vapid_public():
+    """Oeffentlicher Schluessel fuer den Browser (applicationServerKey).
+    Bewusst ohne Anmeldung: der Wert ist per Definition oeffentlich, und das
+    Frontend braucht ihn, bevor es irgendetwas anmelden kann. Er wird NICHT
+    in prophos.html einbetoniert — sonst muesste bei einer Schluessel-
+    Rotation das Frontend neu deployt werden."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not push_bereit():
+        return jsonify({"ok": False, "error": "Push nicht konfiguriert (VAPID-Schluessel fehlen)"}), 503
+    return jsonify({"ok": True, "key": VAPID_PUBLIC_KEY})
+
+
+@app.route("/push/subscribe", methods=["POST", "OPTIONS"])
+def push_subscribe():
+    if request.method == "OPTIONS":
+        return "", 200
+    if not push_bereit():
+        return jsonify({"ok": False, "error": "Push nicht konfiguriert"}), 503
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    sub = d.get("sub") or {}
+    keys = sub.get("keys") or {}
+    endpoint, p256dh, auth = sub.get("endpoint"), keys.get("p256dh"), keys.get("auth")
+    if not (endpoint and p256dh and auth):
+        return jsonify({"ok": False, "error": "Unvollstaendige Anmeldung"}), 400
+    try:
+        # on_conflict=endpoint: dasselbe Geraet meldet sich nach jedem
+        # Neu-Erteilen der Berechtigung erneut an. Ohne das gaebe es zwei
+        # Zeilen und Finn bekaeme jede Meldung doppelt.
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/push_geraete",
+                          params={"on_conflict": "endpoint"},
+                          json={"user_id": uid, "endpoint": endpoint, "p256dh": p256dh,
+                                "auth": auth, "geraet": str(d.get("geraet") or "")[:80],
+                                "letzter_fehler": ""},
+                          headers=_sb_headers("resolution=merge-duplicates,return=minimal"),
+                          timeout=12)
+        r.raise_for_status()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"ok": True})
+
+
+@app.route("/push/unsubscribe", methods=["POST", "OPTIONS"])
+def push_unsubscribe():
+    if request.method == "OPTIONS":
+        return "", 200
+    if not push_bereit():
+        return jsonify({"ok": False, "error": "Push nicht konfiguriert"}), 503
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    endpoint = (d.get("endpoint") or "").strip()
+    if not endpoint:
+        return jsonify({"ok": False, "error": "endpoint fehlt"}), 400
+    try:
+        # user_id MUSS mit in den Filter: sonst koennte ein eingeloggter User
+        # mit einer fremden endpoint-Adresse das Geraet eines anderen abmelden.
+        requests.delete(f"{SUPABASE_URL}/rest/v1/push_geraete",
+                        params={"endpoint": f"eq.{endpoint}", "user_id": f"eq.{uid}"},
+                        headers=_sb_headers("return=minimal"), timeout=12)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"ok": True})
+
+
+@app.route("/push/geraete", methods=["GET", "OPTIONS"])
+def push_geraete_liste():
+    """Geraeteliste fuer die Einstellungen — ohne die Schluessel."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not push_bereit():
+        return jsonify({"ok": False, "error": "Push nicht konfiguriert"}), 503
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    try:
+        rows = sb_select("push_geraete", {"select": "endpoint,geraet,erstellt_at,zuletzt_ok_at,letzter_fehler",
+                                          "user_id": f"eq.{uid}", "order": "erstellt_at.desc"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"ok": True, "geraete": rows})
+
+
+@app.route("/push/send", methods=["POST", "OPTIONS"])
+def push_send():
+    """Ereignisse, die im FRONTEND entstehen (Auto-Close, News-Alerts), an die
+    eigenen Geraete weiterreichen. Kein Empfaenger-Feld — siehe Kopf."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not push_bereit():
+        return jsonify({"ok": False, "error": "Push nicht konfiguriert"}), 503
+    uid = push_uid(request)
+    if not uid:
+        return jsonify({"ok": False, "error": "Nicht angemeldet"}), 401
+    d = request.get_json(silent=True) or {}
+    ok_n, n = push_an_user(uid, d.get("titel"), d.get("text"),
+                           url=d.get("url"), tag=d.get("tag"), renotify=bool(d.get("renotify")))
+    return jsonify({"ok": True, "zugestellt": ok_n, "geraete": n})
+
+
+@app.route("/sw.js", methods=["GET"])
+def push_service_worker():
+    """Service Worker fuer die LOKALEN PCs durchreichen.
+
+    Am Handy holt sich die installierte Web-App /sw.js direkt von
+    prophos.pages.dev — Cloudflare Pages liefert die Datei aus dem Repo
+    ohnehin aus (genau wie die App-Icons aus dem Manifest). Die PCs laden
+    prophos.html aber ueber localhost:5000, und ein Service Worker MUSS vom
+    selben Ursprung kommen wie die Seite. Ohne diese Route liefe die
+    Registrierung dort in ein 404.
+
+    Der Inhalt kommt aus demselben Repo-Stand wie das Frontend (PROPHOS_FRONTEND
+    zeigt auf pages.dev) — die PCs bekommen also nie einen aelteren Worker als
+    das HTML, das sie gerade fahren. Liegt die Datei lokal (Entwicklung auf dem
+    Mac), gewinnt die lokale."""
+    hier  = os.path.dirname(os.path.abspath(__file__))
+    lokal = os.path.join(hier, "sw.js")
+    if os.path.exists(lokal):
+        return send_from_directory(hier, "sw.js", mimetype="application/javascript")
+    basis = (os.environ.get("PROPHOS_FRONTEND") or "https://prophos.pages.dev/prophos").strip()
+    quelle = basis.rsplit("/", 1)[0] + "/sw.js"
+    try:
+        r = requests.get(quelle, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        return f"// sw.js nicht erreichbar ({type(e).__name__}) — Benachrichtigungen aus\n", 200, \
+               {"Content-Type": "application/javascript"}
+    return r.text, 200, {"Content-Type": "application/javascript",
+                         "Cache-Control": "no-store"}
+
+
 def dup_login(email, password):
     """Duplikum-Login → Token oder None.
 
@@ -3280,6 +3550,36 @@ def _plan_tickets(plan, state_tickets):
     return None
 
 
+def _wt_push_trade(uid, plan, art):
+    """Trade-Ereignis des Waechters aufs Handy (22.09.2026).
+
+    Der Waechter ist die EINZIGE Stelle, die Start und Ende zuverlaessig
+    sieht, ohne dass irgendwo ein Tab offen sein muss — genau deshalb haengt
+    die Benachrichtigung hier und nicht im Frontend.
+
+    tag pro Plan UND Art: ein zweiter Start desselben Plans (Neustart nach
+    Abbruch) ersetzt die alte Meldung, statt den Sperrbildschirm zu fuellen.
+    Nie werfen — der Zyklus bewegt Geld, die Meldung ist Beiwerk."""
+    try:
+        paar = f"{plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'}"
+        sym  = (plan.get('master_symbol') or '').strip()
+        if art == "start":
+            titel = "Trade läuft"
+            text  = paar + (f" · {sym}" if sym else "")
+        else:
+            mp, sp = plan.get("master_pl"), plan.get("slave_pl")
+            teile = [paar]
+            if mp is not None or sp is not None:
+                teile.append(f"Master {mp if mp is not None else '—'} · Slave {sp if sp is not None else '—'}")
+            titel = "Trade beendet"
+            text  = " · ".join(teile)
+        push_an_user(uid, titel, text,
+                     url="https://prophos.pages.dev/prophos#trades",
+                     tag=f"plan-{plan.get('id')}-{art}")
+    except Exception as e:
+        print(f"[push] ⚠️ Trade-Meldung: {type(e).__name__}: {e}", flush=True)
+
+
 def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch=None, tickets=None,
                    email=None, accounts=None, pnl_ready=None):
     """open → review + sofortiger P&L-Fetch. True = Plan ist versorgt.
@@ -3296,6 +3596,7 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
         # Guard hat gegriffen — jemand hat den Plan manuell abgeschlossen. Erledigt.
         return True
     print(f"[watcher] 🔴 {label}: Trade beendet → Überprüfen ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+    _wt_push_trade(uid, plan, "ende")
     if pnl_ready:
         try:
             wt_write_pnl(uid, plan, pnl_ready)
@@ -3553,6 +3854,7 @@ def wt_check_user(uid, creds, memo):
                 wt_save_tickets(uid, plan["id"], master_tickets)
                 if rows:
                     print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+                    _wt_push_trade(uid, plan, "start")
                 continue
 
             # ── Master NICHT verknüpft: alter Slave-Zählwerk-Fallback ──
@@ -3578,6 +3880,7 @@ def wt_check_user(uid, creds, memo):
             wt_save_tickets(uid, plan["id"], trade_tickets)
             if rows:
                 print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
+                _wt_push_trade(uid, plan, "start")
             continue
 
         # status == 'open'

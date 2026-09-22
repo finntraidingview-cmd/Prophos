@@ -4,3 +4,4 @@ gunicorn
 signalrcore
 anthropic
 reportlab
+pywebpush
