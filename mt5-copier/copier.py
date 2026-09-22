@@ -80,14 +80,158 @@ def is_paused():
     return os.path.exists(_PAUSE_FLAG)
 
 
+_REPO = "finntraidingview-cmd/Prophos"
+
+
+def _repo_sha(timeout=8):
+    """Kennung des neuesten Commits auf main (Git-Schnittstelle, kein Zwischenspeicher) — oder None."""
+    try:
+        req = urllib.request.Request(f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
+                                     headers={"User-Agent": "git/2.40"})
+        roh = urllib.request.urlopen(req, timeout=timeout).read()
+        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", roh)
+        return m.group(1).decode("ascii") if m else None
+    except Exception:
+        return None
+
+
+def _copier_code_geaendert():
+    """Wuerde ein Neustart den LAUFENDEN Copier-Code aendern? copier.py aus GENAU dem
+    neuesten Stand (Commit-Kennung) gegen die laufende Datei. True auch bei
+    Unsicherheit (kein Netz) — dann gilt der alte Weg: Neustart."""
+    sha = _repo_sha()
+    if not sha:
+        return True
+    try:
+        neu = urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/mt5-copier/copier.py",
+                                     timeout=10).read()
+        if len(neu) < 10000 or b"def main" not in neu:
+            return True
+        with open(os.path.abspath(__file__), "rb") as f:
+            alt = f.read()
+        glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+        return glatt(neu) != glatt(alt)
+    except Exception:
+        return True
+
+
+def _version_uebernehmen(version):
+    """VERSION-Datei nachziehen, ohne Neustart."""
+    try:
+        ziel = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+        with open(ziel + ".tmp", "w", encoding="utf-8") as f:
+            f.write(version + "\n")
+        os.replace(ziel + ".tmp", ziel)
+    except OSError:
+        pass
+
+
 def _version_watcher():
+    # NUR neu starten, wenn copier.py sich wirklich geaendert hat (23.09.2026, Finn:
+    # "bei Echo wird auf manchen PCs immer wieder das Slave-Terminal nach vorn geholt").
+    # Jeder VERSION-Bump — in Finns Testnacht 12 in 100 min, fast alle nur Frontend —
+    # startete den Copier auf jedem PC mit flachen Mastern neu, und jeder Start haengt
+    # sich per initialize() ans Hedge-Terminal, was dessen Fenster nach vorn reisst.
+    # Gleicher Code im neuesten Commit → nur die VERSION-Datei nachziehen.
+    # _REMOTE_VERSION["neustart"] traegt die Entscheidung in die Hauptschleife.
     while True:
         try:
             with urllib.request.urlopen(UPDATE_URL, timeout=10) as r:
-                _REMOTE_VERSION["v"] = r.read().decode("utf-8", "replace").strip()
+                remote = r.read().decode("utf-8", "replace").strip()
+            lokal = local_version()
+            if remote and lokal and remote != lokal:
+                if _copier_code_geaendert():
+                    _REMOTE_VERSION.update(v=remote, neustart=True)
+                else:
+                    _version_uebernehmen(remote)
+                    log(f"↻ Update {lokal} → {remote}: copier.py unveraendert — kein Neustart, "
+                        f"VERSION nachgezogen.")
+                    _REMOTE_VERSION.update(v=remote, neustart=False)
+            else:
+                _REMOTE_VERSION["v"] = remote
         except Exception:
             pass  # kein Internet o.ae. — einfach beim alten Stand bleiben
         time.sleep(60)
+
+# ── Hedge-Terminal-Fenster: Vordergrund nach initialize() zurueckgeben (23.09.2026) ──
+def _hedge_fenster(hpath):
+    """Sichtbare Hauptfenster der terminal64.exe DIESER Hedge-Installation:
+    [(hwnd, minimiert)] — leer, wenn kein Windows / kein Pfad / nichts laeuft."""
+    if os.name != "nt" or not hpath:
+        return []
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        import provision
+        u32 = ctypes.windll.user32
+        pids = set(provision.terminal_pids(os.path.dirname(os.path.abspath(hpath))))
+        if not pids:
+            return []
+        out = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
+        def _cb(h, _lp):
+            try:
+                if not u32.IsWindowVisible(h) or u32.GetWindow(h, 4):   # GW_OWNER: nur Hauptfenster
+                    return True
+                pid = wt.DWORD()
+                u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+                if pid.value in pids and u32.GetWindowTextLengthW(h) > 0:
+                    out.append((int(h), bool(u32.IsIconic(h))))
+            except Exception:
+                pass
+            return True
+        u32.EnumWindows(_cb, 0)
+        return out
+    except Exception:
+        return []
+
+
+def _vordergrund_merken(hpath):
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        vorn = int(ctypes.windll.user32.GetForegroundWindow())
+        return {"vorn": vorn, "hedge": dict(_hedge_fenster(hpath)), "hpath": hpath}
+    except Exception:
+        return None
+
+
+def _vordergrund_zurueck(vorher):
+    """Hat initialize() das Hedge-Terminal nach vorn geholt? Dann zurueck in den
+    Zustand von vorher: war es minimiert → wieder minimieren; sonst hinter alle
+    anderen Fenster und dem vorherigen Fenster den Vordergrund zurueckgeben
+    (Alt-Tastendruck gibt Windows' Foreground-Lock frei, wie im Panel). Stand das
+    Terminal schon vorher vorn (Finn arbeitet gerade darin), passiert nichts."""
+    if not vorher:
+        return
+    try:
+        import ctypes
+        u32 = ctypes.windll.user32
+        jetzt = dict(_hedge_fenster(vorher.get("hpath")))
+        vorn = int(u32.GetForegroundWindow())
+        if vorn not in jetzt or vorn == vorher.get("vorn"):
+            return
+        war_min = vorher.get("hedge", {}).get(vorn)
+        if war_min or vorn not in vorher.get("hedge", {}):
+            u32.ShowWindow(vorn, 6)                       # SW_MINIMIZE
+            wie = "wieder minimiert"
+        else:
+            # HWND_BOTTOM=1, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE = 0x0013
+            u32.SetWindowPos(vorn, 1, 0, 0, 0, 0, 0x0013)
+            wie = "nach hinten gestellt"
+        alt_vorn = int(vorher.get("vorn") or 0)
+        if alt_vorn and u32.IsWindow(alt_vorn):
+            try:
+                u32.keybd_event(0x12, 0, 0, 0); u32.keybd_event(0x12, 0, 2, 0)   # Alt druecken/loslassen
+                u32.SetForegroundWindow(alt_vorn)
+            except Exception:
+                pass
+        log(f"Hedge-Terminal kam durch initialize() nach vorn — {wie}, Vordergrund zurueckgegeben.")
+    except Exception:
+        pass
+
 
 # Dieselbe Namensregel wie im Panel (panel.py) — bewusst streng, damit
 # Explorer-Kopien wie "config - Kopie.json" oder "config (2).json" NICHT als
@@ -848,6 +992,14 @@ def main():
     # BEWUSST kein login/password/server: initialize() nutzt den im Terminal
     # eingeloggten Account. mt5.login() wird NIE aufgerufen — das wuerde ein
     # Terminal auf ein anderes Konto umschalten.
+    # Vordergrund merken (23.09.2026, Finn: "bei Echo wird auf manchen PCs immer wieder
+    # das Slave-Terminal nach vorn geholt, der Tab ist sowieso immer offen — aber ganz
+    # vorn"): initialize() haengt sich ans Hedge-Terminal und AKTIVIERT dabei dessen
+    # Fenster (holt es sogar aus der Minimierung). Bei jedem Copier-Start — und den
+    # gab es in Finns Testnacht bei jedem VERSION-Bump auf jedem PC mit flachen
+    # Mastern. Deshalb: vorher merken, was vorn war und wie das Terminal stand,
+    # danach genau das wiederherstellen. Jede Stoerung hier ist folgenlos.
+    _vorher = _vordergrund_merken(hpath)
     if not mt5.initialize(**init_kw):
         # Grund in den Log-SPIEGEL, nicht nur nach stderr (31.08.2026): stirbt der
         # Copier hier, sieht Prophos nur noch alive=false und riet bisher pauschal
@@ -857,6 +1009,8 @@ def main():
         log(f"⛔ initialize() fehlgeschlagen: {mt5.last_error()} — laeuft das Hedge-Terminal?")
         log("⛔ ABBRUCH — keine Order gesendet.")
         sys.exit(1)
+
+    _vordergrund_zurueck(_vorher)
 
     ti = mt5.terminal_info()
     ai = mt5.account_info()
@@ -1242,7 +1396,7 @@ def main():
             # Selbst-Update: neue Version auf GitHub → sauber neu starten, aber
             # NUR wenn kein Master eine Position oder einen Hedge offen hat.
             rv = _REMOTE_VERSION["v"]
-            if my_version and rv and rv != my_version:
+            if my_version and rv and rv != my_version and _REMOTE_VERSION.get("neustart", True):
                 busy = [m.file for m in masters if getattr(m, "busy", False)]
                 if not busy:
                     log(f"↻ Update {my_version} → {rv} — alle Master flach, starte neu "
