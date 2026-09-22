@@ -12848,6 +12848,9 @@
         if(typeof renderAccounts === 'function') renderAccounts()
         // Trade-Cards neu rendern damit die Live-Balance-Badges aktuell sind
         if(typeof renderTradePlans === 'function') renderTradePlans()
+        // Offenes Trade-Plan-Popup: Master-/Slave-Dropdown mit der frischen Liste neu
+        // zeichnen (22.09.2026) — sonst steht der Slave dort bis zum nächsten Ereignis leer.
+        if(typeof window._tpAccountSelectsRefresh === 'function') window._tpAccountSelectsRefresh()
         // Lot-Rechner Push-Panel mit frischen Slaves befüllen
         if(typeof window.dupCalcRender === 'function') window.dupCalcRender()
         if(dupEls.testOut){
@@ -21193,7 +21196,6 @@
   }
   function newsOnEnterView(){
     // Notification-Permission einmalig anfragen (optional, nur best-effort)
-    try{ if(window.Notification && Notification.permission === 'default') Notification.requestPermission() }catch(_){}
     if(!newsState.loaded && !newsState.loading) newsFetch(); else newsRender()
   }
 
@@ -21239,7 +21241,12 @@
     wrap.appendChild(el)
     requestAnimationFrame(() => { el.style.opacity = '1'; el.style.transform = 'none' })
     setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(24px)'; setTimeout(() => el.remove(), 400) }, stage === 3 ? 60000 : 30000)
-    try{ if(window.Notification && Notification.permission === 'granted') new Notification(`USD-News ${lbl}`, { body: ev.title || '', silent: true }) }catch(_){}
+    // 22.09.2026: war `new Notification(…)` — zeigte nur im offenen Tab etwas an
+    // und auf dem iPhone gar nichts. Jetzt über den Server als echtes Push, das
+    // auch ankommt, wenn Prophos zu ist. tag pro Ereignis: die drei Stufen
+    // (60/15/5 min) desselben Termins ersetzen einander statt sich zu stapeln.
+    pushAnsHandy(`USD-News ${lbl}`, ev.title || 'Termin steht an',
+                 'https://prophos.pages.dev/prophos#news', `news-${ev.id || ev.title || hhmm}`)
   }
 
   function newsAlertsEnabled(){ return !!document.getElementById('news-alerts-on')?.checked }
@@ -25395,7 +25402,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.389'
+  const OS_TAB_BUILD = '2026-09-22.390'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26779,6 +26786,249 @@
   setInterval(_osWachPruefen, 30000)
   /* ══ ENDE REMOTE-TRADE-SIGNALE ══ */
 
+  /* ══ BENACHRICHTIGUNGEN AUFS HANDY (Web Push, 22.09.2026) ══════════════════
+   * Finn: „gehts nicht ans handy" — und auf die Rückfrage, was dem im Weg
+   * steht: „prophos liegt auf meinem home bildschrim". Damit war der letzte
+   * Blocker weg.
+   *
+   * WARUM DER ALTE WEG NIE ANKAM: an zwei Stellen stand `new Notification(…)`
+   * (News-Alerts, Auto-Close). Das zeigt nur etwas, solange ein Tab OFFEN ist —
+   * und auf iOS gar nichts, auch nicht in der Home-Bildschirm-App: dort zeigt
+   * ausschließlich ein Service Worker an. Die Erlaubnis-Abfrage erschien, und
+   * danach passierte nichts. Auto-Close läuft obendrein nur am PC-Tab, ging
+   * also nie ans Handy, auch nicht theoretisch.
+   *
+   * JETZT: echtes Web Push. Das Gerät meldet sich beim Push-Dienst seines
+   * Herstellers an, Prophos merkt sich Adresse + Schlüssel (push_geraete), und
+   * der Server legt die verschlüsselte Nachricht dort ab — sie kommt an, auch
+   * wenn Prophos komplett geschlossen ist.
+   *
+   * ZWEI REGELN, die iOS erzwingt und die man nicht umgehen kann:
+   *  1. Nur aus der auf dem Home-Bildschirm installierten Web-App. Im normalen
+   *     Safari-Tab gibt es die Schnittstelle nicht — deshalb der ehrliche
+   *     Hinweis im Panel statt eines Knopfs, der dann still nichts tut.
+   *  2. `requestPermission()` nur aus einer echten Nutzer-Geste. Darum hängt
+   *     alles am Knopf und nichts am Seitenstart.
+   *
+   * Das Anmelden passiert bewusst NICHT automatisch beim Laden: eine
+   * Berechtigungs-Abfrage ohne Anlass ist der schnellste Weg, dass Finn sie
+   * wegdrückt — und „verweigert" lässt sich nur noch in den Systemeinstellungen
+   * zurückholen. Was beim Laden passiert, ist nur der stille Abgleich unten
+   * (pushAbgleich): war dieses Gerät schon angemeldet, wird die Anmeldung
+   * aufgefrischt, falls der Push-Dienst die Adresse rotiert hat. */
+  const PUSH_BACKEND = TS_BACKEND
+  let _pushKey = null          // VAPID-Public-Key vom Backend, einmal pro Laden
+  let _pushSub = null          // aktuelle Anmeldung dieses Geräts
+
+  async function _pushTok(){
+    try{ return (await supabase.auth.getSession()).data?.session?.access_token || '' }catch(_){ return '' }
+  }
+  function _pushB64(b64){
+    // VAPID-Schlüssel kommt base64url ohne Polster; applicationServerKey will
+    // rohe Bytes. Node-Standardweg, 1:1 aus der Web-Push-Doku.
+    const pad = '='.repeat((4 - b64.length % 4) % 4)
+    const roh = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'))
+    return Uint8Array.from([...roh].map(c => c.charCodeAt(0)))
+  }
+  function _pushGeraetName(){
+    const ua = navigator.userAgent || ''
+    const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad'
+             : /Android/.test(ua) ? 'Android' : /Macintosh/.test(ua) ? 'Mac'
+             : /Windows/.test(ua) ? 'Windows' : 'Gerät'
+    const br = /CriOS|Chrome/.test(ua) ? 'Chrome' : /Firefox/.test(ua) ? 'Firefox' : 'Safari'
+    const app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches)
+             || window.navigator.standalone ? ' · App' : ''
+    return `${os} · ${br}${app}`
+  }
+
+  /* Kann dieses Gerät überhaupt Push? Gibt einen KLARTEXT-Grund zurück, keinen
+   * bool — das Panel soll sagen, WAS fehlt, statt nur den Knopf auszugrauen. */
+  function pushMoeglich(){
+    if(!('serviceWorker' in navigator)) return { ok:false, grund:'Dieser Browser kann keine Benachrichtigungen.' }
+    if(!('PushManager' in window))      return { ok:false, grund:'Dieser Browser kann kein Web Push.' }
+    if(!('Notification' in window))     return { ok:false, grund:'Dieser Browser kann keine Benachrichtigungen.' }
+    const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    const alsApp = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone
+    if(iOS && !alsApp) return { ok:false, grund:'Am iPhone nur aus der Home-Bildschirm-App: Teilen → „Zum Home-Bildschirm", dann Prophos von dort öffnen.' }
+    return { ok:true, grund:'' }
+  }
+
+  async function _pushWorker(){
+    // scope '/' ist Absicht: sw.js liegt im Wurzelverzeichnis, die Seite unter
+    // /prophos. Ohne den weiten Scope bekäme der Worker die Seite nicht zu fassen.
+    return navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(r => navigator.serviceWorker.ready.then(() => r))
+  }
+  async function _pushVapid(){
+    if(_pushKey) return _pushKey
+    const r = await fetch(`${PUSH_BACKEND}/push/vapid-public`, { cache:'no-store' })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || !d.key) throw new Error(d.error || 'Server hat keinen Schlüssel')
+    _pushKey = d.key
+    return _pushKey
+  }
+  async function _pushSpeichern(sub){
+    const tok = await _pushTok()
+    if(!tok) throw new Error('Nicht angemeldet')
+    const r = await fetch(`${PUSH_BACKEND}/push/subscribe`, {
+      method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
+      body: JSON.stringify({ sub: sub.toJSON(), geraet: _pushGeraetName() })
+    })
+    const d = await r.json().catch(() => ({}))
+    if(!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`)
+  }
+
+  /* Der Knopf: Worker registrieren → Erlaubnis fragen → anmelden → merken. */
+  async function pushEinschalten(){
+    const m = document.getElementById('pushMsg')
+    const kann = pushMoeglich()
+    if(!kann.ok){ if(m) m.textContent = kann.grund; return }
+    if(m) m.textContent = 'Wird eingerichtet…'
+    try{
+      const reg = await _pushWorker()
+      const erl = await Notification.requestPermission()
+      if(erl !== 'granted'){
+        if(m) m.textContent = erl === 'denied'
+          ? 'Abgelehnt — das lässt sich nur noch in den Geräte-Einstellungen zurücknehmen.'
+          : 'Nicht erlaubt.'
+        return
+      }
+      const key = await _pushVapid()
+      // Eine bestehende Anmeldung wiederverwenden: ein zweites subscribe() mit
+      // demselben Schlüssel liefert dieselbe Adresse, mit einem ANDEREN wirft es.
+      let sub = await reg.pushManager.getSubscription()
+      if(sub){
+        const alt = new Uint8Array(sub.options?.applicationServerKey || new ArrayBuffer(0))
+        const neu = _pushB64(key)
+        const gleich = alt.length === neu.length && alt.every((b,i) => b === neu[i])
+        if(!gleich){ try{ await sub.unsubscribe() }catch(_){} ; sub = null }
+      }
+      if(!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:_pushB64(key) })
+      _pushSub = sub
+      await _pushSpeichern(sub)
+      if(m) m.textContent = '✓ Eingeschaltet'
+      pushPanelZeichnen()
+    }catch(e){
+      if(m) m.textContent = 'Fehlgeschlagen: ' + (e.message || e)
+    }
+  }
+
+  async function pushAbmelden(){
+    const m = document.getElementById('pushMsg')
+    try{
+      const reg = await navigator.serviceWorker.getRegistration('/')
+      const sub = reg && await reg.pushManager.getSubscription()
+      if(!sub){ if(m) m.textContent = 'Dieses Gerät war nicht angemeldet.'; return }
+      const tok = await _pushTok()
+      await fetch(`${PUSH_BACKEND}/push/unsubscribe`, {
+        method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint })
+      })
+      try{ await sub.unsubscribe() }catch(_){}
+      _pushSub = null
+      if(m) m.textContent = 'Abgemeldet.'
+      pushPanelZeichnen()
+    }catch(e){ if(m) m.textContent = 'Fehlgeschlagen: ' + (e.message || e) }
+  }
+
+  /* DER EINE WEG, auf dem Frontend-Ereignisse aufs Handy gehen.
+   * Absichtlich OHNE Empfänger-Angabe: das Backend sendet immer an die Geräte
+   * des Aufrufers, ermittelt aus dessen sb-token. Ein user_id-Feld hier wäre
+   * ein Kanal, über den jeder eingeloggte Prophos-User jedem anderen etwas auf
+   * den Sperrbildschirm schreiben könnte.
+   * Wirft nie — eine verpasste Meldung darf keinen Ablauf stoppen. */
+  async function pushAnsHandy(titel, text, url, tag){
+    try{
+      const tok = await _pushTok()
+      if(!tok) return
+      await fetch(`${PUSH_BACKEND}/push/send`, {
+        method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
+        body: JSON.stringify({ titel, text, url: url || null, tag: tag || null })
+      })
+    }catch(e){ console.warn('[push]', e) }
+  }
+  window.pushAnsHandy = pushAnsHandy
+
+  async function pushTesten(){
+    const m = document.getElementById('pushMsg')
+    if(m) m.textContent = 'Wird gesendet…'
+    try{
+      const tok = await _pushTok()
+      const r = await fetch(`${PUSH_BACKEND}/push/send`, {
+        method:'POST', headers:{ 'sb-token':tok, 'Content-Type':'application/json' },
+        body: JSON.stringify({ titel:'Prophos', text:'Test — wenn du das siehst, kommt es an.',
+                               url:'https://prophos.pages.dev/prophos', tag:'test', renotify:true })
+      })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`)
+      if(m) m.textContent = d.geraete
+        ? `Gesendet an ${d.zugestellt}/${d.geraete} Gerät${d.geraete === 1 ? '' : 'e'}.`
+        : 'Noch kein Gerät angemeldet.'
+      pushPanelZeichnen()
+    }catch(e){ if(m) m.textContent = 'Fehlgeschlagen: ' + (e.message || e) }
+  }
+
+  async function pushPanelZeichnen(){
+    const st = document.getElementById('pushStatus')
+    const hi = document.getElementById('pushHinweis')
+    const li = document.getElementById('pushGeraete')
+    const an = document.getElementById('pushAn')
+    const aus = document.getElementById('pushAus')
+    if(!st) return
+    const kann = pushMoeglich()
+    let hier = false
+    if(kann.ok){
+      try{
+        const reg = await navigator.serviceWorker.getRegistration('/')
+        hier = !!(reg && await reg.pushManager.getSubscription())
+      }catch(_){}
+    }
+    st.textContent = !kann.ok ? 'hier nicht möglich' : hier ? 'auf diesem Gerät an' : 'auf diesem Gerät aus'
+    st.style.color = hier ? 'var(--good)' : 'var(--sub)'
+    if(hi) hi.textContent = kann.ok ? '' : kann.grund
+    if(an)  an.hidden = hier
+    if(aus) aus.hidden = !hier
+    if(!li) return
+    try{
+      const tok = await _pushTok()
+      const r = await fetch(`${PUSH_BACKEND}/push/geraete`, { headers:{ 'sb-token':tok }, cache:'no-store' })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || !d.ok){ li.innerHTML = `<span style="color:var(--sub)">${d.error || 'Geräte nicht abrufbar'}</span>`; return }
+      const g = d.geraete || []
+      if(!g.length){ li.innerHTML = '<span style="color:var(--sub)">Noch kein Gerät angemeldet.</span>'; return }
+      li.innerHTML = g.map(x => {
+        const ok = x.zuletzt_ok_at ? new Date(x.zuletzt_ok_at).toLocaleString('de-DE') : 'noch nie'
+        const err = x.letzter_fehler ? ` · <span style="color:var(--danger)">${x.letzter_fehler}</span>` : ''
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-soft)">
+          <span>${x.geraet || 'Gerät'}</span>
+          <span style="color:var(--sub)">zuletzt erreicht: ${ok}${err}</span></div>`
+      }).join('')
+    }catch(e){ li.innerHTML = `<span style="color:var(--sub)">${e.message || e}</span>` }
+  }
+
+  /* Stiller Abgleich beim Laden: NUR auffrischen, was schon angemeldet ist.
+   * Push-Dienste rotieren Adressen (Apple z.B. nach längerer Inaktivität) —
+   * ohne das läuft die Zeile in push_geraete irgendwann ins Leere, und die
+   * Meldungen hören auf, ohne dass irgendwo etwas rot wird. Fragt NIE nach
+   * einer Berechtigung; ist keine da, passiert nichts. */
+  async function pushAbgleich(){
+    try{
+      if(!pushMoeglich().ok) return
+      if(Notification.permission !== 'granted') return
+      const reg = await _pushWorker()
+      const sub = await reg.pushManager.getSubscription()
+      if(!sub) return
+      _pushSub = sub
+      await _pushSpeichern(sub)
+    }catch(e){ console.warn('[push] Abgleich', e) }
+  }
+
+  document.getElementById('pushAn')?.addEventListener('click', pushEinschalten)
+  document.getElementById('pushAus')?.addEventListener('click', pushAbmelden)
+  document.getElementById('pushTest')?.addEventListener('click', pushTesten)
+  setTimeout(pushAbgleich, 4000)
+  /* ══ ENDE BENACHRICHTIGUNGEN AUFS HANDY ══ */
+
   /* ══ AUTO-CLOSE VOR MARKET CLOSE (22.09.2026, Finns Auftrag: „wenn Orders noch
    * offen sind, 10 Minuten vor Market Close eigenständig schließen — von 23:45
    * Dubai bis 00:00 geht der Bot in zufälligem Abstand hin und schließt alle
@@ -26882,7 +27132,11 @@
     if(document.getElementById('acLog') && document.querySelector('[data-view="settings"].active')) acLogLaden()
   }
   function acBenachrichtigen(titel, text){
-    try{ if('Notification' in window && Notification.permission === 'granted') new Notification(titel, { body: text }) }catch(_){}
+    // 22.09.2026: war `new Notification(…)` — das zeigte nur im offenen PC-Tab
+    // etwas an, und Auto-Close LÄUFT nur am PC-Tab. Die Meldung erreichte Finn
+    // also nie dort, wo er abends ist. Jetzt über den Server als echtes Push
+    // an alle angemeldeten Geräte; der Toast am ausführenden Tab bleibt.
+    pushAnsHandy(titel, text, 'https://prophos.pages.dev/prophos#settings', 'auto-close')
     if(typeof atToast === 'function') atToast(`${titel} — ${text}`, 'end')
   }
 
@@ -27050,13 +27304,6 @@
 
   document.getElementById('acSave')?.addEventListener('click', acSpeichern)
   document.getElementById('acLogReload')?.addEventListener('click', acLogLaden)
-  document.getElementById('acNotif')?.addEventListener('click', async () => {
-    const msg = document.getElementById('acMsg')
-    if(!('Notification' in window)){ if(msg) msg.textContent = 'Dieser Browser kann keine Benachrichtigungen.'; return }
-    const p = await Notification.requestPermission()
-    if(msg) msg.textContent = p === 'granted' ? '✓ Benachrichtigungen erlaubt' : 'Benachrichtigungen nicht erlaubt (' + p + ')'
-    if(p === 'granted') acBenachrichtigen('Prophos', 'Auto-Close-Benachrichtigungen sind an.')
-  })
   window.acOnEnterSettings = async () => { if(!_ac.geladen) await acLaden(); acRegelInsFormular(); acLogLaden() }
   /* ══ ENDE AUTO-CLOSE ══ */
 
@@ -27518,6 +27765,19 @@
     // Initial render beider Selects
     tpRenderAccountSelect('master')
     tpRenderAccountSelect('slave')
+    // Slave kommt 1-2 s nach dem Master (22.09.2026, Finn): die Slave-Liste haengt an
+    // dupState.accounts (Duplikum-Kontoliste, asynchron) — solange die fehlt, greift der
+    // Rueckfall und die Vorauswahl nicht. Deshalb: Liste sofort anstossen, falls sie fehlt,
+    // und dieses Popup neu zeichnen, sobald sie da ist (Haken, den dupLoadAccounts ruft).
+    window._tpAccountSelectsRefresh = () => {
+      if(!document.getElementById('tradePlanModal')?.classList.contains('open')) return
+      tpRenderAccountSelect('master')
+      tpRenderAccountSelect('slave')
+      if(typeof tpRecompute === 'function') tpRecompute()
+    }
+    if(!((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
+      dupLoadAccounts().catch(() => {})
+    }
 
     // Live-Balances kommen oft asynchron — nochmal re-rendern, damit das Modal
     // die neuesten Werte zeigt. Behält die User-Auswahl bei.
