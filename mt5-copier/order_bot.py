@@ -2640,6 +2640,29 @@ def _tv_autofill_vorschlag(username, ohne=None, anmelde_handle=None):
     return tv_uia_namen_filtern(roh, _Nadel, typ_vorrang=None, ohne=ohne)
 
 
+TV_RX_KONTO_ARTIG = re.compile(r"^[A-Z]{2,}[A-Z0-9_-]*\d{5,}(\s+(USD|EUR))?$", re.I)
+
+
+def tv_fremdes_konto(aehnlich, ids):
+    """Steht im Panel ein Konto, das WIE eine Prop-Kontonummer aussieht (Buchstaben +
+    mind. 5 Ziffern, optional ' USD'), aber zu KEINER erwarteten ID gehoert?
+    -> dieser Text oder ''. Reine Ziffern (Positions-/Order-IDs) zaehlen nie.
+    (22.09.2026, Finns Leerzeit-Fund: 'der erste Tab ist offen, es ist nicht der
+    richtige Account drin — bis der geschlossen wird, sind es 10-15 Sekunden'. Die
+    Leseschleife kannte nur ein POSITIVES Ende und lief bei einem fremden Konto
+    die vollen 14 s.)"""
+    soll = {_nur_alnum(i) for i in ids or () if i}
+    for n in aehnlich or ():
+        t = str(n).strip()
+        if not TV_RX_KONTO_ARTIG.match(t):
+            continue
+        wort = _nur_alnum(t.split()[0])
+        if wort in soll or any(w and (w in wort or wort in w) for w in soll):
+            continue
+        return t
+    return ""
+
+
 def modus_tvkonto(cmd):
     res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
@@ -2717,9 +2740,16 @@ def modus_tvkonto(cmd):
                     _warte(0.4, 0.3)
         return fenster[0]
 
+    # Bedienfeld-Wartezeit: beim ersten Blick 2,5 s, danach nur noch kurz — meldet
+    # sich kein Userscript (bei Finn seit 22.09.2026 der Normalfall: Reader aus),
+    # verbrannte sonst JEDE Leserunde 2,5 s nur mit Warten auf etwas, das nie kommt.
+    bf_to = [2.5]
+
     def lies():
         """-> (zustand, aktiv_text, bf, uia_element|None)"""
-        b = _tv_bf(nach=start, timeout=2.5)
+        b = _tv_bf(nach=start, timeout=bf_to[0])
+        if not b:
+            bf_to[0] = 0.3
         z, a = tv_konto_zustand(b, ext, geschwister) if b else ("kein_broker", "")
         if z in ("richtig", "gleicher_login"):
             return z, a, b, None
@@ -2734,10 +2764,20 @@ def modus_tvkonto(cmd):
 
     ende = time.time() + (40.0 if gestartet else 14.0)
     zustand, aktiv, bf, uia_el = "kein_broker", "", None, None
+    fremd_vor = ""
     while not frisch_mit_link:
         zustand, aktiv, bf, uia_el = lies()
         if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
             break
+        # NEGATIVES ENDE: zweimal hintereinander dasselbe FREMDE Konto im Panel (UIA)
+        # -> 'falsch', sofort weiter zum Login-Wechsel statt 14 s auf ein richtiges
+        # zu warten, das nie kommt. Zweimal, weil ein einzelner Blick in die
+        # Ladephase fallen kann (Regel seit .327: nie aus EINEM Blick urteilen).
+        fremd = tv_fremdes_konto(uia_info.get("aehnlich"), ids) if not (gestartet and time.time() - start < 6.0) else ""
+        if fremd and fremd == fremd_vor:
+            zustand, aktiv = "falsch", fremd
+            break
+        fremd_vor = fremd
         _warte(0.35, 0.25)
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"

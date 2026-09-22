@@ -916,6 +916,13 @@ def main():
         order_bot.tv_order_meldungen(_TO, "MNQZ6") == ["Take Profit order placed on MNQZ6"]
         and order_bot.tv_order_meldungen(_TO, "NQZ6") == ["Order filled: Buy 1 NQZ2026"]
         and order_bot.tv_order_meldungen(_TO, "ESZ6") == [])
+    # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
+    chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
+        order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"
+        and order_bot.tv_fremdes_konto(["APEX6416990000025 USD"], ["APEX6416990000025"]) == ""
+        and order_bot.tv_fremdes_konto(["PAAPEX6416990000031"], ["APEX6416990000031"]) == ""      # Geschwister-aehnlich: kein Urteil
+        and order_bot.tv_fremdes_konto(["4470324", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
+        and order_bot.tv_fremdes_konto(None, ["APEX1"]) == "")
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
