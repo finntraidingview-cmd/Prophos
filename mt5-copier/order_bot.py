@@ -2142,6 +2142,16 @@ def tv_panel_lage(roh, knoepfe, fenster):
              and (ky is None or ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10)]
     zy = (zeile[0][1][1] + zeile[0][1][3]) // 2 if zeile else ((ky - 42) if ky is not None else (b - int(h * 0.05)))
     kand = []
+    # ZUERST direkt ueber 'Profit' (Finn 22.09.2026 13:07, Screenshot mit Tooltip 'Maximize
+    # panel': 'eigentlich muss er nur ueber Profit klicken' — ⤢ sitzt 5 px links der rechten
+    # Kante von 'Profit', 43 px darueber; 'Restore panel' nach dem Maximieren an derselben
+    # Stelle relativ zur dann oben liegenden Kopfzeile).
+    profit = [e for e in kopf if re.match(r"^(profit|gewinn)$", str(e[0]).strip(), re.I)]
+    if profit:
+        pr = profit[0][1]
+        py = (pr[1] + pr[3]) // 2
+        for dx, dy in ((5, -43), (pr[2] - (pr[0] + pr[2]) // 2, -43), (5, -38), (5, -48), (9, -43)):
+            kand.append((pr[2] - dx, py + dy, "ueber 'Profit'"))
     for e in roh or ():
         n = str(e[0]).strip()
         if e[1] and (len(e) < 3 or e[2] in ("Button", "")) and re.search(r"(maxim|expand|restore|wiederherstell|vergr)", n, re.I) \
