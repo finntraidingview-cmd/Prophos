@@ -1201,6 +1201,8 @@
   #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
   #adm-pane-wd .wd-konten td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle}
   #adm-pane-wd .wd-konten tr:last-child td{border-bottom:0}
+  #adm-pane-wd .wd-konten tr.klick{cursor:pointer}
+  #adm-pane-wd .wd-konten tr.klick:hover td{background:rgba(99,91,255,.05)}
   #adm-pane-wd .wd-konten tr.aus td{opacity:.5}
   #adm-pane-wd .wd-konten tr.aus td:first-child{opacity:1}
   #adm-pane-wd .wd-konten .wd-in{width:70px}
@@ -18372,6 +18374,8 @@
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
+      wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
+      wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
       // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
       // hinzufügen' — manche Fundeds stehen noch auf Anfangs-Balance"): nur so markierte Konten fährt der Farmer.
       wdFarm:         !!row.wd_farm,
@@ -25578,7 +25582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.409'
+  const OS_TAB_BUILD = '2026-09-22.410'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29375,7 +29379,9 @@
         id: String(a.id), user_id: String(a.user_id), person: a.person || String(a.user_id).slice(0, 8), name: a.name || '', firm: a.firm || '',
         type: a.account_type || '', ext: String(a.external_id || '').trim(), max_drawdown: a.max_drawdown != null ? Number(a.max_drawdown) : null,
         balance: a.balance != null ? Number(a.balance) : null, wd_farm: !!a.wd_farm,
-        tp_vorgabe: a.max_profit_per_trade > 0 ? Number(a.max_profit_per_trade) : null, sl_vorgabe: a.max_loss_per_trade > 0 ? Number(a.max_loss_per_trade) : null,
+        // 23.09.2026: eigene Spalten wd_tp/wd_sl — max_profit/max_loss_per_trade sind die Prop-Firm-LIMITS (Tradeify 3600/4500),
+        // die standen hier vorher drin und Jacobs Farmer-Pläne bekamen TP 3600 statt 270–290
+        tp_vorgabe: a.wd_tp > 0 ? Number(a.wd_tp) : null, sl_vorgabe: a.wd_sl > 0 ? Number(a.wd_sl) : null,
         winning_days: a.winning_days != null ? Number(a.winning_days) : null, goal_target: a.goal_target != null ? Number(a.goal_target) : null,
         live_balance: a.live_balance != null ? Number(a.live_balance) : null, live_at: a.live_at || null }))
     }catch(e){ console.warn('[wd] rpc wd_konten_alle', e); _wd.datenFehler = 'Konten (RPC): ' + (e.message || e) }
@@ -29419,6 +29425,7 @@
   const WD_HINWEIS_FARM = 'nicht im Farm (Haken aus)'
   const WD_HINWEIS_EXT = 'ohne External ID — der Bot kann das Konto nicht wählen'
   const WD_HINWEIS_ARCHIV = 'archiviert (Konto-Archiv) — fährt nicht mit'
+  const WD_AUTO_HINWEISE = ['hat schon einen geplanten/laufenden Plan', 'Konto nicht (mehr) gefunden']   // vom Server gesetzt, nicht von Finn
 
   /* ── Erwartete Blöcke (Mac): alle IDs mit Funded/Live-Konten bei Futures-Firmen — aus der RPC/Railway,
    *    sonst aus der Admin-Übersicht. Konten ohne Farm-Haken bleiben sichtbar, aber abgewählt. ── */
@@ -29571,7 +29578,10 @@
       const sPreset = slave ? (FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx) : null
       const zVon = new Map()
       for(const k of konten){
-        if(!wdAktiv(k) || k.plan_id) continue
+        if(k.plan_id) continue
+        // Vom Server abgewählt („hat schon einen Plan", „nicht gefunden") → erneut versuchen, sobald Haken + External ID da
+        // sind; der Server räumt alte, nie gestartete Farmer-Pläne jetzt selbst weg und verknüpft gleiche-Tag-Pläne (23.09.2026)
+        if(!wdAktiv(k)){ if(k.farm && k.ext && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true } else continue }
         if(!slave){ const h = 'kein Duplikum-Slave bekannt (noch nie ein Duplikum-Plan bei dieser ID) — der PC-Tab legt den Plan an'; if(k.hinweis !== h){ k.hinweis = h; ge = true } continue }
         const kd = wdKontoDaten(k.id)
         if(!kd || kd.archiviert){ k.aktiv = false; k.hinweis = kd ? WD_HINWEIS_ARCHIV : 'Konto nicht (mehr) gefunden'; ge = true; continue }
@@ -29594,7 +29604,7 @@
       if(res && res.error) fehler.push(res.error)
     }
     for(const bl of bloecke){
-      for(const p of ((res && res.angelegt) || [])){
+      for(const p of [...((res && res.angelegt) || []), ...((res && res.verknuepft) || [])]){
         const k = bl.konten.find(x => String(x.id) === String(p.master_account_id)); if(!k) continue
         const z = bl.zVon.get(String(k.id)) || {}
         Object.assign(k, { plan_id: String(p.id), start_um: p.start_um, tp: p.master_tp, sl: p.master_sl, slave: p.slave_risk, kt: p.master_contracts, waehrung: bl.sPreset ? bl.sPreset.currency : '€',
@@ -29649,14 +29659,14 @@
     const slave = sl.slave, sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx: window._fxUsdEur || 0.85, regeln: vp.regeln })
     if(z.fehler) return { fehler: z.fehler }
-    if(acc.maxProfitPerTrade > 0) z.tp = Number(acc.maxProfitPerTrade)
+    if(acc.wdTp > 0) z.tp = Number(acc.wdTp)   // Farmer-Vorgabe, NICHT das Firmen-Limit maxProfitPerTrade
     _tpNqMode = vp.instr
     try{ localStorage.setItem(TP_NQ_MODE_LS, vp.instr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
     const symbol = (vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
-    if(acc.maxLossPerTrade > 0) row.master_sl = Number(acc.maxLossPerTrade)
+    if(acc.wdSl > 0) row.master_sl = Number(acc.wdSl)
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
     if(error) return { fehler: error.message }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
@@ -30095,6 +30105,15 @@
       if(b.disabled) return
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
     }))
+    box.querySelectorAll('.wd-konten tr').forEach(tr => {
+      const cb = tr.querySelector('[data-wd-konto]'); if(!cb) return
+      tr.classList.toggle('klick', !cb.disabled)
+      tr.addEventListener('click', ev => {
+        if(cb.disabled || ev.target.closest('input,button,select,a,label')) return
+        cb.checked = !cb.checked; cb.dispatchEvent(new Event('change', { bubbles: true }))
+        tr.classList.toggle('aus', !cb.checked)
+      })
+    })
     box.querySelectorAll('[data-wd-ohne]').forEach(b => b.addEventListener('click', () => {
       _wd.zeigOhne = _wd.zeigOhne || {}; _wd.zeigOhne[b.dataset.wdOhne] = !_wd.zeigOhne[b.dataset.wdOhne]
       wdAblauf(_wd.rows || [], wdFehlend())

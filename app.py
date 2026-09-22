@@ -5468,7 +5468,7 @@ def admin_wd_plaene():
         rows = daten.get("plaene") or []
         if not isinstance(rows, list) or not rows:
             return jsonify({"error": "plaene fehlt"}), 400
-        angelegt, uebersprungen = [], []
+        angelegt, uebersprungen, verknuepft = [], [], []
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
@@ -5479,17 +5479,41 @@ def admin_wd_plaene():
                 acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
-                offen = sb_select("trade_plans", {"select": "id,status", "master_account_id": f"eq.{mid}",
-                                                  "status": "in.(planned,open)", "limit": "1"})
-                if offen:
-                    uebersprungen.append({"master_account_id": mid, "grund": "hat schon einen geplanten/laufenden Plan"}); continue
+                offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
+                                                  "status": "in.(planned,open)", "limit": "5"})
+                # 23.09.2026 (Finn: „alle Accounts sind einfach off — hat schon einen Plan"): ein Farmer-Plan eines
+                # FRUEHEREN Tages, der nie gestartet ist (Farmer AUS), blockiert sonst jeden Folgetag → weg damit.
+                # Ein Farmer-Plan fuer DENSELBEN Tag (die Zeile hatte den Verweis verloren) wird verknuepft statt
+                # uebersprungen. Nur fremde/laufende Plaene blockieren wirklich.
+                neu_tag = str(body.get("planned_for") or "")
+                blockiert = None
+                for o in offen:
+                    farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
+                    alt_tag = str(o.get("planned_for") or "")
+                    if farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and neu_tag and alt_tag < neu_tag:
+                        try:
+                            requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+                                            params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
+                                            headers=_sb_headers("return=representation"), timeout=12)
+                        except Exception as e:
+                            print(f"[wd] ⚠️ alter Plan {o['id']} nicht geloescht: {e}", flush=True)
+                        continue
+                    if farmer and o.get("status") == "planned" and alt_tag == neu_tag:
+                        voll = sb_select("trade_plans", {"select": "*", "id": f"eq.{o['id']}"})
+                        if voll:
+                            verknuepft.append(voll[0]); blockiert = "verknuepft"; break
+                    blockiert = "hat schon einen geplanten/laufenden Plan"; break
+                if blockiert == "verknuepft":
+                    continue
+                if blockiert:
+                    uebersprungen.append({"master_account_id": mid, "grund": blockiert}); continue
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
                 angelegt.append(sb_insert("trade_plans", body))
-            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen})
+            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
             print(f"[wd] ⚠️ anlegen: {type(e).__name__}: {e}", flush=True)
-            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen,
+            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft,
                             "error": f"Anlegen abgebrochen ({type(e).__name__}: {e})"}), 502
 
     if request.method == "PATCH":
