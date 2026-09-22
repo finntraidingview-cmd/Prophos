@@ -2949,6 +2949,7 @@ def modus_tvkonto(cmd):
     fenster = [None]
     maximiert = [False]         # Panel per Knopf nach oben geholt -> am Ende wieder nach unten
     max_versucht = [False]      # einmal pro Tab probieren
+    lies_diag = {"w": None, "els": None}   # was die letzte Leserunde sah (fuer die Spur)
 
     def raus(msg, schritt):
         # Panel IMMER wieder nach unten — auch bei Absage: maximiert verdeckt es den
@@ -3044,8 +3045,10 @@ def modus_tvkonto(cmd):
         if z in ("richtig", "gleicher_login"):
             return z, a, b, None
         w = tv_fenster()
+        lies_diag["w"] = bool(w)
         if w:
             els = _tv_uia_konten(w, ids, uia_info)
+            lies_diag["els"] = [(x["text"][:30], x["r"]) for x in els[:3]]
             if len(els) == 1:          # zwei sichtbare Konten = offene Liste = kein Urteil
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
@@ -3054,6 +3057,17 @@ def modus_tvkonto(cmd):
             # — das Panel unten ist so flach, dass die Kontozeile ganz fehlt): Panel per
             # Knopf nach OBEN holen (hartnaeckig, s. _tv_panel_umschalten), dann neu lesen.
             # Einmal pro Tab; am Ende des Laufs geht es wieder nach unten (raus).
+            if len(els) > 1 and not lies_diag.get("esc"):
+                # zwei sichtbare Konten = eine offene Liste (vom letzten Lauf?) — einmal ESC, neu lesen
+                lies_diag["esc"] = True
+                trail.append(f"{len(els)} Konten sichtbar (offene Liste?) — ESC")
+                try:
+                    from pywinauto import keyboard as _kb
+                    _kb.send_keys("{ESC}")
+                except Exception:
+                    pass
+                _warte(0.5, 0.3)
+                return lies()
             if not els and not max_versucht[0] and not tv_fremdes_konto(uia_info.get("aehnlich"), ids):
                 max_versucht[0] = True
                 try:
@@ -3084,7 +3098,10 @@ def modus_tvkonto(cmd):
         _warte(0.35, 0.25)
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
-                 + (" (UIA)" if uia_el else ""))
+                 + (" (UIA)" if uia_el else "")
+                 + (f" [Fenster {'ja' if lies_diag['w'] else 'NEIN: ' + fenster_gesehen[0][:120]}"
+                    f" · Treffer {lies_diag['els']} · kontoartig {(uia_info.get('aehnlich') or [])[:4]}"
+                    f" · Scan {uia_info.get('weg')}/{uia_info.get('gescannt')}]" if zustand not in ("richtig", "gleicher_login") else ""))
 
     def diagnose():
         pfad, d = _tv_dump_sichern(trail) if bf else ("", tv_diagnose(None))
@@ -3651,7 +3668,10 @@ def modus_tvkonto(cmd):
                     break
                 _warte(0.4, 0.3)
             res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
-            trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}")
+            trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}"
+                         + (f" [Fenster {'ja' if lies_diag['w'] else 'NEIN: ' + fenster_gesehen[0][:120]}"
+                            f" · Treffer {lies_diag['els']} · kontoartig {(uia_info.get('aehnlich') or [])[:4]}"
+                            f" · Scan {uia_info.get('weg')}/{uia_info.get('gescannt')}]" if zustand not in ("richtig", "gleicher_login") else ""))
             if zustand == "richtig":
                 res["ok"] = True
                 return raus(f"Tradovate-Login gewechselt ({username}) — aktiv ist {aktiv[:60]}.", "login")
@@ -3690,7 +3710,10 @@ def modus_tvkonto(cmd):
                             break
                         _warte(0.35, 0.25)
                     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
-                    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}")
+                    trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
+                                 + (f" [Fenster {'ja' if lies_diag['w'] else 'NEIN: ' + fenster_gesehen[0][:120]}"
+                                    f" · Treffer {lies_diag['els']} · kontoartig {(uia_info.get('aehnlich') or [])[:4]}"
+                                    f" · Scan {uia_info.get('weg')}/{uia_info.get('gescannt')}]" if zustand not in ("richtig", "gleicher_login") else ""))
                     if zustand == "richtig":
                         res["ok"] = True
                         return raus(f"Richtiges Konto ist aktiv ({aktiv[:60]}).", "konto")
