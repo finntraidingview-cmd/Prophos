@@ -1153,7 +1153,7 @@
   /* Noch ein Stueck rausgezoomt (22.09.2026, Finn: „ein bisschen kleiner, sodass ich immer direkt
      unten auf Start druecke — das Scrollen faehrt mich immer rein"): das ganze Modal auf 84 %,
      mehr Hoehe erlaubt, Vorschlag-Boxen und Ergebnis-Kacheln enger. Nur dieses Modal. */
-  #tradePlanModal .modal{zoom:.84;max-height:96vh}
+  #tradePlanModal .modal{zoom:.9;max-height:96vh}   /* .84 → .9 (22.09.2026, Finn: „ein bisschen größer reinzoomen") */
   #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
   #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
   #tradePlanModal .tp-slave-out{padding:10px 16px}
@@ -3533,10 +3533,69 @@
     }
     #dashboard-view .subtab:active:not(:disabled){transform:scale(.97)}
     #dashboard-view .subtab-count{font-size:11px}
-    /* Mehr als vier Tabs passen nicht in eine Spur — dann wieder wischbar,
-       ohne das Plaettchen zu verlieren. */
-    #dashboard-view .subtabs:has(> .subtab:nth-child(5)){padding:3px 4px}
-    #dashboard-view .subtabs:has(> .subtab:nth-child(5)) .subtab{flex:0 0 auto}
+    /* Ab VIER Tabs traegt die Spur nicht mehr: „Manuell · Topstep API ·
+       Duplikum · Echo" braucht mit den Zaehlern rund 450px, das Geraet hat
+       358px Inhalt — die Spur lief rechts aus dem Bild und sah aus, als
+       fehle ein Stueck. Dann kein Segmented, sondern eine wischbare Pillen-
+       Reihe (aktive Pille gefuellt), die sichtbar weitergeht. */
+    #dashboard-view .subtabs:has(> .subtab:nth-child(4)){
+      background:transparent;padding:0;gap:7px;border-radius:0;
+      overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+      margin-right:calc(-1 * var(--m-gut));padding-right:var(--m-gut);
+      /* Weiche Kante rechts: zeigt, dass die Reihe weitergeht — ohne sie
+         sieht die angeschnittene vierte Pille nach Darstellungsfehler aus */
+      -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
+      mask-image:linear-gradient(90deg,#000 calc(100% - 26px),transparent);
+    }
+    #dashboard-view .subtabs:has(> .subtab:nth-child(4))::-webkit-scrollbar{display:none}
+    #dashboard-view .subtabs:has(> .subtab:nth-child(4)) .subtab{
+      flex:0 0 auto;border-radius:999px;padding:8px 14px;
+      background:var(--surface);border:1px solid var(--m-hair);box-shadow:none;
+    }
+    #dashboard-view .subtabs:has(> .subtab:nth-child(4)) .subtab.active{
+      background:var(--violet);border-color:var(--violet);color:#fff;box-shadow:none;
+    }
+    #dashboard-view .subtabs:has(> .subtab:nth-child(4)) .subtab.active .subtab-count{
+      background:rgba(255,255,255,.22);color:#fff;
+    }
+
+    /* ============ FILTER-ZEILEN ============ */
+    /* Die Filter-Selects tragen ihre Masse inline (padding, font-size,
+       min-width) — ohne !important bleibt hier alles beim Desktop-Mass.
+       Als Filter brauchen sie keine volle Feldhoehe: 36px-Pillen in der
+       Traeger-Toenung, damit sie nicht wie Eingabefelder aussehen. */
+    #dashboard-view #acc-firm-filter,#dashboard-view #acc-type-filter,
+    #dashboard-view #trade-filter-account,#dashboard-view #trade-filter-sym{
+      min-height:36px !important;padding:0 32px 0 12px !important;
+      font-size:13px !important;font-weight:550;
+      background-color:var(--surface) !important;
+      border:1px solid var(--m-hair) !important;border-radius:999px !important;
+      background-position:right 12px center !important;
+    }
+    /* „Firma:" / „Typ:" — die Beschriftung davor als leise Grossbuchstaben */
+    #dashboard-view [data-pane="manual"] label > span:first-child{
+      font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;
+      color:var(--sub-2);
+    }
+    /* Haken-Zeilen als eigene Zeile mit Luft, nicht als Formular-Rest */
+    #dashboard-view [data-pane="manual"] label:has(#acc-show-archived){
+      gap:9px;font-size:13.5px;color:var(--ink-2);min-height:var(--m-row);
+    }
+
+    /* ============ PANEL UM EINEN LEER-ZUSTAND ============ */
+    /* Sonst steht der Leer-Zustand als weisser Block mit doppelter Polsterung
+       da. Auf dem getoenten Traeger ist „nichts" die ehrlichere Darstellung. */
+    /* Die :not() sind Pflicht — und zwar BEIDE, mit und ohne Leerzeichen:
+       :has() traefe sonst auch das Panel MIT Inhalt (der Leer-Zustand bleibt
+       als display:none-Div im Markup stehen), und die gefuellte Liste haette
+       ihre weisse Flaeche verloren. Warum nicht kurz [style*="none"]: die
+       Empty-Divs tragen inline zusaetzlich border:none — der Kurz-Test hat
+       deshalb IMMER getroffen, auch bei display:block. Das Markup schreibt
+       "display:none", die Renderer per style.display "display: none". */
+    #dashboard-view .panel:has(> .empty:not([style*="display:none"]):not([style*="display: none"])),
+    #dashboard-view .panel:has(> .table-wrap > .empty:not([style*="display:none"]):not([style*="display: none"])){
+      background:transparent;box-shadow:none;padding:0;
+    }
 
     /* ============ EINGABEN ============ */
     #dashboard-view .input,
@@ -3585,7 +3644,12 @@
       max-height:90vh;box-shadow:0 -1px 0 var(--m-hair);
       overscroll-behavior:contain;
       animation:mob-sheet-v3 .42s var(--m-spring);
+      scrollbar-width:none;
     }
+    /* Der Rollbalken lief als graue Leiste ueber die abgerundete Sheet-Ecke */
+    #dashboard-view .modal::-webkit-scrollbar,
+    #dashboard-view .sidebar::-webkit-scrollbar{display:none}
+    #dashboard-view .sidebar{scrollbar-width:none}
     /* Griff-Linie: sitzt jetzt im Sheet-Polster statt darueber */
     #dashboard-view .modal::before{
       width:38px;height:5px;background:var(--border);margin:6px auto 14px;
@@ -25267,7 +25331,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.385'
+  const OS_TAB_BUILD = '2026-09-22.386'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27268,6 +27332,12 @@
          && !sel.value && _dupSlaveIds && _dupSlaveIds.size === 1){
         const _einziger = [..._dupSlaveIds][0]
         if(filtered.some(a => String(a.id) === String(_einziger))) sel.value = _einziger
+      }
+      // IMMER vorauswählen, wenn genau EIN Slave zur Wahl steht (22.09.2026, Finn,
+      // Screenshot Orbit: Slave stand auf „— wählen —", obwohl nur der Duplikum-Slave
+      // in der Liste war): unabhängig davon, ob _dupSlaveIds schon vollständig ist.
+      if(role === 'slave' && _tpRoute !== 'mt5' && _tpRoute !== 'topstep' && !sel.value && filtered.length === 1){
+        sel.value = String(filtered[0].id)
       }
     }
 
