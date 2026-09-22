@@ -2197,8 +2197,12 @@ def _tv_panel_umschalten(w, trail, ziel):
     lage = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), _tv_uia_knoepfe_alle(w), fr)
     if lage["zustand"] == ziel:
         return True
-    if lage["zustand"] is None and ziel == "unten":
-        return True                     # nichts oben zu sehen -> nichts zurueckzunehmen
+    if lage["zustand"] is None:
+        # ohne Kopfzeile kein Anker -> NICHT blind klicken (22.09.2026 18:3x, Spur 16:29: vier
+        # Raster-Klicks ins Leere, 5 s weg; fuer 'unten' gibt es ohnehin nichts zurueckzunehmen)
+        if ziel == "oben":
+            trail.append("Tradovate-Panel: keine Kopfzeile (Account Balance/Equity/Profit) zu sehen — kein Klick")
+        return ziel == "unten"
     trail.append(f"Panel {lage['zustand'] or 'ohne Kopfzeile'}: Kante x={lage['rechts']}, Zeile y={lage['zeile_y']}, Fenster {fr}")
     probiert = []
     for x, y, wie in lage["kandidaten"]:
@@ -3067,7 +3071,7 @@ def modus_tvkonto(cmd):
     # Bedienfeld-Wartezeit: beim ersten Blick 2,5 s, danach nur noch kurz — meldet
     # sich kein Userscript (bei Finn seit 22.09.2026 der Normalfall: Reader aus),
     # verbrannte sonst JEDE Leserunde 2,5 s nur mit Warten auf etwas, das nie kommt.
-    bf_to = [2.5]
+    bf_to = [0.6]     # 2,5 -> 0,6 s (22.09.2026 18:3x, Finn: 'so viele Leerzeiten, jeder Step 10 s' — das Userscript sendet nie)
 
     def lies():
         """-> (zustand, aktiv_text, bf, uia_element|None)"""
@@ -3125,7 +3129,7 @@ def modus_tvkonto(cmd):
             zustand, aktiv = "falsch", fremd
             break
         fremd_vor = fremd
-        _warte(0.35, 0.25)
+        _warte(0.2, 0.15)
     if max_fehl[0]:
         return raus(max_fehl[0], "panel")
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
@@ -3259,6 +3263,10 @@ def modus_tvkonto(cmd):
                 if len(els) == 1:
                     return "dialog", els[0]
                 if broker_knopf():
+                    return "verbunden", None
+                # Ein Konto im Panel ist ebenfalls der Beweis 'verbunden' (22.09.2026 18:3x —
+                # Spur 12:10: 46 s Warten, obwohl das Panel laengst ein Konto zeigte)
+                if finde([], TV_RX_KONTOARTIG)[0]:
                     return "verbunden", None
                 if time.time() >= ende_d:
                     return "nichts", None
@@ -3729,7 +3737,7 @@ def modus_tvkonto(cmd):
                         zustand, aktiv, uia_el = "gleicher_login", fremd, els_f[0]
                         trail.append(f"nach Login: unbekanntes Konto '{fremd[:40]}' — derselbe Login (gerade angemeldet), weiter per Dropdown")
                         break
-                _warte(0.4, 0.3)
+                _warte(0.2, 0.15)
             res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
             trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}"
                          + (f" [Fenster {'ja' if lies_diag['w'] else 'NEIN: ' + fenster_gesehen[0][:120]}"
@@ -3780,7 +3788,7 @@ def modus_tvkonto(cmd):
                             zustand, aktiv = "falsch", f_v
                             break
                         fremd_v = f_v
-                        _warte(0.35, 0.25)
+                        _warte(0.2, 0.15)
                     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
                     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
                                  + (f" [Fenster {'ja' if lies_diag['w'] else 'NEIN: ' + fenster_gesehen[0][:120]}"
@@ -3877,7 +3885,7 @@ def modus_tvkonto(cmd):
             break
         if len(els) > 1:
             break                  # mehrdeutig wird durch Warten nicht besser
-        _warte(0.5, 0.4)
+        _warte(0.25, 0.2)
     if not (eintrag or eintrag_uia):
         # Dropdown wieder schliessen, sonst bleibt es ueber dem Chart haengen.
         try:
