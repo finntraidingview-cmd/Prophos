@@ -3083,6 +3083,12 @@ def modus_tvkonto(cmd):
         if w:
             els = _tv_uia_konten(w, ids, uia_info)
             lies_diag["els"] = [(x["text"][:30], x["r"]) for x in els[:3]]
+            # WEICH (22.09.2026 14:0x, Finn: 'wenn man das Dropdown direkt druecken kann wie bei
+            # Moritz, geht es auch?'): Maximieren gescheitert, aber ein Konto ist lesbar (Panel
+            # war schon offen) -> kein Abbruch, weiter wie vor .365 direkt ueber das Dropdown.
+            if max_fehl[0] and (els or tv_fremdes_konto(uia_info.get("aehnlich"), ids)):
+                trail.append("Panel nicht maximiert, Konto aber lesbar — weiter ohne Maximieren")
+                max_fehl[0] = ""
             if len(els) == 1:          # zwei sichtbare Konten = offene Liste = kein Urteil
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
