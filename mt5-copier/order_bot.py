@@ -3079,27 +3079,25 @@ def modus_tvkonto(cmd):
             return z, a, b, None
         w = tv_fenster()
         lies_diag["w"] = bool(w)
-        if w and not max_versucht[0]:
-            # ERST DAS PANEL NACH OBEN (Finn 22.09.2026 13:1x) — auf jedem PC, vor jedem
-            # Lesen; ohne Erfolg bricht der Lauf ab und nennt jeden Klick.
-            max_versucht[0] = True
-            try:
-                if _tv_panel_umschalten(w, trail, "oben"):
-                    maximiert[0] = True
-                    _warte(0.6, 0.3)
-                else:
-                    max_fehl[0] = "Das Tradovate-Panel liess sich nicht maximieren (⤢ unten rechts nicht getroffen) — siehe Spur."
-            except Exception as e_:
-                max_fehl[0] = f"Panel maximieren abgebrochen: {type(e_).__name__}: {e_}"
         if w:
             els = _tv_uia_konten(w, ids, uia_info)
             lies_diag["els"] = [(x["text"][:30], x["r"]) for x in els[:3]]
-            # WEICH (22.09.2026 14:0x, Finn: 'wenn man das Dropdown direkt druecken kann wie bei
-            # Moritz, geht es auch?'): Maximieren gescheitert, aber ein Konto ist lesbar (Panel
-            # war schon offen) -> kein Abbruch, weiter wie vor .365 direkt ueber das Dropdown.
-            if max_fehl[0] and (els or tv_fremdes_konto(uia_info.get("aehnlich"), ids)):
-                trail.append("Panel nicht maximiert, Konto aber lesbar — weiter ohne Maximieren")
-                max_fehl[0] = ""
+            # NUR MAXIMIEREN, WENN NOETIG (22.09.2026 18:2x, Finn, Screenshot: Dropdown schon
+            # sichtbar, Konto lesbar — der Bot klickte trotzdem in die Panel-Zeile, traf ueber
+            # dem 'i' den 'Collapse'-Knopf, klappte das Panel EIN und konnte danach nichts mehr
+            # lesen). Regel: ist ein Konto (bekannt oder kontoartig) zu lesen, bleibt das Panel
+            # unangetastet; erst wenn NICHTS zu lesen ist, wird es nach oben geholt (hartnaeckig,
+            # s. _tv_panel_umschalten) und neu gelesen — einmal pro Tab, am Ende wieder runter.
+            if not els and not tv_fremdes_konto(uia_info.get("aehnlich"), ids) and not max_versucht[0]:
+                max_versucht[0] = True
+                try:
+                    if _tv_panel_umschalten(w, trail, "oben"):
+                        maximiert[0] = True
+                        _warte(0.6, 0.3)
+                        return lies()
+                    trail.append("Panel liess sich nicht maximieren — weiter mit dem, was zu lesen ist")
+                except Exception as e_:
+                    trail.append(f"Panel maximieren abgebrochen: {type(e_).__name__}")
             if len(els) == 1:          # zwei sichtbare Konten = offene Liste = kein Urteil
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
