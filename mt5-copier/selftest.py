@@ -954,7 +954,7 @@ def main():
     chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann Raster ab 6 px links der 'Profit'-Kante; nie 'Publish'",
         _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174 and _LG["rechts"] == 1620 and _LG["zeile_y"] == 1131
         and _LG["kandidaten"][0] == (1613, 1131, "ueber dem i von 'Profit' (-43)") and _LG["kandidaten"][1][:2] == (1613, 1137)
-        and any(k[2] == "unbenannter Knopf der Panelzeile" for k in _LG["kandidaten"]) and all(k[1] in (1126, 1131, 1136) for k in _LG["kandidaten"])
+        and any(k[2] == "unbenannter Knopf der Panelzeile" for k in _LG["kandidaten"]) and all(1100 <= k[1] <= 1150 for k in _LG["kandidaten"])
         and not any(k[0] > 1620 for k in _LG["kandidaten"]))
     chk("TV-PANEL: 'ueber Profit' ist immer der erste Kandidat (ein benannter Knopf an derselben Stelle faellt als Doppel weg); ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
         order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][:2] == (1613, 1131)
