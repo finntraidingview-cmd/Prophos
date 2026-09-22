@@ -5457,7 +5457,33 @@ def admin_wd_plaene():
                                   "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
                                   "slave_name,master_name,updated_at",
                         "id": f"in.({chunk})"})
-            return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx()})
+            # 23.09.2026 (Finn: „immer noch nicht — alle Konten off"): beim LADEN tote Farmer-Plaene frueherer Tage
+            # wegraeumen (planned, nie gestartet — z.B. Farmer AUS) und melden, welche Konten wirklich belegt sind
+            # (belegt: Konto → Grund) bzw. welchen Farmer-Plan es fuer diesen Tag schon gibt (plaene_tag) — damit
+            # der Tab seine Zeilen selbst heilen kann, ohne dass jemand „Wuerfeln" drueckt.
+            belegt, plaene_tag = {}, []
+            if tag and uids:
+                offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,notes,planned_for,start_um,start_um_gestartet_at,"
+                                                          "orbit_gesendet_at,ended_at,master_pl,master_tp,master_sl,master_risk,slave_risk,"
+                                                          "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at",
+                                                "status": "in.(planned,open)"})
+                for o in offen:
+                    mid = str(o.get("master_account_id") or "")
+                    farmer = (o.get("notes") or "") == "Winning-Day-Farmer"
+                    alt_tag = str(o.get("planned_for") or "")
+                    if farmer and o.get("status") == "planned" and not o.get("start_um_gestartet_at") and alt_tag and alt_tag < tag:
+                        try:
+                            requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+                                            params={"id": f"eq.{o['id']}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
+                                            headers=_sb_headers("return=representation"), timeout=12)
+                        except Exception as e:
+                            print(f"[wd] ⚠️ alter Plan {o['id']} nicht geloescht: {e}", flush=True)
+                        continue
+                    if farmer and alt_tag == tag:
+                        plaene_tag.append(o)
+                        continue
+                    belegt[mid] = "hat schon einen geplanten/laufenden Plan"
+            return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx(), "belegt": belegt, "plaene_tag": plaene_tag})
         except Exception as e:
             print(f"[wd] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
             return jsonify({"error": f"Farmer-Daten nicht ladbar ({type(e).__name__}: {e})"}), 502

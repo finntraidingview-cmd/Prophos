@@ -25582,7 +25582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.410'
+  const OS_TAB_BUILD = '2026-09-22.411'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29404,7 +29404,12 @@
     }
     if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: null, sl_vorgabe: null, winning_days: null, live_balance: null }))
     if(!konten && !rail){ _wd.daten = null; return null }
-    _wd.daten = { konten: konten || [], slaves: (rail && rail.slaves) || {}, plaene: (rail && rail.plaene) || null, fx: (rail && rail.fx) || window._fxUsdEur || 0.85, rail: !!rail }
+    // belegt / plaene_tag (23.09.2026): welche Konten wirklich einen fremden Plan haben, und welche Farmer-Pläne für
+    // diesen Tag schon existieren — Grundlage für die Selbstheilung der Zeilen (wdZeilenHeilen)
+    const ptag = (rail && Array.isArray(rail.plaene_tag)) ? rail.plaene_tag : []
+    const plaene = rail ? [...((rail.plaene) || []), ...ptag.filter(q => !((rail.plaene) || []).some(z => String(z.id) === String(q.id)))] : null
+    _wd.daten = { konten: konten || [], slaves: (rail && rail.slaves) || {}, plaene, fx: (rail && rail.fx) || window._fxUsdEur || 0.85, rail: !!rail,
+                  belegt: (rail && rail.belegt) || {}, plaene_tag: ptag }
     _wd.datenFehler = konten ? '' : _wd.datenFehler
     _wd.datenTag = tag
     return _wd.daten
@@ -29725,7 +29730,7 @@
     //     plan_id ein — der Tab soll ihm nicht in die Quere kommen (sonst zwei Pläne für ein Konto).
     if(offenFuer && row.start_um && row.richtung && !sl.fehler){
       const zeiten = wdKontoZeiten(konten, row.start_um, r); if(zeiten.geaendert) geaendert = true
-      const frisch = Date.now() - new Date(row.updated_at || 0).getTime() < 90000
+      const frisch = Date.now() - new Date(row.updated_at || 0).getTime() < 90000 || !(_wd.regeln && _wd.regeln.scharf)   // AUS → kein Rückfall-Plan
       for(const k of konten){
         const plan = planVon(k)
         if(!wdAktiv(k)){
@@ -29953,7 +29958,7 @@
     if(laeuft) satz = `▶ Block ${laeuft.reihenfolge || ''} ${laeuft.name || ''} läuft gerade.`
     else if(!rows.length) satz = 'Noch keine Blöcke für diesen Tag — „🎲 Würfeln" trägt alle IDs ein, verteilt die Zeiten und legt die Pläne an. Eine ID anklicken zeigt ihre Konten.'
     else if(!mitZeit.length) satz = aktivRows.length ? (r.aktiv ? 'Zeiten kommen um 00:10 von allein — oder jetzt „🎲 Würfeln".' : 'Noch nicht gewürfelt — „🎲 Würfeln" verteilt die Zeiten und legt sofort alle Pläne an.') : 'Kein Konto im Farm — Haken in den Blöcken setzen, dann „Änderungen speichern".'
-    else if(geplant.length) satz = `Nächster Start ${wdHhmm(geplant[0].start_um)} Dubai: ${geplant[0].name || '?'}${ohnePlan ? ` · ⚠ ${ohnePlan} Konten ohne Plan (Grund steht in der Tabelle)` : ' · alle Pläne liegen bereit, die PC-Tabs starten sie zur Zeit'}.`
+    else if(geplant.length) satz = `Nächster Start ${wdHhmm(geplant[0].start_um)} Dubai: ${geplant[0].name || '?'}${ohnePlan ? (r.scharf ? ` · ⚠ ${ohnePlan} Konten ohne Plan (Grund steht in der Tabelle)` : ` · Farmer AUS — ${ohnePlan} Konten bereit, Pläne kommen beim Scharfstellen`) : ' · alle Pläne liegen bereit, die PC-Tabs starten sie zur Zeit'}.`
     else satz = aktivRows.every(x => x.status === 'fertig') ? 'Alle Blöcke durch.' : aktivRows.some(x => x.status === 'verpasst') ? 'Blöcke verpasst — PC-Tab war zu?' : 'Alles durch.'
     txt.textContent = (j ? `Jetzt ${j.hhmm} Dubai · ` : '') + satz
   }
@@ -30004,7 +30009,7 @@
     const de = wdDe
     if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Haken setzen, dann speichern</span>`
     if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
-    if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : '<span style="color:var(--sub)">noch kein Plan — „🎲 Würfeln"</span>'
+    if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : (_wd.regeln && _wd.regeln.scharf) ? '<span style="color:var(--sub)">noch kein Plan — „Würfeln"</span>' : '<span style="color:var(--sub)">bereit — Plan kommt beim Scharfstellen</span>'
     const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
     if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:#2a9d5c">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
     if(k.status === 'open') return `<span style="color:#2a9d5c">✓ Order raus${um} · läuft</span>`
@@ -30183,8 +30188,53 @@
       const d = await wdDatenLaden(tag)
       // gar nichts ladbar → Rückfall auf die Admin-Übersicht (nur Konten, keine fremden Pläne)
       if(!d && !window._admData && typeof window._admLaden === 'function'){ try{ await Promise.race([window._admLaden(), new Promise(res => setTimeout(res, 10000))]) }catch(_){} }
-      const rows = await wdRowsLaden(tag); _wd.rows = rows.map(wdMitLive); wdRender()
+      // Farmer AUS, aber noch nie gestartete Pläne da (alter Stand vor .411) → weg damit, einmal je Ladung
+      if(d && d.rail && !(_wd.regeln && _wd.regeln.scharf) && !_wd.busy && typeof wsFarmerPlaeneLoeschen === 'function'){
+        try{ const n = await wsFarmerPlaeneLoeschen(tag); if(n){ await wdDatenLaden(tag); wdSay(`Farmer AUS — ${n} nie gestartete Pläne gelöscht.`, 'ok') } }catch(e){ console.warn('[wd] aufräumen', e) }
+      }
+      let rows = await wdRowsLaden(tag)
+      try{ rows = await wdZeilenHeilen(tag, rows) }catch(e){ console.warn('[wd] heilen', e) }
+      _wd.rows = rows.map(wdMitLive); wdRender()
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
+  }
+  /* Selbstheilung beim Laden (23.09.2026, Finn: „immer noch nicht — alle Konten sind einfach off"): der Server räumt
+   * tote Farmer-Pläne früherer Tage weg und meldet belegt (Konto → Grund) und plaene_tag (Farmer-Pläne für diesen Tag).
+   * Hier: Haken/Archiv-Stand frisch aus der Kontenliste, vorhandene Farmer-Pläne verknüpfen, Konten wieder aktiv
+   * setzen, deren Server-Grund nicht mehr gilt. Nur Zeilen, die noch nicht laufen; geschrieben wird nur bei Änderung. */
+  async function wdZeilenHeilen(tag, rows){
+    const d = _wd.daten; if(!d || !d.rail) return rows
+    const belegt = d.belegt || {}, ptag = Array.isArray(d.plaene_tag) ? d.plaene_tag : [], jobs = []
+    for(const x of rows){
+      if(!x || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
+      const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
+      for(const k of konten){
+        const kd = wdKontoDaten(k.id)
+        if(kd){
+          const farm = !!kd.wd_farm && !kd.archiviert
+          if(!!k.farm !== farm || !!k.archiviert !== !!kd.archiviert){
+            k.farm = farm; k.archiviert = !!kd.archiviert; ge = true
+            if(!farm && !k.plan_id){ k.aktiv = false; k.hinweis = kd.archiviert ? WD_HINWEIS_ARCHIV : WD_HINWEIS_FARM }
+          }
+          if(!k.ext && kd.ext){ k.ext = kd.ext; ge = true }
+        }
+        if(k.plan_id) continue
+        const p = ptag.find(q => String(q.master_account_id) === String(k.id) && String(q.user_id) === String(x.user_id))
+        if(p){
+          Object.assign(k, { plan_id: String(p.id), start_um: p.start_um || k.start_um, tp: p.master_tp != null ? Number(p.master_tp) : k.tp,
+                             sl: p.master_sl != null ? Number(p.master_sl) : null, slave: p.slave_risk != null ? Number(p.slave_risk) : k.slave,
+                             kt: p.master_contracts != null ? Number(p.master_contracts) : k.kt, status: p.status, aktiv: true, hinweis: '' })
+          ge = true; continue
+        }
+        if(belegt[String(k.id)]){ if(wdAktiv(k)){ k.aktiv = false; k.hinweis = belegt[String(k.id)]; ge = true } continue }
+        if(!wdAktiv(k) && k.farm && k.ext && !k.archiviert && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true }
+      }
+      if(!ge) continue
+      const st = konten.some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
+      x.konten = konten; x.status = st
+      jobs.push(supabase.from('wd_tagesplan').update({ konten, status: st, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft'))
+    }
+    if(jobs.length) await Promise.all(jobs)
+    return rows
   }
   // Nachts zuschauen: solange der Tab offen ist, alle 30 s frisch — ohne die Eingaben zu verlieren, wenn gerade getippt wird
   setInterval(() => { if(wdSichtbar() && !_wd.busy && !document.querySelector('#adm-pane-wd :focus')) wdNeuLaden() }, 30000)
@@ -30286,8 +30336,11 @@
       fort('würfelt …')
       const n = await wdWuerfelnSchreiben(tag, true)
       fort('legt Pläne an …')
-      const nz = n ? await wdPlaeneNachziehen(tag) : { geaendert: 0, geloescht: 0 }
-      const a = n ? await wdPlaeneAnlegen(tag) : { angelegt: 0, fehler: [] }
+      // Farmer AUS = KEINE Pläne (23.09.2026, Finn: „warum haben die schon geplante Dinge, obwohl es heute aus sein
+      // sollte?") — Pläne entstehen erst beim Scharfstellen (ws-knopf), und beim Ausschalten werden sie wieder gelöscht.
+      const scharf = !!(_wd.regeln && _wd.regeln.scharf)
+      const nz = (n && scharf) ? await wdPlaeneNachziehen(tag) : { geaendert: 0, geloescht: 0 }
+      const a = (n && scharf) ? await wdPlaeneAnlegen(tag) : { angelegt: 0, fehler: (n && !scharf) ? ['Farmer AUS — Pläne kommen beim Scharfstellen'] : [] }
       fort('lädt neu …')
       await wdNeuLaden()
       const teile = []
@@ -30323,11 +30376,45 @@
         const { error } = await supabase.from('wd_farmer_regeln').update({ scharf: an, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
         if(error) throw error
         if(_wd.regeln) _wd.regeln.scharf = an
-        if(typeof atToast === 'function') atToast(an ? 'Farmer SCHARF — Pläne starten zur Startzeit.' : 'Farmer AUS — heute wird nur geplant, nichts gestartet.', an ? 'start' : 'end')
-      }catch(e){ if(typeof atToast === 'function') atToast('Schalter nicht gespeichert: ' + (e.message || e), 'end') }
+        const tag = document.getElementById('wd-tag')?.value
+        if(an){
+          // SCHARF: jetzt die Pläne für den gewählten Tag anlegen (gleicher Weg wie beim Würfeln)
+          b.textContent = 'legt Pläne an …'
+          let a = { angelegt: 0, fehler: [] }
+          if(tag && typeof wdPlaeneAnlegen === 'function'){
+            await wdDatenLaden(tag); try{ await wdPlaeneNachziehen(tag) }catch(_){}
+            a = await wdPlaeneAnlegen(tag)
+          }
+          if(typeof atToast === 'function') atToast(`Farmer SCHARF — ${a.angelegt} Pläne angelegt, sie starten zur Startzeit.${a.fehler.length ? ' ⚠ ' + a.fehler.join(' · ') : ''}`, 'start')
+        }else{
+          // AUS: nie gestartete Farmer-Pläne wieder weg — sonst stehen sie als „Geplant ⏰" in den Trades und blockieren morgen
+          b.textContent = 'löscht Pläne …'
+          const n = await wsFarmerPlaeneLoeschen(tag)
+          if(typeof atToast === 'function') atToast(`Farmer AUS — ${n} Pläne gelöscht, nichts startet.`, 'end')
+        }
+        if(typeof wdNeuLaden === 'function') await wdNeuLaden()
+      }catch(e){ if(typeof atToast === 'function') atToast('Schalter: ' + (e.message || e), 'end') }
       b.disabled = false; wsRender()
     })
     return el
+  }
+  // Nie gestartete Farmer-Pläne des Tages löschen (über Railway, im Profil der jeweiligen ID) und aus den Zeilen lösen
+  async function wsFarmerPlaeneLoeschen(tag){
+    const d = _wd.daten; if(!tag || !d || !d.rail) return 0
+    const alle = [...(d.plaene || []), ...(d.plaene_tag || [])]
+    const weg = new Map()
+    for(const p of alle){ if(p && p.status === 'planned' && !p.start_um_gestartet_at) weg.set(String(p.id), p) }
+    if(!weg.size) return 0
+    await Promise.all([...weg.keys()].map(id => wdApi('DELETE', { id }).catch(e => console.warn('[wd] löschen', id, e))))
+    const rows = await wdRowsLaden(tag), jobs = []
+    for(const x of rows){
+      if(!x || x.status === 'laeuft' || x.status === 'fertig') continue
+      let ge = false
+      const konten = (x.konten || []).map(k => { if(k && k.plan_id && weg.has(String(k.plan_id))){ ge = true; return { ...k, plan_id: null, status: null, gesendet: false, um: null } } return k })
+      if(ge) jobs.push(supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? 'geplant' : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft'))
+    }
+    await Promise.all(jobs)
+    return weg.size
   }
   function wsRender(){
     const el = wsLeiste(); if(!el) return
@@ -30335,8 +30422,8 @@
     el.classList.toggle('an', an)
     el.querySelector('#ws-knopf').textContent = an ? 'Farmer SCHARF' : 'Farmer AUS'
     el.querySelector('#ws-text').innerHTML = an
-      ? `<b>Scharf:</b> gewürfelte Pläne starten zur Startzeit (ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai) von allein. Zum Ausstellen auf den Knopf drücken.`
-      : `<b>Aus:</b> würfeln und planen geht, aber zur Startzeit startet <b>nichts</b> — heute nur planen und schauen. Zum Scharfstellen auf den Knopf drücken.${r.aktiv ? '' : ' Nachts von allein würfeln ist ebenfalls aus (Einstellungen).'}`
+      ? `<b>Scharf:</b> die Pläne liegen an und starten zur Startzeit (ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai) von allein. Zum Ausstellen auf den Knopf drücken — dann werden nie gestartete Pläne wieder gelöscht.`
+      : `<b>Aus:</b> würfeln geht (Blöcke, Zeiten, Richtung), aber es werden <b>keine Pläne</b> angelegt und nichts gestartet. Zum Scharfstellen auf den Knopf drücken — dann werden die Pläne für den gewählten Tag angelegt.${r.aktiv ? '' : ' Nachts von allein würfeln ist ebenfalls aus (Einstellungen).'}`
   }
   function wzPanel(){
     let p = document.getElementById('wz-panel'); if(p) return p
