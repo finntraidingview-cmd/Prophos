@@ -1150,6 +1150,15 @@
   #tradePlanModal .tp-mult-out{padding:12px 18px}
   #tradePlanModal .modal-msg{margin-top:6px;min-height:0}
   #tradePlanModal .modal-foot{padding-top:12px;margin-top:6px}
+  /* Noch ein Stueck rausgezoomt (22.09.2026, Finn: „ein bisschen kleiner, sodass ich immer direkt
+     unten auf Start druecke — das Scrollen faehrt mich immer rein"): das ganze Modal auf 84 %,
+     mehr Hoehe erlaubt, Vorschlag-Boxen und Ergebnis-Kacheln enger. Nur dieses Modal. */
+  #tradePlanModal .modal{zoom:.84;max-height:96vh}
+  #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
+  #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
+  #tradePlanModal .tp-slave-out{padding:10px 16px}
+  #tradePlanModal .tp-mult-out{padding:8px 16px}
+  #tradePlanModal .calc-slave-value{font-size:32px}
 
   /* Account type badges */
   #dashboard-view .type-badge{
@@ -3275,6 +3284,406 @@
     /* Aktionszeile: .mtc-msg{flex:1} halbierte die Zeile auch leer */
     #mtcAddModal .modal-actions{flex-wrap:wrap}
     #mtcAddModal .mtc-msg{flex:1 0 100%;order:-1;margin-bottom:2px}
+  }
+
+  /* ============================================================
+     [hidden] wirkt wieder — GLOBAL, nicht nur mobil.
+     Befund 22.09.2026 (Handy-Ueberarbeitung): unter den Accounts stand
+     ein leerer weisser Kasten. Es war #syncBanner, markiert mit dem
+     hidden-Attribut — aber .sync-banner setzt display:flex, und eine
+     Klassenregel schlaegt das Browser-Default display:none von [hidden].
+     Betroffen ist nicht nur dieses eine Element: .btn, .panel, .grid-2,
+     .field, .card, .calc-dup-push und .cosmos-svg stehen im Markup
+     ebenfalls mit hidden da und setzen alle selbst ein display.
+     Das :not([style*="display"]) ist die Sicherung fuer den umgekehrten
+     Fall — Code, der ein Element per style.display einblendet, ohne das
+     hidden-Attribut zu raeumen, behaelt den Vortritt.
+  ============================================================ */
+  [hidden]:not([style*="display"]){display:none !important}
+
+  /* ============================================================
+     MOBILE APP-SHELL v3 — 22.09.2026
+     Finn: „Geh mal ans Handy-Design und tu das Handy-Design komplett
+     ueberarbeiten! Viel cleaner, viel smoother, wie eine richtige
+     Handy-App."
+
+     Die Schichten davor (Grundschicht 28.08., APP-POLITUR, POLITUR v2,
+     VOLL-AUDIT 29.08.) haben das Handy erst benutzbar gemacht: Tabellen
+     zu Listen, kein Querlauf, Touch-Groessen, Sheets. Das bleibt alles
+     stehen — es ist aus echten Vorfaellen gewachsen und traegt.
+     Was fehlte, war eine gemeinsame FORM. Jede Runde hat ihre eigenen
+     Radien, Schatten und Abstaende mitgebracht; das Ergebnis war sauber,
+     aber es sah aus wie eine gut aufgeraeumte Webseite, nicht wie eine App.
+
+     v3 legt genau diese Form darueber — eine Schicht, ein Token-Satz:
+
+       1. TRAGER-FARBE. Am Desktop ist --bg #FAFBFC (fast weiss), Karten
+          heben sich nur per Rahmen/Schatten ab. Am Handy wird --bg zu
+          #F2F3F7: weisse Karten stehen dann VON SELBST auf der Flaeche,
+          ohne Rahmen und ohne kraeftigen Schatten. Das ist der eine
+          Schritt, der am meisten nach iOS aussieht.
+       2. NAV-BAR statt Topbar. 50px, nur Titel + Avatar. Der Titel ist
+          unsichtbar, solange der grosse Titel im Inhalt steht, und
+          blendet beim Scrollen ein (Klasse .nav-solid, gesetzt von einem
+          IntersectionObserver — kein Scroll-Handler, kein Frame-Budget).
+       3. GROSSE TITEL. v2 hat die .view-title am Handy versteckt, weil
+          zwei Titel doppelt wirkten. Mit der Kollaps-Mechanik ist es
+          genau andersherum: der grosse Titel ist das App-Merkmal, die
+          Nav-Bar faengt ihn beim Scrollen auf. .view-sub bleibt versteckt.
+       4. EIN MASS-SATZ. --m-* unten: Rand 16, Radien 20/16/12, Zeilen 44.
+          Vorher liefen 13/14/12,5/11 quer durcheinander.
+       5. BEWEGUNG. --m-spring ist die iOS-Sheet-Kurve; Sheets, Druck-
+          Feedback und View-Wechsel laufen ueber dieselbe Kurve, damit
+          sich alles nach demselben Geraet anfuehlt.
+
+     Quellreihenfolge ist Absicht: v3 steht NACH allen aelteren
+     Mobil-Bloecken und schlaegt sie bei gleicher Spezifitaet. Wo eine
+     alte Regel spezifischer ist (!important, :has(), :not([...])), steht
+     unten die passende Gegenregel in derselben Form.
+  ============================================================ */
+  @media (max-width:820px){
+
+    /* ---- Mass- und Bewegungs-Satz der Mobil-Schicht ---- */
+    :root{
+      /* Traeger-Farbe: Karten brauchen dann keinen Rahmen mehr */
+      --bg:#F2F3F7;
+      --surface-tint:#E9EBF0;   /* muss auf dem dunkleren Traeger noch lesbar sein */
+
+      --m-gut:16px;             /* Seitenrand des Inhalts */
+      --m-gap:12px;             /* Abstand zwischen Karten */
+      --m-r-sheet:22px;         /* Bottom-Sheets */
+      --m-r-card:16px;          /* Karten, Panels, Listen-Gruppen */
+      --m-r-ctl:12px;           /* Inputs, Selects, Buttons */
+      --m-row:44px;             /* Touch-Zeile (Apple HIG) */
+      --m-nav-h:54px;           /* Tab-Bar */
+      --mob-nav-h:54px;         /* Altname — aeltere Bloecke rechnen damit */
+      --topbar-h:50px;
+
+      /* Karten liegen auf --bg, der Schatten ist nur noch eine Kante */
+      --shadow-mob-card:0 1px 2px rgba(16,24,40,.05);
+      --m-shadow-raised:0 4px 16px rgba(16,24,40,.10),0 1px 3px rgba(16,24,40,.06);
+      --m-hair:rgba(16,24,40,.07);   /* Trennlinien */
+
+      /* iOS-Sheet-Kurve: schnell an, weich aus */
+      --m-spring:cubic-bezier(.32,.72,0,1);
+    }
+
+    @keyframes mob-view-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+    /* ---- Seite ---- */
+    body{background:var(--bg);overscroll-behavior-y:none}
+    #dashboard-view .main{
+      padding:14px calc(var(--m-gut) + env(safe-area-inset-right))
+              calc(28px + var(--m-nav-h) + env(safe-area-inset-bottom))
+              calc(var(--m-gut) + env(safe-area-inset-left));
+    }
+    #dashboard-view .view.active{animation:mob-view-in .26s var(--m-spring) forwards}
+
+    /* ============ NAV-BAR ============ */
+    #dashboard-view .topbar{
+      height:calc(var(--topbar-h) + env(safe-area-inset-top));
+      padding:env(safe-area-inset-top) calc(var(--m-gut) + env(safe-area-inset-right)) 0
+              calc(var(--m-gut) + env(safe-area-inset-left));
+      gap:12px;background:var(--bg);
+      /* Die Linie gehoert zum gescrollten Zustand, nicht zum Ruhezustand */
+      border-bottom:1px solid transparent;
+      transition:border-color .2s var(--ease);
+    }
+    #dashboard-view.nav-solid .topbar{border-bottom-color:var(--m-hair)}
+    /* Titel faengt den grossen Titel auf, sobald der aus dem Bild scrollt */
+    #dashboard-view .tb-title{
+      font-size:16.5px;font-weight:650;letter-spacing:-.02em;
+      opacity:0;transform:translateY(7px);
+      transition:opacity .2s var(--ease),transform .2s var(--ease);
+    }
+    #dashboard-view.nav-solid .tb-title{opacity:1;transform:none}
+    /* Profil: nur der Avatar — Name und Pfeil sind Desktop-Zubehoer */
+    #dashboard-view .user-btn{
+      padding:0;border:none;background:none;box-shadow:none;
+      transition:transform .12s var(--m-spring);
+    }
+    #dashboard-view .user-btn:active{transform:scale(.9)}
+    #dashboard-view .user-btn:hover{background:none}
+    #dashboard-view .user-name,#dashboard-view .user-chev{display:none}
+    #dashboard-view .user-avatar{width:31px;height:31px;font-size:12.5px}
+    /* Dropdown haengt am rechten Rand statt an der (nun schmalen) Taste */
+    #dashboard-view .user-dropdown{
+      right:0;border-radius:var(--m-r-card);
+      box-shadow:var(--m-shadow-raised);border-color:var(--m-hair);
+    }
+
+    /* ============ GROSSE TITEL ============ */
+    /* Gegenregeln zu POLITUR v2 (dort display:none) — gleiche Selektor-
+       Form, damit die Spezifitaet passt und die Quellreihenfolge zaehlt. */
+    #dashboard-view .view:not([data-view="account-detail"]) .view-title{
+      display:block;font-size:27px;font-weight:700;letter-spacing:-.03em;
+      line-height:1.15;margin:2px 0 0;
+    }
+    #dashboard-view .view-head > div:first-child:has(> .view-title){display:block}
+    /* Diese drei hatten im Kopf NUR den Titel-Block — v2 hat den Kopf ganz
+       abgeraeumt, jetzt tragen sie ihren grossen Titel wie alle anderen. */
+    #dashboard-view [data-view="topstep"] .view-head,
+    #dashboard-view [data-view="calc"] .view-head,
+    #dashboard-view [data-view="settings"] .view-head{
+      display:flex;flex-direction:column;align-items:stretch;gap:12px;margin-bottom:14px;
+    }
+    #dashboard-view .view-head{gap:12px;margin-bottom:16px}
+    /* Der Erklaersatz bleibt weg: er steht am Handy immer dreizeilig. */
+    #dashboard-view .view:not([data-view="account-detail"]) .view-sub{display:none}
+
+    /* Aktionszeile unter dem Titel: wischbar, mit weicher Kante als Hinweis,
+       dass rechts noch etwas steht (vorher schnitt die Zeile hart ab). */
+    #dashboard-view .view-head > div:last-child{
+      gap:8px;
+      margin-right:calc(-1 * var(--m-gut));
+      padding-right:var(--m-gut);
+      -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
+      mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);
+    }
+    /* Ohne Ueberlauf keine Kante — sonst blasst der letzte Knopf immer ab.
+       (Nur ein Kind = nichts zu wischen.) */
+    #dashboard-view .view-head > div:last-child:has(> :only-child){
+      -webkit-mask-image:none;mask-image:none;
+    }
+
+    /* ============ TAB-BAR ============ */
+    #dashboard-view .mob-nav{
+      height:calc(var(--m-nav-h) + env(safe-area-inset-bottom));
+      background:var(--surface);
+      /* Haarlinie statt Schatten: der Schatten war der letzte Rest
+         „schwebende Web-Leiste" — auf iOS trennt eine 1px-Kante. */
+      border-top:1px solid var(--m-hair);box-shadow:none;
+      padding:0 calc(4px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(4px + env(safe-area-inset-left));
+    }
+    #dashboard-view .mob-link{
+      gap:4px;padding:7px 2px 7px;
+      font-size:10px;font-weight:600;letter-spacing:.01em;color:var(--sub-2);
+      transition:color .18s var(--ease);
+    }
+    #dashboard-view .mob-link svg{
+      width:23px;height:23px;stroke-width:1.9;
+      transition:transform .22s var(--m-spring),stroke-width .18s var(--ease);
+    }
+    #dashboard-view .mob-link.active{color:var(--violet)}
+    /* Aktives Icon etwas kraeftiger — iOS macht das ueber gefuellte Symbole,
+       wir haben nur Strich-Icons, also ueber die Strichstaerke. */
+    #dashboard-view .mob-link.active svg{stroke-width:2.3}
+    #dashboard-view .mob-link:active svg{transform:scale(.86)}
+
+    /* ============ KARTEN & PANELS ============ */
+    #dashboard-view .panel,#dashboard-view .kpi,#dashboard-view .trade-card,
+    #dashboard-view .mtc-card,#dashboard-view .mtc-plan,#dashboard-view .mg-stat,
+    #dashboard-view .mg-empty,#dashboard-view .card,#dashboard-view .tc2,
+    #dashboard-view .note-card,#dashboard-view .calc-grid,
+    #dashboard-view .calc-dup-push,#dashboard-view .calib-panel{
+      background:var(--surface);border:none;
+      border-radius:var(--m-r-card);box-shadow:var(--shadow-mob-card);
+    }
+    #dashboard-view .panel{padding:16px}
+    #dashboard-view .panel-title{font-size:13px;font-weight:650;letter-spacing:-.01em}
+    #dashboard-view .kpi{padding:14px 15px;border-radius:var(--m-r-card)}
+    #dashboard-view .kpi-label{
+      font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+      color:var(--sub-2);margin-bottom:3px;
+    }
+    #dashboard-view .kpi-value{font-size:20px;font-weight:680;letter-spacing:-.025em}
+    #dashboard-view .kpis{gap:10px}
+
+    /* ============ BUTTONS ============ */
+    #dashboard-view .btn{
+      border-radius:var(--m-r-ctl);font-size:13.5px;font-weight:600;
+      padding:0 15px;min-height:39px;gap:7px;
+      transition:background-color .15s var(--ease),transform .12s var(--m-spring);
+    }
+    #dashboard-view .btn:active{transform:scale(.96)}
+    #dashboard-view .btn svg{width:15px;height:15px}
+    #dashboard-view .btn-primary{
+      box-shadow:0 1px 2px rgba(84,71,206,.2);
+    }
+    #dashboard-view .btn-primary:hover{transform:none;background:var(--violet)}
+    /* Sekundaer-Knoepfe: weisse Flaeche mit Haarlinie statt Schatten-Pille —
+       auf dem dunkleren Traeger reicht das und wirkt ruhiger. */
+    #dashboard-view .btn-ghost{
+      background:var(--surface);box-shadow:none;
+      border:1px solid var(--m-hair);color:var(--ink-2);
+    }
+    #dashboard-view .btn-ghost:hover{background:var(--surface)}
+    /* Volle Breite im Sheet-Fuss bleibt — dort zaehlt Treffsicherheit */
+    #dashboard-view .modal-actions .btn,#dashboard-view .modal-foot .btn{
+      min-height:46px;font-size:15px;border-radius:var(--m-r-ctl);
+    }
+
+    /* ============ SEGMENTED CONTROL (Sub-Tabs) ============ */
+    /* v2 hatte lose Pillen; iOS setzt eine getoente Spur, in der ein weisses
+       Plaettchen sitzt. Das liest sich als EIN Schalter statt als vier
+       Knoepfe — und zeigt nebenbei, wie viele Tabs es ueberhaupt gibt. */
+    #dashboard-view .subtabs{
+      background:var(--surface-tint);border-radius:11px;
+      padding:3px;gap:2px;margin-bottom:14px;border-bottom:none;
+    }
+    #dashboard-view .subtab{
+      flex:1;justify-content:center;border-radius:8px;
+      padding:8px 10px;font-size:13px;font-weight:600;
+      background:transparent;color:var(--sub);border-bottom:none;margin-bottom:0;
+      transition:background-color .2s var(--m-spring),color .2s var(--ease);
+    }
+    #dashboard-view .subtab.active{
+      background:var(--surface);color:var(--ink);
+      box-shadow:0 1px 3px rgba(16,24,40,.1),0 1px 1px rgba(16,24,40,.04);
+    }
+    #dashboard-view .subtab:active:not(:disabled){transform:scale(.97)}
+    #dashboard-view .subtab-count{font-size:11px}
+    /* Mehr als vier Tabs passen nicht in eine Spur — dann wieder wischbar,
+       ohne das Plaettchen zu verlieren. */
+    #dashboard-view .subtabs:has(> .subtab:nth-child(5)){padding:3px 4px}
+    #dashboard-view .subtabs:has(> .subtab:nth-child(5)) .subtab{flex:0 0 auto}
+
+    /* ============ EINGABEN ============ */
+    #dashboard-view .input,
+    #dashboard-view .mtc-details input,#dashboard-view .mtc-details select,
+    #dashboard-view .mtc-modal-body input,#dashboard-view .mtc-modal-body select{
+      border-radius:var(--m-r-ctl);
+      border:1px solid var(--m-hair);
+      background:var(--surface);
+      min-height:var(--m-row);padding:10px 13px;
+    }
+    #dashboard-view .input:focus{
+      border-color:var(--violet);box-shadow:0 0 0 3.5px rgba(84,71,206,.13);
+    }
+    /* Native Selects tragen am Handy den System-Pfeil in System-Groesse —
+       eigener Chevron, damit sie wie die uebrigen Felder aussehen. */
+    #dashboard-view select.input,
+    #dashboard-view .view-head select,
+    #dashboard-view .mtc-details select{
+      -webkit-appearance:none;appearance:none;
+      padding-right:34px;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1.5 1.75 6 6.25l4.5-4.5' stroke='%2398A2B3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;
+      background-position:right 13px center;
+    }
+    /* Haken: 14px war ein Tippziel fuer eine Maus, nicht fuer einen Daumen */
+    #dashboard-view input[type=checkbox]{
+      width:21px;height:21px;border-radius:6px;accent-color:var(--violet);flex-shrink:0;
+    }
+    /* Feld-Beschriftung in allen Sheets gleich */
+    #dashboard-view .modal .field > label,#dashboard-view .field > label{
+      font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+      color:var(--sub);font-weight:650;
+    }
+
+    /* ============ BOTTOM-SHEETS ============ */
+    @keyframes mob-sheet-v3{from{transform:translateY(100%)}to{transform:none}}
+    #dashboard-view .modal-bg{
+      background:rgba(16,24,40,.34);
+      /* Blur kostet pro Frame das ganze Backdrop — die Abdunklung genuegt */
+      backdrop-filter:none;-webkit-backdrop-filter:none;
+    }
+    #dashboard-view .modal{
+      border-radius:var(--m-r-sheet) var(--m-r-sheet) 0 0;
+      padding:8px calc(var(--m-gut) + env(safe-area-inset-right))
+              calc(16px + env(safe-area-inset-bottom)) calc(var(--m-gut) + env(safe-area-inset-left));
+      max-height:90vh;box-shadow:0 -1px 0 var(--m-hair);
+      overscroll-behavior:contain;
+      animation:mob-sheet-v3 .42s var(--m-spring);
+    }
+    /* Griff-Linie: sitzt jetzt im Sheet-Polster statt darueber */
+    #dashboard-view .modal::before{
+      width:38px;height:5px;background:var(--border);margin:6px auto 14px;
+    }
+    #dashboard-view .modal-title{font-size:19px;font-weight:680;letter-spacing:-.02em}
+    #dashboard-view .modal-sub{margin-bottom:18px}
+    /* Sidebar-Sheet („Mehr") in derselben Form wie alle Sheets */
+    #dashboard-view .sidebar{
+      border-radius:var(--m-r-sheet) var(--m-r-sheet) 0 0;
+      border-top:none;box-shadow:0 -1px 0 var(--m-hair),0 -20px 50px rgba(16,24,40,.16);
+      transition:transform .42s var(--m-spring);
+      overscroll-behavior:contain;
+      padding-top:6px;
+    }
+    #dashboard-view .sidebar::before{width:38px;height:5px;margin:6px auto 12px}
+    #dashboard-view .sb-overlay{background:rgba(16,24,40,.34)}
+    #dashboard-view .sb-nav{gap:5px}
+    #dashboard-view .sidebar .sb-link{
+      border-radius:var(--m-r-ctl);padding:12px 11px;font-size:13.5px;font-weight:550;
+      background:var(--surface-tint);color:var(--ink-2);
+      transition:transform .12s var(--m-spring);
+    }
+    #dashboard-view .sidebar .sb-link:active{transform:scale(.97)}
+    #dashboard-view .sidebar .sb-link.active{background:var(--violet-tint);color:var(--violet)}
+    #dashboard-view .sidebar .sb-icon{width:17px;height:17px}
+    #dashboard-view .sb-section{
+      font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--sub-2);
+    }
+
+    /* ============ LISTEN ============ */
+    /* Zeilen-Druck: ohne Rueckmeldung fuehlt sich jeder Tap nach Aussetzer an.
+       Die Flaeche ist der Traeger, nicht die Zeile — deshalb der helle Ton. */
+    #dashboard-view [data-pane="manual"] .t tr:active,
+    #dashboard-view [data-pane="topstep"] .t tr:active,
+    #dashboard-view [data-pane="duplikum"] .t tr:active,
+    #dashboard-view [data-pane="mt5"] .t tr:active,
+    #finTable tr:active,
+    #dashboard-view #fin-rg-rows tr:active{background:var(--surface-tint)}
+    /* Trennlinien einheitlich auf die Haarlinie */
+    #dashboard-view [data-pane="manual"] .t tr,
+    #dashboard-view [data-pane="topstep"] .t tr,
+    #dashboard-view [data-pane="duplikum"] .t tr,
+    #dashboard-view [data-pane="mt5"] .t tr,
+    #finTable tr,#dashboard-view #fin-rg-rows tr{border-bottom-color:var(--m-hair)}
+    /* Trade-Karten: gleicher Radius wie alle Karten, ruhigere Aktionszeile */
+    #dashboard-view .tc2{padding:14px}
+    #dashboard-view .tc2-sys{border-radius:15px 0 10px 0}
+    #dashboard-view .tc2-actions{border-top-color:var(--m-hair);padding-top:11px}
+    #dashboard-view .tc2-actions .tc2-btn{border-radius:10px;font-weight:600}
+
+    /* ============ LEER-ZUSTAENDE ============ */
+    /* Kein Kasten mehr: auf dem getoenten Traeger ist der leere Bereich
+       selbst schon die Aussage. Nur Symbol, Satz, fertig. */
+    #dashboard-view .empty{
+      background:transparent;border:none;box-shadow:none;padding:52px 24px;
+    }
+    #dashboard-view .empty-icon{width:52px;height:52px;border-radius:15px;margin-bottom:14px}
+    #dashboard-view .empty-icon svg{width:23px;height:23px}
+    #dashboard-view .empty h3{font-size:16px;font-weight:650}
+    #dashboard-view .empty p{font-size:13.5px;max-width:280px;line-height:1.5}
+    #dashboard-view .empty-ico{font-size:34px;margin-bottom:12px}
+
+    /* ============ HINWEIS-BOXEN ============ */
+    /* Rahmen raus, nur Toenung — wie in den Sheets schon seit v1 */
+    #dashboard-view .sync-banner,#dashboard-view .mtc-banner,
+    #dashboard-view .mtc-jobbar,#dashboard-view .mtc-warn{
+      border:none;border-radius:var(--m-r-ctl);background:var(--surface);
+      box-shadow:var(--shadow-mob-card);
+    }
+
+    /* ============ MUENZ-KNOPF ============ */
+    /* Sass am „Mehr"-Tab und war mit 52px + Leuchtschatten der lauteste
+       Punkt im Bild. Kleiner, leiser, aus dem Daumenweg der Leiste. */
+    #dashboard-view.active ~ #coinflip-fab{
+      width:44px;height:44px;font-size:19px;border:none;
+      bottom:calc(var(--m-nav-h) + 14px + env(safe-area-inset-bottom));
+      right:calc(var(--m-gut) + env(safe-area-inset-right));
+      box-shadow:0 2px 10px rgba(217,119,6,.28);
+      opacity:.94;
+    }
+
+    /* ============ TOASTS ============ */
+    #dashboard-view .mg-toast,.at-toast,.at-prompt{border-radius:var(--m-r-card)}
+    .at-toast,.at-prompt{
+      left:calc(var(--m-gut) + env(safe-area-inset-left));
+      right:calc(var(--m-gut) + env(safe-area-inset-right));
+    }
+
+    /* ============ LOGIN ============ */
+    #login-view .side{padding:24px 22px calc(24px + env(safe-area-inset-bottom))}
+    #login-view input{border-radius:var(--m-r-ctl);min-height:var(--m-row)}
+  }
+
+  /* Weniger Bewegung, wenn das System danach fragt — die Sheet-Kurve ist
+     genau die Art Animation, die bei Bewegungsempfindlichkeit stoert. */
+  @media (max-width:820px) and (prefers-reduced-motion:reduce){
+    #dashboard-view .modal,#dashboard-view .view.active{animation-duration:.01ms}
+    #dashboard-view .sidebar{transition-duration:.01ms}
   }
 </style>
 </head>
@@ -8487,6 +8896,14 @@
     userDropdown.classList.remove('open')
     history.replaceState(null, '', '#' + name)
     if(name === 'overview') window.scrollTo(0, 0)
+    // Am Handy faengt JEDER Screen oben an (App-Shell v3, 22.09.2026): sonst
+    // landet man nach einem Tab-Wechsel mitten in der neuen Liste, weil die
+    // Seite als Ganzes scrollt und die Scroll-Position dabei stehen bleibt.
+    // Danach den Titel-Beobachter auf die neue View umhaengen.
+    if(window.matchMedia('(max-width:820px)').matches){
+      window.scrollTo(0, 0)
+      if(typeof mobNavSync === 'function') requestAnimationFrame(mobNavSync)
+    }
     // Settings-Panel: Firm-Listen neu rendern
     if(name === 'settings'){
       if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
@@ -11707,6 +12124,43 @@
     document.getElementById('sidebar').classList.toggle('open')
     document.getElementById('sbOverlay').classList.toggle('open')
   })
+
+  /* ── Nav-Bar faengt den grossen Titel auf (App-Shell v3, 22.09.2026) ──
+   * Am Handy steht der Screen-Name gross im Inhalt; die schmale Leiste oben
+   * bleibt leer, solange man ihn sieht, und blendet ihn ein, sobald er nach
+   * oben rausgescrollt ist — das ist die Bewegung, an der man eine echte
+   * App erkennt.
+   * BEWUSST ein IntersectionObserver und KEIN scroll-Handler: der Beobachter
+   * meldet sich zweimal pro Screen (rein/raus), ein scroll-Handler dagegen
+   * bei jedem Frame. Genau daran haben die Performance-Runden vom 29.08.2026
+   * schon einmal gelitten (Parallax-Grafik, Backdrop-Blur der Leiste).
+   * Der Beobachter haengt immer am Titel der AKTIVEN View, deshalb ruft
+   * switchView() die Funktion nach jedem Wechsel neu. */
+  let _mobNavIO = null
+  const _mobMQ = window.matchMedia('(max-width:820px)')
+  function mobNavSync(){
+    const dv = document.getElementById('dashboard-view')
+    if(!dv) return
+    if(_mobNavIO){ _mobNavIO.disconnect(); _mobNavIO = null }
+    // Desktop: die Leiste traegt ihren Titel immer. Die Klasse schadet dort
+    // nichts — alle .nav-solid-Regeln stehen in der 820px-Query.
+    if(!_mobMQ.matches){ dv.classList.add('nav-solid'); return }
+    const ziel = dv.querySelector('.view.active .view-title')
+    // Views ohne eigenen Titel (oder mit verstecktem): Leiste traegt ihn.
+    if(!ziel || !ziel.offsetParent){ dv.classList.add('nav-solid'); return }
+    dv.classList.remove('nav-solid')
+    const bar = dv.querySelector('.topbar')
+    const h = bar ? Math.round(bar.getBoundingClientRect().height) : 50
+    _mobNavIO = new IntersectionObserver(
+      es => dv.classList.toggle('nav-solid', !es[0].isIntersecting),
+      { rootMargin: '-' + (h + 4) + 'px 0px 0px 0px', threshold: 0 }
+    )
+    _mobNavIO.observe(ziel)
+  }
+  // Nur beim Ueberschreiten der Grenze neu verdrahten — ein resize-Listener
+  // wuerde am Handy auch bei jeder geoeffneten Tastatur feuern.
+  _mobMQ.addEventListener('change', mobNavSync)
+  window.addEventListener('orientationchange', () => setTimeout(mobNavSync, 250))
 
   /* ========== BUILD-WÄCHTER (29.08.2026) ==========
    * Das Handy lief heute mehrfach still auf einem alten Build (Finns Funde:
@@ -24813,7 +25267,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.384'
+  const OS_TAB_BUILD = '2026-09-22.385'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
