@@ -816,8 +816,24 @@ def main():
             import provision
             import subprocess
             if not provision.terminal_pids(os.path.dirname(os.path.abspath(hpath))):
-                log("Hedge-Terminal laeuft nicht — starte es (Login ist gespeichert)…")
-                subprocess.Popen([hpath], cwd=os.path.dirname(os.path.abspath(hpath)))
+                log("Hedge-Terminal laeuft nicht — starte es MINIMIERT (Login ist gespeichert)…")
+                # OHNE Vordergrund-Klau (22.09.2026, Finn: "ich arbeite am PC, und auf einmal
+                # oeffnet sich das MT5-Slave-Hedge-Terminal — obwohl ich da gar nichts mache"):
+                # ein frisch gestartetes MT5 reisst den Vordergrund an sich. Der Copier BRAUCHT
+                # das Hedge-Terminal (er haengt daran, es bleibt bewusst immer offen), aber es
+                # muss dabei niemanden stoeren. SW_SHOWMINNOACTIVE (7): starten, minimiert,
+                # nicht aktivieren. Der Knopf "Slave-Terminal starten" holt es weiter nach vorn
+                # — dort hat Finn es ja selbst angefordert.
+                _si = None
+                if os.name == "nt":
+                    try:
+                        _si = subprocess.STARTUPINFO()
+                        _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        _si.wShowWindow = 7   # SW_SHOWMINNOACTIVE
+                    except Exception:
+                        _si = None
+                subprocess.Popen([hpath], cwd=os.path.dirname(os.path.abspath(hpath)),
+                                 startupinfo=_si)
                 time.sleep(20)  # Boot + Auto-Login abwarten; notfalls wiederholt die .bat
         except Exception as e:
             log(f"⚠ Hedge-Terminal-Autostart fehlgeschlagen ({type(e).__name__}) — "

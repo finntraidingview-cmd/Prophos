@@ -7839,6 +7839,31 @@
         </div>
       </div>
 
+      <!-- BENACHRICHTIGUNGEN AUFS HANDY (22.09.2026, Finn: „gehts nicht ans handy"
+           / „prophos liegt auf meinem home bildschrim"). Echtes Web Push ueber
+           sw.js + VAPID — kommt an, auch wenn Prophos komplett geschlossen ist.
+           Der alte Weg (new Notification aus einem offenen Tab) hat auf dem
+           iPhone NIE etwas angezeigt, auch nicht in der Home-Bildschirm-App:
+           iOS zeigt Web-Benachrichtigungen nur ueber einen Service Worker.
+           Geraeteliste + Schluessel: sql/2026-09-22_push_geraete.sql -->
+      <div class="panel" style="margin-bottom:14px" id="pushPanel">
+        <div class="panel-head">
+          <div class="panel-title">Benachrichtigungen aufs Handy</div>
+          <span id="pushStatus" class="mono" style="font-size:12px;color:var(--sub)"></span>
+        </div>
+        <p style="font-size:12.5px;color:var(--sub);margin:-4px 0 12px;line-height:1.55">
+          Trade-Start und -Ende, Auto-Close-Ergebnisse und News-Alerts kommen als Push — auch wenn Prophos zu ist.
+          <span id="pushHinweis"></span>
+        </p>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="pushAn">Auf diesem Gerät einschalten</button>
+          <button class="btn btn-ghost" id="pushTest">Test-Push senden</button>
+          <button class="btn btn-ghost" id="pushAus" hidden>Dieses Gerät abmelden</button>
+          <span id="pushMsg" style="font-size:12.5px"></span>
+        </div>
+        <div id="pushGeraete" style="margin-top:14px;font-size:12.5px"></div>
+      </div>
+
       <!-- AUTO-CLOSE vor Market Close (22.09.2026, Finns Auftrag): Regel + Log.
            Ausgeführt wird nur am PC-Tab (dort läuft der Copier); Mac/Handy sehen
            dieselbe Regel und dasselbe Log (Supabase, sql/2026-09-22_auto_close.sql). -->
@@ -7866,7 +7891,6 @@
         </div>
         <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-primary" id="acSave">Speichern</button>
-          <button class="btn btn-ghost" id="acNotif">🔔 Benachrichtigungen erlauben</button>
           <button class="btn btn-ghost" id="acLogReload">Log neu laden</button>
           <span id="acMsg" style="font-size:12.5px"></span>
         </div>
@@ -25371,7 +25395,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.388'
+  const OS_TAB_BUILD = '2026-09-22.389'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

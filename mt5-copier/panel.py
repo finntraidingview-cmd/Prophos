@@ -644,8 +644,24 @@ def terminal_schliessbar(cfg, st, age, plan_status=None):
     """Reine Entscheidung (testbar, ohne I/O): darf das MASTER-Terminal dieser
     Instanz jetzt geschlossen werden? → (ja/nein, grund). Dieselbe strenge
     Beweis-Doktrin wie der Loesch-Riegel: ohne frischen Status keine Aktion."""
-    if not str(cfg.get("master_terminal_path") or "").strip():
+    mpath = str(cfg.get("master_terminal_path") or "").strip()
+    if not mpath:
         return False, "kein Master-Terminal (Orbit/TV-Instanz oder Pfad fehlt)"
+    # NIE die HEDGE-Installation (22.09.2026, Finn: "auf einmal oeffnet sich das
+    # Slave-Hedge-Terminal von selbst"): zeigt master_terminal_path faelschlich in
+    # denselben Ordner wie hedge_terminal_path, wuerde jeder Zu-Weg (Trade-Ende,
+    # Leerlauf-Waechter, Knopf) das Hedge-Terminal killen — und der Copier startet
+    # es Sekunden spaeter wieder. Derselbe Riegel wie in loesch_terminal_dir.
+    hpath = str(cfg.get("hedge_terminal_path") or "").strip()
+    if hpath:
+        # Ordner beider Pfade — Trenner bewusst BEIDE (\ und /), damit der Vergleich
+        # auch ausserhalb von Windows stimmt (Selftest laeuft auf dem Mac) und ein
+        # leeres Ergebnis nie als "gleich" durchgeht.
+        def _d(pfad):
+            teil = re.split(r"[\\/]", str(pfad).strip().rstrip("\\/"))[:-1]
+            return os.path.normcase("/".join(teil))
+        if _d(mpath) and _d(mpath) == _d(hpath):
+            return False, "Master- und Hedge-Terminal im selben Ordner — das Hedge-Terminal wird nie geschlossen"
     if plan_status:
         return False, f"Trade-Plan ist '{plan_status}'"
     frisch = bool(st.get("running")) and age is not None and age <= 15

@@ -1511,6 +1511,16 @@ def main():
     import panel
     _cfgT = {"master_terminal_path": "C:\\MT5-X\\terminal64.exe"}
     _stOK = {"running": True, "master_positions": [], "hedges": {"1": []}}
+    # Hedge-Riegel (22.09.2026, Finn: "auf einmal oeffnet sich das Slave-Hedge-Terminal"):
+    # zeigt master_terminal_path in den Hedge-Ordner, wird NIE geschlossen.
+    _stZU = {"running": True, "master_positions": [], "hedges": {}}
+    _tsb = lambda m, h: panel.terminal_schliessbar({"master_terminal_path": m, "hedge_terminal_path": h}, _stZU, 5, None)[0]
+    chk("TERMINAL-ZU: Hedge-Installation wird nie geschlossen (Master- und Hedge-Pfad im selben Ordner), aehnliche Ordnernamen aber schon",
+        _tsb(r"C:\MT5-A\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
+        and _tsb(r"C:\MT5-Hedge\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is False
+        and _tsb(r"C:\MT5-Hedge2\terminal64.exe", r"C:\MT5-Hedge\terminal64.exe") is True
+        and _tsb(r"C:\MT5-A\terminal64.exe", "") is True)
+
     # Leerlauf-Waechter (22.09.2026): schliessen erst nach ununterbrochen leerem Lauf ab Schwelle
     chk("TERMINAL-LEERLAUF: Zaehler startet beim ersten leeren Blick, schliesst ab Schwelle, jeder nicht-leere Blick setzt zurueck",
         panel.leerlauf_entscheidung(True, None, 1000.0, 900) == (1000.0, False)
