@@ -2334,10 +2334,28 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     if not tv_tab_schliessbar(titel, klasse, begriff):
         return False, (f"Der aktive Tab sieht nicht nach TradingView aus ('{titel[:50]}') — "
                        "es wird nichts geschlossen.")
+    # Vordergrund BEWEISEN, mit Nachdruck (22.09.2026 02:2x, Finns Lauf nach dem
+    # Leerzeit-Fix: 'TradingView-Fenster steht nicht im Vordergrund' — das Konto war
+    # nach 2 s gelesen, der Fokus-Wechsel von set_focus() noch nicht durch; vorher
+    # hatten die 14 s Leseschleife das zufaellig mitgewartet). Bis ~2,5 s: set_focus
+    # + SetForegroundWindow wiederholen, dann erst absagen — Strg+W in ein fremdes
+    # Fenster bleibt ausgeschlossen.
     try:
         import ctypes
-        if int(ctypes.windll.user32.GetForegroundWindow()) != int(w.handle):
-            return False, "TradingView-Fenster steht nicht im Vordergrund — es wird nichts geschlossen."
+        u32 = ctypes.windll.user32
+        ende_v = time.time() + 2.5
+        while int(u32.GetForegroundWindow()) != int(w.handle):
+            if time.time() >= ende_v:
+                return False, "TradingView-Fenster steht nicht im Vordergrund — es wird nichts geschlossen."
+            try:
+                w.set_focus()
+            except Exception:
+                pass
+            try:
+                u32.SetForegroundWindow(int(w.handle))
+            except Exception:
+                pass
+            _warte(0.25, 0.15)
     except Exception:
         pass                      # ohne die Probe (kein Windows) entscheidet set_focus
     chrome = _chrome_pfad((cfg or {}).get("tv_browser_path"))
@@ -2861,12 +2879,10 @@ def modus_tvkonto(cmd):
                       f"der Tradovate-Login gewechselt werden, aber fuer die Firma ist kein "
                       "Username hinterlegt (Einstellungen > Prop Firms > Firma bearbeiten > "
                       "'Tradovate-Username fuer TradingView').", "login")
-        # Frisch mit dem Link gestartet: es WAR kein TradingView offen, also gibt
-        # es kein aktives Konto, dem man die Sicht nehmen koennte — kein Riegel.
-        if not frisch_mit_link:
-            f = flach_pruefen("ab- und angemeldet")
-            if f:
-                return ab(f, "login")
+        # KEIN Positions-Riegel mehr (Finn 22.09.2026 02:2x: 'ob eine offene Position da
+        # ist, ist komplett egal — es wird ueber Duplikum gehedged. Einfach direkt
+        # ausloggen'). Der Riegel stammte aus der Orbit-Copier-Zeit, als der Reader die
+        # Sicht auf das aktive Konto verloren haette; der Reader ist aus.
         w = tv_fenster(versuche=12)
         if not w:
             return ab("TradingView-Fenster nicht gefunden. " + fenster_gesehen[0], "login")
@@ -3425,9 +3441,6 @@ def modus_tvkonto(cmd):
                     if zustand == "gleicher_login":
                         login_noetig = False
                         break
-                f = flach_pruefen("ab- und angemeldet")
-                if f:
-                    return ab(f, "login")
                 broker = broker_knopf()
                 if len(broker) != 1:
                     return ab(f"Der Broker-Knopf 'Tradovate' im unteren Panel ist nicht eindeutig "
@@ -3456,10 +3469,7 @@ def modus_tvkonto(cmd):
     # --- Schritt 3: gleicher Login, anderes Unterkonto -> Dropdown ---------
     # Finn 21.09.2026: "an diesem Step muessten wir einfach nur einmal auf das
     # Drop-Down draufdruecken und den Account switchen."
-    f = flach_pruefen("das Konto gewechselt")
-    if f:
-        return ab(f)
-
+    # kein Positions-Riegel (s.o., Finn 22.09.2026)
     w = tv_fenster(versuche=8)
     if not w:
         return ab("TradingView-Fenster fuer den Klick nicht gefunden. " + fenster_gesehen[0])
