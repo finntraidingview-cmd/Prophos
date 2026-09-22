@@ -63,3 +63,10 @@ begin
 end $$;
 revoke all on function public.wd_konto_setzen(uuid, boolean, numeric, numeric) from public;
 grant execute on function public.wd_konto_setzen(uuid, boolean, numeric, numeric) to authenticated;
+
+-- Nachtrag 23.09.2026 01:4x (Finn: „Emin und Finn — die ID immer weglassen, immer"): feste Ausschlussliste
+-- von Nutzer-IDs in den Farmer-Regeln (gilt für Mac-Tab und alle PC-Tabs), dazu deren Konten aus dem Farm.
+-- Emin = 6cceb3f3-dc78-48ee-8668-26081da3e70f, Finn = b55d7ab4-5246-4101-abca-f729c71d17ec („Finn + Pascal" bleibt drin).
+alter table public.wd_farmer_regeln add column if not exists ids_aus jsonb not null default '[]'::jsonb;
+update public.wd_farmer_regeln set ids_aus = '["6cceb3f3-dc78-48ee-8668-26081da3e70f","b55d7ab4-5246-4101-abca-f729c71d17ec"]'::jsonb where id = 1;
+update public.accounts set wd_farm = false where user_id in ('6cceb3f3-dc78-48ee-8668-26081da3e70f','b55d7ab4-5246-4101-abca-f729c71d17ec');
