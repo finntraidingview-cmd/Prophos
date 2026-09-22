@@ -4904,6 +4904,11 @@
             <input type="checkbox" id="autotrack-toggle">
             <span id="autotrack-label">Auto-Erkennung</span>
           </label>
+          <!-- Futures vorplanen (22.09.2026, Finn: „bei Futures ist der Trade-Plan immer dasselbe —
+               Gesamtkosten aufs Drawdown, 1 Kontrakt, TP ~370-400 = ein Gewinntag; ein Feld, das am
+               Anfang des Tages alle Trades vorplant"). Legt für jedes aktive Futures-Konto ohne
+               laufenden Plan einen fertigen Orbit-Plan an; eigene Verdrahtung (kein Sammel-Handler). -->
+          <button class="btn btn-ghost" id="tpVorplanenBtn" title="Für jedes aktive Futures-Konto ohne laufenden Plan einen Orbit-Plan anlegen: Risiko = Max-Drawdown, Slave = Gesamtkosten, Duplikum-Slave, TP aus Spanne">⚡ Futures vorplanen</button>
           <button class="btn btn-primary" id="addTradePlanBtn" onclick="window.openTradePlanModal && window.openTradePlanModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Trade planen
@@ -5031,6 +5036,50 @@
          „Weiter" aus dem Trade-Plan-Modal. Buy/Sell + TP/SL in $ + Lots — beim
          „Starten" läuft der Trade-Start-Check, und bei Grün platziert der Bot
          die Market-Order automatisch im Master-Terminal. -->
+    <!-- Futures vorplanen (22.09.2026) — eigenes Popup, eigene Verdrahtung -->
+    <div class="modal-bg" id="tpVorplanModal">
+      <div class="modal" style="max-width:640px">
+        <div class="modal-head">
+          <h3>Futures vorplanen</h3>
+          <button class="modal-x" id="tpVorplanX" aria-label="Schließen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5">
+            Je Konto: Risiko Master = Max-Drawdown · Risiko Slave = Gesamtkosten · Slave = Duplikum-Slave · Weg Orbit · Symbol aus Instrument.
+            TP wird je Konto zufällig aus der Spanne gezogen (kein gleiches Muster über alle IDs). Richtung kannst du hier setzen oder später im Order-Popup.
+          </p>
+          <div class="form-grid">
+            <div class="field">
+              <label>Instrument</label>
+              <div class="seg" id="tp-vp-instr">
+                <button type="button" data-vp-instr="mnq" class="active">MNQ <span style="opacity:.6;font-size:11px">$2/pt</span></button>
+                <button type="button" data-vp-instr="nq">NQ <span style="opacity:.6;font-size:11px">$20/pt</span></button>
+              </div>
+            </div>
+            <div class="field"><label>Kontrakte</label><input type="number" class="input mono" id="tp-vp-kt" min="1" step="1" value="1"></div>
+            <div class="field"><label>TP von ($)</label><input type="number" class="input mono" id="tp-vp-tp-von" min="0" step="10" value="370"></div>
+            <div class="field"><label>TP bis ($)</label><input type="number" class="input mono" id="tp-vp-tp-bis" min="0" step="10" value="400"></div>
+            <div class="field" style="grid-column:1 / -1">
+              <label>Richtung <span style="color:var(--sub);font-weight:400">(optional — leer = im Order-Popup wählen)</span></label>
+              <div class="seg" id="tp-vp-dir">
+                <button type="button" data-vp-dir="" class="active">—</button>
+                <button type="button" data-vp-dir="buy">BUY</button>
+                <button type="button" data-vp-dir="sell">SELL</button>
+              </div>
+            </div>
+          </div>
+          <div id="tp-vp-liste" style="margin-top:12px;font-size:12.5px"></div>
+          <div class="modal-msg" id="tpVorplanMsg"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="tpVorplanCancel">Abbrechen</button>
+          <button class="btn btn-primary" id="tpVorplanGo">Pläne anlegen</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="tpOrderModal">
       <div class="modal" style="max-width:440px">
         <div class="modal-head">
@@ -25410,7 +25459,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.392'
+  const OS_TAB_BUILD = '2026-09-22.393'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28737,6 +28786,158 @@
   }
   document.getElementById('tradePlanSave')?.addEventListener('click', () => saveTradePlanFromModal(false))
   document.getElementById('tradePlanSaveStart')?.addEventListener('click', () => saveTradePlanFromModal(true))
+
+  /* ══ FUTURES VORPLANEN (22.09.2026, Finn: „bei Futures ist der Trade-Plan immer dasselbe:
+   * Gesamtkosten aufs Drawdown, 1 Kontrakt, TP so 370-400, damit es ein Gewinntag wird —
+   * ein Feld, das am Anfang des Tages alle Trades vorplant"). Ein Klick legt für jedes
+   * aktive Futures-Konto ohne laufenden Plan denselben Plan an, den Popup 1 von Hand
+   * ergäbe: Risiko Master = Max-Drawdown (tpFillMasterRiskFromDD), Risiko Slave =
+   * Gesamtkosten in Slave-Währung (wie „Gesamtkosten übernehmen"), Multiplier über
+   * tpCalcMultiplier, Slave = der eine Duplikum-Slave, Weg Orbit, Symbol = Instrument +
+   * Kontraktmonat. TP je Konto ZUFÄLLIG aus der Spanne (Jitter-Doktrin: nicht auf allen
+   * IDs derselbe Zielwert). Richtung optional — ohne sie öffnet „Starten" wie gehabt das
+   * Order-Popup (TP steht dann schon drin). Eigene Verdrahtung, kein Sammel-Handler. ══ */
+  const TP_VP_LS = 'prophos_tp_vorplan'
+  let _vpInstr = 'mnq', _vpDir = ''
+
+  // Reine Rechnung je Konto (testbar): -> {masterRisk, slaveRisk, tp} oder {fehler}
+  function tpVorplanZeile(acc, gkEur, slaveCurrency, fxUsdEur, tpVon, tpBis, zufall){
+    const dd = Number(acc && acc.maxDrawdown) || 0
+    if(!(dd > 0)) return { fehler: 'kein Max-Drawdown am Konto' }
+    if(!(gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
+    const slaveRisk = Math.round((slaveCurrency !== '€' ? gkEur / (fxUsdEur || 0.85) : gkEur) * 100) / 100
+    const von = Math.max(0, Number(tpVon) || 0), bis = Math.max(von, Number(tpBis) || von)
+    const r = (typeof zufall === 'number') ? zufall : Math.random()
+    const tp = Math.round(von + r * (bis - von))
+    return { masterRisk: dd, slaveRisk, tp: tp > 0 ? tp : null }
+  }
+
+  // Der eine Duplikum-Slave (wie im Plan-Popup: Duplikum-Gegenstück ist als Slave angelegt)
+  function tpDupSlaveAccount(){
+    try{
+      const links = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const dAccs = (typeof dupState !== 'undefined' && dupState.accounts) || []
+      if(!dAccs.length) return { fehler: 'Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden, dann erneut.' }
+      const ids = []
+      for(const [dupId, pid] of Object.entries(links)){
+        const d = dAccs.find(x => String(x.account_id) === String(dupId))
+        if(d && Number(d.type) === 1) ids.push(String(pid))
+      }
+      const slaves = ids.map(id => (accounts || []).find(a => String(a.id) === id)).filter(Boolean)
+      if(slaves.length !== 1) return { fehler: slaves.length ? `${slaves.length} Duplikum-Slaves — nicht eindeutig` : 'Kein Duplikum-Slave verknüpft' }
+      return { slave: slaves[0] }
+    }catch(e){ return { fehler: 'Duplikum-Slave nicht bestimmbar: ' + (e.message || e) } }
+  }
+
+  function tpVorplanKandidaten(){
+    const arch = (typeof getArchive === 'function') ? getArchive() : {}
+    const belegt = new Set((tradePlans || []).filter(p => p && (p.status === 'planned' || p.status === 'open')).map(p => String(p.masterAccountId)))
+    return (accounts || []).filter(a => a && !(arch[a.id] && arch[a.id].archived)
+      && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(a.firm)
+      && String(a.externalId || '').trim())
+      .map(a => ({ acc: a, belegt: belegt.has(String(a.id)) }))
+  }
+
+  function tpVorplanRender(){
+    const box = document.getElementById('tp-vp-liste'); if(!box) return
+    const msg = document.getElementById('tpVorplanMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    const sl = tpDupSlaveAccount()
+    if(sl.fehler){ box.innerHTML = `<span style="color:var(--danger)">${escapeHtml(sl.fehler)}</span>`; return }
+    const slave = sl.slave
+    const sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+    const fx = window._fxUsdEur || 0.85
+    const tpVon = parseFloat(document.getElementById('tp-vp-tp-von')?.value), tpBis = parseFloat(document.getElementById('tp-vp-tp-bis')?.value)
+    const kand = tpVorplanKandidaten()
+    if(!kand.length){ box.innerHTML = '<span style="color:var(--sub)">Kein aktives Futures-Konto mit External ID gefunden.</span>'; return }
+    box.innerHTML = `<div style="margin-bottom:6px;color:var(--sub)">Slave: <b>${escapeHtml(slave.name)}</b> · ${kand.length} Futures-Konto/-Konten</div>` + kand.map(k => {
+      const gk = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(k.acc, { netPayouts: true }) : 0
+      const z = tpVorplanZeile(k.acc, gk, sPreset.currency, fx, tpVon, tpBis, 0.5)
+      const aus = k.belegt || z.fehler
+      const grund = k.belegt ? 'hat schon einen geplanten/laufenden Plan' : (z.fehler || '')
+      return `<label style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);${aus ? 'opacity:.55' : ''}">
+        <input type="checkbox" data-vp-acc="${escapeHtml(String(k.acc.id))}" ${aus ? 'disabled' : 'checked'}>
+        <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')}</span>
+          ${aus ? `<span style="color:var(--sub)"> — ${escapeHtml(grund)}</span>` : `<span class="mono" style="color:var(--sub)"> · DD $${Number(z.masterRisk).toLocaleString('de-DE')} · Slave ${sPreset.currency}${Number(z.slaveRisk).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`}</span>
+      </label>`
+    }).join('')
+  }
+
+  function tpVorplanOpen(){
+    try{
+      const g = JSON.parse(localStorage.getItem(TP_VP_LS) || '{}')
+      _vpInstr = g.instr === 'nq' ? 'nq' : 'mnq'
+      if(g.kt) document.getElementById('tp-vp-kt').value = g.kt
+      if(g.von != null) document.getElementById('tp-vp-tp-von').value = g.von
+      if(g.bis != null) document.getElementById('tp-vp-tp-bis').value = g.bis
+    }catch(_){}
+    _vpDir = ''
+    document.querySelectorAll('[data-vp-instr]').forEach(b => b.classList.toggle('active', b.dataset.vpInstr === _vpInstr))
+    document.querySelectorAll('[data-vp-dir]').forEach(b => b.classList.toggle('active', b.dataset.vpDir === _vpDir))
+    document.getElementById('tpVorplanModal').classList.add('open')
+    if(!((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
+      dupLoadAccounts().then(tpVorplanRender).catch(() => {})
+    }
+    tpVorplanRender()
+  }
+  function tpVorplanClose(){ document.getElementById('tpVorplanModal').classList.remove('open') }
+
+  async function tpVorplanAnlegen(){
+    const msg = document.getElementById('tpVorplanMsg')
+    const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
+    const sl = tpDupSlaveAccount()
+    if(sl.fehler) return say(sl.fehler, 'err')
+    const slave = sl.slave
+    const sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
+    const fx = window._fxUsdEur || 0.85
+    const kt = Math.max(1, Math.round(parseFloat(document.getElementById('tp-vp-kt')?.value) || 1))
+    const tpVon = parseFloat(document.getElementById('tp-vp-tp-von')?.value), tpBis = parseFloat(document.getElementById('tp-vp-tp-bis')?.value)
+    const gewaehlt = new Set([...document.querySelectorAll('[data-vp-acc]:checked')].map(i => i.dataset.vpAcc))
+    if(!gewaehlt.size) return say('Kein Konto ausgewählt.', 'err')
+    // Instrument wie im Plan-Popup setzen — tpCalcMultiplier rechnet mit dem Punktwert dieses Schalters
+    _tpNqMode = _vpInstr
+    try{ localStorage.setItem(TP_NQ_MODE_LS, _vpInstr) }catch(_){}
+    try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
+    try{ localStorage.setItem(TP_VP_LS, JSON.stringify({ instr: _vpInstr, kt, von: tpVon, bis: tpBis })) }catch(_){}
+    const heute = new Date().toLocaleDateString('en-CA')
+    const symbol = (_vpInstr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
+    const rows = [], fehler = []
+    for(const k of tpVorplanKandidaten()){
+      if(k.belegt || !gewaehlt.has(String(k.acc.id))) continue
+      const gk = calcReingesteckdEur(k.acc, { netPayouts: true })
+      const z = tpVorplanZeile(k.acc, gk, sPreset.currency, fx, tpVon, tpBis)
+      if(z.fehler){ fehler.push(`${k.acc.name}: ${z.fehler}`); continue }
+      const mult = tpCalcMultiplier(k.acc.firm, slave.firm, z.masterRisk, kt, z.slaveRisk)
+      const planObj = { masterAccountId: k.acc.id, slaveAccountId: slave.id, masterName: k.acc.name, masterFirm: k.acc.firm,
+        slaveName: slave.name, slaveFirm: slave.firm, masterRisk: z.masterRisk, masterContracts: kt, slaveRisk: z.slaveRisk,
+        multiplier: mult, masterTp: z.tp, masterSl: null, richtung: _vpDir || null, priority: 'medium', plannedFor: heute, notes: null, status: 'planned' }
+      rows.push({ ...planToRow(planObj), route: 'tvplus', master_symbol: symbol })
+    }
+    if(!rows.length) return say('Nichts anzulegen. ' + fehler.join(' · '), 'err')
+    const go = document.getElementById('tpVorplanGo'); if(go){ go.disabled = true; go.textContent = 'lege an…' }
+    try{
+      const { data, error } = await supabase.from('trade_plans').insert(rows).select('*')
+      if(error) throw error
+      for(const r of (data || [])) tradePlans.unshift(rowToPlan(r))
+      renderTradePlans()
+      tpVorplanClose()
+      if(typeof atToast === 'function') atToast(`⚡ ${(data || []).length} Futures-Plan/-Pläne angelegt (${symbol}, ${kt} Kt, TP ${tpVon}–${tpBis} $)${fehler.length ? ' · übersprungen: ' + fehler.length : ''}`, 'start')
+    }catch(e){ say('Fehler: ' + (e.message || e), 'err') }
+    finally{ if(go){ go.disabled = false; go.textContent = 'Pläne anlegen' } }
+  }
+
+  document.getElementById('tpVorplanenBtn')?.addEventListener('click', tpVorplanOpen)
+  document.getElementById('tpVorplanX')?.addEventListener('click', tpVorplanClose)
+  document.getElementById('tpVorplanCancel')?.addEventListener('click', tpVorplanClose)
+  document.getElementById('tpVorplanGo')?.addEventListener('click', tpVorplanAnlegen)
+  document.getElementById('tpVorplanModal')?.addEventListener('click', e => { if(e.target === document.getElementById('tpVorplanModal')) tpVorplanClose() })
+  document.querySelectorAll('[data-vp-instr]').forEach(b => b.addEventListener('click', () => {
+    _vpInstr = b.dataset.vpInstr; document.querySelectorAll('[data-vp-instr]').forEach(x => x.classList.toggle('active', x === b)); tpVorplanRender()
+  }))
+  document.querySelectorAll('[data-vp-dir]').forEach(b => b.addEventListener('click', () => {
+    _vpDir = b.dataset.vpDir; document.querySelectorAll('[data-vp-dir]').forEach(x => x.classList.toggle('active', x === b))
+  }))
+  ;['tp-vp-tp-von', 'tp-vp-tp-bis'].forEach(id => document.getElementById(id)?.addEventListener('input', tpVorplanRender))
+  /* ══ ENDE FUTURES VORPLANEN ══ */
 
   // ─────── Trade-Complete-Modal ───────
   /* ── "Heute schon getradet" pro Account (Reset automatisch um Mitternacht DE-Zeit) ──
