@@ -1,5 +1,6 @@
 import requests
 import re
+import bisect
 import urllib3
 import threading
 import calendar
@@ -41,7 +42,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-23.2"
+APP_BUILD = "2026-09-23.3"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -3581,6 +3582,108 @@ def _wt_push_trade(uid, plan, art):
         print(f"[push] ⚠️ Trade-Meldung: {type(e).__name__}: {e}", flush=True)
 
 
+
+
+# ── Statuswechsel-Wache fuer die Handy-Meldungen (23.09.2026) ────────────────
+# BEFUND aus der ersten Nacht (Finn: "Ich habe dann von Prophos nie wieder meine
+# Nachricht bekommen. Das heisst, der Trade ist zu Ende."): die Test-Push kam an,
+# danach nichts mehr — obwohl in derselben Nacht Traedes liefen und endeten.
+# In push_geraete stand zuletzt_ok_at unveraendert auf dem Zeitpunkt des Tests
+# und letzter_fehler war LEER: es wurde also gar nicht erst gesendet, es ist
+# nichts fehlgeschlagen.
+#
+# URSACHE: die erste Fassung haengte die Meldung an die ERKENNUNG des Waechters
+# (in wt_finish_plan und an den beiden Auto-Start-Stellen). Genau die greift bei
+# Finns Trades aber selten: Orbit und Echo legen den Status im BROWSER um und
+# schreiben direkt nach Supabase (mpFinishPlan, atMoveToReview und die
+# Start-Stellen in prophos.html) — am Waechter komplett vorbei. Der Plan, der in
+# der Nacht endete, war ein tvplus-Plan, beendet vom PC-Tab; der Waechter hat den
+# Wechsel nie gemacht und deshalb auch nichts gemeldet.
+#
+# KONSEQUENZ: nicht an den Ausloeser haengen, sondern an den ZUSTAND. Diese Wache
+# liest einmal je Zyklus die Plaene in den drei lebenden Status und meldet jeden
+# Wechsel — egal, WER ihn ausgeloest hat (Waechter, PC-Tab, Handy, von Hand).
+# Das ist eine Stelle statt acht, sie deckt auch die mt5-Route ab (die der
+# Waechter bei der Erkennung bewusst auslaesst) und sie ueberlebt, dass am
+# Frontend staendig weitergebaut wird.
+#
+# Die drei alten Direkt-Haken sind dafuer raus — sonst haette derselbe Wechsel
+# zweimal gesendet. Sichtbar waere das wegen des gleichen tag zwar nur eine
+# Meldung, aber zwei Wege fuer dieselbe Sache sind beim Suchen das Schlimmste.
+# Preis: bis zu einem Zyklus (30 s) Verzoegerung. Fuer einen Trade, der Minuten
+# bis Stunden laeuft, ist das ohne Belang.
+_push_status_gesehen = {}      # plan_id -> zuletzt gesehener Status
+_push_wache_erste_runde = True
+
+
+def _push_frisch(p, feld, sekunden=240):
+    """Liegt der Zeitstempel in `feld` weniger als `sekunden` zurueck?"""
+    roh = p.get(feld)
+    if not roh:
+        return False
+    try:
+        t = datetime.fromisoformat(str(roh).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - t).total_seconds() < sekunden
+    except Exception:
+        return False
+
+
+def push_trade_wache():
+    """Ein Push je Statuswechsel. Wirft nie."""
+    global _push_wache_erste_runde
+    if not push_bereit():
+        return
+    try:
+        rows = sb_select("trade_plans", {
+            "select": "id,user_id,status,master_name,slave_name,master_symbol,"
+                      "master_pl,slave_pl,started_at,ended_at",
+            "status": "in.(planned,open,review)",
+        })
+    except Exception as e:
+        print(f"[push] ⚠️ Wache lesen: {type(e).__name__}: {e}", flush=True)
+        return
+
+    erste = _push_wache_erste_runde
+    gesehen = set()
+    for p in rows:
+        pid = str(p.get("id") or "")
+        if not pid:
+            continue
+        gesehen.add(pid)
+        neu = p.get("status")
+        alt = _push_status_gesehen.get(pid)
+        _push_status_gesehen[pid] = neu
+
+        if neu == "open" and (alt == "planned" or alt is None):
+            art, stempel = "start", "started_at"
+        elif neu == "review" and (alt == "open" or alt is None):
+            art, stempel = "ende", "ended_at"
+        else:
+            continue
+
+        # alt is None heisst: diesen Plan sehen wir zum ersten Mal. Das ist nach
+        # JEDEM Neustart fuer jeden laufenden Plan der Fall — ohne Bremse haette
+        # Finn nach jedem Deploy ein Dutzend Meldungen auf einmal. Deshalb in
+        # dem Fall nur melden, wenn der Wechsel nachweislich gerade erst
+        # passiert ist (Zeitstempel juenger als vier Minuten). Damit geht ein
+        # Trade-Ende mitten im Deploy trotzdem nicht verloren.
+        if alt is None and not _push_frisch(p, stempel):
+            continue
+        # Die allererste Runde nach dem Start baut nur die Karte auf.
+        if erste and not _push_frisch(p, stempel):
+            continue
+
+        uid = p.get("user_id")
+        if uid:
+            _wt_push_trade(uid, p, art)
+
+    for pid in [k for k in _push_status_gesehen if k not in gesehen]:
+        _push_status_gesehen.pop(pid, None)
+    _push_wache_erste_runde = False
+
+
 def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch=None, tickets=None,
                    email=None, accounts=None, pnl_ready=None):
     """open → review + sofortiger P&L-Fetch. True = Plan ist versorgt.
@@ -3599,7 +3702,6 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
         # Guard hat gegriffen — jemand hat den Plan manuell abgeschlossen. Erledigt.
         return True
     print(f"[watcher] 🔴 {label}: Trade beendet → Überprüfen ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
-    _wt_push_trade(uid, plan, "ende")
     if pnl_ready:
         try:
             wt_write_pnl(uid, plan, pnl_ready)
@@ -3857,7 +3959,6 @@ def wt_check_user(uid, creds, memo):
                 wt_save_tickets(uid, plan["id"], master_tickets)
                 if rows:
                     print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
-                    _wt_push_trade(uid, plan, "start")
                 continue
 
             # ── Master NICHT verknüpft: alter Slave-Zählwerk-Fallback ──
@@ -3883,7 +3984,6 @@ def wt_check_user(uid, creds, memo):
             wt_save_tickets(uid, plan["id"], trade_tickets)
             if rows:
                 print(f"[watcher] ▶ {label}: Trade gestartet ({plan.get('master_name') or '—'} → {plan.get('slave_name') or '—'})", flush=True)
-                _wt_push_trade(uid, plan, "start")
             continue
 
         # status == 'open'
@@ -4022,6 +4122,14 @@ def watcher_loop():
         started = time.time()
         try:
             watcher_cycle()
+            # Handy-Meldungen: eigener Schritt NACH dem Zyklus und in eigenem
+            # try, damit eine fehlgeschlagene Meldung nie den Zyklus als
+            # gescheitert stempelt (last_run bliebe stehen -> fresh kippt ->
+            # alle Browser schalten ihre Erkennung ab).
+            try:
+                push_trade_wache()
+            except Exception as e:
+                print(f"[push] ⚠️ Wache: {type(e).__name__}: {e}", flush=True)
             # WICHTIG (Review-Finding): last_run NUR nach erfolgreichem Zyklus stempeln.
             # Stünde es hinter dem except, bliebe fresh=true, obwohl jeder Zyklus wirft
             # (z.B. rotierter Service-Key) — alle Browser hätten ihre Erkennung
@@ -5714,8 +5822,13 @@ def kompass_parse(item):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", datum):
         datum = None
     zeit = str(item.get("time") or "").strip()[:5] or None
+    # Posting-Zeit: Pascals id ist ein Epoch-Zeitstempel (idea-1790114840 = 22.09.2026 22:07:20 UTC) —
+    # genauer als date/time, die er von Hand setzt (23.09. 01:07 stand mit date 22.09. drin).
+    mt = re.match(r"^idea-(\d{10})$", str(item["id"]))
+    t0 = datetime.fromtimestamp(int(mt.group(1)), tz=timezone.utc).isoformat() if mt else None
     return {
         "id": str(item["id"])[:80],
+        "t0": t0,
         "session": kompass_session(item.get("context")),
         "kontext": (item.get("context") or None),
         "datum": datum,
@@ -5758,6 +5871,101 @@ def kompass_collect():
         return len(rows), len(neu)
 
 
+# ── Auswertung (23.09.2026, Finn: „pack die Daten mal in Prophos, is der Bot von meinem Bruder, will
+#    sehen wie gut der is"): je Forecast die Kursbewegung 1/2/4/8 h nach der Posting-Zeit, aus den
+#    NQ-Futures-Kerzen (Yahoo, 5 min, 60 Tage — derselbe Weg wie /markt/futures). Ergebnis in
+#    kompass_forecasts.auswertung; „fertig" sobald alle Horizonte da sind. Kerzen höchstens alle 4 min neu.
+KOMPASS_HORIZONTE = (1, 2, 4, 8)
+_kompass_kerzen = {"at": 0, "T": [], "K": []}   # T = Epoch je Kerze, K = (open, high, low, close)
+
+
+def kompass_kerzen():
+    if _kompass_kerzen["T"] and time.time() - _kompass_kerzen["at"] < 240:
+        return
+    r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/NQ%3DF",
+                     params={"range": "60d", "interval": "5m"},
+                     headers={"User-Agent": "Mozilla/5.0 (Prophos)"}, timeout=20)
+    r.raise_for_status()
+    res = ((r.json() or {}).get("chart") or {}).get("result") or []
+    if not res:
+        raise ValueError("Yahoo ohne Kerzen für NQ=F")
+    ts = res[0].get("timestamp") or []
+    q = ((res[0].get("indicators") or {}).get("quote") or [{}])[0]
+    T, K = [], []
+    for t, o, h, l, c in zip(ts, q.get("open") or [], q.get("high") or [], q.get("low") or [], q.get("close") or []):
+        if c is None:
+            continue
+        T.append(int(t)); K.append((o if o is not None else c, h if h is not None else c, l if l is not None else c, c))
+    if len(T) < 100:
+        raise ValueError(f"Yahoo liefert nur {len(T)} Kerzen")
+    _kompass_kerzen.update({"at": time.time(), "T": T, "K": K})
+
+
+def _kompass_px(t):
+    """Schlusskurs der letzten Kerze bis t (None bei Lücke > 1 h, z. B. Wochenende)."""
+    T = _kompass_kerzen["T"]
+    i = bisect.bisect_right(T, t) - 1
+    if i < 0 or t - T[i] > 3600:
+        return None, None
+    return _kompass_kerzen["K"][i][3], i
+
+
+def kompass_auswerten():
+    """Alle Forecasts mit Richtung und Posting-Zeit, die noch nicht fertig sind, nachrechnen."""
+    rows = _sb_all("kompass_forecasts", {"select": "id,bias,t0,auswertung", "bias": "not.is.null", "t0": "not.is.null"})
+    offen = [z for z in rows if not ((z.get("auswertung") or {}).get("fertig"))]
+    if not offen:
+        return 0
+    kompass_kerzen()
+    T, K = _kompass_kerzen["T"], _kompass_kerzen["K"]
+    jetzt = time.time()
+    n = 0
+    for z in offen:
+        try:
+            t0 = int(datetime.fromisoformat(str(z["t0"]).replace("Z", "+00:00")).timestamp())
+        except Exception:
+            continue
+        aus = dict(z.get("auswertung") or {})
+        long = z["bias"] == "LONG"
+        p0, i0 = _kompass_px(t0)
+        if p0 is None:
+            # Vor dem Kerzenfenster (Yahoo: 60 Tage für 5 min) oder in einer Handelspause — nicht rechenbar
+            if t0 < T[0]:
+                aus.update({"fertig": True, "grund": "keine Kerzen (älter als 60 Tage)", "berechnet_at": datetime.now(timezone.utc).isoformat()})
+                sb_update("kompass_forecasts", {"id": f"eq.{z['id']}"}, {"auswertung": aus})
+                n += 1
+            continue
+        aus["p0"] = p0
+        geaendert = False
+        for h in KOMPASS_HORIZONTE:
+            key = f"h{h}"
+            if key in aus:
+                continue
+            t1 = t0 + h * 3600
+            if t1 > T[-1] or t1 > jetzt:
+                continue   # Stunde noch nicht vorbei bzw. Yahoo noch nicht so weit (Verzögerung)
+            p1, i1 = _kompass_px(t1)
+            if p1 is None:
+                continue
+            hi = max(k[1] for k in K[i0:i1 + 1]); lo = min(k[2] for k in K[i0:i1 + 1])
+            dp = (p1 - p0) / p0 * 100
+            aus[key] = {
+                "p": p1, "dp": round(dp, 4), "hit": (dp > 0) if long else (dp < 0),
+                "mfe": round(((hi - p0) if long else (p0 - lo)) / p0 * 100, 4),
+                "mae": round(((p0 - lo) if long else (hi - p0)) / p0 * 100, 4),
+            }
+            geaendert = True
+        if all(f"h{h}" in aus for h in KOMPASS_HORIZONTE):
+            aus["fertig"] = True; geaendert = True
+        if geaendert:
+            aus["berechnet_at"] = datetime.now(timezone.utc).isoformat()
+            sb_update("kompass_forecasts", {"id": f"eq.{z['id']}"}, {"auswertung": aus})
+            n += 1
+    if n:
+        print(f"[kompass] Auswertung: {n} Forecasts nachgerechnet", flush=True)
+    return n
+
+
 def kompass_loop():
     print(f"[kompass] 🧭 Sammler läuft (alle {KOMPASS_INTERVAL}s, {KOMPASS_URL})", flush=True)
     while True:
@@ -5768,6 +5976,12 @@ def kompass_loop():
         except Exception as e:
             _kompass_info["last_error"] = f"{type(e).__name__}: {e}"
             print(f"[kompass] ⚠️ {e}", flush=True)
+        try:
+            _kompass_info["ausgewertet"] = kompass_auswerten()
+            _kompass_info["auswertung_error"] = ""
+        except Exception as e:
+            _kompass_info["auswertung_error"] = f"{type(e).__name__}: {e}"
+            print(f"[kompass] ⚠️ Auswertung: {e}", flush=True)
         _kompass_info["last_run"] = time.time()
         _kompass_info["runs"] += 1
         time.sleep(max(15.0, KOMPASS_INTERVAL - (time.time() - started)))
