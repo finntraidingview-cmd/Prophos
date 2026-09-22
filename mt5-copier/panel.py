@@ -813,6 +813,80 @@ def _terminal_zu_worker(fname, ausloeser):
                   f"{type(e).__name__}: {e}", flush=True)
 
 
+# ── Leerlauf-Waechter: Terminal ohne Trade geht nach 15 min von selbst zu ─────
+# (22.09.2026, Finn: "so oft sehe ich unter Accounts Terminals, die seit Stunden
+# oder Tagen offen sind, wo kein Trade laeuft — wenn kein Trade auf dem Terminal
+# laeuft, soll es einfach automatisch geschlossen werden"). Der Trade-Ende-
+# Worker oben haengt an einem Plan-Ereignis und wird von jedem Panel-Neustart
+# gekappt; Trades ohne Panel-Plan sieht er gar nicht. Dieser Waechter braucht
+# kein Ereignis: er prueft alle 60 s jede Echo-Instanz mit terminal_schliessbar
+# (frischer, warnungsfreier Status, keine Position, kein Hedge, kein Plan
+# geplant/laufend) und schliesst, wenn das nachweislich seit LEERLAUF_MIN Minuten
+# ununterbrochen so ist — ein Terminal, das Finn gerade fuer den naechsten Trade
+# oeffnet, ist dann laengst per Plan 'geplant' und bleibt. Zufalls-Streuung auf
+# die Schwelle (Jitter-Doktrin), damit kein festes Muster entsteht.
+LEERLAUF_MIN = 15.0
+_LEERLAUF_SEIT = {}     # config_file -> Zeitpunkt, seit dem die Instanz beweisbar leer laeuft
+_LEERLAUF_SCHWELLE = {} # config_file -> gewuerfelte Schwelle in Sekunden
+
+
+def leerlauf_entscheidung(schliessbar, seit, jetzt, schwelle_s):
+    """Reine Entscheidung (testbar): (neues 'seit', jetzt schliessen?).
+    schliessbar False -> Zaehler zurueck (None). True -> Zaehler laeuft ab dem
+    ersten leeren Blick; schliessen, sobald jetzt - seit >= schwelle_s."""
+    if not schliessbar:
+        return None, False
+    if seit is None:
+        return jetzt, False
+    return seit, (jetzt - seit) >= schwelle_s
+
+
+def _leerlauf_waechter():
+    while True:
+        try:
+            time.sleep(60)
+            plans_akt = {}
+            with PLANS_LOCK:
+                for p in _load_plans():
+                    if p["status"] in ("geplant", "laufend"):
+                        plans_akt[p["file"]] = p["status"]
+            for i in instances():
+                fname = i["config_file"]
+                cfg = read_json(os.path.join(HERE, fname), {}) or {}
+                if not str(cfg.get("master_terminal_path") or "").strip():
+                    continue  # Orbit/TV-Instanzen: kein Master-Terminal
+                install_dir = os.path.dirname(os.path.abspath(str(cfg["master_terminal_path"])))
+                if not provision.terminal_pids(install_dir):
+                    _LEERLAUF_SEIT.pop(fname, None)
+                    continue
+                st = read_json(os.path.join(HERE, i["status_file"]), {}) or {}
+                age = None
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+                except (ValueError, TypeError):
+                    pass
+                ok, grund = terminal_schliessbar(cfg, st, age, plans_akt.get(fname))
+                schwelle = _LEERLAUF_SCHWELLE.setdefault(fname, LEERLAUF_MIN * 60 + random.uniform(0, 240))
+                seit, zu = leerlauf_entscheidung(ok, _LEERLAUF_SEIT.get(fname), time.time(), schwelle)
+                if seit is None:
+                    _LEERLAUF_SEIT.pop(fname, None)
+                else:
+                    _LEERLAUF_SEIT[fname] = seit
+                if not zu:
+                    continue
+                if fname in _TERMINAL_ZU_AKTIV:
+                    continue  # der Trade-Ende-Worker ist schon dran
+                anzeige = cfg.get("display_name") or i["name"]
+                for pid in provision.terminal_pids(install_dir):
+                    provision._taskkill(pid, grace_s=5)
+                print(f"[panel] {fname}: Master-Terminal geschlossen (Leerlauf-Waechter: {anzeige}, "
+                      f"seit {round((time.time() - seit) / 60)} min kein Trade — {grund}).", flush=True)
+                _LEERLAUF_SEIT.pop(fname, None)
+                _LEERLAUF_SCHWELLE.pop(fname, None)
+        except Exception as e:
+            print(f"[panel] Leerlauf-Waechter: {type(e).__name__}: {e}", flush=True)
+
+
 # ── Provisionierung: "Account hinzufuegen" ─────────────────────────────────────
 # Ein Job zur Zeit. Das Passwort liegt NUR im Speicher des Worker-Threads und in
 # der transienten Startdatei, die provision.py garantiert loescht — im Job-Status
@@ -2986,6 +3060,8 @@ def main():
         terminal_zu_nachholen()
     except Exception as e:
         print(f"[panel] Terminal-Zu nachholen: {type(e).__name__}: {e}", flush=True)
+    # Leerlauf-Waechter (22.09.2026): Terminal ohne Trade geht nach ~15 min von selbst zu
+    threading.Thread(target=_leerlauf_waechter, daemon=True).start()
     # UAC-Haken an allen terminal64.exe wegraeumen (09.09.2026, Finns Fund:
     # Benutzerkontensteuerung beim Terminal-Start ueber Echo — Details im
     # Docstring von provision.uac_haken_entfernen). getattr-Riegel, weil die

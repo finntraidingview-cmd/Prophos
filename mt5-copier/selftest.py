@@ -1511,6 +1511,13 @@ def main():
     import panel
     _cfgT = {"master_terminal_path": "C:\\MT5-X\\terminal64.exe"}
     _stOK = {"running": True, "master_positions": [], "hedges": {"1": []}}
+    # Leerlauf-Waechter (22.09.2026): schliessen erst nach ununterbrochen leerem Lauf ab Schwelle
+    chk("TERMINAL-LEERLAUF: Zaehler startet beim ersten leeren Blick, schliesst ab Schwelle, jeder nicht-leere Blick setzt zurueck",
+        panel.leerlauf_entscheidung(True, None, 1000.0, 900) == (1000.0, False)
+        and panel.leerlauf_entscheidung(True, 1000.0, 1500.0, 900) == (1000.0, False)
+        and panel.leerlauf_entscheidung(True, 1000.0, 1900.0, 900) == (1000.0, True)
+        and panel.leerlauf_entscheidung(False, 1000.0, 1900.0, 900) == (None, False)
+        and panel.leerlauf_entscheidung(False, None, 1900.0, 900) == (None, False))
     chk("PANEL: Terminal-Zu nur bei frischem Status ohne Position/Hedge/Plan",
         panel.terminal_schliessbar(_cfgT, _stOK, 5, None)[0] is True
         and panel.terminal_schliessbar(_cfgT, _stOK, 99, None)[0] is False
