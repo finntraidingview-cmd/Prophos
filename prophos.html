@@ -5075,6 +5075,17 @@
               <label>Symbol (Master)</label>
               <input type="text" class="input mono" id="tp-order-symbol" placeholder="z.B. NDX100">
             </div>
+            <!-- Geplante Startzeit (22.09.2026, Finn: „ich plane einen Trade und gebe ihm eine Uhrzeit,
+                 wann der Bot die Order losschicken soll"). Leer = manuell über „Starten". Der PC-Tab
+                 feuert zur Zeit (+ 0–60 s Zufall) den normalen Start-Weg. -->
+            <div class="field" style="grid-column:1 / -1">
+              <label>Start um <span style="color:var(--sub);font-weight:400">(optional — der PC-Tab startet dann von selbst)</span></label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="datetime-local" class="input mono" id="tp-order-start-um" style="flex:0 0 240px">
+                <button type="button" class="btn btn-ghost" id="tp-order-start-um-x" style="padding:6px 10px;font-size:12px">✕</button>
+                <span id="tp-order-start-um-hint" style="font-size:12px;color:var(--sub)"></span>
+              </div>
+            </div>
           </div>
           <!-- Remote-Signal-Status (28.08.2026): läuft Prophos NICHT auf dem PC
                (Handy/Mac), schreibt „Starten" das Signal nach order_signale —
@@ -21967,6 +21978,8 @@
       masterSl:        row.master_sl        != null ? Number(row.master_sl)        : null,
       // Orbit (22.09.2026): Zeitpunkt des Kauf-Klicks — Karte zeigt „Warte auf Duplikum" (sql/2026-09-22_orbit_gesendet_at.sql)
       orbitGesendetAt: row.orbit_gesendet_at || null,
+      startUm: row.start_um || null,                          // geplante Startzeit (sql/2026-09-22_trade_plans_start_um.sql)
+      startUmGestartetAt: row.start_um_gestartet_at || null,
       masterRealized:  row.master_realized  != null ? Number(row.master_realized)  : null,
       slaveRealized:   row.slave_realized   != null ? Number(row.slave_realized)   : null,
       priority:    row.priority || 'medium',
@@ -23007,7 +23020,13 @@
       const orbitBtn = (typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p))
         ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>`
         : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
-      const jetztBtn = (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
+      // Geplante Startzeit (22.09.2026): Chip statt Knopf, Klick nimmt die Zeit wieder raus.
+      const startUmBtn = (p.startUm && !p.startUmGestartetAt)
+        ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
+        : (p.startUm && p.startUmGestartetAt && (Date.now() - new Date(p.startUmGestartetAt).getTime()) < 15 * 60 * 1000 && !orbitWartetAufDup(p))
+          ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>`
+          : ''
+      const jetztBtn = startUmBtn ? startUmBtn : (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -23400,6 +23419,10 @@
     })
     // Orbit-„Starten" (22.09.2026): fährt die Puls-Kette in TradingView. Doppelklick-Schutz
     // sitzt in tpOrbitStarten (_tpOrbitLaeuft) — es gibt genau eine Maus.
+    // Geplante Startzeit auf der Karte entfernen (22.09.2026) — eigener Handler.
+    document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
+      btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
+    })
     document.querySelectorAll('[data-plan-orbit-start]').forEach(btn => {
       btn.addEventListener('click', () => {
         if(typeof tpOrbitStarten === 'function') tpOrbitStarten(btn.dataset.planOrbitStart)
@@ -25088,6 +25111,13 @@
     const _slIn = document.getElementById('tp-order-sl')
     if(_slIn) _slIn.placeholder = _tpOrderOrbit ? 'leer = kein SL' : 'z.B. 100'
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
+    // Start um: gespeicherte Zeit ins Feld (lokale Zeit des Geräts, gespeichert wird UTC)
+    const _suEl = document.getElementById('tp-order-start-um')
+    if(_suEl){
+      _suEl.value = plan.startUm ? tpStartUmLokal(plan.startUm) : ''
+      const _h = document.getElementById('tp-order-start-um-hint')
+      if(_h) _h.textContent = plan.startUmGestartetAt ? 'wurde bereits ausgelöst' : ''
+    }
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
     tpOrderSltpApply()
@@ -25283,6 +25313,12 @@
     // Orbit: leerer SL wird als NULL gespeichert — sonst würde ein alter SL vom letzten
     // Trade stillschweigend mitgehen (Puls liest master_sl; NULL = Schalter AUS).
     if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
+    // Geplante Startzeit (22.09.2026): leer = NULL; eine neue Zeit setzt den Claim zurück.
+    const _suVal = document.getElementById('tp-order-start-um')?.value || ''
+    const _suIso = _suVal ? new Date(_suVal).toISOString() : null
+    if(_suVal && !(new Date(_suVal).getTime() > Date.now() - 60000)) return err('„Start um" liegt in der Vergangenheit.')
+    upd.start_um = _suIso
+    if(_suIso !== (plan.startUm ? new Date(plan.startUm).toISOString() : null)) upd.start_um_gestartet_at = null
     try{
       const { data, error } = await supabase.from('trade_plans').update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
@@ -25331,7 +25367,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.386'
+  const OS_TAB_BUILD = '2026-09-22.387'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26878,6 +26914,73 @@
       break   // ein Trade je Tick — es gibt genau ein Terminal und eine Maus
     }
   }
+  /* ══ GEPLANTE STARTZEIT (22.09.2026, Finn: „ich plane einen Trade und gebe ihm eine Uhrzeit,
+   * wann der Bot die Order losschicken soll"). Popup 2 speichert start_um am Plan; die Karte
+   * zeigt „⏰ hh:mm ✕". Der PC-TAB (MT5_LOCAL) prüft alle 15 s: Plan geplant, start_um erreicht,
+   * noch nicht ausgelöst → Claim per Update (start_um_gestartet_at NULL → jetzt; nur der Tab,
+   * dessen Update eine Zeile trifft, feuert — zwei PC-Tabs feuern nie doppelt) → nach 0–60 s
+   * Zufall (kein festes Muster) EXAKT der Weg des „Starten"-Klicks: Orbit tpOrbitStarten
+   * (Duplikum-Check → Puls), Echo tpJetztStarten (Check → Puls). Mehr als 10 min verspätet
+   * (Tab war zu) wird NICHT nachgefeuert — Chip zeigt „verpasst", Finn startet von Hand. ══ */
+  function tpStartUmLokal(iso){
+    const d = new Date(iso); if(!isFinite(d)) return ''
+    const z = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`
+  }
+  function tpStartUmText(iso){
+    const d = new Date(iso); if(!isFinite(d)) return '?'
+    const heute = new Date(); const gleicherTag = d.toDateString() === heute.toDateString()
+    const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if(d.getTime() < Date.now() - 10 * 60 * 1000 && !gleicherTag) return `verpasst (${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} ${uhr})`
+    if(d.getTime() < Date.now() - 10 * 60 * 1000) return `verpasst (${uhr})`
+    return gleicherTag ? uhr : `${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} ${uhr}`
+  }
+  async function tpStartUmEntfernen(planId){
+    try{
+      const { data, error } = await supabase.from('trade_plans').update({ start_um: null, start_um_gestartet_at: null })
+        .eq('id', planId).eq('status', 'planned').select('*')
+      if(error) throw error
+      if(data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]); renderTradePlans() }
+    }catch(e){ if(typeof atToast === 'function') atToast('Startzeit nicht entfernt: ' + (e.message || e), 'end') }
+  }
+  document.getElementById('tp-order-start-um-x')?.addEventListener('click', () => {
+    const el = document.getElementById('tp-order-start-um'); if(el) el.value = ''
+  })
+  let _suLaeuft = false
+  async function tpStartUmTick(){
+    if(!MT5_LOCAL || _suLaeuft) return
+    let uid; try{ uid = currentUserId }catch(_){ uid = null }
+    if(!uid) return
+    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+    const now = Date.now()
+    const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
+      && new Date(p.startUm).getTime() <= now && (p.route === 'tvplus' || p.route === 'mt5'))
+    if(!faellig.length) return
+    const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
+    _suLaeuft = true
+    try{
+      const verspaetet = now - new Date(plan.startUm).getTime()
+      // Claim: nur der Tab, dessen Update eine Zeile trifft, darf feuern
+      const { data } = await supabase.from('trade_plans').update({ start_um_gestartet_at: new Date().toISOString() })
+        .eq('id', plan.id).eq('status', 'planned').is('start_um_gestartet_at', null).select('*')
+      if(!data || !data.length) return
+      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+      renderTradePlans()
+      if(verspaetet > 10 * 60 * 1000){
+        if(typeof atToast === 'function') atToast(`⏰ Startzeit von „${plan.masterName || '—'}" um ${Math.round(verspaetet / 60000)} min verpasst — NICHT gestartet. Von Hand starten.`, 'end')
+        return
+      }
+      const jitter = Math.floor(Math.random() * 60000)
+      if(typeof atToast === 'function') atToast(`⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (Zufallsversatz).`, 'start')
+      await new Promise(r => setTimeout(r, jitter))
+      if(plan.route === 'tvplus' && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id)
+      else if(plan.route === 'mt5' && typeof tpJetztStarten === 'function') await tpJetztStarten(plan.id)
+    }catch(e){ console.warn('[start-um]', e) }
+    finally{ _suLaeuft = false }
+  }
+  setInterval(tpStartUmTick, 15000)
+  /* ══ ENDE GEPLANTE STARTZEIT ══ */
+
   setInterval(acTick, 20000)
   setTimeout(acTick, 8000)
 
