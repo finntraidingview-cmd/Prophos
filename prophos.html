@@ -1217,6 +1217,30 @@
   #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
   #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
   #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
+  /* WD-Anbau (23.09.2026): Scharf-Leiste oben + Zeitstrahl mit einer Zeile je ID — eigene Knoten, laufen
+     neben dem WD-Block der parallelen Session, fassen dessen Markup nicht an. */
+  #ws-leiste{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin:0 0 12px;border-radius:12px;border:1px solid var(--line);background:rgba(220,60,60,.05)}
+  #ws-leiste.an{background:rgba(42,157,92,.07);border-color:#2a9d5c}
+  #ws-leiste .ws-knopf{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;border:1px solid var(--danger);color:var(--danger);background:#fff;font-weight:700;font-size:14px;cursor:pointer;letter-spacing:.01em}
+  #ws-leiste.an .ws-knopf{border-color:#2a9d5c;color:#fff;background:#2a9d5c}
+  #ws-leiste .ws-text{font-size:12.5px;color:var(--sub);line-height:1.45;flex:1;min-width:240px}
+  #ws-leiste .ws-text b{color:var(--ink)}
+  #wz-panel .wz-kopf,#wz-panel .wz-zeile{display:flex;align-items:center}
+  #wz-panel .wz-name{width:170px;flex:0 0 170px;padding-right:10px;font-size:12.5px;line-height:1.25;overflow:hidden}
+  #wz-panel .wz-name b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #wz-panel .wz-name span{display:block;font-size:11px;color:var(--sub);white-space:nowrap}
+  #wz-panel .wz-track{position:relative;flex:1;height:34px;border-bottom:1px dashed var(--line)}
+  #wz-panel .wz-achse{height:20px;border-bottom:1px solid var(--line)}
+  #wz-panel .wz-tick{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  #wz-panel .wz-tick.halb{opacity:.45}
+  #wz-panel .wz-tick span{position:absolute;top:1px;left:4px;font-size:10.5px;color:var(--sub);white-space:nowrap}
+  #wz-panel .wz-bar{position:absolute;top:8px;height:18px;border-radius:5px;background:var(--violet)}
+  #wz-panel .wz-bar.laeuft{background:#2a9d5c}
+  #wz-panel .wz-bar.fertig{background:#2a9d5c;opacity:.55}
+  #wz-panel .wz-bar.verpasst{background:var(--danger)}
+  #wz-panel .wz-lbl{position:absolute;top:8px;line-height:18px;font-size:11.5px;white-space:nowrap;color:var(--ink);padding:0 6px}
+  #wz-panel .wz-jetzt{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);pointer-events:none}
+  #wz-panel .wz-jetzt span{position:absolute;top:-1px;left:4px;font-size:10.5px;color:var(--danger);white-space:nowrap}
   #tradePlanModal .modal{zoom:.9;max-height:96vh}   /* .84 → .9 (22.09.2026, Finn: „ein bisschen größer reinzoomen") */
   #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
   #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
@@ -5150,11 +5174,8 @@
               <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
             </div>
             <div class="vp-zeile"><b>Funded · Slave (€)</b>
-              <span>über Kontogröße &lt;2k</span> <input type="number" class="input mono vp-in" data-vp-st="0" min="0" step="5" value="50">
-              <span style="margin-left:6px">2–4k</span> <input type="number" class="input mono vp-in" data-vp-st="1" min="0" step="5" value="60">
-              <span style="margin-left:6px">4–6k</span> <input type="number" class="input mono vp-in" data-vp-st="2" min="0" step="5" value="70">
-              <span style="margin-left:6px">6–8k</span> <input type="number" class="input mono vp-in" data-vp-st="3" min="0" step="5" value="80">
-              <span style="margin-left:6px">&gt;8k</span> <input type="number" class="input mono vp-in" data-vp-st="4" min="0" step="5" value="90">
+              <span class="mono" id="tp-vp-staffel-info" style="color:var(--sub)"></span>
+              <span style="color:var(--sub)">· ändern: Admin → Winning Days → Hedge-Tabelle</span>
             </div>
           </div>
           <div id="tp-vp-liste" style="margin-top:12px;font-size:12.5px"></div>
@@ -25528,7 +25549,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.403'
+  const OS_TAB_BUILD = '2026-09-22.404'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27395,14 +27416,26 @@
     tpStartUmHinweis()
   })
   let _suLaeuft = false
+  // 🌾 Farmer-Schalter (23.09.2026, Finn: „einen Regler oben, wo ich es ausstellen kann — heute nur planen und gucken"):
+  // Pläne des Winning-Day-Farmers (notes 'Winning-Day-Farmer') feuern zur Startzeit NUR, wenn wd_farmer_regeln.scharf
+  // gesetzt ist. Der Schalter liegt in der DB, damit alle PC-Tabs denselben Stand haben; hier alle 60 s nachgelesen.
+  let _suScharf = null
+  async function tpFarmerScharf(){
+    if(_suScharf && Date.now() - _suScharf.at < 60000) return _suScharf.an
+    try{ const { data } = await supabase.from('wd_farmer_regeln').select('scharf').eq('id', 1).maybeSingle(); _suScharf = { at: Date.now(), an: !!(data && data.scharf) } }
+    catch(_){ _suScharf = { at: Date.now(), an: false } }
+    return _suScharf.an
+  }
+  const tpIstFarmerPlan = p => /Winning-Day-Farmer/.test(String((p && p.notes) || ''))
   async function tpStartUmTick(){
     if(!MT5_LOCAL || _suLaeuft) return
     let uid; try{ uid = currentUserId }catch(_){ uid = null }
     if(!uid) return
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
     const now = Date.now()
+    const scharf = await tpFarmerScharf()
     const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
-      && new Date(p.startUm).getTime() <= now && (p.route === 'tvplus' || p.route === 'mt5'))
+      && new Date(p.startUm).getTime() <= now && (p.route === 'tvplus' || p.route === 'mt5') && (scharf || !tpIstFarmerPlan(p)))
     if(!faellig.length) return
     const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
     _suLaeuft = true
@@ -28890,10 +28923,26 @@
   // Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 … 23.09.2026: vorher stand hier ein
   // „Puffer" (Live − Start + Drawdown) — Finn: „ich verstehe nicht, was mit dem Puffer gemeint ist,
   // ich will einfach die Balance stehen haben". Jetzt zählt nur, was über der Kontogröße liegt.
-  function tpVorplanStaffel(plus, staffel){
+  // Staffel als LISTE (23.09.2026, Finn: „von Balance bis Balance, rechts der Betrag, Zeile per Plus, dann speichern"):
+  // [{von, bis, eur}] nach „von" aufsteigend; „bis" ist Anzeige (null = offen). Das alte Format (fünf Zahlen für
+  // <2k/2–4k/4–6k/6–8k/>8k) wird beim Lesen umgerechnet, damit kein Tab mit altem Stand NaN rechnet.
+  function tpStaffelListe(staffel){
+    if(Array.isArray(staffel) && staffel.length && staffel[0] && typeof staffel[0] === 'object'){
+      return staffel.map(z => ({ von: Number(z.von) || 0, bis: (z.bis == null || z.bis === '') ? null : Number(z.bis), eur: Number(z.eur) || 0 })).sort((a, b) => a.von - b.von)
+    }
     const s = (Array.isArray(staffel) && staffel.length === 5) ? staffel : TP_VP_VORGABE.staffel
-    const p = Number(plus) || 0
-    return p > 8000 ? s[4] : p > 6000 ? s[3] : p > 4000 ? s[2] : p > 2000 ? s[1] : s[0]
+    return [[0, 2000], [2000, 4000], [4000, 6000], [6000, 8000], [8000, null]].map(([von, bis], i) => ({ von, bis, eur: Number(s[i]) || 0 }))
+  }
+  function tpStaffelText(staffel){
+    const de = v => Number(v).toLocaleString('de-DE')
+    return tpStaffelListe(staffel).map(z => `${de(z.von)}–${z.bis == null ? '∞' : de(z.bis)} → ${de(z.eur)} €`).join(' · ')
+  }
+  // Betrag = letzte Zeile, deren „von" unter dem Stand liegt; darunter die erste Zeile. 8000 → Zeile 6000, 8001 → Zeile 8000.
+  function tpVorplanStaffel(plus, staffel){
+    const l = tpStaffelListe(staffel), p = Number(plus) || 0
+    let eur = l.length ? l[0].eur : 0
+    for(const z of l){ if(p > z.von) eur = z.eur }
+    return eur
   }
   // Startbalance: DB-Feld, sonst Kontogröße aus dem Namen („150k Apex …" → 150000). 23.09.2026: bei fast
   // allen Fundeds steht balance = 0 in der DB (nie gepflegt), Puffer = Live − 0 + DD war dann 158.425 $.
@@ -28948,9 +28997,10 @@
     const q = sel => parseFloat(document.querySelector(sel)?.value)
     const fu = {}
     for(const k of TP_VP_FIRMEN) fu[k] = tpVorplanSpanne(q(`[data-vp-fu="${k}-von"]`), q(`[data-vp-fu="${k}-bis"]`))
-    const staffel = [0, 1, 2, 3, 4].map(i => { const v = q(`[data-vp-st="${i}"]`); return (v >= 0) ? v : TP_VP_VORGABE.staffel[i] })
-    return { ch: tpVorplanSpanne(n('tp-vp-ch-von'), n('tp-vp-ch-bis')), fu, staffel }
+    // Staffel wird hier nicht mehr bearbeitet (Hedge-Tabelle im Admin) — aktuelle Liste unverändert weiterreichen
+    return { ch: tpVorplanSpanne(n('tp-vp-ch-von'), n('tp-vp-ch-bis')), fu, staffel: tpStaffelListe(_tpVpStaffel) }
   }
+  let _tpVpStaffel = null
   function tpVorplanRegelnSetzen(r){
     const setId = (id, v) => { const el = document.getElementById(id); if(el && v != null) el.value = v }
     const setQ = (sel, v) => { const el = document.querySelector(sel); if(el && v != null) el.value = v }
@@ -28961,8 +29011,8 @@
       const sp = (g.fu && Array.isArray(g.fu[k])) ? g.fu[k] : TP_VP_VORGABE.fu[k]
       setQ(`[data-vp-fu="${k}-von"]`, sp[0]); setQ(`[data-vp-fu="${k}-bis"]`, sp[1])
     }
-    const st = (Array.isArray(g.staffel) && g.staffel.length === 5) ? g.staffel : TP_VP_VORGABE.staffel
-    st.forEach((v, i) => setQ(`[data-vp-st="${i}"]`, v))
+    _tpVpStaffel = tpStaffelListe(g.staffel)
+    const info = document.getElementById('tp-vp-staffel-info'); if(info) info.textContent = tpStaffelText(_tpVpStaffel)
   }
 
   // Fertige trade_plans-Zeile für ein Konto — genau das, was Popup 1 von Hand ergäbe (auch der Farmer nutzt das)
@@ -30078,6 +30128,91 @@
     finally{ _wd.busy = false; if(b){ b.disabled = false; b.textContent = '🎲 Würfeln' } }
   })
   /* ══ ENDE WINNING-DAY-FARMER ══ */
+
+  /* ══ WD-ANBAU (23.09.2026) — läuft NEBEN dem WD-Block der parallelen Session „Winning Day Farm" und fasst dessen
+   * Markup/Funktionen nicht an: eigene Knoten, zur Laufzeit in #adm-pane-wd gehängt, gelesen wird nur _wd.rows/_wd.regeln.
+   *  1) SCHARF-LEISTE ganz oben (Finn: „einen Regler oben, wo ich es ausstellen kann, weil es gerade AN ist — heute nur
+   *     planen und gucken"): wd_farmer_regeln.scharf. AUS = Pläne werden gewürfelt und angelegt, aber zur Startzeit
+   *     NICHT gestartet (tpStartUmTick lässt Farmer-Pläne liegen). AN = läuft wie geplant.
+   *  2) ZEITSTRAHL (Finn: „wieder hinzufügen, aber clean — mit Namen; die Blöcke waren so eng, dass man nur die Uhrzeit
+   *     sah"): eine Zeile je ID, Name links, Balken rechts, Uhrzeit + Richtung NEBEN dem Balken (nie im Balken). ══ */
+  const wzHhmm = ms => { const w = wdJetzt(WD_TZ_STD, new Date(ms)); return w ? w.hhmm : '' }
+  function wsLeiste(){
+    let el = document.getElementById('ws-leiste'); if(el) return el
+    const pane = document.getElementById('adm-pane-wd'); if(!pane) return null
+    el = document.createElement('div'); el.id = 'ws-leiste'
+    el.innerHTML = `<button type="button" class="ws-knopf" id="ws-knopf">—</button><div class="ws-text" id="ws-text"></div>`
+    pane.insertBefore(el, pane.firstChild)
+    el.querySelector('#ws-knopf').addEventListener('click', async () => {
+      const an = !(_wd.regeln && _wd.regeln.scharf), b = el.querySelector('#ws-knopf'); b.disabled = true
+      try{
+        const { data: { user } } = await supabase.auth.getUser()
+        const { error } = await supabase.from('wd_farmer_regeln').update({ scharf: an, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
+        if(error) throw error
+        if(_wd.regeln) _wd.regeln.scharf = an
+        if(typeof atToast === 'function') atToast(an ? '🌾 Farmer SCHARF — Pläne starten zur Startzeit.' : '🌾 Farmer AUS — heute wird nur geplant, nichts gestartet.', an ? 'start' : 'end')
+      }catch(e){ if(typeof atToast === 'function') atToast('Schalter nicht gespeichert: ' + (e.message || e), 'end') }
+      b.disabled = false; wsRender()
+    })
+    return el
+  }
+  function wsRender(){
+    const el = wsLeiste(); if(!el) return
+    const r = _wd.regeln || {}, an = !!r.scharf
+    el.classList.toggle('an', an)
+    el.querySelector('#ws-knopf').textContent = an ? '🌾 Farmer SCHARF' : '🌾 Farmer AUS'
+    el.querySelector('#ws-text').innerHTML = an
+      ? `<b>Scharf:</b> gewürfelte Pläne starten zur Startzeit (ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai) von allein. Zum Ausstellen auf den Knopf drücken.`
+      : `<b>Aus:</b> würfeln und planen geht, aber zur Startzeit startet <b>nichts</b> — heute nur planen und schauen. Zum Scharfstellen auf den Knopf drücken.${r.aktiv ? '' : ' Nachts von allein würfeln ist ebenfalls aus (Einstellungen).'}`
+  }
+  function wzPanel(){
+    let p = document.getElementById('wz-panel'); if(p) return p
+    const pane = document.getElementById('adm-pane-wd'); if(!pane) return null
+    p = document.createElement('div'); p.className = 'panel'; p.id = 'wz-panel'; p.style.margin = '0 0 12px'
+    p.innerHTML = `<div class="wd-panel-kopf" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <div class="panel-title">Zeitstrahl <span style="font-weight:400;color:var(--sub);font-size:12px">· Dubai-Zeit · eine Zeile je ID</span></div>
+        <div style="font-size:11.5px;color:var(--sub)"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--violet);vertical-align:-1px;margin-right:4px"></i>geplant <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#2a9d5c;vertical-align:-1px;margin:0 4px 0 10px"></i>läuft <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:#2a9d5c;opacity:.55;vertical-align:-1px;margin:0 4px 0 10px"></i>fertig <i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--danger);vertical-align:-1px;margin:0 4px 0 10px"></i>verpasst</div>
+      </div><div id="wz-body"></div>`
+    const first = pane.querySelector(':scope > .panel')
+    if(first && first.nextSibling) pane.insertBefore(p, first.nextSibling); else pane.appendChild(p)
+    return p
+  }
+  function wzRender(){
+    const p = wzPanel(); if(!p) return
+    const body = p.querySelector('#wz-body'), r = _wd.regeln || {}
+    const rows = (_wd.rows || []).filter(x => x && x.start_um && x.status !== 'leer')
+    if(!rows.length){ body.innerHTML = `<div style="padding:6px 0;color:var(--sub);font-size:13px">Noch keine Startzeiten — „🎲 Würfeln" verteilt die Blöcke ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai.</div>`; return }
+    const dauer = x => (typeof wdDauerMs === 'function') ? wdDauerMs(x, r) : 10 * 60000
+    const H = 3600000
+    const t0 = Math.floor((Math.min(...rows.map(x => +new Date(x.start_um))) - 10 * 60000) / H) * H
+    const t1 = Math.ceil((Math.max(...rows.map(x => +new Date(x.start_um) + dauer(x))) + 10 * 60000) / H) * H
+    const pct = t => Math.max(0, Math.min(100, (t - t0) / (t1 - t0) * 100)), now = Date.now()
+    let ticks = '', raster = ''
+    for(let t = t0; t <= t1; t += H / 2){ const voll = ((t - t0) % H) === 0; ticks += `<div class="wz-tick ${voll ? '' : 'halb'}" style="left:${pct(t).toFixed(2)}%">${voll ? `<span>${wzHhmm(t)}</span>` : ''}</div>`; raster += `<div class="wz-tick ${voll ? '' : 'halb'}" style="left:${pct(t).toFixed(2)}%"></div>` }
+    const sorted = rows.slice().sort((a, b) => (+new Date(a.start_um)) - (+new Date(b.start_um)))
+    const zeilen = sorted.map(x => {
+      const a = +new Date(x.start_um), e = a + dauer(x), w = Math.max(2, pct(e) - pct(a))
+      const n = (x.konten || []).filter(k => k && k.aktiv !== false).length
+      const pfeil = x.richtung === 'sell' ? '▼ SELL' : x.richtung === 'buy' ? '▲ BUY' : ''
+      const rechts = pct(e) > 80   // Balken endet am rechten Rand → Beschriftung links vom Balken
+      const lbl = `${wzHhmm(a)}${pfeil ? ' · ' + pfeil : ''} · ${n} Konten`
+      return `<div class="wz-zeile"><div class="wz-name"><b>${escapeHtml(x.name || '?')}</b><span>Block ${x.reihenfolge || '–'} · ${escapeHtml(x.status || '')}</span></div>
+        <div class="wz-track">${raster}<div class="wz-bar ${escapeHtml(x.status || '')}" style="left:${pct(a).toFixed(2)}%;width:${w.toFixed(2)}%" title="${escapeHtml(x.name || '')} · ${wzHhmm(a)}–${wzHhmm(e)} Dubai"></div>
+        <div class="wz-lbl" style="${rechts ? `right:${(100 - pct(a)).toFixed(2)}%` : `left:${pct(e).toFixed(2)}%`}">${escapeHtml(lbl)}</div></div></div>`
+    }).join('')
+    const jetzt = (now >= t0 && now <= t1) ? `<div class="wz-jetzt" style="left:calc(170px + (100% - 170px) * ${(pct(now) / 100).toFixed(4)})"><span>jetzt ${wzHhmm(now)}</span></div>` : ''
+    body.innerHTML = `<div class="wz" style="position:relative"><div class="wz-kopf"><div class="wz-name"></div><div class="wz-track wz-achse">${ticks}</div></div>${zeilen}${jetzt}</div>`
+  }
+  // Nachziehen, sobald sich Zeilen oder Regeln ändern (der WD-Block rendert selbst; wir schauen nur zu)
+  let _wzSig = ''
+  setInterval(() => {
+    const pane = document.getElementById('adm-pane-wd'); if(!pane || pane.hidden || pane.offsetParent === null) return
+    const r = _wd.regeln || {}
+    const sig = JSON.stringify([(_wd.rows || []).map(x => [x.user_id, x.start_um, x.status, x.reihenfolge, x.richtung, x.name, (x.konten || []).filter(k => k && k.aktiv !== false).length]), r.scharf, r.aktiv, r.abstand_max, r.start_hhmm, Math.floor(Date.now() / 60000)])
+    if(sig === _wzSig) return
+    _wzSig = sig; wsRender(); wzRender()
+  }, 1000)
+  /* ══ ENDE WD-ANBAU ══ */
 
   // ─────── Trade-Complete-Modal ───────
   /* ── "Heute schon getradet" pro Account (Reset automatisch um Mitternacht DE-Zeit) ──
