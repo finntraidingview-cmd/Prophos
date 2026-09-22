@@ -2194,9 +2194,12 @@ def _tv_panel_umschalten(w, trail, ziel):
     zurueckerlesen, bis sie stimmt. -> True, wenn das Panel am Ende im Ziel-
     Zustand ist (auch wenn es schon dort war)."""
     fr = _tv_fenster_rect(w)
-    lage = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), _tv_uia_knoepfe_alle(w), fr)
+    roh0 = _tv_uia_roh(w, ("Text", "Button"))
+    lage = tv_panel_lage(roh0, None, fr)
     if lage["zustand"] == ziel:
         return True
+    if lage["zustand"] is not None:
+        lage = tv_panel_lage(roh0, _tv_uia_knoepfe_alle(w), fr)   # Knoepfe nur, wenn geklickt werden muss
     if lage["zustand"] is None:
         # ohne Kopfzeile kein Anker -> NICHT blind klicken (22.09.2026 18:3x, Spur 16:29: vier
         # Raster-Klicks ins Leere, 5 s weg; fuer 'unten' gibt es ohnehin nichts zurueckzunehmen)
@@ -3119,9 +3122,24 @@ def modus_tvkonto(cmd):
     ende = time.time() + (40.0 if (gestartet and not frisch_mit_link) else 15.0 if frisch_mit_link else 14.0)
     zustand, aktiv, bf, uia_el = "kein_broker", "", None, None
     fremd_vor = ""
+    t_schleife, scan_vor, ruhig_seit = time.time(), None, None
     while True:
         zustand, aktiv, bf, uia_el = lies()
         if zustand in ("richtig", "gleicher_login") or time.time() >= ende or max_fehl[0]:
+            break
+        # GAR KEINE ID (22.09.2026 18:5x, Finn: 'falsche ID / gar keine ID — noch schneller?';
+        # Spur 18:39: Panel nicht da, Scan 124 Elemente, die Schleife lief trotzdem 14 s):
+        # ist die Seite RUHIG (zwei Blicke mit gleicher Elementzahl) und weder Konto noch
+        # kontoartiger Text zu sehen, ist das 'kein Broker' — sofort Tab zu + Link.
+        n_scan = uia_info.get("gescannt")
+        if n_scan is not None and scan_vor is not None and abs(n_scan - scan_vor) <= 5:
+            ruhig_seit = ruhig_seit or time.time()
+        else:
+            ruhig_seit = None
+        scan_vor = n_scan
+        if (ruhig_seit and time.time() - t_schleife >= 2.5 and not (gestartet and time.time() - start < 6.0)
+                and not tv_fremdes_konto(uia_info.get("aehnlich"), ids)):
+            trail.append(f"Seite ruhig ({n_scan} Elemente), kein Konto zu sehen -> kein Broker")
             break
         # NEGATIVES ENDE: zweimal hintereinander dasselbe FREMDE Konto im Panel (UIA)
         # -> 'falsch', sofort weiter zum Login-Wechsel statt 14 s auf ein richtiges
