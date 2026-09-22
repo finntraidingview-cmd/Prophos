@@ -1153,6 +1153,10 @@
   /* Noch ein Stueck rausgezoomt (22.09.2026, Finn: „ein bisschen kleiner, sodass ich immer direkt
      unten auf Start druecke — das Scrollen faehrt mich immer rein"): das ganze Modal auf 84 %,
      mehr Hoehe erlaubt, Vorschlag-Boxen und Ergebnis-Kacheln enger. Nur dieses Modal. */
+  /* Futures vorplanen (22.09.2026): viele kleine Zahlenfelder (TP je Firma, Puffer-Staffel) in einer Zeile */
+  #tpVorplanModal .vp-in{width:62px;padding:3px 6px;height:auto;font-size:12px;text-align:right}
+  #tpVorplanModal .vp-zeile{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12.5px}
+  #tpVorplanModal .vp-zeile>b{min-width:118px;font-weight:600}
   #tradePlanModal .modal{zoom:.9;max-height:96vh}   /* .84 → .9 (22.09.2026, Finn: „ein bisschen größer reinzoomen") */
   #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
   #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
@@ -5047,8 +5051,10 @@
         </div>
         <div class="modal-body">
           <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5">
-            Je Konto: Risiko Master = Max-Drawdown · Risiko Slave = Gesamtkosten · Slave = Duplikum-Slave · Weg Orbit · Symbol aus Instrument.
-            TP wird je Konto zufällig aus der Spanne gezogen (kein gleiches Muster über alle IDs). Richtung kannst du hier setzen oder später im Order-Popup.
+            Je Konto: Risiko Master = Max-Drawdown · Slave = Duplikum-Slave · Weg Orbit · Symbol aus Instrument.
+            <b>Challenge/Phase:</b> TP aus der Challenge-Spanne, Risiko Slave = Gesamtkosten.
+            <b>Funded/Live:</b> TP = Gewinntag der Firma + Spread/Gebühren, Risiko Slave nach Puffer-Staffel
+            (Puffer = Live-Balance − Start + Max-Drawdown). TP je Konto zufällig aus der Spanne; Slave-Betrag je Zeile änderbar.
           </p>
           <div class="form-grid">
             <div class="field">
@@ -5059,8 +5065,6 @@
               </div>
             </div>
             <div class="field"><label>Kontrakte</label><input type="number" class="input mono" id="tp-vp-kt" min="1" step="1" value="1"></div>
-            <div class="field"><label>TP von ($)</label><input type="number" class="input mono" id="tp-vp-tp-von" min="0" step="10" value="370"></div>
-            <div class="field"><label>TP bis ($)</label><input type="number" class="input mono" id="tp-vp-tp-bis" min="0" step="10" value="400"></div>
             <div class="field" style="grid-column:1 / -1">
               <label>Richtung <span style="color:var(--sub);font-weight:400">(optional — leer = im Order-Popup wählen)</span></label>
               <div class="seg" id="tp-vp-dir">
@@ -5068,6 +5072,27 @@
                 <button type="button" data-vp-dir="buy">BUY</button>
                 <button type="button" data-vp-dir="sell">SELL</button>
               </div>
+            </div>
+          </div>
+          <!-- Regeln (Finn 22.09.2026: „Tradeify Winning Day = 250 → 270-290 wegen Spread/Gebühren; Apex 53+;
+               Slave nach Balance-Puffer: >8000 → 90 €, 6000-8000 → 80, 4000-6000 → 70, 2000-4000 → 60, <2000 → 50") -->
+          <div id="tp-vp-regeln" style="margin-top:10px;display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)">
+            <div class="vp-zeile"><b>Challenge · TP ($)</b>
+              <input type="number" class="input mono vp-in" id="tp-vp-ch-von" min="0" step="10" value="370"> – <input type="number" class="input mono vp-in" id="tp-vp-ch-bis" min="0" step="10" value="400">
+              <span style="color:var(--sub)">· Slave = Gesamtkosten</span>
+            </div>
+            <div class="vp-zeile"><b>Funded · TP ($)</b>
+              <span>Tradeify</span> <input type="number" class="input mono vp-in" data-vp-fu="tradeify-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="tradeify-bis" min="0" step="5" value="290">
+              <span style="margin-left:6px">Apex</span> <input type="number" class="input mono vp-in" data-vp-fu="apex-von" min="0" step="5" value="55"> – <input type="number" class="input mono vp-in" data-vp-fu="apex-bis" min="0" step="5" value="75">
+              <span style="margin-left:6px">Topstep</span> <input type="number" class="input mono vp-in" data-vp-fu="topstep-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="topstep-bis" min="0" step="5" value="240">
+              <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
+            </div>
+            <div class="vp-zeile"><b>Funded · Slave (€)</b>
+              <span>Puffer &lt;2k</span> <input type="number" class="input mono vp-in" data-vp-st="0" min="0" step="5" value="50">
+              <span style="margin-left:6px">2–4k</span> <input type="number" class="input mono vp-in" data-vp-st="1" min="0" step="5" value="60">
+              <span style="margin-left:6px">4–6k</span> <input type="number" class="input mono vp-in" data-vp-st="2" min="0" step="5" value="70">
+              <span style="margin-left:6px">6–8k</span> <input type="number" class="input mono vp-in" data-vp-st="3" min="0" step="5" value="80">
+              <span style="margin-left:6px">&gt;8k</span> <input type="number" class="input mono vp-in" data-vp-st="4" min="0" step="5" value="90">
             </div>
           </div>
           <div id="tp-vp-liste" style="margin-top:12px;font-size:12.5px"></div>
@@ -25459,7 +25484,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.393'
+  const OS_TAB_BUILD = '2026-09-22.394'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28799,17 +28824,92 @@
    * Order-Popup (TP steht dann schon drin). Eigene Verdrahtung, kein Sammel-Handler. ══ */
   const TP_VP_LS = 'prophos_tp_vorplan'
   let _vpInstr = 'mnq', _vpDir = ''
+  /* Zwei Regelwerke (Finn 22.09.2026, nach .393: „für Futures ist es immer ein Winning Day. Tradeify
+   * Winning Day = 250 → gehen wir so auf 270-290, weil man Spread und Gebühren zahlt. Bei Apex ist immer
+   * 53+. … je nachdem, wie viel auf der Balance noch drauf ist, mit dem wir gegenhedgen: über 8000 → 90 €,
+   * 6000-8000 → 80, 4000-6000 → 70, 2000-4000 → 60, kleiner 2000 → 50"):
+   *  Challenge/Phase 1/2 → TP aus der Challenge-Spanne (370-400), Risiko Slave = Gesamtkosten (wie .393).
+   *  Funded/Live       → TP = Gewinntag der Firma + Spread/Gebühren (Tradeify 270-290, Apex 55-75,
+   *                      Topstep 220-240 als Vorgabe, alles editierbar), Risiko Slave nach Puffer-Staffel.
+   *  Puffer = Live-Balance − Startbalance + Max-Drawdown (was das Konto noch verlieren kann); ohne
+   *  Live-Stand = Max-Drawdown (frisches Konto). Der Betrag steht je Zeile editierbar im Popup. */
+  const TP_VP_VORGABE = { ch: [370, 400], fu: { tradeify: [270, 290], apex: [55, 75], topstep: [220, 240], sonst: [270, 290] }, staffel: [50, 60, 70, 80, 90] }
+  const TP_VP_FIRMEN = ['tradeify', 'apex', 'topstep', 'sonst']
 
-  // Reine Rechnung je Konto (testbar): -> {masterRisk, slaveRisk, tp} oder {fehler}
-  function tpVorplanZeile(acc, gkEur, slaveCurrency, fxUsdEur, tpVon, tpBis, zufall){
+  function tpVorplanFirmaKey(firm){
+    const f = String(firm || '').toLowerCase()
+    return f.includes('tradeify') ? 'tradeify' : f.includes('apex') ? 'apex' : f.includes('topstep') ? 'topstep' : 'sonst'
+  }
+  function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'live' }
+  function tpVorplanSpanne(von, bis){ const v = Math.max(0, Number(von) || 0); return [v, Math.max(v, Number(bis) || v)] }
+  // Staffel: Puffer ($) → Slave-Betrag (€). Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 …
+  function tpVorplanStaffel(puffer, staffel){
+    const s = (Array.isArray(staffel) && staffel.length === 5) ? staffel : TP_VP_VORGABE.staffel
+    const p = Number(puffer) || 0
+    return p > 8000 ? s[4] : p > 6000 ? s[3] : p > 4000 ? s[2] : p > 2000 ? s[1] : s[0]
+  }
+  function tpVorplanSlaveWaehrung(eur, slaveCurrency, fxUsdEur){
+    return Math.round((slaveCurrency !== '€' ? eur / (fxUsdEur || 0.85) : eur) * 100) / 100
+  }
+  // Live-Stand des Master-Kontos: Duplikum-Balance, sonst TopstepX-Balance, sonst null
+  function tpVorplanLive(acc){
+    try{
+      const d = (typeof getDupBalanceForAccount === 'function') ? getDupBalanceForAccount(acc.id) : null
+      if(d && typeof d.balance === 'number' && isFinite(d.balance)) return d.balance
+      if(acc.topstep && typeof acc.topstep.balance === 'number' && isFinite(acc.topstep.balance)) return acc.topstep.balance
+    }catch(_){}
+    return null
+  }
+
+  // Reine Rechnung je Konto (testbar). opt = {gkEur, live, slaveCurrency, fx, regeln, zufall}
+  //  -> {phase, firma, tpVon, tpBis, tp, masterRisk, puffer, slaveEur, slaveRisk, basis, hinweis} oder {fehler}
+  function tpVorplanZeile(acc, opt){
+    const o = opt || {}
     const dd = Number(acc && acc.maxDrawdown) || 0
     if(!(dd > 0)) return { fehler: 'kein Max-Drawdown am Konto' }
-    if(!(gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
-    const slaveRisk = Math.round((slaveCurrency !== '€' ? gkEur / (fxUsdEur || 0.85) : gkEur) * 100) / 100
-    const von = Math.max(0, Number(tpVon) || 0), bis = Math.max(von, Number(tpBis) || von)
-    const r = (typeof zufall === 'number') ? zufall : Math.random()
-    const tp = Math.round(von + r * (bis - von))
-    return { masterRisk: dd, slaveRisk, tp: tp > 0 ? tp : null }
+    const regeln = o.regeln || TP_VP_VORGABE
+    const funded = tpVorplanIstFunded(acc)
+    const firma = tpVorplanFirmaKey(acc && acc.firm)
+    const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
+    let slaveEur, puffer = null, basis, hinweis = ''
+    if(funded){
+      const start = Number(acc.initialBalance) || 0
+      const live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
+      puffer = (live == null) ? dd : Math.round(live - start + dd)
+      if(live == null) hinweis = 'kein Live-Stand — Puffer = Max-Drawdown'
+      slaveEur = tpVorplanStaffel(puffer, regeln.staffel); basis = 'staffel'
+    }else{
+      if(!(o.gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
+      slaveEur = o.gkEur; basis = 'gesamtkosten'
+    }
+    const slaveRisk = tpVorplanSlaveWaehrung(slaveEur, o.slaveCurrency, o.fx)
+    const r = (typeof o.zufall === 'number') ? o.zufall : Math.random()
+    const tp = Math.round(tpVon + r * (tpBis - tpVon))
+    return { phase: funded ? 'funded' : 'challenge', firma, tpVon, tpBis, tp: tp > 0 ? tp : null, masterRisk: dd, puffer,
+      slaveEur: Math.round(slaveEur * 100) / 100, slaveRisk, basis, hinweis }
+  }
+
+  // Regeln aus den Feldern lesen / in die Felder schreiben
+  function tpVorplanRegelnLesen(){
+    const n = id => parseFloat(document.getElementById(id)?.value)
+    const q = sel => parseFloat(document.querySelector(sel)?.value)
+    const fu = {}
+    for(const k of TP_VP_FIRMEN) fu[k] = tpVorplanSpanne(q(`[data-vp-fu="${k}-von"]`), q(`[data-vp-fu="${k}-bis"]`))
+    const staffel = [0, 1, 2, 3, 4].map(i => { const v = q(`[data-vp-st="${i}"]`); return (v >= 0) ? v : TP_VP_VORGABE.staffel[i] })
+    return { ch: tpVorplanSpanne(n('tp-vp-ch-von'), n('tp-vp-ch-bis')), fu, staffel }
+  }
+  function tpVorplanRegelnSetzen(r){
+    const setId = (id, v) => { const el = document.getElementById(id); if(el && v != null) el.value = v }
+    const setQ = (sel, v) => { const el = document.querySelector(sel); if(el && v != null) el.value = v }
+    const g = r || {}
+    const ch = Array.isArray(g.ch) ? g.ch : TP_VP_VORGABE.ch
+    setId('tp-vp-ch-von', ch[0]); setId('tp-vp-ch-bis', ch[1])
+    for(const k of TP_VP_FIRMEN){
+      const sp = (g.fu && Array.isArray(g.fu[k])) ? g.fu[k] : TP_VP_VORGABE.fu[k]
+      setQ(`[data-vp-fu="${k}-von"]`, sp[0]); setQ(`[data-vp-fu="${k}-bis"]`, sp[1])
+    }
+    const st = (Array.isArray(g.staffel) && g.staffel.length === 5) ? g.staffel : TP_VP_VORGABE.staffel
+    st.forEach((v, i) => setQ(`[data-vp-st="${i}"]`, v))
   }
 
   // Der eine Duplikum-Slave (wie im Plan-Popup: Duplikum-Gegenstück ist als Slave angelegt)
@@ -28846,19 +28946,31 @@
     const slave = sl.slave
     const sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const fx = window._fxUsdEur || 0.85
-    const tpVon = parseFloat(document.getElementById('tp-vp-tp-von')?.value), tpBis = parseFloat(document.getElementById('tp-vp-tp-bis')?.value)
+    const regeln = tpVorplanRegelnLesen()
     const kand = tpVorplanKandidaten()
     if(!kand.length){ box.innerHTML = '<span style="color:var(--sub)">Kein aktives Futures-Konto mit External ID gefunden.</span>'; return }
-    box.innerHTML = `<div style="margin-bottom:6px;color:var(--sub)">Slave: <b>${escapeHtml(slave.name)}</b> · ${kand.length} Futures-Konto/-Konten</div>` + kand.map(k => {
+    const de = (v, fd) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: fd || 0, maximumFractionDigits: fd || 0 })
+    box.innerHTML = `<div style="margin-bottom:6px;color:var(--sub)">Slave: <b>${escapeHtml(slave.name)}</b> (${escapeHtml(sPreset.currency)}) · ${kand.length} Futures-Konto/-Konten</div>` + kand.map(k => {
       const gk = (typeof calcReingesteckdEur === 'function') ? calcReingesteckdEur(k.acc, { netPayouts: true }) : 0
-      const z = tpVorplanZeile(k.acc, gk, sPreset.currency, fx, tpVon, tpBis, 0.5)
+      const z = tpVorplanZeile(k.acc, { gkEur: gk, live: tpVorplanLive(k.acc), slaveCurrency: sPreset.currency, fx, regeln, zufall: 0.5 })
       const aus = k.belegt || z.fehler
       const grund = k.belegt ? 'hat schon einen geplanten/laufenden Plan' : (z.fehler || '')
-      return `<label style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);${aus ? 'opacity:.55' : ''}">
-        <input type="checkbox" data-vp-acc="${escapeHtml(String(k.acc.id))}" ${aus ? 'disabled' : 'checked'}>
-        <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')}</span>
-          ${aus ? `<span style="color:var(--sub)"> — ${escapeHtml(grund)}</span>` : `<span class="mono" style="color:var(--sub)"> · DD $${Number(z.masterRisk).toLocaleString('de-DE')} · Slave ${sPreset.currency}${Number(z.slaveRisk).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>`}</span>
-      </label>`
+      const id = escapeHtml(String(k.acc.id))
+      if(aus) return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);opacity:.55">
+        <input type="checkbox" data-vp-acc="${id}" disabled>
+        <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} — ${escapeHtml(grund)}</span></span></div>`
+      // Basis-Zeile: woher der Slave-Betrag kommt — Finn sieht die Rechnung und korrigiert im Feld daneben
+      const basis = z.basis === 'staffel'
+        ? (z.hinweis ? `Puffer $${de(z.puffer)} (${escapeHtml(z.hinweis)})` : `Puffer $${de(z.puffer)} = Live ${de(tpVorplanLive(k.acc))} − Start ${de(k.acc.initialBalance)} + DD ${de(z.masterRisk)}`) + ` → ${de(z.slaveEur)} €`
+        : `Gesamtkosten ${de(z.slaveEur, 2)} €`
+      return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
+        <input type="checkbox" id="tp-vp-acc-${id}" data-vp-acc="${id}" checked>
+        <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
+          <span class="mono" style="color:var(--sub)"> · DD $${de(z.masterRisk)} · TP ${de(z.tpVon)}–${de(z.tpBis)}</span>
+          <div class="mono" style="color:var(--sub);font-size:11.5px">${basis}</div></label>
+        <span class="mono" style="color:var(--sub);white-space:nowrap">Slave ${escapeHtml(sPreset.currency)}</span>
+        <input type="number" class="input mono vp-in" data-vp-slave="${id}" min="0" step="1" value="${z.slaveRisk}" style="width:74px">
+      </div>`
     }).join('')
   }
 
@@ -28867,9 +28979,10 @@
       const g = JSON.parse(localStorage.getItem(TP_VP_LS) || '{}')
       _vpInstr = g.instr === 'nq' ? 'nq' : 'mnq'
       if(g.kt) document.getElementById('tp-vp-kt').value = g.kt
-      if(g.von != null) document.getElementById('tp-vp-tp-von').value = g.von
-      if(g.bis != null) document.getElementById('tp-vp-tp-bis').value = g.bis
-    }catch(_){}
+      // Alter Stand (.393) merkte nur von/bis → wird zur Challenge-Spanne
+      const regeln = g.regeln || ((g.von != null && g.bis != null) ? { ch: [g.von, g.bis] } : null)
+      tpVorplanRegelnSetzen(regeln)
+    }catch(_){ tpVorplanRegelnSetzen(null) }
     _vpDir = ''
     document.querySelectorAll('[data-vp-instr]').forEach(b => b.classList.toggle('active', b.dataset.vpInstr === _vpInstr))
     document.querySelectorAll('[data-vp-dir]').forEach(b => b.classList.toggle('active', b.dataset.vpDir === _vpDir))
@@ -28890,22 +29003,25 @@
     const sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const fx = window._fxUsdEur || 0.85
     const kt = Math.max(1, Math.round(parseFloat(document.getElementById('tp-vp-kt')?.value) || 1))
-    const tpVon = parseFloat(document.getElementById('tp-vp-tp-von')?.value), tpBis = parseFloat(document.getElementById('tp-vp-tp-bis')?.value)
+    const regeln = tpVorplanRegelnLesen()
     const gewaehlt = new Set([...document.querySelectorAll('[data-vp-acc]:checked')].map(i => i.dataset.vpAcc))
     if(!gewaehlt.size) return say('Kein Konto ausgewählt.', 'err')
     // Instrument wie im Plan-Popup setzen — tpCalcMultiplier rechnet mit dem Punktwert dieses Schalters
     _tpNqMode = _vpInstr
     try{ localStorage.setItem(TP_NQ_MODE_LS, _vpInstr) }catch(_){}
     try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
-    try{ localStorage.setItem(TP_VP_LS, JSON.stringify({ instr: _vpInstr, kt, von: tpVon, bis: tpBis })) }catch(_){}
+    try{ localStorage.setItem(TP_VP_LS, JSON.stringify({ instr: _vpInstr, kt, regeln })) }catch(_){}
     const heute = new Date().toLocaleDateString('en-CA')
     const symbol = (_vpInstr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
     const rows = [], fehler = []
     for(const k of tpVorplanKandidaten()){
       if(k.belegt || !gewaehlt.has(String(k.acc.id))) continue
       const gk = calcReingesteckdEur(k.acc, { netPayouts: true })
-      const z = tpVorplanZeile(k.acc, gk, sPreset.currency, fx, tpVon, tpBis)
+      const z = tpVorplanZeile(k.acc, { gkEur: gk, live: tpVorplanLive(k.acc), slaveCurrency: sPreset.currency, fx, regeln })
       if(z.fehler){ fehler.push(`${k.acc.name}: ${z.fehler}`); continue }
+      // Slave-Betrag aus dem Zeilenfeld, falls Finn ihn dort geändert hat (leer/0 → Rechnung)
+      const hand = parseFloat(document.querySelector(`[data-vp-slave="${CSS.escape(String(k.acc.id))}"]`)?.value)
+      if(hand > 0) z.slaveRisk = Math.round(hand * 100) / 100
       const mult = tpCalcMultiplier(k.acc.firm, slave.firm, z.masterRisk, kt, z.slaveRisk)
       const planObj = { masterAccountId: k.acc.id, slaveAccountId: slave.id, masterName: k.acc.name, masterFirm: k.acc.firm,
         slaveName: slave.name, slaveFirm: slave.firm, masterRisk: z.masterRisk, masterContracts: kt, slaveRisk: z.slaveRisk,
@@ -28920,7 +29036,7 @@
       for(const r of (data || [])) tradePlans.unshift(rowToPlan(r))
       renderTradePlans()
       tpVorplanClose()
-      if(typeof atToast === 'function') atToast(`⚡ ${(data || []).length} Futures-Plan/-Pläne angelegt (${symbol}, ${kt} Kt, TP ${tpVon}–${tpBis} $)${fehler.length ? ' · übersprungen: ' + fehler.length : ''}`, 'start')
+      if(typeof atToast === 'function') atToast(`⚡ ${(data || []).length} Futures-Plan/-Pläne angelegt (${symbol}, ${kt} Kt · Challenge TP ${regeln.ch[0]}–${regeln.ch[1]} $ · Funded TP je Firma)${fehler.length ? ' · übersprungen: ' + fehler.length : ''}`, 'start')
     }catch(e){ say('Fehler: ' + (e.message || e), 'err') }
     finally{ if(go){ go.disabled = false; go.textContent = 'Pläne anlegen' } }
   }
@@ -28936,7 +29052,8 @@
   document.querySelectorAll('[data-vp-dir]').forEach(b => b.addEventListener('click', () => {
     _vpDir = b.dataset.vpDir; document.querySelectorAll('[data-vp-dir]').forEach(x => x.classList.toggle('active', x === b))
   }))
-  ;['tp-vp-tp-von', 'tp-vp-tp-bis'].forEach(id => document.getElementById(id)?.addEventListener('input', tpVorplanRender))
+  // Jede Regeländerung rechnet die Liste neu (nur der Regelblock dieses Popups — kein Sammel-Handler)
+  document.getElementById('tp-vp-regeln')?.addEventListener('input', tpVorplanRender)
   /* ══ ENDE FUTURES VORPLANEN ══ */
 
   // ─────── Trade-Complete-Modal ───────
