@@ -1244,6 +1244,12 @@
   #adm-pane-wd .wd-firma-edit{display:none;padding:6px 10px 12px 30px;gap:12px;align-items:end;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:4px}
   #adm-pane-wd .wd-firma.offen + .wd-firma-edit{display:flex}
   #adm-pane-wd .wd-firma-edit .wd-feld{width:110px}
+  #adm-pane-wd .wd-chips{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
+  #adm-pane-wd .wd-chip-f{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;cursor:pointer;background:var(--surface,#fff)}
+  #adm-pane-wd .wd-chip-f:hover{background:rgba(0,0,0,.03)}
+  #adm-pane-wd .wd-chip-f.an{border-color:var(--violet);background:rgba(99,91,255,.08);color:var(--violet);font-weight:600}
+  #adm-pane-wd .wd-chip-f i{width:8px;height:8px;border-radius:50%;display:inline-block}
+  #adm-pane-wd .wd-chip-f small{font-size:10px;color:var(--sub)}
   #adm-pane-wd .wd-stufe{display:grid;grid-template-columns:8px 100px 1fr 118px 28px;gap:8px;align-items:center;padding:4px 0}
   #adm-pane-wd .wd-stufe.kopf{font-size:11px;color:var(--sub);padding-bottom:2px}
   #adm-pane-wd .wd-stufe .balken{width:8px;height:28px;border-radius:4px}
@@ -7395,10 +7401,17 @@
                 <div class="kf" style="margin-top:8px">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
               </div>
               <div class="wd-set-card">
-                <h4>Hedge-Staffel · Slave-Betrag <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
-                <div class="kf" style="margin-bottom:6px">nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)</div>
+                <h4>Hedge-Staffel · <span id="wd-staffel-titel">Standard</span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
+                <!-- Eine Tabelle je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben — auf Tradeify drücken, dann
+                     die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
+                     Tabelle gilt Standard. -->
+                <div class="wd-chips" id="wd-staffel-firmen"></div>
+                <div class="kf" id="wd-staffel-hinweis" style="margin-bottom:6px">nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)</div>
                 <div id="wd-staffel-body"></div>
-                <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add" style="margin-top:8px">+ Zeile</button>
+                <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+                  <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add">+ Zeile</button>
+                  <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-reset" style="display:none" title="eigene Tabelle dieser Firma löschen — es gilt wieder Standard">wie Standard</button>
+                </div>
               </div>
             </div>
           </div>
@@ -25582,7 +25595,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.414'
+  const OS_TAB_BUILD = '2026-09-22.415'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29012,7 +29025,8 @@
       else if(!(groesse > 0)){ plus = 0; hinweis = 'Kontogröße unbekannt („150k" in den Namen) — kleinste Stufe' }
       else plus = Math.round(live - groesse)
       puffer = plus   // alter Feldname, bleibt für Anzeigen, die ihn noch lesen
-      slaveEur = tpVorplanStaffel(plus, regeln.staffel); basis = 'staffel'
+      // Staffel je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben"): regeln.staffelFirma[firma], sonst Standard
+      slaveEur = tpVorplanStaffel(plus, (regeln.staffelFirma && regeln.staffelFirma[firma]) || regeln.staffel); basis = 'staffel'
     }else{
       if(!(o.gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
       slaveEur = o.gkEur; basis = 'gesamtkosten'
@@ -29031,9 +29045,9 @@
     const fu = {}
     for(const k of TP_VP_FIRMEN) fu[k] = tpVorplanSpanne(q(`[data-vp-fu="${k}-von"]`), q(`[data-vp-fu="${k}-bis"]`))
     // Staffel wird hier nicht mehr bearbeitet (Hedge-Tabelle im Admin) — aktuelle Liste unverändert weiterreichen
-    return { ch: tpVorplanSpanne(n('tp-vp-ch-von'), n('tp-vp-ch-bis')), fu, staffel: tpStaffelListe(_tpVpStaffel) }
+    return { ch: tpVorplanSpanne(n('tp-vp-ch-von'), n('tp-vp-ch-bis')), fu, staffel: tpStaffelListe(_tpVpStaffel), ...(_tpVpStaffelFirma ? { staffelFirma: _tpVpStaffelFirma } : {}) }
   }
-  let _tpVpStaffel = null
+  let _tpVpStaffel = null, _tpVpStaffelFirma = null   // Staffel je Firma wird hier nur durchgereicht (Bearbeitung im Admin)
   function tpVorplanRegelnSetzen(r){
     const setId = (id, v) => { const el = document.getElementById(id); if(el && v != null) el.value = v }
     const setQ = (sel, v) => { const el = document.querySelector(sel); if(el && v != null) el.value = v }
@@ -29045,7 +29059,9 @@
       setQ(`[data-vp-fu="${k}-von"]`, sp[0]); setQ(`[data-vp-fu="${k}-bis"]`, sp[1])
     }
     _tpVpStaffel = tpStaffelListe(g.staffel)
-    const info = document.getElementById('tp-vp-staffel-info'); if(info) info.textContent = tpStaffelText(_tpVpStaffel)
+    _tpVpStaffelFirma = (g.staffelFirma && typeof g.staffelFirma === 'object') ? g.staffelFirma : null
+    const eigene = Object.keys(_tpVpStaffelFirma || {}).filter(k => Array.isArray(_tpVpStaffelFirma[k]) && _tpVpStaffelFirma[k].length)
+    const info = document.getElementById('tp-vp-staffel-info'); if(info) info.textContent = 'Standard: ' + tpStaffelText(_tpVpStaffel) + (eigene.length ? ` · eigene Tabelle: ${eigene.join(', ')}` : '')
   }
 
   // Fertige trade_plans-Zeile für ein Konto — genau das, was Popup 1 von Hand ergäbe (auch der Farmer nutzt das)
@@ -29866,8 +29882,9 @@
       <span class="kf">${i + 1 < liste.length ? 'bis ' + wdDe(liste[i + 1].von) + ' $' : 'und mehr'}</span>
       <span style="display:flex;align-items:center;gap:6px"><input type="number" class="input mono" data-wd-se="${i}" value="${z.eur}" min="0" step="5"><span class="kf">€</span></span>
       <button type="button" class="btn btn-ghost btn-xs" data-wd-sx="${i}" title="Zeile entfernen">✕</button></div>`).join('')
-    box.querySelectorAll('[data-wd-sx]').forEach(b => b.addEventListener('click', () => { const l = wdStaffelLesen(); l.splice(+b.dataset.wdSx, 1); wdStaffelRender(l) }))
-    box.querySelectorAll('[data-wd-sv]').forEach(el => el.addEventListener('change', () => wdStaffelRender(wdStaffelLesen())))
+    box.querySelectorAll('[data-wd-sx]').forEach(b => b.addEventListener('click', () => { const l = wdStaffelLesen(); l.splice(+b.dataset.wdSx, 1); wdStaffelRender(l); wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
+    box.querySelectorAll('[data-wd-sv]').forEach(el => el.addEventListener('change', () => { wdStaffelRender(wdStaffelLesen()); wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
+    box.querySelectorAll('[data-wd-se]').forEach(el => el.addEventListener('change', () => { wdStaffelArbeitUebernehmen(); wdAutoHedge() }))
   }
   // Firmen als klickbare Zeilen (Finn: „ich drücke auf eine Firma drauf und kann dann die Werte schnell eingeben")
   const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'FundedNext Futures, MFFU, Lucid …'] }
@@ -29901,8 +29918,10 @@
     }).join('')
     box.querySelectorAll('[data-wd-firma]').forEach(el => el.addEventListener('click', () => {
       _wd.firmaOffen = _wd.firmaOffen === el.dataset.wdFirma ? null : el.dataset.wdFirma
+      wdStaffelWahl(_wd.firmaOffen || 'standard')   // Klick auf die Firma zeigt rechts ihre Hedge-Tabelle
       box.querySelectorAll('[data-wd-firma]').forEach(x => { const an = x.dataset.wdFirma === _wd.firmaOffen; x.classList.toggle('offen', an); const pf = x.querySelector('.pfeil'); if(pf) pf.textContent = an ? '▾' : '▸' })
     }))
+    box.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('change', wdAutoHedge))
     box.querySelectorAll('[data-wd-fu],[data-wd-kt]').forEach(inp => inp.addEventListener('input', () => {
       const k = (inp.dataset.wdFu || inp.dataset.wdKt).split('-')[0]
       const v = parseFloat(box.querySelector(`[data-wd-fu="${k}-von"]`)?.value) || 0, b2 = parseFloat(box.querySelector(`[data-wd-fu="${k}-bis"]`)?.value) || v
@@ -29913,7 +29932,55 @@
   document.getElementById('wd-staffel-add')?.addEventListener('click', () => {
     const l = wdStaffelLesen(), last = l[l.length - 1]
     l.push({ von: last ? last.von + 2000 : 0, bis: null, eur: last ? last.eur + 10 : 50 }); wdStaffelRender(l)
+    wdStaffelArbeitUebernehmen(); wdAutoHedge()
   })
+  /* Eine Staffel je Firma (23.09.2026): Arbeitskopie { standard: Liste, tradeify: Liste|null, … }; die Karte zeigt die
+   * gewählte (Chips oder Klick auf die Firma links). Eine Firma ohne eigene Liste zeigt eine Kopie des Standards — die
+   * erste Änderung macht daraus ihre eigene Tabelle; „wie Standard" löscht sie wieder. Gespeichert wird alles zusammen
+   * (regeln.staffel + regeln.staffelFirma), tpVorplanZeile nimmt je Konto die Tabelle seiner Firma. */
+  function wdStaffelArbeitInit(regeln){
+    const r = regeln || {}, sf = (r.staffelFirma && typeof r.staffelFirma === 'object') ? r.staffelFirma : {}
+    _wd.staffelArbeit = { standard: wdStaffelListe(r.staffel) }
+    for(const k of TP_VP_FIRMEN) _wd.staffelArbeit[k] = (Array.isArray(sf[k]) && sf[k].length) ? wdStaffelListe(sf[k]) : null
+    if(!_wd.staffelWahl) _wd.staffelWahl = 'standard'
+  }
+  const wdStaffelEigen = k => !!(_wd.staffelArbeit && Array.isArray(_wd.staffelArbeit[k]) && _wd.staffelArbeit[k].length)
+  function wdStaffelAktuell(){
+    const a = _wd.staffelArbeit || { standard: wdStaffelListe(null) }, w = _wd.staffelWahl || 'standard'
+    return (w === 'standard' || !wdStaffelEigen(w)) ? a.standard.map(z => ({ ...z })) : a[w].map(z => ({ ...z }))
+  }
+  function wdStaffelArbeitUebernehmen(){
+    if(!_wd.staffelArbeit) return
+    const l = wdStaffelLesen(); if(!l.length) return
+    const w = _wd.staffelWahl || 'standard'
+    if(w === 'standard') _wd.staffelArbeit.standard = l
+    else _wd.staffelArbeit[w] = l   // ab jetzt eigene Tabelle dieser Firma
+    wdStaffelChips()
+  }
+  function wdStaffelChips(){
+    const box = document.getElementById('wd-staffel-firmen'); if(!box) return
+    const w = _wd.staffelWahl || 'standard'
+    const chips = [['standard', 'Standard', '#636e72', '']].concat(TP_VP_FIRMEN.map(k => { const [name, farbe] = WD_FIRMEN[k] || [k, '#636e72']; return [k, name, farbe, wdStaffelEigen(k) ? 'eigene' : 'wie Standard'] }))
+    box.innerHTML = chips.map(([k, name, farbe, sub]) => `<span class="wd-chip-f ${w === k ? 'an' : ''}" data-wd-staffel-wahl="${k}"><i style="background:${farbe}"></i>${escapeHtml(name)}${sub ? `<small>${sub}</small>` : ''}</span>`).join('')
+    box.querySelectorAll('[data-wd-staffel-wahl]').forEach(c => c.addEventListener('click', () => wdStaffelWahl(c.dataset.wdStaffelWahl)))
+    const t = document.getElementById('wd-staffel-titel'); if(t) t.textContent = w === 'standard' ? 'Standard (alle Firmen ohne eigene Tabelle)' : ((WD_FIRMEN[w] || [w])[0] + (wdStaffelEigen(w) ? ' · eigene Tabelle' : ' · noch wie Standard'))
+    const h = document.getElementById('wd-staffel-hinweis'); if(h) h.textContent = w === 'standard' ? 'nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)' : (wdStaffelEigen(w) ? `gilt nur für ${(WD_FIRMEN[w] || [w])[0]} — Stand über der Kontogröße → Slave-Betrag` : `zeigt den Standard — die erste Änderung macht daraus die eigene Tabelle für ${(WD_FIRMEN[w] || [w])[0]}`)
+    const rb = document.getElementById('wd-staffel-reset'); if(rb) rb.style.display = (w !== 'standard' && wdStaffelEigen(w)) ? '' : 'none'
+  }
+  function wdStaffelWahl(k){
+    wdStaffelArbeitUebernehmen()
+    _wd.staffelWahl = (k === 'standard' || TP_VP_FIRMEN.includes(k)) ? k : 'standard'
+    wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
+  }
+  document.getElementById('wd-staffel-reset')?.addEventListener('click', () => {
+    const w = _wd.staffelWahl; if(!w || w === 'standard' || !_wd.staffelArbeit) return
+    _wd.staffelArbeit[w] = null; wdStaffelChips(); wdStaffelRender(wdStaffelAktuell()); wdAutoHedge()
+  })
+  // Auto-Speichern (23.09.2026, Finn: „nach jeder Änderung automatisch speichern, nicht immer auf Speichern drücken")
+  let _wdAutoT = null
+  function wdAutoHedge(){ clearTimeout(_wdAutoT); _wdAutoT = setTimeout(() => wdHedgeSpeichern(true).catch(e => wdSay('Auto-Speichern: ' + (e.message || e), 'err')), 700) }
+  function wdAutoRegeln(){ clearTimeout(_wdAutoT); _wdAutoT = setTimeout(() => wdRegelnSpeichern(true).catch(e => wdSay('Auto-Speichern: ' + (e.message || e), 'err')), 700) }
+  function wdGespeichertZeigen(ids){ for(const id of ids){ const b = document.getElementById(id); if(!b) continue; const alt = b.dataset.alt || b.textContent; b.dataset.alt = alt; b.textContent = '✓ gespeichert'; clearTimeout(b._t); b._t = setTimeout(() => { b.textContent = alt }, 2000) } }
   function wdRegelnInsFormular(){
     const r = _wd.regeln || {}, g = id => document.getElementById(id)
     if(g('wd-aktiv')) g('wd-aktiv').checked = !!r.aktiv
@@ -29927,25 +29994,27 @@
     const vp = wdVorplanRegeln(), fu = vp.regeln.fu || TP_VP_VORGABE.fu
     if(g('wd-instr')) g('wd-instr').value = vp.instr
     if(g('wd-kt')) g('wd-kt').value = vp.kt
-    wdStaffelRender(wdStaffelListe(vp.regeln.staffel))
+    wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
     wdFirmenRender(fu, vp)
     wdStatus()
   }
-  async function wdHedgeSpeichern(){
+  async function wdHedgeSpeichern(auto){
     const vp = wdVorplanRegeln(), q = sel => parseFloat(document.querySelector(`#adm-pane-wd ${sel}`)?.value)
     const fu = {}, kt = {}
     for(const k of TP_VP_FIRMEN){
       fu[k] = tpVorplanSpanne(q(`[data-wd-fu="${k}-von"]`), q(`[data-wd-fu="${k}-bis"]`))
       const a = Math.max(1, Math.round(q(`[data-wd-kt="${k}-von"]`) || 1)); kt[k] = [a, Math.max(a, Math.round(q(`[data-wd-kt="${k}-bis"]`) || a))]
     }
-    const liste = wdStaffelLesen()
-    if(!liste.length) return wdSay('Mindestens eine Staffel-Zeile nötig.', 'err')
-    // Liste [{von,bis,eur}] — nur wenn der Leser (tpStaffelListe, .404) da ist; sonst das alte 5-Zahlen-Format
-    const staffel = (typeof tpStaffelListe === 'function') ? liste : [0, 2001, 4001, 6001, 8001].map(p => (liste.filter(z => z.von <= p).pop() || liste[0]).eur)
+    wdStaffelArbeitUebernehmen()
+    const a = _wd.staffelArbeit || { standard: wdStaffelLesen() }
+    const staffel = (a.standard && a.standard.length) ? a.standard : wdStaffelListe(null)
+    const staffelFirma = {}; for(const k of TP_VP_FIRMEN) if(wdStaffelEigen(k)) staffelFirma[k] = a[k]
     const instr = document.getElementById('wd-instr')?.value === 'nq' ? 'nq' : 'mnq'
-    await wdVorplanRegelnSpeichern({ instr, kt: Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1)), regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, kt, staffel } })
-    wdRegelnInsFormular(); wdRender()
-    wdSay('Hedge-Tabelle gespeichert — gilt für alle PC-Tabs und „Futures vorplanen". Schon angelegte Pläne behalten ihre Zahlen.', 'ok')
+    await wdVorplanRegelnSpeichern({ instr, kt: Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1)), regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, kt, staffel, staffelFirma } })
+    // Beim Auto-Speichern nichts neu bauen, solange ein Feld den Fokus hat — sonst springt der Cursor raus
+    if(!auto || !document.querySelector('#adm-pane-wd .wd-set-grid :focus')){ wdRegelnInsFormular(); wdRender() } else { wdFirmenZaehlen(); wdStaffelChips() }
+    wdGespeichertZeigen(['wdHedgeSave', 'wdHedgeSave2'])
+    if(!auto) wdSay('Hedge-Tabelle gespeichert — gilt für alle PC-Tabs und „Futures vorplanen". Schon angelegte Pläne behalten ihre Zahlen.', 'ok')
   }
   // Kopfzeile: Chip AN/AUS + ein Satz mit dem nächsten Schritt
   function wdStatus(){
@@ -30339,7 +30408,7 @@
     if(nz.geaendert) teile.push(`${nz.geaendert} Pläne umgestellt`); if(nz.geloescht) teile.push(`${nz.geloescht} Pläne gelöscht`); if(a.angelegt) teile.push(`${a.angelegt} Pläne neu angelegt`)
     wdSay(n ? teile.join(' · ') + (a.fehler.length ? ' — ⚠ ' + a.fehler.join(' · ') : '') : 'Nichts zu speichern.', n && !a.fehler.length ? 'ok' : 'err')
   }
-  async function wdRegelnSpeichern(){
+  async function wdRegelnSpeichern(auto){
     const g = id => document.getElementById(id), n = (id, std) => { const v = parseFloat(g(id)?.value); return isFinite(v) ? Math.max(0, Math.round(v)) : std }
     const { data: { user } } = await supabase.auth.getUser()
     const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || '02:00', tz: WD_TZ_STD,
@@ -30350,8 +30419,9 @@
     const { error } = await supabase.from('wd_farmer_regeln').update(r).eq('id', 1)
     if(error) return wdSay('Einstellungen nicht gespeichert: ' + error.message, 'err')
     Object.assign(_wd.regeln = _wd.regeln || {}, r)
-    wdRegelnInsFormular(); wdRender()
-    wdSay(`Einstellungen gespeichert — Automatik ${r.aktiv ? 'AN' : 'AUS'}.`, 'ok')
+    if(!auto || !document.querySelector('#adm-pane-wd .wd-set-grid :focus')){ wdRegelnInsFormular(); wdRender() } else wdStatus()
+    wdGespeichertZeigen(['wdRegelnSave'])
+    if(!auto) wdSay(`Einstellungen gespeichert — Automatik ${r.aktiv ? 'AN' : 'AUS'}.`, 'ok')
   }
   // Knopf in Trades springt in den Admin-Tab (hinter dem Kasse-Code wartet der Sprung)
   document.getElementById('wdBtn')?.addEventListener('click', () => {
@@ -30362,6 +30432,7 @@
       else window._wdTabPending = true
     }, 60)
   })
+  document.getElementById('wd-regeln')?.addEventListener('change', wdAutoRegeln)   // Auto-Speichern (23.09.2026)
   document.getElementById('wdRegelnSave')?.addEventListener('click', () => wdRegelnSpeichern().then(() => wdHedgeSpeichern()).catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave2')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
