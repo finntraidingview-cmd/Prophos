@@ -954,11 +954,11 @@ def main():
         (order_bot.tv_panel_eingeklappt(_PK, _FR) or {}).get("knopf", {}).get("text") == "Maximize panel"
         and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
         and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["kopf_y"] == 1174)
-    chk("TV-PANEL: Trennleiste liegt ueber dem Broker-Knopf 'Tradovate'; ohne ihn 34 px ueber der Kopfzeile; zu flach ist DPI-relativ (11 %)",
-        order_bot.tv_panel_eingeklappt(_PK, _FR)["leiste_y"] == 1110
-        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Tradovate"], _FR)["leiste_y"] == 1140
-        and order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 2060, 1116, 2078), "Text")], (0, 0, 3840, 2160)) is not None
-        and order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1800, 1116, 1818), "Text")], (0, 0, 3840, 2160)) is None)
+    chk("TV-PANEL: zu flach ist DPI-relativ (11 % der Fensterhoehe); 'Restore panel' ist NIE der Aufklapp-Knopf",
+        order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 2060, 1116, 2078), "Text")], (0, 0, 3840, 2160)) is not None
+        and order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1800, 1116, 1818), "Text")], (0, 0, 3840, 2160)) is None
+        and order_bot.tv_panel_eingeklappt([("Restore panel", (1280, 1122, 1296, 1140), "Button")] + [x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
+        and order_bot.TV_RX_PANEL_RESTORE.search("Restore panel") and not order_bot.TV_RX_PANEL_RESTORE.search("Minimize panel"))
     chk("TV-PANEL: offenes Panel (Kopfzeile weit ueber dem Rand) oder keine Kopfzeile = nichts tun",
         order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1030, 1116, 1048), "Text"), ("Equity", (1150, 1030, 1190, 1048), "Text")], _FR) is None
         and order_bot.tv_panel_eingeklappt([("Symbol", (1656, 297, 1700, 315), "Text")], _FR) is None

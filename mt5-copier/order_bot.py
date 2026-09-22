@@ -2014,7 +2014,8 @@ def tv_schalter_zu(schalter, label_r, bereich):
 
 
 TV_RX_PANEL_KOPF = re.compile(r"^(account balance|kontostand|equity|eigenkapital)$", re.I)
-TV_RX_PANEL_MAX = re.compile(r"(maxim|expand|restore|vergr|erweiter|aufklapp|wiederherstell)", re.I)
+TV_RX_PANEL_MAX = re.compile(r"(maxim|expand|vergr|erweiter|aufklapp)", re.I)
+TV_RX_PANEL_RESTORE = re.compile(r"(restore|wiederherstell)", re.I)
 
 
 def tv_panel_eingeklappt(roh, fenster):
@@ -2057,25 +2058,42 @@ def tv_panel_eingeklappt(roh, fenster):
 
 
 def _tv_panel_aufziehen(w, trail):
-    """Eingeklapptes Tradovate-Panel oeffnen: Maximieren-Knopf, sonst die
-    Trennleiste ueber der Kopfzeile ein Drittel hochziehen. -> True, wenn
-    etwas getan wurde."""
+    """Zu flaches Tradovate-Panel oeffnen — ueber den Knopf 'Maximize panel' in
+    der Panel-Kopfzeile (Finn 22.09.2026 12:24, vier Screenshots mit Tooltips:
+    'Maximize panel' klappt das Panel ueber den ganzen Chart, dort steht die
+    Konto-Auswahl; 'Restore panel' bringt den Chart zurueck. Sein Wunsch: 'eine
+    einfache Loesung — auf dieses Ding druecken, Accounts switchen, dann wieder
+    drauf druecken'). Das Ziehen an der Trennleiste aus .356/.357 hat bei ihm
+    nichts bewirkt und ist raus. -> True, wenn maximiert wurde."""
     fr = _tv_fenster_rect(w)
     roh = _tv_uia_roh(w, ("Text", "Button"))
     z = tv_panel_eingeklappt(roh, fr)
     if not z:
         return False
-    if z["knopf"]:
-        _tv_uia_klick(z["knopf"], f"Panel aufklappen ('{z['knopf']['text']}')", trail)
-        return True
-    l, t, r, b = fr
-    x = l + (r - l) * 2 // 5
-    y1 = z["leiste_y"]               # Trennleiste knapp ueber der obersten Panel-Zeile
-    y2 = t + (b - t) * 55 // 100     # bis etwa Fenstermitte
-    _maus_fahren(x, y1)
-    ok = _ziehen_absolut(x, y1, x, y2)
-    trail.append(f"Tradovate-Panel an der Leiste hochgezogen ({y1}->{y2}){'' if ok else ' — SendInput abgelehnt'}")
-    return ok
+    if not z["knopf"]:
+        trail.append("Tradovate-Panel zu flach, aber kein Knopf 'Maximize panel' benannt — "
+                     + tv_uia_spur([e for e in roh if e[1] and e[1][1] > z["kopf_y"] - 80], 6))
+        return False
+    _tv_uia_klick(z["knopf"], f"Panel maximieren ('{z['knopf']['text']}')", trail)
+    return True
+
+
+def _tv_panel_wiederherstellen(w, trail):
+    """Gegenstueck: 'Restore panel' klicken, damit Chart, Watchlist und Order-
+    Panel wieder da sind (im maximierten Panel gibt es beides nicht). Nur wenn
+    der Knopf da ist. -> True, wenn geklickt."""
+    try:
+        roh = _tv_uia_roh(w, ("Button",))
+    except Exception:
+        return False
+    for e in roh or ():
+        n = str(e[0]).strip()
+        if e[1] and TV_RX_PANEL_RESTORE.search(n) and not re.search(r"minim", n, re.I):
+            k = {"text": n[:40], "r": tuple(e[1]), "punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}
+            _tv_uia_klick(k, f"Panel wiederherstellen ('{n[:30]}')", trail)
+            _warte(0.6, 0.3)
+            return True
+    return False
 
 
 def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
@@ -2841,8 +2859,19 @@ def modus_tvkonto(cmd):
     res = {"ok": False, "msg": "", "trail": "", "schritt": "start",
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
     trail = _StempelSpur()      # jeder Eintrag traegt seine Sekunde seit Lauf-Start
+    fenster = [None]
+    maximiert = [False]         # Panel per 'Maximize panel' offen -> vor dem Ende 'Restore panel'
 
     def raus(msg, schritt):
+        # Maximiertes Panel IMMER zuruecknehmen — auch bei Absage: sonst bleibt der
+        # Chart verdeckt, und der Asset-Schritt faende Watchlist und Order-Panel nicht.
+        if maximiert[0]:
+            maximiert[0] = False
+            try:
+                if fenster[0]:
+                    _tv_panel_wiederherstellen(fenster[0], trail)
+            except Exception:
+                pass
         res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
         # Text-Suche wieder aus: sie laeuft durchs ganze DOM und soll nie im
         # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
@@ -2891,7 +2920,6 @@ def modus_tvkonto(cmd):
     _tv_http("/suche", {"texte": ids}, timeout=1.5)   # nur fuer Userscript 0.4.2+, sonst wirkungslos
 
     uia_info = {}
-    fenster = [None]
     aufgezogen = [False]        # Tradovate-Panel schon aufgezogen? (einmal pro Lauf)
 
     fenster_gesehen = [""]
@@ -2943,6 +2971,7 @@ def modus_tvkonto(cmd):
                 aufgezogen[0] = True
                 try:
                     if _tv_panel_aufziehen(w, trail):
+                        maximiert[0] = True
                         _warte(0.8, 0.3)
                         return lies()
                 except Exception as e_:
@@ -3618,6 +3647,7 @@ def modus_tvkonto(cmd):
     # 'Dropdown geoeffnet … 0 Treffer'). Kein Aufwand, wenn es schon offen ist.
     try:
         if _tv_panel_aufziehen(w, trail):
+            maximiert[0] = True
             _warte(0.8, 0.3)
     except Exception as e_:
         trail.append(f"Panel aufziehen: {type(e_).__name__}")
