@@ -24554,7 +24554,13 @@
     if(info) info.textContent = _tpOrderOrbit
       ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab, danach läuft der Duplikum-Check (Duplikum kopiert). Gestartet wird über „Starten" auf der Karte: Puls öffnet TradingView → Konto → Asset → Order-Panel → Buy/Sell.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
-    document.getElementById('tp-order-tp').value = plan.masterTp ?? ''
+    // TP-VORSCHLAG (22.09.2026, Finn: „beim Account gebe ich Max Profit/Trade an — bei jedem
+    // Trade, den ich plane, soll diese Zahl automatisch im Take Profit stehen"): steht am
+    // Plan noch kein TP, kommt der Wert vom Master-Account (max_profit_per_trade, z.B. 3.600).
+    // Ein gespeicherter TP bleibt; SL bleibt leer (oft die Auto-Liquidation), Lots tippt Finn.
+    const _accTp = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    const _tpVorschlag = (_accTp && Number(_accTp.maxProfitPerTrade) > 0) ? Number(_accTp.maxProfitPerTrade) : ''
+    document.getElementById('tp-order-tp').value = plan.masterTp ?? _tpVorschlag
     // SL dieser ORDER (31.08.2026, Finns Fund): steht seit heute in master_sl,
     // nicht mehr in master_risk. Fallback auf master_risk fuer alle Plaene, die
     // vor der Trennung gespeichert wurden — dort WAR der SL das Risiko.
@@ -24806,7 +24812,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.381'
+  const OS_TAB_BUILD = '2026-09-22.382'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
