@@ -3672,6 +3672,7 @@ def modus_tvkonto(cmd):
             # Firma dastehen.
             fenster[0] = None
             max_versucht[0] = False     # neuer Tab: Panel kann wieder flach laden
+            uia_info["aehnlich"] = []   # nur, was NACH dem Login zu sehen ist (alte Konten des vorigen Logins raus)
             start = time.time()
             ende = time.time() + 45.0
             while True:
@@ -3680,6 +3681,18 @@ def modus_tvkonto(cmd):
                     return raus(max_fehl[0], "panel")
                 if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
                     break
+                # NACH DEM EIGENEN LOGIN ist JEDES angezeigte Konto derselbe Login (22.09.2026
+                # 13:2x, Finns PC: nach dem Login mit TDFYU954156097 stand 'FTDFYSLX150141702701
+                # USD' im Panel — ein Konto dieses Logins, das Prophos nicht kennt (anderes
+                # Namensmuster als TDFYSL…) — und der Bot verlangte eines der BEKANNTEN Konten).
+                # Steht ein kontoartiger Text da, gilt 'gleicher_login': weiter zum Dropdown.
+                fremd = tv_fremdes_konto(uia_info.get("aehnlich"), ids)
+                if fremd and fenster[0]:
+                    els_f = _tv_uia_konten(fenster[0], [fremd.split()[0]], {})
+                    if len(els_f) == 1:
+                        zustand, aktiv, uia_el = "gleicher_login", fremd, els_f[0]
+                        trail.append(f"nach Login: unbekanntes Konto '{fremd[:40]}' — derselbe Login (gerade angemeldet), weiter per Dropdown")
+                        break
                 _warte(0.4, 0.3)
             res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
             trail.append(f"nach Login: '{aktiv[:40] or '-'}' -> {zustand}"
