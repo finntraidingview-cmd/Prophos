@@ -945,30 +945,23 @@ def main():
         and order_bot.tv_tab_rang("Prophos - Google Chrome", "", "") == 0
         and order_bot.tv_tab_rang("DevTools - NQZ2026 30,784.50 0%", "", "") == 0
         and order_bot.tv_tab_rang("30,784.50 0% Unnamed", "", "") == 0)
-    # Eingeklapptes Tradovate-Panel (22.09.2026, Finns PC): nur Kopfzeile sichtbar
+    # Tradovate-Panel hoch/runter (22.09.2026, Finns PC): Kandidaten fuer den ⤢-Knopf
     _FR = (0, 107, 2000, 1190)
     _PK = [("Tradovate", (100, 1122, 170, 1140), "Button"), ("Account Balance", (1016, 1165, 1116, 1183), "Text"),
-           ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"),
-           ("Maximize panel", (1280, 1122, 1296, 1140), "Button"), ("Symbol", (1656, 297, 1700, 315), "Text")]
-    chk("TV-PANEL: Kopfzeile am unteren Rand ohne Platz darunter = eingeklappt, Maximieren-Knopf in der Zeile gefunden",
-        (order_bot.tv_panel_eingeklappt(_PK, _FR) or {}).get("knopf", {}).get("text") == "Maximize panel"
-        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
-        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["kopf_y"] == 1174)
-    chk("TV-PANEL: zu flach ist DPI-relativ (11 % der Fensterhoehe); 'Restore panel' ist NIE der Aufklapp-Knopf",
-        order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 2060, 1116, 2078), "Text")], (0, 0, 3840, 2160)) is not None
-        and order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1800, 1116, 1818), "Text")], (0, 0, 3840, 2160)) is None
-        and order_bot.tv_panel_eingeklappt([("Restore panel", (1280, 1122, 1296, 1140), "Button")] + [x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
-        and order_bot.TV_RX_PANEL_RESTORE.search("Restore panel") and not order_bot.TV_RX_PANEL_RESTORE.search("Minimize panel"))
-    # Knopf ohne Namen (Finns PC): rechtester Knopf der 'Tradovate'-Zeile, links davon 'Minimize'
+           ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"), ("Symbol", (1656, 297, 1700, 315), "Text")]
     _KN = [("", (1570, 1122, 1586, 1140)), ("", (1608, 1122, 1624, 1140)), ("", (170, 1122, 190, 1140)), ("Publish", (1930, 208, 1990, 228))]
-    chk("TV-PANEL: ohne Namen zaehlt die Lage — rechtester Knopf in der Tradovate-Zeile ueber 'Profit', nie der Minimize links daneben, nie 'Publish' oben",
-        order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR, _KN)["knopf"]["punkt"] == (1616, 1131)
-        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR, [("", (170, 1122, 190, 1140))])["knopf"] is None
-        and order_bot.tv_panel_eingeklappt(_PK, _FR, _KN)["knopf"]["text"] == "Maximize panel")
-    chk("TV-PANEL: offenes Panel (Kopfzeile weit ueber dem Rand) oder keine Kopfzeile = nichts tun",
-        order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1030, 1116, 1048), "Text"), ("Equity", (1150, 1030, 1190, 1048), "Text")], _FR) is None
-        and order_bot.tv_panel_eingeklappt([("Symbol", (1656, 297, 1700, 315), "Text")], _FR) is None
-        and order_bot.tv_panel_eingeklappt(_PK, None) is None)
+    _LG = order_bot.tv_panel_lage(_PK, _KN, _FR)
+    chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann feste Lage ueber 'Profit'; nie 'Publish'",
+        _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174
+        and [k[:2] for k in _LG["kandidaten"]] == [(1616, 1131), (1578, 1131)]
+        and _LG["kandidaten"][0][2] == "unbenannter Knopf der Panelzeile")
+    chk("TV-PANEL: benannter Knopf 'Maximize panel' steht als erster Kandidat; ohne Knoepfe bleibt die feste Lage",
+        order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][2] == "Knopf 'Maximize panel'"
+        and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"] == [(1614, 1131, "feste Lage rechts ueber 'Profit'")])
+    chk("TV-PANEL: Lage 'oben' (Panel maximiert: Kopfzeile im oberen Drittel); ohne Kopfzeile None",
+        order_bot.tv_panel_lage([("Tradovate", (100, 208, 170, 226), "Button"), ("Account Balance", (1345, 252, 1445, 270), "Text"), ("Profit", (1585, 252, 1620, 270), "Text")], None, _FR)["zustand"] == "oben"
+        and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["zustand"] is None
+        and order_bot.tv_panel_lage(_PK, _KN, None)["zustand"] is None)
     # Klickpunkt am Fensterrand (22.09.2026 12:33, Finns PC): Umschalter ragt unter den Rand
     chk("TV-UIA: Klickpunkt bleibt 12 px ueber dem Fensterboden, wenn das Element darunter hinausragt",
         order_bot.tv_uia_filtern([("FNFTCHFINNSAMUELHERM11892 USD", (80, 1165, 330, 1200))], ["FNFTCHFINNSAMUELHERM11892"], (0, 0, 2000, 1186))[0]["punkt"] == (205, 1174)

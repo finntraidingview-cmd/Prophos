@@ -2113,42 +2113,73 @@ def tv_panel_eingeklappt(roh, fenster, knoepfe=None):
     return {"kopf_y": ky, "knopf": knopf, "leiste_y": leiste_y}
 
 
-def _tv_panel_aufziehen(w, trail):
-    """Zu flaches Tradovate-Panel oeffnen — ueber den Knopf 'Maximize panel' in
-    der Panel-Kopfzeile (Finn 22.09.2026 12:24, vier Screenshots mit Tooltips:
-    'Maximize panel' klappt das Panel ueber den ganzen Chart, dort steht die
-    Konto-Auswahl; 'Restore panel' bringt den Chart zurueck. Sein Wunsch: 'eine
-    einfache Loesung — auf dieses Ding druecken, Accounts switchen, dann wieder
-    drauf druecken'). Das Ziehen an der Trennleiste aus .356/.357 hat bei ihm
-    nichts bewirkt und ist raus. -> True, wenn maximiert wurde."""
-    fr = _tv_fenster_rect(w)
-    roh = _tv_uia_roh(w, ("Text", "Button"))
-    z = tv_panel_eingeklappt(roh, fr, _tv_uia_knoepfe_alle(w))
-    if not z:
-        return False
-    if not z["knopf"]:
-        trail.append("Tradovate-Panel zu flach, aber kein Knopf 'Maximize panel' benannt — "
-                     + tv_uia_spur([e for e in roh if e[1] and e[1][1] > z["kopf_y"] - 80], 6))
-        return False
-    _tv_uia_klick(z["knopf"], f"Panel maximieren ('{z['knopf']['text']}')", trail)
-    return True
-
-
-def _tv_panel_wiederherstellen(w, trail):
-    """Gegenstueck: 'Restore panel' klicken, damit Chart, Watchlist und Order-
-    Panel wieder da sind (im maximierten Panel gibt es beides nicht). Nur wenn
-    der Knopf da ist. -> True, wenn geklickt."""
-    try:
-        roh = _tv_uia_roh(w, ("Button",))
-    except Exception:
-        return False
+def tv_panel_lage(roh, knoepfe, fenster):
+    """Lage des Tradovate-Panels + Klick-Kandidaten fuer seinen Maximieren-/
+    Restore-Knopf (22.09.2026 12:5x, Finn: 'er soll so lange druecken, bis er ihn
+    findet, nicht jedes Mal neu testen'). Rein rechnend.
+    -> {'zustand': 'oben'|'unten'|None, 'kopf_y', 'kandidaten': [(x, y, wie)]}
+    Kopfzeile = 'Account Balance'/'Equity'/'Profit'. 'oben' = die Kopfzeile liegt
+    im oberen Drittel (Panel maximiert), 'unten' = im unteren Bereich. Knopfzeile
+    = Zeile des Broker-Knopfs 'Tradovate' (sonst 42 px ueber der Kopfzeile, Finns
+    Screenshot). Kandidaten, in dieser Reihenfolge: benannte Knoepfe
+    (maxim/expand/restore), unbenannte kleine Knoepfe der Zeile von rechts nach
+    links, und zuletzt die feste Lage 6 px links der rechten Kante von 'Profit'."""
+    if not fenster:
+        return {"zustand": None, "kopf_y": None, "kandidaten": []}
+    l, t, r, b = fenster
+    h = max(1, b - t)
+    kopf = [e for e in roh or () if e[1] and TV_RX_PANEL_KOPF.match(str(e[0]).strip())]
+    if not kopf:
+        return {"zustand": None, "kopf_y": None, "kandidaten": []}
+    ky = min((e[1][1] + e[1][3]) // 2 for e in kopf)
+    zustand = "oben" if ky < t + h * 0.34 else "unten"
+    rechts = max(e[1][2] for e in kopf)
+    zeile = [e for e in roh or () if e[1] and re.match(r"^tradovate\b", str(e[0]).strip(), re.I)
+             and ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10]
+    zy = (zeile[0][1][1] + zeile[0][1][3]) // 2 if zeile else ky - 42
+    kand = []
     for e in roh or ():
         n = str(e[0]).strip()
-        if e[1] and TV_RX_PANEL_RESTORE.search(n) and not re.search(r"minim", n, re.I):
-            k = {"text": n[:40], "r": tuple(e[1]), "punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}
-            _tv_uia_klick(k, f"Panel wiederherstellen ('{n[:30]}')", trail)
-            _warte(0.6, 0.3)
-            return True
+        if e[1] and (len(e) < 3 or e[2] in ("Button", "")) and re.search(r"(maxim|expand|restore|wiederherstell|vergr)", n, re.I) \
+           and abs((e[1][1] + e[1][3]) // 2 - zy) <= 25:
+            kand.append(((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2, f"Knopf '{n[:24]}'"))
+    klein = [(n, rr) for n, rr in (knoepfe or ()) if abs((rr[1] + rr[3]) // 2 - zy) <= 14
+             and rr[2] <= rechts + 30 and rr[0] >= rechts - 160 and (rr[2] - rr[0]) <= 60]
+    for n, rr in sorted(klein, key=lambda x: -x[1][2])[:3]:
+        kand.append(((rr[0] + rr[2]) // 2, (rr[1] + rr[3]) // 2, "unbenannter Knopf der Panelzeile"))
+    kand.append((rechts - 6, zy, "feste Lage rechts ueber 'Profit'"))
+    out = []
+    for x, y, wie in kand:
+        if any(abs(x - ox) <= 6 and abs(y - oy) <= 6 for ox, oy, _w in out):
+            continue
+        out.append((x, y, wie))
+    return {"zustand": zustand, "kopf_y": ky, "kandidaten": out}
+
+
+def _tv_panel_umschalten(w, trail, ziel):
+    """Panel per Knopf nach 'oben' (maximiert) oder 'unten' (wiederhergestellt)
+    bringen — Kandidaten nacheinander klicken und nach JEDEM Klick die Lage
+    zurueckerlesen, bis sie stimmt. -> True, wenn das Panel am Ende im Ziel-
+    Zustand ist (auch wenn es schon dort war)."""
+    fr = _tv_fenster_rect(w)
+    lage = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), _tv_uia_knoepfe_alle(w), fr)
+    if lage["zustand"] is None:
+        trail.append("Tradovate-Panel: keine Kopfzeile (Account Balance/Equity/Profit) zu sehen")
+        return False
+    if lage["zustand"] == ziel:
+        return True
+    probiert = []
+    for x, y, wie in lage["kandidaten"]:
+        _tv_uia_klick({"punkt": (x, y)}, f"Panel {'maximieren' if ziel == 'oben' else 'wiederherstellen'} ({wie})", trail)
+        probiert.append(f"{wie}@{x},{y}")
+        ende = time.time() + 2.0
+        while time.time() < ende:
+            _warte(0.4, 0.25)
+            neu = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), None, fr)
+            if neu["zustand"] == ziel:
+                trail.append(f"Panel ist jetzt {ziel}")
+                return True
+    trail.append(f"Panel blieb {lage['zustand']} — probiert: " + " | ".join(probiert))
     return False
 
 
@@ -2916,8 +2947,19 @@ def modus_tvkonto(cmd):
            "zustand": "", "konto_aktiv": "", "dump": "", "diagnose": None}
     trail = _StempelSpur()      # jeder Eintrag traegt seine Sekunde seit Lauf-Start
     fenster = [None]
+    maximiert = [False]         # Panel per Knopf nach oben geholt -> am Ende wieder nach unten
+    max_versucht = [False]      # einmal pro Tab probieren
 
     def raus(msg, schritt):
+        # Panel IMMER wieder nach unten — auch bei Absage: maximiert verdeckt es den
+        # Chart, und der Asset-Schritt faende Watchlist und Order-Panel nicht.
+        if maximiert[0]:
+            maximiert[0] = False
+            try:
+                if fenster[0]:
+                    _tv_panel_umschalten(fenster[0], trail, "unten")
+            except Exception:
+                pass
         res["msg"], res["schritt"], res["trail"] = msg, schritt, " > ".join(trail)
         # Text-Suche wieder aus: sie laeuft durchs ganze DOM und soll nie im
         # Dauerbetrieb mitlaufen (der Server schaltet nach 90 s ohnehin ab).
@@ -3008,10 +3050,19 @@ def modus_tvkonto(cmd):
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
                 return z2, e["text"], b, e
-            # (Das Aufziehen/Maximieren des Panels aus .356-.359 ist NICHT mehr verdrahtet —
-            # Finn 22.09.2026 12:33: der Umschalter unten links reicht, die Liste klappt nach
-            # OBEN auf; das eigentliche Problem war der Klickpunkt unter dem Fensterrand,
-            # s. tv_uia_filtern.)
+            # Kein Konto zu sehen (Finns PC, 22.09.2026 12:5x: 'nach Login: - -> kein_broker'
+            # — das Panel unten ist so flach, dass die Kontozeile ganz fehlt): Panel per
+            # Knopf nach OBEN holen (hartnaeckig, s. _tv_panel_umschalten), dann neu lesen.
+            # Einmal pro Tab; am Ende des Laufs geht es wieder nach unten (raus).
+            if not els and not max_versucht[0] and not tv_fremdes_konto(uia_info.get("aehnlich"), ids):
+                max_versucht[0] = True
+                try:
+                    if _tv_panel_umschalten(w, trail, "oben"):
+                        maximiert[0] = True
+                        _warte(0.6, 0.3)
+                        return lies()
+                except Exception as e_:
+                    trail.append(f"Panel maximieren: {type(e_).__name__}")
         return z, a, b, None
 
     ende = time.time() + (40.0 if gestartet else 14.0)
@@ -3591,6 +3642,7 @@ def modus_tvkonto(cmd):
             # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
             # Firma dastehen.
             fenster[0] = None
+            max_versucht[0] = False     # neuer Tab: Panel kann wieder flach laden
             start = time.time()
             ende = time.time() + 45.0
             while True:
@@ -3681,6 +3733,20 @@ def modus_tvkonto(cmd):
         hwnd = w.handle
     except Exception:
         return ab("Browser-Fenster ohne Handle — Fenster neu oeffnen.")
+    # Vor dem Dropdown (Finns PC): Panel nach oben, damit die Liste Platz hat —
+    # bei Moritz (Panel offen, Liste passt) hat das bisher nie gefehlt; deshalb nur,
+    # wenn der Umschalter im unteren Zehntel des Fensters sitzt.
+    try:
+        fr_d = _tv_fenster_rect(w)
+        if uia_el and fr_d and uia_el["punkt"][1] > fr_d[1] + (fr_d[3] - fr_d[1]) * 0.9:
+            if _tv_panel_umschalten(w, trail, "oben"):
+                maximiert[0] = True
+                _warte(0.6, 0.3)
+                els_n = _tv_uia_konten(w, ids, uia_info)
+                if len(els_n) == 1:
+                    uia_el = els_n[0]
+    except Exception as e_:
+        trail.append(f"Panel maximieren: {type(e_).__name__}")
     _warte(0.3, 0.3)
 
     # Umschalter anklicken — mit dem Auge, das ihn gesehen hat.
