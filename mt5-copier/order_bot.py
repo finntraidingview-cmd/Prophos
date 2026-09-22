@@ -1959,6 +1959,39 @@ def _tv_uia_felder(w):
         return None
 
 
+def _tv_uia_knoepfe_alle(w):
+    """ALLE sichtbaren Knoepfe eines Fensters, auch UNBENANNTE, in einem UIA-Aufruf.
+    -> [(name, (l,t,r,b))] oder None. (22.09.2026 12:3x, Finns PC: der ⤢-Knopf
+    'Maximize panel' traegt nur einen Tooltip, keinen Accessibility-Namen — die
+    Sammelabfrage laesst Namenloses weg, hier zaehlt die LAGE.)"""
+    if _UIA_SAMMEL["geht"] is False:
+        return None
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        dll = u.UIA_dll
+        anfrage = u.iuia.CreateCacheRequest()
+        for pid in (dll.UIA_NamePropertyId, dll.UIA_BoundingRectanglePropertyId, dll.UIA_IsOffscreenPropertyId):
+            anfrage.AddProperty(pid)
+        bed = u.iuia.CreatePropertyCondition(dll.UIA_ControlTypePropertyId, _UIA_TYPID["Button"])
+        feld = w.element_info.element.FindAllBuildCache(u.tree_scope["descendants"], bed, anfrage)
+        out = []
+        for i in range(feld.Length):
+            e = feld.GetElement(i)
+            try:
+                if e.CachedIsOffscreen:
+                    continue
+                r = e.CachedBoundingRectangle
+                if r.right - r.left < 6 or r.bottom - r.top < 6:
+                    continue
+                out.append((str(e.CachedName or "").strip(), (r.left, r.top, r.right, r.bottom)))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return None
+
+
 def _tv_uia_schalter(w):
     """Alle Umschalter (Toggle-Muster) eines Fensters in EINEM Aufruf (22.09.2026
     01:50, Finns Lauf: 'er platziert nur einen TP, SL vergisst er komplett' —
@@ -2013,12 +2046,12 @@ def tv_schalter_zu(schalter, label_r, bereich):
     return best if best else (None, None)
 
 
-TV_RX_PANEL_KOPF = re.compile(r"^(account balance|kontostand|equity|eigenkapital)$", re.I)
+TV_RX_PANEL_KOPF = re.compile(r"^(account balance|kontostand|equity|eigenkapital|profit|gewinn)$", re.I)
 TV_RX_PANEL_MAX = re.compile(r"(maxim|expand|vergr|erweiter|aufklapp)", re.I)
 TV_RX_PANEL_RESTORE = re.compile(r"(restore|wiederherstell)", re.I)
 
 
-def tv_panel_eingeklappt(roh, fenster):
+def tv_panel_eingeklappt(roh, fenster, knoepfe=None):
     """Ist das Tradovate-Panel unten nur als KOPFZEILE zu sehen? (22.09.2026,
     Finns PC, erster Lauf: 'unten sieht man den Accountnamen nicht — man muesste
     das Fenster an der Leiste hochziehen'; bei Moritz laedt es aufgeklappt.)
@@ -2054,6 +2087,22 @@ def tv_panel_eingeklappt(roh, fenster):
         if TV_RX_PANEL_MAX.search(n) and -60 <= (e[1][1] + e[1][3]) // 2 - ky <= 25:
             knopf = {"text": n[:40], "r": tuple(e[1]), "punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}
             break
+    if knopf is None and knoepfe:
+        # OHNE Namen ueber die LAGE (Finns Screenshot 12:22): die Knopfzeile ist die
+        # Zeile des Broker-Knopfs 'Tradovate' (ueber der Kopfzeile); 'Maximize panel'
+        # ist darin der RECHTESTE Knopf, direkt links daneben 'Minimize'. Rechts
+        # begrenzt die Kopfzeile selbst (rechte Kante von 'Profit'/'Equity').
+        zeile = [e for e in roh or () if e[1] and re.match(r"^tradovate\b", str(e[0]).strip(), re.I)
+                 and ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10]
+        if zeile:
+            zy = (zeile[0][1][1] + zeile[0][1][3]) // 2
+            rechts = max(e[1][2] for e in kopf)
+            kand = [(n, r) for n, r in knoepfe if abs((r[1] + r[3]) // 2 - zy) <= 14
+                    and r[2] <= rechts + 30 and r[0] >= rechts - 160 and (r[2] - r[0]) <= 60]
+            if kand:
+                n, r = max(kand, key=lambda x: x[1][2])
+                knopf = {"text": (n or "unbenannt, rechtester Knopf der Panelzeile")[:40], "r": tuple(r),
+                         "punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)}
     return {"kopf_y": ky, "knopf": knopf, "leiste_y": leiste_y}
 
 
@@ -2067,7 +2116,7 @@ def _tv_panel_aufziehen(w, trail):
     nichts bewirkt und ist raus. -> True, wenn maximiert wurde."""
     fr = _tv_fenster_rect(w)
     roh = _tv_uia_roh(w, ("Text", "Button"))
-    z = tv_panel_eingeklappt(roh, fr)
+    z = tv_panel_eingeklappt(roh, fr, _tv_uia_knoepfe_alle(w))
     if not z:
         return False
     if not z["knopf"]:

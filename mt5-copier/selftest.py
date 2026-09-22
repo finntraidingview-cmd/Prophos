@@ -948,7 +948,7 @@ def main():
     # Eingeklapptes Tradovate-Panel (22.09.2026, Finns PC): nur Kopfzeile sichtbar
     _FR = (0, 107, 2000, 1190)
     _PK = [("Tradovate", (100, 1122, 170, 1140), "Button"), ("Account Balance", (1016, 1165, 1116, 1183), "Text"),
-           ("Equity", (1150, 1165, 1190, 1183), "Text"), ("Profit", (1255, 1165, 1290, 1183), "Text"),
+           ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"),
            ("Maximize panel", (1280, 1122, 1296, 1140), "Button"), ("Symbol", (1656, 297, 1700, 315), "Text")]
     chk("TV-PANEL: Kopfzeile am unteren Rand ohne Platz darunter = eingeklappt, Maximieren-Knopf in der Zeile gefunden",
         (order_bot.tv_panel_eingeklappt(_PK, _FR) or {}).get("knopf", {}).get("text") == "Maximize panel"
@@ -959,6 +959,12 @@ def main():
         and order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1800, 1116, 1818), "Text")], (0, 0, 3840, 2160)) is None
         and order_bot.tv_panel_eingeklappt([("Restore panel", (1280, 1122, 1296, 1140), "Button")] + [x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
         and order_bot.TV_RX_PANEL_RESTORE.search("Restore panel") and not order_bot.TV_RX_PANEL_RESTORE.search("Minimize panel"))
+    # Knopf ohne Namen (Finns PC): rechtester Knopf der 'Tradovate'-Zeile, links davon 'Minimize'
+    _KN = [("", (1570, 1122, 1586, 1140)), ("", (1608, 1122, 1624, 1140)), ("", (170, 1122, 190, 1140)), ("Publish", (1930, 208, 1990, 228))]
+    chk("TV-PANEL: ohne Namen zaehlt die Lage — rechtester Knopf in der Tradovate-Zeile ueber 'Profit', nie der Minimize links daneben, nie 'Publish' oben",
+        order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR, _KN)["knopf"]["punkt"] == (1616, 1131)
+        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR, [("", (170, 1122, 190, 1140))])["knopf"] is None
+        and order_bot.tv_panel_eingeklappt(_PK, _FR, _KN)["knopf"]["text"] == "Maximize panel")
     chk("TV-PANEL: offenes Panel (Kopfzeile weit ueber dem Rand) oder keine Kopfzeile = nichts tun",
         order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1030, 1116, 1048), "Text"), ("Equity", (1150, 1030, 1190, 1048), "Text")], _FR) is None
         and order_bot.tv_panel_eingeklappt([("Symbol", (1656, 297, 1700, 315), "Text")], _FR) is None
