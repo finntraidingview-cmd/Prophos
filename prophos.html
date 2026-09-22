@@ -1186,6 +1186,29 @@
   #adm-pane-wd .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
   #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
+  #adm-pane-wd .wd-ablauf-tab tr.id td{transition:background .12s var(--ease)}
+  #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:var(--surface-tint)}
+  #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(18,183,106,.07)}
+  #adm-pane-wd .wd-ablauf-tab tr.offen td{background:var(--violet-tint);border-bottom:0}
+  #adm-pane-wd .wd-ablauf-tab tr.offen td:nth-child(4){color:var(--violet)}
+  #adm-pane-wd .wd-ablauf-tab td.pfeil{width:14px;color:var(--sub)}
+  #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 12px 18px;background:var(--surface-tint)}
+  #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px;background:var(--surface, #fff)}
+  #adm-pane-wd .wd-konten tr.wd-ohne td{border-bottom:0;padding-top:6px}
+  #adm-pane-wd .wd-aus-chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:999px;padding:1px 4px 1px 9px;font-size:12px}
+  #adm-pane-wd .btn-xs{padding:1px 7px;font-size:11px;height:auto;line-height:1.5}
+  #adm-pane-wd .wd-konten{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+  #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
+  #adm-pane-wd .wd-konten td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+  #adm-pane-wd .wd-konten tr:last-child td{border-bottom:0}
+  #adm-pane-wd .wd-konten tr.aus td{opacity:.5}
+  #adm-pane-wd .wd-konten tr.aus td:first-child{opacity:1}
+  #adm-pane-wd .wd-konten .wd-in{width:70px}
+  #adm-pane-wd .wd-hedge-kopf{font-weight:600;font-size:13px;margin:14px 0 6px}
+  #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
+  #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
+  #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
   #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:rgba(0,0,0,.025)}
   #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(42,157,92,.07)}
   #adm-pane-wd .wd-ablauf-tab tr.offen td{background:rgba(99,91,255,.06);border-bottom:0}
@@ -7345,16 +7368,13 @@
                  nirgends überarbeiten") — dieselben Regeln wie „Futures vorplanen" (wd_farmer_regeln.vorplan) -->
             <div class="wd-hedge-kopf">Hedge-Tabelle <span style="font-weight:400;color:var(--sub);font-size:12px">· Slave-Betrag nach Stand über der Kontogröße · TP je Firma (zufällig aus der Spanne, außer das Konto hat eine TP-Vorgabe)</span></div>
             <div class="wd-hedge-zeile">
-              <table class="wd-tab wd-hedge">
-                <thead><tr><th>Stand über Kontogröße ($)</th><th>Slave (€)</th></tr></thead>
-                <tbody>
-                  <tr><td>unter 2.000</td><td><input type="number" class="input mono vp-in" data-wd-st="0" min="0" step="5"></td></tr>
-                  <tr><td>2.000 – 4.000</td><td><input type="number" class="input mono vp-in" data-wd-st="1" min="0" step="5"></td></tr>
-                  <tr><td>4.000 – 6.000</td><td><input type="number" class="input mono vp-in" data-wd-st="2" min="0" step="5"></td></tr>
-                  <tr><td>6.000 – 8.000</td><td><input type="number" class="input mono vp-in" data-wd-st="3" min="0" step="5"></td></tr>
-                  <tr><td>über 8.000</td><td><input type="number" class="input mono vp-in" data-wd-st="4" min="0" step="5"></td></tr>
-                </tbody>
-              </table>
+              <div>
+                <table class="wd-tab wd-hedge" id="wd-staffel">
+                  <thead><tr><th>ab Stand über Kontogröße ($)</th><th></th><th>Slave (€)</th><th></th></tr></thead>
+                  <tbody id="wd-staffel-body"></tbody>
+                </table>
+                <button type="button" class="btn btn-ghost btn-xs" id="wd-staffel-add" style="margin-top:6px">+ Zeile</button>
+              </div>
               <table class="wd-tab wd-hedge">
                 <thead><tr><th>Firma</th><th>TP von ($)</th><th>TP bis ($)</th></tr></thead>
                 <tbody>
@@ -25549,7 +25569,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.404'
+  const OS_TAB_BUILD = '2026-09-22.405'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29764,7 +29784,36 @@
    * (max_profit_per_trade / max_loss_per_trade) und sofort in den noch nicht gestarteten Plan.
    * Alles in Dubai-Zeit; Zustand der Pläne direkt aus Railway. ── */
   const wdSay = (t, k) => { const m = document.getElementById('wdMsg'); if(m){ m.textContent = t || ''; m.className = 'modal-msg' + (k ? ' ' + k : '') } }
-  const WD_STAFFEL_LABEL = ['unter 2.000', '2.000 – 4.000', '4.000 – 6.000', '6.000 – 8.000', 'über 8.000']
+  /* Hedge-Staffel als freie Liste (Finn 23.09.2026: „auf ein PLUS drücken und eine Zeile eingeben — von Balance bis
+   * Balance, rechts der Betrag — nochmal Plus für die nächste Zeile, dann Speichern"): [{von, bis, eur}], von = Stand
+   * über der Kontogröße in $ (aufsteigend), bis = nur Anzeige (nächstes von), eur = Slave-Betrag. Altes 5-Zahlen-
+   * Format wird beim Lesen umgerechnet — tpStaffelListe (.404) macht dasselbe für tpVorplanStaffel. */
+  function wdStaffelListe(st){
+    if(typeof tpStaffelListe === 'function'){ try{ return tpStaffelListe(st) }catch(_){} }
+    if(Array.isArray(st) && st.length && typeof st[0] === 'object') return st.map(z => ({ von: +z.von || 0, bis: z.bis == null ? null : +z.bis, eur: +z.eur || 0 })).sort((a, b) => a.von - b.von)
+    const s = (Array.isArray(st) && st.length === 5) ? st : TP_VP_VORGABE.staffel
+    return [0, 2000, 4000, 6000, 8000].map((von, i) => ({ von, bis: i < 4 ? [2000, 4000, 6000, 8000][i] : null, eur: +s[i] || 0 }))
+  }
+  function wdStaffelLesen(){
+    const out = []
+    document.querySelectorAll('#wd-staffel-body tr').forEach(tr => {
+      const v = parseFloat(tr.querySelector('[data-wd-sv]')?.value), e = parseFloat(tr.querySelector('[data-wd-se]')?.value)
+      out.push({ von: isFinite(v) ? Math.max(0, Math.round(v)) : 0, bis: null, eur: isFinite(e) ? Math.max(0, Math.round(e * 100) / 100) : 0 })
+    })
+    out.sort((a, b) => a.von - b.von)
+    out.forEach((z, i) => { z.bis = i + 1 < out.length ? out[i + 1].von : null })
+    return out
+  }
+  function wdStaffelRender(liste){
+    const tb = document.getElementById('wd-staffel-body'); if(!tb) return
+    tb.innerHTML = liste.map((z, i) => `<tr><td><input type="number" class="input mono vp-in" data-wd-sv="${i}" value="${z.von}" min="0" step="100" style="width:82px"></td><td class="mono kf">${i + 1 < liste.length ? 'bis ' + wdDe(liste[i + 1].von) : 'offen'}</td><td><input type="number" class="input mono vp-in" data-wd-se="${i}" value="${z.eur}" min="0" step="5"></td><td><button type="button" class="btn btn-ghost btn-xs" data-wd-sx="${i}" title="Zeile entfernen">✕</button></td></tr>`).join('')
+    tb.querySelectorAll('[data-wd-sx]').forEach(b => b.addEventListener('click', () => { const l = wdStaffelLesen(); l.splice(+b.dataset.wdSx, 1); wdStaffelRender(l) }))
+    tb.querySelectorAll('[data-wd-sv]').forEach(el => el.addEventListener('change', () => wdStaffelRender(wdStaffelLesen())))
+  }
+  document.getElementById('wd-staffel-add')?.addEventListener('click', () => {
+    const l = wdStaffelLesen(), last = l[l.length - 1]
+    l.push({ von: last ? last.von + 2000 : 0, bis: null, eur: last ? last.eur + 10 : 50 }); wdStaffelRender(l)
+  })
   function wdRegelnInsFormular(){
     const r = _wd.regeln || {}, g = id => document.getElementById(id)
     if(g('wd-aktiv')) g('wd-aktiv').checked = !!r.aktiv
@@ -29775,10 +29824,10 @@
     if(g('wd-abst-max')) g('wd-abst-max').value = r.abstand_max != null ? r.abstand_max : 4
     // Hedge-Tabelle (23.09.2026, Finn: „die Tabelle, wie viel gegengehedgt wird, steht nirgendwo und ich
     // kann sie nirgends überarbeiten") — dieselben Regeln wie „Futures vorplanen" (wd_farmer_regeln.vorplan)
-    const vp = wdVorplanRegeln(), fu = vp.regeln.fu || TP_VP_VORGABE.fu, st = (Array.isArray(vp.regeln.staffel) && vp.regeln.staffel.length === 5) ? vp.regeln.staffel : TP_VP_VORGABE.staffel
+    const vp = wdVorplanRegeln(), fu = vp.regeln.fu || TP_VP_VORGABE.fu
     if(g('wd-instr')) g('wd-instr').value = vp.instr
     if(g('wd-kt')) g('wd-kt').value = vp.kt
-    st.forEach((v, i) => { const el = document.querySelector(`#adm-pane-wd [data-wd-st="${i}"]`); if(el) el.value = v })
+    wdStaffelRender(wdStaffelListe(vp.regeln.staffel))
     for(const k of TP_VP_FIRMEN){
       const sp = Array.isArray(fu[k]) ? fu[k] : TP_VP_VORGABE.fu[k]
       const a = document.querySelector(`#adm-pane-wd [data-wd-fu="${k}-von"]`), b = document.querySelector(`#adm-pane-wd [data-wd-fu="${k}-bis"]`)
@@ -29790,7 +29839,10 @@
     const vp = wdVorplanRegeln(), q = sel => parseFloat(document.querySelector(`#adm-pane-wd ${sel}`)?.value)
     const fu = {}
     for(const k of TP_VP_FIRMEN) fu[k] = tpVorplanSpanne(q(`[data-wd-fu="${k}-von"]`), q(`[data-wd-fu="${k}-bis"]`))
-    const staffel = [0, 1, 2, 3, 4].map(i => { const v = q(`[data-wd-st="${i}"]`); return (v >= 0) ? v : TP_VP_VORGABE.staffel[i] })
+    const liste = wdStaffelLesen()
+    if(!liste.length) return wdSay('Mindestens eine Staffel-Zeile nötig.', 'err')
+    // Liste [{von,bis,eur}] — nur wenn der Leser (tpStaffelListe, .404) da ist; sonst das alte 5-Zahlen-Format
+    const staffel = (typeof tpStaffelListe === 'function') ? liste : [0, 2001, 4001, 6001, 8001].map(p => (liste.filter(z => z.von <= p).pop() || liste[0]).eur)
     const instr = document.getElementById('wd-instr')?.value === 'nq' ? 'nq' : 'mnq'
     const kt = Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1))
     await wdVorplanRegelnSpeichern({ instr, kt, regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, staffel } })
@@ -29857,7 +29909,8 @@
   }
   // Anzeige-Helfer (Ebene 2): Zustand je Konto und die aufgeklappte ID
   const wdDe = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
-  const wdChip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], leer: ['— nichts drin', 'var(--sub)'], laeuft: ['▶ läuft', '#2a9d5c'], fertig: ['✓ fertig', '#2a9d5c'], verpasst: ['✗ verpasst', 'var(--danger)'], erwartet: ['noch nicht eingetragen', 'var(--sub)'] }[st] || [st, 'var(--sub)'])
+  // Chips in der Optik der Admin-Übersicht (Finn: „so wie in Übersicht und Acc-Käufe — farblich schön")
+  const wdChip = st => { const [t, k] = ({ geplant: ['⏰ geplant', 'neutral'], leer: ['— nichts drin', 'neutral'], laeuft: ['▶ läuft', 'good'], fertig: ['✓ fertig', 'good'], verpasst: ['✗ verpasst', 'bad'], erwartet: ['noch nicht eingetragen', 'warn'] }[st] || [st, 'neutral']); return `<span class="chip chip-${k}">${escapeHtml(t)}</span>` }
   function wdStand(k){
     const de = wdDe
     if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Haken setzen, dann speichern</span>`
@@ -29878,7 +29931,11 @@
     const uid = escapeHtml(String(x.user_id))
     const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
     const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
-    const zeilen = (x.konten || []).map(k => {
+    // Nur Konten mit Farm-Haken zeigen (Finn: „sonst sehe ich jeden Funded, bei dem manche noch rumchillen") —
+    // die ohne Haken zusammengeklappt in einer Zeile, auf Wunsch einblenden
+    const zeigOhne = !!(_wd.zeigOhne || {})[uid]
+    const ohne = (x.konten || []).filter(k => !k.farm && !k.plan_id), sichtbar = (x.konten || []).filter(k => k.farm || k.plan_id || zeigOhne)
+    const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
       const planFest = (k.plan_id && k.status && k.status !== 'planned') || k.gestartet
@@ -29900,6 +29957,7 @@
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
         <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}</td></tr>`
     }).join('')
+    const ohneZeile = ohne.length ? `<tr class="wd-ohne"><td></td><td colspan="9"><button type="button" class="btn btn-ghost btn-xs" data-wd-ohne="${uid}">${zeigOhne ? '▾ ' + ohne.length + ' ohne Haken ausblenden' : '▸ ' + ohne.length + ' weitere ohne Haken einblenden'}</button></td></tr>` : ''
     const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
     const nAkt = (x.konten || []).filter(wdAktiv).length
     return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
@@ -29911,7 +29969,7 @@
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
         <span class="kf" style="margin-left:auto">Haken = dauerhaft · TP/SL = Vorgabe je Konto · dann „Änderungen speichern"</span>
       </div>
-      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}</tbody></table>${hinweis}</div>`
+      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
@@ -29935,17 +29993,17 @@
         const k = (x.konten || []), n = drin(x), mitPlan = k.filter(q => wdAktiv(q) && q.plan_id).length
         const ende = x.start_um ? new Date(x.start_um).getTime() + wdDauerMs(x, r) : 0
         const jetzt = x.start_um && now >= new Date(x.start_um).getTime() && now <= ende
-        const [ct, cc] = wdChip(erw ? 'erwartet' : x.status)
+        const chipHtml = wdChip(erw ? 'erwartet' : x.status)
         const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
         const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
         const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
           <td class="pfeil">${offen ? '▾' : '▸'}</td><td class="mono">${x.reihenfolge ? 'Block ' + x.reihenfolge : '—'}</td>
           <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
           <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
-          <td>${x.richtung === 'buy' ? '<span style="color:#2a9d5c">▲ BUY</span>' : x.richtung === 'sell' ? '<span style="color:var(--danger)">▼ SELL</span>' : '—'}</td>
+          <td>${x.richtung === 'buy' ? '<span class="chip chip-good">▲ BUY</span>' : x.richtung === 'sell' ? '<span class="chip chip-bad">▼ SELL</span>' : '<span class="kf">—</span>'}</td>
           <td class="mono">${n}<span class="kf"> / ${k.length}</span></td><td class="mono">${wdSum}</td>
           <td class="mono">${mitPlan}${n && mitPlan < n ? `<span style="color:var(--danger)"> / ${n}</span>` : ''}</td>
-          <td style="color:${cc}">${ct}${gestartet ? ` · ${gestartet} gestartet` : ''}</td></tr>`
+          <td>${chipHtml}${gestartet ? `<span class="kf"> · ${gestartet} gestartet</span>` : ''}</td></tr>`
         return zeile + (offen ? `<tr class="wd-detail"><td colspan="9">${wdKarte(x, erw)}</td></tr>` : '')
       }).join('') + '</tbody></table>'
     box.querySelectorAll('tr[data-wd-open]').forEach(tr => tr.addEventListener('click', ev => {
@@ -29957,6 +30015,10 @@
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
       if(b.disabled) return
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
+    }))
+    box.querySelectorAll('[data-wd-ohne]').forEach(b => b.addEventListener('click', () => {
+      _wd.zeigOhne = _wd.zeigOhne || {}; _wd.zeigOhne[b.dataset.wdOhne] = !_wd.zeigOhne[b.dataset.wdOhne]
+      wdAblauf(_wd.rows || [], wdFehlend())
     }))
     // ID-Haken: alle Konten des Blocks rein/raus (nur die, die sich noch ändern lassen)
     box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', () => {
