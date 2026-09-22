@@ -5543,6 +5543,14 @@
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-winning-day-hint"></div>
             </div>
+            <!-- 🌾 WD-Farm-Haken nach dem Trade (23.09.2026, Finn: „oder nach dem Trade einen Haken setzen") -->
+            <div class="field" style="grid-column:span 2" id="tc-wd-farm-wrap" hidden>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+                <input type="checkbox" id="tc-wd-farm" style="width:16px;height:16px;flex-shrink:0">
+                <span style="color:var(--ink);font-weight:500" id="tc-wd-farm-label">🌾 Zu WD-Farm hinzufügen</span>
+              </label>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Nur angehakte Fundeds fährt der Winning-Day-Farmer nachts von allein. Haken raus = raus aus dem Farm.</div>
+            </div>
             <div class="field" style="grid-column:span 2">
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
@@ -8326,6 +8334,14 @@
           <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Broker-Account-Nummer. Wird als #ID-Badge in Trade-Plänen angezeigt.</div>
         </div>
+        <!-- 🌾 WD-Farm (23.09.2026): nur angehakte Fundeds fährt der Winning-Day-Farmer (Admin → Winning Days) -->
+        <div class="field" style="grid-column:1/-1" id="ac-wd-farm-row">
+          <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
+            <input type="checkbox" id="ac-wd-farm" style="width:16px;height:16px;flex-shrink:0">
+            <span style="font-weight:500">🌾 Zu WD-Farm hinzufügen</span>
+            <span style="font-size:11.5px;color:var(--sub)">— nur angehakte Fundeds fährt der Winning-Day-Farmer nachts von allein</span>
+          </label>
+        </div>
       </div>
 
       <!-- Fortschritts-Ziel (10.09.2026, Finn: "man weiß nie, wie viele Winning Days
@@ -8645,6 +8661,13 @@
         <div class="field">
           <label>Max Profit / Trade ($)</label>
           <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
+            <input type="checkbox" id="bulk-wd-farm" style="width:16px;height:16px;flex-shrink:0">
+            <span style="font-weight:500">🌾 Zu WD-Farm hinzufügen</span>
+            <span style="font-size:11.5px;color:var(--sub)">— alle angelegten Konten fährt der Winning-Day-Farmer</span>
+          </label>
         </div>
       </div>
 
@@ -18405,6 +18428,9 @@
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
+      // 🌾 WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
+      // hinzufügen' — manche Fundeds stehen noch auf Anfangs-Balance"): nur so markierte Konten fährt der Farmer.
+      wdFarm:         !!row.wd_farm,
       // Fortschritts-Ziel (10.09.2026): "3 von 5 Winning Days" pro Account
       goalKind:       row.goal_kind || null,
       goalTarget:     row.goal_target      != null ? Number(row.goal_target)      : null,
@@ -18454,6 +18480,7 @@
       max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null,
       max_loss_per_trade:   a.maxLossPerTrade   != null ? a.maxLossPerTrade   : null,
       max_profit_per_trade: a.maxProfitPerTrade != null ? a.maxProfitPerTrade : null,
+      wd_farm: !!a.wdFarm,
       goal_kind:        a.goalKind       || null,
       goal_target:      a.goalTarget     != null ? a.goalTarget     : null,
       goal_min_profit:  a.goalMinProfit  != null ? a.goalMinProfit  : null,
@@ -18525,6 +18552,7 @@
     purchase: document.getElementById('ac-purchase-cost'),
     maxDd:    document.getElementById('ac-max-drawdown'),
     extId:    document.getElementById('ac-ext-id'),
+    wdFarm:   document.getElementById('ac-wd-farm'),
     goalKind:      document.getElementById('ac-goal-kind'),
     goalTarget:    document.getElementById('ac-goal-target'),
     goalSince:     document.getElementById('ac-goal-since'),
@@ -19295,6 +19323,7 @@
       accEls.purchase.value = editAccount.purchaseCost != null ? editAccount.purchaseCost : ''
       accEls.maxDd.value = editAccount.maxDrawdown != null ? editAccount.maxDrawdown : ''
       if(accEls.extId) accEls.extId.value = editAccount.externalId || ''
+      if(accEls.wdFarm) accEls.wdFarm.checked = !!editAccount.wdFarm
       // Fortschritts-Ziel vorausfüllen (Min-Gewinn/Schon-erledigt seit 10.09. ohne Feld)
       if(accEls.goalKind)   accEls.goalKind.value   = editAccount.goalKind || ''
       if(accEls.goalTarget) accEls.goalTarget.value = editAccount.goalTarget != null ? editAccount.goalTarget : ''
@@ -19318,6 +19347,7 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.extId) accEls.extId.value = ''
+      if(accEls.wdFarm) accEls.wdFarm.checked = false
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
       if(accEls.credLogin)    accEls.credLogin.value    = ''
@@ -19489,6 +19519,7 @@
         goalManualLast: vorher?.goalManualLast || null
       }),
       payoutReadyAt:  payoutReadyVal,
+      wdFarm:         !!accEls.wdFarm?.checked,
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -19551,6 +19582,7 @@
           max_daily_drawdown: acc.maxDailyDrawdown,
           max_loss_per_trade: acc.maxLossPerTrade,
           max_profit_per_trade: acc.maxProfitPerTrade,
+          wd_farm: !!acc.wdFarm,
           external_id: acc.externalId,
           goal_kind:        acc.goalKind,
           goal_target:      acc.goalTarget,
@@ -20020,6 +20052,7 @@
       maxDailyDd: document.getElementById('bulk-max-daily-dd'),
       maxLossTrade:   document.getElementById('bulk-max-loss-trade'),
       maxProfitTrade: document.getElementById('bulk-max-profit-trade'),
+      wdFarm:    document.getElementById('bulk-wd-farm'),
       count:     document.getElementById('bulk-count'),
       startnum:  document.getElementById('bulk-startnum'),
       template:  document.getElementById('bulk-nametemplate'),
@@ -20262,6 +20295,7 @@
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
       if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = ''
       if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = ''
+      if(bEl.wdFarm) bEl.wdFarm.checked = false
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
@@ -20348,6 +20382,7 @@
           max_loss_per_trade:   !isNaN(maxLossTradeRaw)   && maxLossTradeRaw   > 0 ? maxLossTradeRaw   : null,
           max_profit_per_trade: !isNaN(maxProfitTradeRaw) && maxProfitTradeRaw > 0 ? maxProfitTradeRaw : null,
           external_id:    extId,
+          wd_farm:        !!bEl.wdFarm?.checked,
         }
         if(cred && (cred.login || cred.password || cred.server)){
           row.cred_login    = cred.login    || null
@@ -25599,7 +25634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.398'
+  const OS_TAB_BUILD = '2026-09-22.399'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29104,9 +29139,16 @@
     }).join('')
   }
 
-  function tpVorplanOpen(){
+  async function tpVorplanOpen(){
+    let g = {}
+    try{ g = JSON.parse(localStorage.getItem(TP_VP_LS) || '{}') }catch(_){}
+    // 23.09.2026: die DB-Regeln (wd_farmer_regeln.vorplan, für alle Tabs) gewinnen — sonst zeigen
+    // „Futures vorplanen" und Admin → Winning Days verschiedene Tabellen.
     try{
-      const g = JSON.parse(localStorage.getItem(TP_VP_LS) || '{}')
+      const { data } = await supabase.from('wd_farmer_regeln').select('vorplan').eq('id', 1).maybeSingle()
+      if(data && data.vorplan && data.vorplan.regeln) g = { ...g, ...data.vorplan }
+    }catch(_){}
+    try{
       _vpInstr = g.instr === 'nq' ? 'nq' : 'mnq'
       if(g.kt) document.getElementById('tp-vp-kt').value = g.kt
       // Alter Stand (.393) merkte nur von/bis → wird zur Challenge-Spanne
@@ -30101,6 +30143,26 @@
     }
   }
 
+  /* 🌾 WD-Farm-Haken im Trade-Abschluss (23.09.2026): für Funded/Live-Master-Konten zeigt das Popup
+   * den Haken mit dem aktuellen Stand; „Erledigt" schreibt ihn direkt ans Konto (accounts.wd_farm).
+   * Der Farmer (Admin → Winning Days) nimmt nur Konten mit Haken. */
+  function tcWdFarmPrepare(p){
+    const wrap = document.getElementById('tc-wd-farm-wrap'), cb = document.getElementById('tc-wd-farm'), lbl = document.getElementById('tc-wd-farm-label')
+    if(!wrap || !cb || !lbl) return
+    const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
+    const t = String((a && a.type) || '').toLowerCase()
+    if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
+    wrap.hidden = false
+    cb.checked = !!a.wdFarm
+    lbl.textContent = `🌾 ${a.wdFarm ? 'Im WD-Farm' : 'Zu WD-Farm hinzufügen'} — ${a.name}`
+  }
+  async function wdFarmSetzen(accId, an){
+    const { error } = await supabase.from('accounts').update({ wd_farm: !!an }).eq('id', accId)
+    if(error) throw error
+    const a = (accounts || []).find(x => String(x.id) === String(accId)); if(a) a.wdFarm = !!an
+    if(typeof atToast === 'function') atToast(`🌾 ${a ? a.name : accId} ${an ? 'ist jetzt im WD-Farm' : 'ist raus aus dem WD-Farm'}`, 'start')
+  }
+
   // Trade-Abschluss: welcher Account des Plans zählt manuell? Master zuerst
   // (Prop-Account), sonst Slave — ein Plan hat praktisch nie zwei.
   let _tcWinningAccId = null
@@ -30183,6 +30245,7 @@
     // Manueller Winning Day (15.09.2026): Häkchen nur, wenn ein Account des
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
     tcWinningDayPrepare(p)
+    tcWdFarmPrepare(p)
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
@@ -30835,6 +30898,11 @@
       const _wdCb = document.getElementById('tc-winning-day')
       if(_wdCb && _wdCb.checked && !_wdCb.disabled && _tcWinningAccId){
         try{ await zielManuellPlus(_tcWinningAccId) }catch(_){}
+      }
+      // 🌾 WD-Farm-Haken (23.09.2026): direkt am Master-Konto setzen/entfernen, wenn er sich geändert hat
+      const _fmCb = document.getElementById('tc-wd-farm'), _fmWrap = document.getElementById('tc-wd-farm-wrap')
+      if(_fmCb && _fmWrap && !_fmWrap.hidden && masterAcc && !!masterAcc.wdFarm !== _fmCb.checked){
+        try{ await wdFarmSetzen(masterAcc.id, _fmCb.checked) }catch(e){ console.warn('[wd-farm]', e) }
       }
 
       renderTradePlans()
