@@ -42,7 +42,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-23.3"
+APP_BUILD = "2026-09-23.4"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -5878,6 +5878,57 @@ def kompass_collect():
 KOMPASS_HORIZONTE = (1, 2, 4, 8)
 _kompass_kerzen = {"at": 0, "T": [], "K": []}   # T = Epoch je Kerze, K = (open, high, low, close)
 
+# Session-Fenster (23.09.2026, Finn: „mach auch Statistiken, wie gut es ist"): zusätzlich zu den
+# festen Stunden-Horizonten das Fenster, für das der Forecast eigentlich gedacht ist —
+# NY Open→Close, London Open→Close, Pre-London die vier Stunden vor London, Asia = Tokio-Handel.
+# Für NY außerdem der Gap (Open gegen den Vortagesschluss 16:00 NY) — das ist die Frage, für die
+# Pascals eigener Backtest 80 % ausweist. Stündlich hat kein Fenster (dort zählt +1 h).
+try:
+    from zoneinfo import ZoneInfo as _ZI
+except Exception:   # pragma: no cover — sehr alte Python-Version
+    _ZI = None
+KOMPASS_FENSTER = {
+    "ny":        ("America/New_York", (9, 30), (16, 0), 0),
+    "ny_update": ("America/New_York", (9, 30), (16, 0), 0),
+    "london":    ("Europe/London",    (8, 0),  (16, 30), 0),
+    "prelondon": ("Europe/London",    (4, 0),  (8, 0),  0),
+    "asia":      ("Asia/Tokyo",       (9, 0),  (15, 0), 0),
+}
+
+
+def kompass_fenster(session, t0):
+    """→ (von, bis, vortag_close) als Epoch für das Session-Fenster des Tages, in dem t0 (Ortszeit) liegt.
+    vortag_close = 16:00 NY des letzten Werktags davor (nur NY). None, wenn keine Session."""
+    f = KOMPASS_FENSTER.get(session)
+    if not f or not _ZI:
+        return None
+    tz = _ZI(f[0])
+    d = datetime.fromtimestamp(t0, tz)
+    von = d.replace(hour=f[1][0], minute=f[1][1], second=0, microsecond=0)
+    bis = d.replace(hour=f[2][0], minute=f[2][1], second=0, microsecond=0)
+    # Posting nach Fensterende (z. B. Asia-Forecast 17:30 NY = 06:30 Tokio → Fenster liegt noch vor uns: passt;
+    # ein NY-Forecast um 18:00 NY dagegen meint den nächsten Tag)
+    if t0 > bis.timestamp():
+        d2 = d + __import__("datetime").timedelta(days=1)
+        von = d2.replace(hour=f[1][0], minute=f[1][1], second=0, microsecond=0)
+        bis = d2.replace(hour=f[2][0], minute=f[2][1], second=0, microsecond=0)
+    vortag = None
+    if session in ("ny", "ny_update"):
+        v = von - __import__("datetime").timedelta(days=1)
+        while v.weekday() >= 5:
+            v -= __import__("datetime").timedelta(days=1)
+        vortag = v.replace(hour=16, minute=0, second=0, microsecond=0).timestamp()
+    return int(von.timestamp()), int(bis.timestamp()), (int(vortag) if vortag else None)
+
+
+def _kompass_bedarf(session):
+    b = [f"h{h}" for h in KOMPASS_HORIZONTE]
+    if session in KOMPASS_FENSTER:
+        b.append("sess")
+    if session in ("ny", "ny_update"):
+        b.append("gap")
+    return b
+
 
 def kompass_kerzen():
     if _kompass_kerzen["T"] and time.time() - _kompass_kerzen["at"] < 240:
@@ -5912,8 +5963,10 @@ def _kompass_px(t):
 
 def kompass_auswerten():
     """Alle Forecasts mit Richtung und Posting-Zeit, die noch nicht fertig sind, nachrechnen."""
-    rows = _sb_all("kompass_forecasts", {"select": "id,bias,t0,auswertung", "bias": "not.is.null", "t0": "not.is.null"})
-    offen = [z for z in rows if not ((z.get("auswertung") or {}).get("fertig"))]
+    rows = _sb_all("kompass_forecasts", {"select": "id,bias,t0,session,auswertung", "bias": "not.is.null", "t0": "not.is.null"})
+    # Offen = irgendein Bedarf fehlt (Stunden-Horizonte, Session-Fenster, Gap) und nicht als unrechenbar markiert
+    offen = [z for z in rows if not ((z.get("auswertung") or {}).get("grund"))
+             and any(k not in (z.get("auswertung") or {}) for k in _kompass_bedarf(z.get("session")))]
     if not offen:
         return 0
     kompass_kerzen()
@@ -5955,8 +6008,34 @@ def kompass_auswerten():
                 "mae": round(((p0 - lo) if long else (hi - p0)) / p0 * 100, 4),
             }
             geaendert = True
-        if all(f"h{h}" in aus for h in KOMPASS_HORIZONTE):
-            aus["fertig"] = True; geaendert = True
+        # Session-Fenster + Gap (nur wenn das Fenster vorbei ist; fehlende Kerzen → 'na', damit es nicht ewig offen bleibt)
+        fen = kompass_fenster(z.get("session"), t0)
+        if fen:
+            von, bis, vortag = fen
+            if "sess" not in aus and bis <= jetzt and bis <= T[-1]:
+                pv, iv = _kompass_px(von); pb, ib = _kompass_px(bis)
+                if pv is not None and pb is not None and iv is not None:
+                    dp = (pb - pv) / pv * 100
+                    hi = max(k[1] for k in K[iv:ib + 1]); lo = min(k[2] for k in K[iv:ib + 1])
+                    aus["sess"] = {"von": von, "bis": bis, "p_von": pv, "p_bis": pb, "dp": round(dp, 4),
+                                   "hit": (dp > 0) if long else (dp < 0),
+                                   "mfe": round(((hi - pv) if long else (pv - lo)) / pv * 100, 4),
+                                   "mae": round(((pv - lo) if long else (hi - pv)) / pv * 100, 4)}
+                elif bis + 7200 <= jetzt:
+                    aus["sess"] = {"na": True}
+                geaendert = True
+            if vortag and "gap" not in aus and von <= jetzt and von <= T[-1]:
+                pvt, _i = _kompass_px(vortag); po, _j = _kompass_px(von)
+                if pvt is not None and po is not None:
+                    dp = (po - pvt) / pvt * 100
+                    aus["gap"] = {"vortag": vortag, "open": von, "p_vortag": pvt, "p_open": po, "dp": round(dp, 4),
+                                  "hit": (dp > 0) if long else (dp < 0)}
+                elif von + 7200 <= jetzt:
+                    aus["gap"] = {"na": True}
+                geaendert = True
+        if all(k in aus for k in _kompass_bedarf(z.get("session"))):
+            if not aus.get("fertig"):
+                aus["fertig"] = True; geaendert = True
         if geaendert:
             aus["berechnet_at"] = datetime.now(timezone.utc).isoformat()
             sb_update("kompass_forecasts", {"id": f"eq.{z['id']}"}, {"auswertung": aus})

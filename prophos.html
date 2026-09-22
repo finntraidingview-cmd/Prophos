@@ -1189,6 +1189,7 @@
   #adm-pane-kompass table.kp-tab{width:100%;border-collapse:collapse;font-size:12.5px}
   #adm-pane-kompass table.kp-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:11.5px;padding:6px 8px;border-bottom:1px solid var(--line)}
   #adm-pane-kompass table.kp-tab td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass table.kp-tab td:first-child,#adm-pane-kompass table.kp-tab td:nth-child(2){white-space:nowrap}
   #adm-pane-kompass table.kp-tab tr.kp-zeile{cursor:pointer}
   #adm-pane-kompass table.kp-tab tr.kp-zeile:hover td{background:rgba(120,120,160,.06)}
   #adm-pane-kompass table.kp-tab tr.kp-detail td{font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink);background:rgba(120,120,160,.04)}
@@ -1196,17 +1197,39 @@
   #adm-pane-kompass .kp-b.long{color:#2a9d5c}
   #adm-pane-kompass .kp-b.short{color:var(--danger)}
   #adm-pane-kompass .kp-mehr{margin-top:8px}
-  #adm-pane-kompass .kp-stat-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
-  @media (max-width:900px){#adm-pane-kompass .kp-stat-grid{grid-template-columns:1fr}}
-  #adm-pane-kompass .kp-stat-titel{font-size:12px;font-weight:600;color:var(--sub);margin-bottom:4px}
-  #adm-pane-kompass table.kp-stat{width:100%;border-collapse:collapse;font-size:12.5px}
-  #adm-pane-kompass table.kp-stat th{text-align:right;font-weight:600;color:var(--sub);font-size:11.5px;padding:4px 8px;border-bottom:1px solid var(--line)}
-  #adm-pane-kompass table.kp-stat th:first-child,#adm-pane-kompass table.kp-stat td:first-child{text-align:left}
-  #adm-pane-kompass table.kp-stat td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
-  #adm-pane-kompass table.kp-stat td small{display:block;color:var(--sub);font-size:10.5px;font-weight:400}
-  #adm-pane-kompass .kp-q{font-weight:700}
-  #adm-pane-kompass .kp-q.gut{color:#2a9d5c}
-  #adm-pane-kompass .kp-q.schlecht{color:var(--danger)}
+  #adm-pane-kompass .kp-kpis .kpi{cursor:pointer;position:relative}
+  #adm-pane-kompass .kp-kpis .kpi.aktiv{border-color:var(--violet);box-shadow:0 0 0 2px rgba(124,92,255,.15)}
+  #adm-pane-kompass .kp-kpis .kpi-value.gut{color:var(--good)}
+  #adm-pane-kompass .kp-kpis .kpi-value.schlecht{color:var(--danger)}
+  #adm-pane-kompass .kp-kpis .kpi-hint{font-size:11px;color:var(--sub);margin-top:2px;line-height:1.35}
+  #adm-pane-kompass .kp-zeile-bar{display:grid;grid-template-columns:120px 1fr 92px;gap:10px;align-items:center;padding:6px 6px;border-radius:8px;font-size:12.5px}
+  #adm-pane-kompass .kp-zeile-bar.klick{cursor:pointer}
+  #adm-pane-kompass .kp-zeile-bar.klick:hover{background:rgba(124,92,255,.06)}
+  #adm-pane-kompass .kp-zeile-bar.aktiv{background:rgba(124,92,255,.10)}
+  #adm-pane-kompass .kp-zeile-bar .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-kompass .kp-zeile-bar .name small{display:block;font-weight:400;color:var(--sub);font-size:11px}
+  #adm-pane-kompass .kp-zeile-bar .wert{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+  #adm-pane-kompass .kp-zeile-bar .wert small{display:block;font-weight:400;color:var(--sub);font-size:11px}
+  #adm-pane-kompass .kp-zeile-bar .wert.gut{color:var(--good)}
+  #adm-pane-kompass .kp-zeile-bar .wert.schlecht{color:var(--danger)}
+  #adm-pane-kompass .kp-bar{height:10px;border-radius:999px;background:rgba(220,60,60,.18);overflow:hidden;position:relative}
+  #adm-pane-kompass .kp-bar .hit{height:100%;background:var(--good);border-radius:999px 0 0 999px;transition:width .5s var(--ease)}
+  #adm-pane-kompass .kp-bar .mitte{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--ink);opacity:.35}
+  #adm-pane-kompass .kp-bar.leer{background:var(--surface-tint)}
+  #adm-pane-kompass .kp-trenner{border-top:1px solid var(--line);margin:10px 0 8px}
+  #adm-pane-kompass .kp-kurve-ende{font-size:22px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass .kp-kurve-ende.gut{color:var(--good)}
+  #adm-pane-kompass .kp-kurve-ende.schlecht{color:var(--danger)}
+  #adm-pane-kompass #kp-kurve svg{width:100%;height:auto;display:block}
+  #adm-pane-kompass .kp-wochen-titel{font-size:12px;font-weight:600;color:var(--sub);margin:12px 0 6px}
+  #adm-pane-kompass .kp-wochen{display:flex;gap:6px;align-items:flex-end;height:78px}
+  #adm-pane-kompass .kp-woche{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+  #adm-pane-kompass .kp-woche .stab{width:100%;max-width:46px;border-radius:6px 6px 2px 2px;background:var(--good);min-height:2px}
+  #adm-pane-kompass .kp-woche .stab.schlecht{background:var(--danger)}
+  #adm-pane-kompass .kp-woche .stab.mittel{background:var(--sub)}
+  #adm-pane-kompass .kp-woche .pz{font-size:11px;font-weight:600;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass .kp-woche .kw{font-size:10px;color:var(--sub);white-space:nowrap}
+  @media (max-width:960px){#adm-pane-kompass .kp-zeile-bar{grid-template-columns:96px 1fr 80px}}
   #adm-pane-kompass .kp-erg{white-space:nowrap;font-variant-numeric:tabular-nums}
   #adm-pane-kompass .kp-erg.hit{color:#2a9d5c}
   #adm-pane-kompass .kp-erg.miss{color:var(--danger)}
@@ -7489,17 +7512,31 @@
             <div class="kp-status" id="kp-status">Lade …</div>
           </div>
           <div class="kp-karten" id="kp-karten"></div>
-          <!-- Trefferquote (23.09.2026, Finn: „is der Bot von meinem Bruder, will sehen wie gut der is"): Railway rechnet je
-               Forecast die NQ-Bewegung 1/2/4/8 h nach der Posting-Zeit (kompass_forecasts.auswertung); hier die Quoten. -->
-          <div class="panel" style="margin-top:12px">
-            <div class="kp-kopf-zeile" style="margin-bottom:6px">
-              <div class="panel-title">Trefferquote <span style="font-weight:400;color:var(--sub);font-size:12px">· Kurs n Stunden nach dem Forecast in Forecast-Richtung? NQ-Futures, ab Posting-Zeit</span></div>
+          <!-- Wie gut ist der Bot (23.09.2026, Finn: „is der Bot von meinem Bruder, will sehen wie gut der is" · dann
+               „das ist so hässlich, erkennt gar nichts — mit draufdrücken, ein bisschen Farben, übersichtlich wie der
+               Überblick bei Finanzen"): Kacheln wählen die Frage (Session / NY-Gap / +1 h / +4 h), darunter Balken je
+               Session (Klick = Filter) und je Konfidenz, LONG/SHORT, Vergleich „immer LONG", Kurve + Wochen. -->
+          <div class="kpis kp-kpis" id="kp-kpis" style="margin-top:12px;margin-bottom:12px"></div>
+          <div class="grid-split kp-grid" style="margin-bottom:12px">
+            <div class="panel" style="margin:0">
+              <div class="panel-head" style="margin-bottom:6px"><div><div class="panel-title">Je Session</div><div class="panel-sub" id="kp-frage-sub">–</div></div></div>
+              <div id="kp-sessions"></div>
             </div>
-            <div class="kp-stat-grid">
-              <div><div class="kp-stat-titel">je Session</div><div id="kp-stat-session"></div></div>
-              <div><div class="kp-stat-titel">je Konfidenz <span id="kp-stat-konf-filter" style="font-weight:400;color:var(--sub)"></span></div><div id="kp-stat-konf"></div></div>
+            <div class="panel" style="margin:0">
+              <div class="panel-head" style="margin-bottom:6px"><div><div class="panel-title">Je Konfidenz <span id="kp-konf-sub" style="font-weight:400;color:var(--sub);font-size:12px"></span></div><div class="panel-sub">Pascals 1–5 · trifft hohe Konfidenz öfter?</div></div></div>
+              <div id="kp-konf"></div>
+              <div class="kp-trenner"></div>
+              <div id="kp-richtung"></div>
             </div>
-            <div class="kf" style="margin-top:6px">Treffer = Schlusskurs nach n h liegt in Forecast-Richtung · Ø = mittlere Bewegung in Forecast-Richtung (negativ = im Schnitt dagegen) · n = ausgewertete Forecasts. Grün ab 60 %, rot bis 45 %.</div>
+          </div>
+          <div class="panel" style="margin:0 0 12px">
+            <div class="panel-head" style="margin-bottom:6px">
+              <div><div class="panel-title">Wenn man jedem Forecast gefolgt wäre</div><div class="panel-sub" id="kp-kurve-sub">Summe der Bewegung in Forecast-Richtung, ein Forecast nach dem anderen · NQ in Prozent</div></div>
+              <div class="kp-kurve-ende" id="kp-kurve-ende">–</div>
+            </div>
+            <div id="kp-kurve"></div>
+            <div class="kp-wochen-titel">Trefferquote je Woche</div>
+            <div id="kp-wochen" class="kp-wochen"></div>
           </div>
           <div class="panel" style="margin-top:12px">
             <div class="kp-kopf-zeile" style="margin-bottom:8px">
@@ -25696,7 +25733,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.419'
+  const OS_TAB_BUILD = '2026-09-22.420'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30418,7 +30455,7 @@
   const KP_SESSIONS = [['update vor trigger','ny_update'],['asia','asia'],['pre-london','prelondon'],['london','london'],['new york','ny'],['hourly','hourly']]
   const KP_NAMEN = { asia: 'Asia Open', prelondon: 'Pre-London', london: 'London', ny: 'New York', ny_update: 'NY · Update vor Open', hourly: 'Stündlich', sonst: 'Sonstige' }
   const KP_REIHE = ['ny', 'ny_update', 'london', 'prelondon', 'asia', 'hourly']
-  const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false, lastCheck: 0, tick: null }
+  const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false, lastCheck: 0, tick: null, metrik: 'sess' }
 
   function kpSession(ctx){ const c = String(ctx || '').toLowerCase(); for(const [k, n] of KP_SESSIONS){ if(c.includes(k)) return n } return 'sonst' }
   function kpParse(it){
@@ -30457,32 +30494,106 @@
     if(!a){ const alt = r.auswertung && r.auswertung.grund; return `<span class="kp-erg offen" title="${kpEsc(alt || 'noch nicht ausgewertet — Railway rechnet, sobald die Stunde vorbei ist')}">${alt ? '—' : '…'}</span>` }
     return `<span class="kp-erg ${a.hit ? 'hit' : 'miss'}" title="max dafür ${kpPct(a.mfe)} · max dagegen ${kpPct(a.mae)}">${kpPct(a.dp)} ${a.hit ? '✔' : '✘'}</span>`
   }
-  function kpQuote(rows, h){
-    const xs = rows.filter(r => r.auswertung && r.auswertung['h' + h] && r.bias)
-    if(!xs.length) return null
-    const hits = xs.filter(r => r.auswertung['h' + h].hit).length
-    const avg = xs.reduce((s, r) => s + (r.bias === 'LONG' ? 1 : -1) * r.auswertung['h' + h].dp, 0) / xs.length
-    return { n: xs.length, q: hits / xs.length * 100, avg }
+  // ── Kennzahlen (23.09.2026): Frage wählen (Kachel), dann alles darunter dazu ────────────────────────
+  const KP_METRIK = {
+    sess: { name: 'Session', frage: 'Open → Close der Session in Forecast-Richtung?', hint: 'NY 9:30–16:00 · London 8:00–16:30 · Pre-London 4:00–8:00 · Asia = Tokio · Stündlich = +1 h' },
+    gap:  { name: 'NY-Gap',  frage: 'Öffnet New York höher/tiefer als der Vortagesschluss?', hint: 'nur NY-Forecasts · das ist Pascals 80-%-Frage' },
+    h1:   { name: '+1 Stunde', frage: 'Kurs eine Stunde nach dem Forecast in Forecast-Richtung?', hint: 'ab Posting-Zeit · alle Sessions' },
+    h4:   { name: '+4 Stunden', frage: 'Kurs vier Stunden nach dem Forecast in Forecast-Richtung?', hint: 'ab Posting-Zeit · alle Sessions' },
   }
-  function kpQuoteZelle(s){
-    if(!s) return '<td><span style="color:var(--sub)">—</span></td>'
-    const cls = s.q >= 60 ? 'gut' : s.q <= 45 ? 'schlecht' : ''
-    return `<td><span class="kp-q ${cls}">${Math.round(s.q)} %</span><small>n ${s.n} · Ø ${kpPct(s.avg)}</small></td>`
+  function kpM(r, m){
+    // Ergebnis-Objekt {dp, hit} eines Forecasts für die Frage m — null, wenn (noch) nicht da
+    const a = r.auswertung; if(!a || !r.bias) return null
+    m = m || _kp.metrik
+    if(m === 'sess'){ const s = r.session === 'hourly' ? a.h1 : a.sess; return (s && !s.na && s.dp != null) ? s : null }
+    const o = a[m]; return (o && !o.na && o.dp != null) ? o : null
+  }
+  function kpQuote(rows, m){
+    const xs = rows.map(r => [r, kpM(r, m)]).filter(x => x[1])
+    if(!xs.length) return null
+    const hits = xs.filter(x => x[1].hit).length
+    const avg = xs.reduce((s, [r, o]) => s + (r.bias === 'LONG' ? 1 : -1) * o.dp, 0) / xs.length
+    const long = xs.filter(x => x[1].dp > 0).length   // was „immer LONG" getroffen hätte
+    return { n: xs.length, q: hits / xs.length * 100, avg, immerLong: long / xs.length * 100 }
+  }
+  function kpKlasse(q){ return q == null ? '' : q >= 60 ? 'gut' : q <= 45 ? 'schlecht' : '' }
+  function kpErgM(r, m){
+    const o = kpM(r, m)
+    if(!o) return `<span class="kp-erg offen" title="Session-Fenster noch nicht vorbei oder keine Kerzen">…</span>`
+    return `<span class="kp-erg ${o.hit ? 'hit' : 'miss'}" title="${o.mfe != null ? `max dafür ${kpPct(o.mfe)} · max dagegen ${kpPct(o.mae)}` : ''}">${kpPct(o.dp)} ${o.hit ? '✔' : '✘'}</span>`
+  }
+  function kpBarZeile(name, sub, s, opt){
+    opt = opt || {}
+    const q = s ? Math.round(s.q) : null
+    return `<div class="kp-zeile-bar${opt.klick ? ' klick' : ''}${opt.aktiv ? ' aktiv' : ''}"${opt.data ? ' ' + opt.data : ''} title="${kpEsc(s ? `${s.n} Forecasts · ${q} % Treffer · Ø ${kpPct(s.avg)} in Forecast-Richtung` : 'noch nichts ausgewertet')}">
+      <div class="name">${kpEsc(name)}${sub ? `<small>${kpEsc(sub)}</small>` : ''}</div>
+      <div class="kp-bar${s ? '' : ' leer'}">${s ? `<div class="hit" style="width:${q}%"></div><div class="mitte"></div>` : ''}</div>
+      <div class="wert ${kpKlasse(s && s.q)}">${s ? q + ' %' : '—'}<small>${s ? `${s.n} · Ø ${kpPct(s.avg)}` : ''}</small></div>
+    </div>`
   }
   function kpStatRender(){
-    const kopf = `<thead><tr><th></th>${KP_H.map(h => `<th>+${h} h</th>`).join('')}</tr></thead>`
     const gueltig = _kp.rows.filter(r => r.bias && (r.datum || r.t0))
-    const bs = document.getElementById('kp-stat-session')
+    const basis = gueltig.filter(r => !_kp.filter || r.session === _kp.filter)
+    const m = _kp.metrik
+    const kb = document.getElementById('kp-kpis')
+    if(kb) kb.innerHTML = Object.keys(KP_METRIK).map(k => {
+      const s = kpQuote(gueltig, k); const q = s ? Math.round(s.q) : null
+      return `<div class="kpi${k === m ? ' aktiv' : ''}" data-kp-metrik="${k}" title="${kpEsc(KP_METRIK[k].frage)}">
+        <div class="kpi-label">${kpEsc(KP_METRIK[k].name)}</div>
+        <div class="kpi-value ${kpKlasse(q)}">${q == null ? '—' : q + ' %'}</div>
+        <div class="kpi-delta delta-neutral">${s ? `${s.n} Forecasts · Ø ${kpPct(s.avg)}` : 'noch nichts ausgewertet'}</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${q || 0}%;background:${q >= 60 ? 'var(--good)' : (q != null && q <= 45) ? 'var(--danger)' : 'var(--sub)'}"></div></div>
+        <div class="kpi-hint">${kpEsc(KP_METRIK[k].hint)}</div>
+      </div>`
+    }).join('')
+    const fs = document.getElementById('kp-frage-sub'); if(fs) fs.textContent = KP_METRIK[m].frage + ' · Klick auf eine Session filtert alles darunter'
+    const bs = document.getElementById('kp-sessions')
     if(bs){
-      const gruppen = [...KP_REIHE.map(s => [KP_NAMEN[s], gueltig.filter(r => r.session === s)]), ['alle', gueltig]]
-      bs.innerHTML = `<table class="kp-stat">${kopf}<tbody>${gruppen.map(([name, rows]) => rows.length ? `<tr><td>${kpEsc(name)}</td>${KP_H.map(h => kpQuoteZelle(kpQuote(rows, h))).join('')}</tr>` : '').join('')}</tbody></table>`
+      const zeilen = KP_REIHE.map(s => [s, gueltig.filter(r => r.session === s)]).filter(x => x[1].length)
+      bs.innerHTML = zeilen.map(([s, rows]) => kpBarZeile(KP_NAMEN[s], `${rows.length} Forecasts`, kpQuote(rows, m), { klick: true, aktiv: _kp.filter === s, data: `data-kp-sfilter="${s}"` })).join('')
+        + kpBarZeile('alle', `${gueltig.length} Forecasts`, kpQuote(gueltig, m), { klick: true, aktiv: !_kp.filter, data: 'data-kp-sfilter=""' })
     }
-    const bk = document.getElementById('kp-stat-konf')
-    if(bk){
-      const basis = gueltig.filter(r => !_kp.filter || r.session === _kp.filter)
-      const f = document.getElementById('kp-stat-konf-filter'); if(f) f.textContent = _kp.filter ? '· ' + (KP_NAMEN[_kp.filter] || _kp.filter) : '· alle Sessions'
-      const gruppen = [5, 4, 3, 2, 1].map(k => ['Konfidenz ' + k, basis.filter(r => r.konfidenz === k)]).concat([['ohne Konfidenz', basis.filter(r => r.konfidenz == null)]])
-      bk.innerHTML = `<table class="kp-stat">${kopf}<tbody>${gruppen.map(([name, rows]) => rows.length ? `<tr><td>${kpEsc(name)}</td>${KP_H.map(h => kpQuoteZelle(kpQuote(rows, h))).join('')}</tr>` : '').join('')}</tbody></table>`
+    const ks = document.getElementById('kp-konf-sub'); if(ks) ks.textContent = _kp.filter ? '· ' + (KP_NAMEN[_kp.filter] || _kp.filter) : '· alle Sessions'
+    const bk = document.getElementById('kp-konf')
+    if(bk) bk.innerHTML = [5, 4, 3, 2, 1].map(k => [k, basis.filter(r => r.konfidenz === k)]).filter(x => x[1].length)
+      .map(([k, rows]) => kpBarZeile('Konfidenz ' + k, '●'.repeat(k) + '○'.repeat(5 - k), kpQuote(rows, m))).join('')
+      + (basis.some(r => r.konfidenz == null) ? kpBarZeile('ohne Konfidenz', 'altes Format „LONG - 60%"', kpQuote(basis.filter(r => r.konfidenz == null), m)) : '')
+    const br = document.getElementById('kp-richtung')
+    if(br){
+      const alle = kpQuote(basis, m)
+      br.innerHTML = kpBarZeile('LONG-Forecasts', `${basis.filter(r => r.bias === 'LONG').length}`, kpQuote(basis.filter(r => r.bias === 'LONG'), m))
+        + kpBarZeile('SHORT-Forecasts', `${basis.filter(r => r.bias === 'SHORT').length}`, kpQuote(basis.filter(r => r.bias === 'SHORT'), m))
+        + (alle ? `<div class="kf" style="margin-top:8px;padding:0 6px">Vergleich: <b>immer LONG</b> hätte im selben Zeitraum <b>${Math.round(alle.immerLong)} %</b> getroffen — der Bot ${Math.round(alle.q)} %. ${alle.q - alle.immerLong >= 5 ? 'Der Bot ist besser als stur LONG.' : alle.q - alle.immerLong <= -5 ? 'Stur LONG wäre besser gewesen.' : 'Kein Unterschied zu stur LONG.'}</div>` : '')
+    }
+    kpKurveRender(basis, m)
+  }
+  function kpKurveRender(basis, m){
+    const box = document.getElementById('kp-kurve'), ende = document.getElementById('kp-kurve-ende'), wb = document.getElementById('kp-wochen')
+    if(!box) return
+    const pts = basis.map(r => [r, kpM(r, m)]).filter(x => x[1] && x[0].t0).sort((a, b) => String(a[0].t0).localeCompare(String(b[0].t0)))
+    if(!pts.length){ box.innerHTML = '<div style="color:var(--sub);font-size:12.5px;padding:8px 2px">noch nichts ausgewertet</div>'; if(ende) ende.textContent = '–'; if(wb) wb.innerHTML = ''; return }
+    let sum = 0; const ys = [0]; const serie = []
+    pts.forEach(([r, o]) => { sum += (r.bias === 'LONG' ? 1 : -1) * o.dp; ys.push(sum); serie.push(o.hit) })
+    const W = Math.max(320, box.clientWidth || 600), H = 150, P = 10   // volle Panel-Breite, Text bleibt unverzerrt
+    const lo = Math.min(...ys), hi = Math.max(...ys), span = (hi - lo) || 1
+    const X = i => P + i / (ys.length - 1) * (W - 2 * P), Y = v => P + (hi - v) / span * (H - 2 * P)
+    const d = ys.map((v, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1)).join(' ')
+    const farbe = sum > 0 ? 'var(--good)' : sum < 0 ? 'var(--danger)' : 'var(--sub)'
+    const gitter = [hi, 0, lo].filter((v, i, a) => a.indexOf(v) === i).map(v => `<line x1="${P}" x2="${W - P}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-dasharray="${v === 0 ? '' : '3 4'}"/><text x="${W - P}" y="${(Y(v) - 3).toFixed(1)}" font-size="10" text-anchor="end" fill="var(--sub)">${kpPct(v)}</text>`).join('')
+    const y0 = Y(Math.min(Math.max(lo, 0), hi))
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="max-height:170px">${gitter}<path d="${d} L${X(ys.length - 1).toFixed(1)} ${y0.toFixed(1)} L${P} ${y0.toFixed(1)} Z" fill="${farbe}" opacity=".08"/><path d="${d}" fill="none" stroke="${farbe}" stroke-width="2"/></svg>`
+    let akt = 0; for(let i = serie.length - 1; i >= 0 && serie[i] === serie[serie.length - 1]; i--) akt++
+    let best = 0, lauf = 0; serie.forEach(h => { lauf = h ? lauf + 1 : 0; best = Math.max(best, lauf) })
+    if(ende){ ende.textContent = kpPct(sum); ende.className = 'kp-kurve-ende ' + (sum > 0 ? 'gut' : sum < 0 ? 'schlecht' : '') }
+    const sub = document.getElementById('kp-kurve-sub'); if(sub) sub.textContent = `${pts.length} Forecasts nacheinander, Bewegung in Forecast-Richtung summiert (NQ, %) · gerade ${akt} ${serie[serie.length - 1] ? 'Treffer' : 'Fehler'} in Folge · längste Treffer-Serie ${best}`
+    if(wb){
+      const wochen = new Map()
+      pts.forEach(([r, o]) => {
+        const d = new Date(r.t0); const tag = (d.getUTCDay() + 6) % 7; const mo = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - tag))
+        const k = mo.toISOString().slice(0, 10); const w = wochen.get(k) || { n: 0, hit: 0 }; w.n++; if(o.hit) w.hit++; wochen.set(k, w)
+      })
+      wb.innerHTML = [...wochen.entries()].sort().map(([k, w]) => { const q = Math.round(w.hit / w.n * 100); const kl = q >= 60 ? '' : q <= 45 ? ' schlecht' : ' mittel'
+        return `<div class="kp-woche" title="Woche ab ${k} · ${w.hit} von ${w.n} Treffer"><div class="pz">${q} %</div><div class="stab${kl}" style="height:${Math.max(4, q * 0.5)}px"></div><div class="kw">${k.slice(8, 10)}.${k.slice(5, 7)}.</div></div>` }).join('')
     }
   }
   function kpSay(t, art){ const el = document.getElementById('kp-status'); if(el){ el.textContent = t || ''; el.style.color = art === 'err' ? 'var(--danger)' : '' } }
@@ -30582,7 +30693,7 @@
         <div class="kp-karte-kopf"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div>${kpKonf(r.konfidenz)}</div>
         <div class="kp-bias ${r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''}">${kpEsc(r.bias || '?')}</div>
         <div class="kp-alter">${kpEsc(kpStamp(r))} · ${kpEsc(kpAlter(r))}${alt ? ' · <b>alt</b>' : ''}</div>
-        <div class="kp-alter">nach 1 h ${kpErg(r, 1)} · 4 h ${kpErg(r, 4)}</div>
+        <div class="kp-alter">Session ${kpErgM(r, 'sess')} · 1 h ${kpErg(r, 1)} · 4 h ${kpErg(r, 4)}</div>
         <div class="kp-text">${kpEsc(r.text || r.titel || '')}</div>
       </div>`
     }).join('')
@@ -30597,10 +30708,10 @@
     const limit = 60 + _kp.mehr * 100
     const zeig = rows.slice(0, limit)
     if(!zeig.length){ box.innerHTML = '<div style="color:var(--sub);font-size:12.5px;padding:8px 2px">nichts da</div>'; return }
-    box.innerHTML = `<table class="kp-tab"><thead><tr><th>Datum</th><th>Session</th><th>Richtung</th><th>Konfidenz</th><th>+1 h</th><th>+4 h</th><th>Titel</th></tr></thead><tbody>${zeig.map(r => {
+    box.innerHTML = `<table class="kp-tab"><thead><tr><th>Datum</th><th>Session</th><th>Richtung</th><th>Konfidenz</th><th>Session</th><th>+1 h</th><th>+4 h</th><th>Titel</th></tr></thead><tbody>${zeig.map(r => {
       const cls = r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''
-      const d = _kp.offen === r.id ? `<tr class="kp-detail"><td colspan="7">${kpEsc(r.text || '')}</td></tr>` : ''
-      return `<tr class="kp-zeile" data-kp-id="${kpEsc(r.id)}"><td class="mono">${kpEsc(kpStamp(r))}</td><td>${kpEsc(KP_NAMEN[r.session] || r.kontext || r.session)}</td><td class="kp-b ${cls}">${kpEsc(r.bias || '—')}</td><td>${kpKonf(r.konfidenz, true)}</td><td>${kpErg(r, 1)}</td><td>${kpErg(r, 4)}</td><td style="color:var(--sub)">${kpEsc(r.titel || '')}</td></tr>${d}`
+      const d = _kp.offen === r.id ? `<tr class="kp-detail"><td colspan="8">${kpEsc(r.text || '')}</td></tr>` : ''
+      return `<tr class="kp-zeile" data-kp-id="${kpEsc(r.id)}"><td class="mono">${kpEsc(kpStamp(r))}</td><td>${kpEsc(KP_NAMEN[r.session] || r.kontext || r.session)}</td><td class="kp-b ${cls}">${kpEsc(r.bias || '—')}</td><td>${kpKonf(r.konfidenz, true)}</td><td>${kpErgM(r, 'sess')}</td><td>${kpErg(r, 1)}</td><td>${kpErg(r, 4)}</td><td style="color:var(--sub)">${kpEsc(r.titel || '')}</td></tr>${d}`
     }).join('')}</tbody></table>` + (rows.length > limit ? `<div class="kp-mehr"><button type="button" class="btn btn-ghost btn-xs" id="kp-mehr-btn">${rows.length - limit} weitere zeigen</button></div>` : '')
   }
 
@@ -30640,6 +30751,16 @@
     if(e.target.id === 'kp-mehr-btn'){ _kp.mehr++; kpArchivRender(); return }
     const z = e.target.closest('tr[data-kp-id]'); if(!z) return
     _kp.offen = _kp.offen === z.dataset.kpId ? null : z.dataset.kpId; kpRender(0)
+  })
+  document.getElementById('kp-kpis')?.addEventListener('click', e => {
+    const k = e.target.closest('[data-kp-metrik]'); if(!k) return
+    _kp.metrik = k.dataset.kpMetrik; kpStatRender()
+  })
+  document.getElementById('kp-sessions')?.addEventListener('click', e => {
+    const z = e.target.closest('[data-kp-sfilter]'); if(!z) return
+    _kp.filter = z.dataset.kpSfilter || ''; _kp.mehr = 0
+    document.querySelectorAll('#kp-filter .kp-fchip').forEach(x => x.classList.toggle('active', (x.dataset.kpSession || '') === _kp.filter))
+    kpStatRender(); kpArchivRender()
   })
   document.getElementById('kp-filter')?.addEventListener('click', e => {
     const b = e.target.closest('.kp-fchip'); if(!b) return
