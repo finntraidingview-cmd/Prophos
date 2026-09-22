@@ -41,7 +41,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-23.1"
+APP_BUILD = "2026-09-23.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -5666,11 +5666,14 @@ def watcher_status():
 # trägt beim Laden zusätzlich selbst nach (Browser-Upsert), falls Railway hängt.
 KOMPASS_URL = (os.environ.get("KOMPASS_URL")
                or "https://kompass-api.pascal-hermann-22.workers.dev?category=k%3Aideas")
-KOMPASS_INTERVAL = int(os.environ.get("KOMPASS_INTERVAL") or 300)
+# Jede Minute (Finn 23.09.2026 03:0x: „immer live, nie holen drücken müssen"). Der Feed ist klein
+# (~130 Zeilen) und der Worker bei Cloudflare — geschrieben wird nur, was neu oder geändert ist.
+KOMPASS_INTERVAL = int(os.environ.get("KOMPASS_INTERVAL") or 60)
 _kompass_info = {"started": False, "last_run": 0, "last_ok": 0, "runs": 0, "feed": 0,
                  "neu": 0, "last_error": "", "url": KOMPASS_URL}
 _kompass_lock = threading.Lock()
 _kompass_started = False
+_kompass_memo = {}   # id -> Hash(titel+text+datum+zeit) des letzten Schreibens — spart den Upsert unveränderter Zeilen
 
 # Reihenfolge wichtig: „New York Session Forecast (Update vor Trigger)" enthält
 # auch „new york" — der speziellere Treffer muss zuerst geprüft werden.
@@ -5735,15 +5738,20 @@ def kompass_collect():
         if not isinstance(items, list):
             raise ValueError("Worker liefert keine Liste")
         rows = [z for z in (kompass_parse(i) for i in items) if z]
-        vorhanden = set()
-        if rows:
+        if not _kompass_memo and rows:
+            # Erster Lauf nach dem Start: was schon in der DB steht, gilt als bekannt —
+            # geschrieben wird es trotzdem einmal (Titel/Text könnten sich geändert haben).
             for s in _sb_all("kompass_forecasts", {"select": "id"}):
-                vorhanden.add(str(s.get("id")))
-        neu = [z for z in rows if z["id"] not in vorhanden]
-        # Alles upserten (nicht nur Neues): Pascal kann Text/Titel eines Eintrags nachträglich
-        # ändern, und der Feed ist klein (~130 Zeilen) — 200er-Pakete reichen.
-        for i in range(0, len(rows), 200):
-            sb_upsert("kompass_forecasts", rows[i:i + 200])
+                _kompass_memo.setdefault(str(s.get("id")), "")
+        def sig(z):
+            return hashlib.sha1(json.dumps([z["titel"], z["text"], z["datum"], z["zeit"], z["kontext"]],
+                                           ensure_ascii=False).encode("utf-8")).hexdigest()
+        neu = [z for z in rows if z["id"] not in _kompass_memo]
+        schreiben = [z for z in rows if _kompass_memo.get(z["id"]) != sig(z)]
+        for i in range(0, len(schreiben), 200):
+            sb_upsert("kompass_forecasts", schreiben[i:i + 200])
+        for z in schreiben:
+            _kompass_memo[z["id"]] = sig(z)
         _kompass_info.update({"feed": len(rows), "neu": len(neu), "last_ok": time.time()})
         if neu:
             print(f"[kompass] {len(neu)} neue Forecasts gesichert (Feed {len(rows)})", flush=True)
@@ -5762,7 +5770,7 @@ def kompass_loop():
             print(f"[kompass] ⚠️ {e}", flush=True)
         _kompass_info["last_run"] = time.time()
         _kompass_info["runs"] += 1
-        time.sleep(max(30.0, KOMPASS_INTERVAL - (time.time() - started)))
+        time.sleep(max(15.0, KOMPASS_INTERVAL - (time.time() - started)))
 
 
 def start_kompass():

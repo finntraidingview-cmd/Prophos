@@ -7466,8 +7466,9 @@
             <div class="kp-kopf-zeile">
               <div class="panel-title">Kompass <span style="font-weight:400;color:var(--sub);font-size:12px">· Nasdaq-100-Forecasts von Pascals Research-Agent</span></div>
               <div class="vp-zeile">
+                <span class="mono" id="kp-tick" style="font-size:11.5px;color:var(--sub)"></span>
                 <span class="kp-chip" id="kp-chip">—</span>
-                <button class="btn btn-primary btn-mini" id="kpHolen" title="Feed sofort holen und in die DB schreiben (Browser + Railway-Sammler)">Jetzt holen</button>
+                <button class="btn btn-ghost btn-mini" id="kpHolen" title="läuft von allein alle 20 s — hier nur, wenn du nicht warten willst">Jetzt prüfen</button>
               </div>
             </div>
             <div class="kp-status" id="kp-status">Lade …</div>
@@ -25668,7 +25669,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.416'
+  const OS_TAB_BUILD = '2026-09-22.417'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30383,13 +30384,14 @@
    * Pascals Nasdaq-Forecasts („Kompass"): Worker-Feed → Karten je Session + Archiv aus kompass_forecasts.
    * Zwei Wege in die DB: der Railway-Sammler (app.py, alle 5 min) und dieser Tab beim Laden (Browser-Upsert
    * der fehlenden Zeilen) — so bleibt nichts liegen, auch wenn Railway gerade hängt. Solange der Tab offen
-   * ist, lädt er alle 60 s neu. Titel-Formate: „LONG - Konfidenz 3/5" (aktuell), „LONG - 60%" (bis Ende
+   * ist, lädt er alle 20 s neu und meldet neue Forecasts als Toast (Finn 23.09.2026 03:0x: „immer live,
+   * nicht holen drücken müssen"); der Railway-Sammler läuft jede Minute. Titel-Formate: „LONG - Konfidenz 3/5" (aktuell), „LONG - 60%" (bis Ende
    * August), vereinzelt Freitext — Richtung = erstes LONG/SHORT, Konfidenz nur bei „Konfidenz N/5". */
   const KP_URL = 'https://kompass-api.pascal-hermann-22.workers.dev?category=k%3Aideas'
   const KP_SESSIONS = [['update vor trigger','ny_update'],['asia','asia'],['pre-london','prelondon'],['london','london'],['new york','ny'],['hourly','hourly']]
   const KP_NAMEN = { asia: 'Asia Open', prelondon: 'Pre-London', london: 'London', ny: 'New York', ny_update: 'NY · Update vor Open', hourly: 'Stündlich', sonst: 'Sonstige' }
   const KP_REIHE = ['ny', 'ny_update', 'london', 'prelondon', 'asia', 'hourly']
-  const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false }
+  const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false, lastCheck: 0, tick: null }
 
   function kpSession(ctx){ const c = String(ctx || '').toLowerCase(); for(const [k, n] of KP_SESSIONS){ if(c.includes(k)) return n } return 'sonst' }
   function kpParse(it){
@@ -30471,7 +30473,14 @@
     const map = new Map()
     ;(db || []).forEach(r => map.set(r.id, r))
     ;(feed || []).forEach(r => map.set(r.id, Object.assign({}, map.get(r.id) || {}, r)))
+    const vorher = new Set(_kp.rows.map(r => r.id))
     _kp.rows = [...map.values()].sort(kpSort)
+    if(feed || db) _kp.lastCheck = Date.now()
+    // Neue Forecasts seit dem letzten Laden als Toast — nur wenn schon einmal geladen war (sonst käme beim Öffnen alles)
+    if(_kp.geladen && vorher.size){
+      const neue = _kp.rows.filter(r => !vorher.has(r.id) && (r.datum || r.bias))
+      neue.slice(0, 3).forEach(r => { if(typeof atToast === 'function') atToast(`Kompass · ${KP_NAMEN[r.session] || r.session}: ${r.bias || '?'}${r.konfidenz ? ' ' + r.konfidenz + '/5' : ''}`, 'ok') })
+    }
     _kp.geladen = true
     kpRender(nachgetragen)
   }
@@ -30529,7 +30538,7 @@
   }
 
   async function kpHolen(){
-    const btn = document.getElementById('kpHolen'); if(btn){ btn.disabled = true; btn.textContent = '⏳ holt …' }
+    const btn = document.getElementById('kpHolen'); if(btn){ btn.disabled = true; btn.textContent = '⏳ prüft …' }
     try{
       // Railway-Sammler anstoßen (schreibt per Service-Key) und parallel selbst laden/nachtragen
       const rail = (async () => { try{
@@ -30538,14 +30547,21 @@
       }catch(e){} })()
       await Promise.all([rail, kpLaden()])
       await kpLaden()
-    }finally{ if(btn){ btn.disabled = false; btn.textContent = 'Jetzt holen' } }
+    }finally{ if(btn){ btn.disabled = false; btn.textContent = 'Jetzt prüfen' } }
   }
   function kpOpen(){
     if(!_kp.geladen) kpSay('Lade …')
     kpLaden()
-    clearInterval(_kp.timer); _kp.timer = setInterval(kpLaden, 60000)
+    clearInterval(_kp.timer); _kp.timer = setInterval(kpLaden, 20000)
+    clearInterval(_kp.tick); _kp.tick = setInterval(kpTick, 1000); kpTick()
   }
-  function kpClose(){ clearInterval(_kp.timer); _kp.timer = null }
+  function kpTick(){
+    const el = document.getElementById('kp-tick'); if(!el) return
+    if(!_kp.lastCheck){ el.textContent = ''; return }
+    const s = Math.max(0, Math.round((Date.now() - _kp.lastCheck) / 1000))
+    el.textContent = 'geprüft vor ' + s + ' s'
+  }
+  function kpClose(){ clearInterval(_kp.timer); _kp.timer = null; clearInterval(_kp.tick); _kp.tick = null }
   window._kpTabOeffnen = kpOpen
   window._kpTabSchliessen = kpClose
   document.getElementById('kpHolen')?.addEventListener('click', kpHolen)
