@@ -4641,7 +4641,9 @@
             </div>
             <div class="field">
               <label>Master-Account</label>
-              <div style="display:flex;gap:6px;margin-bottom:6px">
+              <!-- Firmen-/Typ-Filter ausgeblendet (22.09.2026, Finn: „damit das Popup übersichtlicher wird");
+                   die Selects bleiben im DOM (Wert '' = alle), die Filterlogik ist unverändert. -->
+              <div style="display:none;gap:6px;margin-bottom:6px">
                 <select class="input" id="tp-master-firm-filter" style="flex:1;padding:5px 26px 5px 10px;font-size:12px;height:auto" title="Nach Firma filtern">
                   <option value="">Alle Firmen</option>
                 </select>
@@ -4658,7 +4660,7 @@
             </div>
             <div class="field">
               <label>Slave-Account</label>
-              <div style="display:flex;gap:6px;margin-bottom:6px">
+              <div style="display:none;gap:6px;margin-bottom:6px">
                 <select class="input" id="tp-slave-firm-filter" style="flex:1;padding:5px 26px 5px 10px;font-size:12px;height:auto" title="Nach Firma filtern">
                   <option value="">Alle Firmen</option>
                 </select>
@@ -8506,11 +8508,10 @@
       if(typeof ltStart === 'function') ltStart()
       if(typeof mt5FleetRenderTick === 'function') mt5FleetRenderTick(true)
     } else if(typeof ltStop === 'function') ltStop()
-    // Beim Öffnen der Trades-View immer auf „Geplant" starten (nicht auf dem zuletzt
-    // aktiven Tab hängenbleiben — z.B. „Erledigt" nach einem Trade-Abschluss).
+    // Reiter BLEIBT (22.09.2026, Finn: „wenn ich bei Offen oder Überprüfen bin, in einen
+    // anderen Tab gehe und zurückkomme, bin ich automatisch bei Geplant — das ist ein Bug").
+    // Bis dahin sprang die View beim Betreten immer auf „Geplant" (Regel vom Sommer).
     if(name === 'trades'){
-      const plannedTab = document.querySelector('[data-tradetab="planned"]')
-      if(plannedTab && !plannedTab.classList.contains('active')) plannedTab.click()
       // Duplikium-Live-Lots sofort holen statt bis zu 10s auf den Poller zu warten
       // (25.08.2026, gehört zur Sektion DUP-ROUTE LIVE-LOTS)
       if(typeof dupLotsKick === 'function') dupLotsKick()
@@ -24211,13 +24212,13 @@
     // automatisch — da soll auch der Duplikum-Slave sein" wählt man den Slave wie dort.
     const fixed = _tpRoute === 'mt5'
     const filterRow = document.getElementById('tp-slave-firm-filter')?.parentElement
-    if(filterRow) filterRow.style.display = fixed ? 'none' : ''
+    if(filterRow) filterRow.style.display = 'none'   // Filter seit 22.09.2026 immer ausgeblendet
     const slaveSel = document.getElementById('tp-slave')
     if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
     const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
-    if(masterFilterRow) masterFilterRow.style.display = _tpRoute === 'topstep' ? 'none' : ''
+    if(masterFilterRow) masterFilterRow.style.display = 'none'   // Filter seit 22.09.2026 immer ausgeblendet
     // TP/Richtung bleiben im Plan-Modal VERSTECKT (Finns Korrektur nach dem
     // ersten Test, 28.08.2026): eingestellt wird die Order im zweiten Popup
     // („Weiter →"), das sie per „Speichern" AM PLAN ablegt — gestartet wird
@@ -24812,7 +24813,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.382'
+  const OS_TAB_BUILD = '2026-09-22.383'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26384,6 +26385,7 @@
     }
     _editingPlanId = editId || null
     const isEdit = !!editId
+    _tpRiskAuto.master = null; _tpRiskAuto.manuell = false   // Risiko-Box-Automatik je Popup neu (22.09.2026)
 
     // Title
     document.getElementById('tradePlanTitle').textContent = isEdit ? 'Trade-Plan bearbeiten' : 'Trade planen'
@@ -27256,6 +27258,9 @@
 
   /* ── END NQ/MNQ Toggle ── */
 
+  // Auto-Anwenden der Risiko-Box (s. tpRecompute): je Master einmal, manuell = aus
+  const _tpRiskAuto = { master: null, manuell: false }
+  document.getElementById('tp-slave-risk')?.addEventListener('input', () => { _tpRiskAuto.manuell = true })
   function tpRecompute(){
     const masterId = document.getElementById('tp-master').value
     const slaveId  = document.getElementById('tp-slave').value
@@ -27408,6 +27413,23 @@
       } else {
         vgEl.style.display = 'none'
         vgEl.dataset.suggestedVgEur = ''
+      }
+    }
+
+    // RISIKO-BOX AUTOMATISCH ANWENDEN (22.09.2026, Finn: „damit ich nicht immer draufdrücken
+    // muss": CFD Phase 1 → Auto-Vorschlag (Kaufkosten), CFD Phase 2 (Nachfolger mit
+    // Vorgänger) → Fixkosten bei Phasenwechsel, Futures → Gesamtkosten — manuell bleibt
+    // alles umschaltbar). Einmal je gewähltem Master; nie, wenn Finn das Feld selbst
+    // angefasst hat oder ein bestehender Plan mit Slave-Risiko bearbeitet wird.
+    if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
+      _tpRiskAuto.master = String(master.id)
+      const bearbeitetMitWert = !!(_editingPlanId && slaveRisk > 0)
+      if(!bearbeitetMitWert){
+        const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(master.firm)
+        const vgSichtbar = vgEl && vgEl.style.display !== 'none' && parseFloat(vgEl.dataset.suggestedVgEur || '') > 0
+        const knopf = istFut ? 'tp-gesamtkosten-apply' : vgSichtbar ? 'tp-vorgaenger-apply' : 'tp-slave-suggest-apply'
+        // nach dem laufenden Recompute (die Knöpfe rechnen selbst neu)
+        setTimeout(() => document.getElementById(knopf)?.click(), 0)
       }
     }
 

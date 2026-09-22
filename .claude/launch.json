@@ -150,6 +150,16 @@
         "/private/tmp/claude-501/-Applications-Prophos/26590bfc-7fd4-498b-bac1-fa179fdfd463/scratchpad"
       ],
       "port": 5121
+    },
+    {
+      "name": "prophos-static-check-14",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5131"
+      ],
+      "port": 5131
     }
   ]
 }
