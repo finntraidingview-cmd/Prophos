@@ -945,6 +945,19 @@ def main():
         and order_bot.tv_tab_rang("Prophos - Google Chrome", "", "") == 0
         and order_bot.tv_tab_rang("DevTools - NQZ2026 30,784.50 0%", "", "") == 0
         and order_bot.tv_tab_rang("30,784.50 0% Unnamed", "", "") == 0)
+    # Eingeklapptes Tradovate-Panel (22.09.2026, Finns PC): nur Kopfzeile sichtbar
+    _FR = (0, 107, 2000, 1190)
+    _PK = [("Tradovate", (100, 1122, 170, 1140), "Button"), ("Account Balance", (1016, 1165, 1116, 1183), "Text"),
+           ("Equity", (1150, 1165, 1190, 1183), "Text"), ("Profit", (1255, 1165, 1290, 1183), "Text"),
+           ("Maximize panel", (1280, 1122, 1296, 1140), "Button"), ("Symbol", (1656, 297, 1700, 315), "Text")]
+    chk("TV-PANEL: Kopfzeile am unteren Rand ohne Platz darunter = eingeklappt, Maximieren-Knopf in der Zeile gefunden",
+        (order_bot.tv_panel_eingeklappt(_PK, _FR) or {}).get("knopf", {}).get("text") == "Maximize panel"
+        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["knopf"] is None
+        and order_bot.tv_panel_eingeklappt([x for x in _PK if x[0] != "Maximize panel"], _FR)["kopf_y"] == 1174)
+    chk("TV-PANEL: offenes Panel (Kopfzeile weit ueber dem Rand) oder keine Kopfzeile = nichts tun",
+        order_bot.tv_panel_eingeklappt([("Account Balance", (1016, 1030, 1116, 1048), "Text"), ("Equity", (1150, 1030, 1190, 1048), "Text")], _FR) is None
+        and order_bot.tv_panel_eingeklappt([("Symbol", (1656, 297, 1700, 315), "Text")], _FR) is None
+        and order_bot.tv_panel_eingeklappt(_PK, None) is None)
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]

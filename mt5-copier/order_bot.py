@@ -839,6 +839,41 @@ def _klick_absolut(x, y, taste="links", doppel=False):
     return user32.SendInput(len(folge), batch, ctypes.sizeof(_INP)) == len(folge)
 
 
+def _ziehen_absolut(x1, y1, x2, y2, schritte=12):
+    """Echtes Ziehen (Druecken - bewegen - loslassen) ueber SendInput, gleiche
+    Absolut-Normierung wie _klick_absolut. Fuer die Trennleiste des Tradovate-
+    Panels (22.09.2026)."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+    vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+    norm = lambda x, y: (int(round((int(x) - vx) * 65535 / max(1, vw - 1))), int(round((int(y) - vy) * 65535 / max(1, vh - 1))))
+    PUL = ctypes.POINTER(ctypes.c_ulong)
+
+    class _MI(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long), ("mouseData", ctypes.c_ulong),
+                    ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong), ("dwExtraInfo", PUL)]
+
+    class _INP(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong), ("mi", _MI)]
+    MOVE, ABS, DOWN, UP = 0x0001, 0x8000 | 0x4000, 0x0002, 0x0004
+
+    def sende(fl, x, y):
+        ax, ay = norm(x, y)
+        b = (_INP * 1)()
+        b[0].type = 0
+        b[0].mi = _MI(ax, ay, 0, fl, 0, None)
+        return user32.SendInput(1, b, ctypes.sizeof(_INP)) == 1
+    ok = sende(MOVE | ABS, x1, y1)
+    time.sleep(0.08)
+    ok = sende(MOVE | DOWN | ABS, x1, y1) and ok
+    for i in range(1, schritte + 1):
+        time.sleep(0.03)
+        ok = sende(MOVE | ABS, x1 + (x2 - x1) * i // schritte, y1 + (y2 - y1) * i // schritte) and ok
+    time.sleep(0.08)
+    return sende(MOVE | UP | ABS, x2, y2) and ok
+
+
 def _cursor_pos():
     import ctypes
     import ctypes.wintypes as wt
@@ -1978,6 +2013,62 @@ def tv_schalter_zu(schalter, label_r, bereich):
     return best if best else (None, None)
 
 
+TV_RX_PANEL_KOPF = re.compile(r"^(account balance|kontostand|equity|eigenkapital)$", re.I)
+TV_RX_PANEL_MAX = re.compile(r"(maxim|expand|restore|vergr|erweiter|aufklapp|wiederherstell)", re.I)
+
+
+def tv_panel_eingeklappt(roh, fenster):
+    """Ist das Tradovate-Panel unten nur als KOPFZEILE zu sehen? (22.09.2026,
+    Finns PC, erster Lauf: 'unten sieht man den Accountnamen nicht — man muesste
+    das Fenster an der Leiste hochziehen'; bei Moritz laedt es aufgeklappt.)
+    Kopfzeile = 'Account Balance'/'Equity' im unteren Fensterviertel; eingeklappt,
+    wenn darunter bis zum Fensterrand weniger als 90 px bleiben.
+    -> {'kopf_y': y, 'knopf': {...}|None} oder None (Kopfzeile nicht zu sehen /
+    Panel offen). knopf = Maximieren-Knopf in derselben Zeile, falls benannt."""
+    if not fenster:
+        return None
+    l, t, r, b = fenster
+    h = max(1, b - t)
+    kopf = [e for e in roh or () if e[1] and TV_RX_PANEL_KOPF.match(str(e[0]).strip()) and e[1][1] > t + h * 0.6]
+    if not kopf:
+        return None
+    ky = min((e[1][1] + e[1][3]) // 2 for e in kopf)
+    if b - ky > 90:
+        return None
+    knopf = None
+    for e in roh or ():
+        if not e[1] or (len(e) > 2 and e[2] not in ("Button", "")):
+            continue
+        n = str(e[0]).strip()
+        # Knopf-Zeile ('Tradovate ▾ … — ⤢') liegt bei Finn ~40 px UEBER der Kopfzeile
+        if TV_RX_PANEL_MAX.search(n) and -60 <= (e[1][1] + e[1][3]) // 2 - ky <= 25:
+            knopf = {"text": n[:40], "r": tuple(e[1]), "punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}
+            break
+    return {"kopf_y": ky, "knopf": knopf}
+
+
+def _tv_panel_aufziehen(w, trail):
+    """Eingeklapptes Tradovate-Panel oeffnen: Maximieren-Knopf, sonst die
+    Trennleiste ueber der Kopfzeile ein Drittel hochziehen. -> True, wenn
+    etwas getan wurde."""
+    fr = _tv_fenster_rect(w)
+    roh = _tv_uia_roh(w, ("Text", "Button"))
+    z = tv_panel_eingeklappt(roh, fr)
+    if not z:
+        return False
+    if z["knopf"]:
+        _tv_uia_klick(z["knopf"], f"Panel aufklappen ('{z['knopf']['text']}')", trail)
+        return True
+    l, t, r, b = fr
+    x = l + (r - l) * 2 // 5
+    y1 = z["kopf_y"] - 34            # Trennleiste knapp ueber der Kopfzeile
+    y2 = t + (b - t) * 55 // 100     # bis etwa Fenstermitte
+    _maus_fahren(x, y1)
+    ok = _ziehen_absolut(x, y1, x, y2)
+    trail.append(f"Tradovate-Panel an der Leiste hochgezogen ({y1}->{y2}){'' if ok else ' — SendInput abgelehnt'}")
+    return ok
+
+
 def _tv_uia_konten(w, ids, info=None, nur_ziel=None, ohne=None):
     """AUGEN OHNE USERSCRIPT (21.09.2026, Finn: 'nein, ohne Tampermonkey — das
     bekommen wir doch auch so hin'): die Kontonummern direkt aus Chromes
@@ -2792,6 +2883,7 @@ def modus_tvkonto(cmd):
 
     uia_info = {}
     fenster = [None]
+    aufgezogen = [False]        # Tradovate-Panel schon aufgezogen? (einmal pro Lauf)
 
     fenster_gesehen = [""]
 
@@ -2834,6 +2926,15 @@ def modus_tvkonto(cmd):
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
                 return z2, e["text"], b, e
+            # Nichts zu sehen und das Panel unten nur als Kopfzeile (Finns PC,
+            # 22.09.2026): einmal pro Lauf aufziehen, dann weiterlesen.
+            if not els and not aufgezogen[0] and not tv_fremdes_konto(uia_info.get("aehnlich"), ids):
+                aufgezogen[0] = True
+                try:
+                    if _tv_panel_aufziehen(w, trail):
+                        _warte(0.8, 0.3)
+                except Exception as e_:
+                    trail.append(f"Panel aufziehen: {type(e_).__name__}")
         return z, a, b, None
 
     ende = time.time() + (40.0 if gestartet else 14.0)
@@ -3413,6 +3514,7 @@ def modus_tvkonto(cmd):
             # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
             # Firma dastehen.
             fenster[0] = None
+            aufgezogen[0] = False       # neuer Tab: das Panel kann wieder eingeklappt laden
             start = time.time()
             ende = time.time() + 45.0
             while True:
@@ -3453,6 +3555,7 @@ def modus_tvkonto(cmd):
                     # es ja der richtige Login: erst lesen, dann handeln.
                     gelesen = True
                     trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
+                    aufgezogen[0] = False
                     ende_v = time.time() + 25.0
                     while True:
                         zustand, aktiv, bf, uia_el = lies()
