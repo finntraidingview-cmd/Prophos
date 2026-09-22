@@ -6655,7 +6655,7 @@
               <b id="adm-mode-note">–</b><br>
               <span id="adm-excluded-note"></span>
               Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
-              Firmennamen werden zusammengefasst — z.&nbsp;B. „Apex Trader" → Apex, sonst wäre das Klumpenrisiko zu klein.
+              Firmennamen werden zusammengefasst — z.&nbsp;B. „apex" → Apex Trader, sonst wäre das Klumpenrisiko zu klein.
             </p>
           </div>
         </div>
@@ -7564,7 +7564,7 @@
             <option value="FundedNext Futures"></option>
             <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
-            <option value="Apex"></option>
+            <option value="Apex Trader"></option>
             <option value="The5%ers"></option>
             <!-- Custom firms werden hier per JS hinzugefügt (data-custom="1") -->
           </datalist>
@@ -7817,7 +7817,7 @@
             <option value="FundedNext Futures"></option>
             <option value="MyFundedFutures"></option>
             <option value="Tradeify"></option>
-            <option value="Apex"></option>
+            <option value="Apex Trader"></option>
             <option value="The5%ers"></option>
             <option value="AlphaFutures"></option>
             <option value="MFFU"></option>
@@ -21628,7 +21628,7 @@
    * tatsächlich auf Accounts verwendeten Firmennamen — dedupliziert, alphabetisch.
    */
   function refreshFirmDatalist(){
-    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex','The5%ers']
+    const STATIC_FIRMS = ['Topstep','Fusion Markets','FundingPips','FundedNext','FundedNext Futures','MyFundedFutures','Tradeify','Apex Trader','The5%ers']
     const seen = new Map()  // lowercase → Original-Schreibweise (erste gesehene gewinnt)
     const addName = (name) => {
       const n = (name || '').trim()
@@ -24771,7 +24771,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.374'
+  const OS_TAB_BUILD = '2026-09-22.375'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

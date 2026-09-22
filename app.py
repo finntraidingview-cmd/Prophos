@@ -3772,7 +3772,7 @@ SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY")
                      or "sb_publishable__LWDlDHJbNIr6X7kRwfqqg_tZcjwaDS").strip()
 
 _FIRM_RULES = [
-    ("apex", "Apex"), ("tradeify", "Tradeify"), ("fundednext", "FundedNext"),
+    ("apex", "Apex Trader"), ("tradeify", "Tradeify"), ("fundednext", "FundedNext"),
     ("founded next", "FundedNext"), ("foundednext", "FundedNext"),
     ("fundingpips", "FundingPips"), ("funding pips", "FundingPips"),
     ("topstep", "Topstep"), ("ftmo", "FTMO"), ("alpha", "Alpha Future"),
@@ -3807,7 +3807,8 @@ ADMIN_EMAILS = {
 
 def _firm_norm(name):
     """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
-    angezeigt (real vorhanden: 'Apex' vs 'Apex Trader', 'MyFoundedFutures')."""
+    angezeigt (real vorhanden: 'MyFoundedFutures'; 'Apex' vs 'Apex Trader' seit
+    22.09.2026 in der DB zusammengelegt — die Regel fängt nur Tippfehler ab)."""
     raw = (name or "").strip()
     f = raw.lower()
     if not f:
