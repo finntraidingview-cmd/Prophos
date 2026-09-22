@@ -24813,7 +24813,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.383'
+  const OS_TAB_BUILD = '2026-09-22.384'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27421,6 +27421,13 @@
     // Vorgänger) → Fixkosten bei Phasenwechsel, Futures → Gesamtkosten — manuell bleibt
     // alles umschaltbar). Einmal je gewähltem Master; nie, wenn Finn das Feld selbst
     // angefasst hat oder ein bestehender Plan mit Slave-Risiko bearbeitet wird.
+    // FUTURES: nur die Gesamtkosten-Box (22.09.2026, Finn: „Auto-Vorschlag und Fixkosten bei
+    // Phasenwechsel brauche ich bei Futures nie") — die beiden anderen bleiben ausgeblendet,
+    // auch wenn sie rechnerisch etwas haetten.
+    if(master && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master.firm)){
+      if(suggestEl) suggestEl.style.display = 'none'
+      if(vgEl){ vgEl.style.display = 'none' }
+    }
     if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
       _tpRiskAuto.master = String(master.id)
       const bearbeitetMitWert = !!(_editingPlanId && slaveRisk > 0)
