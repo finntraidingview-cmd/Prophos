@@ -5107,8 +5107,8 @@
           <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5">
             Je Konto: Risiko Master = Max-Drawdown · Slave = Duplikum-Slave · Weg Orbit · Symbol aus Instrument.
             <b>Challenge/Phase:</b> TP aus der Challenge-Spanne, Risiko Slave = Gesamtkosten.
-            <b>Funded/Live:</b> TP = Gewinntag der Firma + Spread/Gebühren, Risiko Slave nach Puffer-Staffel
-            (Puffer = Live-Balance − Start + Max-Drawdown). TP je Konto zufällig aus der Spanne; Slave-Betrag je Zeile änderbar.
+            <b>Funded/Live:</b> TP = Gewinntag der Firma + Spread/Gebühren, Risiko Slave nach Staffel
+            (was auf der Balance über der Kontogröße liegt). TP je Konto zufällig aus der Spanne; Slave-Betrag je Zeile änderbar.
           </p>
           <div class="form-grid">
             <div class="field">
@@ -5142,7 +5142,7 @@
               <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
             </div>
             <div class="vp-zeile"><b>Funded · Slave (€)</b>
-              <span>Puffer &lt;2k</span> <input type="number" class="input mono vp-in" data-vp-st="0" min="0" step="5" value="50">
+              <span>über Kontogröße &lt;2k</span> <input type="number" class="input mono vp-in" data-vp-st="0" min="0" step="5" value="50">
               <span style="margin-left:6px">2–4k</span> <input type="number" class="input mono vp-in" data-vp-st="1" min="0" step="5" value="60">
               <span style="margin-left:6px">4–6k</span> <input type="number" class="input mono vp-in" data-vp-st="2" min="0" step="5" value="70">
               <span style="margin-left:6px">6–8k</span> <input type="number" class="input mono vp-in" data-vp-st="3" min="0" step="5" value="80">
@@ -5549,7 +5549,7 @@
                 <input type="checkbox" id="tc-wd-farm" style="width:16px;height:16px;flex-shrink:0">
                 <span style="color:var(--ink);font-weight:500" id="tc-wd-farm-label">🌾 Zu WD-Farm hinzufügen</span>
               </label>
-              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Nur angehakte Fundeds fährt der Winning-Day-Farmer nachts von allein. Haken raus = raus aus dem Farm.</div>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Haken raus = der Winning-Day-Farmer lässt dieses Konto aus, bis du ihn wieder setzt (gilt für alle folgenden Tage).</div>
             </div>
             <div class="field" style="grid-column:span 2">
               <label>Lesson learned (optional)</label>
@@ -8337,9 +8337,9 @@
         <!-- 🌾 WD-Farm (23.09.2026): nur angehakte Fundeds fährt der Winning-Day-Farmer (Admin → Winning Days) -->
         <div class="field" style="grid-column:1/-1" id="ac-wd-farm-row">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
-            <input type="checkbox" id="ac-wd-farm" style="width:16px;height:16px;flex-shrink:0">
-            <span style="font-weight:500">🌾 Zu WD-Farm hinzufügen</span>
-            <span style="font-size:11.5px;color:var(--sub)">— nur angehakte Fundeds fährt der Winning-Day-Farmer nachts von allein</span>
+            <input type="checkbox" id="ac-wd-farm" checked style="width:16px;height:16px;flex-shrink:0">
+            <span style="font-weight:500">🌾 Im WD-Farm</span>
+            <span style="font-size:11.5px;color:var(--sub)">— Haken raus = der Winning-Day-Farmer lässt dieses Konto aus (gilt bis du ihn wieder setzt)</span>
           </label>
         </div>
       </div>
@@ -8664,9 +8664,9 @@
         </div>
         <div class="field" style="grid-column:1/-1">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
-            <input type="checkbox" id="bulk-wd-farm" style="width:16px;height:16px;flex-shrink:0">
-            <span style="font-weight:500">🌾 Zu WD-Farm hinzufügen</span>
-            <span style="font-size:11.5px;color:var(--sub)">— alle angelegten Konten fährt der Winning-Day-Farmer</span>
+            <input type="checkbox" id="bulk-wd-farm" checked style="width:16px;height:16px;flex-shrink:0">
+            <span style="font-weight:500">🌾 Im WD-Farm</span>
+            <span style="font-size:11.5px;color:var(--sub)">— Haken raus = der Winning-Day-Farmer lässt diese Konten aus</span>
           </label>
         </div>
       </div>
@@ -19347,7 +19347,7 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.extId) accEls.extId.value = ''
-      if(accEls.wdFarm) accEls.wdFarm.checked = false
+      if(accEls.wdFarm) accEls.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
       if(accEls.credLogin)    accEls.credLogin.value    = ''
@@ -20295,7 +20295,7 @@
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
       if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = ''
       if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = ''
-      if(bEl.wdFarm) bEl.wdFarm.checked = false
+      if(bEl.wdFarm) bEl.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bEl.template.value = ''
@@ -25634,7 +25634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.399'
+  const OS_TAB_BUILD = '2026-09-22.400'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28992,10 +28992,13 @@
   }
   function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'live' }
   function tpVorplanSpanne(von, bis){ const v = Math.max(0, Number(von) || 0); return [v, Math.max(v, Number(bis) || v)] }
-  // Staffel: Puffer ($) → Slave-Betrag (€). Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 …
-  function tpVorplanStaffel(puffer, staffel){
+  // Staffel: „wie viel auf der Balance drauf ist" ($, = Live-Balance − Kontogröße) → Slave-Betrag (€).
+  // Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 … 23.09.2026: vorher stand hier ein
+  // „Puffer" (Live − Start + Drawdown) — Finn: „ich verstehe nicht, was mit dem Puffer gemeint ist,
+  // ich will einfach die Balance stehen haben". Jetzt zählt nur, was über der Kontogröße liegt.
+  function tpVorplanStaffel(plus, staffel){
     const s = (Array.isArray(staffel) && staffel.length === 5) ? staffel : TP_VP_VORGABE.staffel
-    const p = Number(puffer) || 0
+    const p = Number(plus) || 0
     return p > 8000 ? s[4] : p > 6000 ? s[3] : p > 4000 ? s[2] : p > 2000 ? s[1] : s[0]
   }
   // Startbalance: DB-Feld, sonst Kontogröße aus dem Namen („150k Apex …" → 150000). 23.09.2026: bei fast
@@ -29015,7 +29018,7 @@
   }
 
   // Reine Rechnung je Konto (testbar). opt = {gkEur, live, slaveCurrency, fx, regeln, zufall}
-  //  -> {phase, firma, tpVon, tpBis, tp, masterRisk, puffer, slaveEur, slaveRisk, basis, hinweis} oder {fehler}
+  //  -> {phase, firma, tpVon, tpBis, tp, masterRisk, live, groesse, plus, puffer(=plus, alt), slaveEur, slaveRisk, basis, hinweis} oder {fehler}
   function tpVorplanZeile(acc, opt){
     const o = opt || {}
     const dd = Number(acc && acc.maxDrawdown) || 0
@@ -29024,15 +29027,16 @@
     const funded = tpVorplanIstFunded(acc)
     const firma = tpVorplanFirmaKey(acc && acc.firm)
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
-    let slaveEur, puffer = null, basis, hinweis = ''
+    let slaveEur, puffer = null, plus = null, live = null, groesse = 0, basis, hinweis = ''
     if(funded){
       const startRoh = Number(acc.initialBalance) || 0
-      const start = startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
-      const live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
-      if(live == null){ puffer = dd; hinweis = 'kein Live-Stand — Puffer = Max-Drawdown' }
-      else if(!(start > 0)){ puffer = dd; hinweis = 'Startbalance unbekannt (Konto pflegen oder „150k" in den Namen) — Puffer = Max-Drawdown' }
-      else puffer = Math.round(live - start + dd)
-      slaveEur = tpVorplanStaffel(puffer, regeln.staffel); basis = 'staffel'
+      groesse = startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
+      live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
+      if(live == null){ plus = 0; hinweis = 'kein Live-Stand — kleinste Stufe' }
+      else if(!(groesse > 0)){ plus = 0; hinweis = 'Kontogröße unbekannt („150k" in den Namen) — kleinste Stufe' }
+      else plus = Math.round(live - groesse)
+      puffer = plus   // alter Feldname, bleibt für Anzeigen, die ihn noch lesen
+      slaveEur = tpVorplanStaffel(plus, regeln.staffel); basis = 'staffel'
     }else{
       if(!(o.gkEur > 0)) return { fehler: 'Gesamtkosten 0 — nichts reingesteckt?' }
       slaveEur = o.gkEur; basis = 'gesamtkosten'
@@ -29040,7 +29044,7 @@
     const slaveRisk = tpVorplanSlaveWaehrung(slaveEur, o.slaveCurrency, o.fx)
     const r = (typeof o.zufall === 'number') ? o.zufall : Math.random()
     const tp = Math.round(tpVon + r * (tpBis - tpVon))
-    return { phase: funded ? 'funded' : 'challenge', firma, tpVon, tpBis, tp: tp > 0 ? tp : null, masterRisk: dd, puffer,
+    return { phase: funded ? 'funded' : 'challenge', firma, tpVon, tpBis, tp: tp > 0 ? tp : null, masterRisk: dd, live, groesse, plus, puffer,
       slaveEur: Math.round(slaveEur * 100) / 100, slaveRisk, basis, hinweis }
   }
 
@@ -29126,7 +29130,7 @@
         <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} — ${escapeHtml(grund)}</span></span></div>`
       // Basis-Zeile: woher der Slave-Betrag kommt — Finn sieht die Rechnung und korrigiert im Feld daneben
       const basis = z.basis === 'staffel'
-        ? (z.hinweis ? `Puffer $${de(z.puffer)} (${escapeHtml(z.hinweis)})` : `Puffer $${de(z.puffer)} = Live ${de(tpVorplanLive(k.acc))} − Start ${de(k.acc.initialBalance)} + DD ${de(z.masterRisk)}`) + ` → ${de(z.slaveEur)} €`
+        ? (z.hinweis ? escapeHtml(z.hinweis) : `Balance $${de(z.live)} · ${z.plus >= 0 ? '+' : '−'}$${de(Math.abs(z.plus))} über ${de(z.groesse)}`) + ` → ${de(z.slaveEur)} €`
         : `Gesamtkosten ${de(z.slaveEur, 2)} €`
       return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
         <input type="checkbox" id="tp-vp-acc-${id}" data-vp-acc="${id}" checked>
@@ -30154,7 +30158,7 @@
     if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
     wrap.hidden = false
     cb.checked = !!a.wdFarm
-    lbl.textContent = `🌾 ${a.wdFarm ? 'Im WD-Farm' : 'Zu WD-Farm hinzufügen'} — ${a.name}`
+    lbl.textContent = `🌾 ${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
   }
   async function wdFarmSetzen(accId, an){
     const { error } = await supabase.from('accounts').update({ wd_farm: !!an }).eq('id', accId)
