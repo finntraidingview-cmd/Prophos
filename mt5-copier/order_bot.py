@@ -1244,7 +1244,17 @@ def tv_tab_rang(name, begriff, symbol):
     # Prozent) — ein einzelnes waere zu weit (Prozent steht in vielen Titeln).
     if ("▲" in n or "▼" in n) and "%" in n:
         return 1
+    # OHNE Pfeil (22.09.2026 02:5x, Finns Lauf: 'NQZ2026 30,784.50 0% Unnamed' —
+    # bei genau 0 % Aenderung schreibt TradingView KEINEN Pfeil, der Tab galt als
+    # 'nicht gefunden', obwohl er vorne stand): Symbol-Wort, dann Kurs, dann Prozent —
+    # drei Merkmale in dieser Reihenfolge sind genauso eindeutig wie Pfeil + Prozent.
+    if TV_RX_CHART_TITEL.match(n):
+        return 1
     return 0
+
+
+# '(1) ' Zaehler-Praefix vertragen; Symbol wie 'NQZ2026', 'BTC1!', 'CME_MINI:NQZ2026'
+TV_RX_CHART_TITEL = re.compile(r"^(\(\d+\)\s*)?[A-Za-z][A-Za-z0-9!:._-]{1,24}\s+[\d.,]+\s+(▲|▼)?\s*[−\-+]?[\d.,]+\s*%")
 
 
 def tv_tab_passt(name, begriff, symbol):
@@ -4299,7 +4309,14 @@ def modus_tvkette(cmd):
         print(json.dumps(res))
         return
     trail = _StempelSpur()
-    w, f = _tv_fenster_holen([], "", "")
+    # Fenstersuche MIT dem Plan-Symbol (Rang 3, falls der Chart schon darauf steht)
+    # und mit Geduld: direkt nach dem Login laedt der Tab noch, sein Titel wechselt.
+    w, f, ende_w = None, "", time.time() + 8.0
+    while not w:
+        w, f = _tv_fenster_holen([], "", symbol)
+        if w or time.time() >= ende_w:
+            break
+        _warte(0.5, 0.3)
     if not w:
         ok, msg = False, "TradingView-Fenster fuer den Asset-Schritt nicht gefunden."
     else:

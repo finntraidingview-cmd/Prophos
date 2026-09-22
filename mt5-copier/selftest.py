@@ -928,6 +928,14 @@ def main():
         and order_bot.tv_verlassen_knopf([("Leave", (10, 10, 60, 30), "Button")])["text"] == "Leave"
         and order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", None, "Button")]) is None
         and order_bot.tv_verlassen_knopf([]) is None)
+    chk("TV-TAB: Chart-Titel OHNE Pfeil (genau 0 %) wird erkannt — nie Prophos/DevTools/Kurse ohne Symbol",
+        order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed - Google Chrome", "", "") == 1
+        and order_bot.tv_tab_rang("(2) MNQZ2026 30,849.00 ▲ +0.21% Unnamed", "", "") == 1
+        and order_bot.tv_tab_rang("BTC1! 86,680 −0.1% Unnamed", "", "") == 1
+        and order_bot.tv_tab_rang("NQZ2026 30,784.50 0% Unnamed", "", "NQZ6") == 3
+        and order_bot.tv_tab_rang("Prophos - Google Chrome", "", "") == 0
+        and order_bot.tv_tab_rang("DevTools - NQZ2026 30,784.50 0%", "", "") == 0
+        and order_bot.tv_tab_rang("30,784.50 0% Unnamed", "", "") == 0)
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]
