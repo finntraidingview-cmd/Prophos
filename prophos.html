@@ -22841,6 +22841,7 @@
     if(sub) sub.innerHTML = subHtml || ''
   }
   function _pfClose(){
+    _pfOrbitWeiter = null
     // Remote-Lauf, dessen Order noch NICHT unterwegs ist? Dann ist „Popup zu"
     // die ehrliche Antwort ans Handy: verworfen, nichts gesendet (28.08.2026).
     if(_pfRemoteHook && !_pfRemoteHook.armed && _pfPlanId != null
@@ -22961,6 +22962,7 @@
     return { softWait: true }
   }
 
+  let _pfOrbitWeiter = null   // Orbit: Fortsetzung nach grünem Duplikum-Check (s. tpOrbitStarten)
   async function tpPreflightAndStart(planId, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     if(!plan) return
@@ -22971,6 +22973,11 @@
     // Check wie auf der Duplikum-Route. nurDup wirkt NUR bei Orbit-Plänen; für alle
     // anderen bleibt die Routen-Erkennung unten unverändert.
     const orbitDup = plan.route === 'tvplus' && !!(opts && opts.nurDup)
+    // weiter (22.09.2026): bei Grün NICHT schließen, sondern im selben Popup mit der
+    // Puls-Kette weitermachen (Orbit-„Starten" = Check → Signal/Order in einem Stück).
+    // Für „Erneut versuchen" gemerkt, damit der Haken den Neuanlauf überlebt.
+    if(orbitDup && opts && opts.weiter) _pfOrbitWeiter = opts.weiter
+    const weiter = orbitDup ? _pfOrbitWeiter : null
 
     // Explizite Routen-Wahl aus dem Modal-Regler (15.08.2026): route='mt5' →
     // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
@@ -23100,6 +23107,13 @@
     _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
     _pfStatusSave()
     try { renderTradePlans() } catch(_){}
+    if(allOk && weiter){
+      _pfOrbitWeiter = null
+      const fe = document.getElementById('pf-final')
+      if(fe){ fe.style.display = 'block'; fe.className = 'pf-final ok'; fe.textContent = '✓ Duplikum bereit — Puls übernimmt…' }
+      try{ await weiter() }catch(e){ console.warn('[orbit weiter]', e) }
+      return
+    }
     _pfFinish(allOk, hardFail
       ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
       : softWait ? 'Hinweise oben prüfen — der Trade bleibt auf Geplant.' : null)
@@ -23904,7 +23918,7 @@
     if(pid == null) return
     const rb = document.getElementById('pf-retry')
     if(rb){ rb.disabled = true; rb.textContent = 'Prüfe …' }
-    tpPreflightAndStart(pid, { nurDup: true })   // nurDup wirkt nur bei Orbit-Plänen
+    tpPreflightAndStart(pid, { nurDup: true, weiter: _pfOrbitWeiter })   // nurDup/weiter wirken nur bei Orbit-Plänen
   })
   document.getElementById('pf-force')?.addEventListener('click', async () => {
     const pid = _pfPlanId
@@ -24363,7 +24377,10 @@
     // SL dieser ORDER (31.08.2026, Finns Fund): steht seit heute in master_sl,
     // nicht mehr in master_risk. Fallback auf master_risk fuer alle Plaene, die
     // vor der Trennung gespeichert wurden — dort WAR der SL das Risiko.
-    document.getElementById('tp-order-sl').value = plan.masterSl ?? plan.masterRisk ?? ''
+    // Orbit: KEIN Rückfall aufs Plan-Risiko (22.09.2026) — leer heißt dort „kein SL".
+    document.getElementById('tp-order-sl').value = _tpOrderOrbit ? (plan.masterSl ?? '') : (plan.masterSl ?? plan.masterRisk ?? '')
+    const _slIn = document.getElementById('tp-order-sl')
+    if(_slIn) _slIn.placeholder = _tpOrderOrbit ? 'leer = kein SL' : 'z.B. 100'
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
@@ -24511,7 +24528,14 @@
     if(!_tpOrderDir) return err('Richtung wählen — Buy oder Sell.')
     if(!symbol) return err('Symbol angeben.')
     const autoSltp = !!document.getElementById('tp-order-sltp')?.checked
-    if(autoSltp && (!(tp > 0) || !(sl > 0)))
+    // ORBIT (22.09.2026, Finn: „ich benutze sehr oft nicht mal einen Stop Loss, weil mein
+    // Stop Loss automatisch der Low ist — kein Pflichtfeld"): SL darf leer bleiben, Puls
+    // stellt dann den SL-Schalter im Order-Panel AUS. TP bleibt Pflicht, solange der
+    // Schalter an ist. Echo unverändert (dort braucht der MT5-Dialog beide Werte).
+    if(autoSltp && !(tp > 0))
+      return err(_tpOrderOrbit ? 'Take Profit in $ angeben — oder den SL/TP-Schalter ausschalten.'
+                               : 'Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
+    if(autoSltp && !_tpOrderOrbit && !(sl > 0))
       return err('Take Profit und Stop Loss in $ angeben — oder den SL/TP-Schalter ausschalten.')
     if(!(lots > 0)) return err('Lot-Anzahl angeben.')
     // SPEICHERN statt Starten (Finns Korrektur 28.08.2026): die Order wandert
@@ -24550,7 +24574,9 @@
     // Nur bei eingeschaltetem Schalter überschreiben: „Order pur" soll den
     // zuletzt eingetippten Stop nicht stillschweigend wegwerfen — ob mit oder
     // ohne SL/TP gestartet wird, entscheidet ohnehin master_tp (s. tpJetztStarten).
-    if(autoSltp) upd.master_sl = sl
+    // Orbit: leerer SL wird als NULL gespeichert — sonst würde ein alter SL vom letzten
+    // Trade stillschweigend mitgehen (Puls liest master_sl; NULL = Schalter AUS).
+    if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
     try{
       const { data, error } = await supabase.from('trade_plans').update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
@@ -24560,12 +24586,12 @@
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       renderTradePlans()
       if(_tpOrderOrbit){
-        // ORBIT (22.09.2026, Finns Ablauf): Popup 2 SPEICHERT nur noch — wie bei Echo.
-        // Danach derselbe Check wie beim Duplikum-Trade (Duplikum kopiert, kein TV-Reader);
-        // ist er grün, steht die Karte auf „✓ Ready to start". Die Puls-Kette (TradingView →
-        // Konto → Asset → Order → Buy/Sell) fährt erst „Starten" auf der Karte: tpOrbitStarten.
+        // ORBIT (22.09.2026, Finns Ablauf, Korrektur 02:1x: „den Duplikum-Precheck nicht
+        // beim Speichern machen, sondern beim Starten"): Popup 2 SPEICHERT nur — wie bei
+        // Echo. „Starten" auf der Karte fährt dann in EINEM Stück: Duplikum-Check →
+        // (vom Mac: Signal an den PC) → Puls-Kette in TradingView (tpOrbitStarten).
         document.getElementById('tpOrderModal').classList.remove('open')
-        tpPreflightAndStart(plan.id, { nurDup: true })
+        if(typeof atToast === 'function') atToast(`Order gespeichert: ${_tpOrderDir.toUpperCase()} ${lots} ${symbol}${autoSltp ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ' · ohne SL'}` : ' · ohne SL/TP'} — Starten über die Karte.`, 'start')
         return
       }
       document.getElementById('tpOrderModal').classList.remove('open')
@@ -24599,7 +24625,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.349'
+  const OS_TAB_BUILD = '2026-09-22.350'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24773,7 +24799,7 @@
   // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
-  async function tpOrbitStarten(planId, fern){
+  async function tpOrbitStarten(planId, fern, opts){
     const plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
@@ -24783,9 +24809,24 @@
     let extId = '', geschwister = []
     // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
     // und dort sitzt auch „Diagnose kopieren".
+    // Lokal am PC (nach dem Check): Zeile + Abschluss im offenen Check-Popup.
+    const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
+    const pfEnde = (ok, text) => {
+      const finalEl = document.getElementById('pf-final'), foot = document.getElementById('pf-foot')
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
+      if(foot) foot.style.display = 'flex'
+    }
     const fehler = async (text, r) => {
       if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
                                    msg: text, trail: (r && r.trail) || null })
+      if(imPopup){
+        _pfSet('ob-order', 'err', escapeHtml(text))
+        pfEnde(false, /UNKLAR/.test(text) ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, NICHT blind erneut starten.' : '✗ Nichts platziert — Meldung oben.')
+        return
+      }
       await openTpOrderModal(planId)
       const msg = document.getElementById('tpOrderMsg')
       if(!msg) return toast(text, 'end')
@@ -24813,9 +24854,16 @@
       openTpOrderModal(planId)
       return
     }
+    // DUPLIKUM-CHECK ZUERST (22.09.2026, Finn: „beim Starten: erst Duplikum, dann Verbindung
+    // zum PC, dann die Order — alles in einem Stück"). Nicht im Signal-Lauf am PC: dort hat
+    // der Absender den Check schon gefahren. Grün → weiter im SELBEN Popup.
+    if(!fern && !(opts && opts.nachCheck)){
+      if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
+      return tpPreflightAndStart(planId, { nurDup: true, weiter: () => tpOrbitStarten(planId, null, { nachCheck: true }) })
+    }
     // HANDY/MAC (22.09.2026, Finn: „dass ich auch über die Prophos-URL die Trades starten
     // kann wie bei Echo"): kein localhost → Signal an den PC, Live-Schritte im Check-Popup.
-    if(!MT5_LOCAL && !fern) return tpOrbitRemote(plan, w)
+    if(!MT5_LOCAL && !fern) return tpOrbitRemote(plan, w, true)
     if(typeof window.mtcApi !== 'function')
       return fehler('Copier-Backend am PC nicht erreichbar — nichts gestartet.')
     const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
@@ -24862,7 +24910,9 @@
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
     _tpOrbitLaeuft = true
-    toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
+    if(imPopup) _pfAddRow('ob-order', 'Puls platziert in TradingView')
+    if(imPopup) _pfSet('ob-order', 'warn', `⏳ TradingView → Konto ${escapeHtml(extId)} → ${escapeHtml(symbol)} → Order-Panel → ${escapeHtml(dir.toUpperCase())} (ECHTE Order) — HÄNDE WEG von Maus und Tastatur!`)
+    else toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
     try{
       const r = await window.mtcApi('tv-konto', { method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -24879,6 +24929,11 @@
         await tvPlanAufOpen(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
                               msg: String(r.msg || 'Order platziert.') })
+        if(imPopup){
+          _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
+          pfEnde(true, '✓ Order platziert — der Plan steht auf „Läuft".')
+          setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
+        }
         toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
       } else if(r && r.ok){
         // ok OHNE gesendet = der Bot am PC ist noch der alte (kennt „scharf" nicht, kommt in ~20 s nach).
@@ -24903,19 +24958,20 @@
    * (order_signale, Per-User-RLS), gleiche Frische-Regel (3 min), gleicher Riegel (_rsAktiv:
    * ein Remote-Lauf zur Zeit). Storno nur, solange kein PC übernommen hat. Eine Warteschlange
    * gibt es hier bewusst nicht (Finn: „lassen wir mal offen"). */
-  async function tpOrbitRemote(plan, w){
+  async function tpOrbitRemote(plan, w, anhaengen){
     if(_rsAktiv){
       if(typeof atToast === 'function') atToast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       return
     }
     _pfMt5StopTimer()
     _pfPlanId = null
-    document.getElementById('pf-rows').innerHTML = ''
+    // anhaengen (22.09.2026): die Duplikum-Zeilen bleiben stehen, die Signal-Schritte kommen darunter.
+    if(!anhaengen) document.getElementById('pf-rows').innerHTML = ''
     const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
     _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
-    if(info) info.textContent = `📡 Orbit-Start · ${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}${w.tp > 0 ? ` · TP $${w.tp}${w.sl > 0 ? ` / SL $${w.sl}` : ''}` : ' · ohne SL/TP'}`
+    if(info) info.textContent = `📡 Orbit-Start · ${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}${w.tp > 0 ? ` · TP $${w.tp}${w.sl > 0 ? ` / SL $${w.sl}` : ' · ohne SL'}` : ' · ohne SL/TP'}`
     document.getElementById('tpPreflightModal').classList.add('open')
     const fertigUi = (ok, text) => {
       if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
