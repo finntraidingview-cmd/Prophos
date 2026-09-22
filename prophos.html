@@ -1185,6 +1185,26 @@
   #adm-pane-wd .wd-tab{width:100%;border-collapse:collapse;font-size:12.5px}
   #adm-pane-wd .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
   #adm-pane-wd .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  #adm-pane-wd .wd-ablauf-tab tr.id{cursor:pointer}
+  #adm-pane-wd .wd-ablauf-tab tr.id:hover td{background:rgba(0,0,0,.025)}
+  #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(42,157,92,.07)}
+  #adm-pane-wd .wd-ablauf-tab tr.offen td{background:rgba(99,91,255,.06);border-bottom:0}
+  #adm-pane-wd .wd-ablauf-tab td.pfeil{width:14px;color:var(--sub)}
+  #adm-pane-wd .wd-ablauf-tab tr.wd-detail>td{padding:0 0 10px 18px;background:rgba(99,91,255,.03)}
+  #adm-pane-wd .wd-ablauf-tab tr.wd-detail .wd-karte{border-color:var(--violet);margin-top:2px}
+  #adm-pane-wd .wd-aus-chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:999px;padding:1px 4px 1px 9px;font-size:12px}
+  #adm-pane-wd .btn-xs{padding:1px 7px;font-size:11px;height:auto;line-height:1.5}
+  #adm-pane-wd .wd-konten{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+  #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
+  #adm-pane-wd .wd-konten td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+  #adm-pane-wd .wd-konten tr:last-child td{border-bottom:0}
+  #adm-pane-wd .wd-konten tr.aus td{opacity:.5}
+  #adm-pane-wd .wd-konten tr.aus td:first-child{opacity:1}
+  #adm-pane-wd .wd-konten .wd-in{width:70px}
+  #adm-pane-wd .wd-hedge-kopf{font-weight:600;font-size:13px;margin:14px 0 6px}
+  #adm-pane-wd .wd-hedge-zeile{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  #adm-pane-wd .wd-hedge{width:auto;min-width:220px}
+  #adm-pane-wd .wd-hedge td,#adm-pane-wd .wd-hedge th{padding:3px 14px 3px 0;white-space:nowrap}
   #adm-pane-wd .wd-ablauf-tab tr.jetzt td{background:rgba(42,157,92,.07)}
   #adm-pane-wd .wd-konten{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
   #adm-pane-wd .wd-konten th{text-align:left;font-weight:500;color:var(--sub);padding:3px 8px 4px 0;border-bottom:1px solid var(--line);font-size:11.5px;white-space:nowrap}
@@ -7280,18 +7300,15 @@
           </div>
           <div class="panel" style="margin:0 0 12px">
             <div class="wd-panel-kopf">
-              <div class="panel-title">Ablauf <span style="font-weight:400;color:var(--sub);font-size:12px">· Dubai-Zeit · Block für Block, dazwischen Pause</span></div>
-              <div class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub)"></div>
+              <div class="panel-title">IDs <span style="font-weight:400;color:var(--sub);font-size:12px">· eine Zeile je ID in Block-Reihenfolge · anklicken zeigt die Konten der ID</span></div>
+              <div class="vp-zeile">
+                <input type="search" class="input vp-in" id="wd-such" placeholder="ID / Konto / Firma suchen" style="width:190px;text-align:left">
+                <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm"><span>nur IDs mit Konten drin</span></label>
+                <span class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub);margin-left:10px"></span>
+              </div>
             </div>
             <div id="wd-ablauf"></div>
             <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
-          </div>
-          <div class="panel" style="margin:0 0 12px">
-            <div class="wd-panel-kopf">
-              <div class="panel-title">Blöcke <span style="font-weight:400;color:var(--sub);font-size:12px">· eine ID = ein Block, alle Konten darin in dieselbe Richtung</span></div>
-              <div style="font-size:12px;color:var(--sub)">Haken = dauerhaft im Farm (gilt auch morgen) · TP/SL = Vorgabe je Konto · danach „Änderungen speichern"</div>
-            </div>
-            <div id="wd-liste" class="wd-karten"></div>
           </div>
           <div class="panel" style="margin:0 0 12px">
             <div class="panel-title" style="margin-bottom:8px">Einstellungen <span style="font-weight:400;color:var(--sub);font-size:12px">· gelten für alle PC-Tabs</span></div>
@@ -7302,6 +7319,7 @@
               <span style="margin-left:6px">Abstand zwischen Konten</span> <input type="number" class="input mono vp-in" id="wd-abst-min" min="0" step="1" value="2"> – <input type="number" class="input mono vp-in" id="wd-abst-max" min="0" step="1" value="4"> <span style="color:var(--sub)">min</span>
               <button class="btn btn-ghost btn-mini" id="wdRegelnSave">Speichern</button>
             </div>
+            <div class="vp-zeile" id="wd-ids-aus" style="margin-top:8px"></div>
             <!-- Hedge-Tabelle (23.09.2026, Finn: „die Tabelle, wie viel gegengehedgt wird, steht nirgendwo und ich kann sie
                  nirgends überarbeiten") — dieselben Regeln wie „Futures vorplanen" (wd_farmer_regeln.vorplan) -->
             <div class="wd-hedge-kopf">Hedge-Tabelle <span style="font-weight:400;color:var(--sub);font-size:12px">· Slave-Betrag nach Stand über der Kontogröße · TP je Firma (zufällig aus der Spanne, außer das Konto hat eine TP-Vorgabe)</span></div>
@@ -25510,7 +25528,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.402'
+  const OS_TAB_BUILD = '2026-09-22.403'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29232,7 +29250,8 @@
   async function wdRowsLaden(tag){
     const { data, error } = await supabase.from('wd_tagesplan').select('*').eq('tag', tag).order('reihenfolge', { ascending: true, nullsFirst: false }).order('registriert_at', { ascending: true })
     if(error) throw error
-    _wd.rows = data || []; _wd.tag = tag; return _wd.rows
+    const aus = wdIdsAus()   // ausgelassene IDs (Emin, Finn) tauchen nirgends auf — auch nicht beim Würfeln
+    _wd.rows = (data || []).filter(x => !aus.has(String(x.user_id))); _wd.tag = tag; return _wd.rows
   }
   function wdVorplanRegeln(){
     const v = (_wd.regeln && _wd.regeln.vorplan) || {}
@@ -29303,6 +29322,8 @@
   // Live-Stand eines Plans aus der Railway-Antwort (Mac) — der PC-Tab hat die Pläne selbst in tradePlans
   const wdPlanLive = k => (k && k.plan_id && _wd.daten && Array.isArray(_wd.daten.plaene)) ? (_wd.daten.plaene.find(p => String(p.id) === String(k.plan_id)) || null) : null
   const wdKontoDaten = id => ((_wd.daten && _wd.daten.konten) || []).find(q => String(q.id) === String(id)) || null
+  // IDs, die NIE gefahren werden (Finn 23.09.2026: „Emin und Finn — die ID immer weglassen, immer") — wd_farmer_regeln.ids_aus
+  const wdIdsAus = () => new Set((((_wd.regeln || {}).ids_aus) || []).map(String))
   const WD_HINWEIS_FARM = 'nicht im Farm (Haken aus)'
   const WD_HINWEIS_EXT = 'ohne External ID — der Bot kann das Konto nicht wählen'
 
@@ -29315,13 +29336,13 @@
       const ext = String(r.ext || '').trim(), sp = wdTpSpanne(firm)
       return { id: String(r.id), name: r.name || '', firm, ext, farm, aktiv: !!(farm && ext), tpVon: sp[0], tpBis: sp[1], hinweis: !farm ? WD_HINWEIS_FARM : ext ? '' : WD_HINWEIS_EXT }
     }
-    const d = _wd.daten
+    const d = _wd.daten, aus = wdIdsAus()
     if(d && Array.isArray(d.konten)){
-      for(const r of d.konten) add(r.user_id, r.person, konto(r, r.firm || '', !!r.wd_farm))
+      for(const r of d.konten){ if(aus.has(String(r.user_id))) continue; add(r.user_id, r.person, konto(r, r.firm || '', !!r.wd_farm)) }
     }else{
       const a = window._admData; if(!a || !Array.isArray(a.rows)) return null
       for(const r of a.rows){
-        if(r.archived || !(r.type === 'funded' || r.type === 'live') || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
+        if(aus.has(String(r.user_id)) || r.archived || !(r.type === 'funded' || r.type === 'live') || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
         add(String(r.user_id), r.person, konto(r, r.firm_raw || r.firm || '', r.wd_farm === undefined ? true : !!r.wd_farm))
       }
     }
@@ -29662,6 +29683,7 @@
     try{
       if(!_wd.geladen || Date.now() - _wd.letzteLadung > 5 * 60000){ if(!(await wdLaden())) return }
       const r = _wd.regeln || {}, j = wdJetzt(WD_TZ_STD); if(!j) return
+      if(wdIdsAus().has(String(uid))) return   // diese ID wird nie gefahren (ids_aus)
       // Eintragen IMMER (23.09.2026, Finn: „ich will von allen IDs alle Konten sehen"): jeder offene PC-Tab
       // meldet seine Fundeds für den nächsten Lauf-Tag — eine Zeile ohne Zeiten tut nichts, bis gewürfelt ist.
       const tagZiel = wdNaechsterTag(r, j)
@@ -29738,29 +29760,11 @@
     const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv)), ohnePlan = konten.filter(k => !k.plan_id).length
     let satz
     if(laeuft) satz = `▶ Block ${laeuft.reihenfolge || ''} ${laeuft.name || ''} läuft gerade.`
-    else if(!rows.length) satz = 'Noch keine Blöcke für diesen Tag — „🎲 Würfeln" trägt alle IDs ein, verteilt die Zeiten und legt die Pläne an.'
+    else if(!rows.length) satz = 'Noch keine Blöcke für diesen Tag — „🎲 Würfeln" trägt alle IDs ein, verteilt die Zeiten und legt die Pläne an. Eine ID anklicken zeigt ihre Konten.'
     else if(!mitZeit.length) satz = aktivRows.length ? (r.aktiv ? 'Zeiten kommen um 00:10 von allein — oder jetzt „🎲 Würfeln".' : 'Noch nicht gewürfelt — „🎲 Würfeln" verteilt die Zeiten und legt sofort alle Pläne an.') : 'Kein Konto im Farm — Haken in den Blöcken setzen, dann „Änderungen speichern".'
     else if(geplant.length) satz = `Nächster Start ${wdHhmm(geplant[0].start_um)} Dubai: ${geplant[0].name || '?'}${ohnePlan ? ` · ⚠ ${ohnePlan} Konten ohne Plan (Grund steht in der Tabelle)` : ' · alle Pläne liegen bereit, die PC-Tabs starten sie zur Zeit'}.`
     else satz = aktivRows.every(x => x.status === 'fertig') ? 'Alle Blöcke durch.' : aktivRows.some(x => x.status === 'verpasst') ? 'Blöcke verpasst — PC-Tab war zu?' : 'Alles durch.'
     txt.textContent = (j ? `Jetzt ${j.hhmm} Dubai · ` : '') + satz
-  }
-  // Ablauf: eine Tabelle über alle Blöcke (Finn: „der Zeitstrahl ist mies hässlich, man erkennt da gar nichts")
-  function wdAblauf(rows){
-    const box = document.getElementById('wd-ablauf'); if(!box) return
-    const r = _wd.regeln || {}, mit = rows.filter(x => x.status !== 'leer')
-    if(!mit.length){ box.innerHTML = `<div class="wd-leer" style="padding:4px 0">Noch keine Blöcke — „🎲 Würfeln" verteilt sie ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai.</div>`; return }
-    const chip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], laeuft: ['▶ läuft', '#2a9d5c'], fertig: ['✓ fertig', '#2a9d5c'], verpasst: ['✗ verpasst', 'var(--danger)'] }[st] || [st, 'var(--sub)'])
-    const sortiert = [...mit].sort((a, b) => (a.start_um ? new Date(a.start_um).getTime() : 9e15) - (b.start_um ? new Date(b.start_um).getTime() : 9e15) || (a.reihenfolge || 99) - (b.reihenfolge || 99))
-    const now = Date.now()
-    box.innerHTML = `<table class="wd-tab wd-ablauf-tab"><thead><tr><th>Block</th><th>Start Dubai</th><th>ID</th><th>Richtung</th><th>Konten</th><th>Pläne</th><th>Stand</th></tr></thead><tbody>` +
-      sortiert.map(x => {
-        const k = (x.konten || []).filter(wdAktiv), n = k.length, mitPlan = k.filter(q => q.plan_id).length
-        const ende = x.start_um ? new Date(x.start_um).getTime() + wdDauerMs(x, r) : 0
-        const jetzt = x.start_um && now >= new Date(x.start_um).getTime() && now <= ende
-        const [ct, cc] = chip(x.status)
-        const gestartet = k.filter(q => q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
-        return `<tr class="${jetzt ? 'jetzt' : ''}"><td class="mono">${x.reihenfolge ? 'Block ' + x.reihenfolge : '—'}</td><td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td><td style="font-weight:600">${escapeHtml(x.name || '?')}</td><td>${x.richtung === 'buy' ? '<span style="color:#2a9d5c">▲ BUY</span>' : x.richtung === 'sell' ? '<span style="color:var(--danger)">▼ SELL</span>' : '—'}</td><td class="mono">${n}</td><td class="mono">${mitPlan}${mitPlan < n ? `<span style="color:var(--danger)"> / ${n}</span>` : ''}</td><td style="color:${cc}">${ct}${gestartet ? ` · ${gestartet} gestartet` : ''}</td></tr>`
-      }).join('') + '</tbody></table>'
   }
   async function wdVerlauf(){
     const box = document.getElementById('wd-verlauf'); if(!box) return
@@ -29801,78 +29805,105 @@
     }
     return { ...x, konten, status }
   }
-  function wdRender(){
-    const box = document.getElementById('wd-liste'); if(!box) return
-    const rows = _wd.rows || [], de = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }), r = _wd.regeln || {}
-    const erwartet = wdErwartet(), da = new Set(rows.map(x => String(x.user_id)))
-    const fehlend = erwartet ? erwartet.filter(e => !da.has(e.user_id)) : []
-    wdStatus(); wdAblauf(rows)
-    const fEl = document.getElementById('wd-fehlend')
-    if(fEl) fEl.innerHTML = erwartet === null ? `<span style="color:var(--danger)">Konten nicht ladbar${_wd.datenFehler ? ' (' + escapeHtml(_wd.datenFehler) + ')' : ''} — ich zeige nur IDs, deren PC-Tab sich selbst eingetragen hat.</span>`
-      : (_wd.daten && !_wd.daten.rail ? `<span style="color:var(--danger)">Railway nicht erreichbar${_wd.railFehler ? ' (' + escapeHtml(_wd.railFehler) + ')' : ''} — Pläne kann ich von hier nicht anlegen, das machen dann die PC-Tabs; Zustand der Pläne fehlt.</span> ` : '')
-      + (fehlend.length && rows.length ? `⚠ Noch nicht eingetragen: <b>${escapeHtml(fehlend.map(e => e.name).join(', '))}</b> — „🎲 Würfeln" trägt sie mit ein.` : '')
-    const j = wdJetzt(WD_TZ_STD), uhr = document.getElementById('wd-uhr'); if(uhr && j) uhr.textContent = `Anzeige alle 30 s frisch`
-    const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv))
-    const kz = document.getElementById('wd-k-zeile'); if(kz) kz.textContent = rows.length ? `${rows.filter(x => x.status !== 'leer').length} Blöcke · ${konten.length} Konten im Farm · ${konten.filter(k => k.plan_id).length} Pläne · ${konten.filter(k => k.status && k.status !== 'planned' && k.status !== 'verpasst' && k.status !== 'weg').length} gestartet` : (erwartet ? `${erwartet.length} IDs · ${erwartet.reduce((n, e) => n + e.konten.length, 0)} Konten gefunden` : '')
-    const chip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], leer: ['— nichts drin', 'var(--sub)'], laeuft: ['▶ läuft', '#2a9d5c'], fertig: ['✓ fertig', '#2a9d5c'], verpasst: ['✗ verpasst', 'var(--danger)'], erwartet: ['noch nicht eingetragen', 'var(--sub)'] }[st] || [st, 'var(--sub)'])
-    const stand = k => {
-      if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Haken setzen, dann speichern</span>`
-      if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
-      if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : '<span style="color:var(--sub)">noch kein Plan — „🎲 Würfeln"</span>'
-      const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
-      if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:#2a9d5c">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
-      if(k.status === 'open') return `<span style="color:#2a9d5c">✓ Order raus${um} · läuft</span>`
-      if(k.status === 'review' || k.status === 'completed') return `<span style="color:#2a9d5c">✓ Trade zu Ende${k.ended ? ` · ${wdHhmm(k.ended)}` : ''}${typeof k.pl === 'number' ? ` · P&L ${k.pl > 0 ? '+' : ''}${de(k.pl)} $` : ''}</span>`
-      if(k.status === 'verpasst') return `<span style="color:var(--danger)">✗ Startzeit verpasst — PC-Tab war zu?</span>`
-      if(k.status === 'weg') return `<span style="color:var(--danger)">✗ Plan wurde gelöscht</span>`
-      return `<span style="color:var(--sub)">${escapeHtml(String(k.status || ''))}</span>`
-    }
-    const karte = (x, erw) => {
-      const fest = !erw && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst')
-      const [ct, cc] = chip(erw ? 'erwartet' : x.status), uid = escapeHtml(String(x.user_id))
-      const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
-      const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
-      const zeilen = (x.konten || []).map(k => {
-        const kd = wdKontoDaten(k.id) || {}
-        const aus = k.aktiv === false || !k.farm
-        const planFest = k.plan_id && k.status && k.status !== 'planned' || k.gestartet
-        const sperren = erw || fest || planFest || (!k.ext && !k.plan_id)
-        const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
-        const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
-        const slWert = k.plan_id ? (k.sl || '') : (kd.sl_vorgabe || '')
-        const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
-        const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
-        const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
-        const groesse = kd.balance > 0 ? kd.balance : tpKontoGroesseAusName(k.name)
-        const plus = live != null && groesse > 0 ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
-        const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${groesse ? de(groesse) : '?'}</div>` : ''}` : (kd.balance > 0 ? `$${de(kd.balance)}<div class="kf">kein Live-Stand</div>` : '<span class="kf">kein Live-Stand</span>')
-        const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
-        const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
-        const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
-        return `<tr class="${aus ? 'aus' : ''}">
-          <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${aus ? '' : 'checked'} ${sperren ? 'disabled' : ''} title="Haken = dauerhaft im Farm (gilt auch morgen); ohne Haken bleibt das Konto draußen, bis du ihn wieder setzt"></td>
-          <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
-          <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${stand(k)}</td></tr>`
-      }).join('')
-      const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
-      const nAkt = (x.konten || []).filter(wdAktiv).length
-      return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
-        <div class="wd-karte-kopf">
-          <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest ? 'disabled' : ''}></label>
-          <span class="nr">${x.reihenfolge ? 'Block ' + x.reihenfolge : 'Block —'}</span>
-          ${erw || fest ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
-          <span class="name">${escapeHtml(x.name || '?')}</span>
-          <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>SELL</button></div>
-          <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}</span>
-          <span class="mono" style="font-size:12px;color:${cc};margin-left:auto">${ct}</span>
-        </div>
-        <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}</tbody></table>${hinweis}</div>`
-    }
-    if(!rows.length && !(erwartet && erwartet.length)){
-      box.innerHTML = `<div class="wd-leer">${erwartet === null ? 'Noch keine ID für diesen Tag. Jeder offene PC-Tab trägt sich innerhalb von 30 s selbst ein — und die Konten aller IDs konnte ich gerade nicht laden.' : 'Kein Funded/Live-Konto bei einer Futures-Firma (Tradeify, Apex, Topstep, FundedNext Futures, MFFU, Lucid) gefunden.'}</div>`
-      return
-    }
-    box.innerHTML = rows.map(x => karte(x, false)).join('') + fehlend.map(e => karte(e, true)).join('')
+  // Anzeige-Helfer (Ebene 2): Zustand je Konto und die aufgeklappte ID
+  const wdDe = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+  const wdChip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], leer: ['— nichts drin', 'var(--sub)'], laeuft: ['▶ läuft', '#2a9d5c'], fertig: ['✓ fertig', '#2a9d5c'], verpasst: ['✗ verpasst', 'var(--danger)'], erwartet: ['noch nicht eingetragen', 'var(--sub)'] }[st] || [st, 'var(--sub)'])
+  function wdStand(k){
+    const de = wdDe
+    if(!k.farm && !k.plan_id) return `<span style="color:var(--sub)">aus — Haken setzen, dann speichern</span>`
+    if(k.hinweis && !k.plan_id) return `<span style="color:var(--danger)">${escapeHtml(k.hinweis)}</span>`
+    if(!k.plan_id) return k.aktiv === false ? '<span style="color:var(--sub)">heute abgewählt</span>' : '<span style="color:var(--sub)">noch kein Plan — „🎲 Würfeln"</span>'
+    const um = k.um ? ` · ${wdHhmm(k.um)}` : ''
+    if(k.status === 'planned' || !k.status) return k.gestartet ? `<span style="color:#2a9d5c">▶ startet gerade${um}</span>` : `<span style="color:var(--sub)">⏰ Plan liegt bereit</span>`
+    if(k.status === 'open') return `<span style="color:#2a9d5c">✓ Order raus${um} · läuft</span>`
+    if(k.status === 'review' || k.status === 'completed') return `<span style="color:#2a9d5c">✓ Trade zu Ende${k.ended ? ` · ${wdHhmm(k.ended)}` : ''}${typeof k.pl === 'number' ? ` · P&L ${k.pl > 0 ? '+' : ''}${de(k.pl)} $` : ''}</span>`
+    if(k.status === 'verpasst') return `<span style="color:var(--danger)">✗ Startzeit verpasst — PC-Tab war zu?</span>`
+    if(k.status === 'weg') return `<span style="color:var(--danger)">✗ Plan wurde gelöscht</span>`
+    return `<span style="color:var(--sub)">${escapeHtml(String(k.status || ''))}</span>`
+  }
+  // Ebene 2: die Konten EINER ID (Finn 23.09.2026: „auf eine ID draufdrücken, dann die Accounts der ID — kein Multiselect")
+  function wdKarte(x, erw){
+    const r = _wd.regeln || {}, de = wdDe
+    const fest = !erw && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst')
+    const uid = escapeHtml(String(x.user_id))
+    const zeiten = (!erw && x.start_um) ? wdKontoZeiten((x.konten || []).map(k => ({ ...k })), x.start_um, r) : new Map()
+    const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
+    const zeilen = (x.konten || []).map(k => {
+      const kd = wdKontoDaten(k.id) || {}
+      const aus = k.aktiv === false || !k.farm
+      const planFest = (k.plan_id && k.status && k.status !== 'planned') || k.gestartet
+      const sperren = erw || fest || planFest || (!k.ext && !k.plan_id)
+      const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
+      const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
+      const slWert = k.plan_id ? (k.sl || '') : (kd.sl_vorgabe || '')
+      const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
+      const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
+      const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
+      const groesse = kd.balance > 0 ? kd.balance : tpKontoGroesseAusName(k.name)
+      const plus = live != null && groesse > 0 ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
+      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${groesse ? de(groesse) : '?'}</div>` : ''}` : (kd.balance > 0 ? `$${de(kd.balance)}<div class="kf">kein Live-Stand</div>` : '<span class="kf">kein Live-Stand</span>')
+      const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
+      const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
+      const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
+      return `<tr class="${aus ? 'aus' : ''}">
+        <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${aus ? '' : 'checked'} ${sperren ? 'disabled' : ''} title="Haken = dauerhaft im Farm (gilt auch morgen); ohne Haken bleibt das Konto draußen, bis du ihn wieder setzt"></td>
+        <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
+        <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}</td></tr>`
+    }).join('')
+    const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
+    const nAkt = (x.konten || []).filter(wdAktiv).length
+    return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
+      <div class="wd-karte-kopf">
+        <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest ? 'disabled' : ''}> <span class="kf">alle</span></label>
+        <span class="kf">Start</span>
+        ${erw || fest ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
+        <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>SELL</button></div>
+        <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
+        <span class="kf" style="margin-left:auto">Haken = dauerhaft · TP/SL = Vorgabe je Konto · dann „Änderungen speichern"</span>
+      </div>
+      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}</tbody></table>${hinweis}</div>`
+  }
+  // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
+  function wdAblauf(rows, fehlend){
+    const box = document.getElementById('wd-ablauf'); if(!box) return
+    const r = _wd.regeln || {}, de = wdDe
+    const such = String(document.getElementById('wd-such')?.value || '').trim().toLowerCase()
+    const nurFarm = !!document.getElementById('wd-nur-farm')?.checked
+    const alle = [...rows.map(x => ({ x, erw: false })), ...(fehlend || []).map(e => ({ x: e, erw: true }))]
+    const drin = x => (x.konten || []).filter(wdAktiv).length
+    let liste = alle.filter(({ x }) => !such || String(x.name || '').toLowerCase().includes(such) || (x.konten || []).some(k => String(k.name || '').toLowerCase().includes(such) || String(k.firm || '').toLowerCase().includes(such)))
+    if(nurFarm) liste = liste.filter(({ x }) => drin(x) > 0)
+    liste.sort((a, b) => {
+      const ta = a.x.start_um ? new Date(a.x.start_um).getTime() : 9e15, tb = b.x.start_um ? new Date(b.x.start_um).getTime() : 9e15
+      return ta - tb || String(a.x.name || '').localeCompare(String(b.x.name || ''))
+    })
+    if(!liste.length){ box.innerHTML = `<div class="wd-leer" style="padding:4px 0">${alle.length ? 'Kein Treffer.' : 'Noch keine ID — Konten aller IDs konnten nicht geladen werden, und kein PC-Tab hat sich eingetragen.'}</div>`; return }
+    const now = Date.now()
+    box.innerHTML = `<table class="wd-tab wd-ablauf-tab"><thead><tr><th></th><th>Block</th><th>Start Dubai</th><th>ID</th><th>Richtung</th><th>Konten drin</th><th title="Winning Days aller Konten der ID (gezählt)">WD</th><th>Pläne</th><th>Stand</th></tr></thead><tbody>` +
+      liste.map(({ x, erw }) => {
+        const uid = String(x.user_id), offen = _wd.offen === uid
+        const k = (x.konten || []), n = drin(x), mitPlan = k.filter(q => wdAktiv(q) && q.plan_id).length
+        const ende = x.start_um ? new Date(x.start_um).getTime() + wdDauerMs(x, r) : 0
+        const jetzt = x.start_um && now >= new Date(x.start_um).getTime() && now <= ende
+        const [ct, cc] = wdChip(erw ? 'erwartet' : x.status)
+        const gestartet = k.filter(q => wdAktiv(q) && q.status && q.status !== 'planned' && q.status !== 'verpasst' && q.status !== 'weg').length
+        const wdSum = k.reduce((s, q) => { const kd = wdKontoDaten(q.id); return s + (kd && kd.winning_days != null ? kd.winning_days : 0) }, 0)
+        const zeile = `<tr class="id ${jetzt ? 'jetzt' : ''} ${offen ? 'offen' : ''}" data-wd-open="${escapeHtml(uid)}" title="anklicken: Konten dieser ID">
+          <td class="pfeil">${offen ? '▾' : '▸'}</td><td class="mono">${x.reihenfolge ? 'Block ' + x.reihenfolge : '—'}</td>
+          <td class="mono" style="font-weight:600">${x.start_um ? wdHhmm(x.start_um) : '—:—'}${x.start_um ? `<span class="kf"> – ${wdHhmm(new Date(ende).toISOString())}</span>` : ''}</td>
+          <td style="font-weight:600">${escapeHtml(x.name || '?')}</td>
+          <td>${x.richtung === 'buy' ? '<span style="color:#2a9d5c">▲ BUY</span>' : x.richtung === 'sell' ? '<span style="color:var(--danger)">▼ SELL</span>' : '—'}</td>
+          <td class="mono">${n}<span class="kf"> / ${k.length}</span></td><td class="mono">${wdSum}</td>
+          <td class="mono">${mitPlan}${n && mitPlan < n ? `<span style="color:var(--danger)"> / ${n}</span>` : ''}</td>
+          <td style="color:${cc}">${ct}${gestartet ? ` · ${gestartet} gestartet` : ''}</td></tr>`
+        return zeile + (offen ? `<tr class="wd-detail"><td colspan="9">${wdKarte(x, erw)}</td></tr>` : '')
+      }).join('') + '</tbody></table>'
+    box.querySelectorAll('tr[data-wd-open]').forEach(tr => tr.addEventListener('click', ev => {
+      if(ev.target.closest('input,button,select,label')) return
+      const uid = tr.dataset.wdOpen
+      _wd.offen = _wd.offen === uid ? null : uid
+      wdAblauf(_wd.rows || [], wdFehlend())
+    }))
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
       if(b.disabled) return
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
@@ -29881,6 +29912,42 @@
     box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', () => {
       cb.closest('.wd-karte')?.querySelectorAll('[data-wd-konto]').forEach(x => { if(!x.disabled) x.checked = cb.checked })
     }))
+  }
+  function wdFehlend(){
+    const erwartet = wdErwartet(), da = new Set((_wd.rows || []).map(x => String(x.user_id)))
+    return erwartet ? erwartet.filter(e => !da.has(e.user_id)) : []
+  }
+  // Ausgelassene IDs unter Einstellungen (Emin, Finn) — Liste aus wd_farmer_regeln.ids_aus, Namen aus den Konten
+  function wdIdsAusRender(){
+    const box = document.getElementById('wd-ids-aus'); if(!box) return
+    const aus = [...wdIdsAus()], konten = (_wd.daten && _wd.daten.konten) || []
+    const name = uid => { const k = konten.find(q => String(q.user_id) === uid); return k ? k.person : uid.slice(0, 8) }
+    const bekannt = new Map(); for(const k of konten) if(!aus.includes(String(k.user_id))) bekannt.set(String(k.user_id), k.person)
+    box.innerHTML = `<span class="kf">Immer weglassen:</span> ${aus.length ? aus.map(uid => `<span class="wd-aus-chip">${escapeHtml(name(uid))} <button type="button" class="btn btn-ghost btn-xs" data-wd-aus-weg="${escapeHtml(uid)}" title="wieder mitnehmen">×</button></span>`).join(' ') : '<span class="kf">— niemand</span>'}
+      <select class="input mono vp-in" id="wd-aus-wahl" style="width:130px;text-align:left"><option value="">ID wählen …</option>${[...bekannt.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([uid, n]) => `<option value="${escapeHtml(uid)}">${escapeHtml(n)}</option>`).join('')}</select>
+      <button type="button" class="btn btn-ghost btn-xs" id="wd-aus-add">+ weglassen</button>`
+    const speichern = async liste => {
+      const { error } = await supabase.from('wd_farmer_regeln').update({ ids_aus: liste, updated_at: new Date().toISOString() }).eq('id', 1)
+      if(error) return wdSay('Liste nicht gespeichert: ' + error.message, 'err')
+      _wd.regeln = Object.assign(_wd.regeln || {}, { ids_aus: liste }); wdIdsAusRender(); wdNeuLaden()
+      wdSay('Ausgelassene IDs gespeichert — gilt für alle Tabs.', 'ok')
+    }
+    box.querySelectorAll('[data-wd-aus-weg]').forEach(b => b.addEventListener('click', () => speichern(aus.filter(u => u !== b.dataset.wdAusWeg))))
+    document.getElementById('wd-aus-add')?.addEventListener('click', () => { const v = document.getElementById('wd-aus-wahl')?.value; if(v) speichern([...aus, v]) })
+  }
+  function wdRender(){
+    const rows = _wd.rows || []
+    const erwartet = wdErwartet(), fehlend = wdFehlend()
+    wdStatus()
+    const fEl = document.getElementById('wd-fehlend')
+    if(fEl) fEl.innerHTML = erwartet === null ? `<span style="color:var(--danger)">Konten nicht ladbar${_wd.datenFehler ? ' (' + escapeHtml(_wd.datenFehler) + ')' : ''} — ich zeige nur IDs, deren PC-Tab sich selbst eingetragen hat.</span>`
+      : (_wd.daten && !_wd.daten.rail ? `<span style="color:var(--danger)">Railway nicht erreichbar${_wd.railFehler ? ' (' + escapeHtml(_wd.railFehler) + ')' : ''} — Pläne kann ich von hier nicht anlegen, das machen dann die PC-Tabs; Zustand der Pläne fehlt.</span> ` : '')
+      + (fehlend.length && rows.length ? `⚠ Noch nicht eingetragen: <b>${escapeHtml(fehlend.map(e => e.name).join(', '))}</b> — „🎲 Würfeln" trägt sie mit ein.` : '')
+    const uhr = document.getElementById('wd-uhr'); if(uhr) uhr.textContent = 'Anzeige alle 30 s frisch'
+    const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv))
+    const kz = document.getElementById('wd-k-zeile'); if(kz) kz.textContent = rows.length ? `${rows.filter(x => x.status !== 'leer').length} Blöcke · ${konten.length} Konten drin · ${konten.filter(k => k.plan_id).length} Pläne · ${konten.filter(k => k.status && k.status !== 'planned' && k.status !== 'verpasst' && k.status !== 'weg').length} gestartet` : (erwartet ? `${erwartet.length} IDs · ${erwartet.reduce((n, e) => n + e.konten.length, 0)} Konten gefunden` : '')
+    wdAblauf(rows, fehlend)
+    wdIdsAusRender()
   }
   function wdSichtbar(){ const p = document.getElementById('adm-pane-wd'); return !!(p && !p.hidden && p.offsetParent !== null) }
   async function wdOpen(){
@@ -29910,7 +29977,7 @@
     const tag = _wd.tag; if(!tag) return
     let n = 0, haken = 0, vorgaben = 0
     const num = el => { const v = parseFloat(el?.value); return (isFinite(v) && v > 0) ? Math.round(v) : null }
-    for(const el of document.querySelectorAll('#wd-liste .wd-karte[data-wd-user]')){
+    for(const el of document.querySelectorAll('#wd-ablauf .wd-karte[data-wd-user]')){
       const uid = el.dataset.wdUser, x = (_wd.rows || []).find(r => String(r.user_id) === uid); if(!x) continue
       if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = []
@@ -29979,6 +30046,8 @@
   document.getElementById('wdHedgeSave')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdReload')?.addEventListener('click', () => { wdNeuLaden(); wdVerlauf() })
   document.getElementById('wd-tag')?.addEventListener('change', wdNeuLaden)
+  document.getElementById('wd-such')?.addEventListener('input', () => wdAblauf(_wd.rows || [], wdFehlend()))
+  document.getElementById('wd-nur-farm')?.addEventListener('change', () => wdAblauf(_wd.rows || [], wdFehlend()))
   document.getElementById('wdSave')?.addEventListener('click', async () => {
     const b = document.getElementById('wdSave'); if(b){ b.disabled = true; b.textContent = 'speichert …' }
     _wd.busy = true
