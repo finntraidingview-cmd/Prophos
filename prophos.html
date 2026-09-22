@@ -13419,25 +13419,30 @@
     }catch(e){ console.warn('[mt5PlanAufOpen]', e) }
   }
 
-  /* Orbit-Route: Plan auf „Läuft", nachdem Puls die Order in TradingView
-   * platziert hat (30.08.2026, Schritt 2). Bewusst NICHT mt5PlanAufOpen
-   * mitbenutzt (Doktrin „keine generischen Handler"): dort wird eine
-   * mt5_baseline aus Master-/Hedge-Balance eingefroren — auf dieser Route gibt
-   * es gar kein Master-MT5-Terminal, der Master ist ein Tradovate-Konto hinter
-   * TradingView. Eine Baseline zu schreiben, die nur die Hedge-Seite kennt,
-   * wäre eine halbe Wahrheit im P&L; die Orbit-P&L ist bis heute ehrlich null. */
-  async function tvPlanAufOpen(planId){
+  /* Orbit-Route (22.09.2026, Finn: „wenn Puls die Order platziert hat, wird der Trade
+   * erst zu offen verschoben, wenn er von Duplikum erkannt wird — auf der Karte soll
+   * dann ‚Warte auf Duplikum' stehen"): der Plan bleibt GEPLANT, nur der Kauf-Klick
+   * wird gestempelt (orbit_gesendet_at). Die Duplikum-Auto-Erkennung setzt ihn wie
+   * jeden Duplikum-Trade auf „Läuft" — mit allem, was der P&L-Weg dort braucht.
+   * Bis .354 sprang der Plan hier direkt auf 'open' (ohne Baseline, halbe Wahrheit). */
+  const ORBIT_WARTE_MS = 10 * 60 * 1000   // danach zeigt die Karte wieder „Starten"
+  function orbitWartetAufDup(p){
+    if(!p || p.route !== 'tvplus' || p.status !== 'planned' || !p.orbitGesendetAt) return false
+    const t = new Date(p.orbitGesendetAt).getTime()
+    return isFinite(t) && (Date.now() - t) < ORBIT_WARTE_MS
+  }
+  async function tvPlanGesendet(planId){
     try{
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
       const { data, error } = await supabase.from('trade_plans')
-        .update({ status: 'open', started_at: new Date().toISOString() })
+        .update({ orbit_gesendet_at: new Date().toISOString() })
         .eq('id', plan.id).eq('status', 'planned').select('*')
       if(error || !data || !data.length) return
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       if(typeof renderTradePlans === 'function') renderTradePlans()
-    }catch(e){ console.warn('[tvPlanAufOpen]', e) }
+    }catch(e){ console.warn('[tvPlanGesendet]', e) }
   }
 
   async function mt5PlanPollTick(){
@@ -21269,6 +21274,8 @@
       multiplier:      row.multiplier       != null ? Number(row.multiplier)       : null,
       masterTp:        row.master_tp        != null ? Number(row.master_tp)        : null,
       masterSl:        row.master_sl        != null ? Number(row.master_sl)        : null,
+      // Orbit (22.09.2026): Zeitpunkt des Kauf-Klicks — Karte zeigt „Warte auf Duplikum" (sql/2026-09-22_orbit_gesendet_at.sql)
+      orbitGesendetAt: row.orbit_gesendet_at || null,
       masterRealized:  row.master_realized  != null ? Number(row.master_realized)  : null,
       slaveRealized:   row.slave_realized   != null ? Number(row.slave_realized)   : null,
       priority:    row.priority || 'medium',
@@ -22306,7 +22313,9 @@
       const qs = (typeof _rsQueueStatusFuer === 'function') ? _rsQueueStatusFuer(p.id) : null
       // ORBIT (22.09.2026, Finn: „wie bei Echo auf Starten drücken"): eigener Knopf mit
       // eigener Verdrahtung (data-plan-orbit-start → tpOrbitStarten) — ohne Warteschlange.
-      const orbitBtn = `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
+      const orbitBtn = (typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p))
+        ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>`
+        : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
       const jetztBtn = (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
@@ -24625,7 +24634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.354'
+  const OS_TAB_BUILD = '2026-09-22.355'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24925,13 +24934,13 @@
           geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
             '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] }) })
       if(r && r.ok && r.gesendet){
-        // Position bewiesen → Plan auf „Läuft" (eigener Orbit-Handler, s. tvPlanAufOpen).
-        await tvPlanAufOpen(plan.id)
+        // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
+        await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
                               msg: String(r.msg || 'Order platziert.') })
         if(imPopup){
           _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
-          pfEnde(true, '✓ Order platziert — der Plan steht auf „Läuft".')
+          pfEnde(true, '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
           setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
         toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
@@ -24941,8 +24950,10 @@
       } else if(r && r.retry_ok === false){
         // retry_ok=false kommt vom Bot: der Kauf-Klick KANN raus sein. Dieselbe Regel wie auf
         // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
-        // Order zweimal im Markt. Liegt sie: „Läuft" auf der Karte.
-        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie: „Läuft" auf der Karte). · ' + (r.msg || r.error || ''), r)
+        // Order zweimal im Markt. Ging der Klick nachweislich raus (r.gesendet), wird er
+        // gestempelt: die Karte zeigt „Warte auf Duplikum", Duplikum erkennt die Order selbst.
+        if(r.gesendet) await tvPlanGesendet(plan.id)
+        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie, erkennt Duplikum sie von selbst). · ' + (r.msg || r.error || ''), r)
       } else {
         await fehler('Nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'), r)
       }
@@ -25041,7 +25052,7 @@
       } else if(row.status === 'fertig'){
         _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
         _pfSet('ob-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
-        fertigUi(true, '✓ Order platziert — der Plan steht auf „Läuft".')
+        fertigUi(true, '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
         try{ loadTradePlansFromSupabase() }catch(_){}
         stop()
         setTimeout(() => {
@@ -25058,7 +25069,7 @@
           + (altTab ? '<br>Der PC-Tab fährt noch einen alten Build — am PC neu laden (Strg+F5).' : ''))
         if(ziel === 'ob-claim') _pfSet('ob-order', 'warn', 'Übersprungen — nichts platziert.')
         fertigUi(false, erg.unklar
-          ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie: „Läuft" auf der Karte).'
+          ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie, erkennt Duplikum sie von selbst).'
           : '✗ Nichts platziert — Meldung oben. Erneut „Starten" ist ungefährlich.')
         stop()
       }
