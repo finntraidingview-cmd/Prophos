@@ -17361,7 +17361,7 @@
       // .eq('status','open')-Guard wie in atMoveToReview: hat das Profil selbst
       // gerade manuell abgeschlossen, darf es nicht auf 'review' zurückfallen.
       const { data, error } = await sb.from('trade_plans')
-        .update({ status: 'review' })
+        .update({ status: 'review', ended_at: new Date().toISOString() })   // Trade-Ende stempeln (22.09.2026)
         .eq('id', plan.id).eq('status', 'open').select('*').single()
       if(error) throw error
       moved = !!data
@@ -22026,6 +22026,7 @@
       blown:       row.blown,
       resultNotes: row.result_notes,
       completedAt: row.completed_at,
+      endedAt:     row.ended_at || null,   // echtes Trade-Ende (sql/2026-09-22_trade_plans_ended_at.sql)
       startedAt:   row.started_at,
       createdAt:   row.created_at,
       // MT5-Route (Migration 2026-08-15): route=NULL ist Bestand (Duplikum/Mirror),
@@ -24699,6 +24700,9 @@
       const _cur = tradePlans.find(x => String(x.id) === String(planId))
       if(newStatus === 'open' && !_cur?.startedAt) updates.started_at = new Date().toISOString()
       if(newStatus === 'planned') updates.started_at = null
+      // Trade-Ende (22.09.2026): zurück auf offen/geplant (Fehlerkennung) löscht es, review stempelt es
+      if(newStatus === 'open' || newStatus === 'planned') updates.ended_at = null
+      if(newStatus === 'review' && !_cur?.endedAt) updates.ended_at = new Date().toISOString()
       // MT5-Route (15.08.2026): klickt Finn manuell "Läuft" und das Paar ist über
       // mt5_links verlinkt (lokaler PC), gehört der Plan der MT5-Zustandsmaschine —
       // route + Baseline mit ins Update, sonst wüsste weder die Ende-Erkennung noch
@@ -28764,6 +28768,14 @@
    * Auto-Tracker die P&L schon erfasst, nur Finns Bestätigung fehlt — fürs
    * "kann ich heute noch einen Trade machen?" ist das Geld aber bereits
    * verdient/verloren. null = heute keine realisierten Trades (Anzeige leer). */
+  /* Tages-Anker eines Trades (22.09.2026, Finn: „Trade geht an Tag 1 in TP/SL, ich
+   * drücke erst an Tag 2 auf Erledigt — dann sehe ich das P&L heute, obwohl es gestern
+   * war"): das echte Trade-ENDE (ended_at, gestempelt beim Übergang auf Überprüfen),
+   * sonst der Trade-Start (Trades sind intraday) — NIE der Klick-Zeitpunkt der
+   * Bestätigung (completed_at), der ist nur noch letzter Rückfall. */
+  function tpTradeTagZeit(p){
+    return p.endedAt || p.startedAt || p.completedAt || p.createdAt || null
+  }
   function tagesPlFuer(accountId){
     if(!accountId) return null
     const heute = _deTodayStr()
@@ -28775,9 +28787,8 @@
       if(!istMaster && !istSlave) continue
       const pl = istMaster ? p.masterPl : p.slavePl
       if(pl == null) continue
-      // review-Pläne haben meist noch KEIN completedAt (kommt erst mit der
-      // Bestätigung) — dann zählt der Trade-Start als Tages-Anker.
-      const wann = p.completedAt || p.startedAt || p.createdAt
+      // Tages-Anker = echtes Trade-Ende (s. tpTradeTagZeit), nicht der Klick auf „Erledigt"
+      const wann = tpTradeTagZeit(p)
       if(!wann) continue
       let tag = null
       try{ tag = new Date(wann).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
@@ -28850,7 +28861,7 @@
       if(!istMaster && !istSlave) continue
       const pl = istMaster ? p.masterPl : p.slavePl
       if(pl == null) continue
-      const wann = p.completedAt || p.startedAt || p.createdAt
+      const wann = tpTradeTagZeit(p)   // Trade-Ende statt Klick-Zeitpunkt (22.09.2026)
       if(!wann) continue
       let tag = null
       try{ tag = new Date(wann).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }) }catch(_){ continue }
@@ -29249,7 +29260,7 @@
       // .eq('status','open')-Guard: falls der User im Erkennungs-Moment gerade manuell
       // abgeschlossen hat, darf der Plan nicht von 'completed' zurück auf 'review' fallen.
       const { data, error } = await supabase
-        .from('trade_plans').update({ status: 'review' })
+        .from('trade_plans').update({ status: 'review', ended_at: new Date().toISOString() })   // Trade-Ende stempeln (22.09.2026)
         .eq('id', plan.id).eq('status', 'open').select('*').single()
       if(error) throw error
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
@@ -29727,7 +29738,10 @@
         slave_pl: sPl,
         blown: blown,
         result_notes: resultNotes,
-        completed_at: p.completedAt || new Date().toISOString()
+        completed_at: p.completedAt || new Date().toISOString(),
+        // Trade-Ende (22.09.2026): bleibt, wenn schon gestempelt; direkt von „offen" = jetzt;
+        // Bestand in „Überprüfen" ohne Stempel = Trade-Start (intraday) — nie der Klick von Tag 2.
+        ended_at: p.endedAt || (p.status === 'review' ? (p.startedAt || new Date().toISOString()) : new Date().toISOString())
       }
       const { data, error } = await supabase
         .from('trade_plans').update(updates).eq('id', _completingPlanId).select('*').single()

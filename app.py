@@ -3588,7 +3588,9 @@ def wt_finish_plan(uid, token, plan, dup_slave, dup_master, label, started_epoch
     try:
         rows = sb_update("trade_plans",
                          {"id": f"eq.{plan['id']}", "status": "eq.open", "user_id": f"eq.{uid}"},
-                         {"status": "review"})
+                         # ended_at (22.09.2026): das echte Trade-Ende — Tages-Anker fuer Tages-P&L
+                         # und Ziel-Fortschritt, statt des Klick-Zeitpunkts von "Erledigt"
+                         {"status": "review", "ended_at": datetime.now(timezone.utc).isoformat()})
     except Exception as e:
         print(f"[watcher] ⚠️ {label}: review-Update fehlgeschlagen: {e}", flush=True)
         return False   # nächster Tick probiert es erneut

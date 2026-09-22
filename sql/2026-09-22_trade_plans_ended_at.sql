@@ -1,0 +1,15 @@
+-- ============================================================================
+-- Prophos: trade_plans.ended_at — wann der Trade WIRKLICH zu Ende war (22.09.2026)
+--
+-- Finn: „Der Trade läuft an Tag 1 und geht dort in TP/SL. Ich drücke aber erst
+-- an Tag 2 auf Erledigt — und dann sehe ich das P&L heute, obwohl es gestern
+-- war." completed_at ist der Klick-Zeitpunkt der Bestätigung, nicht das
+-- Trade-Ende. ended_at wird gesetzt, sobald ein Plan auf 'review' geht
+-- (Browser-Erkennung, Mirror, Server-Wächter) bzw. direkt von 'open' auf
+-- 'completed' — und ist der Tages-Anker für Tages-P&L und Ziel-Fortschritt.
+-- Zurück auf 'open'/'planned' (Fehlerkennung) löscht es wieder.
+-- Bestand ohne ended_at fällt auf started_at zurück (Trades sind intraday).
+--
+-- Im Supabase SQL Editor einfügen und auf "Run" klicken. Idempotent.
+-- ============================================================================
+alter table public.trade_plans add column if not exists ended_at timestamptz;
