@@ -4170,7 +4170,7 @@ def _sb_all(table, params):
 
 
 def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
     plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
@@ -4340,6 +4340,8 @@ def admin_build_overview():
             "person": disp.get(uid) or names.get(uid, uid[:8]),
             "person_mail": names.get(uid, ""),
             "archived": aid in archived,
+            # Winning-Day-Farmer (23.09.2026): nur angehakte Fundeds werden gefarmt (sql/2026-09-23_accounts_wd_farm.sql)
+            "wd_farm": bool(a.get("wd_farm")),
             # created_at = Kaufzeitpunkt-Näherung (28.08.2026, „Letzte Käufe" im
             # Acc-Käufe-Tab): der Account wird beim Kauf in Prophos angelegt,
             # ein eigenes Kaufdatum-Feld gibt es nicht.
@@ -5301,6 +5303,226 @@ def admin_acc_plan():
     except Exception as e:
         print(f"[accplan] ⚠️ aendern: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Nicht geaendert ({type(e).__name__})"}), 502
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# WINNING-DAY-FARMER: Pläne für ALLE IDs zentral anlegen (23.09.2026, Finn:
+# „sobald gewürfelt wird, werden schon alle Trades geplant — schön sauber
+# geplant, dann ausgeführt … das ist ja kein Verlauf mit geplanten Trades, ich
+# sehe keinen Account"). BEFUND: trade_plans hängt per RLS am eigenen Login —
+# der Mac (Admin-Tab) konnte für Moritz, Jacob, … keine Pläne schreiben, das
+# musste jeder PC-Tab selbst tun. War der Tab zu (Moritz, 23.09. 01:04),
+# stand nach dem Würfeln nichts. Deshalb hier über den Service-Key:
+#   GET    ?tag=      → alle Funded/Live-Konten bei Futures-Firmen (nicht
+#                       archiviert, ausgeblendete Personen weg) mit DD, Balance,
+#                       External ID, wd_farm-Haken; je Person der Duplikum-Slave
+#                       (= Slave des letzten dup/tvplus-Plans); die Pläne, auf
+#                       die die Tagesplan-Zeilen verweisen; FX.
+#   POST   {plaene}   → trade_plans-Zeilen 1:1 einfügen (user_id = Block-ID);
+#                       Konto mit geplantem/laufendem Plan wird übersprungen.
+#   PATCH  {id, upd}  → Startzeit/Richtung/TP/Slave nur solange 'planned' und
+#                       nicht gestartet (Guard wie tpStartUmTick).
+#          {aktion:'farm', account_id, wd_farm} → Haken setzen (fremde Konten).
+#   DELETE ?id=       → nur 'planned' und nicht gestartet.
+# Gate: eingeloggt (wie /admin/overview) — die Farmer-Tabellen sind per RLS
+# ohnehin für alle Angemeldeten offen; der Admin-Tab sitzt hinter dem Kasse-Code.
+# Gerechnet wird NICHTS hier: TP, Risiko, Multiplikator kommen fertig aus dem
+# Frontend (dieselben Funktionen wie „Futures vorplanen"), damit es nie zwei
+# Rechnungen gibt.
+# ════════════════════════════════════════════════════════════════════════════
+
+WD_FUTURES_FIRMEN = ("tradeify", "apex", "topstep", "futur", "mffu", "lucid")
+WD_PLAN_FELDER = {
+    "user_id", "master_account_id", "slave_account_id", "master_name", "master_firm",
+    "slave_name", "slave_firm", "master_risk", "master_contracts", "slave_risk",
+    "multiplier", "master_tp", "master_sl", "priority", "planned_for", "notes",
+    "status", "richtung", "route", "master_symbol", "start_um",
+}
+WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol"}
+
+
+def _wd_login():
+    """Eingeloggt reicht (wie /admin/overview). → (user_id, None) oder (None, (resp, status))."""
+    if not SUPABASE_SERVICE_KEY:
+        return None, (jsonify({"error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503)
+    token = (request.headers.get("sb-token") or "").strip()
+    if not token:
+        return None, (jsonify({"error": "Nicht angemeldet"}), 401)
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        u = r.json() or {}
+        if r.status_code != 200 or not u.get("id"):
+            return None, (jsonify({"error": "Nicht angemeldet"}), 401)
+        return str(u["id"]), None
+    except Exception:
+        return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
+
+
+def _wd_personen():
+    """user_id → Anzeigename (user_metadata.name, sonst E-Mail-Kürzel) und die
+    Menge der ausgeblendeten Personen (ADMIN_EXCLUDE_EMAILS) — wie in der Übersicht."""
+    disp, excluded = {}, set()
+    r = requests.get(f"{SUPABASE_URL}/auth/v1/admin/users?per_page=200",
+                     headers=_sb_headers(), timeout=12)
+    for u in (r.json() or {}).get("users", []):
+        uid = str(u.get("id"))
+        mail = str(u.get("email") or "")
+        meta_name = str((u.get("user_metadata") or {}).get("name") or "").strip()
+        disp[uid] = meta_name or (mail.split("@")[0] if "@" in mail else (mail or uid[:8]))
+        if mail.strip().lower() in ADMIN_EXCLUDE_EMAILS:
+            excluded.add(uid)
+    return disp, excluded
+
+
+def _wd_fx():
+    for r in _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"}):
+        try:
+            val = r.get("value")
+            if isinstance(val, str): val = json.loads(val)
+            f = float(val if not isinstance(val, dict) else val.get("rate"))
+            if 0.5 < f < 1.5: return f
+        except Exception:
+            pass
+    return 0.85
+
+
+def _wd_num(v):
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
+def admin_wd_plaene():
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+
+    if request.method == "GET":
+        tag = (request.args.get("tag") or "").strip()[:10]
+        try:
+            disp, excluded = _wd_personen()
+            archiv = _acc_plan_archiviert()
+            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,balance,starting_balance,max_drawdown,wd_farm"})
+            konten = []
+            for a in accs:
+                typ = (a.get("account_type") or "").lower()
+                firm = (a.get("firm") or "").strip()
+                uid = str(a.get("user_id"))
+                if typ not in ("funded", "live") or not any(k in firm.lower() for k in WD_FUTURES_FIRMEN):
+                    continue
+                if str(a["id"]) in archiv or uid in excluded:
+                    continue
+                konten.append({
+                    "id": str(a["id"]), "user_id": uid, "person": disp.get(uid, uid[:8]),
+                    "name": a.get("name") or "", "firm": firm, "type": typ,
+                    "ext": (a.get("external_id") or "").strip(),
+                    "max_drawdown": _wd_num(a.get("max_drawdown")),
+                    "balance": _wd_num(a.get("balance")),
+                    "starting_balance": _wd_num(a.get("starting_balance")),
+                    "wd_farm": bool(a.get("wd_farm")),
+                })
+            # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
+            # laufen über route=mt5 und haben einen anderen Slave — die zählen hier nicht)
+            slaves = {}
+            uids = {k["user_id"] for k in konten}
+            if uids:
+                seit = datetime.now(timezone.utc).timestamp() - 120 * 86400
+                seit_iso = datetime.fromtimestamp(seit, timezone.utc).isoformat()
+                plans = _sb_all("trade_plans", {"select": "user_id,slave_account_id,slave_name,slave_firm,created_at",
+                                                "route": "in.(dup,tvplus)", "created_at": f"gte.{seit_iso}",
+                                                "order": "created_at.desc"})
+                for p in plans:
+                    uid = str(p.get("user_id"))
+                    if uid in uids and uid not in slaves and p.get("slave_account_id"):
+                        slaves[uid] = {"id": str(p["slave_account_id"]), "name": p.get("slave_name") or "",
+                                       "firm": p.get("slave_firm") or ""}
+            # Pläne, auf die die Tagesplan-Zeilen zeigen (über alle IDs — genau das sieht der Mac per RLS nicht)
+            plaene = []
+            if tag:
+                ids = []
+                for row in sb_select("wd_tagesplan", {"select": "konten", "tag": f"eq.{tag}"}):
+                    for k in (row.get("konten") or []):
+                        if isinstance(k, dict) and k.get("plan_id"):
+                            ids.append(str(k["plan_id"]))
+                for i in range(0, len(ids), 80):
+                    chunk = ",".join(ids[i:i + 80])
+                    plaene += sb_select("trade_plans", {
+                        "select": "id,user_id,master_account_id,status,start_um,start_um_gestartet_at,orbit_gesendet_at,"
+                                  "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
+                                  "slave_name,master_name,updated_at",
+                        "id": f"in.({chunk})"})
+            return jsonify({"konten": konten, "slaves": slaves, "plaene": plaene, "fx": _wd_fx()})
+        except Exception as e:
+            print(f"[wd] ⚠️ laden: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"error": f"Farmer-Daten nicht ladbar ({type(e).__name__}: {e})"}), 502
+
+    daten = request.get_json(silent=True) or {}
+
+    if request.method == "POST":
+        rows = daten.get("plaene") or []
+        if not isinstance(rows, list) or not rows:
+            return jsonify({"error": "plaene fehlt"}), 400
+        angelegt, uebersprungen = [], []
+        try:
+            for r in rows[:200]:
+                body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
+                mid, uid = str(body.get("master_account_id") or ""), str(body.get("user_id") or "")
+                if len(mid) < 10 or len(uid) < 10:
+                    uebersprungen.append({"master_account_id": mid, "grund": "user_id/master_account_id fehlt"}); continue
+                # Konto muss dieser Person gehören — sonst landet ein Plan im falschen Profil
+                acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{mid}"})
+                if not acc or str(acc[0].get("user_id")) != uid:
+                    uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
+                offen = sb_select("trade_plans", {"select": "id,status", "master_account_id": f"eq.{mid}",
+                                                  "status": "in.(planned,open)", "limit": "1"})
+                if offen:
+                    uebersprungen.append({"master_account_id": mid, "grund": "hat schon einen geplanten/laufenden Plan"}); continue
+                body["status"] = "planned"
+                body.setdefault("notes", "Winning-Day-Farmer")
+                angelegt.append(sb_insert("trade_plans", body))
+            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen})
+        except Exception as e:
+            print(f"[wd] ⚠️ anlegen: {type(e).__name__}: {e}", flush=True)
+            return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen,
+                            "error": f"Anlegen abgebrochen ({type(e).__name__}: {e})"}), 502
+
+    if request.method == "PATCH":
+        if daten.get("aktion") == "farm":
+            aid = str(daten.get("account_id") or "")
+            if len(aid) < 10:
+                return jsonify({"error": "account_id fehlt"}), 400
+            try:
+                z = sb_update("accounts", {"id": f"eq.{aid}"}, {"wd_farm": bool(daten.get("wd_farm"))})
+                return jsonify({"geaendert": bool(z)})
+            except Exception as e:
+                return jsonify({"error": f"Haken nicht gesetzt ({type(e).__name__})"}), 502
+        pid = str(daten.get("id") or "")
+        upd = {k: v for k, v in (daten.get("upd") or {}).items() if k in WD_PATCH_FELDER}
+        if len(pid) < 10 or not upd:
+            return jsonify({"error": "id/upd fehlt"}), 400
+        try:
+            z = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"}, upd)
+            return jsonify({"geaendert": bool(z), "plan": z[0] if z else None})
+        except Exception as e:
+            return jsonify({"error": f"Nicht geändert ({type(e).__name__})"}), 502
+
+    pid = str(daten.get("id") or request.args.get("id") or "").strip()
+    if len(pid) < 10:
+        return jsonify({"error": "id fehlt"}), 400
+    try:
+        r = requests.delete(f"{SUPABASE_URL}/rest/v1/trade_plans",
+                            params={"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"},
+                            headers=_sb_headers("return=representation"), timeout=12)
+        r.raise_for_status()
+        return jsonify({"geloescht": bool(r.json())})
+    except Exception as e:
+        return jsonify({"error": f"Nicht gelöscht ({type(e).__name__})"}), 502
 
 
 # ════════════════════════════════════════════════════════════════════════════
