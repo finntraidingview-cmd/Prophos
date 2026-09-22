@@ -2335,18 +2335,34 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
         return False, (f"Der aktive Tab sieht nicht nach TradingView aus ('{titel[:50]}') — "
                        "es wird nichts geschlossen.")
     # Vordergrund BEWEISEN, mit Nachdruck (22.09.2026 02:2x, Finns Lauf nach dem
-    # Leerzeit-Fix: 'TradingView-Fenster steht nicht im Vordergrund' — das Konto war
-    # nach 2 s gelesen, der Fokus-Wechsel von set_focus() noch nicht durch; vorher
-    # hatten die 14 s Leseschleife das zufaellig mitgewartet). Bis ~2,5 s: set_focus
-    # + SetForegroundWindow wiederholen, dann erst absagen — Strg+W in ein fremdes
-    # Fenster bleibt ausgeschlossen.
+    # Leerzeit-Fix: 'TradingView-Fenster steht nicht im Vordergrund' — der Fokus-
+    # Wechsel von set_focus() war noch nicht durch). ZWEITER LAUF 02:4x: auch mit
+    # Nachdruck 'nicht im Vordergrund', obwohl Finn TradingView vorne SAH. Deshalb
+    # zaehlt jetzt der TITEL des Vordergrund-Fensters, nicht sein Handle: steht vorne
+    # ein Fenster, dessen Titel nach dem TradingView-Tab aussieht, ist es das richtige
+    # (Chrome kann fuer dasselbe Fenster ein anderes Handle liefern als pywinautos
+    # Fund). Strg+W geht ohnehin an das Vordergrund-Fenster. Absage nennt, was vorne
+    # stand.
     try:
         import ctypes
         u32 = ctypes.windll.user32
+
+        def vorne():
+            h = u32.GetForegroundWindow()
+            n = u32.GetWindowTextLengthW(h)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u32.GetWindowTextW(h, buf, n + 1)
+            kb = ctypes.create_unicode_buffer(128)
+            u32.GetClassNameW(h, kb, 128)
+            return int(h), buf.value or "", kb.value or ""
         ende_v = time.time() + 2.5
-        while int(u32.GetForegroundWindow()) != int(w.handle):
+        while True:
+            h_v, t_v, k_v = vorne()
+            if h_v == int(w.handle) or tv_tab_schliessbar(t_v, k_v, begriff):
+                break
             if time.time() >= ende_v:
-                return False, "TradingView-Fenster steht nicht im Vordergrund — es wird nichts geschlossen."
+                return False, (f"TradingView-Fenster steht nicht im Vordergrund (vorn: '{t_v[:60] or '?'}') — "
+                               "es wird nichts geschlossen.")
             try:
                 w.set_focus()
             except Exception:
