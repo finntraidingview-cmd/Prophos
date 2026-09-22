@@ -25582,7 +25582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.413'
+  const OS_TAB_BUILD = '2026-09-22.414'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29446,7 +29446,7 @@
     }
     const d = _wd.daten, aus = wdIdsAus()
     if(d && Array.isArray(d.konten)){
-      for(const r of d.konten){ if(aus.has(String(r.user_id))) continue; add(r.user_id, r.person, konto(r, r.firm || '', !!r.wd_farm)) }
+      for(const r of d.konten){ if(aus.has(String(r.user_id)) || r.archiviert) continue; add(r.user_id, r.person, konto(r, r.firm || '', !!r.wd_farm)) }   // archiviert = nicht existent
     }else{
       const a = window._admData; if(!a || !Array.isArray(a.rows)) return null
       for(const r of a.rows){
@@ -29474,6 +29474,8 @@
       }
       if(x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
+      // Archivierte Konten aus bestehenden Zeilen entfernen (Finn 23.09.2026: „die sind weg, die nutze ich nicht") — nur ohne Plan
+      for(let i = konten.length - 1; i >= 0; i--){ const kd = wdKontoDaten(konten[i].id); if(kd && kd.archiviert && !konten[i].plan_id){ konten.splice(i, 1); ge = true } }
       for(const k of e.konten){
         const v = konten.find(q => String(q.id) === k.id)
         if(!v){ konten.push(k); ge = true; continue }
@@ -29871,7 +29873,7 @@
   const WD_FIRMEN = { tradeify: ['Tradeify', '#6c5ce7', 'Gewinntag 250 $'], apex: ['Apex', '#0984e3', 'Gewinntag 53 $'], topstep: ['Topstep', '#e17055', ''], sonst: ['andere Firmen', '#636e72', 'FundedNext Futures, MFFU, Lucid …'] }
   // „3 im Farm · 1 aus" — wird nach dem Laden der Konten nachgezogen (wdRender), ohne die Zeilen neu zu bauen
   function wdFirmaKurz(k, konten){
-    const ges = konten.filter(q => tpVorplanFirmaKey(q.firm) === k), n = ges.filter(q => q.wd_farm).length
+    const ges = konten.filter(q => tpVorplanFirmaKey(q.firm) === k && !q.archiviert), n = ges.filter(q => q.wd_farm).length
     return ges.length ? `${n} im Farm${ges.length > n ? ` · ${ges.length - n} aus` : ''}` : 'keine Konten'
   }
   function wdFirmenZaehlen(){
@@ -30032,8 +30034,7 @@
     // die ohne Haken zusammengeklappt in einer Zeile, auf Wunsch einblenden
     // Archivierte Konten (Konto-Archiv) standardmäßig weg — bei Moritz 13 von 16 (Finn 23.09.2026: „da müssen ganz viele
     // archivierte sein, da kann nicht gar nichts sein"); Konten ohne Haken bleiben sichtbar (grau)
-    const zeigArch = !!(_wd.zeigArch || {})[uid]
-    const ohne = (x.konten || []).filter(k => k.archiviert && !k.plan_id), sichtbar = (x.konten || []).filter(k => !k.archiviert || k.plan_id || zeigArch)
+    const ohne = [], sichtbar = (x.konten || []).filter(k => !k.archiviert || k.plan_id)   // archivierte Konten existieren hier nicht (Finn 23.09.2026)
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
@@ -30056,7 +30057,7 @@
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
         <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}</td></tr>`
     }).join('')
-    const ohneZeile = ohne.length ? `<tr class="wd-ohne"><td></td><td colspan="9"><button type="button" class="btn btn-ghost btn-xs" data-wd-ohne="${uid}">${zeigArch ? '▾ ' + ohne.length + ' archivierte ausblenden' : '▸ ' + ohne.length + ' archivierte einblenden (fahren nicht mit)'}</button></td></tr>` : ''
+    const ohneZeile = ''   // keine Einblenden-Zeile mehr — archivierte Konten sind für den Farmer weg (Finn 23.09.2026)
     const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
     const nAkt = (x.konten || []).filter(wdAktiv).length
     return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
@@ -30261,6 +30262,7 @@
     for(const x of rows){
       if(!x || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
+      for(let i = konten.length - 1; i >= 0; i--){ const kd = wdKontoDaten(konten[i].id); if(kd && kd.archiviert && !konten[i].plan_id){ konten.splice(i, 1); ge = true } }   // archiviert = weg
       for(const k of konten){
         const kd = wdKontoDaten(k.id)
         if(kd){
