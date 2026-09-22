@@ -4386,31 +4386,61 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             return False, ("Das Order-Panel ist nicht zu sehen (Reiter 'Market … Stop Limit' fehlen), auch "
                            "nach Shift+T nicht. Gesehen: " + tv_uia_spur(roh))
 
-    # --- Panel auf dem RICHTIGEN Symbol? (23.09.2026 03:19, Finns Lauf: Watchlist
-    # NQ1! geklickt, Tab-Titel stand nach 0,7 s auf NQ — das Order-Panel hing aber
+    # --- Panel auf dem RICHTIGEN Symbol und RUHIG? (23.09.2026 03:19, Finns Lauf:
+    # Watchlist NQ1! geklickt, Tab-Titel nach 0,7 s auf NQ — das Order-Panel hing aber
     # noch am alten MNQ. Units/TP/SL landeten im MNQ-Panel, erst der Knopf-Beweis
     # ganz am Ende stoppte den Lauf: "Auf dem Knopf steht nicht NQ ('Buy 2 MNQZ6
-    # MARKET')" — 9 s umsonst, Fehler statt Order, fuer Finn 'Puls ist langsam'.)
-    # TradingView baut das Panel nach dem Symbolwechsel VERZOEGERT neu auf; der
-    # Senden-Knopf unten traegt das Symbol aber schon vor dem Ausfuellen ('Buy 1
-    # MNQZ6 MARKET'). Also erst tippen, wenn der Knopf die Plan-Wurzel zeigt — bis
-    # 8 s, sonst ehrliche Absage, ohne einen einzigen Tipp ins falsche Panel.
+    # MARKET')". Zweiter Lauf 03:54 mit der ersten Fassung dieser Wartestelle: der
+    # Senden-Knopf war VOR dem Ausfuellen 8 s lang gar nicht lesbar -> Absage, obwohl
+    # das Panel da war. Finn: "mach das erst, wenn er das Panel auch so sieht".)
+    # Deshalb zwei Bedingungen, keine davon eine Falle:
+    #  1. RUHE: die Beschriftungen unter der Reiter-Zeile (Zahlen ausgeblendet) sind
+    #     in zwei Blicken hintereinander gleich — TradingView baut das Panel nach dem
+    #     Symbolwechsel verzoegert neu auf, ein halb gebautes Panel ist nie ruhig.
+    #  2. SYMBOL: ist der Senden-Knopf lesbar ('Buy 1 MNQZ6 MARKET' steht schon vor
+    #     dem Ausfuellen drauf), muss er die Plan-Wurzel tragen. Zeigt er 8 s lang ein
+    #     anderes Symbol -> Absage ohne einen Tipp ins falsche Panel. Ist er (noch)
+    #     nicht lesbar, wird NICHT abgesagt: nach 3 s Ruhe geht es weiter wie frueher,
+    #     der Knopf-Beweis am Ende bleibt die letzte Sperre. Die Spur nennt, was unter
+    #     den Reitern zu sehen war — damit der naechste Fall lesbar ist.
     ziel_root = tv_symbol_root(cmd.get("symbol"))
-    if ziel_root:
-        t_sym = time.time()
-        while True:
-            kn = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=ber["reiter_y"])
-            if any(tv_symbol_root(wort) == ziel_root for k in kn for wort in k["text"].split()):
-                if time.time() - t_sym > 0.5:
-                    trail.append(f"Order-Panel zog nach {time.time() - t_sym:.1f}s auf {ziel_root} nach")
-                break
-            if time.time() - t_sym > 8.0:
-                gesehen = ", ".join(f"'{k['text'][:30]}'" for k in kn) or "kein Senden-Knopf"
-                return False, (f"Das Order-Panel steht nicht auf {ziel_root} — der Knopf unten zeigt auch nach "
-                               f"8 s noch {gesehen}. Nichts getippt, nichts gesendet.")
-            _warte(0.4, 0.2)
-            roh, ber2 = blick()
-            ber = ber2 or ber
+
+    def _panel_namen(roh_, ber_):
+        out = []
+        for e in roh_ or ():
+            if not e[1]:
+                continue
+            l, t, r, b = e[1]
+            if ber_["links"] <= (l + r) // 2 <= ber_["rechts"] and (t + b) // 2 >= ber_["reiter_y"]:
+                out.append(re.sub(r"[\d.,]+", "#", str(e[0]).strip())[:40])
+        return tuple(out)
+
+    t_sym, letzte, knopf_falsch = time.time(), None, None
+    while True:
+        namen = _panel_namen(roh, ber)
+        ruhig = letzte is not None and namen == letzte
+        kn = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=ber["reiter_y"])
+        passt = any(tv_symbol_root(wort) == ziel_root for k in kn for wort in k["text"].split()) if (kn and ziel_root) else None
+        knopf_falsch = (kn[0]["text"][:40] if kn else None) if passt is False else None
+        dauer = time.time() - t_sym
+        if ruhig and (passt or (passt is None and dauer >= 3.0)):
+            if passt is None:
+                trail.append("Order-Panel ruhig, Senden-Knopf vor dem Ausfuellen nicht lesbar — weiter, Beweis am Ende "
+                             f"(unter den Reitern: {', '.join(namen[:14]) or 'nichts'})")
+            elif dauer > 0.5:
+                trail.append(f"Order-Panel zog nach {dauer:.1f}s auf {ziel_root} nach")
+            break
+        if dauer > 8.0:
+            if knopf_falsch:
+                return False, (f"Das Order-Panel steht nicht auf {ziel_root} — der Knopf unten zeigt auch nach 8 s "
+                               f"noch '{knopf_falsch}'. Nichts getippt, nichts gesendet.")
+            trail.append("Order-Panel wurde 8 s nicht ruhig — weiter, Beweis am Ende "
+                         f"(unter den Reitern: {', '.join(namen[:14]) or 'nichts'})")
+            break
+        letzte = namen
+        _warte(0.4, 0.2)
+        roh, ber2 = blick()
+        ber = ber2 or ber
 
     # --- Market --------------------------------------------------------------
     ok, f = _tv_uia_klick(ber["market"], "Reiter Market", trail)
