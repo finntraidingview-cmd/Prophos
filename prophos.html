@@ -1154,12 +1154,23 @@
      unten auf Start druecke — das Scrollen faehrt mich immer rein"): das ganze Modal auf 84 %,
      mehr Hoehe erlaubt, Vorschlag-Boxen und Ergebnis-Kacheln enger. Nur dieses Modal. */
   /* Futures vorplanen (22.09.2026): viele kleine Zahlenfelder (TP je Firma, Puffer-Staffel) in einer Zeile */
-  #tpVorplanModal .vp-in,#wdModal .vp-in{width:62px;padding:3px 6px;height:auto;font-size:12px;text-align:right}
-  #tpVorplanModal .vp-zeile,#wdModal .vp-zeile{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12.5px}
+  #tpVorplanModal .vp-in,#adm-pane-wd .vp-in{width:62px;padding:3px 6px;height:auto;font-size:12px;text-align:right}
+  #tpVorplanModal .vp-zeile,#adm-pane-wd .vp-zeile{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12.5px}
   #tpVorplanModal .vp-zeile>b{min-width:118px;font-weight:600}
-  #wdModal .btn-mini{padding:3px 10px;font-size:12px;height:auto}
-  #wdModal .wd-row{border-top:1px solid var(--line);padding:8px 0}
-  #wdModal .wd-row .seg button{padding:3px 9px;font-size:11.5px}
+  /* Winning-Day-Farmer im Admin (23.09.2026, Finn: „mach alles in Admin und mehr Überblick") */
+  #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  #adm-pane-wd .wd-row{border-top:1px solid var(--line);padding:8px 0}
+  #adm-pane-wd .wd-row .seg button{padding:3px 9px;font-size:11.5px}
+  #adm-pane-wd .wd-strahl{position:relative;height:46px;border-radius:8px;background:var(--bg-2, rgba(0,0,0,.04));border:1px solid var(--line);overflow:hidden}
+  #adm-pane-wd .wd-block{position:absolute;top:8px;height:30px;border-radius:6px;padding:0 8px;font-size:11.5px;line-height:30px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff;background:var(--violet);min-width:64px}
+  #adm-pane-wd .wd-block.laeuft{background:#2a9d5c}
+  #adm-pane-wd .wd-block.fertig{background:#2a9d5c;opacity:.7}
+  #adm-pane-wd .wd-block.verpasst{background:var(--danger)}
+  #adm-pane-wd .wd-jetzt{position:absolute;top:0;bottom:0;width:2px;background:var(--danger)}
+  #adm-pane-wd .wd-achse{display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-top:4px}
+  #adm-pane-wd .wd-tab{width:100%;border-collapse:collapse;font-size:12.5px}
+  #adm-pane-wd .wd-tab th{text-align:left;font-weight:500;color:var(--sub);padding:4px 8px 6px 0;border-bottom:1px solid var(--line)}
+  #adm-pane-wd .wd-tab td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical-align:top}
   #tradePlanModal .modal{zoom:.9;max-height:96vh}   /* .84 → .9 (22.09.2026, Finn: „ein bisschen größer reinzoomen") */
   #tradePlanModal #tp-slave-suggest,#tradePlanModal #tp-gesamtkosten-suggest,#tradePlanModal #tp-vorgaenger-suggest{padding:6px 10px !important;line-height:1.35 !important}
   #tradePlanModal #tp-slave-suggest-detail,#tradePlanModal #tp-gesamtkosten-detail,#tradePlanModal #tp-vorgaenger-detail{margin-top:2px !important}
@@ -5046,43 +5057,6 @@
          „Starten" läuft der Trade-Start-Check, und bei Grün platziert der Bot
          die Market-Order automatisch im Master-Terminal. -->
     <!-- Futures vorplanen (22.09.2026) — eigenes Popup, eigene Verdrahtung -->
-    <!-- Winning-Day-Farmer (22.09.2026) — eigenes Popup, eigene Verdrahtung -->
-    <div class="modal-bg" id="wdModal">
-      <div class="modal" style="max-width:760px">
-        <div class="modal-head">
-          <h3>🌾 Winning Days</h3>
-          <button class="modal-x" id="wdX" aria-label="Schließen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <p style="font-size:12.5px;color:var(--sub);margin:0 0 10px;line-height:1.5">
-            Jeder PC-Tab trägt ab 00:00 (Dubai) seine Funded-Konten ein. Ab 00:10 wird gewürfelt: welche ID zuerst, Startzeiten mit Pause dazwischen, Richtung je ID (alle Konten einer ID gleich).
-            Zur Startzeit legt der PC-Tab der ID die Pläne an (Funded-Regeln aus „Futures vorplanen") und startet sie nacheinander. Bis dahin ist hier alles änderbar.
-          </p>
-          <div class="vp-zeile" id="wd-regeln">
-            <label class="at-toggle" style="margin-right:4px"><input type="checkbox" id="wd-aktiv"><span>Automatik</span></label>
-            <span>Start ab</span> <input type="time" class="input mono vp-in" id="wd-start" style="width:86px;text-align:left" value="02:00"> <span style="color:var(--sub)">Dubai</span>
-            <span style="margin-left:6px">Pause</span> <input type="number" class="input mono vp-in" id="wd-pause-min" min="0" step="5" value="15"> – <input type="number" class="input mono vp-in" id="wd-pause-max" min="0" step="5" value="60"> <span style="color:var(--sub)">min</span>
-            <span style="margin-left:6px">Abstand</span> <input type="number" class="input mono vp-in" id="wd-abst-min" min="0" step="1" value="2"> – <input type="number" class="input mono vp-in" id="wd-abst-max" min="0" step="1" value="4"> <span style="color:var(--sub)">min</span>
-            <button class="btn btn-ghost btn-mini" id="wdRegelnSave">Regeln speichern</button>
-          </div>
-          <div class="mono" id="wd-vorplan" style="margin-top:6px;font-size:11.5px;color:var(--sub)"></div>
-          <div class="vp-zeile" style="margin-top:10px">
-            <span>Tag</span> <input type="date" class="input mono vp-in" id="wd-tag" style="width:140px;text-align:left">
-            <button class="btn btn-ghost btn-mini" id="wdReload">Neu laden</button>
-            <button class="btn btn-ghost btn-mini" id="wdMich" title="Dieses Profil mit seinen Funded-Konten für den Tag eintragen (macht der PC-Tab sonst ab 00:00 selbst)">Mich eintragen</button>
-            <button class="btn btn-ghost btn-mini" id="wdWuerfel" title="Reihenfolge, Zeiten und Richtung für alle noch nicht gestarteten IDs neu würfeln">🎲 Neu würfeln</button>
-          </div>
-          <div id="wd-liste" style="margin-top:8px;font-size:12.5px"></div>
-          <div class="modal-msg" id="wdMsg"></div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn btn-ghost" id="wdCancel">Schließen</button>
-          <button class="btn btn-primary" id="wdSave">Änderungen speichern</button>
-        </div>
-      </div>
-    </div>
     <div class="modal-bg" id="tpVorplanModal">
       <div class="modal" style="max-width:640px">
         <div class="modal-head">
@@ -7084,6 +7058,7 @@
         </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
+          <button class="subtab adm-tab" data-admtab="wd">🌾 Winning Days</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
@@ -7270,6 +7245,56 @@
              denselben /admin/overview-Zeilen wie die Übersicht — jeder Account
              mit Kaufpreis > 0 zählt, auch archivierte (gekauft ist gekauft).
              Bewusst ohne Ketten/Hedge/Payouts: das ist die Frage der Übersicht. -->
+        <!-- WINNING-DAY-FARMER (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"): der ganze
+             Tagesplan über alle IDs lebt hier — Regeln, Fortschritt, Zeitstrahl, fehlende IDs, Zeilen je ID,
+             7-Tage-Verlauf. Der Knopf in Trades springt nur hierher. Eigene Verdrahtung (kein Sammel-Handler). -->
+        <div id="adm-pane-wd" hidden>
+          <div class="panel" style="margin:0 0 14px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+              <div>
+                <div class="panel-title">🌾 Winning-Day-Farmer</div>
+                <div class="panel-sub">Ab 00:00 Dubai tragen sich die PC-Tabs mit ihren Fundeds ein, ab 00:10 wird gewürfelt (Reihenfolge, Zeiten, Richtung je ID). Zur Startzeit startet jede ID ihre Konten nacheinander — alle in dieselbe Richtung. Bis dahin ist hier alles änderbar.</div>
+              </div>
+              <span class="mono" id="wd-auto-chip" style="font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--sub);white-space:nowrap">Automatik —</span>
+            </div>
+            <div class="vp-zeile" id="wd-regeln">
+              <label class="at-toggle" style="margin-right:4px"><input type="checkbox" id="wd-aktiv"><span>Automatik</span></label>
+              <span>Start ab</span> <input type="time" class="input mono vp-in" id="wd-start" style="width:86px;text-align:left" value="02:00"> <span style="color:var(--sub)">Dubai</span>
+              <span style="margin-left:6px">Pause</span> <input type="number" class="input mono vp-in" id="wd-pause-min" min="0" step="5" value="15"> – <input type="number" class="input mono vp-in" id="wd-pause-max" min="0" step="5" value="60"> <span style="color:var(--sub)">min</span>
+              <span style="margin-left:6px">Abstand</span> <input type="number" class="input mono vp-in" id="wd-abst-min" min="0" step="1" value="2"> – <input type="number" class="input mono vp-in" id="wd-abst-max" min="0" step="1" value="4"> <span style="color:var(--sub)">min</span>
+              <button class="btn btn-ghost btn-mini" id="wdRegelnSave">Regeln speichern</button>
+            </div>
+            <div class="mono" id="wd-vorplan" style="margin-top:6px;font-size:11.5px;color:var(--sub)"></div>
+          </div>
+          <div class="vp-zeile" style="margin:0 0 12px">
+            <span>Tag</span> <input type="date" class="input mono vp-in" id="wd-tag" style="width:140px;text-align:left">
+            <button class="btn btn-ghost btn-mini" id="wdReload">Neu laden</button>
+            <button class="btn btn-ghost btn-mini" id="wdMich" title="Dieses Profil mit seinen Funded-Konten für den Tag eintragen (macht der PC-Tab sonst ab 00:00 selbst)">Mich eintragen</button>
+            <button class="btn btn-ghost btn-mini" id="wdWuerfel" title="Reihenfolge, Zeiten und Richtung für alle noch nicht gestarteten IDs neu würfeln">🎲 Neu würfeln</button>
+            <button class="btn btn-primary btn-mini" id="wdSave">Änderungen speichern</button>
+            <span id="wd-stand" style="margin-left:auto;font-size:11.5px;color:var(--sub)"></span>
+          </div>
+          <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+            <div class="kpi"><div class="kpi-label">IDs</div><div class="kpi-value" id="wd-k-ids">–</div><div class="kpi-delta delta-neutral" id="wd-k-ids-sub">–</div></div>
+            <div class="kpi"><div class="kpi-label">Konten</div><div class="kpi-value" id="wd-k-konten">–</div><div class="kpi-delta delta-neutral" id="wd-k-konten-sub">–</div></div>
+            <div class="kpi"><div class="kpi-label">Nächster Start</div><div class="kpi-value" id="wd-k-next">–</div><div class="kpi-delta delta-neutral" id="wd-k-next-sub">–</div></div>
+            <div class="kpi"><div class="kpi-label">Zeitfenster</div><div class="kpi-value" id="wd-k-fenster">–</div><div class="kpi-delta delta-neutral" id="wd-k-fenster-sub">–</div></div>
+          </div>
+          <div class="panel" style="margin:0 0 14px">
+            <div class="panel-title" style="margin-bottom:8px">Zeitstrahl</div>
+            <div id="wd-strahl"></div>
+            <div id="wd-fehlend" style="margin-top:8px;font-size:12.5px;color:var(--sub)"></div>
+          </div>
+          <div class="panel" style="margin:0 0 14px">
+            <div class="panel-title" style="margin-bottom:4px">IDs des Tages</div>
+            <div id="wd-liste" style="font-size:12.5px"></div>
+            <div class="modal-msg" id="wdMsg"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title" style="margin-bottom:8px">Verlauf (7 Tage)</div>
+            <div id="wd-verlauf" style="font-size:12.5px"></div>
+          </div>
+        </div>
         <div id="adm-pane-buys" hidden>
           <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-buys-body" hidden>
@@ -9208,6 +9233,8 @@
       $('kasse-content').hidden = false
       kasseLoad()
       admLoad()
+      // Sprung aus Trades („🌾 Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
+      if(window._wdTabPending){ window._wdTabPending = false; document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
     }
 
     /* ── Admin-Übersicht: Kapitalverteilung über ALLE Personen ──
@@ -9230,6 +9257,7 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
+        window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
         // Lesbare Namen: seit 28.08.2026 liefert der Server die
         // user_metadata-Namen ("Pascal", "Moritz") direkt als person/name mit
         // (person_mail/mail = E-Mail daneben) — vorher kannte er nur die
@@ -12175,6 +12203,8 @@
         $('adm-pane-kasse').hidden    = name !== 'kasse'
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
+        $('adm-pane-wd').hidden       = name !== 'wd'
+        if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
@@ -25526,7 +25556,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.395'
+  const OS_TAB_BUILD = '2026-09-22.396'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29354,7 +29384,7 @@
   setInterval(wdTick, 30000)
   setTimeout(wdTick, 12000)
 
-  /* ── Popup ── */
+  /* ── Admin-Tab „🌾 Winning Days" (23.09.2026, Finn: „mach alles in Admin und mehr Überblick") ── */
   const wdSay = (t, k) => { const m = document.getElementById('wdMsg'); if(m){ m.textContent = t || ''; m.className = 'modal-msg' + (k ? ' ' + k : '') } }
   function wdZeitSetzen(iso, hhmm){   // neue Uhrzeit (Gerätezeit) am selben Tag wie bisher
     const d = new Date(iso || Date.now()), m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim())
@@ -29369,6 +29399,8 @@
     if(g('wd-pause-max')) g('wd-pause-max').value = r.pause_max != null ? r.pause_max : 60
     if(g('wd-abst-min')) g('wd-abst-min').value = r.abstand_min != null ? r.abstand_min : 2
     if(g('wd-abst-max')) g('wd-abst-max').value = r.abstand_max != null ? r.abstand_max : 4
+    const chip = g('wd-auto-chip')
+    if(chip){ chip.textContent = r.aktiv ? `Automatik AN · ${r.start_hhmm || '02:00'} Dubai` : 'Automatik AUS'; chip.style.color = r.aktiv ? '#2a9d5c' : 'var(--sub)'; chip.style.borderColor = r.aktiv ? '#2a9d5c' : 'var(--line)' }
     const vp = wdVorplanRegeln(), fu = vp.regeln.fu || TP_VP_VORGABE.fu, st = vp.regeln.staffel || TP_VP_VORGABE.staffel
     const el = g('wd-vorplan'); if(el) el.textContent = `Regeln (aus „Futures vorplanen"): ${vp.instr.toUpperCase()} ${vp.kt} Kt · TP Tradeify ${fu.tradeify.join('–')} · Apex ${fu.apex.join('–')} · Topstep ${fu.topstep.join('–')} · andere ${fu.sonst.join('–')} $ · Slave nach Puffer ${st.join('/')} €`
   }
@@ -29383,20 +29415,95 @@
     const { error } = await supabase.from('wd_farmer_regeln').update(r).eq('id', 1)
     if(error) return wdSay('Regeln nicht gespeichert: ' + error.message, 'err')
     Object.assign(_wd.regeln = _wd.regeln || {}, r)
+    wdRegelnInsFormular()
     wdSay(`Regeln gespeichert — Automatik ${r.aktiv ? 'AN' : 'AUS'}.`, 'ok')
+  }
+  const wdAktiv = k => k && k.aktiv !== false
+  const wdDauerMs = (x, r) => (x.konten || []).filter(wdAktiv).length * (Math.max(1, +((r || {}).abstand_max) || 4) + 2) * 60000
+  // IDs, die laut Admin-Übersicht Funded-Futures-Konten haben, aber für den Tag keine Zeile — PC-Tab aus?
+  function wdFehlendeIds(rows){
+    const d = window._admData; if(!d || !Array.isArray(d.rows)) return null
+    const fut = /tradeify|apex|topstep|futur|mffu|lucid/i, kand = new Map()
+    for(const r of d.rows){
+      if(r.archived || !(r.type === 'funded' || r.type === 'live') || !String(r.ext || '').trim() || !fut.test(r.firm_raw || r.firm || '')) continue
+      kand.set(String(r.user_id), r.person || String(r.user_id).slice(0, 8))
+    }
+    const da = new Set((rows || []).map(x => String(x.user_id)))
+    return [...kand.entries()].filter(([uid]) => !da.has(uid)).map(([, name]) => name).sort()
+  }
+  function wdKpis(rows){
+    const g = id => document.getElementById(id), r = _wd.regeln || {}, now = Date.now()
+    const z = st => rows.filter(x => x.status === st).length
+    const konten = rows.flatMap(x => (x.konten || []).filter(wdAktiv))
+    const erg = rows.flatMap(x => (x.ergebnis && x.ergebnis.konten) || [])
+    const okN = erg.filter(e => !e.fehler).length, fehlN = erg.filter(e => e.fehler).length
+    if(g('wd-k-ids')) g('wd-k-ids').textContent = String(rows.length)
+    if(g('wd-k-ids-sub')) g('wd-k-ids-sub').textContent = rows.length ? `${z('geplant')} geplant · ${z('laeuft')} läuft · ${z('fertig')} fertig${z('verpasst') ? ` · ${z('verpasst')} verpasst` : ''}${z('leer') ? ` · ${z('leer')} leer` : ''}` : 'noch keine eingetragen'
+    if(g('wd-k-konten')) g('wd-k-konten').textContent = String(konten.length)
+    if(g('wd-k-konten-sub')) g('wd-k-konten-sub').textContent = erg.length ? `${okN} gestartet${fehlN ? ` · ${fehlN} Fehler` : ''}` : 'noch keins gestartet'
+    const next = rows.filter(x => x.status === 'geplant' && x.start_um && new Date(x.start_um).getTime() > now - 60000).sort((a, b) => new Date(a.start_um) - new Date(b.start_um))[0]
+    const laeuft = rows.find(x => x.status === 'laeuft')
+    if(g('wd-k-next')) g('wd-k-next').textContent = laeuft ? `▶ ${laeuft.name || '?'}` : next ? `${tpStartUmZeit(next.start_um)} ${next.name || '?'}` : '—'
+    if(g('wd-k-next-sub')){
+      const min = next ? Math.round((new Date(next.start_um).getTime() - now) / 60000) : null
+      g('wd-k-next-sub').textContent = laeuft ? `läuft seit ${laeuft.gestartet_at ? tpStartUmZeit(laeuft.gestartet_at) : '?'}` : next ? (min > 0 ? `in ${min >= 60 ? Math.floor(min / 60) + ' h ' + (min % 60) + ' min' : min + ' min'} · ${(next.richtung || '').toUpperCase()}` : 'jetzt fällig') : (rows.length ? 'alles durch' : '—')
+    }
+    const starts = rows.filter(x => x.start_um).map(x => ({ a: new Date(x.start_um).getTime(), b: new Date(x.start_um).getTime() + wdDauerMs(x, r) }))
+    if(g('wd-k-fenster')) g('wd-k-fenster').textContent = starts.length ? `${tpStartUmZeit(new Date(Math.min(...starts.map(s => s.a))).toISOString())}–${tpStartUmZeit(new Date(Math.max(...starts.map(s => s.b))).toISOString())}` : '—'
+    if(g('wd-k-fenster-sub')) g('wd-k-fenster-sub').textContent = starts.length ? `${Math.round((Math.max(...starts.map(s => s.b)) - Math.min(...starts.map(s => s.a))) / 60000)} min · Gerätezeit` : 'noch nicht gewürfelt'
+  }
+  function wdStrahl(rows){
+    const box = document.getElementById('wd-strahl'); if(!box) return
+    const r = _wd.regeln || {}, mit = rows.filter(x => x.start_um && x.status !== 'leer')
+    if(!mit.length){ box.innerHTML = '<div style="color:var(--sub);font-size:12.5px">Noch nichts gewürfelt — ab 00:10 Dubai automatisch, oder „🎲 Neu würfeln".</div>'; return }
+    const t0 = Math.min(...mit.map(x => new Date(x.start_um).getTime())) - 10 * 60000
+    const t1 = Math.max(...mit.map(x => new Date(x.start_um).getTime() + wdDauerMs(x, r))) + 10 * 60000
+    const pct = t => Math.max(0, Math.min(100, (t - t0) / (t1 - t0) * 100))
+    const now = Date.now()
+    const bloecke = mit.map(x => {
+      const a = new Date(x.start_um).getTime(), w = Math.max(3, pct(a + wdDauerMs(x, r)) - pct(a))
+      const pfeil = x.richtung === 'sell' ? '▼' : x.richtung === 'buy' ? '▲' : ''
+      return `<div class="wd-block ${escapeHtml(x.status)}" style="left:${pct(a).toFixed(2)}%;width:${w.toFixed(2)}%" title="${escapeHtml(x.name || '')} · ${tpStartUmZeit(x.start_um)} · ${(x.konten || []).filter(wdAktiv).length} Konten · ${escapeHtml(x.status)}">${tpStartUmZeit(x.start_um)} ${escapeHtml(x.name || '?')} ${pfeil}</div>`
+    }).join('')
+    const jetzt = (now >= t0 && now <= t1) ? `<div class="wd-jetzt" style="left:${pct(now).toFixed(2)}%" title="jetzt"></div>` : ''
+    box.innerHTML = `<div class="wd-strahl">${bloecke}${jetzt}</div><div class="wd-achse"><span>${tpStartUmZeit(new Date(t0).toISOString())}</span><span>${tpStartUmZeit(new Date(t1).toISOString())}</span></div>`
+  }
+  async function wdVerlauf(){
+    const box = document.getElementById('wd-verlauf'); if(!box) return
+    try{
+      const von = new Date(Date.now() - 7 * 86400000).toLocaleDateString('en-CA')
+      const { data, error } = await supabase.from('wd_tagesplan').select('tag,user_id,name,konten,status,ergebnis,start_um').gte('tag', von).order('tag', { ascending: false })
+      if(error) throw error
+      const tage = new Map()
+      for(const x of (data || [])){
+        const t = tage.get(x.tag) || { tag: x.tag, ids: 0, fertig: 0, verpasst: 0, leer: 0, konten: 0, ok: 0, fehler: 0, namen: [] }
+        t.ids++; if(x.status === 'fertig') t.fertig++; if(x.status === 'verpasst') t.verpasst++; if(x.status === 'leer') t.leer++
+        t.konten += (x.konten || []).filter(wdAktiv).length
+        for(const e of ((x.ergebnis && x.ergebnis.konten) || [])){ if(e.fehler) t.fehler++; else t.ok++ }
+        t.namen.push(`${x.name || '?'}${x.status === 'verpasst' ? ' ✗' : x.status === 'fertig' ? ' ✓' : x.status === 'leer' ? ' –' : ''}`)
+        tage.set(x.tag, t)
+      }
+      if(!tage.size){ box.innerHTML = '<div style="color:var(--sub)">Noch kein Tag im Verlauf.</div>'; return }
+      box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>IDs</th><th>Konten</th><th>gestartet</th><th>Fehler</th><th>Wer</th></tr></thead><tbody>` +
+        [...tage.values()].map(t => `<tr><td class="mono">${escapeHtml(t.tag)}</td><td>${t.ids}${t.verpasst ? ` <span style="color:var(--danger)">(${t.verpasst} verpasst)</span>` : ''}</td><td>${t.konten}</td><td>${t.ok}</td><td>${t.fehler ? `<span style="color:var(--danger)">${t.fehler}</span>` : '0'}</td><td style="color:var(--sub)">${escapeHtml(t.namen.join(' · '))}</td></tr>`).join('') + '</tbody></table>'
+    }catch(e){ box.innerHTML = `<div style="color:var(--danger)">Verlauf: ${escapeHtml(String(e.message || e))}</div>` }
   }
   function wdRender(){
     const box = document.getElementById('wd-liste'); if(!box) return
     const rows = _wd.rows || [], de = v => Number(v).toLocaleString('de-DE')
+    wdKpis(rows); wdStrahl(rows)
+    const fehl = wdFehlendeIds(rows), fEl = document.getElementById('wd-fehlend')
+    if(fEl) fEl.innerHTML = fehl === null ? '' : fehl.length ? `Nicht eingetragen (haben laut Übersicht Funded-Futures-Konten): <b>${escapeHtml(fehl.join(', '))}</b> — PC-Tab an? Sonst dort „Mich eintragen".` : (rows.length ? '<span style="color:#2a9d5c">Alle IDs mit Funded-Futures-Konten sind eingetragen.</span>' : '')
+    const stand = document.getElementById('wd-stand'); if(stand) stand.textContent = `Stand ${tpStartUmZeit(new Date().toISOString())} · aktualisiert alle 30 s`
     if(!rows.length){ box.innerHTML = `<div style="color:var(--sub);padding:8px 0">Für ${escapeHtml(_wd.tag || '')} ist noch keine ID eingetragen — die PC-Tabs tragen sich ab 00:00 (Dubai) ein, oder „Mich eintragen".</div>`; return }
-    const chip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], leer: ['— nichts zu tun', 'var(--sub)'], laeuft: ['▶ läuft', 'var(--ok, #2a9d5c)'], fertig: ['✓ fertig', 'var(--ok, #2a9d5c)'], verpasst: ['✗ verpasst', 'var(--danger)'] }[st] || [st, 'var(--sub)'])
+    const chip = st => ({ geplant: ['⏰ geplant', 'var(--sub)'], leer: ['— nichts zu tun', 'var(--sub)'], laeuft: ['▶ läuft', '#2a9d5c'], fertig: ['✓ fertig', '#2a9d5c'], verpasst: ['✗ verpasst', 'var(--danger)'] }[st] || [st, 'var(--sub)'])
     box.innerHTML = rows.map(x => {
       const fest = x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst'
       const [ct, cc] = chip(x.status), uid = escapeHtml(String(x.user_id))
       const erg = (x.ergebnis && x.ergebnis.konten) || [], ergVon = id => erg.find(e => String(e.id) === String(id))
       const konten = (x.konten || []).map(k => {
         const e = ergVon(k.id)
-        const stat = e ? (e.fehler ? `<span style="color:var(--danger)"> ✗ ${escapeHtml(e.fehler)}</span>` : ` <span style="color:var(--ok, #2a9d5c)">✓ ${e.gesendet ? 'gesendet' : escapeHtml(String(e.status || ''))}${e.tp ? ` · TP $${de(e.tp)}` : ''}</span>`) : ''
+        const stat = e ? (e.fehler ? `<span style="color:var(--danger)"> ✗ ${escapeHtml(e.fehler)}</span>` : ` <span style="color:#2a9d5c">✓ ${e.gesendet ? 'gesendet' : escapeHtml(String(e.status || ''))}${e.tp ? ` · TP $${de(e.tp)}` : ''}${e.um ? ` · ${tpStartUmZeit(e.um)}` : ''}</span>`) : ''
         const vorschau = k.fehler ? `<span style="color:var(--danger)">${escapeHtml(k.fehler)}</span>` : `TP ${de(k.tpVon)}–${de(k.tpBis)} $ · Slave ${escapeHtml(k.waehrung || '€')}${de(k.slave)}${k.puffer != null ? ` (Puffer $${de(k.puffer)})` : ''}`
         return `<label style="display:flex;gap:8px;align-items:center;padding:2px 0 2px 30px;font-size:12px;${k.aktiv === false ? 'opacity:.6' : ''}">
           <input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${k.aktiv === false ? '' : 'checked'} ${fest || k.fehler ? 'disabled' : ''}>
@@ -29410,7 +29517,7 @@
           <b style="min-width:80px">${escapeHtml(x.name || '?')}</b>
           <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${fest ? 'disabled' : ''}>SELL</button></div>
           <span class="mono" style="font-size:12px;color:${cc}">${ct}</span>
-          <span style="color:var(--sub);font-size:12px;margin-left:auto">${(x.konten || []).filter(k => k.aktiv !== false).length} Konto/Konten</span>
+          <span style="color:var(--sub);font-size:12px;margin-left:auto">${(x.konten || []).filter(wdAktiv).length} Konto/Konten${x.registriert_at ? ` · eingetragen ${tpStartUmZeit(x.registriert_at)}` : ''}</span>
         </div>${konten}${hinweis}</div>`
     }).join('')
     box.querySelectorAll('[data-wd-dir]').forEach(b => b.addEventListener('click', () => {
@@ -29418,20 +29525,23 @@
       b.parentElement.querySelectorAll('[data-wd-dir]').forEach(x => x.classList.toggle('active', x === b))
     }))
   }
+  function wdSichtbar(){ const p = document.getElementById('adm-pane-wd'); return !!(p && !p.hidden && p.offsetParent !== null) }
   async function wdOpen(){
-    document.getElementById('wdModal').classList.add('open')
     wdSay('')
     await wdLaden()
     wdRegelnInsFormular()
     const j = wdJetzt(WD_TZ_STD), tagEl = document.getElementById('wd-tag')
     if(tagEl && !tagEl.value) tagEl.value = j ? j.tag : new Date().toLocaleDateString('en-CA')
     await wdNeuLaden()
+    wdVerlauf()
   }
+  window._wdTabOeffnen = wdOpen
   async function wdNeuLaden(){
     const tag = document.getElementById('wd-tag')?.value; if(!tag) return
     try{ await wdRowsLaden(tag); wdRender() }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
   }
-  function wdClose(){ document.getElementById('wdModal').classList.remove('open') }
+  // Nachts zuschauen: solange der Tab offen ist, alle 30 s frisch — ohne die Eingaben zu verlieren, wenn gerade getippt wird
+  setInterval(() => { if(wdSichtbar() && !document.querySelector('#adm-pane-wd :focus')) wdNeuLaden() }, 30000)
   async function wdSpeichern(){
     const tag = _wd.tag; if(!tag) return
     let n = 0
@@ -29442,8 +29552,7 @@
       const dirBtn = el.querySelector('[data-wd-dir].active'), richtung = dirBtn ? dirBtn.dataset.wdDir : x.richtung
       const zeit = el.querySelector('[data-wd-zeit]')?.value
       const start_um = zeit ? wdZeitSetzen(x.start_um || wdZeitpunkt(tag, zeit, WD_TZ_STD).toISOString(), zeit) : x.start_um
-      const aktiv = konten.some(k => k.aktiv !== false)
-      const status = aktiv ? 'geplant' : 'leer'
+      const aktiv = konten.some(wdAktiv), status = aktiv ? 'geplant' : 'leer'
       const upd = { konten, richtung: richtung || null, start_um: aktiv ? start_um : null, status, updated_at: new Date().toISOString() }
       const { error } = await supabase.from('wd_tagesplan').update(upd).eq('tag', tag).eq('user_id', x.user_id).neq('status', 'laeuft')
       if(error) return wdSay('Speichern fehlgeschlagen: ' + error.message, 'err')
@@ -29452,12 +29561,17 @@
     await wdNeuLaden()
     wdSay(`${n} Zeile/Zeilen gespeichert.`, 'ok')
   }
-  document.getElementById('wdBtn')?.addEventListener('click', wdOpen)
-  document.getElementById('wdX')?.addEventListener('click', wdClose)
-  document.getElementById('wdCancel')?.addEventListener('click', wdClose)
-  document.getElementById('wdModal')?.addEventListener('click', e => { if(e.target === document.getElementById('wdModal')) wdClose() })
+  // Knopf in Trades springt in den Admin-Tab (hinter dem Kasse-Code wartet der Sprung)
+  document.getElementById('wdBtn')?.addEventListener('click', () => {
+    if(typeof switchView === 'function') switchView('admin')
+    setTimeout(() => {
+      const kc = document.getElementById('kasse-content')
+      if(kc && !kc.hidden) document.querySelector('.adm-tab[data-admtab="wd"]')?.click()
+      else window._wdTabPending = true
+    }, 60)
+  })
   document.getElementById('wdRegelnSave')?.addEventListener('click', () => wdRegelnSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
-  document.getElementById('wdReload')?.addEventListener('click', wdNeuLaden)
+  document.getElementById('wdReload')?.addEventListener('click', () => { wdNeuLaden(); wdVerlauf() })
   document.getElementById('wd-tag')?.addEventListener('change', wdNeuLaden)
   document.getElementById('wdSave')?.addEventListener('click', () => wdSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdMich')?.addEventListener('click', async () => {
@@ -29466,7 +29580,7 @@
       if(!_wd.geladen) await wdLaden()
       const x = await wdRegistrieren(tag)
       if(x.fehler) return wdSay('Eintragen fehlgeschlagen: ' + x.fehler, 'err')
-      wdSay(x.schon ? 'Dieses Profil ist für den Tag schon eingetragen.' : 'Eingetragen — „Neu würfeln" verteilt die Zeiten.', 'ok')
+      wdSay(x.schon ? 'Dieses Profil ist für den Tag schon eingetragen.' : 'Eingetragen — „🎲 Neu würfeln" verteilt die Zeiten.', 'ok')
       await wdNeuLaden()
     }catch(e){ wdSay('Fehler: ' + (e.message || e), 'err') }
   })
