@@ -956,8 +956,8 @@ def main():
         and _LG["kandidaten"][0] == (1615, 1131, "ueber 'Profit'") and _LG["kandidaten"][1][:2] == (1602, 1131)
         and any(k[2] == "unbenannter Knopf der Panelzeile" for k in _LG["kandidaten"]) and all(k[1] in (1126, 1131, 1136) for k in _LG["kandidaten"])
         and not any(k[0] > 1620 for k in _LG["kandidaten"]))
-    chk("TV-PANEL: benannter Knopf 'Maximize panel' steht als erster Kandidat; ohne Knoepfe beginnt das Raster 6 px links der Kante; ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
-        any(k[2] == "Knopf 'Maximize panel'" for k in order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"])
+    chk("TV-PANEL: 'ueber Profit' ist immer der erste Kandidat (ein benannter Knopf an derselben Stelle faellt als Doppel weg); ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
+        order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][:2] == (1615, 1131)
         and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"][0][:2] == (1615, 1131)
         and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["rechts"] == 1620)
     chk("TV-PANEL: Lage 'oben' (Panel maximiert: Kopfzeile im oberen Drittel); ohne Kopfzeile None",
