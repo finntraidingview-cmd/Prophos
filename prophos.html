@@ -24634,7 +24634,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.370'
+  const OS_TAB_BUILD = '2026-09-22.371'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -24933,6 +24933,18 @@
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
           geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
             '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] }) })
+      // SPUR IN DIE DB, auch fuer lokale Laeufe (22.09.2026 13:5x): ein Klick direkt am PC
+      // schrieb bisher keine Signal-Zeile — bei Erfolg blieb nur ein Toast, die Spur war weg,
+      // und der Umweg „schon im richtigen Login, trotzdem abgemeldet" liess sich nicht belegen.
+      // Status fertig/fehler (nie 'wartet'): der Empfaenger-Tick fasst die Zeile nicht an.
+      if(!fern){
+        try{
+          await supabase.from('order_signale').insert({ plan_id: String(plan.id),
+            status: (r && r.ok) ? 'fertig' : 'fehler', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+            params: { aktion: 'orbit', lokal: true, orbit: { symbol, richtung: dir, volumen: lots, tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null } },
+            ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail } })
+        }catch(_){}
+      }
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         await tvPlanGesendet(plan.id)

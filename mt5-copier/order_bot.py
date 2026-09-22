@@ -3747,10 +3747,19 @@ def modus_tvkonto(cmd):
                     gelesen = True
                     trail.append("TradingView hat sich von selbst wieder verbunden (gemerkte Sitzung)")
                     ende_v = time.time() + 25.0
+                    fremd_v = ""
                     while True:
                         zustand, aktiv, bf, uia_el = lies()
                         if zustand in ("richtig", "gleicher_login") or time.time() >= ende_v:
                             break
+                        # Unbekanntes Konto zweimal gesehen -> nicht 25 s warten, sondern gleich
+                        # zum Listen-Check (22.09.2026 13:5x, Finn: 'wenn TradingView oeffnet und ich
+                        # im RICHTIGEN Tradovate schon drin bin' — erst Dropdown, dann erst abmelden).
+                        f_v = tv_fremdes_konto(uia_info.get("aehnlich"), ids)
+                        if f_v and f_v == fremd_v:
+                            zustand, aktiv = "falsch", f_v
+                            break
+                        fremd_v = f_v
                         _warte(0.35, 0.25)
                     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
                     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
