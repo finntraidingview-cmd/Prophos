@@ -2150,7 +2150,12 @@ def tv_panel_lage(roh, knoepfe, fenster):
     if profit:
         pr = profit[0][1]
         py = (pr[1] + pr[3]) // 2
-        for dx, dy in ((5, -43), (pr[2] - (pr[0] + pr[2]) // 2, -43), (5, -38), (5, -48), (9, -43)):
+        # Finn 13:1x: "ueber dem i von Profit einfach immer nach oben gehen" — das 'i' ist
+        # der vorletzte Buchstabe, ~80 % der Wortbreite; senkrecht darueber in 6-px-Schritten.
+        xi = pr[0] + int((pr[2] - pr[0]) * 0.80)
+        for dy in (-43, -37, -49, -31, -55, -25, -61, -67):
+            kand.append((xi, py + dy, f"ueber dem i von 'Profit' ({dy:+d})"))
+        for dx, dy in ((5, -43), (pr[2] - (pr[0] + pr[2]) // 2, -43), (9, -43)):
             kand.append((pr[2] - dx, py + dy, "ueber 'Profit'"))
     for e in roh or ():
         n = str(e[0]).strip()
