@@ -6503,6 +6503,26 @@
               <button class="btn btn-ghost" id="adm-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
             </div>
 
+            <!-- HEUTE (22.09.2026, Finn: „daily so kurzen Überblick, was wir heute
+                 für Trades gemacht haben, pro ID — so kleine Motivation"). Die
+                 abgeschlossenen trade_plans des laufenden Kalendertags (Ortszeit
+                 des PCs, Quelle /admin/overview.trades_heute = letzte 48 h), je
+                 Master-Account eine Karte: Anzahl, Gewinner/Verlierer, Master-P&L
+                 in $, Hedge daneben. Folgt dem Personen-Filter und der Suche.
+                 Reine Anzeige — zählt in keine Summe unten rein. -->
+            <div class="panel" id="adm-heute-panel" style="margin:0 0 14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title" id="adm-heute-title">Heute</div>
+                  <div class="panel-sub" id="adm-heute-sub">–</div>
+                </div>
+                <div id="adm-heute-sums" style="display:flex;gap:22px;text-align:right;flex-wrap:wrap"></div>
+              </div>
+              <div id="adm-heute-motto" style="font-size:13.5px;font-weight:600;margin:-2px 0 12px;line-height:1.5"></div>
+              <div id="adm-heute-ids" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px"></div>
+              <div class="adm-empty" id="adm-heute-empty" hidden>Heute noch kein abgeschlossener Trade.</div>
+            </div>
+
             <div class="kpis">
               <div class="kpi">
                 <div class="kpi-label">Geparktes Kapital</div>
@@ -8552,6 +8572,7 @@
         for(const r of (d.accounts || [])){ r.email = r.person_mail || r.person; r.person = personName(r.user_id, r.person) }
         for(const p of (d.people || [])){ p.email = p.mail || p.name; p.name = personName(p.user_id, p.name) }
         for(const t of (d.pending_payouts || [])){ t.person = personName(t.user_id, t.person) }
+        for(const t of (d.trades_heute || [])){ t.person = personName(t.user_id, t.person) }
         ;(d.people || []).sort((a, b) => a.name.localeCompare(b.name, 'de'))
 
         // Ausgeblendete Personen sichtbar machen — sonst fehlt jemand in den
@@ -8862,9 +8883,125 @@
       }
     }
 
+    /* ── HEUTE: Tages-Überblick je ID (22.09.2026, Finn: „daily so kurzen
+     * Überblick, was wir heute für Trades gemacht haben, pro ID — so kleine
+     * Motivation"). Der Server liefert die abgeschlossenen trade_plans der
+     * letzten 48 h; welcher Kalendertag „heute" ist, entscheidet dieser PC in
+     * seiner Ortszeit (toLocaleDateString('sv') = JJJJ-MM-TT lokal). Gruppiert
+     * je Master-Account: Anzahl, Gewinner (master_pl > 0), Verlierer, Summe
+     * Master-P&L in $, Hedge-P&L je Währung. Der Motto-Satz hängt nur am
+     * Tagesergebnis — keine Bewertung von Regeln oder Risiko, nur Stimmung. */
+    const admTagLokal = d => new Date(d).toLocaleDateString('sv')
+    function admHeuteRender(){
+      const panel = $('adm-heute-panel'); if(!panel || !admData) return
+      const ids = $('adm-heute-ids'), sums = $('adm-heute-sums'), motto = $('adm-heute-motto'),
+            empty = $('adm-heute-empty'), sub = $('adm-heute-sub'), title = $('adm-heute-title')
+      if(!ids || !sums || !motto) return
+      const fPerson = $('adm-person').value
+      const q = ($('adm-search').value || '').trim().toLowerCase()
+      const alle = (admData.trades_heute || []).filter(t => {
+        if(fPerson && String(t.user_id) !== String(fPerson)) return false
+        if(q && !((t.master_name||'').toLowerCase().includes(q) ||
+                  (t.master_firm||'').toLowerCase().includes(q) ||
+                  (t.person||'').toLowerCase().includes(q))) return false
+        return t.completed_at && t.master_pl != null
+      })
+      const jetzt = new Date()
+      const heute = admTagLokal(jetzt)
+      const gestern = admTagLokal(new Date(jetzt.getTime() - 86400000))
+      const tHeute = alle.filter(t => admTagLokal(t.completed_at) === heute)
+      const tGestern = alle.filter(t => admTagLokal(t.completed_at) === gestern)
+      title.textContent = 'Heute · ' + jetzt.toLocaleDateString('de-DE', { weekday:'short', day:'2-digit', month:'2-digit' })
+      const sumPl = list => list.reduce((a, t) => a + (Number(t.master_pl) || 0), 0)
+      const fmtPl = v => (v > 0 ? '+' : v < 0 ? '−' : '') + admGeld(Math.abs(v), 'USD')
+      const farbe = v => v > 0 ? 'var(--good)' : v < 0 ? 'var(--danger)' : 'var(--sub)'
+
+      ids.innerHTML = ''; sums.innerHTML = ''
+      if(!tHeute.length){
+        const g = tGestern.length
+        empty.hidden = false
+        empty.textContent = g
+          ? `Heute noch kein abgeschlossener Trade — gestern: ${g} Trade${g === 1 ? '' : 's'}, ${fmtPl(sumPl(tGestern))}.`
+          : 'Heute noch kein abgeschlossener Trade.'
+        sub.textContent = fPerson || q ? 'für diesen Filter' : 'über alle Personen'
+        motto.textContent = jetzt.getHours() < 20
+          ? 'Der Tag ist noch offen — Setup abwarten, dann sauber ausführen.'
+          : 'Kein Trade ist auch ein Ergebnis. Morgen wieder am Start.'
+        motto.style.color = 'var(--sub)'
+        return
+      }
+      empty.hidden = true
+
+      // Je Master-Account eine Karte
+      const perId = new Map()
+      for(const t of tHeute){
+        const key = t.account_id || (t.master_name + '|' + t.user_id)
+        const e = perId.get(key) || { name: t.master_name || '—', firm: t.master_firm || '', person: t.person || '—',
+                                      n: 0, win: 0, loss: 0, pl: 0, hedge: new Map(), blown: 0, symbole: new Set() }
+        e.n++; e.pl += Number(t.master_pl) || 0
+        if(t.master_pl > 0) e.win++; else if(t.master_pl < 0) e.loss++
+        if(t.slave_pl != null) e.hedge.set(t.hedge_ccy, (e.hedge.get(t.hedge_ccy) || 0) + Number(t.slave_pl))
+        if(t.blown) e.blown++
+        if(t.symbol) e.symbole.add(t.symbol)
+        perId.set(key, e)
+      }
+      const karten = [...perId.values()].sort((a, b) => (b.pl - a.pl) || a.person.localeCompare(b.person, 'de'))
+      const total = sumPl(tHeute)
+      const wins = tHeute.filter(t => t.master_pl > 0).length
+      const losses = tHeute.filter(t => t.master_pl < 0).length
+      const personen = new Set(tHeute.map(t => t.person))
+      const hedgeSum = new Map()
+      for(const k of karten) for(const [c, v] of k.hedge) hedgeSum.set(c, (hedgeSum.get(c) || 0) + v)
+      sub.textContent = `${tHeute.length} Trade${tHeute.length === 1 ? '' : 's'} · ${karten.length} ID${karten.length === 1 ? '' : 's'} · ${personen.size} Person${personen.size === 1 ? '' : 'en'}`
+
+      for(const [lbl, txt, col] of [
+          ['Master-P&L', fmtPl(total), farbe(total)],
+          ['Gewinner / Verlierer', `${wins} / ${losses}`, 'var(--ink)'],
+          ...(hedgeSum.size ? [['Hedge', [...hedgeSum.entries()].map(([c, v]) => (v > 0 ? '+' : v < 0 ? '−' : '') + admGeld(Math.abs(v), c)).join(' · '), 'var(--sub)']] : [])
+        ]){
+        const d = document.createElement('div')
+        d.innerHTML = '<div class="tnum" style="font-size:17px;font-weight:800"></div><div style="font-size:11px;color:var(--sub)"></div>'
+        d.children[0].textContent = txt; d.children[0].style.color = col
+        d.children[1].textContent = lbl
+        sums.appendChild(d)
+      }
+
+      // Motto: nur Stimmung zum Tagesergebnis, bewusst kurz
+      const geblowt = karten.reduce((a, k) => a + k.blown, 0)
+      let m, mc = 'var(--ink)'
+      if(geblowt)                 { m = `${geblowt} Account${geblowt === 1 ? '' : 's'} heute geblowt — abhaken, Nachfolger klarmachen, weiter.`; mc = 'var(--danger)' }
+      else if(total > 0 && !losses){ m = `${fmtPl(total)} und kein einziger Verlierer — genau so. 💪`; mc = 'var(--good)' }
+      else if(total > 0)          { m = `${fmtPl(total)} über ${karten.length} ID${karten.length === 1 ? '' : 's'} — sauber gearbeitet, dranbleiben.`; mc = 'var(--good)' }
+      else if(total === 0)        { m = 'Plus-minus null — Kapital geschont, morgen geht es weiter.' }
+      else                        { m = `${fmtPl(total)} — gehört dazu. Morgen neu, gleiche Ruhe.`; mc = 'var(--sub)' }
+      motto.textContent = m; motto.style.color = mc
+
+      for(const k of karten){
+        const card = document.createElement('div')
+        card.style.cssText = 'border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--bg)'
+        card.innerHTML =
+          '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
+            '<div style="min-width:0"><div class="h-n" style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>' +
+            '<div class="h-p" style="font-size:11px;color:var(--sub)"></div></div>' +
+            '<div class="h-pl tnum" style="font-weight:800;font-size:15px;white-space:nowrap"></div>' +
+          '</div>' +
+          '<div class="h-s" style="font-size:11.5px;color:var(--sub);margin-top:6px"></div>'
+        card.querySelector('.h-n').textContent = k.name
+        card.querySelector('.h-p').textContent = admShortName(k.person) + (k.firm ? ' · ' + k.firm : '')
+        const pl = card.querySelector('.h-pl'); pl.textContent = fmtPl(k.pl); pl.style.color = farbe(k.pl)
+        const teile = [`${k.n} Trade${k.n === 1 ? '' : 's'}`, `${k.win} ✓ ${k.loss} ✗`]
+        if(k.symbole.size) teile.push([...k.symbole].join(', '))
+        if(k.hedge.size) teile.push('Hedge ' + [...k.hedge.entries()].map(([c, v]) => (v > 0 ? '+' : v < 0 ? '−' : '') + admGeld(Math.abs(v), c)).join(' · '))
+        if(k.blown) teile.push('geblowt')
+        card.querySelector('.h-s').textContent = teile.join(' · ')
+        ids.appendChild(card)
+      }
+    }
+
     function admRender(){
       if(!admData) return
       admWertRender()
+      admHeuteRender()
       const rows = admFiltered()
       const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
       // Gleiche Kappung wie in admGroup: die KPI muss zur Summe der Firmen-/
@@ -24634,7 +24771,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.373'
+  const OS_TAB_BUILD = '2026-09-22.374'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

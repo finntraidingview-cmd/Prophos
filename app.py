@@ -4282,6 +4282,49 @@ def admin_build_overview():
         })
     payout_ready.sort(key=lambda r: (r["ready_at"] or "9999", r["person"], r["account_name"]))
 
+    # TRADES HEUTE (22.09.2026, Finn: „daily so kurzen Überblick, was wir heute
+    # für Trades gemacht haben, pro ID — so kleine Motivation"). Quelle sind
+    # die abgeschlossenen trade_plans (completed_at zählt, wie in den
+    # Rechnungen). Bewusst die letzten 48 h statt „heute" — welcher Kalendertag
+    # das ist, entscheidet das Frontend in der Ortszeit des PCs; der Server
+    # kennt die nicht. Master-P&L ist $ (Prop-Konten), Hedge-P&L trägt die
+    # Währung der Slave-Firma (Fusion ⇒ €) — dieselbe Regel wie oben.
+    # Ausgeblendete Personen wie überall. Reine Anzeige, zählt in keine Summe.
+    trades_heute = []
+    try:
+        seit = (datetime.now(timezone.utc).timestamp() - 48 * 3600)
+        seit_iso = datetime.fromtimestamp(seit, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for p in _sb_all("trade_plans", {
+                "select": "id,user_id,master_account_id,master_name,master_firm,slave_name,slave_firm,"
+                          "master_pl,slave_pl,blown,completed_at,richtung,master_symbol,route",
+                "status": "eq.completed",
+                "completed_at": f"gte.{seit_iso}",
+                "order": "completed_at.desc"}):
+            uid = str(p.get("user_id") or "")
+            if uid in excluded_ids:
+                continue
+            trades_heute.append({
+                "id": p.get("id"),
+                "user_id": uid,
+                "person": disp.get(uid) or names.get(uid, uid[:8] or "—"),
+                "account_id": str(p.get("master_account_id") or ""),
+                "master_name": p.get("master_name") or "",
+                "master_firm": (p.get("master_firm") or "").strip(),
+                "slave_name": p.get("slave_name") or "",
+                "slave_firm": (p.get("slave_firm") or "").strip(),
+                "master_pl": _pnum(p.get("master_pl")),
+                "slave_pl": _pnum(p.get("slave_pl")),
+                "hedge_ccy": "EUR" if _firm_norm(p.get("slave_firm")) == "Fusion Markets" else "USD",
+                "blown": bool(p.get("blown")),
+                "completed_at": p.get("completed_at") or "",
+                "richtung": p.get("richtung") or "",
+                "symbol": (p.get("master_symbol") or "").strip(),
+                "route": p.get("route") or "",
+            })
+    except Exception as e:
+        # Übersicht trotzdem liefern, aber hörbar — nie catch-und-schweigen.
+        print(f"[admin] ⚠️ trades_heute: {type(e).__name__}: {e}", flush=True)
+
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
           "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
@@ -4294,6 +4337,7 @@ def admin_build_overview():
             "pending_payouts": pending_rows,
             "payouts_received": recv_rows,
             "payout_ready": payout_ready,
+            "trades_heute": trades_heute,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids)}
