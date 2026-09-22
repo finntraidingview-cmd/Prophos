@@ -2021,8 +2021,12 @@ def tv_panel_eingeklappt(roh, fenster):
     """Ist das Tradovate-Panel unten nur als KOPFZEILE zu sehen? (22.09.2026,
     Finns PC, erster Lauf: 'unten sieht man den Accountnamen nicht — man muesste
     das Fenster an der Leiste hochziehen'; bei Moritz laedt es aufgeklappt.)
-    Kopfzeile = 'Account Balance'/'Equity' im unteren Fensterviertel; eingeklappt,
-    wenn darunter bis zum Fensterrand weniger als 90 px bleiben.
+    Kopfzeile = 'Account Balance'/'Equity' im unteren Fensterbereich; ZU FLACH,
+    wenn darunter bis zum Fensterrand weniger als 11 % der Fensterhoehe (mind.
+    90 px) bleiben — dann passt die aufgeklappte Konto-Liste nicht hinein
+    (22.09.2026 12:2x, Finns zweiter Lauf: Konto sichtbar, Dropdown geklickt,
+    '0 Treffer' — die Liste wurde unten abgeschnitten). Moritz' offenes Panel
+    (~17 % der Hoehe) bleibt unberuehrt.
     -> {'kopf_y': y, 'knopf': {...}|None} oder None (Kopfzeile nicht zu sehen /
     Panel offen). knopf = Maximieren-Knopf in derselben Zeile, falls benannt."""
     if not fenster:
@@ -2033,8 +2037,13 @@ def tv_panel_eingeklappt(roh, fenster):
     if not kopf:
         return None
     ky = min((e[1][1] + e[1][3]) // 2 for e in kopf)
-    if b - ky > 90:
+    if b - ky > max(90, int(h * 0.11)):
         return None
+    # Trennleiste = knapp ueber der obersten Zeile des Panels (Broker-Knopf 'Tradovate',
+    # sonst die Kopfzeile selbst)
+    oben = [e[1][1] for e in roh or () if e[1] and re.match(r"^tradovate\b", str(e[0]).strip(), re.I)
+            and ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10]
+    leiste_y = (min(oben) - 12) if oben else (ky - 34)
     knopf = None
     for e in roh or ():
         if not e[1] or (len(e) > 2 and e[2] not in ("Button", "")):
@@ -2044,7 +2053,7 @@ def tv_panel_eingeklappt(roh, fenster):
         if TV_RX_PANEL_MAX.search(n) and -60 <= (e[1][1] + e[1][3]) // 2 - ky <= 25:
             knopf = {"text": n[:40], "r": tuple(e[1]), "punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}
             break
-    return {"kopf_y": ky, "knopf": knopf}
+    return {"kopf_y": ky, "knopf": knopf, "leiste_y": leiste_y}
 
 
 def _tv_panel_aufziehen(w, trail):
@@ -2061,7 +2070,7 @@ def _tv_panel_aufziehen(w, trail):
         return True
     l, t, r, b = fr
     x = l + (r - l) * 2 // 5
-    y1 = z["kopf_y"] - 34            # Trennleiste knapp ueber der Kopfzeile
+    y1 = z["leiste_y"]               # Trennleiste knapp ueber der obersten Panel-Zeile
     y2 = t + (b - t) * 55 // 100     # bis etwa Fenstermitte
     _maus_fahren(x, y1)
     ok = _ziehen_absolut(x, y1, x, y2)
@@ -2926,13 +2935,16 @@ def modus_tvkonto(cmd):
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
                 return z2, e["text"], b, e
-            # Nichts zu sehen und das Panel unten nur als Kopfzeile (Finns PC,
-            # 22.09.2026): einmal pro Lauf aufziehen, dann weiterlesen.
-            if not els and not aufgezogen[0] and not tv_fremdes_konto(uia_info.get("aehnlich"), ids):
+            # Panel unten zu flach (Finns PC, 22.09.2026: eingeklappt, oder offen, aber
+            # ohne Platz fuer die Konto-Liste): einmal pro Tab aufziehen, dann weiterlesen.
+            # Unabhaengig davon, ob ein Konto zu sehen ist — im zweiten Lauf WAR eines zu
+            # sehen, und die Liste dahinter blieb trotzdem abgeschnitten.
+            if not aufgezogen[0]:
                 aufgezogen[0] = True
                 try:
                     if _tv_panel_aufziehen(w, trail):
                         _warte(0.8, 0.3)
+                        return lies()
                 except Exception as e_:
                     trail.append(f"Panel aufziehen: {type(e_).__name__}")
         return z, a, b, None
@@ -3602,6 +3614,13 @@ def modus_tvkonto(cmd):
     w = tv_fenster(versuche=8)
     if not w:
         return ab("TradingView-Fenster fuer den Klick nicht gefunden. " + fenster_gesehen[0])
+    # Vor dem Dropdown: Panel muss Platz fuer die Liste haben (Finns PC, 22.09.2026 —
+    # 'Dropdown geoeffnet … 0 Treffer'). Kein Aufwand, wenn es schon offen ist.
+    try:
+        if _tv_panel_aufziehen(w, trail):
+            _warte(0.8, 0.3)
+    except Exception as e_:
+        trail.append(f"Panel aufziehen: {type(e_).__name__}")
     try:
         hwnd = w.handle
     except Exception:
