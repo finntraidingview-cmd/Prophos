@@ -25723,6 +25723,53 @@
    * Frische-Gate BEIDSEITIG (3 min): ein PC, der Stunden später aufwacht,
    * darf nie eine alte Order feuern; ein Signal ohne PC verfällt sichtbar. */
   const OS_FRISCHE_S = 180
+  // Warum claimt kein PC? (23.09.2026 03:20 — Finn wartete 17 s vor „warte auf den PC…"
+  // und brach ab; die Antwort stand längst in mt5_live.status.signal_rx: das Copier-
+  // Backend am PC startete nach einem VERSION-Bump gerade neu bzw. am PC stand noch ein
+  // fertiges Popup offen. Der Absender liest deshalb den Empfänger-Stand aller frischen
+  // PC-Tabs (≤ 30 s) des eigenen Profils mit und schreibt ihn in die Warte-Zeile — statt
+  // stumm Sekunden zu zählen.) Ein Aufruf je 4 s, geteilt von allen Sendern.
+  const OS_RX_TEXT = {
+    'popup-offen':        'am PC ist noch ein Check-/Order-Popup offen — dort „Schließen"',
+    'copier-offline':     'Copier-Backend am PC antwortet nicht (startet nach einem Update gerade neu — meist unter 1 min)',
+    'lauf-aktiv':         'PC arbeitet noch ein anderes Signal ab',
+    'kein-login':         'Prophos-Tab am PC ist nicht eingeloggt',
+    'kein-copier-proxy':  'Prophos-Tab am PC ohne Copier-Anbindung (start-alles.bat)',
+    'kein-instanz-match': 'kein Copier auf diesem PC passt zum Plan',
+    'claim-verloren':     'anderer PC war schneller'
+  }
+  let _osRxCache = { t: 0, html: '' }
+  async function osPcStandHtml(sec){
+    if(Date.now() - _osRxCache.t < 4000) return _osRxCache.html
+    _osRxCache.t = Date.now()
+    try{
+      let uid; try{ uid = currentUserId }catch(_){ uid = null }
+      const grenze = new Date(Date.now() - 30000).toISOString()
+      const { data } = await supabase.from('mt5_live').select('pc_name,status,updated_at').gte('updated_at', grenze)
+      const je = new Map()
+      for(const r of data || []){
+        const st = r.status || {}
+        if(uid && st.user_id && String(st.user_id) !== String(uid)) continue
+        const alt = je.get(r.pc_name)
+        if(!alt || String(alt.updated_at) < String(r.updated_at)) je.set(r.pc_name, { rx: String(st.signal_rx || '?'), updated_at: r.updated_at })
+      }
+      if(!je.size){
+        _osRxCache.html = '<br><span style="opacity:.8">Kein PC-Tab dieser ID meldet sich — am PC Prophos-Tab offen + start-alles.bat?</span>'
+        return _osRxCache.html
+      }
+      const teile = []
+      for(const [pc, st] of je){
+        const k = st.rx.split(':')[0].trim()
+        let txt = OS_RX_TEXT[k]
+        if(!txt) txt = k.startsWith('claim') ? 'übernimmt gerade' : (k.startsWith('db-fehler') || k.startsWith('tick-fehler')) ? st.rx
+                : k === 'ok-leer' ? (Number(sec) > 12 ? 'sieht kein wartendes Signal — anderes Profil am PC eingeloggt?' : 'lebt, nächster Blick in ≤ 5 s')
+                : st.rx
+        teile.push(`<span class="mono">${escapeHtml(pc)}</span>: ${escapeHtml(txt)}`)
+      }
+      _osRxCache.html = '<br><span style="opacity:.8">PC meldet — ' + teile.join(' · ') + '</span>'
+    }catch(_){ _osRxCache.html = '' }
+    return _osRxCache.html
+  }
   // Tab-Build-Stempel (28.08.2026, Remote-Close-Debug): wandert im Flotten-
   // Push als status.tab_build in die Cloud. Hintergrund: die Copier-Version
   // am PC ist NICHT die Tab-Version (der Tab wechselt nur durch Neuladen),
@@ -25735,7 +25782,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.423'
+  const OS_TAB_BUILD = '2026-09-22.424'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25825,7 +25872,7 @@
         tpOrderRemoteDone(erg, 'verfallen')
         return
       }
-      tpOrderRemoteBox(`📡 Signal gesendet — warte auf den PC dieser ID… <span class="mono">(${sec}s)</span><br>Abbrechen: dieses Popup einfach schließen.`, 'wait')
+      tpOrderRemoteBox(`📡 Signal gesendet — warte auf den PC dieser ID… <span class="mono">(${sec}s)</span><br>Abbrechen: dieses Popup einfach schließen.` + await osPcStandHtml(sec), 'wait')
     } else if(row.status === 'laeuft'){
       tpOrderRemoteBox(`🖥 PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen — Trade-Start-Check läuft, bei Grün platziert Puls… <span class="mono">(${sec}s)</span>`, 'wait')
     } else if(row.status === 'fertig'){
@@ -26158,7 +26205,7 @@
           fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Starten".')
           stop(); return
         }
-        _pfSet('ob-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+        _pfSet('ob-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
       } else if(row.status === 'laeuft'){
         _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
         _pfSet('ob-order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
@@ -26501,7 +26548,7 @@
                  '⏸ Angehalten — kein PC hat übernommen. Am PC Tab neu laden (Strg+F5), dann ▶ Weiter.')
           return
         }
-        _rsqStep('claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s)`)
+        _rsqStep('claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s)` + await osPcStandHtml(sec))
         // Baseline schon JETZT (alle PCs — wer claimt, steht noch nicht fest):
         // claimt der PC zwischen zwei Ticks und stempelt sofort 'order', wäre
         // sie sonst leer und eine ALTE gleichgerichtete Position ginge als
@@ -26759,7 +26806,7 @@
           fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Schließen".')
           stop(); return
         }
-        _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.`)
+        _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
       } else if(row.status === 'laeuft'){
         _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
         _pfSet('cs-close', 'warn', `⏳ Puls klickt im Terminal — Position schließen… (${sec}s) — HÄNDE WEG am PC!`)
@@ -26902,10 +26949,21 @@
     // Manueller Lauf hat IMMER Vorrang: solange am PC ein Check- oder
     // Order-Popup offen ist, wird nichts geclaimt (das Signal bleibt 'wartet'
     // und verfällt notfalls ehrlich).
-    if(document.getElementById('tpPreflightModal')?.classList.contains('open')
-       || document.getElementById('tpOrderModal')?.classList.contains('open')){
-      _osStand = 'popup-offen'; return
+    // Ein FERTIGES Check-Popup zählt nicht (23.09.2026 03:20, Finns Lauf: der lokale
+    // Orbit-Start am PC endete mit Fehler, das Popup stand mit „Schließen" offen — vom
+    // Mac kam 76 s später das Signal, der PC claimte nie: 'popup-offen'. Finn sah nur
+    // „Puls ist langsam"). Zeigt das Popup nur noch ein Ergebnis (pf-final sichtbar,
+    // kein Force/Retry mehr wählbar), ist es kein laufender Handgriff: zu damit, Signal
+    // nehmen. Läuft der Check noch oder wartet er auf Finns Entscheidung, bleibt der
+    // Vorrang wie bisher. Das Order-Popup (Eingabefelder) blockiert weiterhin immer.
+    if(document.getElementById('tpPreflightModal')?.classList.contains('open')){
+      const fin = document.getElementById('pf-final')
+      const sichtbar = el => !!el && el.style.display !== 'none' && el.style.display !== ''
+      const entscheidung = sichtbar(document.getElementById('pf-force')) || sichtbar(document.getElementById('pf-retry'))
+      if(!sichtbar(fin) || entscheidung){ _osStand = 'popup-offen'; return }
+      try{ _pfClose() }catch(_){}
     }
+    if(document.getElementById('tpOrderModal')?.classList.contains('open')){ _osStand = 'popup-offen'; return }
     _osBusy = true
     try{
       const { data: sigs, error } = await supabase.from('order_signale')

@@ -2968,6 +2968,41 @@ def _local_version():
         return None
 
 
+def _panel_code_geaendert(sha):
+    """Wuerde ein Neustart den LAUFENDEN Panel-Code aendern? Vergleicht panel.py und
+    provision.py aus GENAU dem Stand `sha` (Commit-Kennung, nie Zwischenspeicher)
+    mit dem, was hier gerade laeuft (__file__ — bei runpy-Auffrischung ist das
+    panel_frisch.py, also wirklich der laufende Code). True auch bei Unsicherheit
+    (kein sha, kein Netz): dann gilt der alte Weg, Neustart."""
+    if not sha:
+        return True
+    glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+    laufend = {"panel.py": os.path.abspath(__file__),
+               "provision.py": os.path.abspath(getattr(provision, "__file__", os.path.join(HERE, "provision.py")))}
+    for name, pfad in laufend.items():
+        try:
+            neu = repo_datei("mt5-copier/" + name, sha, 10)
+            with open(pfad, "rb") as f:
+                alt = f.read()
+        except Exception:
+            return True
+        if glatt(neu) != glatt(alt):
+            return True
+    return False
+
+
+def _version_uebernehmen(version):
+    """VERSION-Datei nachziehen, ohne Neustart — der Chip im MT5-Tab zeigt dann die
+    Wahrheit: laufender Code == neuester Code, Nummer == neueste Nummer."""
+    try:
+        ziel = os.path.join(HERE, "VERSION")
+        with open(ziel + ".tmp", "w", encoding="utf-8") as f:
+            f.write(version + "\n")
+        os.replace(ziel + ".tmp", ziel)
+    except OSError as e:
+        print(f"[panel] VERSION nachziehen: {type(e).__name__}: {e}", flush=True)
+
+
 def _version_watcher(my_version):
     """Zwei Geschwindigkeiten (22.09.2026):
     SCHNELL — alle 15 s den neuesten Stand fragen (repo_sha). Hat er sich
@@ -3002,6 +3037,20 @@ def _version_watcher(my_version):
             # verloren, der Bot lief verwaist weiter). Solange der TradingView-Lauf
             # oder eine Master-Order ihre Sperre haelt, wird der Neustart vertagt.
             if TV_ORDER_LOCK.locked() or any(l.locked() for l in list(MASTER_ORDER_LOCKS.values())):
+                continue
+            # NUR neu starten, wenn sich das PANEL selbst geaendert hat (23.09.2026, Finns
+            # Nacht: 12 Frontend-Commits in 100 min, jeder mit VERSION-Bump, jeder ein
+            # Panel-Neustart — und in jedem Neustart-Fenster stand der Signal-Empfaenger
+            # im Prophos-Tab auf 'copier-offline'. Finns Orbit-Start vom Mac um 03:20:53
+            # fiel genau ins Fenster des Bumps von 03:17 und wurde 17 s lang nicht
+            # geclaimt: "warum ist Puls so langsam"). Der Stand `letzter` (repo_sha) ist
+            # der neueste Commit; ist panel.py/provision.py dort gleich dem laufenden
+            # Code, bringt ein Neustart nichts — nur die VERSION-Datei nachziehen, damit
+            # der Chip stimmt. order_bot.py ist ohnehin schon per Hot-Swap frisch.
+            if not _panel_code_geaendert(letzter):
+                _version_uebernehmen(remote)
+                print(f"[panel] Update {my_version} → {remote}: Panel-Code unveraendert — kein Neustart.", flush=True)
+                my_version = remote
                 continue
             print(f"[panel] Update {my_version} → {remote} — Neustart durch start-panel.bat.", flush=True)
             os._exit(0)

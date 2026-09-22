@@ -4386,6 +4386,32 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             return False, ("Das Order-Panel ist nicht zu sehen (Reiter 'Market … Stop Limit' fehlen), auch "
                            "nach Shift+T nicht. Gesehen: " + tv_uia_spur(roh))
 
+    # --- Panel auf dem RICHTIGEN Symbol? (23.09.2026 03:19, Finns Lauf: Watchlist
+    # NQ1! geklickt, Tab-Titel stand nach 0,7 s auf NQ — das Order-Panel hing aber
+    # noch am alten MNQ. Units/TP/SL landeten im MNQ-Panel, erst der Knopf-Beweis
+    # ganz am Ende stoppte den Lauf: "Auf dem Knopf steht nicht NQ ('Buy 2 MNQZ6
+    # MARKET')" — 9 s umsonst, Fehler statt Order, fuer Finn 'Puls ist langsam'.)
+    # TradingView baut das Panel nach dem Symbolwechsel VERZOEGERT neu auf; der
+    # Senden-Knopf unten traegt das Symbol aber schon vor dem Ausfuellen ('Buy 1
+    # MNQZ6 MARKET'). Also erst tippen, wenn der Knopf die Plan-Wurzel zeigt — bis
+    # 8 s, sonst ehrliche Absage, ohne einen einzigen Tipp ins falsche Panel.
+    ziel_root = tv_symbol_root(cmd.get("symbol"))
+    if ziel_root:
+        t_sym = time.time()
+        while True:
+            kn = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=ber["reiter_y"])
+            if any(tv_symbol_root(wort) == ziel_root for k in kn for wort in k["text"].split()):
+                if time.time() - t_sym > 0.5:
+                    trail.append(f"Order-Panel zog nach {time.time() - t_sym:.1f}s auf {ziel_root} nach")
+                break
+            if time.time() - t_sym > 8.0:
+                gesehen = ", ".join(f"'{k['text'][:30]}'" for k in kn) or "kein Senden-Knopf"
+                return False, (f"Das Order-Panel steht nicht auf {ziel_root} — der Knopf unten zeigt auch nach "
+                               f"8 s noch {gesehen}. Nichts getippt, nichts gesendet.")
+            _warte(0.4, 0.2)
+            roh, ber2 = blick()
+            ber = ber2 or ber
+
     # --- Market --------------------------------------------------------------
     ok, f = _tv_uia_klick(ber["market"], "Reiter Market", trail)
     if not ok:

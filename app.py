@@ -6159,6 +6159,35 @@ def _local_fetch_version():
         pass
     return None
 
+def _local_repo_sha():
+    # Kennung des neuesten Commits auf main (wie panel.repo_sha: Git-Schnittstelle,
+    # 0,3 s, KEIN Zwischenspeicher) — oder None.
+    try:
+        r = requests.get("https://github.com/finntraidingview-cmd/Prophos.git/info/refs?service=git-upload-pack",
+                         headers={"User-Agent": "git/2.40"}, timeout=8)
+        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", r.content) if r.ok else None
+        return m.group(1).decode("ascii") if m else None
+    except Exception:
+        return None
+
+def _local_code_geaendert():
+    # Wuerde ein Neustart den LAUFENDEN Backend-Code aendern? app.py aus GENAU dem
+    # neuesten Stand (Commit-Kennung) gegen die laufende Datei. True auch bei
+    # Unsicherheit (kein Netz) — dann gilt der alte Weg: Neustart.
+    sha = _local_repo_sha()
+    if not sha:
+        return True
+    try:
+        r = requests.get(f"https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/{sha}/app.py", timeout=10)
+        if not r.ok or len(r.content) < 10000:
+            return True
+        with open(os.path.abspath(__file__), "rb") as f:
+            alt = f.read()
+        glatt = lambda b: b.replace(b"\r\n", b"\n").lstrip(b"\xef\xbb\xbf").strip()
+        return glatt(r.content) != glatt(alt)
+    except Exception:
+        return True
+
 def _local_version_watcher():
     # Boot-Baseline EINMAL holen. Schlägt das fehl (kein Netz beim Start),
     # bleibt der Watcher komplett inaktiv — ein Vergleich gegen None würde
@@ -6174,6 +6203,16 @@ def _local_version_watcher():
         time.sleep(60)
         rv = _local_fetch_version()
         if rv is None or rv == baseline:
+            continue
+        # NUR neu starten, wenn app.py sich geaendert hat (23.09.2026, Finns Nacht: 12
+        # Frontend-Commits in 100 min, jeder VERSION-Bump ein Backend-Neustart — und
+        # in jedem Neustart-Fenster war localhost:5000 weg, der Prophos-Tab am PC
+        # meldete 'copier-offline' und claimte kein Remote-Signal: "Puls ist langsam").
+        # Das Frontend kommt ohnehin live von pages.dev, dafuer braucht es keinen
+        # Neustart. Gleicher Code → nur die Baseline nachziehen.
+        if not _local_code_geaendert():
+            print(f"[update] {baseline} → {rv}: app.py unveraendert — kein Neustart noetig.")
+            baseline = rv
             continue
         # Update da. Exit NUR, wenn keine Mirror-Session scharf ist — ein
         # os._exit mitten im Spiegeln hieße: offene Position ohne Hedge-Pflege
