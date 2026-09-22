@@ -2131,6 +2131,18 @@ def tv_panel_lage(roh, knoepfe, fenster):
     l, t, r, b = fenster
     h, br = max(1, b - t), max(1, r - l)
     kopf = [e for e in roh or () if e[1] and TV_RX_PANEL_KOPF.match(str(e[0]).strip())]
+    # Kopfzeile = die Zeile von 'Profit' (22.09.2026 14:1x, dritter PC: ein 'Account
+    # Balance' weiter oben auf der Seite (y=234) galt als Kopfzeile, waehrend 'Profit' bei
+    # 622 lag — 30 Klicks in die falsche Zeile, einer traf den 'Trade'-Knopf und schloss
+    # das Order-Panel). Ohne 'Profit': die Zeile, in der die meisten Labels liegen.
+    if kopf:
+        pz = [e for e in kopf if re.match(r"^(profit|gewinn)$", str(e[0]).strip(), re.I)]
+        if pz:
+            py0 = (pz[-1][1][1] + pz[-1][1][3]) // 2
+        else:
+            ys = [(e[1][1] + e[1][3]) // 2 for e in kopf]
+            py0 = max(ys, key=lambda y: sum(1 for y2 in ys if abs(y2 - y) <= 12))
+        kopf = [e for e in kopf if abs((e[1][1] + e[1][3]) // 2 - py0) <= 12]
     ky = min((e[1][1] + e[1][3]) // 2 for e in kopf) if kopf else None
     zustand = None if ky is None else ("oben" if ky < t + h * 0.34 else "unten")
     rechts = max(e[1][2] for e in kopf) if kopf else None
@@ -2166,9 +2178,8 @@ def tv_panel_lage(roh, knoepfe, fenster):
              and rr[2] <= rechts + 30 and rr[0] >= rechts - 160 and (rr[2] - rr[0]) <= 60]
     for n, rr in sorted(klein, key=lambda x: -x[1][2])[:3]:
         kand.append(((rr[0] + rr[2]) // 2, (rr[1] + rr[3]) // 2, "unbenannter Knopf der Panelzeile"))
-    for dy in (0, -5, 5):
-        for dx in (6, 10, 14, 18, 22, 26, 30):
-            kand.append((rechts - dx, zy + dy, f"Raster {dx} px links der Kante, {dy:+d}"))
+    for dx in (6, 12, 18, 24):
+        kand.append((rechts - dx, zy, f"Raster {dx} px links der Kante"))
     out = []
     for x, y, wie in kand:
         if any(abs(x - ox) <= 3 and abs(y - oy) <= 3 for ox, oy, _w in out):
@@ -2193,9 +2204,9 @@ def _tv_panel_umschalten(w, trail, ziel):
     for x, y, wie in lage["kandidaten"]:
         _tv_uia_klick({"punkt": (x, y)}, f"Panel {'maximieren' if ziel == 'oben' else 'wiederherstellen'} ({wie})", trail)
         probiert.append(f"{x},{y}")
-        ende = time.time() + 1.3
+        ende = time.time() + 0.9
         while time.time() < ende:
-            _warte(0.3, 0.2)
+            _warte(0.25, 0.15)
             neu = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), None, fr)
             if neu["zustand"] == ziel:
                 trail.append(f"Panel ist jetzt {ziel} (Klick {x},{y})")
@@ -3095,10 +3106,15 @@ def modus_tvkonto(cmd):
                 return z2, e["text"], b, e
         return z, a, b, None
 
-    ende = time.time() + (40.0 if gestartet else 14.0)
+    # AUCH BEI LINK-START ZUERST LESEN (22.09.2026 14:1x, dritter PC, Spur 12:10: mit dem
+    # Login-Link gestartet, Sitzung verband sich selbst mit dem RICHTIGEN Login — der Bot
+    # las nicht, wartete 43 s auf den Connect-Dialog, schloss den Tab und fing von vorn an).
+    # Steht nach dem Start ein bekanntes Konto im Panel, geht es direkt zum Dropdown; erst
+    # wenn in 15 s nichts zu lesen ist, kommt der Dialog-Weg.
+    ende = time.time() + (40.0 if (gestartet and not frisch_mit_link) else 15.0 if frisch_mit_link else 14.0)
     zustand, aktiv, bf, uia_el = "kein_broker", "", None, None
     fremd_vor = ""
-    while not frisch_mit_link:
+    while True:
         zustand, aktiv, bf, uia_el = lies()
         if zustand in ("richtig", "gleicher_login") or time.time() >= ende or max_fehl[0]:
             break
