@@ -2115,28 +2115,32 @@ def tv_panel_eingeklappt(roh, fenster, knoepfe=None):
 
 def tv_panel_lage(roh, knoepfe, fenster):
     """Lage des Tradovate-Panels + Klick-Kandidaten fuer seinen Maximieren-/
-    Restore-Knopf (22.09.2026 12:5x, Finn: 'er soll so lange druecken, bis er ihn
-    findet, nicht jedes Mal neu testen'). Rein rechnend.
+    Restore-Knopf (22.09.2026 13:1x, Finn: 'nur daran arbeiten, dass er dieses
+    Maximieren-Feld drueckt — ueberall draufdruecken unten rechts, wo das Ding ist,
+    bis das Feld weiss wird'). Rein rechnend.
     -> {'zustand': 'oben'|'unten'|None, 'kopf_y', 'kandidaten': [(x, y, wie)]}
-    Kopfzeile = 'Account Balance'/'Equity'/'Profit'. 'oben' = die Kopfzeile liegt
-    im oberen Drittel (Panel maximiert), 'unten' = im unteren Bereich. Knopfzeile
-    = Zeile des Broker-Knopfs 'Tradovate' (sonst 42 px ueber der Kopfzeile, Finns
-    Screenshot). Kandidaten, in dieser Reihenfolge: benannte Knoepfe
-    (maxim/expand/restore), unbenannte kleine Knoepfe der Zeile von rechts nach
-    links, und zuletzt die feste Lage 6 px links der rechten Kante von 'Profit'."""
+    Kopfzeile = 'Account Balance'/'Equity'/'Profit'. 'oben' = Kopfzeile im oberen
+    Drittel (Panel maximiert, Chart weiss), 'unten' = darunter. Knopfzeile = Zeile des
+    Broker-Knopfs 'Tradovate' (sonst 42 px ueber der Kopfzeile). Rechte Kante = rechte
+    Kante von 'Profit' (sonst 36 px links der Watchlist-Spalte 'Symbol'/'Watchlist').
+    Kandidaten in dieser Reihenfolge: benannte Knoepfe, unbenannte kleine Knoepfe der
+    Zeile von rechts, dann ein RASTER um die feste Lage (6-30 px links der rechten
+    Kante, drei Hoehen) — der ⤢ sass in Finns Screenshot 6 px links der Kante."""
     if not fenster:
         return {"zustand": None, "kopf_y": None, "kandidaten": []}
     l, t, r, b = fenster
-    h = max(1, b - t)
+    h, br = max(1, b - t), max(1, r - l)
     kopf = [e for e in roh or () if e[1] and TV_RX_PANEL_KOPF.match(str(e[0]).strip())]
-    if not kopf:
-        return {"zustand": None, "kopf_y": None, "kandidaten": []}
-    ky = min((e[1][1] + e[1][3]) // 2 for e in kopf)
-    zustand = "oben" if ky < t + h * 0.34 else "unten"
-    rechts = max(e[1][2] for e in kopf)
+    ky = min((e[1][1] + e[1][3]) // 2 for e in kopf) if kopf else None
+    zustand = None if ky is None else ("oben" if ky < t + h * 0.34 else "unten")
+    rechts = max(e[1][2] for e in kopf) if kopf else None
+    if rechts is None:
+        wl = [e[1][0] for e in roh or () if e[1] and re.match(r"^(watchlist|symbol)$", str(e[0]).strip(), re.I)
+              and e[1][0] > l + br * 0.6]
+        rechts = (min(wl) - 36) if wl else (r - int(br * 0.19))
     zeile = [e for e in roh or () if e[1] and re.match(r"^tradovate\b", str(e[0]).strip(), re.I)
-             and ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10]
-    zy = (zeile[0][1][1] + zeile[0][1][3]) // 2 if zeile else ky - 42
+             and (ky is None or ky - 120 <= (e[1][1] + e[1][3]) // 2 <= ky + 10)]
+    zy = (zeile[0][1][1] + zeile[0][1][3]) // 2 if zeile else ((ky - 42) if ky is not None else (b - int(h * 0.05)))
     kand = []
     for e in roh or ():
         n = str(e[0]).strip()
@@ -2147,13 +2151,15 @@ def tv_panel_lage(roh, knoepfe, fenster):
              and rr[2] <= rechts + 30 and rr[0] >= rechts - 160 and (rr[2] - rr[0]) <= 60]
     for n, rr in sorted(klein, key=lambda x: -x[1][2])[:3]:
         kand.append(((rr[0] + rr[2]) // 2, (rr[1] + rr[3]) // 2, "unbenannter Knopf der Panelzeile"))
-    kand.append((rechts - 6, zy, "feste Lage rechts ueber 'Profit'"))
+    for dy in (0, -5, 5):
+        for dx in (6, 10, 14, 18, 22, 26, 30):
+            kand.append((rechts - dx, zy + dy, f"Raster {dx} px links der Kante, {dy:+d}"))
     out = []
     for x, y, wie in kand:
-        if any(abs(x - ox) <= 6 and abs(y - oy) <= 6 for ox, oy, _w in out):
+        if any(abs(x - ox) <= 3 and abs(y - oy) <= 3 for ox, oy, _w in out):
             continue
         out.append((x, y, wie))
-    return {"zustand": zustand, "kopf_y": ky, "kandidaten": out}
+    return {"zustand": zustand, "kopf_y": ky, "kandidaten": out, "rechts": rechts, "zeile_y": zy}
 
 
 def _tv_panel_umschalten(w, trail, ziel):
@@ -2163,23 +2169,23 @@ def _tv_panel_umschalten(w, trail, ziel):
     Zustand ist (auch wenn es schon dort war)."""
     fr = _tv_fenster_rect(w)
     lage = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), _tv_uia_knoepfe_alle(w), fr)
-    if lage["zustand"] is None:
-        trail.append("Tradovate-Panel: keine Kopfzeile (Account Balance/Equity/Profit) zu sehen")
-        return False
     if lage["zustand"] == ziel:
         return True
+    if lage["zustand"] is None and ziel == "unten":
+        return True                     # nichts oben zu sehen -> nichts zurueckzunehmen
+    trail.append(f"Panel {lage['zustand'] or 'ohne Kopfzeile'}: Kante x={lage['rechts']}, Zeile y={lage['zeile_y']}, Fenster {fr}")
     probiert = []
     for x, y, wie in lage["kandidaten"]:
         _tv_uia_klick({"punkt": (x, y)}, f"Panel {'maximieren' if ziel == 'oben' else 'wiederherstellen'} ({wie})", trail)
-        probiert.append(f"{wie}@{x},{y}")
-        ende = time.time() + 2.0
+        probiert.append(f"{x},{y}")
+        ende = time.time() + 1.3
         while time.time() < ende:
-            _warte(0.4, 0.25)
+            _warte(0.3, 0.2)
             neu = tv_panel_lage(_tv_uia_roh(w, ("Text", "Button")), None, fr)
             if neu["zustand"] == ziel:
-                trail.append(f"Panel ist jetzt {ziel}")
+                trail.append(f"Panel ist jetzt {ziel} (Klick {x},{y})")
                 return True
-    trail.append(f"Panel blieb {lage['zustand']} — probiert: " + " | ".join(probiert))
+    trail.append(f"Panel blieb {lage['zustand'] or 'ohne Kopfzeile'} — geklickt: " + " | ".join(probiert))
     return False
 
 
@@ -2950,6 +2956,7 @@ def modus_tvkonto(cmd):
     maximiert = [False]         # Panel per Knopf nach oben geholt -> am Ende wieder nach unten
     max_versucht = [False]      # einmal pro Tab probieren
     lies_diag = {"w": None, "els": None}   # was die letzte Leserunde sah (fuer die Spur)
+    max_fehl = [""]             # Maximieren gescheitert -> Lauf abbrechen
 
     def raus(msg, schritt):
         # Panel IMMER wieder nach unten — auch bei Absage: maximiert verdeckt es den
@@ -3046,6 +3053,18 @@ def modus_tvkonto(cmd):
             return z, a, b, None
         w = tv_fenster()
         lies_diag["w"] = bool(w)
+        if w and not max_versucht[0]:
+            # ERST DAS PANEL NACH OBEN (Finn 22.09.2026 13:1x) — auf jedem PC, vor jedem
+            # Lesen; ohne Erfolg bricht der Lauf ab und nennt jeden Klick.
+            max_versucht[0] = True
+            try:
+                if _tv_panel_umschalten(w, trail, "oben"):
+                    maximiert[0] = True
+                    _warte(0.6, 0.3)
+                else:
+                    max_fehl[0] = "Das Tradovate-Panel liess sich nicht maximieren (⤢ unten rechts nicht getroffen) — siehe Spur."
+            except Exception as e_:
+                max_fehl[0] = f"Panel maximieren abgebrochen: {type(e_).__name__}: {e_}"
         if w:
             els = _tv_uia_konten(w, ids, uia_info)
             lies_diag["els"] = [(x["text"][:30], x["r"]) for x in els[:3]]
@@ -3053,30 +3072,6 @@ def modus_tvkonto(cmd):
                 e = els[0]
                 z2 = "richtig" if _nur_alnum(e["id"]) == _nur_alnum(ext) else "gleicher_login"
                 return z2, e["text"], b, e
-            # Kein Konto zu sehen (Finns PC, 22.09.2026 12:5x: 'nach Login: - -> kein_broker'
-            # — das Panel unten ist so flach, dass die Kontozeile ganz fehlt): Panel per
-            # Knopf nach OBEN holen (hartnaeckig, s. _tv_panel_umschalten), dann neu lesen.
-            # Einmal pro Tab; am Ende des Laufs geht es wieder nach unten (raus).
-            if len(els) > 1 and not lies_diag.get("esc"):
-                # zwei sichtbare Konten = eine offene Liste (vom letzten Lauf?) — einmal ESC, neu lesen
-                lies_diag["esc"] = True
-                trail.append(f"{len(els)} Konten sichtbar (offene Liste?) — ESC")
-                try:
-                    from pywinauto import keyboard as _kb
-                    _kb.send_keys("{ESC}")
-                except Exception:
-                    pass
-                _warte(0.5, 0.3)
-                return lies()
-            if not els and not max_versucht[0] and not tv_fremdes_konto(uia_info.get("aehnlich"), ids):
-                max_versucht[0] = True
-                try:
-                    if _tv_panel_umschalten(w, trail, "oben"):
-                        maximiert[0] = True
-                        _warte(0.6, 0.3)
-                        return lies()
-                except Exception as e_:
-                    trail.append(f"Panel maximieren: {type(e_).__name__}")
         return z, a, b, None
 
     ende = time.time() + (40.0 if gestartet else 14.0)
@@ -3084,7 +3079,7 @@ def modus_tvkonto(cmd):
     fremd_vor = ""
     while not frisch_mit_link:
         zustand, aktiv, bf, uia_el = lies()
-        if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
+        if zustand in ("richtig", "gleicher_login") or time.time() >= ende or max_fehl[0]:
             break
         # NEGATIVES ENDE: zweimal hintereinander dasselbe FREMDE Konto im Panel (UIA)
         # -> 'falsch', sofort weiter zum Login-Wechsel statt 14 s auf ein richtiges
@@ -3096,6 +3091,8 @@ def modus_tvkonto(cmd):
             break
         fremd_vor = fremd
         _warte(0.35, 0.25)
+    if max_fehl[0]:
+        return raus(max_fehl[0], "panel")
     res["zustand"], res["konto_aktiv"] = zustand, aktiv[:80]
     trail.append(f"Konto im Panel: '{aktiv[:40] or '-'}' -> {zustand}"
                  + (" (UIA)" if uia_el else "")
@@ -3664,6 +3661,8 @@ def modus_tvkonto(cmd):
             ende = time.time() + 45.0
             while True:
                 zustand, aktiv, bf, uia_el = lies()
+                if max_fehl[0]:
+                    return raus(max_fehl[0], "panel")
                 if zustand in ("richtig", "gleicher_login") or time.time() >= ende:
                     break
                 _warte(0.4, 0.3)
@@ -3756,20 +3755,6 @@ def modus_tvkonto(cmd):
         hwnd = w.handle
     except Exception:
         return ab("Browser-Fenster ohne Handle — Fenster neu oeffnen.")
-    # Vor dem Dropdown (Finns PC): Panel nach oben, damit die Liste Platz hat —
-    # bei Moritz (Panel offen, Liste passt) hat das bisher nie gefehlt; deshalb nur,
-    # wenn der Umschalter im unteren Zehntel des Fensters sitzt.
-    try:
-        fr_d = _tv_fenster_rect(w)
-        if uia_el and fr_d and uia_el["punkt"][1] > fr_d[1] + (fr_d[3] - fr_d[1]) * 0.9:
-            if _tv_panel_umschalten(w, trail, "oben"):
-                maximiert[0] = True
-                _warte(0.6, 0.3)
-                els_n = _tv_uia_konten(w, ids, uia_info)
-                if len(els_n) == 1:
-                    uia_el = els_n[0]
-    except Exception as e_:
-        trail.append(f"Panel maximieren: {type(e_).__name__}")
     _warte(0.3, 0.3)
 
     # Umschalter anklicken — mit dem Auge, das ihn gesehen hat.

@@ -951,13 +951,15 @@ def main():
            ("Equity", (1478, 1165, 1518, 1183), "Text"), ("Profit", (1585, 1165, 1620, 1183), "Text"), ("Symbol", (1656, 297, 1700, 315), "Text")]
     _KN = [("", (1570, 1122, 1586, 1140)), ("", (1608, 1122, 1624, 1140)), ("", (170, 1122, 190, 1140)), ("Publish", (1930, 208, 1990, 228))]
     _LG = order_bot.tv_panel_lage(_PK, _KN, _FR)
-    chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann feste Lage ueber 'Profit'; nie 'Publish'",
-        _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174
-        and [k[:2] for k in _LG["kandidaten"]] == [(1616, 1131), (1578, 1131)]
-        and _LG["kandidaten"][0][2] == "unbenannter Knopf der Panelzeile")
-    chk("TV-PANEL: benannter Knopf 'Maximize panel' steht als erster Kandidat; ohne Knoepfe bleibt die feste Lage",
+    chk("TV-PANEL: Lage 'unten' erkannt; Kandidaten = unbenannte Knoepfe der Tradovate-Zeile von rechts, dann Raster ab 6 px links der 'Profit'-Kante; nie 'Publish'",
+        _LG["zustand"] == "unten" and _LG["kopf_y"] == 1174 and _LG["rechts"] == 1620 and _LG["zeile_y"] == 1131
+        and [k[:2] for k in _LG["kandidaten"]][:2] == [(1616, 1131), (1578, 1131)]
+        and _LG["kandidaten"][2][2].startswith("Raster 10 px")     # 'Raster 6 px' (1614) faellt als Doppel von 1616 weg and all(k[1] in (1126, 1131, 1136) for k in _LG["kandidaten"])
+        and not any(k[0] > 1620 for k in _LG["kandidaten"]))
+    chk("TV-PANEL: benannter Knopf 'Maximize panel' steht als erster Kandidat; ohne Knoepfe beginnt das Raster 6 px links der Kante; ohne Kopfzeile Rueckfall auf Watchlist-Spalte",
         order_bot.tv_panel_lage(_PK + [("Maximize panel", (1608, 1122, 1624, 1140), "Button")], None, _FR)["kandidaten"][0][2] == "Knopf 'Maximize panel'"
-        and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"] == [(1614, 1131, "feste Lage rechts ueber 'Profit'")])
+        and order_bot.tv_panel_lage(_PK, None, _FR)["kandidaten"][0][:2] == (1614, 1131)
+        and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["rechts"] == 1620)
     chk("TV-PANEL: Lage 'oben' (Panel maximiert: Kopfzeile im oberen Drittel); ohne Kopfzeile None",
         order_bot.tv_panel_lage([("Tradovate", (100, 208, 170, 226), "Button"), ("Account Balance", (1345, 252, 1445, 270), "Text"), ("Profit", (1585, 252, 1620, 270), "Text")], None, _FR)["zustand"] == "oben"
         and order_bot.tv_panel_lage([("Symbol", (1656, 297, 1700, 315), "Text")], None, _FR)["zustand"] is None
