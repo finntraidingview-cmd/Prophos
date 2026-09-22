@@ -891,7 +891,7 @@ def _cursor_set(x, y):
     ctypes.windll.user32.SetCursorPos(int(x), int(y))
 
 
-def _maus_fahren(x, y, schritte=18):
+def _maus_fahren(x, y, schritte=8):
     """Den ECHTEN Mauszeiger sichtbar hinfahren (nicht teleportieren) — Finns
     Ansage: man soll sehen, wie der Bot die Kontrolle uebernimmt. SetCursorPos
     statt pywinauto.mouse (Parsec-Doppelcursor, s.o.)."""
@@ -3071,7 +3071,7 @@ def modus_tvkonto(cmd):
             else:
                 fenster_gesehen[0] = (spur_f[-1] if spur_f else "")[:300]
                 if runde < versuche:
-                    _warte(0.4, 0.3)
+                    _warte(0.25, 0.15)
         return fenster[0]
 
     # Bedienfeld-Wartezeit: beim ersten Blick 2,5 s, danach nur noch kurz — meldet
@@ -3321,7 +3321,7 @@ def modus_tvkonto(cmd):
                 trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
                 ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
                 if ok:
-                    _warte(0.4, 0.3)
+                    _warte(0.25, 0.15)
                     eintrag_x, ende_x, runde = None, time.time() + 6.0, 0
                     while not eintrag_x:
                         runde += 1
@@ -3331,7 +3331,7 @@ def modus_tvkonto(cmd):
                         elif len(els) > 1 or (time.time() >= ende_x and runde >= 2):
                             break
                         else:
-                            _warte(0.5, 0.3)
+                            _warte(0.3, 0.15)
                     if eintrag_x:
                         ok, f = _tv_uia_klick(eintrag_x, f"Konto {ext}", trail)
                         if not ok:
@@ -3339,7 +3339,7 @@ def modus_tvkonto(cmd):
                         start = time.time()
                         ende_x = time.time() + 12.0
                         while time.time() < ende_x:
-                            _warte(0.4, 0.3)
+                            _warte(0.25, 0.15)
                             zustand, aktiv, _b, _e = lies()
                             if zustand == "richtig":
                                 res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
@@ -3349,7 +3349,7 @@ def modus_tvkonto(cmd):
                         return ab(f"Zielkonto in der Liste angeklickt, aber das Panel zeigt danach "
                                   f"'{aktiv[:40] or '?'}'.")
                     esc()
-                    _warte(0.4, 0.3)
+                    _warte(0.25, 0.15)
                     trail.append("Zielkonto nicht in der Liste -> anderer Login noetig")
 
             return "weiter"
@@ -3409,7 +3409,7 @@ def modus_tvkonto(cmd):
                 return ab(f, "login")
             w, ende_n = None, time.time() + 40.0
             while time.time() < ende_n and w is None:
-                _warte(0.5, 0.3)
+                _warte(0.3, 0.15)
                 fenster[0] = None
                 w = tv_fenster()
             if w is None:
@@ -3512,7 +3512,7 @@ def modus_tvkonto(cmd):
             ok, f = _tv_uia_klick(el, "Demo", trail)
             if not ok:
                 return ab(f, "login")
-            _warte(0.4, 0.3)
+            _warte(0.25, 0.15)
             nicht_merken()
             el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
             if not el:
@@ -3582,7 +3582,7 @@ def modus_tvkonto(cmd):
             while time.time() < ende_f and not (un and pw):
                 un, pw = felder()
                 if not (un and pw):
-                    _warte(0.4, 0.3)
+                    _warte(0.25, 0.15)
             if not (un and pw):
                 inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab("Im Tradovate-Fenster wurden Username- und Passwortfeld nicht gefunden.", "login")
@@ -3629,7 +3629,7 @@ def modus_tvkonto(cmd):
                 for _versuch in range(3):
                     u3, _p3 = felder()
                     if not u3:
-                        _warte(0.5, 0.3)
+                        _warte(0.3, 0.15)
                         continue
                     try:
                         r = u3.rectangle()
@@ -3679,7 +3679,7 @@ def modus_tvkonto(cmd):
                     if not hat_fokus:
                         return ab("Benutzername-Feld hat den Fokus verloren.", "login")
                     _tv_tippen(tv_tasten_escape(username), "Username", trail)
-                    _warte(0.5, 0.3)
+                    _warte(0.3, 0.15)
                     u4, _p4 = felder()
                     if not u4 or _nur_alnum(_tv_edit_wert(u4)) != _nur_alnum(username):
                         return ab(f"Der Username '{username}' liess sich nicht ins Feld tippen "
@@ -3700,7 +3700,7 @@ def modus_tvkonto(cmd):
                             return ab("Autofill-Vorschlag liess sich nicht waehlen.", "login")
                 ende_b = time.time() + 6.0
                 while time.time() < ende_b and not bewiesen():
-                    _warte(0.4, 0.3)
+                    _warte(0.25, 0.15)
             if not bewiesen():
                 inventar["tradovate_fenster"] = tv_uia_inventar(_tv_uia_roh(tw))
                 return ab(f"Im Tradovate-Fenster stehen Username '{username}' und ein gefuelltes "
@@ -3731,7 +3731,7 @@ def modus_tvkonto(cmd):
             ende_z = time.time() + 35.0
             noch_da = True
             while time.time() < ende_z and noch_da:
-                _warte(0.4, 0.3)
+                _warte(0.25, 0.15)
                 noch_da = any(h == tw_handle and TV_RX_TRADOVATE_TITEL.search(t) for h, t, _x in _tv_browser_fenster())
             if noch_da:
                 inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
@@ -3888,7 +3888,7 @@ def modus_tvkonto(cmd):
             ok, f = _tv_uia_klick(els[0], "Konto-Umschalter", trail)
     if not ok:
         return ab(f)
-    _warte(0.4, 0.3)
+    _warte(0.25, 0.15)
 
     # Zieleintrag in der offenen Liste suchen: erst das Userscript (nur 0.4.2+
     # sieht die Liste — 'treffer'), sonst UIA. Die Liste baut sich nach dem
@@ -3943,7 +3943,7 @@ def modus_tvkonto(cmd):
     start = time.time()            # nur Staende NACH dem Klick zaehlen
     ende = time.time() + 12.0
     while time.time() < ende:
-        _warte(0.4, 0.3)
+        _warte(0.25, 0.15)
         zustand, aktiv, _b, _e = lies()
         if zustand == "richtig":
             res["ok"], res["zustand"], res["konto_aktiv"] = True, zustand, aktiv[:80]
@@ -4046,7 +4046,7 @@ def tv_asset_schritt(w, symbol, trail):
         return False, f
     ende = time.time() + 10.0
     while time.time() < ende:
-        _warte(0.4, 0.3)
+        _warte(0.25, 0.15)
         if titel_wurzel() == ziel:
             trail.append(f"Chart steht auf {ziel} (Tab-Titel)")
             _warte(0.35, 0.25)      # das Order-Panel baut sich nach dem Wechsel neu auf
@@ -4365,7 +4365,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                            "Limit' nicht — es wird NICHT umgeschaltet. Gesehen: " + tv_uia_spur(roh))
         if leer >= 4 and time.time() - t_leer >= 3.0:
             break
-        _warte(0.5, 0.3)
+        _warte(0.3, 0.15)
         roh, ber = blick()
     if not ber:
         fr = _tv_fenster_rect(w)
@@ -4375,7 +4375,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # von den Schnell-Knoepfen SELL/BUY oben links
         _tv_uia_klick({"punkt": (fr[0] + int((fr[2] - fr[0]) * 0.35), fr[1] + int((fr[3] - fr[1]) * 0.6))},
                       "Chart (Fokus)", trail)
-        _warte(0.4, 0.3)
+        _warte(0.25, 0.15)
         keyboard.send_keys("+t")
         trail.append("Order-Panel per Shift+T geoeffnet")
         ende = time.time() + 6.0
@@ -4390,7 +4390,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     ok, f = _tv_uia_klick(ber["market"], "Reiter Market", trail)
     if not ok:
         return False, f
-    _warte(0.5, 0.3)
+    _warte(0.2, 0.1)      # 0,5 -> 0,2 (22.09.2026 19:0x, Finn: 'vor Buy/Sell, TP und Lots noch Leerzeit')
 
     # --- Seite: Buy/Sell im Seiten-Kasten UEBER der Reiter-Zeile -------------
     roh, ber2 = blick()
@@ -4402,7 +4402,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     ok, f = _tv_uia_klick(seite[0], f"Seite {plan['richtung'].upper()}", trail)
     if not ok:
         return False, f
-    _warte(0.6, 0.4)
+    _warte(0.3, 0.15)
 
     # --- Felder ueber ihre Lage zur Beschriftung -----------------------------
     def felder():
@@ -4422,9 +4422,14 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                 rs.append(None)
         return eds, rs
 
-    def feld_zu(muster, name):
-        roh_, _b = blick()
-        labels = tv_im_panel(roh_, ber, muster, y_von=ber["reiter_y"])
+    def feld_zu(muster, name, lab_bekannt=None):
+        # lab_bekannt (22.09.2026 19:0x): nach dem Tippen die Beschriftung nicht neu suchen —
+        # sie bewegt sich nicht; nur die Felder neu lesen (ein Scan statt zwei je Feld).
+        if lab_bekannt is not None:
+            labels = [lab_bekannt]
+        else:
+            roh_, _b = blick()
+            labels = tv_im_panel(roh_, ber, muster, y_von=ber["reiter_y"])
         if not labels:
             return None, None, f"Beschriftung '{name}' im Order-Panel nicht gefunden."
         eds, rs = felder()
@@ -4468,7 +4473,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         return False, f
     if tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
         setze_wert(feld, float(plan["menge"]), "Units")
-        feld, _lab, f = feld_zu(TV_RX_UNITS, "Units")
+        feld, _lab, f = feld_zu(TV_RX_UNITS, "Units", lab_bekannt=_lab)
         if not feld or tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
             return False, f"Menge {plan['menge']} steht nicht im Feld 'Units' (dort: '{_tv_edit_wert(feld[0]) if feld else '?'}')."
     trail.append(f"Units = {plan['menge']}")
@@ -4498,7 +4503,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             # Schalter nachweislich AN ist und der Wert schon stimmt.
             if not (echt and ist_an and tv_zahl_lesen(_tv_edit_wert(feld[0])) == float(soll)):
                 setze_wert(feld, float(soll), name)
-                feld, lab, f = feld_zu(muster, name)
+                feld, lab, f = feld_zu(muster, name, lab_bekannt=lab)
                 ist = tv_zahl_lesen(_tv_edit_wert(feld[0])) if feld else None
                 if ist is None or abs(ist - float(soll)) > 0.005:
                     return False, f"{name}: im Feld steht '{_tv_edit_wert(feld[0]) if feld else '?'}' statt {soll}."
@@ -4514,8 +4519,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             else:
                 sx, sy = ber["rechts"] - 52, lab["punkt"][1]
             _tv_uia_klick({"punkt": (sx, sy)}, f"Schalter {name} AUS", trail)
-            _warte(0.6, 0.3)
-            feld, lab, f = feld_zu(muster, name)
+            _warte(0.35, 0.15)
+            feld, lab, f = feld_zu(muster, name, lab_bekannt=lab)
             if not feld:
                 return False, f
             nach, _r = schalter(lab)
@@ -4597,7 +4602,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     trail.append("Senden geklickt — ab hier zaehlt nur noch der Beweis")
     ende = time.time() + 25.0
     while time.time() < ende:
-        _warte(0.4, 0.3)
+        _warte(0.25, 0.15)
         roh_t = _tv_uia_roh(w, typen)
         neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
         if neu_t:
@@ -4706,7 +4711,7 @@ def modus_tvkette(cmd):
         w, f = _tv_fenster_holen([], "", symbol)
         if w or time.time() >= ende_w:
             break
-        _warte(0.5, 0.3)
+        _warte(0.3, 0.15)
     if not w:
         ok, msg = False, "TradingView-Fenster fuer den Asset-Schritt nicht gefunden."
     else:
