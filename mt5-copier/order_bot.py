@@ -3257,6 +3257,15 @@ def modus_tvkonto(cmd):
             # maximiertem Panel OBEN; die Lage zum Broker-Knopf (bis 160 px darunter) reicht.
             kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.0)
                     if 0 <= e["r"][1] - broker_r[1] <= 160 and abs(e["r"][0] - broker_r[0]) <= 200]
+            # NIE STILL UEBERSPRINGEN (22.09.2026 13:4x, Finns erster kompletter Lauf auf seinem
+            # PC: richtiger Login, unbekanntes Konto aktiv — der Bot meldete sich ab statt in
+            # die Liste zu schauen). Mehrere Treffer (Knopf + Textkind) -> der naechste unter
+            # dem Broker-Knopf; keiner -> steht in der Spur.
+            if len(kand) > 1:
+                kand = [min(kand, key=lambda e: e["r"][1] - broker_r[1])]
+            if not kand:
+                trail.append(f"kein Konto-Umschalter unter dem Broker-Knopf @{broker_r[0]},{broker_r[1]} gesehen — "
+                             + tv_uia_spur([(e["text"], e["r"], "Text") for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.0)], 4))
             if len(kand) == 1:
                 trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
                 ok, f = _tv_uia_klick(kand[0], "Konto-Umschalter", trail)
