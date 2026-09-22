@@ -25582,7 +25582,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.411'
+  const OS_TAB_BUILD = '2026-09-22.412'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29372,7 +29372,8 @@
    *    und Farmer. Fällt Railway aus: Pläne legen die PC-Tabs an (wdAbgleich, wie bis .399). ── */
   async function wdDatenLaden(tag){
     let konten = null, rail = null
-    try{
+    // 23.09.2026 (Finn: „lädt immer relativ lang — nervig"): RPC und Railway liefen NACHEINANDER; jetzt gleichzeitig
+    const ladeRpc = async () => { try{
       const { data, error } = await supabase.rpc('wd_konten_alle')
       if(error) throw error
       konten = (data || []).filter(a => WD_FUTURES_RX.test(a.firm || '')).map(a => ({
@@ -29384,8 +29385,8 @@
         tp_vorgabe: a.wd_tp > 0 ? Number(a.wd_tp) : null, sl_vorgabe: a.wd_sl > 0 ? Number(a.wd_sl) : null,
         winning_days: a.winning_days != null ? Number(a.winning_days) : null, goal_target: a.goal_target != null ? Number(a.goal_target) : null,
         live_balance: a.live_balance != null ? Number(a.live_balance) : null, live_at: a.live_at || null }))
-    }catch(e){ console.warn('[wd] rpc wd_konten_alle', e); _wd.datenFehler = 'Konten (RPC): ' + (e.message || e) }
-    try{
+    }catch(e){ console.warn('[wd] rpc wd_konten_alle', e); _wd.datenFehler = 'Konten (RPC): ' + (e.message || e) } }
+    const ladeRail = async () => { try{
       const { data: { session } } = await supabase.auth.getSession()
       const tok = session?.access_token; if(!tok) throw new Error('nicht angemeldet')
       const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 12000)
@@ -29394,7 +29395,8 @@
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       rail = d; _wd.railFehler = ''
-    }catch(e){ _wd.railFehler = String(e.message || e); console.warn('[wd] Railway', e) }
+    }catch(e){ _wd.railFehler = String(e.message || e); console.warn('[wd] Railway', e) } }
+    await Promise.all([ladeRpc(), ladeRail()])
     if(konten && rail && Array.isArray(rail.konten)){
       // Railway kennt Archiv + ausgeblendete Personen: solche Konten bleiben in der Liste, aber als
       // „archiviert" markiert (fahren nicht mit, zeigen den Grund) — vorher fielen sie stumm raus und
@@ -30027,7 +30029,7 @@
     const alleAn = (x.konten || []).length && (x.konten || []).every(k => k.farm && k.aktiv !== false)
     // Nur Konten mit Farm-Haken zeigen (Finn: „sonst sehe ich jeden Funded, bei dem manche noch rumchillen") —
     // die ohne Haken zusammengeklappt in einer Zeile, auf Wunsch einblenden
-    const zeigOhne = !!(_wd.zeigOhne || {})[uid]
+    const zeigOhne = (_wd.zeigOhne || {})[uid] !== false   // Standard: alle zeigen, die ohne Haken grau (Finn 23.09.2026)
     const ohne = (x.konten || []).filter(k => !k.farm && !k.plan_id), sichtbar = (x.konten || []).filter(k => k.farm || k.plan_id || zeigOhne)
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
@@ -30061,9 +30063,35 @@
         ${erw || fest ? `<span class="zeit">${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}</span>` : `<input type="time" class="input mono vp-in" data-wd-zeit style="width:92px;text-align:left;font-size:15px;font-weight:600" value="${x.start_um ? escapeHtml(wdHhmm(x.start_um)) : ''}" title="Startzeit des Blocks in Dubai-Zeit">`}
         <div class="seg"><button type="button" data-wd-dir="buy" class="${x.richtung === 'buy' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>BUY</button><button type="button" data-wd-dir="sell" class="${x.richtung === 'sell' ? 'active' : ''}" ${erw || fest ? 'disabled' : ''}>SELL</button></div>
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
-        <span class="kf" style="margin-left:auto">Haken = dauerhaft · TP/SL = Vorgabe je Konto · dann „Änderungen speichern"</span>
+        <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft · TP/SL, Zeit, Richtung: „Änderungen speichern"</span>
       </div>
       <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
+  }
+  /* Haken sofort wirksam (23.09.2026, Finn: „ich drücke auf den Account, der Haken geht weg, aber die sind immer noch
+   * aktiv — bei nur einem Haken soll 0 von 3 stehen"): Anzeige sofort, dann dauerhaft am Konto (rpc wd_konto_setzen),
+   * Zeile (aktiv/hinweis/status) in die DB, bei Haken raus den noch nicht gestarteten Plan löschen, bei Haken rein
+   * und SCHARF den Plan anlegen. Kein „Änderungen speichern" mehr nötig für den Haken. */
+  async function wdKontoHaken(uid, kontoId, an){
+    const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
+    const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k) return
+    k.farm = !!an; k.aktiv = !!(an && k.ext && !k.archiviert); k.hinweis = an ? (k.ext ? '' : WD_HINWEIS_EXT) : WD_HINWEIS_FARM
+    const kd = wdKontoDaten(kontoId); if(kd) kd.wd_farm = !!an
+    x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
+    wdRender()
+    try{
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: !!an }); if(error) throw error
+      let planWeg = false
+      if(!an && k.plan_id && (k.status === 'planned' || !k.status) && !k.gestartet && _wd.daten && _wd.daten.rail){
+        try{ await wdApi('DELETE', { id: k.plan_id }); planWeg = true; k.plan_id = null; k.status = null; k.um = null; k.gesendet = false }
+        catch(e){ console.warn('[wd] Plan löschen', e) }
+      }
+      const konten = (x.konten || []).map(q => ({ ...q }))
+      await supabase.from('wd_tagesplan').update({ konten, status: x.status, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
+      let angelegt = 0
+      if(an && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
+      wdSay(an ? `${k.name || 'Konto'} ist drin — dauerhaft${angelegt ? ', Plan angelegt' : ''}.` : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`, 'ok')
+      wdCacheSchreiben(x.tag)
+    }catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
   }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
@@ -30120,12 +30148,19 @@
       })
     })
     box.querySelectorAll('[data-wd-ohne]').forEach(b => b.addEventListener('click', () => {
-      _wd.zeigOhne = _wd.zeigOhne || {}; _wd.zeigOhne[b.dataset.wdOhne] = !_wd.zeigOhne[b.dataset.wdOhne]
+      _wd.zeigOhne = _wd.zeigOhne || {}; _wd.zeigOhne[b.dataset.wdOhne] = ((_wd.zeigOhne[b.dataset.wdOhne]) !== false) ? false : true
       wdAblauf(_wd.rows || [], wdFehlend())
     }))
     // ID-Haken: alle Konten des Blocks rein/raus (nur die, die sich noch ändern lassen)
-    box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', () => {
-      cb.closest('.wd-karte')?.querySelectorAll('[data-wd-konto]').forEach(x => { if(!x.disabled) x.checked = cb.checked })
+    // Haken je Konto: sofort wirksam (wdKontoHaken); die Zeilen-Klicks (tr.klick) lösen dasselbe change-Ereignis aus
+    box.querySelectorAll('[data-wd-konto]').forEach(cb => cb.addEventListener('change', () => {
+      const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
+      if(uid && !cb.disabled) wdKontoHaken(uid, cb.dataset.wdKonto, cb.checked)
+    }))
+    box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', async () => {
+      const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser, an = cb.checked
+      const ids = [...(karte ? karte.querySelectorAll('[data-wd-konto]') : [])].filter(x => !x.disabled && x.checked !== an).map(x => x.dataset.wdKonto)
+      for(const id of ids) await wdKontoHaken(uid, id, an)   // nacheinander — eine Zeile, keine Schreib-Rennen
     }))
   }
   // „2× archiviert · 1× schon Plan" — warum in einem Block nichts drin ist
@@ -30172,12 +30207,27 @@
     wdFirmenZaehlen()
   }
   function wdSichtbar(){ const p = document.getElementById('adm-pane-wd'); return !!(p && !p.hidden && p.offsetParent !== null) }
+  // Letzter Stand im Browser (23.09.2026, Finn: „der Zeitstrahl und alles lädt immer relativ lang"): beim Öffnen sofort
+  // zeichnen, dann frisch laden — Railway braucht mehrere Sekunden, die DB unter einer.
+  const WD_CACHE_LS = 'prophos_wd_cache'
+  function wdCacheSchreiben(tag){
+    try{ localStorage.setItem(WD_CACHE_LS, JSON.stringify({ tag, at: Date.now(), regeln: _wd.regeln, rows: _wd.rows || [], konten: (_wd.daten && _wd.daten.konten) || [] })) }catch(_){}
+  }
+  function wdCacheLesen(){ try{ return JSON.parse(localStorage.getItem(WD_CACHE_LS) || 'null') }catch(_){ return null } }
   async function wdOpen(){
     wdSay('')
+    const c = wdCacheLesen(), tagEl = document.getElementById('wd-tag')
+    if(c && !_wd.geladen && c.regeln) _wd.regeln = c.regeln
+    const j = wdJetzt(WD_TZ_STD)
+    if(tagEl && !tagEl.value) tagEl.value = j ? wdNaechsterTag(_wd.regeln || {}, j) : new Date().toLocaleDateString('en-CA')
+    if(c && Array.isArray(c.rows) && c.tag === (tagEl && tagEl.value) && !(_wd.rows || []).length){
+      if(!_wd.daten && Array.isArray(c.konten)) _wd.daten = { konten: c.konten, slaves: {}, plaene: null, fx: 0.85, rail: false, belegt: {}, plaene_tag: [] }
+      _wd.rows = c.rows; _wd.tag = c.tag
+      try{ wdRegelnInsFormular(); wdRender() }catch(e){ console.warn('[wd] Sofort-Anzeige', e) }
+      const u = document.getElementById('wd-uhr'); if(u) u.textContent = 'Stand von eben — lädt frisch …'
+    }
     await wdLaden()
     wdRegelnInsFormular()
-    const j = wdJetzt(WD_TZ_STD), tagEl = document.getElementById('wd-tag')
-    if(tagEl && !tagEl.value) tagEl.value = j ? wdNaechsterTag(_wd.regeln || {}, j) : new Date().toLocaleDateString('en-CA')
     await wdNeuLaden()
     wdVerlauf()
   }
@@ -30185,16 +30235,17 @@
   async function wdNeuLaden(){
     const tag = document.getElementById('wd-tag')?.value; if(!tag) return
     try{
-      const d = await wdDatenLaden(tag)
+      const [d, rowsRoh] = await Promise.all([wdDatenLaden(tag), wdRowsLaden(tag)])   // parallel (23.09.2026)
       // gar nichts ladbar → Rückfall auf die Admin-Übersicht (nur Konten, keine fremden Pläne)
       if(!d && !window._admData && typeof window._admLaden === 'function'){ try{ await Promise.race([window._admLaden(), new Promise(res => setTimeout(res, 10000))]) }catch(_){} }
       // Farmer AUS, aber noch nie gestartete Pläne da (alter Stand vor .411) → weg damit, einmal je Ladung
       if(d && d.rail && !(_wd.regeln && _wd.regeln.scharf) && !_wd.busy && typeof wsFarmerPlaeneLoeschen === 'function'){
-        try{ const n = await wsFarmerPlaeneLoeschen(tag); if(n){ await wdDatenLaden(tag); wdSay(`Farmer AUS — ${n} nie gestartete Pläne gelöscht.`, 'ok') } }catch(e){ console.warn('[wd] aufräumen', e) }
+        try{ const n = await wsFarmerPlaeneLoeschen(tag); if(n){ await wdDatenLaden(tag); _wd.rowsFrisch = await wdRowsLaden(tag); wdSay(`Farmer AUS — ${n} nie gestartete Pläne gelöscht.`, 'ok') } }catch(e){ console.warn('[wd] aufräumen', e) }
       }
-      let rows = await wdRowsLaden(tag)
+      let rows = (_wd.tag === tag && _wd.rows !== rowsRoh && (_wd.rows || []).length && _wd.rows[0] && _wd.rows[0].tag === tag && _wd.rows.some(x => x && x.konten)) && _wd.rowsFrisch ? _wd.rows : rowsRoh
+      if(_wd.rowsFrisch){ rows = _wd.rowsFrisch; _wd.rowsFrisch = null }
       try{ rows = await wdZeilenHeilen(tag, rows) }catch(e){ console.warn('[wd] heilen', e) }
-      _wd.rows = rows.map(wdMitLive); wdRender()
+      _wd.rows = rows.map(wdMitLive); wdRender(); wdCacheSchreiben(tag)
     }catch(e){ wdSay('Laden fehlgeschlagen: ' + (e.message || e), 'err') }
   }
   /* Selbstheilung beim Laden (23.09.2026, Finn: „immer noch nicht — alle Konten sind einfach off"): der Server räumt
