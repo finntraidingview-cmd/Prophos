@@ -3738,9 +3738,18 @@ def modus_tvkonto(cmd):
             keyboard.send_keys("{ESC}")
         except Exception:
             pass
+        # Beweise in den Meldungstext (22.09.2026 12:4x, Finns PC: dritter Lauf mit
+        # '0 Treffer' — ohne die Zahlen ist nicht zu sehen, WO UIA den Umschalter sieht
+        # und ob der Klick ueberhaupt im Fenster lag).
+        fr_ = _tv_fenster_rect(w)
+        roh_l = _tv_uia_roh(w, ("Text", "ListItem", "MenuItem", "Button"))
+        konto_artig = [f"{t[:34]}@{r[0]},{r[1]}-{r[3]}" for t, r, _typ in roh_l
+                       if r and TV_RX_KONTO_ARTIG.match(str(t).strip())][:8]
         return ab(f"Dropdown geoeffnet, aber Konto {ext} steht darin nicht eindeutig "
                   f"({anzahl} Treffer). Liegt es wirklich unter diesem Tradovate-Login? "
-                  "Falls ja: bitte 'Diagnose kopieren' und schicken.")
+                  f"| Fenster {fr_} · Umschalter {(schalter_uia or {}).get('r')} · geklickt "
+                  f"{(schalter_uia or {}).get('punkt')} · kontoartig nach dem Klick: "
+                  + (" | ".join(konto_artig) or "nichts") + " · Scan " + str(uia_info.get("scan") or uia_info.get("weg")))
     if eintrag_uia:
         ok, f = _tv_uia_klick(eintrag_uia, f"Konto {ext}", trail)
     else:
