@@ -923,6 +923,11 @@ def main():
         and order_bot.tv_fremdes_konto(["PAAPEX6416990000031"], ["APEX6416990000031"]) == ""      # Geschwister-aehnlich: kein Urteil
         and order_bot.tv_fremdes_konto(["4470324", "Sell 2 at 30,858.25"], ["APEX1"]) == ""
         and order_bot.tv_fremdes_konto(None, ["APEX1"]) == "")
+    chk("TV-TAB: Chromes 'Website verlassen?' — 'Verlassen'/'Leave' wird gefunden, 'Abbrechen' nie, Unsichtbares nie",
+        order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", (1003, 288, 1101, 322), "Button")])["punkt"] == (1052, 305)
+        and order_bot.tv_verlassen_knopf([("Leave", (10, 10, 60, 30), "Button")])["text"] == "Leave"
+        and order_bot.tv_verlassen_knopf([("Abbrechen", (1113, 288, 1211, 322), "Button"), ("Verlassen", None, "Button")]) is None
+        and order_bot.tv_verlassen_knopf([]) is None)
     chk("TV-ORDER: Knopf-Beweis versteht 'MKT' wie 'MARKET' — und verwechselt Sell nie mit Buy",
         order_bot.tv_senden_text_passt("Sell 1 MNQZ6 MKT", "sell", 1)[0]
         and order_bot.tv_senden_text_passt("Buy 2 MNQZ6 MARKET", "buy", 2)[0]

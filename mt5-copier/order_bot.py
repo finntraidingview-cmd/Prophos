@@ -2292,6 +2292,22 @@ def tv_tab_schliessbar(titel, klasse, begriff=""):
     return ist_tradingview_fenster(titel, klasse) or tv_tab_rang(titel, begriff, "") > 0
 
 
+TV_RX_VERLASSEN = re.compile(r"^(verlassen|leave|leave page|seite verlassen)$", re.I)
+
+
+def tv_verlassen_knopf(roh):
+    """Chromes Rueckfrage 'Website verlassen? — Deine Aenderungen werden eventuell
+    nicht gespeichert' nach Strg+W (22.09.2026 02:05, Finns Screenshot: der Bot
+    hatte den Tab richtig schnell geschlossen, blieb aber vor dem Dialog stehen;
+    'kommt manchmal'). -> der Knopf 'Verlassen'/'Leave' als {text, r, punkt} oder
+    None. NIE 'Abbrechen'. Rein rechnend."""
+    for e in roh or ():
+        n, r = str(e[0]).strip(), e[1]
+        if r and TV_RX_VERLASSEN.match(n):
+            return {"text": n, "r": tuple(r), "punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)}
+    return None
+
+
 def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     """FINNS WEG (22.09.2026, von Hand geprueft): "das mit Log out ist dumm …
     der Tab wird geschlossen, dann oeffnet sich ein neuer Tab mit dem Link —
@@ -2332,7 +2348,21 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     except Exception as e:
         return False, f"Tab liess sich nicht schliessen ({type(e).__name__})"
     trail.append("TradingView-Tab geschlossen")
-    _warte(0.5, 0.3)
+    # Chromes Rueckfrage 'Website verlassen?' (kommt nur manchmal): bis ~2,5 s nach
+    # dem Knopf 'Verlassen' schauen und ihn klicken — sonst bliebe der alte Tab
+    # offen und der neue kaeme daneben.
+    ende_v = time.time() + 2.5
+    while time.time() < ende_v:
+        _warte(0.25, 0.15)
+        try:
+            k = tv_verlassen_knopf(_tv_uia_roh(w, ("Button",)))
+        except Exception:
+            k = None
+        if k:
+            _tv_uia_klick(k, f"'{k['text']}' (Website verlassen?)", trail)
+            _warte(0.4, 0.2)
+            break
+    _warte(0.3, 0.2)
     befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")),
                              (cfg or {}).get("tv_chrome_profil"))
     flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
