@@ -5020,7 +5020,7 @@
                Anfang des Tages alle Trades vorplant"). Legt für jedes aktive Futures-Konto ohne
                laufenden Plan einen fertigen Orbit-Plan an; eigene Verdrahtung (kein Sammel-Handler). -->
           <!-- Winning-Day-Farmer (22.09.2026, Finn: „nie wieder Winning Days manuell fahren") — Tagesplan über alle IDs -->
-          <button class="btn btn-ghost" id="wdBtn" title="Winning-Day-Farmer: Tagesplan über alle IDs (Reihenfolge, Zeiten, Richtung würfeln, bearbeiten, Automatik)">🌾 Winning Days</button>
+          <button class="btn btn-ghost" id="wdBtn" title="Winning-Day-Farmer: Tagesplan über alle IDs (Reihenfolge, Zeiten, Richtung würfeln, bearbeiten, Automatik)">Winning Days</button>
           <button class="btn btn-ghost" id="tpVorplanenBtn" title="Für jedes aktive Futures-Konto ohne laufenden Plan einen Orbit-Plan anlegen: Risiko = Max-Drawdown, Slave = Gesamtkosten, Duplikum-Slave, TP aus Spanne">⚡ Futures vorplanen</button>
           <button class="btn btn-primary" id="addTradePlanBtn" onclick="window.openTradePlanModal && window.openTradePlanModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -5595,11 +5595,11 @@
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-winning-day-hint"></div>
             </div>
-            <!-- 🌾 WD-Farm-Haken nach dem Trade (23.09.2026, Finn: „oder nach dem Trade einen Haken setzen") -->
+            <!-- WD-Farm-Haken nach dem Trade (23.09.2026, Finn: „oder nach dem Trade einen Haken setzen") -->
             <div class="field" style="grid-column:span 2" id="tc-wd-farm-wrap" hidden>
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
                 <input type="checkbox" id="tc-wd-farm" style="width:16px;height:16px;flex-shrink:0">
-                <span style="color:var(--ink);font-weight:500" id="tc-wd-farm-label">🌾 Zu WD-Farm hinzufügen</span>
+                <span style="color:var(--ink);font-weight:500" id="tc-wd-farm-label">Zu WD-Farm hinzufügen</span>
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Haken raus = der Winning-Day-Farmer lässt dieses Konto aus, bis du ihn wieder setzt (gilt für alle folgenden Tage).</div>
             </div>
@@ -7156,7 +7156,7 @@
         </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
-          <button class="subtab adm-tab" data-admtab="wd">🌾 Winning Days</button>
+          <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
@@ -7330,7 +7330,7 @@
         <div id="adm-pane-wd" hidden>
           <div class="panel" style="margin:0 0 12px">
             <div class="wd-kopf-zeile">
-              <div class="panel-title">🌾 Winning-Day-Farmer <span class="mono" id="wd-uhr" style="font-weight:400;font-size:11.5px;color:var(--sub);margin-left:8px"></span></div>
+              <div class="panel-title">Winning-Day-Farmer <span class="mono" id="wd-uhr" style="font-weight:400;font-size:11.5px;color:var(--sub);margin-left:8px"></span></div>
               <span class="wd-status-chip" id="wd-auto-chip">—</span>
             </div>
             <div class="wd-status-text" id="wd-status-text"></div>
@@ -8385,11 +8385,11 @@
           <input class="input mono" id="ac-ext-id" placeholder="z.B. TDFYSL150305023594" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Broker-Account-Nummer. Wird als #ID-Badge in Trade-Plänen angezeigt.</div>
         </div>
-        <!-- 🌾 WD-Farm (23.09.2026): nur angehakte Fundeds fährt der Winning-Day-Farmer (Admin → Winning Days) -->
+        <!-- WD-Farm (23.09.2026): nur angehakte Fundeds fährt der Winning-Day-Farmer (Admin → Winning Days) -->
         <div class="field" style="grid-column:1/-1" id="ac-wd-farm-row">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
             <input type="checkbox" id="ac-wd-farm" checked style="width:16px;height:16px;flex-shrink:0">
-            <span style="font-weight:500">🌾 Im WD-Farm</span>
+            <span style="font-weight:500">Im WD-Farm</span>
             <span style="font-size:11.5px;color:var(--sub)">— Haken raus = der Winning-Day-Farmer lässt dieses Konto aus (gilt bis du ihn wieder setzt)</span>
           </label>
         </div>
@@ -8716,7 +8716,7 @@
         <div class="field" style="grid-column:1/-1">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
             <input type="checkbox" id="bulk-wd-farm" checked style="width:16px;height:16px;flex-shrink:0">
-            <span style="font-weight:500">🌾 Im WD-Farm</span>
+            <span style="font-weight:500">Im WD-Farm</span>
             <span style="font-size:11.5px;color:var(--sub)">— Haken raus = der Winning-Day-Farmer lässt diese Konten aus</span>
           </label>
         </div>
@@ -9349,7 +9349,7 @@
       $('kasse-content').hidden = false
       kasseLoad()
       admLoad()
-      // Sprung aus Trades („🌾 Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
+      // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
       if(window._wdTabPending){ window._wdTabPending = false; document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
     }
 
@@ -18363,7 +18363,7 @@
       maxDailyDrawdown: row.max_daily_drawdown != null ? Number(row.max_daily_drawdown) : null,
       maxLossPerTrade:   row.max_loss_per_trade   != null ? Number(row.max_loss_per_trade)   : null,
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
-      // 🌾 WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
+      // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
       // hinzufügen' — manche Fundeds stehen noch auf Anfangs-Balance"): nur so markierte Konten fährt der Farmer.
       wdFarm:         !!row.wd_farm,
       // Fortschritts-Ziel (10.09.2026): "3 von 5 Winning Days" pro Account
@@ -25569,7 +25569,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.405'
+  const OS_TAB_BUILD = '2026-09-22.406'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27436,7 +27436,7 @@
     tpStartUmHinweis()
   })
   let _suLaeuft = false
-  // 🌾 Farmer-Schalter (23.09.2026, Finn: „einen Regler oben, wo ich es ausstellen kann — heute nur planen und gucken"):
+  // Farmer-Schalter (23.09.2026, Finn: „einen Regler oben, wo ich es ausstellen kann — heute nur planen und gucken"):
   // Pläne des Winning-Day-Farmers (notes 'Winning-Day-Farmer') feuern zur Startzeit NUR, wenn wd_farmer_regeln.scharf
   // gesetzt ist. Der Schalter liegt in der DB, damit alle PC-Tabs denselben Stand haben; hier alle 60 s nachgelesen.
   let _suScharf = null
@@ -29774,7 +29774,7 @@
   setInterval(wdTick, 30000)
   setTimeout(wdTick, 12000)
 
-  /* ── Admin-Tab „🌾 Winning Days" (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; „mies
+  /* ── Admin-Tab „Winning Days" (23.09.2026, Finn: „mach alles in Admin und mehr Überblick"; „mies
    * hässlich und man checkt nix"; 01:1x: „man checkt NOCH NIX — so unübersichtlich"; „der Erklärblock und
    * der Zeitstrahl sind mies hässlich"; „ich will einfach die Balance stehen haben, keinen Puffer"; „wie
    * viele Winning Days die jeweils haben"; „TP und SL bearbeiten"; „alle IDs im Admin managen").
@@ -30212,7 +30212,7 @@
         const { error } = await supabase.from('wd_farmer_regeln').update({ scharf: an, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
         if(error) throw error
         if(_wd.regeln) _wd.regeln.scharf = an
-        if(typeof atToast === 'function') atToast(an ? '🌾 Farmer SCHARF — Pläne starten zur Startzeit.' : '🌾 Farmer AUS — heute wird nur geplant, nichts gestartet.', an ? 'start' : 'end')
+        if(typeof atToast === 'function') atToast(an ? 'Farmer SCHARF — Pläne starten zur Startzeit.' : 'Farmer AUS — heute wird nur geplant, nichts gestartet.', an ? 'start' : 'end')
       }catch(e){ if(typeof atToast === 'function') atToast('Schalter nicht gespeichert: ' + (e.message || e), 'end') }
       b.disabled = false; wsRender()
     })
@@ -30222,7 +30222,7 @@
     const el = wsLeiste(); if(!el) return
     const r = _wd.regeln || {}, an = !!r.scharf
     el.classList.toggle('an', an)
-    el.querySelector('#ws-knopf').textContent = an ? '🌾 Farmer SCHARF' : '🌾 Farmer AUS'
+    el.querySelector('#ws-knopf').textContent = an ? 'Farmer SCHARF' : 'Farmer AUS'
     el.querySelector('#ws-text').innerHTML = an
       ? `<b>Scharf:</b> gewürfelte Pläne starten zur Startzeit (ab ${escapeHtml(r.start_hhmm || '02:00')} Dubai) von allein. Zum Ausstellen auf den Knopf drücken.`
       : `<b>Aus:</b> würfeln und planen geht, aber zur Startzeit startet <b>nichts</b> — heute nur planen und schauen. Zum Scharfstellen auf den Knopf drücken.${r.aktiv ? '' : ' Nachts von allein würfeln ist ebenfalls aus (Einstellungen).'}`
@@ -30604,7 +30604,7 @@
     }
   }
 
-  /* 🌾 WD-Farm-Haken im Trade-Abschluss (23.09.2026): für Funded/Live-Master-Konten zeigt das Popup
+  /* WD-Farm-Haken im Trade-Abschluss (23.09.2026): für Funded/Live-Master-Konten zeigt das Popup
    * den Haken mit dem aktuellen Stand; „Erledigt" schreibt ihn direkt ans Konto (accounts.wd_farm).
    * Der Farmer (Admin → Winning Days) nimmt nur Konten mit Haken. */
   function tcWdFarmPrepare(p){
@@ -30615,13 +30615,13 @@
     if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
     wrap.hidden = false
     cb.checked = !!a.wdFarm
-    lbl.textContent = `🌾 ${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
+    lbl.textContent = `${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
   }
   async function wdFarmSetzen(accId, an){
     const { error } = await supabase.from('accounts').update({ wd_farm: !!an }).eq('id', accId)
     if(error) throw error
     const a = (accounts || []).find(x => String(x.id) === String(accId)); if(a) a.wdFarm = !!an
-    if(typeof atToast === 'function') atToast(`🌾 ${a ? a.name : accId} ${an ? 'ist jetzt im WD-Farm' : 'ist raus aus dem WD-Farm'}`, 'start')
+    if(typeof atToast === 'function') atToast(`${a ? a.name : accId} ${an ? 'ist jetzt im WD-Farm' : 'ist raus aus dem WD-Farm'}`, 'start')
   }
 
   // Trade-Abschluss: welcher Account des Plans zählt manuell? Master zuerst
@@ -31360,7 +31360,7 @@
       if(_wdCb && _wdCb.checked && !_wdCb.disabled && _tcWinningAccId){
         try{ await zielManuellPlus(_tcWinningAccId) }catch(_){}
       }
-      // 🌾 WD-Farm-Haken (23.09.2026): direkt am Master-Konto setzen/entfernen, wenn er sich geändert hat
+      // WD-Farm-Haken (23.09.2026): direkt am Master-Konto setzen/entfernen, wenn er sich geändert hat
       const _fmCb = document.getElementById('tc-wd-farm'), _fmWrap = document.getElementById('tc-wd-farm-wrap')
       if(_fmCb && _fmWrap && !_fmWrap.hidden && masterAcc && !!masterAcc.wdFarm !== _fmCb.checked){
         try{ await wdFarmSetzen(masterAcc.id, _fmCb.checked) }catch(e){ console.warn('[wd-farm]', e) }
