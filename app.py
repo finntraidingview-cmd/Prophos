@@ -1,4 +1,5 @@
 import requests
+import re
 import urllib3
 import threading
 import calendar
@@ -40,7 +41,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-21.3"
+APP_BUILD = "2026-09-23.1"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -5646,6 +5647,156 @@ def watcher_status():
         "polls_last_hour": _dup_budget_snapshot(),
         "build": APP_BUILD,
     })
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# KOMPASS-SAMMLER — Pascals Nasdaq-Forecasts dauerhaft in die DB (23.09.2026)
+#
+# Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
+# bekomme + alles in die DB packen immer". Pascals Research-Agent „Kompass"
+# postet mehrmals täglich Forecasts zum Nasdaq-100 (LONG/SHORT, Konfidenz 1–5)
+# in einen Cloudflare-Worker. Die Seite lifeplanner-eps.pages.dev/signal.html
+# ist dafür NICHT brauchbar: sie baut das JSON erst im Browser zusammen, ein
+# HTTP-GET bekommt nur die leere Hülle. Der Worker selbst liefert die ganze
+# Liste (id, context, date, time, title, body) — aber nur den laufenden Stand,
+# nichts davon ist bei uns dauerhaft. Dieser Sammler holt die Liste alle
+# KOMPASS_INTERVAL Sekunden und upsertet sie in kompass_forecasts (Pascals id
+# ist der Schlüssel; erfasst_at bleibt beim Update stehen, weil es nicht im
+# Body steht). Läuft nur mit Service-Key, also auf Railway — der Admin-Tab
+# trägt beim Laden zusätzlich selbst nach (Browser-Upsert), falls Railway hängt.
+KOMPASS_URL = (os.environ.get("KOMPASS_URL")
+               or "https://kompass-api.pascal-hermann-22.workers.dev?category=k%3Aideas")
+KOMPASS_INTERVAL = int(os.environ.get("KOMPASS_INTERVAL") or 300)
+_kompass_info = {"started": False, "last_run": 0, "last_ok": 0, "runs": 0, "feed": 0,
+                 "neu": 0, "last_error": "", "url": KOMPASS_URL}
+_kompass_lock = threading.Lock()
+_kompass_started = False
+
+# Reihenfolge wichtig: „New York Session Forecast (Update vor Trigger)" enthält
+# auch „new york" — der speziellere Treffer muss zuerst geprüft werden.
+KOMPASS_SESSIONS = [
+    ("update vor trigger", "ny_update"),
+    ("asia", "asia"),
+    ("pre-london", "prelondon"),
+    ("london", "london"),
+    ("new york", "ny"),
+    ("hourly", "hourly"),
+]
+
+
+def kompass_session(ctx):
+    c = (ctx or "").lower()
+    for key, name in KOMPASS_SESSIONS:
+        if key in c:
+            return name
+    return "sonst"
+
+
+def kompass_parse(item):
+    """Ein Worker-Eintrag → eine Zeile für kompass_forecasts (None = kein Forecast,
+    z. B. Pascals Test-Einträge ohne LONG/SHORT-Titel)."""
+    if not isinstance(item, dict) or not item.get("id"):
+        return None
+    # Titel-Formate im Feed (Stand 23.09.2026): seit ~Ende August „LONG - Konfidenz 3/5", davor
+    # „LONG - 60%" (Prozent statt Konfidenz) und vereinzelt Freitext wie „[6H-UPDATE] LONG (fade-Risiko) …".
+    # Richtung = erstes LONG/SHORT im Titel; Konfidenz nur, wenn „Konfidenz N/5" drinsteht.
+    titel = str(item.get("title") or "")
+    mb = re.search(r"\b(LONG|SHORT)\b", titel, re.I)
+    mk = re.search(r"Konfidenz\s*(\d)\s*/\s*5", titel, re.I)
+    bias = mb.group(1).upper() if mb else None
+    konf = int(mk.group(1)) if mk else None
+    if konf is not None and not (1 <= konf <= 5):
+        konf = None
+    datum = str(item.get("date") or "")[:10]
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", datum):
+        datum = None
+    zeit = str(item.get("time") or "").strip()[:5] or None
+    return {
+        "id": str(item["id"])[:80],
+        "session": kompass_session(item.get("context")),
+        "kontext": (item.get("context") or None),
+        "datum": datum,
+        "zeit": zeit,
+        "bias": bias,
+        "konfidenz": konf,
+        "titel": (item.get("title") or None),
+        "text": (item.get("body") or item.get("text") or None),
+        "roh": item,
+        "aktualisiert_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def kompass_collect():
+    """Feed holen, in die DB upserten. Gibt (feed_count, neu) zurück, wirft bei Fehlern."""
+    with _kompass_lock:
+        r = requests.get(KOMPASS_URL, timeout=20, headers={"Accept": "application/json"})
+        r.raise_for_status()
+        items = r.json()
+        if not isinstance(items, list):
+            raise ValueError("Worker liefert keine Liste")
+        rows = [z for z in (kompass_parse(i) for i in items) if z]
+        vorhanden = set()
+        if rows:
+            for s in _sb_all("kompass_forecasts", {"select": "id"}):
+                vorhanden.add(str(s.get("id")))
+        neu = [z for z in rows if z["id"] not in vorhanden]
+        # Alles upserten (nicht nur Neues): Pascal kann Text/Titel eines Eintrags nachträglich
+        # ändern, und der Feed ist klein (~130 Zeilen) — 200er-Pakete reichen.
+        for i in range(0, len(rows), 200):
+            sb_upsert("kompass_forecasts", rows[i:i + 200])
+        _kompass_info.update({"feed": len(rows), "neu": len(neu), "last_ok": time.time()})
+        if neu:
+            print(f"[kompass] {len(neu)} neue Forecasts gesichert (Feed {len(rows)})", flush=True)
+        return len(rows), len(neu)
+
+
+def kompass_loop():
+    print(f"[kompass] 🧭 Sammler läuft (alle {KOMPASS_INTERVAL}s, {KOMPASS_URL})", flush=True)
+    while True:
+        started = time.time()
+        try:
+            kompass_collect()
+            _kompass_info["last_error"] = ""
+        except Exception as e:
+            _kompass_info["last_error"] = f"{type(e).__name__}: {e}"
+            print(f"[kompass] ⚠️ {e}", flush=True)
+        _kompass_info["last_run"] = time.time()
+        _kompass_info["runs"] += 1
+        time.sleep(max(30.0, KOMPASS_INTERVAL - (time.time() - started)))
+
+
+def start_kompass():
+    global _kompass_started
+    if _kompass_started:
+        return
+    if not SUPABASE_SERVICE_KEY:
+        print("[kompass] ℹ️ Kein SUPABASE_SERVICE_KEY — Sammler inaktiv (Admin-Tab trägt selbst nach).", flush=True)
+        return
+    _kompass_started = True
+    _kompass_info["started"] = True
+    threading.Thread(target=kompass_loop, daemon=True).start()
+
+
+@app.route("/admin/kompass", methods=["GET", "OPTIONS"])
+def admin_kompass():
+    """Stand des Sammlers; ?refresh=1 holt den Feed sofort (Knopf „Jetzt holen" im Admin-Tab)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    out = dict(_kompass_info)
+    if (request.args.get("refresh") or "") in ("1", "true"):
+        try:
+            feed, neu = kompass_collect()
+            out.update({"feed": feed, "neu": neu, "refreshed": True, "last_error": ""})
+        except Exception as e:
+            out.update({"refreshed": False, "last_error": f"{type(e).__name__}: {e}"})
+    out["now"] = time.time()
+    return jsonify(out)
+
+
+start_kompass()
 
 
 start_watcher()

@@ -1161,6 +1161,41 @@
      hässlich und man checkt nix — erklär mal visuell"; 01:xx: „der Erklärblock und der Zeitstrahl sind
      mies hässlich, man erkennt da gar nichts"): Kopf eine Zeile, Ablauf als Tabelle, je Block eine
      Konten-Tabelle (Haken · Konto · WD · Balance · Start · TP · SL · Risiko · Slave · Stand). */
+  /* Kompass-Tab im Admin (23.09.2026): Karten je Session, Archiv-Tabelle. Farben wie die WD-Chips. */
+  #adm-pane-kompass .btn-mini{padding:4px 11px;font-size:12px;height:auto}
+  #adm-pane-kompass .kp-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+  #adm-pane-kompass .kp-chip{display:inline-block;font-size:12.5px;font-weight:600;padding:5px 13px;border-radius:999px;border:1px solid var(--line);color:var(--sub)}
+  #adm-pane-kompass .kp-chip.ok{color:#2a9d5c;border-color:#2a9d5c;background:rgba(42,157,92,.08)}
+  #adm-pane-kompass .kp-chip.warn{color:var(--danger);border-color:var(--danger);background:rgba(220,60,60,.06)}
+  #adm-pane-kompass .kp-status{font-size:12.5px;color:var(--sub);margin-top:8px;line-height:1.45}
+  #adm-pane-kompass .kp-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  #adm-pane-kompass .kp-karte{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--surface,#fff);cursor:pointer}
+  #adm-pane-kompass .kp-karte.leer{opacity:.6;cursor:default;border-style:dashed}
+  #adm-pane-kompass .kp-karte.alt{opacity:.7}
+  #adm-pane-kompass .kp-karte-kopf{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  #adm-pane-kompass .kp-session{font-size:12px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  #adm-pane-kompass .kp-bias{font-size:20px;font-weight:700;letter-spacing:-.01em;margin-top:4px}
+  #adm-pane-kompass .kp-bias.long{color:#2a9d5c}
+  #adm-pane-kompass .kp-bias.short{color:var(--danger)}
+  #adm-pane-kompass .kp-konf{font-size:13px;letter-spacing:.08em;color:var(--sub)}
+  #adm-pane-kompass .kp-konf b{color:var(--ink)}
+  #adm-pane-kompass .kp-konf.hoch b{color:#2a9d5c}
+  #adm-pane-kompass .kp-alter{font-size:11.5px;color:var(--sub);margin-top:4px;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass .kp-text{font-size:12.5px;line-height:1.5;margin-top:8px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  #adm-pane-kompass .kp-karte.offen .kp-text{display:block;-webkit-line-clamp:unset}
+  #adm-pane-kompass .kp-chips{display:flex;gap:6px;flex-wrap:wrap}
+  #adm-pane-kompass .kp-fchip{border:1px solid var(--line);background:none;color:var(--sub);border-radius:999px;padding:3px 10px;font-size:11.5px;cursor:pointer}
+  #adm-pane-kompass .kp-fchip.active{color:var(--violet);border-color:var(--violet)}
+  #adm-pane-kompass table.kp-tab{width:100%;border-collapse:collapse;font-size:12.5px}
+  #adm-pane-kompass table.kp-tab th{text-align:left;font-weight:600;color:var(--sub);font-size:11.5px;padding:6px 8px;border-bottom:1px solid var(--line)}
+  #adm-pane-kompass table.kp-tab td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass table.kp-tab tr.kp-zeile{cursor:pointer}
+  #adm-pane-kompass table.kp-tab tr.kp-zeile:hover td{background:rgba(120,120,160,.06)}
+  #adm-pane-kompass table.kp-tab tr.kp-detail td{font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink);background:rgba(120,120,160,.04)}
+  #adm-pane-kompass .kp-b{font-weight:700}
+  #adm-pane-kompass .kp-b.long{color:#2a9d5c}
+  #adm-pane-kompass .kp-b.short{color:var(--danger)}
+  #adm-pane-kompass .kp-mehr{margin-top:8px}
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -7177,6 +7212,7 @@
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
+          <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
@@ -7420,6 +7456,40 @@
             <div id="wd-verlauf" style="font-size:12.5px"></div>
           </div>
         </div>
+        <!-- KOMPASS (23.09.2026, Finn: „bau eine Seite in Prophos unter Admin, wo ich die Daten immer live
+             bekomme + alles in die DB packen immer"): Pascals Nasdaq-Forecasts. Oben je Session der neueste
+             Forecast als Karte (Richtung, Konfidenz, Alter, Text zum Aufklappen), darunter das Archiv aus
+             kompass_forecasts. Der Tab holt den Worker-Feed selbst und trägt fehlende Zeilen in die DB
+             nach — unabhängig vom Railway-Sammler. Eigene Verdrahtung (kein Sammel-Handler). -->
+        <div id="adm-pane-kompass" hidden>
+          <div class="panel" style="margin:0 0 12px">
+            <div class="kp-kopf-zeile">
+              <div class="panel-title">Kompass <span style="font-weight:400;color:var(--sub);font-size:12px">· Nasdaq-100-Forecasts von Pascals Research-Agent</span></div>
+              <div class="vp-zeile">
+                <span class="kp-chip" id="kp-chip">—</span>
+                <button class="btn btn-primary btn-mini" id="kpHolen" title="Feed sofort holen und in die DB schreiben (Browser + Railway-Sammler)">Jetzt holen</button>
+              </div>
+            </div>
+            <div class="kp-status" id="kp-status">Lade …</div>
+          </div>
+          <div class="kp-karten" id="kp-karten"></div>
+          <div class="panel" style="margin-top:12px">
+            <div class="kp-kopf-zeile" style="margin-bottom:8px">
+              <div class="panel-title">Archiv <span class="mono" id="kp-archiv-n" style="font-weight:400;font-size:12px;color:var(--sub)"></span></div>
+              <div class="kp-chips" id="kp-filter">
+                <button type="button" class="kp-fchip active" data-kp-session="">alle</button>
+                <button type="button" class="kp-fchip" data-kp-session="asia">Asia</button>
+                <button type="button" class="kp-fchip" data-kp-session="prelondon">Pre-London</button>
+                <button type="button" class="kp-fchip" data-kp-session="london">London</button>
+                <button type="button" class="kp-fchip" data-kp-session="ny">New York</button>
+                <button type="button" class="kp-fchip" data-kp-session="ny_update">NY-Update</button>
+                <button type="button" class="kp-fchip" data-kp-session="hourly">Stündlich</button>
+              </div>
+            </div>
+            <div id="kp-archiv"></div>
+          </div>
+        </div>
+
         <div id="adm-pane-buys" hidden>
           <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-buys-body" hidden>
@@ -12229,6 +12299,9 @@
         $('adm-pane-wallet').hidden   = name !== 'wallet'
         $('adm-pane-rg').hidden       = name !== 'rg'
         $('adm-pane-wd').hidden       = name !== 'wd'
+        $('adm-pane-kompass').hidden  = name !== 'kompass'
+        if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
+        else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
@@ -25595,7 +25668,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.415'
+  const OS_TAB_BUILD = '2026-09-22.416'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30305,6 +30378,192 @@
     wdVerlauf()
   }
   window._wdTabOeffnen = wdOpen
+
+  /* ── KOMPASS-TAB (23.09.2026) ───────────────────────────────────────────────
+   * Pascals Nasdaq-Forecasts („Kompass"): Worker-Feed → Karten je Session + Archiv aus kompass_forecasts.
+   * Zwei Wege in die DB: der Railway-Sammler (app.py, alle 5 min) und dieser Tab beim Laden (Browser-Upsert
+   * der fehlenden Zeilen) — so bleibt nichts liegen, auch wenn Railway gerade hängt. Solange der Tab offen
+   * ist, lädt er alle 60 s neu. Titel-Formate: „LONG - Konfidenz 3/5" (aktuell), „LONG - 60%" (bis Ende
+   * August), vereinzelt Freitext — Richtung = erstes LONG/SHORT, Konfidenz nur bei „Konfidenz N/5". */
+  const KP_URL = 'https://kompass-api.pascal-hermann-22.workers.dev?category=k%3Aideas'
+  const KP_SESSIONS = [['update vor trigger','ny_update'],['asia','asia'],['pre-london','prelondon'],['london','london'],['new york','ny'],['hourly','hourly']]
+  const KP_NAMEN = { asia: 'Asia Open', prelondon: 'Pre-London', london: 'London', ny: 'New York', ny_update: 'NY · Update vor Open', hourly: 'Stündlich', sonst: 'Sonstige' }
+  const KP_REIHE = ['ny', 'ny_update', 'london', 'prelondon', 'asia', 'hourly']
+  const _kp = { rows: [], filter: '', offen: null, timer: null, info: null, feedAt: 0, feedFehler: '', dbFehler: '', dbN: 0, mehr: 0, geladen: false }
+
+  function kpSession(ctx){ const c = String(ctx || '').toLowerCase(); for(const [k, n] of KP_SESSIONS){ if(c.includes(k)) return n } return 'sonst' }
+  function kpParse(it){
+    if(!it || !it.id) return null
+    const t = String(it.title || '')
+    const mb = t.match(/\b(LONG|SHORT)\b/i), mk = t.match(/Konfidenz\s*(\d)\s*\/\s*5/i)
+    const datum = /^\d{4}-\d{2}-\d{2}/.test(String(it.date || '')) ? String(it.date).slice(0, 10) : null
+    const k = mk ? Number(mk[1]) : null
+    return { id: String(it.id).slice(0, 80), session: kpSession(it.context), kontext: it.context || null, datum, zeit: (String(it.time || '').trim().slice(0, 5)) || null,
+      bias: mb ? mb[1].toUpperCase() : null, konfidenz: (k >= 1 && k <= 5) ? k : null, titel: t || null, text: it.body || it.text || null, roh: it, aktualisiert_at: new Date().toISOString() }
+  }
+  function kpEsc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
+  // Neueste zuerst: Datum, dann id (idea-<epoch>: neuere ids sind größer). Test-Einträge ohne Datum landen hinten.
+  function kpSort(a, b){ return String(b.datum || '').localeCompare(String(a.datum || '')) || String(b.id).localeCompare(String(a.id)) }
+  function kpStamp(r){ return (r.datum || '—') + (r.zeit ? ' ' + r.zeit : '') }
+  function kpAlter(r){
+    if(!r.datum) return ''
+    const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
+    const d = Math.round((new Date(heute) - new Date(r.datum)) / 86400000)
+    if(d <= 0) return r.zeit ? 'heute ' + r.zeit + ' Dubai' : 'heute'
+    if(d === 1) return 'gestern' + (r.zeit ? ' ' + r.zeit : '')
+    return 'vor ' + d + ' Tagen'
+  }
+  function kpKonf(k, klein){
+    if(k == null) return '<span class="kp-konf">Konfidenz —</span>'
+    const p = '●'.repeat(k) + '○'.repeat(5 - k)
+    return `<span class="kp-konf${k >= 4 ? ' hoch' : ''}"><b>${p}</b>${klein ? '' : ' ' + k + '/5'}</span>`
+  }
+  function kpSay(t, art){ const el = document.getElementById('kp-status'); if(el){ el.textContent = t || ''; el.style.color = art === 'err' ? 'var(--danger)' : '' } }
+
+  async function kpFeedHolen(){
+    // Feed direkt aus dem Browser (der Worker schickt CORS-Header — signal.html macht dasselbe von pages.dev aus)
+    const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 15000)
+    try{
+      const r = await fetch(KP_URL, { cache: 'no-store', signal: ctrl.signal })
+      if(!r.ok) throw new Error('HTTP ' + r.status)
+      const list = await r.json()
+      if(!Array.isArray(list)) throw new Error('keine Liste')
+      _kp.feedAt = Date.now(); _kp.feedFehler = ''
+      return list.map(kpParse).filter(Boolean)
+    }catch(e){ _kp.feedFehler = e.name === 'AbortError' ? 'Zeitüberschreitung' : (e.message || String(e)); return null }
+    finally{ clearTimeout(tm) }
+  }
+  async function kpDbLaden(){
+    try{
+      const { data, error } = await supabase.from('kompass_forecasts').select('id,session,kontext,datum,zeit,bias,konfidenz,titel,text,erfasst_at').order('id', { ascending: false }).limit(1000)
+      if(error) throw error
+      _kp.dbFehler = ''; _kp.dbN = (data || []).length
+      return data || []
+    }catch(e){ _kp.dbFehler = e.message || String(e); return null }
+  }
+  async function kpNachtragen(feedRows, dbRows){
+    // Was der Feed hat und die DB nicht: aus dem Browser upserten (RLS: angemeldet reicht)
+    const da = new Set((dbRows || []).map(r => r.id))
+    const neu = feedRows.filter(r => !da.has(r.id))
+    if(!neu.length) return 0
+    const { error } = await supabase.from('kompass_forecasts').upsert(neu, { onConflict: 'id' })
+    if(error){ console.warn('[kompass] Nachtragen', error); return 0 }
+    return neu.length
+  }
+  async function kpRailInfo(){
+    try{
+      const { data: { session } } = await supabase.auth.getSession()
+      const tok = session?.access_token; if(!tok) return null
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 8000)
+      const r = await fetch(`${WATCHER_HOME}/admin/kompass`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      clearTimeout(tm)
+      if(!r.ok) return null
+      return await r.json()
+    }catch(e){ return null }
+  }
+
+  async function kpLaden(){
+    const [feed, db, info] = await Promise.all([kpFeedHolen(), kpDbLaden(), kpRailInfo()])
+    _kp.info = info
+    let nachgetragen = 0
+    if(feed && db) nachgetragen = await kpNachtragen(feed, db)
+    // Anzeige: DB-Stand + alles aus dem Feed (auch wenn der Upsert scheitert, sieht Finn den Feed)
+    const map = new Map()
+    ;(db || []).forEach(r => map.set(r.id, r))
+    ;(feed || []).forEach(r => map.set(r.id, Object.assign({}, map.get(r.id) || {}, r)))
+    _kp.rows = [...map.values()].sort(kpSort)
+    _kp.geladen = true
+    kpRender(nachgetragen)
+  }
+
+  function kpRender(nachgetragen){
+    const chip = document.getElementById('kp-chip')
+    const teile = []
+    if(_kp.feedFehler) teile.push('Feed: Fehler (' + _kp.feedFehler + ')')
+    else if(_kp.feedAt) teile.push('Feed: ok · ' + new Date(_kp.feedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+    if(_kp.dbFehler) teile.push('DB: Fehler (' + _kp.dbFehler + ')')
+    else teile.push('DB: ' + (_kp.dbN + (nachgetragen || 0)) + ' Forecasts' + (nachgetragen ? ' · ' + nachgetragen + ' eben nachgetragen' : ''))
+    const i = _kp.info
+    if(i && i.started){
+      const vor = i.last_run ? Math.max(0, Math.round((i.now - i.last_run) / 60)) : null
+      teile.push('Railway-Sammler: ' + (i.last_error ? 'Fehler (' + i.last_error + ')' : (vor == null ? 'gestartet, noch kein Lauf' : 'letzter Lauf vor ' + vor + ' min')))
+    } else if(i && !i.started) teile.push('Railway-Sammler: inaktiv')
+    else teile.push('Railway-Sammler: nicht erreichbar')
+    kpSay(teile.join(' · '))
+    if(chip){
+      const schlecht = !!(_kp.feedFehler && _kp.dbFehler)
+      chip.className = 'kp-chip ' + (schlecht ? 'warn' : (_kp.feedFehler ? '' : 'ok'))
+      chip.textContent = schlecht ? 'keine Daten' : (_kp.feedFehler ? 'nur DB-Stand' : 'live')
+    }
+    // Karten: je Session der neueste Forecast
+    const box = document.getElementById('kp-karten'); if(!box) return
+    const neueste = {}
+    for(const r of _kp.rows){ if(!neueste[r.session]) neueste[r.session] = r }
+    const heute = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
+    box.innerHTML = KP_REIHE.map(s => {
+      const r = neueste[s]
+      if(!r) return `<div class="kp-karte leer"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div><div class="kp-bias" style="color:var(--sub)">—</div><div class="kp-alter">noch kein Forecast</div></div>`
+      const alt = r.datum && r.datum < heute
+      return `<div class="kp-karte${alt ? ' alt' : ''}${_kp.offen === r.id ? ' offen' : ''}" data-kp-id="${kpEsc(r.id)}" title="Klick: Text auf-/zuklappen">
+        <div class="kp-karte-kopf"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div>${kpKonf(r.konfidenz)}</div>
+        <div class="kp-bias ${r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''}">${kpEsc(r.bias || '?')}</div>
+        <div class="kp-alter">${kpEsc(kpStamp(r))} · ${kpEsc(kpAlter(r))}${alt ? ' · <b>alt</b>' : ''}</div>
+        <div class="kp-text">${kpEsc(r.text || r.titel || '')}</div>
+      </div>`
+    }).join('')
+    kpArchivRender()
+  }
+  function kpArchivRender(){
+    const box = document.getElementById('kp-archiv'); if(!box) return
+    // Pascals Test-Einträge (kein Datum, keine Richtung) bleiben in der DB, aber nicht in der Tabelle
+    const rows = _kp.rows.filter(r => (r.datum || r.bias) && (!_kp.filter || r.session === _kp.filter))
+    const n = document.getElementById('kp-archiv-n'); if(n) n.textContent = rows.length ? '· ' + rows.length : ''
+    const limit = 60 + _kp.mehr * 100
+    const zeig = rows.slice(0, limit)
+    if(!zeig.length){ box.innerHTML = '<div style="color:var(--sub);font-size:12.5px;padding:8px 2px">nichts da</div>'; return }
+    box.innerHTML = `<table class="kp-tab"><thead><tr><th>Datum</th><th>Session</th><th>Richtung</th><th>Konfidenz</th><th>Titel</th></tr></thead><tbody>${zeig.map(r => {
+      const cls = r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''
+      const d = _kp.offen === r.id ? `<tr class="kp-detail"><td colspan="5">${kpEsc(r.text || '')}</td></tr>` : ''
+      return `<tr class="kp-zeile" data-kp-id="${kpEsc(r.id)}"><td class="mono">${kpEsc(kpStamp(r))}</td><td>${kpEsc(KP_NAMEN[r.session] || r.kontext || r.session)}</td><td class="kp-b ${cls}">${kpEsc(r.bias || '—')}</td><td>${kpKonf(r.konfidenz, true)}</td><td style="color:var(--sub)">${kpEsc(r.titel || '')}</td></tr>${d}`
+    }).join('')}</tbody></table>` + (rows.length > limit ? `<div class="kp-mehr"><button type="button" class="btn btn-ghost btn-xs" id="kp-mehr-btn">${rows.length - limit} weitere zeigen</button></div>` : '')
+  }
+
+  async function kpHolen(){
+    const btn = document.getElementById('kpHolen'); if(btn){ btn.disabled = true; btn.textContent = '⏳ holt …' }
+    try{
+      // Railway-Sammler anstoßen (schreibt per Service-Key) und parallel selbst laden/nachtragen
+      const rail = (async () => { try{
+        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+        await fetch(`${WATCHER_HOME}/admin/kompass?refresh=1`, { headers: { 'sb-token': tok }, cache: 'no-store' })
+      }catch(e){} })()
+      await Promise.all([rail, kpLaden()])
+      await kpLaden()
+    }finally{ if(btn){ btn.disabled = false; btn.textContent = 'Jetzt holen' } }
+  }
+  function kpOpen(){
+    if(!_kp.geladen) kpSay('Lade …')
+    kpLaden()
+    clearInterval(_kp.timer); _kp.timer = setInterval(kpLaden, 60000)
+  }
+  function kpClose(){ clearInterval(_kp.timer); _kp.timer = null }
+  window._kpTabOeffnen = kpOpen
+  window._kpTabSchliessen = kpClose
+  document.getElementById('kpHolen')?.addEventListener('click', kpHolen)
+  document.getElementById('kp-karten')?.addEventListener('click', e => {
+    const k = e.target.closest('[data-kp-id]'); if(!k) return
+    _kp.offen = _kp.offen === k.dataset.kpId ? null : k.dataset.kpId; kpRender(0)
+  })
+  document.getElementById('kp-archiv')?.addEventListener('click', e => {
+    if(e.target.id === 'kp-mehr-btn'){ _kp.mehr++; kpArchivRender(); return }
+    const z = e.target.closest('tr[data-kp-id]'); if(!z) return
+    _kp.offen = _kp.offen === z.dataset.kpId ? null : z.dataset.kpId; kpRender(0)
+  })
+  document.getElementById('kp-filter')?.addEventListener('click', e => {
+    const b = e.target.closest('.kp-fchip'); if(!b) return
+    _kp.filter = b.dataset.kpSession || ''; _kp.mehr = 0
+    document.querySelectorAll('#kp-filter .kp-fchip').forEach(x => x.classList.toggle('active', x === b))
+    kpArchivRender()
+  })
   async function wdNeuLaden(){
     const tag = document.getElementById('wd-tag')?.value; if(!tag) return
     try{
