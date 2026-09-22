@@ -885,16 +885,23 @@ def main():
            ("MNQZ6", (75, 1020, 125, 1038), "Text"), ("Short", (213, 1020, 250, 1038), "Text"), ("-3", (433, 1020, 445, 1038), "Text"),
            ("NQZ6", (75, 1054, 125, 1072), "Text"), ("Long", (213, 1054, 250, 1072), "Text"), ("2", (433, 1054, 445, 1072), "Text"),
            ("MNQZ2026", (1680, 365, 1748, 385), "Text")]
+    _ohne = lambda d: (d and {k: v for k, v in d.items() if k != "anker"})
     chk("TV-ORDER 4b: Positions-Tabelle — Zeile nur bei passender Wurzel UND Seite, MNQ nie NQ, Watchlist zaehlt nie",
-        order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell") == {"menge": 3.0, "zeilen": 1, "spalten": True}
-        and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy") == {"menge": 0.0, "zeilen": 0, "spalten": True}
-        and order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy") == {"menge": 2.0, "zeilen": 1, "spalten": True}
-        and order_bot.tv_positions_tabelle(_PT[:6], "MNQZ6", "sell") == {"menge": 0.0, "zeilen": 0, "spalten": True})
+        _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")) == {"menge": 3.0, "zeilen": 1, "spalten": True}
+        and _ohne(order_bot.tv_positions_tabelle(_PT, "MNQZ6", "buy")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
+        and _ohne(order_bot.tv_positions_tabelle(_PT, "NQZ6", "buy")) == {"menge": 2.0, "zeilen": 1, "spalten": True}
+        and _ohne(order_bot.tv_positions_tabelle(_PT[:6], "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": True}
+        and order_bot.tv_positions_tabelle(_PT, "MNQZ6", "sell")["anker"] == (56, 979, 120, 997))
+    # Reiter durch Meldungen verdeckt (22.09.2026 09:50): der Anker aus dem Vorher-Blick traegt weiter
+    chk("TV-ORDER 4b: ohne sichtbaren Reiter zaehlt die Tabelle nur mit dem Anker aus dem Vorher-Blick (+-20 px)",
+        order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
+        and _ohne(order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 979, 120, 997))) == {"menge": 3.0, "zeilen": 1, "spalten": True}
+        and order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell", anker=(56, 700, 120, 718)) is None)
     _PT2 = [x for x in _PT if x[0] not in ("Side", "Qty")]              # Finns Lauf: nur 'Symbol' benannt
     chk("TV-ORDER 4b: ohne Side/Qty zaehlen Zeilen mit der Symbol-Wurzel in der Symbol-Spalte (Menge unbekannt)",
-        order_bot.tv_positions_tabelle(_PT2, "MNQZ6", "sell") == {"menge": 0.0, "zeilen": 1, "spalten": False}
-        and order_bot.tv_positions_tabelle(_PT2, "NQZ6", "sell") == {"menge": 0.0, "zeilen": 1, "spalten": False}
-        and order_bot.tv_positions_tabelle(_PT2, "ESZ6", "sell") == {"menge": 0.0, "zeilen": 0, "spalten": False})
+        _ohne(order_bot.tv_positions_tabelle(_PT2, "MNQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
+        and _ohne(order_bot.tv_positions_tabelle(_PT2, "NQZ6", "sell")) == {"menge": 0.0, "zeilen": 1, "spalten": False}
+        and _ohne(order_bot.tv_positions_tabelle(_PT2, "ESZ6", "sell")) == {"menge": 0.0, "zeilen": 0, "spalten": False})
     chk("TV-ORDER 4b: ohne Reiter 'Positions' ueber dem Kopf gibt es KEINEN Tabellen-Beweis (None, nicht 'flach')",
         order_bot.tv_positions_tabelle([x for x in _PT if x[0] != "Positions"], "MNQZ6", "sell") is None
         and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
@@ -912,10 +919,12 @@ def main():
     _TO = [("Take Profit order placed on MNQZ6", (130, 1100, 420, 1120), "Text"), ("Sell 2 at 30,858.25", (130, 1125, 300, 1140), "Text"),
            ("Order filled: Buy 1 NQZ2026", (130, 1150, 400, 1170), "Text"), ("Start creating order", (1325, 920, 1618, 978), "Button"),
            ("Take Profit order placed on ESZ6", None, "Text")]
-    chk("TV-ORDER 4b: TradingViews Order-Meldungen — nur mit der Symbol-Wurzel des Plans, nie Unsichtbares oder der Kauf-Knopf",
+    chk("TV-ORDER 4b: TradingViews Order-Meldungen — Symbol im Text muss die Plan-Wurzel sein, ohne Symbol zaehlt sie; nie Unsichtbares oder der Kauf-Knopf",
         order_bot.tv_order_meldungen(_TO, "MNQZ6") == ["Take Profit order placed on MNQZ6"]
         and order_bot.tv_order_meldungen(_TO, "NQZ6") == ["Order filled: Buy 1 NQZ2026"]
-        and order_bot.tv_order_meldungen(_TO, "ESZ6") == [])
+        and order_bot.tv_order_meldungen(_TO, "ESZ6") == []
+        and order_bot.tv_order_meldungen([("Take Profit order placed on", (130, 1100, 400, 1120), "Text"), ("Stop Loss order placed on", (130, 1130, 400, 1150), "Text")], "NQZ6")
+            == ["Take Profit order placed on", "Stop Loss order placed on"])
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
     chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
         order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"

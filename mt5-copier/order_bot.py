@@ -3834,7 +3834,7 @@ TV_RX_POS_LONGSHORT = {"buy": re.compile(r"^(long|buy|kauf)", re.I), "sell": re.
 TV_RX_POS_TAB = re.compile(r"^positions?$", re.I)
 
 
-def tv_positions_tabelle(roh, symbol, richtung):
+def tv_positions_tabelle(roh, symbol, richtung, anker=None):
     """Positions-Tabelle unten im TradingView-Konto-Bereich lesen (4b, 22.09.2026,
     Finns erster scharfer Lauf: "es drueckt nicht drauf" — der Klick hing am
     Positions-Reader, und der ist bei ihm PAUSIERT, weil Duplikium kopiert. Der
@@ -3849,7 +3849,12 @@ def tv_positions_tabelle(roh, symbol, richtung):
     Symbol-Spalte (Tradovate nettet pro Symbol — eine NEUE Zeile ist eine neue
     Position; die Gegenrichtung auf einer bestehenden gibt keine neue Zeile und
     damit ehrlich UNKLAR).
-    -> {'menge': Summe, 'zeilen': n, 'spalten': bool} oder None ohne Anker."""
+    anker = Kopfzelle 'Symbol' aus einem FRUEHEREN Blick (22.09.2026 09:50, Finns
+    Lauf: nach dem Klick decken TradingViews Meldungen die Reiter-Zeile ab —
+    'kein Reiter Positions zu sehen' — obwohl die Tabelle darunter unveraendert
+    steht). Steht die Symbol-Zelle noch an derselben Stelle (+-20 px), gilt sie
+    ohne Reiter.
+    -> {'menge': Summe, 'zeilen': n, 'spalten': bool, 'anker': rect} oder None ohne Anker."""
     els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
     mitte_y = lambda r: (r[1] + r[3]) // 2
     tabs = [r for n, r in els if TV_RX_POS_TAB.search(n)]
@@ -3857,8 +3862,10 @@ def tv_positions_tabelle(roh, symbol, richtung):
     for ns, rs in els:
         if not TV_RX_POS_SYMBOL.search(ns):
             continue
-        # ein Positions-Reiter DARUEBER (hoechstens 120 px), grob gleiche linke Kante
-        if not any(0 < mitte_y(rs) - mitte_y(t) <= 120 and abs(t[0] - rs[0]) <= 120 for t in tabs):
+        # ein Positions-Reiter DARUEBER (hoechstens 120 px), grob gleiche linke Kante —
+        # oder die Zelle sitzt dort, wo sie beim Vorher-Blick mit Reiter sass
+        gleich = bool(anker) and abs(rs[0] - anker[0]) <= 20 and abs(rs[1] - anker[1]) <= 20
+        if not gleich and not any(0 < mitte_y(rs) - mitte_y(t) <= 120 and abs(t[0] - rs[0]) <= 120 for t in tabs):
             continue
         seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
         mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
@@ -3889,7 +3896,7 @@ def tv_positions_tabelle(roh, symbol, richtung):
             kand = [(abs(r2[0] - rq[0]), tv_zahl_lesen(n2)) for n2, r2 in els
                     if abs(mitte_y(r2) - y) <= 12 and abs(r2[0] - rq[0]) <= 90 and tv_zahl_lesen(n2) is not None]
             summe += abs(min(kand)[1]) if kand else 0.0
-    return {"menge": summe, "zeilen": zeilen, "spalten": spalten}
+    return {"menge": summe, "zeilen": zeilen, "spalten": spalten, "anker": tuple(rs)}
 
 
 def tv_positions_zone(roh, max_n=24):
@@ -3914,7 +3921,11 @@ TV_RX_MELDUNG = re.compile(r"\b(order (placed|filled|executed)|position opened|f
 
 
 def tv_order_meldungen(roh, symbol):
-    """TradingViews eigene Order-Meldungen (Toasts) mit der Symbol-Wurzel des Plans.
+    """TradingViews eigene Order-Meldungen (Toasts). Steht ein Symbol im Text, muss
+    es die Wurzel des Plans sein; OHNE Symbol im Text zaehlt die Meldung trotzdem
+    (22.09.2026 09:50, Finns Lauf: TradingView setzt den Symbol-Namen als EIGENEN
+    Knoten neben 'Take Profit order placed on' — der Text selbst traegt ihn nicht;
+    gegen alte Meldungen schuetzt der Vorher/Nachher-Vergleich des Aufrufers).
     -> Liste der Texte. Rein rechnend."""
     root = tv_symbol_root(symbol)
     out = []
@@ -3922,7 +3933,10 @@ def tv_order_meldungen(roh, symbol):
         n = str(e[0]).strip()
         if not e[1] or not TV_RX_MELDUNG.search(n):
             continue
-        if root and not any(tv_symbol_root(wort) == root for wort in re.findall(r"[A-Za-z0-9!:._-]+", n)):
+        # Symbol-artige Woerter im Text (Buchstaben, dann Ziffern: NQZ6, MNQZ2026, BTC1!) —
+        # gibt es welche, muss eines die Plan-Wurzel tragen; Kurse ('30,858.25') zaehlen nicht.
+        woerter = [tv_symbol_root(x) for x in re.findall(r"\b[A-Za-z]{1,6}[A-Za-z0-9]*\d[A-Za-z0-9!]*", n)]
+        if root and woerter and root not in woerter:
             continue
         if n not in out:
             out.append(n)
@@ -4175,7 +4189,9 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Positions-Tabelle war da hinter 'Show more' verdeckt): TradingViews EIGENE
         # Meldung nach dem Klick. Gezaehlt werden nur Meldungen, die es VOR dem Klick
         # noch nicht gab (alte bleiben minutenlang stehen).
-        toasts_vorher = set(tv_order_meldungen(_tv_uia_roh(w, typen), cmd.get("symbol")))
+        roh_v = _tv_uia_roh(w, typen)
+        toasts_vorher = set(tv_order_meldungen(roh_v, cmd.get("symbol")))
+        namen_vorher = {str(e[0]).strip() for e in roh_v if e[1]}
 
     # --- Beweis am Knopf: er sagt selbst, was er gleich tun wuerde -----------
     roh, _b = blick()
@@ -4230,7 +4246,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                             if tv_symbol_root(p.get("symbol")) == tv_symbol_root(cmd.get("symbol"))
                             and tv_seite_passt(p.get("seite"), plan["richtung"])), {})
         else:
-            jetzt = tv_positions_tabelle(_tv_uia_roh(w, typen_pos), cmd.get("symbol"), plan["richtung"])
+            jetzt = tv_positions_tabelle(_tv_uia_roh(w, typen_pos), cmd.get("symbol"), plan["richtung"], anker=vorher.get("anker"))
             treffer = {}
             if jetzt is None:
                 continue
@@ -4248,14 +4264,18 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     # kann der Bot NICHT wissen. Eine Rueckfrage wird bewusst NICHT geraten
     # weggeklickt: was zu sehen ist, steht in der Meldung.
     roh = _tv_uia_roh(w, typen_pos)
+    # Fuer den naechsten Anker: was ist seit dem Klick NEU auf dem Schirm?
+    neu_seit = [str(e[0]).strip()[:60] for e in roh if e[1] and str(e[0]).strip() not in namen_vorher
+                and 2 < len(str(e[0]).strip()) <= 60]
+    neu_txt = " | Neu seit dem Klick: " + (" | ".join(list(dict.fromkeys(neu_seit))[:15]) or "nichts")
     if not quelle:
         return False, ("Kauf-Klick ist RAUS, aber nicht beweisbar: der Reader ist aus/pausiert und die "
                        "Positions-Tabelle unten in TradingView (Reiter 'Positions', Kopf 'Symbol') "
                        "war nicht zu lesen. In TradingView nachsehen — NICHT blind erneut starten. Tabellen-Zone: "
-                       + tv_positions_zone(roh))
+                       + tv_positions_zone(roh) + neu_txt)
     return False, (f"Ergebnis UNKLAR: 25 s nach dem Kauf-Klick zeigt die Quelle '{quelle}' keine neue Position. "
                    "Erst in TradingView nachsehen, ob die Order liegt — NICHT blind erneut starten. Tabellen-Zone: "
-                   + tv_positions_zone(roh))
+                   + tv_positions_zone(roh) + neu_txt)
 
 
 TV_BRUECKE_FELDER = ("symbol", "richtung", "volumen", "tp_usd", "sl_usd", "probe", "scharf")
