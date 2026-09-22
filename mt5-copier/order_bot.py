@@ -3223,7 +3223,10 @@ def modus_tvkonto(cmd):
             return None, n
 
         def broker_knopf():
-            els, _roh = finde(TV_NAMEN_BROKER, TV_RX_BROKER, y_von=0.5)
+            # y_von 0.5 -> 0.0 (22.09.2026 13:3x): mit MAXIMIERTEM Panel sitzt der Broker-Knopf
+            # 'Tradovate' oben im Fenster — die alte Einschraenkung 'untere Haelfte' haette
+            # ihn (und damit 'verbunden') nicht mehr gesehen.
+            els, _roh = finde(TV_NAMEN_BROKER, TV_RX_BROKER, y_von=0.0)
             return els
 
         def dialog_oder_verbunden(sek):
@@ -3248,7 +3251,11 @@ def modus_tvkonto(cmd):
             nonlocal start, zustand, aktiv
             broker_r = broker_el["r"]
             roh_k = _tv_uia_roh(w, ("Text",), muster=(TV_RX_KONTOARTIG,))
-            kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.5)
+            # y_von 0.0 (22.09.2026, Finns Ablauf: 'wenn er das Maximieren getroffen hat, links
+            # ins Dropdown druecken und anhand der External IDs pruefen, ob es der richtige
+            # Login ist — falls ja switchen, falls nicht abmelden'): der Umschalter sitzt mit
+            # maximiertem Panel OBEN; die Lage zum Broker-Knopf (bis 160 px darunter) reicht.
+            kand = [e for e in tv_uia_namen_filtern(roh_k, TV_RX_KONTOARTIG, _tv_fenster_rect(w), y_von=0.0)
                     if 0 <= e["r"][1] - broker_r[1] <= 160 and abs(e["r"][0] - broker_r[0]) <= 200]
             if len(kand) == 1:
                 trail.append(f"unbekanntes Konto aktiv ('{kand[0]['text'][:30]}') -> erst Dropdown pruefen")
