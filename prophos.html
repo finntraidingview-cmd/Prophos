@@ -1196,6 +1196,21 @@
   #adm-pane-kompass .kp-b.long{color:#2a9d5c}
   #adm-pane-kompass .kp-b.short{color:var(--danger)}
   #adm-pane-kompass .kp-mehr{margin-top:8px}
+  #adm-pane-kompass .kp-stat-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
+  @media (max-width:900px){#adm-pane-kompass .kp-stat-grid{grid-template-columns:1fr}}
+  #adm-pane-kompass .kp-stat-titel{font-size:12px;font-weight:600;color:var(--sub);margin-bottom:4px}
+  #adm-pane-kompass table.kp-stat{width:100%;border-collapse:collapse;font-size:12.5px}
+  #adm-pane-kompass table.kp-stat th{text-align:right;font-weight:600;color:var(--sub);font-size:11.5px;padding:4px 8px;border-bottom:1px solid var(--line)}
+  #adm-pane-kompass table.kp-stat th:first-child,#adm-pane-kompass table.kp-stat td:first-child{text-align:left}
+  #adm-pane-kompass table.kp-stat td{text-align:right;padding:5px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #adm-pane-kompass table.kp-stat td small{display:block;color:var(--sub);font-size:10.5px;font-weight:400}
+  #adm-pane-kompass .kp-q{font-weight:700}
+  #adm-pane-kompass .kp-q.gut{color:#2a9d5c}
+  #adm-pane-kompass .kp-q.schlecht{color:var(--danger)}
+  #adm-pane-kompass .kp-erg{white-space:nowrap;font-variant-numeric:tabular-nums}
+  #adm-pane-kompass .kp-erg.hit{color:#2a9d5c}
+  #adm-pane-kompass .kp-erg.miss{color:var(--danger)}
+  #adm-pane-kompass .kp-erg.offen{color:var(--sub)}
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -7474,6 +7489,18 @@
             <div class="kp-status" id="kp-status">Lade …</div>
           </div>
           <div class="kp-karten" id="kp-karten"></div>
+          <!-- Trefferquote (23.09.2026, Finn: „is der Bot von meinem Bruder, will sehen wie gut der is"): Railway rechnet je
+               Forecast die NQ-Bewegung 1/2/4/8 h nach der Posting-Zeit (kompass_forecasts.auswertung); hier die Quoten. -->
+          <div class="panel" style="margin-top:12px">
+            <div class="kp-kopf-zeile" style="margin-bottom:6px">
+              <div class="panel-title">Trefferquote <span style="font-weight:400;color:var(--sub);font-size:12px">· Kurs n Stunden nach dem Forecast in Forecast-Richtung? NQ-Futures, ab Posting-Zeit</span></div>
+            </div>
+            <div class="kp-stat-grid">
+              <div><div class="kp-stat-titel">je Session</div><div id="kp-stat-session"></div></div>
+              <div><div class="kp-stat-titel">je Konfidenz <span id="kp-stat-konf-filter" style="font-weight:400;color:var(--sub)"></span></div><div id="kp-stat-konf"></div></div>
+            </div>
+            <div class="kf" style="margin-top:6px">Treffer = Schlusskurs nach n h liegt in Forecast-Richtung · Ø = mittlere Bewegung in Forecast-Richtung (negativ = im Schnitt dagegen) · n = ausgewertete Forecasts. Grün ab 60 %, rot bis 45 %.</div>
+          </div>
           <div class="panel" style="margin-top:12px">
             <div class="kp-kopf-zeile" style="margin-bottom:8px">
               <div class="panel-title">Archiv <span class="mono" id="kp-archiv-n" style="font-weight:400;font-size:12px;color:var(--sub)"></span></div>
@@ -25669,7 +25696,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.418'
+  const OS_TAB_BUILD = '2026-09-22.419'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30400,7 +30427,9 @@
     const mb = t.match(/\b(LONG|SHORT)\b/i), mk = t.match(/Konfidenz\s*(\d)\s*\/\s*5/i)
     const datum = /^\d{4}-\d{2}-\d{2}/.test(String(it.date || '')) ? String(it.date).slice(0, 10) : null
     const k = mk ? Number(mk[1]) : null
-    return { id: String(it.id).slice(0, 80), session: kpSession(it.context), kontext: it.context || null, datum, zeit: (String(it.time || '').trim().slice(0, 5)) || null,
+    const mt = String(it.id).match(/^idea-(\d{10})$/)   // Pascals id = Epoch-Sekunden = Posting-Zeit
+    const t0 = mt ? new Date(Number(mt[1]) * 1000).toISOString() : null
+    return { id: String(it.id).slice(0, 80), t0, session: kpSession(it.context), kontext: it.context || null, datum, zeit: (String(it.time || '').trim().slice(0, 5)) || null,
       bias: mb ? mb[1].toUpperCase() : null, konfidenz: (k >= 1 && k <= 5) ? k : null, titel: t || null, text: it.body || it.text || null, roh: it, aktualisiert_at: new Date().toISOString() }
   }
   function kpEsc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
@@ -30420,6 +30449,42 @@
     const p = '●'.repeat(k) + '○'.repeat(5 - k)
     return `<span class="kp-konf${k >= 4 ? ' hoch' : ''}"><b>${p}</b>${klein ? '' : ' ' + k + '/5'}</span>`
   }
+  const KP_H = [1, 2, 4, 8]
+  function kpPct(x){ return (x > 0 ? '+' : '') + Number(x).toFixed(2).replace('.', ',') + ' %' }
+  function kpErg(r, h){
+    // Ergebnis nach h Stunden als kleine Zelle: '+0,12 % ✔' grün, '−0,09 % ✘' rot, '…' solange offen
+    const a = r.auswertung && r.auswertung['h' + h]
+    if(!a){ const alt = r.auswertung && r.auswertung.grund; return `<span class="kp-erg offen" title="${kpEsc(alt || 'noch nicht ausgewertet — Railway rechnet, sobald die Stunde vorbei ist')}">${alt ? '—' : '…'}</span>` }
+    return `<span class="kp-erg ${a.hit ? 'hit' : 'miss'}" title="max dafür ${kpPct(a.mfe)} · max dagegen ${kpPct(a.mae)}">${kpPct(a.dp)} ${a.hit ? '✔' : '✘'}</span>`
+  }
+  function kpQuote(rows, h){
+    const xs = rows.filter(r => r.auswertung && r.auswertung['h' + h] && r.bias)
+    if(!xs.length) return null
+    const hits = xs.filter(r => r.auswertung['h' + h].hit).length
+    const avg = xs.reduce((s, r) => s + (r.bias === 'LONG' ? 1 : -1) * r.auswertung['h' + h].dp, 0) / xs.length
+    return { n: xs.length, q: hits / xs.length * 100, avg }
+  }
+  function kpQuoteZelle(s){
+    if(!s) return '<td><span style="color:var(--sub)">—</span></td>'
+    const cls = s.q >= 60 ? 'gut' : s.q <= 45 ? 'schlecht' : ''
+    return `<td><span class="kp-q ${cls}">${Math.round(s.q)} %</span><small>n ${s.n} · Ø ${kpPct(s.avg)}</small></td>`
+  }
+  function kpStatRender(){
+    const kopf = `<thead><tr><th></th>${KP_H.map(h => `<th>+${h} h</th>`).join('')}</tr></thead>`
+    const gueltig = _kp.rows.filter(r => r.bias && (r.datum || r.t0))
+    const bs = document.getElementById('kp-stat-session')
+    if(bs){
+      const gruppen = [...KP_REIHE.map(s => [KP_NAMEN[s], gueltig.filter(r => r.session === s)]), ['alle', gueltig]]
+      bs.innerHTML = `<table class="kp-stat">${kopf}<tbody>${gruppen.map(([name, rows]) => rows.length ? `<tr><td>${kpEsc(name)}</td>${KP_H.map(h => kpQuoteZelle(kpQuote(rows, h))).join('')}</tr>` : '').join('')}</tbody></table>`
+    }
+    const bk = document.getElementById('kp-stat-konf')
+    if(bk){
+      const basis = gueltig.filter(r => !_kp.filter || r.session === _kp.filter)
+      const f = document.getElementById('kp-stat-konf-filter'); if(f) f.textContent = _kp.filter ? '· ' + (KP_NAMEN[_kp.filter] || _kp.filter) : '· alle Sessions'
+      const gruppen = [5, 4, 3, 2, 1].map(k => ['Konfidenz ' + k, basis.filter(r => r.konfidenz === k)]).concat([['ohne Konfidenz', basis.filter(r => r.konfidenz == null)]])
+      bk.innerHTML = `<table class="kp-stat">${kopf}<tbody>${gruppen.map(([name, rows]) => rows.length ? `<tr><td>${kpEsc(name)}</td>${KP_H.map(h => kpQuoteZelle(kpQuote(rows, h))).join('')}</tr>` : '').join('')}</tbody></table>`
+    }
+  }
   function kpSay(t, art){ const el = document.getElementById('kp-status'); if(el){ el.textContent = t || ''; el.style.color = art === 'err' ? 'var(--danger)' : '' } }
 
   async function kpFeedHolen(){
@@ -30437,7 +30502,7 @@
   }
   async function kpDbLaden(){
     try{
-      const { data, error } = await supabase.from('kompass_forecasts').select('id,session,kontext,datum,zeit,bias,konfidenz,titel,text,erfasst_at').order('id', { ascending: false }).limit(1000)
+      const { data, error } = await supabase.from('kompass_forecasts').select('id,session,kontext,datum,zeit,bias,konfidenz,titel,text,erfasst_at,t0,auswertung').order('id', { ascending: false }).limit(1000)
       if(error) throw error
       _kp.dbFehler = ''; _kp.dbN = (data || []).length
       return data || []
@@ -30472,7 +30537,7 @@
     // Anzeige: DB-Stand + alles aus dem Feed (auch wenn der Upsert scheitert, sieht Finn den Feed)
     const map = new Map()
     ;(db || []).forEach(r => map.set(r.id, r))
-    ;(feed || []).forEach(r => map.set(r.id, Object.assign({}, map.get(r.id) || {}, r)))
+    ;(feed || []).forEach(r => { const alt = map.get(r.id) || {}; map.set(r.id, Object.assign({}, alt, r, { auswertung: alt.auswertung || null })) })
     const vorher = new Set(_kp.rows.map(r => r.id))
     _kp.rows = [...map.values()].sort(kpSort)
     if(feed || db) _kp.lastCheck = Date.now()
@@ -30517,9 +30582,11 @@
         <div class="kp-karte-kopf"><div class="kp-session">${kpEsc(KP_NAMEN[s])}</div>${kpKonf(r.konfidenz)}</div>
         <div class="kp-bias ${r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''}">${kpEsc(r.bias || '?')}</div>
         <div class="kp-alter">${kpEsc(kpStamp(r))} · ${kpEsc(kpAlter(r))}${alt ? ' · <b>alt</b>' : ''}</div>
+        <div class="kp-alter">nach 1 h ${kpErg(r, 1)} · 4 h ${kpErg(r, 4)}</div>
         <div class="kp-text">${kpEsc(r.text || r.titel || '')}</div>
       </div>`
     }).join('')
+    kpStatRender()
     kpArchivRender()
   }
   function kpArchivRender(){
@@ -30530,10 +30597,10 @@
     const limit = 60 + _kp.mehr * 100
     const zeig = rows.slice(0, limit)
     if(!zeig.length){ box.innerHTML = '<div style="color:var(--sub);font-size:12.5px;padding:8px 2px">nichts da</div>'; return }
-    box.innerHTML = `<table class="kp-tab"><thead><tr><th>Datum</th><th>Session</th><th>Richtung</th><th>Konfidenz</th><th>Titel</th></tr></thead><tbody>${zeig.map(r => {
+    box.innerHTML = `<table class="kp-tab"><thead><tr><th>Datum</th><th>Session</th><th>Richtung</th><th>Konfidenz</th><th>+1 h</th><th>+4 h</th><th>Titel</th></tr></thead><tbody>${zeig.map(r => {
       const cls = r.bias === 'LONG' ? 'long' : r.bias === 'SHORT' ? 'short' : ''
-      const d = _kp.offen === r.id ? `<tr class="kp-detail"><td colspan="5">${kpEsc(r.text || '')}</td></tr>` : ''
-      return `<tr class="kp-zeile" data-kp-id="${kpEsc(r.id)}"><td class="mono">${kpEsc(kpStamp(r))}</td><td>${kpEsc(KP_NAMEN[r.session] || r.kontext || r.session)}</td><td class="kp-b ${cls}">${kpEsc(r.bias || '—')}</td><td>${kpKonf(r.konfidenz, true)}</td><td style="color:var(--sub)">${kpEsc(r.titel || '')}</td></tr>${d}`
+      const d = _kp.offen === r.id ? `<tr class="kp-detail"><td colspan="7">${kpEsc(r.text || '')}</td></tr>` : ''
+      return `<tr class="kp-zeile" data-kp-id="${kpEsc(r.id)}"><td class="mono">${kpEsc(kpStamp(r))}</td><td>${kpEsc(KP_NAMEN[r.session] || r.kontext || r.session)}</td><td class="kp-b ${cls}">${kpEsc(r.bias || '—')}</td><td>${kpKonf(r.konfidenz, true)}</td><td>${kpErg(r, 1)}</td><td>${kpErg(r, 4)}</td><td style="color:var(--sub)">${kpEsc(r.titel || '')}</td></tr>${d}`
     }).join('')}</tbody></table>` + (rows.length > limit ? `<div class="kp-mehr"><button type="button" class="btn btn-ghost btn-xs" id="kp-mehr-btn">${rows.length - limit} weitere zeigen</button></div>` : '')
   }
 
@@ -30578,7 +30645,7 @@
     const b = e.target.closest('.kp-fchip'); if(!b) return
     _kp.filter = b.dataset.kpSession || ''; _kp.mehr = 0
     document.querySelectorAll('#kp-filter .kp-fchip').forEach(x => x.classList.toggle('active', x === b))
-    kpArchivRender()
+    kpStatRender(); kpArchivRender()
   })
   async function wdNeuLaden(){
     const tag = document.getElementById('wd-tag')?.value; if(!tag) return
