@@ -5579,6 +5579,20 @@
                  sichtbar. Mit TP ($), SL (= Risiko Master $) und Lots (= Anzahl
                  Kontrakte) ist die Order damit KOMPLETT beim Planen erfasst —
                  die Karte kann sie per „Jetzt starten" direkt auslösen. -->
+            <!-- Kompass-Vorwahl (23.09.2026, Finn: „im V2-Popup ist die Richtung zu 75 % das, was der Kompass gerade sagt,
+                 zu 25 % genau das Gegenteil — und ein dickes Feld, was aktuell der Forecast ist"). Nur auf Echo V2 / Orbit V2. -->
+            <div class="field" id="tp-kompass-box" style="grid-column:span 2;display:none">
+              <div id="tp-kompass-inner" style="padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:rgba(84,71,206,.05)">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+                  <div>
+                    <span style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.06em">Kompass aktuell</span>
+                    <div id="tp-kompass-bias" style="font-family:var(--mono);font-weight:800;font-size:22px;line-height:1.1;margin-top:2px">—</div>
+                  </div>
+                  <div id="tp-kompass-meta" style="font-size:12px;color:var(--sub);text-align:right"></div>
+                </div>
+                <div id="tp-kompass-wahl" style="font-size:12px;margin-top:6px;color:var(--ink)"></div>
+              </div>
+            </div>
             <div class="field" id="tp-dir-row" style="grid-column:span 2;display:none">
               <label>Richtung <span id="tp-dir-hint" style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
               <div style="display:flex;gap:8px">
@@ -25680,6 +25694,9 @@
     const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? '— Puls braucht sie' : '— für „Jetzt starten"'
     const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht, wenn TP gesetzt'
     if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle()
+    // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
+    v2zeig('tp-kompass-box', v2, true)
+    if(typeof tpV2KompassVorwahl === 'function') tpV2KompassVorwahl()
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
     const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
@@ -25693,6 +25710,63 @@
   // Richtung im Plan-Modal (28.08.2026, Finns Jetzt-starten-Flow) — gleiche
   // Optik wie die Buy/Sell-Knöpfe im Order-Popup (tpOrderDirSet).
   let _tpDir = null
+  /* KOMPASS-VORWAHL im V2-Popup (23.09.2026, Finn: „bei Echo/Orbit V2 ist die Richtung zu 75 % das, was der
+   * Kompass gerade sagt, zu 25 % genau das Gegenteil — und ein dickes Feld, was aktuell der Forecast ist").
+   * Quelle: kompass_forecasts (Pascals Feed, Sammler in app.py), neuester Eintrag nach Posting-Zeit t0 mit
+   * LONG/SHORT — meist der Stunden-Forecast. Gewürfelt wird NUR bei neuem Plan ohne gewählte Richtung
+   * (Jitter-Doktrin: nicht alle IDs in dieselbe Richtung); beim Bearbeiten bleibt die Richtung des Plans.
+   * Reine Vorwahl: BUY/SELL bleiben klickbar, gespeichert wird, was am Ende aktiv ist. */
+  let _tpKp = { row: null, at: 0, wahl: null }
+  async function tpKompassAktuell(){
+    if(_tpKp.row && Date.now() - _tpKp.at < 60000) return _tpKp.row
+    try{
+      const { data } = await supabase.from('kompass_forecasts').select('id,session,kontext,zeit,bias,konfidenz,t0')
+        .in('bias', ['LONG', 'SHORT']).not('t0', 'is', null).order('t0', { ascending: false }).limit(1)
+      _tpKp.row = (data && data[0]) || null; _tpKp.at = Date.now()
+    }catch(_){ _tpKp.row = null; _tpKp.at = Date.now() }
+    return _tpKp.row
+  }
+  function tpKompassBoxRender(row, wahl, laedt){
+    const box = document.getElementById('tp-kompass-box'), inner = document.getElementById('tp-kompass-inner')
+    const b = document.getElementById('tp-kompass-bias'), m = document.getElementById('tp-kompass-meta'), w = document.getElementById('tp-kompass-wahl')
+    if(!box || !b || !m || !w) return
+    box.style.display = routeIstV2(_tpRoute) ? '' : 'none'
+    if(laedt){ b.textContent = '…'; b.style.color = 'var(--sub)'; m.textContent = 'Kompass wird geladen'; w.textContent = ''; return }
+    if(!row){
+      b.textContent = 'keine Vorhersage'; b.style.color = 'var(--sub)'; m.textContent = 'Kompass: nichts in der Datenbank'
+      w.textContent = 'Richtung selbst wählen.'; if(inner) inner.style.borderColor = 'var(--border)'; return
+    }
+    const long = row.bias === 'LONG'
+    b.textContent = long ? '▲ LONG' : '▼ SHORT'; b.style.color = long ? '#0E9757' : 'var(--danger)'
+    if(inner) inner.style.borderColor = long ? 'rgba(14,151,87,.45)' : 'rgba(217,45,32,.45)'
+    const t0 = row.t0 ? new Date(row.t0) : null
+    const alter = (t0 && isFinite(t0)) ? Math.round((Date.now() - t0.getTime()) / 60000) : null
+    const alterTxt = alter == null ? '' : alter < 60 ? `vor ${alter} min` : `vor ${Math.round(alter / 60)} h`
+    let name = row.kontext || row.session || 'Kompass'
+    try{ if(KP_NAMEN && KP_NAMEN[row.session]) name = KP_NAMEN[row.session] }catch(_){}
+    m.textContent = `${name}${(t0 && isFinite(t0)) ? ' · ' + t0.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}`
+      + `${row.konfidenz ? ' · Konfidenz ' + row.konfidenz + '/5' : ''}${alterTxt ? ' · ' + alterTxt : ''}`
+    if(wahl) w.innerHTML = wahl.gleich
+      ? `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — wie der Kompass (75 %). Bleibt klickbar.`
+      : `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — <b>Gegenteil</b> gewürfelt (25 %). Bleibt klickbar.`
+    else w.textContent = _editingPlanId ? 'Richtung kommt aus dem gespeicherten Plan.' : 'Richtung selbst wählen.'
+  }
+  async function tpV2KompassVorwahl(){
+    if(!routeIstV2(_tpRoute)){ const box = document.getElementById('tp-kompass-box'); if(box) box.style.display = 'none'; return }
+    tpKompassBoxRender(null, null, true)
+    const row = await tpKompassAktuell()
+    if(!routeIstV2(_tpRoute) || !document.getElementById('tradePlanModal')?.classList.contains('open')) return
+    let wahl = _tpKp.wahl
+    if(row && !_editingPlanId && _tpDir == null){
+      const gleich = Math.random() < 0.75
+      const dir = ((row.bias === 'LONG') === gleich) ? 'buy' : 'sell'
+      wahl = { gleich, dir, id: row.id }
+      _tpKp.wahl = wahl
+      tpDirSet(dir)
+    }
+    if(_editingPlanId) wahl = null
+    tpKompassBoxRender(row, wahl, false)
+  }
   function tpDirSet(dir){
     _tpDir = (dir === 'buy' || dir === 'sell') ? dir : null
     const b = document.getElementById('tp-dir-buy')
@@ -26344,7 +26418,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.437'
+  const OS_TAB_BUILD = '2026-09-22.438'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29112,6 +29186,7 @@
       document.getElementById('tp-slave-risk').value  = ''
       document.getElementById('tp-master-tp').value   = ''
       if(typeof tpDirSet === 'function') tpDirSet(null)
+      _tpKp.wahl = null   // Kompass-Vorwahl (23.09.2026): jeder neue Plan würfelt frisch
       const _slEl0 = document.getElementById('tp-master-sl'); if(_slEl0) _slEl0.value = ''
       const _suEl0 = document.getElementById('tp-plan-start-um'); if(_suEl0) _suEl0.value = ''
       if(typeof tpPlanStartUmHinweis === 'function') tpPlanStartUmHinweis()
