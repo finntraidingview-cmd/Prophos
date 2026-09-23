@@ -5566,18 +5566,32 @@
                  Seit 28.08.2026 im ECHO-Modus wieder sichtbar (tpRouteUpdateSeg):
                  Finns Jetzt-starten-Flow — TP/SL/Lots/Richtung komplett beim Planen. -->
             <div class="field" id="tp-master-tp-row" style="grid-column:span 2;display:none">
-              <label>Take Profit ($) <span style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
+              <label>Take Profit ($) <span id="tp-master-tp-hint" style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
               <input type="number" class="input mono" id="tp-master-tp" min="0" step="10" placeholder="z.B. 100">
+            </div>
+            <!-- V2-Wege (23.09.2026, Finn: „alles in ein einziges Popup — Account, Kontrakte, TP, SL, Uhrzeit, dann nur
+                 noch Starten"): Stop Loss und Startzeit direkt hier, nur auf Echo V2 / Orbit V2 sichtbar (tpRouteUpdateSeg). -->
+            <div class="field" id="tp-master-sl-row" style="display:none">
+              <label>Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
+              <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
                  sichtbar. Mit TP ($), SL (= Risiko Master $) und Lots (= Anzahl
                  Kontrakte) ist die Order damit KOMPLETT beim Planen erfasst —
                  die Karte kann sie per „Jetzt starten" direkt auslösen. -->
             <div class="field" id="tp-dir-row" style="grid-column:span 2;display:none">
-              <label>Richtung <span style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
+              <label>Richtung <span id="tp-dir-hint" style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
               <div style="display:flex;gap:8px">
                 <button type="button" id="tp-dir-buy" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">BUY</button>
                 <button type="button" id="tp-dir-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
+              </div>
+            </div>
+            <div class="field" id="tp-plan-start-um-row" style="grid-column:span 2;display:none">
+              <label>Start um <span style="color:var(--sub);font-weight:400">— leer = von Hand starten</span></label>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <input type="time" class="input mono" id="tp-plan-start-um" style="flex:0 0 130px">
+                <button type="button" class="btn btn-ghost" id="tp-plan-start-um-x" style="padding:4px 8px;font-size:11px" title="Startzeit leeren">✕</button>
+                <span id="tp-plan-start-um-hint" style="font-size:11px;color:var(--sub)"></span>
               </div>
             </div>
 
@@ -23578,7 +23592,7 @@
     // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
     const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
       + (routeIstV2(p.route)
-          ? ` · Risiko <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>`   // V2: kein Multiplier, kein Slave-Risiko
+          ? ''   // V2: kein Multiplier, kein Slave-Risiko — TP/SL stehen weiter hinten in der Zeile
           : ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
       + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
@@ -25631,8 +25645,9 @@
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
     const sb = document.getElementById('tradePlanSaveStart')
-    if(sb) sb.textContent = routeIstEcho(_tpRoute) ? 'Weiter →'
-      : routeIstOrbit(_tpRoute) ? 'Speichern' : 'Speichern & Starten →'
+    if(sb) sb.textContent = routeIstV2(_tpRoute) ? 'Speichern'   // V2: ein Popup, kein „Weiter"
+      : _tpRoute === 'mt5' ? 'Weiter →'
+      : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
     // Bei fixem Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren.
     // NUR Echo. Orbit war vom 28.08. bis 22.09.2026 auch fix (Hedge des PCs über den
     // Orbit-Copier); seit Finns Ansage „Orbit soll 1zu1 wie Duplikum werden, nur
@@ -25651,6 +25666,20 @@
     v2weg(document.getElementById('tp-vorgaenger-suggest'), v2)
     const multBox = document.querySelector('#tradePlanModal .tp-multi-display')
     if(multBox) multBox.style.display = v2 ? 'none' : ''
+    // Ein Popup für alles (23.09.2026, Finn: „den Account auswählen, die Lotanzahl, Take Profit und Stop-Loss, die
+    // Uhrzeit — das ist alles"): auf V2 kommen TP, SL, Richtung und Startzeit HIER rein; Risiko Master und die
+    // Limits-Box verschwinden. Auf den anderen Wegen bleibt alles wie bisher (TP/Richtung versteckt, Popup 2).
+    v2weg(document.getElementById('tp-master-risk'), v2)
+    v2weg(document.getElementById('tp-master-limits-info'), v2)
+    const v2zeig = (id, an, span2) => { const el = document.getElementById(id); if(!el) return; el.style.display = an ? '' : 'none'; el.style.gridColumn = span2 ? 'span 2' : '' }
+    v2zeig('tp-master-tp-row', v2, false)
+    v2zeig('tp-master-sl-row', v2, false)
+    v2zeig('tp-dir-row', v2, true)
+    v2zeig('tp-plan-start-um-row', v2, true)
+    const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' ? '— leer = kein TP' : '— mit SL zusammen, sonst Order pur') : '— für „Jetzt starten"'
+    const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? '— Puls braucht sie' : '— für „Jetzt starten"'
+    const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht, wenn TP gesetzt'
+    if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle()
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
     const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
@@ -26315,7 +26344,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.436'
+  const OS_TAB_BUILD = '2026-09-22.437'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28359,6 +28388,22 @@
       + `${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${tz ? ' (' + tz + ')' : ''}`
   }
   document.getElementById('tp-order-start-um')?.addEventListener('input', tpStartUmHinweis)
+  // Startzeit im Plan-Popup (V2-Wege, 23.09.2026): gleiche Regel (heute, vergangene Uhrzeit = morgen, Gerätezeit).
+  function tpPlanStartUmHinweis(){
+    const el = document.getElementById('tp-plan-start-um'), h = document.getElementById('tp-plan-start-um-hint')
+    if(!el || !h) return
+    const d = tpStartUmAusZeit(el.value)
+    if(!d){ h.textContent = ''; return }
+    let tz = ''; try{ tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '' }catch(_){}
+    const heute = d.toDateString() === new Date().toDateString()
+    h.textContent = `→ ${heute ? 'heute' : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })} `
+      + `${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}${tz ? ' (' + tz + ')' : ''} — der PC-Tab startet dann von selbst`
+  }
+  document.getElementById('tp-plan-start-um')?.addEventListener('input', tpPlanStartUmHinweis)
+  document.getElementById('tp-plan-start-um-x')?.addEventListener('click', () => {
+    const el = document.getElementById('tp-plan-start-um'); if(el) el.value = ''
+    tpPlanStartUmHinweis()
+  })
   document.getElementById('tp-order-start-um-x')?.addEventListener('click', () => {
     const el = document.getElementById('tp-order-start-um'); if(el) el.value = ''
     tpStartUmHinweis()
@@ -29048,6 +29093,11 @@
         _tpRiskAuto.master = (Number(p.slaveRisk) > 0) ? String(p.masterAccountId || '') : null
         document.getElementById('tp-master-tp').value   = p.masterTp ?? ''
         if(typeof tpDirSet === 'function') tpDirSet(p.richtung)
+        // V2-Felder (23.09.2026): SL, Startzeit und Instrument aus dem Plan
+        const _slEl = document.getElementById('tp-master-sl'); if(_slEl) _slEl.value = p.masterSl ?? ''
+        const _suEl2 = document.getElementById('tp-plan-start-um'); if(_suEl2) _suEl2.value = p.startUm ? tpStartUmZeit(p.startUm) : ''
+        if(typeof tpPlanStartUmHinweis === 'function') tpPlanStartUmHinweis()
+        if(p.route === 'tvv2' && p.masterSymbol){ _tpNqMode = /^NQ/i.test(String(p.masterSymbol)) ? 'nq' : 'mnq'; if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }
         document.getElementById('tp-planned-for').value = p.plannedFor || ''
         document.getElementById('tp-notes').value       = p.notes || ''
         // Priority
@@ -29062,6 +29112,9 @@
       document.getElementById('tp-slave-risk').value  = ''
       document.getElementById('tp-master-tp').value   = ''
       if(typeof tpDirSet === 'function') tpDirSet(null)
+      const _slEl0 = document.getElementById('tp-master-sl'); if(_slEl0) _slEl0.value = ''
+      const _suEl0 = document.getElementById('tp-plan-start-um'); if(_suEl0) _suEl0.value = ''
+      if(typeof tpPlanStartUmHinweis === 'function') tpPlanStartUmHinweis()
       document.getElementById('tp-notes').value       = ''
       // Default: morgen
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
@@ -29233,7 +29286,11 @@
     const master = masterId ? accounts.find(a => String(a.id) === String(masterId)) : null
     const slave  = slaveId  ? accounts.find(a => String(a.id) === String(slaveId))  : null
 
+    // Orbit V2 (23.09.2026, Finn: „ob ich NQ oder MNQ kaufen will, bei den Kontrakten anklickbar"): der Schalter
+    // erscheint dort für JEDE Futures-Firma (Einheit Kontrakte), nicht nur für projectx-Presets — das Symbol
+    // (MNQ/NQ + Kontraktmonat) wandert beim Speichern als master_symbol an den Plan.
     const masterIsProjectx = tpNqIsProjectx(master?.firm)
+      || (typeof _tpRoute !== 'undefined' && _tpRoute === 'tvv2' && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master?.firm))
     const slaveIsProjectx  = tpNqIsProjectx(slave?.firm)
 
     // Master toggle
@@ -29749,6 +29806,10 @@
     const slaveRisk  = parseFloat(document.getElementById('tp-slave-risk').value)  || 0
     const masterTpRaw = parseFloat(document.getElementById('tp-master-tp').value)
     const masterTp   = isFinite(masterTpRaw) && masterTpRaw > 0 ? masterTpRaw : null
+    // V2-Wege (23.09.2026): SL und Startzeit kommen aus DIESEM Popup (kein Popup 2 mehr)
+    const masterSlRaw = parseFloat(document.getElementById('tp-master-sl')?.value)
+    const masterSlV2  = isFinite(masterSlRaw) && masterSlRaw > 0 ? masterSlRaw : null
+    const startUmVal  = document.getElementById('tp-plan-start-um')?.value || ''
     const plannedFor = document.getElementById('tp-planned-for').value || null
     const notes      = document.getElementById('tp-notes').value.trim() || null
     const priority   = document.querySelector('#tp-priority .prio-btn.active')?.dataset.prio || 'medium'
@@ -29769,7 +29830,12 @@
       msg('Dieser Topstep-Account ist noch nicht verknüpft — wähle ihn im Dropdown an, dann öffnet sich das Verknüpfen-Fenster.', 'err'); return
     }
     if(!v2 && masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
-    if(!masterRisk || !masterQty || (!slaveRisk && !v2)){
+    if(v2){
+      if(!(_tpDir === 'buy' || _tpDir === 'sell')){ msg('Richtung wählen (BUY oder SELL) — „Starten" schickt sie direkt an Puls.', 'err'); return }
+      if(_tpRoute === 'mt5v2' && masterTp && !masterSlV2){ msg('Echo V2: mit Take Profit braucht Puls auch einen Stop Loss — oder beides leer lassen (Order pur).', 'err'); return }
+      if(startUmVal && !tpStartUmAusZeit(startUmVal)){ msg('„Start um": Uhrzeit nicht lesbar (hh:mm).', 'err'); return }
+    }
+    if((!masterRisk && !v2) || !masterQty || (!slaveRisk && !v2)){
       msg('Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
@@ -29784,13 +29850,14 @@
       masterFirm: master.firm,
       slaveName:  slave ? slave.name : null,
       slaveFirm:  slave ? slave.firm : null,
-      masterRisk, masterContracts: masterQty, slaveRisk: v2 ? null : slaveRisk, multiplier: mult,
+      // V2: kein eigenes Risiko-Feld — der SL ist das Risiko (Karte zeigt ihn als SL)
+      masterRisk: v2 ? (masterSlV2 ?? 0) : masterRisk, masterContracts: masterQty, slaveRisk: v2 ? null : slaveRisk, multiplier: mult,
       masterTp,
       // Der Order-SL gehoert NICHT diesem Formular (31.08.2026) — beim
       // Bearbeiten unveraendert durchreichen. Ohne diese Zeile schreibt
       // planToRow master_sl auf null, und der naechste Plan-Edit loescht den
       // Stop der bereits gespeicherten Order still weg.
-      masterSl: (_editingPlanId
+      masterSl: v2 ? masterSlV2 : (_editingPlanId
         ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
         : null),
       // Richtung nur auf den Routen mit Jetzt-starten-Flow (28.08.2026) —
@@ -29806,6 +29873,13 @@
       status: 'planned'
     }
 
+    // V2 (23.09.2026): Symbol und Startzeit gehören mit in die Zeile — planToRow lässt beide bewusst weg
+    // (sie kamen bisher nur aus Popup 2). Orbit V2: MNQ/NQ aus dem Schalter + gerechneter Kontraktmonat
+    // (wie Popup 2 bei Orbit); Echo V2: Firmen-Standard (null). Neue Startzeit setzt den Claim zurück.
+    const v2Extra = !v2 ? {} : {
+      master_symbol: _tpRoute === 'tvv2' ? (((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()) : null,
+      start_um: startUmVal ? tpStartUmAusZeit(startUmVal).toISOString() : null
+    }
     try{
       let savedPlanId = null
       if(_editingPlanId){
@@ -29825,6 +29899,11 @@
         const _curPlan = tradePlans.find(x => String(x.id) === String(_editingPlanId))
         if(!_curPlan || _curPlan.status === 'planned'){
           updateRow.route = (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup'
+          if(v2){
+            Object.assign(updateRow, v2Extra)
+            const _alt = _curPlan && _curPlan.startUm ? new Date(_curPlan.startUm).toISOString() : null
+            if(v2Extra.start_um !== _alt) updateRow.start_um_gestartet_at = null
+          }
         }
         const { data, error } = await supabase
           .from('trade_plans').update(updateRow).eq('id', _editingPlanId).select('*').single()
@@ -29837,7 +29916,7 @@
         // bewusst weg, damit Edits laufender Pläne die Engine nicht umziehen —
         // beim Neuanlegen ist das Mitschreiben genau richtig). 'dup' explizit,
         // nie null: null = Alt-Plan = Auto-Erkennung darf raten.
-        const insertRow = { ...planToRow(planObj), route: (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup' }
+        const insertRow = { ...planToRow(planObj), route: (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup', ...v2Extra }
         const { data, error } = await supabase
           .from('trade_plans').insert(insertRow).select('*').single()
         if(error) throw error
@@ -29851,8 +29930,11 @@
       if(startAfter && savedPlanId){
         // MT5-Weg (15.08.2026): „Weiter" führt erst in den Order-Bot-Schritt —
         // der startet den Check selbst. Duplikum/Mirror wie gehabt direkt.
-        // V2-Wege (23.09.2026): wie Echo direkt ins Order-Popup — kein Duplikum-Check, nichts zu pushen.
-        if((routeIstEcho(_tpRoute) || _tpRoute === 'tvv2') && typeof openTpOrderModal === 'function'){
+        // V2-Wege (23.09.2026, Finn: „alles in 1 Popup — dann auf Starten drücken, Puls übernimmt"): kein
+        // Popup 2, nichts zu prüfen, nichts zu pushen — Toast, fertig.
+        if(v2){
+          if(typeof atToast === 'function') atToast('Plan gespeichert — „Starten" auf der Karte schickt die Order an Puls (auch vom Mac/Handy).', 'start')
+        } else if(_tpRoute === 'mt5' && typeof openTpOrderModal === 'function'){
           openTpOrderModal(savedPlanId)
         } else {
           tpPreflightAndStart(savedPlanId)
