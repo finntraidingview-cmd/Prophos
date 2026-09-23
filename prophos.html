@@ -7255,7 +7255,7 @@
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
-          <button class="subtab adm-tab" data-admtab="fin">Finanzen</button>
+          <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
           <button class="subtab adm-tab" data-admtab="rg">Rechnungen</button>
@@ -7743,20 +7743,34 @@
             </div>
 
             <!-- PAYOUTS ERHALTEN — wo sie ankamen (11.09.2026, Finns Wunsch:
-                 das KPI oben zeigt nur die nackte Summe). Chips = Summe pro
-                 Person (die Kurzantwort), Tabelle = jede gebuchte Payout-
-                 Buchung, neueste zuerst; Herkunft („lag bei …") steht beim
-                 Pending-Flow in der Notiz. Auch Buchungen OHNE Account sind
-                 drin — die fehlen im KPI (das summiert je Account), sind aber
-                 trotzdem angekommenes Geld. Ohne Payouts unsichtbar. -->
+                 das KPI oben zeigt nur die nackte Summe). Tabelle = jede
+                 gebuchte Payout-Buchung, neueste zuerst; Herkunft („lag bei …")
+                 steht beim Pending-Flow in der Notiz. Auch Buchungen OHNE
+                 Account sind drin — die fehlen im KPI (das summiert je
+                 Account), sind aber trotzdem angekommenes Geld. Ohne Payouts
+                 unsichtbar.
+                 UMBAU 23.09.2026 (Finn: „die gleiche Logik mit Draufdrücken
+                 und Farben von den Leuten, einmal mit Payouts erhalten"): die
+                 Chips sind einer Personen-Verteilung gewichen — Balken wie
+                 „Nach Person" in der Übersicht, Breite = Anteil an allen
+                 Payouts. Klick auf eine Person filtert die Tabelle darunter
+                 auf ihre Buchungen, nochmal klicken oder „Alle anzeigen"
+                 macht wieder auf. Der Tab heißt seitdem „Payouts". -->
             <div class="panel" id="adm-f-recv-panel" hidden style="margin-bottom:14px">
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Payouts erhalten</div>
-                  <div class="panel-sub">Wo die Payouts ankamen — über alle Personen, neueste zuerst</div>
+                  <div class="panel-sub">Wer wie viel bekommen hat · zum Aufklappen auf eine Person klicken</div>
                 </div>
               </div>
-              <div id="adm-f-recv-where" style="display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 12px"></div>
+              <div class="adm-dist" id="adm-f-recv-dist"></div>
+              <div class="panel-head" style="border-top:1px solid var(--border)">
+                <div>
+                  <div class="panel-title" id="adm-f-recv-title">Alle Payouts</div>
+                  <div class="panel-sub" id="adm-f-recv-count">–</div>
+                </div>
+                <button class="btn btn-ghost" id="adm-f-recv-back" hidden style="padding:7px 12px">Alle anzeigen</button>
+              </div>
               <div class="table-wrap adm-scroll">
                 <table class="t">
                   <thead><tr>
@@ -10131,6 +10145,7 @@
      * ist die Frage „steht die ID im Minus?", also wird ehrlich saldiert.
      * Beträge in € wie die Übersicht (Hedge ist fx-gerechnet in €). */
     let finPerson = ''
+    let finPoPerson = ''   // Payouts erhalten: aufgeklappte Person (23.09.2026)
     function admFinRender(){
       if(!admData) return
       const m = new Map()
@@ -10211,22 +10226,58 @@
       const recvPanel = $('adm-f-recv-panel')
       if(recvPanel){
         recvPanel.hidden = !recv.length
-        const chips = $('adm-f-recv-where')
-        if(chips){
+        // Personen-Verteilung (23.09.2026): dieselbe Balken-Mechanik wie
+        // „Nach Person" in der Übersicht — Breite = Anteil an allen erhaltenen
+        // Payouts, Klick klappt die Person auf (Tabelle darunter zeigt nur
+        // ihre Buchungen), nochmal klicken schließt. Grün, weil Payouts
+        // angekommenes Geld sind — die Ampel der Übersicht meint Klumpen-
+        // risiko und passt hier nicht.
+        const dist = $('adm-f-recv-dist')
+        if(dist){
           const byP = new Map()
           for(const t of recv){
-            const k = admShortName(t.person || '—')
-            byP.set(k, (byP.get(k) || 0) + (Number(t.amount) || 0))
+            const k = String(t.user_id || t.person || '—')
+            const g = byP.get(k) || { key:k, label:t.person || '—', n:0, sum:0, letzte:'' }
+            g.n++; g.sum += Number(t.amount) || 0
+            if((t.occurred_at || '') > g.letzte) g.letzte = t.occurred_at || ''
+            byP.set(k, g)
           }
-          chips.innerHTML = [...byP.entries()]
-            .sort((a, b) => b[1] - a[1])
-            .map(([k, v]) => `<span class="chip chip-good">${escapeHtml(k)} · ${admEur.format(v)}</span>`)
-            .join('')
+          const list = [...byP.values()].sort((a, b) => b.sum - a.sum)
+          const total = list.reduce((a, g) => a + g.sum, 0)
+          if(finPoPerson && !byP.has(String(finPoPerson))) finPoPerson = ''   // Person weg (Filter/Reload) → zu
+          dist.innerHTML = ''
+          for(const g of list){
+            const share = total > 0 ? 100 * g.sum / total : 0
+            const row = document.createElement('button')
+            row.type = 'button'
+            row.className = 'adm-row adm-row-btn' + (String(finPoPerson) === String(g.key) ? ' is-on' : '')
+            row.innerHTML =
+              '<div class="adm-row-name"></div>' +
+              `<div class="adm-track"><div class="adm-fill" style="width:${Math.min(100, share).toFixed(1)}%;background:var(--good)"></div></div>` +
+              `<div class="adm-val" style="color:var(--good)">+${admEur.format(g.sum)}</div>` +
+              `<div class="adm-pct">${share.toFixed(0)}%</div>`
+            row.querySelector('.adm-row-name').textContent = admShortName(g.label)
+            const dl = g.letzte ? new Date(g.letzte).toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'
+            row.title = `${g.label} · ${g.n} Payout${g.n === 1 ? '' : 's'} · letzter ${dl} — zum Aufklappen klicken`
+            row.addEventListener('click', () => {
+              finPoPerson = (String(finPoPerson) === String(g.key)) ? '' : g.key
+              admFinRender()
+            })
+            dist.appendChild(row)
+          }
+          const pers = finPoPerson ? byP.get(String(finPoPerson)) : null
+          const ttl = $('adm-f-recv-title'), cnt = $('adm-f-recv-count'), back = $('adm-f-recv-back')
+          if(ttl) ttl.textContent = pers ? admShortName(pers.label) : 'Alle Payouts'
+          if(cnt) cnt.textContent = pers
+            ? `${pers.n} Payout${pers.n === 1 ? '' : 's'} · ${admEur.format(pers.sum)}`
+            : `${recv.length} Payout${recv.length === 1 ? '' : 's'} · ${admEur.format(total)} · neueste zuerst`
+          if(back) back.hidden = !pers
         }
         const tb = $('adm-f-recv-rows')
         if(tb){
           tb.innerHTML = ''
-          for(const t of recv){
+          const zeilen = finPoPerson ? recv.filter(t => String(t.user_id || t.person || '—') === String(finPoPerson)) : recv
+          for(const t of zeilen){
             const d = t.occurred_at ? new Date(t.occurred_at) : null
             const tr = document.createElement('tr')
             tr.innerHTML =
@@ -12384,6 +12435,7 @@
       })
       $('adm-buys-back')?.addEventListener('click', () => { bPerson = ''; bFirm = ''; admBuysRender() })
       $('adm-fin-back')?.addEventListener('click', () => { finPerson = ''; admFinRender() })
+      $('adm-f-recv-back')?.addEventListener('click', () => { finPoPerson = ''; admFinRender() })
       $('kasse-list').addEventListener('click', ev => {
         const del = ev.target.closest('.kasse-del'); if(del) kasseDelete(del.dataset.id)
       })
@@ -25823,7 +25875,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.431'
+  const OS_TAB_BUILD = '2026-09-22.432'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

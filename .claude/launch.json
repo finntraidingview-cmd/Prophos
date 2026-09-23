@@ -170,6 +170,36 @@
         "5137"
       ],
       "port": 5137
+    },
+    {
+      "name": "prophos-static-check-16",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5141"
+      ],
+      "port": 5141
+    },
+    {
+      "name": "prophos-static-check-17",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5151"
+      ],
+      "port": 5151
+    },
+    {
+      "name": "prophos-static-check-18",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5157"
+      ],
+      "port": 5157
     }
   ]
 }
