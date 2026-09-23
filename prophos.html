@@ -5625,13 +5625,15 @@
                  Seit 28.08.2026 im ECHO-Modus wieder sichtbar (tpRouteUpdateSeg):
                  Finns Jetzt-starten-Flow — TP/SL/Lots/Richtung komplett beim Planen. -->
             <div class="field" id="tp-master-tp-row" style="grid-column:span 2;display:none">
-              <label>Take Profit ($) <span id="tp-master-tp-hint" style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
+              <!-- Label einzeilig (white-space:nowrap): 24.09.2026, Finn „TP und SL sind nicht auf der gleichen Höhe" —
+                   der lange Hinweis brach um und schob das TP-Feld unter das SL-Feld. -->
+              <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Take Profit ($) <span id="tp-master-tp-hint" style="color:var(--sub);font-weight:400">— für „Jetzt starten"</span></label>
               <input type="number" class="input mono" id="tp-master-tp" min="0" step="10" placeholder="z.B. 100">
             </div>
             <!-- V2-Wege (23.09.2026, Finn: „alles in ein einziges Popup — Account, Kontrakte, TP, SL, Uhrzeit, dann nur
                  noch Starten"): Stop Loss und Startzeit direkt hier, nur auf Echo V2 / Orbit V2 sichtbar (tpRouteUpdateSeg). -->
             <div class="field" id="tp-master-sl-row" style="display:none">
-              <label>Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
+              <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
               <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
@@ -15054,7 +15056,8 @@
   function mt5RoutePollWanted(){
     if(!MT5_LOCAL) return false
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
-    return (_tp || []).some(p => p && p.route === 'mt5' && (p.status === 'planned' || p.status === 'open'))
+    // Echo V2 seit 24.09.2026 mit dabei (Live-P&L des Masters auf der Karte, Ende-Erkennung)
+    return (_tp || []).some(p => p && routeIstEcho(p.route) && (p.status === 'planned' || p.status === 'open'))
   }
 
   /* ── Zustandsmaschine planned→open→review (Pendant zu mirrorPlanPoll) ──
@@ -15135,13 +15138,34 @@
   }
   /* V2-Wege (23.09.2026): kein Copier, kein Duplikum — also keine Erkennung. Der bewiesene Kauf-Klick
    * (Orbit V2: Positions-Tabelle/Toast in TradingView; Echo V2: price+ticket vom Bot) setzt den Plan selbst
-   * auf „Läuft" (started_at). Kein mt5_baseline, kein P&L-Beweis: Ende und P&L trägt Finn ein. */
-  async function v2PlanAufOpen(planId){
+   * auf „Läuft" (started_at). Orbit V2: kein mt5_baseline, Ende und P&L trägt Finn ein.
+   * ECHO V2 seit 24.09.2026 (Finn: „mit dem bestehenden Setup von Echo den Live-P&L einfach mitlesen, und
+   * wenn der Trade beendet wird, hat man den P&L direkt — wir übernehmen einfach von Echo"): Puls platziert
+   * im Master-Terminal, der Echo-Snapshot liefert Balance/Equity/Positionen des Masters ohnehin — also wird
+   * hier wie bei mt5PlanAufOpen die master_balance aus einer FRISCHEN Instanz-Antwort eingefroren
+   * (mt5_baseline {master_balance, at, ticket}; kein hedge_balance, es gibt keinen Hedge). Ohne frische
+   * Instanz (alive && !note) bleibt die Baseline explizit null — Doktrin „bei jedem Übergang nach open
+   * gesetzt ODER genullt", sonst rechnete ein wiederverwendeter Plan mit der Baseline des vorigen Laufs. */
+  async function v2PlanAufOpen(planId, ticket){
     try{
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
+      const upd = { status: 'open', started_at: new Date().toISOString(), ended_at: null }
+      if(plan.route === 'mt5v2'){
+        let base = null
+        try{
+          const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
+          const r = (dd && !dd.copier_offline && !dd._httpFail) ? mt5V2Resolve(plan, dd.instances || []) : null
+          const s = (r && r.inst && r.inst.status) || {}
+          if(r && r.inst.alive && !s.note && s.master_balance != null){
+            base = { master_balance: Number(s.master_balance), at: new Date().toISOString(), ticket: ticket ?? null }
+          }
+        }catch(_){}
+        upd.mt5_baseline = base
+        if(!base) console.warn('[v2PlanAufOpen] Echo V2 ohne Baseline gestartet (keine frische Instanz) — P&L bleibt manuell')
+      }
       const { data, error } = await supabase.from('trade_plans')
-        .update({ status: 'open', started_at: new Date().toISOString(), ended_at: null })
+        .update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
       if(error || !data || !data.length) return
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
@@ -15154,7 +15178,10 @@
     if(!MT5_LOCAL || mt5PlanPoll.busy) return
     // defensiver tradePlans-Zugriff wie atCheck (Boot-Reihenfolge)
     let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
-    const plans = (_tp || []).filter(p => p && p.route === 'mt5' && (p.status === 'planned' || p.status === 'open'))
+    // Echo V2 (route mt5v2) läuft seit 24.09.2026 mit (Finn: „wir übernehmen einfach von Echo"): dieselbe
+    // Ende-Erkennung über die Master-Positionen — aber KEIN Auto-Start, „Läuft" setzt nur der bewiesene
+    // Puls-Klick (v2PlanAufOpen). Geplante V2-Pläne werden daher unten übersprungen.
+    const plans = (_tp || []).filter(p => p && routeIstEcho(p.route) && (p.status === 'planned' || p.status === 'open'))
     if(!plans.length) return
     if(typeof window.mtcApi !== 'function') return
     mt5PlanPoll.busy = true
@@ -15171,6 +15198,13 @@
       // Baseline mitten im fremden Trade; Review-Fund 15.08.2026).
       const openMasters = new Set()
       for(const p of plans){
+        // Laufender Echo-V2-Plan besetzt seinen Master genauso (24.09.2026) — ein geplanter
+        // Echo-Plan auf demselben Login darf nicht in dessen Position hinein auto-starten.
+        if(p.route === 'mt5v2'){
+          const ml = (p.status === 'open') ? mt5LoginForAccount(p.masterAccountId) : null
+          if(ml) openMasters.add(String(ml))
+          continue
+        }
         const r = planMt5Route(p)
         if(!r) continue
         if(p.status === 'planned') (plannedByMaster[r.masterLogin] = plannedByMaster[r.masterLogin] || []).push(p)
@@ -15178,7 +15212,9 @@
       }
 
       for(const plan of plans){
-        const route = mt5RouteResolve(plan, instances)
+        const istV2 = plan.route === 'mt5v2'
+        // Echo V2: Instanz nur über den Master-Login (kein Hedge-Login am Plan)
+        const route = istV2 ? mt5V2Resolve(plan, instances) : mt5RouteResolve(plan, instances)
         if(!route) continue
         const s = route.inst.status || {}
         const fresh = !!route.inst.alive && !s.note
@@ -15186,6 +15222,7 @@
         const posCount = (s.master_positions || []).length
 
         if(plan.status === 'planned'){
+          if(istV2) continue   // Echo V2 startet NIE von selbst — „Läuft" kommt vom bewiesenen Puls-Klick
           if(posCount <= 0) continue
           if((plannedByMaster[route.masterLogin] || []).length > 1){
             if(!mt5PlanPoll.multiWarned.has(route.masterLogin)){
@@ -15248,6 +15285,31 @@
         mt5PlanPoll.streak.set(String(plan.id), n)
         if(n < 2) continue
         mt5PlanPoll.streak.set(String(plan.id), 0)
+
+        /* ECHO V2 (24.09.2026): Ende = Master flach (2 frische Messungen wie bei Echo). Eingefroren wird
+         * nur die Master-Balance — es gibt keinen Hedge, also kein closed_sum/closed_tickets. Fehlt die
+         * Start-Baseline (Plan lief ohne frische Instanz an), wird sie hier NICHT nachgeholt: die Position
+         * lief da schon, ein Delta wäre eine plausible falsche Zahl — Auto-P&L liefert dann null, Finn
+         * trägt ein („Beweis oder leer"). Danach derselbe Weg wie Echo: atShowEndPrompt → review + Auto-P&L. */
+        if(istV2){
+          const finV2 = { master_balance: s.master_balance != null ? Number(s.master_balance) : null, at: new Date().toISOString() }
+          const baseV2 = Object.assign({}, plan.mt5Baseline || {}, { final: finV2 })
+          const { data: dV2, error: eV2 } = await supabase.from('trade_plans')
+            .update({ mt5_baseline: baseV2 })
+            .eq('id', plan.id).eq('status', 'open').select('*')
+          if(eV2){ console.warn('[mt5Poll] V2 final:', eV2.message || eV2); continue }
+          if(!dV2 || !dV2.length){
+            if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
+            continue
+          }
+          const iV2 = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+          if(iV2 >= 0) tradePlans[iV2] = rowToPlan(dV2[0])
+          const freshV2 = (iV2 >= 0) ? tradePlans[iV2] : rowToPlan(dV2[0])
+          mt5PlanPoll.wasOpen.delete(String(plan.id))
+          mt5PlanPoll.streak.delete(String(plan.id))
+          if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshV2)
+          continue
+        }
 
         /* IM STREAK-MOMENT einfrieren — die Daten sind nachweislich frisch, später
          * wären sie durch Folgetrades/Ring-Rotation kontaminiert oder weg.
@@ -15316,9 +15378,10 @@
   /* V2-WEGE (23.09.2026, Finn: „Echo V2: es wird einfach ein ganz normales Terminal geöffnet, dann startet dort
    * der Trade — nichts gegengehedgt, kein Multiplikator, gar nichts; das Einzige: mit Puls die Order mit den
    * Parametern platzieren, fertig. Orbit V2: genau das Gleiche in TradingView — mit Duplikum nichts reinpushen").
-   * route='mt5v2' bzw. 'tvv2'. Beide Wege haben KEINEN Slave; keine Engine (Echo-Copier, Duplikum-Wächter,
-   * Live-Lots, Auto-P&L, Railway-Wächter) fasst sie an. „Läuft" setzt der bewiesene Kauf-Klick (v2PlanAufOpen),
-   * Ende und P&L bleiben Handarbeit — Finn testet damit erst mal kleine Beträge. */
+   * route='mt5v2' bzw. 'tvv2'. Beide Wege haben KEINEN Slave. „Läuft" setzt der bewiesene Kauf-Klick (v2PlanAufOpen).
+   * Orbit V2: keine Engine, Ende und P&L bleiben Handarbeit. Echo V2 seit 24.09.2026 (Finn: „wir übernehmen
+   * einfach von Echo"): Master-Baseline beim Puls-Klick, Ende-Erkennung + Live-P&L + Auto-P&L über die
+   * Echo-Zustandsmaschine (mt5PlanPollTick), Slave-P&L fest 0. */
   function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' }
   function routeIstEcho(r){ return r === 'mt5' || r === 'mt5v2' }      // Puls im MT5-Master-Terminal
   function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' }   // Puls in TradingView
@@ -16116,6 +16179,14 @@
     if(base && fin && base.master_balance != null && fin.master_balance != null){
       masterPnl = Number(fin.master_balance) - Number(base.master_balance)
     }
+    // ECHO V2 (24.09.2026, Finn: „wenn der Trade beendet wird, hat man den P&L direkt"): kein Slave →
+    // slave_pl = 0 fest, Master nur beweisbar aus Start- und End-Balance; fehlt eine, ehrlich null
+    // (kein Hedge-Hinweis, der Ambiguous-Text passt hier nicht).
+    if(routeIstV2(plan?.route)){
+      try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
+      if(masterPnl == null) return null
+      return { slavePnl: 0, slaveCcy: '', masterPnl, masterCcy: '' }
+    }
     const slavePnl = (fin && fin.closed_sum != null) ? Number(fin.closed_sum) : null
     // closed_sum null = Hedge extern geschlossen / Ring-Kürzungsverdacht / kein
     // belegter Close → Feld bleibt leer + Hinweis im Modal (analog _autoPnlAmbiguous,
@@ -16295,8 +16366,53 @@
       + `<b style="font-size:12.5px;color:${farbe}">${sym}%</b></span>`
   }
 
+  /* ECHO V2 (24.09.2026, Finn: „ich will den P&L vom Master-Account checken"): kein Hedge, kein Balken —
+   * nur EIN Chip: master_equity − mt5_baseline.master_balance (Baseline vom Puls-Klick, v2PlanAufOpen).
+   * Quelle wie bei Echo: lokal mtcInstances (≤15 s), sonst mt5_live über window._mt5CloudRows (≤25 s,
+   * damit es auch am Mac/Handy steht). Ohne Baseline oder ohne frische Zahl: nichts — nie alte Zahlen als live. */
+  function mt5V2LivePnlInner(p){
+    try{
+      if(!p || p.route !== 'mt5v2' || p.status !== 'open') return ''
+      const base = p.mt5Baseline
+      if(!base || base.master_balance == null) return ''
+      let s = null
+      if(MT5_LOCAL){
+        const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
+        if(state){
+          const r = mt5V2Resolve(p, Object.values(state))
+          if(r && r.inst && r.inst.alive && r.inst.fetchedAt && (Date.now() - r.inst.fetchedAt) <= 15000) s = r.inst.status || {}
+        }
+      }
+      if(!s){
+        const cloud = []
+        for(const r of (window._mt5CloudRows || [])){
+          if(!r || !r.alive) continue
+          const ts = Date.parse(r.updated_at || '') || 0
+          if(!ts || (Date.now() - ts) > 25000) continue
+          cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
+            status: Object.assign({}, r.status || {}, { master_login: r.master_login }) })
+        }
+        if(cloud.length){
+          const r = mt5V2Resolve(p, cloud)
+          if(r && r.inst) s = r.inst.status || {}
+        }
+      }
+      if(!s || s.note || s.master_equity == null) return ''
+      const v = Number(s.master_equity) - Number(base.master_balance)
+      if(!isFinite(v)) return ''
+      const ccy = s.master_currency === 'EUR' ? '€' : s.master_currency === 'USD' ? '$' : (s.master_currency || '')
+      const lots = (s.master_positions || []).reduce((a, x) => a + (Number(x.volume) || 0), 0)
+      return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="Live-P&L des Masters (Echo V2): Equity minus Balance beim Start">`
+        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ccy ? ' ' + ccy : ''}</b>`
+        + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lt</span>` : '')
+        + `</span>`
+    }catch(_){ return '' }
+  }
+
   function mt5LivePnlInner(p){
     try{
+      if(p && p.route === 'mt5v2') return mt5V2LivePnlInner(p)   // Echo V2 (24.09.2026): eigener Chip, gleicher Ticker
       if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
       // Quelle 1 (PC): lokales Copier-Panel — frisch ≤15s, wie immer.
       let s = null
@@ -16399,7 +16515,7 @@
     // Daten da sind. Seit 29.08.2026 auch OHNE MT5_LOCAL: am Handy/Mac füllt
     // der Cloud-Fallback (mt5_live) die Zeile — das Gate hierauf hielt die
     // Live-P&L-Zeile am Handy dauerhaft leer.
-    if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
+    if(!p || !routeIstEcho(p.route) || p.status !== 'open') return ''   // Echo + Echo V2 (24.09.2026)
     return `<span data-mt5live="${escapeHtml(String(p.id))}">${mt5LivePnlInner(p)}</span>`
   }
   // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
@@ -25164,7 +25280,8 @@
    * gespiegelt, (3) Richtungs-Schutz, (4) Terminal starten / nach vorn (Login-Zwang wie bei Echo), (5) Puls
    * platziert — /api/master-order mit ohne_hedge:true (das Panel lässt dann seinen Copier-Frische-Riegel weg,
    * prüft aber selbst Echo-Fenster und EA-Selbstheilung). „Läuft" setzt der bewiesene Bot-Erfolg (price +
-   * ticket) über v2PlanAufOpen — ohne mt5_baseline, Ende/P&L bleiben Handarbeit. Remote (Signal vom Mac):
+   * ticket) über v2PlanAufOpen — seit 24.09.2026 MIT mt5_baseline (Master-Balance), Ende/P&L kommen wie bei
+   * Echo aus mt5PlanPollTick/_autoPnlFetchMt5 (Slave = 0). Remote (Signal vom Mac):
    * _pfRemoteHook/_pfRemoteMelde wie bei Echo. Die Order kommt aus _tpPendingOrder (Klick/Signal), sonst aus
    * dem Plan — so trägt „Erneut versuchen" nach einer Absage (retry_ok) auch ohne neuen Klick. ══ */
   async function tpPreflightMt5V2(plan){
@@ -25301,13 +25418,13 @@
       await new Promise(res => setTimeout(res, 6000))
     }
     const offen = !!(r && r.price && r.ticket)
-    if(r && (r.ok || offen)) await v2PlanAufOpen(plan.id)   // Position lesend bestätigt → „Läuft", auch wenn nur SL/TP scheiterte
+    if(r && (r.ok || offen)) await v2PlanAufOpen(plan.id, r.ticket ?? null)   // Position lesend bestätigt → „Läuft" (+ Baseline, 24.09.2026), auch wenn nur SL/TP scheiterte
     if(r && r.ok){
       const okTxt = `Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}` + (r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP')
         + (r.retcode === 10010 ? ' · ⚠ Teilausführung — Größe im Terminal prüfen' : '')
       _pfSet('v2order', 'ok', '✓ ' + escapeHtml(okTxt))
       _pfRemoteMelde(plan.id, { ok:true, price: r.price ?? null, ticket: r.ticket ?? null, msg: okTxt })
-      abschluss(true, '✓ Order platziert — Plan läuft (ohne Hedge). Ende und P&L trägst du selbst ein.', false)
+      abschluss(true, '✓ Order platziert — Plan läuft (ohne Hedge). Echo liest den Master mit: Live-P&L auf der Karte, Ende und P&L kommen automatisch.', false)
       setTimeout(() => { if(offenUndMeiner()) _pfClose() }, 2200)
     } else {
       const retryOk = !!(r && r.retry_ok)
@@ -26068,9 +26185,9 @@
     v2zeig('tp-master-sl-row', v2, false)
     v2zeig('tp-dir-row', v2, true)
     v2zeig('tp-plan-start-um-row', v2, true)
-    const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' ? '— leer = kein TP' : '— mit SL zusammen, sonst Order pur') : '— für „Jetzt starten"'
+    const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' ? '— leer = kein TP' : '— nur mit SL') : '— für „Jetzt starten"'
     const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? '— Puls braucht sie' : '— für „Jetzt starten"'
-    const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht, wenn TP gesetzt'
+    const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht bei TP'
     if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle()
     // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
     v2zeig('tp-kompass-box', v2, true)
@@ -26818,7 +26935,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.441'
+  const OS_TAB_BUILD = '2026-09-22.442'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29304,7 +29421,9 @@
       // (state≠CONNECTED) → Warnhinweis direkt im Dropdown, damit Finn nicht erst beim
       // Preflight-Check merkt, dass der Account in Duplikum tot ist.
       const dupWarn = {}  // prophosAccountId -> '⛔ OFF' | '🔌 getrennt'
-      try {
+      // V2-Wege (24.09.2026, Finn: „OFF kann ich rausmachen, die Accounts laufen nicht mehr mit Duplikum"):
+      // der Duplikum-Zustand ist dort ohne Bedeutung — kein Marker. Echo/Orbit/Duplikum unverändert.
+      try { if(routeIstV2(_tpRoute)) throw 0
         const dl = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
         const dAccs = (typeof dupState !== 'undefined' && dupState.accounts) || []
         for(const [dupId, pid] of Object.entries(dl)){
@@ -33059,8 +33178,9 @@
   async function _autoPnlFetch(plan){
     // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
-    if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
-    // V2-Wege (23.09.2026): kein Copier, kein Duplikum — keine P&L-Quelle, Handeingabe (Beweis oder leer).
+    // Echo V2 seit 24.09.2026 ebenfalls aus der Baseline (Master-Balance Start/Ende, Slave = 0).
+    if(routeIstEcho(plan.route)) return _autoPnlFetchMt5(plan)
+    // Orbit V2 (23.09.2026): kein Copier, kein Duplikum — keine P&L-Quelle, Handeingabe (Beweis oder leer).
     if(routeIstV2(plan.route)) return null
     // Orbit (seit 22.09.2026): Duplikum kopiert diese Trades — P&L wie auf der Duplikum-Route.
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
