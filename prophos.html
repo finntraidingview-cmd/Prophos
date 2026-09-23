@@ -25782,7 +25782,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.429'
+  const OS_TAB_BUILD = '2026-09-22.430'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28802,11 +28802,12 @@
     // angefasst hat. Beim Bearbeiten eines Plans mit Slave-Risiko ist der gespeicherte
     // Master schon beim Öffnen als „angewendet" vorbelegt (s. openTradePlanModal) — ein
     // Wechsel im Dropdown holt die Werte des NEUEN Masters (23.09.2026).
-    // FUTURES: nur die Gesamtkosten-Box (22.09.2026, Finn: „Auto-Vorschlag und Fixkosten bei
-    // Phasenwechsel brauche ich bei Futures nie") — die beiden anderen bleiben ausgeblendet,
-    // auch wenn sie rechnerisch etwas haetten.
+    // FUTURES: Standard ist die Gesamtkosten-Box (22.09.2026), der Auto-Vorschlag (Kaufkosten
+    // x Risk-Anteil) bleibt aber SICHTBAR und per Klick waehlbar (23.09.2026, Finn: „wenn ich
+    // einen Account kaufe und er geht ins Minus, ohne dass ich blowe, will ich trotzdem mit dem
+    // Verhaeltnis weitermachen, wie ich es bekommen habe — sonst werden die Gesamtkosten kleiner").
+    // Nur die Fixkosten bei Phasenwechsel bleiben bei Futures ausgeblendet.
     if(master && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master.firm)){
-      if(suggestEl) suggestEl.style.display = 'none'
       if(vgEl){ vgEl.style.display = 'none' }
     }
     if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
