@@ -5470,8 +5470,12 @@
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-dup">Duplikum</button>
-                <!-- V2-Wege (23.09.2026, Finn: „einfach nichts gegengehedgt — kein Multiplikator, gar nichts"):
-                     Echo V2 = Puls platziert im Master-Terminal, kein Echo-Copier; Orbit V2 = Puls in TradingView, kein Duplikum. -->
+              </div>
+              <!-- V2-Wege (23.09.2026, Finn: „einfach nichts gegengehedgt — kein Multiplikator, gar nichts"):
+                   Echo V2 = Puls platziert im Master-Terminal, kein Echo-Copier; Orbit V2 = Puls in TradingView, kein Duplikum.
+                   Seit 24.09.2026 (Kapitel „Ohne Hedge", Finn: „Echo und Orbit V2 jeweils in der Spalte weiter
+                   drunter, damit sie einfach mehr separat sind") als eigene Zeile unter den Hedge-Wegen. -->
+              <div class="seg tp-route-seg-v2" id="tp-route-seg-v2" style="margin-top:6px">
                 <button type="button" id="tp-route-mt5v2">Echo V2</button>
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
               </div>
@@ -26814,7 +26818,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.440'
+  const OS_TAB_BUILD = '2026-09-22.441'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28988,6 +28992,15 @@
           _tpRoute = alt === 'mt5' ? 'mt5v2' : (alt === 'mt5v2' || alt === 'tvv2') ? alt : 'tvv2'
           localStorage.setItem(TP_ROUTE_LS, _tpRoute)
           localStorage.setItem('prophos_tp_route_k2', String(kh.id))
+        }
+        // Echo V2 braucht einen per Echo verknüpften Master (mt5_links) — auf einem
+        // Gerät ohne solche Links (Finns Mac, 24.09.2026 abends: Popup stand auf
+        // Echo V2 mit leerem Master-Dropdown, „hier stimmt das Mapping nicht")
+        // ist Orbit V2 die einzige sinnvolle Vorbelegung. Gilt bei jedem neuen Plan.
+        if(_tpRoute === 'mt5v2' && typeof mt5GetLinks === 'function'
+           && !Object.keys(mt5GetLinks() || {}).length){
+          _tpRoute = 'tvv2'
+          localStorage.setItem(TP_ROUTE_LS, _tpRoute)
         }
       } catch(_){}
     }
