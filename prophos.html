@@ -23353,7 +23353,7 @@
       + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
       // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
       // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
-      + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{2}$/, ''))}</b>` : '')
+      + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}</b>` : '')
       + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
       + (p.masterTp > 0 ? ` · TP <b style="color:#2a9d5c">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
       + (p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
@@ -23440,18 +23440,36 @@
       // Popup soll gar nicht geöffnet werden, ich will mehrere Trades gleichzeitig in die
       // Warteschlange packen") — die Karte zeigt dann denselben Stand wie bei Echo. Am PC
       // (localhost) bleibt der direkte Weg mit Check-Popup.
-      const orbitBtn = (typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p))
-        ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>`
-        : (!MT5_LOCAL && qs && qs.laeuft)
-          ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
-          : (!MT5_LOCAL && qs)
-            ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
+      // Hängender Start (23.09.2026, Finn: „füg da noch einen Button hinzu, ‚Neu starten' — der Start ging nicht
+      // los, weil der PC nicht bereit war, und nach ein, zwei Minuten kommt nichts zurück"). Befund Jacob 13:30:
+      // der PC-Tab hatte den Claim (start_um_gestartet_at), Puls scheiterte um 13:31 an der Watchlist — die
+      // Karte zeigte 15 min lang „gestartet 13:30" ohne Ausweg. Jetzt: 2 min nach dem Claim ohne Kauf-Klick
+      // bzw. 2 min nach dem Kauf-Klick ohne Duplikum-Erkennung steht neben dem Chip „Neu starten"
+      // (tpNeuStarten). Läuft schon ein Signal aus der Warteschlange (qs) oder der lokale Orbit-Lauf,
+      // zeigt die Karte dessen Stand statt des alten Chips.
+      const NEU_AB_MS = 2 * 60 * 1000
+      let orbitLokal = false; try{ orbitLokal = !!_tpOrbitLaeuft }catch(_){}
+      const wartetDup = typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p)
+      const gestVor = p.startUmGestartetAt ? Date.now() - new Date(p.startUmGestartetAt).getTime() : -1
+      const dupVor = p.orbitGesendetAt ? Date.now() - new Date(p.orbitGesendetAt).getTime() : -1
+      const neuBtn = (!qs && !orbitLokal && (p.route === 'tvplus' || p.route === 'mt5')
+                      && ((wartetDup && dupVor > NEU_AB_MS) || (!p.orbitGesendetAt && gestVor > NEU_AB_MS)))
+        ? ` <button class="btn btn-ghost tc2-btn" data-plan-neu-start="${p.id}" title="${wartetDup
+              ? 'Puls meldete die Order als platziert, Duplikum hat sie aber noch nicht erkannt — erst in TradingView nachsehen, dann erneut starten'
+              : 'Der Start wurde ausgelöst, aber nichts kam zurück (PC nicht bereit?) — Klick stößt den Start erneut an'}">Neu starten</button>`
+        : ''
+      const orbitBtn = (!MT5_LOCAL && qs && qs.laeuft)
+        ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
+        : (!MT5_LOCAL && qs)
+          ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
+          : wartetDup
+            ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>${neuBtn}`
             : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
       // Geplante Startzeit (22.09.2026): Chip statt Knopf, Klick nimmt die Zeit wieder raus.
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
         ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
-        : (p.startUm && p.startUmGestartetAt && (Date.now() - new Date(p.startUmGestartetAt).getTime()) < 15 * 60 * 1000 && !orbitWartetAufDup(p))
-          ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>`
+        : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
+          ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
           : ''
       const jetztBtn = startUmBtn ? startUmBtn : (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
         : (qs && qs.laeuft)
@@ -23849,6 +23867,10 @@
     // Geplante Startzeit auf der Karte entfernen (22.09.2026) — eigener Handler.
     document.querySelectorAll('[data-plan-start-um-x]').forEach(btn => {
       btn.addEventListener('click', () => { if(typeof tpStartUmEntfernen === 'function') tpStartUmEntfernen(btn.dataset.planStartUmX) })
+    })
+    // „Neu starten" bei hängendem Start (23.09.2026) — eigener Handler, kein Sammel-Handler.
+    document.querySelectorAll('[data-plan-neu-start]').forEach(btn => {
+      btn.addEventListener('click', () => { if(typeof tpNeuStarten === 'function') tpNeuStarten(btn.dataset.planNeuStart) })
     })
     document.querySelectorAll('[data-plan-orbit-start]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -25881,7 +25903,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.433'
+  const OS_TAB_BUILD = '2026-09-22.434'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27846,6 +27868,43 @@
       if(error) throw error
       if(data && data.length){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]); renderTradePlans() }
     }catch(e){ if(typeof atToast === 'function') atToast('Startzeit nicht entfernt: ' + (e.message || e), 'end') }
+  }
+  /* „Neu starten" (23.09.2026, Finn: „der Start ging nicht los, weil der PC gar nicht bereit war — nach ein, zwei
+   * Minuten kommt nichts zurück, dann will ich ‚Neu starten' drücken"). Befund am selben Tag (Jacob, 13:30):
+   * der PC-Tab hatte den Claim gesetzt, Puls scheiterte um 13:31 (Watchlist-Klick landete auf NQ statt MNQ),
+   * die Karte zeigte 15 min „gestartet 13:30" und der Fehler stand nur am PC. Der Knopf stößt den Start erneut
+   * an — lokal direkt (Check-Popup), vom Mac/Handy über die Auto-Start-Warteschlange wie „Starten".
+   * Stempel: der Kauf-Klick (orbit_gesendet_at) wird gelöscht, sonst bliebe „Warte auf Duplikum" stehen; der
+   * Claim (start_um_gestartet_at) bleibt gesetzt und wandert auf jetzt — mit NULL würde der PC-Tick die alte
+   * Startzeit sofort erneut claimen und parallel feuern, und der Farmer-Abgleich lässt Pläne mit Claim bewusst
+   * in Ruhe. Ein noch wartendes Signal des hängenden Laufs wird verworfen (ein spät hochkommender PC-Tab
+   * dürfte sonst das alte UND das neue Signal fahren). War der Kauf-Klick gestempelt, kann die Order im Markt
+   * liegen → Rückfrage (UNKLAR-Doktrin vom 18.08.2026: erst nachsehen, nie blind doppelt). */
+  async function tpNeuStarten(planId){
+    const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'planned') return toast('Plan ist nicht (mehr) „Geplant" — nichts gestartet.', 'end')
+    if(typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(plan)){
+      const um = new Date(plan.orbitGesendetAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+      if(!confirm(`Puls hat um ${um} gemeldet, die Order sei in TradingView platziert — Duplikum hat sie nur noch nicht erkannt.\n\nErst in TradingView nachsehen: liegt die Order dort, NICHT erneut starten (sonst liegt sie doppelt).\n\nWirklich erneut starten?`)) return
+    }
+    try{
+      const upd = { orbit_gesendet_at: null }
+      if(plan.startUmGestartetAt) upd.start_um_gestartet_at = new Date().toISOString()
+      const { data, error } = await supabase.from('trade_plans').update(upd).eq('id', plan.id).eq('status', 'planned').select('*')
+      if(error) throw error
+      if(!data || !data.length) return toast('Plan ist nicht (mehr) „Geplant" — nichts gestartet.', 'end')
+      const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+      try{
+        await supabase.from('order_signale')
+          .update({ status: 'verworfen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'Durch „Neu starten" ersetzt.' } })
+          .eq('plan_id', String(plan.id)).eq('status', 'wartet')
+      }catch(e){ console.warn('[neu-starten] altes Signal', e) }
+      renderTradePlans()
+    }catch(e){ return toast('Neu starten nicht möglich: ' + (e.message || e), 'end') }
+    const p2 = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
+    if(p2.route === 'tvplus' && typeof tpOrbitStarten === 'function') tpOrbitStarten(p2.id)
+    else if(p2.route === 'mt5' && typeof tpJetztStarten === 'function') tpJetztStarten(p2.id)
   }
   // Hinweis unter dem Feld: welcher Tag ist gemeint, in welcher Zeitzone (Gerät)
   function tpStartUmHinweis(){
