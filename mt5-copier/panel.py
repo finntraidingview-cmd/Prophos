@@ -541,6 +541,30 @@ def upsert_plan(file, name, multiplier):
         return p
 
 
+def _echo_fenster_offen(file):
+    """Echo V2 (23.09.2026): hat diese Instanz ein offenes Trade-Fenster im Sinne des Copiers
+    (copier.plan_armed_files: 'laufend' immer, 'geplant' 6 h ab armed_at)? Liefert den Plan-Namen,
+    sonst None. Dieselbe Regel wie im Copier — bewusst hier nachgebaut statt importiert (copier.py
+    haengt an MetaTrader5 und laeuft als eigener Prozess)."""
+    now = datetime.now()
+    with PLANS_LOCK:
+        plans = _load_plans()
+    for p in plans:
+        if p.get("file") != file:
+            continue
+        st = p.get("status")
+        if st == "laufend":
+            return p.get("name") or "laufend"
+        if st == "geplant":
+            try:
+                age = (now - datetime.fromisoformat(str(p.get("armed_at") or ""))).total_seconds()
+            except (TypeError, ValueError):
+                continue
+            if age <= 6 * 3600:
+                return p.get("name") or "geplant"
+    return None
+
+
 def delete_plan(pid):
     with PLANS_LOCK:
         plans = _load_plans()
@@ -2621,13 +2645,38 @@ class Handler(BaseHTTPRequestHandler):
                    "sl_usd": body.get("sl_usd"), "tp_usd": body.get("tp_usd")}
             if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            # ECHO V2 (23.09.2026, Finn: "nichts gegengehedgt, kein Multiplikator, gar nichts"): ohne_hedge
+            # heisst, der Copier SOLL nicht mitlaufen — der Frische-Riegel unten (schuetzt die Order vor einem
+            # ungehedgten Markt) ist hier verkehrt. Stattdessen zwei eigene Riegel, beide beweisbar VOR dem
+            # Bot-Start (retry_ok=True): (1) kein offenes Echo-Fenster dieser Instanz (plans.json 'laufend'
+            # bzw. 'geplant' < 6 h — sonst wuerde ein laufender Copier die Order doch kopieren), (2) keine
+            # laufende EA-Selbstheilung fuer dieses Terminal (die killt und startet das Terminal neu — mitten
+            # im Order-Dialog waere das ein UNKLAR). Der Bot selbst bleibt unveraendert (Login-Guard, Klick).
+            ohne_hedge = bool(body.get("ohne_hedge"))
+            if ohne_hedge:
+                fenster = _echo_fenster_offen(inst["config_file"])
+                if fenster:
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                        "grund": "echo_fenster_offen", "msg":
+                        f"Echo-Fenster fuer diese Instanz ist offen (Plan '{fenster}') — der Copier "
+                        "wuerde die Order hedgen. Erst den Echo-Trade beenden."}, ensure_ascii=False))
+                cfg_v2 = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+                tpath = str(cfg_v2.get("master_terminal_path") or "").strip()
+                inst_dir = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
+                with HEAL_LOCK:
+                    heilt = bool(inst_dir) and inst_dir in HEAL_ACTIVE
+                if heilt:
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                        "grund": "terminal_heilt", "msg":
+                        "Terminal wird gerade geprueft (EA-Selbstheilung laeuft) — gleich erneut."},
+                        ensure_ascii=False))
             st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
             age = None
             try:
                 age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
             except (ValueError, TypeError):
                 pass
-            if not (st.get("running") and age is not None and age <= 15):
+            if not ohne_hedge and not (st.get("running") and age is not None and age <= 15):
                 return self._send(409, json.dumps({"ok": False, "retry_ok": True,
                     "grund": "copier_alt", "msg":
                     "Copier liefert keine frischen Daten — die Order wuerde UNGEHEDGET "
@@ -2673,7 +2722,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "retry_ok": False, "msg": f"Order-Bot-Start fehlgeschlagen: {e}"}
             finally:
                 lock.release()
-            print(f"[panel] {fname}: Master-Order {cmd['richtung']} {cmd['volumen']} "
+            print(f"[panel] {fname}: Master-Order{' (Echo V2, ohne Hedge)' if ohne_hedge else ''} "
+                  f"{cmd['richtung']} {cmd['volumen']} "
                   f"{cmd['symbol']} -> {res.get('ok')} ({res.get('msg') or res.get('retcode')})", flush=True)
             # Stempel-Spur immer ins Log (02.09.2026, Finns '10 sec pro Step'):
             # bei Erfolg steht die Spur sonst NIRGENDS — genau dann braucht

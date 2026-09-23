@@ -1597,6 +1597,9 @@
   #dashboard-view .tc2-sys-tvplus{background:rgba(124,58,237,.12);color:#7C3AED}
   #dashboard-view .tc2-sys-mirror{background:rgba(136,124,252,.17);color:#5B4EE0}
   #dashboard-view .tc2-sys-tsx{background:rgba(71,85,105,.11);color:#475569}
+  /* V2-Wege (23.09.2026): gleiche Farbe wie Echo/Orbit, gestrichelter Rand = „ohne Hedge" */
+  #dashboard-view .tc2-sys-mt5v2{background:rgba(14,151,149,.15);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}
+  #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
   #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
@@ -5412,6 +5415,10 @@
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-dup">Duplikum</button>
+                <!-- V2-Wege (23.09.2026, Finn: „einfach nichts gegengehedgt — kein Multiplikator, gar nichts"):
+                     Echo V2 = Puls platziert im Master-Terminal, kein Echo-Copier; Orbit V2 = Puls in TradingView, kein Duplikum. -->
+                <button type="button" id="tp-route-mt5v2">Echo V2</button>
+                <button type="button" id="tp-route-tvv2">Orbit V2</button>
               </div>
             </div>
             <div class="field">
@@ -14639,6 +14646,16 @@
     if(!inst) return null
     return { inst, masterLogin: linkRoute.masterLogin, hedgeLogin: linkRoute.hedgeLogin }
   }
+  // ECHO V2 (23.09.2026): Plan → Instanz NUR über den Master-Login — der Plan hat keinen Hedge, die
+  // Instanz liefert nur Terminal-Pfad + erwarteten Login. Instanzen MIT Terminal-Pfad zuerst.
+  function mt5V2Resolve(plan, instances){
+    if(!plan) return null
+    const masterLogin = (typeof mt5LoginForAccount === 'function') ? mt5LoginForAccount(plan.masterAccountId) : null
+    if(!masterLogin) return null
+    const passt = x => !!x && String(((x.status || {}).master_login) || x.master_expected || '') === String(masterLogin)
+    const inst = (instances || []).find(x => passt(x) && x.has_terminal) || (instances || []).find(passt) || null
+    return inst ? { inst, masterLogin: String(masterLogin) } : null
+  }
 
   // Poll-Bedarf für die Copier-IIFE (Gate-Erweiterung am Modulende): auf der
   // Trades-View sollen Balances/Live-P&L fließen, solange ein MT5-Plan aktiv ist.
@@ -14723,6 +14740,22 @@
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
       if(typeof renderTradePlans === 'function') renderTradePlans()
     }catch(e){ console.warn('[tvPlanGesendet]', e) }
+  }
+  /* V2-Wege (23.09.2026): kein Copier, kein Duplikum — also keine Erkennung. Der bewiesene Kauf-Klick
+   * (Orbit V2: Positions-Tabelle/Toast in TradingView; Echo V2: price+ticket vom Bot) setzt den Plan selbst
+   * auf „Läuft" (started_at). Kein mt5_baseline, kein P&L-Beweis: Ende und P&L trägt Finn ein. */
+  async function v2PlanAufOpen(planId){
+    try{
+      const plan = tradePlans.find(x => String(x.id) === String(planId))
+      if(!plan || plan.status !== 'planned') return
+      const { data, error } = await supabase.from('trade_plans')
+        .update({ status: 'open', started_at: new Date().toISOString(), ended_at: null })
+        .eq('id', plan.id).eq('status', 'planned').select('*')
+      if(error || !data || !data.length) return
+      const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+      if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      if(typeof renderTradePlans === 'function') renderTradePlans()
+    }catch(e){ console.warn('[v2PlanAufOpen]', e) }
   }
 
   async function mt5PlanPollTick(){
@@ -14888,10 +14921,21 @@
    * und dupLotsHasOpenPlan: explizite route gewinnt, Mirror per Struktur-
    * Erkennung, alles uebrige ist Duplikium. Wuerde der Sticker anders raten
    * als diese beiden, behauptete er neben den Live-Chips etwas Falsches. */
+  /* V2-WEGE (23.09.2026, Finn: „Echo V2: es wird einfach ein ganz normales Terminal geöffnet, dann startet dort
+   * der Trade — nichts gegengehedgt, kein Multiplikator, gar nichts; das Einzige: mit Puls die Order mit den
+   * Parametern platzieren, fertig. Orbit V2: genau das Gleiche in TradingView — mit Duplikum nichts reinpushen").
+   * route='mt5v2' bzw. 'tvv2'. Beide Wege haben KEINEN Slave; keine Engine (Echo-Copier, Duplikum-Wächter,
+   * Live-Lots, Auto-P&L, Railway-Wächter) fasst sie an. „Läuft" setzt der bewiesene Kauf-Klick (v2PlanAufOpen),
+   * Ende und P&L bleiben Handarbeit — Finn testet damit erst mal kleine Beträge. */
+  function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' }
+  function routeIstEcho(r){ return r === 'mt5' || r === 'mt5v2' }      // Puls im MT5-Master-Terminal
+  function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' }   // Puls in TradingView
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
     tvplus: ['Orbit',     'Orbit — Duplikum kopiert, Puls platziert die Order automatisch in TradingView'],
+    mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
+    tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
   }
@@ -14904,6 +14948,7 @@
     if(!p) return 'dup'
     if(p.route === 'mt5')    return 'mt5'
     if(p.route === 'tvplus') return 'tvplus'
+    if(routeIstV2(p.route))  return p.route
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return 'mirror'
     return 'dup'
   }
@@ -16001,7 +16046,7 @@
   function dupLotsHasOpenPlan(){
     let _tp; try { _tp = tradePlans } catch(_){ return false }
     return (_tp || []).some(p =>
-      p.status === 'open' && p.route !== 'mt5'   // Orbit zählt mit (22.09.2026: Orbit = Duplikum + automatische Order)
+      p.status === 'open' && p.route !== 'mt5' && !routeIstV2(p.route)   // Orbit zählt mit (22.09.2026: Orbit = Duplikum + automatische Order)
       && !(typeof planMirrorRoute === 'function' && planMirrorRoute(p))
       && atGetDupId(p.slaveAccountId)
     )
@@ -16036,7 +16081,7 @@
   // aktualisieren kann, ohne die ganze Karte neu zu rendern (Muster mt5LivePnlInner).
   function dupLiveLotsInner(p){
     try{
-      if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+      if(!p || p.status !== 'open' || p.route === 'mt5' || routeIstV2(p.route)) return ''
       if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
       if(!Array.isArray(dupLots.positions) || (Date.now() - dupLots.fetchedAt) > dupLots.FRESH_MS) return ''
       const dupSlaveId  = atGetDupId(p.slaveAccountId)
@@ -16085,7 +16130,7 @@
   function dupLiveLotsHtml(p){
     // Wrapper IMMER rendern (auch leer): der erste Karten-Render passiert oft vor
     // dem ersten Fetch — der Ticker füllt den Platzhalter nach (Muster mt5LivePnlHtml).
-    if(!p || p.status !== 'open' || p.route === 'mt5') return ''
+    if(!p || p.status !== 'open' || p.route === 'mt5' || routeIstV2(p.route)) return ''
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return ''
     return `<span data-duplots="${escapeHtml(String(p.id))}">${dupLiveLotsInner(p)}</span>`
   }
@@ -17528,7 +17573,7 @@
       // Orbit-Pläne waren vom 28.08. bis 22.09.2026 ebenfalls ausgenommen (TV-Reader-
       // Welt). Seit Finns Ansage 22.09.2026 — „Orbit = Duplikum mit automatisch Trades
       // platzieren" — kopiert Duplikum sie, also gehören sie genau HIERHER.
-      if(plan.route === 'mt5') continue
+      if(plan.route === 'mt5' || routeIstV2(plan.route)) continue   // V2 (23.09.2026): kein Duplikum
 
       // Slave UND Master via External ID (dupGetLinks) auflösen
       const dupSlaveId  = atGetDupId(plan.slaveAccountId)
@@ -18002,7 +18047,7 @@
       // MT5-Routen-Pläne (15.08.2026): gehören der MT5-Zustandsmaschine des
       // aktiven lokalen Profils (mt5PlanPoll), nie dem Duplikum-Wächter.
       // Orbit-Pläne zählen seit 22.09.2026 mit (Orbit = Duplikum + automatische Order).
-      if(plan.route === 'mt5') continue
+      if(plan.route === 'mt5' || routeIstV2(plan.route)) continue   // V2 (23.09.2026): kein Duplikum
       const dupSlaveId  = dupIdOf(plan.slaveAccountId)
       const dupMasterId = dupIdOf(plan.masterAccountId)
       if(!dupSlaveId) continue
@@ -23502,7 +23547,7 @@
     const sysBadge = isCompleted ? '' : sysStickerHtml(planSysKey(p))
 
     const masterName = p.masterName || '— gelöscht —'
-    const slaveName  = p.slaveName  || '— gelöscht —'
+    const slaveName  = p.slaveName  || (routeIstV2(p.route) ? '' : '— gelöscht —')   // V2: kein Slave, kein „gelöscht"
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
     const sCur = slavePreset.currency
     const mult = p.multiplier != null ? p.multiplier.toFixed(3) : '—'
@@ -23532,8 +23577,10 @@
 
     // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
     const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
-      + ` · ×<b style="color:var(--violet)">${mult}</b>`
-      + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`
+      + (routeIstV2(p.route)
+          ? ` · Risiko <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>`   // V2: kein Multiplier, kein Slave-Risiko
+          : ` · ×<b style="color:var(--violet)">${mult}</b>`
+            + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
       + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
       // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
       // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
@@ -23636,7 +23683,7 @@
       const wartetDup = typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p)
       const gestVor = p.startUmGestartetAt ? Date.now() - new Date(p.startUmGestartetAt).getTime() : -1
       const dupVor = p.orbitGesendetAt ? Date.now() - new Date(p.orbitGesendetAt).getTime() : -1
-      const neuBtn = (!qs && !orbitLokal && (p.route === 'tvplus' || p.route === 'mt5')
+      const neuBtn = (!qs && !orbitLokal && (routeIstOrbit(p.route) || routeIstEcho(p.route))
                       && ((wartetDup && dupVor > NEU_AB_MS) || (!p.orbitGesendetAt && gestVor > NEU_AB_MS)))
         ? ` <button class="btn btn-ghost tc2-btn" data-plan-neu-start="${p.id}" title="${wartetDup
               ? 'Puls meldete die Order als platziert, Duplikum hat sie aber noch nicht erkannt — erst in TradingView nachsehen, dann erneut starten'
@@ -23655,7 +23702,7 @@
         : (p.startUm && p.startUmGestartetAt && gestVor < 15 * 60 * 1000 && !wartetDup && !qs)
           ? `<span class="rsq-card-run" title="Der PC-Tab hat die geplante Startzeit ausgelöst — kommt binnen 2 min nichts zurück, erscheint „Neu starten"">⏰ gestartet ${tpStartUmText(p.startUmGestartetAt)}</span>${neuBtn}`
           : ''
-      const jetztBtn = startUmBtn ? startUmBtn : (p.route === 'tvplus') ? orbitBtn : (p.route !== 'mt5') ? ''
+      const jetztBtn = startUmBtn ? startUmBtn : routeIstOrbit(p.route) ? orbitBtn : !routeIstEcho(p.route) ? ''
         : (qs && qs.laeuft)
           ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
           : qs
@@ -23696,9 +23743,10 @@
         <div class="tc2-main">
           <div class="tc2-pair">
             <span class="tc2-name" title="${escapeHtml(masterName)}">${escapeHtml(masterName)}</span>
-            <i class="tc2-arrow">→</i>
-            <span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>
-            ${(p.route === 'mt5' && (p.richtung === 'buy' || p.richtung === 'sell'))
+            ${slaveName
+              ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
+              : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
+            ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
           </div>
@@ -24359,6 +24407,10 @@
     // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
     // Fallback für Alt-Pläne ohne gesetzte Route.
     if(plan.route === 'mt5') return tpPreflightMt5(plan)
+    // V2-Wege (23.09.2026): Echo V2 hat seinen eigenen Check ohne Copier; Orbit V2 kennt keinen Duplikum-Check —
+    // „Speichern & Starten" landet im Order-Popup, „Starten" auf der Karte geht direkt zu Puls (tpOrbitStarten).
+    if(plan.route === 'mt5v2') return tpPreflightMt5V2(plan)
+    if(plan.route === 'tvv2') return openTpOrderModal(planId)
 
     // Orbit: aus Popup 1 („Speichern") geht es ins Order-Popup (Richtung/TP/SL/Lots).
     // Erst DESSEN „Speichern" kommt mit nurDup hierher zurück und fährt den Duplikum-Check
@@ -24697,6 +24749,169 @@
     // erst die Ursache weg muss, bevor ein Neustart etwas bringt.
     const at = dd && dd.copier_log_at ? String(dd.copier_log_at).slice(11, 19) : ''
     return { zeilen, stand: at }
+  }
+  /* ══ ECHO V2 — Trade-Start ohne Hedge (23.09.2026, Finn: „bei Echo V2 wird einfach ein ganz normales Terminal
+   * geöffnet, dann startet dort der Trade — nichts gegengehedgt, kein Multiplikator, gar nichts; das Einzige:
+   * mit Puls die Order mit den Parametern platzieren, fertig"). Dieselbe Popup-Mechanik wie tpPreflightMt5,
+   * aber ohne Copier-Zeilen: (1) Master-Login → Instanz mit Terminal-Pfad, (2) KEIN Hedge: kein offenes
+   * Echo-Fenster dieser Instanz (sonst kopiert ein laufender Copier doch), Master nicht per Duplikum
+   * gespiegelt, (3) Richtungs-Schutz, (4) Terminal starten / nach vorn (Login-Zwang wie bei Echo), (5) Puls
+   * platziert — /api/master-order mit ohne_hedge:true (das Panel lässt dann seinen Copier-Frische-Riegel weg,
+   * prüft aber selbst Echo-Fenster und EA-Selbstheilung). „Läuft" setzt der bewiesene Bot-Erfolg (price +
+   * ticket) über v2PlanAufOpen — ohne mt5_baseline, Ende/P&L bleiben Handarbeit. Remote (Signal vom Mac):
+   * _pfRemoteHook/_pfRemoteMelde wie bei Echo. Die Order kommt aus _tpPendingOrder (Klick/Signal), sonst aus
+   * dem Plan — so trägt „Erneut versuchen" nach einer Absage (retry_ok) auch ohne neuen Klick. ══ */
+  async function tpPreflightMt5V2(plan){
+    _pfMt5StopTimer()
+    if(_pfRemoteHook && !_pfRemoteHook.armed && String(_pfRemoteHook.planId) !== String(plan.id)){
+      if(_tpPendingOrder && String(_tpPendingOrder.planId) === String(_pfRemoteHook.planId)) _tpPendingOrder = null
+      _pfRemoteMelde(_pfRemoteHook.planId, { ok:false, verworfen:true,
+        msg:'Am PC wurde ein anderer Check gestartet — Signal verworfen, nichts platziert.' })
+    }
+    _pfErrLog = []
+    _pfPlanId = plan.id
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `Echo V2 · ${plan.masterName || '—'} — ohne Hedge, ohne Copier`
+    document.getElementById('tpPreflightModal').classList.add('open')
+    const offenUndMeiner = () => document.getElementById('tpPreflightModal')?.classList.contains('open') && String(_pfPlanId) === String(plan.id)
+    const po = (_tpPendingOrder && String(_tpPendingOrder.planId) === String(plan.id)) ? _tpPendingOrder : (_tpOrderAusPlan(plan).order || null)
+    let hardFail = false
+    const fail = (key, html) => { _pfSet(key, 'err', html); hardFail = true }
+    const abschluss = (ok, text, retry) => {
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb){ rb.style.display = retry ? '' : 'none'; rb.disabled = false; rb.textContent = 'Erneut versuchen' }
+      if(foot) foot.style.display = 'flex'
+      _pfCheckStatus[String(plan.id)] = { state: ok ? 'ready' : 'issue', at: Date.now() }
+      _pfStatusSave()
+      try{ renderTradePlans() }catch(_){}
+    }
+    _pfAddRow('v2link',  'Master-Terminal verlinkt')
+    _pfAddRow('v2hedge', 'Kein Hedge')
+    _pfAddRow('v2dir',   'Richtungs-Schutz')
+    _pfAddRow('v2term',  'Terminal')
+    _pfAddRow('v2order', 'Puls platziert')
+    if(!po) fail('v2order', 'Keine vollständige Order am Plan (Richtung/Lots/TP+SL) — über „Weiter →" speichern.')
+
+    // ── 1. Verlinkung: Master-Login → Instanz mit Terminal-Pfad (der Hedge der Instanz ist hier egal) ──
+    const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : { ok:false, copier_offline:true }
+    const offline = !dd || dd.copier_offline || dd._httpFail
+    const route = offline ? null : mt5V2Resolve(plan, dd.instances || [])
+    if(offline) fail('v2link', 'Copier-Backend am PC nicht erreichbar — start-alles.bat ausführen (der Copier selbst muss NICHT laufen).')
+    else if(!route) fail('v2link', `Kein Master-Terminal für „${escapeHtml(plan.masterName || '—')}" auf diesem PC — der Account braucht eine MT5-Verlinkung und eine Echo-Instanz mit Terminal-Pfad (Echo-Ansicht → Neue Instanz).`)
+    else if(!route.inst.has_terminal) fail('v2link', `Instanz <span class="mono">${escapeHtml(String(route.inst.name || route.inst.file))}</span> hat keinen Terminal-Pfad (master_terminal_path).`)
+    else _pfSet('v2link', 'ok', `Master <span class="mono">${escapeHtml(route.masterLogin)}</span> · Instanz <span class="mono">${escapeHtml(String(route.inst.name || route.inst.file))}</span>`)
+
+    // ── 2. Kein Hedge: Echo-Fenster dieser Instanz zu + Master nicht in Duplikum ──
+    if(!route){
+      _pfSet('v2hedge', 'warn', 'Übersprungen — Verlinkung fehlt.')
+    } else {
+      const jetzt = Date.now()
+      const fenster = (Array.isArray(dd.plans) ? dd.plans : []).find(x => x && x.file === route.inst.file
+        && (x.status === 'laufend' || (x.status === 'geplant' && isFinite(new Date(x.armed_at || 0).getTime()) && jetzt - new Date(x.armed_at).getTime() <= 6 * 3600 * 1000)))
+      const _dupLinks = (typeof dupGetLinks === 'function') ? dupGetLinks() : {}
+      const _dupConnected = (typeof dupState !== 'undefined') && !!dupState.token
+      if(_dupConnected && !(dupState.accounts || []).length && typeof dupLoadAccounts === 'function'){ try{ await dupLoadAccounts() }catch(_){} }
+      const _dupAccIds = new Set(((typeof dupState !== 'undefined' && dupState.accounts) || []).map(a => String(a.account_id)))
+      const _dupLinkedIds = new Set(Object.entries(_dupLinks).filter(([dupId]) => !_dupAccIds.size || _dupAccIds.has(String(dupId))).map(([, manualId]) => String(manualId)))
+      if(fenster) fail('v2hedge', `Echo-Fenster dieser Instanz ist OFFEN (Panel-Plan „${escapeHtml(String(fenster.name || fenster.status))}") — ein laufender Copier würde die Order hedgen. Erst den Echo-Trade beenden.`)
+      else if(_dupConnected && _dupLinkedIds.has(String(plan.masterAccountId))) fail('v2hedge', 'Der Master ist mit Duplikum verlinkt und Duplikum ist verbunden — Duplikum würde die Order kopieren. Für Echo V2 den Master aus Duplikum nehmen.')
+      else _pfSet('v2hedge', 'ok', `Copier ${route.inst.alive ? 'läuft, aber ohne offenes Echo-Fenster' : 'aus'} · Master nicht in Duplikum — nichts kopiert diese Order.`)
+    }
+
+    // ── 3. Richtungs-Schutz (wie Echo: nie gegen einen laufenden/gespeicherten Trade derselben Firma) ──
+    try{
+      const dirs = await window.firmLiveRichtungen(plan.masterFirm)
+      const fName = escapeHtml(plan.masterFirm || '—')
+      const laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
+      const meine = po ? (/sell/i.test(po.richtung) ? 'SHORT' : 'LONG') : null
+      if(laufDir && meine && laufDir !== meine) fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`)
+      else if(laufDir) _pfSet('v2dir', 'ok', `${fName} läuft bereits ${laufDir} — gleiche Richtung ✓`)
+      else {
+        const gep = (typeof firmGeplanteRichtungen === 'function') ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
+        const gepDir = (gep.long.length && gep.short.length) ? null : gep.long.length ? 'LONG' : gep.short.length ? 'SHORT' : null
+        if(gepDir && meine && gepDir !== meine) fail('v2dir', `${fName} hat einen gespeicherten Plan auf <b>${gepDir}</b> — deine <b>${meine}</b>-Order wäre die Gegenrichtung. Nicht gestartet.`)
+        else _pfSet('v2dir', 'ok', gepDir ? `Kein laufender Trade bei ${fName} — gespeicherter Plan ebenfalls ${gepDir} ✓` : `Kein laufender Trade bei ${fName} — Richtung frei.`)
+      }
+    }catch(_){ _pfSet('v2dir', 'warn', 'Richtungs-Schutz nicht prüfbar (keine Flotten-Daten) — Richtung selbst im Blick behalten.') }
+
+    // ── 4. Terminal starten / nach vorn (Login-Zwang wie bei Echo, wenn die Zugangsdaten zum Login passen) ──
+    let file = null
+    if(hardFail){
+      _pfSet('v2term', 'warn', 'Übersprungen — Zeilen oben rot.')
+      _pfSet('v2order', 'warn', 'Übersprungen.')
+    } else {
+      file = route.inst.file
+      const mAcc = accounts.find(a => String(a.id) === String(plan.masterAccountId))
+      const mc = (mAcc && mAcc.creds) || {}
+      const sendCreds = !!(mc.login && mc.password && String(mc.login) === String(route.masterLogin))
+      _pfSet('v2term', 'warn', '⏳ Terminal wird gestartet bzw. nach vorn geholt…')
+      let ts = null
+      try{
+        ts = await window.mtcApi(`start-terminal?file=${encodeURIComponent(file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(sendCreds ? { login: String(mc.login), password: String(mc.password), server: String(mc.server || '') } : {}) })
+      }catch(e){ ts = { ok:false, msg: String(e && e.message || e) } }
+      if(!ts || !ts.ok){ fail('v2term', 'Terminal-Start fehlgeschlagen: ' + escapeHtml(String((ts && (ts.msg || ts.error)) || 'Fehler'))); _pfSet('v2order', 'warn', 'Übersprungen.') }
+      else if(/FALSCHEN Konto/i.test(String(ts.msg || ''))){ fail('v2term', escapeHtml(String(ts.msg))); _pfSet('v2order', 'warn', 'Übersprungen.') }
+      else _pfSet('v2term', 'ok', escapeHtml(String(ts.msg || 'Terminal läuft')) + ' — den Login prüft Puls vor dem Klick lesend selbst.')
+    }
+    if(hardFail){
+      _pfRemoteMelde(plan.id, { ok:false, check_fail:true, msg: 'Echo-V2-Check rot — nichts platziert: ' + _pfErrLog.join(' · ') })
+      abschluss(false, '✗ Nichts platziert — Zeilen oben prüfen.', true)
+      return
+    }
+
+    // ── 5. Puls platziert ── (one-shot: die gemerkte Order gilt nur für diesen Abschuss)
+    if(!offenUndMeiner()) return
+    _tpPendingOrder = null
+    if(_pfRemoteHook && String(_pfRemoteHook.planId) === String(plan.id)){
+      _pfRemoteHook.armed = true
+      try{ _pfRemoteHook.schritt && _pfRemoteHook.schritt('order') }catch(_){}
+    }
+    const orderTxt = `${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol}${po.tp_usd ? ` (TP $${po.tp_usd} · SL $${po.sl_usd})` : ' (ohne SL/TP)'}`
+    _pfSet('v2order', 'warn', `⏳ Puls platziert: ${escapeHtml(orderTxt)} — HÄNDE WEG von Maus und Tastatur!`)
+    if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ok'; finalEl.textContent = '🤖 Puls arbeitet im Master-Terminal — nichts anfassen.' }
+    // Bis 90 s: bootet das Terminal noch oder heilt das Panel gerade das EA, kommt retry_ok=true zurück
+    // (grund 'terminal_heilt' vom Panel; Verbindungsfehler vom Bot) — dann alle 6 s erneut. Beweisbar nichts
+    // gesendet, solange retry_ok wahr ist (Bot-Vertrag seit 15.08.2026).
+    let r = null
+    const t0 = Date.now()
+    for(;;){
+      try{
+        r = await window.mtcApi(`master-order?file=${encodeURIComponent(file)}`, { method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ symbol: po.symbol, richtung: po.richtung, volumen: po.volumen, sl_usd: po.sl_usd, tp_usd: po.tp_usd, ohne_hedge: true }) })
+      }catch(e){ r = { ok:false, retry_ok:false, msg: 'Order-Abschuss gestört: ' + String(e && e.message || e) } }
+      const wartbar = !!(r && !r.ok && r.retry_ok && (r.grund === 'terminal_heilt' || /Verbindung|initialize|IPC|Terminal nicht/i.test(String(r.msg || ''))))
+      if(!wartbar || Date.now() - t0 > 90000) break
+      if(!offenUndMeiner()){ r = { ok:false, retry_ok:true, msg:'Popup geschlossen — nichts platziert.' }; break }
+      _pfSet('v2order', 'warn', `⏳ Terminal noch nicht bereit — neuer Versuch in 6 s (${Math.round((Date.now() - t0) / 1000)}s): ${escapeHtml(String(r.msg || ''))}`)
+      await new Promise(res => setTimeout(res, 6000))
+    }
+    const offen = !!(r && r.price && r.ticket)
+    if(r && (r.ok || offen)) await v2PlanAufOpen(plan.id)   // Position lesend bestätigt → „Läuft", auch wenn nur SL/TP scheiterte
+    if(r && r.ok){
+      const okTxt = `Order platziert: ${po.richtung.toUpperCase()} ${po.volumen} ${po.symbol} @ ${r.price}` + (r.sl ? ` · SL ${r.sl} · TP ${r.tp}` : ' · ohne SL/TP')
+        + (r.retcode === 10010 ? ' · ⚠ Teilausführung — Größe im Terminal prüfen' : '')
+      _pfSet('v2order', 'ok', '✓ ' + escapeHtml(okTxt))
+      _pfRemoteMelde(plan.id, { ok:true, price: r.price ?? null, ticket: r.ticket ?? null, msg: okTxt })
+      abschluss(true, '✓ Order platziert — Plan läuft (ohne Hedge). Ende und P&L trägst du selbst ein.', false)
+      setTimeout(() => { if(offenUndMeiner()) _pfClose() }, 2200)
+    } else {
+      const retryOk = !!(r && r.retry_ok)
+      const msg = String((r && (r.msg || r.error)) || 'keine Antwort vom Bot')
+      _pfSet('v2order', 'err', escapeHtml(msg))
+      _pfRemoteMelde(plan.id, { ok:false, retry_ok: retryOk, unklar: !retryOk, offen, msg })
+      abschluss(false, offen ? '🚨 POSITION IST OFFEN, SL/TP fehlt — SOFORT im Master-Terminal nachtragen!'
+        : retryOk ? '✗ Nichts platziert — Meldung oben. „Erneut versuchen" nimmt die Order vom Plan.'
+        : '⚠ Ergebnis UNKLAR — erst im Master-Terminal prüfen, ob die Order liegt. NICHT blind erneut starten.', retryOk && !offen)
+    }
   }
   async function tpPreflightMt5(plan){
     _pfMt5StopTimer()
@@ -25407,15 +25622,17 @@
   }
 
   function tpRouteUpdateSeg(){
-    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep')
+    document.getElementById('tp-route-dup')?.classList.toggle('active', _tpRoute !== 'mt5' && _tpRoute !== 'tvplus' && _tpRoute !== 'topstep' && !routeIstV2(_tpRoute))
     document.getElementById('tp-route-topstep')?.classList.toggle('active', _tpRoute === 'topstep')
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
+    document.getElementById('tp-route-mt5v2')?.classList.toggle('active', _tpRoute === 'mt5v2')
+    document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
     const sb = document.getElementById('tradePlanSaveStart')
-    if(sb) sb.textContent = _tpRoute === 'mt5' ? 'Weiter →'
-      : _tpRoute === 'tvplus' ? 'Speichern' : 'Speichern & Starten →'
+    if(sb) sb.textContent = routeIstEcho(_tpRoute) ? 'Weiter →'
+      : routeIstOrbit(_tpRoute) ? 'Speichern' : 'Speichern & Starten →'
     // Bei fixem Hedge sind Slave-Filter sinnlos → ausblenden, Select sperren.
     // NUR Echo. Orbit war vom 28.08. bis 22.09.2026 auch fix (Hedge des PCs über den
     // Orbit-Copier); seit Finns Ansage „Orbit soll 1zu1 wie Duplikum werden, nur
@@ -25425,6 +25642,15 @@
     if(filterRow) filterRow.style.display = 'none'   // Filter seit 22.09.2026 immer ausgeblendet
     const slaveSel = document.getElementById('tp-slave')
     if(slaveSel) slaveSel.disabled = fixed && !!_tpMt5HedgeAccId
+    // V2-Wege (23.09.2026): kein Slave, kein Hedge — Slave-Feld, Risiko Slave, Kosten-Boxen und Multiplier-Anzeige weg.
+    const v2 = routeIstV2(_tpRoute)
+    const v2weg = (el, aus) => { const f = el ? el.closest('.field') : null; if(f) f.style.display = aus ? 'none' : '' }
+    v2weg(slaveSel, v2)
+    v2weg(document.getElementById('tp-slave-risk'), v2)
+    v2weg(document.getElementById('tp-gesamtkosten-suggest'), v2)
+    v2weg(document.getElementById('tp-vorgaenger-suggest'), v2)
+    const multBox = document.querySelector('#tradePlanModal .tp-multi-display')
+    if(multBox) multBox.style.display = v2 ? 'none' : ''
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
     const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
@@ -25751,7 +25977,7 @@
     // „Starten" speichert die Werte am Plan und übergibt dann an den Puls, der
     // in TradingView die ganze Kette fährt (30.08.2026, Schritt 2): Tab nach
     // vorn → Unterkonto per External ID → Symbol → Order-Ticket → platzieren.
-    _tpOrderOrbit = plan.route === 'tvplus'
+    _tpOrderOrbit = routeIstOrbit(plan.route)   // Orbit V2 (23.09.2026) gleich: SL optional, kein Rückfall aufs Risiko
     // Speichern-Editor statt Start-Popup (Finns Korrektur 28.08.2026 nach dem
     // ersten Live-Test): hier wird die Order (Richtung/TP/SL/Lots) AM PLAN
     // gespeichert — gestartet wird über „Starten" auf der Karte, mit Live-Check.
@@ -25762,7 +25988,9 @@
     const startBtn = document.getElementById('tpOrderStart')
     if(startBtn){ startBtn.disabled = false; startBtn.textContent = 'Speichern' }
     const info = document.getElementById('tp-order-info')
-    if(info) info.textContent = _tpOrderOrbit
+    if(info) info.textContent = routeIstV2(plan.route)
+      ? `${plan.masterName || '—'} · ohne Hedge — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (Puls platziert, nichts wird kopiert).`
+      : _tpOrderOrbit
       ? `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab, danach läuft der Duplikum-Check (Duplikum kopiert). Gestartet wird über „Starten" auf der Karte: Puls öffnet TradingView → Konto → Asset → Order-Panel → Buy/Sell.`
       : `${plan.masterName || '—'} → ${plan.slaveName || '—'} · ×${Number(plan.multiplier || 0).toFixed(3)} — „Speichern" legt die Order am Plan ab; gestartet wird über „Starten" auf der Karte (dort läuft der Live-Check, Puls platziert bei Grün).`
     // TP-VORSCHLAG (22.09.2026, Finn: „beim Account gebe ich Max Profit/Trade an — bei jedem
@@ -26087,7 +26315,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.435'
+  const OS_TAB_BUILD = '2026-09-22.436'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26272,6 +26500,18 @@
     // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
     // und dort sitzt auch „Diagnose kopieren".
     // Lokal am PC (nach dem Check): Zeile + Abschluss im offenen Check-Popup.
+    // ORBIT V2 (23.09.2026): kein Duplikum-Check — am PC trotzdem das Check-Popup mit nur der Puls-Zeile
+    // aufmachen, damit Ergebnis/Fehler dort stehen bleiben (ein Toast ist nach 5 s weg).
+    if(!fern && MT5_LOCAL && plan.route === 'tvv2' && !(opts && opts.nachCheck)){
+      if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
+      _pfPlanId = planId
+      const _rows = document.getElementById('pf-rows'); if(_rows) _rows.innerHTML = ''
+      const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
+      const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
+      _pfEchoKnopf(false)
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      document.getElementById('tpPreflightModal')?.classList.add('open')
+    }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
     const pfEnde = (ok, text) => {
       const finalEl = document.getElementById('pf-final'), foot = document.getElementById('pf-foot')
@@ -26331,7 +26571,7 @@
     // Vorher lief hier das Check-Popup + tpOrbitRemote, ein Lauf zur Zeit — jeder weitere
     // Klick endete im Toast „gleich danach erneut Starten".
     if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan)
-    if(!fern && !(opts && opts.nachCheck)){
+    if(!fern && !(opts && opts.nachCheck) && plan.route !== 'tvv2'){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       return tpPreflightAndStart(planId, { nurDup: true, weiter: () => tpOrbitStarten(planId, null, { nachCheck: true }) })
     }
@@ -26409,12 +26649,15 @@
       }
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
-        await tvPlanGesendet(plan.id)
+        // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
+        if(plan.route === 'tvv2') await v2PlanAufOpen(plan.id)
+        else await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
                               msg: String(r.msg || 'Order platziert.') })
         if(imPopup){
           _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
-          pfEnde(true, '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
+          pfEnde(true, plan.route === 'tvv2' ? '✓ Order platziert — Plan läuft (ohne Hedge). Ende und P&L trägst du selbst ein.'
+                                              : '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
           setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
         toast(`✓ Order platziert: ${dir.toUpperCase()} ${lots} ${r.tv_symbol || symbol}${r.einstieg ? ` @ ${r.einstieg}` : ''}${tp > 0 ? ` · TP $${tp}${sl > 0 ? ` / SL $${sl}` : ''}` : ' · ohne SL/TP'}`, 'start')
@@ -26426,8 +26669,9 @@
         // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
         // Order zweimal im Markt. Ging der Klick nachweislich raus (r.gesendet), wird er
         // gestempelt: die Karte zeigt „Warte auf Duplikum", Duplikum erkennt die Order selbst.
-        if(r.gesendet) await tvPlanGesendet(plan.id)
-        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie, erkennt Duplikum sie von selbst). · ' + (r.msg || r.error || ''), r)
+        if(r.gesendet) await (plan.route === 'tvv2' ? v2PlanAufOpen(plan.id) : tvPlanGesendet(plan.id))
+        await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten'
+          + (plan.route === 'tvv2' ? '.' : ' (liegt sie, erkennt Duplikum sie von selbst).') + ' · ' + (r.msg || r.error || ''), r)
       } else {
         await fehler('Nichts platziert · ' + ((r && (r.msg || r.error)) || 'keine Antwort'), r)
       }
@@ -26466,6 +26710,13 @@
                           { key:'claim', state:'',     label:'PC' },
                           { key:'order', state:'',     label:'Order' } ] }
     _rsQueueRender()
+    // ORBIT V2 (23.09.2026): kein Duplikum — Schritt „Duplikum" entfällt, direkt das Signal an den PC.
+    if(plan.route === 'tvv2'){
+      _rsAktiv.steps = _rsAktiv.steps.filter(x => x.key !== 'dup')
+      _rsQueueRender()
+      await tpOrbitRemoteSchlange(plan, w)
+      return
+    }
     _rsqStep('dup', 'warn', '⏳ Duplikum-Check: Verknüpfung, Accounts, Multiplier, Symbol-Mapping…')
     const halt = (doneHtml, haltText, details) => {
       if(_rsAktiv && String(_rsAktiv.planId || '') === pid && !_rsAktiv.sigId) _rsAktiv = null
@@ -26632,7 +26883,8 @@
     }
     if(MT5_LOCAL){
       _tpPendingOrder = order
-      tpPreflightMt5(plan)
+      if(plan.route === 'mt5v2') tpPreflightMt5V2(plan)   // Echo V2 (23.09.2026): ohne Copier-Zeilen
+      else tpPreflightMt5(plan)
       return
     }
     _rsQueueAdd(plan)
@@ -26661,7 +26913,7 @@
 
   function _rsPlanLabel(plan, pid){
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
-    if(plan.route === 'tvplus' && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
+    if(routeIstOrbit(plan.route) && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
       const w = tpOrbitWerte(plan)
       return w.dir ? `${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : (plan.masterName || '—')
     }
@@ -26786,7 +27038,7 @@
       return
     }
     // ORBIT (23.09.2026): eigener Weg — Duplikum-Check still, dann Signal an den PC-Tab.
-    if(plan.route === 'tvplus'){
+    if(routeIstOrbit(plan.route)){
       const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan) : { fehlt: ['Orbit-Start in diesem Build nicht möglich'] }
       if(w.fehlt.length){
         _rsQueue.unshift(pid)
@@ -26861,6 +27113,7 @@
     if(_rsSende || _rsAktiv) return   // ein Remote-Lauf zur Zeit
     _rsSende = true
     const sltpAn = !!order.tp_usd
+    const ohneHedge = plan.route === 'mt5v2'   // Echo V2 (23.09.2026): kein Hedge-Schritt, kein Hedge-Hinweis
     const label = `${plan.masterName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}`
     let sig = null
     try{
@@ -26885,7 +27138,7 @@
                           { key:'check', state:'',   label:'Check' },
                           { key:'order', state:'',   label:'Order' },
                           ...(sltpAn ? [{ key:'sltp', state:'', label:'TP/SL' }] : []),
-                          { key:'hedge', state:'',   label:'Hedge' } ] }
+                          ...(ohneHedge ? [] : [{ key:'hedge', state:'',   label:'Hedge' }]) ] }
     _rsSende = false
     _rsQueueRender()
     _rsqStep('sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span> — die Prop-Firma sieht nur die gewohnte PC-IP.`)
@@ -27001,7 +27254,7 @@
                 _rsqStep('sltp', 'warn', `⏳ Puls trägt SL/TP ein… (${sec}s) — HÄNDE WEG am PC!`)
               }
             }
-            if(!live.hedgeOk){
+            if(!live.hedgeOk && !ohneHedge){
               const hs = (st.hedges || {})[String(live.ident)]
               if(Array.isArray(hs) && hs.length){
                 live.hedgeOk = true
@@ -27016,8 +27269,8 @@
             // Das Signal läuft in der DB normal zu Ende — und der NÄCHSTE
             // Trade aus der Schlange darf schon los (der PC-Empfänger claimt
             // ihn ohnehin erst, wenn sein eigener Riegel frei ist).
-            if(live.hedgeOk && (!sltpAn || live.sltpOk)){
-              fertig(true, `✓ Live bestätigt: Order im Markt${sltpAn ? ' · TP/SL gesetzt' : ''} · Hedge kopiert — Puls räumt am PC nur noch auf.`, null)
+            if((live.hedgeOk || ohneHedge) && (!sltpAn || live.sltpOk)){
+              fertig(true, `✓ Live bestätigt: Order im Markt${sltpAn ? ' · TP/SL gesetzt' : ''}${ohneHedge ? '' : ' · Hedge kopiert'} — Puls räumt am PC nur noch auf.`, null)
               return
             }
           }
@@ -27036,9 +27289,9 @@
         // gelandet); der Hedge ist Echos Job — ohne Live-Sichtung ehrlich
         // als „prüfen" markieren statt blind abhaken (Beweis-Doktrin).
         if(sltpAn && !live.sltpOk) _rsqStep('sltp', 'ok', null)
-        if(!live.hedgeOk) _rsqStep('hedge', 'warn', null)
+        if(!live.hedgeOk && !ohneHedge) _rsqStep('hedge', 'warn', null)
         fertig(true, '✓ ' + escapeHtml(String(erg.msg || 'Order platziert.'))
-          + (!live.hedgeOk ? ' · Hedge noch nicht im Flotten-Puls gesehen — auf der Trade-Karte prüfen.' : ''), null)
+          + ((!live.hedgeOk && !ohneHedge) ? ' · Hedge noch nicht im Flotten-Puls gesehen — auf der Trade-Karte prüfen.' : ''), null)
       } else if(row.status === 'verworfen'){
         // Bewusster Abbruch (✕ hier oder von einem anderen Gerät) — kein
         // PC-Problem, die Schlange darf ohne Halt weiter.
@@ -27488,7 +27741,7 @@
               .update({ status:'fehler', updated_at: new Date().toISOString(), ergebnis:{ ok:false, msg: text } })
               .eq('id', sig.id).eq('status', 'wartet')
           }
-          if(plan.status !== 'planned' || plan.route !== 'tvplus'){
+          if(plan.status !== 'planned' || !routeIstOrbit(plan.route)){
             await absage(`Plan ist kein geplanter Orbit-Trade (Status: ${plan.status}, Weg: ${plan.route || '—'}) — nichts gestartet.`)
             continue
           }
@@ -27536,7 +27789,8 @@
         }
         // Gehört der Plan zu DIESEM PC? Sonst liegen lassen — ein anderer PC
         // der Flotte (gleiches Profil) kann ihn claimen.
-        const route = mt5RouteResolve(plan, dd.instances || [])
+        // Echo V2 (23.09.2026): Zuordnung nur über den Master-Login — der Plan hat keinen Hedge.
+        const route = plan.route === 'mt5v2' ? mt5V2Resolve(plan, dd.instances || []) : mt5RouteResolve(plan, dd.instances || [])
         if(!route) continue
         // Race-sicher claimen: Update nur, solange noch 'wartet' — 0 Zeilen
         // heißt „anderer PC war schneller" (dasselbe Guard-Muster wie die
@@ -27573,7 +27827,8 @@
           }
         }, 8 * 60 * 1000)
         if(typeof atToast === 'function') atToast(`📡 Remote-Signal: ${plan.masterName || '—'} → Check startet, Puls übernimmt bei Grün`, 'start')
-        tpPreflightMt5(plan)
+        if(plan.route === 'mt5v2') tpPreflightMt5V2(plan)
+        else tpPreflightMt5(plan)
         break   // ein Signal pro Lauf — der nächste wird erst nach Abschluss geclaimt (_osActive-Riegel)
       }
     }catch(e){
@@ -28087,8 +28342,8 @@
       renderTradePlans()
     }catch(e){ return toast('Neu starten nicht möglich: ' + (e.message || e), 'end') }
     const p2 = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
-    if(p2.route === 'tvplus' && typeof tpOrbitStarten === 'function') tpOrbitStarten(p2.id)
-    else if(p2.route === 'mt5' && typeof tpJetztStarten === 'function') tpJetztStarten(p2.id)
+    if(routeIstOrbit(p2.route) && typeof tpOrbitStarten === 'function') tpOrbitStarten(p2.id)
+    else if(routeIstEcho(p2.route) && typeof tpJetztStarten === 'function') tpJetztStarten(p2.id)
   }
   // Hinweis unter dem Feld: welcher Tag ist gemeint, in welcher Zeitzone (Gerät)
   function tpStartUmHinweis(){
@@ -28128,7 +28383,7 @@
     const now = Date.now()
     const scharf = await tpFarmerScharf()
     const faellig = (_tp || []).filter(p => p && p.status === 'planned' && p.startUm && !p.startUmGestartetAt
-      && new Date(p.startUm).getTime() <= now && (p.route === 'tvplus' || p.route === 'mt5') && (scharf || !tpIstFarmerPlan(p)))
+      && new Date(p.startUm).getTime() <= now && (routeIstOrbit(p.route) || routeIstEcho(p.route)) && (scharf || !tpIstFarmerPlan(p)))
     if(!faellig.length) return
     const plan = faellig.sort((a, b) => new Date(a.startUm) - new Date(b.startUm))[0]
     _suLaeuft = true
@@ -28158,8 +28413,8 @@
         ? `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (etwas anderes läuft noch).`
         : `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet jetzt.`, 'start')
       if(jitter) await new Promise(r => setTimeout(r, jitter))
-      if(plan.route === 'tvplus' && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id)
-      else if(plan.route === 'mt5' && typeof tpJetztStarten === 'function') await tpJetztStarten(plan.id)
+      if(routeIstOrbit(plan.route) && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id)
+      else if(routeIstEcho(plan.route) && typeof tpJetztStarten === 'function') await tpJetztStarten(plan.id)
     }catch(e){ console.warn('[start-um]', e) }
     finally{ _suLaeuft = false }
   }
@@ -28199,16 +28454,16 @@
     // sie per Struktur, siehe planMirrorRoute) — beim Bearbeiten soll der Regler
     // aber ehrlich "Topstep" zeigen, sonst filtert der dup-Weg den TSX-Master
     // aus dem Dropdown und die Auswahl wirkt kaputt (01.09.2026).
-    _tpRoute = _editPlan ? (['mt5', 'tvplus'].includes(_editPlan.route) ? _editPlan.route
+    _tpRoute = _editPlan ? (['mt5', 'tvplus', 'mt5v2', 'tvv2'].includes(_editPlan.route) ? _editPlan.route
                             : (typeof planMirrorRoute === 'function' && planMirrorRoute(_editPlan)) ? 'topstep'
                             : 'dup')
-                         : (['mt5', 'tvplus', 'topstep'].includes(localStorage.getItem(TP_ROUTE_LS))
+                         : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     tpRouteUpdateSeg()
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -28421,7 +28676,7 @@
       // Ohne lokale Instanz-Daten (Copier offline/noch nicht geladen) wird
       // NICHT gefiltert — der Trade-Start-Check fängt es dann sauber.
       let _mt5LokalMasters = null
-      if(_tpRoute === 'mt5' && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL
+      if(routeIstEcho(_tpRoute) && typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL
          && typeof window.mtcInstances === 'function'){
         try{
           const _st = window.mtcInstances()
@@ -28446,7 +28701,7 @@
         if(orbitSlaveStreng && !(_dupSlaveIds && _dupSlaveIds.has(String(a.id)))) return false
         if(archive[a.id]?.archived && !isProtected) return false
         if(!isProtected){
-          if(_tpRoute === 'mt5'){
+          if(routeIstEcho(_tpRoute)){   // Echo V2 (23.09.2026): dieselben Master wie Echo, nur ohne Hedge
             if(!_mt5Ids.has(String(a.id))) return false
             if(role === 'slave' && _tpMt5HedgeAccId && String(a.id) !== String(_tpMt5HedgeAccId)) return false
             if(role === 'master' && _tpMt5HedgeAccId && String(a.id) === String(_tpMt5HedgeAccId)) return false
@@ -28464,11 +28719,12 @@
             // ORBIT = Duplikum + automatische Order (22.09.2026): dieselben Duplikum-Regeln
             // wie darunter, der Master zusätzlich Futures-Account (Kontrakte-Spec) MIT
             // External ID — die ID ist das Konto-Matching im TradingView-Panel.
-            if(_tpRoute === 'tvplus' && role === 'master'){
+            if(routeIstOrbit(_tpRoute) && role === 'master'){
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
             }
-            if(!_dupIds.has(String(a.id))) return false
+            // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
+            if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
             // nie Master sein (gleiches Selbst-Spiegel-Prinzip wie beim Hedge).
             if(role === 'slave'  && _dupSlaveIds && !_dupSlaveIds.has(String(a.id))) return false
@@ -28700,7 +28956,8 @@
       tpNqUpdateToggle()
       tpRecompute()
     }
-    ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus']].forEach(([id, r]) => {
+    ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus'],
+      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
@@ -29502,30 +29759,32 @@
     }
     msg('')
 
-    if(!masterId || !slaveId){ msg('Master und Slave müssen gewählt sein.', 'err'); return }
+    // V2-Wege (23.09.2026): kein Slave — Master reicht.
+    const v2 = routeIstV2(_tpRoute)
+    if(!masterId || (!slaveId && !v2)){ msg(v2 ? 'Master muss gewählt sein.' : 'Master und Slave müssen gewählt sein.', 'err'); return }
     // Topstep-Weg: 'tsx:<id>' ist ein noch UNVERLINKTER API-Account — ohne
     // Prophos-Account dahinter gibt es keinen Plan (Struktur-Erkennung, P&L,
     // Kette). Die Wahl im Dropdown öffnet das Verknüpfen-Fenster.
     if(String(masterId).startsWith('tsx:')){
       msg('Dieser Topstep-Account ist noch nicht verknüpft — wähle ihn im Dropdown an, dann öffnet sich das Verknüpfen-Fenster.', 'err'); return
     }
-    if(masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
-    if(!masterRisk || !masterQty || !slaveRisk){
+    if(!v2 && masterId === slaveId){ msg('Master und Slave müssen unterschiedlich sein.', 'err'); return }
+    if(!masterRisk || !masterQty || (!slaveRisk && !v2)){
       msg('Risiko und Anzahl ausfüllen.', 'err'); return
     }
 
     const master = accounts.find(a => String(a.id) === String(masterId))
-    const slave  = accounts.find(a => String(a.id) === String(slaveId))
-    const mult = tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
+    const slave  = v2 ? null : accounts.find(a => String(a.id) === String(slaveId))
+    const mult = v2 ? null : tpCalcMultiplier(master.firm, slave.firm, masterRisk, masterQty, slaveRisk)
 
     const planObj = {
       masterAccountId: masterId,
-      slaveAccountId:  slaveId,
+      slaveAccountId:  v2 ? null : slaveId,
       masterName: master.name,
       masterFirm: master.firm,
-      slaveName:  slave.name,
-      slaveFirm:  slave.firm,
-      masterRisk, masterContracts: masterQty, slaveRisk, multiplier: mult,
+      slaveName:  slave ? slave.name : null,
+      slaveFirm:  slave ? slave.firm : null,
+      masterRisk, masterContracts: masterQty, slaveRisk: v2 ? null : slaveRisk, multiplier: mult,
       masterTp,
       // Der Order-SL gehoert NICHT diesem Formular (31.08.2026) — beim
       // Bearbeiten unveraendert durchreichen. Ohne diese Zeile schreibt
@@ -29542,7 +29801,7 @@
       // (dieselbe Falle, vor der der masterSl-Kommentar hierüber warnt),
       // und der neue Gespeicherte-Pläne-Richtungs-Schutz verlöre seine
       // Wahrheit. _tpDir ist beim Bearbeiten immer aus p.richtung vorbelegt.
-      richtung: ((_tpRoute === 'mt5' || _tpRoute === 'tvplus') && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
+      richtung: ((routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) && (_tpDir === 'buy' || _tpDir === 'sell')) ? _tpDir : null,
       priority, plannedFor, notes,
       status: 'planned'
     }
@@ -29565,7 +29824,7 @@
         // die MT5-Engine umleiten, wenn beide Accounts doppelt verlinkt sind.
         const _curPlan = tradePlans.find(x => String(x.id) === String(_editingPlanId))
         if(!_curPlan || _curPlan.status === 'planned'){
-          updateRow.route = (_tpRoute === 'mt5' || _tpRoute === 'tvplus') ? _tpRoute : 'dup'
+          updateRow.route = (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup'
         }
         const { data, error } = await supabase
           .from('trade_plans').update(updateRow).eq('id', _editingPlanId).select('*').single()
@@ -29578,7 +29837,7 @@
         // bewusst weg, damit Edits laufender Pläne die Engine nicht umziehen —
         // beim Neuanlegen ist das Mitschreiben genau richtig). 'dup' explizit,
         // nie null: null = Alt-Plan = Auto-Erkennung darf raten.
-        const insertRow = { ...planToRow(planObj), route: (_tpRoute === 'mt5' || _tpRoute === 'tvplus') ? _tpRoute : 'dup' }
+        const insertRow = { ...planToRow(planObj), route: (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup' }
         const { data, error } = await supabase
           .from('trade_plans').insert(insertRow).select('*').single()
         if(error) throw error
@@ -29592,7 +29851,8 @@
       if(startAfter && savedPlanId){
         // MT5-Weg (15.08.2026): „Weiter" führt erst in den Order-Bot-Schritt —
         // der startet den Check selbst. Duplikum/Mirror wie gehabt direkt.
-        if(_tpRoute === 'mt5' && typeof openTpOrderModal === 'function'){
+        // V2-Wege (23.09.2026): wie Echo direkt ins Order-Popup — kein Duplikum-Check, nichts zu pushen.
+        if((routeIstEcho(_tpRoute) || _tpRoute === 'tvv2') && typeof openTpOrderModal === 'function'){
           openTpOrderModal(savedPlanId)
         } else {
           tpPreflightAndStart(savedPlanId)
@@ -32190,6 +32450,8 @@
     // MT5-Route (15.08.2026): P&L kommt AUSSCHLIESSLICH aus der eingefrorenen
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
     if(plan.route === 'mt5') return _autoPnlFetchMt5(plan)
+    // V2-Wege (23.09.2026): kein Copier, kein Duplikum — keine P&L-Quelle, Handeingabe (Beweis oder leer).
+    if(routeIstV2(plan.route)) return null
     // Orbit (seit 22.09.2026): Duplikum kopiert diese Trades — P&L wie auf der Duplikum-Route.
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
     const mirrorRoute = (typeof planMirrorRoute === 'function') ? planMirrorRoute(plan) : null
@@ -32286,7 +32548,7 @@
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
         // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).
-        const isMt5Plan = plan.route === 'mt5'
+        const isMt5Plan = plan.route === 'mt5' || routeIstV2(plan.route)
         if(!isMirrorPlan && !isMt5Plan && (typeof dupState === 'undefined' || !dupState.token)) return
         const apply = (res) => {
           if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
