@@ -23377,10 +23377,18 @@
       // Karte — läuft gerade / ⏳ Nr. N (Klick nimmt ihn raus) / Starten.
       const qs = (typeof _rsQueueStatusFuer === 'function') ? _rsQueueStatusFuer(p.id) : null
       // ORBIT (22.09.2026, Finn: „wie bei Echo auf Starten drücken"): eigener Knopf mit
-      // eigener Verdrahtung (data-plan-orbit-start → tpOrbitStarten) — ohne Warteschlange.
+      // eigener Verdrahtung (data-plan-orbit-start → tpOrbitStarten). Seit 23.09.2026 läuft
+      // der Start vom Mac/Handy über dieselbe Auto-Start-Warteschlange wie Echo (Finn: „das
+      // Popup soll gar nicht geöffnet werden, ich will mehrere Trades gleichzeitig in die
+      // Warteschlange packen") — die Karte zeigt dann denselben Stand wie bei Echo. Am PC
+      // (localhost) bleibt der direkte Weg mit Check-Popup.
       const orbitBtn = (typeof orbitWartetAufDup === 'function' && orbitWartetAufDup(p))
         ? `<span class="rsq-card-run" title="Puls hat die Order in TradingView platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft" (nach 10 min ohne Erkennung erscheint „Starten" wieder)">⏳ Warte auf Duplikum…</span>`
-        : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
+        : (!MT5_LOCAL && qs && qs.laeuft)
+          ? `<span class="rsq-card-run" title="Signal läuft — Live-Schritte im Auto-Start-Panel unten rechts">📡 startet gerade…</span>`
+          : (!MT5_LOCAL && qs)
+            ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
+            : `<button class="btn btn-primary tc2-btn" data-plan-orbit-start="${p.id}" title="Puls platziert die Order in TradingView: Konto → Asset → Order-Panel → Buy/Sell">Starten</button>`
       // Geplante Startzeit (22.09.2026): Chip statt Knopf, Klick nimmt die Zeit wieder raus.
       const startUmBtn = (p.startUm && !p.startUmGestartetAt)
         ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-start-um-x="${p.id}" title="Der PC-Tab startet zu dieser Zeit von selbst (Duplikum-Check → Puls). Klick nimmt die Startzeit wieder raus.">⏰ ${tpStartUmText(p.startUm)} ✕</button>`
@@ -23924,6 +23932,20 @@
     if(state === 'err') _pfErrLog.push(String(subHtml || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
     if(sub) sub.innerHTML = subHtml || ''
   }
+  // Kurzfassung der roten/gelben Check-Zeilen als Klartext (23.09.2026) — fürs Auto-Start-
+  // Panel, wenn der Duplikum-Check still (Popup zu) gelaufen ist.
+  function _pfKurzfassung(){
+    const teile = []
+    document.querySelectorAll('#pf-rows .pf-row').forEach(row => {
+      const ico = row.querySelector('.pf-ico'); if(!ico) return
+      const st = ico.classList.contains('pf-err') ? '✕' : ico.classList.contains('pf-warn') ? '!' : ''
+      if(!st) return
+      const label = String((row.querySelector('.pf-label') || {}).textContent || '').trim()
+      const sub = String((row.querySelector('.pf-sub') || {}).textContent || '').replace(/\s+/g, ' ').trim()
+      teile.push(`${st} ${label}${sub ? ': ' + sub.slice(0, 140) : ''}`)
+    })
+    return teile.join(' · ') || 'Details im Check-Popup.'
+  }
   function _pfClose(){
     _pfOrbitWeiter = null
     // Remote-Lauf, dessen Order noch NICHT unterwegs ist? Dann ist „Popup zu"
@@ -24060,8 +24082,14 @@
     // weiter (22.09.2026): bei Grün NICHT schließen, sondern im selben Popup mit der
     // Puls-Kette weitermachen (Orbit-„Starten" = Check → Signal/Order in einem Stück).
     // Für „Erneut versuchen" gemerkt, damit der Haken den Neuanlauf überlebt.
-    if(orbitDup && opts && opts.weiter) _pfOrbitWeiter = opts.weiter
-    const weiter = orbitDup ? _pfOrbitWeiter : null
+    // still (23.09.2026, Orbit-Warteschlange vom Mac/Handy): derselbe Check, aber das Popup
+    // bleibt ZU — die Zeilen landen trotzdem im (verborgenen) Popup, damit „Details" im
+    // Auto-Start-Panel sie samt Fix-Knöpfen zeigen kann. Grün → opts.weiter, rot/gelb →
+    // opts.fehl(Kurzfassung). _pfOrbitWeiter bleibt unberührt: ein späteres „Erneut
+    // versuchen" im geöffneten Popup prüft nur, weiter geht die Schlange per ▶ Weiter.
+    const still = orbitDup && !!(opts && opts.still)
+    if(orbitDup && !still && opts && opts.weiter) _pfOrbitWeiter = opts.weiter
+    const weiter = orbitDup ? (still ? (opts.weiter || null) : _pfOrbitWeiter) : null
 
     // Explizite Routen-Wahl aus dem Modal-Regler (15.08.2026): route='mt5' →
     // immer der MT5-Preflight. Die automatische Erkennung darunter bleibt als
@@ -24096,7 +24124,7 @@
     _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
     if(info) info.textContent = `${plan.masterName || '—'} → ${plan.slaveName || '—'}${plan.multiplier != null ? ' · ×' + Number(plan.multiplier).toFixed(3) : ''}`
-    document.getElementById('tpPreflightModal').classList.add('open')
+    if(!still) document.getElementById('tpPreflightModal').classList.add('open')
 
     let hardFail = false   // echtes Problem → Buttons statt Auto-Start
     let softWait = false   // Fix-Button angeboten → nicht auto-starten
@@ -24191,6 +24219,19 @@
     _pfCheckStatus[String(planId)] = { state: allOk ? 'ready' : 'issue', at: Date.now() }
     _pfStatusSave()
     try { renderTradePlans() } catch(_){}
+    if(still){
+      if(allOk && weiter){
+        try{ await weiter() }catch(e){ console.warn('[orbit schlange weiter]', e) }
+        return
+      }
+      // rot/gelb: Fuß im verborgenen Popup vorbereiten („Erneut versuchen"/„Schließen" für
+      // den Fall, dass Finn es über „Details" aufmacht), Kurzfassung ans Panel.
+      _pfFinish(allOk, hardFail
+        ? 'Es gibt Probleme — Details oben. Der Trade bleibt auf Geplant.'
+        : softWait ? 'Hinweise oben prüfen — der Trade bleibt auf Geplant.' : null)
+      if(opts && typeof opts.fehl === 'function') opts.fehl(_pfKurzfassung())
+      return
+    }
     if(allOk && weiter){
       _pfOrbitWeiter = null
       const fe = document.getElementById('pf-final')
@@ -25782,7 +25823,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.430'
+  const OS_TAB_BUILD = '2026-09-22.431'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -26018,13 +26059,18 @@
     // DUPLIKUM-CHECK ZUERST (22.09.2026, Finn: „beim Starten: erst Duplikum, dann Verbindung
     // zum PC, dann die Order — alles in einem Stück"). Nicht im Signal-Lauf am PC: dort hat
     // der Absender den Check schon gefahren. Grün → weiter im SELBEN Popup.
+    // HANDY/MAC (22.09.2026, Finn: „dass ich auch über die Prophos-URL die Trades starten
+    // kann wie bei Echo"; seit 23.09.2026: „das Popup soll gar nicht geöffnet werden — ich
+    // will mehrere Trades gleichzeitig in die Warteschlange packen, wie bei Echo"): kein
+    // localhost → in die Auto-Start-Warteschlange (Panel unten rechts). Duplikum-Check und
+    // Signal fährt die Schlange selbst, einen Plan nach dem anderen (tpOrbitSchlange).
+    // Vorher lief hier das Check-Popup + tpOrbitRemote, ein Lauf zur Zeit — jeder weitere
+    // Klick endete im Toast „gleich danach erneut Starten".
+    if(!MT5_LOCAL && !fern) return _rsQueueAdd(plan)
     if(!fern && !(opts && opts.nachCheck)){
       if(_rsAktiv) return toast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
       return tpPreflightAndStart(planId, { nurDup: true, weiter: () => tpOrbitStarten(planId, null, { nachCheck: true }) })
     }
-    // HANDY/MAC (22.09.2026, Finn: „dass ich auch über die Prophos-URL die Trades starten
-    // kann wie bei Echo"): kein localhost → Signal an den PC, Live-Schritte im Check-Popup.
-    if(!MT5_LOCAL && !fern) return tpOrbitRemote(plan, w, true)
     if(typeof window.mtcApi !== 'function')
       return fehler('Copier-Backend am PC nicht erreichbar — nichts gestartet.')
     const masterAcc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
@@ -26128,66 +26174,133 @@
     }
   }
 
-  /* ORBIT vom Handy/Mac (22.09.2026): Signal → PC-Tab → Puls in TradingView. Anzeige wie beim
-   * Remote-Schließen im vorhandenen Check-Popup (kein neues Design), gleicher Kanal
-   * (order_signale, Per-User-RLS), gleiche Frische-Regel (3 min), gleicher Riegel (_rsAktiv:
-   * ein Remote-Lauf zur Zeit). Storno nur, solange kein PC übernommen hat. Eine Warteschlange
-   * gibt es hier bewusst nicht (Finn: „lassen wir mal offen"). */
-  async function tpOrbitRemote(plan, w, anhaengen){
-    if(_rsAktiv){
-      if(typeof atToast === 'function') atToast('Gerade läuft schon ein Remote-Lauf — gleich danach erneut „Starten".', 'end')
+  /* ORBIT vom Handy/Mac (22.09.2026; seit 23.09.2026 über die Auto-Start-Warteschlange —
+   * Finn: „das Popup soll gar nicht geöffnet werden, ich will mehrere Trades gleichzeitig in
+   * die Warteschlange packen, wie bei Echo"): Signal → PC-Tab → Puls in TradingView. Gleicher
+   * Kanal (order_signale, Per-User-RLS), gleiche Frische-Regel (3 min), gleicher Riegel
+   * (_rsAktiv: ein Remote-Lauf zur Zeit) — Anzeige im Panel unten rechts (#rs-queue) statt im
+   * blockierenden Check-Popup. Der Duplikum-Check (Finn 22.09.: „erst Duplikum, dann
+   * Verbindung zum PC, dann die Order") läuft VOR jedem Signal still im verborgenen Popup
+   * (tpPreflightAndStart still): rot hält die Schlange an, „Details" zeigt die Zeilen samt
+   * Fix-Knöpfen. Storno nur, solange kein PC übernommen hat. Fehler HALTEN die Schlange
+   * (Doppel-Order-Doktrin: nie blind das nächste Signal hinterherschicken). */
+  async function tpOrbitSchlange(plan, w){
+    if(_rsSende || _rsAktiv) return
+    const pid = String(plan.id)
+    // Check-Popup gerade von etwas anderem belegt (z.B. Popup 2 „Speichern" → Duplikum-Check)?
+    // Plan zurück nach vorn, der 3-s-Takt versucht es erneut — nie fremde Zeilen überschreiben.
+    if(document.getElementById('tpPreflightModal')?.classList.contains('open')){
+      if(!_rsQueue.some(x => String(x) === pid)) _rsQueue.unshift(pid)
+      _rsQueueRender()
       return
     }
-    _pfMt5StopTimer()
-    _pfPlanId = null
-    // anhaengen (22.09.2026): die Duplikum-Zeilen bleiben stehen, die Signal-Schritte kommen darunter.
-    if(!anhaengen) document.getElementById('pf-rows').innerHTML = ''
-    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
-    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
-    _pfEchoKnopf(false)
-    const info = document.getElementById('pf-plan-info')
-    if(info) info.textContent = `📡 Orbit-Start · ${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}${w.tp > 0 ? ` · TP $${w.tp}${w.sl > 0 ? ` / SL $${w.sl}` : ' · ohne SL'}` : ' · ohne SL/TP'}`
-    document.getElementById('tpPreflightModal').classList.add('open')
-    const fertigUi = (ok, text) => {
-      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
-      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
-      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
-      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
-      if(foot) foot.style.display = 'flex'
+    const label = _rsPlanLabel(plan, pid)
+    _rsAktiv = { sigId: null, planId: pid, timer: null, t0: Date.now(),
+                 cancel: false, storno: null, planLabel: label, lastMsg: '',
+                 steps: [ { key:'dup',   state:'warn', label:'Duplikum' },
+                          { key:'sig',   state:'',     label:'Signal' },
+                          { key:'claim', state:'',     label:'PC' },
+                          { key:'order', state:'',     label:'Order' } ] }
+    _rsQueueRender()
+    _rsqStep('dup', 'warn', '⏳ Duplikum-Check: Verknüpfung, Accounts, Multiplier, Symbol-Mapping…')
+    const halt = (doneHtml, haltText, details) => {
+      if(_rsAktiv && String(_rsAktiv.planId || '') === pid && !_rsAktiv.sigId) _rsAktiv = null
+      _rsqDonePush(false, label, doneHtml)
+      if(!_rsQueue.some(x => String(x) === pid)) _rsQueue.unshift(pid)
+      _rsQueueHalt = haltText
+      _rsQueueHaltDetails = details ? pid : null
+      _rsQueueRender()
     }
-    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
-    _pfAddRow('ob-sig',   'Signal senden')
-    _pfAddRow('ob-claim', 'PC übernimmt')
-    _pfAddRow('ob-order', 'Puls platziert in TradingView')
+    let gemeldet = false
+    try{
+      await tpPreflightAndStart(pid, { nurDup: true, still: true,
+        weiter: async () => {
+          gemeldet = true
+          if(!_rsAktiv || String(_rsAktiv.planId || '') !== pid) return
+          if(_rsAktiv.cancel){   // ✕ kam während des Checks — nichts gesendet
+            _rsAktiv = null
+            _rsqDonePush(false, label, 'Abgebrochen — nichts gesendet.')
+            _rsQueueRender()
+            setTimeout(_rsQueuePump, 900)
+            return
+          }
+          _rsqStep('dup', 'ok', 'Duplikum bereit.')
+          await tpOrbitRemoteSchlange(plan, w)
+        },
+        fehl: kurz => {
+          gemeldet = true
+          halt('✗ Duplikum-Check: ' + escapeHtml(kurz),
+               `⏸ Angehalten — Duplikum-Check rot bei „${plan.masterName || '—'}": ${kurz} — erst beheben, dann ▶ Weiter.`, true)
+        } })
+    }catch(e){
+      gemeldet = true
+      halt('✗ Duplikum-Check abgebrochen: ' + escapeHtml(String(e && e.message || e)),
+           `⏸ Angehalten — Duplikum-Check bei „${plan.masterName || '—'}" abgebrochen: ${String(e && e.message || e)} — dann ▶ Weiter.`, false)
+    }
+    // Weder grün noch rot gemeldet (Plan zwischendurch weg o.ä.) → Riegel nicht hängen lassen.
+    if(!gemeldet && _rsAktiv && String(_rsAktiv.planId || '') === pid && !_rsAktiv.sigId){
+      _rsAktiv = null
+      _rsqDonePush(false, label, 'Übersprungen — Duplikum-Check ohne Ergebnis.')
+      _rsQueueRender()
+      setTimeout(_rsQueuePump, 900)
+    }
+  }
+
+  async function tpOrbitRemoteSchlange(plan, w){
+    const pid = String(plan.id)
+    if(!_rsAktiv || String(_rsAktiv.planId || '') !== pid){
+      // Ohne den Vorlauf aus tpOrbitSchlange (Riegel + Panel-Eintrag): hier selbst anlegen.
+      if(_rsAktiv || _rsSende) return
+      _rsAktiv = { sigId: null, planId: pid, timer: null, t0: Date.now(), cancel: false, storno: null,
+                   planLabel: _rsPlanLabel(plan, pid), lastMsg: '',
+                   steps: [ { key:'sig', state:'', label:'Signal' }, { key:'claim', state:'', label:'PC' }, { key:'order', state:'', label:'Order' } ] }
+    }
+    const label = _rsAktiv.planLabel
+    _rsAktiv.t0 = Date.now()
+    _rsQueueRender()
     let sig = null
     try{
       // Werte unter params.orbit (NICHT oben als richtung/volumen): ein PC-Tab mit altem Build
       // lehnt das Signal dann ab, statt es als Echo-/MT5-Order zu behandeln.
       const { data, error } = await supabase.from('order_signale')
-        .insert({ plan_id: String(plan.id),
+        .insert({ plan_id: pid,
                   params: { aktion: 'orbit', orbit: { symbol: w.symbol, richtung: w.dir, volumen: w.lots,
                                                      tp_usd: w.tp > 0 ? w.tp : null, sl_usd: (w.tp > 0 && w.sl > 0) ? w.sl : null } } })
         .select('*').single()
       if(error) throw error
       sig = data
     }catch(e){
-      _pfSet('ob-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
-      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Starten".')
+      _rsAktiv = null
+      _rsqDonePush(false, label, '✗ Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      if(!_rsQueue.some(x => String(x) === pid)) _rsQueue.unshift(pid)
+      _rsQueueHalt = '⏸ Angehalten — Verbindung prüfen, dann ▶ Weiter.'
+      _rsQueueRender()
       return
     }
-    _pfSet('ob-sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
-    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    if(!_rsAktiv || String(_rsAktiv.planId || '') !== pid) return   // „Alle stoppen" während des Inserts
+    _rsAktiv.sigId = sig.id
+    _rsqStep('sig', 'ok', `Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
     const stornoFallsWartet = () => {
       supabase.from('order_signale')
         .update({ status:'verworfen', updated_at: new Date().toISOString(),
-                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen.' } })
         .eq('id', sig.id).eq('status', 'wartet')
         .then(() => {}, e => console.warn('[signal] Storno:', e))
     }
+    _rsAktiv.storno = stornoFallsWartet   // fürs ✕ im Panel (greift nur bei 'wartet')
+    if(_rsAktiv.cancel) stornoFallsWartet()   // ✕ kam schon während des Sendens
     const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    // Abschluss wie bei Echo (tpRemoteCheck): haltMsg gesetzt = Schlange anhalten.
+    const fertig = (ok, msg, haltMsg) => {
+      stop()
+      _rsqDonePush(ok, label, msg)
+      if(haltMsg) _rsQueueHalt = haltMsg
+      _rsQueueRender()
+      try{ loadTradePlansFromSupabase() }catch(_){}
+      if(!haltMsg) setTimeout(_rsQueuePump, 900)
+    }
     const tick = async () => {
       if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
-      if(zu()){ stornoFallsWartet(); stop(); return }
       let row = null
       try{
         const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
@@ -26204,38 +26317,40 @@
                         ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
               .eq('id', sig.id).eq('status', 'wartet')
           }catch(_){}
-          _pfSet('ob-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
-          _pfSet('ob-order', 'warn', 'Übersprungen — nichts platziert.')
-          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Starten".')
-          stop(); return
+          _rsqStep('claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          fertig(false, '✗ Signal verfallen — nichts platziert.',
+                 '⏸ Angehalten — kein PC hat übernommen. Am PC Tab neu laden (Strg+F5), dann ▶ Weiter.')
+          return
         }
-        _pfSet('ob-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
+        _rsqStep('claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s)` + await osPcStandHtml(sec))
       } else if(row.status === 'laeuft'){
-        _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
-        _pfSet('ob-order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
+        if(_rsAktiv.cancel){
+          // Storno kam zu spät — der PC hat schon geclaimt, der Lauf gehört ihm.
+          _rsAktiv.cancel = false
+          if(typeof atToast === 'function') atToast('PC hat schon übernommen — dieser Trade läuft zu Ende.', 'end')
+        }
+        _rsqStep('claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _rsqStep('order', 'warn', `⏳ Puls klickt in TradingView: Konto → Asset → Order-Panel → ${escapeHtml(w.dir.toUpperCase())}… (${sec}s) — HÄNDE WEG am PC!`)
       } else if(row.status === 'fertig'){
-        _pfSet('ob-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
-        _pfSet('ob-order', 'ok', escapeHtml(String(erg.msg || 'Order platziert.')))
-        fertigUi(true, '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
-        try{ loadTradePlansFromSupabase() }catch(_){}
-        stop()
-        setTimeout(() => {
-          const fe2 = document.getElementById('pf-final')
-          if(document.getElementById('tpPreflightModal')?.classList.contains('open')
-             && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
-        }, 2400)
+        _rsqStep('claim', 'ok', null)
+        _rsqStep('order', 'ok', null)
+        fertig(true, '✓ ' + escapeHtml(String(erg.msg || 'Order platziert.')) + ' — sobald Duplikum sie sieht, springt der Plan auf „Läuft".', null)
+      } else if(row.status === 'verworfen'){
+        // Bewusster Abbruch (✕ hier oder von einem anderen Gerät) — kein PC-Problem, weiter.
+        _rsqStep('claim', 'err', null)
+        fertig(false, escapeHtml(String(erg.msg || 'Abgebrochen — nichts platziert.')), null)
       } else {
-        // fehler / verworfen / verfallen. unklar = der Kauf-Klick KANN raus sein — nie blind
-        // erneut senden (Doppel-Order-Doktrin), erst am PC in TradingView nachsehen.
-        const ziel = !row.pc ? 'ob-claim' : 'ob-order'
+        // fehler / verfallen. unklar = der Kauf-Klick KANN raus sein — nie blind erneut senden
+        // (Doppel-Order-Doktrin), erst am PC in TradingView nachsehen.
+        const ziel = !row.pc ? 'claim' : 'order'
         const altTab = /unvollständig/i.test(String(erg.msg || ''))
-        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status))
+        _rsqStep(ziel, 'err', escapeHtml(String(erg.msg || row.status))
           + (altTab ? '<br>Der PC-Tab fährt noch einen alten Build — am PC neu laden (Strg+F5).' : ''))
-        if(ziel === 'ob-claim') _pfSet('ob-order', 'warn', 'Übersprungen — nichts platziert.')
-        fertigUi(false, erg.unklar
-          ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten (liegt sie, erkennt Duplikum sie von selbst).'
-          : '✗ Nichts platziert — Meldung oben. Erneut „Starten" ist ungefährlich.')
-        stop()
+        fertig(false,
+          erg.unklar ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt: ' + escapeHtml(String(erg.msg || ''))
+                     : '✗ ' + escapeHtml(String(erg.msg || row.status)),
+          erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst in TradingView nachsehen, NICHT blind weiter (liegt die Order, erkennt Duplikum sie von selbst).'
+                     : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.')
       }
     }
     _rsAktiv.timer = setInterval(tick, 2000)
@@ -26276,11 +26391,16 @@
    * Signal hinterherschicken); nur Erfolg und bewusster Abbruch rücken auf. */
   let _rsQueue = []        // [planId] — nur Referenzen, Werte kommen beim Senden frisch aus dem Plan
   let _rsQueueHalt = null  // Klartext, warum die Schlange steht (null = läuft)
+  let _rsQueueHaltDetails = null  // planId, dessen stiller Duplikum-Check rot war → „Details" öffnet das Check-Popup (23.09.2026)
   let _rsqDone = []        // erledigte Läufe fürs Panel: { ok, label, msg }
   let _rsSende = false     // Riegel, solange das Insert eines Starts unterwegs ist (Doppelklick-Race)
 
   function _rsPlanLabel(plan, pid){
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
+    if(plan.route === 'tvplus' && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
+      const w = tpOrbitWerte(plan)
+      return w.dir ? `${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : (plan.masterName || '—')
+    }
     const { order } = _tpOrderAusPlan(plan)
     return order ? `${plan.masterName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}`
                  : (plan.masterName || '—')
@@ -26348,7 +26468,9 @@
     if(halt){
       halt.style.display = _rsQueueHalt ? '' : 'none'
       if(_rsQueueHalt) halt.innerHTML = escapeHtml(String(_rsQueueHalt))
-        + '<div style="margin-top:7px"><button class="btn btn-primary" id="rsq-weiter" style="font-size:11.5px;padding:4px 10px">▶ Weiter</button></div>'
+        + '<div style="margin-top:7px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-primary" id="rsq-weiter" style="font-size:11.5px;padding:4px 10px">▶ Weiter</button>'
+        + (_rsQueueHaltDetails ? '<button class="btn btn-ghost" id="rsq-details" style="font-size:11.5px;padding:4px 10px">🔍 Details</button>' : '')
+        + '</div>'
     }
     let h = ''
     for(const d of _rsqDone){
@@ -26399,6 +26521,18 @@
       _rsQueuePump()
       return
     }
+    // ORBIT (23.09.2026): eigener Weg — Duplikum-Check still, dann Signal an den PC-Tab.
+    if(plan.route === 'tvplus'){
+      const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan) : { fehlt: ['Orbit-Start in diesem Build nicht möglich'] }
+      if(w.fehlt.length){
+        _rsQueue.unshift(pid)
+        _rsQueueHalt = `⏸ Angehalten — „${plan.masterName || '—'}" unvollständig: ${w.fehlt.join(', ')}`
+        _rsQueueRender()
+        return
+      }
+      tpOrbitSchlange(plan, w)
+      return
+    }
     const { order, fehlt } = _tpOrderAusPlan(plan)
     if(!order){
       // Unvollständig → anhalten statt still überspringen: Finn soll es sehen
@@ -26420,6 +26554,7 @@
     _rsQueue = []
     _rsqDone = []
     _rsQueueHalt = null
+    _rsQueueHaltDetails = null
     if(_rsAktiv && _rsAktiv.planLabel){
       _rsAktiv.cancel = true
       if(_rsAktiv.storno) _rsAktiv.storno()   // greift nur, solange 'wartet'
@@ -26427,8 +26562,17 @@
     _rsQueueRender()
   })
   document.getElementById('rsq-halt')?.addEventListener('click', ev => {
+    if(ev.target.closest('#rsq-details')){
+      // Verborgenes Check-Popup mit den Zeilen dieses Plans zeigen — nur, wenn es noch seine
+      // sind (zwischendurch kann ein anderer Check die Zeilen ersetzt haben).
+      if(_rsQueueHaltDetails && _pfPlanId != null && String(_pfPlanId) === String(_rsQueueHaltDetails))
+        document.getElementById('tpPreflightModal')?.classList.add('open')
+      else if(typeof atToast === 'function') atToast('Die Check-Zeilen sind nicht mehr da — ▶ Weiter prüft neu.', 'end')
+      return
+    }
     if(!ev.target.closest('#rsq-weiter')) return
     _rsQueueHalt = null
+    _rsQueueHaltDetails = null
     _rsQueueRender()
     _rsQueuePump()
   })
