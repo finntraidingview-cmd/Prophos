@@ -4282,7 +4282,9 @@ def admin_build_overview():
     accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
-    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl",
+    # completed_at seit 23.09.2026 mit: der Personen-Verlauf (unten) braucht
+    # das Datum jedes Hedge-Verlusts, die Summen-Aggregation braucht es nicht.
+    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl,completed_at",
                                         "status": "eq.completed"})
     # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
     # Finn: „man soll auch sehen, wo die ganzen Payouts ankamen"): dieselben
@@ -4330,6 +4332,7 @@ def admin_build_overview():
     # Hedge-Kosten je Master-Account: nur abgeschlossene Trades auf einen LIVE-Slave.
     # Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −. USD→EUR wie im Frontend.
     hedge = {}
+    hedge_ev = []      # Verlauf (23.09.2026): (master_id, datum, kosten_eur) je Trade
     for p in plans:
         if p.get("slave_pl") is None:
             continue
@@ -4342,6 +4345,7 @@ def admin_build_overview():
         cur = _firm_norm(sl.get("firm"))
         pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
         hedge[m] = hedge.get(m, 0.0) + (-pl_eur)
+        hedge_ev.append((m, str(p.get("completed_at") or "")[:10], -pl_eur))
 
     payouts = {}
     for t in txs:
@@ -4420,6 +4424,22 @@ def admin_build_overview():
                     seen.add(prev); stack.append(prev)
         return b, h, p, n
 
+    def chain_ids(aid):
+        """Alle Account-IDs der Kette (eigene + Vorgänger), gleiche Regel wie
+        chain(). Der Personen-Verlauf in der Übersicht (23.09.2026) wählt damit
+        im Ketten-Modus dieselben Ereignisse, die c_* schon summiert."""
+        ids, stack, seen = [], [aid], {aid}
+        while stack:
+            cur = stack.pop()
+            acc = by_id.get(cur)
+            if acc is None or (acc.get("account_type") or "") == "live":
+                continue
+            ids.append(cur)
+            for prev in preds_of.get(cur, []):
+                if prev not in seen and len(seen) < 200:
+                    seen.add(prev); stack.append(prev)
+        return ids
+
     # Eine flache Zeile pro Account — die UI filtert/aggregiert daraus selbst
     # (Person, Firma, aktiv/archiviert). Jede Zeile trägt BEIDE Sichten:
     #   buy/hedge/payouts/parked      = nur dieser Account
@@ -4464,7 +4484,42 @@ def admin_build_overview():
             "c_hedge": round(ch, 2),
             "c_payouts": round(cp, 2),
             "c_parked": round(cb + ch - cp, 2),
+            "chain_ids": chain_ids(aid),
         })
+
+    # VERLAUF je Person (23.09.2026, Finn: „Charts, wo man den Verlauf von jeder
+    # Person farblich markiert sieht — gleiche Logik für Übersicht, Saldo und
+    # Payouts erhalten"): jede Geldbewegung als datiertes Ereignis in EUR —
+    #   kauf   = purchase_cost, Datum = created_at (Kaufnäherung wie „created")
+    #   hedge  = Hedge-Kosten eines Trades, Datum = completed_at
+    #   payout = gebuchter Payout, Datum = occurred_at, auch OHNE Account
+    # Das Frontend wählt je Auswertung Ereignisse und Vorzeichen und summiert
+    # je Person kumuliert. Reine Anzeige — keine Summe oben rechnet damit.
+    verlauf = []
+    for a in accounts:
+        aid = str(a["id"]); uid = str(a.get("user_id"))
+        if (a.get("account_type") or "") == "live" or uid in excluded_ids:
+            continue
+        try: buy = float(a.get("purchase_cost") or 0)
+        except (TypeError, ValueError): buy = 0.0
+        datum = str(a.get("created_at") or "")[:10]
+        if buy and datum:
+            verlauf.append({"uid": uid, "aid": aid, "datum": datum, "art": "kauf", "eur": round(buy, 2)})
+    for m, datum, eur in hedge_ev:
+        acc = by_id.get(m) or {}
+        uid = str(acc.get("user_id") or "")
+        if not datum or not uid or uid in excluded_ids or (acc.get("account_type") or "") == "live":
+            continue
+        verlauf.append({"uid": uid, "aid": m, "datum": datum, "art": "hedge", "eur": round(eur, 2)})
+    for t in txs:
+        uid = str(t.get("user_id") or "")
+        datum = str(t.get("occurred_at") or "")[:10]
+        if not datum or uid in excluded_ids:
+            continue
+        try: amt = float(t.get("amount") or 0)
+        except (TypeError, ValueError): continue
+        verlauf.append({"uid": uid, "aid": str(t.get("account_id") or ""), "datum": datum, "art": "payout", "eur": round(amt, 2)})
+    verlauf.sort(key=lambda e: e["datum"])
 
     # Payouts unterwegs (02.09.2026, Finns Wunsch: „das ich im Admin dashboard
     # dazu eine cleane übersicht habe"): alle OFFENEN Anfragen aus
@@ -4753,6 +4808,7 @@ def admin_build_overview():
     return {"accounts": rows, "people": people_list, "firms": firm_list,
             "pending_payouts": pending_rows,
             "payouts_received": recv_rows,
+            "verlauf": verlauf,
             "payout_ready": payout_ready,
             "trades_heute": trades_heute,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),

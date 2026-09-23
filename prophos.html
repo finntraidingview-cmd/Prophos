@@ -873,6 +873,18 @@
     font-size:12px;color:var(--sub);text-align:right;
     font-variant-numeric:tabular-nums;
   }
+  /* Personen-Verlauf (23.09.2026): Kurve je Person unter den Balken, feste Farbe
+     je Person als Punkt vor dem Namen und in der Chip-Legende unter dem Chart. */
+  #dashboard-view .adm-dot{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:7px;vertical-align:1px;flex:none}
+  #dashboard-view .adm-vl{position:relative;height:220px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-soft)}
+  #dashboard-view .adm-vl-legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;font-size:11.5px;color:var(--sub)}
+  #dashboard-view .adm-vl-chip{
+    display:inline-flex;align-items:center;gap:2px;background:none;border:0;padding:3px 6px;
+    border-radius:6px;font:inherit;color:var(--sub);cursor:pointer;transition:background .12s var(--ease);
+  }
+  #dashboard-view .adm-vl-chip:hover{background:var(--surface-tint)}
+  #dashboard-view .adm-vl-chip.is-on{color:var(--ink);font-weight:600;background:var(--violet-tint)}
+  #dashboard-view .adm-vl-chip.is-off{opacity:.45}
   #dashboard-view .adm-sub{font-size:11.5px;color:var(--sub-2);font-weight:400}
   #dashboard-view .adm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   #dashboard-view .adm-scroll{max-height:440px;overflow:auto}
@@ -7322,6 +7334,22 @@
               </div>
             </div>
 
+            <!-- Verlauf nach Person (23.09.2026, Finn: „Charts, wo man den Verlauf
+                 von jeder Person farblich markiert sieht"): dieselben Zeilen,
+                 Filter und Kettenregel wie die Balken „Nach Person" — Kauf + Hedge
+                 − Payouts, kumuliert über die Zeit, eine Kurve je Person in
+                 fester Farbe. Klick auf Kurve oder Chip klappt auf wie der Balken. -->
+            <div class="panel" style="margin-top:14px">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Verlauf nach Person</div>
+                  <div class="panel-sub">Kauf + Hedge − Payouts, kumuliert · gleiche Filter wie oben · Kurve anklicken klappt die Person auf</div>
+                </div>
+              </div>
+              <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-person-chart"></canvas></div>
+              <div class="adm-vl-legend" id="adm-person-legend"></div>
+            </div>
+
             <div class="panel" style="margin-top:14px">
               <div class="panel-head">
                 <div>
@@ -7764,6 +7792,9 @@
                 </div>
               </div>
               <div class="adm-dist" id="adm-f-recv-dist"></div>
+              <!-- Verlauf (23.09.2026): erhaltene Payouts je Person kumuliert, gleiche Buchungen wie die Balken -->
+              <div class="adm-vl"><canvas id="adm-f-recv-chart"></canvas></div>
+              <div class="adm-vl-legend" id="adm-f-recv-legend" style="margin-bottom:12px"></div>
               <div class="panel-head" style="border-top:1px solid var(--border)">
                 <div>
                   <div class="panel-title" id="adm-f-recv-title">Alle Payouts</div>
@@ -7793,6 +7824,9 @@
                 </div>
               </div>
               <div class="adm-dist" id="adm-fin-person-dist"></div>
+              <!-- Verlauf (23.09.2026): Saldo je Person kumuliert, gleiche Zahlen wie die Balken -->
+              <div class="adm-vl"><canvas id="adm-fin-person-chart"></canvas></div>
+              <div class="adm-vl-legend" id="adm-fin-person-legend"></div>
             </div>
 
             <div class="panel" style="margin-top:14px" id="adm-fin-acc-panel" hidden>
@@ -9588,6 +9622,7 @@
           (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
         selF.value = curF
         msg.style.display = 'none'; body.hidden = false
+        admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
         admRender()
         admBuysRender()
         admFinRender()
@@ -9691,6 +9726,125 @@
       return at > 0 ? s.slice(0, at) : s
     }
 
+    /* ── Personen-Verlauf (23.09.2026, Finn am Screenshot „Saldo nach Person":
+     * „Charts, wo man den Verlauf von jeder Person farblich markiert sieht —
+     * mit der gleichen Logik für Übersicht und Payouts erhalten") ──
+     * Quelle: admData.verlauf — jede Geldbewegung als datiertes Ereignis (kauf /
+     * hedge / payout, in €, mit Account- und Personen-ID). Jede Auswertung wählt
+     * ihre Konten und ihr Vorzeichen selbst (admVlSerien) und summiert je Person
+     * kumuliert; Chart.js zeichnet eine Kurve je Person (Muster rgChart).
+     * Die Farbe je Person ist FEST (admPersonColor) und gilt in allen drei
+     * Charts und als Punkt vor dem Namen in den Balken — sonst müsste man in
+     * jedem Tab die Legende neu lesen. Klick auf Kurve oder Chip tut dasselbe
+     * wie der Klick auf den Balken: gleicher Zustand, gleicher Renderer. */
+    const ADM_P_COLORS = ['#5447CE', '#0EA5E9', '#16A34A', '#E0891F', '#E11D48', '#A855F7', '#14B8A6', '#F59E0B', '#64748B', '#0F766E', '#BE185D', '#7C3AED']
+    let admPColors = new Map()
+    function admPersonColorsBauen(){
+      // Nach user_id sortiert (stabil), Wunschplatz aus einem Hash der ID — eine
+      // neue Person verschiebt die Farben der anderen nur bei einer Kollision.
+      admPColors = new Map()
+      const uids = [...new Set([...(admData.people || []).map(p => String(p.user_id)),
+                                ...(admData.payouts_received || []).map(t => String(t.user_id || t.person || '—'))])].sort()
+      const frei = ADM_P_COLORS.map(() => true)
+      for(const uid of uids){
+        let h = 0; for(const ch of uid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+        let i = h % ADM_P_COLORS.length, n = 0
+        while(!frei[i] && n < ADM_P_COLORS.length){ i = (i + 1) % ADM_P_COLORS.length; n++ }
+        frei[i] = false
+        admPColors.set(uid, ADM_P_COLORS[i])
+      }
+    }
+    const admPersonColor = key => admPColors.get(String(key)) || '#94A3B8'
+    const admDot = key => `<span class="adm-dot" style="background:${admPersonColor(key)}"></span>`
+    const admVlLabel = k => (admData?.people || []).find(p => String(p.user_id) === String(k))?.name || admShortName(k)
+    const admVlDatum = d => d ? String(d).slice(2, 10).split('-').reverse().join('.') : ''
+    const admEurKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k €' : Math.round(v) + ' €'
+    const admVlSign = v => (v >= 0 ? '+' : '−') + admEur.format(Math.abs(v))
+    const admVlCharts = {}
+    /* Ereignisse eines Konto-Satzes als Serien je Person.
+     * ids = Set der Account-IDs, die zählen (Payouts ohne Account fallen damit
+     * raus — genau wie bei den Balken, die r.payouts je Account summieren).
+     * sign = Vorzeichen je Art, z.B. { kauf:1, hedge:1, payout:-1 } für „geparkt". */
+    function admVlSerien(ids, sign){
+      const m = new Map()
+      for(const e of (admData.verlauf || [])){
+        if(!e.datum || !ids.has(String(e.aid))) continue
+        const f = sign[e.art]; if(!f) continue
+        const k = String(e.uid)
+        const s = m.get(k) || { key:k, label: admVlLabel(k), events:[] }
+        s.events.push({ datum: e.datum, eur: f * (Number(e.eur) || 0) })
+        m.set(k, s)
+      }
+      return [...m.values()].sort((a, b) => a.label.localeCompare(b.label, 'de'))
+    }
+    /* series = [{ key, label, events:[{datum, eur}] }], schon vorzeichenrichtig.
+     * active = aufgeklappte Person ('' = keine): ihre Kurve wird dick + gefüllt,
+     * die anderen blass. onPick(key) = derselbe Umschalter wie der Balken-Klick. */
+    function admVerlauf(name, canvasId, legendId, series, active, onPick){
+      const cv = $(canvasId), lg = $(legendId)
+      if(!cv) return
+      const wrap = cv.parentElement
+      if(admVlCharts[name]){ try { admVlCharts[name].destroy() } catch(_){} admVlCharts[name] = null }
+      if(lg) lg.innerHTML = ''
+      const tage = [...new Set(series.flatMap(s => s.events.map(e => e.datum)))].sort()
+      // Unter zwei Tagen gibt es keine Kurve — Block bleibt weg statt leer zu stehen.
+      if(typeof Chart === 'undefined' || tage.length < 2 || !series.length){
+        wrap.hidden = true; if(lg) lg.hidden = true
+        return
+      }
+      wrap.hidden = false; if(lg) lg.hidden = false
+      const idx = new Map(tage.map((t, i) => [t, i]))
+      const datasets = series.map(s => {
+        const perTag = new Array(tage.length).fill(0)
+        for(const e of s.events){ perTag[idx.get(e.datum)] += e.eur }
+        let kum = 0
+        const data = perTag.map(v => { kum += v; return +kum.toFixed(2) })
+        const col = admPersonColor(s.key)
+        const on = active && String(active) === String(s.key)
+        const dim = active && !on
+        return { label: admShortName(s.label), key: s.key, data,
+                 borderColor: dim ? col + '40' : col, borderWidth: on ? 2.5 : (dim ? 1.5 : 2),
+                 backgroundColor: col + '18', fill: on ? 'origin' : false,
+                 // monotone statt tension: kumulierte Sprünge dürfen nicht überschwingen
+                 pointRadius: 0, pointHitRadius: 8, cubicInterpolationMode: 'monotone' }
+      })
+      admVlCharts[name] = new Chart(cv.getContext('2d'), {
+        type: 'line',
+        data: { labels: tage.map(admVlDatum), datasets },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
+          onClick: (ev, els, chart) => {
+            const el = els && els[0]
+            if(el && onPick) onPick(chart.data.datasets[el.datasetIndex].key)
+          },
+          onHover: (ev, els) => { const t = ev.native && ev.native.target; if(t) t.style.cursor = els.length ? 'pointer' : '' },
+          plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
+            callbacks: { title: items => items.length ? admVlDatum(tage[items[0].dataIndex]) : '',
+                         label: ctx => ` ${ctx.dataset.label}: ${admVlSign(ctx.parsed.y)}` } } },
+          scales: { x: { grid: { display: false }, ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, maxTicksLimit: 6, maxRotation: 0 } },
+                    // Nulllinie kräftiger — bei Saldo/Verlauf wechseln Personen die Seite.
+                    y: { grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
+                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => admEurKurz(v) } } } }
+      })
+      if(lg){
+        for(const s of series){
+          const ds = datasets.find(d => d.key === s.key)
+          const last = ds && ds.data.length ? ds.data[ds.data.length - 1] : 0
+          const b = document.createElement('button')
+          b.type = 'button'
+          b.className = 'adm-vl-chip' + (active ? (String(active) === String(s.key) ? ' is-on' : ' is-off') : '')
+          b.innerHTML = admDot(s.key) + '<span class="nm"></span>' +
+            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${last < 0 ? '#b91c1c' : '#15803d'}">${admVlSign(last)}</span>`
+          b.querySelector('.nm').textContent = admShortName(s.label)
+          b.title = `${s.label} · Stand heute — klicken klappt die Person auf`
+          if(onPick) b.addEventListener('click', () => onPick(s.key))
+          lg.appendChild(b)
+        }
+      }
+    }
+    // Ein Chart in einem versteckten Tab hat Breite 0 — beim Öffnen nachziehen.
+    function admVlResize(){ for(const c of Object.values(admVlCharts)){ if(c){ try { c.resize() } catch(_){} } } }
+
     /* filterId = das <select>, das ein Klick auf eine Zeile setzt (Aufklappen).
      * Bewusst über die vorhandenen Filter statt über einen eigenen Drilldown-
      * Zustand: so bleiben KPIs, Verteilungen und Account-Liste automatisch
@@ -9717,6 +9871,7 @@
         const nm = row.querySelector('.adm-row-name')
         // Wenn kein Anzeigename hinterlegt ist, kommt die E-Mail — die passt nicht in die Spalte.
         nm.textContent = admShortName(g.label)
+        if(filterId === 'adm-person') nm.insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
         row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
           + (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : '')
           + ' — zum Aufklappen klicken'
@@ -9919,6 +10074,19 @@
 
       admDist($('adm-firm-dist'), byFirm, 'adm-firm')
       admDist($('adm-person-dist'), byPerson, 'adm-person')
+
+      // Verlauf je Person (23.09.2026): dieselben Zeilen wie die Balken; im
+      // Ketten-Modus zählen die Ereignisse der abgelösten Vorgänger mit (wie c_*).
+      // Ohne Kappung bei 0 — der Verlauf zeigt den Geldfluss, die Kappung gilt
+      // nur der Summen-Frage „wie viel ist gerade gebunden".
+      const vlIds = new Set()
+      for(const r of rows){
+        vlIds.add(String(r.id))
+        if(admChainMode()) for(const c of (r.chain_ids || [])) vlIds.add(String(c))
+      }
+      admVerlauf('overview', 'adm-person-chart', 'adm-person-legend',
+        admVlSerien(vlIds, { kauf:1, hedge:1, payout:-1 }), $('adm-person').value,
+        key => { const sel = $('adm-person'); sel.value = (String(sel.value) === String(key)) ? '' : key; admRender() })
 
       // Kosten-Tabelle je Firma
       const ftb = $('adm-firm-rows'); ftb.innerHTML = ''
@@ -10257,6 +10425,7 @@
               `<div class="adm-val" style="color:var(--good)">+${admEur.format(g.sum)}</div>` +
               `<div class="adm-pct">${share.toFixed(0)}%</div>`
             row.querySelector('.adm-row-name').textContent = admShortName(g.label)
+            row.querySelector('.adm-row-name').insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
             const dl = g.letzte ? new Date(g.letzte).toLocaleDateString('de-DE', { day:'2-digit', month:'short' }) : '—'
             row.title = `${g.label} · ${g.n} Payout${g.n === 1 ? '' : 's'} · letzter ${dl} — zum Aufklappen klicken`
             row.addEventListener('click', () => {
@@ -10265,6 +10434,14 @@
             })
             dist.appendChild(row)
           }
+          // Verlauf (23.09.2026): erhaltene Payouts je Person kumuliert — dieselben
+          // Buchungen wie die Balken, also auch die ohne Account.
+          admVerlauf('recv', 'adm-f-recv-chart', 'adm-f-recv-legend',
+            list.map(g => ({ key:g.key, label:g.label,
+              events: recv.filter(t => String(t.user_id || t.person || '—') === String(g.key) && t.occurred_at)
+                          .map(t => ({ datum: String(t.occurred_at).slice(0, 10), eur: Number(t.amount) || 0 })) }))
+                .sort((a, b) => a.label.localeCompare(b.label, 'de')),
+            finPoPerson, key => { finPoPerson = (String(finPoPerson) === String(key)) ? '' : key; admFinRender() })
           const pers = finPoPerson ? byP.get(String(finPoPerson)) : null
           const ttl = $('adm-f-recv-title'), cnt = $('adm-f-recv-count'), back = $('adm-f-recv-back')
           if(ttl) ttl.textContent = pers ? admShortName(pers.label) : 'Alle Payouts'
@@ -10563,6 +10740,7 @@
           `<div class="adm-val" style="color:${colSaldo(g.saldo)}">${fmtSaldo(g.saldo)}</div>` +
           `<div class="adm-pct">${g.accs}×</div>`
         row.querySelector('.adm-row-name').textContent = admShortName(g.label)
+        row.querySelector('.adm-row-name').insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
         row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admEur.format(g.payouts)} Payouts − ${admEur.format(g.buy)} Kauf − ${admEur.format(g.hedge)} Hedge — zum Aufklappen klicken`
         row.addEventListener('click', () => {
           finPerson = (String(finPerson) === String(g.key)) ? '' : g.key
@@ -10570,6 +10748,11 @@
         })
         el.appendChild(row)
       }
+      // Verlauf je Person (23.09.2026): alle Accounts, eigene Zahlen, Saldo-
+      // Vorzeichen (Payouts +, Kauf −, Hedge −) — exakt die Balken über die Zeit.
+      admVerlauf('fin', 'adm-fin-person-chart', 'adm-fin-person-legend',
+        admVlSerien(new Set((admData.accounts || []).map(r => String(r.id))), { kauf:-1, hedge:-1, payout:1 }), finPerson,
+        key => { finPerson = (String(finPerson) === String(key)) ? '' : key; admFinRender() })
 
       // Aufklappung: alle Accounts der gewählten Person, tiefstes Minus zuerst
       $('adm-fin-acc-panel').hidden = !finPerson
@@ -12424,6 +12607,7 @@
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
+        if(name === 'overview') admVlResize()   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026)
         if(name === 'rg')   rgOpen()
       }))
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
@@ -25903,7 +26087,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.434'
+  const OS_TAB_BUILD = '2026-09-22.435'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
