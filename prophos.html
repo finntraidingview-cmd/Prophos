@@ -23351,6 +23351,12 @@
       + ` · ×<b style="color:var(--violet)">${mult}</b>`
       + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`
       + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
+      // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
+      // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
+      + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{2}$/, ''))}</b>` : '')
+      + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
+      + (p.masterTp > 0 ? ` · TP <b style="color:#2a9d5c">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
+      + (p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
       + (sDup ? ` · <span style="color:var(--violet)">${fmtDupBalance(sDup)}</span>` : '')
 
     // Rechte Metrik je Status
@@ -25875,7 +25881,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.432'
+  const OS_TAB_BUILD = '2026-09-22.433'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
