@@ -1249,6 +1249,30 @@
   #adm-pane-kompass .kp-erg.hit{color:#2a9d5c}
   #adm-pane-kompass .kp-erg.miss{color:var(--danger)}
   #adm-pane-kompass .kp-erg.offen{color:var(--sub)}
+  /* Kapitel-Tab (24.09.2026): Karten je Kapitel nebeneinander, Kacheln darin eine
+     Nummer kleiner als die Übersichts-KPIs, aktive Karte mit Rahmen in Kapitel-Farbe
+     (--k-farbe / --k-schein setzt der Renderer je Karte). */
+  #adm-pane-kapitel .kap-karten{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-bottom:14px}
+  #adm-pane-kapitel .kap-karte{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--k-farbe,var(--border));border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow-card);cursor:pointer;transition:box-shadow .2s var(--ease),border-color .2s var(--ease)}
+  #adm-pane-kapitel .kap-karte:hover{box-shadow:var(--shadow-card-hover)}
+  #adm-pane-kapitel .kap-karte.aktiv{border-color:var(--k-farbe);box-shadow:0 0 0 3px var(--k-schein,transparent)}
+  #adm-pane-kapitel .kap-kopf{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  #adm-pane-kapitel .kap-name{font-weight:600;font-size:14px}
+  #adm-pane-kapitel .kap-zeit{color:var(--sub);font-size:12px;font-variant-numeric:tabular-nums}
+  #adm-pane-kapitel .kap-kopf .chip{margin-left:auto}
+  #adm-pane-kapitel .kap-leer{font-size:12px;color:var(--sub);margin:-4px 0 10px}
+  #adm-pane-kapitel .kap-karte .kpis{grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:0}
+  #adm-pane-kapitel .kap-karte .kpi{padding:10px 12px;box-shadow:none}
+  #adm-pane-kapitel .kap-karte .kpi-value{font-size:18px}
+  #adm-pane-kapitel .kap-karte .kpi-delta{font-size:11px}
+  @media (max-width:1200px){#adm-pane-kapitel .kap-karte .kpis{grid-template-columns:repeat(2,1fr)}}
+  #adm-pane-kapitel .kap-edit-zeile{display:grid;grid-template-columns:auto minmax(120px,1fr) 140px 140px minmax(160px,1.6fr);gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-soft)}
+  #adm-pane-kapitel .kap-edit-zeile:last-child{border-bottom:none}
+  #adm-pane-kapitel .kap-edit-zeile .input{width:100%;min-width:0;padding:6px 9px;font-size:12.5px;height:auto}
+  @media (max-width:960px){
+    #adm-pane-kapitel .kap-edit-zeile{grid-template-columns:auto 1fr 1fr}
+    #adm-pane-kapitel .kap-edit-zeile .input[data-kap-feld="name"],#adm-pane-kapitel .kap-edit-zeile .input[data-kap-feld="beschreibung"]{grid-column:2 / -1}
+  }
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -3974,6 +3998,33 @@
     #dashboard-view .modal,#dashboard-view .view.active{animation-duration:.01ms}
     #dashboard-view .sidebar{transition-duration:.01ms}
   }
+
+  /* ── KAPITEL-UMSCHALTER in der Topbar (24.09.2026) ──
+     Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit Realmoney … dass wir das
+     Ganze zeitlich trennen können mit den vorherigen Daten." Ein .seg wie
+     #tp-route-seg, nur kompakter (28 px), damit er neben Glocke und Profil
+     Platz hat. Der aktive Knopf trägt den Farbpunkt des Kapitels (--k-farbe,
+     Muster wie .tc2-sys::before). Desktop zeigt den Namen, Handy den Kurznamen. */
+  #dashboard-view .seg-kapitel{flex:none;padding:2px;border-radius:8px}
+  #dashboard-view .seg-kapitel button{
+    display:inline-flex;align-items:center;gap:5px;
+    padding:4px 9px;font-size:12px;line-height:16px;white-space:nowrap;border-radius:6px
+  }
+  #dashboard-view .seg-kapitel button::before{
+    content:'';width:6px;height:6px;border-radius:50%;background:var(--k-farbe,var(--sub));
+    display:none;flex:none
+  }
+  #dashboard-view .seg-kapitel button.active::before{display:inline-block}
+  #dashboard-view .seg-kapitel .k-kurz{display:none}
+  /* Titel darf nicht umbrechen, sondern wird abgeschnitten — sonst drückt der
+     Umschalter die Topbar in zwei Zeilen */
+  #dashboard-view .topbar > div:first-of-type{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  @media (max-width:820px){
+    #dashboard-view .seg-kapitel .k-lang{display:none}
+    #dashboard-view .seg-kapitel .k-kurz{display:inline}
+    #dashboard-view .seg-kapitel button{padding:7px 9px;min-height:32px;border-radius:calc(var(--m-r-ctl) - 4px)}
+    #dashboard-view .seg-kapitel{border-radius:calc(var(--m-r-ctl) - 2px)}
+  }
 </style>
 </head>
 <body>
@@ -4372,6 +4423,10 @@
     </div>
 
     <div class="tb-spacer"></div>
+
+    <!-- Kapitel-Umschalter (24.09.2026): Hedge-Ära / Ohne Hedge / Alle — Knöpfe
+         rendert kapitelRenderSeg() aus der Tabelle kapitel -->
+    <div class="seg seg-kapitel" id="kapitel-seg" title="Kapitel"></div>
 
     <button class="tb-btn" aria-label="Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -6366,6 +6421,8 @@
           <div class="kpi-delta delta-neutral" id="fin-kpi-purchases-sub">YTD ausgegeben</div>
         </div>
       </div>
+      <!-- Kapitel-Hinweis (24.09.2026): welche Buchungen die Kacheln und die Liste gerade zeigen -->
+      <div id="fin-kapitel-zeile" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);margin:-6px 0 14px 2px"></div>
 
       <!-- Zeitraum-Auswertung: Account-Kosten + Live-P/L im gewählten Zeitraum -->
       <div style="margin:0 0 16px;padding:12px 16px;background:var(--card);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -7301,6 +7358,7 @@
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
+          <button class="subtab adm-tab" data-admtab="kapitel">📖 Kapitel</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
@@ -7322,6 +7380,9 @@
                 <option value="all">Aktive + archivierte</option>
               </select>
               <input id="adm-search" class="adm-search" type="search" placeholder="Account, ID, Firma oder Person suchen …">
+              <!-- Kapitel (24.09.2026): nur Anzeige, was der Regler in der Topbar gewählt hat — die Zahlen
+                   kommen vom Server schon gefiltert (?kapitel=). Bewusst kein zweiter Umschalter hier. -->
+              <span class="chip chip-neutral" id="adm-kapitel-chip" title="Kapitel wird oben in der Leiste umgeschaltet"><span class="adm-dot" style="margin-right:0"></span><span class="nm">Alle Kapitel</span></span>
               <button class="btn btn-ghost" id="adm-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
             </div>
 
@@ -7632,6 +7693,50 @@
               </div>
             </div>
             <div id="kp-archiv"></div>
+          </div>
+        </div>
+
+        <!-- KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit Realmoney … zeitlich
+             trennen mit den vorherigen Daten … dass man in Prophos in so einem neuen Chapter alles da
+             sieht"): Hedge-Ära und Ohne Hedge nebeneinander — je Kapitel eine Karte mit Kacheln, darunter
+             der Monatsverlauf als Balken und die Stammdaten zum Bearbeiten. Zahlen fertig aus
+             /admin/kapitel (Zuordnung nur über kapitel_id), hier wird nichts nachgerechnet. Umschalten
+             läuft über den Regler in der Topbar; ein Klick auf die Karte ruft nur window._kapitel.setzen.
+             Neue Kapitel legt Finn per SQL an — deshalb nur Bearbeiten, kein „Neues Kapitel". -->
+        <div id="adm-pane-kapitel" hidden>
+          <div id="adm-kap-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Kapitel…</div>
+          <div id="adm-kap-body" hidden>
+            <div class="panel-head" style="margin-bottom:10px">
+              <div>
+                <div class="panel-title">Kapitel im Vergleich</div>
+                <div class="panel-sub">Karte anklicken macht das Kapitel überall aktiv — wie der Regler oben</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span class="mono" id="adm-kap-stand" style="font-size:11.5px;color:var(--sub)"></span>
+                <button class="btn btn-ghost" id="adm-kap-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+              </div>
+            </div>
+            <div class="kap-karten" id="adm-kap-karten"></div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">Monatsverlauf</div>
+                  <div class="panel-sub">Payouts nach oben, Kauf und Hedge nach unten · Farbe = Kapitel, im Wechselmonat stehen beide übereinander</div>
+                </div>
+              </div>
+              <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
+              <div class="adm-vl-legend" id="adm-kap-legend"></div>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="panel-head" style="margin-bottom:6px">
+                <div>
+                  <div class="panel-title">Kapitel bearbeiten</div>
+                  <div class="panel-sub">Name, Beginn, Ende (leer = offen), Beschreibung — speichert von allein · neue Kapitel per SQL</div>
+                </div>
+                <span class="mono" id="adm-kap-edit-stand" style="font-size:11.5px;color:var(--sub)"></span>
+              </div>
+              <div id="adm-kap-edit"></div>
+            </div>
           </div>
         </div>
 
@@ -9629,7 +9734,11 @@
         const { data: { session } } = await supabase.auth.getSession()
         const tok = session?.access_token
         if(!tok) throw new Error('nicht angemeldet')
-        const r = await fetch(`${WATCHER_HOME}/admin/overview`, { headers: { 'sb-token': tok }, cache:'no-store' })
+        // Kapitel (24.09.2026): der Server filtert Kauf/Hedge/Payouts/Verlauf über kapitel_id,
+        // „Alle" = ungefiltert wie bisher. Gewählt wird oben in der Topbar (window._kapitel).
+        const kap = window._kapitel ? window._kapitel.aktiv : 'alle'
+        const r = await fetch(`${WATCHER_HOME}/admin/overview` + (kap !== 'alle' ? `?kapitel=${encodeURIComponent(kap)}` : ''),
+                              { headers: { 'sb-token': tok }, cache:'no-store' })
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
@@ -9672,6 +9781,7 @@
           (d.firms || []).map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')
         selF.value = curF
         msg.style.display = 'none'; body.hidden = false
+        admKapChipRender()       // Hinweis-Chip „Kapitel: …" in der Toolbar (24.09.2026)
         admPersonColorsBauen()   // feste Farbe je Person für Balken-Punkte und Verlaufs-Charts (23.09.2026)
         admRender()
         admBuysRender()
@@ -9714,6 +9824,13 @@
       const fStatus = $('adm-status').value
       const q       = ($('adm-search').value || '').trim().toLowerCase()
       return (admData.accounts || []).filter(r => {
+        // Kapitel (24.09.2026): der Server lässt die Konten UNGEFILTERT (Ketten brauchen die
+        // Vorgänger) und nullt nur Kauf/Hedge/Payouts außerhalb des Kapitels. Ein Konto aus
+        // einem anderen Kapitel OHNE Bewegung in diesem bleibt weg — sonst zählt es bei
+        // „Accounts" mit, obwohl nichts von ihm hier steht. Hat es hier Payouts oder
+        // Hedge (Konto aus der Hedge-Ära, Payout danach), bleibt es — die Summen brauchen es.
+        if(window._kapitel && window._kapitel.aktiv !== 'alle' && !window._kapitel.passt(r.kapitel_id, r.created)
+           && !((Number(r.buy) || 0) || (Number(r.hedge) || 0) || (Number(r.payouts) || 0))) return false
         if(fStatus === 'active'   && r.archived) return false
         if(fStatus === 'archived' && !r.archived) return false
         if(fPerson && String(r.user_id) !== String(fPerson)) return false
@@ -9894,6 +10011,220 @@
     }
     // Ein Chart in einem versteckten Tab hat Breite 0 — beim Öffnen nachziehen.
     function admVlResize(){ for(const c of Object.values(admVlCharts)){ if(c){ try { c.resize() } catch(_){} } } }
+
+    /* ── Kapitel-Tab (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
+     * Realmoney … zeitlich trennen mit den vorherigen Daten … dass man in Prophos in so
+     * einem neuen Chapter alles da sieht"). Kapitel 1 = Hedge-Ära, Kapitel 2 = Ohne Hedge.
+     * Alles kommt fertig aus /admin/kapitel (je Kapitel Summen + Monate, Zuordnung nur
+     * über kapitel_id) — hier wird nichts nachgerechnet, nur gezeichnet: Karten mit
+     * Kacheln, Monatsbalken (Chart.js wie admVerlauf), Stammdaten mit Auto-Speichern
+     * (Muster kp-quoten). Umschalten bleibt Sache des Topbar-Reglers; die Karte ruft nur
+     * window._kapitel.setzen(id), der Rest kommt über das Event 'prophos:kapitel' zurück. */
+    let admKapData = null, admKapChart = null, _admKapTimer = null
+    const admKapUsd = new Intl.NumberFormat('de-DE', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
+    const admKapNum = v => { const n = Number(v); return Number.isFinite(n) ? n : 0 }   // nie NaN in einer Kachel
+    // Kapitel-Farbe ist #rrggbb — Alpha anhängen für Balken je Art / Schein der aktiven Karte
+    const admKapAlpha = (hex, a) => /^#[0-9a-f]{6}$/i.test(hex || '') ? hex + a : '#64748B' + a
+    const admKapFarbe = k => /^#[0-9a-f]{6}$/i.test(k.farbe || '') ? k.farbe : '#64748B'
+    // „29.04.–23.09.2026" bzw. „seit 24.09.2026 · offen"
+    function admKapZeit(k){
+      const f = iso => { const [y, m, d] = String(iso).slice(0, 10).split('-'); return `${d}.${m}.${y}` }
+      if(!k.bis) return `seit ${f(k.von)} · offen`
+      const von = String(k.von).slice(0, 10), bis = String(k.bis).slice(0, 10)
+      return (von.slice(0, 4) === bis.slice(0, 4) ? f(von).slice(0, 6) : f(von)) + '–' + f(bis)
+    }
+    // Leerzustand: noch nichts gebucht (Kapitel 2 am ersten Tag) → Kacheln zeigen „—"
+    const admKapLeer = k => !admKapNum(k.konten) && !admKapNum(k.trades) && !admKapNum(k.payout_n) && !admKapNum(k.kauf) && !admKapNum(k.live_pnl)
+
+    // Hinweis-Chip in der Übersicht-Toolbar: nur Anzeige dessen, was oben gewählt ist
+    function admKapChipRender(){
+      const el = $('adm-kapitel-chip'); if(!el || !window._kapitel) return
+      const a = window._kapitel.aktiv
+      el.querySelector('.adm-dot').style.background = a === 'alle' ? 'var(--sub-2)' : window._kapitel.farbe(a)
+      el.querySelector('.nm').textContent = a === 'alle' ? 'Alle Kapitel' : 'Kapitel: ' + window._kapitel.name(a)
+    }
+
+    async function admKapitelLaden(){
+      const msg = $('adm-kap-msg'), body = $('adm-kap-body')
+      if(!msg) return
+      if(!admKapData){ msg.style.display = ''; msg.textContent = 'Lade Kapitel…'; body.hidden = true }
+      try{
+        const { data: { session } } = await supabase.auth.getSession()
+        const tok = session?.access_token
+        if(!tok) throw new Error('nicht angemeldet')
+        const r = await fetch(`${WATCHER_HOME}/admin/kapitel`, { headers: { 'sb-token': tok }, cache:'no-store' })
+        const d = await r.json()
+        if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+        admKapitelRender(d)
+      }catch(e){
+        msg.style.display = ''; body.hidden = true
+        msg.textContent = 'Kapitel nicht verfügbar: ' + (e.message || e)
+      }
+    }
+    // Beim Öffnen des Tabs: einmal laden, danach nur den Chart nachziehen (Breite 0 im versteckten Tab)
+    function admKapitelOeffnen(){
+      if(!admKapData){ admKapitelLaden(); return }
+      if(admKapChart){ try { admKapChart.resize() } catch(_){} }
+    }
+    function admKapitelRender(d){
+      admKapData = d
+      const msg = $('adm-kap-msg'), body = $('adm-kap-body')
+      if(!body) return
+      const liste = (d.kapitel || []).slice().sort((a, b) => String(a.von).localeCompare(String(b.von)))
+      if(!liste.length){ msg.style.display = ''; msg.textContent = 'Keine Kapitel angelegt (Tabelle kapitel ist leer).'; body.hidden = true; return }
+      msg.style.display = 'none'; body.hidden = false
+      const st = $('adm-kap-stand')
+      if(st) st.textContent = d.generated ? 'Stand ' + new Date(d.generated).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
+      admKapKarten(liste)
+      admKapChartBauen(liste)
+      admKapEditBauen(liste)
+    }
+    window._admKapitelRender = admKapitelRender   // isoliert prüfbar mit Stub-Daten, wie _admLaden
+
+    // a) Vergleich nebeneinander — je Kapitel eine Karte mit acht Kacheln
+    function admKapKarten(liste){
+      const wrap = $('adm-kap-karten'); if(!wrap) return
+      wrap.innerHTML = ''
+      const aktiv = window._kapitel ? String(window._kapitel.aktiv) : ''
+      const eur = n => admEur.format(admKapNum(n))
+      const sign = n => admVlSign(admKapNum(n))
+      const col = n => admKapNum(n) < 0 ? '#b91c1c' : '#15803d'
+      const kpi = (label, value, sub, valStyle) =>
+        `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
+      for(const k of liste){
+        const leer = admKapLeer(k), farbe = admKapFarbe(k)
+        const netto = admKapNum(k.netto), hedge = admKapNum(k.hedge)
+        const trades = admKapNum(k.trades), blown = admKapNum(k.blown), ohne = admKapNum(k.trades_ohne_hedge)
+        const blowQ = trades ? Math.round(blown / trades * 100) + ' %' : '–'
+        const payoutN = admKapNum(k.payout_n)
+        // Hedge-Kachel: im Kapitel ohne Hedge ist „0 €" die gute Nachricht (grün, „kein Gegen-Hedge")
+        let hVal, hSub, hStyle
+        if(!k.hedge_aktiv && !hedge){ hVal = '0 €'; hSub = 'kein Gegen-Hedge'; hStyle = 'color:#15803d' }
+        else if(leer){ hVal = '—'; hSub = '—'; hStyle = '' }
+        else { hVal = hedge < 0 ? '−' + eur(-hedge) : eur(hedge); hSub = hedge < 0 ? 'Hedge im Gewinn' : 'Verluste auf Live-Slaves'; hStyle = hedge ? `color:${hedge > 0 ? '#b91c1c' : '#15803d'}` : '' }
+        const mpl = admKapNum(k.master_pl)
+        const card = document.createElement('div')
+        card.className = 'kap-karte' + (aktiv === String(k.id) ? ' aktiv' : '')
+        card.style.setProperty('--k-farbe', farbe)
+        card.style.setProperty('--k-schein', admKapAlpha(farbe, '26'))
+        card.dataset.kapitelId = k.id
+        card.title = `${k.name} — klicken macht dieses Kapitel überall aktiv`
+        card.innerHTML =
+          `<div class="kap-kopf"><span class="adm-dot" style="background:${farbe}"></span><span class="kap-name"></span>` +
+          `<span class="kap-zeit">${escapeHtml(admKapZeit(k))}</span>` +
+          `<span class="chip ${k.hedge_aktiv ? 'chip-neutral' : 'chip-good'}">${k.hedge_aktiv ? 'mit Hedge' : 'ohne Hedge'}</span></div>` +
+          (leer ? '<div class="kap-leer">Noch keine Buchungen in diesem Kapitel</div>' : '') +
+          '<div class="kpis">' +
+          kpi('Netto', leer ? '—' : sign(netto), 'Payouts − Kauf − Hedge', leer ? '' : `color:${col(netto)}`) +
+          kpi('Payouts', leer ? '—' : eur(k.payouts), leer ? '—' : `${payoutN} Buchung${payoutN === 1 ? '' : 'en'}`) +
+          kpi('Kauf', leer ? '—' : eur(k.kauf), leer ? '—' : (k.erster_tag ? `${admVlDatum(k.erster_tag)} – ${admVlDatum(k.letzter_tag)}` : 'Kaufpreise der Konten')) +
+          kpi('Hedge-Kosten', hVal, hSub, hStyle) +
+          kpi('Konten', leer ? '—' : `${admKapNum(k.konten_aktiv)} / ${admKapNum(k.konten)}`, leer ? '—' : 'aktiv / gesamt') +
+          kpi('Trades', leer ? '—' : String(trades), leer ? '—' : `${ohne} ohne Hedge · Blow-Quote ${blowQ}`) +
+          kpi('Live-P&L', leer ? '—' : sign(k.live_pnl), 'Realmoney, gebucht', leer ? '' : `color:${col(k.live_pnl)}`) +
+          kpi('Master-P&L', leer ? '—' : (mpl < 0 ? '−' : '+') + admKapUsd.format(Math.abs(mpl)), 'USD roh, Prop-Konten', leer ? '' : `color:${col(mpl)}`) +
+          '</div>'
+        card.querySelector('.kap-name').textContent = k.name || ('Kapitel ' + k.id)
+        card.addEventListener('click', () => { if(window._kapitel) window._kapitel.setzen(k.id) })
+        wrap.appendChild(card)
+      }
+    }
+
+    // b) Monatsverlauf — gestapelte Balken je Kapitel × Art (Payouts +, Kauf −, Hedge −).
+    // Je Kapitel eigene Serien statt „Farbe ab 2026-09": der Wechselmonat gehört beiden.
+    const ADM_KAP_ARTEN = [['payouts', 'Payouts', 'FF', 1], ['kauf', 'Kauf', 'A6', -1], ['hedge', 'Hedge', '59', -1]]
+    function admKapChartBauen(liste){
+      const cv = $('adm-kap-chart'), lg = $('adm-kap-legend'); if(!cv) return
+      const wrap = cv.parentElement
+      if(admKapChart){ try { admKapChart.destroy() } catch(_){} admKapChart = null }
+      if(lg) lg.innerHTML = ''
+      const monate = [...new Set(liste.flatMap(k => (k.monate || []).map(m => m.monat)))].sort()
+      if(typeof Chart === 'undefined' || !monate.length){ wrap.hidden = true; if(lg) lg.hidden = true; return }
+      wrap.hidden = false; if(lg) lg.hidden = false
+      const idx = new Map(monate.map((m, i) => [m, i]))
+      const datasets = []
+      for(const k of liste){
+        for(const [art, label, alpha, vz] of ADM_KAP_ARTEN){
+          const data = new Array(monate.length).fill(0)
+          let any = false
+          for(const m of (k.monate || [])){ const v = admKapNum(m[art]); if(v && idx.has(m.monat)){ data[idx.get(m.monat)] += vz * v; any = true } }
+          if(!any) continue
+          datasets.push({ label: `${k.name} · ${label}`, data: data.map(v => +v.toFixed(2)),
+                          backgroundColor: admKapAlpha(admKapFarbe(k), alpha), borderWidth: 0, stack: 'kapitel' })
+        }
+      }
+      const MON = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
+      const fmtMonat = m => { const [y, mo] = m.split('-'); return (MON[Number(mo) - 1] || mo) + ' ' + String(y).slice(2) }
+      admKapChart = new Chart(cv.getContext('2d'), {
+        type: 'bar',
+        data: { labels: monate.map(fmtMonat), datasets },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
+            filter: item => item.parsed.y !== 0,
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${admVlSign(ctx.parsed.y)}` } } },
+          scales: { x: { stacked: true, grid: { display: false }, ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, maxRotation: 0 } },
+                    y: { stacked: true, grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
+                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => admEurKurz(v) } } } }
+      })
+      // Chip-Legende wie beim Personen-Verlauf: je Kapitel Farbpunkt, Name, Netto — dahinter die drei Arten
+      if(lg){
+        for(const k of liste){
+          const netto = admKapNum(k.netto)
+          const b = document.createElement('span'); b.className = 'adm-vl-chip'; b.style.cursor = 'default'
+          b.innerHTML = `<span class="adm-dot" style="background:${admKapFarbe(k)}"></span><span class="nm"></span>` +
+            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${netto < 0 ? '#b91c1c' : '#15803d'}">${admKapLeer(k) ? '—' : admVlSign(netto)}</span>`
+          b.querySelector('.nm').textContent = k.name
+          lg.appendChild(b)
+        }
+        const arten = document.createElement('span'); arten.className = 'adm-vl-chip'; arten.style.cursor = 'default'
+        arten.innerHTML = ADM_KAP_ARTEN.map(([_, label, alpha]) => `<span class="adm-dot" style="background:${admKapAlpha('#64748B', alpha)}"></span>${label}`).join('<span style="width:8px"></span>')
+        lg.appendChild(arten)
+      }
+    }
+
+    // c) Stammdaten bearbeiten — eine Zeile je Kapitel, Auto-Speichern 0,7 s nach der Eingabe
+    // (Muster kp-quoten), danach window._kapitel.laden() → Regler + Sichten neu.
+    function admKapEditBauen(liste){
+      const wrap = $('adm-kap-edit'); if(!wrap) return
+      wrap.innerHTML = ''
+      for(const k of liste){
+        const row = document.createElement('div'); row.className = 'kap-edit-zeile'; row.dataset.kapitelId = k.id
+        row.innerHTML =
+          `<span class="adm-dot" style="background:${admKapFarbe(k)}" title="Kapitel ${k.id}"></span>` +
+          '<input class="input" data-kap-feld="name" placeholder="Name" maxlength="60">' +
+          '<input class="input mono" type="date" data-kap-feld="von" title="Beginn">' +
+          '<input class="input mono" type="date" data-kap-feld="bis" title="Ende — leer = offen">' +
+          '<input class="input" data-kap-feld="beschreibung" placeholder="Beschreibung" maxlength="200">'
+        row.querySelector('[data-kap-feld="name"]').value = k.name || ''
+        row.querySelector('[data-kap-feld="von"]').value = String(k.von || '').slice(0, 10)
+        row.querySelector('[data-kap-feld="bis"]').value = k.bis ? String(k.bis).slice(0, 10) : ''
+        row.querySelector('[data-kap-feld="beschreibung"]').value = k.beschreibung || ''
+        row.querySelectorAll('[data-kap-feld]').forEach(el => el.addEventListener('input', () => {
+          const st = $('adm-kap-edit-stand'); if(st) st.textContent = '…'
+          clearTimeout(_admKapTimer); _admKapTimer = setTimeout(() => admKapSpeichern(row), 700)
+        }))
+        wrap.appendChild(row)
+      }
+    }
+    async function admKapSpeichern(row){
+      const id = Number(row.dataset.kapitelId)
+      const lies = f => row.querySelector(`[data-kap-feld="${f}"]`)?.value ?? ''
+      const st = $('adm-kap-edit-stand')
+      const name = lies('name').trim(), von = lies('von'), bis = lies('bis')
+      if(!name || !von){ if(st) st.textContent = 'Name und Beginn dürfen nicht leer sein'; return }
+      const patch = { name, von, bis: bis || null, beschreibung: lies('beschreibung').trim(), updated_at: new Date().toISOString() }
+      try{
+        const { error } = await supabase.from('kapitel').update(patch).eq('id', id)
+        if(error) throw error
+        if(st){ st.textContent = '✓ gespeichert'; setTimeout(() => { if(st.textContent === '✓ gespeichert') st.textContent = '' }, 2500) }
+        // Stammdaten lokal nachziehen — die Zahlen bleiben, bis neu geladen wird
+        const k = admKapData && (admKapData.kapitel || []).find(x => Number(x.id) === id)
+        if(k) Object.assign(k, { name, von, bis: patch.bis, beschreibung: patch.beschreibung })
+        if(window._kapitel?.laden) await window._kapitel.laden()   // Regler neu + Event → Karten neu
+        else admKapKarten((admKapData?.kapitel || []).slice())
+      }catch(e){ if(st) st.textContent = 'nicht gespeichert: ' + (e.message || e) }
+    }
 
     /* filterId = das <select>, das ein Klick auf eine Zeile setzt (Aufklappen).
      * Bewusst über die vorhandenen Filter statt über einen eigenen Drilldown-
@@ -12651,6 +12982,8 @@
         $('adm-pane-rg').hidden       = name !== 'rg'
         $('adm-pane-wd').hidden       = name !== 'wd'
         $('adm-pane-kompass').hidden  = name !== 'kompass'
+        $('adm-pane-kapitel').hidden  = name !== 'kapitel'
+        if(name === 'kapitel') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026)
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
@@ -12663,6 +12996,18 @@
       document.querySelectorAll('.adm-f').forEach(el => el.addEventListener('change', admRender))
       $('adm-search')?.addEventListener('input', admRender)
       $('adm-refresh')?.addEventListener('click', admLoad)
+      $('adm-kap-refresh')?.addEventListener('click', admKapitelLaden)
+      // Kapitel-Regler in der Topbar (24.09.2026): Übersicht/Käufe/Payouts neu vom Server (gefiltert),
+      // die Kapitel-Karten nur neu zeichnen (ihre Zahlen hängen nicht an der Wahl, nur der Rahmen).
+      // Nur bei echtem Wechsel nachladen — kapitelLaden() feuert das Event auch ohne Wechsel.
+      let _admKapLetzt = window._kapitel ? window._kapitel.aktiv : null
+      document.addEventListener('prophos:kapitel', ev => {
+        const id = ev.detail ? ev.detail.id : (window._kapitel ? window._kapitel.aktiv : null)
+        const gewechselt = String(id) !== String(_admKapLetzt); _admKapLetzt = id
+        admKapChipRender()
+        if(admKapData) admKapitelRender(admKapData)
+        if(gewechselt && admData) admLoad()
+      })
       $('adm-acc-back')?.addEventListener('click', () => {
         $('adm-firm').value = ''; $('adm-person').value = ''; $('adm-search').value = ''
         admRender()
@@ -22675,6 +23020,7 @@
       blown:       row.blown,
       resultNotes: row.result_notes,
       completedAt: row.completed_at,
+      kapitelId:   row.kapitel_id ?? null, // Kapitel (24.09.2026), per DB-Trigger nach Datum
       endedAt:     row.ended_at || null,   // echtes Trade-Ende (sql/2026-09-22_trade_plans_ended_at.sql)
       startedAt:   row.started_at,
       createdAt:   row.created_at,
@@ -23308,8 +23654,14 @@
     return 'bad'
   }
 
+  // Kapitel (24.09.2026): der globale Umschalter in der Topbar gilt auch fürs
+  // Archiv — kein eigener Regler in der Filterleiste. Datum-Fallback für Pläne
+  // ohne kapitel_id (frischer Insert): Ende, sonst Anlage.
+  function kapitelFilterPlaene(list){
+    return list.filter(p => kapitelPasst(p.kapitelId, p.completedAt || p.createdAt))
+  }
   function applyTradeFilter(list){
-    let filtered = list
+    let filtered = kapitelFilterPlaene(list)
     // Datum
     if(tradeFilter.dateRange !== 'all'){
       const now = new Date()
@@ -23374,7 +23726,9 @@
     ]
     for(const lane of lanes){
       let list = tradePlans.filter(p => p.status === lane.status)
-      const totalForLane = list.length
+      // Erledigt zählt nur das gewählte Kapitel (24.09.2026) — die anderen Lanes
+      // sind Gegenwart und bleiben ungefiltert
+      const totalForLane = lane.status === 'completed' ? kapitelFilterPlaene(list).length : list.length
       // Filter nur auf 'completed' anwenden
       if(lane.status === 'completed'){
         list = applyTradeFilter(list)
@@ -23423,8 +23777,13 @@
         const fcount = document.getElementById('trade-filter-count')
         if(fcount){
           const hasFilter = tradeFilter.dateRange !== 'all' || tradeFilter.accountId || tradeFilter.sym || tradeFilter.search.trim()
+          // Zusatz „· Kapitel …", solange nicht „Alle" gewählt ist (24.09.2026)
+          const kZusatz = kapitelAktiv === 'alle' ? '' : ` · Kapitel ${kapitelName(kapitelAktiv)}`
           if(hasFilter && totalForLane > 0){
-            fcount.textContent = `${list.length} von ${totalForLane} Trades`
+            fcount.textContent = `${list.length} von ${totalForLane} Trades${kZusatz}`
+            fcount.style.display = ''
+          } else if(kZusatz && totalForLane > 0){
+            fcount.textContent = `${totalForLane} Trades${kZusatz}`
             fcount.style.display = ''
           } else {
             fcount.style.display = 'none'
@@ -26455,7 +26814,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.439'
+  const OS_TAB_BUILD = '2026-09-22.440'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28615,6 +28974,23 @@
                             : 'dup')
                          : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
+    // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
+    // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
+    // Kapitel dreht die gespeicherte Vorwahl einmalig auf den V2-Weg —
+    // dup/tvplus/topstep → Orbit V2, mt5 → Echo V2, ohne Wert → Orbit V2.
+    // Nur Vorbelegung: der Regler bleibt frei, keine Sperre, keine Warnung.
+    // Das Flag merkt sich die Kapitel-Id, damit das pro Kapitel genau einmal passiert.
+    if(!_editPlan && typeof kapitelHeute === 'function'){
+      try {
+        const kh = kapitelObj(kapitelHeute())
+        if(kh && kh.hedge === false && localStorage.getItem('prophos_tp_route_k2') !== String(kh.id)){
+          const alt = localStorage.getItem(TP_ROUTE_LS)
+          _tpRoute = alt === 'mt5' ? 'mt5v2' : (alt === 'mt5v2' || alt === 'tvv2') ? alt : 'tvv2'
+          localStorage.setItem(TP_ROUTE_LS, _tpRoute)
+          localStorage.setItem('prophos_tp_route_k2', String(kh.id))
+        }
+      } catch(_){}
+    }
     tpRouteUpdateSeg()
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
@@ -33216,6 +33592,151 @@
     })
   })
 
+  /* ========== KAPITEL — zeitliche Trennung Hedge-Ära / Ohne Hedge (24.09.2026) ==========
+     Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit Realmoney … dass wir das
+     Ganze zeitlich trennen können mit den vorherigen Daten, sodass man es
+     auseinanderhalten kann … und dass man auch in Prophos in so einem neuen
+     Chapter alles da sieht."
+     Kapitel 1 = Hedge-Ära (bis 23.09.2026), Kapitel 2 = Ohne Hedge (ab 24.09.2026,
+     offen). Quelle ist die Tabelle `kapitel`; accounts/trade_plans/transactions
+     tragen kapitel_id per DB-Trigger nach Datum. Frontend-Inserts setzen die
+     Spalte NICHT — nach einem Insert ohne .select() ist sie lokal undefined,
+     dann gilt hier „Kapitel des Datums" (kapitelPasst mit Datum-Fallback).
+     Der Umschalter in der Topbar ist global: Finanzen und Trade-Archiv filtern
+     darauf, der Admin-Tab hängt sich per Event 'prophos:kapitel' an. */
+  const KAPITEL_LS = 'prophos_kapitel'
+  // Fallback, falls die Tabelle leer ist oder nicht antwortet — dieselben zwei
+  // Kapitel wie in sql/2026-09-24. `von` von Kapitel 1 ist bewusst weit vorn:
+  // alles vor dem 24.09.2026 ist Hedge-Ära.
+  const KAPITEL_FALLBACK = [
+    { id:1, key:'hedge',      name:'Hedge-Ära',  von:'2026-04-29', bis:'2026-09-23', hedge:true,  farbe:'#7C3AED', beschreibung:'Gegenhedge mit Realmoney' },   // Werte = DB-Seed (sql/2026-09-24_kapitel.sql)
+    { id:2, key:'ohne_hedge', name:'Ohne Hedge', von:'2026-09-24', bis:null,         hedge:false, farbe:'#0E7A78', beschreibung:'Puls platziert nur, kein Gegenhedge' }
+  ]
+  let kapitelListe = KAPITEL_FALLBACK.slice()
+  let kapitelAktiv = 'alle'   // 'alle' | id (number) — echter Startwert kommt gleich aus localStorage
+
+  function _kapitelIso(d){
+    if(!d) return null
+    if(typeof d === 'string') return d.slice(0, 10)
+    const x = d instanceof Date ? d : new Date(d)
+    if(isNaN(x)) return null
+    return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0')
+  }
+  function _kapitelHeuteIso(){ return _kapitelIso(new Date()) }
+  // Kapitel-Id zu einem Datum — gleiche Regel wie die DB-Funktion: von ≤ d ≤ bis
+  // (bis NULL = offen). Vor dem ersten Kapitel → erstes, nach dem letzten → letztes.
+  function kapitelFuerDatum(d){
+    const iso = _kapitelIso(d) || _kapitelHeuteIso()
+    const L = kapitelListe.length ? kapitelListe : KAPITEL_FALLBACK
+    for(const k of L){
+      if(iso >= String(k.von).slice(0, 10) && (!k.bis || iso <= String(k.bis).slice(0, 10))) return k.id
+    }
+    if(iso < String(L[0].von).slice(0, 10)) return L[0].id
+    return L[L.length - 1].id
+  }
+  function kapitelHeute(){ return kapitelFuerDatum(new Date()) }
+  function kapitelObj(id){ return (kapitelListe.length ? kapitelListe : KAPITEL_FALLBACK).find(k => k.id === Number(id)) || null }
+  function kapitelName(id){ return id === 'alle' ? 'Alle Kapitel' : (kapitelObj(id)?.name || ('Kapitel ' + id)) }
+  function kapitelFarbe(id){ return kapitelObj(id)?.farbe || 'var(--sub)' }
+  function kapitelKurz(k){ return k.kurz || (k.key === 'hedge' ? 'Hedge' : String(k.name || '').replace(/-Ära$/, '')) }
+  function kapitelDatumFmt(iso){
+    if(!iso) return ''
+    const [y, m, d] = String(iso).slice(0, 10).split('-')
+    return `${d}.${m}.${y}`
+  }
+  // Passt eine Zeile zum gewählten Kapitel? kapitelId aus der DB hat Vorrang,
+  // sonst zählt das Datum (Fallback: heute — frisch eingefügte Zeilen ohne Spalte).
+  function kapitelPasst(kapitelId, datumFallback){
+    if(kapitelAktiv === 'alle') return true
+    const id = (kapitelId != null) ? Number(kapitelId) : kapitelFuerDatum(datumFallback || new Date())
+    return id === kapitelAktiv
+  }
+
+  function kapitelRenderSeg(){
+    const seg = document.getElementById('kapitel-seg')
+    if(!seg) return
+    const L = kapitelListe.length ? kapitelListe : KAPITEL_FALLBACK
+    const btn = (id, farbe, lang, kurz, tip) =>
+      `<button type="button" data-kapitel="${escapeHtml(String(id))}" data-kurz="${escapeHtml(kurz)}" class="${String(id) === String(kapitelAktiv) ? 'active' : ''}"` +
+      ` style="--k-farbe:${escapeHtml(farbe)}" title="${escapeHtml(tip)}"><span class="k-lang">${escapeHtml(lang)}</span><span class="k-kurz">${escapeHtml(kurz)}</span></button>`
+    seg.innerHTML = L.map(k => btn(
+      k.id, k.farbe || 'var(--sub)', k.name, kapitelKurz(k),
+      `${kapitelDatumFmt(k.von)} – ${k.bis ? kapitelDatumFmt(k.bis) : 'offen'}${k.beschreibung ? ' · ' + k.beschreibung : ''}`
+    )).join('') + btn('alle', 'var(--sub)', 'Alle', 'Alle', 'Alle Kapitel zusammen')
+  }
+  // Umschalter anwenden: Zustand, Topbar, alle Renderer, Event für den Admin-Tab.
+  // speichern=false beim Nachziehen aus der Cloud (initialSyncFromSupabase),
+  // sonst würde der setItem-Hook den Cloud-Wert gleich wieder hochladen.
+  function kapitelAnwenden(idOderAlle, speichern){
+    const id = idOderAlle === 'alle' ? 'alle' : Number(idOderAlle)
+    kapitelAktiv = (id === 'alle' || kapitelObj(id)) ? id : kapitelHeute()
+    if(speichern){
+      try { localStorage.setItem(KAPITEL_LS, JSON.stringify({ id: kapitelAktiv })) } catch(_){}
+    }
+    kapitelRenderSeg()
+    if(typeof renderFinanzen === 'function') { try { renderFinanzen() } catch(e){ console.warn('[kapitel] renderFinanzen:', e) } }
+    else {
+      if(typeof renderFinRangeStats === 'function') { try { renderFinRangeStats() } catch(_){} }
+      if(typeof renderFinPending === 'function') { try { renderFinPending() } catch(_){} }
+    }
+    if(typeof renderTradePlans === 'function') { try { renderTradePlans() } catch(e){ console.warn('[kapitel] renderTradePlans:', e) } }
+    try { document.dispatchEvent(new CustomEvent('prophos:kapitel', { detail: { id: kapitelAktiv } })) } catch(_){}
+  }
+  function kapitelSetzen(idOderAlle){ kapitelAnwenden(idOderAlle, true) }
+  // Gespeicherten Wert lesen; ohne Wert gilt das Kapitel von heute (= 2).
+  function kapitelAusLS(){
+    try {
+      const v = JSON.parse(localStorage.getItem(KAPITEL_LS) || 'null')
+      if(v && (v.id === 'alle' || Number.isFinite(Number(v.id)))) return v.id === 'alle' ? 'alle' : Number(v.id)
+    } catch(_){}
+    return null
+  }
+  // Nach initialSyncFromSupabase (Cloud gewinnt) Umschalter + Renderer nachziehen
+  function kapitelNachSync(){
+    const v = kapitelAusLS()
+    kapitelAnwenden(v == null ? kapitelHeute() : v, false)
+  }
+  // Tabelle kapitel laden — beim Login. Fehler oder leer → Fallback bleibt stehen.
+  async function kapitelLaden(){
+    try {
+      const { data, error } = await supabase.from('kapitel').select('*').order('von', { ascending: true })
+      if(error) throw error
+      if(Array.isArray(data) && data.length){
+        kapitelListe = data.map(r => ({
+          id: Number(r.id), key: r.key, name: r.name, von: r.von, bis: r.bis || null,
+          hedge: !!r.hedge, farbe: r.farbe || '#64748B', beschreibung: r.beschreibung || ''
+        }))
+      }
+    } catch(e) {
+      console.warn('[kapitel] Tabelle nicht ladbar, Fallback bleibt:', e?.message || e)
+    }
+    // Zustand gegen die echte Liste prüfen (eine gespeicherte Id, die es nicht
+    // gibt, fällt auf heute zurück) — Umschalter und Sichten neu zeichnen
+    kapitelAnwenden(kapitelAktiv, false)
+  }
+  // Eigene Verdrahtung des Umschalters (kein Sammel-Handler)
+  ;(function kapitelWire(){
+    const seg = document.getElementById('kapitel-seg')
+    if(!seg) return
+    seg.addEventListener('click', ev => {
+      const b = ev.target.closest('button[data-kapitel]')
+      if(!b || !seg.contains(b)) return
+      kapitelSetzen(b.dataset.kapitel === 'alle' ? 'alle' : Number(b.dataset.kapitel))
+    })
+  })()
+  // Startzustand: gespeichert oder Kapitel von heute — nur Zustand + Topbar,
+  // die Sichten rendern beim Laden ihrer Daten ohnehin selbst
+  kapitelAktiv = (() => { const v = kapitelAusLS(); return v == null ? kapitelHeute() : (v === 'alle' || kapitelObj(v) ? v : kapitelHeute()) })()
+  kapitelRenderSeg()
+  // Schnittstelle für den Admin-Tab (zweiter Bauabschnitt, hängt sich hier ein)
+  window._kapitel = {
+    get liste(){ return kapitelListe.slice() },
+    get aktiv(){ return kapitelAktiv },
+    setzen: kapitelSetzen, passt: kapitelPasst, name: kapitelName, farbe: kapitelFarbe,
+    heute: kapitelHeute, fuerDatum: kapitelFuerDatum, obj: kapitelObj, kurz: kapitelKurz, datumFmt: kapitelDatumFmt,
+    render: kapitelRenderSeg, laden: kapitelLaden
+  }
+
   /* ========== FINANZEN ========== */
   let transactions = []
   let _activeFinTab = 'all'
@@ -33237,7 +33758,8 @@
       occurredAt: row.occurred_at,
       notes:      row.notes,
       autoGenerated: row.auto_generated,
-      createdAt:  row.created_at
+      createdAt:  row.created_at,
+      kapitelId:  row.kapitel_id ?? null   // Kapitel (24.09.2026), per DB-Trigger nach occurred_at
     }
   }
 
@@ -33253,7 +33775,8 @@
       liegtBei:   row.liegt_bei,
       requestedAt: row.requested_at,
       notes:      row.notes,
-      status:     row.status
+      status:     row.status,
+      kapitelId:  row.kapitel_id ?? null   // Kapitel (24.09.2026) — Fallback requested_at, falls die Spalte fehlt
     }
   }
 
@@ -33488,7 +34011,8 @@
       if(to && d > to) return false
       return true
     }
-    const list  = (transactions || []).filter(inRange)
+    // Kapitel (24.09.2026): nur Buchungen des gewählten Kapitels
+    const list  = (transactions || []).filter(t => kapitelPasst(t.kapitelId, t.occurredAt)).filter(inRange)
     const costsList = list.filter(t => t.kind === 'account_purchase')
     const liveList  = list.filter(t => t.kind === 'live_pnl')
     const costs = costsList.reduce((s,t) => s + t.amount, 0)
@@ -33540,18 +34064,20 @@
   function renderFinPending(){
     const panel = document.getElementById('fin-pending-panel')
     if(!panel) return
-    if(!finPending.length){ panel.hidden = true; return }
+    // Kapitel (24.09.2026): offene Anfragen des gewählten Kapitels, Datum = requested_at
+    const pend = finPending.filter(p => kapitelPasst(p.kapitelId, p.requestedAt))
+    if(!pend.length){ panel.hidden = true; return }
     panel.hidden = false
 
     const fmtEur = n => '€' + Number(n).toLocaleString('de-DE', { minimumFractionDigits:2, maximumFractionDigits:2 })
-    const sum = finPending.reduce((s,p) => s + Number(p.amount || 0), 0)
+    const sum = pend.reduce((s,p) => s + Number(p.amount || 0), 0)
     document.getElementById('fin-pending-sum').textContent = fmtEur(sum)
     document.getElementById('fin-pending-count').textContent =
-      finPending.length + (finPending.length === 1 ? ' Payout offen' : ' Payouts offen')
+      pend.length + (pend.length === 1 ? ' Payout offen' : ' Payouts offen')
 
     // „Wo liegt Geld" — Gruppierung nach liegt_bei, größter Batzen zuerst
     const byWhere = new Map()
-    for(const p of finPending){
+    for(const p of pend){
       const k = (p.liegtBei || '').trim() || 'Unbekannt'
       byWhere.set(k, (byWhere.get(k) || 0) + Number(p.amount || 0))
     }
@@ -33561,7 +34087,7 @@
       .join('')
 
     const rows = document.getElementById('fin-pending-rows')
-    rows.innerHTML = finPending.map(p => {
+    rows.innerHTML = pend.map(p => {
       const d = new Date(p.requestedAt)
       const days = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
       const dateStr = d.toLocaleDateString('de-DE', { day:'2-digit', month:'short' })
@@ -33753,9 +34279,23 @@
     const empty = document.getElementById('finEmpty')
     if(!tbody) return
 
+    // Kapitel (24.09.2026): Kacheln, Tab-Zähler und Liste rechnen nur mit den
+    // Buchungen des gewählten Kapitels — „Alle" zeigt wieder alles.
+    const txK = transactions.filter(t => kapitelPasst(t.kapitelId, t.occurredAt))
+    const kzeile = document.getElementById('fin-kapitel-zeile')
+    if(kzeile){
+      if(kapitelAktiv === 'alle'){
+        kzeile.innerHTML = '<span class="dot" style="background:var(--sub)"></span>Alle Kapitel'
+      } else {
+        const k = kapitelObj(kapitelAktiv)
+        const zeit = k ? (k.bis ? `bis ${kapitelDatumFmt(k.bis)}` : `seit ${kapitelDatumFmt(k.von)}`) : ''
+        kzeile.innerHTML = `<span class="dot" style="background:${escapeHtml(kapitelFarbe(kapitelAktiv))}"></span>Kapitel: ${escapeHtml(kapitelName(kapitelAktiv))}${zeit ? ' · ' + zeit : ''}`
+      }
+    }
+
     // KPIs (YTD)
     const yearStart = new Date(new Date().getFullYear(), 0, 1)
-    const ytd = transactions.filter(t => new Date(t.occurredAt) >= yearStart)
+    const ytd = txK.filter(t => new Date(t.occurredAt) >= yearStart)
     const sumByKind = (k) => ytd.filter(t => t.kind === k).reduce((s,t) => s + t.amount, 0)
     const sumPayouts   = sumByKind('payout')
     const sumLivePnl   = sumByKind('live_pnl')
@@ -33779,14 +34319,14 @@
     if(elLivepl) elLivepl.style.color = sumLivePnl >= 0 ? 'var(--good)' : 'var(--danger)'
 
     // Sub-Tab Counts
-    document.getElementById('fintab-count-all').textContent              = String(transactions.length)
-    document.getElementById('fintab-count-payout').textContent           = String(transactions.filter(t => t.kind === 'payout').length)
-    document.getElementById('fintab-count-live_pnl').textContent         = String(transactions.filter(t => t.kind === 'live_pnl').length)
-    document.getElementById('fintab-count-account_purchase').textContent = String(transactions.filter(t => t.kind === 'account_purchase').length)
-    document.getElementById('fintab-count-manual').textContent           = String(transactions.filter(t => t.kind === 'manual').length)
+    document.getElementById('fintab-count-all').textContent              = String(txK.length)
+    document.getElementById('fintab-count-payout').textContent           = String(txK.filter(t => t.kind === 'payout').length)
+    document.getElementById('fintab-count-live_pnl').textContent         = String(txK.filter(t => t.kind === 'live_pnl').length)
+    document.getElementById('fintab-count-account_purchase').textContent = String(txK.filter(t => t.kind === 'account_purchase').length)
+    document.getElementById('fintab-count-manual').textContent           = String(txK.filter(t => t.kind === 'manual').length)
 
     // Liste
-    const filtered = _activeFinTab === 'all' ? transactions : transactions.filter(t => t.kind === _activeFinTab)
+    const filtered = _activeFinTab === 'all' ? txK : txK.filter(t => t.kind === _activeFinTab)
     if(!filtered.length){
       tbody.innerHTML = ''
       empty.style.display = 'block'
@@ -34366,6 +34906,7 @@
       loadAccountsFromSupabase()
       loadTradePlansFromSupabase()
       loadTransactionsFromSupabase()
+      if(typeof kapitelLaden === 'function') kapitelLaden()   // Tabelle kapitel (24.09.2026)
       if(typeof loadManagedFromSupabase === 'function') loadManagedFromSupabase()
       if(typeof loadFirmSpecsFromSupabase === 'function') loadFirmSpecsFromSupabase()
       if(typeof loadNotesFromSupabase === 'function') loadNotesFromSupabase()
@@ -34445,7 +34986,8 @@
     'prophos_mirror_pairs',
     'prophos_account_archive',
     'prophos_account_parents',
-    'prophos_custom_firms'
+    'prophos_custom_firms',
+    'prophos_kapitel'   // gewähltes Kapitel {id} — gleich auf Mac, PC und Handy (24.09.2026)
   ]
   // prophos_mt5_links gehört bewusst NICHT hierher: die MT5-Links leben als
   // echte Tabelle mt5_links (Finns Vorgabe 14.08.2026), localStorage ist dort
@@ -34457,7 +34999,8 @@
     'prophos_mirror_pairs':    'mirror_pairs',
     'prophos_account_archive': 'archive',
     'prophos_account_parents': 'parents',
-    'prophos_custom_firms':    'custom_firms'
+    'prophos_custom_firms':    'custom_firms',
+    'prophos_kapitel':         'kapitel'
   }
 
   // Verhindert Endlosschleifen wenn unser eigener Save den Storage-Event triggert
@@ -34575,6 +35118,8 @@
       if(typeof mergeCustomFirmsIntoPresets === 'function') mergeCustomFirmsIntoPresets()
       if(typeof renderCustomFirmsList === 'function') renderCustomFirmsList()
       if(typeof dupRender === 'function') dupRender()
+      // Kapitel-Umschalter nachziehen — Cloud-Wert gewinnt (24.09.2026)
+      if(typeof kapitelNachSync === 'function') kapitelNachSync()
       // MT5-Links kommen aus der eigenen Tabelle mt5_links, nicht aus user_settings —
       // aber über denselben Einstieg, damit Login/Wechsel/Boot identisch laufen.
       if(typeof mt5LoadLinks === 'function') mt5LoadLinks().catch(e => console.warn('[mt5links] init:', e))

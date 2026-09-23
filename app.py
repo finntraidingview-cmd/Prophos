@@ -4281,21 +4281,17 @@ def _sb_all(table, params):
             return out
 
 
-def admin_build_overview():
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm"})
+def _admin_basis():
+    """Gemeinsame Grundlage von /admin/overview und /admin/kapitel (24.09.2026,
+    Kapitel-Vergleich): Accounts, Archiv + Vorgänger-Ketten, FX, Personen-Namen
+    und die ausgeblendeten Personen. Wortgleich aus admin_build_overview
+    herausgezogen, damit die Kapitel-Auswertung exakt dieselben Mengen sieht
+    und nie eine zweite Regel entsteht. Wirft RuntimeError, wenn Ausblenden
+    nicht möglich ist (Auth-API weg) — wie die Übersicht vorher auch."""
+    # kapitel_id seit 24.09.2026 mit (per Trigger nach created_at gesetzt, backfilled).
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
-    # completed_at seit 23.09.2026 mit: der Personen-Verlauf (unten) braucht
-    # das Datum jedes Hedge-Verlusts, die Summen-Aggregation braucht es nicht.
-    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl,completed_at",
-                                        "status": "eq.completed"})
-    # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
-    # Finn: „man soll auch sehen, wo die ganzen Payouts ankamen"): dieselben
-    # Zeilen speisen jetzt zusätzlich die Empfangs-Liste im Finanzen-Tab
-    # (Person, Datum, Account, Notiz) — ein zweiter Fetch wäre doppelt.
-    txs       = _sb_all("transactions", {"select": "account_id,user_id,account_name,"
-                                                   "account_firm,amount,currency,occurred_at,notes",
-                                         "kind": "eq.payout"})
 
     # Archiv-Status liegt in user_settings (aus dem localStorage gesynct) und ist
     # zwischen Profilen historisch vermischt — unkritisch, weil Account-IDs global
@@ -4332,38 +4328,6 @@ def admin_build_overview():
     by_id = {str(a["id"]): a for a in accounts}
     live_ids = {str(a["id"]) for a in accounts if (a.get("account_type") or "") == "live"}
 
-    # Hedge-Kosten je Master-Account: nur abgeschlossene Trades auf einen LIVE-Slave.
-    # Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −. USD→EUR wie im Frontend.
-    hedge = {}
-    hedge_ev = []      # Verlauf (23.09.2026): (master_id, datum, kosten_eur) je Trade
-    for p in plans:
-        if p.get("slave_pl") is None:
-            continue
-        if str(p.get("slave_account_id")) not in live_ids:
-            continue
-        m = str(p.get("master_account_id"))
-        sl = by_id.get(str(p.get("slave_account_id"))) or {}
-        try: pl = float(p["slave_pl"])
-        except (TypeError, ValueError): continue
-        cur = _firm_norm(sl.get("firm"))
-        pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
-        hedge[m] = hedge.get(m, 0.0) + (-pl_eur)
-        hedge_ev.append((m, str(p.get("completed_at") or "")[:10], -pl_eur))
-
-    payouts = {}
-    for t in txs:
-        a = str(t.get("account_id") or "")
-        if not a: continue
-        try: payouts[a] = payouts.get(a, 0.0) + float(t.get("amount") or 0)
-        except (TypeError, ValueError): pass
-    # Anzahl Payouts je Account (17.09.2026, FundedNext-Refund beim ERSTEN
-    # Payout): erhaltene Buchungen + offene Anfragen (unten) — beides
-    # „verbraucht" den ersten Payout, der Refund zählt dann nicht mehr.
-    payout_n = {}
-    for t in txs:
-        a = str(t.get("account_id") or "")
-        if a: payout_n[a] = payout_n.get(a, 0) + 1
-
     # Personen-Labels über die Auth-Admin-API. `names` (E-Mail) bleibt die
     # Wahrheit für die Ausschluss-Liste; für die ANZEIGE zählt seit 28.08.2026
     # zusätzlich der Name aus den user_metadata ("Pascal", "Moritz", …) — vorher
@@ -4399,10 +4363,117 @@ def admin_build_overview():
                 excluded_ids.add(str(uid))
                 excluded_names.append(mail)
 
+    return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "fx": fx,
+            "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
+            "excluded_ids": excluded_ids, "excluded_names": excluded_names}
+
+
+def _admin_hedge_ev(p, by_id, live_ids, fx):
+    """Hedge-Kosten EINES abgeschlossenen Plans in EUR — die eine Formel für
+    Übersicht und Kapitel (24.09.2026). Nur Trades auf einen LIVE-Slave;
+    Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −; Fusion rechnet in €,
+    sonst USD→EUR mit fx. → (master_id, datum, kosten_eur) oder None."""
+    if p.get("slave_pl") is None:
+        return None
+    if str(p.get("slave_account_id")) not in live_ids:
+        return None
+    sl = by_id.get(str(p.get("slave_account_id"))) or {}
+    try: pl = float(p["slave_pl"])
+    except (TypeError, ValueError): return None
+    cur = _firm_norm(sl.get("firm"))
+    pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
+    return str(p.get("master_account_id")), str(p.get("completed_at") or "")[:10], -pl_eur
+
+
+def _kapitel_liste():
+    """Alle Kapitel (Tabelle kapitel, 24.09.2026) nach Beginn sortiert. Fehlt
+    die Tabelle noch oder klemmt der Read → leere Liste, aber hörbar."""
+    try:
+        return _sb_all("kapitel", {"select": "id,key,name,von,bis,hedge,farbe,beschreibung",
+                                   "order": "von.asc"})
+    except Exception as e:
+        print(f"[admin] ⚠️ kapitel: {type(e).__name__}: {e}", flush=True)
+        return []
+
+
+def _kapitel_int(v):
+    """kapitel_id aus der DB als int (smallint kommt als int, null → None)."""
+    try:
+        return int(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _kapitel_param():
+    """Query-Param ?kapitel= der Admin-Routen: fehlt oder „alle" → None (ungefiltert,
+    wie vor 24.09.2026); sonst die smallint-ID. Unlesbar → ValueError."""
+    v = (request.args.get("kapitel") or "").strip().lower()
+    if not v or v == "alle":
+        return None
+    return int(v)
+
+
+def admin_build_overview(kapitel_id=None):
+    # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
+    # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
+    # Daten … und dass man auch in Prophos in so einem neuen Chapter alles da
+    # sieht"). Kapitel 1 = Hedge-Ära (bis 23.09.2026), Kapitel 2 = Ohne Hedge.
+    # Gefiltert wird ausschließlich über die SPALTE kapitel_id (Trigger setzt
+    # sie nach Datum, backfilled, nie null) — sie ist die eine Wahrheit, nicht
+    # created_at/completed_at/occurred_at. kapitel_id=None → alles wie bisher.
+    b = _admin_basis()
+    accounts, archived, preds_of, fx = b["accounts"], b["archived"], b["preds_of"], b["fx"]
+    by_id, live_ids, names, disp = b["by_id"], b["live_ids"], b["names"], b["disp"]
+    excluded_ids, excluded_names = b["excluded_ids"], b["excluded_names"]
+    kf = {} if kapitel_id is None else {"kapitel_id": f"eq.{int(kapitel_id)}"}
+    # completed_at seit 23.09.2026 mit: der Personen-Verlauf (unten) braucht
+    # das Datum jedes Hedge-Verlusts, die Summen-Aggregation braucht es nicht.
+    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl,completed_at",
+                                        "status": "eq.completed", **kf})
+    # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
+    # Finn: „man soll auch sehen, wo die ganzen Payouts ankamen"): dieselben
+    # Zeilen speisen jetzt zusätzlich die Empfangs-Liste im Finanzen-Tab
+    # (Person, Datum, Account, Notiz) — ein zweiter Fetch wäre doppelt.
+    txs       = _sb_all("transactions", {"select": "account_id,user_id,account_name,"
+                                                   "account_firm,amount,currency,occurred_at,notes",
+                                         "kind": "eq.payout", **kf})
+    # Accounts bleiben UNGEFILTERT (die Ketten brauchen die Vorgänger), aber
+    # Kaufkosten zählen nur für Konten, die im gewählten Kapitel liegen.
+    kauf_zaehlt = {str(a["id"]) for a in accounts
+                   if kapitel_id is None or _kapitel_int(a.get("kapitel_id")) == int(kapitel_id)}
+
+    # Hedge-Kosten je Master-Account: nur abgeschlossene Trades auf einen LIVE-Slave.
+    # Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −. USD→EUR wie im Frontend.
+    hedge = {}
+    hedge_ev = []      # Verlauf (23.09.2026): (master_id, datum, kosten_eur) je Trade
+    for p in plans:
+        ev = _admin_hedge_ev(p, by_id, live_ids, fx)
+        if ev is None:
+            continue
+        m, datum, eur = ev
+        hedge[m] = hedge.get(m, 0.0) + eur
+        hedge_ev.append(ev)
+
+    payouts = {}
+    for t in txs:
+        a = str(t.get("account_id") or "")
+        if not a: continue
+        try: payouts[a] = payouts.get(a, 0.0) + float(t.get("amount") or 0)
+        except (TypeError, ValueError): pass
+    # Anzahl Payouts je Account (17.09.2026, FundedNext-Refund beim ERSTEN
+    # Payout): erhaltene Buchungen + offene Anfragen (unten) — beides
+    # „verbraucht" den ersten Payout, der Refund zählt dann nicht mehr.
+    payout_n = {}
+    for t in txs:
+        a = str(t.get("account_id") or "")
+        if a: payout_n[a] = payout_n.get(a, 0) + 1
+
     def own(aid, a=None):
-        """Eigene Zahlen EINES Accounts (ohne Kette), in EUR."""
+        """Eigene Zahlen EINES Accounts (ohne Kette), in EUR. Kauf nur, wenn
+        der Account im gewählten Kapitel liegt (24.09.2026) — Hedge/Payouts
+        sind über die gefilterten Reads oben schon begrenzt."""
         a = a if a is not None else by_id.get(aid) or {}
-        try: buy = float(a.get("purchase_cost") or 0)
+        try: buy = float(a.get("purchase_cost") or 0) if aid in kauf_zaehlt else 0.0
         except (TypeError, ValueError): buy = 0.0
         return buy, hedge.get(aid, 0.0), payouts.get(aid, 0.0)
 
@@ -4472,6 +4543,8 @@ def admin_build_overview():
             "person": disp.get(uid) or names.get(uid, uid[:8]),
             "person_mail": names.get(uid, ""),
             "archived": aid in archived,
+            # Kapitel des Accounts (24.09.2026) — das Frontend färbt/filtert damit.
+            "kapitel_id": _kapitel_int(a.get("kapitel_id")),
             # Winning-Day-Farmer (23.09.2026): nur angehakte Fundeds werden gefarmt (sql/2026-09-23_accounts_wd_farm.sql)
             "wd_farm": bool(a.get("wd_farm")),
             # created_at = Kaufzeitpunkt-Näherung (28.08.2026, „Letzte Käufe" im
@@ -4503,6 +4576,8 @@ def admin_build_overview():
         aid = str(a["id"]); uid = str(a.get("user_id"))
         if (a.get("account_type") or "") == "live" or uid in excluded_ids:
             continue
+        if aid not in kauf_zaehlt:
+            continue                                   # Kauf gehört in ein anderes Kapitel (24.09.2026)
         try: buy = float(a.get("purchase_cost") or 0)
         except (TypeError, ValueError): buy = 0.0
         datum = str(a.get("created_at") or "")[:10]
@@ -4816,29 +4891,156 @@ def admin_build_overview():
             "trades_heute": trades_heute,
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
-            "excluded_uids": sorted(excluded_ids)}
+            "excluded_uids": sorted(excluded_ids),
+            # Kapitel (24.09.2026): aktiver Filter + alle Kapitel für den Umschalter.
+            "kapitel": {"aktiv": (int(kapitel_id) if kapitel_id is not None else None),
+                        "liste": _kapitel_liste()}}
 
 
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])
 def admin_overview():
     if request.method == "OPTIONS":
         return "", 200
-    if not SUPABASE_SERVICE_KEY:
-        return jsonify({"error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503
-    token = (request.headers.get("sb-token") or "").strip()
-    if not token:
-        return jsonify({"error": "Nicht angemeldet"}), 401
+    # Auth seit 24.09.2026 über _wd_login (Service-Key + sb-token + /auth/v1/user
+    # — exakt die Prüfung, die hier vorher inline stand; nur eingeloggt, kein Admin).
+    _uid, err = _wd_login()
+    if err:
+        return err
     try:
-        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
-                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
-        if r.status_code != 200 or not (r.json() or {}).get("id"):
-            return jsonify({"error": "Nicht angemeldet"}), 401
-    except Exception:
-        return jsonify({"error": "Anmeldung nicht prüfbar"}), 502
+        kapitel_id = _kapitel_param()
+    except ValueError:
+        return jsonify({"error": "kapitel muss eine Zahl oder 'alle' sein"}), 400
     try:
-        return jsonify(admin_build_overview())
+        return jsonify(admin_build_overview(kapitel_id))
     except Exception as e:
         print(f"[admin] ⚠️ overview: {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def admin_build_kapitel():
+    """Kapitel-Vergleich für den Admin-Tab (24.09.2026, Finn: „dass wir das
+    Ganze zeitlich trennen können mit den vorherigen Daten"): je Kapitel die
+    Summen, die auch die Übersicht kennt, plus Monatssäulen für ein Chart.
+    Zuordnung ausschließlich über die Spalte kapitel_id (accounts, trade_plans,
+    transactions). Dieselben Helfer wie die Übersicht: _admin_basis (Accounts,
+    Archiv, FX, Ausgeblendete), _admin_hedge_ev (Hedge-Formel). Reine Anzeige."""
+    b = _admin_basis()
+    accounts, archived, fx = b["accounts"], b["archived"], b["fx"]
+    by_id, live_ids, excluded_ids = b["by_id"], b["live_ids"], b["excluded_ids"]
+    liste = _kapitel_liste()
+    # master_pl/blown/user_id zusätzlich zur Übersicht: Trade-Zähler + Prop-P&L je Kapitel.
+    plans = _sb_all("trade_plans", {"select": "user_id,master_account_id,slave_account_id,"
+                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge",
+                                    "status": "eq.completed"})
+    # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
+    # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
+    txs = _sb_all("transactions", {"select": "user_id,account_id,kind,amount,occurred_at,kapitel_id",
+                                   "kind": "in.(payout,live_pnl)"})
+
+    def _f(v):
+        try: return float(v)
+        except (TypeError, ValueError): return None
+
+    def _uid_of_plan(p):
+        acc = by_id.get(str(p.get("master_account_id") or "")) or {}
+        return str(acc.get("user_id") or p.get("user_id") or "")
+
+    out = []
+    for k in liste:
+        kid = _kapitel_int(k.get("id"))
+        if kid is None:
+            continue
+        kauf = hedge = payouts = master_pl = live_pnl = 0.0
+        konten = konten_aktiv = payout_n = trades = blown = trades_ohne_hedge = 0
+        tage = []
+        monate = {}
+        def _monat(datum, art, eur):
+            if not datum:
+                return
+            tage.append(datum)
+            m = monate.setdefault(datum[:7], {"monat": datum[:7], "kauf": 0.0, "hedge": 0.0, "payouts": 0.0})
+            m[art] += eur
+        # Konten + Kauf: nur Prop-Konten (kein Live-Broker), keine ausgeblendeten Personen.
+        for a in accounts:
+            if _kapitel_int(a.get("kapitel_id")) != kid:
+                continue
+            if (a.get("account_type") or "") == "live" or str(a.get("user_id")) in excluded_ids:
+                continue
+            aid = str(a["id"])
+            konten += 1
+            if aid not in archived:
+                konten_aktiv += 1
+            buy = _f(a.get("purchase_cost")) or 0.0
+            kauf += buy
+            if buy:
+                _monat(str(a.get("created_at") or "")[:10], "kauf", buy)
+        # Trades: Zähler über alle abgeschlossenen Pläne des Kapitels, Hedge nur
+        # auf Live-Slaves (Formel wie Übersicht), Master-P&L roh in USD.
+        for p in plans:
+            if _kapitel_int(p.get("kapitel_id")) != kid:
+                continue
+            if _uid_of_plan(p) in excluded_ids:
+                continue
+            trades += 1
+            if p.get("blown"):
+                blown += 1
+            # ohne_hedge = generierte Spalte (route in mt5v2/tvv2), 24.09.2026, Finn:
+            # „alle Trades über Echo V2 / Orbit V2 sind ab jetzt ohne Gegenhedge".
+            if p.get("ohne_hedge"):
+                trades_ohne_hedge += 1
+            mpl = _f(p.get("master_pl"))
+            if mpl is not None:
+                master_pl += mpl
+            ev = _admin_hedge_ev(p, by_id, live_ids, fx)
+            if ev is not None:
+                _m, datum, eur = ev
+                hedge += eur
+                _monat(datum, "hedge", eur)
+        for t in txs:
+            if _kapitel_int(t.get("kapitel_id")) != kid:
+                continue
+            if str(t.get("user_id") or "") in excluded_ids:
+                continue
+            amt = _f(t.get("amount"))
+            if amt is None:
+                continue
+            if t.get("kind") == "payout":
+                payouts += amt
+                payout_n += 1
+                _monat(str(t.get("occurred_at") or "")[:10], "payouts", amt)
+            elif t.get("kind") == "live_pnl":
+                live_pnl += amt
+        out.append({
+            "id": kid, "key": k.get("key") or "", "name": k.get("name") or "",
+            "von": k.get("von") or "", "bis": k.get("bis"),
+            "hedge_aktiv": bool(k.get("hedge")),
+            "farbe": k.get("farbe") or "", "beschreibung": k.get("beschreibung") or "",
+            "konten": konten, "konten_aktiv": konten_aktiv,
+            "kauf": round(kauf, 2), "hedge": round(hedge, 2),
+            "payouts": round(payouts, 2), "payout_n": payout_n,
+            "trades": trades, "blown": blown, "trades_ohne_hedge": trades_ohne_hedge,
+            "master_pl": round(master_pl, 2), "live_pnl": round(live_pnl, 2),
+            "netto": round(payouts - kauf - hedge, 2),
+            "erster_tag": min(tage) if tage else None,
+            "letzter_tag": max(tage) if tage else None,
+            "monate": [{k2: (round(v, 2) if isinstance(v, float) else v) for k2, v in m.items()}
+                       for _mk, m in sorted(monate.items())],
+        })
+    return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso()}
+
+
+@app.route("/admin/kapitel", methods=["GET", "OPTIONS"])
+def admin_kapitel():
+    """Kapitel-Vergleich (24.09.2026) — Auth wie /admin/overview: eingeloggt reicht."""
+    if request.method == "OPTIONS":
+        return "", 200
+    _uid, err = _wd_login()
+    if err:
+        return err
+    try:
+        return jsonify(admin_build_kapitel())
+    except Exception as e:
+        print(f"[admin] ⚠️ kapitel: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -5703,6 +5905,7 @@ def admin_wd_plaene():
                     uebersprungen.append({"master_account_id": mid, "grund": blockiert}); continue
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
+                # kapitel_id bewusst nicht gesetzt (24.09.2026): der DB-Trigger ordnet den Plan nach Datum dem Kapitel zu.
                 angelegt.append(sb_insert("trade_plans", body))
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
