@@ -2740,6 +2740,33 @@ def tv_uia_inventar(roh, max_n=90):
     return out
 
 
+TV_RX_LOGIN_LABELS = re.compile(r"^(benutzername|kennwort|passwort|anmelden|username|password|log ?in|sign ?in|"
+                                r"don'?t remember me|remember me|angemeldet bleiben|forgot|vergessen|tradovate|"
+                                r"connect|demo|live|schliessen|close|cancel|abbrechen|ok)\b", re.I)
+
+
+def tv_seite_texte(roh, max_n=6):
+    """Was steht auf der Seite? (23.09.2026, Moritz-PC: 'Login geklickt, aber das
+    Tradovate-Fenster ist noch offen — steht dort eine Fehlermeldung?' — die Frage
+    beantwortet der Bot jetzt selbst.) Kurze, lesbare Saetze ohne die bekannten
+    Feld-/Knopf-Beschriftungen; Fehler- und Rueckfragetexte kommen so in die Meldung."""
+    out, gesehen = [], set()
+    for name, r, typ in roh or ():
+        t = " ".join(str(name or "").split())
+        if not (8 <= len(t) <= 160) or not re.search(r"[A-Za-zÄÖÜäöü]{3}", t):
+            continue
+        if TV_RX_LOGIN_LABELS.search(t) and len(t) <= 24:
+            continue
+        k = t.lower()
+        if k in gesehen:
+            continue
+        gesehen.add(k)
+        out.append(t)
+        if len(out) >= max_n:
+            break
+    return " | ".join(f"'{x}'" for x in out)
+
+
 def tv_version_min(version, minimum):
     """'0.4.2' >= '0.4.2'? Unlesbare Version = False (dann lieber zum Update raten)."""
     def teile(v):
@@ -3734,9 +3761,17 @@ def modus_tvkonto(cmd):
                 _warte(0.25, 0.15)
                 noch_da = any(h == tw_handle and TV_RX_TRADOVATE_TITEL.search(t) for h, t, _x in _tv_browser_fenster())
             if noch_da:
-                inventar["tradovate_nach_login"] = tv_uia_inventar(_tv_uia_roh(tw))
-                return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — steht dort eine "
-                          "Fehlermeldung oder eine Rueckfrage?", "login")
+                roh_n = _tv_uia_roh(tw)
+                inventar["tradovate_nach_login"] = tv_uia_inventar(roh_n)
+                # Was auf der Seite steht, gehoert in die Meldung (23.09.2026, Moritz-PC,
+                # Remote-Lauf: die Frage 'steht dort eine Fehlermeldung?' konnte vom Mac
+                # aus niemand beantworten — Dump lag nur auf dem PC). Typische Faelle:
+                # Tradovate verlangt bei einem NEUEN Geraet einen Bestaetigungscode per
+                # E-Mail, meldet falsche Zugangsdaten oder eine bestehende Sitzung.
+                seite = tv_seite_texte(roh_n)
+                return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — "
+                          + (f"dort steht: {seite}" if seite
+                             else "steht dort eine Fehlermeldung oder eine Rueckfrage?"), "login")
             trail.append("angemeldet, Tradovate-Fenster zu")
 
             # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der

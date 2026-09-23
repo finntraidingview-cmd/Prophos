@@ -25782,7 +25782,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.426'
+  const OS_TAB_BUILD = '2026-09-22.427'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -25977,8 +25977,12 @@
       if(foot) foot.style.display = 'flex'
     }
     const fehler = async (text, r) => {
+      // Diagnose mitschicken (23.09.2026, Moritz-PC: der Dump lag nur auf dem PC, vom Mac
+      // aus war 'steht dort eine Fehlermeldung?' nicht zu beantworten) — per SQL lesbar.
       if(fern) return fern.melde({ ok:false, unklar: !!(r && r.retry_ok === false) || /^⚠ Ergebnis UNKLAR/.test(text),
-                                   msg: text, trail: (r && r.trail) || null })
+                                   msg: text, trail: (r && r.trail) || null,
+                                   zustand: (r && r.zustand) || null, schritt: (r && r.schritt) || null,
+                                   diagnose: (r && r.diagnose) || null })
       if(imPopup){
         _pfSet('ob-order', 'err', escapeHtml(text))
         pfEnde(false, /UNKLAR/.test(text) ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, NICHT blind erneut starten.' : '✗ Nichts platziert — Meldung oben.')
