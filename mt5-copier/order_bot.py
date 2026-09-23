@@ -3734,32 +3734,77 @@ def modus_tvkonto(cmd):
                           "Passwort NICHT nachweislich drin — es wird nicht auf Login geklickt. Ist "
                           "dieser Login in Chromes Passwortmanager fuer tradovate.com gespeichert?", "login")
             trail.append("Username + gefuelltes Passwort bewiesen")
+            # Login-Klick mit NACHWEIS und zwei Rueckfaellen (23.09.2026 04:2x, Moritz-PC,
+            # Finn: "der Knopf wird beim Drueberfahren ein anderes Blau, die Maus ist drauf,
+            # aber es geht nicht los — irgendwas packt es"). Der atomare SendInput-Klick
+            # (Bewegen+Druecken+Loslassen in einem Batch) erreicht den Knopf als Hover,
+            # aber die Seite wertet ihn nicht als Klick — vermutlich schluckt Chromes noch
+            # offene Autofill-Liste das Druecken. Auf Finns PC ging derselbe Klick durch.
+            # Deshalb: Klick -> 4 s auf das Verschwinden des Fensters warten -> sonst Enter
+            # (der Klick hat dem Knopf den Tastaturfokus gegeben) -> sonst Esc (Autofill-
+            # Liste zu), ins Passwortfeld und Enter (Formular abschicken). Jeder Schritt
+            # steht in der Spur; jeder wird nur gefahren, solange das Fenster wirklich noch da ist.
+            def tradovate_noch_da():
+                return any(h == tw_handle and TV_RX_TRADOVATE_TITEL.search(t) for h, t, _x in _tv_browser_fenster())
+
+            def warte_weg(sek):
+                ende_w = time.time() + sek
+                while time.time() < ende_w:
+                    _warte(0.25, 0.15)
+                    if not tradovate_noch_da():
+                        return True
+                return False
+
+            def taste(k):
+                try:
+                    from pywinauto import keyboard
+                    keyboard.send_keys(k)
+                    return True
+                except Exception:
+                    return False
+
             el, n = warte_auf(TV_NAMEN_LOGIN, TV_RX_LOGIN, 6.0, "login_knopf", quelle=tw)
+            weg = False
             if el:
                 ok, f = _tv_uia_klick(el, "Login", trail)
                 if not ok:
                     return ab(f, "login")
-            else:
-                # Knopf nicht eindeutig -> Enter im Passwortfeld schickt das Formular
-                # ab. Erlaubt, weil Username + gefuelltes Passwort oben BEWIESEN sind.
+                weg = warte_weg(4.0)
+                if not weg and tradovate_noch_da():
+                    trail.append("Login-Klick ohne Wirkung (Fenster unveraendert) -> Enter auf dem Knopf")
+                    taste("{ENTER}")
+                    weg = warte_weg(4.0)
+            if not weg and tradovate_noch_da():
+                # Enter im Passwortfeld schickt das Formular ab. Erlaubt, weil Username +
+                # gefuelltes Passwort oben BEWIESEN sind. Erst Esc: eine offene Autofill-Liste
+                # wuerde das Enter sonst als Auswahl verstehen statt als Abschicken.
                 _u5, p5 = felder()
                 try:
                     r = p5.rectangle()
-                    _tv_uia_klick({"punkt": (r.left + 40, (r.top + r.bottom) // 2)}, "Passwortfeld", trail)
+                    taste("{ESC}")
+                    _warte(0.2, 0.15)
+                    _tv_uia_klick({"punkt": (r.right - 30, (r.top + r.bottom) // 2)}, "Passwortfeld", trail)
                     _warte(0.3, 0.2)
-                    from pywinauto import keyboard
-                    keyboard.send_keys("{ENTER}")
-                    trail.append(f"'Anmelden' nicht eindeutig ({n}) -> Enter im Passwortfeld")
+                    taste("{ESC}")
+                    _warte(0.15, 0.1)
+                    if not bewiesen():
+                        return ab("Nach dem Esc sind Username/Passwort nicht mehr nachweislich gefuellt — "
+                                  "es wird nicht abgeschickt.", "login")
+                    taste("{ENTER}")
+                    trail.append(("Login-Knopf" if el else f"'Anmelden' nicht eindeutig ({n})")
+                                 + " -> Esc + Enter im Passwortfeld")
                 except Exception:
-                    return ab(f"Der Knopf 'Anmelden' im Tradovate-Fenster wurde nicht eindeutig gefunden "
-                              f"({n} Treffer)." + spur[0], "login")
+                    if not el:
+                        return ab(f"Der Knopf 'Anmelden' im Tradovate-Fenster wurde nicht eindeutig gefunden "
+                                  f"({n} Treffer)." + spur[0], "login")
+                    trail.append("Passwortfeld fuer den Rueckfall nicht erreichbar")
 
             # Das Fenster muss verschwinden (bzw. der Tab den Titel verlieren).
             ende_z = time.time() + 35.0
-            noch_da = True
+            noch_da = not weg
             while time.time() < ende_z and noch_da:
                 _warte(0.25, 0.15)
-                noch_da = any(h == tw_handle and TV_RX_TRADOVATE_TITEL.search(t) for h, t, _x in _tv_browser_fenster())
+                noch_da = tradovate_noch_da()
             if noch_da:
                 roh_n = _tv_uia_roh(tw)
                 inventar["tradovate_nach_login"] = tv_uia_inventar(roh_n)
@@ -3769,9 +3814,9 @@ def modus_tvkonto(cmd):
                 # Tradovate verlangt bei einem NEUEN Geraet einen Bestaetigungscode per
                 # E-Mail, meldet falsche Zugangsdaten oder eine bestehende Sitzung.
                 seite = tv_seite_texte(roh_n)
-                return ab("Login geklickt, aber das Tradovate-Fenster ist noch offen — "
-                          + (f"dort steht: {seite}" if seite
-                             else "steht dort eine Fehlermeldung oder eine Rueckfrage?"), "login")
+                return ab("Login geklickt (Klick, Enter, Enter im Passwortfeld), aber das Tradovate-Fenster ist "
+                          "noch offen — " + (f"dort steht: {seite}" if seite
+                                              else "steht dort eine Fehlermeldung oder eine Rueckfrage?"), "login")
             trail.append("angemeldet, Tradovate-Fenster zu")
 
             # Zurueck zu TradingView und neu lesen: jetzt muss eines der Konten der
