@@ -7578,6 +7578,21 @@
           </div>
           <div class="kp-status" id="kp-status" hidden></div>
           <div class="kp-karten" id="kp-karten"></div>
+          <!-- Vorwahl-Quoten fürs V2-Popup (23.09.2026, Finn: „5/5 → 90 %, 4/5 → 80 %, 3/5 → 75 %, sonst 70 — und im
+               Admin änderbar"): eine Zeile, Auto-Speichern 0,7 s nach der Änderung in kompass_regeln (id 1, alle IDs). -->
+          <div class="panel" id="kp-quoten" style="margin:12px 0 0">
+            <div class="panel-head" style="margin-bottom:6px">
+              <div><div class="panel-title">Richtungs-Vorwahl bei Echo V2 / Orbit V2</div>
+                   <div class="panel-sub">Wie oft das Plan-Popup die Kompass-Richtung vorwählt — der Rest ist das Gegenteil. Gilt für alle IDs, BUY/SELL bleiben klickbar.</div></div>
+              <span class="mono" id="kp-quoten-stand" style="font-size:11.5px;color:var(--sub)"></span>
+            </div>
+            <div class="vp-zeile" style="gap:14px;flex-wrap:wrap">
+              <label class="vp-zeile" style="gap:6px">Konfidenz 5/5 <input type="number" class="input mono vp-in" data-kp-quote="5" min="0" max="100" step="5"> %</label>
+              <label class="vp-zeile" style="gap:6px">4/5 <input type="number" class="input mono vp-in" data-kp-quote="4" min="0" max="100" step="5"> %</label>
+              <label class="vp-zeile" style="gap:6px">3/5 <input type="number" class="input mono vp-in" data-kp-quote="3" min="0" max="100" step="5"> %</label>
+              <label class="vp-zeile" style="gap:6px">sonst <input type="number" class="input mono vp-in" data-kp-quote="sonst" min="0" max="100" step="5"> %</label>
+            </div>
+          </div>
           <!-- Wie gut ist der Bot (23.09.2026, Finn: „is der Bot von meinem Bruder, will sehen wie gut der is" · dann
                „das ist so hässlich, erkennt gar nichts — mit draufdrücken, ein bisschen Farben, übersichtlich wie der
                Überblick bei Finanzen"): Kacheln wählen die Frage (Session / NY-Gap / +1 h / +4 h), darunter Balken je
@@ -25717,6 +25732,26 @@
    * (Jitter-Doktrin: nicht alle IDs in dieselbe Richtung); beim Bearbeiten bleibt die Richtung des Plans.
    * Reine Vorwahl: BUY/SELL bleiben klickbar, gespeichert wird, was am Ende aktiv ist. */
   let _tpKp = { row: null, at: 0, wahl: null }
+  // Quote je Konfidenz (23.09.2026, Finn: „5/5 → 90 %, 4/5 → 80 %, 3/5 → 75 %, sonst 70 — im Admin änderbar"):
+  // kompass_regeln.quoten (eine Zeile für alle IDs), Standard hier, 60 s gecacht. Wert = wie oft das Popup der
+  // Kompass-Richtung folgt; der Rest ist das Gegenteil.
+  const KP_QUOTEN_STD = { '5': 90, '4': 80, '3': 75, 'sonst': 70 }
+  let _tpKpQ = { q: null, at: 0 }
+  async function tpKompassQuoten(){
+    if(_tpKpQ.q && Date.now() - _tpKpQ.at < 60000) return _tpKpQ.q
+    let q = { ...KP_QUOTEN_STD }
+    try{
+      const { data } = await supabase.from('kompass_regeln').select('quoten').eq('id', 1).maybeSingle()
+      if(data && data.quoten && typeof data.quoten === 'object') q = { ...q, ...data.quoten }
+    }catch(_){}
+    _tpKpQ = { q, at: Date.now() }
+    return q
+  }
+  function tpKompassQuote(q, konfidenz){
+    const k = Number(konfidenz)
+    const v = (k >= 3 && q && q[String(k)] != null) ? Number(q[String(k)]) : Number((q || KP_QUOTEN_STD).sonst)
+    return Math.min(100, Math.max(0, isFinite(v) ? v : 70))
+  }
   async function tpKompassAktuell(){
     if(_tpKp.row && Date.now() - _tpKp.at < 60000) return _tpKp.row
     try{
@@ -25746,21 +25781,23 @@
     try{ if(KP_NAMEN && KP_NAMEN[row.session]) name = KP_NAMEN[row.session] }catch(_){}
     m.textContent = `${name}${(t0 && isFinite(t0)) ? ' · ' + t0.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}`
       + `${row.konfidenz ? ' · Konfidenz ' + row.konfidenz + '/5' : ''}${alterTxt ? ' · ' + alterTxt : ''}`
+    const qz = wahl && isFinite(Number(wahl.quote)) ? Number(wahl.quote) : 75
     if(wahl) w.innerHTML = wahl.gleich
-      ? `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — wie der Kompass (75 %). Bleibt klickbar.`
-      : `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — <b>Gegenteil</b> gewürfelt (25 %). Bleibt klickbar.`
+      ? `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — wie der Kompass (${qz} % bei Konfidenz ${row.konfidenz ? row.konfidenz + '/5' : '–'}). Bleibt klickbar.`
+      : `→ <b>${wahl.dir === 'buy' ? 'BUY' : 'SELL'}</b> vorgewählt — <b>Gegenteil</b> gewürfelt (${100 - qz} % bei Konfidenz ${row.konfidenz ? row.konfidenz + '/5' : '–'}). Bleibt klickbar.`
     else w.textContent = _editingPlanId ? 'Richtung kommt aus dem gespeicherten Plan.' : 'Richtung selbst wählen.'
   }
   async function tpV2KompassVorwahl(){
     if(!routeIstV2(_tpRoute)){ const box = document.getElementById('tp-kompass-box'); if(box) box.style.display = 'none'; return }
     tpKompassBoxRender(null, null, true)
-    const row = await tpKompassAktuell()
+    const [row, q] = await Promise.all([tpKompassAktuell(), tpKompassQuoten()])
     if(!routeIstV2(_tpRoute) || !document.getElementById('tradePlanModal')?.classList.contains('open')) return
     let wahl = _tpKp.wahl
     if(row && !_editingPlanId && _tpDir == null){
-      const gleich = Math.random() < 0.75
+      const quote = tpKompassQuote(q, row.konfidenz)   // 5/5 → 90, 4/5 → 80, 3/5 → 75, sonst 70 (Admin → Kompass)
+      const gleich = Math.random() * 100 < quote
       const dir = ((row.bias === 'LONG') === gleich) ? 'buy' : 'sell'
-      wahl = { gleich, dir, id: row.id }
+      wahl = { gleich, dir, id: row.id, quote }
       _tpKp.wahl = wahl
       tpDirSet(dir)
     }
@@ -26418,7 +26455,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.438'
+  const OS_TAB_BUILD = '2026-09-22.439'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31678,9 +31715,36 @@
       await kpLaden()
     }finally{ if(btn){ btn.disabled = false; btn.textContent = 'Jetzt prüfen' } }
   }
+  // Vorwahl-Quoten (23.09.2026): Eingaben ↔ kompass_regeln.quoten, Auto-Speichern 0,7 s nach der Änderung
+  // (Finn will nie mehr „Speichern" drücken). Eigene Verdrahtung, kein Sammel-Handler.
+  let _kpQTimer = null
+  async function kpQuotenLaden(){
+    _tpKpQ = { q: null, at: 0 }
+    const q = await tpKompassQuoten()
+    document.querySelectorAll('[data-kp-quote]').forEach(el => { if(document.activeElement !== el) el.value = q[el.dataset.kpQuote] ?? '' })
+  }
+  async function kpQuotenSpeichern(){
+    const q = {}
+    document.querySelectorAll('[data-kp-quote]').forEach(el => {
+      const v = Number(el.value)
+      q[el.dataset.kpQuote] = (el.value !== '' && isFinite(v)) ? Math.min(100, Math.max(0, v)) : KP_QUOTEN_STD[el.dataset.kpQuote]
+    })
+    const st = document.getElementById('kp-quoten-stand')
+    try{
+      const { error } = await supabase.from('kompass_regeln').upsert({ id: 1, quoten: q, aktualisiert_at: new Date().toISOString() }, { onConflict: 'id' })
+      if(error) throw error
+      _tpKpQ = { q: { ...KP_QUOTEN_STD, ...q }, at: Date.now() }
+      if(st){ st.textContent = '✓ gespeichert'; setTimeout(() => { if(st.textContent === '✓ gespeichert') st.textContent = '' }, 2500) }
+    }catch(e){ if(st) st.textContent = 'nicht gespeichert: ' + (e.message || e) }
+  }
+  document.querySelectorAll('[data-kp-quote]').forEach(el => el.addEventListener('input', () => {
+    const st = document.getElementById('kp-quoten-stand'); if(st) st.textContent = '…'
+    clearTimeout(_kpQTimer); _kpQTimer = setTimeout(kpQuotenSpeichern, 700)
+  }))
   function kpOpen(){
     if(!_kp.geladen) kpSay('Lade …')
     kpLaden()
+    kpQuotenLaden()
     clearInterval(_kp.timer); _kp.timer = setInterval(kpLaden, 20000)
     clearInterval(_kp.tick); _kp.tick = setInterval(kpTick, 1000); kpTick()
   }
