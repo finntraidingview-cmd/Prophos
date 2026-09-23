@@ -25782,7 +25782,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.427'
+  const OS_TAB_BUILD = '2026-09-22.428'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27597,10 +27597,10 @@
   }
   /* ══ GEPLANTE STARTZEIT (22.09.2026, Finn: „ich plane einen Trade und gebe ihm eine Uhrzeit,
    * wann der Bot die Order losschicken soll"). Popup 2 speichert start_um am Plan; die Karte
-   * zeigt „⏰ hh:mm ✕". Der PC-TAB (MT5_LOCAL) prüft alle 15 s: Plan geplant, start_um erreicht,
+   * zeigt „⏰ hh:mm ✕". Der PC-TAB (MT5_LOCAL) prüft jede Sekunde: Plan geplant, start_um erreicht,
    * noch nicht ausgelöst → Claim per Update (start_um_gestartet_at NULL → jetzt; nur der Tab,
-   * dessen Update eine Zeile trifft, feuert — zwei PC-Tabs feuern nie doppelt) → nach 0–60 s
-   * Zufall (kein festes Muster) EXAKT der Weg des „Starten"-Klicks: Orbit tpOrbitStarten
+   * dessen Update eine Zeile trifft, feuert — zwei PC-Tabs feuern nie doppelt) → sofort (Versatz
+   * 5–30 s nur, wenn etwas anderes ansteht; seit 23.09.2026) EXAKT der Weg des „Starten"-Klicks: Orbit tpOrbitStarten
    * (Duplikum-Check → Puls), Echo tpJetztStarten (Check → Puls). Mehr als 10 min verspätet
    * (Tab war zu) wird NICHT nachgefeuert — Chip zeigt „verpasst", Finn startet von Hand. ══ */
   /* Uhrzeit → Zeitpunkt (22.09.2026, Finn: „Datum immer weglassen, immer das aktuelle Datum
@@ -27699,15 +27699,26 @@
         if(typeof atToast === 'function') atToast(`⏰ Startzeit von „${plan.masterName || '—'}" um ${Math.round(verspaetet / 60000)} min verpasst — NICHT gestartet. Von Hand starten.`, 'end')
         return
       }
-      const jitter = Math.floor(Math.random() * 60000)
-      if(typeof atToast === 'function') atToast(`⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (Zufallsversatz).`, 'start')
-      await new Promise(r => setTimeout(r, jitter))
+      // Pünktlich statt Zufall (23.09.2026 04:1x, Finn: „wenn ich den Trade auf 4:30 plane, soll er
+      // auch um 4:30 starten, wenn gerade keine anderen Orders oder eine Queue da sind — nicht noch
+      // ein paar Sekunden warten, das ist unnötig"). Bisher: 15-s-Takt + 0–60 s Zufall = 30–40 s.
+      // Jetzt: 1-s-Takt, und Versatz NUR, wenn wirklich etwas anderes ansteht (zweiter fälliger
+      // Plan, Echo-Warteschlange, laufender Remote-/Orbit-Lauf) — dann 5–30 s, damit zwei Läufe
+      // nicht im selben Sekundenraster losgehen. Die Streuung ZWISCHEN den IDs kommt beim Farmer
+      // ohnehin aus den gewürfelten Startzeiten, nicht aus dem Versatz hier.
+      let anderes = false
+      try{ anderes = faellig.length > 1 || (_rsQueue && _rsQueue.length > 0) || !!_rsAktiv || !!_tpOrbitLaeuft }catch(_){ anderes = false }
+      const jitter = anderes ? 5000 + Math.floor(Math.random() * 25000) : 0
+      if(typeof atToast === 'function') atToast(jitter
+        ? `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet in ${Math.round(jitter / 1000)} s (etwas anderes läuft noch).`
+        : `⏰ Geplante Startzeit erreicht — „${plan.masterName || '—'}" startet jetzt.`, 'start')
+      if(jitter) await new Promise(r => setTimeout(r, jitter))
       if(plan.route === 'tvplus' && typeof tpOrbitStarten === 'function') await tpOrbitStarten(plan.id)
       else if(plan.route === 'mt5' && typeof tpJetztStarten === 'function') await tpJetztStarten(plan.id)
     }catch(e){ console.warn('[start-um]', e) }
     finally{ _suLaeuft = false }
   }
-  setInterval(tpStartUmTick, 15000)
+  setInterval(tpStartUmTick, 1000)   // 15 s → 1 s (23.09.2026): die Prüfung ist rein lokal, die DB sieht nur den Claim
   /* ══ ENDE GEPLANTE STARTZEIT ══ */
 
   setInterval(acTick, 20000)
