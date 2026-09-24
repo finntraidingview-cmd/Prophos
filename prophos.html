@@ -18492,7 +18492,8 @@
     const rows = (rk && rk.data) || []
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
     // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
-    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0], alter_ms: jetzt - (Number(r.reader_ts) || 0), sichtbar: r.sichtbar !== false } : null
+    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0], alter_ms: jetzt - (Number(r.reader_ts) || 0), sichtbar: r.sichtbar !== false,
+                               quelle: r.quelle || null, modus: r.modus || null } : null
     mkl.kursJe = { NQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'NQ') || null), MNQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'MNQ') || null) }
     mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
@@ -18551,10 +18552,14 @@
     // Stale-Alarm (24.09.2026 spät): > 60 s ohne Tick = rot „Feed steht seit …" (der Web-Push kommt aus mklStaleWache ab 2 min)
     const steht = k.alter_ms > 60000
     const dauer = alt < 3600 ? Math.round(alt / 60) + ' min' : (alt / 3600).toFixed(1) + ' h'
+    // modus 'delayed_streaming_600' (Reader 0.8.0): TradingView liefert auf dem PC nur verzögerte CME-Kurse — das ist kein
+    // Live-Feed, auch wenn die Ticks frisch aussehen. quelle 'ws' = Socket (Tab darf verdeckt sein), 'titel' = Tab muss sichtbar sein.
+    const delayed = /^delayed/.test(String(k.modus || ''))
     if(q){
-      q.textContent = (frisch ? `live · vor ${alt} s` : steht ? `⚠ Feed steht seit ${dauer}` : `⚠ kein Live-Kurs — letzter Stand vor ${alt} s`) + ` (PC ${k.pc})${k.sichtbar ? '' : ' · Tab verdeckt'}`
-      q.style.color = steht ? '#b91c1c' : frisch ? '' : '#B45309'
-      q.style.fontWeight = steht ? '600' : ''
+      q.textContent = (frisch ? `live · vor ${alt} s` : steht ? `⚠ Feed steht seit ${dauer}` : `⚠ kein Live-Kurs — letzter Stand vor ${alt} s`) + ` (PC ${k.pc}${k.quelle ? ` · ${k.quelle === 'ws' ? 'Socket, Tab verdeckt ok' : k.quelle === 'titel' ? 'Titel, Tab muss sichtbar sein' : k.quelle}` : ''})${(k.sichtbar || k.quelle === 'ws') ? '' : ' · Tab verdeckt'}`
+        + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
+      q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : frisch ? '' : '#B45309'
+      q.style.fontWeight = (steht || delayed) ? '600' : ''
     }
     if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
@@ -29360,7 +29365,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.490'
+  const OS_TAB_BUILD = '2026-09-22.491'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42622,10 +42627,15 @@
         const rows = []
         for(const w of ['NQ', 'MNQ']){
           const q = ks[w]; if(!q || q.stale) continue
-          const preis = (typeof q.preis === 'number' && isFinite(q.preis) && q.preis > 0) ? q.preis : ((typeof tvKursZahl === 'function') ? tvKursZahl(q.text) : null)
+          // 0.8.0: bei quelle 'ws' ist lp der Last Price (preis ist dann derselbe Wert); Reihenfolge preis → lp → Text
+          const preis = (typeof q.preis === 'number' && isFinite(q.preis) && q.preis > 0) ? q.preis
+                      : (typeof q.lp === 'number' && isFinite(q.lp) && q.lp > 0) ? q.lp
+                      : ((typeof tvKursZahl === 'function') ? tvKursZahl(q.text) : null)
           if(!(preis > 0)) continue
+          // quelle/stale/modus (Spalten seit .488): modus 'delayed_streaming_600' = TV-CME-Abo auf dem PC nicht aktiv (Kurse 10 min alt)
           rows.push({ id: `${pc}:${w}`, pc_name: pc, symbol: String(q.symbol_text || w).slice(0, 32), wurzel: w, preis, text: String(q.text || preis).slice(0, 32),
-            sichtbar: q.sichtbar !== false, reader_ts: Number(q.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString() })
+            sichtbar: q.sichtbar !== false, reader_ts: Number(q.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString(),
+            quelle: String(q.quelle || '').slice(0, 12) || null, stale: false, modus: String(q.modus || '').slice(0, 32) || null })
         }
         if(rows.length) await supabase.from('tv_kurse').upsert(rows)
       }
@@ -42655,6 +42665,25 @@
             epLokal.kerzenGeraeumt = Date.now()
             try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
           }
+        }
+        // Kerzen-Erstladung (Reader 0.8.0, 24.09.2026 spät): TradingViews eigene Erstladung (bis 600 Minutenkerzen je Wurzel)
+        // einmal je Tab-Sitzung über GET /kerzen (direkt am reader-server, wie /positions) holen und in Häppchen ≤ 500
+        // idempotent nach tv_kurs_1m — danach reicht der Kerzen-Ring aus /positions. Leer/fehlgeschlagen → nach 1 h erneut.
+        // Socket-Bars haben keine Tick-Zahl (ticks 0); ein Reader < 0.8.0 antwortet mit dem Positions-Stand → keine bars → 'leer'.
+        const el = epLokal.kerzenErstladung
+        if(ks && (!el || (el !== 'fertig' && Date.now() - (epLokal.kerzenErstladungAt || 0) > 3600000))){
+          epLokal.kerzenErstladung = 'laeuft'; epLokal.kerzenErstladungAt = Date.now()
+          try{
+            const r = await fetch(EP_READER + '/kerzen', { cache: 'no-store', signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(4000) : undefined })
+            const kd = r.ok ? await r.json() : null
+            const bars = (kd && Array.isArray(kd.bars)) ? kd.bars : []
+            const brows = bars.filter(b => b && b.wurzel && b.minute > 0 && b.c > 0).map(b => ({
+              wurzel: String(b.wurzel).slice(0, 8), minute: new Date(Number(b.minute) * 1000).toISOString(), symbol: String(b.symbol || b.wurzel).slice(0, 32),
+              o: b.o, h: b.h, l: b.l, c: b.c, ticks: 0, pc, updated_at: new Date().toISOString() }))
+            for(let i = 0; i < brows.length; i += 500) await supabase.from('tv_kurs_1m').upsert(brows.slice(i, i + 500), { onConflict: 'wurzel,minute' })
+            epLokal.kerzenErstladung = brows.length ? 'fertig' : 'leer'
+            if(kd && kd.aufloesung_warnung) console.warn('[bruecke] Kerzen-Erstladung:', kd.aufloesung_warnung)
+          }catch(e){ epLokal.kerzenErstladung = 'fehler'; console.warn('[bruecke] Kerzen-Erstladung', e && e.message || e) }
         }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
