@@ -10180,7 +10180,14 @@
       // dann ist die Staffel wieder die Quelle des Hedge-Betrags
       let hedgeAn = false; try{ hedgeAn = !!wdVorplanRegeln().hedge_an }catch(_){}
       const st = $('wd-staffel-card'); if(st) st.hidden = an && !hedgeAn
-      const wc = $('wd-weg-chip');     if(wc) wc.hidden = !an       // „Orbit V2 · ohne Hedge" im Farmer-Kopf
+      // Farmer-Kopf-Chip (24.09.2026 spät): Schalter „Fusion-Gegenhedge" an = die Pläne SIND gehedgt — nicht „ohne Hedge" nennen
+      const wc = $('wd-weg-chip')
+      if(wc){
+        wc.hidden = !an
+        wc.textContent = hedgeAn ? 'Orbit V2 · Fusion-Gegenhedge' : 'Orbit V2 · ohne Hedge'
+        wc.title = hedgeAn ? 'Winning Days Farm: Puls platziert, der PC öffnet die Fusion-Gegenorder — beide Schließ-Level in MetaTrader'
+                           : 'Kapitel ohne Hedge: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum'
+      }
     }
     const admUsd = new Intl.NumberFormat('de-DE', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
     const admUsdSign = v => (v >= 0 ? '+' : '−') + admUsd.format(Math.abs(v))
@@ -26243,7 +26250,9 @@
     // BUY/SELL-Chip über routeIstEcho, damit Echo V2 ihn wie Echo bekommt.
     const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''}`
       + (istV2Karte
-          ? ''
+          // Winning Days Farm (24.09.2026 spät): tvv2 mit hedge_eur ist GEHEDGT — der gestrichelte V2-Rand meint „ohne Hedge",
+          // der Untertitel sagt es deshalb ausdrücklich (der 🛡-Chip trägt Betrag und Zustand)
+          ? ((p.route === 'tvv2' && p.hedgeEur > 0) ? ` <span style="color:var(--sub-2)">·</span> <span title="Fusion-Gegenhedge über ${Number(p.hedgeEur).toLocaleString('de-DE')} €${p.hedgeFaktor > 0 ? ` (Faktor ${Number(p.hedgeFaktor).toLocaleString('de-DE')})` : ''} — beide Schließ-Level in MetaTrader">Winning Days Farm · Fusion-Gegenhedge</span>` : '')
           : ` <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
             + ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
@@ -29265,7 +29274,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.478'
+  const OS_TAB_BUILD = '2026-09-22.480'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36391,6 +36400,20 @@
     }
   })()
 
+  // Winning Days Farm (24.09.2026 spät, Daten-Integrität): der Fusion-Gegenhedge ist der „Slave" dieses Plans — read-only,
+  // sein P&L kommt aus der Deal-Historie (mt5_baseline.hedge.pl → slave_pl), nie aus dem Popup. Offen/unklar = Warnhinweis.
+  function tcHedgeZeile(p){
+    const h = (p.mt5Baseline && p.mt5Baseline.hedge) || null
+    const eur = Number(p.hedgeEur).toLocaleString('de-DE')
+    const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    if(h && h.status === 'geschlossen' && h.pl != null){
+      const pl = Number(h.pl)
+      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">(${escapeHtml(hedgeGrundText(h.grund))}) — aus der Deal-Historie, wird als Slave-P&L gebucht</span></div>`
+    }
+    if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:#B45309">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
+    if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:#B45309">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
+    return `<div style="color:var(--sub);font-size:12.5px">Fusion-Gegenhedge (${eur} €) wurde nie geöffnet${h && h.msg ? ` — ${escapeHtml(String(h.msg))}` : ''} · nur der Master zählt.</div>`
+  }
   function tcRecompute(){
     if(!_completingPlanId) return
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
@@ -36425,7 +36448,7 @@
     }else{
       // V2 (24.09.2026): der Slave existiert nicht — der alte Satz klang, als fehle etwas
       realisedHtml = routeIstV2(p.route)
-        ? '<div style="color:var(--sub);font-size:12.5px">Ohne Hedge — nur der Master zählt.</div>'
+        ? (p.hedgeEur > 0 ? tcHedgeZeile(p) : '<div style="color:var(--sub);font-size:12.5px">Ohne Hedge — nur der Master zählt.</div>')
         : '<div style="color:var(--sub);font-size:12.5px">Kein Live-Account beteiligt — wird nicht in Finanzen gebucht.</div>'
     }
 
@@ -36660,7 +36683,13 @@
     const mPl = parseFloat(document.getElementById('tc-master-pl').value)
     // V2 (24.09.2026): kein Slave — slave_pl fest 0, das Feld ist ausgeblendet; nur der Master ist Pflicht
     const tcV2Save = routeIstV2(p.route)
-    const sPl = tcV2Save ? 0 : parseFloat(document.getElementById('tc-slave-pl').value)
+    // Winning Days Farm (24.09.2026 spät, Daten-Integrität): slave_pl trägt den vom Hedge geschriebenen Fusion-P&L (Deal-
+    // Historie) — das Popup darf ihn NIE mit 0 überschreiben. Hedge zu mit pl → dieser Wert; Hedge offen/unklar oder
+    // „P&L folgt" → slave_pl bleibt unangetastet (Feld fliegt aus dem Update); nie gehedgt/nie geöffnet → 0 wie bisher.
+    const tcHedge = (tcV2Save && p.hedgeEur > 0 && p.mt5Baseline && p.mt5Baseline.hedge) ? p.mt5Baseline.hedge : null
+    const tcHedgeZu = !!(tcHedge && tcHedge.status === 'geschlossen' && tcHedge.pl != null)
+    const tcSlaveLassen = !!(tcHedge && !tcHedgeZu && (tcHedge.status === 'geschlossen' || ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(tcHedge.status)))
+    const sPl = tcV2Save ? (tcHedgeZu ? Number(tcHedge.pl) : (tcSlaveLassen ? (Number(p.slavePl) || 0) : 0)) : parseFloat(document.getElementById('tc-slave-pl').value)
     // Neue Status-Auswahl (3 Radios) + welcher Account
     const statusChoice = document.querySelector('input[name="tc-status"]:checked')?.value || 'none'
     const targetAccountId = document.getElementById('tc-status-account')?.value || null
@@ -36695,6 +36724,7 @@
           if(p.status === 'planned' || !p.endedAt) updates.ended_at = d.toISOString()
         }
       }
+      if(tcSlaveLassen) delete updates.slave_pl   // Hedge offen / P&L folgt: gespeicherten Fusion-P&L nicht anrühren
       const quelle = plQuelleErmitteln(mPl)
       if(quelle) updates.pl_quelle = quelle
       let { data, error } = await supabase
