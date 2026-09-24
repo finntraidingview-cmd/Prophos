@@ -7377,12 +7377,19 @@
           <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
           <span class="mono" id="mkl-diff" style="font-size:13px;font-weight:700"></span>
           <span id="mkl-quelle" style="font-size:11.5px;color:var(--sub-2)"></span>
-          <div class="seg" id="mkl-span" style="margin-left:auto">
+          <!-- NQ ↔ MNQ (24.09.2026 spät, Finn: „nur NQ und MNQ aus TradingView"): der Reader liefert seit 0.7.0 beide Wurzeln,
+               der Chart zeigt eine, die Zeile darunter beide Kurse mit Alter. Kein Fusion-/NAS100-Kurs im Chart. -->
+          <div class="seg" id="mkl-wurzel-seg" style="margin-left:auto">
+            <button type="button" data-mkl-wurzel="NQ" class="active">NQ</button>
+            <button type="button" data-mkl-wurzel="MNQ">MNQ</button>
+          </div>
+          <div class="seg" id="mkl-span">
             <button type="button" data-mkl-span="60" class="active">1 h</button>
             <button type="button" data-mkl-span="240">4 h</button>
             <button type="button" data-mkl-span="1440">24 h</button>
           </div>
         </div>
+        <div id="mkl-beide" class="mono" style="font-size:12px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px"></div>
         <div style="height:300px;margin-top:10px;position:relative"><canvas id="mkl-chart"></canvas>
           <!-- Ohne Kerzen zeichnete Chart.js eine leere 0–1-Achse (24.09.2026, Design-Rundgang) — jetzt ein
                ehrlicher Platzhalter; mklChartZeichnen blendet ihn ein/aus. -->
@@ -18403,7 +18410,9 @@
    * Treffer werden über die Kerzen (High/Low) seit dem Entry ausgewertet — ein TP zählt also auch, wenn gerade
    * kein Tab offen war. Innerhalb EINER Kerze, die beide Level berührt, gewinnt der SL (konservativ).
    * Anzeige ehrlich: ohne frischen Kurs (≤ 30 s) gibt es keinen Fill und der Kopf sagt „kein Live-Kurs". */
-  const mkl = { span: 60, chart: null, kerzen: [], kurs: null, kursAlt: null, orders: [], dir: null, instr: 'MNQ', busy: false, tick: null, stub: null }
+  // wurzel (24.09.2026 spät): NQ ↔ MNQ aus dem Reader-Feed, letzte Wahl bleibt am Gerät; kursJe = frischester Kurs je Wurzel für die Kopfzeile
+  const mkl = { span: 60, chart: null, kerzen: [], kurs: null, kursAlt: null, kursJe: {}, orders: [], dir: null, instr: 'MNQ', busy: false, tick: null, stub: null,
+                wurzel: (() => { try{ return localStorage.getItem('prophos_mkl_wurzel') === 'MNQ' ? 'MNQ' : 'NQ' }catch(_){ return 'NQ' } })() }
   const $mkl = id => document.getElementById(id)
   const mklAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="markt"]'); return !!(v && v.classList.contains('active')) }
   const mklFmt = (v, n) => (v == null || !isFinite(v)) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: n == null ? 2 : n, maximumFractionDigits: n == null ? 2 : n })
@@ -18458,14 +18467,17 @@
     if(mkl.stub) return
     const jetzt = Date.now()
     const q = []
-    q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(5))
+    q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(12))
     if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - mkl.span * 60000).toISOString()).order('minute', { ascending: true }).limit(1500))
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     if(currentUserId) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
     const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
     const rows = (rk && rk.data) || []
-    const best = rows.find(r => r && r.preis != null && (r.wurzel === 'NQ' || r.wurzel === 'MNQ')) || null
-    mkl.kursAlt = best ? { preis: Number(best.preis), symbol: best.symbol, wurzel: best.wurzel, pc: best.pc_name || best.id, alter_ms: jetzt - (Number(best.reader_ts) || 0), sichtbar: best.sichtbar !== false } : null
+    // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
+    // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
+    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0], alter_ms: jetzt - (Number(r.reader_ts) || 0), sichtbar: r.sichtbar !== false } : null
+    mkl.kursJe = { NQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'NQ') || null), MNQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'MNQ') || null) }
+    mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
     const neu = (rz && rz.data) || []
     if(vollstaendig || !mkl.kerzen.length) mkl.kerzen = neu
@@ -18476,8 +18488,8 @@
       const grenze = jetzt - mkl.span * 60000
       mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= grenze)
     }
-    // Eine Wurzel für den Chart: die mit der jüngsten Kerze
-    if(mkl.kerzen.length){ const w = mkl.kerzen[mkl.kerzen.length - 1].wurzel; mkl.kerzen = mkl.kerzen.filter(k => k.wurzel === w) }
+    // Nur die gewählte Wurzel im Chart (NQ ↔ MNQ-Umschalter); NAS100-Kerzen (Fusion-Feed, wurzel NAS100) bleiben außen vor
+    mkl.kerzen = mkl.kerzen.filter(k => k.wurzel === mkl.wurzel)
     if(ro && ro.data){ mkl.orders = ro.data; mkl.ordersGeladen = true }
   }
   async function mklDemoSchliessenDb(zu){
@@ -18493,7 +18505,22 @@
     if(!el) return
     // Kein Kurs je gesehen (24.09.2026 spät, tv_kurse leer): eine Zeile, die sagt, was auf dem 24/7-PC laufen muss —
     // kein Alarm-Design, das ist ein Einrichtungsstand, kein Fehler. Gab es je einen Kurs, steht unten der letzte mit Alter.
-    if(!k){ el.textContent = '–'; if(sym) sym.textContent = ''; if(diff) diff.textContent = ''; if(q) q.textContent = 'Kein Kurs-Feed: auf dem 24/7-PC TradingView mit NQ/MNQ sichtbar offen, Userscript 0.6.0 + Reader laufend, Prophos-Tab ≥ .469 offen.'; if(hint) hint.textContent = ''; return }
+    // Beide Wurzeln nebeneinander mit Alter (0.7.0) — steht auch, wenn die gewählte Wurzel gerade nichts hat
+    const beide = $mkl('mkl-beide')
+    if(beide){
+      const je = mkl.kursJe || {}
+      beide.innerHTML = ['NQ', 'MNQ'].map(w => { const x = je[w]; if(!x) return `<span style="color:var(--sub-2)"><b>${w}</b> –</span>`
+        const a = Math.round(x.alter_ms / 1000), f = x.alter_ms <= HEDGE_KURS_MAX_ALTER_MS, steht = x.alter_ms > 60000
+        return `<span style="${f ? '' : 'opacity:.55'}"><b>${w}</b> ${mklFmt(x.preis)} <span style="color:${steht ? '#b91c1c' : 'var(--sub-2)'}">vor ${a < 120 ? a + ' s' : Math.round(a / 60) + ' min'}</span></span>` }).join('<span style="color:var(--sub-2)">·</span>')
+    }
+    if(!k){
+      const andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', jeA = (mkl.kursJe || {})[andere]
+      el.textContent = '–'; if(sym) sym.textContent = mkl.wurzel; if(diff) diff.textContent = ''
+      if(q){ q.style.color = ''; q.style.fontWeight = ''; q.textContent = jeA ? `Kein ${mkl.wurzel}-Kurs im Feed — ${andere} liefert (Reader < 0.7.0 liest nur ein Symbol).`
+                                         : 'Kein Kurs-Feed: auf dem 24/7-PC TradingView mit NQ/MNQ offen, Userscript ≥ 0.7.0 + Reader laufend, Prophos-Tab ≥ .469 offen.' }
+      if(hint) hint.textContent = ''
+      return
+    }
     const frisch = k.alter_ms <= HEDGE_KURS_MAX_ALTER_MS
     el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
     if(sym) sym.textContent = k.symbol
@@ -18504,8 +18531,15 @@
       else diff.textContent = ''
     }
     const alt = Math.round(k.alter_ms / 1000)
-    if(q) q.textContent = (frisch ? `live · vor ${alt} s` : `⚠ kein Live-Kurs — letzter Stand vor ${alt < 3600 ? Math.round(alt / 60) + ' min' : (alt / 3600).toFixed(1) + ' h'}`) + ` · ${k.pc}${k.sichtbar ? '' : ' · Tab verdeckt'}`
-    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen · Quelle: TradingView-Tab-Titel des Reader-PCs (Userscript 0.6.0) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
+    // Stale-Alarm (24.09.2026 spät): > 60 s ohne Tick = rot „Feed steht seit …" (der Web-Push kommt aus mklStaleWache ab 2 min)
+    const steht = k.alter_ms > 60000
+    const dauer = alt < 3600 ? Math.round(alt / 60) + ' min' : (alt / 3600).toFixed(1) + ' h'
+    if(q){
+      q.textContent = (frisch ? `live · vor ${alt} s` : steht ? `⚠ Feed steht seit ${dauer}` : `⚠ kein Live-Kurs — letzter Stand vor ${alt} s`) + ` (PC ${k.pc})${k.sichtbar ? '' : ' · Tab verdeckt'}`
+      q.style.color = steht ? '#b91c1c' : frisch ? '' : '#B45309'
+      q.style.fontWeight = steht ? '600' : ''
+    }
+    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
   function mklChartZeichnen(){
     const cv = $mkl('mkl-chart'); if(!cv || typeof Chart === 'undefined') return
@@ -18615,6 +18649,38 @@
   // Takt: 5 s in der Markt-View (Kurs + Kerzen-Nachtrag), sonst alle 60 s nur die Auswertung offener Demo-Orders
   setInterval(() => { if(mklAktiv()) mklTick(false) }, 5000)
   setInterval(() => { if(!mklAktiv() && currentUserId && (!mkl.ordersGeladen || mkl.orders.some(o => o.status === 'open'))) mklTick(false) }, 60000)
+  // Wurzel-Umschalter NQ ↔ MNQ (24.09.2026 spät) — eigener Handler, letzte Wahl bleibt am Gerät
+  document.querySelectorAll('#mkl-wurzel-seg [data-mkl-wurzel]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-mkl-wurzel') === mkl.wurzel)
+    b.addEventListener('click', () => {
+      mkl.wurzel = b.getAttribute('data-mkl-wurzel') === 'MNQ' ? 'MNQ' : 'NQ'
+      try{ localStorage.setItem('prophos_mkl_wurzel', mkl.wurzel) }catch(_){}
+      document.querySelectorAll('#mkl-wurzel-seg button').forEach(x => x.classList.toggle('active', x === b))
+      mkl.kerzen = []; mklTick(true)
+    })
+  })
+  // Stale-Alarm mit Web-Push (24.09.2026 spät): läuft in jedem eingeloggten Tab alle 60 s, unabhängig von der Markt-View.
+  // Kein NQ/MNQ-Tick > 2 min (obwohl es je einen gab) → EINMAL Push „Kurs-Feed steht" (Tag kursfeed — das Handy fasst
+  // Doppelte mehrerer Geräte zusammen), läuft er wieder → Entwarnung. Merker in localStorage, damit ein Reload nicht erneut
+  // alarmiert. Ohne je einen Kurs (Einrichtung) kein Alarm — das ist kein Ausfall.
+  const MKL_STALE_PUSH_MS = 120000
+  async function mklStaleWache(){
+    if(!currentUserId) return
+    try{
+      const { data } = await supabase.from('tv_kurse').select('pc_name,wurzel,reader_ts').in('wurzel', ['NQ', 'MNQ']).order('reader_ts', { ascending: false }).limit(1)
+      const r = (data || [])[0]; if(!r) return
+      const alter = Date.now() - (Number(r.reader_ts) || 0)
+      let alarm = false; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') === '1' }catch(_){}
+      if(alter > MKL_STALE_PUSH_MS && !alarm){
+        try{ localStorage.setItem('prophos_mkl_stale_alarm', '1') }catch(_){}
+        if(typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed steht', `Kein NQ/MNQ-Tick seit ${Math.round(alter / 60000)} min (PC ${r.pc_name || '?'}) — TradingView + Reader auf dem 24/7-PC prüfen.`, '#markt', 'kursfeed')
+      } else if(alter <= HEDGE_KURS_MAX_ALTER_MS && alarm){
+        try{ localStorage.removeItem('prophos_mkl_stale_alarm') }catch(_){}
+        if(typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed läuft wieder', `NQ/MNQ-Ticks kommen wieder an (PC ${r.pc_name || '?'}).`, '#markt', 'kursfeed')
+      }
+    }catch(_){ /* still — nächster Takt */ }
+  }
+  setInterval(mklStaleWache, 60000); setTimeout(mklStaleWache, 15000)
   /* ========== ENDE MARKT LIVE ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
@@ -29277,7 +29343,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.486'
+  const OS_TAB_BUILD = '2026-09-22.489'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42531,8 +42597,23 @@
       // in tv_kurse, der Hedge-Wächter (hedgeWacheTick) nimmt die jüngste über alle PCs. Nur mit lesbarer Zahl
       // und nur, wenn der Titel jünger als 20 s ist — ein eingefrorener Titel (Tab zu, TV ausgeloggt) wird
       // nicht als Kurs weitergereicht („Beweis oder leer"). reader-server liefert kurs_alter_s in Server-Sekunden.
+      // 0.7.0 (24.09.2026 spät, Finn: „nur NQ und MNQ aus TradingView"): beide Wurzeln aus den Chart-Legenden — je Wurzel EINE
+      // tv_kurse-Zeile `${pc}:NQ` / `${pc}:MNQ` (die alte Ein-Symbol-Zeile id = pc bleibt für Reader < 0.7.0 als Fallback unten).
+      // stale (Script-Urteil oder Empfang > 45 s) wird NICHT geschrieben — die Zeile altert dann sichtbar („Beweis oder leer").
+      const ks = (d.kurse && typeof d.kurse === 'object') ? d.kurse : null
+      if(ks){
+        const rows = []
+        for(const w of ['NQ', 'MNQ']){
+          const q = ks[w]; if(!q || q.stale) continue
+          const preis = (typeof q.preis === 'number' && isFinite(q.preis) && q.preis > 0) ? q.preis : ((typeof tvKursZahl === 'function') ? tvKursZahl(q.text) : null)
+          if(!(preis > 0)) continue
+          rows.push({ id: `${pc}:${w}`, pc_name: pc, symbol: String(q.symbol_text || w).slice(0, 32), wurzel: w, preis, text: String(q.text || preis).slice(0, 32),
+            sichtbar: q.sichtbar !== false, reader_ts: Number(q.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString() })
+        }
+        if(rows.length) await supabase.from('tv_kurse').upsert(rows)
+      }
       const k = d.kurs
-      if(k && k.symbol && k.text && typeof d.kurs_alter_s === 'number' && d.kurs_alter_s <= 20){
+      if(!ks && k && k.symbol && k.text && typeof d.kurs_alter_s === 'number' && d.kurs_alter_s <= 20){
         const preis = (typeof tvKursZahl === 'function') ? tvKursZahl(k.text) : null
         if(preis != null){
           await supabase.from('tv_kurse').upsert({
@@ -42542,7 +42623,9 @@
             reader_ts: Number(k.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString()
           })
         }
+      }
         // Minutenkerzen (24.09.2026 abends, Markt-Chart + Demo-Orders): reader-server bündelt die Ticks je
+        // Minute — seit 0.7.0 ALLER Wurzeln in einer Liste (wurzel trennt), deshalb außerhalb des Ein-Symbol-Blocks.
         // Minute, hier gehen laufende + letzte abgeschlossene Kerze idempotent nach tv_kurs_1m. Einmal pro
         // Stunde Kerzen älter als 14 Tage wegräumen — sonst wächst die Tabelle ewig.
         const kz = Array.isArray(d.kurs_1m) ? d.kurs_1m : []
@@ -42556,7 +42639,6 @@
             try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
           }
         }
-      }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
   }
