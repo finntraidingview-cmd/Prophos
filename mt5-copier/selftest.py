@@ -1746,6 +1746,16 @@ def test_solo_level_und_grund():
         print("✗ solo_level_tp (Level Master-SL)"); ok = False
     if [copier.solo_deal_grund(x) for x in (4, 5, 3, 0, 6, "x")] != ["level_tp", "level_sl", "close", "hand", "stopout", "unbekannt"]:
         print("✗ solo_deal_grund"); ok = False
+    # explizite Lots (Popup 1 Multiplikator): 0,94 bleibt auf Raster 0,01; 0,004 → unter Mindestlot = 0.0; 0,996 → 1.0;
+    # ohne lots → aus eur/punkte wie bisher
+    if copier.solo_lots_waehlen(0.94, 70, 140, 0.85, si) != (0.94, 0.94, "lots"):
+        print("✗ solo_lots_waehlen 0,94"); ok = False
+    if copier.solo_lots_waehlen(0.004, 70, 140, 0.85, si) != (0.0, 0.004, "lots"):
+        print("✗ solo_lots_waehlen 0,004 muss 0.0 (Mindestlot) liefern"); ok = False
+    if copier.solo_lots_waehlen(0.996, 0, 0, 0.85, si) != (1.0, 0.996, "lots"):
+        print("✗ solo_lots_waehlen 0,996 Raster"); ok = False
+    if copier.solo_lots_waehlen(None, 70, 140, 0.85, si) != (0.59, None, "eur") or copier.solo_lots_waehlen(0, 70, 140, 0.85, si)[2] != "eur":
+        print("✗ solo_lots_waehlen ohne lots → eur"); ok = False
     if ok:
         print("✓ Solo-Hedge: Lots, beide Level, Grund-Mapping")
     return ok

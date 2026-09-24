@@ -568,6 +568,19 @@ def solo_lots(eur, punkte, wert_pro_punkt, si):
     return norm_vol(si, float(eur) / (float(punkte) * float(wert_pro_punkt)))
 
 
+def solo_lots_waehlen(lots_roh, eur, punkte, wert_pro_punkt, si):
+    """REIN RECHNEND (testbar): Lots fuer den Solo-Open. Schickt das Frontend
+    lots explizit (Popup 1 klassischer Multiplikator: Kontrakte × Multiplikator,
+    z. B. 0,94 — Koordination 24.09.2026 spaet), werden sie auf das Broker-Raster
+    gebracht (norm_vol: volume_step, min, max) statt roh gesendet; sonst wie
+    bisher aus eur / (punkte × Punktwert). -> (lots_gesendet, lots_angefragt,
+    quelle 'lots'|'eur'); 0.0 = unter Mindestlot / nicht rechenbar."""
+    roh = float(lots_roh or 0)
+    if roh > 0:
+        return norm_vol(si, roh), roh, "lots"
+    return solo_lots(eur or 0, punkte or 0, wert_pro_punkt, si), None, "eur"
+
+
 def solo_notfall_sl(fill, richtung, punkte, *, puffer, point, digits):
     """REIN RECHNEND (testbar): Broker-seitiges Schliess-Level der Solo-Position.
     Finn (24.09.2026 abends): „Sobald der Preis in MetaTrader erreicht wird, soll
@@ -1671,13 +1684,13 @@ def main():
         tp_punkte = float(a.get("tp_punkte") or a.get("punkte") or 0)
         sl_punkte = float(a.get("sl_punkte") or 0)
         puffer = float(a.get("puffer") if a.get("puffer") is not None else 3)
-        lots = float(a.get("lots") or 0)
+        lots, lots_angefragt, lots_quelle = solo_lots_waehlen(a.get("lots"), a.get("eur"), tp_punkte, wert, si)
         if not lots > 0:
-            lots = solo_lots(a.get("eur") or 0, tp_punkte, wert, si)
-        if not lots > 0:
-            return {"ok": False, "code": "lots", "wert_pro_punkt": wert,
-                    "msg": f"Lots nicht berechenbar (eur {a.get('eur')}, tp_punkte {tp_punkte}, "
-                           f"{wert:.4f} {hedge_acc.get('currency') or ''}/Pkt/Lot) — unter Mindestlot oder Werte fehlen"}
+            return {"ok": False, "code": "lots", "wert_pro_punkt": wert, "lots_angefragt": lots_angefragt,
+                    "msg": (f"Lots {lots_angefragt} liegen unter dem Mindestlot {si['volume_min']} des Brokers"
+                            if lots_angefragt else
+                            f"Lots nicht berechenbar (eur {a.get('eur')}, tp_punkte {tp_punkte}, "
+                            f"{wert:.4f} {hedge_acc.get('currency') or ''}/Pkt/Lot) — unter Mindestlot oder Werte fehlen")}
         mt5.symbol_select(sym, True)
         tick = mt5.symbol_info_tick(sym)
         if tick is None or not (tick.bid and tick.ask):
@@ -1706,6 +1719,8 @@ def main():
         erg = {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0), "lots": lots,
                "fill": fill, "symbol": sym, "richtung": richtung, "wert_pro_punkt": round(wert, 5),
                "eur_je_punkt": round(wert * lots, 4), "waehrung": hedge_acc.get("currency"),
+               # lots = tatsaechlich gesendet (Broker-Raster), lots_angefragt = Rohwert vom Frontend (None = aus eur gerechnet)
+               "lots_angefragt": lots_angefragt, "lots_quelle": lots_quelle,
                "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0, "tp": 0.0,
                "tp_punkte": tp_punkte, "sl_punkte": sl_punkte, "puffer": puffer}
         # Schliess-Level im Terminal (Finn: „sobald der Preis in MetaTrader erreicht wird"): sl am Hedge =
