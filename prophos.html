@@ -19845,10 +19845,11 @@
     if(!pc) return null
     const [er, ml] = await Promise.all([
       supabase.from('echoplus_live').select('updated_at').eq('pc_name', pc).order('updated_at', { ascending: false }).limit(1).then(x => x, () => ({})),
-      supabase.from('mt5_live').select('updated_at,tab_build:status->>tab_build').eq('pc_name', pc).order('updated_at', { ascending: false }).limit(1).then(x => x, () => ({}))
+      supabase.from('mt5_live').select('updated_at,tab_build:status->>tab_build,bruecke:status->kurs_bruecke').eq('pc_name', pc).order('updated_at', { ascending: false }).limit(1).then(x => x, () => ({}))
     ])
     const e0 = (er && er.data && er.data[0]) || null, m0 = (ml && ml.data && ml.data[0]) || null
-    const lage = { t: Date.now(), readerAt: e0 ? (Date.parse(e0.updated_at) || null) : null, build: m0 ? (m0.tab_build || null) : null, buildAt: m0 ? (Date.parse(m0.updated_at) || null) : null }
+    const lage = { t: Date.now(), readerAt: e0 ? (Date.parse(e0.updated_at) || null) : null, build: m0 ? (m0.tab_build || null) : null, buildAt: m0 ? (Date.parse(m0.updated_at) || null) : null,
+                   bruecke: (m0 && m0.bruecke && typeof m0.bruecke === 'object') ? m0.bruecke : null }
     _mklLage.set(pc, lage)
     return lage
   }
@@ -19862,6 +19863,12 @@
     const p = pc || '?'
     if(!lage) return { fall: null, zeile: `Lage auf ${p} wird geprüft …` }
     const readerFrisch = !!(lage.readerAt && Date.now() - lage.readerAt < 60000)
+    // Tab lebt (Flotten-Push < 2 min), erreicht den Reader aber nicht (epLokal-Backoff, 25.09.2026)
+    const br = lage.bruecke, tabLebt = !!(lage.buildAt && Date.now() - lage.buildAt < 120000)
+    if(tabLebt && br && Number(br.backoff_s) > 0){
+      const naechst = br.fehler_at ? Math.max(0, Math.round((Date.parse(br.fehler_at) + Number(br.backoff_s) * 1000 - Date.now()) / 1000)) : Number(br.backoff_s)
+      return { fall: 'a', zeile: `${readerFrisch ? `Reader auf ${p} läuft, aber der` : 'Der'} Prophos-Tab (Build ${lage.build || '?'}) erreicht ${readerFrisch ? 'ihn' : 'den Reader'} nicht (${br.letzter_fehler || 'Fehler'}, nächster Versuch in ${naechst} s)${readerFrisch ? '' : ` — Reader-Fenster (start-reader.bat) auf ${p} prüfen`}` }
+    }
     if(readerFrisch) return { fall: 'a', zeile: `Reader auf ${p} läuft, aber kein aktueller Prophos-Tab schiebt die Kurse (dort gemeldet: Build ${lage.build || '?'}) — auf ${p} alle Prophos-Tabs schließen, einen neu öffnen; Chrome-Speichersparen für prophos.pages.dev aus` }
     return { fall: 'b', zeile: `Reader auf ${p} meldet sich nicht — Reader-Fenster (start-reader.bat) prüfen` }
   }
@@ -31014,7 +31021,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.566'
+  const OS_TAB_BUILD = '2026-09-22.567'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44394,21 +44401,33 @@
     }catch(_){ epOrbitInst = null }
     return epOrbitInst
   }
+  /* Kurzer Backoff für den LOKALEN Reader (25.09.2026, Live-Befund Koordination pc-usq1i6: Reader 0.8.6 lief wieder, aber beide
+   * Prophos-Tabs schrieben > 7 min nichts — nach einem Reader-Hänger (Windows-QuickEdit) bzw. langsamen Antworten (Konsole flutet
+   * Log-Zeilen) saß die Brücke im 45-s→10-min-Backoff fest). Timeout 4 s statt 1,5 s. Hat dieser Tab den Reader schon einmal
+   * erreicht oder läuft er am PC (MT5_LOCAL): 5 → 10 → 20 s, Deckel 30 s — er ist lokal, kein Netzlast-Problem. Nur Geräte, die
+   * nie einen Reader hatten (Mac, Handy), behalten 45 s → 10 min (keine rote Konsolen-Zeile alle paar Sekunden). Nach dem ersten
+   * Erfolg sofort zurück in den normalen Takt. Fehler + Backoff reisen in epLokal.diag (Flotten-Push kurs_bruecke) mit. */
+  const epLokalKurz = () => !!(epLokal.ab > 0 || (typeof MT5_LOCAL !== 'undefined' && MT5_LOCAL))
   async function epLokalHolen(){
     if(Date.now() < epLokal.naechster) return epLokal.stand
     try{
       const r = await fetch(EP_READER + '/positions', { cache: 'no-store',
-        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(1500) : undefined })
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(4000) : undefined })
       if(!r.ok) throw new Error('HTTP ' + r.status)
       epLokal.stand = await r.json()
       epLokal.ab = Date.now()
-      epLokal.backoffMs = 45000
+      epLokal.backoffMs = 5000
       epLokal.naechster = 0
+      if(epLokal.diag && epLokal.diag.backoff_s) epLokal.diag = Object.assign(epLokal.diag, { backoff_s: 0, wieder_da_at: new Date().toISOString() })
       return epLokal.stand
-    }catch(_){
+    }catch(e){
       epLokal.stand = null
+      const kurz = epLokalKurz()
+      if(kurz && epLokal.backoffMs > 30000) epLokal.backoffMs = 5000   // Übergang vom langen auf den kurzen Takt
       epLokal.naechster = Date.now() + epLokal.backoffMs
-      epLokal.backoffMs = Math.min(epLokal.backoffMs * 2, 600000)
+      const fehler = (e && e.name === 'TimeoutError') ? 'Timeout 4 s' : String((e && e.message) || e).slice(0, 120)
+      epLokal.diag = Object.assign(epLokal.diag || {}, { letzter_fehler: fehler, fehler_at: new Date().toISOString(), backoff_s: Math.round(epLokal.backoffMs / 1000) })
+      epLokal.backoffMs = kurz ? Math.min(epLokal.backoffMs * 2, 30000) : Math.min(epLokal.backoffMs * 2, 600000)
       return null
     }
   }
