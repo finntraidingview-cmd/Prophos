@@ -18599,8 +18599,8 @@
     const jetzt = Date.now()
     const q = []
     q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(12))
-    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 1440 * 60000).toISOString()).order('minute', { ascending: true }).limit(3000))   // 24 h × 2 Wurzeln = 2.880 Kerzen (Zählung + Auto-Sprung brauchen beide)
-    else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
+    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 1440 * 60000).toISOString()).order('minute', { ascending: true }).limit(3000))   // 24 h × 2 Wurzeln = 2.880 Kerzen (Zählung + Auto-Sprung brauchen beide)
+    else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     // Nebenabfragen (Demo-Orders, Reader-PCs) nur alle 60 s bzw. beim vollen Laden — im 5-s-Takt reichen Kurs + Kerzen-Nachtrag
     // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
     const neben = vollstaendig || !mkl.ordersGeladen || (jetzt - (mkl.nebenAt || 0)) > 60000
@@ -18727,7 +18727,12 @@
         mEl.title = 'High/Low der laufenden Minute aus dem Reader-Ring (+ Live-Kurs) — jeder Tick dazwischen ist darin erfasst, auch wenn die Anzeige ihn nicht einzeln zeigt'
       } else { mEl.textContent = ''; mEl.title = '' }
     }
-    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
+    // Kerzen-Quelle (Reader 0.8.4): 'ws-tick' = aus Quote-Ticks gebaut (Wurzel ohne Chart-Serie, z. B. NQ nur in der Watchlist) —
+    // H/L nur so gut wie die Tick-Dichte, kein Volumen; Ersatz-Marker für ältere Zeilen ohne quelle: ticks > 0
+    const tickKerzen = mkl.kerzen.filter(kk => kk.quelle === 'ws-tick' || (!kk.quelle && Number(kk.ticks) > 0)).length
+    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein)`
+      + (tickKerzen ? ` · ${tickKerzen === mkl.kerzen.length ? `${mkl.wurzel}: aus Quote-Ticks (H/L Näherung, kein Volumen — ${mkl.wurzel} hat auf dem Reader-PC keine Chart-Serie)` : `${tickKerzen} Kerzen aus Quote-Ticks (H/L Näherung)`}` : '')
+      + ' — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.'
   }
   // Chart (25.09.2026, Finn zum Chart.js-Kerzenversuch: „richtig gottlos hässlich … lass es auch rauszoomen … nur 1-Minuten-
   // Chart, das reicht"): TradingView Lightweight Charts (MIT, jsDelivr 4.2.3, lazy beim ersten Zeichnen) statt Floating-Bars.
@@ -29673,7 +29678,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.508'
+  const OS_TAB_BUILD = '2026-09-22.510'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -43011,7 +43016,8 @@
         if(kz.length){
           const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
             wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
-            o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString() }))
+            o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString(),
+            quelle: String(x.quelle || '').slice(0, 12) || null }))   // 'ws' = Chart-Serie exakt, 'ws-tick' = aus Quote-Ticks (H/L Näherung) — Reader 0.8.4
           // Nur geänderte Kerzen schreiben (1-s-Takt): Signatur je Wurzel+Minute aus O/H/L/C, spätestens alle 5 s erneut
           epLokal.letzteKerze = epLokal.letzteKerze || {}
           const rowsNeu = rows.filter(r => { const key = r.wurzel + '|' + r.minute, sig = [r.o, r.h, r.l, r.c].join('|'), alt = epLokal.letzteKerze[key]
@@ -43044,7 +43050,8 @@
             const bars = (kd && Array.isArray(kd.bars)) ? kd.bars : []
             const brows = bars.filter(b => b && b.wurzel && b.minute > 0 && b.c > 0).map(b => ({
               wurzel: String(b.wurzel).slice(0, 8), minute: new Date(Number(b.minute) * 1000).toISOString(), symbol: String(b.symbol || b.wurzel).slice(0, 32),
-              o: b.o, h: b.h, l: b.l, c: b.c, ticks: 0, pc, updated_at: new Date().toISOString() }))
+              o: b.o, h: b.h, l: b.l, c: b.c, ticks: Number(b.n) || 0, pc, updated_at: new Date().toISOString(),
+              quelle: String(b.quelle || '').slice(0, 12) || null }))   // 'ws' Chart-Serie / 'ws-tick' aus Quote-Ticks (Reader 0.8.4)
             for(let i = 0; i < brows.length; i += 500) await supabase.from('tv_kurs_1m').upsert(brows.slice(i, i + 500), { onConflict: 'wurzel,minute' })
             epLokal.kerzenErstladung = brows.length ? 'fertig' : 'leer'
             epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: epLokal.kerzenErstladung, erstladung_bars: bars.length, erstladung_http: r.status, erstladung_warnung: (kd && kd.aufloesung_warnung) || null, erstladung_at: new Date().toISOString() })
