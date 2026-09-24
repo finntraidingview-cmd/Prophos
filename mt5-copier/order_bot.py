@@ -4194,18 +4194,69 @@ def tv_zahl_lesen(text):
         return None
 
 
-def tv_panel_bereich(roh):
-    """x-/y-Anker des Order-Panels aus der Reiter-Zeile. -> dict oder None.
-    'Market' und 'Stop Limit' muessen auf EINER Zeile stehen — das gibt es nur
-    im Order-Panel."""
+# Abstand, in dem die Feld-Beschriftungen (Units / Take profit / Stop loss) UNTER
+# der Reiter-Zeile liegen muessen, damit die Reiter-Zeile als Order-Ticket gilt.
+TV_PANEL_LABEL_TIEFE = 520
+TV_PANEL_RAND = 30
+
+
+def tv_panel_bereich(roh, fenster=None):
+    """Order-Ticket per UIA finden. -> dict oder None (keine Reiter-Zeile).
+
+    Anker (25.09.2026, Finns Test-Order: das Order-Panel war zum ersten Mal NICHT
+    rechts angedockt, sondern ein frei schwebendes Popup ueber dem Chart; der Bot
+    nahm die Reiter-Zeile fuer bare Muenze, arbeitete mit der Geometrie der rechten
+    Spalte und klickte 'Market' @655,285 und 'BUY' @895,228 ins Leere — das Popup
+    sass bei ~1000-1460 x 160-1000, 'Units' war 'nicht gefunden'):
+      1. Reiter-Zeile: 'Market' und 'Stop Limit' auf EINER Zeile (beide Sprachen).
+      2. Darunter, im x-Bereich der Reiter-Zeile (+/- Rand), mindestens eine
+         Feld-Beschriftung aus TV_RX_UNITS / TV_RX_TP / TV_RX_SL — nur dann ist
+         die Reiter-Zeile das Ticket. Die gemeinsame Bounding-Box aus Reitern und
+         Beschriftungen ist der Bereich ('links'/'rechts'/'oben'/'unten'), egal ob
+         angedockt oder Popup. Gibt es mehrere Reiter-Zeilen, gewinnt die mit den
+         meisten Beschriftungen darunter.
+      3. Reiter-Zeile ohne Beschriftungen darunter: dict mit 'ohne_felder': True —
+         der Aufrufer wartet kurz (Panel im Aufbau) und bricht dann ab, statt auf
+         Rueckfall-Koordinaten zu klicken.
+    'modus' = 'angedockt', wenn der Bereich am rechten Fensterrand endet (fenster =
+    Rechteck des TradingView-Fensters), sonst 'Popup'; 'spur' = lesbare Kurzform."""
     markt = [e for e in roh or () if e[1] and TV_RX_MARKET.search(str(e[0]).strip())]
     stopl = [e for e in roh or () if e[1] and TV_RX_STOPLIMIT.search(str(e[0]).strip())]
+    labels = [e for e in roh or () if e[1] and (TV_RX_UNITS.search(str(e[0]).strip())
+                                                or TV_RX_TP.search(str(e[0]).strip())
+                                                or TV_RX_SL.search(str(e[0]).strip()))]
+    bester, bester_n = None, -1
     for m in markt:
         for sl in stopl:
-            if abs((m[1][1] + m[1][3]) - (sl[1][1] + sl[1][3])) <= 24 and sl[1][0] > m[1][0]:
-                return {"links": m[1][0] - 30, "rechts": sl[1][2] + 30, "reiter_y": (m[1][1] + m[1][3]) // 2,
-                        "market": {"text": m[0], "r": tuple(m[1]), "punkt": ((m[1][0] + m[1][2]) // 2, (m[1][1] + m[1][3]) // 2)}}
-    return None
+            if not (abs((m[1][1] + m[1][3]) - (sl[1][1] + sl[1][3])) <= 24 and sl[1][0] > m[1][0]):
+                continue
+            reiter_y = (m[1][1] + m[1][3]) // 2
+            l0, r0 = m[1][0], sl[1][2]
+            unter = []
+            for e in labels:
+                el, et, er, eb = e[1]
+                mx, my = (el + er) // 2, (et + eb) // 2
+                if l0 - TV_PANEL_RAND - 40 <= mx <= r0 + TV_PANEL_RAND + 40 and reiter_y < my <= reiter_y + TV_PANEL_LABEL_TIEFE:
+                    unter.append(e)
+            if len(unter) > bester_n:
+                bester, bester_n = (m, sl, unter), len(unter)
+    if bester is None:
+        return None
+    m, sl, unter = bester
+    reiter_y = (m[1][1] + m[1][3]) // 2
+    xs_l = [m[1][0], sl[1][0]] + [e[1][0] for e in unter]
+    xs_r = [m[1][2], sl[1][2]] + [e[1][2] for e in unter]
+    ys_t = [m[1][1], sl[1][1]] + [e[1][1] for e in unter]
+    ys_b = [m[1][3], sl[1][3]] + [e[1][3] for e in unter]
+    links, rechts = min(xs_l) - TV_PANEL_RAND, max(xs_r) + TV_PANEL_RAND
+    oben, unten = min(ys_t) - 12, max(ys_b) + 12
+    modus = "angedockt" if (fenster and fenster[2] - rechts <= 80) else "Popup"
+    if not unter:
+        modus = "Reiter ohne Felder"
+    return {"links": links, "rechts": rechts, "oben": oben, "unten": unten, "reiter_y": reiter_y,
+            "market": {"text": m[0], "r": tuple(m[1]), "punkt": ((m[1][0] + m[1][2]) // 2, (m[1][1] + m[1][3]) // 2)},
+            "labels": len(unter), "ohne_felder": not unter, "modus": modus,
+            "spur": f"Panel: {modus} @{links},{oben} {rechts - links}x{unten - oben} ({len(unter)} Beschriftungen)"}
 
 
 def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
@@ -4475,9 +4526,11 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         return False, "pywinauto fehlt"
     typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem")
 
+    fenster = _tv_fenster_rect(w)
+
     def blick():
         roh = _tv_uia_roh(w, typen)
-        return roh, tv_panel_bereich(roh)
+        return roh, tv_panel_bereich(roh, fenster)
 
     # --- Panel offen? sonst Shift+T (offizieller TradingView-Hotkey, UMSCHALTER:
     # nur druecken, wenn das Panel nachweislich fehlt) ------------------------
@@ -4520,6 +4573,21 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         if not ber:
             return False, ("Das Order-Panel ist nicht zu sehen (Reiter 'Market … Stop Limit' fehlen), auch "
                            "nach Shift+T nicht. Gesehen: " + tv_uia_spur(roh))
+
+    # --- Reiter-Zeile da, aber keine Feld-Beschriftung darunter (25.09.2026, Popup-Fall):
+    # kurz warten (Panel im Aufbau), dann ABBRUCH — kein Klick auf Rueckfall-Koordinaten.
+    t_felder = time.time()
+    while ber.get("ohne_felder"):
+        if time.time() - t_felder > 4.0:
+            return False, ("Order-Panel nicht gefunden: die Reiter-Zeile 'Market … Stop Limit' steht bei "
+                           f"@{ber['links']},{ber['reiter_y']}, aber darunter ist keine Beschriftung Units/Take profit/"
+                           "Stop loss zu sehen (losgeloestes Popup? in TradingView ueber das Andock-Symbol in der "
+                           "Kopfzeile des Order-Tickets → Andocken). Nichts geklickt, nichts getippt. Gesehen: "
+                           + tv_uia_spur(roh))
+        _warte(0.4, 0.2)
+        roh, ber2 = blick()
+        ber = ber2 or ber
+    trail.append(ber.get("spur") or "Panel: ?")
 
     # --- Panel auf dem RICHTIGEN Symbol und RUHIG? (23.09.2026 03:19, Finns Lauf:
     # Watchlist NQ1! geklickt, Tab-Titel nach 0,7 s auf NQ — das Order-Panel hing aber

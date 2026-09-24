@@ -462,6 +462,36 @@ def main():
         order_bot.zeile_nennt_ticket("123456789 NAS100 buy 0.20", 123456789)
         and not order_bot.zeile_nennt_ticket("9123456789 NAS100", 123456789)
         and not order_bot.zeile_nennt_ticket("", 123456789))
+    # Order-Panel per UIA finden (25.09.2026, Popup-Fall): angedockt rechts vs. frei schwebend
+    # mittig — beide liefern Units/TP/SL im Bereich; Reiter ohne Felder = 'ohne_felder'; ein
+    # 'Markt'-Text anderswo (ohne Felder darunter) gewinnt nicht gegen das echte Ticket.
+    def _roh_ticket(x, y):
+        return [("Buy", (x + 10, y - 60, x + 190, y - 30), "Text"), ("Sell", (x + 200, y - 60, x + 380, y - 30), "Text"),
+                ("Markt", (x + 10, y, x + 80, y + 24), "TabItem"), ("Limit", (x + 90, y, x + 150, y + 24), "TabItem"),
+                ("Stop", (x + 160, y, x + 220, y + 24), "TabItem"), ("Stop Limit", (x + 230, y, x + 330, y + 24), "TabItem"),
+                ("Einheiten", (x + 10, y + 60, x + 100, y + 80), "Text"), ("Take Profit, $", (x + 10, y + 140, x + 130, y + 160), "Text"),
+                ("Stop-Loss, $", (x + 10, y + 220, x + 130, y + 240), "Text"), ("Kauf 5 MNQZ6 MARKT", (x + 10, y + 320, x + 380, y + 360), "Button")]
+    fenster = (0, 0, 1920, 1080)
+    ang = order_bot.tv_panel_bereich(_roh_ticket(1500, 250), fenster)
+    pop = order_bot.tv_panel_bereich(_roh_ticket(1000, 300) + [("Markt", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
+    ohne = order_bot.tv_panel_bereich([("Market", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
+    def _findet(ber, x):
+        u = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_UNITS, y_von=ber["reiter_y"])
+        tp = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_TP, y_von=ber["reiter_y"])
+        sl = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_SL, y_von=ber["reiter_y"])
+        return len(u) == 1 and len(tp) == 1 and len(sl) == 1
+    chk("ORDER-BOT: Order-Panel angedockt rechts per UIA gefunden (Units/TP/SL im Bereich, modus angedockt)",
+        ang and not ang["ohne_felder"] and ang["modus"] == "angedockt" and ang["labels"] == 3
+        and ang["links"] <= 1510 and ang["rechts"] >= 1830 and ang["reiter_y"] == 262 and _findet(ang, 1500)
+        and ang["spur"].startswith("Panel: angedockt @"))
+    chk("ORDER-BOT: Order-Panel als Popup mittig gefunden, 'Markt'-Text anderswo gewinnt nicht (modus Popup)",
+        pop and not pop["ohne_felder"] and pop["modus"] == "Popup" and pop["labels"] == 3
+        and pop["links"] <= 1010 and pop["rechts"] >= 1330 and pop["reiter_y"] == 312 and pop["market"]["punkt"][0] == 1045
+        and _findet(pop, 1000) and "Popup @" in pop["spur"])
+    chk("ORDER-BOT: Reiter-Zeile ohne Beschriftungen darunter → ohne_felder (kein Blindklick), keine Reiter → None",
+        ohne and ohne["ohne_felder"] and ohne["modus"] == "Reiter ohne Felder"
+        and order_bot.tv_panel_bereich([("Einheiten", (10, 10, 50, 30), "Text")], fenster) is None
+        and order_bot.tv_panel_bereich([], None) is None)
     # Ruecklese-Vergleich (18.08.2026, Feld zeigte '2', MT5 rechnete 0.01):
     # als Zahl vergleichen, MT5-Umformatierung und Locale duerfen nicht stoeren
     chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",
@@ -830,7 +860,7 @@ def main():
            ("Buy 1 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
     _ber = order_bot.tv_panel_bereich(_OP)
     chk("TV-ORDER: Panel-Anker aus der Reiter-Zeile; ohne 'Stop Limit' auf derselben Zeile kein Panel",
-        _ber is not None and _ber["links"] == 1307 and _ber["rechts"] == 1647 and _ber["market"]["punkt"] == (1360, 425)
+        _ber is not None and _ber["links"] == 1295 and _ber["rechts"] == 1647 and _ber["market"]["punkt"] == (1360, 425)   # links seit 25.09.2026 inkl. 'Stop loss, $' (1325 − 30)
         and order_bot.tv_panel_bereich([x for x in _OP if x[0] != "Stop Limit"]) is None
         and order_bot.tv_panel_bereich([("Market", (1337, 415, 1383, 435), "Text"), ("Stop Limit", (1550, 700, 1617, 720), "Text")]) is None)
     chk("TV-ORDER: Seite nur IM Panel und nur ueber der Reiter-Zeile — nie die Schnell-Knoepfe im Chart, innerstes Element",
