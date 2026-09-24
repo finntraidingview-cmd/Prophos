@@ -585,6 +585,55 @@ def solo_plan8(kommentar):
     ohne Kennung, der Close-Kommentar 'PXsoloc' und Fremdes → None."""
     m = re.match(r"^PXsolo:([0-9A-Za-z-]{1,8})", str(kommentar or "").strip())
     return m.group(1) if m else None
+
+
+def _pos_feld(p, name, standard=None):
+    """Feld aus einer MT5-Position (namedtuple) oder einem dict (Selbsttest)."""
+    if isinstance(p, dict):
+        return p.get(name, standard)
+    return getattr(p, name, standard)
+
+
+def solo_schon_offen(positionen, plan_id, plan_map=None):
+    """REIN RECHNEND (testbar): offene Solo-Position DESSELBEN Plans oder None — Riegel gegen den zweiten Open
+    (zweite Gegenprüfung 25.09.2026, Stand .549: zwei Prophos-Tabs derselben ID erreichen die Selbstheilung im
+    selben Takt, oder ein Plan mit offenem Hedge wird erneut gestartet → zwei Fusion-Positionen, die erste ohne
+    Wächter). Treffer: magic SOLO_MAGIC UND (plan_id laut Ticket→Plan-Zuordnung dieses Copiers == plan_id ODER
+    plan8 aus dem Kommentar == erste 8 Zeichen der plan_id). Ohne plan_id (Frontend vor .548) kein Riegel → None.
+    Das Fusion-Konto 488579 ist zwischen den PCs geteilt — positions_get sieht auch Positionen anderer Terminals,
+    der Riegel greift also auch PC-übergreifend, sobald die erste Position im Konto steht."""
+    pid = str(plan_id or "").strip()
+    p8 = solo_plan8(solo_kommentar(pid)) if pid else None
+    if not pid or not p8:
+        return None
+    pm = plan_map or {}
+    for p in (positionen or []):
+        try:
+            if int(_pos_feld(p, "magic", 0) or 0) != SOLO_MAGIC:
+                continue
+            t = int(_pos_feld(p, "ticket", 0) or 0)
+            zu = pm.get(t) or pm.get(str(t))
+            zu_pid = (zu.get("plan_id") if isinstance(zu, dict) else zu) or ""
+            if (zu_pid and str(zu_pid) == pid) or solo_plan8(_pos_feld(p, "comment", "")) == p8:
+                return p
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def solo_schon_offen_erg(p, plan_id):
+    """REIN RECHNEND (testbar): Antwort des Riegels — ok:false, code 'schon_offen', retry_ok:false, dazu die Daten
+    der vorhandenen Position (ticket, lots, fill, sl, tp, richtung, plan8, plan_id), damit das Frontend sie am Plan
+    übernehmen kann statt einen Fehler zu zeigen."""
+    typ = int(_pos_feld(p, "type", 0) or 0)
+    ticket = int(_pos_feld(p, "ticket", 0) or 0)
+    return {"ok": False, "code": "schon_offen", "retry_ok": False, "ticket": ticket,
+            "lots": float(_pos_feld(p, "volume", 0.0) or 0.0), "fill": float(_pos_feld(p, "price_open", 0.0) or 0.0),
+            "sl": float(_pos_feld(p, "sl", 0.0) or 0.0), "tp": float(_pos_feld(p, "tp", 0.0) or 0.0),
+            "richtung": "buy" if typ == 0 else "sell", "symbol": str(_pos_feld(p, "symbol", "") or ""),
+            "plan8": solo_plan8(_pos_feld(p, "comment", "")) or solo_plan8(solo_kommentar(plan_id)),
+            "plan_id": str(plan_id or "")[:64] or None,
+            "msg": f"Fuer diesen Plan liegt schon eine Solo-Position auf Fusion (Ticket {ticket}) — kein zweiter Open"}
 SOLO_AUFTRAG = "hedge_solo_auftrag.json"
 SOLO_ERGEBNIS = "hedge_solo_ergebnis.json"
 SOLO_MAX_ALTER_S = 40.0        # aeltere Auftraege werden verworfen, nie verspaetet ausgefuehrt
@@ -1716,6 +1765,26 @@ def main():
         richtung = str(a.get("richtung") or "").lower()
         if richtung not in ("buy", "sell"):
             return {"ok": False, "code": "befehl", "msg": "richtung muss buy/sell sein"}
+        # RIEGEL gegen den zweiten Open (zweite Gegenprüfung 25.09.2026): liegt fuer diesen Plan schon eine
+        # Solo-Position im (geteilten) Konto, wird NICHT gesendet — Antwort 'schon_offen' mit Ticket/Lots/Fill.
+        # Konto nicht lesbar → ebenfalls nicht senden (ein doppelter Hedge ist schlimmer als ein spaeter).
+        if a.get("plan_id"):
+            alle_pos = mt5.positions_get()
+            if alle_pos is None:
+                return {"ok": False, "code": "positionen_unlesbar", "retry_ok": True,
+                        "msg": f"Offene Positionen im Hedge-Terminal nicht lesbar ({mt5.last_error()}) — "
+                               "Riegel gegen Doppel-Open kann nicht pruefen, nichts gesendet"}
+            plan_map = {}
+            for t_, e_ in (hedge_acc.get("solo_bekannt") or {}).items():
+                if isinstance(e_, dict) and e_.get("plan_id"):
+                    plan_map[int(t_)] = str(e_.get("plan_id"))
+            for t_, pid_ in (hedge_acc.get("solo_plan") or {}).items():
+                plan_map[int(t_)] = str(pid_)
+            vorhanden = solo_schon_offen(alle_pos, a.get("plan_id"), plan_map)
+            if vorhanden is not None:
+                erg_ = solo_schon_offen_erg(vorhanden, a.get("plan_id"))
+                log(f"[solo] RIEGEL: Plan {str(a.get('plan_id'))[:8]} hat schon Ticket {erg_['ticket']} — kein zweiter Open")
+                return erg_
         si = sym_info(sym)
         if si is None:
             return {"ok": False, "code": "symbol", "msg": f"Symbol {sym} im Hedge-Terminal unbekannt"}

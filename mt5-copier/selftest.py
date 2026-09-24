@@ -1738,6 +1738,7 @@ def main():
     results.append(test_solo_level_und_grund())
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
+    results.append(test_solo_riegel())
     results.append(test_hedge_bereit())
 
     print()
@@ -1977,6 +1978,45 @@ def test_solo_zu_ring():
         print("✗ Persistenz-Form"); ok = False
     if ok:
         print("✓ Solo-Abschluss-Ring: erkennen, nicht doppelt, max 20, Persistenz-Form")
+    return ok
+
+
+def test_solo_riegel():
+    """Riegel gegen den zweiten Open (zweite Gegenpruefung 25.09.2026): zwei Auftraege derselben plan8 nacheinander
+    → der zweite findet die Position des ersten und antwortet 'schon_offen' (retry_ok False, Ticket/Lots/Fill)."""
+    import copier
+    ok = True
+    pid = "2089a033-1234-4abc-9def-000000000000"
+    konto = []   # offene Positionen im geteilten Fusion-Konto
+    # Auftrag 1: nichts offen → kein Riegel, „Open" legt die Position mit Kommentar PXsolo:<plan8> an
+    if copier.solo_schon_offen(konto, pid) is not None:
+        print("✗ Riegel greift bei leerem Konto"); ok = False
+    konto.append({"ticket": 555001, "magic": copier.SOLO_MAGIC, "comment": copier.solo_kommentar(pid), "type": 1,
+                  "volume": 0.94, "price_open": 20000.5, "sl": 20150.0, "tp": 19890.0, "symbol": "NAS100"})
+    # Auftrag 2: gleiche plan_id → Riegel
+    treffer = copier.solo_schon_offen(konto, pid)
+    erg = copier.solo_schon_offen_erg(treffer, pid) if treffer is not None else {}
+    soll = {"ok": False, "code": "schon_offen", "retry_ok": False, "ticket": 555001, "lots": 0.94, "fill": 20000.5,
+            "sl": 20150.0, "tp": 19890.0, "richtung": "sell", "plan8": "2089a033"}
+    if any(erg.get(k) != v for k, v in soll.items()):
+        print(f"✗ zweiter Auftrag gleicher plan8: {erg}"); ok = False
+    # anderer Plan, fremde magic, ohne plan_id → kein Riegel
+    if copier.solo_schon_offen(konto, "77777777-aaaa") is not None:
+        print("✗ Riegel greift bei fremdem Plan"); ok = False
+    if copier.solo_schon_offen([dict(konto[0], magic=760001)], pid) is not None:
+        print("✗ Riegel greift bei Copier-magic"); ok = False
+    if copier.solo_schon_offen(konto, None) is not None or copier.solo_schon_offen(konto, "") is not None:
+        print("✗ Riegel ohne plan_id muss None sein"); ok = False
+    # Kommentar vom Broker gekuerzt/ueberschrieben → Zuordnung ueber Ticket→plan_id (solo_plan/solo_bekannt)
+    gekuerzt = [dict(konto[0], comment="PXsolo")]
+    if copier.solo_schon_offen(gekuerzt, pid) is not None:
+        print("✗ ohne Kommentar-Kennung und ohne Zuordnung darf nichts greifen"); ok = False
+    if copier.solo_schon_offen(gekuerzt, pid, {555001: pid}) is None or copier.solo_schon_offen(gekuerzt, pid, {"555001": {"plan_id": pid}}) is None:
+        print("✗ Riegel ueber Ticket→plan_id (int- und String-Schluessel)"); ok = False
+    if copier.solo_schon_offen(None, pid) is not None:
+        print("✗ None-Liste"); ok = False
+    if ok:
+        print("✓ Solo-Riegel: zweiter Auftrag gleicher plan8 → 'schon_offen' mit Ticket/Lots/Fill; fremder Plan, Copier-magic, ohne plan_id frei; Zuordnung auch ueber Ticket→plan_id")
     return ok
 
 

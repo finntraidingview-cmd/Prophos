@@ -69,6 +69,15 @@ def main():
     check(k["id"] == "alt" and q == "fusion_live", "Rückfall: erstes live-Konto mit Firma Fusion")
     k, q = a["_wd_hedge_konto"]([{"id": "x", "account_type": "funded", "firm": "Apex"}], "488579")
     check(k is None and q == "ohne", "kein Fusion-Konto → ohne Konto")
+    # Frontend-Gleichstand (zweite Gegenprüfung 25.09.2026): Archiv-Filter + MetaApi-Login
+    k, q = a["_wd_hedge_konto"](konten, "488579", {"echo"})
+    check(k["id"] == "demo" and q == "login", "archiviertes live-Konto zählt nicht → nächster Login-Treffer")
+    k, q = a["_wd_hedge_konto"](konten, "488579", {"echo", "demo"})
+    check(k["id"] == "alt" and q == "fusion_live", "alle Login-Treffer archiviert → Rückfall Fusion live")
+    ma = [{"id": "ma", "external_id": "", "meta_api_account_id": "abc", "meta_api_login": "488579", "account_type": "live", "firm": "Fusion Markets", "created_at": "2026-09-01"},
+          {"id": "ohne_ma", "external_id": "", "meta_api_account_id": None, "meta_api_login": "488579", "account_type": "live", "firm": "X", "created_at": "2026-06-01"}]
+    k, q = a["_wd_hedge_konto"](ma, "488579")
+    check(k["id"] == "ma" and q == "login", "MetaApi-Login als Treffer (nur mit meta_api_account_id)")
 
     z = a["_wd_hedge_buchung"](offen["id"], "u1", konten[1], "Moritz", -4.2, D)
     check(z["kind"] == "wd_hedge" and z["currency"] == "EUR" and z["amount"] == -4.2 and z["account_id"] == "echo"

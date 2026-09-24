@@ -6841,17 +6841,29 @@ def _wd_hedge_schluessel(pid):
     return f"Trade #{str(pid)[:8]} WD-Hedge"
 
 
-def _wd_hedge_konto(konten, login=None):
-    """REIN RECHNEND: Fusion-Hedge-Konto für die Buchung aus den Konten des Plan-Besitzers.
-    1) external_id = login (Standard 488579), live vor anderen, dann das älteste;
-    2) erstes live-Konto mit Firma „Fusion" (ältestes); 3) None (Buchung ohne Konto).
+def _wd_hedge_konto(konten, login=None, archiviert=None):
+    """REIN RECHNEND: Fusion-Hedge-Konto für die Buchung aus den Konten des Plan-Besitzers — dieselbe Wahl wie
+    wdHedgeKonto im Frontend (zweite Gegenprüfung 25.09.2026, Befund 11: Backend nahm auch archivierte Konten und
+    kannte den MetaApi-Login nicht, je nachdem wer buchte, landete die Zeile auf einem anderen Konto).
+    Archivierte Konten (user_settings 'archive', Menge der IDs) zählen nie. Reihenfolge = created_at.
+    1) external_id = login ODER meta_api_login = login (nur mit meta_api_account_id, wie row.ma im Frontend),
+       live vor anderen, sonst der erste Treffer;
+    2) erstes live-Konto mit Firma „Fusion"; 3) None (Buchung ohne Konto).
     -> (Konto-dict | None, quelle 'login' | 'fusion_live' | 'ohne')"""
     login = str(login or WD_HEDGE_LOGIN).strip()
-    ks = sorted([a for a in (konten or []) if a and a.get("id")], key=lambda a: str(a.get("created_at") or ""))
-    passend = [a for a in ks if str(a.get("external_id") or "").strip() == login]
-    passend.sort(key=lambda a: 0 if str(a.get("account_type") or "") == "live" else 1)
+    aus = {str(x) for x in (archiviert or ())}
+    ks = sorted([a for a in (konten or []) if a and a.get("id") and str(a.get("id")) not in aus],
+                key=lambda a: str(a.get("created_at") or ""))
+
+    def _treffer(a):
+        if str(a.get("external_id") or "").strip() == login:
+            return True
+        return bool(a.get("meta_api_account_id")) and str(a.get("meta_api_login") or "").strip() == login
+
+    passend = [a for a in ks if _treffer(a)]
+    live = [a for a in passend if str(a.get("account_type") or "") == "live"]
     if passend:
-        return passend[0], "login"
+        return (live or passend)[0], "login"
     fusion = [a for a in ks if str(a.get("account_type") or "") == "live" and "fusion" in str(a.get("firm") or "").lower()]
     if fusion:
         return fusion[0], "fusion_live"
@@ -7122,9 +7134,10 @@ def admin_wd_plaene():
                                 ml = sb_select("mt5_live", {"select": "hedge_login,updated_at", "pc_name": f"eq.{h.get('pc')}",
                                                             "hedge_login": "neq.", "order": "updated_at.desc", "limit": "1"})
                                 login = str((ml[0] if ml else {}).get("hedge_login") or "").strip()
-                            konten = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at",
+                            konten = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at,"
+                                                                      "meta_api_account_id,meta_api_login",
                                                             "user_id": f"eq.{uid}"}) if uid else []
-                            konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN)
+                            konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN, _acc_plan_archiviert())
                             login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
                     filt = {"id": f"eq.{pid}", "route": "eq.tvv2", "status": "in.(open,review,completed)"}
                     if plan.get("updated_at"):
