@@ -41,7 +41,7 @@ import sys
 import threading
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
 TOL = 1e-6
 
@@ -619,6 +619,13 @@ def kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
         return k1m, k1m_vor
     neu = {"minute": minute, "wurzel": wurzel, "symbol": symbol, "o": p, "h": p, "l": p, "c": p, "n": 1}
     return neu, (k1m if k1m else k1m_vor)
+
+
+def utc_iso():
+    """Zeitstempel fuer die Solo-Quittungen/den Abschluss-Ring in UTC mit 'Z' (Review
+    24.09.2026 spaet): datetime.now().isoformat() ohne Zeitzone deutete der Mac in
+    Dubai als seine Ortszeit — die Karte lag Stunden daneben."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 SOLO_ZU = "hedge_solo_zu.json"      # Ring der selbst erkannten Abschluesse + zuletzt bekannte Tickets (neustart-fest)
@@ -1593,7 +1600,7 @@ def main():
         for e in weg:
             pl, grund, exit_preis = solo_pl_aus_history(e["ticket"])
             eintrag = {"ticket": int(e["ticket"]), "pl": pl, "grund": grund or "unbekannt", "fill_close": exit_preis,
-                       "closed_at": datetime.now().isoformat(timespec="seconds"),
+                       "closed_at": utc_iso(),
                        "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill")}
             ring = solo_zu_ring(ring, eintrag)
             log(f"[solo] Position {e['ticket']} zu ({eintrag['grund']}) · P&L {pl if pl is not None else '?'} · @ {exit_preis or '?'}")
@@ -1611,7 +1618,7 @@ def main():
     def solo_ergebnis_schreiben(alle, cmd_id, erg):
         erg = dict(erg)
         erg["cmd_id"] = cmd_id
-        erg["at"] = datetime.now().isoformat(timespec="seconds")
+        erg["at"] = utc_iso()
         alle[cmd_id] = erg
         # Ring: aelteste raus (Schluessel-Reihenfolge = Einfuegereihenfolge)
         while len(alle) > SOLO_ERGEBNIS_MAX:
