@@ -1262,6 +1262,7 @@
   #tradePlanModal #tp-v2-nq.active small,#tradePlanModal #tp-nq-nq.active span{color:rgba(255,255,255,.9) !important;opacity:1}
   #dashboard-view .tp-nq-warn{margin-top:6px;padding:7px 10px;border-radius:8px;background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4}
   #dashboard-view .tp-nq-warn[hidden]{display:none}
+  #tradePlanModal .tp-dir-gesperrt{border:1px dashed var(--danger) !important;color:var(--danger) !important;background:rgba(240,68,56,.06) !important;opacity:.75;cursor:not-allowed}
   /* Handy (24.09.2026, Vollumstieg auf V2): die 760-px-Regel oben trägt !important und schlug am Handy die
      Sheet-Breite — das Popup lief seitlich aus dem Bild. Auf ≤ 820 px volle Sheet-Breite, Sheet-Polster,
      Instrument-Seg und Kontrakte untereinander (eine Spalte), nichts scrollt quer. */
@@ -6067,6 +6068,8 @@
                 <button type="button" id="tp-dir-buy" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">BUY</button>
                 <button type="button" id="tp-dir-sell" class="btn btn-ghost" style="flex:1;font-weight:600;font-family:var(--mono)">SELL</button>
               </div>
+              <!-- Richtungs-Schutz Orbit V2 / Winning Days Farm (25.09.2026), gefüllt von tpV2RichtungSchutz -->
+              <div class="tp-nq-warn" id="tp-dir-konflikt" hidden></div>
             </div>
             <div class="field" id="tp-plan-start-um-row" style="grid-column:span 2;display:none">
               <label>Start um <span style="color:var(--sub);font-weight:400">— leer = von Hand starten</span></label>
@@ -30535,6 +30538,7 @@
     v2zeig('tp-master-tp-row', v2, false)
     v2zeig('tp-master-sl-row', v2 && !wdAn, false)   // WD Farm: der SL ist das Risiko Master — kein zweites Feld
     v2zeig('tp-dir-row', v2, true)
+    try{ tpV2RichtungSchutz() }catch(_){}   // Richtungs-Schutz Orbit V2 / Winning Days Farm (25.09.2026)
     v2zeig('tp-plan-start-um-row', v2, true)
     const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' || _tpRoute === 'tsv2' ? '— leer = kein TP' : '— nur mit SL') : '— für „Jetzt starten"'
     const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? (_tpRoute === 'tsv2' ? '— wie du platzierst' : '— Puls braucht sie') : '— für „Jetzt starten"'
@@ -30649,8 +30653,13 @@
     _tpKp.wahl = null
     tpKompassBoxRender(row, null, false)
   }
+  // Gesperrte Gegenrichtung im Plan-Popup (Richtungs-Schutz V2, 25.09.2026): tpDirSet wählt sie nie — auch nicht über die
+  // Kompass-Vorwahl oder beim Bearbeiten; stattdessen die laufende Richtung.
+  let _tpDirSperre = null, _tpDirSchutzLauf = 0
   function tpDirSet(dir){
-    _tpDir = (dir === 'buy' || dir === 'sell') ? dir : null
+    let d = (dir === 'buy' || dir === 'sell') ? dir : null
+    if(d && _tpDirSperre && d === _tpDirSperre) d = (d === 'buy' ? 'sell' : 'buy')
+    _tpDir = d
     const b = document.getElementById('tp-dir-buy')
     const s = document.getElementById('tp-dir-sell')
     if(b){ b.style.background = _tpDir === 'buy' ? 'rgba(18,183,106,.12)' : ''
@@ -30662,6 +30671,25 @@
   }
   document.getElementById('tp-dir-buy')?.addEventListener('click', () => tpDirSet('buy'))
   document.getElementById('tp-dir-sell')?.addEventListener('click', () => tpDirSet('sell'))
+  async function tpV2RichtungSchutz(){
+    const b = document.getElementById('tp-dir-buy'), sl = document.getElementById('tp-dir-sell'), hint = document.getElementById('tp-dir-konflikt')
+    const frei = () => { _tpDirSperre = null; for(const x of [b, sl]) if(x){ x.disabled = false; x.classList.remove('tp-dir-gesperrt'); x.title = '' }; if(hint){ hint.hidden = true; hint.textContent = '' } }
+    if(_tpRoute !== 'tvv2'){ frei(); return }
+    const lauf = ++_tpDirSchutzLauf
+    const masterId = document.getElementById('tp-master')?.value
+    const master = (accounts || []).find(a => String(a.id) === String(masterId)) || null
+    let k = null; try{ k = await v2RichtungKonflikt({ firm: master ? master.firm : '', ohneId: _editingPlanId }) }catch(_){}
+    if(lauf !== _tpDirSchutzLauf || _tpRoute !== 'tvv2') return
+    frei()
+    if(!k) return
+    if(hint){ hint.hidden = false; hint.textContent = k.text }
+    if(!k.lauf) return
+    const gesperrt = k.lauf === 'long' ? 'sell' : 'buy', btn = gesperrt === 'sell' ? sl : b
+    _tpDirSperre = gesperrt
+    if(btn){ btn.disabled = true; btn.classList.add('tp-dir-gesperrt'); btn.title = k.text }
+    if(!_tpDir || _tpDir === gesperrt) tpDirSet(k.lauf === 'long' ? 'buy' : 'sell')
+  }
+  document.getElementById('tp-master')?.addEventListener('change', () => { try{ tpV2RichtungSchutz() }catch(_){} })
 
   /* Der einmal gefundene Hedge-Account gehoert in die DATENBANK, nicht in die
    * Telemetrie (31.08.2026, Finns Fund am MacBook: "warum wird mir hier der
@@ -30885,6 +30913,49 @@
     }
     return out
   }
+
+  /* RICHTUNGS-SCHUTZ für Orbit V2 / Winning Days Farm (25.09.2026, Finn: „Beim ersten Trade bei Jacob bin ich long gegangen, jetzt
+   * will ich den zweiten starten und es gibt keinen Richtungsschutz — gefährlich"). Dieselbe Doktrin wie firmLiveRichtungen +
+   * firmGeplanteRichtungen (nur die eigene ID, seit 26.08.2026), erweitert um die Regel der Koordination: ein LAUFENDER Plan der
+   * eigenen ID sperrt die Gegenrichtung für JEDE Firma (Orbit-V2-Positionen stehen nicht in mt5_live/dup_live, der Plan ist dort die
+   * einzige Wahrheit). Rangfolge wie im Order-Dialog: erst Laufendes (offene Pläne jeder Firma + Live-Positionen derselben Firma),
+   * nur ohne Laufendes die gespeicherten Pläne derselben Firma. Widersprechen sich die Quellen (LONG und SHORT) → kein Block, nur
+   * Hinweis. frisch = Pläne direkt aus der DB (Start/Speichern), sonst aus tradePlans (Popup). Kein Treffer → null.
+   * → { lauf:'long'|'short'|null, widerspruch, text } */
+  async function v2RichtungKonflikt(o){
+    const norm = f => String(f || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const ziel = norm(o && o.firm), ohne = o && o.ohneId != null ? String(o.ohneId) : null
+    let liste = null
+    if(o && o.frisch){
+      try{ const { data, error } = await supabase.from('trade_plans').select('id,status,richtung,master_firm,master_name').in('status', ['open', 'planned'])
+           if(!error && Array.isArray(data)) liste = data.map(r => ({ id: r.id, status: r.status, richtung: r.richtung, firm: r.master_firm, name: r.master_name })) }catch(_){}
+    }
+    if(!liste) liste = (tradePlans || []).filter(p => p.status === 'open' || p.status === 'planned')
+      .map(p => ({ id: p.id, status: p.status, richtung: p.richtung, firm: p.masterFirm, name: p.masterName }))
+    const lauf = { long: [], short: [] }, gep = { long: [], short: [] }
+    for(const p of liste){
+      if(ohne && String(p.id) === ohne) continue
+      if(p.richtung !== 'buy' && p.richtung !== 'sell') continue
+      const seite = p.richtung === 'buy' ? 'long' : 'short'
+      if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
+      else if(ziel && norm(p.firm) === ziel) gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
+    }
+    try{
+      if(ziel && typeof window.firmLiveRichtungen === 'function'){
+        const d = await window.firmLiveRichtungen(o.firm)
+        for(const x of (d.long || [])) lauf.long.push({ name: x.wer, firm: o.firm, verb: 'läuft gerade' })
+        for(const x of (d.short || [])) lauf.short.push({ name: x.wer, firm: o.firm, verb: 'läuft gerade' })
+      }
+    }catch(_){ /* keine Flotten-Daten → nur die Pläne */ }
+    const quelle = (lauf.long.length || lauf.short.length) ? lauf : gep
+    const L = quelle.long.length, S = quelle.short.length
+    if(!L && !S) return null
+    if(L && S) return { lauf: null, widerspruch: true, text: `Laufende/geplante Trades widersprechen sich (LONG und SHORT) — Richtung selbst prüfen.` }
+    const seite = L ? 'long' : 'short', b0 = quelle[seite][0]
+    return { lauf: seite, widerspruch: false,
+      text: `Achtung: ${b0.name || '?'}${b0.firm ? ` (${b0.firm})` : ''} ${b0.verb} ${seite.toUpperCase()} — ${seite === 'long' ? 'SELL' : 'BUY'} wäre gegen den ${quelle === lauf ? 'laufenden' : 'geplanten'} Trade` }
+  }
+  window._v2RichtungKonflikt = v2RichtungKonflikt   // Entwickler-Haken wie _mklStub: Regel ohne Popup prüfbar
 
   function tpOrderDirSet(dir){
     _tpOrderDir = dir
@@ -31351,7 +31422,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.582'
+  const OS_TAB_BUILD = '2026-09-22.583'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31620,6 +31691,16 @@
       toast('Für „Starten" fehlt: ' + w.fehlt.join(', ') + ' — im Order-Popup speichern.', 'end')
       openTpOrderModal(planId)
       return
+    }
+    // RICHTUNGS-SCHUTZ Orbit V2 / Winning Days Farm (25.09.2026): frisch aus der DB, bevor irgendetwas an Puls geht — gilt für den
+    // Karten-Klick, die Startzeit/den Farmer (tpStartUmTick) und den Remote-Start vom Mac/Handy (orderSignalTick → hier am PC)
+    if(plan.route === 'tvv2'){
+      let k = null; try{ k = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
+      if(k && k.lauf && k.lauf !== (dir === 'sell' ? 'short' : 'long')){
+        const t = k.text + ' — nicht gestartet (Richtungs-Schutz).'
+        if(fern) return fern.melde({ ok:false, msg: t })
+        toast(t, 'end'); return
+      }
     }
     // DUPLIKUM-CHECK ZUERST (22.09.2026, Finn: „beim Starten: erst Duplikum, dann Verbindung
     // zum PC, dann die Order — alles in einem Stück"). Nicht im Signal-Lauf am PC: dort hat
@@ -33922,6 +34003,7 @@
     _editingPlanId = editId || null
     const isEdit = !!editId
     _tpRiskAuto.master = null; _tpRiskAuto.manuell = false   // Risiko-Box-Automatik je Popup neu (22.09.2026)
+    _tpDirSperre = null   // Richtungs-Schutz: Sperre des vorigen Popups gilt nicht weiter (25.09.2026)
     _tpWdHand.mult = null; _tpWdHand.risk = null; _tpWdHand.slaveGeschrieben = null; _tpWdHand.slaveVorbelegt = false; _tpWdHand.slaveHand = false   // WD-Farm: Hand-Multiplikator + Staffel-Sperre je Popup neu (25.09.2026)
 
     // Title
@@ -35481,6 +35563,11 @@
     // Winning Day (24.09.2026 abends): Fusion-Gegenhedge aus der Staffel am Plan; „Orbit V2" ohne Winning Day nullt ihn
     // nicht (der Betrag kann aus dem Order-Popup stammen) — nur der Wechsel weg von tvv2 räumt ihn weg.
     if(_tpRoute === 'tvv2'){
+      // Richtungs-Schutz (25.09.2026): Pläne frisch aus der DB — Gegenrichtung zu einem laufenden/geplanten Trade wird nicht gespeichert
+      if(_tpDir === 'buy' || _tpDir === 'sell'){
+        let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
+        if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
+      }
       if(_tpWd){
         if(!masterTp){ msg('Winning Days Farm braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).', 'err'); return }
         if(!(mult > 0)){ msg('Multiplikator nicht rechenbar — Risiko Master ($), Kontrakte und Risiko Slave (€) prüfen.', 'err'); return }
