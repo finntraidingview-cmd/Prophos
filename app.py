@@ -3848,7 +3848,8 @@ def wt_check_user(uid, creds, memo):
     # V2-Wege (23.09.2026, Finn: "nichts gegengehedgt"): Echo V2 (mt5v2) und Orbit V2 (tvv2) haben
     # weder Duplikum noch Slave — der Waechter darf sie nicht anfassen, sonst 'erkennt' er Enden aus
     # Duplikum-Daten, die es fuer diese Plaene nie gibt.
-    plans = [p for p in plans if (p.get("route") or "") not in ("mt5", "mt5v2", "tvv2")]
+    # tsv2 = Topstep V2 (24.09.2026 abends, Finn: "bei Topstep wird nichts mehr über die API gemacht, alles manuell")
+    plans = [p for p in plans if (p.get("route") or "") not in ("mt5", "mt5v2", "tvv2", "tsv2")]
     active = [p for p in plans if p.get("status") in ("planned", "open")]
     review_missing = [p for p in plans if p.get("status") == "review"
                       and (p.get("master_pl") is None or p.get("slave_pl") is None)]

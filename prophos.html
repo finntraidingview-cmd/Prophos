@@ -1763,6 +1763,7 @@
   /* V2-Wege (23.09.2026): gleiche Farbe wie Echo/Orbit, gestrichelter Rand = „ohne Hedge" */
   #dashboard-view .tc2-sys-mt5v2{background:rgba(14,151,149,.15);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}
   #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
+  #dashboard-view .tc2-sys-tsv2{background:rgba(234,88,12,.12);color:#C2410C;outline:1px dashed rgba(234,88,12,.55);outline-offset:-1px}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
   #dashboard-view .tc2-actions .tc2-ab{padding:4px 6px}
   #dashboard-view .tc2-actions .tc2-btn{padding:4px 10px;font-size:12px}
@@ -5654,6 +5655,8 @@
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2" style="margin-top:6px">
                 <button type="button" id="tp-route-mt5v2">Echo V2</button>
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
+                <!-- Topstep V2 (24.09.2026 abends, Finn: „Topstep ohne API, alles manuell") -->
+                <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
               </div>
             </div>
             <div class="field" id="tp-master-row">
@@ -10780,7 +10783,7 @@
     // Firmenfarbe: feste Palette der Personen, Platz aus einem Hash des Namens (kein eigener Farbsatz)
     const admKfFirmColor = firm => { let h = 0; for(const ch of String(firm || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ADM_P_COLORS[h % ADM_P_COLORS.length] }
     const admKfUsdKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k $' : Math.round(v) + ' $'
-    const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
+    const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
     const admKfWochentag = d => { const x = d ? new Date(d + 'T12:00:00Z') : null; return x && !isNaN(x) ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][x.getUTCDay()] : '—' }
     const ADM_KF_WT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So', '—']
     const admKfStdNum = k => { const n = parseInt(k); return Number.isFinite(n) ? n : 99 }   // „00 h" ist 0, nicht „fehlt" (Review F5)
@@ -16492,7 +16495,7 @@
    * Today's P&L → Auto-P&L). Echo V2 seit 24.09.2026 (Finn: „wir übernehmen
    * einfach von Echo"): Master-Baseline beim Puls-Klick, Ende-Erkennung + Live-P&L + Auto-P&L über die
    * Echo-Zustandsmaschine (mt5PlanPollTick), Slave-P&L fest 0. */
-  function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' }
+  function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' || r === 'tsv2' }   // tsv2 = Topstep V2, von Hand (24.09.2026 abends)
   function routeIstEcho(r){ return r === 'mt5' || r === 'mt5v2' }      // Puls im MT5-Master-Terminal
   function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' }   // Puls in TradingView
   const SYS_STICKER = {
@@ -16501,6 +16504,7 @@
     tvplus: ['Orbit',     'Orbit — Duplikum kopiert, Puls platziert die Order automatisch in TradingView'],
     mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
     tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
+    tsv2:   ['Topstep V2', 'Topstep V2 — du platzierst selbst in TopstepX: kein Bot, keine API, kein Hedge; „Läuft" und P&L von Hand'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
   }
@@ -25683,7 +25687,7 @@
       actions = istV2Karte ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${jetztBtn}
+        ${p.route === 'tsv2' ? `<button class="btn btn-primary tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>` : jetztBtn}
         <button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Ohne Puls abschließen — P&L und Trade-Datum von Hand eintragen (z. B. nachtragen, wenn etwas schiefging)">Erledigt</button>` : `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
@@ -25698,7 +25702,7 @@
       // Echo V2 über /api/master-close (ohne_hedge), Orbit V2 über /api/tv-close; vom Mac als close-Signal.
       const closeBtn = (p.route === 'mt5' && !isPending)
         ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:#D92D20">Schließen</button>`
-        : (istV2Karte && !isPending)
+        : (istV2Karte && !isPending && p.route !== 'tsv2')
           ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:#D92D20">Schließen</button>`
           : ''
       actions = `
@@ -27615,6 +27619,7 @@
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     document.getElementById('tp-route-mt5v2')?.classList.toggle('active', _tpRoute === 'mt5v2')
     document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2')
+    document.getElementById('tp-route-tsv2')?.classList.toggle('active', _tpRoute === 'tsv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
     const sb = document.getElementById('tradePlanSaveStart')
@@ -27651,9 +27656,9 @@
     v2zeig('tp-master-sl-row', v2, false)
     v2zeig('tp-dir-row', v2, true)
     v2zeig('tp-plan-start-um-row', v2, true)
-    const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' ? '— leer = kein TP' : '— nur mit SL') : '— für „Jetzt starten"'
-    const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? '— Puls braucht sie' : '— für „Jetzt starten"'
-    const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht bei TP'
+    const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' || _tpRoute === 'tsv2' ? '— leer = kein TP' : '— nur mit SL') : '— für „Jetzt starten"'
+    const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? (_tpRoute === 'tsv2' ? '— wie du platzierst' : '— Puls braucht sie') : '— für „Jetzt starten"'
+    const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = (_tpRoute === 'tvv2' || _tpRoute === 'tsv2') ? '— leer = kein SL' : '— Pflicht bei TP'
     // V2-Raster (24.09.2026, Finn: „Allgemein noch sehr unübersichtlich, nicht clean"): Klasse am Formular
     // (CSS: Master volle Breite, Platzhalter weg → Instrument | Kontrakte, dann TP | SL). Auf den anderen
     // Wegen wird sie exakt wieder entfernt — dort ändert sich nichts.
@@ -27663,7 +27668,7 @@
     // Orbit V2 = ganze Kontrakte (step 1, min 1), Echo V2 = Lots mit 0.01, alle anderen Wege wie bisher.
     const qtyEl = document.getElementById('tp-master-qty'), qtyLbl = document.getElementById('tp-master-qty-label')
     if(qtyEl){
-      if(_tpRoute === 'tvv2'){ qtyEl.step = '1'; qtyEl.min = '1'; qtyEl.setAttribute('inputmode', 'numeric') }
+      if(_tpRoute === 'tvv2' || _tpRoute === 'tsv2'){ qtyEl.step = '1'; qtyEl.min = '1'; qtyEl.setAttribute('inputmode', 'numeric') }
       else if(_tpRoute === 'mt5v2'){ qtyEl.step = '0.01'; qtyEl.min = '0.01'; qtyEl.removeAttribute('inputmode') }
       else { qtyEl.step = '0.1'; qtyEl.min = '0.01'; qtyEl.removeAttribute('inputmode') }
     }
@@ -28411,7 +28416,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.456'
+  const OS_TAB_BUILD = '2026-09-22.457'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30586,7 +30591,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? 'Orbit V2' : r.route === 'mt5v2' ? 'Echo V2' : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? 'Orbit V2' : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? 'Topstep V2' : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -30918,10 +30923,10 @@
     // sie per Struktur, siehe planMirrorRoute) — beim Bearbeiten soll der Regler
     // aber ehrlich "Topstep" zeigen, sonst filtert der dup-Weg den TSX-Master
     // aus dem Dropdown und die Auswahl wirkt kaputt (01.09.2026).
-    _tpRoute = _editPlan ? (['mt5', 'tvplus', 'mt5v2', 'tvv2'].includes(_editPlan.route) ? _editPlan.route
+    _tpRoute = _editPlan ? (['mt5', 'tvplus', 'mt5v2', 'tvv2', 'tsv2'].includes(_editPlan.route) ? _editPlan.route
                             : (typeof planMirrorRoute === 'function' && planMirrorRoute(_editPlan)) ? 'topstep'
                             : 'dup')
-                         : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2'].includes(localStorage.getItem(TP_ROUTE_LS))
+                         : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2', 'tsv2'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
     // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
@@ -30934,7 +30939,7 @@
         const kh = kapitelObj(kapitelHeute())
         if(kh && kh.hedge === false && localStorage.getItem('prophos_tp_route_k2') !== String(kh.id)){
           const alt = localStorage.getItem(TP_ROUTE_LS)
-          _tpRoute = alt === 'mt5' ? 'mt5v2' : (alt === 'mt5v2' || alt === 'tvv2') ? alt : 'tvv2'
+          _tpRoute = alt === 'mt5' ? 'mt5v2' : alt === 'topstep' ? 'tsv2' : (alt === 'mt5v2' || alt === 'tvv2' || alt === 'tsv2') ? alt : 'tvv2'
           localStorage.setItem(TP_ROUTE_LS, _tpRoute)
           localStorage.setItem('prophos_tp_route_k2', String(kh.id))
         }
@@ -30953,7 +30958,7 @@
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-tsv2'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -31213,8 +31218,10 @@
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
             }
+            // Topstep V2 (24.09.2026 abends): Master = Topstep- oder Futures-Konto, ohne Duplikum, ohne External ID
+            if(_tpRoute === 'tsv2' && role === 'master' && !(tpFirmIstFutures(a.firm) || /topstep/i.test(String(a.firm || '')))) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
-            if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2') return false
+            if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
             // nie Master sein (gleiches Selbst-Spiegel-Prinzip wie beim Hedge).
             if(role === 'slave'  && _dupSlaveIds && !_dupSlaveIds.has(String(a.id))) return false
@@ -31449,7 +31456,7 @@
       tpRecompute()
     }
     ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus'],
-      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2']].forEach(([id, r]) => {
+      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
@@ -31544,7 +31551,7 @@
         const _slEl = document.getElementById('tp-master-sl'); if(_slEl) _slEl.value = p.masterSl ?? ''
         const _suEl2 = document.getElementById('tp-plan-start-um'); if(_suEl2) _suEl2.value = p.startUm ? tpStartUmZeit(p.startUm) : ''
         if(typeof tpPlanStartUmHinweis === 'function') tpPlanStartUmHinweis()
-        if(p.route === 'tvv2' && p.masterSymbol){ _tpNqMode = /^NQ/i.test(String(p.masterSymbol)) ? 'nq' : 'mnq'; if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }
+        if((p.route === 'tvv2' || p.route === 'tsv2') && p.masterSymbol){ _tpNqMode = /^NQ/i.test(String(p.masterSymbol)) ? 'nq' : 'mnq'; if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }
         document.getElementById('tp-planned-for').value = p.plannedFor || ''
         document.getElementById('tp-notes').value       = p.notes || ''
         // Priority
@@ -31738,7 +31745,7 @@
     // erscheint dort für JEDE Futures-Firma (Einheit Kontrakte), nicht nur für projectx-Presets — das Symbol
     // (MNQ/NQ + Kontraktmonat) wandert beim Speichern als master_symbol an den Plan.
     const masterIsProjectx = tpNqIsProjectx(master?.firm)
-      || (typeof _tpRoute !== 'undefined' && _tpRoute === 'tvv2' && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master?.firm))
+      || (typeof _tpRoute !== 'undefined' && (_tpRoute === 'tvv2' || _tpRoute === 'tsv2') && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master?.firm))
     const slaveIsProjectx  = tpNqIsProjectx(slave?.firm)
 
     // Master toggle — auf den V2-Wegen (24.09.2026) übernimmt der .seg #tp-v2-instr-seg (nur Orbit V2 mit
@@ -31751,7 +31758,7 @@
     const rowV2 = document.getElementById('tp-v2-instr-row')
     // 24.09.2026 00:1x (Finn: „ich will hier zwischen NQ und MNQ unterscheiden können bei Orbit V2 — das gibt's
     // gerade gar nicht"): bei Orbit V2 IMMER sichtbar, auch bevor ein Master gewählt ist — Orbit V2 ist Futures.
-    if(rowV2) rowV2.style.display = (v2 && _tpRoute === 'tvv2') ? '' : 'none'
+    if(rowV2) rowV2.style.display = (v2 && (_tpRoute === 'tvv2' || _tpRoute === 'tsv2')) ? '' : 'none'
     document.getElementById('tp-v2-mnq')?.classList.toggle('active', _tpNqMode === 'mnq')
     document.getElementById('tp-v2-nq')?.classList.toggle('active',  _tpNqMode === 'nq')
 
@@ -32353,7 +32360,7 @@
     // (sie kamen bisher nur aus Popup 2). Orbit V2: MNQ/NQ aus dem Schalter + gerechneter Kontraktmonat
     // (wie Popup 2 bei Orbit); Echo V2: Firmen-Standard (null). Neue Startzeit setzt den Claim zurück.
     const v2Extra = !v2 ? {} : {
-      master_symbol: _tpRoute === 'tvv2' ? (((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()) : null,
+      master_symbol: (_tpRoute === 'tvv2' || _tpRoute === 'tsv2') ? (((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()) : null,
       start_um: startUmVal ? tpStartUmAusZeit(startUmVal).toISOString() : null
     }
     try{
@@ -35676,6 +35683,7 @@
     // kennt nur echo/tv/duplikum/hand, ein eigener Wert würde den Abschluss abweisen.
     if(route === 'mt5' || route === 'mt5v2') return 'echo'
     if(route === 'tvv2') return 'tv'
+    if(route === 'tsv2') return 'hand'   // Topstep V2: es gibt keine Auto-Quelle
     return 'duplikum'   // dup, tvplus, topstep (Mirror) und alles Unbekannte
   }
   function plQuelleErmitteln(mPl){
