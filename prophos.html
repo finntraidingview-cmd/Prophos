@@ -8875,6 +8875,8 @@
                 <button class="btn btn-ghost" id="wal-feed-refresh" title="Transfers aller Wallets neu von den Chains laden" style="padding:7px 12px">↻</button>
               </div>
             </div>
+            <!-- Lücken der Gegenprüfung (25.09.2026): nie still fehlen — rot über dem Feed -->
+            <div id="wal-feed-warn" style="font-size:12px;color:var(--danger);background:rgba(240,68,56,.08);border-radius:8px;padding:8px 10px;margin:4px 0 8px" hidden></div>
             <div class="table-wrap">
               <table class="t">
                 <thead><tr>
@@ -12841,6 +12843,9 @@
                   rpc:'https://ethereum-rpc.publicnode.com',
                   rpcFallback:'https://eth.drpc.org',
                   txApi:'https://eth.blockscout.com',
+                  // Gegenprüfung an der Kette (25.09.2026): publicnode keyless max. ~5.000 Blöcke je eth_getLogs, ältere = „archive" (Token nötig)
+                  logSpan:5000, logStuecke:3, pruefBloecke:600,
+                  bsSym:{ '0xdac17f958d2ee523a2206206994597c13d831ec7':'USDT', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48':'USDC' },
                   explorer: a => 'https://etherscan.io/address/' + a,
                   tx: h => 'https://etherscan.io/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
@@ -12852,6 +12857,9 @@
                             'USDC.e':'0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' },  // USDC.e (gebridgt)
                   rpc:'https://arb1.arbitrum.io/rpc',
                   txApi:'https://arbitrum.blockscout.com',
+                  // Gegenprüfung an der Kette (25.09.2026): arb1 liefert auch 1 Mio. Blöcke (~2,9 Tage) je eth_getLogs
+                  logSpan:1000000, logStuecke:4, pruefBloecke:28800,
+                  bsSym:{ '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9':'USDT0', '0xaf88d065e77c8cc2239327c5edb3a432268e5831':'USDC', '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8':'USDC.E' },
                   explorer: a => 'https://arbiscan.io/address/' + a,
                   tx: h => 'https://arbiscan.io/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
@@ -12867,6 +12875,9 @@
                   rpc:'https://polygon-bor-rpc.publicnode.com',
                   rpcFallback:'https://polygon-rpc.com',
                   txApi:'https://polygon.blockscout.com',
+                  // Gegenprüfung an der Kette (25.09.2026): publicnode max. 10.000 Blöcke je eth_getLogs
+                  logSpan:10000, logStuecke:6, pruefBloecke:3600,
+                  bsSym:{ '0xc2132d05d31c914a87c6611c10748aeb04b58e8f':'USDT0' },
                   explorer: a => 'https://polygonscan.com/address/' + a,
                   tx: h => 'https://polygonscan.com/tx/' + h,
                   valid: a => /^0x[0-9a-fA-F]{40}$/.test(a),
@@ -13441,7 +13452,123 @@
     const walTxCache = new Map()   // wallet.id → { t, res } — 60 s, schont TronGrid & Co.
     const WAL_TX_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
+    /* GEGENPRÜFUNG AN DER KETTE (25.09.2026, Vorfall: Pascal schickte 4.497,50 USDT0 von 0xe120…5EE7 auf Arbitrum, der
+     * Feed zeigte nichts — der Arbitrum-Index von Blockscout stand seit gut zwei Tagen bei Block 507.912.969, meldete aber
+     * „fertig indexiert"; auch die Abflüsse über 203,60 und 185,09 USDC fehlten. Finn: „sowas darf NIE passieren … ich will
+     * alle Transfers sehen"). Blockscout bleibt die Quelle für den Verlauf, aber jede EVM-Wallet wird zusätzlich direkt am
+     * Knoten gelesen (eth_getLogs auf die Stable-Contracts, raus + rein): vom Kopf der Kette zurück bis zum Index-Stand von
+     * Blockscout (Lücke) bzw. mindestens pruefBloecke (~2 h, Gegenprüfung auch bei frischem Index). Was Blockscout nicht
+     * kennt, wird ergänzt; lässt sich die Lücke nicht vollständig lesen, steht das ROT über dem Feed (res.warn) — nie still. */
+    const walKopfCache = new Map()   // chain → { t, p } — Index-Stand Blockscout + Kopf der Kette, 30 s, eine Abfrage je Chain
+    function walKoepfe(key, c){
+      const alt = walKopfCache.get(key)
+      if(alt && Date.now() - alt.t < 30000) return alt.p
+      const p = Promise.all([
+        fetch(c.txApi + '/api/v2/blocks?type=block').then(r => r.ok ? r.json() : null).then(d => {
+          const b = d && Array.isArray(d.items) ? d.items[0] : null
+          return (b && Number(b.height) > 0) ? { hoehe: Number(b.height), ts: Date.parse(b.timestamp) || null } : null
+        }).catch(() => null),
+        walRpc(c, 'eth_blockNumber', []).then(h => parseInt(h, 16)).catch(() => null)
+      ]).then(([bs, kopf]) => ({ bs, kopf: (kopf > 0) ? kopf : null }))
+      walKopfCache.set(key, { t: Date.now(), p })
+      return p
+    }
+    // höchstens 2 gleichzeitige eth_getLogs je Chain — öffentliche Knoten drosseln sonst (7 Arbitrum-Wallets × raus/rein)
+    const walLogSlots = new Map()
+    async function walLogRpc(key, c, filter){
+      let sl = walLogSlots.get(key)
+      if(!sl){ sl = { frei: 2, warte: [] }; walLogSlots.set(key, sl) }
+      if(sl.frei > 0) sl.frei--
+      else await new Promise(res => sl.warte.push(res))
+      try{ return await walRpc(c, 'eth_getLogs', [filter]) }
+      finally{ const naechster = sl.warte.shift(); if(naechster) naechster(); else sl.frei++ }
+    }
+    const walBsSymGelernt = new Map()   // 'chain:contract' → Symbol, wie Blockscout es nennt (Archiv-Schlüssel walTxKey enthält das Symbol)
+    const walDauer = ms => { const m = Math.round(ms / 60000); return m < 90 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${(m / 1440).toFixed(1).replace('.', ',')} Tage` }
+    async function walTxKette(key, c, w, ziel, kopf){
+      const me = w.address.toLowerCase()
+      const meTopic = '0x000000000000000000000000' + me.slice(2)
+      const adressen = Object.values(c.stables)
+      const symVon = a => { const k = String(a).toLowerCase()
+        return walBsSymGelernt.get(key + ':' + k) || (c.bsSym && c.bsSym[k]) || Object.entries(c.stables).find(([, x]) => x.toLowerCase() === k)?.[0] || '?' }
+      const hex = n => '0x' + n.toString(16)
+      const span = c.logSpan || 5000, maxStuecke = c.logStuecke || 3
+      const roh = []
+      let bis = kopf, stuecke = 0, abgedecktAb = null, fehler = null
+      while(bis >= ziel && stuecke < maxStuecke){
+        const von = Math.max(ziel, bis - span + 1)
+        try{
+          const [raus, rein] = await Promise.all([
+            walLogRpc(key, c, { address: adressen, fromBlock: hex(von), toBlock: hex(bis), topics: [WAL_TX_TRANSFER_TOPIC, meTopic] }),
+            walLogRpc(key, c, { address: adressen, fromBlock: hex(von), toBlock: hex(bis), topics: [WAL_TX_TRANSFER_TOPIC, null, meTopic] })
+          ])
+          for(const [dir, logs] of [['raus', raus], ['rein', rein]]){
+            for(const l of (logs || [])){
+              const from = '0x' + String(l.topics[1]).slice(-40), to = '0x' + String(l.topics[2]).slice(-40)
+              if(dir === 'rein' && from === me) continue   // Selbst-Transfer steckt schon im raus-Lauf
+              roh.push({ bn: parseInt(l.blockNumber, 16), dir, amount: (parseInt(l.data, 16) || 0) / 10 ** (c.stableDec || 6),
+                         sym: symVon(l.address), tok: String(l.address).toLowerCase(), other: dir === 'raus' ? to : from,
+                         hash: String(l.transactionHash || '').toLowerCase(), ts: null, quelle: 'kette' })
+            }
+          }
+        }catch(e){ fehler = (e && e.message) || String(e); break }
+        abgedecktAb = von; bis = von - 1; stuecke++
+      }
+      return { roh, abgedecktAb, fehler }
+    }
+
     async function walTxEvmBlockscout(c, w){
+      const key = w.chain
+      const [bsErg, koepfe] = await Promise.all([
+        walTxBlockscoutRoh(c, w).then(x => ({ x }), e => ({ fehler: (e && e.message) || String(e) })),
+        walKoepfe(key, c)
+      ])
+      const bs = bsErg.x || null
+      const warn = [], notes = []
+      if(bs && bs.fremd) notes.push(`${bs.fremd} Transfer${bs.fremd === 1 ? '' : 's'} unbekannter Token ausgeblendet — nur USDT/USDC-Contracts zählen (Schutz vor Adress-Poisoning: nie Adressen aus der Historie kopieren).`)
+      for(const e of (bs ? bs.list : [])) if(e.tok && e.sym) walBsSymGelernt.set(key + ':' + e.tok, e.sym)
+      const kopf = koepfe.kopf, bsKopf = koepfe.bs
+      let kette = [], bsFehlte = 0
+      if(!kopf){
+        warn.push(`${c.label}: Gegenprüfung an der Kette nicht möglich (Knoten nicht erreichbar)`
+          + (bsKopf && bsKopf.ts && Date.now() - bsKopf.ts > 10 * 60000 ? ` — und Blockscout hinkt ${walDauer(Date.now() - bsKopf.ts)} hinterher: neuere Transfers fehlen evtl.` : ''))
+      } else {
+        const fenster = c.pruefBloecke || 600
+        // Ziel: bis zum Index-Stand von Blockscout (Lücke) und mindestens das Prüf-Fenster; ohne Blockscout so weit es geht
+        const lueckeAb = (bs && bsKopf) ? bsKopf.hoehe + 1 : null
+        const ziel = bs ? Math.max(0, Math.min(lueckeAb != null ? lueckeAb : kopf - fenster, kopf - fenster))
+                        : Math.max(0, kopf - (c.logSpan || 5000) * (c.logStuecke || 3) + 1)
+        const k = await walTxKette(key, c, w, ziel, kopf)
+        const muss = bs ? (lueckeAb != null ? Math.min(lueckeAb, kopf - fenster) : kopf - fenster) : ziel
+        if(k.abgedecktAb == null || k.abgedecktAb > muss){
+          const ab = (bs && bsKopf && bsKopf.ts) ? walTxZeit(bsKopf.ts) : null
+          warn.push(`${w.person_name} · ${c.label}: Transfers ${ab ? 'seit ' + ab + ' ' : ''}NICHT vollständig geprüft`
+            + (k.fehler ? ` (Knoten: ${String(k.fehler).slice(0, 120)})` : ' (Lücke größer als die Lesegrenze des Knotens)') + ' — im Explorer ↗ nachsehen')
+        }
+        if(!bs) warn.push(`${w.person_name} · ${c.label}: Blockscout nicht erreichbar (${String(bsErg.fehler || '').slice(0, 80)}) — nur die jüngsten Blöcke direkt von der Kette gelesen, Älteres aus dem Archiv`)
+        else if(bsKopf && bsKopf.ts && Date.now() - bsKopf.ts > 10 * 60000 && !warn.length)
+          notes.push(`${c.label}: Blockscout hinkt ${walDauer(Date.now() - bsKopf.ts)} hinterher — die Transfers seitdem wurden direkt von der Kette gelesen und ergänzt.`)
+        // Abgleich: was Blockscout nicht kennt, kommt dazu (Schlüssel Hash + Contract + Betrag + Richtung)
+        const schl = e => [e.hash, e.tok, e.amount.toFixed(6), e.dir].join('|')
+        const bekannt = new Set((bs ? bs.list : []).map(schl))
+        for(const e of k.roh){
+          if(bekannt.has(schl(e))) continue
+          kette.push(e)
+          if(bsKopf && e.bn <= bsKopf.hoehe) bsFehlte++
+        }
+        if(bsFehlte) warn.push(`${w.person_name} · ${c.label}: Blockscout fehlte${bsFehlte === 1 ? ' ein Transfer' : ` ${bsFehlte} Transfers`} trotz Index-Stand — von der Kette ergänzt`)
+        // Echte Blockzeiten für die ergänzten Zeilen
+        const bns = [...new Set(kette.map(e => e.bn))].slice(0, 40)
+        const zeit = new Map(await Promise.all(bns.map(bn => walRpc(c, 'eth_getBlockByNumber', ['0x' + bn.toString(16), false])
+          .then(b => [bn, (parseInt(b && b.timestamp, 16) || 0) * 1000 || null]).catch(() => [bn, null]))))
+        for(const e of kette) e.ts = zeit.get(e.bn) || null
+      }
+      const list = [...(bs ? bs.list : []), ...kette]
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.bn || 0) - (a.bn || 0)).slice(0, WAL_TX_N)
+      return { list, note: notes.join(' ') || null, warn: warn.join(' · ') || null }
+    }
+
+    async function walTxBlockscoutRoh(c, w){
       const r = await fetch(c.txApi + '/api/v2/addresses/' + w.address + '/token-transfers?type=ERC-20')
       if(!r.ok) throw new Error('Blockscout: HTTP ' + r.status)
       const d = await r.json()
@@ -13464,10 +13591,12 @@
                  dir: raus ? 'raus' : 'rein',
                  amount: (Number(t.total?.value) || 0) / 10 ** dec,
                  sym: t.token?.symbol || '?',
+                 tok: String(t.token?.address || t.token?.address_hash || '').toLowerCase(),
+                 bn: Number(t.block_number) || null,
                  other: raus ? to : from,
-                 hash: t.transaction_hash || t.tx_hash || '' }
-      }).slice(0, WAL_TX_N)
-      return { list, note: fremd ? `${fremd} Transfer${fremd === 1 ? '' : 's'} unbekannter Token ausgeblendet — nur USDT/USDC-Contracts zählen (Schutz vor Adress-Poisoning: nie Adressen aus der Historie kopieren).` : null }
+                 hash: String(t.transaction_hash || t.tx_hash || '').toLowerCase() }
+      })
+      return { list, fremd }   // Hinweis-Text + Kürzen macht walTxEvmBlockscout (Gegenprüfung 25.09.2026)
     }
 
     async function walTxBnbLogs(c, w){
@@ -13587,6 +13716,7 @@
       if(w.chain === 'solana') return walTxSolana(c, w)
       return walTxTron(c, w)
     }
+    window._walTxFetch = walTxFetch   // Test-Zugriff (liest nur öffentliche Chain-Daten)
 
     const walTxZeit = ts => {
       if(!ts) return '–'
@@ -13633,6 +13763,8 @@
             const key = walLabelKey(w.chain, e.other)
             if(walLabels.has(key) || offen.has(key)) continue
             if(wallets.some(x => x.chain === w.chain && x.address.toLowerCase() === e.other.toLowerCase())) continue
+            // Weiterleitung braucht meist bis 5 min — jüngere Zahlungen erst beim nächsten Lauf prüfen, sonst stünde „extern" für immer (25.09.2026)
+            if(e.ts && Date.now() - e.ts < 60 * 60000) continue
             offen.set(key, { chain:w.chain, address:e.other.toLowerCase(), c })
           }
         }
@@ -13641,6 +13773,8 @@
           if(n++ >= 25) break   // pro Lauf gedeckelt — der Rest beim nächsten Öffnen
           const hots = new Set([...walLabels.values()].filter(r => r.chain === chain && r.kind === 'coinpayments_hot').map(r => r.address.toLowerCase()))
           let kind = 'extern'
+          // Blockscout hinkt (Vorfall 25.09.2026, Arbitrum 2 Tage): die Weiterleitung wäre noch nicht indexiert → nichts festschreiben
+          try{ const kp = await walKoepfe(chain, c); if(!kp.bs || !kp.bs.ts || Date.now() - kp.bs.ts > 10 * 60000) continue }catch(_){ continue }
           try{
             const r = await fetch(c.txApi + '/api/v2/addresses/' + address + '/token-transfers?type=ERC-20')
             if(!r.ok) continue   // Blockscout-Fehler: nicht als „extern" festschreiben
@@ -13778,8 +13912,9 @@
       const c = WAL_CHAINS[w.chain]
       const msg = $('wal-tx-msg'), note = $('wal-tx-note'), tb = $('wal-tx-rows')
       tb.innerHTML = ''
-      note.hidden = !res.note
-      note.textContent = res.note || ''
+      note.hidden = !res.note && !res.warn
+      note.textContent = [res.warn ? '⚠ ' + res.warn : '', res.note || ''].filter(Boolean).join(' · ')
+      note.style.color = res.warn ? 'var(--danger)' : 'var(--sub)'
       if(!res.list.length){
         msg.hidden = false
         msg.textContent = 'Keine Transfers gefunden.'
@@ -13906,7 +14041,7 @@
       const ids = new Set(rows.map(w => w.id))
       // Eigene Adressen → Name, damit interne Umbuchungen als „Jacob · Arbitrum" statt 0x… stehen
       const eigene = new Map(wallets.map(w => [w.chain + ':' + w.address.toLowerCase(), w]))
-      const alle = [], notes = new Set()
+      const alle = [], notes = new Set(), warns = new Set()
       let fehler = 0
       // Staub raus (Finn 15.09.2026: „mach alles unter 1 USDT weg" — Gas-Reste
       // wie 0,0145 USDT0 und 0,00-USDC-Zeilen verstopften den Feed): Stables
@@ -13917,8 +14052,9 @@
       for(const w of rows){
         const f = walFeed.get(w.id)
         if(!f) continue
-        if(f.err){ fehler++; continue }
+        if(f.err){ fehler++; warns.add(`${w.person_name} · ${WAL_CHAINS[w.chain].label}: Transfers nicht ladbar (${String(f.err).slice(0, 100)}) — im Explorer ↗ nachsehen`); continue }
         if(f.res.note) notes.add(f.res.note)
+        if(f.res.warn) warns.add(f.res.warn)
         for(const e of f.res.list){
           const v = wertUsdt(e, w)
           if(v != null && v < WAL_FEED_MIN) continue
@@ -14018,6 +14154,8 @@
       const note = $('wal-feed-note')
       note.hidden = !notes.size
       note.textContent = [...notes].join(' ')
+      const warnEl = $('wal-feed-warn')
+      if(warnEl){ warnEl.hidden = !warns.size; warnEl.textContent = warns.size ? '⚠ ' + [...warns].join(' · ') : '' }
     }
 
     /* ── ZWECK/KOMMENTAR-MODAL (18.09.2026, Finn: „ich kann jeder Transaktion
@@ -30818,7 +30956,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.559'
+  const OS_TAB_BUILD = '2026-09-22.560'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
