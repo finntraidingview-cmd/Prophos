@@ -1827,6 +1827,11 @@
   #dashboard-view .mwd-box-s{font-size:10.5px;color:var(--sub-2);margin-top:3px;line-height:1.4}
   #dashboard-view .mwd-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:8px;font-size:11px;color:var(--sub-2)}
   #dashboard-view .mwd-fuss-chip{margin-left:auto}
+  #dashboard-view .mwd-fehler{flex-basis:100%;color:#b91c1c;font-weight:600}
+  #dashboard-view .mwd-aktionen{display:inline-flex;align-items:center;gap:6px;margin-left:8px}
+  #dashboard-view .mwd-btn{padding:3px 10px;font-size:11.5px;height:auto;line-height:1.5}
+  #dashboard-view .mwd-btn.is-frage{border-color:#b91c1c;color:#b91c1c;background:rgba(240,68,56,.06)}
+  #dashboard-view .mwd-hinweis{font-size:10.5px;color:var(--sub-2)}
   @media (max-width:820px){
     #dashboard-view .mwd-pl{grid-template-columns:1fr 1fr}
     #dashboard-view .mwd-box-sum{grid-column:1 / -1}
@@ -1835,6 +1840,8 @@
     #dashboard-view .mwd-fuss .tc2-hedge > *{white-space:normal}
     #dashboard-view .mwd-mark b{font-size:9.5px}
     #dashboard-view .mwd-fuss-chip{margin-left:0;flex-basis:100%}
+    #dashboard-view .mwd-aktionen{margin-left:0;flex-basis:100%;justify-content:flex-end}
+    #dashboard-view .mwd-btn{padding:7px 14px;font-size:13px}
   }
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
@@ -19303,7 +19310,7 @@
    * tickt mit dem Kurs (Realtime/Poll). Fusion-Chip = hedgeChipHtml wie auf der Trade-Karte. Klick auf eine Zeile hebt ihre
    * Linien im Chart hervor. „schließt bei" = Master-TP ± Puffer (der Feed-Wächter nimmt genau dieses Level). ── */
   const MKL_WD_POLL_MS = 15000
-  mkl.wd = { plaene: [], at: 0, tag: '', fehler: '', aktiv: null, laeuft: false }
+  mkl.wd = { plaene: [], at: 0, tag: '', fehler: '', aktiv: null, laeuft: false, frage: null, busy: {} }   // frage = {id, aktion, bis}: Inline-„Wirklich?" (25.09.2026)
   async function mklWdLaden(){
     if(mkl.wd.laeuft || !currentUserId || mkl.stub) return
     mkl.wd.laeuft = true
@@ -19406,6 +19413,7 @@
       const sb = mklWdSchliesstBei(pw)
       const fSub = !h ? (num(pw.hedge_eur) > 0 ? (geplant ? `öffnet beim Start · ${f0(pw.hedge_eur)} € am Master-TP` : 'kein Hedge geöffnet') : 'ohne Gegenhedge')
         : h.status === 'geschlossen' ? `realisiert · ${escapeHtml(typeof hedgeGrundText === 'function' ? hedgeGrundText(h.grund) : String(h.grund || ''))}${h.fill_close ? ` · zu bei ${f2(h.fill_close)}` : ''}`
+        : h.status === 'fehler' ? 'nicht geöffnet — Grund unten' : h.status === 'unklar' ? 'unklar — im Hedge-Terminal prüfen' : h.status === 'oeffnet' ? 'öffnet…'
         : `${fLive != null ? 'live' : (h.status === 'schliesst' ? 'schließt…' : h.status === 'offen' ? 'offen · P&L folgt' : h.status)} · ${escapeHtml(String(h.richtung || '').toUpperCase())} ${f2(h.lots)} Lot${sb ? ` · schließt bei NQ ${f2(sb)} (Feed)` : ''}${num(h.sl) != null ? ` · Notfall-SL im Terminal ${f2(h.sl)}` : ''}`
       const zusammen = (mWert != null && fWert != null) ? mWert * fx + fWert : null
       const boxen = `<div class="mwd-pl">
@@ -19415,16 +19423,72 @@
         </div>`
       // ── Fuß ──
       const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: h ? { hedge: h } : null }) : ''
-      const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}</div>`
+      // Fehlertext des Hedges lesbar statt nur „Fehler" im Chip (Koordination 25.09.2026)
+      const fehlerTxt = (h && h.status === 'fehler') ? `<span class="mwd-fehler">Fusion: ${escapeHtml(String(h.msg || h.code || 'Fehler ohne Text'))}</span>` : ''
+      // Aktionen auf laufenden Karten (Finn 25.09.2026: „Ich habe den Master manuell beendet — bau ein Feld ein, mit dem ich den
+      // Trade als erledigt setzen kann"): „Beendet" nur für eigene Pläne (RLS — fremde IDs sperrt Supabase), „Hedge zu" nur am PC
+      // des Hedges. Erster Klick fragt inline „Wirklich?", der zweite führt aus (mklWdAktion); eigene Verdrahtung je Knopf.
+      let aktionen = ''
+      if(offen){
+        const eigen = mklWdEigenerPlan(pw.id)
+        const frage = a => mkl.wd.frage && mkl.wd.frage.id === String(pw.id) && mkl.wd.frage.aktion === a && Date.now() < mkl.wd.frage.bis
+        const busy = a => mkl.wd.busy[`${pw.id}:${a}`]
+        const knopf = (a, txt, titel) => `<button type="button" class="btn btn-ghost mwd-btn${frage(a) ? ' is-frage' : ''}" data-mwd-aktion="${a}" data-mwd-plan="${escapeHtml(String(pw.id))}" title="${escapeHtml(titel)}"${busy(a) ? ' disabled' : ''}>${busy(a) ? 'läuft…' : frage(a) ? 'Wirklich?' : txt}</button>`
+        const hedgeHier = !!(h && ['offen', 'schliesst'].includes(h.status) && MT5_LOCAL && h.pc && typeof hedgePcId === 'function' && h.pc === hedgePcId())
+        aktionen = `<span class="mwd-aktionen">`
+          + (hedgeHier ? knopf('hedge', 'Hedge zu', 'Fusion-Gegenposition jetzt schließen (dieser PC hält sie)') : '')
+          + (eigen ? knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, P&L unter „Überprüfen"')
+                   : `<span class="mwd-hinweis" title="Supabase erlaubt das Beenden nur im eigenen Profil">beenden im Profil von ${escapeHtml(String(pw.person || '?'))}</span>`)
+          + `</span>`
+      }
+      const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}${fehlerTxt}${aktionen}</div>`
       return `<div class="mwd-card ${offen ? 'mwd-open' : geplant ? 'mwd-planned' : 'mwd-done'}${aktiv ? ' is-aktiv' : ''}" data-mkl-wd="${escapeHtml(String(pw.id))}" style="--mwd-farbe:${farbe}" title="Klick hebt die Linien im Chart hervor">${kopf}${level}${boxen}${fuss}</div>`
     })
     const offenN = pl.filter(x => x.status === 'open').length, geplantN = pl.filter(x => x.status === 'planned').length
     el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} laufen · ${geplantN} geplant · ${pl.length - offenN - geplantN} zu · alle IDs${kp == null ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
       <div class="mwd-liste">${karten.join('') || '<div style="font-size:12px;color:var(--sub-2)">Keine Winning-Day-Pläne am Handelstag.</div>'}</div>`
+    el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
+  }
+  // Eigener Plan? Nur dann darf „Beendet" schreiben (trade_plans unter RLS des angemeldeten Nutzers)
+  const mklWdEigenerPlan = id => { try{ return (tradePlans || []).find(x => String(x.id) === String(id)) || null }catch(_){ return null } }
+  /* Aktionen der Markt-Karte (25.09.2026). ende = derselbe Weg wie das Reader-Ende der Trades-Seite: tvV2EndeSetzen(plan, null,
+   * 'hand') schreibt final + öffnet den Abschluss-Hinweis, atMoveToReview schiebt auf „Überprüfen" und holt den P&L. Ein offener
+   * Hedge schließt tvV2EndeSetzen am PC selbst; am Mac übernimmt der PC-Wächter (Plan nicht mehr open → master_ende).
+   * hedge = hedgeSoloSchliessen(plan, 'hand') wie der Knopf auf der Trade-Karte. */
+  async function mklWdAktion(id, aktion){
+    const pid = String(id), key = `${pid}:${aktion}`
+    if(mkl.wd.busy[key]) return
+    if(!(mkl.wd.frage && mkl.wd.frage.id === pid && mkl.wd.frage.aktion === aktion && Date.now() < mkl.wd.frage.bis)){
+      mkl.wd.frage = { id: pid, aktion, bis: Date.now() + 5000 }; mklWdRender()
+      setTimeout(() => { if(mkl.wd.frage && mkl.wd.frage.id === pid && Date.now() >= mkl.wd.frage.bis){ mkl.wd.frage = null; mklWdRender() } }, 5100)
+      return
+    }
+    mkl.wd.frage = null; mkl.wd.busy[key] = true; mklWdRender()
+    const pw = (mkl.wd.plaene || []).find(x => String(x.id) === pid) || {}
+    try{
+      if(aktion === 'ende'){
+        const plan = mklWdEigenerPlan(pid)
+        if(!plan || typeof tvV2EndeSetzen !== 'function') throw new Error('Plan nicht im eigenen Profil')
+        const ok = await tvV2EndeSetzen(plan, null, 'hand')
+        if(typeof atMoveToReview === 'function'){ const pf = mklWdEigenerPlan(pid) || plan; await atMoveToReview(pf) }
+        const hOffen = pw.hedge && ['offen', 'schliesst'].includes(pw.hedge.status)
+        if(typeof atToast === 'function') atToast(ok === false ? 'Plan lief schon nicht mehr — nichts geändert.' : `Beendet: ${(pw.konto && pw.konto.name) || plan.masterName || '—'}${hOffen && !MT5_LOCAL ? ' · Hedge schließt am PC' : ''}`)
+      } else if(aktion === 'hedge'){
+        const plan = mklWdEigenerPlan(pid) || { id: pid, mt5Baseline: { hedge: pw.hedge }, masterName: (pw.konto && pw.konto.name) || '' }
+        const r = (typeof hedgeSoloSchliessen === 'function') ? await hedgeSoloSchliessen(plan, 'hand') : { ok: false, msg: 'nicht verfügbar' }
+        if(typeof atToast === 'function') atToast(r && r.ok === false ? `Hedge nicht geschlossen: ${r.msg || '?'}` : 'Fusion-Hedge geschlossen')
+      }
+    }catch(e){
+      if(typeof atToast === 'function') atToast(`Nicht ausgeführt: ${e && e.message || e}`)
+    }finally{
+      delete mkl.wd.busy[key]
+      try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
+      mklWdRender(); mklChartZeichnen()
+    }
   }
   // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
   $mkl('mkl-wd')?.addEventListener('click', ev => {
-    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu]')) return
+    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-mwd-aktion]')) return
     const z = ev.target.closest && ev.target.closest('[data-mkl-wd]'); if(!z) return
     const id = z.getAttribute('data-mkl-wd')
     mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
@@ -30214,7 +30278,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.537'
+  const OS_TAB_BUILD = '2026-09-22.538'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
