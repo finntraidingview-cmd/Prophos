@@ -8072,7 +8072,7 @@
                 </div>
                 <div class="kf-param">
                   <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
-                  <label title="leer = reale Reibung je Trade aus der Hedge-Ära (gemessen je Firma · Typ × Anteil: Funded 1,0 / Challenge·Phase 0,5) · Zahl = Override für alle Trades">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung" placeholder="auto"></label>
+                  <label title="leer = reale Reibung je Trade aus der Hedge-Ära (gemessen je Firma · Typ × realer Anteil aus den entschiedenen Ketten: Fixgröße und Payout-Ketten 100 %, ohne Payout geblowt 0 %) · Zahl = Override für alle Trades">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung" placeholder="auto"></label>
                   <!-- Duplikum pauschal (24.09.2026 abends, Finn: „jede ID hat im Schnitt 6–7 Futures-Accounts = Slots, mal die
                        Anzahl der IDs (7), mal 8 € — weil wir 8 € pro Monat für einen Duplikum-Slot zahlen") -->
                   <label title="Duplikum-Ersparnis pauschal: IDs × Ø Futures-Konten je ID = Slots, × € je Slot und Monat. Zählt ab Kapitelbeginn je Tag mit 1/30 des Monatsbetrags — unabhängig davon, ob getradet wurde.">Duplikum <input class="input mono" type="number" step="1" min="0" data-kf-param="dup_ids" style="width:52px"> IDs × <input class="input mono" type="number" step="0.5" min="0" data-kf-param="dup_konten" style="width:52px"> Konten × <input class="input mono" type="number" step="0.5" min="0" data-kf-param="dup_eur" style="width:56px"> €/Monat</label>
@@ -8142,7 +8142,9 @@
                   <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Reibung</div><div class="kf-chip-bar" data-kf-chips="reibung"></div></div>
                   <div class="kf-gross">
                     <div class="kf-chart" data-kf-chart="reibg" hidden><div class="kf-titel">Reibung gesamt je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibg"></span></div><div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (Median, Ausreißer 1,5×IQR raus) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reibg"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="reib" hidden><div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div><div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt (Funded 100 %, Challenge/Phase 50 % der gesamten) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="reib" hidden><div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div><div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt — je Gruppe aus den entschiedenen Ketten gemessen: Fixgröße und Payout-Ketten 100 %, ohne Payout geblowt 0 % (kommt über die Gesamtkosten zurück) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div></div>
+                    <!-- Gemessen vs. real je Kontotyp (25.09.2026, Finn: „ein richtig cleaner Chart, wo man die reelle Reibung im Verhältnis der gemessenen sieht … alle Typen von Accounts und deren Reibung bzw. Kosten") -->
+                    <div class="kf-chart" data-kf-chart="reibv" hidden><div class="kf-titel">Gemessen vs. real je Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibv"></span></div><div class="kf-sub">Summe der Reibung in der Hedge-Ära je Typ des Master-Kontos: grau = gemessen (Ist gegen perfekte Symmetrie, saubere Menge), farbig = real (Fixgröße und Payout-Ketten voll, ohne Payout geblowt null, laufende Ketten mit dem Anteil des Typs)</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reibv"></canvas></div></div>
                   </div>
                 </div>
                 <div id="adm-kf-quoten" hidden>
@@ -10923,10 +10925,10 @@
       // Kopf kurz (24.09.2026 abends, Finn: „mach besser" — drei Zeilen Modelltext waren eine Textwand):
       // eine Zeile, alles Weitere im Tooltip (ⓘ) des Kopfes.
       const modLang = `Modell je Trade: Hedge € = −Master-P&L $ × Quote (Firma · Typ · Größe aus der Hedge-Ära) × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
-        (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} € je Trade)` : ' (gemessen je Firma · Typ × Anteil: Funded 1,0 · Challenge/Phase 0,5)') +
+        (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} € je Trade)` : ' (gemessen je Firma · Typ × realer Anteil aus den entschiedenen Ketten)') +
         ` · ohne Quote: FX ${admKfDe(fx, 3)} × 1\n` +
         ((rg && Number.isFinite(Number(rg.median)))
-          ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026)`
+          ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — realer Anteil ${admKfDe(100 * Number(rg.anteil || 0), 0)} % aus ${rg.n_entschieden || 0} entschiedenen Ketten-Trades (Fixgröße/Payout 100 %, Blow ohne Payout 0 %)`
           : 'Reibung: Gruppenwerte kommen mit dem nächsten Laden') +
         '\nKonten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)'
       if(mod){
@@ -11064,7 +11066,7 @@
     const ADM_KF_GRUPPEN = {
       verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
       trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
-      reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real']] }
+      reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real'], ['reibv', 'Gemessen vs. real je Typ']] }
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
       for(const [gruppe, liste] of Object.entries(ADM_KF_GRUPPEN)){
@@ -11214,11 +11216,11 @@
       const basis = (rg?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && Number(g.n) >= minN)
         .sort((a, b) => Number(b.n) - Number(a.n)).slice(0, 14)
         .map(g => ({ key: g.firm + ' · ' + admKfTyp(g.typ), label: g.firm + ' · ' + admKfTyp(g.typ), n: Number(g.n), roh: Number(g.n_roh || g.n),
-                     gesamt: Number(g.median), real: Number(g.real_median), mean: Number(g.mean), realMean: Number(g.real_mean), anteil: Number(g.anteil), firm: g.firm }))
+                     gesamt: Number(g.median), real: Number(g.real_median), mean: Number(g.mean), realMean: Number(g.real_mean), anteil: Number(g.anteil), quelle: g.anteil_quelle || '', nEnt: Number(g.n_entschieden || 0), firm: g.firm }))
       const aktiv = f && f.art === 'q' ? f.wert : ''
       const eur = v => admKfDe(v, 2) + ' €', eurK = v => admKfDe(v, 0) + ' €'
       const klick = e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() }
-      const zeilen = e => [`${e.n} Hedge-Trades${e.roh > e.n ? ` (${e.roh - e.n} Ausreißer raus)` : ''} · gesamt Ø ${eur(e.mean)} · real Ø ${eur(e.realMean)} · Anteil real ${admKfDe(e.anteil, 1)}`]
+      const zeilen = e => [`${e.n} Hedge-Trades${e.roh > e.n ? ` (${e.roh - e.n} Ausreißer raus)` : ''} · gesamt Ø ${eur(e.mean)} · real Ø ${eur(e.realMean)} · Anteil real ${admKfDe(100 * e.anteil, 0)} % (${e.quelle}, ${e.nEnt} entschieden)`]
       const gSum = rg?.global ? [['gemessen Ø', Number(rg.global.mean), eur], ['Median', Number(rg.global.median), eur]] : []
       const rSum = rg?.global ? [['real Ø', Number(rg.global.real_mean), eur], ['Median', Number(rg.global.real_median), eur]] : []
       admKfSumHtml('adm-kf-sum-reibg', gSum)
@@ -11231,6 +11233,21 @@
       admKfBar('reib', 'adm-kf-cv-reib', cr, { horizontal: true,
         a: { label: 'real', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: eurK },
         istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm), klick, zeilen })
+      // Gemessen vs. real je Kontotyp (25.09.2026): Ebene T (nur Typ), Summen € über die saubere Menge — grau die
+      // gemessene Reibung, farbig der reale Teil (entschieden real + laufend × Anteil). Ohne Filter-Klick (Typ ist
+      // kein Filter-Schlüssel), Tooltip nennt Anteil, entschiedene/offene Trades und was der Blow zurückgeholt hat.
+      const typOrd = { challenge: 0, phase1: 1, phase2: 2, funded: 3 }
+      const ct = (rg?.gruppen || []).filter(g => g.ebene === 'T' && g.typ && g.typ !== '—' && Number(g.n_roh || g.n) >= minN)
+        .map(g => ({ key: g.key, label: admKfTyp(g.typ), n: Number(g.n_roh || g.n), a: Number(g.summe), b: Number(g.summe_real),
+                     anteil: Number(g.anteil), quelle: g.anteil_quelle || '', nEnt: Number(g.n_entschieden || 0), nOffen: Number(g.n_offen || 0),
+                     zurueck: Number(g.summe_zurueck), offen: Number(g.summe_offen), realEnt: Number(g.summe_real_ent), mean: Number(g.mean), realMean: Number(g.real_mean) }))
+        .sort((x, y) => (typOrd[x.key.replace('typ:', '')] ?? 9) - (typOrd[y.key.replace('typ:', '')] ?? 9))
+      admKfSumHtml('adm-kf-sum-reibv', ct.length ? [['gemessen', ct.reduce((x, e) => x + e.a, 0), eurK], ['real', ct.reduce((x, e) => x + e.b, 0), eurK]] : [])
+      admKfBar('reibv', 'adm-kf-cv-reibv', ct, { horizontal: true,
+        a: { label: 'gemessen', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: eurK, kurz: eurK },
+        b: { label: 'real', achse: true, farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eurK, kurz: eurK },
+        zeilen: e => [`${e.n} Hedge-Trades · Ø gemessen ${eur(e.mean)} · Ø real ${eur(e.realMean)} · Anteil real ${admKfDe(100 * e.anteil, 0)} % (${e.quelle})`,
+                      `entschieden ${e.nEnt}: real ${eurK(e.realEnt)} · beim Blow zurückgeholt ${eurK(e.zurueck)} · laufend ${e.nOffen}: ${eurK(e.offen)} × Anteil`] })
     }
     /* Kalender-Heatmap (24.09.2026 abends, Finn: „MEHR, CLEAN"): 16 Wochen bis heute (Dubai), Zelle = Tag, Farbe nach
      * Master-P&L-Summe des Tages (grün/rot, Deckkraft relativ zum Tagesmaximum). Klick = Tag-Filter wie im Je-Tag-Chart. */
@@ -29343,7 +29360,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.489'
+  const OS_TAB_BUILD = '2026-09-22.490'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

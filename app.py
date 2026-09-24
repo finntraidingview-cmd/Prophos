@@ -4404,6 +4404,7 @@ def _admin_basis():
     # eindeutig sind: ein fremder Eintrag matcht schlicht keinen eigenen Account.
     archived = set()
     preds_of = {}          # Nachfolger-ID -> [Vorgänger-IDs]
+    arch_info = {}         # Konto-ID -> {reason, successor} (25.09.2026)
     for r in arch_rows:
         v = r.get("value")
         if isinstance(v, str):
@@ -4420,6 +4421,15 @@ def _admin_basis():
                 # steckt weiterhin in der Firma — über den Nachfolger.
                 if isinstance(info, dict) and info.get("successorId"):
                     preds_of.setdefault(str(info["successorId"]), []).append(str(acc_id))
+                # Grund + Nachfolger je Konto (25.09.2026, reale Reibung): 'blown' / 'passed' /
+                # 'manual' / 'passed_pending' — mehrere Nutzer tragen identische Einträge,
+                # der erste Treffer gilt, ein Grund überschreibt nur ein leeres Feld.
+                if isinstance(info, dict):
+                    ai = arch_info.setdefault(str(acc_id), {"reason": "", "successor": ""})
+                    if not ai["reason"] and info.get("reason"):
+                        ai["reason"] = str(info.get("reason") or "").strip().lower()
+                    if not ai["successor"] and info.get("successorId"):
+                        ai["successor"] = str(info["successorId"])
 
     fx = 0.85
     for r in fx_rows:
@@ -4469,7 +4479,7 @@ def _admin_basis():
                 excluded_ids.add(str(uid))
                 excluded_names.append(mail)
 
-    return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "fx": fx,
+    return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "arch_info": arch_info, "fx": fx,
             "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
             "excluded_ids": excluded_ids, "excluded_names": excluded_names}
 
@@ -4510,12 +4520,77 @@ HQ_MIN_N = 5
 # Reibung (24.09.2026, Finn: „Die Reibung mit 5,44 € macht keinen Sinn … die 5 € sind die Reibungskosten
 # insgesamt, nur die Hälfte bleibt real übrig"): je Hedge-Trade GEMESSEN als Kosten = −(slave_pl_eur −
 # (−master_pl × slave_risk/master_risk)), Ausreißer |Abw.| > 100 € raus (wie die Auswertung 24.09.);
-# real = gemessen × Anteil: Fixgrößen-Hedge (Funded) 1,0, Gesamtkosten-Hedge (Challenge/Phase) 0,5.
+# real = gemessen × Anteil. Der Anteil war bis .486 fest (Funded 1,0 / sonst 0,5) — seit 25.09.2026
+# (Finn: „100 % bei Funded stimmt, aber du darfst die Reibung nur betrachten, wenn die Accounts
+# geblowt werden — dann wird die Reibung quasi resettet") wird er je Gruppe aus den ENTSCHIEDENEN
+# Ketten gemessen (_reib_real_flags): Trade auf Funded-Fixgröße → 1,0 (kein Blow holt sie zurück);
+# Kette hat ein Payout → 1,0; Kette ohne Payout geblowt → 0,0 (steckt in den Gesamtkosten, der Blow
+# holt sie mit zurück); manuell archiviert → 1,0 (weg ohne Blow); noch laufend → unentschieden, zählt
+# nicht in den Anteil. Anteil = Σ real / Σ gemessen der entschiedenen Trades, Rückfall auf die nächste
+# Ebene (A→B→C→D) und zuletzt global. Die Konstanten bleiben nur als allerletzter Rückfall.
 # HQ_REIBUNG_STD = Rückfall, wenn gar keine Gruppe misst (Hälfte der alten 5,44 €).
 HQ_REIBUNG_STD = 2.72
 HQ_REIB_MAX_ABW = 100.0
 HQ_REIB_ANTEIL_FUNDED = 1.0
 HQ_REIB_ANTEIL_SONST = 0.5
+HQ_REIB_UMSCHALT = 0.5      # Fixgröße erkannt, wenn slave_risk < 50 % des bisherigen Ketten-Maximums
+
+
+def _reib_real_flags(plans, by_id, live_ids, arch_info, payout_accs):
+    """Je Hedge-Trade (Plan-ID) das reale Flag der Reibung (25.09.2026): 1.0 = fällt wirklich an,
+    0.0 = kommt beim Blow über die Gesamtkosten zurück, None = Kette noch offen (unentschieden).
+    Kette = Master-Konto → successorId … bis zum Ende; Umschaltpunkt je Kette = erster Trade, dessen
+    slave_risk unter HQ_REIB_UMSCHALT × Maximum der vorherigen liegt (dieselbe Regel wie die
+    Auswertung 24.09.2026, von einem Prüf-Agent an 5 Ketten bestätigt)."""
+    def ende(acc_id):
+        cur, tiefe = str(acc_id), 0
+        while tiefe < 10:
+            nxt = (arch_info.get(cur) or {}).get("successor") or ""
+            if not nxt:
+                break
+            cur, tiefe = nxt, tiefe + 1
+        return cur
+    kette_von, ketten = {}, {}
+    for p in plans:
+        if str(p.get("slave_account_id")) not in live_ids:
+            continue
+        m = str(p.get("master_account_id") or "")
+        if not m:
+            continue
+        if m not in kette_von:
+            kette_von[m] = ende(m)
+        ketten.setdefault(kette_von[m], []).append(p)
+    # Payout je Kette: irgendein Konto der Kette hat eine Payout-Buchung
+    kette_payout = set()
+    for acc in payout_accs:
+        kette_payout.add(kette_von.get(str(acc)) or ende(acc))
+    flags = {}
+    for kid, ps in ketten.items():
+        ps.sort(key=lambda p: str(p.get("completed_at") or ""))
+        end_acc = by_id.get(kid) or {}
+        grund = (arch_info.get(kid) or {}).get("reason") or ""
+        hat_payout = kid in kette_payout
+        maxi, umschalt = None, None
+        for i, p in enumerate(ps):
+            try:
+                sr = float(p.get("slave_risk") or 0)
+            except (TypeError, ValueError):
+                sr = 0
+            if umschalt is None and maxi is not None and sr > 0 and sr < HQ_REIB_UMSCHALT * maxi:
+                umschalt = i
+            if sr > 0:
+                maxi = sr if maxi is None else max(maxi, sr)
+            fix = umschalt is not None and i >= umschalt
+            if fix or hat_payout:
+                f = 1.0
+            elif grund == "blown":
+                f = 0.0
+            elif grund == "manual":
+                f = 1.0
+            else:
+                f = None      # aktiv, oder bestanden ohne erfassten Nachfolger
+            flags[str(p.get("id"))] = f
+    return flags
 HQ_GROESSEN = (25000, 50000, 100000, 150000, 200000, 300000)
 HQ_ROUTEN = {"", "dup", "tvplus", "mt5"}   # Hedge-Wege; V2 (mt5v2/tvv2) hat keinen Slave
 
@@ -4590,7 +4665,7 @@ def _hq_keys(acc):
     return keys
 
 
-def _admin_hedge_quoten(plans, by_id, live_ids, fx):
+def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
     """Quoten je Gruppe aus allen abgeschlossenen Hedge-Trades. Rein: Slave live, beide P&L
     vorhanden und ≠ 0, keine Platzhalter ±1, 0 < q < 5 (Ausreißer raus). Zusätzlich die
     GEPLANTE Quote r = slave_risk € / master_risk $ als Vergleich (median_r).
@@ -4600,6 +4675,7 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx):
     samm = {}
     reib = {}
     reib_alle = []
+    real_flags = real_flags or {}
     for p in plans:
         if str(p.get("route") or "") not in HQ_ROUTEN:
             continue
@@ -4625,13 +4701,16 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx):
         if r is not None:
             kosten = -(spl_eur - (-mpl * r))
             if abs(kosten) <= HQ_REIB_MAX_ABW:
-                anteil = _hq_anteil(acc.get("account_type"))
-                reib_alle.append((kosten, kosten * anteil))
-                for ebene, key, firm, typ, g in _hq_keys(acc):
+                # Reales Flag aus dem Ketten-Ausgang (25.09.2026); None = noch offen → zählt nur gemessen
+                flag = real_flags.get(str(p.get("id")))
+                reib_alle.append((kosten, flag))
+                # Ebene T = nur Kontotyp (25.09.2026, Finn: „alle Typen von Accounts und deren
+                # Reibung bzw. Kosten") — reine Anzeige-Gruppe, löst keinen V2-Trade auf.
+                for ebene, key, firm, typ, g in _hq_keys(acc) + [("T", f"typ:{_hq_typ(acc)}", None, _hq_typ(acc), None)]:
                     e = reib.setdefault(key, {"key": key, "ebene": ebene, "firm": firm, "typ": typ, "groesse": g,
-                                              "k": [], "kr": []})
+                                              "k": [], "fl": []})
                     e["k"].append(kosten)
-                    e["kr"].append(kosten * anteil)
+                    e["fl"].append(flag)
         q = -spl_eur / mpl
         if not (0 < q < 5):
             continue
@@ -4655,23 +4734,65 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx):
         gruppen.append(g)
         lookup[g["key"]] = g
     gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
-    reib_gruppen, reib_lookup = [], {}
-    for e in reib.values():
-        ks, krs = _hq_ohne_ausreisser(e["k"], e["kr"])
-        g = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
-             "n": len(ks), "n_roh": len(e["k"]),
-             "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
-             # Anteil nur auf Ebene A/B eindeutig (ein Typ); C/D mischen → real aus den Einzel-Trades
-             "anteil": (_hq_anteil(e["typ"]) if e["typ"] else None),
-             "real_median": round(_hq_pct(krs, 0.5), 2), "real_mean": round(sum(krs) / len(krs), 2)}
-        reib_gruppen.append(g)
-        reib_lookup[g["key"]] = g
-    reib_gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
+    # Realer Anteil je Gruppe (25.09.2026): Σ(Kosten × Flag) / Σ Kosten über die ENTSCHIEDENEN
+    # Trades (Flag 0/1), geklemmt 0…1; unter HQ_MIN_N entschiedenen Trades oder bei Σ ≤ 0 kein
+    # eigener Wert → Rückfall auf die nächste Ebene (B→C→D), zuletzt global.
+    def _anteil_aus(ks, fls):
+        ent = [(k, f) for k, f in zip(ks, fls) if f is not None]
+        summe = sum(k for k, _ in ent)
+        if len(ent) < HQ_MIN_N or summe <= 0:
+            return None, len(ent)
+        return max(0.0, min(1.0, sum(k * f for k, f in ent) / summe)), len(ent)
     reib_global = None
+    g_anteil = None
     if reib_alle:
-        ks, krs = _hq_ohne_ausreisser([k for k, _ in reib_alle], [kr for _, kr in reib_alle])
+        # Anteil aus der UNGETRIMMTEN sauberen Menge (|Abw.| ≤ 100 €, wie die Auswertung 24.09.2026);
+        # der IQR-Trimm gilt nur für Median/Mittelwert je Trade.
+        g_anteil, g_n_ent = _anteil_aus([k for k, _ in reib_alle], [f for _, f in reib_alle])
+        ks, _fls = _hq_ohne_ausreisser([k for k, _ in reib_alle], [f for _, f in reib_alle])
+        if g_anteil is None:
+            g_anteil = HQ_REIB_ANTEIL_SONST
         reib_global = {"n": len(ks), "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
-                       "real_median": round(_hq_pct(krs, 0.5), 2), "real_mean": round(sum(krs) / len(krs), 2)}
+                       "anteil": round(g_anteil, 3), "n_entschieden": g_n_ent,
+                       "real_median": round(_hq_pct(ks, 0.5) * g_anteil, 2), "real_mean": round(sum(ks) / len(ks) * g_anteil, 2)}
+    reib_gruppen, reib_lookup = [], {}
+    roh = {}
+    for e in reib.values():
+        ks, _fls = _hq_ohne_ausreisser(e["k"], e["fl"])
+        a, n_ent = _anteil_aus(e["k"], e["fl"])     # Anteil ungetrimmt, wie die Summen darunter
+        roh[e["key"]] = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
+                         "n": len(ks), "n_roh": len(e["k"]),
+                         "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
+                         # Summen über die saubere Menge OHNE IQR-Trimm (= die Zahlen der Auswertung 24.09.2026):
+                         # gemessen gesamt, davon entschieden real / entschieden zurückgeholt / noch offen
+                         "summe": round(sum(e["k"]), 2),
+                         "summe_real_ent": round(sum(k for k, f in zip(e["k"], e["fl"]) if f == 1.0), 2),
+                         "summe_zurueck": round(sum(k for k, f in zip(e["k"], e["fl"]) if f == 0.0), 2),
+                         "summe_offen": round(sum(k for k, f in zip(e["k"], e["fl"]) if f is None), 2),
+                         "n_offen": sum(1 for f in e["fl"] if f is None),
+                         "anteil_eigen": a, "n_entschieden": n_ent}
+    for key, g in roh.items():
+        # Rückfall-Kette A→B→C→D: eigener Anteil, sonst der der nächstgröberen Gruppe, sonst global
+        a, quelle = g["anteil_eigen"], "eigen"
+        if a is None:
+            firm, typ = g["firm"], g["typ"]
+            for k2, q2 in ((f"{firm}|{typ}", "B"), (firm, "C"), ("*", "D")):
+                r2 = roh.get(k2)
+                if r2 and r2["anteil_eigen"] is not None and k2 != key:
+                    a, quelle = r2["anteil_eigen"], f"Ebene {q2}"
+                    break
+        if a is None:
+            a, quelle = (g_anteil if g_anteil is not None else HQ_REIB_ANTEIL_SONST), "global"
+        g["anteil"] = round(a, 3)
+        g["anteil_quelle"] = quelle
+        g["real_median"] = round(g["median"] * a, 2)
+        g["real_mean"] = round(g["mean"] * a, 2)
+        # Summe real = entschieden real + offen × Anteil (Erwartung für die laufenden Ketten)
+        g["summe_real"] = round(g["summe_real_ent"] + g["summe_offen"] * a, 2)
+        # anteil_eigen bleibt im Dict (None = geerbt) — die Rückfall-Schleife anderer Gruppen liest es noch
+        reib_gruppen.append(g)
+        reib_lookup[key] = g
+    reib_gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
     return gruppen, lookup, reib_gruppen, reib_lookup, reib_global
 
 
@@ -5384,7 +5505,14 @@ def admin_build_kapitel():
     # für hedge_q/hedge_hyp_eur je V2-Trade unten. Ausgeblendete Personen fallen auch hier raus.
     hq_plans = [p for p in plans
                 if str((by_id.get(str(p.get("master_account_id") or "")) or {}).get("user_id") or p.get("user_id") or "") not in excluded_ids]
-    hq_gruppen, hq_lookup, reib_gruppen, reib_lookup, reib_global = _admin_hedge_quoten(hq_plans, by_id, live_ids, fx)
+    # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
+    # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
+    # Seit 25.09.2026 VOR den Quoten geladen: die realen Reibungs-Flags brauchen die Payout-Konten.
+    txs = _sb_all("transactions", {"select": "user_id,account_id,kind,amount,occurred_at,kapitel_id",
+                                   "kind": "in.(payout,live_pnl)"})
+    payout_accs = {str(t.get("account_id")) for t in txs if t.get("kind") == "payout" and t.get("account_id")}
+    real_flags = _reib_real_flags(hq_plans, by_id, live_ids, b.get("arch_info") or {}, payout_accs)
+    hq_gruppen, hq_lookup, reib_gruppen, reib_lookup, reib_global = _admin_hedge_quoten(hq_plans, by_id, live_ids, fx, real_flags)
     # Vorbelegung = realer MITTELWERT (Finn 24.09.2026: „die Hälfte von 5,44" meint den Mittelwert, nicht den Median)
     reib_std = (reib_global or {}).get("real_mean")
     if reib_std is None:
@@ -5399,11 +5527,6 @@ def admin_build_kapitel():
                 firm_sym.setdefault(_firm_norm(f.get("name")), w)
     except Exception as e:
         print(f"[admin] ⚠️ firm_specs (kapitel): {type(e).__name__}: {e}", flush=True)
-    # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
-    # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
-    txs = _sb_all("transactions", {"select": "user_id,account_id,kind,amount,occurred_at,kapitel_id",
-                                   "kind": "in.(payout,live_pnl)"})
-
     def _f(v):
         try: return float(v)
         except (TypeError, ValueError): return None
@@ -5496,10 +5619,11 @@ def admin_build_kapitel():
                 macc = by_id.get(str(p.get("master_account_id") or "")) or {}
                 hg = _hq_aufloesen(macc, hq_lookup)
                 hq = hg["median_q"] if hg else None
-                # Reibung real je Trade (24.09.2026): gemessener Gruppen-Median × Anteil des V2-Kontotyps
-                # (Funded 1,0 / sonst 0,5); ohne Gruppe der globale reale Mittelwert, sonst HQ_REIBUNG_STD.
+                # Reibung real je Trade: gemessener Gruppen-Median × realer Anteil der Gruppe (seit
+                # 25.09.2026 aus den entschiedenen Ketten gemessen, nicht mehr fest 1,0/0,5);
+                # ohne Gruppe der globale reale Mittelwert, sonst HQ_REIBUNG_STD.
                 rg = _hq_aufloesen(macc, reib_lookup)
-                r_anteil = _hq_anteil(macc.get("account_type"))
+                r_anteil = rg["anteil"] if rg else ((reib_global or {}).get("anteil") or HQ_REIB_ANTEIL_SONST)
                 reib_real = round(rg["median"] * r_anteil, 2) if rg else round(float(reib_std), 2)
                 trades_liste.append({
                     "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
@@ -5524,7 +5648,7 @@ def admin_build_kapitel():
                     "hedge_q_quelle": (f'{hg["key"]} · n={hg["n"]} · Ebene {hg["ebene"]}' if hg else None),
                     "reibung_real": reib_real,
                     "reibung_anteil": r_anteil,
-                    "reibung_quelle": (f'{rg["key"]} · n={rg["n"]} · Ebene {rg["ebene"]} · gemessen {rg["median"]} € × {r_anteil}' if rg else "global"),
+                    "reibung_quelle": (f'{rg["key"]} · n={rg["n"]} · Ebene {rg["ebene"]} · gemessen {rg["median"]} € × Anteil {r_anteil} ({rg["anteil_quelle"]}, {rg["n_entschieden"]} entschieden)' if rg else "global"),
                     "hedge_hyp_eur": (round(-mpl * hq - reib_real, 2) if (hq is not None and mpl is not None) else None)})
             ev = _admin_hedge_ev(p, by_id, live_ids, fx)
             if ev is not None:
@@ -5582,8 +5706,10 @@ def admin_build_kapitel():
             # Hedge-Quoten der Hedge-Ära (24.09.2026): Gruppen A→D mit n/median/mean/p25/p75/median_r
             "hedge_quoten": {"gruppen": hq_gruppen, "fx": fx, "min_n": HQ_MIN_N, "reibung_std": round(float(reib_std), 2)},
             # Gemessene Reibung je Gruppe (24.09.2026): Kosten €/Trade (+ = weg), real = × Anteil
+            # anteil je Gruppe seit 25.09.2026 gemessen (Ketten-Ausgang), 'regel' = Klartext fürs Frontend
             "reibung_gruppen": {"gruppen": reib_gruppen, "global": reib_global, "min_n": HQ_MIN_N,
-                                "max_abw": HQ_REIB_MAX_ABW, "anteile": {"funded": HQ_REIB_ANTEIL_FUNDED, "sonst": HQ_REIB_ANTEIL_SONST}}}
+                                "max_abw": HQ_REIB_MAX_ABW, "umschalt": HQ_REIB_UMSCHALT,
+                                "regel": "Fixgröße 1,0 · Kette mit Payout 1,0 · ohne Payout geblowt 0 · manuell archiviert 1,0 · laufend zählt nicht"}}
 
 
 @app.route("/admin/kapitel", methods=["GET", "OPTIONS"])
