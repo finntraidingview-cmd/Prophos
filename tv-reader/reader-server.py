@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.8"
+READER_VERSION = "0.8.9"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -398,6 +398,76 @@ def _quelle_gewinnt(alt, tab, rolle, modus, jetzt, still_s):
     if jetzt - float(alt.get("s") or 0) > still_s:
         return True
     return _rang(rolle, modus) >= _rang(alt.get("rolle"), alt.get("modus"))
+
+
+# 0.8.9 (25.09.2026, Live pc-usq1i6: zwei Feed-Tabs, NQ hinkte 7 s hinter MNQ — 'der andere ging SO viel
+# schneller'). Die Regel 0.8.6 'derselbe Tab bleibt, bis er 5 s schweigt' hielt einen Tab fest, solange er
+# ueberhaupt etwas schickte, auch wenn ein anderer Tab 4× pro Sekunde tickte (verdeckter Tab / Watchlist-
+# Symbol vs. Chart-Symbol). Jetzt je Wurzel: Echtzeit vor verzoegert HART; sonst gewinnt der FRISCHESTE Tick
+# (ts des Kurses = Empfang des letzten qsd im Tab, Browser-ms) mit HYSTERESE_MS Vorsprung; Feed vor Broker nur
+# als Gleichstand-Entscheid innerhalb der Hysterese; schweigt der bisherige Tab KURS_QUELLE_S ganz, darf jeder.
+HYSTERESE_MS = 1000.0
+
+
+def _tick_ms(ts):
+    """ts des Kurses als Browser-Millisekunden (Sekunden-Werte werden hochgerechnet), None ohne Zahl."""
+    try:
+        v = float(ts)
+    except (TypeError, ValueError):
+        return None
+    return v * 1000.0 if 0 < v < 1e11 else (v if v > 0 else None)
+
+
+def _kurs_quelle_gewinnt(alt, neu, jetzt, still_s=KURS_QUELLE_S, hyst_ms=HYSTERESE_MS):
+    """REIN RECHNEND (testbar): darf der Kurs-Tick neu = {tab, rolle, modus, tick} den bisherigen einer Wurzel
+    alt = {tab, rolle, modus, tick, s (Server-Empfang)} ersetzen?"""
+    if not alt:
+        return True
+    if alt.get("tab") == neu.get("tab"):
+        return True
+    if jetzt - float(alt.get("s") or 0) > still_s:
+        return True                                        # bisheriger Tab schweigt ganz
+    echt_alt = "delayed" not in str(alt.get("modus") or "")
+    echt_neu = "delayed" not in str(neu.get("modus") or "")
+    if echt_alt != echt_neu:
+        return echt_neu                                    # Echtzeit vor verzoegert, hart
+    t_alt, t_neu = _tick_ms(alt.get("tick")), _tick_ms(neu.get("tick"))
+    if t_neu is None:
+        return False
+    if t_alt is None or t_neu >= t_alt + hyst_ms:
+        return True                                        # deutlich frischer
+    if abs(t_neu - t_alt) < hyst_ms and neu.get("rolle") == "feed" and alt.get("rolle") != "feed":
+        return True                                        # Gleichstand: Feed vor Broker
+    return False
+
+
+def _kerzen_quelle_gewinnt(alt, neu, jetzt, still_s=KERZEN_QUELLE_S):
+    """REIN RECHNEND (testbar): Bars eines Tabs fuer eine Wurzel annehmen? alt/neu = {tab, rolle, modus, s,
+    minute (juengste Bar)}. Echtzeit vor verzoegert hart; sonst der Tab mit der JUENGEREN Bar; gleiche Minute =
+    bisheriger bleibt (Feed vor Broker als Gleichstand); schweigt der bisherige still_s, darf jeder. (Serie
+    schlaegt Tick-Kerzen ohnehin: /kerzen kommt nur aus Chart-Serien, _kerzen_uebernehmen ersetzt einen Tick-Ring.)"""
+    if not alt or alt.get("tab") == neu.get("tab") or jetzt - float(alt.get("s") or 0) > still_s:
+        return True
+    echt_alt = "delayed" not in str(alt.get("modus") or "")
+    echt_neu = "delayed" not in str(neu.get("modus") or "")
+    if echt_alt != echt_neu:
+        return echt_neu
+    m_alt, m_neu = float(alt.get("minute") or 0), float(neu.get("minute") or 0)
+    if m_neu > m_alt:
+        return True
+    return m_neu == m_alt and neu.get("rolle") == "feed" and alt.get("rolle") != "feed"
+
+
+def _quellen_zeile(kurse, jetzt, mit_alter=True):
+    """Live-Zeile: je Wurzel die Kurs-Quelle und das Alter ihres letzten Ticks ('NQ←tmug5j 0,3s').
+    mit_alter=False = Vergleichsschluessel fuer die Zeilen-Drossel (das Alter aendert sich jedes Paket)."""
+    teile = []
+    for w in sorted(kurse or {}):
+        k = kurse[w]
+        t = _tick_ms(k.get("ts"))
+        alter = (f"{max(0.0, jetzt - t / 1000.0):.1f}s".replace(".", ",")) if (t and mit_alter) else ("?" if mit_alter else "")
+        teile.append(f"{w}←{str(k.get('tab_id') or '?')[:6]} {alter}".rstrip())
+    return " · ".join(teile)
 
 
 def _broker_wahl(tabs, jetzt, frisch_s=BROKER_FRISCH_S):
@@ -740,14 +810,21 @@ class Handler(BaseHTTPRequestHandler):
             _tid, _t = _tab(daten, _jetzt)
             _modus = daten.get("modus")
             _wz = lambda b: (_kurs_wurzel(b.get("wurzel")) or str(b.get("wurzel") or "").upper()[:8])
-            erlaubt = {}
+            # 0.8.9: je Wurzel der Tab mit der juengsten Bar (Echtzeit vor verzoegert hart)
+            juengste = {}
             for b in bars:
-                if isinstance(b, dict) and _wz(b) and _wz(b) not in erlaubt:
-                    erlaubt[_wz(b)] = _quelle_gewinnt(_kerzen_quelle.get(_wz(b)), _tid, _t["rolle"], _modus, _jetzt, KERZEN_QUELLE_S)
+                if isinstance(b, dict) and _wz(b):
+                    try:
+                        juengste[_wz(b)] = max(juengste.get(_wz(b), 0.0), float(b.get("minute") or 0))
+                    except (TypeError, ValueError):
+                        pass
+            erlaubt = {w: _kerzen_quelle_gewinnt(_kerzen_quelle.get(w), {"tab": _tid, "rolle": _t["rolle"], "modus": _modus,
+                                                                          "minute": m}, _jetzt)
+                       for w, m in juengste.items()}
             bars = [b for b in bars if isinstance(b, dict) and erlaubt.get(_wz(b))]
             for w, ok_ in erlaubt.items():
                 if ok_:
-                    _kerzen_quelle[w] = {"tab": _tid, "rolle": _t["rolle"], "modus": _modus, "s": _jetzt}
+                    _kerzen_quelle[w] = {"tab": _tid, "rolle": _t["rolle"], "modus": _modus, "s": _jetzt, "minute": juengste[w]}
             _kerzen, n, warnung = _kerzen_uebernehmen(_kerzen, bars, bool(daten.get("erstladung")))
             if n:
                 _kerzen_s = time.time()
@@ -836,9 +913,11 @@ class Handler(BaseHTTPRequestHandler):
                 for w_, k_ in daten.get("kurse").items():
                     wz = _kurs_wurzel(w_) or str(w_).upper()[:8]
                     alt_ = _kurse.get(wz)
-                    alt_q = ({"tab": alt_.get("tab_id"), "rolle": alt_.get("rolle"), "modus": alt_.get("modus"), "s": alt_.get("empf_s")}
-                             if alt_ else None)
-                    if isinstance(k_, dict) and _quelle_gewinnt(alt_q, _tid, _t["rolle"], k_.get("modus"), jetzt, KURS_QUELLE_S):
+                    alt_q = ({"tab": alt_.get("tab_id"), "rolle": alt_.get("rolle"), "modus": alt_.get("modus"), "s": alt_.get("empf_s"),
+                              "tick": alt_.get("ts")} if alt_ else None)
+                    # 0.8.9: frischester Tick gewinnt (Hysterese 1 s), Echtzeit vor verzoegert hart
+                    if isinstance(k_, dict) and _kurs_quelle_gewinnt(alt_q, {"tab": _tid, "rolle": _t["rolle"], "modus": k_.get("modus"),
+                                                                             "tick": k_.get("ts")}, jetzt):
                         _gefiltert[w_] = k_
                 _kurse, _k1m_je, _k1m_vor_je = _kurse_uebernehmen(_gefiltert, daten.get("sichtbar") is not False,
                                                                   jetzt, _kurse, _k1m_je, _k1m_vor_je)
@@ -878,8 +957,8 @@ class Handler(BaseHTTPRequestHandler):
                 _feed_zeile["s"] = _jetzt
                 _bfs = _t.get("bf") or _bedienfeld
                 _btid, _bfr = _broker_wahl(_tabs, _jetzt)
-                kopf = f"\r[{time.strftime('%H:%M:%S')}] " + ("Broker-Tab still/fehlt — kein Positions-Urteil" if not _bfr else "Feed-Tab")
-                zeile = kopf + " | " + _tabs_zeile(_jetzt) + " · " + _kerzen_diag(_kerzen, _bfs, _aufl_warnung, _script_version)
+                kopf = f"\r[{time.strftime('%H:%M:%S')}] " + ("kein Broker-Tab → kein Positions-Urteil" if not _bfr else "Feed-Tab")
+                zeile = kopf + " | " + _quellen_zeile(_kurse, _jetzt) + " | " + _tabs_zeile(_jetzt) + " · " + _kerzen_diag(_kerzen, _bfs, _aufl_warnung, _script_version)
                 if not _bfr:
                     print(zeile.ljust(160)[:160], end="", flush=True)
             self._json(200, {"ok": True, "an": True, "rolle": "feed", "reader_version": READER_VERSION})
@@ -991,10 +1070,12 @@ class Handler(BaseHTTPRequestHandler):
         # \r haelt es als eine aktualisierende Live-Zeile. 0.8.2: rechts die Kerzen-Diagnose,
         # die Positionen werden dafuer bei Bedarf gekuerzt (Konsole meist 120–160 Zeichen breit).
         _feed_bf = next((t_.get("bf") for t_ in _tabs.values() if t_.get("rolle") == "feed" and t_.get("bf")), None)
-        diag = _tabs_zeile(time.time()) + " · " + _kerzen_diag(_kerzen, _feed_bf or _bedienfeld, _aufl_warnung, _script_version)
+        diag = _quellen_zeile(_kurse, time.time()) + " | " + _tabs_zeile(time.time()) + " · " + _kerzen_diag(_kerzen, _feed_bf or _bedienfeld, _aufl_warnung, _script_version)
         kopf = f"\r[{zeit}] {len(pos)} Pos · "
         platz = max(20, 160 - len(kopf) - len(diag) - 3)
-        if _zeile_faellig(_zeile_merk, zeilen[:platz] + " | " + diag, time.time()):
+        # Vergleich OHNE Tick-Alter (aendert sich jedes Paket) — sonst schriebe die Drossel wieder je POST
+        _schl = zeilen[:platz] + " | " + _quellen_zeile(_kurse, time.time(), mit_alter=False) + " | " + diag.split(" | ", 1)[-1]
+        if _zeile_faellig(_zeile_merk, _schl, time.time()):
             print((kopf + zeilen[:platz] + " | " + diag).ljust(160)[:160], end="", flush=True)
 
         self._json(200, {"ok": True, "an": True, "reader_version": READER_VERSION})
