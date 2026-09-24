@@ -16527,10 +16527,12 @@
     }
     return id
   }
-  let _fleetPushBusy = false
+  let _fleetPushBusy = false, _fleetPushSeit = 0
   async function mt5FleetPushTick(){
+    // Wächter (24.09.2026 abends): hängt ein Tick länger als 90 s, gilt er als tot — Flag lösen, weiter pushen
+    if(_fleetPushBusy && _fleetPushSeit && (Date.now() - _fleetPushSeit) > 90000){ _fleetPushBusy = false; console.warn('[fleet] Push-Tick hing > 90 s — Flag gelöst') }
     if(!MT5_LOCAL || _fleetPushBusy || typeof window.mtcApi !== 'function') return
-    _fleetPushBusy = true
+    _fleetPushBusy = true; _fleetPushSeit = Date.now()
     try{
       const dd = await window.mtcApi('instances')
       if(!dd || dd.copier_offline || dd._httpFail) return
@@ -28487,7 +28489,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.466'
+  const OS_TAB_BUILD = '2026-09-22.467'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40450,16 +40452,25 @@
     return ' · Puls .' + b.split('.').pop()
   }
 
+  // Zeitlimit (24.09.2026 abends, Finn: „bei Echo kein Live-P&L mehr"): pc-c8tka2 hörte um 13:11 UTC mit dem
+  // 5-s-Push an mt5_live auf — genau beim ersten stündlichen Rundgang. Ohne Zeitlimit hängt ein fetch, dessen
+  // Antwort nie kommt, für immer; _fleetPushBusy bleibt gesetzt, kein Push, keine lokalen Chips. Kurze Wege
+  // 20 s, die langen Bot-Wege (tv-lesen/-close/-konto/-order, master-close) 320 s (> Proxy 310 s in app.py).
   async function mtcApi(path, opts){
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus)/.test(String(path))   // lokal: kein TDZ bei frühen Ticks
+    const ctrl = new AbortController()
+    const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
+    const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)
     try {
-      const r = await fetch(`${MTC_BASE}/${path}`, opts)
+      const r = await fetch(`${MTC_BASE}/${path}`, Object.assign({}, opts || {}, { signal: ctrl.signal }))
       const txt = await r.text()
       let j; try { j = JSON.parse(txt) } catch(_){
         return { ok:false, copier_offline:true, _httpFail:true,
                  error: r.ok ? 'Backend-Antwort ist kein JSON (falsche/alte Version?)' : `HTTP ${r.status}` }
       }
       return j
-    } catch(e){ return { ok:false, copier_offline:true, _httpFail:true, error:String(e) } }
+    } catch(e){ return { ok:false, copier_offline:true, _httpFail:true, error: (e && e.name === 'AbortError') ? `Zeitlimit ${Math.round(ms / 1000)} s` : String(e) } }
+    finally{ clearTimeout(tm) }
   }
 
   function offlineChip(){
