@@ -18562,15 +18562,10 @@
       // Beide Level (Vertrag .470): sl = am Master-TP, tp = am Master-SL. Fehlt das zweite, obwohl der Plan einen SL hat
       // (tp_fehler), steht das Warnzeichen sichtbar im Chip — nicht nur im Tooltip.
       const f = v => Number(v).toLocaleString('de-DE')
-<<<<<<< Updated upstream
-      const lvl = h.sl > 0 ? ` · zu bei ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Level'
-      const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
-=======
       // Anzeige (25.09.2026): Schließ-Level über den Kurs-Feed (Master-TP ± 8 Ticks) zuerst, das Notfall-Netz im Terminal dahinter
       const sbNq = h.schliesst_bei_nq > 0 ? Number(h.schliesst_bei_nq) : hedgeSchliesstBei(p.richtung, Number(h.tp_level_nq) || 0, (typeof h.puffer_punkte === 'number') ? h.puffer_punkte : hedgePuffer())
       const lvl = (sbNq > 0 ? ` · schließt bei NQ ${f(sbNq)}` : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Notfall-SL')
-      const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
->>>>>>> Stashed changes
+      const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
@@ -29844,7 +29839,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.515'
+  const OS_TAB_BUILD = '2026-09-22.516'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
