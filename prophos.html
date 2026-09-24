@@ -7408,7 +7408,9 @@
           </div>
         </div>
         <div id="mkl-beide" class="mono" style="font-size:12px;margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px"></div>
-        <div style="height:300px;margin-top:10px;position:relative"><canvas id="mkl-chart"></canvas>
+        <!-- Chart-Container für Lightweight Charts (25.09.2026): Höhe setzt mklChartZeichnen (380 Desktop / 260 Handy), der Platzhalter
+             darunter deckt den Rahmen ab, solange keine Kerzen da sind -->
+        <div style="margin-top:10px;position:relative"><div id="mkl-chart" style="height:380px;width:100%"></div>
           <!-- Ohne Kerzen zeichnete Chart.js eine leere 0–1-Achse (24.09.2026, Design-Rundgang) — jetzt ein
                ehrlicher Platzhalter; mklChartZeichnen blendet ihn ein/aus. -->
           <div id="mkl-leer" class="empty" style="display:none;position:absolute;inset:0;padding:0;border:none;background:transparent;flex-direction:column;justify-content:center;align-items:center">
@@ -18606,7 +18608,7 @@
     const jetzt = Date.now()
     const q = []
     q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(12))
-    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - mkl.span * 60000).toISOString()).order('minute', { ascending: true }).limit(1500))
+    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 1440 * 60000).toISOString()).order('minute', { ascending: true }).limit(3000))   // 24 h × 2 Wurzeln = 2.880 Kerzen (Zählung + Auto-Sprung brauchen beide)
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     // Nebenabfragen (Demo-Orders, Reader-PCs) nur alle 60 s bzw. beim vollen Laden — im 5-s-Takt reichen Kurs + Kerzen-Nachtrag
     // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
@@ -18647,7 +18649,7 @@
       // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
       for(const k of neu){ const i = mkl.kerzen.findIndex(x => x.minute === k.minute && x.wurzel === k.wurzel); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
       mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0))
-      const grenze = jetzt - mkl.span * 60000
+      const grenze = jetzt - 1440 * 60000
       mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= grenze)
     }
     // Nur die gewählte Wurzel im Chart (NQ ↔ MNQ-Umschalter); NAS100-Kerzen (Fusion-Feed, wurzel NAS100) bleiben außen vor
@@ -18701,7 +18703,9 @@
     el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
     if(sym) sym.textContent = k.symbol
     // Tagesveränderung gegen die erste Kerze der Spanne (ehrlich: „seit Spannenanfang", nicht Vortag)
-    const erste = mkl.kerzen.length ? Number(mkl.kerzen[0].o) : null
+    // Vergleichswert = erste Kerze im SICHTBAREN Fenster (1 h / 4 h / 24 h), die Daten sind immer 24 h
+    const ersteK = mkl.kerzen.find(kk => (Date.parse(kk.minute) || 0) >= Date.now() - mkl.span * 60000)
+    const erste = ersteK ? Number(ersteK.o) : null
     if(diff){
       if(erste > 0){ const d = k.preis - erste, pct = d / erste * 100; diff.textContent = `${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(d))} (${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(pct))} %) seit ${mkl.span >= 1440 ? '24 h' : mkl.span / 60 + ' h'}`; diff.style.color = d >= 0 ? 'var(--good)' : 'var(--danger)' }
       else diff.textContent = ''
@@ -18733,28 +18737,53 @@
     }
     if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
-  // Chart (25.09.2026, Finn: „aus dem Chart, wie sich die Kerzen bewegen, auch einen Balkenchart machen"): Kerzen als
-  // Chart.js-Floating-Bars ohne neue Bibliothek — Datensatz „Docht" [l,h] schmal, Datensatz „Körper" [min(o,c),max(o,c)]
-  // grün (c ≥ o) / rot, beide ungruppiert (grouped:false) auf derselben Minuten-Achse. Die LAUFENDE Kerze bewegt sich mit
-  // dem Live-Kurs (close = Kurs, high/low mitgezogen — nur in der Anzeige, die Cloud-Kerze kommt vom Reader). Linie bleibt
-  // als Alternative (Umschalter, Wahl am Gerät). Handy: ≈ 7 px je Kerze, sonst wird es Brei. Wechselt die Darstellung, wird
-  // die Instanz neu gebaut (anderer Chart-Typ), sonst nur update('none') — kein Blitzen im Takt.
-  function mklKerzenSichtbar(ks, cv){
-    if(mkl.art === 'linie') return ks
-    const breite = cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600
-    const maxN = Math.max(20, Math.floor(breite / 7))
-    return ks.length > maxN ? ks.slice(ks.length - maxN) : ks
+  // Chart (25.09.2026, Finn zum Chart.js-Kerzenversuch: „richtig gottlos hässlich … lass es auch rauszoomen … nur 1-Minuten-
+  // Chart, das reicht"): TradingView Lightweight Charts (MIT, jsDelivr 4.2.3, lazy beim ersten Zeichnen) statt Floating-Bars.
+  // Daten = ALLE 1-Minuten-Kerzen der letzten 24 h der gewählten Wurzel; 1 h / 4 h / 24 h setzen nur den sichtbaren Bereich,
+  // Zoom (Mausrad/Pinch) und Verschieben (Drag) sind eingebaut. Laufende Kerze per series.update() (close = Live-Kurs, h/l
+  // mitgezogen — nur Anzeige, die Cloud-Kerze kommt vom Reader), neue Minute = neue Kerze. Demo-Orders als Preislinien. Farben
+  // aus den Design-Tokens, Zeit lokal (Dubai wie überall). Fehlt die Bibliothek (offline/CDN): Hinweistext statt Absturz.
+  // Die kleinen Yahoo-Karten unten bleiben Chart.js. Lücken (Markt zu, PC aus) bleiben Lücken.
+  const MKL_LIB_URL = 'https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js'
+  let _mklLw = null   // { chart, serie, art, wurzel, n, erste, letzte, vorletzte, linien, ro }
+  function mklLibLaden(){
+    if(window.LightweightCharts) return Promise.resolve(true)
+    if(mkl.libLaeuft) return mkl.libLaeuft
+    mkl.libLaeuft = new Promise(res => {
+      const sc = document.createElement('script'); sc.src = MKL_LIB_URL; sc.async = true
+      sc.onload = () => res(!!window.LightweightCharts)
+      sc.onerror = () => { mkl.libLaeuft = null; res(false) }
+      document.head.appendChild(sc)
+    })
+    return mkl.libLaeuft
+  }
+  const mklToken = (name, fallback) => { try{ const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); return v || fallback }catch(_){ return fallback } }
+  const mklZeit = tt => new Date(tt * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  const mklChartHoehe = () => (window.innerWidth || 1000) < 700 ? 260 : 380
+  function mklChartEntfernen(){ if(_mklLw){ try{ _mklLw.ro && _mklLw.ro.disconnect() }catch(_){} try{ _mklLw.chart.remove() }catch(_){} _mklLw = null } }
+  // 1 h / 4 h / 24 h = sichtbarer Bereich bis „jetzt + 5 Kerzen", Daten bleiben die vollen 24 h
+  function mklSichtbarSetzen(){
+    if(!_mklLw || !_mklLw.n) return
+    const bis = Math.max(_mklLw.letzte, Math.floor(Date.now() / 1000)), von = bis - mkl.span * 60
+    try{ _mklLw.chart.timeScale().setVisibleRange({ from: Math.max(_mklLw.erste, von), to: bis + 5 * 60 }) }catch(_){}
   }
   function mklChartZeichnen(){
-    const cv = $mkl('mkl-chart'); if(!cv || typeof Chart === 'undefined') return
-    let ks = mklKerzenSichtbar(mkl.kerzen, cv)
-    // Leer-Zustand: Canvas weg, Platzhalter hin — Chart.js zeichnete sonst eine 0–1-Achse ins Nichts
-    const leer = $mkl('mkl-leer'); if(leer) leer.style.display = ks.length ? 'none' : 'flex'
-    cv.style.visibility = ks.length ? '' : 'hidden'
+    const box = $mkl('mkl-chart'); if(!box) return
+    const leer = $mkl('mkl-leer'), t = $mkl('mkl-leer-titel'), p = $mkl('mkl-leer-text')
+    box.style.height = mklChartHoehe() + 'px'
+    if(!window.LightweightCharts){
+      mklLibLaden().then(ok => {
+        if(ok) mklChartZeichnen()
+        else { if(leer) leer.style.display = 'flex'; if(t) t.textContent = 'Chart-Bibliothek nicht geladen'; if(p) p.textContent = 'Lightweight Charts (jsDelivr) ist gerade nicht erreichbar — Kurse und Demo-Orders laufen trotzdem, der Chart kommt beim nächsten Laden.' }
+      })
+      return
+    }
+    let ks = mkl.kerzen
+    if(leer) leer.style.display = ks.length ? 'none' : 'flex'
     // Platzhalter-Text (25.09.2026): hat die ANDERE Wurzel Kerzen, ist der Chart nicht kaputt — die gewählte liegt auf dem Reader-PC
     // nur in der Watchlist (kein Chart-Pane → keine Kerzen). Link schaltet um.
     if(leer && !ks.length){
-      const t = $mkl('mkl-leer-titel'), p = $mkl('mkl-leer-text'), andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', je = mkl.kerzenJe || {}
+      const andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', je = mkl.kerzenJe || {}
       if(je[andere] > 0){
         if(t) t.textContent = `${mkl.wurzel} liefert keine Kerzen`
         if(p) p.innerHTML = `${mkl.wurzel} liegt auf dem Reader-PC nur in der Watchlist. Für ${mkl.wurzel}-Kerzen ein ${mkl.wurzel}-Pane im TradingView-Layout öffnen. <a href="#markt" data-mkl-wechsel="${andere}" style="font-weight:600">${andere} anzeigen →</a>`
@@ -18767,52 +18796,59 @@
     if(mkl.kurs && ks.length){
       const last = ks[ks.length - 1], tLast = Date.parse(last.minute) || 0
       if(Date.now() - tLast < 120000){
-        const p = mkl.kurs.preis
-        ks = ks.slice(0, -1).concat([Object.assign({}, last, { c: p, h: Math.max(Number(last.h), p), l: Math.min(Number(last.l), p), live: true })])
+        const pr = mkl.kurs.preis
+        ks = ks.slice(0, -1).concat([Object.assign({}, last, { c: pr, h: Math.max(Number(last.h), pr), l: Math.min(Number(last.l), pr), live: true })])
       }
     }
-    const labels = ks.map(k => new Date(k.minute).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }))
     const art = mkl.art === 'linie' ? 'linie' : 'kerzen'
-    let ds, yMin, yMax
-    if(art === 'kerzen'){
-      const farben = ks.map(k => Number(k.c) >= Number(k.o) ? '#12B76A' : '#F04438')
-      const koerper = ks.map(k => { const o = Number(k.o), c = Number(k.c), lo = Math.min(o, c), hi = Math.max(o, c); return hi - lo < 0.25 ? [lo - 0.125, lo + 0.125] : [lo, hi] })   // Doji: mindestens ein Tick hoch
-      ds = [
-        { type: 'bar', label: 'Docht', data: ks.map(k => [Number(k.l), Number(k.h)]), backgroundColor: farben.map(f => f + 'b3'), borderWidth: 0, barPercentage: 0.14, categoryPercentage: 1, grouped: false, order: 3 },
-        { type: 'bar', label: 'Kerze', data: koerper, backgroundColor: farben, borderWidth: 0, barPercentage: 0.72, categoryPercentage: 1, grouped: false, order: 2 }
-      ]
-      const lo = Math.min(...ks.map(k => Number(k.l))), hi = Math.max(...ks.map(k => Number(k.h))), pad = Math.max(1, (hi - lo) * 0.06)
-      yMin = lo - pad; yMax = hi + pad
+    // Daten für die Bibliothek: Unix-Sekunden, streng aufsteigend, doppelte Minuten raus
+    const daten = []; let letzteT = -1
+    for(const k of ks){
+      const tt = Math.floor((Date.parse(k.minute) || 0) / 1000); if(!(tt > 0) || tt <= letzteT) continue; letzteT = tt
+      daten.push(art === 'kerzen' ? { time: tt, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c) } : { time: tt, value: Number(k.c) })
+    }
+    const LW = window.LightweightCharts
+    if(!_mklLw || _mklLw.art !== art || _mklLw.wurzel !== mkl.wurzel){
+      mklChartEntfernen()
+      const rahmen = mklToken('--border-soft', 'rgba(102,112,133,.18)')
+      const chart = LW.createChart(box, { width: box.clientWidth || 600, height: mklChartHoehe(),
+        layout: { background: { type: 'solid', color: mklToken('--bg', '#ffffff') }, textColor: mklToken('--sub', '#667085'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
+        grid: { vertLines: { color: rahmen }, horzLines: { color: rahmen } },
+        rightPriceScale: { borderColor: rahmen, autoScale: true },
+        timeScale: { borderColor: rahmen, timeVisible: true, secondsVisible: false, rightOffset: 5, barSpacing: 8, tickMarkFormatter: tt => mklZeit(tt) },
+        localization: { locale: 'de-DE', timeFormatter: tt => new Date(tt * 1000).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+                        priceFormatter: v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+        crosshair: { mode: LW.CrosshairMode.Normal }, handleScale: true, handleScroll: true })
+      const fmt = { type: 'price', precision: 2, minMove: 0.25 }
+      const serie = art === 'kerzen'
+        ? chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', wickUpColor: '#26a69a', wickDownColor: '#ef5350', borderVisible: false, lastValueVisible: true, priceLineVisible: true, priceFormat: fmt })
+        : chart.addLineSeries({ color: '#7C3AED', lineWidth: 2, lastValueVisible: true, priceLineVisible: true, priceFormat: fmt })
+      _mklLw = { chart, serie, art, wurzel: mkl.wurzel, n: 0, erste: 0, letzte: 0, vorletzte: '', linien: [], ro: null }
+      try{ _mklLw.ro = new ResizeObserver(() => { if(!_mklLw || !_mklLw.chart) return; const h = mklChartHoehe(); if(box.style.height !== h + 'px') box.style.height = h + 'px'; _mklLw.chart.applyOptions({ width: box.clientWidth || 600, height: h }) }); _mklLw.ro.observe(box) }catch(_){}
+      serie.setData(daten)
+      _mklLw.n = daten.length; _mklLw.erste = daten.length ? daten[0].time : 0; _mklLw.letzte = daten.length ? daten[daten.length - 1].time : 0
+      _mklLw.vorletzte = daten.length > 1 ? JSON.stringify(daten[daten.length - 2]) : ''
+      mklSichtbarSetzen()
     } else {
-      const closes = ks.map(k => Number(k.c))
-      const up = closes.length > 1 ? closes[closes.length - 1] >= closes[0] : true
-      const farbe = up ? '#12B76A' : '#F04438'
-      ds = [{ type: 'line', label: 'Kurs', data: closes, borderColor: farbe, backgroundColor: farbe + '1f', borderWidth: 1.6, pointRadius: 0, pointHitRadius: 12, fill: true, tension: .15, order: 2 }]
+      // Takt-Update ohne Zoom-Verlust: update() nur für die letzte Kerze (oder die neue Minute: erst die abgeschlossene Vorgängerin
+      // final, dann die neue). setData nur bei vollem Neuladen (Anzahl schrumpft / springt / Anfang verschoben) — das setzt den Bereich neu.
+      const s = _mklLw.serie, n = daten.length, alt = _mklLw.n
+      if(!n){ s.setData([]) }
+      else if(n === alt && daten[0].time === _mklLw.erste && daten[n - 1].time === _mklLw.letzte){ s.update(daten[n - 1]) }
+      else if(n === alt + 1 && daten[0].time === _mklLw.erste && daten[n - 2].time === _mklLw.letzte){ s.update(daten[n - 2]); s.update(daten[n - 1]) }
+      else { s.setData(daten); _mklLw.n = n; _mklLw.erste = daten[0].time; _mklLw.letzte = daten[n - 1].time; mklSichtbarSetzen() }
+      _mklLw.n = n; _mklLw.erste = n ? daten[0].time : 0; _mklLw.letzte = n ? daten[n - 1].time : 0
+      _mklLw.vorletzte = n > 1 ? JSON.stringify(daten[n - 2]) : ''
     }
-    // Offene Demo-Orders als Linien: Entry (grau gestrichelt), TP (grün), SL (rot)
+    // Demo-Order-Linien: Entry grau gestrichelt, TP grün / SL rot gepunktet (LineStyle: 1 Dotted, 2 Dashed)
+    for(const l of _mklLw.linien){ try{ _mklLw.serie.removePriceLine(l) }catch(_){} }
+    _mklLw.linien = []
     for(const o of mkl.orders.filter(o => o.status === 'open')){
-      const linie = (v, col, dash, lbl) => v > 0 && ds.push({ type: 'line', label: lbl, data: labels.map(() => v), borderColor: col, borderWidth: 1, borderDash: dash, pointRadius: 0, pointHitRadius: 0, fill: false, order: 1 })
-      linie(Number(o.entry), '#98A2B3', [4, 4], `Entry ${o.richtung.toUpperCase()} ${o.kt}×${o.symbol}`)
-      linie(Number(o.tp_level), '#15803d', [2, 3], 'TP')
-      linie(Number(o.sl_level), '#b91c1c', [2, 3], 'SL')
+      const linie = (v, col, titel, style) => { if(!(Number(v) > 0)) return; try{ _mklLw.linien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: titel })) }catch(_){} }
+      linie(o.entry, '#98A2B3', `${String(o.richtung || '').toUpperCase()} ${o.kt}×${o.symbol}`, 2)
+      linie(o.tp_level, '#15803d', 'TP', 1)
+      linie(o.sl_level, '#b91c1c', 'SL', 1)
     }
-    const tipIdx = art === 'kerzen' ? 1 : 0
-    if(mkl.chart && mkl.chart._mklArt === art){
-      const c = mkl.chart
-      c._mklKs = ks; c.data.labels = labels; c.data.datasets = ds
-      c.options.scales.y.min = yMin; c.options.scales.y.max = yMax
-      c.update('none'); return
-    }
-    if(mkl.chart){ mkl.chart.destroy(); mkl.chart = null }
-    mkl.chart = new Chart(cv.getContext('2d'), { type: art === 'kerzen' ? 'bar' : 'line', data: { labels, datasets: ds }, options: {
-      responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false }, tooltip: { filter: i => i.datasetIndex === tipIdx, callbacks: { label: c => {
-        const k = (mkl.chart && mkl.chart._mklKs || [])[c.dataIndex]
-        return (art === 'kerzen' && k) ? `O ${mklFmt(k.o)} · H ${mklFmt(k.h)} · L ${mklFmt(k.l)} · C ${mklFmt(k.c)}${k.live ? ' · live' : ''}` : mklFmt(Array.isArray(c.raw) ? c.raw[1] : c.parsed.y)
-      } } } },
-      scales: { x: { offset: art === 'kerzen', grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#98A2B3', font: { size: 10 } } },
-                y: { position: 'right', beginAtZero: false, min: yMin, max: yMax, grid: { color: 'rgba(102,112,133,.10)' }, ticks: { color: '#98A2B3', font: { size: 10 }, callback: v => Number(v).toLocaleString('de-DE') } } } } })
-    mkl.chart._mklArt = art; mkl.chart._mklKs = ks
   }
   function mklOrdersRender(){
     const offenEl = $mkl('mkl-offen'), verlaufEl = $mkl('mkl-verlauf'); if(!offenEl || !verlaufEl) return
@@ -18878,10 +18914,11 @@
   // Stub ohne Login (Muster _admKapStub): window._mklStub({kurs, kerzen, orders}) zeichnet die View mit Testdaten
   window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
   // Verdrahtung: Spanne, Richtung, Instrument, Platzieren — jeweils eigene Handler
+  // 1 h / 4 h / 24 h (25.09.2026): nur der sichtbare Bereich — die Daten sind immer die vollen 24 h 1-Minuten-Kerzen
   document.querySelectorAll('#mkl-span [data-mkl-span]').forEach(b => b.addEventListener('click', () => {
     mkl.span = Number(b.getAttribute('data-mkl-span')) || 60
     document.querySelectorAll('#mkl-span button').forEach(x => x.classList.toggle('active', x === b))
-    mkl.kerzen = []; mklTick(true)
+    mklSichtbarSetzen(); mklKopf()
   }))
   document.querySelectorAll('#mkl-dir [data-mkl-dir]').forEach(b => b.addEventListener('click', () => {
     mkl.dir = b.getAttribute('data-mkl-dir')
@@ -29644,7 +29681,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.506'
+  const OS_TAB_BUILD = '2026-09-22.507'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
