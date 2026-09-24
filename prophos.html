@@ -28884,6 +28884,15 @@
         hf.style.display = v2tv ? '' : 'none'
         if(v2tv){
           let vorschlag = (plan.hedgeEur > 0) ? plan.hedgeEur : '', quelle = (plan.hedgeEur > 0) ? 'am Plan gespeichert' : ''
+          // Winning Days Farm (24.09.2026 spät): trägt der Plan einen Faktor, ist der Betrag hier = TP × FX × Faktor —
+          // der Faktor bleibt im data-Attribut, damit ein geänderter TP den Betrag neu rechnet (Listener unten) und ein
+          // geänderter Betrag den Faktor nachzieht. Nie beide Werte widersprüchlich.
+          hi.dataset.faktor = (plan.hedgeFaktor > 0) ? String(plan.hedgeFaktor) : ''
+          const _tpJetzt = parseFloat(document.getElementById('tp-order-tp')?.value) || 0
+          if(plan.hedgeFaktor > 0 && _tpJetzt > 0){
+            vorschlag = Math.round(_tpJetzt * tpWdFx() * plan.hedgeFaktor * 100) / 100
+            quelle = `Faktor ${Number(plan.hedgeFaktor).toLocaleString('de-DE')} × TP ${_tpJetzt.toLocaleString('de-DE')} $ × FX ${tpWdFx().toLocaleString('de-DE', { maximumFractionDigits: 4 })}`
+          }
           if(vorschlag === '' && _accTp && typeof tpVorplanZeile === 'function' && typeof tpVorplanIstFunded === 'function' && tpVorplanIstFunded(_accTp)){
             try{
               const vp = (typeof wdVorplanRegeln === 'function') ? wdVorplanRegeln() : null
@@ -29100,6 +29109,13 @@
     if(plan.route === 'tvv2'){
       const hv = parseFloat(document.getElementById('tp-order-hedge')?.value)
       upd.hedge_eur = (isFinite(hv) && hv > 0) ? Math.round(hv * 100) / 100 : null
+      // Faktor nachziehen (24.09.2026 spät, Winning Days Farm): Betrag und Faktor dürfen sich nie widersprechen —
+      // Faktor = Betrag ÷ (TP × FX). Ohne Betrag oder ohne TP wird der Faktor NULL; der Betrag bleibt die Wahrheit
+      // für Copier (Lots) und Farmer (Staffel-Abgleich). Pläne ohne Faktor und ohne Betrag bleiben unberührt.
+      if(plan.hedgeFaktor != null || upd.hedge_eur != null){
+        const tpV = autoSltp ? (Number(tp) || 0) : 0
+        upd.hedge_faktor = (upd.hedge_eur > 0 && tpV > 0) ? Math.round(upd.hedge_eur / (tpV * tpWdFx()) * 100) / 100 : null
+      }
     }
     try{
       const { data, error } = await supabase.from('trade_plans').update(upd)
@@ -29196,7 +29212,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.473'
+  const OS_TAB_BUILD = '2026-09-22.474'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32969,6 +32985,24 @@
     try{ if(id !== 'tp-wd-faktor' && document.getElementById('tp-wd-faktor')?.value === '') tpWdFaktorVorbelegen(); else tpWdVorschau() }catch(_){}
   }))
   document.getElementById('tp-v2-instr-seg')?.addEventListener('click', () => setTimeout(() => { try{ tpWdVorschau() }catch(_){} }, 0))
+  // Popup 2 (Order-Bot-Schritt) auf Winning Days Farm: TP geändert → Betrag aus dem Faktor neu rechnen; Betrag
+  // geändert → Faktor nachziehen (Betrag ÷ (TP × FX)). Der Faktor lebt im data-Attribut des Betrag-Feldes
+  // (gesetzt beim Öffnen), der Hinweis nennt immer beide Zahlen.
+  document.getElementById('tp-order-tp')?.addEventListener('input', () => { try{
+    const hi = document.getElementById('tp-order-hedge'), hh = document.getElementById('tp-order-hedge-hint'), f = parseFloat(hi?.dataset.faktor || '')
+    const tp = parseFloat(document.getElementById('tp-order-tp').value) || 0
+    if(!hi || !(f > 0) || !(tp > 0)) return
+    hi.value = Math.round(tp * tpWdFx() * f * 100) / 100
+    if(hh) hh.textContent = `Faktor ${f.toLocaleString('de-DE')} × TP ${tp.toLocaleString('de-DE')} $ × FX ${tpWdFx().toLocaleString('de-DE', { maximumFractionDigits: 4 })}`
+  }catch(_){} })
+  document.getElementById('tp-order-hedge')?.addEventListener('input', () => { try{
+    const hi = document.getElementById('tp-order-hedge'), hh = document.getElementById('tp-order-hedge-hint')
+    const tp = parseFloat(document.getElementById('tp-order-tp')?.value) || 0, hv = parseFloat(hi.value)
+    if(!(tp > 0)){ if(hh) hh.textContent = hv > 0 ? 'ohne TP kein Faktor — der Betrag gilt so' : ''; hi.dataset.faktor = ''; return }
+    const f = (hv > 0) ? Math.round(hv / (tp * tpWdFx()) * 100) / 100 : 0
+    hi.dataset.faktor = f > 0 ? String(f) : ''
+    if(hh) hh.textContent = f > 0 ? `Faktor ${f.toLocaleString('de-DE')} (aus Betrag ÷ (TP × FX ${tpWdFx().toLocaleString('de-DE', { maximumFractionDigits: 4 })}))` : 'leer = kein Hedge'
+  }catch(_){} })
   // Wählt automatisch den Live-Account (Fusion Markets) als Slave, falls beim Klick auf
   // "Übernehmen" (Auto-Vorschlag oder Gesamtkosten) noch keiner ausgewählt ist — Finn hat
   // praktisch immer denselben Live-Slave, das erspart den manuellen Zwischenschritt UND behebt
