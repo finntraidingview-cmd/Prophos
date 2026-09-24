@@ -492,6 +492,47 @@ def main():
         ohne and ohne["ohne_felder"] and ohne["modus"] == "Reiter ohne Felder"
         and order_bot.tv_panel_bereich([("Einheiten", (10, 10, 50, 30), "Text")], fenster) is None
         and order_bot.tv_panel_bereich([], None) is None)
+    # Neues TradingView-Layout (25.09.2026, Finns Screenshot, angedockt): Reiterzeile 1 'Order | DOM',
+    # Verkauf/Kauf, Reiterzeile 2 'Markt … Stop Limit', 'Einheiten' als AUFKLAPPMENUE (ComboBox), daneben
+    # 'Ø USD Risiko', 'Take Profit, $' / 'Stop-Loss, $' ebenfalls Menues mit Schalter rechts.
+    _NL = [("Order", (1500, 120, 1560, 144), "TabItem"), ("DOM", (1570, 120, 1620, 144), "TabItem"),
+           ("Verkauf 30.827,25", (1500, 170, 1650, 220), "Button"), ("Kauf 30.827,75", (1660, 170, 1810, 220), "Button"),
+           ("Markt", (1510, 250, 1560, 274), "TabItem"), ("Limit", (1580, 250, 1630, 274), "TabItem"),
+           ("Stop", (1650, 250, 1700, 274), "TabItem"), ("Stop Limit", (1720, 250, 1810, 274), "TabItem"),
+           ("Einheiten", (1510, 300, 1600, 322), "ComboBox"), ("Ø USD Risiko", (1660, 300, 1800, 322), "ComboBox"),
+           ("Tick Wert 2,50 USD", (1510, 360, 1650, 378), "Text"), ("Aussteige", (1510, 400, 1600, 418), "Text"),
+           ("Take Profit, $", (1510, 440, 1640, 462), "ComboBox"), ("Stop-Loss, $", (1510, 520, 1640, 542), "ComboBox"),
+           ("Time-in-Force Day", (1510, 600, 1700, 618), "Text"), ("Kauf 5 MNQZ6 MARKT", (1510, 700, 1810, 740), "Button")]
+    _nl_felder = [(1510, 326, 1640, 350), (1660, 326, 1800, 350), (1510, 466, 1640, 490), (1510, 546, 1640, 570)]
+    _nl_werte = ["5", "12,50", "250", "100"]
+    _nl_schalter = [((1770, 442, 1806, 460), True), ((1770, 522, 1806, 540), False)]
+    _nb = order_bot.tv_panel_bereich(_NL, (0, 0, 1920, 1080))
+    chk("ORDER-BOT (neues Layout): reiter_y auf der Markt-Zeile, nicht auf 'Order | DOM'; Beschriftungen als ComboBox gefunden",
+        _nb and _nb["reiter_y"] == 262 and _nb["labels"] == 3 and _nb["modus"] == "angedockt"
+        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])) == 1
+        and order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])[0]["typ"] == "ComboBox"
+        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])) == 1
+        and len(order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_SL, y_von=_nb["reiter_y"])) == 1)
+    _lab_u = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_UNITS, y_von=_nb["reiter_y"])
+    _lab_tp = order_bot.tv_im_panel(_NL, _nb, order_bot.TV_RX_TP, y_von=_nb["reiter_y"])
+    chk("ORDER-BOT (neues Layout): Feld unter 'Einheiten' ist das linke (nicht 'Ø USD Risiko'), Schalter zu 'Take Profit' gefunden",
+        order_bot.tv_label_mit_feld(_lab_u, _nl_felder, _nb)[1] == 0
+        and order_bot.tv_label_mit_feld(_lab_tp, _nl_felder, _nb)[1] == 2
+        and order_bot.tv_schalter_zu(_nl_schalter, _lab_tp[0]["r"], _nb) == ((1770, 442, 1806, 460), True))
+    # Rueckfall ohne jede Beschriftung: Units = oberstes Zahlenfeld, TP/SL ueber die Schalter-Zeilen
+    _ohne = [e for e in _NL if e[2] != "ComboBox"]
+    _nb2 = order_bot.tv_panel_bereich(_ohne, (0, 0, 1920, 1080))
+    _iu = order_bot.tv_feld_ohne_label(_nl_felder, _nl_werte, {"links": 1480, "rechts": 1840}, 262)
+    _zeilen = order_bot.tv_schalter_zeilen(_nl_schalter, {"links": 1480, "rechts": 1840}, 350)
+    _lab_sl = {"r": (1490, _zeilen[1][1], _zeilen[1][0] - 6, _zeilen[1][3])}
+    chk("ORDER-BOT (Rueckfall): ohne Beschriftungen → ohne_felder; Units = oberstes Zahlenfeld; TP/SL-Zeilen in Reihenfolge, Feld unter der SL-Zeile",
+        _nb2 and _nb2["ohne_felder"] and _iu == 0 and len(_zeilen) == 2 and _zeilen[0][1] == 442 and _zeilen[1][1] == 522
+        and order_bot.tv_feld_unter(_nl_felder, _lab_sl["r"], {"links": 1480, "rechts": 1840}) == 3
+        and order_bot.tv_feld_ohne_label([(1510, 200, 1600, 220)], ["5"], {"links": 1480, "rechts": 1840}, 262) is None)
+    _inv = order_bot.tv_panel_inventar(_NL, _nb, 4)
+    chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
+        _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3
+        and "Kauf 30" not in _inv)
     # Ruecklese-Vergleich (18.08.2026, Feld zeigte '2', MT5 rechnete 0.01):
     # als Zahl vergleichen, MT5-Umformatierung und Locale duerfen nicht stoeren
     chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",

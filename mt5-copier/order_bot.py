@@ -1852,7 +1852,7 @@ _TV_UIA_TYPEN = ("Text", "ListItem", "MenuItem", "Button", "ComboBox", "DataItem
 # schlimmstenfalls ist es also so schnell wie vorher.
 _UIA_TYPID = {"Button": 50000, "CheckBox": 50002, "ComboBox": 50003, "Edit": 50004,
               "Hyperlink": 50005, "Image": 50006, "ListItem": 50007, "MenuItem": 50011,
-              "RadioButton": 50013, "TabItem": 50019, "Text": 50020, "Group": 50026,
+              "RadioButton": 50013, "TabItem": 50019, "Text": 50020, "Custom": 50025, "Group": 50026,
               "DataItem": 50029}
 _UIA_SAMMEL = {"geht": None}      # None = noch nicht probiert, True/False = Ergebnis
 
@@ -4313,6 +4313,53 @@ def tv_label_mit_feld(labels, felder_r, bereich):
     return None, None
 
 
+def tv_feld_ohne_label(felder_r, werte, bereich, y_von):
+    """Rueckfall ohne Beschriftung (25.09.2026, neues TradingView-Layout: 'Einheiten' als
+    Aufklappmenue): das OBERSTE (dann linkeste) Eingabefeld im Panel unterhalb der
+    Markt-Reiterzeile, in dem eine Zahl steht = Units. -> Index oder None"""
+    bestes, schluessel = None, None
+    for i, r in enumerate(felder_r or ()):
+        if not r:
+            continue
+        l, t, rr, b = r
+        if not (bereich["links"] <= (l + rr) // 2 <= bereich["rechts"]) or t <= y_von:
+            continue
+        if tv_zahl_lesen(werte[i] if i < len(werte or ()) else "") is None:
+            continue
+        k = (t // 12, l)
+        if schluessel is None or k < schluessel:
+            bestes, schluessel = i, k
+    return bestes
+
+
+def tv_schalter_zeilen(schalter, bereich, y_von):
+    """Umschalter im Panel unterhalb von y_von, von oben nach unten (Take Profit vor
+    Stop Loss — so steht es im Ticket). -> [rect, ...]"""
+    out = []
+    for r, _an in schalter or ():
+        if r[0] < bereich["links"] - 10 or r[2] > bereich["rechts"] + 10:
+            continue
+        if (r[1] + r[3]) // 2 <= y_von:
+            continue
+        out.append(tuple(r))
+    return sorted(out, key=lambda r: (r[1], r[0]))
+
+
+def tv_panel_inventar(roh, bereich, max_n=10):
+    """Die ersten Elemente UNTER der Reiterzeile im Panel als 'Typ:Name@l,t,r,b' — kommt
+    in die Fehlermeldung, damit beim naechsten Fehlschlag nicht geraten werden muss,
+    wie TradingView die Beschriftungen jetzt nennt (25.09.2026)."""
+    out = []
+    for e in sorted((x for x in roh or () if x[1]), key=lambda x: (x[1][1], x[1][0])):
+        l, t, r, b = e[1]
+        if not (bereich["links"] <= (l + r) // 2 <= bereich["rechts"]) or (t + b) // 2 <= bereich["reiter_y"]:
+            continue
+        out.append(f"{(e[2] if len(e) > 2 else '') or '?'}:{str(e[0]).strip()[:28]}@{l},{t},{r},{b}")
+        if len(out) >= max_n:
+            break
+    return " | ".join(out) or "nichts unter der Reiterzeile"
+
+
 def tv_order_plan(cmd):
     """Befehl -> (plan, fehler). plan = {'richtung','menge','tp','sl'}; tp/sl None = aus."""
     r = str(cmd.get("richtung") or "").strip().lower()
@@ -4524,7 +4571,11 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         from pywinauto import keyboard
     except ImportError:
         return False, "pywinauto fehlt"
-    typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem")
+    # 25.09.2026: ComboBox/MenuItem/Group/Custom dazu — im neuen TradingView-Layout ist
+    # 'Einheiten ▾' ein Aufklappmenue, 'Take Profit, $ ▾'/'Stop-Loss, $ ▾' ebenso; als reine
+    # Textknoten waren sie nicht mehr zu sehen ('Beschriftung Units nicht gefunden', obwohl
+    # Reiter und Seite sauber geklickt wurden).
+    typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem", "ComboBox", "MenuItem", "Group", "Custom")
 
     fenster = _tv_fenster_rect(w)
 
@@ -4579,6 +4630,21 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     t_felder = time.time()
     while ber.get("ohne_felder"):
         if time.time() - t_felder > 4.0:
+            # Beschriftungen fehlen, aber ZAHLENFELDER unter der Reiterzeile im Reiter-Bereich? Dann ist das
+            # Ticket da und TradingView nennt die Beschriftungen nur anders → weiter, feld_zu faehrt den
+            # Rueckfall (oberstes Zahlenfeld = Units, Umschalter-Zeilen = TP/SL) und die Spur sagt es.
+            eds_ = _tv_uia_felder(w) or []
+            rs_ = []
+            for e_ in eds_:
+                try:
+                    r_ = e_.rectangle()
+                    rs_.append((r_.left, r_.top, r_.right, r_.bottom))
+                except Exception:
+                    rs_.append(None)
+            if tv_feld_ohne_label(rs_, [_tv_edit_wert(e_) for e_ in eds_], ber, ber["reiter_y"]) is not None:
+                trail.append(f"{ber.get('spur')} — keine Beschriftung lesbar, aber Zahlenfelder unter den Reitern: "
+                             "weiter im Rueckfall")
+                break
             return False, ("Order-Panel nicht gefunden: die Reiter-Zeile 'Market … Stop Limit' steht bei "
                            f"@{ber['links']},{ber['reiter_y']}, aber darunter ist keine Beschriftung Units/Take profit/"
                            "Stop loss zu sehen (losgeloestes Popup? in TradingView ueber das Andock-Symbol in der "
@@ -4587,7 +4653,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         _warte(0.4, 0.2)
         roh, ber2 = blick()
         ber = ber2 or ber
-    trail.append(ber.get("spur") or "Panel: ?")
+    if not ber.get("ohne_felder"):
+        trail.append(ber.get("spur") or "Panel: ?")
 
     # --- Panel auf dem RICHTIGEN Symbol und RUHIG? (23.09.2026 03:19, Finns Lauf:
     # Watchlist NQ1! geklickt, Tab-Titel nach 0,7 s auf NQ — das Order-Panel hing aber
@@ -4681,16 +4748,52 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                 rs.append(None)
         return eds, rs
 
+    merk = {"units_unten": None}   # Unterkante des Units-Felds: TP/SL-Schalter liegen darunter
+
     def feld_zu(muster, name, lab_bekannt=None):
         # lab_bekannt (22.09.2026 19:0x): nach dem Tippen die Beschriftung nicht neu suchen —
         # sie bewegt sich nicht; nur die Felder neu lesen (ein Scan statt zwei je Feld).
+        roh_ = None
         if lab_bekannt is not None:
             labels = [lab_bekannt]
         else:
             roh_, _b = blick()
             labels = tv_im_panel(roh_, ber, muster, y_von=ber["reiter_y"])
         if not labels:
-            return None, None, f"Beschriftung '{name}' im Order-Panel nicht gefunden."
+            # RUECKFALL OHNE BESCHRIFTUNG (25.09.2026, Finns Lauf im neuen Layout): Units = das
+            # oberste Zahlenfeld unter der Markt-Reiterzeile; Take Profit / Stop Loss = die
+            # erste / zweite Umschalter-Zeile unter dem Units-Feld (Feld direkt darunter).
+            # Beweis bleibt wie immer das Zuruecklesen des getippten Werts. Die Einheit ($)
+            # kann so NICHT geprueft werden — das steht in der Spur.
+            eds, rs = felder()
+            if muster is TV_RX_UNITS:
+                werte = [_tv_edit_wert(e) for e in eds]
+                i = tv_feld_ohne_label(rs, werte, ber, ber["reiter_y"])
+                if i is not None:
+                    r = rs[i]
+                    lab = {"text": "Units (ohne Beschriftung)", "typ": "?", "r": (r[0], r[1] - 22, r[2], r[1] - 2),
+                           "punkt": ((r[0] + r[2]) // 2, r[1] - 12)}
+                    trail.append(f"Beschriftung '{name}' nicht gefunden — Rueckfall: oberstes Zahlenfeld unter den "
+                                 f"Reitern @{r[0]},{r[1]} (Wert '{werte[i]}')")
+                    merk["units_unten"] = r[3]
+                    return (eds[i], r), lab, ""
+            else:
+                sch = _tv_uia_schalter(w) or []
+                zeilen = tv_schalter_zeilen(sch, ber, merk["units_unten"] or ber["reiter_y"])
+                idx = 0 if muster is TV_RX_TP else 1
+                if len(zeilen) > idx:
+                    z = zeilen[idx]
+                    lab = {"text": f"{name}, $ (ohne Beschriftung — Einheit unbestaetigt)", "typ": "?",
+                           "r": (ber["links"] + 10, z[1], z[0] - 6, z[3]), "punkt": ((ber["links"] + z[0]) // 2, (z[1] + z[3]) // 2)}
+                    i = tv_feld_unter(rs, lab["r"], ber)
+                    if i is not None:
+                        trail.append(f"Beschriftung '{name}' nicht gefunden — Rueckfall: {idx + 1}. Umschalter-Zeile unter "
+                                     f"Units @{z[0]},{z[1]}, Feld darunter @{rs[i][0]},{rs[i][1]}; Einheit $ NICHT geprueft")
+                        return (eds[i], rs[i]), lab, ""
+            if roh_ is None:
+                roh_, _b = blick()
+            return None, None, (f"Beschriftung '{name}' im Order-Panel nicht gefunden (auch kein Rueckfall ueber "
+                                f"Zahlenfeld/Umschalter). Unter der Reiterzeile: " + tv_panel_inventar(roh_, ber))
         eds, rs = felder()
         # MEHRERE Treffer sind normal (22.09.2026, Finns Lauf: "'Units' nicht eindeutig
         # (2 Treffer)" — TradingView fuehrt die Beschriftung als Text UND als Name des
@@ -4736,6 +4839,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         if not feld or tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
             return False, f"Menge {plan['menge']} steht nicht im Feld 'Units' (dort: '{_tv_edit_wert(feld[0]) if feld else '?'}')."
     trail.append(f"Units = {plan['menge']}")
+    if feld and feld[1] and merk["units_unten"] is None:
+        merk["units_unten"] = feld[1][3]
 
     # Take Profit / Stop Loss
     for muster, name, soll in ((TV_RX_TP, "Take profit", plan["tp"]), (TV_RX_SL, "Stop loss", plan["sl"])):
