@@ -18427,6 +18427,7 @@
         const frisch = Number(r.alter_s) < 30
         if(!frisch) continue
         gelesen++
+        if(typeof hedgeEinstiegNachtragen === 'function') hedgeEinstiegNachtragen(plan, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
         const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan) : { symbol: plan.masterSymbol || '', dir: plan.richtung }
         const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
         const pos = (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol)
@@ -19022,6 +19023,28 @@
   }
   // Die EINE Puls-Lesung nach dem Level-Ende. Eine Maus: läuft eine Order/ein Schließen (_tpOrbitLaeuft) oder der Rundgang
   // (tvV2Poll.busy), wird gewartet (8–14 s, höchstens ~3 min); 409 puls_beschaeftigt zählt als belegt, nicht als Lesung.
+  /* EINSTIEG AUS DEM PULS-FILL NACHTRAGEN (25.09.2026, Live-Daten .580: das tvlesen-Ergebnis trägt avg_fill_je_wurzel =
+   * {NQ: {avg_fill, symbol, seite, menge}, MNQ: {…}}). Nur wenn der Einstieg am Hedge noch aus dem Kurs-Feed stammt (einstieg_quelle
+   * beginnt mit 'feed'), die Wurzel die des Plans ist und die Seite zur Plan-Richtung passt → einstieg_nq = avg_fill, Quelle
+   * 'puls avg_fill (nachgetragen)'. NUR Anzeige/Statistik: tp_level_nq, sl_level_nq und schliesst_bei_nq bleiben, was beim Open galt —
+   * sonst schlösse ein laufender Hedge plötzlich an anderer Stelle. Schreiben atomar über mt5_baseline_patch_in('hedge'). */
+  async function hedgeEinstiegNachtragen(plan, r){
+    try{
+      const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+      const je = r && r.avg_fill_je_wurzel
+      if(!h || !je || typeof je !== 'object' || !/^feed/.test(String(h.einstieg_quelle || ''))) return
+      if(!(plan.richtung === 'buy' || plan.richtung === 'sell')) return
+      const sym = h.symbol_nq || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
+      const w = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(sym) : ''
+      const x = (w === 'NQ' || w === 'MNQ') ? je[w] : null
+      if(!x || tvSeiteNorm(x.seite) !== plan.richtung) return
+      const fill = (typeof x.avg_fill === 'number') ? x.avg_fill : ((typeof tvKursZahl === 'function') ? tvKursZahl(String(x.avg_fill || '')) : NaN)
+      if(!(fill > 1000)) return
+      await baselinePatchIn(plan.id, 'hedge', { einstieg_nq: fill, einstieg_quelle: 'puls avg_fill (nachgetragen)', einstieg_feed_vorher: (h.einstieg_nq != null) ? h.einstieg_nq : null,
+        einstieg_nachgetragen_at: new Date().toISOString() })
+    }catch(e){ console.warn('[hedge] Einstieg nachtragen', e) }
+  }
+  window._hedgeEinstiegNachtragen = hedgeEinstiegNachtragen
   async function hedgeReviewPulsLesen(pid){
     const p0 = tradePlans.find(x => String(x.id) === pid)
     const fin0 = p0 && p0.mt5Baseline && p0.mt5Baseline.final
@@ -19042,6 +19065,7 @@
       await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
     }
     const p1 = tradePlans.find(x => String(x.id) === pid) || p0
+    if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
     const fin1 = (p1.mt5Baseline && p1.mt5Baseline.final) || fin0
     if(p1.status !== 'review' || fin1.quelle !== 'level') return
     const nowIso = new Date().toISOString()
@@ -31327,7 +31351,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.581'
+  const OS_TAB_BUILD = '2026-09-22.582'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
