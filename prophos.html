@@ -16668,9 +16668,15 @@
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
       const upd = { status: 'open', started_at: new Date().toISOString(), ended_at: null }
+      // MERGE statt Überschreiben (25.09.2026, Live-Befund Plan 2089a033): seit .527 öffnet der Fusion-Hedge VOR diesem
+      // Schritt und schreibt mt5_baseline.hedge — das frühere „mt5_baseline = { tv }" hat das hedge-Objekt gelöscht, die
+      // Fusion-Position lag danach ohne Eintrag am Plan. Jetzt: frische Zeile lesen und nur die eigenen Felder setzen.
+      let altBase = null
+      try{ const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle(); altBase = (z && z.mt5_baseline) || null }catch(_){ altBase = plan.mt5Baseline || null }
       if(plan.route === 'tvv2'){
-        // Orbit V2 (24.09.2026): Startwert von Today's P&L aus dem Reader — oder ehrlich null
-        upd.mt5_baseline = (tvBaseline && typeof tvBaseline === 'object') ? { tv: tvBaseline } : null
+        // Orbit V2 (24.09.2026): Startwert von Today's P&L aus dem Reader — oder ehrlich ohne tv-Feld
+        const mitTv = (tvBaseline && typeof tvBaseline === 'object') ? { tv: tvBaseline } : {}
+        upd.mt5_baseline = (altBase || Object.keys(mitTv).length) ? Object.assign({}, altBase || {}, mitTv) : null
         if(!upd.mt5_baseline) console.warn('[v2PlanAufOpen] Orbit V2 ohne Start-Baseline (kein tv-lesen) — Auto-P&L nimmt später Today\'s P&L als Ganzes')
       }
       if(plan.route === 'mt5v2'){
@@ -16683,7 +16689,7 @@
             base = { master_balance: Number(s.master_balance), at: new Date().toISOString(), ticket: ticket ?? null }
           }
         }catch(_){}
-        upd.mt5_baseline = base
+        upd.mt5_baseline = (altBase || base) ? Object.assign({}, altBase || {}, base || {}) : null   // Merge (25.09.2026)
         if(!base) console.warn('[v2PlanAufOpen] Echo V2 ohne Baseline gestartet (keine frische Instanz) — P&L bleibt manuell')
       }
       const { data, error } = await supabase.from('trade_plans')
@@ -17016,6 +17022,9 @@
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
             hedge_currency: s.hedge_currency ?? null,
             hedge_fremde: s.hedge_fremde ?? null,
+            // Solo-Hedge (25.09.2026): offene Positionen + Abschluss-Ring — fehlten im Push, der Mac konnte Live-P&L und Ring nie sehen
+            hedge_solo: Array.isArray(s.hedge_solo) ? s.hedge_solo : null,
+            hedge_solo_zu: Array.isArray(s.hedge_solo_zu) ? s.hedge_solo_zu : null,
             plan_sym: symByFile[inst.file] || null,
             // Empfänger-Puls der Remote-Signale (28.08.2026): letzter Tick-
             // Ausgang von orderSignalTick — per SQL aus der Ferne prüfbar, ob
@@ -18533,8 +18542,27 @@
     }catch(_){}
     return null
   }
+  // Wrapper (25.09.2026, Live-Befund Plan 2089a033: „hedge = NULL, nichts geschrieben"): jeder Ausstieg bei einem Plan mit
+  // hedge_eur > 0 hinterlässt eine Spur am Plan — Guard → status 'uebersprungen' + Grund + roter Toast, Exception → 'fehler'.
   async function hedgeSoloOeffnen(plan, r){
-    if(!plan || !(plan.hedgeEur > 0) || plan.route !== 'tvv2' || !MT5_LOCAL || typeof window.mtcApi !== 'function') return null
+    if(!plan || !(plan.hedgeEur > 0)) return null   // kein Hedge verlangt — nichts zu tun
+    const grund = plan.route !== 'tvv2' ? `Weg ${plan.route || '?'} statt Orbit V2` : !MT5_LOCAL ? 'nicht am PC (kein lokales Copier-Backend)'
+                : typeof window.mtcApi !== 'function' ? 'Copier-API im Tab nicht geladen' : null
+    if(grund){
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'uebersprungen', grund_code: 'guard', msg: grund, eur: plan.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() }) }catch(_){}
+      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + grund, 'end')
+      return null
+    }
+    try{ return await hedgeSoloOeffnenKern(plan, r) }
+    catch(e){
+      const msg = 'Hedge-Pfad abgebrochen: ' + String(e && e.message || e)
+      console.warn('[hedgeSolo]', e)
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'fehler', msg, eur: plan.hedgeEur, pc: hedgePcId(), at: new Date().toISOString() }) }catch(_){}
+      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + msg, 'end')
+      return null
+    }
+  }
+  async function hedgeSoloOeffnenKern(plan, r){
     const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
     const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0, sl = Number(plan.masterSl) || 0
     const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
@@ -18768,7 +18796,8 @@
     return (m > 0 && m < kontrakte) ? m : null
   }
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
-  const _hedgeLeerSeit = new Map()   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
+  const _hedgeLeerSeit = new Map()
+  const _hedgeNachgeholt = new Set()   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
     if(_hedgeWacheBusy) return
@@ -18778,6 +18807,37 @@
     _hedgeWacheBusy = true
     try{
       let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+      // Selbstheilung (25.09.2026, Live-Befund Plan 2089a033): laufender Plan mit hedge_eur, aber OHNE hedge-Objekt, ≥ 20 s nach
+      // dem Start → Hedge einmal nachholen. Das Fusion-Konto ist zwischen PCs geteilt und hedge_solo trägt keine Plan-Kennung:
+      // zeigt der frische Stand eine Solo-Position, die keinem sichtbaren Plan gehört, wird NICHT geöffnet (könnte genau der
+      // verlorene Hedge sein) — Status 'unklar' mit Ticket, Mensch prüft. Liste nicht lesbar → nichts tun.
+      if(amPc){
+        const liste0 = hedgeSoloListeFrisch()
+        for(const p of (_tp || [])){
+          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0) || (p.mt5Baseline && p.mt5Baseline.hedge)) continue
+          if(Date.now() - (Date.parse(p.startedAt || '') || Date.now()) < 20000 || _hedgeNachgeholt.has(String(p.id)) || !Array.isArray(liste0)) continue
+          _hedgeNachgeholt.add(String(p.id))
+          const bekannt = new Set((_tp || []).map(x => x && x.mt5Baseline && x.mt5Baseline.hedge && Number(x.mt5Baseline.hedge.ticket)).filter(Boolean))
+          // Plan-Kennung im hedge_solo-Eintrag (Backend, sobald im Order-Kommentar): eigene Position → übernehmen statt blocken;
+          // Positionen mit fremder Kennung stören nicht; Positionen OHNE Kennung sind unklar → blocken.
+          const pid = String(p.id), pid8 = pid.slice(0, 8)
+          // Copier b30d580: plan_id (aus dem open-Auftrag) oder plan8 (aus dem Kommentar 'PXsolo:<plan8>')
+          const kennung = q => (q && q.plan_id) ? String(q.plan_id).slice(0, 8) : (q && q.plan8) ? String(q.plan8).slice(0, 8) : null
+          const eigen = liste0.find(q => q && q.ticket && (String(q.plan_id || '') === pid || kennung(q) === pid8))
+          if(eigen){
+            try{ await hedgeAmPlanSchreiben(p.id, { status: 'offen', ticket: eigen.ticket, lots: eigen.lots, fill: eigen.fill, sl: eigen.sl || 0, tp: eigen.tp || 0, richtung: eigen.richtung || null,
+              eur: p.hedgeEur, pc: hedgePcId(), opened_at: new Date().toISOString(), wiederhergestellt: true, msg: 'wiederhergestellt (Eintrag fehlte, Position per Plan-Kennung gefunden)' }) }catch(_){}
+            continue
+          }
+          const fremd = liste0.filter(q => q && q.ticket && !bekannt.has(Number(q.ticket)) && !kennung(q))   // nur Positionen OHNE jede Kennung blocken
+          if(fremd.length){
+            try{ await hedgeAmPlanSchreiben(p.id, { status: 'unklar', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge-Eintrag fehlt, auf Fusion liegt eine Solo-Position ohne Zuordnung (Ticket ${fremd.map(q => q.ticket).join(', ')}) — im Terminal prüfen, KEIN zweiter Open` }) }catch(_){}
+            if(typeof atToast === 'function') atToast(`⚠ Fusion-Hedge unklar (${p.masterName || '—'}): Solo-Position ohne Zuordnung auf Fusion — im Terminal prüfen`, 'end')
+          } else {
+            try{ await hedgeSoloOeffnen(p, { klick_at: p.startedAt || null, nachgeholt: true }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
+          }
+        }
+      }
       const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && (!amPc || p.mt5Baseline.hedge.pc === hedgePcId()))
       if(!meine.length) return
       const liste = amPc ? hedgeSoloListeFrisch() : null
@@ -18900,6 +18960,7 @@
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
+      if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:#b91c1c">nicht geöffnet</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
       return box(`<span style="font-size:11px;color:#b91c1c">Fehler</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`)
     }catch(_){ return '' }
   }
@@ -30495,7 +30556,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.548'
+  const OS_TAB_BUILD = '2026-09-22.549'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30669,7 +30730,17 @@
   // fern = { werte, melde } — gesetzt NUR vom Signal-Empfänger am PC (orderSignalTick, Zweig
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
+  // Wrapper (25.09.2026, Live-Befund: Remote-Signal 39bb477f blieb auf 'laeuft'): meldet ein Remote-Lauf (fern) nichts,
+  // weil ein Pfad ohne fern.melde endet oder wirft, schließt der Wrapper die Signal-Zeile ab — nie 'laeuft' liegen lassen.
   async function tpOrbitStarten(planId, fern, opts){
+    if(!fern) return tpOrbitStartenKern(planId, null, opts)
+    let gemeldet = false
+    const f2 = Object.assign({}, fern, { melde: x => { gemeldet = true; return fern.melde(x) } })
+    try{ return await tpOrbitStartenKern(planId, f2, opts) }
+    catch(e){ if(!gemeldet){ gemeldet = true; try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Ergebnis UNKLAR — Lauf am PC abgebrochen: ' + String(e && e.message || e) }) }catch(_){} } }
+    finally{ if(!gemeldet){ try{ await fern.melde({ ok:false, unklar:true, msg: '⚠ Lauf am PC ohne Abschluss beendet — erst in TradingView nachsehen.' }) }catch(_){} } }
+  }
+  async function tpOrbitStartenKern(planId, fern, opts){
     let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
@@ -32119,6 +32190,17 @@
     if(document.getElementById('tpOrderModal')?.classList.contains('open')){ _osStand = 'popup-offen'; return }
     _osBusy = true
     try{
+      // Verwaiste Läufe (25.09.2026): 'laeuft' auf DIESEM PC, seit > 6 min ohne Abschluss, und hier läuft gerade nichts —
+      // der Lauf ist abgerissen (Tab neu geladen, Build-Wechsel). Abschließen statt ewig 'laeuft' — Ergebnis UNKLAR.
+      try{
+        if(!_tpOrbitLaeuft){
+          const pcIch = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+          const grenze = new Date(Date.now() - 6 * 60000).toISOString()
+          if(pcIch) await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
+              ergebnis: { ok: false, unklar: true, msg: '⚠ Lauf ohne Abschluss (Tab neu geladen oder abgerissen) — erst in TradingView nachsehen.' } })
+            .eq('status', 'laeuft').eq('pc', pcIch).lt('updated_at', grenze)
+        }
+      }catch(_){}
       const { data: sigs, error } = await supabase.from('order_signale')
         .select('*').eq('status', 'wartet').order('created_at', { ascending: true })
       if(error){ _osStand = 'db-fehler: ' + String(error.message || error.code || '?').slice(0, 60); return }
