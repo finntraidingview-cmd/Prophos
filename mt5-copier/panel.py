@@ -2424,7 +2424,10 @@ class Handler(BaseHTTPRequestHandler):
             # Frische-Riegel (V2 hat keinen Copier) und ohne Echo-Pause-Riegel
             # (hier wird nur gelesen).
             # Vertrag: 200 ok · 409 puls_beschaeftigt / konto_nicht_erreicht ·
-            # 503 reader_fehlt · sonst 200 mit ok:false + code.
+            # sonst 200 mit ok:false + code. Seit 24.09.2026 (Finn: „alles ohne
+            # Tampermonkey-Script, wenn es geht") kein 503 reader_fehlt mehr: der
+            # Bot liest ohne Reader per UIA; die Antwort traegt 'quelle'
+            # ('reader' | 'uia'), das Log nennt sie.
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
@@ -2488,17 +2491,17 @@ class Handler(BaseHTTPRequestHandler):
                 TV_ORDER_LOCK.release()
             http = 200
             if not res.get("ok"):
-                http = {"reader_fehlt": 503, "konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
+                http = {"konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
             # Kurze Zeile je Lesung (24.09.2026, Rundgang alle 50–80 s — das Log soll
-            # lesbar bleiben): Erfolg = Konto, Positionen, Today, Klicks im Konto-Schritt;
-            # Fehler = Code + Meldung. Die Spur gibt es weiter in der Antwort.
+            # lesbar bleiben): Erfolg = Konto, Positionen, Today, Klicks im Konto-Schritt,
+            # Quelle (reader/uia); Fehler = Code + Meldung. Die Spur gibt es weiter in der Antwort.
             if res.get("ok"):
                 _t = res.get("today_pnl")
                 print(f"[panel] tv-lesen {konto}: {len(res.get('positionen') or [])} Pos, today "
                       f"{('%+.2f' % _t) if isinstance(_t, (int, float)) else '?'}"
-                      f" · {res.get('konto_klicks', '?')} Klick(s)", flush=True)
+                      f" · {res.get('konto_klicks', '?')} Klick(s) · Quelle {res.get('quelle') or '?'}", flush=True)
             else:
-                print(f"[panel] tv-lesen {konto}: FEHLER {res.get('code') or '?'} — "
+                print(f"[panel] tv-lesen {konto}: FEHLER {res.get('code') or '?'} (Quelle {res.get('quelle') or '?'}) — "
                       f"{str(res.get('msg') or '')[:160]}", flush=True)
             return self._send(http, json.dumps(res, ensure_ascii=False))
 
@@ -2508,17 +2511,19 @@ class Handler(BaseHTTPRequestHandler):
             # offen'): der Bot faehrt das Konto an wie bei tv-lesen und flattet
             # die Position der Symbol-Wurzel ueber TradingViews eigenen
             # Schliessen-Knopf in der Positions-Tabelle (+ Rueckfrage). Beweis:
-            # Reader-Stand juenger als der Klick, ohne die Position, zweimal.
+            # Reader-Stand juenger als der Klick, ohne die Position, zweimal —
+            # ohne Reader (seit 24.09.2026) die UIA-Tabelle zweimal ohne die Zeile.
             # Gleiche Bauart wie /api/tv-lesen: Config-Felder aus der Basis-Config,
             # UNTER dem TV-Lock. Kein Echo-Pause-Riegel (Schliessen ist die sichere
             # Richtung; die Pause gilt dem MT5-Echo), kein Copier-Riegel (V2 hat
             # keinen Copier).
             # Vertrag: 200 ok (code '' = geschlossen, 'schon_flach' = war nichts
-            # offen) · 409 puls_beschaeftigt / konto_nicht_erreicht · 503 reader_fehlt
-            # · sonst 200 mit ok:false + code (close_knopf_unklar, bestaetigung_unklar,
-            # ende_unklar, fenster, reader_pausiert, reader_unfrisch, userscript_alt,
-            # bot_fehlt, tv_fehlt, befehl, timeout, absturz). retry_ok:false, sobald
-            # ein Klick raus war (geklickt:true).
+            # offen) · 409 puls_beschaeftigt / konto_nicht_erreicht · sonst 200 mit
+            # ok:false + code (close_knopf_unklar, bestaetigung_unklar, ende_unklar,
+            # fenster, tabelle_unklar, bot_fehlt, tv_fehlt, befehl, timeout, absturz).
+            # Seit 24.09.2026 kein 503 reader_fehlt und keine reader_*-Codes mehr:
+            # ohne Reader laeuft der Bot per UIA, die Antwort traegt 'quelle'.
+            # retry_ok:false, sobald ein Klick raus war (geklickt:true).
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
@@ -2590,12 +2595,13 @@ class Handler(BaseHTTPRequestHandler):
                 TV_ORDER_LOCK.release()
             http = 200
             if not res.get("ok"):
-                http = {"reader_fehlt": 503, "konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
+                http = {"konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
             _t = res.get("today_pnl")
             print(f"[panel] tv-close {konto} {symbol}{(' ' + richtung) if richtung else ''}: "
                   f"{'OK' if res.get('ok') else 'FEHLER'} [{res.get('code') or 'geschlossen'}]"
                   f" geklickt={res.get('geklickt')} · {len(res.get('positionen_danach') or [])} Pos danach"
                   f" · today {('%+.2f' % _t) if isinstance(_t, (int, float)) else '?'}"
+                  f" · Quelle {res.get('quelle') or '?'}"
                   + ("" if res.get("ok") else f" — {str(res.get('msg') or '')[:160]}"), flush=True)
             if res.get("trail"):
                 print(f"[panel] tv-close Spur: {str(res['trail'])[:900]}", flush=True)

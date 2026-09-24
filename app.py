@@ -4392,7 +4392,7 @@ def _admin_basis():
     und nie eine zweite Regel entsteht. Wirft RuntimeError, wenn Ausblenden
     nicht möglich ist (Auth-API weg) — wie die Übersicht vorher auch."""
     # kapitel_id seit 24.09.2026 mit (per Trigger nach created_at gesetzt, backfilled).
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
 
@@ -4486,6 +4486,179 @@ def _admin_hedge_ev(p, by_id, live_ids, fx):
     cur = _firm_norm(sl.get("firm"))
     pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
     return str(p.get("master_account_id")), str(p.get("completed_at") or "")[:10], -pl_eur
+
+
+# ── Gemessene Hedge-Quote aus der Hedge-Ära (24.09.2026, Finn zum Kontrafakt-Panel: „Es macht
+# keinen Sinn, weil der Hedge nicht immer 1:1 ist. Du weißt ja immer, wie viel grob gegengehedgt
+# wurde — guck in den bestehenden Daten … Apex Funded, gerade +7.500 $ gemacht, ist so grob ein
+# Tausender wert. Oder von einem 100k-Konto waren die Gesamtkosten grob 2.000 — verliert der
+# Master 2.000, sind es so grob 400 € weniger.") ──
+# q = −slave_pl_eur / master_pl_usd je abgeschlossenem Hedge-Trade (Slave = Live-Konto, EUR wie
+# _admin_hedge_ev). q > 0 = symmetrischer Hedge. Gruppen A = Firma·Typ·Größe, B = Firma·Typ,
+# C = Firma, D = alle; ein V2-Trade bekommt die erste Gruppe mit n ≥ HQ_MIN_N in der Folge A→B→C→D.
+HQ_MIN_N = 5
+# Reibung (24.09.2026, Finn: „Die Reibung mit 5,44 € macht keinen Sinn … die 5 € sind die Reibungskosten
+# insgesamt, nur die Hälfte bleibt real übrig"): je Hedge-Trade GEMESSEN als Kosten = −(slave_pl_eur −
+# (−master_pl × slave_risk/master_risk)), Ausreißer |Abw.| > 100 € raus (wie die Auswertung 24.09.);
+# real = gemessen × Anteil: Fixgrößen-Hedge (Funded) 1,0, Gesamtkosten-Hedge (Challenge/Phase) 0,5.
+# HQ_REIBUNG_STD = Rückfall, wenn gar keine Gruppe misst (Hälfte der alten 5,44 €).
+HQ_REIBUNG_STD = 2.72
+HQ_REIB_MAX_ABW = 100.0
+HQ_REIB_ANTEIL_FUNDED = 1.0
+HQ_REIB_ANTEIL_SONST = 0.5
+HQ_GROESSEN = (25000, 50000, 100000, 150000, 200000, 300000)
+HQ_ROUTEN = {"", "dup", "tvplus", "mt5"}   # Hedge-Wege; V2 (mt5v2/tvv2) hat keinen Slave
+
+
+def _hq_groesse(acc):
+    """Kontogröße als Bucket (25k/50k/100k/150k/200k/300k) — account_size ist nur bei
+    wenigen Konten gesetzt, starting_balance öfter; nichts davon → None (nur B/C/D)."""
+    for feld in ("account_size", "starting_balance"):
+        try:
+            v = float(acc.get(feld) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v >= 5000:
+            return min(HQ_GROESSEN, key=lambda g: abs(g - v))
+    return None
+
+
+def _hq_pct(vals, p):
+    """Perzentil mit linearer Interpolation (wie percentile_cont in Postgres)."""
+    if not vals:
+        return None
+    v = sorted(vals)
+    k = (len(v) - 1) * p
+    lo, hi = int(k), min(int(k) + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (k - lo)
+
+
+def _hq_typ(acc):
+    return str(acc.get("account_type") or "").strip().lower() or "—"
+
+
+def _hq_anteil(typ):
+    """Realer Anteil der gemessenen Reibung: Funded (Fixgröße) 1,0, sonst (Gesamtkosten) 0,5."""
+    return HQ_REIB_ANTEIL_FUNDED if str(typ or "").strip().lower() == "funded" else HQ_REIB_ANTEIL_SONST
+
+
+def _cfd_wurzel(sym):
+    """Wurzel eines CFD-Symbols aus firm_specs.symbol (24.09.2026, Finn: Symbol „—" bei Echo V2
+    soll „CFD · Echo V2" heißen — Wurzel aus dem Firmen-Standard, falls greifbar):
+    'US100.cash' → 'US100', 'NAS100' → 'NAS100', 'XAUUSD' → 'XAUUSD', leer → ''."""
+    t = str(sym or "").strip().upper()
+    if not t:
+        return ""
+    return re.split(r"[.\s_-]", t, 1)[0] or t
+
+
+def _hq_keys(acc):
+    """Die vier Gruppenschlüssel eines Master-Kontos, in Auflösungs-Reihenfolge A→B→C→D."""
+    firm = _firm_norm(acc.get("firm"))
+    typ = _hq_typ(acc)
+    g = _hq_groesse(acc)
+    keys = []
+    if g:
+        keys.append(("A", f"{firm}|{typ}|{g}", firm, typ, g))
+    keys.append(("B", f"{firm}|{typ}", firm, typ, None))
+    keys.append(("C", firm, firm, None, None))
+    keys.append(("D", "*", None, None, None))
+    return keys
+
+
+def _admin_hedge_quoten(plans, by_id, live_ids, fx):
+    """Quoten je Gruppe aus allen abgeschlossenen Hedge-Trades. Rein: Slave live, beide P&L
+    vorhanden und ≠ 0, keine Platzhalter ±1, 0 < q < 5 (Ausreißer raus). Zusätzlich die
+    GEPLANTE Quote r = slave_risk € / master_risk $ als Vergleich (median_r).
+    Reibung (24.09.2026) im selben Lauf, eigene Filter (beide Risiken > 0, |Abw.| ≤ 100 €).
+    → (gruppen, lookup, reib_gruppen, reib_lookup, reib_global) — reib_global = {median, mean,
+    real_median, real_mean, n} über alle sauberen Reibungs-Trades (Vorbelegung des Eingabefelds)."""
+    samm = {}
+    reib = {}
+    reib_alle = []
+    for p in plans:
+        if str(p.get("route") or "") not in HQ_ROUTEN:
+            continue
+        if str(p.get("slave_account_id")) not in live_ids:
+            continue
+        try:
+            mpl = float(p.get("master_pl")); spl = float(p.get("slave_pl"))
+        except (TypeError, ValueError):
+            continue
+        if not mpl or not spl or abs(mpl) == 1 or abs(spl) == 1:
+            continue
+        sl = by_id.get(str(p.get("slave_account_id"))) or {}
+        spl_eur = spl if _firm_norm(sl.get("firm")) == "Fusion Markets" else spl * fx
+        r = None
+        try:
+            mr = float(p.get("master_risk") or 0); sr = float(p.get("slave_risk") or 0)
+            if mr > 0 and sr > 0:
+                r = sr / mr
+        except (TypeError, ValueError):
+            pass
+        acc = by_id.get(str(p.get("master_account_id") or "")) or {}
+        # Reibung je Trade (Kosten, + = Geld weg): Live-Ist gegen den perfekt symmetrischen Hedge
+        if r is not None:
+            kosten = -(spl_eur - (-mpl * r))
+            if abs(kosten) <= HQ_REIB_MAX_ABW:
+                anteil = _hq_anteil(acc.get("account_type"))
+                reib_alle.append((kosten, kosten * anteil))
+                for ebene, key, firm, typ, g in _hq_keys(acc):
+                    e = reib.setdefault(key, {"key": key, "ebene": ebene, "firm": firm, "typ": typ, "groesse": g,
+                                              "k": [], "kr": []})
+                    e["k"].append(kosten)
+                    e["kr"].append(kosten * anteil)
+        q = -spl_eur / mpl
+        if not (0 < q < 5):
+            continue
+        for ebene, key, firm, typ, g in _hq_keys(acc):
+            e = samm.setdefault(key, {"key": key, "ebene": ebene, "firm": firm, "typ": typ, "groesse": g,
+                                      "q": [], "r": [], "sum_mpl": 0.0, "sum_spl_eur": 0.0})
+            e["q"].append(q)
+            if r is not None:
+                e["r"].append(r)
+            e["sum_mpl"] += mpl
+            e["sum_spl_eur"] += spl_eur
+    gruppen, lookup = [], {}
+    for e in samm.values():
+        qs = e["q"]
+        g = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
+             "n": len(qs),
+             "median_q": round(_hq_pct(qs, 0.5), 4), "mean_q": round(sum(qs) / len(qs), 4),
+             "p25": round(_hq_pct(qs, 0.25), 4), "p75": round(_hq_pct(qs, 0.75), 4),
+             "median_r": (round(_hq_pct(e["r"], 0.5), 4) if e["r"] else None),
+             "sum_master_pl": round(e["sum_mpl"], 2), "sum_slave_pl_eur": round(e["sum_spl_eur"], 2)}
+        gruppen.append(g)
+        lookup[g["key"]] = g
+    gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
+    reib_gruppen, reib_lookup = [], {}
+    for e in reib.values():
+        ks = e["k"]
+        g = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
+             "n": len(ks),
+             "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
+             # Anteil nur auf Ebene A/B eindeutig (ein Typ); C/D mischen → real aus den Einzel-Trades
+             "anteil": (_hq_anteil(e["typ"]) if e["typ"] else None),
+             "real_median": round(_hq_pct(e["kr"], 0.5), 2), "real_mean": round(sum(e["kr"]) / len(e["kr"]), 2)}
+        reib_gruppen.append(g)
+        reib_lookup[g["key"]] = g
+    reib_gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
+    reib_global = None
+    if reib_alle:
+        ks = [k for k, _ in reib_alle]; krs = [kr for _, kr in reib_alle]
+        reib_global = {"n": len(ks), "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
+                       "real_median": round(_hq_pct(krs, 0.5), 2), "real_mean": round(sum(krs) / len(krs), 2)}
+    return gruppen, lookup, reib_gruppen, reib_lookup, reib_global
+
+
+def _hq_aufloesen(acc, lookup):
+    """Erste Gruppe mit n ≥ HQ_MIN_N in der Folge A→B→C→D — oder None (dann rechnet das
+    Frontend wie vorher mit fx × 1 und kennzeichnet „ohne Quote")."""
+    for _ebene, key, _f, _t, _g in _hq_keys(acc):
+        g = lookup.get(key)
+        if g and g["n"] >= HQ_MIN_N:
+            return g
+    return None
 
 
 def _kapitel_liste():
@@ -5137,8 +5310,27 @@ def admin_build_kapitel():
     # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
     plans = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,slave_account_id,"
                                               "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
-                                              "route,master_name,richtung",
+                                              "route,master_name,richtung,slave_risk,master_risk",
                                     "status": "eq.completed"})
+    # Hedge-Quoten je Firma·Typ·Größe aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht
+    # immer 1:1 … guck in den bestehenden Daten, wie viel wo gegengehedgt wurde") — Grundlage
+    # für hedge_q/hedge_hyp_eur je V2-Trade unten. Ausgeblendete Personen fallen auch hier raus.
+    hq_plans = [p for p in plans
+                if str((by_id.get(str(p.get("master_account_id") or "")) or {}).get("user_id") or p.get("user_id") or "") not in excluded_ids]
+    hq_gruppen, hq_lookup, reib_gruppen, reib_lookup, reib_global = _admin_hedge_quoten(hq_plans, by_id, live_ids, fx)
+    reib_std = (reib_global or {}).get("real_median")
+    if reib_std is None:
+        reib_std = HQ_REIBUNG_STD
+    # Firmen-Standard-Symbol (firm_specs.symbol, über alle Personen) → CFD-Wurzel für Echo-V2-Trades
+    # ohne master_symbol (24.09.2026, Finn: „—" soll „CFD · Echo V2" heißen). Fehlt der Read → leer, hörbar.
+    firm_sym = {}
+    try:
+        for f in _sb_all("firm_specs", {"select": "name,symbol"}):
+            w = _cfd_wurzel(f.get("symbol"))
+            if w:
+                firm_sym.setdefault(_firm_norm(f.get("name")), w)
+    except Exception as e:
+        print(f"[admin] ⚠️ firm_specs (kapitel): {type(e).__name__}: {e}", flush=True)
     # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
     # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
     txs = _sb_all("transactions", {"select": "user_id,account_id,kind,amount,occurred_at,kapitel_id",
@@ -5225,13 +5417,36 @@ def admin_build_kapitel():
             if wurzel:
                 symbole[wurzel] = symbole.get(wurzel, 0) + 1
             if kontrafakt:
+                # Quote des Master-Kontos (Firma·Typ·Größe) aus der Hedge-Ära → Vorschlag hedge_hyp_eur
+                # = −master_pl × q − Reibung. Ohne passende Gruppe (n < HQ_MIN_N überall) bleibt hedge_q
+                # None; das Frontend rechnet dann fx × 1 und zeigt „ohne Quote".
+                macc = by_id.get(str(p.get("master_account_id") or "")) or {}
+                hg = _hq_aufloesen(macc, hq_lookup)
+                hq = hg["median_q"] if hg else None
+                # Reibung real je Trade (24.09.2026): gemessener Gruppen-Median × Anteil des V2-Kontotyps
+                # (Funded 1,0 / sonst 0,5); ohne Gruppe der globale reale Median, sonst HQ_REIBUNG_STD.
+                rg = _hq_aufloesen(macc, reib_lookup)
+                r_anteil = _hq_anteil(macc.get("account_type"))
+                reib_real = round(rg["median"] * r_anteil, 2) if rg else round(float(reib_std), 2)
                 trades_liste.append({
                     "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
                     "account_name": p.get("master_name") or "",
                     "datum": str(p.get("completed_at") or "")[:10],
                     "master_pl": round(mpl, 2) if mpl is not None else None,
-                    "master_symbol_root": wurzel, "route": p.get("route") or "",
-                    "richtung": str(p.get("richtung") or "").lower(), "blown": bool(p.get("blown"))})
+                    # Echo V2 ohne Symbol: Wurzel aus dem Firmen-Standard (symbol_quelle 'firma'), sonst leer → Frontend „CFD"
+                    "master_symbol_root": wurzel or (firm_sym.get(_firm_norm(macc.get("firm")), "") if (macc and str(p.get("route") or "") == "mt5v2") else ""),
+                    "symbol_quelle": ("plan" if wurzel else ("firma" if (macc and str(p.get("route") or "") == "mt5v2" and firm_sym.get(_firm_norm(macc.get("firm")))) else "")),
+                    "route": p.get("route") or "",
+                    "richtung": str(p.get("richtung") or "").lower(), "blown": bool(p.get("blown")),
+                    "master_firm": _firm_norm(macc.get("firm")) if macc else "—",
+                    "master_typ": _hq_typ(macc) if macc else "—",
+                    "master_groesse": _hq_groesse(macc) if macc else None,
+                    "hedge_q": hq,
+                    "hedge_q_quelle": (f'{hg["key"]} · n={hg["n"]} · Ebene {hg["ebene"]}' if hg else None),
+                    "reibung_real": reib_real,
+                    "reibung_anteil": r_anteil,
+                    "reibung_quelle": (f'{rg["key"]} · n={rg["n"]} · Ebene {rg["ebene"]} · gemessen {rg["median"]} € × {r_anteil}' if rg else "global"),
+                    "hedge_hyp_eur": (round(-mpl * hq - reib_real, 2) if (hq is not None and mpl is not None) else None)})
             ev = _admin_hedge_ev(p, by_id, live_ids, fx)
             if ev is not None:
                 _m, datum, eur = ev
@@ -5284,7 +5499,12 @@ def admin_build_kapitel():
             "payouts_liste": sorted(payouts_liste, key=lambda t: t["datum"]),
             "kauf_liste": sorted(kauf_liste, key=lambda t: t["datum"]),
         })
-    return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso()}
+    return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso(),
+            # Hedge-Quoten der Hedge-Ära (24.09.2026): Gruppen A→D mit n/median/mean/p25/p75/median_r
+            "hedge_quoten": {"gruppen": hq_gruppen, "fx": fx, "min_n": HQ_MIN_N, "reibung_std": round(float(reib_std), 2)},
+            # Gemessene Reibung je Gruppe (24.09.2026): Kosten €/Trade (+ = weg), real = × Anteil
+            "reibung_gruppen": {"gruppen": reib_gruppen, "global": reib_global, "min_n": HQ_MIN_N,
+                                "max_abw": HQ_REIB_MAX_ABW, "anteile": {"funded": HQ_REIB_ANTEIL_FUNDED, "sonst": HQ_REIB_ANTEIL_SONST}}}
 
 
 @app.route("/admin/kapitel", methods=["GET", "OPTIONS"])

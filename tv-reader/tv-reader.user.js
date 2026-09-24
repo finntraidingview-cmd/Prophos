@@ -16,6 +16,13 @@
 // (HTTPS-Seite -> http://127.0.0.1). Ist die Standard-Zapfstelle fuer
 // Userscripts, die mit einem lokalen Prozess reden.
 //
+// Seit 24.09.2026 optional (Finn: „Nein — alles ohne Tampermonkey-Script,
+// wenn es geht"): Bot liest per UIA, das Script beschleunigt nur (Reader-
+// Stand < 1 s statt UIA-Scan ~1–2 s). Rundgang (tvlesen) und Schliessen
+// (tvclose) laufen ohne Reader vollstaendig ueber die Windows-UI-Automation;
+// ist der Reader da und >= 0.5.0, bleibt er die bevorzugte Quelle. Update
+// kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
+//
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
 //   0.5.1  24.09.2026  Zusammenfassung robuster: Label/Wert in getrennten Divs
 //                      derselben Elternebene (auch mit Icon dazwischen), Werte
