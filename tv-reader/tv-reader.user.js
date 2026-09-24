@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.4
+// @version      0.8.5
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.5  25.09.2026  Mehrere Tabs an einem reader-server: jeder Tab traegt eine stabile tab_id (sessionStorage)
+//                      und eine Rolle — 'broker' nur mit echter Konto-Kennung im Konto-Umschalter (≥ 5 Ziffern,
+//                      z. B. PAAPEX6416990000007; 'Paper Trading' zaehlt NICHT), sonst 'feed'. Ein Feed-Tab
+//                      meldet KEINE Positionen und kein Konto (nie 'flach'); Kurse/Kerzen/Bedienfeld tragen
+//                      tab_id + rolle, das Bedienfeld zusaetzlich fokus (document.hasFocus) fuer den Puls.
 //   0.8.4  25.09.2026  Zeilen mit Symbol + Menge, aber ohne lesbaren P&L (Spalte fehlt/Zelle leer) und ohne
 //                      Order-Merkmale werden BEHALTEN und die Lesung gilt als blind ('pnl-spalte fehlt' /
 //                      'pnl leer') — vorher fielen sie weg, ein offener Master sah flach aus, und der
@@ -73,7 +78,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.4';
+  const VERSION    = '0.8.5';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -264,6 +269,22 @@
   // Konto-Kennung aus dem Broker-Panel (Konto-Umschalter, gleiche Signaturen wie das Bedienfeld),
   // nur jeden BF_JEDER-ten Tick neu gelesen — die Suche geht durchs halbe DOM.
   const kontoMerk = { text: null, ts: 0 };
+  // 0.8.5: stabile Kennung dieses Tabs (ueberlebt F5 im selben Tab, nicht einen neuen Tab)
+  const TAB_ID = (() => {
+    let id = null;
+    try { id = sessionStorage.getItem('prophos_tab_id'); } catch (_) {}
+    if (!id) {
+      id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      try { sessionStorage.setItem('prophos_tab_id', id); } catch (_) {}
+    }
+    return id;
+  })();
+  // Echte Broker-Konto-Kennung (Tradovate: Buchstaben + mindestens 5 Ziffern). 'Paper Trading' o. ae. zaehlt
+  // nicht — sonst hielte sich ein Feed-Konto mit Paper-Trading-Leiste fuer einen Broker und meldete 'flach'.
+  const RX_KONTO_ECHT = /[A-Z]{2,}[A-Z0-9_-]*\d{5,}/i;
+  function tabRolle(jetzt) {
+    return (kontoMerk.text && RX_KONTO_ECHT.test(kontoMerk.text) && (jetzt - kontoMerk.ts) < 30000) ? 'broker' : 'feed';
+  }
   function liesKonto() {
     try {
       const k = suche(SIG_KONTO_SCHALTER);
@@ -841,6 +862,8 @@
       // der Hedge haengt am Positions-Strom, das Bedienfeld nur am Puls.
       bf = { ts: Date.now(), fehler: String((e && e.message) || e) };
     }
+    // 0.8.5: Herkunft fuers reader-server-Routing (Puls klickt im Tab mit Fokus)
+    try { bf.tab_id = TAB_ID; bf.rolle = tabRolle(Date.now()); bf.fokus = document.hasFocus(); bf.version = bf.version || VERSION; } catch (_) {}
     GM_xmlhttpRequest({
       method: 'POST', url: BEDIENFELD,
       headers: { 'Content-Type': 'application/json' },
@@ -1234,7 +1257,7 @@
     feed.aufloesung_warnung = andere.length ? ('Chart-Aufloesung ' + andere[0].aufloesung + ' statt 1 — keine Minutenkerzen') : null;
     GM_xmlhttpRequest({
       method: 'POST', url: KERZEN, headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ ts: jetzt, version: VERSION, quelle: 'ws', erstladung: erst, modus: feed.modus, delay_s: feed.delay_s, bars }), timeout: 4000,
+      data: JSON.stringify({ ts: jetzt, version: VERSION, tab_id: TAB_ID, rolle: tabRolle(jetzt), quelle: 'ws', erstladung: erst, modus: feed.modus, delay_s: feed.delay_s, bars }), timeout: 4000,
       onerror: () => {}, ontimeout: () => {},
     });
   }
@@ -1309,16 +1332,22 @@
     // Auch blind wird GESENDET — der Server soll den Grund kennen (und die
     // Orbit-Karte spaeter auch). Er uebernimmt den Stand dann nur nicht.
     if ((tickNr % BF_JEDER) === 0) liesKonto();
-    const payload = JSON.stringify({
-      ts: Date.now(), positionen, version: VERSION,
+    const rolle = tabRolle(Date.now());
+    // 0.8.5: Positions-Felder NUR als Broker-Tab — ein Feed-Tab (kein Broker) schickt keine Liste und kein
+    // Konto; der reader-server nimmt von ihm nur Kurse/Kerzen (ein fehlendes Feld ist nie 'flach')
+    const posFelder = rolle === 'broker' ? {
+      positionen,
       blind: !!blind, blind_grund: blind || '',
-      sichtbar: document.visibilityState === 'visible',
       // 0.8.3: Beweis-Felder fuer den Master-zu-Waechter — positionen_ts nur bei VOLLSTAENDIGER
       // Lesung (nicht blind), positionen_ok = diese Liste ist eine Aussage; konto aus dem Umschalter
       positionen_ts: blind ? null : Date.now(),
       positionen_ok: !blind,
       konto: kontoMerk.text,
       konto_ts: kontoMerk.ts || null,
+    } : { positionen_quelle: 'feed' };
+    const payload = JSON.stringify(Object.assign({
+      ts: Date.now(), version: VERSION, tab_id: TAB_ID, rolle,
+      sichtbar: document.visibilityState === 'visible',
       // 0.6.0 (24.09.2026, Winning-Day-Gegenhedge auf Fusion — Finn: „auf einem PC,
       // der 24/7 laeuft, per Reader immer in Echtzeit die aktuellen NQ-/MNQ-Punkte
       // haben"): der Kurs aus dem TAB-TITEL. Bewusst nicht aus der Watchlist oder
@@ -1332,7 +1361,7 @@
       // Rueckfall Tab-Titel; reload_grund nur im ersten Tick nach einer Selbstheilung.
       kurse: liesKurse(),
       reload_grund: reloadGrund,
-    });
+    }, posFelder));
     reloadGrund = null;
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();

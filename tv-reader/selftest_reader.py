@@ -178,6 +178,32 @@ def main():
     c = rs._mit_an({"ts": 7000, "positionen": []})
     check(c["positionen_ok"] is True and c["positionen_ts"] == 7000 and c["konto"] is None, "Waechter-Felder: altes Script → positionen_ts = ts, konto null")
 
+    # 0.8.6: mehrere Tabs an einem reader-server
+    j = 1000.0
+    check(rs._rang("feed", "streaming") == 3 and rs._rang("broker", "streaming") == 2 and rs._rang("feed", "delayed_streaming_600") == 1
+          and rs._rang("broker", None) == 2, "Rang: Echtzeit vor verzögert, Feed vor Broker")
+    q = lambda tab, rolle, modus, s_: {"tab": tab, "rolle": rolle, "modus": modus, "s": s_}
+    check(rs._quelle_gewinnt(None, "b", "broker", "streaming", j, 5)
+          and not rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "b", "broker", "streaming", j, 5)
+          and rs._quelle_gewinnt(q("f", "feed", "streaming", j - 6), "b", "broker", "streaming", j, 5)
+          and rs._quelle_gewinnt(q("b", "broker", "delayed_streaming_600", j - 1), "f", "feed", "streaming", j, 5)
+          and not rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "b", "broker", "delayed_streaming_600", j, 5)
+          and rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "f", "feed", "delayed_streaming_600", j, 5),
+          "Quelle: frischer Feed hält Broker ab, still > 5 s → Broker darf, verzögert verliert, gleicher Tab immer")
+    tabs = {"f": {"rolle": "feed", "last_s": j, "stand_s": 0.0},
+            "b": {"rolle": "broker", "last_s": j - 2, "stand_s": j - 2, "stand": {"positionen": [{"symbol": "MNQZ6"}], "konto_ts": 5}}}
+    check(rs._broker_wahl(tabs, j) == ("b", True), "Feed leer + Broker mit Position → Broker-Stand, frisch")
+    check(rs._broker_wahl({"f": tabs["f"]}, j) == (None, False), "nur Feed-Tab → kein Broker, kein Urteil")
+    check(rs._broker_wahl(tabs, j + 11) == ("b", False), "Broker-Tab 11 s still → Stand bleibt, aber nicht frisch")
+    tabs["b2"] = {"rolle": "broker", "last_s": j, "stand_s": j, "stand": {"positionen": [], "konto_ts": 9}}
+    check(rs._broker_wahl(tabs, j)[0] == "b2", "zwei Broker-Tabs → jüngster konto_ts gewinnt")
+    bft = {"f": {"rolle": "feed", "bf": {"x": 1}, "bf_s": j, "fokus": False},
+           "b": {"rolle": "broker", "bf": {"summary": {"a": 1}}, "bf_s": j - 1, "fokus": False},
+           "p": {"rolle": "feed", "bf": {"y": 1}, "bf_s": j - 1, "fokus": True}}
+    check(rs._bf_wahl(bft, j) == "p" and rs._bf_wahl(bft, j, broker_zuerst=True) == "b"
+          and rs._bf_wahl({"f": bft["f"]}, j) == "f" and rs._bf_wahl({}, j) is None,
+          "Bedienfeld: Klicks → Tab mit Fokus, Summary → Broker, sonst der einzige")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

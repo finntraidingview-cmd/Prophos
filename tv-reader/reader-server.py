@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.5"
+READER_VERSION = "0.8.6"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -98,6 +98,8 @@ _k1m_vor = None
 # 0.7.0 (24.09.2026): BEIDE Symbole — je Wurzel ('NQ'/'MNQ') der letzte Kurs + Empfangszeit
 # und die Minutenkerzen (laufend/abgeschlossen). _kurs/_k1m oben bleiben fuer alte
 # Userscripts (0.6.0, nur Tab-Titel) und alte Bruecken (Feld 'kurs') bestehen.
+_kurs_quelle_titel = {"q": None}   # 0.8.6: welcher Tab liefert den Titel-Kurs
+_feed_zeile = {"s": 0.0}           # 0.8.6: Drossel fuer die Live-Zeile aus Feed-POSTs
 _kurse = {}        # wurzel -> {bid, ask, text, preis, ts, quelle, stale, sichtbar, symbol_text, empf_s}
 _k1m_je = {}       # wurzel -> laufende Kerze
 _k1m_vor_je = {}   # wurzel -> letzte abgeschlossene Kerze
@@ -338,6 +340,120 @@ _blind_grund = ""
 _blind_seit = 0.0
 _letzte_zahl = None   # letzte gemeldete Positionszahl (Beweisspur)
 
+# ── Mehrere TradingView-Tabs an EINEM reader-server (0.8.6, 25.09.2026) ─────────────────────────────
+# Finn richtet auf Moritz' PC einen DAUERHAFTEN Feed-Tab (eigenes TV-Konto mit CME-Abo, OHNE Broker) ein;
+# daneben oeffnet Puls eigene Tabs im Broker-Konto. Beide posten hierher. BEFUND bis 0.8.5: Positions-Stand
+# und Bedienfeld = der letzte POST gewinnt KOMPLETT, Kurse = der letzte je Wurzel, Kerzen mischen sich (eine
+# Erstladung des einen Tabs ersetzt den Ring des anderen). Sieht der Feed-Tab eine Konto-Leiste (z. B. Paper
+# Trading), meldet er ehrlich 'flach' und ueberschreibt den Puls-Tab → der Master-weg-Waechter koennte den
+# Fusion-Hedge schliessen, obwohl der Master laeuft. Ab jetzt: Stand JE TAB (tab_id), Rolle 'broker' (Konto
+# gelesen) oder 'feed'; Positionen/Konto/Bedienfeld-Summary NUR aus Broker-Tabs, Kurse/Kerzen je Wurzel aus
+# der besten Quelle (Echtzeit vor verzoegert, Feed vor Broker, bei Stille uebernimmt der andere).
+BROKER_FRISCH_S = 10.0   # Broker-Tab ohne POST laenger als das → kein Positions-Urteil (positionen_ok false)
+KURS_QUELLE_S = 5.0      # Kurs-Quelle einer Wurzel gilt als still nach so vielen Sekunden → andere darf
+KERZEN_QUELLE_S = 90.0   # dasselbe fuer den Kerzen-Ring (du-Frames kommen nur alle paar Sekunden)
+_tabs = {}               # tab_id -> {rolle, stand, stand_s, blind_grund, blind_seit, bf, bf_s, last_s, version, sichtbar, fokus, quelle}
+_kerzen_quelle = {}      # wurzel -> {tab, rolle, modus, s}
+
+
+def _rang(rolle, modus):
+    """Rang einer Kurs-/Kerzen-Quelle: Echtzeit (modus ohne 'delayed') zaehlt doppelt, Feed-Tab vor Broker-Tab."""
+    return (0 if "delayed" in str(modus or "") else 2) + (1 if rolle == "feed" else 0)
+
+
+def _quelle_gewinnt(alt, tab, rolle, modus, jetzt, still_s):
+    """REIN RECHNEND (testbar): darf ein Wert von (tab, rolle, modus) den bisherigen einer Wurzel ersetzen?
+    alt = {tab, rolle, modus, s} oder None. Ja, wenn es keinen gibt, derselbe Tab liefert, der bisherige
+    seit still_s schweigt, oder die neue Quelle mindestens gleichen Rang hat."""
+    if not alt:
+        return True
+    if alt.get("tab") == tab:
+        return True
+    if jetzt - float(alt.get("s") or 0) > still_s:
+        return True
+    return _rang(rolle, modus) >= _rang(alt.get("rolle"), alt.get("modus"))
+
+
+def _broker_wahl(tabs, jetzt, frisch_s=BROKER_FRISCH_S):
+    """REIN RECHNEND (testbar): welcher Broker-Tab liefert den Positions-Stand? -> (tab_id | None, frisch).
+    Unter den frischen Broker-Tabs (letzter POST <= frisch_s) gewinnt der mit dem juengsten konto_ts, dann
+    der juengste Stand; ohne frischen der zuletzt aktive (frisch False = kein Urteil)."""
+    broker = [(tid, t) for tid, t in (tabs or {}).items() if t.get("rolle") == "broker" and t.get("stand_s")]
+    if not broker:
+        return None, False
+    frische = [(tid, t) for tid, t in broker if jetzt - float(t.get("last_s") or 0) <= frisch_s]
+    if frische:
+        tid, _t = max(frische, key=lambda x: (float((x[1].get("stand") or {}).get("konto_ts") or 0), float(x[1].get("stand_s") or 0)))
+        return tid, True
+    tid, _t = max(broker, key=lambda x: float(x[1].get("stand_s") or 0))
+    return tid, False
+
+
+def _bf_wahl(tabs, jetzt, broker_zuerst=False, frisch_s=BROKER_FRISCH_S):
+    """REIN RECHNEND (testbar): welches Bedienfeld? Fuer Klicks (Puls) zaehlt der Tab MIT FOKUS, dann Broker,
+    dann der juengste; fuer die Konto-Summary (broker_zuerst) der Broker vor dem Fokus. Frische zuerst,
+    sonst der juengste ueberhaupt. -> tab_id | None"""
+    mit = [(tid, t) for tid, t in (tabs or {}).items() if t.get("bf") is not None]
+    if not mit:
+        return None
+    frisch = [(tid, t) for tid, t in mit if jetzt - float(t.get("bf_s") or 0) <= frisch_s] or mit
+
+    def schluessel(x):
+        t = x[1]
+        fok, brk = (1 if t.get("fokus") else 0), (1 if t.get("rolle") == "broker" else 0)
+        return ((brk, fok) if broker_zuerst else (fok, brk)) + (float(t.get("bf_s") or 0),)
+    return max(frisch, key=schluessel)[0]
+
+
+def _tab(daten, jetzt):
+    """Tab-Eintrag zum Payload holen/anlegen. Ohne tab_id (Userscript < 0.8.5) = 'standard' als Broker —
+    genau das alte Ein-Tab-Verhalten."""
+    daten = daten if isinstance(daten, dict) else {}
+    tid = str(daten.get("tab_id") or "standard")[:40]
+    rolle = str(daten.get("rolle") or "broker")
+    rolle = rolle if rolle in ("broker", "feed") else "broker"
+    t = _tabs.setdefault(tid, {"stand": None, "stand_s": 0.0, "blind_grund": "", "blind_seit": 0.0, "bf": None, "bf_s": 0.0})
+    t.update({"rolle": rolle, "last_s": jetzt, "version": daten.get("version") or t.get("version")})
+    if "sichtbar" in daten:
+        t["sichtbar"] = daten.get("sichtbar") is not False
+    if "fokus" in daten:
+        t["fokus"] = bool(daten.get("fokus"))
+    # verwaiste Tabs (Puls oeffnet/schliesst eigene) nach 10 min vergessen
+    for alt in [k for k, v in _tabs.items() if jetzt - float(v.get("last_s") or 0) > 600 and k != tid]:
+        _tabs.pop(alt, None)
+    return tid, t
+
+
+def _effektiv_setzen(jetzt):
+    """Globale Kompatibilitaets-Sicht (_stand/_stand_s/_blind_grund) = gewaehlter Broker-Tab."""
+    global _stand, _stand_s, _blind_grund, _blind_seit
+    tid, _frisch = _broker_wahl(_tabs, jetzt)
+    if tid:
+        t = _tabs[tid]
+        _stand, _stand_s = t.get("stand") or {"ts": 0, "positionen": []}, float(t.get("stand_s") or 0)
+        _blind_grund, _blind_seit = t.get("blind_grund") or "", float(t.get("blind_seit") or 0)
+
+
+def _tabs_liste(jetzt):
+    """Diagnose fuer GET /positions: je Tab Rolle, Alter, Quelle, Sicht/Fokus, Version, Konto."""
+    out = []
+    for tid, t in sorted(_tabs.items(), key=lambda x: -float(x[1].get("last_s") or 0)):
+        out.append({"tab_id": tid, "rolle": t.get("rolle"), "alter_s": round(jetzt - float(t.get("last_s") or 0), 1),
+                    "quelle": t.get("quelle"), "sichtbar": t.get("sichtbar"), "fokus": t.get("fokus"),
+                    "version": t.get("version"),
+                    "konto": ((t.get("stand") or {}).get("konto") if t.get("rolle") == "broker" else None),
+                    "blind": bool(t.get("blind_grund"))})
+    return out
+
+
+def _tabs_zeile(jetzt):
+    """Kurzform fuer die Live-Zeile: 'Tabs: feed 1 · broker 1' (Tabs mit POST in den letzten 60 s)."""
+    n = {"feed": 0, "broker": 0}
+    for t in _tabs.values():
+        if jetzt - float(t.get("last_s") or 0) <= 60 and t.get("rolle") in n:
+            n[t["rolle"]] += 1
+    return f"Tabs: feed {n['feed']} · broker {n['broker']}"
+
 
 def _schreibe_datei(stand):
     """Atomar schreiben, damit ein mitlesender Copier nie eine halbe Datei sieht."""
@@ -407,7 +523,9 @@ def _mit_an(stand):
     # Konto-Zusammenfassung aus dem letzten Bedienfeld (Userscript 0.5.0+),
     # rein durchgereicht; bei aelterem Userscript fehlen die Felder im
     # Bedienfeld und stehen hier als None.
-    bf = _bedienfeld or {}
+    jetzt_ = time.time()
+    _bft = _bf_wahl(_tabs, jetzt_, broker_zuerst=True)
+    bf = ((_tabs.get(_bft) or {}).get("bf") if _bft else None) or _bedienfeld or {}
     out["summary"] = bf.get("summary")
     out["today_pnl_text"] = bf.get("today_pnl_text")
     out["today_label"] = bf.get("today_label")
@@ -440,11 +558,15 @@ def _mit_an(stand):
     out.update(_versionen())   # reader_version / script_version / script_alter_s (0.8.1)
     # 0.8.5: Beweis-Felder fuer den Master-zu-Waechter (Script 0.8.3 liefert sie; aelteres Script:
     # positionen_ts = ts des Stands, konto null). Blind = keine Aussage, egal was das Script sagt.
-    out["positionen_ok"] = bool(stand.get("positionen_ok", True)) and not _blind_grund
+    _btid, _bfrisch = _broker_wahl(_tabs, jetzt_)
+    # 0.8.6: nur ein FRISCHER Broker-Tab liefert ein Urteil; ohne Tab-Buchfuehrung (noch kein POST) wie bisher
+    out["positionen_ok"] = bool(stand.get("positionen_ok", True)) and not _blind_grund and (_bfrisch or not _tabs)
     out["positionen_ts"] = stand.get("positionen_ts") or stand.get("ts") or None
     out["positionen_alter_s"] = round(time.time() - _stand_s, 3) if _stand_s else None
     out["konto"] = stand.get("konto") or None
     out["konto_ts"] = stand.get("konto_ts") or None
+    out["positionen_tab"] = _btid
+    out["tabs"] = _tabs_liste(jetzt_)
     return out
 
 
@@ -493,7 +615,7 @@ class Handler(BaseHTTPRequestHandler):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor, _kurse, _k1m_je, _k1m_vor_je, _reload_grund, _reload_s
         global _kerzen, _kerzen_s, _kerzen_modus, _kerzen_delay_s, _aufl_warnung
-        global _script_version, _script_s
+        global _script_version, _script_s, _kerzen_quelle
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -531,6 +653,8 @@ class Handler(BaseHTTPRequestHandler):
         # ehrlichen Fehlermeldung. Ob ueberhaupt geordert werden darf,
         # entscheidet der Puls selbst am Feld 'an' von GET /positions.
         if self.path.rstrip("/") == "/bedienfeld":
+            _tid, _t = _tab(daten, time.time())
+            _t["bf"], _t["bf_s"] = daten, time.time()
             _bedienfeld = daten
             _bedienfeld_s = time.time()
             # dump-Anforderung zurueckgeben: das Userscript haengt beim
@@ -547,6 +671,19 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(bars, list):
                 self._json(400, {"ok": False, "msg": "Feld 'bars' fehlt oder ist keine Liste"})
                 return
+            # 0.8.6: je Wurzel nur die beste Quelle (Echtzeit vor verzoegert, Feed vor Broker, bei Stille die andere)
+            _jetzt = time.time()
+            _tid, _t = _tab(daten, _jetzt)
+            _modus = daten.get("modus")
+            _wz = lambda b: (_kurs_wurzel(b.get("wurzel")) or str(b.get("wurzel") or "").upper()[:8])
+            erlaubt = {}
+            for b in bars:
+                if isinstance(b, dict) and _wz(b) and _wz(b) not in erlaubt:
+                    erlaubt[_wz(b)] = _quelle_gewinnt(_kerzen_quelle.get(_wz(b)), _tid, _t["rolle"], _modus, _jetzt, KERZEN_QUELLE_S)
+            bars = [b for b in bars if isinstance(b, dict) and erlaubt.get(_wz(b))]
+            for w, ok_ in erlaubt.items():
+                if ok_:
+                    _kerzen_quelle[w] = {"tab": _tid, "rolle": _t["rolle"], "modus": _modus, "s": _jetzt}
             _kerzen, n, warnung = _kerzen_uebernehmen(_kerzen, bars, bool(daten.get("erstladung")))
             if n:
                 _kerzen_s = time.time()
@@ -605,8 +742,12 @@ class Handler(BaseHTTPRequestHandler):
         # Kurs aus dem Titel (0.6.0) VOR dem Pause-Gate uebernehmen — siehe
         # Kommentar bei _kurs. Nur, wenn das Feld wirklich ein Kurs-Objekt ist;
         # null (kein Chart-Tab) laesst den letzten Stand stehen, das Alter sagt es.
+        _jetzt = time.time()
+        _tid, _t = _tab(daten, _jetzt)
         k = daten.get("kurs")
-        if isinstance(k, dict) and k.get("symbol") and k.get("text"):
+        _titel_ok = _quelle_gewinnt(_kurs_quelle_titel.get("q"), _tid, _t["rolle"], None, _jetzt, KURS_QUELLE_S)
+        if isinstance(k, dict) and k.get("symbol") and k.get("text") and _titel_ok:
+            _kurs_quelle_titel["q"] = {"tab": _tid, "rolle": _t["rolle"], "modus": None, "s": _jetzt}
             _kurs = {"symbol": str(k.get("symbol"))[:32], "text": str(k.get("text"))[:32],
                      "ts": k.get("ts") or daten.get("ts"),
                      "sichtbar": daten.get("sichtbar") is not False}
@@ -626,8 +767,21 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if isinstance(daten.get("kurse"), dict):
                 jetzt = time.time()
-                _kurse, _k1m_je, _k1m_vor_je = _kurse_uebernehmen(daten.get("kurse"), daten.get("sichtbar") is not False,
+                # 0.8.6: je Wurzel nur die beste Quelle uebernehmen (Rang aus Rolle + modus des Tabs)
+                _gefiltert = {}
+                for w_, k_ in daten.get("kurse").items():
+                    wz = _kurs_wurzel(w_) or str(w_).upper()[:8]
+                    alt_ = _kurse.get(wz)
+                    alt_q = ({"tab": alt_.get("tab_id"), "rolle": alt_.get("rolle"), "modus": alt_.get("modus"), "s": alt_.get("empf_s")}
+                             if alt_ else None)
+                    if isinstance(k_, dict) and _quelle_gewinnt(alt_q, _tid, _t["rolle"], k_.get("modus"), jetzt, KURS_QUELLE_S):
+                        _gefiltert[w_] = k_
+                _kurse, _k1m_je, _k1m_vor_je = _kurse_uebernehmen(_gefiltert, daten.get("sichtbar") is not False,
                                                                   jetzt, _kurse, _k1m_je, _k1m_vor_je)
+                for w_, k_ in _kurse.items():
+                    if k_.get("empf_s") == jetzt:
+                        k_["tab_id"], k_["rolle"] = _tid, _t["rolle"]
+                        _t["quelle"] = k_.get("quelle")
                 # 0.8.4: Wurzeln, die per Socket ticken, aber keine Chart-Serie haben, bekommen
                 # Minutenkerzen aus den Quote-Ticks (auch im verdeckten Tab — der Socket ist nicht gedrosselt).
                 for w, k in _kurse.items():
@@ -653,6 +807,19 @@ class Handler(BaseHTTPRequestHandler):
         # Fall ab (Userscript 0.3 an altem Server); dieser hier deckt jeden
         # kuenftigen ab — eine leere Liste darf nur ankommen, wenn wirklich
         # eine Liste geschickt wurde.
+        # 0.8.6: Feed-Tab (kein Broker) liefert NIE einen Positions-Stand — auch nicht 'flach'
+        if _t["rolle"] == "feed":
+            # Live-Zeile auch ohne Broker-Tab auffrischen (hoechstens 1×/s), sonst stuende im Fenster ein alter Stand
+            if _jetzt - _feed_zeile["s"] >= 1.0:
+                _feed_zeile["s"] = _jetzt
+                _bfs = _t.get("bf") or _bedienfeld
+                _btid, _bfr = _broker_wahl(_tabs, _jetzt)
+                kopf = f"\r[{time.strftime('%H:%M:%S')}] " + ("Broker-Tab still/fehlt — kein Positions-Urteil" if not _bfr else "Feed-Tab")
+                zeile = kopf + " | " + _tabs_zeile(_jetzt) + " · " + _kerzen_diag(_kerzen, _bfs, _aufl_warnung, _script_version)
+                if not _bfr:
+                    print(zeile.ljust(160)[:160], end="", flush=True)
+            self._json(200, {"ok": True, "an": True, "rolle": "feed", "reader_version": READER_VERSION})
+            return
         if not isinstance(daten.get("positionen"), list):
             self._json(400, {"ok": False, "msg":
                 "Feld 'positionen' fehlt oder ist keine Liste — wird NICHT als "
@@ -677,18 +844,19 @@ class Handler(BaseHTTPRequestHandler):
         # das war von aussen bisher nicht erkennbar.
         alt_und_ploetzlich_flach = ("version" not in daten
                                     and not daten.get("positionen")
-                                    and _stand.get("positionen"))
+                                    and ((_t.get("stand") or {}).get("positionen")))
         if daten.get("blind") or alt_und_ploetzlich_flach:
             if daten.get("blind"):
-                _blind_grund = str(daten.get("blind_grund") or "Reader meldet blind")
+                _t["blind_grund"] = str(daten.get("blind_grund") or "Reader meldet blind")
             else:
-                _blind_grund = ("Userscript ohne Versionsfeld (aelter als 0.4) meldet "
-                                "ploetzlich flat — im TradingView-Tab laeuft noch der "
-                                "alte Code. Tab mit F5 neu laden!")
-            if not _blind_seit:
-                _blind_seit = time.time()
-                print(f"\n[{time.strftime('%H:%M:%S')}] Reader BLIND: {_blind_grund} — "
+                _t["blind_grund"] = ("Userscript ohne Versionsfeld (aelter als 0.4) meldet "
+                                     "ploetzlich flat — im TradingView-Tab laeuft noch der "
+                                     "alte Code. Tab mit F5 neu laden!")
+            if not _t.get("blind_seit"):
+                _t["blind_seit"] = time.time()
+                print(f"\n[{time.strftime('%H:%M:%S')}] Reader BLIND ({_tid}): {_t['blind_grund']} — "
                       f"Stand eingefroren, Hedges bleiben stehen.")
+            _effektiv_setzen(time.time())
             try:
                 _schreibe_datei(_mit_an(_stand))
             except Exception as e:
@@ -696,14 +864,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "an": True, "blind": True})
             return
 
-        if _blind_grund:
-            print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder "
-                  f"(war {round(time.time() - _blind_seit, 1)}s blind).")
-            _blind_grund = ""
-            _blind_seit = 0.0
+        if _t.get("blind_grund"):
+            print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder ({_tid}) "
+                  f"(war {round(time.time() - float(_t.get('blind_seit') or 0), 1)}s blind).")
+            _t["blind_grund"], _t["blind_seit"] = "", 0.0
 
-        _stand = daten
-        _stand_s = time.time()
+        _t["stand"], _t["stand_s"] = daten, time.time()
+        _effektiv_setzen(time.time())
         try:
             _schreibe_datei(_mit_an(_stand))
         except Exception as e:
@@ -735,7 +902,8 @@ class Handler(BaseHTTPRequestHandler):
             zeilen = "flat"
         # \r haelt es als eine aktualisierende Live-Zeile. 0.8.2: rechts die Kerzen-Diagnose,
         # die Positionen werden dafuer bei Bedarf gekuerzt (Konsole meist 120–160 Zeichen breit).
-        diag = _kerzen_diag(_kerzen, _bedienfeld, _aufl_warnung, _script_version)
+        _feed_bf = next((t_.get("bf") for t_ in _tabs.values() if t_.get("rolle") == "feed" and t_.get("bf")), None)
+        diag = _tabs_zeile(time.time()) + " · " + _kerzen_diag(_kerzen, _feed_bf or _bedienfeld, _aufl_warnung, _script_version)
         kopf = f"\r[{zeit}] {len(pos)} Pos · "
         platz = max(20, 160 - len(kopf) - len(diag) - 3)
         print((kopf + zeilen[:platz] + " | " + diag).ljust(160)[:160], end="", flush=True)
@@ -753,9 +921,13 @@ class Handler(BaseHTTPRequestHandler):
                     "Noch kein Bedienfeld empfangen — laeuft das Userscript "
                     "(Version 0.3+) im TradingView-Tab?"})
                 return
-            out = dict(_bedienfeld)
+            # 0.8.6: das Bedienfeld des Tabs, in dem Puls gerade klickt (Fokus), sonst Broker, sonst juengstes
+            _bft = _bf_wahl(_tabs, time.time())
+            _src = _tabs.get(_bft) if _bft else None
+            out = dict((_src or {}).get("bf") or _bedienfeld)
             out["ok"] = True
-            out["alter_s"] = round(time.time() - _bedienfeld_s, 3)
+            out["alter_s"] = round(time.time() - float((_src or {}).get("bf_s") or _bedienfeld_s), 3)
+            out["tab_id"], out["rolle"] = _bft, (_src or {}).get("rolle")
             out.update(_versionen())
             self._json(200, out)
             return
