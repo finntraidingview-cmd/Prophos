@@ -18823,6 +18823,7 @@
     // Frische (Reader 0.8.5): positionen_ok === true (Script UND Server nicht blind) und positionen_alter_s ≤ 10; altes Script ohne
     // die Felder: Payload-Alter ≤ 10 s. false = kein Urteil (Flatter-Vorfall 01.09.).
     if(o.positionenOk === false) return false
+    if(o.liste.some(x => x && x.pnl_unklar)) return false   // Userscript 0.8.4: Zeile ohne lesbaren P&L = Lesung blind, nie „Master weg"
     if(!(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
     if(o.kontoPlan){ if(!hedgeKontoPasst(o.kontoAktiv, o.kontoPlan)) return false }   // exakter Token-Vergleich (Gegenprüfung 25.09.2026)
     else if(!(o.kontenAnzahl <= 1)) return false
@@ -18854,7 +18855,24 @@
   window._hedgeKontoPasst = hedgeKontoPasst
   const _hedgeLeerSeit = new Map()
   const _hedgeKontoSeit = new Map()   // plan-id → {text, seit}: seit wann der Reader DIESES Konto (passend) ununterbrochen zeigt
-  const _hedgeNachgeholt = new Set()   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
+  const _hedgeNachgeholt = new Set()
+  // Level eines Plans aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq) + TP/SL in Punkten — für Übernahmen/Nachholen (25.09.2026)
+  function hedgeLevelAusPlan(p){
+    try{
+      const tv = (p && p.mt5Baseline && p.mt5Baseline.tv) || {}
+      const ein = Number(tv.einstieg_nq)
+      const sym = tv.einstieg_symbol || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p).symbol : p.masterSymbol) || ''
+      const ppl = hedgePplFuer(sym), kt = Number(p.masterContracts) || 0, tp = Number(p.masterTp) || 0, sl = Number(p.masterSl) || 0
+      const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
+      const slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
+      const out = { punkte, sl_punkte: slPunkte, puffer_punkte: hedgePuffer() }
+      if(!(ein > 1000)) return out
+      const buy = p.richtung === 'buy'
+      const tpL = punkte > 0 ? Math.round((buy ? ein + punkte : ein - punkte) * 100) / 100 : null
+      const slL = slPunkte > 0 ? Math.round((buy ? ein - slPunkte : ein + slPunkte) * 100) / 100 : null
+      return Object.assign(out, { einstieg_nq: ein, einstieg_quelle: 'tv', tp_level_nq: tpL, sl_level_nq: slL, schliesst_bei_nq: tpL ? hedgeSchliesstBei(p.richtung, tpL, hedgePuffer()) : null })
+    }catch(_){ return {} }
+  }   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
     if(_hedgeWacheBusy) return
@@ -18870,29 +18888,39 @@
       // verlorene Hedge sein) — Status 'unklar' mit Ticket, Mensch prüft. Liste nicht lesbar → nichts tun.
       if(amPc){
         const liste0 = hedgeSoloListeFrisch()
+        // Copier b30d580: plan_id (aus dem open-Auftrag) oder plan8 (aus dem Kommentar 'PXsolo:<plan8>')
+        const kennung = q => (q && q.plan_id) ? String(q.plan_id).slice(0, 8) : (q && q.plan8) ? String(q.plan8).slice(0, 8) : null
+        const eigenVon = pl => Array.isArray(liste0) ? liste0.find(q => q && q.ticket && (String(q.plan_id || '') === String(pl.id) || kennung(q) === String(pl.id).slice(0, 8))) : null
+        // Übernahme mit den Leveln aus dem Puls-Fill (tv.einstieg_nq + TP/SL-Punkte), nicht aus dem Feed-Jetzt (Gegenprüfung 25.09.2026)
+        const uebernehmen = async (pl, eigen, msg) => {
+          try{ await hedgeAmPlanSchreiben(pl.id, Object.assign(hedgeLevelAusPlan(pl), { status: 'offen', ticket: eigen.ticket, lots: eigen.lots, fill: eigen.fill, sl: eigen.sl || 0, tp: eigen.tp || 0,
+            richtung: eigen.richtung || null, eur: pl.hedgeEur, pc: hedgePcId(), opened_at: new Date().toISOString(), wiederhergestellt: true, msg })) }catch(_){}
+        }
         for(const p of (_tp || [])){
           const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
-          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0) || (hx && !(hx.status === 'fehler' && hedgeFehlerSicher(hx)))) continue   // fehlend ODER sicherer Fehler (25.09.2026)
-          if(Date.now() - (Date.parse(p.startedAt || '') || Date.now()) < 20000 || _hedgeNachgeholt.has(String(p.id)) || !Array.isArray(liste0)) continue
+          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0)) continue
+          // (a) 'oeffnet' / 'fehler' / 'wartet' OHNE Ticket, älter als 60 s → per Kennung in hedge_solo abgleichen (jeden Tick, idempotent):
+          // die Antwort kann verloren gegangen sein, obwohl die Position liegt
+          if(hx && ['oeffnet', 'fehler', 'wartet'].includes(hx.status) && !hx.ticket && Date.now() - (Date.parse(hx.at || '') || 0) > 60000){
+            const eigen = eigenVon(p)
+            if(eigen){ await uebernehmen(p, eigen, `wiederhergestellt (${hx.status} ohne Ticket, Position per Plan-Kennung gefunden)`); continue }
+          }
+          // (b) Nachholen: nur bei fehlendem hedge-Objekt oder sicherem Fehler, 20 s bis 3 min nach dem Start, einmal je Tab
+          if(hx && !(hx.status === 'fehler' && hedgeFehlerSicher(hx))) continue
+          const seitStart = Date.now() - (Date.parse(p.startedAt || '') || Date.now())
+          if(seitStart < 20000 || seitStart > 180000 || _hedgeNachgeholt.has(String(p.id)) || !Array.isArray(liste0)) continue
           _hedgeNachgeholt.add(String(p.id))
           const bekannt = new Set((_tp || []).map(x => x && x.mt5Baseline && x.mt5Baseline.hedge && Number(x.mt5Baseline.hedge.ticket)).filter(Boolean))
-          // Plan-Kennung im hedge_solo-Eintrag (Backend, sobald im Order-Kommentar): eigene Position → übernehmen statt blocken;
-          // Positionen mit fremder Kennung stören nicht; Positionen OHNE Kennung sind unklar → blocken.
-          const pid = String(p.id), pid8 = pid.slice(0, 8)
-          // Copier b30d580: plan_id (aus dem open-Auftrag) oder plan8 (aus dem Kommentar 'PXsolo:<plan8>')
-          const kennung = q => (q && q.plan_id) ? String(q.plan_id).slice(0, 8) : (q && q.plan8) ? String(q.plan8).slice(0, 8) : null
-          const eigen = liste0.find(q => q && q.ticket && (String(q.plan_id || '') === pid || kennung(q) === pid8))
-          if(eigen){
-            try{ await hedgeAmPlanSchreiben(p.id, { status: 'offen', ticket: eigen.ticket, lots: eigen.lots, fill: eigen.fill, sl: eigen.sl || 0, tp: eigen.tp || 0, richtung: eigen.richtung || null,
-              eur: p.hedgeEur, pc: hedgePcId(), opened_at: new Date().toISOString(), wiederhergestellt: true, msg: 'wiederhergestellt (Eintrag fehlte, Position per Plan-Kennung gefunden)' }) }catch(_){}
-            continue
-          }
+          const eigen = eigenVon(p)
+          if(eigen){ await uebernehmen(p, eigen, 'wiederhergestellt (Eintrag fehlte, Position per Plan-Kennung gefunden)'); continue }
           const fremd = liste0.filter(q => q && q.ticket && !bekannt.has(Number(q.ticket)) && !kennung(q))   // nur Positionen OHNE jede Kennung blocken
           if(fremd.length){
             try{ await hedgeAmPlanSchreiben(p.id, { status: 'unklar', pc: hedgePcId(), at: new Date().toISOString(), msg: `Hedge-Eintrag fehlt, auf Fusion liegt eine Solo-Position ohne Zuordnung (Ticket ${fremd.map(q => q.ticket).join(', ')}) — im Terminal prüfen, KEIN zweiter Open` }) }catch(_){}
             if(typeof atToast === 'function') atToast(`⚠ Fusion-Hedge unklar (${p.masterName || '—'}): Solo-Position ohne Zuordnung auf Fusion — im Terminal prüfen`, 'end')
           } else {
-            try{ await hedgeSoloOeffnen(p, { klick_at: p.startedAt || null, nachgeholt: true }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
+            // Einstieg aus dem Puls-Fill (mt5_baseline.tv.einstieg_nq), nicht der Feed-Kurs von jetzt — sonst liegen die Level falsch
+            const ein = p.mt5Baseline && p.mt5Baseline.tv && Number(p.mt5Baseline.tv.einstieg_nq)
+            try{ await hedgeSoloOeffnen(p, { klick_at: p.startedAt || null, nachgeholt: true, einstieg: (ein > 1000) ? String(ein) : null, tv_symbol: (p.mt5Baseline.tv && p.mt5Baseline.tv.einstieg_symbol) || undefined }) }catch(e){ console.warn('[hedgeWache] nachholen', e) }
           }
         }
       }
@@ -18919,7 +18947,12 @@
         }
         if(h.status !== 'offen') continue
         // Startphase schonen (25.09.2026): der Hedge öffnet jetzt VOR v2PlanAufOpen — ein noch geplanter Plan mit frischem Hedge ist kein Master-Ende
-        if(p.status !== 'open' && !(p.status === 'planned' && Date.now() - (Date.parse(h.opened_at || h.at || '') || 0) < 180000)){ await hedgeSoloSchliessen(p, 'master_ende'); continue }
+        if(p.status !== 'open' && !(p.status === 'planned' && Date.now() - (Date.parse(h.opened_at || h.at || '') || 0) < 180000)){
+          // Plan noch „geplant", Hedge seit > 3 min offen UND ein Puls-Beweis (klick_at aus v2AufOpen): dann ist nur der Plan-Open
+          // verloren gegangen — „Läuft" nachholen statt den Hedge zu schließen (Gegenprüfung 25.09.2026)
+          if(p.status === 'planned' && h.klick_at && typeof v2PlanAufOpen === 'function'){ try{ await v2PlanAufOpen(p.id, null, null) }catch(e){ console.warn('[hedgeWache] v2PlanAufOpen nachholen', e) } continue }
+          await hedgeSoloSchliessen(p, 'master_ende'); continue
+        }
         // ERSTE LINIE (Finn 25.09.2026, 1-s-Takt): Schließen über den Kurs-Feed — Master-TP + 8 Ticks bzw. Master-SL erreicht.
         // Ring-/Position-weg-Abgleich unten bleibt die zweite Linie (= Notfall-Level im Terminal hat gefüllt).
         {
@@ -30662,7 +30695,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.554'
+  const OS_TAB_BUILD = '2026-09-22.555'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30986,6 +31019,11 @@
     geschwister = [..._gleicheFirma.filter(a => !_istArch(a)), ..._inaktiv]
       .map(a => String(a.externalId).trim())
     _tpOrbitLaeuft = true
+    // Winning Day: Copier-Update-Neustart für die nächsten 3 min vertagen (Panel POST /api/hedge-solo {aktion:'bereit'}, abc14c6) —
+    // sonst trifft der Hedge-Open das Neustart-Fenster (Plan 9302faea: copier_alt). Ohne Antwort egal, die Wiederholung fängt es.
+    if(plan.hedgeEur > 0 && typeof window.mtcApi === 'function'){
+      try{ window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'bereit', sekunden: 180, grund: 'winning_day_start' }), timeoutMs: 5000 }).catch(() => {}) }catch(_){}
+    }
     if(imPopup) _pfAddRow('ob-order', 'Puls platziert in TradingView')
     if(imPopup) _pfSet('ob-order', 'warn', `⏳ TradingView → Konto ${escapeHtml(extId)} → ${escapeHtml(symbol)} → Order-Panel → ${escapeHtml(dir.toUpperCase())} (ECHTE Order) — HÄNDE WEG von Maus und Tastatur!`)
     else toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
