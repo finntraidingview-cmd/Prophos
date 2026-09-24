@@ -42,13 +42,18 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-23.4"
+APP_BUILD = "2026-09-24.1"
 
 @app.route("/version", methods=["GET"])
 def version():
+    # kapitel_heute seit 24.09.2026 (Vollumstieg auf „Ohne Hedge", Finn: „riesen
+    # Umstieg — geh alles durch, Backend, jedes Einzelne"): ein kleines Signal für
+    # die PC-Panels, in welchem Kapitel wir heute sind (id/name/hedge). Gecacht,
+    # damit /version nie einen DB-Read pro Aufruf kostet; ohne DB → null.
     return jsonify({
         "build": APP_BUILD,
-        "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12]
+        "commit": (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:12],
+        "kapitel_heute": _kapitel_heute(),
     })
 
 # ── Forex-Factory News-Kalender (öffentlicher Wochen-Feed, gecacht) ──
@@ -442,7 +447,10 @@ def copier_proxy(path):
         # Bedarf TradingView und wartet, bis der Broker wieder verbunden ist —
         # das Panel gibt dem Bot 260 s (seit 2b: ab-/anmelden). Hier wird nichts gesendet, ein frueher
         # Abbruch waere also kein Doppel-Order-Pfad, aber eine falsche Absage.
-        _tmo = (310 if path in ("master-order", "master-close", "tv-order")
+        # tv-lesen / tv-close (24.09.2026, Orbit-V2-Rundgang und -Schließen): der Bot schaltet
+        # Konten um und wartet auf frische Reader-Stände — Panel-Timeout bis 165 s+. Mit 25 s
+        # brach der Proxy ab, während der Bot weiterklickte (PC-Agent-Befund).
+        _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close")
                 else 270 if path == "tv-konto" else 25)
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
@@ -2611,6 +2619,18 @@ _watcher_tokens = {}      # EMAIL -> {"token":..., "at": epoch} — EIN Token pr
                           # auf derselben Duplikum-E-Mail — vorher wurde doppelt gepollt
                           # und doppelt eingeloggt)
 _watcher_seen = {}        # EMAIL -> set(ticket) des letzten Ticks — für die Uhr-Kalibrierung
+# Session-Pause je Duplikum-Konto (24.09.2026, Vollumstieg „Ohne Hedge" — Duplikum
+# ist nur noch Rest-Abo; Finn: „riesen Umstieg — geh alles durch, Backend, jedes
+# Einzelne"): läuft ein Abo aus oder fehlen die Zugangsdaten, kassiert der Wächter
+# sonst jeden Zyklus (30 s) aufs Neue Login/401 — und schreibt das ins Log. Nach
+# WT_PAUSE_FAILS Auth-Fehlschlägen in Folge (kein Token / 401 auch nach Re-Login)
+# ruht das Konto WT_PAUSE_S lang, EIN Log-Satz „Duplikum-Session <mail>: pausiert
+# bis …", danach ein Versuch je Pause. Netz-/Rate-Limit-Fehler zählen NICHT — die
+# sind vorübergehend, und ein laufender Hedge-Plan braucht den nächsten Tick.
+# V2-Pläne (mt5v2/tvv2) berührt der Wächter ohnehin nie (Filter in wt_check_user).
+_watcher_pause = {}       # EMAIL -> {"fails": n, "until": epoch, "gemeldet": bool}
+WT_PAUSE_FAILS = 3
+WT_PAUSE_S = 30 * 60
 _watcher_info = {"started": False, "last_run": 0, "runs": 0, "users": 0, "last_error": "", "cycle_ms": 0}
 _watcher_thread_started = False
 _watcher_memo_lock = threading.Lock()
@@ -3300,32 +3320,80 @@ def wt_memo_positions(creds, memo):
         return _wt_memo_positions_locked(email, creds, memo)
 
 
+def _wt_session_pausiert(email):
+    """Ruht dieses Duplikum-Konto gerade (24.09.2026)? Läuft die Pause ab, wird
+    das EINMAL gemeldet und der nächste Versuch erlaubt; scheitert der wieder,
+    setzt _wt_session_fehler sofort die nächste Pause (fails bleibt ≥ Schwelle)."""
+    pz = _watcher_pause.get(email)
+    if not pz:
+        return False
+    if time.time() < pz["until"]:
+        return True
+    if not pz.get("gemeldet"):
+        pz["gemeldet"] = True
+        print(f"[watcher] ▶ Duplikum-Session {email}: Pause vorbei — neuer Versuch", flush=True)
+    return False
+
+
+def _wt_session_fehler(email, grund):
+    # gemeldet=True beim Anlegen: „Pause vorbei" darf erst nach einer ECHTEN Pause kommen.
+    pz = _watcher_pause.setdefault(email, {"fails": 0, "until": 0.0, "gemeldet": True})
+    pz["fails"] += 1
+    if pz["fails"] >= WT_PAUSE_FAILS:
+        pz["until"] = time.time() + WT_PAUSE_S
+        pz["gemeldet"] = False
+        bis = time.strftime("%H:%M UTC", time.gmtime(pz["until"]))
+        print(f"[watcher] ⏸ Duplikum-Session {email}: pausiert bis {bis} — "
+              f"{pz['fails']} Fehlschläge in Folge ({grund}); Abo/Passwort prüfen. "
+              f"Hedge-Pläne dieses Kontos werden solange nicht vom Server erkannt.", flush=True)
+
+
+def _wt_session_ok(email):
+    pz = _watcher_pause.pop(email, None)
+    if pz and pz["fails"] >= WT_PAUSE_FAILS:
+        print(f"[watcher] ✅ Duplikum-Session {email}: wieder da", flush=True)
+
+
 def _wt_memo_positions_locked(email, creds, memo):
     # Re-Check unter dem E-Mail-Lock: ein paralleles Profil derselben E-Mail hat
     # das Ergebnis evtl. gerade eben schon geholt (Single-Flight).
     with _watcher_memo_lock:
         if email in memo:
             return memo[email]
+    # Session-Pause (24.09.2026): kein Login, kein Duplikum-Call, kein Log-Eintrag.
+    if _wt_session_pausiert(email):
+        with _watcher_memo_lock:
+            memo[email] = (None, None)
+        return None, None
     token = wt_email_token(creds)
     if not token:
+        _wt_session_fehler(email, "kein Token — Login abgelehnt oder im Backoff")
         with _watcher_memo_lock:
             memo[email] = (None, None)
         return None, None
     n_acc = wt_account_count(email, token)
     positions = None
+    auth_fail = False      # nur 401-Ketten zählen für die Session-Pause, nie Netz/Rate-Limit
     for attempt in range(2):
         res = wt_dup_positions(token, "position/getOpenPositions.php", email, n_acc)
         if res == "budget":
             break            # bewusst kein Retry — Budget ist Budget
         if res == "401":
+            auth_fail = True
             token = wt_email_token(creds, force=True)
             if not token:
                 break
             continue
         if isinstance(res, list):
             positions = res
+            auth_fail = False
             break
+        auth_fail = False
         time.sleep(0.7)   # Fehlerantwort → kurz warten, einmal sofort nachfassen
+    if isinstance(positions, list):
+        _wt_session_ok(email)
+    elif auth_fail:
+        _wt_session_fehler(email, "401 / Token abgelehnt auch nach Re-Login")
     # Uhr-Kalibrierung: Tickets, die es im LETZTEN Tick noch nicht gab, sind
     # höchstens Sekunden alt → openTime − jetzt ≈ Duplikums Uhr-Offset zu UTC.
     # Drei Gates gegen Vergiftung (Review-Findings 05.08.2026):
@@ -4092,6 +4160,8 @@ def watcher_cycle():
         _watcher_tokens.pop(e, None)
     for e in [e for e in _watcher_seen if e not in known_emails]:
         _watcher_seen.pop(e, None)
+    for e in [e for e in list(_watcher_pause) if e not in known_emails]:
+        _watcher_pause.pop(e, None)
     with _watcher_memo_lock:
         for e in [e for e in _watcher_email_locks if e not in known_emails]:
             _watcher_email_locks.pop(e, None)
@@ -4413,6 +4483,42 @@ def _kapitel_param():
     return int(v)
 
 
+_kapitel_heute_cache = {"at": 0.0, "wert": None}
+
+
+def _kapitel_heute():
+    """Kapitel des heutigen Tages (UTC) aus der Tabelle kapitel — dieselbe Regel wie
+    die DB-Funktion kapitel_fuer(current_date): von <= heute und (bis leer oder
+    bis >= heute), bei mehreren Treffern das jüngste. 5 min gecacht (24.09.2026,
+    /version wird von den PC-Panels gepollt). → {id, key, name, hedge} oder None."""
+    now = time.time()
+    if (now - _kapitel_heute_cache["at"]) < 300:
+        return _kapitel_heute_cache["wert"]
+    heute = time.strftime("%Y-%m-%d", time.gmtime())
+    wert = None
+    for k in _kapitel_liste():
+        von, bis = str(k.get("von") or "")[:10], str(k.get("bis") or "")[:10]
+        if von and von <= heute and (not bis or bis >= heute):
+            wert = {"id": _kapitel_int(k.get("id")), "key": k.get("key") or "",
+                    "name": k.get("name") or "", "hedge": bool(k.get("hedge"))}
+    _kapitel_heute_cache.update(at=now, wert=wert)
+    return wert
+
+
+def _symbol_wurzel(sym):
+    """Wurzel eines Futures-Symbols für den Kapitel-Vergleich (24.09.2026):
+    MNQZ6 / MNQZ2026 / MNQ1! / MNQ → 'MNQ'; NQZ6 → 'NQ'. Leer → ''."""
+    s = str(sym or "").strip().upper()
+    if not s:
+        return ""
+    s = re.sub(r"\d!$", "", s)                       # TradingView-Continuous (MNQ1!)
+    m = re.match(r"^([A-Z]{1,6})[FGHJKMNQUVXZ]\d{1,4}$", s)   # Monatscode + Jahr
+    if m:
+        return m.group(1)
+    m = re.match(r"^([A-Z]+)\d*$", s)
+    return m.group(1) if m else s
+
+
 def admin_build_overview(kapitel_id=None):
     # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
     # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
@@ -4426,9 +4532,24 @@ def admin_build_overview(kapitel_id=None):
     by_id, live_ids, names, disp = b["by_id"], b["live_ids"], b["names"], b["disp"]
     excluded_ids, excluded_names = b["excluded_ids"], b["excluded_names"]
     kf = {} if kapitel_id is None else {"kapitel_id": f"eq.{int(kapitel_id)}"}
+    # Kapitel-Liste EINMAL lesen (24.09.2026, Vollumstieg „Ohne Hedge", Finn: „riesen
+    # Umstieg — geh alles durch, Backend, jedes Einzelne"): ist das gefilterte Kapitel
+    # eines ohne Hedge (kapitel.hedge = false), gibt es dort per Definition keine
+    # Slave-P&L — die Hedge-Spalten werden gar nicht erst gelesen und die Hedge-
+    # Formel nicht gerechnet (hedge = 0, hedge_ev leer). Spart bei Kapitel 2 die
+    # teuerste Rechnung der Übersicht und liefert nie „fast 0" aus Altlasten.
+    kapitel_liste = _kapitel_liste()
+    kap = next((k for k in kapitel_liste if kapitel_id is not None
+                and _kapitel_int(k.get("id")) == int(kapitel_id)), None)
+    hedge_aus = bool(kap is not None and not kap.get("hedge"))
     # completed_at seit 23.09.2026 mit: der Personen-Verlauf (unten) braucht
     # das Datum jedes Hedge-Verlusts, die Summen-Aggregation braucht es nicht.
-    plans     = _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,slave_pl,completed_at",
+    # master_pl/blown/user_id seit 24.09.2026: ohne Hedge-Spalten braucht der
+    # Admin etwas Sinnvolles je Zeile — Master-P&L (USD), Trades, Blows im Kapitel.
+    plans_select = "master_account_id,user_id,master_pl,blown"
+    if not hedge_aus:
+        plans_select += ",slave_account_id,slave_pl,completed_at"
+    plans     = _sb_all("trade_plans", {"select": plans_select,
                                         "status": "eq.completed", **kf})
     # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
     # Finn: „man soll auch sehen, wo die ganzen Payouts ankamen"): dieselben
@@ -4446,13 +4567,35 @@ def admin_build_overview(kapitel_id=None):
     # Verlust (slave_pl < 0) → Kosten +, Gewinn → Kosten −. USD→EUR wie im Frontend.
     hedge = {}
     hedge_ev = []      # Verlauf (23.09.2026): (master_id, datum, kosten_eur) je Trade
-    for p in plans:
+    for p in ([] if hedge_aus else plans):
         ev = _admin_hedge_ev(p, by_id, live_ids, fx)
         if ev is None:
             continue
         m, datum, eur = ev
         hedge[m] = hedge.get(m, 0.0) + eur
         hedge_ev.append(ev)
+
+    # Master-P&L / Trades / Blows je Account und je Person im (gefilterten) Kapitel
+    # (24.09.2026): USD roh, wie /admin/kapitel — Prop-Konten laufen in USD.
+    # Person = Besitzer des Master-Kontos (Fallback: user_id des Plans).
+    mpl_k, trades_k, blown_k = {}, {}, {}
+    mpl_p, trades_p, blown_p = {}, {}, {}
+    for p in plans:
+        m = str(p.get("master_account_id") or "")
+        acc = by_id.get(m) or {}
+        puid = str(acc.get("user_id") or p.get("user_id") or "")
+        trades_k[m] = trades_k.get(m, 0) + 1
+        trades_p[puid] = trades_p.get(puid, 0) + 1
+        if p.get("blown"):
+            blown_k[m] = blown_k.get(m, 0) + 1
+            blown_p[puid] = blown_p.get(puid, 0) + 1
+        try:
+            v = float(p.get("master_pl"))
+        except (TypeError, ValueError):
+            continue
+        if v == v:
+            mpl_k[m] = mpl_k.get(m, 0.0) + v
+            mpl_p[puid] = mpl_p.get(puid, 0.0) + v
 
     payouts = {}
     for t in txs:
@@ -4561,6 +4704,12 @@ def admin_build_overview(kapitel_id=None):
             "c_payouts": round(cp, 2),
             "c_parked": round(cb + ch - cp, 2),
             "chain_ids": chain_ids(aid),
+            # Kapitel „Ohne Hedge" (24.09.2026): Master-P&L (USD), Trades und Blows
+            # dieses Kontos im gefilterten Kapitel — ohne Hedge-Spalten die Kennzahl
+            # der Zeile. Nur eigene Pläne, keine Kette.
+            "master_pl_k": round(mpl_k.get(aid, 0.0), 2),
+            "trades_k": trades_k.get(aid, 0),
+            "blown_k": blown_k.get(aid, 0),
         })
 
     # VERLAUF je Person (23.09.2026, Finn: „Charts, wo man den Verlauf von jeder
@@ -4877,7 +5026,11 @@ def admin_build_overview(kapitel_id=None):
 
     people_list = sorted(
         [{"user_id": u, "name": disp.get(u) or names.get(u, u[:8]),
-          "mail": names.get(u, "")} for u in {r["user_id"] for r in rows}],
+          "mail": names.get(u, ""),
+          # Master-P&L/Trades/Blows je Person im Kapitel (24.09.2026, USD).
+          "master_pl": round(mpl_p.get(u, 0.0), 2),
+          "trades": trades_p.get(u, 0), "blown": blown_p.get(u, 0)}
+         for u in {r["user_id"] for r in rows}],
         key=lambda p: p["name"].lower())
     firm_list = sorted({r["firm"] for r in rows})
     # excluded_uids zusaetzlich zu den E-Mails (26.08.2026): die Flotte im
@@ -4892,9 +5045,10 @@ def admin_build_overview(kapitel_id=None):
             "fx_usd_eur": fx, "generated": _wt_now_iso(),
             "excluded": sorted(excluded_names),
             "excluded_uids": sorted(excluded_ids),
-            # Kapitel (24.09.2026): aktiver Filter + alle Kapitel für den Umschalter.
+            # Kapitel (24.09.2026): aktiver Filter + alle Kapitel für den Umschalter;
+            # hedge_aus = Hedge-Spalten wurden für dieses Kapitel gar nicht gelesen.
             "kapitel": {"aktiv": (int(kapitel_id) if kapitel_id is not None else None),
-                        "liste": _kapitel_liste()}}
+                        "liste": kapitel_liste, "hedge_aus": hedge_aus}}
 
 
 @app.route("/admin/overview", methods=["GET", "OPTIONS"])
@@ -4927,10 +5081,12 @@ def admin_build_kapitel():
     b = _admin_basis()
     accounts, archived, fx = b["accounts"], b["archived"], b["fx"]
     by_id, live_ids, excluded_ids = b["by_id"], b["live_ids"], b["excluded_ids"]
+    names, disp = b["names"], b["disp"]
     liste = _kapitel_liste()
     # master_pl/blown/user_id zusätzlich zur Übersicht: Trade-Zähler + Prop-P&L je Kapitel.
+    # master_symbol seit 24.09.2026 (Vollumstieg „Ohne Hedge"): Symbol-Zähler NQ/MNQ je Kapitel.
     plans = _sb_all("trade_plans", {"select": "user_id,master_account_id,slave_account_id,"
-                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge",
+                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol",
                                     "status": "eq.completed"})
     # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
     # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
@@ -4954,6 +5110,14 @@ def admin_build_kapitel():
         konten = konten_aktiv = payout_n = trades = blown = trades_ohne_hedge = 0
         tage = []
         monate = {}
+        # Je Person (24.09.2026, Finn: Vergleich im Admin ohne Hedge-Spalten) und
+        # je Symbolwurzel (NQ/MNQ) — ausgeblendete Personen sind oben schon raus.
+        personen = {}
+        symbole = {}
+        def _person(uid):
+            return personen.setdefault(uid, {
+                "user_id": uid, "person": disp.get(uid) or names.get(uid, uid[:8] or "—"),
+                "konten": 0, "kauf": 0.0, "payouts": 0.0, "master_pl": 0.0, "trades": 0, "blown": 0})
         def _monat(datum, art, eur):
             if not datum:
                 return
@@ -4974,6 +5138,9 @@ def admin_build_kapitel():
             kauf += buy
             if buy:
                 _monat(str(a.get("created_at") or "")[:10], "kauf", buy)
+            pe = _person(str(a.get("user_id")))
+            pe["konten"] += 1
+            pe["kauf"] += buy
         # Trades: Zähler über alle abgeschlossenen Pläne des Kapitels, Hedge nur
         # auf Live-Slaves (Formel wie Übersicht), Master-P&L roh in USD.
         for p in plans:
@@ -4982,8 +5149,11 @@ def admin_build_kapitel():
             if _uid_of_plan(p) in excluded_ids:
                 continue
             trades += 1
+            pe = _person(_uid_of_plan(p))
+            pe["trades"] += 1
             if p.get("blown"):
                 blown += 1
+                pe["blown"] += 1
             # ohne_hedge = generierte Spalte (route in mt5v2/tvv2), 24.09.2026, Finn:
             # „alle Trades über Echo V2 / Orbit V2 sind ab jetzt ohne Gegenhedge".
             if p.get("ohne_hedge"):
@@ -4991,6 +5161,10 @@ def admin_build_kapitel():
             mpl = _f(p.get("master_pl"))
             if mpl is not None:
                 master_pl += mpl
+                pe["master_pl"] += mpl
+            wurzel = _symbol_wurzel(p.get("master_symbol"))
+            if wurzel:
+                symbole[wurzel] = symbole.get(wurzel, 0) + 1
             ev = _admin_hedge_ev(p, by_id, live_ids, fx)
             if ev is not None:
                 _m, datum, eur = ev
@@ -5008,6 +5182,9 @@ def admin_build_kapitel():
                 payouts += amt
                 payout_n += 1
                 _monat(str(t.get("occurred_at") or "")[:10], "payouts", amt)
+                tuid = str(t.get("user_id") or "")
+                if tuid:
+                    _person(tuid)["payouts"] += amt
             elif t.get("kind") == "live_pnl":
                 live_pnl += amt
         out.append({
@@ -5025,6 +5202,13 @@ def admin_build_kapitel():
             "letzter_tag": max(tage) if tage else None,
             "monate": [{k2: (round(v, 2) if isinstance(v, float) else v) for k2, v in m.items()}
                        for _mk, m in sorted(monate.items())],
+            # Vergleich je Person + Symbol-Zähler (24.09.2026). Personen ohne
+            # Bewegung im Kapitel tauchen nicht auf (kein Konto, kein Trade, kein Payout).
+            "personen": sorted(
+                [{k2: (round(v, 2) if isinstance(v, float) else v) for k2, v in pe.items()}
+                 for pe in personen.values()],
+                key=lambda pe: str(pe["person"]).lower()),
+            "symbole": dict(sorted(symbole.items())),
         })
     return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso()}
 
@@ -5710,6 +5894,67 @@ WD_PLAN_FELDER = {
 }
 WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol"}
 
+# ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
+# Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem
+# 24.09.2026 gibt es keinen Gegen-Hedge mehr, Duplikum fliegt komplett raus. Die
+# Regel für den Farmer stammt aus Finns Ansage vom 22.09.2026 („Ich will nie
+# wieder Winning Days manuell fahren müssen": ab 02:00 Dubai alle Fundeds ID für
+# ID, Richtung je ID, TP aus der Firmen-Spanne) — davon bleibt alles, NUR der
+# Weg ändert sich: statt Orbit (tvplus, Puls platziert + Duplikum kopiert auf den
+# Slave) fährt der Farmer jetzt Orbit V2 (tvv2: Puls in TradingView, Rundgang
+# liest Today's P&L) bzw. bei einer MT5-Firma Echo V2 (mt5v2: Puls im MT5-Master-
+# Terminal). Das Frontend (tpVorplanPlanRow) schickt die Zeilen noch mit
+# route='tvplus' + Duplikum-Slave/Multiplier — hier wird das VOR dem Insert
+# umgeschrieben, damit nie wieder ein Farmer-Plan auf einem Hedge-Weg landet,
+# egal welcher Frontend-Stand die Zeile baut. Slave/Multiplier werden auf null
+# gesetzt (kein Slave = nichts zu hedgen), master_symbol wie das Frontend
+# (MNQ + Frontmonat), falls es fehlt.
+WD_V2_NULL_FELDER = ("slave_account_id", "slave_name", "slave_firm", "slave_risk", "multiplier")
+WD_V2_ROUTEN = ("tvv2", "mt5v2")
+
+
+def _wd_futures_frontcode(jetzt=None):
+    """Frontmonat-Code der CME-Index-Futures (H/M/U/Z + Jahresziffer), exakt wie
+    tpFuturesFrontcode im Frontend: Roll am Donnerstag vor dem 3. Freitag des
+    Quartalsmonats (= 3. Freitag − 8 Tage); liegt der Roll-Tag noch VOR dem
+    Stichtag, ist der nächste Quartalsmonat dran. Gerechnet in UTC-Kalendertagen.
+    → z.B. 'Z6' am 24.09.2026, 'U6' am 09.09.2026."""
+    d = jetzt or datetime.now(timezone.utc)
+    MON = {3: "H", 6: "M", 9: "U", 12: "Z"}
+    d_ord = datetime(d.year, d.month, d.day).toordinal()
+    for i in range(13):
+        roh = (d.month - 1) + i
+        jahr, monat = d.year + roh // 12, (roh % 12) + 1
+        if monat not in MON:
+            continue
+        erster = datetime(jahr, monat, 1)
+        bis_freitag = (4 - erster.weekday()) % 7          # weekday(): Mo=0 … Fr=4
+        dritter_freitag = erster.toordinal() + bis_freitag + 14
+        roll = dritter_freitag - 8
+        if roll > d_ord:
+            return MON[monat] + str(jahr % 10)
+    return ""
+
+
+def _wd_v2_route(firm):
+    """Weg je Konto: Futures-Firma → Orbit V2 (tvv2), alles andere → Echo V2 (mt5v2)."""
+    f = (firm or "").strip().lower()
+    return "tvv2" if any(k in f for k in WD_FUTURES_FIRMEN) else "mt5v2"
+
+
+def _wd_plan_v2(body, firm=None, jetzt=None):
+    """Farmer-Zeile auf V2 drehen (in place + zurück): route, Slave-Felder null,
+    master_symbol bei Bedarf (MNQ + Frontmonat, wie das Frontend ohne NQ-Modus).
+    Ein schon V2-gesetzter Weg bleibt, wie er ist (Frontend entscheidet MNQ/NQ)."""
+    route = str(body.get("route") or "")
+    if route not in WD_V2_ROUTEN:
+        body["route"] = _wd_v2_route(firm if firm is not None else body.get("master_firm"))
+    for k in WD_V2_NULL_FELDER:
+        body[k] = None
+    if not str(body.get("master_symbol") or "").strip() and body["route"] == "tvv2":
+        body["master_symbol"] = "MNQ" + _wd_futures_frontcode(jetzt)
+    return body
+
 
 def _wd_login():
     """Eingeloggt reicht (wie /admin/overview). → (user_id, None) oder (None, (resp, status))."""
@@ -5872,7 +6117,7 @@ def admin_wd_plaene():
                 if len(mid) < 10 or len(uid) < 10:
                     uebersprungen.append({"master_account_id": mid, "grund": "user_id/master_account_id fehlt"}); continue
                 # Konto muss dieser Person gehören — sonst landet ein Plan im falschen Profil
-                acc = sb_select("accounts", {"select": "id,user_id", "id": f"eq.{mid}"})
+                acc = sb_select("accounts", {"select": "id,user_id,firm", "id": f"eq.{mid}"})
                 if not acc or str(acc[0].get("user_id")) != uid:
                     uebersprungen.append({"master_account_id": mid, "grund": "Konto gehört nicht zu dieser ID"}); continue
                 offen = sb_select("trade_plans", {"select": "id,status,notes,planned_for,start_um_gestartet_at", "master_account_id": f"eq.{mid}",
@@ -5906,6 +6151,8 @@ def admin_wd_plaene():
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
                 # kapitel_id bewusst nicht gesetzt (24.09.2026): der DB-Trigger ordnet den Plan nach Datum dem Kapitel zu.
+                # V2 statt Hedge-Weg (24.09.2026, Vollumstieg): route tvv2/mt5v2, kein Slave, kein Multiplier.
+                _wd_plan_v2(body, (acc[0].get("firm") if acc and acc[0].get("firm") else body.get("master_firm")))
                 angelegt.append(sb_insert("trade_plans", body))
             return jsonify({"angelegt": angelegt, "uebersprungen": uebersprungen, "verknuepft": verknuepft})
         except Exception as e:
@@ -5928,6 +6175,14 @@ def admin_wd_plaene():
         if len(pid) < 10 or not upd:
             return jsonify({"error": "id/upd fehlt"}), 400
         try:
+            # V2-Plan (24.09.2026): Slave-Risiko/Multiplier gibt es ohne Hedge nicht — ein
+            # Admin-Nachzug (Staffel) darf sie nicht wieder an einen V2-Plan schreiben.
+            if "slave_risk" in upd or "multiplier" in upd:
+                alt = sb_select("trade_plans", {"select": "route", "id": f"eq.{pid}", "limit": "1"})
+                if alt and (alt[0].get("route") or "") in WD_V2_ROUTEN:
+                    upd.pop("slave_risk", None); upd.pop("multiplier", None)
+                    if not upd:
+                        return jsonify({"geaendert": False, "plan": None, "hinweis": "V2-Plan ohne Slave — nichts zu ändern"})
             z = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"}, upd)
             return jsonify({"geaendert": bool(z), "plan": z[0] if z else None})
         except Exception as e:

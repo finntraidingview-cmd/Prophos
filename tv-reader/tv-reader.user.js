@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.5.0
+// @version      0.5.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -17,6 +17,10 @@
 // Userscripts, die mit einem lokalen Prozess reden.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.5.1  24.09.2026  Zusammenfassung robuster: Label/Wert in getrennten Divs
+//                      derselben Elternebene (auch mit Icon dazwischen), Werte
+//                      wie „−1,234.50 USD“, „-1.234,50 $“, „USD 1,234.50“,
+//                      „(12.50)“. Vollumstieg „Ohne Hedge“ (Rundgang + tvclose).
 //   0.5.0  24.09.2026  Konto-Zusammenfassung (summary + today_pnl_text) im
 //                      Bedienfeld — Orbit-V2-Rundgang: Puls liest, ob die
 //                      Position noch offen ist, und nach dem Ende „Today's P&L".
@@ -36,7 +40,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.5.0';
+  const VERSION    = '0.5.1';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -481,7 +485,11 @@
   const SUMMARY_MAX = 40;
   // Zahlen-Text: Vorzeichen (auch U+2212 „−" wie im TV-Titel), Waehrung vorn
   // oder hinten, Tausender-/Dezimalzeichen deutsch wie englisch, Prozent.
-  const RX_WERT  = /^[+\-−–]?\s*[$€£]?\s*[+\-−–]?\d[\d.,\s\u00a0']*\s*(%|USD|EUR|GBP|CHF|\$|€|£)?$/;
+  // 0.5.1: zusaetzlich Waehrungswort VORN („USD 1,234.50“, „USD -12.50“) und Buchhalter-
+  // Klammern („(12.50)“, „(1.234,50 $)“) — Tradovates Kopfzeile „Balance · Realized P&L ·
+  // Unrealized P&L“ schreibt je nach Einstellung so. Das Vorzeichen bleibt im Text; der
+  // Puls liest es (tv_geld_lesen: U+2212, Gedankenstrich, Klammer-Minus).
+  const RX_WERT  = /^\(?\s*[+\-−–]?\s*(?:[$€£]|USD|EUR|GBP|CHF)?\s*[+\-−–]?\d[\d.,\s\u00a0']*\s*(?:%|USD|EUR|GBP|CHF|\$|€|£)?\s*\)?$/;
   const RX_LABEL = /[A-Za-zÄÖÜäöüß]/;
 
   function textKurz(el) {
@@ -575,14 +583,29 @@
         const m = t.match(/^([^:\d]{2,40}):\s*(.+)$/);
         if (m && istLabel(m[1].trim()) && istWert(m[2].trim())) { setze(m[1], m[2]); continue; }
         if (!istLabel(t)) continue;
+        // 0.5.1 (Vollumstieg „Ohne Hedge“ — Rundgang und tvclose lesen Today's P&L hieraus):
+        // Tradovates Kopfzeile im Reiter „Positionen“ stellt Label und Wert oft als
+        // getrennte Divs unter EINEM Elternteil — mit einem Info-Icon oder Trenner
+        // dazwischen. Deshalb nicht nur die direkten Nachbarn, sondern ALLE Geschwister
+        // des Labels (naechster zuerst, dann die uebrigen), danach die Geschwister des
+        // Elternteils. Erster Treffer, der wie ein Wert aussieht, gewinnt; ein Geschwister
+        // derselben Ebene, das selbst wie ein Label aussieht, beendet die Suche (sonst
+        // naehme „Balance“ den Wert von „Equity“ daneben).
         const p = el.parentElement;
-        const kand = [el.nextElementSibling, el.previousElementSibling,
-                      p && p.nextElementSibling, p && p.previousElementSibling];
+        const gp = p && p.parentElement;
+        const kand = [el.nextElementSibling, el.previousElementSibling];
+        if (p) for (const g of p.children) if (g !== el && kand.indexOf(g) < 0) kand.push(g);
+        if (p) kand.push(p.nextElementSibling, p.previousElementSibling);
+        if (gp && p) for (const g of gp.children) if (g !== p && kand.indexOf(g) < 0) kand.push(g);
+        let gefunden = false;
         for (const k of kand) {
           if (!k || k === el) continue;
           const v = textKurz(k);
-          if (istWert(v)) { setze(t, v); break; }
+          if (!v || v.length > 40) continue;
+          if (istWert(v)) { setze(t, v); gefunden = true; break; }
+          if (istLabel(v) && k.parentElement === p) break;
         }
+        if (gefunden) continue;
       }
     }
 

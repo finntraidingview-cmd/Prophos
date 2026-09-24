@@ -886,6 +886,16 @@
   #dashboard-view .adm-vl-chip.is-on{color:var(--ink);font-weight:600;background:var(--violet-tint)}
   #dashboard-view .adm-vl-chip.is-off{opacity:.45}
   #dashboard-view .adm-sub{font-size:11.5px;color:var(--sub-2);font-weight:400}
+  /* Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes Einzelne"):
+     ist das aktive Kapitel hedge-frei, trägt die Admin-View die Klasse adm-ohne-hedge — dann
+     verschwinden alle Hedge-Spalten/-Fragmente (adm-hedge) und die V2-Kacheln (adm-v2:
+     Master-P&L, Trades · Blows) erscheinen. Umgeschaltet wird zentral in admHedgeModus(). */
+  #dashboard-view .adm-ohne-hedge .adm-hedge{display:none !important}
+  #dashboard-view .adm-v2{display:none}
+  #dashboard-view .adm-ohne-hedge .adm-v2{display:block}
+  #dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(6,1fr)}
+  @media (max-width:1200px){#dashboard-view .adm-ohne-hedge .kpis.adm-kpis-v2{grid-template-columns:repeat(3,1fr)}}
+  #dashboard-view .adm-row-name small{display:block;font-weight:400;color:var(--sub);font-size:11px;margin-top:1px;overflow:hidden;text-overflow:ellipsis}
   #dashboard-view .adm-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   #dashboard-view .adm-scroll{max-height:440px;overflow:auto}
   #dashboard-view .adm-empty{padding:26px 4px;text-align:center;color:var(--sub);font-size:13px}
@@ -1180,6 +1190,20 @@
   /* aktiv = weiße Pille des .seg PLUS Farbakzent — sonst sah man nicht, was gedrückt ist */
   #tradePlanModal .tp-v2-instr button.active{color:var(--violet)}
   #tradePlanModal .tp-v2-instr button.active small{color:var(--violet);opacity:.85}
+  /* Handy (24.09.2026, Vollumstieg auf V2): die 760-px-Regel oben trägt !important und schlug am Handy die
+     Sheet-Breite — das Popup lief seitlich aus dem Bild. Auf ≤ 820 px volle Sheet-Breite, Sheet-Polster,
+     Instrument-Seg und Kontrakte untereinander (eine Spalte), nichts scrollt quer. */
+  @media (max-width:820px){
+    #tradePlanModal:has(.tp-v2) .modal{
+      max-width:100% !important;width:100% !important;
+      padding:8px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+    }
+    #tradePlanModal .tp-v2{grid-template-columns:1fr !important;gap:12px !important}
+    #tradePlanModal .tp-v2 > .field{grid-column:1 / -1 !important;min-width:0}
+    #tradePlanModal .tp-v2 .input,#tradePlanModal .tp-v2 select.input{width:100%;min-width:0;box-sizing:border-box}
+    #tradePlanModal .tp-v2 .seg{display:flex;width:100%}
+    #tradePlanModal .tp-v2 .seg button{flex:1;min-width:0;padding:9px 8px}
+  }
   #tradePlanModal .tp-multi-display{margin-top:10px}
   #tradePlanModal .tp-slave-out{padding:14px 18px}
   #tradePlanModal .tp-mult-out{padding:12px 18px}
@@ -1289,6 +1313,16 @@
   #adm-pane-kapitel .kap-karte .kpi-value{font-size:18px}
   #adm-pane-kapitel .kap-karte .kpi-delta{font-size:11px}
   @media (max-width:1200px){#adm-pane-kapitel .kap-karte .kpis{grid-template-columns:repeat(2,1fr)}}
+  /* NQ vs MNQ + Personen-Vergleich je Kapitel (24.09.2026): ein Zweifarb-Balken für die Symbolwurzel,
+     darunter Balkenzeilen je Person (adm-row wie in der Übersicht, Netto = Payouts − Kauf). */
+  #adm-pane-kapitel .kap-sym{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12px}
+  #adm-pane-kapitel .kap-sym .lbl{font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+  #adm-pane-kapitel .kap-sym .lbl small{color:var(--sub);font-weight:400;margin-left:3px}
+  #adm-pane-kapitel .kap-sym-bar{flex:1;height:10px;border-radius:999px;background:var(--surface-tint);overflow:hidden;display:flex}
+  #adm-pane-kapitel .kap-sym-bar i{display:block;height:100%;transition:width .5s var(--ease)}
+  #adm-pane-kapitel .kap-personen{margin-top:10px;border-top:1px solid var(--border-soft)}
+  #adm-pane-kapitel .kap-personen-titel{font-size:11.5px;color:var(--sub);font-weight:600;margin:10px 0 2px}
+  #adm-pane-kapitel .kap-personen .adm-row{padding:7px 0;grid-template-columns:minmax(170px,2fr) minmax(50px,1fr) auto 36px}
   #adm-pane-kapitel .kap-edit-zeile{display:grid;grid-template-columns:auto minmax(120px,1fr) 140px 140px minmax(160px,1.6fr);gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-soft)}
   #adm-pane-kapitel .kap-edit-zeile:last-child{border-bottom:none}
   #adm-pane-kapitel .kap-edit-zeile .input{width:100%;min-width:0;padding:6px 9px;font-size:12.5px;height:auto}
@@ -4301,23 +4335,21 @@
 
     <div class="sb-section">Trading</div>
     <nav class="sb-nav">
-      <!-- Overview: aus der Navigation ausgeblendet (Finn wollte kein Design-Feature dort,
-           16.07.2026) — View + Code bleiben intakt, per URL-Hash (#overview) erreichbar. -->
-      <button class="sb-link" data-view="overview" style="display:none">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
-        Overview
+      <!-- Reihenfolge seit Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch,
+           jedes Einzelne"): zuerst, was im V2-Alltag zählt (Trades, Accounts, Finanzen, Echo, Orbit,
+           Markt, News), die Hedge-Werkzeuge stehen unten als eigene Gruppe. Nur Markup umsortiert,
+           IDs/Badges/Views unverändert. -->
+      <button class="sb-link" data-view="trades">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
+        Trades
       </button>
       <button class="sb-link active" data-view="accounts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
       </button>
-      <button class="sb-link" data-view="topstep">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-        Topstep Mirror
-      </button>
-      <button class="sb-link" data-view="calc">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="13" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="13" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="13" y1="18" x2="16" y2="18"/></svg>
-        Lot Rechner
+      <button class="sb-link" data-view="payouts">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Finanzen
       </button>
       <!-- MT5-Copier: eigener Hedge-Copier statt Duplikium (Etappe 3, 15.08.2026).
            Separater Bereich mit eigener Logik — die Duplikium-Wege bleiben
@@ -4342,9 +4374,23 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-7 4 5"/><path d="M3 21h18"/></svg>
         Markt
       </button>
-      <button class="sb-link" data-view="trades">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
-        Trades
+      <button class="sb-link" data-view="news">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
+        News <span class="sb-badge" id="sb-badge-news" hidden>0</span>
+      </button>
+      <button class="sb-link" data-view="notes">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+        Notizzettel
+      </button>
+      <button class="sb-link" data-view="kasse">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
+        Admin
+      </button>
+      <!-- Overview: aus der Navigation ausgeblendet (Finn wollte kein Design-Feature dort,
+           16.07.2026) — View + Code bleiben intakt, per URL-Hash (#overview) erreichbar. -->
+      <button class="sb-link" data-view="overview" style="display:none">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Overview
       </button>
       <!-- Live Trades / Risk / AI Advisor / Analytics / Journal: aus der
            Navigation ausgeblendet (Finn nutzt sie nie, 14.07.2026; Live Trades
@@ -4364,10 +4410,6 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-.5 2.5-1.5 3.5L13 11v3"/><circle cx="12" cy="18" r="1"/><path d="M9 22h6"/></svg>
         AI Advisor
       </button>
-      <button class="sb-link" data-view="payouts">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-        Finanzen
-      </button>
       <button class="sb-link" data-view="analytics" style="display:none">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 21H4.6c-.6 0-1.1-.2-1.4-.6s-.6-.9-.6-1.4V3"/><path d="M7 14l4-4 4 4 6-6"/></svg>
         Analytics
@@ -4376,23 +4418,21 @@
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
         Journal
       </button>
+      <!-- Hedge-Ära: Topstep Mirror (Spiegelung TopstepX ↔ MT5), Lot Rechner (Hatch-Multiplier Master ↔ Slave,
+           Duplikium-Push) und Topstep Manager gehören zum Gegenhedge — bleiben erreichbar, nur unten. -->
+      <div class="sb-section" style="padding-top:12px">Hedge-Ära</div>
+      <button class="sb-link" data-view="topstep">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Topstep Mirror
+      </button>
+      <button class="sb-link" data-view="calc">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="13" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="13" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/><line x1="13" y1="18" x2="16" y2="18"/></svg>
+        Lot Rechner
+      </button>
       <button class="sb-link" data-view="managed">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Topstep Manager <span class="sb-badge" id="sb-badge-managed" hidden>0</span>
       </button>
-      <button class="sb-link" data-view="notes">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-        Notizzettel
-      </button>
-      <button class="sb-link" data-view="news">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
-        News <span class="sb-badge" id="sb-badge-news" hidden>0</span>
-      </button>
-      <button class="sb-link" data-view="kasse">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="4" width="3" height="14"/></svg>
-        Admin
-      </button>
-
       <div class="sb-divider"></div>
       <div class="sb-section" style="padding-top:0">Account</div>
       <button class="sb-link" data-view="settings">
@@ -5210,7 +5250,7 @@
                laufenden Plan einen fertigen Orbit-Plan an; eigene Verdrahtung (kein Sammel-Handler). -->
           <!-- Winning-Day-Farmer (22.09.2026, Finn: „nie wieder Winning Days manuell fahren") — Tagesplan über alle IDs -->
           <button class="btn btn-ghost" id="wdBtn" title="Winning-Day-Farmer: Tagesplan über alle IDs (Reihenfolge, Zeiten, Richtung würfeln, bearbeiten, Automatik)">Winning Days</button>
-          <button class="btn btn-ghost" id="tpVorplanenBtn" title="Für jedes aktive Futures-Konto ohne laufenden Plan einen Orbit-Plan anlegen: Risiko = Max-Drawdown, Slave = Gesamtkosten, Duplikum-Slave, TP aus Spanne">⚡ Futures vorplanen</button>
+          <button class="btn btn-ghost" id="tpVorplanenBtn" title="Für jedes aktive Futures-Konto ohne laufenden Plan einen Orbit-V2-Plan anlegen (ohne Hedge): MNQ/NQ + Kontrakte, TP aus der Spanne, SL optional, Richtung nach Kompass, Startzeit">⚡ Futures vorplanen</button>
           <button class="btn btn-primary" id="addTradePlanBtn" onclick="window.openTradePlanModal && window.openTradePlanModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Trade planen
@@ -5348,7 +5388,23 @@
           </button>
         </div>
         <div class="modal-body">
-          <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5">
+          <!-- Weg (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes Einzelne"): Standard ist Orbit V2 ohne
+               Hedge — kein Slave, kein Multiplier, kein Duplikum. Der alte Orbit-Weg (Duplikum-Slave, Gesamtkosten,
+               Staffel) bleibt als zweiter Knopf, solange Hedge-Konten noch laufen; sichtbar wird davon nur, was der
+               gewählte Weg braucht (tpVorplanWegAnwenden). -->
+          <div class="field" style="margin-bottom:10px">
+            <label>Weg</label>
+            <div class="seg" id="tp-vp-weg">
+              <button type="button" data-vp-weg="tvv2" class="active">Orbit V2 <span style="opacity:.6;font-size:11px">ohne Hedge</span></button>
+              <button type="button" data-vp-weg="tvplus">Orbit <span style="opacity:.6;font-size:11px">Duplikum</span></button>
+            </div>
+          </div>
+          <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5" id="tp-vp-intro-v2">
+            Je Konto ein <b>Orbit-V2-Plan</b> — ohne Hedge: Puls platziert die Order in TradingView, nichts wird kopiert.
+            <b>Challenge/Phase:</b> TP aus der Challenge-Spanne. <b>Funded/Live:</b> TP = Gewinntag der Firma + Spread/Gebühren.
+            TP je Konto zufällig aus der Spanne, Richtung je Konto nach Kompass gewürfelt (oder fest), Startzeit optional.
+          </p>
+          <p style="font-size:12.5px;color:var(--sub);margin:0 0 12px;line-height:1.5;display:none" id="tp-vp-intro-alt">
             Je Konto: Risiko Master = Max-Drawdown · Slave = Duplikum-Slave · Weg Orbit · Symbol aus Instrument.
             <b>Challenge/Phase:</b> TP aus der Challenge-Spanne, Risiko Slave = Gesamtkosten.
             <b>Funded/Live:</b> TP = Gewinntag der Firma + Spread/Gebühren, Risiko Slave nach Staffel
@@ -5364,20 +5420,32 @@
             </div>
             <div class="field"><label>Kontrakte</label><input type="number" class="input mono" id="tp-vp-kt" min="1" step="1" value="1"></div>
             <div class="field" style="grid-column:1 / -1">
-              <label>Richtung <span style="color:var(--sub);font-weight:400">(optional — leer = im Order-Popup wählen)</span></label>
+              <label>Richtung <span style="color:var(--sub);font-weight:400" id="tp-vp-dir-hint">(Kompass = je Konto gewürfelt wie im Plan-Popup · leer = im Order-Popup wählen)</span></label>
               <div class="seg" id="tp-vp-dir">
-                <button type="button" data-vp-dir="" class="active">—</button>
+                <button type="button" data-vp-dir="kompass" class="active">Kompass</button>
+                <button type="button" data-vp-dir="">—</button>
                 <button type="button" data-vp-dir="buy">BUY</button>
                 <button type="button" data-vp-dir="sell">SELL</button>
               </div>
+              <div class="mono" id="tp-vp-kompass" style="font-size:11.5px;color:var(--sub);margin-top:4px"></div>
             </div>
+            <!-- Nur Orbit V2: SL optional (Order-Popup-Regel: SL nur zusammen mit TP), Startzeit wie im Order-Popup
+                 (start_um, der PC-Tab feuert zur Zeit; Datum = heute bzw. morgen, wenn die Zeit schon vorbei ist) -->
+            <div class="field" data-vp-nur-v2><label>Stop-Loss ($) <span style="color:var(--sub);font-weight:400">optional</span></label>
+              <input type="number" class="input mono" id="tp-vp-sl" min="0" step="10" placeholder="leer = ohne SL"></div>
+            <div class="field" data-vp-nur-v2><label>Startzeit <span style="color:var(--sub);font-weight:400">optional</span></label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="time" class="input mono" id="tp-vp-start-um" style="flex:0 0 130px">
+                <button type="button" class="btn btn-ghost" id="tp-vp-start-um-x" style="padding:6px 10px;font-size:12px">✕</button>
+                <span id="tp-vp-start-um-hint" style="font-size:12px;color:var(--sub)"></span>
+              </div></div>
           </div>
           <!-- Regeln (Finn 22.09.2026: „Tradeify Winning Day = 250 → 270-290 wegen Spread/Gebühren; Apex 53+;
                Slave nach Balance-Puffer: >8000 → 90 €, 6000-8000 → 80, 4000-6000 → 70, 2000-4000 → 60, <2000 → 50") -->
           <div id="tp-vp-regeln" style="margin-top:10px;display:grid;gap:6px;padding-top:8px;border-top:1px solid var(--line)">
             <div class="vp-zeile"><b>Challenge · TP ($)</b>
               <input type="number" class="input mono vp-in" id="tp-vp-ch-von" min="0" step="10" value="370"> – <input type="number" class="input mono vp-in" id="tp-vp-ch-bis" min="0" step="10" value="400">
-              <span style="color:var(--sub)">· Slave = Gesamtkosten</span>
+              <span style="color:var(--sub)" data-vp-nur-alt>· Slave = Gesamtkosten</span>
             </div>
             <div class="vp-zeile"><b>Funded · TP ($)</b>
               <span>Tradeify</span> <input type="number" class="input mono vp-in" data-vp-fu="tradeify-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="tradeify-bis" min="0" step="5" value="290">
@@ -5385,7 +5453,7 @@
               <span style="margin-left:6px">Topstep</span> <input type="number" class="input mono vp-in" data-vp-fu="topstep-von" min="0" step="5" value="220"> – <input type="number" class="input mono vp-in" data-vp-fu="topstep-bis" min="0" step="5" value="240">
               <span style="margin-left:6px">andere</span> <input type="number" class="input mono vp-in" data-vp-fu="sonst-von" min="0" step="5" value="270"> – <input type="number" class="input mono vp-in" data-vp-fu="sonst-bis" min="0" step="5" value="290">
             </div>
-            <div class="vp-zeile"><b>Funded · Slave (€)</b>
+            <div class="vp-zeile" data-vp-nur-alt><b>Funded · Slave (€)</b>
               <span class="mono" id="tp-vp-staffel-info" style="color:var(--sub)"></span>
               <span style="color:var(--sub)">· ändern: Admin → Winning Days → Hedge-Tabelle</span>
             </div>
@@ -6452,7 +6520,7 @@
           <div class="kpi-delta delta-neutral" id="fin-kpi-payouts-sub">YTD eingegangen</div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Live P/L</div>
+          <div class="kpi-label" id="fin-kpi-livepl-label">Live P/L</div>
           <div class="kpi-value tnum" id="fin-kpi-livepl">—</div>
           <div class="kpi-delta delta-neutral" id="fin-kpi-livepl-sub">YTD Live-Accounts</div>
         </div>
@@ -7427,7 +7495,7 @@
               <button class="btn btn-ghost" id="adm-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
             </div>
 
-            <div class="kpis">
+            <div class="kpis adm-kpis-v2">
               <div class="kpi">
                 <div class="kpi-label">Geparktes Kapital</div>
                 <div class="kpi-value" id="adm-k-parked">–</div>
@@ -7447,6 +7515,19 @@
                 <div class="kpi-label">Größtes Klumpenrisiko</div>
                 <div class="kpi-value" id="adm-k-top">–</div>
                 <div class="kpi-bar"><div class="kpi-bar-fill" id="adm-k-top-bar" style="width:0%"></div></div>
+              </div>
+              <!-- Kapitel „Ohne Hedge" (24.09.2026): statt Hedge zählt hier der Master-P&L der Prop-Konten
+                   (master_pl_k je Zeile, USD roh) und Trades · Blows (trades_k / blown_k). Nur sichtbar,
+                   wenn das aktive Kapitel hedge-frei ist (Klasse adm-v2 ↔ adm-ohne-hedge). -->
+              <div class="kpi adm-v2">
+                <div class="kpi-label">Master-P&amp;L</div>
+                <div class="kpi-value" id="adm-k-mpl">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-mpl-sub">USD roh, nur Master</div>
+              </div>
+              <div class="kpi adm-v2">
+                <div class="kpi-label">Trades · Blows</div>
+                <div class="kpi-value" id="adm-k-trades">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-k-trades-sub">–</div>
               </div>
             </div>
 
@@ -7480,7 +7561,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Verlauf nach Person</div>
-                  <div class="panel-sub">Kauf + Hedge − Payouts, kumuliert · gleiche Filter wie oben · Kurve anklicken klappt die Person auf</div>
+                  <div class="panel-sub">Kauf <span class="adm-hedge">+ Hedge </span>− Payouts, kumuliert · gleiche Filter wie oben · Kurve anklicken klappt die Person auf</div>
                 </div>
               </div>
               <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-person-chart"></canvas></div>
@@ -7491,7 +7572,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Kosten je Firma</div>
-                  <div class="panel-sub">Kaufpreis + Hedge-Verluste − erhaltene Payouts = geparkt</div>
+                  <div class="panel-sub">Kaufpreis <span class="adm-hedge">+ Hedge-Verluste </span>− erhaltene Payouts = geparkt</div>
                 </div>
               </div>
               <div class="table-wrap">
@@ -7500,7 +7581,7 @@
                     <th>Firma</th>
                     <th class="adm-num">Accounts</th>
                     <th class="adm-num">Kaufkosten</th>
-                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num adm-hedge">Hedge</th>
                     <th class="adm-num">Payouts</th>
                     <th class="adm-num">Geparkt</th>
                   </tr></thead>
@@ -7561,7 +7642,7 @@
                     <th>Externe ID</th>
                     <th>Person</th>
                     <th class="adm-num">Kauf</th>
-                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num adm-hedge">Hedge</th>
                     <th class="adm-num">Payouts</th>
                     <th class="adm-num">Geparkt</th>
                   </tr></thead>
@@ -7574,7 +7655,7 @@
             <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
               <b id="adm-mode-note">–</b><br>
               <span id="adm-excluded-note"></span>
-              Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor.
+              <span class="adm-hedge">Live-Hedge-Konten (Fusion) sind keine Prop-Firma und bleiben überall außen vor. </span>
               Firmennamen werden zusammengefasst — z.&nbsp;B. „apex" → Apex Trader, sonst wäre das Klumpenrisiko zu klein.
             </p>
           </div>
@@ -7593,7 +7674,12 @@
           <div class="panel" style="margin:0 0 12px">
             <div class="wd-kopf-zeile">
               <div class="panel-title">Winning-Day-Farmer <span class="mono" id="wd-uhr" style="font-weight:400;font-size:11.5px;color:var(--sub);margin-left:8px"></span></div>
-              <span class="wd-status-chip" id="wd-auto-chip">—</span>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <!-- Kapitel „Ohne Hedge" (24.09.2026): der Farmer plant dann über Orbit V2 — kein Slave, kein
+                     Duplikum. Chip nur im hedge-freien Kapitel (admHedgeModus), Texte darunter setzt die Farmer-Logik. -->
+                <span class="chip chip-good" id="wd-weg-chip" hidden title="Kapitel ohne Hedge: Pläne laufen über Orbit V2 — Puls platziert, kein Slave, kein Duplikum">Orbit V2 · ohne Hedge</span>
+                <span class="wd-status-chip" id="wd-auto-chip">—</span>
+              </div>
             </div>
             <div class="wd-status-text" id="wd-status-text"></div>
             <div class="vp-zeile" style="margin-top:10px">
@@ -7642,7 +7728,9 @@
                 <div id="wd-firmen"></div>
                 <div class="kf" style="margin-top:8px">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
               </div>
-              <div class="wd-set-card">
+              <!-- Staffel = Slave-Betrag nach Balance-Überschuss — ohne Slave sinnlos, darum im
+                   hedge-freien Kapitel ausgeblendet (24.09.2026, admHedgeModus). Daten bleiben unangetastet. -->
+              <div class="wd-set-card" id="wd-staffel-card">
                 <h4>Hedge-Staffel · <span id="wd-staffel-titel">Standard</span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
                 <!-- Eine Tabelle je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben — auf Tradeify drücken, dann
                      die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
@@ -7879,7 +7967,7 @@
         <div id="adm-pane-fin" hidden>
           <div id="adm-fin-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-fin-body" hidden>
-            <div class="kpis">
+            <div class="kpis adm-kpis-v2">
               <div class="kpi">
                 <div class="kpi-label">Gesamt-Saldo</div>
                 <div class="kpi-value" id="adm-f-saldo">–</div>
@@ -7899,6 +7987,17 @@
                 <div class="kpi-label">Payouts unterwegs</div>
                 <div class="kpi-value" id="adm-f-pend">–</div>
                 <div class="kpi-delta delta-neutral" id="adm-f-pend-sub">angefragt, noch nicht da</div>
+              </div>
+              <!-- Kapitel „Ohne Hedge" (24.09.2026): Master-P&L + Trades · Blows über alle Konten, nur im hedge-freien Kapitel -->
+              <div class="kpi adm-v2">
+                <div class="kpi-label">Master-P&amp;L</div>
+                <div class="kpi-value" id="adm-f-mpl">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-mpl-sub">USD roh, nur Master</div>
+              </div>
+              <div class="kpi adm-v2">
+                <div class="kpi-label">Trades · Blows</div>
+                <div class="kpi-value" id="adm-f-trades">–</div>
+                <div class="kpi-delta delta-neutral" id="adm-f-trades-sub">–</div>
               </div>
             </div>
 
@@ -8016,7 +8115,7 @@
               <div class="panel-head">
                 <div>
                   <div class="panel-title">Saldo nach Person</div>
-                  <div class="panel-sub">Payouts − Kaufkosten − Hedge · zum Aufklappen auf eine Person klicken</div>
+                  <div class="panel-sub">Payouts − Kaufkosten<span class="adm-hedge"> − Hedge</span> · zum Aufklappen auf eine Person klicken</div>
                 </div>
               </div>
               <div class="adm-dist" id="adm-fin-person-dist"></div>
@@ -8039,7 +8138,7 @@
                     <th>Account</th>
                     <th>Firma</th>
                     <th class="adm-num">Kauf</th>
-                    <th class="adm-num">Hedge</th>
+                    <th class="adm-num adm-hedge">Hedge</th>
                     <th class="adm-num">Payouts</th>
                     <th class="adm-num">Saldo</th>
                   </tr></thead>
@@ -8051,7 +8150,7 @@
             <p style="font-size:11.5px;color:var(--sub);margin:14px 2px 0;line-height:1.6">
               Alle Accounts zählen — aktive wie archivierte, jeder mit seinen eigenen Zahlen
               (keine Vorgänger-Ketten, sonst stünden sie doppelt drin). Saldo = erhaltene Payouts
-              − Kaufkosten − Hedge-Verluste. Das ist die Geldfluss-Sicht — „Geparkt" in der
+              − Kaufkosten<span class="adm-hedge"> − Hedge-Verluste</span>. Das ist die Geldfluss-Sicht — „Geparkt" in der
               Übersicht beantwortet die andere Frage nach gebundenem Kapital.
             </p>
           </div>
@@ -8535,8 +8634,9 @@
           <div class="field" style="flex:0 0 120px"><label>Abstand max (s)</label><input type="number" class="input mono" id="acMax" min="10" step="5" value="150"></div>
           <div class="field" style="flex:0 0 auto"><label>Wege</label>
             <div style="display:flex;gap:14px;align-items:center;height:38px;font-size:13px">
-              <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="acRouteMt5" checked> Echo</label>
-              <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="acRouteTv"> Orbit</label>
+              <!-- 24.09.2026: die V2-Wege hängen an denselben Haken (Echo V2 → master-close, Orbit V2 → tv-close) -->
+              <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="acRouteMt5" checked> Echo / Echo V2</label>
+              <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="acRouteTv"> Orbit / Orbit V2</label>
             </div></div>
         </div>
         <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -9766,7 +9866,52 @@
     let admData = null
     const admEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:0, maximumFractionDigits:0 })
 
+    /* ── Kapitel „Ohne Hedge" im Admin (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes
+     * Einzelne"). Ist das aktive Kapitel hedge-frei (Tabelle kapitel, hedge=false), trägt die
+     * Admin-View die Klasse adm-ohne-hedge: Hedge-Spalten/-Fragmente (adm-hedge) weg, V2-Kacheln
+     * (adm-v2: Master-P&L in USD, Trades · Blows) da. Bei „Alle" und Hedge-Ära bleibt alles wie heute.
+     * Die Zahlen liefert /admin/overview je Konto-Zeile als master_pl_k / trades_k / blown_k —
+     * fehlen die Felder noch (altes Backend), zeigen die Kacheln „—" statt einer falschen 0. */
+    const admOhneHedge = () => !!(window._kapitel && window._kapitel.aktiv !== 'alle' && window._kapitel.obj(window._kapitel.aktiv)?.hedge === false)
+    function admHedgeModus(){
+      const an = admOhneHedge()
+      const v = document.querySelector('#dashboard-view section.view[data-view="kasse"]')
+      if(v) v.classList.toggle('adm-ohne-hedge', an)
+      const st = $('wd-staffel-card'); if(st) st.hidden = an        // Hedge-Staffel = Slave-Betrag, ohne Slave sinnlos
+      const wc = $('wd-weg-chip');     if(wc) wc.hidden = !an       // „Orbit V2 · ohne Hedge" im Farmer-Kopf
+    }
+    const admUsd = new Intl.NumberFormat('de-DE', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
+    const admUsdSign = v => (v >= 0 ? '+' : '−') + admUsd.format(Math.abs(v))
+    function admV2Summe(rows){
+      let mpl = 0, trades = 0, blown = 0, da = false
+      for(const r of rows){
+        if(r.master_pl_k != null || r.trades_k != null || r.blown_k != null) da = true
+        mpl += Number(r.master_pl_k) || 0; trades += Number(r.trades_k) || 0; blown += Number(r.blown_k) || 0
+      }
+      return { mpl, trades, blown, da }
+    }
+    function admV2Kacheln(rows, idMpl, idTrades){
+      const s = admV2Summe(rows)
+      const m = $(idMpl), t = $(idTrades); if(!m || !t) return
+      m.textContent = s.da ? admUsdSign(s.mpl) : '—'
+      m.style.color = s.da ? (s.mpl < 0 ? '#b91c1c' : '#15803d') : ''
+      const ms = $(idMpl + '-sub'); if(ms) ms.textContent = s.da ? 'USD roh, nur Master' : 'kommt mit dem nächsten Backend'
+      t.textContent = s.da ? `${s.trades} · ${s.blown}` : '—'
+      const ts = $(idTrades + '-sub'); if(ts) ts.textContent = s.da ? (s.trades ? `Blow-Quote ${Math.round(s.blown / s.trades * 100)} %` : 'noch kein Trade') : 'Trades · Blows'
+    }
+    // Unterzeile „Master-P&L" für die Personen-Balken (nur hedge-frei): Summe der gefilterten Zeilen,
+    // sonst der Personen-Wert des Servers (people[].master_pl), sonst „—".
+    function admMplUnterzeile(g){
+      if(!admOhneHedge()) return ''
+      let v = null
+      if(g.mplDa) v = g.mpl
+      else { const p = (admData?.people || []).find(x => String(x.user_id) === String(g.key)); if(p && p.master_pl != null) v = Number(p.master_pl) || 0 }
+      return `<small>Master-P&L ${v == null ? '—' : admUsdSign(v)}</small>`
+    }
+
     window._admLaden = () => admLoad()   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026)
+    // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
+    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender() }
     async function admLoad(){
       const msg = $('adm-msg'), body = $('adm-body')
       if(!msg) return
@@ -9900,9 +10045,10 @@
       const m = new Map()
       for(const r of rows){
         const k = r[key] || '—'
-        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0 }
+        const g = m.get(k) || { key:k, label: r[labelKey] || k, accounts:0, buy:0, hedge:0, payouts:0, parked:0, net:0, mpl:0, mplDa:false }
         const v = admVals(r)
         g.accounts++; g.buy += v.buy; g.hedge += v.hedge; g.payouts += v.payouts
+        if(r.master_pl_k != null){ g.mpl += Number(r.master_pl_k) || 0; g.mplDa = true }   // Kapitel ohne Hedge (24.09.2026)
         g.parked += Math.max(0, v.parked)
         g.net    += v.parked
         m.set(k, g)
@@ -9951,8 +10097,11 @@
       // Nach user_id sortiert (stabil), Wunschplatz aus einem Hash der ID — eine
       // neue Person verschiebt die Farben der anderen nur bei einer Kollision.
       admPColors = new Map()
-      const uids = [...new Set([...(admData.people || []).map(p => String(p.user_id)),
-                                ...(admData.payouts_received || []).map(t => String(t.user_id || t.person || '—'))])].sort()
+      // Kapitel-Tab (24.09.2026): Personen aus /admin/kapitel bekommen dieselbe feste Farbe — auch wenn die
+      // Übersicht noch nicht geladen ist (admData null). Hash je ID → gleiche Farbe in allen Tabs.
+      const uids = [...new Set([...(admData?.people || []).map(p => String(p.user_id)),
+                                ...(admData?.payouts_received || []).map(t => String(t.user_id || t.person || '—')),
+                                ...(admKapData?.kapitel || []).flatMap(k => (k.personen || []).map(q => String(q.user_id)))])].sort()
       const frei = ADM_P_COLORS.map(() => true)
       for(const uid of uids){
         let h = 0; for(const ch of uid) h = (h * 31 + ch.charCodeAt(0)) >>> 0
@@ -10126,6 +10275,7 @@
     function admKapKarten(liste){
       const wrap = $('adm-kap-karten'); if(!wrap) return
       wrap.innerHTML = ''
+      admPersonColorsBauen()   // Punkte der Personen-Zeilen — auch ohne geladene Übersicht (24.09.2026)
       const aktiv = window._kapitel ? String(window._kapitel.aktiv) : ''
       const eur = n => admEur.format(admKapNum(n))
       const sign = n => admVlSign(admKapNum(n))
@@ -10144,6 +10294,10 @@
         else if(leer){ hVal = '—'; hSub = '—'; hStyle = '' }
         else { hVal = hedge < 0 ? '−' + eur(-hedge) : eur(hedge); hSub = hedge < 0 ? 'Hedge im Gewinn' : 'Verluste auf Live-Slaves'; hStyle = hedge ? `color:${hedge > 0 ? '#b91c1c' : '#15803d'}` : '' }
         const mpl = admKapNum(k.master_pl)
+        // NQ vs MNQ (24.09.2026): Anzahl Trades je Symbolwurzel aus /admin/kapitel (symbole:{NQ,MNQ}) — tolerant,
+        // das Feld kommt erst mit dem neuen Backend. Personen (personen:[…]) ebenso.
+        const sym = (k.symbole && typeof k.symbole === 'object') ? { nq: admKapNum(k.symbole.NQ), mnq: admKapNum(k.symbole.MNQ) } : null
+        const personen = Array.isArray(k.personen) ? k.personen.map(q => ({ ...q, netto: admKapNum(q.payouts) - admKapNum(q.kauf) })).sort((a, b) => b.netto - a.netto) : null
         const card = document.createElement('div')
         card.className = 'kap-karte' + (aktiv === String(k.id) ? ' aktiv' : '')
         card.style.setProperty('--k-farbe', farbe)
@@ -10161,14 +10315,64 @@
           kpi('Kauf', leer ? '—' : eur(k.kauf), leer ? '—' : (k.erster_tag ? `${admVlDatum(k.erster_tag)} – ${admVlDatum(k.letzter_tag)}` : 'Kaufpreise der Konten')) +
           kpi('Hedge-Kosten', hVal, hSub, hStyle) +
           kpi('Konten', leer ? '—' : `${admKapNum(k.konten_aktiv)} / ${admKapNum(k.konten)}`, leer ? '—' : 'aktiv / gesamt') +
-          kpi('Trades', leer ? '—' : String(trades), leer ? '—' : `${ohne} ohne Hedge · Blow-Quote ${blowQ}`) +
+          // „n ohne Hedge" nur, wenn es in einem Hedge-Kapitel überhaupt V2-Trades gibt (seit der Trigger-Regel normal 0)
+          kpi('Trades', leer ? '—' : String(trades), leer ? '—' : `${k.hedge_aktiv && ohne ? `${ohne} ohne Hedge · ` : ''}Blow-Quote ${blowQ}${sym ? ` · ${sym.nq} NQ · ${sym.mnq} MNQ` : ''}`) +
           kpi('Live-P&L', leer ? '—' : sign(k.live_pnl), 'Realmoney, gebucht', leer ? '' : `color:${col(k.live_pnl)}`) +
           kpi('Master-P&L', leer ? '—' : (mpl < 0 ? '−' : '+') + admKapUsd.format(Math.abs(mpl)), 'USD roh, Prop-Konten', leer ? '' : `color:${col(mpl)}`) +
-          '</div>'
+          '</div>' +
+          // NQ vs MNQ als Zweifarb-Balken (Kapitel-Farbe voll = NQ, blass = MNQ)
+          (sym ? (() => { const n = sym.nq + sym.mnq, a = n ? 100 * sym.nq / n : 0
+            return `<div class="kap-sym" title="Trades je Symbolwurzel im Kapitel"><span class="lbl">NQ<small>${sym.nq}</small></span>` +
+              `<div class="kap-sym-bar"><i style="width:${a.toFixed(1)}%;background:${farbe}"></i><i style="width:${(n ? 100 - a : 0).toFixed(1)}%;background:${admKapAlpha(farbe, '59')}"></i></div>` +
+              `<span class="lbl">MNQ<small>${sym.mnq}</small></span></div>` })() : '') +
+          (personen && personen.length ? '<div class="kap-personen"><div class="kap-personen-titel">Nach Person · Netto = Payouts − Kauf · klicken öffnet die Person in der Übersicht</div></div>' : '')
         card.querySelector('.kap-name').textContent = k.name || ('Kapitel ' + k.id)
         card.addEventListener('click', () => { if(window._kapitel) window._kapitel.setzen(k.id) })
+        // Personen-Vergleich (24.09.2026, Finn: „geh alles durch, jedes Einzelne"): Balkenzeilen wie „Nach
+        // Person" in der Übersicht — Breite relativ zum größten Betrag der Karte, Farbe = Vorzeichen,
+        // Punkt = feste Personenfarbe. Klick klappt die Person auf wie im Payouts-Tab: Kapitel wird aktiv,
+        // Person als Filter in der Übersicht — dort steht die Konten-Liste mit den Zahlen dieses Kapitels
+        // (/admin/kapitel liefert je Person nur Summen, keine Konten).
+        const pw = card.querySelector('.kap-personen')
+        if(pw){
+          const maxAbs = Math.max(1, ...personen.map(q => Math.abs(q.netto)))
+          for(const q of personen){
+            const uid = String(q.user_id ?? q.person ?? '—')
+            const tr = admKapNum(q.trades), bl = admKapNum(q.blown)
+            const row = document.createElement('button')
+            row.type = 'button'
+            row.className = 'adm-row adm-row-btn'
+            row.innerHTML =
+              '<div class="adm-row-name"></div>' +
+              `<div class="adm-track"><div class="adm-fill" style="width:${(100 * Math.abs(q.netto) / maxAbs).toFixed(1)}%;background:${q.netto < 0 ? 'var(--danger)' : 'var(--good)'}"></div></div>` +
+              `<div class="adm-val" style="color:${col(q.netto)}">${sign(q.netto)}</div>` +
+              `<div class="adm-pct">${admKapNum(q.konten)}×</div>`
+            const nm = row.querySelector('.adm-row-name')
+            nm.textContent = admShortName(q.person || uid)
+            nm.insertAdjacentHTML('afterbegin', admDot(uid))
+            nm.insertAdjacentHTML('beforeend', `<small>${tr} Trade${tr === 1 ? '' : 's'} · ${bl} Blow${bl === 1 ? '' : 's'} · Master ${q.master_pl == null ? '—' : admUsdSign(admKapNum(q.master_pl))}</small>`)
+            row.title = `${q.person || uid} · ${admKapNum(q.konten)} Konten · ${eur(q.payouts)} Payouts − ${eur(q.kauf)} Kauf — klicken öffnet die Person in der Übersicht`
+            row.addEventListener('click', ev => { ev.stopPropagation(); admKapPersonOeffnen(k.id, uid, admShortName(q.person || uid)) })
+            pw.appendChild(row)
+          }
+        }
         wrap.appendChild(card)
       }
+    }
+    // Person aus der Kapitel-Karte aufklappen: Kapitel aktiv (löst über das Event admLoad aus, wenn es
+    // wechselt), Person als Filter in der Übersicht, dorthin springen — gleiche Mechanik wie der Balken-Klick.
+    function admKapPersonOeffnen(kid, uid, name){
+      if(window._kapitel && String(window._kapitel.aktiv) !== String(kid)) window._kapitel.setzen(kid)
+      const sel = $('adm-person')
+      if(sel){
+        sel.value = String(uid)
+        // Person (noch) nicht im Dropdown — Übersicht nicht geladen oder ausgeblendete Person: Option anlegen,
+        // admLoad baut die Liste ohnehin neu und behält die Wahl.
+        if(sel.value !== String(uid)){ const o = document.createElement('option'); o.value = String(uid); o.textContent = name || String(uid); sel.appendChild(o); sel.value = String(uid) }
+      }
+      const tab = document.querySelector('.adm-tab[data-admtab="overview"]'); if(tab) tab.click()
+      if(admData) admRender()
+      $('adm-acc-panel')?.scrollIntoView({ behavior:'smooth', block:'nearest' })
     }
 
     // b) Monatsverlauf — gestapelte Balken je Kapitel × Art (Payouts +, Kauf −, Hedge −).
@@ -10293,7 +10497,10 @@
         const nm = row.querySelector('.adm-row-name')
         // Wenn kein Anzeigename hinterlegt ist, kommt die E-Mail — die passt nicht in die Spalte.
         nm.textContent = admShortName(g.label)
-        if(filterId === 'adm-person') nm.insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
+        if(filterId === 'adm-person'){
+          nm.insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
+          nm.insertAdjacentHTML('beforeend', admMplUnterzeile(g))   // Kapitel ohne Hedge: Master-P&L statt Hedge (24.09.2026)
+        }
         row.title = `${g.label} · ${g.accounts} Account${g.accounts === 1 ? '' : 's'}`
           + (g.net < 0 ? ` · ${admEur.format(-g.net)} im Plus (zählt nicht gegen die Summe)` : '')
           + ' — zum Aufklappen klicken'
@@ -10311,8 +10518,8 @@
     function admHedgeCell(v){
       const n = Number(v) || 0
       return n < 0
-        ? `<td class="adm-num" style="color:var(--good)">−${admEur.format(-n)}</td>`
-        : `<td class="adm-num" style="color:var(--sub)">${admEur.format(n)}</td>`
+        ? `<td class="adm-num adm-hedge" style="color:var(--good)">−${admEur.format(-n)}</td>`
+        : `<td class="adm-num adm-hedge" style="color:var(--sub)">${admEur.format(n)}</td>`
     }
 
     /* ── Payout-Rechnung je Account (17.09.2026) — EINE Stelle für den
@@ -10454,6 +10661,7 @@
 
     function admRender(){
       if(!admData) return
+      admHedgeModus()   // Kapitel ohne Hedge: Klasse + WD-Sichtbarkeit (24.09.2026)
       admWertRender()
       const rows = admFiltered()
       const sum = k => rows.reduce((a, r) => a + (Number(admVals(r)[k]) || 0), 0)
@@ -10465,7 +10673,8 @@
       const nPred = admChainMode() ? rows.reduce((a, r) => a + (Number(r.preds) || 0), 0) : 0
 
       $('adm-k-parked').textContent = admEur.format(totalParked)
-      $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf · ${admEur.format(sum('hedge'))} Hedge`
+      $('adm-k-parked-sub').textContent = `${admEur.format(sum('buy'))} Kauf` + (admOhneHedge() ? '' : ` · ${admEur.format(sum('hedge'))} Hedge`)
+      admV2Kacheln(rows, 'adm-k-mpl', 'adm-k-trades')   // Master-P&L / Trades · Blows, nur hedge-frei sichtbar
       $('adm-k-accs').textContent = rows.length
       $('adm-k-accs-sub').textContent = nArch
         ? `${rows.length - nArch} aktiv · ${nArch} archiviert`
@@ -10475,9 +10684,10 @@
       const plusNote = nPlusAccs
         ? ` ${nPlusAccs} Account${nPlusAccs === 1 ? '' : 's'} steht im Plus und zählt in den Summen mit 0 — wer sein Kapital zurückgeholt hat, verrechnet sich nicht gegen die anderen.`
         : ''
+      const hz = admOhneHedge() ? '' : ' + Hedge-Verluste'   // Kapitel ohne Hedge: kein Hedge-Wort im Text (24.09.2026)
       $('adm-mode-note').textContent = (admChainMode()
-        ? `Geparkt = Gesamtkosten je aktivem Account: Kaufpreis + Hedge-Verluste − Payouts, inklusive der abgelösten Vorgänger-Accounts (${nPred} eingerechnet).`
-        : 'Geparkt = Kaufpreis + Hedge-Verluste − Payouts, jeder Account für sich. Vorgänger werden hier NICHT in den Nachfolger gerechnet, sonst stünden sie doppelt drin.'
+        ? `Geparkt = Gesamtkosten je aktivem Account: Kaufpreis${hz} − Payouts, inklusive der abgelösten Vorgänger-Accounts (${nPred} eingerechnet).`
+        : `Geparkt = Kaufpreis${hz} − Payouts, jeder Account für sich. Vorgänger werden hier NICHT in den Nachfolger gerechnet, sonst stünden sie doppelt drin.`
         ) + plusNote
 
       const byFirm   = admGroup(rows, 'firm', 'firm')
@@ -10507,7 +10717,7 @@
         if(admChainMode()) for(const c of (r.chain_ids || [])) vlIds.add(String(c))
       }
       admVerlauf('overview', 'adm-person-chart', 'adm-person-legend',
-        admVlSerien(vlIds, { kauf:1, hedge:1, payout:-1 }), $('adm-person').value,
+        admVlSerien(vlIds, admOhneHedge() ? { kauf:1, payout:-1 } : { kauf:1, hedge:1, payout:-1 }), $('adm-person').value,
         key => { const sel = $('adm-person'); sel.value = (String(sel.value) === String(key)) ? '' : key; admRender() })
 
       // Kosten-Tabelle je Firma
@@ -10738,16 +10948,19 @@
     let finPoPerson = ''   // Payouts erhalten: aufgeklappte Person (23.09.2026)
     function admFinRender(){
       if(!admData) return
+      admHedgeModus()   // Kapitel ohne Hedge (24.09.2026)
       const m = new Map()
       for(const r of (admData.accounts || [])){
         const k = String(r.user_id)
-        const g = m.get(k) || { key:k, label:r.person, email:r.email, accs:0, buy:0, hedge:0, payouts:0 }
+        const g = m.get(k) || { key:k, label:r.person, email:r.email, accs:0, buy:0, hedge:0, payouts:0, mpl:0, mplDa:false }
         g.accs++
         g.buy += Number(r.buy) || 0
         g.hedge += Number(r.hedge) || 0
         g.payouts += Number(r.payouts) || 0
+        if(r.master_pl_k != null){ g.mpl += Number(r.master_pl_k) || 0; g.mplDa = true }
         m.set(k, g)
       }
+      admV2Kacheln(admData.accounts || [], 'adm-f-mpl', 'adm-f-trades')   // nur hedge-frei sichtbar
       const list = [...m.values()]
       for(const g of list) g.saldo = g.payouts - g.buy - g.hedge
       list.sort((a, b) => a.saldo - b.saldo)            // tiefstes Minus zuerst
@@ -10763,7 +10976,7 @@
 
       $('adm-f-saldo').textContent = fmtSaldo(totSaldo)
       $('adm-f-saldo').style.color = colSaldo(totSaldo)
-      $('adm-f-saldo-sub').textContent = `${admEur.format(totBuy)} Kauf · ${admEur.format(totHedge)} Hedge`
+      $('adm-f-saldo-sub').textContent = `${admEur.format(totBuy)} Kauf` + (admOhneHedge() ? '' : ` · ${admEur.format(totHedge)} Hedge`)
       $('adm-f-minus').textContent = totMinus ? fmtSaldo(totMinus) : '—'
       $('adm-f-minus').style.color = totMinus ? '#b91c1c' : 'var(--ink)'
       $('adm-f-minus-sub').textContent = `${minusL.length} von ${list.length} IDs`
@@ -11163,7 +11376,8 @@
           `<div class="adm-pct">${g.accs}×</div>`
         row.querySelector('.adm-row-name').textContent = admShortName(g.label)
         row.querySelector('.adm-row-name').insertAdjacentHTML('afterbegin', admDot(g.key))   // Farbe wie im Verlauf
-        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admEur.format(g.payouts)} Payouts − ${admEur.format(g.buy)} Kauf − ${admEur.format(g.hedge)} Hedge — zum Aufklappen klicken`
+        row.querySelector('.adm-row-name').insertAdjacentHTML('beforeend', admMplUnterzeile(g))   // Kapitel ohne Hedge (24.09.2026)
+        row.title = `${g.label} · ${g.accs} Account${g.accs === 1 ? '' : 's'} · ${admEur.format(g.payouts)} Payouts − ${admEur.format(g.buy)} Kauf${admOhneHedge() ? '' : ` − ${admEur.format(g.hedge)} Hedge`} — zum Aufklappen klicken`
         row.addEventListener('click', () => {
           finPerson = (String(finPerson) === String(g.key)) ? '' : g.key
           admFinRender()
@@ -11173,7 +11387,7 @@
       // Verlauf je Person (23.09.2026): alle Accounts, eigene Zahlen, Saldo-
       // Vorzeichen (Payouts +, Kauf −, Hedge −) — exakt die Balken über die Zeit.
       admVerlauf('fin', 'adm-fin-person-chart', 'adm-fin-person-legend',
-        admVlSerien(new Set((admData.accounts || []).map(r => String(r.id))), { kauf:-1, hedge:-1, payout:1 }), finPerson,
+        admVlSerien(new Set((admData.accounts || []).map(r => String(r.id))), admOhneHedge() ? { kauf:-1, payout:1 } : { kauf:-1, hedge:-1, payout:1 }), finPerson,
         key => { finPerson = (String(finPerson) === String(key)) ? '' : key; admFinRender() })
 
       // Aufklappung: alle Accounts der gewählten Person, tiefstes Minus zuerst
@@ -13028,6 +13242,7 @@
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
+        admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
         if(name === 'fin')  admFinRender()
@@ -13046,6 +13261,7 @@
         const id = ev.detail ? ev.detail.id : (window._kapitel ? window._kapitel.aktiv : null)
         const gewechselt = String(id) !== String(_admKapLetzt); _admKapLetzt = id
         admKapChipRender()
+        admHedgeModus()
         if(admKapData) admKapitelRender(admKapData)
         if(gewechselt && admData) admLoad()
       })
@@ -18239,7 +18455,20 @@
       // Der Wächter für die anderen Profile hängt am selben Schalter
       if(typeof mpStart === 'function') tog.checked ? mpStart() : mpStop()
     })
+    atToggleSichtbarkeit()
+    setInterval(atToggleSichtbarkeit, 10000)   // Duplikum-Verbindung kommt/geht ohne Karten-Render
   })
+  /* Schalter nur zeigen, wenn er etwas zu tun hat (24.09.2026, Vollumstieg auf „Ohne Hedge"): die
+   * Auto-Erkennung ist die DUPLIKUM-Erkennung (atCheck). Ohne verbundene Duplikum-Session und ohne
+   * geplante/laufende Hedge-Pläne (dup/tvplus/topstep/Alt-Bestand) steht er nur im Weg — V2 und Echo
+   * haben eigene Engines. Der Schalter selbst bleibt unverändert, nur die Sichtbarkeit. */
+  function atToggleSichtbarkeit(){
+    const box = document.getElementById('autotrack-toggle')?.closest('.at-toggle'); if(!box) return
+    const dupDa = (typeof dupState !== 'undefined') && !!dupState.token
+    let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+    const hedgeDa = (_tp || []).some(p => p && (p.status === 'open' || p.status === 'planned') && p.route !== 'mt5' && !routeIstV2(p.route))
+    box.style.display = (dupDa || hedgeDa) ? '' : 'none'
+  }
 
   // Hilfsfunktion: Prophos-Account-ID → Duplikum-Account-ID
   function atGetDupId(prophosAccountId){
@@ -23424,6 +23653,9 @@
       resultNotes: row.result_notes,
       completedAt: row.completed_at,
       kapitelId:   row.kapitel_id ?? null, // Kapitel (24.09.2026), per DB-Trigger nach Datum
+      // Herkunft des Master-P&L (24.09.2026, Vollumstieg): 'echo' | 'tv' | 'duplikum' | 'hand' — schreibt
+      // tradeCompleteSave; fehlt die Spalte noch, bleibt es null (siehe plQuelle-Fallback beim Speichern).
+      plQuelle:    (typeof row.pl_quelle === 'string' && row.pl_quelle) ? row.pl_quelle : null,
       endedAt:     row.ended_at || null,   // echtes Trade-Ende (sql/2026-09-22_trade_plans_ended_at.sql)
       startedAt:   row.started_at,
       createdAt:   row.created_at,
@@ -24121,6 +24353,7 @@
   }
 
   function renderTradePlans(){
+    try{ if(typeof atToggleSichtbarkeit === 'function') atToggleSichtbarkeit() }catch(_){}
     const lanes = [
       { status:'planned',   target:'tradeCardsPlanned',   empty:'tradeEmptyPlanned',   countId:'tradetab-count-planned' },
       { status:'open',      target:'tradeCardsOpen',      empty:'tradeEmptyOpen',      countId:'tradetab-count-open' },
@@ -24381,12 +24614,17 @@
     else if(isPlanned) dotCls += ' tc2-dot-prio-' + (p.priority || 'medium')
 
     // Sub-Zeile: Firmen + External ID + Multiplier + Risk + Kontrakte + Balances
-    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''} <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
-      + (routeIstV2(p.route)
-          ? ''   // V2: kein Multiplier, kein Slave-Risiko — TP/SL stehen weiter hinten in der Zeile
-          : ` · ×<b style="color:var(--violet)">${mult}</b>`
+    // V2 (24.09.2026, Vollumstieg — Finn: „geh alles durch, jedes Einzelne"): kein Slave, also kein „→ –",
+    // kein Multiplier, kein Slave-Risiko. Nur Firma, External ID, Richtung, Symbol, Kontrakte/Lots, TP/SL.
+    // Hedge-Karten (dup/tvplus/mt5/topstep) bleiben pixelgleich.
+    const istV2Karte = routeIstV2(p.route)
+    const sub = `${escapeHtml(p.masterFirm||'–')}${mExt ? ` <span class="mono" style="opacity:.6" title="${escapeHtml(mExtTitle)}">${_mTsxName ? '' : '#'}${escapeHtml(String(mExt).slice(0,18))}</span>` : ''}`
+      + (istV2Karte
+          ? ''
+          : ` <span style="color:var(--sub-2)">→</span> ${escapeHtml(p.slaveFirm||'–')}`
+            + ` · ×<b style="color:var(--violet)">${mult}</b>`
             + ` · <b>$${(p.masterRisk||0).toLocaleString('de-DE')}</b>/<b>${sCur}${(p.slaveRisk||0).toLocaleString('de-DE')}</b>`)
-      + (p.masterContracts ? ` · <b>${p.masterContracts}</b> Kt` : '')
+      + (p.masterContracts ? ` · <b>${p.masterContracts}</b> ${istV2Karte && p.route === 'mt5v2' ? 'Lots' : 'Kt'}` : '')
       // Instrument, Richtung, TP/SL in $ direkt auf der Karte (23.09.2026, Finn: „wenn so ein Trade geplant ist, immer
       // kurz den Take-Profit in Dollar, den Stop-Loss und die Kontrakte sehen, und ob es MNQ oder NQ ist")
       + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}</b>` : '')
@@ -24513,7 +24751,13 @@
           : qs
             ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
             : `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
-      actions = `
+      // V2 (24.09.2026): nur Bearbeiten, Löschen, Starten/Startzeit — „Läuft" ohne Puls gäbe keinen Beweis
+      // und keine Baseline (v2PlanAufOpen läuft nur nach dem bewiesenen Klick), „Erledigt" auf einem
+      // geplanten V2-Plan hätte keinen P&L. Hedge-Karten unverändert.
+      actions = istV2Karte ? `
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
+        <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
+        ${jetztBtn}` : `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
         <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
@@ -24523,9 +24767,13 @@
       // Remote-Close (28.08.2026, Finns Feature): „Schließen" nur für Echo-
       // Pläne — lokal schließt Puls direkt im Terminal, am Handy/Mac geht ein
       // close-Signal an den PC (dasselbe Kanal-Muster wie „Starten").
+      // V2 (24.09.2026): eigener Knopf mit eigener Verdrahtung (data-plan-v2-schliessen → tpV2PlanSchliessen):
+      // Echo V2 über /api/master-close (ohne_hedge), Orbit V2 über /api/tv-close; vom Mac als close-Signal.
       const closeBtn = (p.route === 'mt5' && !isPending)
         ? `<button class="btn btn-ghost tc2-btn" data-plan-schliessen="${p.id}" title="Master-Position schließen — Puls klickt im Terminal, der Hedge geht über Echo mit" style="color:#D92D20">Schließen</button>`
-        : ''
+        : (istV2Karte && !isPending)
+          ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:#D92D20">Schließen</button>`
+          : ''
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
         ${closeBtn}
@@ -24551,7 +24799,7 @@
             ${slaveName
               ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
               : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
-            ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
+            ${(p.route === 'mt5' && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
           </div>
@@ -24924,6 +25172,12 @@
     document.querySelectorAll('[data-plan-schliessen]').forEach(btn => {
       btn.addEventListener('click', () => {
         if(typeof tpPlanSchliessen === 'function') tpPlanSchliessen(btn.dataset.planSchliessen)
+      })
+    })
+    // „Schließen" auf V2-Karten (24.09.2026) — eigener Handler, eigene Funktion (kein Sammel-Handler)
+    document.querySelectorAll('[data-plan-v2-schliessen]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if(typeof tpV2PlanSchliessen === 'function') tpV2PlanSchliessen(btn.dataset.planV2Schliessen)
       })
     })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
@@ -27232,7 +27486,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.444'
+  const OS_TAB_BUILD = '2026-09-22.445'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28426,6 +28680,247 @@
     tick()
   }
 
+  /* ══ V2 SCHLIESSEN (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge" — Finn: „riesen Umstieg — geh alles
+   * durch, jedes Einzelne, du weißt doch was ich will"). Echo V2 und Orbit V2 haben keinen Hedge und keinen
+   * Copier-Beweis, deshalb eigene Wege — getrennt vom Echo-Close (tpPlanSchliessen bleibt unverändert):
+   *   Echo V2  → /api/master-close?file=<Instanz> {ticket, symbol, login, ohne_hedge:true}. Ticket aus
+   *              mt5_baseline.ticket (Puls-Klick), sonst aus den Master-Positionen der Instanz (genau eine,
+   *              tpClosePosAufloesen). Erfolg → mt5PlanPoll.wasOpen scharf, die Echo-Ende-Erkennung (Master
+   *              flach, 2 frische Messungen) friert final.master_balance ein → atShowEndPrompt — derselbe Weg
+   *              wie ein TP-Ende, keine zweite Ende-Logik.
+   *   Orbit V2 → /api/tv-close {konto, symbol, timeout_s} → {ok, code:'schon_flach'|…, today_pnl,
+   *              positionen_danach}. Keine passende Position mehr → final {today_pnl, datum, at} genau wie der
+   *              Rundgang (tvV2EndeSetzen) → atShowEndPrompt → review + Auto-P&L.
+   * Läuft NUR am PC (MT5_LOCAL). Vom Mac/Handy: close-Signal mit params.v2 (Absender tpV2PlanSchliessen,
+   * Empfänger eigener Zweig in orderSignalTick). Auto-Close vor Market Close nutzt v2SchliessenAmPc direkt. ══ */
+  async function tvV2EndeSetzen(plan, todayPnl){
+    const nowIso = new Date().toISOString()
+    const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2HeuteDatum(), at: nowIso, quelle: 'close' }
+    const alt = plan.mt5Baseline || {}
+    const base = Object.assign({}, alt, { final: fin, live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
+    const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
+      .eq('id', plan.id).eq('status', 'open').select('*')
+    if(error) throw error
+    if(!data || !data.length){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
+    const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
+    if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+    const fresh = (i >= 0) ? tradePlans[i] : rowToPlan(data[0])
+    try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
+    if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
+    if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
+    return true
+  }
+
+  // -> { ok, msg, retry, unklar, beendet, pausiert, ticket, profit, trail } — nie werfen, immer ein Ergebnis
+  async function v2SchliessenAmPc(plan){
+    if(!plan || plan.status !== 'open' || !routeIstV2(plan.route)) return { ok:false, msg:'Plan läuft nicht (mehr) — nichts geschlossen.', retry:false }
+    if(typeof window.mtcApi !== 'function') return { ok:false, msg:'Copier-Backend am PC nicht erreichbar.', retry:true }
+    const pid = String(plan.id)
+    if(plan.route === 'tvv2'){
+      const konto = tvV2Konto(plan)
+      if(!konto) return { ok:false, msg:'Master-Konto hat keine External ID — unter Accounts nachtragen.', retry:false }
+      const symbol = tpOrbitWerte(plan).symbol || ''
+      let r = null
+      // Eine Maus: solange Puls in TradingView schließt, fasst der Rundgang (tvV2PollTick) nichts an.
+      let riegel = false
+      try{ if(!_tpOrbitLaeuft){ _tpOrbitLaeuft = true; riegel = true } }catch(_){}
+      try{
+        r = await window.mtcApi('tv-close', { method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' }) })
+      }catch(e){
+        return { ok:false, unklar:true, retry:false, msg:'tv-close gestört: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Position noch offen ist.' }
+      }finally{ try{ if(riegel) _tpOrbitLaeuft = false }catch(_){} }
+      if(!r || r._httpFail || r.copier_offline) return { ok:false, retry:true, code:'tv_close_fehlt', msg:'Das Panel am PC kennt /api/tv-close noch nicht (Panel zu alt?) — in TradingView von Hand schließen.' }
+      const danach = Array.isArray(r.positionen_danach) ? r.positionen_danach : null
+      const nochOffen = danach ? danach.some(x => x && tvSymbolPasst(x.symbol, symbol)) : null
+      if(r.ok || r.code === 'schon_flach'){
+        if(nochOffen === true) return { ok:false, unklar:true, retry:false, msg:'Puls meldet ok, aber die Position steht noch im Konto — in TradingView nachsehen.' }
+        const todayPnl = (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
+        let beendet = false
+        try{ beendet = await tvV2EndeSetzen(plan, todayPnl) }catch(e){ console.warn('[v2-close] final', e) }
+        return { ok:true, beendet, profit: todayPnl, trail: r.trail || null,
+          msg: (r.code === 'schon_flach' ? 'Position war schon flach — Plan beendet.' : String(r.msg || 'Position geschlossen.'))
+             + (todayPnl != null ? ` · Today's P&L ${todayPnl.toLocaleString('de-DE')} $` : '') }
+      }
+      return { ok:false, msg: String(r.msg || r.error || r.code || 'Close fehlgeschlagen.'), code: r.code || null, trail: r.trail || null,
+               retry: !!r.retry_ok || r.code === 'puls_beschaeftigt', unklar: r.retry_ok === false }
+    }
+    // Echo V2: Instanz nur über den Master-Login (kein Hedge-Login am Plan)
+    const dd = await window.mtcApi('instances')
+    if(!dd || dd.copier_offline || dd._httpFail) return { ok:false, msg:'Copier-Backend nicht erreichbar.', retry:true }
+    const route = mt5V2Resolve(plan, dd.instances || [])
+    if(!route) return { ok:false, msg:'Plan gehört zu keiner Instanz auf diesem PC (Master-Login nicht verlinkt).', retry:false }
+    const s = route.inst.status || {}
+    if(!route.inst.alive || s.note) return { ok:false, msg:'Instanz liefert keinen frischen Stand — Terminal/EA prüfen.', retry:true }
+    const symbol = plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
+    const poss = Array.isArray(s.master_positions) ? s.master_positions : []
+    if(!poss.length){
+      mt5PlanPoll.wasOpen.add(pid)
+      return { ok:true, beendet:false, msg:'Master ist schon flach — die Ende-Erkennung übernimmt (2 Messungen).' }
+    }
+    const baseTicket = Number((plan.mt5Baseline || {}).ticket) || 0
+    let ticket = 0, beschr = ''
+    const p0 = baseTicket ? poss.find(x => Number(x.ident) === baseTicket) : null
+    if(p0){ ticket = baseTicket; beschr = `${p0.symbol || ''} ${Number(p0.type) === 0 ? 'buy' : 'sell'} ${p0.volume || ''}`.trim() }
+    else {
+      const t = tpClosePosAufloesen(plan, route, symbol)
+      if(t.fehler) return { ok:false, msg: t.fehler, retry: /frisch|schon zu/i.test(t.fehler) }
+      ticket = t.ticket; beschr = t.beschr
+    }
+    let r = null
+    try{
+      r = await window.mtcApi(`master-close?file=${encodeURIComponent(route.inst.file)}`, { method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ ticket, symbol, login: route.masterLogin, ohne_hedge: true }) })
+    }catch(e){ return { ok:false, unklar:true, retry:false, msg:'Close-Aufruf gestört: ' + String(e && e.message || e) + ' — im Terminal prüfen, ob die Position noch offen ist.' } }
+    if(r && r.ok){
+      mt5PlanPoll.wasOpen.add(pid)
+      return { ok:true, beendet:false, ticket, profit: r.profit ?? null, trail: r.trail || null,
+               msg:`#${ticket} ${beschr} geschlossen · ${r.msg || ''}`.trim() }
+    }
+    const pausiert = (typeof _pfEchoPausiert === 'function') && _pfEchoPausiert(r)
+    return { ok:false, msg:(r && (r.msg || r.error)) || 'keine Antwort vom Bot', pausiert, trail: (r && r.trail) || null,
+             retry: !!(r && r.retry_ok) || pausiert, unklar: !!(r && r.retry_ok === false) }
+  }
+
+  // Karten-Knopf „Schließen" auf V2 (data-plan-v2-schliessen): lokal direkt, am Mac/Handy als close-Signal.
+  // Live-Schritte im vorhandenen Check-Popup — dieselbe Optik wie tpPlanSchliessen, kein neues Design.
+  async function tpV2PlanSchliessen(planId){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    if(!plan || plan.status !== 'open' || !routeIstV2(plan.route)) return
+    if(_rsAktiv){
+      if(typeof atToast === 'function') atToast('Gerade läuft ein Auto-Start — „Schließen" gleich danach erneut versuchen.', 'end')
+      return
+    }
+    const istEcho = plan.route === 'mt5v2'
+    const symbol = istEcho
+      ? (plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || ''))
+      : (tpOrbitWerte(plan).symbol || '')
+    _pfMt5StopTimer()
+    _pfPlanId = null
+    document.getElementById('pf-rows').innerHTML = ''
+    const finalEl = document.getElementById('pf-final'); if(finalEl){ finalEl.style.display = 'none' }
+    const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
+    _pfEchoKnopf(false)
+    const info = document.getElementById('pf-plan-info')
+    if(info) info.textContent = `📡 Schließen · ${istEcho ? 'Echo V2' : 'Orbit V2'} · ${plan.masterName || '—'}${symbol ? ` · ${symbol}` : ''} — ohne Hedge`
+    document.getElementById('tpPreflightModal').classList.add('open')
+    const fertigUi = (ok, text) => {
+      if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
+      const cb = document.getElementById('pf-cancel'); if(cb) cb.textContent = 'Schließen'
+      const fb = document.getElementById('pf-force'); if(fb) fb.style.display = 'none'
+      const rb = document.getElementById('pf-retry'); if(rb) rb.style.display = 'none'
+      if(foot) foot.style.display = 'flex'
+    }
+    const autoZu = () => setTimeout(() => {
+      const fe2 = document.getElementById('pf-final')
+      if(document.getElementById('tpPreflightModal')?.classList.contains('open')
+         && fe2 && fe2.className.indexOf('ok') !== -1) _pfClose()
+    }, 2400)
+    const okText = res => res.beendet
+      ? '✓ Position geschlossen — Plan ist beendet, P&L steht unter „Überprüfen".'
+      : '✓ Position geschlossen — die Ende-Erkennung übernimmt, der Plan wandert gleich zu „Beendet".'
+    const errText = res => res.unklar
+      ? (istEcho ? '⚠ Ergebnis UNKLAR — erst im Terminal prüfen, ob die Position noch offen ist.' : '⚠ Ergebnis UNKLAR — erst in TradingView prüfen, ob die Position noch offen ist.')
+      : '✗ Nicht geschlossen — Meldung oben. Erneut „Schließen" ist ungefährlich (Puls prüft vorher lesend).'
+
+    if(MT5_LOCAL){
+      _pfAddRow('cl-pos', istEcho ? 'Position am Master auflösen' : 'Konto in TradingView')
+      _pfAddRow('cl-bot', istEcho ? 'Puls schließt im Terminal' : 'Puls schließt in TradingView (Flatten)')
+      _pfSet('cl-pos', 'warn', '⏳ …')
+      _pfSet('cl-bot', 'warn', '⏳ Puls arbeitet — HÄNDE WEG, bis die Bestätigung kommt!')
+      let res
+      try{ res = await v2SchliessenAmPc(plan) }catch(e){ res = { ok:false, unklar:true, msg: String(e && e.message || e) } }
+      if(res.ok){
+        _pfSet('cl-pos', 'ok', istEcho && res.ticket ? `#${res.ticket}` : escapeHtml(symbol || 'Konto erreicht'))
+        _pfSet('cl-bot', 'ok', escapeHtml(String(res.msg || 'Position geschlossen.')))
+        fertigUi(true, okText(res)); autoZu()
+      } else {
+        _pfSet('cl-pos', res.retry ? 'warn' : 'err', res.retry ? 'nicht ausgeführt' : '—')
+        _pfSet('cl-bot', 'err', escapeHtml(String(res.msg || 'keine Antwort vom Bot')))
+        if(res.pausiert){
+          fertigUi(false, '⏸ Echo ist pausiert — es wurde NICHTS geschlossen. Unten fortsetzen, dann läuft das Schließen sofort neu.')
+          _pfEchoKnopf(true, () => tpV2PlanSchliessen(planId))
+          return
+        }
+        fertigUi(false, errText(res))
+      }
+      return
+    }
+
+    // Remote: close-Signal mit params.v2 + Live-Schritte (Muster tpPlanSchliessen)
+    _pfAddRow('cs-sig',   'Close-Signal senden')
+    _pfAddRow('cs-claim', 'PC übernimmt')
+    _pfAddRow('cs-close', istEcho ? 'Puls schließt im Terminal' : 'Puls schließt in TradingView')
+    const zu = () => !document.getElementById('tpPreflightModal')?.classList.contains('open')
+    let sig = null
+    try{
+      const { data, error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plan.id), params: { aktion: 'close', v2: plan.route, symbol, konto: istEcho ? null : tvV2Konto(plan) } })
+        .select('*').single()
+      if(error) throw error
+      sig = data
+    }catch(e){
+      _pfSet('cs-sig', 'err', 'Signal konnte nicht gesendet werden: ' + escapeHtml(String(e && e.message || e)))
+      fertigUi(false, '✗ Nichts gesendet — Verbindung prüfen, dann erneut „Schließen".')
+      return
+    }
+    _pfSet('cs-sig', 'ok', `Close-Signal in der Cloud <span class="mono">#${escapeHtml(String(sig.id).slice(0, 8))}</span>`)
+    _rsAktiv = { sigId: sig.id, timer: null, t0: Date.now() }
+    const stornoFallsWartet = () => {
+      supabase.from('order_signale')
+        .update({ status:'verworfen', updated_at: new Date().toISOString(),
+                  ergebnis:{ ok:false, msg:'Vom Absender abgebrochen (Popup geschlossen).' } })
+        .eq('id', sig.id).eq('status', 'wartet')
+        .then(() => {}, e => console.warn('[signal] Storno:', e))
+    }
+    const stop = () => { if(_rsAktiv && _rsAktiv.timer) clearInterval(_rsAktiv.timer); _rsAktiv = null }
+    const tick = async () => {
+      if(!_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      if(zu()){ stornoFallsWartet(); stop(); return }
+      let row = null
+      try{
+        const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle()
+        row = data
+      }catch(_){ return }
+      if(!row || !_rsAktiv || _rsAktiv.sigId !== sig.id) return
+      const sec = Math.round((Date.now() - _rsAktiv.t0) / 1000)
+      const erg = row.ergebnis || {}
+      if(row.status === 'wartet'){
+        if(sec > OS_FRISCHE_S){
+          try{
+            await supabase.from('order_signale')
+              .update({ status:'verfallen', updated_at: new Date().toISOString(),
+                        ergebnis:{ ok:false, msg:'Kein PC hat binnen 3 Minuten übernommen.' } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }catch(_){}
+          _pfSet('cs-claim', 'err', 'Kein PC hat übernommen — auf dem PC müssen der Prophos-Tab (aktueller Build!) UND das Copier-Backend laufen.')
+          _pfSet('cs-close', 'warn', 'Übersprungen — nichts geschlossen.')
+          fertigUi(false, '✗ Signal verfallen — am PC Tab neu laden (Strg+F5), dann erneut „Schließen".')
+          stop(); return
+        }
+        _pfSet('cs-claim', 'warn', `⏳ warte auf den PC dieser ID… (${sec}s) — Abbrechen: Popup schließen.` + await osPcStandHtml(sec))
+      } else if(row.status === 'laeuft'){
+        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span> hat übernommen.`)
+        _pfSet('cs-close', 'warn', `⏳ Puls schließt die Position… (${sec}s) — HÄNDE WEG am PC!`)
+      } else if(row.status === 'fertig'){
+        _pfSet('cs-claim', 'ok', `PC <span class="mono">${escapeHtml(String(row.pc || '?'))}</span>`)
+        _pfSet('cs-close', 'ok', escapeHtml(String(erg.msg || 'Position geschlossen.')))
+        fertigUi(true, okText(erg))
+        try{ loadTradePlansFromSupabase() }catch(_){}
+        stop(); autoZu()
+      } else {
+        const ziel = (row.status === 'wartet' || !row.pc) ? 'cs-claim' : 'cs-close'
+        _pfSet(ziel, 'err', escapeHtml(String(erg.msg || row.status)))
+        fertigUi(false, errText(erg))
+        stop()
+      }
+    }
+    _rsAktiv.timer = setInterval(tick, 2000)
+    tick()
+  }
+  /* ══ ENDE V2 SCHLIESSEN ══ */
+
   /* ── Empfänger: läuft NUR auf dem PC (MT5_LOCAL), Takt 5s wie die Flotte ── */
   let _osBusy = false
   let _osActive = null   // { sigId, planId, timeout } — ein Signal zur Zeit
@@ -28598,6 +29093,44 @@
                       ergebnis:{ ok:false, msg:'Plan zum Signal nicht gefunden.' } })
             .eq('id', sig.id).eq('status', 'wartet')
           continue
+        }
+        // V2-Close (24.09.2026, Vollumstieg): eigener Zweig VOR dem Echo-Close — ein close-Signal mit
+        // params.v2 gehört zu einem laufenden Echo-V2-/Orbit-V2-Plan. Ein alter PC-Build ohne diesen
+        // Zweig lässt es liegen (der Echo-Zweig findet über mt5RouteResolve keinen Hedge-Login → continue),
+        // es verfällt nach 3 min ehrlich — nie ein Klick aus Versehen.
+        if(String((sig.params || {}).aktion || '') === 'close' && routeIstV2(plan.route)){
+          const absageV2 = async text => {
+            await supabase.from('order_signale')
+              .update({ status:'fehler', updated_at: new Date().toISOString(), ergebnis:{ ok:false, msg: text } })
+              .eq('id', sig.id).eq('status', 'wartet')
+          }
+          if(plan.status !== 'open'){ await absageV2(`Plan läuft nicht (Status: ${plan.status}) — nichts geschlossen.`); continue }
+          if(typeof v2SchliessenAmPc !== 'function'){ await absageV2('Dieser PC-Tab kann V2 noch nicht schließen — am PC neu laden.'); continue }
+          // Gehört der Plan zu DIESEM PC? Echo V2: Instanz über den Master-Login (sonst liegen lassen, ein
+          // anderer PC der Flotte kann ihn claimen). Orbit V2: jeder PC-Tab dieses Profils mit Copier-Backend
+          // — wie beim Orbit-Start; fehlt dort TradingView, sagt es der Bot.
+          if(plan.route === 'mt5v2' && !mt5V2Resolve(plan, dd.instances || [])) continue
+          const { data: clV } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
+                      updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clV || !clV.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'claim-close-v2: ' + String(sig.id).slice(0, 8)
+          _osActive = { sigId: sig.id, planId: String(plan.id), timeout: null }
+          _osActive.timeout = setTimeout(() => {
+            if(_osActive && _osActive.sigId === sig.id){
+              _osErgebnis(sig.id, { ok:false, unklar:true,
+                msg:'Keine Rückmeldung vom V2-Close binnen 8 Minuten — am PC prüfen, ob die Position noch offen ist.' })
+            }
+          }, 8 * 60 * 1000)
+          if(typeof atToast === 'function') atToast(`📡 Remote-Close (${plan.route === 'mt5v2' ? 'Echo V2' : 'Orbit V2'}): ${plan.masterName || '—'} — Puls schließt`, 'end')
+          // Nicht awaiten: der Tick gibt _osBusy frei, _osActive hält den Riegel bis zum Ergebnis.
+          v2SchliessenAmPc(plan)
+            .then(res => _osErgebnis(sig.id, { ok: !!res.ok, retry_ok: !!res.retry, unklar: !!res.unklar, beendet: !!res.beendet,
+                                               profit: (res.profit ?? null), trail: res.trail || null,
+                                               msg: String(res.msg || (res.ok ? 'Position geschlossen.' : 'Close fehlgeschlagen.')) }))
+            .catch(e => _osErgebnis(sig.id, { ok:false, unklar:true, msg:'V2-Close am PC abgebrochen: ' + String(e && e.message || e) }))
+          break   // ein Signal pro Lauf (dasselbe _osActive-Riegel-Muster)
         }
         // Remote-Close (28.08.2026): eigener Zweig VOR dem planned-Gate — ein
         // close-Signal gehört zu einem LAUFENDEN Plan. Alte Builds ohne diesen
@@ -29105,7 +29638,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? 'Orbit V2' : r.route === 'mt5v2' ? 'Echo V2' : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -29159,11 +29692,35 @@
     const key = acFensterKey(r, r.tz)
     if(_ac.fensterKey !== key){ _ac.fensterKey = key; _ac.naechster = {}; _ac.gemeldet = {} }
     let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
-    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(p.route === 'tvplus' ? 'tvplus' : p.route === 'mt5' ? 'mt5' : ''))
+    // V2 hängt an denselben Haken (24.09.2026): Echo V2 zählt als „Echo", Orbit V2 als „Orbit"
+    const acHaken = p => (p.route === 'tvplus' || p.route === 'tvv2') ? 'tvplus' : (p.route === 'mt5' || p.route === 'mt5v2') ? 'mt5' : ''
+    const offen = (_tp || []).filter(p => p && p.status === 'open' && (r.routen || []).includes(acHaken(p)))
     if(!offen.length) return
     const now = Date.now()
     for(const plan of offen){
       const pid = String(plan.id)
+      // V2 (24.09.2026, Vollumstieg): Echo V2 über master-close (ohne Hedge), Orbit V2 über tv-close —
+      // dieselbe Funktion wie „Schließen" auf der Karte (v2SchliessenAmPc), Log wie bisher, danach
+      // übernimmt die Ende-Erkennung (Echo-Poll bzw. Orbit-V2-Final direkt aus der tv-close-Antwort).
+      if(routeIstV2(plan.route)){
+        if((_ac.naechster[pid] || 0) > now) continue
+        _ac.laeuft = true
+        try{
+          let erg
+          if(typeof _rsAktiv !== 'undefined' && _rsAktiv) erg = { ok: false, msg: 'Remote-Lauf aktiv — später', retry: true }
+          else if(typeof _tpOrbitLaeuft !== 'undefined' && _tpOrbitLaeuft) erg = { ok: false, msg: 'Orbit-Lauf aktiv — später', retry: true }
+          else erg = await v2SchliessenAmPc(plan)
+          await acLog(plan, erg.ok, erg.msg)
+          acBenachrichtigen(erg.ok ? 'Auto-Close ✓' : 'Auto-Close ✗', `${plan.masterName || pid}: ${erg.msg}`)
+          const min = Math.max(10, r.min_s || 45), max = Math.max(min, r.max_s || 150)
+          _ac.naechster[pid] = Date.now() + (min + Math.random() * (max - min)) * 1000 * (erg.retry || erg.ok ? 1 : 3)
+          try{ loadTradePlansFromSupabase() }catch(_){}
+        }catch(e){
+          await acLog(plan, false, 'Fehler: ' + (e && e.message || e))
+          _ac.naechster[pid] = Date.now() + 90 * 1000
+        }finally{ _ac.laeuft = false }
+        break   // ein Trade je Tick — eine Maus
+      }
       if(plan.route === 'tvplus'){
         // Orbit: Schließen in TradingView ist der nächste Bot-Schritt — einmal je Fenster ehrlich ins Log.
         if(!_ac.gemeldet[pid]){ _ac.gemeldet[pid] = true; await acLog(plan, false, 'Orbit: automatisches Schließen in TradingView ist noch nicht gebaut — bitte von Hand schließen.'); acBenachrichtigen('Auto-Close', `${plan.masterName || 'Orbit-Trade'}: bitte von Hand in TradingView schließen.`) }
@@ -30239,7 +30796,9 @@
     // Slave toggle
     const rowS = document.getElementById('tp-nq-toggle-slave')
     if(rowS){
-      rowS.style.display = slaveIsProjectx ? '' : 'none'
+      // V2 (24.09.2026): kein Slave — die Slave-Pillen bleiben aus, auch wenn im versteckten Slave-Dropdown
+      // noch eine alte Auswahl steht (Handy-Check: „Instrument Slave" tauchte auf Orbit V2 auf)
+      rowS.style.display = (slaveIsProjectx && !v2) ? '' : 'none'
       // Wenn nur Slave sichtbar (kein Master): volle Breite; wenn beide: normale Spalte
       rowS.style.gridColumn = (!masterIsProjectx && slaveIsProjectx) ? 'span 2' : ''
     }
@@ -30906,7 +31465,89 @@
    * IDs derselbe Zielwert). Richtung optional — ohne sie öffnet „Starten" wie gehabt das
    * Order-Popup (TP steht dann schon drin). Eigene Verdrahtung, kein Sammel-Handler. ══ */
   const TP_VP_LS = 'prophos_tp_vorplan'
-  let _vpInstr = 'mnq', _vpDir = ''
+  let _vpInstr = 'mnq', _vpDir = 'kompass'
+  /* ORBIT V2 als Standard (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge" — Finn: „riesen Umstieg — geh alles
+   * durch, jedes Einzelne, du weißt doch was ich will"): _vpWeg 'tvv2' legt je aktives Futures-Konto ohne Plan
+   * einen Orbit-V2-Plan an — kein Slave, kein Multiplier, keine Gesamtkosten/Staffel, kein Duplikum. Nur
+   * Instrument + Frontmonat, Kontrakte, TP aus der bestehenden Spanne, SL optional, Richtung nach Kompass
+   * (je Konto gewürfelt wie tpV2KompassVorwahl im Plan-Popup — nicht alle IDs zwingend gleich) oder fest,
+   * Startzeit optional (start_um, der PC-Tab feuert zur Zeit). Der alte Orbit-Weg (tvplus, Duplikum-Slave)
+   * bleibt als zweiter Knopf für den Hedge-Bestand; der Farmer nutzt weiter tpVorplanPlanRow (unverändert). */
+  let _vpWeg = 'tvv2'
+  let _vpKompass = { row: null, q: null }
+  function tpVorplanIstV2(){ return _vpWeg === 'tvv2' }
+  function tpVorplanDirSetzen(d){
+    _vpDir = d
+    document.querySelectorAll('[data-vp-dir]').forEach(x => x.classList.toggle('active', x.dataset.vpDir === d))
+  }
+  function tpVorplanWegAnwenden(){
+    const v2 = tpVorplanIstV2()
+    document.querySelectorAll('[data-vp-weg]').forEach(b => b.classList.toggle('active', b.dataset.vpWeg === _vpWeg))
+    const iv = document.getElementById('tp-vp-intro-v2'); if(iv) iv.style.display = v2 ? '' : 'none'
+    const ia = document.getElementById('tp-vp-intro-alt'); if(ia) ia.style.display = v2 ? 'none' : ''
+    document.querySelectorAll('[data-vp-nur-v2]').forEach(el => { el.style.display = v2 ? '' : 'none' })
+    document.querySelectorAll('[data-vp-nur-alt]').forEach(el => { el.style.display = v2 ? 'none' : '' })
+    const kb = document.querySelector('[data-vp-dir="kompass"]'); if(kb) kb.style.display = v2 ? '' : 'none'
+    if(!v2 && _vpDir === 'kompass') tpVorplanDirSetzen('')
+    const h = document.getElementById('tp-vp-dir-hint')
+    if(h) h.textContent = v2 ? '(Kompass = je Konto gewürfelt wie im Plan-Popup · leer = im Order-Popup wählen)' : '(optional — leer = im Order-Popup wählen)'
+    const go = document.getElementById('tpVorplanGo'); if(go && !go.disabled) go.textContent = v2 ? 'Orbit-V2-Pläne anlegen' : 'Pläne anlegen'
+  }
+  // Kompass-Zeile unter der Richtung: dieselbe Quelle wie das Plan-Popup (tpKompassAktuell/tpKompassQuoten)
+  async function tpVorplanKompassLaden(){
+    const el = document.getElementById('tp-vp-kompass'); if(!el) return
+    if(!tpVorplanIstV2() || _vpDir !== 'kompass'){ el.textContent = ''; return }
+    el.textContent = 'Kompass wird geladen …'
+    try{
+      const [row, q] = await Promise.all([tpKompassAktuell(), tpKompassQuoten()])
+      _vpKompass = { row, q }
+    }catch(_){ _vpKompass = { row: null, q: null } }
+    if(!tpVorplanIstV2() || _vpDir !== 'kompass'){ el.textContent = ''; return }
+    const row = _vpKompass.row
+    if(!row){ el.textContent = 'Kompass: keine Vorhersage in der Datenbank — Richtung bleibt leer (im Order-Popup wählen).'; return }
+    const quote = tpKompassQuote(_vpKompass.q, row.konfidenz)
+    el.innerHTML = `Kompass ${row.bias === 'LONG' ? '<b style="color:#0E9757">▲ LONG</b>' : '<b style="color:var(--danger)">▼ SHORT</b>'}`
+      + `${row.konfidenz ? ' · Konfidenz ' + escapeHtml(String(row.konfidenz)) + '/5' : ''} → je Konto ${quote} % wie der Kompass, sonst Gegenteil (gewürfelt beim Anlegen)`
+  }
+  // Richtung je Konto: fest (buy/sell), nach Kompass gewürfelt, oder null (leer)
+  function tpVorplanRichtungFuer(){
+    if(_vpDir === 'buy' || _vpDir === 'sell') return _vpDir
+    if(_vpDir !== 'kompass') return null
+    const row = _vpKompass.row; if(!row) return null
+    const quote = tpKompassQuote(_vpKompass.q, row.konfidenz)
+    const gleich = Math.random() * 100 < quote
+    return ((row.bias === 'LONG') === gleich) ? 'buy' : 'sell'
+  }
+  // Reine Rechnung je Konto auf V2: nur TP aus der Spanne (Challenge/Funded je Firma) — kein Slave, keine Kosten
+  function tpVorplanZeileV2(acc, regeln, zufall){
+    const funded = tpVorplanIstFunded(acc)
+    const firma = tpVorplanFirmaKey(acc && acc.firm)
+    const rg = regeln || TP_VP_VORGABE
+    const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((rg.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (rg.ch || TP_VP_VORGABE.ch)))
+    const r = (typeof zufall === 'number') ? zufall : Math.random()
+    const tp = Math.round(tpVon + r * (tpBis - tpVon))
+    const dd = Number(acc && acc.maxDrawdown) || 0
+    return { phase: funded ? 'funded' : 'challenge', firma, tpVon, tpBis, tp: tp > 0 ? tp : null, masterRisk: dd > 0 ? dd : null }
+  }
+  // Fertige trade_plans-Zeile auf Orbit V2 — genau das, was Plan-Popup + Order-Popup auf V2 ergäben
+  function tpVorplanPlanRowV2(acc, z, kt, symbol, richtung, sl, heute, startUmIso){
+    const planObj = { masterAccountId: acc.id, slaveAccountId: null, masterName: acc.name, masterFirm: acc.firm,
+      slaveName: null, slaveFirm: null, masterRisk: z.masterRisk, masterContracts: kt, slaveRisk: null, multiplier: null,
+      masterTp: z.tp, masterSl: (z.tp > 0 && sl > 0) ? sl : null,   // SL nur zusammen mit TP (Order-Popup-Regel)
+      richtung: (richtung === 'buy' || richtung === 'sell') ? richtung : null,
+      priority: 'medium', plannedFor: heute, notes: null, status: 'planned' }
+    return { ...planToRow(planObj), route: 'tvv2', master_symbol: symbol, start_um: startUmIso || null }
+  }
+  function tpVorplanStartUmHinweis(){
+    const el = document.getElementById('tp-vp-start-um'), h = document.getElementById('tp-vp-start-um-hint')
+    if(!el || !h) return
+    const v = el.value || ''
+    if(!v){ h.textContent = ''; return }
+    const d = tpStartUmAusZeit(v)
+    if(!d){ h.textContent = 'ungültig'; return }
+    const heute = d.toDateString() === new Date().toDateString()
+    h.textContent = `${heute ? 'heute' : 'morgen'} ${tpStartUmZeit(d.toISOString())} · Gerätezeit, PC-Tab feuert`
+  }
   /* Zwei Regelwerke (Finn 22.09.2026, nach .393: „für Futures ist es immer ein Winning Day. Tradeify
    * Winning Day = 250 → gehen wir so auf 270-290, weil man Spread und Gebühren zahlt. Bei Apex ist immer
    * 53+. … je nachdem, wie viel auf der Balance noch drauf ist, mit dem wir gegenhedgen: über 8000 → 90 €,
@@ -31063,6 +31704,26 @@
   function tpVorplanRender(){
     const box = document.getElementById('tp-vp-liste'); if(!box) return
     const msg = document.getElementById('tpVorplanMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    // ORBIT V2 (24.09.2026): kein Slave, kein Duplikum — Liste zeigt nur Konto, Phase, TP-Spanne, Drawdown
+    if(tpVorplanIstV2()){
+      const regeln = tpVorplanRegelnLesen()
+      const kand = tpVorplanKandidaten()
+      if(!kand.length){ box.innerHTML = '<span style="color:var(--sub)">Kein aktives Futures-Konto mit External ID gefunden.</span>'; return }
+      const de = v => Number(v).toLocaleString('de-DE')
+      box.innerHTML = `<div style="margin-bottom:6px;color:var(--sub)">Orbit V2 · <b>ohne Hedge</b> · ${kand.length} Futures-Konto/-Konten</div>` + kand.map(k => {
+        const z = tpVorplanZeileV2(k.acc, regeln, 0.5)
+        const id = escapeHtml(String(k.acc.id))
+        if(k.belegt) return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);opacity:.55">
+          <input type="checkbox" data-vp-acc="${id}" disabled>
+          <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} — hat schon einen geplanten/laufenden Plan</span></span></div>`
+        return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
+          <input type="checkbox" id="tp-vp-acc-${id}" data-vp-acc="${id}" checked>
+          <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
+            <span class="mono" style="color:var(--sub)"> · TP ${de(z.tpVon)}–${de(z.tpBis)} $${z.masterRisk ? ` · DD $${de(z.masterRisk)}` : ''}</span></label>
+        </div>`
+      }).join('')
+      return
+    }
     const sl = tpDupSlaveAccount()
     if(sl.fehler){ box.innerHTML = `<span style="color:var(--danger)">${escapeHtml(sl.fehler)}</span>`; return }
     const slave = sl.slave
@@ -31112,20 +31773,27 @@
       const regeln = g.regeln || ((g.von != null && g.bis != null) ? { ch: [g.von, g.bis] } : null)
       tpVorplanRegelnSetzen(regeln)
     }catch(_){ tpVorplanRegelnSetzen(null) }
-    _vpDir = ''
+    // Weg: Orbit V2 ist Standard (24.09.2026); der alte Duplikum-Weg nur, wenn er zuletzt bewusst gewählt war
+    _vpWeg = (g.weg === 'tvplus') ? 'tvplus' : 'tvv2'
+    const slEl = document.getElementById('tp-vp-sl'); if(slEl) slEl.value = (g.sl > 0) ? g.sl : ''
+    const suEl = document.getElementById('tp-vp-start-um'); if(suEl) suEl.value = ''
+    tpVorplanStartUmHinweis()
+    tpVorplanDirSetzen(tpVorplanIstV2() ? ((g.dir === 'buy' || g.dir === 'sell' || g.dir === '') ? g.dir : 'kompass') : '')
+    tpVorplanWegAnwenden()
     document.querySelectorAll('[data-vp-instr]').forEach(b => b.classList.toggle('active', b.dataset.vpInstr === _vpInstr))
-    document.querySelectorAll('[data-vp-dir]').forEach(b => b.classList.toggle('active', b.dataset.vpDir === _vpDir))
     document.getElementById('tpVorplanModal').classList.add('open')
-    if(!((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
+    if(!tpVorplanIstV2() && !((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
       dupLoadAccounts().then(tpVorplanRender).catch(() => {})
     }
     tpVorplanRender()
+    tpVorplanKompassLaden()
   }
   function tpVorplanClose(){ document.getElementById('tpVorplanModal').classList.remove('open') }
 
   async function tpVorplanAnlegen(){
     const msg = document.getElementById('tpVorplanMsg')
     const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
+    if(tpVorplanIstV2()) return tpVorplanAnlegenV2(say)
     const sl = tpDupSlaveAccount()
     if(sl.fehler) return say(sl.fehler, 'err')
     const slave = sl.slave
@@ -31168,6 +31836,47 @@
     finally{ if(go){ go.disabled = false; go.textContent = 'Pläne anlegen' } }
   }
 
+  // ORBIT V2 anlegen (24.09.2026): je gewähltes Konto eine tvv2-Zeile — Richtung je Konto gewürfelt (Kompass)
+  // oder fest, TP zufällig aus der Spanne, SL optional, Startzeit optional. Kein Slave, kein Duplikum.
+  async function tpVorplanAnlegenV2(say){
+    const kt = Math.max(1, Math.round(parseFloat(document.getElementById('tp-vp-kt')?.value) || 1))
+    const regeln = tpVorplanRegelnLesen()
+    const gewaehlt = new Set([...document.querySelectorAll('[data-vp-acc]:checked')].map(i => i.dataset.vpAcc))
+    if(!gewaehlt.size) return say('Kein Konto ausgewählt.', 'err')
+    const sl = Math.max(0, parseFloat(document.getElementById('tp-vp-sl')?.value) || 0)
+    const startHhmm = document.getElementById('tp-vp-start-um')?.value || ''
+    const startD = startHhmm ? tpStartUmAusZeit(startHhmm) : null
+    if(startHhmm && !startD) return say('Startzeit ungültig (hh:mm).', 'err')
+    // Instrument wie im Plan-Popup merken (Order-Popup + Karte lesen denselben Schalter)
+    _tpNqMode = _vpInstr
+    try{ localStorage.setItem(TP_NQ_MODE_LS, _vpInstr) }catch(_){}
+    try{ if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle() }catch(_){}
+    try{ localStorage.setItem(TP_VP_LS, JSON.stringify({ weg: 'tvv2', instr: _vpInstr, kt, regeln, sl: sl > 0 ? sl : null, dir: _vpDir })) }catch(_){}
+    // Dieselben TP-Regeln auch für den Winning-Day-Farmer (liest aus der DB)
+    try{ wdVorplanRegelnSpeichern({ instr: _vpInstr, kt, regeln }) }catch(_){}
+    if(_vpDir === 'kompass' && !_vpKompass.row){ try{ await tpVorplanKompassLaden() }catch(_){} }
+    const heute = new Date().toLocaleDateString('en-CA')
+    const symbol = (_vpInstr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
+    const startIso = startD ? startD.toISOString() : null
+    const rows = []
+    for(const k of tpVorplanKandidaten()){
+      if(k.belegt || !gewaehlt.has(String(k.acc.id))) continue
+      rows.push(tpVorplanPlanRowV2(k.acc, tpVorplanZeileV2(k.acc, regeln), kt, symbol, tpVorplanRichtungFuer(), sl, heute, startIso))
+    }
+    if(!rows.length) return say('Nichts anzulegen.', 'err')
+    const go = document.getElementById('tpVorplanGo'); if(go){ go.disabled = true; go.textContent = 'lege an…' }
+    try{
+      const { data, error } = await supabase.from('trade_plans').insert(rows).select('*')
+      if(error) throw error
+      for(const r of (data || [])) tradePlans.unshift(rowToPlan(r))
+      renderTradePlans()
+      tpVorplanClose()
+      const richt = _vpDir === 'kompass' ? (_vpKompass.row ? 'Richtung je Konto nach Kompass' : 'Richtung leer (kein Kompass)') : _vpDir ? _vpDir.toUpperCase() : 'Richtung leer'
+      if(typeof atToast === 'function') atToast(`⚡ ${(data || []).length} Orbit-V2-Plan/-Pläne angelegt (${symbol}, ${kt} Kt · ${richt}${sl > 0 ? ` · SL $${sl}` : ''}${startIso ? ` · Start ${tpStartUmText(startIso)}` : ''}) — ohne Hedge`, 'start')
+    }catch(e){ say('Fehler: ' + (e.message || e), 'err') }
+    finally{ if(go){ go.disabled = false; go.textContent = 'Orbit-V2-Pläne anlegen' } }
+  }
+
   document.getElementById('tpVorplanenBtn')?.addEventListener('click', tpVorplanOpen)
   document.getElementById('tpVorplanX')?.addEventListener('click', tpVorplanClose)
   document.getElementById('tpVorplanCancel')?.addEventListener('click', tpVorplanClose)
@@ -31177,8 +31886,20 @@
     _vpInstr = b.dataset.vpInstr; document.querySelectorAll('[data-vp-instr]').forEach(x => x.classList.toggle('active', x === b)); tpVorplanRender()
   }))
   document.querySelectorAll('[data-vp-dir]').forEach(b => b.addEventListener('click', () => {
-    _vpDir = b.dataset.vpDir; document.querySelectorAll('[data-vp-dir]').forEach(x => x.classList.toggle('active', x === b))
+    tpVorplanDirSetzen(b.dataset.vpDir); tpVorplanKompassLaden()
   }))
+  // Weg-Schalter (24.09.2026): Orbit V2 ↔ alter Duplikum-Weg — eigene Verdrahtung, Liste rechnet neu
+  document.querySelectorAll('[data-vp-weg]').forEach(b => b.addEventListener('click', () => {
+    _vpWeg = b.dataset.vpWeg === 'tvplus' ? 'tvplus' : 'tvv2'
+    if(tpVorplanIstV2() && !_vpDir) tpVorplanDirSetzen('kompass')
+    tpVorplanWegAnwenden()
+    if(!tpVorplanIstV2() && !((typeof dupState !== 'undefined' && dupState.accounts) || []).length && typeof dupLoadAccounts === 'function'){
+      dupLoadAccounts().then(tpVorplanRender).catch(() => {})
+    }
+    tpVorplanRender(); tpVorplanKompassLaden()
+  }))
+  document.getElementById('tp-vp-start-um')?.addEventListener('input', tpVorplanStartUmHinweis)
+  document.getElementById('tp-vp-start-um-x')?.addEventListener('click', () => { const el = document.getElementById('tp-vp-start-um'); if(el) el.value = ''; tpVorplanStartUmHinweis() })
   // Jede Regeländerung rechnet die Liste neu (nur der Regelblock dieses Popups — kein Sammel-Handler)
   document.getElementById('tp-vp-regeln')?.addEventListener('input', tpVorplanRender)
   /* ══ ENDE FUTURES VORPLANEN ══ */
@@ -33360,6 +34081,11 @@
     if(tcMasterField) tcMasterField.style.gridColumn = tcV2 ? 'span 2' : ''
     document.getElementById('tc-slave-cur').textContent = slavePreset.currency
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
+    // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
+    // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
+    _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: plQuelleFuerRoute(p.route) }
+            : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
+            : null
     document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
     document.getElementById('tradeCompleteMsg').textContent = ''
@@ -33653,7 +34379,10 @@
           const filled = []
           // V2 (24.09.2026): Slave wird still mit 0 belegt (Feld ausgeblendet) — kein „Slave 0.00" im Hinweis
           if(res.slavePnl != null && sEl && sEl.value === ''){ sEl.value = res.slavePnl.toFixed(2); if(!routeIstV2(plan.route)) filled.push('Slave ' + res.slavePnl.toFixed(2) + (res.slaveCcy||'')) }
-          if(res.masterPnl != null && mEl && mEl.value === ''){ mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||'')) }
+          if(res.masterPnl != null && mEl && mEl.value === ''){
+            mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||''))
+            _tcAuto = { wert: Number(res.masterPnl.toFixed(2)), quelle: plQuelleFuerRoute(plan.route) }   // pl_quelle (24.09.2026)
+          }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
             if(msgEl){
@@ -33954,6 +34683,20 @@
     })
   })
 
+  /* pl_quelle (24.09.2026, Vollumstieg — Finn will nachher sehen, WOHER ein P&L kam): 'echo' = Master-Baseline
+   * der Echo-Zustandsmaschine (_autoPnlFetchMt5, Echo + Echo V2), 'tv' = Today's P&L des Orbit-V2-Rundgangs
+   * (_autoPnlFetchTvV2), 'duplikum' = Duplikum-/Mirror-Weg, 'hand' = eingetippt oder geändert. Der Vergleich
+   * läuft über den Wert: weicht der gespeicherte Master-Wert vom Auto-Wert ab, war es Hand. Spalte legt der
+   * DB-Agent parallel an — fehlt sie noch, wird ohne pl_quelle wiederholt (kein hängender Abschluss). */
+  let _tcAuto = null   // { wert, quelle } — Herkunft des vorbelegten Master-Werts im Abschließen-Popup
+  function plQuelleFuerRoute(route){
+    return (route === 'mt5' || route === 'mt5v2') ? 'echo' : route === 'tvv2' ? 'tv' : 'duplikum'
+  }
+  function plQuelleErmitteln(mPl){
+    if(_tcAuto && _tcAuto.wert != null && isFinite(mPl) && Math.abs(mPl - _tcAuto.wert) < 0.005) return _tcAuto.quelle   // null = unbekannt, nicht anfassen
+    return 'hand'
+  }
+
   document.getElementById('tradeCompleteSave')?.addEventListener('click', async () => {
     if(!_completingPlanId) return
     const p = tradePlans.find(x => String(x.id) === String(_completingPlanId))
@@ -33988,8 +34731,16 @@
         // Bestand in „Überprüfen" ohne Stempel = Trade-Start (intraday) — nie der Klick von Tag 2.
         ended_at: p.endedAt || (p.status === 'review' ? (p.startedAt || new Date().toISOString()) : new Date().toISOString())
       }
-      const { data, error } = await supabase
+      const quelle = plQuelleErmitteln(mPl)
+      if(quelle) updates.pl_quelle = quelle
+      let { data, error } = await supabase
         .from('trade_plans').update(updates).eq('id', _completingPlanId).select('*').single()
+      if(error && updates.pl_quelle && /pl_quelle/i.test(String(error.message || '') + String(error.details || ''))){
+        // Spalte noch nicht da (DB-Agent parallel) — ohne pl_quelle wiederholen, der Abschluss darf nicht hängen
+        console.warn('[complete] pl_quelle-Spalte fehlt noch — speichere ohne:', error.message || error)
+        delete updates.pl_quelle
+        ;({ data, error } = await supabase.from('trade_plans').update(updates).eq('id', _completingPlanId).select('*').single())
+      }
       if(error) throw error
       const idx = tradePlans.findIndex(x => String(x.id) === String(_completingPlanId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
@@ -34825,6 +35576,30 @@
     if(elPurchases) elPurchases.textContent = sumPurchases ? '−€' + Math.abs(sumPurchases).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'
     // Live P/L Farbe je nach Vorzeichen
     if(elLivepl) elLivepl.style.color = sumLivePnl >= 0 ? 'var(--good)' : 'var(--danger)'
+
+    // Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes Einzelne"):
+    // ohne Gegen-Hedge gibt es kein Live-P&L mehr — die Kachel zeigt stattdessen den Prop-P&L der
+    // Master: Σ master_pl der abgeschlossenen Pläne im Kapitel (USD roh, aus tradePlans), Unterzeile
+    // Trades + Blow-Quote. Bei Hedge-Ära und „Alle" bleibt Live P/L wie gehabt.
+    const elLiveplLbl = document.getElementById('fin-kpi-livepl-label')
+    const elLiveplSub = document.getElementById('fin-kpi-livepl-sub')
+    if(kapitelAktiv !== 'alle' && kapitelObj(kapitelAktiv)?.hedge === false){
+      const fertig = (Array.isArray(tradePlans) ? tradePlans : []).filter(p => p.status === 'completed' && kapitelPasst(p.kapitelId, p.completedAt || p.createdAt))
+      const mitPl = fertig.filter(p => p.masterPl != null)
+      const mpl = mitPl.reduce((sum, p) => sum + p.masterPl, 0)
+      const blows = fertig.filter(p => !!p.blown).length
+      if(elLiveplLbl) elLiveplLbl.textContent = 'Prop-P&L (Master)'
+      if(elLivepl){
+        elLivepl.textContent = mitPl.length ? (mpl >= 0 ? '+' : '−') + '$' + Math.abs(mpl).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'
+        elLivepl.style.color = mitPl.length ? (mpl >= 0 ? 'var(--good)' : 'var(--danger)') : ''
+      }
+      if(elLiveplSub) elLiveplSub.textContent = fertig.length
+        ? `${fertig.length} Trade${fertig.length === 1 ? '' : 's'} · Blow-Quote ${Math.round(blows / fertig.length * 100)} %`
+        : 'noch kein Trade im Kapitel'
+    } else {
+      if(elLiveplLbl) elLiveplLbl.textContent = 'Live P/L'
+      if(elLiveplSub) elLiveplSub.textContent = 'YTD Live-Accounts'
+    }
 
     // Sub-Tab Counts
     document.getElementById('fintab-count-all').textContent              = String(txK.length)

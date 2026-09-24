@@ -4284,6 +4284,68 @@ TV_RX_POS_LONGSHORT = {"buy": re.compile(r"^(long|buy|kauf)", re.I), "sell": re.
 TV_RX_POS_TAB = re.compile(r"^positions?$", re.I)
 
 
+def tv_positions_kopf(roh, anker=None):
+    """Kopfzelle 'Symbol' der Positions-Tabelle samt 'Side'/'Qty' derselben Zeile
+    — die Anker-Regel aus tv_positions_tabelle, am 24.09.2026 herausgezogen,
+    weil tvclose (Orbit V2 schliessen) dieselbe Zeile braucht, ohne Mengen zu
+    summieren. Regel unveraendert: 'Symbol' in der Zeile unter einem Reiter
+    'Positions' (max. 120 px darueber, grob gleiche linke Kante) — oder dort,
+    wo der Anker eines frueheren Blicks sass (+-20 px).
+    -> (rs, rd|None, rq|None) oder None."""
+    els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
+    mitte_y = lambda r: (r[1] + r[3]) // 2
+    tabs = [r for n, r in els if TV_RX_POS_TAB.search(n)]
+    for ns, rs in els:
+        if not TV_RX_POS_SYMBOL.search(ns):
+            continue
+        # ein Positions-Reiter DARUEBER (hoechstens 120 px), grob gleiche linke Kante —
+        # oder die Zelle sitzt dort, wo sie beim Vorher-Blick mit Reiter sass
+        gleich = bool(anker) and abs(rs[0] - anker[0]) <= 20 and abs(rs[1] - anker[1]) <= 20
+        if not gleich and not any(0 < mitte_y(rs) - mitte_y(t) <= 120 and abs(t[0] - rs[0]) <= 120 for t in tabs):
+            continue
+        seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
+        mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
+        rd = min(seiten, key=lambda r: r[0]) if seiten else None
+        rq = min((r for r in mengen if not rd or r[0] > rd[0]), key=lambda r: r[0], default=None)
+        return rs, rd, rq
+    return None
+
+
+def tv_positions_zeilen(roh, kopf, symbol, richtung=None):
+    """Zeilen der Positions-Tabelle mit der Symbol-Wurzel (24.09.2026, fuer
+    tvclose). Dieselben Regeln wie die Zeilen-Schleife in tv_positions_tabelle:
+    unter der Kopfzeile, in der Symbol-Spalte, ein Wort, eine Zeile je 10 px.
+    'richtung' (buy/sell) schliesst NUR Zeilen aus, deren Seiten-Spalte lesbar
+    ist und BEWIESEN die Gegenseite zeigt — ohne Spalte oder mit unlesbarer
+    Seite zaehlt jede Zeile der Wurzel (die Seite ist dann ehrlich unbekannt).
+    -> [{'y', 'symbol', 'r', 'seite'|None}]"""
+    if not kopf:
+        return []
+    rs, rd, rq = kopf
+    els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
+    mitte_y = lambda r: (r[1] + r[3]) // 2
+    spalten = bool(rd and rq)
+    root = tv_symbol_root(symbol)
+    x_bis = (rd[0] - 10) if rd else (rs[0] + 160)
+    out, gesehen = [], []
+    for n, r in els:
+        y = mitte_y(r)
+        if y <= mitte_y(rs) + 8 or not (rs[0] - 30 <= r[0] < x_bis):
+            continue
+        if " " in n or not root or tv_symbol_root(n) != root or any(abs(y - g) <= 10 for g in gesehen):
+            continue
+        seite = None
+        if spalten:
+            s_el = [n2 for n2, r2 in els if abs(mitte_y(r2) - y) <= 12 and rd[0] - 30 <= r2[0] < rq[0] - 10]
+            seite = s_el[0][:20] if s_el else None
+            gegen = tv_gegenseite(richtung)
+            if gegen and any(TV_RX_POS_LONGSHORT[gegen].search(n2) for n2 in s_el):
+                continue
+        gesehen.append(y)
+        out.append({"y": y, "symbol": n[:30], "r": tuple(r), "seite": seite})
+    return out
+
+
 def tv_positions_tabelle(roh, symbol, richtung, anker=None):
     """Positions-Tabelle unten im TradingView-Konto-Bereich lesen (4b, 22.09.2026,
     Finns erster scharfer Lauf: "es drueckt nicht drauf" — der Klick hing am
@@ -4307,22 +4369,9 @@ def tv_positions_tabelle(roh, symbol, richtung, anker=None):
     -> {'menge': Summe, 'zeilen': n, 'spalten': bool, 'anker': rect} oder None ohne Anker."""
     els = [(str(e[0]).strip(), e[1]) for e in roh or () if e[1]]
     mitte_y = lambda r: (r[1] + r[3]) // 2
-    tabs = [r for n, r in els if TV_RX_POS_TAB.search(n)]
-    kopf = None
-    for ns, rs in els:
-        if not TV_RX_POS_SYMBOL.search(ns):
-            continue
-        # ein Positions-Reiter DARUEBER (hoechstens 120 px), grob gleiche linke Kante —
-        # oder die Zelle sitzt dort, wo sie beim Vorher-Blick mit Reiter sass
-        gleich = bool(anker) and abs(rs[0] - anker[0]) <= 20 and abs(rs[1] - anker[1]) <= 20
-        if not gleich and not any(0 < mitte_y(rs) - mitte_y(t) <= 120 and abs(t[0] - rs[0]) <= 120 for t in tabs):
-            continue
-        seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
-        mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(mitte_y(r) - mitte_y(rs)) <= 14 and r[0] > rs[0]]
-        rd = min(seiten, key=lambda r: r[0]) if seiten else None
-        rq = min((r for r in mengen if not rd or r[0] > rd[0]), key=lambda r: r[0], default=None)
-        kopf = (rs, rd, rq)
-        break
+    # Kopfzeile: seit 24.09.2026 in tv_positions_kopf (tvclose braucht dieselbe
+    # Anker-Regel, ohne die Mengen zu summieren) — Logik unveraendert.
+    kopf = tv_positions_kopf(roh, anker)
     if not kopf:
         return None
     rs, rd, rq = kopf
@@ -5028,8 +5077,167 @@ def tv_positionen_auspacken(pos):
     return out
 
 
-def modus_tvlesen(cmd):
+def tv_gegenseite(richtung):
+    return {"buy": "sell", "sell": "buy"}.get(str(richtung or "").lower())
+
+
+def tv_positionen_treffer(positionen, symbol, richtung=None):
+    """Reader-Zeilen mit der Symbol-Wurzel. 'richtung' schliesst NUR Zeilen aus,
+    deren Seite BEWIESEN die Gegenseite ist (Short bei buy) — eine leere oder
+    unlesbare Seite zaehlt mit. Grund (24.09.2026, zweites Lesen): tvclose
+    meldet 'schon_flach' (ok:true), wenn hier nichts uebrig bleibt; ein
+    unlesbares 'Side'-Feld darf eine offene Position nie fuer flach erklaeren."""
+    root = tv_symbol_root(symbol)
+    gegen = tv_gegenseite(richtung)
+    out = []
+    for p in (positionen or []):
+        if not root or tv_symbol_root(p.get("symbol")) != root:
+            continue
+        if gegen and tv_seite_passt(p.get("seite"), gegen):
+            continue
+        out.append(p)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Gemeinsame Bausteine von tvlesen und tvclose (24.09.2026 — beim Bau von
+# tvclose herausgezogen, damit der Konto-Schritt und die Frische-Doktrin an
+# GENAU EINER Stelle stehen; tvlesen verhaelt sich unveraendert).
+# ---------------------------------------------------------------------------
+
+def _tv_reader_bereit(trail):
+    """Schritt 0: Reader da, Userscript neu genug? -> (bf0, code, msg, extra)
+    — code '' heisst bereit."""
+    bf0 = _tv_http("/bedienfeld", timeout=2.0)
+    if bf0 is None:
+        return None, "reader_fehlt", ("TV-Reader (127.0.0.1:8790) antwortet nicht — laeuft reader-server.py "
+                                      "auf diesem PC?"), {}
+    if not bf0.get("ok"):
+        return None, "reader_fehlt", ("Reader laeuft, hat aber noch kein Bedienfeld — laeuft das Userscript "
+                                      "(Tampermonkey, Version " + TV_USERSCRIPT_LESEN_MIN + "+) im TradingView-Tab?"), {}
+    if not tv_version_min(bf0.get("version"), TV_USERSCRIPT_LESEN_MIN):
+        return None, "userscript_alt", (f"Userscript {bf0.get('version') or '?'} liefert noch keine "
+                                        f"Konto-Zusammenfassung — Update auf {TV_USERSCRIPT_LESEN_MIN}+ und den "
+                                        "TradingView-Tab mit F5 neu laden."), {"userscript": bf0.get("version")}
+    trail.append(f"Reader da (Userscript {bf0.get('version')}, Bedienfeld {bf0.get('alter_s')}s alt)")
+    return bf0, "", "", {}
+
+
+def _tv_konto_abgefangen(cmd, ext, geschwister, res, trail):
+    """Schritt 1: Konto-Schritt = modus_tvkonto, UNVERAENDERT, Ausgabe abgefangen
+    (Bauart aus modus_tvkette). Schreibt konto_aktiv/konto_trail/konto_msg/
+    konto_klicks nach res. -> (code, msg, extra); code '' = Konto steht.
+    konto_klicks (24.09.2026, Pruefauftrag 'wenn das Konto schon aktiv ist,
+    wirklich kein Klick'): zaehlt die '… geklickt'-Stationen in der Spur des
+    Konto-Schritts. Steht das Konto laut Bedienfeld/UIA schon richtig, endet
+    modus_tvkonto VOR jedem Klick (Zweig zustand == 'richtig') — die Zahl im
+    Panel-Log beweist das je Lauf, statt es zu behaupten."""
     import io
+    cmd_k = {k: str(cmd.get(k) or "").strip()
+             for k in ("tv_url", "tv_browser_path", "tv_chrome_profil", "tv_username", "firma")}
+    cmd_k["ext_id"] = ext
+    cmd_k["geschwister"] = geschwister
+    cmd_k["sitzung_merken"] = bool(cmd.get("sitzung_merken"))
+    puffer, echt = io.StringIO(), sys.stdout
+    sys.stdout = puffer
+    try:
+        modus_tvkonto(cmd_k)
+    except Exception as e:
+        sys.stdout = echt
+        return "tv_fehlt", f"Konto-Schritt abgebrochen: {type(e).__name__}: {e}", {}
+    finally:
+        sys.stdout = echt
+    zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
+    try:
+        res_k = json.loads(zeilen[-1])
+    except (ValueError, IndexError):
+        return "tv_fehlt", "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer"), {}
+    res["konto_aktiv"] = str(res_k.get("konto_aktiv") or "")[:80]
+    res["konto_trail"] = str(res_k.get("trail") or "")
+    res["konto_msg"] = str(res_k.get("msg") or "")[:300]
+    res["konto_klicks"] = res["konto_trail"].count("geklickt")
+    if not res_k.get("ok"):
+        schritt_k = str(res_k.get("schritt") or "")
+        if schritt_k in ("start", "befehl", "tradingview"):
+            # pywinauto fehlt (Mac) / Befehl / TradingView laesst sich nicht oeffnen
+            code = "bot_fehlt" if "pywinauto" in res["konto_msg"] else "tv_fehlt"
+        else:
+            code = "konto_nicht_erreicht"
+        return code, (res["konto_msg"] or "Konto-Schritt fehlgeschlagen"), {
+            "zustand": res_k.get("zustand"), "diagnose": res_k.get("diagnose")}
+    trail.append(f"Konto steht ({res['konto_aktiv'][:40]}) — {res_k.get('schritt')}, "
+                 f"{res['konto_klicks']} Klick(s) im Konto-Schritt")
+    return "", "", {}
+
+
+def _tv_frisch_lesen(ext, geschwister, t_ab, timeout_s, res):
+    """Schritt 2: Bedienfeld + Positions-Stand holen, beide JUENGER als t_ab —
+    kein Klick. Aktualisiert res['konto_aktiv'] aus dem Reader-Auge.
+    -> {'ok': True, 'bf', 'st', 'empf', 'konto_quelle'} oder
+       {'ok': False, 'code', 'msg', 'konto_quelle', ...}"""
+    ende = t_ab + timeout_s
+    bf, st, grund, empf = None, None, "noch kein Stand", None
+    konto_quelle = None
+    while time.time() < ende:
+        rest = ende - time.time()
+        bf = _tv_bf(nach=t_ab, timeout=min(3.0, max(0.3, rest)))
+        if not bf:
+            grund = "kein Bedienfeld-Stand nach dem Konto-Schritt (Userscript stumm? Tab verdeckt?)"
+            continue
+        z, aktiv = tv_konto_zustand(bf, ext, geschwister)
+        if z == "richtig":
+            res["konto_aktiv"], konto_quelle = aktiv[:80], "reader"
+        elif z in ("gleicher_login", "falsch"):
+            # Das Reader-Auge sieht ein ANDERES Konto als das UIA-Auge eben — zwei
+            # Augen, die sich widersprechen, sind kein Beweis. Nichts liefern.
+            return {"ok": False, "code": "konto_nicht_erreicht", "konto_quelle": konto_quelle,
+                    "msg": f"Konto-Schritt meldete {ext}, der Reader sieht aber '{aktiv[:40]}' im Panel — "
+                           "kein Stand ohne eindeutiges Konto.", "konto_aktiv": aktiv[:80], "zustand": z}
+        elif time.time() - t_ab < 3.0:
+            grund = "Reader-Auge sieht das Konto (noch) nicht"
+            _warte(0.3, 0.2)
+            continue
+        else:
+            # Der Reader kennt den Konto-Umschalter nicht (TradingView hat die Anker
+            # umbenannt, Fund 21.09.2026) — dann gilt der UIA-Beweis von eben (nach
+            # dem Klick frisch gelesen, derselbe Beweis, mit dem tvkonto Orders freigibt).
+            konto_quelle = "uia"
+        st = _tv_http("/positions", timeout=2.0)
+        if not st:
+            grund = "Positions-Stand nicht abrufbar"
+            _warte(0.3, 0.2)
+            continue
+        if st.get("an") is False:
+            return {"ok": False, "code": "reader_pausiert", "konto_quelle": konto_quelle,
+                    "msg": "TV-Reader ist pausiert (Orbit-Schalter) — der Positions-Stand ist eingefroren, "
+                           "stale ist nicht flat. Reader in Prophos einschalten."}
+        if st.get("blind"):
+            grund = "Reader blind: " + str(st.get("blind_grund") or "")[:120]
+            _warte(0.4, 0.3)
+            continue
+        if not isinstance(st.get("positionen"), list):
+            grund = "Positions-Stand ohne Liste"
+            _warte(0.3, 0.2)
+            continue
+        # Frische: Server-Alter (reader-server 24.09.2026+), sonst Browser-ts
+        # (gleicher PC, gleiche Uhr).
+        try:
+            if st.get("alter_s") is not None:
+                empf = time.time() - float(st["alter_s"])
+            else:
+                empf = float(st.get("ts") or 0) / 1000.0
+        except (TypeError, ValueError):
+            empf = None
+        if empf is None or empf < t_ab:
+            grund = "Positions-Stand aelter als der Lesebeginn (noch vom vorigen Konto?)"
+            _warte(0.3, 0.2)
+            continue
+        return {"ok": True, "bf": bf, "st": st, "empf": empf, "konto_quelle": konto_quelle}
+    return {"ok": False, "code": "reader_unfrisch", "konto_quelle": konto_quelle,
+            "msg": f"In {timeout_s:.0f} s kein beweisbarer Stand: {grund}."}
+
+
+def modus_tvlesen(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None}
     trail = _StempelSpur()
@@ -5053,116 +5261,23 @@ def modus_tvlesen(cmd):
     # --- 0: Reader da? Ohne ihn gibt es weder Positionen noch Zusammenfassung —
     # dann braucht es auch keinen Fenster-Tanz. Reihenfolge bewusst so: der
     # billigste Beweis zuerst (Doktrin seit dem MT5-Puls).
-    bf0 = _tv_http("/bedienfeld", timeout=2.0)
-    if bf0 is None:
-        return raus("reader_fehlt", "TV-Reader (127.0.0.1:8790) antwortet nicht — laeuft reader-server.py "
-                    "auf diesem PC?", "reader")
-    if not bf0.get("ok"):
-        return raus("reader_fehlt", "Reader laeuft, hat aber noch kein Bedienfeld — laeuft das Userscript "
-                    "(Tampermonkey, Version " + TV_USERSCRIPT_LESEN_MIN + "+) im TradingView-Tab?", "reader")
-    if not tv_version_min(bf0.get("version"), TV_USERSCRIPT_LESEN_MIN):
-        return raus("userscript_alt", f"Userscript {bf0.get('version') or '?'} liefert noch keine "
-                    f"Konto-Zusammenfassung — Update auf {TV_USERSCRIPT_LESEN_MIN}+ und den "
-                    "TradingView-Tab mit F5 neu laden.", "reader", userscript=bf0.get("version"))
-    trail.append(f"Reader da (Userscript {bf0.get('version')}, Bedienfeld {bf0.get('alter_s')}s alt)")
+    bf0, code, msg, extra = _tv_reader_bereit(trail)
+    if code:
+        return raus(code, msg, "reader", **extra)
 
     # --- 1: Konto-Schritt = modus_tvkonto, unveraendert, Ausgabe abgefangen ----
-    cmd_k = {k: str(cmd.get(k) or "").strip()
-             for k in ("tv_url", "tv_browser_path", "tv_chrome_profil", "tv_username", "firma")}
-    cmd_k["ext_id"] = ext
-    cmd_k["geschwister"] = geschwister
-    cmd_k["sitzung_merken"] = bool(cmd.get("sitzung_merken"))
-    puffer, echt = io.StringIO(), sys.stdout
-    sys.stdout = puffer
-    try:
-        modus_tvkonto(cmd_k)
-    except Exception as e:
-        sys.stdout = echt
-        return raus("tv_fehlt", f"Konto-Schritt abgebrochen: {type(e).__name__}: {e}", "konto")
-    finally:
-        sys.stdout = echt
-    zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
-    try:
-        res_k = json.loads(zeilen[-1])
-    except (ValueError, IndexError):
-        return raus("tv_fehlt", "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer"), "konto")
-    res["konto_aktiv"] = str(res_k.get("konto_aktiv") or "")[:80]
-    res["konto_trail"] = str(res_k.get("trail") or "")
-    res["konto_msg"] = str(res_k.get("msg") or "")[:300]
-    if not res_k.get("ok"):
-        schritt_k = str(res_k.get("schritt") or "")
-        if schritt_k in ("start", "befehl", "tradingview"):
-            # pywinauto fehlt (Mac) / Befehl / TradingView laesst sich nicht oeffnen
-            code = "bot_fehlt" if "pywinauto" in res["konto_msg"] else "tv_fehlt"
-        else:
-            code = "konto_nicht_erreicht"
-        return raus(code, res["konto_msg"] or "Konto-Schritt fehlgeschlagen", "konto",
-                    zustand=res_k.get("zustand"), diagnose=res_k.get("diagnose"))
-    trail.append(f"Konto steht ({res['konto_aktiv'][:40]}) — {res_k.get('schritt')}")
+    code, msg, extra = _tv_konto_abgefangen(cmd, ext, geschwister, res, trail)
+    if code:
+        return raus(code, msg, "konto", **extra)
 
     # --- 2: Lesen, kein Klick mehr. Alles muss JUENGER sein als t_lese. -------
     t_lese = time.time()
     _tv_http("/suche", {"texte": [ext] + geschwister}, timeout=1.5)   # Konto-Auge per Text (tv_konto_per_text)
-    ende = t_lese + timeout_s
-    bf, st, grund, empf = None, None, "noch kein Stand", None
-    konto_quelle = None
-    while time.time() < ende:
-        rest = ende - time.time()
-        bf = _tv_bf(nach=t_lese, timeout=min(3.0, max(0.3, rest)))
-        if not bf:
-            grund = "kein Bedienfeld-Stand nach dem Konto-Schritt (Userscript stumm? Tab verdeckt?)"
-            continue
-        z, aktiv = tv_konto_zustand(bf, ext, geschwister)
-        if z == "richtig":
-            res["konto_aktiv"], konto_quelle = aktiv[:80], "reader"
-        elif z in ("gleicher_login", "falsch"):
-            # Das Reader-Auge sieht ein ANDERES Konto als das UIA-Auge eben — zwei
-            # Augen, die sich widersprechen, sind kein Beweis. Nichts liefern.
-            return raus("konto_nicht_erreicht", f"Konto-Schritt meldete {ext}, der Reader sieht aber "
-                        f"'{aktiv[:40]}' im Panel — kein P&L ohne eindeutiges Konto.", "lesen",
-                        konto_aktiv=aktiv[:80], zustand=z)
-        elif time.time() - t_lese < 3.0:
-            grund = "Reader-Auge sieht das Konto (noch) nicht"
-            _warte(0.3, 0.2)
-            continue
-        else:
-            # Der Reader kennt den Konto-Umschalter nicht (TradingView hat die Anker
-            # umbenannt, Fund 21.09.2026) — dann gilt der UIA-Beweis von eben (nach
-            # dem Klick frisch gelesen, derselbe Beweis, mit dem tvkonto Orders freigibt).
-            konto_quelle = "uia"
-        st = _tv_http("/positions", timeout=2.0)
-        if not st:
-            grund = "Positions-Stand nicht abrufbar"
-            _warte(0.3, 0.2)
-            continue
-        if st.get("an") is False:
-            return raus("reader_pausiert", "TV-Reader ist pausiert (Orbit-Schalter) — der Positions-Stand "
-                        "ist eingefroren, stale ist nicht flat. Reader in Prophos einschalten.", "lesen")
-        if st.get("blind"):
-            grund = "Reader blind: " + str(st.get("blind_grund") or "")[:120]
-            _warte(0.4, 0.3)
-            continue
-        if not isinstance(st.get("positionen"), list):
-            grund = "Positions-Stand ohne Liste"
-            _warte(0.3, 0.2)
-            continue
-        # Frische: Server-Alter (reader-server 24.09.2026+), sonst Browser-ts
-        # (gleicher PC, gleiche Uhr).
-        try:
-            if st.get("alter_s") is not None:
-                empf = time.time() - float(st["alter_s"])
-            else:
-                empf = float(st.get("ts") or 0) / 1000.0
-        except (TypeError, ValueError):
-            empf = None
-        if empf is None or empf < t_lese:
-            grund = "Positions-Stand aelter als der Lesebeginn (noch vom vorigen Konto?)"
-            _warte(0.3, 0.2)
-            continue
-        break
-    else:
-        return raus("reader_unfrisch", f"In {timeout_s:.0f} s kein beweisbarer Stand: {grund}.", "lesen",
-                    konto_quelle=konto_quelle)
+    f = _tv_frisch_lesen(ext, geschwister, t_lese, timeout_s, res)
+    if not f["ok"]:
+        extra = {k: v for k, v in f.items() if k not in ("ok", "code", "msg")}
+        return raus(f["code"], f["msg"], "lesen", **extra)
+    bf, st, empf, konto_quelle = f["bf"], f["st"], f["empf"], f["konto_quelle"]
 
     positionen = tv_positionen_auspacken(st.get("positionen"))
     summary = bf.get("summary") if isinstance(bf.get("summary"), dict) else None
@@ -5181,6 +5296,411 @@ def modus_tvlesen(cmd):
                 + (f", Today's P&L {today:g} ({today_label})" if today is not None else
                    ", Tages-G&V nicht gefunden — 'summary' in der Antwort zeigt die Labels"),
                 "fertig")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ORBIT V2 SCHLIESSEN: tvclose (24.09.2026)
+#
+# Finns Auto-Close-Regel (22.09.2026): 23:45–00:00 Dubai alles schliessen —
+# fuer Echo laengst gebaut (/api/master-close), fuer Orbit stand in der Notiz
+# nur „Orbit-Schliessen in TV offen — Positions-Tabelle → ✕ / Flatten". Mit
+# dem Vollumstieg auf „Ohne Hedge" (Finn 24.09.2026: „riesen Umstieg — geh
+# alles durch") ist Orbit V2 der Standardweg fuer Futures, also braucht das
+# Auto-Close diesen Schritt jetzt wirklich.
+#
+# Bauweise, additiv, dieselben Mechaniken wie Order-Start und Rundgang:
+#   · Schritt 0/1/2 EXAKT wie tvlesen (Reader, modus_tvkonto abgefangen,
+#     frischer Stand) — steht das Konto, wird im Konto-Schritt nichts geklickt.
+#   · Ist laut frischem Reader-Stand keine Position der Wurzel offen:
+#     {ok:true, code:'schon_flach'} — nichts geklickt, Today's P&L dabei.
+#   · Sonst mit dem UIA-Auge (tv_positions_kopf / tv_positions_zeilen —
+#     dieselbe Kopf-/Zeilen-Regel wie der Order-Beweis) GENAU EINE Zeile der
+#     Wurzel finden und in DIESER Zeile GENAU EINEN benannten Knopf, dessen
+#     Name auf TV_RX_CLOSE passt (Close / Schliessen / Flatten / Close position,
+#     deutsch wie englisch, exakt — nie 'Close all', nie 'Closed', nie ein
+#     unbenannter Knopf). Alles andere: {ok:false, code:'close_knopf_unklar',
+#     gesehen:<UIA-Spur>} — NIE raten, NIE den Kauf-Knopf anfassen.
+#   · Nach dem Klick: TradingViews Rueckfrage 'Close position' / 'Position
+#     schliessen' bestaetigen — nur ueber einen NEU erschienenen, eindeutigen
+#     Bestaetigen-Knopf (TV_RX_CLOSE_JA, Rang 1). Ein blosses 'Close' im
+#     Dialog kann auch das X zum Wegklicken sein und zaehlt deshalb nicht.
+#     Zwei Kandidaten oder keiner in 8 s: 'bestaetigung_unklar' + ESC (ESC ist
+#     Abbrechen, nie Bestaetigen), retry_ok bleibt False (ein Klick ist raus).
+#   · Beweis wie beim Order-Start, nur gespiegelt: Reader-Stand JUENGER als
+#     der Klick und OHNE die Position — zweimal hintereinander (Streak 2, zwei
+#     verschiedene Staende). Ist der Reader blind, ersatzweise die UIA-Tabelle
+#     zweimal ohne die Zeile. Danach Today's P&L aus einem frischen Bedienfeld.
+# Rueckgabe-Codes (zusaetzlich zu denen von tvlesen): schon_flach (ok), fenster
+# (kein TradingView-Fenster), close_knopf_unklar, bestaetigung_unklar,
+# ende_unklar (geklickt, Position 'timeout_s' lang nicht weg), absturz.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Der Schliessen-Knopf in der Positions-Zeile — EXAKTER Name, optional ein
+# Symbol dahinter ('Close MNQZ6'); das Symbol muss dann die Plan-Wurzel tragen.
+TV_RX_CLOSE = re.compile(r"^(?:close(?: position)?|position schlie(?:ß|ss)en|schlie(?:ß|ss)en|flatten|glattstellen)"
+                         r"(?:\s+(?P<sym>[A-Za-z][A-Za-z0-9!:._-]{1,20}))?$", re.I)
+# 'Close all' / 'Alle schliessen' / 'Close all positions' — nie, in keiner Form.
+TV_RX_CLOSE_ALLE = re.compile(r"\b(all|alle|everything|sämtliche|saemtliche)\b", re.I)
+# Rueckfrage-Dialog: Rang 1 = eindeutige Bestaetigung. Ein blosses 'Close'/
+# 'Schliessen' gehoert NICHT hierher (kann das X des Dialogs sein).
+TV_RX_CLOSE_JA = re.compile(r"^(?:yes|ja|confirm|bestätigen|bestaetigen|ok|close position|position schlie(?:ß|ss)en|"
+                            r"flatten|glattstellen)(?:\s+[A-Za-z][A-Za-z0-9!:._-]{1,20})?$", re.I)
+TV_RX_CLOSE_NEIN = re.compile(r"^(?:cancel|abbrechen|no|nein|zurück|zurueck)$", re.I)
+TV_RX_CLOSE_DIALOG = re.compile(r"^(?:close position|position schlie(?:ß|ss)en|are you sure|sind sie sicher|"
+                                r"wirklich schlie(?:ß|ss)en)", re.I)
+
+
+def tv_close_text_passt(text, symbol):
+    """Ist dieser Knopf-Name der Schliessen-Knopf fuer die Wurzel von 'symbol'?
+    Exakt (nach strip), deutsch/englisch; 'Close all', 'Closed', 'Close all
+    positions' nie. Traegt der Name ein Symbol, muss es die Wurzel sein."""
+    t = str(text or "").strip()
+    if not t or TV_RX_CLOSE_ALLE.search(t):
+        return False
+    m = TV_RX_CLOSE.match(t)
+    if not m:
+        return False
+    sym = m.group("sym")
+    if sym:
+        root = tv_symbol_root(symbol)
+        return bool(root) and tv_symbol_root(sym) == root
+    return True
+
+
+def tv_close_knopf(roh, symbol, richtung=None, anker=None):
+    """Zeile + Schliessen-Knopf in der Positions-Tabelle (rein rechnend).
+    -> {'kopf': bool, 'anker': rect|None, 'zeilen': n, 'zeile': {...}|None,
+        'knopf': {...}|None, 'kandidaten': [...], 'grund': str}
+    knopf nur bei GENAU EINER Zeile der Wurzel und GENAU EINEM passenden,
+    BENANNTEN Element in dieser Zeile (+-14 px), rechts der Symbol-Spalte."""
+    mitte_y = lambda r: (r[1] + r[3]) // 2
+    root = tv_symbol_root(symbol)
+    out = {"kopf": False, "anker": None, "zeilen": 0, "zeile": None, "knopf": None, "kandidaten": [], "grund": ""}
+    kopf = tv_positions_kopf(roh, anker)
+    if not kopf:
+        out["grund"] = "Positions-Tabelle (Reiter 'Positions', Kopf 'Symbol') nicht zu sehen"
+        return out
+    out["kopf"], out["anker"] = True, tuple(kopf[0])
+    zeilen = tv_positions_zeilen(roh, kopf, symbol, richtung)
+    out["zeilen"] = len(zeilen)
+    if len(zeilen) != 1:
+        out["grund"] = (f"keine Zeile mit {root or '?'} in der Positions-Tabelle" if not zeilen else
+                        f"{len(zeilen)} Zeilen mit {root} — nicht eindeutig")
+        return out
+    z = zeilen[0]
+    out["zeile"] = {"symbol": z["symbol"], "y": z["y"], "seite": z["seite"]}
+    rs = kopf[0]
+    kand = []
+    for e in roh or ():
+        if not e[1]:
+            continue
+        n, r, typ = str(e[0]).strip(), e[1], (e[2] if len(e) > 2 else "")
+        if abs(mitte_y(r) - z["y"]) > 14 or r[0] <= rs[0]:
+            continue
+        if not tv_close_text_passt(n, symbol):
+            continue
+        if any(k["r"] == tuple(r) for k in kand):
+            continue
+        kand.append({"text": n[:60], "typ": typ, "r": tuple(r),
+                     "punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)})
+    out["kandidaten"] = kand
+    if len(kand) == 1:
+        out["knopf"] = kand[0]
+    else:
+        out["grund"] = (f"kein benannter Schliessen-Knopf in der Zeile {z['symbol']} (y={z['y']})" if not kand
+                        else f"{len(kand)} Schliessen-Knoepfe in der Zeile {z['symbol']} — nicht eindeutig")
+    return out
+
+
+def tv_close_bestaetigung(roh, namen_vorher):
+    """Rueckfrage nach dem Klick: NEUE Elemente seit dem Klick sichten.
+    -> {'ja': [...Rang-1-Knoepfe...], 'nein': n, 'dialog': bool, 'neu': [...]}"""
+    ja, nein, dialog, neu = [], 0, False, []
+    for e in roh or ():
+        if not e[1]:
+            continue
+        n, r, typ = str(e[0]).strip(), e[1], (e[2] if len(e) > 2 else "")
+        if not n or n in namen_vorher:
+            continue
+        if len(n) <= 60 and n not in neu:
+            neu.append(n)
+        if TV_RX_CLOSE_DIALOG.search(n):
+            dialog = True
+        if TV_RX_CLOSE_NEIN.match(n):
+            nein += 1
+            dialog = True
+            continue
+        if TV_RX_CLOSE_JA.match(n) and not TV_RX_CLOSE_ALLE.search(n) and typ in ("Button", "", "Hyperlink"):
+            if not any(k["r"] == tuple(r) for k in ja):
+                ja.append({"text": n[:60], "typ": typ, "r": tuple(r),
+                           "punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)})
+    return {"ja": ja, "nein": nein, "dialog": dialog, "neu": neu[:15]}
+
+
+def pruefe_tv_close_befehl(cmd):
+    """Fehlerliste fuer den tvclose-Befehl (leer = in Ordnung)."""
+    fehler = pruefe_tv_lesen_befehl(cmd)
+    if not isinstance(cmd, dict):
+        return fehler
+    if not tv_symbol_root(cmd.get("symbol")):
+        fehler.append("Symbol fehlt (z.B. NQZ6 / MNQ)")
+    r = str(cmd.get("richtung") or "").strip().lower()
+    if r and r not in ("buy", "sell"):
+        fehler.append("Richtung muss buy/sell sein (oder leer)")
+    return fehler
+
+
+def modus_tvclose(cmd):
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
+           "konto_aktiv": "", "konto_quelle": None, "geklickt": False, "bestaetigt": False,
+           "retry_ok": True}
+    trail = _StempelSpur()
+    fenster = [None]
+    maximiert = [False]
+
+    def raus(code, msg, schritt, **extra):
+        # Panel wieder nach unten, falls es fuer die Tabelle hochgeholt wurde
+        # (dieselbe Nachsorge wie in modus_tvkonto: maximiert verdeckt es den Chart).
+        if maximiert[0]:
+            maximiert[0] = False
+            try:
+                if fenster[0]:
+                    _tv_panel_umschalten(fenster[0], trail, "unten")
+            except Exception:
+                pass
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        res["trail"] = " > ".join(trail) + ((" || Konto: " + res["konto_trail"]) if res.get("konto_trail") else "")
+        res.pop("konto_trail", None)
+        _tv_http("/suche", {"texte": []}, timeout=1.5)
+        print(json.dumps(res, ensure_ascii=False))
+
+    fehler = pruefe_tv_close_befehl(cmd)
+    if fehler:
+        return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
+    ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
+    symbol = str(cmd.get("symbol") or "").strip()
+    root = tv_symbol_root(symbol)
+    richtung = str(cmd.get("richtung") or "").strip().lower() or None
+    timeout_s = tv_lesen_timeout(cmd)
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
+                   if len(_nur_alnum(x)) >= 3][:60]
+    res["symbol"], res["wurzel"], res["richtung"] = symbol, root, richtung
+
+    def today_aus(bf):
+        summary = bf.get("summary") if isinstance(bf.get("summary"), dict) else None
+        t, lab, txt = tv_today_pnl(summary, bf.get("today_pnl_text"), bf.get("today_label"))
+        return {"summary": summary, "today_pnl": t, "today_label": lab, "today_pnl_text": txt,
+                "sprache_fremd": bool(bf.get("sprache_fremd")), "summary_fehler": bf.get("summary_fehler")}
+
+    # --- 0 + 1: wie tvlesen -------------------------------------------------
+    bf0, code, msg, extra = _tv_reader_bereit(trail)
+    if code:
+        return raus(code, msg, "reader", **extra)
+    code, msg, extra = _tv_konto_abgefangen(cmd, ext, geschwister, res, trail)
+    if code:
+        return raus(code, msg, "konto", **extra)
+
+    # --- 2: Vorher-Stand, frisch — ist ueberhaupt etwas offen? --------------
+    t_lese = time.time()
+    _tv_http("/suche", {"texte": [ext] + geschwister}, timeout=1.5)
+    f = _tv_frisch_lesen(ext, geschwister, t_lese, min(timeout_s, 30.0), res)
+    if not f["ok"]:
+        extra = {k: v for k, v in f.items() if k not in ("ok", "code", "msg")}
+        return raus(f["code"], f["msg"], "lesen", **extra)
+    bf, st = f["bf"], f["st"]
+    res["konto_quelle"] = f["konto_quelle"]
+    vorher = tv_positionen_auspacken(st.get("positionen"))
+    treffer = tv_positionen_treffer(vorher, symbol, richtung)
+    res["positionen_vorher"] = vorher
+    trail.append(f"Vorher: {len(vorher)} Pos, davon {len(treffer)} mit {root}"
+                 + (f" ({richtung})" if richtung else ""))
+    if not treffer:
+        t_info = today_aus(bf)
+        return raus("schon_flach", f"Keine offene Position {root} auf {res['konto_aktiv'][:40]} — nichts geklickt"
+                    + (f", Today's P&L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else ""),
+                    "fertig", ok=True, positionen_danach=vorher, geklickt=False, retry_ok=False,
+                    gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"), **t_info)
+
+    # --- 3: TradingView-Fenster (wie modus_tvkette, mit Geduld) --------------
+    w, fw, ende_w = None, "", time.time() + 8.0
+    while not w:
+        try:
+            w, fw = _tv_fenster_holen(trail, "", symbol)
+        except Exception as e:
+            w, fw = None, f"{type(e).__name__}: {e}"
+        if w or time.time() >= ende_w:
+            break
+        _warte(0.3, 0.15)
+    if not w:
+        return raus("fenster", "TradingView-Fenster nicht gefunden — nichts geklickt. " + str(fw or ""), "fenster")
+    fenster[0] = w
+    typen = ("Text", "Button", "TabItem", "DataItem", "HeaderItem", "Header", "Custom",
+             "Hyperlink", "MenuItem", "ListItem", "CheckBox")
+
+    # --- 4: Zeile + Knopf mit dem UIA-Auge, hoechstens ~10 s ------------------
+    # Nur zwei Hilfsklicks sind erlaubt, beide eindeutig und ohne Marktwirkung:
+    # (a) der Reiter 'Positions' (genau ein Treffer), wenn die Kopfzeile fehlt,
+    # (b) das Panel nach oben holen (_tv_panel_umschalten, Kopfzeilen-Anker),
+    #     wenn es eingeklappt ist. Sonst kein Klick ausser dem Schliessen-Knopf.
+    # Zwischen den Blicken faehrt die Maus ueber die Zeile (kein Klick): bei
+    # TradingView erscheint das ✕ mancher Tabellen erst beim Hover.
+    ende = time.time() + 10.0
+    roh, k, anker, tab_geklickt, oben_versucht, gehovert = [], None, None, False, False, False
+    while True:
+        roh = _tv_uia_roh(w, typen)
+        k = tv_close_knopf(roh, symbol, richtung, anker)
+        anker = k["anker"] or anker
+        if k["knopf"]:
+            break
+        if time.time() >= ende:
+            break
+        if not k["kopf"] and not tab_geklickt:
+            tabs = [e for e in roh if e[1] and TV_RX_POS_TAB.search(str(e[0]).strip())
+                    and (len(e) < 3 or e[2] in ("TabItem", "Button", "Text", ""))]
+            if len(tabs) == 1:
+                tab_geklickt = True
+                r = tabs[0][1]
+                _tv_uia_klick({"punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)}, "Reiter Positions", trail)
+                _warte(0.5, 0.3)
+                continue
+        if not k["kopf"] and not oben_versucht:
+            oben_versucht = True
+            try:
+                if tv_panel_eingeklappt(roh, _tv_fenster_rect(w)) and _tv_panel_umschalten(w, trail, "oben"):
+                    maximiert[0] = True
+                    _warte(0.6, 0.3)
+                    continue
+            except Exception as e:
+                trail.append(f"Panel-Umschalten abgebrochen: {type(e).__name__}")
+        if k["zeile"] and not gehovert:
+            gehovert = True
+            zr = k["zeile"]
+            try:
+                _maus_fahren(int(k["anker"][0] + 40) if k["anker"] else 200, int(zr["y"]))
+                trail.append(f"Maus ueber Zeile {zr['symbol']} (y={zr['y']}), kein Klick")
+            except Exception:
+                pass
+        _warte(0.4, 0.25)
+    if not k["knopf"]:
+        gesehen = (k["grund"] + " | Kandidaten: " + (" | ".join(f"{x['typ']}:{x['text']}" for x in k["kandidaten"]) or "keine")
+                   + " | Zone: " + tv_positions_zone(roh))
+        return raus("close_knopf_unklar", f"Schliessen-Knopf fuer {root} nicht eindeutig — nichts geklickt. "
+                    + k["grund"], "knopf", gesehen=gesehen, zeile=k["zeile"], zeilen=k["zeilen"])
+    trail.append(f"Zeile {k['zeile']['symbol']} (Seite {k['zeile']['seite'] or '?'}), Knopf '{k['knopf']['text']}'")
+    namen_vorher = {str(e[0]).strip() for e in roh if e[1]}
+
+    # ═══ AB HIER UNUMKEHRBAR: genau der Knopf, dessen Name eben bewiesen wurde ═══
+    t_klick = time.time()
+    ok, fk = _tv_uia_klick(k["knopf"], f"Schliessen ({k['knopf']['text'][:30]})", trail)
+    if not ok:
+        return raus("close_knopf_unklar", fk + " — nichts geschlossen.", "knopf")
+    res["geklickt"], res["retry_ok"] = True, False
+
+    def weg_im_reader(nach):
+        """Frischer Reader-Stand nach 'nach' ohne die Position? -> (True/False/None, st, empf)"""
+        st2 = _tv_http("/positions", timeout=2.0)
+        if not st2 or st2.get("an") is False or st2.get("blind") or not isinstance(st2.get("positionen"), list):
+            return None, st2, None
+        try:
+            e2 = (time.time() - float(st2["alter_s"])) if st2.get("alter_s") is not None else float(st2.get("ts") or 0) / 1000.0
+        except (TypeError, ValueError):
+            return None, st2, None
+        if e2 < nach:
+            return None, st2, None
+        return (not tv_positionen_treffer(st2["positionen"], symbol, richtung)), st2, e2
+
+    # --- 5: Rueckfrage bestaetigen (falls TradingView eine zeigt) — bis 8 s ---
+    ende_d = time.time() + 8.0
+    bestaetigung, letzte = "keine", None
+    while time.time() < ende_d:
+        _warte(0.3, 0.2)
+        weg, _st, _e = weg_im_reader(t_klick)
+        if weg:
+            break                        # ohne Rueckfrage direkt geschlossen
+        roh_d = _tv_uia_roh(w, typen)
+        letzte = tv_close_bestaetigung(roh_d, namen_vorher)
+        if len(letzte["ja"]) == 1:
+            ok, fk = _tv_uia_klick(letzte["ja"][0], f"Bestaetigen ({letzte['ja'][0]['text'][:30]})", trail)
+            if not ok:
+                return raus("bestaetigung_unklar", fk + " — Rueckfrage steht evtl. noch offen, in TradingView nachsehen.",
+                            "dialog", gesehen=" | ".join(letzte["neu"]))
+            bestaetigung = "dialog"
+            break
+        if len(letzte["ja"]) >= 2 or (letzte["dialog"] and time.time() > t_klick + 4.0 and not letzte["ja"]):
+            # Zwei Bestaetigen-Kandidaten, oder ein Dialog ohne eindeutigen Knopf:
+            # nichts raten — ESC (= Abbrechen) und ehrlich melden.
+            try:
+                from pywinauto import keyboard
+                keyboard.send_keys("{ESC}")
+                trail.append("ESC (Rueckfrage abgebrochen, nichts bestaetigt)")
+            except Exception:
+                pass
+            # War es gar keine Rueckfrage, sondern TradingViews Meldung zum schon
+            # erfolgten Schliessen ('Close position … placed')? Dann sagt der Reader
+            # jetzt 'weg' — und der Beweis unten zaehlt, nicht das ESC.
+            _warte(0.4, 0.3)
+            weg, _st, _e = weg_im_reader(t_klick)
+            if weg:
+                trail.append("Reader meldet die Position schon weg — keine Rueckfrage, weiter zum Beweis")
+                break
+            return raus("bestaetigung_unklar", "Rueckfrage nach dem Klick nicht eindeutig — mit ESC abgebrochen, "
+                        "nichts bestaetigt. In TradingView nachsehen. Neu seit dem Klick: " + " | ".join(letzte["neu"]),
+                        "dialog", gesehen=" | ".join(letzte["neu"]),
+                        kandidaten=[x["text"] for x in letzte["ja"]])
+    res["bestaetigung"] = bestaetigung
+    if bestaetigung == "dialog":
+        trail.append("Rueckfrage bestaetigt")
+
+    # --- 6: Beweis — Reader JUENGER als der Klick und OHNE die Position, Streak 2;
+    #        Reader blind -> UIA-Tabelle zweimal ohne Zeile -------------------
+    ende_b = t_klick + timeout_s
+    streak, streak_tab, e_letzt, st_letzt, blind_seit = 0, 0, None, None, None
+    while time.time() < ende_b:
+        _warte(0.35, 0.25)
+        weg, st2, e2 = weg_im_reader(t_klick)
+        if weg is None:
+            blind_seit = blind_seit or time.time()
+            if time.time() - blind_seit >= 3.0:
+                roh_b = _tv_uia_roh(w, typen)
+                kb = tv_close_knopf(roh_b, symbol, richtung, anker)
+                streak_tab = streak_tab + 1 if (kb["kopf"] and kb["zeilen"] == 0) else 0
+                if streak_tab >= 2:
+                    trail.append("Position weg (UIA-Tabelle, 2 Blicke; Reader blind)")
+                    res["beweis"] = "tabelle"
+                    break
+            continue
+        blind_seit = None
+        if weg and (e_letzt is None or e2 > e_letzt):
+            streak += 1
+            st_letzt, e_letzt = st2, e2
+            if streak >= 2:
+                trail.append("Position weg (Reader, 2 frische Staende)")
+                res["beweis"] = "reader"
+                break
+        elif not weg:
+            streak, st_letzt = 0, st2
+    if not res.get("beweis"):
+        roh_u = _tv_uia_roh(w, typen)
+        neu = [n for n in (str(e[0]).strip() for e in roh_u if e[1]) if n and n not in namen_vorher and 2 < len(n) <= 60]
+        return raus("ende_unklar", f"Schliessen geklickt, aber {timeout_s:.0f} s danach zeigt der Reader die Position "
+                    f"{root} noch — erst in TradingView nachsehen, NICHT blind wiederholen. Neu seit dem Klick: "
+                    + (" | ".join(list(dict.fromkeys(neu))[:12]) or "nichts"), "beweis",
+                    positionen_danach=tv_positionen_auspacken((st_letzt or {}).get("positionen")))
+
+    # --- 7: Today's P&L aus einem Bedienfeld NACH dem Beweis -----------------
+    t_ende = time.time()
+    _warte(1.0, 0.6)          # Tradovate bucht den realisierten G&V einen Moment spaeter
+    bf2 = _tv_bf(nach=t_ende, timeout=6.0) or bf
+    t_info = today_aus(bf2)
+    danach = tv_positionen_auspacken((st_letzt or {}).get("positionen"))
+    trail.append(f"Danach: {len(danach)} Pos, Today {t_info['today_pnl']} ('{t_info['today_label']}')")
+    return raus("", f"Position {root} auf {res['konto_aktiv'][:40]} geschlossen (bewiesen: {res['beweis']}"
+                + (", Rueckfrage bestaetigt" if bestaetigung == "dialog" else "") + ")"
+                + (f", Today's P&L {t_info['today_pnl']:g}" if t_info["today_pnl"] is not None else
+                   ", Tages-G&V nicht gefunden — 'summary' zeigt die Labels"),
+                "fertig", ok=True, bestaetigt=True, positionen_danach=danach,
+                gelesen_at=time.strftime("%Y-%m-%dT%H:%M:%S"), userscript=bf2.get("version"), **t_info)
 
 
 def modus_tvorder(cmd):
@@ -7754,6 +8274,27 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
                               "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e}"}))
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvclose":
+        # Orbit V2 schliessen (24.09.2026, Auto-Close 23:45–00:00 Dubai): Konto
+        # anfahren wie tvlesen, dann in der Positions-Tabelle GENAU EINE Zeile
+        # der Wurzel ueber TradingViews eigenen Schliessen-Knopf flatten und den
+        # Beweis (Reader ohne die Position, Streak 2) + Today's P&L liefern.
+        # Kein Prophos-Heimweg, derselbe Grund wie bei tvlesen.
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True,
+                              "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvclose(cmd)
+        except Exception as e:
+            # retry_ok=False: der Bot weiss nach einem Absturz nicht, ob der
+            # Schliessen-Klick schon raus war (Doktrin wie tvorder).
+            print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz", "retry_ok": False,
+                              "msg": f"TV-Schliessen abgebrochen: {type(e).__name__}: {e} — erst in "
+                                     "TradingView nachsehen, ob die Position noch offen ist."}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
         # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView

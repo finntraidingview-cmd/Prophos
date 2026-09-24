@@ -2483,9 +2483,112 @@ class Handler(BaseHTTPRequestHandler):
             http = 200
             if not res.get("ok"):
                 http = {"reader_fehlt": 503, "konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
-            print(f"[panel] TV-Lesen @{konto} -> {res.get('ok')} [{res.get('code') or 'ok'}] "
-                  f"{len(res.get('positionen') or [])} Pos · Today {res.get('today_pnl')} "
-                  f"({res.get('msg')})", flush=True)
+            # Kurze Zeile je Lesung (24.09.2026, Rundgang alle 50–80 s — das Log soll
+            # lesbar bleiben): Erfolg = Konto, Positionen, Today, Klicks im Konto-Schritt;
+            # Fehler = Code + Meldung. Die Spur gibt es weiter in der Antwort.
+            if res.get("ok"):
+                _t = res.get("today_pnl")
+                print(f"[panel] tv-lesen {konto}: {len(res.get('positionen') or [])} Pos, today "
+                      f"{('%+.2f' % _t) if isinstance(_t, (int, float)) else '?'}"
+                      f" · {res.get('konto_klicks', '?')} Klick(s)", flush=True)
+            else:
+                print(f"[panel] tv-lesen {konto}: FEHLER {res.get('code') or '?'} — "
+                      f"{str(res.get('msg') or '')[:160]}", flush=True)
+            return self._send(http, json.dumps(res, ensure_ascii=False))
+
+        if u.path == "/api/tv-close":
+            # Orbit V2 schliessen (24.09.2026, Vollumstieg 'Ohne Hedge'; Finns
+            # Auto-Close-Regel 23:45–00:00 Dubai, bisher 'Orbit-Schliessen in TV
+            # offen'): der Bot faehrt das Konto an wie bei tv-lesen und flattet
+            # die Position der Symbol-Wurzel ueber TradingViews eigenen
+            # Schliessen-Knopf in der Positions-Tabelle (+ Rueckfrage). Beweis:
+            # Reader-Stand juenger als der Klick, ohne die Position, zweimal.
+            # Gleiche Bauart wie /api/tv-lesen: Config-Felder aus der Basis-Config,
+            # UNTER dem TV-Lock. Kein Echo-Pause-Riegel (Schliessen ist die sichere
+            # Richtung; die Pause gilt dem MT5-Echo), kein Copier-Riegel (V2 hat
+            # keinen Copier).
+            # Vertrag: 200 ok (code '' = geschlossen, 'schon_flach' = war nichts
+            # offen) · 409 puls_beschaeftigt / konto_nicht_erreicht · 503 reader_fehlt
+            # · sonst 200 mit ok:false + code (close_knopf_unklar, bestaetigung_unklar,
+            # ende_unklar, fenster, reader_pausiert, reader_unfrisch, userscript_alt,
+            # bot_fehlt, tv_fehlt, befehl, timeout, absturz). retry_ok:false, sobald
+            # ein Klick raus war (geklickt:true).
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
+            if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                    "msg": "Feld 'konto' (External ID) fehlt oder ist kuerzer als 3 Zeichen"}, ensure_ascii=False))
+            symbol = str(body.get("symbol") or "").strip()
+            if not SYMBOL_RE.fullmatch(symbol or ""):
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "Symbol ungueltig"}))
+            richtung = str(body.get("richtung") or "").strip().lower()
+            if richtung and richtung not in ("buy", "sell"):
+                return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                    "msg": "richtung muss buy/sell sein (oder fehlen)"}, ensure_ascii=False))
+            try:
+                timeout_s = max(10.0, min(180.0, float(body.get("timeout_s") or 45)))
+            except (TypeError, ValueError):
+                timeout_s = 45.0
+            bc = base_config()
+            cmd = {k: str(bc.get(k) or "").strip()
+                   for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            cmd["konto"] = konto
+            cmd["symbol"] = symbol
+            cmd["richtung"] = richtung
+            cmd["timeout_s"] = timeout_s
+            cmd["tv_username"] = str(body.get("tv_username") or "").strip()
+            cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            cmd["sitzung_merken"] = bool(body.get("sitzung_merken"))
+            g = body.get("geschwister")
+            cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                    "msg": "Es laeuft schon ein TradingView-Lauf (Order/Konto/Lesen/Schliessen) — spaeter erneut."},
+                    ensure_ascii=False))
+            to = int(timeout_s) + 120
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                if not os.path.exists(bot):
+                    res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg":
+                           "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
+                           "einmal 'Alles neu starten' klicken, dann erneut."}
+                else:
+                    # Konto-Schritt (bis 45 s) + Vorher-Stand (bis 30 s) + Knopf (10 s) +
+                    # Rueckfrage (8 s) + Beweis (timeout_s) + Puffer; mit Login-Wechsel
+                    # die 260-s-Obergrenze von tv-konto.
+                    if cmd["tv_username"]:
+                        to = max(to, 260)
+                    p = subprocess.run([sys.executable, bot, "tvclose", json.dumps(cmd)],
+                                       capture_output=True, text=True, errors="replace", timeout=to)
+                    line = (p.stdout or "").strip().splitlines()
+                    res = json.loads(line[-1]) if line else {
+                        "ok": False, "code": "bot_stumm", "retry_ok": False,
+                        "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                # retry_ok=False: der Klick KANN raus sein — nie blind wiederholen.
+                res = {"ok": False, "code": "timeout", "retry_ok": False,
+                       "msg": f"TV-Schliessen Timeout ({to}s) — in TradingView nachsehen, ob die Position noch offen ist."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg": f"TV-Schliessen fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            http = 200
+            if not res.get("ok"):
+                http = {"reader_fehlt": 503, "konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
+            _t = res.get("today_pnl")
+            print(f"[panel] tv-close {konto} {symbol}{(' ' + richtung) if richtung else ''}: "
+                  f"{'OK' if res.get('ok') else 'FEHLER'} [{res.get('code') or 'geschlossen'}]"
+                  f" geklickt={res.get('geklickt')} · {len(res.get('positionen_danach') or [])} Pos danach"
+                  f" · today {('%+.2f' % _t) if isinstance(_t, (int, float)) else '?'}"
+                  + ("" if res.get("ok") else f" — {str(res.get('msg') or '')[:160]}"), flush=True)
+            if res.get("trail"):
+                print(f"[panel] tv-close Spur: {str(res['trail'])[:900]}", flush=True)
             return self._send(http, json.dumps(res, ensure_ascii=False))
 
         if u.path == "/api/tv-order":
@@ -2838,13 +2941,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"ok": False, "msg": "ticket fehlt"}))
             if symbol and not SYMBOL_RE.fullmatch(symbol):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            # ECHO V2 (24.09.2026, Vollumstieg 'Ohne Hedge' — Auto-Close 23:45–00:00 Dubai
+            # muss auch V2-Positionen schliessen): ohne_hedge:true = es gibt keinen Hedge,
+            # den der Copier mitgehen muesste — der Frische-Riegel unten waere hier verkehrt
+            # (der Copier laeuft bei V2 oft gar nicht, das Close muss trotzdem raus). Derselbe
+            # Bypass wie bei /api/master-order: statt Copier-Frische nur der Riegel gegen die
+            # laufende EA-Selbstheilung (killt das Terminal mitten im Klick = UNKLAR). Der
+            # Bot selbst (run_close) braucht keinen Copier: er liest die Position ueber die
+            # Terminal-API (Login-Guard, Ticket, genau EINE offene Position) und klickt.
+            ohne_hedge = bool(body.get("ohne_hedge"))
+            if ohne_hedge:
+                cfg_v2 = read_json(os.path.join(HERE, inst["config_file"]), {}) or {}
+                tpath = str(cfg_v2.get("master_terminal_path") or "").strip()
+                inst_dir = os.path.dirname(os.path.abspath(tpath)) if tpath else ""
+                with HEAL_LOCK:
+                    heilt = bool(inst_dir) and inst_dir in HEAL_ACTIVE
+                if heilt:
+                    return self._send(409, json.dumps({"ok": False, "retry_ok": True,
+                        "grund": "terminal_heilt", "msg":
+                        "Terminal wird gerade geprueft (EA-Selbstheilung laeuft) — gleich erneut."},
+                        ensure_ascii=False))
             st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
             age = None
             try:
                 age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
             except (ValueError, TypeError):
                 pass
-            if not (st.get("running") and age is not None and age <= 15):
+            if not ohne_hedge and not (st.get("running") and age is not None and age <= 15):
                 return self._send(409, json.dumps({"ok": False, "retry_ok": True,
                     "grund": "copier_alt", "msg":
                     "Copier liefert keine frischen Daten — der Hedge wuerde das Close "
@@ -2881,7 +3004,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": False, "retry_ok": False, "msg": f"Close-Bot-Start fehlgeschlagen: {e}"}
             finally:
                 lock.release()
-            print(f"[panel] {fname}: Master-Close #{ticket} {symbol} "
+            print(f"[panel] {fname}: Master-Close{' (Echo V2, ohne Hedge)' if ohne_hedge else ''} #{ticket} {symbol} "
                   f"-> {res.get('ok')} ({res.get('msg')})", flush=True)
             if res.get("trail"):
                 print(f"[panel] {fname}: Spur: {res['trail']}", flush=True)
