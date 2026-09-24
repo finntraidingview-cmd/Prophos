@@ -19457,12 +19457,31 @@
              alter_ms: jetzt - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0), handel_ms: jetzt - (Number(r.reader_ts) || 0),
              sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null }
   }
+  async function mklKerzen24h(jetzt){
+    const seit = new Date(jetzt - 1440 * 60000).toISOString(), alle = []
+    for(const w of ['NQ', 'MNQ']){
+      const je = []
+      for(let seite = 0; seite < 2; seite++){
+        const { data, error } = await supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle')
+          .eq('wurzel', w).gte('minute', seit).order('minute', { ascending: false }).range(seite * 1000, seite * 1000 + 999)
+        if(error) throw error
+        je.push(...(data || []))
+        if(!data || data.length < 1000) break
+      }
+      alle.push(...je.reverse())
+    }
+    return { data: alle }
+  }
   async function mklLaden(vollstaendig){
     if(mkl.stub) return
     const jetzt = Date.now()
     const q = []
     q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(12))
-    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 1440 * 60000).toISOString()).order('minute', { ascending: true }).limit(3000))   // 24 h × 2 Wurzeln = 2.880 Kerzen (Zählung + Auto-Sprung brauchen beide)
+    // 24 h JE WURZEL, neueste zuerst und seitenweise (25.09.2026, Finn-Screenshot: nur zwei Riesenkerzen bei „23:02" und „03:19" —
+    // die alte Abfrage holte beide Wurzeln aufsteigend in EINER Abfrage mit limit 3000, Supabase liefert aber höchstens 1000 Zeilen:
+    // bei 903 MNQ + 494 NQ kamen nur die ÄLTESTEN 1000, alles nach ~19:02 UTC fehlte, im 1-h-Ausschnitt standen nur die zwei Kerzen
+    // links und rechts der Lücke). Jetzt je Wurzel absteigend in Seiten à 1000 (höchstens 2), danach aufsteigend zusammengesetzt.
+    if(vollstaendig || !mkl.kerzen.length) q.push(mklKerzen24h(jetzt))
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     // Nebenabfragen (Demo-Orders, Reader-PCs) nur alle 60 s bzw. beim vollen Laden — im 5-s-Takt reichen Kurs + Kerzen-Nachtrag
     // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
@@ -19502,7 +19521,7 @@
     if(vollstaendig || !mkl.kerzen.length) mkl.kerzen = neu
     else {
       // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
-      for(const k of neu){ const i = mkl.kerzen.findIndex(x => x.minute === k.minute && x.wurzel === k.wurzel); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
+      for(const k of neu){ const tk = Date.parse(k.minute) || 0; const i = mkl.kerzen.findIndex(x => x.wurzel === k.wurzel && (Date.parse(x.minute) || 0) === tk); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
       mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0))
       const grenze = jetzt - 1440 * 60000
       mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= grenze)
@@ -19666,12 +19685,16 @@
       }
     }
     const art = mkl.art === 'linie' ? 'linie' : 'kerzen'
-    // Daten für die Bibliothek: Unix-Sekunden, streng aufsteigend, doppelte Minuten raus
-    const daten = []; let letzteT = -1
+    // Daten für die Bibliothek (25.09.2026 gehärtet): Unix-SEKUNDEN, nach Zeit sortiert, je Minute genau eine Kerze — die zuletzt
+    // gelieferte gewinnt (vorher: die erste; und bei unsortierter Eingabe fielen alle älteren Minuten still heraus). Schlüssel ist
+    // die Minute der gewählten Wurzel, nicht das Symbol (MNQZ2026 ↔ MNQ1! aus einem zweiten Feed-Tab ändert nichts).
+    const jeMinute = new Map()
     for(const k of ks){
-      const tt = Math.floor((Date.parse(k.minute) || 0) / 1000); if(!(tt > 0) || tt <= letzteT) continue; letzteT = tt
-      daten.push(art === 'kerzen' ? { time: tt, open: Number(k.o), high: Number(k.h), low: Number(k.l), close: Number(k.c) } : { time: tt, value: Number(k.c) })
+      const tt = Math.floor((Date.parse(k.minute) || 0) / 60000) * 60; if(!(tt > 0)) continue
+      const o = Number(k.o), h = Number(k.h), l = Number(k.l), c = Number(k.c); if(!(c > 0)) continue
+      jeMinute.set(tt, art === 'kerzen' ? { time: tt, open: o > 0 ? o : c, high: Math.max(h > 0 ? h : c, c), low: Math.min(l > 0 ? l : c, c), close: c } : { time: tt, value: c })
     }
+    const daten = [...jeMinute.values()].sort((a, b) => a.time - b.time)
     const LW = window.LightweightCharts
     if(!_mklLw || _mklLw.art !== art || _mklLw.wurzel !== mkl.wurzel){
       mklChartEntfernen()
@@ -19698,10 +19721,17 @@
       // Takt-Update ohne Zoom-Verlust: update() nur für die letzte Kerze (oder die neue Minute: erst die abgeschlossene Vorgängerin
       // final, dann die neue). setData nur bei vollem Neuladen (Anzahl schrumpft / springt / Anfang verschoben) — das setzt den Bereich neu.
       const s = _mklLw.serie, n = daten.length, alt = _mklLw.n
-      if(!n){ s.setData([]) }
-      else if(n === alt && daten[0].time === _mklLw.erste && daten[n - 1].time === _mklLw.letzte){ s.update(daten[n - 1]) }
-      else if(n === alt + 1 && daten[0].time === _mklLw.erste && daten[n - 2].time === _mklLw.letzte){ s.update(daten[n - 2]); s.update(daten[n - 1]) }
-      else { s.setData(daten); _mklLw.n = n; _mklLw.erste = daten[0].time; _mklLw.letzte = daten[n - 1].time; mklSichtbarSetzen() }
+      try{
+        if(!n){ s.setData([]) }
+        else if(n === alt && daten[0].time === _mklLw.erste && daten[n - 1].time === _mklLw.letzte){ s.update(daten[n - 1]) }
+        else if(n === alt + 1 && daten[0].time === _mklLw.erste && daten[n - 2].time === _mklLw.letzte && daten[n - 1].time > _mklLw.letzte){ s.update(daten[n - 2]); s.update(daten[n - 1]) }
+        else { s.setData(daten); _mklLw.n = n; _mklLw.erste = daten[0].time; _mklLw.letzte = daten[n - 1].time; mklSichtbarSetzen() }
+      }catch(e){
+        // Lightweight-Fehler (z. B. „Cannot update oldest data") nicht schlucken: einmal komplett neu aufbauen (25.09.2026)
+        console.warn('[markt] Chart-Update fehlgeschlagen — Neuaufbau', e)
+        if(!mkl.chartNeuAufbau){ mkl.chartNeuAufbau = true; mklChartEntfernen(); try{ mklChartZeichnen() }finally{ mkl.chartNeuAufbau = false } }
+        return
+      }
       _mklLw.n = n; _mklLw.erste = n ? daten[0].time : 0; _mklLw.letzte = n ? daten[n - 1].time : 0
       _mklLw.vorletzte = n > 1 ? JSON.stringify(daten[n - 2]) : ''
     }
@@ -19790,6 +19820,7 @@
     finally{ mkl.busy = false }
   }
   // Stub ohne Login (Muster _admKapStub): window._mklStub({kurs, kerzen, orders}) zeichnet die View mit Testdaten
+  window._mklChartDaten = () => (_mklLw && _mklLw.serie && typeof _mklLw.serie.data === 'function') ? _mklLw.serie.data() : null   // Test-Zugriff
   window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kursJe = d.kurs && d.kurs.wurzel ? { [d.kurs.wurzel]: d.kurs } : {}; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
   // Verdrahtung: Spanne, Richtung, Instrument, Platzieren — jeweils eigene Handler
   // 1 h / 4 h / 24 h (25.09.2026): nur der sichtbare Bereich — die Daten sind immer die vollen 24 h 1-Minuten-Kerzen
@@ -31067,7 +31098,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.572'
+  const OS_TAB_BUILD = '2026-09-22.573'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
