@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.3
+// @version      0.8.4
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.4  25.09.2026  Zeilen mit Symbol + Menge, aber ohne lesbaren P&L (Spalte fehlt/Zelle leer) und ohne
+//                      Order-Merkmale werden BEHALTEN und die Lesung gilt als blind ('pnl-spalte fehlt' /
+//                      'pnl leer') — vorher fielen sie weg, ein offener Master sah flach aus, und der
+//                      Master-weg-Waechter haette den Hedge schliessen koennen (Gegenpruefung der Koordination).
 //   0.8.3  25.09.2026  Positions-Payload fuer den Master-zu-Waechter (Finn: 'Fusion soll sofort schliessen,
 //                      wenn der Master in TradingView zu ist'): je Position zusaetzlich wurzel, richtung
 //                      (buy/sell), menge_zahl, avg_fill (Zahl), ts; dazu konto + konto_ts (Konto-Umschalter
@@ -69,7 +73,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.3';
+  const VERSION    = '0.8.4';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -94,7 +98,7 @@
   // Was der letzte Lesevorgang WIRKLICH vorgefunden hat (0.4.0) — Grundlage
   // fuer die Blind-Entscheidung in tick(). zeilen/zellen/tabelle statt eines
   // blossen "0 Positionen".
-  let leseBefund = { zeilen: 0, zellen: 0, tabelle: false };
+  let leseBefund = { zeilen: 0, zellen: 0, tabelle: false, unklar: 0, pnl_spalte: true };
 
   /* Spaltentitel sind NICHT stabil (Fund 31.08.2026 an Finns PC): die Tabelle
    * hiess auf Deutsch mal "Menge / Durchschn. Ausfuehrungspreis /
@@ -189,11 +193,21 @@
     for (const r of rows.values()) {
       for (const k in r) if (r[k]) zellen++;
     }
-    leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa() };
-    // Eine Zeile ist eine offene Position, wenn sie Symbol UND einen G&V-Wert
-    // traegt. Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
-    const jetzt = Date.now();
-    return [...rows.values()]
+    const aus = positionenAusZeilen([...rows.values()], labels, Date.now());
+    leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa(), unklar: aus.unklar, pnl_spalte: aus.pnlSpalte };
+    return aus.positionen;
+  }
+
+  // REIN RECHNEND (testbar, 0.8.4): Tabellenzeilen {label: text} → Positionen.
+  // Eine Zeile ist eine offene Position, wenn sie Symbol UND einen G&V-Wert traegt; Order-Verlauf-Zeilen
+  // (mit 'Order-ID'/'Status') fallen raus. NEU: Symbol + Menge, aber KEIN lesbarer G&V und keine Order-
+  // Merkmale = 'unklar' — die Zeile bleibt in der Liste (pnl null) und blindGrund meldet die Lesung als
+  // blind. Fehlt die G&V-Spalte ganz (Layout/Sprache), sah ein offener Master sonst flach aus.
+  const ORDER_MERKMALE = ['Status', 'Order-ID', 'Order ID', 'Auftrags-ID', 'Auftragsnummer', 'Order Id'];
+  function positionenAusZeilen(zeilen, labels, jetzt) {
+    const pnlSpalte = SPALTEN.pnl.some((l) => labels && labels.has(l));
+    let unklar = 0;
+    const positionen = (zeilen || [])
       .map((r) => {
         const symbol = feld(r, SPALTEN.symbol), seite = feld(r, SPALTEN.seite);
         const menge = feld(r, SPALTEN.menge), einstieg = feld(r, SPALTEN.einstieg);
@@ -209,9 +223,19 @@
           menge_zahl: zahlAusText(menge),
           avg_fill:   zahlAusText(einstieg),
           ts:         jetzt,
+          _order:     ORDER_MERKMALE.some((k) => r[k] !== undefined && String(r[k]).trim() !== ''),
         };
       })
-      .filter((p) => p.symbol && p.pnl !== null);
+      .filter((p) => {
+        if (!p.symbol) return false;
+        if (p.pnl !== null) return true;                 // wie bisher: Symbol + G&V = Position
+        if (p._order || !p.menge) return false;          // Order-Verlauf oder Zeile ohne Menge: wie bisher raus
+        unklar++;
+        p.pnl_unklar = true;                             // behalten, aber als Beweis unbrauchbar → blind
+        return true;
+      })
+      .map((p) => { delete p._order; return p; });
+    return { positionen, unklar, pnlSpalte };
   }
 
   // 'Buy'/'Kauf'/'Long' -> 'buy', 'Sell'/'Verkauf'/'Short' -> 'sell', sonst null
@@ -863,6 +887,10 @@
   let sichtbarePosZahl = null;   // Positionszahl der letzten SICHTBAREN, nicht blinden Lesung
 
   function blindGrund(positionen) {
+    // 0.8.4: Zeilen mit Symbol + Menge ohne lesbaren G&V = die Liste kann einen offenen Master verbergen
+    if (leseBefund.unklar) return leseBefund.pnl_spalte
+      ? ('pnl leer in ' + leseBefund.unklar + ' Zeile(n) mit Symbol + Menge')
+      : 'pnl-spalte fehlt (' + leseBefund.unklar + ' Zeile(n) mit Symbol + Menge)';
     if (positionen.length) return null;                  // Positionen = Beweis genug
     if (!leseBefund.tabelle) return 'Positionstabelle nicht auffindbar (Panel zu?)';
     if (leseBefund.zeilen && !leseBefund.zellen) return 'Tabellenzellen kamen leer zurueck';
