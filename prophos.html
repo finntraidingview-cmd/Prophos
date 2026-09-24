@@ -18259,17 +18259,68 @@
     }catch(_){}
     return null
   }
+  // Vom Copier SELBST erkannte Abschlüsse (Backend .475): status.hedge_solo_zu[] = letzte 20 {ticket, pl, grund, fill_close,
+  // closed_at, …}, neustart-fest. Steht das Ticket drin, ist die Position zu — ohne Close-Aufruf. Nur frische Status (≤ 15 s).
+  // Am PC aus dem Panel (mtcInstances), am Mac aus mt5_live (window._mt5CloudRows, Zeilen des PCs, der den Hedge hält) —
+  // dasselbe Muster wie hedgeSoloLive; Ring-Einträge sind neustart-fest, deshalb reicht am Mac auch eine ältere Zeile.
+  function hedgeSoloZuFinden(ticket, pc){
+    if(!ticket) return null
+    const such = list => { for(const s of (list || [])){ const z = (s && Array.isArray(s.hedge_solo_zu)) ? s.hedge_solo_zu.find(q => q && Number(q.ticket) === Number(ticket)) : null; if(z) return z } return null }
+    try{
+      if(MT5_LOCAL && typeof window.mtcInstances === 'function'){
+        const frische = Object.values(window.mtcInstances() || {}).filter(i => i && i.alive && i.fetchedAt && (Date.now() - i.fetchedAt) <= 15000).map(i => i.status)
+        const z = such(frische); if(z) return z
+      }
+      const rows = (window._mt5CloudRows || []).filter(r => r && (!pc || r.pc_name === pc)).map(r => r.status)
+      return such(rows)
+    }catch(_){ return null }
+  }
+  // Abschluss aus dem Ring am Plan festhalten — ohne Close-Aufruf. pl null = Historie hinkte beim Erkennen: dann steht
+  // „P&L folgt" auf der Karte und der PC-Tab fragt per Close-Aufruf mit Ticket nach (hedgePlNachholen).
+  async function hedgeZuAusRing(plan, zu){
+    const pl = (typeof zu.pl === 'number' && isFinite(zu.pl)) ? zu.pl : null
+    const grundEnd = (zu.grund && zu.grund !== 'close' && zu.grund !== 'unbekannt') ? zu.grund : 'level_mt5'
+    const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
+    await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: zu.grund || null, pl, pl_offen: pl == null, fill_close: zu.fill_close || null,
+      schon_zu: true, closed_at: zu.closed_at || new Date().toISOString(), msg: 'vom Copier erkannt' }, extra)
+    if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
+  }
+  async function hedgePlNachholen(plan){
+    const h = plan.mt5Baseline.hedge, pid = String(plan.id)
+    if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
+    _hedgeBusy.add(pid)
+    try{
+      try{ await hedgeAmPlanSchreiben(plan.id, { pl_nachfrage_at: new Date().toISOString() }) }catch(_){}
+      const res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'close', ticket: h.ticket, grund: h.grund || 'level_mt5' }), timeoutMs: 20000 })
+      if(res && res.ok && typeof res.pl === 'number' && isFinite(res.pl)){
+        const extra = (plan.slavePl == null) ? { slave_pl: res.pl } : null
+        await hedgeAmPlanSchreiben(plan.id, { pl: res.pl, pl_offen: false, fill_close: res.fill_close || h.fill_close || null, msg: 'P&L nachgeholt' }, extra)
+      }
+    }catch(_){}
+    finally{ _hedgeBusy.delete(pid) }
+  }
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
-    if(!MT5_LOCAL || _hedgeWacheBusy || typeof window.mtcApi !== 'function') return
+    if(_hedgeWacheBusy) return
+    // Am PC (Terminal dort): voller Wächter. Am Mac (Backend .475): nur der Ring-Abgleich aus mt5_live, damit die Karte
+    // „zu · −4,20 € · Master-TP erreicht" auch zeigt, wenn der PC-Tab gerade nicht lief.
+    const amPc = !!(MT5_LOCAL && typeof window.mtcApi === 'function')
     _hedgeWacheBusy = true
     try{
       let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
-      const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.pc === hedgePcId())
+      const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && (!amPc || p.mt5Baseline.hedge.pc === hedgePcId()))
       if(!meine.length) return
-      const liste = hedgeSoloListeFrisch()
+      const liste = amPc ? hedgeSoloListeFrisch() : null
       for(const p of meine){
         const h = p.mt5Baseline.hedge
+        // Ring-Abgleich (Backend .475): Ticket in hedge_solo_zu → Position ist zu, Ergebnis direkt übernehmen, kein Close-Aufruf
+        if((h.status === 'offen' || h.status === 'schliesst') && h.ticket && !_hedgeBusy.has(String(p.id))){
+          const zu = hedgeSoloZuFinden(h.ticket, h.pc)
+          if(zu){ await hedgeZuAusRing(p, zu); continue }
+        }
+        if(!amPc) continue
+        // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
+        if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
           try{
             const e = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'ergebnis', cmd_id: h.cmd_id }), timeoutMs: 8000 })
@@ -18326,8 +18377,8 @@
           `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Faktor ${f(h.hedge_faktor)})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
       }
       if(h.status === 'geschlossen'){
-        const pl = Number(h.pl)
-        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">zu · P&L ?</span>`,
+        const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
+        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">zu · P&L folgt</span>`,
           'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
@@ -29214,7 +29265,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.477'
+  const OS_TAB_BUILD = '2026-09-22.478'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
