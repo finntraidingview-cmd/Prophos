@@ -3832,6 +3832,10 @@
     #dashboard-view .view-head > div:last-child:has(> :only-child){
       -webkit-mask-image:none;mask-image:none;
     }
+    /* Hauptaktion zuerst (24.09.2026, Design-Rundgang): „Trade planen" bzw. „Account
+       hinzufuegen" stand als letzter Knopf rechts ausserhalb des Bilds — die Zeile
+       ist wischbar, aber die Hauptaktion muss ohne Wischen sichtbar sein. */
+    #dashboard-view .view-head > div:last-child > .btn-primary{order:-1}
 
     /* ============ TAB-BAR ============ */
     #dashboard-view .mob-nav{
@@ -7368,7 +7372,15 @@
             <button type="button" data-mkl-span="1440">24 h</button>
           </div>
         </div>
-        <div style="height:300px;margin-top:10px"><canvas id="mkl-chart"></canvas></div>
+        <div style="height:300px;margin-top:10px;position:relative"><canvas id="mkl-chart"></canvas>
+          <!-- Ohne Kerzen zeichnete Chart.js eine leere 0–1-Achse (24.09.2026, Design-Rundgang) — jetzt ein
+               ehrlicher Platzhalter; mklChartZeichnen blendet ihn ein/aus. -->
+          <div id="mkl-leer" class="empty" style="display:none;position:absolute;inset:0;padding:0;border:none;background:transparent;flex-direction:column;justify-content:center;align-items:center">
+            <div class="empty-ico">📉</div>
+            <h3>Keine Minutenkerzen</h3>
+            <p>Der Chart füllt sich, sobald der Reader-PC mit offenem TradingView-Tab Kurse liefert.</p>
+          </div>
+        </div>
         <div id="mkl-hinweis" style="font-size:11.5px;color:var(--sub-2);margin-top:6px;line-height:1.5"></div>
       </div>
       <div class="card" style="padding:14px 16px;margin-bottom:14px">
@@ -7409,7 +7421,7 @@
       <div class="view-head">
         <div>
           <h1 class="view-title">Echo</h1>
-          <p class="view-sub">Dein MT5-Hedge-Copier — die Flotte dieses PCs. Duplikium läuft daneben normal weiter.</p>
+          <p class="view-sub">Dein MT5-Copier — die Flotte dieses PCs, Echo und Echo V2.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="mtc-version" title="Version des Copier-Stacks auf diesem PC" style="display:none"></span>
@@ -7488,7 +7500,7 @@
       <div class="view-head">
         <div>
           <h1 class="view-title">Orbit</h1>
-          <p class="view-sub">Futures-Hedge über den TradingView-Reader — liest die Master-Positionen direkt aus dem Browser. Erste Stufe: sehen &amp; schalten.</p>
+          <p class="view-sub">Futures über TradingView — Puls platziert die Order, der Reader liest die Positionen. Orbit V2 läuft ohne Hedge.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <span class="mtc-chip" id="ep-lokal-chip" title="Der Reader läuft auf DIESEM Gerät (127.0.0.1:8790 antwortet)" style="display:none"><span class="mtc-dot on"></span>Reader lokal</span>
@@ -7592,8 +7604,8 @@
       <div id="kasse-lock">
         <div class="card" style="max-width:340px;margin:36px auto;text-align:center;padding:26px 22px">
           <div style="font-size:30px;margin-bottom:8px">🔒</div>
-          <h3 style="margin:0 0 4px;font-size:16px">Kasse gesperrt</h3>
-          <p style="margin:0 0 16px;color:var(--sub);font-size:13px">Code eingeben, um die Kasse zu öffnen.</p>
+          <h3 style="margin:0 0 4px;font-size:16px">Admin gesperrt</h3>
+          <p style="margin:0 0 16px;color:var(--sub);font-size:13px">Code eingeben, um den Admin-Bereich zu öffnen.</p>
           <input id="kasse-code" type="password" inputmode="numeric" maxlength="8" placeholder="Code" autocomplete="off" style="text-align:center;font-size:20px;letter-spacing:.3em;width:100%;padding:11px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--ink)">
           <div id="kasse-code-err" style="color:var(--danger);font-size:12.5px;height:16px;margin-top:6px"></div>
           <button class="btn btn-primary" id="kasse-unlock" style="width:100%;margin-top:6px">Öffnen</button>
@@ -9987,8 +9999,8 @@
     'account-detail': ['Account', 'Details, Trades & Buchungen'],
     topstep:   ['Topstep Mirror', 'TSX ↔ MT5 hatching'],
     calc:      ['Lot Rechner', 'Hatch-Multiplier zwischen zwei Firms'],
-    mt5copier: ['Echo', 'Dein MT5-Hedge-Copier — die Flotte dieses PCs'],
-    echoplus:  ['Orbit', 'Futures-Hedge über den TradingView-Reader'],
+    mt5copier: ['Echo', 'Dein MT5-Copier — die Flotte dieses PCs'],
+    echoplus:  ['Orbit', 'Futures über TradingView — Puls platziert, der Reader liest'],
     trades:    ['Trades',    'Trade-Log über alle Accounts'],
     livetrades:['Live Trades', 'Offene Positionen'],
     risk:      ['Risk',      'Live-Drawdown & Compliance'],
@@ -18401,6 +18413,9 @@
   function mklChartZeichnen(){
     const cv = $mkl('mkl-chart'); if(!cv || typeof Chart === 'undefined') return
     const ks = mkl.kerzen
+    // Leer-Zustand: Canvas weg, Platzhalter hin — Chart.js zeichnete sonst eine 0–1-Achse ins Nichts
+    const leer = $mkl('mkl-leer'); if(leer) leer.style.display = ks.length ? 'none' : 'flex'
+    cv.style.visibility = ks.length ? '' : 'hidden'
     const labels = ks.map(k => new Date(k.minute).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }))
     const closes = ks.map(k => Number(k.c))
     if(mkl.kurs && ks.length){ closes[closes.length - 1] = mkl.kurs.preis }   // laufende Minute = Live-Kurs
@@ -29072,7 +29087,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.469'
+  const OS_TAB_BUILD = '2026-09-22.471'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
