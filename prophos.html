@@ -1336,7 +1336,8 @@
   #adm-pane-stat .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
   #adm-pane-stat .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
   #adm-pane-stat .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
-  #adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,1fr);gap:10px;margin:6px 0 4px}   /* 8 Kacheln = 2 saubere Reihen (24.09.2026 abends) */
+  #adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:6px 0 4px}   /* 8 Kacheln = 2 saubere Reihen; minmax(0,…) = kein Überlauf bei schmaler Breite (24.09.2026 abends) */
+  #adm-pane-stat .kf-kpis .kpi{min-width:0}
   #adm-pane-stat .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
   #adm-pane-stat .kf-kpis .kpi-value{font-size:18px}
   #adm-pane-stat .kf-kpis .kpi-delta{font-size:11px}
@@ -7988,6 +7989,9 @@
                 <div class="kf-param">
                   <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
                   <label title="leer = reale Reibung je Trade aus der Hedge-Ära (gemessen je Firma · Typ × Anteil: Funded 1,0 / Challenge·Phase 0,5) · Zahl = Override für alle Trades">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung" placeholder="auto"></label>
+                  <!-- Duplikum pauschal (24.09.2026 abends, Finn: „jede ID hat im Schnitt 6–7 Futures-Accounts = Slots, mal die
+                       Anzahl der IDs (7), mal 8 € — weil wir 8 € pro Monat für einen Duplikum-Slot zahlen") -->
+                  <label title="Duplikum-Ersparnis pauschal: IDs × Ø Futures-Konten je ID = Slots, × € je Slot und Monat. Zählt ab Kapitelbeginn je Tag mit 1/30 des Monatsbetrags — unabhängig davon, ob getradet wurde.">Duplikum <input class="input mono" type="number" step="1" min="0" data-kf-param="dup_ids" style="width:52px"> IDs × <input class="input mono" type="number" step="0.5" min="0" data-kf-param="dup_konten" style="width:52px"> Konten × <input class="input mono" type="number" step="0.5" min="0" data-kf-param="dup_eur" style="width:56px"> €/Monat</label>
                   <span class="mono" id="adm-kf-stand" style="font-size:11.5px;color:var(--sub)"></span>
                   <button class="btn btn-ghost" id="adm-kf-refresh" title="Neu laden" style="padding:6px 10px">↻</button>
                 </div>
@@ -8014,8 +8018,8 @@
                       <div class="adm-vl-legend" id="adm-kf-legend-real"></div>
                     </div>
                     <div class="kf-chart" data-kf-chart="dup" hidden>
-                      <div class="kf-titel">Duplikum gespart · kumuliert je Person</div>
-                      <div class="kf-sub">Orbit-V2-Konten hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht (10 € je Slot und Monat, Slot lebt vom ersten Trade bis zum Blow und wird danach wiederverwendet) · je Tag Slots × 10 €/30 — gestrichelt = alle zusammen</div>
+                      <div class="kf-titel">Duplikum gespart · kumuliert</div>
+                      <div class="kf-sub">pauschal: IDs × Ø Futures-Konten je ID = Slots, × € je Slot und Monat (Kopf oben), je Tag 1/30 — ab Kapitelbeginn, unabhängig vom Traden; Personen-Filter greift hier nicht</div>
                       <div class="adm-vl"><canvas id="adm-kf-chart-dup"></canvas></div>
                       <div class="adm-vl-legend" id="adm-kf-legend-dup"></div>
                     </div>
@@ -10755,7 +10759,8 @@
      * Faktor 1, Reibung 5,44 → hedge_hyp = −175,44 € (der Hedge hätte den Gewinn gespiegelt gekostet). */
     // reibung null = je Trade aus der Hedge-Ära (24.09.2026, Finn: „Die Reibung mit 5,44 € macht keinen Sinn …
     // nur die Hälfte bleibt real übrig"); eine Zahl im Feld = Override für alle Trades.
-    const ADM_KF_STD = { faktor: 1, reibung: null }
+    // Duplikum pauschal (24.09.2026 abends, Finn): IDs × Ø Futures-Konten je ID × € je Slot und Monat — Standard 7 × 6 × 8 €
+    const ADM_KF_STD = { faktor: 1, reibung: null, dup_ids: 7, dup_konten: 6, dup_eur: 8 }
     const admKf = { param: { ...ADM_KF_STD }, person: '', filter: null, geladen: false }
     let _admKfTimer = null
     // Quote je Trade seit 24.09.2026 (Finn: „der Hedge ist nicht immer 1:1 … Apex Funded +7.500 $ ist so grob ein
@@ -10931,43 +10936,24 @@
         return [...m.values()].sort((a, b) => a.label.localeCompare(b.label, 'de'))
       }
       const pick = key => { admKf.person = String(admKf.person) === String(key) ? '' : String(key); admKfRender() }
-      // Duplikum-Ersparnis (24.09.2026 abends, Finn: „wie bei Duplikum sparen, auch täglich und monatlich — wir zahlen
-      // 10 € pro Monat pro ID-Slot; wenn ein Acc blown ist und ein neuer dazukommt, ist es derselbe Slot, also nicht
-      // doppelt"): Orbit-V2-Konten (Futures) hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht. Je Tag zählen,
-      // wie viele gleichzeitig leben (erster Trade bis Blow-Trade, sonst bis heute Dubai) — das ist die Slot-Zahl,
-      // Wiederverwendung inklusive. Slot je Tag = 10 €/30, Monat = Slots × 10 €. Nicht mit Reibung/Hedge verrechnet.
-      const DUP_EUR_MONAT = 10
+      // Duplikum-Ersparnis PAUSCHAL (24.09.2026 abends, Finn: „das kann nicht nur gezählt werden, wenn der Account
+      // getradet wird — jede ID hat im Schnitt 6–7 Futures-Accounts, das sind die Slots; mal die Anzahl der IDs (7,
+      // nur die neuen), das sind z. B. 42, mal 8 €, weil uns ein Duplikum-Slot 8 € im Monat kostet"): Slots =
+      // IDs × Ø Konten je ID, Monat = Slots × €/Slot, Tag = Monat/30, kumuliert ab Kapitelbeginn bis heute (Dubai).
+      // Parameter stehen im Kopf (gespeichert wie Faktor/Reibung); der Personen-Filter greift hier nicht (Flotte).
       const heute = (typeof _kapitelHeuteIso === 'function') ? _kapitelHeuteIso() : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })   // eine Wahrheit (Review F9)
-      const dupKonten = new Map()
-      for(const t of alle){
-        if(t.route !== 'tvv2' || !t.datum) continue
-        const key = String(t.user_id) + '|' + (t.account_id || t.account_name || t.id)   // account_id seit 24.09. im Backend (Review F6)
-        const e = dupKonten.get(key) || { user: String(t.user_id), von: t.datum, bis: null }
-        if(t.datum < e.von) e.von = t.datum
-        if(t.blown && (!e.bis || t.datum > e.bis)) e.bis = t.datum
-        dupKonten.set(key, e)
-      }
+      const dupIds = Math.max(0, Number(admKf.param.dup_ids) || 0), dupKontenJeId = Math.max(0, Number(admKf.param.dup_konten) || 0), dupEur = Math.max(0, Number(admKf.param.dup_eur) || 0)
+      const dupSlots = dupIds * dupKontenJeId, dupMonat = dupSlots * dupEur, dupTag = dupMonat / 30
       const dupTage = []
-      if(dupKonten.size){
-        // Ab dem ersten Slot-Tag (nicht ab dem ersten Kauf — der kann Jahre zurückliegen), bis heute (Review F6)
-        const erster = [...dupKonten.values()].map(e => e.von).sort()[0]
-        const d = new Date(erster + 'T00:00:00Z')
-        for(let i = 0; i < 2000 && !isNaN(d) && d.toISOString().slice(0, 10) <= heute; i++, d.setUTCDate(d.getUTCDate() + 1)) dupTage.push(d.toISOString().slice(0, 10))
-      }
-      const slotsAm = (d, user) => [...dupKonten.values()].filter(e => (!user || e.user === user) && e.von <= d && (!e.bis || e.bis >= d)).length
-      const dupEvents = []
-      let dupSum = 0
-      for(const d of dupTage) for(const u of personen.keys()){
-        const nS = slotsAm(d, u); if(!nS) continue
-        const eur = nS * DUP_EUR_MONAT / 30
-        dupEvents.push({ user_id: u, datum: d, eur })
-        if(persOk({ user_id: u })) dupSum += eur
-      }
-      const slotsHeute = slotsAm(heute, pers || '')
+      { const start = String(k.von || tage[1] || tage[0] || heute).slice(0, 10)
+        const d = new Date(start + 'T00:00:00Z')
+        for(let i = 0; i < 2000 && !isNaN(d) && d.toISOString().slice(0, 10) <= heute; i++, d.setUTCDate(d.getUTCDate() + 1)) dupTage.push(d.toISOString().slice(0, 10)) }
+      const dupSum = dupTage.length * dupTag
       if(kp) kp.insertAdjacentHTML('beforeend', kpi('Duplikum gespart', admVlSign(dupSum),
-        `${slotsHeute} Slot${slotsHeute === 1 ? '' : 's'} heute · ${admKfDe(slotsHeute * DUP_EUR_MONAT, 0)} €/Monat · ${admKfDe(slotsHeute * DUP_EUR_MONAT / 30, 2)} €/Tag`, `color:${col(dupSum)}`))
-      admVerlauf('kfdup', 'adm-kf-chart-dup', 'adm-kf-legend-dup', serien(dupEvents, e => e.eur), pers, pick,
-                 { tage: dupTage.length ? dupTage : tage, gesamt: true, gesamtFarbe: farbe })
+        `${admKfDe(dupSlots, 0)} Slots (${admKfDe(dupIds, 0)} IDs × ${admKfDe(dupKontenJeId, 1)}) · ${admKfDe(dupMonat, 0)} €/Monat · ${admKfDe(dupTag, 2)} €/Tag · ${dupTage.length} Tage`, `color:${col(dupSum)}`))
+      admVerlauf('kfdup', 'adm-kf-chart-dup', 'adm-kf-legend-dup',
+                 [{ key: 'dup', label: 'Alle IDs', events: dupTage.map(d => ({ datum: d, eur: dupTag })) }], '', () => {},
+                 { tage: dupTage.length ? dupTage : tage })
       // Chart A: alle Personen (nur Balken-Filter), aktive Person hervorgehoben — „alle ins Minus"
       admVerlauf('kfhyp', 'adm-kf-chart-hyp', 'adm-kf-legend-hyp', serien(alle.filter(artOk), t => admKfHyp(t, fx)), pers, pick,
                  { tage, gesamt: true, gesamtFarbe: farbe, sub: qSub })
@@ -11287,6 +11273,8 @@
         // Reibung: null/leer = auto (Gruppenwert je Trade); eine gespeicherte 5,44 stammt aus dem alten Modell → auto
         { const r = v.reibung; const n = Number(r); const ov = (r !== null && r !== undefined && r !== '' && Number.isFinite(n) && n >= 0 && n !== 5.44) ? n : null
           if(ov !== admKf.param.reibung){ admKf.param.reibung = ov; neu = true } }
+        // Duplikum-Pauschale (24.09.2026 abends): drei Zahlen, fehlend = Standard
+        for(const kk of ['dup_ids', 'dup_konten', 'dup_eur']){ const n = Number(v[kk]); if(v[kk] !== undefined && v[kk] !== null && v[kk] !== '' && Number.isFinite(n) && n >= 0 && n !== admKf.param[kk]){ admKf.param[kk] = n; neu = true } }
         if(neu && admKapData) admKfRender()
         admKf.geladen = true   // erst nach Erfolg — nach einem Fehler nochmal versuchen (Review 24.09.2026, F12)
       }catch(e){ console.warn('[kontrafakt] Parameter laden:', e.message || e) }
@@ -28414,7 +28402,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.460'
+  const OS_TAB_BUILD = '2026-09-22.461'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
