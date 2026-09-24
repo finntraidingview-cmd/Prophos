@@ -18428,7 +18428,12 @@
     try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
     const base = (plan && plan.mt5Baseline) || null
     const tv = (base && base.tv) || null, fin = (base && base.final) || null
-    if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)) return null
+    if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)){
+      // Ende aus dem Hedge-Level (25.09.2026, hedgePlanAufReview): vorläufiger Master-P&L = ±TP/SL in $, gekennzeichnet
+      if(fin && fin.quelle === 'level' && typeof fin.master_pl_schaetzung === 'number' && isFinite(fin.master_pl_schaetzung))
+        return { slavePnl: null, slaveCcy: '', masterPnl: fin.master_pl_schaetzung, masterCcy: '$', hinweis: 'geschätzt aus TP/SL-Level — Today\'s P&L nicht gelesen' }
+      return null
+    }
     const start = (tv && typeof tv.today_pnl_start === 'number' && isFinite(tv.today_pnl_start)) ? tv.today_pnl_start : null
     let masterPnl, hinweis = ''
     if(start != null && tv.datum_start && fin.datum === tv.datum_start){
@@ -18443,6 +18448,7 @@
       hinweis = 'Today\'s P&L als Ganzes übernommen (kein Startwert beim Puls-Klick)'
     }
     if(masterPnl != null) masterPnl = Number(masterPnl.toFixed(2))
+    if(fin.quelle === 'puls' && !hinweis) hinweis = 'aus TradingView gelesen (Today\'s P&L nach dem Level-Ende)'
     // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave-P&L NICHT 0, sondern kommt vom Hedge-Wächter
     // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
     return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
@@ -18756,6 +18762,103 @@
       schon_zu: true, closed_at: zu.closed_at || new Date().toISOString(), msg: 'vom Copier erkannt' }, extra)
     if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
   }
+  // PLAN AUF ÜBERPRÜFEN NACH FEED-/LEVEL-CLOSE (Koordination 25.09.2026, Live-Befund Plan 24b7c138: Hedge per sl_feed zu,
+  // +0,76 €, der Plan blieb aber „Läuft" — Jacobs PC hat keinen Reader, der Rundgang liest nur stündlich). Ist der Hedge wegen
+  // Master-TP/-SL zu (tp_feed/sl_feed, aus dem Ring level_tp/level_sl), ist der Master am selben Level zu → der PC-Wächter
+  // beendet den Plan sofort: final {quelle 'level', grund, art, today_pnl null} → Überprüfen. Master-P&L vorläufig aus dem Level
+  // (TP → +master_tp, SL → −master_sl, in $, im Popup gekennzeichnet), slave_pl = hedge.pl (schreibt schon der Close). 10–20 s
+  // später EINE Puls-Lesung (Today's P&L): liefert sie einen Wert, ersetzt er die Schätzung (final.quelle 'puls'), sonst bleibt
+  // die Schätzung stehen. Nur am PC des Hedges (Wächter-Liste 'meine'); der Mac zeigt nur.
+  const HEDGE_REVIEW_GRUENDE = { tp_feed: 'tp', level_tp: 'tp', sl_feed: 'sl', level_sl: 'sl' }
+  const _hedgeReviewVersucht = new Map()   // planId → ms des letzten Versuchs (höchstens alle 60 s, falls ein Write scheitert)
+  function hedgeLevelSchaetzung(p, art){
+    if(art === 'tp') return (Number(p.masterTp) > 0) ? Number(Number(p.masterTp).toFixed(2)) : null
+    if(art === 'sl') return (Number(p.masterSl) > 0) ? -Number(Number(p.masterSl).toFixed(2)) : null
+    return null
+  }
+  window._hedgeLevelSchaetzung = hedgeLevelSchaetzung   // Test-Zugriff (rein rechnend)
+  window._autoPnlFetchTvV2 = (typeof _autoPnlFetchTvV2 === 'function') ? _autoPnlFetchTvV2 : null
+  async function hedgePlanAufReview(plan){
+    const pid = String((plan && plan.id) || '')
+    if(!pid || !MT5_LOCAL) return false
+    const alt = _hedgeReviewVersucht.get(pid)
+    if(alt && Date.now() - alt < 60000) return false
+    _hedgeReviewVersucht.set(pid, Date.now())
+    // frisch aus der DB — tvV2EndeSetzen merged auf dem übergebenen Objekt, der geschlossene Hedge darf dabei nicht zurückfallen
+    let p = plan
+    try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p = rowToPlan(data) }catch(_){}
+    const h = p.mt5Baseline && p.mt5Baseline.hedge
+    const art = h ? HEDGE_REVIEW_GRUENDE[h.grund] : null
+    if(!art || h.status !== 'geschlossen' || p.route !== 'tvv2' || p.status !== 'open' || (h.pc && h.pc !== hedgePcId())) return false
+    const schaetzung = hedgeLevelSchaetzung(p, art)
+    const extra = { grund: h.grund, art, master_pl_schaetzung: schaetzung, hedge_pl: (h.pl != null && isFinite(Number(h.pl))) ? Number(h.pl) : null }
+    let beendet = false
+    try{ beendet = await tvV2EndeSetzen(p, null, 'level', extra) }catch(e){ console.warn('[hedgeReview] Ende', e); return false }
+    if(!beendet) return false
+    // atShowEndPrompt schiebt schon auf Überprüfen — explizit nachziehen, falls das Popup für diesen Plan schon gemeldet war
+    try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
+    if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: Master-${art === 'tp' ? 'TP' : 'SL'} erreicht → Überprüfen`
+      + (schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
+    setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)
+    return true
+  }
+  // Die EINE Puls-Lesung nach dem Level-Ende. Eine Maus: läuft eine Order/ein Schließen (_tpOrbitLaeuft) oder der Rundgang
+  // (tvV2Poll.busy), wird gewartet (8–14 s, höchstens ~3 min); 409 puls_beschaeftigt zählt als belegt, nicht als Lesung.
+  async function hedgeReviewPulsLesen(pid){
+    const p0 = tradePlans.find(x => String(x.id) === pid)
+    const fin0 = p0 && p0.mt5Baseline && p0.mt5Baseline.final
+    if(!p0 || p0.status !== 'review' || !fin0 || fin0.quelle !== 'level') return
+    const konto = tvV2Konto(p0)
+    if(!konto) return
+    const t0 = Date.now()
+    let r = null
+    for(;;){
+      let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
+      if(!belegt){
+        tvV2Poll.busy = true
+        try{ r = await tvV2Lesen(konto, 45) }catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
+        finally{ tvV2Poll.busy = false }
+        if(!(r && !r.ok && r.code === 'puls_beschaeftigt')) break
+      }
+      if(Date.now() - t0 > 180000){ r = r || { ok: false, code: 'puls_belegt', msg: 'Puls/Rundgang 3 min belegt' }; break }
+      await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+    }
+    const p1 = tradePlans.find(x => String(x.id) === pid) || p0
+    const fin1 = (p1.mt5Baseline && p1.mt5Baseline.final) || fin0
+    if(p1.status !== 'review' || fin1.quelle !== 'level') return
+    const nowIso = new Date().toISOString()
+    const frisch = !!(r && r.ok && r.alter_s != null && Number(r.alter_s) < 30)
+    const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p1) : { symbol: p1.masterSymbol || '', dir: p1.richtung }
+    const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
+    const pos = frisch ? (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol) && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir)) : null
+    const tpnl = (frisch && !pos && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
+    const patch = (tpnl != null)
+      ? { today_pnl: tpnl, datum: tvV2Handelstag(), quelle: 'puls', puls_at: nowIso }
+      : { puls_at: nowIso, puls_fehler: pos ? 'Master-Position laut Puls noch offen' : !r ? 'keine Antwort' : !r.ok ? String(r.code || 'fehler') + (r.msg ? ': ' + String(r.msg).slice(0, 200) : '')
+          : !frisch ? 'Lesung nicht frisch' : 'kein Today\'s P&L' }
+    const { data: neu, error } = await supabase.rpc('mt5_baseline_patch', { p_plan: pid, p_patch: { final: Object.assign({}, fin1, patch) }, p_status: 'review' })
+    if(error){ console.warn('[hedgeReview] final-Patch', error.message || error); return }
+    if(!neu) return   // Plan nicht mehr in „Überprüfen" (schon bestätigt) — nichts mehr anfassen
+    const i = tradePlans.findIndex(x => String(x.id) === pid)
+    if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { mt5Baseline: neu })
+    try{ _autoPnlCache.delete(pid) }catch(_){}
+    if(pos && typeof atToast === 'function') atToast(`⚠ ${p1.masterName || 'Plan'}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
+    if(tpnl != null){
+      const res = await _autoPnlFetchTvV2(i >= 0 ? tradePlans[i] : Object.assign({}, p1, { mt5Baseline: neu }))
+      const m = res && res.masterPnl
+      if(m != null){
+        // nur die Schätzung ersetzen (oder ein leeres Feld) — eine inzwischen eingetragene Zahl bleibt stehen
+        const sz = fin1.master_pl_schaetzung
+        let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).eq('status', 'review')
+        q = (typeof sz === 'number' && isFinite(sz)) ? q.or(`master_pl.is.null,master_pl.eq.${sz}`) : q.is('master_pl', null)
+        const { data: d2, error: e2 } = await q.select('*')
+        if(e2) console.warn('[hedgeReview] master_pl', e2.message || e2)
+        else if(d2 && d2[0]){ const j = tradePlans.findIndex(x => String(x.id) === pid); if(j >= 0) tradePlans[j] = rowToPlan(d2[0]) }
+        if(typeof atToast === 'function') atToast(`✓ ${p1.masterName || 'Plan'}: Master-P&L aus TradingView ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`, 'end')
+      }
+    }
+    try{ renderTradePlans() }catch(_){}
+  }
   async function hedgePlNachholen(plan){
     const h = plan.mt5Baseline.hedge, pid = String(plan.id)
     if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
@@ -18935,6 +19038,8 @@
           if(zu){ await hedgeZuAusRing(p, zu); continue }
         }
         if(!amPc) continue
+        // Hedge wegen Master-TP/-SL zu, Plan läuft noch → Plan auf Überprüfen (25.09.2026, auch nachträglich, z. B. Plan 24b7c138)
+        if(h.status === 'geschlossen' && p.status === 'open' && HEDGE_REVIEW_GRUENDE[h.grund]){ if(await hedgePlanAufReview(p)) continue }
         // Ring meldete zu ohne P&L (Historie hinkte) → per Close-Aufruf mit Ticket nachfragen (schon_zu + pl)
         if(h.status === 'geschlossen' && h.pl == null && h.pl_offen && h.ticket && !_hedgeBusy.has(String(p.id))){ await hedgePlNachholen(p); continue }
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
@@ -18965,7 +19070,11 @@
             try{ await hedgeAmPlanSchreiben(p.id, { waechter_at: jetztIso, waechter_stand: { at: jetztIso, kurs, wurzel: kq ? kq.wurzel : null, quelle: kq ? kq.quelle : null }, feed_fehlt_seit: fehltSeit }) }catch(_){}
           }
           const ent = hedgeFeedEntscheid(p.richtung, kurs, Number(h.tp_level_nq) || 0, Number(h.sl_level_nq) || 0, hedgePuffer())
-          if(ent){ await hedgeSoloSchliessen(p, ent, kurs); continue }
+          if(ent){
+            const rs = await hedgeSoloSchliessen(p, ent, kurs)
+            if(rs && rs.ok){ const pf = tradePlans.find(x => String(x.id) === String(p.id)); if(pf) await hedgePlanAufReview(pf) }
+            continue
+          }
           // DRITTE LINIE: Master weg laut Reader (Finn schloss den Master von Hand in TradingView, Prophos merkte es erst beim
           // stündlichen Rundgang). Reader-Liste dieses PCs (GET /positions), Beweis-Regeln in hedgeMasterWegEntscheid.
           try{
@@ -30695,7 +30804,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.557'
+  const OS_TAB_BUILD = '2026-09-22.558'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31960,9 +32069,11 @@
    *              Rundgang (tvV2EndeSetzen) → atShowEndPrompt → review + Auto-P&L.
    * Läuft NUR am PC (MT5_LOCAL). Vom Mac/Handy: close-Signal mit params.v2 (Absender tpV2PlanSchliessen,
    * Empfänger eigener Zweig in orderSignalTick). Auto-Close vor Market Close nutzt v2SchliessenAmPc direkt. ══ */
-  async function tvV2EndeSetzen(plan, todayPnl, quelle){
+  async function tvV2EndeSetzen(plan, todayPnl, quelle, finExtra){
     const nowIso = new Date().toISOString()
-    const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2Handelstag(), at: nowIso, quelle: quelle || 'close' }   // 'reader_leer' = Master laut Reader weg (25.09.2026)
+    const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2Handelstag(), at: nowIso, quelle: quelle || 'close' }
+    // finExtra (25.09.2026): Ende aus dem Hedge-Level (hedgePlanAufReview) trägt grund/art/master_pl_schaetzung mit
+    if(finExtra && typeof finExtra === 'object') Object.assign(fin, finExtra)   // 'reader_leer' = Master laut Reader weg (25.09.2026)
     const alt = plan.mt5Baseline || {}
     const base = Object.assign({}, alt, { final: fin, live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
     const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
@@ -31973,7 +32084,7 @@
     if(i >= 0) tradePlans[i] = rowToPlan(data[0])
     const fresh = (i >= 0) ? tradePlans[i] : rowToPlan(data[0])
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.quelle !== 'level' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // FUSION-GEGENHEDGE (24.09.2026 abends): Master ist zu → Hedge sofort zu (der Wächter täte es binnen 5 s
     // ohnehin, sobald der Plan „review" ist — hier ohne Wartezeit, mit dem frischen Plan-Objekt).
@@ -37570,7 +37681,10 @@
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
-    _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: plQuelleFuerRoute(p.route) }
+    // Schätzung aus dem Hedge-Level (25.09.2026) ist keine Quelle im Sinne von pl_quelle → null (nicht anfassen)
+    const _tcFin = (p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.final) || null
+    const _tcSchaetzung = !!(_tcFin && _tcFin.quelle === 'level' && typeof _tcFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _tcFin.master_pl_schaetzung) < 0.005)
+    _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: _tcSchaetzung ? null : plQuelleFuerRoute(p.route) }
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
             : null
     document.getElementById('tc-slave-pl').value  = tcGehedgt
@@ -37592,7 +37706,11 @@
     // Review-Plan mit schon persistiertem Auto-P&L → Hinweis statt leerer Message
     if(p.status === 'review' && (p.masterPl != null || p.slavePl != null)){
       const msgEl = document.getElementById('tradeCompleteMsg')
-      if(msgEl){ msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'; msgEl.className = 'modal-msg ok' }
+      if(msgEl){
+        msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'
+          + (_tcSchaetzung ? ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)' : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
+        msgEl.className = 'modal-msg ok'
+      }
     }
 
     // Status-Auswahl initialisieren (3-Radio + Account-Picker)
