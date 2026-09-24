@@ -154,9 +154,33 @@ def _version_watcher():
         time.sleep(60)
 
 # ── Hedge-Terminal-Fenster: Vordergrund nach initialize() zurueckgeben (23.09.2026) ──
+# Umbau 24.09.2026 (Finn: "bei manchen PCs wird immer wieder das Echo-Slave-Terminal
+# in den Vordergrund geholt — aus dem Nichts"): die erste Fassung prueft GENAU EINMAL,
+# direkt nachdem initialize() zurueckkam. Zwei Luecken: (1) das Terminal aktiviert
+# sein Fenster oft erst kurz DANACH (Konto-Sync nach dem IPC-Anschluss) — der Check
+# sah noch das alte Vordergrundfenster und tat nichts; (2) die Fenster-Erkennung lief
+# ueber provision.terminal_pids und damit ueber wmic, das auf Windows 11 24H2+ fehlt —
+# dort war die Liste immer leer, die Rueckgabe totes Recht. Jetzt: Fenster werden
+# ueber den Exe-Pfad ihres Prozesses erkannt (Win32, ohne wmic), und ein Waechter
+# beobachtet einige Sekunden lang und stellt jedes Nach-vorn-Reissen zurueck.
+def _fenster_pfad(hwnd):
+    """Exe-Pfad des Prozesses hinter einem Fenster (Windows) oder None."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        import provision
+        pid = wt.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return provision.prozess_pfad(pid.value) if pid.value else None
+    except Exception:
+        return None
+
+
 def _hedge_fenster(hpath):
     """Sichtbare Hauptfenster der terminal64.exe DIESER Hedge-Installation:
-    [(hwnd, minimiert)] — leer, wenn kein Windows / kein Pfad / nichts laeuft."""
+    [(hwnd, minimiert)] — leer, wenn kein Windows / kein Pfad / nichts laeuft.
+    Erkennung ueber den Exe-Pfad des Fensterprozesses; PIDs aus
+    provision.terminal_pids nur noch als zweites Kriterium."""
     if os.name != "nt" or not hpath:
         return []
     try:
@@ -164,9 +188,9 @@ def _hedge_fenster(hpath):
         import ctypes.wintypes as wt
         import provision
         u32 = ctypes.windll.user32
+        want = os.path.normcase(os.path.normpath(os.path.dirname(os.path.abspath(hpath))))
         pids = set(provision.terminal_pids(os.path.dirname(os.path.abspath(hpath))))
-        if not pids:
-            return []
+        pfad_cache = {}
         out = []
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
@@ -174,9 +198,18 @@ def _hedge_fenster(hpath):
             try:
                 if not u32.IsWindowVisible(h) or u32.GetWindow(h, 4):   # GW_OWNER: nur Hauptfenster
                     return True
+                if u32.GetWindowTextLengthW(h) <= 0:
+                    return True
                 pid = wt.DWORD()
                 u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
-                if pid.value in pids and u32.GetWindowTextLengthW(h) > 0:
+                if pid.value in pids:
+                    out.append((int(h), bool(u32.IsIconic(h))))
+                    return True
+                if pid.value not in pfad_cache:
+                    pfad_cache[pid.value] = provision.prozess_pfad(pid.value)
+                pfad = pfad_cache[pid.value]
+                if pfad and os.path.basename(pfad).lower() == "terminal64.exe" and \
+                   os.path.normcase(os.path.normpath(os.path.dirname(pfad))) == want:
                     out.append((int(h), bool(u32.IsIconic(h))))
             except Exception:
                 pass
@@ -192,45 +225,89 @@ def _vordergrund_merken(hpath):
         return None
     try:
         import ctypes
-        vorn = int(ctypes.windll.user32.GetForegroundWindow())
+        vorn = int(ctypes.windll.user32.GetForegroundWindow() or 0)
         return {"vorn": vorn, "hedge": dict(_hedge_fenster(hpath)), "hpath": hpath}
     except Exception:
         return None
 
 
-def _vordergrund_zurueck(vorher):
+def _vordergrund_geben(u32, ziel):
+    """Einem anderen Fenster den Vordergrund geben, obwohl Windows das nur dem
+    aktuellen Vordergrund-Thread erlaubt: unseren Thread an den Thread des
+    aktuellen Vordergrundfensters haengen (AttachThreadInput), dann setzen.
+    Rueckfall: Alt-Tastendruck (gibt den Foreground-Lock frei, wie im Panel)."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        vorn = u32.GetForegroundWindow()
+        mein = k32.GetCurrentThreadId()
+        fremd = u32.GetWindowThreadProcessId(vorn, None) if vorn else 0
+        angehaengt = bool(fremd and fremd != mein and u32.AttachThreadInput(fremd, mein, True))
+        try:
+            u32.SetForegroundWindow(ziel)
+        finally:
+            if angehaengt:
+                u32.AttachThreadInput(fremd, mein, False)
+        if int(u32.GetForegroundWindow() or 0) == int(ziel):
+            return True
+        u32.keybd_event(0x12, 0, 0, 0); u32.keybd_event(0x12, 0, 2, 0)   # Alt druecken/loslassen
+        u32.SetForegroundWindow(ziel)
+        return int(u32.GetForegroundWindow() or 0) == int(ziel)
+    except Exception:
+        return False
+
+
+def _vordergrund_zurueck(vorher, dauer_s=0.0):
     """Hat initialize() das Hedge-Terminal nach vorn geholt? Dann zurueck in den
-    Zustand von vorher: war es minimiert → wieder minimieren; sonst hinter alle
-    anderen Fenster und dem vorherigen Fenster den Vordergrund zurueckgeben
-    (Alt-Tastendruck gibt Windows' Foreground-Lock frei, wie im Panel). Stand das
-    Terminal schon vorher vorn (Finn arbeitet gerade darin), passiert nichts."""
-    if not vorher:
-        return
+    Zustand von vorher: war es minimiert (oder vorher gar nicht sichtbar) → wieder
+    minimieren; sonst hinter alle anderen Fenster, und dem vorherigen Fenster den
+    Vordergrund zurueckgeben. Stand das Terminal schon vorher vorn (Finn arbeitet
+    gerade darin), passiert nichts. dauer_s > 0: so lange beobachten (alle 0,2 s)
+    und JEDES Nach-vorn-Reissen in dem Fenster zuruecknehmen — das Terminal
+    aktiviert sich nach dem IPC-Anschluss oft erst mit Verzoegerung, und manchmal
+    zweimal. Liefert die Zahl der Eingriffe."""
+    if not vorher or os.name != "nt":
+        return 0
+    eingriffe = 0
     try:
         import ctypes
         u32 = ctypes.windll.user32
-        jetzt = dict(_hedge_fenster(vorher.get("hpath")))
-        vorn = int(u32.GetForegroundWindow())
-        if vorn not in jetzt or vorn == vorher.get("vorn"):
-            return
-        war_min = vorher.get("hedge", {}).get(vorn)
-        if war_min or vorn not in vorher.get("hedge", {}):
-            u32.ShowWindow(vorn, 6)                       # SW_MINIMIZE
-            wie = "wieder minimiert"
-        else:
-            # HWND_BOTTOM=1, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE = 0x0013
-            u32.SetWindowPos(vorn, 1, 0, 0, 0, 0, 0x0013)
-            wie = "nach hinten gestellt"
         alt_vorn = int(vorher.get("vorn") or 0)
-        if alt_vorn and u32.IsWindow(alt_vorn):
-            try:
-                u32.keybd_event(0x12, 0, 0, 0); u32.keybd_event(0x12, 0, 2, 0)   # Alt druecken/loslassen
-                u32.SetForegroundWindow(alt_vorn)
-            except Exception:
-                pass
-        log(f"Hedge-Terminal kam durch initialize() nach vorn — {wie}, Vordergrund zurueckgegeben.")
+        ende = time.time() + max(0.0, float(dauer_s))
+        while True:
+            jetzt = dict(_hedge_fenster(vorher.get("hpath")))
+            vorn = int(u32.GetForegroundWindow() or 0)
+            if vorn in jetzt and vorn != alt_vorn:
+                war_min = vorher.get("hedge", {}).get(vorn)
+                if war_min or vorn not in vorher.get("hedge", {}):
+                    u32.ShowWindow(vorn, 6)                       # SW_MINIMIZE
+                    wie = "wieder minimiert"
+                else:
+                    # HWND_BOTTOM=1, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE = 0x0013
+                    u32.SetWindowPos(vorn, 1, 0, 0, 0, 0, 0x0013)
+                    wie = "nach hinten gestellt"
+                if alt_vorn and u32.IsWindow(alt_vorn):
+                    _vordergrund_geben(u32, alt_vorn)
+                eingriffe += 1
+                if eingriffe == 1:
+                    log(f"Hedge-Terminal kam durch initialize() nach vorn — {wie}, "
+                        f"Vordergrund zurueckgegeben.")
+            if time.time() >= ende:
+                break
+            time.sleep(0.2)
     except Exception:
         pass
+    return eingriffe
+
+
+def _vordergrund_waechter_starten(vorher, dauer_s=8.0):
+    """_vordergrund_zurueck im Hintergrund, damit der Copier-Start nicht wartet."""
+    if not vorher or os.name != "nt":
+        return None
+    t = threading.Thread(target=_vordergrund_zurueck, args=(vorher, dauer_s),
+                         name="vordergrund-waechter", daemon=True)
+    t.start()
+    return t
 
 
 # Dieselbe Namensregel wie im Panel (panel.py) — bewusst streng, damit
@@ -1008,9 +1085,14 @@ def main():
         # ueber log() geht, landet in copier-log.json und damit in Prophos.
         log(f"⛔ initialize() fehlgeschlagen: {mt5.last_error()} — laeuft das Hedge-Terminal?")
         log("⛔ ABBRUCH — keine Order gesendet.")
+        # Auch der Fehlversuch kann das Terminal nach vorn geholt haben — und die
+        # .bat startet uns in 10 s neu (24.09.2026). Kurz synchron zuruecknehmen.
+        _vordergrund_zurueck(_vorher, dauer_s=2.0)
         sys.exit(1)
 
-    _vordergrund_zurueck(_vorher)
+    # Im Hintergrund ~8 s beobachten (24.09.2026): das Terminal aktiviert sein
+    # Fenster nach dem Anschluss oft erst verzoegert, die Einmal-Pruefung griff nicht.
+    _vordergrund_waechter_starten(_vorher)
 
     ti = mt5.terminal_info()
     ai = mt5.account_info()

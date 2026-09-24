@@ -423,15 +423,142 @@ def _journal_tail(data_dir, baseline=None, n=6):
 
 
 def terminal_pids(install_dir):
-    """PIDs laufender terminal64.exe DIESER Installation (leer = laeuft nicht)."""
+    """PIDs laufender terminal64.exe DIESER Installation (leer = laeuft nicht).
+
+    Drei Wege, der erste der trifft gewinnt (24.09.2026, Finn: 'bei manchen PCs
+    wird immer wieder das Echo-Slave-Terminal in den Vordergrund geholt'):
+    bis heute lief das NUR ueber `wmic` — und wmic gibt es auf frisch
+    installierten Windows 11 (24H2+) nicht mehr. Dort lieferte die Funktion
+    IMMER [] : der Copier hielt das laufende Hedge-Terminal fuer nicht
+    gestartet und startete es bei jedem Prozessstart ein zweites Mal (MT5
+    reisst dann das laufende Fenster nach vorn), und die Vordergrund-Rueckgabe
+    in copier.py fand kein Terminal-Fenster, dem sie etwas haette zurueckgeben
+    koennen. Deshalb jetzt: 1. Win32-API (Toolhelp-Snapshot + Prozess-Pfad, ohne
+    Subprozess, ohne Adminrechte), 2. wmic (alte Windows), 3. PowerShell/CIM.
+    None aus einem Weg heisst 'konnte nicht pruefen' — dann der naechste."""
+    for weg in (_pids_per_winapi, _pids_per_wmic, _pids_per_powershell):
+        pids = weg(install_dir)
+        if pids is not None:
+            return pids
+    return []
+
+
+def _exe_normiert(install_dir):
+    return os.path.normcase(os.path.normpath(
+        os.path.join(os.path.abspath(install_dir), "terminal64.exe")))
+
+
+def _pids_per_winapi(install_dir):
+    """Toolhelp-Snapshot aller Prozesse, Name terminal64.exe, dann der volle
+    Pfad per QueryFullProcessImageNameW (PROCESS_QUERY_LIMITED_INFORMATION —
+    reicht auch fuer Prozesse mit hoeheren Rechten). None = kein Windows oder
+    API-Fehler; ein Prozess, dessen Pfad nicht lesbar ist, zaehlt nicht."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        k32 = ctypes.windll.kernel32
+        # Handles sind 64 Bit — ohne restype schneidet ctypes sie auf int (32 Bit) ab.
+        k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        k32.CreateToolhelp32Snapshot.argtypes = [wt.DWORD, wt.DWORD]
+        k32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", wt.DWORD), ("cntUsage", wt.DWORD),
+                        ("th32ProcessID", wt.DWORD),
+                        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                        ("th32ModuleID", wt.DWORD), ("cntThreads", wt.DWORD),
+                        ("th32ParentProcessID", wt.DWORD), ("pcPriClassBase", ctypes.c_long),
+                        ("dwFlags", wt.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+        snap = k32.CreateToolhelp32Snapshot(0x2, 0)        # TH32CS_SNAPPROCESS
+        if snap == ctypes.c_void_p(-1).value or not snap:
+            return None
+        want = _exe_normiert(install_dir)
+        out = []
+        try:
+            pe = PROCESSENTRY32W()
+            pe.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = k32.Process32FirstW(snap, ctypes.byref(pe))
+            while ok:
+                if pe.szExeFile.lower() == "terminal64.exe":
+                    pfad = prozess_pfad(pe.th32ProcessID)
+                    if pfad and os.path.normcase(os.path.normpath(pfad)) == want:
+                        out.append(int(pe.th32ProcessID))
+                ok = k32.Process32NextW(snap, ctypes.byref(pe))
+        finally:
+            k32.CloseHandle(snap)
+        return out
+    except Exception:
+        return None
+
+
+def prozess_pfad(pid):
+    """Voller Exe-Pfad eines Prozesses (Windows) oder None."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+        k32.QueryFullProcessImageNameW.argtypes = [ctypes.c_void_p, wt.DWORD, ctypes.c_wchar_p,
+                                                   ctypes.POINTER(wt.DWORD)]
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        h = k32.OpenProcess(0x1000, False, int(pid))       # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = wt.DWORD(1024)
+            if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                return buf.value
+            return None
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return None
+
+
+def _pids_per_wmic(install_dir):
     exe = os.path.join(install_dir, "terminal64.exe").replace("\\", "\\\\")
     try:
         r = subprocess.run(["wmic", "process", "where",
                             f"ExecutablePath='{exe}'", "get", "ProcessId"],
                            capture_output=True, text=True, errors="replace", timeout=30)
-        return [int(t) for t in (r.stdout or "").split() if t.isdigit()]
     except Exception:
-        return []
+        return None                                       # wmic fehlt (Win 11 24H2+) o.ae.
+    if r.returncode != 0 and not (r.stdout or "").strip():
+        return None
+    return [int(t) for t in (r.stdout or "").split() if t.isdigit()]
+
+
+def _pids_per_powershell(install_dir):
+    script = ("$ErrorActionPreference='SilentlyContinue';"
+              "Get-CimInstance Win32_Process -Filter \"Name='terminal64.exe'\" | "
+              "ForEach-Object { \"$($_.ProcessId)|$($_.ExecutablePath)\" }")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                           capture_output=True, text=True, errors="replace", timeout=40)
+    except Exception:
+        return None
+    return pids_aus_ps_zeilen(r.stdout or "", install_dir)
+
+
+def pids_aus_ps_zeilen(text, install_dir):
+    """'pid|pfad'-Zeilen (PowerShell-Weg) → PIDs dieser Installation. Rein."""
+    want = _exe_normiert(install_dir)
+    out = []
+    for zeile in text.splitlines():
+        pid, _, pfad = zeile.strip().partition("|")
+        pid = pid.strip()
+        if pid.isdigit() and pfad and os.path.normcase(os.path.normpath(pfad.strip())) == want:
+            out.append(int(pid))
+    return out
 
 
 def _kill_terminal_at(install_dir):

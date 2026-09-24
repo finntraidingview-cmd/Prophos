@@ -1627,10 +1627,83 @@ def main():
         and all(FAMILIE_MIN <= z <= FAMILIE_MAX for z in MAGIC_UMZUG.values())
         and FAMILIE_MIN <= 770000 and 778999 <= FAMILIE_MAX)
 
+    # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
+    results.append(test_terminal_pids_ohne_wmic())
+    results.append(test_vordergrund_waechter_ohne_windows())
+
     print()
     ok = sum(1 for r in results if r)
     print(f"{ok}/{len(results)} Tests bestanden")
     return 0 if ok == len(results) else 1
+
+
+
+def test_terminal_pids_ohne_wmic():
+    """24.09.2026: Prozess-Erkennung ohne wmic (fehlt auf Windows 11 24H2+)."""
+    import provision
+    import subprocess as sp
+    ok = True
+    # Reiner Parser des PowerShell-Wegs: nur Zeilen mit passendem Pfad zaehlen.
+    inst = os.path.join(os.sep, "MT5-Hedge")
+    exe = os.path.join(inst, "terminal64.exe")
+    txt = f"1234|{exe}\n99|{os.path.join(os.sep, 'MT5-ftmo1', 'terminal64.exe')}\n" \
+          f"abc|{exe}\n  5678 | {exe} \n\n"
+    got = provision.pids_aus_ps_zeilen(txt, inst)
+    if got != [1234, 5678]:
+        print(f"✗ pids_aus_ps_zeilen: {got}"); ok = False
+    # Auf dem Mac: Win32 → None, wmic fehlt → None, powershell fehlt → None → [] (kein Absturz).
+    if provision._pids_per_winapi(inst) is not None:
+        print("✗ _pids_per_winapi muss ohne Windows None liefern"); ok = False
+    if provision.terminal_pids(inst) != []:
+        print("✗ terminal_pids ohne jeden Weg muss [] liefern"); ok = False
+    # Stub: wmic fehlt (FileNotFoundError), PowerShell liefert → PowerShell-Weg gewinnt.
+    echt = sp.run
+    def stub(cmd, **kw):
+        if cmd[0] == "wmic":
+            raise FileNotFoundError("wmic")
+        class R: returncode = 0; stdout = f"4321|{exe}\n"
+        return R()
+    sp.run = stub
+    try:
+        if provision.terminal_pids(inst) != [4321]:
+            print("✗ PowerShell-Rueckfall greift nicht, wenn wmic fehlt"); ok = False
+        # Stub: wmic da und leer (Terminal laeuft nicht) → [] ohne PowerShell-Weg.
+        def stub2(cmd, **kw):
+            class R: returncode = 0; stdout = "ProcessId\n\n" if cmd[0] == "wmic" else f"7|{exe}\n"
+            return R()
+        sp.run = stub2
+        if provision.terminal_pids(inst) != []:
+            print("✗ wmic-Leerergebnis muss gelten (kein PowerShell-Weg)"); ok = False
+        def stub3(cmd, **kw):
+            class R: returncode = 0; stdout = "ProcessId\n\n2222\n" if cmd[0] == "wmic" else ""
+            return R()
+        sp.run = stub3
+        if provision.terminal_pids(inst) != [2222]:
+            print("✗ wmic-Weg liefert nicht die PID"); ok = False
+    finally:
+        sp.run = echt
+    if ok:
+        print("✓ terminal_pids: Win32 → wmic → PowerShell, ohne wmic kein Blindflug")
+    return ok
+
+
+def test_vordergrund_waechter_ohne_windows():
+    """Vordergrund-Rueckgabe/-Waechter sind ohne Windows folgenlos und werfen nie."""
+    import copier
+    ok = True
+    if copier._hedge_fenster("/x/terminal64.exe") != []:
+        print("✗ _hedge_fenster ohne Windows muss [] liefern"); ok = False
+    if copier._vordergrund_merken("/x/terminal64.exe") is not None:
+        print("✗ _vordergrund_merken ohne Windows muss None liefern"); ok = False
+    if copier._vordergrund_zurueck(None, dauer_s=1.0) != 0:
+        print("✗ _vordergrund_zurueck(None) muss 0 Eingriffe liefern"); ok = False
+    if copier._vordergrund_zurueck({"vorn": 1, "hedge": {}, "hpath": "/x"}, dauer_s=0.0) != 0:
+        print("✗ _vordergrund_zurueck ohne Windows muss 0 liefern"); ok = False
+    if copier._vordergrund_waechter_starten({"vorn": 1, "hedge": {}, "hpath": "/x"}) is not None:
+        print("✗ Waechter ohne Windows darf keinen Thread starten"); ok = False
+    if ok:
+        print("✓ Vordergrund-Waechter: ohne Windows folgenlos")
+    return ok
 
 
 if __name__ == "__main__":
