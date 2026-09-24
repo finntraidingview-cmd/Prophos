@@ -16862,6 +16862,8 @@
             // Build-Stempel des TABS (28.08.2026, Remote-Close-Debug) — s.
             // OS_TAB_BUILD: beweist per SQL, welchen Build dieser PC-Tab fährt.
             tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null,
+            // Copier-/Bot-Stand des PCs (25.09.2026, Koordination: hedge_solo war null, Copier-Version aus der Cloud unklar) — /api/instances liefert version + bot_version
+            copier_version: dd.version || null, bot_version: dd.bot_version || null,
             // Kurs-Brücke-Diagnose (25.09.2026): Kerzen vom Reader, gültige Zeilen, letzter Upsert-Fehler, Erstladung —
             // per SQL aus der Ferne lesbar (mt5_live.status.kurs_bruecke), typeof-Guard wie oben
             kurs_bruecke: (typeof epLokal !== 'undefined' && epLokal && epLokal.diag) ? epLokal.diag : null
@@ -18420,7 +18422,7 @@
   function hedgeGrundText(g){
     return g === 'tp_feed' ? 'am Master-TP über den Kurs-Feed geschlossen' : g === 'sl_feed' ? 'am Master-SL über den Kurs-Feed geschlossen'
       : g === 'level_tp' ? 'Notfall-SL gefüllt (Master-TP erreicht, Fusion-SL im Terminal)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP im Terminal gefüllt)'
-      : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
+      : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende_reader' ? 'Master zu (Reader) → Hedge geschlossen' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
       : g === 'stopout' ? 'Stop-out durch den Broker' : g === 'close' ? 'Close-Auftrag' : g === 'tp' ? 'TP erreicht' : g === 'unbekannt' ? 'Grund unbekannt' : (g || '?')
   }
   // Schließen (Grund: level_sl | level_tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
@@ -18556,6 +18558,21 @@
     if(!kq){ try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) kq = { preis: k.preis, wurzel: k.wurzel, quelle: 'cloud' } }catch(_){} }
     return kq   // null = kein Beweis → nichts tun
   }
+  // REIN RECHNEND (testbar über window._hedgeMasterWegEntscheid): „Master weg laut Reader" (Finn 25.09.2026: „Wenn die
+  // Master-Position schließt, muss Fusion auch schließen"). true nur mit BEWEIS: Reader-Liste ≤ 10 s alt, Hedge ≥ 30 s offen,
+  // Konto passt (External ID des Plans steht im aktiven Reader-Konto — fehlt sie, nur wenn der Reader genau EIN Konto kennt),
+  // und seit ≥ 10 s durchgehend KEINE Position im Plan-Symbol (Wurzel NQ/MNQ). Reader offline/alt → false (nie raten).
+  function hedgeMasterWegEntscheid(o){
+    if(!o || !Array.isArray(o.liste) || !(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
+    if(o.kontoPlan){ if(!o.kontoAktiv || String(o.kontoAktiv).indexOf(String(o.kontoPlan)) < 0) return false }
+    else if(!(o.kontenAnzahl <= 1)) return false
+    const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
+    const offen = o.liste.some(x => { if(!x) return false; const xw = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || ''); const m = (typeof tvKursZahl === 'function') ? tvKursZahl(x.menge) : Number(x.menge); return xw === w && (m == null || Math.abs(m) > 0) })
+    if(offen) return false
+    return o.leerSeitMs >= 10000
+  }
+  window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
+  const _hedgeLeerSeit = new Map()   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
     if(_hedgeWacheBusy) return
@@ -18602,6 +18619,27 @@
           }
           const ent = hedgeFeedEntscheid(p.richtung, kurs, Number(h.tp_level_nq) || 0, Number(h.sl_level_nq) || 0, hedgePuffer())
           if(ent){ await hedgeSoloSchliessen(p, ent, kurs); continue }
+          // DRITTE LINIE: Master weg laut Reader (Finn schloss den Master von Hand in TradingView, Prophos merkte es erst beim
+          // stündlichen Rundgang). Reader-Liste dieses PCs (GET /positions), Beweis-Regeln in hedgeMasterWegEntscheid.
+          try{
+            const st = (typeof epLokal !== 'undefined' && epLokal && epLokal.stand && epLokal.stand.an !== false) ? epLokal.stand : null
+            const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+            const kontoPlan = acc ? String(acc.externalId || '').trim() : ''
+            const konto = st && st.konto ? st.konto : null
+            const listeLeer = !!(st && Array.isArray(st.positionen) && !st.positionen.some(x => x && ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : '') === wz))
+            if(listeLeer && st){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
+            const weg = hedgeMasterWegEntscheid({ liste: st ? st.positionen : null, alterMs: st ? Date.now() - (epLokal.ab || 0) : Infinity,
+              sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz,
+              kontoPlan, kontoAktiv: konto ? konto.aktiv : null, kontenAnzahl: konto && Array.isArray(konto.eintraege) ? konto.eintraege.length : 1,
+              leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0 })
+            if(weg){
+              _hedgeLeerSeit.delete(String(p.id))
+              await hedgeSoloSchliessen(p, 'master_ende_reader', kurs)
+              // Plan auf Überprüfen wie beim Orbit-V2-Ende: P&L holt der Rundgang / „P&L holen" nach, Grund reader_leer
+              try{ if(typeof tvV2EndeSetzen === 'function'){ await tvV2EndeSetzen(p, null, 'reader_leer'); if(typeof atMoveToReview === 'function'){ const pf = tradePlans.find(x => String(x.id) === String(p.id)) || p; await atMoveToReview(pf) } } }catch(e){ console.warn('[hedgeWache] Plan-Ende', e) }
+              continue
+            }
+          }catch(e){ console.warn('[hedgeWache] Reader-Abgleich', e) }
         }
         // Position im Terminal weg (Schließ-Level gefüllt oder von Hand zu) — erst 20 s nach dem Open, damit ein
         // Status von VOR dem Open nicht als „weg" durchgeht; hedgeSoloSchliessen bekommt dann schon_zu + P&L
@@ -29961,7 +29999,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.528'
+  const OS_TAB_BUILD = '2026-09-22.529'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31210,9 +31248,9 @@
    *              Rundgang (tvV2EndeSetzen) → atShowEndPrompt → review + Auto-P&L.
    * Läuft NUR am PC (MT5_LOCAL). Vom Mac/Handy: close-Signal mit params.v2 (Absender tpV2PlanSchliessen,
    * Empfänger eigener Zweig in orderSignalTick). Auto-Close vor Market Close nutzt v2SchliessenAmPc direkt. ══ */
-  async function tvV2EndeSetzen(plan, todayPnl){
+  async function tvV2EndeSetzen(plan, todayPnl, quelle){
     const nowIso = new Date().toISOString()
-    const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2Handelstag(), at: nowIso, quelle: 'close' }
+    const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2Handelstag(), at: nowIso, quelle: quelle || 'close' }   // 'reader_leer' = Master laut Reader weg (25.09.2026)
     const alt = plan.mt5Baseline || {}
     const base = Object.assign({}, alt, { final: fin, live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
     const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
