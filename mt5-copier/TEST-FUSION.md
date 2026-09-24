@@ -77,30 +77,52 @@ Die Meldung im Fenster kopieren und schicken. Häufige Fälle:
 - `Algo Trading ist nicht aktiv` → im Hedge-Terminal einschalten.
 - `Warte auf Snapshot` bleibt stehen → das EA läuft nicht auf einem Chart im Master-Terminal.
 
-## Erster echter Winning-Days-Farm-Hedge — Checkliste (24.09.2026)
+## Erster echter Winning-Days-Farm-Hedge — Checkliste (Stand 25.09.2026)
 
 Reihenfolge einhalten, jeder Punkt ist ein Beweis, kein Klick ins Blaue.
 
+**Vorbedingung 0:** Fusion 488579 braucht **Marge** — heute 0 €. Ohne Guthaben lehnt der Broker die
+Gegen-Order ab (`abgelehnt`, retcode „not enough money"); erst einzahlen, dann starten.
+
 **Voraussetzungen am PC**
-1. Copier läuft mit Version ≥ `.472` (Copier-Fenster: Kopfzeile, oder Prophos → Echo → Instanz-Chip).
-2. Fusion-Terminal (`C:\MT5-Hedge`) offen, **Algo-Handel AN** (Knopf oben grün), Symbol **NAS100** in der Marktübersicht sichtbar.
-3. Prophos-PC-Tab mit Build ≥ `.473` (Versions-Leiste unten), eingeloggt in die ID, deren Konto gehedgt wird.
+1. Copier läuft mit Version ≥ `.512` (notfall_faktor + Grund-Durchreichung; Copier-Fenster: Kopfzeile,
+   oder Prophos → Echo → Instanz-Chip).
+2. Fusion-Terminal (`C:\MT5-Hedge`) offen, **Algo-Handel AN** (Knopf oben grün), Symbol **NAS100** in der
+   Marktübersicht sichtbar.
+3. Prophos-PC-Tab mit Build ≥ `.516` (Feed-Wächter, Puffer in Ticks; Versions-Leiste unten), eingeloggt in
+   die ID, deren Konto gehedgt wird.
 4. Kein Echo-Not-Aus (Pause) aktiv — ein Solo-Open wird sonst mit `pausiert` abgelehnt.
+5. **Kurs-Feed läuft:** der Markt-Kopf in Prophos zeigt NQ/MNQ „live · vor x s" (Reader-PC mit Userscript
+   ≥ 0.8.0, siehe `tv-reader/README.md`). Ohne Feed schließt nur das Netz im Terminal — kein Wächter.
 
 **Kleinster Plan**
-5. Trade-Plan → Weg **Winning Days Farm** → Funded-Futures-Konto wählen → 1 MNQ, kleiner TP (z. B. 30 $) und kleiner SL (z. B. 30 $), Faktor z. B. 0,5 → Speichern.
-6. „Starten" (PC oder Mac). Puls platziert in TradingView; in der Sekunde des bestätigten Buy-Klicks geht die Gegen-Order auf Fusion raus.
+6. Trade-Plan → Weg **Winning Days Farm** → Funded-Futures-Konto wählen → 1 MNQ, kleiner TP (z. B. 30 $),
+   **Risiko Master ($)** = Stop-Distanz, z. B. 30 $, **Risiko Slave (€)** z. B. 10 € — die Multiplikator-Box
+   zeigt die Fusion-Lots (Kontrakte × Multiplikator) → Speichern.
+7. „Starten" (PC oder Mac). Puls platziert in TradingView; in der Sekunde des bestätigten Buy-Klicks geht
+   die Gegen-Order auf Fusion raus.
 
 **Was in MetaTrader zu sehen sein muss**
-7. Position auf NAS100, Kommentar `PXsolo`, Magic 790001, Richtung = Gegenseite des Masters, Lots = € / (TP-Distanz × Punktwert).
-8. **SL UND TP gesetzt:** SL = Fill ± TP-Distanz × 1,10 (Notfall, Finn: „110 % vom Master-Take-Profit"), TP = Fill ∓ (SL-Distanz + Puffer) — Reserve HINTER dem Master-SL, der Feed-Wächter schließt am Master-SL selbst. Fehlt eines, steht in Prophos `sl_fehler`/`tp_fehler` mit dem Retcode. Der Normalweg zum Schließen ist der Wächter im PC-Tab über den NQ-Feed (8 Ticks über dem Master-TP) — das Level im Terminal ist das Netz dahinter.
+8. Position auf NAS100, Kommentar `PXsolo`, Magic 790001, Richtung = Gegenseite des Masters, Lots wie in
+   der Multiplikator-Box.
+9. **SL UND TP gesetzt:** SL = Fill ± TP-Distanz × 1,10 (Notfall, Finn: „110 % vom Master-Take-Profit"),
+   TP = Fill ∓ (SL-Distanz + Puffer) — Reserve HINTER dem Master-SL. Fehlt eines, steht in Prophos
+   `sl_fehler`/`tp_fehler` mit dem Retcode.
 
 **Was in Prophos zu sehen sein muss**
-9. Karte: Chip „FUSION SELL 0,xx Lot · ±x,xx € · zu bei X / Y" (Level aus der Copier-Antwort, Live-P&L aus dem Copier-Status, auch am Mac über `mt5_live`).
-10. Erreicht der Kurs ein Level, schließt der Broker; der Copier erkennt den Abschluss selbst (`hedge_solo_zu` im Status: Ticket, P&L, Grund `level_tp`/`level_sl`, Schlusskurs) und der PC-Tab bucht ihn auf die Karte.
+10. Karte: Chip „FUSION SELL 0,xx Lot · ±x,xx € · schließt bei NQ 31.002 · Notfall 20.143 / 19.870" —
+    „schließt bei" = Master-TP ± 8 Ticks (Kurs-Feed), „Notfall" = die beiden Terminal-Level; Live-P&L aus
+    dem Copier-Status, auch am Mac über `mt5_live`. Unter dem Markt-Chart steht der Plan mit Entry/TP/SL-
+    Linien und Δ TP.
+11. **Normalweg:** der Wächter im PC-Tab schließt über den NQ-Feed (Grund `tp_feed` bei Master-TP + 8 Ticks,
+    `sl_feed` bei Master-SL). **Netz:** erreicht der Kurs vorher ein Terminal-Level, schließt der Broker; der
+    Copier erkennt es selbst (`hedge_solo_zu`, Grund `level_tp`/`level_sl` = Notfall gefüllt) und der
+    PC-Tab bucht es auf die Karte.
 
 **Abbrechen**
-11. Knopf **„Hedge zu"** auf der Karte (nur am PC, der den Hedge hält) → Grund `close`.
-12. Oder von Hand im Terminal schließen → der Copier bucht es mit Grund `hand`. Nie den Copier beenden, solange die Position offen ist — der Close-Auftrag braucht ihn.
+12. Knopf **„Hedge zu"** auf der Karte (nur am PC, der den Hedge hält) → Grund `hand`.
+13. Oder von Hand im Terminal schließen → der Copier bucht es mit Grund `hand`. Nie den Copier beenden,
+    solange die Position offen ist — der Close-Auftrag braucht ihn.
 
-Gelingt 7–10, ist der Weg bewiesen. Beim ersten Fehlschlag: Copier-Fenster-Meldung + Chip-Tooltip kopieren und schicken.
+Gelingt 8–11, ist der Weg bewiesen. Beim ersten Fehlschlag: Copier-Fenster-Meldung + Chip-Tooltip kopieren
+und schicken.
