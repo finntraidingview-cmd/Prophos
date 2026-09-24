@@ -1181,6 +1181,11 @@
   #tradePlanModal .tp-v2 .tp-v2-instr button{padding:7px 12px;font-size:14px}
   #tradePlanModal .tp-v2 #tp-master-row{grid-column:1 / -1}
   #tradePlanModal .tp-v2 #tp-nq-toggle-slave-placeholder{display:none !important}
+  /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
+     volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
+     diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
+  #tradePlanModal .tp-wd #tp-slave-risk-field{grid-column:auto !important}
+  #tradePlanModal .tp-wd .field:has(> #tp-master-tp){grid-column:1 / -1}
   #tradePlanModal .tp-v2-instr{display:flex;width:100%}
   #tradePlanModal .tp-v2-instr button{
     flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;
@@ -1739,6 +1744,10 @@
   #dashboard-view .tc2-chip-ready{background:rgba(16,185,129,.12);color:#0f9c7a}
   #dashboard-view .tc2-chip-mirror{background:rgba(136,124,252,.14);color:#6d5ff0}
   #dashboard-view .tc2-chip-issue{background:rgba(240,68,56,.12);color:#F04438;animation:tc2PulseIssue 1.6s ease-in-out infinite}
+  /* Fusion-Gegenhedge-Chip (25.09.2026, Design-Rundgang): am Handy brach der Chip mitten im Text um
+     („… zu bei 20.331,5 /  Lot 20.018,5") — jetzt bricht er nur zwischen seinen Teilen */
+  #dashboard-view .tc2-hedge{flex-wrap:wrap;row-gap:2px}
+  #dashboard-view .tc2-hedge > *{white-space:nowrap}
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
 
@@ -5757,7 +5766,7 @@
               <label id="tp-master-qty-label">Anzahl Kontrakte</label>
               <input type="number" class="input mono" id="tp-master-qty" min="0.01" step="0.1" placeholder="z.B. 1" value="1">
             </div>
-            <div class="field" style="grid-column:span 2">
+            <div class="field" id="tp-slave-risk-field" style="grid-column:span 2">
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
               <div id="tp-slave-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:6px;font-size:12px;line-height:1.4">
@@ -5855,7 +5864,7 @@
                  aus den Lots (tpWdVorschau). Ein eigenes Faktor-Feld gab es kurz (.473–.483), Finn hat es verworfen. -->
             <div class="field" id="tp-wd-hedge-row" style="grid-column:span 2;display:none">
               <label>Fusion-Gegenhedge <span id="tp-wd-hedge-eur" style="color:var(--sub);font-weight:400"></span></label>
-              <div id="tp-wd-vorschau" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+              <div id="tp-wd-vorschau" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px"></div>
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
                  sichtbar. Mit TP ($), SL (= Risiko Master $) und Lots (= Anzahl
@@ -18494,13 +18503,13 @@
     try{
       if(!p || p.route !== 'tvv2') return ''
       const h = p.mt5Baseline && p.mt5Baseline.hedge
-      if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet der PC auf Fusion die Gegen-Order${p.multiplier > 0 && p.masterContracts > 0 ? ` mit ${(Math.round(Number(p.masterContracts) * Number(p.multiplier) * 100) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} Lot NAS100 (Multiplikator ${Number(p.multiplier).toFixed(3)})` : ''} — ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.hedgeFaktor > 0 ? '' : ' (Staffel)'} — beide Schließ-Level in MetaTrader">🛡 Hedge ${Number(p.hedgeEur).toLocaleString('de-DE')} €${p.hedgeFaktor > 0 ? ` · ×${Number(p.hedgeFaktor).toLocaleString('de-DE', { maximumFractionDigits: 3 })}` : ''}</span>` : '' }
+      if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet der PC auf Fusion die Gegen-Order${p.multiplier > 0 && p.masterContracts > 0 ? ` mit ${(Math.round(Number(p.masterContracts) * Number(p.multiplier) * 100) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} Lot NAS100 (Multiplikator ${Number(p.multiplier).toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })})` : ''} — ${Number(p.hedgeEur).toLocaleString('de-DE')} € Verlust am Master-TP${p.hedgeFaktor > 0 ? '' : ' (Staffel)'} — beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Hedge ${p.hedgeFaktor > 0 ? `×${Number(p.hedgeFaktor).toLocaleString('de-DE', { maximumFractionDigits: 3 })} · ` : ''}${Number(p.hedgeEur).toLocaleString('de-DE')} €</span>` : '' }
       const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
       // Beide Level (Vertrag .470): sl = am Master-TP, tp = am Master-SL. Fehlt das zweite, obwohl der Plan einen SL hat
       // (tp_fehler), steht das Warnzeichen sichtbar im Chip — nicht nur im Tooltip.
       const f = v => Number(v).toLocaleString('de-DE')
       const lvl = h.sl > 0 ? ` · zu bei ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Level'
-      const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
+      const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
@@ -26701,7 +26710,7 @@
     const masterName = p.masterName || '— gelöscht —'
     const slaveName  = p.slaveName  || (routeIstV2(p.route) ? '' : '— gelöscht —')   // V2: kein Slave, kein „gelöscht"
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-    const sCur = slavePreset.currency
+    const sCur = (p.route === 'tvv2' && p.hedgeEur > 0) ? '€' : slavePreset.currency   // WD-Farm: Fusion-P&L kommt in EUR (25.09.2026)
     const mult = p.multiplier != null ? p.multiplier.toFixed(3) : '—'
 
     const _m = accounts.find(a => String(a.id) === String(p.masterAccountId))
@@ -26935,7 +26944,10 @@
             <span class="tc2-name" title="${escapeHtml(masterName)}">${escapeHtml(masterName)}</span>
             ${!istV2Karte
               ? `<i class="tc2-arrow">→</i><span class="tc2-name" title="${escapeHtml(slaveName)}">${escapeHtml(slaveName)}</span>`
-              : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
+              : (p.route === 'tvv2' && p.hedgeEur > 0)
+                // Winning Days Farm (25.09.2026, Design-Rundgang): „ohne Hedge" stand direkt neben „Fusion-Gegenhedge"
+                ? `<span class="tc2-chip" title="Winning Days Farm: Fusion-Gegenhedge, beide Schließ-Level in MetaTrader" style="background:rgba(124,58,237,.10);color:#6D28D9">Fusion-Hedge</span>`
+                : `<span class="tc2-chip" title="V2-Weg: kein Slave, nichts wird kopiert" style="opacity:.75">ohne Hedge</span>`}
             ${(routeIstEcho(p.route) && (p.richtung === 'buy' || p.richtung === 'sell'))
               ? `<span class="tc2-chip" style="font-family:var(--mono);font-weight:700;${p.richtung === 'buy' ? 'background:rgba(18,183,106,.12);color:#0E9757' : 'background:rgba(240,68,56,.10);color:#D92D20'}" title="Gespeicherte Order-Richtung">${p.richtung === 'buy' ? 'BUY' : 'SELL'}</span>`
               : ''}
@@ -26956,7 +26968,7 @@
       : ''
 
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-    const sCur = slavePreset.currency
+    const sCur = (p.route === 'tvv2' && p.hedgeEur > 0) ? '€' : slavePreset.currency   // WD-Farm: Fusion-P&L kommt in EUR (25.09.2026)
 
     const mPl = p.masterPl ?? null
     const sPl = p.slavePl ?? null
@@ -27124,7 +27136,7 @@
 
     // Meta row (risk + contracts + multiplier)
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-    const sCur = slavePreset.currency
+    const sCur = (p.route === 'tvv2' && p.hedgeEur > 0) ? '€' : slavePreset.currency   // WD-Farm: Fusion-P&L kommt in EUR (25.09.2026)
     const meta = `
       <div class="tc-row">
         <div class="tc-meta-item">
@@ -28887,15 +28899,17 @@
     }
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
     const n2 = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if(eurEl) eurEl.textContent = `— Fusion ${n2(r.lots)} Lot NAS100 · Multiplikator ${r.mult.toFixed(3)}`
-    const kachel = (titel, master, fusion, farbe) => { const netto = master * fx + fusion; return `<div style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:${farbe}">
+    if(eurEl) eurEl.textContent = `— ${n2(r.lots)} Lot NAS100 · Multiplikator ${r.mult.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
+    // Kachel-Farbe folgt dem Netto (25.09.2026, Design-Rundgang: die TP-Kachel war rot, obwohl „zusammen" im Plus stand);
+    // die Fusion-Zahl selbst bleibt nach ihrem eigenen Vorzeichen gefärbt — man sieht weiter, welche Seite zahlt.
+    const kachel = (titel, master, fusion) => { const netto = master * fx + fusion; const farbe = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'; return `<div style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:${farbe}">
         <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">${titel}</div>
         <div class="mono" style="font-size:12.5px;margin-top:3px">Master <b style="color:${master >= 0 ? '#15803d' : '#b91c1c'}">${fmtD(master)}</b> · Fusion <b style="color:${fusion >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(fusion)}</b></div>
         <div class="mono" style="font-size:11.5px;color:var(--sub);margin-top:2px">zusammen ≈ <b style="color:${netto >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(netto)}</b></div></div>` }
     const tpHtml = r.tp > 0
-      ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100, 'rgba(240,68,56,.06)')
+      ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100)
       : '<div style="padding:8px 12px;border-radius:8px;border:1px dashed var(--border);font-size:12px;color:var(--sub)">bei Take Profit: erst Take Profit ($) eintragen.</div>'
-    const slHtml = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100, 'rgba(18,183,106,.06)')
+    const slHtml = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100)
     box.innerHTML = tpHtml + slHtml
       + `<div style="grid-column:1 / -1;font-size:11px;color:var(--sub-2);line-height:1.5">Stop-Distanz ${r.slPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt${r.tpPkt > 0 ? ` · TP-Distanz ${r.tpPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt + ${puffer} Pkt Puffer am Fusion-Level` : ''} · ${r.slavePpl.toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/Pkt je Lot NAS100 — beide Schließ-Level liegen in MetaTrader.</div>`
   }
@@ -28945,7 +28959,7 @@
     const multBox = document.querySelector('#tradePlanModal .tp-multi-display')
     if(multBox) multBox.style.display = (v2 && !wdAn) ? 'none' : ''
     { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = wdAn ? 'Risiko Master ($) — ist der Stop Loss' : 'Risiko Master ($)' }
-    { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>) — Fusion, aus der Farmer-Staffel vorbelegt'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
+    { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>) — Fusion, Staffel-Vorschlag'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
     // Ein Popup für alles (23.09.2026, Finn: „den Account auswählen, die Lotanzahl, Take Profit und Stop-Loss, die
     // Uhrzeit — das ist alles"): auf V2 kommen TP, SL, Richtung und Startzeit HIER rein; Risiko Master und die
     // Limits-Box verschwinden. Auf den anderen Wegen bleibt alles wie bisher (TP/Richtung versteckt, Popup 2).
@@ -28965,6 +28979,7 @@
     // (CSS: Master volle Breite, Platzhalter weg → Instrument | Kontrakte, dann TP | SL). Auf den anderen
     // Wegen wird sie exakt wieder entfernt — dort ändert sich nichts.
     document.getElementById('tp-form-grid')?.classList.toggle('tp-v2', v2)
+    document.getElementById('tp-form-grid')?.classList.toggle('tp-wd', wdAn)   // WD-Farm-Raster (25.09.2026): Risiko Slave neben Kontrakte, TP volle Breite
     // Kontrakte-Feld je Weg (24.09.2026, Finns Screenshot: der Browser meckerte beim Speichern „Die zwei
     // nächstliegenden gültigen Werte sind 0,91 und 1,01" — step 0.1 ab min 0.01 stammt aus der Lots-Welt):
     // Orbit V2 = ganze Kontrakte (step 1, min 1), Echo V2 = Lots mit 0.01, alle anderen Wege wie bisher.
@@ -29764,7 +29779,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.513'
+  const OS_TAB_BUILD = '2026-09-22.514'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36944,7 +36959,7 @@
     const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     if(h && h.status === 'geschlossen' && h.pl != null){
       const pl = Number(h.pl)
-      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">(${escapeHtml(hedgeGrundText(h.grund))}) — aus der Deal-Historie, wird als Slave-P&L gebucht</span></div>`
+      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund))} · aus der Deal-Historie, wird als Slave-P&L gebucht</span></div>`
     }
     if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:#B45309">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
     if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:#B45309">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
@@ -37154,6 +37169,9 @@
       `
     }
 
+    // Winning Days Farm (25.09.2026, Design-Rundgang, von der Koordination freigegeben): der Symmetrie-Block der
+    // Hedge-Ära („Stark asymmetrisch", „mehr auf Live") ist hier Rauschen — der Fusion-Hedge ist absichtlich klein.
+    if(routeIstV2(p.route) && p.hedgeEur > 0) planHtml = ''
     document.getElementById('tc-net-display').innerHTML = realisedHtml + planHtml
   }
   ;['tc-master-pl','tc-slave-pl'].forEach(id => {
