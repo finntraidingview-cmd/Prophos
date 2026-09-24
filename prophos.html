@@ -5660,6 +5660,9 @@
               <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
                 <button type="button" id="tp-route-mt5v2">Echo V2</button>
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
+                <!-- Winning Day (24.09.2026 abends, Finn: „ein Drittes, wo Winning-Day-Pläne drinstehen, und im Dropdown
+                     nur Funded-Futures-Konten"): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge aus der Staffel (hedge_eur). -->
+                <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge aus der Hedge-Staffel — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
                 <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
               </div>
               <!-- Alte Wege der Hedge-Ära, zweite Zeile (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
@@ -7349,6 +7352,38 @@
           <span id="mk-stand" style="font-size:12px;color:var(--sub)"></span>
           <button class="btn btn-ghost" id="mk-refresh" style="font-size:12px;padding:6px 11px">↻ Aktualisieren</button>
         </div>
+      </div>
+      <!-- LIVE (24.09.2026 abends, Finn: „ich will unter Markt den Markt auch wieder gespiegelt sehen, auch als
+           Chart, sodass ich die Orders als Demo nachstellen kann"): Kurs + Minutenkerzen aus dem TradingView-Reader
+           (tv_kurse / tv_kurs_1m), Demo-Orders gegen den Feed (demo_orders). Verdrahtung im Modul (Sektion
+           MARKT LIVE), eigene IDs mkl-*. Die Yahoo-Karten darunter bleiben als verzögerter Vergleich. -->
+      <div class="card" id="mkl-wrap" style="padding:14px 16px;margin-bottom:14px">
+        <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px">
+          <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
+          <span class="mono" id="mkl-diff" style="font-size:13px;font-weight:700"></span>
+          <span id="mkl-quelle" style="font-size:11.5px;color:var(--sub-2)"></span>
+          <div class="seg" id="mkl-span" style="margin-left:auto">
+            <button type="button" data-mkl-span="60" class="active">1 h</button>
+            <button type="button" data-mkl-span="240">4 h</button>
+            <button type="button" data-mkl-span="1440">24 h</button>
+          </div>
+        </div>
+        <div style="height:300px;margin-top:10px"><canvas id="mkl-chart"></canvas></div>
+        <div id="mkl-hinweis" style="font-size:11.5px;color:var(--sub-2);margin-top:6px;line-height:1.5"></div>
+      </div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px">
+        <div class="panel-title">Demo-Order <span style="font-weight:400;color:var(--sub);font-size:12px">· ohne Geld nachstellen — Fill zum Live-Kurs, TP/SL in $ wie im Order-Popup, Treffer über die Minutenkerzen (zählt auch, wenn kein Tab offen war)</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end;margin-top:10px">
+          <div class="field" style="margin:0"><label>Richtung</label><div class="seg" id="mkl-dir"><button type="button" data-mkl-dir="buy">BUY</button><button type="button" data-mkl-dir="sell">SELL</button></div></div>
+          <div class="field" style="margin:0"><label>Instrument</label><div class="seg" id="mkl-instr"><button type="button" data-mkl-instr="MNQ" class="active">MNQ <span style="opacity:.6;font-size:11px">$2/pt</span></button><button type="button" data-mkl-instr="NQ">NQ <span style="opacity:.6;font-size:11px">$20/pt</span></button></div></div>
+          <div class="field" style="margin:0;width:90px"><label>Kontrakte</label><input type="number" class="input mono" id="mkl-kt" min="1" step="1" value="1"></div>
+          <div class="field" style="margin:0;width:120px"><label>Take Profit ($)</label><input type="number" class="input mono" id="mkl-tp" min="0" step="10" placeholder="optional"></div>
+          <div class="field" style="margin:0;width:120px"><label>Stop Loss ($)</label><input type="number" class="input mono" id="mkl-sl" min="0" step="10" placeholder="optional"></div>
+          <button type="button" class="btn btn-primary" id="mkl-go">Demo-Order platzieren</button>
+          <span class="modal-msg" id="mkl-msg" style="margin:0"></span>
+        </div>
+        <div id="mkl-offen" style="margin-top:12px"></div>
+        <div id="mkl-verlauf" style="margin-top:10px"></div>
       </div>
       <div id="mk-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px"></div>
 
@@ -18116,12 +18151,12 @@
     let res = null
     try{
       res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, punkte, symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
+        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, punkte, puffer: hedgePuffer(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
     }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
     if(res && res.ok){
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, fill: res.fill, sl: res.sl || 0, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
-      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${Number(res.lots).toLocaleString('de-DE')} Lot NAS100 @ ${Number(res.fill).toLocaleString('de-DE')} · schließt bei NQ ${tpLevel != null ? tpLevel.toLocaleString('de-DE') : '?'} (+${hedgePuffer()} Pkt)${res.sl ? ` · Notfall-SL ${Number(res.sl).toLocaleString('de-DE')}` : ''}`, 'start')
+      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${Number(res.lots).toLocaleString('de-DE')} Lot NAS100 @ ${Number(res.fill).toLocaleString('de-DE')}${res.sl ? ` · schließt in MetaTrader bei ${Number(res.sl).toLocaleString('de-DE')} (TP-Distanz + ${hedgePuffer()} Pkt)` : ' · ⚠ KEIN Schließ-Level gesetzt (' + (res.sl_fehler || '?') + ')'}`, 'start')
       return h
     }
     const unklar = !!(res && (res.code === 'copier_stumm' || res.retry_ok === false))
@@ -18152,7 +18187,7 @@
         // slave_pl = realisierter Fusion-P&L (Deal-Historie) — nur, wenn am Plan noch nichts steht
         const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
         await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
-        if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${grund === 'tp' ? 'NQ am TP' : grund === 'master_ende' ? 'Master beendet' : grund})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}${res.schon_zu ? ' · war schon zu (Notfall-SL?)' : ''}`, 'end')
+        if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${grund === 'level_mt5' ? 'Level in MetaTrader erreicht' : grund === 'master_ende' ? 'Master beendet' : grund === 'hand' ? 'von Hand' : grund})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
@@ -18164,8 +18199,19 @@
   function hedgePuffer(){ try{ const v = wdVorplanRegeln().hedge_puffer; return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : HEDGE_PUFFER_STD }catch(_){ return HEDGE_PUFFER_STD } }
   // Wächter (PC-Tab, alle 5 s): eigene Pläne mit offenem Hedge auf diesem PC. Zwei Auslöser:
   //   1) Plan nicht mehr „open" → Master ist zu (Rundgang, Auto-Close, Schließen, Erledigt) → Hedge zu.
-  //   2) Plan „open" + Kurs frisch + TP-Level (+ Puffer) erreicht → Hedge zu. Kein Kurs → nichts (Notfall-SL wacht).
+  //   2) Das Schließ-Level in MetaTrader hat gefüllt (Finn: „sobald der Preis in MetaTrader erreicht wird") — die
+  //      Position fehlt in hedge_solo eines FRISCHEN Copier-Status → Close-Auftrag holt den P&L aus der Historie.
+  //      Bewusst NICHT über den NQ-Feed geschlossen: der Feed ist Anzeige (Markt-Chart), das Level liegt im Terminal.
   // Dazu „unklar"-Opens mit cmd_id nachfragen (der Copier hat vielleicht doch quittiert).
+  function hedgeSoloListeFrisch(){
+    try{
+      if(!MT5_LOCAL || typeof window.mtcInstances !== 'function') return null
+      for(const i of Object.values(window.mtcInstances() || {})){
+        if(i && i.alive && i.fetchedAt && (Date.now() - i.fetchedAt) <= 15000 && i.status && Array.isArray(i.status.hedge_solo)) return i.status.hedge_solo
+      }
+    }catch(_){}
+    return null
+  }
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
     if(!MT5_LOCAL || _hedgeWacheBusy || typeof window.mtcApi !== 'function') return
@@ -18174,8 +18220,7 @@
       let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
       const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.pc === hedgePcId())
       if(!meine.length) return
-      const puffer = hedgePuffer()
-      let kurs = null, kursGelesen = false
+      const liste = hedgeSoloListeFrisch()
       for(const p of meine){
         const h = p.mt5Baseline.hedge
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
@@ -18188,11 +18233,10 @@
         }
         if(h.status !== 'offen') continue
         if(p.status !== 'open'){ await hedgeSoloSchliessen(p, 'master_ende'); continue }
-        if(!(h.tp_level_nq > 0)) continue
-        if(!kursGelesen){ kurs = await hedgeKursLesen(); kursGelesen = true }
-        if(!kurs) continue
-        const erreicht = p.richtung === 'buy' ? kurs.preis >= h.tp_level_nq + puffer : p.richtung === 'sell' ? kurs.preis <= h.tp_level_nq - puffer : false
-        if(erreicht) await hedgeSoloSchliessen(p, 'tp', kurs.preis)
+        // Position im Terminal weg (Schließ-Level gefüllt oder von Hand zu) — erst 20 s nach dem Open, damit ein
+        // Status von VOR dem Open nicht als „weg" durchgeht; hedgeSoloSchliessen bekommt dann schon_zu + P&L
+        if(liste && !liste.some(q => q && Number(q.ticket) === Number(h.ticket))
+           && Date.now() - (Date.parse(h.opened_at || h.at || '') || 0) > 20000) await hedgeSoloSchliessen(p, 'level_mt5')
       }
     }catch(e){ console.warn('[hedgeWache]', e) }
     finally{ _hedgeWacheBusy = false }
@@ -18221,7 +18265,7 @@
       const h = p.mt5Baseline && p.mt5Baseline.hedge
       if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet Puls auf Fusion die Gegen-Order über ${Number(p.hedgeEur).toLocaleString('de-DE')} € (Staffel)">🛡 Hedge ${Number(p.hedgeEur).toLocaleString('de-DE')} €</span>` : '' }
       const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
-      const lvl = h.tp_level_nq > 0 ? ` · TP ${Number(h.tp_level_nq).toLocaleString('de-DE')}` : ' · TP ?'
+      const lvl = h.sl > 0 ? ` · zu bei ${Number(h.sl).toLocaleString('de-DE')}` : ' · ⚠ kein Level'
       const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
@@ -18229,7 +18273,7 @@
         const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
         return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
-          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} € über ${h.punkte} Pkt · Einstieg NQ ${h.einstieg_nq ?? '?'} (${h.einstieg_quelle || ''}) · schließt bei NQ ${h.tp_level_nq ?? '?'} + ${hedgePuffer()} Pkt${h.sl ? ` · Notfall-SL NAS100 ${h.sl}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
+          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} € über ${h.punkte} Pkt · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · schließt in MetaTrader bei ${h.sl} (TP-Distanz + ${hedgePuffer()} Pkt)` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = Number(h.pl)
@@ -18243,6 +18287,223 @@
   }
   window.hedgeSoloSchliessen = hedgeSoloSchliessen
   /* ========== ENDE FUSION-GEGENHEDGE ========== */
+
+  /* ========== MARKT LIVE — Chart aus dem Reader-Feed + Demo-Orders (24.09.2026 abends) ==========
+   * Finn: „Ich will unter Markt den Markt auch wieder gespiegelt sehen, abgebildet, auch als Chart, sodass ich
+   * die Orders als Demo nachstellen kann." Quelle = derselbe Feed wie der Gegenhedge: tv_kurse (letzter Kurs je
+   * PC) + tv_kurs_1m (Minutenkerzen, vom reader-server aus den Titel-Ticks gebündelt). Demo-Orders leben in
+   * demo_orders (pro Nutzer): Fill zum Live-Kurs, TP/SL in $ → Level wie bei Puls (Entry ± $ / (Punktwert × Kt)),
+   * Treffer werden über die Kerzen (High/Low) seit dem Entry ausgewertet — ein TP zählt also auch, wenn gerade
+   * kein Tab offen war. Innerhalb EINER Kerze, die beide Level berührt, gewinnt der SL (konservativ).
+   * Anzeige ehrlich: ohne frischen Kurs (≤ 30 s) gibt es keinen Fill und der Kopf sagt „kein Live-Kurs". */
+  const mkl = { span: 60, chart: null, kerzen: [], kurs: null, kursAlt: null, orders: [], dir: null, instr: 'MNQ', busy: false, tick: null, stub: null }
+  const $mkl = id => document.getElementById(id)
+  const mklAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="markt"]'); return !!(v && v.classList.contains('active')) }
+  const mklFmt = (v, n) => (v == null || !isFinite(v)) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: n == null ? 2 : n, maximumFractionDigits: n == null ? 2 : n })
+  const mklPpl = sym => sym === 'NQ' ? 20 : 2
+  // Level aus $ (wie Puls/Order-Popup): Entry ± usd / (ppl × kt); null ohne Betrag
+  function mklLevel(entry, richtung, usd, ppl, kt, istTp){
+    if(!(usd > 0) || !(ppl > 0) || !(kt > 0)) return null
+    const d = usd / (ppl * kt)
+    const plus = (richtung === 'buy') === !!istTp
+    return Math.round((plus ? entry + d : entry - d) * 100) / 100
+  }
+  // P&L in $: (Kurs − Entry) × ppl × kt, bei sell umgekehrt
+  const mklPl = (o, kurs) => Math.round(((o.richtung === 'buy' ? kurs - Number(o.entry) : Number(o.entry) - kurs) * mklPpl(o.symbol) * Number(o.kt)) * 100) / 100
+  // REIN RECHNEND (testbar über window._mklAuswerten): offene Demo-Orders gegen Kerzen + Live-Kurs.
+  // → [{id, exit, grund, exit_at}] für alle, die zu sind. Kerzen chronologisch, nur die NACH dem Entry.
+  function mklAuswerten(orders, kerzen, kurs){
+    const zu = []
+    for(const o of (orders || [])){
+      if(!o || o.status !== 'open') continue
+      const t0 = Date.parse(o.entry_at) || 0, tp = Number(o.tp_level), sl = Number(o.sl_level)
+      let erg = null
+      for(const k of (kerzen || [])){
+        const tk = Date.parse(k.minute) || 0
+        if(tk + 60000 <= t0) continue                      // Kerze ganz vor dem Entry
+        const h = Number(k.h), l = Number(k.l)
+        if(tk < t0){                                      // Entry-Kerze: nur der Close zählt (High/Low können vor dem Fill liegen)
+          const c = Number(k.c)
+          if(o.richtung === 'buy'){ if(sl > 0 && c <= sl) erg = { exit: sl, grund: 'sl' }; else if(tp > 0 && c >= tp) erg = { exit: tp, grund: 'tp' } }
+          else { if(sl > 0 && c >= sl) erg = { exit: sl, grund: 'sl' }; else if(tp > 0 && c <= tp) erg = { exit: tp, grund: 'tp' } }
+        } else if(o.richtung === 'buy'){
+          if(sl > 0 && l <= sl) erg = { exit: sl, grund: 'sl' }
+          else if(tp > 0 && h >= tp) erg = { exit: tp, grund: 'tp' }
+        } else {
+          if(sl > 0 && h >= sl) erg = { exit: sl, grund: 'sl' }
+          else if(tp > 0 && l <= tp) erg = { exit: tp, grund: 'tp' }
+        }
+        if(erg){ erg.exit_at = new Date(Math.max(t0 + 1000, tk + 59000)).toISOString(); break }
+      }
+      if(!erg && kurs && kurs.preis > 0){
+        const p = kurs.preis
+        if(o.richtung === 'buy'){ if(sl > 0 && p <= sl) erg = { exit: sl, grund: 'sl' }; else if(tp > 0 && p >= tp) erg = { exit: tp, grund: 'tp' } }
+        else { if(sl > 0 && p >= sl) erg = { exit: sl, grund: 'sl' }; else if(tp > 0 && p <= tp) erg = { exit: tp, grund: 'tp' } }
+        if(erg) erg.exit_at = new Date().toISOString()
+      }
+      if(erg) zu.push({ id: o.id, exit: erg.exit, grund: erg.grund, exit_at: erg.exit_at, pl_usd: mklPl(o, erg.exit) })
+    }
+    return zu
+  }
+  window._mklAuswerten = mklAuswerten
+  // Daten holen: jüngster Kurs (auch alt, mit Alter), Kerzen der Spanne, offene + letzte Demo-Orders
+  async function mklLaden(vollstaendig){
+    if(mkl.stub) return
+    const jetzt = Date.now()
+    const q = []
+    q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(5))
+    if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - mkl.span * 60000).toISOString()).order('minute', { ascending: true }).limit(1500))
+    else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
+    if(currentUserId) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
+    const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
+    const rows = (rk && rk.data) || []
+    const best = rows.find(r => r && r.preis != null && (r.wurzel === 'NQ' || r.wurzel === 'MNQ')) || null
+    mkl.kursAlt = best ? { preis: Number(best.preis), symbol: best.symbol, wurzel: best.wurzel, pc: best.pc_name || best.id, alter_ms: jetzt - (Number(best.reader_ts) || 0), sichtbar: best.sichtbar !== false } : null
+    mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
+    const neu = (rz && rz.data) || []
+    if(vollstaendig || !mkl.kerzen.length) mkl.kerzen = neu
+    else {
+      // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
+      for(const k of neu){ const i = mkl.kerzen.findIndex(x => x.minute === k.minute && x.wurzel === k.wurzel); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
+      mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0))
+      const grenze = jetzt - mkl.span * 60000
+      mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= grenze)
+    }
+    // Eine Wurzel für den Chart: die mit der jüngsten Kerze
+    if(mkl.kerzen.length){ const w = mkl.kerzen[mkl.kerzen.length - 1].wurzel; mkl.kerzen = mkl.kerzen.filter(k => k.wurzel === w) }
+    if(ro && ro.data){ mkl.orders = ro.data; mkl.ordersGeladen = true }
+  }
+  async function mklDemoSchliessenDb(zu){
+    for(const z of zu){
+      try{
+        const { data } = await supabase.from('demo_orders').update({ status: 'closed', exit: z.exit, exit_at: z.exit_at, grund: z.grund, pl_usd: z.pl_usd }).eq('id', z.id).eq('status', 'open').select('*')
+        if(data && data[0]){ const i = mkl.orders.findIndex(o => o.id === z.id); if(i >= 0) mkl.orders[i] = data[0] }
+      }catch(e){ console.warn('[demo] close', e) }
+    }
+  }
+  function mklKopf(){
+    const k = mkl.kursAlt, el = $mkl('mkl-preis'), sym = $mkl('mkl-sym'), diff = $mkl('mkl-diff'), q = $mkl('mkl-quelle'), hint = $mkl('mkl-hinweis')
+    if(!el) return
+    if(!k){ el.textContent = '–'; if(sym) sym.textContent = ''; if(diff) diff.textContent = ''; if(q) q.textContent = 'kein Kurs im Feed — TradingView + Reader auf dem 24/7-PC offen?'; return }
+    const frisch = k.alter_ms <= HEDGE_KURS_MAX_ALTER_MS
+    el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
+    if(sym) sym.textContent = k.symbol
+    // Tagesveränderung gegen die erste Kerze der Spanne (ehrlich: „seit Spannenanfang", nicht Vortag)
+    const erste = mkl.kerzen.length ? Number(mkl.kerzen[0].o) : null
+    if(diff){
+      if(erste > 0){ const d = k.preis - erste, pct = d / erste * 100; diff.textContent = `${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(d))} (${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(pct))} %) seit ${mkl.span >= 1440 ? '24 h' : mkl.span / 60 + ' h'}`; diff.style.color = d >= 0 ? 'var(--good)' : 'var(--danger)' }
+      else diff.textContent = ''
+    }
+    const alt = Math.round(k.alter_ms / 1000)
+    if(q) q.textContent = (frisch ? `live · vor ${alt} s` : `⚠ kein Live-Kurs — letzter Stand vor ${alt < 3600 ? Math.round(alt / 60) + ' min' : (alt / 3600).toFixed(1) + ' h'}`) + ` · ${k.pc}${k.sichtbar ? '' : ' · Tab verdeckt'}`
+    if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen · Quelle: TradingView-Tab-Titel des Reader-PCs (Userscript 0.6.0) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
+  }
+  function mklChartZeichnen(){
+    const cv = $mkl('mkl-chart'); if(!cv || typeof Chart === 'undefined') return
+    const ks = mkl.kerzen
+    const labels = ks.map(k => new Date(k.minute).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }))
+    const closes = ks.map(k => Number(k.c))
+    if(mkl.kurs && ks.length){ closes[closes.length - 1] = mkl.kurs.preis }   // laufende Minute = Live-Kurs
+    const up = closes.length > 1 ? closes[closes.length - 1] >= closes[0] : true
+    const farbe = up ? '#12B76A' : '#F04438'
+    const ds = [{ label: 'Kurs', data: closes, borderColor: farbe, backgroundColor: farbe + '1f', borderWidth: 1.6, pointRadius: 0, pointHitRadius: 12, fill: true, tension: .15, order: 2 }]
+    // Offene Demo-Orders als Linien: Entry (grau gestrichelt), TP (grün), SL (rot)
+    for(const o of mkl.orders.filter(o => o.status === 'open')){
+      const linie = (v, col, dash, lbl) => v > 0 && ds.push({ label: lbl, data: labels.map(() => v), borderColor: col, borderWidth: 1, borderDash: dash, pointRadius: 0, pointHitRadius: 0, fill: false, order: 1 })
+      linie(Number(o.entry), '#98A2B3', [4, 4], `Entry ${o.richtung.toUpperCase()} ${o.kt}×${o.symbol}`)
+      linie(Number(o.tp_level), '#15803d', [2, 3], 'TP')
+      linie(Number(o.sl_level), '#b91c1c', [2, 3], 'SL')
+    }
+    if(mkl.chart){ mkl.chart.data.labels = labels; mkl.chart.data.datasets = ds; mkl.chart.update('none'); return }
+    mkl.chart = new Chart(cv.getContext('2d'), { type: 'line', data: { labels, datasets: ds }, options: {
+      responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { filter: i => i.datasetIndex === 0, callbacks: { label: c => mklFmt(c.parsed.y) } } },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#98A2B3', font: { size: 10 } } },
+                y: { position: 'right', grid: { color: 'rgba(102,112,133,.10)' }, ticks: { color: '#98A2B3', font: { size: 10 }, callback: v => Number(v).toLocaleString('de-DE') } } } } })
+  }
+  function mklOrdersRender(){
+    const offenEl = $mkl('mkl-offen'), verlaufEl = $mkl('mkl-verlauf'); if(!offenEl || !verlaufEl) return
+    const kurs = mkl.kurs ? mkl.kurs.preis : null
+    const offen = mkl.orders.filter(o => o.status === 'open'), zu = mkl.orders.filter(o => o.status === 'closed').slice(0, 12)
+    const zeile = (o, live) => {
+      const pl = live ? (kurs != null ? mklPl(o, kurs) : null) : Number(o.pl_usd)
+      const col = pl == null ? 'var(--sub)' : pl >= 0 ? '#15803d' : '#b91c1c'
+      return `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:12.5px">
+        <b style="color:${o.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'};min-width:52px">${o.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>
+        <span class="mono">${o.kt} × ${escapeHtml(o.symbol)}</span>
+        <span class="mono" style="color:var(--sub)">@ ${mklFmt(o.entry)}</span>
+        <span class="mono" style="font-size:11.5px;color:var(--sub)">TP ${o.tp_level ? mklFmt(o.tp_level) : '—'} · SL ${o.sl_level ? mklFmt(o.sl_level) : '—'}</span>
+        <span class="mono" style="font-size:11.5px;color:var(--sub-2)">${new Date(o.entry_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}${live ? '' : ` → ${o.exit_at ? new Date(o.exit_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''} @ ${mklFmt(o.exit)} (${o.grund === 'tp' ? 'TP' : o.grund === 'sl' ? 'SL' : 'Hand'})`}</span>
+        <b class="mono" style="margin-left:auto;color:${col}">${pl == null ? (live ? 'kein Kurs' : '–') : (pl >= 0 ? '+' : '−') + mklFmt(Math.abs(pl)) + ' $'}</b>
+        ${live ? `<button type="button" class="btn btn-ghost btn-xs" data-mkl-close="${escapeHtml(String(o.id))}" ${kurs == null ? 'disabled title="ohne frischen Kurs kein Fill"' : ''}>Schließen</button>` : ''}
+      </div>`
+    }
+    offenEl.innerHTML = offen.length ? `<div style="font-size:12px;color:var(--sub);margin-bottom:2px">Offen (${offen.length})</div>` + offen.map(o => zeile(o, true)).join('') : `<div style="font-size:12.5px;color:var(--sub)">Keine offene Demo-Order.</div>`
+    const summe = mkl.orders.filter(o => o.status === 'closed').reduce((s, o) => s + (Number(o.pl_usd) || 0), 0)
+    verlaufEl.innerHTML = zu.length ? `<div style="font-size:12px;color:var(--sub);margin-bottom:2px">Zuletzt geschlossen · Summe aller Demo-Trades <b class="mono" style="color:${summe >= 0 ? '#15803d' : '#b91c1c'}">${summe >= 0 ? '+' : '−'}${mklFmt(Math.abs(summe))} $</b></div>` + zu.map(o => zeile(o, false)).join('') : ''
+    // Eigene Handler je Knopf (keine Sammel-Handler)
+    offenEl.querySelectorAll('[data-mkl-close]').forEach(b => b.addEventListener('click', () => mklDemoHand(b.getAttribute('data-mkl-close'))))
+  }
+  async function mklDemoHand(id){
+    const o = mkl.orders.find(x => String(x.id) === String(id)); if(!o || o.status !== 'open' || !mkl.kurs) return
+    await mklDemoSchliessenDb([{ id: o.id, exit: mkl.kurs.preis, grund: 'hand', exit_at: new Date().toISOString(), pl_usd: mklPl(o, mkl.kurs.preis) }])
+    mklOrdersRender(); mklChartZeichnen()
+  }
+  async function mklDemoPlatzieren(){
+    const msg = $mkl('mkl-msg'), say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
+    say('')
+    if(!currentUserId) return say('Nicht eingeloggt.', 'err')
+    if(!(mkl.dir === 'buy' || mkl.dir === 'sell')) return say('Richtung wählen — BUY oder SELL.', 'err')
+    const kt = Math.round(parseFloat($mkl('mkl-kt')?.value) || 0); if(!(kt > 0)) return say('Kontrakte angeben.', 'err')
+    const tpUsd = parseFloat($mkl('mkl-tp')?.value), slUsd = parseFloat($mkl('mkl-sl')?.value)
+    await mklLaden(false)
+    if(!mkl.kurs) return say('Kein frischer Live-Kurs (≤ 30 s) — ohne Kurs kein Fill.', 'err')
+    const ppl = mklPpl(mkl.instr), entry = mkl.kurs.preis
+    const row = { symbol: mkl.instr, richtung: mkl.dir, kt, entry, entry_at: new Date().toISOString(), entry_pc: mkl.kurs.pc || '',
+      tp_usd: tpUsd > 0 ? tpUsd : null, sl_usd: slUsd > 0 ? slUsd : null,
+      tp_level: mklLevel(entry, mkl.dir, tpUsd, ppl, kt, true), sl_level: mklLevel(entry, mkl.dir, slUsd, ppl, kt, false), status: 'open', user_id: currentUserId }
+    const b = $mkl('mkl-go'); if(b) b.disabled = true
+    try{
+      const { data, error } = await supabase.from('demo_orders').insert(row).select('*').single()
+      if(error) throw error
+      mkl.orders.unshift(data)
+      say(`✓ Demo: ${mkl.dir.toUpperCase()} ${kt} × ${mkl.instr} @ ${mklFmt(entry)}${row.tp_level ? ` · TP ${mklFmt(row.tp_level)}` : ''}${row.sl_level ? ` · SL ${mklFmt(row.sl_level)}` : ''}`, 'ok')
+      mklOrdersRender(); mklChartZeichnen()
+    }catch(e){ say('Nicht gespeichert: ' + (e && e.message || e), 'err') }
+    finally{ if(b) b.disabled = false }
+  }
+  async function mklTick(vollstaendig){
+    if(mkl.busy) return; mkl.busy = true
+    try{
+      await mklLaden(vollstaendig)
+      const zu = mklAuswerten(mkl.orders, mkl.kerzen, mkl.kurs)
+      if(zu.length){ await mklDemoSchliessenDb(zu); if(typeof atToast === 'function') atToast(`Demo: ${zu.length} Order${zu.length > 1 ? 's' : ''} geschlossen (${zu.map(z => z.grund.toUpperCase() + ' ' + (z.pl_usd >= 0 ? '+' : '−') + mklFmt(Math.abs(z.pl_usd)) + ' $').join(', ')})`, 'end') }
+      if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+    }catch(e){ console.warn('[markt-live]', e) }
+    finally{ mkl.busy = false }
+  }
+  // Stub ohne Login (Muster _admKapStub): window._mklStub({kurs, kerzen, orders}) zeichnet die View mit Testdaten
+  window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+  // Verdrahtung: Spanne, Richtung, Instrument, Platzieren — jeweils eigene Handler
+  document.querySelectorAll('#mkl-span [data-mkl-span]').forEach(b => b.addEventListener('click', () => {
+    mkl.span = Number(b.getAttribute('data-mkl-span')) || 60
+    document.querySelectorAll('#mkl-span button').forEach(x => x.classList.toggle('active', x === b))
+    mkl.kerzen = []; mklTick(true)
+  }))
+  document.querySelectorAll('#mkl-dir [data-mkl-dir]').forEach(b => b.addEventListener('click', () => {
+    mkl.dir = b.getAttribute('data-mkl-dir')
+    document.querySelectorAll('#mkl-dir button').forEach(x => { x.classList.toggle('active', x === b); x.style.color = x === b ? (mkl.dir === 'sell' ? 'var(--danger)' : '#2a9d5c') : '' })
+  }))
+  document.querySelectorAll('#mkl-instr [data-mkl-instr]').forEach(b => b.addEventListener('click', () => {
+    mkl.instr = b.getAttribute('data-mkl-instr') === 'NQ' ? 'NQ' : 'MNQ'
+    document.querySelectorAll('#mkl-instr button').forEach(x => x.classList.toggle('active', x === b))
+  }))
+  $mkl('mkl-go')?.addEventListener('click', mklDemoPlatzieren)
+  document.querySelectorAll('#dashboard-view .sb-link[data-view="markt"]').forEach(b => b.addEventListener('click', () => setTimeout(() => mklTick(true), 80)))
+  // Takt: 5 s in der Markt-View (Kurs + Kerzen-Nachtrag), sonst alle 60 s nur die Auswertung offener Demo-Orders
+  setInterval(() => { if(mklAktiv()) mklTick(false) }, 5000)
+  setInterval(() => { if(!mklAktiv() && currentUserId && (!mkl.ordersGeladen || mkl.orders.some(o => o.status === 'open'))) mklTick(false) }, 60000)
+  /* ========== ENDE MARKT LIVE ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
    * Finns Wunsch: bei laufenden Duplikium-Trades die Lots von Master (Fusion)
@@ -27952,7 +28213,23 @@
    * gespiegelt). Die Wahl wird beim Speichern als plan.route persistiert. */
   const TP_ROUTE_LS = 'prophos_tp_route'
   let _tpRoute = 'dup'            // wird bei jedem Modal-Open gesetzt (Edit: aus plan.route)
+  let _tpWd = false               // Winning Day (24.09.2026 abends): tvv2 + hedge_eur aus der Staffel, nur Funded-Futures
   let _tpMt5HedgeAccId = null     // Prophos-Account-ID des fixen Hedge — async aufgelöst
+  // Hedge-Betrag für einen Winning-Day-Plan: bestehender Wert bleibt, sonst Staffel (Live-Balance − Kontogröße),
+  // ohne Rechenbasis (kein DD am Konto) die kleinste Stufe — ein Winning Day ohne Hedge wäre kein Winning Day.
+  function tpWdHedgeEur(masterId, bestehend){
+    if(bestehend > 0) return bestehend
+    try{
+      const acc = (accounts || []).find(a => String(a.id) === String(masterId))
+      const vp = (typeof wdVorplanRegeln === 'function') ? wdVorplanRegeln() : { regeln: TP_VP_VORGABE }
+      if(acc){
+        const z = tpVorplanZeile(acc, { live: (typeof tpVorplanLive === 'function') ? tpVorplanLive(acc) : null, slaveCurrency: '€', regeln: vp.regeln, zufall: 0.5 })
+        if(z && !z.fehler && z.slaveEur > 0) return Math.round(z.slaveEur * 100) / 100
+      }
+      const st = (vp.regeln && vp.regeln.staffel) || TP_VP_VORGABE.staffel
+      const e = tpVorplanStaffel(0, st); return e > 0 ? e : 50
+    }catch(_){ return 50 }
+  }
 
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
   // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
@@ -27969,7 +28246,8 @@
     document.getElementById('tp-route-mt5')?.classList.toggle('active', _tpRoute === 'mt5')
     document.getElementById('tp-route-tvplus')?.classList.toggle('active', _tpRoute === 'tvplus')
     document.getElementById('tp-route-mt5v2')?.classList.toggle('active', _tpRoute === 'mt5v2')
-    document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2')
+    document.getElementById('tp-route-tvv2')?.classList.toggle('active', _tpRoute === 'tvv2' && !_tpWd)
+    document.getElementById('tp-route-wd')?.classList.toggle('active', _tpRoute === 'tvv2' && _tpWd)
     document.getElementById('tp-route-tsv2')?.classList.toggle('active', _tpRoute === 'tsv2')
     // MT5-Weg: „Speichern & Starten" wird zu „Weiter" — dazwischen liegt der
     // Order-Bot-Schritt (Buy/Sell, TP/SL in $, Lots), erst danach der Check.
@@ -28794,7 +29072,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.468'
+  const OS_TAB_BUILD = '2026-09-22.469'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31332,6 +31610,9 @@
                             : 'dup')
                          : (['mt5', 'tvplus', 'topstep', 'mt5v2', 'tvv2', 'tsv2'].includes(localStorage.getItem(TP_ROUTE_LS))
                             ? localStorage.getItem(TP_ROUTE_LS) : 'dup')
+    // Winning Day (24.09.2026 abends): beim Bearbeiten = tvv2-Plan mit hedge_eur; neu = letzte Wahl
+    _tpWd = _editPlan ? (_editPlan.route === 'tvv2' && _editPlan.hedgeEur > 0)
+                      : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
     // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
     // Kapitel dreht die gespeicherte Vorwahl einmalig auf den V2-Weg —
@@ -31362,7 +31643,7 @@
     // Läuft der Plan schon (open/review/…), ist die Route fix — der Save-Guard
     // verwirft die Wahl ohnehin, also den Regler ehrlich sperren statt so tun.
     const _segLocked = !!(_editPlan && _editPlan.status !== 'planned')
-    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-tsv2'].forEach(id => {
+    ;['tp-route-dup', 'tp-route-topstep', 'tp-route-mt5', 'tp-route-tvplus', 'tp-route-mt5v2', 'tp-route-tvv2', 'tp-route-wd', 'tp-route-tsv2'].forEach(id => {
       const b = document.getElementById(id)
       if(b){ b.disabled = _segLocked; b.title = _segLocked ? 'Route ist fix, sobald der Trade läuft' : '' }
     })
@@ -31626,6 +31907,9 @@
             // müssen nicht mit der Topstep-API verknüpft sein"): Firma Topstep + External ID, sonst nichts.
             // Die External ID ist die Kennung, an der später ggf. Puls das Konto erkennt — heute nur Planung von Hand.
             if(_tpRoute === 'tsv2' && role === 'master' && !(/topstep/i.test(String(a.firm || '')) && String(a.externalId || '').trim())) return false
+            // Winning Day (24.09.2026 abends): nur Funded/Live-Konten bei Futures-Firmen mit External ID
+            if(_tpRoute === 'tvv2' && _tpWd && role === 'master'
+               && !(tpFirmIstFutures(a.firm) && typeof tpVorplanIstFunded === 'function' && tpVorplanIstFunded(a) && String(a.externalId || '').trim())) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
             if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
@@ -31863,14 +32147,24 @@
       tpRecompute()
     }
     ;[['tp-route-dup', 'dup'], ['tp-route-topstep', 'topstep'], ['tp-route-mt5', 'mt5'], ['tp-route-tvplus', 'tvplus'],
-      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
+      ['tp-route-mt5v2', 'mt5v2'], ['tp-route-tvv2', 'tvv2'], ['tp-route-wd', 'tvv2'], ['tp-route-tsv2', 'tsv2']].forEach(([id, r]) => {
       const b = document.getElementById(id)
       if(b && !b._tpHooked){
         b.addEventListener('click', () => {
-          if(_tpRoute === r) return
-          _tpRoute = r
+          const wd = id === 'tp-route-wd'   // Winning Day = tvv2 + Staffel-Hedge, Dropdown nur Funded-Futures (24.09.2026 abends)
+          if(_tpRoute === r && _tpWd === wd) return
+          _tpRoute = r; _tpWd = wd
           localStorage.setItem(TP_ROUTE_LS, r)
+          localStorage.setItem('prophos_tp_wd', wd ? '1' : '0')
           tpRouteApply()
+          if(wd){
+            // TP-Vorschlag aus der Firmen-Spanne des gewählten Kontos (wie der Farmer), nur wenn das Feld leer ist
+            try{
+              const tpEl = document.getElementById('tp-master-tp'), mid = document.getElementById('tp-master')?.value
+              const acc = (accounts || []).find(a => String(a.id) === String(mid))
+              if(tpEl && !(parseFloat(tpEl.value) > 0) && acc && typeof wdTpSpanne === 'function'){ const [v, b2] = wdTpSpanne(acc.firm); tpEl.value = Math.round(v + Math.random() * (b2 - v)) }
+            }catch(_){}
+          }
           if(r === 'mt5' && !_tpMt5HedgeAccId){
             tpResolveMt5Hedge().then(() => {
               // Open-Check wie beim Kick unten — nicht in ein geschlossenes Modal rendern
@@ -32770,6 +33064,14 @@
       master_symbol: (_tpRoute === 'tvv2' || _tpRoute === 'tsv2') ? (((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()) : null,
       start_um: startUmVal ? tpStartUmAusZeit(startUmVal).toISOString() : null
     }
+    // Winning Day (24.09.2026 abends): Fusion-Gegenhedge aus der Staffel am Plan; „Orbit V2" ohne Winning Day nullt ihn
+    // nicht (der Betrag kann aus dem Order-Popup stammen) — nur der Wechsel weg von tvv2 räumt ihn weg.
+    if(_tpRoute === 'tvv2'){
+      if(_tpWd){
+        if(!masterTp){ msg('Winning Day braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).', 'err'); return }
+        v2Extra.hedge_eur = tpWdHedgeEur(masterId, _editPlan && _editPlan.hedgeEur)
+      }
+    } else if(v2) v2Extra.hedge_eur = null
     try{
       let savedPlanId = null
       if(_editingPlanId){
@@ -41956,6 +42258,20 @@
             reader_ts: Number(k.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString()
           })
         }
+        // Minutenkerzen (24.09.2026 abends, Markt-Chart + Demo-Orders): reader-server bündelt die Ticks je
+        // Minute, hier gehen laufende + letzte abgeschlossene Kerze idempotent nach tv_kurs_1m. Einmal pro
+        // Stunde Kerzen älter als 14 Tage wegräumen — sonst wächst die Tabelle ewig.
+        const kz = Array.isArray(d.kurs_1m) ? d.kurs_1m : []
+        if(kz.length){
+          const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
+            wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
+            o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString() }))
+          if(rows.length) await supabase.from('tv_kurs_1m').upsert(rows, { onConflict: 'wurzel,minute' })
+          if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){
+            epLokal.kerzenGeraeumt = Date.now()
+            try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
+          }
+        }
       }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
@@ -42372,7 +42688,7 @@
       if(hinweis) hinweis.innerHTML =
         'Quelle: Yahoo Finance über das Prophos-Backend — CME-Futures sind dort für Gratis-Nutzer '
         + '<b>verzögert</b> (typisch ~10 min). Das Alter steht an jeder Karte. '
-        + 'Für Echtzeit wäre der Orbit-Reader der Weg: der liest TradingViews Watchlist mit deinem eigenen CME-Abo.'
+        + 'Echtzeit steht oben: der Live-Feed kommt vom TradingView-Reader (Tab-Titel) des 24/7-PCs.'
         + ((d.fehler && d.fehler.length) ? `<br>Nicht geladen: ${mkEsc(d.fehler.join(' · '))}` : '')
     }catch(e){
       if(grid && !grid.querySelector('.ts-card')) grid.innerHTML =

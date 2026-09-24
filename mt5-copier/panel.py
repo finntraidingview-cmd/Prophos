@@ -2765,8 +2765,12 @@ class Handler(BaseHTTPRequestHandler):
                 if lots > 50:
                     return self._send(400, json.dumps({"ok": False, "code": "befehl",
                         "msg": f"lots {lots} ueber dem Riegel 50 — Rechenfehler?"}, ensure_ascii=False))
+                try:
+                    puffer = max(0.0, min(100.0, float(body.get("puffer") if body.get("puffer") is not None else 3)))
+                except (TypeError, ValueError):
+                    puffer = 3.0
                 auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte,
-                                "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
+                                "puffer": puffer, "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
             else:
                 try:
                     ticket = int(body.get("ticket") or 0)

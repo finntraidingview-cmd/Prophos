@@ -568,18 +568,19 @@ def solo_lots(eur, punkte, wert_pro_punkt, si):
     return norm_vol(si, float(eur) / (float(punkte) * float(wert_pro_punkt)))
 
 
-def solo_notfall_sl(fill, richtung, punkte, *, faktor, min_puffer_punkte, point, digits):
-    """REIN RECHNEND (testbar): Broker-seitiger Notfall-SL der Solo-Position —
-    Finns „110 %": dort, wo der Master seinen TP erreicht (punkte hinter dem
-    Einstieg), plus (faktor − 100) % Puffer, mindestens min_puffer_punkte. Der
-    Hedge laeuft GEGEN den Master: Master-TP = Hedge-Verlust, also ein SL.
-    richtung = Richtung der HEDGE-Order (buy/sell). Kein Master-SL → kein TP.
-    Sicherheitsnetz fuer den Fall, dass der Waechter im Prophos-Tab nicht
-    schliesst (Tab zu, Kurs-Feed weg) — der Normalweg ist der Waechter."""
+def solo_notfall_sl(fill, richtung, punkte, *, puffer, point, digits):
+    """REIN RECHNEND (testbar): Broker-seitiges Schliess-Level der Solo-Position.
+    Finn (24.09.2026 abends): „Sobald der Preis in MetaTrader erreicht wird, soll
+    die Order einfach geschlossen werden — mit noch so 2, 3 Punkten mehr." Also
+    KEIN Waechter ueber den NQ-Feed, sondern ein SL im Terminal: dort, wo der
+    Master seinen TP erreicht (punkte hinter dem Hedge-Einstieg — NAS100 laeuft
+    mit NQ, die Distanz in Punkten ist dieselbe), plus puffer Punkte. Der Hedge
+    laeuft GEGEN den Master: Master-TP = Hedge-Verlust, also ein SL.
+    richtung = Richtung der HEDGE-Order (buy/sell). Kein Master-SL → kein TP;
+    endet der Master ohne TP (Auto-Close, Hand), schliesst der Prophos-Tab."""
     if not (float(fill) > 0 and float(punkte) > 0):
         return 0.0
-    dist = float(punkte) * float(faktor) / 100.0
-    dist = max(dist, float(punkte) + float(min_puffer_punkte) * float(point))
+    dist = float(punkte) + max(0.0, float(puffer or 0))
     # SELL-Hedge verliert bei STEIGENDEM Kurs → SL ueber dem Einstieg; BUY-Hedge darunter
     lvl = float(fill) + dist if str(richtung).lower() == "sell" else float(fill) - dist
     return max(round(lvl, int(digits)), float(point))
@@ -1554,12 +1555,13 @@ def main():
                "fill": fill, "symbol": sym, "richtung": richtung, "wert_pro_punkt": round(wert, 5),
                "eur_je_punkt": round(wert * lots, 4), "waehrung": hedge_acc.get("currency"),
                "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0}
-        # Notfall-SL (Finns „110 %") — nur mit TP-Distanz; ein Fehler hier ist kein Abbruch
+        # Schliess-Level im Terminal (Finn: „sobald der Preis in MetaTrader erreicht wird") — nur mit
+        # TP-Distanz; ein Fehler hier ist kein Abbruch, die Antwort traegt sl 0 + sl_fehler
         try:
             punkte = float(a.get("punkte") or 0)
             if punkte > 0 and ticket:
-                sl = solo_notfall_sl(fill, richtung, punkte, faktor=m.notfall_faktor,
-                                     min_puffer_punkte=m.notfall_puffer, point=si["point"], digits=si["digits"])
+                sl = solo_notfall_sl(fill, richtung, punkte, puffer=float(a.get("puffer") or 3),
+                                     point=si["point"], digits=si["digits"])
                 if sl > 0:
                     ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
                                   "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},

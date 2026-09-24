@@ -50,6 +50,7 @@ Nur Python-Standardbibliothek — kein pip, keine Cloud, keine Schluessel.
 Laeuft auf Mac/Windows/Linux gleich.
 """
 import json
+import re
 import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -77,6 +78,70 @@ _bedienfeld_s = 0.0
 # weiter ticken — er ist eine Beobachtung des Markts, kein Hedge-Befehl.
 _kurs = None
 _kurs_s = 0.0
+# Minutenkerzen aus den Titel-Ticks (24.09.2026 abends, Markt-Chart + Demo-Orders):
+# die 250-ms-Ticks bleiben hier, in die Cloud gehen nur Kerzen. _k1m = laufende
+# Minute, _k1m_vor = letzte abgeschlossene — beide stehen in jeder GET-Antwort
+# (kurs_1m), die Bruecke im Prophos-Tab upsertet sie idempotent.
+_k1m = None
+_k1m_vor = None
+
+
+def _kurs_zahl(text):
+    """'30,448.25' / '29.491,75' / '30,448' -> float — dieselbe Regel wie
+    tv_snapshot.parse_de_zahl (beide Trenner: der letzte ist das Dezimalzeichen;
+    reine Dreiergruppen = Tausender; sonst einzelner Trenner = Dezimal)."""
+    t = str(text or "").replace("\u2212", "-").replace(" ", "").replace("'", "").strip()
+    if not t:
+        return None
+    neg = t.startswith("-")
+    t = t.lstrip("+-")
+    if not t or not all(ch.isdigit() or ch in ".," for ch in t) or not t[0].isdigit():
+        return None
+    ip, ik = t.rfind("."), t.rfind(",")
+    if ip >= 0 and ik >= 0:
+        dez = "." if ip > ik else ","
+        s = t.replace("," if dez == "." else ".", "").replace(",", ".")
+    elif ip >= 0 or ik >= 0:
+        tr = "." if ip >= 0 else ","
+        teile = t.split(tr)
+        gruppen = len(teile) > 1 and all(len(x) == 3 for x in teile[1:]) and len(teile[0]) <= 3
+        s = "".join(teile) if gruppen else t.replace(",", ".")
+    else:
+        s = t
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    return -v if neg else v
+
+
+def _kurs_wurzel(sym):
+    """'CME_MINI:MNQ1!' / 'MNQZ2026' / 'NQ' -> 'MNQ' / 'MNQ' / 'NQ' (Port von tv_symbol_root)."""
+    s = str(sym or "").strip().upper().split()[0] if str(sym or "").strip() else ""
+    if ":" in s:
+        s = s.split(":")[-1]
+    s = "".join(ch for ch in s if ch.isalnum() or ch == "!")
+    if s.endswith("!"):
+        return s.rstrip("!").rstrip("0123456789")
+    m = re.match(r"^([A-Z]{1,4})[FGHJKMNQUVXZ]\d{1,4}$", s)
+    if m:
+        return m.group(1)
+    return s.rstrip("0123456789")
+
+
+def _kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
+    """REIN RECHNEND (testbar): (laufende Kerze, letzte abgeschlossene) nach einem
+    Tick. Minute = floor(jetzt_s / 60) in Server-UTC-Sekunden."""
+    minute = int(jetzt_s // 60) * 60
+    if k1m and k1m.get("minute") == minute and k1m.get("wurzel") == wurzel:
+        k1m["h"] = max(k1m["h"], preis)
+        k1m["l"] = min(k1m["l"], preis)
+        k1m["c"] = preis
+        k1m["n"] += 1
+        return k1m, k1m_vor
+    neu = {"minute": minute, "wurzel": wurzel, "symbol": symbol, "o": preis, "h": preis, "l": preis, "c": preis, "n": 1}
+    # die bisherige laufende Kerze ist jetzt abgeschlossen (nur, wenn es eine war)
+    return neu, (k1m if k1m else k1m_vor)
 _dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 
 # Text-Suche (21.09.2026, Futures-Puls Schritt 2): der Puls nennt Texte (die
@@ -132,6 +197,7 @@ def _mit_an(stand):
     # Prophos-Tab schreibt ihn nach tv_kurse (Cloud), der Hedge-Waechter liest dort.
     out["kurs"] = _kurs
     out["kurs_alter_s"] = round(time.time() - _kurs_s, 3) if _kurs_s else None
+    out["kurs_1m"] = [k for k in (_k1m_vor, _k1m) if k]   # letzte abgeschlossene + laufende Minute
     return out
 
 
@@ -178,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
-        global _such_texte, _such_bis, _kurs, _kurs_s
+        global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -264,6 +330,16 @@ class Handler(BaseHTTPRequestHandler):
                      "ts": k.get("ts") or daten.get("ts"),
                      "sichtbar": daten.get("sichtbar") is not False}
             _kurs_s = time.time()
+            # Minutenkerze fortschreiben — nur mit lesbarer Zahl und nur aus einem
+            # SICHTBAREN Tab (verdeckt tickt der Titel gedrosselt, das waere eine
+            # Kerze aus drei Ticks). Fehler hier duerfen den Positions-Strom nie stoeren.
+            try:
+                pz = _kurs_zahl(_kurs["text"])
+                if pz is not None and pz > 0 and _kurs["sichtbar"]:
+                    _k1m, _k1m_vor = _kerze_fortschreiben(_k1m, _k1m_vor, _kurs_wurzel(_kurs["symbol"]),
+                                                          _kurs["symbol"], pz, time.time())
+            except Exception:
+                pass
 
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
         # (Badge zeigt es), der Stand friert ein — stale != flat.
