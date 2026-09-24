@@ -5602,8 +5602,11 @@ def admin_build_kapitel():
     # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
     # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
     # Seit 25.09.2026 VOR den Quoten geladen: die realen Reibungs-Flags brauchen die Payout-Konten.
+    # wd_hedge (25.09.2026) = Fusion-Gegenhedge der Winning Days als Buchung — eigene Summe im Kapitel. Das
+    # Hedge-GELD der Farm-Pläne zählt weiter über den Plan (slave_pl + hedge_eur in _admin_hedge_ev), die Buchung
+    # ist der Finanzen-Abgleich dazu; in 'hedge' würde sie doppelt zählen.
     txs = _sb_all("transactions", {"select": "user_id,account_id,kind,amount,occurred_at,kapitel_id",
-                                   "kind": "in.(payout,live_pnl)"})
+                                   "kind": "in.(payout,live_pnl,wd_hedge)"})
     payout_accs = {str(t.get("account_id")) for t in txs if t.get("kind") == "payout" and t.get("account_id")}
     real_flags, real_kats = _reib_real_flags(hq_plans, by_id, live_ids, b.get("arch_info") or {}, payout_accs)
     hq_gruppen, hq_lookup, reib_gruppen, reib_lookup, reib_global = _admin_hedge_quoten(hq_plans, by_id, live_ids, fx, real_flags, real_kats)
@@ -5634,7 +5637,8 @@ def admin_build_kapitel():
         kid = _kapitel_int(k.get("id"))
         if kid is None:
             continue
-        kauf = hedge = payouts = master_pl = live_pnl = 0.0
+        kauf = hedge = payouts = master_pl = live_pnl = wd_hedge = 0.0
+        wd_hedge_n = 0
         konten = konten_aktiv = payout_n = trades = blown = trades_ohne_hedge = 0
         tage = []
         monate = {}
@@ -5770,6 +5774,9 @@ def admin_build_kapitel():
                                           "datum": str(t.get("occurred_at") or "")[:10], "eur": round(amt, 2)})
             elif t.get("kind") == "live_pnl":
                 live_pnl += amt
+            elif t.get("kind") == "wd_hedge":
+                wd_hedge += amt
+                wd_hedge_n += 1
         out.append({
             "id": kid, "key": k.get("key") or "", "name": k.get("name") or "",
             "von": k.get("von") or "", "bis": k.get("bis"),
@@ -5780,6 +5787,8 @@ def admin_build_kapitel():
             "payouts": round(payouts, 2), "payout_n": payout_n,
             "trades": trades, "blown": blown, "trades_ohne_hedge": trades_ohne_hedge,
             "master_pl": round(master_pl, 2), "live_pnl": round(live_pnl, 2),
+            # Summe der WD-Hedge-Buchungen (P&L in €, negativ = Kosten) + Anzahl — Abgleich zu 'hedge' (Kosten, +)
+            "wd_hedge": round(wd_hedge, 2), "wd_hedge_n": wd_hedge_n,
             "netto": round(payouts - kauf - hedge, 2),
             "erster_tag": min(tage) if tage else None,
             "letzter_tag": max(tage) if tage else None,
@@ -5953,7 +5962,7 @@ def rechnung_daten(uid, von, bis):
 
 
 _RG_KIND_LBL = {"payout": "Payout", "account_purchase": "Account-Kauf",
-                "live_pnl": "Live-P&L", "manual": "Manuell"}
+                "live_pnl": "Live-P&L", "manual": "Manuell", "wd_hedge": "WD-Hedge"}
 
 
 def rechnung_pdf(meta, daten):
@@ -6097,7 +6106,7 @@ def rechnung_pdf(meta, daten):
     # ── Abrechnung: Summen je Art → Saldo → Anteil → RECHNUNGSBETRAG ──
     el.append(Paragraph("3 · ABRECHNUNG", st_cap))
     srows = []
-    for kind in ("payout", "account_purchase", "live_pnl", "manual"):
+    for kind in ("payout", "account_purchase", "live_pnl", "wd_hedge", "manual"):
         for cur, v in sorted((s["je_art"].get(kind) or {}).items()):
             srows.append([_RG_KIND_LBL[kind], _rg_fmt(v, _rg_cur_sym(cur))])
     srows.append(["Zeitraum-Saldo (Summe aller Buchungen)", _rg_fmt(s["saldo"], "€")])
@@ -6815,6 +6824,87 @@ def _wd_ende_upd(plan, jetzt_iso, datum, grund=None):
     return {"status": "review", "ended_at": jetzt_iso, "mt5_baseline": base}, None
 
 
+# Winning-Days-Gegenhedge in Finanzen (25.09.2026, Finn: „auf ‚Erledigt' wird es in Finanzen gebucht — eigene
+# Finanzen-Kategorie für den Winning-Days-Gegenhedge; das sind ab jetzt die einzigen Hedgekosten").
+# ZIELKONTO — BEFUND 25.09.2026: der Fusion-Login 488579 ist KEIN einzelnes Prophos-Konto, sondern liegt als eigenes
+# Konto in jedem Profil (live, Fusion Markets, external_id '488579'; Emin hedgt auf 430095); jede ID hat ihren
+# Hedge-P&L bisher als 'live_pnl' auf IHRE Kopie gebucht. REGEL (Koordinations-Session, identisch mit Testes Buchung
+# eigener Pläne): user_id = Besitzer des Plans; Konto = sein Konto mit external_id = Hedge-Login (mt5_baseline.hedge.
+# hedge_login, sonst mt5_live.hedge_login des hedge.pc, sonst 488579); Rückfall erstes live-Konto mit Firma
+# „Fusion"; sonst account_id null + account_name 'Fusion (WD-Hedge)'. currency immer EUR (Copier-P&L ist
+# Kontowährung EUR; die currency-Spalte der Konten steht fälschlich auf USD).
+WD_HEDGE_LOGIN = "488579"
+
+
+def _wd_hedge_schluessel(pid):
+    """Idempotenz-Schlüssel der Buchung in transactions.notes."""
+    return f"Trade #{str(pid)[:8]} WD-Hedge"
+
+
+def _wd_hedge_konto(konten, login=None):
+    """REIN RECHNEND: Fusion-Hedge-Konto für die Buchung aus den Konten des Plan-Besitzers.
+    1) external_id = login (Standard 488579), live vor anderen, dann das älteste;
+    2) erstes live-Konto mit Firma „Fusion" (ältestes); 3) None (Buchung ohne Konto).
+    -> (Konto-dict | None, quelle 'login' | 'fusion_live' | 'ohne')"""
+    login = str(login or WD_HEDGE_LOGIN).strip()
+    ks = sorted([a for a in (konten or []) if a and a.get("id")], key=lambda a: str(a.get("created_at") or ""))
+    passend = [a for a in ks if str(a.get("external_id") or "").strip() == login]
+    passend.sort(key=lambda a: 0 if str(a.get("account_type") or "") == "live" else 1)
+    if passend:
+        return passend[0], "login"
+    fusion = [a for a in ks if str(a.get("account_type") or "") == "live" and "fusion" in str(a.get("firm") or "").lower()]
+    if fusion:
+        return fusion[0], "fusion_live"
+    return None, "ohne"
+
+
+def _wd_zahl(v):
+    """Zahl aus JSON (int/float oder Text mit Punkt/Komma); None = keine Zahl, bool zählt nicht."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if v == v and abs(v) != float("inf") else None
+    try:
+        return float(str(v).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+
+
+def _wd_erledigt_upd(plan, master_pl, slave_pl, jetzt_iso, datum):
+    """REIN RECHNEND (testbar): Update für „Winning Day erledigt" (Abschluss-Popup vom Mac, 25.09.2026).
+    Nur route 'tvv2' und status open/review (completed = Korrektur, idempotent: completed_at bleibt).
+    Setzt master_pl ($), slave_pl (€ | null), status 'completed', completed_at; ended_at, falls leer;
+    mt5_baseline.final wie bei 'ende', falls noch keins (Beenden und Erledigen in einem Schritt).
+    -> (upd, None) oder (None, (http_code, fehler))"""
+    if not isinstance(plan, dict) or not plan.get("id"):
+        return None, (404, "Plan nicht gefunden")
+    st = str(plan.get("status") or "")
+    if str(plan.get("route") or "") != "tvv2" or st not in ("open", "review", "completed"):
+        return None, (409, "nicht offen")
+    upd = {"status": "completed", "master_pl": master_pl, "slave_pl": slave_pl}
+    if st != "completed" or not plan.get("completed_at"):
+        upd["completed_at"] = jetzt_iso
+    if not plan.get("ended_at"):
+        upd["ended_at"] = jetzt_iso
+    base = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    if not isinstance(base.get("final"), dict):
+        e_upd, _e = _wd_ende_upd(dict(plan, status="open"), jetzt_iso, datum, "erledigt")
+        if e_upd:
+            upd["mt5_baseline"] = e_upd["mt5_baseline"]
+    return upd, None
+
+
+def _wd_hedge_buchung(plan_id, uid, konto, person, slave_pl, datum):
+    """REIN RECHNEND: transactions-Zeile 'wd_hedge' (EUR, Vorzeichen = P&L, auto_generated). user_id = Besitzer
+    des Plans; ohne Konto account_id null + 'Fusion (WD-Hedge)' (kapitel_id setzt der Trigger dann übers Datum)."""
+    name = (konto or {}).get("name") or "Fusion (WD-Hedge)"
+    return {"user_id": str(uid), "account_id": (str(konto.get("id")) if konto else None),
+            "account_name": name, "account_firm": (konto or {}).get("firm") or "Fusion Markets",
+            "kind": "wd_hedge", "amount": round(float(slave_pl), 2), "currency": "EUR", "occurred_at": datum,
+            "notes": f"{_wd_hedge_schluessel(plan_id)} · {person or '—'} · {name}",
+            "auto_generated": True}
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":
@@ -6992,6 +7082,88 @@ def admin_wd_plaene():
                 return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
             except Exception as e:
                 return jsonify({"error": f"Nicht beendet ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "erledigt":
+            # Winning Day erledigt (25.09.2026): P&L von Hand, Fusion-P&L als 'wd_hedge' in Finanzen. Reihenfolge:
+            # Zielkonto auflösen (ohne Konto bei slave_pl ≠ null: 409, NICHTS geschrieben) → Plan (optimistische
+            # Sperre wie 'ende') → Buchung idempotent über den notes-Schlüssel (vorhandene aktualisieren, nie doppeln;
+            # slave_pl null löscht eine frühere Auto-Buchung). Master-P&L wird NICHT gebucht (Prop-Konto).
+            pid = str(daten.get("plan_id") or "").strip()
+            mpl = _wd_zahl(daten.get("master_pl"))
+            spl = None if daten.get("slave_pl") in (None, "") else _wd_zahl(daten.get("slave_pl"))
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            if mpl is None:
+                return jsonify({"error": "master_pl fehlt oder ist keine Zahl"}), 400
+            if daten.get("slave_pl") not in (None, "") and spl is None:
+                return jsonify({"error": "slave_pl ist keine Zahl"}), 400
+            try:
+                disp, _excl = _wd_personen()
+                uid = konto = person = None
+                konto_quelle = login_quelle = None
+                for _versuch in range(3):
+                    rows = sb_select("trade_plans", {"select": "id,route,status,user_id,master_account_id,master_name,mt5_baseline,"
+                                                               "updated_at,ended_at,completed_at", "id": f"eq.{pid}", "limit": "1"})
+                    plan = rows[0] if rows else None
+                    jetzt = datetime.now(timezone.utc)
+                    jetzt_iso = jetzt.isoformat().replace("+00:00", "Z")
+                    upd, fehler = _wd_erledigt_upd(plan, mpl, spl, jetzt_iso, _cme_handelstag())
+                    if fehler:
+                        return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
+                    if uid is None:
+                        uid = str(plan.get("user_id") or "")
+                        if not uid and plan.get("master_account_id"):
+                            macc = sb_select("accounts", {"select": "user_id", "id": f"eq.{plan.get('master_account_id')}", "limit": "1"})
+                            uid = str((macc[0] if macc else {}).get("user_id") or "")
+                        person = disp.get(uid, uid[:8])
+                        if spl is not None:
+                            h = ((plan.get("mt5_baseline") or {}).get("hedge") or {}) if isinstance(plan.get("mt5_baseline"), dict) else {}
+                            login = str(h.get("hedge_login") or "").strip()
+                            if not login and h.get("pc"):
+                                ml = sb_select("mt5_live", {"select": "hedge_login,updated_at", "pc_name": f"eq.{h.get('pc')}",
+                                                            "hedge_login": "neq.", "order": "updated_at.desc", "limit": "1"})
+                                login = str((ml[0] if ml else {}).get("hedge_login") or "").strip()
+                            konten = sb_select("accounts", {"select": "id,user_id,name,firm,account_type,external_id,created_at",
+                                                            "user_id": f"eq.{uid}"}) if uid else []
+                            konto, konto_quelle = _wd_hedge_konto(konten, login or WD_HEDGE_LOGIN)
+                            login_quelle = login or f"{WD_HEDGE_LOGIN} (Standard)"
+                    filt = {"id": f"eq.{pid}", "route": "eq.tvv2", "status": "in.(open,review,completed)"}
+                    if plan.get("updated_at"):
+                        filt["updated_at"] = f"eq.{plan['updated_at']}"
+                    z = sb_update("trade_plans", filt, upd)
+                    if z:
+                        break
+                else:
+                    return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
+                # Buchung (idempotent)
+                buchung, buchung_fehler = None, None
+                try:
+                    alt = sb_select("transactions", {"select": "id,amount", "kind": "eq.wd_hedge", "auto_generated": "is.true",
+                                                     "notes": f"like.{_wd_hedge_schluessel(pid)}*"})
+                    if spl is None:
+                        for t in alt:
+                            requests.delete(f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                                            headers=_sb_headers(), timeout=12).raise_for_status()
+                    else:
+                        zeile = _wd_hedge_buchung(pid, uid, konto, person, spl, jetzt.date().isoformat())
+                        if alt:
+                            r = sb_update("transactions", {"id": f"eq.{alt[0]['id']}"}, zeile)
+                            for t in alt[1:]:   # Altlast: Doppelte weg, genau eine Buchung je Plan
+                                requests.delete(f"{SUPABASE_URL}/rest/v1/transactions", params={"id": f"eq.{t['id']}"},
+                                                headers=_sb_headers(), timeout=12).raise_for_status()
+                        else:
+                            r = sb_insert("transactions", zeile)
+                        r0 = (r[0] if isinstance(r, list) and r else r) or {}
+                        buchung = {"id": r0.get("id"), "amount": zeile["amount"], "account_id": zeile["account_id"],
+                                   "account_name": zeile["account_name"], "user_id": zeile["user_id"], "neu": not alt,
+                                   "konto_quelle": konto_quelle, "hedge_login": login_quelle}
+                except Exception as e:
+                    buchung_fehler = f"Buchung fehlgeschlagen ({type(e).__name__}) — erneut 'erledigt' senden, der Plan bleibt completed"
+                out = {"ok": True, "plan_id": pid, "status": "completed", "buchung": buchung}
+                if buchung_fehler:
+                    out["buchung_fehler"] = buchung_fehler
+                return jsonify(out)
+            except Exception as e:
+                return jsonify({"error": f"Nicht erledigt ({type(e).__name__})"}), 502
         if daten.get("aktion") == "farm":
             aid = str(daten.get("account_id") or "")
             if len(aid) < 10:
