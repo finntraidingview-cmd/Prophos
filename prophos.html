@@ -18666,6 +18666,7 @@
         let best = null
         for(const r of (data || [])){
           if(!r || r.preis == null || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ')) continue
+          if(/^delayed/.test(String(r.modus || ''))) continue   // verzögerter PC (kein CME-Abo): Ankunft frisch, Kurs 10 min alt — nie werten
           const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit (lp_time hinkt in ruhigen Minuten)
           if(alter > HEDGE_KURS_MAX_ALTER_MS) continue
           best = { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || r.id, alter_ms: alter }
@@ -18865,6 +18866,7 @@
   }
   // Schließen (Grund: level_sl | level_tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
   const _hedgeBusy = new Set()
+  const HEDGE_TAB_ID = 't' + Math.random().toString(36).slice(2, 10)   // unterscheidet Tabs mit derselben PC-Kennung (Prüfliste 10)
   async function hedgeSoloSchliessen(plan, grund, kurs, zusatz){
     const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
     if(!h || !(h.status === 'offen' || h.status === 'schliesst') || !h.ticket) return { ok: false, msg: 'kein offener Hedge am Plan' }
@@ -18879,7 +18881,16 @@
     }
     _hedgeBusy.add(pid)
     try{
-      try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: new Date().toISOString() }, zusatz || {})) }catch(_){}
+      // Zwei Wächter auf demselben Hedge (zwei Profile, gleiche PC-Kennung seit .571 — Prüfliste 10): frisch lesen; schließt gerade ein
+      // anderer Tab (< 60 s) oder ist der Hedge schon zu, nichts tun — Grund/P&L/Auslöser des ersten Close bleiben stehen
+      try{
+        const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+        const hf = z && z.mt5_baseline && z.mt5_baseline.hedge
+        if(hf && hf.status === 'geschlossen') return { ok: false, msg: 'schon geschlossen' }
+        if(hf && hf.status === 'schliesst' && hf.close_tab && hf.close_tab !== HEDGE_TAB_ID && Date.now() - (Date.parse(hf.close_at || '') || 0) < 60000)
+          return { ok: false, msg: 'schließt gerade in einem anderen Tab' }
+      }catch(_){}
+      try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: new Date().toISOString(), close_tab: HEDGE_TAB_ID }, zusatz || {})) }catch(_){}
       let res = null
       try{
         res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -18939,7 +18950,11 @@
   // „P&L folgt" auf der Karte und der PC-Tab fragt per Close-Aufruf mit Ticket nach (hedgePlNachholen).
   async function hedgeZuAusRing(plan, zu){
     const pl = (typeof zu.pl === 'number' && isFinite(zu.pl)) ? zu.pl : null
-    const grundEnd = (zu.grund && zu.grund !== 'close' && zu.grund !== 'unbekannt') ? zu.grund : 'level_mt5'
+    // Lief gerade unser eigener Close (status 'schliesst', z. B. tp_feed) und die Antwort ging verloren, meldet der Ring nur 'close' —
+    // dann bleibt unser Grund stehen, nie level_mt5 (Prüfliste 13)
+    const hAkt = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+    const grundEnd = (zu.grund && zu.grund !== 'close' && zu.grund !== 'unbekannt') ? zu.grund
+      : (hAkt && hAkt.status === 'schliesst' && hAkt.grund) ? hAkt.grund : 'level_mt5'
     const extra = (pl != null) ? { slave_pl: pl } : null   // immer aus hedge.pl, auch über eine 0 hinweg
     await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: zu.grund || null, pl, pl_offen: pl == null, fill_close: zu.fill_close || null,
       schon_zu: true, closed_at: zu.closed_at || new Date().toISOString(), msg: 'vom Copier erkannt' }, extra)
@@ -19099,9 +19114,11 @@
       const m = (typeof r.minute === 'number') ? r.minute : Math.floor((Date.parse(r.minute) || 0) / 1000)
       if(!(m > abSec)) continue
       const key = r.wurzel + '|' + hedgeKerzenKlasse(r.quelle), h = Number(r.h), l = Number(r.l)
-      const e = out[key] = Object.assign({ hoch: null, tief: null }, out[key])
+      const e = out[key] = Object.assign({ hoch: null, tief: null, minuten: [] }, out[key])
+      // nur max/min — eine ältere oder verspätete Minute kann hoch/tief nie verkleinern (Prüfliste 2 + 7)
       if(h > 0) e.hoch = (e.hoch == null) ? h : Math.max(e.hoch, h)
       if(l > 0) e.tief = (e.tief == null) ? l : Math.min(e.tief, l)
+      if(!e.minuten.includes(m)) e.minuten = e.minuten.concat([m])
     }
     return out
   }
@@ -19111,7 +19128,7 @@
     const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', a = w === 'NQ' ? 'MNQ' : 'NQ'
     for(const [wz, kl] of [[w, 'ws'], [a, 'ws'], [w, 'tick'], [a, 'tick']]){
       const x = je && je[wz + '|' + kl]
-      if(x && (x.hoch != null || x.tief != null)) return { wurzel: wz, quelle: kl === 'ws' ? 'ws' : 'ws-tick', hoch: x.hoch, tief: x.tief }
+      if(x && (x.hoch != null || x.tief != null)) return { wurzel: wz, quelle: kl === 'ws' ? 'ws' : 'ws-tick', hoch: x.hoch, tief: x.tief, minuten: x.minuten || [] }
     }
     return null
   }
@@ -19120,26 +19137,51 @@
   // Je Plan im Tab gemerkt (über Ticks hinweg — eine Kerze, die aus kurs_1m herausfällt, bleibt gezählt). Quellen: der lokale Reader
   // (epLokal.stand.kurs_1m, ≤ 10 s alt, jeden Tick) und tv_kurs_1m ab der Open-Minute (alle 5 s; nach einem Tab-Reload baut das den
   // Stand neu auf). Open-Minute = Minute des Puls-Klicks (klick_at), sonst opened_at.
-  const _hedgeExtrem = new Map()   // planId → { abSec, je, dbAt }
-  async function hedgeExtremSeitOpen(p, h, wurzel){
-    const ts = Date.parse(h.klick_at || h.opened_at || h.at || '') || 0
-    if(!ts) return null
-    const abSec = Math.floor(ts / 60000) * 60, pid = String(p.id)
-    let e = _hedgeExtrem.get(pid)
-    if(!e || e.abSec !== abSec){ e = { abSec, je: null, dbAt: 0 }; _hedgeExtrem.set(pid, e) }
+  // Prüfliste „Winning Days gegen Hatchen" (25.09.2026) eingearbeitet: Open = opened_at (Fusion offen, nicht der Puls-Klick);
+  // Schlüssel Plan + Ticket (neues Ticket / Übernahme → frisch); verzögerte Reader (modus delayed_*) und Kerzen verzögerter PCs zählen
+  // nie; fehlende abgeschlossene Minuten der gewählten Quelle → luecke_seit (Chip „Kerzen-Lücke seit …"), nie still „kein Ausschlag".
+  const _hedgeExtrem = new Map()   // `${planId}|${ticket}` → { abSec, je, dbAt }
+  const _hedgeVerzoegertePcs = { at: 0, set: new Set() }
+  async function hedgeVerzoegertePcs(){
+    if(Date.now() - _hedgeVerzoegertePcs.at < 30000) return _hedgeVerzoegertePcs.set
+    _hedgeVerzoegertePcs.at = Date.now()
     try{
-      if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && Array.isArray(epLokal.stand.kurs_1m) && Date.now() - (epLokal.ab || 0) <= 10000)
-        e.je = hedgeExtremRechnen(e.je, epLokal.stand.kurs_1m, abSec)
+      const { data } = await supabase.from('tv_kurse').select('pc_name,modus').gte('updated_at', new Date(Date.now() - 3600000).toISOString())
+      _hedgeVerzoegertePcs.set = new Set((data || []).filter(r => r && /^delayed/.test(String(r.modus || ''))).map(r => r.pc_name))
+    }catch(_){}
+    return _hedgeVerzoegertePcs.set
+  }
+  // REIN RECHNEND (window._hedgeKerzenLuecke): erste fehlende abgeschlossene Minute nach der Open-Minute (Unix-Sekunden) oder null
+  function hedgeKerzenLuecke(minuten, abSec, jetztMs){
+    const bisSec = Math.floor(jetztMs / 60000) * 60 - 60   // letzte abgeschlossene Minute
+    const hat = new Set(minuten || [])
+    for(let m = abSec + 60; m <= bisSec; m += 60) if(!hat.has(m)) return m
+    return null
+  }
+  window._hedgeKerzenLuecke = hedgeKerzenLuecke
+  async function hedgeExtremSeitOpen(p, h, wurzel){
+    const ts = Date.parse(h.opened_at || h.at || '') || 0
+    if(!ts) return null
+    const abSec = Math.floor(ts / 60000) * 60, schl = String(p.id) + '|' + String(h.ticket || '')
+    let e = _hedgeExtrem.get(schl)
+    if(!e || e.abSec !== abSec){ e = { abSec, je: null, dbAt: 0 }; _hedgeExtrem.set(schl, e) }
+    try{
+      const st = (typeof epLokal !== 'undefined' && epLokal) ? epLokal.stand : null
+      if(st && Array.isArray(st.kurs_1m) && Date.now() - (epLokal.ab || 0) <= 10000 && !/^delayed/.test(String(st.modus || '')))
+        e.je = hedgeExtremRechnen(e.je, st.kurs_1m, abSec)
     }catch(_){}
     if(Date.now() - e.dbAt >= 5000){
       e.dbAt = Date.now()
       try{
-        const { data } = await supabase.from('tv_kurs_1m').select('wurzel,minute,h,l,quelle').in('wurzel', ['NQ', 'MNQ'])
+        const verz = await hedgeVerzoegertePcs()
+        const { data } = await supabase.from('tv_kurs_1m').select('wurzel,minute,h,l,quelle,pc').in('wurzel', ['NQ', 'MNQ'])
           .gt('minute', new Date(abSec * 1000).toISOString()).order('minute', { ascending: false }).limit(1000)
-        if(Array.isArray(data)) e.je = hedgeExtremRechnen(e.je, data, abSec)
+        if(Array.isArray(data)) e.je = hedgeExtremRechnen(e.je, data.filter(r => r && !verz.has(r.pc)), abSec)
       }catch(_){}
     }
-    return hedgeExtremWahl(e.je, wurzel)
+    const x = hedgeExtremWahl(e.je, wurzel)
+    if(x) x.luecke_seit = hedgeKerzenLuecke(x.minuten, abSec, Date.now())
+    return x
   }
   // Aktueller Kurs für den Wächter: zuerst der lokale Reader dieses PCs (GET /positions → kurse[wurzel], ≤ 5 s, nicht stale),
   // sonst tv_kurse über Realtime/Poll (mkl.kursJe, ≤ 5 s), sonst die Cloud-Abfrage (≤ 5 s). null = kein Beweis → nichts tun.
@@ -19149,10 +19191,10 @@
     const lokal = ww => { try{
       if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && Date.now() - (epLokal.ab || 0) <= 5000){
         const q = epLokal.stand.kurse && epLokal.stand.kurse[ww]
-        const pr = q && !q.stale ? (Number(q.preis) || Number(q.lp) || 0) : 0
+        const pr = q && !q.stale && !/^delayed/.test(String(q.modus || '')) ? (Number(q.preis) || Number(q.lp) || 0) : 0   // delayed_* = 10 min alt
         if(pr > 0) return { preis: pr, wurzel: ww, quelle: 'reader' }
       } }catch(_){} return null }
-    const cloudRt = ww => { try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null; if(k && k.alter_ms <= 5000 && k.preis > 0) return { preis: k.preis, wurzel: ww, quelle: 'realtime' } }catch(_){} return null }
+    const cloudRt = ww => { try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null; if(k && k.alter_ms <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return { preis: k.preis, wurzel: ww, quelle: 'realtime' } }catch(_){} return null }
     let kq = lokal(w) || lokal(andere) || cloudRt(w) || cloudRt(andere)
     if(!kq){ try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) kq = { preis: k.preis, wurzel: k.wurzel, quelle: 'cloud' } }catch(_){} }
     return kq   // null = kein Beweis → nichts tun
@@ -19330,11 +19372,18 @@
           // Wächter-Stand am Plan alle 10 s (nicht jede Sekunde) + „Feed fehlt seit" für den Chip-Tooltip (Gegenprüfung 25.09.2026)
           const jetztIso = new Date().toISOString()
           const fehltSeit = kurs ? null : (h.feed_fehlt_seit || jetztIso)
-          if(!h.waechter_at || Date.now() - (Date.parse(h.waechter_at) || 0) > 10000 || (!!fehltSeit) !== (!!h.feed_fehlt_seit)){
+          const lueckeNeu = (ext && ext.luecke_seit) ? new Date(ext.luecke_seit * 1000).toISOString() : null
+          if(!h.waechter_at || Date.now() - (Date.parse(h.waechter_at) || 0) > 10000 || (!!fehltSeit) !== (!!h.feed_fehlt_seit)
+             || lueckeNeu !== ((h.waechter_stand && h.waechter_stand.kerzen_luecke_seit) || null)){
             try{ await hedgeAmPlanSchreiben(p.id, { waechter_at: jetztIso, waechter_stand: { at: jetztIso, kurs, wurzel: kq ? kq.wurzel : null, quelle: kq ? kq.quelle : null,
-              hoch_seit_open: ext ? ext.hoch : null, tief_seit_open: ext ? ext.tief : null, kerzen_wurzel: ext ? ext.wurzel : null, kerzen_quelle: ext ? ext.quelle : null }, feed_fehlt_seit: fehltSeit }) }catch(_){}
+              hoch_seit_open: ext ? ext.hoch : null, tief_seit_open: ext ? ext.tief : null, kerzen_wurzel: ext ? ext.wurzel : null, kerzen_quelle: ext ? ext.quelle : null,
+              kerzen_luecke_seit: (ext && ext.luecke_seit) ? new Date(ext.luecke_seit * 1000).toISOString() : null }, feed_fehlt_seit: fehltSeit }) }catch(_){}
           }
-          const det = hedgeFeedEntscheidDetail(p.richtung, kurs, Number(h.tp_level_nq) || 0, Number(h.sl_level_nq) || 0, hedgePuffer(), ext ? ext.hoch : null, ext ? ext.tief : null)
+          // Übernommene Hedges ohne NQ-Level: aus tv.einstieg_nq rechnen (hedgeLevelAusPlan), sonst kein Docht-Schluss (Prüfliste 12)
+          const lvAus = (Number(h.tp_level_nq) > 0) ? null : hedgeLevelAusPlan(p)
+          const tpL = Number(h.tp_level_nq) > 0 ? Number(h.tp_level_nq) : (lvAus && Number(lvAus.tp_level_nq)) || 0
+          const slL = Number(h.sl_level_nq) > 0 ? Number(h.sl_level_nq) : (lvAus && Number(lvAus.sl_level_nq)) || 0
+          const det = hedgeFeedEntscheidDetail(p.richtung, kurs, tpL, slL, hedgePuffer(), ext ? ext.hoch : null, ext ? ext.tief : null)
           if(det){
             // Auslöser mit Kerzen-Quelle, z. B. 'kerze_high MNQ ws' (Koordination 25.09.2026)
             const ausl = (det.ausloeser !== 'kurs' && ext) ? `${det.ausloeser} ${ext.wurzel} ${ext.quelle}` : det.ausloeser
@@ -19418,7 +19467,7 @@
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
       // Anzeige (25.09.2026): Schließ-Level über den Kurs-Feed (Master-TP ± 8 Ticks) zuerst, das Notfall-Netz im Terminal dahinter
       const sbNq = h.schliesst_bei_nq > 0 ? Number(h.schliesst_bei_nq) : hedgeSchliesstBei(p.richtung, Number(h.tp_level_nq) || 0, (typeof h.puffer_punkte === 'number') ? h.puffer_punkte : hedgePuffer())
-      const lvl = (h.master_teil != null ? ` · ⚠ Master teilweise zu (${h.master_teil} Kt)` : '') + (sbNq > 0 ? ` · schließt bei NQ ${f(sbNq)}` : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Notfall-SL')
+      const lvl = ((h.waechter_stand && h.waechter_stand.kerzen_luecke_seit) ? ' · ⚠ Kerzen-Lücke' : '') + (h.master_teil != null ? ` · ⚠ Master teilweise zu (${h.master_teil} Kt)` : '') + (sbNq > 0 ? ` · schließt bei NQ ${f(sbNq)}` : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Notfall-SL')
       const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
@@ -19427,7 +19476,9 @@
         return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
           (() => { const ws = h.waechter_stand || {}, x = p.richtung === 'sell' ? ws.tief_seit_open : ws.hoch_seit_open
-                   return (x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)} · schließt bei ${f(sbNq)} — ` : '' })()
+                   const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
+                   const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
+                   return lTxt + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
           + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
@@ -31170,7 +31221,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.577'
+  const OS_TAB_BUILD = '2026-09-22.578'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44659,6 +44710,7 @@
         const rows = []
         for(const w of ['NQ', 'MNQ']){
           const q = ks[w]; if(!q || q.stale) continue
+          if(/^delayed/.test(String(q.modus || ''))) continue   // TV-CME-Abo fehlt: 10 min alte Kurse nie als frisch in die Cloud (Prüfliste 25.09.2026)
           // 0.8.0: bei quelle 'ws' ist lp der Last Price (preis ist dann derselbe Wert); Reihenfolge preis → lp → Text
           const preis = (typeof q.preis === 'number' && isFinite(q.preis) && q.preis > 0) ? q.preis
                       : (typeof q.lp === 'number' && isFinite(q.lp) && q.lp > 0) ? q.lp
@@ -44697,7 +44749,7 @@
         // epLokal.diag reist im Flotten-Push als mt5_live.status.kurs_bruecke mit (kz = Kerzen vom Reader, rows = gültige,
         // fehler = letzter Upsert-Fehler, erstladung = Stand der 0.8.0-Erstladung).
         epLokal.diag = Object.assign(epLokal.diag || {}, { at: new Date().toISOString(), kurse: ks ? Object.keys(ks).join(',') : (k ? 'alt' : '-'), kz: kz.length, kz_bsp: kz[0] ? { wurzel: kz[0].wurzel, minute: kz[0].minute, c: kz[0].c } : null })
-        if(kz.length){
+        if(kz.length && !/^delayed/.test(String(d.modus || ''))){   // verzögerte Kerzen (delayed_*) nie schreiben — Teil-Bars, falsches c
           const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
             wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
             o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString(),
@@ -44733,7 +44785,7 @@
           try{
             const r = await fetch(EP_READER + '/kerzen', { cache: 'no-store', signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(4000) : undefined })
             const kd = r.ok ? await r.json() : null
-            const bars = (kd && Array.isArray(kd.bars)) ? kd.bars : []
+            const bars = (kd && Array.isArray(kd.bars) && !/^delayed/.test(String(kd.modus || ''))) ? kd.bars : []   // delayed_* nie schreiben
             const brows = bars.filter(b => b && b.wurzel && b.minute > 0 && b.c > 0).map(b => ({
               wurzel: String(b.wurzel).slice(0, 8), minute: new Date(Number(b.minute) * 1000).toISOString(), symbol: String(b.symbol || b.wurzel).slice(0, 32),
               o: b.o, h: b.h, l: b.l, c: b.c, ticks: Number(b.n) || 0, pc, updated_at: new Date().toISOString(),
