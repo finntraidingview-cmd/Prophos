@@ -3109,6 +3109,7 @@ def dup_login(email, password):
     Proxy frische Tokens für fremde Duplikum-Konten ausstellen lassen."""
     if not email or not password:
         return None
+    grund = "netz"   # Review-Finding 24.09.2026: nur eine ECHTE Ablehnung zählt später zur Session-Pause
     try:
         r = requests.post(f"{DUP_BASE}/access/getToken.php", auth=(email, password), timeout=15)
         token = None
@@ -3124,9 +3125,34 @@ def dup_login(email, password):
                 token = txt
         if r.ok and token:
             return token
+        # Antwort da, aber kein Token: 401/403 oder 200 mit Fehler-Body (falsches Passwort,
+        # Abo abgelaufen) = Ablehnung; 5xx/429 = Duplikum selbst hakt → 'netz'.
+        if r.status_code in (401, 403) or r.ok:
+            grund = "401"
     except Exception as e:
         print(f"[watcher] ⚠️ Duplikum-Login {email}: {e}", flush=True)
+    _dup_login_grund[email.strip().lower()] = grund
     return None
+
+
+# Warum gab es zuletzt keinen Token? (Review-Finding 24.09.2026) — je E-Mail
+# '401' (Login abgelehnt / Abo-Ende), 'backoff' (Login-Backoff läuft), 'netz'
+# (Duplikum nicht erreichbar). Nur '401' darf die 30-min-Session-Pause füttern.
+_dup_login_grund = {}
+_wt_token_grund = {}
+
+
+def wt_email_token_grund(creds, force=False):
+    """wt_email_token + Grund → (token, grund); grund 'ok' | '401' | 'backoff' | 'netz' | 'leer'.
+    Test-Stubs von wt_email_token bleiben wirksam (Aufruf über den Modulnamen)."""
+    email = (creds.get("email") or "").strip().lower()
+    _wt_token_grund.pop(email, None)
+    token = wt_email_token(creds, force=force)
+    if token:
+        return token, "ok"
+    if not email:
+        return None, "leer"
+    return None, _wt_token_grund.pop(email, None) or "netz"
 
 
 def _wt_now_iso():
@@ -3283,7 +3309,9 @@ def wt_email_token(creds, force=False):
         bo_key = email + "|" + hashlib.md5(pw.encode()).hexdigest()[:10]
         bo = _watcher_backoff.get(bo_key)
         if bo and time.time() < bo["until"]:
+            _wt_token_grund[email] = "backoff"
             return None
+        _dup_login_grund.pop(email, None)
         token = dup_login(email, pw)
         if token:
             _watcher_backoff.pop(bo_key, None)
@@ -3300,6 +3328,7 @@ def wt_email_token(creds, force=False):
             fails = (bo["fails"] + 1) if bo else 1
             wait = min(3600, 300 * (2 ** (fails - 1)))
             _watcher_backoff[bo_key] = {"until": time.time() + wait, "fails": fails}
+            _wt_token_grund[email] = _dup_login_grund.get(email) or "netz"
             print(f"[watcher] ⚠️ Login fehlgeschlagen für {email} — Backoff {wait//60}min (Versuch {fails})", flush=True)
         return token
 
@@ -3365,9 +3394,13 @@ def _wt_memo_positions_locked(email, creds, memo):
         with _watcher_memo_lock:
             memo[email] = (None, None)
         return None, None
-    token = wt_email_token(creds)
+    token, grund = wt_email_token_grund(creds)
     if not token:
-        _wt_session_fehler(email, "kein Token — Login abgelehnt oder im Backoff")
+        # Review-Finding 24.09.2026: vorher zählte JEDES „kein Token" zur Pause — auch
+        # Login-Backoff und Netzfehler, damit pausierte ein funktionierendes Konto nach
+        # drei Backoff-Ticks für 30 min. Jetzt zählt nur die echte Ablehnung (401/Abo-Ende).
+        if grund == "401":
+            _wt_session_fehler(email, "Login abgelehnt (401 / Abo-Ende)")
         with _watcher_memo_lock:
             memo[email] = (None, None)
         return None, None
@@ -4484,17 +4517,31 @@ def _kapitel_param():
 
 
 _kapitel_heute_cache = {"at": 0.0, "wert": None}
+# Review-Finding 24.09.2026 (K20): Server (UTC), Browser (Gerätezeit) und DB (current_date UTC)
+# hatten drei verschiedene „heute" — rund um Mitternacht landete ein Plan in einem anderen
+# Kapitel als der PC-Chip anzeigte. Festgelegt: Asia/Dubai, Finns Betriebszeit; das Frontend
+# (kapitelHeute) rechnet identisch. Der DB-Trigger bleibt bei now()::date (UTC) — er greift nur
+# als Fallback für Zeilen ohne gesetztes kapitel_id, siehe Kommentar im Frontend.
+KAPITEL_TZ = "Asia/Dubai"
+
+
+def _kapitel_heute_iso():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(KAPITEL_TZ)).strftime("%Y-%m-%d")
+    except Exception:   # pragma: no cover — zoneinfo/tzdata fehlt → UTC wie vorher
+        return time.strftime("%Y-%m-%d", time.gmtime())
 
 
 def _kapitel_heute():
-    """Kapitel des heutigen Tages (UTC) aus der Tabelle kapitel — dieselbe Regel wie
-    die DB-Funktion kapitel_fuer(current_date): von <= heute und (bis leer oder
+    """Kapitel des heutigen Tages (Asia/Dubai, KAPITEL_TZ) aus der Tabelle kapitel — dieselbe
+    Regel wie die DB-Funktion kapitel_fuer(d): von <= heute und (bis leer oder
     bis >= heute), bei mehreren Treffern das jüngste. 5 min gecacht (24.09.2026,
     /version wird von den PC-Panels gepollt). → {id, key, name, hedge} oder None."""
     now = time.time()
     if (now - _kapitel_heute_cache["at"]) < 300:
         return _kapitel_heute_cache["wert"]
-    heute = time.strftime("%Y-%m-%d", time.gmtime())
+    heute = _kapitel_heute_iso()
     wert = None
     for k in _kapitel_liste():
         von, bis = str(k.get("von") or "")[:10], str(k.get("bis") or "")[:10]
@@ -5978,7 +6025,11 @@ def _wd_plan_v2(body, firm=None, jetzt=None):
         body["route"] = _wd_v2_route(firm if firm is not None else body.get("master_firm"))
     for k in WD_V2_NULL_FELDER:
         body[k] = None
-    if not str(body.get("master_symbol") or "").strip() and body["route"] == "tvv2":
+    if body["route"] == "mt5v2":
+        # Review-Finding 24.09.2026 (W12): das Frontend schickt MNQ+Frontcode für JEDE Zeile —
+        # bei einer MT5-Firma bliebe „MNQZ6" als MT5-Symbol stehen. Leer = Firmen-Standard.
+        body["master_symbol"] = None
+    elif not str(body.get("master_symbol") or "").strip() and body["route"] == "tvv2":
         body["master_symbol"] = "MNQ" + _wd_futures_frontcode(jetzt)
     return body
 
