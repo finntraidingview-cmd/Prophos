@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.0
+// @version      0.8.1
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.1  25.09.2026  Kurs-ts = EMPFANGSZEIT (Moritz' PC: reader_ts hinkte 0–60 s, weil lp_time nur minuten-
+//                      genau kommt → Markt-Kopf/Hedge-Waechter hielten den laufenden Feed fuer tot); lp_time
+//                      bleibt als lp_time/lp_time_ms daneben. Serien-Rueckfall, wenn die Sends vor dem Wrapper
+//                      liefen: genau ein aufgeloestes Symbol → Tab-Titel-Symbol → einzige qsd-Wurzel.
 //   0.8.0  24.09.2026  TradingViews EIGENE WebSocket-Verbindung passiv mitgehoert (document-start, unsafeWindow):
 //                      Kurse (qsd: lp/bid/ask/lp_time) und Minutenkerzen (timescale_update/du) fuer NQ + MNQ —
 //                      laeuft auch im verdeckten Tab; POST /kerzen; feed-Nachweis im Bedienfeld; Legende/Titel
@@ -56,7 +60,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.0';
+  const VERSION    = '0.8.1';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -952,6 +956,23 @@
       }
     }
   }
+  // 0.8.1: Serie ohne mitgehoerten create_series-Send (Wrapper kam nach den Sends — Tampermonkey-Update
+  // ohne F5, oder Chart schon aufgebaut) — drei Rueckfaelle, jeder als 'geraten' markiert, damit das
+  // Reader-Fenster sagt, worauf die Zuordnung beruht: (1) genau EIN aufgeloestes Symbol (symbol_resolved
+  // kommt eingehend, braucht keinen Send) → das; (2) Tab-Titel „MNQZ2026 30,448.25 ▼ …" = Symbol des
+  // aktiven Charts; (3) genau EINE Wurzel im qsd-Strom. Aufloesung bleibt '1' als Annahme — der
+  // reader-server prueft die Kerzenabstaende nicht, aber die Bars sind ohnehin nur brauchbar, wenn der
+  // Chart auf 1 min steht (Finns Screenshot 24.09.: „1m"). Mehrdeutig → unbekannte_serien zaehlt hoch.
+  function pxSerieRaten(sid) {
+    let symbol = '', grund = '';
+    const ids = Object.keys(feed.info);
+    if (ids.length === 1) { symbol = feed.info[ids[0]].symbol; grund = 'einziges aufgeloestes Symbol'; }
+    if (!symbol) { const t = liesKursAusTitel(); if (t && t.symbol) { symbol = t.symbol; grund = 'Tab-Titel'; } }
+    if (!symbol) { const ws = Object.keys(feed.kurse); if (ws.length === 1) { symbol = feed.kurse[ws[0]].symbol || ws[0]; grund = 'einzige qsd-Wurzel'; } }
+    const wurzel = symbol ? kursWurzelAusText(symbol) : '';
+    if (!wurzel) return null;
+    return (feed.serien[sid] = { symbol, wurzel, aufloesung: '1', geraten: true, grund });
+  }
   function pxBarsAusUpdate(p1, erstladung) {
     if (!p1 || typeof p1 !== 'object') return 0;
     let n = 0;
@@ -960,13 +981,7 @@
       const s = eintrag && Array.isArray(eintrag.s) ? eintrag.s : null;
       if (!s || !s.length) continue;
       let serie = feed.serien[sid];
-      if (!serie) {
-        const ids = Object.keys(feed.info);
-        if (ids.length === 1) {
-          const i = feed.info[ids[0]];
-          serie = feed.serien[sid] = { symbol: i.symbol, wurzel: i.root || kursWurzelAusText(i.symbol), aufloesung: '1', geraten: true };
-        }
-      }
+      if (!serie) serie = pxSerieRaten(sid);
       for (const b of s) {
         const v = b && Array.isArray(b.v) ? b.v : null;
         if (!v || v.length < 5 || v.length > 6 || !v.every(x => typeof x === 'number')) continue;
@@ -1027,7 +1042,11 @@
       }
       if (sym) k.symbol = sym;
       k.empf_ms = jetzt;
-      k.ts = (typeof k.lp_time === 'number' && k.lp_time > 1e9) ? k.lp_time * 1000 : jetzt;
+      // 0.8.1: ts ist die EMPFANGSZEIT. Vorher lp_time×1000 — TradingView liefert lp_time aber nur
+      // minutengenau/sporadisch (Mitschnitt 24.09.: lp-Updates ohne lp_time, lp_time = Minutengrenze).
+      // Moritz' PC 24.09. 21:40: reader_ts = 17:40:00,000 exakt, 46 s alt bei 5 s altem updated_at —
+      // jeder Leser mit 30-s-Grenze (hedgeKursLesen, Markt-Kopf, Farmer-Zeile) hielt den Feed fuer tot.
+      k.ts = jetzt;
       if (neu) k.geaendert_ms = jetzt;
       feedZaehl(feed.qsd, jetzt); feed.letzter_ws_ms = jetzt;
     } else if (msg.m === 'du' || msg.m === 'timescale_update') {
@@ -1069,7 +1088,9 @@
       const k = feed.kurse[w];
       const preis = (typeof k.lp === 'number') ? k.lp : (typeof k.bid === 'number' && typeof k.ask === 'number') ? Math.round((k.bid + k.ask) * 100 / 2) / 100 : null;
       if (!(preis > 0)) continue;
-      out[w] = { bid: k.bid, ask: k.ask, lp: k.lp, lp_time: k.lp_time, text: String(preis), symbol_text: k.symbol, quelle: 'ws', ts: k.ts,
+      out[w] = { bid: k.bid, ask: k.ask, lp: k.lp, lp_time: k.lp_time,
+                 lp_time_ms: (typeof k.lp_time === 'number' && k.lp_time > 1e9) ? k.lp_time * 1000 : null,   // 0.8.1: Handelszeit getrennt vom ts
+                 text: String(preis), symbol_text: k.symbol, quelle: 'ws', ts: k.ts,
                  modus: feed.modus, delay_s: feed.delay_s };
     }
     return out;

@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.1"
+READER_VERSION = "0.8.2"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -321,6 +321,25 @@ def _script_merken(daten, jetzt_s):
     if isinstance(v, str) and v.strip():
         return v.strip()[:16], jetzt_s
     return _script_version, _script_s
+
+
+def _kerzen_diag(kerzen, bedienfeld, aufl_warnung, script_version):
+    """REIN RECHNEND (testbar): Kerzen-Diagnose fuer die Live-Zeile (0.8.2, Koordinations-Session
+    25.09.2026: 'ein Foto des Reader-Fensters soll reichen, Finn soll keine URLs oeffnen muessen').
+    Moritz' PC: Kurse per Socket da, tv_kurs_1m leer — ob keine du-Frames kommen, die Serie nicht
+    zuordenbar ist oder der Server die Bars verwirft, war nur ueber /positions im Browser zu sehen."""
+    ring = "/".join(f"{w} {len(r)}" for w, r in sorted(kerzen.items())) or "leer"
+    feed = (bedienfeld or {}).get("feed") if isinstance(bedienfeld, dict) else None
+    if isinstance(feed, dict):
+        serien = feed.get("serien") if isinstance(feed.get("serien"), dict) else {}
+        geraten = sum(1 for v in serien.values() if isinstance(v, dict) and v.get("geraten"))
+        teil = (f"du/min {feed.get('du_min', '?')} · Serien {len(serien)}"
+                + (f" ({geraten} geraten)" if geraten else "")
+                + f" · unbek {feed.get('unbekannte_serien', '?')}")
+    else:
+        teil = "kein feed (Script < 0.8.0?)"
+    aufl = f"Aufl-WARNUNG {aufl_warnung}" if aufl_warnung else "Aufl ok"
+    return f"Kerzen {ring} · {teil} · {aufl} · Script {script_version or '?'} · Reader {READER_VERSION}"
 
 
 def _mit_an(stand):
@@ -649,8 +668,12 @@ class Handler(BaseHTTPRequestHandler):
             )
         else:
             zeilen = "flat"
-        # \r haelt es als eine aktualisierende Live-Zeile
-        print(f"\r[{zeit}] {len(pos)} Pos · {zeilen}".ljust(160)[:160], end="", flush=True)
+        # \r haelt es als eine aktualisierende Live-Zeile. 0.8.2: rechts die Kerzen-Diagnose,
+        # die Positionen werden dafuer bei Bedarf gekuerzt (Konsole meist 120–160 Zeichen breit).
+        diag = _kerzen_diag(_kerzen, _bedienfeld, _aufl_warnung, _script_version)
+        kopf = f"\r[{zeit}] {len(pos)} Pos · "
+        platz = max(20, 160 - len(kopf) - len(diag) - 3)
+        print((kopf + zeilen[:platz] + " | " + diag).ljust(160)[:160], end="", flush=True)
 
         self._json(200, {"ok": True, "an": True, "reader_version": READER_VERSION})
 

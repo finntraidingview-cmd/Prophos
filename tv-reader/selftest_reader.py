@@ -129,6 +129,12 @@ def main():
     check(ganz["reader_version"] == rs.READER_VERSION and "script_version" in ganz and "script_alter_s" in ganz,
           "GET /positions traegt die drei Felder")
 
+    # 0.8.2: Kerzen-Diagnose fuer die Live-Zeile
+    d = rs._kerzen_diag({"NQ": {1: {}, 2: {}}, "MNQ": {}}, {"feed": {"du_min": 12, "serien": {"sds_1": {"wurzel": "NQ", "geraten": True, "grund": "Tab-Titel"}, "sds_2": {"wurzel": "MNQ"}}, "unbekannte_serien": 0}}, None, "0.8.1")
+    check(d == "Kerzen MNQ 0/NQ 2 · du/min 12 · Serien 2 (1 geraten) · unbek 0 · Aufl ok · Script 0.8.1 · Reader " + rs.READER_VERSION, f"Diagnose: Ring, du/min, Serien mit geraten, Script, Reader [{d}]")
+    d = rs._kerzen_diag({}, None, "Chart-Aufloesung 5 statt 1", None)
+    check(d.startswith("Kerzen leer · kein feed (Script < 0.8.0?) · Aufl-WARNUNG Chart-Aufloesung 5 statt 1 · Script ?"), f"Diagnose: leer, kein feed, Warnung, Script unbekannt [{d}]")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
