@@ -4657,7 +4657,11 @@ def _hq_ohne_ausreisser(vals, begleit=None):
 
 
 def _hq_typ(acc):
-    return str(acc.get("account_type") or "").strip().lower() or "—"
+    """Kontotyp für die Statistik. 'winning_days' (vierter Kontotyp seit 25.09.2026, sql/2026-09-25_
+    accounts_winning_days.sql — ein Funded-Konto nach bestandenem Big Trade) heißt in der Statistik
+    'wd', wie die Winning-Day-Trades der Hedge-Ära (Faustregel in _hq_typ_trade)."""
+    t = str(acc.get("account_type") or "").strip().lower() or "—"
+    return "wd" if t == "winning_days" else t
 
 
 # Winning Day als eigener Typ (25.09.2026, Finn am Statistik-Tab: „bei Tradeify Funded sollte es auch grob
@@ -4676,6 +4680,11 @@ def _hq_typ_trade(acc, plan):
     (ohne Risiko: |master_pl|), sonst der Kontotyp. Nur für die Quoten-/Reibungs-Gruppen und die
     Statistik-Ausgabe — an den Konten selbst ändert sich nichts."""
     typ = _hq_typ(acc)
+    # Kontotyp 'winning_days' (25.09.2026) schlägt alles: jeder Trade auf so einem Konto ist ein Winning Day —
+    # der Erledigt-Haken und die Risiko-Faustregel gelten nur noch für Konten, die (noch) 'funded' heißen
+    # (Hedge-Ära-Bestand, dessen Konten damals nicht umgestellt waren).
+    if typ == "wd":
+        return "wd"
     # Ausdrückliche Markierung (sql/2026-09-25_trade_plans_winning_day.sql, Erledigt-Haken / Farmer) schlägt
     # die Faustregel: true → Winning Day, false → Big Trade / Kontotyp; nur null (Bestand) wird geschätzt.
     wd = plan.get("winning_day")
@@ -4693,8 +4702,11 @@ def _hq_typ_trade(acc, plan):
 
 
 def _hq_anteil(typ):
-    """Realer Anteil der gemessenen Reibung: Funded (Fixgröße) 1,0, sonst (Gesamtkosten) 0,5."""
-    return HQ_REIB_ANTEIL_FUNDED if str(typ or "").strip().lower() == "funded" else HQ_REIB_ANTEIL_SONST
+    """Realer Anteil der gemessenen Reibung: Funded (Fixgröße) 1,0, sonst (Gesamtkosten) 0,5.
+    BEFUND 25.09.2026: wird von der Reibungs-Auswertung nicht mehr aufgerufen — der Anteil kommt seit
+    .490 gemessen je Gruppe (_anteil_aus) mit Rückfall auf den globalen Messwert, nie aus dem Typ.
+    Bleibt als Vorgabe stehen; 'wd'/'winning_days' zählen wie Funded (Fixgröße, kein Kaufpreis-Anteil)."""
+    return HQ_REIB_ANTEIL_FUNDED if str(typ or "").strip().lower() in ("funded", "wd", "winning_days") else HQ_REIB_ANTEIL_SONST
 
 
 def _cfd_wurzel(sym):
@@ -6799,7 +6811,8 @@ def admin_wd_plaene():
                 typ = (a.get("account_type") or "").lower()
                 firm = (a.get("firm") or "").strip()
                 uid = str(a.get("user_id"))
-                if typ not in ("funded", "live") or not any(k in firm.lower() for k in WD_FUTURES_FIRMEN):
+                # 25.09.2026: nur noch Winning-Days-Konten (vierter Kontotyp) — Finn: „immer nur die Winning Days sehen"
+                if typ != "winning_days" or not any(k in firm.lower() for k in WD_FUTURES_FIRMEN):
                     continue
                 if str(a["id"]) in archiv or uid in excluded:
                     continue
