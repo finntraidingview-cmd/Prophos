@@ -5905,7 +5905,7 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
-              <div class="tp-wd-hilfe">Stop-Distanz für die Lot-Rechnung</div>
+              <div class="tp-wd-hilfe">nur für die Lot-Rechnung — kein Stop in TradingView</div>
             </div>
             <div class="field">
               <!-- Label/step schaltet tpRouteUpdateSeg je Weg um (24.09.2026): Orbit V2 ganze Kontrakte, Echo V2 Lots 0.01 -->
@@ -6020,7 +6020,7 @@
             <!-- V2-Wege (23.09.2026, Finn: „alles in ein einziges Popup — Account, Kontrakte, TP, SL, Uhrzeit, dann nur
                  noch Starten"): Stop Loss und Startzeit direkt hier, nur auf Echo V2 / Orbit V2 sichtbar (tpRouteUpdateSeg). -->
             <div class="field tp-wd-only" id="tp-wd-tp-kachel"></div>
-            <div class="tp-wd-head" id="tp-wd-head-c">Stop Loss → was am SL passiert <span>folgt aus Risiko Master + Multiplikator</span></div>
+            <div class="tp-wd-head" id="tp-wd-head-c">Kein Stop Loss <span>Winning Days laufen ohne SL — der Hedge endet mit dem Master</span></div>
             <div class="field" id="tp-master-sl-row" style="display:none">
               <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
               <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
@@ -27859,7 +27859,8 @@
       + (p.masterSymbol ? ` · <b title="${escapeHtml(String(p.masterSymbol))}">${escapeHtml(String(p.masterSymbol).replace(/[FGHJKMNQUVXZ]\d{1,2}$/, ''))}</b>` : '')
       + (p.richtung ? ` <b style="color:${p.richtung === 'sell' ? 'var(--danger)' : '#2a9d5c'}">${p.richtung === 'sell' ? '▼ SELL' : '▲ BUY'}</b>` : '')
       + (p.masterTp > 0 ? ` · TP <b style="color:#2a9d5c">$${Number(p.masterTp).toLocaleString('de-DE')}</b>` : '')
-      + (p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
+      + (((typeof tpIstWdPlan === 'function') && tpIstWdPlan(p)) ? ''   // Winning Days: nie ein SL (25.09.2026)
+         : p.masterSl > 0 ? ` · SL <b style="color:var(--danger)">$${Number(p.masterSl).toLocaleString('de-DE')}</b>` : (p.masterTp > 0 ? ` · SL <span style="opacity:.6">—</span>` : ''))
       + (sDup ? ` · <span style="color:var(--violet)">${fmtDupBalance(sDup)}</span>` : '')
 
     // Rechte Metrik je Status
@@ -30054,7 +30055,7 @@
       document.getElementById('tp-wd-multi-row')?.classList.add('tp-wd-leer')
       { const mg = document.getElementById('tp-wd-marge'); if(mg) mg.textContent = '' }
       if(tpBox) tpBox.innerHTML = leer('bei Take Profit: ' + grund)
-      box.innerHTML = leer('bei Stop Loss: ' + grund)
+      box.innerHTML = leer('kein Stop Loss — der Hedge endet mit dem Master (TP, Auto-Close, von Hand)')
       return
     }
     // A) Multiplikator-Box mit dem Rechenweg (Finns Beispiel: 250 $ ÷ (2 $/Pkt × 1 Kt) = 125 Pkt · 100 € ÷ (0,85 €/Pkt × 125 Pkt) = 0,94 Lot → ×0,941)
@@ -30081,10 +30082,10 @@
       ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100,
                `${n(r.lots, 2)} Lot × ${n(r.slavePpl, 2)} €/Pkt × (${n(r.tpPkt, 1)} + ${n(puffer, 2)} Pkt Puffer) · ${tpWdSchliessText(r, puffer)}`)
       : leer('bei Take Profit: erst Take Profit ($) eintragen.')
-    // C) bei Stop Loss + Notfall-SL
+    // C) kein Stop Loss (25.09.2026, Finn: „Bei Winning Days ist NIE ein Stop Loss drin") + Notfall-SL auf Fusion
     const notfall = (typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : HEDGE_NOTFALL_STD
-    box.innerHTML = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100,
-        `${n(r.lots, 2)} Lot × ${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt Stop-Distanz`)
+    box.innerHTML = `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Kein Stop Loss</div>
+         <div class="tp-wd-kachel-sub">Der Master läuft ohne SL in TradingView. Der Hedge endet mit dem Master — Take Profit, Auto-Close oder von Hand.</div></div>`
       + `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Notfall-SL Fusion</div>
          <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal</span></div>
          <div class="tp-wd-kachel-sub">Greift nur, wenn der Feed-Wächter das Schließen verpasst — dann zu bei ${n(r.tpPkt * notfall, 1)} Pkt hinter dem Fusion-Einstieg${r.tpPkt > 0 ? '' : ' (erst mit Take Profit)'}.</div></div>`
@@ -30605,6 +30606,12 @@
     document.getElementById('tp-order-sl').value = _tpOrderOrbit ? (plan.masterSl ?? '') : (plan.masterSl ?? plan.masterRisk ?? '')
     const _slIn = document.getElementById('tp-order-sl')
     if(_slIn) _slIn.placeholder = _tpOrderOrbit ? 'leer = kein SL' : 'z.B. 100'
+    // Winning Days OHNE Stop Loss (25.09.2026, Finn: „Bei Winning Days ist NIE ein Stop Loss drin"): Feld leer + gesperrt
+    if(_slIn){
+      const _wdO = (typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)
+      _slIn.disabled = _wdO
+      if(_wdO){ _slIn.value = ''; _slIn.placeholder = 'kein SL bei Winning Days' }
+    }
     document.getElementById('tp-order-lots').value = plan.masterContracts ?? 1
     // Start um: gespeicherte Zeit ins Feld (lokale Zeit des Geräts, gespeichert wird UTC)
     const _suEl = document.getElementById('tp-order-start-um')
@@ -30847,6 +30854,7 @@
     // Orbit: leerer SL wird als NULL gespeichert — sonst würde ein alter SL vom letzten
     // Trade stillschweigend mitgehen (Puls liest master_sl; NULL = Schalter AUS).
     if(autoSltp) upd.master_sl = (_tpOrderOrbit && !(sl > 0)) ? null : sl
+    if((typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026)
     // Geplante Startzeit (22.09.2026): leer = NULL; eine neue Zeit setzt den Claim zurück.
     const _suVal = document.getElementById('tp-order-start-um')?.value || ''
     const _suDate = _suVal ? tpStartUmAusZeit(_suVal) : null
@@ -30956,7 +30964,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.560'
+  const OS_TAB_BUILD = '2026-09-22.561'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35044,7 +35052,9 @@
       // Bearbeiten unveraendert durchreichen. Ohne diese Zeile schreibt
       // planToRow master_sl auf null, und der naechste Plan-Edit loescht den
       // Stop der bereits gespeicherten Order still weg.
-      masterSl: wd ? masterRisk : v2 ? masterSlV2 : (_editingPlanId
+      // Winning Days OHNE Stop Loss (25.09.2026, Finn — verbindliche Regel: „Bei Winning Days ist NIE ein Stop Loss drin. Wir geben
+      // beim Planen nur einen Take Profit an"). Risiko Master bleibt reines Rechenfeld für den Multiplikator (master_risk).
+      masterSl: wd ? null : v2 ? masterSlV2 : (_editingPlanId
         ? (tradePlans.find(x => String(x.id) === String(_editingPlanId))?.masterSl ?? null)
         : null),
       // Richtung nur auf den Routen mit Jetzt-starten-Flow (28.08.2026) —
@@ -36000,7 +36010,7 @@
         if(kd.tp_vorgabe > 0) z.tp = kd.tp_vorgabe
         const pr = tpVorplanPlanRow(accLike, slave, z, wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
-        if(kd.sl_vorgabe > 0) pr.master_sl = kd.sl_vorgabe
+        pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
         // Fusion-Gegenhedge (24.09.2026 abends): Staffel-Betrag in € als hedge_eur — der Server dreht die Zeile auf
         // V2 (Slave-Felder null), hedge_eur bleibt stehen. Schalter AUS → NULL = kein Hedge.
         pr.hedge_eur = (vp.hedge_an && z.slaveEur > 0) ? Math.round(z.slaveEur * 100) / 100 : null
@@ -36052,7 +36062,7 @@
         if(row.richtung && p.richtung !== row.richtung) upd.richtung = row.richtung
         if(soll && Math.abs(new Date(p.start_um || 0).getTime() - new Date(soll).getTime()) > 30000) upd.start_um = soll
         if(kd && kd.tp_vorgabe > 0 && Number(p.master_tp) !== kd.tp_vorgabe) upd.master_tp = kd.tp_vorgabe
-        if(kd && (kd.sl_vorgabe || null) !== (p.master_sl != null ? Number(p.master_sl) : null)) upd.master_sl = kd.sl_vorgabe || null
+        if(p.master_sl != null) upd.master_sl = null   // Winning Days: nie ein SL (25.09.2026) — alten Stop am geplanten Plan entfernen
         if(!Object.keys(upd).length) continue
         try{
           const x = await wdApi('PATCH', { id: k.plan_id, upd })
@@ -36077,7 +36087,7 @@
     const symbol = (vp.instr === 'nq' ? 'NQ' : 'MNQ') + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
-    if(acc.wdSl > 0) row.master_sl = Number(acc.wdSl)
+    row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
     if(error) return { fehler: error.message }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
@@ -36513,7 +36523,7 @@
       const sperren = erw || fest || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
-      const slWert = k.plan_id ? (k.sl || '') : (kd.sl_vorgabe || '')
+      const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
       const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
@@ -36540,7 +36550,7 @@
         <span class="kf">${nAkt} von ${(x.konten || []).length} Konten drin${x.gestartet_at ? ` · gestartet ${wdHhmm(x.gestartet_at)}` : ''}${erw ? ' · noch nicht eingetragen — „🎲 Würfeln" nimmt die ID mit' : ''}</span>
         <span class="kf" style="margin-left:auto">Haken wirkt sofort und dauerhaft · TP/SL, Zeit, Richtung: „Änderungen speichern"</span>
       </div>
-      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th>SL $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
+      <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
   /* Haken sofort wirksam (23.09.2026, Finn: „ich drücke auf den Account, der Haken geht weg, aber die sind immer noch
    * aktiv — bei nur einem Haken soll 0 von 3 stehen"): Anzeige sofort, dann dauerhaft am Konto (rpc wd_konto_setzen),
