@@ -5614,7 +5614,10 @@ def modus_tvlesen(cmd):
         res.pop("konto_trail", None)
         if reader_da[0]:
             _tv_http("/suche", {"texte": []}, timeout=1.5)     # Textsuche nie im Dauerbetrieb
-        print(json.dumps(res, ensure_ascii=False))
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))   # Konsole ohne UTF-8 (24.09.2026): JSON-Escapes statt Absturz
 
     fehler = pruefe_tv_lesen_befehl(cmd)
     if fehler:
@@ -5875,7 +5878,10 @@ def modus_tvclose(cmd):
         res.pop("konto_trail", None)
         if reader_da[0]:
             _tv_http("/suche", {"texte": []}, timeout=1.5)
-        print(json.dumps(res, ensure_ascii=False))
+        try:
+            print(json.dumps(res, ensure_ascii=False))
+        except UnicodeEncodeError:
+            print(json.dumps(res, ensure_ascii=True))   # Konsole ohne UTF-8 (24.09.2026): JSON-Escapes statt Absturz
 
     fehler = pruefe_tv_close_befehl(cmd)
     if fehler:
@@ -8679,6 +8685,14 @@ def modus_inspect(cfg_path):
 
 
 def main():
+    # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
+    # '\u25bc' aus dem TradingView-Tab-Titel nicht kodieren — die Spur traegt den Titel, die JSON-Antwort
+    # scheiterte beim print). Unkodierbares wird ersetzt statt zu werfen; das Panel liest mit errors=replace.
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(errors="replace")
+        except Exception:
+            pass
     if len(sys.argv) >= 2 and sys.argv[1] == "mousetest":
         modus_mousetest()
         return 0

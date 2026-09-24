@@ -17750,6 +17750,7 @@
   async function tvV2PollTick(opts){
     const manuell = !!(opts && opts.manuell)
     let gelesen = 0
+    const fehler = []   // je Konto: 'code: msg' — für den Toast von „P&L holen" (24.09.2026 abends)
     try{
       if(!MT5_LOCAL || tvV2Poll.busy) return { ok:false, grund: tvV2Poll.busy ? 'laeuft_schon' : 'kein_pc' }
       let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
@@ -17777,6 +17778,7 @@
           if(code === 'puls_beschaeftigt') break   // Puls hat die Maus — diesen Tick komplett überspringen
           const msg = (r && r.msg) ? String(r.msg).slice(0, 300) : ''
           tvV2Poll.stand.set(pid, { code, msg, at: Date.now() })
+          fehler.push(`${plan.masterName || konto}: ${code}${msg ? ' — ' + msg.slice(0, 160) : ''}`)
           // Fehler in die DB (24.09.2026 abends, Finn: 'liest die Position trotzdem nicht'): mt5_baseline.fehler
           // trägt Code + Meldung des Bots, damit die Ursache auch vom Mac aus lesbar ist. Nur bei geändertem
           // Text oder älter als 10 min, Guard status=open.
@@ -17882,7 +17884,8 @@
       }
     }catch(e){ console.warn('[tvV2]', e) }
     finally{ tvV2Poll.busy = false; tvV2NaechsterTick() }
-    return { ok:true, konten: gelesen }
+    // ok nur, wenn wirklich etwas gelesen wurde — „0 Konten gelesen" ist kein Erfolg (24.09.2026 abends)
+    return { ok: gelesen > 0, konten: gelesen, fehler }
   }
   tvV2NaechsterTick()
 
@@ -17902,8 +17905,9 @@
     try{
       if(MT5_LOCAL && typeof window.mtcApi === 'function'){
         const r = await tvV2PollTick({ manuell: true })
-        if(r && r.ok) toast(`P&L geholt: ${r.konten} von ${plans.length} Konten gelesen — steht in der DB.`)
-        else toast(r && r.grund === 'laeuft_schon' ? 'Rundgang läuft gerade schon.' : r && r.grund === 'order_laeuft' ? 'Puls platziert gerade eine Order — gleich nochmal.' : 'Rundgang nicht möglich (Backend/Reader?).')
+        if(r && r.ok) toast(`P&L geholt: ${r.konten} von ${plans.length} Konten gelesen — steht in der DB.` + (r.fehler && r.fehler.length ? ` · ${r.fehler.length} Fehler: ${r.fehler[0]}` : ''))
+        else toast(r && r.grund === 'laeuft_schon' ? 'Rundgang läuft gerade schon.' : r && r.grund === 'order_laeuft' ? 'Puls platziert gerade eine Order — gleich nochmal.'
+                   : (r && r.fehler && r.fehler.length) ? `P&L holen: kein Konto gelesen — ${r.fehler[0]}` : 'Rundgang nicht möglich (Backend/Reader?).')
         try{ renderTradePlans() }catch(_){}
         return
       }
@@ -28483,7 +28487,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.465'
+  const OS_TAB_BUILD = '2026-09-22.466'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30130,7 +30134,8 @@
           try{ rr = await tvV2PollTick({ manuell: true }) }catch(e){ rr = { ok:false, grund: String((e && e.message) || e) } }
           await supabase.from('order_signale')
             .update({ status: rr && rr.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
-                      ergebnis: rr && rr.ok ? { ok:true, msg:`P&L geholt: ${rr.konten} Konten gelesen`, konten: rr.konten } : { ok:false, msg:'Rundgang nicht möglich: ' + ((rr && rr.grund) || 'unbekannt') } })
+                      ergebnis: rr && rr.ok ? { ok:true, msg:`P&L geholt: ${rr.konten} Konten gelesen`, konten: rr.konten, fehler: rr.fehler || [] }
+                                            : { ok:false, msg:'P&L holen: kein Konto gelesen — ' + ((rr && rr.fehler && rr.fehler[0]) || (rr && rr.grund) || 'unbekannt'), fehler: (rr && rr.fehler) || [] } })
             .eq('id', sig.id)
           continue
         }
