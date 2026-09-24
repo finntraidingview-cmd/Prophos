@@ -11013,7 +11013,7 @@
     const admKfQFmt = q => admKfDe(q, 3) + ' €/$'   // drei Stellen (24.09.2026 abends, Finn: „auf den dritten Cent — eher 0,04 oder 0,045")
     // 'wd' = Winning Day (25.09.2026, Finn: „unterscheiden zwischen Funded, Winning Day und Challenge") — Backend
     // ordnet Funded-Trades mit Master-Risiko < 1.000 $ so ein, Funded bleibt der Big Trade.
-    const ADM_KF_TYP = { funded: 'Funded', wd: 'Winning Day', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', eval: 'Eval' }
+    const ADM_KF_TYP = { funded: 'Funded', wd: 'Winning Day', winning_days: 'Winning Day', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', eval: 'Eval' }   // winning_days = Kontoart (25.09.2026), bis das Backend sie als 'wd' liefert
     const admKfTyp = t => ADM_KF_TYP[String(t || '').toLowerCase()] || (t ? String(t) : '—')
     const admKfGroesse = g => g ? Math.round(Number(g) / 1000) + 'k' : ''
     const admKfFirmaTyp = t => (t.master_firm || '—') + ' · ' + admKfTyp(t.master_typ)
@@ -11547,7 +11547,7 @@
       // Sortierung je Firma, darunter die Typen in fester Reihenfolge (25.09.2026, Finn: „sortier das nicht nach
       // dem Geldwert, sondern nach Prop-Firms: Firma A alle Typen, Firma B alle Typen") — Balken bleiben relativ
       // zur größten Quote, damit man die Firmen trotzdem vergleichen kann.
-      const typOrdQ = { challenge: 0, phase1: 1, phase2: 2, eval: 2, funded: 3, wd: 4 }
+      const typOrdQ = { challenge: 0, phase1: 1, phase2: 2, eval: 2, funded: 3, wd: 4, winning_days: 4 }
       const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && (g.vorgabe || Number(g.n) >= minN) && Number(g.median_q) > 0)
                     .sort((a, b) => String(a.firm).localeCompare(String(b.firm), 'de') || ((typOrdQ[String(a.typ || '').toLowerCase()] ?? 9) - (typOrdQ[String(b.typ || '').toLowerCase()] ?? 9)))
       wrap.hidden = !grp.length
@@ -11560,7 +11560,7 @@
         const on = !!(f && f.art === 'q' && f.wert === key)
         // Beispielzahl = typische Trade-Größe der Gruppe (bsp_usd, Median |Master-P&L|), Funded/Winning Day als
         // Gewinn, Challenge/Phasen als Verlust; ohne bsp_usd die alten Festwerte +7.500 $ / −2.000 $
-        const gewinn = funded || String(g.typ || '').toLowerCase() === 'wd'
+        const gewinn = funded || ['wd', 'winning_days'].includes(String(g.typ || '').toLowerCase())
         const bspUsd = Number(g.bsp_usd) > 0 ? Number(g.bsp_usd) : (gewinn ? 7500 : 2000)
         const bsp = g.vorgabe ? `${admUsdSign(Number(g.ziel_usd))} ≙ ${admVlSign(-Number(g.ziel_eur))}`
                   : gewinn ? `${admUsdSign(bspUsd)} ≙ ${admVlSign(-bspUsd * q)}` : `${admUsdSign(-bspUsd)} ≙ ${admVlSign(bspUsd * q)}`
@@ -11747,7 +11747,7 @@
       const panel = $('adm-wert-panel'); if(!panel || !admData) return
       const tb = $('adm-wert-rows'), sums = $('adm-wert-sums'), pers = $('adm-wert-personen'), empty = $('adm-wert-empty')
       if(!tb || !sums || !pers) return
-      const rows = admFiltered().filter(r => r.type === 'funded' && !r.archived)
+      const rows = admFiltered().filter(r => (r.type === 'funded' || r.type === 'winning_days') && !r.archived)
       tb.innerHTML = ''; sums.innerHTML = ''; pers.innerHTML = ''
       if(empty) empty.hidden = rows.length > 0
       const add = (m, c, v) => { if(v != null) m.set(c, (m.get(c) || 0) + v) }
@@ -22395,6 +22395,7 @@
   const typeLabel = t => {
     if(t === 'live') return 'Live'
     if(t === 'funded') return 'Funded'
+    if(t === 'winning_days') return 'Winning Days'   // vierte Kontoart (25.09.2026)
     if(t === 'phase1') return 'Phase 1'
     if(t === 'phase2') return 'Phase 2'
     if(t === 'challenge') return 'Challenge'  // Legacy für bestehende Accounts
@@ -30133,7 +30134,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.533'
+  const OS_TAB_BUILD = '2026-09-22.534'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32991,9 +32992,9 @@
             // die External ID haben oder verknüpft sind … aktuell nur Accounts mit ID — ist ein Bug"). Archivierte
             // fallen schon oben raus; Planung ist Handarbeit, es gibt keinen Bot, der eine Kennung bräuchte.
             if(_tpRoute === 'tsv2' && role === 'master' && !/topstep/i.test(String(a.firm || ''))) return false
-            // Winning Day (24.09.2026 abends): nur Funded/Live-Konten bei Futures-Firmen mit External ID
+            // Winning Days Farm (25.09.2026): NUR Konten der Kontoart 'winning_days' mit External ID (vorher Funded/Live bei Futures-Firmen)
             if(_tpRoute === 'tvv2' && _tpWd && role === 'master'
-               && !(tpFirmIstFutures(a.firm) && typeof tpVorplanIstFunded === 'function' && tpVorplanIstFunded(a) && String(a.externalId || '').trim())) return false
+               && !(typeof tpIstWinningDays === 'function' && tpIstWinningDays(a) && String(a.externalId || '').trim())) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
             if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
@@ -34385,7 +34386,9 @@
     const f = String(firm || '').toLowerCase()
     return f.includes('tradeify') ? 'tradeify' : f.includes('apex') ? 'apex' : f.includes('topstep') ? 'topstep' : 'sonst'
   }
-  function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'live' }
+  // Kontoart 'winning_days' (25.09.2026, Finn: vierte Kontoart „Winning Days") zählt überall als Funded; tpIstWinningDays ist das Geschwister
+  function tpVorplanIstFunded(acc){ const t = String((acc && acc.type) || '').toLowerCase(); return t === 'funded' || t === 'live' || t === 'winning_days' }
+  function tpIstWinningDays(acc){ return String((acc && acc.type) || '').toLowerCase() === 'winning_days' }
   function tpVorplanSpanne(von, bis){ const v = Math.max(0, Number(von) || 0); return [v, Math.max(v, Number(bis) || v)] }
   // Staffel: „wie viel auf der Balance drauf ist" ($, = Live-Balance − Kontogröße) → Slave-Betrag (€).
   // Grenzen wie von Finn genannt: „über 8000" = 90, „6000-8000" = 80 … 23.09.2026: vorher stand hier ein
@@ -34539,7 +34542,7 @@
           <span style="flex:1;min-width:0"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} — hat schon einen geplanten/laufenden Plan</span></span></div>`
         return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
           <input type="checkbox" id="tp-vp-acc-${id}" data-vp-acc="${id}" checked>
-          <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
+          <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${String(k.acc.type || '').toLowerCase() === 'winning_days' ? 'Winning Days' : z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
             <span class="mono" style="color:var(--sub)"> · TP ${de(z.tpVon)}–${de(z.tpBis)} $${z.masterRisk ? ` · DD $${de(z.masterRisk)}` : ''}</span></label>
         </div>`
       }).join('')
@@ -34569,7 +34572,7 @@
         : `Gesamtkosten ${de(z.slaveEur, 2)} €`
       return `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
         <input type="checkbox" id="tp-vp-acc-${id}" data-vp-acc="${id}" checked>
-        <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
+        <label for="tp-vp-acc-${id}" style="flex:1;min-width:0;cursor:pointer"><b>${escapeHtml(k.acc.name)}</b> <span style="color:var(--sub)">${escapeHtml(k.acc.firm || '')} · ${String(k.acc.type || '').toLowerCase() === 'winning_days' ? 'Winning Days' : z.phase === 'funded' ? 'Funded' : 'Challenge'}</span>
           <span class="mono" style="color:var(--sub)"> · DD $${de(z.masterRisk)} · TP ${de(z.tpVon)}–${de(z.tpBis)}</span>
           <div class="mono" style="color:var(--sub);font-size:11.5px">${basis}</div></label>
         <span class="mono" style="color:var(--sub);white-space:nowrap">Slave ${escapeHtml(sPreset.currency)}</span>
@@ -34974,7 +34977,7 @@
     }else{
       const a = window._admData; if(!a || !Array.isArray(a.rows)) return null
       for(const r of a.rows){
-        if(aus.has(String(r.user_id)) || r.archived || !(r.type === 'funded' || r.type === 'live') || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
+        if(aus.has(String(r.user_id)) || r.archived || !(r.type === 'funded' || r.type === 'live' || r.type === 'winning_days') || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
         add(String(r.user_id), r.person, konto(r, r.firm_raw || r.firm || '', r.wd_farm === undefined ? true : !!r.wd_farm))
       }
     }
@@ -36574,7 +36577,7 @@
   function zielKonfig(a){
     if(!a || a.type === 'live') return null
     const istFutures = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(a.firm) : false
-    if(istFutures && a.type === 'funded')
+    if(istFutures && (a.type === 'funded' || a.type === 'winning_days'))
       return { kind: 'winning_days', target: a.goalTarget > 0 ? a.goalTarget : 5, manual: true, implizit: !a.goalManual || a.goalKind !== 'winning_days' }
     if(a.goalKind && a.goalTarget > 0)
       return { kind: a.goalKind, target: a.goalTarget, manual: !!a.goalManual, implizit: false }
@@ -36815,7 +36818,7 @@
     if(!wrap || !cb || !lbl) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     const t = String((a && a.type) || '').toLowerCase()
-    if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
+    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days')){ wrap.hidden = true; return }
     wrap.hidden = false
     cb.checked = !!a.wdFarm
     lbl.textContent = `${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
@@ -36827,7 +36830,7 @@
     if(!wrap || !cb) return
     const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
     const t = String((a && a.type) || '').toLowerCase()
-    if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
+    if(!a || !(t === 'funded' || t === 'live' || t === 'winning_days')){ wrap.hidden = true; return }
     wrap.hidden = false
     if(p.winningDay === true || p.winningDay === false){
       cb.checked = p.winningDay
@@ -38445,7 +38448,7 @@
     const panel = document.getElementById('fin-status-panel')
     if(!panel) return
     const arch = (typeof getArchive === 'function') ? getArchive() : {}
-    const list = (accounts || []).filter(a => a.type === 'funded' && !arch[a.id]?.archived)
+    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'winning_days') && !arch[a.id]?.archived)
     if(!list.length){ panel.hidden = true; return }
     const rows = list.map(a => {
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
@@ -38635,7 +38638,7 @@
     // aufblähen, Finn hat hunderte Accounts insgesamt).
     const accountSel = document.getElementById('fin-account')
     const finArchive = (typeof getArchive === 'function') ? getArchive() : {}
-    const finFundedAccounts = accounts.filter(a => a.type === 'funded' && !finArchive[a.id]?.archived)
+    const finFundedAccounts = accounts.filter(a => (a.type === 'funded' || a.type === 'winning_days') && !finArchive[a.id]?.archived)
     // Live-Balance pro Account ans Dropdown hängen, damit Finn bei vielen fast
     // gleich benannten Accounts den richtigen zuordnen kann (Priorität TSX > MT5 > Duplikum).
     const finLiveBalStr = (a) => {
