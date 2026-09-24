@@ -6664,7 +6664,13 @@ def _wd_heute_zeile(p, acc, disp):
     ppl = WD_HEUTE_PPL.get(root)
     kt = _wd_num(p.get("master_contracts"))
     richtung = str(p.get("richtung") or "").lower()
-    einstieg = _wd_num((hedge or {}).get("einstieg_nq"))
+    # Einstieg (25.09.2026): aus dem Hedge, sonst aus der tv-Baseline (Teste speichert den Bot-Fill dort seit .517 auch
+    # OHNE Hedge) — damit bekommen auch ungehedgte Winning Days ihre Level im Chart. Quelle wird mitgegeben.
+    einstieg, einstieg_quelle = _wd_num((hedge or {}).get("einstieg_nq")), None
+    if einstieg is not None:
+        einstieg_quelle = "hedge"
+    elif _wd_num(tv.get("einstieg_nq")) is not None:
+        einstieg, einstieg_quelle = _wd_num(tv.get("einstieg_nq")), "tv"
     tp_usd, sl_usd = _wd_num(p.get("master_tp")), _wd_num(p.get("master_sl"))
     # Master-P&L: fertig am Plan → sonst letzter Rundgang-Stand (live) → sonst Ende-Differenz aus final/tv
     mpl = None
@@ -6689,7 +6695,7 @@ def _wd_heute_zeile(p, acc, disp):
         "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
         "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
         "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
-        "einstieg_nq": einstieg,
+        "einstieg_nq": einstieg, "einstieg_quelle": einstieg_quelle,
         "tp_level_nq": _wd_level(einstieg, richtung, tp_usd, ppl, kt, True),
         "sl_level_nq": _wd_level(einstieg, richtung, sl_usd, ppl, kt, False),
         "master_pl": mpl,
@@ -6728,7 +6734,7 @@ def admin_wd_heute():
     open), egal welcher Tag. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
     Je Plan: {id (= plan_id), user_id, person, farbe_key, konto{name, firma, groesse, kontonr_ende,
     external_id}, route, richtung, kt (= kontrakte), symbol_root, master_tp, master_sl, status, start_um,
-    started_at, ended_at, einstieg_nq, tp_level_nq, sl_level_nq, master_pl{wert, at, quelle}|null,
+    started_at, ended_at, einstieg_nq, einstieg_quelle ('hedge'|'tv'|null), tp_level_nq, sl_level_nq, master_pl{wert, at, quelle}|null,
     hedge (mt5_baseline.hedge komplett)|null, grund, hedge_eur, hedge_faktor, quelle 'farmer'|'manuell',
     verknuepft, handelstag}.
     Ausgeblendete Personen (ADMIN_EXCLUDE_EMAILS) fehlen wie in der Übersicht."""

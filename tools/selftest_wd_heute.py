@@ -87,6 +87,11 @@ def main():
           and z2["hedge"] is None and z2["quelle"] == "manuell" and z2["person"] == "u1" and z2["handelstag"] == "2026-09-25" and z2["konto"]["name"] == ""
           and z2["grund"] == "rundgang" and z2["farbe_key"] == "u1" and z2["konto"]["kontonr_ende"] == "",
           "Zeile: ohne Hedge keine Level, Ende-Differenz final − Start am selben Tag, manuell, Handelstag = Folgetag nach 17:00 CT")
+    p4 = dict(p2, id="p4", mt5_baseline={"tv": {"today_pnl_start": 10.0, "datum_start": "2026-09-25", "einstieg_nq": "30000.5"}})
+    z4 = a["_wd_heute_zeile"](p4, None, {})
+    check(z4["einstieg_nq"] == 30000.5 and z4["einstieg_quelle"] == "tv" and z4["tp_level_nq"] == 30140.5 and z4["sl_level_nq"] == 29950.5 and z4["hedge"] is None,
+          "Zeile ohne Hedge: Einstieg aus der tv-Baseline, Level gerechnet, Quelle 'tv'")
+    check(z["einstieg_quelle"] == "hedge" and z2["einstieg_quelle"] is None, "einstieg_quelle: hedge / null")
     p3 = dict(p2, id="p3", master_pl="55.5", completed_at="2026-09-25T01:00:00Z", status="completed")
     check(a["_wd_heute_zeile"](p3, None, {})["master_pl"]["quelle"] == "plan", "Zeile: fertiger master_pl schlaegt alles")
 

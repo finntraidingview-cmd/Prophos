@@ -605,76 +605,19 @@ def solo_notfall_sl(fill, richtung, punkte, *, faktor, point, digits, puffer=0.0
 
 
 def solo_level_tp(fill, richtung, sl_punkte, *, puffer, point, digits):
-    """REIN RECHNEND (testbar): Gewinn-Level (TP) der Solo-Position fuer den Fall,
-    dass der MASTER seinen SL erreicht (Koordination 24.09.2026 spaet: „beim
-    Erreichen der Punkte schliesst die TV-Order broker-seitig, und die Fusion-
-    Position muss zeitgleich zu"). Distanz = sl_punkte − puffer, nie unter 1 Punkt
-    (der Hedge soll VOR dem Master-SL raus, nicht dahinter). SELL-Hedge gewinnt
-    bei fallendem Kurs → TP unter dem Fill; BUY-Hedge darueber. 0.0 = kein Level."""
+    """REIN RECHNEND (testbar): Reserve-Level (TP am Hedge) fuer den Fall, dass der MASTER
+    seinen SL erreicht. Entscheidung Koordination 25.09.2026: auf der Master-SL-Seite ist der
+    Feed-Waechter im PC-Tab der HAUPTWEG (schliesst bei Kurs = Master-SL, ohne Puffer — Finn:
+    „am SL des Masters genauso"); dieses Terminal-Level ist NUR die Reserve dahinter und muss
+    deshalb HINTER dem Master-SL liegen: Distanz = sl_punkte + puffer. Die Fassung davor
+    (sl_punkte − puffer) lag DAVOR — Fusion haette vor dem Master-SL geschlossen, und bei einer
+    Umkehr stuende der Master ungehedgt. SELL-Hedge gewinnt bei fallendem Kurs → TP unter dem
+    Fill; BUY-Hedge darueber. 0.0 = kein Level (kein Master-SL)."""
     if not (float(fill) > 0 and float(sl_punkte or 0) > 0):
         return 0.0
-    dist = max(1.0, float(sl_punkte) - max(0.0, float(puffer or 0)))
+    dist = float(sl_punkte) + max(0.0, float(puffer or 0))
     lvl = float(fill) - dist if str(richtung).lower() == "sell" else float(fill) + dist
     return max(round(lvl, int(digits)), float(point))
-
-
-def kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
-    """REIN RECHNEND (testbar): (laufende Kerze, letzte abgeschlossene) nach einem
-    Tick — dieselbe Form wie kurs_1m im reader-server (o/h/l/c/n, minute = Anfang
-    der Minute in Server-UTC-Sekunden), damit das Frontend beide Quellen mit
-    derselben Bruecke nach tv_kurs_1m schreiben kann (Spalte wurzel trennt sie).
-    Zweiter Kurs-Feed (Koordination 24.09.2026 spaet): der Copier hat den NAS100-
-    Tick ohnehin — EHRLICH: NAS100 ist ein CFD, laeuft parallel zu NQ mit Basis-
-    Abstand und anderen Handelszeiten. Fuer den Hedge ist es der richtige Kurs
-    (die Level liegen beim Broker), fuer NQ-Demo-Orders nur 'ungefaehr'."""
-    minute = int(jetzt_s // 60) * 60
-    p = float(preis)
-    if k1m and k1m.get("minute") == minute and k1m.get("wurzel") == wurzel:
-        k1m["h"] = max(k1m["h"], p)
-        k1m["l"] = min(k1m["l"], p)
-        k1m["c"] = p
-        k1m["n"] += 1
-        return k1m, k1m_vor
-    neu = {"minute": minute, "wurzel": wurzel, "symbol": symbol, "o": p, "h": p, "l": p, "c": p, "n": 1}
-    return neu, (k1m if k1m else k1m_vor)
-
-
-def utc_iso():
-    """Zeitstempel fuer die Solo-Quittungen/den Abschluss-Ring in UTC mit 'Z' (Review
-    24.09.2026 spaet): datetime.now().isoformat() ohne Zeitzone deutete der Mac in
-    Dubai als seine Ortszeit — die Karte lag Stunden daneben."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-SOLO_ZU = "hedge_solo_zu.json"      # Ring der selbst erkannten Abschluesse + zuletzt bekannte Tickets (neustart-fest)
-SOLO_ZU_MAX = 20
-
-
-def solo_zu_erkennen(bekannt, aktuell):
-    """REIN RECHNEND (testbar): welche Solo-Tickets sind seit dem letzten Tick
-    verschwunden? bekannt/aktuell = {ticket: {symbol, lots, richtung, fill}}.
-    -> Liste der verschwundenen Eintraege (mit ticket), Reihenfolge nach Ticket.
-    Koordination 24.09.2026 spaet: der Copier erkennt den Abschluss der Solo-
-    Position SELBST — der PC-Tab (und ueber mt5_live der Mac) sieht 'Level
-    gefuellt, −4,20 €, level_tp' auch dann, wenn zwischen Fuellen und dem
-    naechsten Waechter-Tick ein Tab-Neustart lag oder nie ein Close-Auftrag kam."""
-    out = []
-    for t in sorted(int(k) for k in (bekannt or {})):
-        if t not in {int(k) for k in (aktuell or {})}:
-            e = dict((bekannt.get(t) if t in bekannt else bekannt.get(str(t))) or {})
-            e["ticket"] = t
-            out.append(e)
-    return out
-
-
-def solo_zu_ring(ring, eintrag, maximum=SOLO_ZU_MAX):
-    """REIN RECHNEND (testbar): Eintrag {ticket, …} in den Ring — ein Ticket steht
-    nie doppelt (der Erste gewinnt), aelteste fliegen raus, juengster hinten."""
-    ring = [r for r in (ring or []) if isinstance(r, dict)]
-    if any(int(r.get("ticket") or 0) == int(eintrag.get("ticket") or 0) for r in ring):
-        return ring
-    ring.append(dict(eintrag))
-    return ring[-int(maximum):]
 
 
 def solo_deal_grund(reason):

@@ -1748,10 +1748,12 @@ def test_solo_level_und_grund():
         print("✗ solo_notfall_sl Alt-Weg puffer ohne Faktor"); ok = False
     if copier.solo_notfall_sl(0, "buy", 10, faktor=1.1, point=0.01, digits=2) != 0.0:
         print("✗ solo_notfall_sl ohne Fill → 0"); ok = False
-    if copier.solo_level_tp(20000, "sell", 100, puffer=3, point=0.01, digits=2) != 19903.0 \
-            or copier.solo_level_tp(20000, "buy", 2, puffer=3, point=0.01, digits=2) != 20001.0 \
+    # Reserve-Level Master-SL-Seite HINTER dem Master-SL (25.09.2026): SELL-Hedge TP unter dem Fill bei sl_punkte + puffer
+    if copier.solo_level_tp(20000, "sell", 100, puffer=3, point=0.01, digits=2) != 19897.0 \
+            or copier.solo_level_tp(20000, "buy", 100, puffer=3, point=0.01, digits=2) != 20103.0 \
+            or copier.solo_level_tp(20000, "buy", 2, puffer=0, point=0.01, digits=2) != 20002.0 \
             or copier.solo_level_tp(20000, "buy", 0, puffer=3, point=0.01, digits=2) != 0.0:
-        print("✗ solo_level_tp (Level Master-SL)"); ok = False
+        print("✗ solo_level_tp (Reserve-Level Master-SL, hinter dem SL)"); ok = False
     if [copier.solo_deal_grund(x) for x in (4, 5, 3, 0, 6, "x")] != ["level_tp", "level_sl", "close", "hand", "stopout", "unbekannt"]:
         print("✗ solo_deal_grund"); ok = False
     # explizite Lots (Popup 1 Multiplikator): 0,94 bleibt auf Raster 0,01; 0,004 → unter Mindestlot = 0.0; 0,996 → 1.0;
