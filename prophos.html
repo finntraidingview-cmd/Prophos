@@ -1595,6 +1595,10 @@
   #dashboard-view .type-phase1{background:rgba(247,144,9,.1);color:#b6690a}
   #dashboard-view .type-phase2{background:rgba(247,144,9,.18);color:#9a5a08}
   #dashboard-view .type-funded{background:var(--violet-tint);color:var(--violet)}
+  #dashboard-view .type-winning_days{background:rgba(22,200,198,.14);color:#0E7A78}   /* Winning Days (25.09.2026): Teal wie die V2-Sticker */
+  #dashboard-view .acc-wd-toggle{margin-left:6px;padding:2px 7px;border-radius:6px;border:1px dashed var(--border);background:transparent;color:var(--sub);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;vertical-align:middle}
+  #dashboard-view .acc-wd-toggle:hover{border-color:#0E7A78;color:#0E7A78;background:rgba(22,200,198,.08)}
+  #dashboard-view .acc-wd-toggle:disabled{opacity:.5;cursor:default}
   #dashboard-view .type-live{background:rgba(18,183,106,.1);color:#058a50}
   #dashboard-view .type-live::before{
     content:'';width:6px;height:6px;border-radius:999px;background:#12B76A;
@@ -4923,6 +4927,7 @@
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
                 <option value="funded">Funded</option>
+                <option value="winning_days">Winning Days</option>
                 <option value="live">Live</option>
               </select>
             </label>
@@ -5177,6 +5182,7 @@
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
               <option value="funded">Funded</option>
+              <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
           </div>
@@ -6197,6 +6203,19 @@
         </div>
         <div class="modal-body">
           <div id="successorParentInfo" class="link-tsx-hero"></div>
+          <!-- Übergang Funded → Winning Days (25.09.2026, Finns vierte Kontoart „Winning Days"): der Big Trade ist gewonnen, das
+               Konto ist bestanden — es bleibt DIESELBE Konto-Zeile, nur account_type wechselt (kein Nachfolger). Rückweg auf
+               Funded ebenso. Eigene Verdrahtung (suc-wd-btn), gefüllt von sucWdBlockRender. -->
+          <div id="suc-wd-block" style="display:none;margin-top:12px;padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg)">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px">
+              <div style="flex:1;min-width:220px">
+                <div id="suc-wd-titel" style="font-size:13px;font-weight:600;color:var(--ink)"></div>
+                <div id="suc-wd-text" style="font-size:12px;color:var(--sub);margin-top:2px;line-height:1.45"></div>
+              </div>
+              <button type="button" class="btn btn-primary" id="suc-wd-btn"></button>
+            </div>
+            <div class="modal-divider" style="margin-top:14px">oder wie bisher einen Nachfolger anlegen</div>
+          </div>
 
           <p style="font-size:12.5px;color:var(--sub);margin:14px 0 4px">
             Der Vorgänger-Account wird automatisch archiviert und mit dem neuen Account verknüpft. Du findest ihn weiterhin über den "Archivierte anzeigen"-Filter.
@@ -6221,6 +6240,7 @@
                 <option value="phase1">Phase 1</option>
                 <option value="phase2">Phase 2</option>
                 <option value="funded">Funded</option>
+                <option value="winning_days">Winning Days</option>
                 <option value="live">Live</option>
               </select>
             </div>
@@ -7230,6 +7250,7 @@
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
               <option value="funded">Funded</option>
+              <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
           </div>
@@ -7273,6 +7294,7 @@
               <option value="phase1">Phase 1</option>
               <option value="phase2">Phase 2</option>
               <option value="funded">Funded</option>
+              <option value="winning_days">Winning Days</option>
               <option value="live">Live</option>
             </select>
           </div>
@@ -9305,6 +9327,7 @@
             <option value="phase1">Phase 1</option>
             <option value="phase2">Phase 2</option>
             <option value="funded">Funded</option>
+            <option value="winning_days">Winning Days</option>
             <option value="live">Live-Account</option>
           </select>
         </div>
@@ -9352,7 +9375,6 @@
           <label>Zieltyp</label>
           <select class="input" id="ac-goal-kind">
             <option value="">— kein Ziel —</option>
-            <option value="winning_days">Winning Days</option>
             <option value="trading_days">Trading Days</option>
           </select>
         </div>
@@ -9568,6 +9590,7 @@
             <option value="phase2">Phase 2</option>
             <option value="challenge">Challenge</option>
             <option value="funded">Funded</option>
+            <option value="winning_days">Winning Days</option>
           </select>
         </div>
         <div class="field">
@@ -21978,6 +22001,7 @@
     else if(acc.type === 'phase2') suggested = `${acc.name} → Funded`
     else if(acc.type === 'challenge') suggested = `${acc.name} → Funded`  // Legacy
     else if(acc.type === 'funded') suggested = `${acc.name} → Live`
+    else if(acc.type === 'winning_days') suggested = `${acc.name} → Live`
     document.getElementById('suc-name').value = suggested
 
     // Default-Typ vorschlagen
@@ -21985,8 +22009,10 @@
     if(acc.type === 'phase1') sucType.value = 'phase2'
     else if(acc.type === 'phase2') sucType.value = 'funded'
     else if(acc.type === 'challenge') sucType.value = 'funded'  // Legacy
-    else if(acc.type === 'funded') sucType.value = 'live'
+    else if(acc.type === 'funded' || acc.type === 'winning_days') sucType.value = 'live'
     else sucType.value = 'phase1'
+    // Übergang Funded ⇄ Winning Days (25.09.2026, Finns vierte Kontoart): kein neues Konto, dieselbe Zeile wechselt die Art
+    sucWdBlockRender(acc)
 
     document.getElementById('successorMsg').textContent = ''
     document.getElementById('successorModal').classList.add('open')
@@ -22027,6 +22053,28 @@
   })
 
   document.getElementById('successorCancel')?.addEventListener('click', closeSuccessorWizard)
+  /* Übergang Funded ⇄ Winning Days (25.09.2026): sichtbar nur bei Funded- (Hinweg) und Winning-Days-Konten (Rückweg).
+   * Schreibt account_type + eine Notiz-Zeile mit Datum auf DIESELBE Konto-Zeile; Kapitel, Buchungen, Verknüpfungen bleiben. */
+  function sucWdBlockRender(acc){
+    const block = document.getElementById('suc-wd-block'), titel = document.getElementById('suc-wd-titel'), text = document.getElementById('suc-wd-text'), btn = document.getElementById('suc-wd-btn')
+    if(!block || !btn) return
+    if(acc && acc.type === 'funded'){
+      block.style.display = ''; titel.textContent = 'Big Trade gewonnen → Konto ist bestanden → Winning Days'
+      text.textContent = 'Kein neues Konto: dieselbe Zeile wechselt die Kontoart auf „Winning Days" (Datum landet in den Notizen). Payouts, Buchungen und Verknüpfungen bleiben.'
+      btn.textContent = 'Als Winning Days führen'; btn.dataset.ziel = 'winning_days'
+    } else if(acc && acc.type === 'winning_days'){
+      block.style.display = ''; titel.textContent = 'Winning Days → zurück auf Funded'
+      text.textContent = 'Macht den Übergang rückgängig: dieselbe Zeile wird wieder als Funded geführt, die Notiz-Zeile wird entfernt.'
+      btn.textContent = 'Zurück auf Funded'; btn.dataset.ziel = 'funded'
+    } else { block.style.display = 'none' }
+  }
+  async function sucWdUmstellen(){
+    const btn = document.getElementById('suc-wd-btn'), msg = document.getElementById('successorMsg'); if(!btn) return
+    if(msg) msg.textContent = ''
+    const ok = await accWdUmstellen(_successorParentAccId, btn.dataset.ziel, { btn, msg })
+    if(ok) closeSuccessorWizard()
+  }
+  document.getElementById('suc-wd-btn')?.addEventListener('click', sucWdUmstellen)
   document.getElementById('successorCancel2')?.addEventListener('click', closeSuccessorWizard)
   document.getElementById('successorModal')?.addEventListener('click', e => {
     if(e.target === document.getElementById('successorModal')) closeSuccessorWizard()
@@ -22395,7 +22443,7 @@
   const typeLabel = t => {
     if(t === 'live') return 'Live'
     if(t === 'funded') return 'Funded'
-    if(t === 'winning_days') return 'Winning Days'   // vierte Kontoart (25.09.2026)
+    if(t === 'winning_days') return 'Winning Days'   // vierte Kontoart (25.09.2026): bestandenes Funded-Konto nach dem Big Trade
     if(t === 'phase1') return 'Phase 1'
     if(t === 'phase2') return 'Phase 2'
     if(t === 'challenge') return 'Challenge'  // Legacy für bestehende Accounts
@@ -22770,6 +22818,39 @@
     if(h) todoHaken(h.dataset.todoId, h.checked)
   })
 
+  const ACC_TYPE_RANG = { challenge: 0, phase1: 1, phase2: 2, funded: 3, winning_days: 4, live: 5 }
+  /* Vierte Kontoart „Winning Days" (Finn 25.09.2026; Koordination: die Migration stellte nur ein Konto um, 94 Funded-Konten
+   * muss Finn selbst zuordnen): kleiner Knopf neben dem Typ-Chip — bei Funded-Konten einer Futures-Firma „→ Winning Days",
+   * bei Winning-Days-Konten „→ Funded". Schreibt account_type + Notiz-Zeile mit Datum auf DIESELBE Zeile (accWdUmstellen),
+   * derselbe Weg wie der Übergangs-Schritt im Nachfolger-Wizard. */
+  function accWdToggleHtml(a){
+    if(!a) return ''
+    const futures = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
+    if(a.type === 'funded' && futures) return ` <button type="button" class="acc-wd-toggle" data-acc-wdtyp="${escapeHtml(String(a.id))}" data-ziel="winning_days" data-stop-row-click="1" title="Big Trade gewonnen — dieses Funded-Konto als Winning-Days-Konto führen (dieselbe Konto-Zeile, sofort gespeichert)">→ Winning Days</button>`
+    if(a.type === 'winning_days') return ` <button type="button" class="acc-wd-toggle" data-acc-wdtyp="${escapeHtml(String(a.id))}" data-ziel="funded" data-stop-row-click="1" title="Zurück auf Funded (dieselbe Konto-Zeile, sofort gespeichert)">→ Funded</button>`
+    return ''
+  }
+  async function accWdUmstellen(accId, zielRoh, opts){
+    const acc = accounts.find(a => String(a.id) === String(accId)); if(!acc) return false
+    const ziel = zielRoh === 'funded' ? 'funded' : 'winning_days'
+    const heute = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const alt = String(acc.notes || '').split('\n').filter(z => !/^Winning Days seit /.test(z.trim()))
+    const notes = (ziel === 'winning_days' ? alt.concat([`Winning Days seit ${heute}`]) : alt).join('\n').trim() || null
+    const btn = opts && opts.btn; if(btn) btn.disabled = true
+    try{
+      const { data, error } = await supabase.from('accounts').update({ account_type: ziel, notes }).eq('id', acc.id).select('*').single()
+      if(error) throw error
+      const idx = accounts.findIndex(x => String(x.id) === String(acc.id)); if(idx >= 0) accounts[idx] = rowToAccount(data)
+      if(typeof renderAccounts === 'function') renderAccounts()
+      if(typeof renderOverviewKpis === 'function') renderOverviewKpis()
+      if(typeof atToast === 'function') atToast(ziel === 'winning_days' ? `${acc.name}: jetzt Winning Days` : `${acc.name}: wieder Funded`)
+      return true
+    }catch(e){
+      const t = 'Nicht umgestellt: ' + (e && e.message || e)
+      if(opts && opts.msg) opts.msg.textContent = t; else if(typeof atToast === 'function') atToast(t); else alert(t)
+      return false
+    }finally{ if(btn) btn.disabled = false }
+  }
   function renderAccounts(){
     if(!accEls.table) return
     if(typeof tsAutoLinkSoon === 'function') tsAutoLinkSoon()  // Auto-Verlinkung per External ID (17.09.2026)
@@ -22827,6 +22908,9 @@
       if(qNorm && !accHaystack(a).includes(qNorm)) return false
       return true
     })
+    // Reihenfolge nach Kontoart (Koordination 25.09.2026, vierte Kontoart „Winning Days"): Challenge · Phase 1 · Phase 2 ·
+    // Funded · Winning Days · Live, innerhalb einer Art bleibt die bisherige Reihenfolge (stabil).
+    .map((a, i) => [a, i]).sort((x, y) => (ACC_TYPE_RANG[x[0].type] ?? 9) - (ACC_TYPE_RANG[y[0].type] ?? 9) || x[1] - y[1]).map(x => x[0])
     const archivedCount = accounts.filter(a => archive[a.id]?.archived).length
     const archCounter = document.getElementById('archived-counter')
     if(archCounter){
@@ -22992,7 +23076,7 @@
               ${meta}
             </td>
             <td>${escapeHtml(a.firm || '–')}</td>
-            <td><span class="type-badge type-${a.type}">${typeLabel(a.type)}</span></td>
+            <td><span class="type-badge type-${a.type}">${typeLabel(a.type)}</span>${accWdToggleHtml(a)}</td>
             <td>${balCell}</td>
             <td>${linksHtml}</td>
             <td style="padding-right:20px;text-align:right;white-space:nowrap" data-stop-row-click="1">
@@ -23085,6 +23169,11 @@
             alert('Löschen fehlgeschlagen: ' + (e.message || e))
           }
         })
+      })
+      // Schnell-Umstellung Funded ⇄ Winning Days (25.09.2026): ein Klick, sofort in die DB, eigener Handler je Knopf
+      // (Attribut data-acc-wdtyp — data-acc-wd trägt bereits der Winning-Day-Zähler-Badge im Namen, der das Bearbeiten öffnet)
+      accEls.table.querySelectorAll('[data-acc-wdtyp]').forEach(btn => {
+        btn.addEventListener('click', e => { e.stopPropagation(); accWdUmstellen(btn.dataset.accWdtyp, btn.dataset.ziel, { btn }) })
       })
       // Row-Click → Account Detail View
       accEls.table.querySelectorAll('tr[data-acc-detail]').forEach(row => {
@@ -23221,7 +23310,7 @@
     const typ  = accEls.type?.value || ''
     const istFutures = (typeof tpFirmIstFutures === 'function') ? tpFirmIstFutures(firm) : false
     const istPhase   = typ === 'challenge' || typ === 'phase1' || typ === 'phase2'
-    const istFunded  = typ === 'funded'
+    const istFunded  = typ === 'funded' || typ === 'winning_days'   // Winning Days (25.09.2026): bestandenes Funded-Konto, gleiche Blöcke
     if(accEls.goalSec)   accEls.goalSec.hidden   = !(istPhase && !istFutures)
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !(istFunded && !istFutures)
@@ -25170,10 +25259,11 @@
       return sum + v
     }, 0)
     const breakdown = []
-    const counts = { live:0, funded:0, challenge:0, phase1:0, phase2:0 }
+    const counts = { live:0, funded:0, winning_days:0, challenge:0, phase1:0, phase2:0 }
     accounts.forEach(a => { counts[a.type] = (counts[a.type]||0) + 1 })
     if(counts.live)      breakdown.push(`${counts.live} Live`)
     if(counts.funded)    breakdown.push(`${counts.funded} Funded`)
+    if(counts.winning_days) breakdown.push(`${counts.winning_days} Winning Days`)
     if(counts.phase1)    breakdown.push(`${counts.phase1} Phase 1`)
     if(counts.phase2)    breakdown.push(`${counts.phase2} Phase 2`)
     if(counts.challenge) breakdown.push(`${counts.challenge} Challenge`)
@@ -30134,7 +30224,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.535'
+  const OS_TAB_BUILD = '2026-09-22.536'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38448,7 +38538,7 @@
     const panel = document.getElementById('fin-status-panel')
     if(!panel) return
     const arch = (typeof getArchive === 'function') ? getArchive() : {}
-    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'winning_days') && !arch[a.id]?.archived)
+    const list = (accounts || []).filter(a => (a.type === 'funded' || a.type === 'winning_days') && !arch[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
     if(!list.length){ panel.hidden = true; return }
     const rows = list.map(a => {
       const pi = (typeof payoutReadyInfo === 'function') ? payoutReadyInfo(a) : null
@@ -38638,7 +38728,7 @@
     // aufblähen, Finn hat hunderte Accounts insgesamt).
     const accountSel = document.getElementById('fin-account')
     const finArchive = (typeof getArchive === 'function') ? getArchive() : {}
-    const finFundedAccounts = accounts.filter(a => (a.type === 'funded' || a.type === 'winning_days') && !finArchive[a.id]?.archived)
+    const finFundedAccounts = accounts.filter(a => (a.type === 'funded' || a.type === 'winning_days') && !finArchive[a.id]?.archived)   // Winning Days (25.09.2026) zahlen aus wie Funded
     // Live-Balance pro Account ans Dropdown hängen, damit Finn bei vielen fast
     // gleich benannten Accounts den richtigen zuordnen kann (Priorität TSX > MT5 > Duplikum).
     const finLiveBalStr = (a) => {
