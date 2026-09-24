@@ -1157,6 +1157,29 @@
   #tradePlanModal .modal-head{padding-bottom:12px}
   #tradePlanModal .modal-body{padding:12px 0 2px}
   #tradePlanModal .form-grid{gap:10px 14px !important}
+  /* V2-Raster (24.09.2026, Finn zum Orbit-V2-Popup: „Wenn man NQ oder MNQ drückt, muss es farbig werden.
+     Allgemein noch sehr unübersichtlich, nicht clean."): Klasse tp-v2 setzt tpRouteUpdateSeg NUR auf
+     Echo V2 / Orbit V2 und nimmt sie sonst exakt wieder weg — die Hedge-Wege sehen diese Regeln nie.
+     Zeile 1 Master volle Breite, Zeile 2 Instrument | Kontrakte, Zeile 3 TP | SL (kein Loch mehr unter dem Master). */
+  /* Größe (24.09.2026, Finn: „Du kannst das Popup mehr in die Größe ziehen, nicht so klein"): nur wenn das
+     Formular tp-v2 trägt — das Popup verlässt den .9-Zoom, wird breiter, Felder und Schrift wachsen. */
+  #tradePlanModal:has(.tp-v2) .modal{zoom:1;max-width:760px !important;width:min(760px,96vw) !important;padding:22px 30px 20px}
+  #tradePlanModal .tp-v2{gap:14px 18px !important}   /* !important: das Grid trägt gap inline */
+  #tradePlanModal .tp-v2 label{font-size:13.5px}
+  #tradePlanModal .tp-v2 .input,#tradePlanModal .tp-v2 select.input{font-size:15px;padding:10px 12px}
+  #tradePlanModal .tp-v2 .seg button{font-size:13.5px;padding:8px 14px}
+  #tradePlanModal .tp-v2 .tp-v2-instr button{padding:7px 12px;font-size:14px}
+  #tradePlanModal .tp-v2 #tp-master-row{grid-column:1 / -1}
+  #tradePlanModal .tp-v2 #tp-nq-toggle-slave-placeholder{display:none !important}
+  #tradePlanModal .tp-v2-instr{display:flex;width:100%}
+  #tradePlanModal .tp-v2-instr button{
+    flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;
+    padding:5px 10px;font-family:var(--mono);font-weight:600;line-height:1.15;
+  }
+  #tradePlanModal .tp-v2-instr button small{font-size:10px;font-weight:400;color:var(--sub);font-family:'Inter',system-ui,sans-serif}
+  /* aktiv = weiße Pille des .seg PLUS Farbakzent — sonst sah man nicht, was gedrückt ist */
+  #tradePlanModal .tp-v2-instr button.active{color:var(--violet)}
+  #tradePlanModal .tp-v2-instr button.active small{color:var(--violet);opacity:.85}
   #tradePlanModal .tp-multi-display{margin-top:10px}
   #tradePlanModal .tp-slave-out{padding:14px 18px}
   #tradePlanModal .tp-mult-out{padding:12px 18px}
@@ -5458,7 +5481,7 @@
           </button>
         </div>
         <div class="modal-body">
-          <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
+          <div class="form-grid" id="tp-form-grid" style="grid-template-columns:1fr 1fr;gap:14px">
             <!-- Routen-Regler (15.08.2026, Finns Ansage): Duplikum ODER eigener
                  MT5-Copier. Filtert beide Account-Dropdowns auf die jeweils
                  verlinkten Accounts; bei MT5 ist der Slave fix der Hedge dieses PCs. -->
@@ -5480,7 +5503,7 @@
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
               </div>
             </div>
-            <div class="field">
+            <div class="field" id="tp-master-row">
               <label>Master-Account</label>
               <!-- Firmen-/Typ-Filter ausgeblendet (22.09.2026, Finn: „damit das Popup übersichtlicher wird");
                    die Selects bleiben im DOM (Wert '' = alle), die Filterlogik ist unverändert. -->
@@ -5528,6 +5551,17 @@
             <!-- Placeholder col 2 wenn nur Master-Toggle sichtbar — hält Grid-Alignment -->
             <div id="tp-nq-toggle-slave-placeholder" style="display:none"></div>
 
+            <!-- Instrument auf Orbit V2 (24.09.2026, Finn: „Wenn man NQ oder MNQ drückt, muss es farbig werden"):
+                 eigener .seg mit klarem Aktiv-Zustand, gleicher Modus (_tpNqMode) wie die Pillen darüber —
+                 die bleiben für die Hedge-Wege pixelgleich. Sichtbarkeit steuert tpNqUpdateToggle. -->
+            <div class="field" id="tp-v2-instr-row" style="display:none">
+              <label>Instrument</label>
+              <div class="seg tp-v2-instr" id="tp-v2-instr-seg">
+                <button type="button" id="tp-v2-mnq">MNQ<small>$2/pt</small></button>
+                <button type="button" id="tp-v2-nq">NQ<small>$20/pt</small></button>
+              </div>
+            </div>
+
             <!-- NQ/MNQ Toggle Slave — sichtbar wenn Slave projectx-Firma ist (col 2) -->
             <!-- Wenn beide sichtbar: Master col1, Slave col2; wenn nur Slave: span 2 -->
             <div class="field" id="tp-nq-toggle-slave" style="display:none">
@@ -5543,7 +5577,8 @@
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
             </div>
             <div class="field">
-              <label>Anzahl Kontrakte</label>
+              <!-- Label/step schaltet tpRouteUpdateSeg je Weg um (24.09.2026): Orbit V2 ganze Kontrakte, Echo V2 Lots 0.01 -->
+              <label id="tp-master-qty-label">Anzahl Kontrakte</label>
               <input type="number" class="input mono" id="tp-master-qty" min="0.01" step="0.1" placeholder="z.B. 1" value="1">
             </div>
             <div class="field" style="grid-column:span 2">
@@ -26436,6 +26471,20 @@
     const tpHint = document.getElementById('tp-master-tp-hint'); if(tpHint) tpHint.textContent = v2 ? (_tpRoute === 'tvv2' ? '— leer = kein TP' : '— nur mit SL') : '— für „Jetzt starten"'
     const dirHint = document.getElementById('tp-dir-hint'); if(dirHint) dirHint.textContent = v2 ? '— Puls braucht sie' : '— für „Jetzt starten"'
     const slHint = document.getElementById('tp-master-sl-hint'); if(slHint) slHint.textContent = _tpRoute === 'tvv2' ? '— leer = kein SL' : '— Pflicht bei TP'
+    // V2-Raster (24.09.2026, Finn: „Allgemein noch sehr unübersichtlich, nicht clean"): Klasse am Formular
+    // (CSS: Master volle Breite, Platzhalter weg → Instrument | Kontrakte, dann TP | SL). Auf den anderen
+    // Wegen wird sie exakt wieder entfernt — dort ändert sich nichts.
+    document.getElementById('tp-form-grid')?.classList.toggle('tp-v2', v2)
+    // Kontrakte-Feld je Weg (24.09.2026, Finns Screenshot: der Browser meckerte beim Speichern „Die zwei
+    // nächstliegenden gültigen Werte sind 0,91 und 1,01" — step 0.1 ab min 0.01 stammt aus der Lots-Welt):
+    // Orbit V2 = ganze Kontrakte (step 1, min 1), Echo V2 = Lots mit 0.01, alle anderen Wege wie bisher.
+    const qtyEl = document.getElementById('tp-master-qty'), qtyLbl = document.getElementById('tp-master-qty-label')
+    if(qtyEl){
+      if(_tpRoute === 'tvv2'){ qtyEl.step = '1'; qtyEl.min = '1'; qtyEl.setAttribute('inputmode', 'numeric') }
+      else if(_tpRoute === 'mt5v2'){ qtyEl.step = '0.01'; qtyEl.min = '0.01'; qtyEl.removeAttribute('inputmode') }
+      else { qtyEl.step = '0.1'; qtyEl.min = '0.01'; qtyEl.removeAttribute('inputmode') }
+    }
+    if(qtyLbl) qtyLbl.textContent = _tpRoute === 'mt5v2' ? 'Lots' : 'Anzahl Kontrakte'
     if(typeof tpNqUpdateToggle === 'function') tpNqUpdateToggle()
     // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
     v2zeig('tp-kompass-box', v2, true)
@@ -27183,7 +27232,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.443'
+  const OS_TAB_BUILD = '2026-09-22.444'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30173,11 +30222,19 @@
       || (typeof _tpRoute !== 'undefined' && _tpRoute === 'tvv2' && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master?.firm))
     const slaveIsProjectx  = tpNqIsProjectx(slave?.firm)
 
-    // Master toggle
+    // Master toggle — auf den V2-Wegen (24.09.2026) übernimmt der .seg #tp-v2-instr-seg (nur Orbit V2 mit
+    // Futures-Firma); die alten Pillen und der Platzhalter bleiben dort aus, auf den Hedge-Wegen unverändert.
+    const v2 = (typeof _tpRoute !== 'undefined') && routeIstV2(_tpRoute)
     const rowM = document.getElementById('tp-nq-toggle-master')
-    if(rowM) rowM.style.display = masterIsProjectx ? '' : 'none'
+    if(rowM) rowM.style.display = (masterIsProjectx && !v2) ? '' : 'none'
     document.getElementById('tp-nq-mnq')?.classList.toggle('active', _tpNqMode  === 'mnq')
     document.getElementById('tp-nq-nq')?.classList.toggle('active',  _tpNqMode  === 'nq')
+    const rowV2 = document.getElementById('tp-v2-instr-row')
+    // 24.09.2026 00:1x (Finn: „ich will hier zwischen NQ und MNQ unterscheiden können bei Orbit V2 — das gibt's
+    // gerade gar nicht"): bei Orbit V2 IMMER sichtbar, auch bevor ein Master gewählt ist — Orbit V2 ist Futures.
+    if(rowV2) rowV2.style.display = (v2 && _tpRoute === 'tvv2') ? '' : 'none'
+    document.getElementById('tp-v2-mnq')?.classList.toggle('active', _tpNqMode === 'mnq')
+    document.getElementById('tp-v2-nq')?.classList.toggle('active',  _tpNqMode === 'nq')
 
     // Slave toggle
     const rowS = document.getElementById('tp-nq-toggle-slave')
@@ -30188,7 +30245,7 @@
     }
     // Placeholder col2 — sichtbar wenn nur Master-Toggle gezeigt wird
     const ph = document.getElementById('tp-nq-toggle-slave-placeholder')
-    if(ph) ph.style.display = (masterIsProjectx && !slaveIsProjectx) ? '' : 'none'
+    if(ph) ph.style.display = (masterIsProjectx && !slaveIsProjectx && !v2) ? '' : 'none'
 
     document.getElementById('tp-nqs-mnq')?.classList.toggle('active', _tpNqsMode === 'mnq')
     document.getElementById('tp-nqs-nq')?.classList.toggle('active',  _tpNqsMode === 'nq')
@@ -30255,6 +30312,17 @@
     tpNqUpdateToggle(); tpRecompute()
   })
   document.getElementById('tp-nq-nq')?.addEventListener('click', () => {
+    _tpNqMode = 'nq'
+    localStorage.setItem(TP_NQ_MODE_LS, 'nq')
+    tpNqUpdateToggle(); tpRecompute()
+  })
+  // V2-Instrument-Seg (24.09.2026): gleicher Modus wie die Master-Pillen, eigene Verdrahtung
+  document.getElementById('tp-v2-mnq')?.addEventListener('click', () => {
+    _tpNqMode = 'mnq'
+    localStorage.setItem(TP_NQ_MODE_LS, 'mnq')
+    tpNqUpdateToggle(); tpRecompute()
+  })
+  document.getElementById('tp-v2-nq')?.addEventListener('click', () => {
     _tpNqMode = 'nq'
     localStorage.setItem(TP_NQ_MODE_LS, 'nq')
     tpNqUpdateToggle(); tpRecompute()
@@ -33243,15 +33311,53 @@
 
     // Hero info
     const slavePreset = FIRM_PRESETS[firmToPreset(p.slaveFirm)] || FIRM_PRESETS.projectx
-    document.getElementById('tradeCompleteInfo').innerHTML = `
-      <div style="font-size:14px;font-weight:600;color:var(--ink);margin-bottom:4px">
-        ${escapeHtml(p.masterName||'–')} → ${escapeHtml(p.slaveName||'–')}
-      </div>
-      <div style="font-size:12.5px;color:var(--sub)">
-        Multiplier ${p.multiplier != null ? p.multiplier.toFixed(3) : '—'} ·
-        Risiko $${p.masterRisk||0} → ${slavePreset.currency}${p.slaveRisk||0}
-      </div>
-    `
+    const tcV2 = routeIstV2(p.route)
+    if(tcV2){
+      // Kopf auf Echo V2 / Orbit V2 (24.09.2026, Finn: „muss auch angepasst werden — für Echo V2 / Orbit V2 —
+      // das muss ja ein anderes sein, da gibt's ja keinen Slave"): Sticker, Master, Order-Zeile und die
+      // Herkunft des Auto-Werts (Echo V2: Master-Balance Start → Ende; Orbit V2: Today's P&L Start → Ende)
+      // statt Multiplier/Risiko, die es ohne Hedge nicht gibt.
+      const fmt = n => Number(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      const usd = n => (Number(n) < 0 ? '−' : '') + '$' + fmt(Math.abs(Number(n)))   // −$20,00 statt $-20,00
+      const teile = []
+      if(p.masterSymbol) teile.push(escapeHtml(String(p.masterSymbol)))
+      if(p.masterContracts != null) teile.push(`${escapeHtml(String(p.masterContracts))} ${p.route === 'mt5v2' ? 'Lots' : 'Kt'}`)
+      if(p.richtung === 'buy' || p.richtung === 'sell') teile.push(p.richtung.toUpperCase())
+      const tpSl = [p.masterTp > 0 ? `TP $${fmt(p.masterTp)}` : null, p.masterSl > 0 ? `SL $${fmt(p.masterSl)}` : null].filter(Boolean).join(' / ')
+      if(tpSl) teile.push(tpSl)
+      const b = p.mt5Baseline || null
+      let herkunft = ''
+      if(b && p.route === 'mt5v2' && b.master_balance != null){
+        herkunft = `Baseline ${fmt(b.master_balance)} → Ende ${(b.final && b.final.master_balance != null) ? fmt(b.final.master_balance) : '—'}`
+      } else if(b && p.route === 'tvv2' && b.tv && b.tv.today_pnl_start != null){
+        herkunft = `Today's P&amp;L Start ${usd(b.tv.today_pnl_start)} → Ende ${(b.final && b.final.today_pnl != null) ? usd(b.final.today_pnl) : '—'}`
+      } else if(b && p.route === 'tvv2' && b.final && b.final.today_pnl != null){
+        herkunft = `Today's P&amp;L Ende ${usd(b.final.today_pnl)} (kein Startwert beim Puls-Klick)`
+      }
+      document.getElementById('tradeCompleteInfo').innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          ${sysStickerHtml(p.route)}
+          <span style="font-size:14px;font-weight:600;color:var(--ink)">${escapeHtml(p.masterName||'–')}</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--sub);font-family:var(--mono)">${teile.join(' · ') || '—'}</div>
+        ${herkunft ? `<div style="font-size:12px;color:var(--sub);margin-top:4px">${herkunft}</div>` : ''}
+      `
+    } else {
+      document.getElementById('tradeCompleteInfo').innerHTML = `
+        <div style="font-size:14px;font-weight:600;color:var(--ink);margin-bottom:4px">
+          ${escapeHtml(p.masterName||'–')} → ${escapeHtml(p.slaveName||'–')}
+        </div>
+        <div style="font-size:12.5px;color:var(--sub)">
+          Multiplier ${p.multiplier != null ? p.multiplier.toFixed(3) : '—'} ·
+          Risiko $${p.masterRisk||0} → ${slavePreset.currency}${p.slaveRisk||0}
+        </div>
+      `
+    }
+    // V2: kein Slave → Feld weg, Master über die volle Breite; sonst exakt zurück auf zwei Spalten
+    const tcSlaveField = document.getElementById('tc-slave-pl')?.closest('.field')
+    const tcMasterField = document.getElementById('tc-master-pl')?.closest('.field')
+    if(tcSlaveField) tcSlaveField.style.display = tcV2 ? 'none' : ''
+    if(tcMasterField) tcMasterField.style.gridColumn = tcV2 ? 'span 2' : ''
     document.getElementById('tc-slave-cur').textContent = slavePreset.currency
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
     document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
@@ -33545,7 +33651,8 @@
           if(String(_completingPlanId) !== String(planId)) return true  // Modal gewechselt → stoppen
           if(!res) return false
           const filled = []
-          if(res.slavePnl != null && sEl && sEl.value === ''){ sEl.value = res.slavePnl.toFixed(2); filled.push('Slave ' + res.slavePnl.toFixed(2) + (res.slaveCcy||'')) }
+          // V2 (24.09.2026): Slave wird still mit 0 belegt (Feld ausgeblendet) — kein „Slave 0.00" im Hinweis
+          if(res.slavePnl != null && sEl && sEl.value === ''){ sEl.value = res.slavePnl.toFixed(2); if(!routeIstV2(plan.route)) filled.push('Slave ' + res.slavePnl.toFixed(2) + (res.slaveCcy||'')) }
           if(res.masterPnl != null && mEl && mEl.value === ''){ mEl.value = res.masterPnl.toFixed(2); filled.push('Master ' + res.masterPnl.toFixed(2) + (res.masterCcy||'')) }
           if(filled.length){
             if(typeof tcRecompute === 'function') { try { tcRecompute() } catch(_){} }
@@ -33575,7 +33682,7 @@
         // Sind durch den Cache schon beide Felder gefüllt → fertig, kein Live-Nachladen nötig
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
 
-        if(msgEl){ msgEl.textContent = isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
+        if(msgEl){ msgEl.textContent = plan.route === 'tvv2' ? '⏳ Auto-PnL aus Today\'s P&L…' : isMt5Plan ? '⏳ Auto-PnL aus MT5-Baseline…' : isMirrorPlan ? '⏳ Auto-PnL aus Mirror/TSX…' : '⏳ Auto-PnL aus Duplikum…'; msgEl.className = 'modal-msg muted' }
         _autoPnlFetch(plan).then(res => {
           if(apply(res)) return
           // Retry nach 1,5s (Duplikum-Latenz — Finns "kurz warten"-Idee)
@@ -33637,7 +33744,10 @@
         return `<div><span style="color:var(--sub);font-size:11.5px">${piece.label} realisiert</span> <span style="color:${cls};font-weight:600;font-family:var(--mono)">${sign}${piece.currency}${piece.amount.toLocaleString('de-DE')}</span></div>`
       }).join('')
     }else{
-      realisedHtml = '<div style="color:var(--sub);font-size:12.5px">Kein Live-Account beteiligt — wird nicht in Finanzen gebucht.</div>'
+      // V2 (24.09.2026): der Slave existiert nicht — der alte Satz klang, als fehle etwas
+      realisedHtml = routeIstV2(p.route)
+        ? '<div style="color:var(--sub);font-size:12.5px">Ohne Hedge — nur der Master zählt.</div>'
+        : '<div style="color:var(--sub);font-size:12.5px">Kein Live-Account beteiligt — wird nicht in Finanzen gebucht.</div>'
     }
 
     // Plan-Genauigkeit für Hedge-Trades:
@@ -33850,7 +33960,9 @@
     if(!p) return
 
     const mPl = parseFloat(document.getElementById('tc-master-pl').value)
-    const sPl = parseFloat(document.getElementById('tc-slave-pl').value)
+    // V2 (24.09.2026): kein Slave — slave_pl fest 0, das Feld ist ausgeblendet; nur der Master ist Pflicht
+    const tcV2Save = routeIstV2(p.route)
+    const sPl = tcV2Save ? 0 : parseFloat(document.getElementById('tc-slave-pl').value)
     // Neue Status-Auswahl (3 Radios) + welcher Account
     const statusChoice = document.querySelector('input[name="tc-status"]:checked')?.value || 'none'
     const targetAccountId = document.getElementById('tc-status-account')?.value || null
@@ -33859,7 +33971,7 @@
 
     if(isNaN(mPl) || isNaN(sPl)){
       const el = document.getElementById('tradeCompleteMsg')
-      el.textContent = 'Beide P/L-Werte ausfüllen (auch wenn 0).'
+      el.textContent = tcV2Save ? 'P/L Master ausfüllen (auch wenn 0).' : 'Beide P/L-Werte ausfüllen (auch wenn 0).'
       el.className = 'modal-msg err'
       return
     }

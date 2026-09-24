@@ -4714,6 +4714,23 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         return False, (f"Der Kauf-Knopf unten im Panel ist nicht eindeutig ({len(knopf)} Treffer). "
                        "Gesehen: " + tv_uia_spur(roh))
     ok, f = tv_senden_text_passt(knopf[0]["text"], plan["richtung"], plan["menge"])
+    if not ok and f.startswith("Menge "):
+        # 24.09.2026 00:0x (Finns Screenshot, Auto-Start angehalten): Units stand auf 1, der
+        # Knopf sagte trotzdem 'Sell 5 NQZ6 MARKET' — TradingView hatte die Menge nach dem
+        # TP/SL-Tippen wieder auf den alten Ticket-Wert gedreht. Einmal Units neu setzen und
+        # den Knopf NEU lesen; bleibt es falsch, gilt der Riegel wie bisher (nie mit 5 statt 1
+        # klicken). Kein Klick auf den Kauf-Knopf in diesem Zweig.
+        trail.append(f"Knopf zeigt andere Menge ('{knopf[0]['text'][:40]}') — Units einmal neu setzen")
+        feld_u, _lab_u, f_u = feld_zu(TV_RX_UNITS, "Units")
+        if feld_u:
+            setze_wert(feld_u, float(plan["menge"]), "Units")
+            _warte(0.6, 0.3)
+            roh, _b = blick()
+            knopf = tv_im_panel(roh, ber, TV_RX_SENDEN, y_von=lab["r"][3])
+            if len(knopf) == 1:
+                ok, f = tv_senden_text_passt(knopf[0]["text"], plan["richtung"], plan["menge"])
+            else:
+                ok, f = False, f"Der Kauf-Knopf ist nach dem Menge-Neusetzen nicht eindeutig ({len(knopf)} Treffer)."
     if not ok:
         return False, f
     ziel = tv_symbol_root(cmd.get("symbol"))
