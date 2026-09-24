@@ -216,6 +216,25 @@ def main():
     finally:
         rs.os.name = _alt
 
+    # 0.8.8: Konsole entlasten — Entprellung und Zeilen-Drossel
+    m = {}
+    folge = [(0.0, True), (1.0, False), (2.0, True), (2.5, True), (3.1, True), (4.0, True), (5.0, False), (9.0, False), (13.2, False), (14.0, True)]
+    gemeldet = [(t_, z) for t_, z in folge if rs._entprellt(m, z, t_)]
+    check(gemeldet == [], f"Entprellen: blind nur 2 s stabil (2,0–4,0 s), dann wieder sieht → keine Meldung {gemeldet}")
+    m = {}
+    ts_ = [i * 0.25 for i in range(0, 200)]                     # 50 s, 4 POSTs/s
+    zust = [((i // 2) % 2 == 0) for i in range(200)]              # blind/sieht wechselt alle 0,5 s
+    n_meld = sum(1 for t_, z in zip(ts_, zust) if rs._entprellt(m, z, t_))
+    check(n_meld == 0, f"Entprellen: Flattern alle 0,5 s über 50 s → 0 Meldungen [{n_meld}]")
+    m = {}
+    ts_ = [i * 0.25 for i in range(0, 200)]
+    n_meld = [t_ for t_ in ts_ if rs._entprellt(m, t_ >= 5.0 and t_ < 30.0, t_)]
+    check(n_meld == [8.0, 33.0], f"Entprellen: stabiler Wechsel → gemeldet nach 3 s (8,0 s BLIND, 33,0 s sieht wieder) {n_meld}")
+    zm = {}
+    zeilen_ = [t_ for t_ in [i * 0.25 for i in range(0, 80)] if rs._zeile_faellig(zm, "gleich", t_)]
+    check(zeilen_ == [0.0, 5.0, 10.0, 15.0] and rs._zeile_faellig(zm, "anders", 15.25),
+          f"Statuszeile: gleicher Inhalt alle 5 s, geänderter sofort {zeilen_}")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

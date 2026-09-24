@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.7"
+READER_VERSION = "0.8.8"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -472,6 +472,41 @@ def _tabs_liste(jetzt):
     return out
 
 
+# ── Konsole entlasten (0.8.8, 25.09.2026, Koordination: zwei Tabs auf Script 0.8.4 → bei JEDEM POST
+# 'Reader BLIND … / Reader sieht wieder …' plus Statuszeile, mehrere Zeilen pro Sekunde; Windows-Konsolen sind
+# beim Schreiben langsam, die Bruecken-GETs liefen in Timeouts, das Badge zeigte 'Timeout'). Zustandswechsel
+# werden je Tab erst nach STABIL_S gemeldet und hoechstens alle MELDE_ABSTAND_S, die Statuszeile nur bei
+# Aenderung oder alle ZEILE_ABSTAND_S.
+STABIL_S = 3.0
+MELDE_ABSTAND_S = 10.0
+ZEILE_ABSTAND_S = 5.0
+_zeile_merk = {}      # Statuszeile: {inhalt, s}
+_version_je_tab = {}  # tab_id -> zuletzt gemeldete Userscript-Version
+_zahl_merk = {}       # tab_id -> {zahl, s, wechsel}
+
+
+def _entprellt(merk, zustand, jetzt, stabil_s=STABIL_S, abstand_s=MELDE_ABSTAND_S):
+    """REIN RECHNEND (testbar): soll ein Zustandswechsel (z. B. blind True/False) JETZT gemeldet werden?
+    merk = je Tab {gemeldet, kand, kand_s, meld_s}; bei JEDEM POST aufrufen. Ja erst, wenn der neue Zustand
+    seit stabil_s unveraendert anliegt UND die letzte Meldung >= abstand_s her ist."""
+    if merk.get("kand") != zustand:
+        merk["kand"], merk["kand_s"] = zustand, jetzt
+    if zustand == merk.get("gemeldet", False):
+        return False
+    if jetzt - float(merk.get("kand_s") or jetzt) >= stabil_s and jetzt - float(merk.get("meld_s", -1e9)) >= abstand_s:
+        merk["gemeldet"], merk["meld_s"] = zustand, jetzt
+        return True
+    return False
+
+
+def _zeile_faellig(merk, inhalt, jetzt, abstand_s=ZEILE_ABSTAND_S):
+    """REIN RECHNEND (testbar): Statuszeile nur bei geaendertem Inhalt oder alle abstand_s."""
+    if inhalt != merk.get("inhalt") or jetzt - float(merk.get("s", -1e9)) >= abstand_s:
+        merk["inhalt"], merk["s"] = inhalt, jetzt
+        return True
+    return False
+
+
 def _tabs_zeile(jetzt):
     """Kurzform fuer die Live-Zeile: 'Tabs: feed 1 · broker 1' (Tabs mit POST in den letzten 60 s)."""
     n = {"feed": 0, "broker": 0}
@@ -656,9 +691,12 @@ class Handler(BaseHTTPRequestHandler):
         # geladen" war schon dreimal die Erklaerung fuer fehlende Felder.
         if isinstance(daten, dict):
             v_neu, s_neu = _script_merken(daten, time.time())
-            if v_neu != _script_version:
-                print(f"\n[{time.strftime('%H:%M:%S')}] Userscript {_script_version or 'unbekannt'} -> {v_neu}"
-                      f" (reader-server {READER_VERSION})", flush=True)
+            # 0.8.8: je Tab melden — bei zwei Tabs mit verschiedenen Versionen flatterte die globale Zeile
+            _vtid = str(daten.get("tab_id") or "standard")[:40]
+            if v_neu and _version_je_tab.get(_vtid) != v_neu:
+                print(f"\n[{time.strftime('%H:%M:%S')}] Userscript {_version_je_tab.get(_vtid) or 'unbekannt'} -> {v_neu}"
+                      f" ({_vtid}, reader-server {READER_VERSION})", flush=True)
+                _version_je_tab[_vtid] = v_neu
             _script_version, _script_s = v_neu, s_neu
 
         # Schalter (Orbit-View): POST /schalter {"an": true/false}
@@ -835,8 +873,8 @@ class Handler(BaseHTTPRequestHandler):
         # eine Liste geschickt wurde.
         # 0.8.6: Feed-Tab (kein Broker) liefert NIE einen Positions-Stand — auch nicht 'flach'
         if _t["rolle"] == "feed":
-            # Live-Zeile auch ohne Broker-Tab auffrischen (hoechstens 1×/s), sonst stuende im Fenster ein alter Stand
-            if _jetzt - _feed_zeile["s"] >= 1.0:
+            # Live-Zeile auch ohne Broker-Tab auffrischen (hoechstens alle ZEILE_ABSTAND_S), sonst stuende im Fenster ein alter Stand
+            if _jetzt - _feed_zeile["s"] >= ZEILE_ABSTAND_S:
                 _feed_zeile["s"] = _jetzt
                 _bfs = _t.get("bf") or _bedienfeld
                 _btid, _bfr = _broker_wahl(_tabs, _jetzt)
@@ -871,6 +909,18 @@ class Handler(BaseHTTPRequestHandler):
         alt_und_ploetzlich_flach = ("version" not in daten
                                     and not daten.get("positionen")
                                     and ((_t.get("stand") or {}).get("positionen")))
+        _jetzt_p = time.time()
+        # Uebergangsschutz (0.8.8): mehrere Tabs mit Script < 0.8.5 landen alle im Tab 'standard'. Ein BLINDER
+        # POST von dort ersetzt nicht den Stand eines nicht-blinden, der hoechstens BROKER_FRISCH_S alt ist — er
+        # kommt dann mit hoher Wahrscheinlichkeit aus dem ANDEREN Tab. Ein einzelner, wirklich blinder Tab wird
+        # nach BROKER_FRISCH_S blind wie bisher (bis dahin bleibt sein letzter guter Stand, alter_s waechst).
+        if (_tid == "standard" and daten.get("blind") and _t.get("stand_s")
+                and not _t.get("blind_grund") and _jetzt_p - float(_t["stand_s"]) <= BROKER_FRISCH_S):
+            # bewusst OHNE _entprellt: ein ignorierter POST darf die BLIND-Meldung nicht verbrauchen
+            self._json(200, {"ok": True, "an": True, "blind": True, "ignoriert": "standard_uebergang"})
+            return
+        _ist_blind = bool(daten.get("blind") or alt_und_ploetzlich_flach)
+        _melden = _entprellt(_t.setdefault("meld", {}), _ist_blind, _jetzt_p)
         if daten.get("blind") or alt_und_ploetzlich_flach:
             if daten.get("blind"):
                 _t["blind_grund"] = str(daten.get("blind_grund") or "Reader meldet blind")
@@ -880,6 +930,7 @@ class Handler(BaseHTTPRequestHandler):
                                      "alte Code. Tab mit F5 neu laden!")
             if not _t.get("blind_seit"):
                 _t["blind_seit"] = time.time()
+            if _melden:
                 print(f"\n[{time.strftime('%H:%M:%S')}] Reader BLIND ({_tid}): {_t['blind_grund']} — "
                       f"Stand eingefroren, Hedges bleiben stehen.")
             _effektiv_setzen(time.time())
@@ -891,9 +942,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if _t.get("blind_grund"):
-            print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder ({_tid}) "
-                  f"(war {round(time.time() - float(_t.get('blind_seit') or 0), 1)}s blind).")
+            if _melden:
+                print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder ({_tid}) "
+                      f"(war {round(time.time() - float(_t.get('blind_seit') or 0), 1)}s blind).")
             _t["blind_grund"], _t["blind_seit"] = "", 0.0
+        elif _melden:
+            print(f"\n[{time.strftime('%H:%M:%S')}] Reader sieht wieder ({_tid}).")
 
         _t["stand"], _t["stand_s"] = daten, time.time()
         _effektiv_setzen(time.time())
@@ -912,11 +966,19 @@ class Handler(BaseHTTPRequestHandler):
         # inklusive der Userscript-Version: so ist von aussen belegbar, welcher
         # Stand die Aussage getroffen hat (der Grund, warum VERSION im
         # Userscript ueberhaupt doppelt steht).
-        if _letzte_zahl is None or len(pos) != _letzte_zahl:
-            print(f"\n[{zeit}] Positionen {_letzte_zahl} -> {len(pos)}"
-                  f" (Userscript {daten.get('version') or 'unbekannt'},"
-                  f" Tab {'vorn' if daten.get('sichtbar') else 'verdeckt/unbekannt'})")
-            _letzte_zahl = len(pos)
+        # 0.8.8: je Tab und hoechstens alle 2 s; unterdrueckte Zwischenwechsel werden mitgezaehlt
+        # (Beweisspur bleibt: 'Positionen 1 -> 0 (+4 Wechsel dazwischen)').
+        _zm = _zahl_merk.setdefault(_tid, {"zahl": None, "s": -1e9, "wechsel": 0})
+        if _zm["zahl"] is None or len(pos) != _zm["zahl"]:
+            if time.time() - _zm["s"] >= 2.0:
+                extra = f", +{_zm['wechsel']} Wechsel dazwischen" if _zm["wechsel"] else ""
+                print(f"\n[{zeit}] Positionen {_zm['zahl']} -> {len(pos)} ({_tid}"
+                      f", Userscript {daten.get('version') or 'unbekannt'},"
+                      f" Tab {'vorn' if daten.get('sichtbar') else 'verdeckt/unbekannt'}{extra})")
+                _zm.update(zahl=len(pos), s=time.time(), wechsel=0)
+            else:
+                _zm["wechsel"] += 1
+        _letzte_zahl = len(pos)
         if pos:
             zeilen = " · ".join(
                 f"{p.get('symbol')} {p.get('seite')} {p.get('menge')}"
@@ -932,7 +994,8 @@ class Handler(BaseHTTPRequestHandler):
         diag = _tabs_zeile(time.time()) + " · " + _kerzen_diag(_kerzen, _feed_bf or _bedienfeld, _aufl_warnung, _script_version)
         kopf = f"\r[{zeit}] {len(pos)} Pos · "
         platz = max(20, 160 - len(kopf) - len(diag) - 3)
-        print((kopf + zeilen[:platz] + " | " + diag).ljust(160)[:160], end="", flush=True)
+        if _zeile_faellig(_zeile_merk, zeilen[:platz] + " | " + diag, time.time()):
+            print((kopf + zeilen[:platz] + " | " + diag).ljust(160)[:160], end="", flush=True)
 
         self._json(200, {"ok": True, "an": True, "reader_version": READER_VERSION})
 
