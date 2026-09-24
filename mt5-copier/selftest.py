@@ -529,6 +529,20 @@ def main():
         _nb2 and _nb2["ohne_felder"] and _iu == 0 and len(_zeilen) == 2 and _zeilen[0][1] == 442 and _zeilen[1][1] == 522
         and order_bot.tv_feld_unter(_nl_felder, _lab_sl["r"], {"links": 1480, "rechts": 1840}) == 3
         and order_bot.tv_feld_ohne_label([(1510, 200, 1600, 220)], ["5"], {"links": 1480, "rechts": 1840}, 262) is None)
+    # Deutsch (25.09.2026, Finn: 'Englisch geht sofort, Deutsch nicht'): Namen mit weichem Trennstrich,
+    # geschuetztem Leerzeichen und Menue-Pfeil, Beschriftung als Hyperlink/Group — normalisiert getroffen
+    _DE = [("Markt", (1510, 250, 1560, 274), "TabItem"), ("Stop\u00a0Limit", (1720, 250, 1810, 274), "TabItem"),
+           ("Ein\u00adheiten \u25be", (1510, 300, 1600, 322), "Hyperlink"), ("Take\u00a0Profit, $ \u25be", (1510, 440, 1640, 462), "Group"),
+           ("Stop-Loss, $\u25bc", (1510, 520, 1640, 542), "Menu"), ("Order", (1500, 120, 1560, 144), "TabItem")]
+    _db = order_bot.tv_panel_bereich(_DE, (0, 0, 1920, 1080))
+    chk("ORDER-BOT (Deutsch): weicher Trennstrich, NBSP, Menue-Pfeil, Typen Hyperlink/Group/Menu → Reiter + 3 Beschriftungen",
+        _db and _db["labels"] == 3 and _db["reiter_y"] == 262
+        and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_UNITS, y_von=_db["reiter_y"])[0]["text"] == "Einheiten"
+        and order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_TP, y_von=_db["reiter_y"])[0]["text"] == "Take Profit, $"
+        and "$" in order_bot.tv_im_panel(_DE, _db, order_bot.TV_RX_SL, y_von=_db["reiter_y"])[0]["text"]
+        and order_bot.tv_name_norm("  Ein\u00adheiten\u00a0\u25be ") == "Einheiten"
+        and bool(order_bot.TV_RX_UNITS.search("Stück")) and bool(order_bot.TV_RX_UNITS.search("Anzahl"))
+        and not order_bot.TV_RX_UNITS.search("Order") and not order_bot.TV_RX_TP.search("Tick Wert 2,50 USD"))
     _inv = order_bot.tv_panel_inventar(_NL, _nb, 4)
     chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
         _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3

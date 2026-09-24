@@ -220,3 +220,15 @@ fuer einen sauberen Neustart durch die .bat.
   nachzulegen. Plus 3 s Cooldown zwischen Versuchen.
 - **Snapshot-Timeout:** ändert sich die Snapshot-Sequenz 15 s nicht, kommt eine Warnung
   („läuft das Lese-EA noch?").
+
+## Puls und die TradingView-Sprache (25.09.2026)
+
+TradingView auf **Englisch** ist der sichere Weg für den Puls. Auf Deutsch im neuen Order-Ticket
+(„Einheiten ▾" als Aufklappmenü) fand der Bot bis .525 die Beschriftung nicht („Beschriftung
+'Units' nicht gefunden"), auf Englisch im selben Layout lief die Order sofort. **Ab Bot-Version
+.526** wird Deutsch wieder unterstützt: alle Kontrolltypen mit Namen werden gelesen, Namen werden
+vor dem Vergleich normalisiert (weiche Trennstriche, geschützte Leerzeichen, Menü-Pfeile), deutsche
+Varianten (Einheiten/Anzahl/Stück, Take Profit, Stop-Loss, Markt, Kauf/Verkauf) sind hinterlegt, und
+ohne lesbare Beschriftung greift der Rückfall (oberstes Zahlenfeld = Units, Umschalter-Zeilen = TP/SL).
+Schlägt eine Beschriftung trotzdem fehl, nennt die Puls-Meldung die zehn Elemente unter der
+Reiterzeile als `Typ:Name@l,t,r,b` — diesen Text bitte weitergeben, dann muss niemand raten.

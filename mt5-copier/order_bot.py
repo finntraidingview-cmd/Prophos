@@ -1852,8 +1852,8 @@ _TV_UIA_TYPEN = ("Text", "ListItem", "MenuItem", "Button", "ComboBox", "DataItem
 # schlimmstenfalls ist es also so schnell wie vorher.
 _UIA_TYPID = {"Button": 50000, "CheckBox": 50002, "ComboBox": 50003, "Edit": 50004,
               "Hyperlink": 50005, "Image": 50006, "ListItem": 50007, "MenuItem": 50011,
-              "RadioButton": 50013, "TabItem": 50019, "Text": 50020, "Custom": 50025, "Group": 50026,
-              "DataItem": 50029}
+              "List": 50008, "Menu": 50009, "RadioButton": 50013, "TabItem": 50019, "Text": 50020,
+              "Custom": 50025, "Group": 50026, "DataItem": 50029, "Pane": 50033}
 _UIA_SAMMEL = {"geht": None}      # None = noch nicht probiert, True/False = Ergebnis
 
 
@@ -4165,9 +4165,21 @@ def tv_asset_schritt(w, symbol, trail):
 
 TV_RX_MARKET = re.compile(r"^(market|markt)$", re.I)
 TV_RX_STOPLIMIT = re.compile(r"^stop[- ]?limit$", re.I)
-TV_RX_UNITS = re.compile(r"^(units|einheiten|menge|kontrakte|quantity)\b", re.I)
-TV_RX_TP = re.compile(r"^take[- ]?profit", re.I)
-TV_RX_SL = re.compile(r"^stop[- ]?loss", re.I)
+# 25.09.2026 (Finn: 'auf Englisch geht es sofort, auf Deutsch im selben Layout nicht'): deutsche
+# Varianten des neuen Tickets — und die Namen werden vor dem Vergleich NORMALISIERT (tv_name_norm:
+# weiche Trennstriche, geschuetzte Leerzeichen, Pfeile/Chevrons des Aufklappmenues, Doppelabstaende).
+TV_RX_UNITS = re.compile(r"^(units|einheiten|menge|kontrakte|quantity|anzahl|st(ue|ü)ck|lots?)\b", re.I)
+TV_RX_TP = re.compile(r"^(take[- ]?profit|gewinn(mitnahme|ziel)|tp\b)", re.I)
+TV_RX_SL = re.compile(r"^(stop+[- ]?loss|verlustbegrenzung|sl\b)", re.I)
+_TV_NAME_MUELL = re.compile(r"[\u00ad\u200b\u200c\u200d\ufeff]|[\u25be\u25bc\u25b4\u25b2\u2bc5\u2bc6\u2304\u2303\u02c5\u02c4\u23f7\u23f6\u2193\u2191\u02cf]+")
+
+
+def tv_name_norm(name):
+    """UIA-Name fuers Muster: unsichtbare Zeichen und Menue-Pfeile raus, geschuetzte
+    Leerzeichen zu Leerzeichen, Abstaende gebuendelt, Raender ab."""
+    t = _TV_NAME_MUELL.sub("", str(name or ""))
+    t = t.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2009", " ")
+    return re.sub(r"\s+", " ", t).strip()
 # Seiten-Kasten: 'Buy' als Textknoten — oder, falls nur der Kasten selbst benannt
 # ist, 'Buy 30,827.75' (Name + Kurs).
 TV_RX_SEITE = {"buy": re.compile(r"^(buy|kauf|kaufen)(\s+[\d.,]+)?$", re.I),
@@ -4220,11 +4232,11 @@ def tv_panel_bereich(roh, fenster=None):
          Rueckfall-Koordinaten zu klicken.
     'modus' = 'angedockt', wenn der Bereich am rechten Fensterrand endet (fenster =
     Rechteck des TradingView-Fensters), sonst 'Popup'; 'spur' = lesbare Kurzform."""
-    markt = [e for e in roh or () if e[1] and TV_RX_MARKET.search(str(e[0]).strip())]
-    stopl = [e for e in roh or () if e[1] and TV_RX_STOPLIMIT.search(str(e[0]).strip())]
-    labels = [e for e in roh or () if e[1] and (TV_RX_UNITS.search(str(e[0]).strip())
-                                                or TV_RX_TP.search(str(e[0]).strip())
-                                                or TV_RX_SL.search(str(e[0]).strip()))]
+    markt = [e for e in roh or () if e[1] and TV_RX_MARKET.search(tv_name_norm(e[0]))]
+    stopl = [e for e in roh or () if e[1] and TV_RX_STOPLIMIT.search(tv_name_norm(e[0]))]
+    labels = [e for e in roh or () if e[1] and (TV_RX_UNITS.search(tv_name_norm(e[0]))
+                                                or TV_RX_TP.search(tv_name_norm(e[0]))
+                                                or TV_RX_SL.search(tv_name_norm(e[0])))]
     bester, bester_n = None, -1
     for m in markt:
         for sl in stopl:
@@ -4263,7 +4275,7 @@ def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
     """Elemente im x-Bereich des Panels, deren Name passt; innerste, ohne Doppelte."""
     kand = []
     for e in roh or ():
-        if not e[1] or not muster.search(str(e[0]).strip()):
+        if not e[1] or not muster.search(tv_name_norm(e[0])):
             continue
         l, t, r, b = e[1]
         mx, my = (l + r) // 2, (t + b) // 2
@@ -4271,7 +4283,7 @@ def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
             continue
         if (y_von is not None and my < y_von) or (y_bis is not None and my > y_bis):
             continue
-        kand.append({"text": str(e[0]).strip()[:80], "typ": e[2] if len(e) > 2 else "", "r": (l, t, r, b), "punkt": (mx, my)})
+        kand.append({"text": tv_name_norm(e[0])[:80], "typ": e[2] if len(e) > 2 else "", "r": (l, t, r, b), "punkt": (mx, my)})
     out = []
     for a in kand:
         ar = a["r"]
@@ -4575,7 +4587,8 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     # 'Einheiten ▾' ein Aufklappmenue, 'Take Profit, $ ▾'/'Stop-Loss, $ ▾' ebenso; als reine
     # Textknoten waren sie nicht mehr zu sehen ('Beschriftung Units nicht gefunden', obwohl
     # Reiter und Seite sauber geklickt wurden).
-    typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem", "ComboBox", "MenuItem", "Group", "Custom")
+    typen = ("Text", "Button", "TabItem", "RadioButton", "CheckBox", "ListItem", "ComboBox", "MenuItem", "Group", "Custom",
+             "Hyperlink", "Menu", "List", "Pane", "Image")   # 25.09.2026 (Deutsch): alles, was einen Namen tragen kann
 
     fenster = _tv_fenster_rect(w)
 
@@ -4596,7 +4609,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     roh, ber = blick()
     t_leer, leer = time.time(), 0
     while not ber:
-        teile = any(x[1] and (TV_RX_TP.search(str(x[0])) or TV_RX_SL.search(str(x[0])) or TV_RX_UNITS.search(str(x[0])))
+        teile = any(x[1] and (TV_RX_TP.search(tv_name_norm(x[0])) or TV_RX_SL.search(tv_name_norm(x[0])) or TV_RX_UNITS.search(tv_name_norm(x[0])))
                     for x in roh)
         leer = 0 if teile else leer + 1
         if teile and time.time() - t_leer > 10.0:
