@@ -6598,6 +6598,179 @@ def _wd_num(v):
         return None
 
 
+# ── Winning Days des Tages — Übersicht unter dem Markt-Chart (25.09.2026, Koordinations-Runde) ──
+# Finn: unter dem Markt-Chart ALLE Winning Days des Tages über alle IDs sehen, mit Entry/TP/SL
+# als Markierung im Chart. trade_plans hängt per RLS am Login — deshalb wie /admin/wd-plaene
+# über den Service-Key (eingeloggt reicht). Nur Lesen; gerechnet werden hier NUR die Level aus
+# $-Distanz und Einstieg (dieselbe Formel wie Puls/Order-Popup: Einstieg ± $ / (Punktwert × Kt),
+# NQ 20 $/Pkt, MNQ 2 $/Pkt). Der Einstieg selbst kommt aus mt5_baseline.hedge.einstieg_nq (Avg
+# Fill vom Puls-Klick, sonst Feed) — die tv-Baseline trägt keinen Kurs. Ohne Einstieg bleiben die
+# Level null: keine geschätzte Linie im Chart („Beweis oder leer").
+WD_HEUTE_PPL = {"NQ": 20.0, "MNQ": 2.0}
+
+
+def _cme_handelstag(roh=None):
+    """Handelstag nach CME/Tradovate (Chicago): die Session ab 17:00 CT trägt das Datum des
+    Folgetags → Chicago-Datum von (Zeitpunkt + 7 h). Exakt wie tvV2Handelstag im Frontend, damit
+    Farmer-Pläne und Rundgang-Ergebnisse (mt5_baseline.tv.datum_start) denselben Tag meinen.
+    roh: ISO-Stempel, Unix-Sekunden oder None (= jetzt). None, wenn nicht parsebar."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        if roh is None:
+            t = datetime.now(timezone.utc)
+        elif isinstance(roh, (int, float)):
+            t = datetime.fromtimestamp(float(roh), timezone.utc)
+        else:
+            t = datetime.fromisoformat(str(roh).replace("Z", "+00:00"))
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+        return (t + timedelta(hours=7)).astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _wd_level(einstieg, richtung, usd, ppl, kt, ist_tp):
+    """REIN RECHNEND (testbar): Preis-Level aus einer $-Distanz. BUY: TP über, SL unter dem
+    Einstieg; SELL gespiegelt. None ohne Einstieg, ohne Betrag, ohne Punktwert oder Kontrakte."""
+    try:
+        e, u, p, k = float(einstieg or 0), float(usd or 0), float(ppl or 0), float(kt or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (e > 0 and u > 0 and p > 0 and k > 0) or richtung not in ("buy", "sell"):
+        return None
+    d = u / (p * k)
+    hoch = (richtung == "buy") == bool(ist_tp)
+    return round(e + d if hoch else e - d, 2)
+
+
+def _wd_konto_groesse(acc):
+    """Kontogröße: starting_balance, sonst „150k" aus dem Namen (wie tpKontoGroesseAusName)."""
+    sb = _wd_num((acc or {}).get("starting_balance"))
+    if sb and sb > 0:
+        return sb
+    m = re.search(r"(\d{2,3})\s*k\b", str((acc or {}).get("name") or ""), re.I)
+    return float(m.group(1)) * 1000 if m else None
+
+
+def _wd_heute_zeile(p, acc, disp):
+    """Eine Plan-Zeile für /admin/wd-heute — der JSON-Vertrag steht in der Route."""
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    hedge = base.get("hedge") if isinstance(base.get("hedge"), dict) else None
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    live = base.get("live") if isinstance(base.get("live"), dict) else {}
+    final = base.get("final") if isinstance(base.get("final"), dict) else {}
+    root = _symbol_wurzel(p.get("master_symbol_root") or p.get("master_symbol"))
+    ppl = WD_HEUTE_PPL.get(root)
+    kt = _wd_num(p.get("master_contracts"))
+    richtung = str(p.get("richtung") or "").lower()
+    einstieg = _wd_num((hedge or {}).get("einstieg_nq"))
+    tp_usd, sl_usd = _wd_num(p.get("master_tp")), _wd_num(p.get("master_sl"))
+    # Master-P&L: fertig am Plan → sonst letzter Rundgang-Stand (live) → sonst Ende-Differenz aus final/tv
+    mpl = None
+    if _wd_num(p.get("master_pl")) is not None:
+        mpl = {"wert": _wd_num(p.get("master_pl")), "at": p.get("completed_at") or p.get("ended_at"), "quelle": "plan"}
+    elif _wd_num(live.get("pnl")) is not None:
+        mpl = {"wert": _wd_num(live.get("pnl")), "at": live.get("at"), "quelle": "rundgang"}
+    elif _wd_num(final.get("today_pnl")) is not None:
+        start = _wd_num(tv.get("today_pnl_start"))
+        gleicher_tag = bool(final.get("datum")) and final.get("datum") == tv.get("datum_start")
+        wert = (final["today_pnl"] - start) if (start is not None and gleicher_tag) else _wd_num(final.get("today_pnl"))
+        mpl = {"wert": round(wert, 2), "at": final.get("at"), "quelle": "final"}
+    uid = str(p.get("user_id") or "")
+    ext = str((acc or {}).get("external_id") or "").strip()
+    return {
+        "id": str(p.get("id")), "plan_id": str(p.get("id")), "user_id": uid, "person": disp.get(uid, uid[:8]),
+        # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
+        # die user_id; das Frontend hasht wie gehabt
+        "farbe_key": uid,
+        "konto": {"name": (acc or {}).get("name") or p.get("master_name") or "", "firma": (acc or {}).get("firm") or p.get("master_firm") or "",
+                  "groesse": _wd_konto_groesse(acc), "kontonr_ende": ext[-4:] if ext else "", "external_id": ext},
+        "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
+        "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
+        "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
+        "einstieg_nq": einstieg,
+        "tp_level_nq": _wd_level(einstieg, richtung, tp_usd, ppl, kt, True),
+        "sl_level_nq": _wd_level(einstieg, richtung, sl_usd, ppl, kt, False),
+        "master_pl": mpl,
+        "hedge": hedge,   # KOMPLETT (mt5_baseline.hedge) — das Frontend rendert damit hedgeChipHtml unveraendert
+        # Ende-Grund am Plan: final.quelle ('close' = Schliessen/Auto-Close, sonst Rundgang-Ende) — nur wenn ein Ende da ist
+        "grund": (final.get("quelle") or ("rundgang" if final else None)) if (final or p.get("ended_at")) else None,
+        "hedge_eur": _wd_num(p.get("hedge_eur")), "hedge_faktor": _wd_num(p.get("hedge_faktor")),
+        "quelle": "farmer" if (p.get("notes") or "") == "Winning-Day-Farmer" else "manuell",
+        "verknuepft": bool(p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at")),
+        "handelstag": _cme_handelstag(p.get("started_at") or p.get("start_um") or p.get("planned_for") or p.get("created_at")),
+    }
+
+
+def _wd_heute_sortkey(z):
+    """open (nach started_at) → planned (nach start_um) → Rest (ended_at absteigend)."""
+    st = z.get("status")
+    if st == "open":
+        return (0, str(z.get("started_at") or ""), "")
+    if st == "planned":
+        return (1, str(z.get("start_um") or "9999"), "")
+    # absteigend: Stempel negiert über ein umgekehrtes Zeichen-Mapping wäre umständlich → Tupel mit Marker,
+    # sortiert wird unten stabil in zwei Schritten (siehe _wd_heute_sortieren)
+    return (2, "", str(z.get("ended_at") or z.get("started_at") or ""))
+
+
+def _wd_heute_sortieren(zeilen):
+    rest = sorted([z for z in zeilen if _wd_heute_sortkey(z)[0] == 2], key=lambda z: _wd_heute_sortkey(z)[2], reverse=True)
+    vorn = sorted([z for z in zeilen if _wd_heute_sortkey(z)[0] != 2], key=_wd_heute_sortkey)
+    return vorn + rest
+
+
+@app.route("/admin/wd-heute", methods=["GET", "OPTIONS"])
+def admin_wd_heute():
+    """GET /admin/wd-heute → {tag, jetzt, plaene:[…]} — alle Winning-Day-Pläne des CME-Handelstags
+    über alle IDs (route tvv2 UND (Farmer-Notiz ODER hedge_eur > 0)) plus alle laufenden (status
+    open), egal welcher Tag. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
+    Je Plan: {id (= plan_id), user_id, person, farbe_key, konto{name, firma, groesse, kontonr_ende,
+    external_id}, route, richtung, kt (= kontrakte), symbol_root, master_tp, master_sl, status, start_um,
+    started_at, ended_at, einstieg_nq, tp_level_nq, sl_level_nq, master_pl{wert, at, quelle}|null,
+    hedge (mt5_baseline.hedge komplett)|null, grund, hedge_eur, hedge_faktor, quelle 'farmer'|'manuell',
+    verknuepft, handelstag}.
+    Ausgeblendete Personen (ADMIN_EXCLUDE_EMAILS) fehlen wie in der Übersicht."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    try:
+        tag = (request.args.get("tag") or "").strip()[:10] or _cme_handelstag()
+        disp, excluded = _wd_personen()
+        seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 3 * 86400, timezone.utc).isoformat()
+        felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
+                  "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,"
+                  "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline")
+        wd = "or.(notes.eq.Winning-Day-Farmer,hedge_eur.gt.0)"
+        rows = _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "and": f"({wd},created_at.gte.{seit})"})
+        rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.open", "and": f"({wd})"})
+        gesehen, plaene = set(), []
+        for p in rows:
+            pid = str(p.get("id"))
+            if pid in gesehen or str(p.get("user_id")) in excluded:
+                continue
+            gesehen.add(pid)
+            plaene.append(p)
+        acc_ids = {str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")}
+        accs = {}
+        ids = sorted(acc_ids)
+        for i in range(0, len(ids), 80):
+            for a in sb_select("accounts", {"select": "id,name,firm,starting_balance,balance,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
+                accs[str(a["id"])] = a
+        zeilen = []
+        for p in plaene:
+            z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp)
+            if z["status"] == "open" or z["handelstag"] == tag:
+                zeilen.append(z)
+        return jsonify({"tag": tag, "jetzt": datetime.now(timezone.utc).isoformat(), "plaene": _wd_heute_sortieren(zeilen)})
+    except Exception as e:
+        print(f"[wd-heute] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Winning Days des Tages nicht ladbar ({type(e).__name__}: {e})"}), 502
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":
