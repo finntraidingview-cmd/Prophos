@@ -1336,7 +1336,7 @@
   #adm-pane-kapitel .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
   #adm-pane-kapitel .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
   #adm-pane-kapitel .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
-  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 4px}
+  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:6px 0 4px}
   #adm-pane-kapitel .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
   #adm-pane-kapitel .kf-kpis .kpi-value{font-size:18px}
   #adm-pane-kapitel .kf-kpis .kpi-delta{font-size:11px}
@@ -1362,6 +1362,13 @@
   #adm-pane-kapitel .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   /* Ein großer Chart mit Chip-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke") */
   #adm-pane-kapitel .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  /* Chips als kleine Pillen (24.09.2026 abends, Finn am Live-Screenshot: die Chips erbten 16 px Text ohne Rahmen) */
+  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4}
+  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip:hover{background:var(--surface-tint)}
+  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
+  /* Kacheln: Unterzeile einzeilig mit Ellipse, voller Text im Tooltip (Finn: „schau mal die Kacheln an, wie hässlich die sind") */
+  #adm-pane-kapitel .kf-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  #adm-pane-kapitel .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-kapitel .kf-gross{margin-top:8px}
   #adm-pane-kapitel .kf-gross .kf-chart[hidden]{display:none}
   #adm-pane-kapitel .kf-gross .kf-chart .kf-titel{margin-top:4px;font-size:13px}
@@ -5970,6 +5977,13 @@
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px">Haken raus = der Winning-Day-Farmer lässt dieses Konto aus, bis du ihn wieder setzt (gilt für alle folgenden Tage).</div>
             </div>
+            <!-- Trade-Datum (24.09.2026 abends, Finn: „Trades im Nachhinein eintragen, wenn was schiefgeht"): nur bei
+                 Abschluss direkt aus „Geplant" und beim Bearbeiten sichtbar — offene/überprüfte Pläne tragen ihre Stempel. -->
+            <div class="field" style="grid-column:span 2" id="tc-datum-wrap" hidden>
+              <label>Trade-Datum</label>
+              <input type="datetime-local" class="input mono" id="tc-datum">
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-datum-hint">Zum Nachtragen: der Trade zählt in Statistik und Kapitel zu diesem Tag.</div>
+            </div>
             <div class="field" style="grid-column:span 2">
               <label>Lesson learned (optional)</label>
               <textarea class="input" id="tc-result-notes" rows="2" placeholder="Was war gut, was schlecht…"></textarea>
@@ -8013,6 +8027,8 @@
                   <div class="kf-chart kf-mini" data-kf-chart="ri" hidden><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
                   <div class="kf-chart kf-mini" data-kf-chart="firm" hidden><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
                   <div class="kf-chart kf-mini" data-kf-chart="typ" hidden><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="gr" hidden><div class="kf-titel">Nach Kontogröße <span class="adm-sub kf-mini-sum" id="adm-kf-sum-gr"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-gr"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="wt" hidden><div class="kf-titel">Nach Wochentag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wt"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-wt"></canvas></div></div>
                   <div class="kf-chart kf-mini" data-kf-chart="person" hidden><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick auf Person filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
                 </div>
                 <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
@@ -10722,6 +10738,7 @@
     const admKfFirmColor = firm => { let h = 0; for(const ch of String(firm || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ADM_P_COLORS[h % ADM_P_COLORS.length] }
     const admKfUsdKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k $' : Math.round(v) + ' $'
     const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
+    const admKfWochentag = d => { const x = d ? new Date(d + 'T12:00:00Z') : null; return x && !isNaN(x) ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][x.getUTCDay()] : '—' }
     const admKfRi = r => r === 'buy' ? 'BUY' : r === 'sell' ? 'SELL' : '—'
     // Symbol (24.09.2026, Finn: „—" bei Echo V2 soll „CFD · Echo V2" heißen): MT5-Weg → Wurzel aus dem
     // Firmen-Standard-Symbol (Backend symbol_quelle 'firma'), sonst „CFD"; Futures-Wege → NQ/MNQ wie gehabt.
@@ -10733,6 +10750,9 @@
                            ri:   ['Richtung', t => admKfRi(t.richtung), w => w],
                            firm: ['Firma',    t => t.master_firm || '—', w => w],
                            typ:  ['Kontotyp', t => admKfTyp(t.master_typ), w => w],
+                           // Zwei weitere Dimensionen (24.09.2026 abends, Finn: „mach doch 1–2 mehr Charts")
+                           gr:   ['Kontogröße', t => t.master_groesse ? admKfGroesse(t.master_groesse) : '—', w => w],
+                           wt:   ['Wochentag', t => admKfWochentag(t.datum), w => w],
                            tag:  ['Tag',      t => t.datum || '—', w => admVlDatum(w) || w],
                            pnl:  ['P&L-Stufe', t => admKfBucket(admKapNum(t.master_pl)), w => w + ' $'],
                            q:    ['Firma · Typ', admKfFirmaTyp, w => w] }
@@ -10783,7 +10803,7 @@
       // a) Kacheln
       const col = n => n < 0 ? '#b91c1c' : '#15803d'
       const kpi = (label, value, sub, valStyle) =>
-        `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
+        `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral" title="${String(sub).replace(/<[^>]+>/g, '').replace(/"/g, '&quot;')}">${sub}</div></div>`
       const real = sumP - sumK, mitHedge = real + hyp
       const filterTxt = escapeHtml((pers ? admShortName(personen.get(pers) || pers) : 'alle Personen') + (f ? ` · ${ADM_KF_ARTEN[f.art][2](f.wert)}` : ''))
       // Mehr Kennzahlen (24.09.2026, Finn: „so viel mehr Daten mit einer cleanen Übersicht"): Bilanz-Zeile
@@ -10898,7 +10918,7 @@
      * volle Breite des eben eingeblendeten Containers bekommt. Auswahl lebt nur in der Sitzung (admKf.chart). */
     const ADM_KF_CHARTS = [['hyp', 'Mit Hedge · Verlauf'], ['real', 'Real · Verlauf'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart'],
                            ['reibg', 'Reibung gesamt'], ['reib', 'Reibung real'], ['tag', 'Je Tag'], ['pnl', 'Verteilung'], ['sym', 'Symbol'],
-                           ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['person', 'Person']]
+                           ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['gr', 'Kontogröße'], ['wt', 'Wochentag'], ['person', 'Person']]
     function admKfChartWahlRender(){
       const bar = $('adm-kf-chartwahl'); if(!bar) return
       if(!ADM_KF_CHARTS.some(([k]) => k === admKf.chart)) admKf.chart = 'hyp'
@@ -10992,7 +11012,7 @@
      * zwei Balken: Hedge hypothetisch (€, Kapitel-Farbe, links) und Master-P&L real ($, grün/rot, rechts).
      * Kategorie-Farbe in der x-Beschriftung (Person = admPersonColor, sonst Palette per Namens-Hash). */
     function admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen){
-      const dims = [['sym', 'sym'], ['weg', 'weg'], ['ri', 'ri'], ['firm', 'firm'], ['typ', 'typ'], ['person', null]]
+      const dims = [['sym', 'sym'], ['weg', 'weg'], ['ri', 'ri'], ['firm', 'firm'], ['typ', 'typ'], ['gr', 'gr'], ['wt', 'wt'], ['person', null]]
       for(const [name, art] of dims){
         const istPerson = !art
         const rows = istPerson ? alle.filter(artOk) : alle.filter(persOk)
@@ -11010,7 +11030,8 @@
         admKfSumHtml('adm-kf-sum-' + name, cats.length ? [['Hedge', cats.reduce((x, e) => x + e.a, 0), admVlSign], ['Master', cats.reduce((x, e) => x + e.b, 0), admUsdSign]] : [])
         const aktiv = istPerson ? (pers || '') : (f && f.art === art ? f.wert : '')
         const catCol = e => istPerson ? admPersonColor(e.key) : admKfFirmColor(e.label)
-        admKfBar('dim-' + name, 'adm-kf-cv-' + name, cats, { horizontal: cats.length > 6,
+        // Immer derselbe Chart (24.09.2026 abends, Finn: „für die großen über Kategorien immer den gleichen Chart"): liegend
+        admKfBar('dim-' + name, 'adm-kf-cv-' + name, cats, { horizontal: true,
           a: { label: 'Mit Hedge (hyp.)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: admVlSign, kurz: admEurKurz },
           b: { label: 'Master-P&L real', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
           istOn: e => !aktiv || String(e.key) === String(aktiv), tick: catCol,
@@ -11025,7 +11046,7 @@
      * Klick = Filter Firma · Typ wie die Quoten-Zeilen. Backend trimmt je Gruppe mit 1,5 × IQR. */
     function admKfReibChart(rg, f, farbe){
       const minN = Number(rg?.min_n) || 5
-      const basis = (rg?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && Number(g.n) >= minN)
+      const basis = (rg?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && Number(g.n) >= minN)
         .sort((a, b) => Number(b.n) - Number(a.n)).slice(0, 14)
         .map(g => ({ key: g.firm + ' · ' + admKfTyp(g.typ), label: g.firm + ' · ' + admKfTyp(g.typ), n: Number(g.n), roh: Number(g.n_roh || g.n),
                      gesamt: Number(g.median), real: Number(g.real_median), mean: Number(g.mean), realMean: Number(g.real_mean), anteil: Number(g.anteil), firm: g.firm }))
@@ -11084,7 +11105,7 @@
       const minN = Number(hq?.min_n) || 5
       // Nur Ebene B (Firma · Typ) mit bekannter Firma, nach Quote sortiert (24.09.2026, Finn am Screenshot:
       // „man erkennt da nix" — 18 Zeilen in zwei Spalten, Größen doppelt zur Firma, Balken nicht sortiert).
-      const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && Number(g.n) >= minN && Number(g.median_q) > 0)
+      const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && Number(g.n) >= minN && Number(g.median_q) > 0)
                     .sort((a, b) => Number(b.median_q) - Number(a.median_q) || Number(b.n) - Number(a.n))
       wrap.hidden = !grp.length
       el.innerHTML = ''
@@ -25503,13 +25524,16 @@
           : qs
             ? `<button class="btn btn-ghost tc2-btn rsq-card-wait" data-plan-unqueue="${p.id}" title="Wartet auf den Auto-Start — Klick nimmt den Trade wieder aus der Warteschlange">⏳ Nr. ${qs.pos} in der Warteschlange ✕</button>`
             : `<button class="btn btn-primary tc2-btn" data-plan-jetzt="${p.id}" title="Order aus dem Plan starten — Puls platziert bei grünem Check">Starten</button>`
-      // V2 (24.09.2026): nur Bearbeiten, Löschen, Starten/Startzeit — „Läuft" ohne Puls gäbe keinen Beweis
-      // und keine Baseline (v2PlanAufOpen läuft nur nach dem bewiesenen Klick), „Erledigt" auf einem
-      // geplanten V2-Plan hätte keinen P&L. Hedge-Karten unverändert.
+      // V2 (24.09.2026): Bearbeiten, Löschen, Starten/Startzeit — „Läuft" ohne Puls gäbe keinen Beweis
+      // und keine Baseline (v2PlanAufOpen läuft nur nach dem bewiesenen Klick). „Erledigt" direkt aus
+      // Geplant gibt es seit 24.09.2026 abends doch (Finn: „ich will hier direkt auf Erledigt drücken
+      // können, obwohl er noch geplant ist, und Trades im Nachhinein eintragen, wenn was schiefgeht —
+      // bei Echo V2 und Orbit V2"): P&L von Hand, Trade-Datum im Abschluss-Popup wählbar. Hedge-Karten unverändert.
       actions = istV2Karte ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${jetztBtn}` : `
+        ${jetztBtn}
+        <button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Ohne Puls abschließen — P&L und Trade-Datum von Hand eintragen (z. B. nachtragen, wenn etwas schiefging)">Erledigt</button>` : `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
         <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
@@ -28236,7 +28260,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.451'
+  const OS_TAB_BUILD = '2026-09-22.452'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34884,6 +34908,17 @@
             : null
     document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
+    // Trade-Datum (24.09.2026 abends): aus „Geplant" = jetzt (änderbar zum Nachtragen), „Bearbeiten" = gespeichertes Datum
+    const tcDatumWrap = document.getElementById('tc-datum-wrap'), tcDatum = document.getElementById('tc-datum')
+    if(tcDatumWrap && tcDatum){
+      const zeigen = p.status === 'planned' || p.status === 'completed'
+      tcDatumWrap.hidden = !zeigen
+      const basis = (p.status === 'completed' && p.completedAt) ? new Date(p.completedAt) : new Date()
+      const lokal = new Date(basis.getTime() - basis.getTimezoneOffset() * 60000)
+      tcDatum.value = isNaN(lokal.getTime()) ? '' : lokal.toISOString().slice(0, 16)
+      const hint = document.getElementById('tc-datum-hint')
+      if(hint) hint.textContent = p.status === 'planned' ? 'Abschluss ohne Puls — zum Nachtragen das Datum des echten Trades wählen; er zählt dann zu diesem Tag.' : 'Datum des Trades — zählt in Statistik und Kapitel zu diesem Tag.'
+    }
     document.getElementById('tradeCompleteMsg').textContent = ''
     // Review-Plan mit schon persistiertem Auto-P&L → Hinweis statt leerer Message
     if(p.status === 'review' && (p.masterPl != null || p.slavePl != null)){
@@ -35530,6 +35565,15 @@
         // Trade-Ende (22.09.2026): bleibt, wenn schon gestempelt; direkt von „offen" = jetzt;
         // Bestand in „Überprüfen" ohne Stempel = Trade-Start (intraday) — nie der Klick von Tag 2.
         ended_at: p.endedAt || (p.status === 'review' ? (p.startedAt || new Date().toISOString()) : new Date().toISOString())
+      }
+      // Trade-Datum aus dem Popup (24.09.2026 abends, nachtragen): nur wenn das Feld sichtbar ist (Geplant/Bearbeiten)
+      const tcDatumEl = document.getElementById('tc-datum'), tcDatumWrapEl = document.getElementById('tc-datum-wrap')
+      if(tcDatumEl && tcDatumWrapEl && !tcDatumWrapEl.hidden && tcDatumEl.value){
+        const d = new Date(tcDatumEl.value)
+        if(!isNaN(d.getTime())){
+          updates.completed_at = d.toISOString()
+          if(p.status === 'planned' || !p.endedAt) updates.ended_at = d.toISOString()
+        }
       }
       const quelle = plQuelleErmitteln(mPl)
       if(quelle) updates.pl_quelle = quelle
