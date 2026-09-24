@@ -5318,7 +5318,8 @@ def admin_build_kapitel():
     hq_plans = [p for p in plans
                 if str((by_id.get(str(p.get("master_account_id") or "")) or {}).get("user_id") or p.get("user_id") or "") not in excluded_ids]
     hq_gruppen, hq_lookup, reib_gruppen, reib_lookup, reib_global = _admin_hedge_quoten(hq_plans, by_id, live_ids, fx)
-    reib_std = (reib_global or {}).get("real_median")
+    # Vorbelegung = realer MITTELWERT (Finn 24.09.2026: „die Hälfte von 5,44" meint den Mittelwert, nicht den Median)
+    reib_std = (reib_global or {}).get("real_mean")
     if reib_std is None:
         reib_std = HQ_REIBUNG_STD
     # Firmen-Standard-Symbol (firm_specs.symbol, über alle Personen) → CFD-Wurzel für Echo-V2-Trades
@@ -5424,7 +5425,7 @@ def admin_build_kapitel():
                 hg = _hq_aufloesen(macc, hq_lookup)
                 hq = hg["median_q"] if hg else None
                 # Reibung real je Trade (24.09.2026): gemessener Gruppen-Median × Anteil des V2-Kontotyps
-                # (Funded 1,0 / sonst 0,5); ohne Gruppe der globale reale Median, sonst HQ_REIBUNG_STD.
+                # (Funded 1,0 / sonst 0,5); ohne Gruppe der globale reale Mittelwert, sonst HQ_REIBUNG_STD.
                 rg = _hq_aufloesen(macc, reib_lookup)
                 r_anteil = _hq_anteil(macc.get("account_type"))
                 reib_real = round(rg["median"] * r_anteil, 2) if rg else round(float(reib_std), 2)

@@ -1351,6 +1351,12 @@
   #adm-pane-kapitel .kf-mini .kf-titel,#adm-pane-kapitel .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
   #adm-pane-kapitel .kf-mini-sum{font-weight:400;font-variant-numeric:tabular-nums}
   #adm-pane-kapitel .kf-mini-cv{position:relative;height:170px;margin-top:4px}
+  #adm-pane-kapitel .kap-regel{font-size:11px;color:var(--sub);margin:-2px 0 6px}
+  #adm-pane-kapitel .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
+  #adm-pane-kapitel .kf-trades .adm-row-name{display:flex;align-items:flex-start}
+  #adm-pane-kapitel .kf-trades .adm-row-name .adm-dot{margin-top:5px}
+  #adm-pane-kapitel .kf-trades .adm-val{min-width:82px;text-align:right}
+  #adm-pane-kapitel .kf-trades .adm-pct{text-align:left;font-size:11px;color:var(--sub);white-space:normal}
   #adm-pane-kapitel .kf-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin-top:14px}
   #adm-pane-kapitel .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
   #adm-pane-kapitel .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -7911,6 +7917,9 @@
                   <div class="panel-title">Was der Gegen-Hedge gekostet hätte <span class="chip chip-good" id="adm-kf-kapitel" style="margin-left:6px;border:1px solid transparent"></span></div>
                   <div class="panel-sub" id="adm-kf-modell"></div>
                   <div class="panel-sub" id="adm-kf-modell2"></div>
+                  <!-- Zuordnungsregel (24.09.2026, DB-Trigger sql/2026-09-24_kapitel_konto_vererbung.sql: Buchungen erben das
+                       Kapitel ihres Kontos; Trades nach Weg) — Finn: „bestehende Konten bleiben in der Hedge-Ära" -->
+                  <div class="panel-sub kap-regel" style="margin:2px 0 0">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
                 </div>
                 <div class="kf-param">
                   <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
@@ -7988,6 +7997,10 @@
                   <div class="kf-mini"><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
                   <div class="kf-mini"><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
                 </div>
+                <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
+                     schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
+                <div class="kf-abschnitt">Trades <span class="adm-sub" id="adm-kf-trades-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+                <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
               </div>
             </div>
             <div class="panel" style="margin-top:14px">
@@ -10472,6 +10485,8 @@
           `<div class="kap-kopf"><span class="adm-dot" style="background:${farbe}"></span><span class="kap-name"></span>` +
           `<span class="kap-zeit">${escapeHtml(admKapZeit(k))}</span>` +
           `<span class="chip ${k.hedge_aktiv ? 'chip-neutral' : 'chip-good'}">${k.hedge_aktiv ? 'mit Hedge' : 'ohne Hedge'}</span></div>` +
+          // Zuordnungsregel (24.09.2026, DB-Trigger kapitel_konto_vererbung): Buchungen erben das Kapitel des Kontos, Trades nach Weg
+          '<div class="kap-regel">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>' +
           (leer ? '<div class="kap-leer">Noch keine Buchungen in diesem Kapitel</div>' : '') +
           '<div class="kpis">' +
           kpi('Netto', leer ? '—' : sign(netto), 'Payouts − Kauf − Hedge', leer ? '' : `color:${col(netto)}`) +
@@ -10671,8 +10686,9 @@
     // und zählt als „ohne Quote". Der Faktor bleibt reiner Multiplikator auf die Quote.
     const admKfQ = t => { const q = Number(t.hedge_q); return Number.isFinite(q) && q > 0 ? q : null }
     // Reibung je Trade: Override aus dem Feld, sonst reibung_real des Backends (Gruppen-Median × Anteil),
-    // sonst globaler realer Median, zuletzt 2,72 € (Hälfte der alten 5,44 €).
-    const admKfReibGlobal = () => { const g = Number(admKapData?.reibung_gruppen?.global?.real_median); return Number.isFinite(g) ? g : (Number(admKapData?.hedge_quoten?.reibung_std) || 2.72) }
+    // sonst globaler realer Mittelwert, zuletzt 2,72 € (Hälfte der alten 5,44 €).
+    // Vorbelegung = realer MITTELWERT (Finn 24.09.2026: „die Hälfte von 5,44" meint den Mittelwert, nicht den Median)
+    const admKfReibGlobal = () => { const g = Number(admKapData?.reibung_gruppen?.global?.real_mean); return Number.isFinite(g) ? g : (Number(admKapData?.hedge_quoten?.reibung_std) || 2.72) }
     const admKfReib = t => { if(admKf.param.reibung !== null) return admKf.param.reibung; const r = Number(t.reibung_real); return Number.isFinite(r) ? r : admKfReibGlobal() }
     const admKfHyp = (t, fx) => { const q = admKfQ(t); return -admKapNum(t.master_pl) * (q !== null ? q : fx) * admKf.param.faktor - admKfReib(t) }
     // P&L-Stufe für das Histogramm: 1.000-$-Schritte von −2k bis +8k, Ränder gesammelt
@@ -10821,6 +10837,39 @@
       admKfTagChart(alle.filter(persOk), f, fx, farbe)
       admKfHistChart(alle.filter(persOk), f, farbe)
       admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen)
+      admKfTradeListe(trades, fx, pick, pers)
+    }
+    /* Trade-Liste (24.09.2026, Finn: „grob 100 € Gegen-Cash … die nimmt man schon mal in die neue Statistik rein"):
+     * neueste 30 Trades des aktuellen Filters — Datum · Person · Konto (Firma · Typ) · Master-P&L $ · „≙ −975 € Hedge"
+     * · Quote-Quelle („Apex Trader · Funded 0,24 · n 153"). Zeilen mit Farbpunkt der Person, Klick = Personen-Filter. */
+    const admKfQuelleKurz = t => {
+      const q = admKfQ(t); if(q === null) return 'ohne Quote · FX × 1'
+      const m = /^([^|]+)\|([^|·]+)(?:\|(\d+))?\s*·\s*n=(\d+)/.exec(String(t.hedge_q_quelle || ''))
+      return m ? `${m[1].trim()} · ${admKfTyp(m[2].trim())}${m[3] ? ' · ' + admKfGroesse(m[3]) : ''} ${admKfDe(q, 2)} · n ${m[4]}` : `Quote ${admKfDe(q, 2)}`
+    }
+    function admKfTradeListe(trades, fx, pick, pers){
+      const el = $('adm-kf-rows-t'), sub = $('adm-kf-trades-sub'); if(!el) return
+      el.innerHTML = ''
+      const liste = trades.slice().sort((a, b) => String(b.datum).localeCompare(String(a.datum)) || (Number(b.id) - Number(a.id))).slice(0, 30)
+      if(sub) sub.textContent = trades.length > liste.length ? `· neueste ${liste.length} von ${trades.length}` : `· ${trades.length}`
+      if(!liste.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
+      for(const t of liste){
+        const mpl = admKapNum(t.master_pl), hyp = admKfHyp(t, fx)
+        const row = document.createElement('button')
+        row.type = 'button'
+        row.className = 'adm-row adm-row-btn' + (pers && String(pers) === String(t.user_id) ? ' is-on' : '')
+        row.innerHTML =
+          `<div class="adm-row-name">${admDot(t.user_id)}<span><span class="nm"></span><small></small></span></div>` +
+          `<div class="adm-val" style="color:${mpl < 0 ? admKfRot : admKfGut}">${admUsdSign(mpl)}</div>` +
+          `<div class="adm-val" style="color:${hyp < 0 ? admKfRot : admKfGut}">≙ ${admVlSign(hyp)} Hedge</div>` +
+          `<div class="adm-pct"></div>`
+        row.querySelector('.nm').textContent = `${admVlDatum(t.datum)} · ${admShortName(t.person || t.user_id)}`
+        row.querySelector('small').textContent = `${t.account_name || '—'} · ${admKfFirmaTyp(t)}${t.master_groesse ? ' · ' + admKfGroesse(t.master_groesse) : ''} · ${ADM_KF_WEG[t.route] || t.route || '—'}${t.blown ? ' · Blow' : ''}`
+        row.querySelector('.adm-pct').textContent = admKfQuelleKurz(t)
+        row.title = `${admShortName(t.person || t.user_id)} · ${t.account_name || '—'} · Master ${admUsdSign(mpl)} → Hedge ${admVlSign(hyp)} (Quote × Master − Reibung ${admKfDe(admKfReib(t), 2)} €) — klicken filtert die Person`
+        row.addEventListener('click', () => pick(String(t.user_id)))
+        el.appendChild(row)
+      }
     }
     /* Ein Balken-Chart im Kontrafakt-Muster (24.09.2026). cats = [{ label, key, a, b, n, … }], cfg:
      *   a/b = { label, farbe(e, on), fmt, kurz } — b optional (zweite Achse rechts),
@@ -28095,7 +28144,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.448'
+  const OS_TAB_BUILD = '2026-09-22.449'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
