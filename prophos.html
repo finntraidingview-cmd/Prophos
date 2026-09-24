@@ -18434,7 +18434,9 @@
   function mklKopf(){
     const k = mkl.kursAlt, el = $mkl('mkl-preis'), sym = $mkl('mkl-sym'), diff = $mkl('mkl-diff'), q = $mkl('mkl-quelle'), hint = $mkl('mkl-hinweis')
     if(!el) return
-    if(!k){ el.textContent = '–'; if(sym) sym.textContent = ''; if(diff) diff.textContent = ''; if(q) q.textContent = 'kein Kurs im Feed — TradingView + Reader auf dem 24/7-PC offen?'; return }
+    // Kein Kurs je gesehen (24.09.2026 spät, tv_kurse leer): eine Zeile, die sagt, was auf dem 24/7-PC laufen muss —
+    // kein Alarm-Design, das ist ein Einrichtungsstand, kein Fehler. Gab es je einen Kurs, steht unten der letzte mit Alter.
+    if(!k){ el.textContent = '–'; if(sym) sym.textContent = ''; if(diff) diff.textContent = ''; if(q) q.textContent = 'Kein Kurs-Feed: auf dem 24/7-PC TradingView mit NQ/MNQ sichtbar offen, Userscript 0.6.0 + Reader laufend, Prophos-Tab ≥ .469 offen.'; if(hint) hint.textContent = ''; return }
     const frisch = k.alter_ms <= HEDGE_KURS_MAX_ALTER_MS
     el.textContent = mklFmt(k.preis); el.style.opacity = frisch ? '1' : '.45'
     if(sym) sym.textContent = k.symbol
