@@ -1785,6 +1785,53 @@
      („… zu bei 20.331,5 /  Lot 20.018,5") — jetzt bricht er nur zwischen seinen Teilen */
   #dashboard-view .tc2-hedge{flex-wrap:wrap;row-gap:2px}
   #dashboard-view .tc2-hedge > *{white-space:nowrap}
+  /* Winning-Days-Karten unter Markt (25.09.2026, Finn: „ich will erstmal eine cleane Order sehen und die unterscheiden können") */
+  #dashboard-view .mwd-liste{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:8px}
+  #dashboard-view .mwd-card{position:relative;min-width:0;overflow:hidden;padding:10px 12px 9px 14px;border:1px solid var(--border);border-left:4px solid var(--mwd-farbe,#667085);border-radius:10px;background:var(--surface);cursor:pointer;transition:border-color .12s,box-shadow .12s}
+  #dashboard-view .mwd-card:hover{border-color:#d1d5db}
+  #dashboard-view .mwd-card.is-aktiv{box-shadow:0 0 0 2px var(--mwd-farbe,#667085)}
+  #dashboard-view .mwd-card.mwd-planned{border-style:dashed;border-left-style:solid;background:var(--bg);opacity:.85}
+  #dashboard-view .mwd-card.mwd-done{opacity:.72}
+  #dashboard-view .mwd-card.mwd-done:hover,#dashboard-view .mwd-card.mwd-planned:hover{opacity:1}
+  #dashboard-view .mwd-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:12.5px}
+  #dashboard-view .mwd-person{font-weight:700;color:var(--ink)}
+  #dashboard-view .mwd-konto{color:var(--sub)}
+  #dashboard-view .mwd-chip{font-family:var(--mono);font-weight:700;font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--surface-tint);color:var(--sub)}
+  #dashboard-view .mwd-chip.mwd-buy{background:rgba(18,183,106,.12);color:#0E9757}
+  #dashboard-view .mwd-chip.mwd-sell{background:rgba(240,68,56,.10);color:#D92D20}
+  #dashboard-view .mwd-kt{font-weight:600;color:var(--ink-2)}
+  #dashboard-view .mwd-status{margin-left:auto;font-size:11.5px;color:var(--sub)}
+  #dashboard-view .mwd-open .mwd-status{color:#0E9757;font-weight:600}
+  #dashboard-view .mwd-level{margin:22px 40px 4px}   /* Rand = Platz für die Randmarken (SL/TP stehen mittig über ihrem Strich) */
+  #dashboard-view .mwd-bar{position:relative;height:8px;border-radius:4px;background:var(--border-soft)}
+  #dashboard-view .mwd-mark{position:absolute;top:-2px;transform:translateX(-50%);font-size:10px;line-height:1;white-space:nowrap}
+  #dashboard-view .mwd-mark i{display:block;width:2px;height:12px;margin:0 auto;background:var(--sub-2);border-radius:1px}
+  #dashboard-view .mwd-mark b{display:block;margin-top:4px;font-family:var(--mono);font-weight:600;color:var(--sub)}
+  #dashboard-view .mwd-m-sl i{background:#F04438}#dashboard-view .mwd-m-sl b{color:#b91c1c}
+  #dashboard-view .mwd-m-tp i{background:#12B76A}#dashboard-view .mwd-m-tp b{color:#15803d}
+  #dashboard-view .mwd-m-entry i{background:var(--ink-2)}#dashboard-view .mwd-m-entry b{color:var(--ink-2)}
+  #dashboard-view .mwd-kurs{position:absolute;bottom:2px;transform:translateX(-50%);text-align:center;font-size:10px;line-height:1;white-space:nowrap}
+  #dashboard-view .mwd-kurs b{display:block;font-family:var(--mono);font-weight:700;color:var(--violet);margin-bottom:2px}
+  #dashboard-view .mwd-kurs i{display:block;width:0;height:0;margin:0 auto;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--violet)}
+  #dashboard-view .mwd-level-txt{margin-top:26px;font-size:11px;color:var(--sub)}
+  #dashboard-view .mwd-level-txt .mwd-nah{color:#B45309;font-weight:700}
+  #dashboard-view .mwd-pl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+  #dashboard-view .mwd-box{padding:7px 10px;border-radius:8px;border:1px solid var(--border-soft);background:var(--bg)}
+  #dashboard-view .mwd-box-sum{background:var(--surface-tint)}
+  #dashboard-view .mwd-box-t{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
+  #dashboard-view .mwd-box-v{font-family:var(--mono);font-size:16px;font-weight:700;margin-top:2px;line-height:1.15}
+  #dashboard-view .mwd-box-s{font-size:10.5px;color:var(--sub-2);margin-top:3px;line-height:1.4}
+  #dashboard-view .mwd-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:8px;font-size:11px;color:var(--sub-2)}
+  #dashboard-view .mwd-fuss-chip{margin-left:auto}
+  @media (max-width:820px){
+    #dashboard-view .mwd-pl{grid-template-columns:1fr 1fr}
+    #dashboard-view .mwd-box-sum{grid-column:1 / -1}
+    #dashboard-view .mwd-status{margin-left:0;flex-basis:100%}
+    #dashboard-view .mwd-level{margin:24px 34px 4px}
+    #dashboard-view .mwd-fuss .tc2-hedge > *{white-space:normal}
+    #dashboard-view .mwd-mark b{font-size:9.5px}
+    #dashboard-view .mwd-fuss-chip{margin-left:0;flex-basis:100%}
+  }
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
   #dashboard-view .tc2-date{font-size:11px;color:var(--sub);font-family:var(--mono);white-space:nowrap}
 
@@ -19234,6 +19281,12 @@
   const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
   const mklWdSchliesstBei = pw => (pw.hedge && Number(pw.hedge.schliesst_bei_nq) > 0) ? Number(pw.hedge.schliesst_bei_nq)   // was der Wächter wirklich nimmt; Rechnung nur Rückfall
     : (Number(pw.tp_level_nq) > 0) ? (pw.richtung === 'sell' ? Number(pw.tp_level_nq) - hedgePuffer() : Number(pw.tp_level_nq) + hedgePuffer()) : null
+  /* Karte je Winning Day (25.09.2026, Finn: „unübersichtlich, man sieht kein Fusion-Live-P&L, nicht die Anfangsorder, nicht
+   * Take Profit, nicht Stop Loss — ich will erstmal eine cleane Order sehen und die unterscheiden können"): Kopf (Person · Konto ·
+   * BUY/SELL · Kontrakte · Status), Level-Balken SL — Entry — TP mit Kurs-Marker und Abständen in Punkten (live), zwei P&L-Kästen
+   * Master (live gerechnet aus dem Kurs, darunter der letzte Rundgang) und Fusion (hedge_solo live oder realisiert, Lots, schließt
+   * bei, Notfall-Level) plus „zusammen", Fußzeile Quelle · Start · Hedge-Chip. laufend = Personen-Farbe am linken Rand, geplant =
+   * gestrichelt/gedämpft mit Startzeit, zu = gedämpft mit Ergebnis. Klick hebt die Linien im Chart hervor (mkl.wd.aktiv). */
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     const pl = mkl.wd.plaene || []
@@ -19242,38 +19295,90 @@
     // NQ/MNQ preisgleich — irgendein frischer Kurs: je Wurzel aus tv_kurse (mkl.kursJe, Realtime/Poll), sonst der Kopf-Kurs (mkl.kurs)
     const kurs = (mkl.kursJe && (mkl.kursJe[mkl.wurzel] || mkl.kursJe.NQ || mkl.kursJe.MNQ)) || mkl.kurs || null
     const kp = (kurs && kurs.alter_ms <= 10000) ? kurs.preis : null
-    const f2 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    const f0 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
+    const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const f0 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const sig = (v, einheit, d) => { const n = num(v); if(n == null) return '–'; return `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })} ${einheit}` }
+    const col = v => num(v) == null ? 'var(--sub)' : Number(v) >= 0 ? '#15803d' : '#b91c1c'
     const uhr = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
     const alter = t => { if(!t) return ''; const sek = Math.round((Date.now() - (Date.parse(t) || 0)) / 1000); return sek < 90 ? `vor ${sek} s` : sek < 5400 ? `vor ${Math.round(sek / 60)} min` : `vor ${(sek / 3600).toFixed(1)} h` }
-    const zeilen = pl.map(pw => {
-      const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', buy = pw.richtung === 'buy'
-      const abstand = (offen && kp != null && Number(pw.tp_level_nq) > 0) ? (buy ? Number(pw.tp_level_nq) - kp : kp - Number(pw.tp_level_nq)) : null   // nur laufende Pläne
-      // Lesbarer Master-Ende-Grund (Koordination 25.09.2026: kein Rohwert „close"); Hedge-Grund über hedgeGrundText
-      const grundTxt = { close: 'Schließen', rundgang: 'Rundgang', auto_close: 'Auto-Close', erledigt: 'Erledigt', tp: 'TP', sl: 'SL', hand: 'von Hand', master_ende: 'Master beendet' }[String(pw.grund || '')] || (pw.grund ? String(pw.grund) : '')
-      const hedgeZu = (pw.hedge && pw.hedge.status === 'geschlossen' && typeof hedgeGrundText === 'function') ? ` · Fusion: ${hedgeGrundText(pw.hedge.grund)}` : ''
-      const status = offen ? `läuft seit ${uhr(pw.started_at)}` : geplant ? `geplant ${pw.start_um ? uhr(pw.start_um) : '–'}` : `zu${grundTxt ? ' · ' + escapeHtml(grundTxt) : ''}${pw.ended_at ? ' · ' + uhr(pw.ended_at) : ''}${escapeHtml(hedgeZu)}`
-      const mplW = pw.master_pl && pw.master_pl.wert != null ? Number(pw.master_pl.wert) : null
-      const mpl = mplW != null ? `<b style="color:${mplW >= 0 ? '#15803d' : '#b91c1c'}">${mplW >= 0 ? '+' : '−'}${f2(Math.abs(mplW))} $</b> <span style="color:var(--sub-2);font-size:10.5px">${alter(pw.master_pl.at)}</span>` : '<span style="color:var(--sub-2)">P&L –</span>'
-      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: pw.hedge ? { hedge: pw.hedge } : null }) : ''
-      const sb = mklWdSchliesstBei(pw), aktiv = mkl.wd.aktiv === String(pw.id)
-      return `<div class="mono" data-mkl-wd="${escapeHtml(String(pw.id))}" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:7px 10px;border-radius:8px;border:1px solid ${aktiv ? farbe : 'var(--border-soft)'};border-left:4px solid ${farbe};margin-bottom:5px;font-size:12px;cursor:pointer;${offen ? '' : geplant ? 'background:var(--bg);' : 'opacity:.6;'}" title="Klick hebt die Linien im Chart hervor · NQ-Level gelten auf dem MNQ-Chart 1:1 (gleicher Verfall, Differenz < 1 Pkt)">
-        <span style="min-width:70px;font-weight:600">${escapeHtml(String(pw.person || '?'))}</span>
-        <span style="min-width:110px" title="${escapeHtml(String((pw.konto && pw.konto.firma) || ''))}">${escapeHtml(String((pw.konto && pw.konto.name) || mklWdKurz(pw)))}</span>
-        <b style="color:${buy ? '#15803d' : '#b91c1c'}">${buy ? 'BUY' : pw.richtung === 'sell' ? 'SELL' : '?'}</b><span>${escapeHtml(String(pw.kt || '?'))} ${escapeHtml(String(pw.symbol_root || ''))}</span>
-        <span style="color:var(--sub)">Entry ${f2(pw.einstieg_nq)}</span>
-        <span style="color:#15803d">TP ${f2(pw.tp_level_nq)}</span>
-        <span style="color:#b91c1c">SL ${f2(pw.sl_level_nq)}</span>
-        <span style="color:var(--sub)" title="Schließ-Level über den Kurs-Feed: Master-TP ${buy ? '+' : '−'} ${hedgePuffer()} Pkt Puffer">schließt bei ${f2(sb)}</span>
-        <span style="${abstand == null ? 'color:var(--sub-2)' : Math.abs(abstand) <= 5 ? 'color:#B45309;font-weight:600' : ''}" title="Abstand des Kurses zum TP in NQ-Punkten (live)">${abstand == null ? 'Δ TP –' : `Δ TP ${abstand < 0 ? '−' : ''}${f0(Math.abs(abstand))} Pkt`}</span>
-        <span>${mpl}</span>
-        ${chip}
-        <span style="margin-left:auto;color:var(--sub);font-size:11px">${status}</span>
-      </div>`
+    const dauer = (von, bis) => { const a = Date.parse(von || '') || 0; if(!a) return ''; const m = Math.max(0, Math.round(((bis ? (Date.parse(bis) || Date.now()) : Date.now()) - a) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
+    const grundTxt = g => ({ close: 'Schließen', rundgang: 'Rundgang', auto_close: 'Auto-Close', erledigt: 'Erledigt', tp: 'TP', sl: 'SL', hand: 'von Hand', master_ende: 'Master beendet' })[String(g || '')] || (g ? String(g) : '')
+    const karten = pl.map(pw => {
+      const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', zu = !offen && !geplant
+      const buy = pw.richtung === 'buy', sell = pw.richtung === 'sell'
+      const kt = num(pw.kt), root = String(pw.symbol_root || ''), ppl = mklPpl(root)
+      const entry = num(pw.einstieg_nq), tp = num(pw.tp_level_nq), sl = num(pw.sl_level_nq)
+      const h = pw.hedge || null, aktiv = mkl.wd.aktiv === String(pw.id)
+      const konto = pw.konto || {}
+      // ── Kopf ──
+      const status = offen ? `läuft seit ${uhr(pw.started_at)}${dauer(pw.started_at) ? ' · ' + dauer(pw.started_at) : ''}`
+        : geplant ? `geplant${pw.start_um ? ' · Start ' + uhr(pw.start_um) : ' · Start von Hand'}`
+        : `zu ${uhr(pw.ended_at)}${grundTxt(pw.grund) ? ' · ' + escapeHtml(grundTxt(pw.grund)) : ''}${dauer(pw.started_at, pw.ended_at) ? ' · ' + dauer(pw.started_at, pw.ended_at) : ''}`
+      const kopf = `<div class="mwd-kopf">
+          <span class="mwd-person">${escapeHtml(String(pw.person || '?'))}</span>
+          <span class="mwd-konto" title="${escapeHtml(String(konto.name || ''))}">${escapeHtml(String(konto.firma || '?'))}${konto.groesse ? ' ' + escapeHtml(String(konto.groesse)) : ''}${konto.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(konto.kontonr_ende))}</span>` : ''}</span>
+          <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
+          <span class="mwd-kt mono">${kt != null ? f0(kt) : '?'} × ${escapeHtml(root || '?')}</span>
+          <span class="mwd-status">${status}</span>
+        </div>`
+      // ── Level-Balken: Preisachse links → rechts, SL-Entry-Segment rot, Entry-TP-Segment grün, Kurs als Marker ──
+      let level = ''
+      if(entry != null && (tp != null || sl != null)){
+        const pts = [entry, tp, sl, (offen && kp != null) ? kp : null].filter(v => v != null)
+        const lo0 = Math.min(...pts), hi0 = Math.max(...pts), pad = Math.max(2, (hi0 - lo0) * 0.08)
+        const lo = lo0 - pad, hi = hi0 + pad, pct = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100))
+        const seg = (a, b, c) => (a != null && b != null) ? `, ${c} ${pct(Math.min(a, b))}%, ${c} ${pct(Math.max(a, b))}%` : ''
+        const stops = [] ; if(sl != null) stops.push([Math.min(sl, entry), Math.max(sl, entry), 'rgba(240,68,56,.28)']); if(tp != null) stops.push([Math.min(tp, entry), Math.max(tp, entry), 'rgba(18,183,106,.32)'])
+        stops.sort((x, y) => x[0] - y[0])
+        let grad = 'linear-gradient(90deg, var(--border-soft) 0%'; let cur = 0
+        for(const [x, y, c] of stops){ grad += `, var(--border-soft) ${pct(x)}%, ${c} ${pct(x)}%, ${c} ${pct(y)}%, var(--border-soft) ${pct(y)}%` }
+        grad += ', var(--border-soft) 100%)'
+        const mark = (v, cls, txt) => v == null ? '' : `<span class="mwd-mark ${cls}" style="left:${pct(v)}%"><i></i><b>${txt}</b></span>`
+        const dTp = (offen && kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null
+        const dSl = (offen && kp != null && sl != null) ? (buy ? kp - sl : sl - kp) : null
+        level = `<div class="mwd-level">
+          <div class="mwd-bar" style="background:${grad}">
+            ${mark(sl, 'mwd-m-sl', 'SL ' + f2(sl))}${mark(entry, 'mwd-m-entry', 'Entry ' + f2(entry))}${mark(tp, 'mwd-m-tp', 'TP ' + f2(tp))}
+            ${(offen && kp != null) ? `<span class="mwd-kurs" style="left:${pct(kp)}%" title="Kurs jetzt"><b>${f2(kp)}</b><i></i></span>` : ''}
+          </div>
+          <div class="mwd-level-txt mono">${offen ? (kp != null
+              ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}</span>` : ''}${dSl != null ? ` · SL in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
+              : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? ' · SL ' + f2(sl) : ''} · Entry ${f2(entry)}`}</div>
+        </div>`
+      } else {
+        level = `<div class="mwd-level-txt mono">${geplant ? 'Order noch nicht platziert' : 'kein Einstieg gespeichert'}${num(pw.master_tp) != null ? ` · TP ${f0(pw.master_tp)} $` : ''}${num(pw.master_sl) != null ? ` · SL ${f0(pw.master_sl)} $` : ''}${(kt != null && ppl) ? ` · ${f0(num(pw.master_tp) / (ppl * kt))} Pkt` : ''}</div>`
+      }
+      // ── P&L-Kästen ──
+      const rund = pw.master_pl && num(pw.master_pl.wert) != null ? pw.master_pl : null
+      let mLive = null
+      if(offen && kp != null && entry != null && kt != null && ppl) mLive = Math.round(((buy ? kp - entry : sell ? entry - kp : 0) * ppl * kt) * 100) / 100
+      const mWert = zu ? (rund ? num(rund.wert) : null) : (mLive != null ? mLive : (rund ? num(rund.wert) : null))
+      const mSub = zu ? (rund ? `${rund.quelle === 'plan' ? 'eingetragen' : 'letzter Stand'} ${alter(rund.at)}` : 'kein Ergebnis eingetragen')
+        : mLive != null ? `live · (${f2(kp)} − ${f2(entry)}) × ${f0(ppl)} $ × ${f0(kt)}${rund ? ` · Rundgang ${sig(rund.wert, '$', 0)} ${alter(rund.at)}` : ''}`
+        : rund ? `letzter Rundgang ${alter(rund.at)}${offen ? ' · kein frischer Kurs' : ''}` : (geplant ? 'noch nicht gestartet' : 'kein Stand')
+      const live = (h && h.ticket && ['offen', 'schliesst'].includes(h.status) && typeof hedgeSoloLive === 'function') ? hedgeSoloLive(h.ticket) : null
+      const fLive = live && isFinite(Number(live.profit)) ? Number(live.profit) : null
+      const fWert = h ? (h.status === 'geschlossen' ? num(h.pl) : fLive) : null
+      const sb = mklWdSchliesstBei(pw)
+      const fSub = !h ? (num(pw.hedge_eur) > 0 ? (geplant ? `öffnet beim Start · ${f0(pw.hedge_eur)} € am Master-TP` : 'kein Hedge geöffnet') : 'ohne Gegenhedge')
+        : h.status === 'geschlossen' ? `realisiert · ${escapeHtml(typeof hedgeGrundText === 'function' ? hedgeGrundText(h.grund) : String(h.grund || ''))}${h.fill_close ? ` · zu bei ${f2(h.fill_close)}` : ''}`
+        : `${fLive != null ? 'live' : (h.status === 'schliesst' ? 'schließt…' : h.status === 'offen' ? 'offen · P&L folgt' : h.status)} · ${escapeHtml(String(h.richtung || '').toUpperCase())} ${f2(h.lots)} Lot${sb ? ` · schließt bei NQ ${f2(sb)} (Feed)` : ''}${num(h.sl) != null ? ` · Notfall-SL im Terminal ${f2(h.sl)}` : ''}`
+      const zusammen = (mWert != null && fWert != null) ? mWert * fx + fWert : null
+      const boxen = `<div class="mwd-pl">
+          <div class="mwd-box"><div class="mwd-box-t">Master</div><div class="mwd-box-v" style="color:${col(mWert)}">${sig(mWert, '$', 2)}</div><div class="mwd-box-s">${mSub}</div></div>
+          <div class="mwd-box"><div class="mwd-box-t">Fusion</div><div class="mwd-box-v" style="color:${col(fWert)}">${fWert == null ? '–' : sig(fWert, '€', 2)}</div><div class="mwd-box-s">${fSub}</div></div>
+          <div class="mwd-box mwd-box-sum"><div class="mwd-box-t">zusammen</div><div class="mwd-box-v" style="color:${col(zusammen)}">${zusammen == null ? '–' : '≈ ' + sig(zusammen, '€', 2)}</div><div class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/$ + Fusion</div></div>
+        </div>`
+      // ── Fuß ──
+      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: h ? { hedge: h } : null }) : ''
+      const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}</div>`
+      return `<div class="mwd-card ${offen ? 'mwd-open' : geplant ? 'mwd-planned' : 'mwd-done'}${aktiv ? ' is-aktiv' : ''}" data-mkl-wd="${escapeHtml(String(pw.id))}" style="--mwd-farbe:${farbe}" title="Klick hebt die Linien im Chart hervor">${kopf}${level}${boxen}${fuss}</div>`
     })
     const offenN = pl.filter(x => x.status === 'open').length, geplantN = pl.filter(x => x.status === 'planned').length
-    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} laufen · ${geplantN} geplant · ${pl.length - offenN - geplantN} zu · alle IDs${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      <div style="margin-top:8px">${zeilen.join('') || '<div style="font-size:12px;color:var(--sub-2)">Keine Winning-Day-Pläne am Handelstag.</div>'}</div>`
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} laufen · ${geplantN} geplant · ${pl.length - offenN - geplantN} zu · alle IDs${kp == null ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+      <div class="mwd-liste">${karten.join('') || '<div style="font-size:12px;color:var(--sub-2)">Keine Winning-Day-Pläne am Handelstag.</div>'}</div>`
   }
   // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
   $mkl('mkl-wd')?.addEventListener('click', ev => {
@@ -29999,7 +30104,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.530'
+  const OS_TAB_BUILD = '2026-09-22.531'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
