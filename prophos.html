@@ -1336,7 +1336,7 @@
   #adm-pane-kapitel .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
   #adm-pane-kapitel .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
   #adm-pane-kapitel .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
-  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(6,1fr);gap:10px;margin:6px 0 4px}
+  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 4px}
   #adm-pane-kapitel .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
   #adm-pane-kapitel .kf-kpis .kpi-value{font-size:18px}
   #adm-pane-kapitel .kf-kpis .kpi-delta{font-size:11px}
@@ -1360,16 +1360,25 @@
   #adm-pane-kapitel .kf-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin-top:14px}
   #adm-pane-kapitel .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
   #adm-pane-kapitel .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  /* Ein großer Chart mit Chip-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke") */
+  #adm-pane-kapitel .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  #adm-pane-kapitel .kf-gross{margin-top:8px}
+  #adm-pane-kapitel .kf-gross .kf-chart[hidden]{display:none}
+  #adm-pane-kapitel .kf-gross .kf-chart .kf-titel{margin-top:4px;font-size:13px}
+  #adm-pane-kapitel .kf-gross .adm-vl{height:380px}
+  #adm-pane-kapitel .kf-gross .kf-mini-cv{height:380px}
+  @media (max-width:600px){#adm-pane-kapitel .kf-gross .adm-vl,#adm-pane-kapitel .kf-gross .kf-mini-cv{height:280px}}
   /* Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht immer 1:1 … guck in den
      bestehenden Daten, wie viel wo gegengehedgt wurde"): Zeile = Firma · Typ · Größe, Balken = Quote,
      Unterzeile mit geplanter Quote + Beispielzahl. Zwei Spalten, Muster Balkenzeilen. */
-  #adm-pane-kapitel .kf-quoten{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;margin-top:2px}
-  #adm-pane-kapitel .kf-quoten .adm-row{padding:6px 0;grid-template-columns:minmax(190px,2fr) minmax(60px,1fr) auto}
+  /* Umbau 24.09.2026 (Finn am Screenshot: „man erkennt da nix"): EINE Spalte, nur Firma · Typ (keine Größen-
+     Zeilen), nach Quote sortiert, breiter Balken, kurze Unterzeile — Ø geplant nur noch im Tooltip. */
+  #adm-pane-kapitel .kf-quoten{display:grid;grid-template-columns:1fr;gap:0;margin-top:2px}
+  #adm-pane-kapitel .kf-quoten .adm-row{padding:7px 0;grid-template-columns:minmax(170px,1fr) minmax(160px,2.4fr) auto}
   #adm-pane-kapitel .kf-quoten .adm-row-name{display:flex;align-items:flex-start}
   #adm-pane-kapitel .kf-quoten .adm-row-name .adm-dot{margin-top:5px}
   #adm-pane-kapitel .kf-quoten .adm-row-name small{white-space:normal}
   #adm-pane-kapitel .kf-q-sub{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
-  @media (max-width:960px){#adm-pane-kapitel .kf-quoten{grid-template-columns:1fr}}
   @media (max-width:1200px){#adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(4,1fr)}}
   @media (max-width:960px){
     #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(3,1fr)}
@@ -7494,7 +7503,7 @@
       <div class="view-head">
         <div>
           <h1 class="view-title">Admin</h1>
-          <p class="view-sub">Kapitalverteilung über alle Personen &amp; gemeinsame Kasse</p>
+          <p class="view-sub">Kapitalverteilung über alle Personen</p>
         </div>
       </div>
 
@@ -7521,7 +7530,8 @@
           <button class="subtab adm-tab" data-admtab="kapitel">📖 Kapitel</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
-          <button class="subtab adm-tab" data-admtab="kasse">Kasse</button>
+          <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
+          <button class="subtab adm-tab" data-admtab="kasse" style="display:none">Kasse</button>
           <button class="subtab adm-tab" data-admtab="wallet">Meta Wallet</button>
           <button class="subtab adm-tab" data-admtab="rg">Rechnungen</button>
         </div>
@@ -7938,64 +7948,72 @@
                      ist … Apex Funded, gerade +7.500 $ gemacht, ist so grob ein Tausender wert"). Gezeichnet von admKfQuotenRender. -->
                 <div id="adm-kf-quoten" hidden>
                   <div class="kf-abschnitt">Hedge-Quoten aus der Hedge-Ära</div>
-                  <div class="kf-sub" id="adm-kf-quoten-sub">gemessen: € Hedge je $ Master-P&amp;L (Median) je Firma · Typ · Größe — Klick filtert Kacheln und Charts</div>
+                  <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma · Typ, nach Quote sortiert — Klick filtert Kacheln und Charts</div>
                   <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-q"></div>
                 </div>
-                <!-- Reibung (24.09.2026, Finn: „Die 5 € sind die Reibungskosten insgesamt, nur die Hälfte bleibt real übrig …
-                     davon auch ein Chart"): gemessen je Firma · Typ (grau) und real (Kapitel-Farbe), daneben kumuliert je Person. -->
-                <div class="kf-abschnitt">Reibung</div>
-                <div class="kf-charts">
-                  <div class="kf-chart">
-                    <div class="kf-titel">Reibung je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div>
-                    <div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (grau) und real (Kapitel-Farbe: Funded 100 %, Challenge/Phase 50 %) · Klick filtert</div>
-                    <div class="kf-mini-cv" style="height:190px"><canvas id="adm-kf-cv-reib"></canvas></div>
-                  </div>
-                  <div class="kf-chart">
-                    <div class="kf-titel">Reibung gespart · kumuliert je Person</div>
-                    <div class="kf-sub">reale Reibung, die ohne Hedge nicht anfällt — gestrichelt = alle zusammen</div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-reib"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-reib"></div>
-                  </div>
-                </div>
-                <div class="kf-abschnitt">Verlauf</div>
-                <div class="kf-charts">
-                  <div class="kf-chart">
+                <!-- Ein großer Chart mit Auswahl (24.09.2026, Finn am Screenshot: „die Charts sind cool, die machen auch Sinn —
+                     aber macht doch bitte, dass man einen ganz großen Chart hat; je nachdem, wo ich draufdrücke, sehe ich es, und
+                     allgemein mehr Ordnung"): zwölf Sichten, ein Chip-Balken, genau eine Sicht sichtbar (admKfChartWahlRender). -->
+                <div class="kf-abschnitt">Chart</div>
+                <div class="kf-chip-bar" id="adm-kf-chartwahl"></div>
+                <div class="kf-gross" id="adm-kf-gross">
+                  <div class="kf-chart" data-kf-chart="hyp">
                     <div class="kf-titel">Mit Hedge (hypothetisch) · kumuliert je Person</div>
                     <div class="kf-sub">So wäre der Gegen-Hedge gelaufen — Realmoney in EUR, gestrichelt = alle zusammen · Klick auf Person hebt sie hervor und filtert</div>
                     <div class="adm-vl"><canvas id="adm-kf-chart-hyp"></canvas></div>
                     <div class="adm-vl-legend" id="adm-kf-legend-hyp"></div>
                   </div>
-                  <div class="kf-chart">
+                  <div class="kf-chart" data-kf-chart="real" hidden>
                     <div class="kf-titel">Real · Master-P&amp;L kumuliert je Person</div>
                     <div class="kf-sub">Prop-Konten in USD, echte Zahlen — hat es sich ohne Hedge gelohnt?</div>
                     <div class="adm-vl"><canvas id="adm-kf-chart-real"></canvas></div>
                     <div class="adm-vl-legend" id="adm-kf-legend-real"></div>
                   </div>
-                </div>
-                <div class="kf-charts">
-                  <div class="kf-chart">
+                  <!-- Duplikum gespart (24.09.2026 abends, Finn: „wie bei Duplikum sparen, auch täglich und monatlich — 10 € pro
+                       Monat pro ID-Slot; blown + neuen Acc hinzufügen = derselbe Slot, nicht doppelt"). Gezeichnet in admKfRender. -->
+                  <div class="kf-chart" data-kf-chart="dup" hidden>
+                    <div class="kf-titel">Duplikum gespart · kumuliert je Person</div>
+                    <div class="kf-sub">Orbit-V2-Konten hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht (10 € je Slot und Monat, Slot lebt vom ersten Trade bis zum Blow und wird danach wiederverwendet) · je Tag Slots × 10 €/30 — gestrichelt = alle zusammen</div>
+                    <div class="adm-vl"><canvas id="adm-kf-chart-dup"></canvas></div>
+                    <div class="adm-vl-legend" id="adm-kf-legend-dup"></div>
+                  </div>
+                  <div class="kf-chart" data-kf-chart="reibp" hidden>
+                    <div class="kf-titel">Reibung gespart · kumuliert je Person</div>
+                    <div class="kf-sub">reale Reibung, die ohne Hedge nicht anfällt — gestrichelt = alle zusammen</div>
+                    <div class="adm-vl"><canvas id="adm-kf-chart-reib"></canvas></div>
+                    <div class="adm-vl-legend" id="adm-kf-legend-reib"></div>
+                  </div>
+                  <!-- Reibung in zwei Sichten (24.09.2026, Finn: „ein Chart, der die gesamte Reibung zeigt, und einmal den Chart,
+                       der nur die reale Reibung zeigt — die reale ist ja grob die gesamte durch 2"). Gezeichnet von admKfReibChart. -->
+                  <div class="kf-chart" data-kf-chart="reibg" hidden>
+                    <div class="kf-titel">Reibung gesamt je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibg"></span></div>
+                    <div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (Median, Ausreißer 1,5×IQR raus) · Klick filtert</div>
+                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-reibg"></canvas></div>
+                  </div>
+                  <div class="kf-chart" data-kf-chart="reib" hidden>
+                    <div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div>
+                    <div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt (Funded 100 %, Challenge/Phase 50 % der gesamten) · Klick filtert</div>
+                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div>
+                  </div>
+                  <div class="kf-chart" data-kf-chart="tag" hidden>
                     <div class="kf-titel">Je Tag · Mit Hedge vs. Real <span class="adm-sub kf-mini-sum" id="adm-kf-sum-tag"></span></div>
                     <div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe), rechts Master-P&amp;L real ($, grün/rot) · Klick auf einen Tag filtert</div>
-                    <div class="kf-mini-cv" style="height:190px"><canvas id="adm-kf-cv-tag"></canvas></div>
+                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-tag"></canvas></div>
                   </div>
-                  <div class="kf-chart">
+                  <div class="kf-chart" data-kf-chart="pnl" hidden>
                     <div class="kf-titel">Verteilung Master-P&amp;L je Trade <span class="adm-sub kf-mini-sum" id="adm-kf-sum-pnl"></span></div>
                     <div class="kf-sub">Anzahl Trades je 1.000-$-Stufe (−2k … +8k $) · Klick auf eine Stufe filtert</div>
-                    <div class="kf-mini-cv" style="height:190px"><canvas id="adm-kf-cv-pnl"></canvas></div>
+                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-pnl"></canvas></div>
                   </div>
-                </div>
-                <!-- Sechs kleine Balken-Charts (24.09.2026, Finn: „für jedes Ding jeweils einen einzelnen Chart nebeneinander,
-                     mit genau der Logik [Hedge-Quoten je Firma/Typ]"): je Kategorie zwei Balken — Hedge hypothetisch (€,
-                     Kapitel-Farbe) und Master-P&L real ($, grün/rot). Klick auf Balken = Filter. Gezeichnet von admKfDimCharts. -->
-                <div class="kf-abschnitt">Nach Dimension</div>
-                <div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert Kacheln und Charts, nochmal = aus</div>
-                <div class="kf-dims">
-                  <div class="kf-mini"><div class="kf-titel">Nach Symbol <span class="adm-sub kf-mini-sum" id="adm-kf-sum-sym"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-sym"></canvas></div></div>
-                  <div class="kf-mini"><div class="kf-titel">Nach Weg <span class="adm-sub kf-mini-sum" id="adm-kf-sum-weg"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-weg"></canvas></div></div>
-                  <div class="kf-mini"><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
-                  <div class="kf-mini"><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
-                  <div class="kf-mini"><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
-                  <div class="kf-mini"><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
+                  <!-- Sechs Dimensionen (24.09.2026, Finn: „für jedes Ding jeweils einen einzelnen Chart … mit genau der Logik
+                       [Hedge-Quoten je Firma/Typ]"): je Kategorie zwei Balken — Hedge hypothetisch (€, Kapitel-Farbe) und
+                       Master-P&L real ($, grün/rot). Klick auf Balken = Filter. Gezeichnet von admKfDimCharts. -->
+                  <div class="kf-chart kf-mini" data-kf-chart="sym" hidden><div class="kf-titel">Nach Symbol <span class="adm-sub kf-mini-sum" id="adm-kf-sum-sym"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick filtert, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-sym"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="weg" hidden><div class="kf-titel">Nach Weg <span class="adm-sub kf-mini-sum" id="adm-kf-sum-weg"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-weg"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="ri" hidden><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="firm" hidden><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="typ" hidden><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
+                  <div class="kf-chart kf-mini" data-kf-chart="person" hidden><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick auf Person filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
                 </div>
                 <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
                      schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
@@ -9879,7 +9897,7 @@
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Markt', 'NQ & MNQ — Kurs, Tagesveränderung, Verlauf'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
-    kasse:     ['Admin', 'Kapitalverteilung & gemeinsame Kasse'],
+    kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
   }
   let _detailAccountId = null  // Account-Detail-View State
@@ -10428,7 +10446,7 @@
     function admKapitelOeffnen(){
       if(!admKapData){ admKapitelLaden(); return }
       if(admKapChart){ try { admKapChart.resize() } catch(_){} }
-      for(const n of ['kfhyp', 'kfreal', 'kfreib']){ if(admVlCharts[n]){ try { admVlCharts[n].resize() } catch(_){} } }
+      for(const n of ['kfhyp', 'kfreal', 'kfreib', 'kfdup']){ if(admVlCharts[n]){ try { admVlCharts[n].resize() } catch(_){} } }
       for(const c of Object.values(admKfCharts)){ if(c){ try { c.resize() } catch(_){} } }
     }
     function admKapitelRender(d){
@@ -10802,6 +10820,7 @@
         if(f){ const b = document.createElement('button'); b.type = 'button'; b.className = 'adm-vl-chip is-on'; b.textContent = ADM_KF_ARTEN[f.art][2](f.wert) + ' ✕'; b.addEventListener('click', () => { admKf.filter = null; admKfRender() }); fw.appendChild(b) }
       }
       admKfQuotenRender(admKapData?.hedge_quoten, f)
+      admKfChartWahlRender()   // genau eine Chart-Sicht sichtbar, BEVOR die Charts gezeichnet werden (Größe)
       // Ø Quote je Person (Chart A: Chip-Unterzeile + Tooltip) — nur Trades mit Quote
       const qPers = new Map()
       for(const t of alle.filter(artOk)){ const q = admKfQ(t); if(q === null) continue; const u = String(t.user_id); const e = qPers.get(u) || { s: 0, n: 0 }; e.s += q; e.n++; qPers.set(u, e) }
@@ -10821,6 +10840,41 @@
         return [...m.values()].sort((a, b) => a.label.localeCompare(b.label, 'de'))
       }
       const pick = key => { admKf.person = String(admKf.person) === String(key) ? '' : String(key); admKfRender() }
+      // Duplikum-Ersparnis (24.09.2026 abends, Finn: „wie bei Duplikum sparen, auch täglich und monatlich — wir zahlen
+      // 10 € pro Monat pro ID-Slot; wenn ein Acc blown ist und ein neuer dazukommt, ist es derselbe Slot, also nicht
+      // doppelt"): Orbit-V2-Konten (Futures) hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht. Je Tag zählen,
+      // wie viele gleichzeitig leben (erster Trade bis Blow-Trade, sonst bis heute Dubai) — das ist die Slot-Zahl,
+      // Wiederverwendung inklusive. Slot je Tag = 10 €/30, Monat = Slots × 10 €. Nicht mit Reibung/Hedge verrechnet.
+      const DUP_EUR_MONAT = 10
+      const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
+      const dupKonten = new Map()
+      for(const t of alle){
+        if(t.route !== 'tvv2' || !t.datum) continue
+        const key = String(t.user_id) + '|' + (t.account_name || t.id)
+        const e = dupKonten.get(key) || { user: String(t.user_id), von: t.datum, bis: null }
+        if(t.datum < e.von) e.von = t.datum
+        if(t.blown && (!e.bis || t.datum > e.bis)) e.bis = t.datum
+        dupKonten.set(key, e)
+      }
+      const dupTage = []
+      if(tage.length && dupKonten.size){
+        const d = new Date(tage[1] || tage[0]); d.setUTCHours(0, 0, 0, 0)
+        for(let i = 0; i < 400 && d.toISOString().slice(0, 10) <= heute; i++, d.setUTCDate(d.getUTCDate() + 1)) dupTage.push(d.toISOString().slice(0, 10))
+      }
+      const slotsAm = (d, user) => [...dupKonten.values()].filter(e => (!user || e.user === user) && e.von <= d && (!e.bis || e.bis >= d)).length
+      const dupEvents = []
+      let dupSum = 0
+      for(const d of dupTage) for(const u of personen.keys()){
+        const nS = slotsAm(d, u); if(!nS) continue
+        const eur = nS * DUP_EUR_MONAT / 30
+        dupEvents.push({ user_id: u, datum: d, eur })
+        if(persOk({ user_id: u })) dupSum += eur
+      }
+      const slotsHeute = slotsAm(heute, pers || '')
+      if(kp) kp.insertAdjacentHTML('beforeend', kpi('Duplikum gespart', admVlSign(dupSum),
+        `${slotsHeute} Slot${slotsHeute === 1 ? '' : 's'} heute · ${admKfDe(slotsHeute * DUP_EUR_MONAT, 0)} €/Monat · ${admKfDe(slotsHeute * DUP_EUR_MONAT / 30, 2)} €/Tag`, `color:${col(dupSum)}`))
+      admVerlauf('kfdup', 'adm-kf-chart-dup', 'adm-kf-legend-dup', serien(dupEvents, e => e.eur), pers, pick,
+                 { tage: dupTage.length ? dupTage : tage, gesamt: true, gesamtFarbe: farbe })
       // Chart A: alle Personen (nur Balken-Filter), aktive Person hervorgehoben — „alle ins Minus"
       admVerlauf('kfhyp', 'adm-kf-chart-hyp', 'adm-kf-legend-hyp', serien(alle.filter(artOk), t => admKfHyp(t, fx)), pers, pick,
                  { tage, gesamt: true, gesamtFarbe: farbe, sub: qSub })
@@ -10838,6 +10892,24 @@
       admKfHistChart(alle.filter(persOk), f, farbe)
       admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen)
       admKfTradeListe(trades, fx, pick, pers)
+    }
+    /* Chart-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke, sehe ich es"):
+     * zwölf Sichten als Chips, genau eine sichtbar. Wechsel zeichnet über admKfRender neu, damit Chart.js die
+     * volle Breite des eben eingeblendeten Containers bekommt. Auswahl lebt nur in der Sitzung (admKf.chart). */
+    const ADM_KF_CHARTS = [['hyp', 'Mit Hedge · Verlauf'], ['real', 'Real · Verlauf'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart'],
+                           ['reibg', 'Reibung gesamt'], ['reib', 'Reibung real'], ['tag', 'Je Tag'], ['pnl', 'Verteilung'], ['sym', 'Symbol'],
+                           ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['person', 'Person']]
+    function admKfChartWahlRender(){
+      const bar = $('adm-kf-chartwahl'); if(!bar) return
+      if(!ADM_KF_CHARTS.some(([k]) => k === admKf.chart)) admKf.chart = 'hyp'
+      bar.innerHTML = ''
+      for(const [key, label] of ADM_KF_CHARTS){
+        const b = document.createElement('button'); b.type = 'button'
+        b.className = 'adm-vl-chip' + (key === admKf.chart ? ' is-on' : ''); b.textContent = label
+        b.addEventListener('click', () => { if(admKf.chart === key) return; admKf.chart = key; admKfRender() })
+        bar.appendChild(b)
+      }
+      document.querySelectorAll('#adm-kf-gross .kf-chart').forEach(el => { el.hidden = el.dataset.kfChart !== admKf.chart })
     }
     /* Trade-Liste (24.09.2026, Finn: „grob 100 € Gegen-Cash … die nimmt man schon mal in die neue Statistik rein"):
      * neueste 30 Trades des aktuellen Filters — Datum · Person · Konto (Firma · Typ) · Master-P&L $ · „≙ −975 € Hedge"
@@ -10883,24 +10955,32 @@
       wrap.hidden = false
       const mono = { family: 'JetBrains Mono', size: 9 }
       const on = e => !cfg.istOn || cfg.istOn(e)
-      const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), yAxisID: 'y', borderRadius: 3, maxBarThickness: 26,
+      // Liegende Balken (24.09.2026, Finn am Screenshot: „man erkennt da nix" — 14 Firma·Typ-Namen auf der
+      // x-Achse druckten übereinander). cfg.horizontal: Kategorien auf der y-Achse, Höhe wächst mit der Zahl
+      // der Zeilen; Wert-Achse liegt dann auf x, eine zweite Wert-Achse oben statt rechts.
+      const horiz = !!cfg.horizontal
+      wrap.style.height = horiz ? Math.max(380, cats.length * 26 + 40) + 'px' : ''
+      const axisKey = horiz ? 'xAxisID' : 'yAxisID', prim = horiz ? 'x' : 'y', sek = horiz ? 'x1' : 'y1'
+      const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), [axisKey]: prim, borderRadius: 3, maxBarThickness: 26,
                           backgroundColor: cats.map(e => cfg.a.farbe(e, on(e))) }]
-      if(cfg.b) datasets.push({ label: cfg.b.label, data: cats.map(e => +Number(e.b).toFixed(2)), yAxisID: cfg.b.achse || 'y1', borderRadius: 3, maxBarThickness: 26,
+      if(cfg.b) datasets.push({ label: cfg.b.label, data: cats.map(e => +Number(e.b).toFixed(2)), [axisKey]: cfg.b.achse ? prim : sek, borderRadius: 3, maxBarThickness: 26,
                                 backgroundColor: cats.map(e => cfg.b.farbe(e, on(e))) })
-      const scales = { x: { grid: { display: false }, ticks: { font: mono, maxRotation: 0, autoSkip: cats.length > 14,
-                                                                 color: ctx => { const e = cats[ctx.index]; return e && cfg.tick ? (on(e) ? cfg.tick(e) : cfg.tick(e) + '66') : '#667085' } } },
-                       y: { position: 'left', grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
-                            ticks: { color: '#667085', font: mono, maxTicksLimit: 5, precision: cfg.a.ganz ? 0 : undefined, callback: v => cfg.a.kurz(v) } } }
-      if(cfg.b && !cfg.b.achse) scales.y1 = { position: 'right', grid: { display: false }, ticks: { color: '#667085', font: mono, maxTicksLimit: 5, callback: v => cfg.b.kurz(v) } }
+      const katAchse = { grid: { display: false }, ticks: { font: horiz ? { family: 'JetBrains Mono', size: 10 } : mono, maxRotation: 0, autoSkip: !horiz && cats.length > 14,
+                                                            color: ctx => { const e = cats[ctx.index]; return e && cfg.tick ? (on(e) ? cfg.tick(e) : cfg.tick(e) + '66') : '#667085' } } }
+      const wertAchse = { position: horiz ? 'bottom' : 'left', grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
+                          ticks: { color: '#667085', font: mono, maxTicksLimit: 5, precision: cfg.a.ganz ? 0 : undefined, callback: v => cfg.a.kurz(v) } }
+      const scales = horiz ? { y: katAchse, x: wertAchse } : { x: katAchse, y: wertAchse }
+      if(cfg.b && !cfg.b.achse) scales[sek] = { position: horiz ? 'top' : 'right', grid: { display: false }, ticks: { color: '#667085', font: mono, maxTicksLimit: 5, callback: v => cfg.b.kurz(v) } }
+      const wert = ctx => ctx.parsed[prim]
       admKfCharts[name] = new Chart(cv.getContext('2d'), {
         type: 'bar', data: { labels: cats.map(e => e.label), datasets },
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 }, indexAxis: horiz ? 'y' : 'x',
           interaction: { mode: 'index', intersect: false },
           onClick: (ev, els) => { const el = els && els[0]; const e = el && cats[el.index]; if(e && cfg.klick) cfg.klick(e) },
           onHover: (ev, els) => { const t = ev.native && ev.native.target; if(t) t.style.cursor = els.length && cfg.klick ? 'pointer' : '' },
           plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
             callbacks: { title: items => items.length ? String(cats[items[0].dataIndex].label) : '',
-                         label: ctx => ` ${ctx.datasetIndex === 0 ? cfg.a.label : cfg.b.label}: ${(ctx.datasetIndex === 0 ? cfg.a : cfg.b).fmt(ctx.parsed.y)}`,
+                         label: ctx => ` ${ctx.datasetIndex === 0 ? cfg.a.label : cfg.b.label}: ${(ctx.datasetIndex === 0 ? cfg.a : cfg.b).fmt(wert(ctx))}`,
                          afterBody: items => { const e = cats[items[0].dataIndex]; return e && cfg.zeilen ? cfg.zeilen(e) : '' } } } },
           scales }
       })
@@ -10930,7 +11010,7 @@
         admKfSumHtml('adm-kf-sum-' + name, cats.length ? [['Hedge', cats.reduce((x, e) => x + e.a, 0), admVlSign], ['Master', cats.reduce((x, e) => x + e.b, 0), admUsdSign]] : [])
         const aktiv = istPerson ? (pers || '') : (f && f.art === art ? f.wert : '')
         const catCol = e => istPerson ? admPersonColor(e.key) : admKfFirmColor(e.label)
-        admKfBar('dim-' + name, 'adm-kf-cv-' + name, cats, {
+        admKfBar('dim-' + name, 'adm-kf-cv-' + name, cats, { horizontal: cats.length > 6,
           a: { label: 'Mit Hedge (hyp.)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: admVlSign, kurz: admEurKurz },
           b: { label: 'Master-P&L real', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
           istOn: e => !aktiv || String(e.key) === String(aktiv), tick: catCol,
@@ -10939,22 +11019,32 @@
                         e.qn ? `Quote Ø ${admKfQFmt(e.qs / e.qn)}${e.qn < e.n ? ` (${e.n - e.qn} ohne Quote)` : ''}` : 'ohne Quote (FX × 1)'] })
       }
     }
-    /* Reibung je Firma · Typ (24.09.2026, Finn: „davon auch ein Chart"): Gruppen der Ebene B mit n ≥ min_n,
-     * gemessen (grau) und real (Kapitel-Farbe) in € je Hedge-Trade. Klick = Filter Firma · Typ wie die Quoten-Zeilen. */
+    /* Reibung je Firma · Typ (24.09.2026, Finn: „davon auch ein Chart"; abends: „ein Chart, der die gesamte Reibung
+     * zeigt, und einmal den Chart, der nur die reale Reibung zeigt"): Gruppen der Ebene B mit n ≥ min_n als zwei
+     * Sichten — gesamt (gemessen, grau) und real (Kapitel-Farbe), liegende Balken, nach Wert sortiert.
+     * Klick = Filter Firma · Typ wie die Quoten-Zeilen. Backend trimmt je Gruppe mit 1,5 × IQR. */
     function admKfReibChart(rg, f, farbe){
       const minN = Number(rg?.min_n) || 5
-      const cats = (rg?.gruppen || []).filter(g => g.ebene === 'B' && Number(g.n) >= minN)
+      const basis = (rg?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && Number(g.n) >= minN)
         .sort((a, b) => Number(b.n) - Number(a.n)).slice(0, 14)
-        .map(g => ({ key: (g.firm || '—') + ' · ' + admKfTyp(g.typ), label: (g.firm || '—') + ' · ' + admKfTyp(g.typ), n: Number(g.n),
-                     a: Number(g.median), b: Number(g.real_median), mean: Number(g.mean), anteil: Number(g.anteil), firm: g.firm }))
-      admKfSumHtml('adm-kf-sum-reib', rg?.global ? [['gemessen Ø', Number(rg.global.mean), v => admKfDe(v, 2) + ' €'], ['real Ø', Number(rg.global.real_mean), v => admKfDe(v, 2) + ' €']] : [])
+        .map(g => ({ key: g.firm + ' · ' + admKfTyp(g.typ), label: g.firm + ' · ' + admKfTyp(g.typ), n: Number(g.n), roh: Number(g.n_roh || g.n),
+                     gesamt: Number(g.median), real: Number(g.real_median), mean: Number(g.mean), realMean: Number(g.real_mean), anteil: Number(g.anteil), firm: g.firm }))
       const aktiv = f && f.art === 'q' ? f.wert : ''
-      admKfBar('reib', 'adm-kf-cv-reib', cats, {
-        a: { label: 'gemessen', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: v => admKfDe(v, 2) + ' €', kurz: v => admKfDe(v, 0) + ' €' },
-        b: { label: 'real', achse: 'y', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: v => admKfDe(v, 2) + ' €', kurz: v => admKfDe(v, 0) + ' €' },
-        istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm),
-        klick: e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() },
-        zeilen: e => [`${e.n} Hedge-Trades · Ø gemessen ${admKfDe(e.mean, 2)} € · Anteil real ${admKfDe(e.anteil, 1)}`] })
+      const eur = v => admKfDe(v, 2) + ' €', eurK = v => admKfDe(v, 0) + ' €'
+      const klick = e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() }
+      const zeilen = e => [`${e.n} Hedge-Trades${e.roh > e.n ? ` (${e.roh - e.n} Ausreißer raus)` : ''} · gesamt Ø ${eur(e.mean)} · real Ø ${eur(e.realMean)} · Anteil real ${admKfDe(e.anteil, 1)}`]
+      const gSum = rg?.global ? [['gemessen Ø', Number(rg.global.mean), eur], ['Median', Number(rg.global.median), eur]] : []
+      const rSum = rg?.global ? [['real Ø', Number(rg.global.real_mean), eur], ['Median', Number(rg.global.real_median), eur]] : []
+      admKfSumHtml('adm-kf-sum-reibg', gSum)
+      admKfSumHtml('adm-kf-sum-reib', rSum)
+      const cg = basis.map(e => ({ ...e, a: e.gesamt })).sort((a, b) => b.a - a.a)
+      admKfBar('reibg', 'adm-kf-cv-reibg', cg, { horizontal: true,
+        a: { label: 'gesamt (gemessen)', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: eur, kurz: eurK },
+        istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm), klick, zeilen })
+      const cr = basis.map(e => ({ ...e, a: e.real })).sort((a, b) => b.a - a.a)
+      admKfBar('reib', 'adm-kf-cv-reib', cr, { horizontal: true,
+        a: { label: 'real', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: eurK },
+        istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm), klick, zeilen })
     }
     /* Je Tag: Mit Hedge (€) vs. Real ($) als Balkenpaar (24.09.2026) — Klick auf einen Tag filtert */
     function admKfTagChart(rows, f, fx, farbe){
@@ -10992,8 +11082,10 @@
     function admKfQuotenRender(hq, f){
       const wrap = $('adm-kf-quoten'), el = $('adm-kf-rows-q'); if(!wrap || !el) return
       const minN = Number(hq?.min_n) || 5
-      const grp = (hq?.gruppen || []).filter(g => (g.ebene === 'A' || g.ebene === 'B') && Number(g.n) >= minN && Number(g.median_q) > 0)
-                    .sort((a, b) => Number(b.n) - Number(a.n))
+      // Nur Ebene B (Firma · Typ) mit bekannter Firma, nach Quote sortiert (24.09.2026, Finn am Screenshot:
+      // „man erkennt da nix" — 18 Zeilen in zwei Spalten, Größen doppelt zur Firma, Balken nicht sortiert).
+      const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && Number(g.n) >= minN && Number(g.median_q) > 0)
+                    .sort((a, b) => Number(b.median_q) - Number(a.median_q) || Number(b.n) - Number(a.n))
       wrap.hidden = !grp.length
       el.innerHTML = ''
       if(!grp.length) return
@@ -11003,7 +11095,7 @@
         const key = (g.firm || '—') + ' · ' + admKfTyp(g.typ)
         const on = !!(f && f.art === 'q' && f.wert === key)
         const bsp = funded ? `+7.500 $ ≙ ${admVlSign(-7500 * q)}` : `−2.000 $ ≙ ${admVlSign(2000 * q)}`
-        const geplant = Number.isFinite(Number(g.median_r)) && g.median_r !== null ? `Ø geplant ${admKfQFmt(Number(g.median_r))} · ` : ''
+        const geplant = Number.isFinite(Number(g.median_r)) && g.median_r !== null ? ` · geplant ${admKfQFmt(Number(g.median_r))}` : ''
         const row = document.createElement('button')
         row.type = 'button'
         row.className = 'adm-row adm-row-btn' + (on ? ' is-on' : '')
@@ -11012,8 +11104,8 @@
           `<div class="adm-track"><div class="adm-fill" style="width:${(100 * q / maxQ).toFixed(1)}%;background:${admKfFirmColor(g.firm)}"></div></div>` +
           `<div class="adm-val">${admKfQFmt(q)}</div>`
         row.querySelector('.nm').textContent = key + (g.groesse ? ' · ' + admKfGroesse(g.groesse) : '')
-        row.querySelector('.kf-q-sub').textContent = `${g.n} Trades · ${geplant}${bsp}`
-        row.title = `${key}${g.groesse ? ' · ' + admKfGroesse(g.groesse) : ''} · ${g.n} Hedge-Trades · Median ${admKfQFmt(q)} (p25 ${admKfQFmt(Number(g.p25))} · p75 ${admKfQFmt(Number(g.p75))}) · Ebene ${g.ebene} — klicken filtert auf ${key}`
+        row.querySelector('.kf-q-sub').textContent = `${g.n} Trades · ${bsp}`
+        row.title = `${key} · ${g.n} Hedge-Trades · Median ${admKfQFmt(q)} (p25 ${admKfQFmt(Number(g.p25))} · p75 ${admKfQFmt(Number(g.p75))})${geplant} — klicken filtert auf ${key}`
         row.addEventListener('click', () => { admKf.filter = on ? null : { art: 'q', wert: key }; admKfRender() })
         el.appendChild(row)
       }
@@ -28144,7 +28236,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.450'
+  const OS_TAB_BUILD = '2026-09-22.451'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -4533,6 +4533,20 @@ def _hq_pct(vals, p):
     return v[lo] + (v[hi] - v[lo]) * (k - lo)
 
 
+def _hq_ohne_ausreisser(vals, begleit=None):
+    """Tukey-Zaun (1,5 × IQR) je Gruppe (24.09.2026, Finn: „kannst du hier die Ausreißer weglassen").
+    Ab 5 Werten; begleit = parallele Liste, die mitgefiltert wird (Reibung real). Liefert (vals, begleit)."""
+    if len(vals) < 5:
+        return vals, begleit
+    q1, q3 = _hq_pct(vals, 0.25), _hq_pct(vals, 0.75)
+    iqr = q3 - q1
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    idx = [i for i, v in enumerate(vals) if lo <= v <= hi]
+    if len(idx) < 3:
+        return vals, begleit
+    return [vals[i] for i in idx], ([begleit[i] for i in idx] if begleit is not None else None)
+
+
 def _hq_typ(acc):
     return str(acc.get("account_type") or "").strip().lower() or "—"
 
@@ -4621,9 +4635,9 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx):
             e["sum_spl_eur"] += spl_eur
     gruppen, lookup = [], {}
     for e in samm.values():
-        qs = e["q"]
+        qs, _ = _hq_ohne_ausreisser(e["q"])
         g = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
-             "n": len(qs),
+             "n": len(qs), "n_roh": len(e["q"]),
              "median_q": round(_hq_pct(qs, 0.5), 4), "mean_q": round(sum(qs) / len(qs), 4),
              "p25": round(_hq_pct(qs, 0.25), 4), "p75": round(_hq_pct(qs, 0.75), 4),
              "median_r": (round(_hq_pct(e["r"], 0.5), 4) if e["r"] else None),
@@ -4633,19 +4647,19 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx):
     gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
     reib_gruppen, reib_lookup = [], {}
     for e in reib.values():
-        ks = e["k"]
+        ks, krs = _hq_ohne_ausreisser(e["k"], e["kr"])
         g = {"key": e["key"], "ebene": e["ebene"], "firm": e["firm"], "typ": e["typ"], "groesse": e["groesse"],
-             "n": len(ks),
+             "n": len(ks), "n_roh": len(e["k"]),
              "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
              # Anteil nur auf Ebene A/B eindeutig (ein Typ); C/D mischen → real aus den Einzel-Trades
              "anteil": (_hq_anteil(e["typ"]) if e["typ"] else None),
-             "real_median": round(_hq_pct(e["kr"], 0.5), 2), "real_mean": round(sum(e["kr"]) / len(e["kr"]), 2)}
+             "real_median": round(_hq_pct(krs, 0.5), 2), "real_mean": round(sum(krs) / len(krs), 2)}
         reib_gruppen.append(g)
         reib_lookup[g["key"]] = g
     reib_gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
     reib_global = None
     if reib_alle:
-        ks = [k for k, _ in reib_alle]; krs = [kr for _, kr in reib_alle]
+        ks, krs = _hq_ohne_ausreisser([k for k, _ in reib_alle], [kr for _, kr in reib_alle])
         reib_global = {"n": len(ks), "median": round(_hq_pct(ks, 0.5), 2), "mean": round(sum(ks) / len(ks), 2),
                        "real_median": round(_hq_pct(krs, 0.5), 2), "real_mean": round(sum(krs) / len(krs), 2)}
     return gruppen, lookup, reib_gruppen, reib_lookup, reib_global
