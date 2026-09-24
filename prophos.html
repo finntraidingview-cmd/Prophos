@@ -18312,11 +18312,12 @@
     }
     // Einstiegskurs: vom Bot (Avg Fill Price der Position), sonst der Live-Kurs des Feeds — mit Quelle
     let einstieg = (r && r.einstieg != null) ? tvKursZahl(r.einstieg) : null, quelle = 'fill'
-    if(!(einstieg > 1000)){ const k = await hedgeKursLesen(); einstieg = k ? k.preis : null; quelle = k ? `feed ${k.symbol} (${Math.round(k.alter_ms / 1000)} s alt)` : 'keine' }
+    let einstiegWurzel = null
+    if(!(einstieg > 1000)){ const kq = await hedgeKursAktuell(ppl === 20 ? 'NQ' : 'MNQ'); einstieg = kq ? kq.preis : null; einstiegWurzel = kq ? kq.wurzel : null; quelle = kq ? `feed ${kq.wurzel} (${kq.quelle})` : 'keine' }   // Plan-Wurzel bevorzugt, sonst die andere (Gegenprüfung 25.09.2026)
     const tpLevel = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null
     const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
-    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
+    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
     let res = null
     try{
       // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name für
@@ -18369,6 +18370,11 @@
     if(h.pc && h.pc !== hedgePcId()) return { ok: false, msg: `Hedge liegt auf ${h.pc}, nicht auf diesem PC` }
     const pid = String(plan.id)
     if(_hedgeBusy.has(pid)) return { ok: false, msg: 'läuft schon' }
+    // Backoff nach abgelehntem Close (Gegenprüfung 25.09.2026): 10 / 20 / 40 / 60 s — sonst hämmert der 1-s-Wächter Aufträge ins Panel
+    if(h.close_fehler_at){
+      const n = Math.max(1, Number(h.close_versuche) || 1), warte = Math.min(60000, 10000 * Math.pow(2, n - 1))
+      if(Date.now() - (Date.parse(h.close_fehler_at) || 0) < warte) return { ok: false, msg: `Backoff ${Math.round(warte / 1000)} s nach Close-Fehler` }
+    }
     _hedgeBusy.add(pid)
     try{
       try{ await hedgeAmPlanSchreiben(plan.id, { status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: new Date().toISOString() }) }catch(_){}
@@ -18385,12 +18391,12 @@
         // Grund vom Copier (Vertrag .470: level_sl/level_tp/hand/stopout/close/unbekannt) schlägt den Frontend-Grund —
         // der Copier weiß aus der Deal-Historie, welches Level gefüllt hat. 'close'/'unbekannt' sagen nichts Neues.
         const grundEnd = (res.grund && res.grund !== 'close' && res.grund !== 'unbekannt') ? res.grund : grund
-        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
+        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, close_fehler: null, close_versuche: 0, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
         if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
-      await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString() })
+      await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString(), close_versuche: (Number(h.close_versuche) || 0) + 1 })
       if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg, 'end')
       return { ok: false, msg }
     }finally{ _hedgeBusy.delete(pid) }
@@ -18475,17 +18481,18 @@
   // Aktueller Kurs für den Wächter: zuerst der lokale Reader dieses PCs (GET /positions → kurse[wurzel], ≤ 5 s, nicht stale),
   // sonst tv_kurse über Realtime/Poll (mkl.kursJe, ≤ 5 s), sonst die Cloud-Abfrage (≤ 5 s). null = kein Beweis → nichts tun.
   async function hedgeKursAktuell(wurzel){
-    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ'
-    try{
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', andere = w === 'NQ' ? 'MNQ' : 'NQ'
+    // je Quelle beide Wurzeln (Gegenprüfung 25.09.2026: fehlt die Plan-Wurzel, die andere nehmen — NQ ≈ MNQ < 1 Pkt)
+    const lokal = ww => { try{
       if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && Date.now() - (epLokal.ab || 0) <= 5000){
-        const q = epLokal.stand.kurse && epLokal.stand.kurse[w]
+        const q = epLokal.stand.kurse && epLokal.stand.kurse[ww]
         const pr = q && !q.stale ? (Number(q.preis) || Number(q.lp) || 0) : 0
-        if(pr > 0) return pr
-      }
-    }catch(_){}
-    try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[w] : null; if(k && k.alter_ms <= 5000 && k.preis > 0) return k.preis }catch(_){}
-    try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) return k.preis }catch(_){}
-    return null
+        if(pr > 0) return { preis: pr, wurzel: ww, quelle: 'reader' }
+      } }catch(_){} return null }
+    const cloudRt = ww => { try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null; if(k && k.alter_ms <= 5000 && k.preis > 0) return { preis: k.preis, wurzel: ww, quelle: 'realtime' } }catch(_){} return null }
+    let kq = lokal(w) || lokal(andere) || cloudRt(w) || cloudRt(andere)
+    if(!kq){ try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) kq = { preis: k.preis, wurzel: k.wurzel, quelle: 'cloud' } }catch(_){} }
+    return kq   // null = kein Beweis → nichts tun
   }
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
@@ -18523,7 +18530,13 @@
         // Ring-/Position-weg-Abgleich unten bleibt die zweite Linie (= Notfall-Level im Terminal hat gefüllt).
         {
           const wz = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
-          const kurs = await hedgeKursAktuell(wz === 'MNQ' ? 'MNQ' : 'NQ')
+          const kq = await hedgeKursAktuell(wz === 'MNQ' ? 'MNQ' : 'NQ'), kurs = kq ? kq.preis : null
+          // Wächter-Stand am Plan alle 10 s (nicht jede Sekunde) + „Feed fehlt seit" für den Chip-Tooltip (Gegenprüfung 25.09.2026)
+          const jetztIso = new Date().toISOString()
+          const fehltSeit = kurs ? null : (h.feed_fehlt_seit || jetztIso)
+          if(!h.waechter_at || Date.now() - (Date.parse(h.waechter_at) || 0) > 10000 || (!!fehltSeit) !== (!!h.feed_fehlt_seit)){
+            try{ await hedgeAmPlanSchreiben(p.id, { waechter_at: jetztIso, waechter_stand: { at: jetztIso, kurs, wurzel: kq ? kq.wurzel : null, quelle: kq ? kq.quelle : null }, feed_fehlt_seit: fehltSeit }) }catch(_){}
+          }
           const ent = hedgeFeedEntscheid(p.richtung, kurs, Number(h.tp_level_nq) || 0, Number(h.sl_level_nq) || 0, hedgePuffer())
           if(ent){ await hedgeSoloSchliessen(p, ent, kurs); continue }
         }
@@ -18572,7 +18585,7 @@
         const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
         return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
-          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
+          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
@@ -19118,7 +19131,8 @@
   // Kurz-Name fürs Chart-Label: erstes Wort der Firma + Kontonr-Ende
   const mklWdKurz = pw => { const k = pw.konto || {}; const fi = String(k.firma || '').trim().split(/\s+/)[0]; return `${fi || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
   const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
-  const mklWdSchliesstBei = pw => (Number(pw.tp_level_nq) > 0) ? (pw.richtung === 'sell' ? Number(pw.tp_level_nq) - hedgePuffer() : Number(pw.tp_level_nq) + hedgePuffer()) : null
+  const mklWdSchliesstBei = pw => (pw.hedge && Number(pw.hedge.schliesst_bei_nq) > 0) ? Number(pw.hedge.schliesst_bei_nq)   // was der Wächter wirklich nimmt; Rechnung nur Rückfall
+    : (Number(pw.tp_level_nq) > 0) ? (pw.richtung === 'sell' ? Number(pw.tp_level_nq) - hedgePuffer() : Number(pw.tp_level_nq) + hedgePuffer()) : null
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     const pl = mkl.wd.plaene || []
@@ -28935,7 +28949,18 @@
   // Risiko Slave vorbelegen (nur ein leeres Feld): beim Bearbeiten aus dem Plan, sonst die Farmer-Staffel des Kontos —
   // dieselbe Quelle, die der Farmer für seinen Multiplikator nutzt (tpVorplanZeile.slaveEur über tpWdHedgeEur)
   function tpWdSlaveRiskVorbelegen(){
-    const el = document.getElementById('tp-slave-risk'); if(!el || el.value !== '' || !tpWdAktiv()) return
+    if(!tpWdAktiv()) return
+    // Risiko Master ($) = Stop-Distanz für die Lot-Rechnung (Gegenprüfung 25.09.2026: Finn fährt Winning Days oft ohne SL — nicht
+    // blocken): leer → Farmer-SL-Vorgabe des Kontos (wd_sl), sonst Max-Drawdown
+    try{
+      const mr = document.getElementById('tp-master-risk')
+      if(mr && mr.value === ''){
+        const acc = (accounts || []).find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
+        const v = acc ? (acc.wdSl > 0 ? Number(acc.wdSl) : (acc.maxDrawdown > 0 ? Number(acc.maxDrawdown) : 0)) : 0
+        if(v > 0) mr.value = String(Math.round(v))
+      }
+    }catch(e){ console.warn('[wd-master-risk]', e) }
+    const el = document.getElementById('tp-slave-risk'); if(!el || el.value !== '') return
     try{
       let ep = null; try{ ep = _editPlan }catch(_){ ep = null }
       const masterId = document.getElementById('tp-master')?.value
@@ -29030,7 +29055,7 @@
     v2weg(document.getElementById('tp-vorgaenger-suggest'), v2)
     const multBox = document.querySelector('#tradePlanModal .tp-multi-display')
     if(multBox) multBox.style.display = (v2 && !wdAn) ? 'none' : ''
-    { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = wdAn ? 'Risiko Master ($) — ist der Stop Loss' : 'Risiko Master ($)' }
+    { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = wdAn ? 'Risiko Master ($) — Stop-Distanz in $ für die Lot-Rechnung' : 'Risiko Master ($)' }
     { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>) — Fusion, Staffel-Vorschlag'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
     // Ein Popup für alles (23.09.2026, Finn: „den Account auswählen, die Lotanzahl, Take Profit und Stop-Loss, die
     // Uhrzeit — das ist alles"): auf V2 kommen TP, SL, Richtung und Startzeit HIER rein; Risiko Master und die
@@ -29851,7 +29876,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.517'
+  const OS_TAB_BUILD = '2026-09-22.521'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30216,6 +30241,17 @@
           try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
         }
         await v2PlanAufOpen(plan.id, null, tvb)
+        // Bot-Fill auch OHNE Hedge am Plan (Gegenprüfung 25.09.2026): mt5_baseline.tv.einstieg_nq — die Winning-Days-Übersicht
+        // (wd-heute) zeichnet daraus Entry-/TP-/SL-Linien für reine Orbit-V2-Winning-Days
+        try{
+          const ein = (r && r.einstieg != null && typeof tvKursZahl === 'function') ? tvKursZahl(r.einstieg) : null
+          if(ein > 1000){
+            const { data: zeile } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+            const base = Object.assign({}, (zeile && zeile.mt5_baseline) || {})
+            base.tv = Object.assign({}, base.tv || {}, { einstieg_nq: ein, einstieg_quelle: 'fill', einstieg_symbol: r.tv_symbol || null })
+            await supabase.from('trade_plans').update({ mt5_baseline: base }).eq('id', plan.id)
+          }
+        }catch(e){ console.warn('[v2] einstieg_nq', e) }
         // FUSION-GEGENHEDGE (24.09.2026 abends): direkt nach „Läuft" die Gegen-Order auf Fusion — nur bei
         // Plänen mit hedge_eur (Farmer-Staffel / Order-Popup). r trägt einstieg (Avg Fill) + tv_symbol.
         if(plan.hedgeEur > 0 && typeof hedgeSoloOeffnen === 'function'){
