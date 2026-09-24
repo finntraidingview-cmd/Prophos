@@ -1336,7 +1336,7 @@
   #adm-pane-stat .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
   #adm-pane-stat .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
   #adm-pane-stat .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
-  #adm-pane-stat .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:6px 0 4px}
+  #adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,1fr);gap:10px;margin:6px 0 4px}   /* 8 Kacheln = 2 saubere Reihen (24.09.2026 abends) */
   #adm-pane-stat .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
   #adm-pane-stat .kf-kpis .kpi-value{font-size:18px}
   #adm-pane-stat .kf-kpis .kpi-delta{font-size:11px}
@@ -1373,7 +1373,7 @@
   #adm-pane-stat .kf-gross .adm-vl{height:360px}
   #adm-pane-stat .kf-gross .kf-mini-cv{height:320px}
   /* Oberkategorie: Titel links, Unter-Auswahl rechts, darunter EINE Fläche (24.09.2026 abends) */
-  #adm-pane-stat .kf-gruppe{margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)}
+  #adm-pane-stat .kf-gruppe{margin-top:12px;padding:12px 14px 10px;border:1px solid var(--border-soft);border-radius:12px;background:var(--surface,#fff)}
   #adm-pane-stat .kf-gruppe-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
   #adm-pane-stat .kf-gruppe-kopf .kf-abschnitt{margin-top:0}
   #adm-pane-stat .kf-gruppe-kopf .kf-chip-bar{margin-top:0}
@@ -1407,9 +1407,9 @@
   #adm-pane-stat .kf-quoten .adm-row-name .adm-dot{margin-top:5px}
   #adm-pane-stat .kf-quoten .adm-row-name small{white-space:normal}
   #adm-pane-stat .kf-q-sub{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
-  @media (max-width:1200px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,1fr)}}
+
   @media (max-width:960px){
-    #adm-pane-stat .kf-kpis{grid-template-columns:repeat(3,1fr)}
+    #adm-pane-stat .kf-kpis{grid-template-columns:repeat(2,1fr)}
       }
   @media (max-width:600px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(2,1fr)}}
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
@@ -7982,7 +7982,7 @@
                   <div class="panel-sub" id="adm-kf-modell2"></div>
                   <!-- Zuordnungsregel (24.09.2026, DB-Trigger sql/2026-09-24_kapitel_konto_vererbung.sql: Buchungen erben das
                        Kapitel ihres Kontos; Trades nach Weg) — Finn: „bestehende Konten bleiben in der Hedge-Ära" -->
-                  <div class="panel-sub kap-regel" style="margin:2px 0 0">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
+                  <div class="panel-sub kap-regel" style="margin:2px 0 0" hidden>Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
                 </div>
                 <div class="kf-param">
                   <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
@@ -10126,6 +10126,7 @@
     window._admLaden = () => admLoad()   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026)
     // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
     window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender() }
+    window._admKapStub = d => admKapitelRender(d)   // Entwickler-Haken wie _admStub: Kapitel/Statistik mit Stub-Daten zeichnen (24.09.2026)
     async function admLoad(){
       const msg = $('adm-msg'), body = $('adm-body')
       if(!msg) return
@@ -10831,12 +10832,22 @@
       const rg = admKapData?.reibung_gruppen?.global || null
       const reibEl = panel.querySelector('[data-kf-param="reibung"]'); if(reibEl) reibEl.placeholder = 'auto ' + admKfDe(admKfReibGlobal(), 2)
       const mod = $('adm-kf-modell'), mod2 = $('adm-kf-modell2')
-      if(mod) mod.textContent = `Modell je Trade: Hedge € = −Master-P&L $ × Quote (Firma · Typ · Größe aus der Hedge-Ära) × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
+      // Kopf kurz (24.09.2026 abends, Finn: „mach besser" — drei Zeilen Modelltext waren eine Textwand):
+      // eine Zeile, alles Weitere im Tooltip (ⓘ) des Kopfes.
+      const modLang = `Modell je Trade: Hedge € = −Master-P&L $ × Quote (Firma · Typ · Größe aus der Hedge-Ära) × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
         (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} € je Trade)` : ' (gemessen je Firma · Typ × Anteil: Funded 1,0 · Challenge/Phase 0,5)') +
-        ` · ohne Quote: FX ${admKfDe(fx, 3)} × 1`
-      if(mod2) mod2.textContent = (rg && Number.isFinite(Number(rg.median)))
-        ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — Hälfte von 5,44 € gemessen: Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026)`
-        : 'Reibung: Hälfte von 5,44 € gemessen — Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026); Gruppenwerte kommen mit dem nächsten Laden'
+        ` · ohne Quote: FX ${admKfDe(fx, 3)} × 1\n` +
+        ((rg && Number.isFinite(Number(rg.median)))
+          ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026)`
+          : 'Reibung: Gruppenwerte kommen mit dem nächsten Laden') +
+        '\nKonten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)'
+      if(mod){
+        mod.textContent = `Hedge € = −Master-P&L × Quote × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
+          (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} €)` : (rg && Number.isFinite(Number(rg.real_mean)) ? ` (Ø ${admKfDe(Number(rg.real_mean), 2)} €)` : '')) +
+          ` · FX ${admKfDe(fx, 3)} · ⓘ Details im Tooltip`
+        mod.title = modLang
+      }
+      if(mod2){ mod2.hidden = true; mod2.textContent = '' }
       const alle = Array.isArray(k.trades_liste) ? k.trades_liste : []
       const leer = $('adm-kf-leer'), body = $('adm-kf-body')
       if(!alle.length){ leer.hidden = false; body.hidden = true; return }
@@ -10870,20 +10881,22 @@
       const best = sortiert[0], worst = sortiert[sortiert.length - 1]
       const tradeTxt = t => t ? escapeHtml(`${t.account_name || t.person || '—'} · ${admVlDatum(t.datum)}`) : '–'
       const kp = $('adm-kf-kpis'), kp2 = $('adm-kf-kpis2')
+      // Acht Kacheln in zwei 4er-Reihen (24.09.2026 abends, Finn: „mach besser" — 6 + 1 verwaiste Kachel)
       if(kp) kp.innerHTML =
         kpi('Payouts', admVlSign(sumP), `${payouts.length} Auszahlung${payouts.length === 1 ? '' : 'en'} im Kapitel`, `color:${col(sumP)}`) +
         kpi('Kauf', admVlSign(-sumK), `${kauf.length} Konten · Payouts decken ${sumK ? admKfDe(sumP / sumK * 100, 0) + ' %' : '–'}`, `color:${col(-sumK)}`) +
+        kpi('Real', admVlSign(real), 'Payouts − Kauf, Realmoney', `color:${col(real)}`) +
         kpi('Master-P&amp;L real', admUsdSign(mpl), 'USD roh, Prop-Konten', `color:${col(mpl)}`) +
-        kpi('Hedge hypothetisch', admVlSign(hyp), `Real ${admVlSign(real)} → mit Hedge ${admVlSign(mitHedge)}` + (ohneQ ? ` · ${ohneQ} ohne Quote` : ''), `color:${col(hyp)}`) +
-        kpi('Reibung gespart', admVlSign(reibSum), n ? `Ø ${admKfDe(reibSum / n, 2)} € je Trade · steckt im Hedge-Wert` : 'reale Reibung, die nicht anfällt', `color:${col(reibSum)}`) +
-        kpi('Vorteil ohne Hedge', admVlSign(-hyp), -hyp >= 0 ? 'so viel hätte der Gegen-Hedge gekostet (inkl. Reibung)' : 'so viel hätte der Gegen-Hedge gebracht', `color:${col(-hyp)}`)
+        kpi('Hedge hypothetisch', admVlSign(hyp), `mit Hedge wäre Real ${admVlSign(mitHedge)}` + (ohneQ ? ` · ${ohneQ} ohne Quote` : ''), `color:${col(hyp)}`) +
+        kpi('Vorteil ohne Hedge', admVlSign(-hyp), -hyp >= 0 ? 'so viel hätte der Gegen-Hedge gekostet' : 'so viel hätte der Gegen-Hedge gebracht', `color:${col(-hyp)}`) +
+        kpi('Reibung gespart', admVlSign(reibSum), n ? `Ø ${admKfDe(reibSum / n, 2)} € je Trade · steckt im Hedge-Wert` : 'reale Reibung, die nicht anfällt', `color:${col(reibSum)}`)
       if(kp2) kp2.innerHTML =
         kpi('Trades', String(n), `Blow-Quote ${n ? Math.round(blown / n * 100) + ' %' : '–'} · ${filterTxt}`) +
         kpi('Ø je Trade', n ? admUsdSign(mpl / n) : '–', 'Master-P&amp;L geteilt durch Trades', n ? `color:${col(mpl)}` : '') +
         kpi('Win-Rate', n ? Math.round(wins / n * 100) + ' %' : '–', `${wins} von ${n} im Plus`) +
+        kpi('Ø Quote', qAvg !== null ? admKfQFmt(qAvg) : '–', `${mitQ.length} von ${n} mit Quote · Ersparnis ${n ? admVlSign(-hyp / n) : '–'} je Trade`) +
         kpi('Bester Trade', best ? admUsdSign(admKapNum(best.master_pl)) : '–', tradeTxt(best), best ? `color:${col(admKapNum(best.master_pl))}` : '') +
         kpi('Schlechtester Trade', worst ? admUsdSign(admKapNum(worst.master_pl)) : '–', tradeTxt(worst), worst ? `color:${col(admKapNum(worst.master_pl))}` : '') +
-        kpi('Ø Quote', qAvg !== null ? admKfQFmt(qAvg) : '–', `${mitQ.length} von ${n} Trades mit Quote · Ersparnis ${n ? admVlSign(-hyp / n) : '–'} je Trade`) +
         // Serien (24.09.2026 abends): aktuelle Serie + längste Gewinn-/Verlustserie
         (() => { const sr = admKfSerien(trades); const txt = sr.cur ? `${sr.cur} ${sr.curSign > 0 ? 'Gewinn' : 'Verlust'}${sr.cur === 1 ? '' : 'e'} in Folge` : '–'
                  return kpi('Serie aktuell', sr.cur ? (sr.curSign > 0 ? '+' : '−') + sr.cur : '–', txt, sr.cur ? `color:${sr.curSign > 0 ? '#15803d' : '#b91c1c'}` : '') +
@@ -11052,7 +11065,8 @@
       // x-Achse druckten übereinander). cfg.horizontal: Kategorien auf der y-Achse, Höhe wächst mit der Zahl
       // der Zeilen; Wert-Achse liegt dann auf x, eine zweite Wert-Achse oben statt rechts.
       const horiz = !!cfg.horizontal
-      wrap.style.height = horiz ? Math.max(window.innerWidth <= 600 ? 280 : 320, cats.length * 26 + 40) + 'px' : ''   // Mobil 280 (Review F13)
+      // Höhe folgt der Zeilenzahl (24.09.2026 abends: drei Balken in 320 px waren Leerraum), Untergrenze 220/200 mobil
+      wrap.style.height = horiz ? Math.min(640, Math.max(window.innerWidth <= 600 ? 200 : 220, cats.length * 34 + 70)) + 'px' : ''
       const axisKey = horiz ? 'xAxisID' : 'yAxisID', prim = horiz ? 'x' : 'y', sek = horiz ? 'x1' : 'y1'
       const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), [axisKey]: prim, borderRadius: 3, maxBarThickness: 26,
                           backgroundColor: cats.map(e => cfg.a.farbe(e, on(e))) }]
@@ -28397,7 +28411,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.455'
+  const OS_TAB_BUILD = '2026-09-22.456'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
