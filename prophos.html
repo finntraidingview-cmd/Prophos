@@ -1257,6 +1257,11 @@
   /* aktiv = weiße Pille des .seg PLUS Farbakzent — sonst sah man nicht, was gedrückt ist */
   #tradePlanModal .tp-v2-instr button.active{color:var(--violet)}
   #tradePlanModal .tp-v2-instr button.active small{color:var(--violet);opacity:.85}
+  /* NQ gewählt (25.09.2026): vollflächig rot, weiße Schrift — Finn fährt fast immer MNQ */
+  #tradePlanModal #tp-v2-nq.active,#tradePlanModal #tp-nq-nq.active{background:var(--danger) !important;color:#fff !important;border-color:var(--danger) !important}
+  #tradePlanModal #tp-v2-nq.active small,#tradePlanModal #tp-nq-nq.active span{color:rgba(255,255,255,.9) !important;opacity:1}
+  #dashboard-view .tp-nq-warn{margin-top:6px;padding:7px 10px;border-radius:8px;background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4}
+  #dashboard-view .tp-nq-warn[hidden]{display:none}
   /* Handy (24.09.2026, Vollumstieg auf V2): die 760-px-Regel oben trägt !important und schlug am Handy die
      Sheet-Breite — das Popup lief seitlich aus dem Bild. Auf ≤ 820 px volle Sheet-Breite, Sheet-Polster,
      Instrument-Seg und Kontrakte untereinander (eine Spalte), nichts scrollt quer. */
@@ -5782,6 +5787,7 @@
                (Handy/Mac), schreibt „Starten" das Signal nach order_signale —
                hier steht live, was der PC daraus macht (wartet/läuft/Ergebnis). -->
           <div id="tp-order-remote" style="display:none;margin-top:14px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.5;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.3)"></div>
+          <div class="tp-nq-warn" id="tp-order-nq-warn" hidden style="margin-top:14px">Achtung: NQ im Symbol — 10-facher Punktwert von MNQ. Wirklich NQ?</div>
           <div class="modal-actions" style="margin-top:16px">
             <span class="modal-msg" id="tpOrderMsg"></span>
             <button class="btn btn-ghost" id="tpOrderBack">Zurück</button>
@@ -5871,6 +5877,7 @@
                 <button type="button" id="tp-nq-mnq" class="btn btn-ghost active" style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">MNQ <span style="font-size:10px;color:var(--sub);font-weight:400">$2/pt</span></button>
                 <button type="button" id="tp-nq-nq"  class="btn btn-ghost"        style="font-size:12px;padding:4px 14px;border-radius:20px;font-family:var(--mono);font-weight:600">NQ  <span style="font-size:10px;color:var(--sub);font-weight:400">$20/pt</span></button>
               </div>
+              <div class="tp-nq-warn" id="tp-nq-master-warn" hidden>Achtung: NQ gewählt — 10-facher Punktwert von MNQ. Wirklich NQ?</div>
             </div>
             <!-- Placeholder col 2 wenn nur Master-Toggle sichtbar — hält Grid-Alignment -->
             <div id="tp-nq-toggle-slave-placeholder" style="display:none"></div>
@@ -5884,6 +5891,9 @@
                 <button type="button" id="tp-v2-mnq">MNQ<small>$2/pt</small></button>
                 <button type="button" id="tp-v2-nq">NQ<small>$20/pt</small></button>
               </div>
+              <!-- NQ-Warnung (25.09.2026, Finn: „NQ wird fast nie benutzt, ich nehme immer MNQ — das NQ soll komplett rot laufen,
+                   damit man sich nicht vertut"): nur Hinweis, keine Sperre; tpNqUpdateToggle blendet sie ein -->
+              <div class="tp-nq-warn" id="tp-v2-nq-warn" hidden>Achtung: NQ gewählt — 10-facher Punktwert von MNQ. Wirklich NQ?</div>
             </div>
 
             <!-- NQ/MNQ Toggle Slave — sichtbar wenn Slave projectx-Firma ist (col 2) -->
@@ -31022,6 +31032,7 @@
         dirSperren(lauft, dirs[lauft][0] || {}, true)
       }).catch(() => {})
     }
+    try{ tpOrderNqWarn() }catch(_){}
     document.getElementById('tpOrderModal').classList.add('open')
   }
 
@@ -31221,7 +31232,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.578'
+  const OS_TAB_BUILD = '2026-09-22.579'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31376,6 +31387,13 @@
   // Order-Werte eines Orbit-Plans. 'aus' (optional) = Werte aus einem Remote-Signal — sie
   // gewinnen, weil der Absender sie beim SENDEN frisch aus seinem Plan-Stand gebaut hat
   // (der PC-Tab kann den Plan noch im alten Stand geladen haben).
+  // NQ-Hinweis im Order-Schritt (25.09.2026): Symbolwurzel NQ (Börsen-Präfix weg, MNQ zählt nicht) → rote Zeile über den Knöpfen
+  function tpOrderNqWarn(){
+    const w = document.getElementById('tp-order-nq-warn'); if(!w) return
+    const roh = String(document.getElementById('tp-order-symbol')?.value || '').trim().replace(/^[^:]*:/, '').toUpperCase()
+    w.hidden = !/^NQ/.test(roh)
+  }
+  document.getElementById('tp-order-symbol')?.addEventListener('input', tpOrderNqWarn)
   function tpOrbitWerte(plan, aus){
     const q = aus || {}
     const r0 = aus ? q.richtung : plan.richtung
@@ -34660,6 +34678,12 @@
     if(rowV2) rowV2.style.display = (v2 && (_tpRoute === 'tvv2' || _tpRoute === 'tsv2')) ? '' : 'none'
     document.getElementById('tp-v2-mnq')?.classList.toggle('active', _tpNqMode === 'mnq')
     document.getElementById('tp-v2-nq')?.classList.toggle('active',  _tpNqMode === 'nq')
+    // NQ gewählt → Knopf vollflächig rot mit „· 10× MNQ" + Warnzeile unter dem Umschalter (25.09.2026, nur Hinweis)
+    { const nq = _tpNqMode === 'nq'
+      const b2 = document.getElementById('tp-v2-nq'); if(b2) b2.innerHTML = nq ? 'NQ<small>$20/pt · 10× MNQ</small>' : 'NQ<small>$20/pt</small>'
+      const bp = document.getElementById('tp-nq-nq'); if(bp) bp.innerHTML = `NQ <span style="font-size:10px;color:var(--sub);font-weight:400">${nq ? '$20/pt · 10× MNQ' : '$20/pt'}</span>`
+      const w2 = document.getElementById('tp-v2-nq-warn'); if(w2) w2.hidden = !nq
+      const wp = document.getElementById('tp-nq-master-warn'); if(wp) wp.hidden = !nq }
 
     // Slave toggle
     const rowS = document.getElementById('tp-nq-toggle-slave')
