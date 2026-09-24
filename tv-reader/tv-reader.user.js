@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.1
+// @version      0.8.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.2  25.09.2026  Serien-Zaehler nach Ursache getrennt (Moritz' PC: 'unbek 366' bei 'Serien 3' — ein
+//                      Zaehler je Bar sagte nicht, WELCHE Serie): fremd (Symbol bekannt, weder NQ noch MNQ),
+//                      unaufgeloest (Send gehoert, Symbol-Id noch ohne Klartext — wird nachgezogen, sobald
+//                      symbol_resolved kommt) und unbekannt (kein Send, kein Rueckfall) — je Serie, nicht je Bar
 //   0.8.1  25.09.2026  Kurs-ts = EMPFANGSZEIT (Moritz' PC: reader_ts hinkte 0–60 s, weil lp_time nur minuten-
 //                      genau kommt → Markt-Kopf/Hedge-Waechter hielten den laufenden Feed fuer tot); lp_time
 //                      bleibt als lp_time/lp_time_ms daneben. Serien-Rueckfall, wenn die Sends vor dem Wrapper
@@ -60,7 +64,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.1';
+  const VERSION    = '0.8.2';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -914,6 +918,10 @@
     bars: [],            // wartende Bars fuer POST /kerzen
     erstladung: false,
     unbekannte_serien: 0, fehler: 0, aufloesung_warnung: null,
+    // 0.8.2: je Serien-Id statt je Bar — sid -> Bars, damit die Live-Zeile sagt, welche Serie es ist
+    unbekannt: {},       // kein create_series-Send gehoert UND kein Rueckfall (pxSerieRaten) moeglich
+    unaufgeloest: {},    // Send gehoert, aber die Symbol-Id hat noch keinen Klartext (resolve_symbol lief vor dem Wrapper)
+    fremd: {},           // Symbol bekannt, Wurzel weder NQ noch MNQ (ES, Vergleichssymbol, …) -> keine Bars, kein Fehler
     modus: null, delay_s: null,   // update_mode aus qsd/series_completed ('streaming' | 'delayed_streaming_600'), delay aus symbol_resolved
     info: {},            // symbolId -> { symbol, root, front_contract, pointvalue, tick } aus symbol_resolved (eingehend)
     bevorzugt: {},       // wurzel -> Symbol der Chart-Serie (NQ1! und NQZ2026 liefern dieselben qsd — nur eine Quelle je Wurzel)
@@ -951,7 +959,9 @@
         const sym = feed.symbole[String(msg.p[3])] || '';
         const info = feed.info[String(msg.p[3])];
         const wurzel = (info && info.root) || kursWurzelAusText(sym);
-        feed.serien[String(msg.p[1])] = { symbol: sym, wurzel, aufloesung: String(msg.p[4]) };
+        // symbol_id merken (0.8.2): ist der Klartext noch unbekannt, zieht pxSerienNachziehen ihn nach,
+        // sobald symbol_resolved fuer diese Id eintrifft — statt jede Bar als 'unbekannt' zu zaehlen.
+        feed.serien[String(msg.p[1])] = { symbol: sym, wurzel, aufloesung: String(msg.p[4]), symbol_id: String(msg.p[3]) };
         if (wurzel && sym) feed.bevorzugt[wurzel] = sym;
       }
     }
@@ -973,6 +983,24 @@
     if (!wurzel) return null;
     return (feed.serien[sid] = { symbol, wurzel, aufloesung: '1', geraten: true, grund });
   }
+  // 0.8.2: Serien, deren Send gehoert wurde, deren Symbol-Id aber noch keinen Klartext hatte, bekommen
+  // ihn nach — feed.symbole/feed.info fuellen sich durch symbol_resolved (eingehend) auch dann, wenn
+  // das resolve_symbol selbst vor dem Wrapper lief.
+  function pxSerienNachziehen() {
+    for (const sid of Object.keys(feed.serien)) {
+      const se = feed.serien[sid];
+      if (!se || se.wurzel || !se.symbol_id) continue;
+      const sym = feed.symbole[se.symbol_id] || '';
+      const info = feed.info[se.symbol_id];
+      if (!sym && !info) continue;
+      se.symbol = sym || (info && info.symbol) || '';
+      se.wurzel = (info && info.root) || kursWurzelAusText(se.symbol);
+      if (se.wurzel && se.symbol) feed.bevorzugt[se.wurzel] = se.symbol;
+      if (se.wurzel) { delete feed.unaufgeloest[sid]; feed.unbekannte_serien = Object.keys(feed.unbekannt).length + Object.keys(feed.unaufgeloest).length; }
+    }
+  }
+  const WURZELN = ['NQ', 'MNQ'];   // nur dafuer gibt es Bars — alles andere (ES, Vergleichssymbol) ist 'fremd', kein Fehler
+  const zaehl = (obj, sid) => { obj[sid] = (obj[sid] || 0) + 1; };
   function pxBarsAusUpdate(p1, erstladung) {
     if (!p1 || typeof p1 !== 'object') return 0;
     let n = 0;
@@ -981,11 +1009,19 @@
       const s = eintrag && Array.isArray(eintrag.s) ? eintrag.s : null;
       if (!s || !s.length) continue;
       let serie = feed.serien[sid];
+      if (serie && !serie.wurzel && serie.symbol_id) { pxSerienNachziehen(); serie = feed.serien[sid]; }
       if (!serie) serie = pxSerieRaten(sid);
       for (const b of s) {
         const v = b && Array.isArray(b.v) ? b.v : null;
         if (!v || v.length < 5 || v.length > 6 || !v.every(x => typeof x === 'number')) continue;
-        if (!serie || !serie.wurzel) { feed.unbekannte_serien++; continue; }
+        if (!serie || !serie.wurzel || WURZELN.indexOf(serie.wurzel) < 0) {
+          // Ursache getrennt zaehlen (0.8.2), je Serie: fremd / unaufgeloest / unbekannt
+          if (serie && serie.symbol) { const f = feed.fremd[sid] || (feed.fremd[sid] = { symbol: serie.symbol, bars: 0 }); f.bars++; }
+          else if (serie && serie.symbol_id) zaehl(feed.unaufgeloest, sid);
+          else zaehl(feed.unbekannt, sid);
+          feed.unbekannte_serien = Object.keys(feed.unbekannt).length + Object.keys(feed.unaufgeloest).length;
+          continue;
+        }
         feed.bars.push({ wurzel: serie.wurzel, symbol: serie.symbol, aufloesung: serie.aufloesung,
                          minute: Math.floor(v[0]), o: v[1], h: v[2], l: v[3], c: v[4], vol: v[5] == null ? null : v[5] });
         n++;
@@ -1012,6 +1048,7 @@
                                       tick: (i.minmov && i.pricescale) ? i.minmov / i.pricescale : null };
       if (sym) feed.symbole[String(msg.p[1])] = sym;
       if (typeof i.delay === 'number') feed.delay_s = i.delay;
+      pxSerienNachziehen();   // 0.8.2: wartende Serien mit dieser Symbol-Id bekommen jetzt Klartext + Wurzel
       return;
     }
     if (msg.m === 'series_completed' && msg.p.length >= 3) { pxModus(msg.p[2]); return; }
@@ -1101,6 +1138,7 @@
       ws_frames_min: feed.frames.length, qsd_min: feed.qsd.length, du_min: feed.du.length, titel_min: feed.titel.length,
       letzter_frame_ms: feed.letzter_frame_ms, letzter_ws_ms: feed.letzter_ws_ms, sockets: feed.sockets,
       serien: feed.serien, symbole: Object.keys(feed.symbole).length, unbekannte_serien: feed.unbekannte_serien,
+      unbekannt: feed.unbekannt, unaufgeloest: feed.unaufgeloest, fremd: feed.fremd,   // 0.8.2: je Serie, mit Bars
       fehler: feed.fehler, aufloesung_warnung: feed.aufloesung_warnung, sichtbar: document.visibilityState === 'visible',
       bars_wartend: feed.bars.length, modus: feed.modus, delay_s: feed.delay_s,
       info: Object.values(feed.info).map(i => ({ symbol: i.symbol, root: i.root, front_contract: i.front_contract, pointvalue: i.pointvalue, tick: i.tick })),

@@ -181,12 +181,28 @@ und die Minutenkerzen der Chart-Serie (`timescale_update` = Erstladung mit Histo
 WebSocket-Nachrichten werden im verdeckten Tab **nicht** gedrosselt — dieser Weg liefert auch,
 wenn Prophos vorn liegt. Voraussetzungen: Chart auf **1 Minute**, Symbol NQ (NQ1! oder Front-Month),
 **MNQ1! in der Watchlist** (dann kommen NQ und MNQ parallel). Steht der Chart auf einer anderen
-Auflösung, gibt es keine Minutenkerzen — Prophos zeigt „Chart-Auflösung x statt 1". Zeigt der
+Auflösung, gibt es keine Minutenkerzen — Prophos zeigt „Chart-Auflösung x statt 1". **Kerzen gibt
+es nur für Symbole, die als Chart-Pane im Layout liegen** — die Watchlist liefert per `qsd` nur den
+Kurs, keine Bars. Für NQ-Kerzen braucht es also ein NQ-Pane (zwei Panes: NQ1! und MNQ1!, siehe
+Einrichtung unten); liegt NQ nur in der Watchlist, füllt sich `tv_kurs_1m` nur für MNQ (Moritz' PC,
+25.09.2026). Zeigt der
 Feed `delayed_streaming_600`, ist das TradingView-CME-Abo auf dem PC nicht aktiv: alle Kurse sind
 dann 10 Minuten alt mit frischem Zeitstempel — der Markt-Kopf warnt.
 
 Rückfälle bleiben eingebaut: die Sell/Buy-Knöpfe der Legende je Chart-Pane (0.7.0, nur im sichtbaren
 Tab zuverlässig) und der Tab-Titel (0.6.0).
+
+**Die Live-Zeile im Reader-Fenster lesen (reader-server 0.8.2+).** Rechts steht `Kerzen NQ n/MNQ n ·
+du/min x · Serien y (z geraten) · unbek u · fremd … · Aufl ok · Script 0.8.x · Reader 0.8.x`.
+`du/min 0` = keine Chart-Frames (kein Chart im Tab oder Socket nicht mitgehört → F5).
+`Serien 0` + `unbek > 0` = Chart-Serie nicht zuordenbar und kein Rückfall (F5). `fremd ESZ2026` =
+ein Pane zeigt ein Symbol, das weder NQ noch MNQ ist — kein Fehler, nur keine Bars dafür.
+`(unaufgel. n)` = Send gehört, Symbol-Klartext noch nicht angekommen (heilt sich beim nächsten
+symbol_resolved, sonst F5). `Aufl-WARNUNG` = Chart nicht auf 1 min. `Script ?` = noch kein POST,
+`kein feed` = Script < 0.8.0. Nach F5 im TV-Tab schickt TradingView die Erstladung (Hunderte Bars)
+— die Brücke im Prophos-Tab holt sie einmal je Tab-Sitzung über `GET /kerzen`; war ihr letzter
+Versuch „leer", wiederholt sie erst nach einer Stunde → nach dem TV-F5 auch den Prophos-PC-Tab neu
+laden, dann springt `tv_kurs_1m` sofort auf Hunderte Zeilen.
 
 **Woher der Kurs im Rückfall kommt (0.7.0).** Je Chart-Pane liest das Userscript die Sell/Buy-Knöpfe in der
 Legende (`data-name="sell-order-button"` / `"buy-order-button"`) — sie tragen Bid und Ask.

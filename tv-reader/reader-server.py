@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.2"
+READER_VERSION = "0.8.3"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -336,6 +336,14 @@ def _kerzen_diag(kerzen, bedienfeld, aufl_warnung, script_version):
         teil = (f"du/min {feed.get('du_min', '?')} · Serien {len(serien)}"
                 + (f" ({geraten} geraten)" if geraten else "")
                 + f" · unbek {feed.get('unbekannte_serien', '?')}")
+        # 0.8.3: Ursache je Serie (Script 0.8.2) — fremd = Symbol bekannt, aber weder NQ noch MNQ (kein Fehler),
+        # unaufgeloest = Send gehoert, Klartext fehlt noch, unbekannt = kein Send und kein Rueckfall
+        fremd = feed.get("fremd") if isinstance(feed.get("fremd"), dict) else {}
+        if fremd:
+            teil += " · fremd " + ",".join(str((v or {}).get("symbol") or sid).split(":")[-1][:12] for sid, v in list(fremd.items())[:3])
+        unauf = feed.get("unaufgeloest") if isinstance(feed.get("unaufgeloest"), dict) else {}
+        if unauf:
+            teil += f" (unaufgel. {len(unauf)})"
     else:
         teil = "kein feed (Script < 0.8.0?)"
     aufl = f"Aufl-WARNUNG {aufl_warnung}" if aufl_warnung else "Aufl ok"
