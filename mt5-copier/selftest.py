@@ -1723,6 +1723,7 @@ def main():
     results.append(test_kerze_fortschreiben())
     results.append(test_solo_level_und_grund())
     results.append(test_solo_zu_ring())
+    results.append(test_solo_plan_kennung())
 
     print()
     ok = sum(1 for r in results if r)
@@ -1858,6 +1859,36 @@ def test_solo_level_und_grund():
         print("✗ solo_lots_waehlen ohne lots → eur"); ok = False
     if ok:
         print("✓ Solo-Hedge: Lots, beide Level, Grund-Mapping")
+    return ok
+
+
+def test_solo_plan_kennung():
+    """Plan-Kennung im Solo-Kommentar (25.09.2026): 'PXsolo:<plan8>', <= 31 Zeichen, Parsen mit/ohne Kennung,
+    und die Kennung reist mit bekannt → Abschluss-Ring."""
+    import copier
+    ok = True
+    k = copier.solo_kommentar("2089a033-1234-4abc-9def-000000000000")
+    if k != "PXsolo:2089a033" or len(k) > copier.SOLO_KOMMENTAR_MAX:
+        print(f"✗ solo_kommentar mit plan_id: {k!r}"); ok = False
+    if copier.solo_kommentar(None) != "PXsolo" or copier.solo_kommentar("") != "PXsolo":
+        print("✗ solo_kommentar ohne plan_id"); ok = False
+    if copier.solo_kommentar("ab:c/d e;f\\gh12345") != "PXsolo:abcdefgh":
+        print(f"✗ solo_kommentar Sonderzeichen: {copier.solo_kommentar('ab:c/d e;f')!r}"); ok = False
+    if len(copier.solo_kommentar("x" * 200)) > 31:
+        print("✗ Kommentar laenger als 31"); ok = False
+    faelle = {"PXsolo:2089a033": "2089a033", " PXsolo:2089a0 ": "2089a0", "PXsolo": None, "PXsoloc": None,
+              "PXsolo:": None, "": None, None: None, "PX-760001": None, "PXsolo:2089a033extra": "2089a033"}
+    for ein, soll in faelle.items():
+        if copier.solo_plan8(ein) != soll:
+            print(f"✗ solo_plan8({ein!r}) = {copier.solo_plan8(ein)!r}, soll {soll!r}"); ok = False
+    # Kennung reist mit: bekannt-Eintrag traegt plan8/plan_id, verschwundene Position → Ring-Eintrag hat sie
+    bekannt = {4711: {"symbol": "NAS100", "lots": 0.09, "plan8": "2089a033", "plan_id": "2089a033-1234"}}
+    weg = copier.solo_zu_erkennen(bekannt, {})
+    ring = copier.solo_zu_ring([], dict(weg[0], pl=-4.2))
+    if ring[0].get("plan8") != "2089a033" or ring[0].get("plan_id") != "2089a033-1234":
+        print(f"✗ Kennung im Abschluss-Ring: {ring}"); ok = False
+    if ok:
+        print("✓ Solo-Plan-Kennung: Kommentar PXsolo:<plan8> (≤ 31), Parsen mit/ohne Kennung, Kennung im Abschluss-Ring")
     return ok
 
 

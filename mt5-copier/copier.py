@@ -553,6 +553,24 @@ FAMILIE_MAX = 779999
 # README.md verlangt (zwei Python-Prozesse am selben Terminal sind nicht stabil).
 SOLO_MAGIC = 790001
 SOLO_KOMMENTAR = "PXsolo"
+SOLO_KOMMENTAR_MAX = 31    # MT5: Order-Kommentar hoechstens 31 Zeichen
+
+
+def solo_kommentar(plan_id):
+    """REIN RECHNEND (testbar): Order-Kommentar der Solo-Position, 25.09.2026 (Koordination: Finns Fusion-Konto
+    488579 ist zwischen allen PCs geteilt; hedge_solo zeigte alle Solo-Positionen ohne Zuordnung, ein verpasster
+    oder verlorener Hedge — Jacobs Plan 2089a033 — war nicht sicher wiederzufinden). 'PXsolo:<plan8>' mit den
+    ersten 8 Zeichen der plan_id (nur [0-9a-zA-Z-]), ohne plan_id wie bisher 'PXsolo'. Erkennung eigener
+    Positionen bleibt die magic 790001 — der Kommentar ist nur Zusatz (manche Broker kuerzen/ueberschreiben ihn)."""
+    p8 = re.sub(r"[^0-9A-Za-z-]", "", str(plan_id or ""))[:8]
+    return (f"{SOLO_KOMMENTAR}:{p8}" if p8 else SOLO_KOMMENTAR)[:SOLO_KOMMENTAR_MAX]
+
+
+def solo_plan8(kommentar):
+    """REIN RECHNEND (testbar): plan8 aus einem Solo-Kommentar ('PXsolo:2089a033' → '2089a033'); alte 'PXsolo'
+    ohne Kennung, der Close-Kommentar 'PXsoloc' und Fremdes → None."""
+    m = re.match(r"^PXsolo:([0-9A-Za-z-]{1,8})", str(kommentar or "").strip())
+    return m.group(1) if m else None
 SOLO_AUFTRAG = "hedge_solo_auftrag.json"
 SOLO_ERGEBNIS = "hedge_solo_ergebnis.json"
 SOLO_MAX_ALTER_S = 40.0        # aeltere Auftraege werden verworfen, nie verspaetet ausgefuehrt
@@ -1613,7 +1631,8 @@ def main():
         solo_liste None (Terminal nicht lesbar) = kein Urteil, bekannt bleibt stehen."""
         if solo_liste is None:
             return
-        aktuell = {int(p["ticket"]): {"symbol": p.get("symbol"), "lots": p.get("lots"), "richtung": p.get("richtung"), "fill": p.get("fill")}
+        aktuell = {int(p["ticket"]): {"symbol": p.get("symbol"), "lots": p.get("lots"), "richtung": p.get("richtung"), "fill": p.get("fill"),
+                                      "plan8": p.get("plan8"), "plan_id": p.get("plan_id")}
                    for p in solo_liste if p and p.get("ticket")}
         weg = solo_zu_erkennen(hedge_acc.get("solo_bekannt") or {}, aktuell)
         ring = hedge_acc.get("solo_zu") or []
@@ -1621,7 +1640,8 @@ def main():
             pl, grund, exit_preis = solo_pl_aus_history(e["ticket"])
             eintrag = {"ticket": int(e["ticket"]), "pl": pl, "grund": grund or "unbekannt", "fill_close": exit_preis,
                        "closed_at": utc_iso(),
-                       "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill")}
+                       "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill"),
+                       "plan8": e.get("plan8"), "plan_id": e.get("plan_id")}
             ring = solo_zu_ring(ring, eintrag)
             log(f"[solo] Position {e['ticket']} zu ({eintrag['grund']}) · P&L {pl if pl is not None else '?'} · @ {exit_preis or '?'}")
         if weg or aktuell != hedge_acc.get("solo_bekannt"):
@@ -1713,7 +1733,7 @@ def main():
         price = tick.bid if richtung == "sell" else tick.ask
         req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": typ,
                "price": price, "deviation": m.deviation, "magic": SOLO_MAGIC,
-               "comment": SOLO_KOMMENTAR, "type_time": mt5.ORDER_TIME_GTC,
+               "comment": solo_kommentar(a.get("plan_id")), "type_time": mt5.ORDER_TIME_GTC,
                "type_filling": filling_for(m, sym)}
         r = send(m, req, f"SOLO OPEN {richtung.upper()} {lots} {sym} ({a.get('eur')} € / {a.get('punkte')} Pkt)")
         if r is None:
@@ -1730,7 +1750,12 @@ def main():
                 fill = float(d[0].price) or fill
         except Exception:
             pass
+        # Zuordnung Ticket → Plan merken (persistiert mit solo_bekannt in hedge_solo_zu.json), damit hedge_solo und
+        # der Abschluss-Ring plan_id tragen, auch wenn der Broker den Kommentar kuerzt
+        if ticket and a.get("plan_id"):
+            hedge_acc.setdefault("solo_plan", {})[int(ticket)] = str(a.get("plan_id"))[:64]
         erg = {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0), "lots": lots,
+               "plan8": solo_plan8(solo_kommentar(a.get("plan_id"))), "plan_id": (str(a.get("plan_id"))[:64] if a.get("plan_id") else None),
                "fill": fill, "symbol": sym, "richtung": richtung, "wert_pro_punkt": round(wert, 5),
                "eur_je_punkt": round(wert * lots, 4), "waehrung": hedge_acc.get("currency"),
                # lots = tatsaechlich gesendet (Broker-Raster), lots_angefragt = Rohwert vom Frontend (None = aus eur gerechnet)
@@ -2019,7 +2044,12 @@ def main():
                                      # Vertrag fuer das Frontend (Koordination 24.09.2026 spaet): sprechende Namen
                                      "richtung": "buy" if int(p_.type) == 0 else "sell",
                                      "lots": float(p_.volume), "fill": float(p_.price_open),
-                                     "pl_live": float(p_.profit)})
+                                     "pl_live": float(p_.profit),
+                                     # Zuordnung zum Plan (25.09.2026): plan8 aus dem Kommentar, plan_id aus dem Auftrag
+                                     "comment": str(getattr(p_, "comment", "") or ""),
+                                     "plan8": solo_plan8(getattr(p_, "comment", "")),
+                                     "plan_id": ((hedge_acc.get("solo_plan") or {}).get(int(p_.ticket))
+                                                 or ((hedge_acc.get("solo_bekannt") or {}).get(int(p_.ticket)) or {}).get("plan_id"))})
                         continue
                     fremde.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
                                    "type": int(p_.type), "volume": float(p_.volume)})
