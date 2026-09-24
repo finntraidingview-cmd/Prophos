@@ -9299,6 +9299,39 @@
   </main>
 
   <!-- ADD ACCOUNT MODAL -->
+  <!-- Erledigt für Winning Days anderer IDs (25.09.2026, Finn: „Wenn ich auf ‚Beenden' gehe, sehe ich einfach das Popup
+       ‚Trade erledigt', gebe Master- und Slave-P&L von Hand ein, fertig. Auf ‚Erledigt' wird es in Finanzen gebucht."):
+       eigene Pläne nutzen das bestehende tradeCompleteModal, fremde dieses Popup → PATCH /admin/wd-plaene {aktion:'erledigt'}.
+       Eigene Verdrahtung in MARKT LIVE (mklWdErledigt*), kein Sammel-Handler. -->
+  <div class="modal-bg" id="mwdErledigtModal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head">
+        <h3 id="mwd-erl-titel">Trade erledigt</h3>
+        <button class="modal-x" id="mwdErledigtClose" aria-label="Schließen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="mwd-erl-info" style="font-size:12.5px;color:var(--sub);margin-bottom:12px"></div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field">
+            <label>Master-P&amp;L ($)</label>
+            <input type="number" class="input mono" id="mwd-erl-master" step="0.01" placeholder="z.B. 250">
+          </div>
+          <div class="field">
+            <label>Fusion-P&amp;L (€) <span id="mwd-erl-quelle" style="color:var(--sub);font-weight:400"></span></label>
+            <input type="number" class="input mono" id="mwd-erl-fusion" step="0.01" placeholder="z.B. −101,47">
+          </div>
+        </div>
+        <div class="modal-msg" id="mwdErledigtMsg"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="mwdErledigtCancel">Abbrechen</button>
+        <button class="btn btn-primary" id="mwdErledigtSave">Erledigt</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-bg" id="addAccountModal">
     <div class="modal" role="dialog" aria-labelledby="addAccountTitle">
       <h3 class="modal-title" id="addAccountTitle">Account hinzufügen</h3>
@@ -19455,8 +19488,11 @@
         const hedgeHier = !!(h && ['offen', 'schliesst'].includes(h.status) && MT5_LOCAL && h.pc && typeof hedgePcId === 'function' && h.pc === hedgePcId())
         aktionen = `<span class="mwd-aktionen">`
           + (hedgeHier ? knopf('hedge', 'Hedge zu', 'Fusion-Gegenposition jetzt schließen (dieser PC hält sie)') : '')
-          + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, P&L unter „Überprüfen"')
+          + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
           + `</span>`
+      } else if(pw.status === 'review' && !(pw.master_pl && pw.master_pl.quelle === 'plan')){
+        // Beendet, aber noch nicht erledigt (Finn 25.09.2026: die zwei Test-Trades nachtragen) — öffnet dasselbe Popup, ohne Rückfrage
+        aktionen = `<span class="mwd-aktionen"><button type="button" class="btn btn-primary mwd-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(pw.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">Erledigt eintragen</button></span>`
       }
       const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}${fehlerTxt}${aktionen}</div>`
       return `<div class="mwd-card ${offen ? 'mwd-open' : geplant ? 'mwd-planned' : 'mwd-done'}${aktiv ? ' is-aktiv' : ''}" data-mkl-wd="${escapeHtml(String(pw.id))}" style="--mwd-farbe:${farbe}" title="Klick hebt die Linien im Chart hervor">${kopf}${level}${boxen}${fuss}</div>`
@@ -19474,6 +19510,7 @@
   async function mklWdAktion(id, aktion){
     const pid = String(id), key = `${pid}:${aktion}`
     if(mkl.wd.busy[key]) return
+    if(aktion === 'erledigt'){ mklWdErledigtOeffnen(pid); return }
     if(!(mkl.wd.frage && mkl.wd.frage.id === pid && mkl.wd.frage.aktion === aktion && Date.now() < mkl.wd.frage.bis)){
       mkl.wd.frage = { id: pid, aktion, bis: Date.now() + 5000 }; mklWdRender()
       setTimeout(() => { if(mkl.wd.frage && mkl.wd.frage.id === pid && Date.now() >= mkl.wd.frage.bis){ mkl.wd.frage = null; mklWdRender() } }, 5100)
@@ -19497,7 +19534,9 @@
         if(res.status === 409 && /gleichzeitig/i.test(String(res.d.error || ''))) res = await endeRufen()
         const hOffen = pw.hedge && ['offen', 'schliesst'].includes(pw.hedge.status)
         if(res.status === 200 && res.d.ok){
-          if(typeof atToast === 'function') atToast(`Beendet: ${(pw.konto && pw.konto.name) || pw.person || '—'} · P&L unter „Überprüfen"${hOffen ? ' · Hedge schließt der PC' : ''}`)
+          if(typeof atToast === 'function') atToast(`Beendet: ${(pw.konto && pw.konto.name) || pw.person || '—'}${hOffen ? ' · Hedge schließt der PC' : ''}`)
+          try{ if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase() }catch(_){}
+          mklWdErledigtOeffnen(pid, { status: 'review' })
         } else if(!(res.status === 409 && /nicht offen/i.test(String(res.d.error || '')))){
           throw new Error(res.d.error || ('HTTP ' + res.status))
         }
@@ -19515,6 +19554,60 @@
       mklWdRender(); mklChartZeichnen()
     }
   }
+  /* Erledigt-Popup (25.09.2026): eigener Plan → bestehendes tradeCompleteModal (bucht wie jede Trade-Karte, Teste stellt die
+   * Buchung auf 'wd_hedge' um); fremder Plan → kompaktes Popup mwdErledigtModal → PATCH /admin/wd-plaene {aktion:'erledigt',
+   * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
+   * aus der Deal-Historie. */
+  let _mwdErlId = null
+  function mklWdErledigtOeffnen(pid, extra){
+    const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
+    const hPl = (pw.hedge && pw.hedge.pl != null && isFinite(Number(pw.hedge.pl))) ? Number(pw.hedge.pl) : null
+    const eigen = mklWdEigenerPlan(pid)
+    if(eigen && typeof openTradeCompleteModal === 'function'){ mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined); return }
+    _mwdErlId = String(pid)
+    const k = pw.konto || {}
+    const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = `Trade erledigt · ${pw.person || '?'} · ${k.name || k.firma || '?'}`
+    const info = document.getElementById('mwd-erl-info')
+    if(info) info.textContent = [pw.richtung ? String(pw.richtung).toUpperCase() : '', pw.kt != null ? `${pw.kt} × ${pw.symbol_root || '?'}` : '', pw.master_tp != null ? `TP ${pw.master_tp} $` : '', pw.master_sl != null ? `SL ${pw.master_sl} $` : ''].filter(Boolean).join(' · ') + ' — wird in Finanzen gebucht.'
+    const m = document.getElementById('mwd-erl-master'); if(m) m.value = (pw.master_pl && pw.master_pl.wert != null) ? String(pw.master_pl.wert) : ''
+    const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = hPl != null ? String(hPl) : ''
+    const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? '— aus MetaTrader' : ''
+    const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
+    document.getElementById('mwdErledigtModal')?.classList.add('open')
+    setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
+  }
+  function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null }
+  async function mklWdErledigtSpeichern(){
+    const pid = _mwdErlId; if(!pid) return
+    const msg = document.getElementById('mwdErledigtMsg'), btn = document.getElementById('mwdErledigtSave')
+    const say = (t, k) => { if(msg){ msg.textContent = t; msg.className = 'modal-msg' + (k ? ' ' + k : '') } }
+    const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
+    const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
+    if(mpl == null || !isFinite(mpl)) return say('Master-P&L eintragen ($).', 'err')
+    if(spl != null && !isFinite(spl)) return say('Fusion-P&L ist keine Zahl.', 'err')
+    if(btn) btn.disabled = true; say('')
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'erledigt', plan_id: pid, master_pl: mpl, slave_pl: spl }) })
+      const d = await r.json().catch(() => ({}))
+      if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
+      const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+      // Antwort (Backend .541): {ok, plan_id, status:'completed', buchung:{amount, …}|null, buchung_fehler?} — ist der Plan zu, die
+      // Buchung aber gescheitert, bleibt das Popup offen: ein zweites „Erledigt" ist idempotent und holt die Buchung nach.
+      if(d.buchung_fehler){ say(`Plan ist erledigt, die Buchung in Finanzen aber nicht: ${d.buchung_fehler} — „Erledigt" noch einmal drücken.`, 'err'); return }
+      const bu = d.buchung || null, betrag = (bu && isFinite(Number(bu.amount))) ? Number(bu.amount) : null
+      if(typeof atToast === 'function') atToast(bu ? `Erledigt · Fusion ${betrag != null ? fmtE(betrag) : ''} auf „${bu.account_name || 'Hedge-Konto'}" gebucht` : 'Erledigt · ohne Fusion-Buchung')
+      mklWdErledigtZu()
+      try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
+      mklWdRender(); mklChartZeichnen()
+    }catch(e){ say('Nicht gespeichert: ' + (e && e.message || e), 'err') }
+    finally{ if(btn) btn.disabled = false }
+  }
+  document.getElementById('mwdErledigtClose')?.addEventListener('click', mklWdErledigtZu)
+  document.getElementById('mwdErledigtCancel')?.addEventListener('click', mklWdErledigtZu)
+  document.getElementById('mwdErledigtSave')?.addEventListener('click', mklWdErledigtSpeichern)
+  document.getElementById('mwdErledigtModal')?.addEventListener('click', ev => { if(ev.target && ev.target.id === 'mwdErledigtModal') mklWdErledigtZu() })
   // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
   $mkl('mkl-wd')?.addEventListener('click', ev => {
     if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-mwd-aktion]')) return
@@ -30307,7 +30400,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.542'
+  const OS_TAB_BUILD = '2026-09-22.543'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
