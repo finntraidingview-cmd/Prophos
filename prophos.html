@@ -30695,7 +30695,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.555'
+  const OS_TAB_BUILD = '2026-09-22.557'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38345,6 +38345,14 @@
       // Finanzen gebucht — eigene Kategorie für den Winning-Days-Gegenhedge, das sind die einzigen Hedgekosten ab jetzt"):
       // WD-Farm-Plan (V2 + hedge_eur, kein Slave-Konto) bucht slave_pl als kind 'wd_hedge' in EUR auf das Fusion-Hedge-Konto;
       // idempotent über den Match-Tag. Leeres Slave-Feld (Hedge noch offen / P&L folgt) → keine Buchung.
+      // Leeres Slave-Feld (Hedge offen / P&L folgt) → eine schon vorhandene WD-Hedge-Auto-Buchung LÖSCHEN (wie das Backend, 25.09.2026)
+      if(tcGehedgtSave && tcSlaveLassen){
+        try{
+          const { data: alt } = await supabase.from('transactions').select('id').eq('kind', 'wd_hedge').eq('auto_generated', true).like('notes', `${planRef} WD-Hedge%`)
+          for(const z of (alt || [])){ const { error: de } = await supabase.from('transactions').delete().eq('id', z.id); if(!de) transactions = transactions.filter(t => String(t.id) !== String(z.id)) }
+          if(alt && alt.length) renderFinanzen()
+        }catch(e){ console.warn('[wd-hedge] Buchung löschen', e) }
+      }
       if(tcGehedgtSave && !tcSlaveLassen && isFinite(sPl)){
         // Idempotenz mit dem Backend (PATCH /admin/wd-plaene {aktion:'erledigt'}, .541): beide nutzen das notes-Präfix
         // „Trade #<plan8> WD-Hedge" + kind wd_hedge. Vorher frisch in der DB suchen — hat das Backend schon gebucht und die
@@ -38365,7 +38373,7 @@
           // dieselbe Form wie das Backend (Koordination 25.09.2026) — sonst flattern die notes je nachdem, wer zuletzt schrieb
           notes: `${planRef} WD-Hedge · ${(document.getElementById('userName')?.textContent || '').trim() || '?'} · ${p.masterName || (masterAcc && masterAcc.name) || '?'}`,
           auto_generated: true
-        }, `${planRef} WD-Hedge`)
+        }, `${planRef} WD-Hedge`, { nullErlaubt: true })
       }
 
       // "Heute schon getradet"-Haken auf den Master-Account anwenden (Reset autom. um Mitternacht DE)
@@ -38791,21 +38799,26 @@
   const WD_HEDGE_LOGIN_STD = '488579'
   function wdHedgeKonto(plan){
     try{
-      const acc = accounts || []
+      const arch = (typeof getArchive === 'function') ? getArchive() : {}
+      const acc = (accounts || []).filter(x => !(arch[x.id] && arch[x.id].archived))   // Archiv-Filter wie das Backend (25.09.2026)
       const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
-      const login = String((h && h.hedge_login) || WD_HEDGE_LOGIN_STD)
-      const treffer = acc.filter(x => !x.archived && (String(x.externalId || '') === login || String((x.ma && x.ma.login) || '') === login))
-      let a = treffer.find(x => x.type === 'live') || treffer[0]   // live vor Demo (wie das Backend)
+      let login = h && h.hedge_login ? String(h.hedge_login) : ''
+      if(!login && h && h.pc){ const row = (window._mt5CloudRows || []).find(r => r && r.pc_name === h.pc && r.hedge_login); if(row) login = String(row.hedge_login) }
+      if(!login) login = WD_HEDGE_LOGIN_STD
+      // live vor Demo, dann das älteste Konto (wie PATCH /admin/wd-plaene)
+      const ordnen = arr => arr.slice().sort((a, b) => ((b.type === 'live') - (a.type === 'live')) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+      let a = ordnen(acc.filter(x => String(x.externalId || '') === login || String((x.ma && x.ma.login) || '') === login))[0]
       if(!a && typeof mt5GetLinks === 'function'){ const id = (mt5GetLinks() || {})[login]; if(id != null) a = acc.find(x => String(x.id) === String(id)) }
-      if(!a) a = acc.find(x => !x.archived && x.type === 'live' && /fusion/i.test(String(x.firm || '')))
+      if(!a) a = ordnen(acc.filter(x => x.type === 'live' && /fusion/i.test(String(x.firm || ''))))[0]
       return a || null
     }catch(_){ return null }
   }
-  async function upsertAutoTransaction(payload, matchTag){
+  async function upsertAutoTransaction(payload, matchTag, opts){
     try{
       // Bestehende Transaktion mit diesem Tag suchen
       const existing = transactions.find(t => t.notes && t.notes.includes(matchTag))
-      const isZero = Math.abs(Number(payload.amount || 0)) < 0.01
+      // opts.nullErlaubt (WD-Hedge, 25.09.2026): 0,00 € ist ein echter Wert und wird gebucht, nicht gelöscht (wie das Backend)
+      const isZero = !(opts && opts.nullErlaubt) && Math.abs(Number(payload.amount || 0)) < 0.01
 
       if(existing){
         if(isZero){
