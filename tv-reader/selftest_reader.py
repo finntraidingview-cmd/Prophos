@@ -204,6 +204,18 @@ def main():
           and rs._bf_wahl({"f": bft["f"]}, j) == "f" and rs._bf_wahl({}, j) is None,
           "Bedienfeld: Klicks → Tab mit Fokus, Summary → Broker, sonst der einzige")
 
+    # QuickEdit aus (25.09.2026): Bit-Logik + auf Nicht-Windows kein Eingriff, auf Windows ohne Konsole kein Absturz
+    check(rs._quickedit_modus(0x01F7) == 0x01B7 and rs._quickedit_modus(0x0007) == 0x0087 and rs._quickedit_modus(0x00C0) == 0x0080,
+          "QuickEdit: 0x0040 raus, 0x0080 rein, übrige Bits bleiben")
+    import os as _os
+    check(rs.quickedit_aus() is (None if _os.name != "nt" else rs.quickedit_aus()), "QuickEdit: auf Mac/Linux None (kein Eingriff)")
+    _alt = rs.os.name
+    try:
+        rs.os.name = "nt"
+        check(rs.quickedit_aus() is False if _alt != "nt" else True, "QuickEdit: 'Windows' ohne Konsole → False statt Absturz")
+    finally:
+        rs.os.name = _alt
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

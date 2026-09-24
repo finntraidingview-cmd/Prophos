@@ -67,6 +67,32 @@ HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
 
+
+# ── QuickEdit aus (25.09.2026, Live-Befund pc-usq1i6: Feed stand 6 min, Finns Foto zeigte die Titelleiste
+# „Auswählen Prophos TV-Reader"). Windows-Konsolen starten bei einem Klick ins Fenster eine MARKIERUNG
+# (QuickEdit) — solange sie steht, blockiert Windows jede Ausgabe, der Prozess haengt beim naechsten print()
+# und nimmt nichts mehr an. Beim Start abschalten; auf Mac/Linux nichts.
+def _quickedit_modus(mode):
+    """REIN RECHNEND (testbar): Konsolen-Modus ohne ENABLE_QUICK_EDIT_MODE (0x0040), mit ENABLE_EXTENDED_FLAGS (0x0080)."""
+    return (int(mode) & ~0x0040) | 0x0080
+
+
+def quickedit_aus():
+    """-> None (kein Windows), True (aus bzw. war schon aus), False (keine Konsole / abgelehnt)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-10)            # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not k32.GetConsoleMode(h, ctypes.byref(mode)):
+            return False
+        neu = _quickedit_modus(mode.value)
+        return True if neu == mode.value else bool(k32.SetConsoleMode(h, neu))
+    except Exception:
+        return False
+
 # Letzter bekannter Stand (wird von POST gesetzt, von GET/Datei gelesen)
 _stand = {"ts": 0, "positionen": []}
 _stand_s = 0.0      # Server-Zeit des letzten UEBERNOMMENEN Stands (24.09.2026, fuer alter_s)
@@ -958,6 +984,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if quickedit_aus():
+        print("QuickEdit aus (Klick ins Fenster hält den Reader nicht mehr an)")
     print(f"Prophos TV-Reader-Empfaenger {READER_VERSION} laeuft auf http://127.0.0.1:{PORT}")
     print(f"Schreibt den Stand nach {DATEI}")
     print(f"Reader ist {'AN' if _an else 'PAUSIERT (reader_aus.flag liegt)'}")

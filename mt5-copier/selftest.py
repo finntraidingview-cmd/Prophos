@@ -1740,6 +1740,7 @@ def main():
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
     results.append(test_hedge_bereit())
+    results.append(test_quickedit())
 
     print()
     ok = sum(1 for r in results if r)
@@ -1905,6 +1906,29 @@ def test_solo_plan_kennung():
         print(f"✗ Kennung im Abschluss-Ring: {ring}"); ok = False
     if ok:
         print("✓ Solo-Plan-Kennung: Kommentar PXsolo:<plan8> (≤ 31), Parsen mit/ohne Kennung, Kennung im Abschluss-Ring")
+    return ok
+
+
+def test_quickedit():
+    """QuickEdit aus beim Start (25.09.2026, pc-usq1i6: Klick ins Konsolenfenster hielt den Prozess an) —
+    copier und panel: Bit-Logik, Nicht-Windows = None, 'Windows' ohne Konsole = False statt Absturz."""
+    import copier, panel, os
+    ok = True
+    for mod in (copier, panel):
+        if not (mod._quickedit_modus(0x01F7) == 0x01B7 and mod._quickedit_modus(0x0007) == 0x0087):
+            print(f"✗ {mod.__name__}._quickedit_modus"); ok = False
+        if os.name != "nt":
+            if mod.quickedit_aus() is not None:
+                print(f"✗ {mod.__name__}.quickedit_aus auf Nicht-Windows"); ok = False
+            alt = mod.os.name
+            try:
+                mod.os.name = "nt"
+                if mod.quickedit_aus() is not False:
+                    print(f"✗ {mod.__name__}.quickedit_aus ohne Konsole"); ok = False
+            finally:
+                mod.os.name = alt
+    if ok:
+        print("✓ QuickEdit aus: Bit-Logik, Nicht-Windows kein Eingriff, ohne Konsole kein Absturz (copier + panel)")
     return ok
 
 

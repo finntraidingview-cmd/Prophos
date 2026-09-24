@@ -3412,6 +3412,32 @@ def _local_version():
         return None
 
 
+# ── QuickEdit aus (25.09.2026, Live-Befund pc-usq1i6: Feed stand 6 min, Finns Foto zeigte die Titelleiste
+# „Auswählen Prophos TV-Reader"). Windows-Konsolen starten bei einem Klick ins Fenster eine MARKIERUNG
+# (QuickEdit) — solange sie steht, blockiert Windows jede Ausgabe, der Prozess haengt beim naechsten print()
+# und nimmt nichts mehr an. Beim Start abschalten; auf Mac/Linux nichts.
+def _quickedit_modus(mode):
+    """REIN RECHNEND (testbar): Konsolen-Modus ohne ENABLE_QUICK_EDIT_MODE (0x0040), mit ENABLE_EXTENDED_FLAGS (0x0080)."""
+    return (int(mode) & ~0x0040) | 0x0080
+
+
+def quickedit_aus():
+    """-> None (kein Windows), True (aus bzw. war schon aus), False (keine Konsole / abgelehnt)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-10)            # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not k32.GetConsoleMode(h, ctypes.byref(mode)):
+            return False
+        neu = _quickedit_modus(mode.value)
+        return True if neu == mode.value else bool(k32.SetConsoleMode(h, neu))
+    except Exception:
+        return False
+
+
 def _panel_code_geaendert(sha):
     """Wuerde ein Neustart den LAUFENDEN Panel-Code aendern? Vergleicht panel.py und
     provision.py aus GENAU dem Stand `sha` (Commit-Kennung, nie Zwischenspeicher)
@@ -3542,6 +3568,8 @@ def _selbst_auffrischen():
 
 
 def main():
+    if quickedit_aus():
+        print("QuickEdit aus (Klick ins Fenster hält das Panel nicht mehr an)", flush=True)
     _selbst_auffrischen()
     print("=" * 66)
     print(" Echo-Panel (Prophos)")
