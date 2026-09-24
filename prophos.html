@@ -11089,8 +11089,9 @@
      * · Quote-Quelle („Apex Trader · Funded 0,24 · n 153"). Zeilen mit Farbpunkt der Person, Klick = Personen-Filter. */
     const admKfQuelleKurz = t => {
       const q = admKfQ(t); if(q === null) return 'ohne Quote · FX × 1'
-      const m = /^([^|]+)\|([^|·]+)(?:\|(\d+))?\s*·\s*n=(\d+)/.exec(String(t.hedge_q_quelle || ''))
-      return m ? `${m[1].trim()} · ${admKfTyp(m[2].trim())}${m[3] ? ' · ' + admKfGroesse(m[3]) : ''} ${admKfDe(q, 2)} · n ${m[4]}` : `Quote ${admKfDe(q, 2)}`
+      const m = /^([^|]+)\|([^|·]+)(?:\|(\d+))?\s*·\s*(?:n=(\d+)|Vorgabe)/.exec(String(t.hedge_q_quelle || ''))
+      // „· Vorgabe" statt „· n 0" für Gruppen aus HQ_VORGABEN (Topstep · Funded, 24.09.2026 spät)
+      return m ? `${m[1].trim()} · ${admKfTyp(m[2].trim())}${m[3] ? ' · ' + admKfGroesse(m[3]) : ''} ${admKfDe(q, 2)} · ${m[4] !== undefined ? 'n ' + m[4] : 'Vorgabe'}` : `Quote ${admKfDe(q, 2)}`
     }
     function admKfTradeListe(trades, fx, pick, pers){
       const el = $('adm-kf-rows-t'), sub = $('adm-kf-trades-sub'); if(!el) return
@@ -11335,7 +11336,9 @@
       const minN = Number(hq?.min_n) || 5
       // Nur Ebene B (Firma · Typ) mit bekannter Firma, nach Quote sortiert (24.09.2026, Finn am Screenshot:
       // „man erkennt da nix" — 18 Zeilen in zwei Spalten, Größen doppelt zur Firma, Balken nicht sortiert).
-      const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && Number(g.n) >= minN && Number(g.median_q) > 0)
+      // Vorgabe-Gruppen (Backend HQ_VORGABEN, 24.09.2026 spät: Topstep · Funded = 4.500 $ ≙ 850 €) stehen
+      // ohne Trades in der Liste — sie sind die Quote, die ein Topstep-V2-Trade bekommt.
+      const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && (g.vorgabe || Number(g.n) >= minN) && Number(g.median_q) > 0)
                     .sort((a, b) => Number(b.median_q) - Number(a.median_q) || Number(b.n) - Number(a.n))
       wrap.hidden = !grp.length
       el.innerHTML = ''
@@ -11345,7 +11348,8 @@
         const q = Number(g.median_q), funded = String(g.typ || '').toLowerCase() === 'funded'
         const key = (g.firm || '—') + ' · ' + admKfTyp(g.typ)
         const on = !!(f && f.art === 'q' && f.wert === key)
-        const bsp = funded ? `+7.500 $ ≙ ${admVlSign(-7500 * q)}` : `−2.000 $ ≙ ${admVlSign(2000 * q)}`
+        const bsp = g.vorgabe ? `${admUsdSign(Number(g.ziel_usd))} ≙ ${admVlSign(-Number(g.ziel_eur))}`
+                  : funded ? `+7.500 $ ≙ ${admVlSign(-7500 * q)}` : `−2.000 $ ≙ ${admVlSign(2000 * q)}`
         const geplant = Number.isFinite(Number(g.median_r)) && g.median_r !== null ? ` · geplant ${admKfQFmt(Number(g.median_r))}` : ''
         const row = document.createElement('button')
         row.type = 'button'
@@ -11355,8 +11359,10 @@
           `<div class="adm-track"><div class="adm-fill" style="width:${(100 * q / maxQ).toFixed(1)}%;background:${admKfFirmColor(g.firm)}"></div></div>` +
           `<div class="adm-val">${admKfQFmt(q)}</div>`
         row.querySelector('.nm').textContent = key + (g.groesse ? ' · ' + admKfGroesse(g.groesse) : '')
-        row.querySelector('.kf-q-sub').textContent = `${g.n} Trades · ${bsp}`
-        row.title = `${key} · ${g.n} Hedge-Trades · Median ${admKfQFmt(q)} (p25 ${admKfQFmt(Number(g.p25))} · p75 ${admKfQFmt(Number(g.p75))})${geplant} — klicken filtert auf ${key}`
+        row.querySelector('.kf-q-sub').textContent = g.vorgabe ? `Vorgabe · ${bsp}` : `${g.n} Trades · ${bsp}`
+        row.title = g.vorgabe
+          ? `${key} · Vorgabe (Finn 24.09.2026): ${bsp} → ${admKfQFmt(q)} · keine brauchbare Hedge-Messung (${g.n_roh || 0} Trades roh, unter ${minN}) — klicken filtert auf ${key}`
+          : `${key} · ${g.n} Hedge-Trades · Median ${admKfQFmt(q)} (p25 ${admKfQFmt(Number(g.p25))} · p75 ${admKfQFmt(Number(g.p75))})${geplant} — klicken filtert auf ${key}`
         row.addEventListener('click', () => { admKf.filter = on ? null : { art: 'q', wert: key }; admKfRender() })
         el.appendChild(row)
       }
@@ -29365,7 +29371,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.491'
+  const OS_TAB_BUILD = '2026-09-22.492'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

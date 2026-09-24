@@ -4593,6 +4593,15 @@ def _reib_real_flags(plans, by_id, live_ids, arch_info, payout_accs):
     return flags
 HQ_GROESSEN = (25000, 50000, 100000, 150000, 200000, 300000)
 HQ_ROUTEN = {"", "dup", "tvplus", "mt5"}   # Hedge-Wege; V2 (mt5v2/tvv2) hat keinen Slave
+# Vorgaben je Firma·Typ ohne brauchbare Hedge-Messung (24.09.2026 spät, Finn am Statistik-Tab:
+# „Ein Topstep, der als Typ Funded ist, ist 4.500 $, entsprechend 850 €, damit du Bescheid weißt").
+# Topstep lief in der Hedge-Ära nur über 5 Funded-Trades — keine Gruppe erreicht HQ_MIN_N, ein
+# Topstep-V2-Trade fiel bis .491 auf die globale Quote (Ebene D, ~0,5 €/$ statt ~0,19). Die Vorgabe
+# steht als eigene Gruppe (vorgabe=True, Quote = ziel_eur/ziel_usd) auf Ebene B und greift in
+# _hq_aufloesen wie eine gemessene Gruppe — eine echte Messung mit n ≥ HQ_MIN_N schlägt sie.
+HQ_VORGABEN = {
+    "Topstep|funded": {"ziel_usd": 4500.0, "ziel_eur": 850.0},
+}
 
 
 def _hq_groesse(acc):
@@ -4733,6 +4742,21 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
              "sum_master_pl": round(e["sum_mpl"], 2), "sum_slave_pl_eur": round(e["sum_spl_eur"], 2)}
         gruppen.append(g)
         lookup[g["key"]] = g
+    # Vorgaben (HQ_VORGABEN): nur wo keine Messung mit n ≥ HQ_MIN_N steht; eine dünne Messung
+    # (n < HQ_MIN_N) wird durch die Vorgabe ersetzt, ihre Rohzahl bleibt sichtbar (n_roh).
+    for key, v in HQ_VORGABEN.items():
+        alt_g = lookup.get(key)
+        if alt_g and alt_g["n"] >= HQ_MIN_N:
+            continue
+        firm, typ = key.split("|", 1)
+        q = round(float(v["ziel_eur"]) / float(v["ziel_usd"]), 4)
+        vg = {"key": key, "ebene": "B", "firm": firm, "typ": typ, "groesse": None,
+              "n": 0, "n_roh": (alt_g["n_roh"] if alt_g else 0),
+              "median_q": q, "mean_q": q, "p25": q, "p75": q, "median_r": None,
+              "sum_master_pl": 0.0, "sum_slave_pl_eur": 0.0,
+              "vorgabe": True, "ziel_usd": float(v["ziel_usd"]), "ziel_eur": float(v["ziel_eur"])}
+        gruppen = [x for x in gruppen if x["key"] != key] + [vg]
+        lookup[key] = vg
     gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
     # Realer Anteil je Gruppe (25.09.2026): Σ(Kosten × Flag) / Σ Kosten über die ENTSCHIEDENEN
     # Trades (Flag 0/1), geklemmt 0…1; unter HQ_MIN_N entschiedenen Trades oder bei Σ ≤ 0 kein
@@ -4798,10 +4822,11 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
 
 def _hq_aufloesen(acc, lookup):
     """Erste Gruppe mit n ≥ HQ_MIN_N in der Folge A→B→C→D — oder None (dann rechnet das
-    Frontend wie vorher mit fx × 1 und kennzeichnet „ohne Quote")."""
+    Frontend wie vorher mit fx × 1 und kennzeichnet „ohne Quote"). Eine Vorgabe (HQ_VORGABEN,
+    nur im Quoten-Lookup) zählt auf ihrer Ebene wie eine volle Gruppe."""
     for _ebene, key, _f, _t, _g in _hq_keys(acc):
         g = lookup.get(key)
-        if g and g["n"] >= HQ_MIN_N:
+        if g and (g["n"] >= HQ_MIN_N or g.get("vorgabe")):
             return g
     return None
 
@@ -5645,7 +5670,8 @@ def admin_build_kapitel():
                     "master_typ": _hq_typ(macc) if macc else "—",
                     "master_groesse": _hq_groesse(macc) if macc else None,
                     "hedge_q": hq,
-                    "hedge_q_quelle": (f'{hg["key"]} · n={hg["n"]} · Ebene {hg["ebene"]}' if hg else None),
+                    "hedge_q_quelle": ((f'{hg["key"]} · Vorgabe {hg["ziel_usd"]:.0f} $ ≙ {hg["ziel_eur"]:.0f} €' if hg.get("vorgabe")
+                                        else f'{hg["key"]} · n={hg["n"]} · Ebene {hg["ebene"]}') if hg else None),
                     "reibung_real": reib_real,
                     "reibung_anteil": r_anteil,
                     "reibung_quelle": (f'{rg["key"]} · n={rg["n"]} · Ebene {rg["ebene"]} · gemessen {rg["median"]} € × Anteil {r_anteil} ({rg["anteil_quelle"]}, {rg["n_entschieden"]} entschieden)' if rg else "global"),
