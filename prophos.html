@@ -6788,7 +6788,7 @@
       </div>
 
       <!-- KPIs -->
-      <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+      <div class="kpis" style="grid-template-columns:repeat(5,1fr)">
         <div class="kpi">
           <div class="kpi-label">Realisiert YTD</div>
           <div class="kpi-value tnum" id="fin-kpi-total">—</div>
@@ -6803,6 +6803,12 @@
           <div class="kpi-label" id="fin-kpi-livepl-label">Live P/L</div>
           <div class="kpi-value tnum" id="fin-kpi-livepl">—</div>
           <div class="kpi-delta delta-neutral" id="fin-kpi-livepl-sub">YTD Live-Accounts</div>
+        </div>
+        <!-- WD-Hedge (Jahr) (25.09.2026): Fusion-Gegenhedge der Winning Days — im Kapitel „Ohne Hedge" die einzige Hedge-Zeile -->
+        <div class="kpi">
+          <div class="kpi-label">WD-Hedge</div>
+          <div class="kpi-value tnum" id="fin-kpi-wdhedge">—</div>
+          <div class="kpi-delta delta-neutral" id="fin-kpi-wdhedge-sub">YTD Fusion-Gegenhedge</div>
         </div>
         <div class="kpi">
           <div class="kpi-label">Account-Käufe</div>
@@ -6849,6 +6855,11 @@
         <button class="subtab" data-fintab="live_pnl">
           Live P/L
           <span class="subtab-count" id="fintab-count-live_pnl">0</span>
+        </button>
+        <!-- Winning-Days-Hedge (25.09.2026): eigene Kategorie für den Fusion-Gegenhedge der Winning Days -->
+        <button class="subtab" data-fintab="wd_hedge">
+          WD-Hedge
+          <span class="subtab-count" id="fintab-count-wd_hedge">0</span>
         </button>
         <button class="subtab" data-fintab="account_purchase">
           Käufe
@@ -14054,7 +14065,7 @@
     let rgOverlap = []       // Rechnungen, mit denen sich der gewählte Zeitraum überschneidet
     const rgEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR' })
     const rgDatum = iso => iso ? String(iso).slice(0,10).split('-').reverse().join('.') : '–'
-    const RG_LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', manual:'Manuell' }
+    const RG_LBL = { payout:'Payouts', account_purchase:'Account-Käufe', live_pnl:'Live-P&L', wd_hedge:'WD-Hedge', manual:'Manuell' }
     // Rechnungsbetrag = Saldo − Personen-Anteil. Neue Rechnungen tragen ihn
     // eingefroren in summen.betrag; Alt-Zeilen (vor .143) rechnen ihn hier nach.
     const rgBetragVon = (s, pct) => {
@@ -14220,7 +14231,7 @@
                       y: { grid: { color: RG_GRID }, ticks: { ...RG_TICKS, callback: v => rgEurKurz(v) } } } }
         })
         const arten = []
-        for(const k of ['payout', 'account_purchase', 'live_pnl', 'manual']){
+        for(const k of ['payout', 'account_purchase', 'live_pnl', 'wd_hedge', 'manual']){
           for(const [cur, v] of Object.entries(s.je_art?.[k] || {})){
             arten.push({ lbl: (RG_LBL[k] || k) + (cur === 'EUR' ? '' : ' ' + cur), v: Number(v) })
           }
@@ -18422,6 +18433,14 @@
   const hedgePcId = () => (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
   // Nach dem bewiesenen Kauf-Klick (tpOrbitStarten → v2AufOpen): Gegen-Order auf Fusion. r = Bot-Antwort
   // (einstieg = Text des Avg-Fill-Preises, tv_symbol). Läuft nur am PC (dort steht das Hedge-Terminal).
+  // Hedge-Login dieses PCs aus dem Copier-Status (/api/instances, frisch ≤ 15 s) — z. B. 488579, bei Emin 430095
+  function hedgeLoginDiesesPcs(){
+    try{
+      if(!MT5_LOCAL || typeof window.mtcInstances !== 'function') return null
+      for(const i of Object.values(window.mtcInstances() || {})){ if(i && i.alive && i.fetchedAt && (Date.now() - i.fetchedAt) <= 15000 && i.status && i.status.hedge_login) return String(i.status.hedge_login) }
+    }catch(_){}
+    return null
+  }
   async function hedgeSoloOeffnen(plan, r){
     if(!plan || !(plan.hedgeEur > 0) || plan.route !== 'tvv2' || !MT5_LOCAL || typeof window.mtcApi !== 'function') return null
     const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
@@ -18463,6 +18482,7 @@
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
         notfall_faktor: res.notfall_faktor || hedgeNotfallFaktor(), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: hedgePuffer(),
+        hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
         schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer()),   // Feed-Wächter schließt hier (TP ± 8 Ticks)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
@@ -30287,7 +30307,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.541'
+  const OS_TAB_BUILD = '2026-09-22.542'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37494,7 +37514,7 @@
     const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     if(h && h.status === 'geschlossen' && h.pl != null){
       const pl = Number(h.pl)
-      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund))} · aus der Deal-Historie, wird als Slave-P&L gebucht</span></div>`
+      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund))} · aus der Deal-Historie, wird auf ‚Erledigt' als WD-Hedge in Finanzen gebucht</span></div>`
     }
     if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:#B45309">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
     if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:#B45309">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
@@ -37876,6 +37896,32 @@
           notes: `${planRef} Slave`,
           auto_generated: true
         }, `${planRef} Slave`)
+      }
+
+      // Winning-Days-Gegenhedge (25.09.2026, Finn: „Nach dem Trade gebe ich Master- und Slave-P&L ein, auf ‚Erledigt' wird es in
+      // Finanzen gebucht — eigene Kategorie für den Winning-Days-Gegenhedge, das sind die einzigen Hedgekosten ab jetzt"):
+      // WD-Farm-Plan (V2 + hedge_eur, kein Slave-Konto) bucht slave_pl als kind 'wd_hedge' in EUR auf das Fusion-Hedge-Konto;
+      // idempotent über den Match-Tag. Leeres Slave-Feld (Hedge noch offen / P&L folgt) → keine Buchung.
+      if(tcGehedgtSave && !tcSlaveLassen && isFinite(sPl)){
+        // Idempotenz mit dem Backend (PATCH /admin/wd-plaene {aktion:'erledigt'}, .541): beide nutzen das notes-Präfix
+        // „Trade #<plan8> WD-Hedge" + kind wd_hedge. Vorher frisch in der DB suchen — hat das Backend schon gebucht und die
+        // lokale Liste kennt die Zeile noch nicht, wird sie übernommen und aktualisiert statt doppelt angelegt.
+        try{
+          const { data: vorh } = await supabase.from('transactions').select('*').eq('kind', 'wd_hedge').like('notes', `${planRef} WD-Hedge%`).limit(1)
+          if(vorh && vorh[0] && !transactions.some(t => String(t.id) === String(vorh[0].id))) transactions.push(rowToTransaction(vorh[0]))
+        }catch(_){}
+        const hk = wdHedgeKonto(p)
+        await upsertAutoTransaction({
+          account_id: hk ? hk.id : null,
+          account_name: hk ? hk.name : 'Fusion (WD-Hedge)',
+          account_firm: hk ? hk.firm : 'Fusion Markets',
+          kind: 'wd_hedge',
+          amount: sPl,
+          currency: 'EUR',
+          occurred_at: new Date().toISOString().slice(0,10),
+          notes: `${planRef} WD-Hedge`,
+          auto_generated: true
+        }, `${planRef} WD-Hedge`)
       }
 
       // "Heute schon getradet"-Haken auf den Master-Account anwenden (Reset autom. um Mitternacht DE)
@@ -38294,6 +38340,23 @@
   // ── Upsert: aktualisiert eine bestehende Auto-Transaktion (matched über notes-Tag),
   //    oder erstellt sie neu falls nicht vorhanden. Wenn payload.amount sehr klein ist (≈0),
   //    wird die existierende Transaktion gelöscht.
+  // Fusion-Hedge-Konto der Winning-Days-Gegenhedges (25.09.2026, Koordination per SQL: Login 488579 existiert in JEDEM Profil
+  // als eigenes Konto; Emins PC hedgt auf 430095). Regel: im Profil des Plan-Besitzers (accounts = eigene Konten per RLS) das
+  // Konto mit external_id = Hedge-Login des PCs, der den Hedge hielt (hedge.hedge_login; ohne Wert 488579), Rückfall: erstes
+  // Live-Konto bei Fusion, sonst ohne Konto. Die Buchungswährung ist IMMER EUR (die currency-Spalte dieser Konten ist falsch mit USD gepflegt).
+  const WD_HEDGE_LOGIN_STD = '488579'
+  function wdHedgeKonto(plan){
+    try{
+      const acc = accounts || []
+      const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+      const login = String((h && h.hedge_login) || WD_HEDGE_LOGIN_STD)
+      const treffer = acc.filter(x => !x.archived && (String(x.externalId || '') === login || String((x.ma && x.ma.login) || '') === login))
+      let a = treffer.find(x => x.type === 'live') || treffer[0]   // live vor Demo (wie das Backend)
+      if(!a && typeof mt5GetLinks === 'function'){ const id = (mt5GetLinks() || {})[login]; if(id != null) a = acc.find(x => String(x.id) === String(id)) }
+      if(!a) a = acc.find(x => !x.archived && x.type === 'live' && /fusion/i.test(String(x.firm || '')))
+      return a || null
+    }catch(_){ return null }
+  }
   async function upsertAutoTransaction(payload, matchTag){
     try{
       // Bestehende Transaktion mit diesem Tag suchen
@@ -38339,6 +38402,7 @@
     return ({
       'payout':           'Payout',
       'live_pnl':         'Live P/L',
+      'wd_hedge':         'Winning-Days-Hedge',   // 25.09.2026: einzige Hedgekosten ab jetzt
       'account_purchase': 'Account-Kauf',
       'manual':           'Manuell'
     })[k] || k
@@ -38378,9 +38442,10 @@
     // Kapitel (24.09.2026): nur Buchungen des gewählten Kapitels
     const list  = (transactions || []).filter(t => kapitelPasst(t.kapitelId, t.occurredAt)).filter(inRange)
     const costsList = list.filter(t => t.kind === 'account_purchase')
-    const liveList  = list.filter(t => t.kind === 'live_pnl')
+    const liveList  = list.filter(t => t.kind === 'live_pnl' || t.kind === 'wd_hedge')   // Hedge-Geld: Live P/L + WD-Hedge (25.09.2026)
     const costs = costsList.reduce((s,t) => s + t.amount, 0)
     const live  = liveList.reduce((s,t) => s + t.amount, 0)
+    const liveNurWd = liveList.filter(t => t.kind === 'wd_hedge').reduce((s,t) => s + t.amount, 0)
     const fmt$ = n => (n >= 0 ? '+' : '−') + '€' + Math.abs(n).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2})
     const costsEl = document.getElementById('fin-range-costs')
     const liveEl  = document.getElementById('fin-range-livepl')
@@ -38388,6 +38453,7 @@
     if(liveEl){
       liveEl.textContent = liveList.length ? fmt$(live) : '—'
       liveEl.style.color = live >= 0 ? 'var(--good)' : 'var(--danger)'
+      liveEl.title = liveList.length ? `davon Live P/L ${fmt$(live - liveNurWd)} · WD-Hedge ${fmt$(liveNurWd)}` : ''
     }
   }
   ;(function wireFinRange(){
@@ -38672,7 +38738,8 @@
     const sumLivePnl   = sumByKind('live_pnl')
     const sumPurchases = sumByKind('account_purchase')
     const sumManual    = sumByKind('manual')
-    const sumTotal     = sumPayouts + sumLivePnl + sumPurchases + sumManual
+    const sumWdHedge   = sumByKind('wd_hedge')   // Winning-Days-Gegenhedge (25.09.2026)
+    const sumTotal     = sumPayouts + sumLivePnl + sumWdHedge + sumPurchases + sumManual
 
     // Alles in Euro: Finn rechnet durchgängig in EUR, gespeicherte Beträge sind bereits
     // Euro-Werte (auch wo das currency-Feld historisch 'USD' sagt) — daher nur Symbol, keine Umrechnung.
@@ -38686,6 +38753,10 @@
     if(elPayouts)   elPayouts.textContent   = sumPayouts || ytd.some(t => t.kind === 'payout') ? '+€' + sumPayouts.toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'
     if(elLivepl)    elLivepl.textContent    = ytd.some(t => t.kind === 'live_pnl') ? fmtSigned(sumLivePnl) : '—'
     if(elPurchases) elPurchases.textContent = sumPurchases ? '−€' + Math.abs(sumPurchases).toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'
+    // WD-Hedge (Jahr): eigene Kachel, Unterzeile mit Anzahl Buchungen
+    { const el = document.getElementById('fin-kpi-wdhedge'), sub = document.getElementById('fin-kpi-wdhedge-sub'), n = ytd.filter(t => t.kind === 'wd_hedge').length
+      if(el){ el.textContent = n ? fmtSigned(sumWdHedge) : '—'; el.style.color = n ? (sumWdHedge >= 0 ? 'var(--good)' : 'var(--danger)') : '' }
+      if(sub) sub.textContent = n ? `YTD · ${n} Winning Day${n === 1 ? '' : 's'} gehedgt` : 'YTD Fusion-Gegenhedge' }
     // Live P/L Farbe je nach Vorzeichen
     if(elLivepl) elLivepl.style.color = sumLivePnl >= 0 ? 'var(--good)' : 'var(--danger)'
 
@@ -38717,6 +38788,7 @@
     document.getElementById('fintab-count-all').textContent              = String(txK.length)
     document.getElementById('fintab-count-payout').textContent           = String(txK.filter(t => t.kind === 'payout').length)
     document.getElementById('fintab-count-live_pnl').textContent         = String(txK.filter(t => t.kind === 'live_pnl').length)
+    { const c = document.getElementById('fintab-count-wd_hedge'); if(c) c.textContent = String(txK.filter(t => t.kind === 'wd_hedge').length) }
     document.getElementById('fintab-count-account_purchase').textContent = String(txK.filter(t => t.kind === 'account_purchase').length)
     document.getElementById('fintab-count-manual').textContent           = String(txK.filter(t => t.kind === 'manual').length)
 
@@ -38733,6 +38805,7 @@
       const kindCls = ({
         'payout':           'chip-good',
         'live_pnl':         t.amount >= 0 ? 'chip-good' : 'chip-warn',
+        'wd_hedge':         t.amount >= 0 ? 'chip-good' : 'chip-warn',
         'account_purchase': 'chip-warn',
         'manual':           'chip-neutral'
       })[t.kind] || 'chip-neutral'
