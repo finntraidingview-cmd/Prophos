@@ -6750,7 +6750,10 @@ def admin_wd_heute():
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
                   "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,"
                   "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline")
-        wd = "or.(notes.eq.Winning-Day-Farmer,hedge_eur.gt.0)"
+        # PostgREST: verschachteltes Oder heisst or(...) OHNE Punkt — "or.(...)" gab 400 Bad Request
+        # (Finn 25.09.2026 am Markt-Block: "Winning Days des Tages nicht ladbar"). ilike statt eq, damit
+        # Notes mit Zusatztext den Farmer-Plan nicht verlieren.
+        wd = "or(notes.ilike.*Winning-Day-Farmer*,hedge_eur.gt.0)"
         rows = _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "and": f"({wd},created_at.gte.{seit})"})
         rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.open", "and": f"({wd})"})
         gesehen, plaene = set(), []
