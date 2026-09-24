@@ -7394,6 +7394,11 @@
             <button type="button" data-mkl-wurzel="NQ" class="active">NQ</button>
             <button type="button" data-mkl-wurzel="MNQ">MNQ</button>
           </div>
+          <!-- Kerzen ↔ Linie (25.09.2026, Finn: „einen Balkenchart machen") — Kerzen Standard, Wahl am Gerät -->
+          <div class="seg" id="mkl-art-seg">
+            <button type="button" data-mkl-art="kerzen" class="active" title="Minutenkerzen (Docht + Körper), die laufende Kerze bewegt sich mit dem Live-Kurs">Kerzen</button>
+            <button type="button" data-mkl-art="linie" title="Schlusskurs je Minute als Linie">Linie</button>
+          </div>
           <div class="seg" id="mkl-span">
             <button type="button" data-mkl-span="60" class="active">1 h</button>
             <button type="button" data-mkl-span="240">4 h</button>
@@ -18532,7 +18537,8 @@
    * Anzeige ehrlich: ohne frischen Kurs (≤ 30 s) gibt es keinen Fill und der Kopf sagt „kein Live-Kurs". */
   // wurzel (24.09.2026 spät): NQ ↔ MNQ aus dem Reader-Feed, letzte Wahl bleibt am Gerät; kursJe = frischester Kurs je Wurzel für die Kopfzeile
   const mkl = { span: 60, chart: null, kerzen: [], kurs: null, kursAlt: null, kursJe: {}, orders: [], dir: null, instr: 'MNQ', busy: false, tick: null, stub: null,
-                wurzel: (() => { try{ return localStorage.getItem('prophos_mkl_wurzel') === 'MNQ' ? 'MNQ' : 'NQ' }catch(_){ return 'NQ' } })() }
+                wurzel: (() => { try{ return localStorage.getItem('prophos_mkl_wurzel') === 'MNQ' ? 'MNQ' : 'NQ' }catch(_){ return 'NQ' } })(),
+                art: (() => { try{ return localStorage.getItem('prophos_mkl_art') === 'linie' ? 'linie' : 'kerzen' }catch(_){ return 'kerzen' } })() }
   const $mkl = id => document.getElementById(id)
   const mklAktiv = () => { const v = document.querySelector('#dashboard-view .view[data-view="markt"]'); return !!(v && v.classList.contains('active')) }
   const mklFmt = (v, n) => (v == null || !isFinite(v)) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: n == null ? 2 : n, maximumFractionDigits: n == null ? 2 : n })
@@ -18687,31 +18693,74 @@
     }
     if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
+  // Chart (25.09.2026, Finn: „aus dem Chart, wie sich die Kerzen bewegen, auch einen Balkenchart machen"): Kerzen als
+  // Chart.js-Floating-Bars ohne neue Bibliothek — Datensatz „Docht" [l,h] schmal, Datensatz „Körper" [min(o,c),max(o,c)]
+  // grün (c ≥ o) / rot, beide ungruppiert (grouped:false) auf derselben Minuten-Achse. Die LAUFENDE Kerze bewegt sich mit
+  // dem Live-Kurs (close = Kurs, high/low mitgezogen — nur in der Anzeige, die Cloud-Kerze kommt vom Reader). Linie bleibt
+  // als Alternative (Umschalter, Wahl am Gerät). Handy: ≈ 7 px je Kerze, sonst wird es Brei. Wechselt die Darstellung, wird
+  // die Instanz neu gebaut (anderer Chart-Typ), sonst nur update('none') — kein Blitzen im Takt.
+  function mklKerzenSichtbar(ks, cv){
+    if(mkl.art === 'linie') return ks
+    const breite = cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth) || 600
+    const maxN = Math.max(20, Math.floor(breite / 7))
+    return ks.length > maxN ? ks.slice(ks.length - maxN) : ks
+  }
   function mklChartZeichnen(){
     const cv = $mkl('mkl-chart'); if(!cv || typeof Chart === 'undefined') return
-    const ks = mkl.kerzen
+    let ks = mklKerzenSichtbar(mkl.kerzen, cv)
     // Leer-Zustand: Canvas weg, Platzhalter hin — Chart.js zeichnete sonst eine 0–1-Achse ins Nichts
     const leer = $mkl('mkl-leer'); if(leer) leer.style.display = ks.length ? 'none' : 'flex'
     cv.style.visibility = ks.length ? '' : 'hidden'
+    // laufende Kerze mit dem Live-Kurs (Kopie — nie das Cloud-Objekt anfassen), nur wenn die letzte Kerze die laufende Minute ist
+    if(mkl.kurs && ks.length){
+      const last = ks[ks.length - 1], tLast = Date.parse(last.minute) || 0
+      if(Date.now() - tLast < 120000){
+        const p = mkl.kurs.preis
+        ks = ks.slice(0, -1).concat([Object.assign({}, last, { c: p, h: Math.max(Number(last.h), p), l: Math.min(Number(last.l), p), live: true })])
+      }
+    }
     const labels = ks.map(k => new Date(k.minute).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }))
-    const closes = ks.map(k => Number(k.c))
-    if(mkl.kurs && ks.length){ closes[closes.length - 1] = mkl.kurs.preis }   // laufende Minute = Live-Kurs
-    const up = closes.length > 1 ? closes[closes.length - 1] >= closes[0] : true
-    const farbe = up ? '#12B76A' : '#F04438'
-    const ds = [{ label: 'Kurs', data: closes, borderColor: farbe, backgroundColor: farbe + '1f', borderWidth: 1.6, pointRadius: 0, pointHitRadius: 12, fill: true, tension: .15, order: 2 }]
+    const art = mkl.art === 'linie' ? 'linie' : 'kerzen'
+    let ds, yMin, yMax
+    if(art === 'kerzen'){
+      const farben = ks.map(k => Number(k.c) >= Number(k.o) ? '#12B76A' : '#F04438')
+      const koerper = ks.map(k => { const o = Number(k.o), c = Number(k.c), lo = Math.min(o, c), hi = Math.max(o, c); return hi - lo < 0.25 ? [lo - 0.125, lo + 0.125] : [lo, hi] })   // Doji: mindestens ein Tick hoch
+      ds = [
+        { type: 'bar', label: 'Docht', data: ks.map(k => [Number(k.l), Number(k.h)]), backgroundColor: farben.map(f => f + 'b3'), borderWidth: 0, barPercentage: 0.14, categoryPercentage: 1, grouped: false, order: 3 },
+        { type: 'bar', label: 'Kerze', data: koerper, backgroundColor: farben, borderWidth: 0, barPercentage: 0.72, categoryPercentage: 1, grouped: false, order: 2 }
+      ]
+      const lo = Math.min(...ks.map(k => Number(k.l))), hi = Math.max(...ks.map(k => Number(k.h))), pad = Math.max(1, (hi - lo) * 0.06)
+      yMin = lo - pad; yMax = hi + pad
+    } else {
+      const closes = ks.map(k => Number(k.c))
+      const up = closes.length > 1 ? closes[closes.length - 1] >= closes[0] : true
+      const farbe = up ? '#12B76A' : '#F04438'
+      ds = [{ type: 'line', label: 'Kurs', data: closes, borderColor: farbe, backgroundColor: farbe + '1f', borderWidth: 1.6, pointRadius: 0, pointHitRadius: 12, fill: true, tension: .15, order: 2 }]
+    }
     // Offene Demo-Orders als Linien: Entry (grau gestrichelt), TP (grün), SL (rot)
     for(const o of mkl.orders.filter(o => o.status === 'open')){
-      const linie = (v, col, dash, lbl) => v > 0 && ds.push({ label: lbl, data: labels.map(() => v), borderColor: col, borderWidth: 1, borderDash: dash, pointRadius: 0, pointHitRadius: 0, fill: false, order: 1 })
+      const linie = (v, col, dash, lbl) => v > 0 && ds.push({ type: 'line', label: lbl, data: labels.map(() => v), borderColor: col, borderWidth: 1, borderDash: dash, pointRadius: 0, pointHitRadius: 0, fill: false, order: 1 })
       linie(Number(o.entry), '#98A2B3', [4, 4], `Entry ${o.richtung.toUpperCase()} ${o.kt}×${o.symbol}`)
       linie(Number(o.tp_level), '#15803d', [2, 3], 'TP')
       linie(Number(o.sl_level), '#b91c1c', [2, 3], 'SL')
     }
-    if(mkl.chart){ mkl.chart.data.labels = labels; mkl.chart.data.datasets = ds; mkl.chart.update('none'); return }
-    mkl.chart = new Chart(cv.getContext('2d'), { type: 'line', data: { labels, datasets: ds }, options: {
+    const tipIdx = art === 'kerzen' ? 1 : 0
+    if(mkl.chart && mkl.chart._mklArt === art){
+      const c = mkl.chart
+      c._mklKs = ks; c.data.labels = labels; c.data.datasets = ds
+      c.options.scales.y.min = yMin; c.options.scales.y.max = yMax
+      c.update('none'); return
+    }
+    if(mkl.chart){ mkl.chart.destroy(); mkl.chart = null }
+    mkl.chart = new Chart(cv.getContext('2d'), { type: art === 'kerzen' ? 'bar' : 'line', data: { labels, datasets: ds }, options: {
       responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false }, tooltip: { filter: i => i.datasetIndex === 0, callbacks: { label: c => mklFmt(c.parsed.y) } } },
-      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#98A2B3', font: { size: 10 } } },
-                y: { position: 'right', grid: { color: 'rgba(102,112,133,.10)' }, ticks: { color: '#98A2B3', font: { size: 10 }, callback: v => Number(v).toLocaleString('de-DE') } } } } })
+      plugins: { legend: { display: false }, tooltip: { filter: i => i.datasetIndex === tipIdx, callbacks: { label: c => {
+        const k = (mkl.chart && mkl.chart._mklKs || [])[c.dataIndex]
+        return (art === 'kerzen' && k) ? `O ${mklFmt(k.o)} · H ${mklFmt(k.h)} · L ${mklFmt(k.l)} · C ${mklFmt(k.c)}${k.live ? ' · live' : ''}` : mklFmt(Array.isArray(c.raw) ? c.raw[1] : c.parsed.y)
+      } } } },
+      scales: { x: { offset: art === 'kerzen', grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#98A2B3', font: { size: 10 } } },
+                y: { position: 'right', beginAtZero: false, min: yMin, max: yMax, grid: { color: 'rgba(102,112,133,.10)' }, ticks: { color: '#98A2B3', font: { size: 10 }, callback: v => Number(v).toLocaleString('de-DE') } } } } })
+    mkl.chart._mklArt = art; mkl.chart._mklKs = ks
   }
   function mklOrdersRender(){
     const offenEl = $mkl('mkl-offen'), verlaufEl = $mkl('mkl-verlauf'); if(!offenEl || !verlaufEl) return
@@ -18803,6 +18852,16 @@
       try{ localStorage.setItem('prophos_mkl_wurzel', mkl.wurzel) }catch(_){}
       document.querySelectorAll('#mkl-wurzel-seg button').forEach(x => x.classList.toggle('active', x === b))
       mkl.kerzen = []; mklTick(true)
+    })
+  })
+  // Darstellung Kerzen ↔ Linie (25.09.2026) — eigener Handler; der Chart-Typ wechselt, mklChartZeichnen baut die Instanz dann neu
+  document.querySelectorAll('#mkl-art-seg [data-mkl-art]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-mkl-art') === mkl.art)
+    b.addEventListener('click', () => {
+      mkl.art = b.getAttribute('data-mkl-art') === 'linie' ? 'linie' : 'kerzen'
+      try{ localStorage.setItem('prophos_mkl_art', mkl.art) }catch(_){}
+      document.querySelectorAll('#mkl-art-seg button').forEach(x => x.classList.toggle('active', x === b))
+      mklChartZeichnen()
     })
   })
   // Stale-Alarm mit Web-Push (24.09.2026 spät): läuft in jedem eingeloggten Tab alle 60 s, unabhängig von der Markt-View.
@@ -29490,7 +29549,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.502'
+  const OS_TAB_BUILD = '2026-09-22.504'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
