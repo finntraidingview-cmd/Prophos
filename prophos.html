@@ -28945,6 +28945,18 @@
   }
   // Vorschau-Kacheln aus den Lots: bei SL gewinnt Fusion Lots × 0,85 × SL-Punkte (= Slave-Risiko), bei TP verliert Fusion
   // Lots × 0,85 × (TP-Punkte + Puffer). „zusammen" rechnet den Master-$ mit FX (window._fxUsdEur) in € um.
+  // Schließ-Level in NQ für die Kachel „bei Take Profit" (Koordination 25.09.2026): der Feed-Wächter schließt bei Master-TP ± Puffer
+  // (8 Ticks). Mit frischem NQ/MNQ-Kurs (≤ 60 s, Markt-View/Realtime) als Zahl „≈ NQ 31.002", sonst nur als Distanz.
+  function tpWdSchliessHtml(r, puffer){
+    if(!(r.tpPkt > 0)) return ''
+    const ticks = Math.round(puffer / HEDGE_TICK)
+    let dir = null; try{ dir = (_tpDir === 'buy' || _tpDir === 'sell') ? _tpDir : null }catch(_){}
+    let kurs = null
+    try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je[(typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'] || je.NQ || je.MNQ; if(k && k.alter_ms <= 60000 && k.preis > 0) kurs = k.preis }catch(_){}
+    const fmt = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const level = (kurs && dir) ? (dir === 'sell' ? kurs - r.tpPkt - puffer : kurs + r.tpPkt + puffer) : null
+    return `<div style="grid-column:1 / -1;font-size:11.5px;color:var(--sub);line-height:1.5">Fusion schließt über den Kurs-Feed bei <b>Master-TP ${dir === 'sell' ? '−' : '+'} ${ticks} Ticks</b>${level ? ` ≈ <b class="mono">NQ ${fmt(level)}</b> (Kurs jetzt ${fmt(kurs)} ${dir === 'sell' ? '−' : '+'} ${r.tpPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt TP-Distanz ${dir === 'sell' ? '−' : '+'} ${puffer.toLocaleString('de-DE')} Pkt)` : (dir ? ' — NQ-Level erscheint, sobald ein frischer Kurs da ist' : ' — Richtung wählen, dann steht das NQ-Level hier')}; Notfall-SL Fusion ${Math.round(((typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : 1.1) * 100)} % im Terminal.</div>`
+  }
   function tpWdVorschau(){
     const row = document.getElementById('tp-wd-hedge-row'), box = document.getElementById('tp-wd-vorschau'), eurEl = document.getElementById('tp-wd-hedge-eur')
     if(!row || !box || row.style.display === 'none') return
@@ -28970,7 +28982,7 @@
       ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100)
       : '<div style="padding:8px 12px;border-radius:8px;border:1px dashed var(--border);font-size:12px;color:var(--sub)">bei Take Profit: erst Take Profit ($) eintragen.</div>'
     const slHtml = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100)
-    box.innerHTML = tpHtml + slHtml
+    box.innerHTML = tpHtml + slHtml + tpWdSchliessHtml(r, puffer)
       + `<div style="grid-column:1 / -1;font-size:11px;color:var(--sub-2);line-height:1.5">Stop-Distanz ${r.slPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt${r.tpPkt > 0 ? ` · TP-Distanz ${r.tpPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt + ${puffer} Pkt Puffer am Fusion-Level` : ''} · ${r.slavePpl.toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/Pkt je Lot NAS100 — beide Schließ-Level liegen in MetaTrader.</div>`
   }
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
@@ -29839,7 +29851,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.516'
+  const OS_TAB_BUILD = '2026-09-22.517'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
