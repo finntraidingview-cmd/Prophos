@@ -31098,7 +31098,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.574'
+  const OS_TAB_BUILD = '2026-09-22.575'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -44640,7 +44640,9 @@
           if(rowsNeu.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rowsNeu, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
           if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){
             epLokal.kerzenGeraeumt = Date.now()
-            try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
+            // 26 h statt 14 Tage (25.09.2026, Finn: „alle 24 h löschen" — ≈ 2.900 Zeilen/Tag, 440 kB bei 1.409 Zeilen): der Chart zeigt
+            // höchstens 24 h, 26 h halten den Ausschnitt am Rand vollständig; ältere Kerzen liest niemand (Demo-Auswertung raus)
+            try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 26 * 3600000).toISOString()) }catch(_){}
           }
         }
         // Kerzen-Erstladung (Reader 0.8.0, 24.09.2026 spät): TradingViews eigene Erstladung (bis 600 Minutenkerzen je Wurzel)
