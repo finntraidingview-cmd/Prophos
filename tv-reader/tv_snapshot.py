@@ -1,3 +1,4 @@
+import re
 #!/usr/bin/env python3
 """Prophos TV-Reader — Übersetzer: TradingView-Positionen -> PROPHOS1-Snapshot.
 
@@ -44,18 +45,28 @@ def root_symbol(tv_symbol):
 
 
 def parse_de_zahl(text):
-    """Deutsche Zahl -> float. '29.618,25' -> 29618.25 ; '+190,00 USD' -> 190.0 ;
-    '2' -> 2.0. Gibt None bei leer/None/'-' (Doktrin 'Beweis oder leer': nichts erfinden)."""
+    """Zahl aus einem TradingView-Feld, deutsch ODER englisch (24.09.2026, Finn: „stell ein, dass es egal
+    ist, ob TradingView auf Deutsch ist"): '29.618,25' -> 29618.25 ; '29,618.25' -> 29618.25 ;
+    '+190,00 USD' -> 190.0 ; '1,875' -> 1875.0 (reine Tausender-Gruppe) ; '2' -> 2.0.
+    Regel wie tv_zahl_lesen im Puls: stehen beide Trenner drin, ist der LETZTE das Dezimalzeichen;
+    nur Dreiergruppen = Tausender; sonst ist der einzelne Trenner das Dezimalzeichen.
+    Gibt None bei leer/None/'-' (Doktrin 'Beweis oder leer': nichts erfinden). Name bleibt aus
+    Kompatibilitaet (alle Aufrufer), die Sprache ist egal."""
     if text is None:
         return None
-    t = str(text).strip()
+    t = str(text).replace("\u2212", "-").replace("\u2013", "-").strip()
     if not t or t == "-":
         return None
-    # nur Zahl, Trenner, Vorzeichen behalten
     t = "".join(c for c in t if c in "0123456789.,-+")
-    if not t or t in ("-", "+"):
+    if not t or t in ("-", "+") or not any(c.isdigit() for c in t):
         return None
-    t = t.replace(".", "").replace(",", ".")   # Tausenderpunkt raus, Dezimalkomma -> Punkt
+    if "," in t and "." in t:
+        dez = "," if t.rfind(",") > t.rfind(".") else "."
+        t = t.replace("." if dez == "," else ",", "").replace(dez, ".")
+    elif re.fullmatch(r"[+-]?\d{1,3}([.,]\d{3})+", t):
+        t = t.replace(",", "").replace(".", "")       # reine Tausender-Gruppen ('1,875' / '1.875')
+    else:
+        t = t.replace(",", ".")
     try:
         return float(t)
     except ValueError:
@@ -143,6 +154,13 @@ def _selftest():
     ok(parse_de_zahl("-570,00\nUSD") == -570.0, "negativ mit Zeilenumbruch")
     ok(parse_de_zahl("2") == 2.0, "ganze Zahl")
     ok(parse_de_zahl("-") is None and parse_de_zahl("") is None, "leer/Strich -> None")
+    # englische Zahlen (24.09.2026): TradingView darf auf Englisch laufen
+    ok(parse_de_zahl("29,618.25") == 29618.25, "EN Tausenderkomma + Dezimalpunkt")
+    ok(parse_de_zahl("-1,234.50 USD") == -1234.5, "EN negativ mit Waehrung")
+    ok(parse_de_zahl("1,875") == 1875.0, "EN reine Tausender-Gruppe")
+    ok(parse_de_zahl("12.50") == 12.5, "EN Dezimalpunkt ohne Tausender")
+    ok(parse_de_zahl("12,50") == 12.5, "DE Dezimalkomma ohne Tausender")
+    ok(parse_de_zahl("\u2212570.00") == -570.0, "typografisches Minus")
 
     # Symbol-Normalisierung
     ok(root_symbol("CME_MINI:NQ1!") == "NQ", "NQ normalisiert")

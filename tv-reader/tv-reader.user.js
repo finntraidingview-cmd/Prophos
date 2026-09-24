@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.5.1
+// @version      0.5.2
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.5.2  24.09.2026  Sprache egal: Englisch wird gelesen statt gewarnt (Verbinder parst beide Zahlformate)
 //   0.5.1  24.09.2026  Zusammenfassung robuster: Label/Wert in getrennten Divs
 //                      derselben Elternebene (auch mit Icon dazwischen), Werte
 //                      wie „−1,234.50 USD“, „-1.234,50 $“, „USD 1,234.50“,
@@ -47,7 +48,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.5.1';
+  const VERSION    = '0.5.2';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -61,13 +62,11 @@
   // Die TradingView-Positionstabelle ist eine ka-table: jede Zelle traegt ein
   // stabiles data-label (Spaltentitel). Daran haengt der Reader auf, NICHT an
   // den gehashten CSS-Klassen (die aendern sich bei TV-Updates).
-  // TV MUSS auf Deutsch laufen: nicht nur die data-labels sind lokalisiert,
-  // auch das ZAHLENFORMAT haengt an der Sprache — der Verbinder parst
-  // deutsche Zahlen (parse_de_zahl: "29.618,25"). Englisch wuerde also still
-  // 0 Positionen liefern und spaeter falsche Preise. Deshalb wird die
-  // englische Positionstabelle ERKANNT und als Warnung gemeldet statt
-  // mitgelesen (Fund 28.08.2026, PC 1: TV lief auf Englisch, Reader stumm
-  // bei offener Position).
+  // Sprache egal (0.5.2, 24.09.2026, Finn: „stell ein, dass es egal ist, ob es auf Deutsch ist"):
+  // die Spaltentitel stehen deutsch UND englisch in SPALTEN, und der Verbinder
+  // (tv_snapshot.parse_de_zahl) wie der Puls (tv_zahl_lesen) lesen beide
+  // Zahlformate ('29.618,25' und '29,618.25'). Englisch wird weiter ERKANNT
+  // (spracheFremd, fuer die Ferndiagnose im Payload), aber nicht mehr gewarnt.
   let spracheFremd = false;
   let spaltenGesehen = [];      // fuer die Ferndiagnose: was die Tabelle WIRKLICH anbietet
   // Was der letzte Lesevorgang WIRKLICH vorgefunden hat (0.4.0) — Grundlage
@@ -839,7 +838,7 @@
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
         else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
-        else if (spracheFremd) setBadge('⚠ TradingView ist nicht auf Deutsch — Reader liest die deutschen Spalten. Profilmenü → Sprache → Deutsch, dann F5', 'warn');
+        // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
       },
       onerror:   () => setBadge(`● Reader · ${positionen.length} Pos · Copier OFFLINE`, 'warn'),
