@@ -7387,6 +7387,8 @@
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px">
           <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
           <span class="mono" id="mkl-diff" style="font-size:13px;font-weight:700"></span>
+          <!-- laufende Minute H/L (25.09.2026): zeigt, dass Ausreißer zwischen zwei Anzeigen erfasst sind — Demo-Orders werten über H/L aus -->
+          <span class="mono" id="mkl-minute" style="font-size:12px;color:var(--sub)"></span>
           <span id="mkl-quelle" style="font-size:11.5px;color:var(--sub-2)"></span>
           <!-- NQ ↔ MNQ (24.09.2026 spät, Finn: „nur NQ und MNQ aus TradingView"): der Reader liefert seit 0.7.0 beide Wurzeln,
                der Chart zeigt eine, die Zeile darunter beide Kurse mit Alter. Kein Fusion-/NAS100-Kurs im Chart. -->
@@ -18589,6 +18591,16 @@
   }
   window._mklAuswerten = mklAuswerten
   // Daten holen: jüngster Kurs (auch alt, mit Alter), Kerzen der Spanne, offene + letzte Demo-Orders
+  // Kurs-Objekt aus einer tv_kurse-Zeile (REST oder Realtime). Alter = Cloud-Ankunft (updated_at), NICHT reader_ts: bei quelle 'ws'
+  // war reader_ts bis Script 0.8.0 die Zeit des letzten Handels (lp_time) — in ruhigen Minuten 30–60 s alt, obwohl die Brücke
+  // frisch schrieb. Die Brücke schreibt nur nicht-stale Kurse, also ist eine frische Zeile ein frischer Feed. reader_ts fürs Tooltip.
+  function mklKursAus(r, jetzt){
+    if(!r) return null
+    jetzt = jetzt || Date.now()
+    return { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0],
+             alter_ms: jetzt - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0), handel_ms: jetzt - (Number(r.reader_ts) || 0),
+             sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null }
+  }
   async function mklLaden(vollstaendig){
     if(mkl.stub) return
     const jetzt = Date.now()
@@ -18611,12 +18623,7 @@
     const rows = (rk && rk.data) || []
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
     // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
-    // Alter = Cloud-Ankunft (updated_at), NICHT reader_ts: bei quelle 'ws' ist reader_ts die Zeit des letzten Handels (lp_time) —
-    // in ruhigen Minuten 30–60 s alt, obwohl die Brücke alle 5 s frisch schreibt (Finn 25.09.2026 live: „hängt noch relativ").
-    // Die Brücke schreibt nur nicht-stale Kurse, also ist eine frische Zeile ein frischer Feed. reader_ts bleibt fürs Tooltip.
-    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0],
-                               alter_ms: jetzt - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0), handel_ms: jetzt - (Number(r.reader_ts) || 0),
-                               sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null } : null
+    const kursAus = r => mklKursAus(r, jetzt)   // dieselbe Rechnung wie der Realtime-Kanal (mklKursAus)
     mkl.kursJe = { NQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'NQ') || null), MNQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'MNQ') || null) }
     mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
@@ -18689,7 +18696,18 @@
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
       q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : frisch ? '' : '#B45309'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
-      q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed`
+      q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed. Die Brücke schreibt jede Sekunde bei Änderung; Ausreißer zwischen zwei Anzeigen stecken im High/Low der laufenden Minute, Demo-Orders werten darüber aus.`
+    }
+    // Laufende Minute H/L (25.09.2026, Finn: „jede Bewegung"): aus der letzten Kerze (< 2 min) plus Live-Kurs — sichtbar, dass
+    // Ausreißer zwischen zwei Anzeigen erfasst sind; die Demo-Orders werten ohnehin über High/Low aus.
+    const mEl = $mkl('mkl-minute')
+    if(mEl){
+      const last = mkl.kerzen.length ? mkl.kerzen[mkl.kerzen.length - 1] : null
+      if(last && Date.now() - (Date.parse(last.minute) || 0) < 120000){
+        const h = Math.max(Number(last.h), frisch ? k.preis : -Infinity), l = Math.min(Number(last.l), frisch ? k.preis : Infinity)
+        mEl.textContent = `Minute: H ${mklFmt(h)} / L ${mklFmt(l)}`
+        mEl.title = 'High/Low der laufenden Minute aus dem Reader-Ring (+ Live-Kurs) — jeder Tick dazwischen ist darin erfasst, auch wenn die Anzeige ihn nicht einzeln zeigt'
+      } else { mEl.textContent = ''; mEl.title = '' }
     }
     if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
@@ -18842,7 +18860,8 @@
   $mkl('mkl-go')?.addEventListener('click', mklDemoPlatzieren)
   document.querySelectorAll('#dashboard-view .sb-link[data-view="markt"]').forEach(b => b.addEventListener('click', () => setTimeout(() => mklTick(true), 80)))
   // Takt: 5 s in der Markt-View (Kurs + Kerzen-Nachtrag), sonst alle 60 s nur die Auswertung offener Demo-Orders
-  setInterval(() => { if(mklAktiv()) mklTick(false) }, 5000)
+  // Polling als Rückfall zum Realtime-Kanal (25.09.2026): 5 s ohne Kanal, 15 s bei SUBSCRIBED (mklPollMs, s. u.); 1-s-Prüfer
+  setInterval(() => { if(mklAktiv() && Date.now() - (mkl.tickAt || 0) >= mklPollMs){ mkl.tickAt = Date.now(); mklTick(false) } }, 1000)
   setInterval(() => { if(!mklAktiv() && currentUserId && (!mkl.ordersGeladen || mkl.orders.some(o => o.status === 'open'))) mklTick(false) }, 60000)
   // Wurzel-Umschalter NQ ↔ MNQ (24.09.2026 spät) — eigener Handler, letzte Wahl bleibt am Gerät
   document.querySelectorAll('#mkl-wurzel-seg [data-mkl-wurzel]').forEach(b => {
@@ -18864,6 +18883,40 @@
       mklChartZeichnen()
     })
   })
+  // Realtime (25.09.2026, Aufgabe B, Finn: „echt quasi live"): Supabase-Kanal auf tv_kurse + tv_kurs_1m — Kopf und laufende Kerze
+  // springen sofort, ohne Poll; das Polling bleibt als Rückfall (15 s bei SUBSCRIBED, sonst 5 s). Voraussetzung: beide Tabellen
+  // in der Publikation supabase_realtime (sql/2026-09-25_realtime_tv_kurse.sql, angewendet); die RLS-Lesepolicy (authenticated)
+  // gilt auch hier. Der Kanal startet, sobald ein Nutzer eingeloggt ist, und wird nur einmal aufgebaut (supabase-js verbindet neu).
+  let mklPollMs = 5000, _mklRt = null, _mklRtStatus = null
+  function mklRealtimeStart(){
+    if(_mklRt || !currentUserId || typeof supabase.channel !== 'function') return
+    try{
+      _mklRt = supabase.channel('markt-live')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurse' }, m => { try{
+          const r = m.new; if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
+          const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
+          if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
+          mkl.kursJe[r.wurzel] = kk
+          if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
+          if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+        }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m' }, m => { try{
+          const k = m.new; if(!k || k.wurzel !== mkl.wurzel || mkl.stub) return
+          const t = Date.parse(k.minute) || 0
+          const i = mkl.kerzen.findIndex(x => (Date.parse(x.minute) || 0) === t)
+          if(i >= 0) mkl.kerzen[i] = k
+          else { mkl.kerzen.push(k); mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0)) }
+          if(mklAktiv()) mklChartZeichnen()
+        }catch(e){ console.warn('[markt-live] tv_kurs_1m', e) } })
+        .subscribe(status => {
+          _mklRtStatus = status
+          mklPollMs = status === 'SUBSCRIBED' ? 15000 : 5000
+          console.log('[markt-live] Realtime', status)
+        })
+    }catch(e){ console.warn('[markt-live] Realtime', e); _mklRt = null; mklPollMs = 5000 }
+  }
+  window._mklRealtimeStatus = () => _mklRtStatus
+  setTimeout(mklRealtimeStart, 3000); setInterval(mklRealtimeStart, 15000)
   // Stale-Alarm mit Web-Push (24.09.2026 spät): läuft in jedem eingeloggten Tab alle 60 s, unabhängig von der Markt-View.
   // Kein NQ/MNQ-Tick > 2 min (obwohl es je einen gab) → EINMAL Push „Kurs-Feed steht" (Tag kursfeed — das Handy fasst
   // Doppelte mehrerer Geräte zusammen), läuft er wieder → Entwarnung. Merker in localStorage, damit ein Reload nicht erneut
@@ -29549,7 +29602,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.504'
+  const OS_TAB_BUILD = '2026-09-22.505'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42818,17 +42871,20 @@
       }catch(_){ /* Cloud/Schalter gerade nicht erreichbar — naechster Tick */ }
       // soll_an wird hier bewusst NICHT mitgeschrieben (sticky Schalter —
       // den setzen nur die Schalt-Klicks, sonst wuerde die Bruecke ihn platt-pushen)
+      // Positionen weiter alle 5 s (der Tick läuft seit Aufgabe B alle 2 s — nur Kurse/Kerzen brauchen den schnellen Takt)
+      const cloudFaellig = Date.now() - (epLokal.cloudAt || 0) >= 5000
+      if(cloudFaellig){ epLokal.cloudAt = Date.now()
       await supabase.from('echoplus_live').upsert({
         id: pc, pc_name: pc,
         an: d.an !== false,
         positionen: d.positionen || [],
         reader_ts: Number(d.ts) || 0,
         updated_at: new Date().toISOString()
-      })
+      }) }
       // Versionen des Reader-PCs (24.09.2026 spät, Finn live: Tab .495, Reader meldet sich, tv_kurse leer — aus der Cloud sah
       // man nicht, welches Script dort läuft): reader_version/script_version aus der GET-Antwort. Eigener, toleranter Update-
       // Aufruf NACH dem Upsert — fehlen die Spalten noch (SQL kommt vom Backend), scheitert nur er, nie der Positions-Strom.
-      if(d.reader_version || d.script_version){
+      if(cloudFaellig && (d.reader_version || d.script_version)){
         try{ await supabase.from('echoplus_live').update({ reader_version: String(d.reader_version || '').slice(0, 24) || null, script_version: String(d.script_version || '').slice(0, 24) || null }).eq('id', pc) }catch(_){}
       }
       // Live-Kurs aus dem Tab-Titel (Userscript 0.6.0, 24.09.2026 — Winning-Day-Gegenhedge): eine Zeile je PC
@@ -42849,6 +42905,11 @@
                       : ((typeof tvKursZahl === 'function') ? tvKursZahl(q.text) : null)
           if(!(preis > 0)) continue
           // quelle/stale/modus (Spalten seit .488): modus 'delayed_streaming_600' = TV-CME-Abo auf dem PC nicht aktiv (Kurse 10 min alt)
+          // Nur bei Änderung schreiben (1-s-Takt), spätestens alle 5 s als Lebenszeichen (updated_at ist die Frische im Markt-Kopf)
+          epLokal.letzterKurs = epLokal.letzterKurs || {}
+          const lk = epLokal.letzterKurs[w]
+          if(lk && lk.preis === preis && Date.now() - lk.at < 5000) continue
+          epLokal.letzterKurs[w] = { preis, at: Date.now() }
           rows.push({ id: `${pc}:${w}`, pc_name: pc, symbol: String(q.symbol_text || w).slice(0, 32), wurzel: w, preis, text: String(q.text || preis).slice(0, 32),
             sichtbar: q.sichtbar !== false, reader_ts: Number(q.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString(),
             quelle: String(q.quelle || '').slice(0, 12) || null, stale: false, modus: String(q.modus || '').slice(0, 32) || null })
@@ -42880,8 +42941,14 @@
           const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
             wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
             o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString() }))
-          epLokal.diag.rows = rows.length
-          if(rows.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rows, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
+          // Nur geänderte Kerzen schreiben (1-s-Takt): Signatur je Wurzel+Minute aus O/H/L/C, spätestens alle 5 s erneut
+          epLokal.letzteKerze = epLokal.letzteKerze || {}
+          const rowsNeu = rows.filter(r => { const key = r.wurzel + '|' + r.minute, sig = [r.o, r.h, r.l, r.c].join('|'), alt = epLokal.letzteKerze[key]
+            if(alt && alt.sig === sig && Date.now() - alt.at < 5000) return false
+            epLokal.letzteKerze[key] = { sig, at: Date.now() }; return true })
+          for(const key of Object.keys(epLokal.letzteKerze)) if(Date.now() - epLokal.letzteKerze[key].at > 600000) delete epLokal.letzteKerze[key]
+          epLokal.diag.rows = rowsNeu.length
+          if(rowsNeu.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rowsNeu, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
           if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){
             epLokal.kerzenGeraeumt = Date.now()
             try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
@@ -42892,8 +42959,14 @@
         // idempotent nach tv_kurs_1m — danach reicht der Kerzen-Ring aus /positions. Leer/fehlgeschlagen → nach 1 h erneut.
         // Socket-Bars haben keine Tick-Zahl (ticks 0); ein Reader < 0.8.0 antwortet mit dem Positions-Stand → keine bars → 'leer'.
         const el = epLokal.kerzenErstladung
-        if(ks && (!el || (el !== 'fertig' && Date.now() - (epLokal.kerzenErstladungAt || 0) > 3600000))){
-          epLokal.kerzenErstladung = 'laeuft'; epLokal.kerzenErstladungAt = Date.now()
+        // Wiederholung (25.09.2026, Live-Daten-Session: nach F5 im TV-Tab liegen Hunderte Bars im Ring, die Brücke holte sie erst
+        // nach 1 h): 'leer'/'fehler' nach 5 min erneut, und SOFORT, sobald der Reader in /positions mehr Kerzen meldet als beim
+        // letzten Versuch (kerzen_anzahl je Wurzel) — solange die Erstladung noch nicht 'fertig' ist.
+        const anzahlJetzt = (d.kerzen_anzahl && typeof d.kerzen_anzahl === 'object') ? Object.values(d.kerzen_anzahl).reduce((a, b) => a + (Number(b) || 0), 0) : 0
+        const wiederholMs = (el === 'leer' || el === 'fehler') ? 300000 : 3600000
+        const neueBars = el && el !== 'fertig' && el !== 'laeuft' && anzahlJetzt > (epLokal.kerzenAnzahlBei || 0)
+        if(ks && (!el || neueBars || (el !== 'fertig' && el !== 'laeuft' && Date.now() - (epLokal.kerzenErstladungAt || 0) > wiederholMs))){
+          epLokal.kerzenErstladung = 'laeuft'; epLokal.kerzenErstladungAt = Date.now(); epLokal.kerzenAnzahlBei = anzahlJetzt
           try{
             const r = await fetch(EP_READER + '/kerzen', { cache: 'no-store', signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(4000) : undefined })
             const kd = r.ok ? await r.json() : null
@@ -42910,7 +42983,10 @@
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
   }
-  setInterval(epBrueckeTick, 5000)
+  // 1 s statt 5 s (25.09.2026, Aufgabe B — Finn am Mac: „jede Bewegung", keine 5-Sekunden-Sprünge): der Reader antwortet lokal,
+  // Kurse + laufende Kerze gehen NUR bei Änderung in die Cloud (sonst alle 5 s als Lebenszeichen), Positionen/echoplus_live
+  // bleiben bei 5 s (Wächter cloudAt). Keine Tick-Ströme: höchstens 2 Kurs- + 2 Kerzen-Zeilen je Sekunde.
+  setInterval(epBrueckeTick, 1000)
 
   // ── Schalten: soll_an schreiben (sticky), lokal zusaetzlich sofort ──
   async function epSchalten(id, an){
