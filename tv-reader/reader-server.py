@@ -93,6 +93,71 @@ _k1m_vor_je = {}   # wurzel -> letzte abgeschlossene Kerze
 _reload_grund = None
 _reload_s = 0.0
 STALE_S = 45.0     # kein neuer Kurs > 45 s → stale (Userscript sagt es, der Server prueft es zusaetzlich am Alter)
+# 0.8.0: Bars aus TradingViews Socket (POST /kerzen) — Ring je Wurzel, nur Aufloesung '1'
+KERZEN_MAX = 600
+_kerzen = {}          # wurzel -> {minute(int): {wurzel, symbol, aufloesung, minute, o, h, l, c, vol}}
+_kerzen_s = 0.0       # Server-Zeit des letzten Bar-Empfangs
+_kerzen_modus = None  # 'streaming' | 'delayed_streaming_600' (aus dem Userscript)
+_kerzen_delay_s = None
+_aufl_warnung = None
+
+
+def _kerzen_uebernehmen(ring, bars, erstladung, maximum=KERZEN_MAX):
+    """REIN RECHNEND (testbar): Bars {wurzel, symbol, aufloesung, minute, o, h, l, c, vol?} in den
+    Ring je Wurzel (upsert auf minute — dieselbe Kerze kommt mehrfach mit wachsendem Volumen).
+    Nur Aufloesung '1' zaehlt; andere liefern eine Warnung. erstladung=True ersetzt den Ring der
+    betroffenen Wurzeln (Serie neu geladen). -> (ring, uebernommen, warnung)"""
+    ring = dict(ring or {})
+    n, warnung, ersetzt = 0, None, set()
+    for b in (bars or []):
+        if not isinstance(b, dict):
+            continue
+        aufl = str(b.get("aufloesung") or "")
+        if aufl != "1":
+            warnung = f"Chart-Aufloesung {aufl or '?'} statt 1 — keine Minutenkerzen"
+            continue
+        w = _kurs_wurzel(b.get("wurzel")) or str(b.get("wurzel") or "").upper()[:8]
+        try:
+            minute = int(float(b.get("minute")))
+            o, h, l, c = (float(b.get("o")), float(b.get("h")), float(b.get("l")), float(b.get("c")))
+        except (TypeError, ValueError):
+            continue
+        if not w or minute <= 0 or c <= 0:
+            continue
+        if erstladung and w not in ersetzt:
+            ring[w] = {}
+            ersetzt.add(w)
+        r = ring.setdefault(w, {})
+        vol = b.get("vol")
+        r[minute] = {"wurzel": w, "symbol": str(b.get("symbol") or w)[:32], "aufloesung": "1", "minute": minute,
+                     "o": o, "h": h, "l": l, "c": c, "vol": (float(vol) if isinstance(vol, (int, float)) else None)}
+        n += 1
+        if len(r) > maximum:
+            for k in sorted(r)[:len(r) - maximum]:
+                del r[k]
+    return ring, n, warnung
+
+
+def _kerzen_liste(ring, seit=None):
+    """REIN RECHNEND: alle Bars aller Wurzeln chronologisch, optional nur minute >= seit."""
+    out = []
+    for w in sorted((ring or {}).keys()):
+        for m in sorted(ring[w]):
+            if seit is None or m >= seit:
+                out.append(ring[w][m])
+    return out
+
+
+def _kurs_1m_aus_ring(ring):
+    """REIN RECHNEND: letzte abgeschlossene + laufende Minute je Wurzel in der Form von kurs_1m
+    (minute in Unix-Sekunden, o/h/l/c, n = ticks unbekannt → 0) — damit die bestehende Bruecke
+    unveraendert nach tv_kurs_1m schreibt."""
+    out = []
+    for w in sorted((ring or {}).keys()):
+        for m in sorted(ring[w])[-2:]:
+            b = ring[w][m]
+            out.append({"minute": m, "wurzel": w, "symbol": b["symbol"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "n": 0, "quelle": "ws"})
+    return out
 
 
 def _kurse_uebernehmen(kurse, sichtbar, jetzt_s, alt, k1m_je, k1m_vor_je):
@@ -116,12 +181,16 @@ def _kurse_uebernehmen(kurse, sichtbar, jetzt_s, alt, k1m_je, k1m_vor_je):
             preis = bid or ask or txt
         if not preis or preis <= 0:
             continue
-        neu[wurzel] = {"bid": bid, "ask": ask, "text": str(k.get("text") or "")[:32], "preis": preis,
-                       "ts": k.get("ts"), "quelle": str(k.get("quelle") or "")[:12],
+        lp = _kurs_zahl(str(k.get("lp"))) if isinstance(k.get("lp"), (int, float)) else None
+        if lp and lp > 0:
+            preis = float(lp)                     # WS: der letzte Trade ist der Kurs, Bid/Ask nur Beiwerk
+        neu[wurzel] = {"bid": bid, "ask": ask, "lp": lp, "text": str(k.get("text") or "")[:32], "preis": preis,
+                       "ts": k.get("ts"), "lp_time": k.get("lp_time"), "quelle": str(k.get("quelle") or "")[:12],
+                       "modus": (str(k.get("modus"))[:32] if k.get("modus") else None), "delay_s": k.get("delay_s"),
                        "stale": bool(k.get("stale")), "unveraendert_s": k.get("unveraendert_s"),
                        "sichtbar": bool(sichtbar), "symbol_text": str(k.get("symbol_text") or "")[:60],
                        "empf_s": jetzt_s}
-        if sichtbar:
+        if sichtbar and str(k.get("quelle") or "") != "ws":   # WS-Kurse: die Bars kommen fertig ueber /kerzen
             k1m_je[wurzel], k1m_vor_je[wurzel] = _kerze_fortschreiben(
                 k1m_je.get(wurzel), k1m_vor_je.get(wurzel), wurzel, str(k.get("symbol_text") or wurzel)[:32], preis, jetzt_s)
     return neu, k1m_je, k1m_vor_je
@@ -255,12 +324,20 @@ def _mit_an(stand):
     # (Form wie bisher, wurzel unterscheidet; alte Bruecken lesen weiter kurs_1m). Ohne 0.7.0-Userscript
     # fallen die Titel-Kerzen (_k1m) hinein, damit nichts verloren geht.
     out["kurse"] = _kurse_ausgabe(_kurse, time.time())
-    kerzen = []
-    for w in sorted(_k1m_je.keys()):
-        kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k]
+    # 0.8.0: Kerzen zuerst aus dem Socket-Ring (fertige TradingView-Bars), sonst Tick-Kerzen (Legende/Titel)
+    kerzen = _kurs_1m_aus_ring(_kerzen) if _kerzen else []
+    if not kerzen:
+        for w in sorted(_k1m_je.keys()):
+            kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k]
     if not kerzen:
         kerzen = [k for k in (_k1m_vor, _k1m) if k]
     out["kurs_1m"] = kerzen
+    out["kerzen_alter_s"] = round(time.time() - _kerzen_s, 3) if _kerzen_s else None
+    out["kerzen_anzahl"] = {w: len(r) for w, r in _kerzen.items()}
+    out["aufloesung_warnung"] = _aufl_warnung
+    out["modus"] = _kerzen_modus
+    out["delay_s"] = _kerzen_delay_s
+    out["feed"] = (bf.get("feed") if isinstance(bf.get("feed"), dict) else None)   # Nachweis aus dem Userscript (0.8.0)
     out["reload_grund"] = _reload_grund
     out["reload_alter_s"] = round(time.time() - _reload_s, 3) if _reload_s else None
     return out
@@ -310,6 +387,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor, _kurse, _k1m_je, _k1m_vor_je, _reload_grund, _reload_s
+        global _kerzen, _kerzen_s, _kerzen_modus, _kerzen_delay_s, _aufl_warnung
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -345,6 +423,29 @@ class Handler(BaseHTTPRequestHandler):
             # der Dump laeuft durchs ganze DOM).
             self._json(200, {"ok": True, "dump": time.time() < _dump_bis,
                              "suche": _such_texte if time.time() < _such_bis else []})
+            return
+
+        # 0.8.0: Bars aus TradingViews Socket — {ts, quelle:'ws', erstladung, modus, delay_s, bars:[...]}.
+        # VOR dem Pause-Gate wie der Kurs (Beobachtung, kein Hedge-Befehl).
+        if self.path.rstrip("/") == "/kerzen":
+            bars = daten.get("bars")
+            if not isinstance(bars, list):
+                self._json(400, {"ok": False, "msg": "Feld 'bars' fehlt oder ist keine Liste"})
+                return
+            _kerzen, n, warnung = _kerzen_uebernehmen(_kerzen, bars, bool(daten.get("erstladung")))
+            if n:
+                _kerzen_s = time.time()
+            _aufl_warnung = warnung
+            if daten.get("modus"):
+                _kerzen_modus = str(daten.get("modus"))[:32]
+            if isinstance(daten.get("delay_s"), (int, float)):
+                _kerzen_delay_s = daten.get("delay_s")
+            if daten.get("erstladung") and n:
+                print(f"\n[{time.strftime('%H:%M:%S')}] Kerzen-Erstladung: {n} Bars "
+                      f"({', '.join(f'{w}:{len(r)}' for w, r in _kerzen.items())})"
+                      + (f" · {_kerzen_modus}" if _kerzen_modus else ""), flush=True)
+            self._json(200, {"ok": True, "uebernommen": n, "warnung": warnung,
+                             "anzahl": {w: len(r) for w, r in _kerzen.items()}})
             return
 
         # Text-Suche scharfschalten: POST /suche {"texte": [...]} — 90 s lang
@@ -529,6 +630,23 @@ class Handler(BaseHTTPRequestHandler):
             out["ok"] = True
             out["alter_s"] = round(time.time() - _bedienfeld_s, 3)
             self._json(200, out)
+            return
+
+        # 0.8.0: GET /kerzen[?seit=<unix s>] — alle Bars des Rings (bis 600 je Wurzel), fuer die
+        # Bruecke beim ersten Sehen eines PCs (Erstladung nach tv_kurs_1m), danach reicht kurs_1m.
+        if self.path.split("?")[0].rstrip("/") == "/kerzen":
+            seit = None
+            try:
+                q = self.path.split("?", 1)[1] if "?" in self.path else ""
+                for teil in q.split("&"):
+                    if teil.startswith("seit="):
+                        seit = int(float(teil[5:]))
+            except (ValueError, TypeError):
+                seit = None
+            self._json(200, {"ok": True, "quelle": "ws", "bars": _kerzen_liste(_kerzen, seit),
+                             "anzahl": {w: len(r) for w, r in _kerzen.items()},
+                             "alter_s": round(time.time() - _kerzen_s, 3) if _kerzen_s else None,
+                             "aufloesung_warnung": _aufl_warnung, "modus": _kerzen_modus, "delay_s": _kerzen_delay_s})
             return
 
         # Aktuellen Stand abfragbar machen (fuer den Copier, die Orbit-View

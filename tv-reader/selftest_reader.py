@@ -63,6 +63,53 @@ def main():
     aus2 = rs._kurse_ausgabe(kurse2, 1000.0 + 60)
     check(aus2["NQ"]["stale"] is True, "Ausgabe: Empfang aelter als 45 s → stale, auch ohne Userscript-Urteil")
 
+    # 0.8.0: Bar-Ring aus dem Socket — Testframes der Session „Live-Daten fuer NQ und MNQ" (24.09.2026), sonst konstruiert
+    import json, re
+    pfad = "/private/tmp/claude-501/-Applications-Prophos/52453f70-d3af-439b-ac22-ac0ba195aecd/scratchpad/tv-frames/tv_frames_2026-09-24.jsonl"
+    bars_real = []
+    try:
+        for zeile in open(pfad, encoding="utf-8"):
+            f = json.loads(zeile); i = 0
+            while i < len(f):
+                m = re.match(r"~m~(\d+)~m~", f[i:i + 24])
+                if not m:
+                    break
+                n = int(m.group(1)); body = f[i + len(m.group(0)):i + len(m.group(0)) + n]; i += len(m.group(0)) + n
+                if body.startswith("~h~"):
+                    continue
+                j = json.loads(body)
+                if j.get("m") in ("timescale_update", "du"):
+                    for sid, e in (j["p"][1] or {}).items():
+                        for b in (e.get("s") or []):
+                            v = b["v"]
+                            bars_real.append({"wurzel": "NQ", "symbol": "CME_MINI:NQ1!", "aufloesung": "1", "minute": v[0], "o": v[1], "h": v[2], "l": v[3], "c": v[4], "vol": v[5] if len(v) > 5 else None,
+                                              "_erst": j.get("m") == "timescale_update"})
+    except FileNotFoundError:
+        pass
+    if bars_real:
+        erst = [b for b in bars_real if b["_erst"]]; du = [b for b in bars_real if not b["_erst"]]
+        ring, n1, w1 = rs._kerzen_uebernehmen({}, erst, True)
+        ring, n2, w2 = rs._kerzen_uebernehmen(ring, du, False)
+        liste = rs._kerzen_liste(ring)
+        check(n1 == 30 and n2 == 5 and w1 is None and len(ring["NQ"]) == 31 and liste[-1]["minute"] == 1790267700 and liste[-2]["vol"] == 881.0,
+              f"Ring aus echten Frames: 30 Bars Erstladung + 5 du auf 2 Minuten → 31 Kerzen, letzte du-Fassung gewinnt (vol 881) [{n1}/{n2}]")
+        k1m = rs._kurs_1m_aus_ring(ring)
+        check(len(k1m) == 2 and k1m[0]["minute"] == 1790267640 and k1m[1]["minute"] == 1790267700 and k1m[1]["quelle"] == "ws",
+              "kurs_1m aus dem Ring = letzte abgeschlossene + laufende Minute")
+    else:
+        print("· Testframes nicht gefunden — Ring nur konstruiert geprueft")
+    ring, n, w = rs._kerzen_uebernehmen({}, [{"wurzel": "MNQ", "symbol": "MNQ1!", "aufloesung": "5", "minute": 60, "o": 1, "h": 2, "l": 0.5, "c": 1.5}], False)
+    check(n == 0 and ring == {} and "5 statt 1" in (w or ""), "Aufloesung 5 → verworfen mit Warnung")
+    ring, n, w = rs._kerzen_uebernehmen({}, [{"wurzel": "NQ", "symbol": "NQ1!", "aufloesung": "1", "minute": 60 * i, "o": 1, "h": 2, "l": 0.5, "c": 1.5} for i in range(1, 700)], True, maximum=600)
+    check(n == 699 and len(ring["NQ"]) == 600 and min(ring["NQ"]) == 60 * 100, "Ring-Deckel 600: aelteste fliegen raus")
+    ring, n, w = rs._kerzen_uebernehmen(ring, [{"wurzel": "NQ", "symbol": "NQ1!", "aufloesung": "1", "minute": 60, "o": 9, "h": 9, "l": 9, "c": 9}], True)
+    check(len(ring["NQ"]) == 1 and 60 in ring["NQ"], "Erstladung ersetzt den Ring der Wurzel (Serie neu geladen)")
+    ring, n, w = rs._kerzen_uebernehmen(ring, [{"wurzel": "MNQ", "symbol": "MNQ1!", "aufloesung": "1", "minute": 120, "o": 1, "h": 1, "l": 1, "c": 1}, "kaputt", {"wurzel": "NQ", "aufloesung": "1", "minute": "x"}], False)
+    check(n == 1 and set(ring) == {"NQ", "MNQ"} and rs._kerzen_liste(ring, seit=100) == [ring["MNQ"][120]], "zweite Wurzel, Unsinn ignoriert, seit-Filter")
+    kurse, _, _ = rs._kurse_uebernehmen({"NQ": {"lp": 30700.25, "bid": "30,700.00", "ask": "30,700.50", "text": "30700.25", "ts": 1, "quelle": "ws", "lp_time": 1790268000, "modus": "delayed_streaming_600", "delay_s": 600}}, False, 2000.0, {}, {}, {})
+    check(kurse["NQ"]["preis"] == 30700.25 and kurse["NQ"]["lp"] == 30700.25 and kurse["NQ"]["modus"] == "delayed_streaming_600" and kurse["NQ"]["delay_s"] == 600,
+          "kurse: WS-Quelle nimmt lp als Kurs, Modus/Delay laufen mit, verdeckt egal")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

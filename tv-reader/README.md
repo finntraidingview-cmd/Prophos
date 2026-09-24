@@ -174,7 +174,21 @@ Script, das die ganze Zeit liest, auf einem PC, der 24/7 an ist — genau von de
 auch die Order platziert ist." Der Feed speist den Markt-Chart, die Demo-Orders und die
 Anzeige der Gegenhedge-Level (die Schließ-Level selbst liegen im Fusion-Terminal).
 
-**Woher der Kurs kommt.** Je Chart-Pane liest das Userscript die Sell/Buy-Knöpfe in der
+**Woher der Kurs kommt (0.8.0).** Das Userscript hört TradingViews **eigene WebSocket-Verbindung**
+passiv mit — kein eigener Socket, keine eigene Anfrage, es liest nur, was ohnehin ankommt: Kurse
+(`qsd`: letzter Preis, Bid, Ask, Zeit des letzten Trades) für jedes Symbol in Chart **und Watchlist**,
+und die Minutenkerzen der Chart-Serie (`timescale_update` = Erstladung mit Historie, `du` = laufend).
+WebSocket-Nachrichten werden im verdeckten Tab **nicht** gedrosselt — dieser Weg liefert auch,
+wenn Prophos vorn liegt. Voraussetzungen: Chart auf **1 Minute**, Symbol NQ (NQ1! oder Front-Month),
+**MNQ1! in der Watchlist** (dann kommen NQ und MNQ parallel). Steht der Chart auf einer anderen
+Auflösung, gibt es keine Minutenkerzen — Prophos zeigt „Chart-Auflösung x statt 1". Zeigt der
+Feed `delayed_streaming_600`, ist das TradingView-CME-Abo auf dem PC nicht aktiv: alle Kurse sind
+dann 10 Minuten alt mit frischem Zeitstempel — der Markt-Kopf warnt.
+
+Rückfälle bleiben eingebaut: die Sell/Buy-Knöpfe der Legende je Chart-Pane (0.7.0, nur im sichtbaren
+Tab zuverlässig) und der Tab-Titel (0.6.0).
+
+**Woher der Kurs im Rückfall kommt (0.7.0).** Je Chart-Pane liest das Userscript die Sell/Buy-Knöpfe in der
 Legende (`data-name="sell-order-button"` / `"buy-order-button"`) — sie tragen Bid und Ask.
 Der Kurs im Payload ist die Mitte. Welches Symbol das Pane zeigt, steht in der Legende
 daneben (Symbol oder Beschreibung, beides wird erkannt). Rückfall ist der Tab-Titel (nur
@@ -207,10 +221,30 @@ das aktive Chart). Zwei Panes = beide Symbole gleichzeitig.
 - Badge im TradingView-Tab: grün „Reader · … · Copier ok"; grau = pausiert, orange = blind/offline.
 
 **Selbstheilung:** kein neuer Kurs > 45 s → `stale:true` je Symbol im Payload (Prophos zeigt
-den Kurs gedämpft). > 90 s ohne jeden Tick → das Script lädt die Seite einmal neu (höchstens
-alle 10 Minuten), der Grund steht danach im Payload (`reload_grund`) und im Reader-Fenster.
-Am Wochenende (Markt zu) ist stale normal — der Reload greift dann alle 10 Minuten; wer das
-nicht will, lässt den Tab am Wochenende zu.
+den Kurs gedämpft). Neu laden tut sich das Script nur, wenn **gar kein WebSocket-Frame** mehr
+ankommt (auch kein Herzschlag) **und** 90 s kein Titel-/Legenden-Wert sich geändert hat —
+höchstens alle 10 Minuten; der Grund steht danach im Payload (`reload_grund`) und im
+Reader-Fenster. Am Wochenende und in der CME-Pause läuft der Herzschlag weiter: stale, aber
+kein Reload. Im Bedienfeld (`feed`) stehen Frames/Minute je Quelle, `letzter_frame_ms`
+(irgendein Frame) getrennt von `letzter_ws_ms` (Kurs-/Bar-Frame) — so unterscheidet man
+„Markt zu" (Herzschlag ja, Kurs nein) von „Socket tot" (nichts).
+
+**Weg 2 — Chrome so einstellen, dass der Tab nie verworfen wird (10 Minuten, einmalig):**
+1. TradingView in ein **eigenes Chrome-Fenster** legen (Tab dort aktiv), Fenster **nie
+   minimieren** — klein an den Rand schieben reicht.
+2. Chrome-Verknüpfung mit Flags starten (gelten nur, wenn Chrome damit als **erste** Instanz
+   startet — alle Chrome-Fenster vorher schließen):
+   `--disable-backgrounding-occluded-windows --disable-background-timer-throttling --disable-renderer-backgrounding`
+3. `chrome://settings/performance`: Memory Saver **aus** oder `tradingview.com` unter „Diese
+   Websites immer aktiv lassen"; Energiesparmodus aus.
+4. Windows: Ruhezustand/Standby aus (Bildschirm sperren ist ok, Chrome läuft weiter);
+   PC-Neustart = Chrome per Autostart mit derselben Verknüpfung.
+Mit 1–3 bleibt der Tab `visible`, also liefern auch Legende und Titel; der Socket-Weg braucht
+das nicht, profitiert aber von 3–4 (kein Verwerfen des Tabs).
+
+**Live-Beweis:** `select wurzel, count(*), min(minute), max(minute) from tv_kurs_1m group by 1`
+zeigt Bars; `tv_kurse` hat NQ **und** MNQ mit Alter < 20 s, **während der TV-Tab verdeckt ist**
+(Prophos-Tab davor). Dann Screenshot der Markt-View mit Kerzen.
 
 **Was Finn am PC einmal prüfen muss (vom Mac nicht beweisbar):** (1) tickt die Legende auch,
 wenn das TradingView-Fenster hinter Prophos liegt (Kopfzeile in Markt beobachten, während

@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.7.0
+// @version      0.8.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
-// @run-at       document-idle
+// @run-at       document-start
 // @updateURL    https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
 // @downloadURL  https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/tv-reader.user.js
 // ==/UserScript==
@@ -24,6 +25,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.0  24.09.2026  TradingViews EIGENE WebSocket-Verbindung passiv mitgehoert (document-start, unsafeWindow):
+//                      Kurse (qsd: lp/bid/ask/lp_time) und Minutenkerzen (timescale_update/du) fuer NQ + MNQ —
+//                      laeuft auch im verdeckten Tab; POST /kerzen; feed-Nachweis im Bedienfeld; Legende/Titel
+//                      bleiben Rueckfall; Reload nur, wenn KEIN Frame mehr kommt (auch kein Herzschlag)
 //   0.7.0  24.09.2026  BEIDE Kurse NQ + MNQ aus den Legenden-Knöpfen (Sell/Buy = Bid/Ask) je Chart-Pane,
 //                      Tab-Titel nur Rückfall; Stale-Wächter + Selbstheilung per Reload (kurse, stale, reload_grund)
 //   0.6.0  24.09.2026  Live-Kurs aus dem Tab-Titel (kurs) im Positions-Strom — Winning-Day-Gegenhedge auf Fusion
@@ -51,9 +56,10 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.7.0';
+  const VERSION    = '0.8.0';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
+  const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
   const BF_JEDER   = 2;      // Bedienfeld nur jeden n-ten Tick (500 ms) — die
                              // Steuerelement-Suche geht durchs halbe DOM, das
@@ -717,6 +723,8 @@
       // nichts gefunden. Der Unterschied zaehlt — "nicht gesucht" darf beim
       // Puls nie als "steht nicht da" ankommen.
       treffer: suchTexte.length ? sucheTexte() : null,
+      // 0.8.0: Nachweis, was der Socket liefert — auch im verdeckten Tab (Frames/Minute je Quelle, Modus, Serien)
+      feed: pxFeedStand(),
       panel: dumpKompakt(),                     // Werkzeugleiste + rechte Spalte, immer
     };
   }
@@ -871,6 +879,230 @@
     }
     return out;
   }
+  /* ═══ 0.8.0 (24.09.2026 spaet): TradingViews EIGENE WebSocket-Verbindung passiv mithoeren ═══
+   * Finn: „Ich muss das zu 100 % sicher haben: die MNQ- und NQ-Live-Daten in Prophos … auf einem
+   * PC, der 24/7 an ist — genau von dem NQ und MNQ, wo auch die Order platziert ist." Spec:
+   * Vault „Prophos - Live-Chart NQ MNQ ueber TV-Reader" (Session „Live-Daten fuer NQ und MNQ").
+   * Kein eigener Socket, keine eigene Anfrage: das Script haengt sich an die Verbindung, die
+   * TradingView selbst oeffnet, und liest mit, was ohnehin ankommt. WebSocket-message-Events
+   * werden im verdeckten Tab NICHT gedrosselt — deshalb liefert dieser Weg auch, wenn Prophos
+   * vorn liegt (der Tab-Titel friert dort ein). Dafuer @run-at document-start (der Socket ist
+   * bei document-idle laengst offen) und @grant unsafeWindow (mit @grant laeuft das Script in
+   * der Sandbox, das Seiten-Objekt WebSocket erreicht man nur ueber unsafeWindow).
+   * Am 24.09.2026 im Browser-Pane am echten TradingView mitgelesen (MessageEvent-Getter, 8 s):
+   *   Frame  = '~m~<len>~m~<json>' (mehrere je Frame), '~m~<len>~m~~h~<n>' = Herzschlag
+   *   qsd    → p[1] = {n:'CME_MINI:NQ1!' ODER n:'={"symbol":"CME_MINI:NQ1!",…}', s:'ok',
+   *                    v:{bid, ask, lp, lp_time, ch, chp, volume, …}}  (Teil-Updates: nur die
+   *                    Felder, die sich geaendert haben — deshalb wird gemerged, nie ersetzt)
+   *   du / timescale_update → p[1] = {'sds_1': {s:[{i, v:[t, o, h, l, c, vol]}], lbs:{…}},
+   *                    'st1': {st:[…]} (Studien — fallen durch die 5–6-Zahlen-Regel)}
+   *   Serie → Symbol/Aufloesung nur ueber die SENDS: resolve_symbol (p[1]=Symbol-Id,
+   *   p[2]='={"symbol":…}') und create_series/modify_series (p[1]=Serien-Id, p[3]=Symbol-Id,
+   *   p[4]=Aufloesung, z. B. '1'). Serien-Id nie hart verdrahten.
+   * Alles hier ist gegen Fehler abgeschottet: ein Fehler im Mithoeren darf TradingView nie
+   * stoeren (wir reichen jedes Event unveraendert weiter) und den Positions-Reader nie mitreissen. */
+  const feed = {
+    sockets: 0, frames: [], qsd: [], du: [], titel: [],   // Zeitstempel (ms) der letzten 60 s
+    letzter_frame_ms: 0, letzter_ws_ms: 0,                // irgendein Frame (auch ~h~) / Kurs- oder Bar-Frame
+    serien: {},          // serienId -> { symbol, wurzel, aufloesung }
+    symbole: {},         // symbolId (sds_sym_1) -> symbol
+    kurse: {},           // wurzel -> { lp, bid, ask, lp_time, symbol, ts, geaendert_ms }
+    bars: [],            // wartende Bars fuer POST /kerzen
+    erstladung: false,
+    unbekannte_serien: 0, fehler: 0, aufloesung_warnung: null,
+    modus: null, delay_s: null,   // update_mode aus qsd/series_completed ('streaming' | 'delayed_streaming_600'), delay aus symbol_resolved
+    info: {},            // symbolId -> { symbol, root, front_contract, pointvalue, tick } aus symbol_resolved (eingehend)
+    bevorzugt: {},       // wurzel -> Symbol der Chart-Serie (NQ1! und NQZ2026 liefern dieselben qsd — nur eine Quelle je Wurzel)
+  };
+  const feedZaehl = (liste, jetzt) => { liste.push(jetzt); while (liste.length && liste[0] < jetzt - 60000) liste.shift(); };
+  // Framing als reine Funktion (testbar): Text -> [{m, p} | {h: n}]
+  function pxFramesParsen(text) {
+    const out = [];
+    const s = String(text || '');
+    let i = 0;
+    while (i < s.length) {
+      const m = /^~m~(\d+)~m~/.exec(s.slice(i, i + 24));
+      if (!m) break;
+      const len = Number(m[1]);
+      const body = s.substr(i + m[0].length, len);
+      i += m[0].length + len;
+      if (body.startsWith('~h~')) { out.push({ h: Number(body.slice(3)) || 0 }); continue; }
+      try { const j = JSON.parse(body); if (j && typeof j === 'object') out.push(j); } catch (_) { out.push({ fehler: body.slice(0, 40) }); }
+    }
+    return out;
+  }
+  // 'CME_MINI:NQ1!' | '={"symbol":"CME_MINI:NQ1!",…}' -> 'CME_MINI:NQ1!'
+  function pxSymbolAusN(n) {
+    let s = String(n || '');
+    if (s.startsWith('=')) { try { s = JSON.parse(s.slice(1)).symbol || ''; } catch (_) { const m = /"symbol"\s*:\s*"([^"]+)"/.exec(s); s = m ? m[1] : ''; } }
+    return s;
+  }
+  function pxSendMerken(text) {
+    for (const msg of pxFramesParsen(text)) {
+      if (!msg || !msg.m || !Array.isArray(msg.p)) continue;
+      if (msg.m === 'resolve_symbol' && msg.p.length >= 3) {
+        const sym = pxSymbolAusN(msg.p[2]);
+        if (sym) feed.symbole[String(msg.p[1])] = sym;
+      } else if ((msg.m === 'create_series' || msg.m === 'modify_series') && msg.p.length >= 5) {
+        const sym = feed.symbole[String(msg.p[3])] || '';
+        const info = feed.info[String(msg.p[3])];
+        const wurzel = (info && info.root) || kursWurzelAusText(sym);
+        feed.serien[String(msg.p[1])] = { symbol: sym, wurzel, aufloesung: String(msg.p[4]) };
+        if (wurzel && sym) feed.bevorzugt[wurzel] = sym;
+      }
+    }
+  }
+  function pxBarsAusUpdate(p1, erstladung) {
+    if (!p1 || typeof p1 !== 'object') return 0;
+    let n = 0;
+    for (const sid of Object.keys(p1)) {
+      const eintrag = p1[sid];
+      const s = eintrag && Array.isArray(eintrag.s) ? eintrag.s : null;
+      if (!s || !s.length) continue;
+      let serie = feed.serien[sid];
+      if (!serie) {
+        const ids = Object.keys(feed.info);
+        if (ids.length === 1) {
+          const i = feed.info[ids[0]];
+          serie = feed.serien[sid] = { symbol: i.symbol, wurzel: i.root || kursWurzelAusText(i.symbol), aufloesung: '1', geraten: true };
+        }
+      }
+      for (const b of s) {
+        const v = b && Array.isArray(b.v) ? b.v : null;
+        if (!v || v.length < 5 || v.length > 6 || !v.every(x => typeof x === 'number')) continue;
+        if (!serie || !serie.wurzel) { feed.unbekannte_serien++; continue; }
+        feed.bars.push({ wurzel: serie.wurzel, symbol: serie.symbol, aufloesung: serie.aufloesung,
+                         minute: Math.floor(v[0]), o: v[1], h: v[2], l: v[3], c: v[4], vol: v[5] == null ? null : v[5] });
+        n++;
+      }
+    }
+    if (n && erstladung) { feed.erstladung = true; feed.erstladung_erwartet = null; }
+    if (feed.bars.length > 2000) feed.bars = feed.bars.slice(-2000);   // Erstladung ist begrenzt, du-Updates sind klein
+    return n;
+  }
+  function pxModus(m) {
+    if (typeof m !== 'string' || !m) return;
+    feed.modus = m;
+    const d = /delayed[^0-9]*(\d+)/.exec(m);
+    if (d) feed.delay_s = Number(d[1]);
+    else if (m === 'streaming') feed.delay_s = 0;
+  }
+  function pxNachricht(msg, jetzt) {
+    if (!msg || !msg.m || !Array.isArray(msg.p)) return;   // Begruessung ohne m, Herzschlag: nichts zu tun
+    if (msg.m === 'symbol_resolved' && msg.p.length >= 3 && msg.p[2] && typeof msg.p[2] === 'object') {
+      // eingehend: Symbol-Id -> Klartext + Wurzel + Frontkontrakt + Punktwert (kein Regex noetig)
+      const i = msg.p[2], sym = String(i.pro_name || i.full_name || i.name || '');
+      const root = String(i.root || '') || kursWurzelAusText(sym);
+      feed.info[String(msg.p[1])] = { symbol: sym, root, front_contract: i.front_contract || null, pointvalue: i.pointvalue || null,
+                                      tick: (i.minmov && i.pricescale) ? i.minmov / i.pricescale : null };
+      if (sym) feed.symbole[String(msg.p[1])] = sym;
+      if (typeof i.delay === 'number') feed.delay_s = i.delay;
+      return;
+    }
+    if (msg.m === 'series_completed' && msg.p.length >= 3) { pxModus(msg.p[2]); return; }
+    if (msg.m === 'series_loading' && msg.p.length >= 2) {
+      // Serie wird neu geladen (Symbol-/Aufloesungswechsel): das naechste timescale_update ersetzt den Ring
+      feed.erstladung_erwartet = String(msg.p[1]);
+      return;
+    }
+    if (msg.m === 'qsd') {
+      const p1 = msg.p[1];
+      if (!p1 || typeof p1 !== 'object' || !p1.v) return;
+      const sym = pxSymbolAusN(p1.n), wurzel = kursWurzelAusText(sym);
+      if (!wurzel) return;
+      if (p1.v.update_mode) pxModus(p1.v.update_mode);
+      // Nur EINE Quelle je Wurzel (NQ1! und NQZ2026 senden identische qsd): die Chart-Serie hat Vorrang,
+      // sonst das zuerst gesehene Symbol; ein anderes Symbol darf erst uebernehmen, wenn die Quelle > 10 s still ist.
+      const bev = feed.bevorzugt[wurzel];
+      const k0 = feed.kurse[wurzel];
+      if (k0 && k0.symbol && k0.symbol !== sym) {
+        const quelleAktiv = (jetzt - (k0.empf_ms || 0)) < 10000;
+        if (quelleAktiv && (bev ? k0.symbol === bev : true) && sym !== bev) return;
+      }
+      const k = feed.kurse[wurzel] || (feed.kurse[wurzel] = { lp: null, bid: null, ask: null, lp_time: null, symbol: sym, ts: 0, geaendert_ms: 0, empf_ms: 0 });
+      const v = p1.v;
+      let neu = false;
+      for (const f of ['lp', 'bid', 'ask', 'lp_time']) {
+        if (typeof v[f] === 'number' && isFinite(v[f])) { if (k[f] !== v[f]) neu = true; k[f] = v[f]; }
+      }
+      if (sym) k.symbol = sym;
+      k.empf_ms = jetzt;
+      k.ts = (typeof k.lp_time === 'number' && k.lp_time > 1e9) ? k.lp_time * 1000 : jetzt;
+      if (neu) k.geaendert_ms = jetzt;
+      feedZaehl(feed.qsd, jetzt); feed.letzter_ws_ms = jetzt;
+    } else if (msg.m === 'du' || msg.m === 'timescale_update') {
+      if (pxBarsAusUpdate(msg.p[1], msg.m === 'timescale_update')) { feedZaehl(feed.du, jetzt); feed.letzter_ws_ms = jetzt; }
+    }
+  }
+  function pxFrameVerarbeiten(data) {
+    if (typeof data !== 'string' || data.indexOf('~m~') !== 0) return;
+    const jetzt = Date.now();
+    feedZaehl(feed.frames, jetzt); feed.letzter_frame_ms = jetzt;
+    for (const msg of pxFramesParsen(data)) { try { pxNachricht(msg, jetzt); } catch (_) { feed.fehler++; } }
+  }
+  function pxSocketHaken(ws) {
+    feed.sockets++;
+    try { ws.addEventListener('message', ev => { try { pxFrameVerarbeiten(ev.data); } catch (_) { feed.fehler++; } }); } catch (_) {}
+    try {
+      const origSend = ws.send;
+      ws.send = function (d) { try { if (typeof d === 'string') pxSendMerken(d); } catch (_) { feed.fehler++; } return origSend.apply(this, arguments); };
+    } catch (_) {}
+  }
+  (function pxWebSocketWrappen() {
+    const W = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+    const Orig = W.WebSocket;
+    if (!Orig || Orig.__prophos) return;
+    function PxWebSocket(url, protocols) {
+      const ws = (protocols === undefined) ? new Orig(url) : new Orig(url, protocols);
+      try { pxSocketHaken(ws); } catch (_) { feed.fehler++; }
+      return ws;
+    }
+    PxWebSocket.prototype = Orig.prototype;
+    for (const k of ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED']) { try { PxWebSocket[k] = Orig[k]; } catch (_) {} }
+    PxWebSocket.__prophos = true;
+    try { W.WebSocket = PxWebSocket; } catch (_) { feed.fehler++; }
+  })();
+  // Kurse aus dem Socket in der Payload-Form (Vorrang vor Legende/Titel): preis = lp, sonst Mitte bid/ask
+  function pxKurse() {
+    const out = {};
+    for (const w of Object.keys(feed.kurse)) {
+      const k = feed.kurse[w];
+      const preis = (typeof k.lp === 'number') ? k.lp : (typeof k.bid === 'number' && typeof k.ask === 'number') ? Math.round((k.bid + k.ask) * 100 / 2) / 100 : null;
+      if (!(preis > 0)) continue;
+      out[w] = { bid: k.bid, ask: k.ask, lp: k.lp, lp_time: k.lp_time, text: String(preis), symbol_text: k.symbol, quelle: 'ws', ts: k.ts,
+                 modus: feed.modus, delay_s: feed.delay_s };
+    }
+    return out;
+  }
+  // Nachweis fuers Bedienfeld: was liefert der Socket gerade — auch im verdeckten Tab?
+  function pxFeedStand() {
+    return {
+      ws_frames_min: feed.frames.length, qsd_min: feed.qsd.length, du_min: feed.du.length, titel_min: feed.titel.length,
+      letzter_frame_ms: feed.letzter_frame_ms, letzter_ws_ms: feed.letzter_ws_ms, sockets: feed.sockets,
+      serien: feed.serien, symbole: Object.keys(feed.symbole).length, unbekannte_serien: feed.unbekannte_serien,
+      fehler: feed.fehler, aufloesung_warnung: feed.aufloesung_warnung, sichtbar: document.visibilityState === 'visible',
+      bars_wartend: feed.bars.length, modus: feed.modus, delay_s: feed.delay_s,
+      info: Object.values(feed.info).map(i => ({ symbol: i.symbol, root: i.root, front_contract: i.front_contract, pointvalue: i.pointvalue, tick: i.tick })),
+      bevorzugt: feed.bevorzugt,
+    };
+  }
+  // Bars gebuendelt an den Empfaenger (POST /kerzen), hoechstens alle 2 s, nur wenn welche warten
+  let pxKerzenZuletzt = 0;
+  function pxKerzenSenden() {
+    const jetzt = Date.now();
+    if (!feed.bars.length || jetzt - pxKerzenZuletzt < 2000) return;
+    pxKerzenZuletzt = jetzt;
+    const bars = feed.bars; feed.bars = [];
+    const erst = feed.erstladung; feed.erstladung = false;
+    const andere = bars.filter(b => b.aufloesung !== '1');
+    feed.aufloesung_warnung = andere.length ? ('Chart-Aufloesung ' + andere[0].aufloesung + ' statt 1 — keine Minutenkerzen') : null;
+    GM_xmlhttpRequest({
+      method: 'POST', url: KERZEN, headers: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({ ts: jetzt, version: VERSION, quelle: 'ws', erstladung: erst, modus: feed.modus, delay_s: feed.delay_s, bars }), timeout: 4000,
+      onerror: () => {}, ontimeout: () => {},
+    });
+  }
+
   // Stale-Waechter (0.7.0): je Wurzel den letzten Text und wann er sich ZULETZT geaendert hat.
   // Kein neuer Wert > 45 s → stale:true im Payload (der Chart ist eingefroren oder der Markt
   // steht — beides darf nie als „live" durchgehen). > 90 s ohne jeden Tick → einmal
@@ -892,15 +1124,18 @@
       kurse[w].unveraendert_s = Math.round(alter);
       if (m.geaendert_ms > juengste) juengste = m.geaendert_ms;
     }
-    // Reload nur, wenn es UEBERHAUPT einen Kurs gab (sonst ist es kein Chart-Tab) und alle
-    // Wurzeln > RELOAD_S unveraendert sind — und nicht oefter als alle 10 min.
-    if (juengste && (jetzt - juengste) / 1000 > RELOAD_S) {
+    // Reload-Kriterium (Koordination 24.09.2026 spaet): nur wenn KEIN WebSocket-Frame mehr kommt (auch kein
+    // Herzschlag — am Wochenende/in der CME-Pause laeuft der Herzschlag weiter, die Verbindung ist gesund) UND
+    // kein Titel-/Legenden-Wert sich > RELOAD_S geaendert hat — und nicht oefter als alle 10 min. Ohne jemals
+    // einen Frame (kein Chart-Tab) kein Reload.
+    const socketTot = feed.letzter_frame_ms > 0 && (jetzt - feed.letzter_frame_ms) / 1000 > RELOAD_S;
+    if (socketTot && juengste && (jetzt - juengste) / 1000 > RELOAD_S) {
       let letzter = 0;
       try { letzter = Number(localStorage.getItem('prophos_reader_reload_ms')) || 0; } catch (_) {}
       if (jetzt - letzter > RELOAD_SPERRE_MS) {
         try {
           localStorage.setItem('prophos_reader_reload_ms', String(jetzt));
-          sessionStorage.setItem('prophos_reader_reload_grund', 'kein neuer Kurs seit ' + Math.round((jetzt - juengste) / 1000) + ' s');
+          sessionStorage.setItem('prophos_reader_reload_grund', 'kein WebSocket-Frame seit ' + Math.round((jetzt - feed.letzter_frame_ms) / 1000) + ' s, kein neuer Kurs seit ' + Math.round((jetzt - juengste) / 1000) + ' s');
         } catch (_) {}
         setTimeout(() => location.reload(), 500);
         return true;
@@ -910,14 +1145,18 @@
   }
   // Gesamtbild fuer den Payload: Legenden zuerst, Tab-Titel als Rueckfall fuer die Wurzel des aktiven Charts
   function liesKurse() {
-    const kurse = liesKurseAusLegenden();
+    // 0.8.0: Socket zuerst (laeuft auch verdeckt), dann Legende (0.7.0), dann Tab-Titel (0.6.0)
+    const kurse = pxKurse();
+    const leg = liesKurseAusLegenden();
+    for (const w of Object.keys(leg)) if (!kurse[w]) kurse[w] = leg[w];
     const t = liesKursAusTitel();
     if (t) {
+      feedZaehl(feed.titel, Date.now());
       const w = kursWurzelAusText(t.symbol);
       if (w && !kurse[w]) kurse[w] = { bid: null, ask: null, text: t.text, symbol_text: t.symbol, quelle: 'titel' };
     }
     const ts = Date.now();
-    for (const w of Object.keys(kurse)) kurse[w].ts = ts;
+    for (const w of Object.keys(kurse)) if (!kurse[w].ts) kurse[w].ts = ts;
     staleUndReload(kurse);
     return kurse;
   }
@@ -954,6 +1193,7 @@
     reloadGrund = null;
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
+    try { pxKerzenSenden(); } catch (_) { feed.fehler++; }   // 0.8.0: wartende Bars gebuendelt an /kerzen
 
     GM_xmlhttpRequest({
       method: 'POST',
@@ -1000,6 +1240,9 @@
     }
   }
 
-  starteTakt();
-  tick();
+  // document-start (0.8.0): der Socket-Wrapper oben muss vor TradingViews erstem WebSocket stehen —
+  // der DOM-Reader (Positionen, Bedienfeld, Badge) laeuft wie bisher erst, wenn die Seite da ist.
+  const start = () => { starteTakt(); tick(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+  else start();
 })();
