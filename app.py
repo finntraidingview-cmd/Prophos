@@ -4481,11 +4481,18 @@ def _admin_hedge_ev(p, by_id, live_ids, fx):
     sonst USD→EUR mit fx. → (master_id, datum, kosten_eur) oder None."""
     if p.get("slave_pl") is None:
         return None
-    if str(p.get("slave_account_id")) not in live_ids:
-        return None
-    sl = by_id.get(str(p.get("slave_account_id"))) or {}
     try: pl = float(p["slave_pl"])
     except (TypeError, ValueError): return None
+    if str(p.get("slave_account_id")) not in live_ids:
+        # Winning-Days-Farm (24.09.2026 spät): Solo-Hedge auf Fusion OHNE Slave-Konto am Plan —
+        # hedge_eur > 0 markiert ihn, slave_pl ist der realisierte Fusion-P&L aus der Deal-Historie
+        # (immer €). Ohne hedge_eur bleibt es wie bisher: kein Live-Slave, kein Hedge.
+        try: he = float(p.get("hedge_eur") or 0)
+        except (TypeError, ValueError): he = 0.0
+        if not he > 0:
+            return None
+        return str(p.get("master_account_id")), str(p.get("completed_at") or "")[:10], -pl
+    sl = by_id.get(str(p.get("slave_account_id"))) or {}
     cur = _firm_norm(sl.get("firm"))
     pl_eur = pl if cur == "Fusion Markets" else pl * fx   # Fusion rechnet in €
     return str(p.get("master_account_id")), str(p.get("completed_at") or "")[:10], -pl_eur
@@ -4828,7 +4835,7 @@ def admin_build_overview(kapitel_id=None):
     # Admin etwas Sinnvolles je Zeile — Master-P&L (USD), Trades, Blows im Kapitel.
     plans_select = "master_account_id,user_id,master_pl,blown"
     if not hedge_aus:
-        plans_select += ",slave_account_id,slave_pl,completed_at"
+        plans_select += ",slave_account_id,slave_pl,completed_at,hedge_eur"   # hedge_eur: Solo-Hedge ohne Slave-Konto (24.09.2026 spät)
     plans     = _sb_all("trade_plans", {"select": plans_select,
                                         "status": "eq.completed", **kf})
     # Select bewusst breiter als die Summen-Aggregation braucht (11.09.2026,
@@ -5370,7 +5377,7 @@ def admin_build_kapitel():
     # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
     plans = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,slave_account_id,"
                                               "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
-                                              "route,master_name,richtung,slave_risk,master_risk",
+                                              "route,master_name,richtung,slave_risk,master_risk,hedge_eur",
                                     "status": "eq.completed"})
     # Hedge-Quoten je Firma·Typ·Größe aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht
     # immer 1:1 … guck in den bestehenden Daten, wie viel wo gegengehedgt wurde") — Grundlage
@@ -5466,8 +5473,11 @@ def admin_build_kapitel():
             if p.get("blown"):
                 blown += 1
                 pe["blown"] += 1
-            # ohne_hedge = generierte Spalte (route in mt5v2/tvv2), 24.09.2026, Finn:
-            # „alle Trades über Echo V2 / Orbit V2 sind ab jetzt ohne Gegenhedge".
+            # ohne_hedge = generierte Spalte: V2-Weg (mt5v2/tvv2/tsv2) UND kein Fusion-Gegenhedge
+            # (hedge_eur leer/0) — sql/2026-09-24_trade_plans_ohne_hedge_wd.sql. Finn (24.09.2026):
+            # „alle Trades über Echo V2 / Orbit V2 sind ab jetzt ohne Gegenhedge" — AUSSER Winning-
+            # Days-Farm-Pläne (hedge_eur > 0), die auf Fusion gegengehedgt sind; deren slave_pl zählt
+            # unten über _admin_hedge_ev als echte Hedge-Seite, nicht als Kontrafakt.
             if p.get("ohne_hedge"):
                 trades_ohne_hedge += 1
             mpl = _f(p.get("master_pl"))
@@ -5477,7 +5487,9 @@ def admin_build_kapitel():
             wurzel = _symbol_wurzel(p.get("master_symbol"))
             if wurzel:
                 symbole[wurzel] = symbole.get(wurzel, 0) + 1
-            if kontrafakt:
+            if kontrafakt and p.get("ohne_hedge"):
+                # Nur echte Ohne-Hedge-Trades (24.09.2026 spät): ein Winning-Days-Farm-Plan IST gehedgt —
+                # sein realer Fusion-P&L läuft unten in 'hedge', ein hypothetischer daneben wäre doppelt.
                 # Quote des Master-Kontos (Firma·Typ·Größe) aus der Hedge-Ära → Vorschlag hedge_hyp_eur
                 # = −master_pl × q − Reibung. Ohne passende Gruppe (n < HQ_MIN_N überall) bleibt hedge_q
                 # None; das Frontend rechnet dann fx × 1 und zeigt „ohne Quote".
