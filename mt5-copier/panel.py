@@ -2379,7 +2379,10 @@ class Handler(BaseHTTPRequestHandler):
             g = body.get("geschwister")
             cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
             if not TV_ORDER_LOCK.acquire(blocking=False):
-                return self._send(409, json.dumps({"ok": False, "msg":
+                # code + retry_ok (Cross-Check 24.09.2026): der Orbit-Start im Frontend wartet bei
+                # puls_beschaeftigt (Rundgang/tv-close halten den Lock minutenlang) statt abzubrechen —
+                # dafuer braucht er denselben Code wie tv-lesen/tv-close. Hier ist noch nichts gesendet.
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True, "msg":
                     "Es laeuft schon ein TradingView-Lauf — kurz warten."}, ensure_ascii=False))
             try:
                 bot = os.path.join(HERE, "order_bot.py")
@@ -2464,7 +2467,10 @@ class Handler(BaseHTTPRequestHandler):
                     # Konto-Schritt (bis 45 s TV-Start + Lesen + Dropdown) + Lesephase
                     # (timeout_s) + Puffer; ist ein Login-Wechsel moeglich (Username
                     # dabei), gilt die 260-s-Obergrenze von tv-konto.
-                    to = int(timeout_s) + 90
+                    # +110 statt +90 (Cross-Check 24.09.2026): der Konto-Schritt allein kann ohne Login-
+                    # Wechsel ~105 s brauchen (TV-Start 45 + Lesen 40 + Dropdown), plus Lesephase — sonst
+                    # killt das Panel den Bot kurz vor dem Stand. Deckel 300 < Proxy 310 (app.py).
+                    to = min(300, int(timeout_s) + 110)
                     if cmd["tv_username"]:
                         to = max(to, 260)
                     p = subprocess.run([sys.executable, bot, "tvlesen", json.dumps(cmd)],
@@ -2549,7 +2555,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
                     "msg": "Es laeuft schon ein TradingView-Lauf (Order/Konto/Lesen/Schliessen) — spaeter erneut."},
                     ensure_ascii=False))
-            to = int(timeout_s) + 120
+            # +150 statt +120 (Cross-Check 24.09.2026): laengste Kette = Konto-Schritt ~105 + Vorher-Stand 30
+            # + Fenster 8 + Knopf 10 + Rueckfrage 8 + Beweis timeout_s + Today 7 — mit den 90 s des Frontends
+            # waren 210 s zu knapp; ein Timeout HIER ist der teuerste Ausgang (Klick evtl. raus, retry_ok
+            # False). Deckel 300 < Proxy 310 (app.py).
+            to = min(300, int(timeout_s) + 150)
             try:
                 bot = os.path.join(HERE, "order_bot.py")
                 if not os.path.exists(bot):

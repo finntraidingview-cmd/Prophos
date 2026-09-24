@@ -5085,8 +5085,12 @@ def admin_build_kapitel():
     liste = _kapitel_liste()
     # master_pl/blown/user_id zusätzlich zur Übersicht: Trade-Zähler + Prop-P&L je Kapitel.
     # master_symbol seit 24.09.2026 (Vollumstieg „Ohne Hedge"): Symbol-Zähler NQ/MNQ je Kapitel.
-    plans = _sb_all("trade_plans", {"select": "user_id,master_account_id,slave_account_id,"
-                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol",
+    # id/route/master_name/richtung seit 24.09.2026 nachts (Finn: „Graph OHNE Gegenhedge und
+    # Graph MIT Gegenhedge — wie hätte es ausgesehen, hätte ich jetzt gegengehedgt?"): das
+    # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
+    plans = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,slave_account_id,"
+                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
+                                              "route,master_name,richtung",
                                     "status": "eq.completed"})
     # payout = erhaltenes Geld (auch OHNE account_id, wie „Payouts erhalten");
     # live_pnl = das echte Hedge-Geld in EUR aus den Finanzen-Buchungen.
@@ -5114,6 +5118,11 @@ def admin_build_kapitel():
         # je Symbolwurzel (NQ/MNQ) — ausgeblendete Personen sind oben schon raus.
         personen = {}
         symbole = {}
+        # Kontrafakt-Listen (24.09.2026): NUR für hedge-freie Kapitel, klein gehalten — je Trade
+        # Master-P&L in USD + Symbolwurzel/Weg/Richtung, dazu Payouts und Käufe des Kapitels als
+        # datierte EUR-Beträge. Hedge-Kapitel bekommen die Listen nicht (dort ist der Hedge real).
+        kontrafakt = not bool(k.get("hedge"))
+        trades_liste, payouts_liste, kauf_liste = [], [], []
         def _person(uid):
             return personen.setdefault(uid, {
                 "user_id": uid, "person": disp.get(uid) or names.get(uid, uid[:8] or "—"),
@@ -5141,6 +5150,9 @@ def admin_build_kapitel():
             pe = _person(str(a.get("user_id")))
             pe["konten"] += 1
             pe["kauf"] += buy
+            if kontrafakt and buy:
+                kauf_liste.append({"user_id": pe["user_id"], "person": pe["person"],
+                                   "datum": str(a.get("created_at") or "")[:10], "eur": round(buy, 2)})
         # Trades: Zähler über alle abgeschlossenen Pläne des Kapitels, Hedge nur
         # auf Live-Slaves (Formel wie Übersicht), Master-P&L roh in USD.
         for p in plans:
@@ -5165,6 +5177,14 @@ def admin_build_kapitel():
             wurzel = _symbol_wurzel(p.get("master_symbol"))
             if wurzel:
                 symbole[wurzel] = symbole.get(wurzel, 0) + 1
+            if kontrafakt:
+                trades_liste.append({
+                    "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
+                    "account_name": p.get("master_name") or "",
+                    "datum": str(p.get("completed_at") or "")[:10],
+                    "master_pl": round(mpl, 2) if mpl is not None else None,
+                    "master_symbol_root": wurzel, "route": p.get("route") or "",
+                    "richtung": str(p.get("richtung") or "").lower(), "blown": bool(p.get("blown"))})
             ev = _admin_hedge_ev(p, by_id, live_ids, fx)
             if ev is not None:
                 _m, datum, eur = ev
@@ -5185,6 +5205,9 @@ def admin_build_kapitel():
                 tuid = str(t.get("user_id") or "")
                 if tuid:
                     _person(tuid)["payouts"] += amt
+                if kontrafakt:
+                    payouts_liste.append({"user_id": tuid, "person": (personen.get(tuid) or {}).get("person") or tuid[:8] or "—",
+                                          "datum": str(t.get("occurred_at") or "")[:10], "eur": round(amt, 2)})
             elif t.get("kind") == "live_pnl":
                 live_pnl += amt
         out.append({
@@ -5209,6 +5232,10 @@ def admin_build_kapitel():
                  for pe in personen.values()],
                 key=lambda pe: str(pe["person"]).lower()),
             "symbole": dict(sorted(symbole.items())),
+            # Kontrafakt-Rohdaten (24.09.2026) — nur hedge-freie Kapitel tragen sie, sonst leer.
+            "trades_liste": sorted(trades_liste, key=lambda t: (t["datum"], str(t["id"]))),
+            "payouts_liste": sorted(payouts_liste, key=lambda t: t["datum"]),
+            "kauf_liste": sorted(kauf_liste, key=lambda t: t["datum"]),
         })
     return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso()}
 

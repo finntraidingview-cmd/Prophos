@@ -1330,6 +1330,28 @@
     #adm-pane-kapitel .kap-edit-zeile{grid-template-columns:auto 1fr 1fr}
     #adm-pane-kapitel .kap-edit-zeile .input[data-kap-feld="name"],#adm-pane-kapitel .kap-edit-zeile .input[data-kap-feld="beschreibung"]{grid-column:2 / -1}
   }
+  /* Kontrafakt „Mit Hedge" (24.09.2026 nachts, Finn: „Graph OHNE Gegenhedge und Graph MIT Gegenhedge"):
+     Kacheln, zwei Verlaufs-Charts nebeneinander, Balkenzeilen nach Symbol/Weg/Richtung — Muster
+     Übersicht, keine Tabelle. Parameter-Felder klein rechts im Panel-Kopf (Muster kp-quoten). */
+  #adm-pane-kapitel .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+  #adm-pane-kapitel .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
+  #adm-pane-kapitel .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
+  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(5,1fr);gap:10px;margin:8px 0 6px}
+  #adm-pane-kapitel .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
+  #adm-pane-kapitel .kf-kpis .kpi-value{font-size:18px}
+  #adm-pane-kapitel .kf-kpis .kpi-delta{font-size:11px}
+  #adm-pane-kapitel .kf-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
+  #adm-pane-kapitel .kf-chart .adm-vl{margin-top:4px;padding-top:6px;border-top:none}
+  #adm-pane-kapitel .kf-titel{font-size:12px;font-weight:600;margin-top:10px}
+  #adm-pane-kapitel .kf-sub{font-size:11.5px;color:var(--sub)}
+  #adm-pane-kapitel .kf-rows-wrap{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  #adm-pane-kapitel .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
+  #adm-pane-kapitel .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  @media (max-width:1200px){#adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:960px){
+    #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(2,1fr)}
+    #adm-pane-kapitel .kf-charts,#adm-pane-kapitel .kf-rows-wrap{grid-template-columns:1fr}
+  }
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -7856,6 +7878,46 @@
               <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
               <div class="adm-vl-legend" id="adm-kap-legend"></div>
             </div>
+            <!-- Kontrafakt „Mit Hedge" (24.09.2026 nachts, Finn: „so ein Graph OHNE Gegenhedge und so ein Graph MIT
+                 Gegenhedge — wie hätte es ausgesehen, hätte ich jetzt gegengehedgt? … wie viel wir da verloren hätten").
+                 Nur sichtbar, wenn ein hedge-freies Kapitel existiert; gezeichnet von admKfRender. -->
+            <div class="panel" id="adm-kf-panel" style="margin-top:14px" hidden>
+              <div class="panel-head" style="margin-bottom:4px">
+                <div>
+                  <div class="panel-title">Was der Gegen-Hedge gekostet hätte <span class="chip chip-good" id="adm-kf-kapitel" style="margin-left:6px;border:1px solid transparent"></span></div>
+                  <div class="panel-sub" id="adm-kf-modell"></div>
+                </div>
+                <div class="kf-param">
+                  <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
+                  <label title="gemessene Reibung der Hedge-Ära: −10.978 € / 2.019 Trades = 5,44 € je Trade (Stand 24.09.2026)">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung"></label>
+                  <span class="mono" id="adm-kf-stand" style="font-size:11.5px;color:var(--sub)"></span>
+                </div>
+              </div>
+              <div id="adm-kf-leer" class="kap-leer" style="margin:6px 0 0" hidden>Noch keine abgeschlossenen Trades im Kapitel</div>
+              <div id="adm-kf-body" hidden>
+                <div class="kf-filter" id="adm-kf-filter" hidden></div>
+                <div class="kpis kf-kpis" id="adm-kf-kpis"></div>
+                <div class="kf-charts">
+                  <div class="kf-chart">
+                    <div class="kf-titel">Mit Hedge (hypothetisch) · kumuliert je Person</div>
+                    <div class="kf-sub">So wäre der Gegen-Hedge gelaufen — Realmoney in EUR, gestrichelt = alle zusammen · Klick auf Person hebt sie hervor und filtert</div>
+                    <div class="adm-vl"><canvas id="adm-kf-chart-hyp"></canvas></div>
+                    <div class="adm-vl-legend" id="adm-kf-legend-hyp"></div>
+                  </div>
+                  <div class="kf-chart">
+                    <div class="kf-titel">Real · Master-P&amp;L kumuliert je Person</div>
+                    <div class="kf-sub">Prop-Konten in USD, echte Zahlen — hat es sich ohne Hedge gelohnt?</div>
+                    <div class="adm-vl"><canvas id="adm-kf-chart-real"></canvas></div>
+                    <div class="adm-vl-legend" id="adm-kf-legend-real"></div>
+                  </div>
+                </div>
+                <div class="kf-rows-wrap">
+                  <div><div class="kf-titel">Nach Symbol <span class="adm-sub">· Balken = Hedge hypothetisch, rechts Master-P&amp;L real</span></div><div class="adm-dist kf-rows" id="adm-kf-rows-sym"></div></div>
+                  <div><div class="kf-titel">Nach Weg</div><div class="adm-dist kf-rows" id="adm-kf-rows-weg"></div></div>
+                  <div><div class="kf-titel">Nach Richtung</div><div class="adm-dist kf-rows" id="adm-kf-rows-ri"></div></div>
+                </div>
+              </div>
+            </div>
             <div class="panel" style="margin-top:14px">
               <div class="panel-head" style="margin-bottom:6px">
                 <div>
@@ -10137,13 +10199,17 @@
     /* series = [{ key, label, events:[{datum, eur}] }], schon vorzeichenrichtig.
      * active = aufgeklappte Person ('' = keine): ihre Kurve wird dick + gefüllt,
      * die anderen blass. onPick(key) = derselbe Umschalter wie der Balken-Klick. */
-    function admVerlauf(name, canvasId, legendId, series, active, onPick){
+    // opts (24.09.2026 nachts, Kontrafakt-Charts): { tage:[…] zusätzliche x-Tage, kurz/sign: eigene
+    // Formatierer (USD statt EUR), gesamt: gestrichelte Summenlinie über alle Personen }. Ohne opts
+    // zeichnet die Funktion exakt wie zuvor (Übersicht, Payouts, Finanzen).
+    function admVerlauf(name, canvasId, legendId, series, active, onPick, opts = {}){
       const cv = $(canvasId), lg = $(legendId)
       if(!cv) return
       const wrap = cv.parentElement
       if(admVlCharts[name]){ try { admVlCharts[name].destroy() } catch(_){} admVlCharts[name] = null }
       if(lg) lg.innerHTML = ''
-      const tage = [...new Set(series.flatMap(s => s.events.map(e => e.datum)))].sort()
+      const fmtKurz = opts.kurz || admEurKurz, fmtSign = opts.sign || admVlSign
+      const tage = [...new Set([...(opts.tage || []), ...series.flatMap(s => s.events.map(e => e.datum))])].sort()
       // Unter zwei Tagen gibt es keine Kurve — Block bleibt weg statt leer zu stehen.
       if(typeof Chart === 'undefined' || tage.length < 2 || !series.length){
         wrap.hidden = true; if(lg) lg.hidden = true
@@ -10165,6 +10231,12 @@
                  // monotone statt tension: kumulierte Sprünge dürfen nicht überschwingen
                  pointRadius: 0, pointHitRadius: 8, cubicInterpolationMode: 'monotone' }
       })
+      if(opts.gesamt && datasets.length > 1){
+        const summe = tage.map((_, i) => +datasets.reduce((a, d) => a + d.data[i], 0).toFixed(2))
+        datasets.push({ label: 'Gesamt', key: '__gesamt', data: summe, borderColor: opts.gesamtFarbe || '#101828',
+                        borderDash: [5, 4], borderWidth: 1.5, backgroundColor: 'transparent', fill: false,
+                        pointRadius: 0, pointHitRadius: 8, cubicInterpolationMode: 'monotone' })
+      }
       admVlCharts[name] = new Chart(cv.getContext('2d'), {
         type: 'line',
         data: { labels: tage.map(admVlDatum), datasets },
@@ -10172,16 +10244,17 @@
           interaction: { mode: 'nearest', axis: 'x', intersect: false },
           onClick: (ev, els, chart) => {
             const el = els && els[0]
-            if(el && onPick) onPick(chart.data.datasets[el.datasetIndex].key)
+            const key = el && chart.data.datasets[el.datasetIndex].key
+            if(el && onPick && key !== '__gesamt') onPick(key)
           },
           onHover: (ev, els) => { const t = ev.native && ev.native.target; if(t) t.style.cursor = els.length ? 'pointer' : '' },
           plugins: { legend: { display: false }, tooltip: { backgroundColor: '#101828', displayColors: true,
             callbacks: { title: items => items.length ? admVlDatum(tage[items[0].dataIndex]) : '',
-                         label: ctx => ` ${ctx.dataset.label}: ${admVlSign(ctx.parsed.y)}` } } },
+                         label: ctx => ` ${ctx.dataset.label}: ${fmtSign(ctx.parsed.y)}` } } },
           scales: { x: { grid: { display: false }, ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, maxTicksLimit: 6, maxRotation: 0 } },
                     // Nulllinie kräftiger — bei Saldo/Verlauf wechseln Personen die Seite.
                     y: { grid: { color: ctx => ctx.tick.value === 0 ? 'rgba(102,112,133,.35)' : 'rgba(102,112,133,.08)' },
-                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => admEurKurz(v) } } } }
+                         ticks: { color:'#667085', font:{ family:'JetBrains Mono', size:9 }, callback: v => fmtKurz(v) } } } }
       })
       if(lg){
         for(const s of series){
@@ -10191,7 +10264,7 @@
           b.type = 'button'
           b.className = 'adm-vl-chip' + (active ? (String(active) === String(s.key) ? ' is-on' : ' is-off') : '')
           b.innerHTML = admDot(s.key) + '<span class="nm"></span>' +
-            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${last < 0 ? '#b91c1c' : '#15803d'}">${admVlSign(last)}</span>`
+            `<span style="font-variant-numeric:tabular-nums;margin-left:5px;color:${last < 0 ? '#b91c1c' : '#15803d'}">${fmtSign(last)}</span>`
           b.querySelector('.nm').textContent = admShortName(s.label)
           b.title = `${s.label} · Stand heute — klicken klappt die Person auf`
           if(onPick) b.addEventListener('click', () => onPick(s.key))
@@ -10255,6 +10328,7 @@
     function admKapitelOeffnen(){
       if(!admKapData){ admKapitelLaden(); return }
       if(admKapChart){ try { admKapChart.resize() } catch(_){} }
+      for(const n of ['kfhyp', 'kfreal']){ if(admVlCharts[n]){ try { admVlCharts[n].resize() } catch(_){} } }
     }
     function admKapitelRender(d){
       admKapData = d
@@ -10267,6 +10341,8 @@
       if(st) st.textContent = d.generated ? 'Stand ' + new Date(d.generated).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
       admKapKarten(liste)
       admKapChartBauen(liste)
+      admKfRender(liste)       // Kontrafakt „Mit Hedge" (24.09.2026 nachts)
+      admKfParamLaden()        // gespeicherte Parameter einmal nachladen → rechnet bei Abweichung neu
       admKapEditBauen(liste)
     }
     window._admKapitelRender = admKapitelRender   // isoliert prüfbar mit Stub-Daten, wie _admLaden
@@ -10470,6 +10546,174 @@
         else admKapKarten((admKapData?.kapitel || []).slice())
       }catch(e){ if(st) st.textContent = 'nicht gespeichert: ' + (e.message || e) }
     }
+
+    /* ── Kontrafakt „Mit Hedge" (24.09.2026 nachts, Finn: „Ich will so eine Statistik, wo man sieht:
+     * so ein Graph OHNE Gegenhedge (so wie es jetzt ist) und so ein Graph MIT Gegenhedge — wie hätte
+     * es ausgesehen, hätte ich jetzt gegengehedgt? … Die Graphen wie gestern, wo man von jeder ID den
+     * Live-P&L gesehen hat, wie alle ins Minus gegangen sind — genau das Gleiche hier. Man kann so
+     * rausfinden, wie viel wir da verloren hätten.") ──
+     * Rohdaten: trades_liste / payouts_liste / kauf_liste des hedge-freien Kapitels aus /admin/kapitel
+     * (nur dort geliefert). Modell je abgeschlossenem V2-Trade:
+     *   hedge_hyp € = −master_pl $ × fx × faktor − reibung
+     * faktor 1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr; reibung 5,44 €
+     * = gemessene Reibung der Hedge-Ära (−10.978 € / 2.019 Trades, Stand 24.09.2026, Notiz
+     * prophos-reibung-merkzahlen). Beide Parameter im Panel änderbar, Auto-Speichern 0,7 s in
+     * user_settings key 'kontrafakt' {faktor, reibung} (Muster kp-quoten), Standard steht hier im Code.
+     * Filter: eine Person (Chip/Kurve) UND eine Balkenzeile (Symbol/Weg/Richtung). Payouts und Kauf
+     * kennen kein Symbol — sie folgen nur dem Personen-Filter. Beispiel: master_pl +200 $, fx 0,85,
+     * Faktor 1, Reibung 5,44 → hedge_hyp = −175,44 € (der Hedge hätte den Gewinn gespiegelt gekostet). */
+    const ADM_KF_STD = { faktor: 1, reibung: 5.44 }
+    const admKf = { param: { ...ADM_KF_STD }, person: '', filter: null, geladen: false }
+    let _admKfTimer = null
+    const admKfHyp = (t, fx) => -admKapNum(t.master_pl) * fx * admKf.param.faktor - admKf.param.reibung
+    const admKfUsdKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k $' : Math.round(v) + ' $'
+    const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
+    const admKfRi = r => r === 'buy' ? 'BUY' : r === 'sell' ? 'SELL' : '—'
+    const ADM_KF_ARTEN = { sym: ['adm-kf-rows-sym', t => t.master_symbol_root || '—', w => w],
+                           weg: ['adm-kf-rows-weg', t => t.route || '—', w => ADM_KF_WEG[w] || w],
+                           ri:  ['adm-kf-rows-ri',  t => admKfRi(t.richtung), w => w] }
+    // Welches Kapitel zeigt das Panel: das aktive, wenn es hedge-frei ist, sonst das jüngste hedge-freie
+    function admKfKapitel(liste){
+      const frei = liste.filter(k => !k.hedge_aktiv)
+      if(!frei.length) return null
+      const aktiv = window._kapitel ? String(window._kapitel.aktiv) : ''
+      return frei.find(k => String(k.id) === aktiv) || frei[frei.length - 1]
+    }
+    const admKfDe = (v, d) => v.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+    function admKfRender(liste){
+      const panel = $('adm-kf-panel'); if(!panel) return
+      const k = admKfKapitel(liste || (admKapData?.kapitel || []))
+      panel.hidden = !k
+      if(!k) return
+      const fx = Number(admKapData?.fx_usd_eur) || 0.85
+      const farbe = admKapFarbe(k)
+      const chip = $('adm-kf-kapitel')
+      if(chip){ chip.textContent = k.name || ('Kapitel ' + k.id); chip.style.color = farbe; chip.style.borderColor = admKapAlpha(farbe, '66'); chip.style.background = admKapAlpha(farbe, '14') }
+      panel.querySelectorAll('[data-kf-param]').forEach(el => { if(document.activeElement !== el) el.value = String(admKf.param[el.dataset.kfParam]) })
+      const mod = $('adm-kf-modell')
+      if(mod) mod.textContent = `Modell je Trade: Hedge € = −Master-P&L $ × FX ${admKfDe(fx, 3)} × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung ${admKfDe(admKf.param.reibung, 2)} € · ` +
+        'Faktor 1 = symmetrischer Fixgrößen-Hedge wie in der Hedge-Ära, Reibung 5,44 € = −10.978 € / 2.019 Trades (Stand 24.09.2026)'
+      const alle = Array.isArray(k.trades_liste) ? k.trades_liste : []
+      const leer = $('adm-kf-leer'), body = $('adm-kf-body')
+      if(!alle.length){ leer.hidden = false; body.hidden = true; return }
+      leer.hidden = true; body.hidden = false
+      const pers = admKf.person, f = admKf.filter
+      const persOk = e => !pers || String(e.user_id) === pers
+      const artOk = t => !f || ADM_KF_ARTEN[f.art][1](t) === f.wert
+      const trades = alle.filter(t => persOk(t) && artOk(t))
+      const payouts = (k.payouts_liste || []).filter(persOk), kauf = (k.kauf_liste || []).filter(persOk)
+      const sumP = payouts.reduce((a, e) => a + admKapNum(e.eur), 0), sumK = kauf.reduce((a, e) => a + admKapNum(e.eur), 0)
+      const hyp = trades.reduce((a, t) => a + admKfHyp(t, fx), 0)
+      const mpl = trades.reduce((a, t) => a + admKapNum(t.master_pl), 0)
+      const blown = trades.filter(t => t.blown).length
+      const personen = new Map()
+      for(const t of alle){ const u = String(t.user_id); if(!personen.has(u)) personen.set(u, t.person || u) }
+      // a) Kacheln
+      const col = n => n < 0 ? '#b91c1c' : '#15803d'
+      const kpi = (label, value, sub, valStyle) =>
+        `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${valStyle || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
+      const real = sumP - sumK, mitHedge = real + hyp
+      const filterTxt = escapeHtml((pers ? admShortName(personen.get(pers) || pers) : 'alle Personen') + (f ? ` · ${ADM_KF_ARTEN[f.art][2](f.wert)}` : ''))
+      const kp = $('adm-kf-kpis')
+      if(kp) kp.innerHTML =
+        kpi('Real (ohne Hedge)', admVlSign(real), `Payouts ${admEur.format(sumP)} − Kauf ${admEur.format(sumK)}`, `color:${col(real)}`) +
+        kpi('Mit Hedge (hypothetisch)', admVlSign(mitHedge), `Real ${admVlSign(hyp)} Hedge`, `color:${col(mitHedge)}`) +
+        kpi('Nicht gehedgt = ' + (-hyp >= 0 ? 'gespart' : 'verloren'), admVlSign(-hyp), -hyp >= 0 ? 'so viel hätte der Gegen-Hedge gekostet' : 'so viel hätte der Gegen-Hedge gebracht', `color:${col(-hyp)}`) +
+        kpi('Master-P&amp;L real', admUsdSign(mpl), 'USD roh, Prop-Konten', `color:${col(mpl)}`) +
+        kpi('Trades', String(trades.length), `Blow-Quote ${trades.length ? Math.round(blown / trades.length * 100) + ' %' : '–'} · ${filterTxt}`)
+      // b) Filter-Chips (ein Klick nimmt den Filter wieder weg)
+      const fw = $('adm-kf-filter')
+      if(fw){
+        fw.innerHTML = ''
+        fw.hidden = !pers && !f
+        if(pers){ const b = document.createElement('button'); b.type = 'button'; b.className = 'adm-vl-chip is-on'; b.innerHTML = admDot(pers) + '<span class="nm"></span> ✕'; b.querySelector('.nm').textContent = admShortName(personen.get(pers) || pers); b.addEventListener('click', () => { admKf.person = ''; admKfRender() }); fw.appendChild(b) }
+        if(f){ const b = document.createElement('button'); b.type = 'button'; b.className = 'adm-vl-chip is-on'; b.textContent = ADM_KF_ARTEN[f.art][2](f.wert) + ' ✕'; b.addEventListener('click', () => { admKf.filter = null; admKfRender() }); fw.appendChild(b) }
+      }
+      // c) Charts — x-Achse = Tage des Kapitels (Trades, Payouts, Kauf) plus ein Null-Anker am Tag vor
+      // dem ersten Ereignis, damit auch der erste Kapitel-Tag schon eine Linie hat.
+      const tage = [...new Set([...alle, ...(k.payouts_liste || []), ...(k.kauf_liste || [])].map(e => e.datum).filter(Boolean))].sort()
+      if(tage.length){ const d = new Date(tage[0] + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); tage.unshift(d.toISOString().slice(0, 10)) }
+      const serien = (rows, wert) => {
+        const m = new Map()
+        for(const t of rows){
+          if(!t.datum) continue
+          const u = String(t.user_id)
+          const s = m.get(u) || { key: u, label: personen.get(u) || u, events: [] }
+          s.events.push({ datum: t.datum, eur: wert(t) }); m.set(u, s)
+        }
+        return [...m.values()].sort((a, b) => a.label.localeCompare(b.label, 'de'))
+      }
+      const pick = key => { admKf.person = String(admKf.person) === String(key) ? '' : String(key); admKfRender() }
+      // Chart A: alle Personen (nur Balken-Filter), aktive Person hervorgehoben — „alle ins Minus"
+      admVerlauf('kfhyp', 'adm-kf-chart-hyp', 'adm-kf-legend-hyp', serien(alle.filter(artOk), t => admKfHyp(t, fx)), pers, pick,
+                 { tage, gesamt: true, gesamtFarbe: farbe })
+      // Chart B: Master-P&L real in USD — bei gewählter Person nur diese
+      admVerlauf('kfreal', 'adm-kf-chart-real', 'adm-kf-legend-real', serien(trades, t => admKapNum(t.master_pl)), pers, pick,
+                 { tage, gesamt: true, gesamtFarbe: farbe, kurz: admKfUsdKurz, sign: admUsdSign })
+      // d) Balkenzeilen nach Symbol / Weg / Richtung — Personen-Filter gilt, der Balken-Filter nicht
+      // (sonst wäre nur noch die gewählte Zeile zu sehen); Breite = |Hedge hyp.| relativ zum Größten.
+      const basis = alle.filter(persOk)
+      for(const [art, [elId, wertVon, labelVon]] of Object.entries(ADM_KF_ARTEN)){
+        const el = $(elId); if(!el) continue
+        el.innerHTML = ''
+        const g = new Map()
+        for(const t of basis){
+          const w = wertVon(t)
+          const e = g.get(w) || { wert: w, n: 0, mpl: 0, hyp: 0 }
+          e.n++; e.mpl += admKapNum(t.master_pl); e.hyp += admKfHyp(t, fx); g.set(w, e)
+        }
+        const grp = [...g.values()].sort((a, b) => b.n - a.n)
+        if(!grp.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; continue }
+        const maxAbs = Math.max(1, ...grp.map(e => Math.abs(e.hyp)))
+        for(const e of grp){
+          const on = f && f.art === art && f.wert === e.wert
+          const row = document.createElement('button')
+          row.type = 'button'
+          row.className = 'adm-row adm-row-btn' + (on ? ' is-on' : '')
+          row.innerHTML =
+            '<div class="adm-row-name"></div>' +
+            `<div class="adm-track"><div class="adm-fill" style="width:${(100 * Math.abs(e.hyp) / maxAbs).toFixed(1)}%;background:${e.hyp < 0 ? 'var(--danger)' : 'var(--good)'}"></div></div>` +
+            `<div class="adm-val" style="color:${col(e.hyp)}">${admVlSign(e.hyp)}</div>` +
+            `<div class="adm-pct" style="color:${col(e.mpl)}">${admUsdSign(e.mpl)}</div>`
+          const nm = row.querySelector('.adm-row-name')
+          nm.textContent = labelVon(e.wert)
+          nm.insertAdjacentHTML('beforeend', `<small>${e.n} Trade${e.n === 1 ? '' : 's'}</small>`)
+          row.title = `${labelVon(e.wert)} · ${e.n} Trades · Hedge hypothetisch ${admVlSign(e.hyp)} · Master real ${admUsdSign(e.mpl)} — klicken filtert Kacheln und Charts`
+          row.addEventListener('click', () => { admKf.filter = on ? null : { art, wert: e.wert }; admKfRender() })
+          el.appendChild(row)
+        }
+      }
+    }
+    // Parameter: einmal aus user_settings nachladen (Standard aus dem Code, bis die Antwort da ist)
+    async function admKfParamLaden(){
+      if(admKf.geladen || !currentUserId) return
+      admKf.geladen = true
+      try{
+        const { data, error } = await supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'kontrafakt').maybeSingle()
+        if(error) throw error
+        const v = (data && data.value) || {}
+        let neu = false
+        for(const p of ['faktor', 'reibung']){ const n = Number(v[p]); if(Number.isFinite(n) && n >= 0 && n !== admKf.param[p]){ admKf.param[p] = n; neu = true } }
+        if(neu && admKapData) admKfRender()
+      }catch(e){ console.warn('[kontrafakt] Parameter laden:', e.message || e) }
+    }
+    async function admKfParamSpeichern(){
+      const st = $('adm-kf-stand')
+      if(!currentUserId){ if(st) st.textContent = 'nicht gespeichert: nicht angemeldet'; return }
+      try{
+        const { error } = await supabase.from('user_settings').upsert({ user_id: currentUserId, key: 'kontrafakt', value: { ...admKf.param } }, { onConflict: 'user_id,key' })
+        if(error) throw error
+        if(st){ st.textContent = '✓ gespeichert'; setTimeout(() => { if(st.textContent === '✓ gespeichert') st.textContent = '' }, 2500) }
+      }catch(e){ if(st) st.textContent = 'nicht gespeichert: ' + (e.message || e) }
+    }
+    // Eigene Verdrahtung der zwei Felder: sofort neu rechnen, 0,7 s später speichern (kein Sammel-Handler)
+    document.querySelectorAll('#adm-kf-panel [data-kf-param]').forEach(el => el.addEventListener('input', () => {
+      const n = Number(el.value)
+      admKf.param[el.dataset.kfParam] = (el.value !== '' && Number.isFinite(n) && n >= 0) ? n : ADM_KF_STD[el.dataset.kfParam]
+      admKfRender()
+      const st = $('adm-kf-stand'); if(st) st.textContent = '…'
+      clearTimeout(_admKfTimer); _admKfTimer = setTimeout(admKfParamSpeichern, 700)
+    }))
 
     /* filterId = das <select>, das ein Klick auf eine Zeile setzt (Aufklappen).
      * Bewusst über die vorhandenen Filter statt über einen eigenen Drilldown-
@@ -16907,6 +17151,11 @@
       if(orderLaeuft) return
       tvV2Poll.busy = true
       for(const plan of plans){
+        // Vor JEDEM Konto neu prüfen (Cross-Check 24.09.2026): ein Tick dauert bei mehreren Konten
+        // Minuten — startet währenddessen eine Order oder ein Schließen (setzt _tpOrbitLaeuft), darf der
+        // Rundgang kein weiteres Konto anfahren, sonst hält er den TV-Lock und die Order wartet unnötig.
+        let _orderJetzt = false; try{ _orderJetzt = !!_tpOrbitLaeuft }catch(_){}
+        if(_orderJetzt) break
         const pid = String(plan.id)
         const konto = tvV2Konto(plan)
         if(!konto){ tvV2Poll.stand.set(pid, { code:'kein_konto', at: Date.now() }); continue }
@@ -16933,7 +17182,10 @@
         if(pos){
           tvV2Poll.wasOpen.add(pid)
           tvV2Poll.streak.set(pid, 0)
-          const pnl = Number(pos.pnl)
+          // pnl_zahl zuerst (Cross-Check 24.09.2026): der Bot (tv_positionen_auspacken) liefert pnl als
+          // Reader-TEXT („−12,50 USD") und die geparste Zahl in pnl_zahl — Number(Text) wäre NaN, der Chip
+          // stünde ewig auf „Rundgang …". Fallback Number(pnl) nur für Stände, die schon eine Zahl tragen.
+          const pnl = (typeof pos.pnl_zahl === 'number' && isFinite(pos.pnl_zahl)) ? pos.pnl_zahl : Number(pos.pnl)
           // Höchstens EIN Write pro Tick und Plan; Guard status=open, damit ein Abschluss von Hand nie
           // zurückgedreht wird. Steht in der DB, damit der Chip auch am Mac/Handy steht.
           const live = { pnl: isFinite(pnl) ? pnl : null, offen: true, at: nowIso }
@@ -27486,7 +27738,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.445'
+  const OS_TAB_BUILD = '2026-09-22.446'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27796,16 +28048,30 @@
     if(imPopup) _pfSet('ob-order', 'warn', `⏳ TradingView → Konto ${escapeHtml(extId)} → ${escapeHtml(symbol)} → Order-Panel → ${escapeHtml(dir.toUpperCase())} (ECHTE Order) — HÄNDE WEG von Maus und Tastatur!`)
     else toast(`Puls übernimmt: TradingView → Konto ${extId} → ${symbol} → Order-Panel → ${dir.toUpperCase()} klicken (ECHTE Order). HÄNDE WEG von Maus und Tastatur.`, 'start')
     try{
-      const r = await window.mtcApi('tv-konto', { method:'POST',
-        headers:{'Content-Type':'application/json'},
-        // scharf (22.09.2026, Schritt 4b): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
-        // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
-        // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
-        // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
-        body: JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
+      // scharf (22.09.2026, Schritt 4b): NUR mit dieser Marke klickt Puls den Kauf-Knopf —
+      // genau einmal, danach zählt nur der Beweis (Reader, sonst Positions-Tabelle).
+      // BRÜCKE: dieselben Felder ZUSÄTZLICH als „@feld=wert" in der geschwister-Liste —
+      // die reicht jedes Panel seit .316 durch, auch ein am PC noch altes.
+      const _tvBody = JSON.stringify({ ext_id: extId, tv_username: tvUser, firma: firmName, symbol, scharf: true,
           // Marken VORN: das Panel kappt die Liste bei 60 Einträgen.
           geschwister: ['@scharf=1', '@symbol=' + symbol, '@richtung=' + dir, '@volumen=' + lots,
-            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] }) })
+            '@tp_usd=' + (tp > 0 ? tp : ''), '@sl_usd=' + (tp > 0 && sl > 0 ? sl : ''), ...geschwister] })
+      // PULS-WARTESCHLEIFE (Cross-Check V2-Kette, 24.09.2026): hält der Rundgang (tv-lesen, bis ~2,5 min je
+      // Konto) oder ein tv-close gerade den TV-Lock im Panel, antwortet /api/tv-konto mit 409
+      // puls_beschaeftigt — bisher brach der Start hart ab („Nichts platziert"), obwohl nur zu warten war.
+      // Der 409 kommt VOR jedem Bot-Aufruf, es ist also beweisbar nichts gesendet. _tpOrbitLaeuft steht
+      // schon, der Rundgang fängt kein weiteres Konto an; das laufende endet spätestens mit dem
+      // Panel-Timeout. Streuung 8–14 s, höchstens ~150 s. Alte Panels ohne 'code' erkennt der Meldungstext.
+      let r = null
+      const _tvT0 = Date.now()
+      for(;;){
+        r = await window.mtcApi('tv-konto', { method:'POST', headers:{'Content-Type':'application/json'}, body: _tvBody })
+        const beschaeftigt = !!(r && !r.ok && !r._httpFail && (r.code === 'puls_beschaeftigt' || /schon ein TradingView-Lauf/i.test(String(r.msg || ''))))
+        if(!beschaeftigt || Date.now() - _tvT0 > 150000) break
+        const sek = Math.round((Date.now() - _tvT0) / 1000)
+        if(imPopup) _pfSet('ob-order', 'warn', `⏳ Puls ist gerade beschäftigt (Rundgang/Schließen in TradingView) — die Order wartet, neuer Versuch gleich… (${sek}s)`)
+        await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+      }
       // SPUR IN DIE DB, auch fuer lokale Laeufe (22.09.2026 13:5x): ein Klick direkt am PC
       // schrieb bisher keine Signal-Zeile — bei Erfolg blieb nur ein Toast, die Spur war weg,
       // und der Umweg „schon im richtigen Login, trotzdem abgemeldet" liess sich nicht belegen.
@@ -28725,8 +28991,17 @@
       let riegel = false
       try{ if(!_tpOrbitLaeuft){ _tpOrbitLaeuft = true; riegel = true } }catch(_){}
       try{
-        r = await window.mtcApi('tv-close', { method:'POST', headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' }) })
+        // Warteschleife wie beim Start (Cross-Check 24.09.2026): läuft gerade ein Rundgang-Lesen (bis ~2,5 min),
+        // kommt 409 puls_beschaeftigt VOR jedem Bot-Aufruf — nichts geklickt, nur warten (8–14 s, max ~150 s).
+        // Danach bleibt der 409 ein ehrlicher Fehler mit retry (Auto-Close/Signal versuchen es später erneut).
+        const _clBody = JSON.stringify({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' })
+        const _clT0 = Date.now()
+        for(;;){
+          r = await window.mtcApi('tv-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
+          const beschaeftigt = !!(r && !r.ok && !r._httpFail && r.code === 'puls_beschaeftigt')
+          if(!beschaeftigt || Date.now() - _clT0 > 150000) break
+          await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+        }
       }catch(e){
         return { ok:false, unklar:true, retry:false, msg:'tv-close gestört: ' + String(e && e.message || e) + ' — in TradingView prüfen, ob die Position noch offen ist.' }
       }finally{ try{ if(riegel) _tpOrbitLaeuft = false }catch(_){} }
