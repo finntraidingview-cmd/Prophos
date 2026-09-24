@@ -586,6 +586,33 @@ def solo_notfall_sl(fill, richtung, punkte, *, puffer, point, digits):
     return max(round(lvl, int(digits)), float(point))
 
 
+def solo_level_tp(fill, richtung, sl_punkte, *, puffer, point, digits):
+    """REIN RECHNEND (testbar): Gewinn-Level (TP) der Solo-Position fuer den Fall,
+    dass der MASTER seinen SL erreicht (Koordination 24.09.2026 spaet: „beim
+    Erreichen der Punkte schliesst die TV-Order broker-seitig, und die Fusion-
+    Position muss zeitgleich zu"). Distanz = sl_punkte − puffer, nie unter 1 Punkt
+    (der Hedge soll VOR dem Master-SL raus, nicht dahinter). SELL-Hedge gewinnt
+    bei fallendem Kurs → TP unter dem Fill; BUY-Hedge darueber. 0.0 = kein Level."""
+    if not (float(fill) > 0 and float(sl_punkte or 0) > 0):
+        return 0.0
+    dist = max(1.0, float(sl_punkte) - max(0.0, float(puffer or 0)))
+    lvl = float(fill) - dist if str(richtung).lower() == "sell" else float(fill) + dist
+    return max(round(lvl, int(digits)), float(point))
+
+
+def solo_deal_grund(reason):
+    """REIN RECHNEND (testbar): DEAL_REASON des schliessenden Deals → Grund aus
+    Sicht des MASTERS. Hedge-SL gefuellt = der Master hat seinen TP erreicht
+    ('level_tp'); Hedge-TP gefuellt = Master-SL ('level_sl'); EXPERT = unser
+    eigener Close-Auftrag ('close'); CLIENT/MOBILE/WEB = von Hand im Terminal
+    ('hand'); SO = Stop-Out ('stopout'); sonst 'unbekannt'."""
+    try:
+        r = int(reason)
+    except (TypeError, ValueError):
+        return "unbekannt"
+    return {4: "level_tp", 5: "level_sl", 3: "close", 0: "hand", 1: "hand", 2: "hand", 6: "stopout"}.get(r, "unbekannt")
+
+
 def solo_auftraege_lesen(pfad, erledigt, jetzt):
     """REIN RECHNEND (testbar): offene Auftraege aus der Datei — nur mit cmd_id,
     noch nicht erledigt, juenger als SOLO_MAX_ALTER_S. -> (auftraege, verworfen)"""
@@ -1495,7 +1522,9 @@ def main():
 
     def solo_pl_aus_history(ticket):
         """Realisierter P&L der Position aus der Deal-Historie (Profit + Kommission
-        + Swap + Gebuehr) — der Beweis fuer slave_pl. None, wenn die Historie noch
+        + Swap + Gebuehr) — der Beweis fuer slave_pl — plus GRUND des Schliessens
+        (DEAL_REASON des letzten OUT-Deals, solo_deal_grund) und Schluss-Kurs.
+        -> (pl, grund, exit_preis); (None, None, None), wenn die Historie noch
         nachhinkt ('Beweis oder leer')."""
         for _ in range(8):
             try:
@@ -1505,10 +1534,12 @@ def main():
             if deals:
                 out = [d for d in deals if int(getattr(d, "entry", 0)) == 1]     # DEAL_ENTRY_OUT
                 if out:
-                    return round(sum(float(d.profit) + float(d.commission) + float(d.swap)
-                                     + float(getattr(d, "fee", 0.0) or 0.0) for d in deals), 2)
+                    letzter = out[-1]
+                    pl = round(sum(float(d.profit) + float(d.commission) + float(d.swap)
+                                   + float(getattr(d, "fee", 0.0) or 0.0) for d in deals), 2)
+                    return pl, solo_deal_grund(getattr(letzter, "reason", None)), float(getattr(letzter, "price", 0.0) or 0.0)
             time.sleep(0.25)
-        return None
+        return None, None, None
 
     def solo_open(m, a):
         sym = str(a.get("symbol") or "NAS100")
@@ -1519,12 +1550,17 @@ def main():
         if si is None:
             return {"ok": False, "code": "symbol", "msg": f"Symbol {sym} im Hedge-Terminal unbekannt"}
         wert = (si["tick_value"] / si["tick_size"]) if (si["tick_value"] > 0 and si["tick_size"] > 0) else 0.0
+        # tp_punkte = Distanz zum Master-TP (Pflicht fuer Lots + Schliess-Level), sl_punkte = Distanz zum
+        # Master-SL (optional, Koordination 24.09.2026 spaet); 'punkte' bleibt als alter Name fuer tp_punkte.
+        tp_punkte = float(a.get("tp_punkte") or a.get("punkte") or 0)
+        sl_punkte = float(a.get("sl_punkte") or 0)
+        puffer = float(a.get("puffer") if a.get("puffer") is not None else 3)
         lots = float(a.get("lots") or 0)
         if not lots > 0:
-            lots = solo_lots(a.get("eur") or 0, a.get("punkte") or 0, wert, si)
+            lots = solo_lots(a.get("eur") or 0, tp_punkte, wert, si)
         if not lots > 0:
             return {"ok": False, "code": "lots", "wert_pro_punkt": wert,
-                    "msg": f"Lots nicht berechenbar (eur {a.get('eur')}, punkte {a.get('punkte')}, "
+                    "msg": f"Lots nicht berechenbar (eur {a.get('eur')}, tp_punkte {tp_punkte}, "
                            f"{wert:.4f} {hedge_acc.get('currency') or ''}/Pkt/Lot) — unter Mindestlot oder Werte fehlen"}
         mt5.symbol_select(sym, True)
         tick = mt5.symbol_info_tick(sym)
@@ -1554,23 +1590,36 @@ def main():
         erg = {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0), "lots": lots,
                "fill": fill, "symbol": sym, "richtung": richtung, "wert_pro_punkt": round(wert, 5),
                "eur_je_punkt": round(wert * lots, 4), "waehrung": hedge_acc.get("currency"),
-               "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0}
-        # Schliess-Level im Terminal (Finn: „sobald der Preis in MetaTrader erreicht wird") — nur mit
-        # TP-Distanz; ein Fehler hier ist kein Abbruch, die Antwort traegt sl 0 + sl_fehler
+               "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0, "tp": 0.0,
+               "tp_punkte": tp_punkte, "sl_punkte": sl_punkte, "puffer": puffer}
+        # Schliess-Level im Terminal (Finn: „sobald der Preis in MetaTrader erreicht wird"): sl am Hedge =
+        # Master-TP (tp_punkte + puffer), tp am Hedge = Master-SL (sl_punkte − puffer, optional). EIN
+        # SLTP-Request fuer beide; ein Fehler hier ist kein Abbruch, die Antwort traegt sl/tp 0 + *_fehler.
         try:
-            punkte = float(a.get("punkte") or 0)
-            if punkte > 0 and ticket:
-                sl = solo_notfall_sl(fill, richtung, punkte, puffer=float(a.get("puffer") or 3),
-                                     point=si["point"], digits=si["digits"])
+            if tp_punkte > 0 and ticket:
+                sl = solo_notfall_sl(fill, richtung, tp_punkte, puffer=puffer, point=si["point"], digits=si["digits"])
+                tp = solo_level_tp(fill, richtung, sl_punkte, puffer=puffer, point=si["point"], digits=si["digits"]) if sl_punkte > 0 else 0.0
                 if sl > 0:
                     ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
-                                  "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},
-                              f"SOLO NOTFALL-SL {sl} {sym} (Ticket {ticket})")
-                    erg["sl"] = sl if ok else 0.0
-                    if not ok:
+                                  "sl": sl, "tp": tp, "magic": SOLO_MAGIC},
+                              f"SOLO LEVEL SL {sl} / TP {tp or '—'} {sym} (Ticket {ticket})")
+                    if ok:
+                        erg["sl"], erg["tp"] = sl, tp
+                    elif tp > 0:
+                        # Beide zusammen abgelehnt (z. B. TP zu nah am Kurs): das Master-TP-Level ist das
+                        # wichtigere — noch einmal nur mit SL, damit der Hedge nie ohne Schliess-Level bleibt
+                        erg["tp_fehler"] = str(mt5.last_error())
+                        ok2 = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
+                                       "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},
+                                   f"SOLO LEVEL nur SL {sl} {sym} (Ticket {ticket})")
+                        if ok2:
+                            erg["sl"] = sl
+                        else:
+                            erg["sl_fehler"] = str(mt5.last_error())
+                    else:
                         erg["sl_fehler"] = str(mt5.last_error())
         except Exception as e:
-            erg["sl_fehler"] = f"{type(e).__name__}: {e}"
+            erg["sl_fehler"] = erg.get("sl_fehler") or f"{type(e).__name__}: {e}"
         return erg
 
     def solo_close(m, a):
@@ -1582,10 +1631,11 @@ def main():
             return {"ok": False, "code": "befehl", "msg": "ticket fehlt"}
         pos = mt5.positions_get(ticket=ticket)
         if not pos:
-            # Schon zu (Broker-SL, Hand) → P&L aus der Historie, kein Fehler
-            pl = solo_pl_aus_history(ticket)
-            return {"ok": True, "schon_zu": True, "ticket": ticket, "pl": pl,
-                    "msg": "Position war schon zu" + (f" · P&L {pl}" if pl is not None else " · P&L noch nicht in der Historie")}
+            # Schon zu (Level im Terminal, Hand) → P&L + Grund aus der Historie, kein Fehler
+            pl, grund, exit_preis = solo_pl_aus_history(ticket)
+            return {"ok": True, "schon_zu": True, "ticket": ticket, "pl": pl, "grund": grund, "fill_close": exit_preis,
+                    "msg": "Position war schon zu" + (f" ({grund})" if grund else "")
+                           + (f" · P&L {pl}" if pl is not None else " · P&L noch nicht in der Historie")}
         p = pos[0]
         if int(getattr(p, "magic", 0) or 0) != SOLO_MAGIC:
             return {"ok": False, "code": "fremd", "retry_ok": False,
@@ -1603,9 +1653,10 @@ def main():
         if r is None:
             return {"ok": False, "code": "abgelehnt", "retry_ok": True, "ticket": ticket,
                     "msg": f"Close abgelehnt ({mt5.last_error()})"}
-        pl = solo_pl_aus_history(ticket)
+        pl, grund, exit_preis = solo_pl_aus_history(ticket)
         return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
-                "fill_close": float(getattr(r, "price", 0.0) or 0.0), "lots": float(p.volume), "pl": pl,
+                "fill_close": float(getattr(r, "price", 0.0) or 0.0) or exit_preis, "lots": float(p.volume), "pl": pl,
+                "grund": grund or "close",
                 "msg": f"geschlossen @ {getattr(r, 'price', '?')}" + (f" · P&L {pl}" if pl is not None else " · P&L folgt aus der Historie")}
 
     def solo_abarbeiten():
@@ -1808,7 +1859,11 @@ def main():
                                      "type": int(p_.type), "volume": float(p_.volume),
                                      "profit": float(p_.profit), "price_open": float(p_.price_open),
                                      "sl": float(getattr(p_, "sl", 0.0) or 0.0),
-                                     "tp": float(getattr(p_, "tp", 0.0) or 0.0)})
+                                     "tp": float(getattr(p_, "tp", 0.0) or 0.0),
+                                     # Vertrag fuer das Frontend (Koordination 24.09.2026 spaet): sprechende Namen
+                                     "richtung": "buy" if int(p_.type) == 0 else "sell",
+                                     "lots": float(p_.volume), "fill": float(p_.price_open),
+                                     "pl_live": float(p_.profit)})
                         continue
                     fremde.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
                                    "type": int(p_.type), "volume": float(p_.volume)})

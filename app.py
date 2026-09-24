@@ -6253,8 +6253,9 @@ WD_PLAN_FELDER = {
     "multiplier", "master_tp", "master_sl", "priority", "planned_for", "notes",
     "status", "richtung", "route", "master_symbol", "start_um",
     "hedge_eur",   # Fusion-Gegenhedge in € (24.09.2026 abends, Winning Days ohne Duplikum)
+    "hedge_faktor",  # Faktor 1,0 = am Master-TP verliert Fusion in € so viel, wie der Master in $ gewinnt (24.09.2026 spät)
 }
-WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur"}
+WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur", "hedge_faktor"}
 
 # ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
 # Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem

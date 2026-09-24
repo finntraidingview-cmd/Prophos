@@ -2755,13 +2755,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "Symbol ungueltig"}))
                 try:
                     eur = float(body.get("eur") or 0)
-                    punkte = float(body.get("punkte") or 0)
+                    # tp_punkte = Distanz Master-TP (Pflicht), sl_punkte = Distanz Master-SL (optional);
+                    # 'punkte' bleibt als alter Name fuer tp_punkte (Frontend-Stand .469)
+                    punkte = float(body.get("tp_punkte") or body.get("punkte") or 0)
+                    sl_punkte = float(body.get("sl_punkte") or 0)
                     lots = float(body.get("lots") or 0)
                 except (TypeError, ValueError):
-                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "eur/punkte/lots keine Zahlen"}))
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "eur/tp_punkte/sl_punkte/lots keine Zahlen"}))
                 if not (lots > 0 or (eur > 0 and punkte > 0)):
                     return self._send(400, json.dumps({"ok": False, "code": "befehl",
-                        "msg": "eur + punkte (oder lots) muessen > 0 sein"}, ensure_ascii=False))
+                        "msg": "eur + tp_punkte (oder lots) muessen > 0 sein"}, ensure_ascii=False))
+                if sl_punkte < 0:
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "sl_punkte darf nicht negativ sein"}))
                 if lots > 50:
                     return self._send(400, json.dumps({"ok": False, "code": "befehl",
                         "msg": f"lots {lots} ueber dem Riegel 50 — Rechenfehler?"}, ensure_ascii=False))
@@ -2769,8 +2774,8 @@ class Handler(BaseHTTPRequestHandler):
                     puffer = max(0.0, min(100.0, float(body.get("puffer") if body.get("puffer") is not None else 3)))
                 except (TypeError, ValueError):
                     puffer = 3.0
-                auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte,
-                                "puffer": puffer, "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
+                auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte, "tp_punkte": punkte,
+                                "sl_punkte": sl_punkte, "puffer": puffer, "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
             else:
                 try:
                     ticket = int(body.get("ticket") or 0)
