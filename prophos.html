@@ -18550,6 +18550,10 @@
   function tvV2LivePnlInner(p){
     try{
       if(!p || p.route !== 'tvv2' || p.status !== 'open') return ''
+      // 25.09.2026 (Finn: Master-P&L live auf der Karte wie im Winning-Days-Block): mit bekanntem Einstieg rechnet der Chip
+      // mit dem Feed-Kurs (wdKursJetzt + wdMasterLive — dieselbe Rechnung wie der Block); ohne frischen Kurs grau „Kurs
+      // fehlt", nie eine alte Zahl als live. Ohne Einstieg bleibt der bisherige Rundgang-Chip darunter.
+      { const fc = wdMasterChipInner(p); if(fc) return fc }
       const grau = (txt, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border)" title="${escapeHtml(title || '')}">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
         + `<span style="font-size:11px;color:var(--sub)">${escapeHtml(txt)}</span></span>`
@@ -18583,6 +18587,35 @@
         + `</span>`
     }catch(_){ return '' }
   }
+
+  // MASTER-Chip aus dem Feed (Trade-Karte, Orbit V2 mit laufendem Plan). -> HTML | '' (kein Einstieg → Rundgang-Chip)
+  function wdMasterChipInner(p){
+    const base = p.mt5Baseline || {}, h = base.hedge || null, tv = base.tv || null
+    const einstieg = (h && Number(h.einstieg_nq) > 0) ? Number(h.einstieg_nq) : (tv && Number(tv.einstieg_nq) > 0 ? Number(tv.einstieg_nq) : null)
+    const kt = Number(p.masterContracts)
+    if(!(einstieg > 0) || !(kt > 0) || !(p.richtung === 'buy' || p.richtung === 'sell')) return ''
+    const eq = (h && Number(h.einstieg_nq) > 0) ? (h.einstieg_quelle || 'Hedge') : 'Rundgang'
+    let wurzel = (h && h.einstieg_wurzel) || ''
+    if(!wurzel){ try{ wurzel = tvSymbolWurzel((typeof tpOrbitWerte === 'function' ? tpOrbitWerte(p).symbol : '') || p.masterSymbol || '') }catch(_){} }
+    wurzel = wurzel === 'NQ' ? 'NQ' : 'MNQ'
+    const kopf = `${p.richtung.toUpperCase()} ${kt.toLocaleString('de-DE')} ${wurzel}`
+    const lbl = `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+    const fE = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const k = wdKursJetzt(wurzel, 10000)
+    const r = k ? wdMasterLive(p.richtung, einstieg, kt, wurzel, k.preis) : null
+    if(!r){
+      return `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${escapeHtml(`Kein frischer NQ/MNQ-Kurs (≤ 10 s) — Master-P&L folgt mit dem Feed · Einstieg ${fE(einstieg)} (${eq})`)}">${lbl}<span style="font-size:11px;color:var(--sub)">${escapeHtml(kopf)} · Kurs fehlt</span></span>`
+    }
+    const live = (h && h.ticket && ['offen', 'schliesst'].includes(h.status) && typeof hedgeSoloLive === 'function') ? hedgeSoloLive(h.ticket) : null
+    const fus = live && isFinite(Number(live.profit)) ? Number(live.profit) : null
+    const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
+    const sig = (v, einh) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${einh}`
+    const alterS = Math.max(0, k.alter_ms / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })
+    const titel = `${r.formel} = ${sig(r.pl, '$')} · Kurs ${fE(k.preis)} (${k.quelle}, vor ${alterS} s) · Einstieg ${fE(einstieg)} (${eq})`
+      + (fus != null ? ` · zusammen ≈ ${sig(r.pl * fx + fus, '€')} (Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/$ + Fusion ${sig(fus, '€')})` : '')
+    return `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${r.pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'};border:1px solid var(--border-soft)" title="${escapeHtml(titel)}">${lbl}<span style="font-size:11px;color:var(--sub)">${escapeHtml(kopf)}</span><b style="font-size:12px;color:${r.pl >= 0 ? '#15803d' : '#b91c1c'}">${sig(r.pl, '$')}</b></span>`
+  }
+  window._wdMasterChipInner = wdMasterChipInner
 
   /* Auto-P&L Orbit V2 (Pendant zu _autoPnlFetchMt5): NUR aus mt5_baseline.tv + .final.
    * master_pl = final.today_pnl − tv.today_pnl_start, wenn beide Zahlen da sind UND derselbe Tag.
@@ -19665,6 +19698,46 @@
   }
   // P&L in $: (Kurs − Entry) × ppl × kt, bei sell umgekehrt
   const mklPl = (o, kurs) => Math.round(((o.richtung === 'buy' ? kurs - Number(o.entry) : Number(o.entry) - kurs) * mklPpl(o.symbol) * Number(o.kt)) * 100) / 100
+  /* Master-Live-P&L eines Winning Days — EINE Rechnung für den Winning-Days-Block (Markt) UND die offene Trade-Karte
+   * (Finn 25.09.2026: „die Position ist im Winning-Days-Tab ja schon nachgebaut — ich will den Master-P&L auch auf der
+   * Karte live sehen"). wdKursJetzt: frischester Kurs (≤ maxMs, nie verzögert) — lokaler Reader dieses PCs, sonst
+   * tv_kurse (mkl.kursJe, Realtime/Poll; Alter läuft ab dem Erfassen weiter), sonst der Kopf-Kurs, sonst der Cloud-Cache
+   * des Wächters. NQ ≈ MNQ (< 1 Pkt): fehlt die Wurzel, zählt die andere. -> {preis, wurzel, quelle, alter_ms} | null */
+  function wdKursJetzt(wurzel, maxMs){
+    const max = maxMs > 0 ? maxMs : 10000, w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', andere = w === 'NQ' ? 'MNQ' : 'NQ'
+    const verz = m => /^delayed/.test(String(m || ''))
+    try{
+      if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && Date.now() - (epLokal.ab || 0) <= Math.min(max, 5000)){
+        for(const ww of [w, andere]){
+          const q = epLokal.stand.kurse && epLokal.stand.kurse[ww]
+          const pr = q && !q.stale && !verz(q.modus) ? (Number(q.preis) || Number(q.lp) || 0) : 0
+          if(pr > 0) return { preis: pr, wurzel: ww, quelle: 'Reader', alter_ms: Date.now() - (epLokal.ab || 0) }
+        }
+      }
+    }catch(_){}
+    const echt = k => (k && k.preis > 0 && !verz(k.modus)) ? (Number(k.alter_ms) || 0) + (k.erfasst_ms ? Date.now() - k.erfasst_ms : 0) : Infinity
+    try{
+      for(const k of [mkl.kursJe && mkl.kursJe[w], mkl.kursJe && mkl.kursJe[andere], mkl.kurs]){
+        const a = echt(k); if(a <= max) return { preis: Number(k.preis), wurzel: k.wurzel || w, quelle: 'Feed' + (k.pc ? ' ' + k.pc : ''), alter_ms: a }
+      }
+    }catch(_){}
+    try{
+      const c = (typeof _hedgeKurs !== 'undefined') ? _hedgeKurs : null
+      if(c && c.wert && c.wert.preis > 0){ const a = (Number(c.wert.alter_ms) || 0) + (Date.now() - (c.at || 0)); if(a <= max) return { preis: Number(c.wert.preis), wurzel: c.wert.wurzel || w, quelle: 'Cloud', alter_ms: a } }
+    }catch(_){}
+    return null
+  }
+  // REIN RECHNEND (testbar über window._wdMasterLive): (Kurs − Einstieg) × Punktwert × Kontrakte, bei sell umgekehrt;
+  // Punktwert über mklPpl (MNQ 2 $, NQ 20 $). -> { pl, ppl, formel } | null ohne vollständige Angaben
+  function wdMasterLive(richtung, einstieg, kt, wurzel, kurs){
+    const e = Number(einstieg), k = Number(kurs), n = Number(kt)
+    if(!(e > 0) || !(k > 0) || !(n > 0) || !(richtung === 'buy' || richtung === 'sell')) return null
+    const ppl = mklPpl(wurzel === 'NQ' ? 'NQ' : 'MNQ')
+    const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return { pl: Math.round(((richtung === 'buy' ? k - e : e - k) * ppl * n) * 100) / 100, ppl,
+             formel: richtung === 'buy' ? `(${f2(k)} − ${f2(e)}) × ${ppl} $ × ${n}` : `(${f2(e)} − ${f2(k)}) × ${ppl} $ × ${n}` }
+  }
+  window._wdMasterLive = wdMasterLive
   // REIN RECHNEND (testbar über window._mklAuswerten): offene Demo-Orders gegen Kerzen + Live-Kurs.
   // → [{id, exit, grund, exit_at}] für alle, die zu sind. Kerzen chronologisch, nur die NACH dem Entry.
   function mklAuswerten(orders, kerzen, kurs){
@@ -19710,7 +19783,8 @@
     jetzt = jetzt || Date.now()
     return { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0],
              alter_ms: jetzt - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0), handel_ms: jetzt - (Number(r.reader_ts) || 0),
-             sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null }
+             sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null,
+             erfasst_ms: jetzt }   // 25.09.2026: alter_ms gilt nur zum Erfassungszeitpunkt — wdKursJetzt rechnet damit weiter
   }
   async function mklKerzen24h(jetzt){
     const seit = new Date(jetzt - 1440 * 60000).toISOString(), alle = []
@@ -20281,8 +20355,9 @@
     if(!alle.length && !mkl.wd.fehler && !mkl.wd.at){ el.style.display = 'none'; return }
     el.style.display = ''
     // NQ/MNQ preisgleich — irgendein frischer Kurs: je Wurzel aus tv_kurse (mkl.kursJe, Realtime/Poll), sonst der Kopf-Kurs (mkl.kurs)
-    const kurs = (mkl.kursJe && (mkl.kursJe[mkl.wurzel] || mkl.kursJe.NQ || mkl.kursJe.MNQ)) || mkl.kurs || null
-    const kp = (kurs && kurs.alter_ms <= 10000) ? kurs.preis : null
+    // 25.09.2026: Kurs über wdKursJetzt (dieselbe Quelle wie der MASTER-Chip der Trade-Karte, echtes Alter ≤ 10 s)
+    const kurs = wdKursJetzt(mkl.wurzel, 10000)
+    const kp = kurs ? kurs.preis : null
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const f2 = v => num(v) == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -20340,11 +20415,12 @@
       }
       // ── P&L-Kästen ──
       const rund = pw.master_pl && num(pw.master_pl.wert) != null ? pw.master_pl : null
-      let mLive = null
-      if(offen && kp != null && entry != null && kt != null && ppl) mLive = Math.round(((buy ? kp - entry : sell ? entry - kp : 0) * ppl * kt) * 100) / 100
+      // eine Rechnung für Block und Trade-Karte (wdMasterLive)
+      const mR = offen && kp != null ? wdMasterLive(pw.richtung, entry, kt, root, kp) : null
+      const mLive = mR ? mR.pl : null
       const mWert = zu ? (rund ? num(rund.wert) : null) : (mLive != null ? mLive : (rund ? num(rund.wert) : null))
       const mSub = zu ? (rund ? `${rund.quelle === 'plan' ? 'eingetragen' : 'letzter Stand'} ${alter(rund.at)}` : 'kein Ergebnis eingetragen')
-        : mLive != null ? `live · (${f2(kp)} − ${f2(entry)}) × ${f0(ppl)} $ × ${f0(kt)}${rund ? ` · Rundgang ${sig(rund.wert, '$', 0)} ${alter(rund.at)}` : ''}`
+        : mLive != null ? `live · ${mR.formel}${rund ? ` · Rundgang ${sig(rund.wert, '$', 0)} ${alter(rund.at)}` : ''}`
         : rund ? `letzter Rundgang ${alter(rund.at)}${offen ? ' · kein frischer Kurs' : ''}` : (geplant ? 'noch nicht gestartet' : 'kein Stand')
       const live = (h && h.ticket && ['offen', 'schliesst'].includes(h.status) && typeof hedgeSoloLive === 'function') ? hedgeSoloLive(h.ticket) : null
       const fLive = live && isFinite(Number(live.profit)) ? Number(live.profit) : null
@@ -31422,7 +31498,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.583'
+  const OS_TAB_BUILD = '2026-09-22.585'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
