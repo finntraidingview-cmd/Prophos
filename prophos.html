@@ -5641,22 +5641,20 @@
                  verlinkten Accounts; bei MT5 ist der Slave fix der Hedge dieses PCs. -->
             <div class="field" style="grid-column:1 / -1">
               <label>Weg</label>
-              <div class="seg" id="tp-route-seg">
-                <!-- Reihenfolge 22.09.2026 (Finn: „ich will Orbit und Duplikum tauschen") -->
+              <!-- V2-Wege ZUERST (24.09.2026 abends, Finn: „Echo V2 nach ganz vorne, Orbit V2 als Zweites, Topstep V2 auch
+                   nach vorne — die alten Wege nach hinten"): Echo V2 = Puls im Master-Terminal, Orbit V2 = Puls in TradingView,
+                   Topstep V2 = von Hand. Kein Hedge, kein Slave. -->
+              <div class="seg tp-route-seg-v2" id="tp-route-seg-v2">
+                <button type="button" id="tp-route-mt5v2">Echo V2</button>
+                <button type="button" id="tp-route-tvv2">Orbit V2</button>
+                <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
+              </div>
+              <!-- Alte Wege der Hedge-Ära, zweite Zeile (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
+              <div class="seg" id="tp-route-seg" style="margin-top:6px;opacity:.85">
                 <button type="button" id="tp-route-tvplus">Orbit</button>
                 <button type="button" id="tp-route-topstep">Topstep</button>
                 <button type="button" id="tp-route-mt5">Echo</button>
                 <button type="button" id="tp-route-dup">Duplikum</button>
-              </div>
-              <!-- V2-Wege (23.09.2026, Finn: „einfach nichts gegengehedgt — kein Multiplikator, gar nichts"):
-                   Echo V2 = Puls platziert im Master-Terminal, kein Echo-Copier; Orbit V2 = Puls in TradingView, kein Duplikum.
-                   Seit 24.09.2026 (Kapitel „Ohne Hedge", Finn: „Echo und Orbit V2 jeweils in der Spalte weiter
-                   drunter, damit sie einfach mehr separat sind") als eigene Zeile unter den Hedge-Wegen. -->
-              <div class="seg tp-route-seg-v2" id="tp-route-seg-v2" style="margin-top:6px">
-                <button type="button" id="tp-route-mt5v2">Echo V2</button>
-                <button type="button" id="tp-route-tvv2">Orbit V2</button>
-                <!-- Topstep V2 (24.09.2026 abends, Finn: „Topstep ohne API, alles manuell") -->
-                <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
               </div>
             </div>
             <div class="field" id="tp-master-row">
@@ -28416,7 +28414,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.457'
+  const OS_TAB_BUILD = '2026-09-22.458'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31218,8 +31216,10 @@
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
             }
-            // Topstep V2 (24.09.2026 abends): Master = Topstep- oder Futures-Konto, ohne Duplikum, ohne External ID
-            if(_tpRoute === 'tsv2' && role === 'master' && !(tpFirmIstFutures(a.firm) || /topstep/i.test(String(a.firm || '')))) return false
+            // Topstep V2 (24.09.2026 abends, Finn: „nur die Topstep-Accounts, die mit der External ID verknüpft sind —
+            // müssen nicht mit der Topstep-API verknüpft sein"): Firma Topstep + External ID, sonst nichts.
+            // Die External ID ist die Kennung, an der später ggf. Puls das Konto erkennt — heute nur Planung von Hand.
+            if(_tpRoute === 'tsv2' && role === 'master' && !(/topstep/i.test(String(a.firm || '')) && String(a.externalId || '').trim())) return false
             // Orbit V2 (23.09.2026): Master braucht keine Duplikum-Verknüpfung — Puls erkennt das Konto an der External ID.
             if(!_dupIds.has(String(a.id)) && _tpRoute !== 'tvv2' && _tpRoute !== 'tsv2') return false
             // Slave = nur der echte Duplikium-Slave; und der kann umgekehrt
@@ -31322,6 +31322,7 @@
         html += orbitSlaveStreng
           ? (_dupSlaveIds ? '<option value="" disabled>(Kein Duplikum-Slave — Accounts → Duplikum verknüpfen)</option>'
                           : '<option value="" disabled>(Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden)</option>')
+          : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein Topstep-Konto mit External ID — bei Accounts die External ID eintragen)</option>'
           : '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
       } else if(groups.length === 1){
         // Nur eine Firma → keine Gruppe nötig, flache Liste
