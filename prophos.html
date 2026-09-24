@@ -6020,6 +6020,17 @@
               </label>
               <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-winning-day-hint"></div>
             </div>
+            <!-- Winning-Day-Kennzeichen am Trade (25.09.2026, Finn: „wenn man bei Trade abhakt: dieser Trade ist ein
+                 Winning Day"): nur bei Funded/Live-Master, schreibt trade_plans.winning_day (true/false); vorbelegt aus
+                 dem gespeicherten Wert, sonst aus der Faustregel Master-Risiko < 1.000 $. Statistik trennt danach
+                 Funded (Big Trade) und Winning Day. -->
+            <div class="field" style="grid-column:span 2" id="tc-wd-trade-wrap" hidden>
+              <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+                <input type="checkbox" id="tc-wd-trade" style="width:16px;height:16px;flex-shrink:0">
+                <span style="color:var(--ink);font-weight:500">🌾 Dieser Trade ist ein Winning Day</span>
+              </label>
+              <div style="font-size:11px;color:var(--sub-2);margin-top:4px;padding-left:2px" id="tc-wd-trade-hint">Kleiner Tages-Trade auf dem Funded — die Statistik rechnet ihn getrennt vom Big Trade.</div>
+            </div>
             <!-- WD-Farm-Haken nach dem Trade (23.09.2026, Finn: „oder nach dem Trade einen Haken setzen") -->
             <div class="field" style="grid-column:span 2" id="tc-wd-farm-wrap" hidden>
               <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
@@ -8149,7 +8160,7 @@
                 </div>
                 <div id="adm-kf-quoten" hidden>
                   <div class="kf-abschnitt">Hedge-Quoten aus der Hedge-Ära</div>
-                  <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma · Typ, nach Quote sortiert — Klick filtert Kacheln und Charts</div>
+                  <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma, darunter Challenge → Phasen → Funded → Winning Day — Klick filtert Kacheln und Charts</div>
                   <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-q"></div>
                 </div>
                 <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
@@ -10863,7 +10874,9 @@
     const admKfBucket = v => v < -2000 ? '< −2k' : v >= 8000 ? '≥ 8k' : (lo => `${admKfMinus(lo / 1000)}…${admKfMinus(lo / 1000 + 1)}k`)(Math.floor(v / 1000) * 1000)
     const ADM_KF_BUCKETS = ['< −2k', ...Array.from({ length: 10 }, (_, k) => `${admKfMinus(k - 2)}…${admKfMinus(k - 1)}k`), '≥ 8k']
     const admKfQFmt = q => admKfDe(q, 3) + ' €/$'   // drei Stellen (24.09.2026 abends, Finn: „auf den dritten Cent — eher 0,04 oder 0,045")
-    const ADM_KF_TYP = { funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', eval: 'Eval' }
+    // 'wd' = Winning Day (25.09.2026, Finn: „unterscheiden zwischen Funded, Winning Day und Challenge") — Backend
+    // ordnet Funded-Trades mit Master-Risiko < 1.000 $ so ein, Funded bleibt der Big Trade.
+    const ADM_KF_TYP = { funded: 'Funded', wd: 'Winning Day', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', eval: 'Eval' }
     const admKfTyp = t => ADM_KF_TYP[String(t || '').toLowerCase()] || (t ? String(t) : '—')
     const admKfGroesse = g => g ? Math.round(Number(g) / 1000) + 'k' : ''
     const admKfFirmaTyp = t => (t.master_firm || '—') + ' · ' + admKfTyp(t.master_typ)
@@ -11237,7 +11250,7 @@
       // Gemessen vs. real je Kontotyp (25.09.2026): Ebene T (nur Typ), Summen € über die saubere Menge — grau die
       // gemessene Reibung, farbig der reale Teil (entschieden real + laufend × Anteil). Ohne Filter-Klick (Typ ist
       // kein Filter-Schlüssel), Tooltip nennt Anteil, entschiedene/offene Trades und was der Blow zurückgeholt hat.
-      const typOrd = { challenge: 0, phase1: 1, phase2: 2, funded: 3 }
+      const typOrd = { challenge: 0, phase1: 1, phase2: 2, funded: 3, wd: 4 }
       const ct = (rg?.gruppen || []).filter(g => g.ebene === 'T' && g.typ && g.typ !== '—' && Number(g.n_roh || g.n) >= minN)
         .map(g => ({ key: g.key, label: admKfTyp(g.typ), n: Number(g.n_roh || g.n), a: Number(g.summe), b: Number(g.summe_real),
                      anteil: Number(g.anteil), quelle: g.anteil_quelle || '', nEnt: Number(g.n_entschieden || 0), nOffen: Number(g.n_offen || 0),
@@ -11338,8 +11351,12 @@
       // „man erkennt da nix" — 18 Zeilen in zwei Spalten, Größen doppelt zur Firma, Balken nicht sortiert).
       // Vorgabe-Gruppen (Backend HQ_VORGABEN, 24.09.2026 spät: Topstep · Funded = 4.500 $ ≙ 850 €) stehen
       // ohne Trades in der Liste — sie sind die Quote, die ein Topstep-V2-Trade bekommt.
+      // Sortierung je Firma, darunter die Typen in fester Reihenfolge (25.09.2026, Finn: „sortier das nicht nach
+      // dem Geldwert, sondern nach Prop-Firms: Firma A alle Typen, Firma B alle Typen") — Balken bleiben relativ
+      // zur größten Quote, damit man die Firmen trotzdem vergleichen kann.
+      const typOrdQ = { challenge: 0, phase1: 1, phase2: 2, eval: 2, funded: 3, wd: 4 }
       const grp = (hq?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && (g.vorgabe || Number(g.n) >= minN) && Number(g.median_q) > 0)
-                    .sort((a, b) => Number(b.median_q) - Number(a.median_q) || Number(b.n) - Number(a.n))
+                    .sort((a, b) => String(a.firm).localeCompare(String(b.firm), 'de') || ((typOrdQ[String(a.typ || '').toLowerCase()] ?? 9) - (typOrdQ[String(b.typ || '').toLowerCase()] ?? 9)))
       wrap.hidden = !grp.length
       el.innerHTML = ''
       if(!grp.length) return
@@ -11348,8 +11365,12 @@
         const q = Number(g.median_q), funded = String(g.typ || '').toLowerCase() === 'funded'
         const key = (g.firm || '—') + ' · ' + admKfTyp(g.typ)
         const on = !!(f && f.art === 'q' && f.wert === key)
+        // Beispielzahl = typische Trade-Größe der Gruppe (bsp_usd, Median |Master-P&L|), Funded/Winning Day als
+        // Gewinn, Challenge/Phasen als Verlust; ohne bsp_usd die alten Festwerte +7.500 $ / −2.000 $
+        const gewinn = funded || String(g.typ || '').toLowerCase() === 'wd'
+        const bspUsd = Number(g.bsp_usd) > 0 ? Number(g.bsp_usd) : (gewinn ? 7500 : 2000)
         const bsp = g.vorgabe ? `${admUsdSign(Number(g.ziel_usd))} ≙ ${admVlSign(-Number(g.ziel_eur))}`
-                  : funded ? `+7.500 $ ≙ ${admVlSign(-7500 * q)}` : `−2.000 $ ≙ ${admVlSign(2000 * q)}`
+                  : gewinn ? `${admUsdSign(bspUsd)} ≙ ${admVlSign(-bspUsd * q)}` : `${admUsdSign(-bspUsd)} ≙ ${admVlSign(bspUsd * q)}`
         const geplant = Number.isFinite(Number(g.median_r)) && g.median_r !== null ? ` · geplant ${admKfQFmt(Number(g.median_r))}` : ''
         const row = document.createElement('button')
         row.type = 'button'
@@ -11361,7 +11382,7 @@
         row.querySelector('.nm').textContent = key + (g.groesse ? ' · ' + admKfGroesse(g.groesse) : '')
         row.querySelector('.kf-q-sub').textContent = g.vorgabe ? `Vorgabe · ${bsp}` : `${g.n} Trades · ${bsp}`
         row.title = g.vorgabe
-          ? `${key} · Vorgabe (Finn 24.09.2026): ${bsp} → ${admKfQFmt(q)} · keine brauchbare Hedge-Messung (${g.n_roh || 0} Trades roh, unter ${minN}) — klicken filtert auf ${key}`
+          ? `${key} · Vorgabe (Finn): ${bsp} → ${admKfQFmt(q)}${g.gemessen && Number(g.gemessen.n) >= minN ? ` · gemessen ${admKfQFmt(Number(g.gemessen.median_q))} aus ${g.gemessen.n} Hedge-Trades` : ` · keine brauchbare Hedge-Messung (${g.n_roh || 0} Trades roh, unter ${minN})`} — klicken filtert auf ${key}`
           : `${key} · ${g.n} Hedge-Trades · Median ${admKfQFmt(q)} (p25 ${admKfQFmt(Number(g.p25))} · p75 ${admKfQFmt(Number(g.p75))})${geplant} — klicken filtert auf ${key}`
         row.addEventListener('click', () => { admKf.filter = on ? null : { art: 'q', wert: key }; admKfRender() })
         el.appendChild(row)
@@ -25363,6 +25384,7 @@
       // Herkunft des Master-P&L (24.09.2026, Vollumstieg): 'echo' | 'tv' | 'duplikum' | 'hand' — schreibt
       // tradeCompleteSave; fehlt die Spalte noch, bleibt es null (siehe plQuelle-Fallback beim Speichern).
       plQuelle:    (typeof row.pl_quelle === 'string' && row.pl_quelle) ? row.pl_quelle : null,
+      winningDay:  row.winning_day === true ? true : (row.winning_day === false ? false : null),   // 25.09.2026, null = nie gesetzt
       endedAt:     row.ended_at || null,   // echtes Trade-Ende (sql/2026-09-22_trade_plans_ended_at.sql)
       startedAt:   row.started_at,
       createdAt:   row.created_at,
@@ -29371,7 +29393,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.493'
+  const OS_TAB_BUILD = '2026-09-22.494'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36033,6 +36055,25 @@
     cb.checked = !!a.wdFarm
     lbl.textContent = `${a.wdFarm ? 'Im WD-Farm' : 'Nicht im WD-Farm'} — ${a.name}`
   }
+  /* Winning-Day-Kennzeichen am Trade (25.09.2026): Haken nur bei Funded/Live-Master. Vorbelegung = gespeicherter
+   * Wert; nie gesetzt → Faustregel wie im Backend (_hq_typ_trade): Master-Risiko < 1.000 $, ohne Risiko |Master-P&L|. */
+  function tcWdTradePrepare(p){
+    const wrap = document.getElementById('tc-wd-trade-wrap'), cb = document.getElementById('tc-wd-trade'), hint = document.getElementById('tc-wd-trade-hint')
+    if(!wrap || !cb) return
+    const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId))
+    const t = String((a && a.type) || '').toLowerCase()
+    if(!a || !(t === 'funded' || t === 'live')){ wrap.hidden = true; return }
+    wrap.hidden = false
+    if(p.winningDay === true || p.winningDay === false){
+      cb.checked = p.winningDay
+      if(hint) hint.textContent = 'Gespeichert — die Statistik rechnet ihn ' + (p.winningDay ? 'als Winning Day.' : 'als Big Trade.')
+    }else{
+      const risk = p.masterRisk > 0 ? p.masterRisk : Math.abs(Number(p.masterPl) || 0)
+      cb.checked = risk > 0 && risk < 1000
+      if(hint) hint.textContent = cb.checked ? 'Vorschlag aus dem Master-Risiko unter 1.000 $ — Haken raus, wenn es der Big Trade war.'
+                                            : 'Kleiner Tages-Trade auf dem Funded — die Statistik rechnet ihn getrennt vom Big Trade.'
+    }
+  }
   async function wdFarmSetzen(accId, an){
     const { error } = await supabase.from('accounts').update({ wd_farm: !!an }).eq('id', accId)
     if(error) throw error
@@ -36182,6 +36223,7 @@
     // Plans manuell zählt — sonst bleibt die Box unsichtbar.
     tcWinningDayPrepare(p)
     tcWdFarmPrepare(p)
+    tcWdTradePrepare(p)
 
     tcRecompute()
     document.getElementById('tradeCompleteModal').classList.add('open')
@@ -36852,6 +36894,11 @@
       if(tcSlaveLassen) delete updates.slave_pl   // Hedge offen / P&L folgt: gespeicherten Fusion-P&L nicht anrühren
       const quelle = plQuelleErmitteln(mPl)
       if(quelle) updates.pl_quelle = quelle
+      // Winning-Day-Kennzeichen (25.09.2026): nur wenn der Haken sichtbar war (Funded/Live-Master) — dann true/false,
+      // damit die Statistik nicht mehr schätzen muss; der manuelle Zähl-Haken (🏆) markiert den Trade mit.
+      const _wdTradeCb = document.getElementById('tc-wd-trade'), _wdTradeWrap = document.getElementById('tc-wd-trade-wrap')
+      const _wdZaehlCb = document.getElementById('tc-winning-day')
+      if(_wdTradeWrap && !_wdTradeWrap.hidden && _wdTradeCb) updates.winning_day = !!(_wdTradeCb.checked || (_wdZaehlCb && !_wdZaehlCb.disabled && _wdZaehlCb.checked))
       let { data, error } = await supabase
         .from('trade_plans').update(updates).eq('id', _completingPlanId).select('*').single()
       if(error && updates.pl_quelle && /pl_quelle/i.test(String(error.message || '') + String(error.details || ''))){

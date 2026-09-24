@@ -4598,9 +4598,13 @@ HQ_ROUTEN = {"", "dup", "tvplus", "mt5"}   # Hedge-Wege; V2 (mt5v2/tvv2) hat kei
 # Topstep lief in der Hedge-Ära nur über 5 Funded-Trades — keine Gruppe erreicht HQ_MIN_N, ein
 # Topstep-V2-Trade fiel bis .491 auf die globale Quote (Ebene D, ~0,5 €/$ statt ~0,19). Die Vorgabe
 # steht als eigene Gruppe (vorgabe=True, Quote = ziel_eur/ziel_usd) auf Ebene B und greift in
-# _hq_aufloesen wie eine gemessene Gruppe — eine echte Messung mit n ≥ HQ_MIN_N schlägt sie.
+# _hq_aufloesen wie eine gemessene Gruppe. Seit 25.09.2026 schlägt die Vorgabe auch eine vorhandene
+# Messung (Finn nennt bewusst grobe Zielzahlen); die Messung bleibt als 'gemessen' an der Gruppe.
 HQ_VORGABEN = {
     "Topstep|funded": {"ziel_usd": 4500.0, "ziel_eur": 850.0},
+    # 25.09.2026, Finn: „bei Winning Day … so grob machen: bei Tradeify 250 $ entsprechen so grob 75 €" — die
+    # Messung sagt 0,386 €/$ (171 Trades → 250 $ ≙ 97 €); Finns Zahl gilt, die Messung steht im Tooltip daneben.
+    "Tradeify|wd": {"ziel_usd": 250.0, "ziel_eur": 75.0},
 }
 
 
@@ -4645,6 +4649,38 @@ def _hq_typ(acc):
     return str(acc.get("account_type") or "").strip().lower() or "—"
 
 
+# Winning Day als eigener Typ (25.09.2026, Finn am Statistik-Tab: „bei Tradeify Funded sollte es auch grob
+# 850 € sein bei dem Big Trade, aber bei den Winning Days ist es ja unterschiedlich — da muss man unterscheiden
+# zwischen Funded, Winning Day und Challenge"). BEFUND in den Hedge-Ära-Daten: Funded-Trades teilen sich sauber
+# am Master-Risiko — < 1.000 $ (Tradeify Ø 404 $, Slave-Risiko Ø 93 €, Quote 0,39) sind Winning Days, ≥ 3.000 $
+# (Tradeify Ø 4.449 $, Slave-Risiko Ø 846 €, Quote 0,20 → 4.500 $ ≙ ~900 €) sind Big Trades; dazwischen 18 von
+# 559. Die gemischte Gruppe „Tradeify · Funded" zeigte 0,363 €/$ — die Winning Days (171 Trades) haben den
+# Median der Big Trades (56) überstimmt. Ein V2-Trade ohne Master-Risiko (kein SL nötig) wird über |master_pl|
+# eingeordnet.
+HQ_WD_RISK = 1000.0
+
+
+def _hq_typ_trade(acc, plan):
+    """Kontotyp je TRADE: 'wd' (Winning Day) für einen Funded-Trade mit Master-Risiko < HQ_WD_RISK
+    (ohne Risiko: |master_pl|), sonst der Kontotyp. Nur für die Quoten-/Reibungs-Gruppen und die
+    Statistik-Ausgabe — an den Konten selbst ändert sich nichts."""
+    typ = _hq_typ(acc)
+    # Ausdrückliche Markierung (sql/2026-09-25_trade_plans_winning_day.sql, Erledigt-Haken / Farmer) schlägt
+    # die Faustregel: true → Winning Day, false → Big Trade / Kontotyp; nur null (Bestand) wird geschätzt.
+    wd = plan.get("winning_day")
+    if wd is True:
+        return "wd"
+    if wd is False or typ != "funded":
+        return typ
+    try:
+        risk = float(plan.get("master_risk") or 0)
+        if risk <= 0:
+            risk = abs(float(plan.get("master_pl") or 0))
+    except (TypeError, ValueError):
+        risk = 0
+    return "wd" if 0 < risk < HQ_WD_RISK else typ
+
+
 def _hq_anteil(typ):
     """Realer Anteil der gemessenen Reibung: Funded (Fixgröße) 1,0, sonst (Gesamtkosten) 0,5."""
     return HQ_REIB_ANTEIL_FUNDED if str(typ or "").strip().lower() == "funded" else HQ_REIB_ANTEIL_SONST
@@ -4660,10 +4696,11 @@ def _cfd_wurzel(sym):
     return re.split(r"[.\s_-]", t, 1)[0] or t
 
 
-def _hq_keys(acc):
-    """Die vier Gruppenschlüssel eines Master-Kontos, in Auflösungs-Reihenfolge A→B→C→D."""
+def _hq_keys(acc, plan=None):
+    """Die vier Gruppenschlüssel eines Master-Kontos, in Auflösungs-Reihenfolge A→B→C→D.
+    Mit plan wird der Typ je Trade bestimmt (Winning Day = 'wd', siehe _hq_typ_trade)."""
     firm = _firm_norm(acc.get("firm"))
-    typ = _hq_typ(acc)
+    typ = _hq_typ_trade(acc, plan) if plan is not None else _hq_typ(acc)
     g = _hq_groesse(acc)
     keys = []
     if g:
@@ -4715,7 +4752,8 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
                 reib_alle.append((kosten, flag))
                 # Ebene T = nur Kontotyp (25.09.2026, Finn: „alle Typen von Accounts und deren
                 # Reibung bzw. Kosten") — reine Anzeige-Gruppe, löst keinen V2-Trade auf.
-                for ebene, key, firm, typ, g in _hq_keys(acc) + [("T", f"typ:{_hq_typ(acc)}", None, _hq_typ(acc), None)]:
+                t_typ = _hq_typ_trade(acc, p)
+                for ebene, key, firm, typ, g in _hq_keys(acc, p) + [("T", f"typ:{t_typ}", None, t_typ, None)]:
                     e = reib.setdefault(key, {"key": key, "ebene": ebene, "firm": firm, "typ": typ, "groesse": g,
                                               "k": [], "fl": []})
                     e["k"].append(kosten)
@@ -4723,10 +4761,11 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
         q = -spl_eur / mpl
         if not (0 < q < 5):
             continue
-        for ebene, key, firm, typ, g in _hq_keys(acc):
+        for ebene, key, firm, typ, g in _hq_keys(acc, p):
             e = samm.setdefault(key, {"key": key, "ebene": ebene, "firm": firm, "typ": typ, "groesse": g,
-                                      "q": [], "r": [], "sum_mpl": 0.0, "sum_spl_eur": 0.0})
+                                      "q": [], "r": [], "sum_mpl": 0.0, "sum_spl_eur": 0.0, "abs_mpl": []})
             e["q"].append(q)
+            e["abs_mpl"].append(abs(mpl))
             if r is not None:
                 e["r"].append(r)
             e["sum_mpl"] += mpl
@@ -4739,22 +4778,24 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
              "median_q": round(_hq_pct(qs, 0.5), 4), "mean_q": round(sum(qs) / len(qs), 4),
              "p25": round(_hq_pct(qs, 0.25), 4), "p75": round(_hq_pct(qs, 0.75), 4),
              "median_r": (round(_hq_pct(e["r"], 0.5), 4) if e["r"] else None),
-             "sum_master_pl": round(e["sum_mpl"], 2), "sum_slave_pl_eur": round(e["sum_spl_eur"], 2)}
+             "sum_master_pl": round(e["sum_mpl"], 2), "sum_slave_pl_eur": round(e["sum_spl_eur"], 2),
+             # Typische Trade-Größe der Gruppe (Median |master_pl|, auf 50 $ gerundet) für die Beispielzeile im
+             # Frontend — statt fest +7.500 $ / −2.000 $ (25.09.2026: Tradeify Big Trade ist ±4.500 $, Winning Day ~270 $)
+             "bsp_usd": (round(_hq_pct(e["abs_mpl"], 0.5) / 50) * 50 if e["abs_mpl"] else None)}
         gruppen.append(g)
         lookup[g["key"]] = g
-    # Vorgaben (HQ_VORGABEN): nur wo keine Messung mit n ≥ HQ_MIN_N steht; eine dünne Messung
-    # (n < HQ_MIN_N) wird durch die Vorgabe ersetzt, ihre Rohzahl bleibt sichtbar (n_roh).
+    # Vorgaben (HQ_VORGABEN): ersetzen die Gruppe des Schlüssels — Finns Zahl gilt, die Messung (n, Median)
+    # reist als 'gemessen' mit und steht im Tooltip (25.09.2026; bis dahin galt: nur ohne Messung ≥ HQ_MIN_N).
     for key, v in HQ_VORGABEN.items():
         alt_g = lookup.get(key)
-        if alt_g and alt_g["n"] >= HQ_MIN_N:
-            continue
         firm, typ = key.split("|", 1)
         q = round(float(v["ziel_eur"]) / float(v["ziel_usd"]), 4)
         vg = {"key": key, "ebene": "B", "firm": firm, "typ": typ, "groesse": None,
               "n": 0, "n_roh": (alt_g["n_roh"] if alt_g else 0),
               "median_q": q, "mean_q": q, "p25": q, "p75": q, "median_r": None,
               "sum_master_pl": 0.0, "sum_slave_pl_eur": 0.0,
-              "vorgabe": True, "ziel_usd": float(v["ziel_usd"]), "ziel_eur": float(v["ziel_eur"])}
+              "vorgabe": True, "ziel_usd": float(v["ziel_usd"]), "ziel_eur": float(v["ziel_eur"]),
+              "gemessen": ({"n": alt_g["n"], "median_q": alt_g["median_q"], "bsp_usd": alt_g.get("bsp_usd")} if alt_g else None)}
         gruppen = [x for x in gruppen if x["key"] != key] + [vg]
         lookup[key] = vg
     gruppen.sort(key=lambda g: (g["ebene"], -g["n"], g["key"]))
@@ -4820,11 +4861,11 @@ def _admin_hedge_quoten(plans, by_id, live_ids, fx, real_flags=None):
     return gruppen, lookup, reib_gruppen, reib_lookup, reib_global
 
 
-def _hq_aufloesen(acc, lookup):
+def _hq_aufloesen(acc, lookup, plan=None):
     """Erste Gruppe mit n ≥ HQ_MIN_N in der Folge A→B→C→D — oder None (dann rechnet das
     Frontend wie vorher mit fx × 1 und kennzeichnet „ohne Quote"). Eine Vorgabe (HQ_VORGABEN,
     nur im Quoten-Lookup) zählt auf ihrer Ebene wie eine volle Gruppe."""
-    for _ebene, key, _f, _t, _g in _hq_keys(acc):
+    for _ebene, key, _f, _t, _g in _hq_keys(acc, plan):
         g = lookup.get(key)
         if g and (g["n"] >= HQ_MIN_N or g.get("vorgabe")):
             return g
@@ -5523,7 +5564,7 @@ def admin_build_kapitel():
     # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
     plans = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,slave_account_id,"
                                               "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
-                                              "route,master_name,richtung,slave_risk,master_risk,hedge_eur",
+                                              "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day",
                                     "status": "eq.completed"})
     # Hedge-Quoten je Firma·Typ·Größe aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht
     # immer 1:1 … guck in den bestehenden Daten, wie viel wo gegengehedgt wurde") — Grundlage
@@ -5642,12 +5683,12 @@ def admin_build_kapitel():
                 # = −master_pl × q − Reibung. Ohne passende Gruppe (n < HQ_MIN_N überall) bleibt hedge_q
                 # None; das Frontend rechnet dann fx × 1 und zeigt „ohne Quote".
                 macc = by_id.get(str(p.get("master_account_id") or "")) or {}
-                hg = _hq_aufloesen(macc, hq_lookup)
+                hg = _hq_aufloesen(macc, hq_lookup, p)   # Typ je Trade: Winning Day ≠ Big Trade (25.09.2026)
                 hq = hg["median_q"] if hg else None
                 # Reibung real je Trade: gemessener Gruppen-Median × realer Anteil der Gruppe (seit
                 # 25.09.2026 aus den entschiedenen Ketten gemessen, nicht mehr fest 1,0/0,5);
                 # ohne Gruppe der globale reale Mittelwert, sonst HQ_REIBUNG_STD.
-                rg = _hq_aufloesen(macc, reib_lookup)
+                rg = _hq_aufloesen(macc, reib_lookup, p)
                 r_anteil = rg["anteil"] if rg else ((reib_global or {}).get("anteil") or HQ_REIB_ANTEIL_SONST)
                 reib_real = round(rg["median"] * r_anteil, 2) if rg else round(float(reib_std), 2)
                 trades_liste.append({
@@ -5667,7 +5708,7 @@ def admin_build_kapitel():
                     "route": p.get("route") or "",
                     "richtung": str(p.get("richtung") or "").lower(), "blown": bool(p.get("blown")),
                     "master_firm": _firm_norm(macc.get("firm")) if macc else "—",
-                    "master_typ": _hq_typ(macc) if macc else "—",
+                    "master_typ": _hq_typ_trade(macc, p) if macc else "—",   # 'wd' = Winning Day auf Funded
                     "master_groesse": _hq_groesse(macc) if macc else None,
                     "hedge_q": hq,
                     "hedge_q_quelle": ((f'{hg["key"]} · Vorgabe {hg["ziel_usd"]:.0f} $ ≙ {hg["ziel_eur"]:.0f} €' if hg.get("vorgabe")
@@ -6681,6 +6722,7 @@ def admin_wd_plaene():
                     uebersprungen.append({"master_account_id": mid, "grund": blockiert}); continue
                 body["status"] = "planned"
                 body.setdefault("notes", "Winning-Day-Farmer")
+                body["winning_day"] = True   # Farmer-Plan = Winning Day (25.09.2026, sql/2026-09-25_trade_plans_winning_day.sql)
                 # kapitel_id bewusst nicht gesetzt (24.09.2026): der DB-Trigger ordnet den Plan nach Datum dem Kapitel zu.
                 # V2 statt Hedge-Weg (24.09.2026, Vollumstieg): route tvv2/mt5v2, kein Slave, kein Multiplier.
                 _wd_plan_v2(body, (acc[0].get("firm") if acc and acc[0].get("firm") else body.get("master_firm")))
