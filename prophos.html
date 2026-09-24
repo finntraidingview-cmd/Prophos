@@ -31021,7 +31021,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.568'
+  const OS_TAB_BUILD = '2026-09-22.569'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36145,8 +36145,25 @@
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
+    /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
+     * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
+     * → den übernehmen; (b) Claim per Insert in user_settings (eindeutig user_id + key 'wd_rueckfall:<tag>:<konto>', Muster .563):
+     * nur wer den Insert gewinnt, legt an. Scheitert das Anlegen, wird der Claim wieder freigegeben. */
+    const tagKey = row.planned_for || tag || new Date().toLocaleDateString('en-CA')
+    try{
+      const { data: schon } = await supabase.from('trade_plans').select('*').eq('master_account_id', acc.id).eq('planned_for', tagKey)
+        .eq('notes', 'Winning-Day-Farmer').limit(1)
+      if(schon && schon[0]){
+        const p0 = rowToPlan(schon[0]); if(!tradePlans.some(x => String(x.id) === String(p0.id))) tradePlans.unshift(p0)
+        return { plan: p0, z, uebernommen: true }
+      }
+    }catch(_){}
+    const claimKey = `wd_rueckfall:${tagKey}:${acc.id}`
+    const { error: ce } = await supabase.from('user_settings').insert({ user_id: currentUserId, key: claimKey, value: { at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } })
+    if(ce) return { warten: true }   // ein anderer Tab legt gerade an — beim nächsten Abgleich steht sein Plan da
+    supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
-    if(error) return { fehler: error.message }
+    if(error){ supabase.from('user_settings').delete().eq('user_id', currentUserId).eq('key', claimKey).then(() => {}, () => {}); return { fehler: error.message } }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
     return { plan, z }
   }
@@ -36219,6 +36236,7 @@
           if(frisch) continue
           const acc = (accounts || []).find(a => String(a.id) === String(k.id)); if(!acc) continue
           const p = await wdPlanAnlegen(acc, row.richtung, vp, startIso, row.tag)
+          if(p.warten) continue   // Claim verloren: der andere Tab legt an (25.09.2026)
           if(p.fehler){ set(k, 'aktiv', false); set(k, 'hinweis', p.fehler); continue }
           set(k, 'plan_id', String(p.plan.id)); set(k, 'start_um', startIso); set(k, 'tp', p.plan.masterTp); set(k, 'sl', p.plan.masterSl); set(k, 'slave', p.plan.slaveRisk); set(k, 'live', p.z.live); set(k, 'plus', p.z.plus); set(k, 'status', 'planned')
         }else if(plan && plan.status === 'planned' && !plan.startUmGestartetAt){
