@@ -17498,6 +17498,8 @@
       // läuft exakt dann, wenn der Offen-Reiter sichtbar ist — also genau
       // dann, wenn die Plan-Karten die Daten brauchen.
       window._mt5CloudRows = rows
+      window._mt5CloudRowsAt = Date.now()   // 25.09.2026: Alter für hedgeCloudRowsNachladen
+      try{ if(typeof hedgeChipsAuffrischen === 'function') hedgeChipsAuffrischen() }catch(_){}   // FUSION-Chips sofort mit den neuen Zeilen
       // Denselben Zug für die Konto-Auswahl mitnehmen (31.08.2026): die Zeilen
       // liegen hier ohnehin schon vor, der Cache ist dann beim Öffnen des
       // Trade-planen-Modals bereits gefüllt statt erst nach seiner Abfrage.
@@ -18260,6 +18262,9 @@
   // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
   // sind. Nicht-frische Daten leeren die Zeile — nie alte Zahlen als 'live' zeigen.
   setInterval(() => {
+    // FUSION-Chips (25.09.2026) im selben Takt: Cloud-Zeilen bei Bedarf nachladen, dann die Knoten neu setzen
+    try{ if(typeof hedgeCloudRowsNachladen === 'function') hedgeCloudRowsNachladen() }catch(_){}
+    try{ if(typeof hedgeChipsAuffrischen === 'function') hedgeChipsAuffrischen() }catch(_){}
     try{
       const nodes = document.querySelectorAll('[data-mt5live]')
       if(!nodes.length) return
@@ -19667,6 +19672,53 @@
     }catch(_){ return '' }
   }
   window.hedgeSoloSchliessen = hedgeSoloSchliessen
+  /* FUSION-Chip frisch halten (25.09.2026, Finn auf .586 am Mac: MASTER live −300 $, FUSION nur „SELL 3,53 Lot offen" ohne €).
+   * BEFUND: der Chip entstand nur beim vollen Karten-Render; hedgeSoloLive liest window._mt5CloudRows, das der Flotten-Tick
+   * füllt — nach einem Reload rendert die Karte VOR dem ersten Tick („offen"), und nichts zeichnete den Chip neu. Dazu lädt
+   * der Flotten-Tick NUR im Offen-Reiter; im Markt-Block (Winning Days) am Mac kamen die Zeilen also gar nicht.
+   * Jetzt: eigener Knoten data-hedgechip je Karte, neu gesetzt im 5-s-Ticker und direkt nach dem Flotten-Tick — nur wenn sich das
+   * HTML geändert hat (sonst flackert der Tooltip beim Hovern); fehlen die Zeilen oder sind sie > 8 s alt, während ein Hedge
+   * offen ist, lädt hedgeCloudRowsNachladen mt5_live selbst (dieselbe Abfrage wie der Flotten-Tick). hedgeSoloLive unverändert. */
+  function hedgeChipSlot(p){
+    const html = hedgeChipHtml(p)
+    if(!html || !p || p.id == null) return html
+    return `<span data-hedgechip="${escapeHtml(String(p.id))}">${html}</span>`
+  }
+  function hedgeChipsAuffrischen(planListe){
+    const nodes = document.querySelectorAll('[data-hedgechip]')
+    if(!nodes.length) return 0
+    let liste = planListe
+    if(!liste){ try{ liste = tradePlans }catch(_){ liste = [] } }
+    let n = 0
+    nodes.forEach(el => {
+      const p = (liste || []).find(x => x && String(x.id) === el.getAttribute('data-hedgechip'))
+      if(!p) return
+      const html = hedgeChipHtml(p)
+      if(html !== el._hedgeHtml){ el.innerHTML = html; el._hedgeHtml = html; n++ }
+    })
+    return n
+  }
+  window._hedgeChipsAuffrischen = hedgeChipsAuffrischen
+  let _hedgeRowsLaeuft = false
+  async function hedgeCloudRowsNachladen(){
+    if(_hedgeRowsLaeuft || !currentUserId) return
+    if(Date.now() - (Number(window._mt5CloudRowsAt) || 0) <= 8000) return
+    let offen = false
+    try{ offen = (tradePlans || []).some(x => x && x.route === 'tvv2' && ['open', 'review'].includes(x.status) && x.mt5Baseline && x.mt5Baseline.hedge && ['offen', 'schliesst'].includes(x.mt5Baseline.hedge.status)) }catch(_){}
+    try{ if(!offen && typeof mkl !== 'undefined' && mkl.wd && Array.isArray(mkl.wd.plaene)) offen = mkl.wd.plaene.some(x => x && x.hedge && ['offen', 'schliesst'].includes(x.hedge.status)) }catch(_){}
+    if(!offen) return
+    _hedgeRowsLaeuft = true
+    try{
+      const { data, error } = await supabase.from('mt5_live').select('*').gte('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+      if(!error && Array.isArray(data)){
+        window._mt5CloudRows = data.sort((a, b) => String(a.instance).localeCompare(String(b.instance)))
+        window._mt5CloudRowsAt = Date.now()
+        hedgeChipsAuffrischen()
+        try{ if(typeof mklAktiv === 'function' && mklAktiv()) mklWdRender() }catch(_){}
+      }
+    }catch(_){}
+    finally{ _hedgeRowsLaeuft = false }
+  }
   // Klick auf „Hedge öffnen" (Trade-Karte + Winning-Days-Block): Plan frisch aus dem Cache, nur laufend, dann derselbe Pfad
   async function hedgeOeffnenKlick(btn){
     const p = tradePlans.find(x => String(x.id) === String(btn.getAttribute('data-plan-hedge-oeffnen')))
@@ -28370,7 +28422,7 @@
         const mirrorTot = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id) && mirrorPlanEngineTot(p.id))
           ? `<span class="tc2-chip tc2-chip-issue" title="Die Mirror-Engine ist weg (Backend neu gestartet?) — der Trade läuft UNGESPIEGELT. Vor einem Neustart im MT5 prüfen, ob der alte Hedge noch offen ist.">🪞 UNGESPIEGELT</span>` : ''
         // Fusion-Gegenhedge (24.09.2026 abends): eigener Chip neben MASTER, nur Orbit V2 mit hedge_eur
-        const hedgeChip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml(p) : ''
+        const hedgeChip = (typeof hedgeChipSlot === 'function') ? hedgeChipSlot(p) : ''   // eigener Knoten, frischt im 5-s-Ticker nach
         metric = mirrorTot + mt5Live + hedgeChip + dupLive + (p.startedAt
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
           : `<span class="tc2-timer">live</span>`)
@@ -28383,7 +28435,7 @@
       if(p.masterPl != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.masterPl)}">$${fmtR(p.masterPl)}</span>`)
       if(p.slavePl  != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.slavePl)}">${sCur}${fmtR(p.slavePl)}</span>`)
       // Fusion-Gegenhedge (24.09.2026): Stand des Hedges auch auf „Überprüfen" (offen = noch nicht zu!)
-      { const hc = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml(p) : ''; if(hc) parts.push(hc) }
+      { const hc = (typeof hedgeChipSlot === 'function') ? hedgeChipSlot(p) : ''; if(hc) parts.push(hc) }
       metric = parts.length
         ? parts.join('') + `<span class="tc2-chip" style="background:rgba(245,158,11,.14);color:#b45309">prüfen</span>`
         : `<span class="tc2-pending-lbl">🟠 beendet — P&L wird geladen…</span>`
@@ -31503,7 +31555,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.586'
+  const OS_TAB_BUILD = '2026-09-22.587'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
