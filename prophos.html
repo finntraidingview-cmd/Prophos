@@ -25673,8 +25673,12 @@
       actions = istV2Karte ? `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
-        ${p.route === 'tsv2' ? `<button class="btn btn-primary tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>` : jetztBtn}
-        <button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Ohne Puls abschließen — P&L und Trade-Datum von Hand eintragen (z. B. nachtragen, wenn etwas schiefging)">Erledigt</button>` : `
+        ${p.route === 'tsv2'
+          ? `<button class="btn btn-primary tc2-btn" data-plan-start="${p.id}" title="Topstep V2: du hast in TopstepX platziert — Plan als laufend markieren">Läuft</button>`
+          // „Läuft" ohne Puls auch bei Echo V2/Orbit V2 (24.09.2026 abends, Finn: „ich plane manuell, starte manuell oder
+          // mit dem Bot — das automatische Tracken funktioniert am Anfang noch nicht"): keine Baseline, P&L später von Hand.
+          : `<button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Von Hand gestartet — nur als laufend markieren (ohne Puls, ohne Baseline: P&L später von Hand)">Läuft</button> ${jetztBtn}`}
+        <button class="btn btn-ghost tc2-btn" data-plan-complete="${p.id}" title="Direkt abschließen — P&L und Trade-Datum von Hand eintragen (auch aus Geplant)">Erledigt</button>` : `
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-edit="${p.id}" title="Bearbeiten">${svgEdit}</button>
         <button class="btn btn-ghost icon-btn tc2-ab" data-plan-del="${p.id}" title="Löschen">${svgDel}</button>
         <button class="btn btn-ghost tc2-btn" data-plan-start="${p.id}" title="Nur als laufend markieren (ohne Puls)">Läuft</button>
@@ -28402,7 +28406,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.461'
+  const OS_TAB_BUILD = '2026-09-22.462'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35352,6 +35356,9 @@
         // da wird noch der Live-P&L abgefragt, das ist ein Bug"): es gibt keine Auto-Quelle (kein Bot, keine API,
         // keine Baseline) — gar nicht erst „⏳ Auto-PnL…" zeigen und nichts nachladen. P&L kommt von Hand.
         if(plan.route === 'tsv2') return
+        // V2 ohne Baseline (von Hand gestartet oder direkt aus Geplant erledigt, 24.09.2026 abends): es gibt nichts
+        // nachzuladen — kein „⏳ Auto-PnL…", P&L von Hand.
+        if(routeIstV2(plan.route) && !plan.mt5Baseline) return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
         // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).
