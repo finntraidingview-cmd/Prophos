@@ -4611,6 +4611,11 @@ HQ_VORGABEN = {
     # 25.09.2026, Finn: „bei Winning Day … so grob machen: bei Tradeify 250 $ entsprechen so grob 75 €" — die
     # Messung sagt 0,386 €/$ (171 Trades → 250 $ ≙ 97 €); Finns Zahl gilt, die Messung steht im Tooltip daneben.
     "Tradeify|wd": {"ziel_usd": 250.0, "ziel_eur": 75.0},
+    # 25.09.2026 abends, Finn (Topstep Challenge hat keine Hedge-Messung, Mikes Trade fiel auf die globale Quote
+    # 0,55): „Beim ersten Trade sind 4.500 $ da 200 €, beim zweiten Trade 4.500 $ so 450 € — mach genau die Mitte,
+    # der erste Trade kommt zu 100 % vor, der zweite zu 50 %." Gewichteter Schnitt: (200 × 1 + 450 × 0,5) / 1,5
+    # = 366,67 € je 4.500 $ → 0,0815 €/$.
+    "Topstep|challenge": {"ziel_usd": 4500.0, "ziel_eur": 366.67},
 }
 
 

@@ -8169,6 +8169,18 @@
                      schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
                 <div class="kf-abschnitt">Trades <span class="adm-sub" id="adm-kf-trades-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
                 <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
+                <!-- Kosten nach Prop-Firma (25.09.2026 abends, Finn: „da drunter noch einen Chart, wie sich die Kosten aus den
+                     jeweiligen Prop-Firmen ergeben, wie viel, und daraus noch ein paar Charts"): dieselben Trades wie die Liste,
+                     Hedge hypothetisch (€, Quote × Master − Reibung) je Firma, je Firma · Typ und als Verlauf. -->
+                <div class="kf-gruppe" data-kf-gruppe="firma">
+                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Kosten nach Prop-Firma</div><div class="kf-chip-bar" data-kf-chips="firma"></div></div>
+                  <div class="kf-gross">
+                    <div class="kf-chart" data-kf-chart="fS" hidden><div class="kf-titel">Hedge-Kosten je Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fS"></span></div><div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe) = was der Gegenhedge bei dieser Firma gekostet hätte · rechts Master-P&amp;L real ($) · Klick filtert auf die Firma</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fS"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="fT" hidden><div class="kf-titel">Hedge-Kosten je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fT"></span></div><div class="kf-sub">wie links, aufgeteilt nach Challenge / Phase / Funded / Winning Day · Klick filtert auf Firma · Typ</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fT"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="fA" hidden><div class="kf-titel">Ø Hedge je Trade und Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-fA"></span></div><div class="kf-sub">Hedge hypothetisch je Trade (€) im Schnitt · rechts die Quote (€ Hedge je $ Master, aus der Hedge-Ära bzw. Vorgabe) · Klick filtert auf die Firma</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-fA"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="fV" hidden><div class="kf-titel">Verlauf · Hedge-Kosten kumuliert je Firma</div><div class="kf-sub">Hedge hypothetisch, aufsummiert über die Tage des Kapitels, eine Linie je Firma, gestrichelt = alle zusammen · Klick auf Chip oder Linie filtert auf die Firma</div><div class="adm-vl"><canvas id="adm-kf-chart-fV"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-fV"></div></div>
+                  </div>
+                </div>
               </div>
             </div>
         </div>
@@ -11074,6 +11086,55 @@
       admKfHistChart(alle.filter(persOk), f, farbe)
       admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen)
       admKfTradeListe(trades, fx, pick, pers)
+      admKfFirmaCharts(alle.filter(persOk), f, fx, farbe, tage)
+    }
+    /* Kosten nach Prop-Firma (25.09.2026 abends, Finn: „wie sich die Kosten aus den jeweiligen Prop-Firmen ergeben, wie viel,
+     * und daraus noch ein paar Charts"): dieselben Trades wie die Liste (Personen-Filter greift, Sach-Filter nicht — sonst
+     * bliebe nur der gewählte Balken). Vier Sichten: Σ je Firma, Σ je Firma · Typ, Ø je Trade + Quote, Verlauf kumuliert. */
+    function admKfFirmaCharts(rows, f, fx, farbe, tage){
+      const eur = v => admVlSign(v)
+      const gruppe = (wertVon, labelVon) => {
+        const g = new Map()
+        for(const t of rows){
+          const w = wertVon(t)
+          const e = g.get(w) || { key: w, label: labelVon(w), firm: t.master_firm || '—', n: 0, a: 0, b: 0, qs: 0, qn: 0 }
+          e.n++; e.a += admKfHyp(t, fx); e.b += admKapNum(t.master_pl)
+          const q = admKfQ(t); if(q !== null){ e.qs += q; e.qn++ }
+          g.set(w, e)
+        }
+        return [...g.values()].sort((x, y) => x.a - y.a)   // größte Kosten (negativstes Hedge) zuerst
+      }
+      const firmVon = t => t.master_firm || '—'
+      const qVon = t => (t.master_firm || '—') + ' · ' + admKfTyp(t.master_typ)
+      const zeilen = e => [`${e.n} Trade${e.n === 1 ? '' : 's'} · Ø Hedge ${eur(e.a / e.n)} · Ø Master ${admUsdSign(e.b / e.n)}${e.qn ? ` · Quote Ø ${admKfQFmt(e.qs / e.qn)}` : ''}`]
+      const aktivF = f && f.art === 'firm' ? f.wert : '', aktivQ = f && f.art === 'q' ? f.wert : ''
+      const klickF = e => { admKf.filter = (f && f.art === 'firm' && f.wert === e.key) ? null : { art: 'firm', wert: e.key }; admKfRender() }
+      const klickQ = e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() }
+      const cfgAB = { a: { label: 'Hedge hyp. (€)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: admEurKurz },
+                      b: { label: 'Master-P&L real ($)', farbe: (e, on) => (e.b < 0 ? admKfRot : admKfGut) + (on ? 'CC' : '33'), fmt: admUsdSign, kurz: admKfUsdKurz },
+                      tick: e => admKfFirmColor(e.firm), zeilen }
+      // Σ je Firma
+      const cf = gruppe(firmVon, w => w)
+      admKfSumHtml('adm-kf-sum-fS', cf.length ? [['Hedge', cf.reduce((x, e) => x + e.a, 0), admVlSign], ['Master', cf.reduce((x, e) => x + e.b, 0), admUsdSign]] : [])
+      admKfBar('fS', 'adm-kf-cv-fS', cf, { ...cfgAB, horizontal: true, istOn: e => !aktivF || e.key === aktivF, klick: klickF })
+      // Σ je Firma · Typ
+      const cq = gruppe(qVon, w => w)
+      admKfSumHtml('adm-kf-sum-fT', cq.length ? [['Gruppen', cq.length, v => String(v)]] : [])
+      admKfBar('fT', 'adm-kf-cv-fT', cq, { ...cfgAB, horizontal: true, istOn: e => !aktivQ || e.key === aktivQ, klick: klickQ })
+      // Ø je Trade + Quote (b auf eigener Achse, weil €/$ eine andere Größe ist)
+      const ca = cf.map(e => ({ ...e, a: e.a / e.n, b: e.qn ? e.qs / e.qn : 0 })).sort((x, y) => x.a - y.a)
+      admKfSumHtml('adm-kf-sum-fA', ca.length ? [['Ø Hedge', rows.length ? cf.reduce((x, e) => x + e.a, 0) / rows.length : 0, admVlSign]] : [])
+      admKfBar('fA', 'adm-kf-cv-fA', ca, { horizontal: true,
+        a: { label: 'Ø Hedge je Trade (€)', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: admEurKurz },
+        b: { label: 'Quote (€/$)', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: admKfQFmt, kurz: v => admKfDe(v, 2) },
+        tick: e => admKfFirmColor(e.firm), istOn: e => !aktivF || e.key === aktivF, klick: klickF, zeilen })
+      // Verlauf kumuliert je Firma (admVerlauf: Serien = Firmen, Farbe = Firmen-Farbe, gestrichelt = alle)
+      const sm = new Map()
+      for(const t of rows){ if(!t.datum) continue; const w = firmVon(t); const sr = sm.get(w) || { key: w, label: w, events: [] }; sr.events.push({ datum: t.datum, eur: admKfHyp(t, fx) }); sm.set(w, sr) }
+      const serien = [...sm.values()].sort((x, y) => x.label.localeCompare(y.label, 'de'))
+      admVerlauf('kffV', 'adm-kf-chart-fV', 'adm-kf-legend-fV', serien, aktivF, key => klickF({ key }),
+                 { tage, gesamt: true, gesamtFarbe: farbe, farbe: k => admKfFirmColor(k), labelRoh: true,
+                   sub: k => { const e = cf.find(x => x.key === k); return e ? `${e.n} Trades · Ø ${admVlSign(e.a / e.n)}` : '' } })
     }
     /* Chart-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke, sehe ich es"):
      * zwölf Sichten als Chips, genau eine sichtbar. Wechsel zeichnet über admKfRender neu, damit Chart.js die
@@ -11084,7 +11145,8 @@
     const ADM_KF_GRUPPEN = {
       verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
       trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
-      reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real'], ['reibv', 'Verlauf gemessen vs. real']] }
+      reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real'], ['reibv', 'Verlauf gemessen vs. real']],
+      firma:   [['fS', 'Je Firma'], ['fT', 'Je Firma · Typ'], ['fA', 'Ø je Trade'], ['fV', 'Verlauf']] }
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
       for(const [gruppe, liste] of Object.entries(ADM_KF_GRUPPEN)){
@@ -29428,7 +29490,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.499'
+  const OS_TAB_BUILD = '2026-09-22.500'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
