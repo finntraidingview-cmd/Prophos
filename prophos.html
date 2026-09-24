@@ -7911,7 +7911,9 @@
                      Hedge-Staffel, Puls öffnet ihn direkt nach der Order auf Fusion, der Wächter schließt ihn am TP (+ Puffer). -->
                 <label class="wd-schalter"><input type="checkbox" id="wd-hedge-an"><span><b>Fusion-Gegenhedge</b><small>je Konto den Staffel-Betrag als Gegen-Order auf Fusion — zu, sobald NQ den TP erreicht (Notfall-SL 110 % broker-seitig)</small></span></label>
                 <div class="wd-felder drei" id="wd-hedge-felder">
-                  <div class="wd-feld"><label>Puffer über TP (NQ-Pkt)</label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="3" title="so viele Punkte über/unter dem TP-Level, bevor der Hedge geschlossen wird (Finn: „2, 3 Punkte mehr")"></div>
+                  <!-- Puffer in TICKS (25.09.2026, Finn: „8 Ticks über dem Master-TP, TP 31.000 → bei 31.002"); intern bleibt hedge_puffer in Punkten (Ticks × 0,25) -->
+                  <div class="wd-feld"><label>Puffer hinter dem Master-TP (Ticks)</label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="8" title="so viele Ticks (0,25 Pkt) über/unter dem Master-TP, bevor der Wächter die Fusion-Position über den Kurs-Feed schließt — 8 Ticks = 2 Punkte"></div>
+                  <div class="wd-feld"><label>Notfall-SL Fusion (%)</label><input type="number" class="input mono" id="wd-hedge-notfall" min="100" max="200" step="5" value="110" title="Sicherheitsnetz broker-seitig in MetaTrader: Stop am Hedge = Fill ± Master-TP-Distanz × Prozent (alte Logik, 110 %) — greift nur, wenn der Feed-Wächter nicht schließt"></div>
                   <div class="wd-feld" style="grid-column:span 2"><label>&nbsp;</label><div class="kf" id="wd-hedge-kurs" style="padding-top:8px">Kurs-Feed: —</div></div>
                 </div>
                 <div class="wd-felder drei">
@@ -18222,7 +18224,13 @@
    * Hedge-TP: der Hedge endet mit dem Master (Rundgang/Auto-Close) oder am Notfall-SL.
    * Doktrin unverändert: Beweis oder leer — Ticket, Fill, P&L kommen vom Copier (Deal-Historie), nie geschätzt. */
   const HEDGE_KURS_MAX_ALTER_MS = 30000     // Kurs älter als 30 s zählt nicht (Feed weg, Tab verdeckt)
-  const HEDGE_PUFFER_STD = 3               // Finns „2, 3 Punkte mehr"
+  const HEDGE_PUFFER_STD = 2               // 8 Ticks à 0,25 (Finn 25.09.2026: „8 Ticks über dem Master-TP, TP 31.000 → bei 31.002"); vorher 3 Pkt
+  const HEDGE_TICK = 0.25                  // NQ/MNQ-Tick
+  const HEDGE_NOTFALL_STD = 1.10           // Notfall-SL am Fusion-Hedge = 110 % der Master-TP-Distanz (alte Logik, Finns „110 %")
+  const hedgePufferTicks = () => Math.round(hedgePuffer() / HEDGE_TICK)
+  function hedgeNotfallFaktor(){ try{ const v = wdVorplanRegeln().hedge_notfall; return (typeof v === 'number' && isFinite(v) && v >= 1 && v <= 2) ? v : HEDGE_NOTFALL_STD }catch(_){ return HEDGE_NOTFALL_STD } }
+  // Schließ-Level über den Kurs-Feed: Master-TP ± Puffer (BUY-Master: darüber, SELL-Master: darunter)
+  const hedgeSchliesstBei = (richtungMaster, tpLevel, puffer) => (tpLevel > 0) ? (richtungMaster === 'sell' ? tpLevel - puffer : tpLevel + puffer) : null
   // Zahl aus einem TradingView-Titel/Feld — dieselbe Regel wie tv_snapshot.parse_de_zahl: stehen beide Trenner
   // drin, ist der LETZTE das Dezimalzeichen; reine Dreiergruppen sind Tausender; sonst ist der einzige Trenner
   // das Dezimalzeichen. „30,448.25" → 30448.25 · „29.491,75" → 29491.75 · „30,448" → 30448 · „30448.5" → 30448.5
@@ -18317,17 +18325,23 @@
       // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
       const lotsSoll = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
       res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
+        // notfall_faktor (Backend .512, Finn: „Notfall-Stop-Loss bei 110 % vom Master-TP wie in der alten Logik"): SL am Hedge =
+        // fill ± tp_punkte × 1,10 (nie näher als tp_punkte + 1 Pkt); das eigentliche Schließen macht der Feed-Wächter bei TP + 8 Ticks.
+        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), notfall_faktor: hedgeNotfallFaktor(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
       if(res && res.ok && lotsSoll) res.lots_soll = lotsSoll
     }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
     if(res && res.ok){
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
+        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktor(), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: hedgePuffer(),
+        schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer()),   // Feed-Wächter schließt hier (TP ± 8 Ticks)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
       const f = v => Number(v).toLocaleString('de-DE')
-      const levelText = res.sl ? ` · Level in MetaTrader: ${f(res.sl)} (Master-TP + ${hedgePuffer()} Pkt)${res.tp ? ` / ${f(res.tp)} (Master-SL)` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
-                                : ' · ⚠ KEIN Schließ-Level gesetzt (' + (res.sl_fehler || '?') + ')'
+      const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer())
+      const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
+        + (res.sl ? ` · Notfall-SL Fusion ${f(res.sl)} (${Math.round((res.notfall_faktor || hedgeNotfallFaktor()) * 100)} %)${res.tp ? ` / Master-SL-Level ${f(res.tp)}` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
+                  : ' · ⚠ KEIN Notfall-SL gesetzt (' + (res.sl_fehler || '?') + ')')
       if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${f(res.lots)} Lot NAS100 @ ${f(res.fill)}${levelText}`, 'start')
       return h
     }
@@ -18341,7 +18355,8 @@
   // es vertauscht): level_tp = Master hat seinen TP erreicht (die Fusion-Gegenposition ist am SL gefüllt), level_sl = Master
   // am SL (Fusion am TP); dazu hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470. Unbekanntes als Rohtext.
   function hedgeGrundText(g){
-    return g === 'level_tp' ? 'Master-TP erreicht (Fusion-SL gefüllt)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP gefüllt)'
+    return g === 'tp_feed' ? 'am Master-TP über den Kurs-Feed geschlossen' : g === 'sl_feed' ? 'am Master-SL über den Kurs-Feed geschlossen'
+      : g === 'level_tp' ? 'Notfall-SL gefüllt (Master-TP erreicht, Fusion-SL im Terminal)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP im Terminal gefüllt)'
       : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
       : g === 'stopout' ? 'Stop-out durch den Broker' : g === 'close' ? 'Close-Auftrag' : g === 'tp' ? 'TP erreicht' : g === 'unbekannt' ? 'Grund unbekannt' : (g || '?')
   }
@@ -18441,6 +18456,37 @@
     }catch(_){}
     finally{ _hedgeBusy.delete(pid) }
   }
+  // REIN RECHNEND (testbar über window._hedgeFeedEntscheid): Schließ-Entscheid über den Kurs-Feed (Finn 25.09.2026: „Der Bot
+  // soll die Fusion-Position schließen, wenn der Preis 8 Ticks über dem Master-TP ist"). BUY-Master: Kurs ≥ TP + Puffer → 'tp_feed',
+  // Kurs ≤ SL → 'sl_feed'; SELL-Master spiegelbildlich. Ohne Kurs, ohne Level oder ohne Richtung → nichts (nie raten).
+  function hedgeFeedEntscheid(richtungMaster, kurs, tpLevel, slLevel, puffer){
+    if(!(kurs > 0) || !(richtungMaster === 'buy' || richtungMaster === 'sell')) return null
+    const p = (typeof puffer === 'number' && isFinite(puffer) && puffer >= 0) ? puffer : 0
+    if(richtungMaster === 'buy'){
+      if(tpLevel > 0 && kurs >= tpLevel + p) return 'tp_feed'
+      if(slLevel > 0 && kurs <= slLevel) return 'sl_feed'
+    } else {
+      if(tpLevel > 0 && kurs <= tpLevel - p) return 'tp_feed'
+      if(slLevel > 0 && kurs >= slLevel) return 'sl_feed'
+    }
+    return null
+  }
+  window._hedgeFeedEntscheid = hedgeFeedEntscheid
+  // Aktueller Kurs für den Wächter: zuerst der lokale Reader dieses PCs (GET /positions → kurse[wurzel], ≤ 5 s, nicht stale),
+  // sonst tv_kurse über Realtime/Poll (mkl.kursJe, ≤ 5 s), sonst die Cloud-Abfrage (≤ 5 s). null = kein Beweis → nichts tun.
+  async function hedgeKursAktuell(wurzel){
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ'
+    try{
+      if(typeof epLokal !== 'undefined' && epLokal && epLokal.stand && Date.now() - (epLokal.ab || 0) <= 5000){
+        const q = epLokal.stand.kurse && epLokal.stand.kurse[w]
+        const pr = q && !q.stale ? (Number(q.preis) || Number(q.lp) || 0) : 0
+        if(pr > 0) return pr
+      }
+    }catch(_){}
+    try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[w] : null; if(k && k.alter_ms <= 5000 && k.preis > 0) return k.preis }catch(_){}
+    try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) return k.preis }catch(_){}
+    return null
+  }
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
     if(_hedgeWacheBusy) return
@@ -18473,6 +18519,14 @@
         }
         if(h.status !== 'offen') continue
         if(p.status !== 'open'){ await hedgeSoloSchliessen(p, 'master_ende'); continue }
+        // ERSTE LINIE (Finn 25.09.2026, 1-s-Takt): Schließen über den Kurs-Feed — Master-TP + 8 Ticks bzw. Master-SL erreicht.
+        // Ring-/Position-weg-Abgleich unten bleibt die zweite Linie (= Notfall-Level im Terminal hat gefüllt).
+        {
+          const wz = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
+          const kurs = await hedgeKursAktuell(wz === 'MNQ' ? 'MNQ' : 'NQ')
+          const ent = hedgeFeedEntscheid(p.richtung, kurs, Number(h.tp_level_nq) || 0, Number(h.sl_level_nq) || 0, hedgePuffer())
+          if(ent){ await hedgeSoloSchliessen(p, ent, kurs); continue }
+        }
         // Position im Terminal weg (Schließ-Level gefüllt oder von Hand zu) — erst 20 s nach dem Open, damit ein
         // Status von VOR dem Open nicht als „weg" durchgeht; hedgeSoloSchliessen bekommt dann schon_zu + P&L
         if(liste && !liste.some(q => q && Number(q.ticket) === Number(h.ticket))
@@ -18481,7 +18535,7 @@
     }catch(e){ console.warn('[hedgeWache]', e) }
     finally{ _hedgeWacheBusy = false }
   }
-  setInterval(hedgeWacheTick, 5000)
+  setInterval(hedgeWacheTick, 1000)   // 1 s (25.09.2026): der Feed-Entscheid soll den Tick nicht verpassen; ohne Hedge kehrt der Tick sofort um
   // Live-P&L der Solo-Position: am PC aus dem Panel (mtcInstances → status.hedge_solo), am Mac aus mt5_live
   // (window._mt5CloudRows, 5-s-Push der PCs, frisch ≤ 25 s). null = kein frischer Beweis.
   function hedgeSoloLive(ticket){
@@ -18508,8 +18562,15 @@
       // Beide Level (Vertrag .470): sl = am Master-TP, tp = am Master-SL. Fehlt das zweite, obwohl der Plan einen SL hat
       // (tp_fehler), steht das Warnzeichen sichtbar im Chip — nicht nur im Tooltip.
       const f = v => Number(v).toLocaleString('de-DE')
+<<<<<<< Updated upstream
       const lvl = h.sl > 0 ? ` · zu bei ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Level'
       const box = (inner, bg, title) => `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
+=======
+      // Anzeige (25.09.2026): Schließ-Level über den Kurs-Feed (Master-TP ± 8 Ticks) zuerst, das Notfall-Netz im Terminal dahinter
+      const sbNq = h.schliesst_bei_nq > 0 ? Number(h.schliesst_bei_nq) : hedgeSchliesstBei(p.richtung, Number(h.tp_level_nq) || 0, (typeof h.puffer_punkte === 'number') ? h.puffer_punkte : hedgePuffer())
+      const lvl = (sbNq > 0 ? ` · schließt bei NQ ${f(sbNq)}` : ' · ⚠ kein NQ-Level') + (h.sl > 0 ? ` · Notfall ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Notfall-SL')
+      const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
+>>>>>>> Stashed changes
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
@@ -18931,7 +18992,7 @@
     finally{ mkl.busy = false }
   }
   // Stub ohne Login (Muster _admKapStub): window._mklStub({kurs, kerzen, orders}) zeichnet die View mit Testdaten
-  window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+  window._mklStub = d => { mkl.stub = d; mkl.kursAlt = d.kurs; mkl.kurs = d.kurs && d.kurs.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? d.kurs : null; mkl.kursJe = d.kurs && d.kurs.wurzel ? { [d.kurs.wurzel]: d.kurs } : {}; mkl.kerzen = d.kerzen || []; mkl.orders = d.orders || []; mklKopf(); mklChartZeichnen(); mklOrdersRender() }
   // Verdrahtung: Spanne, Richtung, Instrument, Platzieren — jeweils eigene Handler
   // 1 h / 4 h / 24 h (25.09.2026): nur der sichtbare Bereich — die Daten sind immer die vollen 24 h 1-Minuten-Kerzen
   document.querySelectorAll('#mkl-span [data-mkl-span]').forEach(b => b.addEventListener('click', () => {
@@ -19068,7 +19129,8 @@
     const pl = mkl.wd.plaene || []
     if(!pl.length && !mkl.wd.fehler){ el.style.display = 'none'; return }
     el.style.display = ''
-    const kurs = (mkl.kursJe && (mkl.kursJe.NQ || mkl.kursJe.MNQ)) || null   // NQ/MNQ preisgleich — irgendein frischer Kurs
+    // NQ/MNQ preisgleich — irgendein frischer Kurs: je Wurzel aus tv_kurse (mkl.kursJe, Realtime/Poll), sonst der Kopf-Kurs (mkl.kurs)
+    const kurs = (mkl.kursJe && (mkl.kursJe[mkl.wurzel] || mkl.kursJe.NQ || mkl.kursJe.MNQ)) || mkl.kurs || null
     const kp = (kurs && kurs.alter_ms <= 10000) ? kurs.preis : null
     const f2 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const f0 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
@@ -19076,8 +19138,11 @@
     const alter = t => { if(!t) return ''; const sek = Math.round((Date.now() - (Date.parse(t) || 0)) / 1000); return sek < 90 ? `vor ${sek} s` : sek < 5400 ? `vor ${Math.round(sek / 60)} min` : `vor ${(sek / 3600).toFixed(1)} h` }
     const zeilen = pl.map(pw => {
       const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', buy = pw.richtung === 'buy'
-      const abstand = (kp != null && Number(pw.tp_level_nq) > 0) ? (buy ? Number(pw.tp_level_nq) - kp : kp - Number(pw.tp_level_nq)) : null
-      const status = offen ? `läuft seit ${uhr(pw.started_at)}` : geplant ? `geplant ${pw.start_um ? uhr(pw.start_um) : '–'}` : `zu${pw.grund ? ' · ' + escapeHtml(String(pw.grund)) : ''}${pw.ended_at ? ' · ' + uhr(pw.ended_at) : ''}`
+      const abstand = (offen && kp != null && Number(pw.tp_level_nq) > 0) ? (buy ? Number(pw.tp_level_nq) - kp : kp - Number(pw.tp_level_nq)) : null   // nur laufende Pläne
+      // Lesbarer Master-Ende-Grund (Koordination 25.09.2026: kein Rohwert „close"); Hedge-Grund über hedgeGrundText
+      const grundTxt = { close: 'Schließen', rundgang: 'Rundgang', auto_close: 'Auto-Close', erledigt: 'Erledigt', tp: 'TP', sl: 'SL', hand: 'von Hand', master_ende: 'Master beendet' }[String(pw.grund || '')] || (pw.grund ? String(pw.grund) : '')
+      const hedgeZu = (pw.hedge && pw.hedge.status === 'geschlossen' && typeof hedgeGrundText === 'function') ? ` · Fusion: ${hedgeGrundText(pw.hedge.grund)}` : ''
+      const status = offen ? `läuft seit ${uhr(pw.started_at)}` : geplant ? `geplant ${pw.start_um ? uhr(pw.start_um) : '–'}` : `zu${grundTxt ? ' · ' + escapeHtml(grundTxt) : ''}${pw.ended_at ? ' · ' + uhr(pw.ended_at) : ''}${escapeHtml(hedgeZu)}`
       const mplW = pw.master_pl && pw.master_pl.wert != null ? Number(pw.master_pl.wert) : null
       const mpl = mplW != null ? `<b style="color:${mplW >= 0 ? '#15803d' : '#b91c1c'}">${mplW >= 0 ? '+' : '−'}${f2(Math.abs(mplW))} $</b> <span style="color:var(--sub-2);font-size:10.5px">${alter(pw.master_pl.at)}</span>` : '<span style="color:var(--sub-2)">P&L –</span>'
       const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: pw.hedge ? { hedge: pw.hedge } : null }) : ''
@@ -29474,7 +29539,7 @@
             }catch(_){}
           }
           hi.value = vorschlag
-          if(hh) hh.textContent = quelle ? `${quelle} · +${(typeof hedgePuffer === 'function') ? hedgePuffer() : 3} Pkt Puffer` : ''
+          if(hh) hh.textContent = quelle ? `${quelle} · schließt bei Master-TP ± ${(typeof hedgePufferTicks === 'function') ? hedgePufferTicks() : 8} Ticks (Kurs-Feed) · Notfall-SL ${Math.round(((typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : 1.1) * 100)} %` : ''
         }
       }
     }catch(_){}
@@ -29779,7 +29844,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.514'
+  const OS_TAB_BUILD = '2026-09-22.515'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34486,7 +34551,8 @@
     // hedge_an / hedge_puffer (24.09.2026 abends): Fusion-Gegenhedge für Farmer-Pläne (Betrag = Staffel), Puffer in
     // NQ-Punkten über dem TP-Level, bevor der Wächter schließt. Steht bewusst AUS, bis Finn ihn einschaltet.
     return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE,
-             hedge_an: !!v.hedge_an, hedge_puffer: (typeof v.hedge_puffer === 'number' && isFinite(v.hedge_puffer) && v.hedge_puffer >= 0) ? v.hedge_puffer : 3 }
+             hedge_an: !!v.hedge_an, hedge_puffer: (typeof v.hedge_puffer === 'number' && isFinite(v.hedge_puffer) && v.hedge_puffer >= 0) ? v.hedge_puffer : 2,   // Standard 8 Ticks = 2 Pkt (25.09.2026); gespeicherte 3 bleiben (12 Ticks)
+             hedge_notfall: (typeof v.hedge_notfall === 'number' && isFinite(v.hedge_notfall) && v.hedge_notfall >= 1 && v.hedge_notfall <= 2) ? v.hedge_notfall : 1.10 }
   }
   // Kontrakte je Firma als Spanne (Finn 23.09.2026: „bei jeder Prop unterschiedlich, von 3 bis 5 — genau wie
   // den TP"): regeln.kt = { tradeify: [von, bis], … }; fehlt die Firma, gilt die Standard-Zahl (Ablauf → Kontrakte).
@@ -35135,7 +35201,8 @@
     if(g('wd-kt')) g('wd-kt').value = vp.kt
     // Fusion-Gegenhedge (24.09.2026 abends) + Frische des Kurs-Feeds (tv_kurse) als Zeile
     if(g('wd-hedge-an')) g('wd-hedge-an').checked = !!vp.hedge_an
-    if(g('wd-hedge-puffer')) g('wd-hedge-puffer').value = vp.hedge_puffer
+    if(g('wd-hedge-puffer')) g('wd-hedge-puffer').value = Math.round((Number(vp.hedge_puffer) || 0) / HEDGE_TICK)   // Punkte → Ticks (bestehende 3 Pkt = 12 Ticks)
+    if(g('wd-hedge-notfall')) g('wd-hedge-notfall').value = Math.round((Number(vp.hedge_notfall) || HEDGE_NOTFALL_STD) * 100)
     if(g('wd-staffel-card')) g('wd-staffel-card').hidden = !vp.hedge_an && (typeof admOhneHedge === 'function' ? admOhneHedge() : false)
     if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${k.pc}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
     wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
@@ -35156,9 +35223,11 @@
     const instr = document.getElementById('wd-instr')?.value === 'nq' ? 'nq' : 'mnq'
     // Fusion-Gegenhedge (24.09.2026 abends): Schalter + Puffer wandern mit in vorplan
     const hedgeAn = !!document.getElementById('wd-hedge-an')?.checked
-    const hp = parseFloat(document.getElementById('wd-hedge-puffer')?.value)
+    const hpTicks = parseFloat(document.getElementById('wd-hedge-puffer')?.value)   // Feld in Ticks (25.09.2026), gespeichert in Punkten
+    const hnPct = parseFloat(document.getElementById('wd-hedge-notfall')?.value)   // Notfall-SL in Prozent, gespeichert als Faktor
     await wdVorplanRegelnSpeichern({ instr, kt: Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1)), regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, kt, staffel, staffelFirma },
-                                     hedge_an: hedgeAn, hedge_puffer: (isFinite(hp) && hp >= 0) ? Math.round(hp * 10) / 10 : 3 })
+                                     hedge_an: hedgeAn, hedge_puffer: (isFinite(hpTicks) && hpTicks >= 0) ? Math.round(hpTicks) * HEDGE_TICK : HEDGE_PUFFER_STD,
+                                     hedge_notfall: (isFinite(hnPct) && hnPct >= 100 && hnPct <= 200) ? Math.round(hnPct) / 100 : HEDGE_NOTFALL_STD })
     // Beim Auto-Speichern nichts neu bauen, solange ein Feld den Fokus hat — sonst springt der Cursor raus
     if(!auto || !document.querySelector('#adm-pane-wd .wd-set-grid :focus')){ wdRegelnInsFormular(); wdRender() } else { wdFirmenZaehlen(); wdStaffelChips() }
     wdGespeichertZeigen(['wdHedgeSave', 'wdHedgeSave2'])

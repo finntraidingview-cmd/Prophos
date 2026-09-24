@@ -200,6 +200,110 @@
         "5157"
       ],
       "port": 5157
+    },
+    {
+      "name": "scratch-charts",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5163",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/18cb4603-423b-4707-9528-8a8cf23234be/scratchpad"
+      ],
+      "port": 5163
+    },
+    {
+      "name": "scratch-vl",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5167",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/4818867f-1f17-4140-99ce-1fc32bbf8325/scratchpad"
+      ],
+      "port": 5167
+    },
+    {
+      "name": "prophos-static-check-19",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5171"
+      ],
+      "port": 5171
+    },
+    {
+      "name": "scratch-kf",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5177",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/caf95578-16b5-4a8a-8bf2-428dc8a55aef/scratchpad"
+      ],
+      "port": 5177
+    },
+    {
+      "name": "coord-473",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5183",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/c5bcf295-7c9d-4929-9227-f556b27a3e22/scratchpad/www"
+      ],
+      "port": 5183
+    },
+    {
+      "name": "prophos-static-check-20",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5191"
+      ],
+      "port": 5191
+    },
+    {
+      "name": "wt-topstep",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5197",
+        "-d",
+        "/private/tmp/prophos-wt-topstep"
+      ],
+      "port": 5197
+    },
+    {
+      "name": "scratch-reibung",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5197",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/fedef978-6e06-4060-b82e-2eb57962b7d5/scratchpad"
+      ],
+      "port": 5197
+    },
+    {
+      "name": "scratch-design",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5193",
+        "-d",
+        "/private/tmp/claude-501/-Applications-Prophos/1f23468b-093f-47fb-bb0d-0cc6db2e7099/scratchpad"
+      ],
+      "port": 5193
     }
   ]
 }
