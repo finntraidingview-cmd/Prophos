@@ -29371,7 +29371,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.492'
+  const OS_TAB_BUILD = '2026-09-22.493'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32210,10 +32210,11 @@
               if(!tpFirmIstFutures(a.firm)) return false
               if(!String(a.externalId || '').trim()) return false
             }
-            // Topstep V2 (24.09.2026 abends, Finn: „nur die Topstep-Accounts, die mit der External ID verknüpft sind —
-            // müssen nicht mit der Topstep-API verknüpft sein"): Firma Topstep + External ID, sonst nichts.
-            // Die External ID ist die Kennung, an der später ggf. Puls das Konto erkennt — heute nur Planung von Hand.
-            if(_tpRoute === 'tsv2' && role === 'master' && !(/topstep/i.test(String(a.firm || '')) && String(a.externalId || '').trim())) return false
+            // Topstep V2 (24.09.2026 abends): Master = jedes aktive Konto der Firma Topstep — OHNE External-ID-Pflicht
+            // (Finn 25.09.2026: „alle Accounts angezeigt werden, die ich bei Topstep habe, nicht nur die, die irgendwie
+            // die External ID haben oder verknüpft sind … aktuell nur Accounts mit ID — ist ein Bug"). Archivierte
+            // fallen schon oben raus; Planung ist Handarbeit, es gibt keinen Bot, der eine Kennung bräuchte.
+            if(_tpRoute === 'tsv2' && role === 'master' && !/topstep/i.test(String(a.firm || ''))) return false
             // Winning Day (24.09.2026 abends): nur Funded/Live-Konten bei Futures-Firmen mit External ID
             if(_tpRoute === 'tvv2' && _tpWd && role === 'master'
                && !(tpFirmIstFutures(a.firm) && typeof tpVorplanIstFunded === 'function' && tpVorplanIstFunded(a) && String(a.externalId || '').trim())) return false
@@ -32319,7 +32320,7 @@
         html += orbitSlaveStreng
           ? (_dupSlaveIds ? '<option value="" disabled>(Kein Duplikum-Slave — Accounts → Duplikum verknüpfen)</option>'
                           : '<option value="" disabled>(Duplikum-Kontoliste nicht geladen — Accounts → Duplikum verbinden)</option>')
-          : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein Topstep-Konto mit External ID — bei Accounts die External ID eintragen)</option>'
+          : _tpRoute === 'tsv2' ? '<option value="" disabled>(Kein aktives Topstep-Konto — bei Accounts eines mit Firma Topstep anlegen)</option>'
           : '<option value="" disabled>(Keine Accounts mit diesen Filtern)</option>'
       } else if(groups.length === 1){
         // Nur eine Firma → keine Gruppe nötig, flache Liste
