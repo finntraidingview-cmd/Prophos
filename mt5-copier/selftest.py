@@ -552,6 +552,20 @@ def main():
     chk("ORDER-BOT (Spur): Inventar unter der Reiterzeile nennt Typ, Name und Rechteck",
         _inv.startswith("ComboBox:Einheiten@1510,300,1600,322 | ComboBox:Ø USD Risiko@") and _inv.count("|") == 3
         and "Kauf 30" not in _inv)
+    # Zuruecklesen mit Nachlesen (25.09.2026, pc-8jcrsm: 'Stop loss: im Feld steht '?' statt 250.0')
+    def _folge(werte):
+        it = iter(werte)
+        return lambda: next(it, None)
+    _pausen = []
+    _w = lambda: _pausen.append(1)
+    r1 = order_bot.tv_wert_nachlesen(_folge([None, 250.0]), 250.0, _w)
+    r2 = order_bot.tv_wert_nachlesen(_folge([25.0, 25.0, 250.0]), 250.0, _w)
+    r3 = order_bot.tv_wert_nachlesen(_folge([25.0, None, 25.0]), 250.0, _w)
+    r4 = order_bot.tv_wert_nachlesen(_folge([None, None, None]), 250.0, _w)
+    r5 = order_bot.tv_wert_nachlesen(_folge([250.004]), 250.0, _w)
+    chk("ORDER-BOT: Zuruecklesen — Feld kurz weg (None) → 2. Lesung ok; abgeschnitten '25' → bis 3 Lesungen; nie mehr als 3",
+        r1 == (True, 250.0, 2) and r2 == (True, 250.0, 3) and r3 == (False, 25.0, 3) and r4 == (False, None, 3)
+        and r5[0] is True and r5[2] == 1 and len(_pausen) == 1 + 2 + 2 + 2)
     # Ruecklese-Vergleich (18.08.2026, Feld zeigte '2', MT5 rechnete 0.01):
     # als Zahl vergleichen, MT5-Umformatierung und Locale duerfen nicht stoeren
     chk("ORDER-BOT: Ruecklese-Vergleich als Zahl (Umformatierung/Locale egal)",
@@ -1724,6 +1738,7 @@ def main():
     results.append(test_solo_level_und_grund())
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
+    results.append(test_hedge_bereit())
 
     print()
     ok = sum(1 for r in results if r)
@@ -1889,6 +1904,45 @@ def test_solo_plan_kennung():
         print(f"✗ Kennung im Abschluss-Ring: {ring}"); ok = False
     if ok:
         print("✓ Solo-Plan-Kennung: Kommentar PXsolo:<plan8> (≤ 31), Parsen mit/ohne Kennung, Kennung im Abschluss-Ring")
+    return ok
+
+
+def test_hedge_bereit():
+    """Neustart-Sperre 'Start steht bevor' (25.09.2026): Copier liest Restzeit, Panel setzt/verlaengert nie kuerzer."""
+    import copier, json, os, tempfile, time
+    ok = True
+    d = tempfile.mkdtemp()
+    pfad = os.path.join(d, copier.HEDGE_BEREIT)
+    if copier.hedge_bereit_rest(pfad, 1000.0) != 0.0:
+        print("✗ ohne Datei muss 0 sein"); ok = False
+    for inhalt, jetzt, soll in (({"bis": 1180.0}, 1000.0, 180.0), ({"bis": 900.0}, 1000.0, 0.0),
+                                ({"bis": 1e12}, 1000.0, 900.0), ({"bis": "kaputt"}, 1000.0, 0.0), ([1, 2], 1000.0, 0.0)):
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(inhalt, f)
+        if copier.hedge_bereit_rest(pfad, jetzt) != soll:
+            print(f"✗ hedge_bereit_rest({inhalt}) = {copier.hedge_bereit_rest(pfad, jetzt)}, soll {soll}"); ok = False
+    with open(pfad, "w", encoding="utf-8") as f:
+        f.write("{kein json")
+    if copier.hedge_bereit_rest(pfad, 1000.0) != 0.0:
+        print("✗ kaputtes JSON muss 0 sein"); ok = False
+    # Panel-Seite: setzen, nie verkuerzen, Deckel 900 s
+    import panel
+    alt_here = panel.HERE
+    try:
+        panel.HERE = d
+        os.remove(pfad)
+        t0 = time.time()
+        b1 = panel.hedge_bereit_setzen(180, "tv-order MNQZ6")
+        b2 = panel.hedge_bereit_setzen(30, "kurz")          # darf nicht verkuerzen
+        b3 = panel.hedge_bereit_setzen(5000, "zu lang")     # Deckel 900
+        gel = json.load(open(pfad, encoding="utf-8"))
+        if not (170 <= b1 - t0 <= 190 and b2 == b1 and 890 <= b3 - t0 <= 910 and gel["grund"] == "zu lang"
+                and 890 <= copier.hedge_bereit_rest(pfad, time.time()) <= 900):
+            print(f"✗ hedge_bereit_setzen: {b1 - t0:.0f}/{b2 - t0:.0f}/{b3 - t0:.0f} {gel}"); ok = False
+    finally:
+        panel.HERE = alt_here
+    if ok:
+        print("✓ Neustart-Sperre 'Start steht bevor': Restzeit, abgelaufen/kaputt = 0, Deckel 900 s, Panel verkuerzt nie")
     return ok
 
 

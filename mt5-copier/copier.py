@@ -551,6 +551,20 @@ FAMILIE_MAX = 779999
 # schreibt hedge_solo_auftrag.json, der Copier arbeitet pro Tick ab und legt das
 # Ergebnis in hedge_solo_ergebnis.json — EIN Prozess am Hedge-Terminal, wie
 # README.md verlangt (zwei Python-Prozesse am selben Terminal sind nicht stabil).
+HEDGE_BEREIT = "hedge_bereit.json"   # Neustart-Sperre „Start steht bevor" (Panel schreibt, 25.09.2026)
+
+
+def hedge_bereit_rest(pfad, jetzt):
+    """REIN RECHNEND bis auf das Lesen (testbar): Sekunden, die die Sperre noch gilt (0 = keine/abgelaufen/
+    kaputt). Hoechstens 900 s — eine Uhr-Verschiebung oder ein Tippfehler legt den Update-Weg nie dauerhaft lahm."""
+    try:
+        d = load_json(pfad)
+        rest = float((d or {}).get("bis") or 0) - float(jetzt)
+    except (FileNotFoundError, ValueError, OSError, TypeError, AttributeError, json.JSONDecodeError):
+        return 0.0
+    return max(0.0, min(900.0, rest))
+
+
 SOLO_MAGIC = 790001
 SOLO_KOMMENTAR = "PXsolo"
 SOLO_KOMMENTAR_MAX = 31    # MT5: Order-Kommentar hoechstens 31 Zeichen
@@ -1970,6 +1984,11 @@ def main():
             rv = _REMOTE_VERSION["v"]
             if my_version and rv and rv != my_version and _REMOTE_VERSION.get("neustart", True):
                 busy = [m.file for m in masters if getattr(m, "busy", False)]
+                # „Start steht bevor" (25.09.2026): nach einem Puls-Start folgt der Hedge-Open — so lange
+                # kein Neustart, sonst trifft der Open auf 'copier_alt' (Finns Test pc-8jcrsm 20:51:14)
+                _bereit = hedge_bereit_rest(os.path.join(here, HEDGE_BEREIT), time.time())
+                if _bereit > 0:
+                    busy.append(f"Start steht bevor (noch {int(_bereit)} s)")
                 if not busy:
                     log(f"↻ Update {my_version} → {rv} — alle Master flach, starte neu "
                         f"(start-copier.bat laedt die neuen Dateien).")

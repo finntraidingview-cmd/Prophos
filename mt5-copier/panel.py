@@ -2639,6 +2639,10 @@ class Handler(BaseHTTPRequestHandler):
                    "probe": bool(body.get("probe"))}
             if not SYMBOL_RE.fullmatch(cmd["symbol"] or ""):
                 return self._send(400, json.dumps({"ok": False, "msg": "Symbol ungueltig"}))
+            # Neustart-Sperre (25.09.2026): nach einem echten Puls-Start folgt der Hedge-Open —
+            # 3 min kein Copier-Update-Neustart, damit er einen frischen Copier vorfindet
+            if not cmd["probe"]:
+                hedge_bereit_setzen(180, f"tv-order {cmd['symbol']}")
 
             # Hedge-Riegel, das Gegenstueck zum Frische-Check von master-order:
             # ohne laufende Orbit-Copier-Instanz bliebe die Futures-Position
@@ -2741,9 +2745,15 @@ class Handler(BaseHTTPRequestHandler):
                 e = alle.get(cid) if cid else None
                 return self._send(200, json.dumps(e or {"ok": False, "code": "offen", "retry_ok": False,
                     "msg": "noch keine Quittung vom Copier"}, ensure_ascii=False))
+            if aktion == "bereit":
+                # Start steht bevor (z. B. geplanter Winning Day in den naechsten Minuten): Copier-Update-
+                # Neustart so lange vertagen. {aktion:'bereit', sekunden (Standard 180, max. 900), grund?}
+                bis = hedge_bereit_setzen(body.get("sekunden") if body.get("sekunden") is not None else 180,
+                                          str(body.get("grund") or "frontend")[:60])
+                return self._send(200, json.dumps({"ok": True, "bis": bis, "rest_s": round(bis - time.time(), 1)}))
             if aktion not in ("open", "close"):
                 return self._send(400, json.dumps({"ok": False, "code": "befehl",
-                    "msg": "aktion muss open/close/ergebnis sein"}, ensure_ascii=False))
+                    "msg": "aktion muss open/close/ergebnis/bereit sein"}, ensure_ascii=False))
             auftrag = {"cmd_id": f"{int(time.time())}-{random.randrange(10**6):06d}", "at": time.time(), "aktion": aktion}
             if aktion == "open":
                 richtung = str(body.get("richtung") or "").strip().lower()
@@ -3353,6 +3363,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass  # eigenes, ruhigeres Logging oben
+
+
+# ── Neustart-Sperre „Start steht bevor" (25.09.2026, Finns Test auf pc-8jcrsm: der Hedge-Open um 20:51:14
+# bekam 'copier_alt', weil der Copier gerade per Selbst-Update neu startete — zwischen Puls-Start und Hedge-Open
+# liegen bis zu ~1 min, und in diesem Fenster hielt nichts den Neustart auf; eine offene Solo-Position tut es
+# erst NACH dem Open). Jeder echte Puls-Start (/api/tv-order ohne probe) und POST /api/hedge-solo
+# {aktion:'bereit', sekunden} schreibt hedge_bereit.json {bis, grund, at}; der Copier behandelt ein
+# 'bis' in der Zukunft wie einen belegten Master und vertagt den Update-Neustart. Hoechstens 15 min.
+HEDGE_BEREIT = "hedge_bereit.json"
+
+
+def hedge_bereit_setzen(sekunden, grund):
+    """Sperre bis jetzt + sekunden setzen (nie verkuerzen, max. 900 s). -> bis (Unix-Sekunden)."""
+    pfad = os.path.join(HERE, HEDGE_BEREIT)
+    try:
+        sek = max(0.0, min(900.0, float(sekunden)))
+    except (TypeError, ValueError):
+        sek = 180.0
+    alt = read_json(pfad, {}) or {}
+    try:
+        alt_bis = float(alt.get("bis") or 0)
+    except (TypeError, ValueError):
+        alt_bis = 0.0
+    bis = max(alt_bis, time.time() + sek)
+    try:
+        tmp = pfad + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"bis": bis, "grund": str(grund or "")[:60], "at": time.time()}, f)
+        os.replace(tmp, pfad)
+    except OSError as e:
+        print(f"[panel] {HEDGE_BEREIT} nicht geschrieben: {type(e).__name__}: {e}", flush=True)
+    return bis
 
 
 # ── Selbst-Update wie im Copier (15.08.2026): neue VERSION auf GitHub → Neustart

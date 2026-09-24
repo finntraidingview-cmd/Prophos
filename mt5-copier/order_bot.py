@@ -4388,6 +4388,26 @@ def tv_panel_inventar(roh, bereich, max_n=10):
     return " | ".join(out) or "nichts unter der Reiterzeile"
 
 
+def tv_wert_nachlesen(lesen, soll, warten, versuche=3, toleranz=0.005):
+    """Getippten Wert zuruecklesen, mit Nachlesen statt sofortigem Abbruch (25.09.2026, Finns Lauf auf
+    pc-8jcrsm: 'Stop loss: im Feld steht '?' statt 250.0' — direkt nach dem Tippen baut TradingView die
+    Zeile neu auf, fuer einen Moment steht unter der Beschriftung GAR KEIN Eingabefeld (das '?'); der zweite
+    Versuch eine Minute spaeter lief durch). lesen() -> Zahl | None (None = Feld nicht da/Wert unlesbar),
+    warten() = Pause mit Streuung (_warte). Bis zu `versuche` Lesungen, dazwischen warten.
+    -> (ok, ist, n_lesungen)   ist = letzte lesbare Zahl oder None"""
+    ist, n = None, 0
+    for i in range(max(1, int(versuche))):
+        if i:
+            warten()
+        n += 1
+        wert = lesen()
+        if wert is not None:
+            ist = wert
+            if abs(float(wert) - float(soll)) <= toleranz:
+                return True, wert, n
+    return False, ist, n
+
+
 def tv_order_plan(cmd):
     """Befehl -> (plan, fehler). plan = {'richtung','menge','tp','sl'}; tp/sl None = aus."""
     r = str(cmd.get("richtung") or "").strip().lower()
@@ -4858,15 +4878,42 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         keyboard.send_keys("{TAB}")
         _warte(0.3, 0.15)
 
+    def pruefe_wert(muster, name, lab, soll, feld_vorher):
+        """Zuruecklesen mit Nachlesen (bis 3 Lesungen, dazwischen 0,3–0,6 s) und EINEM zweiten Tippversuch,
+        wenn danach ein lesbarer, aber falscher Wert steht (z. B. '25' statt '250' — abgeschnittene Eingabe).
+        Steht gar kein Feld da, wird nicht erneut getippt (wohin auch). -> (ok, ist)"""
+        stand = {"feld": feld_vorher}
+
+        def lesen():
+            f_, _l, _e = feld_zu(muster, name, lab_bekannt=lab)
+            if f_:
+                stand["feld"] = f_
+            return tv_zahl_lesen(_tv_edit_wert(f_[0])) if f_ else None
+
+        warten = lambda: _warte(0.3, 0.3)
+        ok_, ist_, n_ = tv_wert_nachlesen(lesen, soll, warten)
+        if ok_:
+            if n_ > 1:
+                trail.append(f"{name}: Wert {soll:g} erst bei Lesung {n_} bestaetigt (Feld baute sich neu auf)")
+            return True, ist_
+        if ist_ is not None and stand["feld"]:
+            trail.append(f"{name}: '{ist_:g}' statt {soll:g} nach {n_} Lesungen — tippe einmal neu")
+            setze_wert(stand["feld"], soll, name)
+            ok_, ist_, n_ = tv_wert_nachlesen(lesen, soll, warten)
+            if ok_:
+                return True, ist_
+        trail.append(f"{name}: Zuruecklesen gescheitert (letzter Wert {ist_ if ist_ is not None else 'kein Feld'})")
+        return False, ist_
+
     # Units
     feld, _lab, f = feld_zu(TV_RX_UNITS, "Units")
     if not feld:
         return False, f
     if tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
         setze_wert(feld, float(plan["menge"]), "Units")
-        feld, _lab, f = feld_zu(TV_RX_UNITS, "Units", lab_bekannt=_lab)
-        if not feld or tv_zahl_lesen(_tv_edit_wert(feld[0])) != float(plan["menge"]):
-            return False, f"Menge {plan['menge']} steht nicht im Feld 'Units' (dort: '{_tv_edit_wert(feld[0]) if feld else '?'}')."
+        ok_u, ist_u = pruefe_wert(TV_RX_UNITS, "Units", _lab, float(plan["menge"]), feld)
+        if not ok_u:
+            return False, f"Menge {plan['menge']} steht nicht im Feld 'Units' (dort: '{ist_u if ist_u is not None else '?'}')."
     trail.append(f"Units = {plan['menge']}")
     if feld and feld[1] and merk["units_unten"] is None:
         merk["units_unten"] = feld[1][3]
@@ -4896,10 +4943,9 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             # Schalter nachweislich AN ist und der Wert schon stimmt.
             if not (echt and ist_an and tv_zahl_lesen(_tv_edit_wert(feld[0])) == float(soll)):
                 setze_wert(feld, float(soll), name)
-                feld, lab, f = feld_zu(muster, name, lab_bekannt=lab)
-                ist = tv_zahl_lesen(_tv_edit_wert(feld[0])) if feld else None
-                if ist is None or abs(ist - float(soll)) > 0.005:
-                    return False, f"{name}: im Feld steht '{_tv_edit_wert(feld[0]) if feld else '?'}' statt {soll}."
+                ok_w, ist = pruefe_wert(muster, name, lab, float(soll), feld)
+                if not ok_w:
+                    return False, f"{name}: im Feld steht '{ist if ist is not None else '?'}' statt {soll}."
             nach, _r = schalter(lab)
             if nach is False:
                 return False, f"'{name}' steht auf {soll} $, aber der Schalter ist AUS — die Order ginge ohne {name} raus."
