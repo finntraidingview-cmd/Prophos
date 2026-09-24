@@ -18846,6 +18846,18 @@
       linie(o.tp_level, '#15803d', 'TP', 1)
       linie(o.sl_level, '#b91c1c', 'SL', 1)
     }
+    // Winning Days (25.09.2026, Finn: „Markiere die Winning Days, damit ich weiß, wo sie sind"): Linien nur für LAUFENDE Pläne
+    // mit Einstieg — Entry durchgezogen in der Personen-Farbe (Flotte), TP grün / SL rot gestrichelt; die angeklickte Zeile dicker
+    // mit Achsen-Label. NQ-Level gelten auf dem MNQ-Chart 1:1 (gleicher Verfall, Differenz < 1 Pkt).
+    for(const l of (_mklLw.wdLinien || [])){ try{ _mklLw.serie.removePriceLine(l) }catch(_){} }
+    _mklLw.wdLinien = []
+    for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && x.status === 'open' && Number(x.einstieg_nq) > 0)){
+      const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
+      const wl = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: hervor, title: titel })) }catch(_){} }
+      wl(pw.einstieg_nq, farbe, kurz, 0, hervor ? 3 : 1)
+      wl(pw.tp_level_nq, '#15803d', `TP ${kurz}`, 2, hervor ? 2 : 1)
+      wl(pw.sl_level_nq, '#b91c1c', `SL ${kurz}`, 2, hervor ? 2 : 1)
+    }
   }
   function mklOrdersRender(){
     const offenEl = $mkl('mkl-offen'), verlaufEl = $mkl('mkl-verlauf'); if(!offenEl || !verlaufEl) return
@@ -18902,9 +18914,10 @@
     if(mkl.busy) return; mkl.busy = true
     try{
       await mklLaden(vollstaendig)
+      if(mklAktiv() && (vollstaendig || Date.now() - mkl.wd.at > MKL_WD_POLL_MS)) await mklWdLaden()   // Winning Days, 15 s
       const zu = mklAuswerten(mkl.orders, mkl.kerzen, mkl.kurs)
       if(zu.length){ await mklDemoSchliessenDb(zu); if(typeof atToast === 'function') atToast(`Demo: ${zu.length} Order${zu.length > 1 ? 's' : ''} geschlossen (${zu.map(z => z.grund.toUpperCase() + ' ' + (z.pl_usd >= 0 ? '+' : '−') + mklFmt(Math.abs(z.pl_usd)) + ' $').join(', ')})`, 'end') }
-      if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+      if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
     }catch(e){ console.warn('[markt-live]', e) }
     finally{ mkl.busy = false }
   }
@@ -18974,7 +18987,7 @@
           if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
           mkl.kursJe[r.wurzel] = kk
           if(r.wurzel === mkl.wurzel){ mkl.kursAlt = kk; mkl.kurs = kk.alter_ms <= HEDGE_KURS_MAX_ALTER_MS ? kk : null }
-          if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender() }
+          if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
         }catch(e){ console.warn('[markt-live] tv_kurse', e) } })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurs_1m' }, m => { try{
           const k = m.new; if(!k || k.wurzel !== mkl.wurzel || mkl.stub) return
@@ -19015,6 +19028,79 @@
     }catch(_){ /* still — nächster Takt */ }
   }
   setInterval(mklStaleWache, 60000); setTimeout(mklStaleWache, 15000)
+  /* ── Winning Days heute (25.09.2026, Finn: „Unten reicht es, wenn ich die Übersicht aller Winning Days habe — wie sie aussehen,
+   * wie sie laufen, welche es sind — und die Winning Days im Chart sehen, wo die Take Profits sind … Markiere die Winning Days,
+   * damit ich weiß, wo sie sind."). Daten: GET /admin/wd-heute (Railway, Service-Key, alle IDs; Vertrag .511 vom Backend) — alle
+   * Winning-Day-Pläne des CME-Handelstags plus alle offenen, sortiert open → geplant → zu. 15-s-Poll in der View, der TP-Abstand
+   * tickt mit dem Kurs (Realtime/Poll). Fusion-Chip = hedgeChipHtml wie auf der Trade-Karte. Klick auf eine Zeile hebt ihre
+   * Linien im Chart hervor. „schließt bei" = Master-TP ± Puffer (der Feed-Wächter nimmt genau dieses Level). ── */
+  const MKL_WD_POLL_MS = 15000
+  mkl.wd = { plaene: [], at: 0, tag: '', fehler: '', aktiv: null, laeuft: false }
+  async function mklWdLaden(){
+    if(mkl.wd.laeuft || !currentUserId || mkl.stub) return
+    mkl.wd.laeuft = true
+    try{
+      const tok = await _pushTok(); if(!tok) throw new Error('nicht angemeldet')
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 12000)
+      const r = await fetch(`${WATCHER_HOME}/admin/wd-heute`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal })
+      clearTimeout(tm)
+      const d = await r.json()
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+      mkl.wd.plaene = Array.isArray(d.plaene) ? d.plaene : []; mkl.wd.tag = d.tag || ''; mkl.wd.fehler = ''
+    }catch(e){ mkl.wd.fehler = String(e && e.message || e) }
+    finally{ mkl.wd.at = Date.now(); mkl.wd.laeuft = false }
+  }
+  // Kurz-Name fürs Chart-Label: erstes Wort der Firma + Kontonr-Ende
+  const mklWdKurz = pw => { const k = pw.konto || {}; const fi = String(k.firma || '').trim().split(/\s+/)[0]; return `${fi || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
+  const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
+  const mklWdSchliesstBei = pw => (Number(pw.tp_level_nq) > 0) ? (pw.richtung === 'sell' ? Number(pw.tp_level_nq) - hedgePuffer() : Number(pw.tp_level_nq) + hedgePuffer()) : null
+  function mklWdRender(){
+    const el = $mkl('mkl-wd'); if(!el) return
+    const pl = mkl.wd.plaene || []
+    if(!pl.length && !mkl.wd.fehler){ el.style.display = 'none'; return }
+    el.style.display = ''
+    const kurs = (mkl.kursJe && (mkl.kursJe.NQ || mkl.kursJe.MNQ)) || null   // NQ/MNQ preisgleich — irgendein frischer Kurs
+    const kp = (kurs && kurs.alter_ms <= 10000) ? kurs.preis : null
+    const f2 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const f0 = v => (v == null || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const uhr = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
+    const alter = t => { if(!t) return ''; const sek = Math.round((Date.now() - (Date.parse(t) || 0)) / 1000); return sek < 90 ? `vor ${sek} s` : sek < 5400 ? `vor ${Math.round(sek / 60)} min` : `vor ${(sek / 3600).toFixed(1)} h` }
+    const zeilen = pl.map(pw => {
+      const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', buy = pw.richtung === 'buy'
+      const abstand = (kp != null && Number(pw.tp_level_nq) > 0) ? (buy ? Number(pw.tp_level_nq) - kp : kp - Number(pw.tp_level_nq)) : null
+      const status = offen ? `läuft seit ${uhr(pw.started_at)}` : geplant ? `geplant ${pw.start_um ? uhr(pw.start_um) : '–'}` : `zu${pw.grund ? ' · ' + escapeHtml(String(pw.grund)) : ''}${pw.ended_at ? ' · ' + uhr(pw.ended_at) : ''}`
+      const mplW = pw.master_pl && pw.master_pl.wert != null ? Number(pw.master_pl.wert) : null
+      const mpl = mplW != null ? `<b style="color:${mplW >= 0 ? '#15803d' : '#b91c1c'}">${mplW >= 0 ? '+' : '−'}${f2(Math.abs(mplW))} $</b> <span style="color:var(--sub-2);font-size:10.5px">${alter(pw.master_pl.at)}</span>` : '<span style="color:var(--sub-2)">P&L –</span>'
+      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: pw.hedge ? { hedge: pw.hedge } : null }) : ''
+      const sb = mklWdSchliesstBei(pw), aktiv = mkl.wd.aktiv === String(pw.id)
+      return `<div class="mono" data-mkl-wd="${escapeHtml(String(pw.id))}" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:7px 10px;border-radius:8px;border:1px solid ${aktiv ? farbe : 'var(--border-soft)'};border-left:4px solid ${farbe};margin-bottom:5px;font-size:12px;cursor:pointer;${offen ? '' : geplant ? 'background:var(--bg);' : 'opacity:.6;'}" title="Klick hebt die Linien im Chart hervor · NQ-Level gelten auf dem MNQ-Chart 1:1 (gleicher Verfall, Differenz < 1 Pkt)">
+        <span style="min-width:70px;font-weight:600">${escapeHtml(String(pw.person || '?'))}</span>
+        <span style="min-width:110px" title="${escapeHtml(String((pw.konto && pw.konto.firma) || ''))}">${escapeHtml(String((pw.konto && pw.konto.name) || mklWdKurz(pw)))}</span>
+        <b style="color:${buy ? '#15803d' : '#b91c1c'}">${buy ? 'BUY' : pw.richtung === 'sell' ? 'SELL' : '?'}</b><span>${escapeHtml(String(pw.kt || '?'))} ${escapeHtml(String(pw.symbol_root || ''))}</span>
+        <span style="color:var(--sub)">Entry ${f2(pw.einstieg_nq)}</span>
+        <span style="color:#15803d">TP ${f2(pw.tp_level_nq)}</span>
+        <span style="color:#b91c1c">SL ${f2(pw.sl_level_nq)}</span>
+        <span style="color:var(--sub)" title="Schließ-Level über den Kurs-Feed: Master-TP ${buy ? '+' : '−'} ${hedgePuffer()} Pkt Puffer">schließt bei ${f2(sb)}</span>
+        <span style="${abstand == null ? 'color:var(--sub-2)' : Math.abs(abstand) <= 5 ? 'color:#B45309;font-weight:600' : ''}" title="Abstand des Kurses zum TP in NQ-Punkten (live)">${abstand == null ? 'Δ TP –' : `Δ TP ${abstand < 0 ? '−' : ''}${f0(Math.abs(abstand))} Pkt`}</span>
+        <span>${mpl}</span>
+        ${chip}
+        <span style="margin-left:auto;color:var(--sub);font-size:11px">${status}</span>
+      </div>`
+    })
+    const offenN = pl.filter(x => x.status === 'open').length, geplantN = pl.filter(x => x.status === 'planned').length
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} laufen · ${geplantN} geplant · ${pl.length - offenN - geplantN} zu · alle IDs${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+      <div style="margin-top:8px">${zeilen.join('') || '<div style="font-size:12px;color:var(--sub-2)">Keine Winning-Day-Pläne am Handelstag.</div>'}</div>`
+  }
+  // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
+  $mkl('mkl-wd')?.addEventListener('click', ev => {
+    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu]')) return
+    const z = ev.target.closest && ev.target.closest('[data-mkl-wd]'); if(!z) return
+    const id = z.getAttribute('data-mkl-wd')
+    mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
+    mklWdRender(); mklChartZeichnen()
+  })
+  // Stub für die Optik ohne Login: window._mklWdStub([...Pläne wie im Vertrag])
+  window._mklWdStub = pl => { mkl.wd.plaene = pl || []; mkl.wd.tag = 'Stub'; mkl.wd.fehler = ''; mklWdRender(); mklChartZeichnen() }
   /* ========== ENDE MARKT LIVE ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
@@ -29678,7 +29764,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.510'
+  const OS_TAB_BUILD = '2026-09-22.513'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
