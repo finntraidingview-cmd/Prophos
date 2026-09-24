@@ -18547,6 +18547,17 @@
     }catch(_){}
     return null
   }
+  // Fehler, bei denen SICHER nichts gesendet wurde (Koordination 25.09.2026, Finns Test Plan 9302faea: 'copier_alt' im Neustart-
+  // Fenster des Copiers nach dem Selbst-Update): kein Auftrag geschrieben (copier_alt), Panel pausiert (retry_ok true), Panel
+  // nicht erreicht ohne cmd_id (verbindung). Nur diese werden wiederholt / per Knopf bzw. Selbstheilung erneut geöffnet.
+  const HEDGE_SICHER = new Set(['copier_alt', 'pausiert', 'verbindung'])
+  const hedgeFehlerSicher = x => !!(x && HEDGE_SICHER.has(x.code) && x.retry_ok !== false && !(x.code === 'verbindung' && x.cmd_id))
+  // Position dieses Plans im frischen hedge_solo (Copier b30d580: plan_id, sonst plan8 aus 'PXsolo:<plan8>')
+  function hedgeSoloEigen(plan){
+    const liste = hedgeSoloListeFrisch(); if(!Array.isArray(liste) || !plan) return null
+    const pid = String(plan.id), pid8 = pid.slice(0, 8)
+    return liste.find(q => q && q.ticket && (String(q.plan_id || '') === pid || String(q.plan_id || q.plan8 || '').slice(0, 8) === pid8)) || null
+  }
   // Wrapper (25.09.2026, Live-Befund Plan 2089a033: „hedge = NULL, nichts geschrieben"): jeder Ausstieg bei einem Plan mit
   // hedge_eur > 0 hinterlässt eine Spur am Plan — Guard → status 'uebersprungen' + Grund + roter Toast, Exception → 'fehler'.
   async function hedgeSoloOeffnen(plan, r){
@@ -18590,19 +18601,33 @@
     const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
     try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
-    let res = null
-    try{
-      // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name für
-      // einen Copier, der das Schnelle Update noch nicht hat.
-      // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
-      // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
-      const lotsSoll = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
-      res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        // notfall_faktor (Backend .512, Finn: „Notfall-Stop-Loss bei 110 % vom Master-TP wie in der alten Logik"): SL am Hedge =
-        // fill ± tp_punkte × 1,10 (nie näher als tp_punkte + 1 Pkt); das eigentliche Schließen macht der Feed-Wächter bei TP + 8 Ticks.
-        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), notfall_faktor: hedgeNotfallFaktor(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
-      if(res && res.ok && lotsSoll) res.lots_soll = lotsSoll
-    }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+    // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
+    // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
+    // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
+    // notfall_faktor (Backend .512): SL am Hedge = fill ± tp_punkte × 1,10; geschlossen wird über den Feed-Wächter bei TP + 8 Ticks.
+    const lotsSoll = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
+    const openBody = JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), notfall_faktor: hedgeNotfallFaktor(), symbol: 'NAS100', plan_id: String(plan.id) })
+    // WIEDERHOLUNG (25.09.2026): bei sicher nicht gesendeten Fehlern (HEDGE_SICHER) bis 90 s nach dem ersten Versuch alle 10–15 s
+    // (Streuung) erneut — Status solange 'wartet'. Vor jedem neuen Versuch: steht schon eine Position mit der Kennung dieses Plans
+    // in hedge_solo, wird sie übernommen statt ein zweites Mal geöffnet. Nie wiederholt: abgelehnt (retry_ok false), copier_stumm.
+    const t0 = Date.now()
+    let res = null, versuch = 0
+    for(;;){
+      versuch++
+      try{
+        res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: openBody, timeoutMs: 38000 })
+        if(res && res.ok && lotsSoll) res.lots_soll = lotsSoll
+      }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+      if(res && res.ok) break
+      if(!hedgeFehlerSicher(res)) break
+      const eigen = hedgeSoloEigen(plan)
+      if(eigen){ res = { ok: true, ticket: eigen.ticket, lots: eigen.lots, fill: eigen.fill, sl: eigen.sl || 0, tp: eigen.tp || 0, symbol: eigen.symbol || 'NAS100', msg: 'übernommen (Position mit Plan-Kennung gefunden)' }; break }
+      const warte = 10000 + Math.random() * 5000
+      if(Date.now() - t0 + warte > 90000) break
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'wartet', code: res.code || null, versuche: versuch, pc: hedgePcId(),
+        msg: `Copier startet neu (${res.code}) — neuer Versuch in ${Math.round(warte / 1000)} s` }) }catch(_){}
+      await new Promise(ok => setTimeout(ok, warte))
+    }
     if(res && res.ok){
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
@@ -18621,7 +18646,8 @@
     }
     const unklar = !!(res && (res.code === 'copier_stumm' || res.retry_ok === false))
     const h = await hedgeAmPlanSchreiben(plan.id, { status: unklar ? 'unklar' : 'fehler', cmd_id: (res && res.cmd_id) || null, code: (res && res.code) || null,
-      msg: String((res && (res.msg || res.error)) || 'keine Antwort vom Panel') })
+      retry_ok: (res && typeof res.retry_ok === 'boolean') ? res.retry_ok : null, versuche: versuch,
+      msg: String((res && (res.msg || res.error)) || 'keine Antwort vom Panel') + (versuch > 1 ? ` (nach ${versuch} Versuchen)` : '') })
     if(typeof atToast === 'function') atToast((unklar ? '⚠ Fusion-Hedge UNKLAR — ' : '⚠ Fusion-Hedge NICHT geöffnet: ') + h.msg, 'end')
     return h
   }
@@ -18819,7 +18845,8 @@
       if(amPc){
         const liste0 = hedgeSoloListeFrisch()
         for(const p of (_tp || [])){
-          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0) || (p.mt5Baseline && p.mt5Baseline.hedge)) continue
+          const hx = p && p.mt5Baseline && p.mt5Baseline.hedge
+          if(!p || p.route !== 'tvv2' || p.status !== 'open' || !(p.hedgeEur > 0) || (hx && !(hx.status === 'fehler' && hedgeFehlerSicher(hx)))) continue   // fehlend ODER sicherer Fehler (25.09.2026)
           if(Date.now() - (Date.parse(p.startedAt || '') || Date.now()) < 20000 || _hedgeNachgeholt.has(String(p.id)) || !Array.isArray(liste0)) continue
           _hedgeNachgeholt.add(String(p.id))
           const bekannt = new Set((_tp || []).map(x => x && x.mt5Baseline && x.mt5Baseline.hedge && Number(x.mt5Baseline.hedge.ticket)).filter(Boolean))
@@ -18965,11 +18992,24 @@
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
+      if(h.status === 'wartet') return box(`<span style="font-size:11px;color:#B45309">wartet…</span>`, 'rgba(247,144,9,.12)', `Fusion-Hedge: ${h.msg || 'neuer Versuch gleich'}`)
       if(h.status === 'uebersprungen') return box(`<span style="font-size:11px;color:#b91c1c">nicht geöffnet</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge übersprungen: ${h.msg || '?'}`)
-      return box(`<span style="font-size:11px;color:#b91c1c">Fehler</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`)
+      // „Hedge öffnen" (25.09.2026): nur bei sicherem Fehler (nichts gesendet), laufendem Plan, am PC des Plans — eigener Handler
+      const oeffnenBtn = (h.status === 'fehler' && hedgeFehlerSicher(h) && p.status === 'open' && p.id && MT5_LOCAL && (!h.pc || h.pc === hedgePcId()))
+        ? ` <button type="button" class="btn btn-ghost tc2-btn" data-plan-hedge-oeffnen="${escapeHtml(String(p.id))}" title="Fusion-Gegenposition jetzt öffnen — beim ersten Versuch wurde sicher nichts gesendet (${escapeHtml(String(h.code || ''))})" style="color:#0E7A78">Hedge öffnen</button>` : ''
+      return box(`<span style="font-size:11px;color:#b91c1c">Fehler</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`) + oeffnenBtn
     }catch(_){ return '' }
   }
   window.hedgeSoloSchliessen = hedgeSoloSchliessen
+  // Klick auf „Hedge öffnen" (Trade-Karte + Winning-Days-Block): Plan frisch aus dem Cache, nur laufend, dann derselbe Pfad
+  async function hedgeOeffnenKlick(btn){
+    const p = tradePlans.find(x => String(x.id) === String(btn.getAttribute('data-plan-hedge-oeffnen')))
+    if(!p || p.status !== 'open') return
+    if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt öffnen?`)) return
+    btn.disabled = true; btn.textContent = 'öffnet…'
+    try{ await hedgeSoloOeffnen(p, { klick_at: new Date().toISOString(), manuell: true }) }finally{ try{ renderTradePlans() }catch(_){} }
+  }
+  window.hedgeOeffnenKlick = hedgeOeffnenKlick
   /* ========== ENDE FUSION-GEGENHEDGE ========== */
 
   /* ========== MARKT LIVE — Chart aus dem Reader-Feed + Demo-Orders (24.09.2026 abends) ==========
@@ -19605,7 +19645,7 @@
           <div class="mwd-box mwd-box-sum"><div class="mwd-box-t">zusammen</div><div class="mwd-box-v" style="color:${col(zusammen)}">${zusammen == null ? '–' : '≈ ' + sig(zusammen, '€', 2)}</div><div class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/$ + Fusion</div></div>
         </div>`
       // ── Fuß ──
-      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: h ? { hedge: h } : null }) : ''
+      const chip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml({ id: pw.id, route: 'tvv2', status: pw.status, hedgeEur: pw.hedge_eur, hedgeFaktor: pw.hedge_faktor, multiplier: pw.hedge_faktor, masterContracts: pw.kt, mt5Baseline: h ? { hedge: h } : null }) : ''
       // Fehlertext des Hedges lesbar statt nur „Fehler" im Chip (Koordination 25.09.2026)
       const fehlerTxt = (h && h.status === 'fehler') ? `<span class="mwd-fehler">Fusion: ${escapeHtml(String(h.msg || h.code || 'Fehler ohne Text'))}</span>` : ''
       // Aktionen auf laufenden Karten (Finn 25.09.2026: „Ich habe den Master manuell beendet — bau ein Feld ein, mit dem ich den
@@ -19765,9 +19805,11 @@
   document.getElementById('mwdErledigtCancel')?.addEventListener('click', mklWdErledigtZu)
   document.getElementById('mwdErledigtSave')?.addEventListener('click', mklWdErledigtSpeichern)
   document.getElementById('mwdErledigtModal')?.addEventListener('click', ev => { if(ev.target && ev.target.id === 'mwdErledigtModal') mklWdErledigtZu() })
+  // „Hedge öffnen" im Winning-Days-Block (25.09.2026) — eigener Listener nur für diesen Knopf
+  $mkl('mkl-wd')?.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-plan-hedge-oeffnen]'); if(b && typeof hedgeOeffnenKlick === 'function') hedgeOeffnenKlick(b) })
   // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
   $mkl('mkl-wd')?.addEventListener('click', ev => {
-    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-mwd-aktion]')) return
+    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-plan-hedge-oeffnen], [data-mwd-aktion]')) return
     const z = ev.target.closest && ev.target.closest('[data-mkl-wd]'); if(!z) return
     const id = z.getAttribute('data-mkl-wd')
     mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
@@ -28072,6 +28114,10 @@
         try{ await hedgeSoloSchliessen(p, 'hand') }finally{ try{ renderTradePlans() }catch(_){} }
       })
     })
+    // „Hedge öffnen" (25.09.2026) — eigener Handler, derselbe Pfad wie beim Start (hedgeSoloOeffnen)
+    document.querySelectorAll('[data-plan-hedge-oeffnen]').forEach(btn => {
+      btn.addEventListener('click', () => hedgeOeffnenKlick(btn))
+    })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
       btn.addEventListener('click', () => transitionPlan(btn.dataset.planStart, 'open'))
     })
@@ -30583,7 +30629,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.550'
+  const OS_TAB_BUILD = '2026-09-22.551'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
