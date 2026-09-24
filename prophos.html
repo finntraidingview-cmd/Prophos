@@ -8133,20 +8133,8 @@
                     <div class="kf-chart" data-kf-chart="wt" hidden><div class="kf-titel">Nach Wochentag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wt"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-wt"></canvas></div></div>
                   </div>
                 </div>
-                <!-- Oberkategorie „Nach Kategorie" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
-                <div class="kf-gruppe" data-kf-gruppe="kat">
-                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Nach Kategorie</div><div class="kf-chip-bar" data-kf-chips="kat"></div></div>
-                  <div class="kf-gross">
-                    <div class="kf-chart" data-kf-chart="sym" hidden><div class="kf-titel">Nach Symbol <span class="adm-sub kf-mini-sum" id="adm-kf-sum-sym"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-sym"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="weg" hidden><div class="kf-titel">Nach Weg <span class="adm-sub kf-mini-sum" id="adm-kf-sum-weg"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-weg"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="ri" hidden><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="firm" hidden><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="typ" hidden><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="gr" hidden><div class="kf-titel">Nach Kontogröße <span class="adm-sub kf-mini-sum" id="adm-kf-sum-gr"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-gr"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="acc" hidden><div class="kf-titel">Nach Konto <span class="adm-sub kf-mini-sum" id="adm-kf-sum-acc"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-acc"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="person" hidden><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick auf Person filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
-                  </div>
-                </div>
+                <!-- „Nach Kategorie" (Symbol/Weg/Richtung/Firma/Kontotyp/Kontogröße/Konto/Person) entfernt
+                     (Finn 24.09.2026 spät am Screenshot: „mies, untauglich, der kann weg"). -->
                 <!-- Oberkategorie „Reibung" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
                 <div class="kf-gruppe" data-kf-gruppe="reibung">
                   <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Reibung</div><div class="kf-chip-bar" data-kf-chips="reibung"></div></div>
@@ -11074,7 +11062,6 @@
     const ADM_KF_GRUPPEN = {
       verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
       trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
-      kat:     [['sym', 'Symbol'], ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['gr', 'Kontogröße'], ['acc', 'Konto'], ['person', 'Person']],
       reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real']] }
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
@@ -11185,7 +11172,9 @@
      * zwei Balken: Hedge hypothetisch (€, Kapitel-Farbe, links) und Master-P&L real ($, grün/rot, rechts).
      * Kategorie-Farbe in der x-Beschriftung (Person = admPersonColor, sonst Palette per Namens-Hash). */
     function admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen){
-      const dims = [['sym', 'sym'], ['weg', 'weg'], ['ri', 'ri'], ['firm', 'firm'], ['typ', 'typ'], ['gr', 'gr'], ['wt', 'wt'], ['acc', 'acc'], ['std', 'std'], ['dauer', 'dauer'], ['person', null]]
+      // Seit 24.09.2026 spät nur noch Wochentag/Stunde/Haltedauer — die Gruppe „Nach Kategorie" (Symbol, Weg, Richtung,
+      // Firma, Kontotyp, Kontogröße, Konto, Person) ist raus (Finn am Screenshot: „mies, untauglich, der kann weg").
+      const dims = [['wt', 'wt'], ['std', 'std'], ['dauer', 'dauer']]
       for(const [name, art] of dims){
         const istPerson = !art
         const rows = istPerson ? alle.filter(artOk) : alle.filter(persOk)
