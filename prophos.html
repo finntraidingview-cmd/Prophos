@@ -1340,25 +1340,23 @@
   #adm-pane-stat .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
   #adm-pane-stat .kf-kpis .kpi-value{font-size:18px}
   #adm-pane-stat .kf-kpis .kpi-delta{font-size:11px}
-  #adm-pane-stat .kf-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
   #adm-pane-stat .kf-chart .adm-vl{margin-top:4px;padding-top:6px;border-top:none}
   #adm-pane-stat .kf-titel{font-size:12px;font-weight:600;margin-top:10px}
   #adm-pane-stat .kf-sub{font-size:11.5px;color:var(--sub)}
   /* Sechs kleine Balken-Charts nebeneinander (24.09.2026, Finn am Screenshot: „für jedes Ding jeweils einen
      einzelnen Chart nebeneinander … allgemein so viel mehr Daten mit einer cleanen Übersicht") */
-  #adm-pane-stat .kf-dims{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
-  #adm-pane-stat .kf-mini{min-width:0}
-  #adm-pane-stat .kf-mini .kf-titel,#adm-pane-stat .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+  #adm-pane-stat .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
   #adm-pane-stat .kf-mini-sum{font-weight:400;font-variant-numeric:tabular-nums}
   #adm-pane-stat .kf-mini-cv{position:relative;height:170px;margin-top:4px}
   #adm-pane-kapitel .kap-regel,#adm-pane-stat .kap-regel{font-size:11px;color:var(--sub);margin:-2px 0 6px}
-  #adm-pane-stat .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
   #adm-pane-stat .kf-trades .adm-row-name{display:flex;align-items:flex-start}
   #adm-pane-stat .kf-trades .adm-row-name .adm-dot{margin-top:5px}
   #adm-pane-stat .kf-trades .adm-val{min-width:82px;text-align:right}
   #adm-pane-stat .kf-trades .adm-pct{text-align:left;font-size:11px;color:var(--sub);white-space:normal}
   #adm-pane-stat .kf-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin-top:14px}
   #adm-pane-stat .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
+  /* Trade-Liste NACH der kf-rows-Regel (gleiche Spezifität, Review 24.09.2026 F3: stand vorher davor und verlor) */
+  #adm-pane-stat .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
   #adm-pane-stat .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   /* Ein großer Chart mit Chip-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke") */
   #adm-pane-stat .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
@@ -1390,7 +1388,14 @@
   #adm-pane-stat .kf-kal .z.is-on{outline:2px solid var(--violet);outline-offset:1px}
   #adm-pane-stat .kf-kal .z.leer{background:transparent}
   #adm-pane-stat .kf-kal-monate{display:flex;justify-content:space-between;font-size:10px;color:var(--sub);font-family:var(--mono);margin-top:4px;padding-left:28px}
-  @media (max-width:600px){#adm-pane-stat .kf-gross .adm-vl,#adm-pane-stat .kf-gross .kf-mini-cv{height:280px}}
+  @media (max-width:600px){
+    #adm-pane-stat .kf-gross .adm-vl,#adm-pane-stat .kf-gross .kf-mini-cv{height:280px}
+    /* Zeilen-Raster mobil (Review 24.09.2026, F4): Trade-Liste und Quoten liefen über die Seitenbreite */
+    #adm-pane-stat .kf-trades .adm-row{grid-template-columns:minmax(0,1fr) auto;grid-auto-rows:auto;gap:4px 10px}
+    #adm-pane-stat .kf-trades .adm-row .adm-pct{grid-column:1 / -1}
+    #adm-pane-stat .kf-quoten .adm-row{grid-template-columns:minmax(0,1fr) auto}
+    #adm-pane-stat .kf-quoten .adm-track{grid-column:1 / -1}
+  }
   /* Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht immer 1:1 … guck in den
      bestehenden Daten, wie viel wo gegengehedgt wurde"): Zeile = Firma · Typ · Größe, Balken = Quote,
      Unterzeile mit geplanter Quote + Beispielzahl. Zwei Spalten, Muster Balkenzeilen. */
@@ -1405,10 +1410,8 @@
   @media (max-width:1200px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,1fr)}}
   @media (max-width:960px){
     #adm-pane-stat .kf-kpis{grid-template-columns:repeat(3,1fr)}
-    #adm-pane-stat .kf-charts{grid-template-columns:1fr}
-    #adm-pane-stat .kf-dims{grid-template-columns:1fr 1fr}
-  }
-  @media (max-width:600px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(2,1fr)}#adm-pane-stat .kf-dims{grid-template-columns:1fr}}
+      }
+  @media (max-width:600px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(2,1fr)}}
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -10060,7 +10063,7 @@
     function showContent(){
       $('kasse-lock').style.display = 'none'
       $('kasse-content').hidden = false
-      kasseLoad()
+      // kasseLoad() entfällt (Review 24.09.2026, F11): der Kasse-Reiter ist seit .451 ausgeblendet
       // Nicht bei jedem Betreten neu laden (24.09.2026 abends, Finn: „dass das nicht immer neu geladen werden muss,
       // wenn ich ganz kurz auf Kompass gehe — die Übersicht auch, ist mir nervig"): Stand bleibt 10 min, ↻ lädt sofort.
       if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad()
@@ -10364,14 +10367,19 @@
       const wrap = cv.parentElement
       if(admVlCharts[name]){ try { admVlCharts[name].destroy() } catch(_){} admVlCharts[name] = null }
       if(lg) lg.innerHTML = ''
+      // Statistik-Tab (Review 24.09.2026, F2/F8): versteckte Sicht nicht zeichnen, leere Sicht mit Hinweis
+      const kfSicht = cv.closest('[data-kf-chart]')
+      if(kfSicht && kfSicht.hidden) return
       const fmtKurz = opts.kurz || admEurKurz, fmtSign = opts.sign || admVlSign
       const tage = [...new Set([...(opts.tage || []), ...series.flatMap(s => s.events.map(e => e.datum))])].sort()
       // Unter zwei Tagen gibt es keine Kurve — Block bleibt weg statt leer zu stehen.
       if(typeof Chart === 'undefined' || tage.length < 2 || !series.length){
         wrap.hidden = true; if(lg) lg.hidden = true
+        if(kfSicht && typeof admKfLeerHinweis === 'function') admKfLeerHinweis(wrap, true)
         return
       }
       wrap.hidden = false; if(lg) lg.hidden = false
+      if(kfSicht && typeof admKfLeerHinweis === 'function') admKfLeerHinweis(wrap, false)
       const idx = new Map(tage.map((t, i) => [t, i]))
       const datasets = series.map(s => {
         const perTag = new Array(tage.length).fill(0)
@@ -10470,9 +10478,11 @@
       el.querySelector('.nm').textContent = a === 'alle' ? 'Alle Kapitel' : 'Kapitel: ' + window._kapitel.name(a)
     }
 
+    let _admKapLaeuft = false
     async function admKapitelLaden(){
       const msg = $('adm-kap-msg'), body = $('adm-kap-body')
-      if(!msg) return
+      if(!msg || _admKapLaeuft) return   // kein Doppel-Fetch (Review 24.09.2026, F12)
+      _admKapLaeuft = true
       if(!admKapData){ msg.style.display = ''; msg.textContent = 'Lade Kapitel…'; body.hidden = true }
       try{
         const { data: { session } } = await supabase.auth.getSession()
@@ -10481,12 +10491,13 @@
         const r = await fetch(`${WATCHER_HOME}/admin/kapitel`, { headers: { 'sb-token': tok }, cache:'no-store' })
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
+        admKapGeladenAt = Date.now()   // Stempel nur nach echtem Fetch (Review 24.09.2026, F1)
         admKapitelRender(d)
       }catch(e){
         msg.style.display = ''; body.hidden = true
         msg.textContent = 'Kapitel nicht verfügbar: ' + (e.message || e)
         const sm = $('adm-stat-msg'); if(sm && !admKapData){ sm.style.display = ''; sm.textContent = 'Statistik nicht verfügbar: ' + (e.message || e) }
-      }
+      }finally{ _admKapLaeuft = false }
     }
     // Beim Öffnen des Tabs: einmal laden, danach nur den Chart nachziehen (Breite 0 im versteckten Tab)
     function admKapitelOeffnen(){
@@ -10497,7 +10508,7 @@
       for(const c of Object.values(admKfCharts)){ if(c){ try { c.resize() } catch(_){} } }
     }
     function admKapitelRender(d){
-      admKapData = d; admKapGeladenAt = Date.now()
+      admKapData = d
       const msg = $('adm-kap-msg'), body = $('adm-kap-body')
       if(!body) return
       const liste = (d.kapitel || []).slice().sort((a, b) => String(a.von).localeCompare(String(b.von)))
@@ -10771,6 +10782,7 @@
     const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
     const admKfWochentag = d => { const x = d ? new Date(d + 'T12:00:00Z') : null; return x && !isNaN(x) ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][x.getUTCDay()] : '—' }
     const ADM_KF_WT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So', '—']
+    const admKfStdNum = k => { const n = parseInt(k); return Number.isFinite(n) ? n : 99 }   // „00 h" ist 0, nicht „fehlt" (Review F5)
     const ADM_KF_DAUER = ['< 5 min', '5–15 min', '15–30 min', '30–60 min', '1–2 h', '2–6 h', '> 6 h', '—']
     const admKfDauerBucket = m => m == null || !Number.isFinite(Number(m)) ? '—' : (v => v < 5 ? '< 5 min' : v < 15 ? '5–15 min' : v < 30 ? '15–30 min' : v < 60 ? '30–60 min' : v < 120 ? '1–2 h' : v < 360 ? '2–6 h' : '> 6 h')(Number(m))
     const admKfRi = r => r === 'buy' ? 'BUY' : r === 'sell' ? 'SELL' : '—'
@@ -10790,7 +10802,7 @@
                            wt:   ['Wochentag', t => admKfWochentag(t.datum), w => w, (a, b) => ADM_KF_WT.indexOf(a.key) - ADM_KF_WT.indexOf(b.key)],
                            // Mehr Sichten (24.09.2026 abends, Finn: „MEHR, CLEAN, SAUBER"): Konto, Stunde (Dubai), Haltedauer
                            acc:  ['Konto', t => t.account_name || '—', w => w],
-                           std:  ['Stunde', t => t.stunde == null ? '—' : String(t.stunde).padStart(2, '0') + ' h', w => w, (a, b) => (parseInt(a.key) || 99) - (parseInt(b.key) || 99)],
+                           std:  ['Stunde', t => t.stunde == null ? '—' : String(t.stunde).padStart(2, '0') + ' h', w => w, (a, b) => admKfStdNum(a.key) - admKfStdNum(b.key)],
                            dauer: ['Haltedauer', t => admKfDauerBucket(t.dauer_min), w => w, (a, b) => ADM_KF_DAUER.indexOf(a.key) - ADM_KF_DAUER.indexOf(b.key)],
                            tag:  ['Tag',      t => t.datum || '—', w => admVlDatum(w) || w],
                            pnl:  ['P&L-Stufe', t => admKfBucket(admKapNum(t.master_pl)), w => w + ' $'],
@@ -10822,7 +10834,7 @@
       if(mod) mod.textContent = `Modell je Trade: Hedge € = −Master-P&L $ × Quote (Firma · Typ · Größe aus der Hedge-Ära) × Faktor ${admKfDe(admKf.param.faktor, 2)} − Reibung real` +
         (admKf.param.reibung !== null ? ` (Override ${admKfDe(admKf.param.reibung, 2)} € je Trade)` : ' (gemessen je Firma · Typ × Anteil: Funded 1,0 · Challenge/Phase 0,5)') +
         ` · ohne Quote: FX ${admKfDe(fx, 3)} × 1`
-      if(mod2) mod2.textContent = rg
+      if(mod2) mod2.textContent = (rg && Number.isFinite(Number(rg.median)))
         ? `Reibung Hedge-Ära: gemessen Median ${admKfDe(Number(rg.median), 2)} € · Ø ${admKfDe(Number(rg.mean), 2)} € je Trade (${rg.n} saubere Trades, |Abw.| ≤ 100 €) → real Median ${admKfDe(Number(rg.real_median), 2)} € · Ø ${admKfDe(Number(rg.real_mean), 2)} € — Hälfte von 5,44 € gemessen: Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026)`
         : 'Reibung: Hälfte von 5,44 € gemessen — Gesamtkosten-Trades zählen zur Hälfte (Auswertung 24.09.2026); Gruppenwerte kommen mit dem nächsten Laden'
       const alle = Array.isArray(k.trades_liste) ? k.trades_liste : []
@@ -10911,20 +10923,22 @@
       // wie viele gleichzeitig leben (erster Trade bis Blow-Trade, sonst bis heute Dubai) — das ist die Slot-Zahl,
       // Wiederverwendung inklusive. Slot je Tag = 10 €/30, Monat = Slots × 10 €. Nicht mit Reibung/Hedge verrechnet.
       const DUP_EUR_MONAT = 10
-      const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
+      const heute = (typeof _kapitelHeuteIso === 'function') ? _kapitelHeuteIso() : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })   // eine Wahrheit (Review F9)
       const dupKonten = new Map()
       for(const t of alle){
         if(t.route !== 'tvv2' || !t.datum) continue
-        const key = String(t.user_id) + '|' + (t.account_name || t.id)
+        const key = String(t.user_id) + '|' + (t.account_id || t.account_name || t.id)   // account_id seit 24.09. im Backend (Review F6)
         const e = dupKonten.get(key) || { user: String(t.user_id), von: t.datum, bis: null }
         if(t.datum < e.von) e.von = t.datum
         if(t.blown && (!e.bis || t.datum > e.bis)) e.bis = t.datum
         dupKonten.set(key, e)
       }
       const dupTage = []
-      if(tage.length && dupKonten.size){
-        const d = new Date(tage[1] || tage[0]); d.setUTCHours(0, 0, 0, 0)
-        for(let i = 0; i < 400 && d.toISOString().slice(0, 10) <= heute; i++, d.setUTCDate(d.getUTCDate() + 1)) dupTage.push(d.toISOString().slice(0, 10))
+      if(dupKonten.size){
+        // Ab dem ersten Slot-Tag (nicht ab dem ersten Kauf — der kann Jahre zurückliegen), bis heute (Review F6)
+        const erster = [...dupKonten.values()].map(e => e.von).sort()[0]
+        const d = new Date(erster + 'T00:00:00Z')
+        for(let i = 0; i < 2000 && !isNaN(d) && d.toISOString().slice(0, 10) <= heute; i++, d.setUTCDate(d.getUTCDate() + 1)) dupTage.push(d.toISOString().slice(0, 10))
       }
       const slotsAm = (d, user) => [...dupKonten.values()].filter(e => (!user || e.user === user) && e.von <= d && (!e.bis || e.bis >= d)).length
       const dupEvents = []
@@ -11027,15 +11041,18 @@
       const cv = $(cvId); if(!cv) return
       if(admKfCharts[name]){ try { admKfCharts[name].destroy() } catch(_){} admKfCharts[name] = null }
       const wrap = cv.parentElement
-      if(typeof Chart === 'undefined' || !cats.length){ wrap.hidden = true; return }
-      wrap.hidden = false
+      // Versteckte Sicht nicht zeichnen (Review 24.09.2026, F2): jeder Render lief sonst über alle ~20 Charts,
+      // auch bei jedem Tastendruck in Faktor/Reibung. Der Chip-Wechsel zeichnet über admKfRender nach.
+      const sicht = cv.closest('.kf-chart'); if(sicht && sicht.hidden) return
+      if(typeof Chart === 'undefined' || !cats.length){ wrap.hidden = true; admKfLeerHinweis(wrap, true); return }
+      wrap.hidden = false; admKfLeerHinweis(wrap, false)
       const mono = { family: 'JetBrains Mono', size: 9 }
       const on = e => !cfg.istOn || cfg.istOn(e)
       // Liegende Balken (24.09.2026, Finn am Screenshot: „man erkennt da nix" — 14 Firma·Typ-Namen auf der
       // x-Achse druckten übereinander). cfg.horizontal: Kategorien auf der y-Achse, Höhe wächst mit der Zahl
       // der Zeilen; Wert-Achse liegt dann auf x, eine zweite Wert-Achse oben statt rechts.
       const horiz = !!cfg.horizontal
-      wrap.style.height = horiz ? Math.max(320, cats.length * 26 + 40) + 'px' : ''
+      wrap.style.height = horiz ? Math.max(window.innerWidth <= 600 ? 280 : 320, cats.length * 26 + 40) + 'px' : ''   // Mobil 280 (Review F13)
       const axisKey = horiz ? 'xAxisID' : 'yAxisID', prim = horiz ? 'x' : 'y', sek = horiz ? 'x1' : 'y1'
       const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), [axisKey]: prim, borderRadius: 3, maxBarThickness: 26,
                           backgroundColor: cats.map(e => cfg.a.farbe(e, on(e))) }]
@@ -11060,6 +11077,13 @@
                          afterBody: items => { const e = cats[items[0].dataIndex]; return e && cfg.zeilen ? cfg.zeilen(e) : '' } } } },
           scales }
       })
+    }
+    /* Leer-Hinweis statt stumm ausgeblendeter Fläche (Review 24.09.2026, F8) */
+    function admKfLeerHinweis(wrap, zeigen){
+      if(!wrap || !wrap.parentElement) return
+      let h = wrap.parentElement.querySelector(':scope > .kf-leer-hinweis')
+      if(zeigen && !h){ h = document.createElement('div'); h.className = 'adm-empty kf-leer-hinweis'; h.textContent = 'Noch keine Daten für diese Sicht — kommt mit den ersten Trades bzw. dem zweiten Tag.'; wrap.insertAdjacentElement('afterend', h) }
+      if(h) h.hidden = !zeigen
     }
     const admKfGut = '#15803d', admKfRot = '#b91c1c'
     const admKfSumHtml = (id, teile) => { const el = $(id); if(el) el.innerHTML = teile.map(([t, v, fmt]) => `· ${t} <b style="color:${v < 0 ? admKfRot : admKfGut}">${fmt(v)}</b>`).join(' ') }
@@ -11128,7 +11152,8 @@
      * Master-P&L-Summe des Tages (grün/rot, Deckkraft relativ zum Tagesmaximum). Klick = Tag-Filter wie im Je-Tag-Chart. */
     function admKfKalender(rows, f){
       const el = $('adm-kf-kal'), mon = $('adm-kf-kal-monate'); if(!el) return
-      const heute = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
+      const sicht = el.closest('.kf-chart'); if(sicht && sicht.hidden) return   // versteckt nicht bauen (Review F2)
+      const heute = (typeof _kapitelHeuteIso === 'function') ? _kapitelHeuteIso() : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Dubai' })
       const je = new Map()
       for(const t of rows){ if(!t.datum) continue; const e = je.get(t.datum) || { n: 0, s: 0 }; e.n++; e.s += admKapNum(t.master_pl); je.set(t.datum, e) }
       const maxAbs = Math.max(1, ...[...je.values()].map(e => Math.abs(e.s)))
@@ -11164,7 +11189,7 @@
       let cur = 0, curSign = 0, bestW = 0, bestL = 0, run = 0, runSign = 0
       for(const t of chrono){
         const v = admKapNum(t.master_pl); const sg = v > 0 ? 1 : v < 0 ? -1 : 0
-        if(!sg){ run = 0; runSign = 0; continue }
+        if(!sg){ run = 0; runSign = 0; cur = 0; curSign = 0; continue }   // Null-Trade bricht die Serie (Review F7)
         if(sg === runSign) run++; else { run = 1; runSign = sg }
         if(sg > 0) bestW = Math.max(bestW, run); else bestL = Math.max(bestL, run)
         cur = run; curSign = sg
@@ -11238,7 +11263,6 @@
     // Parameter: einmal aus user_settings nachladen (Standard aus dem Code, bis die Antwort da ist)
     async function admKfParamLaden(){
       if(admKf.geladen || !currentUserId) return
-      admKf.geladen = true
       try{
         const { data, error } = await supabase.from('user_settings').select('value').eq('user_id', currentUserId).eq('key', 'kontrafakt').maybeSingle()
         if(error) throw error
@@ -11249,6 +11273,7 @@
         { const r = v.reibung; const n = Number(r); const ov = (r !== null && r !== undefined && r !== '' && Number.isFinite(n) && n >= 0 && n !== 5.44) ? n : null
           if(ov !== admKf.param.reibung){ admKf.param.reibung = ov; neu = true } }
         if(neu && admKapData) admKfRender()
+        admKf.geladen = true   // erst nach Erfolg — nach einem Fehler nochmal versuchen (Review 24.09.2026, F12)
       }catch(e){ console.warn('[kontrafakt] Parameter laden:', e.message || e) }
     }
     async function admKfParamSpeichern(){
@@ -14063,7 +14088,8 @@
         const gewechselt = String(id) !== String(_admKapLetzt); _admKapLetzt = id
         admKapChipRender()
         admHedgeModus()
-        if(admKapData) admKapitelRender(admKapData)
+        // Ohne echten Wechsel nur Karten + Edit-Block (Rahmen), nicht die ~20 Statistik-Charts (Review 24.09.2026, F1)
+        if(admKapData){ if(gewechselt) admKapitelRender(admKapData); else { admKapKarten((admKapData.kapitel || []).slice()); admKapEditBauen((admKapData.kapitel || []).slice()) } }
         if(gewechselt && admData) admLoad()
       })
       $('adm-acc-back')?.addEventListener('click', () => {
@@ -28371,7 +28397,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.454'
+  const OS_TAB_BUILD = '2026-09-22.455'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
