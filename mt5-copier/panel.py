@@ -1013,6 +1013,9 @@ MASTER_ORDER_GUARD = threading.Lock()
 # Browser und Maus — davon gibt es genau eines. Zwei parallele Laeufe wuerden
 # sich die Klicks gegenseitig wegziehen, mitten im Order-Ticket.
 TV_ORDER_LOCK = threading.Lock()
+# Solo-Hedge-Auftragsdatei (24.09.2026): zwei gleichzeitige /api/hedge-solo duerfen sich
+# die Liste nicht gegenseitig ueberschreiben (Auto-Close schliesst mehrere Plaene in einem Tick).
+HEDGE_SOLO_LOCK = threading.Lock()
 
 
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
@@ -2709,6 +2712,117 @@ class Handler(BaseHTTPRequestHandler):
                   f"@{cmd['ext_id']} -> {res.get('ok')} ({res.get('schritt')}: {res.get('msg')})",
                   flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
+
+        if u.path == "/api/hedge-solo":
+            # Solo-Hedge auf dem Fusion-Hedge-Terminal (24.09.2026 abends, Winning Days
+            # gegenhedgen ohne Duplikum — Finn: „direkt nach der Puls-Order auf Fusion
+            # die Gegen-Order im Verhaeltnis, und sobald NQ den TP erreicht, schliessen").
+            # Das Panel sendet NICHT selbst an MetaTrader (zweiter Prozess am Terminal,
+            # README.md) — es schreibt einen Auftrag in hedge_solo_auftrag.json, der
+            # laufende Copier fuehrt ihn im naechsten Tick aus (copier.solo_abarbeiten)
+            # und quittiert in hedge_solo_ergebnis.json. Hier wird bis ~14 s gewartet.
+            # Body: {aktion:'open', richtung:'buy'|'sell' (Richtung der HEDGE-Order),
+            #        eur, punkte, symbol?, lots?}  |  {aktion:'close', ticket, grund?}
+            # Antwort: Ergebnis des Copiers (ok, ticket, lots, fill, sl, pl …) oder
+            # 409 copier_alt (kein frischer Status → kein Auftrag, damit nichts liegen
+            # bleibt) / 200 copier_stumm (Auftrag liegt, keine Quittung in der Zeit —
+            # bei open retry_ok:false, die Order KANN raus sein; das Frontend fragt
+            # dann mit derselben cmd_id nach: {aktion:'ergebnis', cmd_id}).
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            aktion = str(body.get("aktion") or "").strip().lower()
+            erg_pfad = os.path.join(HERE, "hedge_solo_ergebnis.json")
+            if aktion == "ergebnis":
+                cid = str(body.get("cmd_id") or "")[:64]
+                alle = read_json(erg_pfad, {}) or {}
+                e = alle.get(cid) if cid else None
+                return self._send(200, json.dumps(e or {"ok": False, "code": "offen", "retry_ok": False,
+                    "msg": "noch keine Quittung vom Copier"}, ensure_ascii=False))
+            if aktion not in ("open", "close"):
+                return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                    "msg": "aktion muss open/close/ergebnis sein"}, ensure_ascii=False))
+            auftrag = {"cmd_id": f"{int(time.time())}-{random.randrange(10**6):06d}", "at": time.time(), "aktion": aktion}
+            if aktion == "open":
+                richtung = str(body.get("richtung") or "").strip().lower()
+                if richtung not in ("buy", "sell"):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                        "msg": "richtung muss buy/sell sein (Richtung der Hedge-Order)"}, ensure_ascii=False))
+                symbol = str(body.get("symbol") or "NAS100").strip()
+                if not SYMBOL_RE.fullmatch(symbol):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "Symbol ungueltig"}))
+                try:
+                    eur = float(body.get("eur") or 0)
+                    punkte = float(body.get("punkte") or 0)
+                    lots = float(body.get("lots") or 0)
+                except (TypeError, ValueError):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "eur/punkte/lots keine Zahlen"}))
+                if not (lots > 0 or (eur > 0 and punkte > 0)):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                        "msg": "eur + punkte (oder lots) muessen > 0 sein"}, ensure_ascii=False))
+                if lots > 50:
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                        "msg": f"lots {lots} ueber dem Riegel 50 — Rechenfehler?"}, ensure_ascii=False))
+                auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte,
+                                "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
+            else:
+                try:
+                    ticket = int(body.get("ticket") or 0)
+                except (TypeError, ValueError):
+                    ticket = 0
+                if ticket <= 0:
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "ticket fehlt"}))
+                auftrag.update({"ticket": ticket, "grund": str(body.get("grund") or "")[:40]})
+            # Riegel: laeuft ein Copier mit frischem Status? Sonst bliebe der Auftrag liegen
+            # (und wuerde nach 40 s verfallen) — lieber sofort ehrlich absagen.
+            frisch = False
+            for inst in instances():
+                st = read_json(os.path.join(HERE, inst["status_file"]), {}) or {}
+                try:
+                    age = (datetime.now() - datetime.fromisoformat(st.get("updated_at") or "")).total_seconds()
+                except (ValueError, TypeError):
+                    age = None
+                if st.get("running") and age is not None and age <= 15:
+                    frisch = True
+                    break
+            if not frisch:
+                return self._send(409, json.dumps({"ok": False, "code": "copier_alt", "retry_ok": True,
+                    "msg": "Der Copier auf diesem PC liefert keinen frischen Status — ohne laufenden Copier "
+                           "kann nichts auf Fusion gesendet werden (Copier-Karte pruefen)."}, ensure_ascii=False))
+            pfad = os.path.join(HERE, "hedge_solo_auftrag.json")
+            with HEDGE_SOLO_LOCK:
+                liste = read_json(pfad, []) or []
+                if not isinstance(liste, list):
+                    liste = []
+                # alte Auftraege (> 5 min) aus der Datei raeumen, sonst waechst sie ewig
+                liste = [a for a in liste if isinstance(a, dict) and (time.time() - float(a.get("at") or 0)) < 300]
+                liste.append(auftrag)
+                tmp = pfad + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(liste, f, ensure_ascii=False, indent=1)
+                os.replace(tmp, pfad)
+            print(f"[panel] hedge-solo {aktion} {auftrag['cmd_id']}: "
+                  + (f"{auftrag.get('richtung')} {auftrag.get('eur')} € / {auftrag.get('punkte')} Pkt {auftrag.get('symbol')}"
+                     if aktion == "open" else f"Ticket {auftrag.get('ticket')} ({auftrag.get('grund')})"), flush=True)
+            ende = time.time() + 14.0
+            erg = None
+            while time.time() < ende:
+                time.sleep(0.3)
+                alle = read_json(erg_pfad, {}) or {}
+                if isinstance(alle, dict) and auftrag["cmd_id"] in alle:
+                    erg = alle[auftrag["cmd_id"]]
+                    break
+            if erg is None:
+                erg = {"ok": False, "code": "copier_stumm", "cmd_id": auftrag["cmd_id"],
+                       "retry_ok": aktion == "close",
+                       "msg": "Auftrag liegt, aber der Copier hat in 14 s nicht quittiert — "
+                              + ("die Order KANN raus sein: mit cmd_id nachfragen, nie blind wiederholen." if aktion == "open"
+                                 else "spaeter erneut schliessen.")}
+            print(f"[panel] hedge-solo {aktion} {auftrag['cmd_id']} -> {'OK' if erg.get('ok') else 'FEHLER'} "
+                  f"[{erg.get('code') or ''}] {str(erg.get('msg') or '')[:160]}", flush=True)
+            return self._send(200, json.dumps(erg, ensure_ascii=False))
 
         if u.path == "/api/start-hedge-terminal":
             # Slave-/Hedge-Terminal per Knopf starten (01.09.2026, Finns Wunsch:

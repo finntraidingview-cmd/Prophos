@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.5.2
+// @version      0.6.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,7 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.6.0  24.09.2026  Live-Kurs aus dem Tab-Titel (kurs) im Positions-Strom — Winning-Day-Gegenhedge auf Fusion
 //   0.5.2  24.09.2026  Sprache egal: Englisch wird gelesen statt gewarnt (Verbinder parst beide Zahlformate)
 //   0.5.1  24.09.2026  Zusammenfassung robuster: Label/Wert in getrennten Divs
 //                      derselben Elternebene (auch mit Icon dazwischen), Werte
@@ -48,7 +49,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.5.2';
+  const VERSION    = '0.6.0';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -808,6 +809,16 @@
     return null;                                          // Tabelle da, wirklich flach
   }
 
+  // Tab-Titel „NQZ2026 30,448.25 ▼ −1.03% Unnamed" (auch „(2) NQ1! 30,510.50 ▼ −0.83% …"
+  // bei ungelesenen Meldungen, und ohne Pfeil bei genau 0 %). Dieselbe Signatur wie
+  // TV_RX_CHART_TITEL im Puls (order_bot.py), nur mit Fanggruppen fuer Symbol + Kurs.
+  const RX_TITEL_KURS = /^(?:\(\d+\)\s*)?([A-Za-z][A-Za-z0-9!:._-]{1,24})\s+([\d.,]+)\s+(?:[▲▼]\s*)?[−\-+]?[\d.,]+\s*%/;
+  function liesKursAusTitel() {
+    const m = RX_TITEL_KURS.exec(String(document.title || '').trim());
+    if (!m) return null;
+    return { symbol: m[1], text: m[2], ts: Date.now() };
+  }
+
   function tick() {
     const positionen = lesePositionen();
     const blind = blindGrund(positionen);
@@ -823,6 +834,15 @@
       ts: Date.now(), positionen, version: VERSION,
       blind: !!blind, blind_grund: blind || '',
       sichtbar: document.visibilityState === 'visible',
+      // 0.6.0 (24.09.2026, Winning-Day-Gegenhedge auf Fusion — Finn: „auf einem PC,
+      // der 24/7 laeuft, per Reader immer in Echtzeit die aktuellen NQ-/MNQ-Punkte
+      // haben"): der Kurs aus dem TAB-TITEL. Bewusst nicht aus der Watchlist oder
+      // der Chart-Legende — deren Anker gehoeren TradingView und wurden schon
+      // zweimal umbenannt (31.08., 21.09.); der Titel tickt seit Monaten in
+      // derselben Form. Nur Roh-Text, gedeutet wird im Prophos-Tab (Zahlformat
+      // deutsch/englisch, gleiche Regel wie tv_snapshot.parse_de_zahl). null =
+      // Titel nicht lesbar (kein Chart-Tab) — nie ein stilles 0.
+      kurs: liesKursAusTitel(),
     });
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();

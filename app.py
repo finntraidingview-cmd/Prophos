@@ -42,7 +42,7 @@ app = Flask(__name__)
 # Bei jedem Deploy-relevanten app.py-Change hochzählen — /version macht endlich
 # VERIFIZIERBAR, welcher Stand auf Railway wirklich läuft (ein HTTP 200 auf
 # irgendeinen Endpoint beweist gar nichts, Lesson vom 21.07.2026).
-APP_BUILD = "2026-09-24.1"
+APP_BUILD = "2026-09-24.2"
 
 @app.route("/version", methods=["GET"])
 def version():
@@ -450,8 +450,10 @@ def copier_proxy(path):
         # tv-lesen / tv-close (24.09.2026, Orbit-V2-Rundgang und -Schließen): der Bot schaltet
         # Konten um und wartet auf frische Reader-Stände — Panel-Timeout bis 165 s+. Mit 25 s
         # brach der Proxy ab, während der Bot weiterklickte (PC-Agent-Befund).
+        # hedge-solo (24.09.2026, Winning-Day-Gegenhedge): das Panel wartet bis 14 s auf die
+        # Quittung des Copiers — 25 s waeren knapp, ein Proxy-Abbruch saehe wie „nicht gesendet" aus.
         _tmo = (310 if path in ("master-order", "master-close", "tv-order", "tv-lesen", "tv-close")
-                else 270 if path == "tv-konto" else 25)
+                else 270 if path == "tv-konto" else 40 if path == "hedge-solo" else 25)
         r = requests.request(
             request.method, f"{COPIER_PANEL}/api/{path}",
             params=request.args,
@@ -6250,8 +6252,9 @@ WD_PLAN_FELDER = {
     "slave_name", "slave_firm", "master_risk", "master_contracts", "slave_risk",
     "multiplier", "master_tp", "master_sl", "priority", "planned_for", "notes",
     "status", "richtung", "route", "master_symbol", "start_um",
+    "hedge_eur",   # Fusion-Gegenhedge in € (24.09.2026 abends, Winning Days ohne Duplikum)
 }
-WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol"}
+WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur"}
 
 # ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
 # Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem

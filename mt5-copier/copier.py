@@ -538,6 +538,79 @@ MAGIC_UMZUG = {26674215: 779215, 26674216: 779216}
 FAMILIE_MIN = 760000
 FAMILIE_MAX = 779999
 
+# ── Eigenstaendige Fusion-Position („Solo-Hedge", 24.09.2026 abends) ──────────
+# Finn: „Winning Days jetzt gegenhedgen, ohne Duplikum: Puls platziert in
+# TradingView, direkt danach geht auf Fusion die Gegen-Order im Verhaeltnis rein,
+# und sobald NQ den Take Profit (+ 2–3 Punkte) erreicht, wird sie geschlossen."
+# Die Position gehoert zu KEINEM Master-Snapshot — deshalb eine magic AUSSERHALB
+# der Familie 760000–779999: kein Copier auf keinem PC am geteilten Fusion-Konto
+# haelt sie fuer einen eigenen Hedge ohne Master und schliesst sie (hedge_book
+# filtert nach fleet_magics UND Kommentar '<prefix>-<Ziffern>'; der Kommentar
+# hier traegt bewusst keinen Bindestrich-Ziffern-Block). Befehle kommen vom
+# Panel per Datei (dasselbe Muster wie plans.json/echo_pause.flag): das Panel
+# schreibt hedge_solo_auftrag.json, der Copier arbeitet pro Tick ab und legt das
+# Ergebnis in hedge_solo_ergebnis.json — EIN Prozess am Hedge-Terminal, wie
+# README.md verlangt (zwei Python-Prozesse am selben Terminal sind nicht stabil).
+SOLO_MAGIC = 790001
+SOLO_KOMMENTAR = "PXsolo"
+SOLO_AUFTRAG = "hedge_solo_auftrag.json"
+SOLO_ERGEBNIS = "hedge_solo_ergebnis.json"
+SOLO_MAX_ALTER_S = 40.0        # aeltere Auftraege werden verworfen, nie verspaetet ausgefuehrt
+SOLO_ERGEBNIS_MAX = 100        # Ring der letzten Ergebnisse (= Erledigt-Liste, neustart-fest)
+
+
+def solo_lots(eur, punkte, wert_pro_punkt, si):
+    """REIN RECHNEND (testbar): Lots fuer „eur Euro Risiko ueber punkte Punkte".
+    wert_pro_punkt = Kontowaehrung je Punkt je Lot (tick_value / tick_size beim
+    Broker). Ergebnis auf das Broker-Raster (norm_vol); 0.0 = unter Mindestlot."""
+    if not (float(eur) > 0 and float(punkte) > 0 and float(wert_pro_punkt) > 0):
+        return 0.0
+    return norm_vol(si, float(eur) / (float(punkte) * float(wert_pro_punkt)))
+
+
+def solo_notfall_sl(fill, richtung, punkte, *, faktor, min_puffer_punkte, point, digits):
+    """REIN RECHNEND (testbar): Broker-seitiger Notfall-SL der Solo-Position —
+    Finns „110 %": dort, wo der Master seinen TP erreicht (punkte hinter dem
+    Einstieg), plus (faktor − 100) % Puffer, mindestens min_puffer_punkte. Der
+    Hedge laeuft GEGEN den Master: Master-TP = Hedge-Verlust, also ein SL.
+    richtung = Richtung der HEDGE-Order (buy/sell). Kein Master-SL → kein TP.
+    Sicherheitsnetz fuer den Fall, dass der Waechter im Prophos-Tab nicht
+    schliesst (Tab zu, Kurs-Feed weg) — der Normalweg ist der Waechter."""
+    if not (float(fill) > 0 and float(punkte) > 0):
+        return 0.0
+    dist = float(punkte) * float(faktor) / 100.0
+    dist = max(dist, float(punkte) + float(min_puffer_punkte) * float(point))
+    # SELL-Hedge verliert bei STEIGENDEM Kurs → SL ueber dem Einstieg; BUY-Hedge darunter
+    lvl = float(fill) + dist if str(richtung).lower() == "sell" else float(fill) - dist
+    return max(round(lvl, int(digits)), float(point))
+
+
+def solo_auftraege_lesen(pfad, erledigt, jetzt):
+    """REIN RECHNEND (testbar): offene Auftraege aus der Datei — nur mit cmd_id,
+    noch nicht erledigt, juenger als SOLO_MAX_ALTER_S. -> (auftraege, verworfen)"""
+    try:
+        roh = load_json(pfad)
+    except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError):
+        return [], []
+    if not isinstance(roh, list):
+        return [], []
+    offen, verworfen = [], []
+    for a in roh:
+        if not isinstance(a, dict) or not a.get("cmd_id"):
+            continue
+        cid = str(a["cmd_id"])
+        if cid in erledigt:
+            continue
+        try:
+            alter = float(jetzt) - float(a.get("at") or 0)
+        except (TypeError, ValueError):
+            alter = 1e9
+        if alter > SOLO_MAX_ALTER_S:
+            verworfen.append(cid)
+            continue
+        offen.append(a)
+    return offen, verworfen
+
 
 def magic_umzug_ziel(master_login, magic, belegte_magics):
     """REIN RECHNEND (testbar): neue magic fuer einen Umzugs-Kandidaten oder
@@ -1249,7 +1322,11 @@ def main():
                 # Preis-Rundung der Notfall-Level (10014-Verwandter 'invalid
                 # price' bei zu vielen Nachkommastellen).
                 "point": float(si.point or 0.01),
-                "digits": int(si.digits or 2)}
+                "digits": int(si.digits or 2),
+                # Solo-Hedge (24.09.2026): Kontowaehrung je Tick je Lot + Tickgroesse →
+                # Wert je PUNKT je Lot = tick_value / tick_size (NAS100 EUR-Konto ≈ 0,85)
+                "tick_value": float(getattr(si, "trade_tick_value", 0.0) or 0.0),
+                "tick_size": float(getattr(si, "trade_tick_size", 0.0) or 0.0)}
 
     def send(m, req, what):
         # Rueckgabe seit 15.08.2026 das order_send-Result statt True: result.deal
@@ -1383,6 +1460,183 @@ def main():
     update_waiting = False
     log(f"Warte auf Snapshots von {len(masters)} Master-Terminal(s)…")
 
+    # ── Solo-Hedge: Auftraege vom Panel abarbeiten (24.09.2026 abends) ─────────
+    solo_pfad = os.path.join(here, SOLO_AUFTRAG)
+    solo_erg_pfad = os.path.join(here, SOLO_ERGEBNIS)
+
+    def solo_ergebnisse():
+        try:
+            e = load_json(solo_erg_pfad)
+            return e if isinstance(e, dict) else {}
+        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError):
+            return {}
+
+    def solo_ergebnis_schreiben(alle, cmd_id, erg):
+        erg = dict(erg)
+        erg["cmd_id"] = cmd_id
+        erg["at"] = datetime.now().isoformat(timespec="seconds")
+        alle[cmd_id] = erg
+        # Ring: aelteste raus (Schluessel-Reihenfolge = Einfuegereihenfolge)
+        while len(alle) > SOLO_ERGEBNIS_MAX:
+            alle.pop(next(iter(alle)))
+        tmp = solo_erg_pfad + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(alle, f, ensure_ascii=False, indent=1)
+            for _ in range(5):
+                try:
+                    os.replace(tmp, solo_erg_pfad)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+        except Exception as e:
+            log(f"⚠ Solo-Ergebnis {cmd_id} nicht geschrieben: {type(e).__name__}: {e}")
+
+    def solo_pl_aus_history(ticket):
+        """Realisierter P&L der Position aus der Deal-Historie (Profit + Kommission
+        + Swap + Gebuehr) — der Beweis fuer slave_pl. None, wenn die Historie noch
+        nachhinkt ('Beweis oder leer')."""
+        for _ in range(8):
+            try:
+                deals = mt5.history_deals_get(position=int(ticket))
+            except Exception:
+                deals = None
+            if deals:
+                out = [d for d in deals if int(getattr(d, "entry", 0)) == 1]     # DEAL_ENTRY_OUT
+                if out:
+                    return round(sum(float(d.profit) + float(d.commission) + float(d.swap)
+                                     + float(getattr(d, "fee", 0.0) or 0.0) for d in deals), 2)
+            time.sleep(0.25)
+        return None
+
+    def solo_open(m, a):
+        sym = str(a.get("symbol") or "NAS100")
+        richtung = str(a.get("richtung") or "").lower()
+        if richtung not in ("buy", "sell"):
+            return {"ok": False, "code": "befehl", "msg": "richtung muss buy/sell sein"}
+        si = sym_info(sym)
+        if si is None:
+            return {"ok": False, "code": "symbol", "msg": f"Symbol {sym} im Hedge-Terminal unbekannt"}
+        wert = (si["tick_value"] / si["tick_size"]) if (si["tick_value"] > 0 and si["tick_size"] > 0) else 0.0
+        lots = float(a.get("lots") or 0)
+        if not lots > 0:
+            lots = solo_lots(a.get("eur") or 0, a.get("punkte") or 0, wert, si)
+        if not lots > 0:
+            return {"ok": False, "code": "lots", "wert_pro_punkt": wert,
+                    "msg": f"Lots nicht berechenbar (eur {a.get('eur')}, punkte {a.get('punkte')}, "
+                           f"{wert:.4f} {hedge_acc.get('currency') or ''}/Pkt/Lot) — unter Mindestlot oder Werte fehlen"}
+        mt5.symbol_select(sym, True)
+        tick = mt5.symbol_info_tick(sym)
+        if tick is None or not (tick.bid and tick.ask):
+            return {"ok": False, "code": "kurs", "msg": f"kein Kurs fuer {sym} (Markt zu?)"}
+        typ = mt5.ORDER_TYPE_SELL if richtung == "sell" else mt5.ORDER_TYPE_BUY
+        price = tick.bid if richtung == "sell" else tick.ask
+        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": typ,
+               "price": price, "deviation": m.deviation, "magic": SOLO_MAGIC,
+               "comment": SOLO_KOMMENTAR, "type_time": mt5.ORDER_TIME_GTC,
+               "type_filling": filling_for(m, sym)}
+        r = send(m, req, f"SOLO OPEN {richtung.upper()} {lots} {sym} ({a.get('eur')} € / {a.get('punkte')} Pkt)")
+        if r is None:
+            le = mt5.last_error()
+            return {"ok": False, "code": "abgelehnt", "retry_ok": False, "lots": lots, "wert_pro_punkt": wert,
+                    "msg": f"order_send abgelehnt ({le}) — im Hedge-Terminal nachsehen"}
+        ticket = int(getattr(r, "order", 0) or 0)
+        fill = float(getattr(r, "price", 0.0) or 0.0) or float(price)
+        # Ticket der POSITION ueber den Deal nachschlagen (position_id), Fill vom Deal
+        try:
+            d = mt5.history_deals_get(ticket=int(r.deal)) if getattr(r, "deal", 0) else None
+            if d:
+                ticket = int(d[0].position_id) or ticket
+                fill = float(d[0].price) or fill
+        except Exception:
+            pass
+        erg = {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0), "lots": lots,
+               "fill": fill, "symbol": sym, "richtung": richtung, "wert_pro_punkt": round(wert, 5),
+               "eur_je_punkt": round(wert * lots, 4), "waehrung": hedge_acc.get("currency"),
+               "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0}
+        # Notfall-SL (Finns „110 %") — nur mit TP-Distanz; ein Fehler hier ist kein Abbruch
+        try:
+            punkte = float(a.get("punkte") or 0)
+            if punkte > 0 and ticket:
+                sl = solo_notfall_sl(fill, richtung, punkte, faktor=m.notfall_faktor,
+                                     min_puffer_punkte=m.notfall_puffer, point=si["point"], digits=si["digits"])
+                if sl > 0:
+                    ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
+                                  "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},
+                              f"SOLO NOTFALL-SL {sl} {sym} (Ticket {ticket})")
+                    erg["sl"] = sl if ok else 0.0
+                    if not ok:
+                        erg["sl_fehler"] = str(mt5.last_error())
+        except Exception as e:
+            erg["sl_fehler"] = f"{type(e).__name__}: {e}"
+        return erg
+
+    def solo_close(m, a):
+        try:
+            ticket = int(a.get("ticket") or 0)
+        except (TypeError, ValueError):
+            ticket = 0
+        if not ticket:
+            return {"ok": False, "code": "befehl", "msg": "ticket fehlt"}
+        pos = mt5.positions_get(ticket=ticket)
+        if not pos:
+            # Schon zu (Broker-SL, Hand) → P&L aus der Historie, kein Fehler
+            pl = solo_pl_aus_history(ticket)
+            return {"ok": True, "schon_zu": True, "ticket": ticket, "pl": pl,
+                    "msg": "Position war schon zu" + (f" · P&L {pl}" if pl is not None else " · P&L noch nicht in der Historie")}
+        p = pos[0]
+        if int(getattr(p, "magic", 0) or 0) != SOLO_MAGIC:
+            return {"ok": False, "code": "fremd", "retry_ok": False,
+                    "msg": f"Ticket {ticket} traegt magic {getattr(p, 'magic', 0)} — kein Solo-Hedge, wird NICHT angefasst"}
+        sym = str(p.symbol)
+        tick = mt5.symbol_info_tick(sym)
+        lang = int(p.type) == 0
+        ctype = mt5.ORDER_TYPE_SELL if lang else mt5.ORDER_TYPE_BUY
+        price = (tick.bid if lang else tick.ask) if tick else 0.0
+        req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": float(p.volume),
+               "type": ctype, "position": ticket, "price": price,
+               "deviation": m.deviation, "magic": SOLO_MAGIC, "comment": SOLO_KOMMENTAR + "c",
+               "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_for(m, sym)}
+        r = send(m, req, f"SOLO CLOSE {float(p.volume)} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'})")
+        if r is None:
+            return {"ok": False, "code": "abgelehnt", "retry_ok": True, "ticket": ticket,
+                    "msg": f"Close abgelehnt ({mt5.last_error()})"}
+        pl = solo_pl_aus_history(ticket)
+        return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
+                "fill_close": float(getattr(r, "price", 0.0) or 0.0), "lots": float(p.volume), "pl": pl,
+                "msg": f"geschlossen @ {getattr(r, 'price', '?')}" + (f" · P&L {pl}" if pl is not None else " · P&L folgt aus der Historie")}
+
+    def solo_abarbeiten():
+        """Pro Tick: Auftraege aus hedge_solo_auftrag.json ausfuehren, Ergebnis in
+        hedge_solo_ergebnis.json (= Erledigt-Liste). Auftraege aelter als
+        SOLO_MAX_ALTER_S werden mit 'verfallen' quittiert, nie ausgefuehrt — der
+        Copier startet bei Updates/Config-Aenderungen neu, ein liegengebliebener
+        OPEN darf Minuten spaeter nicht ploetzlich eine Position aufreissen."""
+        alle = solo_ergebnisse()
+        offen, verworfen = solo_auftraege_lesen(solo_pfad, set(alle.keys()), time.time())
+        for cid in verworfen:
+            solo_ergebnis_schreiben(alle, cid, {"ok": False, "code": "verfallen", "retry_ok": False,
+                                                 "msg": f"Auftrag aelter als {SOLO_MAX_ALTER_S:.0f} s — nicht ausgefuehrt"})
+        for a in offen:
+            cid = str(a["cmd_id"])
+            m0 = masters[0]
+            try:
+                if a.get("aktion") == "open":
+                    if is_paused():
+                        erg = {"ok": False, "code": "pausiert", "retry_ok": True,
+                               "msg": "Echo ist pausiert (Not-Aus) — kein Solo-Open"}
+                    else:
+                        erg = solo_open(m0, a)
+                elif a.get("aktion") == "close":
+                    erg = solo_close(m0, a)
+                else:
+                    erg = {"ok": False, "code": "befehl", "msg": f"unbekannte aktion {a.get('aktion')!r}"}
+            except Exception as e:
+                erg = {"ok": False, "code": "absturz", "retry_ok": a.get("aktion") == "close",
+                       "msg": f"{type(e).__name__}: {str(e)[:200]}"}
+            log(f"[solo] {a.get('aktion')} {cid[:8]}: {'OK' if erg.get('ok') else 'FEHLER'} — {str(erg.get('msg') or '')[:160]}")
+            solo_ergebnis_schreiben(alle, cid, erg)
+
     def master_status(m, snap, hedges, connected):
         # Ein EINGEFRORENER Snapshot ist genauso blind wie ein fehlender — nur
         # unsichtbarer: die Datei von gestern liest sich gueltig (Fund 15.08.2026,
@@ -1449,6 +1703,8 @@ def main():
             # Positionen auf dem Hedge-Konto OHNE Prophos-Magic (None = nicht
             # pruefbar): Finns 'Slave-Order ohne Master'-Alarm im Fleet-Block.
             "hedge_fremde": hedge_acc.get("fremde"),
+            # Solo-Hedges (Winning-Day-Gegenhedge, 24.09.2026): eigene Liste, kein Alarm
+            "hedge_solo": hedge_acc.get("solo"),
             # Verbuchte Closes aus dem Sidecar-Ring — neustart-fest
             "closed_hedges": m.closed[-50:],
         }
@@ -1537,17 +1793,33 @@ def main():
             # Prophos-Familie FAMILIE_MIN-FAMILIE_MAX (seit 11.09.2026
             # 760000-779999): die Hedges der ANDEREN PCs am selben
             # Hedge-Konto tragen Familien-Magics und sind kein Alarm.
-            fremde = []
+            fremde, solo = [], []
             try:
                 for p_ in (mt5.positions_get() or []):
                     mg = int(getattr(p_, "magic", 0) or 0)
                     if FAMILIE_MIN <= mg <= FAMILIE_MAX:
                         continue
+                    if mg == SOLO_MAGIC:
+                        # Solo-Hedge (24.09.2026): kein Alarm, eigene Liste — Prophos zeigt
+                        # Live-P&L + Notfall-SL auf der Winning-Day-Karte (auch am Mac via mt5_live)
+                        solo.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
+                                     "type": int(p_.type), "volume": float(p_.volume),
+                                     "profit": float(p_.profit), "price_open": float(p_.price_open),
+                                     "sl": float(getattr(p_, "sl", 0.0) or 0.0),
+                                     "tp": float(getattr(p_, "tp", 0.0) or 0.0)})
+                        continue
                     fremde.append({"ticket": int(p_.ticket), "symbol": str(p_.symbol),
                                    "type": int(p_.type), "volume": float(p_.volume)})
             except Exception:
                 fremde = None
+                solo = None
             hedge_acc["fremde"] = fremde
+            hedge_acc["solo"] = solo
+            # Solo-Auftraege vom Panel (open/close) — nach dem Bestand, vor den Mastern
+            try:
+                solo_abarbeiten()
+            except Exception as e:
+                log(f"⚠ Solo-Auftraege: {type(e).__name__}: {str(e)[:120]}")
             # USD-Kurs der Hedge-Waehrung fuer die Symmetrie-Anzeige (15.08.2026,
             # Finns Live-Symmetrie): Hedge fuehrt EUR, Master USD — ohne Kurs
             # waere das Verhaeltnis um den EURUSD-Abstand verzerrt. Fehlt das
@@ -1931,7 +2203,9 @@ def main():
 
                 # busy = dieser Master hat offene Positionen ODER offene Hedges —
                 # solange wird kein Selbst-Update-Neustart ausgefuehrt.
-                m.busy = bool(snap["positions"]) or bool(hedges)
+                # Solo-Hedge offen (24.09.2026): der Close-Auftrag braucht einen laufenden
+                # Copier — ein Update-Neustart wartet, bis auch die Solo-Position zu ist.
+                m.busy = bool(snap["positions"]) or bool(hedges) or bool(hedge_acc.get("solo"))
 
                 if time.time() - m.last_status > 1.0:
                     m.last_status = time.time()

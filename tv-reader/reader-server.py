@@ -71,6 +71,12 @@ _an = not os.path.exists(AUS_FLAG)
 # die auch der Puls liest.
 _bedienfeld = None
 _bedienfeld_s = 0.0
+# Live-Kurs aus dem Tab-Titel (Userscript 0.6.0, 24.09.2026, Winning-Day-Gegenhedge):
+# {symbol, text, ts} + Server-Empfangszeit. Liegt BEWUSST neben _stand: der
+# Pause-Schalter friert die Positionen ein (stale != flat), der Kurs darf aber
+# weiter ticken — er ist eine Beobachtung des Markts, kein Hedge-Befehl.
+_kurs = None
+_kurs_s = 0.0
 _dump_bis = 0.0   # bis zu dieser Server-Zeit fordert der Server einen Dump an
 
 # Text-Suche (21.09.2026, Futures-Puls Schritt 2): der Puls nennt Texte (die
@@ -122,6 +128,10 @@ def _mit_an(stand):
     out["today_pnl_text"] = bf.get("today_pnl_text")
     out["today_label"] = bf.get("today_label")
     out["summary_alter_s"] = round(time.time() - _bedienfeld_s, 3) if _bedienfeld_s else None
+    # Kurs aus dem Titel (0.6.0): rein durchgereicht, mit eigenem Alter — der
+    # Prophos-Tab schreibt ihn nach tv_kurse (Cloud), der Hedge-Waechter liest dort.
+    out["kurs"] = _kurs
+    out["kurs_alter_s"] = round(time.time() - _kurs_s, 3) if _kurs_s else None
     return out
 
 
@@ -168,7 +178,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
-        global _such_texte, _such_bis
+        global _such_texte, _such_bis, _kurs, _kurs_s
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -244,6 +254,16 @@ class Handler(BaseHTTPRequestHandler):
                 f"Unbekannter Pfad {self.path!r} — dieser reader-server kennt "
                 "/positions, /schalter, /bedienfeld, /dump-an, /suche. Aeltere Version?"})
             return
+
+        # Kurs aus dem Titel (0.6.0) VOR dem Pause-Gate uebernehmen — siehe
+        # Kommentar bei _kurs. Nur, wenn das Feld wirklich ein Kurs-Objekt ist;
+        # null (kein Chart-Tab) laesst den letzten Stand stehen, das Alter sagt es.
+        k = daten.get("kurs")
+        if isinstance(k, dict) and k.get("symbol") and k.get("text"):
+            _kurs = {"symbol": str(k.get("symbol"))[:32], "text": str(k.get("text"))[:32],
+                     "ts": k.get("ts") or daten.get("ts"),
+                     "sichtbar": daten.get("sichtbar") is not False}
+            _kurs_s = time.time()
 
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
         # (Badge zeigt es), der Stand friert ein — stale != flat.

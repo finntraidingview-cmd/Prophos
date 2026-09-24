@@ -5605,6 +5605,15 @@
               <label>Symbol (Master)</label>
               <input type="text" class="input mono" id="tp-order-symbol" placeholder="z.B. NDX100">
             </div>
+            <!-- Fusion-Gegenhedge (24.09.2026 abends, nur Orbit V2): Betrag in €, den die Gegen-Order auf Fusion
+                 über die TP-Distanz trägt. Leer = kein Hedge. Vorbelegt aus hedge_eur bzw. der Farmer-Staffel. -->
+            <div class="field" id="tp-order-hedge-field" style="grid-column:1 / -1;display:none">
+              <label>Fusion-Gegenhedge (€) <span style="color:var(--sub);font-weight:400">leer = kein Hedge · schließt, sobald NQ den TP erreicht</span></label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="number" class="input mono" id="tp-order-hedge" min="0" step="5" placeholder="leer = kein Hedge" style="flex:0 0 130px">
+                <span id="tp-order-hedge-hint" style="font-size:12px;color:var(--sub)"></span>
+              </div>
+            </div>
             <!-- Geplante Startzeit (22.09.2026, Finn: „ich plane einen Trade und gebe ihm eine Uhrzeit,
                  wann der Bot die Order losschicken soll"). Leer = manuell über „Starten". Der PC-Tab
                  feuert zur Zeit (+ 0–60 s Zufall) den normalen Start-Weg. -->
@@ -7813,6 +7822,13 @@
               <div class="wd-set-card">
                 <h4>Ablauf <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
                 <label class="wd-schalter"><input type="checkbox" id="wd-aktiv"><span><b>Automatik</b><small>nachts um 00:10 von allein würfeln und planen — starten nur, wenn oben „Farmer SCHARF" steht</small></span></label>
+                <!-- Fusion-Gegenhedge (24.09.2026 abends, Finn: „Winning Days jetzt gegenhedgen, ohne Duplikum"): Betrag je Konto aus der
+                     Hedge-Staffel, Puls öffnet ihn direkt nach der Order auf Fusion, der Wächter schließt ihn am TP (+ Puffer). -->
+                <label class="wd-schalter"><input type="checkbox" id="wd-hedge-an"><span><b>Fusion-Gegenhedge</b><small>je Konto den Staffel-Betrag als Gegen-Order auf Fusion — zu, sobald NQ den TP erreicht (Notfall-SL 110 % broker-seitig)</small></span></label>
+                <div class="wd-felder drei" id="wd-hedge-felder">
+                  <div class="wd-feld"><label>Puffer über TP (NQ-Pkt)</label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="3" title="so viele Punkte über/unter dem TP-Level, bevor der Hedge geschlossen wird (Finn: „2, 3 Punkte mehr")"></div>
+                  <div class="wd-feld" style="grid-column:span 2"><label>&nbsp;</label><div class="kf" id="wd-hedge-kurs" style="padding-top:8px">Kurs-Feed: —</div></div>
+                </div>
                 <div class="wd-felder drei">
                   <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
                   <div class="wd-feld"><label>Instrument</label><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select></div>
@@ -10099,7 +10115,10 @@
       const an = admOhneHedge()
       const v = document.querySelector('#dashboard-view section.view[data-view="kasse"]')
       if(v) v.classList.toggle('adm-ohne-hedge', an)
-      const st = $('wd-staffel-card'); if(st) st.hidden = an        // Hedge-Staffel = Slave-Betrag, ohne Slave sinnlos
+      // Hedge-Staffel = Slave-Betrag, ohne Slave sinnlos — AUSSER der Fusion-Gegenhedge (24.09.2026 abends) ist an,
+      // dann ist die Staffel wieder die Quelle des Hedge-Betrags
+      let hedgeAn = false; try{ hedgeAn = !!wdVorplanRegeln().hedge_an }catch(_){}
+      const st = $('wd-staffel-card'); if(st) st.hidden = an && !hedgeAn
       const wc = $('wd-weg-chip');     if(wc) wc.hidden = !an       // „Orbit V2 · ohne Hedge" im Farmer-Kopf
     }
     const admUsd = new Intl.NumberFormat('de-DE', { style:'currency', currency:'USD', minimumFractionDigits:0, maximumFractionDigits:0 })
@@ -17991,6 +18010,240 @@
   }
   /* ========== ENDE ORBIT V2 ========== */
 
+  /* ========== FUSION-GEGENHEDGE für Winning Days („Solo-Hedge", 24.09.2026 abends) ==========
+   * Finn: „Ich will von Duplikum 100 % wegkommen. Ein 24/7-PC liest per Reader die aktuellen NQ-/MNQ-Punkte.
+   * Wird ein Winning Day per Puls platziert, merkt sich Prophos, bei welcher Punktzahl der Take Profit liegt,
+   * öffnet direkt danach auf Fusion die Gegen-Order im Verhältnis, und sobald NQ den TP (+ 2–3 Punkte)
+   * erreicht, wird die Fusion-Order geschlossen. Zeitversatz von 20–30 s ist mir egal."
+   *
+   * Bausteine (alles vorhandene Wege, nichts Neues am Terminal):
+   *   Kurs   — Userscript 0.6.0 liest den Tab-Titel → reader-server → epBrueckeTick → tv_kurse (eine Zeile je PC).
+   *   Hände  — /api/hedge-solo im Panel schreibt einen Auftrag, copier.py (der EINE Prozess am Hedge-Terminal)
+   *            sendet mit magic 790001 (außerhalb der Copier-Familie: kein Copier hält sie für einen Waisen-Hedge)
+   *            und setzt Finns „110 %"-Notfall-SL broker-seitig als Sicherheitsnetz.
+   *   Merken — mt5_baseline.hedge am Plan: {status offen|geschlossen|fehler|unklar, ticket, lots, eur, punkte,
+   *            einstieg_nq, tp_level_nq, fill, sl, pc, at, pl, grund}. Sichtbar auch am Mac (Karte).
+   *   Wächter— hedgeWacheTick (PC-Tab, 5 s): TP-Level + Puffer erreicht → schließen (Grund tp); Plan nicht mehr
+   *            „open" (Rundgang-Ende, Auto-Close, Erledigt, Schließen) → schließen (Grund master_ende).
+   * Verhältnis: hedge_eur (Staffel des Farmers / Order-Popup) über die TP-Distanz in Punkten — die Lots rechnet
+   * der Copier aus dem Broker-Punktwert (tick_value/tick_size), nie aus einer Konstante. Kein Master-SL → kein
+   * Hedge-TP: der Hedge endet mit dem Master (Rundgang/Auto-Close) oder am Notfall-SL.
+   * Doktrin unverändert: Beweis oder leer — Ticket, Fill, P&L kommen vom Copier (Deal-Historie), nie geschätzt. */
+  const HEDGE_KURS_MAX_ALTER_MS = 30000     // Kurs älter als 30 s zählt nicht (Feed weg, Tab verdeckt)
+  const HEDGE_PUFFER_STD = 3               // Finns „2, 3 Punkte mehr"
+  // Zahl aus einem TradingView-Titel/Feld — dieselbe Regel wie tv_snapshot.parse_de_zahl: stehen beide Trenner
+  // drin, ist der LETZTE das Dezimalzeichen; reine Dreiergruppen sind Tausender; sonst ist der einzige Trenner
+  // das Dezimalzeichen. „30,448.25" → 30448.25 · „29.491,75" → 29491.75 · „30,448" → 30448 · „30448.5" → 30448.5
+  function tvKursZahl(text){
+    let t = String(text == null ? '' : text).replace(/−/g, '-').replace(/[\s']/g, '').trim()
+    if(!t) return null
+    const neg = t.startsWith('-'); t = t.replace(/^[-+]/, '')
+    if(!/^\d[\d.,]*$/.test(t)) return null
+    const iP = t.lastIndexOf('.'), iK = t.lastIndexOf(',')
+    let s
+    if(iP >= 0 && iK >= 0){ const dez = iP > iK ? '.' : ','; s = t.replace(dez === '.' ? /,/g : /\./g, '').replace(',', '.') }
+    else if(iP >= 0 || iK >= 0){
+      const tr = iP >= 0 ? '.' : ','
+      const teile = t.split(tr)
+      const gruppen = teile.length > 1 && teile.slice(1).every(x => x.length === 3) && teile[0].length <= 3
+      s = gruppen ? teile.join('') : t.replace(',', '.')
+    } else s = t
+    const v = Number(s)
+    return isFinite(v) ? (neg ? -v : v) : null
+  }
+  // $-je-Punkt je Kontrakt aus der Symbolwurzel (Puls tippt den TP in $ — der Preisabstand ist TP / (ppl × Kt))
+  function hedgePplFuer(symbol){ const w = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(symbol) : ''; return w === 'NQ' ? 20 : w === 'MNQ' ? 2 : 0 }
+  // Jüngster Kurs über alle PCs (tv_kurse), 3 s gecacht. → {preis, symbol, wurzel, pc, alter_ms} | null
+  const _hedgeKurs = { at: 0, wert: null, laeuft: null }
+  async function hedgeKursLesen(){
+    if(Date.now() - _hedgeKurs.at < 3000) return _hedgeKurs.wert
+    if(_hedgeKurs.laeuft) return _hedgeKurs.laeuft
+    _hedgeKurs.laeuft = (async () => {
+      try{
+        const grenze = new Date(Date.now() - 10 * 60000).toISOString()
+        const { data } = await supabase.from('tv_kurse').select('*').gte('updated_at', grenze).order('reader_ts', { ascending: false }).limit(10)
+        let best = null
+        for(const r of (data || [])){
+          if(!r || r.preis == null || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ')) continue
+          const alter = Date.now() - (Number(r.reader_ts) || 0)
+          if(alter > HEDGE_KURS_MAX_ALTER_MS) continue
+          best = { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || r.id, alter_ms: alter }
+          break
+        }
+        _hedgeKurs.wert = best; _hedgeKurs.at = Date.now()
+      }catch(_){ _hedgeKurs.wert = null; _hedgeKurs.at = Date.now() }
+      finally{ _hedgeKurs.laeuft = null }
+      return _hedgeKurs.wert
+    })()
+    return _hedgeKurs.laeuft
+  }
+  // hedge-Objekt am Plan schreiben (Merge in mt5_baseline, Rest bleibt). Ohne Status-Guard: der Hedge lebt auf
+  // Fusion unabhängig vom Plan-Status — auch ein schon abgeschlossener Plan muss „geschlossen · P&L" tragen.
+  async function hedgeAmPlanSchreiben(planId, patch, extra){
+    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    let alt = (plan && plan.mt5Baseline) || null
+    try{ const { data } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', planId).maybeSingle(); if(data) alt = data.mt5_baseline || alt }catch(_){}
+    const base = Object.assign({}, alt || {}, { hedge: Object.assign({}, (alt && alt.hedge) || {}, patch) })
+    const upd = Object.assign({ mt5_baseline: base }, extra || {})
+    const { data, error } = await supabase.from('trade_plans').update(upd).eq('id', planId).select('*')
+    if(error) throw error
+    if(data && data[0]){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+    try{ renderTradePlans() }catch(_){}
+    return base.hedge
+  }
+  const hedgePcId = () => (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+  // Nach dem bewiesenen Kauf-Klick (tpOrbitStarten → v2AufOpen): Gegen-Order auf Fusion. r = Bot-Antwort
+  // (einstieg = Text des Avg-Fill-Preises, tv_symbol). Läuft nur am PC (dort steht das Hedge-Terminal).
+  async function hedgeSoloOeffnen(plan, r){
+    if(!plan || !(plan.hedgeEur > 0) || plan.route !== 'tvv2' || !MT5_LOCAL || typeof window.mtcApi !== 'function') return null
+    const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
+    const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0
+    const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
+    const gegen = plan.richtung === 'buy' ? 'sell' : plan.richtung === 'sell' ? 'buy' : ''
+    const at = new Date().toISOString()
+    if(!gegen || !(punkte > 0)){
+      const msg = !gegen ? 'Richtung am Plan fehlt' : `TP-Distanz nicht rechenbar (TP $${tp}, ${kt} Kt, ${ppl} $/Pkt für ${symbol || '?'})`
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'fehler', msg, eur: plan.hedgeEur, at }) }catch(_){}
+      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + msg, 'end')
+      return null
+    }
+    // Einstiegskurs: vom Bot (Avg Fill Price der Position), sonst der Live-Kurs des Feeds — mit Quelle
+    let einstieg = (r && r.einstieg != null) ? tvKursZahl(r.einstieg) : null, quelle = 'fill'
+    if(!(einstieg > 1000)){ const k = await hedgeKursLesen(); einstieg = k ? k.preis : null; quelle = k ? `feed ${k.symbol} (${Math.round(k.alter_ms / 1000)} s alt)` : 'keine' }
+    const tpLevel = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null
+    // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
+    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', richtung: gegen, eur: plan.hedgeEur, punkte, einstieg_nq: einstieg, einstieg_quelle: quelle, tp_level_nq: tpLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
+    let res = null
+    try{
+      res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, punkte, symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
+    }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+    if(res && res.ok){
+      const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, fill: res.fill, sl: res.sl || 0, symbol: res.symbol || 'NAS100',
+        wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
+      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${Number(res.lots).toLocaleString('de-DE')} Lot NAS100 @ ${Number(res.fill).toLocaleString('de-DE')} · schließt bei NQ ${tpLevel != null ? tpLevel.toLocaleString('de-DE') : '?'} (+${hedgePuffer()} Pkt)${res.sl ? ` · Notfall-SL ${Number(res.sl).toLocaleString('de-DE')}` : ''}`, 'start')
+      return h
+    }
+    const unklar = !!(res && (res.code === 'copier_stumm' || res.retry_ok === false))
+    const h = await hedgeAmPlanSchreiben(plan.id, { status: unklar ? 'unklar' : 'fehler', cmd_id: (res && res.cmd_id) || null, code: (res && res.code) || null,
+      msg: String((res && (res.msg || res.error)) || 'keine Antwort vom Panel') })
+    if(typeof atToast === 'function') atToast((unklar ? '⚠ Fusion-Hedge UNKLAR — ' : '⚠ Fusion-Hedge NICHT geöffnet: ') + h.msg, 'end')
+    return h
+  }
+  // Schließen (Grund: tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
+  const _hedgeBusy = new Set()
+  async function hedgeSoloSchliessen(plan, grund, kurs){
+    const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
+    if(!h || !(h.status === 'offen' || h.status === 'schliesst') || !h.ticket) return { ok: false, msg: 'kein offener Hedge am Plan' }
+    if(!MT5_LOCAL || typeof window.mtcApi !== 'function') return { ok: false, msg: 'nur am PC' }
+    if(h.pc && h.pc !== hedgePcId()) return { ok: false, msg: `Hedge liegt auf ${h.pc}, nicht auf diesem PC` }
+    const pid = String(plan.id)
+    if(_hedgeBusy.has(pid)) return { ok: false, msg: 'läuft schon' }
+    _hedgeBusy.add(pid)
+    try{
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'schliesst', grund, kurs_bei_close: kurs != null ? kurs : null, close_at: new Date().toISOString() }) }catch(_){}
+      let res = null
+      try{
+        res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aktion: 'close', ticket: h.ticket, grund }), timeoutMs: 38000 })
+      }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
+      if(res && res.ok){
+        const pl = (typeof res.pl === 'number' && isFinite(res.pl)) ? res.pl : null
+        // slave_pl = realisierter Fusion-P&L (Deal-Historie) — nur, wenn am Plan noch nichts steht
+        const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
+        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
+        if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${grund === 'tp' ? 'NQ am TP' : grund === 'master_ende' ? 'Master beendet' : grund})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}${res.schon_zu ? ' · war schon zu (Notfall-SL?)' : ''}`, 'end')
+        return { ok: true, pl }
+      }
+      const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
+      await hedgeAmPlanSchreiben(plan.id, { status: 'offen', close_fehler: msg, close_fehler_at: new Date().toISOString() })
+      if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geschlossen: ' + msg, 'end')
+      return { ok: false, msg }
+    }finally{ _hedgeBusy.delete(pid) }
+  }
+  function hedgePuffer(){ try{ const v = wdVorplanRegeln().hedge_puffer; return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : HEDGE_PUFFER_STD }catch(_){ return HEDGE_PUFFER_STD } }
+  // Wächter (PC-Tab, alle 5 s): eigene Pläne mit offenem Hedge auf diesem PC. Zwei Auslöser:
+  //   1) Plan nicht mehr „open" → Master ist zu (Rundgang, Auto-Close, Schließen, Erledigt) → Hedge zu.
+  //   2) Plan „open" + Kurs frisch + TP-Level (+ Puffer) erreicht → Hedge zu. Kein Kurs → nichts (Notfall-SL wacht).
+  // Dazu „unklar"-Opens mit cmd_id nachfragen (der Copier hat vielleicht doch quittiert).
+  let _hedgeWacheBusy = false
+  async function hedgeWacheTick(){
+    if(!MT5_LOCAL || _hedgeWacheBusy || typeof window.mtcApi !== 'function') return
+    _hedgeWacheBusy = true
+    try{
+      let _tp; try{ _tp = tradePlans }catch(_){ _tp = [] }
+      const meine = (_tp || []).filter(p => p && p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.pc === hedgePcId())
+      if(!meine.length) return
+      const puffer = hedgePuffer()
+      let kurs = null, kursGelesen = false
+      for(const p of meine){
+        const h = p.mt5Baseline.hedge
+        if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
+          try{
+            const e = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'ergebnis', cmd_id: h.cmd_id }), timeoutMs: 8000 })
+            if(e && e.ok && e.ticket) await hedgeAmPlanSchreiben(p.id, { status: 'offen', ticket: e.ticket, lots: e.lots, fill: e.fill, sl: e.sl || 0, symbol: e.symbol || 'NAS100', wert_pro_punkt: e.wert_pro_punkt, opened_at: new Date().toISOString(), msg: 'nachträglich quittiert' })
+            else if(e && !e.ok && e.code && e.code !== 'offen') await hedgeAmPlanSchreiben(p.id, { status: 'fehler', code: e.code, msg: String(e.msg || '') })
+          }catch(_){}
+          continue
+        }
+        if(h.status !== 'offen') continue
+        if(p.status !== 'open'){ await hedgeSoloSchliessen(p, 'master_ende'); continue }
+        if(!(h.tp_level_nq > 0)) continue
+        if(!kursGelesen){ kurs = await hedgeKursLesen(); kursGelesen = true }
+        if(!kurs) continue
+        const erreicht = p.richtung === 'buy' ? kurs.preis >= h.tp_level_nq + puffer : p.richtung === 'sell' ? kurs.preis <= h.tp_level_nq - puffer : false
+        if(erreicht) await hedgeSoloSchliessen(p, 'tp', kurs.preis)
+      }
+    }catch(e){ console.warn('[hedgeWache]', e) }
+    finally{ _hedgeWacheBusy = false }
+  }
+  setInterval(hedgeWacheTick, 5000)
+  // Live-P&L der Solo-Position: am PC aus dem Panel (mtcInstances → status.hedge_solo), am Mac aus mt5_live
+  // (window._mt5CloudRows, 5-s-Push der PCs, frisch ≤ 25 s). null = kein frischer Beweis.
+  function hedgeSoloLive(ticket){
+    if(!ticket) return null
+    const such = list => { for(const s of (list || [])){ const x = (s && Array.isArray(s.hedge_solo)) ? s.hedge_solo.find(q => q && Number(q.ticket) === Number(ticket)) : null; if(x) return x } return null }
+    try{
+      if(MT5_LOCAL && typeof window.mtcInstances === 'function'){
+        const st = window.mtcInstances()
+        const frische = Object.values(st || {}).filter(i => i && i.alive && i.fetchedAt && (Date.now() - i.fetchedAt) <= 15000).map(i => i.status)
+        const x = such(frische); if(x) return x
+      }
+      const rows = (window._mt5CloudRows || []).filter(r => r && r.alive && (Date.now() - (Date.parse(r.updated_at || '') || 0)) <= 25000).map(r => r.status)
+      return such(rows)
+    }catch(_){ return null }
+  }
+  // Karten-Chip „FUSION SELL 0,59 Lot · −4,20 € · TP 30.590" — auf offenen Karten neben MASTER, auf Überprüfen/
+  // Erledigt als Ergebnis. Eigener Knoten (nicht im data-mt5live-Ticker), eigener Knopf „Hedge zu" (data-plan-hedge-zu).
+  function hedgeChipHtml(p){
+    try{
+      if(!p || p.route !== 'tvv2') return ''
+      const h = p.mt5Baseline && p.mt5Baseline.hedge
+      if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet Puls auf Fusion die Gegen-Order über ${Number(p.hedgeEur).toLocaleString('de-DE')} € (Staffel)">🛡 Hedge ${Number(p.hedgeEur).toLocaleString('de-DE')} €</span>` : '' }
+      const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+      const lvl = h.tp_level_nq > 0 ? ` · TP ${Number(h.tp_level_nq).toLocaleString('de-DE')}` : ' · TP ?'
+      const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
+      if(h.status === 'offen' || h.status === 'schliesst'){
+        const live = hedgeSoloLive(h.ticket)
+        const pl = live ? Number(live.profit) : NaN
+        const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
+        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
+          isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
+          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} € über ${h.punkte} Pkt · Einstieg NQ ${h.einstieg_nq ?? '?'} (${h.einstieg_quelle || ''}) · schließt bei NQ ${h.tp_level_nq ?? '?'} + ${hedgePuffer()} Pkt${h.sl ? ` · Notfall-SL NAS100 ${h.sl}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
+      }
+      if(h.status === 'geschlossen'){
+        const pl = Number(h.pl)
+        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">zu · P&L ?</span>`,
+          'var(--bg)', `Fusion-Hedge geschlossen (${h.grund || '?'}) ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.schon_zu ? ' · war schon zu (Notfall-SL?)' : ''}`)
+      }
+      if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
+      if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
+      return box(`<span style="font-size:11px;color:#b91c1c">Fehler</span>`, 'rgba(240,68,56,.08)', `Fusion-Hedge nicht geöffnet: ${h.msg || h.code || '?'}`)
+    }catch(_){ return '' }
+  }
+  window.hedgeSoloSchliessen = hedgeSoloSchliessen
+  /* ========== ENDE FUSION-GEGENHEDGE ========== */
+
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
    * Finns Wunsch: bei laufenden Duplikium-Trades die Lots von Master (Fusion)
    * und Slave live sehen — das Pendant zu den MASTER/HEDGE-Chips der MT5-Route —
@@ -24652,6 +24905,9 @@
       // die einzige P&L-Quelle der MT5-Route ('Beweis oder leer').
       route:       row.route || null,
       mt5Baseline: row.mt5_baseline || null,
+      // Fusion-Gegenhedge in € (sql/2026-09-24_tv_kurse_hedge_eur.sql): NULL = kein Hedge. Schreiben nur
+      // Order-Popup und Farmer (Status-Guard planned) — bewusst NICHT in planToRow (ein Modal-Edit darf ihn nicht nullen).
+      hedgeEur:    row.hedge_eur != null ? Number(row.hedge_eur) : null,
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
       // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
       richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null,
@@ -25666,7 +25922,9 @@
         // genauso laut wie auf der geplanten Karte.
         const mirrorTot = (typeof mirrorPlanIsArmed === 'function' && mirrorPlanIsArmed(p.id) && mirrorPlanEngineTot(p.id))
           ? `<span class="tc2-chip tc2-chip-issue" title="Die Mirror-Engine ist weg (Backend neu gestartet?) — der Trade läuft UNGESPIEGELT. Vor einem Neustart im MT5 prüfen, ob der alte Hedge noch offen ist.">🪞 UNGESPIEGELT</span>` : ''
-        metric = mirrorTot + mt5Live + dupLive + (p.startedAt
+        // Fusion-Gegenhedge (24.09.2026 abends): eigener Chip neben MASTER, nur Orbit V2 mit hedge_eur
+        const hedgeChip = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml(p) : ''
+        metric = mirrorTot + mt5Live + hedgeChip + dupLive + (p.startedAt
           ? `<span class="tc2-timer tc-live-timer" data-started="${p.startedAt}">—<span style="color:var(--sub-2)"> live</span></span>`
           : `<span class="tc2-timer">live</span>`)
       }
@@ -25677,6 +25935,8 @@
       const parts = []
       if(p.masterPl != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.masterPl)}">$${fmtR(p.masterPl)}</span>`)
       if(p.slavePl  != null) parts.push(`<span class="tc2-pnl" style="color:${colR(p.slavePl)}">${sCur}${fmtR(p.slavePl)}</span>`)
+      // Fusion-Gegenhedge (24.09.2026): Stand des Hedges auch auf „Überprüfen" (offen = noch nicht zu!)
+      { const hc = (typeof hedgeChipHtml === 'function') ? hedgeChipHtml(p) : ''; if(hc) parts.push(hc) }
       metric = parts.length
         ? parts.join('') + `<span class="tc2-chip" style="background:rgba(245,158,11,.14);color:#b45309">prüfen</span>`
         : `<span class="tc2-pending-lbl">🟠 beendet — P&L wird geladen…</span>`
@@ -25778,13 +26038,21 @@
         : (istV2Karte && !isPending && p.route !== 'tsv2')
           ? `<button class="btn btn-ghost tc2-btn" data-plan-v2-schliessen="${p.id}" title="${p.route === 'mt5v2' ? 'Master-Position schließen — Puls klickt im MT5-Terminal (ohne Hedge)' : 'Position flatten — Puls schließt in TradingView und liest Today’s P&L'}" style="color:#D92D20">Schließen</button>`
           : ''
+      // Fusion-Gegenhedge (24.09.2026): „Hedge zu" nur am PC, der ihn hält (eigener Handler data-plan-hedge-zu)
+      const hedgeZuBtn = (p.route === 'tvv2' && MT5_LOCAL && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'offen'
+                          && (!p.mt5Baseline.hedge.pc || (typeof mt5FleetPcId === 'function' && p.mt5Baseline.hedge.pc === mt5FleetPcId())))
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Nur die Fusion-Gegenposition schließen (Master läuft weiter)" style="color:#B45309">Hedge zu</button>` : ''
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-back="${p.id}" title="Zurück zu Geplant">↺</button>
-        ${closeBtn}
+        ${hedgeZuBtn}${closeBtn}
         <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">${isPending ? 'Abschließen →' : 'Erledigt'}</button>`
     } else if(isReview){
+      const hedgeZuBtnR = (p.route === 'tvv2' && MT5_LOCAL && p.mt5Baseline && p.mt5Baseline.hedge && p.mt5Baseline.hedge.status === 'offen'
+                           && (!p.mt5Baseline.hedge.pc || (typeof mt5FleetPcId === 'function' && p.mt5Baseline.hedge.pc === mt5FleetPcId())))
+        ? `<button class="btn btn-ghost tc2-btn" data-plan-hedge-zu="${p.id}" title="Fusion-Gegenposition schließen (Master ist schon zu)" style="color:#B45309">Hedge zu</button>` : ''
       actions = `
         <button class="btn btn-ghost tc2-btn" data-plan-reopen="${p.id}" title="Zurück zu Offen (Fehlerkennung)">↺</button>
+        ${hedgeZuBtnR}
         <button class="btn btn-primary tc2-btn" data-plan-complete="${p.id}">Überprüfen</button>`
     } else if(isCompleted){
       actions = `
@@ -26182,6 +26450,16 @@
     document.querySelectorAll('[data-plan-v2-schliessen]').forEach(btn => {
       btn.addEventListener('click', () => {
         if(typeof tpV2PlanSchliessen === 'function') tpV2PlanSchliessen(btn.dataset.planV2Schliessen)
+      })
+    })
+    // „Hedge zu" auf Orbit-V2-Karten (24.09.2026 abends, Fusion-Gegenhedge) — eigener Handler, eigene Funktion
+    document.querySelectorAll('[data-plan-hedge-zu]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const p = tradePlans.find(x => String(x.id) === String(btn.dataset.planHedgeZu))
+        if(!p || typeof hedgeSoloSchliessen !== 'function') return
+        if(!confirm(`Fusion-Gegenposition zu ${p.masterName || 'diesem Plan'} jetzt schließen?`)) return
+        btn.disabled = true; btn.textContent = 'schließt…'
+        try{ await hedgeSoloSchliessen(p, 'hand') }finally{ try{ renderTradePlans() }catch(_){} }
       })
     })
     document.querySelectorAll('[data-plan-start]').forEach(btn => {
@@ -28195,6 +28473,28 @@
     const sltpBox = document.getElementById('tp-order-sltp')
     if(sltpBox){ sltpBox.checked = localStorage.getItem('prophos_tp_order_sltp') !== '0' }
     tpOrderSltpApply()
+    // Fusion-Gegenhedge (24.09.2026 abends): Feld nur bei Orbit V2. Vorbelegung: gespeicherter hedge_eur, sonst die
+    // Farmer-Staffel des Kontos (Funded/Live bei Futures-Firma), sonst leer. Hinweis zeigt Quelle + Puffer.
+    try{
+      const hf = document.getElementById('tp-order-hedge-field'), hi = document.getElementById('tp-order-hedge'), hh = document.getElementById('tp-order-hedge-hint')
+      if(hf && hi){
+        const v2tv = plan.route === 'tvv2'
+        hf.style.display = v2tv ? '' : 'none'
+        if(v2tv){
+          let vorschlag = (plan.hedgeEur > 0) ? plan.hedgeEur : '', quelle = (plan.hedgeEur > 0) ? 'am Plan gespeichert' : ''
+          if(vorschlag === '' && _accTp && typeof tpVorplanZeile === 'function' && typeof tpVorplanIstFunded === 'function' && tpVorplanIstFunded(_accTp)){
+            try{
+              const vp = (typeof wdVorplanRegeln === 'function') ? wdVorplanRegeln() : null
+              const z = tpVorplanZeile(_accTp, { live: (typeof tpVorplanLive === 'function') ? tpVorplanLive(_accTp) : null, slaveCurrency: '€', regeln: vp ? vp.regeln : undefined, zufall: 0.5 })
+              if(z && !z.fehler && z.slaveEur > 0 && vp && vp.hedge_an){ vorschlag = z.slaveEur; quelle = `Staffel (${z.plus != null ? (z.plus >= 0 ? '+' : '') + Number(z.plus).toLocaleString('de-DE') + ' $ über Kontogröße' : 'kleinste Stufe'})` }
+              else if(z && !z.fehler && z.slaveEur > 0) quelle = `Staffel wäre ${Number(z.slaveEur).toLocaleString('de-DE')} € — Gegenhedge im Farmer ist AUS`
+            }catch(_){}
+          }
+          hi.value = vorschlag
+          if(hh) hh.textContent = quelle ? `${quelle} · +${(typeof hedgePuffer === 'function') ? hedgePuffer() : 3} Pkt Puffer` : ''
+        }
+      }
+    }catch(_){}
     const msg = document.getElementById('tpOrderMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     const symEl = document.getElementById('tp-order-symbol')
     symEl.value = ''
@@ -28394,6 +28694,11 @@
     const _suIso = _suDate ? _suDate.toISOString() : null
     upd.start_um = _suIso
     if(_suIso !== (plan.startUm ? new Date(plan.startUm).toISOString() : null)) upd.start_um_gestartet_at = null
+    // Fusion-Gegenhedge (24.09.2026 abends): nur Orbit V2 — leer/0 = NULL = kein Hedge
+    if(plan.route === 'tvv2'){
+      const hv = parseFloat(document.getElementById('tp-order-hedge')?.value)
+      upd.hedge_eur = (isFinite(hv) && hv > 0) ? Math.round(hv * 100) / 100 : null
+    }
     try{
       const { data, error } = await supabase.from('trade_plans').update(upd)
         .eq('id', plan.id).eq('status', 'planned').select('*')
@@ -28489,7 +28794,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.467'
+  const OS_TAB_BUILD = '2026-09-22.468'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -28846,6 +29151,12 @@
           try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
         }
         await v2PlanAufOpen(plan.id, null, tvb)
+        // FUSION-GEGENHEDGE (24.09.2026 abends): direkt nach „Läuft" die Gegen-Order auf Fusion — nur bei
+        // Plänen mit hedge_eur (Farmer-Staffel / Order-Popup). r trägt einstieg (Avg Fill) + tv_symbol.
+        if(plan.hedgeEur > 0 && typeof hedgeSoloOeffnen === 'function'){
+          if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Fusion-Gegenhedge wird geöffnet…')
+          try{ await hedgeSoloOeffnen(plan, r) }catch(e){ console.warn('[hedgeSolo]', e) }
+        }
       }
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
@@ -29725,6 +30036,9 @@
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
     if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
+    // FUSION-GEGENHEDGE (24.09.2026 abends): Master ist zu → Hedge sofort zu (der Wächter täte es binnen 5 s
+    // ohnehin, sobald der Plan „review" ist — hier ohne Wartezeit, mit dem frischen Plan-Objekt).
+    try{ if(typeof hedgeSoloSchliessen === 'function' && fresh.mt5Baseline && fresh.mt5Baseline.hedge && fresh.mt5Baseline.hedge.status === 'offen') hedgeSoloSchliessen(fresh, 'master_ende') }catch(_){}
     return true
   }
 
@@ -33108,7 +33422,10 @@
   }
   function wdVorplanRegeln(){
     const v = (_wd.regeln && _wd.regeln.vorplan) || {}
-    return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE }
+    // hedge_an / hedge_puffer (24.09.2026 abends): Fusion-Gegenhedge für Farmer-Pläne (Betrag = Staffel), Puffer in
+    // NQ-Punkten über dem TP-Level, bevor der Wächter schließt. Steht bewusst AUS, bis Finn ihn einschaltet.
+    return { instr: v.instr === 'nq' ? 'nq' : 'mnq', kt: Math.max(1, Math.round(+v.kt || 1)), regeln: v.regeln || TP_VP_VORGABE,
+             hedge_an: !!v.hedge_an, hedge_puffer: (typeof v.hedge_puffer === 'number' && isFinite(v.hedge_puffer) && v.hedge_puffer >= 0) ? v.hedge_puffer : 3 }
   }
   // Kontrakte je Firma als Spanne (Finn 23.09.2026: „bei jeder Prop unterschiedlich, von 3 bis 5 — genau wie
   // den TP"): regeln.kt = { tradeify: [von, bis], … }; fehlt die Firma, gilt die Standard-Zahl (Ablauf → Kontrakte).
@@ -33372,6 +33689,9 @@
         const pr = tpVorplanPlanRow(accLike, slave, z, wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         if(kd.sl_vorgabe > 0) pr.master_sl = kd.sl_vorgabe
+        // Fusion-Gegenhedge (24.09.2026 abends): Staffel-Betrag in € als hedge_eur — der Server dreht die Zeile auf
+        // V2 (Slave-Felder null), hedge_eur bleibt stehen. Schalter AUS → NULL = kein Hedge.
+        pr.hedge_eur = (vp.hedge_an && z.slaveEur > 0) ? Math.round(z.slaveEur * 100) / 100 : null
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
       bloecke.push({ row, konten, ge, sPreset, zVon })
@@ -33527,7 +33847,11 @@
           if(plan.richtung !== row.richtung) upd.richtung = row.richtung
           if(Math.abs(new Date(plan.startUm || 0).getTime() - new Date(startIso).getTime()) > 30000) upd.start_um = startIso
           // Slave nach Live-Balance: der Mac kannte beim Anlegen evtl. keinen Live-Stand (kleinste Stufe)
-          if(z && z.live != null && typeof z.slaveRisk === 'number' && Math.abs((plan.slaveRisk || 0) - z.slaveRisk) > 0.5){
+          if(plan.route === 'tvv2'){
+            // V2 (24.09.2026 abends): kein Slave mehr — nachgezogen wird nur der Fusion-Gegenhedge-Betrag (hedge_eur),
+            // und nur, wenn der Plan schon einen trägt (Schalter AUS → bleibt NULL)
+            if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs(plan.hedgeEur - z.slaveEur) > 0.5) upd.hedge_eur = Math.round(z.slaveEur * 100) / 100
+          } else if(z && z.live != null && typeof z.slaveRisk === 'number' && Math.abs((plan.slaveRisk || 0) - z.slaveRisk) > 0.5){
             upd.slave_risk = z.slaveRisk
             const m = tpCalcMultiplier(plan.masterFirm, sl.slave.firm, plan.masterRisk, plan.masterContracts, z.slaveRisk); if(m) upd.multiplier = m
           }
@@ -33748,6 +34072,11 @@
     const vp = wdVorplanRegeln(), fu = vp.regeln.fu || TP_VP_VORGABE.fu
     if(g('wd-instr')) g('wd-instr').value = vp.instr
     if(g('wd-kt')) g('wd-kt').value = vp.kt
+    // Fusion-Gegenhedge (24.09.2026 abends) + Frische des Kurs-Feeds (tv_kurse) als Zeile
+    if(g('wd-hedge-an')) g('wd-hedge-an').checked = !!vp.hedge_an
+    if(g('wd-hedge-puffer')) g('wd-hedge-puffer').value = vp.hedge_puffer
+    if(g('wd-staffel-card')) g('wd-staffel-card').hidden = !vp.hedge_an && (typeof admOhneHedge === 'function' ? admOhneHedge() : false)
+    if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${k.pc}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
     wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
     wdFirmenRender(fu, vp)
     wdStatus()
@@ -33764,7 +34093,11 @@
     const staffel = (a.standard && a.standard.length) ? a.standard : wdStaffelListe(null)
     const staffelFirma = {}; for(const k of TP_VP_FIRMEN) if(wdStaffelEigen(k)) staffelFirma[k] = a[k]
     const instr = document.getElementById('wd-instr')?.value === 'nq' ? 'nq' : 'mnq'
-    await wdVorplanRegelnSpeichern({ instr, kt: Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1)), regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, kt, staffel, staffelFirma } })
+    // Fusion-Gegenhedge (24.09.2026 abends): Schalter + Puffer wandern mit in vorplan
+    const hedgeAn = !!document.getElementById('wd-hedge-an')?.checked
+    const hp = parseFloat(document.getElementById('wd-hedge-puffer')?.value)
+    await wdVorplanRegelnSpeichern({ instr, kt: Math.max(1, Math.round(parseFloat(document.getElementById('wd-kt')?.value) || 1)), regeln: { ch: vp.regeln.ch || TP_VP_VORGABE.ch, fu, kt, staffel, staffelFirma },
+                                     hedge_an: hedgeAn, hedge_puffer: (isFinite(hp) && hp >= 0) ? Math.round(hp * 10) / 10 : 3 })
     // Beim Auto-Speichern nichts neu bauen, solange ein Feld den Fokus hat — sonst springt der Cursor raus
     if(!auto || !document.querySelector('#adm-pane-wd .wd-set-grid :focus')){ wdRegelnInsFormular(); wdRender() } else { wdFirmenZaehlen(); wdStaffelChips() }
     wdGespeichertZeigen(['wdHedgeSave', 'wdHedgeSave2'])
@@ -41608,6 +41941,22 @@
         reader_ts: Number(d.ts) || 0,
         updated_at: new Date().toISOString()
       })
+      // Live-Kurs aus dem Tab-Titel (Userscript 0.6.0, 24.09.2026 — Winning-Day-Gegenhedge): eine Zeile je PC
+      // in tv_kurse, der Hedge-Wächter (hedgeWacheTick) nimmt die jüngste über alle PCs. Nur mit lesbarer Zahl
+      // und nur, wenn der Titel jünger als 20 s ist — ein eingefrorener Titel (Tab zu, TV ausgeloggt) wird
+      // nicht als Kurs weitergereicht („Beweis oder leer"). reader-server liefert kurs_alter_s in Server-Sekunden.
+      const k = d.kurs
+      if(k && k.symbol && k.text && typeof d.kurs_alter_s === 'number' && d.kurs_alter_s <= 20){
+        const preis = (typeof tvKursZahl === 'function') ? tvKursZahl(k.text) : null
+        if(preis != null){
+          await supabase.from('tv_kurse').upsert({
+            id: pc, pc_name: pc, symbol: String(k.symbol).slice(0, 32),
+            wurzel: (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(k.symbol) : '',
+            preis, text: String(k.text).slice(0, 32), sichtbar: k.sichtbar !== false,
+            reader_ts: Number(k.ts) || Number(d.ts) || 0, updated_at: new Date().toISOString()
+          })
+        }
+      }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
   }
