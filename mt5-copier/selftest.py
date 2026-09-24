@@ -1630,6 +1630,8 @@ def main():
     # ── Slave-Terminal nach vorn (24.09.2026): Prozess-Erkennung ohne wmic ────
     results.append(test_terminal_pids_ohne_wmic())
     results.append(test_vordergrund_waechter_ohne_windows())
+    results.append(test_kerze_fortschreiben())
+    results.append(test_solo_level_und_grund())
 
     print()
     ok = sum(1 for r in results if r)
@@ -1703,6 +1705,48 @@ def test_vordergrund_waechter_ohne_windows():
         print("✗ Waechter ohne Windows darf keinen Thread starten"); ok = False
     if ok:
         print("✓ Vordergrund-Waechter: ohne Windows folgenlos")
+    return ok
+
+
+def test_kerze_fortschreiben():
+    """Minutenkerzen aus Ticks (zweiter Kurs-Feed NAS100, 24.09.2026): o/h/l/c/n,
+    Minutenwechsel schiebt die laufende Kerze nach 'vor', Wurzelwechsel oeffnet neu."""
+    import copier
+    ok = True
+    k, v = copier.kerze_fortschreiben(None, None, "NAS100", "NAS100", 20000.5, 1000 * 60 + 5)
+    k, v = copier.kerze_fortschreiben(k, v, "NAS100", "NAS100", 20003.0, 1000 * 60 + 10)
+    k, v = copier.kerze_fortschreiben(k, v, "NAS100", "NAS100", 19999.0, 1000 * 60 + 20)
+    if (k["o"], k["h"], k["l"], k["c"], k["n"], k["minute"]) != (20000.5, 20003.0, 19999.0, 19999.0, 3, 60000) or v is not None:
+        print(f"✗ Kerze o/h/l/c/n falsch: {k} vor={v}"); ok = False
+    k2, v2 = copier.kerze_fortschreiben(k, v, "NAS100", "NAS100", 20001.0, 1001 * 60 + 1)
+    if v2 is not k or k2["minute"] != 1001 * 60 or k2["o"] != 20001.0 or k2["n"] != 1:
+        print(f"✗ Minutenwechsel falsch: {k2} vor={v2}"); ok = False
+    k3, v3 = copier.kerze_fortschreiben(k2, v2, "NQ", "NQZ2026", 30000.0, 1001 * 60 + 2)
+    if v3 is not k2 or k3["wurzel"] != "NQ" or k3["n"] != 1:
+        print(f"✗ Wurzelwechsel falsch: {k3} vor={v3}"); ok = False
+    if ok:
+        print("✓ Kerzen-Aggregation: o/h/l/c/n, Minuten- und Wurzelwechsel")
+    return ok
+
+
+def test_solo_level_und_grund():
+    """Solo-Hedge: Lots aus eur/punkte, beide Schliess-Level, DEAL_REASON-Grund."""
+    import copier
+    ok = True
+    si = {"volume_step": 0.01, "volume_min": 0.01, "volume_max": 100.0, "point": 0.01, "digits": 2}
+    if copier.solo_lots(70, 140, 0.85, si) != 0.59 or copier.solo_lots(0.5, 140, 0.85, si) != 0.0:
+        print("✗ solo_lots"); ok = False
+    if copier.solo_notfall_sl(20000, "sell", 140, puffer=3, point=0.01, digits=2) != 20143.0 \
+            or copier.solo_notfall_sl(20000, "buy", 140, puffer=3, point=0.01, digits=2) != 19857.0:
+        print("✗ solo_notfall_sl (Level Master-TP)"); ok = False
+    if copier.solo_level_tp(20000, "sell", 100, puffer=3, point=0.01, digits=2) != 19903.0 \
+            or copier.solo_level_tp(20000, "buy", 2, puffer=3, point=0.01, digits=2) != 20001.0 \
+            or copier.solo_level_tp(20000, "buy", 0, puffer=3, point=0.01, digits=2) != 0.0:
+        print("✗ solo_level_tp (Level Master-SL)"); ok = False
+    if [copier.solo_deal_grund(x) for x in (4, 5, 3, 0, 6, "x")] != ["level_tp", "level_sl", "close", "hand", "stopout", "unbekannt"]:
+        print("✗ solo_deal_grund"); ok = False
+    if ok:
+        print("✓ Solo-Hedge: Lots, beide Level, Grund-Mapping")
     return ok
 
 

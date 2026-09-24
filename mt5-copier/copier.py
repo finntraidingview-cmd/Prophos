@@ -600,6 +600,27 @@ def solo_level_tp(fill, richtung, sl_punkte, *, puffer, point, digits):
     return max(round(lvl, int(digits)), float(point))
 
 
+def kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
+    """REIN RECHNEND (testbar): (laufende Kerze, letzte abgeschlossene) nach einem
+    Tick — dieselbe Form wie kurs_1m im reader-server (o/h/l/c/n, minute = Anfang
+    der Minute in Server-UTC-Sekunden), damit das Frontend beide Quellen mit
+    derselben Bruecke nach tv_kurs_1m schreiben kann (Spalte wurzel trennt sie).
+    Zweiter Kurs-Feed (Koordination 24.09.2026 spaet): der Copier hat den NAS100-
+    Tick ohnehin — EHRLICH: NAS100 ist ein CFD, laeuft parallel zu NQ mit Basis-
+    Abstand und anderen Handelszeiten. Fuer den Hedge ist es der richtige Kurs
+    (die Level liegen beim Broker), fuer NQ-Demo-Orders nur 'ungefaehr'."""
+    minute = int(jetzt_s // 60) * 60
+    p = float(preis)
+    if k1m and k1m.get("minute") == minute and k1m.get("wurzel") == wurzel:
+        k1m["h"] = max(k1m["h"], p)
+        k1m["l"] = min(k1m["l"], p)
+        k1m["c"] = p
+        k1m["n"] += 1
+        return k1m, k1m_vor
+    neu = {"minute": minute, "wurzel": wurzel, "symbol": symbol, "o": p, "h": p, "l": p, "c": p, "n": 1}
+    return neu, (k1m if k1m else k1m_vor)
+
+
 def solo_deal_grund(reason):
     """REIN RECHNEND (testbar): DEAL_REASON des schliessenden Deals → Grund aus
     Sicht des MASTERS. Hedge-SL gefuellt = der Master hat seinen TP erreicht
@@ -1361,16 +1382,22 @@ def main():
         # ist der einzige beweisfeste Anker fuer die closed_hedges-Verbuchung
         # (vorher wurde r.deal nur geloggt und war weg). Truthiness bleibt fuer
         # alle Aufrufer erhalten: Result/True = ok, None = fehlgeschlagen.
+        # m.letzter_fehler (24.09.2026 spaet, Review der Koordinations-Session): mt5.last_error()
+        # spiegelt Trade-Retcodes nicht zuverlaessig (oft "(1, 'Success')") — der Solo-Hedge
+        # schreibt sl_fehler/tp_fehler deshalb aus diesem Merker (retcode + Broker-Kommentar).
+        m.letzter_fehler = None
         r = mt5.order_send(req)
         if r is None:
-            log(f"[{m.file}] ❌ order_send None ({mt5.last_error()}) — {what}")
+            m.letzter_fehler = f"order_send None ({mt5.last_error()})"
+            log(f"[{m.file}] ❌ {m.letzter_fehler} — {what}")
             return None
         if r.retcode != mt5.TRADE_RETCODE_DONE:
             hinweis = getattr(r, "comment", "")
             if int(r.retcode) == 10027:
                 hinweis = ("Algo-Handel im HEDGE-Terminal ist AUS — oben den "
                            "'Algo-Handel'-Knopf gruen schalten, sonst kann der Copier nicht hedgen!")
-            log(f"[{m.file}] ❌ abgelehnt retcode={r.retcode} {hinweis} — {what}")
+            m.letzter_fehler = f"retcode {r.retcode} {hinweis}".strip()
+            log(f"[{m.file}] ❌ abgelehnt {m.letzter_fehler} — {what}")
             return None
         log(f"[{m.file}] ✅ {what} · deal={r.deal}")
         return r
@@ -1576,7 +1603,7 @@ def main():
         if r is None:
             le = mt5.last_error()
             return {"ok": False, "code": "abgelehnt", "retry_ok": False, "lots": lots, "wert_pro_punkt": wert,
-                    "msg": f"order_send abgelehnt ({le}) — im Hedge-Terminal nachsehen"}
+                    "msg": f"order_send abgelehnt ({getattr(m, 'letzter_fehler', None) or le}) — im Hedge-Terminal nachsehen"}
         ticket = int(getattr(r, "order", 0) or 0)
         fill = float(getattr(r, "price", 0.0) or 0.0) or float(price)
         # Ticket der POSITION ueber den Deal nachschlagen (position_id), Fill vom Deal
@@ -1608,16 +1635,16 @@ def main():
                     elif tp > 0:
                         # Beide zusammen abgelehnt (z. B. TP zu nah am Kurs): das Master-TP-Level ist das
                         # wichtigere — noch einmal nur mit SL, damit der Hedge nie ohne Schliess-Level bleibt
-                        erg["tp_fehler"] = str(mt5.last_error())
+                        erg["tp_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
                         ok2 = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
                                        "sl": sl, "tp": 0.0, "magic": SOLO_MAGIC},
                                    f"SOLO LEVEL nur SL {sl} {sym} (Ticket {ticket})")
                         if ok2:
                             erg["sl"] = sl
                         else:
-                            erg["sl_fehler"] = str(mt5.last_error())
+                            erg["sl_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
                     else:
-                        erg["sl_fehler"] = str(mt5.last_error())
+                        erg["sl_fehler"] = str(getattr(m, "letzter_fehler", None) or mt5.last_error())
         except Exception as e:
             erg["sl_fehler"] = erg.get("sl_fehler") or f"{type(e).__name__}: {e}"
         return erg
@@ -1652,7 +1679,7 @@ def main():
         r = send(m, req, f"SOLO CLOSE {float(p.volume)} {sym} (Ticket {ticket}, Grund {a.get('grund') or '?'})")
         if r is None:
             return {"ok": False, "code": "abgelehnt", "retry_ok": True, "ticket": ticket,
-                    "msg": f"Close abgelehnt ({mt5.last_error()})"}
+                    "msg": f"Close abgelehnt ({getattr(m, 'letzter_fehler', None) or mt5.last_error()})"}
         pl, grund, exit_preis = solo_pl_aus_history(ticket)
         return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
                 "fill_close": float(getattr(r, "price", 0.0) or 0.0) or exit_preis, "lots": float(p.volume), "pl": pl,
@@ -1744,6 +1771,10 @@ def main():
             "hedge_equity": hedge_acc["equity"],
             "hedge_currency": hedge_acc["currency"],
             "hedge_usd_rate": hedge_acc.get("usd_rate"),
+            # Zweiter Kurs-Feed (24.09.2026 spaet): NAS100-Tick + Minutenkerzen des Fusion-Terminals.
+            # null = Symbol fehlt / kein Tick. CFD, nicht NQ — siehe kerze_fortschreiben.
+            "kurs_nas100": hedge_acc.get("kurs_nas100"),
+            "kurs_1m_nas100": [k for k in (hedge_acc.get("k1m_vor"), hedge_acc.get("k1m")) if k],
             # Algo-Handel beider Seiten (18.08.2026): Master aus dem Snapshot
             # (EA v4), Hedge live aus terminal_info. None = nicht pruefbar
             # (altes EA) — der Check blockt nur bei explizitem False.
@@ -1890,6 +1921,35 @@ def main():
                 _t = mt5.symbol_info_tick(_hcur + "USD")
                 if _t is not None and _t.bid:
                     hedge_acc["usd_rate"] = float(_t.bid)
+
+            # ── NAS100-Tick als zweiter Kurs-Feed (Koordination 24.09.2026 spaet) ──
+            # Kein neuer Prozess, kein Timer: EIN symbol_info_tick pro Tick (0,5 s),
+            # Symbol = erstes NAS100-artiges Ziel aus symbol_map, sonst 'NAS100';
+            # existiert es im Terminal nicht (einmal geprueft), bleibt alles None.
+            # Kerzen aus dem Bid (kerze_fortschreiben), Form wie kurs_1m des Readers.
+            if "nas_sym" not in hedge_acc:
+                hedge_acc["nas_sym"] = None
+                try:
+                    kand = [v for m_ in masters for v in (m_.symbol_map or {}).values() if "NAS" in str(v).upper()]
+                    for s_ in (kand or []) + ["NAS100"]:
+                        if mt5.symbol_info(s_) is not None:
+                            hedge_acc["nas_sym"] = str(s_)
+                            break
+                except Exception:
+                    hedge_acc["nas_sym"] = None
+            hedge_acc["kurs_nas100"] = None
+            if hedge_acc.get("nas_sym"):
+                try:
+                    _tn = mt5.symbol_info_tick(hedge_acc["nas_sym"])
+                    if _tn is not None and _tn.bid:
+                        hedge_acc["kurs_nas100"] = {"bid": float(_tn.bid), "ask": float(_tn.ask),
+                                                    "ts": int(getattr(_tn, "time_msc", 0) or int(_tn.time) * 1000),
+                                                    "symbol": hedge_acc["nas_sym"]}
+                        hedge_acc["k1m"], hedge_acc["k1m_vor"] = kerze_fortschreiben(
+                            hedge_acc.get("k1m"), hedge_acc.get("k1m_vor"), "NAS100", hedge_acc["nas_sym"],
+                            float(_tn.bid), time.time())
+                except Exception:
+                    hedge_acc["kurs_nas100"] = None
 
             # ── Trade-Fenster aus dem Panel-Plan-Store lesen (25.08.2026) ──────
             # plans.json pflegt das Panel: Prophos-Trade-Start legt 'geplant' an,
