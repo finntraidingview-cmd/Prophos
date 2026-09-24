@@ -28414,7 +28414,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.458'
+  const OS_TAB_BUILD = '2026-09-22.459'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35358,6 +35358,10 @@
         // Plänen weiter gar nicht anfassen (Bearbeiten-Modus).
         if(plan.status === 'completed') return
         if((mEl && mEl.value !== '') && (sEl && sEl.value !== '')) return
+        // Topstep V2 (24.09.2026 abends, Finn: „das Popup soll genau so sein wie das andere, nur P&L angeben —
+        // da wird noch der Live-P&L abgefragt, das ist ein Bug"): es gibt keine Auto-Quelle (kein Bot, keine API,
+        // keine Baseline) — gar nicht erst „⏳ Auto-PnL…" zeigen und nichts nachladen. P&L kommt von Hand.
+        if(plan.route === 'tsv2') return
         const isMirrorPlan = (typeof planMirrorRoute === 'function') && !!planMirrorRoute(plan)
         // MT5-Route (15.08.2026): braucht weder Duplikum-Token noch Mirror — die
         // Werte kommen aus der eingefrorenen Baseline (_autoPnlFetchMt5).
