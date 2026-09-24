@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.3"
+READER_VERSION = "0.8.4"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -135,18 +135,58 @@ def _kerzen_uebernehmen(ring, bars, erstladung, maximum=KERZEN_MAX):
             continue
         if not w or minute <= 0 or c <= 0:
             continue
-        if erstladung and w not in ersetzt:
+        # 0.8.4: taucht fuer eine Wurzel erstmals eine Chart-Serie auf, verdraengt sie die Tick-Kerzen
+        # (Ring der Wurzel neu) — Serien-Bars sind exakt, Tick-Kerzen nur eine Naeherung.
+        if w not in ersetzt and (erstladung or _ring_ist_tick(ring.get(w))):
             ring[w] = {}
             ersetzt.add(w)
         r = ring.setdefault(w, {})
         vol = b.get("vol")
         r[minute] = {"wurzel": w, "symbol": str(b.get("symbol") or w)[:32], "aufloesung": "1", "minute": minute,
-                     "o": o, "h": h, "l": l, "c": c, "vol": (float(vol) if isinstance(vol, (int, float)) else None)}
+                     "o": o, "h": h, "l": l, "c": c, "vol": (float(vol) if isinstance(vol, (int, float)) else None),
+                     "quelle": "ws"}
         n += 1
         if len(r) > maximum:
             for k in sorted(r)[:len(r) - maximum]:
                 del r[k]
     return ring, n, warnung
+
+
+def _ring_ist_tick(r):
+    """True, wenn der Ring einer Wurzel (nur) aus Quote-Tick-Kerzen besteht."""
+    return bool(r) and all(b.get("quelle") == "ws-tick" for b in r.values())
+
+
+def _tick_kerze_in_ring(ring, wurzel, symbol, preis, jetzt_s, maximum=KERZEN_MAX):
+    """REIN RECHNEND (testbar, 0.8.4): Minutenkerze aus einem Quote-Tick (qsd: lp, sonst Mitte Bid/Ask)
+    fuer Wurzeln OHNE Chart-Serie — Finn will NQ und MNQ als Chart, ohne das TradingView-Layout
+    umzubauen (Moritz' PC: NQ nur in der Watchlist → keine Serie, nur Ticks). O und C sind exakt,
+    H/L nur so gut wie die Tick-Dichte; Volumen gibt es nicht. quelle 'ws-tick' sagt das dem
+    Frontend. Liegt fuer die Wurzel schon eine Serie im Ring, passiert NICHTS (die Serie gewinnt).
+    -> (ring, geschrieben)"""
+    ring = dict(ring or {})
+    w = _kurs_wurzel(wurzel) or str(wurzel or "").upper()[:8]
+    try:
+        preis = float(preis)
+    except (TypeError, ValueError):
+        return ring, False
+    if not w or preis <= 0:
+        return ring, False
+    r = ring.get(w)
+    if r and not _ring_ist_tick(r):
+        return ring, False                       # Serie vorhanden → keine Tick-Kerzen fuer diese Wurzel
+    r = ring.setdefault(w, {})
+    minute = int(jetzt_s // 60) * 60
+    k = r.get(minute)
+    if k:
+        k["h"] = max(k["h"], preis); k["l"] = min(k["l"], preis); k["c"] = preis; k["n"] = k.get("n", 0) + 1
+    else:
+        r[minute] = {"wurzel": w, "symbol": str(symbol or w)[:32], "aufloesung": "1", "minute": minute,
+                     "o": preis, "h": preis, "l": preis, "c": preis, "vol": None, "n": 1, "quelle": "ws-tick"}
+        if len(r) > maximum:
+            for kk in sorted(r)[:len(r) - maximum]:
+                del r[kk]
+    return ring, True
 
 
 def _kerzen_liste(ring, seit=None):
@@ -167,7 +207,8 @@ def _kurs_1m_aus_ring(ring):
     for w in sorted((ring or {}).keys()):
         for m in sorted(ring[w])[-2:]:
             b = ring[w][m]
-            out.append({"minute": m, "wurzel": w, "symbol": b["symbol"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "n": 0, "quelle": "ws"})
+            out.append({"minute": m, "wurzel": w, "symbol": b["symbol"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"],
+                        "n": int(b.get("n") or 0), "quelle": b.get("quelle") or "ws"})
     return out
 
 
@@ -328,7 +369,7 @@ def _kerzen_diag(kerzen, bedienfeld, aufl_warnung, script_version):
     25.09.2026: 'ein Foto des Reader-Fensters soll reichen, Finn soll keine URLs oeffnen muessen').
     Moritz' PC: Kurse per Socket da, tv_kurs_1m leer — ob keine du-Frames kommen, die Serie nicht
     zuordenbar ist oder der Server die Bars verwirft, war nur ueber /positions im Browser zu sehen."""
-    ring = "/".join(f"{w} {len(r)}" for w, r in sorted(kerzen.items())) or "leer"
+    ring = "/".join(f"{w} {len(r)}" + ("(tick)" if _ring_ist_tick(r) else "") for w, r in sorted(kerzen.items())) or "leer"
     feed = (bedienfeld or {}).get("feed") if isinstance(bedienfeld, dict) else None
     if isinstance(feed, dict):
         serien = feed.get("serien") if isinstance(feed.get("serien"), dict) else {}
@@ -389,6 +430,7 @@ def _mit_an(stand):
     out["kurs_1m"] = kerzen
     out["kerzen_alter_s"] = round(time.time() - _kerzen_s, 3) if _kerzen_s else None
     out["kerzen_anzahl"] = {w: len(r) for w, r in _kerzen.items()}
+    out["kerzen_quelle"] = {w: ("ws-tick" if _ring_ist_tick(r) else "ws") for w, r in _kerzen.items()}   # 0.8.4
     out["aufloesung_warnung"] = _aufl_warnung
     out["modus"] = _kerzen_modus
     out["delay_s"] = _kerzen_delay_s
@@ -576,8 +618,16 @@ class Handler(BaseHTTPRequestHandler):
         # 0.7.0: beide Symbole aus den Legenden (kurse) + Selbstheilungs-Grund — ebenfalls VOR dem Pause-Gate
         try:
             if isinstance(daten.get("kurse"), dict):
+                jetzt = time.time()
                 _kurse, _k1m_je, _k1m_vor_je = _kurse_uebernehmen(daten.get("kurse"), daten.get("sichtbar") is not False,
-                                                                  time.time(), _kurse, _k1m_je, _k1m_vor_je)
+                                                                  jetzt, _kurse, _k1m_je, _k1m_vor_je)
+                # 0.8.4: Wurzeln, die per Socket ticken, aber keine Chart-Serie haben, bekommen
+                # Minutenkerzen aus den Quote-Ticks (auch im verdeckten Tab — der Socket ist nicht gedrosselt).
+                for w, k in _kurse.items():
+                    if k.get("quelle") == "ws" and k.get("empf_s") == jetzt:
+                        _kerzen, ok = _tick_kerze_in_ring(_kerzen, w, k.get("symbol_text") or w, k.get("preis"), jetzt)
+                        if ok:
+                            _kerzen_s = jetzt
             if daten.get("reload_grund"):
                 _reload_grund = str(daten.get("reload_grund"))[:120]
                 _reload_s = time.time()

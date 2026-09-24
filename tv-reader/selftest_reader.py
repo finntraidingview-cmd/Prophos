@@ -137,6 +137,33 @@ def main():
     d = rs._kerzen_diag({}, None, "Chart-Aufloesung 5 statt 1", None)
     check(d.startswith("Kerzen leer · kein feed (Script < 0.8.0?) · Aufl-WARNUNG Chart-Aufloesung 5 statt 1 · Script ?"), f"Diagnose: leer, kein feed, Warnung, Script unbekannt [{d}]")
 
+    # 0.8.4: Tick-Kerzen fuer Wurzeln ohne Chart-Serie (NQ nur in der Watchlist)
+    ring, ok1 = rs._tick_kerze_in_ring({}, "NQ", "CME_MINI:NQZ2026", 100.0, 60 * 100 + 5)
+    ring, ok2 = rs._tick_kerze_in_ring(ring, "NQ", "CME_MINI:NQZ2026", 103.0, 60 * 100 + 20)
+    ring, ok3 = rs._tick_kerze_in_ring(ring, "NQ", "CME_MINI:NQZ2026", 99.0, 60 * 100 + 40)
+    ring, ok4 = rs._tick_kerze_in_ring(ring, "NQ", "CME_MINI:NQZ2026", 101.0, 60 * 101 + 1)
+    k0, k1 = ring["NQ"][6000], ring["NQ"][6060]
+    check(ok1 and ok2 and ok3 and ok4 and (k0["o"], k0["h"], k0["l"], k0["c"], k0["n"], k0["quelle"]) == (100.0, 103.0, 99.0, 99.0, 3, "ws-tick")
+          and (k1["o"], k1["n"]) == (101.0, 1) and rs._ring_ist_tick(ring["NQ"]),
+          "Tick-Kerze: o/h/l/c/n, Minutenwechsel oeffnet neue Kerze, quelle ws-tick")
+    k1m = rs._kurs_1m_aus_ring(ring)
+    check(len(k1m) == 2 and k1m[0]["quelle"] == "ws-tick" and k1m[0]["n"] == 3 and k1m[1]["minute"] == 6060,
+          "kurs_1m aus Tick-Ring traegt quelle ws-tick + n")
+    liste = rs._kerzen_liste(ring)
+    check(all(b["quelle"] == "ws-tick" for b in liste), "GET /kerzen: Tick-Bars tragen quelle ws-tick")
+    # Serie verdraengt Tick-Kerzen: Ring der Wurzel neu, Serien-Bars mit quelle ws
+    ring, n, w = rs._kerzen_uebernehmen(ring, [{"wurzel": "NQ", "symbol": "NQ1!", "aufloesung": "1", "minute": 6120, "o": 1, "h": 2, "l": 0.5, "c": 1.5, "vol": 7}], False)
+    check(n == 1 and list(ring["NQ"]) == [6120] and ring["NQ"][6120]["quelle"] == "ws" and not rs._ring_ist_tick(ring["NQ"]),
+          "Serie verdraengt Tick-Kerzen (Ring der Wurzel neu), Serien-Bar quelle ws")
+    ring2, ok5 = rs._tick_kerze_in_ring(ring, "NQ", "NQ1!", 50.0, 60 * 103)
+    check(not ok5 and list(ring2["NQ"]) == [6120], "Wurzel mit Serie bekommt keine Tick-Kerzen mehr")
+    ring2, ok6 = rs._tick_kerze_in_ring(ring, "MNQ", "MNQ1!", 50.0, 60 * 103)
+    check(ok6 and rs._ring_ist_tick(ring2["MNQ"]) and not rs._ring_ist_tick(ring2["NQ"]), "andere Wurzel ohne Serie bekommt Tick-Kerzen")
+    ring3, _ = rs._tick_kerze_in_ring({}, "NQ", "x", "unsinn", 1.0)
+    check(ring3 == {} and rs._tick_kerze_in_ring({}, "", "x", 1.0, 1.0)[1] is False, "Tick-Kerze: Unsinn/leer ignoriert")
+    d = rs._kerzen_diag(ring2, {"feed": {"du_min": 3, "serien": {}, "unbekannte_serien": 0}}, None, "0.8.2")
+    check(d.startswith("Kerzen MNQ 1(tick)/NQ 1 · "), f"Live-Zeile: NQ n / MNQ n(tick) [{d}]")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
