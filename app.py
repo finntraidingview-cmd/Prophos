@@ -6792,6 +6792,29 @@ def admin_wd_heute():
         return jsonify({"error": f"Winning Days des Tages nicht ladbar ({type(e).__name__}: {e})"}), 502
 
 
+def _wd_ende_upd(plan, jetzt_iso, datum, grund=None):
+    """REIN RECHNEND (testbar): Update für „Winning Day beenden" vom Mac (25.09.2026, Finn: laufende Winning
+    Days ALLER IDs vom Mac aus beenden — trade_plans liegt unter RLS, fremde Pläne nur über den Service-Key).
+    Form = exakt die zwei Frontend-Schritte zusammen: tvV2EndeSetzen (mt5_baseline.final {today_pnl, datum, at,
+    quelle} + live {offen: false, at}) und atMoveToReview (status 'review', ended_at). today_pnl bleibt null —
+    _autoPnlFetchTvV2 liefert dann nichts und Finn trägt den P&L im Abschluss-Popup ein. mt5_baseline.hedge und
+    alle anderen Felder bleiben unverändert: der PC-Wächter sieht Plan ≠ open und schließt den Hedge ('master_ende').
+    -> (upd, None) oder (None, (http_code, fehler))"""
+    if not isinstance(plan, dict) or not plan.get("id"):
+        return None, (404, "Plan nicht gefunden")
+    if str(plan.get("route") or "") != "tvv2" or str(plan.get("status") or "") != "open":
+        return None, (409, "nicht offen")
+    alt = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    fin = {"today_pnl": None, "datum": datum, "at": jetzt_iso, "quelle": "hand",
+           "grund": (str(grund).strip()[:60] if grund else "hand")}
+    live = dict(alt.get("live") or {}) if isinstance(alt.get("live"), dict) else {}
+    live.update({"offen": False, "at": jetzt_iso})
+    base = dict(alt)
+    base["final"] = fin
+    base["live"] = live
+    return {"status": "review", "ended_at": jetzt_iso, "mt5_baseline": base}, None
+
+
 @app.route("/admin/wd-plaene", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
 def admin_wd_plaene():
     if request.method == "OPTIONS":
@@ -6945,6 +6968,30 @@ def admin_wd_plaene():
                             "error": f"Anlegen abgebrochen ({type(e).__name__}: {e})"}), 502
 
     if request.method == "PATCH":
+        if daten.get("aktion") == "ende":
+            # Winning Day vom Mac beenden (25.09.2026). Optimistische Sperre über updated_at (Trigger
+            # trade_plans_set_updated_at): schreibt der PC-Wächter zwischen Lesen und Schreiben den Hedge in
+            # mt5_baseline, greift der Filter nicht → neu lesen statt den Hedge zu überschreiben (max. 3 Versuche).
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                for _versuch in range(3):
+                    rows = sb_select("trade_plans", {"select": "id,route,status,mt5_baseline,updated_at", "id": f"eq.{pid}", "limit": "1"})
+                    jetzt = datetime.now(timezone.utc)
+                    upd, fehler = _wd_ende_upd(rows[0] if rows else None, jetzt.isoformat().replace("+00:00", "Z"),
+                                               _cme_handelstag(), daten.get("grund"))
+                    if fehler:
+                        return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
+                    filt = {"id": f"eq.{pid}", "status": "eq.open", "route": "eq.tvv2"}
+                    if rows[0].get("updated_at"):
+                        filt["updated_at"] = f"eq.{rows[0]['updated_at']}"
+                    z = sb_update("trade_plans", filt, upd)
+                    if z:
+                        return jsonify({"ok": True, "plan_id": pid, "status": "review", "ended_at": z[0].get("ended_at") or upd["ended_at"]})
+                return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
+            except Exception as e:
+                return jsonify({"error": f"Nicht beendet ({type(e).__name__})"}), 502
         if daten.get("aktion") == "farm":
             aid = str(daten.get("account_id") or "")
             if len(aid) < 10:
