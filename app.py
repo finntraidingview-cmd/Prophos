@@ -6734,8 +6734,13 @@ def _wd_heute_zeile(p, acc, disp):
         "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
         "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
         "einstieg_nq": einstieg, "einstieg_quelle": einstieg_quelle,
-        "tp_level_nq": _wd_level(einstieg, richtung, tp_usd, ppl, kt, True),
-        "sl_level_nq": _wd_level(einstieg, richtung, sl_usd, ppl, kt, False),
+        # Level = genau das, woran der Wächter schließt (Koordination 25.09.2026, nach .582 „Einstieg aus dem Puls-Fill nachtragen"):
+        # hedge.tp_level_nq / sl_level_nq / schliesst_bei_nq sind beim Open eingefroren; einstieg_nq kann danach auf den Fill wandern.
+        # Aus einstieg_nq + $-Distanz nur rechnen, wenn am Hedge kein Level steht (ungehedgte Winning Days, alte Pläne).
+        "tp_level_nq": _wd_num((hedge or {}).get("tp_level_nq")) or _wd_level(einstieg, richtung, tp_usd, ppl, kt, True),
+        "sl_level_nq": (_wd_num((hedge or {}).get("sl_level_nq")) or _wd_level(einstieg, richtung, sl_usd, ppl, kt, False)) if sl_usd else None,
+        "schliesst_bei_nq": _wd_num((hedge or {}).get("schliesst_bei_nq")) or None,
+        "level_quelle": ("hedge" if _wd_num((hedge or {}).get("tp_level_nq")) else ("einstieg" if einstieg is not None else None)),
         "master_pl": mpl,
         "hedge": hedge,   # KOMPLETT (mt5_baseline.hedge) — das Frontend rendert damit hedgeChipHtml unveraendert
         # Ende-Grund am Plan: final.quelle ('close' = Schliessen/Auto-Close, sonst Rundgang-Ende) — nur wenn ein Ende da ist
@@ -6772,7 +6777,8 @@ def admin_wd_heute():
     open), egal welcher Tag. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
     Je Plan: {id (= plan_id), user_id, person, farbe_key, konto{name, firma, groesse, kontonr_ende,
     external_id}, route, richtung, kt (= kontrakte), symbol_root, master_tp, master_sl, status, start_um,
-    started_at, ended_at, einstieg_nq, einstieg_quelle ('hedge'|'tv'|null), tp_level_nq, sl_level_nq, master_pl{wert, at, quelle}|null,
+    started_at, ended_at, einstieg_nq, einstieg_quelle ('hedge'|'tv'|null), tp_level_nq, sl_level_nq (eingefroren am Hedge, sonst gerechnet),
+    schliesst_bei_nq (Wächter-Level)|null, level_quelle 'hedge'|'einstieg'|null, master_pl{wert, at, quelle}|null,
     hedge (mt5_baseline.hedge komplett)|null, grund, hedge_eur, hedge_faktor, quelle 'farmer'|'manuell',
     verknuepft, handelstag}.
     Ausgeblendete Personen (ADMIN_EXCLUDE_EMAILS) fehlen wie in der Übersicht."""

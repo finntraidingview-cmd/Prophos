@@ -92,6 +92,15 @@ def main():
     check(z4["einstieg_nq"] == 30000.5 and z4["einstieg_quelle"] == "tv" and z4["tp_level_nq"] == 30140.5 and z4["sl_level_nq"] == 29950.5 and z4["hedge"] is None,
           "Zeile ohne Hedge: Einstieg aus der tv-Baseline, Level gerechnet, Quelle 'tv'")
     check(z["einstieg_quelle"] == "hedge" and z2["einstieg_quelle"] is None, "einstieg_quelle: hedge / null")
+    # Chart-Linie = Wächter-Level (25.09.2026): eingefrorene Level am Hedge schlagen die Rechnung aus einem nachgetragenen Einstieg
+    ph = dict(p, id="ph", master_contracts="1", master_symbol="MNQZ6", master_tp="280", master_sl=None,
+              mt5_baseline=dict(p["mt5_baseline"], hedge=dict(p["mt5_baseline"]["hedge"], einstieg_nq=30618.0, einstieg_quelle="puls avg_fill (nachgetragen)",
+                                                              tp_level_nq=30752.1, schliesst_bei_nq=30754.1, sl_level_nq=None)))
+    zh = a["_wd_heute_zeile"](ph, None, {})
+    check(zh["tp_level_nq"] == 30752.1 and zh["schliesst_bei_nq"] == 30754.1 and zh["level_quelle"] == "hedge" and zh["sl_level_nq"] is None
+          and zh["einstieg_nq"] == 30618.0, "wd-heute: TP-Linie = hedge.tp_level_nq (nicht Fill + Distanz), schliesst_bei_nq durchgereicht, ohne Master-SL kein SL")
+    check(z["level_quelle"] == "einstieg" and z["schliesst_bei_nq"] is None and z4["level_quelle"] == "einstieg" and z2["level_quelle"] is None,
+          "wd-heute: ohne Level am Hedge gerechnet (level_quelle einstieg), ohne Einstieg null")
     # Winning Days ohne Master-SL (Finn 25.09.2026): POST/PATCH schreiben master_sl immer null, wd-heute rechnet dann kein SL-Level
     osl = a["_wd_ohne_master_sl"]
     d1, v1 = osl({"master_sl": 250, "master_tp": 280, "master_risk": 250})
