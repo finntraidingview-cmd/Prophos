@@ -18527,6 +18527,12 @@
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     if(currentUserId) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
     const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
+    // Reader-PCs mit Versionen (24.09.2026 spät): für die Kopfzeile ohne Feed — welcher PC meldet sich, welches Script läuft dort.
+    // Tolerant: fehlen die Spalten noch, bleibt die Liste leer.
+    try{
+      const { data } = await supabase.from('echoplus_live').select('pc_name,reader_version,script_version,updated_at').order('updated_at', { ascending: false }).limit(3)
+      mkl.readerPcs = (data || []).filter(r => r && r.pc_name && (Date.now() - (Date.parse(r.updated_at) || 0)) < 600000)
+    }catch(_){ mkl.readerPcs = [] }
     const rows = (rk && rk.data) || []
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
     // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
@@ -18574,7 +18580,13 @@
       el.textContent = '–'; if(sym) sym.textContent = mkl.wurzel; if(diff) diff.textContent = ''
       if(q){ q.style.color = ''; q.style.fontWeight = ''; q.textContent = jeA ? `Kein ${mkl.wurzel}-Kurs im Feed — ${andere} liefert (Reader < 0.7.0 liest nur ein Symbol).`
                                          : 'Kein Kurs-Feed: auf dem 24/7-PC TradingView mit NQ/MNQ offen, Userscript ≥ 0.7.0 + Reader laufend, Prophos-Tab ≥ .469 offen.' }
-      if(hint) hint.textContent = ''
+      // Welcher Reader-PC meldet sich und mit welchen Versionen (echoplus_live) — Script < 0.7.0 liefert keine Kurse
+      if(hint){
+        const pcs = mkl.readerPcs || []
+        hint.textContent = pcs.length
+          ? pcs.map(r => { const alt = !r.script_version || /^0\.[0-6]\./.test(String(r.script_version)); return `Reader-PC ${r.pc_name}: Reader-Server ${r.reader_version || '?'}, Script ${r.script_version || '?'}${alt ? ' — Script < 0.7.0 liefert keine Kurse; Reader-Fenster neu starten / Tampermonkey-Updates prüfen' : ''}` }).join(' · ')
+          : 'Kein Reader-PC meldet sich (echoplus_live in den letzten 10 min leer).'
+      }
       return
     }
     const frisch = k.alter_ms <= HEDGE_KURS_MAX_ALTER_MS
@@ -29404,7 +29416,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.495'
+  const OS_TAB_BUILD = '2026-09-22.496'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42680,6 +42692,12 @@
         reader_ts: Number(d.ts) || 0,
         updated_at: new Date().toISOString()
       })
+      // Versionen des Reader-PCs (24.09.2026 spät, Finn live: Tab .495, Reader meldet sich, tv_kurse leer — aus der Cloud sah
+      // man nicht, welches Script dort läuft): reader_version/script_version aus der GET-Antwort. Eigener, toleranter Update-
+      // Aufruf NACH dem Upsert — fehlen die Spalten noch (SQL kommt vom Backend), scheitert nur er, nie der Positions-Strom.
+      if(d.reader_version || d.script_version){
+        try{ await supabase.from('echoplus_live').update({ reader_version: String(d.reader_version || '').slice(0, 24) || null, script_version: String(d.script_version || '').slice(0, 24) || null }).eq('id', pc) }catch(_){}
+      }
       // Live-Kurs aus dem Tab-Titel (Userscript 0.6.0, 24.09.2026 — Winning-Day-Gegenhedge): eine Zeile je PC
       // in tv_kurse, der Hedge-Wächter (hedgeWacheTick) nimmt die jüngste über alle PCs. Nur mit lesbarer Zahl
       // und nur, wenn der Titel jünger als 20 s ist — ein eingefrorener Titel (Tab zu, TV ausgeloggt) wird
