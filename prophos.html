@@ -16674,15 +16674,14 @@
       if(!plan || plan.status !== 'planned') return
       const upd = { status: 'open', started_at: new Date().toISOString(), ended_at: null }
       // MERGE statt Überschreiben (25.09.2026, Live-Befund Plan 2089a033): seit .527 öffnet der Fusion-Hedge VOR diesem
-      // Schritt und schreibt mt5_baseline.hedge — das frühere „mt5_baseline = { tv }" hat das hedge-Objekt gelöscht, die
-      // Fusion-Position lag danach ohne Eintrag am Plan. Jetzt: frische Zeile lesen und nur die eigenen Felder setzen.
-      let altBase = null
-      try{ const { data: z } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle(); altBase = (z && z.mt5_baseline) || null }catch(_){ altBase = plan.mt5Baseline || null }
+      // Schritt und schreibt mt5_baseline.hedge — das frühere „mt5_baseline = { tv }" hat das hedge-Objekt gelöscht.
+      // Teil B (25.09.2026): erst der Status (Guard planned), danach NUR die eigenen Felder atomar per RPC (Guard open) —
+      // kein Lesen-Ändern-Schreiben mehr, ein gleichzeitiger Hedge-Write kann nicht verloren gehen.
+      let patchBase = null
       if(plan.route === 'tvv2'){
         // Orbit V2 (24.09.2026): Startwert von Today's P&L aus dem Reader — oder ehrlich ohne tv-Feld
-        const mitTv = (tvBaseline && typeof tvBaseline === 'object') ? { tv: tvBaseline } : {}
-        upd.mt5_baseline = (altBase || Object.keys(mitTv).length) ? Object.assign({}, altBase || {}, mitTv) : null
-        if(!upd.mt5_baseline) console.warn('[v2PlanAufOpen] Orbit V2 ohne Start-Baseline (kein tv-lesen) — Auto-P&L nimmt später Today\'s P&L als Ganzes')
+        if(tvBaseline && typeof tvBaseline === 'object') patchBase = { tv: tvBaseline }
+        else console.warn('[v2PlanAufOpen] Orbit V2 ohne Start-Baseline (kein tv-lesen) — Auto-P&L nimmt später Today\'s P&L als Ganzes')
       }
       if(plan.route === 'mt5v2'){
         let base = null
@@ -16694,8 +16693,8 @@
             base = { master_balance: Number(s.master_balance), at: new Date().toISOString(), ticket: ticket ?? null }
           }
         }catch(_){}
-        upd.mt5_baseline = (altBase || base) ? Object.assign({}, altBase || {}, base || {}) : null   // Merge (25.09.2026)
-        if(!base) console.warn('[v2PlanAufOpen] Echo V2 ohne Baseline gestartet (keine frische Instanz) — P&L bleibt manuell')
+        if(base) patchBase = base   // oberste Ebene: master_balance, at, ticket
+        else console.warn('[v2PlanAufOpen] Echo V2 ohne Baseline gestartet (keine frische Instanz) — P&L bleibt manuell')
       }
       const { data, error } = await supabase.from('trade_plans')
         .update(upd)
@@ -16703,6 +16702,7 @@
       if(error || !data || !data.length) return
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
+      if(patchBase){ try{ await baselinePatch(plan.id, patchBase, 'open') }catch(e){ console.warn('[v2PlanAufOpen] Baseline', (e && e.message) || e) } }
       if(typeof renderTradePlans === 'function') renderTradePlans()
     }catch(e){ console.warn('[v2PlanAufOpen]', e) }
   }
@@ -16830,18 +16830,13 @@
          * trägt ein („Beweis oder leer"). Danach derselbe Weg wie Echo: atShowEndPrompt → review + Auto-P&L. */
         if(istV2){
           const finV2 = { master_balance: s.master_balance != null ? Number(s.master_balance) : null, at: new Date().toISOString() }
-          const baseV2 = Object.assign({}, plan.mt5Baseline || {}, { final: finV2 })
-          const { data: dV2, error: eV2 } = await supabase.from('trade_plans')
-            .update({ mt5_baseline: baseV2 })
-            .eq('id', plan.id).eq('status', 'open').select('*')
-          if(eV2){ console.warn('[mt5Poll] V2 final:', eV2.message || eV2); continue }
-          if(!dV2 || !dV2.length){
+          let bV2 = null   // atomar (Teil B, 25.09.2026): nur final
+          try{ bV2 = await baselinePatch(plan.id, { final: finV2 }, 'open') }catch(eV2){ console.warn('[mt5Poll] V2 final:', (eV2 && eV2.message) || eV2); continue }
+          if(!bV2){
             if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
             continue
           }
-          const iV2 = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-          if(iV2 >= 0) tradePlans[iV2] = rowToPlan(dV2[0])
-          const freshV2 = (iV2 >= 0) ? tradePlans[iV2] : rowToPlan(dV2[0])
+          const freshV2 = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: bV2 })
           mt5PlanPoll.wasOpen.delete(String(plan.id))
           mt5PlanPoll.streak.delete(String(plan.id))
           if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshV2)
@@ -16879,22 +16874,18 @@
           closed_tickets: real.map(e => e.ticket).filter(t => t != null),
           at: new Date().toISOString()
         }
-        const newBase = Object.assign({}, plan.mt5Baseline || {}, { final: fin })
-        const { data, error } = await supabase.from('trade_plans')
-          .update({ mt5_baseline: newBase })
-          .eq('id', plan.id).eq('status', 'open').select('*')
-        if(error){ console.warn('[mt5Poll] final:', error.message || error); continue }
-        if(!data || !data.length){
+        let bFin = null   // atomar (Teil B, 25.09.2026): nur final
+        try{ bFin = await baselinePatch(plan.id, { final: fin }, 'open') }catch(e){ console.warn('[mt5Poll] final:', (e && e.message) || e); continue }
+        if(!bFin){
           if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
           continue
         }
         const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-        if(idx >= 0) tradePlans[idx] = rowToPlan(data[0])
         // OHNE zweites Argument — exakt wie mirrorPlanPoll: der zweite Parameter ist
         // fromServer und würde atMoveToReview (review-Status + Auto-P&L) unterdrücken.
         // Den FRISCHEN Plan übergeben, damit _autoPnlFetchMt5 die eben persistierte
         // final-Baseline sieht (nicht die alte Objekt-Referenz).
-        const freshPlan = (idx >= 0) ? tradePlans[idx] : rowToPlan(data[0])
+        const freshPlan = (idx >= 0) ? tradePlans[idx] : Object.assign({}, plan, { mt5Baseline: bFin })
         mt5PlanPoll.wasOpen.delete(String(plan.id))
         mt5PlanPoll.streak.delete(String(plan.id))
         if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshPlan)
@@ -18244,9 +18235,7 @@
             const altF = plan.mt5Baseline && plan.mt5Baseline.fehler
             const altTs = altF && altF.at ? (Date.parse(altF.at) || 0) : 0
             if(!altF || altF.code !== code || altF.msg !== msg || (Date.now() - altTs) > 10 * 60 * 1000){
-              const base = Object.assign({}, plan.mt5Baseline || {}, { fehler: { code, msg, at: new Date().toISOString() } })
-              const { data } = await supabase.from('trade_plans').update({ mt5_baseline: base }).eq('id', plan.id).eq('status', 'open').select('*')
-              if(data && data.length){ const i = idx0(); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+              await baselinePatch(plan.id, { fehler: { code, msg, at: new Date().toISOString() } }, 'open')   // atomar (Teil B, 25.09.2026)
             }
           }catch(_){}
           continue
@@ -18286,15 +18275,10 @@
           const gleich = liveAlt && liveAlt.offen === true && ((neuPnl == null && !isFinite(altPnl)) || (neuPnl != null && isFinite(altPnl) && Math.abs(neuPnl - altPnl) <= 0.01))
           if(!manuell && gleich && altTs && (Date.now() - altTs) < 2 * 60 * 1000) continue   // manuell: immer schreiben (Stempel „eben geholt")
           const live = { pnl: neuPnl, offen: true, at: nowIso }
-          const base = Object.assign({}, plan.mt5Baseline || {}, { live })
-          const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
-            .eq('id', plan.id).eq('status', 'open').select('*')
-          if(error){ console.warn('[tvV2] live:', error.message || error); continue }
-          if(!data || !data.length){
-            if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
-            continue
-          }
-          const i = idx(); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+          // atomar (Teil B, 25.09.2026): nur live ersetzen — hedge/tv/final anderer Schreiber bleiben unberührt
+          let neuB = null
+          try{ neuB = await baselinePatch(plan.id, { live }, 'open') }catch(e){ console.warn('[tvV2] live:', (e && e.message) || e); continue }
+          if(!neuB && typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
           continue
         }
 
@@ -18322,18 +18306,16 @@
         // IM STREAK-MOMENT einfrieren: Today's P&L jetzt = Endstand (Finn: „eine Position pro Tag").
         const fin = { today_pnl: (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null,
                       datum: tvV2Handelstag(), at: nowIso }
-        const alt = plan.mt5Baseline || {}
-        const base = Object.assign({}, alt, { final: fin,
-          live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
-        const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
-          .eq('id', plan.id).eq('status', 'open').select('*')
-        if(error){ console.warn('[tvV2] final:', error.message || error); continue }
-        if(!data || !data.length){
+        // atomar (Teil B, 25.09.2026): final + live (live schreibt nur der Rundgang selbst), hedge bleibt unberührt
+        const liveAlt = (plan.mt5Baseline && plan.mt5Baseline.live) || {}
+        let neuB = null
+        try{ neuB = await baselinePatch(plan.id, { final: fin, live: Object.assign({}, liveAlt, { offen: false, at: nowIso }) }, 'open') }
+        catch(e){ console.warn('[tvV2] final:', (e && e.message) || e); continue }
+        if(!neuB){
           if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
           continue
         }
-        const i = idx(); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
-        const freshPlan = (i >= 0) ? tradePlans[i] : rowToPlan(data[0])
+        const freshPlan = tradePlans[idx()] || Object.assign({}, plan, { mt5Baseline: neuB })
         tvV2Poll.wasOpen.delete(pid)
         tvV2Poll.streak.delete(pid)
         if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: Ende erkannt, aber der Reader nannte kein Today's P&L — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
@@ -18530,17 +18512,41 @@
   }
   // hedge-Objekt am Plan schreiben (Merge in mt5_baseline, Rest bleibt). Ohne Status-Guard: der Hedge lebt auf
   // Fusion unabhängig vom Plan-Status — auch ein schon abgeschlossener Plan muss „geschlossen · P&L" tragen.
-  async function hedgeAmPlanSchreiben(planId, patch, extra){
-    const plan = tradePlans.find(x => String(x.id) === String(planId))
-    let alt = (plan && plan.mt5Baseline) || null
-    try{ const { data } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', planId).maybeSingle(); if(data) alt = data.mt5_baseline || alt }catch(_){}
-    const base = Object.assign({}, alt || {}, { hedge: Object.assign({}, (alt && alt.hedge) || {}, patch) })
-    const upd = Object.assign({ mt5_baseline: base }, extra || {})
-    const { data, error } = await supabase.from('trade_plans').update(upd).eq('id', planId).select('*')
+  /* mt5_baseline ATOMAR MERGEN (Teil B der Gegenprüfung, 25.09.2026 — RPCs aus sql/2026-09-25_mt5_baseline_patch.sql, Backend .556):
+   * bisher baute jeder Schreiber (Rundgang live/final/fehler, tvV2EndeSetzen, v2PlanAufOpen, einstieg_nq, Hedge) das ganze jsonb aus
+   * einem Plan-Objekt im Tab neu und schrieb es zurück — dazwischen schrieb der Hedge-Wächter in mt5_baseline.hedge, der Rundgang
+   * setzte einen schon geschlossenen Hedge wieder auf 'offen' bzw. löschte einen frischen. Jetzt merged die Datenbank in einem
+   * Statement: baselinePatch = oberste Ebene (mt5_baseline || patch), baselinePatchIn = eine Ebene tiefer (mt5_baseline[key] || patch).
+   * status ersetzt .eq('status', …). Rückgabe: neues mt5_baseline oder null (nichts geschrieben: Plan fehlt/fremd/Status-Guard).
+   * Fehler → werfen, NIE auf Lesen-Ändern-Schreiben zurückfallen. Der lokale Plan übernimmt das zurückgegebene mt5_baseline. */
+  function baselineLokal(planId, base){
+    const i = tradePlans.findIndex(x => String(x.id) === String(planId))
+    if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { mt5Baseline: base })
+    return (i >= 0) ? tradePlans[i] : null
+  }
+  async function baselinePatch(planId, patch, status){
+    const { data, error } = await supabase.rpc('mt5_baseline_patch', { p_plan: String(planId), p_patch: patch || {}, p_status: status || null })
     if(error) throw error
-    if(data && data[0]){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+    if(data) baselineLokal(planId, data)
+    return data || null
+  }
+  async function baselinePatchIn(planId, key, patch, status){
+    const { data, error } = await supabase.rpc('mt5_baseline_patch_in', { p_plan: String(planId), p_key: key, p_patch: patch || {}, p_status: status || null })
+    if(error) throw error
+    if(data) baselineLokal(planId, data)
+    return data || null
+  }
+  async function hedgeAmPlanSchreiben(planId, patch, extra){
+    // nur mt5_baseline.hedge anfassen, in der Datenbank gemerged (Teil B, 25.09.2026) — kein Status-Guard: der Hedge lebt über „open" hinaus
+    const neu = await baselinePatchIn(planId, 'hedge', patch)
+    if(!neu){ console.warn('[hedge] mt5_baseline.hedge nicht geschrieben (Plan fehlt oder fremd)', planId); return {} }
+    if(extra && Object.keys(extra).length){
+      const { data, error } = await supabase.from('trade_plans').update(extra).eq('id', planId).select('*')
+      if(error) throw error
+      if(data && data[0]){ const i = tradePlans.findIndex(x => String(x.id) === String(planId)); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+    }
     try{ renderTradePlans() }catch(_){}
-    return base.hedge
+    return neu.hedge || {}
   }
   const hedgePcId = () => (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
   // Nach dem bewiesenen Kauf-Klick (tpOrbitStarten → v2AufOpen): Gegen-Order auf Fusion. r = Bot-Antwort
@@ -18556,7 +18562,8 @@
   // Fehler, bei denen SICHER nichts gesendet wurde (Koordination 25.09.2026, Finns Test Plan 9302faea: 'copier_alt' im Neustart-
   // Fenster des Copiers nach dem Selbst-Update): kein Auftrag geschrieben (copier_alt), Panel pausiert (retry_ok true), Panel
   // nicht erreicht ohne cmd_id (verbindung). Nur diese werden wiederholt / per Knopf bzw. Selbstheilung erneut geöffnet.
-  const HEDGE_SICHER = new Set(['copier_alt', 'pausiert', 'verbindung'])
+  // positionen_unlesbar (Copier-Riegel .556): Konto vor dem Senden nicht lesbar → nichts gesendet, retry_ok true
+  const HEDGE_SICHER = new Set(['copier_alt', 'pausiert', 'verbindung', 'positionen_unlesbar'])
   const hedgeFehlerSicher = x => !!(x && HEDGE_SICHER.has(x.code) && x.retry_ok !== false && !(x.code === 'verbindung' && x.cmd_id))
   // Position dieses Plans im frischen hedge_solo (Copier b30d580: plan_id, sonst plan8 aus 'PXsolo:<plan8>')
   function hedgeSoloEigen(plan){
@@ -18656,6 +18663,14 @@
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
         open_grund: res.open_grund || null })
+      // schon_offen (Copier-Riegel): Level aus tv.einstieg_nq (Puls-Fill) wie bei der Selbstheilung, falls der Einstieg oben nur vom Feed kam
+      if(res.open_grund === 'schon_offen' && quelle !== 'fill'){
+        try{
+          const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
+          const lv = hedgeLevelAusPlan(pf)
+          if(lv && lv.einstieg_nq > 1000) Object.assign(h, await hedgeAmPlanSchreiben(plan.id, lv))
+        }catch(_){}
+      }
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
       const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer())
       const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
@@ -18836,11 +18851,10 @@
       ? { today_pnl: tpnl, datum: tvV2Handelstag(), quelle: 'puls', puls_at: nowIso }
       : { puls_at: nowIso, puls_fehler: pos ? 'Master-Position laut Puls noch offen' : !r ? 'keine Antwort' : !r.ok ? String(r.code || 'fehler') + (r.msg ? ': ' + String(r.msg).slice(0, 200) : '')
           : !frisch ? 'Lesung nicht frisch' : 'kein Today\'s P&L' }
-    const { data: neu, error } = await supabase.rpc('mt5_baseline_patch', { p_plan: pid, p_patch: { final: Object.assign({}, fin1, patch) }, p_status: 'review' })
-    if(error){ console.warn('[hedgeReview] final-Patch', error.message || error); return }
+    let neu = null
+    try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[hedgeReview] final-Patch', (e && e.message) || e); return }
     if(!neu) return   // Plan nicht mehr in „Überprüfen" (schon bestätigt) — nichts mehr anfassen
     const i = tradePlans.findIndex(x => String(x.id) === pid)
-    if(i >= 0) tradePlans[i] = Object.assign({}, tradePlans[i], { mt5Baseline: neu })
     try{ _autoPnlCache.delete(pid) }catch(_){}
     if(pos && typeof atToast === 'function') atToast(`⚠ ${p1.masterName || 'Plan'}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
     if(tpnl != null){
@@ -30804,7 +30818,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.558'
+  const OS_TAB_BUILD = '2026-09-22.559'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31198,10 +31212,7 @@
         try{
           const ein = (r && r.einstieg != null && typeof tvKursZahl === 'function') ? tvKursZahl(r.einstieg) : null
           if(ein > 1000){
-            const { data: zeile } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
-            const base = Object.assign({}, (zeile && zeile.mt5_baseline) || {})
-            base.tv = Object.assign({}, base.tv || {}, { einstieg_nq: ein, einstieg_quelle: 'fill', einstieg_symbol: r.tv_symbol || null })
-            await supabase.from('trade_plans').update({ mt5_baseline: base }).eq('id', plan.id)
+            await baselinePatchIn(plan.id, 'tv', { einstieg_nq: ein, einstieg_quelle: 'fill', einstieg_symbol: r.tv_symbol || null })   // atomar (Teil B)
           }
         }catch(e){ console.warn('[v2] einstieg_nq', e) }
       }
@@ -32074,15 +32085,11 @@
     const fin = { today_pnl: (typeof todayPnl === 'number' && isFinite(todayPnl)) ? todayPnl : null, datum: tvV2Handelstag(), at: nowIso, quelle: quelle || 'close' }
     // finExtra (25.09.2026): Ende aus dem Hedge-Level (hedgePlanAufReview) trägt grund/art/master_pl_schaetzung mit
     if(finExtra && typeof finExtra === 'object') Object.assign(fin, finExtra)   // 'reader_leer' = Master laut Reader weg (25.09.2026)
-    const alt = plan.mt5Baseline || {}
-    const base = Object.assign({}, alt, { final: fin, live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
-    const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
-      .eq('id', plan.id).eq('status', 'open').select('*')
-    if(error) throw error
-    if(!data || !data.length){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
-    const i = tradePlans.findIndex(x => String(x.id) === String(plan.id))
-    if(i >= 0) tradePlans[i] = rowToPlan(data[0])
-    const fresh = (i >= 0) ? tradePlans[i] : rowToPlan(data[0])
+    // atomar (Teil B, 25.09.2026): nur final + live, der Hedge wird hier NIE angefasst
+    const liveAlt = (plan.mt5Baseline && plan.mt5Baseline.live) || {}
+    const neuB = await baselinePatch(plan.id, { final: fin, live: Object.assign({}, liveAlt, { offen: false, at: nowIso }) }, 'open')
+    if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
+    const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
     if(fin.today_pnl == null && fin.quelle !== 'level' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
