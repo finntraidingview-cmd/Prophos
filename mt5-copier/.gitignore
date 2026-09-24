@@ -39,3 +39,7 @@ plans.json
 # Repo wandern koennen, stehen sie hier).
 anker-*.json
 panel_frisch.py
+
+# PC-Kennung des jeweiligen PCs (25.09.2026, /api/pc-id) — gilt fuer alle Browser-Profile dieses PCs, nie im Repo
+pc_id.json
+pc_id.json.tmp

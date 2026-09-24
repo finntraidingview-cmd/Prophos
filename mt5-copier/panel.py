@@ -1018,6 +1018,41 @@ TV_ORDER_LOCK = threading.Lock()
 HEDGE_SOLO_LOCK = threading.Lock()
 
 
+# PC-Kennung im Panel (25.09.2026, Koordinations-Session): Finn nutzt auf pc-usq1i6 zwei Chrome-Profile (Puls +
+# Feed). Prophos erzeugte die Kennung je Profil aus localStorage → zwei Kennungen am selben PC (pc-usq1i6 +
+# pc-4bx8nm), und hedge.pc band Wächter/Schließen an EIN Profil. Jetzt verwahrt das Panel die Kennung für alle
+# Profile des PCs. Keine Erfindung, keine Überschreibung: das erste Profil, das POST /api/pc-id schickt, trägt
+# seine bestehende Kennung ein (so bleiben pc-usq1i6 … erhalten), jedes weitere bekommt diese zurück.
+PC_ID_DATEI = os.path.join(HERE, "pc_id.json")
+PC_ID_RE = re.compile(r"^pc-[a-z0-9]{4,12}$")
+PC_ID_LOCK = threading.Lock()
+
+
+def pc_id_lesen(pfad=None):
+    """Gespeicherte PC-Kennung oder None (Datei fehlt, kaputt oder Format ungültig — nie raten)."""
+    d = read_json(pfad or PC_ID_DATEI, None)
+    v = d.get("pc_id") if isinstance(d, dict) else None
+    return v if isinstance(v, str) and PC_ID_RE.fullmatch(v) else None
+
+
+def pc_id_setzen(neu, pfad=None):
+    """Setzt die Kennung NUR, wenn noch keine gültige gespeichert ist (atomar über .tmp + os.replace).
+    -> (gueltige_kennung, neu_gesetzt: bool). Ungültiges Format → ValueError (Panel antwortet 400)."""
+    neu = str(neu or "").strip()
+    if not PC_ID_RE.fullmatch(neu):
+        raise ValueError("pc_id muss dem Muster pc-[a-z0-9]{4,12} entsprechen")
+    pfad = pfad or PC_ID_DATEI
+    with PC_ID_LOCK:
+        alt = pc_id_lesen(pfad)
+        if alt:
+            return alt, False
+        tmp = pfad + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"pc_id": neu, "gesetzt_at": datetime.now().isoformat(timespec="seconds")}, f, ensure_ascii=False)
+        os.replace(tmp, pfad)
+        return neu, True
+
+
 def _heal_ea(fname, cfg, install_dir, started_ts, wait_s=45, schnell_wenn_nie_da=False):
     """Hintergrund-Selbstheilung (15.08.2026): Nach einem Terminal-Start pruefen,
     ob der Snapshot wieder fliesst. Tut er es nicht, fehlt das Lese-EA auf dem
@@ -2083,6 +2118,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, PAGE, "text/html; charset=utf-8")
         if path == "/api/instances":
             return self._send(200, json.dumps(snapshot(), ensure_ascii=False))
+        if path == "/api/pc-id":
+            # PC-Kennung für alle Browser-Profile dieses PCs (25.09.2026) — null, solange keine eingetragen ist
+            import socket
+            return self._send(200, json.dumps({"ok": True, "pc_id": pc_id_lesen(), "host": socket.gethostname()}, ensure_ascii=False))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
@@ -2717,6 +2756,22 @@ class Handler(BaseHTTPRequestHandler):
                   flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/pc-id":
+            # Kennung eintragen, falls noch keine da ist; sonst die gespeicherte zurück (nie überschreiben)
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "msg": f"ungueltige Daten: {e}"}))
+            try:
+                pid, neu = pc_id_setzen((body or {}).get("pc_id"))
+            except ValueError as e:
+                return self._send(400, json.dumps({"ok": False, "msg": str(e)}, ensure_ascii=False))
+            except OSError as e:
+                return self._send(500, json.dumps({"ok": False, "msg": f"pc_id.json nicht schreibbar: {e}"}, ensure_ascii=False))
+            if neu:
+                print(f"[panel] PC-Kennung eingetragen: {pid}", flush=True)
+            return self._send(200, json.dumps({"ok": True, "pc_id": pid, "neu": neu}, ensure_ascii=False))
         if u.path == "/api/hedge-solo":
             # Solo-Hedge auf dem Fusion-Hedge-Terminal (24.09.2026 abends, Winning Days
             # gegenhedgen ohne Duplikum — Finn: „direkt nach der Puls-Order auf Fusion

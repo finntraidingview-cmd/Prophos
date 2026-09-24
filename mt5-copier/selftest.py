@@ -1739,6 +1739,7 @@ def main():
     results.append(test_solo_zu_ring())
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
+    results.append(test_pc_id())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2041,6 +2042,36 @@ def test_solo_riegel():
         print("✗ None-Liste"); ok = False
     if ok:
         print("✓ Solo-Riegel: zweiter Auftrag gleicher plan8 → 'schon_offen' mit Ticket/Lots/Fill; fremder Plan, Copier-magic, ohne plan_id frei; Zuordnung auch ueber Ticket→plan_id")
+    return ok
+
+
+def test_pc_id():
+    """PC-Kennung im Panel (25.09.2026): leer → POST setzt; zweiter POST anderer Wert → bleibt; kaputte Datei → null;
+    falsches Format → ValueError (Panel: 400)."""
+    import panel, tempfile
+    ok = True
+    d = tempfile.mkdtemp(); pf = os.path.join(d, "pc_id.json")
+    if panel.pc_id_lesen(pf) is not None:
+        print("✗ pc_id: ohne Datei muss null kommen"); ok = False
+    if panel.pc_id_setzen("pc-usq1i6", pf) != ("pc-usq1i6", True) or panel.pc_id_lesen(pf) != "pc-usq1i6":
+        print("✗ pc_id: erster POST setzt nicht"); ok = False
+    if panel.pc_id_setzen("pc-4bx8nm", pf) != ("pc-usq1i6", False) or panel.pc_id_lesen(pf) != "pc-usq1i6":
+        print("✗ pc_id: zweiter POST darf nicht ueberschreiben"); ok = False
+    for kaputt in ("{nicht json", '{"pc_id": 5}', '{"pc_id": "PC-GROSS"}', '["pc-usq1i6"]'):
+        open(pf, "w").write(kaputt)
+        if panel.pc_id_lesen(pf) is not None:
+            print(f"✗ pc_id: kaputte Datei {kaputt!r} muss null liefern"); ok = False
+    if panel.pc_id_setzen("pc-abcd12", pf) != ("pc-abcd12", True):
+        print("✗ pc_id: kaputte Datei wird beim naechsten POST ersetzt"); ok = False
+    for falsch in ("", None, "pc-", "pc-ab", "pc-ABCD", "pc-abcdefghijklm", "xx-abcd", "pc-abcd; rm"):
+        try:
+            panel.pc_id_setzen(falsch, os.path.join(d, "x.json")); print(f"✗ pc_id: Format {falsch!r} angenommen"); ok = False
+        except ValueError:
+            pass
+    if os.path.exists(pf + ".tmp"):
+        print("✗ pc_id: .tmp liegt noch"); ok = False
+    if ok:
+        print("✓ PC-Kennung: leer → gesetzt, zweiter Wert bleibt aussen vor, kaputte Datei → null, Format pc-[a-z0-9]{4,12}")
     return ok
 
 
