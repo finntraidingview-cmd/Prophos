@@ -1849,6 +1849,19 @@
   #dashboard-view .mwd-box-s{font-size:10.5px;color:var(--sub-2);margin-top:3px;line-height:1.4}
   #dashboard-view .mwd-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:8px;font-size:11px;color:var(--sub-2)}
   #dashboard-view .mwd-fuss-chip{margin-left:auto}
+  /* Erledigt-Popup (25.09.2026): Kopfzeile wie die Karte, zwei Felder auf einer Linie, Ergebniszeile — kompakt */
+  #dashboard-view .mwd-leer{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);font-size:12.5px;color:var(--sub)}
+  #dashboard-view .mwd-nachtrag{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwd-nachtrag-btn{padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11.5px;font-weight:600;cursor:pointer}
+  #dashboard-view .mwd-nachtrag-btn:hover{border-color:var(--violet);color:var(--violet)}
+  #dashboard-view .mwd-erl-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12.5px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .mwd-erl-felder{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  #dashboard-view .mwd-erl-felder .field{margin:0}
+  #dashboard-view .mwd-erl-felder label{white-space:nowrap}
+  #dashboard-view .mwd-erl-hilfe{font-size:11px;color:var(--sub-2);margin-top:4px;line-height:1.35}
+  #dashboard-view .mwd-erl-summe{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-top:14px;padding:9px 12px;border-radius:8px;background:var(--bg);font-size:12.5px}
+  #dashboard-view .mwd-erl-buchung{font-size:11.5px;color:var(--sub)}
+  #dashboard-view #mwdErledigtModal .modal-msg:empty{display:none}
   #dashboard-view .mwd-fehler{flex-basis:100%;color:#b91c1c;font-weight:600}
   #dashboard-view .mwd-aktionen{display:inline-flex;align-items:center;gap:6px;margin-left:8px}
   #dashboard-view .mwd-btn{padding:3px 10px;font-size:11.5px;height:auto;line-height:1.5}
@@ -1862,6 +1875,7 @@
     #dashboard-view .mwd-mark b{font-size:9.5px}
     #dashboard-view .mwd-fuss-chip{margin-left:0;flex-basis:100%}
     #dashboard-view .mwd-aktionen{margin-left:0;flex-basis:100%;justify-content:flex-end}
+    #dashboard-view .mwd-erl-felder{grid-template-columns:1fr}
     #dashboard-view .mwd-btn{padding:7px 14px;font-size:13px}
   }
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
@@ -9331,7 +9345,7 @@
        eigene Pläne nutzen das bestehende tradeCompleteModal, fremde dieses Popup → PATCH /admin/wd-plaene {aktion:'erledigt'}.
        Eigene Verdrahtung in MARKT LIVE (mklWdErledigt*), kein Sammel-Handler. -->
   <div class="modal-bg" id="mwdErledigtModal">
-    <div class="modal" style="max-width:420px">
+    <div class="modal" style="max-width:440px">
       <div class="modal-head">
         <h3 id="mwd-erl-titel">Trade erledigt</h3>
         <button class="modal-x" id="mwdErledigtClose" aria-label="Schließen">
@@ -9339,18 +9353,22 @@
         </button>
       </div>
       <div class="modal-body">
-        <div id="mwd-erl-info" style="font-size:12.5px;color:var(--sub);margin-bottom:12px"></div>
-        <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:12px">
-          <div class="field">
-            <label>Master-P&amp;L ($)</label>
-            <input type="number" class="input mono" id="mwd-erl-master" step="0.01" placeholder="z.B. 250">
+          <!-- Kopf im Stil der Winning-Days-Karte (25.09.2026, Finn: „komplett hässlich" — der lange Kontoname im Titel brach um) -->
+          <div class="mwd-erl-kopf" id="mwd-erl-info"></div>
+          <div class="mwd-erl-felder">
+            <div class="field">
+              <label>Master ($)</label>
+              <input type="number" class="input mono" id="mwd-erl-master" step="0.01" placeholder="z.B. 250">
+              <div class="mwd-erl-hilfe">aus TradingView eintragen</div>
+            </div>
+            <div class="field">
+              <label>Fusion (€)</label>
+              <input type="number" class="input mono" id="mwd-erl-fusion" step="0.01" placeholder="z.B. −101,47">
+              <div class="mwd-erl-hilfe" id="mwd-erl-quelle"></div>
+            </div>
           </div>
-          <div class="field">
-            <label>Fusion-P&amp;L (€) <span id="mwd-erl-quelle" style="color:var(--sub);font-weight:400"></span></label>
-            <input type="number" class="input mono" id="mwd-erl-fusion" step="0.01" placeholder="z.B. −101,47">
-          </div>
-        </div>
-        <div class="modal-msg" id="mwdErledigtMsg"></div>
+          <div class="mwd-erl-summe" id="mwd-erl-summe"></div>
+          <div class="modal-msg" id="mwdErledigtMsg"></div>
       </div>
       <div class="modal-foot">
         <button class="btn btn-ghost" id="mwdErledigtCancel">Abbrechen</button>
@@ -19431,8 +19449,14 @@
    * gestrichelt/gedämpft mit Startzeit, zu = gedämpft mit Ergebnis. Klick hebt die Linien im Chart hervor (mkl.wd.aktiv). */
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
-    const pl = mkl.wd.plaene || []
-    if(!pl.length && !mkl.wd.fehler){ el.style.display = 'none'; return }
+    // Nur laufende und geplante Karten (Finn 25.09.2026: „Die vergangenen Trades sollen da nicht sein, das hat keinen Sinn");
+    // beendete ohne eingetragenes Ergebnis erscheinen nur als EINE Nachtrag-Zeile unter den Karten, completed nie.
+    const alle = mkl.wd.plaene || []
+    const zeit = x => Date.parse(x.status === 'open' ? (x.started_at || '') : (x.start_um || '')) || 9e15
+    const pl = alle.filter(x => x.status === 'open' || x.status === 'planned')
+      .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || zeit(a) - zeit(b))
+    const nachtrag = alle.filter(x => x.status === 'review' && !(x.master_pl && x.master_pl.quelle === 'plan'))
+    if(!alle.length && !mkl.wd.fehler && !mkl.wd.at){ el.style.display = 'none'; return }
     el.style.display = ''
     // NQ/MNQ preisgleich — irgendein frischer Kurs: je Wurzel aus tv_kurse (mkl.kursJe, Realtime/Poll), sonst der Kopf-Kurs (mkl.kurs)
     const kurs = (mkl.kursJe && (mkl.kursJe[mkl.wurzel] || mkl.kursJe.NQ || mkl.kursJe.MNQ)) || mkl.kurs || null
@@ -19531,16 +19555,19 @@
           + (hedgeHier ? knopf('hedge', 'Hedge zu', 'Fusion-Gegenposition jetzt schließen (dieser PC hält sie)') : '')
           + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
           + `</span>`
-      } else if(pw.status === 'review' && !(pw.master_pl && pw.master_pl.quelle === 'plan')){
-        // Beendet, aber noch nicht erledigt (Finn 25.09.2026: die zwei Test-Trades nachtragen) — öffnet dasselbe Popup, ohne Rückfrage
-        aktionen = `<span class="mwd-aktionen"><button type="button" class="btn btn-primary mwd-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(pw.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">Erledigt eintragen</button></span>`
       }
       const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}${fehlerTxt}${aktionen}</div>`
       return `<div class="mwd-card ${offen ? 'mwd-open' : geplant ? 'mwd-planned' : 'mwd-done'}${aktiv ? ' is-aktiv' : ''}" data-mkl-wd="${escapeHtml(String(pw.id))}" style="--mwd-farbe:${farbe}" title="Klick hebt die Linien im Chart hervor">${kopf}${level}${boxen}${fuss}</div>`
     })
-    const offenN = pl.filter(x => x.status === 'open').length, geplantN = pl.filter(x => x.status === 'planned').length
-    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} laufen · ${geplantN} geplant · ${pl.length - offenN - geplantN} zu · alle IDs${kp == null ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      <div class="mwd-liste">${karten.join('') || '<div style="font-size:12px;color:var(--sub-2)">Keine Winning-Day-Pläne am Handelstag.</div>'}</div>`
+    const offenN = pl.filter(x => x.status === 'open').length, geplantN = pl.length - offenN
+    const uhrZ = t => t ? new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–'
+    const naechster = pl.find(x => x.status === 'planned')
+    const leerZeile = offenN ? '' : `<div class="mwd-leer">Gerade läuft kein Winning Day${naechster ? ` · nächster Start ${naechster.start_um ? uhrZ(naechster.start_um) : 'von Hand'} · ${escapeHtml(String(naechster.person || '?'))}` : ''}</div>`
+    const kurzKonto = x => { const k = x.konto || {}; return `${x.person || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
+    const nachtragZeile = nachtrag.length ? `<div class="mwd-nachtrag"><span>${nachtrag.length} beendet ohne Ergebnis — Erledigt eintragen:</span>`
+      + nachtrag.map(x => `<button type="button" class="mwd-nachtrag-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(x.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">${escapeHtml(kurzKonto(x))}</button>`).join('') + `</div>` : ''
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+      ${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${nachtragZeile}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
   }
   // Eigener Plan? Nur dann darf „Beendet" schreiben (trade_plans unter RLS des angemeldeten Nutzers)
@@ -19599,7 +19626,7 @@
    * Buchung auf 'wd_hedge' um); fremder Plan → kompaktes Popup mwdErledigtModal → PATCH /admin/wd-plaene {aktion:'erledigt',
    * plan_id, master_pl, slave_pl} (Backend .541, geht aus open und review; auf completed = Korrektur). Fusion vorbelegt mit hedge.pl
    * aus der Deal-Historie. */
-  let _mwdErlId = null
+  let _mwdErlId = null, _mwdErlKonto = ''
   function mklWdErledigtOeffnen(pid, extra){
     const pw = Object.assign({}, (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)) || {}, extra || {})
     const hPl = (pw.hedge && pw.hedge.pl != null && isFinite(Number(pw.hedge.pl))) ? Number(pw.hedge.pl) : null
@@ -19607,16 +19634,39 @@
     if(eigen && typeof openTradeCompleteModal === 'function'){ mkl.wd.at = 0; openTradeCompleteModal(pid, hPl != null ? hPl : undefined); return }
     _mwdErlId = String(pid)
     const k = pw.konto || {}
-    const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = `Trade erledigt · ${pw.person || '?'} · ${k.name || k.firma || '?'}`
+    const t = document.getElementById('mwd-erl-titel'); if(t) t.textContent = 'Trade erledigt'
     const info = document.getElementById('mwd-erl-info')
-    if(info) info.textContent = [pw.richtung ? String(pw.richtung).toUpperCase() : '', pw.kt != null ? `${pw.kt} × ${pw.symbol_root || '?'}` : '', pw.master_tp != null ? `TP ${pw.master_tp} $` : '', pw.master_sl != null ? `SL ${pw.master_sl} $` : ''].filter(Boolean).join(' · ') + ' — wird in Finanzen gebucht.'
+    if(info){
+      const buy = pw.richtung === 'buy', sell = pw.richtung === 'sell', f0 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+      info.innerHTML = `<span class="mwd-person">${escapeHtml(String(pw.person || '?'))}</span>`
+        + `<span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>`
+        + ((buy || sell) ? `<span class="mwd-chip ${buy ? 'mwd-buy' : 'mwd-sell'}">${buy ? 'BUY' : 'SELL'}</span>` : '')
+        + (pw.kt != null ? `<span class="mwd-kt mono">${f0(pw.kt)} × ${escapeHtml(String(pw.symbol_root || '?'))}</span>` : '')
+        + (pw.master_tp != null ? `<span class="mwd-chip">TP ${f0(pw.master_tp)} $</span>` : '')
+        + (pw.master_sl != null ? `<span class="mwd-chip">SL ${f0(pw.master_sl)} $</span>` : '')
+    }
     const m = document.getElementById('mwd-erl-master'); if(m) m.value = (pw.master_pl && pw.master_pl.wert != null) ? String(pw.master_pl.wert) : ''
     const f = document.getElementById('mwd-erl-fusion'); if(f) f.value = hPl != null ? String(hPl) : ''
-    const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? '— aus MetaTrader' : ''
+    const q = document.getElementById('mwd-erl-quelle'); if(q) q.textContent = hPl != null ? 'aus MetaTrader' : 'im Hedge-Terminal nachsehen'
+    _mwdErlKonto = (pw.hedge && pw.hedge.hedge_login) ? `das Fusion-Konto ${pw.hedge.hedge_login}` : 'das Fusion-Konto des PCs'
+    mklWdErlSumme()
     const msg = document.getElementById('mwdErledigtMsg'); if(msg){ msg.textContent = ''; msg.className = 'modal-msg' }
     document.getElementById('mwdErledigtModal')?.classList.add('open')
     setTimeout(() => { try{ (m && !m.value ? m : f)?.focus() }catch(_){} }, 60)
   }
+  // Ergebniszeile, rechnet beim Tippen mit: zusammen ≈ Master × FX + Fusion (FX wie überall: window._fxUsdEur, sonst 0,85)
+  function mklWdErlSumme(){
+    const el = document.getElementById('mwd-erl-summe'); if(!el) return
+    const zahl = id => { const v = String(document.getElementById(id)?.value || '').trim().replace(',', '.').replace('−', '-'); return v === '' ? null : Number(v) }
+    const mpl = zahl('mwd-erl-master'), spl = zahl('mwd-erl-fusion')
+    const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
+    const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    const summe = (mpl != null && isFinite(mpl)) ? mpl * fx + ((spl != null && isFinite(spl)) ? spl : 0) : null
+    el.innerHTML = `<span>zusammen ≈ <b class="mono" style="color:${summe == null ? 'var(--sub)' : summe >= 0 ? '#15803d' : '#b91c1c'}">${summe == null ? '–' : fmtE(summe)}</b></span>`
+      + `<span class="mwd-erl-buchung">${(spl != null && isFinite(spl)) ? `wird als WD-Hedge auf ${escapeHtml(_mwdErlKonto)} gebucht` : 'ohne Fusion-Buchung'}</span>`
+  }
+  document.getElementById('mwd-erl-master')?.addEventListener('input', mklWdErlSumme)
+  document.getElementById('mwd-erl-fusion')?.addEventListener('input', mklWdErlSumme)
   function mklWdErledigtZu(){ document.getElementById('mwdErledigtModal')?.classList.remove('open'); _mwdErlId = null }
   async function mklWdErledigtSpeichern(){
     const pid = _mwdErlId; if(!pid) return
@@ -30445,7 +30495,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.546'
+  const OS_TAB_BUILD = '2026-09-22.547'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
