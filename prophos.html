@@ -1192,8 +1192,11 @@
   @media (min-width:821px){
     #tradePlanModal .tp-wd{grid-template-columns:repeat(6,1fr) !important}
     #tradePlanModal .tp-wd > .field{grid-column:span 3}
-    #tradePlanModal .tp-wd > .field:has(> #tp-master-risk),#tradePlanModal .tp-wd > .field:has(> #tp-master-qty),
-    #tradePlanModal .tp-wd > #tp-slave-risk-field{grid-column:span 2 !important}
+    /* Mapping (25.09.2026, Finn: „sitzt nicht im Gapping, Mapping nicht sauber"): Kontrakte gehören zur Order → Zeile mit dem
+       Instrument (4 + 2 Spalten); Abschnitt A nur noch Risiko Master | Risiko Slave (je 3), kurze einzeilige Labels. */
+    #tradePlanModal .tp-wd > #tp-v2-instr-row{grid-column:span 4 !important}
+    #tradePlanModal .tp-wd > .field:has(> #tp-master-qty){grid-column:span 2 !important}
+    #tradePlanModal .tp-wd > .field:has(> #tp-master-risk),#tradePlanModal .tp-wd > #tp-slave-risk-field{grid-column:span 3 !important}
     #tradePlanModal .tp-wd > #tp-master-tp-row,#tradePlanModal .tp-wd > #tp-wd-tp-kachel{grid-column:span 3 !important}
   }
   #tradePlanModal .tp-wd > .tp-wd-head{grid-column:1 / -1;margin-top:8px;padding-top:12px;border-top:1px solid var(--border);
@@ -1202,10 +1205,10 @@
   #tradePlanModal .tp-wd > .tp-wd-head span{display:block;margin-top:2px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--sub-2)}
   #tradePlanModal .tp-wd > #tp-master-row,#tradePlanModal .tp-wd > #tp-wd-multi-row,#tradePlanModal .tp-wd > #tp-wd-hedge-row,
   #tradePlanModal .tp-wd > #tp-kompass-box,#tradePlanModal .tp-wd > #tp-dir-row,#tradePlanModal .tp-wd > #tp-plan-start-um-row{grid-column:1 / -1 !important}
-  #tradePlanModal .tp-wd > #tp-v2-instr-row{order:1;grid-column:1 / -1 !important}
-  #tradePlanModal .tp-wd > #tp-wd-head-a{order:2}
-  #tradePlanModal .tp-wd > .field:has(> #tp-master-risk){order:3}
-  #tradePlanModal .tp-wd > .field:has(> #tp-master-qty){order:4}
+  #tradePlanModal .tp-wd > #tp-v2-instr-row{order:1;grid-column:1 / -1}
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-qty){order:2}
+  #tradePlanModal .tp-wd > #tp-wd-head-a{order:3}
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-risk){order:4}
   #tradePlanModal .tp-wd > #tp-slave-risk-field{order:5}
   #tradePlanModal .tp-wd > #tp-wd-multi-row{order:6}
   #tradePlanModal .tp-wd > #tp-wd-head-b{order:7}
@@ -1216,6 +1219,25 @@
   #tradePlanModal .tp-wd > #tp-kompass-box{order:12}
   #tradePlanModal .tp-wd > #tp-dir-row{order:13}
   #tradePlanModal .tp-wd > #tp-plan-start-um-row{order:14}
+  /* Felder immer auf einer Linie: Zeilen oben ausrichten, Labels einzeilig, Hilfszeile unter dem Feld (fehlt sie, rutscht nichts) */
+  #tradePlanModal .tp-wd{align-items:start}
+  /* Hülle der Limits-Box (Oneside-Betting-Hinweis) trägt inline span 2 und belegte leer die Zelle links vom Instrument —
+     auf WD-Farm volle Breite, und ganz weg, solange die Box selbst verborgen ist */
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-limits-info){grid-column:1 / -1 !important}
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-limits-info[style*="display: none"]),
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-limits-info[style*="display:none"]){display:none}
+  #tradePlanModal .tp-wd > .field > label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #tradePlanModal .tp-wd-hilfe{display:none}
+  #tradePlanModal .tp-wd .tp-wd-hilfe{display:block;font-size:11px;color:var(--sub-2);margin-top:4px;line-height:1.35}
+  /* Instrument-Umschalter und Kontrakte-Feld gleich hoch */
+  #tradePlanModal .tp-wd #tp-v2-instr-seg{height:46px;box-sizing:border-box}
+  #tradePlanModal .tp-wd #tp-master-qty{height:46px;box-sizing:border-box}
+  /* Multiplikator-Kästen: gleiche Höhe, im leeren Zustand ruhig (kein lila Rahmen, kein Verlauf) */
+  #tradePlanModal #tp-wd-multi-row .tp-slave-out,#tradePlanModal #tp-wd-multi-row .tp-mult-out{min-height:112px;box-sizing:border-box}
+  #tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-slave-out{border:1px solid var(--border);background:var(--bg);box-shadow:none}
+  #tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-mult-out{background:var(--bg)}
+  #tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-slave-value,#tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-multi-value{color:var(--sub-2)}
+  #tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-slave-unit,#tradePlanModal #tp-wd-multi-row.tp-wd-leer .tp-multi-eq{color:var(--sub);font-family:inherit}
   #tradePlanModal .tp-wd .tp-wd-kachel{padding:10px 12px;border-radius:8px;border:1px solid var(--border);height:100%;box-sizing:border-box}
   #tradePlanModal .tp-wd .tp-wd-kachel-leer{border-style:dashed;font-size:12px;color:var(--sub);background:transparent}
   #tradePlanModal .tp-wd .tp-wd-kachel-titel{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em}
@@ -5864,6 +5886,7 @@
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
+              <div class="tp-wd-hilfe">Stop-Distanz für die Lot-Rechnung</div>
             </div>
             <div class="field">
               <!-- Label/step schaltet tpRouteUpdateSeg je Weg um (24.09.2026): Orbit V2 ganze Kontrakte, Echo V2 Lots 0.01 -->
@@ -5873,6 +5896,7 @@
             <div class="field" id="tp-slave-risk-field" style="grid-column:span 2">
               <label>Risiko Slave (<span id="tp-slave-cur">€</span>)</label>
               <input type="number" class="input mono" id="tp-slave-risk" min="0" step="5" placeholder="z.B. 350">
+              <div class="tp-wd-hilfe">auf Fusion · Staffel-Vorschlag</div>
               <div id="tp-slave-suggest" style="display:none;margin-top:6px;padding:8px 12px;background:rgba(139,92,246,.08);border:1px solid rgba(139,92,246,.2);border-radius:6px;font-size:12px;line-height:1.4">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
                   <div style="color:var(--ink)">
@@ -29507,8 +29531,10 @@
     const col = v => v >= 0 ? '#15803d' : '#b91c1c'
     const leer = (txt) => `<div class="tp-wd-kachel tp-wd-kachel-leer">${txt}</div>`
     if(!(r.lots > 0)){
-      const grund = !r.masterFirm ? 'Master-Konto wählen.' : !(r.risk > 0) ? 'Risiko Master eintragen (Stop-Distanz in $).' : !(r.kt > 0) ? 'Kontrakte eintragen.' : 'Risiko Slave (€) eintragen.'
+      const grund = !r.masterFirm ? 'Master-Konto wählen' : !(r.risk > 0) ? 'Risiko Master eintragen' : !(r.kt > 0) ? 'Kontrakte eintragen' : 'Risiko Slave eintragen'
       if(mv) mv.textContent = '—'; if(sq) sq.textContent = '—'; if(me) me.textContent = grund
+      const su = document.getElementById('tp-wd-slave-unit'); if(su) su.textContent = grund
+      document.getElementById('tp-wd-multi-row')?.classList.add('tp-wd-leer')
       if(tpBox) tpBox.innerHTML = leer('bei Take Profit: ' + grund)
       box.innerHTML = leer('bei Stop Loss: ' + grund)
       return
@@ -29516,6 +29542,8 @@
     // A) Multiplikator-Box mit dem Rechenweg (Finns Beispiel: 250 $ ÷ (2 $/Pkt × 1 Kt) = 125 Pkt · 100 € ÷ (0,85 €/Pkt × 125 Pkt) = 0,94 Lot → ×0,941)
     if(mv) mv.textContent = '×' + n(r.mult, 3)
     if(sq) sq.textContent = n(r.lots, 2)
+    { const su = document.getElementById('tp-wd-slave-unit'); if(su) su.textContent = 'Lot NAS100' }
+    document.getElementById('tp-wd-multi-row')?.classList.remove('tp-wd-leer')
     if(me) me.innerHTML = `${n(r.risk, 0)} $ ÷ (${n(r.masterPpl, r.masterPpl % 1 ? 2 : 0)} $/Pkt × ${n(r.kt, 0)} Kt) = ${n(r.slPkt, 1)} Pkt<br>${n(r.slaveRisk, 0)} € ÷ (${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt) = ${n(r.lots, 2)} Lot → ×${n(r.mult, 3)}`
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
     const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
@@ -29583,8 +29611,8 @@
     // Die klassische Box unter dem Raster (nicht die WD-Kopie in Abschnitt A, #tp-wd-multi-row) — auf allen V2-Wegen weg
     const multBox = [...document.querySelectorAll('#tradePlanModal .tp-multi-display')].find(el => !el.closest('#tp-wd-multi-row'))
     if(multBox) multBox.style.display = v2 ? 'none' : ''
-    { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = wdAn ? 'Risiko Master ($) — Stop-Distanz in $ für die Lot-Rechnung' : 'Risiko Master ($)' }
-    { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>) — Fusion, Staffel-Vorschlag'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
+    { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = 'Risiko Master ($)' }   // WD-Farm: Erklärung steht als Hilfszeile unter dem Feld (tp-wd-hilfe, 25.09.2026)
+    { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
     // Ein Popup für alles (23.09.2026, Finn: „den Account auswählen, die Lotanzahl, Take Profit und Stop-Loss, die
     // Uhrzeit — das ist alles"): auf V2 kommen TP, SL, Richtung und Startzeit HIER rein; Risiko Master und die
     // Limits-Box verschwinden. Auf den anderen Wegen bleibt alles wie bisher (TP/Richtung versteckt, Popup 2).
@@ -30404,7 +30432,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.544'
+  const OS_TAB_BUILD = '2026-09-22.545'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
