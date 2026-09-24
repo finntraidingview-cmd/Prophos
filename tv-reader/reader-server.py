@@ -35,6 +35,17 @@ Der Copier schloss den Hedge und riss ihn im naechsten Tick wieder auf.
 Dazu ein Struktur-Riegel: eine Nachricht ohne Feld 'positionen' (Liste) wird
 abgelehnt statt als "flat" gelesen.
 
+Konto-Zusammenfassung (24.09.2026, Orbit-V2-Rundgang): das Userscript ab
+0.5.0 schickt im Bedienfeld zusaetzlich 'summary' (alle Label→Wert-Paare des
+Account Managers: Balance, Today's P&L, …), 'today_pnl_text' und 'today_label'.
+Hier wird NICHTS daran gedeutet — der Puls (order_bot.py tvlesen) parst die
+Zahlen. Durchgereicht wird es an zwei Stellen: GET /bedienfeld (der ganze
+Stand, wie gehabt) und GET /positions (nur die drei Felder + summary_alter_s,
+damit ein Konsument des Positions-Stands nicht zweimal fragen muss).
+Dazu 'alter_s' im Positions-Stand (Server-Zeit seit dem letzten UEBERNOMMENEN
+Stand): der Puls braucht den Beweis, dass der Stand JUENGER ist als sein
+Kontowechsel — bisher stand nur die Browser-Zeit 'ts' drin.
+
 Nur Python-Standardbibliothek — kein pip, keine Cloud, keine Schluessel.
 Laeuft auf Mac/Windows/Linux gleich.
 """
@@ -50,6 +61,7 @@ AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
 
 # Letzter bekannter Stand (wird von POST gesetzt, von GET/Datei gelesen)
 _stand = {"ts": 0, "positionen": []}
+_stand_s = 0.0      # Server-Zeit des letzten UEBERNOMMENEN Stands (24.09.2026, fuer alter_s)
 _an = not os.path.exists(AUS_FLAG)
 
 # Bedienfeld: letzter Stand der Steuerelement-Geometrie + Empfangszeit.
@@ -98,6 +110,18 @@ def _mit_an(stand):
     # Konsument darf nicht uebersehen koennen, dass dieser Stand steht.
     out["blind"] = bool(_blind_grund)
     out["blind_grund"] = _blind_grund
+    # Alter des Stands in SERVER-Sekunden (24.09.2026): 'ts' ist Browser-Zeit,
+    # der Puls vergleicht aber gegen seine eigene Uhr — also gegen diese hier.
+    # None = noch nie ein Stand uebernommen.
+    out["alter_s"] = round(time.time() - _stand_s, 3) if _stand_s else None
+    # Konto-Zusammenfassung aus dem letzten Bedienfeld (Userscript 0.5.0+),
+    # rein durchgereicht; bei aelterem Userscript fehlen die Felder im
+    # Bedienfeld und stehen hier als None.
+    bf = _bedienfeld or {}
+    out["summary"] = bf.get("summary")
+    out["today_pnl_text"] = bf.get("today_pnl_text")
+    out["today_label"] = bf.get("today_label")
+    out["summary_alter_s"] = round(time.time() - _bedienfeld_s, 3) if _bedienfeld_s else None
     return out
 
 
@@ -143,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        global _stand, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
+        global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         global _such_texte, _such_bis
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
@@ -282,6 +306,7 @@ class Handler(BaseHTTPRequestHandler):
             _blind_seit = 0.0
 
         _stand = daten
+        _stand_s = time.time()
         try:
             _schreibe_datei(_mit_an(_stand))
         except Exception as e:

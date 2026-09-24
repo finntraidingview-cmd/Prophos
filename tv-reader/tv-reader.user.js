@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.4.2
-// @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt.
+// @version      0.5.0
+// @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
@@ -15,6 +15,18 @@
 // Warum GM_xmlhttpRequest statt fetch: umgeht CORS/Mixed-Content sauber
 // (HTTPS-Seite -> http://127.0.0.1). Ist die Standard-Zapfstelle fuer
 // Userscripts, die mit einem lokalen Prozess reden.
+//
+// CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.5.0  24.09.2026  Konto-Zusammenfassung (summary + today_pnl_text) im
+//                      Bedienfeld — Orbit-V2-Rundgang: Puls liest, ob die
+//                      Position noch offen ist, und nach dem Ende „Today's P&L".
+//                      Das exakte Label kennt erst der erste Live-Lauf: im
+//                      Bedienfeld-Dump unter 'summary' nachsehen, wie es
+//                      wirklich heisst, dann NUR TODAY_PNL_LABELS anpassen.
+//   0.4.2  21.09.2026  Text-Suche auf Anforderung (treffer) — Konto-IDs im DOM.
+//   0.4.1  01.09.2026  Verdeckter Tab darf nie auf „flach" wechseln.
+//   0.4.0  01.09.2026  textContent statt innerText, Blind-Pruefung, Worker-Takt.
+//   0.3.x  30./31.08.  Bedienfeld, Kompakt-Dump, Spaltentitel-Listen.
 
 (function () {
   'use strict';
@@ -24,7 +36,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.4.2';
+  const VERSION    = '0.5.0';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -429,6 +441,162 @@
     return out;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════════
+   * KONTO-ZUSAMMENFASSUNG (0.5.0, 24.09.2026 — Orbit-V2-Rundgang)
+   *
+   * Finn: „Der Bot geht sich in einem gewissen Intervall automatisch in das
+   * Konto bei Tradovate auf TradingView, genauso wie man einen Trade startet.
+   * Er liest, ob die Position noch offen ist oder schon beendet. Ist sie
+   * beendet, kann man bei Today's P&L sehen, wie viel sich bewegt hat, weil
+   * man immer nur eine Position pro Tag macht."
+   *
+   * Der exakte DOM der Zusammenfassung (die Leiste bzw. der Reiter im Account
+   * Manager mit Balance / Realized P&L / Unrealized P&L …) ist beim Bau NICHT
+   * bekannt — Tradovate-in-TradingView war auf keinem Mac zu sehen. Deshalb
+   * bewusst GENERISCH, wie beim Spaltentitel-Fund vom 31.08.2026: alle
+   * Label→Wert-Paare im Bereich des Account Managers einsammeln, deutsch wie
+   * englisch, und als 'summary' mitschicken. Zwei Wege, beide ueber
+   * textContent (nie innerText — der Tabwechsel-Fund vom 01.09.2026 gilt hier
+   * genauso, der Rundgang laeuft ja gerade, WEIL der Tab oft hinten liegt):
+   *   (a) ka-table-Zeilen OHNE Symbol-/Seite-Spalte: so sieht der Reiter
+   *       „Account Summary" aus, wenn er offen ist (td[data-label] wie die
+   *       Positionstabelle, nur ohne Positionen);
+   *   (b) Blatt-Elemente mit Text-Label und einem BENACHBARTEN Zahlen-Text
+   *       (naechstes/vorheriges Geschwister, Geschwister des Elternteils) im
+   *       Account-Manager-Panel — so sehen die kleinen Kacheln in der Leiste
+   *       aus. Plus „Label: Wert" in einem Element.
+   * Gekappt auf SUMMARY_MAX Paare, erster Treffer je Label gewinnt.
+   *
+   * 'today_pnl_text' ist der Wert des ERSTEN Labels aus TODAY_PNL_LABELS, das
+   * als Teilstring (ohne Gross/Klein) in einem Summary-Label steckt. Riegel:
+   * Labels mit „unreal…"/„nicht real…" zaehlen nie — „Unrealized P&L" enthaelt
+   * „Realized P&L" als Teilstring, und der offene G&V ist genau NICHT das
+   * Tagesergebnis. Nach dem ersten Live-Lauf steht im Dump, wie das Label bei
+   * Tradovate wirklich heisst — dann nur die Liste anpassen, sonst nichts.
+   * ═════════════════════════════════════════════════════════════════════════ */
+  const TODAY_PNL_LABELS = ["Today's P&L", "Today's Realized P&L", "Realized P&L",
+                            "Heutiger G&V", "Heutiger realisierter G&V", "Realisierter G&V",
+                            "Tages-G&V", "Realisiert"];
+  const RX_NICHT_TODAY = /unreal|nicht\s*real|offen/i;     // offener/unrealisierter G&V ist nie das Tagesergebnis
+  const SUMMARY_MAX = 40;
+  // Zahlen-Text: Vorzeichen (auch U+2212 „−" wie im TV-Titel), Waehrung vorn
+  // oder hinten, Tausender-/Dezimalzeichen deutsch wie englisch, Prozent.
+  const RX_WERT  = /^[+\-−–]?\s*[$€£]?\s*[+\-−–]?\d[\d.,\s\u00a0']*\s*(%|USD|EUR|GBP|CHF|\$|€|£)?$/;
+  const RX_LABEL = /[A-Za-zÄÖÜäöüß]/;
+
+  function textKurz(el) {
+    return ((el && el.textContent) || '').replace(/\s+/g, ' ').trim();
+  }
+  function istWert(t) {
+    return t.length >= 1 && t.length <= 24 && /\d/.test(t) && RX_WERT.test(t);
+  }
+  function istLabel(t) {
+    // Kein Konto-/Ordernummern-Text (4+ Ziffern), kein Satz, kein Leerstring
+    return t.length >= 2 && t.length <= 40 && RX_LABEL.test(t) && !/\d{4,}/.test(t);
+  }
+
+  /* Wurzel des Account Managers: vom stabilsten Anker aus hochklettern, bis
+   * ein Vorfahr breit und hoch genug ist, um das ganze Panel zu sein. Ohne
+   * Layout (verdeckter Tab -> alle Rechtecke 0) fuenf Stufen blind hoch — das
+   * Panel ist nie der Anker selbst, und textContent liest auch ohne Layout. */
+  function kontoManagerWurzel() {
+    const anker = [
+      '[data-name="account-manager"]',
+      '[data-name="account-manager-account-select"]',
+      '[data-name^="account-manager"]',
+      '[class*="accountManager"]',
+      'td[data-label]',
+    ];
+    let el = null;
+    for (const s of anker) {
+      try { el = document.querySelector(s); } catch (_) { el = null; }
+      if (el) break;
+    }
+    if (!el) return null;
+    const r0 = el.getBoundingClientRect();
+    let w = el, stufen = 0;
+    if (!r0.width && !r0.height) {
+      while (w.parentElement && w.parentElement !== document.body && stufen < 5) { w = w.parentElement; stufen++; }
+      return w;
+    }
+    while (w && w !== document.body && stufen < 12) {
+      const r = w.getBoundingClientRect();
+      if (r.height >= 120 && r.width >= window.innerWidth * 0.4) return w;
+      w = w.parentElement; stufen++;
+    }
+    return el.parentElement || el;
+  }
+
+  function liesZusammenfassung() {
+    const paare = {};
+    let n = 0;
+    const setze = (label, wert) => {
+      label = String(label || '').replace(/[:\s]+$/, '').trim();
+      wert = String(wert || '').trim();
+      if (!label || !wert || paare[label] !== undefined || n >= SUMMARY_MAX) return;
+      paare[label] = wert;
+      n++;
+    };
+
+    // (a) Tabellenzeilen ohne Symbol/Seite = Konto-Zusammenfassung als ka-table
+    const zeilen = new Map();
+    document.querySelectorAll('td[data-label]').forEach((td) => {
+      const tr = td.closest('tr');
+      if (!tr) return;
+      if (!zeilen.has(tr)) zeilen.set(tr, []);
+      zeilen.get(tr).push([td.getAttribute('data-label') || '', zellText(td)]);
+    });
+    for (const zellen of zeilen.values()) {
+      if (zellen.some(([l]) => SPALTEN.symbol.includes(l) || SPALTEN.seite.includes(l))) continue;
+      for (const [l, v] of zellen) if (istLabel(l) && istWert(v)) setze(l, v);
+    }
+
+    // (b) Label + benachbarter Zahlen-Text im Account-Manager-Panel
+    const wurzel = kontoManagerWurzel();
+    if (wurzel) {
+      // (c) schlichte Tabelle ohne data-label: <th>Label</th><td>Wert</td>
+      try {
+        wurzel.querySelectorAll('th').forEach((th) => {
+          const td = th.nextElementSibling;
+          const l = textKurz(th), v = td ? textKurz(td) : '';
+          if (istLabel(l) && istWert(v)) setze(l, v);
+        });
+      } catch (_) {}
+      let els;
+      try { els = wurzel.querySelectorAll('*'); } catch (_) { els = []; }
+      let geprueft = 0;
+      for (const el of els) {
+        if (n >= SUMMARY_MAX || ++geprueft > 6000) break;
+        if (el.children.length) continue;                      // nur Blaetter als Label
+        if (el.closest('table,script,style,input,textarea')) continue;
+        const t = textKurz(el);
+        if (!t || t.length > 70) continue;
+        // „Label: 1.234,00" in EINEM Element
+        const m = t.match(/^([^:\d]{2,40}):\s*(.+)$/);
+        if (m && istLabel(m[1].trim()) && istWert(m[2].trim())) { setze(m[1], m[2]); continue; }
+        if (!istLabel(t)) continue;
+        const p = el.parentElement;
+        const kand = [el.nextElementSibling, el.previousElementSibling,
+                      p && p.nextElementSibling, p && p.previousElementSibling];
+        for (const k of kand) {
+          if (!k || k === el) continue;
+          const v = textKurz(k);
+          if (istWert(v)) { setze(t, v); break; }
+        }
+      }
+    }
+
+    // Tages-G&V: erstes Label aus der Liste, das in einem Summary-Label steckt
+    let todayLabel = null, todayText = null;
+    const keys = Object.keys(paare).filter((k) => !RX_NICHT_TODAY.test(k));
+    for (const such of TODAY_PNL_LABELS) {
+      const sl = such.toLowerCase();
+      const k = keys.find((x) => x.toLowerCase().includes(sl));
+      if (k) { todayLabel = k; todayText = paare[k]; break; }
+    }
+    return { summary: paare, today_pnl_text: todayText, today_label: todayLabel };
+  }
+
   function liesBedienfeld() {
     const ticketTreffer = suche(SIG_TICKET);
     // Wurzel fuer die Ticket-Felder: das gefundene Ticket-Element selbst.
@@ -446,6 +614,15 @@
 
     const symbolKnopf = suche(SIG_SYMBOL_KNOPF);
     const kontoSchalter = suche(SIG_KONTO_SCHALTER);
+    // Konto-Zusammenfassung (0.5.0) — darf das Bedienfeld nie mitreissen:
+    // ein Fehler hier wird gemeldet, alles andere geht trotzdem raus.
+    let zus;
+    try {
+      zus = liesZusammenfassung();
+    } catch (e) {
+      zus = { summary: null, today_pnl_text: null, today_label: null,
+              summary_fehler: String((e && e.message) || e) };
+    }
 
     return {
       ts: Date.now(),
@@ -479,6 +656,13 @@
         schalter: kontoSchalter,
         eintraege: sucheAlle(SIG_KONTO_EINTRAEGE),
       },
+      // Konto-Zusammenfassung (0.5.0, Orbit-V2-Rundgang): alle Label→Wert-Paare
+      // des Account Managers + der Tages-G&V nach TODAY_PNL_LABELS. null =
+      // nicht lesbar (Fehler steht in summary_fehler), {} = nichts gefunden.
+      summary: zus.summary,
+      today_pnl_text: zus.today_pnl_text,
+      today_label: zus.today_label,
+      summary_fehler: zus.summary_fehler || null,
       symbol: {
         aktiv: symbolKnopf && symbolKnopf.text ? symbolKnopf.text : '',
         knopf: symbolKnopf,

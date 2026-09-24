@@ -27,6 +27,7 @@ Aufruf (vom Panel als kurzlebiger Subprozess):
   python order_bot.py <config-datei.json> "<befehl-json>"
   python order_bot.py inspect <config-datei.json>     (Dialog-Dump, platziert nichts)
   python order_bot.py tvorder "<befehl-json>"         (Orbit: Order auf TradingView)
+  python order_bot.py tvlesen "<befehl-json>"         (Orbit V2: Konto lesen — Position offen? Today's P&L)
 Befehl:  {"symbol": "NDX100", "richtung": "buy", "volumen": 0.2,
           "sl_usd": 100, "tp_usd": 300}
 Antwort: EINE JSON-Zeile auf stdout.
@@ -4888,6 +4889,283 @@ def modus_tvkette(cmd):
     print(json.dumps(res))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ORBIT-V2-RUNDGANG: tvlesen (24.09.2026 nachts)
+#
+# Finn: "Der Bot geht sich in einem gewissen Intervall automatisch in das
+# Konto bei Tradovate auf TradingView, genauso wie man einen Trade startet. Er
+# liest, ob die Position noch offen ist oder schon beendet. Ist sie beendet,
+# kann man bei Today's P&L sehen, wie viel sich bewegt hat, weil man immer nur
+# eine Position pro Tag macht." Duplikum ist weg; Orbit V2 (route tvv2) hat
+# damit keinen Copier mehr, der Ende + P&L liefert — das macht jetzt dieser
+# Rundgang, gerufen vom Panel (/api/tv-lesen) im Intervall aus Prophos.
+#
+# Bauweise, bewusst NUR additiv:
+#   · Der Konto-Schritt ist modus_tvkonto — UNVERAENDERT und wie in
+#     modus_tvkette mit abgefangener Ausgabe aufgerufen. Damit gelten exakt
+#     dieselben Schritte und Beweise wie vor einer Order: TradingView nach
+#     vorn / starten (tv_sicherstellen), lesen (tv_konto_zustand, UIA-Auge),
+#     Dropdown nur wenn noetig, Beweis ueber frischen Stand nach dem Klick.
+#     Steht das Konto schon richtig, wird nichts geklickt.
+#   · Danach KEIN Klick mehr: Bedienfeld (Userscript 0.5.0+ mit 'summary')
+#     und Positions-Stand vom Reader holen — beide muessen JUENGER sein als
+#     der Beginn der Lesephase, sonst koennten sie noch vom vorigen Konto
+#     stammen (dieselbe Frische-Doktrin wie _tv_bf(nach=...)).
+#   · Zahlen ueber tv_zahl_lesen (deutsch wie englisch), Vorzeichen U+2212
+#     vorher normalisiert — TradingView schreibt "−0,69 %" mit dem
+#     typografischen Minus, und tv_zahl_lesen wuerde es still verschlucken.
+#   · today_pnl ist float oder None — nie 0.0 aus "nichts gefunden".
+# Rueckgabe-Codes (Vertrag mit der Prophos-Seite): reader_fehlt (kein
+# Reader / kein Bedienfeld), userscript_alt, konto_nicht_erreicht (+
+# konto_aktiv), reader_pausiert, reader_unfrisch, bot_fehlt, tv_fehlt.
+# Das Panel setzt daraus die HTTP-Codes (503 / 409); puls_beschaeftigt
+# vergibt das Panel selbst ueber TV_ORDER_LOCK.
+# ═══════════════════════════════════════════════════════════════════════════
+
+TV_USERSCRIPT_LESEN_MIN = "0.5.0"      # ab hier gibt es 'summary' im Bedienfeld
+# Erster Treffer gewinnt (Teilstring, ohne Gross/Klein). Welches Label
+# Tradovate in TradingView WIRKLICH zeigt, sagt der erste Live-Lauf (Antwort
+# 'summary') — dann nur diese Liste anpassen, hier UND im Userscript.
+TV_TODAY_PNL_LABELS = ("Today's P&L", "Today's Realized P&L", "Realized P&L",
+                       "Heutiger G&V", "Heutiger realisierter G&V", "Realisierter G&V",
+                       "Tages-G&V", "Realisiert")
+# "Unrealized P&L" enthaelt "Realized P&L" als Teilstring — der OFFENE G&V ist
+# aber genau nicht das Tagesergebnis. Solche Labels zaehlen nie.
+TV_RX_NICHT_TODAY = re.compile(r"unreal|nicht\s*real|offen", re.I)
+
+
+def tv_geld_lesen(text):
+    """Geldbetrag aus einem TradingView-Text, deutsch oder englisch, mit dem
+    typografischen Minus (U+2212) und dem Gedankenstrich als Vorzeichen.
+    None, wenn nichts Zaehlbares drinsteht — nie ein stilles 0.0."""
+    if text is None:
+        return None
+    t = str(text).replace("−", "-").replace("–", "-").strip()
+    # "(12,50)" = Buchhalter-Minus
+    if re.fullmatch(r"\(\s*[^()]*\d[^()]*\)", t):
+        t = "-" + t.strip("() ")
+    return tv_zahl_lesen(t)
+
+
+def tv_today_pnl(summary, today_text=None, today_label=None):
+    """-> (wert|None, label|None, text|None). Nimmt den Vorschlag des
+    Userscripts (today_pnl_text), sucht sonst selbst in summary — dieselbe
+    Liste, derselbe Riegel gegen 'Unrealized'."""
+    if today_text not in (None, "") and today_label and not TV_RX_NICHT_TODAY.search(str(today_label)):
+        w = tv_geld_lesen(today_text)
+        if w is not None:
+            return w, str(today_label), str(today_text)
+    if not isinstance(summary, dict):
+        return None, None, None
+    keys = [k for k in summary.keys() if not TV_RX_NICHT_TODAY.search(str(k))]
+    for such in TV_TODAY_PNL_LABELS:
+        sl = such.lower()
+        for k in keys:
+            if sl in str(k).lower():
+                w = tv_geld_lesen(summary.get(k))
+                if w is not None:
+                    return w, str(k), str(summary.get(k))
+    return None, None, None
+
+
+def pruefe_tv_lesen_befehl(cmd):
+    """Fehlerliste fuer den tvlesen-Befehl (leer = in Ordnung)."""
+    if not isinstance(cmd, dict):
+        return ["Befehl ist kein Objekt"]
+    fehler = []
+    if len(_nur_alnum(cmd.get("konto") or cmd.get("ext_id"))) < 3:
+        fehler.append("Konto (External ID) fehlt oder ist kuerzer als 3 Zeichen")
+    t = cmd.get("timeout_s")
+    if t not in (None, ""):
+        try:
+            float(t)
+        except (TypeError, ValueError):
+            fehler.append("timeout_s ist keine Zahl")
+    g = cmd.get("geschwister")
+    if g is not None and not isinstance(g, list):
+        fehler.append("geschwister muss eine Liste sein")
+    return fehler
+
+
+def tv_lesen_timeout(cmd):
+    """timeout_s aus dem Befehl, geklemmt 10..180, Standard 45 (Vertrag)."""
+    try:
+        t = float(cmd.get("timeout_s") or 45.0)
+    except (TypeError, ValueError):
+        t = 45.0
+    return max(10.0, min(180.0, t))
+
+
+def tv_positionen_auspacken(pos):
+    """Reader-Zeilen -> Vertragsform: Texte bleiben, dazu die geparsten Zahlen."""
+    out = []
+    for p in (pos or []):
+        if not isinstance(p, dict):
+            continue
+        out.append({"symbol": p.get("symbol"), "seite": p.get("seite"),
+                    "menge": p.get("menge"), "einstieg": p.get("einstieg"),
+                    "pnl": p.get("pnl"), "sl": p.get("sl"), "tp": p.get("tp"),
+                    "menge_zahl": tv_geld_lesen(p.get("menge")),
+                    "einstieg_zahl": tv_geld_lesen(p.get("einstieg")),
+                    "pnl_zahl": tv_geld_lesen(p.get("pnl"))})
+    return out
+
+
+def modus_tvlesen(cmd):
+    import io
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
+           "konto_aktiv": "", "konto_quelle": None}
+    trail = _StempelSpur()
+
+    def raus(code, msg, schritt, **extra):
+        res["code"], res["msg"], res["schritt"] = code, msg, schritt
+        res.update(extra)
+        res["trail"] = " > ".join(trail) + ((" || Konto: " + res["konto_trail"]) if res.get("konto_trail") else "")
+        res.pop("konto_trail", None)
+        _tv_http("/suche", {"texte": []}, timeout=1.5)     # Textsuche nie im Dauerbetrieb
+        print(json.dumps(res, ensure_ascii=False))
+
+    fehler = pruefe_tv_lesen_befehl(cmd)
+    if fehler:
+        return raus("befehl", "Befehl unvollstaendig: " + " / ".join(fehler), "befehl")
+    ext = str(cmd.get("konto") or cmd.get("ext_id") or "").strip()
+    timeout_s = tv_lesen_timeout(cmd)
+    geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
+                   if len(_nur_alnum(x)) >= 3][:60]
+
+    # --- 0: Reader da? Ohne ihn gibt es weder Positionen noch Zusammenfassung —
+    # dann braucht es auch keinen Fenster-Tanz. Reihenfolge bewusst so: der
+    # billigste Beweis zuerst (Doktrin seit dem MT5-Puls).
+    bf0 = _tv_http("/bedienfeld", timeout=2.0)
+    if bf0 is None:
+        return raus("reader_fehlt", "TV-Reader (127.0.0.1:8790) antwortet nicht — laeuft reader-server.py "
+                    "auf diesem PC?", "reader")
+    if not bf0.get("ok"):
+        return raus("reader_fehlt", "Reader laeuft, hat aber noch kein Bedienfeld — laeuft das Userscript "
+                    "(Tampermonkey, Version " + TV_USERSCRIPT_LESEN_MIN + "+) im TradingView-Tab?", "reader")
+    if not tv_version_min(bf0.get("version"), TV_USERSCRIPT_LESEN_MIN):
+        return raus("userscript_alt", f"Userscript {bf0.get('version') or '?'} liefert noch keine "
+                    f"Konto-Zusammenfassung — Update auf {TV_USERSCRIPT_LESEN_MIN}+ und den "
+                    "TradingView-Tab mit F5 neu laden.", "reader", userscript=bf0.get("version"))
+    trail.append(f"Reader da (Userscript {bf0.get('version')}, Bedienfeld {bf0.get('alter_s')}s alt)")
+
+    # --- 1: Konto-Schritt = modus_tvkonto, unveraendert, Ausgabe abgefangen ----
+    cmd_k = {k: str(cmd.get(k) or "").strip()
+             for k in ("tv_url", "tv_browser_path", "tv_chrome_profil", "tv_username", "firma")}
+    cmd_k["ext_id"] = ext
+    cmd_k["geschwister"] = geschwister
+    cmd_k["sitzung_merken"] = bool(cmd.get("sitzung_merken"))
+    puffer, echt = io.StringIO(), sys.stdout
+    sys.stdout = puffer
+    try:
+        modus_tvkonto(cmd_k)
+    except Exception as e:
+        sys.stdout = echt
+        return raus("tv_fehlt", f"Konto-Schritt abgebrochen: {type(e).__name__}: {e}", "konto")
+    finally:
+        sys.stdout = echt
+    zeilen = [z for z in puffer.getvalue().strip().splitlines() if z.strip()]
+    try:
+        res_k = json.loads(zeilen[-1])
+    except (ValueError, IndexError):
+        return raus("tv_fehlt", "Konto-Schritt ohne lesbare Antwort: " + (zeilen[-1][:160] if zeilen else "leer"), "konto")
+    res["konto_aktiv"] = str(res_k.get("konto_aktiv") or "")[:80]
+    res["konto_trail"] = str(res_k.get("trail") or "")
+    res["konto_msg"] = str(res_k.get("msg") or "")[:300]
+    if not res_k.get("ok"):
+        schritt_k = str(res_k.get("schritt") or "")
+        if schritt_k in ("start", "befehl", "tradingview"):
+            # pywinauto fehlt (Mac) / Befehl / TradingView laesst sich nicht oeffnen
+            code = "bot_fehlt" if "pywinauto" in res["konto_msg"] else "tv_fehlt"
+        else:
+            code = "konto_nicht_erreicht"
+        return raus(code, res["konto_msg"] or "Konto-Schritt fehlgeschlagen", "konto",
+                    zustand=res_k.get("zustand"), diagnose=res_k.get("diagnose"))
+    trail.append(f"Konto steht ({res['konto_aktiv'][:40]}) — {res_k.get('schritt')}")
+
+    # --- 2: Lesen, kein Klick mehr. Alles muss JUENGER sein als t_lese. -------
+    t_lese = time.time()
+    _tv_http("/suche", {"texte": [ext] + geschwister}, timeout=1.5)   # Konto-Auge per Text (tv_konto_per_text)
+    ende = t_lese + timeout_s
+    bf, st, grund, empf = None, None, "noch kein Stand", None
+    konto_quelle = None
+    while time.time() < ende:
+        rest = ende - time.time()
+        bf = _tv_bf(nach=t_lese, timeout=min(3.0, max(0.3, rest)))
+        if not bf:
+            grund = "kein Bedienfeld-Stand nach dem Konto-Schritt (Userscript stumm? Tab verdeckt?)"
+            continue
+        z, aktiv = tv_konto_zustand(bf, ext, geschwister)
+        if z == "richtig":
+            res["konto_aktiv"], konto_quelle = aktiv[:80], "reader"
+        elif z in ("gleicher_login", "falsch"):
+            # Das Reader-Auge sieht ein ANDERES Konto als das UIA-Auge eben — zwei
+            # Augen, die sich widersprechen, sind kein Beweis. Nichts liefern.
+            return raus("konto_nicht_erreicht", f"Konto-Schritt meldete {ext}, der Reader sieht aber "
+                        f"'{aktiv[:40]}' im Panel — kein P&L ohne eindeutiges Konto.", "lesen",
+                        konto_aktiv=aktiv[:80], zustand=z)
+        elif time.time() - t_lese < 3.0:
+            grund = "Reader-Auge sieht das Konto (noch) nicht"
+            _warte(0.3, 0.2)
+            continue
+        else:
+            # Der Reader kennt den Konto-Umschalter nicht (TradingView hat die Anker
+            # umbenannt, Fund 21.09.2026) — dann gilt der UIA-Beweis von eben (nach
+            # dem Klick frisch gelesen, derselbe Beweis, mit dem tvkonto Orders freigibt).
+            konto_quelle = "uia"
+        st = _tv_http("/positions", timeout=2.0)
+        if not st:
+            grund = "Positions-Stand nicht abrufbar"
+            _warte(0.3, 0.2)
+            continue
+        if st.get("an") is False:
+            return raus("reader_pausiert", "TV-Reader ist pausiert (Orbit-Schalter) — der Positions-Stand "
+                        "ist eingefroren, stale ist nicht flat. Reader in Prophos einschalten.", "lesen")
+        if st.get("blind"):
+            grund = "Reader blind: " + str(st.get("blind_grund") or "")[:120]
+            _warte(0.4, 0.3)
+            continue
+        if not isinstance(st.get("positionen"), list):
+            grund = "Positions-Stand ohne Liste"
+            _warte(0.3, 0.2)
+            continue
+        # Frische: Server-Alter (reader-server 24.09.2026+), sonst Browser-ts
+        # (gleicher PC, gleiche Uhr).
+        try:
+            if st.get("alter_s") is not None:
+                empf = time.time() - float(st["alter_s"])
+            else:
+                empf = float(st.get("ts") or 0) / 1000.0
+        except (TypeError, ValueError):
+            empf = None
+        if empf is None or empf < t_lese:
+            grund = "Positions-Stand aelter als der Lesebeginn (noch vom vorigen Konto?)"
+            _warte(0.3, 0.2)
+            continue
+        break
+    else:
+        return raus("reader_unfrisch", f"In {timeout_s:.0f} s kein beweisbarer Stand: {grund}.", "lesen",
+                    konto_quelle=konto_quelle)
+
+    positionen = tv_positionen_auspacken(st.get("positionen"))
+    summary = bf.get("summary") if isinstance(bf.get("summary"), dict) else None
+    today, today_label, today_text = tv_today_pnl(summary, bf.get("today_pnl_text"), bf.get("today_label"))
+    trail.append(f"gelesen: {len(positionen)} Pos, {len(summary or {})} Summary-Paare, "
+                 f"Today {today} ('{today_label}')")
+    res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
+                "summary": summary, "today_pnl": today, "today_label": today_label,
+                "today_pnl_text": today_text,
+                "alter_s": round(time.time() - empf, 3),
+                "gelesen_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "konto_quelle": konto_quelle, "userscript": bf.get("version"),
+                "sprache_fremd": bool(bf.get("sprache_fremd")),
+                "summary_fehler": bf.get("summary_fehler")})
+    return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en)"
+                + (f", Today's P&L {today:g} ({today_label})" if today is not None else
+                   ", Tages-G&V nicht gefunden — 'summary' in der Antwort zeigt die Labels"),
+                "fertig")
+
+
 def modus_tvorder(cmd):
     """Die Kette 1-5. Jeder Schritt beweist sich am naechsten Bedienfeld-Stand,
     bevor der naechste beginnt."""
@@ -7443,6 +7721,22 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tvlesen":
+        # Orbit-V2-Rundgang (24.09.2026): Konto anfahren, dann NUR lesen —
+        # Position offen? Today's P&L? Klickt hoechstens den Konto-Umschalter
+        # (ueber modus_tvkonto), nie ins Order-Panel. Kein Prophos-Heimweg:
+        # der PC bleibt auf TradingView, sonst drosselt Chrome den Reader.
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tvlesen(cmd)
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
+                              "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e}"}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvorder":
         # Orbit-Puls Schritt 2 (30.08.2026): die Order auf TradingView

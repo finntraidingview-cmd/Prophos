@@ -2408,6 +2408,86 @@ class Handler(BaseHTTPRequestHandler):
                   f"[{res.get('zustand')}] ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tv-lesen":
+            # Orbit-V2-Rundgang (24.09.2026 nachts, Finn: "Der Bot geht sich in
+            # einem gewissen Intervall automatisch in das Konto bei Tradovate auf
+            # TradingView, genauso wie man einen Trade startet. Er liest, ob die
+            # Position noch offen ist oder schon beendet. Ist sie beendet, kann
+            # man bei Today's P&L sehen, wie viel sich bewegt hat"). Duplikum ist
+            # weg — Orbit V2 (tvv2) bekommt Ende + P&L jetzt ueber diesen Weg.
+            # Gleiche Bauart wie /api/tv-konto: Config-Felder aus der Basis-Config,
+            # Bot-Aufruf, UNTER dem TV-Lock (ein Browser, eine Maus — nie in einen
+            # laufenden Order-/Konto-Lauf hineinklicken). Bewusst OHNE Copier-
+            # Frische-Riegel (V2 hat keinen Copier) und ohne Echo-Pause-Riegel
+            # (hier wird nur gelesen).
+            # Vertrag: 200 ok · 409 puls_beschaeftigt / konto_nicht_erreicht ·
+            # 503 reader_fehlt · sonst 200 mit ok:false + code.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
+            if len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 3:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                    "msg": "Feld 'konto' (External ID) fehlt oder ist kuerzer als 3 Zeichen"}, ensure_ascii=False))
+            try:
+                timeout_s = max(10.0, min(180.0, float(body.get("timeout_s") or 45)))
+            except (TypeError, ValueError):
+                timeout_s = 45.0
+            bc = base_config()
+            cmd = {k: str(bc.get(k) or "").strip()
+                   for k in ("tv_url", "tv_browser_path", "tv_chrome_profil")}
+            cmd["konto"] = konto
+            cmd["timeout_s"] = timeout_s
+            # Optional, wie bei tv-konto: Username/Firma/Geschwister erlauben dem
+            # Konto-Schritt den Login-Wechsel bzw. den Dropdown-Weg. Ohne sie
+            # bleibt es beim Lesen + Dropdown im aktuellen Login.
+            cmd["tv_username"] = str(body.get("tv_username") or "").strip()
+            cmd["firma"] = str(body.get("firma") or "").strip()[:60]
+            cmd["sitzung_merken"] = bool(body.get("sitzung_merken"))
+            g = body.get("geschwister")
+            cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                    "msg": "Es laeuft schon ein TradingView-Lauf (Order/Konto/Lesen) — spaeter erneut."},
+                    ensure_ascii=False))
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                if not os.path.exists(bot):
+                    res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg":
+                           "order_bot.py fehlt auf diesem PC und Download schlug fehl — "
+                           "einmal 'Alles neu starten' klicken, dann erneut."}
+                else:
+                    # Konto-Schritt (bis 45 s TV-Start + Lesen + Dropdown) + Lesephase
+                    # (timeout_s) + Puffer; ist ein Login-Wechsel moeglich (Username
+                    # dabei), gilt die 260-s-Obergrenze von tv-konto.
+                    to = int(timeout_s) + 90
+                    if cmd["tv_username"]:
+                        to = max(to, 260)
+                    p = subprocess.run([sys.executable, bot, "tvlesen", json.dumps(cmd)],
+                                       capture_output=True, text=True, errors="replace", timeout=to)
+                    line = (p.stdout or "").strip().splitlines()
+                    res = json.loads(line[-1]) if line else {
+                        "ok": False, "code": "bot_stumm",
+                        "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "code": "timeout", "retry_ok": True,
+                       "msg": f"TV-Lesen Timeout ({to}s) — in TradingView nachsehen, wie weit er kam."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "msg": f"TV-Lesen fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            http = 200
+            if not res.get("ok"):
+                http = {"reader_fehlt": 503, "konto_nicht_erreicht": 409}.get(str(res.get("code") or ""), 200)
+            print(f"[panel] TV-Lesen @{konto} -> {res.get('ok')} [{res.get('code') or 'ok'}] "
+                  f"{len(res.get('positionen') or [])} Pos · Today {res.get('today_pnl')} "
+                  f"({res.get('msg')})", flush=True)
+            return self._send(http, json.dumps(res, ensure_ascii=False))
+
         if u.path == "/api/tv-order":
             # Orbit-Puls Schritt 2 (30.08.2026, Finns Ablauf 1-5): der Bot faehrt
             # die ganze Kette in TradingView — Tab nach vorn, Unterkonto per

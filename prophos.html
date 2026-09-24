@@ -15138,7 +15138,15 @@
   }
   /* V2-Wege (23.09.2026): kein Copier, kein Duplikum — also keine Erkennung. Der bewiesene Kauf-Klick
    * (Orbit V2: Positions-Tabelle/Toast in TradingView; Echo V2: price+ticket vom Bot) setzt den Plan selbst
-   * auf „Läuft" (started_at). Orbit V2: kein mt5_baseline, Ende und P&L trägt Finn ein.
+   * auf „Läuft" (started_at).
+   * ORBIT V2 seit 24.09.2026 nachts (Finn: „Der Bot geht in einem gewissen Intervall automatisch in das Konto
+   * bei Tradovate auf TradingView, genauso wie man einen Trade startet, liest, ob die Position noch offen ist
+   * oder schon beendet; ist sie beendet, sieht man bei Today's P&L, wie viel sich bewegt hat, weil man immer
+   * nur eine Position pro Tag macht"): der dritte Parameter tvBaseline kommt aus tvV2BaselineLesen (ein
+   * tv-lesen direkt nach dem bewiesenen Kauf-Klick) und wird als mt5_baseline.tv eingefroren —
+   * {konto, today_pnl_start, datum_start, at}. Ohne Lesung: explizit null (gleiche Doktrin wie Echo V2:
+   * bei jedem Übergang nach open gesetzt ODER genullt, nie die Baseline des vorigen Laufs). Ende, Live-P&L
+   * und Auto-P&L kommen dann aus dem Rundgang (tvV2PollTick, Sektion ORBIT V2).
    * ECHO V2 seit 24.09.2026 (Finn: „mit dem bestehenden Setup von Echo den Live-P&L einfach mitlesen, und
    * wenn der Trade beendet wird, hat man den P&L direkt — wir übernehmen einfach von Echo"): Puls platziert
    * im Master-Terminal, der Echo-Snapshot liefert Balance/Equity/Positionen des Masters ohnehin — also wird
@@ -15146,11 +15154,16 @@
    * (mt5_baseline {master_balance, at, ticket}; kein hedge_balance, es gibt keinen Hedge). Ohne frische
    * Instanz (alive && !note) bleibt die Baseline explizit null — Doktrin „bei jedem Übergang nach open
    * gesetzt ODER genullt", sonst rechnete ein wiederverwendeter Plan mit der Baseline des vorigen Laufs. */
-  async function v2PlanAufOpen(planId, ticket){
+  async function v2PlanAufOpen(planId, ticket, tvBaseline){
     try{
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
       const upd = { status: 'open', started_at: new Date().toISOString(), ended_at: null }
+      if(plan.route === 'tvv2'){
+        // Orbit V2 (24.09.2026): Startwert von Today's P&L aus dem Reader — oder ehrlich null
+        upd.mt5_baseline = (tvBaseline && typeof tvBaseline === 'object') ? { tv: tvBaseline } : null
+        if(!upd.mt5_baseline) console.warn('[v2PlanAufOpen] Orbit V2 ohne Start-Baseline (kein tv-lesen) — Auto-P&L nimmt später Today\'s P&L als Ganzes')
+      }
       if(plan.route === 'mt5v2'){
         let base = null
         try{
@@ -15379,7 +15392,8 @@
    * der Trade — nichts gegengehedgt, kein Multiplikator, gar nichts; das Einzige: mit Puls die Order mit den
    * Parametern platzieren, fertig. Orbit V2: genau das Gleiche in TradingView — mit Duplikum nichts reinpushen").
    * route='mt5v2' bzw. 'tvv2'. Beide Wege haben KEINEN Slave. „Läuft" setzt der bewiesene Kauf-Klick (v2PlanAufOpen).
-   * Orbit V2: keine Engine, Ende und P&L bleiben Handarbeit. Echo V2 seit 24.09.2026 (Finn: „wir übernehmen
+   * Orbit V2 seit 24.09.2026 nachts: Rundgang tvV2PollTick liest die TradingView-Konten (Ende, Live-P&L,
+   * Today's P&L → Auto-P&L). Echo V2 seit 24.09.2026 (Finn: „wir übernehmen
    * einfach von Echo"): Master-Baseline beim Puls-Klick, Ende-Erkennung + Live-P&L + Auto-P&L über die
    * Echo-Zustandsmaschine (mt5PlanPollTick), Slave-P&L fest 0. */
   function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' }
@@ -16413,6 +16427,7 @@
   function mt5LivePnlInner(p){
     try{
       if(p && p.route === 'mt5v2') return mt5V2LivePnlInner(p)   // Echo V2 (24.09.2026): eigener Chip, gleicher Ticker
+      if(p && p.route === 'tvv2' && typeof tvV2LivePnlInner === 'function') return tvV2LivePnlInner(p)   // Orbit V2 (24.09.2026): Rundgang-Chip
       if(!p || p.route !== 'mt5' || p.status !== 'open') return ''
       // Quelle 1 (PC): lokales Copier-Panel — frisch ≤15s, wie immer.
       let s = null
@@ -16515,7 +16530,7 @@
     // Daten da sind. Seit 29.08.2026 auch OHNE MT5_LOCAL: am Handy/Mac füllt
     // der Cloud-Fallback (mt5_live) die Zeile — das Gate hierauf hielt die
     // Live-P&L-Zeile am Handy dauerhaft leer.
-    if(!p || !routeIstEcho(p.route) || p.status !== 'open') return ''   // Echo + Echo V2 (24.09.2026)
+    if(!p || !(routeIstEcho(p.route) || p.route === 'tvv2') || p.status !== 'open') return ''   // Echo + Echo V2 + Orbit V2 (24.09.2026)
     return `<span data-mt5live="${escapeHtml(String(p.id))}">${mt5LivePnlInner(p)}</span>`
   }
   // Ticker: hält die Live-Zeilen frisch (5 s), solange offene MT5-Pläne sichtbar
@@ -16532,6 +16547,239 @@
     }catch(_){}
   }, 5000)
   /* ========== ENDE MT5-ROUTE ========== */
+
+  /* ========== ORBIT V2 — Rundgang durch die TradingView-Konten (24.09.2026) ==========
+   * Finn (24.09.2026 nachts, Duplikum fliegt weg): „Der Bot geht in einem gewissen Intervall automatisch
+   * in das Konto bei Tradovate auf TradingView, genauso wie man einen Trade startet, liest, ob die Position
+   * noch offen ist oder schon beendet; ist sie beendet, sieht man bei Today's P&L, wie viel sich bewegt hat,
+   * weil man immer nur eine Position pro Tag macht."
+   *
+   * NUR route 'tvv2'. Echo, Orbit (tvplus), Duplikum und Echo V2 bleiben unberührt.
+   *
+   * Vertrag mit dem Panel (der Bot am PC): mtcApi('tv-lesen', POST {konto:<external_id>, timeout_s})
+   *   → { ok:true, konto_aktiv, positionen:[{symbol, seite, menge, einstieg, pnl}], summary:{label:wert},
+   *       today_pnl:number|null, today_label, alter_s, gelesen_at }
+   *   → { ok:false, code:'puls_beschaeftigt'|'reader_fehlt'|'konto_nicht_erreicht' }
+   *
+   * Daten in trade_plans.mt5_baseline (Frontend plan.mt5Baseline), Form für tvv2:
+   *   { tv:    {konto, today_pnl_start, datum_start, at}   ← Start (v2PlanAufOpen, 3. Parameter)
+   *     live:  {pnl, offen, at}                             ← jeder Tick mit offener Position (Karten-Chip)
+   *     final: {today_pnl, datum, at} }                     ← Ende (2 frische Ticks ohne passende Position)
+   *
+   * Doktrin wie Echo (mt5PlanPollTick): kein Auto-Start („Läuft" = bewiesener Puls-Klick), Ende erst nach
+   * zwei frischen Messungen (alter_s < 30) in Folge, P&L nur aus eingefrorenen Werten — nie aus „jetzt".
+   * Takt mit Streuung 50–80 s (Puls-Jitter-Regel: nie fixe Takte), setTimeout-Kette statt setInterval,
+   * ein Konto nach dem anderen, nie parallel — es gibt genau eine Maus, und die Order geht immer vor. */
+
+  // Buchstabenwurzel eines Futures-Symbols: NQZ6 / NQZ2026 / NQ1! / CME_MINI:NQ1! → NQ; MNQZ6 → MNQ.
+  // Der Reader in TradingView nennt das Symbol anders als der Plan (master_symbol „MNQZ6" vs. Anzeige
+  // „MNQZ2026" oder Continuous „MNQ1!") — verglichen wird deshalb nur die Wurzel, nie der Kontraktmonat.
+  function tvSymbolWurzel(sym){
+    let s = String(sym || '').toUpperCase().trim()
+    if(s.indexOf(':') !== -1) s = s.slice(s.lastIndexOf(':') + 1)   // Börsen-Präfix (CME_MINI:) weg
+    const m = s.match(/^[A-Z]+/)
+    if(!m) return ''
+    let w = m[0]
+    const rest = s.slice(w.length)
+    if(/^\d+!/.test(rest)) return w                       // Continuous (MNQ1!) — das Q ist Teil der Wurzel
+    // Kontraktmonat-Buchstabe (F G H J K M N Q U V X Z) direkt vor dem Jahr → abschneiden (NQZ6 → NQ)
+    if(/^\d/.test(rest) && w.length > 1 && /[FGHJKMNQUVXZ]$/.test(w)) w = w.slice(0, -1)
+    return w
+  }
+  function tvSymbolPasst(a, b){
+    const wa = tvSymbolWurzel(a), wb = tvSymbolWurzel(b)
+    return !!wa && !!wb && wa === wb
+  }
+  // Seite des Readers (long/short/buy/sell/Kauf/Verkauf) auf buy/sell normieren — leer, wenn unbekannt
+  function tvSeiteNorm(x){
+    const t = String(x || '').trim().toLowerCase()
+    if(!t) return ''
+    if(/^(buy|long|kauf|b|l)\b/.test(t)) return 'buy'
+    if(/^(sell|short|verkauf|s)\b/.test(t)) return 'sell'
+    return ''
+  }
+  // Lokales Datum JJJJ-MM-TT (Finn: Chicago-Handelstag ist egal — Vergleich Start/Ende reicht)
+  function tvV2HeuteDatum(){
+    const d = new Date()
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+  }
+  // Ein tv-lesen gegen das Panel — dasselbe Muster wie 'tv-konto' in tpOrbitStarten. Altes Panel ohne
+  // die Route antwortet mit HTML/404 → mtcApi liefert _httpFail → hier 'reader_fehlt'.
+  async function tvV2Lesen(konto, timeoutS){
+    if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
+    const r = await window.mtcApi('tv-lesen', { method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ konto: String(konto), timeout_s: timeoutS || 45 }) })
+    if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
+    return r
+  }
+  // External ID des Master-Kontos (Tradovate-Unterkonto) — dieselbe Quelle wie extId in tpOrbitStarten
+  function tvV2Konto(plan){
+    const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+    return (acc && acc.externalId) ? String(acc.externalId).trim() : ''
+  }
+  // Start-Baseline direkt nach dem bewiesenen Kauf-Klick: Today's P&L JETZT, als Startwert. Ohne Antwort
+  // oder ohne Zahl bleibt today_pnl_start null — kein Schätzwert („Beweis oder leer"). Liefert immer ein
+  // tv-Objekt (Konto + Datum + Zeit), damit später sichtbar ist, WANN gestartet wurde.
+  async function tvV2BaselineLesen(plan){
+    const tv = { konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2HeuteDatum(), at: new Date().toISOString() }
+    if(!tv.konto){ tv.grund = 'kein_konto'; return tv }
+    try{
+      const r = await tvV2Lesen(tv.konto, 45)
+      if(r && r.ok && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) tv.today_pnl_start = r.today_pnl
+      else tv.grund = (r && (r.code || (r.ok ? 'kein_today_pnl' : 'unbekannt'))) || 'unbekannt'
+    }catch(e){ tv.grund = String((e && e.message) || e) }
+    if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
+    return tv
+  }
+
+  const tvV2Poll = {
+    MIN: 50000, MAX: 80000,   // Streuung 50–80 s, jeder Tick würfelt seine Pause neu
+    busy: false, timer: null,
+    streak: new Map(),        // planId → frische Messungen ohne passende Position in Folge (2 = Ende)
+    wasOpen: new Set(),       // Rundgang hat die Position SELBST gesehen (Muster mt5PlanPoll.wasOpen)
+    stand: new Map()          // planId → { code, at } — letzter Reader-/Konto-Fehler für die Karte
+  }
+  function tvV2NaechsterTick(){
+    try{ clearTimeout(tvV2Poll.timer) }catch(_){}
+    const pause = tvV2Poll.MIN + Math.random() * (tvV2Poll.MAX - tvV2Poll.MIN)
+    tvV2Poll.timer = setTimeout(tvV2PollTick, pause)
+  }
+  async function tvV2PollTick(){
+    try{
+      if(!MT5_LOCAL || tvV2Poll.busy) return
+      let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+      const plans = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open')
+      if(!plans.length) return
+      if(typeof window.mtcApi !== 'function') return
+      // Order geht vor: läuft am PC gerade ein Orbit-Start, fasst der Rundgang TradingView nicht an.
+      let orderLaeuft = false; try{ orderLaeuft = !!_tpOrbitLaeuft }catch(_){}
+      if(orderLaeuft) return
+      tvV2Poll.busy = true
+      for(const plan of plans){
+        const pid = String(plan.id)
+        const konto = tvV2Konto(plan)
+        if(!konto){ tvV2Poll.stand.set(pid, { code:'kein_konto', at: Date.now() }); continue }
+        let r = null
+        try{ r = await tvV2Lesen(konto, 45) }catch(e){ r = { ok:false, code:'reader_fehlt', msg: String((e && e.message) || e) } }
+        if(!r || !r.ok){
+          const code = (r && r.code) || 'reader_fehlt'
+          if(code === 'puls_beschaeftigt') break   // Puls hat die Maus — diesen Tick komplett überspringen
+          tvV2Poll.stand.set(pid, { code, at: Date.now() })
+          continue
+        }
+        tvV2Poll.stand.delete(pid)
+        // Frische: der Reader nennt das Alter seiner Lesung; ≥ 30 s ist nicht beweisfähig (weder für
+        // den Chip noch für den Streak) — wie inst.alive/!note bei Echo.
+        const frisch = (r.alter_s == null) || (Number(r.alter_s) < 30)
+        if(!frisch) continue
+        const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan) : { symbol: plan.masterSymbol || '', dir: plan.richtung }
+        const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
+        const pos = (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol)
+          && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir))
+        const nowIso = new Date().toISOString()
+        const idx = () => tradePlans.findIndex(x => String(x.id) === pid)
+
+        if(pos){
+          tvV2Poll.wasOpen.add(pid)
+          tvV2Poll.streak.set(pid, 0)
+          const pnl = Number(pos.pnl)
+          // Höchstens EIN Write pro Tick und Plan; Guard status=open, damit ein Abschluss von Hand nie
+          // zurückgedreht wird. Steht in der DB, damit der Chip auch am Mac/Handy steht.
+          const live = { pnl: isFinite(pnl) ? pnl : null, offen: true, at: nowIso }
+          const base = Object.assign({}, plan.mt5Baseline || {}, { live })
+          const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
+            .eq('id', plan.id).eq('status', 'open').select('*')
+          if(error){ console.warn('[tvV2] live:', error.message || error); continue }
+          if(!data || !data.length){
+            if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
+            continue
+          }
+          const i = idx(); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+          continue
+        }
+
+        // Keine passende Position. Scharf ist die Ende-Erkennung, wenn der Rundgang die Position selbst
+        // gesehen hat ODER der Plan über den bewiesenen Puls-Klick lief (mt5_baseline.tv existiert nur
+        // dann) — sonst könnte ein schneller TP vor dem ersten Tick den Plan ewig auf „Läuft" lassen.
+        const scharf = tvV2Poll.wasOpen.has(pid) || !!(plan.mt5Baseline && plan.mt5Baseline.tv)
+        if(!scharf) continue
+        const n = (tvV2Poll.streak.get(pid) || 0) + 1
+        tvV2Poll.streak.set(pid, n)
+        if(n < 2) continue
+        tvV2Poll.streak.set(pid, 0)
+        // IM STREAK-MOMENT einfrieren: Today's P&L jetzt = Endstand (Finn: „eine Position pro Tag").
+        const fin = { today_pnl: (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null,
+                      datum: tvV2HeuteDatum(), at: nowIso }
+        const alt = plan.mt5Baseline || {}
+        const base = Object.assign({}, alt, { final: fin,
+          live: Object.assign({}, alt.live || {}, { offen: false, at: nowIso }) })
+        const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
+          .eq('id', plan.id).eq('status', 'open').select('*')
+        if(error){ console.warn('[tvV2] final:', error.message || error); continue }
+        if(!data || !data.length){
+          if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase()
+          continue
+        }
+        const i = idx(); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
+        const freshPlan = (i >= 0) ? tradePlans[i] : rowToPlan(data[0])
+        tvV2Poll.wasOpen.delete(pid)
+        tvV2Poll.streak.delete(pid)
+        if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: Ende erkannt, aber der Reader nannte kein Today's P&L — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
+        // OHNE zweites Argument (wie mt5PlanPollTick): fromServer würde review + Auto-P&L unterdrücken.
+        if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshPlan)
+      }
+    }catch(e){ console.warn('[tvV2]', e) }
+    finally{ tvV2Poll.busy = false; tvV2NaechsterTick() }
+  }
+  tvV2NaechsterTick()
+
+  /* Karten-Chip „MASTER +12,50 $" (Optik = mt5V2LivePnlInner, gleicher 5-s-Ticker über mt5LivePnlInner):
+   * Zahl aus mt5_baseline.live.pnl, nur wenn live.at jünger als 3 min — sonst grau „Rundgang …". Steht am PC
+   * ein Reader-/Konto-Fehler, sagt der Chip das („Reader ?" / „Konto ?"). Nie alte Zahlen als live. */
+  function tvV2LivePnlInner(p){
+    try{
+      if(!p || p.route !== 'tvv2' || p.status !== 'open') return ''
+      const grau = (txt, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border)" title="${escapeHtml(title || '')}">`
+        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+        + `<span style="font-size:11px;color:var(--sub)">${escapeHtml(txt)}</span></span>`
+      const st = MT5_LOCAL ? tvV2Poll.stand.get(String(p.id)) : null
+      if(st && (Date.now() - st.at) < 5 * 60 * 1000){
+        if(st.code === 'konto_nicht_erreicht' || st.code === 'kein_konto') return grau('Konto ?', st.code === 'kein_konto' ? 'Master-Konto hat keine External ID — unter Accounts nachtragen' : 'Puls hat das Tradovate-Konto in TradingView nicht erreicht')
+        return grau('Reader ?', 'Der Reader am PC fehlt oder antwortet nicht (Panel zu alt?)')
+      }
+      const live = p.mt5Baseline && p.mt5Baseline.live
+      const ts = live && live.at ? (Date.parse(live.at) || 0) : 0
+      const v = live ? Number(live.pnl) : NaN
+      if(!live || !live.offen || !ts || (Date.now() - ts) > 3 * 60 * 1000 || !isFinite(v)) return grau('Rundgang …', 'Puls liest das Konto alle 50–80 s in TradingView — noch kein frischer Stand')
+      const alter = Math.max(0, Math.round((Date.now() - ts) / 1000))
+      return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="Live-P&L der Position (Orbit V2): aus dem letzten Rundgang in TradingView, vor ${alter} s">`
+        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
+        + `</span>`
+    }catch(_){ return '' }
+  }
+
+  /* Auto-P&L Orbit V2 (Pendant zu _autoPnlFetchMt5): NUR aus mt5_baseline.tv + .final.
+   * master_pl = final.today_pnl − tv.today_pnl_start, wenn beide Zahlen da sind UND derselbe Tag.
+   * Fehlt der Startwert (oder anderer Tag): Finns Regel „eine Position pro Tag" → Today's P&L als Ganzes,
+   * mit Hinweis im Abschließen-Popup. Ohne final.today_pnl: null (Finn trägt ein). Slave = 0 (kein Hedge). */
+  async function _autoPnlFetchTvV2(plan){
+    try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
+    const base = (plan && plan.mt5Baseline) || null
+    const tv = (base && base.tv) || null, fin = (base && base.final) || null
+    if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)) return null
+    const start = (tv && typeof tv.today_pnl_start === 'number' && isFinite(tv.today_pnl_start)) ? tv.today_pnl_start : null
+    let masterPnl, hinweis = ''
+    if(start != null && tv.datum_start && fin.datum === tv.datum_start){
+      masterPnl = fin.today_pnl - start
+    } else {
+      masterPnl = fin.today_pnl
+      hinweis = 'Today\'s P&L als Ganzes übernommen' + (start != null ? ' (Ende an einem anderen Tag als der Start)' : ' (kein Startwert beim Puls-Klick)')
+    }
+    masterPnl = Number(masterPnl.toFixed(2))
+    return { slavePnl: 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
+  }
+  /* ========== ENDE ORBIT V2 ========== */
 
   /* ========== DUP-ROUTE LIVE-LOTS (25.08.2026) ==========
    * Finns Wunsch: bei laufenden Duplikium-Trades die Lots von Master (Fusion)
@@ -26935,7 +27183,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.442'
+  const OS_TAB_BUILD = '2026-09-22.443'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -27267,16 +27515,28 @@
             ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail } })
         }catch(_){}
       }
+      // ORBIT V2 (24.09.2026 nachts): direkt nach dem bewiesenen Klick liest Puls einmal Today's P&L als
+      // Startwert (tvV2BaselineLesen → v2PlanAufOpen 3. Parameter). Läuft hier am PC für BEIDE Wege —
+      // lokaler Klick und Remote-Signal vom Mac (orderSignalTick ruft tpOrbitStarten mit fern) —, denn der
+      // Reader sitzt nur dort. _tpOrbitLaeuft bleibt solange gesetzt (eine Maus).
+      const v2AufOpen = async () => {
+        let tvb = null
+        if(MT5_LOCAL && typeof tvV2BaselineLesen === 'function'){
+          if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Puls liest Today\'s P&L als Startwert…')
+          try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
+        }
+        await v2PlanAufOpen(plan.id, null, tvb)
+      }
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
-        if(plan.route === 'tvv2') await v2PlanAufOpen(plan.id)
+        if(plan.route === 'tvv2') await v2AufOpen()
         else await tvPlanGesendet(plan.id)
         if(fern) fern.melde({ ok:true, einstieg: r.einstieg || null, tv_symbol: r.tv_symbol || null, trail: r.trail || null,
                               msg: String(r.msg || 'Order platziert.') })
         if(imPopup){
           _pfSet('ob-order', 'ok', escapeHtml(String(r.msg || 'Order platziert.')))
-          pfEnde(true, plan.route === 'tvv2' ? '✓ Order platziert — Plan läuft (ohne Hedge). Ende und P&L trägst du selbst ein.'
+          pfEnde(true, plan.route === 'tvv2' ? '✓ Order platziert — Plan läuft (ohne Hedge). Puls liest das Konto alle 50–80 s: Live-P&L auf der Karte, Ende und Today\'s P&L kommen automatisch.'
                                               : '✓ Order platziert — sobald Duplikum sie sieht, springt der Plan auf „Läuft".')
           setTimeout(() => { if(document.getElementById('pf-final')?.className.indexOf('ok') !== -1) _pfClose() }, 2400)
         }
@@ -27289,7 +27549,7 @@
         // der MT5-Route (18.08.2026) — erst nachsehen, nie blind wiederholen, sonst liegt die
         // Order zweimal im Markt. Ging der Klick nachweislich raus (r.gesendet), wird er
         // gestempelt: die Karte zeigt „Warte auf Duplikum", Duplikum erkennt die Order selbst.
-        if(r.gesendet) await (plan.route === 'tvv2' ? v2PlanAufOpen(plan.id) : tvPlanGesendet(plan.id))
+        if(r.gesendet) await (plan.route === 'tvv2' ? v2AufOpen() : tvPlanGesendet(plan.id))
         await fehler('⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, ob die Order liegt. NICHT blind erneut starten'
           + (plan.route === 'tvv2' ? '.' : ' (liegt sie, erkennt Duplikum sie von selbst).') + ' · ' + (r.msg || r.error || ''), r)
       } else {
@@ -33180,7 +33440,8 @@
     // Baseline (mt5_baseline + final) — Duplikum/Mirror kennen diese Trades nicht.
     // Echo V2 seit 24.09.2026 ebenfalls aus der Baseline (Master-Balance Start/Ende, Slave = 0).
     if(routeIstEcho(plan.route)) return _autoPnlFetchMt5(plan)
-    // Orbit V2 (23.09.2026): kein Copier, kein Duplikum — keine P&L-Quelle, Handeingabe (Beweis oder leer).
+    // Orbit V2 (24.09.2026 nachts): Today's P&L aus dem Rundgang (mt5_baseline.tv + .final) — kein Duplikum.
+    if(plan.route === 'tvv2' && typeof _autoPnlFetchTvV2 === 'function') return _autoPnlFetchTvV2(plan)
     if(routeIstV2(plan.route)) return null
     // Orbit (seit 22.09.2026): Duplikum kopiert diese Trades — P&L wie auf der Duplikum-Route.
     // Mirror-Route hat ihren eigenen Pfad (Duplikum kennt diese Trades nicht)
@@ -33297,6 +33558,8 @@
               if(isMt5Plan && _autoPnlAmbiguous.has(String(planId))){
                 _t += ' · ⚠️ Hedge extern geschlossen/nicht belegt — Slave-P&L manuell eintragen'
               }
+              // Orbit V2 (24.09.2026): „Today's P&L als Ganzes übernommen" — Finn soll sehen, dass kein Startwert abgezogen wurde
+              if(res.hinweis) _t += ' · ' + res.hinweis
               msgEl.textContent = _t; msgEl.className = 'modal-msg ok'
             }
             return true
