@@ -30,7 +30,7 @@ def lade():
 
     code = "\n".join([const("WD_HEUTE_PPL"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
                       block("_wd_level"), block("_wd_konto_groesse"), block("_wd_heute_zeile"),
-                      block("_wd_heute_sortkey"), block("_wd_heute_sortieren")])
+                      block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
     return ns
 
@@ -92,6 +92,16 @@ def main():
     check(z4["einstieg_nq"] == 30000.5 and z4["einstieg_quelle"] == "tv" and z4["tp_level_nq"] == 30140.5 and z4["sl_level_nq"] == 29950.5 and z4["hedge"] is None,
           "Zeile ohne Hedge: Einstieg aus der tv-Baseline, Level gerechnet, Quelle 'tv'")
     check(z["einstieg_quelle"] == "hedge" and z2["einstieg_quelle"] is None, "einstieg_quelle: hedge / null")
+    # Winning Days ohne Master-SL (Finn 25.09.2026): POST/PATCH schreiben master_sl immer null, wd-heute rechnet dann kein SL-Level
+    osl = a["_wd_ohne_master_sl"]
+    d1, v1 = osl({"master_sl": 250, "master_tp": 280, "master_risk": 250})
+    d2, v2 = osl({"master_sl": None}); d3, v3 = osl({"master_sl": ""}); d4, v4 = osl({"master_tp": 1})
+    check(d1 == {"master_sl": None, "master_tp": 280, "master_risk": 250} and v1 is True and d2["master_sl"] is None and v2 is False
+          and v3 is False and d4 == {"master_tp": 1, "master_sl": None} and v4 is False and osl(None) == (None, False),
+          "ohne Master-SL: Wert → null (verworfen gemeldet), null/leer bleibt null, master_risk unangetastet")
+    for leer in (None, "", "0", 0):
+        zl = a["_wd_heute_zeile"](dict(p4, master_sl=leer), None, {})
+        check(zl["sl_level_nq"] is None and zl["tp_level_nq"] == 30140.5, f"wd-heute: master_sl {leer!r} → sl_level_nq null, TP-Level bleibt")
     p3 = dict(p2, id="p3", master_pl="55.5", completed_at="2026-09-25T01:00:00Z", status="completed")
     check(a["_wd_heute_zeile"](p3, None, {})["master_pl"]["quelle"] == "plan", "Zeile: fertiger master_pl schlaegt alles")
 

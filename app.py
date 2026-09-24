@@ -6499,6 +6499,23 @@ WD_PLAN_FELDER = {
 }
 WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur", "hedge_faktor"}
 
+
+def _wd_ohne_master_sl(d):
+    """REIN RECHNEND (testbar): Winning Days haben NIE einen Master-SL (Finn 25.09.2026, Regel über die
+    Koordinations-Session; Frontend seit .561). Setzt d["master_sl"] = None und meldet, ob dabei ein echter Wert
+    verworfen wurde. Bewusst NICHT 400 bei einem Wert: alte Tabs (z. B. der .465-Tab auf pc-usq1i6) schicken
+    master_sl noch aus der Farmer-SL-Vorgabe (wd_sl) mit — ein 400 würde die ganze Anlage/Änderung (Start-Zeit,
+    TP, Richtung) verwerfen; so bleibt der Rest gültig und die Regel gilt trotzdem. wd_sl darf in master_risk
+    landen, wenn das Frontend es so schickt — hier wird nichts daraus abgeleitet.
+    -> (d, verworfen: bool)"""
+    if not isinstance(d, dict):
+        return d, False
+    alt = d.get("master_sl")
+    verworfen = alt not in (None, "", 0, 0.0, "0")
+    d["master_sl"] = None
+    return d, verworfen
+
+
 # ── Farmer auf V2 (24.09.2026, Vollumstieg auf Kapitel „Ohne Hedge") ─────────
 # Finn: „riesen Umstieg — geh alles durch, Backend, jedes Einzelne". Seit dem
 # 24.09.2026 gibt es keinen Gegen-Hedge mehr, Duplikum fliegt komplett raus. Die
@@ -7021,6 +7038,7 @@ def admin_wd_plaene():
         try:
             for r in rows[:200]:
                 body = {k: v for k, v in (r or {}).items() if k in WD_PLAN_FELDER}
+                _wd_ohne_master_sl(body)   # Winning Days ohne Master-SL (25.09.2026) — immer null, auch wenn ein alter Tab einen schickt
                 mid, uid = str(body.get("master_account_id") or ""), str(body.get("user_id") or "")
                 if len(mid) < 10 or len(uid) < 10:
                     uebersprungen.append({"master_account_id": mid, "grund": "user_id/master_account_id fehlt"}); continue
@@ -7190,6 +7208,10 @@ def admin_wd_plaene():
         upd = {k: v for k, v in (daten.get("upd") or {}).items() if k in WD_PATCH_FELDER}
         if len(pid) < 10 or not upd:
             return jsonify({"error": "id/upd fehlt"}), 400
+        # master_sl: nur null wird geschrieben (Winning Days ohne Master-SL, 25.09.2026) — ein Wert wird zu null
+        sl_verworfen = False
+        if "master_sl" in upd:
+            upd, sl_verworfen = _wd_ohne_master_sl(upd)
         try:
             # V2-Plan (24.09.2026): Slave-Risiko/Multiplier gibt es ohne Hedge nicht — ein
             # Admin-Nachzug (Staffel) darf sie nicht wieder an einen V2-Plan schreiben.
@@ -7200,7 +7222,10 @@ def admin_wd_plaene():
                     if not upd:
                         return jsonify({"geaendert": False, "plan": None, "hinweis": "V2-Plan ohne Slave — nichts zu ändern"})
             z = sb_update("trade_plans", {"id": f"eq.{pid}", "status": "eq.planned", "start_um_gestartet_at": "is.null"}, upd)
-            return jsonify({"geaendert": bool(z), "plan": z[0] if z else None})
+            out = {"geaendert": bool(z), "plan": z[0] if z else None}
+            if sl_verworfen:
+                out["hinweis"] = "master_sl verworfen — Winning Days haben keinen Master-SL (gespeichert: null)"
+            return jsonify(out)
         except Exception as e:
             return jsonify({"error": f"Nicht geändert ({type(e).__name__})"}), 502
 
