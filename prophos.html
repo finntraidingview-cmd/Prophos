@@ -1333,66 +1333,71 @@
   /* Kontrafakt „Mit Hedge" (24.09.2026 nachts, Finn: „Graph OHNE Gegenhedge und Graph MIT Gegenhedge"):
      Kacheln, zwei Verlaufs-Charts nebeneinander, Balkenzeilen nach Symbol/Weg/Richtung — Muster
      Übersicht, keine Tabelle. Parameter-Felder klein rechts im Panel-Kopf (Muster kp-quoten). */
-  #adm-pane-kapitel .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
-  #adm-pane-kapitel .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
-  #adm-pane-kapitel .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
-  #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:6px 0 4px}
-  #adm-pane-kapitel .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
-  #adm-pane-kapitel .kf-kpis .kpi-value{font-size:18px}
-  #adm-pane-kapitel .kf-kpis .kpi-delta{font-size:11px}
-  #adm-pane-kapitel .kf-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
-  #adm-pane-kapitel .kf-chart .adm-vl{margin-top:4px;padding-top:6px;border-top:none}
-  #adm-pane-kapitel .kf-titel{font-size:12px;font-weight:600;margin-top:10px}
-  #adm-pane-kapitel .kf-sub{font-size:11.5px;color:var(--sub)}
+  #adm-pane-stat .kf-param{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--sub)}
+  #adm-pane-stat .kf-param label{display:flex;align-items:center;gap:6px;white-space:nowrap}
+  #adm-pane-stat .kf-param .input{width:78px;padding:5px 8px;font-size:12.5px;height:auto}
+  #adm-pane-stat .kf-kpis{grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:6px 0 4px}
+  #adm-pane-stat .kf-kpis .kpi{padding:10px 12px;box-shadow:none}
+  #adm-pane-stat .kf-kpis .kpi-value{font-size:18px}
+  #adm-pane-stat .kf-kpis .kpi-delta{font-size:11px}
+  #adm-pane-stat .kf-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
+  #adm-pane-stat .kf-chart .adm-vl{margin-top:4px;padding-top:6px;border-top:none}
+  #adm-pane-stat .kf-titel{font-size:12px;font-weight:600;margin-top:10px}
+  #adm-pane-stat .kf-sub{font-size:11.5px;color:var(--sub)}
   /* Sechs kleine Balken-Charts nebeneinander (24.09.2026, Finn am Screenshot: „für jedes Ding jeweils einen
      einzelnen Chart nebeneinander … allgemein so viel mehr Daten mit einer cleanen Übersicht") */
-  #adm-pane-kapitel .kf-dims{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
-  #adm-pane-kapitel .kf-mini{min-width:0}
-  #adm-pane-kapitel .kf-mini .kf-titel,#adm-pane-kapitel .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
-  #adm-pane-kapitel .kf-mini-sum{font-weight:400;font-variant-numeric:tabular-nums}
-  #adm-pane-kapitel .kf-mini-cv{position:relative;height:170px;margin-top:4px}
-  #adm-pane-kapitel .kap-regel{font-size:11px;color:var(--sub);margin:-2px 0 6px}
-  #adm-pane-kapitel .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
-  #adm-pane-kapitel .kf-trades .adm-row-name{display:flex;align-items:flex-start}
-  #adm-pane-kapitel .kf-trades .adm-row-name .adm-dot{margin-top:5px}
-  #adm-pane-kapitel .kf-trades .adm-val{min-width:82px;text-align:right}
-  #adm-pane-kapitel .kf-trades .adm-pct{text-align:left;font-size:11px;color:var(--sub);white-space:normal}
-  #adm-pane-kapitel .kf-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin-top:14px}
-  #adm-pane-kapitel .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
-  #adm-pane-kapitel .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  #adm-pane-stat .kf-dims{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:6px}
+  #adm-pane-stat .kf-mini{min-width:0}
+  #adm-pane-stat .kf-mini .kf-titel,#adm-pane-stat .kf-chart .kf-titel{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+  #adm-pane-stat .kf-mini-sum{font-weight:400;font-variant-numeric:tabular-nums}
+  #adm-pane-stat .kf-mini-cv{position:relative;height:170px;margin-top:4px}
+  #adm-pane-kapitel .kap-regel,#adm-pane-stat .kap-regel{font-size:11px;color:var(--sub);margin:-2px 0 6px}
+  #adm-pane-stat .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
+  #adm-pane-stat .kf-trades .adm-row-name{display:flex;align-items:flex-start}
+  #adm-pane-stat .kf-trades .adm-row-name .adm-dot{margin-top:5px}
+  #adm-pane-stat .kf-trades .adm-val{min-width:82px;text-align:right}
+  #adm-pane-stat .kf-trades .adm-pct{text-align:left;font-size:11px;color:var(--sub);white-space:normal}
+  #adm-pane-stat .kf-abschnitt{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);margin-top:14px}
+  #adm-pane-stat .kf-rows .adm-row{padding:7px 0;grid-template-columns:minmax(110px,1.4fr) minmax(50px,1fr) auto auto}
+  #adm-pane-stat .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   /* Ein großer Chart mit Chip-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke") */
-  #adm-pane-kapitel .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  #adm-pane-stat .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   /* Chips als kleine Pillen (24.09.2026 abends, Finn am Live-Screenshot: die Chips erbten 16 px Text ohne Rahmen) */
-  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4}
-  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip:hover{background:var(--surface-tint)}
-  #adm-pane-kapitel .kf-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
+  #adm-pane-stat .kf-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4}
+  #adm-pane-stat .kf-chip-bar .adm-vl-chip:hover{background:var(--surface-tint)}
+  #adm-pane-stat .kf-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
   /* Kacheln: Unterzeile einzeilig mit Ellipse, voller Text im Tooltip (Finn: „schau mal die Kacheln an, wie hässlich die sind") */
-  #adm-pane-kapitel .kf-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-  #adm-pane-kapitel .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #adm-pane-kapitel .kf-gross{margin-top:8px}
-  #adm-pane-kapitel .kf-gross .kf-chart[hidden]{display:none}
-  #adm-pane-kapitel .kf-gross .kf-chart .kf-titel{margin-top:4px;font-size:13px}
-  #adm-pane-kapitel .kf-gross .adm-vl{height:380px}
-  #adm-pane-kapitel .kf-gross .kf-mini-cv{height:380px}
-  @media (max-width:600px){#adm-pane-kapitel .kf-gross .adm-vl,#adm-pane-kapitel .kf-gross .kf-mini-cv{height:280px}}
+  #adm-pane-stat .kf-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #adm-pane-stat .kf-gross{margin-top:8px}
+  #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
+  #adm-pane-stat .kf-gross .kf-chart .kf-titel{margin-top:4px;font-size:13px}
+  #adm-pane-stat .kf-gross .adm-vl{height:360px}
+  #adm-pane-stat .kf-gross .kf-mini-cv{height:320px}
+  /* Oberkategorie: Titel links, Unter-Auswahl rechts, darunter EINE Fläche (24.09.2026 abends) */
+  #adm-pane-stat .kf-gruppe{margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)}
+  #adm-pane-stat .kf-gruppe-kopf{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  #adm-pane-stat .kf-gruppe-kopf .kf-abschnitt{margin-top:0}
+  #adm-pane-stat .kf-gruppe-kopf .kf-chip-bar{margin-top:0}
+  @media (max-width:600px){#adm-pane-stat .kf-gross .adm-vl,#adm-pane-stat .kf-gross .kf-mini-cv{height:280px}}
   /* Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht immer 1:1 … guck in den
      bestehenden Daten, wie viel wo gegengehedgt wurde"): Zeile = Firma · Typ · Größe, Balken = Quote,
      Unterzeile mit geplanter Quote + Beispielzahl. Zwei Spalten, Muster Balkenzeilen. */
   /* Umbau 24.09.2026 (Finn am Screenshot: „man erkennt da nix"): EINE Spalte, nur Firma · Typ (keine Größen-
      Zeilen), nach Quote sortiert, breiter Balken, kurze Unterzeile — Ø geplant nur noch im Tooltip. */
-  #adm-pane-kapitel .kf-quoten{display:grid;grid-template-columns:1fr;gap:0;margin-top:2px}
-  #adm-pane-kapitel .kf-quoten .adm-row{padding:7px 0;grid-template-columns:minmax(170px,1fr) minmax(160px,2.4fr) auto}
-  #adm-pane-kapitel .kf-quoten .adm-row-name{display:flex;align-items:flex-start}
-  #adm-pane-kapitel .kf-quoten .adm-row-name .adm-dot{margin-top:5px}
-  #adm-pane-kapitel .kf-quoten .adm-row-name small{white-space:normal}
-  #adm-pane-kapitel .kf-q-sub{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
-  @media (max-width:1200px){#adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(4,1fr)}}
+  #adm-pane-stat .kf-quoten{display:grid;grid-template-columns:1fr;gap:0;margin-top:2px}
+  #adm-pane-stat .kf-quoten .adm-row{padding:7px 0;grid-template-columns:minmax(170px,1fr) minmax(160px,2.4fr) auto}
+  #adm-pane-stat .kf-quoten .adm-row-name{display:flex;align-items:flex-start}
+  #adm-pane-stat .kf-quoten .adm-row-name .adm-dot{margin-top:5px}
+  #adm-pane-stat .kf-quoten .adm-row-name small{white-space:normal}
+  #adm-pane-stat .kf-q-sub{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}
+  @media (max-width:1200px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(4,1fr)}}
   @media (max-width:960px){
-    #adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(3,1fr)}
-    #adm-pane-kapitel .kf-charts{grid-template-columns:1fr}
-    #adm-pane-kapitel .kf-dims{grid-template-columns:1fr 1fr}
+    #adm-pane-stat .kf-kpis{grid-template-columns:repeat(3,1fr)}
+    #adm-pane-stat .kf-charts{grid-template-columns:1fr}
+    #adm-pane-stat .kf-dims{grid-template-columns:1fr 1fr}
   }
-  @media (max-width:600px){#adm-pane-kapitel .kf-kpis{grid-template-columns:repeat(2,1fr)}#adm-pane-kapitel .kf-dims{grid-template-columns:1fr}}
+  @media (max-width:600px){#adm-pane-stat .kf-kpis{grid-template-columns:repeat(2,1fr)}#adm-pane-stat .kf-dims{grid-template-columns:1fr}}
   #adm-pane-wd .btn-mini{padding:4px 11px;font-size:12px;height:auto}
   #adm-pane-wd .wd-karte .seg button{padding:3px 9px;font-size:11.5px}
   #adm-pane-wd .wd-kopf-zeile{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
@@ -7542,6 +7547,7 @@
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
           <button class="subtab adm-tab" data-admtab="kapitel">📖 Kapitel</button>
+          <button class="subtab adm-tab" data-admtab="stat">📊 Statistik</button>
           <button class="subtab adm-tab" data-admtab="buys">Acc-Käufe</button>
           <button class="subtab adm-tab" data-admtab="fin">Payouts</button>
           <!-- Kasse ausgeblendet (Finn 24.09.2026: „mach Kasse mal weg, das nutzen wir aktuell nicht mehr") — Pane + JS bleiben, nur der Reiter ist weg -->
@@ -7922,6 +7928,7 @@
               </div>
             </div>
             <div class="kap-karten" id="adm-kap-karten"></div>
+            <div class="kap-regel" style="margin:0 0 10px">Die Auswertung „Ohne Hedge" (Kontrafakt, Reibung, Duplikum, Kategorien) steht im Reiter <b>📊 Statistik</b>.</div>
             <div class="panel">
               <div class="panel-head">
                 <div>
@@ -7931,111 +7938,6 @@
               </div>
               <div class="adm-vl" style="border-top:none;margin-top:0;padding-top:0"><canvas id="adm-kap-chart"></canvas></div>
               <div class="adm-vl-legend" id="adm-kap-legend"></div>
-            </div>
-            <!-- Kontrafakt „Mit Hedge" (24.09.2026 nachts, Finn: „so ein Graph OHNE Gegenhedge und so ein Graph MIT
-                 Gegenhedge — wie hätte es ausgesehen, hätte ich jetzt gegengehedgt? … wie viel wir da verloren hätten").
-                 Nur sichtbar, wenn ein hedge-freies Kapitel existiert; gezeichnet von admKfRender. -->
-            <div class="panel" id="adm-kf-panel" style="margin-top:14px" hidden>
-              <div class="panel-head" style="margin-bottom:4px">
-                <div>
-                  <div class="panel-title">Was der Gegen-Hedge gekostet hätte <span class="chip chip-good" id="adm-kf-kapitel" style="margin-left:6px;border:1px solid transparent"></span></div>
-                  <div class="panel-sub" id="adm-kf-modell"></div>
-                  <div class="panel-sub" id="adm-kf-modell2"></div>
-                  <!-- Zuordnungsregel (24.09.2026, DB-Trigger sql/2026-09-24_kapitel_konto_vererbung.sql: Buchungen erben das
-                       Kapitel ihres Kontos; Trades nach Weg) — Finn: „bestehende Konten bleiben in der Hedge-Ära" -->
-                  <div class="panel-sub kap-regel" style="margin:2px 0 0">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
-                </div>
-                <div class="kf-param">
-                  <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
-                  <label title="leer = reale Reibung je Trade aus der Hedge-Ära (gemessen je Firma · Typ × Anteil: Funded 1,0 / Challenge·Phase 0,5) · Zahl = Override für alle Trades">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung" placeholder="auto"></label>
-                  <span class="mono" id="adm-kf-stand" style="font-size:11.5px;color:var(--sub)"></span>
-                </div>
-              </div>
-              <div id="adm-kf-leer" class="kap-leer" style="margin:6px 0 0" hidden>Noch keine abgeschlossenen Trades im Kapitel</div>
-              <div id="adm-kf-body" hidden>
-                <div class="kf-filter" id="adm-kf-filter" hidden></div>
-                <div class="kf-abschnitt">Bilanz</div>
-                <div class="kpis kf-kpis" id="adm-kf-kpis"></div>
-                <div class="kf-abschnitt">Trades</div>
-                <div class="kpis kf-kpis" id="adm-kf-kpis2"></div>
-                <!-- Hedge-Quoten aus der Hedge-Ära (24.09.2026, Finn: „Es macht keinen Sinn, weil der Hedge nicht immer 1:1
-                     ist … Apex Funded, gerade +7.500 $ gemacht, ist so grob ein Tausender wert"). Gezeichnet von admKfQuotenRender. -->
-                <div id="adm-kf-quoten" hidden>
-                  <div class="kf-abschnitt">Hedge-Quoten aus der Hedge-Ära</div>
-                  <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma · Typ, nach Quote sortiert — Klick filtert Kacheln und Charts</div>
-                  <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-q"></div>
-                </div>
-                <!-- Ein großer Chart mit Auswahl (24.09.2026, Finn am Screenshot: „die Charts sind cool, die machen auch Sinn —
-                     aber macht doch bitte, dass man einen ganz großen Chart hat; je nachdem, wo ich draufdrücke, sehe ich es, und
-                     allgemein mehr Ordnung"): zwölf Sichten, ein Chip-Balken, genau eine Sicht sichtbar (admKfChartWahlRender). -->
-                <div class="kf-abschnitt">Chart</div>
-                <div class="kf-chip-bar" id="adm-kf-chartwahl"></div>
-                <div class="kf-gross" id="adm-kf-gross">
-                  <div class="kf-chart" data-kf-chart="hyp">
-                    <div class="kf-titel">Mit Hedge (hypothetisch) · kumuliert je Person</div>
-                    <div class="kf-sub">So wäre der Gegen-Hedge gelaufen — Realmoney in EUR, gestrichelt = alle zusammen · Klick auf Person hebt sie hervor und filtert</div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-hyp"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-hyp"></div>
-                  </div>
-                  <div class="kf-chart" data-kf-chart="real" hidden>
-                    <div class="kf-titel">Real · Master-P&amp;L kumuliert je Person</div>
-                    <div class="kf-sub">Prop-Konten in USD, echte Zahlen — hat es sich ohne Hedge gelohnt?</div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-real"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-real"></div>
-                  </div>
-                  <!-- Duplikum gespart (24.09.2026 abends, Finn: „wie bei Duplikum sparen, auch täglich und monatlich — 10 € pro
-                       Monat pro ID-Slot; blown + neuen Acc hinzufügen = derselbe Slot, nicht doppelt"). Gezeichnet in admKfRender. -->
-                  <div class="kf-chart" data-kf-chart="dup" hidden>
-                    <div class="kf-titel">Duplikum gespart · kumuliert je Person</div>
-                    <div class="kf-sub">Orbit-V2-Konten hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht (10 € je Slot und Monat, Slot lebt vom ersten Trade bis zum Blow und wird danach wiederverwendet) · je Tag Slots × 10 €/30 — gestrichelt = alle zusammen</div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-dup"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-dup"></div>
-                  </div>
-                  <div class="kf-chart" data-kf-chart="reibp" hidden>
-                    <div class="kf-titel">Reibung gespart · kumuliert je Person</div>
-                    <div class="kf-sub">reale Reibung, die ohne Hedge nicht anfällt — gestrichelt = alle zusammen</div>
-                    <div class="adm-vl"><canvas id="adm-kf-chart-reib"></canvas></div>
-                    <div class="adm-vl-legend" id="adm-kf-legend-reib"></div>
-                  </div>
-                  <!-- Reibung in zwei Sichten (24.09.2026, Finn: „ein Chart, der die gesamte Reibung zeigt, und einmal den Chart,
-                       der nur die reale Reibung zeigt — die reale ist ja grob die gesamte durch 2"). Gezeichnet von admKfReibChart. -->
-                  <div class="kf-chart" data-kf-chart="reibg" hidden>
-                    <div class="kf-titel">Reibung gesamt je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibg"></span></div>
-                    <div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (Median, Ausreißer 1,5×IQR raus) · Klick filtert</div>
-                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-reibg"></canvas></div>
-                  </div>
-                  <div class="kf-chart" data-kf-chart="reib" hidden>
-                    <div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div>
-                    <div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt (Funded 100 %, Challenge/Phase 50 % der gesamten) · Klick filtert</div>
-                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div>
-                  </div>
-                  <div class="kf-chart" data-kf-chart="tag" hidden>
-                    <div class="kf-titel">Je Tag · Mit Hedge vs. Real <span class="adm-sub kf-mini-sum" id="adm-kf-sum-tag"></span></div>
-                    <div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe), rechts Master-P&amp;L real ($, grün/rot) · Klick auf einen Tag filtert</div>
-                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-tag"></canvas></div>
-                  </div>
-                  <div class="kf-chart" data-kf-chart="pnl" hidden>
-                    <div class="kf-titel">Verteilung Master-P&amp;L je Trade <span class="adm-sub kf-mini-sum" id="adm-kf-sum-pnl"></span></div>
-                    <div class="kf-sub">Anzahl Trades je 1.000-$-Stufe (−2k … +8k $) · Klick auf eine Stufe filtert</div>
-                    <div class="kf-mini-cv"><canvas id="adm-kf-cv-pnl"></canvas></div>
-                  </div>
-                  <!-- Sechs Dimensionen (24.09.2026, Finn: „für jedes Ding jeweils einen einzelnen Chart … mit genau der Logik
-                       [Hedge-Quoten je Firma/Typ]"): je Kategorie zwei Balken — Hedge hypothetisch (€, Kapitel-Farbe) und
-                       Master-P&L real ($, grün/rot). Klick auf Balken = Filter. Gezeichnet von admKfDimCharts. -->
-                  <div class="kf-chart kf-mini" data-kf-chart="sym" hidden><div class="kf-titel">Nach Symbol <span class="adm-sub kf-mini-sum" id="adm-kf-sum-sym"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick filtert, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-sym"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="weg" hidden><div class="kf-titel">Nach Weg <span class="adm-sub kf-mini-sum" id="adm-kf-sum-weg"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-weg"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="ri" hidden><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="firm" hidden><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="typ" hidden><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="gr" hidden><div class="kf-titel">Nach Kontogröße <span class="adm-sub kf-mini-sum" id="adm-kf-sum-gr"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-gr"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="wt" hidden><div class="kf-titel">Nach Wochentag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wt"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-wt"></canvas></div></div>
-                  <div class="kf-chart kf-mini" data-kf-chart="person" hidden><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick auf Person filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
-                </div>
-                <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
-                     schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
-                <div class="kf-abschnitt">Trades <span class="adm-sub" id="adm-kf-trades-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
-                <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
-              </div>
             </div>
             <div class="panel" style="margin-top:14px">
               <div class="panel-head" style="margin-bottom:6px">
@@ -8052,6 +7954,108 @@
           </div>
         </div>
 
+        <!-- STATISTIK (24.09.2026 abends, Finn: „mach einen komplett neuen Statistik-Tab, viel cleaner, viel übersichtlicher,
+             viel mehr — für eine Oberkategorie ein Chart, unterteilt"): das Kontrafakt-Panel aus dem Kapitel-Tab, neu geordnet in
+             Oberkategorien Verlauf · Trades · Kategorie · Reibung, je Gruppe EINE große Fläche mit Unter-Auswahl (Chips).
+             Daten = /admin/kapitel wie der Kapitel-Tab (admKapData), gezeichnet von admKfRender. -->
+        <div id="adm-pane-stat" hidden>
+          <div id="adm-stat-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Statistik…</div>
+            <div class="panel" id="adm-kf-panel" style="margin-top:14px" hidden>
+              <div class="panel-head" style="margin-bottom:4px">
+                <div>
+                  <div class="panel-title">Statistik · was der Gegen-Hedge gekostet hätte <span class="chip chip-good" id="adm-kf-kapitel" style="margin-left:6px;border:1px solid transparent"></span></div>
+                  <div class="panel-sub" id="adm-kf-modell"></div>
+                  <div class="panel-sub" id="adm-kf-modell2"></div>
+                  <!-- Zuordnungsregel (24.09.2026, DB-Trigger sql/2026-09-24_kapitel_konto_vererbung.sql: Buchungen erben das
+                       Kapitel ihres Kontos; Trades nach Weg) — Finn: „bestehende Konten bleiben in der Hedge-Ära" -->
+                  <div class="panel-sub kap-regel" style="margin:2px 0 0">Konten und ihre Buchungen zählen zum Kapitel des Kaufs · Trades zum Kapitel des Wegs (V2 = ohne Hedge)</div>
+                </div>
+                <div class="kf-param">
+                  <label title="1,0 = symmetrischer Fixgrößen-Hedge, wie Prophos ihn in der Hedge-Ära fuhr">Faktor <input class="input mono" type="number" step="0.1" min="0" data-kf-param="faktor"></label>
+                  <label title="leer = reale Reibung je Trade aus der Hedge-Ära (gemessen je Firma · Typ × Anteil: Funded 1,0 / Challenge·Phase 0,5) · Zahl = Override für alle Trades">Reibung €/Trade <input class="input mono" type="number" step="0.01" min="0" data-kf-param="reibung" placeholder="auto"></label>
+                  <span class="mono" id="adm-kf-stand" style="font-size:11.5px;color:var(--sub)"></span>
+                  <button class="btn btn-ghost" id="adm-kf-refresh" title="Neu laden" style="padding:6px 10px">↻</button>
+                </div>
+              </div>
+              <div id="adm-kf-leer" class="kap-leer" style="margin:6px 0 0" hidden>Noch keine abgeschlossenen Trades im Kapitel</div>
+              <div id="adm-kf-body" hidden>
+                <div class="kf-filter" id="adm-kf-filter" hidden></div>
+                <div class="kf-abschnitt">Bilanz</div>
+                <div class="kpis kf-kpis" id="adm-kf-kpis"></div>
+                <!-- Oberkategorie „Verlauf" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
+                <div class="kf-gruppe" data-kf-gruppe="verlauf">
+                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Verlauf</div><div class="kf-chip-bar" data-kf-chips="verlauf"></div></div>
+                  <div class="kf-gross">
+                    <div class="kf-chart" data-kf-chart="hyp" hidden>
+                      <div class="kf-titel">Mit Hedge (hypothetisch) · kumuliert je Person</div>
+                      <div class="kf-sub">So wäre der Gegen-Hedge gelaufen — Realmoney in EUR, gestrichelt = alle zusammen · Klick auf Person hebt sie hervor und filtert</div>
+                      <div class="adm-vl"><canvas id="adm-kf-chart-hyp"></canvas></div>
+                      <div class="adm-vl-legend" id="adm-kf-legend-hyp"></div>
+                    </div>
+                    <div class="kf-chart" data-kf-chart="real" hidden>
+                      <div class="kf-titel">Real · Master-P&amp;L kumuliert je Person</div>
+                      <div class="kf-sub">Prop-Konten in USD, echte Zahlen — hat es sich ohne Hedge gelohnt?</div>
+                      <div class="adm-vl"><canvas id="adm-kf-chart-real"></canvas></div>
+                      <div class="adm-vl-legend" id="adm-kf-legend-real"></div>
+                    </div>
+                    <div class="kf-chart" data-kf-chart="dup" hidden>
+                      <div class="kf-titel">Duplikum gespart · kumuliert je Person</div>
+                      <div class="kf-sub">Orbit-V2-Konten hätten in der Hedge-Ära je einen Duplikum-Slot gebraucht (10 € je Slot und Monat, Slot lebt vom ersten Trade bis zum Blow und wird danach wiederverwendet) · je Tag Slots × 10 €/30 — gestrichelt = alle zusammen</div>
+                      <div class="adm-vl"><canvas id="adm-kf-chart-dup"></canvas></div>
+                      <div class="adm-vl-legend" id="adm-kf-legend-dup"></div>
+                    </div>
+                    <div class="kf-chart" data-kf-chart="reibp" hidden>
+                      <div class="kf-titel">Reibung gespart · kumuliert je Person</div>
+                      <div class="kf-sub">reale Reibung, die ohne Hedge nicht anfällt — gestrichelt = alle zusammen</div>
+                      <div class="adm-vl"><canvas id="adm-kf-chart-reib"></canvas></div>
+                      <div class="adm-vl-legend" id="adm-kf-legend-reib"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="kf-abschnitt">Trades</div>
+                <div class="kpis kf-kpis" id="adm-kf-kpis2"></div>
+                <!-- Oberkategorie „Trades im Zeitverlauf" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
+                <div class="kf-gruppe" data-kf-gruppe="trades">
+                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Trades im Zeitverlauf</div><div class="kf-chip-bar" data-kf-chips="trades"></div></div>
+                  <div class="kf-gross">
+                    <div class="kf-chart" data-kf-chart="tag" hidden><div class="kf-titel">Je Tag · Mit Hedge vs. Real <span class="adm-sub kf-mini-sum" id="adm-kf-sum-tag"></span></div><div class="kf-sub">links Hedge hypothetisch (€, Kapitel-Farbe), rechts Master-P&amp;L real ($, grün/rot) · Klick auf einen Tag filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-tag"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="pnl" hidden><div class="kf-titel">Verteilung Master-P&amp;L je Trade <span class="adm-sub kf-mini-sum" id="adm-kf-sum-pnl"></span></div><div class="kf-sub">Anzahl Trades je 1.000-$-Stufe (−2k … +8k $) · Klick auf eine Stufe filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-pnl"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="wt" hidden><div class="kf-titel">Nach Wochentag <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wt"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-wt"></canvas></div></div>
+                  </div>
+                </div>
+                <!-- Oberkategorie „Nach Kategorie" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
+                <div class="kf-gruppe" data-kf-gruppe="kat">
+                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Nach Kategorie</div><div class="kf-chip-bar" data-kf-chips="kat"></div></div>
+                  <div class="kf-gross">
+                    <div class="kf-chart" data-kf-chart="sym" hidden><div class="kf-titel">Nach Symbol <span class="adm-sub kf-mini-sum" id="adm-kf-sum-sym"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-sym"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="weg" hidden><div class="kf-titel">Nach Weg <span class="adm-sub kf-mini-sum" id="adm-kf-sum-weg"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-weg"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="ri" hidden><div class="kf-titel">Nach Richtung <span class="adm-sub kf-mini-sum" id="adm-kf-sum-ri"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-ri"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="firm" hidden><div class="kf-titel">Nach Firma <span class="adm-sub kf-mini-sum" id="adm-kf-sum-firm"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-firm"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="typ" hidden><div class="kf-titel">Nach Kontotyp <span class="adm-sub kf-mini-sum" id="adm-kf-sum-typ"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-typ"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="gr" hidden><div class="kf-titel">Nach Kontogröße <span class="adm-sub kf-mini-sum" id="adm-kf-sum-gr"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) in Kapitel-Farbe · rechts = Master-P&amp;L real ($) · Klick auf einen Balken filtert alles, nochmal = aus</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-gr"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="person" hidden><div class="kf-titel">Nach Person <span class="adm-sub kf-mini-sum" id="adm-kf-sum-person"></span></div><div class="kf-sub">Balken links = Mit Hedge (hypothetisch, €) · rechts = Master-P&amp;L real ($) · Klick auf Person filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-person"></canvas></div></div>
+                  </div>
+                </div>
+                <!-- Oberkategorie „Reibung" (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner") -->
+                <div class="kf-gruppe" data-kf-gruppe="reibung">
+                  <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Reibung</div><div class="kf-chip-bar" data-kf-chips="reibung"></div></div>
+                  <div class="kf-gross">
+                    <div class="kf-chart" data-kf-chart="reibg" hidden><div class="kf-titel">Reibung gesamt je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibg"></span></div><div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (Median, Ausreißer 1,5×IQR raus) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reibg"></canvas></div></div>
+                    <div class="kf-chart" data-kf-chart="reib" hidden><div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div><div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt (Funded 100 %, Challenge/Phase 50 % der gesamten) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div></div>
+                  </div>
+                </div>
+                <div id="adm-kf-quoten" hidden>
+                  <div class="kf-abschnitt">Hedge-Quoten aus der Hedge-Ära</div>
+                  <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma · Typ, nach Quote sortiert — Klick filtert Kacheln und Charts</div>
+                  <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-q"></div>
+                </div>
+                <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
+                     schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
+                <div class="kf-abschnitt">Trades <span class="adm-sub" id="adm-kf-trades-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+                <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
+              </div>
+            </div>
+        </div>
         <div id="adm-pane-buys" hidden>
           <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-buys-body" hidden>
@@ -10036,7 +10040,9 @@
       $('kasse-lock').style.display = 'none'
       $('kasse-content').hidden = false
       kasseLoad()
-      admLoad()
+      // Nicht bei jedem Betreten neu laden (24.09.2026 abends, Finn: „dass das nicht immer neu geladen werden muss,
+      // wenn ich ganz kurz auf Kompass gehe — die Übersicht auch, ist mir nervig"): Stand bleibt 10 min, ↻ lädt sofort.
+      if(!admData || Date.now() - (window._admLadeZeit || 0) > ADM_CACHE_MS) admLoad()
       // Sprung aus Trades („Winning Days") wartet hinter dem Kasse-Code (23.09.2026)
       if(window._wdTabPending){ window._wdTabPending = false; document.querySelector('.adm-tab[data-admtab="wd"]')?.click() }
     }
@@ -10047,6 +10053,7 @@
      * Endpoint prüft serverseitig das Supabase-Token (nur eingeloggte Prophos-
      * User), die Aggregation macht er mit dem Service-Key. */
     let admData = null
+    const ADM_CACHE_MS = 10 * 60 * 1000   // Übersicht/Kapitel: so lange gilt der Stand beim Tab-Wechsel (24.09.2026 abends)
     const admEur = new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:0, maximumFractionDigits:0 })
 
     /* ── Kapitel „Ohne Hedge" im Admin (24.09.2026, Finn: „riesen Umstieg — geh alles durch, jedes
@@ -10111,6 +10118,7 @@
         const d = await r.json()
         if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
         admData = d
+        window._admLadeZeit = Date.now()
         window._admData = d   // Farmer-Tab (Modul-Ebene) braucht die Personen/Konten für „fehlende IDs" (23.09.2026)
         // Lesbare Namen: seit 28.08.2026 liefert der Server die
         // user_metadata-Namen ("Pascal", "Moritz") direkt als person/name mit
@@ -10414,7 +10422,7 @@
      * Kacheln, Monatsbalken (Chart.js wie admVerlauf), Stammdaten mit Auto-Speichern
      * (Muster kp-quoten). Umschalten bleibt Sache des Topbar-Reglers; die Karte ruft nur
      * window._kapitel.setzen(id), der Rest kommt über das Event 'prophos:kapitel' zurück. */
-    let admKapData = null, admKapChart = null
+    let admKapData = null, admKapChart = null, admKapGeladenAt = 0
     // Review-Finding 24.09.2026 (W5): EIN Timer für alle Zeilen verlor Zeile 1, wenn binnen 0,7 s in
     // Zeile 2 getippt wurde (clearTimeout traf den fremden Timer) → jetzt ein Timer je Kapitel-Id.
     const _admKapTimer = new Map()
@@ -10456,17 +10464,19 @@
       }catch(e){
         msg.style.display = ''; body.hidden = true
         msg.textContent = 'Kapitel nicht verfügbar: ' + (e.message || e)
+        const sm = $('adm-stat-msg'); if(sm && !admKapData){ sm.style.display = ''; sm.textContent = 'Statistik nicht verfügbar: ' + (e.message || e) }
       }
     }
     // Beim Öffnen des Tabs: einmal laden, danach nur den Chart nachziehen (Breite 0 im versteckten Tab)
     function admKapitelOeffnen(){
       if(!admKapData){ admKapitelLaden(); return }
+      if(Date.now() - admKapGeladenAt > ADM_CACHE_MS) admKapitelLaden()   // still im Hintergrund, Stand bleibt sichtbar
       if(admKapChart){ try { admKapChart.resize() } catch(_){} }
       for(const n of ['kfhyp', 'kfreal', 'kfreib', 'kfdup']){ if(admVlCharts[n]){ try { admVlCharts[n].resize() } catch(_){} } }
       for(const c of Object.values(admKfCharts)){ if(c){ try { c.resize() } catch(_){} } }
     }
     function admKapitelRender(d){
-      admKapData = d
+      admKapData = d; admKapGeladenAt = Date.now()
       const msg = $('adm-kap-msg'), body = $('adm-kap-body')
       if(!body) return
       const liste = (d.kapitel || []).slice().sort((a, b) => String(a.von).localeCompare(String(b.von)))
@@ -10729,7 +10739,7 @@
     const admKfMinus = n => String(n).replace('-', '−')   // typografisches Minus wie überall im Panel
     const admKfBucket = v => v < -2000 ? '< −2k' : v >= 8000 ? '≥ 8k' : (lo => `${admKfMinus(lo / 1000)}…${admKfMinus(lo / 1000 + 1)}k`)(Math.floor(v / 1000) * 1000)
     const ADM_KF_BUCKETS = ['< −2k', ...Array.from({ length: 10 }, (_, k) => `${admKfMinus(k - 2)}…${admKfMinus(k - 1)}k`), '≥ 8k']
-    const admKfQFmt = q => admKfDe(q, 2) + ' €/$'
+    const admKfQFmt = q => admKfDe(q, 3) + ' €/$'   // drei Stellen (24.09.2026 abends, Finn: „auf den dritten Cent — eher 0,04 oder 0,045")
     const ADM_KF_TYP = { funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', eval: 'Eval' }
     const admKfTyp = t => ADM_KF_TYP[String(t || '').toLowerCase()] || (t ? String(t) : '—')
     const admKfGroesse = g => g ? Math.round(Number(g) / 1000) + 'k' : ''
@@ -10769,6 +10779,8 @@
       const panel = $('adm-kf-panel'); if(!panel) return
       const k = admKfKapitel(liste || (admKapData?.kapitel || []))
       panel.hidden = !k
+      const sm = $('adm-stat-msg')
+      if(sm){ sm.style.display = k ? 'none' : ''; if(!k) sm.textContent = 'Kein Kapitel ohne Hedge angelegt — die Statistik gilt für hedge-freie Kapitel.' }
       if(!k) return
       const fx = Number(admKapData?.fx_usd_eur) || 0.85
       const farbe = admKapFarbe(k)
@@ -10916,20 +10928,30 @@
     /* Chart-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke, sehe ich es"):
      * zwölf Sichten als Chips, genau eine sichtbar. Wechsel zeichnet über admKfRender neu, damit Chart.js die
      * volle Breite des eben eingeblendeten Containers bekommt. Auswahl lebt nur in der Sitzung (admKf.chart). */
-    const ADM_KF_CHARTS = [['hyp', 'Mit Hedge · Verlauf'], ['real', 'Real · Verlauf'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart'],
-                           ['reibg', 'Reibung gesamt'], ['reib', 'Reibung real'], ['tag', 'Je Tag'], ['pnl', 'Verteilung'], ['sym', 'Symbol'],
-                           ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['gr', 'Kontogröße'], ['wt', 'Wochentag'], ['person', 'Person']]
+    /* Oberkategorien (24.09.2026 abends, Finn: „für eine Oberkategorie ein Chart, unterteilt … viel cleaner"): je Gruppe
+     * ein Chip-Balken und EINE Fläche, genau eine Sicht je Gruppe sichtbar. Wechsel zeichnet über admKfRender neu, damit
+     * Chart.js die Breite des eben eingeblendeten Containers bekommt. Auswahl lebt in der Sitzung (admKf.charts). */
+    const ADM_KF_GRUPPEN = {
+      verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
+      trades:  [['tag', 'Je Tag'], ['pnl', 'Verteilung'], ['wt', 'Wochentag']],
+      kat:     [['sym', 'Symbol'], ['weg', 'Weg'], ['ri', 'Richtung'], ['firm', 'Firma'], ['typ', 'Kontotyp'], ['gr', 'Kontogröße'], ['person', 'Person']],
+      reibung: [['reibg', 'Gesamt (gemessen)'], ['reib', 'Real']] }
     function admKfChartWahlRender(){
-      const bar = $('adm-kf-chartwahl'); if(!bar) return
-      if(!ADM_KF_CHARTS.some(([k]) => k === admKf.chart)) admKf.chart = 'hyp'
-      bar.innerHTML = ''
-      for(const [key, label] of ADM_KF_CHARTS){
-        const b = document.createElement('button'); b.type = 'button'
-        b.className = 'adm-vl-chip' + (key === admKf.chart ? ' is-on' : ''); b.textContent = label
-        b.addEventListener('click', () => { if(admKf.chart === key) return; admKf.chart = key; admKfRender() })
-        bar.appendChild(b)
+      if(!admKf.charts) admKf.charts = {}
+      for(const [gruppe, liste] of Object.entries(ADM_KF_GRUPPEN)){
+        if(!liste.some(([k]) => k === admKf.charts[gruppe])) admKf.charts[gruppe] = liste[0][0]
+        const bar = document.querySelector(`#adm-kf-panel [data-kf-chips="${gruppe}"]`)
+        if(bar){
+          bar.innerHTML = ''
+          for(const [key, label] of liste){
+            const b = document.createElement('button'); b.type = 'button'
+            b.className = 'adm-vl-chip' + (key === admKf.charts[gruppe] ? ' is-on' : ''); b.textContent = label
+            b.addEventListener('click', () => { if(admKf.charts[gruppe] === key) return; admKf.charts[gruppe] = key; admKfRender() })
+            bar.appendChild(b)
+          }
+        }
+        document.querySelectorAll(`#adm-kf-panel [data-kf-gruppe="${gruppe}"] .kf-chart`).forEach(el => { el.hidden = el.dataset.kfChart !== admKf.charts[gruppe] })
       }
-      document.querySelectorAll('#adm-kf-gross .kf-chart').forEach(el => { el.hidden = el.dataset.kfChart !== admKf.chart })
     }
     /* Trade-Liste (24.09.2026, Finn: „grob 100 € Gegen-Cash … die nimmt man schon mal in die neue Statistik rein"):
      * neueste 30 Trades des aktuellen Filters — Datum · Person · Konto (Firma · Typ) · Master-P&L $ · „≙ −975 € Hedge"
@@ -10979,7 +11001,7 @@
       // x-Achse druckten übereinander). cfg.horizontal: Kategorien auf der y-Achse, Höhe wächst mit der Zahl
       // der Zeilen; Wert-Achse liegt dann auf x, eine zweite Wert-Achse oben statt rechts.
       const horiz = !!cfg.horizontal
-      wrap.style.height = horiz ? Math.max(380, cats.length * 26 + 40) + 'px' : ''
+      wrap.style.height = horiz ? Math.max(320, cats.length * 26 + 40) + 'px' : ''
       const axisKey = horiz ? 'xAxisID' : 'yAxisID', prim = horiz ? 'x' : 'y', sek = horiz ? 'x1' : 'y1'
       const datasets = [{ label: cfg.a.label, data: cats.map(e => +Number(e.a).toFixed(2)), [axisKey]: prim, borderRadius: 3, maxBarThickness: 26,
                           backgroundColor: cats.map(e => cfg.a.farbe(e, on(e))) }]
@@ -11156,6 +11178,7 @@
         if(st){ st.textContent = '✓ gespeichert'; setTimeout(() => { if(st.textContent === '✓ gespeichert') st.textContent = '' }, 2500) }
       }catch(e){ if(st) st.textContent = 'nicht gespeichert: ' + (e.message || e) }
     }
+    $('adm-kf-refresh')?.addEventListener('click', () => admKapitelLaden())
     // Eigene Verdrahtung der zwei Felder: sofort neu rechnen, 0,7 s später speichern (kein Sammel-Handler)
     document.querySelectorAll('#adm-kf-panel [data-kf-param]').forEach(el => el.addEventListener('input', () => {
       const n = Number(el.value)
@@ -13933,7 +13956,8 @@
         $('adm-pane-wd').hidden       = name !== 'wd'
         $('adm-pane-kompass').hidden  = name !== 'kompass'
         $('adm-pane-kapitel').hidden  = name !== 'kapitel'
-        if(name === 'kapitel') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026)
+        $('adm-pane-stat').hidden     = name !== 'stat'
+        if(name === 'kapitel' || name === 'stat') admKapitelOeffnen()   // lädt /admin/kapitel beim ersten Öffnen (24.09.2026), danach Cache
         if(name === 'kompass' && typeof window._kpTabOeffnen === 'function') window._kpTabOeffnen()
         else if(typeof window._kpTabSchliessen === 'function') window._kpTabSchliessen()
         if(name === 'wd' && typeof window._wdTabOeffnen === 'function') window._wdTabOeffnen()
@@ -28260,7 +28284,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.452'
+  const OS_TAB_BUILD = '2026-09-22.453'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
