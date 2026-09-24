@@ -1184,8 +1184,44 @@
   /* Winning Days Farm (25.09.2026, Design-Rundgang): das Raster hatte Löcher — Kontrakte halb + leer, Risiko Slave
      volle Breite, TP halb + leer. Jetzt Kontrakte | Risiko Slave, darunter TP volle Breite (der SL-Platz ist auf
      diesem Weg leer, Risiko Master IST der Stop Loss). Klasse tp-wd setzt tpRouteUpdateSeg nur auf diesem Weg. */
-  #tradePlanModal .tp-wd #tp-slave-risk-field{grid-column:auto !important}
-  #tradePlanModal .tp-wd .field:has(> #tp-master-tp){grid-column:1 / -1}
+  /* Winning Days Farm in drei Abschnitten (25.09.2026, Finn: „man erkennt gefühlt gar nicht, was was ausmacht"):
+     6-spaltiges Raster, damit Risiko Master · Kontrakte · Risiko Slave zu dritt nebeneinander passen; order stellt die
+     Abfolge her (A Risiko → Multiplikator-Box, B TP + Kachel, C SL-Kachel), Überschriften im Stil der Abschnitts-Titel. */
+  #tradePlanModal .tp-wd-head,#tradePlanModal .tp-wd-only{display:none}
+  #tradePlanModal .tp-wd > .tp-wd-head,#tradePlanModal .tp-wd > .tp-wd-only{display:block}
+  @media (min-width:821px){
+    #tradePlanModal .tp-wd{grid-template-columns:repeat(6,1fr) !important}
+    #tradePlanModal .tp-wd > .field{grid-column:span 3}
+    #tradePlanModal .tp-wd > .field:has(> #tp-master-risk),#tradePlanModal .tp-wd > .field:has(> #tp-master-qty),
+    #tradePlanModal .tp-wd > #tp-slave-risk-field{grid-column:span 2 !important}
+    #tradePlanModal .tp-wd > #tp-master-tp-row,#tradePlanModal .tp-wd > #tp-wd-tp-kachel{grid-column:span 3 !important}
+  }
+  #tradePlanModal .tp-wd > .tp-wd-head{grid-column:1 / -1;margin-top:8px;padding-top:12px;border-top:1px solid var(--border);
+    font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--sub);font-weight:600}
+  #tradePlanModal .tp-wd > #tp-wd-head-a{margin-top:0;padding-top:0;border-top:none}
+  #tradePlanModal .tp-wd > .tp-wd-head span{display:block;margin-top:2px;text-transform:none;letter-spacing:0;font-weight:400;color:var(--sub-2)}
+  #tradePlanModal .tp-wd > #tp-master-row,#tradePlanModal .tp-wd > #tp-wd-multi-row,#tradePlanModal .tp-wd > #tp-wd-hedge-row,
+  #tradePlanModal .tp-wd > #tp-kompass-box,#tradePlanModal .tp-wd > #tp-dir-row,#tradePlanModal .tp-wd > #tp-plan-start-um-row{grid-column:1 / -1 !important}
+  #tradePlanModal .tp-wd > #tp-v2-instr-row{order:1;grid-column:1 / -1 !important}
+  #tradePlanModal .tp-wd > #tp-wd-head-a{order:2}
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-risk){order:3}
+  #tradePlanModal .tp-wd > .field:has(> #tp-master-qty){order:4}
+  #tradePlanModal .tp-wd > #tp-slave-risk-field{order:5}
+  #tradePlanModal .tp-wd > #tp-wd-multi-row{order:6}
+  #tradePlanModal .tp-wd > #tp-wd-head-b{order:7}
+  #tradePlanModal .tp-wd > #tp-master-tp-row{order:8}
+  #tradePlanModal .tp-wd > #tp-wd-tp-kachel{order:9}
+  #tradePlanModal .tp-wd > #tp-wd-head-c{order:10}
+  #tradePlanModal .tp-wd > #tp-wd-hedge-row{order:11}
+  #tradePlanModal .tp-wd > #tp-kompass-box{order:12}
+  #tradePlanModal .tp-wd > #tp-dir-row{order:13}
+  #tradePlanModal .tp-wd > #tp-plan-start-um-row{order:14}
+  #tradePlanModal .tp-wd .tp-wd-kachel{padding:10px 12px;border-radius:8px;border:1px solid var(--border);height:100%;box-sizing:border-box}
+  #tradePlanModal .tp-wd .tp-wd-kachel-leer{border-style:dashed;font-size:12px;color:var(--sub);background:transparent}
+  #tradePlanModal .tp-wd .tp-wd-kachel-titel{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em}
+  #tradePlanModal .tp-wd .tp-wd-kachel-zeile{font-family:var(--mono);font-size:12.5px;margin-top:4px}
+  #tradePlanModal .tp-wd .tp-wd-kachel-netto{font-family:var(--mono);font-size:12px;color:var(--sub);margin-top:2px}
+  #tradePlanModal .tp-wd .tp-wd-kachel-sub{font-size:11px;color:var(--sub-2);margin-top:6px;line-height:1.45}
   #tradePlanModal .tp-v2-instr{display:flex;width:100%}
   #tradePlanModal .tp-v2-instr button{
     flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;
@@ -1205,6 +1241,7 @@
     }
     #tradePlanModal .tp-v2{grid-template-columns:1fr !important;gap:12px !important}
     #tradePlanModal .tp-v2 > .field{grid-column:1 / -1 !important;min-width:0}
+    #tradePlanModal .tp-wd > .tp-wd-head{grid-column:1 / -1 !important}
     #tradePlanModal .tp-v2 .input,#tradePlanModal .tp-v2 select.input{width:100%;min-width:0;box-sizing:border-box}
     #tradePlanModal .tp-v2 .seg{display:flex;width:100%}
     #tradePlanModal .tp-v2 .seg button{flex:1;min-width:0;padding:9px 8px}
@@ -5757,6 +5794,12 @@
               </div>
             </div>
 
+            <!-- Winning Days Farm, drei Abschnitte (Koordination 25.09.2026, Finn am Screenshot .521: „Mach das visuell
+                 unterschiedlicher, sodass man erkennt, was der Multiplikator ausmacht und was der Take Profit ausmacht —
+                 nutz gerne das gleiche Design vom Alten mit dem Multiplikator"). Die Überschriften und die Extra-Zeilen
+                 tragen tp-wd-head / tp-wd-only und sind nur sichtbar, wenn das Raster die Klasse tp-wd trägt; die
+                 Reihenfolge im Raster stellt CSS (order) her, damit die geteilten Felder an Ort und Stelle bleiben. -->
+            <div class="tp-wd-head" id="tp-wd-head-a">Risiko → Multiplikator <span>Stop-Distanz in $ und Risiko auf Fusion ergeben die Lots</span></div>
             <div class="field">
               <label>Risiko Master ($)</label>
               <input type="number" class="input mono" id="tp-master-risk" min="0" step="10" placeholder="z.B. 1000">
@@ -5845,6 +5888,24 @@
                  tpRecompute()/Save-Code sie lesen/beschreiben.
                  Seit 28.08.2026 im ECHO-Modus wieder sichtbar (tpRouteUpdateSeg):
                  Finns Jetzt-starten-Flow — TP/SL/Lots/Richtung komplett beim Planen. -->
+            <!-- Winning Days Farm: die klassische Multiplikator-Box (gleiche Klassen wie beim Duplikum-Weg), gefüllt von tpWdVorschau -->
+            <div class="field tp-wd-only" id="tp-wd-multi-row">
+              <div class="tp-multi-display" style="margin-top:0">
+                <div class="tp-output-grid">
+                  <div class="tp-slave-out">
+                    <div class="tp-slave-label">Fusion kaufen</div>
+                    <div class="tp-slave-value tnum" id="tp-wd-slave-qty">—</div>
+                    <div class="tp-slave-unit" id="tp-wd-slave-unit">Lot NAS100</div>
+                  </div>
+                  <div class="tp-mult-out">
+                    <div class="tp-multi-label">Multiplikator</div>
+                    <div class="tp-multi-value tnum" id="tp-wd-multi-value">—</div>
+                    <div class="tp-multi-eq" id="tp-wd-multi-eq">Bitte Felder ausfüllen</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="tp-wd-head" id="tp-wd-head-b">Take Profit → was am TP passiert <span>folgt aus Take Profit + Multiplikator</span></div>
             <div class="field" id="tp-master-tp-row" style="grid-column:span 2;display:none">
               <!-- Label einzeilig (white-space:nowrap): 24.09.2026, Finn „TP und SL sind nicht auf der gleichen Höhe" —
                    der lange Hinweis brach um und schob das TP-Feld unter das SL-Feld. -->
@@ -5853,6 +5914,8 @@
             </div>
             <!-- V2-Wege (23.09.2026, Finn: „alles in ein einziges Popup — Account, Kontrakte, TP, SL, Uhrzeit, dann nur
                  noch Starten"): Stop Loss und Startzeit direkt hier, nur auf Echo V2 / Orbit V2 sichtbar (tpRouteUpdateSeg). -->
+            <div class="field tp-wd-only" id="tp-wd-tp-kachel"></div>
+            <div class="tp-wd-head" id="tp-wd-head-c">Stop Loss → was am SL passiert <span>folgt aus Risiko Master + Multiplikator</span></div>
             <div class="field" id="tp-master-sl-row" style="display:none">
               <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
               <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
@@ -5863,7 +5926,6 @@
                  Multiplikator-Box — Slave ist fix Fusion (tpCalcMultiplier, Preset fusion). Hier nur die Vorschau bei TP/SL
                  aus den Lots (tpWdVorschau). Ein eigenes Faktor-Feld gab es kurz (.473–.483), Finn hat es verworfen. -->
             <div class="field" id="tp-wd-hedge-row" style="grid-column:span 2;display:none">
-              <label>Fusion-Gegenhedge <span id="tp-wd-hedge-eur" style="color:var(--sub);font-weight:400"></span></label>
               <div id="tp-wd-vorschau" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px"></div>
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
@@ -28950,13 +29012,14 @@
   // dieselbe Quelle, die der Farmer für seinen Multiplikator nutzt (tpVorplanZeile.slaveEur über tpWdHedgeEur)
   function tpWdSlaveRiskVorbelegen(){
     if(!tpWdAktiv()) return
-    // Risiko Master ($) = Stop-Distanz für die Lot-Rechnung (Gegenprüfung 25.09.2026: Finn fährt Winning Days oft ohne SL — nicht
-    // blocken): leer → Farmer-SL-Vorgabe des Kontos (wd_sl), sonst Max-Drawdown
+    // Risiko Master ($) = Stop-Distanz für die Lot-Rechnung: leer → NUR die Farmer-SL-Vorgabe des Kontos (wd_sl). Der
+    // Max-Drawdown als zweite Quelle ist raus (Koordination 25.09.2026: 4.000 $ vorbelegt ergab Multiplikator 0,059 und die
+    // Kachel „Master −4.000 $" — Finns Beispiel ist 250/100). Leer bleibt leer, Speichern bleibt erlaubt (hedge_eur aus der Staffel).
     try{
       const mr = document.getElementById('tp-master-risk')
       if(mr && mr.value === ''){
         const acc = (accounts || []).find(a => String(a.id) === String(document.getElementById('tp-master')?.value))
-        const v = acc ? (acc.wdSl > 0 ? Number(acc.wdSl) : (acc.maxDrawdown > 0 ? Number(acc.maxDrawdown) : 0)) : 0
+        const v = (acc && acc.wdSl > 0) ? Number(acc.wdSl) : 0
         if(v > 0) mr.value = String(Math.round(v))
       }
     }catch(e){ console.warn('[wd-master-risk]', e) }
@@ -28972,7 +29035,9 @@
   // Lots × 0,85 × (TP-Punkte + Puffer). „zusammen" rechnet den Master-$ mit FX (window._fxUsdEur) in € um.
   // Schließ-Level in NQ für die Kachel „bei Take Profit" (Koordination 25.09.2026): der Feed-Wächter schließt bei Master-TP ± Puffer
   // (8 Ticks). Mit frischem NQ/MNQ-Kurs (≤ 60 s, Markt-View/Realtime) als Zahl „≈ NQ 31.002", sonst nur als Distanz.
-  function tpWdSchliessHtml(r, puffer){
+  // Schließ-Level in NQ für die Kachel „bei Take Profit" (Koordination 25.09.2026): der Feed-Wächter schließt bei Master-TP ± Puffer
+  // (Ticks). Mit frischem NQ/MNQ-Kurs (≤ 60 s, Markt-View/Realtime) als Zahl „≈ NQ 31.002", sonst nur als Distanz. Liefert eine Zeile.
+  function tpWdSchliessText(r, puffer){
     if(!(r.tpPkt > 0)) return ''
     const ticks = Math.round(puffer / HEDGE_TICK)
     let dir = null; try{ dir = (_tpDir === 'buy' || _tpDir === 'sell') ? _tpDir : null }catch(_){}
@@ -28980,35 +29045,53 @@
     try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je[(typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'] || je.NQ || je.MNQ; if(k && k.alter_ms <= 60000 && k.preis > 0) kurs = k.preis }catch(_){}
     const fmt = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const level = (kurs && dir) ? (dir === 'sell' ? kurs - r.tpPkt - puffer : kurs + r.tpPkt + puffer) : null
-    return `<div style="grid-column:1 / -1;font-size:11.5px;color:var(--sub);line-height:1.5">Fusion schließt über den Kurs-Feed bei <b>Master-TP ${dir === 'sell' ? '−' : '+'} ${ticks} Ticks</b>${level ? ` ≈ <b class="mono">NQ ${fmt(level)}</b> (Kurs jetzt ${fmt(kurs)} ${dir === 'sell' ? '−' : '+'} ${r.tpPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt TP-Distanz ${dir === 'sell' ? '−' : '+'} ${puffer.toLocaleString('de-DE')} Pkt)` : (dir ? ' — NQ-Level erscheint, sobald ein frischer Kurs da ist' : ' — Richtung wählen, dann steht das NQ-Level hier')}; Notfall-SL Fusion ${Math.round(((typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : 1.1) * 100)} % im Terminal.</div>`
+    return `Fusion schließt bei <b>Master-TP ${dir === 'sell' ? '−' : '+'} ${ticks} Ticks</b>${level ? ` ≈ <b class="mono">NQ ${fmt(level)}</b> (Kurs jetzt ${fmt(kurs)})` : ' — Level in NQ, sobald Richtung und Kurs-Feed da sind'}`
   }
+  /* Drei Abschnitte (25.09.2026, Finn: „man erkennt gefühlt gar nicht, was was ausmacht"): A füllt die klassische
+   * Multiplikator-Box (Fusion-Lots groß, Multiplikator + Rechenweg), B die Kachel „bei Take Profit" neben dem TP-Feld,
+   * C die Kachel „bei Stop Loss" + Notfall-SL. Kachel-Farbe folgt dem Netto, die Fusion-Zahl behält ihr eigenes Vorzeichen.
+   * Bei SL gewinnt Fusion Lots × 0,85 × SL-Punkte (= Risiko Slave), bei TP verliert Fusion Lots × 0,85 × (TP-Punkte + Puffer). */
   function tpWdVorschau(){
-    const row = document.getElementById('tp-wd-hedge-row'), box = document.getElementById('tp-wd-vorschau'), eurEl = document.getElementById('tp-wd-hedge-eur')
+    const row = document.getElementById('tp-wd-hedge-row'), box = document.getElementById('tp-wd-vorschau'), tpBox = document.getElementById('tp-wd-tp-kachel')
+    const mv = document.getElementById('tp-wd-multi-value'), me = document.getElementById('tp-wd-multi-eq'), sq = document.getElementById('tp-wd-slave-qty')
     if(!row || !box || row.style.display === 'none') return
     const r = tpWdRechnung()
     const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
-    const fmtD = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })} $`
-    const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    const n = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+    const fmtD = v => `${v < 0 ? '−' : '+'}${n(Math.abs(v), 0)} $`
+    const fmtE = v => `${v < 0 ? '−' : '+'}${n(Math.abs(v), 2)} €`
+    const col = v => v >= 0 ? '#15803d' : '#b91c1c'
+    const leer = (txt) => `<div class="tp-wd-kachel tp-wd-kachel-leer">${txt}</div>`
     if(!(r.lots > 0)){
-      if(eurEl) eurEl.textContent = ''
-      box.innerHTML = `<div style="grid-column:1 / -1;font-size:12px;color:var(--sub)">${!r.masterFirm ? 'Master-Konto wählen.' : 'Risiko Master ($), Kontrakte und Risiko Slave (€) ausfüllen — daraus rechnet sich wie bisher der Multiplikator.'}</div>`
+      const grund = !r.masterFirm ? 'Master-Konto wählen.' : !(r.risk > 0) ? 'Risiko Master eintragen (Stop-Distanz in $).' : !(r.kt > 0) ? 'Kontrakte eintragen.' : 'Risiko Slave (€) eintragen.'
+      if(mv) mv.textContent = '—'; if(sq) sq.textContent = '—'; if(me) me.textContent = grund
+      if(tpBox) tpBox.innerHTML = leer('bei Take Profit: ' + grund)
+      box.innerHTML = leer('bei Stop Loss: ' + grund)
       return
     }
+    // A) Multiplikator-Box mit dem Rechenweg (Finns Beispiel: 250 $ ÷ (2 $/Pkt × 1 Kt) = 125 Pkt · 100 € ÷ (0,85 €/Pkt × 125 Pkt) = 0,94 Lot → ×0,941)
+    if(mv) mv.textContent = '×' + n(r.mult, 3)
+    if(sq) sq.textContent = n(r.lots, 2)
+    if(me) me.innerHTML = `${n(r.risk, 0)} $ ÷ (${n(r.masterPpl, r.masterPpl % 1 ? 2 : 0)} $/Pkt × ${n(r.kt, 0)} Kt) = ${n(r.slPkt, 1)} Pkt<br>${n(r.slaveRisk, 0)} € ÷ (${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt) = ${n(r.lots, 2)} Lot → ×${n(r.mult, 3)}`
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
-    const n2 = v => v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if(eurEl) eurEl.textContent = `— ${n2(r.lots)} Lot NAS100 · Multiplikator ${r.mult.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`
-    // Kachel-Farbe folgt dem Netto (25.09.2026, Design-Rundgang: die TP-Kachel war rot, obwohl „zusammen" im Plus stand);
-    // die Fusion-Zahl selbst bleibt nach ihrem eigenen Vorzeichen gefärbt — man sieht weiter, welche Seite zahlt.
-    const kachel = (titel, master, fusion) => { const netto = master * fx + fusion; const farbe = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'; return `<div style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:${farbe}">
-        <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">${titel}</div>
-        <div class="mono" style="font-size:12.5px;margin-top:3px">Master <b style="color:${master >= 0 ? '#15803d' : '#b91c1c'}">${fmtD(master)}</b> · Fusion <b style="color:${fusion >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(fusion)}</b></div>
-        <div class="mono" style="font-size:11.5px;color:var(--sub);margin-top:2px">zusammen ≈ <b style="color:${netto >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(netto)}</b></div></div>` }
-    const tpHtml = r.tp > 0
-      ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100)
-      : '<div style="padding:8px 12px;border-radius:8px;border:1px dashed var(--border);font-size:12px;color:var(--sub)">bei Take Profit: erst Take Profit ($) eintragen.</div>'
-    const slHtml = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100)
-    box.innerHTML = tpHtml + slHtml + tpWdSchliessHtml(r, puffer)
-      + `<div style="grid-column:1 / -1;font-size:11px;color:var(--sub-2);line-height:1.5">Stop-Distanz ${r.slPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt${r.tpPkt > 0 ? ` · TP-Distanz ${r.tpPkt.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Pkt + ${puffer} Pkt Puffer am Fusion-Level` : ''} · ${r.slavePpl.toLocaleString('de-DE', { maximumFractionDigits: 4 })} €/Pkt je Lot NAS100 — beide Schließ-Level liegen in MetaTrader.</div>`
+    const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
+      return `<div class="tp-wd-kachel" style="background:${bg}">
+        <div class="tp-wd-kachel-titel">${titel}</div>
+        <div class="tp-wd-kachel-zeile">Master <b style="color:${col(master)}">${fmtD(master)}</b> · Fusion <b style="color:${col(fusion)}">${fmtE(fusion)}</b></div>
+        <div class="tp-wd-kachel-netto">zusammen ≈ <b style="color:${col(netto)}">${fmtE(netto)}</b></div>
+        ${sub ? `<div class="tp-wd-kachel-sub">${sub}</div>` : ''}</div>` }
+    // B) bei Take Profit — neben dem TP-Feld
+    if(tpBox) tpBox.innerHTML = r.tp > 0
+      ? kachel('bei Take Profit', r.tp, -Math.round(r.lots * r.slavePpl * (r.tpPkt + puffer) * 100) / 100,
+               `${n(r.lots, 2)} Lot × ${n(r.slavePpl, 2)} €/Pkt × (${n(r.tpPkt, 1)} + ${n(puffer, 2)} Pkt Puffer) · ${tpWdSchliessText(r, puffer)}`)
+      : leer('bei Take Profit: erst Take Profit ($) eintragen.')
+    // C) bei Stop Loss + Notfall-SL
+    const notfall = (typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : HEDGE_NOTFALL_STD
+    box.innerHTML = kachel('bei Stop Loss', -r.risk, Math.round(r.lots * r.slavePpl * r.slPkt * 100) / 100,
+        `${n(r.lots, 2)} Lot × ${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt Stop-Distanz`)
+      + `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Notfall-SL Fusion</div>
+         <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal</span></div>
+         <div class="tp-wd-kachel-sub">Greift nur, wenn der Feed-Wächter das Schließen verpasst — dann zu bei ${n(r.tpPkt * notfall, 1)} Pkt hinter dem Fusion-Einstieg${r.tpPkt > 0 ? '' : ' (erst mit Take Profit)'}.</div></div>`
   }
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
   // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
@@ -29053,8 +29136,9 @@
     v2weg(document.getElementById('tp-slave-risk'), v2 && !wdAn)
     v2weg(document.getElementById('tp-gesamtkosten-suggest'), v2)
     v2weg(document.getElementById('tp-vorgaenger-suggest'), v2)
-    const multBox = document.querySelector('#tradePlanModal .tp-multi-display')
-    if(multBox) multBox.style.display = (v2 && !wdAn) ? 'none' : ''
+    // Die klassische Box unter dem Raster (nicht die WD-Kopie in Abschnitt A, #tp-wd-multi-row) — auf allen V2-Wegen weg
+    const multBox = [...document.querySelectorAll('#tradePlanModal .tp-multi-display')].find(el => !el.closest('#tp-wd-multi-row'))
+    if(multBox) multBox.style.display = v2 ? 'none' : ''
     { const lbl = document.getElementById('tp-master-risk')?.closest('.field')?.querySelector('label'); if(lbl) lbl.textContent = wdAn ? 'Risiko Master ($) — Stop-Distanz in $ für die Lot-Rechnung' : 'Risiko Master ($)' }
     { const lbl = document.getElementById('tp-slave-risk')?.closest('.field')?.querySelector('label'); if(lbl && wdAn) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>) — Fusion, Staffel-Vorschlag'; else if(lbl) lbl.innerHTML = 'Risiko Slave (<span id="tp-slave-cur">€</span>)' }
     // Ein Popup für alles (23.09.2026, Finn: „den Account auswählen, die Lotanzahl, Take Profit und Stop-Loss, die
@@ -29876,7 +29960,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.522'
+  const OS_TAB_BUILD = '2026-09-22.523'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -33578,7 +33662,12 @@
     if(master && typeof tpFirmIstFutures === 'function' && tpFirmIstFutures(master.firm)){
       if(vgEl){ vgEl.style.display = 'none' }
     }
-    if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
+    if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id) && typeof tpWdAktiv === 'function' && tpWdAktiv()){
+      // Winning Days Farm (Koordination 25.09.2026): KEINE Gesamtkosten-/Max-Drawdown-Automatik — die füllte Risiko Master
+      // mit 4.000 $ (Multiplikator 0,059). Hier gilt nur die Farmer-Vorgabe wd_sl bzw. die Staffel (tpWdSlaveRiskVorbelegen).
+      _tpRiskAuto.master = String(master.id)
+      setTimeout(() => { try{ tpWdSlaveRiskVorbelegen(); tpWdVorschau() }catch(_){} }, 0)
+    } else if(master && !_tpRiskAuto.manuell && _tpRiskAuto.master !== String(master.id)){
       _tpRiskAuto.master = String(master.id)
       const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(master.firm)
       const vgSichtbar = vgEl && vgEl.style.display !== 'none' && parseFloat(vgEl.dataset.suggestedVgEur || '') > 0
@@ -33713,6 +33802,8 @@
   // auf dem Master IMMER den vollen Max Drawdown (holt über den Drawdown das Geld raus) —
   // deshalb wird das Feld bei jedem „Übernehmen" und bei Master-Wahl gesetzt, nicht nur wenn leer.
   function tpFillMasterRiskFromDD(){
+    // Winning Days Farm (Koordination 25.09.2026): Risiko Master ist die Stop-Distanz, nie der Max-Drawdown — nur wd_sl
+    if(typeof tpWdAktiv === 'function' && tpWdAktiv()) return false
     const masterId = document.getElementById('tp-master')?.value
     const master = accounts.find(a => String(a.id) === String(masterId))
     const input = document.getElementById('tp-master-risk')
