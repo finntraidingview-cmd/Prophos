@@ -621,6 +621,37 @@ def kerze_fortschreiben(k1m, k1m_vor, wurzel, symbol, preis, jetzt_s):
     return neu, (k1m if k1m else k1m_vor)
 
 
+SOLO_ZU = "hedge_solo_zu.json"      # Ring der selbst erkannten Abschluesse + zuletzt bekannte Tickets (neustart-fest)
+SOLO_ZU_MAX = 20
+
+
+def solo_zu_erkennen(bekannt, aktuell):
+    """REIN RECHNEND (testbar): welche Solo-Tickets sind seit dem letzten Tick
+    verschwunden? bekannt/aktuell = {ticket: {symbol, lots, richtung, fill}}.
+    -> Liste der verschwundenen Eintraege (mit ticket), Reihenfolge nach Ticket.
+    Koordination 24.09.2026 spaet: der Copier erkennt den Abschluss der Solo-
+    Position SELBST — der PC-Tab (und ueber mt5_live der Mac) sieht 'Level
+    gefuellt, −4,20 €, level_tp' auch dann, wenn zwischen Fuellen und dem
+    naechsten Waechter-Tick ein Tab-Neustart lag oder nie ein Close-Auftrag kam."""
+    out = []
+    for t in sorted(int(k) for k in (bekannt or {})):
+        if t not in {int(k) for k in (aktuell or {})}:
+            e = dict((bekannt.get(t) if t in bekannt else bekannt.get(str(t))) or {})
+            e["ticket"] = t
+            out.append(e)
+    return out
+
+
+def solo_zu_ring(ring, eintrag, maximum=SOLO_ZU_MAX):
+    """REIN RECHNEND (testbar): Eintrag {ticket, …} in den Ring — ein Ticket steht
+    nie doppelt (der Erste gewinnt), aelteste fliegen raus, juengster hinten."""
+    ring = [r for r in (ring or []) if isinstance(r, dict)]
+    if any(int(r.get("ticket") or 0) == int(eintrag.get("ticket") or 0) for r in ring):
+        return ring
+    ring.append(dict(eintrag))
+    return ring[-int(maximum):]
+
+
 def solo_deal_grund(reason):
     """REIN RECHNEND (testbar): DEAL_REASON des schliessenden Deals → Grund aus
     Sicht des MASTERS. Hedge-SL gefuellt = der Master hat seinen TP erreicht
@@ -1518,6 +1549,57 @@ def main():
     # ── Solo-Hedge: Auftraege vom Panel abarbeiten (24.09.2026 abends) ─────────
     solo_pfad = os.path.join(here, SOLO_AUFTRAG)
     solo_erg_pfad = os.path.join(here, SOLO_ERGEBNIS)
+    solo_zu_pfad = os.path.join(here, SOLO_ZU)
+
+    # Selbst erkannte Abschluesse (24.09.2026 spaet): Datei {zu: [Ring], bekannt: {ticket: …}} — beim Start
+    # gelesen, damit auch Positionen zaehlen, die WAEHREND eines Copier-Neustarts gefuellt wurden.
+    def solo_zu_laden():
+        try:
+            d = load_json(solo_zu_pfad)
+            if isinstance(d, dict):
+                return ([r for r in (d.get("zu") or []) if isinstance(r, dict)][-SOLO_ZU_MAX:],
+                        {int(k): v for k, v in (d.get("bekannt") or {}).items() if str(k).isdigit()})
+        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError):
+            pass
+        return [], {}
+
+    def solo_zu_speichern(ring, bekannt):
+        tmp = solo_zu_pfad + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"zu": ring[-SOLO_ZU_MAX:], "bekannt": {str(k): v for k, v in bekannt.items()}}, f, ensure_ascii=False, indent=1)
+            for _ in range(5):
+                try:
+                    os.replace(tmp, solo_zu_pfad)
+                    return
+                except PermissionError:
+                    time.sleep(0.05)
+        except Exception as e:
+            log(f"⚠ {SOLO_ZU} nicht geschrieben: {type(e).__name__}: {e}")
+
+    hedge_acc["solo_zu"], hedge_acc["solo_bekannt"] = solo_zu_laden()
+    if hedge_acc["solo_bekannt"]:
+        log(f"[solo] {len(hedge_acc['solo_bekannt'])} Solo-Ticket(s) aus {SOLO_ZU} bekannt — pruefe beim ersten Tick, ob sie noch offen sind")
+
+    def solo_abschluesse_erkennen(solo_liste):
+        """Pro Tick: verschwundene Solo-Tickets → P&L/Grund/Exit aus der Historie → Ring + Datei.
+        solo_liste None (Terminal nicht lesbar) = kein Urteil, bekannt bleibt stehen."""
+        if solo_liste is None:
+            return
+        aktuell = {int(p["ticket"]): {"symbol": p.get("symbol"), "lots": p.get("lots"), "richtung": p.get("richtung"), "fill": p.get("fill")}
+                   for p in solo_liste if p and p.get("ticket")}
+        weg = solo_zu_erkennen(hedge_acc.get("solo_bekannt") or {}, aktuell)
+        ring = hedge_acc.get("solo_zu") or []
+        for e in weg:
+            pl, grund, exit_preis = solo_pl_aus_history(e["ticket"])
+            eintrag = {"ticket": int(e["ticket"]), "pl": pl, "grund": grund or "unbekannt", "fill_close": exit_preis,
+                       "closed_at": datetime.now().isoformat(timespec="seconds"),
+                       "symbol": e.get("symbol"), "lots": e.get("lots"), "richtung": e.get("richtung"), "fill": e.get("fill")}
+            ring = solo_zu_ring(ring, eintrag)
+            log(f"[solo] Position {e['ticket']} zu ({eintrag['grund']}) · P&L {pl if pl is not None else '?'} · @ {exit_preis or '?'}")
+        if weg or aktuell != hedge_acc.get("solo_bekannt"):
+            hedge_acc["solo_zu"], hedge_acc["solo_bekannt"] = ring, aktuell
+            solo_zu_speichern(ring, aktuell)
 
     def solo_ergebnisse():
         try:
@@ -1789,6 +1871,9 @@ def main():
             "hedge_fremde": hedge_acc.get("fremde"),
             # Solo-Hedges (Winning-Day-Gegenhedge, 24.09.2026): eigene Liste, kein Alarm
             "hedge_solo": hedge_acc.get("solo"),
+            # Selbst erkannte Abschluesse (24.09.2026 spaet), letzte 20, neustart-fest (hedge_solo_zu.json):
+            # [{ticket, pl, grund, fill_close, closed_at, symbol, lots, richtung, fill}] — zweite Quelle fuer die Karte
+            "hedge_solo_zu": hedge_acc.get("solo_zu") or [],
             # Verbuchte Closes aus dem Sidecar-Ring — neustart-fest
             "closed_hedges": m.closed[-50:],
         }
@@ -1903,7 +1988,11 @@ def main():
                 solo = None
             hedge_acc["fremde"] = fremde
             hedge_acc["solo"] = solo
-            # Solo-Auftraege vom Panel (open/close) — nach dem Bestand, vor den Mastern
+            # Abschluesse selbst erkennen (Ring hedge_solo_zu), dann Auftraege vom Panel (open/close)
+            try:
+                solo_abschluesse_erkennen(solo)
+            except Exception as e:
+                log(f"⚠ Solo-Abschluss-Erkennung: {type(e).__name__}: {str(e)[:120]}")
             try:
                 solo_abarbeiten()
             except Exception as e:

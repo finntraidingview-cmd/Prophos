@@ -1632,6 +1632,7 @@ def main():
     results.append(test_vordergrund_waechter_ohne_windows())
     results.append(test_kerze_fortschreiben())
     results.append(test_solo_level_und_grund())
+    results.append(test_solo_zu_ring())
 
     print()
     ok = sum(1 for r in results if r)
@@ -1747,6 +1748,40 @@ def test_solo_level_und_grund():
         print("✗ solo_deal_grund"); ok = False
     if ok:
         print("✓ Solo-Hedge: Lots, beide Level, Grund-Mapping")
+    return ok
+
+
+def test_solo_zu_ring():
+    """Selbst erkannte Solo-Abschluesse: erkennen, nicht doppelt, Ring max 20, Neustart-Persistenz."""
+    import copier, json, tempfile
+    ok = True
+    bekannt = {4711: {"symbol": "NAS100", "lots": 0.59, "richtung": "sell", "fill": 20000.5}, 4712: {"symbol": "NAS100", "lots": 0.2}}
+    weg = copier.solo_zu_erkennen(bekannt, {4712: {"symbol": "NAS100"}})
+    if [e["ticket"] for e in weg] != [4711] or weg[0].get("lots") != 0.59:
+        print(f"✗ solo_zu_erkennen: {weg}"); ok = False
+    if copier.solo_zu_erkennen(bekannt, bekannt) != [] or copier.solo_zu_erkennen({}, {1: {}}) != []:
+        print("✗ solo_zu_erkennen: nichts verschwunden muss [] liefern"); ok = False
+    # Schluessel als Strings (aus JSON gelesen) muessen genauso gehen
+    if [e["ticket"] for e in copier.solo_zu_erkennen({"4711": {"lots": 1.0}}, {})] != [4711]:
+        print("✗ solo_zu_erkennen: String-Schluessel"); ok = False
+    ring = copier.solo_zu_ring([], {"ticket": 4711, "pl": -4.2, "grund": "level_tp"})
+    ring = copier.solo_zu_ring(ring, {"ticket": 4711, "pl": -9.9, "grund": "hand"})   # doppelt → der Erste gewinnt
+    if len(ring) != 1 or ring[0]["pl"] != -4.2:
+        print(f"✗ solo_zu_ring doppelt: {ring}"); ok = False
+    for t in range(1, 30):
+        ring = copier.solo_zu_ring(ring, {"ticket": 5000 + t, "pl": 0.0, "grund": "close"})
+    if len(ring) != 20 or ring[-1]["ticket"] != 5029 or any(r["ticket"] == 4711 for r in ring):
+        print(f"✗ solo_zu_ring Laenge/Reihenfolge: {len(ring)} {ring[-1]}"); ok = False
+    if copier.solo_zu_ring("kaputt", {"ticket": 1}) != [{"ticket": 1}]:
+        print("✗ solo_zu_ring mit kaputtem Ring"); ok = False
+    # Persistenz-Form: {zu, bekannt} — was gespeichert wird, muss nach dem Neustart identisch zurueckkommen
+    d = tempfile.mkdtemp(); pf = os.path.join(d, copier.SOLO_ZU)
+    json.dump({"zu": ring, "bekannt": {"4712": {"symbol": "NAS100"}}}, open(pf, "w"))
+    geladen = json.load(open(pf))
+    if len(geladen["zu"]) != 20 or geladen["bekannt"].get("4712", {}).get("symbol") != "NAS100":
+        print("✗ Persistenz-Form"); ok = False
+    if ok:
+        print("✓ Solo-Abschluss-Ring: erkennen, nicht doppelt, max 20, Persistenz-Form")
     return ok
 
 
