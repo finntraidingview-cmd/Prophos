@@ -581,20 +581,25 @@ def solo_lots_waehlen(lots_roh, eur, punkte, wert_pro_punkt, si):
     return solo_lots(eur or 0, punkte or 0, wert_pro_punkt, si), None, "eur"
 
 
-def solo_notfall_sl(fill, richtung, punkte, *, puffer, point, digits):
-    """REIN RECHNEND (testbar): Broker-seitiges Schliess-Level der Solo-Position.
-    Finn (24.09.2026 abends): „Sobald der Preis in MetaTrader erreicht wird, soll
-    die Order einfach geschlossen werden — mit noch so 2, 3 Punkten mehr." Also
-    KEIN Waechter ueber den NQ-Feed, sondern ein SL im Terminal: dort, wo der
-    Master seinen TP erreicht (punkte hinter dem Hedge-Einstieg — NAS100 laeuft
-    mit NQ, die Distanz in Punkten ist dieselbe), plus puffer Punkte. Der Hedge
-    laeuft GEGEN den Master: Master-TP = Hedge-Verlust, also ein SL.
-    richtung = Richtung der HEDGE-Order (buy/sell). Kein Master-SL → kein TP;
-    endet der Master ohne TP (Auto-Close, Hand), schliesst der Prophos-Tab."""
+def solo_notfall_sl(fill, richtung, punkte, *, faktor, point, digits, puffer=0.0):
+    """REIN RECHNEND (testbar): NOTFALL-SL der Solo-Position im Terminal — Finn (25.09.2026,
+    Koordination): „Die Fusion-Position erst schliessen, wenn der Preis 8 Ticks ueber dem
+    Master-TP ist — und zusaetzlich auf dem Slave im Notfall ein Stop-Loss bei 110 % vom
+    Master-Take-Profit, wie bei der alten Logik." Der NORMALWEG ist seit .5xx wieder der
+    Waechter im PC-Tab ueber den (jetzt sekuendlichen) NQ-Feed: er schickt den Close-Auftrag
+    mit grund 'tp_feed'/'sl_feed'. Dieses Level hier ist das Sicherheitsnetz dahinter:
+    Distanz = punkte × faktor (Standard 1,10), nie naeher als punkte + 1 Punkt — sonst
+    fuellte der Notfall-SL VOR dem Waechter. puffer bleibt als Alt-Parameter (0.5xx: Distanz
+    = punkte + puffer) und wird nur genommen, wenn kein Faktor da ist.
+    richtung = Richtung der HEDGE-Order: SELL-Hedge verliert bei steigendem Kurs → SL ueber
+    dem Fill, BUY-Hedge darunter. Kein Master-SL → kein TP am Hedge (solo_level_tp)."""
     if not (float(fill) > 0 and float(punkte) > 0):
         return 0.0
-    dist = float(punkte) + max(0.0, float(puffer or 0))
-    # SELL-Hedge verliert bei STEIGENDEM Kurs → SL ueber dem Einstieg; BUY-Hedge darunter
+    p = float(punkte)
+    if faktor is not None and float(faktor) > 0:
+        dist = max(p * float(faktor), p + 1.0)
+    else:
+        dist = p + max(0.0, float(puffer or 0))
     lvl = float(fill) + dist if str(richtung).lower() == "sell" else float(fill) - dist
     return max(round(lvl, int(digits)), float(point))
 
@@ -1684,6 +1689,13 @@ def main():
         tp_punkte = float(a.get("tp_punkte") or a.get("punkte") or 0)
         sl_punkte = float(a.get("sl_punkte") or 0)
         puffer = float(a.get("puffer") if a.get("puffer") is not None else 3)
+        # Notfall-Faktor (25.09.2026): SL am Hedge = fill ± tp_punkte × faktor (Standard 1,10), Panel prueft 1,0–2,0
+        try:
+            notfall_faktor = float(a.get("notfall_faktor") if a.get("notfall_faktor") is not None else 1.10)
+        except (TypeError, ValueError):
+            notfall_faktor = 1.10
+        if not (1.0 <= notfall_faktor <= 2.0):
+            notfall_faktor = 1.10
         lots, lots_angefragt, lots_quelle = solo_lots_waehlen(a.get("lots"), a.get("eur"), tp_punkte, wert, si)
         if not lots > 0:
             return {"ok": False, "code": "lots", "wert_pro_punkt": wert, "lots_angefragt": lots_angefragt,
@@ -1722,13 +1734,15 @@ def main():
                # lots = tatsaechlich gesendet (Broker-Raster), lots_angefragt = Rohwert vom Frontend (None = aus eur gerechnet)
                "lots_angefragt": lots_angefragt, "lots_quelle": lots_quelle,
                "nas_bid": float(tick.bid), "nas_ask": float(tick.ask), "sl": 0.0, "tp": 0.0,
-               "tp_punkte": tp_punkte, "sl_punkte": sl_punkte, "puffer": puffer}
+               "tp_punkte": tp_punkte, "sl_punkte": sl_punkte, "puffer": puffer,
+               "notfall_faktor": notfall_faktor, "sl_distanz_punkte": None}
         # Schliess-Level im Terminal (Finn: „sobald der Preis in MetaTrader erreicht wird"): sl am Hedge =
         # Master-TP (tp_punkte + puffer), tp am Hedge = Master-SL (sl_punkte − puffer, optional). EIN
         # SLTP-Request fuer beide; ein Fehler hier ist kein Abbruch, die Antwort traegt sl/tp 0 + *_fehler.
         try:
             if tp_punkte > 0 and ticket:
-                sl = solo_notfall_sl(fill, richtung, tp_punkte, puffer=puffer, point=si["point"], digits=si["digits"])
+                sl = solo_notfall_sl(fill, richtung, tp_punkte, faktor=notfall_faktor, point=si["point"], digits=si["digits"])
+                erg["sl_distanz_punkte"] = round(abs(sl - fill), 2) if sl > 0 else None
                 tp = solo_level_tp(fill, richtung, sl_punkte, puffer=puffer, point=si["point"], digits=si["digits"]) if sl_punkte > 0 else 0.0
                 if sl > 0:
                     ok = send(m, {"action": mt5.TRADE_ACTION_SLTP, "symbol": sym, "position": ticket,
@@ -1787,7 +1801,9 @@ def main():
         pl, grund, exit_preis = solo_pl_aus_history(ticket)
         return {"ok": True, "ticket": ticket, "deal": int(getattr(r, "deal", 0) or 0),
                 "fill_close": float(getattr(r, "price", 0.0) or 0.0) or exit_preis, "lots": float(p.volume), "pl": pl,
-                "grund": grund or "close",
+                # grund: den Grund des Auftraggebers (Waechter: 'tp_feed'/'sl_feed'/'master_ende', Karte: 'hand')
+                # vor dem DEAL_REASON — unser eigener Close ist fuer MT5 immer nur EXPERT ('close')
+                "grund": (str(a.get("grund"))[:40] if a.get("grund") else None) or grund or "close",
                 "msg": f"geschlossen @ {getattr(r, 'price', '?')}" + (f" · P&L {pl}" if pl is not None else " · P&L folgt aus der Historie")}
 
     def solo_abarbeiten():

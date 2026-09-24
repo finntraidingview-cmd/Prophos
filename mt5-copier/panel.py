@@ -2774,8 +2774,18 @@ class Handler(BaseHTTPRequestHandler):
                     puffer = max(0.0, min(100.0, float(body.get("puffer") if body.get("puffer") is not None else 3)))
                 except (TypeError, ValueError):
                     puffer = 3.0
+                # Notfall-Faktor (25.09.2026, Finn: „im Notfall ein Stop-Loss bei 110 % vom Master-Take-Profit"):
+                # SL am Hedge = fill ± tp_punkte × faktor; erlaubt 1,0–2,0, Standard 1,10, sonst 400
+                try:
+                    notfall_faktor = float(body.get("notfall_faktor") if body.get("notfall_faktor") is not None else 1.10)
+                except (TypeError, ValueError):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": "notfall_faktor keine Zahl"}))
+                if not (1.0 <= notfall_faktor <= 2.0):
+                    return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                        "msg": f"notfall_faktor {notfall_faktor} ausserhalb 1.0–2.0"}, ensure_ascii=False))
                 auftrag.update({"richtung": richtung, "symbol": symbol, "eur": eur, "punkte": punkte, "tp_punkte": punkte,
-                                "sl_punkte": sl_punkte, "puffer": puffer, "lots": lots, "plan_id": str(body.get("plan_id") or "")[:64]})
+                                "sl_punkte": sl_punkte, "puffer": puffer, "notfall_faktor": notfall_faktor, "lots": lots,
+                                "plan_id": str(body.get("plan_id") or "")[:64]})
             else:
                 try:
                     ticket = int(body.get("ticket") or 0)

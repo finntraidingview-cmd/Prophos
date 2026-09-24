@@ -1737,9 +1737,17 @@ def test_solo_level_und_grund():
     si = {"volume_step": 0.01, "volume_min": 0.01, "volume_max": 100.0, "point": 0.01, "digits": 2}
     if copier.solo_lots(70, 140, 0.85, si) != 0.59 or copier.solo_lots(0.5, 140, 0.85, si) != 0.0:
         print("✗ solo_lots"); ok = False
-    if copier.solo_notfall_sl(20000, "sell", 140, puffer=3, point=0.01, digits=2) != 20143.0 \
-            or copier.solo_notfall_sl(20000, "buy", 140, puffer=3, point=0.01, digits=2) != 19857.0:
-        print("✗ solo_notfall_sl (Level Master-TP)"); ok = False
+    # 110 % (25.09.2026): SELL-Hedge SL ueber dem Fill bei 1,1 × Distanz, BUY darunter; Mindestabstand punkte + 1;
+    # Alt-Weg puffer nur ohne Faktor
+    if copier.solo_notfall_sl(20000, "sell", 140, faktor=1.10, point=0.01, digits=2) != 20154.0 \
+            or copier.solo_notfall_sl(20000, "buy", 140, faktor=1.10, point=0.01, digits=2) != 19846.0:
+        print("✗ solo_notfall_sl 110 % (Notfall-SL Master-TP-Seite)"); ok = False
+    if copier.solo_notfall_sl(20000, "buy", 5, faktor=1.10, point=0.01, digits=2) != 19994.0:
+        print("✗ solo_notfall_sl Mindestabstand punkte + 1 (5 × 1,1 = 5,5 < 6)"); ok = False
+    if copier.solo_notfall_sl(20000, "sell", 140, faktor=None, puffer=3, point=0.01, digits=2) != 20143.0:
+        print("✗ solo_notfall_sl Alt-Weg puffer ohne Faktor"); ok = False
+    if copier.solo_notfall_sl(0, "buy", 10, faktor=1.1, point=0.01, digits=2) != 0.0:
+        print("✗ solo_notfall_sl ohne Fill → 0"); ok = False
     if copier.solo_level_tp(20000, "sell", 100, puffer=3, point=0.01, digits=2) != 19903.0 \
             or copier.solo_level_tp(20000, "buy", 2, puffer=3, point=0.01, digits=2) != 20001.0 \
             or copier.solo_level_tp(20000, "buy", 0, puffer=3, point=0.01, digits=2) != 0.0:

@@ -93,7 +93,7 @@ Reihenfolge einhalten, jeder Punkt ist ein Beweis, kein Klick ins Blaue.
 
 **Was in MetaTrader zu sehen sein muss**
 7. Position auf NAS100, Kommentar `PXsolo`, Magic 790001, Richtung = Gegenseite des Masters, Lots = € / (TP-Distanz × Punktwert).
-8. **SL UND TP gesetzt:** SL = Fill ± (TP-Distanz + Puffer), TP = Fill ∓ (SL-Distanz − Puffer). Fehlt eines, steht in Prophos `sl_fehler`/`tp_fehler` mit dem Retcode.
+8. **SL UND TP gesetzt:** SL = Fill ± TP-Distanz × 1,10 (Notfall, Finn: „110 % vom Master-Take-Profit"), TP = Fill ∓ (SL-Distanz − Puffer). Fehlt eines, steht in Prophos `sl_fehler`/`tp_fehler` mit dem Retcode. Der Normalweg zum Schließen ist der Wächter im PC-Tab über den NQ-Feed (8 Ticks über dem Master-TP) — das Level im Terminal ist das Netz dahinter.
 
 **Was in Prophos zu sehen sein muss**
 9. Karte: Chip „FUSION SELL 0,xx Lot · ±x,xx € · zu bei X / Y" (Level aus der Copier-Antwort, Live-P&L aus dem Copier-Status, auch am Mac über `mt5_live`).
