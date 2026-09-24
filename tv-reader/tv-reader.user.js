@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.2
+// @version      0.8.3
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,11 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.3  25.09.2026  Positions-Payload fuer den Master-zu-Waechter (Finn: 'Fusion soll sofort schliessen,
+//                      wenn der Master in TradingView zu ist'): je Position zusaetzlich wurzel, richtung
+//                      (buy/sell), menge_zahl, avg_fill (Zahl), ts; dazu konto + konto_ts (Konto-Umschalter
+//                      des Broker-Panels), positionen_ts (letzte VOLLSTAENDIGE Lesung) und positionen_ok
+//                      (false = blind, kein Beweis).
 //   0.8.2  25.09.2026  Serien-Zaehler nach Ursache getrennt (Moritz' PC: 'unbek 366' bei 'Serien 3' — ein
 //                      Zaehler je Bar sagte nicht, WELCHE Serie): fremd (Symbol bekannt, weder NQ noch MNQ),
 //                      unaufgeloest (Send gehoert, Symbol-Id noch ohne Klartext — wird nachgezogen, sobald
@@ -64,7 +69,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.2';
+  const VERSION    = '0.8.3';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -187,17 +192,61 @@
     leseBefund = { zeilen: rows.size, zellen: zellen, tabelle: tabelleDa() };
     // Eine Zeile ist eine offene Position, wenn sie Symbol UND einen G&V-Wert
     // traegt. Order-Verlauf-Zeilen (mit 'Order-ID'/'Status') fallen so raus.
+    const jetzt = Date.now();
     return [...rows.values()]
-      .map((r) => ({
-        symbol:   feld(r, SPALTEN.symbol),
-        seite:    feld(r, SPALTEN.seite),
-        menge:    feld(r, SPALTEN.menge),
-        einstieg: feld(r, SPALTEN.einstieg),
-        sl:       feld(r, SPALTEN.sl),
-        tp:       feld(r, SPALTEN.tp),
-        pnl:      feld(r, SPALTEN.pnl),
-      }))
+      .map((r) => {
+        const symbol = feld(r, SPALTEN.symbol), seite = feld(r, SPALTEN.seite);
+        const menge = feld(r, SPALTEN.menge), einstieg = feld(r, SPALTEN.einstieg);
+        return {
+          symbol, seite, menge, einstieg,
+          sl:       feld(r, SPALTEN.sl),
+          tp:       feld(r, SPALTEN.tp),
+          pnl:      feld(r, SPALTEN.pnl),
+          // 0.8.3: gedeutete Felder fuer den Master-zu-Waechter im Prophos-Tab — Texte bleiben
+          // daneben stehen (Beweis), die Zahlen sind nur Bequemlichkeit
+          wurzel:     kursWurzelAusText(symbol),
+          richtung:   seiteNorm(seite),
+          menge_zahl: zahlAusText(menge),
+          avg_fill:   zahlAusText(einstieg),
+          ts:         jetzt,
+        };
+      })
       .filter((p) => p.symbol && p.pnl !== null);
+  }
+
+  // 'Buy'/'Kauf'/'Long' -> 'buy', 'Sell'/'Verkauf'/'Short' -> 'sell', sonst null
+  function seiteNorm(t) {
+    const u = String(t || '').trim().toLowerCase();
+    if (/^(buy|kauf|long)/.test(u)) return 'buy';
+    if (/^(sell|verkauf|short)/.test(u)) return 'sell';
+    return null;
+  }
+  // Zahl aus einem Zellen-Text, deutsch ('30.486,79', '1.234') oder englisch ('30,486.79', '1,234'),
+  // Waehrung/Leerzeichen egal, U+2212 als Minus. null = keine Zahl.
+  function zahlAusText(t) {
+    let z = String(t || '').replace(/\u2212/g, '-').replace(/[^\d.,\-]/g, '');
+    if (!/\d/.test(z)) return null;
+    if (z.indexOf(',') >= 0 && z.indexOf('.') >= 0) {
+      const dez = z.lastIndexOf(',') > z.lastIndexOf('.') ? ',' : '.';
+      z = z.split(dez === ',' ? '.' : ',').join('').replace(dez, '.');
+    } else if (/^-?\d{1,3}([.,]\d{3})+$/.test(z)) {
+      z = z.replace(/[.,]/g, '');
+    } else {
+      z = z.replace(',', '.');
+    }
+    const n = Number(z);
+    return isFinite(n) ? n : null;
+  }
+  // Konto-Kennung aus dem Broker-Panel (Konto-Umschalter, gleiche Signaturen wie das Bedienfeld),
+  // nur jeden BF_JEDER-ten Tick neu gelesen — die Suche geht durchs halbe DOM.
+  const kontoMerk = { text: null, ts: 0 };
+  function liesKonto() {
+    try {
+      const k = suche(SIG_KONTO_SCHALTER);
+      const t = k && k.text ? String(k.text).replace(/\s+/g, ' ').trim().slice(0, 64) : '';
+      if (t) { kontoMerk.text = t; kontoMerk.ts = Date.now(); }
+    } catch (_) {}
+    return kontoMerk;
   }
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -1231,10 +1280,17 @@
       sichtbarePosZahl = positionen.length;
     // Auch blind wird GESENDET — der Server soll den Grund kennen (und die
     // Orbit-Karte spaeter auch). Er uebernimmt den Stand dann nur nicht.
+    if ((tickNr % BF_JEDER) === 0) liesKonto();
     const payload = JSON.stringify({
       ts: Date.now(), positionen, version: VERSION,
       blind: !!blind, blind_grund: blind || '',
       sichtbar: document.visibilityState === 'visible',
+      // 0.8.3: Beweis-Felder fuer den Master-zu-Waechter — positionen_ts nur bei VOLLSTAENDIGER
+      // Lesung (nicht blind), positionen_ok = diese Liste ist eine Aussage; konto aus dem Umschalter
+      positionen_ts: blind ? null : Date.now(),
+      positionen_ok: !blind,
+      konto: kontoMerk.text,
+      konto_ts: kontoMerk.ts || null,
       // 0.6.0 (24.09.2026, Winning-Day-Gegenhedge auf Fusion — Finn: „auf einem PC,
       // der 24/7 laeuft, per Reader immer in Echtzeit die aktuellen NQ-/MNQ-Punkte
       // haben"): der Kurs aus dem TAB-TITEL. Bewusst nicht aus der Watchlist oder

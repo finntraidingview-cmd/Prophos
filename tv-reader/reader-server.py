@@ -62,7 +62,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.8.4"
+READER_VERSION = "0.8.5"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -438,6 +438,13 @@ def _mit_an(stand):
     out["reload_grund"] = _reload_grund
     out["reload_alter_s"] = round(time.time() - _reload_s, 3) if _reload_s else None
     out.update(_versionen())   # reader_version / script_version / script_alter_s (0.8.1)
+    # 0.8.5: Beweis-Felder fuer den Master-zu-Waechter (Script 0.8.3 liefert sie; aelteres Script:
+    # positionen_ts = ts des Stands, konto null). Blind = keine Aussage, egal was das Script sagt.
+    out["positionen_ok"] = bool(stand.get("positionen_ok", True)) and not _blind_grund
+    out["positionen_ts"] = stand.get("positionen_ts") or stand.get("ts") or None
+    out["positionen_alter_s"] = round(time.time() - _stand_s, 3) if _stand_s else None
+    out["konto"] = stand.get("konto") or None
+    out["konto_ts"] = stand.get("konto_ts") or None
     return out
 
 

@@ -164,6 +164,20 @@ def main():
     d = rs._kerzen_diag(ring2, {"feed": {"du_min": 3, "serien": {}, "unbekannte_serien": 0}}, None, "0.8.2")
     check(d.startswith("Kerzen MNQ 1(tick)/NQ 1 · "), f"Live-Zeile: NQ n / MNQ n(tick) [{d}]")
 
+    # 0.8.5: Beweis-Felder fuer den Master-zu-Waechter
+    rs._blind_grund = ""
+    st = {"ts": 5000, "positionen": [{"symbol": "MNQZ6", "wurzel": "MNQ", "richtung": "buy", "menge_zahl": 5, "avg_fill": 30486.79, "ts": 4990}],
+          "positionen_ts": 4995, "positionen_ok": True, "konto": "PAAPEX6416990000007", "konto_ts": 4900}
+    a = rs._mit_an(st)
+    check(a["positionen_ok"] is True and a["positionen_ts"] == 4995 and a["konto"] == "PAAPEX6416990000007" and a["konto_ts"] == 4900
+          and a["positionen"][0]["avg_fill"] == 30486.79, "Waechter-Felder: positionen_ok/ts, konto/konto_ts, avg_fill durchgereicht")
+    rs._blind_grund = "Tab verdeckt"
+    b = rs._mit_an(st)
+    check(b["positionen_ok"] is False, "Waechter-Felder: blind → positionen_ok false, auch wenn das Script ok meldet")
+    rs._blind_grund = ""
+    c = rs._mit_an({"ts": 7000, "positionen": []})
+    check(c["positionen_ok"] is True and c["positionen_ts"] == 7000 and c["konto"] is None, "Waechter-Felder: altes Script → positionen_ts = ts, konto null")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
