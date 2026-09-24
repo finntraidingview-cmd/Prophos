@@ -16726,7 +16726,10 @@
             signal_wach: (typeof _osWachStand === 'function') ? _osWachStand() : null,
             // Build-Stempel des TABS (28.08.2026, Remote-Close-Debug) — s.
             // OS_TAB_BUILD: beweist per SQL, welchen Build dieser PC-Tab fährt.
-            tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null
+            tab_build: (typeof OS_TAB_BUILD !== 'undefined') ? OS_TAB_BUILD : null,
+            // Kurs-Brücke-Diagnose (25.09.2026): Kerzen vom Reader, gültige Zeilen, letzter Upsert-Fehler, Erstladung —
+            // per SQL aus der Ferne lesbar (mt5_live.status.kurs_bruecke), typeof-Guard wie oben
+            kurs_bruecke: (typeof epLokal !== 'undefined' && epLokal && epLokal.diag) ? epLokal.diag : null
           },
           updated_at: new Date().toISOString()
         }
@@ -18183,7 +18186,7 @@
         let best = null
         for(const r of (data || [])){
           if(!r || r.preis == null || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ')) continue
-          const alter = Date.now() - (Number(r.reader_ts) || 0)
+          const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit (lp_time hinkt in ruhigen Minuten)
           if(alter > HEDGE_KURS_MAX_ALTER_MS) continue
           best = { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || r.id, alter_ms: alter }
           break
@@ -18525,19 +18528,27 @@
     q.push(supabase.from('tv_kurse').select('*').order('reader_ts', { ascending: false }).limit(12))
     if(vollstaendig || !mkl.kerzen.length) q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - mkl.span * 60000).toISOString()).order('minute', { ascending: true }).limit(1500))
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
-    if(currentUserId) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
+    // Nebenabfragen (Demo-Orders, Reader-PCs) nur alle 60 s bzw. beim vollen Laden — im 5-s-Takt reichen Kurs + Kerzen-Nachtrag
+    // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
+    const neben = vollstaendig || !mkl.ordersGeladen || (jetzt - (mkl.nebenAt || 0)) > 60000
+    if(neben) mkl.nebenAt = jetzt
+    if(currentUserId && neben) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
     const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
     // Reader-PCs mit Versionen (24.09.2026 spät): für die Kopfzeile ohne Feed — welcher PC meldet sich, welches Script läuft dort.
     // Tolerant: fehlen die Spalten noch, bleibt die Liste leer.
-    try{
+    if(neben) try{
       const { data } = await supabase.from('echoplus_live').select('pc_name,reader_version,script_version,updated_at').order('updated_at', { ascending: false }).limit(3)
       mkl.readerPcs = (data || []).filter(r => r && r.pc_name && (Date.now() - (Date.parse(r.updated_at) || 0)) < 600000)
     }catch(_){ mkl.readerPcs = [] }
     const rows = (rk && rk.data) || []
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
     // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
-    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0], alter_ms: jetzt - (Number(r.reader_ts) || 0), sichtbar: r.sichtbar !== false,
-                               quelle: r.quelle || null, modus: r.modus || null } : null
+    // Alter = Cloud-Ankunft (updated_at), NICHT reader_ts: bei quelle 'ws' ist reader_ts die Zeit des letzten Handels (lp_time) —
+    // in ruhigen Minuten 30–60 s alt, obwohl die Brücke alle 5 s frisch schreibt (Finn 25.09.2026 live: „hängt noch relativ").
+    // Die Brücke schreibt nur nicht-stale Kurse, also ist eine frische Zeile ein frischer Feed. reader_ts bleibt fürs Tooltip.
+    const kursAus = r => r ? { preis: Number(r.preis), symbol: r.symbol, wurzel: r.wurzel, pc: r.pc_name || String(r.id).split(':')[0],
+                               alter_ms: jetzt - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0), handel_ms: jetzt - (Number(r.reader_ts) || 0),
+                               sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null } : null
     mkl.kursJe = { NQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'NQ') || null), MNQ: kursAus(rows.find(r => r && r.preis != null && r.wurzel === 'MNQ') || null) }
     mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
@@ -18610,6 +18621,7 @@
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
       q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : frisch ? '' : '#B45309'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
+      q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed`
     }
     if(hint) hint.textContent = `${mkl.kerzen.length} Minutenkerzen ${mkl.wurzel} · Quelle: TradingView-Reader des 24/7-PCs (Chart-Legenden ab Userscript 0.7.0, davor Tab-Titel — dann muss der Tab sichtbar sein) — Lücken sind Lücken (PC aus, Markt zu), nie interpoliert.`
   }
@@ -18739,9 +18751,9 @@
   async function mklStaleWache(){
     if(!currentUserId) return
     try{
-      const { data } = await supabase.from('tv_kurse').select('pc_name,wurzel,reader_ts').in('wurzel', ['NQ', 'MNQ']).order('reader_ts', { ascending: false }).limit(1)
+      const { data } = await supabase.from('tv_kurse').select('pc_name,wurzel,reader_ts,updated_at').in('wurzel', ['NQ', 'MNQ']).order('updated_at', { ascending: false }).limit(1)
       const r = (data || [])[0]; if(!r) return
-      const alter = Date.now() - (Number(r.reader_ts) || 0)
+      const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit
       let alarm = false; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') === '1' }catch(_){}
       if(alter > MKL_STALE_PUSH_MS && !alarm){
         try{ localStorage.setItem('prophos_mkl_stale_alarm', '1') }catch(_){}
@@ -29416,7 +29428,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.498'
+  const OS_TAB_BUILD = '2026-09-22.499'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -42739,11 +42751,16 @@
         // Minute, hier gehen laufende + letzte abgeschlossene Kerze idempotent nach tv_kurs_1m. Einmal pro
         // Stunde Kerzen älter als 14 Tage wegräumen — sonst wächst die Tabelle ewig.
         const kz = Array.isArray(d.kurs_1m) ? d.kurs_1m : []
+        // Diagnose (25.09.2026, Finn live: Kurse da, tv_kurs_1m leer — aus der Cloud nicht zu sehen, wo die Kerzen bleiben):
+        // epLokal.diag reist im Flotten-Push als mt5_live.status.kurs_bruecke mit (kz = Kerzen vom Reader, rows = gültige,
+        // fehler = letzter Upsert-Fehler, erstladung = Stand der 0.8.0-Erstladung).
+        epLokal.diag = Object.assign(epLokal.diag || {}, { at: new Date().toISOString(), kurse: ks ? Object.keys(ks).join(',') : (k ? 'alt' : '-'), kz: kz.length, kz_bsp: kz[0] ? { wurzel: kz[0].wurzel, minute: kz[0].minute, c: kz[0].c } : null })
         if(kz.length){
           const rows = kz.filter(x => x && x.wurzel && x.minute > 0 && x.c > 0).map(x => ({
             wurzel: String(x.wurzel).slice(0, 8), minute: new Date(Number(x.minute) * 1000).toISOString(), symbol: String(x.symbol || '').slice(0, 32),
             o: x.o, h: x.h, l: x.l, c: x.c, ticks: Number(x.n) || 0, pc, updated_at: new Date().toISOString() }))
-          if(rows.length) await supabase.from('tv_kurs_1m').upsert(rows, { onConflict: 'wurzel,minute' })
+          epLokal.diag.rows = rows.length
+          if(rows.length){ const { error } = await supabase.from('tv_kurs_1m').upsert(rows, { onConflict: 'wurzel,minute' }); epLokal.diag.fehler = error ? String(error.message || error.code || error) : null; if(!error) epLokal.diag.letzter_ok = new Date().toISOString() }
           if(!epLokal.kerzenGeraeumt || Date.now() - epLokal.kerzenGeraeumt > 3600000){
             epLokal.kerzenGeraeumt = Date.now()
             try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 14 * 86400000).toISOString()) }catch(_){}
@@ -42765,8 +42782,9 @@
               o: b.o, h: b.h, l: b.l, c: b.c, ticks: 0, pc, updated_at: new Date().toISOString() }))
             for(let i = 0; i < brows.length; i += 500) await supabase.from('tv_kurs_1m').upsert(brows.slice(i, i + 500), { onConflict: 'wurzel,minute' })
             epLokal.kerzenErstladung = brows.length ? 'fertig' : 'leer'
+            epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: epLokal.kerzenErstladung, erstladung_bars: bars.length, erstladung_http: r.status, erstladung_warnung: (kd && kd.aufloesung_warnung) || null, erstladung_at: new Date().toISOString() })
             if(kd && kd.aufloesung_warnung) console.warn('[bruecke] Kerzen-Erstladung:', kd.aufloesung_warnung)
-          }catch(e){ epLokal.kerzenErstladung = 'fehler'; console.warn('[bruecke] Kerzen-Erstladung', e && e.message || e) }
+          }catch(e){ epLokal.kerzenErstladung = 'fehler'; epLokal.diag = Object.assign(epLokal.diag || {}, { erstladung: 'fehler', erstladung_fehler: String(e && e.message || e), erstladung_at: new Date().toISOString() }); console.warn('[bruecke] Kerzen-Erstladung', e && e.message || e) }
         }
     }catch(_){ /* still — naechster Tick */ }
     finally{ _epPushBusy = false }
