@@ -1888,6 +1888,7 @@
   #dashboard-view .tc2-sys-tsx{background:rgba(71,85,105,.11);color:#475569}
   /* V2-Wege (23.09.2026): gleiche Farbe wie Echo/Orbit, gestrichelter Rand = „ohne Hedge" */
   #dashboard-view .tc2-sys-mt5v2{background:rgba(14,151,149,.15);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}
+  #dashboard-view .tc2-sys-wd{background:rgba(22,200,198,.14);color:#0E7A78;outline:1px dashed rgba(14,122,120,.55);outline-offset:-1px}   /* Winning Day: Teal der Kontoart-Chips (25.09.2026) */
   #dashboard-view .tc2-sys-tvv2{background:rgba(124,58,237,.12);color:#7C3AED;outline:1px dashed rgba(124,58,237,.55);outline-offset:-1px}
   #dashboard-view .tc2-sys-tsv2{background:rgba(234,88,12,.12);color:#C2410C;outline:1px dashed rgba(234,88,12,.55);outline-offset:-1px}
   #dashboard-view .tc2-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
@@ -11109,7 +11110,7 @@
     // Firmenfarbe: feste Palette der Personen, Platz aus einem Hash des Namens (kein eigener Farbsatz)
     const admKfFirmColor = firm => { let h = 0; for(const ch of String(firm || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return ADM_P_COLORS[h % ADM_P_COLORS.length] }
     const admKfUsdKurz = v => Math.abs(v) >= 1000 ? (v / 1000).toLocaleString('de-DE', { maximumFractionDigits:1 }) + 'k $' : Math.round(v) + ' $'
-    const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
+    const ADM_KF_WEG = { mt5v2: 'Echo V2', tvv2: 'Orbit V2', wd: 'Winning Days', tsv2: 'Topstep V2', mt5: 'Echo', tvplus: 'Orbit', dup: 'Duplikum' }
     const admKfWochentag = d => { const x = d ? new Date(d + 'T12:00:00Z') : null; return x && !isNaN(x) ? ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'][x.getUTCDay()] : '—' }
     const ADM_KF_WT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So', '—']
     const admKfStdNum = k => { const n = parseInt(k); return Number.isFinite(n) ? n : 99 }   // „00 h" ist 0, nicht „fehlt" (Review F5)
@@ -11122,7 +11123,7 @@
     // [Titel, Wert je Trade, Anzeige-Label] — Filter-Arten; jede Art hat seit 24.09.2026 einen eigenen Chart
     // (admKfDimCharts / Tag / Histogramm), Person läuft über admKf.person. 'q' = Firma · Typ (Quoten-Zeilen, Reibung-Chart).
     const ADM_KF_ARTEN = { sym:  ['Symbol',   admKfSym, w => w],
-                           weg:  ['Weg',      t => t.route || '—', w => ADM_KF_WEG[w] || w],
+                           weg:  ['Weg',      t => (t.route === 'tvv2' && (String(t.master_typ || '').toLowerCase() === 'wd' || Number(t.hedge_eur) > 0)) ? 'wd' : (t.route || '—'), w => ADM_KF_WEG[w] || w],   // Winning Days als eigener Weg (25.09.2026)
                            ri:   ['Richtung', t => admKfRi(t.richtung), w => w],
                            firm: ['Firma',    t => t.master_firm || '—', w => w],
                            typ:  ['Kontotyp', t => admKfTyp(t.master_typ), w => w],
@@ -16893,12 +16894,23 @@
   function routeIstV2(r){ return r === 'mt5v2' || r === 'tvv2' || r === 'tsv2' }   // tsv2 = Topstep V2, von Hand (24.09.2026 abends)
   function routeIstEcho(r){ return r === 'mt5' || r === 'mt5v2' }      // Puls im MT5-Master-Terminal
   function routeIstOrbit(r){ return r === 'tvplus' || r === 'tvv2' }   // Puls in TradingView
+  // Winning-Day-Plan (25.09.2026, Finn am Trades-Tab: „kennzeichne die Trades als Winning Days, nicht als Orbit V2"): intern
+  // route 'tvv2', erkennbar an hedge_eur > 0, der Farmer-Notiz oder der Kontoart 'winning_days' des Master-Kontos.
+  function tpIstWdPlan(p){
+    if(!p || p.route !== 'tvv2') return false
+    if(Number(p.hedgeEur) > 0) return true
+    if(/Winning-Day-Farmer/i.test(String(p.notes || ''))) return true
+    try{ const a = (accounts || []).find(x => String(x.id) === String(p.masterAccountId)); if(a && String(a.type || '').toLowerCase() === 'winning_days') return true }catch(_){}
+    return false
+  }
+  const wegLabel = p => tpIstWdPlan(p) ? 'Winning Day' : p && p.route === 'mt5v2' ? 'Echo V2' : p && p.route === 'tsv2' ? 'Topstep V2' : 'Orbit V2'   // Weg-Label für Anzeigen (25.09.2026)
   const SYS_STICKER = {
     dup:    ['Duplikium', 'Duplikium — Kopie Master → Slave über den Duplikium-Wächter'],
     mt5:    ['Echo',      'Echo — dein MT5-Hedge-Copier auf dem PC'],
     tvplus: ['Orbit',     'Orbit — Duplikum kopiert, Puls platziert die Order automatisch in TradingView'],
     mt5v2:  ['Echo V2',   'Echo V2 — Puls platziert im Master-Terminal, kein Hedge, kein Copier'],
     tvv2:   ['Orbit V2',  'Orbit V2 — Puls platziert in TradingView, kein Duplikum, kein Hedge'],
+    wd:     ['Winning Day', 'Winning Days Farm — Puls platziert in TradingView, Fusion-Gegenhedge (intern Orbit V2)'],
     tsv2:   ['Topstep V2', 'Topstep V2 — du platzierst selbst in TopstepX: kein Bot, keine API, kein Hedge; „Läuft" und P&L von Hand'],
     mirror: ['Mirror',    'Topstep Mirror — TopstepX-Master auf MetaApi-Slave'],
     tsx:    ['TopstepX',  'TopstepX — Position direkt auf dem Topstep-Konto']
@@ -16912,6 +16924,7 @@
     if(!p) return 'dup'
     if(p.route === 'mt5')    return 'mt5'
     if(p.route === 'tvplus') return 'tvplus'
+    if(tpIstWdPlan(p))       return 'wd'   // Winning Day vor Orbit V2 (25.09.2026)
     if(routeIstV2(p.route))  return p.route
     if(typeof planMirrorRoute === 'function' && planMirrorRoute(p)) return 'mirror'
     return 'dup'
@@ -21170,7 +21183,7 @@
     el.innerHTML = `
       <div style="font-weight:700;font-size:14px;color:var(--ink);margin-bottom:3px">🔴 Trade erkannt: beendet</div>
       <div style="color:var(--sub);margin-bottom:11px;font-size:12.5px">${routeIstV2(plan.route)
-        ? `${plan.route === 'mt5v2' ? 'Echo V2' : 'Orbit V2'} · ${escapeHtml(plan.masterName||'—')}`   /* Review-Finding K13 (24.09.2026): V2 hat keinen Slave — kein „→ —" */
+        ? `${wegLabel(plan)} · ${escapeHtml(plan.masterName||'—')}`   /* Review-Finding K13 (24.09.2026): V2 hat keinen Slave — kein „→ —" */
         : `${escapeHtml(plan.masterName||'—')} → ${escapeHtml(plan.slaveName||'—')}`} · P&L wird automatisch erfasst</div>
       <div style="display:flex;gap:8px">
         <button id="at-complete-${plan.id}" style="flex:1;padding:8px;background:var(--violet);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:12.5px">Überprüfen →</button>
@@ -27102,7 +27115,7 @@
         // sonst könnte eine Karte im falschen Block stehen. Vorberechnet in
         // eine Map, weil planSysKey per planMirrorRoute Struktur prüft und
         // der Comparator O(n·log n) mal läuft.
-        const sysOrder = { mt5:0, tvplus:1, mirror:2, tsx:3, dup:4 }
+        const sysOrder = { mt5:0, tvplus:1, mirror:2, tsx:3, dup:4, wd:1 }
         const sysOf = new Map(list.map(p => [p, sysOrder[planSysKey(p)] ?? 9]))
         list.sort((a,b) => {
           const so = sysOf.get(a) - sysOf.get(b)
@@ -30432,7 +30445,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.545'
+  const OS_TAB_BUILD = '2026-09-22.546'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30634,7 +30647,7 @@
       const _fin = document.getElementById('pf-final'); if(_fin) _fin.style.display = 'none'
       const _ft = document.getElementById('pf-foot'); if(_ft) _ft.style.display = 'none'
       _pfEchoKnopf(false)
-      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
+      const _inf = document.getElementById('pf-plan-info'); if(_inf) _inf.textContent = tpIstWdPlan(plan) ? `Winning Day · ${plan.masterName || '—'} — Puls in TradingView, Fusion-Gegenhedge` : `Orbit V2 · ${plan.masterName || '—'} — ohne Duplikum, ohne Hedge`
       document.getElementById('tpPreflightModal')?.classList.add('open')
     }
     const imPopup = !fern && document.getElementById('tpPreflightModal')?.classList.contains('open')
@@ -31086,7 +31099,8 @@
     if(!plan) return 'Plan ' + String(pid).slice(0, 8)
     if(routeIstOrbit(plan.route) && typeof tpOrbitWerte === 'function'){   // Orbit (23.09.2026)
       const w = tpOrbitWerte(plan)
-      return w.dir ? `${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : (plan.masterName || '—')
+      const vor = tpIstWdPlan(plan) ? 'Winning Day · ' : ''
+      return w.dir ? `${vor}${plan.masterName || '—'} · ${w.dir.toUpperCase()} ${w.lots} ${w.symbol}` : `${vor}${plan.masterName || '—'}`
     }
     const { order } = _tpOrderAusPlan(plan)
     return order ? `${plan.masterName || '—'} · ${order.richtung.toUpperCase()} ${order.volumen} ${order.symbol}`
@@ -31803,7 +31817,7 @@
     const foot = document.getElementById('pf-foot'); if(foot) foot.style.display = 'none'
     _pfEchoKnopf(false)
     const info = document.getElementById('pf-plan-info')
-    if(info) info.textContent = `📡 Schließen · ${istEcho ? 'Echo V2' : 'Orbit V2'} · ${plan.masterName || '—'}${symbol ? ` · ${symbol}` : ''} — ohne Hedge`
+    if(info) info.textContent = `📡 Schließen · ${istEcho ? 'Echo V2' : wegLabel(plan)} · ${plan.masterName || '—'}${symbol ? ` · ${symbol}` : ''} — ohne Hedge`
     document.getElementById('tpPreflightModal').classList.add('open')
     const fertigUi = (ok, text) => {
       if(finalEl){ finalEl.style.display = 'block'; finalEl.className = 'pf-final ' + (ok ? 'ok' : 'err'); finalEl.textContent = text }
@@ -32140,7 +32154,7 @@
                 msg:'Keine Rückmeldung vom V2-Close binnen 8 Minuten — am PC prüfen, ob die Position noch offen ist.' })
             }
           }, 8 * 60 * 1000)
-          if(typeof atToast === 'function') atToast(`📡 Remote-Close (${plan.route === 'mt5v2' ? 'Echo V2' : 'Orbit V2'}): ${plan.masterName || '—'} — Puls schließt`, 'end')
+          if(typeof atToast === 'function') atToast(`📡 Remote-Close (${wegLabel(plan)}): ${plan.masterName || '—'} — Puls schließt`, 'end')
           // Nicht awaiten: der Tick gibt _osBusy frei, _osActive hält den Riegel bis zum Ergebnis.
           v2SchliessenAmPc(plan)
             .then(res => _osErgebnis(sig.id, { ok: !!res.ok, retry_ok: !!res.retry, unklar: !!res.unklar, beendet: !!res.beendet,
@@ -32655,7 +32669,7 @@
       if(!rows.length){ box.innerHTML = '<span style="color:var(--sub)">Noch keine Schließ-Versuche.</span>'; return }
       box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Letzte Schließ-Versuche</div>' + rows.map(r => {
         const t = new Date(r.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? 'Orbit V2' : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? 'Topstep V2' : (r.route || '—')
+        const weg = r.route === 'tvplus' ? 'Orbit' : r.route === 'mt5' ? 'Echo' : r.route === 'tvv2' ? (Number(r.hedge_eur) > 0 ? 'Winning Day' : 'Orbit V2') : r.route === 'mt5v2' ? 'Echo V2' : r.route === 'tsv2' ? 'Topstep V2' : (r.route || '—')
         return `<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--line);align-items:baseline">
           <span class="mono" style="color:var(--sub);flex:0 0 92px">${t}</span>
           <span style="flex:0 0 46px">${weg}</span>
@@ -37223,7 +37237,7 @@
       }
       document.getElementById('tradeCompleteInfo').innerHTML = `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          ${sysStickerHtml(p.route)}
+          ${sysStickerHtml(planSysKey(p))}
           <span style="font-size:14px;font-weight:600;color:var(--ink)">${escapeHtml(p.masterName||'–')}</span>
         </div>
         <div style="font-size:12.5px;color:var(--sub);font-family:var(--mono)">${teile.join(' · ') || '—'}</div>
