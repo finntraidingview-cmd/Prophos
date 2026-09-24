@@ -4256,19 +4256,35 @@ def tv_panel_bereich(roh, fenster=None):
         return None
     m, sl, unter = bester
     reiter_y = (m[1][1] + m[1][3]) // 2
-    xs_l = [m[1][0], sl[1][0]] + [e[1][0] for e in unter]
-    xs_r = [m[1][2], sl[1][2]] + [e[1][2] for e in unter]
-    ys_t = [m[1][1], sl[1][1]] + [e[1][1] for e in unter]
-    ys_b = [m[1][3], sl[1][3]] + [e[1][3] for e in unter]
+    # Der Senden-Knopf ('Buy 5 MNQZ6 MARKET') gehoert zum Ticket und schliesst es nach unten ab —
+    # sonst zaehlte er selbst als 'Element darunter' und jedes angedockte Ticket hiesse Popup.
+    l0, r0 = m[1][0], sl[1][2]
+    senden = [e for e in roh or () if e[1] and TV_RX_SENDEN.search(tv_name_norm(e[0]))
+              and l0 - TV_PANEL_RAND - 40 <= (e[1][0] + e[1][2]) // 2 <= r0 + TV_PANEL_RAND + 40
+              and reiter_y < (e[1][1] + e[1][3]) // 2 <= reiter_y + 900]
+    teile = list(unter) + senden
+    xs_l = [m[1][0], sl[1][0]] + [e[1][0] for e in teile]
+    xs_r = [m[1][2], sl[1][2]] + [e[1][2] for e in teile]
+    ys_t = [m[1][1], sl[1][1]] + [e[1][1] for e in teile]
+    ys_b = [m[1][3], sl[1][3]] + [e[1][3] for e in teile]
     links, rechts = min(xs_l) - TV_PANEL_RAND, max(xs_r) + TV_PANEL_RAND
     oben, unten = min(ys_t) - 12, max(ys_b) + 12
-    modus = "angedockt" if (fenster and fenster[2] - rechts <= 80) else "Popup"
+    # angedockt vs. Popup (25.09.2026, zweite Fassung — die erste sagte 'Popup', sobald rechts neben
+    # dem Ticket noch die Watchlist-Spalte lag): ein Popup schwebt UEBER der Chart-Flaeche, also liegen
+    # unter seiner Box im selben x-Band weitere benannte Elemente (Zeitachse, Positions-Reiter, Konto-
+    # Leiste); unter einem angedockten Ticket ist nur dessen eigene Spalte. Dazu: endet die Box am
+    # rechten Fensterrand (<= 80 px), ist sie in jedem Fall angedockt.
+    darunter = sum(1 for e in roh or () if e[1] and links <= (e[1][0] + e[1][2]) // 2 <= rechts
+                   and (e[1][1] + e[1][3]) // 2 >= unten + 40)
+    rand = (fenster[2] - rechts) if fenster else None
+    modus = "angedockt" if ((rand is not None and rand <= 80) or darunter == 0) else "Popup"
     if not unter:
         modus = "Reiter ohne Felder"
     return {"links": links, "rechts": rechts, "oben": oben, "unten": unten, "reiter_y": reiter_y,
             "market": {"text": m[0], "r": tuple(m[1]), "punkt": ((m[1][0] + m[1][2]) // 2, (m[1][1] + m[1][3]) // 2)},
-            "labels": len(unter), "ohne_felder": not unter, "modus": modus,
-            "spur": f"Panel: {modus} @{links},{oben} {rechts - links}x{unten - oben} ({len(unter)} Beschriftungen)"}
+            "labels": len(unter), "ohne_felder": not unter, "modus": modus, "darunter": darunter, "rand_rechts": rand,
+            "spur": (f"Panel: {modus} @{links},{oben} {rechts - links}x{unten - oben} ({len(unter)} Beschriftungen, "
+                     f"{darunter} Elemente darunter, rechts frei {rand if rand is not None else '?'} px)")}
 
 
 def tv_im_panel(roh, bereich, muster, y_von=None, y_bis=None):
@@ -4993,6 +5009,34 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Der Klick kam nachweislich nicht raus (SendInput abgelehnt) — nichts gesendet.
         return False, f + " — NICHT gesendet."
     erg["gesendet"] = True
+
+    def _avg_fill_nachlauf(sekunden=3.0):
+        """Avg Fill Price NACH dem Beweis nachlesen (25.09.2026, erster echter Fusion-Hedge: die
+        Order war per TradingView-Meldung bewiesen, 'einstieg' blieb None, der Hedge nahm den
+        Feed-Kurs statt des Fills). Quellen: Reader (wenn an), sonst die Positions-Tabelle
+        (Spalte 'Avg Fill Price' / 'Durchschnittlicher Erfuellungspreis' ueber TV_RX_POS_EINSTIEG).
+        -> (einstieg_text|None, tv_symbol|None); nie ein Fehler, nur die Spur sagt es."""
+        root = tv_symbol_root(cmd.get("symbol"))
+        ende_ = time.time() + sekunden
+        while True:
+            try:
+                pos, an_ = _tv_positionen(timeout=1.0)
+                if pos is not None and an_:
+                    for p_ in pos:
+                        if tv_symbol_root(p_.get("symbol")) == root and tv_seite_passt(p_.get("seite"), plan["richtung"]) \
+                                and p_.get("einstieg") and tv_geld_lesen(p_.get("einstieg")) is not None:
+                            return str(p_.get("einstieg")), p_.get("symbol")
+                roh_f = _tv_uia_roh(w, typen_pos)
+                anker_ = vorher.get("anker") if isinstance(vorher, dict) else None
+                for z in tv_positions_lesen(roh_f, tv_positions_kopf(roh_f, anker_)):
+                    if tv_symbol_root(z.get("symbol")) == root and (not z.get("seite") or tv_seite_passt(z.get("seite"), plan["richtung"])) \
+                            and z.get("einstieg") and tv_geld_lesen(z.get("einstieg")) is not None:
+                        return str(z.get("einstieg")), z.get("symbol")
+            except Exception:
+                pass
+            if time.time() >= ende_:
+                return None, None
+            _warte(0.5, 0.2)
     trail.append("Senden geklickt — ab hier zaehlt nur noch der Beweis")
     ende = time.time() + 25.0
     while time.time() < ende:
@@ -5000,9 +5044,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         roh_t = _tv_uia_roh(w, typen)
         neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
         if neu_t:
-            erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=None, tv_symbol=None)
             trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
-            return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {cmd.get('symbol')} · {tpsl} "
+            einstieg_, sym_ = _avg_fill_nachlauf()
+            erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=einstieg_, tv_symbol=sym_)
+            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (3 s)'}")
+            return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {sym_ or cmd.get('symbol')}"
+                          + (f" @ {einstieg_}" if einstieg_ else "") + f" · {tpsl} "
                           f"(bewiesen: TradingView-Meldung '{neu_t[0][:60]}')")
         if not quelle:
             continue
@@ -5022,6 +5069,11 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         # Bestaetigt wird nur der ZUWACHS: mehr Kontrakte — oder (Tabelle) eine neue Zeile.
         if vorher is not None and (jetzt["menge"] - vorher["menge"] >= plan["menge"] - 1e-9 or jetzt["zeilen"] > vorher["zeilen"]):
             zuwachs = jetzt["menge"] - vorher["menge"]
+            if not treffer.get("einstieg"):
+                e_, s_ = _avg_fill_nachlauf(2.0)
+                if e_:
+                    treffer = dict(treffer, einstieg=e_, symbol=treffer.get("symbol") or s_)
+                    trail.append(f"Avg Fill nachgelesen: {e_}")
             erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
             trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "

@@ -473,7 +473,8 @@ def main():
                 ("Stop-Loss, $", (x + 10, y + 220, x + 130, y + 240), "Text"), ("Kauf 5 MNQZ6 MARKT", (x + 10, y + 320, x + 380, y + 360), "Button")]
     fenster = (0, 0, 1920, 1080)
     ang = order_bot.tv_panel_bereich(_roh_ticket(1500, 250), fenster)
-    pop = order_bot.tv_panel_bereich(_roh_ticket(1000, 300) + [("Markt", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
+    pop = order_bot.tv_panel_bereich(_roh_ticket(1000, 300) + [("Markt", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text"),
+                                                              ("Positions", (1050, 950, 1120, 970), "TabItem"), ("Account Balance", (1200, 990, 1320, 1008), "Text")], fenster)
     ohne = order_bot.tv_panel_bereich([("Market", (600, 270, 660, 296), "Text"), ("Stop Limit", (700, 270, 790, 296), "Text")], fenster)
     def _findet(ber, x):
         u = order_bot.tv_im_panel(_roh_ticket(x, ber["reiter_y"] - 12), ber, order_bot.TV_RX_UNITS, y_von=ber["reiter_y"])
@@ -484,8 +485,12 @@ def main():
         ang and not ang["ohne_felder"] and ang["modus"] == "angedockt" and ang["labels"] == 3
         and ang["links"] <= 1510 and ang["rechts"] >= 1830 and ang["reiter_y"] == 262 and _findet(ang, 1500)
         and ang["spur"].startswith("Panel: angedockt @"))
-    chk("ORDER-BOT: Order-Panel als Popup mittig gefunden, 'Markt'-Text anderswo gewinnt nicht (modus Popup)",
-        pop and not pop["ohne_felder"] and pop["modus"] == "Popup" and pop["labels"] == 3
+    dock2 = order_bot.tv_panel_bereich(_roh_ticket(900, 300) + [("Watchlist", (1450, 120, 1550, 140), "Text"), ("NQ1!", (1450, 200, 1500, 220), "DataItem")], fenster)
+    chk("ORDER-BOT: angedockt mit Watchlist rechts daneben bleibt 'angedockt' (nichts unter der Box)",
+        dock2 and dock2["modus"] == "angedockt" and dock2["darunter"] == 0 and dock2["rand_rechts"] > 80
+        and "0 Elemente darunter" in dock2["spur"])
+    chk("ORDER-BOT: Order-Panel als Popup mittig gefunden, 'Markt'-Text anderswo gewinnt nicht (modus Popup, Elemente darunter)",
+        pop and not pop["ohne_felder"] and pop["modus"] == "Popup" and pop["labels"] == 3 and pop["darunter"] == 2
         and pop["links"] <= 1010 and pop["rechts"] >= 1330 and pop["reiter_y"] == 312 and pop["market"]["punkt"][0] == 1045
         and _findet(pop, 1000) and "Popup @" in pop["spur"])
     chk("ORDER-BOT: Reiter-Zeile ohne Beschriftungen darunter → ohne_felder (kein Blindklick), keine Reiter → None",
@@ -915,7 +920,7 @@ def main():
            ("Buy 1 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
     _ber = order_bot.tv_panel_bereich(_OP)
     chk("TV-ORDER: Panel-Anker aus der Reiter-Zeile; ohne 'Stop Limit' auf derselben Zeile kein Panel",
-        _ber is not None and _ber["links"] == 1295 and _ber["rechts"] == 1647 and _ber["market"]["punkt"] == (1360, 425)   # links seit 25.09.2026 inkl. 'Stop loss, $' (1325 − 30)
+        _ber is not None and _ber["links"] == 1295 and _ber["rechts"] == 1648 and _ber["market"]["punkt"] == (1360, 425)   # seit 25.09.2026: links inkl. 'Stop loss, $' (1325 − 30), rechts inkl. Senden-Knopf (1618 + 30)
         and order_bot.tv_panel_bereich([x for x in _OP if x[0] != "Stop Limit"]) is None
         and order_bot.tv_panel_bereich([("Market", (1337, 415, 1383, 435), "Text"), ("Stop Limit", (1550, 700, 1617, 720), "Text")]) is None)
     chk("TV-ORDER: Seite nur IM Panel und nur ueber der Reiter-Zeile — nie die Schnell-Knoepfe im Chart, innerstes Element",
