@@ -28414,7 +28414,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.459'
+  const OS_TAB_BUILD = '2026-09-22.460'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32382,7 +32382,9 @@
         // die MT5-Engine umleiten, wenn beide Accounts doppelt verlinkt sind.
         const _curPlan = tradePlans.find(x => String(x.id) === String(_editingPlanId))
         if(!_curPlan || _curPlan.status === 'planned'){
-          updateRow.route = (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup'
+          // routeIstV2 dazu (24.09.2026 abends, Finn: Topstep V2 zeigte im Abschluss noch den Slave): die Whitelist
+          // mappte tsv2 auf 'dup' — der Plan war in der DB ein Duplikum-Plan.
+          updateRow.route = (routeIstV2(_tpRoute) || routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup'
           if(v2){
             Object.assign(updateRow, v2Extra)
             const _alt = _curPlan && _curPlan.startUm ? new Date(_curPlan.startUm).toISOString() : null
@@ -32400,7 +32402,7 @@
         // bewusst weg, damit Edits laufender Pläne die Engine nicht umziehen —
         // beim Neuanlegen ist das Mitschreiben genau richtig). 'dup' explizit,
         // nie null: null = Alt-Plan = Auto-Erkennung darf raten.
-        const insertRow = { ...planToRow(planObj), route: (routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup', ...v2Extra }
+        const insertRow = { ...planToRow(planObj), route: (routeIstV2(_tpRoute) || routeIstEcho(_tpRoute) || routeIstOrbit(_tpRoute)) ? _tpRoute : 'dup', ...v2Extra }   // tsv2 mitschreiben (24.09.2026 abends)
         const { data, error } = await supabase
           .from('trade_plans').insert(insertRow).select('*').single()
         if(error) throw error
