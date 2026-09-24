@@ -19253,6 +19253,11 @@
     return !(mk && mp && mk !== mp)
   }
   window._hedgeKontraktPasst = hedgeKontraktPasst
+  // Echtes Alter eines mkl.kursJe-Eintrags JETZT (25.09.2026, Befund Live-Daten zu .585): alter_ms gilt nur zum Erfassungszeitpunkt
+  // (mklKursAus, Realtime/Poll) — kommt kein Event mehr, bliebe ein alter Kurs sonst für den Wächter ewig „frisch". erfasst_ms seit .585.
+  // Ohne erfasst_ms (Eintrag vor .585) gilt der Kurs als NICHT frisch (Koordination 25.09.2026).
+  const hedgeKursAlterJetzt = k => (k && k.erfasst_ms > 0) ? (Number(k.alter_ms) || 0) + Math.max(0, Date.now() - k.erfasst_ms) : Infinity
+  window._hedgeKursAlterJetzt = hedgeKursAlterJetzt
   // Basis NQ − MNQ aus gleichzeitigen Reader-Kursen (Punkt 5): Proben der letzten 5 min, verlässlich ab 10 Proben
   const _hedgeBasis = []   // { t, d = NQ − MNQ }
   function hedgeBasisProbe(){
@@ -19263,7 +19268,7 @@
       if(st && st.kurse && Date.now() - (epLokal.ab || 0) <= 5000 && ok(st.kurse.NQ) && ok(st.kurse.MNQ)){
         nq = Number(st.kurse.NQ.preis) || Number(st.kurse.NQ.lp); mnq = Number(st.kurse.MNQ.preis) || Number(st.kurse.MNQ.lp)
       } else if(typeof mkl !== 'undefined' && mkl.kursJe){
-        const a = mkl.kursJe.NQ, b = mkl.kursJe.MNQ, gut = k => k && k.alter_ms <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))
+        const a = mkl.kursJe.NQ, b = mkl.kursJe.MNQ, gut = k => k && hedgeKursAlterJetzt(k) <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))
         if(gut(a) && gut(b) && a.pc === b.pc){ nq = a.preis; mnq = b.preis }
       }
       if(nq > 0 && mnq > 0 && Math.abs(nq - mnq) < 30) _hedgeBasis.push({ t: Date.now(), d: nq - mnq })
@@ -19283,7 +19288,7 @@
       const q = st && st.kurse && st.kurse[ww]
       if(q && Date.now() - (epLokal.ab || 0) <= 30000 && !q.stale && !/^delayed/.test(String(q.modus || ''))){ const pr = Number(q.preis) || Number(q.lp); if(pr > 0) return pr }
       const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null
-      if(k && k.alter_ms <= 30000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return k.preis
+      if(k && hedgeKursAlterJetzt(k) <= 30000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return k.preis
     }catch(_){}
     return null
   }
@@ -19355,7 +19360,7 @@
         const pr = q && !q.stale && !/^delayed/.test(String(q.modus || '')) ? (Number(q.preis) || Number(q.lp) || 0) : 0   // delayed_* = 10 min alt
         if(pr > 0) return { preis: pr, wurzel: ww, quelle: 'reader' }
       } }catch(_){} return null }
-    const cloudRt = ww => { try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null; if(k && k.alter_ms <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return { preis: k.preis, wurzel: ww, quelle: 'realtime' } }catch(_){} return null }
+    const cloudRt = ww => { try{ const k = (typeof mkl !== 'undefined' && mkl.kursJe) ? mkl.kursJe[ww] : null; if(k && hedgeKursAlterJetzt(k) <= 5000 && k.preis > 0 && !/^delayed/.test(String(k.modus || ''))) return { preis: k.preis, wurzel: ww, quelle: 'realtime' } }catch(_){} return null }
     let kq = lokal(w) || lokal(andere) || cloudRt(w) || cloudRt(andere)
     if(!kq){ try{ const k = await hedgeKursLesen(); if(k && k.alter_ms <= 5000 && k.preis > 0) kq = { preis: k.preis, wurzel: k.wurzel, quelle: 'cloud' } }catch(_){} }
     return kq   // null = kein Beweis → nichts tun
@@ -30491,7 +30496,7 @@
     const ticks = Math.round(puffer / HEDGE_TICK)
     let dir = null; try{ dir = (_tpDir === 'buy' || _tpDir === 'sell') ? _tpDir : null }catch(_){}
     let kurs = null
-    try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je[(typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'] || je.NQ || je.MNQ; if(k && k.alter_ms <= 60000 && k.preis > 0) kurs = k.preis }catch(_){}
+    try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je[(typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ'] || je.NQ || je.MNQ; if(k && hedgeKursAlterJetzt(k) <= 60000 && k.preis > 0) kurs = k.preis }catch(_){}   // echtes Alter (25.09.2026)
     const fmt = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const level = (kurs && dir) ? (dir === 'sell' ? kurs - r.tpPkt - puffer : kurs + r.tpPkt + puffer) : null
     return `Fusion schließt bei <b>Master-TP ${dir === 'sell' ? '−' : '+'} ${ticks} Ticks</b>${level ? ` ≈ <b class="mono">NQ ${fmt(level)}</b> (Kurs jetzt ${fmt(kurs)})` : ' — Level in NQ, sobald Richtung und Kurs-Feed da sind'}`
@@ -30533,7 +30538,7 @@
       : `${n(r.risk, 0)} $ ÷ (${n(r.masterPpl, r.masterPpl % 1 ? 2 : 0)} $/Pkt × ${n(r.kt, 0)} Kt) = ${n(r.slPkt, 1)} Pkt<br>${n(r.slaveRisk, 0)} € ÷ (${n(r.slavePpl, 2)} €/Pkt × ${n(r.slPkt, 1)} Pkt) = ${n(r.lots, 2)} Lot → ×${n(r.mult, 3)}`
     // Margen-Hinweis (nur Anzeige): Lots × Kurs × €/Pkt ÷ Hebel — NAS100 ≈ NQ-Kurs aus dem Reader-Feed, Hebel 1:100 als Annahme
     { const mg = document.getElementById('tp-wd-marge'); if(mg){ let kurs = null
-        try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && k.alter_ms <= 600000 && k.preis > 0) kurs = k.preis }catch(_){}
+        try{ const je = (typeof mkl !== 'undefined' && mkl.kursJe) || {}; const k = je.NQ || je.MNQ; if(k && hedgeKursAlterJetzt(k) <= 600000 && k.preis > 0) kurs = k.preis }catch(_){}   // echtes Alter (25.09.2026)
         mg.textContent = kurs ? `braucht ca. ${n(r.lots * kurs * r.slavePpl / 100, 0)} € Marge (1:100)` : '' } }
     const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
     const kachel = (titel, master, fusion, sub) => { const netto = master * fx + fusion; const bg = netto >= 0 ? 'rgba(18,183,106,.06)' : 'rgba(240,68,56,.06)'
@@ -31498,7 +31503,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.585'
+  const OS_TAB_BUILD = '2026-09-22.586'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
