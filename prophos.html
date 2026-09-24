@@ -4530,8 +4530,8 @@
     <div class="sb-section">Trading</div>
     <nav class="sb-nav">
       <!-- Reihenfolge seit Kapitel „Ohne Hedge" (24.09.2026, Finn: „riesen Umstieg — geh alles durch,
-           jedes Einzelne"): zuerst, was im V2-Alltag zählt (Trades, Accounts, Finanzen, Echo, Orbit,
-           Markt, News), die Hedge-Werkzeuge stehen unten als eigene Gruppe. Nur Markup umsortiert,
+           jedes Einzelne"): zuerst, was im V2-Alltag zählt (Trades, Accounts, Winning Days, Finanzen, Echo, Orbit,
+           News), die Hedge-Werkzeuge stehen unten als eigene Gruppe. Nur Markup umsortiert,
            IDs/Badges/Views unverändert. -->
       <button class="sb-link" data-view="trades">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg>
@@ -4540,6 +4540,12 @@
       <button class="sb-link active" data-view="accounts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
         Accounts <span class="sb-badge" id="sb-badge-accounts" hidden>0</span>
+      </button>
+      <!-- „Winning Days" (25.09.2026, Finn): vorher „Markt" — Live-Chart NQ/MNQ + Winning Days des Handelstags. Position direkt
+           nach Accounts; data-view="markt" und #markt bleiben intern (Links, Stubs, gespeicherte Ansicht). -->
+      <button class="sb-link" data-view="markt">
+        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-7 4 5"/><path d="M3 21h18"/></svg>
+        Winning Days
       </button>
       <button class="sb-link" data-view="payouts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -4563,10 +4569,6 @@
       <button class="sb-link" data-view="echoplus">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>
         Orbit <span class="sb-badge" id="sb-badge-echoplus" hidden>0</span>
-      </button>
-      <button class="sb-link" data-view="markt">
-        <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 5-7 4 5"/><path d="M3 21h18"/></svg>
-        Markt
       </button>
       <button class="sb-link" data-view="news">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 4H6a2 2 0 0 0-2 2v14l3-2 3 2 3-2 3 2 3-2V6a2 2 0 0 0-2-2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
@@ -7528,7 +7530,7 @@
     <section class="view" data-view="markt">
       <div class="view-head">
         <div>
-          <h1 class="view-title">Markt</h1>
+          <h1 class="view-title">Winning Days</h1>
           <p class="view-sub">NQ &amp; MNQ live aus dem TradingView-Reader · Winning Days des Handelstags mit ihren TP-Leveln im Chart.</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
@@ -10224,7 +10226,7 @@
     journal:   ['Journal',   'Trades reflektieren'],
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
-    markt:     ['Markt', 'NQ & MNQ live · Winning Days'],
+    markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
@@ -10867,7 +10869,9 @@
           kpi('Netto', leer ? '—' : sign(netto), 'Payouts − Kauf − Hedge', leer ? '' : `color:${col(netto)}`) +
           kpi('Payouts', leer ? '—' : eur(k.payouts), leer ? '—' : `${payoutN} Buchung${payoutN === 1 ? '' : 'en'}`) +
           kpi('Kauf', leer ? '—' : eur(k.kauf), leer ? '—' : (k.erster_tag ? `${admVlDatum(k.erster_tag)} – ${admVlDatum(k.letzter_tag)}` : 'Kaufpreise der Konten')) +
-          kpi('Hedge-Kosten', hVal, hSub, hStyle) +
+          // WD-Hedge laut Finanzen (25.09.2026, Backend .541: wd_hedge = Summe €, negativ = Kosten; wd_hedge_n) — eigene Zeile,
+          // bewusst NICHT in die Hedge-Summe addiert (wäre doppelt mit slave_pl der Farm-Pläne)
+          kpi('Hedge-Kosten', hVal, hSub + (admKapNum(k.wd_hedge_n) ? `<div style="margin-top:3px">WD-Hedge laut Finanzen: <b style="color:${col(k.wd_hedge)}">${sign(k.wd_hedge)}</b> (${admKapNum(k.wd_hedge_n)} Buchung${admKapNum(k.wd_hedge_n) === 1 ? '' : 'en'})</div>` : ''), hStyle) +
           kpi('Konten', leer ? '—' : `${admKapNum(k.konten_aktiv)} / ${admKapNum(k.konten)}`, leer ? '—' : 'aktiv / gesamt') +
           // „n ohne Hedge" nur, wenn es in einem Hedge-Kapitel überhaupt V2-Trades gibt (seit der Trigger-Regel normal 0)
           kpi('Trades', leer ? '—' : String(trades), leer ? '—' : `${k.hedge_aktiv && ohne ? `${ohne} ohne Hedge · ` : ''}Blow-Quote ${blowQ}${sym ? ` · ${sym.nq} NQ · ${sym.mnq} MNQ` : ''}`) +
@@ -30400,7 +30404,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.543'
+  const OS_TAB_BUILD = '2026-09-22.544'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38012,7 +38016,8 @@
           amount: sPl,
           currency: 'EUR',
           occurred_at: new Date().toISOString().slice(0,10),
-          notes: `${planRef} WD-Hedge`,
+          // dieselbe Form wie das Backend (Koordination 25.09.2026) — sonst flattern die notes je nachdem, wer zuletzt schrieb
+          notes: `${planRef} WD-Hedge · ${(document.getElementById('userName')?.textContent || '').trim() || '?'} · ${p.masterName || (masterAcc && masterAcc.name) || '?'}`,
           auto_generated: true
         }, `${planRef} WD-Hedge`)
       }
