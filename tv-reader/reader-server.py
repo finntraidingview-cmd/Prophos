@@ -84,6 +84,60 @@ _kurs_s = 0.0
 # (kurs_1m), die Bruecke im Prophos-Tab upsertet sie idempotent.
 _k1m = None
 _k1m_vor = None
+# 0.7.0 (24.09.2026): BEIDE Symbole — je Wurzel ('NQ'/'MNQ') der letzte Kurs + Empfangszeit
+# und die Minutenkerzen (laufend/abgeschlossen). _kurs/_k1m oben bleiben fuer alte
+# Userscripts (0.6.0, nur Tab-Titel) und alte Bruecken (Feld 'kurs') bestehen.
+_kurse = {}        # wurzel -> {bid, ask, text, preis, ts, quelle, stale, sichtbar, symbol_text, empf_s}
+_k1m_je = {}       # wurzel -> laufende Kerze
+_k1m_vor_je = {}   # wurzel -> letzte abgeschlossene Kerze
+_reload_grund = None
+_reload_s = 0.0
+STALE_S = 45.0     # kein neuer Kurs > 45 s → stale (Userscript sagt es, der Server prueft es zusaetzlich am Alter)
+
+
+def _kurse_uebernehmen(kurse, sichtbar, jetzt_s, alt, k1m_je, k1m_vor_je):
+    """REIN RECHNEND (testbar): Payload-Feld 'kurse' {wurzel: {bid, ask, text, ts, quelle,
+    stale?}} in den Server-Stand uebernehmen. preis = Mitte aus bid/ask (sonst text);
+    Kerzen je Wurzel aus dem preis, nur aus SICHTBAREM Tab. Unlesbares bleibt stehen.
+    -> (kurse_neu, k1m_je, k1m_vor_je)"""
+    neu = dict(alt or {})
+    if not isinstance(kurse, dict):
+        return neu, k1m_je, k1m_vor_je
+    for w, k in kurse.items():
+        if not isinstance(k, dict):
+            continue
+        wurzel = _kurs_wurzel(w) or str(w).upper()[:8]
+        bid = _kurs_zahl(k.get("bid")) if k.get("bid") else None
+        ask = _kurs_zahl(k.get("ask")) if k.get("ask") else None
+        txt = _kurs_zahl(k.get("text")) if k.get("text") else None
+        if bid and ask:
+            preis = round((bid + ask) / 2.0, 2)
+        else:
+            preis = bid or ask or txt
+        if not preis or preis <= 0:
+            continue
+        neu[wurzel] = {"bid": bid, "ask": ask, "text": str(k.get("text") or "")[:32], "preis": preis,
+                       "ts": k.get("ts"), "quelle": str(k.get("quelle") or "")[:12],
+                       "stale": bool(k.get("stale")), "unveraendert_s": k.get("unveraendert_s"),
+                       "sichtbar": bool(sichtbar), "symbol_text": str(k.get("symbol_text") or "")[:60],
+                       "empf_s": jetzt_s}
+        if sichtbar:
+            k1m_je[wurzel], k1m_vor_je[wurzel] = _kerze_fortschreiben(
+                k1m_je.get(wurzel), k1m_vor_je.get(wurzel), wurzel, str(k.get("symbol_text") or wurzel)[:32], preis, jetzt_s)
+    return neu, k1m_je, k1m_vor_je
+
+
+def _kurse_ausgabe(kurse, jetzt_s):
+    """REIN RECHNEND (testbar): Ausgabeform je Wurzel mit alter_s (Server-Sekunden seit Empfang)
+    und stale (Userscript-Urteil ODER Empfang aelter als STALE_S)."""
+    out = {}
+    for w, k in (kurse or {}).items():
+        alter = round(jetzt_s - float(k.get("empf_s") or 0), 3) if k.get("empf_s") else None
+        o = {kk: vv for kk, vv in k.items() if kk != "empf_s"}
+        o["alter_s"] = alter
+        o["stale"] = bool(k.get("stale")) or alter is None or alter > STALE_S
+        out[w] = o
+    return out
 
 
 def _kurs_zahl(text):
@@ -197,7 +251,18 @@ def _mit_an(stand):
     # Prophos-Tab schreibt ihn nach tv_kurse (Cloud), der Hedge-Waechter liest dort.
     out["kurs"] = _kurs
     out["kurs_alter_s"] = round(time.time() - _kurs_s, 3) if _kurs_s else None
-    out["kurs_1m"] = [k for k in (_k1m_vor, _k1m) if k]   # letzte abgeschlossene + laufende Minute
+    # 0.7.0: beide Wurzeln — kurse.NQ / kurse.MNQ mit alter_s + stale, Kerzen aller Wurzeln in EINER Liste
+    # (Form wie bisher, wurzel unterscheidet; alte Bruecken lesen weiter kurs_1m). Ohne 0.7.0-Userscript
+    # fallen die Titel-Kerzen (_k1m) hinein, damit nichts verloren geht.
+    out["kurse"] = _kurse_ausgabe(_kurse, time.time())
+    kerzen = []
+    for w in sorted(_k1m_je.keys()):
+        kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k]
+    if not kerzen:
+        kerzen = [k for k in (_k1m_vor, _k1m) if k]
+    out["kurs_1m"] = kerzen
+    out["reload_grund"] = _reload_grund
+    out["reload_alter_s"] = round(time.time() - _reload_s, 3) if _reload_s else None
     return out
 
 
@@ -244,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
-        global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor
+        global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor, _kurse, _k1m_je, _k1m_vor_je, _reload_grund, _reload_s
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -340,6 +405,18 @@ class Handler(BaseHTTPRequestHandler):
                                                           _kurs["symbol"], pz, time.time())
             except Exception:
                 pass
+
+        # 0.7.0: beide Symbole aus den Legenden (kurse) + Selbstheilungs-Grund — ebenfalls VOR dem Pause-Gate
+        try:
+            if isinstance(daten.get("kurse"), dict):
+                _kurse, _k1m_je, _k1m_vor_je = _kurse_uebernehmen(daten.get("kurse"), daten.get("sichtbar") is not False,
+                                                                  time.time(), _kurse, _k1m_je, _k1m_vor_je)
+            if daten.get("reload_grund"):
+                _reload_grund = str(daten.get("reload_grund"))[:120]
+                _reload_s = time.time()
+                print(f"\n[{time.strftime('%H:%M:%S')}] Userscript hat sich selbst neu geladen: {_reload_grund}", flush=True)
+        except Exception:
+            pass
 
         # Positionsdaten vom Userscript. Pausiert: Antwort traegt an=false
         # (Badge zeigt es), der Stand friert ein — stale != flat.

@@ -166,3 +166,55 @@ Sicherheits-Doktrin des Verbinders (stale ≠ flat):
   liefert Futures-Preise, der Fusion-CFD hat eine andere Preisskala — Level
   1:1 übernommen wären falsche Notfall-Level. Leer statt falsch, bis die
   Umrechnung gebaut ist.
+
+## 24/7-Kurs-Feed NQ + MNQ (0.7.0, 24.09.2026) — Betriebs-Checkliste
+
+Finn: „Ich muss das zu 100 % sicher haben: die MNQ- und NQ-Live-Daten in Prophos, mit einem
+Script, das die ganze Zeit liest, auf einem PC, der 24/7 an ist — genau von dem NQ und MNQ, wo
+auch die Order platziert ist." Der Feed speist den Markt-Chart, die Demo-Orders und die
+Anzeige der Gegenhedge-Level (die Schließ-Level selbst liegen im Fusion-Terminal).
+
+**Woher der Kurs kommt.** Je Chart-Pane liest das Userscript die Sell/Buy-Knöpfe in der
+Legende (`data-name="sell-order-button"` / `"buy-order-button"`) — sie tragen Bid und Ask.
+Der Kurs im Payload ist die Mitte. Welches Symbol das Pane zeigt, steht in der Legende
+daneben (Symbol oder Beschreibung, beides wird erkannt). Rückfall ist der Tab-Titel (nur
+das aktive Chart). Zwei Panes = beide Symbole gleichzeitig.
+
+**Einmal einrichten (am 24/7-PC, eingeloggtes TradingView mit Tradovate verbunden):**
+1. Layout „Prophos-Feed": Chart-Layout mit **zwei Panes** (Layout-Knopf oben rechts → 2 Charts
+   übereinander), oben **NQ1!**, unten **MNQ1!**, Layout speichern. In den Legenden müssen
+   die Sell/Buy-Knöpfe stehen (Chart-Einstellungen → Trading → „Kaufen/Verkaufen-Buttons").
+   Legende darf Symbol ODER Beschreibung zeigen.
+2. Tampermonkey-Script auf **0.7.0** (Dashboard → Updates suchen, oder von `@updateURL`),
+   danach TradingView **F5**. Badge muss grün sein.
+3. `start-reader.bat` läuft (Reader-Empfänger, Port 8790) — als Autostart eintragen
+   (Verknüpfung in `shell:startup`).
+4. Prophos-PC-Tab (`localhost:5000`) offen lassen — er ist die Brücke: `tv_kurse` (je Symbol
+   eine Zeile `<pc>:NQ` / `<pc>:MNQ`) und `tv_kurs_1m` (Minutenkerzen) alle 5 s.
+5. Browser-Autostart mit der Layout-URL (Chrome-Verknüpfung mit der URL des gespeicherten
+   Layouts in `shell:startup`), TradingView-Fenster **sichtbar** lassen (nicht minimiert —
+   ein verdecktes Fenster tickt gedrosselt, das Script meldet dann `sichtbar:false` und
+   schreibt keine Kerzen).
+6. PC nie schlafen lassen: `powercfg /change standby-timeout-ac 0` und
+   `powercfg /change monitor-timeout-ac 0` (Admin-Eingabeaufforderung); Windows-Update auf
+   Nutzungszeit stellen.
+
+**Woran man sieht, dass der Feed steht:**
+- Prophos → Markt: Kopfzeile zeigt „live · vor x s · pc-…" — steht dort „kein Live-Kurs" oder
+  ein Alter über 30 s, liefert der PC nicht.
+- SQL: `select id, symbol, preis, reader_ts, updated_at from tv_kurse` — `reader_ts` darf
+  nicht älter als ~10 s sein.
+- Badge im TradingView-Tab: grün „Reader · … · Copier ok"; grau = pausiert, orange = blind/offline.
+
+**Selbstheilung:** kein neuer Kurs > 45 s → `stale:true` je Symbol im Payload (Prophos zeigt
+den Kurs gedämpft). > 90 s ohne jeden Tick → das Script lädt die Seite einmal neu (höchstens
+alle 10 Minuten), der Grund steht danach im Payload (`reload_grund`) und im Reader-Fenster.
+Am Wochenende (Markt zu) ist stale normal — der Reload greift dann alle 10 Minuten; wer das
+nicht will, lässt den Tab am Wochenende zu.
+
+**Was Finn am PC einmal prüfen muss (vom Mac nicht beweisbar):** (1) tickt die Legende auch,
+wenn das TradingView-Fenster hinter Prophos liegt (Kopfzeile in Markt beobachten, während
+Prophos vorn ist) — wenn nein: TradingView in ein eigenes, nebeneinander liegendes Fenster;
+(2) erkennt das Script beide Panes (Markt-Kopf zeigt NQ und MNQ; SQL: zwei `tv_kurse`-Zeilen
+für den PC); (3) Reload-Selbstheilung: Chart einfrieren lassen (Netz kurz trennen) → nach
+90 s lädt die Seite neu, `reload_grund` steht im Reader-Fenster.

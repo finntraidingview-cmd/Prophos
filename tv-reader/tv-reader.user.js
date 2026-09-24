@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.6.0
+// @version      0.7.0
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -24,6 +24,8 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.7.0  24.09.2026  BEIDE Kurse NQ + MNQ aus den Legenden-Knöpfen (Sell/Buy = Bid/Ask) je Chart-Pane,
+//                      Tab-Titel nur Rückfall; Stale-Wächter + Selbstheilung per Reload (kurse, stale, reload_grund)
 //   0.6.0  24.09.2026  Live-Kurs aus dem Tab-Titel (kurs) im Positions-Strom — Winning-Day-Gegenhedge auf Fusion
 //   0.5.2  24.09.2026  Sprache egal: Englisch wird gelesen statt gewarnt (Verbinder parst beide Zahlformate)
 //   0.5.1  24.09.2026  Zusammenfassung robuster: Label/Wert in getrennten Divs
@@ -49,7 +51,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.6.0';
+  const VERSION    = '0.7.0';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const INTERVALMS = 250;    // wie oft gelesen + gesendet wird (0,25 s — niedrige Hedge-Latenz)
@@ -819,6 +821,107 @@
     return { symbol: m[1], text: m[2], ts: Date.now() };
   }
 
+  /* 0.7.0 (24.09.2026, Finn: „ich muss das zu 100 % sicher haben: die MNQ- und NQ-Live-Daten
+   * in Prophos, mit einem Script, das die ganze Zeit liest, auf einem PC, der 24/7 an ist —
+   * genau von dem NQ und MNQ, wo auch die Order platziert ist"):
+   * BEIDE Symbole gleichzeitig, aus einem TradingView-Layout mit zwei Chart-Panes (NQ1! oben,
+   * MNQ1! unten). Quelle je Pane: die Sell/Buy-Knoepfe in der Chart-Legende
+   * ([data-name="sell-order-button"] / [data-name="buy-order-button"]) — sie tragen Bid und
+   * Ask als Text ('30,738.50Sell' / '30,739.00Buy', deutsch 'Verkaufen'/'Kaufen') und haengen
+   * an data-name-Ankern, nicht an gehashten Klassen. Welches Symbol das Pane zeigt, steht in
+   * der Legende daneben: entweder als Symbol ('CME_MINI:NQ1!') oder als Beschreibung
+   * ('NASDAQ 100 E-mini Futures' / 'Micro E-mini Nasdaq-100') — beides wird erkannt.
+   * Rueckfall: der Tab-Titel (nur das aktive Chart-Symbol) wie in 0.6.0.
+   * Am Mac ohne Login geprueft (24.09.2026): Knoepfe + Legende so vorhanden; das 2-Pane-Layout
+   * und das Ticken im VERDECKTEN Tab kann nur der PC beweisen — deshalb meldet der Payload
+   * ehrlich sichtbar/stale je Symbol. */
+  // Kein \b am Ende: nach '1!' gibt es keine Wortgrenze (Browser-Test 24.09.2026: 'NQ1!' fiel durch) — stattdessen
+  // „danach kein Buchstabe/keine Ziffer", damit 'NQZ2026' nicht als 'NQ' + Rest gelesen wird.
+  const RX_KURS_SYMBOL = /\b(M?NQ)(?:\d*!|[FGHJKMNQUVXZ]\d{1,4})?(?![A-Z0-9])/;
+  // \d+ zuerst (Browser-Test: '30739Buy' wurde als '307' gelesen, weil die Dreiergruppen-Form zuerst griff)
+  const RX_KURS_ZAHL = /\d+(?:[.,]\d{3})*(?:[.,]\d+)?/;
+  function kursWurzelAusText(t) {
+    const s = String(t || '');
+    const m = RX_KURS_SYMBOL.exec(s.toUpperCase());
+    if (m) return m[1];
+    if (/micro/i.test(s) && /nasdaq|nq/i.test(s)) return 'MNQ';
+    if (/nasdaq\s*-?\s*100|e-mini nasdaq/i.test(s)) return 'NQ';
+    return '';
+  }
+  function kursZahlText(t) {
+    const m = RX_KURS_ZAHL.exec(String(t || '').replace(/\u2212/g, '-'));
+    return m ? m[0] : '';
+  }
+  // Legenden-Knoepfe je Pane lesen → { NQ: {bid, ask, text, symbol_text, quelle}, MNQ: {...} }
+  function liesKurseAusLegenden() {
+    const out = {};
+    let knoepfe;
+    try { knoepfe = document.querySelectorAll('[data-name="buy-sell-buttons"]'); } catch (_) { return out; }
+    for (const k of knoepfe) {
+      let leg = k.parentElement;
+      while (leg && !/legend/i.test(String(leg.className))) leg = leg.parentElement;
+      const legText = leg ? (leg.textContent || '').replace(/\s+/g, ' ') : '';
+      const wurzel = kursWurzelAusText(legText);
+      if (!wurzel || out[wurzel]) continue;               // unbekanntes Pane oder Doppel (erstes gewinnt)
+      const sell = k.querySelector('[data-name="sell-order-button"]');
+      const buy = k.querySelector('[data-name="buy-order-button"]');
+      const bid = kursZahlText(sell && sell.textContent), ask = kursZahlText(buy && buy.textContent);
+      if (!bid && !ask) continue;
+      out[wurzel] = { bid: bid || null, ask: ask || null, text: bid || ask, symbol_text: legText.slice(0, 60), quelle: 'legende' };
+    }
+    return out;
+  }
+  // Stale-Waechter (0.7.0): je Wurzel den letzten Text und wann er sich ZULETZT geaendert hat.
+  // Kein neuer Wert > 45 s → stale:true im Payload (der Chart ist eingefroren oder der Markt
+  // steht — beides darf nie als „live" durchgehen). > 90 s ohne jeden Tick → einmal
+  // location.reload() (hoechstens 1x je 10 min, Grund landet nach dem Reload im Payload),
+  // damit ein eingefrorener Chart sich selbst heilt. Der Reload-Stempel liegt in
+  // localStorage (ueberlebt den Reload), der Grund in sessionStorage (nur dieser Tab).
+  const STALE_S = 45, RELOAD_S = 90, RELOAD_SPERRE_MS = 10 * 60 * 1000;
+  const kursMerk = {};   // wurzel -> { text, geaendert_ms }
+  let reloadGrund = null;
+  try { reloadGrund = sessionStorage.getItem('prophos_reader_reload_grund') || null; sessionStorage.removeItem('prophos_reader_reload_grund'); } catch (_) {}
+  function staleUndReload(kurse) {
+    const jetzt = Date.now();
+    let juengste = 0;
+    for (const w of Object.keys(kurse)) {
+      const m = kursMerk[w] || (kursMerk[w] = { text: null, geaendert_ms: jetzt });
+      if (kurse[w].text !== m.text) { m.text = kurse[w].text; m.geaendert_ms = jetzt; }
+      const alter = (jetzt - m.geaendert_ms) / 1000;
+      kurse[w].stale = alter > STALE_S;
+      kurse[w].unveraendert_s = Math.round(alter);
+      if (m.geaendert_ms > juengste) juengste = m.geaendert_ms;
+    }
+    // Reload nur, wenn es UEBERHAUPT einen Kurs gab (sonst ist es kein Chart-Tab) und alle
+    // Wurzeln > RELOAD_S unveraendert sind — und nicht oefter als alle 10 min.
+    if (juengste && (jetzt - juengste) / 1000 > RELOAD_S) {
+      let letzter = 0;
+      try { letzter = Number(localStorage.getItem('prophos_reader_reload_ms')) || 0; } catch (_) {}
+      if (jetzt - letzter > RELOAD_SPERRE_MS) {
+        try {
+          localStorage.setItem('prophos_reader_reload_ms', String(jetzt));
+          sessionStorage.setItem('prophos_reader_reload_grund', 'kein neuer Kurs seit ' + Math.round((jetzt - juengste) / 1000) + ' s');
+        } catch (_) {}
+        setTimeout(() => location.reload(), 500);
+        return true;
+      }
+    }
+    return false;
+  }
+  // Gesamtbild fuer den Payload: Legenden zuerst, Tab-Titel als Rueckfall fuer die Wurzel des aktiven Charts
+  function liesKurse() {
+    const kurse = liesKurseAusLegenden();
+    const t = liesKursAusTitel();
+    if (t) {
+      const w = kursWurzelAusText(t.symbol);
+      if (w && !kurse[w]) kurse[w] = { bid: null, ask: null, text: t.text, symbol_text: t.symbol, quelle: 'titel' };
+    }
+    const ts = Date.now();
+    for (const w of Object.keys(kurse)) kurse[w].ts = ts;
+    staleUndReload(kurse);
+    return kurse;
+  }
+
   function tick() {
     const positionen = lesePositionen();
     const blind = blindGrund(positionen);
@@ -843,7 +946,12 @@
       // deutsch/englisch, gleiche Regel wie tv_snapshot.parse_de_zahl). null =
       // Titel nicht lesbar (kein Chart-Tab) — nie ein stilles 0.
       kurs: liesKursAusTitel(),
+      // 0.7.0: beide Symbole aus den Legenden (kurse.NQ / kurse.MNQ mit bid/ask/text/ts/quelle/stale),
+      // Rueckfall Tab-Titel; reload_grund nur im ersten Tick nach einer Selbstheilung.
+      kurse: liesKurse(),
+      reload_grund: reloadGrund,
     });
+    reloadGrund = null;
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
 
