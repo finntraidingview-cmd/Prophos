@@ -7413,8 +7413,8 @@
                ehrlicher Platzhalter; mklChartZeichnen blendet ihn ein/aus. -->
           <div id="mkl-leer" class="empty" style="display:none;position:absolute;inset:0;padding:0;border:none;background:transparent;flex-direction:column;justify-content:center;align-items:center">
             <div class="empty-ico">📉</div>
-            <h3>Keine Minutenkerzen</h3>
-            <p>Der Chart füllt sich, sobald der Reader-PC mit offenem TradingView-Tab Kurse liefert.</p>
+            <h3 id="mkl-leer-titel">Keine Minutenkerzen</h3>
+            <p id="mkl-leer-text">Der Chart füllt sich, sobald der Reader-PC mit offenem TradingView-Tab Kurse liefert.</p>
           </div>
         </div>
         <div id="mkl-hinweis" style="font-size:11.5px;color:var(--sub-2);margin-top:6px;line-height:1.5"></div>
@@ -18628,6 +18628,20 @@
     mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
     const neu = (rz && rz.data) || []
+    // Kerzen je Wurzel zählen (25.09.2026, Finn live: NQ nur in der Watchlist → 0 NQ-Kerzen, 16 MNQ — „der Chart ist kaputt"):
+    // beim vollen Laden aus allen Zeilen, beim Nachtrag nur hochzählen, wenn eine Wurzel bisher leer war
+    const zaehl = { NQ: 0, MNQ: 0 }; for(const k of neu) if(k && zaehl[k.wurzel] != null) zaehl[k.wurzel]++
+    if(vollstaendig || !mkl.kerzenJe) mkl.kerzenJe = zaehl
+    else for(const w of ['NQ', 'MNQ']) if(!mkl.kerzenJe[w] && zaehl[w]) mkl.kerzenJe[w] = zaehl[w]
+    // Automatisch auf die Wurzel MIT Kerzen springen — einmalig, nie gegen einen bewussten Klick (mkl.wurzelBewusst)
+    const andereW = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ'
+    if(!mkl.wurzelBewusst && !mkl.kerzenJe[mkl.wurzel] && mkl.kerzenJe[andereW] > 0){
+      mkl.wurzel = andereW
+      try{ localStorage.setItem('prophos_mkl_wurzel', mkl.wurzel) }catch(_){}
+      document.querySelectorAll('#mkl-wurzel-seg button').forEach(x => x.classList.toggle('active', x.getAttribute('data-mkl-wurzel') === mkl.wurzel))
+      mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
+      mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
+    }
     if(vollstaendig || !mkl.kerzen.length) mkl.kerzen = neu
     else {
       // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
@@ -18651,6 +18665,14 @@
   function mklKopf(){
     const k = mkl.kursAlt, el = $mkl('mkl-preis'), sym = $mkl('mkl-sym'), diff = $mkl('mkl-diff'), q = $mkl('mkl-quelle'), hint = $mkl('mkl-hinweis')
     if(!el) return
+    // Umschalter-Knöpfe (25.09.2026): Wurzel ohne Kerzen (nur Watchlist auf dem Reader-PC) bekommt „nur Kurs" als Hinweis
+    { const je = mkl.kerzenJe || {}
+      document.querySelectorAll('#mkl-wurzel-seg [data-mkl-wurzel]').forEach(b => {
+        const w = b.getAttribute('data-mkl-wurzel'), andere = w === 'NQ' ? 'MNQ' : 'NQ', nur = !je[w] && je[andere] > 0
+        const soll = w + (nur ? ' <span style="font-size:10px;opacity:.6">nur Kurs</span>' : '')
+        if(b.innerHTML !== soll) b.innerHTML = soll
+        b.title = nur ? `${w} liefert nur den Kurs — kein ${w}-Pane im TradingView-Layout des Reader-PCs, deshalb keine Kerzen` : ''
+      }) }
     // Kein Kurs je gesehen (24.09.2026 spät, tv_kurse leer): eine Zeile, die sagt, was auf dem 24/7-PC laufen muss —
     // kein Alarm-Design, das ist ein Einrichtungsstand, kein Fehler. Gab es je einen Kurs, steht unten der letzte mit Alter.
     // Beide Wurzeln nebeneinander mit Alter (0.7.0) — steht auch, wenn die gewählte Wurzel gerade nichts hat
@@ -18729,6 +18751,18 @@
     // Leer-Zustand: Canvas weg, Platzhalter hin — Chart.js zeichnete sonst eine 0–1-Achse ins Nichts
     const leer = $mkl('mkl-leer'); if(leer) leer.style.display = ks.length ? 'none' : 'flex'
     cv.style.visibility = ks.length ? '' : 'hidden'
+    // Platzhalter-Text (25.09.2026): hat die ANDERE Wurzel Kerzen, ist der Chart nicht kaputt — die gewählte liegt auf dem Reader-PC
+    // nur in der Watchlist (kein Chart-Pane → keine Kerzen). Link schaltet um.
+    if(leer && !ks.length){
+      const t = $mkl('mkl-leer-titel'), p = $mkl('mkl-leer-text'), andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', je = mkl.kerzenJe || {}
+      if(je[andere] > 0){
+        if(t) t.textContent = `${mkl.wurzel} liefert keine Kerzen`
+        if(p) p.innerHTML = `${mkl.wurzel} liegt auf dem Reader-PC nur in der Watchlist. Für ${mkl.wurzel}-Kerzen ein ${mkl.wurzel}-Pane im TradingView-Layout öffnen. <a href="#markt" data-mkl-wechsel="${andere}" style="font-weight:600">${andere} anzeigen →</a>`
+      } else {
+        if(t) t.textContent = 'Keine Minutenkerzen'
+        if(p) p.textContent = 'Der Chart füllt sich, sobald der Reader-PC mit offenem TradingView-Tab Kurse liefert.'
+      }
+    }
     // laufende Kerze mit dem Live-Kurs (Kopie — nie das Cloud-Objekt anfassen), nur wenn die letzte Kerze die laufende Minute ist
     if(mkl.kurs && ks.length){
       const last = ks[ks.length - 1], tLast = Date.parse(last.minute) || 0
@@ -18868,10 +18902,18 @@
     b.classList.toggle('active', b.getAttribute('data-mkl-wurzel') === mkl.wurzel)
     b.addEventListener('click', () => {
       mkl.wurzel = b.getAttribute('data-mkl-wurzel') === 'MNQ' ? 'MNQ' : 'NQ'
+      mkl.wurzelBewusst = true   // bewusster Klick: kein automatisches Zurückspringen mehr
       try{ localStorage.setItem('prophos_mkl_wurzel', mkl.wurzel) }catch(_){}
       document.querySelectorAll('#mkl-wurzel-seg button').forEach(x => x.classList.toggle('active', x === b))
       mkl.kerzen = []; mklTick(true)
     })
+  })
+  // Link im Platzhalter „MNQ anzeigen →" (25.09.2026) — eigener Handler auf dem Platzhalter
+  $mkl('mkl-leer')?.addEventListener('click', ev => {
+    const a = ev.target.closest && ev.target.closest('[data-mkl-wechsel]'); if(!a) return
+    ev.preventDefault()
+    const w = a.getAttribute('data-mkl-wechsel') === 'MNQ' ? 'MNQ' : 'NQ'
+    document.querySelector(`#mkl-wurzel-seg [data-mkl-wurzel="${w}"]`)?.click()
   })
   // Darstellung Kerzen ↔ Linie (25.09.2026) — eigener Handler; der Chart-Typ wechselt, mklChartZeichnen baut die Instanz dann neu
   document.querySelectorAll('#mkl-art-seg [data-mkl-art]').forEach(b => {
@@ -29602,7 +29644,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.505'
+  const OS_TAB_BUILD = '2026-09-22.506'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
