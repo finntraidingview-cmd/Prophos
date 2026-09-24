@@ -56,6 +56,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8790
+# Versionsstand DIESES Servers (25.09.2026, Moritz' PC: Tab-Build .495 meldet sich alle 5 s,
+# tv_kurse bleibt leer — aus der Cloud war nicht zu sehen, ob ein reader-server von vor dem
+# Kurs-Feed laeuft (Selbst-Update nur beim Start via start-reader.bat) oder ein Userscript
+# < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
+# welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
+# Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
+READER_VERSION = "0.8.1"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -64,6 +71,10 @@ AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
 _stand = {"ts": 0, "positionen": []}
 _stand_s = 0.0      # Server-Zeit des letzten UEBERNOMMENEN Stands (24.09.2026, fuer alter_s)
 _an = not os.path.exists(AUS_FLAG)
+# Version des Userscripts aus dem letzten POST (positions/bedienfeld/kerzen tragen 'version'),
+# None = noch nie eines gemeldet (oder Script < 0.4, das kein Feld schickt).
+_script_version = None
+_script_s = 0.0
 
 # Bedienfeld: letzter Stand der Steuerelement-Geometrie + Empfangszeit.
 # empfangen_s ist die SERVER-Zeit — das Userscript schickt seine eigene
@@ -295,6 +306,23 @@ def _schreibe_datei(stand):
     os.replace(tmp, DATEI)
 
 
+def _versionen(jetzt_s=None):
+    """Die drei Versions-Felder fuer jede Antwort (GET /positions, GET /bedienfeld)."""
+    jetzt_s = time.time() if jetzt_s is None else jetzt_s
+    return {"reader_version": READER_VERSION,
+            "script_version": _script_version,
+            "script_alter_s": round(jetzt_s - _script_s, 3) if _script_s else None}
+
+
+def _script_merken(daten, jetzt_s):
+    """Userscript-Version aus einem POST-Payload uebernehmen. Gibt (version, zeit) zurueck,
+    unveraendert, wenn der Payload kein brauchbares 'version'-Feld traegt."""
+    v = daten.get("version") if isinstance(daten, dict) else None
+    if isinstance(v, str) and v.strip():
+        return v.strip()[:16], jetzt_s
+    return _script_version, _script_s
+
+
 def _mit_an(stand):
     """Stand + Schalter-Zustand — 'an' gehoert in JEDE Ausgabe (Datei und GET),
     damit kein Konsument den Schalter uebersehen kann."""
@@ -340,6 +368,7 @@ def _mit_an(stand):
     out["feed"] = (bf.get("feed") if isinstance(bf.get("feed"), dict) else None)   # Nachweis aus dem Userscript (0.8.0)
     out["reload_grund"] = _reload_grund
     out["reload_alter_s"] = round(time.time() - _reload_s, 3) if _reload_s else None
+    out.update(_versionen())   # reader_version / script_version / script_alter_s (0.8.1)
     return out
 
 
@@ -388,6 +417,7 @@ class Handler(BaseHTTPRequestHandler):
         global _stand, _stand_s, _bedienfeld, _bedienfeld_s, _dump_bis, _blind_grund, _blind_seit, _letzte_zahl
         global _such_texte, _such_bis, _kurs, _kurs_s, _k1m, _k1m_vor, _kurse, _k1m_je, _k1m_vor_je, _reload_grund, _reload_s
         global _kerzen, _kerzen_s, _kerzen_modus, _kerzen_delay_s, _aufl_warnung
+        global _script_version, _script_s
         laenge = int(self.headers.get("Content-Length", 0) or 0)
         roh = self.rfile.read(laenge) if laenge else b""
         try:
@@ -397,6 +427,15 @@ class Handler(BaseHTTPRequestHandler):
             self._cors()
             self.end_headers()
             return
+        # 0.8.1: Userscript-Version aus JEDEM Payload merken (positions, bedienfeld, kerzen
+        # tragen sie) — Wechsel sichtbar machen, denn "Update eingespielt, Tab nie neu
+        # geladen" war schon dreimal die Erklaerung fuer fehlende Felder.
+        if isinstance(daten, dict):
+            v_neu, s_neu = _script_merken(daten, time.time())
+            if v_neu != _script_version:
+                print(f"\n[{time.strftime('%H:%M:%S')}] Userscript {_script_version or 'unbekannt'} -> {v_neu}"
+                      f" (reader-server {READER_VERSION})", flush=True)
+            _script_version, _script_s = v_neu, s_neu
 
         # Schalter (Orbit-View): POST /schalter {"an": true/false}
         if self.path.rstrip("/") == "/schalter":
@@ -613,7 +652,7 @@ class Handler(BaseHTTPRequestHandler):
         # \r haelt es als eine aktualisierende Live-Zeile
         print(f"\r[{zeit}] {len(pos)} Pos · {zeilen}".ljust(160)[:160], end="", flush=True)
 
-        self._json(200, {"ok": True, "an": True})
+        self._json(200, {"ok": True, "an": True, "reader_version": READER_VERSION})
 
     def do_GET(self):
         # Bedienfeld: das holt sich der Puls vor jedem Klick. 'alter_s' ist
@@ -629,6 +668,7 @@ class Handler(BaseHTTPRequestHandler):
             out = dict(_bedienfeld)
             out["ok"] = True
             out["alter_s"] = round(time.time() - _bedienfeld_s, 3)
+            out.update(_versionen())
             self._json(200, out)
             return
 
@@ -658,7 +698,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Prophos TV-Reader-Empfaenger laeuft auf http://127.0.0.1:{PORT}")
+    print(f"Prophos TV-Reader-Empfaenger {READER_VERSION} laeuft auf http://127.0.0.1:{PORT}")
     print(f"Schreibt den Stand nach {DATEI}")
     print(f"Reader ist {'AN' if _an else 'PAUSIERT (reader_aus.flag liegt)'}")
     print("Warte auf Daten vom Tampermonkey-Reader … (Strg+C zum Beenden)\n")

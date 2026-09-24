@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Selbsttest fuer reader-server.py — rein rechnende Teile (24.09.2026, Kurs-Feed 0.7.0).
+"""Selbsttest fuer reader-server.py — rein rechnende Teile (24.09.2026, Kurs-Feed 0.7.0; 25.09.2026 Versions-Felder 0.8.1).
 
 Aufruf:  python3 selftest_reader.py
 Prueft ohne Netz und ohne Browser: Zahl- und Wurzel-Parser, Minutenkerzen,
@@ -109,6 +109,25 @@ def main():
     kurse, _, _ = rs._kurse_uebernehmen({"NQ": {"lp": 30700.25, "bid": "30,700.00", "ask": "30,700.50", "text": "30700.25", "ts": 1, "quelle": "ws", "lp_time": 1790268000, "modus": "delayed_streaming_600", "delay_s": 600}}, False, 2000.0, {}, {}, {})
     check(kurse["NQ"]["preis"] == 30700.25 and kurse["NQ"]["lp"] == 30700.25 and kurse["NQ"]["modus"] == "delayed_streaming_600" and kurse["NQ"]["delay_s"] == 600,
           "kurse: WS-Quelle nimmt lp als Kurs, Modus/Delay laufen mit, verdeckt egal")
+
+    # 0.8.1: Versions-Felder — reader_version aus der Konstante, script_version aus dem letzten POST-Payload
+    check(isinstance(rs.READER_VERSION, str) and rs.READER_VERSION.count(".") == 2, "READER_VERSION gesetzt (x.y.z)")
+    v, t = rs._script_merken({"version": " 0.8.0 ", "positionen": []}, 500.0)
+    check(v == "0.8.0" and t == 500.0, "_script_merken: Version aus dem Payload, getrimmt")
+    rs._script_version, rs._script_s = v, t
+    v2, t2 = rs._script_merken({"positionen": []}, 600.0)
+    check(v2 == "0.8.0" and t2 == 500.0, "_script_merken: Payload ohne 'version' (Script < 0.4) laesst den letzten Stand stehen")
+    v3, t3 = rs._script_merken({"version": 7}, 600.0)
+    check(v3 == "0.8.0" and t3 == 500.0, "_script_merken: Unsinn im Feld wird ignoriert")
+    aus = rs._versionen(512.0)
+    check(aus == {"reader_version": rs.READER_VERSION, "script_version": "0.8.0", "script_alter_s": 12.0},
+          "_versionen: reader_version, script_version, script_alter_s")
+    rs._script_version, rs._script_s = None, 0.0
+    check(rs._versionen(1.0)["script_version"] is None and rs._versionen(1.0)["script_alter_s"] is None,
+          "_versionen: nie ein Script gesehen → null, null")
+    ganz = rs._mit_an({"ts": 0, "positionen": []})
+    check(ganz["reader_version"] == rs.READER_VERSION and "script_version" in ganz and "script_alter_s" in ganz,
+          "GET /positions traegt die drei Felder")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
