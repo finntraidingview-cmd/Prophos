@@ -5858,6 +5858,8 @@
                 <input type="number" class="input mono" id="tp-wd-faktor" min="0" step="0.05" placeholder="1,00" style="flex:0 0 120px" inputmode="decimal">
                 <span class="mono" id="tp-wd-hedge-eur" style="font-size:12.5px;color:var(--sub)"></span>
               </div>
+              <!-- Beispiel mit Finns eigenen Zahlen (24.09.2026 spät, Finn am Feld: „was ist das, mit Beispiel") -->
+              <div id="tp-wd-beispiel" style="font-size:11.5px;color:var(--sub);margin-top:5px;line-height:1.5"></div>
               <div id="tp-wd-vorschau" style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
@@ -28378,16 +28380,26 @@
   // Faktor vorbelegen — nur in ein LEERES Feld: beim Bearbeiten aus hedge_faktor, bei alten Plänen ohne Faktor aus
   // hedge_eur ÷ (TP × FX), bei neuen Plänen aus der Farmer-Staffel des Kontos (dieselbe Quelle wie bisher, nur als
   // Faktor gezeigt). Ohne TP im Feld passiert nichts — die Vorschau sagt dann „TP eintragen", der TP-Input holt es nach.
+  // Robust seit Finns Screenshot (24.09.2026 spät, Feld blieb leer): das Feld bekommt IMMER einen echten Wert — Plan-Faktor,
+  // sonst Rückrechnung, sonst Staffel ÷ (TP × FX), und wenn nichts rechenbar ist (kein TP, kein Konto) 1,00. Ein leeres
+  // Feld wird so nie gespeichert. Fehler landen in der Konsole statt still im catch.
   function tpWdFaktorVorbelegen(){
     const el = document.getElementById('tp-wd-faktor'); if(!el || el.value !== '') return
-    let ep = null; try{ ep = _editPlan }catch(_){ ep = null }
-    if(ep && ep.hedgeFaktor > 0){ el.value = String(Math.round(ep.hedgeFaktor * 100) / 100); tpWdVorschau(); return }
-    const masterId = document.getElementById('tp-master')?.value
-    let tp = parseFloat(document.getElementById('tp-master-tp')?.value) || 0
-    if(!(tp > 0) && ep && ep.masterTp > 0) tp = Number(ep.masterTp)
-    if(!(tp > 0)){ tpWdVorschau(); return }
-    const eur = (ep && ep.hedgeEur > 0) ? ep.hedgeEur : tpWdHedgeEur(masterId, 0)
-    const f = (eur > 0) ? eur / (tp * tpWdFx()) : 1
+    let f = 1
+    try{
+      let ep = null; try{ ep = _editPlan }catch(_){ ep = null }
+      if(ep && ep.hedgeFaktor > 0) f = Number(ep.hedgeFaktor)
+      else {
+        const masterId = document.getElementById('tp-master')?.value
+        let tp = parseFloat(document.getElementById('tp-master-tp')?.value) || 0
+        if(!(tp > 0) && ep && ep.masterTp > 0) tp = Number(ep.masterTp)
+        if(tp > 0){
+          const eur = (ep && ep.hedgeEur > 0) ? ep.hedgeEur : tpWdHedgeEur(masterId, 0)
+          if(eur > 0) f = eur / (tp * tpWdFx())
+        }
+      }
+    }catch(e){ console.warn('[wd-faktor] Vorbelegung', e); f = 1 }
+    if(!(isFinite(f) && f > 0)) f = 1
     el.value = String(Math.round(f * 100) / 100)
     tpWdVorschau()
   }
@@ -28400,6 +28412,14 @@
     const f = tpWdFelder(), fx = tpWdFx(), fak = tpWdFaktorWert()
     const fmtD = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })} $`
     const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    // Beispiel mit den eigenen Zahlen (Finn: „was ist das, mit Beispiel"): eine Zeile unter dem Feld
+    const bsp = document.getElementById('tp-wd-beispiel')
+    if(bsp){
+      const e1 = f.tp > 0 ? Math.round(f.tp * fx * 100) / 100 : 0
+      bsp.textContent = f.tp > 0
+        ? `1,0 = bei TP ${f.tp.toLocaleString('de-DE')} $ verliert Fusion ${e1.toLocaleString('de-DE', { maximumFractionDigits: 2 })} € am Master-TP · 0,5 = ${(e1 / 2).toLocaleString('de-DE', { maximumFractionDigits: 2 })} € · am SL gewinnt Fusion im gleichen Verhältnis`
+        : 'Erst Take Profit eintragen — dann zeigt das Beispiel deine Zahlen.'
+    }
     if(!(f.tp > 0) || !fak){
       if(eurEl) eurEl.textContent = ''
       box.innerHTML = `<div style="grid-column:1 / -1;font-size:12px;color:var(--sub)">${!(f.tp > 0) ? 'Take Profit ($) eintragen — daraus rechnet sich die Gegenposition.' : 'Faktor eintragen (1,0 = spiegelbildlich).'}</div>`
@@ -29283,7 +29303,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.481'
+  const OS_TAB_BUILD = '2026-09-22.483'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -33060,9 +33080,10 @@
   })
   // Winning Days Farm (24.09.2026 spät): die Vorschau lebt von TP/SL/Kontrakten/Faktor; ein leerer Faktor wird beim
   // ersten TP vorbelegt. Eigene Listener je Feld (keine Sammel-Handler).
-  ;['tp-master-tp', 'tp-master-sl', 'tp-master-qty', 'tp-wd-faktor', 'tp-master'].forEach(id => document.getElementById(id)?.addEventListener('input', () => {
-    try{ if(id !== 'tp-wd-faktor' && document.getElementById('tp-wd-faktor')?.value === '') tpWdFaktorVorbelegen(); else tpWdVorschau() }catch(_){}
-  }))
+  ;['tp-master-tp', 'tp-master-sl', 'tp-master-qty', 'tp-wd-faktor', 'tp-master'].forEach(id => ['input', 'change'].forEach(ev => document.getElementById(id)?.addEventListener(ev, () => {
+    // 'change' zusätzlich (24.09.2026 spät, Finns leeres Feld): ein programmatisch gesetzter TP/ein Konto-Wechsel feuert kein 'input'
+    try{ if(id !== 'tp-wd-faktor' && document.getElementById('tp-wd-faktor')?.value === '') tpWdFaktorVorbelegen(); else tpWdVorschau() }catch(e){ console.warn('[wd-faktor]', e) }
+  })))
   document.getElementById('tp-v2-instr-seg')?.addEventListener('click', () => setTimeout(() => { try{ tpWdVorschau() }catch(_){} }, 0))
   // Popup 2 (Order-Bot-Schritt) auf Winning Days Farm: TP geändert → Betrag aus dem Faktor neu rechnen; Betrag
   // geändert → Faktor nachziehen (Betrag ÷ (TP × FX)). Der Faktor lebt im data-Attribut des Betrag-Feldes
