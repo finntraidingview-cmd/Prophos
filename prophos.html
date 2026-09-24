@@ -19527,7 +19527,12 @@
     // Live-Feed, auch wenn die Ticks frisch aussehen. quelle 'ws' = Socket (Tab darf verdeckt sein), 'titel' = Tab muss sichtbar sein.
     const delayed = /^delayed/.test(String(k.modus || ''))
     if(q){
-      q.textContent = (frisch ? `live · vor ${alt} s` : steht ? `⚠ Feed steht seit ${dauer}` : `⚠ kein Live-Kurs — letzter Stand vor ${alt} s`) + ` (PC ${k.pc}${k.quelle ? ` · ${k.quelle === 'ws' ? 'Socket, Tab verdeckt ok' : k.quelle === 'titel' ? 'Titel, Tab muss sichtbar sein' : k.quelle}` : ''})${(k.sichtbar || k.quelle === 'ws') ? '' : ' · Tab verdeckt'}`
+      // Stillstand mit Diagnose (25.09.2026, Live-Befund Koordination: „Socket, Tab verdeckt ok" stand bei stehendem Feed und
+      // beschrieb den TradingView-Tab — Ursache war ein fehlender Prophos-Tab mit Kurs-Brücke auf dem Reader-PC, dort lief nur
+      // noch ein alter .465-Tab). Die Quelle-Angabe (Socket/Titel) gilt nur für einen frischen Feed.
+      q.textContent = steht ? `⚠ Feed steht seit ${dauer} — ${mklFeedDiagnose(k.pc, mklFeedLageCache(k.pc)).zeile}`
+        : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${k.pc})`
+        : `live · vor ${alt} s` + ` (PC ${k.pc}${k.quelle ? ` · ${k.quelle === 'ws' ? 'Socket, Tab verdeckt ok' : k.quelle === 'titel' ? 'Titel, Tab muss sichtbar sein' : k.quelle}` : ''})${(k.sichtbar || k.quelle === 'ws') ? '' : ' · Tab verdeckt'}`
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
       q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : frisch ? '' : '#B45309'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
@@ -19830,19 +19835,64 @@
   // Doppelte mehrerer Geräte zusammen), läuft er wieder → Entwarnung. Merker in localStorage, damit ein Reload nicht erneut
   // alarmiert. Ohne je einen Kurs (Einrichtung) kein Alarm — das ist kein Ausfall.
   const MKL_STALE_PUSH_MS = 120000
+  /* FEED-DIAGNOSE (25.09.2026, Koordination nach Live-Befund): steht der Kurs-Feed, sagt die Kopfzeile, WO es hängt —
+   *   (a) echoplus_live des Reader-PCs frisch, tv_kurse alt → der Reader läuft, aber kein aktueller Prophos-Tab schiebt die Kurse
+   *       (Build laut mt5_live.status.tab_build dieses PCs; Chrome verwirft Hintergrund-Tabs beim Speichersparen)
+   *   (b) echoplus_live auch alt/fehlt → der Reader selbst meldet sich nicht
+   * Lage je PC 60 s gecacht (zwei kleine Abfragen), die Kopfzeile liest nur den Cache und stößt die Abfrage an. */
+  const _mklLage = new Map()   // pc → { t, readerAt, build, buildAt }
+  async function mklFeedLageLaden(pc){
+    if(!pc) return null
+    const [er, ml] = await Promise.all([
+      supabase.from('echoplus_live').select('updated_at').eq('pc_name', pc).order('updated_at', { ascending: false }).limit(1).then(x => x, () => ({})),
+      supabase.from('mt5_live').select('updated_at,tab_build:status->>tab_build').eq('pc_name', pc).order('updated_at', { ascending: false }).limit(1).then(x => x, () => ({}))
+    ])
+    const e0 = (er && er.data && er.data[0]) || null, m0 = (ml && ml.data && ml.data[0]) || null
+    const lage = { t: Date.now(), readerAt: e0 ? (Date.parse(e0.updated_at) || null) : null, build: m0 ? (m0.tab_build || null) : null, buildAt: m0 ? (Date.parse(m0.updated_at) || null) : null }
+    _mklLage.set(pc, lage)
+    return lage
+  }
+  function mklFeedLageCache(pc){
+    const l = _mklLage.get(pc)
+    if(!l || Date.now() - l.t > 60000){ if(!_mklLage.has(pc + ':laedt')){ _mklLage.set(pc + ':laedt', 1); mklFeedLageLaden(pc).catch(() => null).finally(() => _mklLage.delete(pc + ':laedt')) } }
+    return l || null
+  }
+  // REIN RECHNEND (testbar über window._mklFeedDiagnose): Fall + Text für Kopfzeile und Push
+  function mklFeedDiagnose(pc, lage){
+    const p = pc || '?'
+    if(!lage) return { fall: null, zeile: `Lage auf ${p} wird geprüft …` }
+    const readerFrisch = !!(lage.readerAt && Date.now() - lage.readerAt < 60000)
+    if(readerFrisch) return { fall: 'a', zeile: `Reader auf ${p} läuft, aber kein aktueller Prophos-Tab schiebt die Kurse (dort gemeldet: Build ${lage.build || '?'}) — auf ${p} alle Prophos-Tabs schließen, einen neu öffnen; Chrome-Speichersparen für prophos.pages.dev aus` }
+    return { fall: 'b', zeile: `Reader auf ${p} meldet sich nicht — Reader-Fenster (start-reader.bat) prüfen` }
+  }
+  window._mklFeedDiagnose = mklFeedDiagnose
+  // EIN Push je Stillstand über ALLE Geräte (25.09.2026: jeder offene Prophos-Tab — Mac, PCs, Handy — pushte einmal, auf dem Handy
+  // kam der Alarm deshalb mehrfach). Claim in user_settings (eindeutig je user_id + key) mit dem letzten Tick als Episode: nur das
+  // Gerät, dessen Insert durchgeht, pusht. Alte Claims (> 2 Tage) räumt der Gewinner weg.
+  async function mklPushClaim(art, episode){
+    try{
+      const { error } = await supabase.from('user_settings').insert({ user_id: currentUserId, key: `kursfeed_${art}:${episode}`, value: { at: new Date().toISOString() } })
+      if(error) return false
+      supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'kursfeed_%').lt('created_at', new Date(Date.now() - 2 * 86400000).toISOString()).then(() => {}, () => {})
+      return true
+    }catch(_){ return false }
+  }
   async function mklStaleWache(){
     if(!currentUserId) return
     try{
       const { data } = await supabase.from('tv_kurse').select('pc_name,wurzel,reader_ts,updated_at').in('wurzel', ['NQ', 'MNQ']).order('updated_at', { ascending: false }).limit(1)
       const r = (data || [])[0]; if(!r) return
       const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit
-      let alarm = false; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') === '1' }catch(_){}
-      if(alter > MKL_STALE_PUSH_MS && !alarm){
-        try{ localStorage.setItem('prophos_mkl_stale_alarm', '1') }catch(_){}
-        if(typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed steht', `Kein NQ/MNQ-Tick seit ${Math.round(alter / 60000)} min (PC ${r.pc_name || '?'}) — TradingView + Reader auf dem 24/7-PC prüfen.`, '#markt', 'kursfeed')
+      const episode = String(r.updated_at || r.reader_ts || '')
+      let alarm = null; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') }catch(_){}
+      if(alter > MKL_STALE_PUSH_MS && alarm !== episode){
+        try{ localStorage.setItem('prophos_mkl_stale_alarm', episode) }catch(_){}
+        const diag = mklFeedDiagnose(r.pc_name, await mklFeedLageLaden(r.pc_name).catch(() => null))
+        if(await mklPushClaim('steht', episode) && typeof pushAnsHandy === 'function')
+          pushAnsHandy('Kurs-Feed steht', `Kein NQ/MNQ-Tick seit ${Math.round(alter / 60000)} min — ${diag.zeile}`, '#markt', 'kursfeed')
       } else if(alter <= HEDGE_KURS_MAX_ALTER_MS && alarm){
         try{ localStorage.removeItem('prophos_mkl_stale_alarm') }catch(_){}
-        if(typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed läuft wieder', `NQ/MNQ-Ticks kommen wieder an (PC ${r.pc_name || '?'}).`, '#markt', 'kursfeed')
+        if(await mklPushClaim('ok', alarm) && typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed läuft wieder', `NQ/MNQ-Ticks kommen wieder an (PC ${r.pc_name || '?'}).`, '#markt', 'kursfeed')
       }
     }catch(_){ /* still — nächster Takt */ }
   }
@@ -30964,7 +31014,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.561'
+  const OS_TAB_BUILD = '2026-09-22.563'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
