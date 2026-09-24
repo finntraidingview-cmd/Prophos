@@ -7421,20 +7421,11 @@
         </div>
         <div id="mkl-hinweis" style="font-size:11.5px;color:var(--sub-2);margin-top:6px;line-height:1.5"></div>
       </div>
-      <div class="card" style="padding:14px 16px;margin-bottom:14px">
-        <div class="panel-title">Demo-Order <span style="font-weight:400;color:var(--sub);font-size:12px">· ohne Geld nachstellen — Fill zum Live-Kurs, TP/SL in $ wie im Order-Popup, Treffer über die Minutenkerzen (zählt auch, wenn kein Tab offen war)</span></div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end;margin-top:10px">
-          <div class="field" style="margin:0"><label>Richtung</label><div class="seg" id="mkl-dir"><button type="button" data-mkl-dir="buy">BUY</button><button type="button" data-mkl-dir="sell">SELL</button></div></div>
-          <div class="field" style="margin:0"><label>Instrument</label><div class="seg" id="mkl-instr"><button type="button" data-mkl-instr="MNQ" class="active">MNQ <span style="opacity:.6;font-size:11px">$2/pt</span></button><button type="button" data-mkl-instr="NQ">NQ <span style="opacity:.6;font-size:11px">$20/pt</span></button></div></div>
-          <div class="field" style="margin:0;width:90px"><label>Kontrakte</label><input type="number" class="input mono" id="mkl-kt" min="1" step="1" value="1"></div>
-          <div class="field" style="margin:0;width:120px"><label>Take Profit ($)</label><input type="number" class="input mono" id="mkl-tp" min="0" step="10" placeholder="optional"></div>
-          <div class="field" style="margin:0;width:120px"><label>Stop Loss ($)</label><input type="number" class="input mono" id="mkl-sl" min="0" step="10" placeholder="optional"></div>
-          <button type="button" class="btn btn-primary" id="mkl-go">Demo-Order platzieren</button>
-          <span class="modal-msg" id="mkl-msg" style="margin:0"></span>
-        </div>
-        <div id="mkl-offen" style="margin-top:12px"></div>
-        <div id="mkl-verlauf" style="margin-top:10px"></div>
-      </div>
+      <!-- Winning Days (25.09.2026, Finn: „Unten reicht es, wenn ich die Übersicht aller Winning Days habe — wie sie aussehen, wie sie
+           laufen, welche es sind — und die Winning Days im Chart sehen, wo die Take Profits sind. Das mit der Order kannst du alles
+           weglassen."): die Demo-Order-Karte ist raus (Auswertung + Tabelle demo_orders bleiben im Code, nichts davon sichtbar oder
+           pollend). Der Block füllt sich über GET /admin/wd-heute (Vertrag vom Backend), Verdrahtung in MARKT LIVE. -->
+      <div class="card" id="mkl-wd" style="padding:14px 16px;margin-bottom:14px;display:none"></div>
       <div id="mk-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px"></div>
 
       <!-- Grosser Verlauf, umschaltbar per Klick auf eine Karte (31.08.2026,
@@ -18614,7 +18605,8 @@
     // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
     const neben = vollstaendig || !mkl.ordersGeladen || (jetzt - (mkl.nebenAt || 0)) > 60000
     if(neben) mkl.nebenAt = jetzt
-    if(currentUserId && neben) q.push(supabase.from('demo_orders').select('*').order('created_at', { ascending: false }).limit(60))
+    // demo_orders wird nicht mehr geladen (25.09.2026, Finn: „das mit der Order kannst du alles weglassen") — Auswertung/Tabelle
+    // bleiben im Code, mkl.orders bleibt leer, nichts pollt
     const [rk, rz, ro] = await Promise.all(q.map(p => p.then ? p : Promise.resolve(p)))
     // Reader-PCs mit Versionen (24.09.2026 spät): für die Kopfzeile ohne Feed — welcher PC meldet sich, welches Script läuft dort.
     // Tolerant: fehlen die Spalten noch, bleibt die Liste leer.
@@ -18933,7 +18925,7 @@
   // Takt: 5 s in der Markt-View (Kurs + Kerzen-Nachtrag), sonst alle 60 s nur die Auswertung offener Demo-Orders
   // Polling als Rückfall zum Realtime-Kanal (25.09.2026): 5 s ohne Kanal, 15 s bei SUBSCRIBED (mklPollMs, s. u.); 1-s-Prüfer
   setInterval(() => { if(mklAktiv() && Date.now() - (mkl.tickAt || 0) >= mklPollMs){ mkl.tickAt = Date.now(); mklTick(false) } }, 1000)
-  setInterval(() => { if(!mklAktiv() && currentUserId && (!mkl.ordersGeladen || mkl.orders.some(o => o.status === 'open'))) mklTick(false) }, 60000)
+  // Hintergrund-Takt für Demo-Orders entfernt (25.09.2026) — außerhalb der Markt-View pollt nur noch der Stale-Wächter (60 s)
   // Wurzel-Umschalter NQ ↔ MNQ (24.09.2026 spät) — eigener Handler, letzte Wahl bleibt am Gerät
   document.querySelectorAll('#mkl-wurzel-seg [data-mkl-wurzel]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkl-wurzel') === mkl.wurzel)
@@ -29681,7 +29673,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.507'
+  const OS_TAB_BUILD = '2026-09-22.508'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
