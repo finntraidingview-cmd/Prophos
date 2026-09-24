@@ -180,16 +180,6 @@ def main():
 
     # 0.8.6: mehrere Tabs an einem reader-server
     j = 1000.0
-    check(rs._rang("feed", "streaming") == 3 and rs._rang("broker", "streaming") == 2 and rs._rang("feed", "delayed_streaming_600") == 1
-          and rs._rang("broker", None) == 2, "Rang: Echtzeit vor verzögert, Feed vor Broker")
-    q = lambda tab, rolle, modus, s_: {"tab": tab, "rolle": rolle, "modus": modus, "s": s_}
-    check(rs._quelle_gewinnt(None, "b", "broker", "streaming", j, 5)
-          and not rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "b", "broker", "streaming", j, 5)
-          and rs._quelle_gewinnt(q("f", "feed", "streaming", j - 6), "b", "broker", "streaming", j, 5)
-          and rs._quelle_gewinnt(q("b", "broker", "delayed_streaming_600", j - 1), "f", "feed", "streaming", j, 5)
-          and not rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "b", "broker", "delayed_streaming_600", j, 5)
-          and rs._quelle_gewinnt(q("f", "feed", "streaming", j - 1), "f", "feed", "delayed_streaming_600", j, 5),
-          "Quelle: frischer Feed hält Broker ab, still > 5 s → Broker darf, verzögert verliert, gleicher Tab immer")
     tabs = {"f": {"rolle": "feed", "last_s": j, "stand_s": 0.0},
             "b": {"rolle": "broker", "last_s": j - 2, "stand_s": j - 2, "stand": {"positionen": [{"symbol": "MNQZ6"}], "konto_ts": 5}}}
     check(rs._broker_wahl(tabs, j) == ("b", True), "Feed leer + Broker mit Position → Broker-Stand, frisch")
@@ -235,48 +225,11 @@ def main():
     check(zeilen_ == [0.0, 5.0, 10.0, 15.0] and rs._zeile_faellig(zm, "anders", 15.25),
           f"Statuszeile: gleicher Inhalt alle 5 s, geänderter sofort {zeilen_}")
 
-    # 0.8.9: frischester Tick gewinnt je Wurzel (Hysterese 1 s), Echtzeit vor verzögert hart
-    def lauf(a_takt, b_takt, dauer=20.0, a_modus="streaming", b_modus="streaming", a_rolle="feed", b_rolle="feed"):
-        """Tab A tickt alle a_takt s, Tab B alle b_takt s; beide POSTen alle 0,25 s ihren letzten Tick. -> Anteil B."""
-        alt, b_n, n, t = None, 0, 0, 0.0
-        ta = tb = 0.0
-        while t < dauer:
-            if t - ta >= a_takt:
-                ta = t
-            if t - tb >= b_takt:
-                tb = t
-            for tab, tick, modus, rolle in (("A", ta, a_modus, a_rolle), ("B", tb, b_modus, b_rolle)):
-                neu = {"tab": tab, "rolle": rolle, "modus": modus, "tick": tick * 1000.0 + 1e12}
-                if rs._kurs_quelle_gewinnt(alt, neu, t):
-                    alt = dict(neu, s=t)
-            if t > 5:
-                n += 1
-                b_n += alt["tab"] == "B"
-            t += 0.25
-        return b_n / n
-    check(lauf(4.0, 0.25) > 0.95, f"Tab A tickt alle 4 s, Tab B alle 0,25 s → B gewinnt ({lauf(4.0, 0.25):.2f})")
-    wechsel, alt = 0, None
-    for i in range(80):                                       # beide ticken im gleichen Takt, leicht versetzt
-        for tab, off in (("A", 0.0), ("B", 0.3)):
-            neu = {"tab": tab, "rolle": "feed", "modus": "streaming", "tick": 1e12 + (i * 250 + off * 1000)}
-            if rs._kurs_quelle_gewinnt(alt, neu, i * 0.25):
-                if alt and alt["tab"] != tab:
-                    wechsel += 1
-                alt = dict(neu, s=i * 0.25)
-    check(wechsel == 0, f"Hysterese: gleich schnelle Tabs, 0,3 s versetzt → kein Springen ({wechsel} Wechsel)")
-    check(lauf(0.25, 4.0, a_modus="streaming", b_modus="delayed_streaming_600") == 0.0
-          and lauf(4.0, 0.25, a_modus="streaming", b_modus="delayed_streaming_600") == 0.0,
-          "verzögert verliert immer gegen Echtzeit, auch wenn er öfter tickt")
-    q = {"tab": "A", "rolle": "broker", "modus": "streaming", "tick": 1e12, "s": 100.0}
-    check(rs._kurs_quelle_gewinnt(q, {"tab": "B", "rolle": "feed", "modus": "streaming", "tick": 1e12 + 500}, 100.1)
-          and not rs._kurs_quelle_gewinnt(q, {"tab": "B", "rolle": "broker", "modus": "streaming", "tick": 1e12 + 500}, 100.1)
-          and rs._kurs_quelle_gewinnt(q, {"tab": "B", "rolle": "broker", "modus": "streaming", "tick": 1e12 - 9000}, 106.0),
-          "Gleichstand: Feed vor Broker; bisheriger schweigt > 5 s → jeder darf")
-    kq = {"tab": "A", "rolle": "feed", "modus": "streaming", "s": 100.0, "minute": 6000}
-    check(rs._kerzen_quelle_gewinnt(kq, {"tab": "B", "rolle": "feed", "modus": "streaming", "minute": 6060}, 101)
-          and not rs._kerzen_quelle_gewinnt(kq, {"tab": "B", "rolle": "feed", "modus": "streaming", "minute": 6000}, 101)
-          and not rs._kerzen_quelle_gewinnt(kq, {"tab": "B", "rolle": "feed", "modus": "delayed_streaming_600", "minute": 6120}, 101),
-          "Kerzen: jüngere Bar gewinnt, gleiche Minute bleibt, verzögert verliert")
+    # 0.9.0: Kurse/Kerzen wieder wie 0.8.5 — der letzte POST gewinnt je Wurzel (Finn 25.09.2026)
+    k_ab, _, _ = rs._kurse_uebernehmen({"NQ": {"lp": 30700.0, "text": "30700", "ts": 1, "quelle": "ws", "modus": "streaming"}}, True, 1.0, {}, {}, {})
+    k_ab, _, _ = rs._kurse_uebernehmen({"NQ": {"lp": 30650.0, "text": "30650", "ts": 1, "quelle": "ws", "modus": "delayed_streaming_600"}}, True, 2.0, k_ab, {}, {})
+    check(k_ab["NQ"]["preis"] == 30650.0 and not hasattr(rs, "_kurs_quelle_gewinnt") and not hasattr(rs, "_quelle_gewinnt"),
+          "Kurse wie 0.8.5: der letzte POST gewinnt (auch verzögert), keine Quellenwahl mehr im Server")
     zl = rs._quellen_zeile({"NQ": {"tab_id": "tmug5jxyz", "ts": 1790000000000.0}, "MNQ": {"tab_id": "tabc", "ts": None}}, 1790000000.3)
     check(zl == "MNQ←tabc ? · NQ←tmug5j 0,3s" and rs._quellen_zeile({"NQ": {"tab_id": "t1", "ts": 1}}, 5, mit_alter=False) == "NQ←t1",
           f"Live-Zeile: Quelle + Alter je Wurzel, ohne Alter als Vergleichsschlüssel [{zl}]")
