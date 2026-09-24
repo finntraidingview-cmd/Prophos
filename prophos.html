@@ -5612,7 +5612,7 @@
             <!-- Fusion-Gegenhedge (24.09.2026 abends, nur Orbit V2): Betrag in €, den die Gegen-Order auf Fusion
                  über die TP-Distanz trägt. Leer = kein Hedge. Vorbelegt aus hedge_eur bzw. der Farmer-Staffel. -->
             <div class="field" id="tp-order-hedge-field" style="grid-column:1 / -1;display:none">
-              <label>Fusion-Gegenhedge (€) <span style="color:var(--sub);font-weight:400">leer = kein Hedge · schließt, sobald NQ den TP erreicht</span></label>
+              <label>Fusion-Gegenhedge (€) <span style="color:var(--sub);font-weight:400">leer = kein Hedge · beide Schließ-Level (Master-TP, Master-SL) liegen in MetaTrader</span></label>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="number" class="input mono" id="tp-order-hedge" min="0" step="5" placeholder="leer = kein Hedge" style="flex:0 0 130px">
                 <span id="tp-order-hedge-hint" style="font-size:12px;color:var(--sub)"></span>
@@ -5666,7 +5666,9 @@
                 <button type="button" id="tp-route-tvv2">Orbit V2</button>
                 <!-- Winning Day (24.09.2026 abends, Finn: „ein Drittes, wo Winning-Day-Pläne drinstehen, und im Dropdown
                      nur Funded-Futures-Konten"): technisch Orbit V2 (route tvv2) + Fusion-Gegenhedge aus der Staffel (hedge_eur). -->
-                <button type="button" id="tp-route-wd" title="Winning Day: Orbit V2 + Fusion-Gegenhedge aus der Hedge-Staffel — Dropdown zeigt nur Funded-Futures-Konten">Winning Day</button>
+                <!-- Umbenannt „Winning Days Farm" (24.09.2026 spät, Finns Zielbild): Gegenhedge als Faktor mit TP/SL-Vorschau, beide
+                     Schließ-Level liegen broker-seitig in MetaTrader. -->
+                <button type="button" id="tp-route-wd" title="Winning Days Farm: Orbit V2 + Fusion-Gegenhedge (Faktor, TP- und SL-Level in MetaTrader) — Dropdown zeigt nur Funded-Futures-Konten">Winning Days Farm</button>
                 <button type="button" id="tp-route-tsv2" title="Du platzierst selbst in TopstepX — kein Bot, keine API, kein Hedge">Topstep V2</button>
               </div>
               <!-- Alte Wege der Hedge-Ära, zweite Zeile (Reihenfolge Orbit · Topstep · Echo · Duplikum seit 22.09.2026) -->
@@ -5845,6 +5847,18 @@
             <div class="field" id="tp-master-sl-row" style="display:none">
               <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Stop Loss ($) <span id="tp-master-sl-hint" style="color:var(--sub);font-weight:400"></span></label>
               <input type="number" class="input mono" id="tp-master-sl" min="0" step="10" placeholder="z.B. 100">
+            </div>
+            <!-- Winning Days Farm (24.09.2026 spät, Finn: „Gegenhedge-Multiplikator, gerechnet mit TP und SL — ich gebe an,
+                 wie viel ich gegen was hedge, und sehe sofort: bei TP Master +X $ / Fusion −Y €, bei SL Master −A $ /
+                 Fusion +B €"). Faktor 1,0 = am Master-TP verliert Fusion in € so viel, wie der Master in $ gewinnt (FX =
+                 USD/EUR aus den Einstellungen). Nur auf dem Weg „Winning Days Farm" sichtbar (tpRouteUpdateSeg). -->
+            <div class="field" id="tp-wd-hedge-row" style="grid-column:span 2;display:none">
+              <label style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Gegenhedge auf Fusion <span style="color:var(--sub);font-weight:400">— Faktor · 1,0 = spiegelbildlich zum Master-TP</span></label>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <input type="number" class="input mono" id="tp-wd-faktor" min="0" step="0.05" placeholder="1,00" style="flex:0 0 120px" inputmode="decimal">
+                <span class="mono" id="tp-wd-hedge-eur" style="font-size:12.5px;color:var(--sub)"></span>
+              </div>
+              <div id="tp-wd-vorschau" style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
             </div>
             <!-- Richtung (28.08.2026, Finns Jetzt-starten-Flow): nur im Echo-Modus
                  sichtbar. Mit TP ($), SL (= Risiko Master $) und Lots (= Anzahl
@@ -18144,8 +18158,11 @@
   async function hedgeSoloOeffnen(plan, r){
     if(!plan || !(plan.hedgeEur > 0) || plan.route !== 'tvv2' || !MT5_LOCAL || typeof window.mtcApi !== 'function') return null
     const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
-    const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0
+    const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0, sl = Number(plan.masterSl) || 0
     const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
+    // Zweites Level (24.09.2026 spät, Finns Zielbild „beide Schließ-Level liegen in MetaTrader"): die Master-SL-Distanz
+    // in Punkten wird zum Fusion-TP. Ohne Master-SL kein zweites Level (0) — der Hedge endet dann mit dem Master.
+    const slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
     const gegen = plan.richtung === 'buy' ? 'sell' : plan.richtung === 'sell' ? 'buy' : ''
     const at = new Date().toISOString()
     if(!gegen || !(punkte > 0)){
@@ -18158,17 +18175,25 @@
     let einstieg = (r && r.einstieg != null) ? tvKursZahl(r.einstieg) : null, quelle = 'fill'
     if(!(einstieg > 1000)){ const k = await hedgeKursLesen(); einstieg = k ? k.preis : null; quelle = k ? `feed ${k.symbol} (${Math.round(k.alter_ms / 1000)} s alt)` : 'keine' }
     const tpLevel = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null
+    const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
-    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', richtung: gegen, eur: plan.hedgeEur, punkte, einstieg_nq: einstieg, einstieg_quelle: quelle, tp_level_nq: tpLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
+    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
     let res = null
     try{
+      // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name für
+      // einen Copier, der das Schnelle Update noch nicht hat.
       res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, punkte, puffer: hedgePuffer(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
+        body: JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), symbol: 'NAS100', plan_id: String(plan.id) }), timeoutMs: 38000 })
     }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
     if(res && res.ok){
-      const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, fill: res.fill, sl: res.sl || 0, symbol: res.symbol || 'NAS100',
+      // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
+      const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
+        sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
-      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${Number(res.lots).toLocaleString('de-DE')} Lot NAS100 @ ${Number(res.fill).toLocaleString('de-DE')}${res.sl ? ` · schließt in MetaTrader bei ${Number(res.sl).toLocaleString('de-DE')} (TP-Distanz + ${hedgePuffer()} Pkt)` : ' · ⚠ KEIN Schließ-Level gesetzt (' + (res.sl_fehler || '?') + ')'}`, 'start')
+      const f = v => Number(v).toLocaleString('de-DE')
+      const levelText = res.sl ? ` · Level in MetaTrader: ${f(res.sl)} (Master-TP + ${hedgePuffer()} Pkt)${res.tp ? ` / ${f(res.tp)} (Master-SL)` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
+                                : ' · ⚠ KEIN Schließ-Level gesetzt (' + (res.sl_fehler || '?') + ')'
+      if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${f(res.lots)} Lot NAS100 @ ${f(res.fill)}${levelText}`, 'start')
       return h
     }
     const unklar = !!(res && (res.code === 'copier_stumm' || res.retry_ok === false))
@@ -18177,7 +18202,14 @@
     if(typeof atToast === 'function') atToast((unklar ? '⚠ Fusion-Hedge UNKLAR — ' : '⚠ Fusion-Hedge NICHT geöffnet: ') + h.msg, 'end')
     return h
   }
-  // Schließen (Grund: tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
+  // Lesbarer Schließ-Grund (Vertrag .470: Copier liefert level_sl = Fusion-SL gefüllt = Master am TP, level_tp = Fusion-TP
+  // gefüllt = Master am SL, hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470). Unbekanntes als Rohtext.
+  function hedgeGrundText(g){
+    return g === 'level_sl' ? 'Master-TP erreicht (Fusion-SL gefüllt)' : g === 'level_tp' ? 'Master-SL erreicht (Fusion-TP gefüllt)'
+      : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
+      : g === 'stopout' ? 'Stop-out durch den Broker' : g === 'close' ? 'Close-Auftrag' : g === 'tp' ? 'TP erreicht' : g === 'unbekannt' ? 'Grund unbekannt' : (g || '?')
+  }
+  // Schließen (Grund: level_sl | level_tp | master_ende | hand | …). Nur der PC, der geöffnet hat, kann schließen (Terminal dort).
   const _hedgeBusy = new Set()
   async function hedgeSoloSchliessen(plan, grund, kurs){
     const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
@@ -18198,8 +18230,11 @@
         const pl = (typeof res.pl === 'number' && isFinite(res.pl)) ? res.pl : null
         // slave_pl = realisierter Fusion-P&L (Deal-Historie) — nur, wenn am Plan noch nichts steht
         const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
-        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
-        if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${grund === 'level_mt5' ? 'Level in MetaTrader erreicht' : grund === 'master_ende' ? 'Master beendet' : grund === 'hand' ? 'von Hand' : grund})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
+        // Grund vom Copier (Vertrag .470: level_sl/level_tp/hand/stopout/close/unbekannt) schlägt den Frontend-Grund —
+        // der Copier weiß aus der Deal-Historie, welches Level gefüllt hat. 'close'/'unbekannt' sagen nichts Neues.
+        const grundEnd = (res.grund && res.grund !== 'close' && res.grund !== 'unbekannt') ? res.grund : grund
+        await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: res.grund || null, pl, fill_close: res.fill_close || null, schon_zu: !!res.schon_zu, closed_at: new Date().toISOString(), msg: res.msg || '' }, extra)
+        if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
         return { ok: true, pl }
       }
       const msg = String((res && (res.msg || res.error)) || 'keine Antwort')
@@ -18238,7 +18273,7 @@
         if(h.status === 'unklar' && h.cmd_id && !_hedgeBusy.has(String(p.id))){
           try{
             const e = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'ergebnis', cmd_id: h.cmd_id }), timeoutMs: 8000 })
-            if(e && e.ok && e.ticket) await hedgeAmPlanSchreiben(p.id, { status: 'offen', ticket: e.ticket, lots: e.lots, fill: e.fill, sl: e.sl || 0, symbol: e.symbol || 'NAS100', wert_pro_punkt: e.wert_pro_punkt, opened_at: new Date().toISOString(), msg: 'nachträglich quittiert' })
+            if(e && e.ok && e.ticket) await hedgeAmPlanSchreiben(p.id, { status: 'offen', ticket: e.ticket, lots: e.lots, fill: e.fill, sl: e.sl || 0, tp: e.tp || 0, sl_fehler: e.sl_fehler || null, tp_fehler: e.tp_fehler || null, symbol: e.symbol || 'NAS100', wert_pro_punkt: e.wert_pro_punkt, opened_at: new Date().toISOString(), msg: 'nachträglich quittiert' })
             else if(e && !e.ok && e.code && e.code !== 'offen') await hedgeAmPlanSchreiben(p.id, { status: 'fehler', code: e.code, msg: String(e.msg || '') })
           }catch(_){}
           continue
@@ -18275,9 +18310,12 @@
     try{
       if(!p || p.route !== 'tvv2') return ''
       const h = p.mt5Baseline && p.mt5Baseline.hedge
-      if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet Puls auf Fusion die Gegen-Order über ${Number(p.hedgeEur).toLocaleString('de-DE')} € (Staffel)">🛡 Hedge ${Number(p.hedgeEur).toLocaleString('de-DE')} €</span>` : '' }
+      if(!h){ return (p.hedgeEur > 0 && p.status === 'planned') ? `<span class="tc2-chip" title="Beim Start öffnet der PC auf Fusion die Gegen-Order über ${Number(p.hedgeEur).toLocaleString('de-DE')} €${p.hedgeFaktor > 0 ? ` (Faktor ${Number(p.hedgeFaktor).toLocaleString('de-DE')} × TP × FX)` : ' (Staffel)'} — beide Schließ-Level in MetaTrader">🛡 Hedge ${Number(p.hedgeEur).toLocaleString('de-DE')} €${p.hedgeFaktor > 0 ? ` · ×${Number(p.hedgeFaktor).toLocaleString('de-DE')}` : ''}</span>` : '' }
       const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
-      const lvl = h.sl > 0 ? ` · zu bei ${Number(h.sl).toLocaleString('de-DE')}` : ' · ⚠ kein Level'
+      // Beide Level (Vertrag .470): sl = am Master-TP, tp = am Master-SL. Fehlt das zweite, obwohl der Plan einen SL hat
+      // (tp_fehler), steht das Warnzeichen sichtbar im Chip — nicht nur im Tooltip.
+      const f = v => Number(v).toLocaleString('de-DE')
+      const lvl = h.sl > 0 ? ` · zu bei ${f(h.sl)}${h.tp > 0 ? ` / ${f(h.tp)}` : (h.tp_fehler || h.sl_punkte > 0) ? ' / ⚠' : ''}` : ' · ⚠ kein Level'
       const box = (inner, bg, title) => `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${bg};border:1px solid var(--border-soft)" title="${escapeHtml(title || '')}"><span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span>${inner}</span>`
       if(h.status === 'offen' || h.status === 'schliesst'){
         const live = hedgeSoloLive(h.ticket)
@@ -18285,12 +18323,12 @@
         const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
         return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
-          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} € über ${h.punkte} Pkt · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · schließt in MetaTrader bei ${h.sl} (TP-Distanz + ${hedgePuffer()} Pkt)` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
+          `Fusion-Gegenhedge Ticket ${h.ticket} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Faktor ${f(h.hedge_faktor)})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = Number(h.pl)
         return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">zu · P&L ?</span>`,
-          'var(--bg)', `Fusion-Hedge geschlossen (${h.grund || '?'}) ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.schon_zu ? ' · war schon zu (Notfall-SL?)' : ''}`)
+          'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
@@ -25184,6 +25222,9 @@
       // Fusion-Gegenhedge in € (sql/2026-09-24_tv_kurse_hedge_eur.sql): NULL = kein Hedge. Schreiben nur
       // Order-Popup und Farmer (Status-Guard planned) — bewusst NICHT in planToRow (ein Modal-Edit darf ihn nicht nullen).
       hedgeEur:    row.hedge_eur != null ? Number(row.hedge_eur) : null,
+      // Faktor des Winning-Days-Farm-Hedges (24.09.2026 spät, Spalte hedge_faktor mit .470): 1,0 = spiegelbildlich
+      // zum Master-TP. Wie hedge_eur bewusst nicht in planToRow — geschrieben nur vom Plan-Popup auf dem Weg WD-Farm.
+      hedgeFaktor: row.hedge_faktor != null ? Number(row.hedge_faktor) : null,
       // Buy/Sell am Plan (Migration 2026-08-28): Teil von Finns
       // Jetzt-starten-Flow — Order komplett beim Planen erfasst.
       richtung:    (row.richtung === 'buy' || row.richtung === 'sell') ? row.richtung : null,
@@ -28245,6 +28286,70 @@
       const e = tpVorplanStaffel(0, st); return e > 0 ? e : 50
     }catch(_){ return 50 }
   }
+  // Winning Days Farm (24.09.2026 spät, Finn: „Gegenhedge-Multiplikator, gerechnet mit TP und SL — ich gebe an, wie viel
+  // ich gegen was hedge, und sehe sofort, was bei TP und bei SL rauskommt"). Faktor 1,0 = am Master-TP verliert Fusion
+  // in € so viel, wie der Master in $ gewinnt; FX = USD/EUR aus den Einstellungen (window._fxUsdEur). Am Plan landen
+  // BEIDE: hedge_faktor (der Faktor) und hedge_eur (= TP × FX × Faktor, der Betrag, den Copier/Farmer schon kennen).
+  const tpWdFx = () => { const f = Number(window._fxUsdEur); return (isFinite(f) && f > 0) ? f : 0.85 }
+  const tpWdFelder = () => ({
+    tp: parseFloat(document.getElementById('tp-master-tp')?.value) || 0,
+    sl: parseFloat(document.getElementById('tp-master-sl')?.value) || 0,
+    kt: parseFloat(document.getElementById('tp-master-qty')?.value) || 0,
+    faktor: parseFloat(String(document.getElementById('tp-wd-faktor')?.value || '').replace(',', '.'))
+  })
+  const tpWdFaktorWert = () => { const f = tpWdFelder().faktor; return (isFinite(f) && f > 0) ? Math.round(f * 100) / 100 : null }
+  // Betrag in € für den Plan: TP × FX × Faktor. Ohne brauchbaren Faktor die bisherige Staffel-Logik (tpWdHedgeEur).
+  function tpWdHedgeBetrag(masterId, bestehend){
+    const f = tpWdFelder(), fak = tpWdFaktorWert()
+    if(fak && f.tp > 0) return Math.round(f.tp * tpWdFx() * fak * 100) / 100
+    return tpWdHedgeEur(masterId, bestehend)
+  }
+  // Faktor vorbelegen — nur in ein LEERES Feld: beim Bearbeiten aus hedge_faktor, bei alten Plänen ohne Faktor aus
+  // hedge_eur ÷ (TP × FX), bei neuen Plänen aus der Farmer-Staffel des Kontos (dieselbe Quelle wie bisher, nur als
+  // Faktor gezeigt). Ohne TP im Feld passiert nichts — die Vorschau sagt dann „TP eintragen", der TP-Input holt es nach.
+  function tpWdFaktorVorbelegen(){
+    const el = document.getElementById('tp-wd-faktor'); if(!el || el.value !== '') return
+    let ep = null; try{ ep = _editPlan }catch(_){ ep = null }
+    if(ep && ep.hedgeFaktor > 0){ el.value = String(Math.round(ep.hedgeFaktor * 100) / 100); tpWdVorschau(); return }
+    const masterId = document.getElementById('tp-master')?.value
+    let tp = parseFloat(document.getElementById('tp-master-tp')?.value) || 0
+    if(!(tp > 0) && ep && ep.masterTp > 0) tp = Number(ep.masterTp)
+    if(!(tp > 0)){ tpWdVorschau(); return }
+    const eur = (ep && ep.hedgeEur > 0) ? ep.hedgeEur : tpWdHedgeEur(masterId, 0)
+    const f = (eur > 0) ? eur / (tp * tpWdFx()) : 1
+    el.value = String(Math.round(f * 100) / 100)
+    tpWdVorschau()
+  }
+  // Vorschau-Kacheln: „bei Take Profit: Master +X $ · Fusion −Y €" und „bei Stop Loss: Master −A $ · Fusion +B €".
+  // Fusion am TP = Betrag + Puffer-Anteil (das Level liegt TP-Distanz + Puffer hinter dem Fill); Fusion am SL = Betrag
+  // × SL-Distanz/TP-Distanz (gleiche Punkte-Relation). „zusammen" rechnet den Master-$ mit FX in € um.
+  function tpWdVorschau(){
+    const row = document.getElementById('tp-wd-hedge-row'), box = document.getElementById('tp-wd-vorschau'), eurEl = document.getElementById('tp-wd-hedge-eur')
+    if(!row || !box || row.style.display === 'none') return
+    const f = tpWdFelder(), fx = tpWdFx(), fak = tpWdFaktorWert()
+    const fmtD = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })} $`
+    const fmtE = v => `${v < 0 ? '−' : '+'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    if(!(f.tp > 0) || !fak){
+      if(eurEl) eurEl.textContent = ''
+      box.innerHTML = `<div style="grid-column:1 / -1;font-size:12px;color:var(--sub)">${!(f.tp > 0) ? 'Take Profit ($) eintragen — daraus rechnet sich die Gegenposition.' : 'Faktor eintragen (1,0 = spiegelbildlich).'}</div>`
+      return
+    }
+    const eur = Math.round(f.tp * fx * fak * 100) / 100
+    const puffer = (typeof hedgePuffer === 'function') ? hedgePuffer() : HEDGE_PUFFER_STD
+    let ppl = 2; try{ ppl = (_tpNqMode === 'nq') ? 20 : 2 }catch(_){}
+    const tpPkt = (f.kt > 0) ? f.tp / (ppl * f.kt) : 0
+    const pufferEur = (tpPkt > 0) ? Math.round(eur * puffer / tpPkt * 100) / 100 : 0
+    if(eurEl) eurEl.textContent = `= ${eur.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € Gegenposition · FX ${fx.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} €/$`
+    const kachel = (titel, master, fusion, farbe) => { const netto = master * fx + fusion; return `<div style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:${farbe}">
+        <div style="font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em">${titel}</div>
+        <div class="mono" style="font-size:12.5px;margin-top:3px">Master <b style="color:${master >= 0 ? '#15803d' : '#b91c1c'}">${fmtD(master)}</b> · Fusion <b style="color:${fusion >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(fusion)}</b></div>
+        <div class="mono" style="font-size:11.5px;color:var(--sub);margin-top:2px">zusammen ≈ <b style="color:${netto >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(netto)}</b></div></div>` }
+    const slHtml = (f.sl > 0)
+      ? kachel('bei Stop Loss', -f.sl, Math.round(eur * f.sl / f.tp * 100) / 100, 'rgba(18,183,106,.06)')
+      : `<div style="padding:8px 12px;border-radius:8px;border:1px dashed var(--border);font-size:12px;color:var(--sub)">bei Stop Loss: kein SL am Master — die Gegenposition endet mit dem Master (Rundgang/Auto-Close) oder am Notfall-SL.</div>`
+    box.innerHTML = kachel('bei Take Profit', f.tp, -(eur + pufferEur), 'rgba(240,68,56,.06)') + slHtml
+      + `<div style="grid-column:1 / -1;font-size:11px;color:var(--sub-2);line-height:1.5">Beide Schließ-Level liegen broker-seitig in MetaTrader: Master-TP-Distanz + ${puffer} Pkt Puffer (≈ ${pufferEur.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € mehr) und Master-SL-Distanz. Lots rechnet der Copier aus dem Broker-Punktwert.</div>`
+  }
 
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
   // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
@@ -28321,6 +28426,10 @@
     // Kompass-Feld + Richtungs-Vorwahl (23.09.2026): lädt asynchron, würfelt nur bei neuem Plan ohne Richtung.
     v2zeig('tp-kompass-box', v2, true)
     if(typeof tpV2KompassVorwahl === 'function') tpV2KompassVorwahl()
+    // Winning Days Farm (24.09.2026 spät): Faktor-Feld mit TP/SL-Vorschau nur auf diesem Weg
+    const wdAn = _tpRoute === 'tvv2' && _tpWd
+    v2zeig('tp-wd-hedge-row', wdAn, true)
+    if(wdAn){ tpWdFaktorVorbelegen(); tpWdVorschau() }
     // Topstep-Weg: die Master-Filter (Firma/Typ) arbeiten auf Prophos-Feldern,
     // die TSX-API-Liste ignoriert sie — ausblenden statt so tun (01.09.2026).
     const masterFilterRow = document.getElementById('tp-master-firm-filter')?.parentElement
@@ -29087,7 +29196,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.471'
+  const OS_TAB_BUILD = '2026-09-22.473'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -31628,6 +31737,8 @@
     // Winning Day (24.09.2026 abends): beim Bearbeiten = tvv2-Plan mit hedge_eur; neu = letzte Wahl
     _tpWd = _editPlan ? (_editPlan.route === 'tvv2' && _editPlan.hedgeEur > 0)
                       : (_tpRoute === 'tvv2' && localStorage.getItem('prophos_tp_wd') === '1')
+    // Faktor-Feld je Öffnen leeren — tpRouteUpdateSeg belegt es dann aus dem Plan (hedge_faktor) bzw. der Staffel vor
+    { const fe = document.getElementById('tp-wd-faktor'); if(fe) fe.value = '' }
     // Kapitel „Ohne Hedge" (24.09.2026, Finn: „Ab jetzt wird es nicht mehr
     // gegengehedgt mit Realmoney"): beim ersten neuen Plan im hedgefreien
     // Kapitel dreht die gespeicherte Vorwahl einmalig auf den V2-Weg —
@@ -32179,6 +32290,8 @@
               const acc = (accounts || []).find(a => String(a.id) === String(mid))
               if(tpEl && !(parseFloat(tpEl.value) > 0) && acc && typeof wdTpSpanne === 'function'){ const [v, b2] = wdTpSpanne(acc.firm); tpEl.value = Math.round(v + Math.random() * (b2 - v)) }
             }catch(_){}
+            // Faktor erst jetzt vorbelegen — mit dem eben gesetzten TP (vorher war das Feld ohne TP nicht rechenbar)
+            try{ tpWdFaktorVorbelegen(); tpWdVorschau() }catch(_){}
           }
           if(r === 'mt5' && !_tpMt5HedgeAccId){
             tpResolveMt5Hedge().then(() => {
@@ -32850,6 +32963,12 @@
   ;['tp-master','tp-slave','tp-master-risk','tp-master-qty','tp-slave-risk','tp-master-tp'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', tpRecompute)
   })
+  // Winning Days Farm (24.09.2026 spät): die Vorschau lebt von TP/SL/Kontrakten/Faktor; ein leerer Faktor wird beim
+  // ersten TP vorbelegt. Eigene Listener je Feld (keine Sammel-Handler).
+  ;['tp-master-tp', 'tp-master-sl', 'tp-master-qty', 'tp-wd-faktor', 'tp-master'].forEach(id => document.getElementById(id)?.addEventListener('input', () => {
+    try{ if(id !== 'tp-wd-faktor' && document.getElementById('tp-wd-faktor')?.value === '') tpWdFaktorVorbelegen(); else tpWdVorschau() }catch(_){}
+  }))
+  document.getElementById('tp-v2-instr-seg')?.addEventListener('click', () => setTimeout(() => { try{ tpWdVorschau() }catch(_){} }, 0))
   // Wählt automatisch den Live-Account (Fusion Markets) als Slave, falls beim Klick auf
   // "Übernehmen" (Auto-Vorschlag oder Gesamtkosten) noch keiner ausgewählt ist — Finn hat
   // praktisch immer denselben Live-Slave, das erspart den manuellen Zwischenschritt UND behebt
@@ -33083,10 +33202,13 @@
     // nicht (der Betrag kann aus dem Order-Popup stammen) — nur der Wechsel weg von tvv2 räumt ihn weg.
     if(_tpRoute === 'tvv2'){
       if(_tpWd){
-        if(!masterTp){ msg('Winning Day braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).', 'err'); return }
-        v2Extra.hedge_eur = tpWdHedgeEur(masterId, _editPlan && _editPlan.hedgeEur)
-      }
-    } else if(v2) v2Extra.hedge_eur = null
+        if(!masterTp){ msg('Winning Days Farm braucht einen Take Profit in $ (die Fusion-Gegenposition schließt an dieser Distanz).', 'err'); return }
+        // Faktor (24.09.2026 spät) + Betrag: hedge_faktor ist die Eingabe, hedge_eur = TP × FX × Faktor der Betrag,
+        // den Copier (Lots) und Farmer (Staffel-Abgleich) weiter lesen. Ohne Faktor im Feld die Staffel wie bisher.
+        v2Extra.hedge_faktor = tpWdFaktorWert()
+        v2Extra.hedge_eur = tpWdHedgeBetrag(masterId, _editPlan && _editPlan.hedgeEur)
+      } else v2Extra.hedge_faktor = null
+    } else if(v2){ v2Extra.hedge_eur = null; v2Extra.hedge_faktor = null }
     try{
       let savedPlanId = null
       if(_editingPlanId){
