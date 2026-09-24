@@ -18074,7 +18074,9 @@
       hinweis = 'Today\'s P&L als Ganzes übernommen (kein Startwert beim Puls-Klick)'
     }
     if(masterPnl != null) masterPnl = Number(masterPnl.toFixed(2))
-    return { slavePnl: 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
+    // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave-P&L NICHT 0, sondern kommt vom Hedge-Wächter
+    // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
+    return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
   }
   /* ========== ENDE ORBIT V2 ========== */
 
@@ -18209,10 +18211,11 @@
     if(typeof atToast === 'function') atToast((unklar ? '⚠ Fusion-Hedge UNKLAR — ' : '⚠ Fusion-Hedge NICHT geöffnet: ') + h.msg, 'end')
     return h
   }
-  // Lesbarer Schließ-Grund (Vertrag .470: Copier liefert level_sl = Fusion-SL gefüllt = Master am TP, level_tp = Fusion-TP
-  // gefüllt = Master am SL, hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470). Unbekanntes als Rohtext.
+  // Lesbarer Schließ-Grund. Der Copier meldet aus MASTER-Sicht (Backend-Gegenprüfung 24.09.2026 spät — erste Fassung hatte
+  // es vertauscht): level_tp = Master hat seinen TP erreicht (die Fusion-Gegenposition ist am SL gefüllt), level_sl = Master
+  // am SL (Fusion am TP); dazu hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470. Unbekanntes als Rohtext.
   function hedgeGrundText(g){
-    return g === 'level_sl' ? 'Master-TP erreicht (Fusion-SL gefüllt)' : g === 'level_tp' ? 'Master-SL erreicht (Fusion-TP gefüllt)'
+    return g === 'level_tp' ? 'Master-TP erreicht (Fusion-SL gefüllt)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP gefüllt)'
       : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
       : g === 'stopout' ? 'Stop-out durch den Broker' : g === 'close' ? 'Close-Auftrag' : g === 'tp' ? 'TP erreicht' : g === 'unbekannt' ? 'Grund unbekannt' : (g || '?')
   }
@@ -18235,8 +18238,9 @@
       }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
       if(res && res.ok){
         const pl = (typeof res.pl === 'number' && isFinite(res.pl)) ? res.pl : null
-        // slave_pl = realisierter Fusion-P&L (Deal-Historie) — nur, wenn am Plan noch nichts steht
-        const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
+        // slave_pl = realisierter Fusion-P&L (Deal-Historie) — IMMER aus hedge.pl (bewiesener Wert), auch über eine 0 hinweg:
+        // der Auto-P&L (atMoveToReview) hatte früher 0 geschrieben, bevor der Hedge zu war (Backend-Gegenprüfung 24.09.2026 spät)
+        const extra = (pl != null) ? { slave_pl: pl } : null
         // Grund vom Copier (Vertrag .470: level_sl/level_tp/hand/stopout/close/unbekannt) schlägt den Frontend-Grund —
         // der Copier weiß aus der Deal-Historie, welches Level gefüllt hat. 'close'/'unbekannt' sagen nichts Neues.
         const grundEnd = (res.grund && res.grund !== 'close' && res.grund !== 'unbekannt') ? res.grund : grund
@@ -18287,7 +18291,7 @@
   async function hedgeZuAusRing(plan, zu){
     const pl = (typeof zu.pl === 'number' && isFinite(zu.pl)) ? zu.pl : null
     const grundEnd = (zu.grund && zu.grund !== 'close' && zu.grund !== 'unbekannt') ? zu.grund : 'level_mt5'
-    const extra = (pl != null && plan.slavePl == null) ? { slave_pl: pl } : null
+    const extra = (pl != null) ? { slave_pl: pl } : null   // immer aus hedge.pl, auch über eine 0 hinweg
     await hedgeAmPlanSchreiben(plan.id, { status: 'geschlossen', grund: grundEnd, grund_copier: zu.grund || null, pl, pl_offen: pl == null, fill_close: zu.fill_close || null,
       schon_zu: true, closed_at: zu.closed_at || new Date().toISOString(), msg: 'vom Copier erkannt' }, extra)
     if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge zu (${hedgeGrundText(grundEnd)})${pl != null ? ` · ${pl >= 0 ? '+' : '−'}${Math.abs(pl).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €` : ' · P&L folgt'}`, 'end')
@@ -18297,11 +18301,16 @@
     if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
     _hedgeBusy.add(pid)
     try{
-      try{ await hedgeAmPlanSchreiben(plan.id, { pl_nachfrage_at: new Date().toISOString() }) }catch(_){}
+      // Deckel (Backend-Gegenprüfung 24.09.2026 spät): nach 10 Nachfragen aufhören — sonst fragt der Tab endlos alle 30 s
+      const versuche = (Number(h.pl_versuche) || 0) + 1
+      if(versuche > 10){
+        await hedgeAmPlanSchreiben(plan.id, { pl_offen: false, pl_versuche: versuche, msg: 'P&L nach 10 Nachfragen nicht ermittelbar — im Hedge-Terminal (Historie) nachsehen und im Abschluss-Popup eintragen' })
+        return
+      }
+      try{ await hedgeAmPlanSchreiben(plan.id, { pl_nachfrage_at: new Date().toISOString(), pl_versuche: versuche }) }catch(_){}
       const res = await window.mtcApi('hedge-solo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ aktion: 'close', ticket: h.ticket, grund: h.grund || 'level_mt5' }), timeoutMs: 20000 })
       if(res && res.ok && typeof res.pl === 'number' && isFinite(res.pl)){
-        const extra = (plan.slavePl == null) ? { slave_pl: res.pl } : null
-        await hedgeAmPlanSchreiben(plan.id, { pl: res.pl, pl_offen: false, fill_close: res.fill_close || h.fill_close || null, msg: 'P&L nachgeholt' }, extra)
+        await hedgeAmPlanSchreiben(plan.id, { pl: res.pl, pl_offen: false, fill_close: res.fill_close || h.fill_close || null, msg: 'P&L nachgeholt' }, { slave_pl: res.pl })   // immer aus hedge.pl
       }
     }catch(_){}
     finally{ _hedgeBusy.delete(pid) }
@@ -18385,7 +18394,7 @@
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
-        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">zu · P&L folgt</span>`,
+        return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:${h.pl_offen === false ? '#B45309' : 'var(--sub)'}">${h.pl_offen === false ? 'zu · P&L ? (Terminal)' : 'zu · P&L folgt'}</span>`,
           'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
@@ -29274,7 +29283,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.480'
+  const OS_TAB_BUILD = '2026-09-22.481'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -29449,12 +29458,20 @@
   // 'orbit'): die Order-Werte kommen dann aus dem Signal, und jedes Ende geht als Ergebnis
   // zurück in die Signal-Zeile statt in ein Popup (am PC sitzt dann niemand).
   async function tpOrbitStarten(planId, fern, opts){
-    const plan = tradePlans.find(x => String(x.id) === String(planId))
+    let plan = tradePlans.find(x => String(x.id) === String(planId))
     const toast = (t, art) => { if(typeof atToast === 'function') atToast(t, art) }
     if(!plan || plan.status !== 'planned' || _tpOrbitLaeuft){
       if(fern) fern.melde({ ok:false, msg: _tpOrbitLaeuft ? 'Am PC läuft schon ein Orbit-Start — nichts gesendet.' : 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' })
       return
     }
+    // Frische Plan-Zeile (Backend-Gegenprüfung 24.09.2026 spät): hedge_eur/hedge_faktor/TP/SL können am Mac nachträglich
+    // geändert worden sein — orderSignalTick, tpStartUmTick und der Karten-Klick nehmen sonst den PC-Cache und hedgen mit
+    // altem Betrag oder gar nicht. Eine Query, Cache ersetzen; ist der Plan inzwischen nicht mehr „Geplant", nichts starten.
+    try{
+      const { data } = await supabase.from('trade_plans').select('*').eq('id', plan.id).maybeSingle()
+      if(data){ const frisch = rowToPlan(data); const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = frisch; plan = frisch }
+    }catch(_){ /* offline: mit dem Cache weiter */ }
+    if(plan.status !== 'planned'){ if(fern) fern.melde({ ok:false, msg: 'Plan ist nicht (mehr) „Geplant" — nichts gestartet.' }); return }
     let extId = '', geschwister = []
     // Fehler gehören ins Order-Popup: dort bleiben sie stehen (ein Toast ist nach 5 s weg),
     // und dort sitzt auch „Diagnose kopieren".
@@ -36018,16 +36035,21 @@
     // V2: kein Slave → Feld weg, Master über die volle Breite; sonst exakt zurück auf zwei Spalten
     const tcSlaveField = document.getElementById('tc-slave-pl')?.closest('.field')
     const tcMasterField = document.getElementById('tc-master-pl')?.closest('.field')
-    if(tcSlaveField) tcSlaveField.style.display = tcV2 ? 'none' : ''
-    if(tcMasterField) tcMasterField.style.gridColumn = tcV2 ? 'span 2' : ''
-    document.getElementById('tc-slave-cur').textContent = slavePreset.currency
+    // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave die Fusion-Position — Feld sichtbar, in €,
+    // vorbelegt mit hedge.pl (bewiesener Wert aus der Deal-Historie); leer, solange der Hedge offen ist / P&L folgt.
+    const tcGehedgt = tcV2 && p.hedgeEur > 0
+    if(tcSlaveField) tcSlaveField.style.display = (tcV2 && !tcGehedgt) ? 'none' : ''
+    if(tcMasterField) tcMasterField.style.gridColumn = (tcV2 && !tcGehedgt) ? 'span 2' : ''
+    document.getElementById('tc-slave-cur').textContent = tcGehedgt ? '€' : slavePreset.currency
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
     _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: plQuelleFuerRoute(p.route) }
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
             : null
-    document.getElementById('tc-slave-pl').value  = (preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? '')
+    document.getElementById('tc-slave-pl').value  = tcGehedgt
+      ? (() => { const h = p.mt5Baseline && p.mt5Baseline.hedge; return (h && h.status === 'geschlossen' && h.pl != null) ? Number(h.pl).toFixed(2) : (p.slavePl ?? '') })()
+      : ((preFillSlavePl != null && p.slavePl == null) ? preFillSlavePl.toFixed(2) : (p.slavePl ?? ''))
     document.getElementById('tc-result-notes').value = p.resultNotes || ''
     // Trade-Datum (24.09.2026 abends): aus „Geplant" = jetzt (änderbar zum Nachtragen), „Bearbeiten" = gespeichertes Datum
     const tcDatumWrap = document.getElementById('tc-datum-wrap'), tcDatum = document.getElementById('tc-datum')
@@ -36686,10 +36708,12 @@
     // Winning Days Farm (24.09.2026 spät, Daten-Integrität): slave_pl trägt den vom Hedge geschriebenen Fusion-P&L (Deal-
     // Historie) — das Popup darf ihn NIE mit 0 überschreiben. Hedge zu mit pl → dieser Wert; Hedge offen/unklar oder
     // „P&L folgt" → slave_pl bleibt unangetastet (Feld fliegt aus dem Update); nie gehedgt/nie geöffnet → 0 wie bisher.
-    const tcHedge = (tcV2Save && p.hedgeEur > 0 && p.mt5Baseline && p.mt5Baseline.hedge) ? p.mt5Baseline.hedge : null
-    const tcHedgeZu = !!(tcHedge && tcHedge.status === 'geschlossen' && tcHedge.pl != null)
-    const tcSlaveLassen = !!(tcHedge && !tcHedgeZu && (tcHedge.status === 'geschlossen' || ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(tcHedge.status)))
-    const sPl = tcV2Save ? (tcHedgeZu ? Number(tcHedge.pl) : (tcSlaveLassen ? (Number(p.slavePl) || 0) : 0)) : parseFloat(document.getElementById('tc-slave-pl').value)
+    // Mit Fusion-Gegenhedge ist das Slave-Feld sichtbar (vorbelegt aus hedge.pl, Finn kann es korrigieren): leer = Hedge noch
+    // offen / P&L folgt → slave_pl fliegt aus dem Update; sonst gilt der Feldwert. Nie auf 0 zwingen.
+    const tcGehedgtSave = tcV2Save && p.hedgeEur > 0
+    const sPlFeld = parseFloat(document.getElementById('tc-slave-pl').value)
+    const tcSlaveLassen = tcGehedgtSave && isNaN(sPlFeld)
+    const sPl = tcV2Save ? (tcGehedgtSave && !isNaN(sPlFeld) ? sPlFeld : 0) : sPlFeld
     // Neue Status-Auswahl (3 Radios) + welcher Account
     const statusChoice = document.querySelector('input[name="tc-status"]:checked')?.value || 'none'
     const targetAccountId = document.getElementById('tc-status-account')?.value || null
