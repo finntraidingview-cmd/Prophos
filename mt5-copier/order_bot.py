@@ -5061,9 +5061,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         Order war per TradingView-Meldung bewiesen, 'einstieg' blieb None, der Hedge nahm den
         Feed-Kurs statt des Fills). Quellen: Reader (wenn an), sonst die Positions-Tabelle
         (Spalte 'Avg Fill Price' / 'Durchschnittlicher Erfuellungspreis' ueber TV_RX_POS_EINSTIEG).
-        -> (einstieg_text|None, tv_symbol|None); nie ein Fehler, nur die Spur sagt es."""
+        -> (einstieg_text|None, tv_symbol|None, diagnose|None); nie ein Fehler, nur die Spur sagt es.
+        Hoechstens `sekunden` (3 s) — jede Sekunde hier verzoegert den Hedge-Open; was hier nicht gelingt,
+        holt der naechste Lesebefehl (tvlesen: avg_fill_je_wurzel) nach."""
         root = tv_symbol_root(cmd.get("symbol"))
         ende_ = time.time() + sekunden
+        letzt = {"roh": None, "anker": None}
         while True:
             try:
                 pos, an_ = _tv_positionen(timeout=1.0)
@@ -5071,17 +5074,19 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                     for p_ in pos:
                         if tv_symbol_root(p_.get("symbol")) == root and tv_seite_passt(p_.get("seite"), plan["richtung"]) \
                                 and p_.get("einstieg") and tv_geld_lesen(p_.get("einstieg")) is not None:
-                            return str(p_.get("einstieg")), p_.get("symbol")
+                            return str(p_.get("einstieg")), p_.get("symbol"), None
                 roh_f = _tv_uia_roh(w, typen_pos)
                 anker_ = vorher.get("anker") if isinstance(vorher, dict) else None
+                letzt.update(roh=roh_f, anker=anker_)
                 for z in tv_positions_lesen(roh_f, tv_positions_kopf(roh_f, anker_)):
                     if tv_symbol_root(z.get("symbol")) == root and (not z.get("seite") or tv_seite_passt(z.get("seite"), plan["richtung"])) \
                             and z.get("einstieg") and tv_geld_lesen(z.get("einstieg")) is not None:
-                        return str(z.get("einstieg")), z.get("symbol")
+                        return str(z.get("einstieg")), z.get("symbol"), None
             except Exception:
                 pass
             if time.time() >= ende_:
-                return None, None
+                diag = tv_tabellen_diagnose(letzt["roh"], letzt["anker"], cmd.get("symbol")) if letzt["roh"] is not None else "keine Tabellen-Lesung"
+                return None, None, diag
             _warte(0.5, 0.2)
     trail.append("Senden geklickt — ab hier zaehlt nur noch der Beweis")
     ende = time.time() + 25.0
@@ -5091,9 +5096,10 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
         if neu_t:
             trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
-            einstieg_, sym_ = _avg_fill_nachlauf()
+            einstieg_, sym_, diag_ = _avg_fill_nachlauf()
             erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=einstieg_, tv_symbol=sym_)
-            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (3 s)'}")
+            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (3 s)'}"
+                         + (f" [{diag_}]" if (diag_ and not einstieg_) else ""))
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {sym_ or cmd.get('symbol')}"
                           + (f" @ {einstieg_}" if einstieg_ else "") + f" · {tpsl} "
                           f"(bewiesen: TradingView-Meldung '{neu_t[0][:60]}')")
@@ -5116,10 +5122,12 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         if vorher is not None and (jetzt["menge"] - vorher["menge"] >= plan["menge"] - 1e-9 or jetzt["zeilen"] > vorher["zeilen"]):
             zuwachs = jetzt["menge"] - vorher["menge"]
             if not treffer.get("einstieg"):
-                e_, s_ = _avg_fill_nachlauf(2.0)
+                e_, s_, d_ = _avg_fill_nachlauf(2.0)
                 if e_:
                     treffer = dict(treffer, einstieg=e_, symbol=treffer.get("symbol") or s_)
                     trail.append(f"Avg Fill nachgelesen: {e_}")
+                elif d_:
+                    trail.append(f"Avg Fill nicht lesbar (2 s) [{d_}]")
             erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
             trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "
@@ -5374,6 +5382,46 @@ def tv_positionen_auspacken(pos):
                     "einstieg_zahl": tv_geld_lesen(p.get("einstieg")),
                     "pnl_zahl": tv_geld_lesen(p.get("pnl"))})
     return out
+
+
+def tv_avg_fill_je_wurzel(positionen):
+    """REIN RECHNEND (testbar, 25.09.2026): Avg Fill der offenen Position je Symbol-Wurzel aus den gelesenen
+    Zeilen — fuer den Nachtrag von einstieg_nq, wenn der Nachlauf nach dem Order-Klick nichts lesen konnte
+    (Plan 273fd74f: Reiter 'Positions' direkt nach der Order sekundenlang verdeckt). Tradovate nettet je
+    Symbol → eine Zeile je Kontrakt; bei mehreren Zeilen derselben Wurzel gewinnt die erste mit Zahl.
+    -> {wurzel: {avg_fill, symbol, seite, menge}}"""
+    out = {}
+    for p in (positionen or []):
+        if not isinstance(p, dict):
+            continue
+        w = tv_symbol_root(p.get("symbol"))
+        z = p.get("einstieg_zahl")
+        if z is None:
+            z = tv_geld_lesen(p.get("einstieg"))
+        if not w or z is None or w in out:
+            continue
+        out[w] = {"avg_fill": z, "symbol": p.get("symbol"), "seite": p.get("seite"),
+                  "menge": p.get("menge_zahl") if p.get("menge_zahl") is not None else tv_geld_lesen(p.get("menge"))}
+    return out
+
+
+def tv_tabellen_diagnose(roh, anker, symbol):
+    """REIN RECHNEND (testbar, 25.09.2026): warum war der Avg Fill nicht lesbar? Fuer die Spur, wenn der
+    Nachlauf scheitert — Zone, Kopf ja/nein, Zeilen n, Einstieg-Spalte ja/nein, Symbol der ersten Zeile."""
+    try:
+        kopf = tv_positions_kopf(roh, anker)
+        sp = tv_positions_spalten(roh, kopf) if kopf else None
+        zeilen = tv_positions_lesen(roh, kopf) if kopf else []
+        root = tv_symbol_root(symbol)
+        treffer = [z for z in zeilen if tv_symbol_root(z.get("symbol")) == root]
+        teile = [f"Kopf {'ja' if kopf else 'nein'}" + (" (per Anker)" if (kopf and anker) else ""),
+                 f"Zeilen {len(zeilen)}", f"Zeilen {root or '?'} {len(treffer)}",
+                 f"Einstieg-Spalte {'ja' if (sp and sp.get('einstieg')) else 'nein'}",
+                 f"erste Zeile {(zeilen[0].get('symbol') if zeilen else '—')}"
+                 + (f" Einstieg '{zeilen[0].get('einstieg')}'" if zeilen else "")]
+        return " · ".join(teile) + " · Zone: " + tv_positions_zone(roh, 12)
+    except Exception as e:
+        return f"Diagnose fehlgeschlagen ({type(e).__name__})"
 
 
 def tv_gegenseite(richtung):
@@ -5936,6 +5984,7 @@ def modus_tvlesen(cmd):
             trail.append(f"gelesen (Reader): {len(positionen)} Pos, {len(summary or {})} Summary-Paare, "
                          f"Today {today} ('{today_label}')")
             res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
+                        "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen),   # 25.09.2026: Nachtrag einstieg_nq
                         "summary": summary, "today_pnl": today, "today_label": today_label,
                         "today_pnl_text": today_text,
                         "alter_s": round(time.time() - empf, 3),
@@ -5968,6 +6017,7 @@ def modus_tvlesen(cmd):
                     **_tv_today_aus_uia(u))
     positionen = u["positionen"]
     res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
+                "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen),   # 25.09.2026: Nachtrag einstieg_nq
                 "alter_s": 0.0, "gelesen_at": u["gelesen_at"],
                 "konto_quelle": res.get("konto_quelle") or "uia", "userscript": None,
                 "quelle": "uia", **_tv_today_aus_uia(u)})

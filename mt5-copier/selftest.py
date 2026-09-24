@@ -1011,6 +1011,23 @@ def main():
         and order_bot.tv_positions_tabelle(_PT[:1] + _PT[6:], "MNQZ6", "sell") is None
         and order_bot.tv_positions_tabelle([], "MNQZ6", "sell") is None
         and "Symbol@56,979" in order_bot.tv_positions_zone(_PT))
+    # Avg Fill je Wurzel + Tabellen-Diagnose (25.09.2026, Plan 273fd74f: Nachlauf 'nicht lesbar (3 s)')
+    _PTF = _PT + [("Avg Fill Price", (560, 979, 660, 997), "Text"), ("30,725.25", (560, 1020, 640, 1038), "Text"),
+                  ("30.710,50", (560, 1054, 640, 1072), "Text")]
+    _zf = order_bot.tv_positionen_auspacken(order_bot.tv_positions_lesen(_PTF, order_bot.tv_positions_kopf(_PTF)))
+    _af = order_bot.tv_avg_fill_je_wurzel(_zf)
+    chk("TV-LESEN: avg_fill_je_wurzel aus der Positions-Tabelle (englisch + deutsch), MNQ nie NQ",
+        _af.get("MNQ", {}).get("avg_fill") == 30725.25 and _af.get("NQ", {}).get("avg_fill") == 30710.5
+        and _af["MNQ"]["symbol"] == "MNQZ6" and order_bot.tv_avg_fill_je_wurzel([]) == {}
+        and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": None}]) == {}
+        and order_bot.tv_avg_fill_je_wurzel([{"symbol": "MNQZ6", "einstieg": "—"}, {"symbol": "MNQZ6", "einstieg_zahl": 30100.0}])["MNQ"]["avg_fill"] == 30100.0)
+    _d1 = order_bot.tv_tabellen_diagnose(_PTF, None, "MNQZ6")
+    _d2 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], None, "MNQZ6")
+    _d3 = order_bot.tv_tabellen_diagnose([x for x in _PTF if x[0] != "Positions"], (56, 979, 120, 997), "MNQZ6")
+    chk("TV-ORDER: Tabellen-Diagnose — Kopf/Zeilen/Einstieg-Spalte/erste Zeile/Zone, verdeckter Reiter mit und ohne Anker",
+        _d1.startswith("Kopf ja · Zeilen 2 · Zeilen MNQ 1 · Einstieg-Spalte ja · erste Zeile MNQZ6 Einstieg '30,725.25'")
+        and _d2.startswith("Kopf nein · Zeilen 0") and "kein Reiter 'Positions' zu sehen" in _d2
+        and _d3.startswith("Kopf ja (per Anker) · Zeilen 2") and order_bot.tv_tabellen_diagnose(None, None, "X").startswith("Kopf nein"))
     # Schalter + Meldung (22.09.2026 01:50, Finns Lauf: SL vergessen, weil 'Feld bedienbar'
     # als 'Schalter an' galt). Umschalter = gleiche Zeile, rechts, der aeusserste im Panel.
     _BER = {"links": 1300, "rechts": 1630}
