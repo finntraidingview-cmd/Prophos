@@ -18579,6 +18579,17 @@
     }
   }
   async function hedgeSoloOeffnenKern(plan, r){
+    // Doppel-Open-Riegel (Gegenprüfung 25.09.2026): frisch lesen — steht schon ein Hedge in Arbeit oder offen, NICHT noch einmal
+    // öffnen. 'wartet' eines anderen Laufs zählt nur, solange er jünger als 2 min ist (sonst Rest eines neu geladenen Tabs).
+    try{
+      const { data: z, error: ze } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+      const hz = (!ze && z && z.mt5_baseline && z.mt5_baseline.hedge) || null
+      const alterMs = hz ? Date.now() - (Date.parse(hz.at || hz.opened_at || '') || 0) : Infinity
+      if(hz && (['oeffnet', 'offen', 'schliesst', 'unklar'].includes(hz.status) || (hz.status === 'wartet' && alterMs < 120000))){
+        console.warn('[hedgeSolo] nicht erneut geöffnet — Hedge steht schon auf', hz.status)
+        return hz
+      }
+    }catch(_){}
     const symbol = (r && r.tv_symbol) || (typeof tpOrbitWerte === 'function' ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
     const ppl = hedgePplFuer(symbol), kt = Number(plan.masterContracts) || 0, tp = Number(plan.masterTp) || 0, sl = Number(plan.masterSl) || 0
     const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
@@ -18619,12 +18630,14 @@
         if(res && res.ok && lotsSoll) res.lots_soll = lotsSoll
       }catch(e){ res = { ok: false, code: 'verbindung', msg: String(e && e.message || e) } }
       if(res && res.ok) break
+      // Copier-Riegel (Backend): für diesen Plan liegt schon eine Solo-Position → übernehmen, nie zweiter Open
+      if(res && res.code === 'schon_offen' && res.ticket){ res = Object.assign({}, res, { ok: true, open_grund: 'schon_offen', msg: 'schon offen — übernommen (Copier-Riegel)' }); break }
       if(!hedgeFehlerSicher(res)) break
       const eigen = hedgeSoloEigen(plan)
       if(eigen){ res = { ok: true, ticket: eigen.ticket, lots: eigen.lots, fill: eigen.fill, sl: eigen.sl || 0, tp: eigen.tp || 0, symbol: eigen.symbol || 'NAS100', msg: 'übernommen (Position mit Plan-Kennung gefunden)' }; break }
       const warte = 10000 + Math.random() * 5000
       if(Date.now() - t0 + warte > 90000) break
-      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'wartet', code: res.code || null, versuche: versuch, pc: hedgePcId(),
+      try{ await hedgeAmPlanSchreiben(plan.id, { status: 'wartet', at: new Date().toISOString(), code: res.code || null, versuche: versuch, pc: hedgePcId(),
         msg: `Copier startet neu (${res.code}) — neuer Versuch in ${Math.round(warte / 1000)} s` }) }catch(_){}
       await new Promise(ok => setTimeout(ok, warte))
     }
@@ -18635,7 +18648,8 @@
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
         schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer()),   // Feed-Wächter schließt hier (TP ± 8 Ticks)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
-        wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '' })
+        wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
+        open_grund: res.open_grund || null })
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
       const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer())
       const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
@@ -18797,14 +18811,24 @@
   // Master-Position schließt, muss Fusion auch schließen"). true nur mit BEWEIS: Reader-Liste ≤ 10 s alt, Hedge ≥ 30 s offen,
   // Konto passt (External ID des Plans steht im aktiven Reader-Konto — fehlt sie, nur wenn der Reader genau EIN Konto kennt),
   // und seit ≥ 10 s durchgehend KEINE Position im Plan-Symbol (Wurzel NQ/MNQ). Reader offline/alt → false (nie raten).
+  // Konto-Abgleich exakt (Gegenprüfung 25.09.2026, Punkt 9): die External ID muss als GANZES Token im Konto-Text stehen —
+  // indexOf ließ „…0007" auch in „…00071" passen. Tokens = alles zwischen Nicht-Alphanumerik.
+  function hedgeKontoPasst(kontoText, extId){
+    const id = String(extId || '').trim(); if(!id || !kontoText) return false
+    const t = String(kontoText).trim()
+    return t === id || t.split(/[^A-Za-z0-9]+/).includes(id)
+  }
   function hedgeMasterWegEntscheid(o){
     if(!o || !Array.isArray(o.liste)) return false
     // Frische (Reader 0.8.5): positionen_ok === true (Script UND Server nicht blind) und positionen_alter_s ≤ 10; altes Script ohne
     // die Felder: Payload-Alter ≤ 10 s. false = kein Urteil (Flatter-Vorfall 01.09.).
     if(o.positionenOk === false) return false
     if(!(o.alterMs <= 10000) || !(o.sekundenSeitOpen >= 30)) return false
-    if(o.kontoPlan){ if(!o.kontoAktiv || String(o.kontoAktiv).indexOf(String(o.kontoPlan)) < 0) return false }
+    if(o.kontoPlan){ if(!hedgeKontoPasst(o.kontoAktiv, o.kontoPlan)) return false }   // exakter Token-Vergleich (Gegenprüfung 25.09.2026)
     else if(!(o.kontenAnzahl <= 1)) return false
+    // Konto seit ≥ 10 s stabil (Gegenprüfung 25.09.2026): nach dem Zurückschalten von Konto B auf A ist die Tabelle kurz leer —
+    // ohne diese Regel hätte eine einzige Lesung „Konto A, leer" den Hedge geschlossen, obwohl der Master läuft.
+    if(!(o.kontoStabilMs >= 10000)) return false
     const w = o.wurzel === 'MNQ' ? 'MNQ' : 'NQ'
     const zeilen = o.liste.filter(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : String(x.symbol || '')); return xw === w })
     // Position im Plan-Symbol MIT Plan-Richtung (Tradovate nettet je Symbol): Menge 0 = weg, Teilmenge = nur Hinweis, nie schließen
@@ -18827,7 +18851,9 @@
     return (m > 0 && m < kontrakte) ? m : null
   }
   window._hedgeMasterWegEntscheid = hedgeMasterWegEntscheid
+  window._hedgeKontoPasst = hedgeKontoPasst
   const _hedgeLeerSeit = new Map()
+  const _hedgeKontoSeit = new Map()   // plan-id → {text, seit}: seit wann der Reader DIESES Konto (passend) ununterbrochen zeigt
   const _hedgeNachgeholt = new Set()   // je Plan höchstens ein Nachhol-Versuch pro Tab (25.09.2026)   // plan-id → Zeit, seit der die Reader-Liste ohne Master-Position ist
   let _hedgeWacheBusy = false
   async function hedgeWacheTick(){
@@ -18919,7 +18945,14 @@
             const kontenAnzahl = (kontoRoh && Array.isArray(kontoRoh.eintraege)) ? kontoRoh.eintraege.length : (typeof kontoRoh === 'string' ? 99 : 1)   // Text ohne Liste: Anzahl unbekannt → ohne External ID kein Urteil
             const frisch = !!(st && st.positionen_ok !== false && (typeof st.positionen_alter_s === 'number' ? st.positionen_alter_s <= 10 : Date.now() - (epLokal.ab || 0) <= 10000))
             const richtung = (p.richtung === 'buy' || p.richtung === 'sell') ? p.richtung : null
-            const listeLeer = !!(st && frisch && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
+            // Konto passt (Token) UND ist frisch (konto_ts ≤ 10 s; altes Script ohne konto_ts: Payload-Frische) — sonst kein Timer
+            const kontoFrisch = !!(st && (Number(st.konto_ts) > 0 ? Date.now() - Number(st.konto_ts) <= 10000 : frisch))
+            const kontoPasst = kontoPlan ? hedgeKontoPasst(kontoAktiv, kontoPlan) : (kontenAnzahl <= 1)
+            const pidK = String(p.id)
+            if(kontoFrisch && kontoPasst){ const alt = _hedgeKontoSeit.get(pidK); if(!alt || alt.text !== String(kontoAktiv || '')) _hedgeKontoSeit.set(pidK, { text: String(kontoAktiv || ''), seit: Date.now() }) }
+            else { _hedgeKontoSeit.delete(pidK); _hedgeLeerSeit.delete(pidK) }
+            const kontoStabilMs = _hedgeKontoSeit.has(pidK) ? Date.now() - _hedgeKontoSeit.get(pidK).seit : 0
+            const listeLeer = !!(st && frisch && kontoFrisch && kontoPasst && Array.isArray(st.positionen) && !st.positionen.some(x => { if(!x) return false; const xw = x.wurzel || ((typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(x.symbol || '') : ''); if(xw !== wz) return false; if(richtung && x.richtung && x.richtung !== richtung) return false; const m = (typeof x.menge_zahl === 'number') ? Math.abs(x.menge_zahl) : Math.abs((typeof tvKursZahl === 'function') ? (tvKursZahl(x.menge) || 0) : (Number(x.menge) || 0)); return m > 0 }))
             if(listeLeer){ if(!_hedgeLeerSeit.has(String(p.id))) _hedgeLeerSeit.set(String(p.id), Date.now()) } else _hedgeLeerSeit.delete(String(p.id))
             // Teilschluss (Tradovate nettet je Symbol): nur Hinweis am Chip, schließen erst bei 0
             const teil = (st && frisch) ? hedgeMasterTeilweise(st.positionen, wz, richtung, Number(p.masterContracts) || 0) : null
@@ -18927,7 +18960,7 @@
             const weg = hedgeMasterWegEntscheid({ liste: st ? st.positionen : null, positionenOk: st ? st.positionen_ok : null,
               alterMs: st ? ((typeof st.positionen_alter_s === 'number') ? st.positionen_alter_s * 1000 : Date.now() - (epLokal.ab || 0)) : Infinity,
               sekundenSeitOpen: (Date.now() - (Date.parse(h.opened_at || h.at || '') || 0)) / 1000, wurzel: wz, richtung,
-              kontoPlan, kontoAktiv, kontenAnzahl,
+              kontoPlan, kontoAktiv, kontenAnzahl, kontoStabilMs,
               leerSeitMs: _hedgeLeerSeit.has(String(p.id)) ? Date.now() - _hedgeLeerSeit.get(String(p.id)) : 0 })
             if(weg){
               _hedgeLeerSeit.delete(String(p.id))
@@ -30629,7 +30662,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.552'
+  const OS_TAB_BUILD = '2026-09-22.553'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
