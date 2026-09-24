@@ -5336,6 +5336,9 @@
                Anfang des Tages alle Trades vorplant"). Legt für jedes aktive Futures-Konto ohne
                laufenden Plan einen fertigen Orbit-Plan an; eigene Verdrahtung (kein Sammel-Handler). -->
           <!-- Winning-Day-Farmer (22.09.2026, Finn: „nie wieder Winning Days manuell fahren") — Tagesplan über alle IDs -->
+          <!-- P&L holen (24.09.2026 abends, Finn: „alle 60 s in jeden Account einloggen ist zu viel — jede Stunde und
+               auf Knopfdruck, auch vom MacBook"): manueller Orbit-V2-Rundgang, am PC direkt, sonst per Signal an den PC -->
+          <button class="btn btn-ghost" id="tpPnlHolenBtn" title="Orbit V2: Puls liest jetzt einmal jedes Konto mit laufendem Plan in TradingView (Position + Today's P&L) und schreibt den Stand in die DB — vom Mac/Handy geht ein Signal an den PC. Automatisch sonst nur stündlich.">↻ P&L holen</button>
           <button class="btn btn-ghost" id="wdBtn" title="Winning-Day-Farmer: Tagesplan über alle IDs (Reihenfolge, Zeiten, Richtung würfeln, bearbeiten, Automatik)">Winning Days</button>
           <button class="btn btn-ghost" id="tpVorplanenBtn" title="Für jedes aktive Futures-Konto ohne laufenden Plan einen Orbit-V2-Plan anlegen (ohne Hedge): MNQ/NQ + Kontrakte, TP aus der Spanne, SL optional, Richtung nach Kompass, Startzeit">⚡ Futures vorplanen</button>
           <button class="btn btn-primary" id="addTradePlanBtn" onclick="window.openTradePlanModal && window.openTradePlanModal()">
@@ -17723,14 +17726,17 @@
     try{
       const r = await tvV2Lesen(tv.konto, 45)
       if(r && r.ok && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) tv.today_pnl_start = r.today_pnl
-      else tv.grund = (r && (r.code || (r.ok ? 'kein_today_pnl' : 'unbekannt'))) || 'unbekannt'
+      else tv.grund = ((r && (r.code || (r.ok ? 'kein_today_pnl' : 'unbekannt'))) || 'unbekannt') + (r && r.msg ? ': ' + String(r.msg).slice(0, 300) : '')   // Meldung mit (24.09.2026 abends: in der DB stand nur 'absturz')
     }catch(e){ tv.grund = String((e && e.message) || e) }
     if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
     return tv
   }
 
   const tvV2Poll = {
-    MIN: 50000, MAX: 80000,   // Streuung 50–80 s, jeder Tick würfelt seine Pause neu
+    // Stündlich statt 50–80 s (24.09.2026 abends, Finn: „alle 60 Sekunden in jeden Account einloggen ist zu viel —
+    // jede Stunde automatisch, und jedes Mal, wenn ich auf P&L holen drücke"): Streuung 55–65 min, dazu der
+    // manuelle Rundgang über tvV2PnlHolen (Knopf im Trades-Kopf, auch vom Mac/Handy per Signal).
+    MIN: 55 * 60000, MAX: 65 * 60000,
     busy: false, timer: null,
     streak: new Map(),        // planId → frische Messungen ohne passende Position in Folge (2 = Ende)
     wasOpen: new Set(),       // Rundgang hat die Position SELBST gesehen (Muster mt5PlanPoll.wasOpen)
@@ -17741,16 +17747,18 @@
     const pause = tvV2Poll.MIN + Math.random() * (tvV2Poll.MAX - tvV2Poll.MIN)
     tvV2Poll.timer = setTimeout(tvV2PollTick, pause)
   }
-  async function tvV2PollTick(){
+  async function tvV2PollTick(opts){
+    const manuell = !!(opts && opts.manuell)
+    let gelesen = 0
     try{
-      if(!MT5_LOCAL || tvV2Poll.busy) return
+      if(!MT5_LOCAL || tvV2Poll.busy) return { ok:false, grund: tvV2Poll.busy ? 'laeuft_schon' : 'kein_pc' }
       let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
       const plans = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open')
-      if(!plans.length) return
-      if(typeof window.mtcApi !== 'function') return
+      if(!plans.length) return { ok:false, grund:'keine_plaene' }
+      if(typeof window.mtcApi !== 'function') return { ok:false, grund:'kein_backend' }
       // Order geht vor: läuft am PC gerade ein Orbit-Start, fasst der Rundgang TradingView nicht an.
       let orderLaeuft = false; try{ orderLaeuft = !!_tpOrbitLaeuft }catch(_){}
-      if(orderLaeuft) return
+      if(orderLaeuft) return { ok:false, grund:'order_laeuft' }
       tvV2Poll.busy = true
       for(const plan of plans){
         // Vor JEDEM Konto neu prüfen (Cross-Check 24.09.2026): ein Tick dauert bei mehreren Konten
@@ -17759,6 +17767,7 @@
         let _orderJetzt = false; try{ _orderJetzt = !!_tpOrbitLaeuft }catch(_){}
         if(_orderJetzt) break
         const pid = String(plan.id)
+        const idx0 = () => tradePlans.findIndex(x => String(x.id) === pid)
         const konto = tvV2Konto(plan)
         if(!konto){ tvV2Poll.stand.set(pid, { code:'kein_konto', at: Date.now() }); continue }
         let r = null
@@ -17766,7 +17775,20 @@
         if(!r || !r.ok){
           const code = (r && r.code) || 'reader_fehlt'
           if(code === 'puls_beschaeftigt') break   // Puls hat die Maus — diesen Tick komplett überspringen
-          tvV2Poll.stand.set(pid, { code, at: Date.now() })
+          const msg = (r && r.msg) ? String(r.msg).slice(0, 300) : ''
+          tvV2Poll.stand.set(pid, { code, msg, at: Date.now() })
+          // Fehler in die DB (24.09.2026 abends, Finn: 'liest die Position trotzdem nicht'): mt5_baseline.fehler
+          // trägt Code + Meldung des Bots, damit die Ursache auch vom Mac aus lesbar ist. Nur bei geändertem
+          // Text oder älter als 10 min, Guard status=open.
+          try{
+            const altF = plan.mt5Baseline && plan.mt5Baseline.fehler
+            const altTs = altF && altF.at ? (Date.parse(altF.at) || 0) : 0
+            if(!altF || altF.code !== code || altF.msg !== msg || (Date.now() - altTs) > 10 * 60 * 1000){
+              const base = Object.assign({}, plan.mt5Baseline || {}, { fehler: { code, msg, at: new Date().toISOString() } })
+              const { data } = await supabase.from('trade_plans').update({ mt5_baseline: base }).eq('id', plan.id).eq('status', 'open').select('*')
+              if(data && data.length){ const i = idx0(); if(i >= 0) tradePlans[i] = rowToPlan(data[0]) }
+            }
+          }catch(_){}
           continue
         }
         // Frische: der Reader nennt das Alter seiner Lesung; ≥ 30 s ist nicht beweisfähig (weder für
@@ -17777,6 +17799,7 @@
         tvV2Poll.stand.delete(pid)
         const frisch = Number(r.alter_s) < 30
         if(!frisch) continue
+        gelesen++
         const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan) : { symbol: plan.masterSymbol || '', dir: plan.richtung }
         const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
         const pos = (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol)
@@ -17801,7 +17824,7 @@
           const altPnl = liveAlt ? Number(liveAlt.pnl) : NaN
           const neuPnl = isFinite(pnl) ? pnl : null
           const gleich = liveAlt && liveAlt.offen === true && ((neuPnl == null && !isFinite(altPnl)) || (neuPnl != null && isFinite(altPnl) && Math.abs(neuPnl - altPnl) <= 0.01))
-          if(gleich && altTs && (Date.now() - altTs) < 2 * 60 * 1000) continue
+          if(!manuell && gleich && altTs && (Date.now() - altTs) < 2 * 60 * 1000) continue   // manuell: immer schreiben (Stempel „eben geholt")
           const live = { pnl: neuPnl, offen: true, at: nowIso }
           const base = Object.assign({}, plan.mt5Baseline || {}, { live })
           const { data, error } = await supabase.from('trade_plans').update({ mt5_baseline: base })
@@ -17820,9 +17843,21 @@
         // dann) — sonst könnte ein schneller TP vor dem ersten Tick den Plan ewig auf „Läuft" lassen.
         const scharf = tvV2Poll.wasOpen.has(pid) || !!(plan.mt5Baseline && plan.mt5Baseline.tv)
         if(!scharf) continue
-        const n = (tvV2Poll.streak.get(pid) || 0) + 1
+        let n = (tvV2Poll.streak.get(pid) || 0) + 1
         tvV2Poll.streak.set(pid, n)
-        if(n < 2) continue
+        if(n < 2){
+          // Manueller Rundgang (24.09.2026 abends): die zweite Messung sofort nachholen (4–7 s Streuung), damit
+          // ein Klick auf „P&L holen" das Ende erkennt — beim Stunden-Takt wären es sonst zwei Stunden.
+          if(!manuell) continue
+          await new Promise(res => setTimeout(res, 4000 + Math.random() * 3000))
+          let r2 = null
+          try{ r2 = await tvV2Lesen(konto, 45) }catch(_){ r2 = null }
+          if(!r2 || !r2.ok || r2.alter_s == null || Number(r2.alter_s) >= 30) continue
+          const pos2 = (r2.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol)
+            && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir))
+          if(pos2){ tvV2Poll.streak.set(pid, 0); continue }
+          r = r2; n = 2
+        }
         tvV2Poll.streak.set(pid, 0)
         // IM STREAK-MOMENT einfrieren: Today's P&L jetzt = Endstand (Finn: „eine Position pro Tag").
         const fin = { today_pnl: (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null,
@@ -17847,8 +17882,41 @@
       }
     }catch(e){ console.warn('[tvV2]', e) }
     finally{ tvV2Poll.busy = false; tvV2NaechsterTick() }
+    return { ok:true, konten: gelesen }
   }
   tvV2NaechsterTick()
+
+  /* „P&L holen" (24.09.2026 abends, Finn: „wenn ich auf P&L holen drücke, holt es die P&Ls, schreibt sie in die
+   * Datenbank, und ich sehe sie auch auf dem MacBook — und vom MacBook aus drücken können"): am PC läuft der
+   * Rundgang sofort (manuell = jedes Konto einmal, Ende-Erkennung mit Doppel-Messung). Am Mac/Handy geht ein
+   * Signal {aktion:'rundgang'} an den PC-Tab (Muster Remote-Close); der Stand landet in trade_plans.mt5_baseline
+   * und damit auf jedem Gerät. Ergebnis als Toast. Eigene Verdrahtung des Knopfes, kein Sammel-Handler. */
+  async function tvV2PnlHolen(){
+    let _tp; try { _tp = tradePlans } catch(_){ _tp = [] }
+    const plans = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open')
+    const toast = (t) => { if(typeof atToast === 'function') atToast(t) }
+    if(!plans.length){ toast('Kein laufender Orbit-V2-Plan — nichts zu holen.'); return }
+    const btn = document.getElementById('tpPnlHolenBtn')
+    if(btn){ btn.disabled = true; btn.textContent = '⏳ P&L …' }
+    const fertig = () => { if(btn){ btn.disabled = false; btn.textContent = '↻ P&L holen' } }
+    try{
+      if(MT5_LOCAL && typeof window.mtcApi === 'function'){
+        const r = await tvV2PollTick({ manuell: true })
+        if(r && r.ok) toast(`P&L geholt: ${r.konten} von ${plans.length} Konten gelesen — steht in der DB.`)
+        else toast(r && r.grund === 'laeuft_schon' ? 'Rundgang läuft gerade schon.' : r && r.grund === 'order_laeuft' ? 'Puls platziert gerade eine Order — gleich nochmal.' : 'Rundgang nicht möglich (Backend/Reader?).')
+        try{ renderTradePlans() }catch(_){}
+        return
+      }
+      // Mac/Handy: Signal an den PC-Tab, der den Rundgang fährt
+      const { error } = await supabase.from('order_signale')
+        .insert({ plan_id: String(plans[0].id), params: { aktion: 'rundgang', konten: plans.length } })
+      if(error) throw error
+      toast(`Signal gesendet — der PC holt die P&L von ${plans.length} Konten (1–3 min), die Karten zeigen den Stand danach.`)
+    }catch(e){ toast('P&L holen fehlgeschlagen: ' + String((e && e.message) || e)) }
+    finally{ fertig() }
+  }
+  window.tvV2PnlHolen = tvV2PnlHolen
+  document.getElementById('tpPnlHolenBtn')?.addEventListener('click', () => tvV2PnlHolen())
 
   /* Karten-Chip „MASTER +12,50 $" (Optik = mt5V2LivePnlInner, gleicher 5-s-Ticker über mt5LivePnlInner):
    * Zahl aus mt5_baseline.live.pnl, nur wenn live.at jünger als 3 min — sonst grau „Rundgang …". Steht am PC
@@ -17862,7 +17930,7 @@
       const st = MT5_LOCAL ? tvV2Poll.stand.get(String(p.id)) : null
       if(st && (Date.now() - st.at) < 5 * 60 * 1000){
         if(st.code === 'konto_nicht_erreicht' || st.code === 'kein_konto') return grau('Konto ?', st.code === 'kein_konto' ? 'Master-Konto hat keine External ID — unter Accounts nachtragen' : 'Puls hat das Tradovate-Konto in TradingView nicht erreicht')
-        return grau('Reader ?', 'Der Reader am PC fehlt oder antwortet nicht (Panel zu alt?)')
+        return grau('Reader ?', (st.code + (st.msg ? ': ' + st.msg : '')) || 'Der Reader am PC fehlt oder antwortet nicht (Panel zu alt?)')
       }
       const live = p.mt5Baseline && p.mt5Baseline.live
       const ts = live && live.at ? (Date.parse(live.at) || 0) : 0
@@ -17871,9 +17939,18 @@
       // Review-Finding K19 (24.09.2026): am Mac/Handy gibt es keinen PC-Heartbeat für den Rundgang — ohne
       // frischen Stand wäre „Rundgang …" eine Behauptung, dass ein PC liest. Dort dann nichts rendern;
       // nur am PC selbst (MT5_LOCAL) bleibt der graue Chip, weil der Rundgang hier wirklich läuft.
-      if(unfrisch && !MT5_LOCAL) return ''
-      if(unfrisch) return grau('Rundgang …', 'Puls liest das Konto alle 50–80 s in TradingView — noch kein frischer Stand')
-      const alter = Math.max(0, Math.round((Date.now() - ts) / 1000))
+      // Stunden-Takt (24.09.2026 abends): ein Stand ist selten „frisch" — den LETZTEN Wert mit Alter zeigen
+      // (gedämpft, „vor 23 min"), damit er auch am Mac steht; nur ohne jeden Wert bleibt der graue Chip (PC)
+      // bzw. nichts (Mac). Nie als live behaupten: das Alter steht dran.
+      const alter = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
+      if(unfrisch){
+        if(!live || !live.offen || !ts || !isFinite(v)) return MT5_LOCAL ? grau('Rundgang …', 'Rundgang stündlich oder per „P&L holen" — noch kein Stand') : ''
+        const alterTxt = alter < 3600 ? `vor ${Math.round(alter / 60)} min` : `vor ${(alter / 3600).toFixed(1).replace('.', ',')} h`
+        return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="Letzter Rundgang-Stand ${alterTxt} — „P&L holen" liest neu">`
+          + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+          + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'};opacity:.75">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
+          + `<span style="font-size:10px;color:var(--sub)">${alterTxt}</span></span>`
+      }
       return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="Live-P&L der Position (Orbit V2): aus dem letzten Rundgang in TradingView, vor ${alter} s">`
         + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
         + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $</b>`
@@ -28406,7 +28483,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.463'
+  const OS_TAB_BUILD = '2026-09-22.465'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -30041,6 +30118,22 @@
         // params.v2 gehört zu einem laufenden Echo-V2-/Orbit-V2-Plan. Ein alter PC-Build ohne diesen
         // Zweig lässt es liegen (der Echo-Zweig findet über mt5RouteResolve keinen Hedge-Login → continue),
         // es verfällt nach 3 min ehrlich — nie ein Klick aus Versehen.
+        // Rundgang auf Zuruf (24.09.2026 abends): „P&L holen" vom Mac/Handy — ein Signal, der PC-Tab mit
+        // Copier-Backend claimt es und fährt den manuellen Rundgang über alle laufenden Orbit-V2-Pläne.
+        if(String((sig.params || {}).aktion || '') === 'rundgang'){
+          if(!MT5_LOCAL || typeof window.mtcApi !== 'function') continue
+          const { data: clR } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clR || !clR.length){ _osStand = 'claim-verloren'; continue }
+          let rr = null
+          try{ rr = await tvV2PollTick({ manuell: true }) }catch(e){ rr = { ok:false, grund: String((e && e.message) || e) } }
+          await supabase.from('order_signale')
+            .update({ status: rr && rr.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
+                      ergebnis: rr && rr.ok ? { ok:true, msg:`P&L geholt: ${rr.konten} Konten gelesen`, konten: rr.konten } : { ok:false, msg:'Rundgang nicht möglich: ' + ((rr && rr.grund) || 'unbekannt') } })
+            .eq('id', sig.id)
+          continue
+        }
         if(String((sig.params || {}).aktion || '') === 'close' && routeIstV2(plan.route)){
           const absageV2 = async text => {
             await supabase.from('order_signale')

@@ -5581,6 +5581,17 @@ def _tv_frisch_lesen(ext, geschwister, t_ab, timeout_s, res):
             "msg": f"In {timeout_s:.0f} s kein beweisbarer Stand: {grund}."}
 
 
+def _absturz_ort(e):
+    """'funktion:zeile' der letzten Stelle in order_bot.py aus dem Traceback — fuer die Ferndiagnose."""
+    try:
+        import traceback
+        eigene = [f for f in traceback.extract_tb(e.__traceback__) if "order_bot" in str(f.filename)]
+        f = (eigene or traceback.extract_tb(e.__traceback__))[-1]
+        return f"{f.name}:{f.lineno}"
+    except Exception:
+        return "?"
+
+
 def modus_tvlesen(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None, "quelle": None}
@@ -8716,8 +8727,10 @@ def main():
         try:
             modus_tvlesen(cmd)
         except Exception as e:
+            # Ort dazu (24.09.2026 abends, Finn: 'der Reader ist aktiv, liest die Position trotzdem
+            # nicht' — in der DB stand nur 'absturz'): letzte eigene Stelle aus dem Traceback.
             print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
-                              "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e}"}))
+                              "msg": f"TV-Lesen abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvclose":
         # Orbit V2 schliessen (24.09.2026, Auto-Close 23:45–00:00 Dubai): Konto
