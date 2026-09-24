@@ -4720,6 +4720,49 @@ def _kapitel_heute_iso():
         return time.strftime("%Y-%m-%d", time.gmtime())
 
 
+# Kontrafakt-Statistik 24.09.2026, Finn abends: „mach MEHR Statistik, sauber" — das Frontend soll
+# Trades nach Tageszeit (Stunde in Dubai) und Haltedauer auswerten können. Die Stempel kommen aus
+# Supabase mal mit „Z", mal mit „+00:00", mal ganz ohne Zone (dann UTC, wie in _push_frisch).
+def _kapitel_ts(roh):
+    """ISO-Stempel → aware datetime (UTC bei fehlender Zone), None wenn leer/unparsebar."""
+    if not roh:
+        return None
+    try:
+        t = datetime.fromisoformat(str(roh).strip().replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t
+
+
+def _kapitel_stunde(roh):
+    """Stunde 0–23 des Stempels in KAPITEL_TZ (Asia/Dubai), None ohne parsebaren Stempel.
+    Dubai deshalb, weil Finns Handelstag dort läuft — UTC-Stunden würden die Session-
+    Auswertung um vier Stunden verschieben."""
+    t = _kapitel_ts(roh)
+    if t is None:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return t.astimezone(ZoneInfo(KAPITEL_TZ)).hour
+    except Exception:   # pragma: no cover — tzdata fehlt → UTC+4 fest (Dubai kennt keine Sommerzeit)
+        return (t.astimezone(timezone.utc).hour + 4) % 24
+
+
+def _kapitel_dauer_min(start_roh, ende_roh, max_tage=7):
+    """Haltedauer in ganzen Minuten zwischen zwei Stempeln. None, wenn einer fehlt, das Ende vor
+    dem Start liegt oder die Dauer über max_tage geht — das sind Datenfehler (nachgetragene
+    Trades, hängen gebliebene Pläne), keine Trades, und sie würden jeden Ø kaputtmachen."""
+    a, b = _kapitel_ts(start_roh), _kapitel_ts(ende_roh)
+    if a is None or b is None:
+        return None
+    sek = (b - a).total_seconds()
+    if sek < 0 or sek > max_tage * 86400:
+        return None
+    return int(round(sek / 60.0))
+
+
 def _kapitel_heute():
     """Kapitel des heutigen Tages (Asia/Dubai, KAPITEL_TZ) aus der Tabelle kapitel — dieselbe
     Regel wie die DB-Funktion kapitel_fuer(d): von <= heute und (bis leer oder
@@ -5447,6 +5490,12 @@ def admin_build_kapitel():
                     "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
                     "account_name": p.get("master_name") or "",
                     "datum": str(p.get("completed_at") or "")[:10],
+                    # 24.09.2026 „mach MEHR Statistik": Stunde (Dubai) + Haltedauer + Konto-ID, damit das
+                    # Frontend Tageszeit-, Dauer- und Je-Konto-Charts zeichnen kann. Ende = ended_at, sonst
+                    # completed_at (V2-Trades werden per „Erledigt" abgeschlossen, ended_at kann fehlen).
+                    "stunde": _kapitel_stunde(p.get("ended_at") or p.get("completed_at")),
+                    "dauer_min": _kapitel_dauer_min(p.get("started_at"), p.get("ended_at") or p.get("completed_at")),
+                    "account_id": str(p.get("master_account_id") or ""),
                     "master_pl": round(mpl, 2) if mpl is not None else None,
                     # Echo V2 ohne Symbol: Wurzel aus dem Firmen-Standard (symbol_quelle 'firma'), sonst leer → Frontend „CFD"
                     "master_symbol_root": wurzel or (firm_sym.get(_firm_norm(macc.get("firm")), "") if (macc and str(p.get("route") or "") == "mt5v2") else ""),
