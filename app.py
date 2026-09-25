@@ -369,6 +369,48 @@ def index():
         return send_from_directory(".", "prophos.html")
     return send_from_directory(".", "index.html")
 
+# ── Frontend-Version für den Build-Wächter (25.09.2026, Koordination: PC-Tabs liefen tagelang auf altem Stand — Mikes
+# pc-l5o8bv auf .544, aktuell .595). Der Wächter in prophos.html holt /mt5-copier/VERSION von der eigenen Origin; auf
+# localhost:5000 gab es die Route nicht (404), also blieb er still und der offene Tab alt (der Selbst-Update-Watcher
+# aktualisiert nur Backend/Copier). Quelle wie beim Frontend-Proxy oben: im Lokal-Modus (PROPHOS_FRONTEND) dieselbe
+# Remote-Origin, damit Version und ausgeliefertes HTML zusammenpassen; sonst (Railway) die Datei im Repo. 30 s gecacht,
+# CORS kommt aus dem gemeinsamen after_request. ──
+_frontend_ver = {"at": 0.0, "wert": None}
+_FRONTEND_VER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+
+@app.route("/mt5-copier/VERSION", methods=["GET"])
+def frontend_version():
+    now = time.time()
+    if _frontend_ver["wert"] and now - _frontend_ver["at"] < 30:
+        wert = _frontend_ver["wert"]
+    else:
+        wert = None
+        remote = (os.environ.get("PROPHOS_FRONTEND") or "").strip()
+        if remote:
+            try:
+                m = re.match(r"^(https?://[^/]+)", remote)
+                if m:
+                    r = requests.get(m.group(1) + "/mt5-copier/VERSION", timeout=6, headers={"Cache-Control": "no-cache"})
+                    t = (r.text or "").strip()
+                    if r.ok and _FRONTEND_VER_RE.match(t):
+                        wert = t
+            except Exception as e:
+                print(f"[frontend] VERSION remote fehlgeschlagen ({type(e).__name__}) — nutze lokale Datei")
+        if not wert:
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mt5-copier", "VERSION"), "r", encoding="utf-8") as f:
+                    t = f.read().strip()
+                wert = t if _FRONTEND_VER_RE.match(t) else None
+            except Exception:
+                wert = None
+        if wert:
+            _frontend_ver.update(at=now, wert=wert)
+    if not wert:
+        return Response("", status=404, mimetype="text/plain")
+    resp = Response(wert, mimetype="text/plain")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
 # ── TopstepX Proxy ──
 @app.route("/api/<path:path>", methods=["GET","POST","OPTIONS"])
 def tsx_proxy(path):

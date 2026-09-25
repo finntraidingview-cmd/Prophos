@@ -14909,9 +14909,15 @@
    * die Homescreen-App hielt aber die alte Seite). pages.dev liefert
    * /mt5-copier/VERSION mit aus: Stand beim Laden merken, beim Zurückkehren
    * in die App (+ alle 5 min) neu prüfen — weicht er ab, erscheint die
-   * „Neue Version"-Pille, Tipp lädt neu. Auf localhost:5000 existiert die
-   * Route nicht (404) → Feature still aus; die PCs hat eh der
-   * Selbst-Update-Watcher in app.py. */
+   * „Neue Version"-Pille, Tipp lädt neu.
+   * PCs (25.09.2026, Koordination): die Tabs liefen dort tagelang auf altem
+   * Stand (Mikes pc-l5o8bv auf .544, aktuell .595) — localhost:5000 kannte
+   * /mt5-copier/VERSION nicht (404), der Wächter blieb still, und der
+   * Selbst-Update-Watcher in app.py erneuert nur Backend/Copier, nie den
+   * offenen Tab. app.py liefert die Route jetzt (Remote-Quelle wie das
+   * Frontend). Auf dem PC lädt der Tab bei neuerer Version SELBST neu —
+   * aber nur in einem ruhigen Moment (siehe bwRuhig), sonst in 20–60 s
+   * erneut. Mac/Handy behalten die Pille. */
   ;(async () => {
     const holen = async () => {
       try{
@@ -14940,8 +14946,77 @@
       const v = await holen()
       if(v && v !== basis) zeigen(v)
     }
-    document.addEventListener('visibilitychange', () => { if(!document.hidden) pruefen() })
-    setInterval(() => { if(!document.hidden) pruefen() }, 5 * 60 * 1000)
+    if(!MT5_LOCAL){
+      document.addEventListener('visibilitychange', () => { if(!document.hidden) pruefen() })
+      setInterval(() => { if(!document.hidden) pruefen() }, 5 * 60 * 1000)
+      return
+    }
+    // ── PC: selbst neu laden ──
+    // Maßstab ist der Stand des laufenden Codes (OS_TAB_BUILD), nicht der beim
+    // Laden gelesene VERSION-Wert — nur so erkennt der Tab, dass ER alt ist.
+    // Nur NEUERE Versionen zählen: hängt pages.dev beim Deploy kurz hinterher,
+    // soll kein Tab auf einen älteren Stand „aktualisieren".
+    const bwNr = v => { const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(v || ''); return m ? [m[1], Number(m[2])] : null }
+    const bwNeuer = (a, b) => { const x = bwNr(a), y = bwNr(b); if(!x || !y) return false; return x[0] !== y[0] ? x[0] > y[0] : x[1] > y[1] }
+    const bwEigen = () => { try{ return OS_TAB_BUILD }catch(_){ return basis } }
+    // Ruhiger Moment: kein Puls-Lauf, kein Fern-Lauf, kein Rundgang, kein
+    // Hedge-Auftrag dieses PCs unterwegs, kein offenes Popup, kein Feld mit
+    // angefangener Eingabe. Jede Prüfung einzeln in try — eine noch nicht
+    // initialisierte Variable darf den Wächter nicht umwerfen, zählt aber
+    // als „unruhig" (lieber später laden als mitten hinein).
+    const bwGrund = (seitMs) => {
+      const t = (f) => { try{ return f() }catch(_){ return true } }
+      if(t(() => _tpOrbitLaeuft)) return 'Puls läuft'
+      if(t(() => !!_rsAktiv)) return 'Fern-Lauf aktiv'
+      if(t(() => !!_osBusy || !!_osActive)) return 'Signal in Arbeit'
+      if(t(() => !!(tvV2Poll && tvV2Poll.busy))) return 'Rundgang läuft'
+      if(t(() => _hedgeBusy.size > 0)) return 'Hedge-Auftrag unterwegs'
+      // Hedge-Status am Plan ist weicher: ein hängengebliebenes 'oeffnet'
+      // ohne Ticket würde sonst jedes Update für immer sperren. Zählt nur für
+      // Hedges DIESES PCs und nur die ersten 30 min Wartezeit.
+      if(seitMs < 30 * 60 * 1000 && t(() => {
+        const pc = hedgePcId()
+        return (tradePlans || []).some(p => { const h = p && p.mt5Baseline && p.mt5Baseline.hedge; return !!h && (h.status === 'oeffnet' || h.status === 'schliesst') && (!h.pc || !pc || h.pc === pc) })
+      })) return 'Hedge öffnet/schließt'
+      if(document.querySelector('.modal-bg.open')) return 'Popup offen'
+      const a = document.activeElement
+      if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable) && (a.value || a.textContent || '').trim()) return 'Eingabe offen'
+      return ''
+    }
+    // Schleifenschutz: je Zielversion höchstens 3 Neuladungen, frühestens
+    // 5 min nach der letzten — liefert pages.dev die neue VERSION schon, das
+    // HTML aber noch aus dem Cache, bliebe der Tab sonst im Neulade-Kreis.
+    // Danach nur noch die Pille.
+    const BW_KEY = 'prophos_bw_reload'
+    const bwVersuche = ziel => { try{ const o = JSON.parse(localStorage.getItem(BW_KEY) || 'null'); return (o && o.ziel === ziel) ? o : { ziel, n: 0, at: 0 } }catch(_){ return { ziel, n: 0, at: 0 } } }
+    const bwLaden = window._bwLadenHaken || (() => location.reload())
+    let bwWarteSeit = 0, bwTimer = null
+    const bwPruefen = async () => {
+      if(bwTimer){ clearTimeout(bwTimer); bwTimer = null }
+      const v = await holen()
+      if(!v || !bwNeuer(v, bwEigen())){ bwWarteSeit = 0; return }
+      const vs = bwVersuche(v)
+      if(vs.n >= 3 || Date.now() - vs.at < 5 * 60 * 1000){ zeigen(v); return }
+      if(!bwWarteSeit) bwWarteSeit = Date.now()
+      const grund = bwGrund(Date.now() - bwWarteSeit)
+      if(grund){
+        const ms = 20000 + Math.round(Math.random() * 40000)
+        console.info('[build] ' + v + ' bereit, warte (' + grund + ') — neuer Versuch in ' + Math.round(ms / 1000) + ' s')
+        window._bwStatus = { ziel: v, grund, naechster: Date.now() + ms }
+        bwTimer = setTimeout(bwPruefen, ms)
+        return
+      }
+      try{ localStorage.setItem(BW_KEY, JSON.stringify({ ziel: v, n: vs.n + 1, at: Date.now() })) }catch(_){}
+      console.info('[build] lade neu: ' + bwEigen() + ' → ' + v)
+      window._bwStatus = { ziel: v, grund: '', geladen: Date.now() }
+      bwLaden()
+    }
+    window._bwPruefen = bwPruefen   // Test-Haken (Stub)
+    // PC-Tabs laufen oft im Hintergrund oder minimiert — deshalb hier auch
+    // bei document.hidden prüfen, alle 2 min.
+    setTimeout(bwPruefen, 15000)
+    setInterval(() => { if(!bwTimer) bwPruefen() }, 2 * 60 * 1000)
+    document.addEventListener('visibilitychange', () => { if(!document.hidden && !bwTimer) bwPruefen() })
   })()
 
   /* ========== DASHBOARD MOUNT ========== */
@@ -32072,7 +32147,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.598'
+  const OS_TAB_BUILD = '2026-09-22.599'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
