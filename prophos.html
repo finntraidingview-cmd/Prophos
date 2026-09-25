@@ -19645,6 +19645,57 @@
   }
   // Karten-Chip „FUSION SELL 0,59 Lot · −4,20 € · TP 30.590" — auf offenen Karten neben MASTER, auf Überprüfen/
   // Erledigt als Ergebnis. Eigener Knoten (nicht im data-mt5live-Ticker), eigener Knopf „Hedge zu" (data-plan-hedge-zu).
+  /* MASTER-WEG-SCHUTZ SICHTBAR (25.09.2026, Koordination: Moritz' Plan 552810b3 läuft auf pc-usq1i6, dort meldet echoplus_live
+   * positionen_ok = false — blowt der Master, schließt die Wächter-Linie „Master weg laut Reader" Fusion nicht, und niemand sieht es).
+   * NUR ANZEIGE: liest echoplus_live (für alle lesbar) alle 20 s, solange ein offener Fusion-Hedge sichtbar ist; die Schließ-Entscheidung
+   * (hedgeMasterWegEntscheid) bleibt unberührt. Maßgeblich ist der Reader auf dem PC des Hedges (hedge.pc) — nur dort läuft diese Linie. */
+  const _wdReaderLage = { at: 0, rows: new Map(), laeuft: false, geladen: false }
+  async function wdReaderLageLaden(){
+    if(_wdReaderLage.laeuft) return
+    _wdReaderLage.laeuft = true
+    try{
+      const { data, error } = await supabase.from('echoplus_live').select('pc_name,positionen_ok,positionen_ts,konto,updated_at')
+        .gte('updated_at', new Date(Date.now() - 24 * 3600000).toISOString())
+      if(!error){ _wdReaderLage.rows = new Map((data || []).filter(r => r && r.pc_name).map(r => [r.pc_name, r])); _wdReaderLage.geladen = true }
+      _wdReaderLage.at = Date.now()
+    }catch(_){}
+    finally{ _wdReaderLage.laeuft = false }
+  }
+  setInterval(() => {
+    try{
+      if(typeof currentUserId === 'undefined' || !currentUserId) return
+      const offen = h => h && (h.status === 'offen' || h.status === 'schliesst')
+      const karte = (tradePlans || []).some(p => p && p.route === 'tvv2' && p.mt5Baseline && offen(p.mt5Baseline.hedge))
+      const block = (typeof mkl !== 'undefined' && mkl.wd && Array.isArray(mkl.wd.plaene)) ? mkl.wd.plaene.some(pw => pw && offen(pw.hedge)) : false
+      if(karte || block) wdReaderLageLaden()
+    }catch(_){}
+  }, 20000)
+  setTimeout(() => { try{ if(typeof currentUserId !== 'undefined' && currentUserId) wdReaderLageLaden() }catch(_){} }, 6000)   // erster Stand ohne 20 s Wartezeit
+  // REIN RECHNEND (window._hedgeMasterWegStatus): kann die Linie „Master weg laut Reader" für diesen Hedge gerade greifen?
+  // row = echoplus_live-Zeile des Hedge-PCs (oder null), extId = External ID des Master-Kontos (oder '' = unbekannt, nicht geprüft)
+  // -> { aktiv, kurz, grund }
+  function hedgeMasterWegStatus(pc, row, extId, jetztMs){
+    const jetzt = jetztMs || Date.now(), uhr = ms => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if(!pc) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: 'Hedge ohne PC-Zuordnung — kein Wächter weiß, welcher Reader zählt' }
+    if(!row) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `kein Reader auf ${pc} — ohne Positionsliste schließt Fusion nicht, wenn der Master von Hand zu ist oder blowt (nur am TP über den Kurs-Feed)` }
+    const upd = Date.parse(row.updated_at || '') || 0
+    if(jetzt - upd > 60000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pc} meldet sich nicht (zuletzt ${upd ? uhr(upd) : '—'}) — ohne Positionsliste schließt Fusion nicht, wenn der Master weg ist` }
+    if(row.positionen_ok !== true) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `keine Positionsliste vom Reader auf ${pc} (TradingView-Konto-Tab liefert keine Positionen) — blowt der Master, bleibt Fusion offen` }
+    const pts = Date.parse(row.positionen_ts || '') || 0
+    if(pts && jetzt - pts > 30000) return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Positionsliste auf ${pc} veraltet (Stand ${uhr(pts)})` }
+    if(extId && row.konto && typeof hedgeKontoPasst === 'function' && !hedgeKontoPasst(row.konto, extId))
+      return { aktiv: false, kurz: 'Master-weg-Schutz aus', grund: `Reader auf ${pc} zeigt gerade Konto „${String(row.konto).slice(0, 40)}", der Plan braucht ${extId}` }
+    return { aktiv: true, kurz: 'Master-weg-Schutz aktiv', grund: `Reader auf ${pc} liefert die Positionsliste${extId ? (row.konto ? ` für ${extId}` : ' (Konto im Reader nicht gemeldet)') : ' (Konto nicht geprüft)'} — ist der Master ≥ 10 s weg, schließt der Wächter Fusion` }
+  }
+  window._hedgeMasterWegStatus = hedgeMasterWegStatus
+  function hedgeMasterWegHtml(p, h){
+    try{
+      if(!_wdReaderLage.geladen) return ''
+      const acc = (p.masterAccountId != null) ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) : null
+      const st = hedgeMasterWegStatus(h.pc || null, _wdReaderLage.rows.get(h.pc) || null, acc ? String(acc.externalId || '').trim() : '', Date.now())
+      return `<span style="font-size:10px;color:${st.aktiv ? '#15803d' : 'var(--sub)'};${st.aktiv ? '' : 'opacity:.8;'}" title="${escapeHtml(st.kurz + ': ' + st.grund)}">· ${st.aktiv ? '✓ ' : ''}${escapeHtml(st.kurz)}</span>`
+    }catch(_){ return '' }
+  }
   function hedgeChipHtml(p){
     try{
       if(!p || p.route !== 'tvv2') return ''
@@ -19662,7 +19713,7 @@
         const live = hedgeSoloLive(h.ticket)
         const pl = live ? Number(live.profit) : NaN
         const plHtml = isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'}">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:var(--sub)">${h.status === 'schliesst' ? 'schließt…' : 'offen'}</span>`
-        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>`,
+        return box(`<span style="font-size:11px;color:var(--sub)">${escapeHtml(String(h.richtung || '').toUpperCase())} ${Number(h.lots || 0).toLocaleString('de-DE')} Lot</span>${plHtml}<span style="font-size:10px;color:var(--sub)">${lvl}</span>${hedgeMasterWegHtml(p, h)}`,
           isFinite(pl) ? (pl >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)') : 'var(--bg)',
           (() => { const ws = h.waechter_stand || {}, x = p.richtung === 'sell' ? ws.tief_seit_open : ws.hoch_seit_open
                    const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : ws.kerzen_quelle === 'gemischt' ? 'Chart-Serie + Ticks/andere Wurzel mit Basis-Ausgleich' : ws.kerzen_quelle === 'andere-ohne-basis' ? '— nur andere Wurzel ohne Basis, zählt nicht' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
@@ -31577,7 +31628,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.589'
+  const OS_TAB_BUILD = '2026-09-22.590'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
