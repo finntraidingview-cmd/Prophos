@@ -18693,7 +18693,8 @@
   function hedgeNotfallFaktorFuer(punkte){
     const basis = hedgeNotfallFaktor(), p = Number(punkte)
     if(!(p > 0)) return basis
-    return Math.min(2, Math.max(basis, Math.round(((p + HEDGE_NOTFALL_MIN_PUNKTE) / p) * 1000) / 1000))
+    // Math.ceil statt round (Gegenprüfung 25.09.2026: round lieferte bei 27/34 Pkt nur 9,99 Pkt Abstand)
+    return Math.min(2, Math.max(basis, Math.ceil(((p + HEDGE_NOTFALL_MIN_PUNKTE) / p) * 1000) / 1000))
   }
   window._hedgeNotfallFaktorFuer = hedgeNotfallFaktorFuer
   // Schließ-Level über den Kurs-Feed: Master-TP ± Puffer (BUY-Master: darüber, SELL-Master: darunter)
@@ -19693,7 +19694,17 @@
       if(!_wdReaderLage.geladen) return ''
       const acc = (p.masterAccountId != null) ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) : null
       const st = hedgeMasterWegStatus(h.pc || null, _wdReaderLage.rows.get(h.pc) || null, acc ? String(acc.externalId || '').trim() : '', Date.now())
-      return `<span style="font-size:10px;color:${st.aktiv ? '#15803d' : 'var(--sub)'};${st.aktiv ? '' : 'opacity:.8;'}" title="${escapeHtml(st.kurz + ': ' + st.grund)}">· ${st.aktiv ? '✓ ' : ''}${escapeHtml(st.kurz)}</span>`
+      // Nur „aktiv" sichtbar (Finn 25.09.2026: der Reader liest die Position bewusst nicht — ein Dauer-Grau „aus" wäre Rauschen);
+      // der Grund für „aus" steht nur im Tooltip des Chips (hedgeMasterWegTitel)
+      return st.aktiv ? `<span style="font-size:10px;color:#15803d" title="${escapeHtml(st.kurz + ': ' + st.grund)}">· ✓ ${escapeHtml(st.kurz)}</span>` : ''
+    }catch(_){ return '' }
+  }
+  function hedgeMasterWegTitel(p, h){
+    try{
+      if(!_wdReaderLage.geladen) return ''
+      const acc = (p.masterAccountId != null) ? (accounts || []).find(a => String(a.id) === String(p.masterAccountId)) : null
+      const st = hedgeMasterWegStatus(h.pc || null, _wdReaderLage.rows.get(h.pc) || null, acc ? String(acc.externalId || '').trim() : '', Date.now())
+      return st.aktiv ? '' : `${st.kurz}: ${st.grund} — `
     }catch(_){ return '' }
   }
   function hedgeChipHtml(p){
@@ -19718,7 +19729,7 @@
           (() => { const ws = h.waechter_stand || {}, x = p.richtung === 'sell' ? ws.tief_seit_open : ws.hoch_seit_open
                    const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : ws.kerzen_quelle === 'gemischt' ? 'Chart-Serie + Ticks/andere Wurzel mit Basis-Ausgleich' : ws.kerzen_quelle === 'andere-ohne-basis' ? '— nur andere Wurzel ohne Basis, zählt nicht' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
-                   return lTxt + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
+                   return lTxt + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
           + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
@@ -30682,7 +30693,7 @@
     box.innerHTML = `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Kein Stop Loss</div>
          <div class="tp-wd-kachel-sub">Der Master läuft ohne SL in TradingView. Der Hedge endet mit dem Master — Take Profit, Auto-Close oder von Hand.</div></div>`
       + `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Notfall-SL Fusion</div>
-         <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal · mindestens ${HEDGE_NOTFALL_MIN_PUNKTE} Pkt hinter dem Master-TP</span></div>
+         <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal · ${(r.tpPkt > 0 && r.tpPkt * (notfall - 1) < HEDGE_NOTFALL_MIN_PUNKTE - 0.001) ? `⚠ bei diesem TP nur ${n(r.tpPkt * (notfall - 1), 1)} Pkt hinter dem Master-TP (Deckel 200 %)` : `mindestens ${HEDGE_NOTFALL_MIN_PUNKTE} Pkt hinter dem Master-TP`}</span></div>
          <div class="tp-wd-kachel-sub">Greift nur, wenn der Feed-Wächter das Schließen verpasst — dann zu bei ${n(r.tpPkt * notfall, 1)} Pkt hinter dem Fusion-Einstieg${r.tpPkt > 0 ? '' : ' (erst mit Take Profit)'}.</div></div>`
   }
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
@@ -31628,7 +31639,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.590'
+  const OS_TAB_BUILD = '2026-09-22.591'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
