@@ -19867,7 +19867,14 @@
     // die alte Abfrage holte beide Wurzeln aufsteigend in EINER Abfrage mit limit 3000, Supabase liefert aber höchstens 1000 Zeilen:
     // bei 903 MNQ + 494 NQ kamen nur die ÄLTESTEN 1000, alles nach ~19:02 UTC fehlte, im 1-h-Ausschnitt standen nur die zwei Kerzen
     // links und rechts der Lücke). Jetzt je Wurzel absteigend in Seiten à 1000 (höchstens 2), danach aufsteigend zusammengesetzt.
-    if(vollstaendig || !mkl.kerzen.length) q.push(mklKerzen24h(jetzt))
+    // Lücken-Nachtrag (25.09.2026, Finn-Screenshot 13:25: Chart springt von 05:11 direkt auf 11:01, obwohl tv_kurs_1m lückenlos ist —
+    // der 5-s-Nachtrag holt nur die letzten 3 min; war die Markt-Ansicht verlassen bzw. der Mac/Tab im Schlaf, kamen die Minuten
+    // dazwischen nie nach). Liegt die jüngste bekannte Kerze (beide Wurzeln) mehr als 3 min zurück, wird voll neu geladen — höchstens
+    // einmal je 60 s, damit bei geschlossenem Markt (Tagespause, Wochenende) nicht jeder Tick die 24 h zieht.
+    const kerzeLuecke = !!mkl.kerzen.length && !(jetzt - (mkl.kerzenBisMs || 0) <= 3 * 60000) && (jetzt - (mkl.kerzenVollAt || 0)) > 60000
+    const voll = vollstaendig || !mkl.kerzen.length || kerzeLuecke
+    if(voll) mkl.kerzenVollAt = jetzt
+    if(voll) q.push(mklKerzen24h(jetzt))
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
     // Nebenabfragen (Demo-Orders, Reader-PCs) nur alle 60 s bzw. beim vollen Laden — im 5-s-Takt reichen Kurs + Kerzen-Nachtrag
     // (25.09.2026, Finn am Mac: „hängt noch relativ"; vorher vier Abfragen je Tick)
@@ -19890,10 +19897,11 @@
     mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
     mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
     const neu = (rz && rz.data) || []
+    for(const k of neu){ const t = Date.parse(k && k.minute) || 0; if(t > (mkl.kerzenBisMs || 0)) mkl.kerzenBisMs = t }   // jüngste Kerze, beide Wurzeln
     // Kerzen je Wurzel zählen (25.09.2026, Finn live: NQ nur in der Watchlist → 0 NQ-Kerzen, 16 MNQ — „der Chart ist kaputt"):
     // beim vollen Laden aus allen Zeilen, beim Nachtrag nur hochzählen, wenn eine Wurzel bisher leer war
     const zaehl = { NQ: 0, MNQ: 0 }; for(const k of neu) if(k && zaehl[k.wurzel] != null) zaehl[k.wurzel]++
-    if(vollstaendig || !mkl.kerzenJe) mkl.kerzenJe = zaehl
+    if(voll || !mkl.kerzenJe) mkl.kerzenJe = zaehl
     else for(const w of ['NQ', 'MNQ']) if(!mkl.kerzenJe[w] && zaehl[w]) mkl.kerzenJe[w] = zaehl[w]
     // Automatisch auf die Wurzel MIT Kerzen springen — einmalig, nie gegen einen bewussten Klick (mkl.wurzelBewusst)
     const andereW = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ'
@@ -19904,7 +19912,7 @@
       mkl.kursAlt = mkl.kursJe[mkl.wurzel] || null
       mkl.kurs = (mkl.kursAlt && mkl.kursAlt.alter_ms <= HEDGE_KURS_MAX_ALTER_MS) ? mkl.kursAlt : null
     }
-    if(vollstaendig || !mkl.kerzen.length) mkl.kerzen = neu
+    if(voll) mkl.kerzen = neu
     else {
       // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
       for(const k of neu){ const tk = Date.parse(k.minute) || 0; const i = mkl.kerzen.findIndex(x => x.wurzel === k.wurzel && (Date.parse(x.minute) || 0) === tk); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
@@ -31555,7 +31563,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.587'
+  const OS_TAB_BUILD = '2026-09-22.588'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
