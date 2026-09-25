@@ -4658,6 +4658,9 @@ HQ_VORGABEN = {
     # der erste Trade kommt zu 100 % vor, der zweite zu 50 %." Gewichteter Schnitt: (200 × 1 + 450 × 0,5) / 1,5
     # = 366,67 € je 4.500 $ → 0,0815 €/$.
     "Topstep|challenge": {"ziel_usd": 4500.0, "ziel_eur": 366.67},
+    # 25.09.2026, Finn: „bei FundedNext-Funded-Account machen 4.000 $ grob 850 €". Nur FundedNext (CFD) — „FundedNext Futures" ist
+    # eine eigene Firmengruppe (_firm_norm) und hat keine Vorgabe; sie wird hier bewusst nicht mitgenommen.
+    "FundedNext|funded": {"ziel_usd": 4000.0, "ziel_eur": 850.0},
     # 25.09.2026, Finn am Statistik-Tab: „Topstep · Winning Day" fehlt (Rückfall-Quote 0,55). Er nennt „250/150 $ entsprechen 90 €" —
     # der genaue Bezug ($-Betrag) klärt die Koordination mit ihm; dann diese Zeile mit seinem Wert einkommentieren (wie Tradeify|wd):
     # "Topstep|wd": {"ziel_usd": 250.0, "ziel_eur": 90.0},
