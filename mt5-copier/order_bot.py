@@ -5924,6 +5924,399 @@ def _absturz_ort(e):
         return "?"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ENDLESUNG-ZUSAETZE (25.09.2026, Koordination fuer Finn: „der P&L soll NACH jedem
+# Orbit-Trade perfekt in Prophos landen … am Order-Platzieren-Prozess NICHTS
+# aendern — nur am Ende etwas ergaenzen"). Nur mit cmd['ende'] (die Endlesung im
+# Frontend setzt es); Rundgang und Start-Baseline lesen wie bisher.
+#   (1) Befund: bei jedem Fehlschlag ein kompaktes UIA-Bild (Reiter, Panel-Kopf,
+#       Zahlen-Beschriftungen, Konten, Fenster) — damit ein Fall wie Jacobs
+#       (25.09., Reiter 'Positions' per UIA unsichtbar) aus der DB lesbar ist.
+#   (2) Rueckfall: ist gar kein Panel-Kopf zu sehen, EIN benannter Knopf
+#       'Trading Panel'/'Handelspanel' — aufklappen, lesen, wieder zuklappen.
+#   (3) Exit-Fill: Reiter der Order-Historie ('History'/'Orders') anklicken, die
+#       gefuellten Orders der Plan-Wurzel lesen, zurueck auf 'Positions'. Sonst
+#       kein Klick.
+# ═══════════════════════════════════════════════════════════════════════════
+TV_RX_HIST_TAB = re.compile(r"^(order history|orderhistorie|order-historie|history|historie|verlauf|"
+                            r"filled orders|ausgef(ü|ue)hrte orders)$", re.I)
+TV_RX_ORDERS_TAB = re.compile(r"^(orders|auftr(ä|ae)ge|orders?\s*\(\d+\))$", re.I)
+TV_RX_HANDELSPANEL = re.compile(r"^(trading panel|handelspanel|account manager|konto-?manager)$", re.I)
+TV_RX_ORD_STATUS = re.compile(r"^(status|zustand)$", re.I)
+TV_RX_ORD_PREIS = re.compile(r"^(avg\.?\s*fill\s*price|average\s*fill\s*price|fill\s*price|filled\s*price|"
+                             r"exec(ution)?\s*price|avg\.?\s*price|durchschn\S*\s*(ausf\S*\s*)?preis|"
+                             r"ausf(ü|ue)hrungspreis)", re.I)
+TV_RX_ORD_MENGE_GEF = re.compile(r"^(filled\s*(qty|quantity)?|ausgef(ü|ue)hrte\s*menge|gef(ü|ue)llt)$", re.I)
+TV_RX_ORD_ZEIT = re.compile(r"(time|zeit|datum|date|update|erstellt|placed|platziert)", re.I)
+TV_RX_ORD_ZEIT_FILL = re.compile(r"(fill|update|last|close|ausf|aktual|letzte)", re.I)
+TV_RX_ORD_TYP = re.compile(r"^(type|typ|order\s*type|orderart|auftragsart)$", re.I)
+TV_RX_ORD_GEFUELLT = re.compile(r"^(filled|fill|executed|ausgef(ü|ue)hrt|gef(ü|ue)llt)\b", re.I)
+TV_BEFUND_MAX = 2000
+
+
+def tv_tabelle_kopf_unter(roh, tab_r, max_tiefe=200):
+    """Kopfzelle 'Symbol' einer Tabelle UNTER einem Reiter (Orders/History): Mitte
+    0..max_tiefe px tiefer als der Reiter, linke Kante hoechstens 500 px daneben;
+    die oberste gewinnt. Seite/Menge derselben Zeile wie tv_positions_kopf. Rein
+    rechnend. -> (rs, rd|None, rq|None) oder None."""
+    if not tab_r:
+        return None
+    els = [(str(e[0]).strip(), tuple(e[1])) for e in roh or () if e[1]]
+    my = lambda r: (r[1] + r[3]) // 2
+    ty = my(tab_r)
+    kand = [r for n, r in els if TV_RX_POS_SYMBOL.search(n) and 0 < my(r) - ty <= max_tiefe and abs(r[0] - tab_r[0]) <= 500]
+    if not kand:
+        return None
+    rs = min(kand, key=lambda r: (r[1], r[0]))
+    seiten = [r for n, r in els if TV_RX_POS_SEITE.search(n) and abs(my(r) - my(rs)) <= 14 and r[0] > rs[0]]
+    mengen = [r for n, r in els if TV_RX_POS_MENGE.search(n) and abs(my(r) - my(rs)) <= 14 and r[0] > rs[0]]
+    rd = min(seiten, key=lambda r: r[0]) if seiten else None
+    rq = min((r for r in mengen if not rd or r[0] > rd[0]), key=lambda r: r[0], default=None)
+    return rs, rd, rq
+
+
+def tv_orders_spalten(roh, kopf):
+    """Kopfzeile einer Order-Tabelle -> benannte Baender (Muster tv_positions_spalten):
+    seite, menge, menge_gef ('Filled Qty'), preis ('Avg Fill Price'/'Fill Price'/
+    'Durchschn. Ausfuehrungspreis'), status, zeit (bevorzugt Fill/Update-Zeit), typ.
+    Rein rechnend. -> {'symbol': rect, 'y', 'koepfe': [namen], 'baender': [(name|None, l, r, rect)]}"""
+    rs, rd, rq = kopf
+    my = lambda r: (r[1] + r[3]) // 2
+    y0 = my(rs)
+    koepfe = []
+    for e in roh or ():
+        if not e[1]:
+            continue
+        n, r = " ".join(str(e[0]).split()), tuple(e[1])
+        if not n or len(n) > 40 or abs(my(r) - y0) > 14 or r[0] < rs[0]:
+            continue
+        if any(abs(r[0] - k[1][0]) <= 2 for k in koepfe):
+            continue
+        koepfe.append((n, r))
+    koepfe.sort(key=lambda k: k[1][0])
+    namen = {}
+    zeiten = []
+    for n, r in koepfe:
+        if r == tuple(rs):
+            namen[r] = "symbol"
+        elif TV_RX_ORD_MENGE_GEF.search(n) and "menge_gef" not in namen.values():
+            namen[r] = "menge_gef"
+        elif TV_RX_ORD_PREIS.search(n) and "preis" not in namen.values():
+            namen[r] = "preis"
+        elif TV_RX_POS_SEITE.search(n) and "seite" not in namen.values():
+            namen[r] = "seite"
+        elif TV_RX_POS_MENGE.search(n) and "menge" not in namen.values():
+            namen[r] = "menge"
+        elif TV_RX_ORD_STATUS.search(n) and "status" not in namen.values():
+            namen[r] = "status"
+        elif TV_RX_ORD_TYP.search(n) and "typ" not in namen.values():
+            namen[r] = "typ"
+        elif TV_RX_ORD_ZEIT.search(n):
+            zeiten.append((n, r))
+    if zeiten:
+        bevorzugt = [z for z in zeiten if TV_RX_ORD_ZEIT_FILL.search(z[0])]
+        namen[(bevorzugt or zeiten)[0][1]] = "zeit"
+    baender = []
+    for i, (n, r) in enumerate(koepfe):
+        rechts = (koepfe[i + 1][1][0] - 12) if i + 1 < len(koepfe) else (r[2] + 260)
+        baender.append((namen.get(r), r[0] - 12, rechts, r))
+    return {"symbol": tuple(rs), "y": y0, "koepfe": [n for n, _r in koepfe][:16], "baender": baender}
+
+
+def tv_orders_lesen(roh, kopf, max_zeilen=30):
+    """Zeilen einer Order-Tabelle (Symbol-Wort im Symbol-Band, Zellen ueber die
+    groesste x-Ueberlappung) -> [{'symbol','seite','menge','menge_gef','preis',
+    'status','zeit','typ','y'}] in Tabellen-Reihenfolge (oben -> unten). Rein rechnend."""
+    if not kopf:
+        return []
+    sp = tv_orders_spalten(roh, kopf)
+    my = lambda r: (r[1] + r[3]) // 2
+    rs = sp["symbol"]
+
+    def band_von(r):
+        best, best_ov = None, 0
+        for b in sp["baender"]:
+            ov = min(r[2], b[2]) - max(r[0], b[1])
+            if ov > best_ov:
+                best, best_ov = b, ov
+        return best
+
+    els = [(" ".join(str(e[0]).split()), tuple(e[1])) for e in roh or () if e[1] and str(e[0]).strip()]
+    zeilen_y = []
+    for n, r in els:
+        y = my(r)
+        if not (sp["y"] + 8 < y <= sp["y"] + 700) or " " in n or len(n) > 24:
+            continue
+        b = band_von(r)
+        if not b or b[0] != "symbol" or not TV_RX_POS_SYMBOLZELLE.match(n) or not tv_symbol_root(n):
+            continue
+        if any(abs(y - z[0]) <= 10 for z in zeilen_y):
+            continue
+        zeilen_y.append((y, n))
+    out = []
+    for y, sym in sorted(zeilen_y)[:max_zeilen]:
+        zellen = {}
+        for n, r in els:
+            if abs(my(r) - y) > 12 or r[0] < rs[0] - 30:
+                continue
+            b = band_von(r)
+            if not b or not b[0] or b[0] == "symbol":
+                continue
+            zellen.setdefault(b[0], []).append((r[0], n))
+
+        def text(k):
+            z = sorted(zellen.get(k) or [])
+            return " ".join(t for _x, t in z)[:40] if z else None
+        out.append({"symbol": sym[:30], "seite": text("seite"), "menge": text("menge"), "menge_gef": text("menge_gef"),
+                    "preis": text("preis"), "status": text("status"), "zeit": text("zeit"), "typ": text("typ"), "y": y})
+    return out
+
+
+def tv_zeit_lesen(text):
+    """Zeitstempel einer Order-Zeile -> 'JJJJ-MM-TT HH:MM:SS' (ohne Zeitzone — TradingView
+    zeigt die Zeitzone des Charts) oder None. Formate: 2026-09-25 01:11:14,
+    25.09.2026 01:11:14, 09/25/2026 01:11:14, Sep 25, 2026 01:11:14 (auch 12-h mit AM/PM)."""
+    t = " ".join(str(text or "").replace(",", " ").split())
+    if not t:
+        return None
+    mon = {m: i + 1 for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
+    mon.update({"mär": 3, "mai": 5, "okt": 10, "dez": 12})
+    zm = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?", t, re.I)
+    if not zm:
+        return None
+    h, mi, se = int(zm.group(1)), int(zm.group(2)), int(zm.group(3) or 0)
+    if zm.group(4):
+        h = (h % 12) + (12 if zm.group(4).lower() == "pm" else 0)
+    j = mo = d = None
+    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", t)
+    if m:
+        j, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", t)
+        if m:
+            d, mo, j = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        else:
+            m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", t)
+            if m:
+                mo, d, j = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            else:
+                m = re.search(r"([A-Za-zä]{3})[a-zä]*\.?\s+(\d{1,2})\s+(\d{4})", t)
+                if m and m.group(1).lower() in mon:
+                    mo, d, j = mon[m.group(1).lower()], int(m.group(2)), int(m.group(3))
+    if not (j and mo and d) or not (1 <= mo <= 12 and 1 <= d <= 31 and h < 24 and mi < 60 and se < 60):
+        return None
+    return f"{j:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{se:02d}"
+
+
+def tv_fill_waehlen(zeilen, symbol, richtung):
+    """Exit- und Einstiegs-Fill aus den Order-Zeilen (rein rechnend). Zaehlt nur Zeilen der
+    Plan-Wurzel, die GEFUELLT sind (Status 'Filled'/'Ausgefuehrt'; ohne Status-Spalte nur mit
+    gefuellter Menge > 0) und einen Preis tragen. Exit = Gegenseite der Plan-Richtung, Einstieg =
+    Plan-Seite. Welche: haben alle Kandidaten eine lesbare Zeit, die juengste (Exit) bzw. die
+    juengste VOR dem Exit (Einstieg) — sonst die oberste Zeile (TradingView listet neueste oben),
+    der Einstieg dann die oberste UNTER dem Exit. -> {'exit', 'einstieg', 'kandidaten', 'wahl'}"""
+    root = tv_symbol_root(symbol)
+    gegen = tv_gegenseite(richtung)
+    out = {"exit": None, "einstieg": None, "kandidaten": 0, "wahl": None}
+    if not root or richtung not in ("buy", "sell"):
+        return out
+    gut = []
+    for z in zeilen or ():
+        if tv_symbol_root(z.get("symbol")) != root:
+            continue
+        st = str(z.get("status") or "").strip()
+        mg = tv_zahl_lesen(z.get("menge_gef"))
+        if st:
+            if not TV_RX_ORD_GEFUELLT.search(st):
+                continue
+        elif not (mg and mg > 0):
+            continue
+        preis = tv_zahl_lesen(z.get("preis"))
+        if preis is None or preis <= 0:
+            continue
+        seite = str(z.get("seite") or "")
+        s_norm = "buy" if TV_RX_POS_LONGSHORT["buy"].search(seite) else "sell" if TV_RX_POS_LONGSHORT["sell"].search(seite) else None
+        if not s_norm:
+            continue
+        menge = mg if (mg and mg > 0) else tv_zahl_lesen(z.get("menge"))
+        gut.append({"preis": preis, "menge": abs(menge) if menge is not None else None, "seite": s_norm,
+                    "zeit": tv_zeit_lesen(z.get("zeit")), "zeit_text": (z.get("zeit") or "")[:30],
+                    "symbol": z.get("symbol"), "y": z.get("y")})
+    out["kandidaten"] = len(gut)
+    ex = [g for g in gut if g["seite"] == gegen]
+    ein = [g for g in gut if g["seite"] == richtung]
+    if not ex:
+        return out
+    if all(g["zeit"] for g in ex + ein):
+        out["wahl"] = "zeit"
+        out["exit"] = max(ex, key=lambda g: g["zeit"])
+        vor = [g for g in ein if g["zeit"] <= out["exit"]["zeit"]]
+        out["einstieg"] = max(vor, key=lambda g: g["zeit"]) if vor else None
+    else:
+        out["wahl"] = "oben"
+        out["exit"] = min(ex, key=lambda g: g["y"] or 0)
+        unter = [g for g in ein if (g["y"] or 0) > (out["exit"]["y"] or 0)]
+        out["einstieg"] = min(unter, key=lambda g: g["y"] or 0) if unter else None
+    return out
+
+
+def tv_befund_kompakt(roh, fenster, extra=None, max_bytes=TV_BEFUND_MAX):
+    """Kompaktes UIA-Bild fuer die Ferndiagnose (rein rechnend), JSON <= max_bytes:
+    Fenster, Reiter (TabItem + bekannte Reiter-Namen), Panel-Kopf ('Account Balance'…)
+    und Lage, Zahlen-Beschriftungen (Zusammenfassung), kontoartige Texte, Positions-Zone,
+    ein paar Texte der unteren Fensterhaelfte, Element-Zahl je Typ. extra = Felder des
+    Aufrufers (Konto, Code). Zu gross -> Listen werden von hinten gekuerzt."""
+    els = [(" ".join(str(e[0]).split()), tuple(e[1]), (e[2] if len(e) > 2 else "")) for e in roh or () if e[1]]
+    l, t, r, b = fenster if fenster else (0, 0, 0, 0)
+    h = max(1, b - t)
+    typen = {}
+    for _n, _r, ty in els:
+        typen[ty or "?"] = typen.get(ty or "?", 0) + 1
+    reiter = [f"{n[:24]}@{rr[0]},{rr[1]}" for n, rr, ty in els
+              if n and (ty == "TabItem" or TV_RX_POS_TAB.search(n) or TV_RX_ORDERS_TAB.search(n) or TV_RX_HIST_TAB.search(n))][:14]
+    kopf = [f"{n[:20]}@{rr[1]}" for n, rr, _ty in els if TV_RX_PANEL_KOPF.match(n)][:8]
+    try:
+        lage = tv_panel_lage([(n, rr, ty) for n, rr, ty in els], None, fenster) if fenster else {}
+    except Exception:
+        lage = {}
+    try:
+        einge = bool(tv_panel_eingeklappt([(n, rr, ty) for n, rr, ty in els], fenster)) if fenster else None
+    except Exception:
+        einge = None
+    try:
+        summ = tv_summary_uia([(n, rr, ty) for n, rr, ty in els], tv_summary_bereich([(n, rr, ty) for n, rr, ty in els], fenster))
+    except Exception:
+        summ = {}
+    konten = [n[:30] for n, _rr, _ty in els if TV_RX_KONTO_ARTIG.match(n)][:6]
+    knoepfe = [n[:24] for n, _rr, ty in els if ty == "Button" and TV_RX_HANDELSPANEL.search(n)][:4]
+    unten = []
+    for n, rr, ty in sorted(els, key=lambda e: (e[1][1], e[1][0])):
+        if n and len(n) <= 28 and rr[1] > t + h * 0.55 and not any(n == u.split("@")[0] for u in unten):
+            unten.append(f"{n}@{rr[0]},{rr[1]}")
+        if len(unten) >= 24:
+            break
+    try:
+        zone = tv_positions_zone([(n, rr, ty) for n, rr, ty in els], 10)
+    except Exception:
+        zone = ""
+    befund = {"fenster": [l, t, r - l, b - t] if fenster else None, "n": len(els),
+              "typen": dict(sorted(typen.items(), key=lambda x: -x[1])[:8]),
+              "reiter": reiter, "panel_kopf": kopf, "panel_lage": lage.get("zustand") if isinstance(lage, dict) else None,
+              "eingeklappt": einge, "summary": [f"{k[:24]}={str(v)[:16]}" for k, v in list((summ or {}).items())[:12]],
+              "konten": konten, "handelspanel_knopf": knoepfe, "pos_zone": str(zone)[:300], "unten": unten}
+    if extra:
+        befund.update({k: v for k, v in extra.items() if v not in (None, "", [], {})})
+    for feld in ("unten", "summary", "reiter", "typen", "pos_zone", "konten", "panel_kopf"):
+        if len(json.dumps(befund, ensure_ascii=False).encode("utf-8")) <= max_bytes:
+            break
+        while len(json.dumps(befund, ensure_ascii=False).encode("utf-8")) > max_bytes:
+            v = befund.get(feld)
+            if isinstance(v, list) and v:
+                v.pop()
+            elif isinstance(v, dict) and v:
+                v.pop(list(v.keys())[-1])
+            elif isinstance(v, str) and v:
+                befund[feld] = v[: max(0, len(v) - 60)]
+            else:
+                break
+    return befund
+
+
+def _tv_ende_befund(trail, extra=None):
+    """Befund JETZT (Fenster kurz suchen, ein UIA-Bild). Nie werfen."""
+    try:
+        w, fw = _tv_fenster_geduldig(trail, "", 4.0)
+        if not w:
+            return {"fenster": None, "fehler": ("TradingView-Fenster nicht gefunden: " + str(fw))[:200], **(extra or {})}
+        return tv_befund_kompakt(_tv_uia_roh(w, TV_UIA_LESEN_TYPEN), _tv_fenster_rect(w), extra)
+    except Exception as e:
+        return {"fehler": f"Befund abgebrochen: {type(e).__name__}: {e}"[:200], **(extra or {})}
+
+
+def _tv_reiter_klick(w, roh, muster, name, trail):
+    """GENAU EIN Reiter mit diesem Namen -> klicken. -> True/False (nie raten)."""
+    tabs = [e for e in roh or () if e[1] and muster.search(" ".join(str(e[0]).split()))
+            and (len(e) < 3 or e[2] in ("TabItem", "Button", "Text", ""))]
+    # Text + TabItem derselben Stelle zaehlen einmal
+    eindeutig = []
+    for e in tabs:
+        if not any(abs(e[1][0] - x[1][0]) <= 4 and abs(e[1][1] - x[1][1]) <= 4 for x in eindeutig):
+            eindeutig.append(e)
+    if len(eindeutig) != 1:
+        trail.append(f"Reiter {name}: {len(eindeutig)} Treffer — kein Klick")
+        return False
+    r = eindeutig[0][1]
+    ok, _f = _tv_uia_klick({"punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2)}, f"Reiter {name}", trail)
+    return bool(ok)
+
+
+def _tv_exit_fill_lesen(w, trail, symbol, richtung):
+    """(3) Order-Historie lesen: Reiter History (sonst Orders) anklicken, Tabelle darunter lesen,
+    Exit/Einstieg waehlen, zurueck auf 'Positions'. -> {'exit_fill', 'einstieg_fill', 'exit_diag'}"""
+    out = {"exit_fill": None, "einstieg_fill": None, "exit_diag": {}}
+    diag = out["exit_diag"]
+    try:
+        roh0 = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+        # Nur wenn der Rueckweg sicher ist: GENAU EIN Reiter 'Positions' — sonst bliebe TradingView womoeglich
+        # auf der Historie stehen, und der naechste Order-Beweis faende seine Positions-Tabelle nicht
+        pos_tabs = []
+        for e in roh0:
+            if e[1] and TV_RX_POS_TAB.search(" ".join(str(e[0]).split())) and (len(e) < 3 or e[2] in ("TabItem", "Button", "Text", "")) \
+                    and not any(abs(e[1][0] - x[0]) <= 4 and abs(e[1][1] - x[1]) <= 4 for x in pos_tabs):
+                pos_tabs.append(e[1])
+        if len(pos_tabs) != 1:
+            diag["fehler"] = f"Reiter 'Positions' nicht eindeutig ({len(pos_tabs)}) — Historie nicht angefasst"
+            return out
+        geklickt = None
+        for muster, name in ((TV_RX_HIST_TAB, "History"), (TV_RX_ORDERS_TAB, "Orders")):
+            if _tv_reiter_klick(w, roh0, muster, name, trail):
+                geklickt = (muster, name)
+                break
+        if not geklickt:
+            diag["fehler"] = "kein eindeutiger Reiter History/Orders"
+            return out
+        diag["reiter"] = geklickt[1]
+        roh, kopf, ende_t = [], None, time.time() + 4.0
+        while time.time() < ende_t:
+            _warte(0.6, 0.4)
+            roh = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+            tabs = [e[1] for e in roh if e[1] and geklickt[0].search(" ".join(str(e[0]).split()))]
+            kopf = tv_tabelle_kopf_unter(roh, min(tabs, key=lambda r: r[1]) if tabs else None)
+            if kopf:
+                break
+        if not kopf:
+            diag["fehler"] = "keine Kopfzeile 'Symbol' unter dem Reiter"
+            diag["zone"] = tv_befund_kompakt(roh, _tv_fenster_rect(w)).get("unten", [])[:14]
+            return out
+        diag["koepfe"] = tv_orders_spalten(roh, kopf)["koepfe"]
+        zeilen = tv_orders_lesen(roh, kopf)
+        diag["zeilen"] = [" | ".join(str(z.get(k) or "") for k in ("symbol", "seite", "menge_gef", "menge", "preis", "status", "zeit"))[:110]
+                          for z in zeilen[:4]]
+        wahl = tv_fill_waehlen(zeilen, symbol, richtung)
+        diag["kandidaten"], diag["wahl"] = wahl["kandidaten"], wahl["wahl"]
+        for k_in, k_out in (("exit", "exit_fill"), ("einstieg", "einstieg_fill")):
+            g = wahl.get(k_in)
+            if g:
+                out[k_out] = {"preis": g["preis"], "menge": g["menge"], "seite": g["seite"], "zeit": g["zeit"] or g["zeit_text"] or None,
+                              "symbol": g["symbol"], "quelle": "uia_" + geklickt[1].lower(), "wahl": wahl["wahl"]}
+        trail.append(f"Order-Historie ({geklickt[1]}): {len(zeilen)} Zeilen, {wahl['kandidaten']} gefuellt, "
+                     f"Exit {out['exit_fill']['preis'] if out['exit_fill'] else '-'}")
+    except Exception as e:
+        diag["fehler"] = f"{type(e).__name__}: {e}"[:160]
+    finally:
+        # zurueck auf 'Positions' — der Rundgang und der Order-Beweis erwarten ihn
+        try:
+            if diag.get("reiter"):
+                roh2 = _tv_uia_roh(w, TV_UIA_LESEN_TYPEN)
+                if not _tv_reiter_klick(w, roh2, TV_RX_POS_TAB, "Positions", trail):
+                    diag["zurueck"] = "Reiter Positions nicht eindeutig — steht noch auf " + str(diag.get("reiter"))
+                else:
+                    _warte(0.4, 0.3)
+        except Exception as e:
+            diag["zurueck"] = f"{type(e).__name__}"
+    return out
+
+
 def modus_tvlesen(cmd):
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start",
            "konto_aktiv": "", "konto_quelle": None, "quelle": None}
@@ -5932,7 +6325,21 @@ def modus_tvlesen(cmd):
     maximiert = [False]        # Panel per Hilfsklick hochgeholt -> in raus() wieder nach unten
     reader_da = [False]
 
+    panel_auf = [None]         # Rueckfall hat das Handelspanel per Knopf geoeffnet -> in raus() wieder zu
+    # Endlesung (25.09.2026): NUR mit cmd['ende'] — Befund bei Fehlschlag, Rueckfall Handelspanel, Exit-Fill.
+    # Hier oben, weil raus() es schon beim Befehls-Fehler braucht.
+    ende = bool(cmd.get("ende")) if isinstance(cmd, dict) else False
+
     def raus(code, msg, schritt, **extra):
+        # Endlesung: bei JEDEM Fehlschlag ein Befund — VOR dem Aufraeumen, er soll zeigen, was da war
+        if ende and code and "befund" not in extra and "befund" not in res:
+            res["befund"] = _tv_ende_befund(trail, {"code": code, "konto": res.get("konto_aktiv") or None})
+        if panel_auf[0]:
+            try:
+                _tv_uia_klick({"punkt": panel_auf[0]}, "Handelspanel wieder zu", trail)
+            except Exception:
+                pass
+            panel_auf[0] = None
         if maximiert[0]:
             maximiert[0] = False
             try:
@@ -5958,6 +6365,17 @@ def modus_tvlesen(cmd):
     timeout_s = tv_lesen_timeout(cmd)
     geschwister = [str(x).strip() for x in (cmd.get("geschwister") or [])
                    if len(_nur_alnum(x)) >= 3][:60]
+    e_symbol = str(cmd.get("symbol") or "").strip()
+    e_richtung = str(cmd.get("richtung") or "").strip().lower()
+
+    def ende_fill(w=None):
+        if not (e_symbol and e_richtung in ("buy", "sell")):
+            return {"exit_diag": {"fehler": "symbol/richtung fehlen im Befehl"}}
+        if w is None:
+            w, _fw = _tv_fenster_geduldig(trail, "", 6.0)
+            if not w:
+                return {"exit_diag": {"fehler": "TradingView-Fenster nicht gefunden"}}
+        return _tv_exit_fill_lesen(w, trail, e_symbol, e_richtung)
 
     # --- 0: Quelle waehlen — Reader, wenn da und neu genug, sonst UIA. Kein
     # Abbruch mehr ohne Reader (24.09.2026). Der billigste Blick zuerst.
@@ -5992,6 +6410,10 @@ def modus_tvlesen(cmd):
                         "konto_quelle": konto_quelle, "userscript": bf.get("version"),
                         "sprache_fremd": bool(bf.get("sprache_fremd")),
                         "summary_fehler": bf.get("summary_fehler"), "quelle": "reader"})
+            if ende:
+                res.update(ende_fill())
+                if today is None:
+                    res["befund"] = _tv_ende_befund(trail, {"code": "kein_today", "konto": res.get("konto_aktiv") or None})
             return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en)"
                         + (f", Today's P&L {today:g} ({today_label})" if today is not None else
                            ", Tages-G&V nicht gefunden — 'summary' in der Antwort zeigt die Labels"),
@@ -6012,9 +6434,30 @@ def modus_tvlesen(cmd):
         return raus("fenster", "TradingView-Fenster nicht gefunden — kein Stand. " + fw, "fenster")
     fenster[0] = w
     u = _tv_uia_stand(w, trail, None, None, maximiert)
+    if not u["ok"] and ende:
+        # (2) Rueckfall: gar kein Panel-Kopf ('Account Balance'/'Equity'/'Profit') zu sehen -> GENAU EIN benannter
+        # Knopf 'Trading Panel'/'Handelspanel' aufklappen, neu lesen; raus() klappt ihn wieder zu
+        roh_u = u.get("roh") or ()
+        if not any(e[1] and TV_RX_PANEL_KOPF.match(str(e[0]).strip()) for e in roh_u):
+            kn = [e for e in roh_u if e[1] and TV_RX_HANDELSPANEL.search(" ".join(str(e[0]).split()))
+                  and (len(e) < 3 or e[2] in ("Button", "TabItem", ""))]
+            if len(kn) == 1:
+                r_ = kn[0][1]
+                punkt = ((r_[0] + r_[2]) // 2, (r_[1] + r_[3]) // 2)
+                ok_k, _f = _tv_uia_klick({"punkt": punkt}, f"Handelspanel auf (Rueckfall, '{str(kn[0][0])[:24]}')", trail)
+                if ok_k:
+                    panel_auf[0] = punkt
+                    _warte(1.0, 0.5)
+                    u = _tv_uia_stand(w, trail, None, None, maximiert)
+            else:
+                trail.append(f"Rueckfall: kein Panel-Kopf, Handelspanel-Knopf {len(kn)}x — kein Klick")
     if not u["ok"]:
+        zus = {}
+        if ende:
+            zus["befund"] = tv_befund_kompakt(u.get("roh"), _tv_fenster_rect(w), {"code": u["code"], "konto": res.get("konto_aktiv") or None})
+            zus.update(ende_fill(w))
         return raus(u["code"], u["msg"], "lesen", konto_quelle=res.get("konto_quelle") or "uia",
-                    **_tv_today_aus_uia(u))
+                    **_tv_today_aus_uia(u), **zus)
     positionen = u["positionen"]
     res.update({"ok": True, "positionen": positionen, "offen": bool(positionen),
                 "avg_fill_je_wurzel": tv_avg_fill_je_wurzel(positionen),   # 25.09.2026: Nachtrag einstieg_nq
@@ -6022,6 +6465,10 @@ def modus_tvlesen(cmd):
                 "konto_quelle": res.get("konto_quelle") or "uia", "userscript": None,
                 "quelle": "uia", **_tv_today_aus_uia(u)})
     today, today_label = u["today_pnl"], u["today_label"]
+    if ende:
+        if today is None:
+            res["befund"] = tv_befund_kompakt(u.get("roh"), _tv_fenster_rect(w), {"code": "kein_today", "konto": res.get("konto_aktiv") or None})
+        res.update(ende_fill(w))
     return raus("", f"Konto {res['konto_aktiv'][:40]}: {len(positionen)} Position(en) (UIA)"
                 + (f", Today's P&L {today:g} ({today_label})" if today is not None else
                    ", Tages-G&V nicht gefunden — 'summary' in der Antwort zeigt die Labels"),

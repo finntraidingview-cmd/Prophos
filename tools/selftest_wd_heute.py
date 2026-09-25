@@ -29,7 +29,7 @@ def lade():
         return m.group(0)
 
     code = "\n".join([const("WD_HEUTE_PPL"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
-                      block("_wd_level"), block("_wd_konto_groesse"), block("_wd_heute_zeile"),
+                      block("_wd_level"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), block("_wd_heute_zeile"),
                       block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
     return ns

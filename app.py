@@ -6800,7 +6800,42 @@ def _wd_heute_zeile(p, acc, disp):
         # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
         "tv": {k: tv.get(k) for k in ("einstieg_nq", "einstieg_quelle", "einstieg_fill", "einstieg_symbol", "today_pnl_start", "datum_start") if k in tv},
         "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle") if k in final},
+        # Endlesung (25.09.2026): Stand der Puls-Lesung nach dem Ende (Versuche, Fehler, Befund, Exit-Fill) — Statuszeile + „Jetzt lesen" (Design)
+        "endlesung": _wd_endlesung_zeile(final),
     }
+
+
+def _wd_endlesung_signal(plan):
+    """REIN RECHNEND (testbar): Signal-Zeile fuer den Knopf „Jetzt lesen" (25.09.2026) → (zeile, None) oder (None, (http, text)).
+    Nur Orbit-V2-/Winning-Day-Plaene in „Ueberpruefen" mit Ende und OHNE gelesenes Today's P&L. Die Zeile gehoert dem
+    Plan-Besitzer (order_signale-RLS: nur eigene Zeilen) — so claimt sie dessen PC-Tab (orderSignalTick, aktion 'endlesung').
+    Handelstag und PC prueft der PC-Tab selbst (tvV2EndlesungGrund/PcPasst) und meldet den Grund im Ergebnis."""
+    if not plan:
+        return None, (404, "Plan nicht gefunden")
+    if plan.get("route") != "tvv2":
+        return None, (409, "Kein Orbit-V2-/Winning-Day-Plan")
+    if plan.get("status") != "review":
+        return None, (409, f"Plan ist nicht in „Überprüfen“ (Status {plan.get('status')})")
+    base = plan.get("mt5_baseline") if isinstance(plan.get("mt5_baseline"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else None
+    if not fin:
+        return None, (409, "Plan hat noch kein Ende")
+    if _wd_num(fin.get("today_pnl")) is not None or fin.get("quelle") == "puls":
+        return None, (409, "Today's P&L ist schon gelesen")
+    uid = str(plan.get("user_id") or "")
+    if len(uid) < 10:
+        return None, (409, "Plan ohne Besitzer")
+    return {"user_id": uid, "plan_id": str(plan.get("id")), "status": "wartet",
+            "params": {"aktion": "endlesung", "von": "admin"}}, None
+
+
+def _wd_endlesung_zeile(final):
+    """Endlesungs-Stand fuer die wd-heute-Zeile (Design-Statuszeile, auch fuer fremde Plaene) — nur die puls-Felder."""
+    final = final if isinstance(final, dict) else {}
+    keys = ("today_pnl", "quelle", "datum", "at", "puls_at", "puls_versuche", "puls_fehler", "puls_aufgegeben",
+            "puls_diagnose", "puls_flach", "exit_fill", "exit_diag", "ende_quelle")
+    out = {k: final.get(k) for k in keys if final.get(k) is not None}
+    return out or None
 
 
 def _wd_heute_behalten(z, tag):
@@ -7180,6 +7215,33 @@ def admin_wd_plaene():
                 return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
             except Exception as e:
                 return jsonify({"error": f"Nicht beendet ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "endlesung":
+            # „Jetzt lesen" (25.09.2026): Signal im Namen des Plan-Besitzers — sein PC-Tab liest Today's P&L + Exit-Fill
+            pid = str(daten.get("plan_id") or "").strip()
+            if len(pid) < 10:
+                return jsonify({"error": "plan_id fehlt"}), 400
+            try:
+                rows = sb_select("trade_plans", {"select": "id,route,status,user_id,mt5_baseline", "id": f"eq.{pid}", "limit": "1"})
+                zeile, fehler = _wd_endlesung_signal(rows[0] if rows else None)
+                if fehler:
+                    return jsonify({"error": fehler[1], "plan_id": pid}), fehler[0]
+                sig = sb_insert("order_signale", zeile)
+                return jsonify({"ok": True, "plan_id": pid, "signal_id": str((sig or {}).get("id") or "")})
+            except Exception as e:
+                return jsonify({"error": f"Signal nicht angelegt ({type(e).__name__})"}), 502
+        if daten.get("aktion") == "endlesung_stand":
+            # Stand eines Endlesungs-Signals (der Mac liest fremde order_signale per RLS nicht)
+            sid = str(daten.get("signal_id") or "").strip()
+            if len(sid) < 10:
+                return jsonify({"error": "signal_id fehlt"}), 400
+            try:
+                rows = sb_select("order_signale", {"select": "id,status,ergebnis,pc,updated_at,params", "id": f"eq.{sid}", "limit": "1"})
+                if not rows or (rows[0].get("params") or {}).get("aktion") != "endlesung":
+                    return jsonify({"error": "Signal nicht gefunden"}), 404
+                z = rows[0]
+                return jsonify({"ok": True, "status": z.get("status"), "ergebnis": z.get("ergebnis"), "pc": z.get("pc"), "updated_at": z.get("updated_at")})
+            except Exception as e:
+                return jsonify({"error": f"Stand nicht lesbar ({type(e).__name__})"}), 502
         if daten.get("aktion") == "erledigt":
             # Winning Day erledigt (25.09.2026): P&L von Hand, Fusion-P&L als 'wd_hedge' in Finanzen. Reihenfolge:
             # Zielkonto auflösen (ohne Konto bei slave_pl ≠ null: 409, NICHTS geschrieben) → Plan (optimistische

@@ -2597,6 +2597,12 @@ class Handler(BaseHTTPRequestHandler):
             cmd["sitzung_merken"] = bool(body.get("sitzung_merken"))
             g = body.get("geschwister")
             cmd["geschwister"] = [str(x).strip()[:60] for x in g][:60] if isinstance(g, list) else []
+            # Endlesung (25.09.2026): Ende-Modus des Bots — Befund bei Fehlschlag, Rueckfall Handelspanel,
+            # Exit-Fill aus der Order-Historie. Ohne 'ende' liest der Bot genau wie bisher (Rundgang, Start).
+            cmd["ende"] = bool(body.get("ende"))
+            cmd["symbol"] = str(body.get("symbol") or "").strip()[:30]
+            _ri = str(body.get("richtung") or "").strip().lower()
+            cmd["richtung"] = _ri if _ri in ("buy", "sell") else ""
             if not TV_ORDER_LOCK.acquire(blocking=False):
                 return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
                     "msg": "Es laeuft schon ein TradingView-Lauf (Order/Konto/Lesen) — spaeter erneut."},
@@ -2616,7 +2622,7 @@ class Handler(BaseHTTPRequestHandler):
                     # +110 statt +90 (Cross-Check 24.09.2026): der Konto-Schritt allein kann ohne Login-
                     # Wechsel ~105 s brauchen (TV-Start 45 + Lesen 40 + Dropdown), plus Lesephase — sonst
                     # killt das Panel den Bot kurz vor dem Stand. Deckel 300 < Proxy 310 (app.py).
-                    to = min(300, int(timeout_s) + 110)
+                    to = min(300, int(timeout_s) + 110 + (25 if cmd["ende"] else 0))   # Ende-Modus: Historie + Befund
                     if cmd["tv_username"]:
                         to = max(to, 260)
                     p = subprocess.run([sys.executable, bot, "tvlesen", json.dumps(cmd)],

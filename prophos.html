@@ -18582,10 +18582,11 @@
     }catch(_){ return {} }
   }
   window._tvV2KontoKontext = tvV2KontoKontext
-  async function tvV2Lesen(konto, timeoutS, plan){
+  async function tvV2Lesen(konto, timeoutS, plan, zusatz){
     if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
+    // zusatz (25.09.2026): {ende, symbol, richtung} nur von der Endlesung — Ende-Modus des Bots (Befund, Rückfall, Exit-Fill)
     const r = await window.mtcApi('tv-lesen', { method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify(Object.assign({ konto: String(konto), timeout_s: timeoutS || 45 }, tvV2KontoKontext(plan))) })
+      body: JSON.stringify(Object.assign({ konto: String(konto), timeout_s: timeoutS || 45 }, tvV2KontoKontext(plan), zusatz || {})) })
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
     return r
   }
@@ -19561,38 +19562,58 @@
     return (plaene || []).some(p => p && String(p.id) !== String(plan.id) && p.route === 'tvv2' && String(p.masterAccountId) === String(plan.masterAccountId)
       && p.startedAt && (Date.parse(p.startedAt) || 0) > endeMs && tvV2Handelstag(p.startedAt) === tag)
   }
-  // REIN RECHNEND: ist für diesen Plan jetzt eine Endlesung dran? (ohne PC-Prüfung — die macht der Takt)
-  function tvV2EndlesungFaellig(p, jetzt){
-    if(!p || p.route !== 'tvv2' || p.status !== 'review') return false
+  // REIN RECHNEND: warum ist für diesen Plan JETZT keine Endlesung dran? '' = dran (ohne PC-Prüfung — die macht der Aufrufer).
+  // force = Knopf „Jetzt lesen" (Design, 25.09.2026): ohne Pausen-, Versuchs- und Aufgegeben-Tor; Status, „schon gelesen" und
+  // Handelstag gelten weiter (danach steht Today's P&L auf dem neuen Tag — eine Lesung wäre falsch, nicht nur spät).
+  function tvV2EndlesungGrund(p, jetzt, force){
+    if(!p || p.route !== 'tvv2') return 'kein Orbit-V2-/Winning-Day-Plan'
+    if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
-    if(!fin || (typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || fin.quelle === 'puls' || fin.puls_aufgegeben) return false
-    const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
-    if(versuche >= TV_ENDLESUNG_MAX) return false
+    if(!fin) return 'Plan hat noch kein Ende'
+    if((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || fin.quelle === 'puls') return "Today's P&L ist schon gelesen"
     const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
-    if(tvV2Handelstag(jetzt) !== endeTag) return false
+    if(tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
+    if(force) return ''
+    if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
+    const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
     const letzte = Date.parse(fin.puls_at || '') || 0
-    return !letzte || versuche < 1 || (jetzt - letzte) >= TV_ENDLESUNG_PAUSE_S[Math.min(versuche - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000
+    if(letzte && versuche >= 1 && (jetzt - letzte) < TV_ENDLESUNG_PAUSE_S[Math.min(versuche - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000) return 'Pause bis zum nächsten Versuch'
+    return ''
   }
+  function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
   // Der PC, der liest: am Hedge (Winning Day) bzw. beim Start gemerkt — ohne Merker jeder PC-Tab des Profils (eine ID = ein PC)
+  function tvV2EndlesungPc(p){ const b = (p && p.mt5Baseline) || {}; return (b.hedge && b.hedge.pc) || (b.tv && b.tv.pc) || '' }
   function tvV2EndlesungPcPasst(p){
-    const b = (p && p.mt5Baseline) || {}
-    const pc = (b.hedge && b.hedge.pc) || (b.tv && b.tv.pc) || ''
+    const pc = tvV2EndlesungPc(p)
     return !pc || (typeof mt5FleetPcId === 'function' && pc === mt5FleetPcId())
   }
-  window._tvV2Endlesung = { auswerten: tvV2EndlesungAuswerten, faellig: tvV2EndlesungFaellig, frueher: tvV2FruehereAmTag, spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull }
+  // JSON-Objekt für die DB kappen (Befund ≤ 2 kB kommt schon so vom Bot — hier nur die Sicherung)
+  function tvJsonKurz(o, max){
+    if(o == null) return null
+    try{ const t = JSON.stringify(o); return t.length <= max ? o : { gekuerzt: true, text: t.slice(0, Math.max(0, max - 40)) } }catch(_){ return null }
+  }
+  window._tvV2Endlesung = { auswerten: tvV2EndlesungAuswerten, faellig: tvV2EndlesungFaellig, grund: tvV2EndlesungGrund, frueher: tvV2FruehereAmTag,
+    spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull, max: TV_ENDLESUNG_MAX, pause: TV_ENDLESUNG_PAUSE_S.slice() }
   function tvV2EndlesungAnstossen(pid){
     if(!MT5_LOCAL) return
     // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
     setTimeout(() => { tvV2EndlesungVersuch(pid).catch(e => console.warn('[endlesung]', e)) }, 15000 + Math.random() * 10000)
   }
-  async function tvV2EndlesungVersuch(pid){
+  // -> immer {ok, msg} (nie werfen) — für den Knopf „Jetzt lesen" und den Signal-Empfänger
+  async function tvV2EndlesungVersuch(pid, opts){
     pid = String(pid)
-    if(!MT5_LOCAL || _tvEndlesungLaeuft.has(pid)) return
+    const force = !!(opts && opts.force)
+    if(!MT5_LOCAL) return { ok: false, msg: 'Nur am PC mit TradingView möglich' }
+    if(_tvEndlesungLaeuft.has(pid)) return { ok: false, msg: 'Die Lesung für diesen Plan läuft gerade schon' }
     _tvEndlesungLaeuft.add(pid)
     try{
       let p0 = tradePlans.find(x => String(x.id) === pid)
       try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p0 = rowToPlan(data) }catch(_){}
-      if(!p0 || !tvV2EndlesungFaellig(p0, Date.now()) || !tvV2EndlesungPcPasst(p0)) return
+      if(!p0) return { ok: false, msg: 'Plan nicht gefunden' }
+      const grund = tvV2EndlesungGrund(p0, Date.now(), force)
+      if(grund) return { ok: false, msg: grund }
+      if(!tvV2EndlesungPcPasst(p0)) return { ok: false, msg: `Plan gehört zu PC ${tvV2EndlesungPc(p0)} — dort liest Puls` }
       const fin0 = p0.mt5Baseline.final
       const versuch = (Number(fin0.puls_versuche) || (fin0.puls_at ? 1 : 0)) + 1
       const konto = tvV2Konto(p0)
@@ -19600,8 +19621,10 @@
       const stopp = !konto ? 'Master-Konto ohne External ID' : tvV2SpaetererTrade(p0, fin0, _tp) ? 'Nach dem Ende hat auf dem Konto ein weiterer Trade begonnen — Today\'s P&L nicht mehr eindeutig' : ''
       if(stopp){
         try{ await baselinePatchIn(pid, 'final', { puls_at: new Date().toISOString(), puls_fehler: stopp, puls_aufgegeben: true }, 'review') }catch(_){}
-        return
+        return { ok: false, msg: stopp }
       }
+      const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p0) : { symbol: p0.masterSymbol || '', dir: p0.richtung }
+      const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
       // Eine Maus: Order/Schließen (_tpOrbitLaeuft) oder Rundgang (tvV2Poll.busy) → warten (8–14 s, höchstens ~3 min); 409 = belegt
       const t0 = Date.now()
       let r = null
@@ -19609,7 +19632,8 @@
         let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
         if(!belegt){
           tvV2Poll.busy = true
-          try{ r = await tvV2Lesen(konto, 45, p0) }catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
+          try{ r = await tvV2Lesen(konto, 45, p0, { ende: true, symbol: w.symbol || '', richtung: dir }) }
+          catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
           finally{ tvV2Poll.busy = false }
           if(!(r && !r.ok && r.code === 'puls_beschaeftigt')) break
         }
@@ -19618,29 +19642,37 @@
       }
       const p1 = tradePlans.find(x => String(x.id) === pid) || p0
       if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
-      const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p1) : { symbol: p1.masterSymbol || '', dir: p1.richtung }
-      const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
       const erg = tvV2EndlesungAuswerten(r, w.symbol, dir)
       const nowIso = new Date().toISOString()
-      const patch = erg.ok
-        ? { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null, puls_at: nowIso, puls_versuche: versuch,
-            puls_flach: erg.flach, puls_fehler: null, puls_konto: (r && r.konto_aktiv) || null }
-        : { puls_at: nowIso, puls_versuche: versuch, puls_fehler: erg.fehler }
+      const patch = { puls_at: nowIso, puls_versuche: versuch }
+      if(force) patch.puls_aufgegeben = false
+      if(erg.ok) Object.assign(patch, { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null,
+        puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null })
+      else Object.assign(patch, { puls_fehler: erg.fehler, puls_diagnose: tvJsonKurz((r && r.befund) || null, 2200) })
+      // (B) Exit-Fill aus der Order-Historie (Bot, Ende-Modus) — unabhängig davon, ob Today's P&L gelesen wurde
+      if(r && r.exit_fill && typeof r.exit_fill === 'object') patch.exit_fill = tvJsonKurz(r.exit_fill, 400)
+      else if(r && r.exit_diag && Object.keys(r.exit_diag).length) patch.exit_diag = tvJsonKurz(r.exit_diag, 800)
       let neu = null
-      try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return }
-      if(!neu) return   // Plan nicht mehr in „Überprüfen" (schon abgehakt) — nichts mehr anfassen
+      try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
+      if(!neu) return { ok: false, msg: 'Plan ist nicht mehr in „Überprüfen" — nichts geschrieben' }
+      // Einstiegs-Fill an tv.einstieg_fill, falls noch nicht da
+      if(r && r.einstieg_fill && typeof r.einstieg_fill === 'object' && !(neu.tv && neu.tv.einstieg_fill)){
+        try{ const n2 = await baselinePatchIn(pid, 'tv', { einstieg_fill: tvJsonKurz(r.einstieg_fill, 400) }, 'review'); if(n2) neu = n2 }catch(_){}
+      }
       try{ _autoPnlCache.delete(pid) }catch(_){}
       const name = p1.masterName || 'Plan'
+      const exitTxt = patch.exit_fill ? ` · Exit-Fill ${patch.exit_fill.preis}` : ''
       if(!erg.ok){
         if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
-        if(versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        if(!force && versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
         try{ renderTradePlans() }catch(_){}
-        return
+        return { ok: false, msg: `Versuch ${versuch}: ${erg.fehler}${exitTxt}` }
       }
       const i = tradePlans.findIndex(x => String(x.id) === pid)
       const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : p1, { mt5Baseline: neu })
       const res = await _autoPnlFetchTvV2(planNeu)
       const m = res && res.masterPnl
+      let msg = `Today's P&L ${erg.today}${exitTxt}`
       if(m != null){
         // nur die Schätzung ersetzen (oder ein leeres Feld) — eine inzwischen eingetragene Zahl bleibt stehen
         const sz = fin0.master_pl_schaetzung
@@ -19649,13 +19681,52 @@
         const { data: d2, error: e2 } = await q.select('*')
         if(e2) console.warn('[endlesung] master_pl', e2.message || e2)
         else if(d2 && d2[0]){ const j = tradePlans.findIndex(x => String(x.id) === pid); if(j >= 0) tradePlans[j] = rowToPlan(d2[0]) }
-        if(typeof atToast === 'function') atToast(`✓ ${name}: Master-P&L aus TradingView ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`, 'end')
-      } else if(res && res.hinweis && typeof atToast === 'function') atToast(`${name}: Today's P&L gelesen (${erg.today}) — ${res.hinweis}`, 'end')
+        msg = `Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus TradingView${exitTxt}`
+        if(typeof atToast === 'function') atToast(`✓ ${name}: ${msg}`, 'end')
+      } else if(res && res.hinweis){
+        msg += ' — ' + res.hinweis
+        if(typeof atToast === 'function') atToast(`${name}: ${msg}`, 'end')
+      }
       try{ renderTradePlans() }catch(_){}
+      return { ok: true, msg }
+    }catch(e){
+      console.warn('[endlesung]', e)
+      return { ok: false, msg: 'Endlesung abgebrochen: ' + String((e && e.message) || e) }
     }finally{ _tvEndlesungLaeuft.delete(pid) }
   }
   // Frühere Aufrufer (hedgePlanAufReview) — derselbe Weg
   function hedgeReviewPulsLesen(pid){ return tvV2EndlesungVersuch(pid) }
+  /* „JETZT LESEN" (Design-Knopf in „Zum Abhaken" / Überprüfen, 25.09.2026) → Promise {ok, msg, signal?}. Am PC des Plans lokal
+   * (force). Sonst über Railway: PATCH /admin/wd-plaene {aktion:'endlesung'} legt order_signale {aktion:'endlesung'} im Namen des
+   * Plan-Besitzers an (order_signale-RLS: nur eigene Zeilen — Finns Mac könnte Jacobs PC sonst nicht erreichen); der PC-Tab des
+   * Besitzers claimt es (orderSignalTick). Hier wird bis ~4 min auf das Ergebnis gewartet ({aktion:'endlesung_stand'}). */
+  async function tvV2EndlesungJetzt(pid){
+    pid = String(pid || '')
+    if(!pid) return { ok: false, msg: 'plan_id fehlt' }
+    try{
+      const lokal = (tradePlans || []).find(x => String(x.id) === pid)
+      if(MT5_LOCAL && lokal && tvV2EndlesungPcPasst(lokal)) return await tvV2EndlesungVersuch(pid, { force: true })
+      const tok = await _pushTok(); if(!tok) return { ok: false, msg: 'nicht angemeldet' }
+      const rufe = async body => {
+        const r = await fetch(`${WATCHER_HOME}/admin/wd-plaene`, { method: 'PATCH', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        return { status: r.status, d: await r.json().catch(() => ({})) }
+      }
+      const a = await rufe({ aktion: 'endlesung', plan_id: pid })
+      if(a.status !== 200 || !a.d.ok) return { ok: false, msg: String(a.d.error || `Signal nicht angelegt (HTTP ${a.status})`) }
+      const sid = a.d.signal_id, t0 = Date.now()
+      while(Date.now() - t0 < 240000){
+        await new Promise(res => setTimeout(res, 6000 + Math.random() * 3000))
+        const st = await rufe({ aktion: 'endlesung_stand', signal_id: sid }).catch(() => null)
+        const d = st && st.d
+        if(d && d.status && !['wartet', 'laeuft'].includes(d.status)){
+          const e = d.ergebnis || {}
+          return { ok: !!e.ok, signal: true, msg: String(e.msg || (d.status === 'verfallen' ? 'Kein PC hat das Signal binnen 3 min übernommen — läuft Prophos auf dem PC des Plans?' : d.status)) }
+        }
+      }
+      return { ok: false, signal: true, msg: 'Der PC hat binnen 4 min nicht geantwortet — die Statuszeile zeigt den Stand, sobald er liest' }
+    }catch(e){ return { ok: false, msg: String((e && e.message) || e) } }
+  }
+  window._tvV2EndlesungJetzt = tvV2EndlesungJetzt
   // Nachhol-Takt (60–100 s, gestreut): eine fällige Endlesung je Takt — eine Maus, und die Order geht vor (_tpOrbitLaeuft prüft der Versuch)
   function tvV2EndlesungTakt(){
     try{
@@ -32492,7 +32563,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.604'
+  const OS_TAB_BUILD = '2026-09-22.605'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34206,6 +34277,23 @@
         // es verfällt nach 3 min ehrlich — nie ein Klick aus Versehen.
         // Rundgang auf Zuruf (24.09.2026 abends): „P&L holen" vom Mac/Handy — ein Signal, der PC-Tab mit
         // Copier-Backend claimt es und fährt den manuellen Rundgang über alle laufenden Orbit-V2-Pläne.
+        // Endlesung auf Zuruf (25.09.2026, Knopf „Jetzt lesen"): das Signal legt Railway im Namen des Plan-Besitzers an (order_signale-RLS).
+        // Nur der PC des Plans claimt (tvV2EndlesungPcPasst — Hedge-PC bzw. beim Start gemerkt; ohne Merker jeder PC-Tab des Profils).
+        // NICHT awaiten: die Lesung kann auf die Maus warten (bis ~3 min) — ein Order-Signal dahinter verfiele sonst nach 3 min.
+        if(String((sig.params || {}).aktion || '') === 'endlesung'){
+          if(typeof tvV2EndlesungVersuch !== 'function' || !tvV2EndlesungPcPasst(plan)) continue
+          const { data: clE } = await supabase.from('order_signale')
+            .update({ status:'laeuft', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '', updated_at: new Date().toISOString() })
+            .eq('id', sig.id).eq('status', 'wartet').select()
+          if(!clE || !clE.length){ _osStand = 'claim-verloren'; continue }
+          _osStand = 'claim-endlesung: ' + String(sig.id).slice(0, 8)
+          tvV2EndlesungVersuch(plan.id, { force: true })
+            .then(er => supabase.from('order_signale').update({ status: er && er.ok ? 'fertig' : 'fehler', updated_at: new Date().toISOString(),
+                                                                 ergebnis: er || { ok: false, msg: 'keine Antwort' } }).eq('id', sig.id))
+            .catch(e => supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
+                                                                 ergebnis: { ok: false, msg: 'Endlesung abgebrochen: ' + String((e && e.message) || e) } }).eq('id', sig.id))
+          continue
+        }
         if(String((sig.params || {}).aktion || '') === 'rundgang'){
           if(!MT5_LOCAL || typeof window.mtcApi !== 'function') continue
           const { data: clR } = await supabase.from('order_signale')

@@ -1758,6 +1758,7 @@ def main():
     results.append(test_solo_riegel())
     results.append(test_pc_id())
     results.append(test_lese_instanz())
+    results.append(test_endlesung_bausteine())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2151,6 +2152,99 @@ def test_lese_instanz():
         panel.HERE, panel.PLANS_FILE = here_alt, pf_alt
     if ok:
         print("✓ Lese-Instanz: frisch → Master-Stand (alive bleibt falsch), alt/fremd/halb/fehlend → nichts, Copier gewinnt")
+    return ok
+
+
+def test_endlesung_bausteine():
+    """Endlesung-Zusaetze im Bot (25.09.2026): Order-Historie lesen (EN/DE), Exit-/Einstiegs-Fill waehlen,
+    Zeitformate, kompakter Befund <= 2 kB, Ende-Modus ohne Absturz beim Befehls-Fehler."""
+    import order_bot as ob, io, contextlib, json as _j
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Endlesung: " + name); ok = False
+
+    def zelle(n, x, y, w=50, typ="Text"):
+        return (n, (x, y, x + w, y + 16), typ)
+    en = [zelle("Positions", 10, 500, 60, "TabItem"), zelle("Orders", 80, 500, 50, "TabItem"),
+          zelle("Symbol", 10, 535), zelle("Side", 120, 535), zelle("Type", 180, 535), zelle("Qty", 240, 535),
+          zelle("Filled Qty", 300, 535, 70), zelle("Avg Fill Price", 380, 535, 90), zelle("Status", 480, 535),
+          zelle("Placing Time", 560, 535, 90), zelle("Update Time", 680, 535, 90)]
+    def zeile(y, sym, seite, typ, q, fq, preis, status, t_pl, t_up):
+        return [zelle(sym, 10, y), zelle(seite, 120, y), zelle(typ, 180, y), zelle(q, 240, y), zelle(fq, 300, y),
+                zelle(preis, 380, y, 90), zelle(status, 480, y), zelle(t_pl, 560, y, 110), zelle(t_up, 680, y, 110)]
+    en += zeile(565, "MNQZ6", "Sell", "Market", "2", "2", "30,812.25", "Filled", "2026-09-25 01:11:13", "2026-09-25 01:11:14")
+    en += zeile(590, "MNQZ6", "Buy", "Market", "2", "2", "30,745.00", "Filled", "2026-09-25 00:09:20", "2026-09-25 00:09:21")
+    en += zeile(615, "NQZ6", "Sell", "Limit", "1", "0", "", "Cancelled", "2026-09-24 10:00:00", "2026-09-24 10:05:00")
+    en += zeile(640, "MNQZ6", "Sell", "Limit", "2", "0", "", "Working", "2026-09-25 02:00:00", "2026-09-25 02:00:00")
+    en += zeile(665, "MNQZ6", "Sell", "Market", "2", "2", "30,500.00", "Filled", "2026-09-24 01:00:00", "2026-09-24 01:00:01")
+    tab = en[1][1]
+    kopf = ob.tv_tabelle_kopf_unter(en, tab)
+    chk("Kopf unter dem Reiter", bool(kopf) and kopf[0][1] == 535)
+    sp = ob.tv_orders_spalten(en, kopf)
+    namen = {b[0] for b in sp["baender"] if b[0]}
+    chk("Spalten benannt (EN)", {"symbol", "seite", "typ", "menge", "menge_gef", "preis", "status", "zeit"} <= namen)
+    chk("Zeit = Update Time", any(b[0] == "zeit" and b[3][0] == 680 for b in sp["baender"]))
+    zl = ob.tv_orders_lesen(en, kopf)
+    chk("5 Zeilen gelesen", len(zl) == 5 and zl[0]["preis"] == "30,812.25" and zl[0]["status"] == "Filled")
+    w = ob.tv_fill_waehlen(zl, "MNQZ6", "buy")
+    chk("Exit juengster gefuellter Sell", w["exit"] and w["exit"]["preis"] == 30812.25 and w["exit"]["menge"] == 2
+        and w["exit"]["zeit"] == "2026-09-25 01:11:14" and w["wahl"] == "zeit")
+    chk("Einstieg juengster Buy davor", w["einstieg"] and w["einstieg"]["preis"] == 30745.0)
+    chk("Working/Cancelled/andere Wurzel zaehlen nicht", w["kandidaten"] == 3)
+    w2 = ob.tv_fill_waehlen(zl, "MNQZ6", "sell")
+    chk("Sell-Plan: Exit ist der Buy", w2["exit"] and w2["exit"]["preis"] == 30745.0 and w2["einstieg"] and w2["einstieg"]["preis"] == 30500.0)
+    chk("ohne Richtung nichts", ob.tv_fill_waehlen(zl, "MNQZ6", "")["exit"] is None)
+    ohne_zeit = [dict(z, zeit=None) for z in zl]
+    w3 = ob.tv_fill_waehlen(ohne_zeit, "MNQZ6", "buy")
+    chk("ohne Zeiten: oberste Zeile, Einstieg darunter", w3["wahl"] == "oben" and w3["exit"]["preis"] == 30812.25 and w3["einstieg"]["preis"] == 30745.0)
+    chk("nur Einstieg, kein Exit -> nichts", ob.tv_fill_waehlen([z for z in zl if z["seite"] == "Buy"], "MNQZ6", "buy")["exit"] is None)
+    # Deutsch, ohne Status-Spalte (dann zaehlt die ausgefuehrte Menge)
+    de = [zelle("Positionen", 10, 500, 70, "TabItem"), zelle("Historie", 90, 500, 60, "TabItem"),
+          zelle("Symbol", 10, 535), zelle("Seite", 120, 535), zelle("Menge", 240, 535), zelle("Ausgeführte Menge", 300, 535, 70),
+          zelle("Durchschn. Ausführungspreis", 380, 535, 90), zelle("Zeit", 560, 535)]
+    de += [zelle("NQZ6", 10, 565), zelle("Verkauf", 120, 565), zelle("1", 240, 565), zelle("1", 300, 565), zelle("30.812,25", 380, 565, 90), zelle("25.09.2026 01:11:14", 560, 565, 120)]
+    de += [zelle("NQZ6", 10, 590), zelle("Kauf", 120, 590), zelle("1", 240, 590), zelle("1", 300, 590), zelle("30.745,00", 380, 590, 90), zelle("25.09.2026 00:09:21", 560, 590, 120)]
+    kd = ob.tv_tabelle_kopf_unter(de, de[1][1])
+    wd = ob.tv_fill_waehlen(ob.tv_orders_lesen(de, kd), "NQZ6", "buy")
+    chk("deutsch: Exit 30.812,25, Einstieg 30.745", wd["exit"] and wd["exit"]["preis"] == 30812.25 and wd["einstieg"]["preis"] == 30745.0
+        and wd["exit"]["zeit"] == "2026-09-25 01:11:14")
+    # Zeitformate
+    zt = {"2026-09-25 01:11:14": "2026-09-25 01:11:14", "25.09.2026 01:11": "2026-09-25 01:11:00",
+          "09/25/2026 1:11:14 PM": "2026-09-25 13:11:14", "Sep 25, 2026 01:11:14": "2026-09-25 01:11:14",
+          "25 Sep": None, "": None, "01:11:14": None}
+    chk("Zeitformate", all(ob.tv_zeit_lesen(k) == v for k, v in zt.items()))
+    # Befund
+    gross = en + [(f"Text {i} lang lang lang", (5 + i, 700 + i, 60 + i, 716 + i), "Text") for i in range(400)] \
+        + [("Account Balance", (300, 470, 400, 486), "Text"), ("150,373.00", (410, 470, 480, 486), "Text"),
+           ("FTDFYSLX150372060459", (20, 460, 200, 476), "Button")]
+    bf = ob.tv_befund_kompakt(gross, (0, 0, 1600, 900), {"code": "tabelle_unklar", "konto": "FTDFYSLX150372060459"})
+    groesse = len(_j.dumps(bf, ensure_ascii=False).encode("utf-8"))
+    chk(f"Befund <= 2 kB ({groesse})", groesse <= 2000)
+    chk("Befund traegt Reiter, Kopf, Konto, Code", any(x.startswith("Positions@") for x in bf["reiter"]) and bf["panel_kopf"]
+        and "FTDFYSLX150372060459" in bf["konten"] and bf["code"] == "tabelle_unklar" and bf["fenster"] == [0, 0, 1600, 900])
+    chk("Befund ohne Fenster/leer wirft nicht", isinstance(ob.tv_befund_kompakt([], None), dict))
+    # Ende-Modus: Befehls-Fehler darf nicht an 'ende' scheitern (Befund-Versuch ohne Windows)
+    puf = io.StringIO()
+    with contextlib.redirect_stdout(puf):
+        ob.modus_tvlesen({"ende": True})
+    try:
+        r = _j.loads(puf.getvalue().strip().splitlines()[-1])
+    except Exception:
+        r = {}
+    chk("Ende-Modus Befehls-Fehler -> code befehl + befund", r.get("code") == "befehl" and isinstance(r.get("befund"), dict))
+    puf = io.StringIO()
+    with contextlib.redirect_stdout(puf):
+        ob.modus_tvlesen({})
+    try:
+        r2 = _j.loads(puf.getvalue().strip().splitlines()[-1])
+    except Exception:
+        r2 = {}
+    chk("ohne ende kein Befund (Rundgang unveraendert)", r2.get("code") == "befehl" and "befund" not in r2)
+    if ok:
+        print("✓ Endlesung: Order-Historie EN/DE, Exit/Einstieg nach Zeit oder Lage, Zeitformate, Befund <= 2 kB, Ende-Modus ohne Absturz")
     return ok
 
 
