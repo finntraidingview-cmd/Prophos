@@ -18938,17 +18938,27 @@
     const kt = orbitNum(x.kt), ppl = ORBIT_PPL[String(x.wurzel || '').toUpperCase()] || 0, dir = x.richtung
     if(!(kt > 0) || !(ppl > 0) || !(dir === 'buy' || dir === 'sell')) return null
     const preisVon = v => orbitNum((v && typeof v === 'object') ? v.preis : v)
-    let entry = preisVon(tv.einstieg_fill)
+    // Plausibilität der gelesenen Fills (Live-Daten .605: {preis, menge, seite, zeit, symbol, quelle, wahl 'zeit'|'oben'}): die Seite
+    // muss passen (Einstieg = Plan-Richtung, Ausstieg = Gegenseite); bei wahl 'oben' (keine lesbaren Zeiten, oberste Zeile genommen)
+    // zusätzlich die Menge = Kontrakte — sonst ist es womöglich der Fill eines anderen Trades und zählt nicht
+    const seiteVon = v => (v && typeof v === 'object' && typeof tvSeiteNorm === 'function') ? tvSeiteNorm(v.seite) : ''
+    const mengeOk = v => !(v && typeof v === 'object' && v.wahl === 'oben' && orbitNum(v.menge) != null && orbitNum(v.menge) !== kt)
+    const gegen = dir === 'buy' ? 'sell' : 'buy'
+    const einstiegOk = v => !(seiteVon(v) && seiteVon(v) !== dir) && mengeOk(v)
+    const exitOk = v => !(seiteVon(v) && seiteVon(v) !== gegen) && mengeOk(v)
+    let entry = einstiegOk(tv.einstieg_fill) ? preisVon(tv.einstieg_fill) : null
     if(!(entry > 1000) && tv.einstieg_quelle === 'fill') entry = orbitNum(tv.einstieg_nq)
     if(!(entry > 1000) && /^puls avg_fill/.test(String(h.einstieg_quelle || ''))) entry = orbitNum(h.einstieg_nq)
     if(!(entry > 1000)) return null
-    let exit = preisVon(fin.exit_fill), exitQuelle = exit > 1000 ? 'Exit-Fill' : null
+    let exit = exitOk(fin.exit_fill) ? preisVon(fin.exit_fill) : null, exitQuelle = exit > 1000 ? 'Exit-Fill' : null
     const tpEnde = String(fin.art || '') === 'tp' || ['tp_feed', 'level_tp'].includes(String(fin.grund || '')) || ['tp_feed', 'level_tp'].includes(String(h.grund || ''))
     if(!(exit > 1000) && tpEnde && orbitNum(x.master_tp) > 0){ exit = entry + (dir === 'buy' ? 1 : -1) * orbitNum(x.master_tp) / (ppl * kt); exitQuelle = 'TP-Limit' }
     if(!(exit > 1000)) return null
     const brutto = orbitR2((dir === 'buy' ? exit - entry : entry - exit) * ppl * kt)
     const g = orbitNum(gebuehrProKt), gebuehr = g != null ? orbitR2(g * kt) : null
-    return { brutto, gebuehr, netto: orbitR2(brutto - (gebuehr || 0)), entry, exit: Math.round(exit * 100) / 100, exitQuelle, kt, ppl }
+    // lernbar: Gebühren nur aus sicher zugeordneten Fills lernen (nicht aus wahl 'oben')
+    const schwach = [tv.einstieg_fill, exitQuelle === 'Exit-Fill' ? fin.exit_fill : null].some(v => v && typeof v === 'object' && v.wahl === 'oben')
+    return { brutto, gebuehr, netto: orbitR2(brutto - (gebuehr || 0)), entry, exit: Math.round(exit * 100) / 100, exitQuelle, kt, ppl, lernbar: !schwach }
   }
   window._tradePlAusFills = tradePlAusFills
   // REIN RECHNEND (window._orbitPlAbgleich): A (gelesen, Zahl|null), fills (tradePlAusFills-Ergebnis|null), C (Zahl|null), kt
@@ -18966,7 +18976,7 @@
   window._orbitPlAbgleich = orbitPlAbgleich
   // Gebühr je Kontrakt (Round Turn) aus einem Trade mit A und Brutto — plausibel 0–15 $, sonst nichts lernen
   function orbitGebuehrAusTrade(A, fills){
-    if(A == null || !fills || !(fills.kt > 0)) return null
+    if(A == null || !fills || !(fills.kt > 0) || fills.lernbar === false) return null
     const g = (fills.brutto - A) / fills.kt
     return (g >= 0 && g <= 15) ? Math.round(g * 1000) / 1000 : null
   }
@@ -32563,7 +32573,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.605'
+  const OS_TAB_BUILD = '2026-09-22.606'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
