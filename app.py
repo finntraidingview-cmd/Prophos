@@ -6749,7 +6749,19 @@ def _wd_heute_zeile(p, acc, disp):
         "quelle": "farmer" if (p.get("notes") or "") == "Winning-Day-Farmer" else "manuell",
         "verknuepft": bool(p.get("start_um_gestartet_at") or p.get("orbit_gesendet_at")),
         "handelstag": _cme_handelstag(p.get("started_at") or p.get("start_um") or p.get("planned_for") or p.get("created_at")),
+        # Abhak-Liste im Winning-Days-Block (Koordination 25.09.2026, Finn: „alle erledigten Winning Days unten abhaken — Master-
+        # und Fusion-P&L kommen automatisch rein"): die Rohwerte am Plan + woher der Master-Wert stammt
+        "master_pl_plan": _wd_num(p.get("master_pl")), "slave_pl": _wd_num(p.get("slave_pl")), "pl_quelle": p.get("pl_quelle"),
+        "final_quelle": final.get("quelle"), "master_pl_schaetzung": _wd_num(final.get("master_pl_schaetzung")),
+        "completed_at": p.get("completed_at"),
     }
+
+
+def _wd_heute_behalten(z, tag):
+    """REIN RECHNEND (testbar): gehört die Zeile in /admin/wd-heute? Laufende und zu prüfende (review) IMMER, egal welcher
+    Handelstag (Koordination 25.09.2026: sonst verschwinden Jacobs beendete Pläne um 22:00 UTC aus der Abhak-Liste);
+    alles andere (planned, completed) nur am angefragten Handelstag."""
+    return z.get("status") in ("open", "review") or z.get("handelstag") == tag
 
 
 def _wd_heute_sortkey(z):
@@ -6774,7 +6786,8 @@ def _wd_heute_sortieren(zeilen):
 def admin_wd_heute():
     """GET /admin/wd-heute → {tag, jetzt, plaene:[…]} — alle Winning-Day-Pläne des CME-Handelstags
     über alle IDs (route tvv2 UND (Farmer-Notiz ODER hedge_eur > 0)) plus alle laufenden (status
-    open), egal welcher Tag. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
+    open) und alle zu prüfenden (status review), egal welcher Tag. Zusätzlich je Plan (25.09.2026, Abhak-Liste):
+    master_pl_plan, slave_pl, pl_quelle, final_quelle, master_pl_schaetzung, completed_at. Auth wie /admin/wd-plaene (sb-token, Service-Key liest).
     Je Plan: {id (= plan_id), user_id, person, farbe_key, konto{name, firma, groesse, kontonr_ende,
     external_id}, route, richtung, kt (= kontrakte), symbol_root, master_tp, master_sl, status, start_um,
     started_at, ended_at, einstieg_nq, einstieg_quelle ('hedge'|'tv'|null), tp_level_nq, sl_level_nq (eingefroren am Hedge, sonst gerechnet),
@@ -6793,13 +6806,16 @@ def admin_wd_heute():
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 3 * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,"
                   "master_symbol,master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,"
-                  "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline")
+                  "start_um_gestartet_at,orbit_gesendet_at,started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,"
+                  "slave_pl,pl_quelle")
         # PostgREST: verschachteltes Oder heisst or(...) OHNE Punkt — "or.(...)" gab 400 Bad Request
         # (Finn 25.09.2026 am Markt-Block: "Winning Days des Tages nicht ladbar"). ilike statt eq, damit
         # Notes mit Zusatztext den Farmer-Plan nicht verlieren.
         wd = "or(notes.ilike.*Winning-Day-Farmer*,hedge_eur.gt.0)"
         rows = _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "and": f"({wd},created_at.gte.{seit})"})
         rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.open", "and": f"({wd})"})
+        # zu prüfende Winning Days jedes Tages (Abhak-Liste, 25.09.2026)
+        rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.review", "and": f"({wd})"})
         gesehen, plaene = set(), []
         for p in rows:
             pid = str(p.get("id"))
@@ -6816,7 +6832,7 @@ def admin_wd_heute():
         zeilen = []
         for p in plaene:
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp)
-            if z["status"] == "open" or z["handelstag"] == tag:
+            if _wd_heute_behalten(z, tag):
                 zeilen.append(z)
         return jsonify({"tag": tag, "jetzt": datetime.now(timezone.utc).isoformat(), "plaene": _wd_heute_sortieren(zeilen)})
     except Exception as e:

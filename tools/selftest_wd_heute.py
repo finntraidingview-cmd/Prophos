@@ -30,7 +30,7 @@ def lade():
 
     code = "\n".join([const("WD_HEUTE_PPL"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
                       block("_wd_level"), block("_wd_konto_groesse"), block("_wd_heute_zeile"),
-                      block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
+                      block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
     return ns
 
@@ -121,6 +121,18 @@ def main():
     check([x["status"] for x in s] == ["open", "open", "planned", "planned", "review", "completed"]
           and s[0]["started_at"] < s[1]["started_at"] and s[2]["start_um"] < s[3]["start_um"] and s[4]["ended_at"] > s[5]["ended_at"],
           "Sortierung: open (started_at auf) → planned (start_um auf) → Rest (ended_at ab)")
+
+    # Abhak-Liste (25.09.2026): review jedes Tages bleibt drin, completed/planned nur am Handelstag
+    B = a["_wd_heute_behalten"]
+    check(B({"status": "review", "handelstag": "2026-09-24"}, "2026-09-26") and B({"status": "open", "handelstag": "2026-09-20"}, "2026-09-26"),
+          "wd-heute: review und open jedes Tages bleiben")
+    check(B({"status": "completed", "handelstag": "2026-09-26"}, "2026-09-26") and not B({"status": "completed", "handelstag": "2026-09-25"}, "2026-09-26")
+          and not B({"status": "planned", "handelstag": "2026-09-25"}, "2026-09-26"), "wd-heute: completed/planned nur am Handelstag")
+    pr = dict(p2, id="pr", status="review", master_pl="271", slave_pl="-93.99", pl_quelle=None,
+              mt5_baseline={"final": {"quelle": "level", "master_pl_schaetzung": 271, "today_pnl": None}, "hedge": {"status": "geschlossen", "pl": -93.99, "grund": "tp_feed"}})
+    zr = a["_wd_heute_zeile"](pr, None, {})
+    check(zr["master_pl_plan"] == 271.0 and zr["slave_pl"] == -93.99 and zr["final_quelle"] == "level" and zr["master_pl_schaetzung"] == 271.0
+          and zr["hedge"]["pl"] == -93.99 and zr["pl_quelle"] is None, "Zeile: P&L-Felder für die Abhak-Liste (master_pl_plan, slave_pl, final_quelle, Schätzung)")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1

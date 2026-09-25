@@ -1871,6 +1871,18 @@
   #dashboard-view .mwd-nachtrag{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--sub)}
   #dashboard-view .mwd-nachtrag-btn{padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11.5px;font-weight:600;cursor:pointer}
   #dashboard-view .mwd-nachtrag-btn:hover{border-color:var(--violet);color:var(--violet)}
+  /* Zum Abhaken (25.09.2026): beendete Winning Days aller IDs, Master/Fusion vorbelegt, ein Knopf je Zeile */
+  #dashboard-view .mwd-abh-titel{display:flex;align-items:baseline;gap:8px;margin-top:14px;font-size:13px;font-weight:700;color:var(--ink)}
+  #dashboard-view .mwd-abh-titel span{font-weight:400;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwd-abh{margin-top:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--border-soft);background:var(--surface)}
+  #dashboard-view .mwd-abh-werte{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:stretch;margin-top:8px}
+  #dashboard-view .mwd-abh-werte .mwd-box{display:flex;flex-direction:column;margin:0}
+  #dashboard-view .mwd-abh-in{margin-top:3px;height:30px;padding:3px 8px;font-size:14px;font-weight:700}
+  #dashboard-view .mwd-abh-knopf{align-self:center;white-space:nowrap}
+  #dashboard-view .mwd-abh-erl{margin-top:12px;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwd-abh-erl summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
+  #dashboard-view .mwd-abh-erl-zeile{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 2px;border-bottom:1px solid var(--border-soft)}
+  #dashboard-view .mwd-abh-erl-zeile .mono{margin-left:auto}
   #dashboard-view .mwd-erl-kopf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12.5px;padding-bottom:12px;margin-bottom:14px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-erl-felder{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
   #dashboard-view .mwd-erl-felder .field{margin:0}
@@ -1893,6 +1905,9 @@
     #dashboard-view .mwd-fuss-chip{margin-left:0;flex-basis:100%}
     #dashboard-view .mwd-aktionen{margin-left:0;flex-basis:100%;justify-content:flex-end}
     #dashboard-view .mwd-erl-felder{grid-template-columns:1fr}
+    #dashboard-view .mwd-abh-werte{grid-template-columns:1fr 1fr}
+    #dashboard-view .mwd-abh-werte .mwd-box-sum{grid-column:1 / -1}
+    #dashboard-view .mwd-abh-knopf{grid-column:1 / -1;width:100%}
     #dashboard-view .mwd-btn{padding:7px 14px;font-size:13px}
   }
   @keyframes tc2PulseIssue{0%,100%{box-shadow:0 0 0 0 rgba(240,68,56,.35)}50%{box-shadow:0 0 0 4px rgba(240,68,56,0)}}
@@ -20596,6 +20611,8 @@
    * gestrichelt/gedämpft mit Startzeit, zu = gedämpft mit Ergebnis. Klick hebt die Linien im Chart hervor (mkl.wd.aktiv). */
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
+    // Tippt Finn gerade in der Abhak-Liste, nicht neu zeichnen — sonst verliert das Feld den Fokus (25.09.2026)
+    try{ const a = document.activeElement; if(a && a.classList && a.classList.contains('mwd-abh-in') && el.contains(a)) return }catch(_){}
     // Nur laufende und geplante Karten (Finn 25.09.2026: „Die vergangenen Trades sollen da nicht sein, das hat keinen Sinn");
     // beendete ohne eingetragenes Ergebnis erscheinen nur als EINE Nachtrag-Zeile unter den Karten, completed nie.
     const alle = mkl.wd.plaene || []
@@ -20716,8 +20733,126 @@
     const nachtragZeile = nachtrag.length ? `<div class="mwd-nachtrag"><span>${nachtrag.length} beendet ohne Ergebnis — Erledigt eintragen:</span>`
       + nachtrag.map(x => `<button type="button" class="mwd-nachtrag-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(x.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">${escapeHtml(kurzKonto(x))}</button>`).join('') + `</div>` : ''
     el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${nachtragZeile}`
+      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
+    mklWdAbhakenVerdrahten(el)
+  }
+  /* ZUM ABHAKEN (25.09.2026, Finn: „Wenn Winning Days erledigt werden, wie die bei Jacob heute Nacht, werden sie nur bei Jacobs ID
+   * unter ‚Erledigt' angezeigt. Ich will, dass sie auch unter Winning Days unten als alle erledigten Winning Days angezeigt werden,
+   * sodass ich sie dort abhaken kann. Der P&L kommt automatisch rein — Master- und Fusion-P&L."). Ersetzt die frühere Nachtrag-Zeile:
+   * alle Pläne auf „Überprüfen" über alle IDs (/admin/wd-heute liefert review jedes Tages), je Zeile Master $ und Fusion € vorbelegt
+   * mit ihrer Quelle, editierbar; „Abhaken" → PATCH /admin/wd-plaene {aktion:'erledigt'} (Plan completed + Fusion-P&L als 'wd_hedge'
+   * in Finanzen, idempotent über den notes-Schlüssel). Darunter eingeklappt die am Handelstag erledigten. Eingaben überleben das
+   * Neuzeichnen (mkl.wd.abh), der Block zeichnet nicht neu, solange ein Feld den Fokus hat. */
+  const MWD_TP_GRUENDE = new Set(['tp_feed', 'level_tp', 'tp'])
+  // REIN RECHNEND (window._mklWdAbhakenVorbelegung): Master $ / Fusion € + Quelle für eine wd-heute-Zeile
+  function mklWdAbhakenVorbelegung(pw){
+    const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const h = pw.hedge || null
+    let m = null, mq = 'bitte eintragen'
+    if(num(pw.master_pl_plan) != null){
+      m = num(pw.master_pl_plan)
+      mq = pw.pl_quelle === 'tv' ? "Today's P&L"
+        : (pw.final_quelle === 'level' && num(pw.master_pl_schaetzung) != null && Math.abs(m - num(pw.master_pl_schaetzung)) < 0.005) ? 'aus TP-Level geschätzt'
+        : pw.final_quelle === 'puls' ? 'aus TradingView gelesen' : 'eingetragen'
+    } else if(pw.master_pl && num(pw.master_pl.wert) != null){
+      m = num(pw.master_pl.wert); mq = pw.master_pl.quelle === 'final' ? "Today's P&L" : pw.master_pl.quelle === 'rundgang' ? 'letzter Rundgang' : 'am Plan'
+    } else if(num(pw.master_pl_schaetzung) != null){
+      m = num(pw.master_pl_schaetzung); mq = 'aus TP-Level geschätzt'
+    } else if(h && MWD_TP_GRUENDE.has(String(h.grund || '')) && num(pw.master_tp) > 0){
+      m = num(pw.master_tp); mq = 'aus TP-Level geschätzt'
+    }
+    let f = null, fq = num(pw.hedge_eur) > 0 ? 'bitte eintragen' : 'ohne Gegenhedge', fOffen = false
+    if(num(pw.slave_pl) != null){
+      f = num(pw.slave_pl); fq = (h && num(h.pl) != null && Math.abs(num(h.pl) - f) < 0.005) ? 'Deal-Historie' : 'eingetragen'
+    } else if(h && h.status === 'geschlossen' && num(h.pl) != null){
+      f = num(h.pl); fq = 'Deal-Historie'
+    } else if(h && ['offen', 'schliesst'].includes(h.status)){
+      const live = (typeof hedgeSoloLive === 'function') ? hedgeSoloLive(h.ticket) : null
+      fOffen = true; fq = 'Fusion noch offen — live'
+      if(live && isFinite(Number(live.profit))) f = Number(live.profit)
+    } else if(h && h.status === 'geschlossen'){ fq = 'P&L folgt (Deal-Historie)' }
+    return { m, mq, f, fq, fOffen }
+  }
+  window._mklWdAbhakenVorbelegung = mklWdAbhakenVorbelegung
+  const mklWdZahlLesen = v => { const t = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'); if(t === '') return null; const n = Number(t); return isFinite(n) ? n : NaN }
+  function mklWdAbhakenWerte(pw){
+    const v = mklWdAbhakenVorbelegung(pw), e = (mkl.wd.abh && mkl.wd.abh[String(pw.id)]) || {}
+    const fmt = n => n == null ? '' : Number(n).toFixed(2).replace('.', ',')
+    return Object.assign({}, v, { mText: ('m' in e) ? e.m : fmt(v.m), fText: ('f' in e) ? e.f : fmt(v.f), mHand: 'm' in e, fHand: 'f' in e })
+  }
+  function mklWdAbhakenHtml(){
+    const alle = mkl.wd.plaene || []
+    const offen = alle.filter(x => x.status === 'review').sort((a, b) => (Date.parse(a.ended_at || '') || 0) - (Date.parse(b.ended_at || '') || 0))
+    const erl = alle.filter(x => x.status === 'completed').sort((a, b) => (Date.parse(b.completed_at || b.ended_at || '') || 0) - (Date.parse(a.completed_at || a.ended_at || '') || 0))
+    if(!offen.length && !erl.length) return ''
+    const fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
+    const sig = (n, e) => (n == null || !isFinite(n)) ? '–' : `${n < 0 ? '−' : '+'}${Math.abs(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${e}`
+    const col = n => (n == null || !isFinite(n)) ? 'var(--sub)' : n >= 0 ? '#15803d' : '#b91c1c'
+    const uhr = t => t ? new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–'
+    const kopf = x => { const k = x.konto || {}, buy = x.richtung === 'buy', sell = x.richtung === 'sell'
+      const grund = (x.hedge && x.hedge.grund && typeof hedgeGrundText === 'function') ? hedgeGrundText(x.hedge.grund) : (x.final_quelle || x.grund || '')
+      return `<div class="mwd-kopf"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span>`
+        + `<span class="mwd-konto" title="${escapeHtml(String(k.name || ''))}">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>`
+        + ((buy || sell) ? `<span class="mwd-chip ${buy ? 'mwd-buy' : 'mwd-sell'}">${buy ? 'BUY' : 'SELL'}</span>` : '')
+        + (x.kt != null ? `<span class="mwd-kt mono">${Number(x.kt).toLocaleString('de-DE')} × ${escapeHtml(String(x.symbol_root || '?'))}</span>` : '')
+        + `<span class="mwd-status">zu ${uhr(x.ended_at)}${grund ? ' · ' + escapeHtml(String(grund)) : ''}</span></div>` }
+    const zeilen = offen.map(x => {
+      const pid = String(x.id), w = mklWdAbhakenWerte(x), busy = !!mkl.wd.busy[pid + ':abh']
+      const m = mklWdZahlLesen(w.mText), f = mklWdZahlLesen(w.fText)
+      const summe = (m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : (m != null && !isNaN(m) && !(Number(x.hedge_eur) > 0) ? m * fx : null)
+      const feld = (art, text, einheit, quelle, hand) => `<label class="mwd-box"><span class="mwd-box-t">${art === 'm' ? 'Master' : 'Fusion'} ${einheit}</span>`
+        + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
+        + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span></label>`
+      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}<div class="mwd-abh-werte">`
+        + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
+        + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
+        + `<button type="button" class="btn btn-primary mwd-btn mwd-abh-knopf" data-mwd-abhaken="${escapeHtml(pid)}" title="Plan erledigt setzen — Fusion-P&L wird in Finanzen als Winning-Days-Hedge gebucht"${busy ? ' disabled' : ''}>${busy ? 'bucht…' : 'Abhaken'}</button>`
+        + `</div></div>`
+    })
+    const erlZeilen = erl.map(x => { const k = x.konto || {}, m = (x.master_pl_plan != null) ? Number(x.master_pl_plan) : null, f = (x.slave_pl != null) ? Number(x.slave_pl) : null
+      const summe = (m != null ? m * fx : 0) + (f != null ? f : 0)
+      return `<div class="mwd-abh-erl-zeile"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span><span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.kontonr_ende ? ' …' + escapeHtml(String(k.kontonr_ende)) : ''}</span>`
+        + `<span>Master <b style="color:${col(m)}">${sig(m, '$')}</b></span><span>Fusion <b style="color:${col(f)}">${sig(f, '€')}</b></span><span class="mono" style="color:${col(summe)}">≈ ${sig(summe, '€')}</span></div>` })
+    return (offen.length ? `<div class="mwd-abh-titel">Zum Abhaken <span>· ${offen.length} beendet · alle IDs · Werte prüfen, dann abhaken</span></div>${zeilen.join('')}` : '')
+      + (erl.length ? `<details class="mwd-abh-erl"${mkl.wd.erlOffen ? ' open' : ''}><summary>Erledigt heute (${erl.length})</summary>${erlZeilen.join('')}</details>` : '')
+  }
+  function mklWdAbhakenVerdrahten(el){
+    el.querySelectorAll('.mwd-abh-in').forEach(inp => inp.addEventListener('input', () => {
+      const pid = inp.dataset.abhPlan; mkl.wd.abh = mkl.wd.abh || {}; mkl.wd.abh[pid] = Object.assign({}, mkl.wd.abh[pid], { [inp.dataset.abhFeld]: inp.value })
+      // nur die Summe dieser Zeile nachziehen — kein Neuzeichnen beim Tippen
+      const pw = (mkl.wd.plaene || []).find(x => String(x.id) === pid); const sEl = el.querySelector(`[data-abh-summe="${CSS.escape(pid)}"]`)
+      if(pw && sEl){ const w = mklWdAbhakenWerte(pw), m = mklWdZahlLesen(w.mText), f = mklWdZahlLesen(w.fText), fx = (Number(window._fxUsdEur) > 0) ? Number(window._fxUsdEur) : 0.85
+        const s0 = (m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : null
+        sEl.textContent = s0 == null ? '–' : `≈ ${s0 < 0 ? '−' : '+'}${Math.abs(s0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+        sEl.style.color = s0 == null ? 'var(--sub)' : s0 >= 0 ? '#15803d' : '#b91c1c' }
+    }))
+    el.querySelectorAll('[data-mwd-abhaken]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAbhaken(b.dataset.mwdAbhaken) }))
+    const det = el.querySelector('.mwd-abh-erl'); if(det) det.addEventListener('toggle', () => { mkl.wd.erlOffen = det.open })
+  }
+  async function mklWdAbhaken(pid){
+    const key = pid + ':abh'
+    if(mkl.wd.busy[key]) return
+    const pw = (mkl.wd.plaene || []).find(x => String(x.id) === String(pid)); if(!pw) return
+    const w = mklWdAbhakenWerte(pw), m = mklWdZahlLesen(w.mText), f = mklWdZahlLesen(w.fText)
+    if(m == null || isNaN(m)){ if(typeof atToast === 'function') atToast('Master-P&L fehlt oder ist keine Zahl — erst eintragen'); return }
+    if(f != null && isNaN(f)){ if(typeof atToast === 'function') atToast('Fusion-P&L ist keine Zahl'); return }
+    mkl.wd.busy[key] = true; mklWdRender()
+    try{
+      const d = await wdApi('PATCH', { aktion: 'erledigt', plan_id: String(pid), master_pl: Math.round(m * 100) / 100, slave_pl: f == null ? null : Math.round(f * 100) / 100 })
+      const k = pw.konto || {}
+      if(typeof atToast === 'function') atToast(`Abgehakt: ${pw.person || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}`
+        + (d.buchung ? ` · Fusion ${Number(d.buchung.amount).toLocaleString('de-DE', { minimumFractionDigits: 2 })} € in Finanzen` : (f == null ? ' · ohne Fusion-Buchung' : ''))
+        + (d.buchung_fehler ? ` · ⚠ ${d.buchung_fehler}` : ''))
+      if(mkl.wd.abh) delete mkl.wd.abh[String(pid)]
+      try{ if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase() }catch(_){}
+    }catch(e){
+      if(typeof atToast === 'function') atToast(`Nicht abgehakt: ${e && e.message || e}`)
+    }finally{
+      delete mkl.wd.busy[key]
+      try{ mkl.wd.at = 0; await mklWdLaden() }catch(_){}
+      mklWdRender()
+    }
   }
   /* ========== WACHHUND KURS-FEED + LÜCKEN (25.09.2026, Koordination: „der TV-Reader soll 24/7 laufen, der Bug darf nicht mehr
    * kommen") ==========
@@ -31878,7 +32013,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.594'
+  const OS_TAB_BUILD = '2026-09-22.595'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
