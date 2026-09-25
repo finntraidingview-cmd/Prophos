@@ -1757,6 +1757,7 @@ def main():
     results.append(test_solo_plan_kennung())
     results.append(test_solo_riegel())
     results.append(test_pc_id())
+    results.append(test_lese_instanz())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2089,6 +2090,67 @@ def test_pc_id():
         print("✗ pc_id: .tmp liegt noch"); ok = False
     if ok:
         print("✓ PC-Kennung: leer → gesetzt, zweiter Wert bleibt aussen vor, kaputte Datei → null, Format pc-[a-z0-9]{4,12}")
+    return ok
+
+
+def test_lese_instanz():
+    """Echo V2 ohne Copier (25.09.2026, Mikes PC pc-l5o8bv: zwei Echo-V2-Trades ohne Live-P&L, weil ohne
+    Copier niemand Balance/Equity schrieb): das Panel liest die Snapshot-Datei selbst. Frisch → Master-
+    Felder + lesen, alive bleibt falsch; alt, fremdes Konto, halb geschrieben oder fehlend → nichts;
+    läuft der Copier, gewinnt sein Status unverändert."""
+    import panel, tempfile, time, json as _j
+    from datetime import datetime
+    ok = True
+    d = tempfile.mkdtemp()
+    cfg = {"snapshot_file": "prophos_m1.csv", "common_files_dir": d, "master_expected_login": 14277928}
+    pfad = os.path.join(d, "prophos_m1.csv")
+    def schreiben(zeilen, alter_s=0):
+        open(pfad, "w", encoding="ascii").write("\n".join(zeilen) + "\n")
+        t = time.time() - alter_s
+        os.utime(pfad, (t, t))
+    voll = ["PROPHOS1;42;0;14277928;FundedNext-Server;2;1;50000.00;50123.45;USD;1",
+            "P;777;NDX100;0;0.50;1;18000.5;0;18100.0", "END;42;1"]
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Lese-Instanz: " + name); ok = False
+    schreiben(voll)
+    st = panel.lese_status(cfg)
+    chk("frische Datei liefert Master-Stand", bool(st) and st["lesen"] is True and st["note"] is None
+        and st["master_balance"] == 50000.0 and st["master_equity"] == 50123.45 and st["master_currency"] == "USD"
+        and st["master_login"] == 14277928 and len(st["master_positions"]) == 1
+        and st["master_positions"][0]["volume"] == 0.5 and "hedge_balance" not in st and "running" not in st)
+    schreiben(voll, alter_s=30)
+    chk("30 s alte Datei ist kein Live-Stand", panel.lese_status(cfg) is None)
+    schreiben(voll)
+    chk("fremdes Konto verworfen", panel.lese_status(dict(cfg, master_expected_login=999)) is None)
+    chk("ohne erwarteten Login angenommen", bool(panel.lese_status(dict(cfg, master_expected_login=None))))
+    schreiben(voll[:2])
+    chk("halb geschrieben (ohne END) verworfen", panel.lese_status(cfg) is None)
+    schreiben(["PROPHOS1;7;0;14277928;S;2;0", "END;7;0"])
+    st2 = panel.lese_status(cfg)
+    chk("altes EA ohne Balance → None statt 0", bool(st2) and st2["master_balance"] is None and st2["master_equity"] is None)
+    os.remove(pfad)
+    chk("fehlende Datei → None", panel.lese_status(cfg) is None and panel.lese_status({}) is None)
+    # snapshot(): ohne Copier lesen=True/alive=False, mit frischem Copier dessen Status
+    here_alt, pf_alt = panel.HERE, panel.PLANS_FILE
+    try:
+        h = tempfile.mkdtemp()
+        panel.HERE, panel.PLANS_FILE = h, os.path.join(h, "plans.json")
+        _j.dump(dict(cfg, magic=770123), open(os.path.join(h, "config-50kfundednext.json"), "w"))
+        schreiben(voll)
+        i = panel.snapshot()["instances"][0]
+        chk("snapshot ohne Copier: lesen, alive falsch, Equity da", i["lesen"] is True and i["alive"] is False
+            and i["status"]["master_equity"] == 50123.45)
+        _j.dump({"running": True, "updated_at": datetime.now().isoformat(), "master_equity": 1.0, "note": None},
+                open(os.path.join(h, "status-50kfundednext.json"), "w"))
+        i = panel.snapshot()["instances"][0]
+        chk("snapshot mit Copier: dessen Status, lesen falsch", i["alive"] is True and i["lesen"] is False
+            and i["status"]["master_equity"] == 1.0)
+    finally:
+        panel.HERE, panel.PLANS_FILE = here_alt, pf_alt
+    if ok:
+        print("✓ Lese-Instanz: frisch → Master-Stand (alive bleibt falsch), alt/fremd/halb/fehlend → nichts, Copier gewinnt")
     return ok
 
 

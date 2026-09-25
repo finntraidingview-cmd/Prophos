@@ -16940,7 +16940,8 @@
           const dd = (typeof window.mtcApi === 'function') ? await window.mtcApi('instances') : null
           const r = (dd && !dd.copier_offline && !dd._httpFail) ? mt5V2Resolve(plan, dd.instances || []) : null
           const s = (r && r.inst && r.inst.status) || {}
-          if(r && r.inst.alive && !s.note && s.master_balance != null){
+          // lesen (25.09.2026, Mikes PC): Echo V2 läuft ohne Copier — das Panel liest den Master-Snapshot dann selbst
+          if(r && (r.inst.alive || r.inst.lesen) && !s.note && s.master_balance != null){
             base = { master_balance: Number(s.master_balance), at: new Date().toISOString(), ticket: ticket ?? null }
           }
         }catch(_){}
@@ -17001,7 +17002,9 @@
         const route = istV2 ? mt5V2Resolve(plan, instances) : mt5RouteResolve(plan, instances)
         if(!route) continue
         const s = route.inst.status || {}
-        const fresh = !!route.inst.alive && !s.note
+        // Echo V2 auch aus der Lese-Instanz (Panel liest den Snapshot ohne Copier, 25.09.2026) — Echo mit Hedge
+        // braucht weiter den laufenden Copier (alive)
+        const fresh = (!!route.inst.alive || (istV2 && !!route.inst.lesen)) && !s.note
         if(!fresh) continue
         const posCount = (s.master_positions || []).length
 
@@ -17296,6 +17299,9 @@
             hedges: s.hedges || {},
             master_balance: s.master_balance ?? null, master_equity: s.master_equity ?? null,
             master_currency: s.master_currency ?? null,
+            // Lese-Instanz (25.09.2026): Master-Stand frisch vom Panel ohne Copier — alive bleibt falsch (heißt „Copier hedgt"),
+            // Echo V2 am Mac/Handy liest den Live-P&L über dieses Merkmal
+            lesen: !!inst.lesen,
             hedge_balance: s.hedge_balance ?? null, hedge_equity: s.hedge_equity ?? null,
             hedge_currency: s.hedge_currency ?? null,
             hedge_fremde: s.hedge_fremde ?? null,
@@ -17814,7 +17820,8 @@
       const echoGuete = r => {
         const s = r.status || {}
         const alt = jetzt - Date.parse(r.updated_at)
-        return (r.alive && alt <= 20 * 1000 && !s.note) ? 2 : (r.alive && alt <= 20 * 1000) ? 1 : 0
+        const lebt = r.alive || !!s.lesen   // Lese-Instanz (Echo V2 ohne Copier, 25.09.2026) zählt für die Anzeige wie lebend
+        return (lebt && alt <= 20 * 1000 && !s.note) ? 2 : (lebt && alt <= 20 * 1000) ? 1 : 0
       }
       const echoBeste = new Map()
       for(const r of rows){
@@ -17830,7 +17837,7 @@
       for(const r of echoBeste.values()){
         const s = r.status || {}
         const alterS = Math.max(0, Math.round((jetzt - Date.parse(r.updated_at)) / 1000))
-        const frisch = r.alive && alterS <= 20 && !s.note
+        const frisch = (r.alive || !!s.lesen) && alterS <= 20 && !s.note   // lesen = Echo V2 ohne Copier (25.09.2026)
         // Eingefrorener Snapshot (s.note gesetzt) ist KEIN Beweis für Master-
         // Positionen — die Liste ist die von damals (Finn 15.09.2026 am Screen-
         // shot: Aurels FundedNext5503 stand tagelang als „BUY NDX100 · MASTER
@@ -17987,11 +17994,12 @@
         let v2Chip = ''
         if(p.route === 'mt5v2'){
           const ext = (_fleetPers.extJe || {})[uid + '|' + kName.toLowerCase()] || ''
-          const zeile = ext ? rows.find(r => r && r.alive && String(r.master_login || '') === String(ext) && Date.now() - (Date.parse(r.updated_at || '') || 0) <= 25000) : null
+          // lesen: Lese-Instanz des Panels ohne Copier (25.09.2026) — genau der Echo-V2-Normalfall
+          const zeile = ext ? rows.find(r => r && (r.alive || (r.status && r.status.lesen)) && String(r.master_login || '') === String(ext) && Date.now() - (Date.parse(r.updated_at || '') || 0) <= 25000) : null
           const x = zeile ? mt5V2PnlAus(zeile.status || {}, (p.master_balance != null && isFinite(Number(p.master_balance))) ? Number(p.master_balance) : null) : null
           v2Chip = x ? mt5V2PnlChip(x.v, x.ccy, x.lots, x.schwebend ? 'Schwebender P&L der offenen Position (Equity − Balance jetzt) — ohne Start-Balance' : 'Live-P&L des Masters: Equity − Balance beim Start', x.schwebend)
-            : `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${esc(ext ? `Keine frische Copier-Zeile für Konto ${ext} (mt5_live) — der Copier dieses PCs läuft nicht oder meldet sich nicht` : 'Konto ohne External ID — keine Zuordnung zur Copier-Zeile möglich')}">`
-              + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span><span style="font-size:11px;color:var(--sub)">kein Live-Stand (Copier aus)</span></span>`
+            : `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${esc(ext ? `Keine frische Zeile für Konto ${ext} (mt5_live) — das Master-Terminal (Lese-EA) liefert nicht, oder der Prophos-Tab auf dem PC ist älter als .600 und muss einmal neu geladen werden` : 'Konto ohne External ID — keine Zuordnung zur Copier-Zeile möglich')}">`
+              + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span><span style="font-size:11px;color:var(--sub)">kein Live-Stand</span></span>`
         }
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, kName || '?', null,
           subPerson(pKey) + `<b>${dir === 'SHORT' ? 'SELL' : 'BUY'}</b>${symbol ? ' ' + esc(String(symbol)) : ''}${p.master_firm ? ' · ' + esc(String(p.master_firm)) : ''}`,
@@ -18327,17 +18335,19 @@
       const base = p.mt5Baseline
       const start = (base && base.master_balance != null) ? base.master_balance : null
       let s = null
+      // Quelle: laufender Copier ODER Lese-Instanz (25.09.2026, Finn: „Warum sehe ich bei Mike nicht den Live-P&L,
+      // wenn es doch über Echo V2 gemacht wurde?" — Echo V2 läuft ohne Copier, das Panel liest den Snapshot selbst)
       if(MT5_LOCAL){
         const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
         if(state){
           const r = mt5V2ResolveAnzeige(p, Object.values(state))
-          if(r && r.inst && r.inst.alive && r.inst.fetchedAt && (Date.now() - r.inst.fetchedAt) <= 15000) s = r.inst.status || {}
+          if(r && r.inst && (r.inst.alive || r.inst.lesen) && r.inst.fetchedAt && (Date.now() - r.inst.fetchedAt) <= 15000) s = r.inst.status || {}
         }
       }
       if(!s){
         const cloud = []
         for(const r of (window._mt5CloudRows || [])){
-          if(!r || !r.alive) continue
+          if(!r || !(r.alive || (r.status && r.status.lesen))) continue
           const ts = Date.parse(r.updated_at || '') || 0
           if(!ts || (Date.now() - ts) > 25000) continue
           cloud.push({ file: r.config_file, alive: true, fetchedAt: ts,
@@ -32147,7 +32157,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.599'
+  const OS_TAB_BUILD = '2026-09-22.600'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -33497,7 +33507,7 @@
     const route = mt5V2Resolve(plan, dd.instances || [])
     if(!route) return { ok:false, msg:'Plan gehört zu keiner Instanz auf diesem PC (Master-Login nicht verlinkt).', retry:false }
     const s = route.inst.status || {}
-    if(!route.inst.alive || s.note) return { ok:false, msg:'Instanz liefert keinen frischen Stand — Terminal/EA prüfen.', retry:true }
+    if(!(route.inst.alive || route.inst.lesen) || s.note) return { ok:false, msg:'Instanz liefert keinen frischen Stand — Terminal/EA prüfen.', retry:true }   // lesen = Echo V2 ohne Copier (25.09.2026)
     const symbol = plan.masterSymbol || (((typeof dupSymbolsForFirm === 'function') ? (dupSymbolsForFirm(plan.masterFirm) || []) : [])[0] || '')
     const poss = Array.isArray(s.master_positions) ? s.master_positions : []
     if(!poss.length){

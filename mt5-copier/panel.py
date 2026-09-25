@@ -397,6 +397,19 @@ def snapshot():
         snapf = str(cfg.get("snapshot_file", "prophos_master.csv")).lower()
         seen_magic.setdefault(magic, []).append(inst["config_file"])
         seen_snap.setdefault(snapf, []).append(inst["config_file"])
+        alive = bool(st.get("running")) and age is not None and age <= 15
+        # Lese-Instanz (25.09.2026, Finn: „Warum sehe ich bei Mike nicht den Live-P&L, wenn es doch über
+        # Echo V2 gemacht wurde?"): Echo V2 läuft absichtlich OHNE Copier — dann schrieb niemand
+        # master_balance/-equity/-positionen, Baseline und Live-P&L blieben leer. Läuft der Copier nicht,
+        # liest das Panel die Snapshot-Datei des Lese-EAs selbst (nur Datei, keine Terminal-Verbindung,
+        # kein Hedge). alive bleibt dabei FALSCH — alive heißt „Copier hedgt", darauf verlassen sich die
+        # Echo-Prüfungen mit Hedge; die Lese-Daten tragen nur das eigene Merkmal lesen.
+        lesen = False
+        if not alive:
+            ls = lese_status(cfg)
+            if ls:
+                st = dict(st, **ls)
+                lesen = True
         data.append({
             "name": inst["name"],
             "file": inst["config_file"],
@@ -419,7 +432,9 @@ def snapshot():
             "status": st,
             "age": age,
             # "lebt" = Statusdatei ist frisch. Der Copier schreibt alle ~3s.
-            "alive": bool(st.get("running")) and age is not None and age <= 15,
+            "alive": alive,
+            # Master-Stand frisch aus der Snapshot-Datei, OHNE Copier (nur Echo V2 wertet das aus)
+            "lesen": lesen,
         })
     # Konflikte, die der Copier beim Start mit Abbruch quittieren wuerde — hier
     # schon anzeigen, BEVOR jemand den Neustart auslöst.
@@ -1235,6 +1250,92 @@ def _snapshot_path(cfg):
     common = str(cfg.get("common_files_dir") or "").strip() or os.path.join(
         os.environ.get("APPDATA", ""), "MetaQuotes", "Terminal", "Common", "Files")
     return os.path.join(common, snapf)
+
+
+LESE_FRISCH_S = 15   # wie alive beim Copier: das EA schreibt alle 200 ms, älter heißt Terminal/EA weg
+
+
+def snapshot_lesen(path, expect_login=None):
+    """Snapshot-CSV des Lese-EAs parsen — dieselben Regeln wie copier.read_snapshot (Kopf PROPHOS1,
+    Fremd-Login verworfen, END-Zeile mit passender seq/Anzahl, fehlende Werte None statt 0). Bewusst
+    nachgebaut statt importiert, wie _echo_fenster_offen: copier.py hängt an MetaTrader5."""
+    try:
+        with open(path, "r", encoding="ascii", errors="replace") as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except OSError:
+        return None
+    if not lines or not lines[0].startswith("PROPHOS1;"):
+        return None
+    head = lines[0].split(";")
+    try:
+        seq = int(head[1]); login = int(head[3]); server = head[4]; count = int(head[6])
+    except (IndexError, ValueError):
+        return None
+    balance = equity = currency = None
+    try:
+        if len(head) >= 9:
+            balance = float(head[7]); equity = float(head[8])
+        if len(head) >= 10 and head[9]:
+            currency = head[9]
+    except (IndexError, ValueError):
+        balance = equity = currency = None
+    try:
+        if expect_login and int(expect_login) != login:
+            return None
+    except (TypeError, ValueError):
+        return None
+    positions, footer_ok = [], False
+    for l in lines[1:]:
+        f_ = l.split(";")
+        if l.startswith("P;"):
+            try:
+                pos = {"ident": int(f_[1]), "symbol": f_[2], "type": int(f_[3]),
+                       "volume": float(f_[4]), "contract_size": float(f_[5])}
+            except (IndexError, ValueError):
+                return None
+            pos["price_open"] = pos["sl"] = pos["tp"] = None
+            try:
+                if len(f_) >= 9:
+                    pos["price_open"] = float(f_[6]); pos["sl"] = float(f_[7]); pos["tp"] = float(f_[8])
+            except (IndexError, ValueError):
+                pos["price_open"] = pos["sl"] = pos["tp"] = None
+            positions.append(pos)
+        elif l.startswith("END;"):
+            try:
+                footer_ok = int(f_[1]) == seq and int(f_[2]) == len(positions)
+            except (IndexError, ValueError):
+                return None
+    if not footer_ok or len(positions) != count:
+        return None   # halb geschrieben → nächster Abruf
+    return {"seq": seq, "login": login, "server": server, "positions": positions,
+            "balance": balance, "equity": equity, "currency": currency}
+
+
+def lese_status(cfg, jetzt=None):
+    """Master-Stand OHNE Copier (Echo V2, 25.09.2026): frische Snapshot-Datei → Status-Felder in der Form
+    von copier.master_status (nur die Master-Seite), sonst None. Frisch = Datei ≤ 15 s alt; eine Datei
+    von gestern ist kein Live-Stand („Beweis oder leer"). Kein Hedge-Feld, running bleibt beim Copier."""
+    p = _snapshot_path(cfg)
+    if not p:
+        return None
+    try:
+        mtime = os.path.getmtime(p)
+    except OSError:
+        return None
+    alter = (time.time() if jetzt is None else jetzt) - mtime
+    if alter > LESE_FRISCH_S or alter < -5:
+        return None
+    snap = snapshot_lesen(p, cfg.get("master_expected_login"))
+    if not snap:
+        return None
+    return {
+        "lesen": True, "lese_alter_s": round(max(alter, 0), 1),
+        "note": None, "standby": False,
+        "master_login": snap["login"], "master_server": snap["server"],
+        "master_positions": snap["positions"],
+        "master_balance": snap["balance"], "master_equity": snap["equity"],
+        "master_currency": snap["currency"],
+    }
 
 
 def _drop_snapshot(cfg):
