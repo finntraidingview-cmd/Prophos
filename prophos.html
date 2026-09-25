@@ -31808,9 +31808,9 @@
 
   /* RICHTUNGS-SCHUTZ für Orbit V2 / Winning Days Farm (25.09.2026, Finn: „Beim ersten Trade bei Jacob bin ich long gegangen, jetzt
    * will ich den zweiten starten und es gibt keinen Richtungsschutz — gefährlich"). Dieselbe Doktrin wie firmLiveRichtungen +
-   * firmGeplanteRichtungen (nur die eigene ID, seit 26.08.2026), erweitert um die Regel der Koordination: ein LAUFENDER Plan der
-   * eigenen ID sperrt die Gegenrichtung für JEDE Firma (Orbit-V2-Positionen stehen nicht in mt5_live/dup_live, der Plan ist dort die
-   * einzige Wahrheit). Rangfolge wie im Order-Dialog: erst Laufendes (offene Pläne jeder Firma + Live-Positionen derselben Firma),
+   * firmGeplanteRichtungen (nur die eigene ID, seit 26.08.2026): nur Pläne DERSELBEN Prop-Firma zählen (Orbit-V2-Positionen stehen
+   * nicht in mt5_live/dup_live, der Plan ist dort die einzige Wahrheit). Rangfolge wie im Order-Dialog: erst Laufendes (offene Pläne
+   * + Live-Positionen derselben Firma),
    * nur ohne Laufendes die gespeicherten Pläne derselben Firma. Widersprechen sich die Quellen (LONG und SHORT) → kein Block, nur
    * Hinweis. frisch = Pläne direkt aus der DB (Start/Speichern), sonst aus tradePlans (Popup). Kein Treffer → null.
    * → { lauf:'long'|'short'|null, widerspruch, text } */
@@ -31829,8 +31829,12 @@
       if(ohne && String(p.id) === ohne) continue
       if(p.richtung !== 'buy' && p.richtung !== 'sell') continue
       const seite = p.richtung === 'buy' ? 'long' : 'short'
+      // NUR dieselbe Prop-Firma (25.09.2026 nachmittags, Finn am Popup: „Das ist doch egal, ob ein FundingPips-Account short oder
+      // long ist — es gilt nur, wenn bei der gleichen ID unter der gleichen Firma schon eine Richtung läuft"). Die Koordinations-Regel
+      // „laufender Plan sperrt für JEDE Firma" war falsch und ist raus; ohne gewählte Firma sperrt nichts.
+      if(!ziel || norm(p.firm) !== ziel) continue
       if(p.status === 'open') lauf[seite].push({ name: p.name, firm: p.firm, verb: 'läuft gerade' })
-      else if(ziel && norm(p.firm) === ziel) gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
+      else gep[seite].push({ name: p.name, firm: p.firm, verb: 'ist geplant' })
     }
     try{
       if(ziel && typeof window.firmLiveRichtungen === 'function'){
@@ -32314,7 +32318,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.602'
+  const OS_TAB_BUILD = '2026-09-22.603'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
