@@ -1874,6 +1874,15 @@
   /* Zum Abhaken (25.09.2026): beendete Winning Days aller IDs, Master/Fusion vorbelegt, ein Knopf je Zeile */
   #dashboard-view .mwd-abh-titel{display:flex;align-items:baseline;gap:8px;margin-top:14px;font-size:13px;font-weight:700;color:var(--ink)}
   #dashboard-view .mwd-abh-titel span{font-weight:400;font-size:12px;color:var(--sub)}
+  /* Endlesung-Statuszeile (25.09.2026): Karte in „Überprüfen", „Zum Abhaken", Trade-Popup — eine Zeile, Farbe = Stand */
+  #dashboard-view .el-zeile{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:11.5px;color:var(--sub);margin-top:4px;line-height:1.4}
+  #dashboard-view .el-zeile .el-dot{width:6px;height:6px;border-radius:50%;background:var(--sub-2);flex:none}
+  #dashboard-view .el-laeuft .el-dot{background:#f59e0b}
+  #dashboard-view .el-gelesen .el-dot{background:#16a34a}
+  #dashboard-view .el-aufgegeben .el-dot{background:#dc2626}
+  #dashboard-view .el-aufgegeben .el-text{color:#b91c1c}
+  #dashboard-view .el-zeile .el-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .el-knopf{padding:2px 9px;font-size:11px;line-height:1.5;border-radius:6px}
   #dashboard-view .mwd-abh{margin-top:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--border-soft);background:var(--surface)}
   #dashboard-view .mwd-abh-werte{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:stretch;margin-top:8px}
   #dashboard-view .mwd-abh-werte .mwd-box{display:flex;flex-direction:column;margin:0}
@@ -6197,6 +6206,7 @@
             <div class="field">
               <label>P/L Master ($)</label>
               <input type="number" class="input mono" id="tc-master-pl" step="10" placeholder="±0">
+              <div id="tc-lesung"></div>
             </div>
             <div class="field">
               <label>P/L Slave (<span id="tc-slave-cur">€</span>)</label>
@@ -21266,6 +21276,94 @@
    * mit ihrer Quelle, editierbar; „Abhaken" → PATCH /admin/wd-plaene {aktion:'erledigt'} (Plan completed + Fusion-P&L als 'wd_hedge'
    * in Finanzen, idempotent über den notes-Schlüssel). Darunter eingeklappt die am Handelstag erledigten. Eingaben überleben das
    * Neuzeichnen (mkl.wd.abh), der Block zeichnet nicht neu, solange ein Feld den Fokus hat. */
+  /* ENDLESUNG SICHTBAR (25.09.2026, Koordination für Finn: „der P&L NACH jedem Orbit-/Winning-Day-Trade soll verlässlich in
+   * Prophos landen"). Die Lesung selbst (Puls, bis zu 8 Versuche, Stand in mt5_baseline.final) gehört Live-Daten — hier nur,
+   * was man davon sieht: eine Zeile „Puls liest … / gelesen / aufgegeben" mit Tooltip (puls_fehler, puls_diagnose, exit_fill)
+   * und „Jetzt lesen" für Pläne in review ohne gelesenen Wert. Der Knopf ruft NUR window._tvV2EndlesungJetzt(planId) — die
+   * Funktion liest am PC des Plans selbst oder schickt vom Mac/Handy das Signal 'endlesung' (abgesprochen mit Live-Daten).
+   * Drei Stellen, je eigener Handler: Karte (data-plan-lesen), Zum Abhaken (data-mwd-lesen), Trade-Popup (#tc-lesung). */
+  const _elBusy = new Set()
+  // REIN RECHNEND (window._endlesungStatus): Stand einer Endlesung → {art, text, tip, bisMs, knopf} oder null (nichts zu zeigen)
+  function endlesungStatus(fin, planStatus, jetzt){
+    if(!fin || typeof fin !== 'object') return null
+    jetzt = jetzt == null ? Date.now() : jetzt
+    const cfg = window._tvV2Endlesung || {}
+    const max = Number(cfg.max) > 0 ? Number(cfg.max) : 8
+    const pause = Array.isArray(cfg.pause) && cfg.pause.length ? cfg.pause : [20, 45, 90, 180, 300, 480, 600, 900]
+    const uhr = t => { const d = new Date(t); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) }
+    const n2 = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+    const tip = []
+    if(fin.puls_fehler) tip.push('Letzter Fehler: ' + String(fin.puls_fehler))
+    if(fin.puls_diagnose != null){ let d = ''; try{ d = typeof fin.puls_diagnose === 'string' ? fin.puls_diagnose : JSON.stringify(fin.puls_diagnose) }catch(_){}; if(d) tip.push('Diagnose: ' + d.slice(0, 600)) }
+    const ex = (fin.exit_fill && typeof fin.exit_fill === 'object') ? fin.exit_fill : null
+    if(ex && ex.preis != null) tip.push(`Exit-Fill: ${n2(ex.preis)}${ex.menge != null ? ' · ' + n2(ex.menge) + ' Kt' : ''}${ex.seite ? ' · ' + String(ex.seite) : ''}${ex.zeit ? ' · ' + uhr(ex.zeit) : ''}${ex.quelle ? ' (' + String(ex.quelle) + ')' : ''}`)
+    if(fin.exit_diag != null){ let d = ''; try{ d = typeof fin.exit_diag === 'string' ? fin.exit_diag : JSON.stringify(fin.exit_diag) }catch(_){}; if(d) tip.push('Exit-Befund: ' + d.slice(0, 400)) }
+    if(fin.puls_flach) tip.push('Flach laut ' + (fin.puls_flach === 'tabelle' ? 'Positions-Tabelle' : fin.puls_flach === 'unrealized_0' ? 'offenem G&V = 0' : String(fin.puls_flach)))
+    const exText = (ex && ex.preis != null) ? ' · Exit ' + n2(ex.preis) : ''
+    // gelesen: eine Zahl steht am Plan — vom Puls nach dem Ende oder schon beim Ende (Schließen/Rundgang)
+    if(typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)){
+      const puls = fin.quelle === 'puls'
+      return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (${puls ? 'TradingView' : 'beim Ende'})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
+    }
+    if(planStatus !== 'review') return null
+    const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    if(fin.puls_aufgegeben || versuche >= max){
+      return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
+    }
+    // Lesung nur am Handelstag des Endes (danach springt Today's P&L auf 0) — dann hilft auch „Jetzt lesen" nicht mehr
+    let tagVorbei = false
+    try{ if(typeof tvV2Handelstag === 'function') tagVorbei = (fin.datum || tvV2Handelstag(fin.at || jetzt)) !== tvV2Handelstag(jetzt) }catch(_){}
+    if(tagVorbei) return { art: 'aus', text: 'nicht gelesen — Handelstag vorbei, Master-P&L bitte selbst eintragen', tip: tip.join('\n'), bisMs: null, knopf: false }
+    const letzte = Date.parse(fin.puls_at || '') || 0
+    const bis = (versuche > 0 && letzte) ? letzte + pause[Math.min(versuche - 1, pause.length - 1)] * 1000 : null
+    return { art: 'laeuft', text: versuche ? `Puls liest … Versuch ${versuche}/${max}` : 'Puls liest gleich …', tip: tip.join('\n'), bisMs: bis, knopf: true }
+  }
+  window._endlesungStatus = endlesungStatus
+  const elRest = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s <= 0 ? 'gleich' : 'in ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') }
+  // HTML der Zeile; attr = Datenattribut des Knopfs der jeweiligen Stelle (eigener Handler je Stelle). plan (nur eigene Pläne):
+  // hilft „Jetzt lesen" nicht (window._tvV2Endlesung.grund mit force ≠ ''), ist der Knopf grau und nennt den Grund im Tooltip
+  function endlesungZeileHtml(pid, fin, planStatus, attr, plan){
+    const st = endlesungStatus(fin, planStatus)
+    if(!st) return ''
+    const busy = _elBusy.has(String(pid))
+    let sperre = ''
+    try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(plan && typeof g === 'function') sperre = String(g(plan, Date.now(), true) || '') }catch(_){}
+    const naechster = st.bisMs ? ` · nächster <span data-el-bis="${st.bisMs}">${elRest(st.bisMs - Date.now())}</span>` : ''
+    const knopf = (st.knopf && attr) ? `<button type="button" class="btn btn-ghost el-knopf" ${attr}="${escapeHtml(String(pid))}"${(busy || sperre) ? ' disabled' : ''} title="${escapeHtml(sperre || 'Endlesung jetzt anstoßen — am PC des Plans (vom Mac/Handy per Signal)')}">${busy ? 'liest…' : 'Jetzt lesen'}</button>` : ''
+    return `<div class="el-zeile el-${st.art}"${st.tip ? ` title="${escapeHtml(st.tip)}"` : ''}><span class="el-dot"></span><span class="el-text">${escapeHtml(st.text)}${naechster}</span>${knopf}</div>`
+  }
+  // Countdown „nächster in 1:30" ohne Neuzeichnen — nur die Zahl-Spans
+  setInterval(() => {
+    const els = document.querySelectorAll('[data-el-bis]'); if(!els.length) return
+    const jetzt = Date.now()
+    els.forEach(el => { el.textContent = elRest(Number(el.getAttribute('data-el-bis')) - jetzt) })
+  }, 1000)
+  async function endlesungJetzt(pid){
+    pid = String(pid)
+    if(_elBusy.has(pid)) return
+    if(typeof window._tvV2EndlesungJetzt !== 'function'){ if(typeof atToast === 'function') atToast('Dieser Stand kann noch nicht lesen — Seite neu laden'); return }
+    _elBusy.add(pid); endlesungNeuZeichnen(pid)
+    let r = null
+    try{ r = await window._tvV2EndlesungJetzt(pid) }catch(e){ r = { ok: false, msg: String((e && e.message) || e) } }
+    finally{ _elBusy.delete(pid) }
+    if(typeof atToast === 'function') atToast((r && r.ok ? '✓ ' : '⚠ ') + ((r && r.msg) || (r && r.ok ? 'Endlesung angestoßen' : 'Endlesung nicht möglich')))
+    try{ if(typeof loadTradePlansFromSupabase === 'function') await loadTradePlansFromSupabase() }catch(_){}
+    try{ if(mkl.wd && mkl.wd.plaene && mkl.wd.plaene.some(x => String(x.id) === pid)){ mkl.wd.at = 0; await mklWdLaden() } }catch(_){}
+    endlesungNeuZeichnen(pid)
+  }
+  // Nach Knopf/Ergebnis alle drei Stellen nachziehen (nur die sichtbaren)
+  function endlesungNeuZeichnen(pid){
+    try{ renderTradePlans() }catch(_){}
+    try{ mklWdRender() }catch(_){}
+    try{ if(String(_completingPlanId) === String(pid) && document.getElementById('tradeCompleteModal')?.classList.contains('open')) tcLesungZeichnen(pid) }catch(_){}
+  }
+  function tcLesungZeichnen(pid){
+    const el = document.getElementById('tc-lesung'); if(!el) return
+    const p = tradePlans.find(x => String(x.id) === String(pid))
+    el.innerHTML = (p && p.route === 'tvv2' && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-tc-lesen', p) : ''
+  }
+  // Trade-Popup: eigener Listener nur für den Knopf in #tc-lesung
+  document.getElementById('tc-lesung')?.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-tc-lesen]'); if(b) endlesungJetzt(b.getAttribute('data-tc-lesen')) })
   const MWD_TP_GRUENDE = new Set(['tp_feed', 'level_tp', 'tp'])
   // REIN RECHNEND (window._mklWdAbhakenVorbelegung): Master $ / Fusion € + Quelle für eine wd-heute-Zeile
   function mklWdAbhakenVorbelegung(pw){
@@ -21342,7 +21440,7 @@
         + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
         + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span>`
         + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '') + `</label>`
-      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}<div class="mwd-abh-werte">`
+      return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}${x.route === 'tvv2' ? endlesungZeileHtml(pid, x.endlesung || x.final, x.status, 'data-mwd-lesen') : ''}<div class="mwd-abh-werte">`
         + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
         + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
         + `<button type="button" class="btn btn-primary mwd-btn mwd-abh-knopf" data-mwd-abhaken="${escapeHtml(pid)}" title="Plan erledigt setzen — Fusion-P&L wird in Finanzen als Winning-Days-Hedge gebucht"${busy ? ' disabled' : ''}>${busy ? 'bucht…' : 'Abhaken'}</button>`
@@ -21376,6 +21474,7 @@
         sEl.style.color = s0 == null ? 'var(--sub)' : s0 >= 0 ? '#15803d' : '#b91c1c' }
     }))
     el.querySelectorAll('[data-mwd-abhaken]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAbhaken(b.dataset.mwdAbhaken) }))
+    el.querySelectorAll('[data-mwd-lesen]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); endlesungJetzt(b.dataset.mwdLesen) }))
     const det = el.querySelector('.mwd-abh-erl'); if(det) det.addEventListener('toggle', () => { mkl.wd.erlOffen = det.open })
     // Gebühr von Hand: Enter oder Verlassen speichert; leer = zurück auf den gelernten Wert
     el.querySelectorAll('.mwd-geb-in').forEach(inp => {
@@ -21672,7 +21771,7 @@
   $mkl('mkl-wd')?.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('[data-plan-hedge-oeffnen]'); if(b && typeof hedgeOeffnenKlick === 'function') hedgeOeffnenKlick(b) })
   // Klick auf eine Zeile → Linien im Chart hervorheben (eigener Handler auf dem Block; der Hedge-zu-Knopf im Chip hat seinen eigenen Weg)
   $mkl('mkl-wd')?.addEventListener('click', ev => {
-    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-plan-hedge-oeffnen], [data-mwd-aktion]')) return
+    if(ev.target.closest && ev.target.closest('[data-plan-hedge-zu], [data-plan-hedge-oeffnen], [data-mwd-aktion], [data-mwd-lesen]')) return
     const z = ev.target.closest && ev.target.closest('[data-mkl-wd]'); if(!z) return
     const id = z.getAttribute('data-mkl-wd')
     mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
@@ -29592,6 +29691,7 @@
               : ''}
           </div>
           <div class="tc2-sub">${sub}</div>
+          ${(isReview && p.route === 'tvv2' && p.mt5Baseline) ? endlesungZeileHtml(p.id, p.mt5Baseline.final, p.status, 'data-plan-lesen', p) : ''}
         </div>
         <div class="tc2-metric">${metric}</div>
         <div class="tc2-actions">${actions}</div>
@@ -29977,6 +30077,10 @@
         btn.disabled = true; btn.textContent = 'schließt…'
         try{ await hedgeSoloSchliessen(p, 'hand') }finally{ try{ renderTradePlans() }catch(_){} }
       })
+    })
+    // „Jetzt lesen" (Endlesung, 25.09.2026) — eigener Handler
+    document.querySelectorAll('[data-plan-lesen]').forEach(btn => {
+      btn.addEventListener('click', ev => { ev.stopPropagation(); endlesungJetzt(btn.dataset.planLesen) })
     })
     // „Hedge öffnen" (25.09.2026) — eigener Handler, derselbe Pfad wie beim Start (hedgeSoloOeffnen)
     document.querySelectorAll('[data-plan-hedge-oeffnen]').forEach(btn => {
@@ -32573,7 +32677,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.606'
+  const OS_TAB_BUILD = '2026-09-22.607'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39517,6 +39621,7 @@
     if(tcMasterField) tcMasterField.style.gridColumn = (tcV2 && !tcGehedgt) ? 'span 2' : ''
     document.getElementById('tc-slave-cur').textContent = tcGehedgt ? '€' : slavePreset.currency
     document.getElementById('tc-master-pl').value = p.masterPl ?? ''
+    tcLesungZeichnen(p.id)   // Endlesung-Stand unter dem Master-Feld (25.09.2026)
     // Herkunft des Master-Werts merken (24.09.2026, pl_quelle): in „Überprüfen" steht nur der Auto-Wert
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
     // Schätzung aus dem Hedge-Level (25.09.2026) ist keine Quelle im Sinne von pl_quelle → null (nicht anfassen)
