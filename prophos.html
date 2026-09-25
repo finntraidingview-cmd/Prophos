@@ -17916,9 +17916,18 @@
       // die ausgeschlossenen gilt dann dieselbe Regel wie für ihre Karten.
       const uebrig = ohneMaster.filter(e => !(e.mails.size === 1 && (e.pKey === meUid || excl.has(String(e.pKey)))))
       const eigeneAlarme = (alarme.get(meUid) || []).join('')
+      // Gruppen (25.09.2026, Finn: „mach die Anordnung so, dass ich und Pascal visuell ein bisschen getrennt sind — oben zuerst
+      // Pascals IDs: Chris, Mike, Pascal, EzPoker, Aurel; drunter Jacob, Moritz und Finn + Pascal"). Reihenfolge innerhalb der
+      // Gruppe genau so; Personen ohne Gruppe (neue IDs) danach alphabetisch unter „Weitere". Schlüssel = user_id (Besitzer).
+      const FLOTTE_GRUPPEN = [
+        { titel: 'Pascal', uids: ['7b1bc9a3-94d3-4603-a232-c10fc2df3262', '32b854d1-866f-4e7e-ba0b-9bf63df2d993', '728b4d23-ff5c-45f9-b6de-9b75c1f9a78a', '8ad6a2f1-816e-4229-85cd-03a9c693bb71', '13905525-69d0-4949-b081-efdbc397e888'] },
+        { titel: 'Finn', uids: ['368076fd-67c1-460c-aa86-38d81ae69350', 'aff98e60-e9a0-4821-9d1d-31634571a2f4', '48f272b4-913e-4598-a06a-1dcc3d5679fb'] }
+      ]
+      const gruppeVon = k => { for(let g = 0; g < FLOTTE_GRUPPEN.length; g++){ const i = FLOTTE_GRUPPEN[g].uids.indexOf(String(k)); if(i >= 0) return [g, i] } return [FLOTTE_GRUPPEN.length, 0] }
       const reihenfolge = [...new Set([...karten.keys(), ...alarme.keys()])]
         .filter(k => k !== meUid && !excl.has(String(k)))
-        .sort((a, b) => personen.get(a).name.localeCompare(personen.get(b).name, 'de'))
+        .sort((a, b) => { const ga = gruppeVon(a), gb = gruppeVon(b)
+          return (ga[0] - gb[0]) || (ga[1] - gb[1]) || personen.get(a).name.localeCompare(personen.get(b).name, 'de') })
       if(!reihenfolge.length && !uebrig.length && !eigeneAlarme){ box.style.display = 'none'; return }
 
       // Zaehler-Zeile (16.09.2026, Finn am Screenshot: „wie viele Orders
@@ -17946,9 +17955,18 @@
         + `</div>`
         + `<div style="font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em">FLOTTE — ANDERE PERSONEN</div>`
         + eigeneAlarme
+      let letzteGruppe = -1
       for(const k of reihenfolge){
         const pers = personen.get(k)
         const n = (karten.get(k) || []).length
+        // Gruppen-Trenner: dünne Linie + kleine Überschrift, sobald eine neue Gruppe beginnt
+        const g = gruppeVon(k)[0]
+        if(g !== letzteGruppe){
+          const titel = g < FLOTTE_GRUPPEN.length ? FLOTTE_GRUPPEN[g].titel : 'Weitere'
+          html += `<div style="display:flex;align-items:center;gap:8px;margin:${letzteGruppe < 0 ? '10px' : '18px'} 0 2px;font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--sub)">`
+            + `<span>${esc(titel.toUpperCase())}</span><span style="flex:1;height:1px;background:var(--border)"></span></div>`
+          letzteGruppe = g
+        }
         html += `<div style="font-size:11.5px;font-weight:700;color:${pers.farbe};margin:10px 0 6px">${esc(pers.name)}`
           + (n ? ` <span style="font-weight:500;color:var(--sub)">· ${n} live</span>` : '') + `</div>`
           + `<div class="trade-cards">${(karten.get(k) || []).join('')}</div>`
@@ -32013,7 +32031,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.595'
+  const OS_TAB_BUILD = '2026-09-22.596'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
