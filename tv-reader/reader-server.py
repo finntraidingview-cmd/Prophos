@@ -64,7 +64,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.1"
+READER_VERSION = "0.9.2"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -186,12 +186,30 @@ def _ring_ist_tick(r):
     return bool(r) and all(b.get("quelle") == "ws-tick" for b in r.values())
 
 
+# 0.9.2 (25.09.2026, Befund Koordination): eine Chart-Serie sperrte die Tick-Kerzen ihrer Wurzel fuer die ganze
+# Laufzeit des Servers. Wechselte der Feed-Tab das Chart-Symbol (10:25 UTC nur noch NQ, 11:44 nur noch MNQ1!), bekam
+# die vorige Wurzel GAR KEINE Kerzen mehr — MNQ fehlte 79 min, NQ danach dauerhaft, obwohl beide Kurse frisch tickten.
+# Jetzt gilt die Serie nur als vorhanden, solange ihre juengste Kerze hoechstens SERIE_STALE_S alt ist; danach
+# uebernehmen die Tick-Kerzen, bis die Serie wieder liefert (sie ueberschreibt dann ihre Minuten wie gehabt).
+SERIE_STALE_S = 150
+
+
+def _serie_frisch(r, jetzt_s):
+    """REIN RECHNEND: hat der Ring einer Wurzel eine Chart-Serien-Kerze, deren Minute hoechstens SERIE_STALE_S
+    vor der laufenden Minute liegt?"""
+    m_jetzt = int(jetzt_s // 60) * 60
+    serie = [m for m, b in (r or {}).items() if b.get("quelle") != "ws-tick"]
+    return bool(serie) and m_jetzt - max(serie) <= SERIE_STALE_S
+
+
 def _tick_kerze_in_ring(ring, wurzel, symbol, preis, jetzt_s, maximum=KERZEN_MAX):
     """REIN RECHNEND (testbar, 0.8.4): Minutenkerze aus einem Quote-Tick (qsd: lp, sonst Mitte Bid/Ask)
     fuer Wurzeln OHNE Chart-Serie — Finn will NQ und MNQ als Chart, ohne das TradingView-Layout
     umzubauen (Moritz' PC: NQ nur in der Watchlist → keine Serie, nur Ticks). O und C sind exakt,
     H/L nur so gut wie die Tick-Dichte; Volumen gibt es nicht. quelle 'ws-tick' sagt das dem
-    Frontend. Liegt fuer die Wurzel schon eine Serie im Ring, passiert NICHTS (die Serie gewinnt).
+    Frontend. Liefert fuer die Wurzel eine Serie (juengste Serien-Kerze <= SERIE_STALE_S alt), passiert
+    NICHTS (die Serie gewinnt); ist die Serie verstummt (Chart auf ein anderes Symbol gewechselt), schreibt
+    der Tick wieder Kerzen (0.9.2).
     -> (ring, geschrieben)"""
     ring = dict(ring or {})
     w = _kurs_wurzel(wurzel) or str(wurzel or "").upper()[:8]
@@ -202,11 +220,13 @@ def _tick_kerze_in_ring(ring, wurzel, symbol, preis, jetzt_s, maximum=KERZEN_MAX
     if not w or preis <= 0:
         return ring, False
     r = ring.get(w)
-    if r and not _ring_ist_tick(r):
-        return ring, False                       # Serie vorhanden → keine Tick-Kerzen fuer diese Wurzel
+    if r and not _ring_ist_tick(r) and _serie_frisch(r, jetzt_s):
+        return ring, False                       # Serie liefert → keine Tick-Kerzen fuer diese Wurzel
     r = ring.setdefault(w, {})
     minute = int(jetzt_s // 60) * 60
     k = r.get(minute)
+    if k and k.get("quelle") != "ws-tick":
+        return ring, False                       # diese Minute hat schon eine Serien-Kerze — nie ueberschreiben
     if k:
         k["h"] = max(k["h"], preis); k["l"] = min(k["l"], preis); k["c"] = preis; k["n"] = k.get("n", 0) + 1
     else:

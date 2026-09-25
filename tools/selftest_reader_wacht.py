@@ -30,7 +30,7 @@ def lade():
 
     code = "\n".join([const(c) for c in ("READER_WACHT_SCHWELLE_S", "READER_WACHT_KERZEN_S",
                                          "READER_WACHT_ERINNERUNG_1_S", "READER_WACHT_ERINNERUNG_N_S",
-                                         "READER_WACHT_TZ")]
+                                         "READER_WACHT_TZ", "READER_WACHT_KERZEN_HAUPT")]
                      + [block(f) for f in ("cme_markt_offen", "_cme_offen_seit_s", "_rw_uhr", "_rw_kurs_text",
                                            "reader_wacht_schritt", "_rw_frisch")])
     exec(code, ns)
@@ -151,6 +151,31 @@ def main():
     check(ev == [], "… auch 3 min danach noch nicht")
     zr, ev = s(zr, b + 4230 + 210, 3, True, kerzen_alter_s=4210, kerzen_wurzel="NQ", **kw)
     check([e["art"] for e in ev] == ["kerzen_beginn"], "… fehlen sie 3:30 min nach der Rueckkehr noch → Meldung")
+
+    # Kerzen je Wurzel (25.09.2026): laut nur MNQ, NQ-only leise — der Fall von heute (Chart 11:44 auf MNQ1! gewechselt)
+    check(a["READER_WACHT_KERZEN_HAUPT"] == "MNQ", "Hauptwurzel MNQ")
+    zn, ev = s(leer, T, 3, True, kerzen_je={"MNQ": 40, "NQ": 1200}, **kw)
+    check([e["art"] for e in ev] == ["kerzen_leise_beginn"] and not ev[0]["push"] and "NQ-Kerzen" in ev[0]["titel"]
+          and zn["kerzen"] is None and zn["kerzen_leise"]["wurzel"] == "NQ",
+          "nur NQ ohne Kerzen, MNQ laeuft → leiser Hinweis, kein Push")
+    zn2, ev = s(zn, T + 30, 3, True, kerzen_je={"MNQ": 10, "NQ": 1230}, **kw)
+    check(ev == [] and zn2["kerzen_leise"], "leiser Hinweis nur einmal")
+    zn3, ev = s(zn2, T + 60, 3, True, kerzen_je={"MNQ": 20, "NQ": 30}, **kw)
+    check([e["art"] for e in ev] == ["kerzen_leise_ende"] and not ev[0]["push"] and zn3["kerzen_leise"] is None,
+          "NQ-Kerzen wieder da → leises Ende")
+    zm, ev = s(leer, T, 3, True, kerzen_je={"MNQ": 4600, "NQ": 30}, **kw)
+    check([e["art"] for e in ev] == ["kerzen_beginn"] and ev[0]["push"] and "MNQ-Kerzen fehlen" in ev[0]["titel"]
+          and zm["kerzen"]["wurzel"] == "MNQ", "MNQ ohne Kerzen (10:25–11:43) → laut mit Wurzel im Titel")
+    zb, ev = s(leer, T, 3, True, kerzen_je={"MNQ": 400, "NQ": 500}, **kw)
+    check(sorted(e["art"] for e in ev) == ["kerzen_beginn", "kerzen_leise_beginn"]
+          and [e["push"] for e in ev if e["art"] == "kerzen_beginn"] == [True], "beide fehlen → MNQ laut + NQ leise")
+    zo2, ev = s(leer, T, 3, True, kerzen_je={"NQ": 500}, **kw)
+    check([e["art"] for e in ev] == ["kerzen_beginn"] and ev[0]["push"], "MNQ tickt gar nicht → schlechteste Wurzel laut wie bisher")
+    zf2, ev = s(zb, T + 30, 300, True, kerzen_je=None, **kw)
+    check(sorted(e["art"] for e in ev) == ["feed_beginn", "kerzen_leise_still", "kerzen_still"] and zf2["kerzen_leise"] is None,
+          "Feed-Ausfall schliesst beide Kerzen-Vorfaelle still")
+    zc, ev = s(zb, T + 30, 3, False, kerzen_je={"MNQ": 400, "NQ": 500}, **kw)
+    check(sorted(e["art"] for e in ev) == ["kerzen_leise_still", "kerzen_still"], "Marktschluss schliesst beide still")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

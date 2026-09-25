@@ -7824,6 +7824,11 @@ READER_WACHT_AN = (os.environ.get("READER_WACHT") or "1").strip().lower() not in
 READER_WACHT_TAKT = 30
 READER_WACHT_SCHWELLE_S = 120          # Feed älter → Ausfall
 READER_WACHT_KERZEN_S = 180            # jüngste Kerze älter → Aussetzer
+# Kerzen je Wurzel (25.09.2026, Befund Koordination: ein Tab-Symbolwechsel ließ eine Wurzel ohne Kerzen — der Alarm nannte
+# nur die „schlechteste" Wurzel und kam für jede aufs Handy). LAUT (Push) nur die Hauptwurzel: MNQ ist die Chart-Serie des
+# Feed-Tabs und die Hauptquelle des Hedge-Wächters. Fehlen NUR die Kerzen einer anderen Wurzel (NQ), ist das ein leiser
+# Hinweis — Protokoll in reader_ausfaelle (wurzel, laut=false), kein Push.
+READER_WACHT_KERZEN_HAUPT = "MNQ"
 READER_WACHT_ERINNERUNG_1_S = 600      # erste Erinnerung 10 min nach der Meldung
 READER_WACHT_ERINNERUNG_N_S = 1800     # danach alle 30 min
 READER_WACHT_URL = "https://prophos.pages.dev/prophos#markt"
@@ -7839,7 +7844,7 @@ _reader_wacht_info = {"started": False, "last_check": None, "last_error": "", "r
                       "feed_alter_s": None, "kerzen_alter_s": None, "markt_offen": None,
                       "letzter_kurs": None, "wurzel": None, "pc": None,
                       "meldungen": [], "letzte_zustellung": None, "protokoll_fehler": ""}
-_reader_wacht_zustand = {"feed": None, "kerzen": None}
+_reader_wacht_zustand = {"feed": None, "kerzen": None, "kerzen_leise": None}
 
 
 def cme_markt_offen(dt_utc):
@@ -7892,7 +7897,7 @@ def _rw_kurs_text(kurs, wurzel):
 
 def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s=None,
                          kerzen_alter_s=None, kerzen_wurzel=None, letzter_kurs=None,
-                         kurs_wurzel=None, pc=None):
+                         kurs_wurzel=None, pc=None, kerzen_je=None):
     """REIN RECHNEND (testbar, ohne Netz): ein 30-s-Schritt der Zustandsmaschine.
 
     zustand: {"feed": None | {von, gemeldet, naechste, letzter_kurs, wurzel, pc, id},
@@ -7903,10 +7908,16 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
                     None = unbekannt (Abfrage gescheitert) → keine Kerzen-Aussage
     Rückgabe (neuer_zustand, ereignisse). Ereignis: {art, push, titel, text, renotify, von, bis,
     dauer_s}; art ∈ feed_beginn | feed_erinnerung | feed_ende | feed_still | kerzen_beginn |
-    kerzen_ende | kerzen_still. push=False-Ereignisse schreiben nur das Protokoll."""
+    kerzen_ende | kerzen_still | kerzen_leise_beginn | kerzen_leise_ende | kerzen_leise_still.
+    push=False-Ereignisse schreiben nur das Protokoll.
+    kerzen_je (25.09.2026): {wurzel: Alter s} je frischer Wurzel. Dann ist nur READER_WACHT_KERZEN_HAUPT (MNQ) laut
+    (Zustand 'kerzen'), jede andere Wurzel leise (Zustand 'kerzen_leise', kein Push); tickt die Hauptwurzel gar nicht,
+    ist die schlechteste andere laut wie bisher. Ohne kerzen_je gilt der alte Weg (kerzen_alter_s/kerzen_wurzel laut)."""
     alt_f = (zustand or {}).get("feed")
     alt_k = (zustand or {}).get("kerzen")
+    alt_l = (zustand or {}).get("kerzen_leise")
     neu = {"feed": dict(alt_f) if alt_f else None, "kerzen": dict(alt_k) if alt_k else None,
+           "kerzen_leise": dict(alt_l) if alt_l else None,
            "feed_zurueck": (zustand or {}).get("feed_zurueck")}
     ev = []
 
@@ -7923,6 +7934,9 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
         if neu["kerzen"]:
             ende("kerzen_still", neu["kerzen"], False)
             neu["kerzen"] = None
+        if neu["kerzen_leise"]:
+            ende("kerzen_leise_still", neu["kerzen_leise"], False)
+            neu["kerzen_leise"] = None
         return neu, ev
 
     alter = float("inf") if feed_alter_s is None else max(0.0, float(feed_alter_s))
@@ -7934,6 +7948,9 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
         if neu["kerzen"]:
             ende("kerzen_still", neu["kerzen"], False)
             neu["kerzen"] = None
+        if neu["kerzen_leise"]:
+            ende("kerzen_leise_still", neu["kerzen_leise"], False)
+            neu["kerzen_leise"] = None
         f = neu["feed"]
         if not f:
             von = jetzt - alter if alter != float("inf") else jetzt
@@ -7970,24 +7987,54 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
     # Kerzen-Alter wie das Feed-Alter gedeckelt: seit Öffnung und seit der Feed wieder da ist —
     # nach einem Ausfall füllt der Reader die Kerzen erst nach; ohne Deckel käme direkt nach
     # „Reader wieder da" noch ein „Kerzen fehlen" hinterher.
-    ka = kerzen_alter_s
-    if ka is not None:
+    laut_ka, laut_w, leise_ka, leise_w = kerzen_alter_s, kerzen_wurzel, None, None
+    if isinstance(kerzen_je, dict) and kerzen_je:
+        je = {str(w).upper(): a for w, a in kerzen_je.items() if a is not None}
+        andere = sorted(((float(a), w) for w, a in je.items() if w != READER_WACHT_KERZEN_HAUPT), reverse=True)
+        if READER_WACHT_KERZEN_HAUPT in je:
+            laut_ka, laut_w = je[READER_WACHT_KERZEN_HAUPT], READER_WACHT_KERZEN_HAUPT
+            leise_ka, leise_w = (andere[0] if andere else (None, None))
+        elif andere:
+            laut_ka, laut_w = andere[0]
+        else:
+            laut_ka, laut_w = None, None
+
+    def gedeckelt(ka):
+        if ka is None:
+            return None
         for deckel in (seit_offen_s, (jetzt - neu["feed_zurueck"]) if neu.get("feed_zurueck") else None):
             if deckel is not None:
                 ka = min(float(ka), float(deckel))
+        return ka
+
+    ka = gedeckelt(laut_ka)
     if ka is not None and ka > READER_WACHT_KERZEN_S:
         if not neu["kerzen"]:
             # erste fehlende Minute = Minute nach der jüngsten Kerze
             von = jetzt - ka + 60
-            neu["kerzen"] = {"von": von, "wurzel": kerzen_wurzel, "id": None}
+            neu["kerzen"] = {"von": von, "wurzel": laut_w, "id": None}
             ev.append({"art": "kerzen_beginn", "push": True, "renotify": True,
-                       "titel": f"Reader: Kerzen fehlen seit {_rw_uhr(von)}",
-                       "text": (f"Kurs-Feed frisch, aber keine Minutenkerze {kerzen_wurzel or ''} in tv_kurs_1m seit "
+                       "titel": f"Reader: {laut_w + '-' if laut_w else ''}Kerzen fehlen seit {_rw_uhr(von)}",
+                       "text": (f"Kurs-Feed frisch, aber keine Minutenkerze {laut_w or ''} in tv_kurs_1m seit "
                                 f"{_rw_uhr(von)} (Dubai) · PC {pc or '—'}").replace("  ", " "),
                        "von": von, "bis": None, "dauer_s": None, "id": None})
     elif ka is not None and neu["kerzen"]:
         ende("kerzen_ende", neu["kerzen"], False)
         neu["kerzen"] = None
+
+    kl = gedeckelt(leise_ka)
+    if kl is not None and kl > READER_WACHT_KERZEN_S:
+        if not neu["kerzen_leise"]:
+            von = jetzt - kl + 60
+            neu["kerzen_leise"] = {"von": von, "wurzel": leise_w, "id": None}
+            ev.append({"art": "kerzen_leise_beginn", "push": False, "renotify": False,
+                       "titel": f"Reader: {leise_w}-Kerzen fehlen seit {_rw_uhr(von)} (Hinweis)",
+                       "text": (f"{leise_w}-Kurs frisch, aber keine {leise_w}-Minutenkerze seit {_rw_uhr(von)} (Dubai) — "
+                                f"{READER_WACHT_KERZEN_HAUPT} läuft · PC {pc or '—'}"),
+                       "von": von, "bis": None, "dauer_s": None, "id": None})
+    elif neu["kerzen_leise"] and (kl is not None or not (isinstance(kerzen_je, dict) and kerzen_je)):
+        ende("kerzen_leise_ende", neu["kerzen_leise"], False)
+        neu["kerzen_leise"] = None
     return neu, ev
 
 
@@ -8042,6 +8089,7 @@ def _rw_messen(jetzt):
             if km is None:
                 continue
             a = max(0.0, jetzt - km)
+            out.setdefault("kerzen_je", {})[w] = a
             if schlechteste is None or a > schlechteste[0]:
                 schlechteste = (a, w)
         if schlechteste:
@@ -8050,16 +8098,27 @@ def _rw_messen(jetzt):
 
 
 def _rw_protokoll(e, zustand):
-    """Schreibt das Ereignis nach reader_ausfaelle. Fehler (z. B. Tabelle fehlt) nur loggen."""
-    art = "feed" if e["art"].startswith("feed") else "kerzen"
+    """Schreibt das Ereignis nach reader_ausfaelle. Fehler (z. B. Tabelle fehlt) nur loggen.
+    Seit 25.09.2026 je Kerzen-Vorfall auch wurzel + laut (sql/2026-09-25_reader_ausfaelle_wurzel.sql); fehlen die
+    Spalten noch, wird ohne sie geschrieben."""
+    key = "feed" if e["art"].startswith("feed") else ("kerzen_leise" if e["art"].startswith("kerzen_leise") else "kerzen")
+    art = "feed" if key == "feed" else "kerzen"
     try:
-        if e["art"] in ("feed_beginn", "kerzen_beginn"):
-            zeile = sb_insert("reader_ausfaelle", {
-                "art": art, "von": _rw_iso(e["von"]), "pc": (zustand.get(art) or {}).get("pc") or _reader_wacht_info.get("pc"),
-                "letzter_kurs": (zustand.get(art) or {}).get("letzter_kurs") if art == "feed" else _reader_wacht_info.get("letzter_kurs"),
-                "gemeldet": 1})
-            if isinstance(zeile, dict) and zeile.get("id") is not None and zustand.get(art):
-                zustand[art]["id"] = zeile["id"]
+        if e["art"] in ("feed_beginn", "kerzen_beginn", "kerzen_leise_beginn"):
+            body = {"art": art, "von": _rw_iso(e["von"]), "pc": (zustand.get(key) or {}).get("pc") or _reader_wacht_info.get("pc"),
+                    "letzter_kurs": (zustand.get(key) or {}).get("letzter_kurs") if art == "feed" else _reader_wacht_info.get("letzter_kurs"),
+                    "gemeldet": 0 if key == "kerzen_leise" else 1}
+            if art == "kerzen":
+                body.update({"wurzel": (zustand.get(key) or {}).get("wurzel"), "laut": key == "kerzen"})
+            try:
+                zeile = sb_insert("reader_ausfaelle", body)
+            except Exception as ex_:
+                if not re.search(r"wurzel|laut", str(ex_) + str(getattr(getattr(ex_, "response", None), "text", "")), re.I):
+                    raise
+                body.pop("wurzel", None); body.pop("laut", None)
+                zeile = sb_insert("reader_ausfaelle", body)
+            if isinstance(zeile, dict) and zeile.get("id") is not None and zustand.get(key):
+                zustand[key]["id"] = zeile["id"]
         elif e["art"] == "feed_erinnerung" and e.get("id") is not None:
             sb_update("reader_ausfaelle", {"id": f"eq.{e['id']}"},
                       {"gemeldet": (zustand.get("feed") or {}).get("gemeldet") or 1})
@@ -8079,8 +8138,12 @@ def _rw_uebernehmen(jetzt):
     jeder Deploy mitten im Ausfall ihn ein zweites Mal. Offene Zeilen älter als 12 h (Prozess
     lange tot) werden still geschlossen, statt sie als „Ausfall von vorgestern" zu melden."""
     try:
-        rows = sb_select("reader_ausfaelle", {"select": "id,art,von,gemeldet,letzter_kurs,pc",
-                                              "bis": "is.null", "order": "von.desc", "limit": "20"}) or []
+        try:
+            rows = sb_select("reader_ausfaelle", {"select": "id,art,von,gemeldet,letzter_kurs,pc,wurzel,laut",
+                                                  "bis": "is.null", "order": "von.desc", "limit": "20"}) or []
+        except Exception:   # Spalten wurzel/laut noch nicht da (sql/2026-09-25_reader_ausfaelle_wurzel.sql)
+            rows = sb_select("reader_ausfaelle", {"select": "id,art,von,gemeldet,letzter_kurs,pc",
+                                                  "bis": "is.null", "order": "von.desc", "limit": "20"}) or []
     except Exception as e:
         _reader_wacht_info["protokoll_fehler"] = f"{type(e).__name__}: {str(e)[:160]}"
         print(f"[reader-wacht] ℹ️ Kein Protokoll lesbar (Tabelle reader_ausfaelle fehlt?): {e}", flush=True)
@@ -8088,7 +8151,8 @@ def _rw_uebernehmen(jetzt):
     for r in rows:
         von = _rw_ts(r.get("von"))
         art = r.get("art")
-        if von is None or art not in ("feed", "kerzen") or _reader_wacht_zustand.get(art) or jetzt - von > 12 * 3600:
+        key = "kerzen_leise" if (art == "kerzen" and r.get("laut") is False) else art
+        if von is None or art not in ("feed", "kerzen") or _reader_wacht_zustand.get(key) or jetzt - von > 12 * 3600:
             try:
                 sb_update("reader_ausfaelle", {"id": f"eq.{r['id']}"},
                           {"bis": _rw_iso(jetzt), "dauer_s": int(jetzt - von) if von else None})
@@ -8102,7 +8166,7 @@ def _rw_uebernehmen(jetzt):
                 "pc": r.get("pc"), "id": r.get("id"),
                 "naechste": jetzt + (READER_WACHT_ERINNERUNG_1_S if g <= 1 else READER_WACHT_ERINNERUNG_N_S)}
         else:
-            _reader_wacht_zustand["kerzen"] = {"von": von, "wurzel": None, "id": r.get("id")}
+            _reader_wacht_zustand[key] = {"von": von, "wurzel": r.get("wurzel"), "id": r.get("id")}
         print(f"[reader-wacht] ↻ offener {art}-Vorfall seit {_rw_uhr(von)} (Dubai) übernommen", flush=True)
 
 
@@ -8116,7 +8180,7 @@ def reader_wacht_tick(jetzt=None):
     neu, ev = reader_wacht_schritt(_reader_wacht_zustand, jetzt, m.get("feed_alter_s"), offen,
                                    seit_offen_s=seit, kerzen_alter_s=m.get("kerzen_alter_s"),
                                    kerzen_wurzel=m.get("kerzen_wurzel"), letzter_kurs=m.get("letzter_kurs"),
-                                   kurs_wurzel=m.get("kurs_wurzel"), pc=m.get("pc"))
+                                   kurs_wurzel=m.get("kurs_wurzel"), pc=m.get("pc"), kerzen_je=m.get("kerzen_je"))
     _reader_wacht_zustand = neu
     _reader_wacht_info.update({"feed_alter_s": m.get("feed_alter_s"), "kerzen_alter_s": m.get("kerzen_alter_s"),
                                "markt_offen": offen, "letzter_kurs": m.get("letzter_kurs"),
@@ -8132,6 +8196,8 @@ def reader_wacht_tick(jetzt=None):
             _reader_wacht_info["meldungen"] = ([x for x in _reader_wacht_info["meldungen"] if jetzt - x["at"] < 86400]
                                                + [{"art": e["art"], "titel": e["titel"], "at": jetzt}])[-50:]
             print(f"[reader-wacht] 📣 {e['titel']} — {e['text']} ({zu}/{vers} Geräte)", flush=True)
+        elif e["art"].endswith("_beginn"):
+            print(f"[reader-wacht] ℹ️ {e['titel']} — {e['text']} (leise, kein Push)", flush=True)
         else:
             print(f"[reader-wacht] {e['art']}: Vorfall seit {_rw_uhr(e['von'])} beendet ({e.get('dauer_s')} s)", flush=True)
         _rw_protokoll(e, _reader_wacht_zustand)
@@ -8211,6 +8277,7 @@ def reader_wacht_status():
         "letzter_kurs": i["letzter_kurs"], "wurzel": i["wurzel"], "pc": i["pc"],
         "ausfall": vorfall(_reader_wacht_zustand.get("feed")),
         "kerzen_vorfall": vorfall(_reader_wacht_zustand.get("kerzen")),
+        "kerzen_hinweis": vorfall(_reader_wacht_zustand.get("kerzen_leise")),   # leise (keine Hauptwurzel), kein Push
         "meldungen_heute": heute_n, "letzte_meldungen": [{"art": x["art"], "titel": x["titel"], "at": _rw_iso(x["at"])}
                                                           for x in i["meldungen"][-5:]],
         "letzte_zustellung": ({**i["letzte_zustellung"], "at": _rw_iso(i["letzte_zustellung"]["at"])}

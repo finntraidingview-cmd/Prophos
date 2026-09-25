@@ -159,6 +159,21 @@ def main():
     check(not ok5 and list(ring2["NQ"]) == [6120], "Wurzel mit Serie bekommt keine Tick-Kerzen mehr")
     ring2, ok6 = rs._tick_kerze_in_ring(ring, "MNQ", "MNQ1!", 50.0, 60 * 103)
     check(ok6 and rs._ring_ist_tick(ring2["MNQ"]) and not rs._ring_ist_tick(ring2["NQ"]), "andere Wurzel ohne Serie bekommt Tick-Kerzen")
+    # 0.9.2: verstummte Serie (Chart auf anderes Symbol gewechselt) sperrt die Tick-Kerzen nicht mehr
+    check(rs.SERIE_STALE_S == 150 and rs._serie_frisch(ring["NQ"], 6120 + 150) and not rs._serie_frisch(ring["NQ"], 6120 + 180)
+          and not rs._serie_frisch({}, 6120), "Serie frisch bis 150 s nach ihrer juengsten Kerze")
+    import copy as _copy
+    ring4, ok7 = rs._tick_kerze_in_ring(_copy.deepcopy(ring), "NQ", "NQ1!", 30970.0, 6120 + 185)
+    ring4, ok8 = rs._tick_kerze_in_ring(ring4, "NQ", "NQ1!", 30972.5, 6120 + 200)
+    check(ok7 and ok8 and sorted(ring4["NQ"]) == [6120, 6300] and ring4["NQ"][6300]["quelle"] == "ws-tick"
+          and ring4["NQ"][6300]["h"] == 30972.5 and ring4["NQ"][6120]["quelle"] == "ws",
+          "verstummte Serie (3 min): Tick-Kerzen uebernehmen, alte Serien-Kerze bleibt")
+    ring5, n5, _w5 = rs._kerzen_uebernehmen(ring4, [{"wurzel": "NQ", "symbol": "NQ1!", "aufloesung": "1", "minute": 6300,
+                                                     "o": 30968, "h": 30975, "l": 30966, "c": 30971, "vol": 3}], False)
+    check(n5 == 1 and sorted(ring5["NQ"]) == [6120, 6300] and ring5["NQ"][6300]["quelle"] == "ws" and ring5["NQ"][6300]["h"] == 30975,
+          "Serie liefert wieder: ueberschreibt ihre Minute, Ring bleibt (kein Neuaufbau)")
+    ring6, ok9 = rs._tick_kerze_in_ring(ring5, "NQ", "NQ1!", 30980.0, 6300 + 30)
+    check(not ok9 and ring6["NQ"][6300]["quelle"] == "ws", "Minute mit Serien-Kerze wird nie von Ticks ueberschrieben")
     ring3, _ = rs._tick_kerze_in_ring({}, "NQ", "x", "unsinn", 1.0)
     check(ring3 == {} and rs._tick_kerze_in_ring({}, "", "x", 1.0, 1.0)[1] is False, "Tick-Kerze: Unsinn/leer ignoriert")
     d = rs._kerzen_diag(ring2, {"feed": {"du_min": 3, "serien": {}, "unbekannte_serien": 0}}, None, "0.8.2")
