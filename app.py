@@ -7719,10 +7719,449 @@ def admin_kompass():
     return jsonify(out)
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# READER-WACHT — Server-Wachhund für den TradingView-Kurs-Feed (25.09.2026)
+#
+# Finn: „Erstelle einen Agent, der die nächsten 24 Stunden den Reader überwacht,
+# damit es keine Ausfälle gibt. Wenn es Ausfälle gibt, schick über die Prophos-
+# Benachrichtigung eine Nachricht an mein Handy."
+#
+# WARUM SERVERSEITIG: der Wachhund im Frontend (feedWacheTick, .593) warnt nur in
+# einem offenen Prophos-Tab. Auf den Kursen aus tv_kurse schließt der Winning-
+# Days-Wächter echte Fusion-Hedges — steht der Feed nachts, merkt es sonst
+# niemand. Railway läuft 24/7, also sitzt der Wachhund hier und meldet per Web
+# Push (push_an_user) ans Handy. Dauerhaft, nicht nur 24 h; aus mit READER_WACHT=0.
+#
+# NUR AUF RAILWAY: auf den PCs ist PROPHOS_FRONTEND gesetzt — dort liefe sonst
+# je PC ein eigener Wachhund, und jeder Ausfall käme fünfmal aufs Handy.
+#
+# REGELN (alle in der reinen Funktion reader_wacht_schritt, Selbsttest in
+# tools/selftest_reader_wacht.py):
+#   - „frisch" zählt nur eine tv_kurse-Zeile mit stale=false und modus, der NICHT
+#     mit 'delayed' beginnt (delayed = CME-Abo auf dem PC weg, Kurse 10 min alt
+#     mit frischem Zeitstempel — für den Hedge-Wächter genauso wertlos wie keiner)
+#   - nur bei offenem CME-Markt (So 17:00 – Fr 16:00 Chicago, täglich Pause
+#     16:00–17:00); ein laufender Ausfall endet beim Marktschluss STILL
+#   - Alter wird auf „seit Marktöffnung" gedeckelt: um 17:00 CT ist die letzte
+#     frische Zeile eine Stunde alt, das ist kein Ausfall (sonst Alarm bei jeder
+#     Öffnung)
+#   - Ausfall ab 120 s: EINE Meldung, Erinnerung nach 10 min, dann alle 30 min,
+#     bei Rückkehr EINE „wieder da"-Meldung mit Dauer
+#   - Kerzen-Aussetzer: Feed frisch, aber jüngste Kerze in tv_kurs_1m > 3 min alt
+#     (der Reader schreibt die laufende Minute mit) → einmal je Vorfall
+#   - Protokoll in reader_ausfaelle (sql/2026-09-25_reader_ausfaelle.sql); fehlt
+#     die Tabelle, läuft alles weiter, nur das Protokoll fehlt
+# BEKANNTE GRENZE: CME-Feiertage (verkürzte Sessions, z. B. Thanksgiving) kennt
+# cme_markt_offen nicht — an solchen Tagen kann ein Fehlalarm kommen.
+# ════════════════════════════════════════════════════════════════════════════
+READER_WACHT_AN = (os.environ.get("READER_WACHT") or "1").strip().lower() not in ("0", "false", "aus", "off", "no")
+READER_WACHT_TAKT = 30
+READER_WACHT_SCHWELLE_S = 120          # Feed älter → Ausfall
+READER_WACHT_KERZEN_S = 180            # jüngste Kerze älter → Aussetzer
+READER_WACHT_ERINNERUNG_1_S = 600      # erste Erinnerung 10 min nach der Meldung
+READER_WACHT_ERINNERUNG_N_S = 1800     # danach alle 30 min
+READER_WACHT_URL = "https://prophos.pages.dev/prophos#markt"
+READER_WACHT_TZ = "Asia/Dubai"         # Finn sitzt in Dubai — Uhrzeiten in den Meldungen danach
+# Finns Geräte hängen (Stand 25.09.2026) an der ersten ID; die anderen beiden sind
+# Admin-Logins — ohne angemeldetes Gerät passiert dort schlicht nichts.
+READER_WACHT_UIDS = [u.strip() for u in (os.environ.get("READER_WACHT_UIDS") or
+                     "aff98e60-e9a0-4821-9d1d-31634571a2f4,b55d7ab4-5246-4101-abca-f729c71d17ec,"
+                     "48f272b4-913e-4598-a06a-1dcc3d5679fb").split(",") if u.strip()]
+
+_reader_wacht_started = False
+_reader_wacht_info = {"started": False, "last_check": None, "last_error": "", "runs": 0,
+                      "feed_alter_s": None, "kerzen_alter_s": None, "markt_offen": None,
+                      "letzter_kurs": None, "wurzel": None, "pc": None,
+                      "meldungen": [], "letzte_zustellung": None, "protokoll_fehler": ""}
+_reader_wacht_zustand = {"feed": None, "kerzen": None}
+
+
+def cme_markt_offen(dt_utc):
+    """REIN RECHNEND (testbar): CME-Globex für NQ/MNQ offen? Chicago-Zeit: So 17:00 – Fr 16:00,
+    täglich Pause 16:00–17:00 CT; Sommer-/Winterzeit über zoneinfo. Gleiche Regel wie
+    cmeMarktOffen im Frontend und cmeOffen im Userscript. dt_utc: aware datetime oder Unix-Sekunden."""
+    return _cme_offen_seit_s(dt_utc) is not None
+
+
+def _cme_offen_seit_s(dt_utc):
+    """REIN RECHNEND: Sekunden seit der letzten Öffnung (17:00 CT), None bei geschlossenem Markt.
+    Dient dem Deckel „Alter höchstens seit Öffnung" — sonst wäre um 17:00 CT jede Zeile eine
+    Stunde alt und jede Öffnung ein Ausfall."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    if isinstance(dt_utc, (int, float)):
+        dt_utc = datetime.fromtimestamp(float(dt_utc), timezone.utc)
+    ct = dt_utc.astimezone(ZoneInfo("America/Chicago"))
+    wt, hm = ct.weekday(), ct.hour * 60 + ct.minute      # Mo=0 … So=6
+    if wt == 5:                                          # Samstag
+        return None
+    if wt == 4 and hm >= 16 * 60:                        # Freitag ab 16:00
+        return None
+    if wt == 6 and hm < 17 * 60:                         # Sonntag vor 17:00
+        return None
+    if 16 * 60 <= hm < 17 * 60:                          # tägliche Pause
+        return None
+    tag = ct.date() if hm >= 17 * 60 else ct.date() - timedelta(days=1)
+    auf = datetime(tag.year, tag.month, tag.day, 17, 0, tzinfo=ZoneInfo("America/Chicago"))
+    return max(0.0, (dt_utc - auf).total_seconds())
+
+
+def _rw_uhr(ts):
+    """Unix-Sekunden → „HH:MM" in Dubai-Zeit (Finns Uhr)."""
+    from zoneinfo import ZoneInfo
+    try:
+        return datetime.fromtimestamp(float(ts), timezone.utc).astimezone(ZoneInfo(READER_WACHT_TZ)).strftime("%H:%M")
+    except Exception:
+        return "—"
+
+
+def _rw_kurs_text(kurs, wurzel):
+    if kurs is None:
+        return "kein Kurs"
+    try:
+        return f"{wurzel or 'NQ'} {float(kurs):.2f}"
+    except (TypeError, ValueError):
+        return f"{wurzel or 'NQ'} {kurs}"
+
+
+def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s=None,
+                         kerzen_alter_s=None, kerzen_wurzel=None, letzter_kurs=None,
+                         kurs_wurzel=None, pc=None):
+    """REIN RECHNEND (testbar, ohne Netz): ein 30-s-Schritt der Zustandsmaschine.
+
+    zustand: {"feed": None | {von, gemeldet, naechste, letzter_kurs, wurzel, pc, id},
+              "kerzen": None | {von, wurzel, id}, "feed_zurueck": Zeitpunkt der letzten Rückkehr}
+    feed_alter_s: Sekunden seit der jüngsten FRISCHEN tv_kurse-Zeile, None = keine frische Zeile
+    seit_offen_s: Sekunden seit Marktöffnung (Deckel für beide Alter), None = kein Deckel
+    kerzen_alter_s: Sekunden seit dem Minutenanfang der jüngsten Kerze (schlechteste Wurzel),
+                    None = unbekannt (Abfrage gescheitert) → keine Kerzen-Aussage
+    Rückgabe (neuer_zustand, ereignisse). Ereignis: {art, push, titel, text, renotify, von, bis,
+    dauer_s}; art ∈ feed_beginn | feed_erinnerung | feed_ende | feed_still | kerzen_beginn |
+    kerzen_ende | kerzen_still. push=False-Ereignisse schreiben nur das Protokoll."""
+    alt_f = (zustand or {}).get("feed")
+    alt_k = (zustand or {}).get("kerzen")
+    neu = {"feed": dict(alt_f) if alt_f else None, "kerzen": dict(alt_k) if alt_k else None,
+           "feed_zurueck": (zustand or {}).get("feed_zurueck")}
+    ev = []
+
+    def ende(art, v, push, titel="", text="", renotify=False):
+        ev.append({"art": art, "push": push, "titel": titel, "text": text, "renotify": renotify,
+                   "von": v.get("von"), "bis": jetzt, "dauer_s": int(max(0, jetzt - (v.get("von") or jetzt))),
+                   "id": v.get("id"), "gemeldet": v.get("gemeldet")})
+
+    if not markt_offen:
+        # Marktschluss beendet still — Wochenende/Tagespause ist kein Ausfall
+        if neu["feed"]:
+            ende("feed_still", neu["feed"], False)
+            neu["feed"] = None
+        if neu["kerzen"]:
+            ende("kerzen_still", neu["kerzen"], False)
+            neu["kerzen"] = None
+        return neu, ev
+
+    alter = float("inf") if feed_alter_s is None else max(0.0, float(feed_alter_s))
+    if seit_offen_s is not None:
+        alter = min(alter, float(seit_offen_s))
+
+    if alter > READER_WACHT_SCHWELLE_S:
+        # Feed steht — ein offener Kerzen-Vorfall ist darin enthalten, still schließen
+        if neu["kerzen"]:
+            ende("kerzen_still", neu["kerzen"], False)
+            neu["kerzen"] = None
+        f = neu["feed"]
+        if not f:
+            von = jetzt - alter if alter != float("inf") else jetzt
+            f = neu["feed"] = {"von": von, "gemeldet": 1, "naechste": jetzt + READER_WACHT_ERINNERUNG_1_S,
+                               "letzter_kurs": letzter_kurs, "wurzel": kurs_wurzel, "pc": pc, "id": None}
+            minuten = max(2, int(round((jetzt - von) / 60.0)))
+            ev.append({"art": "feed_beginn", "push": True, "renotify": True,
+                       "titel": f"Reader-Ausfall: Kurs-Feed steht seit {minuten} min",
+                       "text": (f"Letzter frischer Kurs {_rw_kurs_text(letzter_kurs, kurs_wurzel)} um "
+                                f"{_rw_uhr(von)} (Dubai) · PC {pc or '—'}"),
+                       "von": von, "bis": None, "dauer_s": None, "id": None})
+        elif jetzt >= float(f.get("naechste") or 0):
+            f["gemeldet"] = int(f.get("gemeldet") or 1) + 1
+            f["naechste"] = jetzt + READER_WACHT_ERINNERUNG_N_S
+            minuten = int(round((jetzt - f["von"]) / 60.0))
+            ev.append({"art": "feed_erinnerung", "push": True, "renotify": False,
+                       "titel": f"Reader-Ausfall dauert an: {minuten} min",
+                       "text": (f"Seit {_rw_uhr(f['von'])} (Dubai) kein frischer Kurs · letzter "
+                                f"{_rw_kurs_text(f.get('letzter_kurs'), f.get('wurzel'))} · PC {f.get('pc') or '—'}"),
+                       "von": f["von"], "bis": None, "dauer_s": None, "id": f.get("id")})
+        return neu, ev
+
+    # Feed frisch
+    if neu["feed"]:
+        f = neu["feed"]
+        minuten = max(1, int(round((jetzt - f["von"]) / 60.0)))
+        ende("feed_ende", f, True,
+             titel=f"Reader wieder da — Ausfall von {_rw_uhr(f['von'])} bis {_rw_uhr(jetzt)} ({minuten} min)",
+             text=f"Kurs-Feed läuft wieder · {_rw_kurs_text(letzter_kurs, kurs_wurzel)} · PC {pc or f.get('pc') or '—'}",
+             renotify=True)
+        neu["feed"] = None
+        neu["feed_zurueck"] = jetzt
+
+    # Kerzen-Alter wie das Feed-Alter gedeckelt: seit Öffnung und seit der Feed wieder da ist —
+    # nach einem Ausfall füllt der Reader die Kerzen erst nach; ohne Deckel käme direkt nach
+    # „Reader wieder da" noch ein „Kerzen fehlen" hinterher.
+    ka = kerzen_alter_s
+    if ka is not None:
+        for deckel in (seit_offen_s, (jetzt - neu["feed_zurueck"]) if neu.get("feed_zurueck") else None):
+            if deckel is not None:
+                ka = min(float(ka), float(deckel))
+    if ka is not None and ka > READER_WACHT_KERZEN_S:
+        if not neu["kerzen"]:
+            # erste fehlende Minute = Minute nach der jüngsten Kerze
+            von = jetzt - ka + 60
+            neu["kerzen"] = {"von": von, "wurzel": kerzen_wurzel, "id": None}
+            ev.append({"art": "kerzen_beginn", "push": True, "renotify": True,
+                       "titel": f"Reader: Kerzen fehlen seit {_rw_uhr(von)}",
+                       "text": (f"Kurs-Feed frisch, aber keine Minutenkerze {kerzen_wurzel or ''} in tv_kurs_1m seit "
+                                f"{_rw_uhr(von)} (Dubai) · PC {pc or '—'}").replace("  ", " "),
+                       "von": von, "bis": None, "dauer_s": None, "id": None})
+    elif ka is not None and neu["kerzen"]:
+        ende("kerzen_ende", neu["kerzen"], False)
+        neu["kerzen"] = None
+    return neu, ev
+
+
+def _rw_iso(ts):
+    return datetime.fromtimestamp(float(ts), timezone.utc).isoformat() if ts is not None else None
+
+
+def _rw_ts(roh):
+    try:
+        t = datetime.fromisoformat(str(roh).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _rw_frisch(zeile):
+    """Zählt die tv_kurse-Zeile als frisch? stale=false, Kurs da, modus nicht 'delayed…'."""
+    return (not zeile.get("stale") and zeile.get("preis") is not None
+            and not str(zeile.get("modus") or "").lower().startswith("delayed"))
+
+
+def _rw_pc(zeile):
+    return (zeile.get("pc_name") or str(zeile.get("id") or "").split(":")[0] or None)
+
+
+def _rw_messen(jetzt):
+    """Liest tv_kurse (+ tv_kurs_1m je frischer Wurzel). Rückgabe dict für reader_wacht_schritt."""
+    rows = sb_select("tv_kurse", {"select": "id,pc_name,wurzel,preis,modus,stale,updated_at",
+                                  "order": "updated_at.desc", "limit": "6"}) or []
+    frisch = [r for r in rows if _rw_frisch(r)]
+    beste = frisch[0] if frisch else (rows[0] if rows else {})
+    out = {"feed_alter_s": None, "letzter_kurs": beste.get("preis"), "kurs_wurzel": beste.get("wurzel"),
+           "pc": _rw_pc(beste) if beste else None, "kerzen_alter_s": None, "kerzen_wurzel": None}
+    if frisch:
+        t = _rw_ts(frisch[0].get("updated_at"))
+        if t is not None:
+            out["feed_alter_s"] = max(0.0, jetzt - t)
+        # Kerzen nur prüfen, wenn der Feed frisch ist — die schlechteste Wurzel zählt
+        schlechteste = None
+        for w in sorted({(r.get("wurzel") or "").upper() for r in frisch if r.get("wurzel")}):
+            try:
+                k = sb_select("tv_kurs_1m", {"select": "minute", "wurzel": f"eq.{w}",
+                                             "order": "minute.desc", "limit": "1"}) or []
+            except Exception as e:
+                print(f"[reader-wacht] ⚠️ Kerzen {w}: {type(e).__name__}: {e}", flush=True)
+                continue
+            if not k:
+                continue
+            km = _rw_ts(k[0].get("minute"))
+            if km is None:
+                continue
+            a = max(0.0, jetzt - km)
+            if schlechteste is None or a > schlechteste[0]:
+                schlechteste = (a, w)
+        if schlechteste:
+            out["kerzen_alter_s"], out["kerzen_wurzel"] = schlechteste
+    return out
+
+
+def _rw_protokoll(e, zustand):
+    """Schreibt das Ereignis nach reader_ausfaelle. Fehler (z. B. Tabelle fehlt) nur loggen."""
+    art = "feed" if e["art"].startswith("feed") else "kerzen"
+    try:
+        if e["art"] in ("feed_beginn", "kerzen_beginn"):
+            zeile = sb_insert("reader_ausfaelle", {
+                "art": art, "von": _rw_iso(e["von"]), "pc": (zustand.get(art) or {}).get("pc") or _reader_wacht_info.get("pc"),
+                "letzter_kurs": (zustand.get(art) or {}).get("letzter_kurs") if art == "feed" else _reader_wacht_info.get("letzter_kurs"),
+                "gemeldet": 1})
+            if isinstance(zeile, dict) and zeile.get("id") is not None and zustand.get(art):
+                zustand[art]["id"] = zeile["id"]
+        elif e["art"] == "feed_erinnerung" and e.get("id") is not None:
+            sb_update("reader_ausfaelle", {"id": f"eq.{e['id']}"},
+                      {"gemeldet": (zustand.get("feed") or {}).get("gemeldet") or 1})
+        elif e.get("id") is not None:          # *_ende / *_still
+            body = {"bis": _rw_iso(e["bis"]), "dauer_s": e.get("dauer_s")}
+            if e["art"] == "feed_ende":
+                body["gemeldet"] = int(e.get("gemeldet") or 1) + 1      # + die „wieder da"-Meldung
+            sb_update("reader_ausfaelle", {"id": f"eq.{e['id']}"}, body)
+        _reader_wacht_info["protokoll_fehler"] = ""
+    except Exception as ex:
+        _reader_wacht_info["protokoll_fehler"] = f"{type(ex).__name__}: {str(ex)[:160]}"
+        print(f"[reader-wacht] ⚠️ Protokoll ({e['art']}): {_reader_wacht_info['protokoll_fehler']}", flush=True)
+
+
+def _rw_uebernehmen(jetzt):
+    """Nach einem Neustart den offenen Vorfall aus reader_ausfaelle übernehmen — sonst meldete
+    jeder Deploy mitten im Ausfall ihn ein zweites Mal. Offene Zeilen älter als 12 h (Prozess
+    lange tot) werden still geschlossen, statt sie als „Ausfall von vorgestern" zu melden."""
+    try:
+        rows = sb_select("reader_ausfaelle", {"select": "id,art,von,gemeldet,letzter_kurs,pc",
+                                              "bis": "is.null", "order": "von.desc", "limit": "20"}) or []
+    except Exception as e:
+        _reader_wacht_info["protokoll_fehler"] = f"{type(e).__name__}: {str(e)[:160]}"
+        print(f"[reader-wacht] ℹ️ Kein Protokoll lesbar (Tabelle reader_ausfaelle fehlt?): {e}", flush=True)
+        return
+    for r in rows:
+        von = _rw_ts(r.get("von"))
+        art = r.get("art")
+        if von is None or art not in ("feed", "kerzen") or _reader_wacht_zustand.get(art) or jetzt - von > 12 * 3600:
+            try:
+                sb_update("reader_ausfaelle", {"id": f"eq.{r['id']}"},
+                          {"bis": _rw_iso(jetzt), "dauer_s": int(jetzt - von) if von else None})
+            except Exception:
+                pass
+            continue
+        if art == "feed":
+            g = int(r.get("gemeldet") or 1)
+            _reader_wacht_zustand["feed"] = {
+                "von": von, "gemeldet": g, "letzter_kurs": r.get("letzter_kurs"), "wurzel": None,
+                "pc": r.get("pc"), "id": r.get("id"),
+                "naechste": jetzt + (READER_WACHT_ERINNERUNG_1_S if g <= 1 else READER_WACHT_ERINNERUNG_N_S)}
+        else:
+            _reader_wacht_zustand["kerzen"] = {"von": von, "wurzel": None, "id": r.get("id")}
+        print(f"[reader-wacht] ↻ offener {art}-Vorfall seit {_rw_uhr(von)} (Dubai) übernommen", flush=True)
+
+
+def reader_wacht_tick(jetzt=None):
+    global _reader_wacht_zustand
+    jetzt = time.time() if jetzt is None else jetzt
+    dt = datetime.fromtimestamp(jetzt, timezone.utc)
+    seit = _cme_offen_seit_s(dt)
+    offen = seit is not None
+    m = _rw_messen(jetzt) if offen else {}
+    neu, ev = reader_wacht_schritt(_reader_wacht_zustand, jetzt, m.get("feed_alter_s"), offen,
+                                   seit_offen_s=seit, kerzen_alter_s=m.get("kerzen_alter_s"),
+                                   kerzen_wurzel=m.get("kerzen_wurzel"), letzter_kurs=m.get("letzter_kurs"),
+                                   kurs_wurzel=m.get("kurs_wurzel"), pc=m.get("pc"))
+    _reader_wacht_zustand = neu
+    _reader_wacht_info.update({"feed_alter_s": m.get("feed_alter_s"), "kerzen_alter_s": m.get("kerzen_alter_s"),
+                               "markt_offen": offen, "letzter_kurs": m.get("letzter_kurs"),
+                               "wurzel": m.get("kurs_wurzel"), "pc": m.get("pc")})
+    for e in ev:
+        if e["push"]:
+            zu, vers = 0, 0
+            for uid in READER_WACHT_UIDS:
+                a, b = push_an_user(uid, e["titel"], e["text"], url=READER_WACHT_URL,
+                                    tag="reader-wacht", renotify=e["renotify"])
+                zu, vers = zu + a, vers + b
+            _reader_wacht_info["letzte_zustellung"] = {"art": e["art"], "zugestellt": zu, "geraete": vers, "at": jetzt}
+            _reader_wacht_info["meldungen"] = ([x for x in _reader_wacht_info["meldungen"] if jetzt - x["at"] < 86400]
+                                               + [{"art": e["art"], "titel": e["titel"], "at": jetzt}])[-50:]
+            print(f"[reader-wacht] 📣 {e['titel']} — {e['text']} ({zu}/{vers} Geräte)", flush=True)
+        else:
+            print(f"[reader-wacht] {e['art']}: Vorfall seit {_rw_uhr(e['von'])} beendet ({e.get('dauer_s')} s)", flush=True)
+        _rw_protokoll(e, _reader_wacht_zustand)
+    return ev
+
+
+def reader_wacht_loop():
+    print(f"[reader-wacht] 👁 Wachhund läuft (alle {READER_WACHT_TAKT}s, {len(READER_WACHT_UIDS)} Empfänger)", flush=True)
+    try:
+        _rw_uebernehmen(time.time())
+    except Exception as e:
+        print(f"[reader-wacht] ⚠️ Übernahme: {e}", flush=True)
+    while True:
+        started = time.time()
+        try:
+            reader_wacht_tick()
+            _reader_wacht_info["last_error"] = ""
+        except Exception as e:
+            _reader_wacht_info["last_error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            print(f"[reader-wacht] ⚠️ {_reader_wacht_info['last_error']}", flush=True)
+        _reader_wacht_info["last_check"] = time.time()
+        _reader_wacht_info["runs"] += 1
+        time.sleep(max(5.0, READER_WACHT_TAKT - (time.time() - started)))
+
+
+def start_reader_wacht():
+    global _reader_wacht_started
+    if _reader_wacht_started:
+        return
+    if not READER_WACHT_AN:
+        print("[reader-wacht] ℹ️ READER_WACHT=0 — Wachhund aus.", flush=True)
+        return
+    if (os.environ.get("PROPHOS_FRONTEND") or "").strip():
+        return          # PC-Backend: kein Wachhund (sonst meldet jeder PC denselben Ausfall)
+    if not SUPABASE_SERVICE_KEY:
+        print("[reader-wacht] ℹ️ Kein SUPABASE_SERVICE_KEY — Wachhund inaktiv.", flush=True)
+        return
+    _reader_wacht_started = True
+    _reader_wacht_info["started"] = True
+    threading.Thread(target=reader_wacht_loop, daemon=True).start()
+
+
+@app.route("/reader-wacht/status", methods=["GET", "OPTIONS"])
+def reader_wacht_status():
+    """Stand des Wachhunds — nur Zahlen, keine IDs, keine Schlüssel. Ohne Anmeldung, damit
+    Koordination/curl ihn jederzeit prüfen kann."""
+    if request.method == "OPTIONS":
+        return "", 200
+    jetzt = time.time()
+    i = _reader_wacht_info
+
+    def vorfall(v):
+        if not v:
+            return None
+        return {"von": _rw_iso(v.get("von")), "von_dubai": _rw_uhr(v.get("von")),
+                "dauer_s": int(jetzt - v["von"]) if v.get("von") else None,
+                "gemeldet": v.get("gemeldet"), "wurzel": v.get("wurzel"), "pc": v.get("pc"),
+                "protokolliert": v.get("id") is not None}
+
+    heute = datetime.fromtimestamp(jetzt, timezone.utc)
+    from zoneinfo import ZoneInfo
+    tag = heute.astimezone(ZoneInfo(READER_WACHT_TZ)).date()
+    heute_n = sum(1 for x in i["meldungen"]
+                  if datetime.fromtimestamp(x["at"], timezone.utc).astimezone(ZoneInfo(READER_WACHT_TZ)).date() == tag)
+    grund = None
+    if not i["started"]:
+        grund = ("READER_WACHT=0" if not READER_WACHT_AN else
+                 "PC-Backend (PROPHOS_FRONTEND)" if (os.environ.get("PROPHOS_FRONTEND") or "").strip() else
+                 "kein SUPABASE_SERVICE_KEY" if not SUPABASE_SERVICE_KEY else "nicht gestartet")
+    return jsonify({
+        "ok": True, "laeuft": bool(i["started"]), "grund": grund, "takt_s": READER_WACHT_TAKT,
+        "letzter_check": _rw_iso(i["last_check"]) if i["last_check"] else None,
+        "letzter_check_vor_s": round(jetzt - i["last_check"], 1) if i["last_check"] else None,
+        "runs": i["runs"], "markt_offen": cme_markt_offen(heute),
+        "feed_alter_s": round(i["feed_alter_s"], 1) if i["feed_alter_s"] is not None else None,
+        "kerzen_alter_s": round(i["kerzen_alter_s"], 1) if i["kerzen_alter_s"] is not None else None,
+        "letzter_kurs": i["letzter_kurs"], "wurzel": i["wurzel"], "pc": i["pc"],
+        "ausfall": vorfall(_reader_wacht_zustand.get("feed")),
+        "kerzen_vorfall": vorfall(_reader_wacht_zustand.get("kerzen")),
+        "meldungen_heute": heute_n, "letzte_meldungen": [{"art": x["art"], "titel": x["titel"], "at": _rw_iso(x["at"])}
+                                                          for x in i["meldungen"][-5:]],
+        "letzte_zustellung": ({**i["letzte_zustellung"], "at": _rw_iso(i["letzte_zustellung"]["at"])}
+                              if i["letzte_zustellung"] else None),
+        "empfaenger": len(READER_WACHT_UIDS), "push_bereit": push_bereit(),
+        "last_error": i["last_error"], "protokoll_fehler": i["protokoll_fehler"],
+        "now": _rw_iso(jetzt),
+    })
+
+
 start_kompass()
 
 
 start_watcher()
+
+# Reader-Wachhund (25.09.2026) — nur Railway, siehe READER-WACHT oben
+start_reader_wacht()
 
 # ── Duplikum Auto-Connect + proaktiver Refresh (überlebt Restarts) ──
 # Läuft auf Modul-Ebene, damit es auch unter Gunicorn (Production) startet.
