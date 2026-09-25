@@ -18682,6 +18682,20 @@
   const HEDGE_NOTFALL_STD = 1.10           // Notfall-SL am Fusion-Hedge = 110 % der Master-TP-Distanz (alte Logik, Finns „110 %")
   const hedgePufferTicks = () => Math.round(hedgePuffer() / HEDGE_TICK)
   function hedgeNotfallFaktor(){ try{ const v = wdVorplanRegeln().hedge_notfall; return (typeof v === 'number' && isFinite(v) && v >= 1 && v <= 2) ? v : HEDGE_NOTFALL_STD }catch(_){ return HEDGE_NOTFALL_STD } }
+  // Notfall-SL mit Mindestabstand (25.09.2026, Finn nach der Nacht: „der Notfall-SL hat gegriffen anstatt wie geplant, sobald die Order im
+  // Prophos-Chart gehittet wurde"). Befund Jacob 772fa0c3/273fd74f, 01:11 UTC: der Feed-Wächter HAT ausgelöst (close_at 01:11:13,5 bei
+  // 30.739,5 ≥ 30.737,63 bzw. 01:11:37,0 bei 30.754,75 ≥ 30.754,1), der Copier meldete aber „Position war schon zu (level_tp)" — 110 % von
+  // 27–34 Pkt lagen in NQ umgerechnet nur 0,7–1,4 Pkt hinter dem Feed-Level (TP + 8 Ticks). MetaTrader reagiert sofort, der Feed kommt
+  // 2–4 s später → bei jeder schnellen Bewegung gewinnt der Notfall, und schon ein Basis-Wackler NAS100↔NQ kann ihn VOR dem Master-TP
+  // auslösen. Jetzt: Notfall mindestens HEDGE_NOTFALL_MIN_PUNKTE hinter dem Master-TP (also 8 Pkt hinter dem Feed-Level); der Prozentwert
+  // aus dem Farmer bleibt die Untergrenze, Deckel 2,0 wie im Copier.
+  const HEDGE_NOTFALL_MIN_PUNKTE = 10
+  function hedgeNotfallFaktorFuer(punkte){
+    const basis = hedgeNotfallFaktor(), p = Number(punkte)
+    if(!(p > 0)) return basis
+    return Math.min(2, Math.max(basis, Math.round(((p + HEDGE_NOTFALL_MIN_PUNKTE) / p) * 1000) / 1000))
+  }
+  window._hedgeNotfallFaktorFuer = hedgeNotfallFaktorFuer
   // Schließ-Level über den Kurs-Feed: Master-TP ± Puffer (BUY-Master: darüber, SELL-Master: darunter)
   const hedgeSchliesstBei = (richtungMaster, tpLevel, puffer) => (tpLevel > 0) ? (richtungMaster === 'sell' ? tpLevel - puffer : tpLevel + puffer) : null
   // Zahl aus einem TradingView-Titel/Feld — dieselbe Regel wie tv_snapshot.parse_de_zahl: stehen beide Trenner
@@ -18851,7 +18865,7 @@
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
     // notfall_faktor (Backend .512): SL am Hedge = fill ± tp_punkte × 1,10; geschlossen wird über den Feed-Wächter bei TP + 8 Ticks.
     const lotsSoll = (Number(plan.multiplier) > 0 && kt > 0) ? Math.round(kt * Number(plan.multiplier) * 100) / 100 : undefined
-    const openBody = JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), notfall_faktor: hedgeNotfallFaktor(), symbol: 'NAS100', plan_id: String(plan.id) })
+    const openBody = JSON.stringify({ aktion: 'open', richtung: gegen, eur: plan.hedgeEur, lots: lotsSoll, tp_punkte: punkte, sl_punkte: slPunkte, punkte, puffer: hedgePuffer(), notfall_faktor: hedgeNotfallFaktorFuer(punkte), symbol: 'NAS100', plan_id: String(plan.id) })
     // WIEDERHOLUNG (25.09.2026): bei sicher nicht gesendeten Fehlern (HEDGE_SICHER) bis 90 s nach dem ersten Versuch alle 10–15 s
     // (Streuung) erneut — Status solange 'wartet'. Vor jedem neuen Versuch: steht schon eine Position mit der Kennung dieses Plans
     // in hedge_solo, wird sie übernommen statt ein zweites Mal geöffnet. Nie wiederholt: abgelehnt (retry_ok false), copier_stumm.
@@ -18878,7 +18892,7 @@
     if(res && res.ok){
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
-        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktor(), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: hedgePuffer(),
+        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: hedgePuffer(),
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
         schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer()),   // Feed-Wächter schließt hier (TP ± 8 Ticks)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
@@ -18895,7 +18909,7 @@
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
       const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer())
       const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
-        + (res.sl ? ` · Notfall-SL Fusion ${f(res.sl)} (${Math.round((res.notfall_faktor || hedgeNotfallFaktor()) * 100)} %)${res.tp ? ` / Master-SL-Level ${f(res.tp)}` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
+        + (res.sl ? ` · Notfall-SL Fusion ${f(res.sl)} (${Math.round((res.notfall_faktor || hedgeNotfallFaktorFuer(punkte)) * 100)} %)${res.tp ? ` / Master-SL-Level ${f(res.tp)}` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
                   : ' · ⚠ KEIN Notfall-SL gesetzt (' + (res.sl_fehler || '?') + ')')
       if(typeof atToast === 'function') atToast(`✓ Fusion-Hedge offen: ${gegen.toUpperCase()} ${f(res.lots)} Lot NAS100 @ ${f(res.fill)}${levelText}`, 'start')
       return h
@@ -30613,11 +30627,11 @@
                `${n(r.lots, 2)} Lot × ${n(r.slavePpl, 2)} €/Pkt × (${n(r.tpPkt, 1)} + ${n(puffer, 2)} Pkt Puffer) · ${tpWdSchliessText(r, puffer)}`)
       : leer('bei Take Profit: erst Take Profit ($) eintragen.')
     // C) kein Stop Loss (25.09.2026, Finn: „Bei Winning Days ist NIE ein Stop Loss drin") + Notfall-SL auf Fusion
-    const notfall = (typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : HEDGE_NOTFALL_STD
+    const notfall = (typeof hedgeNotfallFaktorFuer === 'function') ? hedgeNotfallFaktorFuer(r.tpPkt) : HEDGE_NOTFALL_STD
     box.innerHTML = `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Kein Stop Loss</div>
          <div class="tp-wd-kachel-sub">Der Master läuft ohne SL in TradingView. Der Hedge endet mit dem Master — Take Profit, Auto-Close oder von Hand.</div></div>`
       + `<div class="tp-wd-kachel" style="background:var(--bg)"><div class="tp-wd-kachel-titel">Notfall-SL Fusion</div>
-         <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal</span></div>
+         <div class="tp-wd-kachel-zeile">${n(notfall * 100, 0)} % <span style="color:var(--sub);font-weight:400">der TP-Distanz, broker-seitig im Terminal · mindestens ${HEDGE_NOTFALL_MIN_PUNKTE} Pkt hinter dem Master-TP</span></div>
          <div class="tp-wd-kachel-sub">Greift nur, wenn der Feed-Wächter das Schließen verpasst — dann zu bei ${n(r.tpPkt * notfall, 1)} Pkt hinter dem Fusion-Einstieg${r.tpPkt > 0 ? '' : ' (erst mit Take Profit)'}.</div></div>`
   }
   // Orbit (28.08.2026, Finns Ansage „durch die Firm-Auswahl"): „Futures-Firma"
@@ -31256,7 +31270,7 @@
             }catch(_){}
           }
           hi.value = vorschlag
-          if(hh) hh.textContent = quelle ? `${quelle} · schließt bei Master-TP ± ${(typeof hedgePufferTicks === 'function') ? hedgePufferTicks() : 8} Ticks (Kurs-Feed) · Notfall-SL ${Math.round(((typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : 1.1) * 100)} %` : ''
+          if(hh) hh.textContent = quelle ? `${quelle} · schließt bei Master-TP ± ${(typeof hedgePufferTicks === 'function') ? hedgePufferTicks() : 8} Ticks (Kurs-Feed) · Notfall-SL ${Math.round(((typeof hedgeNotfallFaktor === 'function') ? hedgeNotfallFaktor() : 1.1) * 100)} %, mindestens ${HEDGE_NOTFALL_MIN_PUNKTE} Pkt hinter dem Master-TP` : ''
         }
       }
     }catch(_){}
@@ -31563,7 +31577,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.588'
+  const OS_TAB_BUILD = '2026-09-22.589'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
