@@ -18556,10 +18556,33 @@
   }
   // Ein tv-lesen gegen das Panel — dasselbe Muster wie 'tv-konto' in tpOrbitStarten. Altes Panel ohne
   // die Route antwortet mit HTML/404 → mtcApi liefert _httpFail → hier 'reader_fehlt'.
-  async function tvV2Lesen(konto, timeoutS){
+  /* Konto-Kontext für Puls (25.09.2026, Befund Jacob 273fd74f/772fa0c3): tv-lesen schickte nur die External ID. Stand in
+   * TradingView ein ANDERES Konto desselben Tradovate-Logins, kannte Puls es nicht, hielt es für einen fremden Login und brach
+   * ohne Username ab („Im TradingView-Panel steht keines der Konten dieser Firma"). Dieselbe Regel wie beim Order-Start
+   * (tpOrbitStarten): alle aktiven Konten derselben Firma + die 10 zuletzt archivierten, dazu Firma und Tradovate-Username aus
+   * den Firmen-Einstellungen — Puls wechselt dann im Dropdown und prüft das Konto danach (modus_tvkonto). Das Panel reicht die
+   * Felder seit .316 durch (tv-lesen und tv-close). */
+  function tvV2KontoKontext(plan){
+    try{
+      if(!plan) return {}
+      const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+      const firma = String((acc && acc.firm) || plan.masterFirm || '').trim()
+      if(!firma) return {}
+      const spec = ((typeof getCustomFirms === 'function' ? getCustomFirms() : null) || []).find(f => String(f.name || '').trim().toLowerCase() === firma.toLowerCase())
+      const arch = (typeof getArchive === 'function') ? getArchive() : {}
+      const gleiche = (accounts || []).filter(a => String(a.id) !== String(plan.masterAccountId)
+        && String(a.firm || '').trim().toLowerCase() === firma.toLowerCase() && a.externalId)
+      const istArch = a => !!(arch[a.id] && arch[a.id].archived)
+      const inaktiv = gleiche.filter(istArch).sort((a, b) => String(arch[b.id].at || '').localeCompare(String(arch[a.id].at || ''))).slice(0, 10)
+      const geschwister = [...gleiche.filter(a => !istArch(a)), ...inaktiv].map(a => String(a.externalId).trim()).filter(Boolean).slice(0, 55)
+      return { firma, tv_username: (spec && spec.tvUsername) ? String(spec.tvUsername).trim() : '', geschwister }
+    }catch(_){ return {} }
+  }
+  window._tvV2KontoKontext = tvV2KontoKontext
+  async function tvV2Lesen(konto, timeoutS, plan){
     if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
     const r = await window.mtcApi('tv-lesen', { method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ konto: String(konto), timeout_s: timeoutS || 45 }) })
+      body: JSON.stringify(Object.assign({ konto: String(konto), timeout_s: timeoutS || 45 }, tvV2KontoKontext(plan))) })
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
     return r
   }
@@ -18572,11 +18595,15 @@
   // oder ohne Zahl bleibt today_pnl_start null — kein Schätzwert („Beweis oder leer"). Liefert immer ein
   // tv-Objekt (Konto + Datum + Zeit), damit später sichtbar ist, WANN gestartet wurde.
   async function tvV2BaselineLesen(plan){
-    const tv = { konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: new Date().toISOString() }
+    const tv = { konto: tvV2Konto(plan), today_pnl_start: null, datum_start: tvV2Handelstag(), at: new Date().toISOString(),
+                 pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null }   // pc: hier läuft TradingView — dort liest die Endlesung (25.09.2026)
     if(!tv.konto){ tv.grund = 'kein_konto'; return tv }
     try{
-      const r = await tvV2Lesen(tv.konto, 45)
-      if(r && r.ok && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) tv.today_pnl_start = r.today_pnl
+      const r = await tvV2Lesen(tv.konto, 45, plan)
+      // tabelle_unklar (25.09.2026, Jacob: Positions-Reiter nicht zu sehen): die Zusammenfassung stand trotzdem — der REALISIERTE
+      // Tages-G&V hängt nicht an der gerade eröffneten Position, als Startwert taugt er auch ohne Tabelle
+      const zahlOk = r && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)
+      if(zahlOk && (r.ok || r.code === 'tabelle_unklar')){ tv.today_pnl_start = r.today_pnl; if(!r.ok) tv.start_ohne_tabelle = true }
       else tv.grund = ((r && (r.code || (r.ok ? 'kein_today_pnl' : 'unbekannt'))) || 'unbekannt') + (r && r.msg ? ': ' + String(r.msg).slice(0, 300) : '')   // Meldung mit (24.09.2026 abends: in der DB stand nur 'absturz')
     }catch(e){ tv.grund = String((e && e.message) || e) }
     if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
@@ -18623,7 +18650,7 @@
         const konto = tvV2Konto(plan)
         if(!konto){ tvV2Poll.stand.set(pid, { code:'kein_konto', at: Date.now() }); continue }
         let r = null
-        try{ r = await tvV2Lesen(konto, 45) }catch(e){ r = { ok:false, code:'reader_fehlt', msg: String((e && e.message) || e) } }
+        try{ r = await tvV2Lesen(konto, 45, plan) }catch(e){ r = { ok:false, code:'reader_fehlt', msg: String((e && e.message) || e) } }
         if(!r || !r.ok){
           const code = (r && r.code) || 'reader_fehlt'
           if(code === 'puls_beschaeftigt') break   // Puls hat die Maus — diesen Tick komplett überspringen
@@ -18698,7 +18725,7 @@
           if(!manuell) continue
           await new Promise(res => setTimeout(res, 4000 + Math.random() * 3000))
           let r2 = null
-          try{ r2 = await tvV2Lesen(konto, 45) }catch(_){ r2 = null }
+          try{ r2 = await tvV2Lesen(konto, 45, plan) }catch(_){ r2 = null }
           if(!r2 || !r2.ok || r2.alter_s == null || Number(r2.alter_s) >= 30) continue
           const pos2 = (r2.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol)
             && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir))
@@ -18721,7 +18748,8 @@
         const freshPlan = tradePlans[idx()] || Object.assign({}, plan, { mt5Baseline: neuB })
         tvV2Poll.wasOpen.delete(pid)
         tvV2Poll.streak.delete(pid)
-        if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: Ende erkannt, aber der Reader nannte kein Today's P&L — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
+        if(fin.today_pnl == null && typeof atToast === 'function') atToast(`⚠ Orbit V2: Ende erkannt, aber der Reader nannte kein Today's P&L — Puls liest nach (${plan.masterName || '—'})`, 'end')
+        if(fin.today_pnl == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(pid)
         // OHNE zweites Argument (wie mt5PlanPollTick): fromServer würde review + Auto-P&L unterdrücken.
         if(typeof atShowEndPrompt === 'function') atShowEndPrompt(freshPlan)
       }
@@ -18862,11 +18890,24 @@
       masterPnl = null
       hinweis = `Start (${tv.datum_start}) und Ende (${fin.datum}) an verschiedenen Handelstagen — Today's P&L nicht vergleichbar, Master-P&L bitte eintragen`
     } else {
-      masterPnl = fin.today_pnl
-      hinweis = 'Today\'s P&L als Ganzes übernommen (kein Startwert beim Puls-Klick)'
+      // Finns Regel „eine Position pro Konto und Tag" (25.09.2026): Today's P&L nach dem Ende = Profit dieses Trades. Lief am
+      // selben Handelstag vorher schon ein Trade auf dem Konto, steckt dessen Profit mit drin → abziehen; ist er nicht erfasst
+      // (kein master_pl), ist der Rest nicht beweisbar → leer mit Hinweis.
+      let _tp = []; try{ _tp = tradePlans }catch(_){}
+      const vor = tvV2FruehereAmTag(plan, fin, _tp)
+      if(vor.fehlt){
+        masterPnl = null
+        hinweis = `Am selben Handelstag lief auf dem Konto vorher schon ein Trade ohne erfassten Master-P&L — Today's P&L (${fin.today_pnl}) enthält ihn, Master-P&L bitte eintragen`
+      } else if(vor.anzahl){
+        masterPnl = fin.today_pnl - vor.summe
+        hinweis = `Today's P&L minus ${vor.anzahl} früheren Trade${vor.anzahl > 1 ? 's' : ''} am selben Tag (${Number(vor.summe.toFixed(2))} $)`
+      } else {
+        masterPnl = fin.today_pnl
+        hinweis = fin.quelle === 'puls' ? 'aus TradingView gelesen (Today\'s P&L nach dem Ende)' : 'Today\'s P&L als Ganzes übernommen (kein Startwert beim Puls-Klick)'
+      }
     }
     if(masterPnl != null) masterPnl = Number(masterPnl.toFixed(2))
-    if(fin.quelle === 'puls' && !hinweis) hinweis = 'aus TradingView gelesen (Today\'s P&L nach dem Level-Ende)'
+    if(fin.quelle === 'puls' && !hinweis) hinweis = 'aus TradingView gelesen (Today\'s P&L nach dem Ende)'
     // Winning Days Farm (24.09.2026 spät): mit Fusion-Gegenhedge ist der Slave-P&L NICHT 0, sondern kommt vom Hedge-Wächter
     // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
     return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
@@ -19317,61 +19358,177 @@
     }catch(e){ console.warn('[hedge] Einstieg nachtragen', e) }
   }
   window._hedgeEinstiegNachtragen = hedgeEinstiegNachtragen
-  async function hedgeReviewPulsLesen(pid){
-    const p0 = tradePlans.find(x => String(x.id) === pid)
-    const fin0 = p0 && p0.mt5Baseline && p0.mt5Baseline.final
-    if(!p0 || p0.status !== 'review' || !fin0 || fin0.quelle !== 'level') return
-    const konto = tvV2Konto(p0)
-    if(!konto) return
-    const t0 = Date.now()
-    let r = null
-    for(;;){
-      let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
-      if(!belegt){
-        tvV2Poll.busy = true
-        try{ r = await tvV2Lesen(konto, 45) }catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
-        finally{ tvV2Poll.busy = false }
-        if(!(r && !r.ok && r.code === 'puls_beschaeftigt')) break
-      }
-      if(Date.now() - t0 > 180000){ r = r || { ok: false, code: 'puls_belegt', msg: 'Puls/Rundgang 3 min belegt' }; break }
-      await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+  /* PULS-ENDLESUNG (25.09.2026, Finn über die Koordination: „Das Einzige, was ich brauche: einmal den Profit, jedes Mal wenn der
+   * Trade beendet wird. Der Anfangs-P&L ist immer gleich … Daraus schließt sich alles."). Regel „eine Position pro Konto und Tag":
+   * Today's P&L (Realized) des Kontos NACH dem Ende = Profit des Trades inkl. Gebühren; ein früherer erfasster Trade desselben
+   * Handelstags wird in _autoPnlFetchTvV2 abgezogen. Gilt für JEDES Orbit-V2-/Winning-Day-Ende ohne gelesene Zahl — angestoßen aus
+   * tvV2EndeSetzen (Level-Ende, Master weg laut Reader, Schließen/Auto-Close ohne Zahl) und dem Rundgang, dazu der Nachhol-Takt
+   * tvV2EndlesungTakt, der auch einen Tab-Neustart überlebt (Stand steht am Plan: final.puls_versuche/puls_at/puls_fehler).
+   * Wiederholung mit Streuung bis Erfolg, höchstens TV_ENDLESUNG_MAX Versuche, nur am Handelstag des Endes (danach springt
+   * Today's P&L auf 0) und nur, solange kein weiterer Trade auf dem Konto begonnen hat (dann stäke er in der Zahl).
+   * BEFUND Jacob 273fd74f/772fa0c3 (pc-8jcrsm, 25.09. 01:11 UTC): hedgeReviewPulsLesen las EINMAL, ohne Konto-Kontext
+   * (tvV2KontoKontext) — Puls fand im Panel kein bekanntes Konto, „konto_nicht_erreicht", die TP-Schätzung blieb stehen.
+   * Beweis: frische Lesung (alter_s < 30), keine Position der Plan-Wurzel, Today's P&L als Zahl. Ohne Positions-Tabelle
+   * (tabelle_unklar) zählt die Zusammenfassung nur, wenn ihr offener G&V („Unrealized") genau 0 ist. Geschrieben wird atomar
+   * (baselinePatchIn 'final', Guard review) {today_pnl, datum, quelle:'puls', ende_quelle, puls_at, puls_versuche, puls_flach}. */
+  const TV_ENDLESUNG_MAX = 8
+  const TV_ENDLESUNG_PAUSE_S = [20, 45, 90, 180, 300, 480, 600, 900]   // Mindestabstand vor Versuch n+1; der Takt streut obendrauf
+  const _tvEndlesungLaeuft = new Set()
+  // REIN RECHNEND: alle offenen G&V-Felder („Unrealized P&L" / „Nicht realisiert") der Zusammenfassung sind genau 0 — und es gibt eins
+  function tvUnrealNull(summary){
+    if(!summary || typeof summary !== 'object') return false
+    const ks = Object.keys(summary).filter(k => /unreali[sz]|nicht\s*reali|unrealisiert/i.test(k))
+    if(!ks.length) return false
+    return ks.every(k => { const t = String(summary[k] == null ? '' : summary[k]).replace(/[^\d.,]/g, ''); return /\d/.test(t) && /^[0.,]+$/.test(t) })
+  }
+  // REIN RECHNEND: Ergebnis einer tv-lesen-Antwort für die Endlesung → {ok, today, flach} oder {ok:false, offen?, fehler}
+  function tvV2EndlesungAuswerten(r, symbol, dir){
+    if(!r) return { ok: false, fehler: 'keine Antwort' }
+    const zahl = (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
+    if(r.ok){
+      if(r.alter_s == null || !(Number(r.alter_s) < 30)) return { ok: false, fehler: 'Lesung nicht frisch' }
+      const pos = (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, symbol) && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir))
+      if(pos) return { ok: false, offen: true, fehler: 'Master-Position laut Puls noch offen' }
+      if(zahl == null) return { ok: false, fehler: "kein Today's P&L in der Zusammenfassung" }
+      return { ok: true, today: zahl, flach: 'tabelle' }
     }
-    const p1 = tradePlans.find(x => String(x.id) === pid) || p0
-    if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
-    const fin1 = (p1.mt5Baseline && p1.mt5Baseline.final) || fin0
-    if(p1.status !== 'review' || fin1.quelle !== 'level') return
-    const nowIso = new Date().toISOString()
-    const frisch = !!(r && r.ok && r.alter_s != null && Number(r.alter_s) < 30)
-    const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p1) : { symbol: p1.masterSymbol || '', dir: p1.richtung }
-    const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
-    const pos = frisch ? (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, w.symbol) && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir)) : null
-    const tpnl = (frisch && !pos && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
-    const patch = (tpnl != null)
-      ? { today_pnl: tpnl, datum: tvV2Handelstag(), quelle: 'puls', puls_at: nowIso }
-      : { puls_at: nowIso, puls_fehler: pos ? 'Master-Position laut Puls noch offen' : !r ? 'keine Antwort' : !r.ok ? String(r.code || 'fehler') + (r.msg ? ': ' + String(r.msg).slice(0, 200) : '')
-          : !frisch ? 'Lesung nicht frisch' : 'kein Today\'s P&L' }
-    let neu = null
-    try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[hedgeReview] final-Patch', (e && e.message) || e); return }
-    if(!neu) return   // Plan nicht mehr in „Überprüfen" (schon bestätigt) — nichts mehr anfassen
-    const i = tradePlans.findIndex(x => String(x.id) === pid)
-    try{ _autoPnlCache.delete(pid) }catch(_){}
-    if(pos && typeof atToast === 'function') atToast(`⚠ ${p1.masterName || 'Plan'}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
-    if(tpnl != null){
-      const res = await _autoPnlFetchTvV2(i >= 0 ? tradePlans[i] : Object.assign({}, p1, { mt5Baseline: neu }))
+    if(r.code === 'tabelle_unklar' && zahl != null && tvUnrealNull(r.summary)) return { ok: true, today: zahl, flach: 'unrealized_0' }
+    return { ok: false, fehler: String(r.code || 'fehler') + (r.msg ? ': ' + String(r.msg).slice(0, 220) : '') }
+  }
+  // REIN RECHNEND: frühere Trades desselben Kontos am selben Handelstag (vor diesem Ende beendet) → {anzahl, summe, fehlt}
+  function tvV2FruehereAmTag(plan, fin, plaene){
+    const endeMs = Date.parse((fin && fin.at) || (plan && plan.endedAt) || '') || Date.now()
+    const tag = (fin && fin.datum) || tvV2Handelstag(endeMs)
+    let anzahl = 0, summe = 0, fehlt = 0
+    for(const p of (plaene || [])){
+      if(!p || !plan || String(p.id) === String(plan.id) || p.route !== 'tvv2' || String(p.masterAccountId) !== String(plan.masterAccountId)) continue
+      if(!(p.status === 'review' || p.status === 'completed')) continue
+      const f = (p.mt5Baseline && p.mt5Baseline.final) || null
+      const pEnde = Date.parse((f && f.at) || p.endedAt || '') || 0
+      if(!pEnde || pEnde >= endeMs) continue
+      if(((f && f.datum) || tvV2Handelstag(pEnde)) !== tag) continue
+      const geschaetzt = f && f.quelle === 'level' && typeof f.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - f.master_pl_schaetzung) < 0.005
+      if(p.masterPl == null || !isFinite(Number(p.masterPl)) || geschaetzt){ fehlt++; continue }
+      anzahl++; summe += Number(p.masterPl)
+    }
+    return { anzahl, summe, fehlt }
+  }
+  // REIN RECHNEND: hat auf dem Konto NACH diesem Ende am selben Handelstag ein weiterer Trade begonnen? Dann stäke er im Today's P&L.
+  function tvV2SpaetererTrade(plan, fin, plaene){
+    const endeMs = Date.parse((fin && fin.at) || '') || 0
+    if(!endeMs) return false
+    const tag = (fin && fin.datum) || tvV2Handelstag(endeMs)
+    return (plaene || []).some(p => p && String(p.id) !== String(plan.id) && p.route === 'tvv2' && String(p.masterAccountId) === String(plan.masterAccountId)
+      && p.startedAt && (Date.parse(p.startedAt) || 0) > endeMs && tvV2Handelstag(p.startedAt) === tag)
+  }
+  // REIN RECHNEND: ist für diesen Plan jetzt eine Endlesung dran? (ohne PC-Prüfung — die macht der Takt)
+  function tvV2EndlesungFaellig(p, jetzt){
+    if(!p || p.route !== 'tvv2' || p.status !== 'review') return false
+    const fin = p.mt5Baseline && p.mt5Baseline.final
+    if(!fin || (typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || fin.quelle === 'puls' || fin.puls_aufgegeben) return false
+    const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    if(versuche >= TV_ENDLESUNG_MAX) return false
+    const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
+    if(tvV2Handelstag(jetzt) !== endeTag) return false
+    const letzte = Date.parse(fin.puls_at || '') || 0
+    return !letzte || versuche < 1 || (jetzt - letzte) >= TV_ENDLESUNG_PAUSE_S[Math.min(versuche - 1, TV_ENDLESUNG_PAUSE_S.length - 1)] * 1000
+  }
+  // Der PC, der liest: am Hedge (Winning Day) bzw. beim Start gemerkt — ohne Merker jeder PC-Tab des Profils (eine ID = ein PC)
+  function tvV2EndlesungPcPasst(p){
+    const b = (p && p.mt5Baseline) || {}
+    const pc = (b.hedge && b.hedge.pc) || (b.tv && b.tv.pc) || ''
+    return !pc || (typeof mt5FleetPcId === 'function' && pc === mt5FleetPcId())
+  }
+  window._tvV2Endlesung = { auswerten: tvV2EndlesungAuswerten, faellig: tvV2EndlesungFaellig, frueher: tvV2FruehereAmTag, spaeter: tvV2SpaetererTrade, unrealNull: tvUnrealNull }
+  function tvV2EndlesungAnstossen(pid){
+    if(!MT5_LOCAL) return
+    // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
+    setTimeout(() => { tvV2EndlesungVersuch(pid).catch(e => console.warn('[endlesung]', e)) }, 15000 + Math.random() * 10000)
+  }
+  async function tvV2EndlesungVersuch(pid){
+    pid = String(pid)
+    if(!MT5_LOCAL || _tvEndlesungLaeuft.has(pid)) return
+    _tvEndlesungLaeuft.add(pid)
+    try{
+      let p0 = tradePlans.find(x => String(x.id) === pid)
+      try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) p0 = rowToPlan(data) }catch(_){}
+      if(!p0 || !tvV2EndlesungFaellig(p0, Date.now()) || !tvV2EndlesungPcPasst(p0)) return
+      const fin0 = p0.mt5Baseline.final
+      const versuch = (Number(fin0.puls_versuche) || (fin0.puls_at ? 1 : 0)) + 1
+      const konto = tvV2Konto(p0)
+      let _tp = []; try{ _tp = tradePlans }catch(_){}
+      const stopp = !konto ? 'Master-Konto ohne External ID' : tvV2SpaetererTrade(p0, fin0, _tp) ? 'Nach dem Ende hat auf dem Konto ein weiterer Trade begonnen — Today\'s P&L nicht mehr eindeutig' : ''
+      if(stopp){
+        try{ await baselinePatchIn(pid, 'final', { puls_at: new Date().toISOString(), puls_fehler: stopp, puls_aufgegeben: true }, 'review') }catch(_){}
+        return
+      }
+      // Eine Maus: Order/Schließen (_tpOrbitLaeuft) oder Rundgang (tvV2Poll.busy) → warten (8–14 s, höchstens ~3 min); 409 = belegt
+      const t0 = Date.now()
+      let r = null
+      for(;;){
+        let belegt = true; try{ belegt = !!_tpOrbitLaeuft || !!tvV2Poll.busy }catch(_){ belegt = true }
+        if(!belegt){
+          tvV2Poll.busy = true
+          try{ r = await tvV2Lesen(konto, 45, p0) }catch(e){ r = { ok: false, code: 'reader_fehlt', msg: String((e && e.message) || e) } }
+          finally{ tvV2Poll.busy = false }
+          if(!(r && !r.ok && r.code === 'puls_beschaeftigt')) break
+        }
+        if(Date.now() - t0 > 180000){ r = r || { ok: false, code: 'puls_belegt', msg: 'Puls/Rundgang 3 min belegt' }; break }
+        await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
+      }
+      const p1 = tradePlans.find(x => String(x.id) === pid) || p0
+      if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
+      const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p1) : { symbol: p1.masterSymbol || '', dir: p1.richtung }
+      const dir = (w.dir === 'buy' || w.dir === 'sell') ? w.dir : ''
+      const erg = tvV2EndlesungAuswerten(r, w.symbol, dir)
+      const nowIso = new Date().toISOString()
+      const patch = erg.ok
+        ? { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null, puls_at: nowIso, puls_versuche: versuch,
+            puls_flach: erg.flach, puls_fehler: null, puls_konto: (r && r.konto_aktiv) || null }
+        : { puls_at: nowIso, puls_versuche: versuch, puls_fehler: erg.fehler }
+      let neu = null
+      try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return }
+      if(!neu) return   // Plan nicht mehr in „Überprüfen" (schon abgehakt) — nichts mehr anfassen
+      try{ _autoPnlCache.delete(pid) }catch(_){}
+      const name = p1.masterName || 'Plan'
+      if(!erg.ok){
+        if(erg.offen && versuch === 1 && typeof atToast === 'function') atToast(`⚠ ${name}: Puls sieht die Master-Position noch offen — in TradingView prüfen`, 'end')
+        if(versuch >= TV_ENDLESUNG_MAX && typeof atToast === 'function') atToast(`⚠ ${name}: Today's P&L nach ${versuch} Versuchen nicht gelesen (${erg.fehler}) — Master-P&L bitte selbst eintragen`, 'end')
+        try{ renderTradePlans() }catch(_){}
+        return
+      }
+      const i = tradePlans.findIndex(x => String(x.id) === pid)
+      const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : p1, { mt5Baseline: neu })
+      const res = await _autoPnlFetchTvV2(planNeu)
       const m = res && res.masterPnl
       if(m != null){
         // nur die Schätzung ersetzen (oder ein leeres Feld) — eine inzwischen eingetragene Zahl bleibt stehen
-        const sz = fin1.master_pl_schaetzung
+        const sz = fin0.master_pl_schaetzung
         let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).eq('status', 'review')
         q = (typeof sz === 'number' && isFinite(sz)) ? q.or(`master_pl.is.null,master_pl.eq.${sz}`) : q.is('master_pl', null)
         const { data: d2, error: e2 } = await q.select('*')
-        if(e2) console.warn('[hedgeReview] master_pl', e2.message || e2)
+        if(e2) console.warn('[endlesung] master_pl', e2.message || e2)
         else if(d2 && d2[0]){ const j = tradePlans.findIndex(x => String(x.id) === pid); if(j >= 0) tradePlans[j] = rowToPlan(d2[0]) }
-        if(typeof atToast === 'function') atToast(`✓ ${p1.masterName || 'Plan'}: Master-P&L aus TradingView ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`, 'end')
-      }
-    }
-    try{ renderTradePlans() }catch(_){}
+        if(typeof atToast === 'function') atToast(`✓ ${name}: Master-P&L aus TradingView ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $`, 'end')
+      } else if(res && res.hinweis && typeof atToast === 'function') atToast(`${name}: Today's P&L gelesen (${erg.today}) — ${res.hinweis}`, 'end')
+      try{ renderTradePlans() }catch(_){}
+    }finally{ _tvEndlesungLaeuft.delete(pid) }
   }
+  // Frühere Aufrufer (hedgePlanAufReview) — derselbe Weg
+  function hedgeReviewPulsLesen(pid){ return tvV2EndlesungVersuch(pid) }
+  // Nachhol-Takt (60–100 s, gestreut): eine fällige Endlesung je Takt — eine Maus, und die Order geht vor (_tpOrbitLaeuft prüft der Versuch)
+  function tvV2EndlesungTakt(){
+    try{
+      if(MT5_LOCAL){
+        let _tp = []; try{ _tp = tradePlans }catch(_){}
+        const jetzt = Date.now()
+        const p = (_tp || []).find(x => tvV2EndlesungFaellig(x, jetzt) && tvV2EndlesungPcPasst(x) && !_tvEndlesungLaeuft.has(String(x.id)))
+        if(p) tvV2EndlesungVersuch(p.id).catch(e => console.warn('[endlesung]', e))
+      }
+    }catch(e){ console.warn('[endlesung] Takt', e) }
+    setTimeout(tvV2EndlesungTakt, 60000 + Math.random() * 40000)
+  }
+  setTimeout(tvV2EndlesungTakt, 30000 + Math.random() * 20000)
   async function hedgePlNachholen(plan){
     const h = plan.mt5Baseline.hedge, pid = String(plan.id)
     if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
@@ -32157,7 +32314,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.601'
+  const OS_TAB_BUILD = '2026-09-22.602'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -33450,8 +33607,10 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.quelle !== 'level' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — P&L bitte selbst eintragen (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.quelle !== 'level' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
+    // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
+    if(fin.today_pnl == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
     // FUSION-GEGENHEDGE (24.09.2026 abends): Master ist zu → Hedge sofort zu (der Wächter täte es binnen 5 s
     // ohnehin, sobald der Plan „review" ist — hier ohne Wartezeit, mit dem frischen Plan-Objekt).
     try{ if(typeof hedgeSoloSchliessen === 'function' && fresh.mt5Baseline && fresh.mt5Baseline.hedge && fresh.mt5Baseline.hedge.status === 'offen') hedgeSoloSchliessen(fresh, 'master_ende') }catch(_){}
@@ -33475,7 +33634,8 @@
         // Warteschleife wie beim Start (Cross-Check 24.09.2026): läuft gerade ein Rundgang-Lesen (bis ~2,5 min),
         // kommt 409 puls_beschaeftigt VOR jedem Bot-Aufruf — nichts geklickt, nur warten (8–14 s, max ~150 s).
         // Danach bleibt der 409 ein ehrlicher Fehler mit retry (Auto-Close/Signal versuchen es später erneut).
-        const _clBody = JSON.stringify({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' })
+        // Konto-Kontext (25.09.2026): Geschwister/Firma/Username wie beim Start — sonst scheitert das Schließen, wenn ein anderes Konto desselben Logins aktiv ist
+        const _clBody = JSON.stringify(Object.assign({ konto, symbol, timeout_s: 90, richtung: (plan.richtung === 'buy' || plan.richtung === 'sell') ? plan.richtung : '' }, tvV2KontoKontext(plan)))
         const _clT0 = Date.now()
         for(;;){
           r = await window.mtcApi('tv-close', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: _clBody })
