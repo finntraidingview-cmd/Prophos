@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.5
+// @version      0.8.6
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,9 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.6  25.09.2026  24/7: Feed-Tab ohne WebSocket-DATEN (qsd/du) > 60 s bei offenem CME-Markt → Tab neu laden,
+//                      hoechstens alle 5 min, nur ohne Maus/Tastatur (Nutzer oder Puls) in den letzten 2 min; Grund landet
+//                      wie bisher im Payload (reload_grund). Bisherige Regel (kein Frame + kein Kurs > 90 s) bleibt.
 //   0.8.5  25.09.2026  Mehrere Tabs an einem reader-server: jeder Tab traegt eine stabile tab_id (sessionStorage)
 //                      und eine Rolle — 'broker' nur mit echter Konto-Kennung im Konto-Umschalter (≥ 5 Ziffern,
 //                      z. B. PAAPEX6416990000007; 'Paper Trading' zaehlt NICHT), sonst 'feed'. Ein Feed-Tab
@@ -78,7 +81,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.5';
+  const VERSION    = '0.8.6';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -1272,6 +1275,23 @@
   const kursMerk = {};   // wurzel -> { text, geaendert_ms }
   let reloadGrund = null;
   try { reloadGrund = sessionStorage.getItem('prophos_reader_reload_grund') || null; sessionStorage.removeItem('prophos_reader_reload_grund'); } catch (_) {}
+  // 0.8.6: CME Globex offen? So 17:00 – Fr 16:00 Chicago, taeglich Pause 16:00–17:00 (Intl → Sommer-/Winterzeit richtig).
+  // Gleiche Regel wie cmeMarktOffen in Prophos; Feiertage kennt sie nicht (dort hoechstens ein Reload je 5 min).
+  function cmeOffen(ms) {
+    try {
+      const teile = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
+      const w = (teile.find((t) => t.type === 'weekday') || {}).value;
+      const m = Number((teile.find((t) => t.type === 'hour') || {}).value) * 60 + Number((teile.find((t) => t.type === 'minute') || {}).value);
+      if (w === 'Sat') return false;
+      if (w === 'Sun') return m >= 17 * 60;
+      if (w === 'Fri') return m < 16 * 60;
+      return !(m >= 16 * 60 && m < 17 * 60);
+    } catch (_) { return true; }
+  }
+  // Letzte Maus-/Tastatur-Eingabe in diesem Tab — Puls klickt mit echter Maus (SendInput), also zaehlt er mit.
+  let letzteEingabeMs = 0;
+  try { ['mousedown', 'keydown', 'wheel', 'touchstart'].forEach((ev) => document.addEventListener(ev, () => { letzteEingabeMs = Date.now(); }, true)); } catch (_) {}
+  const DATEN_S = 60, DATEN_SPERRE_MS = 5 * 60 * 1000, EINGABE_RUHE_MS = 2 * 60 * 1000;
   function staleUndReload(kurse) {
     const jetzt = Date.now();
     let juengste = 0;
@@ -1295,6 +1315,21 @@
         try {
           localStorage.setItem('prophos_reader_reload_ms', String(jetzt));
           sessionStorage.setItem('prophos_reader_reload_grund', 'kein WebSocket-Frame seit ' + Math.round((jetzt - feed.letzter_frame_ms) / 1000) + ' s, kein neuer Kurs seit ' + Math.round((jetzt - juengste) / 1000) + ' s');
+        } catch (_) {}
+        setTimeout(() => location.reload(), 500);
+        return true;
+      }
+    }
+    // 0.8.6 (25.09.2026, Koordination „Reader 24/7"): Socket gesund (Herzschlag), aber keine DATEN — der Chart haengt, obwohl
+    // der Markt offen ist. Nur im Feed-Tab, der schon Daten hatte; nie waehrend jemand (oder Puls) in diesem Tab arbeitet.
+    const ohneDaten = feed.letzter_ws_ms > 0 && (jetzt - feed.letzter_ws_ms) / 1000 > DATEN_S;
+    if (ohneDaten && cmeOffen(jetzt) && tabRolle(jetzt) === 'feed' && jetzt - letzteEingabeMs > EINGABE_RUHE_MS) {
+      let letzter = 0;
+      try { letzter = Number(localStorage.getItem('prophos_reader_daten_reload_ms')) || 0; } catch (_) {}
+      if (jetzt - letzter > DATEN_SPERRE_MS) {
+        try {
+          localStorage.setItem('prophos_reader_daten_reload_ms', String(jetzt));
+          sessionStorage.setItem('prophos_reader_reload_grund', 'keine WebSocket-Daten seit ' + Math.round((jetzt - feed.letzter_ws_ms) / 1000) + ' s bei offenem CME-Markt (Herzschlag ' + (feed.letzter_frame_ms ? Math.round((jetzt - feed.letzter_frame_ms) / 1000) + ' s alt' : 'fehlt') + ')');
         } catch (_) {}
         setTimeout(() => location.reload(), 500);
         return true;

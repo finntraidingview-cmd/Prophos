@@ -268,3 +268,19 @@ Prophos vorn ist) — wenn nein: TradingView in ein eigenes, nebeneinander liege
 (2) erkennt das Script beide Panes (Markt-Kopf zeigt NQ und MNQ; SQL: zwei `tv_kurse`-Zeilen
 für den PC); (3) Reload-Selbstheilung: Chart einfrieren lassen (Netz kurz trennen) → nach
 90 s lädt die Seite neu, `reload_grund` steht im Reader-Fenster.
+
+## 24/7-Betrieb (25.09.2026, Reader 0.9.1 / Userscript 0.8.6)
+
+- **Reader stirbt → startet neu.** `python reader-server.py` läuft als Aufsicht und startet den eigentlichen Server als
+  Kindprozess; endet er (Absturz, Port kurz belegt), kommt er nach 5 s wieder, nach drei schnellen Fehlern nach 30 s.
+  Die Zeile „Reader-Server beendet (Code …) — Neustart in 5 s" im Fenster ist der Beweis. `start-reader.bat` hat zusätzlich
+  eine eigene Schleife (holt vor jedem Neustart das neueste `reader-server.py`) — die Batch selbst aktualisiert sich nicht,
+  die neue Fassung muss einmal von Hand auf den PC.
+- **PC bleibt wach, solange der Reader läuft** (`SetThreadExecutionState`, keine Energie-Einstellung wird geändert).
+- **Tab hängt → lädt neu.** Kommen im Feed-Tab bei offenem CME-Markt (So 17:00 – Fr 16:00 Chicago, ohne die tägliche Pause
+  16:00–17:00) 60 s keine WebSocket-Daten, lädt das Userscript den Tab neu — höchstens alle 5 min und nie, solange in den
+  letzten 2 min jemand (oder Puls) in diesem Tab geklickt oder getippt hat. Der Grund steht nach dem Reload im Fenster.
+- **Tick-Zähler auch für MNQ.** `tv_kurs_1m.ticks` = Pakete des Readers in dieser Minute (voll ≈ 240); nachgefüllte
+  Minuten aus der Erstladung tragen 0. Prophos zeigt im Winning-Days-Block „Reader lückenlos seit …" bzw. die letzte
+  Lücke/den letzten Aussetzer der letzten 24 h und meldet in der Kopfzeile „Kurs-Feed steht", wenn bei offenem Markt
+  > 2 min kein Kurs kam.

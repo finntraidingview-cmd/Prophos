@@ -92,6 +92,7 @@
   .at-toast::before{content:'';width:9px;height:9px;border-radius:50%;background:#fff;flex-shrink:0;animation:atDotPulse 1.5s ease-in-out infinite}
   .at-toast.start{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
   .at-toast.end{background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)}
+  .at-toast.feed{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%)}   /* Kurs-Feed steht (Wachhund, 25.09.2026) */
   /* Toast eines Hintergrund-Profils: anklickbar → wechselt direkt zu dem Profil */
   .at-toast.mpw{pointer-events:auto;cursor:pointer}
   .at-prompt{
@@ -568,6 +569,12 @@
     transition:all .15s var(--ease);position:relative;
   }
   #dashboard-view .tb-btn:hover{background:var(--surface-tint);color:var(--ink)}
+  /* Wachhund Kurs-Feed (25.09.2026): erscheint nur, wenn der Feed bei offenem CME-Markt > 2 min steht */
+  #dashboard-view .tb-feedwarn{height:30px;padding:0 10px;border-radius:999px;border:1px solid rgba(240,68,56,.35);background:rgba(240,68,56,.10);
+    color:#b91c1c;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer;margin-right:8px}
+  #dashboard-view .tb-feedwarn[hidden]{display:none}
+  #dashboard-view .mwd-feed{margin:2px 0 8px;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwd-feed.is-alarm{color:#b91c1c;font-weight:600}
   #dashboard-view .tb-btn svg{width:15px;height:15px}
   #dashboard-view .tb-btn .badge{
     position:absolute;top:-3px;right:-3px;
@@ -4733,6 +4740,9 @@
     <!-- Kapitel-Umschalter (24.09.2026): Hedge-Ära / Ohne Hedge / Alle — Knöpfe
          rendert kapitelRenderSeg() aus der Tabelle kapitel -->
     <div class="seg seg-kapitel" id="kapitel-seg" title="Kapitel"></div>
+
+    <!-- Wachhund Kurs-Feed (25.09.2026): feedWacheTick blendet ihn ein, wenn tv_kurse bei offenem Markt > 2 min steht -->
+    <button type="button" class="tb-feedwarn" id="tb-feedwarn" hidden>Kurs-Feed steht</button>
 
     <button class="tb-btn" aria-label="Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -20517,6 +20527,7 @@
       const d = await r.json()
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status))
       mkl.wd.plaene = Array.isArray(d.plaene) ? d.plaene : []; mkl.wd.tag = d.tag || ''; mkl.wd.fehler = ''
+      try{ localStorage.setItem('prophos_wd_admin', '1') }catch(_){}   // Wachhund Kurs-Feed meldet nur dort, wo die Winning-Days-Ansicht lädt
     }catch(e){ mkl.wd.fehler = String(e && e.message || e) }
     finally{ mkl.wd.at = Date.now(); mkl.wd.laeuft = false }
   }
@@ -20653,9 +20664,138 @@
     const nachtragZeile = nachtrag.length ? `<div class="mwd-nachtrag"><span>${nachtrag.length} beendet ohne Ergebnis — Erledigt eintragen:</span>`
       + nachtrag.map(x => `<button type="button" class="mwd-nachtrag-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(x.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">${escapeHtml(kurzKonto(x))}</button>`).join('') + `</div>` : ''
     el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      ${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${nachtragZeile}`
+      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${nachtragZeile}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
   }
+  /* ========== WACHHUND KURS-FEED + LÜCKEN (25.09.2026, Koordination: „der TV-Reader soll 24/7 laufen, der Bug darf nicht mehr
+   * kommen") ==========
+   * (1) Wachhund: alle 30 s der jüngste tv_kurse-Eintrag; ist er bei offenem CME-Markt > 2 min alt, erscheint ein Hinweis in der
+   * Kopfzeile (#tb-feedwarn) und EINMAL je Ausfall ein Toast — nicht still. Nur dort, wo die Winning-Days-Ansicht schon einmal
+   * geladen hat (Merkzeichen prophos_wd_admin), damit die Freunde-IDs keinen Alarm ohne Handlungsmöglichkeit sehen.
+   * (2) Lücken: tv_kurs_1m der letzten 24 h je Wurzel; Lücke = ab 2 fehlenden Minuten INNERHALB der CME-Handelszeit (Tagespause
+   * 16:00–17:00 Chicago und Wochenende zählen nicht). Anzeige als eine Zeile oben im Winning-Days-Block. Eigener Timer, eigene
+   * Abfragen — der Hedge-Wächter liest nichts davon. */
+  // REIN RECHNEND (testbar über window._cmeMarktOffen): CME Globex offen? So 17:00 – Fr 16:00 Chicago, täglich Pause 16:00–17:00.
+  // Chicago-Zeit über Intl, also mit Sommer-/Winterzeit. Feiertage kennt die Regel nicht (dort meldet sie „offen").
+  function cmeMarktOffen(ms){
+    try{
+      const teile = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(new Date(ms == null ? Date.now() : ms))
+      const w = (teile.find(t => t.type === 'weekday') || {}).value
+      const h = Number((teile.find(t => t.type === 'hour') || {}).value), mi = Number((teile.find(t => t.type === 'minute') || {}).value)
+      const m = h * 60 + mi
+      if(w === 'Sat') return false
+      if(w === 'Sun') return m >= 17 * 60
+      if(w === 'Fri') return m < 16 * 60
+      return !(m >= 16 * 60 && m < 17 * 60)
+    }catch(_){ return true }
+  }
+  window._cmeMarktOffen = cmeMarktOffen
+  // REIN RECHNEND (testbar über window._feedLuecken): je = {wurzel: [{t: Minuten-Start ms, ticks}] oder [ms]}. Zwei Arten Ausfall:
+  // 'luecke' = zwischen zwei Kerzen fehlen ≥ minFehlend Minuten der Handelszeit; 'aussetzer' = Minuten mit ticks < minTicks
+  // (Pakete des Readers je Minute, voll = 240 bei 4/s) — gezählt erst AB der ersten Minute mit ticks > 0 dieser Wurzel (ältere
+  // MNQ-Zeilen tragen 0) und nie die laufende Minute (jetztMs). Grund (Koordination 25.09.2026): die Erstladung nach einem
+  // Reader-Neustart füllt fehlende Minuten nach — Kerzen allein beweisen dann nichts, die Tick-Zahl schon.
+  // -> {luecken:[{von, bis, min, wurzel, art}] (neueste zuletzt), erste}
+  function feedLuecken(je, minFehlend, jetztMs, minTicks){
+    const minF = minFehlend > 0 ? minFehlend : 2, minT = minTicks > 0 ? minTicks : 200, out = []
+    const laufend = Math.floor((jetztMs == null ? Date.now() : jetztMs) / 60000) * 60000
+    let erste = null
+    for(const w of Object.keys(je || {})){
+      const rows = (je[w] || []).map(x => (typeof x === 'number') ? { t: x, ticks: null } : { t: Number(x && x.t), ticks: (x && x.ticks != null) ? Number(x.ticks) : null })
+        .filter(x => isFinite(x.t)).sort((a, b) => a.t - b.t)
+      if(rows.length && (erste == null || rows[0].t < erste)) erste = rows[0].t
+      for(let i = 1; i < rows.length; i++){
+        if(rows[i].t - rows[i - 1].t <= 60000) continue
+        let offen = 0, von = null, bis = null
+        for(let m = rows[i - 1].t + 60000; m < rows[i].t; m += 60000){
+          if(cmeMarktOffen(m)){ offen++; if(von == null) von = m; bis = m + 60000 }
+        }
+        if(offen >= minF) out.push({ von, bis, min: offen, wurzel: w, art: 'luecke' })
+      }
+      const abIdx = rows.findIndex(x => x.ticks > 0)
+      if(abIdx >= 0){
+        let lauf = null
+        const schliessen = () => { if(lauf){ out.push(lauf); lauf = null } }
+        for(let i = abIdx; i < rows.length; i++){
+          const x = rows[i]
+          const schwach = x.t < laufend && x.ticks != null && x.ticks < minT && cmeMarktOffen(x.t)
+          if(!schwach){ schliessen(); continue }
+          if(lauf && x.t === lauf.bis) { lauf.bis = x.t + 60000; lauf.min++ }
+          else { schliessen(); lauf = { von: x.t, bis: x.t + 60000, min: 1, wurzel: w, art: 'aussetzer' } }
+        }
+        schliessen()
+      }
+    }
+    out.sort((a, b) => a.bis - b.bis)
+    return { luecken: out, erste }
+  }
+  window._feedLuecken = feedLuecken
+  const feedWache = { steht: false, alter_s: null, gemeldet: false, pc: '', luecken: null, lueckenAt: 0, laeuft: false }
+  const feedWacheDarf = () => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } }
+  async function feedWacheTick(){
+    if(!currentUserId || mkl.stub || !feedWacheDarf()) return
+    try{
+      const { data, error } = await supabase.from('tv_kurse').select('updated_at,pc_name,wurzel').order('updated_at', { ascending: false }).limit(1)
+      if(error) return
+      const r = (data || [])[0]
+      const alter = r ? (Date.now() - (Date.parse(r.updated_at || '') || 0)) / 1000 : Infinity
+      const offen = cmeMarktOffen(Date.now())
+      feedWache.alter_s = isFinite(alter) ? Math.round(alter) : null; feedWache.pc = r ? String(r.pc_name || '') : ''
+      const steht = offen && alter > 120
+      if(steht && !feedWache.gemeldet && typeof atToast === 'function'){
+        atToast(`Kurs-Feed steht seit ${isFinite(alter) ? Math.round(alter / 60) + ' min' : 'unbekannt'}${feedWache.pc ? ' (' + feedWache.pc + ')' : ''} — Reader am 24/7-PC prüfen`, 'feed')
+        feedWache.gemeldet = true
+      }
+      if(!steht) feedWache.gemeldet = false
+      if(steht !== feedWache.steht){ feedWache.steht = steht; try{ if(mklAktiv()) mklWdRender() }catch(_){} }
+      const b = document.getElementById('tb-feedwarn')
+      if(b){
+        b.hidden = !steht
+        if(steht){
+          b.textContent = `Kurs-Feed steht · ${isFinite(alter) ? Math.round(alter / 60) + ' min' : '?'}`
+          b.title = `Letzter NQ/MNQ-Kurs in tv_kurse ${isFinite(alter) ? 'vor ' + Math.round(alter) + ' s' : 'nie'}${feedWache.pc ? ' von ' + feedWache.pc : ''} — der CME-Markt ist offen. Reader-Fenster und TradingView-Tab am 24/7-PC prüfen. Klick öffnet Winning Days.`
+        }
+      }
+      if(mklAktiv() && Date.now() - feedWache.lueckenAt > 60000) feedLueckenLaden()
+    }catch(_){}
+  }
+  async function feedLueckenLaden(){
+    if(feedWache.laeuft) return
+    feedWache.laeuft = true
+    try{
+      const seit = new Date(Date.now() - 24 * 3600000).toISOString(), je = {}
+      for(const w of ['NQ', 'MNQ']){
+        je[w] = []
+        for(let ab = 0; ab < 4000; ab += 1000){
+          const { data, error } = await supabase.from('tv_kurs_1m').select('minute,ticks').eq('wurzel', w).gte('minute', seit)
+            .order('minute', { ascending: true }).range(ab, ab + 999)
+          if(error) throw error
+          for(const x of (data || [])){ const t = Date.parse(x.minute); if(t) je[w].push({ t, ticks: x.ticks }) }
+          if(!data || data.length < 1000) break
+        }
+      }
+      feedWache.luecken = feedLuecken(je, 2, Date.now(), 200); feedWache.lueckenAt = Date.now()
+      try{ if(mklAktiv()) mklWdRender() }catch(_){}
+    }catch(_){ feedWache.lueckenAt = Date.now() }
+    finally{ feedWache.laeuft = false }
+  }
+  // Zeile oben im Winning-Days-Block: Alarm, wenn der Feed steht; sonst „lückenlos seit …" bzw. die letzte Lücke der letzten 24 h
+  function feedWacheZeile(){
+    const uhr = t => new Date(t).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    const tag = t => new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    const zeit = t => (new Date(t).toDateString() === new Date().toDateString() ? '' : tag(t) + ' ') + uhr(t)
+    if(feedWache.steht) return `<div class="mwd-feed is-alarm">Kurs-Feed steht seit ${feedWache.alter_s != null ? Math.round(feedWache.alter_s / 60) + ' min' : '?'}${feedWache.pc ? ' (' + escapeHtml(feedWache.pc) + ')' : ''} — Reader am 24/7-PC prüfen</div>`
+    const l = feedWache.luecken
+    if(!l || l.erste == null) return ''
+    const letzte = l.luecken.length ? l.luecken[l.luecken.length - 1] : null
+    const titel = 'tv_kurs_1m der letzten 24 h, NQ und MNQ · Lücke = ab 2 fehlenden Minuten in der CME-Handelszeit · Aussetzer = Minute mit weniger als 200 Reader-Paketen (voll 240) · Tagespause und Wochenende zählen nicht'
+    if(!letzte) return `<div class="mwd-feed" title="${titel}">Reader lückenlos seit ${zeit(l.erste)}</div>`
+    const nL = l.luecken.filter(x => x.art === 'luecke').length, nA = l.luecken.length - nL
+    return `<div class="mwd-feed" title="${titel} · 24 h: ${nL} Lücke${nL === 1 ? '' : 'n'}, ${nA} Aussetzer">Reader lückenlos seit ${zeit(letzte.bis)} · letzte${letzte.art === 'aussetzer' ? 'r Aussetzer' : ' Lücke'} ${zeit(letzte.von)}–${uhr(letzte.bis)} (${letzte.min} min, ${escapeHtml(letzte.wurzel)})</div>`
+  }
+  setTimeout(feedWacheTick, 8000); setInterval(feedWacheTick, 30000)
+  document.getElementById('tb-feedwarn')?.addEventListener('click', () => { document.querySelector('#dashboard-view .sb-link[data-view="markt"]')?.click() })
   // Eigener Plan? Nur dann darf „Beendet" schreiben (trade_plans unter RLS des angemeldeten Nutzers)
   const mklWdEigenerPlan = id => { try{ return (tradePlans || []).find(x => String(x.id) === String(id)) || null }catch(_){ return null } }
   /* Aktionen der Markt-Karte (25.09.2026). ende = PATCH /admin/wd-plaene {aktion:'ende'} für jede ID (Backend .539, gleiche
@@ -31686,7 +31826,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.592'
+  const OS_TAB_BUILD = '2026-09-22.593'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

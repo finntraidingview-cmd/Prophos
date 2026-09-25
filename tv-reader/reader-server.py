@@ -52,6 +52,8 @@ Laeuft auf Mac/Windows/Linux gleich.
 import json
 import re
 import os
+import subprocess
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -62,7 +64,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.0"
+READER_VERSION = "0.9.1"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -226,17 +228,34 @@ def _kerzen_liste(ring, seit=None):
     return out
 
 
-def _kurs_1m_aus_ring(ring):
+def _kurs_1m_aus_ring(ring, zaehler=None):
     """REIN RECHNEND: letzte abgeschlossene + laufende Minute je Wurzel in der Form von kurs_1m
-    (minute in Unix-Sekunden, o/h/l/c, n = ticks unbekannt → 0) — damit die bestehende Bruecke
-    unveraendert nach tv_kurs_1m schreibt."""
+    (minute in Unix-Sekunden, o/h/l/c, n) — damit die bestehende Bruecke unveraendert nach tv_kurs_1m schreibt.
+    n: Tick-Kerzen zaehlen selbst; fuer Chart-Serien-Kerzen (bisher immer 0) seit 0.9.1 die Zahl der Pakete mit
+    WebSocket-Kurs dieser Wurzel in der Minute (zaehler[wurzel][minute], ~240 bei 4 Paketen/s) — Beweis, dass der
+    Reader die Minute lueckenlos geliefert hat (Koordination 25.09.2026: nachgefuellte Minuten aus der Erstladung
+    tragen 0 und sind damit als Aussetzer erkennbar)."""
     out = []
     for w in sorted((ring or {}).keys()):
         for m in sorted(ring[w])[-2:]:
             b = ring[w][m]
+            n = int(b.get("n") or 0)
+            if not n and zaehler:
+                n = int(((zaehler.get(w) or {}).get(m)) or 0)
             out.append({"minute": m, "wurzel": w, "symbol": b["symbol"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"],
-                        "n": int(b.get("n") or 0), "quelle": b.get("quelle") or "ws"})
+                        "n": n, "quelle": b.get("quelle") or "ws"})
     return out
+
+
+def _paket_zaehlen(zaehler, wurzel, jetzt_s, behalten=5):
+    """REIN RECHNEND (testbar): ein Paket mit WebSocket-Kurs fuer wurzel in der Minute von jetzt_s zaehlen; nur die
+    letzten `behalten` Minuten je Wurzel bleiben. -> zaehler"""
+    m = int(jetzt_s // 60) * 60
+    z = zaehler.setdefault(wurzel, {})
+    z[m] = z.get(m, 0) + 1
+    for alt in sorted(z)[:-behalten]:
+        del z[alt]
+    return zaehler
 
 
 def _kurse_uebernehmen(kurse, sichtbar, jetzt_s, alt, k1m_je, k1m_vor_je):
@@ -375,6 +394,7 @@ _letzte_zahl = None   # letzte gemeldete Positionszahl (Beweisspur)
 # gelesen) oder 'feed'; Positionen/Konto/Bedienfeld-Summary NUR aus Broker-Tabs. Kurse/Kerzen: seit 0.9.0
 # wieder wie 0.8.5 — der letzte POST gewinnt je Wurzel (Finn 25.09.2026: 'beim alten Reader hat alles perfekt
 # funktioniert, ich wollte nur den Chrome-Tab wechseln'; die Quellenwahl aus 0.8.6/0.8.9 ist raus).
+_paket_zaehler = {}      # 0.9.1: wurzel -> {minute: Pakete mit WebSocket-Kurs} (letzte 5 Minuten)
 BROKER_FRISCH_S = 10.0   # Broker-Tab ohne POST laenger als das → kein Positions-Urteil (positionen_ok false)
 _tabs = {}               # tab_id -> {rolle, stand, stand_s, blind_grund, blind_seit, bf, bf_s, last_s, version, sichtbar, fokus, quelle}
 
@@ -600,7 +620,7 @@ def _mit_an(stand):
     # fallen die Titel-Kerzen (_k1m) hinein, damit nichts verloren geht.
     out["kurse"] = _kurse_ausgabe(_kurse, time.time())
     # 0.8.0: Kerzen zuerst aus dem Socket-Ring (fertige TradingView-Bars), sonst Tick-Kerzen (Legende/Titel)
-    kerzen = _kurs_1m_aus_ring(_kerzen) if _kerzen else []
+    kerzen = _kurs_1m_aus_ring(_kerzen, _paket_zaehler) if _kerzen else []
     if not kerzen:
         for w in sorted(_k1m_je.keys()):
             kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k]
@@ -830,6 +850,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Minutenkerzen aus den Quote-Ticks (auch im verdeckten Tab — der Socket ist nicht gedrosselt).
                 for w, k in _kurse.items():
                     if k.get("quelle") == "ws" and k.get("empf_s") == jetzt:
+                        _paket_zaehlen(_paket_zaehler, w, jetzt)   # 0.9.1: Pakete je Minute, auch fuer Chart-Serien
                         _kerzen, ok = _tick_kerze_in_ring(_kerzen, w, k.get("symbol_text") or w, k.get("preis"), jetzt)
                         if ok:
                             _kerzen_s = jetzt
@@ -1028,9 +1049,67 @@ class Handler(BaseHTTPRequestHandler):
         pass  # kein Request-Log-Spam ueber der Live-Zeile
 
 
-if __name__ == "__main__":
+# ── 24/7 (25.09.2026, Koordination: „der TV-Reader soll 24/7 laufen, der Bug darf nicht mehr kommen") ─────────────
+# (a) PC wach halten, SOLANGE der Reader laeuft: SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) — keine
+#     Systemeinstellung wird geaendert; endet der Prozess, gilt wieder die Energie-Einstellung von Windows.
+# (b) Aufsicht im selben Fenster: der Start (python reader-server.py) startet den eigentlichen Server als Kindprozess und
+#     startet ihn neu, wenn er stirbt (Absturz, Port kurz belegt, Netzwerkfehler). Wirkt ohne Aenderung an start-reader.bat
+#     — die Batch holt nur reader-server.py per Selbst-Update. Strg+C beendet beides.
+KIND_ENV = "PROPHOS_READER_KIND"
+
+
+def wach_halten():
+    """-> None (kein Windows), True (gesetzt), False (abgelehnt)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        return bool(ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001))
+    except Exception:
+        return False
+
+
+def _neustart_pause(schnelle_fehler):
+    """REIN RECHNEND (testbar): Pause vor dem Neustart — 5 s, nach 3 schnellen Fehlern in Folge 30 s (z. B. Port belegt,
+    weil noch ein zweites Reader-Fenster laeuft), damit das Fenster nicht im Sekundentakt Fehler schreibt."""
+    return 30.0 if schnelle_fehler >= 3 else 5.0
+
+
+def _aufsicht(starter=None, schlafen=time.sleep, max_starts=None):
+    """Startet den Server-Kindprozess und startet ihn nach dem Ende neu. starter() -> Exit-Code (Tests injizieren ihn).
+    Ein Lauf unter 60 s zaehlt als schneller Fehler. -> Anzahl Starts (nur mit max_starts relevant)."""
+    if starter is None:
+        def starter():
+            env = dict(os.environ)
+            env[KIND_ENV] = "1"
+            return subprocess.call([sys.executable, os.path.abspath(__file__)], env=env)
+    starts, schnell = 0, 0
+    while max_starts is None or starts < max_starts:
+        t0 = time.time()
+        starts += 1
+        code = starter()
+        dauer = time.time() - t0
+        schnell = schnell + 1 if dauer < 60 else 0
+        pause = _neustart_pause(schnell)
+        print(f"\n[{time.strftime('%H:%M:%S')}] Reader-Server beendet (Code {code}, lief {round(dauer)} s) — "
+              f"Neustart in {int(pause)} s (Start {starts + 1}).", flush=True)
+        if max_starts is not None and starts >= max_starts:
+            break
+        schlafen(pause)
+    return starts
+
+
+if __name__ == "__main__" and os.environ.get(KIND_ENV) != "1":
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält den Reader nicht mehr an)")
+    print(f"Prophos TV-Reader {READER_VERSION} — Aufsicht aktiv: stirbt der Server, startet er in 5 s neu (Strg+C beendet).")
+    try:
+        _aufsicht()
+    except KeyboardInterrupt:
+        print("\nbeendet.")
+elif __name__ == "__main__":
+    if wach_halten():
+        print("PC bleibt wach, solange der Reader laeuft (keine Systemeinstellung geaendert)")
     print(f"Prophos TV-Reader-Empfaenger {READER_VERSION} laeuft auf http://127.0.0.1:{PORT}")
     print(f"Schreibt den Stand nach {DATEI}")
     print(f"Reader ist {'AN' if _an else 'PAUSIERT (reader_aus.flag liegt)'}")

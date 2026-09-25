@@ -234,6 +234,32 @@ def main():
     check(zl == "MNQ←tabc ? · NQ←tmug5j 0,3s" and rs._quellen_zeile({"NQ": {"tab_id": "t1", "ts": 1}}, 5, mit_alter=False) == "NQ←t1",
           f"Live-Zeile: Quelle + Alter je Wurzel, ohne Alter als Vergleichsschlüssel [{zl}]")
 
+    # 0.9.1: 24/7 — Aufsicht mit Neustart, PC wach halten
+    check(rs._neustart_pause(0) == 5.0 and rs._neustart_pause(2) == 5.0 and rs._neustart_pause(3) == 30.0,
+          "Neustart-Pause: 5 s, nach 3 schnellen Fehlern 30 s")
+    codes, pausen = iter([1, 1, 1, 0]), []
+    n = rs._aufsicht(starter=lambda: next(codes), schlafen=pausen.append, max_starts=4)
+    check(n == 4 and pausen == [5.0, 5.0, 30.0], f"Aufsicht: startet nach jedem Ende neu, Pausen {pausen}")
+    import os as _os2
+    check(rs.wach_halten() is (None if _os2.name != "nt" else rs.wach_halten()), "PC wach halten: auf Mac/Linux kein Eingriff (None)")
+    check(rs.KIND_ENV == "PROPHOS_READER_KIND", "Kindprozess-Kennung gesetzt")
+
+    # 0.9.1: Pakete je Minute auch für Chart-Serien (MNQ ticks)
+    z = {}
+    for i in range(240):
+        rs._paket_zaehlen(z, "MNQ", 6000 + i * 0.25)
+    for i in range(10):
+        rs._paket_zaehlen(z, "MNQ", 6060 + i)
+    check(z["MNQ"][6000] == 240 and z["MNQ"][6060] == 10, "Paket-Zähler: 240 in einer vollen Minute, neue Minute beginnt bei 0")
+    for i in range(8):
+        rs._paket_zaehlen(z, "MNQ", 6120 + i * 60)
+    check(len(z["MNQ"]) == 5 and 6000 not in z["MNQ"], "Paket-Zähler: nur die letzten 5 Minuten bleiben")
+    ring = {"MNQ": {6000: {"symbol": "MNQ1!", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "quelle": "ws"}, 6060: {"symbol": "MNQ1!", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "quelle": "ws"}},
+            "NQ": {6060: {"symbol": "NQ", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "n": 238, "quelle": "ws-tick"}}}
+    k1 = {(x["wurzel"], x["minute"]): x["n"] for x in rs._kurs_1m_aus_ring(ring, {"MNQ": {6000: 240, 6060: 17}})}
+    check(k1 == {("MNQ", 6000): 240, ("MNQ", 6060): 17, ("NQ", 6060): 238} and rs._kurs_1m_aus_ring(ring)[0]["n"] == 0,
+          "kurs_1m: Serien-Kerzen tragen den Paket-Zähler, Tick-Kerzen ihre eigene Zahl, ohne Zähler 0 wie bisher")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

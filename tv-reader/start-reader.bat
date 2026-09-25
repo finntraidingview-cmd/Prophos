@@ -12,16 +12,16 @@ rem Wochen auf dem Stand vom Installationstag, waehrend das Repo weiterlief.
 rem Aufgefallen ist es, als Userscript 0.3 an einen reader-server ohne
 rem /bedienfeld sendete. Gleiches Muster wie start-copier.bat: Download in
 rem .newc, Uebernahme nur bei plausibler Groesse, alter Stand als .prev.
-rem Einmalig beim Start (dieser Prozess startet sich nicht selbst neu).
+rem Seit 25.09.2026 (Reader 0.9.1, „24/7"): reader-server.py startet den Server selbst in einer Aufsicht neu, wenn er
+rem stirbt. Diese Schleife ist die zweite Sicherung: endet auch die Aufsicht (z. B. Python-Fehler beim Laden), holt die
+rem Batch nach 10 s das neueste reader-server.py und startet neu. Fenster schliessen oder Strg+C beendet alles.
+:loop
 call :update
-
 python reader-server.py
-if errorlevel 1 (
-  echo.
-  echo Fehler beim Start — ist Python installiert? ^("python --version" pruefen^)
-  pause
-)
-exit /b
+echo.
+echo [%date% %time%] Reader beendet - Neustart in 10 Sekunden ^(Fenster schliessen = aus; "python --version" pruefen, falls das immer wieder kommt^)...
+timeout /t 10 /nobreak >nul
+goto loop
 
 :update
 powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue';$b='https://raw.githubusercontent.com/finntraidingview-cmd/Prophos/main/tv-reader/';foreach($f in @('reader-server.py')){try{Invoke-RestMethod ($b+$f) -OutFile ($f+'.newc') -TimeoutSec 25}catch{}}"
