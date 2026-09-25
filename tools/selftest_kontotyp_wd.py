@@ -50,6 +50,14 @@ def main():
           and a["_hq_typ_trade"](fu_acc, {"winning_day": False, "master_risk": 400}) == "funded",
           "Funded-Konto: Haken schlägt Faustregel, Faustregel < 1.000 $ → wd, sonst funded (Hedge-Ära-Bestand)")
     check(a["_hq_typ_trade"](ch_acc, {"master_risk": 400}) == "challenge", "Challenge bleibt Challenge")
+    # Kontotyp zum Zeitpunkt des Trades (25.09.2026): konto_typ am Plan schlägt den heutigen Kontotyp
+    check(a["_hq_typ_trade"](wd_acc, {"konto_typ": "funded", "master_risk": 0, "master_pl": 10900}) == "funded",
+          "Mikes Trade 2ff62bb5: Konto heute winning_days, konto_typ funded, +10.900 $ → funded")
+    check(a["_hq_typ_trade"](wd_acc, {"konto_typ": "funded", "master_risk": 400}) == "wd",
+          "konto_typ funded + Risiko 400 $ → Faustregel wie früher: wd")
+    check(a["_hq_typ_trade"](fu_acc, {"konto_typ": "winning_days", "master_risk": 4500}) == "wd"
+          and a["_hq_typ_trade"](wd_acc, {"konto_typ": None}) == "wd" and a["_hq_typ_trade"](ch_acc, {"konto_typ": "challenge"}) == "challenge",
+          "konto_typ winning_days → wd; ohne konto_typ Rückfall auf den heutigen Kontotyp")
     check(a["_hq_anteil"]("winning_days") == a["_hq_anteil"]("wd") == a["_hq_anteil"]("funded") == 1.0
           and a["_hq_anteil"]("challenge") == 0.5, "Reibungs-Anteil: wd/winning_days wie Funded 1,0, Challenge 0,5")
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))

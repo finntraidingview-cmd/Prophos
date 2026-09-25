@@ -4658,6 +4658,9 @@ HQ_VORGABEN = {
     # der erste Trade kommt zu 100 % vor, der zweite zu 50 %." Gewichteter Schnitt: (200 × 1 + 450 × 0,5) / 1,5
     # = 366,67 € je 4.500 $ → 0,0815 €/$.
     "Topstep|challenge": {"ziel_usd": 4500.0, "ziel_eur": 366.67},
+    # 25.09.2026, Finn am Statistik-Tab: „Topstep · Winning Day" fehlt (Rückfall-Quote 0,55). Er nennt „250/150 $ entsprechen 90 €" —
+    # der genaue Bezug ($-Betrag) klärt die Koordination mit ihm; dann diese Zeile mit seinem Wert einkommentieren (wie Tradeify|wd):
+    # "Topstep|wd": {"ziel_usd": 250.0, "ziel_eur": 90.0},
 }
 
 
@@ -4720,8 +4723,12 @@ HQ_WD_RISK = 1000.0
 def _hq_typ_trade(acc, plan):
     """Kontotyp je TRADE: 'wd' (Winning Day) für einen Funded-Trade mit Master-Risiko < HQ_WD_RISK
     (ohne Risiko: |master_pl|), sonst der Kontotyp. Nur für die Quoten-/Reibungs-Gruppen und die
-    Statistik-Ausgabe — an den Konten selbst ändert sich nichts."""
-    typ = _hq_typ(acc)
+    Statistik-Ausgabe — an den Konten selbst ändert sich nichts.
+    Seit 25.09.2026 zählt der Kontotyp ZUM ZEITPUNKT des Trades (trade_plans.konto_typ, sql/2026-09-25_trade_plans_konto_typ.sql):
+    Mikes Funded-Trade 2ff62bb5 lief als Winning Day, weil sein Konto Stunden später auf 'winning_days' umgestellt wurde.
+    Ohne konto_typ (Spalte fehlt / Altbestand) wie bisher der heutige Kontotyp."""
+    kt = str((plan or {}).get("konto_typ") or "").strip().lower()
+    typ = ("wd" if kt == "winning_days" else kt) if kt else _hq_typ(acc)
     # Kontotyp 'winning_days' (25.09.2026) schlägt alles: jeder Trade auf so einem Konto ist ein Winning Day —
     # der Erledigt-Haken und die Risiko-Faustregel gelten nur noch für Konten, die (noch) 'funded' heißen
     # (Hedge-Ära-Bestand, dessen Konten damals nicht umgestellt waren).
@@ -5632,10 +5639,15 @@ def admin_build_kapitel():
     # id/route/master_name/richtung seit 24.09.2026 nachts (Finn: „Graph OHNE Gegenhedge und
     # Graph MIT Gegenhedge — wie hätte es ausgesehen, hätte ich jetzt gegengehedgt?"): das
     # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
-    plans = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,slave_account_id,"
-                                              "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
-                                              "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day",
-                                    "status": "eq.completed"})
+    _plans_sel = ("id,user_id,master_account_id,slave_account_id,"
+                  "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
+                  "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day")
+    # konto_typ (25.09.2026, Kontotyp zum Zeitpunkt des Trades): fehlt die Spalte noch (SQL nicht eingespielt), ohne sie laden —
+    # die Statistik darf daran nie kippen
+    try:
+        plans = _sb_all("trade_plans", {"select": _plans_sel + ",konto_typ", "status": "eq.completed"})
+    except Exception:
+        plans = _sb_all("trade_plans", {"select": _plans_sel, "status": "eq.completed"})
     # Hedge-Quoten je Firma·Typ·Größe aus der Hedge-Ära (24.09.2026, Finn: „der Hedge ist nicht
     # immer 1:1 … guck in den bestehenden Daten, wie viel wo gegengehedgt wurde") — Grundlage
     # für hedge_q/hedge_hyp_eur je V2-Trade unten. Ausgeblendete Personen fallen auch hier raus.
@@ -7295,6 +7307,12 @@ def admin_wd_plaene():
                         break
                 else:
                     return jsonify({"error": "Plan wurde gleichzeitig geändert — bitte erneut versuchen", "plan_id": pid}), 409
+                # Kontotyp zum Zeitpunkt des Trades festhalten (25.09.2026) — ein Winning Day ist immer 'winning_days'; nur wenn leer,
+                # und still, falls die Spalte noch fehlt
+                try:
+                    sb_update("trade_plans", {"id": f"eq.{pid}", "konto_typ": "is.null"}, {"konto_typ": "winning_days"})
+                except Exception:
+                    pass
                 # Buchung (idempotent)
                 buchung, buchung_fehler = None, None
                 try:

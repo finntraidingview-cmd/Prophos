@@ -32677,7 +32677,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.609'
+  const OS_TAB_BUILD = '2026-09-22.610'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39775,6 +39775,20 @@
    * migration_trade_plans_review_status_2026-07-30.sql noch nicht ausgeführt →
    * Check-Constraint lehnt 'review' ab), bleibt alles beim alten Verhalten
    * (Plan bleibt 'open' mit pendingFinish-Banner). */
+  /* Kontotyp ZUM ZEITPUNKT des Trades festhalten (25.09.2026, Finn am Statistik-Tab: Mikes Funded-Trade 2ff62bb5 lief als
+   * „Topstep · Winning Day", weil sein Konto Stunden später auf 'winning_days' umgestellt wurde — die Statistik las den heutigen
+   * Kontotyp). Beim Übergang nach review/completed: trade_plans.konto_typ = Winning Day → 'winning_days', sonst der Kontotyp des
+   * Master-Kontos jetzt. Nur wenn leer, eigener Update (schlägt still fehl, solange sql/2026-09-25_trade_plans_konto_typ.sql fehlt). */
+  async function planKontoTypMerken(plan){
+    try{
+      if(!plan || !plan.id) return
+      const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
+      const wd = (typeof tpIstWdPlan === 'function') && tpIstWdPlan(plan)
+      const typ = wd ? 'winning_days' : (acc && acc.type) ? String(acc.type) : null
+      if(!typ) return
+      await supabase.from('trade_plans').update({ konto_typ: typ }).eq('id', plan.id).is('konto_typ', null)
+    }catch(_){}
+  }
   async function atMoveToReview(plan){
     let moved = false
     try{
@@ -39787,6 +39801,7 @@
       const idx = tradePlans.findIndex(x => String(x.id) === String(plan.id))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
       moved = true
+      planKontoTypMerken(tradePlans[idx] || plan)   // Kontotyp zum Zeitpunkt des Trades (25.09.2026)
       renderTradePlans()
     }catch(e){
       console.warn('[review] Status-Update fehlgeschlagen (Migration ausgeführt?):', e.message || e)
@@ -40358,6 +40373,7 @@
       if(error) throw error
       const idx = tradePlans.findIndex(x => String(x.id) === String(_completingPlanId))
       if(idx >= 0) tradePlans[idx] = rowToPlan(data)
+      planKontoTypMerken(idx >= 0 ? tradePlans[idx] : rowToPlan(data))   // Kontotyp zum Zeitpunkt des Trades (25.09.2026)
 
       // pendingFinish erst JETZT löschen — nach erfolgreichem Speichern, nicht schon beim Öffnen des Modals
       if(autoTrack?.pendingFinish?.has(String(_completingPlanId))){
