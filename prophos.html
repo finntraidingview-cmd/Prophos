@@ -1265,8 +1265,8 @@
   #tradePlanModal .tp-v2-instr button.active{color:var(--violet)}
   #tradePlanModal .tp-v2-instr button.active small{color:var(--violet);opacity:.85}
   /* NQ gewählt (25.09.2026): vollflächig rot, weiße Schrift — Finn fährt fast immer MNQ */
-  #tradePlanModal #tp-v2-nq.active,#tradePlanModal #tp-nq-nq.active{background:var(--danger) !important;color:#fff !important;border-color:var(--danger) !important}
-  #tradePlanModal #tp-v2-nq.active small,#tradePlanModal #tp-nq-nq.active span{color:rgba(255,255,255,.9) !important;opacity:1}
+  #tradePlanModal #tp-v2-nq.active.tp-nq-rot,#tradePlanModal #tp-nq-nq.active.tp-nq-rot{background:var(--danger) !important;color:#fff !important;border-color:var(--danger) !important}
+  #tradePlanModal #tp-v2-nq.active.tp-nq-rot small,#tradePlanModal #tp-nq-nq.active.tp-nq-rot span{color:rgba(255,255,255,.9) !important;opacity:1}
   #dashboard-view .tp-nq-warn{margin-top:6px;padding:7px 10px;border-radius:8px;background:rgba(240,68,56,.08);border:1px solid rgba(240,68,56,.35);color:#b91c1c;font-size:12px;font-weight:600;line-height:1.4}
   #dashboard-view .tp-nq-warn[hidden]{display:none}
   #tradePlanModal .tp-dir-gesperrt{border:1px dashed var(--danger) !important;color:var(--danger) !important;background:rgba(240,68,56,.06) !important;opacity:.75;cursor:not-allowed}
@@ -32072,7 +32072,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.597'
+  const OS_TAB_BUILD = '2026-09-22.598'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -32231,7 +32231,10 @@
   function tpOrderNqWarn(){
     const w = document.getElementById('tp-order-nq-warn'); if(!w) return
     const roh = String(document.getElementById('tp-order-symbol')?.value || '').trim().replace(/^[^:]*:/, '').toUpperCase()
-    w.hidden = !/^NQ/.test(roh)
+    // nur für Winning-Day-Pläne (tvv2 mit Fusion-Gegenhedge), wie im Plan-Popup (25.09.2026)
+    const pl = (typeof tradePlans !== 'undefined' && Array.isArray(tradePlans)) ? tradePlans.find(x => x && String(x.id) === String(_tpOrderPlanId)) : null
+    const wd = !!(pl && pl.route === 'tvv2' && Number(pl.hedgeEur) > 0)
+    w.hidden = !(wd && /^NQ/.test(roh))
   }
   document.getElementById('tp-order-symbol')?.addEventListener('input', tpOrderNqWarn)
   function tpOrbitWerte(plan, aus){
@@ -35530,11 +35533,14 @@
     document.getElementById('tp-v2-mnq')?.classList.toggle('active', _tpNqMode === 'mnq')
     document.getElementById('tp-v2-nq')?.classList.toggle('active',  _tpNqMode === 'nq')
     // NQ gewählt → Knopf vollflächig rot mit „· 10× MNQ" + Warnzeile unter dem Umschalter (25.09.2026, nur Hinweis)
-    { const nq = _tpNqMode === 'nq'
-      const b2 = document.getElementById('tp-v2-nq'); if(b2) b2.innerHTML = nq ? 'NQ<small>$20/pt · 10× MNQ</small>' : 'NQ<small>$20/pt</small>'
-      const bp = document.getElementById('tp-nq-nq'); if(bp) bp.innerHTML = `NQ <span style="font-size:10px;color:var(--sub);font-weight:400">${nq ? '$20/pt · 10× MNQ' : '$20/pt'}</span>`
-      const w2 = document.getElementById('tp-v2-nq-warn'); if(w2) w2.hidden = !nq
-      const wp = document.getElementById('tp-nq-master-warn'); if(wp) wp.hidden = !nq }
+    // Nur bei Winning Days Farm (25.09.2026 nachmittags, Finn: „die Meldung ‚Achtung NQ ausgewählt' soll nur bei Winning Days
+    // angezeigt werden, nicht bei jedem Orbit — es ist sehr unwahrscheinlich, dass man mal NQ nimmt"). Bei Orbit V2 & Co. sieht
+    // NQ aus wie jede andere Auswahl (violett aktiv), ohne Warnzeile.
+    { const nq = _tpNqMode === 'nq', rot = nq && !!_tpWd
+      const b2 = document.getElementById('tp-v2-nq'); if(b2){ b2.innerHTML = rot ? 'NQ<small>$20/pt · 10× MNQ</small>' : 'NQ<small>$20/pt</small>'; b2.classList.toggle('tp-nq-rot', rot) }
+      const bp = document.getElementById('tp-nq-nq'); if(bp){ bp.innerHTML = `NQ <span style="font-size:10px;color:var(--sub);font-weight:400">${rot ? '$20/pt · 10× MNQ' : '$20/pt'}</span>`; bp.classList.toggle('tp-nq-rot', rot) }
+      const w2 = document.getElementById('tp-v2-nq-warn'); if(w2) w2.hidden = !rot
+      const wp = document.getElementById('tp-nq-master-warn'); if(wp) wp.hidden = !rot }
 
     // Slave toggle
     const rowS = document.getElementById('tp-nq-toggle-slave')
