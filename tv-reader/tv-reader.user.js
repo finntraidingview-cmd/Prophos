@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.6
+// @version      0.8.7
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,10 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.7  25.09.2026  Feed-Tab ohne Konto (Finn, Reader-Chrome auf pc-usq1i6 ohne Broker: „Kannst du einstellen, dass der
+//                      Reader auch geht, wenn man nirgends in einem Konto angemeldet ist?"): kein Konto im Umschalter → Rolle
+//                      'feed' wie seit 0.8.5, jetzt auch OHNE Positions-Lesung und ohne 'Reader blind'-Abzeichen — stattdessen
+//                      neutral '● Feed-Tab ohne Konto — nur Kurse'. Kurse/Kerzen unveraendert.
 //   0.8.6  25.09.2026  24/7: Feed-Tab ohne WebSocket-DATEN (qsd/du) > 60 s bei offenem CME-Markt → Tab neu laden,
 //                      hoechstens alle 5 min, nur ohne Maus/Tastatur (Nutzer oder Puls) in den letzten 2 min; Grund landet
 //                      wie bisher im Payload (reload_grund). Bisherige Regel (kein Frame + kein Kurs > 90 s) bleibt.
@@ -81,7 +85,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.6';
+  const VERSION    = '0.8.7';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -1356,18 +1360,20 @@
   }
 
   function tick() {
-    const positionen = lesePositionen();
-    const blind = blindGrund(positionen);
+    // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
+    // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
+    if ((tickNr % BF_JEDER) === 0) liesKonto();
+    const rolle = tabRolle(Date.now());
+    const positionen = rolle === 'broker' ? lesePositionen() : [];
+    const blind = rolle === 'broker' ? blindGrund(positionen) : null;
     // Massstab fuer die Verdeckt-Regel nachfuehren: NUR sichtbare, nicht
     // blinde Lesungen zaehlen. Eine Lesung im verdeckten Tab veraendert den
     // Massstab nie — sonst wuerde ein einzelner leerer Befund sich selbst
     // zum neuen "Normal" erklaeren und die Regel aushebeln.
-    if (!blind && document.visibilityState === 'visible')
+    if (rolle === 'broker' && !blind && document.visibilityState === 'visible')
       sichtbarePosZahl = positionen.length;
     // Auch blind wird GESENDET — der Server soll den Grund kennen (und die
     // Orbit-Karte spaeter auch). Er uebernimmt den Stand dann nur nicht.
-    if ((tickNr % BF_JEDER) === 0) liesKonto();
-    const rolle = tabRolle(Date.now());
     // 0.8.5: Positions-Felder NUR als Broker-Tab — ein Feed-Tab (kein Broker) schickt keine Liste und kein
     // Konto; der reader-server nimmt von ihm nur Kurse/Kerzen (ein fehlendes Feld ist nie 'flach')
     const posFelder = rolle === 'broker' ? {
@@ -1412,6 +1418,7 @@
         let an = true;
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
+        else if (rolle !== 'broker') setBadge(`● Feed-Tab ohne Konto — nur Kurse`, 'ok');   // 0.8.7: keine Warnung ohne Konto
         else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen
         else                 setBadge(`● Reader · ${positionen.length} Pos · Copier ok`, 'ok');
