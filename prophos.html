@@ -30792,11 +30792,15 @@
 
     // ── 3. Richtungs-Schutz (wie Echo: nie gegen einen laufenden/gespeicherten Trade derselben Firma) ──
     try{
-      const dirs = await window.firmLiveRichtungen(plan.masterFirm)
       const fName = escapeHtml(plan.masterFirm || '—')
-      const laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
       const meine = po ? (/sell/i.test(po.richtung) ? 'SHORT' : 'LONG') : null
-      if(laufDir && meine && laufDir !== meine) fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`)
+      // Laufende/geplante V2-Pläne derselben Firma dieser ID, frisch aus der DB (25.09.2026 nachmittags, Finn-Fund bei Mike):
+      // Echo V2 startet keinen Copier → firmLiveRichtungen (mt5_live) sah den laufenden FundedNext-Trade oft gar nicht.
+      let kPlan = null; try{ kPlan = await v2RichtungKonflikt({ firm: plan.masterFirm, ohneId: plan.id, frisch: true }) }catch(_){}
+      const dirs = await window.firmLiveRichtungen(plan.masterFirm)
+      let laufDir = dirs.long.length ? 'LONG' : dirs.short.length ? 'SHORT' : null
+      if(kPlan && kPlan.lauf && meine && kPlan.lauf.toUpperCase() !== meine){ fail('v2dir', `${escapeHtml(kPlan.text)} — nicht gestartet (Richtungs-Schutz).`) }
+      else if(laufDir && meine && laufDir !== meine) fail('v2dir', `${fName} läuft bereits <b>${laufDir}</b> — deine <b>${meine}</b>-Order wäre die GEGENRICHTUNG (Selbst-Hedge). Nicht gestartet.`)
       else if(laufDir) _pfSet('v2dir', 'ok', `${fName} läuft bereits ${laufDir} — gleiche Richtung ✓`)
       else {
         const gep = (typeof firmGeplanteRichtungen === 'function') ? firmGeplanteRichtungen(plan.masterFirm, plan.id) : { long: [], short: [] }
@@ -31925,12 +31929,15 @@
   async function tpV2RichtungSchutz(){
     const b = document.getElementById('tp-dir-buy'), sl = document.getElementById('tp-dir-sell'), hint = document.getElementById('tp-dir-konflikt')
     const frei = () => { _tpDirSperre = null; for(const x of [b, sl]) if(x){ x.disabled = false; x.classList.remove('tp-dir-gesperrt'); x.title = '' }; if(hint){ hint.hidden = true; hint.textContent = '' } }
-    if(_tpRoute !== 'tvv2'){ frei(); return }
+    // Alle V2-Wege (25.09.2026 nachmittags, Finn: „Bei Echo V2 ist immer noch der Bug — FundedNext bei Mike läuft LONG und ich
+    // kann einen zweiten FundedNext-Trade SHORT planen"). Bis hier galt der Schutz im Popup nur für Orbit V2 / Winning Days.
+    const V2_SCHUTZ = ['tvv2', 'mt5v2', 'tsv2']
+    if(!V2_SCHUTZ.includes(_tpRoute)){ frei(); return }
     const lauf = ++_tpDirSchutzLauf
     const masterId = document.getElementById('tp-master')?.value
     const master = (accounts || []).find(a => String(a.id) === String(masterId)) || null
     let k = null; try{ k = await v2RichtungKonflikt({ firm: master ? master.firm : '', ohneId: _editingPlanId }) }catch(_){}
-    if(lauf !== _tpDirSchutzLauf || _tpRoute !== 'tvv2') return
+    if(lauf !== _tpDirSchutzLauf || !V2_SCHUTZ.includes(_tpRoute)) return
     frei()
     if(!k) return
     if(hint){ hint.hidden = false; hint.textContent = k.text }
@@ -32677,7 +32684,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.610'
+  const OS_TAB_BUILD = '2026-09-22.611'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36840,6 +36847,12 @@
     const v2Extra = !v2 ? {} : {
       master_symbol: (_tpRoute === 'tvv2' || _tpRoute === 'tsv2') ? (((typeof _tpNqMode !== 'undefined' && _tpNqMode === 'nq') ? 'NQ' : 'MNQ') + tpFuturesFrontcode()) : null,
       start_um: startUmVal ? tpStartUmAusZeit(startUmVal).toISOString() : null
+    }
+    // Richtungs-Schutz auch für Echo V2 und Topstep V2 (25.09.2026 nachmittags, Finn-Fund bei Mike: zweiter FundedNext-Plan in
+    // Gegenrichtung ließ sich speichern) — dieselbe Prüfung wie für Orbit V2 direkt darunter.
+    if((_tpRoute === 'mt5v2' || _tpRoute === 'tsv2') && (_tpDir === 'buy' || _tpDir === 'sell')){
+      let k = null; try{ k = await v2RichtungKonflikt({ firm: master.firm, ohneId: _editingPlanId, frisch: true }) }catch(_){}
+      if(k && k.lauf && k.lauf !== (_tpDir === 'sell' ? 'short' : 'long')){ msg(k.text + ' — nicht gespeichert (Richtungs-Schutz).', 'err'); return }
     }
     // Winning Day (24.09.2026 abends): Fusion-Gegenhedge aus der Staffel am Plan; „Orbit V2" ohne Winning Day nullt ihn
     // nicht (der Betrag kann aus dem Order-Popup stammen) — nur der Wechsel weg von tvv2 räumt ihn weg.
