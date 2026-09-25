@@ -17879,7 +17879,7 @@
       const excl = _fleetPers.exclUids
 
       /* ── Offene V2-Pläne der anderen IDs (25.09.2026, s. RPC oben): eine Karte je Plan unter der Person, reine Anzeige —
-       * keine Knöpfe, kein Live-P&L (liegt für fremde Pläne nicht vor). Emin/Finn (excl) und die eigene ID nie. Echo V2
+       * keine Knöpfe; Echo V2 mit Live-P&L aus mt5_live, wenn der Copier läuft (s. v2Chip). Emin/Finn (excl) und die eigene ID nie. Echo V2
        * steht oft schon als mt5_live-Karte da (Tag „Echo V2") — dann keine zweite Karte: Abgleich über die External ID des
        * Kontos (/admin/overview) bzw. den Instanz-Namen = Kontoname. */
       for(const p of ((fp && !fp.error && Array.isArray(fp.data)) ? fp.data : [])){
@@ -17906,9 +17906,21 @@
             + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span><span style="font-size:11px;color:var(--sub)">${inner}</span></span>`
         }
         const startEp = p.started_at ? Date.parse(p.started_at) / 1000 : NaN
+        // Echo V2 fremder IDs (25.09.2026, Finn: „Warum sehe ich bei Mike nicht den Live-P&L, wenn es doch über Echo V2 gemacht wurde?"):
+        // frische, lebende mt5_live-Zeile des Kontos (master_login = External ID) → derselbe MASTER-Chip wie auf der eigenen Karte
+        // (Start-Balance aus der RPC, falls sie mitkommt, sonst schwebend); ohne frische Zeile grau „kein Live-Stand" — nie erfinden.
+        let v2Chip = ''
+        if(p.route === 'mt5v2'){
+          const ext = (_fleetPers.extJe || {})[uid + '|' + kName.toLowerCase()] || ''
+          const zeile = ext ? rows.find(r => r && r.alive && String(r.master_login || '') === String(ext) && Date.now() - (Date.parse(r.updated_at || '') || 0) <= 25000) : null
+          const x = zeile ? mt5V2PnlAus(zeile.status || {}, (p.master_balance != null && isFinite(Number(p.master_balance))) ? Number(p.master_balance) : null) : null
+          v2Chip = x ? mt5V2PnlChip(x.v, x.ccy, x.lots, x.schwebend ? 'Schwebender P&L der offenen Position (Equity − Balance jetzt) — ohne Start-Balance' : 'Live-P&L des Masters: Equity − Balance beim Start', x.schwebend)
+            : `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="${esc(ext ? `Keine frische Copier-Zeile für Konto ${ext} (mt5_live) — der Copier dieses PCs läuft nicht oder meldet sich nicht` : 'Konto ohne External ID — keine Zuordnung zur Copier-Zeile möglich')}">`
+              + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span><span style="font-size:11px;color:var(--sub)">kein Live-Stand (Copier aus)</span></span>`
+        }
         lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, kName || '?', null,
           subPerson(pKey) + `<b>${dir === 'SHORT' ? 'SELL' : 'BUY'}</b>${symbol ? ' ' + esc(String(symbol)) : ''}${p.master_firm ? ' · ' + esc(String(p.master_firm)) : ''}`,
-          lotChip('KT', Number(p.master_contracts) || 0, dir) + fusion + zeitChip(isFinite(startEp) ? startEp : null, true, 0),
+          v2Chip + lotChip('KT', Number(p.master_contracts) || 0, dir) + fusion + zeitChip(isFinite(startEp) ? startEp : null, true, 0),
           true, wd ? 'wd' : p.route))
       }
       // „Hedge (geteilt / ohne Master)": Positionen auf einem Konto, das nur
@@ -18200,16 +18212,50 @@
    * nur EIN Chip: master_equity − mt5_baseline.master_balance (Baseline vom Puls-Klick, v2PlanAufOpen).
    * Quelle wie bei Echo: lokal mtcInstances (≤15 s), sonst mt5_live über window._mt5CloudRows (≤25 s,
    * damit es auch am Mac/Handy steht). Ohne Baseline oder ohne frische Zahl: nichts — nie alte Zahlen als live. */
+  /* Chip „MASTER ±x $" für Echo V2 — EINE Optik für die eigene Plan-Karte und die Flotten-Karte fremder IDs (25.09.2026) */
+  function mt5V2PnlChip(v, ccy, lots, titel, schwebend){
+    const e = (typeof escapeHtml === 'function') ? escapeHtml : (x => String(x))
+    return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="${e(titel)}">`
+      + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
+      + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}${schwebend ? ';opacity:.85' : ''}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ccy ? ' ' + ccy : ''}</b>`
+      + (schwebend ? `<span style="font-size:9.5px;color:var(--sub)">schwebend</span>` : '')
+      + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lots</span>` : '')   /* Review-Finding K18 (24.09.2026): Echo V2 überall „Lots", Orbit V2 „Kt" */
+      + `</span>`
+  }
+  // REIN RECHNEND (window._mt5V2PnlAus): P&L des Masters aus einem Copier-Status. Mit Start-Balance (Plan-Baseline): Equity − Start;
+  // ohne (Baseline NULL — z. B. Plan lief ohne frische Instanz an, Finn 25.09.2026 bei Mike): Equity − Balance JETZT = schwebender P&L
+  // der offenen Position(en), nur wenn eine Position offen ist. -> { v, schwebend, lots, ccy } | null (nie erfinden)
+  function mt5V2PnlAus(s, startBalance){
+    if(!s || s.note || s.master_equity == null) return null
+    const eq = Number(s.master_equity), lots = (s.master_positions || []).reduce((a, x) => a + (Number(x.volume) || 0), 0)
+    const ccy = s.master_currency === 'EUR' ? '€' : s.master_currency === 'USD' ? '$' : (s.master_currency || '')
+    if(startBalance != null && isFinite(Number(startBalance))){ const v = eq - Number(startBalance); return isFinite(v) ? { v, schwebend: false, lots, ccy } : null }
+    if(!(lots > 0) || s.master_balance == null) return null
+    const v = eq - Number(s.master_balance)
+    return isFinite(v) ? { v, schwebend: true, lots, ccy } : null
+  }
+  window._mt5V2PnlAus = mt5V2PnlAus
+  // Instanz zum Plan: wie mt5V2Resolve (Link Login → Konto), sonst über die External ID des Master-Kontos (= MT5-Login) —
+  // ohne lokalen Link (anderes Gerät, 25.09.2026) fand der Chip die Instanz sonst nie
+  function mt5V2ResolveAnzeige(p, instances){
+    const r = mt5V2Resolve(p, instances); if(r) return r
+    const acc = (accounts || []).find(a => String(a.id) === String(p.masterAccountId))
+    const login = acc ? String(acc.externalId || '').trim() : ''
+    if(!/^\d{4,}$/.test(login)) return null
+    const passt = x => !!x && String(((x.status || {}).master_login) || x.master_expected || '') === login
+    const inst = (instances || []).find(x => passt(x) && x.has_terminal) || (instances || []).find(passt) || null
+    return inst ? { inst, masterLogin: login } : null
+  }
   function mt5V2LivePnlInner(p){
     try{
       if(!p || p.route !== 'mt5v2' || p.status !== 'open') return ''
       const base = p.mt5Baseline
-      if(!base || base.master_balance == null) return ''
+      const start = (base && base.master_balance != null) ? base.master_balance : null
       let s = null
       if(MT5_LOCAL){
         const state = (typeof window.mtcInstances === 'function') ? window.mtcInstances() : null
         if(state){
-          const r = mt5V2Resolve(p, Object.values(state))
+          const r = mt5V2ResolveAnzeige(p, Object.values(state))
           if(r && r.inst && r.inst.alive && r.inst.fetchedAt && (Date.now() - r.inst.fetchedAt) <= 15000) s = r.inst.status || {}
         }
       }
@@ -18223,20 +18269,15 @@
             status: Object.assign({}, r.status || {}, { master_login: r.master_login }) })
         }
         if(cloud.length){
-          const r = mt5V2Resolve(p, cloud)
+          const r = mt5V2ResolveAnzeige(p, cloud)
           if(r && r.inst) s = r.inst.status || {}
         }
       }
-      if(!s || s.note || s.master_equity == null) return ''
-      const v = Number(s.master_equity) - Number(base.master_balance)
-      if(!isFinite(v)) return ''
-      const ccy = s.master_currency === 'EUR' ? '€' : s.master_currency === 'USD' ? '$' : (s.master_currency || '')
-      const lots = (s.master_positions || []).reduce((a, x) => a + (Number(x.volume) || 0), 0)
-      return `<span class="mono" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:${v >= 0 ? 'rgba(18,183,106,.10)' : 'rgba(240,68,56,.08)'}" title="Live-P&L des Masters (Echo V2): Equity minus Balance beim Start">`
-        + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">MASTER</span>`
-        + `<b style="font-size:12px;color:${v >= 0 ? '#15803d' : '#b91c1c'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ccy ? ' ' + ccy : ''}</b>`
-        + (lots ? `<span style="font-size:9.5px;color:var(--sub)">· ${lots.toLocaleString('de-DE', { maximumFractionDigits: 2 })} Lots</span>` : '')   /* Review-Finding K18 (24.09.2026): Echo V2 überall „Lots", Orbit V2 „Kt" */
-        + `</span>`
+      const x = mt5V2PnlAus(s, start)
+      if(!x) return ''
+      return mt5V2PnlChip(x.v, x.ccy, x.lots, x.schwebend
+        ? `Schwebender P&L der offenen Position (Echo V2): Equity ${Number(s.master_equity).toLocaleString('de-DE')} − Balance jetzt ${Number(s.master_balance).toLocaleString('de-DE')} — ohne Start-Balance (Plan-Baseline fehlt), zeigt nur den offenen Teil`
+        : `Live-P&L des Masters (Echo V2): Equity ${Number(s.master_equity).toLocaleString('de-DE')} − Balance beim Start ${Number(start).toLocaleString('de-DE')}`, x.schwebend)
     }catch(_){ return '' }
   }
 
@@ -32031,7 +32072,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.596'
+  const OS_TAB_BUILD = '2026-09-22.597'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
