@@ -17262,7 +17262,7 @@
       return Array.isArray(v) ? new Set(v.map(String)) : null
     }catch(_){ return null }
   })()
-  const _fleetPers = { next: 0, byLogin: null, byName: null, nameByUid: null, me: null, exclUids: _fleetExclSeed }
+  const _fleetPers = { next: 0, byLogin: null, byName: null, nameByUid: null, me: null, exclUids: _fleetExclSeed, extJe: null }
   function _fleetKurzName(mail){
     const s = String(mail || ''); const at = s.indexOf('@')
     return at > 0 ? s.slice(0, at) : s
@@ -17289,6 +17289,9 @@
       const d = await r.json()
       const pName = (uid, mail) => nameById.get(String(uid)) || _fleetKurzName(mail) || String(uid).slice(0, 8)
       const byLogin = {}, byName = {}
+      // uid|Kontoname → External ID (25.09.2026, Flotten-Pläne): ein fremder Echo-V2-Plan kennt nur den Kontonamen, die
+      // mt5_live-Karte nur den MT5-Login — hierüber findet der Flotten-Render heraus, ob beide dasselbe Konto sind.
+      const extJe = {}
       // Mehrdeutigkeit (17.09.2026, Finns Bug-Report „Trades von verschiedenen
       // Personen vertauscht"): bisher gewann schlicht der LETZTE Account mit
       // derselben External ID / demselben Namen — „Live Acc", „Fusion Live",
@@ -17311,7 +17314,10 @@
                       firm: String(a.firm_raw || a.firm || '') }
         setze(byLogin, String(a.ext || '').trim(), wer, !!a.archived)
         setze(byName, String(a.name || '').trim().toLowerCase(), wer, !!a.archived)
+        const nKey = wer.uid + '|' + String(a.name || '').trim().toLowerCase(), ext = String(a.ext || '').trim()
+        if(ext && (!extJe[nKey] || !a.archived)) extJe[nKey] = ext
       }
+      _fleetPers.extJe = extJe
       for(const m of [byLogin, byName]) for(const k of Object.keys(m)) m[k] = m[k].wer
       _fleetPers.byLogin = byLogin
       _fleetPers.byName = byName
@@ -17485,9 +17491,14 @@
       // sichtbar im Fehler-Kasten (catch unten).
       const mitTimeout = (p, ms) => Promise.race([p,
         new Promise((_, nein) => setTimeout(() => nein(new Error('DB-Timeout nach ' + ms + ' ms')), ms))])
-      const [ml, dl] = await Promise.all([
+      // Offene V2-Pläne der ANDEREN (25.09.2026, Finn: „wenn Jacob eingeloggt ist, sieht er nicht die Trades, die gerade bei
+      // Mike live sind") — trade_plans ist per RLS nur für die eigene ID lesbar; Orbit V2, Winning Days und Topstep V2 stehen
+      // in keiner anderen Quelle. Die RPC liefert nur lesend offene mt5v2/tvv2/tsv2-Pläne fremder IDs. Fehler oder Timeout
+      // hier darf den Block nie kippen — dann fehlen nur diese Karten, der Rest steht wie bisher.
+      const [ml, dl, fp] = await Promise.all([
         mitTimeout(supabase.from('mt5_live').select('*').gte('updated_at', grenze), 8000),
-        mitTimeout(supabase.from('dup_live').select('*').gte('updated_at', grenze), 8000)
+        mitTimeout(supabase.from('dup_live').select('*').gte('updated_at', grenze), 8000),
+        mitTimeout(Promise.resolve().then(() => supabase.rpc('flotte_offene_plaene')), 8000).catch(e => ({ data: null, error: e }))
       ])
       const rows = (!ml.error && Array.isArray(ml.data))
         ? ml.data.sort((a, b) => String(a.instance).localeCompare(String(b.instance))) : []
@@ -17693,6 +17704,7 @@
 
       /* ── Echo: eine Karte pro Master-Position, gleiche Optik wie oben ── */
       const fremdGezeigt = new Set()   // Hedge-Konto ist geteilt — Alarm nur einmal pro Hedge
+      const echoKonten = new Map()     // personKey → [{login, inst}] — Abgleich gegen fremde Echo-V2-Pläne (25.09.2026)
       // Dieselbe Instanz von ZWEI PCs gepusht (17.09.2026, per SQL belegt:
       // pc-o7wfb9 + pc-pw1put und pc-sukzo8 + pc-40mali melden dieselben
       // Master-Logins) → jede Karte und jeder Alarm stand doppelt da, der
@@ -17795,6 +17807,7 @@
           // unsichtbar — aber eine Master-Position OHNE Hedge-Positionen ist genau das, was Echo V2 ist. Dann
           // Sticker „Echo V2", rechts „ohne Hedge" statt Hedge-Login, kein leerer SLAVE-Chip.
           const ohneHedge = !hs.length
+          lege(echoKonten, pKey, { login: String(r.master_login || ''), inst: String(r.instance || '').trim().toLowerCase() })
           lege(karten, pKey, tc2Karte(farbe,
             r.instance, ohneHedge ? 'ohne Hedge' : 'Hedge ' + r.hedge_login,
             subPerson(pKey) + `<b>${p.type === 0 ? 'BUY' : 'SELL'}</b> ${esc(p.symbol)} · ${esc(r.pc_name)}`,
@@ -17839,6 +17852,40 @@
       // setzt fleetPersonen die Liste auf leer, blind bleibt hier also nichts.
       if(!_fleetPers.exclUids){ box.style.display = 'none'; return }
       const excl = _fleetPers.exclUids
+
+      /* ── Offene V2-Pläne der anderen IDs (25.09.2026, s. RPC oben): eine Karte je Plan unter der Person, reine Anzeige —
+       * keine Knöpfe, kein Live-P&L (liegt für fremde Pläne nicht vor). Emin/Finn (excl) und die eigene ID nie. Echo V2
+       * steht oft schon als mt5_live-Karte da (Tag „Echo V2") — dann keine zweite Karte: Abgleich über die External ID des
+       * Kontos (/admin/overview) bzw. den Instanz-Namen = Kontoname. */
+      for(const p of ((fp && !fp.error && Array.isArray(fp.data)) ? fp.data : [])){
+        const uid = String(p.user_id || '')
+        if(!uid || uid === meUid || excl.has(uid)) continue
+        const kName = String(p.master_name || '').trim()
+        if(p.route === 'mt5v2'){
+          const ext = (_fleetPers.extJe || {})[uid + '|' + kName.toLowerCase()] || ''
+          if((echoKonten.get(uid) || []).some(e => (ext && e.login === ext) || (kName && e.inst === kName.toLowerCase()))) continue
+        }
+        const pKey = merken(uid, profName.get(uid) || ('ID ' + uid.slice(0, 6)))
+        const wd = p.route === 'tvv2' && (p.winning_day === true || Number(p.hedge_eur) > 0)
+        const dir = dirVon(p.richtung)
+        const symbol = p.master_symbol || p.master_symbol_root || ''
+        // Fusion-Kurzinfo nur beim Winning Day und nur aus dem, was der Plan trägt (Richtung, Lots, Schließ-Level)
+        let fusion = ''
+        const h = p.hedge
+        if(wd && h && h.status){
+          const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })
+          const inner = (h.status === 'offen' || h.status === 'schliesst')
+            ? `${esc(String(h.richtung || '').toUpperCase())} ${f(h.lots || 0)} Lot${Number(h.schliesst_bei_nq) > 0 ? ` · schließt bei NQ ${f(h.schliesst_bei_nq)}` : ''}`
+            : (h.status === 'geschlossen' ? 'zu' : esc(String(h.status)))
+          fusion = `<span class="mono tc2-hedge" style="display:inline-flex;align-items:baseline;gap:3px;padding:2px 7px;border-radius:6px;background:var(--bg);border:1px solid var(--border-soft)" title="Fusion-Gegenhedge${h.pc ? ' · PC ' + esc(String(h.pc)) : ''}">`
+            + `<span style="font-size:9.5px;font-weight:600;color:var(--sub);letter-spacing:.02em">FUSION</span><span style="font-size:11px;color:var(--sub)">${inner}</span></span>`
+        }
+        const startEp = p.started_at ? Date.parse(p.started_at) / 1000 : NaN
+        lege(karten, pKey, tc2Karte(personen.get(pKey).farbe, kName || '?', null,
+          subPerson(pKey) + `<b>${dir === 'SHORT' ? 'SELL' : 'BUY'}</b>${symbol ? ' ' + esc(String(symbol)) : ''}${p.master_firm ? ' · ' + esc(String(p.master_firm)) : ''}`,
+          lotChip('KT', Number(p.master_contracts) || 0, dir) + fusion + zeitChip(isFinite(startEp) ? startEp : null, true, 0),
+          true, wd ? 'wd' : p.route))
+      }
       // „Hedge (geteilt / ohne Master)": Positionen auf einem Konto, das nur
       // EINE E-Mail sieht, gehören eindeutig dieser Person — für die eigene und
       // die ausgeschlossenen gilt dann dieselbe Regel wie für ihre Karten.
@@ -31639,7 +31686,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.591'
+  const OS_TAB_BUILD = '2026-09-22.592'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
