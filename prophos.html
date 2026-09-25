@@ -1880,6 +1880,9 @@
   #dashboard-view .mwd-abh-in{margin-top:3px;height:30px;padding:3px 8px;font-size:14px;font-weight:700}
   #dashboard-view .mwd-abh-knopf{align-self:center;white-space:nowrap}
   #dashboard-view .mwd-abh-erl{margin-top:12px;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwd-abh-geb{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin-top:10px;font-size:11.5px;color:var(--sub)}
+  #dashboard-view .mwd-abh-geb label{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2);font-weight:600}
+  #dashboard-view .mwd-geb-in{width:64px;height:26px;padding:2px 6px;font-size:12px}
   #dashboard-view .mwd-abh-erl summary{cursor:pointer;font-weight:600;color:var(--ink-2)}
   #dashboard-view .mwd-abh-erl-zeile{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 2px;border-bottom:1px solid var(--border-soft)}
   #dashboard-view .mwd-abh-erl-zeile .mono{margin-left:auto}
@@ -18870,8 +18873,7 @@
    * master_pl = final.today_pnl − tv.today_pnl_start, wenn beide Zahlen da sind UND derselbe Tag.
    * Fehlt der Startwert (oder anderer Tag): Finns Regel „eine Position pro Tag" → Today's P&L als Ganzes,
    * mit Hinweis im Abschließen-Popup. Ohne final.today_pnl: null (Finn trägt ein). Slave = 0 (kein Hedge). */
-  async function _autoPnlFetchTvV2(plan){
-    try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
+  function _autoPnlTvV2Gelesen(plan){
     const base = (plan && plan.mt5Baseline) || null
     const tv = (base && base.tv) || null, fin = (base && base.final) || null
     if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)){
@@ -18912,6 +18914,144 @@
     // (hedge.pl → slave_pl) — null lässt atMoveToReview das Feld in Ruhe, statt 0 zu schreiben, bevor der Hedge zu ist.
     return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl, masterCcy: '$', hinweis }
   }
+  /* ══ P&L NACH DEM TRADE — DREI QUELLEN (25.09.2026, Finn über die Koordination: den P&L nach jedem Orbit-/Winning-Day-Trade
+   * „perfekt" in Prophos, ohne am Order-Platzieren etwas zu ändern). Rangfolge:
+   *   (A) gelesen   — Today's P&L nach dem Ende (final.today_pnl vom Rundgang / der Puls-Lesung), abzüglich Startwert bzw. früherer
+   *                   Trades desselben Tages (Regel „eine Position pro Konto und Tag", _autoPnlTvV2Gelesen)
+   *   (B) berechnet — (Exit − Entry) × Punktwert (MNQ 2 $, NQ 20 $) × Kontrakte − Gebühren. Entry = Puls-Fill (tv.einstieg_fill bzw.
+   *                   tv.einstieg_nq mit Quelle 'fill', sonst hedge.einstieg_nq mit Quelle 'puls avg_fill'); Exit = final.exit_fill
+   *                   (liefert Live-Daten), bei einem TP-Ende (Limit-Order) exakt Entry ± master_tp / (Punktwert × Kt)
+   *   (C) geschätzt — TP/SL-Level (final.master_pl_schaetzung, sonst +master_tp bei TP-Ende)
+   * Liegen A und B vor und weichen um mehr als 5 $ + 1 $/Kt ab → Hinweis „gelesen x · berechnet y — prüfen", sonst still.
+   * GEBÜHREN kalibrieren sich selbst: je Firma aus Trades mit A und Brutto (Round Turn je Kt = (Brutto − A) / Kt, plausibel 0–15 $),
+   * Median der letzten 10, in user_settings 'orbit_gebuehr:<firma>' — sichtbar und von Hand überschreibbar („Zum Abhaken").
+   * Ohne Kalibrierung rechnet B ohne Gebühren und sagt das. Der Order-Prozess wird nicht angefasst. ══ */
+  const ORBIT_PPL = { NQ: 20, MNQ: 2 }
+  const orbitNum = v => (v == null || v === '' || typeof v === 'boolean' || !isFinite(Number(v))) ? null : Number(v)
+  const orbitR2 = v => v == null ? null : Math.round(v * 100) / 100
+  // REIN RECHNEND (window._tradePlAusFills): x = {richtung, kt, wurzel, master_tp, tv, final, hedge}, gebuehrProKt (Zahl|null)
+  // -> {brutto, gebuehr, netto, entry, exit, exitQuelle 'Exit-Fill'|'TP-Limit', lernbar} | null
+  function tradePlAusFills(x, gebuehrProKt){
+    if(!x) return null
+    const tv = x.tv || {}, fin = x.final || {}, h = x.hedge || {}
+    const kt = orbitNum(x.kt), ppl = ORBIT_PPL[String(x.wurzel || '').toUpperCase()] || 0, dir = x.richtung
+    if(!(kt > 0) || !(ppl > 0) || !(dir === 'buy' || dir === 'sell')) return null
+    const preisVon = v => orbitNum((v && typeof v === 'object') ? v.preis : v)
+    let entry = preisVon(tv.einstieg_fill)
+    if(!(entry > 1000) && tv.einstieg_quelle === 'fill') entry = orbitNum(tv.einstieg_nq)
+    if(!(entry > 1000) && /^puls avg_fill/.test(String(h.einstieg_quelle || ''))) entry = orbitNum(h.einstieg_nq)
+    if(!(entry > 1000)) return null
+    let exit = preisVon(fin.exit_fill), exitQuelle = exit > 1000 ? 'Exit-Fill' : null
+    const tpEnde = String(fin.art || '') === 'tp' || ['tp_feed', 'level_tp'].includes(String(fin.grund || '')) || ['tp_feed', 'level_tp'].includes(String(h.grund || ''))
+    if(!(exit > 1000) && tpEnde && orbitNum(x.master_tp) > 0){ exit = entry + (dir === 'buy' ? 1 : -1) * orbitNum(x.master_tp) / (ppl * kt); exitQuelle = 'TP-Limit' }
+    if(!(exit > 1000)) return null
+    const brutto = orbitR2((dir === 'buy' ? exit - entry : entry - exit) * ppl * kt)
+    const g = orbitNum(gebuehrProKt), gebuehr = g != null ? orbitR2(g * kt) : null
+    return { brutto, gebuehr, netto: orbitR2(brutto - (gebuehr || 0)), entry, exit: Math.round(exit * 100) / 100, exitQuelle, kt, ppl }
+  }
+  window._tradePlAusFills = tradePlAusFills
+  // REIN RECHNEND (window._orbitPlAbgleich): A (gelesen, Zahl|null), fills (tradePlAusFills-Ergebnis|null), C (Zahl|null), kt
+  // -> {wert, quelle 'gelesen'|'berechnet'|'geschaetzt'|null, text, pruefen, hinweis}
+  function orbitPlAbgleich(A, fills, C, kt){
+    const B = fills ? fills.netto : null, n = orbitNum(kt) || 0
+    const f2 = v => `${v < 0 ? '−' : ''}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+    const pruefen = A != null && B != null && Math.abs(A - B) > 5 + 1 * n
+    const hinweis = pruefen ? `gelesen ${f2(A)} · berechnet ${f2(B)} — prüfen` : ''
+    if(A != null) return { wert: orbitR2(A), quelle: 'gelesen', text: 'aus TradingView gelesen', pruefen, hinweis }
+    if(B != null) return { wert: B, quelle: 'berechnet', text: 'aus Fills berechnet' + (fills.gebuehr == null ? ' (ohne Gebühren)' : ''), pruefen: false, hinweis: '' }
+    if(C != null) return { wert: orbitR2(C), quelle: 'geschaetzt', text: 'geschätzt', pruefen: false, hinweis: '' }
+    return { wert: null, quelle: null, text: '', pruefen: false, hinweis: '' }
+  }
+  window._orbitPlAbgleich = orbitPlAbgleich
+  // Gebühr je Kontrakt (Round Turn) aus einem Trade mit A und Brutto — plausibel 0–15 $, sonst nichts lernen
+  function orbitGebuehrAusTrade(A, fills){
+    if(A == null || !fills || !(fills.kt > 0)) return null
+    const g = (fills.brutto - A) / fills.kt
+    return (g >= 0 && g <= 15) ? Math.round(g * 1000) / 1000 : null
+  }
+  window._orbitGebuehrAusTrade = orbitGebuehrAusTrade
+  const orbitMedian = a => { const b = [...a].sort((x, y) => x - y); if(!b.length) return null; const m = Math.floor(b.length / 2); return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2 }
+  window._orbitMedian = orbitMedian
+  // Speicher je Firma: user_settings 'orbit_gebuehr:<firma klein>' = {firma, proben:[{plan, g, at}] (max. 10), hand: Zahl|null}
+  const _orbitGeb = { geladen: false, laeuft: null, je: {} }
+  const orbitFirmaKey = f => String(f || '').trim().toLowerCase()
+  function orbitGebuehrenLaden(){
+    if(_orbitGeb.geladen || _orbitGeb.laeuft || typeof currentUserId === 'undefined' || !currentUserId) return _orbitGeb.laeuft
+    _orbitGeb.laeuft = (async () => {
+      try{
+        const { data, error } = await supabase.from('user_settings').select('key,value').eq('user_id', currentUserId).like('key', 'orbit_gebuehr:%')
+        if(!error){ for(const r of (data || [])){ const k = String(r.key).slice('orbit_gebuehr:'.length); if(r.value && typeof r.value === 'object') _orbitGeb.je[k] = r.value } _orbitGeb.geladen = true }
+      }catch(_){}
+      finally{ _orbitGeb.laeuft = null }
+      try{ if(typeof mklWdRender === 'function') mklWdRender() }catch(_){}
+    })()
+    return _orbitGeb.laeuft
+  }
+  // -> {wert, quelle 'hand'|'gelernt', n} | null (ohne Kalibrierung)
+  function orbitGebuehrFuer(firma){
+    if(!_orbitGeb.geladen) orbitGebuehrenLaden()
+    const e = _orbitGeb.je[orbitFirmaKey(firma)]; if(!e) return null
+    if(orbitNum(e.hand) != null) return { wert: orbitNum(e.hand), quelle: 'hand', n: (e.proben || []).length }
+    const p = (e.proben || []).map(x => orbitNum(x.g)).filter(v => v != null)
+    return p.length ? { wert: Math.round(orbitMedian(p) * 1000) / 1000, quelle: 'gelernt', n: p.length } : null
+  }
+  async function orbitGebuehrSpeichern(firma, e){
+    const k = orbitFirmaKey(firma); if(!k || typeof currentUserId === 'undefined' || !currentUserId) return
+    _orbitGeb.je[k] = e
+    try{ await supabase.from('user_settings').upsert({ user_id: currentUserId, key: 'orbit_gebuehr:' + k, value: e, updated_at: new Date().toISOString() }, { onConflict: 'user_id,key' }) }
+    catch(err){ console.warn('[gebühr] speichern', err) }
+  }
+  async function orbitGebuehrLernen(firma, planId, g){
+    if(g == null || !firma || !_orbitGeb.geladen) return
+    const k = orbitFirmaKey(firma), e = Object.assign({ firma: String(firma), proben: [], hand: null }, _orbitGeb.je[k] || {})
+    if((e.proben || []).some(x => String(x.plan) === String(planId))) return   // je Plan nur einmal
+    e.proben = (e.proben || []).concat([{ plan: String(planId), g, at: new Date().toISOString() }]).slice(-10)
+    await orbitGebuehrSpeichern(firma, e)
+  }
+  async function orbitGebuehrSetzen(firma, hand){
+    const k = orbitFirmaKey(firma), e = Object.assign({ firma: String(firma), proben: [], hand: null }, _orbitGeb.je[k] || {})
+    e.hand = (hand == null || hand === '' || isNaN(hand)) ? null : Math.round(Number(hand) * 1000) / 1000
+    await orbitGebuehrSpeichern(firma, e)
+  }
+  setTimeout(() => { try{ orbitGebuehrenLaden() }catch(_){} }, 8000)
+  // Wurzel eines Plans (NQ/MNQ) aus dem Symbol
+  function orbitWurzelVon(plan){
+    const sym = ((plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.einstieg_symbol) || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : '') || plan.masterSymbol || '')
+    const w = (typeof tvSymbolWurzel === 'function') ? tvSymbolWurzel(sym) : ''
+    return (w === 'NQ' || w === 'MNQ') ? w : (/MNQ/i.test(sym) ? 'MNQ' : /NQ/i.test(sym) ? 'NQ' : '')
+  }
+  // Auto-P&L Orbit V2 mit Abgleich: A aus _autoPnlTvV2Gelesen (unverändert), B aus den Fills, C Schätzung — Rangfolge A > B > C
+  async function _autoPnlFetchTvV2(plan){
+    try{ _autoPnlAmbiguous.delete(String(plan.id)) }catch(_){}
+    const resA = _autoPnlTvV2Gelesen(plan)
+    const base = (plan && plan.mt5Baseline) || {}, fin = base.final || null
+    const geb = orbitGebuehrFuer(plan.masterFirm)
+    const fills = tradePlAusFills({ richtung: plan.richtung, kt: plan.masterContracts, wurzel: orbitWurzelVon(plan), master_tp: plan.masterTp,
+      tv: base.tv, final: fin, hedge: base.hedge }, geb ? geb.wert : null)
+    const A = (resA && resA.masterPnl != null && fin && orbitNum(fin.today_pnl) != null) ? resA.masterPnl : null
+    const C = (resA && resA.masterPnl != null && A == null) ? resA.masterPnl : null   // die Level-Schätzung aus _autoPnlTvV2Gelesen
+    // Gebühr lernen, wenn A und Brutto beide da sind
+    if(A != null && fills){ const g = orbitGebuehrAusTrade(A, fills); if(g != null) orbitGebuehrLernen(plan.masterFirm, plan.id, g) }
+    const ab = orbitPlAbgleich(A, fills, C, plan.masterContracts)
+    if(ab.wert == null) return resA   // weder gelesen noch berechnet noch geschätzt — wie bisher (Hinweis bleibt)
+    const hinweis = ab.quelle === 'gelesen' ? [resA && resA.hinweis, ab.hinweis].filter(Boolean).join(' · ')
+      : ab.quelle === 'berechnet' ? [`aus Fills berechnet: (${fills.exit.toLocaleString('de-DE')} − ${fills.entry.toLocaleString('de-DE')}) × ${fills.ppl} $ × ${fills.kt}${fills.exitQuelle === 'TP-Limit' ? ' (Exit = TP-Limit)' : ''}${fills.gebuehr != null ? ` − ${fills.gebuehr.toLocaleString('de-DE')} $ Gebühren` : ' — ohne Gebühren'}`, (resA && resA.masterPnl == null) ? resA.hinweis : ''].filter(Boolean).join(' · ')
+      : (resA && resA.hinweis) || 'geschätzt'
+    return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl: ab.wert, masterCcy: '$', hinweis, quelle: ab.quelle }
+  }
+  // REIN RECHNEND (window._kontoStandAusTrades): nur vorbereitet (Finn beantwortet noch den Startwert). Kontostand = Startwert +
+  // Σ master_pl der erledigten Orbit-Pläne des Kontos (route tvv2) − Σ Auszahlungen. opts = {startwert, auszahlungen: [Zahl|{amount}],
+  // routen: ['tvv2']} -> {stand, summe_trades, anzahl, summe_auszahlungen} | null ohne Startwert
+  function kontoStandAusTrades(kontoId, plaene, opts){
+    const o = opts || {}, start = orbitNum(o.startwert)
+    if(start == null) return null
+    const routen = new Set(o.routen || ['tvv2'])
+    const eigene = (plaene || []).filter(p => p && String(p.masterAccountId ?? p.master_account_id) === String(kontoId) && p.status === 'completed' && routen.has(p.route))
+    const summe = eigene.reduce((a, p) => a + (orbitNum(p.masterPl ?? p.master_pl) || 0), 0)
+    const aus = (o.auszahlungen || []).reduce((a, x) => a + (orbitNum((x && typeof x === 'object') ? x.amount : x) || 0), 0)
+    return { stand: orbitR2(start + summe - aus), summe_trades: orbitR2(summe), anzahl: eigene.length, summe_auszahlungen: orbitR2(aus) }
+  }
+  window._kontoStandAusTrades = kontoStandAusTrades
   /* ========== ENDE ORBIT V2 ========== */
 
   /* ========== FUSION-GEGENHEDGE für Winning Days („Solo-Hedge", 24.09.2026 abends) ==========
@@ -20913,7 +21053,7 @@
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     // Tippt Finn gerade in der Abhak-Liste, nicht neu zeichnen — sonst verliert das Feld den Fokus (25.09.2026)
-    try{ const a = document.activeElement; if(a && a.classList && a.classList.contains('mwd-abh-in') && el.contains(a)) return }catch(_){}
+    try{ const a = document.activeElement; if(a && a.classList && (a.classList.contains('mwd-abh-in') || a.classList.contains('mwd-geb-in')) && el.contains(a)) return }catch(_){}
     // Nur laufende und geplante Karten (Finn 25.09.2026: „Die vergangenen Trades sollen da nicht sein, das hat keinen Sinn");
     // beendete ohne eingetragenes Ergebnis erscheinen nur als EINE Nachtrag-Zeile unter den Karten, completed nie.
     const alle = mkl.wd.plaene || []
@@ -21050,8 +21190,23 @@
   function mklWdAbhakenVorbelegung(pw){
     const num = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
     const h = pw.hedge || null
-    let m = null, mq = 'bitte eintragen'
-    if(num(pw.master_pl_plan) != null){
+    let m = null, mq = 'bitte eintragen', mPruefen = ''
+    // Abgleich der drei Quellen (25.09.2026): A = am Plan erfasster Today's-P&L-Wert bzw. gelesenes final, B = aus Fills, C = Schätzung.
+    // Ein von Hand eingetragener Wert (pl_quelle 'hand') bleibt immer; die Level-Schätzung am Plan wird von A/B ersetzt.
+    const fin = pw.final || {}, geb = (typeof orbitGebuehrFuer === 'function') ? orbitGebuehrFuer((pw.konto || {}).firma) : null
+    const fills = (typeof tradePlAusFills === 'function') ? tradePlAusFills({ richtung: pw.richtung, kt: pw.kt, wurzel: pw.symbol_root, master_tp: pw.master_tp,
+      tv: pw.tv, final: pw.final, hedge: pw.hedge }, geb ? geb.wert : null) : null
+    const planIstSchaetzung = num(pw.master_pl_plan) != null && num(pw.master_pl_schaetzung) != null && Math.abs(num(pw.master_pl_plan) - num(pw.master_pl_schaetzung)) < 0.005 && num(fin.today_pnl) == null
+    const planA = (num(pw.master_pl_plan) != null && !planIstSchaetzung && pw.pl_quelle !== 'hand' && num(fin.today_pnl) != null) ? num(pw.master_pl_plan) : null
+    const finA = (planA == null && num(fin.today_pnl) != null && pw.tv && num(pw.tv.today_pnl_start) != null && pw.tv.datum_start && fin.datum === pw.tv.datum_start) ? num(fin.today_pnl) - num(pw.tv.today_pnl_start) : null
+    const A = planA != null ? planA : finA
+    if(pw.pl_quelle !== 'hand' && (A != null || fills)){
+      const ab = orbitPlAbgleich(A, fills, null, pw.kt)
+      if(ab.wert != null){ m = ab.wert; mq = ab.text; mPruefen = ab.hinweis }
+      if(fills && A != null){ const g = orbitGebuehrAusTrade(A, fills); if(g != null) orbitGebuehrLernen((pw.konto || {}).firma, pw.id, g) }
+    }
+    if(m != null){ /* aus dem Abgleich */ }
+    else if(num(pw.master_pl_plan) != null){
       m = num(pw.master_pl_plan)
       mq = pw.pl_quelle === 'tv' ? "Today's P&L"
         : (pw.final_quelle === 'level' && num(pw.master_pl_schaetzung) != null && Math.abs(m - num(pw.master_pl_schaetzung)) < 0.005) ? 'aus TP-Level geschätzt'
@@ -21073,7 +21228,7 @@
       fOffen = true; fq = 'Fusion noch offen — live'
       if(live && isFinite(Number(live.profit))) f = Number(live.profit)
     } else if(h && h.status === 'geschlossen'){ fq = 'P&L folgt (Deal-Historie)' }
-    return { m, mq, f, fq, fOffen }
+    return { m, mq, f, fq, fOffen, mPruefen }
   }
   window._mklWdAbhakenVorbelegung = mklWdAbhakenVorbelegung
   const mklWdZahlLesen = v => { const t = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'); if(t === '') return null; const n = Number(t); return isFinite(n) ? n : NaN }
@@ -21104,7 +21259,8 @@
       const summe = (m != null && !isNaN(m) && f != null && !isNaN(f)) ? m * fx + f : (m != null && !isNaN(m) && !(Number(x.hedge_eur) > 0) ? m * fx : null)
       const feld = (art, text, einheit, quelle, hand) => `<label class="mwd-box"><span class="mwd-box-t">${art === 'm' ? 'Master' : 'Fusion'} ${einheit}</span>`
         + `<input type="text" inputmode="decimal" class="input mono mwd-abh-in" data-abh-plan="${escapeHtml(pid)}" data-abh-feld="${art}" value="${escapeHtml(text)}" placeholder="0,00"${busy ? ' disabled' : ''}>`
-        + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span></label>`
+        + `<span class="mwd-box-s">${escapeHtml(hand ? 'von Hand geändert' : quelle)}</span>`
+        + ((art === 'm' && !hand && w.mPruefen) ? `<span class="mwd-box-s" style="color:#B45309;font-weight:600">${escapeHtml(w.mPruefen)}</span>` : '') + `</label>`
       return `<div class="mwd-abh" data-mwd-abh="${escapeHtml(pid)}">${kopf(x)}<div class="mwd-abh-werte">`
         + feld('m', w.mText, '$', w.mq, w.mHand) + feld('f', w.fText, '€', w.fq, w.fHand)
         + `<div class="mwd-box mwd-box-sum"><span class="mwd-box-t">zusammen</span><span class="mwd-box-v" data-abh-summe="${escapeHtml(pid)}" style="color:${col(summe)}">${summe == null ? '–' : '≈ ' + sig(summe, '€')}</span><span class="mwd-box-s">Master × ${fx.toLocaleString('de-DE', { maximumFractionDigits: 3 })} + Fusion</span></div>`
@@ -21115,7 +21271,17 @@
       const summe = (m != null ? m * fx : 0) + (f != null ? f : 0)
       return `<div class="mwd-abh-erl-zeile"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span><span class="mwd-konto">${escapeHtml(String(k.firma || '?'))}${k.kontonr_ende ? ' …' + escapeHtml(String(k.kontonr_ende)) : ''}</span>`
         + `<span>Master <b style="color:${col(m)}">${sig(m, '$')}</b></span><span>Fusion <b style="color:${col(f)}">${sig(f, '€')}</b></span><span class="mono" style="color:${col(summe)}">≈ ${sig(summe, '€')}</span></div>` })
+    // Gebühren je Firma (Round Turn je Kontrakt): gelernt / von Hand / ohne — Feld leer lassen = zurück auf gelernt
+    const firmen = [...new Set([...offen, ...erl].map(x => String((x.konto || {}).firma || '').trim()).filter(Boolean))]
+    const gebZeile = firmen.length ? `<div class="mwd-abh-geb"><span>Gebühren je Kontrakt (Round Turn):</span>` + firmen.map(fi => {
+        const g = (typeof orbitGebuehrFuer === 'function') ? orbitGebuehrFuer(fi) : null
+        const wert = (g && g.quelle === 'hand') ? String(g.wert).replace('.', ',') : ''
+        const ph = g ? String(g.wert).replace('.', ',') : '0'
+        return `<label title="${escapeHtml(g ? (g.quelle === 'hand' ? `von Hand gesetzt${g.n ? ` · gelernt aus ${g.n} Trade${g.n > 1 ? 's' : ''}` : ''}` : `gelernt aus ${g.n} Trade${g.n > 1 ? 's' : ''} (Median)`) : 'noch nicht kalibriert — rechnet ohne Gebühren, bis ein Trade mit gelesenem Today\'s P&L und Fills da ist')}">`
+          + `${escapeHtml(fi)} <input type="text" inputmode="decimal" class="input mono mwd-geb-in" data-geb-firma="${escapeHtml(fi)}" value="${escapeHtml(wert)}" placeholder="${escapeHtml(ph)}"> $`
+          + `<span class="mwd-box-s">${g ? (g.quelle === 'hand' ? 'von Hand' : `gelernt · ${g.n}`) : 'ohne Gebühren'}</span></label>` }).join('') + `</div>` : ''
     return (offen.length ? `<div class="mwd-abh-titel">Zum Abhaken <span>· ${offen.length} beendet · alle IDs · Werte prüfen, dann abhaken</span></div>${zeilen.join('')}` : '')
+      + gebZeile
       + (erl.length ? `<details class="mwd-abh-erl"${mkl.wd.erlOffen ? ' open' : ''}><summary>Erledigt heute (${erl.length})</summary>${erlZeilen.join('')}</details>` : '')
   }
   function mklWdAbhakenVerdrahten(el){
@@ -21130,6 +21296,14 @@
     }))
     el.querySelectorAll('[data-mwd-abhaken]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAbhaken(b.dataset.mwdAbhaken) }))
     const det = el.querySelector('.mwd-abh-erl'); if(det) det.addEventListener('toggle', () => { mkl.wd.erlOffen = det.open })
+    // Gebühr von Hand: Enter oder Verlassen speichert; leer = zurück auf den gelernten Wert
+    el.querySelectorAll('.mwd-geb-in').forEach(inp => {
+      const sichern = async () => { const t = String(inp.value || '').trim().replace(',', '.'); const n = t === '' ? null : Number(t)
+        if(n != null && (isNaN(n) || n < 0 || n > 50)){ if(typeof atToast === 'function') atToast('Gebühr: Zahl zwischen 0 und 50 $ je Kontrakt'); return }
+        await orbitGebuehrSetzen(inp.dataset.gebFirma, n); try{ mklWdRender() }catch(_){} }
+      inp.addEventListener('change', sichern)
+      inp.addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); inp.blur() } })
+    })
   }
   async function mklWdAbhaken(pid){
     const key = pid + ':abh'
@@ -32318,7 +32492,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.603'
+  const OS_TAB_BUILD = '2026-09-22.604'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

@@ -133,6 +133,12 @@ def main():
     zr = a["_wd_heute_zeile"](pr, None, {})
     check(zr["master_pl_plan"] == 271.0 and zr["slave_pl"] == -93.99 and zr["final_quelle"] == "level" and zr["master_pl_schaetzung"] == 271.0
           and zr["hedge"]["pl"] == -93.99 and zr["pl_quelle"] is None, "Zeile: P&L-Felder für die Abhak-Liste (master_pl_plan, slave_pl, final_quelle, Schätzung)")
+    pf = dict(p2, id="pf", status="review", mt5_baseline={"tv": {"einstieg_nq": 30000.25, "einstieg_quelle": "fill", "konto": "X", "today_pnl_start": -12.5, "datum_start": "2026-09-25"},
+                                                          "final": {"today_pnl": 258.5, "datum": "2026-09-25", "quelle": "puls", "art": "tp", "exit_fill": {"preis": 30027.25}, "puls_versuche": 1}})
+    zf = a["_wd_heute_zeile"](pf, None, {})
+    check(zf["tv"] == {"einstieg_nq": 30000.25, "einstieg_quelle": "fill", "today_pnl_start": -12.5, "datum_start": "2026-09-25"}
+          and zf["final"] == {"today_pnl": 258.5, "datum": "2026-09-25", "quelle": "puls", "art": "tp", "exit_fill": {"preis": 30027.25}},
+          "Zeile: tv/final nur mit den Feldern für die Fill-Rechnung (kein konto, keine puls_versuche)")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1

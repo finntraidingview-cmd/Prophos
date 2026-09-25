@@ -6796,6 +6796,10 @@ def _wd_heute_zeile(p, acc, disp):
         "master_pl_plan": _wd_num(p.get("master_pl")), "slave_pl": _wd_num(p.get("slave_pl")), "pl_quelle": p.get("pl_quelle"),
         "final_quelle": final.get("quelle"), "master_pl_schaetzung": _wd_num(final.get("master_pl_schaetzung")),
         "completed_at": p.get("completed_at"),
+        # P&L aus Fills + Abgleich (Koordination 25.09.2026): Einstieg/Start aus der tv-Baseline, Ende aus final — nur die Felder,
+        # die die Rechnung braucht (Fill-Preise, Today's P&L, Quelle, Ende-Art), keine Zugangsdaten
+        "tv": {k: tv.get(k) for k in ("einstieg_nq", "einstieg_quelle", "einstieg_fill", "einstieg_symbol", "today_pnl_start", "datum_start") if k in tv},
+        "final": {k: final.get(k) for k in ("today_pnl", "datum", "quelle", "art", "grund", "exit_fill", "ende_quelle") if k in final},
     }
 
 
