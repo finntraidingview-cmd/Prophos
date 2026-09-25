@@ -5784,6 +5784,9 @@ def admin_build_kapitel():
                     "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
                     "account_name": p.get("master_name") or "",
                     "datum": str(p.get("completed_at") or "")[:10],
+                    # genauer Zeitpunkt (25.09.2026, Finn: „man sieht nicht immer die neuesten zuerst") — die Liste
+                    # sortiert danach und zeigt die Uhrzeit; datum bleibt der Tag für die Charts
+                    "zeit": p.get("completed_at") or p.get("ended_at") or None,
                     # 24.09.2026 „mach MEHR Statistik": Stunde (Dubai) + Haltedauer + Konto-ID, damit das
                     # Frontend Tageszeit-, Dauer- und Je-Konto-Charts zeichnen kann. Ende = ended_at, sonst
                     # completed_at (V2-Trades werden per „Erledigt" abgeschlossen, ended_at kann fehlen).
@@ -5859,7 +5862,7 @@ def admin_build_kapitel():
                 key=lambda pe: str(pe["person"]).lower()),
             "symbole": dict(sorted(symbole.items())),
             # Kontrafakt-Rohdaten (24.09.2026) — nur hedge-freie Kapitel tragen sie, sonst leer.
-            "trades_liste": sorted(trades_liste, key=lambda t: (t["datum"], str(t["id"]))),
+            "trades_liste": sorted(trades_liste, key=lambda t: (t["datum"], str(t.get("zeit") or ""), str(t["id"]))),
             "payouts_liste": sorted(payouts_liste, key=lambda t: t["datum"]),
             "kauf_liste": sorted(kauf_liste, key=lambda t: t["datum"]),
         })

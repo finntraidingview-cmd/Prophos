@@ -1440,6 +1440,11 @@
   /* Trade-Liste NACH der kf-rows-Regel (gleiche Spezifität, Review 24.09.2026 F3: stand vorher davor und verlor) */
   #adm-pane-stat .kf-trades .adm-row{padding:6px 0;grid-template-columns:minmax(210px,2fr) auto auto minmax(140px,1.2fr)}
   #adm-pane-stat .kf-filter{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  /* Trade-Liste (25.09.2026): Uhrzeit klein neben dem Datum, Personen-Chips mit Anzahl, Verlauf je Person darüber */
+  #adm-pane-stat .kf-trades .kf-uhr{font-family:var(--mono);font-size:10.5px;color:var(--sub-2);margin-left:5px;font-weight:400}
+  #adm-pane-stat .kf-pers-chips{margin-top:8px}
+  #adm-pane-stat .kf-pers-chips .kf-pers-n{margin-left:5px;font-variant-numeric:tabular-nums;color:var(--sub-2);font-weight:400}
+  #adm-pane-stat .kf-trades-verlauf .adm-vl{height:220px}
   /* Ein großer Chart mit Chip-Auswahl (24.09.2026, Finn: „einen ganz großen Chart — je nachdem, wo ich draufdrücke") */
   #adm-pane-stat .kf-chip-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   /* Chips als kleine Pillen (24.09.2026 abends, Finn am Live-Screenshot: die Chips erbten 16 px Text ohne Rahmen) */
@@ -1475,6 +1480,10 @@
     /* Zeilen-Raster mobil (Review 24.09.2026, F4): Trade-Liste und Quoten liefen über die Seitenbreite */
     #adm-pane-stat .kf-trades .adm-row{grid-template-columns:minmax(0,1fr) auto;grid-auto-rows:auto;gap:4px 10px}
     #adm-pane-stat .kf-trades .adm-row .adm-pct{grid-column:1 / -1}
+    #adm-pane-stat .kf-trades-verlauf .adm-vl{height:200px}
+    /* Konto-Zeile unter dem Namen lief am Handy rechts aus der Zeile (25.09.2026) — umbrechen statt abschneiden */
+    #adm-pane-stat .kf-trades .adm-row-name > span{min-width:0}
+    #adm-pane-stat .kf-trades .adm-row-name span,#adm-pane-stat .kf-trades .adm-row-name small{white-space:normal;overflow-wrap:anywhere}
     #adm-pane-stat .kf-quoten .adm-row{grid-template-columns:minmax(0,1fr) auto}
     #adm-pane-stat .kf-quoten .adm-track{grid-column:1 / -1}
   }
@@ -8412,6 +8421,14 @@
                 <!-- Trade-Liste (24.09.2026, Finn: „Bei dem Trade sollte grob 100 € Gegen-Cash gewesen sein — die nimmt man
                      schon mal in die neue Statistik rein"): je Trade der Hedge-Wert aus Quote × Master-P&L. Gezeichnet von admKfTradeListe. -->
                 <div class="kf-abschnitt">Trades <span class="adm-sub" id="adm-kf-trades-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+                <!-- Personen-Chips + Verlauf je Person (25.09.2026, Finn: „gerade komisch verpackt, man sieht nicht immer die neuesten
+                     zuerst"): Chips in den Personen-Farben mit Anzahl filtern Liste UND Chart (derselbe Filter wie der Klick auf den
+                     Namen in der Zeile), darunter der Hedge-€ kumuliert je Person. Gezeichnet von admKfTradeListe. -->
+                <div class="adm-vl-legend kf-pers-chips" id="adm-kf-pers-t"></div>
+                <div class="kf-chart kf-trades-verlauf">
+                  <div class="kf-titel">Verlauf je Person <span class="adm-sub">Hedge € kumuliert · Klick auf eine Linie filtert</span></div>
+                  <div class="adm-vl"><canvas id="adm-kf-chart-tp"></canvas></div>
+                </div>
                 <div class="adm-dist kf-rows kf-trades" id="adm-kf-rows-t"></div>
                 <!-- Kosten nach Prop-Firma (25.09.2026 abends, Finn: „da drunter noch einen Chart, wie sich die Kosten aus den
                      jeweiligen Prop-Firmen ergeben, wie viel, und daraus noch ein paar Charts"): dieselben Trades wie die Liste,
@@ -11371,7 +11388,7 @@
       admKfKalender(alle.filter(persOk), f)
       admKfHistChart(alle.filter(persOk), f, farbe)
       admKfDimCharts(alle, persOk, artOk, pers, f, fx, farbe, pick, personen)
-      admKfTradeListe(trades, fx, pick, pers)
+      admKfTradeListe(trades, fx, pick, pers, alle.filter(artOk), personen, tage)
       admKfFirmaCharts(alle.filter(persOk), f, fx, farbe, tage)
     }
     /* Kosten nach Prop-Firma (25.09.2026 abends, Finn: „wie sich die Kosten aus den jeweiligen Prop-Firmen ergeben, wie viel,
@@ -11459,10 +11476,46 @@
       // „· Vorgabe" statt „· n 0" für Gruppen aus HQ_VORGABEN (Topstep · Funded, 24.09.2026 spät)
       return m ? `${m[1].trim()} · ${admKfTyp(m[2].trim())}${m[3] ? ' · ' + admKfGroesse(m[3]) : ''} ${admKfDe(q, 2)} · ${m[4] !== undefined ? 'n ' + m[4] : 'Vorgabe'}` : `Quote ${admKfDe(q, 2)}`
     }
-    function admKfTradeListe(trades, fx, pick, pers){
+    // Zeitpunkt eines Trades in ms: zeit (completed_at, voll) — ältere Antworten ohne zeit fallen auf den Tag zurück
+    const admKfZeitMs = t => Date.parse(t.zeit || '') || Date.parse((t.datum || '') + 'T00:00:00Z') || 0
+    const admKfUhr = t => { const ms = Date.parse(t.zeit || ''); return ms ? new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '' }
+    const admKfTagLokal = t => { const ms = Date.parse(t.zeit || ''); return ms ? new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : admVlDatum(t.datum) }
+    // Personen-Chips über der Liste (25.09.2026): alle Personen des Kapitels (Sach-Filter greift, Personen-Filter nicht —
+    // sonst verschwänden die anderen Chips), Farbe + Anzahl; Klick = pick (derselbe Umschalter wie Zeile und Chart)
+    function admKfPersChips(rows, pick, pers, personen){
+      const bar = $('adm-kf-pers-t'); if(!bar) return
+      bar.innerHTML = ''
+      const n = new Map()
+      for(const t of rows){ const u = String(t.user_id); n.set(u, (n.get(u) || 0) + 1) }
+      const reihe = [...n.keys()].sort((a, b) => (n.get(b) - n.get(a)) || String(personen.get(a) || a).localeCompare(String(personen.get(b) || b), 'de'))
+      bar.hidden = reihe.length < 2
+      for(const u of reihe){
+        const b = document.createElement('button'); b.type = 'button'
+        b.className = 'adm-vl-chip' + (pers ? (String(pers) === u ? ' is-on' : ' is-off') : '')
+        b.innerHTML = admDot(u) + '<span class="nm"></span><span class="kf-pers-n"></span>'
+        b.querySelector('.nm').textContent = admShortName(personen.get(u) || u)
+        b.querySelector('.kf-pers-n').textContent = String(n.get(u))
+        b.title = String(pers) === u ? 'Filter aufheben' : `${n.get(u)} Trade${n.get(u) === 1 ? '' : 's'} — klicken filtert Liste und Chart`
+        b.addEventListener('click', () => pick(u))
+        bar.appendChild(b)
+      }
+    }
+    function admKfTradeListe(trades, fx, pick, pers, rowsAlle, personen, tage){
       const el = $('adm-kf-rows-t'), sub = $('adm-kf-trades-sub'); if(!el) return
       el.innerHTML = ''
-      const liste = trades.slice().sort((a, b) => String(b.datum).localeCompare(String(a.datum)) || (Number(b.id) - Number(a.id))).slice(0, 30)
+      if(rowsAlle && personen) admKfPersChips(rowsAlle, pick, pers, personen)
+      // Verlauf je Person: dieselben Trades wie die Liste (mit Personen-Filter nur die gewählte), Hedge € kumuliert je Tag
+      if(personen){
+        const m = new Map()
+        for(const t of trades){ if(!t.datum) continue; const u = String(t.user_id)
+          const s = m.get(u) || { key: u, label: personen.get(u) || u, events: [] }; s.events.push({ datum: t.datum, eur: admKfHyp(t, fx) }); m.set(u, s) }
+        admVerlauf('kftp', 'adm-kf-chart-tp', null, [...m.values()].sort((a, b) => String(a.label).localeCompare(String(b.label), 'de')), '', pick, { tage: tage || [] })
+        // unter zwei Tagen zeichnet admVerlauf nichts — dann auch Titel weg statt leerem Kasten
+        const box = document.querySelector('#adm-kf-panel .kf-trades-verlauf'), cv = $('adm-kf-chart-tp')
+        if(box && cv) box.hidden = !!cv.parentElement.hidden
+      }
+      // Immer die neuesten zuerst — nach dem genauen Zeitpunkt, nicht nur nach dem Tag (25.09.2026)
+      const liste = trades.slice().sort((a, b) => (admKfZeitMs(b) - admKfZeitMs(a)) || String(b.datum).localeCompare(String(a.datum)) || String(b.id).localeCompare(String(a.id))).slice(0, 30)
       if(sub) sub.textContent = trades.length > liste.length ? `· neueste ${liste.length} von ${trades.length}` : `· ${trades.length}`
       if(!liste.length){ el.innerHTML = '<div class="adm-empty">Nichts für diesen Filter.</div>'; return }
       for(const t of liste){
@@ -11475,7 +11528,10 @@
           `<div class="adm-val" style="color:${mpl < 0 ? admKfRot : admKfGut}">${admUsdSign(mpl)}</div>` +
           `<div class="adm-val" style="color:${hyp < 0 ? admKfRot : admKfGut}">≙ ${admVlSign(hyp)} Hedge</div>` +
           `<div class="adm-pct"></div>`
-        row.querySelector('.nm').textContent = `${admVlDatum(t.datum)} · ${admShortName(t.person || t.user_id)}`
+        { const uhr = admKfUhr(t), nm = row.querySelector('.nm')
+          nm.textContent = admKfTagLokal(t)
+          if(uhr){ const u = document.createElement('span'); u.className = 'kf-uhr'; u.textContent = uhr; nm.appendChild(u) }
+          nm.appendChild(document.createTextNode(' · ' + admShortName(t.person || t.user_id))) }
         row.querySelector('small').textContent = `${t.account_name || '—'} · ${admKfFirmaTyp(t)}${t.master_groesse ? ' · ' + admKfGroesse(t.master_groesse) : ''} · ${ADM_KF_WEG[t.route] || t.route || '—'}${t.blown ? ' · Blow' : ''}`
         row.querySelector('.adm-pct').textContent = admKfQuelleKurz(t)
         row.title = `${admShortName(t.person || t.user_id)} · ${t.account_name || '—'} · Master ${admUsdSign(mpl)} → Hedge ${admVlSign(hyp)} (Quote × Master − Reibung ${admKfDe(admKfReib(t), 2)} €) — klicken filtert die Person`
@@ -32684,7 +32740,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.612'
+  const OS_TAB_BUILD = '2026-09-22.613'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
