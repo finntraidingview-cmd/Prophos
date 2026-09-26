@@ -1759,6 +1759,7 @@ def main():
     results.append(test_pc_id())
     results.append(test_lese_instanz())
     results.append(test_endlesung_bausteine())
+    results.append(test_profil_riegel())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2245,6 +2246,84 @@ def test_endlesung_bausteine():
     chk("ohne ende kein Befund (Rundgang unveraendert)", r2.get("code") == "befehl" and "befund" not in r2)
     if ok:
         print("✓ Endlesung: Order-Historie EN/DE, Exit/Einstieg nach Zeit oder Lage, Zeitformate, Befund <= 2 kB, Ende-Modus ohne Absturz")
+    return ok
+
+
+def test_profil_riegel():
+    """Chrome-Profil-Riegel (26.09.2026, Moritz' PC): Puls benutzt nur Fenster seines Profils, nie das
+    Reader-Profil ('Terminal 1'), und startet Chrome immer mit --profile-directory seines Profils."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Profil-Riegel: " + name); ok = False
+
+    ls = {"profile": {"info_cache": {"Default": {"name": "Moritz"}, "Profile 1": {"name": "Terminal 1"}}}}
+    prof = ob.chrome_profile_lesen(ls)
+    chk("Local State lesen", prof == {"Default": "Moritz", "Profile 1": "Terminal 1"})
+    chk("Relaunch mit Anfuehrungszeichen", ob.chrome_profil_aus_relaunch(
+        '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --profile-directory="Profile 1"') == "Profile 1")
+    chk("Relaunch ohne Anfuehrungszeichen", ob.chrome_profil_aus_relaunch("chrome.exe --profile-directory=Default") == "Default")
+    chk("Relaunch ohne Schalter", ob.chrome_profil_aus_relaunch("chrome.exe") == "")
+    chk("AppID mit Profil-Endung", ob.chrome_profil_aus_appid("Chrome.Profile1", list(prof)) == "Profile 1")
+    chk("AppID Standardprofil bleibt unbekannt", ob.chrome_profil_aus_appid("Chrome", list(prof)) == "")
+    chk("Aufloesen per Anzeigename", ob.chrome_profil_aufloesen("terminal 1", prof) == "Profile 1")
+    chk("Aufloesen per Verzeichnis", ob.chrome_profil_aufloesen("profile 1", prof) == "Profile 1")
+    chk("Aufloesen unbekannt", ob.chrome_profil_aufloesen("Finn", prof) == "")
+
+    # Moritz: nichts eingetragen -> Default ist Puls-Profil, Terminal 1 gesperrt
+    r = ob.puls_profil_regel(prof)
+    chk("ohne Config eigen = Default", r["eigen"] == "Default" and not r["fehler"])
+    chk("Reader-Profil gesperrt", not ob.profil_erlaubt("Profile 1", r))
+    chk("eigenes Profil erlaubt", ob.profil_erlaubt("Default", r))
+    chk("unbekanntes Fenster erlaubt (wie bisher)", ob.profil_erlaubt("", r))
+    # Config per Anzeigename + ausdrueckliches Reader-Profil
+    r = ob.puls_profil_regel(prof, eigen="Moritz", tabu="Terminal 1")
+    chk("Config per Anzeigename", r["eigen"] == "Default" and r["tabu"] == {"Profile 1"} and not r["fehler"])
+    # Puls-Profil = Reader-Profil -> nie arbeiten, Fehler
+    r = ob.puls_profil_regel(prof, eigen="Terminal 1", tabu="Terminal 1")
+    chk("eigen == tabu -> Fehler, kein Profil", r["eigen"] == "" and r["fehler"]
+        and not ob.profil_erlaubt("Profile 1", r) and not ob.profil_erlaubt("Default", r))
+    # Puls bewusst im zweiten Profil
+    r = ob.puls_profil_regel(prof, eigen="Profile 1")
+    chk("eigen Profile 1 -> Default gesperrt", r["eigen"] == "Profile 1" and not ob.profil_erlaubt("Default", r))
+    # Ein Profil (Finns PC): alles wie bisher
+    r = ob.puls_profil_regel({"Default": "Person 1"})
+    chk("ein Profil: erlaubt", r["eigen"] == "Default" and not r["mehrere"] and ob.profil_erlaubt("Default", r))
+    # Mehrere ohne Default und ohne Config -> Fehler, sicher erkannte Profile gesperrt
+    r = ob.puls_profil_regel({"Profile 1": "A", "Profile 2": "B"})
+    chk("mehrere ohne Default -> Fehler", r["fehler"] and not ob.profil_erlaubt("Profile 1", r))
+    # Kein Local State lesbar -> Config-Wert wie bisher, nichts gesperrt
+    r = ob.puls_profil_regel({}, eigen="Profile 3")
+    chk("ohne Local State Config wie bisher", r["eigen"] == "Profile 3" and ob.profil_erlaubt("Profile 9", r))
+    chk("unbekanntes tv_reader_profil -> Fehler", ob.puls_profil_regel(prof, tabu="Reader X")["fehler"])
+
+    # Start-Profil: Default statt 'zuletzt benutzt'
+    alt = (ob._PROFIL_REGEL, ob._PROFIL_NAMEN)
+    try:
+        ob._PROFIL_REGEL, ob._PROFIL_NAMEN = ob.puls_profil_regel(prof), prof
+        p, f = ob.puls_start_profil({})
+        chk("Start im Default", p == "Default" and not f)
+        chk("Startbefehl traegt Profil", "--profile-directory=Default" in ob.tv_start_befehl("chrome.exe", "", p))
+        ob._PROFIL_REGEL = ob.puls_profil_regel(prof, eigen="Terminal 1", tabu="Terminal 1")
+        p, f = ob.puls_start_profil({})
+        chk("kein Start bei unklarem Profil", p == "" and f)
+        ob._PROFIL_REGEL, ob._PROFIL_NAMEN = ob.puls_profil_regel({}), {}
+        p, f = ob.puls_start_profil({"tv_chrome_profil": ""})
+        chk("ohne Local State Start wie bisher", p == "" and not f)
+        # Fenster-Sperre: gelesene Profile vorgeben (ohne Windows)
+        ob._PROFIL_REGEL, ob._PROFIL_NAMEN = ob.puls_profil_regel(prof), prof
+        ob._FENSTER_PROFIL.update({111: "Profile 1", 222: "Default", 333: ""})
+        chk("Reader-Fenster gesperrt mit Namen", ob._fenster_gesperrt(111) == "Terminal 1 (Profile 1)")
+        chk("Moritz-Fenster frei", ob._fenster_gesperrt(222) == "" and ob._fenster_gesperrt(333) == "")
+    finally:
+        ob._PROFIL_REGEL, ob._PROFIL_NAMEN = alt
+        for h in (111, 222, 333):
+            ob._FENSTER_PROFIL.pop(h, None)
+    if ok:
+        print("✓ Profil-Riegel: Reader-Profil gesperrt, Default/Config-Profil frei, Start immer mit --profile-directory, ein Profil wie bisher")
     return ok
 
 

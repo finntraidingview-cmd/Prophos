@@ -305,6 +305,223 @@ def ist_tradingview_fenster(titel, klasse):
 
 
 # ---------------------------------------------------------------------------
+# CHROME-PROFIL-RIEGEL (26.09.2026) — Puls fasst das Reader-Chrome nie an
+#
+# Finn 26.09.2026 (Moritz' PC pc-usq1i6): "Wenn ich manchmal Trades bei Moritz
+# machen will, geht der Puls-Bot automatisch in dieses extra neue Chrome-Profil,
+# wo nur das Reader-Terminal liegt, will da Orders platzieren und meldet sich
+# deshalb auch an." Dort: Hauptprofil "Moritz" (Orders), zweites Profil
+# "Terminal 1" (nur TradingView 24/7 fuer den Reader). Beleg order_signale:
+# Rundgaenge fanden den Reader-Tab ("MNQ1! … Nicht benannt") zuerst, schlossen
+# ihn (Feed-Ausfall 10:25:14–10:27:51) und meldeten sich darin bei Tradovate an.
+#
+# Warum ueber das PROFIL und nicht ueber Titel oder Prozess: beide Profile
+# laufen im selben chrome.exe (gleiches User-Data-Verzeichnis), Titel wechseln
+# mit Symbol und Sprache, und nach einem Login meldet auch der Reader-Tab
+# rolle 'broker'. Chrome haengt aber an JEDES Fenster die Windows-Eigenschaft
+# AppUserModel_RelaunchCommand mit '--profile-directory=…' (und eine
+# AppUserModelID mit Profil-Endung) — das ist fest, solange das Fenster lebt.
+#
+# Regel: Puls benutzt nur Fenster SEINES Profils (tv_chrome_profil aus der
+# config.json, Verzeichnis ODER Anzeigename; ohne Eintrag das Chrome-Standard-
+# profil 'Default'), und nie ein Profil aus tv_reader_profil. Fenster ohne
+# lesbares Profil (ein einziges Chrome-Profil, andere Browser) bleiben wie
+# bisher erlaubt. Neue TV-Fenster startet er immer mit --profile-directory
+# seines Profils — ohne den Schalter oeffnet Chrome im ZULETZT benutzten
+# Profil, und das war auf Moritz' PC das Reader-Profil.
+# ---------------------------------------------------------------------------
+
+_RX_PROFIL_ARG = re.compile(r'--profile-directory=(?:"([^"]+)"|(\S+))', re.I)
+
+
+def chrome_profil_aus_relaunch(befehl):
+    """'--profile-directory=' aus Chromes Relaunch-Befehl eines Fensters. '' = keins."""
+    m = _RX_PROFIL_ARG.search(str(befehl or ""))
+    return ((m.group(1) or m.group(2) or "").strip().strip('"')) if m else ""
+
+
+def _profil_kurz(s):
+    return re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
+def chrome_profil_aus_appid(appid, verzeichnisse):
+    """AppUserModelID -> Profil-Verzeichnis. Chrome haengt an die ID eines
+    Nicht-Standard-Profils das Verzeichnis ohne Sonderzeichen an
+    ('Chrome.Profile1'); das Standardprofil traegt keine Endung und bleibt
+    hier bewusst unbekannt ('') — gesperrt wird nur, was sicher erkannt ist."""
+    teile = [_profil_kurz(t) for t in str(appid or "").split(".")[1:]]
+    for d in verzeichnisse or ():
+        if d != "Default" and _profil_kurz(d) and _profil_kurz(d) in teile:
+            return d
+    return ""
+
+
+def chrome_profile_lesen(local_state):
+    """{Verzeichnis: Anzeigename} aus Chromes 'Local State' (profile.info_cache)."""
+    try:
+        cache = ((local_state or {}).get("profile") or {}).get("info_cache") or {}
+        return {str(d): str((v or {}).get("name") or d) for d, v in cache.items()}
+    except Exception:
+        return {}
+
+
+def chrome_profil_aufloesen(wert, profile):
+    """Config-Wert (Verzeichnis ODER Anzeigename, Gross/klein egal) -> Verzeichnis.
+    '' = nicht gefunden. Ohne Profilliste gilt der Wert selbst."""
+    w = str(wert or "").strip()
+    if not w:
+        return ""
+    if not profile:
+        return w
+    for d in profile:
+        if w.lower() == d.lower():
+            return d
+    for d, n in profile.items():
+        if w.lower() == str(n).strip().lower():
+            return d
+    return ""
+
+
+def puls_profil_regel(profile, eigen="", tabu=""):
+    """Die Profil-Regel eines PCs -> {eigen, tabu, mehrere, fehler}.
+    eigen = Verzeichnis, in dem Puls arbeitet und startet ('' = unbekannt);
+    tabu = Verzeichnisse, die er nie anfasst; fehler = Grund, warum er keinen
+    Chrome-Start wagen darf."""
+    profile = profile or {}
+    regel = {"eigen": "", "tabu": set(), "mehrere": len(profile) > 1, "fehler": ""}
+    for teil in re.split(r"[,;]", str(tabu or "")):
+        if not teil.strip():
+            continue
+        d = chrome_profil_aufloesen(teil, profile)
+        if d:
+            regel["tabu"].add(d)
+        else:
+            regel["fehler"] = f"tv_reader_profil '{teil.strip()}' ist in Chrome kein Profil."
+    if str(eigen or "").strip():
+        regel["eigen"] = chrome_profil_aufloesen(eigen, profile)
+        if not regel["eigen"]:
+            regel["fehler"] = f"tv_chrome_profil '{str(eigen).strip()}' ist in Chrome kein Profil."
+    elif len(profile) == 1:
+        regel["eigen"] = next(iter(profile))
+    elif "Default" in profile:
+        regel["eigen"] = "Default"
+    elif profile:
+        regel["fehler"] = ("mehrere Chrome-Profile und keins heisst 'Default' — "
+                           "tv_chrome_profil in der config.json setzen.")
+    if regel["eigen"] and regel["eigen"] in regel["tabu"]:
+        regel["fehler"] = (f"Das Puls-Profil '{regel['eigen']}' steht zugleich in tv_reader_profil — "
+                           "Puls arbeitet nie im Reader-Profil.")
+        regel["eigen"] = ""
+    return regel
+
+
+def profil_erlaubt(profil, regel):
+    """Darf Puls ein Fenster dieses Profils benutzen? Unbekanntes Profil = ja
+    (Verhalten wie vor dem Riegel); Tabu-Profil nie; bei mehreren Profilen nur
+    das eigene — und ist das eigene unklar, keins, das sicher erkannt ist."""
+    if not profil or not regel:
+        return True
+    if profil in regel.get("tabu", ()):
+        return False
+    if regel.get("mehrere"):
+        return bool(regel.get("eigen")) and profil == regel["eigen"]
+    return True
+
+
+_PROFIL_REGEL = None
+_PROFIL_NAMEN = {}
+_FENSTER_PROFIL = {}
+
+
+def _puls_cfg_datei():
+    """config.json neben dem Bot (sonst config.vorlage.json) — dieselbe Quelle wie
+    base_config() im Panel. tvorder/tvlesen/tvclose bekommen keine Config mit."""
+    hier = os.path.dirname(os.path.abspath(__file__))
+    for n in ("config.json", "config.vorlage.json"):
+        try:
+            with open(os.path.join(hier, n), "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                return d
+        except Exception:
+            continue
+    return {}
+
+
+def puls_profil_regel_holen(cfg=None):
+    """Regel einmal je Lauf bauen: Local State + Config (Befehl vor Datei)."""
+    global _PROFIL_REGEL, _PROFIL_NAMEN
+    if _PROFIL_REGEL is not None:
+        return _PROFIL_REGEL
+    datei = _puls_cfg_datei()
+    cfg = cfg or {}
+    eigen = str(cfg.get("tv_chrome_profil") or datei.get("tv_chrome_profil") or "").strip()
+    tabu = str(cfg.get("tv_reader_profil") or datei.get("tv_reader_profil") or "").strip()
+    profile = {}
+    try:
+        pfad = os.path.join(os.environ.get("LOCALAPPDATA") or "", "Google", "Chrome", "User Data", "Local State")
+        with open(pfad, "r", encoding="utf-8") as f:
+            profile = chrome_profile_lesen(json.load(f))
+    except Exception:
+        profile = {}
+    _PROFIL_NAMEN = profile
+    _PROFIL_REGEL = puls_profil_regel(profile, eigen, tabu)
+    return _PROFIL_REGEL
+
+
+def _fenster_profil(hwnd):
+    """Chrome-Profil-Verzeichnis eines Fensters aus seinen Windows-Eigenschaften
+    (pywin32, kommt mit pywinauto). '' = nicht lesbar."""
+    try:
+        h = int(hwnd)
+    except Exception:
+        return ""
+    if h in _FENSTER_PROFIL:
+        return _FENSTER_PROFIL[h]
+    profil = ""
+    try:
+        import pywintypes
+        from win32com.propsys import propsys
+        fmt = pywintypes.IID("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}")   # PKEY_AppUserModel_*
+        store = propsys.SHGetPropertyStoreForWindow(h, propsys.IID_IPropertyStore)
+
+        def lies(pid):
+            try:
+                return str(store.GetValue((fmt, pid)).GetValue() or "")
+            except Exception:
+                return ""
+        profil = chrome_profil_aus_relaunch(lies(2))                       # RelaunchCommand
+        if not profil:
+            profil = chrome_profil_aus_appid(lies(5), list(_PROFIL_NAMEN))  # AppUserModelID
+    except Exception:
+        profil = ""
+    _FENSTER_PROFIL[h] = profil
+    return profil
+
+
+def _fenster_gesperrt(hwnd):
+    """'' = Puls darf das Fenster benutzen, sonst die Bezeichnung des fremden Profils."""
+    regel = puls_profil_regel_holen()
+    p = _fenster_profil(hwnd)
+    if profil_erlaubt(p, regel):
+        return ""
+    n = _PROFIL_NAMEN.get(p) or p
+    return n if n == p else f"{n} ({p})"
+
+
+def puls_start_profil(cfg=None):
+    """(Verzeichnis fuer --profile-directory, fehler). Ohne Profilliste (kein
+    Local State lesbar) der Config-Wert wie bisher."""
+    regel = puls_profil_regel_holen(cfg)
+    if regel.get("eigen"):
+        return regel["eigen"], ""
+    if regel.get("fehler") or regel.get("mehrere"):
+        return "", (regel.get("fehler") or "Puls-Profil unklar") + \
+            " Chrome wird nicht gestartet (sonst oeffnet es im zuletzt benutzten Profil — womoeglich dem Reader-Profil)."
+    return str((cfg or {}).get("tv_chrome_profil") or "").strip(), ""
+
+
+# ---------------------------------------------------------------------------
 # ORBIT-PULS (30.08.2026) — rein rechnender Teil, ohne Windows testbar
 #
 # Der Puls klickt auf TradingView mit ECHTER Maus. Das Userscript (tv-reader
@@ -1090,6 +1307,8 @@ def modus_tvfokus():
                 if not ist_tradingview_fenster(w.window_text(),
                                                w.element_info.class_name):
                     continue
+                if _fenster_gesperrt(w.handle):
+                    continue      # Reader-/Fremdprofil (Profil-Riegel 26.09.2026)
                 titel = (w.window_text() or "").strip()
                 if w.is_minimized():
                     w.restore()
@@ -1339,6 +1558,7 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
     kandidaten = []
     fenster_namen = []
     tab_namen = []
+    gesperrt = []
     for w in Desktop(backend="uia").windows():
         try:
             titel = w.window_text() or ""
@@ -1346,6 +1566,13 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
         except Exception:
             continue
         if (klasse or "") not in BROWSER_KLASSEN:
+            continue
+        # Profil-Riegel (26.09.2026): Fenster des Reader-/Fremdprofils nie anfassen —
+        # weder als aktiver Tab noch ueber die Tableiste.
+        fremd = _fenster_gesperrt(w.handle)
+        if fremd:
+            if len(gesperrt) < 4:
+                gesperrt.append(f"{fremd}: {(titel or '?')[:40]}")
             continue
         if len(fenster_namen) < 8:
             fenster_namen.append((titel or "?")[:60])
@@ -1391,7 +1618,8 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
     trail.append(f"Suchbegriff '{begriff or '-'}' / Symbol-Wurzel "
                  f"'{tv_symbol_root(symbol) or '-'}'"
                  f" · Browser-Fenster: {fenster_namen or 'keine'}"
-                 f" · Tabs: {tab_namen or 'keine gelesen'}")
+                 f" · Tabs: {tab_namen or 'keine gelesen'}"
+                 + (f" · gesperrt (Profil-Riegel): {gesperrt}" if gesperrt else ""))
     return None, ("Kein Browser-Fenster mit TradingView gefunden. Gesucht wurde nach "
                   f"'{begriff or 'tradingview'}' bzw. der Symbol-Wurzel "
                   f"'{tv_symbol_root(symbol) or '-'}'. Gesehen: "
@@ -1540,6 +1768,7 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     das Userscript laeuft nur auf tradingview.com, ein frischer Stand heisst
     also 'Seite geladen UND Reader lebt' — mehr, als der Fenstertitel sagt."""
     cfg = cfg or {}
+    puls_profil_regel_holen(cfg)      # Profil-Riegel (26.09.2026) mit der Config dieses Laufs
     bf0 = _tv_http("/bedienfeld", timeout=1.5) or {}
     begriff = tv_tab_suchbegriff(bf0.get("titel")) if bf0.get("ok") else ""
     w, _ = _tv_fenster_holen(trail, begriff, "")
@@ -1555,7 +1784,10 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     # TradingView gleich mit der Direkt-Adresse — dann steht der Connect-Dialog
     # sofort da (Finn: "genau wie wenn man normalerweise am Anfang startet,
     # mit dem Link"). Laeuft durch denselben Domain-Riegel wie tv_url.
-    befehl = tv_start_befehl(chrome, start_url or cfg.get("tv_url"), cfg.get("tv_chrome_profil"))
+    profil, p_fehler = puls_start_profil(cfg)
+    if p_fehler:
+        return False, "TradingView ist im Puls-Profil nicht offen. " + p_fehler, False
+    befehl = tv_start_befehl(chrome, start_url or cfg.get("tv_url"), profil)
     import subprocess
     # Losgeloest starten: das Panel wartet mit capture_output auf diesen Bot —
     # ein Kind, das dessen Pipes erbt, liesse den Aufruf haengen, bis Chrome
@@ -2613,7 +2845,9 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
         ende_v = time.time() + 2.5
         while True:
             h_v, t_v, k_v = vorne()
-            if h_v == int(w.handle) or tv_tab_schliessbar(t_v, k_v, begriff):
+            # Profil-Riegel (26.09.2026): Strg+W geht ans Vordergrund-Fenster — steht dort das
+            # Reader-Chrome, schliesst es den Feed-Tab (Feed-Ausfall 10:25 auf pc-usq1i6).
+            if h_v == int(w.handle) or (tv_tab_schliessbar(t_v, k_v, begriff) and not _fenster_gesperrt(h_v)):
                 break
             if time.time() >= ende_v:
                 return False, (f"TradingView-Fenster steht nicht im Vordergrund (vorn: '{t_v[:60] or '?'}') — "
@@ -2632,6 +2866,11 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     chrome = _chrome_pfad((cfg or {}).get("tv_browser_path"))
     if not chrome:
         return False, "chrome.exe nicht gefunden (tv_browser_path in der config.json setzen) — Tab bleibt offen."
+    profil, p_fehler = puls_start_profil(cfg)
+    if p_fehler:
+        return False, p_fehler + " Tab bleibt offen."
+    if _fenster_gesperrt(w.handle):
+        return False, "Das Fenster gehoert zum Reader-Profil — es wird nichts geschlossen."
     try:
         keyboard.send_keys("^w")
     except Exception as e:
@@ -2652,8 +2891,7 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
             _warte(0.4, 0.2)
             break
     _warte(0.3, 0.2)
-    befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")),
-                             (cfg or {}).get("tv_chrome_profil"))
+    befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")), profil)
     flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     try:
@@ -2903,6 +3141,8 @@ def _tv_browser_fenster():
         try:
             klasse = w.element_info.class_name or ""
             if klasse in BROWSER_KLASSEN or klasse.startswith("Chrome_WidgetWin"):
+                if _fenster_gesperrt(w.handle):
+                    continue      # Profil-Riegel 26.09.2026: kein Login/Autofill im Reader-Profil
                 out.append((w.handle, w.window_text() or "", w))
         except Exception:
             continue
