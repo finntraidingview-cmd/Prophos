@@ -1876,6 +1876,20 @@
   #dashboard-view .mwd-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:8px;font-size:11px;color:var(--sub-2)}
   #dashboard-view .mwd-fuss-chip{margin-left:auto}
   /* Erledigt-Popup (25.09.2026): Kopfzeile wie die Karte, zwei Felder auf einer Linie, Ergebniszeile — kompakt */
+  /* Läuft gerade (26.09.2026): eine Zeile je laufendem Winning Day, Spalten wie eine kleine Tabelle, Handy bricht in zwei Zeilen */
+  #dashboard-view .mwj-kopf{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:14px;font-weight:700;color:var(--ink)}
+  #dashboard-view .mwj-kopf span{font-weight:400;font-size:12px;color:var(--sub)}
+  #dashboard-view .mwj-liste{display:grid;gap:4px;margin-top:8px}
+  #dashboard-view .mwj-zeile{display:grid;grid-template-columns:minmax(0,1.6fr) 58px repeat(4,minmax(0,1fr));align-items:center;gap:8px;padding:7px 10px 7px 12px;border:1px solid var(--border-soft);border-left:4px solid var(--mwd-farbe,#667085);border-radius:8px;background:var(--surface);font:inherit;font-size:12.5px;color:inherit;cursor:pointer;text-align:left;width:100%}
+  #dashboard-view .mwj-zeile:hover{border-color:#d1d5db}
+  #dashboard-view .mwj-zeile.is-aktiv{box-shadow:0 0 0 2px var(--mwd-farbe,#667085)}
+  #dashboard-view .mwj-wer{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dashboard-view .mwj-wer b{color:var(--ink)}
+  #dashboard-view .mwj-wer small{color:var(--sub);margin-left:6px}
+  #dashboard-view .mwj-zelle{min-width:0;font-family:var(--mono);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .mwj-zelle small{display:block;font-family:inherit;font-weight:400;font-size:10.5px;color:var(--sub-2)}
+  #dashboard-view .mwj-naechste{margin-top:8px;font-size:12px;color:var(--sub)}
+  @media (max-width:820px){ #dashboard-view .mwj-zeile{grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr);row-gap:4px} }
   #dashboard-view .mwd-leer{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);font-size:12.5px;color:var(--sub)}
   #dashboard-view .mwd-nachtrag{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--sub)}
   #dashboard-view .mwd-nachtrag-btn{padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11.5px;font-weight:600;cursor:pointer}
@@ -7645,6 +7659,10 @@
            Chart, sodass ich die Orders als Demo nachstellen kann"): Kurs + Minutenkerzen aus dem TradingView-Reader
            (tv_kurse / tv_kurs_1m), Demo-Orders gegen den Feed (demo_orders). Verdrahtung im Modul (Sektion
            MARKT LIVE), eigene IDs mkl-*. Die Yahoo-Karten darunter bleiben als verzögerter Vergleich. -->
+      <!-- LÄUFT GERADE (26.09.2026, Finn: „dass ich bei Winning Days auch eine Übersicht habe, welche Winning Days gerade ablaufen"):
+           kompakte Zeilen je laufendem Winning Day ganz oben, Daten = dieselben Pläne wie der Block unten (mkl.wd.plaene, kein eigener
+           Abruf), Klick = mkl.wd.aktiv (Linien im Chart) + Sprung zur großen Karte. Gezeichnet in mklWdRender (mklWdJetztRender). -->
+      <div class="card" id="mkl-wd-jetzt" style="padding:12px 16px;margin-bottom:14px;display:none"></div>
       <div class="card" id="mkl-wrap" style="padding:14px 16px;margin-bottom:14px">
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px">
           <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
@@ -21329,6 +21347,7 @@
     const alter = t => { if(!t) return ''; const sek = Math.round((Date.now() - (Date.parse(t) || 0)) / 1000); return sek < 90 ? `vor ${sek} s` : sek < 5400 ? `vor ${Math.round(sek / 60)} min` : `vor ${(sek / 3600).toFixed(1)} h` }
     const dauer = (von, bis) => { const a = Date.parse(von || '') || 0; if(!a) return ''; const m = Math.max(0, Math.round(((bis ? (Date.parse(bis) || Date.now()) : Date.now()) - a) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
     const grundTxt = g => ({ close: 'Schließen', rundgang: 'Rundgang', auto_close: 'Auto-Close', erledigt: 'Erledigt', tp: 'TP', sl: 'SL', hand: 'von Hand', master_ende: 'Master beendet' })[String(g || '')] || (g ? String(g) : '')
+    const jetzt = []   // Läuft gerade (26.09.2026): je laufendem Plan die Werte der großen Karte, oben kompakt
     const karten = pl.map(pw => {
       const farbe = mklWdFarbe(pw), offen = pw.status === 'open', geplant = pw.status === 'planned', zu = !offen && !geplant
       const buy = pw.richtung === 'buy', sell = pw.richtung === 'sell'
@@ -21392,6 +21411,10 @@
         : h.status === 'fehler' ? 'nicht geöffnet — Grund unten' : h.status === 'unklar' ? 'unklar — im Hedge-Terminal prüfen' : h.status === 'oeffnet' ? 'öffnet…'
         : `${fLive != null ? 'live' : (h.status === 'schliesst' ? 'schließt…' : h.status === 'offen' ? 'offen · P&L folgt' : h.status)} · ${escapeHtml(String(h.richtung || '').toUpperCase())} ${f2(h.lots)} Lot${sb ? ` · schließt bei NQ ${f2(sb)} (Feed)` : ''}${num(h.sl) != null ? ` · Notfall-SL im Terminal ${f2(h.sl)}` : ''}`
       const zusammen = (mWert != null && fWert != null) ? mWert * fx + fWert : null
+      if(offen){
+        const dTpJ = (kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null
+        jetzt.push({ id: String(pw.id), farbe, aktiv, person: pw.person, konto, buy, sell, kt, root, seit: pw.started_at, mWert, mLive: mLive != null, fWert, fLive: fLive != null, hStatus: h ? h.status : null, hedgeEur: num(pw.hedge_eur), dTp: dTpJ })
+      }
       const boxen = `<div class="mwd-pl">
           <div class="mwd-box"><div class="mwd-box-t">Master</div><div class="mwd-box-v" style="color:${col(mWert)}">${sig(mWert, '$', 2)}</div><div class="mwd-box-s">${mSub}</div></div>
           <div class="mwd-box"><div class="mwd-box-t">Fusion</div><div class="mwd-box-v" style="color:${col(fWert)}">${fWert == null ? '–' : sig(fWert, '€', 2)}</div><div class="mwd-box-s">${fSub}</div></div>
@@ -21429,6 +21452,36 @@
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     mklWdAbhakenVerdrahten(el)
+    mklWdJetztRender(jetzt, pl, { sig, col, uhr, dauer, f0, kp })
+  }
+  /* Läuft gerade (26.09.2026, Finn: „eine Übersicht darüber, welche Winning Days gerade ablaufen"): oben über dem Chart je laufendem
+   * Winning Day eine Zeile — Person · Konto · Richtung · seit · Master $ · Fusion € · Abstand zum TP. Werte = exakt die der großen Karte
+   * (in mklWdRender gesammelt), kein eigener Abruf. Darunter die nächsten geplanten Starts. Klick: mkl.wd.aktiv wie die Karte + Sprung. */
+  function mklWdJetztRender(jetzt, pl, h){
+    const el = $mkl('mkl-wd-jetzt'); if(!el) return
+    if(!(mkl.wd.plaene || []).length && !mkl.wd.at){ el.style.display = 'none'; return }
+    el.style.display = ''
+    const geplant = pl.filter(x => x.status === 'planned')
+    const fSumme = jetzt.reduce((a, j) => a + (j.fWert || 0), 0), mSumme = jetzt.reduce((a, j) => a + (j.mWert || 0), 0)
+    const kopf = `<div class="mwj-kopf">Läuft gerade <span>${jetzt.length ? `${jetzt.length} Winning Day${jetzt.length === 1 ? '' : 's'} · Master ${h.sig(mSumme, '$', 0)} · Fusion ${h.sig(fSumme, '€', 0)}` : 'nichts offen'}${geplant.length ? ` · ${geplant.length} geplant` : ''}${h.kp == null && jetzt.length ? ' · kein frischer Kurs' : ''}</span></div>`
+    const zeilen = jetzt.map(j => {
+      const k = j.konto || {}
+      const fTxt = j.fWert != null ? h.sig(j.fWert, '€', 0) : '–'
+      const fSub = j.fWert != null ? (j.fLive ? 'Fusion live' : 'Fusion') : j.hStatus ? `Fusion ${j.hStatus}` : (j.hedgeEur > 0 ? 'Fusion noch zu' : 'ohne Hedge')
+      const tpTxt = j.dTp == null ? '–' : j.dTp < 0 ? 'erreicht' : `${h.f0(j.dTp)} Pkt`
+      return `<button type="button" class="mwj-zeile${j.aktiv ? ' is-aktiv' : ''}" data-mwj="${escapeHtml(j.id)}" style="--mwd-farbe:${j.farbe}" title="Klick hebt die Linien im Chart hervor und springt zur Karte">
+          <span class="mwj-wer"><b>${escapeHtml(String(j.person || '?'))}</b><small>${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ' …' + escapeHtml(String(k.kontonr_ende)) : ''} · ${j.kt != null ? h.f0(j.kt) : '?'} × ${escapeHtml(j.root || '?')}</small></span>
+          <span class="mwd-chip ${j.buy ? 'mwd-buy' : j.sell ? 'mwd-sell' : ''}">${j.buy ? 'BUY' : j.sell ? 'SELL' : '?'}</span>
+          <span class="mwj-zelle">${h.uhr(j.seit)}<small>${h.dauer(j.seit) || 'seit'}</small></span>
+          <span class="mwj-zelle" style="color:${h.col(j.mWert)}">${h.sig(j.mWert, '$', 0)}<small>${j.mLive ? 'Master live' : 'Master'}</small></span>
+          <span class="mwj-zelle" style="color:${h.col(j.fWert)}">${fTxt}<small>${escapeHtml(fSub)}</small></span>
+          <span class="mwj-zelle">${tpTxt}<small>bis TP</small></span>
+        </button>`
+    })
+    const leer = jetzt.length ? '' : `<div class="mwd-leer">Gerade läuft kein Winning Day</div>`
+    const nx = geplant.slice(0, 4).map(x => `${x.start_um ? h.uhr(x.start_um) : 'von Hand'} ${escapeHtml(String(x.person || '?'))}`)
+    const naechste = geplant.length ? `<div class="mwj-naechste">Als Nächstes: ${nx.join(' · ')}${geplant.length > 4 ? ` · +${geplant.length - 4}` : ''}</div>` : ''
+    el.innerHTML = kopf + leer + `<div class="mwj-liste">${zeilen.join('')}</div>` + naechste
   }
   /* ZUM ABHAKEN (25.09.2026, Finn: „Wenn Winning Days erledigt werden, wie die bei Jacob heute Nacht, werden sie nur bei Jacobs ID
    * unter ‚Erledigt' angezeigt. Ich will, dass sie auch unter Winning Days unten als alle erledigten Winning Days angezeigt werden,
@@ -21937,6 +21990,14 @@
     const id = z.getAttribute('data-mkl-wd')
     mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
     mklWdRender(); mklChartZeichnen()
+  })
+  // Läuft gerade (26.09.2026): Klick = derselbe Umschalter mkl.wd.aktiv wie die Karte, dann zur großen Karte scrollen
+  $mkl('mkl-wd-jetzt')?.addEventListener('click', ev => {
+    const z = ev.target.closest && ev.target.closest('[data-mwj]'); if(!z) return
+    const id = z.getAttribute('data-mwj')
+    mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
+    mklWdRender(); mklChartZeichnen()
+    if(mkl.wd.aktiv){ try{ const karte = [...document.querySelectorAll('#mkl-wd [data-mkl-wd]')].find(x => x.getAttribute('data-mkl-wd') === id); if(karte) karte.scrollIntoView({ behavior: 'smooth', block: 'center' }) }catch(_){} }
   })
   // Stub für die Optik ohne Login: window._mklWdStub([...Pläne wie im Vertrag])
   window._mklWdStub = pl => { mkl.wd.plaene = pl || []; mkl.wd.tag = 'Stub'; mkl.wd.fehler = ''; mklWdRender(); mklChartZeichnen() }
@@ -32845,7 +32906,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.620'
+  const OS_TAB_BUILD = '2026-09-22.621'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
