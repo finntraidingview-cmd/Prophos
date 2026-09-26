@@ -19273,7 +19273,7 @@
                hinweis: `aus der Balance (TradingView): ${be.toLocaleString('de-DE', { minimumFractionDigits: 2 })} − ${bs.toLocaleString('de-DE', { minimumFractionDigits: 2 })}` }
     if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)){
       // Ende aus dem Hedge-Level (25.09.2026, hedgePlanAufReview): vorläufiger Master-P&L = ±TP/SL in $, gekennzeichnet
-      if(fin && fin.quelle === 'level' && typeof fin.master_pl_schaetzung === 'number' && isFinite(fin.master_pl_schaetzung))
+      if(fin && (fin.quelle === 'level' || fin.quelle === 'demo') && typeof fin.master_pl_schaetzung === 'number' && isFinite(fin.master_pl_schaetzung))
         return { slavePnl: null, slaveCcy: '', masterPnl: fin.master_pl_schaetzung, masterCcy: '$', hinweis: 'geschätzt aus TP/SL-Level — Today\'s P&L nicht gelesen' }
       return null
     }
@@ -19955,7 +19955,7 @@
       const pEnde = Date.parse((f && f.at) || p.endedAt || '') || 0
       if(!pEnde || pEnde >= endeMs) continue
       if(((f && f.datum) || tvV2Handelstag(pEnde)) !== tag) continue
-      const geschaetzt = f && f.quelle === 'level' && typeof f.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - f.master_pl_schaetzung) < 0.005
+      const geschaetzt = f && (f.quelle === 'level' || f.quelle === 'demo') && typeof f.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - f.master_pl_schaetzung) < 0.005
       if(p.masterPl == null || !isFinite(Number(p.masterPl)) || geschaetzt){ fehlt++; continue }
       anzahl++; summe += Number(p.masterPl)
     }
@@ -20240,6 +20240,53 @@
     setTimeout(tvV2EndlesungTakt, 60000 + Math.random() * 40000)
   }
   setTimeout(tvV2EndlesungTakt, 30000 + Math.random() * 20000)
+  /* DEMO-ENDE (27.09.2026, F21, Finn: „Wenn der Trade auf diesem Markt als erledigt ist, springt er unter den Live Trades auf Überprüfen.
+   * Warte auf Puls."). Der PC-Tab des Plans (MT5_LOCAL, tvV2EndlesungPcPasst) fragt alle ~60 s /admin/live-trades (Login reicht) und
+   * prüft seine offenen Orbit-V2-Pläne OHNE Hedge (WD mit Hedge haben eigene Wege: hedgePlanAufReview) gegen die Demo desselben
+   * Rechenwegs: 'tp'/'liquidiert' → Ende mit Schätzung demo.pl_usd, 'beide_in_minute' → Ende ohne Schätzung. final.at = demo.at, damit
+   * die zufällige Nachlese-Zeit ab dem echten Treffer zählt. Ein Versuch je Plan und 60 s, ein Tab je Plan (mt5_baseline_sperre).
+   * Der stündliche Rundgang bleibt Rückfall; ohne Reader-Kurs (ohne_kurs) passiert nichts. */
+  const _demoEndeVersucht = new Map()
+  async function tvV2DemoEndeTakt(){
+    try{ await tvV2DemoEndePruefen() }catch(e){ console.warn('[demo-ende] Takt', e) }
+    finally{ setTimeout(tvV2DemoEndeTakt, 55000 + Math.random() * 15000) }
+  }
+  async function tvV2DemoEndePruefen(){
+    try{
+      if(!MT5_LOCAL || !currentUserId) return
+      let _tp = []; try{ _tp = tradePlans }catch(_){}
+      const offen = (_tp || []).filter(p => p && p.route === 'tvv2' && p.status === 'open' && !(p.mt5Baseline && p.mt5Baseline.hedge) && tvV2EndlesungPcPasst(p))
+      if(!offen.length) return
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok) return
+      const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 20000)
+      const r = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=1&nur_eigene=1&status=open`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+      const d = r.ok ? await r.json().catch(() => null) : null
+      for(const t of ((d && d.trades) || [])){
+        const pid = String(t.id || t.plan_id || ''), dm = t.demo || {}
+        if(!['tp', 'liquidiert', 'beide_in_minute'].includes(dm.status)) continue
+        const p = offen.find(x => String(x.id) === pid); if(!p) continue
+        const alt = _demoEndeVersucht.get(pid); if(alt && Date.now() - alt < 60000) continue
+        _demoEndeVersucht.set(pid, Date.now())
+        if(!(await hedgeSperre(pid, 'demo_ende', 30))) continue
+        let frisch = p
+        try{ const { data } = await supabase.from('trade_plans').select('*').eq('id', pid).maybeSingle(); if(data) frisch = rowToPlan(data) }catch(_){}
+        if(frisch.status !== 'open' || (frisch.mt5Baseline && frisch.mt5Baseline.hedge)) continue
+        const beide = dm.status === 'beide_in_minute'
+        const extra = { grund: dm.status === 'tp' ? 'demo_tp' : dm.status === 'liquidiert' ? 'demo_liq' : 'demo_beide', at: dm.at || new Date().toISOString(),
+                        preis: dm.preis != null ? Number(dm.preis) : null, master_pl_schaetzung: (!beide && dm.pl_usd != null && isFinite(Number(dm.pl_usd))) ? Number(dm.pl_usd) : null,
+                        ...(beide ? { hinweis: 'TP und Liquidation in derselben Minute — Reihenfolge unbekannt, keine Schätzung' } : {}) }
+        let ok = false
+        try{ ok = await tvV2EndeSetzen(frisch, null, 'demo', extra) }catch(e){ console.warn('[demo-ende]', e) }
+        if(!ok) continue
+        try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[demo-ende] Überprüfen', e) }
+        // Trade-Ende = Demo-Treffer (atMoveToReview stempelt „jetzt") — Live Trades rechnet die Nachlese-Zeit ab ended_at
+        try{ await supabase.from('trade_plans').update({ ended_at: extra.at }).eq('id', pid).eq('status', 'review'); const pf = tradePlans.find(x => String(x.id) === pid); if(pf) pf.endedAt = extra.at }catch(_){}
+        if(typeof atToast === 'function') atToast(`✓ ${frisch.masterName || 'Plan'}: Demo ${dm.status === 'tp' ? 'TP' : dm.status === 'liquidiert' ? 'Liquidation' : 'TP + Liquidation'} erreicht → Überprüfen · Warte auf Puls`, 'end')
+      }
+    }catch(e){ console.warn('[demo-ende]', e) }
+  }
+  setTimeout(tvV2DemoEndeTakt, 40000 + Math.random() * 20000)
+  window._tvV2DemoEndePruefen = tvV2DemoEndePruefen   // Test-Haken: ein Durchlauf ohne neuen Takt
   async function hedgePlNachholen(plan){
     const h = plan.mt5Baseline.hedge, pid = String(plan.id)
     if(h.pl_nachfrage_at && Date.now() - (Date.parse(h.pl_nachfrage_at) || 0) < 30000) return   // höchstens alle 30 s fragen
@@ -21808,7 +21855,7 @@
    * Drei Stellen, je eigener Handler: Karte (data-plan-lesen), Zum Abhaken (data-mwd-lesen), Trade-Popup (#tc-lesung). */
   const _elBusy = new Set()
   // REIN RECHNEND (window._endlesungStatus): Stand einer Endlesung → {art, text, tip, bisMs, knopf} oder null (nichts zu zeigen)
-  function endlesungStatus(fin, planStatus, jetzt){
+  function endlesungStatus(fin, planStatus, jetzt, pid){
     if(!fin || typeof fin !== 'object') return null
     jetzt = jetzt == null ? Date.now() : jetzt
     const cfg = window._tvV2Endlesung || {}
@@ -21829,8 +21876,17 @@
       const puls = fin.quelle === 'puls'
       return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (${puls ? 'TradingView' : 'beim Ende'})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     }
+    // Balance nach dem Trade gelesen (seit .625 statt Today's P&L; F21 27.09.2026) — P&L exakt setzt endlesungZeileHtml mit der Start-Balance
+    if(typeof fin.balance_end === 'number' && isFinite(fin.balance_end))
+      return { art: 'gelesen', text: `gelesen ${uhr(fin.puls_at || fin.at)} (Balance ${n2(fin.balance_end)} $${fin.balance_quelle === 'folgetrade' ? ', aus dem Folgetrade' : ''})${exText}`, tip: tip.join('\n'), bisMs: null, knopf: false }
     if(planStatus !== 'review') return null
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    // Warte auf Puls (F21, Finn 27.09.2026: „Warte auf Puls. Wird so und so viele Minuten später abgecheckt, je nach Zufall"): vor dem
+    // ersten Versuch bis zur zufälligen Nachlese-Zeit (tvV2NachleseAb ab final.at — beim Demo-Ende = Demo-Zeitpunkt)
+    if(!versuche && pid && fin.at && typeof tvV2NachleseAb === 'function'){
+      const ab = tvV2NachleseAb(pid, fin.at)
+      if(ab > jetzt) return { art: 'laeuft', text: `Warte auf Puls · Nachlesung ab ${uhr(ab)} (in ${Math.max(1, Math.ceil((ab - jetzt) / 60000))} min)`, tip: tip.join('\n'), bisMs: null, knopf: true }
+    }
     if(fin.puls_aufgegeben || versuche >= max){
       return { art: 'aufgegeben', text: 'Lesung aufgegeben — ' + (fin.puls_fehler ? String(fin.puls_fehler) : 'ohne Grund'), tip: tip.join('\n'), bisMs: null, knopf: true }
     }
@@ -21847,8 +21903,11 @@
   // HTML der Zeile; attr = Datenattribut des Knopfs der jeweiligen Stelle (eigener Handler je Stelle). plan (nur eigene Pläne):
   // hilft „Jetzt lesen" nicht (window._tvV2Endlesung.grund mit force ≠ ''), ist der Knopf grau und nennt den Grund im Tooltip
   function endlesungZeileHtml(pid, fin, planStatus, attr, plan){
-    const st = endlesungStatus(fin, planStatus)
+    const st = endlesungStatus(fin, planStatus, null, pid)
     if(!st) return ''
+    // P&L exakt aus Balance nachher − vorher, wenn die Start-Balance am eigenen Plan steht (F21)
+    try{ const bs = plan && plan.mt5Baseline && plan.mt5Baseline.tv && plan.mt5Baseline.tv.balance_start
+         if(st.art === 'gelesen' && typeof fin.balance_end === 'number' && typeof bs === 'number'){ const d = Math.round((fin.balance_end - bs) * 100) / 100; st.text = `P&L exakt ${d >= 0 ? '+' : '−'}${Math.abs(d).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ · ` + st.text } }catch(_){}
     const busy = _elBusy.has(String(pid))
     let sperre = ''
     try{ const g = window._tvV2Endlesung && window._tvV2Endlesung.grund; if(plan && typeof g === 'function') sperre = String(g(plan, Date.now(), true) || '') }catch(_){}
@@ -22433,7 +22492,7 @@
         // B5 (Backend .636): Trade zu, ohne dass TP oder Liquidation im Kurs lag
         : d.status === 'beendet_ohne_treffer' ? `<span class="wdl-demo">Demo: weder TP noch Liquidation bis zum Ende ${uhr(d.at || t.ended_at)} · ${f0(d.minuten)} Minuten Kurs</span>` : ''
       const nachAb = (!offen && !gepl && num(t.balance_end) == null && t.ended_at && typeof tvV2NachleseMs === 'function') ? tvV2NachleseAb(t.id, t.ended_at) : 0
-      const endSub = num(t.balance_end) != null ? 'nach der Nachlesung' : offen ? 'nach dem Trade' : gepl ? '–' : (nachAb > Date.now() ? `Nachlesung ab ${uhr(nachAb)}` : 'Nachlesung ausstehend')
+      const endSub = num(t.balance_end) != null ? 'nach der Nachlesung' : offen ? 'nach dem Trade' : gepl ? '–' : (nachAb > Date.now() ? `Warte auf Puls · Nachlesung ab ${uhr(nachAb)} (in ${Math.max(1, Math.ceil((nachAb - Date.now()) / 60000))} min)` : 'wird gelesen')
       const an = wdlLinienAn(t)
       return `<div class="mwd-card ${offen ? 'mwd-open' : gepl ? 'mwd-planned' : 'mwd-done'}" style="--mwd-farbe:${farbe}" data-wdl-trade="${escapeHtml(wdlTid(t))}" title="klicken: Linien im Chart ${an ? 'ausblenden' : 'einblenden'}">
         <div class="mwd-kopf">
@@ -33790,7 +33849,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.660'
+  const OS_TAB_BUILD = '2026-09-22.661'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35083,7 +35142,7 @@
     if(!neuB){ if(typeof loadTradePlansFromSupabase === 'function') loadTradePlansFromSupabase(); return false }
     const fresh = tradePlans.find(x => String(x.id) === String(plan.id)) || Object.assign({}, plan, { mt5Baseline: neuB })
     try{ tvV2Poll.wasOpen.delete(String(plan.id)); tvV2Poll.streak.delete(String(plan.id)) }catch(_){}
-    if(fin.today_pnl == null && fin.quelle !== 'level' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
+    if(fin.today_pnl == null && fin.quelle !== 'level' && fin.quelle !== 'demo' && typeof atToast === 'function') atToast(`⚠ Orbit V2: geschlossen, aber kein Today's P&L gelesen — Puls liest nach (${plan.masterName || '—'})`, 'end')
     if(typeof atShowEndPrompt === 'function') atShowEndPrompt(fresh)
     // JEDES Ende ohne Zahl (Level, Master weg laut Reader, Schließen/Auto-Close ohne Today's P&L) → Puls-Endlesung (25.09.2026)
     if(fin.today_pnl == null && typeof tvV2EndlesungAnstossen === 'function') tvV2EndlesungAnstossen(plan.id)
@@ -40868,7 +40927,7 @@
     // (atMoveToReview), bei „Bearbeiten" die gespeicherte Quelle; der Auto-Nachlader (apply) überschreibt.
     // Schätzung aus dem Hedge-Level (25.09.2026) ist keine Quelle im Sinne von pl_quelle → null (nicht anfassen)
     const _tcFin = (p.route === 'tvv2' && p.mt5Baseline && p.mt5Baseline.final) || null
-    const _tcSchaetzung = !!(_tcFin && _tcFin.quelle === 'level' && typeof _tcFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _tcFin.master_pl_schaetzung) < 0.005)
+    const _tcSchaetzung = !!(_tcFin && (_tcFin.quelle === 'level' || _tcFin.quelle === 'demo') && typeof _tcFin.master_pl_schaetzung === 'number' && p.masterPl != null && Math.abs(Number(p.masterPl) - _tcFin.master_pl_schaetzung) < 0.005)
     _tcAuto = (p.masterPl != null && p.status === 'review') ? { wert: Number(p.masterPl), quelle: _tcSchaetzung ? null : plQuelleFuerRoute(p.route) }
             : (p.masterPl != null && p.status === 'completed') ? { wert: Number(p.masterPl), quelle: p.plQuelle || null }
             : null
@@ -40893,7 +40952,7 @@
       const msgEl = document.getElementById('tradeCompleteMsg')
       if(msgEl){
         msgEl.textContent = '✨ P&L automatisch erfasst — bitte prüfen & bestätigen'
-          + (_tcSchaetzung ? ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)' : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
+          + (_tcSchaetzung ? (_tcFin.quelle === 'demo' ? ' · Master-P&L geschätzt aus der Demo (TP/Liquidation) — Puls liest die Balance nach' : ' · Master-P&L geschätzt aus TP/SL-Level (Today\'s P&L nicht gelesen)') : (_tcFin && _tcFin.quelle === 'puls') ? ' · Master-P&L aus TradingView gelesen' : '')
         msgEl.className = 'modal-msg ok'
       }
     }
@@ -40904,7 +40963,7 @@
       if(p.route === 'tvv2' && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
         const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt), hEl = document.getElementById('tc-nachlese-hint')
         if(ab && hEl){
-          hEl.textContent = ab > Date.now() ? `Balance-Nachlesung ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — P&L wird dann exakt nachgetragen` : 'Balance-Nachlesung läuft — P&L wird dann exakt nachgetragen'
+          hEl.textContent = (fin.hinweis ? fin.hinweis + ' · ' : '') + (ab > Date.now() ? `Balance-Nachlesung ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — P&L wird dann exakt nachgetragen` : 'Balance-Nachlesung läuft — P&L wird dann exakt nachgetragen')   // hinweis: Demo TP+Liq in einer Minute (F21)
           hEl.hidden = false
         }
       } else { const hEl = document.getElementById('tc-nachlese-hint'); if(hEl) hEl.hidden = true } }
