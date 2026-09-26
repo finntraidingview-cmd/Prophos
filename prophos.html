@@ -8231,7 +8231,8 @@
                   <div class="wd-feld"><label>Kontrakte (Standard)</label><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" title="gilt, wenn die Firma keine eigene Spanne hat"></div>
                 </div>
                 <div class="wd-felder">
-                  <div class="wd-feld"><label>Pause zwischen Blöcken <small>· Zufall je Block</small></label><div class="wd-spanne"><input type="number" class="input mono" id="wd-pause-min" min="0" step="5" value="15"><span>bis</span><input type="number" class="input mono" id="wd-pause-max" min="0" step="5" value="60"><span>min</span></div></div>
+                  <!-- Takt fest 35 min + 0–5 min Zufall (26.09.2026, Finn) — ersetzt „Pause zwischen Blöcken" (pause_min/max wirken nicht mehr) -->
+                  <div class="wd-feld"><label>Takt je Block <small>· fest</small></label><div class="kf mono" style="padding:7px 0;font-size:13px;color:var(--text)" title="ein Block belegt 35 min, der nächste startet 35–40 min später; braucht ein Block für seine Konten länger, gilt das">35–40 min</div></div>
                   <div class="wd-feld"><label>Abstand zwischen Konten <small>· Zufall je Konto</small></label><div class="wd-spanne"><input type="number" class="input mono" id="wd-abst-min" min="0" step="1" value="2"><span>bis</span><input type="number" class="input mono" id="wd-abst-max" min="0" step="1" value="4"><span>min</span></div></div>
                 </div>
               </div>
@@ -33133,7 +33134,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.627'
+  const OS_TAB_BUILD = '2026-09-22.628'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37917,7 +37918,13 @@
     return tag
   }
   const wdAktiv = k => k && k.aktiv !== false
-  const wdDauerMs = (x, r) => Math.max(1, (x.konten || []).filter(wdAktiv).length) * (Math.max(1, +((r || {}).abstand_max) || 4) + 2) * 60000
+  // Fester Takt (26.09.2026, Finn über das Backend-Terminal, Zeitstrahl Chris 02:07 / EzPoker 03:04 / Jacob 04:02: „mach hier immer
+  // ein Block ist 35 min", gewählt „35 min + kleiner Zufall"): ein Block belegt 35 min, der nächste startet 35–40 min nach ihm.
+  // Vorher: Konten × (abstand_max + 2) + Pause pause_min..pause_max (15–60) → ~57 min. Braucht ein Block für seine Konto-Starts
+  // länger (Konten × (abstand_max + 2) > 35, z. B. 7 Konten à 5 min), gilt der größere Wert — sonst überlappt der nächste Block
+  // mit wdKontoZeiten. pause_min/pause_max bleiben in wd_farmer_regeln stehen, wirken aber nicht mehr.
+  const WD_TAKT_MIN = 35, WD_TAKT_ZUFALL_MIN = 5
+  const wdDauerMs = (x, r) => Math.max(WD_TAKT_MIN, Math.max(1, (x.konten || []).filter(wdAktiv).length) * (Math.max(1, +((r || {}).abstand_max) || 4) + 2)) * 60000
 
   /* Würfeln (rein rechnend, testbar). rows = Zeilen des Tages; Zeilen mit start_um bleiben fest
    * (außer alleNeu) und Neue werden dahinter angehängt. seed → deterministisch, null → Math.random.
@@ -37926,9 +37933,9 @@
     const r = regeln || {}, rnd = seed != null ? wdMulberry(seed) : Math.random
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
     const aMax = Math.max(1, +r.abstand_max || 4)
-    const pMin = Math.max(0, +r.pause_min || 0), pMax = Math.max(pMin, +r.pause_max || 0)
     const jit = (r.jitter_min == null) ? 10 : Math.max(0, +r.jitter_min || 0)
-    const dauer = x => nAkt(x) * (aMax + 2) * 60000   // Konten × (Abstand + Bot-Zeit)
+    const dauer = x => wdDauerMs(x, { abstand_max: aMax })   // 35 min, mehr nur wenn die Konten mehr brauchen (Takt 26.09.2026)
+    const luft = () => rnd() * WD_TAKT_ZUFALL_MIN * 60000    // kleiner Zufall 0–5 min, Seed-Zufall (zwei Tabs würfeln gleich)
     const out = new Map()
     const fest = alleNeu ? [] : (rows || []).filter(x => x.start_um && nAkt(x) > 0 && x.status !== 'leer')
     const teil = (rows || []).filter(x => nAkt(x) > 0 && (alleNeu || !x.start_um) && x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst')
@@ -37936,7 +37943,7 @@
     for(let i = teil.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [teil[i], teil[j]] = [teil[j], teil[i]] }
     let t, nr
     if(fest.length){
-      t = Math.max(...fest.map(x => new Date(x.start_um).getTime() + dauer(x))) + (pMin + rnd() * (pMax - pMin)) * 60000
+      t = Math.max(...fest.map(x => new Date(x.start_um).getTime() + dauer(x))) + luft()
       nr = Math.max(...fest.map(x => +x.reihenfolge || 0))
     }else{
       t = wdZeitpunkt(tag, r.start_hhmm || '02:00', r.tz || WD_TZ_STD).getTime() + rnd() * jit * 60000
@@ -37945,7 +37952,7 @@
       nr = 0
     }
     teil.forEach((x, i) => {
-      if(i > 0) t += dauer(teil[i - 1]) + (pMin + rnd() * (pMax - pMin)) * 60000
+      if(i > 0) t += dauer(teil[i - 1]) + luft()
       out.set(String(x.user_id), { reihenfolge: ++nr, start_um: new Date(Math.round(t / 60000) * 60000).toISOString(), richtung: rnd() < 0.5 ? 'buy' : 'sell', status: 'geplant' })
     })
     for(const x of rows || []){
@@ -37954,6 +37961,7 @@
     }
     return out
   }
+  window._wdWuerfeln = wdWuerfeln   // Test-Haken (26.09.2026, Takt 35 min)
   // Rein rechnend: was ist in diesem Tick zu tun? Registrieren ab 00:00 bis zur Startzeit, würfeln ab 00:10.
   function wdTickEntscheidung(j, r, registriertTag){
     const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || '02:00')
@@ -38679,8 +38687,6 @@
     const r = _wd.regeln || {}, g = id => document.getElementById(id)
     if(g('wd-aktiv')) g('wd-aktiv').checked = !!r.aktiv
     if(g('wd-start')) g('wd-start').value = r.start_hhmm || '02:00'
-    if(g('wd-pause-min')) g('wd-pause-min').value = r.pause_min != null ? r.pause_min : 15
-    if(g('wd-pause-max')) g('wd-pause-max').value = r.pause_max != null ? r.pause_max : 60
     if(g('wd-abst-min')) g('wd-abst-min').value = r.abstand_min != null ? r.abstand_min : 2
     if(g('wd-abst-max')) g('wd-abst-max').value = r.abstand_max != null ? r.abstand_max : 4
     // Hedge-Tabelle (23.09.2026, Finn: „die Tabelle, wie viel gegengehedgt wird, steht nirgendwo und ich
@@ -39526,9 +39532,8 @@
     const g = id => document.getElementById(id), n = (id, std) => { const v = parseFloat(g(id)?.value); return isFinite(v) ? Math.max(0, Math.round(v)) : std }
     const { data: { user } } = await supabase.auth.getUser()
     const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || '02:00', tz: WD_TZ_STD,
-                pause_min: n('wd-pause-min', 15), pause_max: n('wd-pause-max', 60), abstand_min: n('wd-abst-min', 2), abstand_max: n('wd-abst-max', 4),
+                abstand_min: n('wd-abst-min', 2), abstand_max: n('wd-abst-max', 4),
                 updated_at: new Date().toISOString(), updated_by: user ? user.id : null }
-    if(r.pause_max < r.pause_min) r.pause_max = r.pause_min
     if(r.abstand_max < r.abstand_min) r.abstand_max = r.abstand_min
     const { error } = await supabase.from('wd_farmer_regeln').update(r).eq('id', 1)
     if(error) return wdSay('Einstellungen nicht gespeichert: ' + error.message, 'err')
