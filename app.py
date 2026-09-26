@@ -8640,6 +8640,57 @@ def reader_wacht_status():
     })
 
 
+# ══ PULS-DIAGNOSE (26.09.2026, Auftrag Koordination B6 „Fenster-Treue") ═══════════════════════════════════════════
+# Puls schreibt je Lauf, welches Chrome-Fenster er als Handels-Fenster gemerkt hat und warum er andere ausgeschlossen
+# hat (Reader-Profil, Lage = Feed-Tab, Popup …) — sql/2026-09-26_puls_diagnose.sql, eine Zeile je PC. Ohne Anmeldung
+# (der PC hat keinen Login): nur dieses eine Diagnose-Feld wird geschrieben, bekannte Felder, kurze Texte, Größendeckel.
+PC_ID_MUSTER = re.compile(r"^pc-[a-z0-9]{4,12}$")
+PULS_DIAGNOSE_MAX = 6000
+
+
+def puls_diagnose_saeubern(d):
+    """REIN RECHNEND (testbar): Diagnose auf bekannte Felder und kurze Texte kürzen. -> dict | None (zu groß/ungültig)."""
+    if not isinstance(d, dict):
+        return None
+
+    def txt(v, n=60):
+        return str(v)[:n] if v is not None else None
+    liste = lambda v: v if isinstance(v, list) else []
+    out = {"modus": txt(d.get("modus"), 20), "code": txt(d.get("code"), 20), "eigen": txt(d.get("eigen")),
+           "tabu": [txt(x) for x in liste(d.get("tabu"))][:6], "gemerkt": None, "profile": [], "fenster": []}
+    g = d.get("gemerkt")
+    if isinstance(g, dict):
+        out["gemerkt"] = {"hwnd": g.get("hwnd") if isinstance(g.get("hwnd"), int) else None,
+                          "pid": g.get("pid") if isinstance(g.get("pid"), int) else None,
+                          "profil": txt(g.get("profil")), "titel": txt(g.get("titel")), "at": txt(g.get("at"), 20)}
+    for x in liste(d.get("profile"))[:12]:
+        if isinstance(x, dict):
+            out["profile"].append({"dir": txt(x.get("dir")), "name": txt(x.get("name"))})
+    for x in liste(d.get("fenster"))[:12]:
+        if isinstance(x, dict):
+            out["fenster"].append({"titel": txt(x.get("titel"), 50), "profil": txt(x.get("profil")),
+                                   "exe": txt(x.get("exe"), 20), "grund": txt(x.get("grund"), 60)})
+    return out if len(json.dumps(out, ensure_ascii=False)) <= PULS_DIAGNOSE_MAX else None
+
+
+@app.route("/puls-diagnose/<pc_id>", methods=["POST", "OPTIONS"])
+def puls_diagnose_schreiben(pc_id):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not PC_ID_MUSTER.fullmatch(pc_id or ""):
+        return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
+    if (request.content_length or 0) > PULS_DIAGNOSE_MAX * 2:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    d = puls_diagnose_saeubern(request.get_json(silent=True))
+    if d is None:
+        return jsonify({"ok": False, "msg": "Diagnose ungültig"}), 400
+    try:
+        sb_upsert("puls_diagnose", {"pc_id": pc_id, "diagnose": d, "at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True})
+
+
 start_kompass()
 
 

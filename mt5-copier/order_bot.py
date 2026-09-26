@@ -522,6 +522,314 @@ def puls_start_profil(cfg=None):
 
 
 # ---------------------------------------------------------------------------
+# FENSTER-TREUE (26.09.2026, Auftrag Koordination B6, Finn: „Das Einfachste: Puls muss immer im bestehenden Chrome-
+# Fenster bleiben. Er darf einen neuen Tab oeffnen, aber kein neues Fenster … er darf kein anderes Profil oeffnen,
+# einfach immer im gleichen Profil sein, nur Tabs hinzufuegen, keine Fenster.")
+#
+# Puls hat EIN Handels-Fenster je PC. Gemerkt in puls_fenster.json neben dem Bot (HWND, Prozess-ID, Profil wenn
+# lesbar). Danach sucht er TradingView NUR in diesem Fenster und aktiviert nie ein anderes — auch wenn dort
+# TradingView offen ist (das Reader-Chrome). Braucht er TradingView neu: Strg+T IN diesem Fenster, nie Strg+N, nie
+# chrome.exe mit URL (das oeffnete am Freitag ein Fenster im zuletzt benutzten Profil = Reader-Profil).
+# Erstes Finden (nichts gemerkt oder Fenster weg nach Chrome-Neustart): Kandidaten = Browser-Hauptfenster von
+# chrome.exe/msedge.exe/brave.exe (Chrome_WidgetWin_1 haben auch Electron-Apps wie Claude/Slack/VS Code), ohne
+# Reader-Profil (Profil-Riegel), ohne das Fenster, dessen Lage der Reader fuer seinen Feed-Tab meldet, ohne DevTools,
+# Tradovate-Anmeldefenster und kleine Popups. Genau ein Kandidat mit TradingView → der; sonst genau ein Kandidat
+# ueberhaupt → der; sonst NICHT raten, Lauf endet mit „Puls-Fenster unklar". Chrome starten nur, wenn gar keins
+# laeuft — dann mit --profile-directory (Profil-Riegel).
+# Diagnose (gemerktes Fenster, gesehene Fenster + Ausschlussgrund) einmal je Lauf an POST /puls-diagnose/<pc_id>.
+# ---------------------------------------------------------------------------
+PULS_BACKEND = "https://web-production-bec81.up.railway.app"
+PULS_BROWSER_EXE = ("chrome.exe", "msedge.exe", "brave.exe")
+_PULS_FENSTER = {"w": None, "code": "", "msg": ""}
+_FENSTER_DIAG = {"gemerkt": None, "code": "", "kandidaten": [], "gesendet": ""}
+
+
+def puls_fenster_wahl(kandidaten, vorn=None):
+    """REIN RECHNEND (testbar): kandidaten = [{handle, aus: '' | Grund, tv: bool}] → (handle | None, code, text).
+    code: 'neu' (eindeutig), 'kein_chrome' (gar kein Browser-Fenster), 'unklar' (0 oder mehrere Kandidaten).
+    vorn = Handle des Vordergrund-Fensters: bei mehreren Kandidaten entscheidet es, wenn es selbst ein zulaessiger
+    Kandidat ist (bei TradingView-Fenstern nur ein TradingView-Fenster) — daher „Handels-Chrome nach vorn holen"."""
+    if not kandidaten:
+        return None, "kein_chrome", "Es laeuft kein Chrome."
+    rest = [k for k in kandidaten if not k.get("aus")]
+    tv = [k for k in rest if k.get("tv")]
+    if len(tv) == 1:
+        return tv[0]["handle"], "neu", "einziges Handels-Fenster mit TradingView"
+    if len(tv) > 1:
+        if vorn is not None and any(k["handle"] == vorn for k in tv):
+            return vorn, "neu", "Handels-Fenster = vorderes Chrome-Fenster mit TradingView"
+        return None, "unklar", f"{len(tv)} Chrome-Fenster mit TradingView (ohne Reader)"
+    if len(rest) == 1:
+        return rest[0]["handle"], "neu", "einziges Chrome-Fenster (ohne Reader)"
+    if len(rest) > 1 and vorn is not None and any(k["handle"] == vorn for k in rest):
+        return vorn, "neu", "Handels-Fenster = vorderes Chrome-Fenster"
+    if not rest:
+        return None, "unklar", "nur ausgeschlossene Chrome-Fenster (Reader/Popups)"
+    return None, "unklar", f"{len(rest)} Chrome-Fenster ohne TradingView"
+
+
+def puls_fenster_gueltig(merk, info):
+    """REIN RECHNEND (testbar): passt das gemerkte Fenster noch? info = {da, klasse, pid, exe, profil}."""
+    if not isinstance(merk, dict) or not isinstance(info, dict) or not info.get("da"):
+        return False
+    if (info.get("klasse") or "") not in BROWSER_KLASSEN or int(info.get("pid") or -1) != int(merk.get("pid") or -2):
+        return False
+    if merk.get("profil") and info.get("profil") and merk["profil"] != info["profil"]:
+        return False
+    return True
+
+
+def reader_geo_passt(rect, geo, tol=16):
+    """REIN RECHNEND (testbar): liegt ein Fenster-Rechteck (l, t, r, b in Bildschirm-Pixeln) dort, wo der Reader
+    seinen Feed-Tab meldet (screenX/Y, outerWidth/Height in CSS-Pixeln, dpr)? Skaliert mit dpr und mit 1."""
+    try:
+        l, t, r, b = [float(x) for x in rect]
+        sx, sy, ow, oh = (float(geo[k]) for k in ("screenX", "screenY", "outerWidth", "outerHeight"))
+        dpr = float(geo.get("dpr") or 1) or 1.0
+    except (TypeError, ValueError, KeyError):
+        return False
+    for f in {dpr, 1.0}:
+        if (abs(l - sx * f) <= tol and abs(t - sy * f) <= tol
+                and abs((r - l) - ow * f) <= tol * 2 and abs((b - t) - oh * f) <= tol * 2):
+            return True
+    return False
+
+
+def tab_neu_plan(n):
+    """REIN RECHNEND (testbar): Tastenfolge fuer „TradingView-Tab schliessen und neu mit Link", ohne dass das Fenster
+    zugeht. n = Tabs im Fenster. ≥ 2: aktiven TV-Tab schliessen, dann neuer Tab. 1: erst neuer (leerer) Tab, dann
+    Tab 1 (= der TV-Tab) schliessen, Adresse im leeren Tab. Unbekannt → None (nichts schliessen)."""
+    if not isinstance(n, int) or n < 1:
+        return None
+    if n >= 2:
+        return ["schliessen", "neuer_tab", "adresse"]
+    return ["neuer_tab", "tab_1", "schliessen", "adresse"]
+
+
+def _puls_merk_pfad():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "puls_fenster.json")
+
+
+def _puls_merk_lesen():
+    try:
+        with open(_puls_merk_pfad(), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) and d.get("hwnd") else None
+    except Exception:
+        return None
+
+
+def _puls_merk_schreiben(d):
+    try:
+        with open(_puls_merk_pfad() + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+        os.replace(_puls_merk_pfad() + ".tmp", _puls_merk_pfad())
+    except Exception:
+        pass
+
+
+def _fenster_info(hwnd):
+    """{da, klasse, pid, exe, profil, titel, rect} eines Top-Level-Fensters (Windows), {} ohne Windows."""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        h = int(hwnd)
+        if not u32.IsWindow(h):
+            return {"da": False}
+        kb = ctypes.create_unicode_buffer(128)
+        u32.GetClassNameW(h, kb, 128)
+        n = u32.GetWindowTextLengthW(h)
+        tb = ctypes.create_unicode_buffer(n + 1)
+        u32.GetWindowTextW(h, tb, n + 1)
+        pid = wt.DWORD()
+        u32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        exe = ""
+        hp = k32.OpenProcess(0x1000, False, pid.value)      # PROCESS_QUERY_LIMITED_INFORMATION
+        if hp:
+            try:
+                pb = ctypes.create_unicode_buffer(520)
+                ln = wt.DWORD(520)
+                if k32.QueryFullProcessImageNameW(hp, 0, pb, ctypes.byref(ln)):
+                    exe = os.path.basename(pb.value).lower()
+            finally:
+                k32.CloseHandle(hp)
+        r = wt.RECT()
+        u32.GetWindowRect(h, ctypes.byref(r))
+        return {"da": True, "klasse": kb.value, "pid": int(pid.value), "exe": exe, "titel": tb.value,
+                "profil": _fenster_profil(h), "rect": (r.left, r.top, r.right, r.bottom),
+                "sichtbar": bool(u32.IsWindowVisible(h))}
+    except Exception:
+        return {}
+
+
+def _reader_geos():
+    """Fensterlagen der Feed-Tabs, die der Reader meldet (reader-server >= 0.9.5: tabs[].geo). [] ohne Reader."""
+    d = _tv_http("/positions", timeout=1.0) or {}
+    out = []
+    for t in d.get("tabs") or []:
+        if isinstance(t, dict) and isinstance(t.get("geo"), dict) and (t.get("rolle") == "feed" or t.get("login_im_feed")):
+            out.append(t["geo"])
+    return out
+
+
+def _puls_diagnose_senden():
+    """Einmal je Lauf: gemerktes Fenster + gesehene Fenster mit Ausschlussgrund ans Backend (2 s, Fehler still)."""
+    if _FENSTER_DIAG.get("gesendet") == (_FENSTER_DIAG.get("code") or "-"):
+        return                         # je Lauf einmal je Ergebnis (z. B. erst 'kein_chrome', nach dem Start 'neu')
+    _FENSTER_DIAG["gesendet"] = _FENSTER_DIAG.get("code") or "-"
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pc_id.json"), "r", encoding="utf-8") as f:
+            pc = (json.load(f) or {}).get("pc_id")
+        if not (isinstance(pc, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", pc)):
+            return
+        import urllib.request
+        regel = puls_profil_regel_holen()
+        daten = {"modus": " ".join(sys.argv[1:2])[:20], "code": _FENSTER_DIAG.get("code"), "gemerkt": _FENSTER_DIAG.get("gemerkt"),
+                 "eigen": regel.get("eigen") or "", "tabu": sorted(regel.get("tabu") or ()),
+                 "profile": [{"dir": d_, "name": n_} for d_, n_ in sorted(_PROFIL_NAMEN.items())][:12],
+                 "fenster": (_FENSTER_DIAG.get("kandidaten") or [])[:12]}
+        req = urllib.request.Request(f"{PULS_BACKEND}/puls-diagnose/{pc}", data=json.dumps(daten).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=2.0).read()
+    except Exception:
+        pass
+
+
+def _puls_fenster(trail):
+    """Das Handels-Fenster dieses PCs → (pywinauto-Fenster | None, code, text). code 'gemerkt' | 'neu' | 'kein_chrome' |
+    'unklar'. Ein Mal je Lauf gesucht; danach nur noch geprueft, ob es noch lebt."""
+    from pywinauto import Desktop
+    alt = _PULS_FENSTER.get("w")
+    if alt is not None:
+        try:
+            if _fenster_info(alt.handle).get("da"):
+                return alt, _PULS_FENSTER["code"], _PULS_FENSTER["msg"]
+        except Exception:
+            pass
+    merk = _puls_merk_lesen()
+    if merk:
+        info = _fenster_info(merk.get("hwnd"))
+        if puls_fenster_gueltig(merk, info):
+            try:
+                w = Desktop(backend="uia").window(handle=int(merk["hwnd"])).wrapper_object()
+                _PULS_FENSTER.update(w=w, code="gemerkt", msg="gemerktes Puls-Fenster")
+                _FENSTER_DIAG.update(gemerkt=dict(merk), code="gemerkt")
+                trail.append(f"Puls-Fenster (gemerkt): {(info.get('titel') or '')[:40]}")
+                _puls_diagnose_senden()
+                return w, "gemerkt", "gemerktes Puls-Fenster"
+            except Exception:
+                pass
+        trail.append("gemerktes Puls-Fenster ist weg (Chrome neu gestartet?) — suche neu")
+    geos = _reader_geos()
+    kand, fenster = [], {}
+    _FENSTER_DIAG["kandidaten"] = []
+    for w in Desktop(backend="uia").windows():
+        try:
+            if (w.element_info.class_name or "") not in BROWSER_KLASSEN:
+                continue
+            info = _fenster_info(w.handle)
+        except Exception:
+            continue
+        titel = info.get("titel") or ""
+        exe = info.get("exe") or ""
+        l, t, r, b = info.get("rect") or (0, 0, 0, 0)
+        aus = ""
+        if exe and exe not in PULS_BROWSER_EXE:
+            continue                                   # Electron-App (Claude, Slack, …) — gar kein Browser
+        if not info.get("sichtbar", True) or not titel.strip():
+            aus = "unsichtbar/ohne Titel"
+        elif titel.strip().lower().startswith("devtools"):
+            aus = "DevTools"
+        elif TV_RX_TRADOVATE_TITEL.search(titel):
+            aus = "Tradovate-Anmeldefenster"
+        elif (r - l) < 400 or (b - t) < 300:
+            aus = "kleines Popup"
+        elif _fenster_gesperrt(w.handle):
+            aus = "Reader-/Fremdprofil " + _fenster_gesperrt(w.handle)
+        elif any(reader_geo_passt((l, t, r, b), g) for g in geos):
+            aus = "Lage = Feed-Tab des Readers"
+        tv = False
+        if not aus:
+            tv = ist_tradingview_fenster(titel, w.element_info.class_name) or tv_tab_rang(titel, "", "") > 0
+            if not tv:
+                try:
+                    tv = _tv_tab_suchen(w, "", "", []) is not None
+                except Exception:
+                    tv = False
+        kand.append({"handle": int(w.handle), "aus": aus, "tv": tv})
+        fenster[int(w.handle)] = (w, info)
+        _FENSTER_DIAG["kandidaten"].append({"titel": titel[:50], "profil": info.get("profil") or "", "exe": exe,
+                                             "grund": aus or ("TradingView" if tv else "Kandidat")})
+    try:
+        import ctypes
+        vorn = int(ctypes.windll.user32.GetForegroundWindow())
+    except Exception:
+        vorn = None
+    h, code, text = puls_fenster_wahl(kand, vorn)
+    _FENSTER_DIAG["code"] = code
+    if h is None:
+        trail.append(f"Puls-Fenster nicht bestimmt: {text} · gesehen: "
+                     + "; ".join(f"{k['titel'][:25]}={k['grund']}" for k in _FENSTER_DIAG["kandidaten"][:6]))
+        _puls_diagnose_senden()
+        msg = ("Puls-Fenster unklar: " + text + " — bitte einmal das Handels-Chrome nach vorn holen "
+               "(nur dort laeuft Puls) und neu starten.") if code == "unklar" else text
+        return None, code, msg
+    w, info = fenster[h]
+    merk = {"hwnd": h, "pid": info.get("pid"), "profil": info.get("profil") or "", "titel": (info.get("titel") or "")[:60],
+            "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    _puls_merk_schreiben(merk)
+    _PULS_FENSTER.update(w=w, code="neu", msg=text)
+    _FENSTER_DIAG["gemerkt"] = merk
+    trail.append(f"Puls-Fenster gemerkt ({text}): {merk['titel'][:40]}")
+    _puls_diagnose_senden()
+    return w, "neu", text
+
+
+def _tab_anzahl(w):
+    """Tabs im Fenster per UIA (0 = nicht lesbar)."""
+    try:
+        return len([t for t in w.descendants(control_type="TabItem") if (t.window_text() or "").strip()])
+    except Exception:
+        return 0
+
+
+def _tv_neuer_tab(w, url, trail):
+    """TradingView in einem NEUEN TAB des Puls-Fensters oeffnen (Strg+T, Adresse, Enter). Getippt wird nur, wenn das
+    Puls-Fenster nachweislich vorn steht. (ok, fehlertext)"""
+    try:
+        from pywinauto import keyboard
+        import ctypes
+    except ImportError:
+        return False, "pywinauto fehlt"
+    try:
+        if w.is_minimized():
+            w.restore()
+            _warte(0.2, 0.25)
+        w.set_focus()
+    except Exception:
+        pass
+    _warte(0.35, 0.3)
+    try:
+        if int(ctypes.windll.user32.GetForegroundWindow()) != int(w.handle):
+            return False, "Puls-Fenster steht nicht im Vordergrund — kein neuer Tab."
+    except Exception:
+        pass
+    try:
+        keyboard.send_keys("^t")
+        _warte(0.5, 0.3)
+        keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+        _warte(0.25, 0.2)
+        keyboard.send_keys("{DELETE}")
+        _warte(0.15, 0.15)
+        keyboard.send_keys("{ENTER}")
+    except Exception as e:
+        return False, f"neuer Tab liess sich nicht oeffnen ({type(e).__name__})"
+    trail.append("TradingView im neuen Tab des Puls-Fensters geoeffnet")
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # ORBIT-PULS (30.08.2026) — rein rechnender Teil, ohne Windows testbar
 #
 # Der Puls klickt auf TradingView mit ECHTER Maus. Das Userscript (tv-reader
@@ -1302,32 +1610,17 @@ def modus_tvfokus():
         return
     _warte(0.1, 0.5)   # Start-Versatz (Jitter-Dauerregel 28.08.2026)
     try:
-        for w in Desktop(backend="uia").windows():
-            try:
-                if not ist_tradingview_fenster(w.window_text(),
-                                               w.element_info.class_name):
-                    continue
-                if _fenster_gesperrt(w.handle):
-                    continue      # Reader-/Fremdprofil (Profil-Riegel 26.09.2026)
-                titel = (w.window_text() or "").strip()
-                if w.is_minimized():
-                    w.restore()
-                    _warte(0.2, 0.25)
-                # BEWUSST ohne den Titelzeilen-Klick aus _fenster_betreten:
-                # beim Browser sitzt dort die Tab-Leiste, ein Klick koennte
-                # den TV-Tab wegschalten (gleiche Lehre wie _zurueck_zu_prophos).
-                w.set_focus()
-                res["ok"] = True
-                res["trail"] = "TradingView-Tab nach vorn"
-                res["msg"] = f"TradingView ist vorn ({titel[:80]})"
-                print(json.dumps(res))
-                return
-            except Exception:
-                continue
-        res["msg"] = ("Kein Browser-Fenster mit aktivem TradingView-Tab gefunden — "
-                      "TradingView muss in einem eigenen Fenster offen sein und "
-                      "dort der sichtbare Tab.")
-        res["trail"] = "TV-Fenster gesucht, kein Treffer"
+        # Fenster-Treue (26.09.2026): nur das Puls-Fenster, nie ein anderes Chrome-Fenster mit TradingView
+        spur = []
+        w, fehler = _tv_fenster_holen(spur, "", "")
+        if w is not None:
+            res["ok"] = True
+            res["trail"] = " > ".join(spur)
+            res["msg"] = f"TradingView ist vorn ({(w.window_text() or '')[:80]})"
+            print(json.dumps(res))
+            return
+        res["msg"] = fehler
+        res["trail"] = " > ".join(spur)
     except Exception as e:
         res["msg"] = f"TV-Fokus fehlgeschlagen: {type(e).__name__}: {e}"
     print(json.dumps(res))
@@ -1552,53 +1845,34 @@ def _tv_tab_suchen(w, begriff, symbol, gesehen):
 
 
 def _tv_fenster_holen(trail, begriff="", symbol=""):
-    """Browser-Fenster mit TradingView nach vorn — Titel zuerst (aktiver Tab),
-    sonst ueber die Tableiste. (fenster, fehlertext)."""
-    from pywinauto import Desktop
-    kandidaten = []
-    fenster_namen = []
-    tab_namen = []
-    gesperrt = []
-    for w in Desktop(backend="uia").windows():
+    """TradingView im PULS-FENSTER nach vorn (Fenster-Treue, 26.09.2026) — Titel zuerst (aktiver Tab), sonst ueber die
+    Tableiste DIESES Fensters. Andere Chrome-Fenster werden nie aktiviert. (fenster, fehlertext)"""
+    pw, code, msg = _puls_fenster(trail)
+    if pw is None:
+        return None, msg
+    try:
+        titel = pw.window_text() or ""
+        klasse = pw.element_info.class_name
+    except Exception:
+        return None, "Puls-Fenster nicht mehr lesbar."
+    if ist_tradingview_fenster(titel, klasse) or tv_tab_rang(titel, begriff, symbol) > 0:
         try:
-            titel = w.window_text() or ""
-            klasse = w.element_info.class_name
+            if pw.is_minimized():
+                pw.restore()
+                _warte(0.2, 0.25)
+            pw.set_focus()
         except Exception:
-            continue
-        if (klasse or "") not in BROWSER_KLASSEN:
-            continue
-        # Profil-Riegel (26.09.2026): Fenster des Reader-/Fremdprofils nie anfassen —
-        # weder als aktiver Tab noch ueber die Tableiste.
-        fremd = _fenster_gesperrt(w.handle)
-        if fremd:
-            if len(gesperrt) < 4:
-                gesperrt.append(f"{fremd}: {(titel or '?')[:40]}")
-            continue
-        if len(fenster_namen) < 8:
-            fenster_namen.append((titel or "?")[:60])
-        # Aktiver Tab: 'tradingview' im Titel ODER das gemeldete Symbol —
-        # bei Finns PC steht im Titel nur 'NQU2026 29.491,75 ...'.
-        if ist_tradingview_fenster(titel, klasse) or tv_tab_rang(titel, begriff, symbol) > 0:
-            try:
-                if w.is_minimized():
-                    w.restore()
-                    _warte(0.2, 0.25)
-                w.set_focus()
-            except Exception:
-                pass
-            trail.append(f"TradingView war schon der aktive Tab ({titel[:40]})")
-            return w, ""
-        kandidaten.append(w)
-
-    for w in kandidaten:
-        tab = _tv_tab_suchen(w, begriff, symbol, tab_namen)
-        if not tab:
-            continue
+            pass
+        trail.append(f"TradingView war schon der aktive Tab ({titel[:40]})")
+        return pw, ""
+    tab_namen = []
+    tab = _tv_tab_suchen(pw, begriff, symbol, tab_namen)
+    if tab:
         try:
-            if w.is_minimized():
-                w.restore()
+            if pw.is_minimized():
+                pw.restore()
                 _warte(0.25, 0.3)
-            w.set_focus()
+            pw.set_focus()
             _warte(0.2, 0.25)
             r = tab.rectangle()
             x = int((r.left + r.right) / 2)
@@ -1607,26 +1881,14 @@ def _tv_fenster_holen(trail, begriff="", symbol=""):
             _klick_absolut(x, y)
             _warte(0.5, 0.4)
             trail.append(f"TradingView-Tab angeklickt ({(tab.window_text() or '')[:50]})")
-            return w, ""
+            return pw, ""
         except Exception as e:
             trail.append(f"Tab-Klick fehlgeschlagen ({type(e).__name__})")
-            continue
-
-    # Selbst-Diagnose statt 'nicht gefunden': WAS hat er gesehen? Daran haengt,
-    # ob der Suchbegriff falsch war (Tabs sind da, passen nur nicht) oder ob
-    # die Tableiste per UIA gar nicht lesbar ist (Liste leer).
-    trail.append(f"Suchbegriff '{begriff or '-'}' / Symbol-Wurzel "
-                 f"'{tv_symbol_root(symbol) or '-'}'"
-                 f" · Browser-Fenster: {fenster_namen or 'keine'}"
-                 f" · Tabs: {tab_namen or 'keine gelesen'}"
-                 + (f" · gesperrt (Profil-Riegel): {gesperrt}" if gesperrt else ""))
-    return None, ("Kein Browser-Fenster mit TradingView gefunden. Gesucht wurde nach "
-                  f"'{begriff or 'tradingview'}' bzw. der Symbol-Wurzel "
-                  f"'{tv_symbol_root(symbol) or '-'}'. Gesehen: "
-                  f"{len(fenster_namen)} Browser-Fenster {fenster_namen}, "
-                  f"Tab-Namen {tab_namen or '(keine lesbar)'}. "
-                  "Steht dort der TradingView-Tab nicht dabei, kann die Tableiste "
-                  "nicht ausgelesen werden.")
+    trail.append(f"Suchbegriff '{begriff or '-'}' / Symbol-Wurzel '{tv_symbol_root(symbol) or '-'}'"
+                 f" · Puls-Fenster '{titel[:40]}' · Tabs: {tab_namen or 'keine gelesen'}")
+    return None, ("Im Puls-Fenster ist kein TradingView-Tab offen (gesucht "
+                  f"'{begriff or 'tradingview'}' bzw. Wurzel '{tv_symbol_root(symbol) or '-'}', Tabs "
+                  f"{tab_namen or '(keine lesbar)'}). Andere Chrome-Fenster fasst Puls nicht an.")
 
 
 def _tv_klick(rect, geo, klient, name, trail, doppel=False):
@@ -1775,6 +2037,20 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     if w:
         return True, "TradingView war schon offen — Fenster ist vorn.", False
 
+    # Fenster-Treue (26.09.2026, Finn: „nur Tabs hinzufuegen, keine Fenster"): gibt es ein Puls-Fenster, kommt
+    # TradingView als NEUER TAB hinein; ist das Fenster unklar, wird nichts geoeffnet; Chrome startet nur, wenn gar
+    # keins laeuft.
+    pw, p_code, p_msg = _puls_fenster(trail)
+    vorher = {str(t.get("tab_id")) for t in ((_tv_http("/positions", timeout=1.0) or {}).get("tabs") or []) if isinstance(t, dict)}
+    start = time.time()
+    if pw is not None:
+        ok_t, f_t = _tv_neuer_tab(pw, tv_start_url(start_url or cfg.get("tv_url")), trail)
+        if not ok_t:
+            return False, f_t, False
+        return _tv_start_beweisen(trail, start, warten_s, "neuer Tab", vorher)
+    if p_code != "kein_chrome":
+        return False, p_msg, False
+
     chrome = _chrome_pfad(cfg.get("tv_browser_path"))
     if not chrome:
         return False, ("TradingView ist nicht offen, und chrome.exe wurde nicht "
@@ -1785,6 +2061,9 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     # sofort da (Finn: "genau wie wenn man normalerweise am Anfang startet,
     # mit dem Link"). Laeuft durch denselben Domain-Riegel wie tv_url.
     profil, p_fehler = puls_start_profil(cfg)
+    gemerkt_p = ((_puls_merk_lesen() or {}).get("profil") or "").strip()
+    if gemerkt_p and not str(cfg.get("tv_chrome_profil") or "").strip():
+        profil, p_fehler = gemerkt_p, ""        # Fenster-Treue: das Profil des gemerkten Puls-Fensters
     if p_fehler:
         return False, "TradingView ist im Puls-Profil nicht offen. " + p_fehler, False
     befehl = tv_start_befehl(chrome, start_url or cfg.get("tv_url"), profil)
@@ -1800,13 +2079,19 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     except OSError as e:
         return False, f"Chrome-Start fehlgeschlagen: {e}", False
     start = time.time()
-    trail.append("TradingView nicht offen -> Chrome gestartet (" + befehl[-1] + ")")
+    trail.append("Kein Chrome offen -> Chrome gestartet (" + befehl[-1] + ")")
+    return _tv_start_beweisen(trail, start, warten_s, "Chrome gestartet", vorher)
 
+
+def _tv_start_beweisen(trail, start, warten_s, wie, vorher=()):
+    """Nach neuem Tab / Chrome-Start: auf ein frisches Bedienfeld AUS EINEM NEUEN TAB (tab_id nicht in `vorher` —
+    der Feed-Tab des Readers meldet sich ja laufend) oder das TV-Tab im Puls-Fenster warten. -> (ok, msg, gestartet)"""
     ende = start + float(warten_s)
     while time.time() < ende:
         _warte(0.5, 0.3)   # Jitter-Dauerregel 28.08.2026
         bf = _tv_http("/bedienfeld", timeout=1.5) or {}
-        if bf.get("ok") and (time.time() - float(bf.get("alter_s") or 0.0)) >= start:
+        neu_tab = not bf.get("tab_id") or str(bf.get("tab_id")) not in set(vorher or ())
+        if bf.get("ok") and neu_tab and (time.time() - float(bf.get("alter_s") or 0.0)) >= start:
             trail.append("Reader meldet sich aus dem neuen Tab")
             return True, "TradingView gestartet — Seite ist geladen, der Reader meldet sich.", True
         probe = []
@@ -1819,7 +2104,7 @@ def tv_sicherstellen(trail, cfg=None, warten_s=12.0, start_url=None):
     # in app.py gibt 25 s, davon gehen die Fenster-Scans vorn und hinten ab —
     # deshalb 12 s Standard; die spaetere Kette darf laenger warten). Ehrlich
     # melden statt 'ok' zu behaupten.
-    return False, (f"Chrome wurde gestartet, TradingView war nach {int(warten_s)} s aber "
+    return False, (f"{wie}: TradingView war nach {int(warten_s)} s aber "
                    "noch nicht zu erkennen — laedt vermutlich noch. Gleich noch "
                    "einmal klicken: ist es dann offen, kommt 'war schon offen'."), True
 
@@ -2801,12 +3086,12 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
     dann kommt man JEDES MAL zu dem Connect." Im verbundenen Tab laedt die
     Direkt-Adresse die Seite nur neu; nach Schliessen + Neu-Oeffnen kommt der
     Tradovate-Dialog. Kein Menue, kein 'Log out', nichts zu suchen.
-    Geoeffnet wird ueber denselben Chrome-Start wie in Schritt 1 (live
-    bewiesen) — das deckt auch den Fall, dass der TradingView-Tab der einzige
-    im Fenster war und Strg+W das ganze Fenster schliesst. (ok, fehlertext)"""
+    Seit 26.09.2026 (Fenster-Treue) nur per Tasten IM Puls-Fenster — nie
+    chrome.exe mit URL (das oeffnete ein Fenster im falschen Profil); ist der
+    TradingView-Tab der einzige, kommt der neue Tab zuerst, damit das Fenster
+    nicht zugeht. (ok, fehlertext)"""
     try:
         from pywinauto import keyboard
-        import subprocess
     except ImportError:
         return False, "pywinauto fehlt"
     try:
@@ -2863,43 +3148,63 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
             _warte(0.25, 0.15)
     except Exception:
         pass                      # ohne die Probe (kein Windows) entscheidet set_focus
-    chrome = _chrome_pfad((cfg or {}).get("tv_browser_path"))
-    if not chrome:
-        return False, "chrome.exe nicht gefunden (tv_browser_path in der config.json setzen) — Tab bleibt offen."
-    profil, p_fehler = puls_start_profil(cfg)
-    if p_fehler:
-        return False, p_fehler + " Tab bleibt offen."
-    if _fenster_gesperrt(w.handle):
-        return False, "Das Fenster gehoert zum Reader-Profil — es wird nichts geschlossen."
+    # Fenster-Treue (26.09.2026, Finn: „nur Tabs hinzufuegen, keine Fenster"): bisher Strg+W + chrome.exe mit URL —
+    # das oeffnete ein Fenster im zuletzt benutzten Profil (Freitag: das Reader-Profil). Jetzt nur Tasten IM Puls-
+    # Fenster, und so, dass es nie zugeht: ≥ 2 Tabs → TV-Tab schliessen, neuer Tab; 1 Tab → erst neuer Tab, dann Tab 1
+    # (der TV-Tab) schliessen. Tabzahl unlesbar → nichts schliessen.
+    n_tabs = _tab_anzahl(w)
+    plan = tab_neu_plan(n_tabs)
+    if not plan:
+        return False, "Tabs im Puls-Fenster nicht lesbar — es wird nichts geschlossen."
+    url = tv_trade_now_url((cfg or {}).get("tv_url"))
+
+    def verlassen_bestaetigen():
+        # Chromes Rueckfrage 'Website verlassen?' (kommt nur manchmal): bis ~2,5 s nach dem Knopf schauen
+        ende_v = time.time() + 2.5
+        while time.time() < ende_v:
+            _warte(0.25, 0.15)
+            try:
+                k = tv_verlassen_knopf(_tv_uia_roh(w, ("Button",)))
+            except Exception:
+                k = None
+            if k:
+                _tv_uia_klick(k, f"'{k['text']}' (Website verlassen?)", trail)
+                _warte(0.4, 0.2)
+                break
+
     try:
-        keyboard.send_keys("^w")
+        for schritt in plan:
+            if schritt == "schliessen":
+                if "tab_1" in plan:
+                    # nach Strg+1 muss vorn wieder der TradingView-Tab stehen — sonst schliesst Strg+W einen fremden Tab
+                    try:
+                        titel_1 = w.window_text() or ""
+                    except Exception:
+                        titel_1 = ""
+                    if not tv_tab_schliessbar(titel_1, w.element_info.class_name, begriff):
+                        return False, (f"Nach Strg+1 steht nicht TradingView vorn ('{titel_1[:40]}') — es wird nichts "
+                                       "geschlossen; der neue leere Tab bleibt offen.")
+                keyboard.send_keys("^w")
+                trail.append("TradingView-Tab geschlossen")
+                verlassen_bestaetigen()
+                _warte(0.3, 0.2)
+            elif schritt == "neuer_tab":
+                keyboard.send_keys("^t")
+                _warte(0.5, 0.3)
+            elif schritt == "tab_1":
+                keyboard.send_keys("^1")
+                _warte(0.4, 0.3)
+            elif schritt == "adresse":
+                keyboard.send_keys("^l")
+                _warte(0.3, 0.2)
+                keyboard.send_keys(tv_tasten_escape(url), with_spaces=True, pause=0.012)
+                _warte(0.25, 0.2)
+                keyboard.send_keys("{DELETE}")
+                _warte(0.15, 0.15)
+                keyboard.send_keys("{ENTER}")
     except Exception as e:
-        return False, f"Tab liess sich nicht schliessen ({type(e).__name__})"
-    trail.append("TradingView-Tab geschlossen")
-    # Chromes Rueckfrage 'Website verlassen?' (kommt nur manchmal): bis ~2,5 s nach
-    # dem Knopf 'Verlassen' schauen und ihn klicken — sonst bliebe der alte Tab
-    # offen und der neue kaeme daneben.
-    ende_v = time.time() + 2.5
-    while time.time() < ende_v:
-        _warte(0.25, 0.15)
-        try:
-            k = tv_verlassen_knopf(_tv_uia_roh(w, ("Button",)))
-        except Exception:
-            k = None
-        if k:
-            _tv_uia_klick(k, f"'{k['text']}' (Website verlassen?)", trail)
-            _warte(0.4, 0.2)
-            break
-    _warte(0.3, 0.2)
-    befehl = tv_start_befehl(chrome, tv_trade_now_url((cfg or {}).get("tv_url")), profil)
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
-             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    try:
-        subprocess.Popen(befehl, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
-    except OSError as e:
-        return False, f"Chrome-Start fehlgeschlagen: {e}"
-    trail.append("TradingView neu mit Direkt-Adresse geoeffnet")
+        return False, f"Tab-Wechsel im Puls-Fenster fehlgeschlagen ({type(e).__name__})"
+    trail.append(f"TradingView neu mit Direkt-Adresse geoeffnet (Tab im Puls-Fenster, vorher {n_tabs} Tabs)")
     return True, ""
 
 
@@ -3143,6 +3448,9 @@ def _tv_browser_fenster():
             if klasse in BROWSER_KLASSEN or klasse.startswith("Chrome_WidgetWin"):
                 if _fenster_gesperrt(w.handle):
                     continue      # Profil-Riegel 26.09.2026: kein Login/Autofill im Reader-Profil
+                exe = (_fenster_info(w.handle) or {}).get("exe") or ""
+                if exe and exe not in PULS_BROWSER_EXE:
+                    continue      # Fenster-Treue 26.09.2026: Electron-Apps (Claude, Slack …) sind kein Browser
                 out.append((w.handle, w.window_text() or "", w))
         except Exception:
             continue

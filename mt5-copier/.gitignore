@@ -43,3 +43,7 @@ panel_frisch.py
 # PC-Kennung des jeweiligen PCs (25.09.2026, /api/pc-id) — gilt fuer alle Browser-Profile dieses PCs, nie im Repo
 pc_id.json
 pc_id.json.tmp
+
+# Gemerktes Puls-Fenster je PC (26.09.2026, Fenster-Treue) — HWND/Prozess-ID gelten nur auf diesem PC
+puls_fenster.json
+puls_fenster.json.tmp

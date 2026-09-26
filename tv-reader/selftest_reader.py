@@ -364,6 +364,11 @@ def main():
     rs.update_zuruecknehmen(dd)
     check(t1 and open(dd, "rb").read() == b"alt", "Tausch legt .prev an, Zurücknehmen stellt die alte Datei her")
 
+    # 0.9.5: Fensterlage je Tab fuer Puls (Fenster-Treue)
+    check(rs._geo_kurz({"screenX": 1, "screenY": 2, "outerWidth": 3, "outerHeight": 4, "dpr": 1.5, "innerWidth": 9})
+          == {"screenX": 1, "screenY": 2, "outerWidth": 3, "outerHeight": 4, "dpr": 1.5}
+          and rs._geo_kurz(None) is None and rs._geo_kurz({"screenX": "x"}) is None, "geo je Tab: nur Lage-Felder, sonst None")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

@@ -1760,6 +1760,7 @@ def main():
     results.append(test_lese_instanz())
     results.append(test_endlesung_bausteine())
     results.append(test_profil_riegel())
+    results.append(test_fenster_treue())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2324,6 +2325,58 @@ def test_profil_riegel():
             ob._FENSTER_PROFIL.pop(h, None)
     if ok:
         print("✓ Profil-Riegel: Reader-Profil gesperrt, Default/Config-Profil frei, Start immer mit --profile-directory, ein Profil wie bisher")
+    return ok
+
+
+def test_fenster_treue():
+    """Fenster-Treue (26.09.2026, B6): ein Puls-Fenster je PC, nie raten, Reader-Fenster raus, Tab statt Fenster."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Fenster-Treue: " + name); ok = False
+
+    w = ob.puls_fenster_wahl
+    chk("kein Browser-Fenster → kein_chrome", w([])[:2] == (None, "kein_chrome"))
+    chk("Reader raus, Handels-Fenster mit TV → das", w([{"handle": 1, "aus": "Reader-/Fremdprofil Terminal 1", "tv": True},
+                                                         {"handle": 2, "aus": "", "tv": True}])[:2] == (2, "neu"))
+    chk("TV-Fenster vor Fenster ohne TV", w([{"handle": 1, "aus": "", "tv": False}, {"handle": 2, "aus": "", "tv": True}])[:2] == (2, "neu"))
+    chk("zwei TV-Fenster → unklar, nicht raten", w([{"handle": 1, "aus": "", "tv": True}, {"handle": 2, "aus": "", "tv": True}])[:2] == (None, "unklar"))
+    chk("ein Fenster ohne TV → das (neuer Tab kommt hinein)", w([{"handle": 5, "aus": "", "tv": False}])[:2] == (5, "neu"))
+    chk("zwei ohne TV → unklar", w([{"handle": 1, "aus": "", "tv": False}, {"handle": 2, "aus": "", "tv": False}])[:2] == (None, "unklar"))
+    zwei_tv = [{"handle": 1, "aus": "", "tv": True}, {"handle": 2, "aus": "", "tv": True}, {"handle": 3, "aus": "", "tv": False},
+               {"handle": 9, "aus": "Reader-/Fremdprofil Terminal 1", "tv": True}]
+    chk("unklar + Handels-Chrome vorn → das vordere", w(zwei_tv, vorn=2)[:2] == (2, "neu"))
+    chk("vorn ist Fenster ohne TV oder Reader → bleibt unklar", w(zwei_tv, vorn=3)[:2] == (None, "unklar") and w(zwei_tv, vorn=9)[:2] == (None, "unklar"))
+    chk("zwei ohne TV, eins vorn → das vordere", w([{"handle": 1, "aus": "", "tv": False}, {"handle": 2, "aus": "", "tv": False}], vorn=1)[:2] == (1, "neu"))
+    chk("nur ausgeschlossene (Reader läuft, Handels-Chrome zu) → unklar, KEIN Chrome-Start",
+        w([{"handle": 1, "aus": "Lage = Feed-Tab des Readers", "tv": True}])[:2] == (None, "unklar"))
+
+    g = ob.puls_fenster_gueltig
+    merk = {"hwnd": 10, "pid": 777, "profil": "Default"}
+    chk("gemerktes Fenster lebt", g(merk, {"da": True, "klasse": "Chrome_WidgetWin_1", "pid": 777, "profil": "Default"}))
+    chk("Chrome neu gestartet (andere pid) → ungültig", not g(merk, {"da": True, "klasse": "Chrome_WidgetWin_1", "pid": 778}))
+    chk("Fenster weg → ungültig", not g(merk, {"da": False}))
+    chk("anderes Profil → ungültig", not g(merk, {"da": True, "klasse": "Chrome_WidgetWin_1", "pid": 777, "profil": "Profile 1"}))
+    chk("Profil unlesbar → pid entscheidet", g(merk, {"da": True, "klasse": "Chrome_WidgetWin_1", "pid": 777, "profil": ""}))
+
+    rg = ob.reader_geo_passt
+    geo = {"screenX": 100, "screenY": 50, "outerWidth": 1200, "outerHeight": 800, "dpr": 1.25}
+    chk("Reader-Lage bei 125 % erkannt", rg((125, 62, 1625, 1062), geo))
+    chk("Reader-Lage bei 100 % (dpr 1) erkannt", rg((100, 50, 1300, 850), dict(geo, dpr=1)))
+    chk("anderes Fenster nicht", not rg((0, 0, 1920, 1040), geo) and not rg((125, 62, 1625, 1062), None))
+
+    tp = ob.tab_neu_plan
+    chk("≥ 2 Tabs: schließen, neuer Tab", tp(3) == ["schliessen", "neuer_tab", "adresse"])
+    chk("1 Tab: erst neuer Tab, dann Tab 1 schließen (Fenster bleibt)", tp(1) == ["neuer_tab", "tab_1", "schliessen", "adresse"])
+    chk("Tabs unlesbar → nichts schließen", tp(0) is None and tp(None) is None)
+    import inspect
+    quelle = inspect.getsource(ob._tv_tab_neu_mit_link) + inspect.getsource(ob._tv_neuer_tab)
+    chk("kein chrome.exe-Start und kein Strg+N beim Tab-Neuöffnen", "Popen" not in quelle and "^n" not in quelle)
+    if ok:
+        print("✓ Fenster-Treue: Wahl eindeutig oder abbrechen, Reader per Profil/Lage raus, gemerktes Fenster geprüft, Tab statt Fenster")
     return ok
 
 

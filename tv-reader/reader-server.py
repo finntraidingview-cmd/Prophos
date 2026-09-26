@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.4"
+READER_VERSION = "0.9.5"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -594,6 +594,14 @@ def _effektiv_setzen(jetzt):
         _blind_grund, _blind_seit = t.get("blind_grund") or "", float(t.get("blind_seit") or 0)
 
 
+def _geo_kurz(geo):
+    """REIN RECHNEND: nur die Lage-Felder des Bedienfeld-geo (screenX/Y, outerWidth/Height, dpr) — None ohne."""
+    if not isinstance(geo, dict):
+        return None
+    out = {k: geo.get(k) for k in ("screenX", "screenY", "outerWidth", "outerHeight", "dpr")}
+    return out if all(isinstance(out[k], (int, float)) for k in ("screenX", "screenY", "outerWidth", "outerHeight")) else None
+
+
 def _tabs_liste(jetzt):
     """Diagnose fuer GET /positions: je Tab Rolle, Alter, Quelle, Sicht/Fokus, Version, Konto."""
     out = []
@@ -603,7 +611,9 @@ def _tabs_liste(jetzt):
                     "version": t.get("version"),
                     "konto": ((t.get("stand") or {}).get("konto") if t.get("rolle") == "broker" else None),
                     "blind": bool(t.get("blind_grund")),
-                    "login_im_feed": (t.get("login_im_feed") or {}).get("konto") if t.get("login_im_feed") else None})
+                    "login_im_feed": (t.get("login_im_feed") or {}).get("konto") if t.get("login_im_feed") else None,
+                    # 0.9.5: Fensterlage des Tabs (Puls schliesst das Fenster des Feed-Tabs bei der Fenstersuche aus)
+                    "geo": _geo_kurz((t.get("bf") or {}).get("geo"))})
     return out
 
 
