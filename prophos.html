@@ -6341,6 +6341,8 @@
             </div>
           </div>
 
+          <!-- Balance-Nachlesung steht aus (F5, 26.09.2026) — eigene Zeile, der Auto-P&L-Ablauf überschreibt tradeCompleteMsg -->
+          <div id="tc-nachlese-hint" style="font-size:12px;color:var(--sub);margin-top:6px" hidden></div>
           <div class="modal-msg" id="tradeCompleteMsg"></div>
         </div>
         <div class="modal-foot">
@@ -19910,12 +19912,15 @@
   // Handelstag gelten weiter (danach steht Today's P&L auf dem neuen Tag — eine Lesung wäre falsch, nicht nur spät).
   function tvV2EndlesungGrund(p, jetzt, force){
     if(!p || p.route !== 'tvv2') return 'kein Orbit-V2-/Winning-Day-Plan'
-    if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
+    // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
+    const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
+    // „Erledigt" bleibt jederzeit möglich (F5, Master 26.09.2026 nach Befund F4: bei 1–150 min Wartezeit ist Erledigt vor der
+    // Nachlesung der Normalfall) — mit Start-Balance liest Puls auch einen erledigten Plan nach, höchstens 12 h nach dem Ende
+    if(p.status !== 'review' && !(p.status === 'completed' && mitBalance)) return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
     if((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls') return 'Ende ist schon gelesen'
-    // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
-    const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
+    if(p.status === 'completed'){ const e = Date.parse(fin.at || p.endedAt || '') || 0; if(!e || jetzt - e > TV_NACHLESE_ERLEDIGT_MAX_MS) return 'erledigt und Ende über 12 h her — keine Nachlesung mehr' }
     const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
     if(!mitBalance && tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
     if(force) return ''
@@ -19941,12 +19946,34 @@
   }
   // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
   const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
+  const TV_NACHLESE_ERLEDIGT_MAX_MS = 12 * 3600000   // erledigte Pläne: Nachlesung höchstens 12 h nach dem Ende (F5)
+  /* FOLGETRADE (F5, Master 26.09.2026 nach Befund F4: „Hat ein späterer Plan desselben Kontos schon tv.balance_start, gilt der als
+   * balance_end dieses Trades"). Die Start-Balance des nächsten Trades IST die End-Balance dieses — exakter als eine Nachlesung, die
+   * nach bis zu 150 min schon den nächsten Trade mitzählen würde. REIN RECHNEND: frühester Orbit-V2-Plan desselben Kontos, der NACH
+   * dem Ende begonnen hat -> {planId, balance (null = ohne Start-Balance), st} | null */
+  function tvV2FolgeBalance(plan, plaene){
+    const fin = plan && plan.mt5Baseline && plan.mt5Baseline.final
+    const ende = Date.parse((fin && fin.at) || (plan && plan.endedAt) || '') || 0
+    if(!ende) return null
+    let best = null
+    for(const q of (plaene || [])){
+      if(!q || String(q.id) === String(plan.id) || q.route !== 'tvv2' || String(q.masterAccountId) !== String(plan.masterAccountId)) continue
+      const tv = q.mt5Baseline && q.mt5Baseline.tv
+      const st = Date.parse(q.startedAt || (tv && tv.at) || '') || 0
+      if(!st || st <= ende) continue
+      const bs = (tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start)) ? tv.balance_start : null
+      if(!best || st < best.st) best = { planId: String(q.id), balance: bs, st }
+    }
+    return best
+  }
+  window._tvV2FolgeBalance = tvV2FolgeBalance
   // Ausstehende Balance-Nachlesung des Kontos (jüngster beendeter Orbit-V2-Plan in „Überprüfen" mit Start-Balance, ohne balance_end).
   // Pläne ohne Start-Balance zählen nicht (Befund F4: nach Tageswechsel nicht lesbar). -> {ab, text, kurz} | null
   function tvV2NachleseOffen(accountId, jetzt){
     let _tp = []; try{ _tp = tradePlans }catch(_){}
     jetzt = jetzt || Date.now()
-    const p = (_tp || []).filter(x => x && x.route === 'tvv2' && x.status === 'review' && String(x.masterAccountId) === String(accountId))
+    const p = (_tp || []).filter(x => x && x.route === 'tvv2' && String(x.masterAccountId) === String(accountId)
+        && (x.status === 'review' || (x.status === 'completed' && jetzt - (Date.parse(x.endedAt || '') || 0) <= TV_NACHLESE_ERLEDIGT_MAX_MS)))
       .sort((a, b) => (Date.parse(b.endedAt || '') || 0) - (Date.parse(a.endedAt || '') || 0))[0]
     const b = p && p.mt5Baseline, fin = b && b.final
     if(!fin || !(b.tv && typeof b.tv.balance_start === 'number') || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))) return null
@@ -19982,6 +20009,25 @@
     // 15–25 s nach dem Ende: der Broker bucht den Fill, TradingView zieht die Zusammenfassung nach
     setTimeout(() => { tvV2EndlesungVersuch(pid).catch(e => console.warn('[endlesung]', e)) }, 15000 + Math.random() * 10000)
   }
+  // Master-P&L aus der Balance nachtragen (aus tvV2EndlesungVersuch herausgezogen, F5 26.09.2026 — Lesung UND Folgetrade nutzen es).
+  // Nur ein leeres Feld oder die Schätzung (TP/SL-Level, Vorbelegung) wird ersetzt; eine von Hand eingetragene Zahl bleibt, die
+  // Differenz zeigt Live Trades (P&L exakt). Gilt für „Überprüfen" UND erledigte Pläne. -> {m, res}
+  async function tvV2MasterPlAusBalance(pid, pBasis, fin0, neu){
+    const i = tradePlans.findIndex(x => String(x.id) === pid)
+    const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : pBasis, { mt5Baseline: neu })
+    const res = await _autoPnlFetchTvV2(planNeu)
+    const m = res && res.masterPnl
+    if(m != null){
+      const sz = fin0 && fin0.master_pl_schaetzung
+      let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).in('status', ['review', 'completed'])
+      q = (typeof sz === 'number' && isFinite(sz)) ? q.or(`master_pl.is.null,master_pl.eq.${sz}`) : q.is('master_pl', null)
+      const { data: d2, error: e2 } = await q.select('*')
+      if(e2) console.warn('[endlesung] master_pl', e2.message || e2)
+      else if(d2 && d2[0]){ const j = tradePlans.findIndex(x => String(x.id) === pid); if(j >= 0) tradePlans[j] = rowToPlan(d2[0]) }
+    }
+    try{ _autoPnlCache.delete(pid) }catch(_){}
+    return { m: m == null ? null : m, res }
+  }
   // -> immer {ok, msg} (nie werfen) — für den Knopf „Jetzt lesen" und den Signal-Empfänger
   async function tvV2EndlesungVersuch(pid, opts){
     pid = String(pid)
@@ -20000,9 +20046,25 @@
       const versuch = (Number(fin0.puls_versuche) || (fin0.puls_at ? 1 : 0)) + 1
       const konto = tvV2Konto(p0)
       let _tp = []; try{ _tp = tradePlans }catch(_){}
-      const stopp = !konto ? 'Master-Konto ohne External ID' : tvV2SpaetererTrade(p0, fin0, _tp) ? 'Nach dem Ende hat auf dem Konto ein weiterer Trade begonnen — Today\'s P&L nicht mehr eindeutig' : ''
+      const mitBal = !!(p0.mt5Baseline.tv && typeof p0.mt5Baseline.tv.balance_start === 'number')
+      // Schreiben mit Status-Guard review ODER completed (F5: Erledigt vor der Nachlesung erlaubt; wechselt der Status während der Lesung, zweiter Versuch)
+      const finPatch = async patch => { let n = await baselinePatchIn(pid, 'final', patch, p0.status === 'completed' ? 'completed' : 'review'); if(!n && p0.status === 'review') n = await baselinePatchIn(pid, 'final', patch, 'completed'); return n }
+      const folge = mitBal ? tvV2FolgeBalance(p0, _tp) : null
+      if(folge && folge.balance != null){
+        // Folgetrade kennt die End-Balance schon — keine Puls-Lesung nötig
+        let neuF = null
+        try{ neuF = await finPatch({ balance_end: folge.balance, balance_quelle: 'folgetrade', folge_plan: folge.planId, puls_fehler: null, puls_at: new Date().toISOString() }) }
+        catch(e){ return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
+        if(!neuF) return { ok: false, msg: 'Plan weder in „Überprüfen" noch erledigt — nichts geschrieben' }
+        const rf = await tvV2MasterPlAusBalance(pid, p0, fin0, neuF)
+        try{ renderTradePlans() }catch(_){}
+        return { ok: true, msg: `Balance nachher aus dem Folgetrade (${folge.balance})${rf.m != null ? ' · Master-P&L ' + rf.m : ''}` }
+      }
+      const stopp = !konto ? 'Master-Konto ohne External ID'
+        : (mitBal && folge) ? 'Nach dem Ende lief auf dem Konto ein weiterer Trade ohne Start-Balance — die Balance zählt ihn mit, P&L bitte selbst prüfen'
+        : (!mitBal && tvV2SpaetererTrade(p0, fin0, _tp)) ? 'Nach dem Ende hat auf dem Konto ein weiterer Trade begonnen — Today\'s P&L nicht mehr eindeutig' : ''
       if(stopp){
-        try{ await baselinePatchIn(pid, 'final', { puls_at: new Date().toISOString(), puls_fehler: stopp, puls_aufgegeben: true }, 'review') }catch(_){}
+        try{ await finPatch({ puls_at: new Date().toISOString(), puls_fehler: stopp, puls_aufgegeben: true }) }catch(_){}
         return { ok: false, msg: stopp }
       }
       const w = (typeof tpOrbitWerte === 'function') ? tpOrbitWerte(p0) : { symbol: p0.masterSymbol || '', dir: p0.richtung }
@@ -20035,9 +20097,11 @@
       // (B) Exit-Fill aus der Order-Historie (Bot, Ende-Modus) — unabhängig davon, ob Today's P&L gelesen wurde
       if(r && r.exit_fill && typeof r.exit_fill === 'object') patch.exit_fill = tvJsonKurz(r.exit_fill, 400)
       else if(r && r.exit_diag && Object.keys(r.exit_diag).length) patch.exit_diag = tvJsonKurz(r.exit_diag, 800)
+      // Während der Lesung (bis ~3 min Warten) kann ein Folgetrade mit Start-Balance dazugekommen sein → dessen Wert gilt (F5)
+      if(erg.ok && mitBal){ let _tp2 = []; try{ _tp2 = tradePlans }catch(_){}; const f2 = tvV2FolgeBalance(p0, _tp2); if(f2 && f2.balance != null) Object.assign(patch, { balance_end: f2.balance, balance_quelle: 'folgetrade', folge_plan: f2.planId, balance_gelesen: erg.balance }) }
       let neu = null
-      try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
-      if(!neu) return { ok: false, msg: 'Plan ist nicht mehr in „Überprüfen" — nichts geschrieben' }
+      try{ neu = await finPatch(patch) }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
+      if(!neu) return { ok: false, msg: 'Plan weder in „Überprüfen" noch erledigt — nichts geschrieben' }
       if(erg.ok && erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity }, nowIso)   // Live-Balance am Konto
       // Einstiegs-Fill an tv.einstieg_fill, falls noch nicht da
       if(r && r.einstieg_fill && typeof r.einstieg_fill === 'object' && !(neu.tv && neu.tv.einstieg_fill)){
@@ -20052,19 +20116,9 @@
         try{ renderTradePlans() }catch(_){}
         return { ok: false, msg: `Versuch ${versuch}: ${erg.fehler}${exitTxt}` }
       }
-      const i = tradePlans.findIndex(x => String(x.id) === pid)
-      const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : p1, { mt5Baseline: neu })
-      const res = await _autoPnlFetchTvV2(planNeu)
-      const m = res && res.masterPnl
+      const { m, res } = await tvV2MasterPlAusBalance(pid, p1, fin0, neu)
       let msg = erg.balance != null ? `Balance ${erg.balance}${exitTxt}` : `Today's P&L ${erg.today}${exitTxt}`
       if(m != null){
-        // nur die Schätzung ersetzen (oder ein leeres Feld) — eine inzwischen eingetragene Zahl bleibt stehen
-        const sz = fin0.master_pl_schaetzung
-        let q = supabase.from('trade_plans').update({ master_pl: m }).eq('id', pid).eq('status', 'review')
-        q = (typeof sz === 'number' && isFinite(sz)) ? q.or(`master_pl.is.null,master_pl.eq.${sz}`) : q.is('master_pl', null)
-        const { data: d2, error: e2 } = await q.select('*')
-        if(e2) console.warn('[endlesung] master_pl', e2.message || e2)
-        else if(d2 && d2[0]){ const j = tradePlans.findIndex(x => String(x.id) === pid); if(j >= 0) tradePlans[j] = rowToPlan(d2[0]) }
         msg = `Master-P&L ${m >= 0 ? '+' : '−'}${Math.abs(m).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ aus TradingView${exitTxt}`
         if(typeof atToast === 'function') atToast(`✓ ${name}: ${msg}`, 'end')
       } else if(res && res.hinweis){
@@ -33252,7 +33306,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.634'
+  const OS_TAB_BUILD = '2026-09-22.635'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40340,6 +40394,16 @@
       }
     }
 
+    // Balance-Nachlesung steht noch aus (F5, 26.09.2026): Erledigt ist trotzdem möglich — Puls liest nach und trägt den P&L exakt
+    // nach (nur leeres Feld oder Schätzung). Ruhiger Hinweis, gleiche Rechnung wie Live Trades/Accounts (tvV2NachleseAb).
+    { const b = p.mt5Baseline || {}, fin = b.final
+      if(p.route === 'tvv2' && fin && b.tv && typeof b.tv.balance_start === 'number' && !(typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) && typeof tvV2NachleseAb === 'function'){
+        const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt), hEl = document.getElementById('tc-nachlese-hint')
+        if(ab && hEl){
+          hEl.textContent = ab > Date.now() ? `Balance-Nachlesung ab ${new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — P&L wird dann exakt nachgetragen` : 'Balance-Nachlesung läuft — P&L wird dann exakt nachgetragen'
+          hEl.hidden = false
+        }
+      } else { const hEl = document.getElementById('tc-nachlese-hint'); if(hEl) hEl.hidden = true } }
     // Status-Auswahl initialisieren (3-Radio + Account-Picker)
     if(typeof tcPopulateStatusAccountPicker === 'function'){
       tcPopulateStatusAccountPicker(p)
