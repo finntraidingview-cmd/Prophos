@@ -6410,10 +6410,7 @@
                 <option value="live">Live</option>
               </select>
             </div>
-            <div class="field">
-              <label>Account-Größe (Balance)</label>
-              <input type="number" class="input mono" id="suc-balance" step="1000" placeholder="100000">
-            </div>
+            <!-- „Account-Größe (Balance)" raus (26.09.2026, F9, Finn: „manuelle Balance komplett weg") — Größe kommt aus dem Namen -->
             <div class="field">
               <label>Kosten</label>
               <input type="number" class="input mono" id="suc-cost" step="1" value="0" placeholder="0">
@@ -9891,7 +9888,7 @@
           <input class="input mono" id="bulk-size" type="number" step="1000" placeholder="z.B. 50000" autocomplete="off">
         </div>
         <div class="field">
-          <label>Anfangs-Balance ($)</label>
+          <label>Kontogröße ($)</label>
           <input class="input mono" id="bulk-balance" type="number" step="0.01" placeholder="= Account-Größe" autocomplete="off">
         </div>
         <div class="field">
@@ -24961,7 +24958,6 @@
 
     // Pre-fill: gleiche Firma, Vorschlag-Name, gleiche Balance, gleicher Max Drawdown
     document.getElementById('suc-firm').value = acc.firm || ''
-    document.getElementById('suc-balance').value = acc.initialBalance || ''
     document.getElementById('suc-cost').value = '0'
     document.getElementById('suc-maxdd').value = acc.maxDrawdown != null ? acc.maxDrawdown : ''
     document.getElementById('suc-max-daily-dd').value    = acc.maxDailyDrawdown != null ? acc.maxDailyDrawdown : ''
@@ -25104,7 +25100,6 @@
     const name = document.getElementById('suc-name').value.trim()
     const firm = document.getElementById('suc-firm').value.trim()
     const type = document.getElementById('suc-type').value
-    const balance = parseFloat(document.getElementById('suc-balance').value) || 0
     const cost = parseFloat(document.getElementById('suc-cost').value) || 0
     const maxDrawdownRaw = parseFloat(document.getElementById('suc-maxdd').value)
     const maxDrawdown = !isNaN(maxDrawdownRaw) && maxDrawdownRaw > 0 ? maxDrawdownRaw : null
@@ -25133,7 +25128,6 @@
       const newAcc = {
         name, firm,
         type,
-        initialBalance: balance,
         purchaseCost: cost,
         maxDrawdown,
         maxDailyDrawdown: !isNaN(sucMaxDailyDd) && sucMaxDailyDd > 0 ? sucMaxDailyDd : null,
@@ -25287,6 +25281,8 @@
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
       // Live-Balance aus TradingView (26.09.2026, Puls-Lesung bei Start/Nachlesung) — jüngste Quelle für die Hedge-Staffel
       tvBalance: row.tv_balance != null ? Number(row.tv_balance) : null, tvBalanceAt: row.tv_balance_at || null,
+      // Kontogröße (26.09.2026, F9): starting_balance statt der manuellen Balance — Rückfall ist der Kontoname („150k")
+      startingBalance: row.starting_balance != null ? Number(row.starting_balance) : null,
       // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
       // hinzufügen' — manche Fundeds stehen noch auf Anfangs-Balance"): nur so markierte Konten fährt der Farmer.
       wdFarm:         !!row.wd_farm,
@@ -27336,7 +27332,7 @@
           name,
           firm,
           account_type:   type,
-          balance:        initialBalance,
+          // manuelle Balance nicht mehr schreiben (F9) — „Kontogröße" landet nur in starting_balance
           account_size:   accountSize,
           starting_balance: initialBalance,
           purchase_cost:  purchaseCost,
@@ -28314,8 +28310,12 @@
     if(overviewEmpty) overviewEmpty.style.display = 'none'
 
     const live = accounts.filter(a => a.type === 'live')
+    // Gesamt-Equity (F9, 26.09.2026): MT5-Balance → TradingView-Balance (Futures) → Konto zählt nicht mit; keine manuelle Balance.
+    // Hinweis: #kpi-total-equity steht derzeit in keinem Markup — die Funktion kehrt oben früh zurück.
+    let ohneLive = 0
     const totalEq = accounts.reduce((sum, a) => {
-      const v = (a.ma && a.ma.balance != null) ? a.ma.balance : (a.initialBalance || 0)
+      const v = (a.ma && a.ma.balance != null) ? a.ma.balance : (a.tvBalance != null ? a.tvBalance : null)
+      if(v == null){ ohneLive++; return sum }
       return sum + v
     }, 0)
     const breakdown = []
@@ -28329,6 +28329,7 @@
     if(counts.challenge) breakdown.push(`${counts.challenge} Challenge`)
 
     kpiEquity.textContent = fmtMoney(totalEq)
+    kpiEquity.title = ohneLive ? `${ohneLive} Konten ohne Live-Wert — nicht in der Summe` : ''
     kpiActive.textContent = String(accounts.length)
     if(kpiActiveSub) kpiActiveSub.textContent = breakdown.join(' · ') || 'Über alle Accounts'
     kpiLive.textContent   = String(live.length)
@@ -33407,7 +33408,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.640'
+  const OS_TAB_BUILD = '2026-09-22.642'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36172,10 +36173,12 @@
      * Format: "+$3.521" / "−$98" / "" wenn keine Aussage möglich.
      */
     function tpFormatDelta(a, bal){
-      if(!a || !isFinite(a.initialBalance) || !isFinite(bal.val)) return ''
+      // Delta zur Kontogröße (starting_balance, sonst Name „150k") statt zur manuellen Balance (F9, 26.09.2026)
+      const groesse = (a && Number(a.startingBalance) > 0) ? Number(a.startingBalance) : (a && typeof tpKontoGroesseAusName === 'function' ? tpKontoGroesseAusName(a.name) : 0)
+      if(!a || !(groesse > 0) || !isFinite(bal.val)) return ''
       // Nur sinnvoll wenn Live-Daten vorliegen, sonst ist Delta immer 0
       if(bal.src === 'init') return ''
-      const delta = bal.val - a.initialBalance
+      const delta = bal.val - groesse
       if(Math.abs(delta) < 1) return ''
       const sym = bal.ccy === 'EUR' ? '€' : (bal.ccy === 'GBP' ? '£' : '$')
       const abs = Math.round(Math.abs(delta)).toLocaleString('de-DE')
@@ -37832,7 +37835,8 @@
     const [tpVon, tpBis] = tpVorplanSpanne(...(funded ? (((regeln.fu || {})[firma]) || TP_VP_VORGABE.fu.sonst) : (regeln.ch || TP_VP_VORGABE.ch)))
     let slaveEur, puffer = null, plus = null, live = null, groesse = 0, basis, hinweis = ''
     if(funded){
-      const startRoh = Number(acc.initialBalance) || 0
+      // Kontogröße aus starting_balance, sonst aus dem Namen — accounts.balance (manuelle Balance) wird nicht mehr gelesen (F9, 26.09.2026)
+      const startRoh = Number(acc.startingBalance) || 0
       groesse = startRoh > 0 ? startRoh : tpKontoGroesseAusName(acc.name)
       live = (typeof o.live === 'number' && isFinite(o.live)) ? o.live : null
       if(live == null){ plus = 0; hinweis = 'kein Live-Stand — kleinste Stufe' }
@@ -38521,7 +38525,7 @@
    *    Staffel über der Kontogröße, TP zufällig aus der Firmen-Spanne — außer das Konto hat eine TP-Vorgabe).
    *    Live-Balance aus dem dup_live-Spiegel (RPC); fehlt sie, kleinste Stufe mit Hinweis, und der PC-Tab
    *    zieht den Slave-Betrag nach, sobald er den Live-Stand hat. ── */
-  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, initialBalance: kd.balance > 0 ? kd.balance : 0 } }
+  function wdAccLike(kd){ return { id: kd.id, name: kd.name, firm: kd.firm, type: kd.type, externalId: kd.ext, maxDrawdown: kd.max_drawdown, startingBalance: kd.starting_balance > 0 ? kd.starting_balance : null } }   // Größe aus starting_balance/Name, nie balance (F9)
   async function wdPlaeneAnlegen(tag){
     const d = _wd.daten
     if(!d || !d.rail) return { angelegt: 0, fehler: ['Railway nicht erreichbar — Pläne legen dann die PC-Tabs an (müssen offen sein)'] }
