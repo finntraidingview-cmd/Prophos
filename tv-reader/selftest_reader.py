@@ -369,6 +369,20 @@ def main():
           == {"screenX": 1, "screenY": 2, "outerWidth": 3, "outerHeight": 4, "dpr": 1.5}
           and rs._geo_kurz(None) is None and rs._geo_kurz({"screenX": "x"}) is None, "geo je Tab: nur Lage-Felder, sonst None")
 
+    # 0.9.6: keine Schein-Kerzen (Wochenende, endofday, wiederholte Stichprobe)
+    tz = rs._tick_zaehlt
+    mm = {}
+    check(not tz(mm, "MNQ", 30889.25, 1759000000, "endofday", True) and not tz(mm, "MNQ", 30889.25, 1759000000, "delayed_streaming_600", True),
+          "Tick: Modus endofday/delayed → keine Kerze")
+    check(not tz(mm, "MNQ", 30889.25, 1759000000, "streaming", False), "Tick: Markt zu → keine Kerze")
+    check(tz(mm, "MNQ", 30889.25, 1759000000, "streaming", True) and not tz(mm, "MNQ", 30889.25, 1759000000, "streaming", True)
+          and not tz(mm, "MNQ", 30889.25, 1759000000, "streaming", True), "Tick: gleicher Preis ohne neuen Quote → nur einmal")
+    check(tz(mm, "MNQ", 30889.50, 1759000000, "streaming", True) and tz(mm, "MNQ", 30889.50, 1759000060, "streaming", True)
+          and tz(mm, "NQ", 30889.50, 1759000060, "streaming", True), "Tick: neuer Preis bzw. neuer Quote-Zeitstempel → zaehlt, je Wurzel getrennt")
+    check(not tz(mm, "MNQ", "x", None, "streaming", True), "Tick: unlesbarer Preis → nein")
+    # Samstag 19:40 UTC: Markt zu (dieselbe Regel, mit der der Server die Ticks jetzt sperrt)
+    check(not rs.cme_offen(_t("2026-09-26T19:40:00")) and rs.cme_offen(_t("2026-09-28T14:00:00")), "Sa 19:40 UTC zu, Mo 14:00 UTC offen")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

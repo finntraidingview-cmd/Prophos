@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.5"
+READER_VERSION = "0.9.6"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -237,6 +237,33 @@ def _tick_kerze_in_ring(ring, wurzel, symbol, preis, jetzt_s, maximum=KERZEN_MAX
             for kk in sorted(r)[:len(r) - maximum]:
                 del r[kk]
     return ring, True
+
+
+# ── Keine Schein-Kerzen (0.9.6, 26.09.2026, Befund Koordination B7): Sa 19:40 UTC auf pc-usq1i6 schrieb der Reader JEDE
+# Minute eine Tick-Kerze o=h=l=c=30889.25 (Freitags-Schluss, modus 'endofday', ticks 127/240) — die 250-ms-Stichproben
+# des unveraenderten Quotes zaehlten als Ticks. Folgen: flache Linie uebers Wochenende, die „juengste Kerze" war immer
+# frisch (Markt-zu-Hinweis griff nicht). Jetzt entsteht eine Tick-Kerze nur bei offenem CME-Markt, nicht im Modus
+# endofday/delayed, und nur aus einem ECHTEN Tick (neuer Preis oder neuer Quote-Zeitstempel lp_time).
+_tick_merk = {}      # wurzel -> (preis, lp_time) des letzten gezaehlten Ticks
+
+
+def _tick_zaehlt(merk, wurzel, preis, lp_time, modus, markt_offen):
+    """REIN RECHNEND (testbar): darf dieser Quote eine Tick-Kerze schreiben/fortschreiben? merk wird fortgeschrieben."""
+    if not markt_offen:
+        return False
+    m = str(modus or "").lower()
+    if m.startswith("endofday") or m.startswith("delayed"):
+        return False
+    try:
+        p = round(float(preis), 4)
+    except (TypeError, ValueError):
+        return False
+    alt = merk.get(wurzel)
+    neu = (p, lp_time)
+    if alt == neu:
+        return False                       # dieselbe Stichprobe noch einmal — kein Tick
+    merk[wurzel] = neu
+    return True
 
 
 def _kerzen_liste(ring, seit=None):
@@ -979,9 +1006,11 @@ class Handler(BaseHTTPRequestHandler):
                 for w, k in _kurse.items():
                     if k.get("quelle") == "ws" and k.get("empf_s") == jetzt:
                         _paket_zaehlen(_paket_zaehler, w, jetzt)   # 0.9.1: Pakete je Minute, auch fuer Chart-Serien
-                        _kerzen, ok = _tick_kerze_in_ring(_kerzen, w, k.get("symbol_text") or w, k.get("preis"), jetzt)
-                        if ok:
-                            _kerzen_s = jetzt
+                        # 0.9.6: nur echte Ticks bei offenem Markt (keine Schein-Kerzen am Wochenende/aus endofday)
+                        if _tick_zaehlt(_tick_merk, w, k.get("preis"), k.get("lp_time"), k.get("modus"), cme_offen(jetzt)):
+                            _kerzen, ok = _tick_kerze_in_ring(_kerzen, w, k.get("symbol_text") or w, k.get("preis"), jetzt)
+                            if ok:
+                                _kerzen_s = jetzt
             if daten.get("reload_grund"):
                 _reload_grund = str(daten.get("reload_grund"))[:120]
                 _reload_s = time.time()
