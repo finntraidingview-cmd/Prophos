@@ -18797,6 +18797,42 @@
     const acc = (accounts || []).find(a => String(a.id) === String(plan.masterAccountId))
     return (acc && acc.externalId) ? String(acc.externalId).trim() : ''
   }
+  /* BALANCE STATT TODAY'S P&L (26.09.2026, Finn: „bei jeder Order holen wir uns den Wert Balance … 1–30 min nach dem Trade loggt Puls sich
+   * noch mal ein und liest die neue Live-Balance — daraus Take Profit und P&L"). Befund: das Tradovate-Panel in TradingView zeigt in der
+   * Kopfzeile nur „Account Balance · Equity · Profit" — ein „Today's P&L" gibt es dort nicht, deshalb scheiterte jede Endlesung
+   * („kein Today's P&L in der Zusammenfassung", 25.09.). Balance = nur Realisiertes, ändert sich während eines offenen Trades nicht;
+   * Equity = Balance + offener P&L. REIN RECHNEND: summary {Label: Text} → {balance, equity} (Zahlen oder null). */
+  function tvGeldText(v){
+    let t = String(v == null ? '' : v).trim(); if(!t) return null
+    const minus = /^[−\-(]/.test(t) || /\)$/.test(t)
+    t = t.replace(/[^\d.,]/g, ''); if(!/\d/.test(t)) return null
+    const lk = t.lastIndexOf(','), lp = t.lastIndexOf('.')
+    if(lk > -1 && lp > -1) t = lk > lp ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '')          // 163,023.16 / 163.023,16
+    else if(lk > -1) t = (t.length - lk - 1 === 3) ? t.replace(/,/g, '') : t.replace(',', '.')                    // 163,023 / 12,5
+    else if(lp > -1 && t.length - lp - 1 === 3 && (t.match(/\./g) || []).length > 1) t = t.replace(/\./g, '')  // 163.023.000
+    const n = Number(t); return isFinite(n) ? (minus ? -n : n) : null
+  }
+  function tvBalanceAus(summary){
+    const out = { balance: null, equity: null }
+    if(!summary || typeof summary !== 'object') return out
+    for(const [k, v] of Object.entries(summary)){
+      const key = String(k).toLowerCase()
+      if(out.balance == null && /(account\s*balance|^balance$|kontostand|saldo)/.test(key)) out.balance = tvGeldText(v)
+      else if(out.equity == null && /(equity|eigenkapital)/.test(key)) out.equity = tvGeldText(v)
+    }
+    return out
+  }
+  window._tvBalanceAus = tvBalanceAus
+  // Live-Balance ans Konto (Spalten aus sql/2026-09-26_accounts_tv_balance.sql) — der PC-Tab des Besitzers darf das eigene Konto schreiben.
+  // Fehlt die Spalte noch, bleibt es still (nur Warnung): der Trade darf daran nie hängen.
+  async function tvKontoBalanceSchreiben(accountId, b, at){
+    if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && b.balance > 1000)) return
+    try{
+      const { error } = await supabase.from('accounts').update({ tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString() }).eq('id', accountId)
+      if(error) console.warn('[tv-balance] Konto', error.message || error)
+      else { const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = at || new Date().toISOString() } }
+    }catch(e){ console.warn('[tv-balance] Konto', e) }
+  }
   // Start-Baseline direkt nach dem bewiesenen Kauf-Klick: Today's P&L JETZT, als Startwert. Ohne Antwort
   // oder ohne Zahl bleibt today_pnl_start null — kein Schätzwert („Beweis oder leer"). Liefert immer ein
   // tv-Objekt (Konto + Datum + Zeit), damit später sichtbar ist, WANN gestartet wurde.
@@ -18811,6 +18847,12 @@
       const zahlOk = r && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)
       if(zahlOk && (r.ok || r.code === 'tabelle_unklar')){ tv.today_pnl_start = r.today_pnl; if(!r.ok) tv.start_ohne_tabelle = true }
       else tv.grund = ((r && (r.code || (r.ok ? 'kein_today_pnl' : 'unbekannt'))) || 'unbekannt') + (r && r.msg ? ': ' + String(r.msg).slice(0, 300) : '')   // Meldung mit (24.09.2026 abends: in der DB stand nur 'absturz')
+      // Balance beim Platzieren (26.09.2026): steht in derselben Zusammenfassung — Grundlage für P&L = Balance nachher − vorher
+      const b = tvBalanceAus(r && r.summary)
+      if(b.balance != null && (!r.konto_aktiv || String(r.konto_aktiv).includes(tv.konto))){
+        tv.balance_start = b.balance; tv.equity_start = b.equity
+        tvKontoBalanceSchreiben(plan.masterAccountId, b, tv.at)
+      }
     }catch(e){ tv.grund = String((e && e.message) || e) }
     if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
     return tv
@@ -19079,6 +19121,13 @@
   function _autoPnlTvV2Gelesen(plan){
     const base = (plan && plan.mt5Baseline) || null
     const tv = (base && base.tv) || null, fin = (base && base.final) || null
+    // (0) Balance nachher − vorher (26.09.2026, Finn: „wenn wir einen Trade rein- bzw. rausgehen, die Differenz — daraus Take Profit und
+    // P&L"): beide von Puls gelesen, tagesunabhängig. Schlägt Today's P&L, weil das Tradovate-Panel dieses Feld gar nicht zeigt.
+    const bs = tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start) ? tv.balance_start : null
+    const be = fin && typeof fin.balance_end === 'number' && isFinite(fin.balance_end) ? fin.balance_end : null
+    if(bs != null && be != null)
+      return { slavePnl: (plan && plan.hedgeEur > 0) ? null : 0, slaveCcy: '', masterPnl: Number((be - bs).toFixed(2)), masterCcy: '$',
+               hinweis: `aus der Balance (TradingView): ${be.toLocaleString('de-DE', { minimumFractionDigits: 2 })} − ${bs.toLocaleString('de-DE', { minimumFractionDigits: 2 })}` }
     if(!fin || typeof fin.today_pnl !== 'number' || !isFinite(fin.today_pnl)){
       // Ende aus dem Hedge-Level (25.09.2026, hedgePlanAufReview): vorläufiger Master-P&L = ±TP/SL in $, gekennzeichnet
       if(fin && fin.quelle === 'level' && typeof fin.master_pl_schaetzung === 'number' && isFinite(fin.master_pl_schaetzung))
@@ -19738,14 +19787,17 @@
   function tvV2EndlesungAuswerten(r, symbol, dir){
     if(!r) return { ok: false, fehler: 'keine Antwort' }
     const zahl = (typeof r.today_pnl === 'number' && isFinite(r.today_pnl)) ? r.today_pnl : null
+    // Balance (26.09.2026): reicht allein — Today's P&L gibt es im Tradovate-Panel nicht; flach = Tabelle ohne Position ODER Equity = Balance
+    const b = tvBalanceAus(r.summary), bal = b.balance
+    const flachEq = bal != null && b.equity != null && Math.abs(b.equity - bal) < 0.005
     if(r.ok){
       if(r.alter_s == null || !(Number(r.alter_s) < 30)) return { ok: false, fehler: 'Lesung nicht frisch' }
       const pos = (r.positionen || []).find(x => x && tvSymbolPasst(x.symbol, symbol) && (!dir || !tvSeiteNorm(x.seite) || tvSeiteNorm(x.seite) === dir))
-      if(pos) return { ok: false, offen: true, fehler: 'Master-Position laut Puls noch offen' }
-      if(zahl == null) return { ok: false, fehler: "kein Today's P&L in der Zusammenfassung" }
-      return { ok: true, today: zahl, flach: 'tabelle' }
+      if(pos) return { ok: false, offen: true, fehler: 'Master-Position laut Puls noch offen', balance: bal, equity: b.equity }
+      if(zahl == null && bal == null) return { ok: false, fehler: "weder Balance noch Today's P&L in der Zusammenfassung" }
+      return { ok: true, today: zahl, balance: bal, equity: b.equity, flach: 'tabelle' }
     }
-    if(r.code === 'tabelle_unklar' && zahl != null && tvUnrealNull(r.summary)) return { ok: true, today: zahl, flach: 'unrealized_0' }
+    if(r.code === 'tabelle_unklar' && (zahl != null || bal != null) && (tvUnrealNull(r.summary) || flachEq)) return { ok: true, today: zahl, balance: bal, equity: b.equity, flach: flachEq ? 'equity_gleich_balance' : 'unrealized_0' }
     return { ok: false, fehler: String(r.code || 'fehler') + (r.msg ? ': ' + String(r.msg).slice(0, 220) : '') }
   }
   // REIN RECHNEND: frühere Trades desselben Kontos am selben Handelstag (vor diesem Ende beendet) → {anzahl, summe, fehlt}
@@ -19782,10 +19834,17 @@
     if(p.status !== 'review') return `Plan ist nicht in „Überprüfen" (Status ${p.status || '?'})`
     const fin = p.mt5Baseline && p.mt5Baseline.final
     if(!fin) return 'Plan hat noch kein Ende'
-    if((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || fin.quelle === 'puls') return "Today's P&L ist schon gelesen"
+    if((typeof fin.today_pnl === 'number' && isFinite(fin.today_pnl)) || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end)) || fin.quelle === 'puls') return 'Ende ist schon gelesen'
+    // Mit Start-Balance zählt der Handelstag nicht (Balance ist tagesunabhängig) — nur Today's P&L springt über Nacht auf 0
+    const mitBalance = !!(p.mt5Baseline && p.mt5Baseline.tv && typeof p.mt5Baseline.tv.balance_start === 'number')
     const endeTag = fin.datum || tvV2Handelstag(fin.at || p.endedAt || jetzt)
-    if(tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
+    if(!mitBalance && tvV2Handelstag(jetzt) !== endeTag) return `Handelstag ${endeTag} ist vorbei — Today's P&L zählt inzwischen den neuen Tag`
     if(force) return ''
+    // Nachlesung 1–30 min nach dem Ende (26.09.2026, Finn: „Zufallsprinzip, 1 bis 30 Minuten nach dem Trade") — je Plan fest aus der ID
+    // gewürfelt, damit alle Tabs dieselbe Zeit sehen und nicht zweimal einloggen. Nur vor dem ersten Versuch.
+    const vers0 = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
+    const endeMs = Date.parse(fin.at || p.endedAt || '') || 0
+    if(!vers0 && endeMs && jetzt < endeMs + tvV2NachleseMs(p.id)) return `Nachlesung ab ${new Date(endeMs + tvV2NachleseMs(p.id)).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} (1–30 min Zufall)`
     if(fin.puls_aufgegeben) return 'aufgegeben: ' + String(fin.puls_fehler || '')
     const versuche = Number(fin.puls_versuche) || (fin.puls_at ? 1 : 0)
     if(versuche >= TV_ENDLESUNG_MAX) return `${versuche} Versuche erfolglos`
@@ -19794,6 +19853,11 @@
     return ''
   }
   function tvV2EndlesungFaellig(p, jetzt){ return !tvV2EndlesungGrund(p, jetzt, false) }
+  // REIN RECHNEND: Wartezeit der Nachlesung je Plan, 60–1.800 s, fest aus der Plan-ID (mulberry-artiger Hash) — gleich auf allen Tabs
+  function tvV2NachleseMs(id){
+    let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
+    return (60 + (h % 1741)) * 1000
+  }
   // Der PC, der liest: am Hedge (Winning Day) bzw. beim Start gemerkt — ohne Merker jeder PC-Tab des Profils (eine ID = ein PC)
   function tvV2EndlesungPc(p){ const b = (p && p.mt5Baseline) || {}; return (b.hedge && b.hedge.pc) || (b.tv && b.tv.pc) || '' }
   function tvV2EndlesungPcPasst(p){
@@ -19859,7 +19923,8 @@
       const patch = { puls_at: nowIso, puls_versuche: versuch }
       if(force) patch.puls_aufgegeben = false
       if(erg.ok) Object.assign(patch, { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null,
-        puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null })
+        puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null,
+        balance_end: erg.balance, equity_end: erg.equity })   // Balance nach dem Trade (26.09.2026) — P&L = balance_end − tv.balance_start
       else Object.assign(patch, { puls_fehler: erg.fehler, puls_diagnose: tvJsonKurz((r && r.befund) || null, 2200) })
       // (B) Exit-Fill aus der Order-Historie (Bot, Ende-Modus) — unabhängig davon, ob Today's P&L gelesen wurde
       if(r && r.exit_fill && typeof r.exit_fill === 'object') patch.exit_fill = tvJsonKurz(r.exit_fill, 400)
@@ -19867,6 +19932,7 @@
       let neu = null
       try{ neu = await baselinePatchIn(pid, 'final', patch, 'review') }catch(e){ console.warn('[endlesung] final-Patch', (e && e.message) || e); return { ok: false, msg: 'Schreiben fehlgeschlagen: ' + String((e && e.message) || e) } }
       if(!neu) return { ok: false, msg: 'Plan ist nicht mehr in „Überprüfen" — nichts geschrieben' }
+      if(erg.ok && erg.balance != null) tvKontoBalanceSchreiben(p0.masterAccountId, { balance: erg.balance, equity: erg.equity }, nowIso)   // Live-Balance am Konto
       // Einstiegs-Fill an tv.einstieg_fill, falls noch nicht da
       if(r && r.einstieg_fill && typeof r.einstieg_fill === 'object' && !(neu.tv && neu.tv.einstieg_fill)){
         try{ const n2 = await baselinePatchIn(pid, 'tv', { einstieg_fill: tvJsonKurz(r.einstieg_fill, 400) }, 'review'); if(n2) neu = n2 }catch(_){}
@@ -19884,7 +19950,7 @@
       const planNeu = Object.assign({}, i >= 0 ? tradePlans[i] : p1, { mt5Baseline: neu })
       const res = await _autoPnlFetchTvV2(planNeu)
       const m = res && res.masterPnl
-      let msg = `Today's P&L ${erg.today}${exitTxt}`
+      let msg = erg.balance != null ? `Balance ${erg.balance}${exitTxt}` : `Today's P&L ${erg.today}${exitTxt}`
       if(m != null){
         // nur die Schätzung ersetzen (oder ein leeres Feld) — eine inzwischen eingetragene Zahl bleibt stehen
         const sz = fin0.master_pl_schaetzung
@@ -24852,6 +24918,8 @@
       maxProfitPerTrade: row.max_profit_per_trade != null ? Number(row.max_profit_per_trade) : null,
       wdTp: row.wd_tp != null ? Number(row.wd_tp) : null,   // TP/SL-Vorgabe des Winning-Day-Farmers (23.09.2026) — nicht die Firmen-Limits
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
+      // Live-Balance aus TradingView (26.09.2026, Puls-Lesung bei Start/Nachlesung) — jüngste Quelle für die Hedge-Staffel
+      tvBalance: row.tv_balance != null ? Number(row.tv_balance) : null, tvBalanceAt: row.tv_balance_at || null,
       // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
       // hinzufügen' — manche Fundeds stehen noch auf Anfangs-Balance"): nur so markierte Konten fährt der Farmer.
       wdFarm:         !!row.wd_farm,
@@ -32910,7 +32978,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.624'
+  const OS_TAB_BUILD = '2026-09-22.625'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37314,6 +37382,8 @@
   // Live-Stand des Master-Kontos: Duplikum-Balance, sonst TopstepX-Balance, sonst null
   function tpVorplanLive(acc){
     try{
+      // TradingView-Balance (Puls, 26.09.2026) vor Duplikum — Duplikum fällt weg, sein Spiegel veraltet
+      if(acc && typeof acc.tvBalance === 'number' && isFinite(acc.tvBalance) && acc.tvBalance > 1000) return acc.tvBalance
       const d = (typeof getDupBalanceForAccount === 'function') ? getDupBalanceForAccount(acc.id) : null
       if(d && typeof d.balance === 'number' && isFinite(d.balance)) return d.balance
       if(acc.topstep && typeof acc.topstep.balance === 'number' && isFinite(acc.topstep.balance)) return acc.topstep.balance
