@@ -6992,6 +6992,10 @@ def admin_wd_heute():
 # Demo = bei jedem Abruf frisch aus den gespeicherten Reader-Minutenkerzen (tv_kurs_1m: h/l je Minute) — kein Dauer-Wächter,
 # rückwirkend identisch, auch wenn niemand zusah. Liquidation: Winning Day → Kontogröße + 100 $ (Finn 25.09.2026: WD-Master blowen
 # bei 150.100 $), sonst Balance beim Start − Max-Drawdown. Ohne Start-Balance kein Liquidations-Level (nur TP).
+# Seit 26.09.2026 abends (Finn: „Der Max-Drawdown ist quasi der SL. Das kannst du selber ausrechnen."): Nicht-WD-Konten
+# bekommen das Level IMMER aus dem Max-Drawdown am Konto — Abstand wie ein SL von max_drawdown $ bei den Kontrakten des
+# Plans (_wd_level), unabhängig von der Start-Balance; liq_balance (Start − Max-Drawdown) nur zusätzlich, wenn sie da ist.
+# Ohne max_drawdown am Konto kein Level (nichts raten). Winning Days unverändert (Kontogröße + 100 $, braucht die Balance).
 LT_WD_BLOW_PLUS = 100.0
 
 
@@ -7006,6 +7010,28 @@ def _lt_liq_balance(acc, plan, balance_start):
     if balance_start is None:
         return None, "keine Start-Balance"
     return (balance_start - dd, f"Start-Balance − Max-Drawdown {dd:,.0f} $".replace(",", ".")) if dd else (None, "kein Max-Drawdown am Konto")
+
+
+def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
+    """REIN RECHNEND (testbar): Liquidation eines Trades → {level, balance, regel, pl_usd}.
+    Winning Day: Level aus Start-Balance − (Kontogröße + 100 $), ohne Start-Balance keins. Sonst: Max-Drawdown als SL-Abstand
+    in $ bei den Kontrakten des Plans (Finn 26.09.2026) — Level ohne Start-Balance; balance = Start − Max-Drawdown nur mit
+    Start-Balance; pl_usd bei Liquidation = −Max-Drawdown."""
+    liq_bal, regel = _lt_liq_balance(acc, plan, balance_start)
+    typ = str((acc or {}).get("account_type") or "").lower()
+    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    if wd:
+        level = None
+        if balance_start is not None and liq_bal is not None and balance_start > liq_bal:
+            level = _wd_level(einstieg, richtung, balance_start - liq_bal, ppl, kt, False)
+        pl = round(liq_bal - balance_start, 2) if (balance_start is not None and liq_bal is not None) else None
+        return {"level": level, "balance": liq_bal, "regel": regel, "pl_usd": pl}
+    dd = _wd_num((acc or {}).get("max_drawdown"))
+    if not dd or dd <= 0:
+        return {"level": None, "balance": None, "regel": "kein Max-Drawdown am Konto", "pl_usd": None}
+    return {"level": _wd_level(einstieg, richtung, dd, ppl, kt, False),
+            "balance": round(balance_start - dd, 2) if balance_start is not None else None,
+            "regel": f"Max-Drawdown {dd:,.0f} $ als SL".replace(",", "."), "pl_usd": -round(dd, 2)}
 
 
 def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
@@ -7046,17 +7072,15 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel):
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     bs, be = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
-    liq_bal, liq_regel = _lt_liq_balance(acc, p, bs)
     ppl, kt = WD_HEUTE_PPL.get(z.get("symbol_root") or ""), z.get("kt")
-    liq_level = None
-    if bs is not None and liq_bal is not None and bs > liq_bal:
-        liq_level = _wd_level(z.get("einstieg_nq"), z.get("richtung"), bs - liq_bal, ppl, kt, False)
+    liq = _lt_liq(acc, p, bs, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
+    liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
     kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
     demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at")) if p.get("started_at") else {"status": "geplant"}
     if demo.get("status") == "tp":
         demo["pl_usd"] = _wd_num(p.get("master_tp"))
-    elif demo.get("status") == "liquidiert" and bs is not None and liq_bal is not None:
-        demo["pl_usd"] = round(liq_bal - bs, 2)
+    elif demo.get("status") == "liquidiert":
+        demo["pl_usd"] = liq["pl_usd"]
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
               "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
