@@ -7036,8 +7036,10 @@ def _lt_liq(acc, plan, balance_start, einstieg, richtung, ppl, kt):
 
 def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
     """REIN RECHNEND (testbar): Demo-Ausführung gegen Minutenkerzen [{minute, h, l}] ab der Start-Minute.
-    → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
-    BUY: TP bei h ≥ TP, Liquidation bei l ≤ Level; SELL gespiegelt. Beide in derselben Minute: Reihenfolge unbekannt."""
+    → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'beendet_ohne_treffer'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
+    BUY: TP bei h ≥ TP, Liquidation bei l ≤ Level; SELL gespiegelt. Beide in derselben Minute: Reihenfolge unbekannt.
+    ende_iso (B5, 26.09.2026, Finns Screenshot: Moritz Apex …0008 SELL 6 MNQ „zu 26.09., 01:17" zeigte „Demo läuft · 543 Minuten"):
+    Kerzen NACH der Ende-Minute zählen nicht; ohne Treffer bis zum Ende → 'beendet_ohne_treffer' (at = Ende)."""
     if richtung not in ("buy", "sell") or tp_level is None:
         return {"status": "ohne_level"}
     try:
@@ -7051,7 +7053,13 @@ def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
             ks.append((m, float(k.get("h")), float(k.get("l"))))
         except (TypeError, ValueError):
             continue
-    ks = sorted([k for k in ks if k[0] >= t0], key=lambda k: k[0])
+    t1 = None
+    if ende_iso:
+        try:
+            t1 = datetime.fromisoformat(str(ende_iso).replace("Z", "+00:00")).replace(second=0, microsecond=0)
+        except (TypeError, ValueError):
+            t1 = None
+    ks = sorted([k for k in ks if k[0] >= t0 and (t1 is None or k[0] <= t1)], key=lambda k: k[0])
     if not ks:
         return {"status": "ohne_kurs"}
     for m, h, l in ks:
@@ -7063,6 +7071,8 @@ def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
             return {"status": "tp", "at": m.isoformat(), "preis": tp_level, "minuten": len(ks)}
         if liq:
             return {"status": "liquidiert", "at": m.isoformat(), "preis": liq_level, "minuten": len(ks)}
+    if t1 is not None:
+        return {"status": "beendet_ohne_treffer", "at": t1.isoformat(), "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
     return {"status": "laeuft", "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
 
 
@@ -7076,7 +7086,9 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel):
     liq = _lt_liq(acc, p, bs, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
     kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
-    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at")) if p.get("started_at") else {"status": "geplant"}
+    # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
+    ende = None if str(p.get("status") or "") == "open" else (p.get("ended_at") or fin.get("at") or p.get("completed_at"))
+    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at"), ende) if p.get("started_at") else {"status": "geplant"}
     if demo.get("status") == "tp":
         demo["pl_usd"] = _wd_num(p.get("master_tp"))
     elif demo.get("status") == "liquidiert":

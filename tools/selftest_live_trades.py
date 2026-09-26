@@ -69,6 +69,22 @@ def main():
     d = a["_lt_demo"]("buy", 30300.0, 29775.0, k, "2026-09-26T10:00:20+00:00")
     check(d["status"] == "liquidiert" and d["preis"] == 29775.0, "Demo: Kerze unter dem Max-Drawdown-Level → liquidiert")
 
+    # B5: beendete Trades — Kerzen nach dem Ende zaehlen nicht
+    dm = a["_lt_demo"]
+    k2 = [{"minute": f"2026-09-25T{h:02d}:{m:02d}:00+00:00", "h": 30010, "l": 29990} for h, m in ((1, 0), (1, 10), (1, 17))] \
+        + [{"minute": "2026-09-25T09:00:00+00:00", "h": 30400, "l": 29500}]
+    d = dm("sell", 29700.0, 30350.0, k2, "2026-09-25T00:59:30+00:00", "2026-09-25T01:17:40+00:00")
+    check(d["status"] == "beendet_ohne_treffer" and d["minuten"] == 3 and d["at"].startswith("2026-09-25T01:17"),
+          "beendet ohne Treffer: nur Kerzen bis zur Ende-Minute, Kerze danach (TP + Liq) zaehlt nicht")
+    d = dm("sell", 29700.0, 30350.0, k2, "2026-09-25T00:59:30+00:00")
+    check(d["status"] == "beide_in_minute", "ohne Ende wie bisher (laufender Trade sieht spaetere Kerzen)")
+    d = dm("sell", 29995.0, 30350.0, k2, "2026-09-25T00:59:30+00:00", "2026-09-25T01:17:40+00:00")
+    check(d["status"] == "tp", "Treffer vor dem Ende bleibt Treffer")
+    check(dm("sell", 29700.0, None, k2, "2026-09-25T02:00:00+00:00", "2026-09-25T03:00:00+00:00")["status"] == "ohne_kurs",
+          "Ende ohne Kerze im Fenster → ohne_kurs")
+    check(dm("sell", 29700.0, None, k2, "2026-09-25T00:59:30+00:00", "kaputt")["status"] == "tp",
+          "kaputtes Ende wirft nicht, rechnet wie ohne Ende")
+
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1
 
