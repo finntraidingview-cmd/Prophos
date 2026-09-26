@@ -4437,7 +4437,7 @@ def _admin_basis():
     und nie eine zweite Regel entsteht. Wirft RuntimeError, wenn Ausblenden
     nicht möglich ist (Auth-API weg) — wie die Übersicht vorher auch."""
     # kapitel_id seit 24.09.2026 mit (per Trigger nach created_at gesetzt, backfilled).
-    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance"})
+    accounts = _sb_all("accounts", {"select": "id,user_id,firm,account_type,purchase_cost,name,external_id,created_at,payout_ready_at,goal_kind,goal_target,goal_done_offset,goal_manual,balance,topstep_balance,meta_api_balance,payout_pct,payout_override,topstep_last_check,meta_api_last_check,wd_farm,kapitel_id,account_size,starting_balance,tv_balance,tv_balance_at"})
     arch_rows = _sb_all("user_settings", {"select": "value", "key": "eq.archive"})
     fx_rows   = _sb_all("user_settings", {"select": "value", "key": "eq.fx_usd_eur"})
 
@@ -5083,6 +5083,41 @@ def _symbol_wurzel(sym):
     return m.group(1) if m else s
 
 
+def acc_balance_wahl(a, echo_bal, dup_bal):
+    """REIN RECHNEND (testbar): Live-Balance eines Kontos → (balance, ccy, quelle, stand) oder (None, None, None, '').
+    Rangfolge: Topstep-Sync „TSX" → MetaApi „MT5" → Echo (mt5_live) → jüngere von TradingView „TV" (tv_balance) und
+    Duplikum (dup_live). 0/leer = unbekannt. Keine manuelle Balance (B8, 26.09.2026)."""
+    def num(v):
+        try:
+            f = float(v)
+            return f if f == f and f > 0 else None
+        except (TypeError, ValueError):
+            return None
+    a = a or {}
+    b = num(a.get("topstep_balance"))
+    if b is not None:
+        return b, "USD", "TSX", a.get("topstep_last_check") or ""
+    b = num(a.get("meta_api_balance"))
+    if b is not None:
+        return b, "USD", "MT5", a.get("meta_api_last_check") or ""
+    login = str(a.get("external_id") or "").strip()
+    hit = (echo_bal or {}).get(login)
+    if hit:
+        b = num(hit[0])
+        if b is not None:
+            return b, hit[1], "Echo", hit[2]
+    tv = num(a.get("tv_balance"))
+    tv_at = str(a.get("tv_balance_at") or "")
+    hit = (dup_bal or {}).get(login)
+    dup = num(hit[0]) if hit else None
+    dup_at = str(hit[2] or "") if (hit and len(hit) > 2) else ""
+    if tv is not None and (dup is None or not dup_at or tv_at >= dup_at):
+        return tv, "USD", "TV", tv_at
+    if dup is not None:
+        return dup, hit[1], "Duplikum", dup_at
+    return None, None, None, ""
+
+
 def admin_build_overview(kapitel_id=None):
     # KAPITEL (24.09.2026, Finn: „Ab jetzt wird es nicht mehr gegengehedgt mit
     # Realmoney … dass wir das Ganze zeitlich trennen können mit den vorherigen
@@ -5407,16 +5442,16 @@ def admin_build_overview(kapitel_id=None):
     # Balance daneben, damit man weiss, wie viel der Account hat"). Gleiche
     # Rangfolge wie die Account-Karte: Topstep-Sync → MetaApi → Duplikum-
     # Spiegel (dup_live.accounts, login = external_id; traegt balance erst
-    # seit diesem Build, davor bleibt der Eintrag leer) → manuelle Balance.
+    # seit diesem Build, davor bleibt der Eintrag leer). Seit 26.09.2026 (B8) ohne manuelle Balance, dafür TradingView.
     dup_bal = {}
     try:
-        for row in _sb_all("dup_live", {"select": "accounts"}):
+        for row in _sb_all("dup_live", {"select": "accounts,updated_at"}):
             for da in (row.get("accounts") or []):
                 if not isinstance(da, dict) or da.get("balance") in (None, ""):
                     continue
                 lg = str(da.get("login") or "").strip()
-                if lg:
-                    dup_bal[lg] = (da.get("balance"), da.get("ccy") or "USD")
+                if lg and (lg not in dup_bal or str(row.get("updated_at") or "") > str(dup_bal[lg][2] or "")):
+                    dup_bal[lg] = (da.get("balance"), da.get("ccy") or "USD", row.get("updated_at") or "")
     except Exception as e:
         print(f"[admin] ⚠️ dup_live-Balances: {type(e).__name__}: {e}", flush=True)
 
@@ -5442,34 +5477,12 @@ def admin_build_overview(kapitel_id=None):
     def _acc_balance(a):
         """(balance, ccy, quelle, stand). 0 gilt bei JEDER Quelle als unbekannt —
         ein Funded-Account steht nie auf 0, das ist der leere Sync/Default
-        (17.09.2026: Topstep-Sync lieferte 0.00, die Tabelle zeigte „0 $")."""
-        def num(v):
-            try:
-                f = float(v)
-                return f if f == f and f > 0 else None
-            except (TypeError, ValueError):
-                return None
-        b = num(a.get("topstep_balance"))
-        if b is not None:
-            return b, "USD", "TSX", a.get("topstep_last_check") or ""
-        b = num(a.get("meta_api_balance"))
-        if b is not None:
-            return b, "USD", "MT5", a.get("meta_api_last_check") or ""
-        login = str(a.get("external_id") or "").strip()
-        hit = echo_bal.get(login)
-        if hit:
-            b = num(hit[0])
-            if b is not None:
-                return b, hit[1], "Echo", hit[2]
-        hit = dup_bal.get(login)
-        if hit:
-            b = num(hit[0])
-            if b is not None:
-                return b, hit[1], "Duplikum", ""
-        b = num(a.get("balance"))
-        if b is not None:
-            return b, "USD", "manuell", ""
-        return None, None, None, ""
+        (17.09.2026: Topstep-Sync lieferte 0.00, die Tabelle zeigte „0 $").
+        26.09.2026 (Auftrag Koordination B8, Finn nutzt die manuelle Balance nicht mehr): TradingView (accounts.tv_balance,
+        Puls liest sie beim Platzieren/Nachlesen) ist Quelle „TV" — die jüngere von TV und Duplikum gewinnt (wie
+        wd_konten_alle.live_balance); die manuelle accounts.balance ist KEIN Rückfall mehr → ohne Live-Wert None
+        („ohne Wert" im Payout-Kalender statt eines alten Handwerts)."""
+        return acc_balance_wahl(a, echo_bal, dup_bal)
 
     def _pnum(v):
         try:
@@ -6972,7 +6985,7 @@ def admin_wd_heute():
         accs = {}
         ids = sorted(acc_ids)
         for i in range(0, len(ids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,starting_balance,balance,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
+            for a in sb_select("accounts", {"select": "id,name,firm,starting_balance,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         zeilen = []
         for p in plaene:
@@ -7131,7 +7144,7 @@ def admin_live_trades():
         accs = {}
         ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
         for i in range(0, len(ids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,balance,external_id,max_drawdown,tv_balance,tv_balance_at",
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,max_drawdown,tv_balance,tv_balance_at",
                                             "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
@@ -7284,7 +7297,7 @@ def admin_wd_plaene():
         try:
             disp, excluded = _wd_personen()
             archiv = _acc_plan_archiviert()
-            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,balance,starting_balance,max_drawdown,wd_farm"})
+            accs = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id,starting_balance,max_drawdown,wd_farm,tv_balance,tv_balance_at"})
             konten = []
             for a in accs:
                 typ = (a.get("account_type") or "").lower()
@@ -7300,8 +7313,11 @@ def admin_wd_plaene():
                     "name": a.get("name") or "", "firm": firm, "type": typ,
                     "ext": (a.get("external_id") or "").strip(),
                     "max_drawdown": _wd_num(a.get("max_drawdown")),
-                    "balance": _wd_num(a.get("balance")),
                     "starting_balance": _wd_num(a.get("starting_balance")),
+                    # B8 (26.09.2026): Live-Wert aus TradingView statt der manuellen Balance (Feld „balance" entfällt —
+                    # das Frontend liest es seit F9 nicht mehr; Rückfall bei RPC-Ausfall nimmt diese drei Namen, F10)
+                    "live_balance": _wd_num(a.get("tv_balance")) if (_wd_num(a.get("tv_balance")) or 0) > 0 else None,
+                    "live_at": a.get("tv_balance_at"),
                     "wd_farm": bool(a.get("wd_farm")),
                 })
             # Duplikum-Slave je Person = Slave des jüngsten dup/tvplus-Plans (Echo-Pläne
