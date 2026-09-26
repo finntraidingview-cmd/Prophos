@@ -9933,7 +9933,7 @@
         <div class="field" style="grid-column:1/-1" id="bulk-creds-box">
           <label>Zugangsdaten (optional)</label>
           <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den neuen Kennungen zugeordnet (1. Zeile → 1. neue Kennung, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den neuen CFD-Kennungen zugeordnet (1. Zeile → 1. neue CFD-Kennung, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
         <div class="field" id="bulk-dup-create-box" style="grid-column:1/-1;display:none;margin-top:2px;padding:11px 13px;background:rgba(136,124,252,.07);border:1px solid rgba(136,124,252,.25);border-radius:10px">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0">
@@ -27397,12 +27397,26 @@
       const b = (typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []
       return b.length > 0 && b.every(x => { const v = bulkPasteVorlage(x); return fut((v && v.firm) || x.firma || bEl.firm.value.trim()) })
     }
+    // Zugangsdaten + Duplikum NUR bei sicher erkannter CFD/MT5-Firma (F17-Ergänzung, Finn: „das nur bei CFD-Propfirms"): Firma im
+    // Formular CFD, oder mindestens eine neue Kennung ist CFD (Firma, Vorlage mit Plattform MT4/MT5 oder erkannte Plattform MT4/MT5).
+    // Leer, unbekannt oder Futures → aus. Zeilen-Zuordnung der Zugangsdaten nur auf die CFD-Kennungen (bulkCfdBloecke).
+    function bulkBlockIstCfd(x){
+      const v = bulkPasteVorlage(x), firm = (v && v.firm) || x.firma || bEl.firm.value.trim()
+      if((typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(firm)) return false
+      return /^MT[45]$/i.test(String((v && v.plattform) || x.plattform || '')) || ((typeof tpFirmIstCfd === 'function') && tpFirmIstCfd(firm))
+    }
+    const bulkCfdBloecke = liste => (liste || []).filter(bulkBlockIstCfd)
+    function bulkZeigtZugang(){
+      const b = (typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []
+      if(b.length) return bulkCfdBloecke(b.filter(bulkIstNeu)).length > 0
+      return (typeof tpFirmIstCfd === 'function') && tpFirmIstCfd(bEl.firm.value.trim())
+    }
     function bulkFuturesUmschalten(){
-      const fut = bulkIstFutures(), cb = document.getElementById('bulk-creds-box')
-      if(cb) cb.style.display = fut ? 'none' : ''
+      const zeigen = bulkZeigtZugang(), cb = document.getElementById('bulk-creds-box')
+      if(cb) cb.style.display = zeigen ? '' : 'none'
       if(bEl.dupCreateBox){
         const dupOn = typeof dupState !== 'undefined' && !!dupState.token
-        bEl.dupCreateBox.style.display = (!fut && dupOn) ? '' : 'none'
+        bEl.dupCreateBox.style.display = (zeigen && dupOn) ? '' : 'none'
       }
     }
     function setBulkMsg(text, kind){
@@ -27592,13 +27606,13 @@
       }
       wahl = wahl.filter(bulkIstNeu)
       if(!wahl.length){ bEl.saveBtn.classList.remove('ts-btn-loading'); bulkPasteRender(); setBulkMsg('Alle Kennungen gibt es schon in Prophos — nichts angelegt.', 'err'); return }
-      const bulkFut = bulkIstFutures()   // F13: Futures → keine Zugangsdaten, nichts an Duplikum
-      const credList = bulkFut ? [] : getBulkCreds()
+      const zugang = bulkZeigtZugang()   // F13/F17: Zugangsdaten + Duplikum nur bei CFD — und nur auf die CFD-Kennungen verteilt
+      const credList = zugang ? getBulkCreds() : [], cfdIdx = new Map(bulkCfdBloecke(wahl).map((x, k) => [x.id, k]))
       const tmplForm = bEl.template.value.trim()
       let created = 0, errors = 0, anyExtId = false, ohneQuelle = false
       const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
       for(let i = 0; i < wahl.length; i++){
-        const x = wahl[i], cred = credList[i] || null
+        const x = wahl[i], cred = cfdIdx.has(x.id) ? (credList[cfdIdx.get(x.id)] || null) : null
         // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > 150.000 (F14)
         const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
         const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || BULK_STD_GROESSE
@@ -27644,7 +27658,7 @@
       }
 
       // Accounts mit vollständigen Zugangsdaten direkt in Duplikum anlegen (Checkbox aktiv)
-      const dupCreateOn = !bulkFut && bEl.dupCreate?.checked && bEl.dupCreateBox && bEl.dupCreateBox.style.display !== 'none'
+      const dupCreateOn = zugang && bEl.dupCreate?.checked && bEl.dupCreateBox && bEl.dupCreateBox.style.display !== 'none'
       if(dupCreateOn && dupCandidates.length && typeof dupCreateAccountInDuplikum === 'function'){
         const roleType = bEl.dupRole?.value || '0'
         let dupOk = 0, dupErr = 0
@@ -32713,8 +32727,25 @@
   // = Firm-Spec mit Einheit 'Kontrakte' (Apex, Tradeify, Alpha, …) — daten-
   // getrieben aus den Settings statt Hardcode-Liste; neue Firma dort anlegen
   // reicht, damit ihre Accounts im Orbit-Master-Dropdown auftauchen.
+  // Futures = Einheit 'Kontrakte' in firm_specs ODER Name in dieser festen Liste (27.09.2026, F17: firm_specs ist PRO NUTZER und
+  // „Topstep" fehlte bei allen — Zugangsdaten/Duplikum im Bulk (F13) und der Block „Futures · Live" im Konto-Popup griffen bei
+  // Topstep nicht). Groß/klein egal. Neue Futures-Firma: hier ergänzen oder in firm_specs mit Einheit Kontrakte anlegen.
+  // CFD/MT5 sicher erkannt (27.09.2026, F17-Ergänzung, Finn: Zugangsdaten „das nur bei CFD-Propfirms"): Einheit 'Lots' in firm_specs
+  // ODER Name in dieser festen Liste. Unbekannt ≠ CFD. Futures-Firmen sind nie CFD.
+  function tpFirmIstCfd(firm){
+    const TP_CFD_FIRMEN = ['fundednext', 'ftmo', 'fundingpips', 'the5%ers', 'the5ers', 'fusion markets', 'thinkmarkets', 'icmarkets', 'ic markets']
+    const n = String(firm || '').trim().toLowerCase()
+    if(!n || tpFirmIstFutures(firm)) return false
+    if(TP_CFD_FIRMEN.includes(n)) return true
+    try{ return (getCustomFirms() || []).some(f => f && String(f.name || '').trim().toLowerCase() === n && f.unit === 'Lots') }
+    catch(_){ return false }
+  }
   function tpFirmIstFutures(firm){
-    try{ return (getCustomFirms() || []).some(f => f && f.name === firm && f.unit === 'Kontrakte') }
+    // Liste IN der Funktion (nicht als const davor): tpFirmIstFutures läuft schon beim ersten Render, bevor das Modul diese Stelle erreicht
+    const TP_FUTURES_FIRMEN = ['topstep', 'tradeify', 'apex trader', 'lucid trading', 'fundednext futures', 'myfundedfutures', 'myfoundedfutures', 'alpha future', 'alphafutures', 'alpha futures']
+    const n = String(firm || '').trim().toLowerCase()
+    if(n && TP_FUTURES_FIRMEN.includes(n)) return true
+    try{ return (getCustomFirms() || []).some(f => f && String(f.name || '').trim().toLowerCase() === n && f.unit === 'Kontrakte') }
     catch(_){ return false }
   }
 
@@ -33659,7 +33690,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.653'
+  const OS_TAB_BUILD = '2026-09-22.654'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
