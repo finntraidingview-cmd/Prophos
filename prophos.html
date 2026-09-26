@@ -8199,6 +8199,7 @@
                      die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
                      Tabelle gilt Standard. -->
                 <div class="wd-chips" id="wd-staffel-firmen"></div>
+                <div class="kf" id="wd-staffel-aus" style="margin-bottom:4px;color:#B45309" hidden>wirkt erst, wenn links „Fusion-Gegenhedge" an ist</div>
                 <div class="kf" id="wd-staffel-hinweis" style="margin-bottom:6px">nach dem, was auf der Balance über der Kontogröße liegt (z. B. 154.425 $ auf 150k = +4.425 $)</div>
                 <div id="wd-staffel-body"></div>
                 <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
@@ -10542,7 +10543,10 @@
       // Hedge-Staffel = Slave-Betrag, ohne Slave sinnlos — AUSSER der Fusion-Gegenhedge (24.09.2026 abends) ist an,
       // dann ist die Staffel wieder die Quelle des Hedge-Betrags
       let hedgeAn = false; try{ hedgeAn = !!wdVorplanRegeln().hedge_an }catch(_){}
-      const st = $('wd-staffel-card'); if(st) st.hidden = an && !hedgeAn
+      // Seit 26.09.2026 IMMER sichtbar (Finn: „wo ist hier die Tabelle hin? wie viel je nach Kontostand"): die Staffel ist die Quelle
+      // des Fusion-Hedges der Winning Days — versteckt, solange der Schalter aus war, konnte man sie vor dem Einschalten nicht pflegen.
+      const st = $('wd-staffel-card'); if(st) st.hidden = false
+      const sa = $('wd-staffel-aus'); if(sa) sa.hidden = hedgeAn
       // Farmer-Kopf-Chip (24.09.2026 spät): Schalter „Fusion-Gegenhedge" an = die Pläne SIND gehedgt — nicht „ohne Hedge" nennen
       const wc = $('wd-weg-chip')
       if(wc){
@@ -32906,7 +32910,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.622'
+  const OS_TAB_BUILD = '2026-09-22.623'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38385,6 +38389,8 @@
       const fz = box.querySelector(`[data-wd-fz="${k}"]`); if(fz) fz.textContent = `${wdDe(v)}–${wdDe(Math.max(v, b2))} $ · ${wdKtText([ka, kb])}`
     }))
   }
+  // Hinweis über der Staffel sofort mit dem Schalter umstellen (26.09.2026) — eigener Listener nur für die Anzeige
+  document.getElementById('wd-hedge-an')?.addEventListener('change', ev => { const sa = document.getElementById('wd-staffel-aus'); if(sa) sa.hidden = !!ev.target.checked })
   document.getElementById('wd-staffel-add')?.addEventListener('click', () => {
     const l = wdStaffelLesen(), last = l[l.length - 1]
     l.push({ von: last ? last.von + 2000 : 0, bis: null, eur: last ? last.eur + 10 : 50 }); wdStaffelRender(l)
