@@ -1761,6 +1761,7 @@ def main():
     results.append(test_endlesung_bausteine())
     results.append(test_profil_riegel())
     results.append(test_fenster_treue())
+    results.append(test_puls_tempo())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2377,6 +2378,38 @@ def test_fenster_treue():
     chk("kein chrome.exe-Start und kein Strg+N beim Tab-Neuöffnen", "Popen" not in quelle and "^n" not in quelle)
     if ok:
         print("✓ Fenster-Treue: Wahl eindeutig oder abbrechen, Reader per Profil/Lage raus, gemerktes Fenster geprüft, Tab statt Fenster")
+    return ok
+
+
+def test_puls_tempo():
+    """Puls-Tempo (27.09.2026, B13): Connect-Dialog sofort erkennen, 'Network error occurred' erkennen, kuerzere Timeouts."""
+    import order_bot as ob, inspect
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Puls-Tempo: " + name); ok = False
+
+    r = (0, 0, 80, 20)
+    dialog = [("Tradovate GOLD", r, "Text"), ("Live", r, "RadioButton"), ("Demo", r, "RadioButton"),
+              ("Don't remember me", r, "CheckBox"), ("Connect", r, "Button")]
+    chk("Dialog sichtbar (Demo + Connect)", ob.tv_connect_dialog_sichtbar(dialog))
+    chk("nur Connect oder nur Demo → kein Dialog", not ob.tv_connect_dialog_sichtbar(dialog[:3])
+        and not ob.tv_connect_dialog_sichtbar([("Connect", r, "Button")]))
+    chk("unsichtbare Elemente (rect None) zaehlen nicht", not ob.tv_connect_dialog_sichtbar([("Demo", None, "RadioButton"), ("Connect", None, "Button")]))
+    chk("'Broker verbinden' (deutsch) zaehlt als Connect", ob.tv_connect_dialog_sichtbar([("Demo", r, "RadioButton"), ("Broker verbinden", r, "Button")]))
+    fehler = dialog + [("Error! Network error occurred. Please check your internet connection and try to connect again.", r, "Text")]
+    chk("'Network error occurred' erkannt", ob.tv_netzfehler_sichtbar(fehler) and not ob.tv_netzfehler_sichtbar(dialog)
+        and not ob.tv_netzfehler_sichtbar([("Network error occurred", None, "Text")]))
+    chk("hoechstens 3 Neu-Versuche", ob.TV_CONNECT_NETZ_MAX == 3)
+    q = inspect.getsource(ob.modus_tvkonto) if hasattr(ob, "modus_tvkonto") else ""
+    chk("Login-Klick: 1,5 s statt 4 s vor dem Enter", "warte_weg(1.5)" in q and "weg = warte_weg(4.0)\n                if not weg and tradovate_noch_da():\n                    trail.append(\"Login-Klick" not in q)
+    chk("Netzfehler-Zweig klickt Connect erneut", "Connect (erneut" in q and "tv_netzfehler_sichtbar" in q)
+    chk("Link-Start bricht das Lesen ab, wenn der Dialog steht", "Connect-Dialog steht schon da" in q)
+    chk("Avg Fill wartet 1,2 s statt 3 s", "_avg_fill_nachlauf(sekunden=1.2)" in inspect.getsource(ob))
+    if ok:
+        print("✓ Puls-Tempo: Dialog sofort, Network error → Connect erneut (max. 3), Login-Enter nach 1,5 s, Avg Fill 1,2 s")
     return ok
 
 

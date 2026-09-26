@@ -2865,6 +2865,21 @@ TV_RX_LOGOUT = re.compile(r"^(log ?out|sign ?out|abmelden|ausloggen|disconnect|"
                           r"(verbindung )?trennen)\b", re.I)
 TV_RX_TRADE = re.compile(r"^(trade|handeln|traden)$", re.I)
 TV_RX_DEMO = re.compile(r"^demo$", re.I)
+# B13 (27.09.2026, Finns Screenshot: Connect-Dialog mit rotem „Error! Network error occurred. Please check your internet
+# connection and try to connect again."): Puls wartete danach bis zu 25 s auf ein Tradovate-Fenster, das nie kam.
+TV_RX_NETZFEHLER = re.compile(r"network error occurred|netzwerkfehler|check your internet connection", re.I)
+TV_CONNECT_NETZ_MAX = 3
+
+
+def tv_connect_dialog_sichtbar(roh):
+    """REIN RECHNEND (testbar): steht der Tradovate-Connect-Dialog da (Demo-Schalter UND Connect-Knopf sichtbar)?"""
+    namen = [str(e[0] or "").strip() for e in (roh or ()) if len(e) > 1 and e[1]]
+    return any(TV_RX_DEMO.search(n) for n in namen) and any(TV_RX_CONNECT.search(n) for n in namen)
+
+
+def tv_netzfehler_sichtbar(roh):
+    """REIN RECHNEND (testbar): zeigt der Dialog Tradovates 'Network error occurred'?"""
+    return any(e[1] and TV_RX_NETZFEHLER.search(str(e[0] or "")) for e in (roh or ()) if len(e) > 1)
 TV_RX_CONNECT = re.compile(r"^(connect( broker)?|(broker )?verbinden)$", re.I)
 TV_RX_LOGIN = re.compile(r"^(log ?in|sign ?in|anmelden|einloggen)$", re.I)
 
@@ -3703,6 +3718,16 @@ def modus_tvkonto(cmd):
         zustand, aktiv, bf, uia_el = lies()
         if zustand in ("richtig", "gleicher_login") or time.time() >= ende or max_fehl[0]:
             break
+        # B13 (27.09.2026, Messung: nach dem Link-Start 8,5 s Lesen, obwohl der Connect-Dialog laengst dastand):
+        # steht der Dialog (Demo + Connect sichtbar), ist nichts verbunden — sofort weiter zum Verbinden.
+        if frisch_mit_link and fenster[0] is not None:
+            try:
+                if tv_connect_dialog_sichtbar(_tv_uia_roh(fenster[0], ("Button", "RadioButton", "Text"),
+                                                          muster=(TV_RX_DEMO, TV_RX_CONNECT))):
+                    trail.append("Connect-Dialog steht schon da — direkt verbinden")
+                    break
+            except Exception:
+                pass
         # GAR KEINE ID (22.09.2026 18:5x, Finn: 'falsche ID / gar keine ID — noch schneller?';
         # Spur 18:39: Panel nicht da, Scan 124 Elemente, die Schleife lief trotzdem 14 s):
         # ist die Seite RUHIG (zwei Blicke mit gleicher Elementzahl) und weder Konto noch
@@ -4085,10 +4110,11 @@ def modus_tvkonto(cmd):
             nonlocal start, zustand, aktiv, bf, uia_el
             # Prop-Konten leben auf Tradovates DEMO-Umgebung (Vault 28.08.2026) —
             # ohne bewiesenen Demo-Schalter wird nicht verbunden.
+            _warte(0.4, 0.8)          # B13: kurze Jitter-Pause (0,4–1,2 s), dann direkt Demo → Connect
             ok, f = _tv_uia_klick(el, "Demo", trail)
             if not ok:
                 return ab(f, "login")
-            _warte(0.25, 0.15)
+            _warte(0.2, 0.15)
             nicht_merken()
             el, n = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 6.0, "connect_knopf")
             if not el:
@@ -4103,8 +4129,9 @@ def modus_tvkonto(cmd):
             # Tradovate-Anmeldefenster (eigenes Popup — oder ein neuer Tab, dann traegt
             # das Browser-Fenster selbst den Titel).
             tw, ende_t = None, time.time() + 25.0
+            netz_n, netz_pruef = 0, time.time() + 1.0
             while time.time() < ende_t and tw is None:
-                _warte(0.35, 0.25)
+                _warte(0.25, 0.15)
                 # Titel der Anmeldeseite (22.09.2026 18:4x, Finns Screenshot + Spur 'Connect → Tradovate-
                 # Fenster da: 11,5 s'): der Tab heisst 'Login to your Account' — 'tradovate' steht erst
                 # spaeter im Titel. Beide Schreibweisen zaehlen, deutsch wie englisch.
@@ -4112,8 +4139,31 @@ def modus_tvkonto(cmd):
                 neu_f = [k for k in kand if k[0] not in vorher]
                 if neu_f or kand:
                     tw = (neu_f or kand)[0][2]
+                    break
+                # B13 (27.09.2026): „Network error occurred" im Dialog → sofort erneut Connect (max. 3×, Jitter
+                # 1–2 s) statt 25 s auf ein Fenster zu warten, das nie kommt. Geprueft hoechstens jede Sekunde, und
+                # nach einem Neu-Klick erst wieder nach 2,5 s (der alte Fehlertext steht noch kurz da).
+                if time.time() >= netz_pruef:
+                    netz_pruef = time.time() + 1.0
+                    try:
+                        roh_nf = _tv_uia_roh(w, ("Text", "Button"), muster=(TV_RX_NETZFEHLER, TV_RX_CONNECT))
+                    except Exception:
+                        roh_nf = []
+                    if tv_netzfehler_sichtbar(roh_nf):
+                        netz_n += 1
+                        trail.append(f"Tradovate: 'Network error occurred' im Connect-Dialog ({netz_n}. Mal)")
+                        if netz_n > TV_CONNECT_NETZ_MAX:
+                            esc()
+                            return ab(f"Tradovate meldet nach {TV_CONNECT_NETZ_MAX}× Connect weiter 'Network error "
+                                      "occurred' — Internet/Tradovate am PC pruefen.", "login")
+                        _warte(1.0, 1.0)
+                        el_c, _n_c = warte_auf(TV_NAMEN_CONNECT, TV_RX_CONNECT, 3.0, "connect_knopf")
+                        if el_c:
+                            _tv_uia_klick(el_c, f"Connect (erneut {netz_n}/{TV_CONNECT_NETZ_MAX})", trail)
+                        netz_pruef, ende_t = time.time() + 2.5, time.time() + 25.0
             if tw is None:
-                return ab("Nach 'Connect' ist kein Tradovate-Anmeldefenster erschienen.", "login")
+                return ab("Nach 'Connect' ist kein Tradovate-Anmeldefenster erschienen"
+                          + (f" ({netz_n}× 'Network error occurred')" if netz_n else "") + ".", "login")
             tw_handle = tw.handle
             try:
                 tw.set_focus()
@@ -4318,7 +4368,8 @@ def modus_tvkonto(cmd):
                 ok, f = _tv_uia_klick(el, "Login", trail)
                 if not ok:
                     return ab(f, "login")
-                weg = warte_weg(4.0)
+                # B13: 4,0 -> 1,5 s — in jeder gemessenen Spur wirkte der Klick nie, erst das Enter (23,6 → 28,0 s)
+                weg = warte_weg(1.5)
                 if not weg and tradovate_noch_da():
                     trail.append("Login-Klick ohne Wirkung (Fenster unveraendert) -> Enter auf dem Knopf")
                     taste("{ENTER}")
@@ -5604,7 +5655,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         return False, f + " — NICHT gesendet."
     erg["gesendet"] = True
 
-    def _avg_fill_nachlauf(sekunden=3.0):
+    def _avg_fill_nachlauf(sekunden=1.2):     # B13: 3,0 -> 1,2 s — lief in jeder Spur voll ab (Positions-Reiter nie sichtbar)
         """Avg Fill Price NACH dem Beweis nachlesen (25.09.2026, erster echter Fusion-Hedge: die
         Order war per TradingView-Meldung bewiesen, 'einstieg' blieb None, der Hedge nahm den
         Feed-Kurs statt des Fills). Quellen: Reader (wenn an), sonst die Positions-Tabelle
@@ -5646,7 +5697,7 @@ def tv_order_schritt(w, cmd, trail, erg=None):
             trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
             einstieg_, sym_, diag_ = _avg_fill_nachlauf()
             erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=einstieg_, tv_symbol=sym_)
-            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (3 s)'}"
+            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (1,2 s)'}"
                          + (f" [{diag_}]" if (diag_ and not einstieg_) else ""))
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {sym_ or cmd.get('symbol')}"
                           + (f" @ {einstieg_}" if einstieg_ else "") + f" · {tpsl} "
