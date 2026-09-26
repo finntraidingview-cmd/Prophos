@@ -6985,6 +6985,140 @@ def admin_wd_heute():
         return jsonify({"error": f"Winning Days des Tages nicht ladbar ({type(e).__name__}: {e})"}), 502
 
 
+# ══ LIVE TRADES (26.09.2026, Finn: „bei jedem einzelnen Trade, bei dem Puls auf TradingView platziert wird, eine neue Navigation
+# unter Winning Days ‚Live Trades' … Einstieg, Take-Profit- bzw. Liquidationswerte von NQ … der Trade wird als Demo in Prophos genauso
+# ausgeführt — wenn der Take Profit in Tradovate ausgelöst wurde, gilt er bei unserem Demo-Trade auch … danach liest Puls 1–30 min später
+# die neue Live-Balance"). Eigener Block, NICHT im READER-WACHT-Bereich (Absprache mit dem Backend-Terminal).
+# Demo = bei jedem Abruf frisch aus den gespeicherten Reader-Minutenkerzen (tv_kurs_1m: h/l je Minute) — kein Dauer-Wächter,
+# rückwirkend identisch, auch wenn niemand zusah. Liquidation: Winning Day → Kontogröße + 100 $ (Finn 25.09.2026: WD-Master blowen
+# bei 150.100 $), sonst Balance beim Start − Max-Drawdown. Ohne Start-Balance kein Liquidations-Level (nur TP).
+LT_WD_BLOW_PLUS = 100.0
+
+
+def _lt_liq_balance(acc, plan, balance_start):
+    """REIN RECHNEND (testbar): Balance, bei der das Konto blowt → (wert, regel) oder (None, grund)."""
+    typ = str((acc or {}).get("account_type") or "").lower()
+    wd = typ == "winning_days" or str(plan.get("konto_typ") or "") == "winning_days" or (_wd_num(plan.get("hedge_eur")) or 0) > 0
+    if wd:
+        g = _wd_konto_groesse(acc)
+        return (g + LT_WD_BLOW_PLUS, f"Winning Day: Kontogröße {g:,.0f} + {LT_WD_BLOW_PLUS:,.0f} $".replace(",", ".")) if g else (None, "Kontogröße unbekannt")
+    dd = _wd_num((acc or {}).get("max_drawdown"))
+    if balance_start is None:
+        return None, "keine Start-Balance"
+    return (balance_start - dd, f"Start-Balance − Max-Drawdown {dd:,.0f} $".replace(",", ".")) if dd else (None, "kein Max-Drawdown am Konto")
+
+
+def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
+    """REIN RECHNEND (testbar): Demo-Ausführung gegen Minutenkerzen [{minute, h, l}] ab der Start-Minute.
+    → {status: 'tp'|'liquidiert'|'beide_in_minute'|'laeuft'|'ohne_kurs'|'ohne_level', at, preis, minuten}.
+    BUY: TP bei h ≥ TP, Liquidation bei l ≤ Level; SELL gespiegelt. Beide in derselben Minute: Reihenfolge unbekannt."""
+    if richtung not in ("buy", "sell") or tp_level is None:
+        return {"status": "ohne_level"}
+    try:
+        t0 = datetime.fromisoformat(str(start_iso).replace("Z", "+00:00")).replace(second=0, microsecond=0)
+    except (TypeError, ValueError):
+        return {"status": "ohne_level"}
+    ks = []
+    for k in kerzen or []:
+        try:
+            m = datetime.fromisoformat(str(k.get("minute")).replace("Z", "+00:00"))
+            ks.append((m, float(k.get("h")), float(k.get("l"))))
+        except (TypeError, ValueError):
+            continue
+    ks = sorted([k for k in ks if k[0] >= t0], key=lambda k: k[0])
+    if not ks:
+        return {"status": "ohne_kurs"}
+    for m, h, l in ks:
+        tp = (h >= tp_level) if richtung == "buy" else (l <= tp_level)
+        liq = liq_level is not None and ((l <= liq_level) if richtung == "buy" else (h >= liq_level))
+        if tp and liq:
+            return {"status": "beide_in_minute", "at": m.isoformat(), "preis": None, "minuten": len(ks)}
+        if tp:
+            return {"status": "tp", "at": m.isoformat(), "preis": tp_level, "minuten": len(ks)}
+        if liq:
+            return {"status": "liquidiert", "at": m.isoformat(), "preis": liq_level, "minuten": len(ks)}
+    return {"status": "laeuft", "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
+
+
+def _lt_zeile(p, acc, disp, kerzen_je_wurzel):
+    z = _wd_heute_zeile(p, acc, disp)
+    base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
+    tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
+    fin = base.get("final") if isinstance(base.get("final"), dict) else {}
+    bs, be = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
+    liq_bal, liq_regel = _lt_liq_balance(acc, p, bs)
+    ppl, kt = WD_HEUTE_PPL.get(z.get("symbol_root") or ""), z.get("kt")
+    liq_level = None
+    if bs is not None and liq_bal is not None and bs > liq_bal:
+        liq_level = _wd_level(z.get("einstieg_nq"), z.get("richtung"), bs - liq_bal, ppl, kt, False)
+    kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
+    demo = _lt_demo(z.get("richtung"), z.get("tp_level_nq"), liq_level, kerzen, p.get("started_at")) if p.get("started_at") else {"status": "geplant"}
+    if demo.get("status") == "tp":
+        demo["pl_usd"] = _wd_num(p.get("master_tp"))
+    elif demo.get("status") == "liquidiert" and bs is not None and liq_bal is not None:
+        demo["pl_usd"] = round(liq_bal - bs, 2)
+    z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
+              "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
+              "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
+              "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
+    return z
+
+
+@app.route("/admin/live-trades", methods=["GET", "OPTIONS"])
+def admin_live_trades():
+    """GET /admin/live-trades?tage=2 → {jetzt, trades:[…]} — alle Orbit-V2-Pläne (route tvv2) aller IDs: laufend, geplant, in
+    „Überprüfen" und abgeschlossen der letzten `tage` Tage. Je Trade der /admin/wd-heute-Vertrag plus balance_start/_end,
+    pl_balance, liq_balance/_regel/_level_nq und demo {status, at, preis, pl_usd}. Auth wie /admin/wd-heute."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    try:
+        tage = max(1, min(14, int(request.args.get("tage") or 2)))
+        disp, excluded = _wd_personen()
+        seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
+        felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
+                  "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,"
+                  "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ")
+        rows = _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "in.(open,review,planned)"})
+        rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.completed", "completed_at": f"gte.{seit}"})
+        gesehen, plaene = set(), []
+        for p in rows:
+            pid = str(p.get("id"))
+            if pid in gesehen or str(p.get("user_id")) in excluded:
+                continue
+            if p.get("status") == "planned" and str(p.get("created_at") or "") < seit:
+                continue   # alte, nie gestartete Pläne gehören nicht in „Live"
+            gesehen.add(pid)
+            plaene.append(p)
+        accs = {}
+        ids = sorted({str(p.get("master_account_id")) for p in plaene if p.get("master_account_id")})
+        for i in range(0, len(ids), 80):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,balance,external_id,max_drawdown,tv_balance,tv_balance_at",
+                                            "id": f"in.({','.join(ids[i:i + 80])})"}):
+                accs[str(a["id"])] = a
+        # Kerzen je Wurzel ab dem frühesten Start (eine Abfrage je Wurzel)
+        starts = [str(p.get("started_at")) for p in plaene if p.get("started_at")]
+        kerzen = {}
+        if starts:
+            ab = min(starts)
+            for w in ("NQ", "MNQ"):
+                kerzen[w] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{w}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
+            # NQ und MNQ laufen preisgleich — fehlt einer Wurzel der Feed, nimmt die andere
+            if not kerzen["NQ"]:
+                kerzen["NQ"] = kerzen["MNQ"]
+            if not kerzen["MNQ"]:
+                kerzen["MNQ"] = kerzen["NQ"]
+        trades = [_lt_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, kerzen) for p in plaene]
+        rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
+        trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
+        return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "trades": trades})
+    except Exception as e:
+        print(f"[live-trades] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Live Trades nicht ladbar ({type(e).__name__}: {e})"}), 502
+
+
 def _wd_ende_upd(plan, jetzt_iso, datum, grund=None):
     """REIN RECHNEND (testbar): Update für „Winning Day beenden" vom Mac (25.09.2026, Finn: laufende Winning
     Days ALLER IDs vom Mac aus beenden — trade_plans liegt unter RLS, fremde Pläne nur über den Service-Key).
