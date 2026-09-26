@@ -32,7 +32,8 @@ def lade():
                                          "READER_WACHT_ERINNERUNG_1_S", "READER_WACHT_ERINNERUNG_N_S",
                                          "READER_WACHT_TZ", "READER_WACHT_KERZEN_HAUPT")]
                      + [block(f) for f in ("cme_markt_offen", "_cme_offen_seit_s", "_rw_uhr", "_rw_kurs_text",
-                                           "reader_wacht_schritt", "_rw_frisch")])
+                                           "reader_wacht_schritt", "_rw_frisch", "_rw_ts", "_rw_uebernahme_key",
+                                           "_rw_puls_text", "_rw_versions_wechsel")])
     exec(code, ns)
     return ns
 
@@ -176,6 +177,41 @@ def main():
           "Feed-Ausfall schliesst beide Kerzen-Vorfaelle still")
     zc, ev = s(zb, T + 30, 3, False, kerzen_je={"MNQ": 400, "NQ": 500}, **kw)
     check(sorted(e["art"] for e in ev) == ["kerzen_leise_still", "kerzen_still"], "Marktschluss schliesst beide still")
+
+    # 26.09.2026: Umstufen statt Doppelzeile (reader_ausfaelle 3/4: NQ-Vorfall laut ohne Wurzel übernommen)
+    zu = {"feed": None, "kerzen": {"von": T - 1560, "wurzel": None, "id": 3}, "kerzen_leise": None}
+    zu2, ev = s(zu, T, 3, True, kerzen_je={"MNQ": 30, "NQ": 1600}, **kw)
+    check([e["art"] for e in ev] == ["kerzen_umgestuft"] and not ev[0]["push"] and ev[0]["id"] == 3
+          and zu2["kerzen"] is None and zu2["kerzen_leise"]["id"] == 3 and zu2["kerzen_leise"]["von"] == T - 1560
+          and zu2["kerzen_leise"]["wurzel"] == "NQ", "laut übernommener NQ-Vorfall → leise weiter, gleiche Zeile + Startzeit")
+    zu3, ev = s(zu2, T + 30, 3, True, kerzen_je={"MNQ": 20, "NQ": 1630}, **kw)
+    check(ev == [], "… und danach keine neue Zeile")
+    zm2 = {"feed": None, "kerzen": {"von": T - 600, "wurzel": "MNQ", "id": 5}, "kerzen_leise": None}
+    zm3, ev = s(zm2, T, 3, True, kerzen_je={"MNQ": 30, "NQ": 1600}, **kw)
+    check(sorted(e["art"] for e in ev) == ["kerzen_ende", "kerzen_leise_beginn"], "echter MNQ-Vorfall endet normal, NQ neu leise")
+    uk = a["_rw_uebernahme_key"]
+    check(uk({"art": "kerzen", "laut": False}) == "kerzen_leise" and uk({"art": "kerzen", "laut": True, "wurzel": "NQ"}) == "kerzen"
+          and uk({"art": "kerzen", "laut": None, "wurzel": "NQ"}) == "kerzen_leise"
+          and uk({"art": "kerzen", "laut": None, "gemeldet": 0}) == "kerzen_leise"
+          and uk({"art": "kerzen", "laut": None, "wurzel": "MNQ", "gemeldet": 1}) == "kerzen" and uk({"art": "feed"}) == "feed",
+          "Übernahme-Schlüssel: laut=false/Nebenwurzel/gemeldet 0 → leise")
+    # Puls-Hinweis im Push
+    pt = a["_rw_puls_text"]
+    von = utc("2026-09-25T10:25:14").timestamp()
+    row = {"created_at": "2026-09-25T10:23:15+00:00", "plan_id": "f3421131-6a9c", "status": "fehler", "params": {"aktion": "orbit"}}
+    txt = pt(row, von)
+    check("Puls-Lauf kurz davor" in txt and "Orbit-Order" in txt and "Plan f3421131" in txt and "(fehler)" in txt,
+          "Puls-Lauf 2 min vor dem Ausfall → im Push genannt")
+    check(pt(dict(row, created_at="2026-09-25T10:15:00+00:00"), von) == "" and pt(None, von) == ""
+          and pt(dict(row, created_at="2026-09-25T10:26:00+00:00"), von) == "",
+          "Lauf > 5 min davor, danach oder keiner → kein Hinweis")
+
+    vw = a["_rw_versions_wechsel"]
+    v1, w1 = vw({}, [{"pc_name": "pc-usq1i6", "reader_version": "0.9.3"}])
+    v2, w2 = vw(v1, [{"pc_name": "pc-usq1i6", "reader_version": "0.9.4"}, {"pc_name": "pc-x", "reader_version": None}])
+    v3, w3 = vw(v2, [{"pc_name": "pc-usq1i6", "reader_version": "0.9.4"}])
+    check(w1 == [] and w2 == [("pc-usq1i6", "0.9.3", "0.9.4")] and w3 == [] and v3 == {"pc-usq1i6": "0.9.4"},
+          "Reader-Update erkannt: erster Stand kein Wechsel, 0.9.3 → 0.9.4 einmal, ohne Version nichts")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

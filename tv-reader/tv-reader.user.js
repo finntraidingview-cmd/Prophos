@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prophos TV-Reader
 // @namespace    prophos
-// @version      0.8.7
+// @version      0.8.8
 // @description  Liest offene TradingView-Positionen live aus dem DOM und schickt sie an den lokalen Prophos-Empfaenger. Seit 0.3 zusaetzlich das BEDIENFELD (Konto-Umschalter, Symbol-Suche, Order-Ticket, Kaufen/Verkaufen) mit Bildschirm-Geometrie — die Augen fuer den Puls, der mit echter Maus klickt. Seit 0.5 auch die KONTO-ZUSAMMENFASSUNG (Balance, Today's P&L …) fuer den Orbit-V2-Rundgang.
 // @match        https://*.tradingview.com/*
 // @grant        GM_xmlhttpRequest
@@ -25,6 +25,12 @@
 // kommt ueber @updateURL/@downloadURL (GitHub-raw) von selbst.
 //
 // CHANGELOG (Kurzform, Details an den Stellen im Code):
+//   0.8.8  26.09.2026  Feed-Tab heilt sich selbst (Koordination B3, Befund R3: Freitag fehlte MNQ ~520 von 635 min, jede
+//                      Luecke begann mit einem Puls-Eingriff ins Reader-Chrome; 17:02–21:00 blieb tot, weil der Tab danach
+//                      NQ1! und ein Konto zeigte). Ein Tab, der 10 min am Stueck Feed war, bleibt Feed (sessionStorage) —
+//                      auch nach einem Login; der Login wird als feed_login gemeldet und im Abzeichen gewarnt. Er merkt sich
+//                      sein Layout (URL + Symbol, solange MNQ tickt) und kehrt bei offenem Markt dorthin zurueck, wenn er
+//                      2 min ein anderes Symbol zeigt oder 2 min kein MNQ-Kurs kam — nie waehrend Eingaben, hoechstens alle 10 min.
 //   0.8.7  25.09.2026  Feed-Tab ohne Konto (Finn, Reader-Chrome auf pc-usq1i6 ohne Broker: „Kannst du einstellen, dass der
 //                      Reader auch geht, wenn man nirgends in einem Konto angemeldet ist?"): kein Konto im Umschalter → Rolle
 //                      'feed' wie seit 0.8.5, jetzt auch OHNE Positions-Lesung und ohne 'Reader blind'-Abzeichen — stattdessen
@@ -85,7 +91,7 @@
   // dreimal ein Update vermutet, das gar nicht aktiv war (31.08.2026), und von
   // aussen war das nur an FEHLENDEN Feldern zu erraten. Ab jetzt sagt jeder
   // Bedienfeld-Abruf, welcher Stand wirklich laeuft.
-  const VERSION    = '0.8.7';
+  const VERSION    = '0.8.8';
   const ENDPOINT   = 'http://127.0.0.1:8790/positions';
   const BEDIENFELD = 'http://127.0.0.1:8790/bedienfeld';
   const KERZEN     = 'http://127.0.0.1:8790/kerzen';       // 0.8.0: Bars aus dem Socket, gebuendelt
@@ -289,8 +295,17 @@
   // Echte Broker-Konto-Kennung (Tradovate: Buchstaben + mindestens 5 Ziffern). 'Paper Trading' o. ae. zaehlt
   // nicht — sonst hielte sich ein Feed-Konto mit Paper-Trading-Leiste fuer einen Broker und meldete 'flach'.
   const RX_KONTO_ECHT = /[A-Z]{2,}[A-Z0-9_-]*\d{5,}/i;
+  // Konto im Umschalter angemeldet? (Rohwert — vor 0.8.8 war das allein die Rolle)
+  function kontoAngemeldet(jetzt) {
+    return !!(kontoMerk.text && RX_KONTO_ECHT.test(kontoMerk.text) && (jetzt - kontoMerk.ts) < 30000);
+  }
+  // 0.8.8: ein markierter Feed-Tab bleibt Feed, auch wenn sich jemand (Puls) darin anmeldet
+  function feedMarkiert() {
+    try { return sessionStorage.getItem('prophos_feed_tab') === '1'; } catch (_) { return false; }
+  }
   function tabRolle(jetzt) {
-    return (kontoMerk.text && RX_KONTO_ECHT.test(kontoMerk.text) && (jetzt - kontoMerk.ts) < 30000) ? 'broker' : 'feed';
+    if (feedMarkiert()) return 'feed';
+    return kontoAngemeldet(jetzt) ? 'broker' : 'feed';
   }
   function liesKonto() {
     try {
@@ -1341,6 +1356,58 @@
     }
     return false;
   }
+  // ── Feed-Tab-Selbstheilung (0.8.8, 26.09.2026, Koordination B3) ────────────────────────────────────────────────
+  // Der Reader-Tab auf pc-usq1i6 wurde von Puls auf NQ1! umgeschaltet und bei Tradovate angemeldet; die bisherigen
+  // Reload-Regeln griffen nicht, weil der Socket gesund war und NQ weiter tickte — MNQ fehlte 4 h. Deshalb:
+  //  - Markierung: 10 min am Stueck Rolle 'feed' → sessionStorage 'prophos_feed_tab' (ueberlebt Reload/Navigation in
+  //    diesem Tab, nicht einen neuen Tab). Ein Handels-Tab ohne Konto wird so nicht markiert, solange darin binnen
+  //    10 min ein Konto erscheint.
+  //  - Layout lernen: markiert + Titel zeigt MNQ + MNQ tickt → Layout-URL (/chart/<id>/) und Titel-Symbol in
+  //    localStorage (je Chrome-Profil, also nur im Reader-Profil).
+  //  - Heilen: markiert + CME offen + seit FALSCH_S ein anderes Symbol im Titel ODER kein neuer MNQ-Kurs → zurueck zur
+  //    Layout-URL; nie, solange in den letzten 2 min Maus/Tastatur (auch Puls) im Tab war; hoechstens alle 10 min.
+  const FEED_MARKE_MS = 10 * 60 * 1000, FALSCH_S = 120, HEIL_SPERRE_MS = 10 * 60 * 1000;
+  let feedSeitMs = 0, falschSeitMs = 0;
+  function feedLayout() {
+    try { return JSON.parse(localStorage.getItem('prophos_feed_layout') || 'null'); } catch (_) { return null; }
+  }
+  function feedPflegen(jetzt, titel) {
+    if (!feedMarkiert()) {
+      if (!kontoAngemeldet(jetzt)) {
+        if (!feedSeitMs) feedSeitMs = jetzt;
+        if (jetzt - feedSeitMs >= FEED_MARKE_MS) { try { sessionStorage.setItem('prophos_feed_tab', '1'); } catch (_) {} }
+      } else feedSeitMs = 0;
+      return;
+    }
+    const mnq = kursMerk.MNQ;
+    if (titel && kursWurzelAusText(titel.symbol) === 'MNQ' && mnq && jetzt - mnq.geaendert_ms < 30000
+        && /^\/chart\/[A-Za-z0-9_-]+\/?$/.test(location.pathname)) {
+      try { localStorage.setItem('prophos_feed_layout', JSON.stringify({ url: location.origin + location.pathname, symbol: titel.symbol, ts: jetzt })); } catch (_) {}
+    }
+  }
+  function feedHeilen(jetzt, titel) {
+    if (!feedMarkiert() || !cmeOffen(jetzt)) { falschSeitMs = 0; return false; }
+    const lay = feedLayout();
+    if (!lay || !lay.url) return false;
+    const mnq = kursMerk.MNQ;
+    const symbolFalsch = !!(titel && titel.symbol && lay.symbol && titel.symbol !== lay.symbol);
+    const ohneMnq = !mnq || (jetzt - mnq.geaendert_ms) / 1000 > FALSCH_S;
+    if (!symbolFalsch && !ohneMnq) { falschSeitMs = 0; return false; }
+    if (!falschSeitMs) falschSeitMs = jetzt;
+    if ((jetzt - falschSeitMs) / 1000 < FALSCH_S || jetzt - letzteEingabeMs < EINGABE_RUHE_MS) return false;
+    let letzter = 0;
+    try { letzter = Number(localStorage.getItem('prophos_feed_heil_ms')) || 0; } catch (_) {}
+    if (jetzt - letzter < HEIL_SPERRE_MS) return false;
+    const grund = (symbolFalsch ? 'Feed-Tab zeigte ' + titel.symbol + ' statt ' + lay.symbol
+                                : 'kein neuer MNQ-Kurs') + ' seit ' + Math.round((jetzt - falschSeitMs) / 1000) + ' s → zurueck zum Layout';
+    try {
+      localStorage.setItem('prophos_feed_heil_ms', String(jetzt));
+      sessionStorage.setItem('prophos_reader_reload_grund', grund);
+    } catch (_) {}
+    setTimeout(() => { location.href = lay.url; }, 500);
+    return true;
+  }
+
   // Gesamtbild fuer den Payload: Legenden zuerst, Tab-Titel als Rueckfall fuer die Wurzel des aktiven Charts
   function liesKurse() {
     // 0.8.0: Socket zuerst (laeuft auch verdeckt), dann Legende (0.7.0), dann Tab-Titel (0.6.0)
@@ -1363,6 +1430,10 @@
     // 0.8.7: Rolle ZUERST — ein Feed-Tab (kein Broker-Konto im Umschalter) liest keine Positionen und ist nie 'blind';
     // er liefert nur Kurse/Kerzen (die Positions-Felder schickt er seit 0.8.5 ohnehin nicht)
     if ((tickNr % BF_JEDER) === 0) liesKonto();
+    // 0.8.8: Feed-Markierung pflegen, Login im Feed-Tab erkennen (Rolle bleibt dann 'feed')
+    const titelJetzt = liesKursAusTitel();
+    feedPflegen(Date.now(), titelJetzt);
+    const feedLogin = feedMarkiert() && kontoAngemeldet(Date.now()) ? kontoMerk.text : null;
     const rolle = tabRolle(Date.now());
     const positionen = rolle === 'broker' ? lesePositionen() : [];
     const blind = rolle === 'broker' ? blindGrund(positionen) : null;
@@ -1397,12 +1468,14 @@
       // derselben Form. Nur Roh-Text, gedeutet wird im Prophos-Tab (Zahlformat
       // deutsch/englisch, gleiche Regel wie tv_snapshot.parse_de_zahl). null =
       // Titel nicht lesbar (kein Chart-Tab) — nie ein stilles 0.
-      kurs: liesKursAusTitel(),
+      kurs: titelJetzt,
       // 0.7.0: beide Symbole aus den Legenden (kurse.NQ / kurse.MNQ mit bid/ask/text/ts/quelle/stale),
       // Rueckfall Tab-Titel; reload_grund nur im ersten Tick nach einer Selbstheilung.
       kurse: liesKurse(),
       reload_grund: reloadGrund,
+      feed_login: feedLogin,
     }, posFelder));
+    feedHeilen(Date.now(), titelJetzt);
     reloadGrund = null;
 
     if ((tickNr++ % BF_JEDER) === 0) sendeBedienfeld();
@@ -1418,6 +1491,7 @@
         let an = true;
         try { an = JSON.parse(r.responseText).an !== false; } catch (_) {}
         if (!an)             setBadge(`⏸ Reader pausiert (via Prophos)`, 'pause');
+        else if (feedLogin)  setBadge(`⚠ Feed-Tab: Broker-Konto angemeldet (${feedLogin}) — hier nie handeln, bitte abmelden`, 'warn');   // 0.8.8
         else if (rolle !== 'broker') setBadge(`● Feed-Tab ohne Konto — nur Kurse`, 'ok');   // 0.8.7: keine Warnung ohne Konto
         else if (blind)      setBadge(`⚠ Reader blind: ${blind} — Stand eingefroren, Hedge bleibt stehen`, 'warn');
         // 0.5.2: Englisch ist kein Warnfall mehr — Spalten und Zahlen werden in beiden Sprachen gelesen

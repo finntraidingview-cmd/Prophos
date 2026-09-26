@@ -54,6 +54,7 @@ import re
 import os
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -64,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.3"
+READER_VERSION = "0.9.4"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -557,11 +558,14 @@ def _tab(daten, jetzt):
     ids = _feed_ids_laden()
     neu = tid not in ids
     rolle, login_im_feed = _feed_rolle(rolle, tid, ids, jetzt)
+    if daten.get("feed_login") and tid != "standard":      # 0.9.4: Userscript 0.8.8 meldet den Login selbst
+        login_im_feed = True
+        rolle = "feed"
     if tid in ids:
         _feed_ids_sichern(jetzt, neu)
     t = _tabs.setdefault(tid, {"stand": None, "stand_s": 0.0, "blind_grund": "", "blind_seit": 0.0, "bf": None, "bf_s": 0.0})
     if login_im_feed:
-        konto = str(daten.get("konto") or "")[:40]
+        konto = str(daten.get("konto") or daten.get("feed_login") or "")[:40]
         if not t.get("login_im_feed"):
             print(f"\n[{time.strftime('%H:%M:%S')}] ACHTUNG: im Feed-Tab {tid[:6]} ist ein Broker-Konto angemeldet"
                   f"{(' (' + konto + ')') if konto else ''} — zaehlt NICHT als Positions-Quelle. Im Reader-Chrome abmelden.",
@@ -1189,6 +1193,187 @@ def _neustart_pause(schnelle_fehler):
     return 30.0 if schnelle_fehler >= 3 else 5.0
 
 
+# ── Selbst-Update (0.9.4, 26.09.2026, Finns Regel „immer direkt deployen", Auftrag Koordination B3) ─────────────────
+# Bis 0.9.3 kam eine neue reader-server.py nur an, wenn jemand am PC das Reader-Fenster schloss und start-reader.bat
+# neu startete (die Aufsicht startete den Kindprozess immer aus der alten Datei). Jetzt prueft die Aufsicht alle 5 min
+# die Commit-Kennung von main (Git-Schnittstelle wie das Panel — raw/main haengt bis zu 5 min im Zwischenspeicher, je
+# Datei mit eigener Uhr) und laedt die Datei ueber genau diese Kennung. Getauscht wird NUR bei geschlossenem CME-Markt
+# (taegliche Pause 16–17 CT, Wochenende) — nie zur Handelszeit, auch nicht in einer „ruhigen Minute"; ein Update, das
+# zur Handelszeit ankommt, wartet auf die naechste Pause. Vor dem Tausch: compile(); die alte Datei bleibt als
+# reader-server.py.prev liegen. Meldet sich der neue Server nicht binnen UPDATE_BEWEIS_S mit der neuen Version, geht
+# die alte Datei zurueck und diese Kennung wird nicht noch einmal versucht.
+# Die AUFSICHT selbst laeuft danach im alten Code weiter (sie tauscht nur den Kindprozess) — Aenderungen an ihr gelten
+# erst nach dem naechsten Start von start-reader.bat. Der Server-Teil (alles, was Kurse/Kerzen/Positionen macht) kommt
+# damit ohne Handgriff an.
+UPDATE_PRUEF_S = 300
+UPDATE_BEWEIS_S = 90
+_REPO = "finntraidingview-cmd/Prophos"
+_REPO_PFAD = "tv-reader/reader-server.py"
+_kind = {"proc": None}          # laufender Server-Kindprozess (fuer den Tausch)
+
+
+def _chicago_offset_h(ts):
+    """REIN RECHNEND (testbar): UTC-Versatz von Chicago (-5 Sommer / -6 Winter) nach US-Regel — zweiter Sonntag im
+    Maerz 2:00 bis erster Sonntag im November 2:00 Ortszeit. Ohne zoneinfo: Python unter Windows kennt IANA-Zonen nur
+    mit dem Paket tzdata, und das liegt auf den PCs nicht sicher."""
+    import datetime as _dt
+    u = _dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc)
+    j = u.year
+
+    def sonntag(monat, n):
+        d = _dt.datetime(j, monat, 1, tzinfo=_dt.timezone.utc)
+        d += _dt.timedelta(days=(6 - d.weekday()) % 7)
+        return d + _dt.timedelta(days=7 * (n - 1))
+    beginn = sonntag(3, 2) + _dt.timedelta(hours=8)     # 2:00 CST = 08:00 UTC
+    ende = sonntag(11, 1) + _dt.timedelta(hours=7)      # 2:00 CDT = 07:00 UTC
+    return -5 if beginn <= u < ende else -6
+
+
+def cme_offen(ts):
+    """REIN RECHNEND (testbar): CME-Globex offen? So 17:00 – Fr 16:00 Chicago, taeglich Pause 16:00–17:00 — gleiche
+    Regel wie cme_markt_offen in app.py und cmeOffen im Userscript (Feiertage kennt sie nicht)."""
+    import datetime as _dt
+    ct = _dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc) + _dt.timedelta(hours=_chicago_offset_h(ts))
+    wt, hm = ct.weekday(), ct.hour * 60 + ct.minute
+    if wt == 5 or (wt == 4 and hm >= 16 * 60) or (wt == 6 and hm < 17 * 60):
+        return False
+    return not (16 * 60 <= hm < 17 * 60)
+
+
+def update_pruefen(alt, neu):
+    """REIN RECHNEND (testbar): taugt die geladene Datei als Ersatz? -> (ok, grund, version)."""
+    if not neu or len(neu) < 4000:
+        return False, "Datei zu klein", None
+    if neu == alt:
+        return False, "unveraendert", None
+    try:
+        compile(neu, "reader-server.py", "exec")
+    except SyntaxError as e:
+        return False, f"Syntaxfehler Zeile {e.lineno}", None
+    m = re.search(rb'^READER_VERSION = "([^"]+)"', neu, re.M)
+    if not m:
+        return False, "keine READER_VERSION", None
+    return True, "", m.group(1).decode("ascii", "replace")
+
+
+def update_tauschen(datei, neu):
+    """Alte Datei nach .prev, neue atomar an ihren Platz."""
+    with open(datei, "rb") as f:
+        alt = f.read()
+    with open(datei + ".prev", "wb") as f:
+        f.write(alt)
+    tmp = datei + ".upd"
+    with open(tmp, "wb") as f:
+        f.write(neu)
+    os.replace(tmp, datei)
+
+
+def update_zuruecknehmen(datei):
+    if os.path.exists(datei + ".prev"):
+        os.replace(datei + ".prev", datei)
+
+
+def _repo_sha(timeout=8):
+    import urllib.request
+    try:
+        req = urllib.request.Request(f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
+                                     headers={"User-Agent": "git/2.40"})
+        m = re.search(rb"([0-9a-f]{40}) refs/heads/main", urllib.request.urlopen(req, timeout=timeout).read())
+        return m.group(1).decode("ascii") if m else None
+    except Exception:
+        return None
+
+
+def _repo_datei(sha, timeout=20):
+    import urllib.request
+    return urllib.request.urlopen(f"https://raw.githubusercontent.com/{_REPO}/{sha}/{_REPO_PFAD}", timeout=timeout).read()
+
+
+def _server_version(timeout=2.0):
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/positions", timeout=timeout) as r:
+            return (json.loads(r.read().decode("utf-8", "replace")) or {}).get("reader_version")
+    except Exception:
+        return None
+
+
+def _update_meldung(text):
+    print(f"\n[{time.strftime('%H:%M:%S')}] Selbst-Update: {text}", flush=True)
+
+
+def update_schritt(zustand, jetzt, markt_offen, sha, lade, pruefe=update_pruefen):
+    """REIN RECHNEND bis auf lade(sha) (testbar): eine Pruefung. zustand {geprueft, schlecht:set, wartend}. ->
+    'tauschen' (wartendes Update jetzt einspielen), 'warten' (Update liegt, Markt offen) oder None."""
+    if sha and sha != zustand.get("geprueft") and sha not in zustand.setdefault("schlecht", set()):
+        zustand["geprueft"] = sha
+        try:
+            neu = lade(sha)
+        except Exception as e:
+            zustand["geprueft"] = None          # beim naechsten Mal noch einmal versuchen
+            _update_meldung(f"Download fehlgeschlagen ({type(e).__name__}) — naechster Versuch in 5 min")
+            neu = None
+        if neu is not None:
+            ok, grund, version = pruefe(zustand.get("aktuell"), neu)
+            if ok:
+                zustand["wartend"] = {"sha": sha, "daten": neu, "version": version, "seit": jetzt}
+                _update_meldung(f"neue Version {version} ({sha[:7]}) geladen und geprueft — "
+                                + ("wird in der CME-Pause eingespielt" if markt_offen else "wird jetzt eingespielt"))
+            elif grund != "unveraendert":
+                zustand["schlecht"].add(sha)
+                _update_meldung(f"Stand {sha[:7]} verworfen: {grund}")
+    if zustand.get("wartend"):
+        return "warten" if markt_offen else "tauschen"
+    return None
+
+
+def _updater(datei, schlafen=time.sleep):
+    """Hintergrund-Faden der Aufsicht: pruefen, in der CME-Pause tauschen, beweisen, sonst zuruecknehmen."""
+    zustand = {"geprueft": None, "schlecht": set(), "wartend": None}
+    schlafen(60)
+    while True:
+        try:
+            with open(datei, "rb") as f:
+                zustand["aktuell"] = f.read()
+            jetzt = time.time()
+            was = update_schritt(zustand, jetzt, cme_offen(jetzt), _repo_sha(), _repo_datei)
+            if was == "tauschen":
+                w = zustand["wartend"]
+                alt_version = _server_version() or READER_VERSION
+                update_tauschen(datei, w["daten"])
+                _update_meldung(f"spiele {w['version']} ein (vorher {alt_version}, CME-Markt geschlossen) — Server startet neu")
+                p = _kind.get("proc")
+                if p is not None:
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+                ende = time.time() + UPDATE_BEWEIS_S
+                bewiesen = False
+                while time.time() < ende:
+                    schlafen(3)
+                    if _server_version() == w["version"]:
+                        bewiesen = True
+                        break
+                if bewiesen:
+                    _update_meldung(f"{w['version']} laeuft (vorher {alt_version}).")
+                else:
+                    update_zuruecknehmen(datei)
+                    zustand["schlecht"].add(w["sha"])
+                    _update_meldung(f"{w['version']} meldete sich nicht binnen {UPDATE_BEWEIS_S} s — alte Datei zurueck, "
+                                    f"Stand {w['sha'][:7]} wird nicht noch einmal versucht")
+                    p = _kind.get("proc")
+                    if p is not None:
+                        try:
+                            p.terminate()
+                        except Exception:
+                            pass
+                zustand["wartend"] = None
+        except Exception as e:
+            _update_meldung(f"Fehler {type(e).__name__}: {e}")
+        schlafen(UPDATE_PRUEF_S)
+
+
 def _aufsicht(starter=None, schlafen=time.sleep, max_starts=None):
     """Startet den Server-Kindprozess und startet ihn nach dem Ende neu. starter() -> Exit-Code (Tests injizieren ihn).
     Ein Lauf unter 60 s zaehlt als schneller Fehler. -> Anzahl Starts (nur mit max_starts relevant)."""
@@ -1196,7 +1381,12 @@ def _aufsicht(starter=None, schlafen=time.sleep, max_starts=None):
         def starter():
             env = dict(os.environ)
             env[KIND_ENV] = "1"
-            return subprocess.call([sys.executable, os.path.abspath(__file__)], env=env)
+            p = subprocess.Popen([sys.executable, os.path.abspath(__file__)], env=env)
+            _kind["proc"] = p     # 0.9.4: der Update-Faden beendet ihn fuer den Tausch
+            try:
+                return p.wait()
+            finally:
+                _kind["proc"] = None
     starts, schnell = 0, 0
     while max_starts is None or starts < max_starts:
         t0 = time.time()
@@ -1217,6 +1407,8 @@ if __name__ == "__main__" and os.environ.get(KIND_ENV) != "1":
     if quickedit_aus():
         print("QuickEdit aus (Klick ins Fenster hält den Reader nicht mehr an)")
     print(f"Prophos TV-Reader {READER_VERSION} — Aufsicht aktiv: stirbt der Server, startet er in 5 s neu (Strg+C beendet).")
+    print("Selbst-Update an: neue Versionen werden nur bei geschlossenem CME-Markt eingespielt (Pause 16–17 CT, Wochenende).")
+    threading.Thread(target=_updater, args=(os.path.abspath(__file__),), daemon=True).start()
     try:
         _aufsicht()
     except KeyboardInterrupt:

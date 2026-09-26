@@ -8240,6 +8240,21 @@ def reader_wacht_schritt(zustand, jetzt, feed_alter_s, markt_offen, seit_offen_s
                 ka = min(float(ka), float(deckel))
         return ka
 
+    # Umstufen statt Doppelzeile (26.09.2026, Befund Koordination: reader_ausfaelle 3/4 — NQ-Vorfall ab 11:46 wurde
+    # beim Deploy 12:12 als LAUTER Vorfall ohne Wurzel übernommen, im ersten Schritt geschlossen (MNQ lief) und
+    # sofort als leiser NQ-Vorfall mit derselben Startzeit neu angelegt). Ist der laute Vorfall in Wahrheit der
+    # einer Nebenwurzel (Wurzel unbekannt oder gleich der fehlenden Nebenwurzel) und läuft die Hauptwurzel, wird
+    # er leise weitergeführt — gleiche Zeile, gleiche Startzeit, kein Push.
+    k_alt = neu["kerzen"]
+    ka_h, kl_n = gedeckelt(laut_ka), gedeckelt(leise_ka)
+    if (k_alt and not neu["kerzen_leise"] and leise_w and laut_w == READER_WACHT_KERZEN_HAUPT
+            and k_alt.get("wurzel") in (None, leise_w)
+            and ka_h is not None and ka_h <= READER_WACHT_KERZEN_S and kl_n is not None and kl_n > READER_WACHT_KERZEN_S):
+        neu["kerzen_leise"] = dict(k_alt, wurzel=leise_w)
+        neu["kerzen"] = None
+        ev.append({"art": "kerzen_umgestuft", "push": False, "renotify": False, "titel": "", "text": "",
+                   "von": k_alt.get("von"), "bis": None, "dauer_s": None, "id": k_alt.get("id"), "wurzel": leise_w})
+
     ka = gedeckelt(laut_ka)
     if ka is not None and ka > READER_WACHT_KERZEN_S:
         if not neu["kerzen"]:
@@ -8337,7 +8352,10 @@ def _rw_protokoll(e, zustand):
     key = "feed" if e["art"].startswith("feed") else ("kerzen_leise" if e["art"].startswith("kerzen_leise") else "kerzen")
     art = "feed" if key == "feed" else "kerzen"
     try:
-        if e["art"] in ("feed_beginn", "kerzen_beginn", "kerzen_leise_beginn"):
+        if e["art"] == "kerzen_umgestuft":
+            if e.get("id") is not None:
+                sb_update("reader_ausfaelle", {"id": f"eq.{e['id']}"}, {"laut": False, "wurzel": e.get("wurzel")})
+        elif e["art"] in ("feed_beginn", "kerzen_beginn", "kerzen_leise_beginn"):
             body = {"art": art, "von": _rw_iso(e["von"]), "pc": (zustand.get(key) or {}).get("pc") or _reader_wacht_info.get("pc"),
                     "letzter_kurs": (zustand.get(key) or {}).get("letzter_kurs") if art == "feed" else _reader_wacht_info.get("letzter_kurs"),
                     "gemeldet": 0 if key == "kerzen_leise" else 1}
@@ -8366,6 +8384,53 @@ def _rw_protokoll(e, zustand):
         print(f"[reader-wacht] ⚠️ Protokoll ({e['art']}): {_reader_wacht_info['protokoll_fehler']}", flush=True)
 
 
+def _rw_uebernahme_key(r):
+    """REIN RECHNEND (testbar): Zustands-Schlüssel einer offenen reader_ausfaelle-Zeile. Kerzen-Zeilen sind leise bei
+    laut=false; ohne 'laut' (Zeile von vor der Spalte) zählen Wurzel ≠ Hauptwurzel oder gemeldet=0 als leise —
+    sonst wurde eine NQ-Zeile beim Deploy laut übernommen und als Doppelzeile neu angelegt (26.09.2026)."""
+    art = r.get("art")
+    if art != "kerzen":
+        return art
+    if r.get("laut") is False:
+        return "kerzen_leise"
+    if r.get("laut") is None:
+        w = str(r.get("wurzel") or "").upper()
+        if (w and w != READER_WACHT_KERZEN_HAUPT) or r.get("gemeldet") == 0:
+            return "kerzen_leise"
+    return "kerzen"
+
+
+def _rw_puls_text(zeile, von):
+    """REIN RECHNEND (testbar): Hinweis auf den letzten Puls-Lauf dieses PCs, wenn er höchstens 5 min vor dem Beginn
+    eines Vorfalls lag (bis 30 s danach) — '' sonst. Finn soll im Push sofort sehen, ob Puls ins Reader-Chrome gegriffen
+    hat (Befund R3, 26.09.2026: jede MNQ-Lücke am Freitag begann mit einem Puls-Eingriff auf pc-usq1i6)."""
+    if not zeile or von is None:
+        return ""
+    t = _rw_ts(zeile.get("created_at"))
+    if t is None or not (float(von) - 300 <= t <= float(von) + 30):
+        return ""
+    params = zeile.get("params") if isinstance(zeile.get("params"), dict) else {}
+    was = "Orbit-Order" if params.get("aktion") == "orbit" else "Order"
+    plan = str(zeile.get("plan_id") or "")[:8] or "—"
+    status = str(zeile.get("status") or "").strip()
+    return f" · Puls-Lauf kurz davor: {_rw_uhr(t)} {was}, Plan {plan}{(' (' + status + ')') if status else ''}"
+
+
+def _rw_puls_hinweis(pc, von):
+    """Letzter Puls-Lauf (order_signale) dieses PCs bis 30 s nach Vorfall-Beginn → Hinweis-Text. Fehler → ''.
+    Rundgänge (tv-lesen/tv-close) stehen nicht in order_signale — die sieht der Hinweis nicht."""
+    if not pc or von is None:
+        return ""
+    try:
+        rows = sb_select("order_signale", {"select": "plan_id,status,created_at,params", "pc": f"eq.{pc}",
+                                           "created_at": f"lte.{_rw_iso(float(von) + 30)}",
+                                           "order": "created_at.desc", "limit": "1"}) or []
+    except Exception as e:
+        print(f"[reader-wacht] ⚠️ Puls-Hinweis: {type(e).__name__}: {e}", flush=True)
+        return ""
+    return _rw_puls_text(rows[0] if rows else None, von)
+
+
 def _rw_uebernehmen(jetzt):
     """Nach einem Neustart den offenen Vorfall aus reader_ausfaelle übernehmen — sonst meldete
     jeder Deploy mitten im Ausfall ihn ein zweites Mal. Offene Zeilen älter als 12 h (Prozess
@@ -8384,7 +8449,7 @@ def _rw_uebernehmen(jetzt):
     for r in rows:
         von = _rw_ts(r.get("von"))
         art = r.get("art")
-        key = "kerzen_leise" if (art == "kerzen" and r.get("laut") is False) else art
+        key = _rw_uebernahme_key(r)
         if von is None or art not in ("feed", "kerzen") or _reader_wacht_zustand.get(key) or jetzt - von > 12 * 3600:
             try:
                 sb_update("reader_ausfaelle", {"id": f"eq.{r['id']}"},
@@ -8403,6 +8468,41 @@ def _rw_uebernehmen(jetzt):
         print(f"[reader-wacht] ↻ offener {art}-Vorfall seit {_rw_uhr(von)} (Dubai) übernommen", flush=True)
 
 
+def _rw_versions_wechsel(alt, rows):
+    """REIN RECHNEND (testbar): Reader-Versionen je PC aus echoplus_live vergleichen. -> (neu, [(pc, von, auf)]).
+    Der erste Stand eines PCs ist kein Wechsel (Neustart des Wachhunds), eine fehlende Version auch nicht."""
+    neu, wechsel = dict(alt or {}), []
+    for r in rows or []:
+        pc, v = r.get("pc_name") or r.get("id"), r.get("reader_version")
+        if not pc or not v:
+            continue
+        if pc in neu and neu[pc] != v:
+            wechsel.append((pc, neu[pc], v))
+        neu[pc] = v
+    return neu, wechsel
+
+
+def _rw_versionen(jetzt):
+    """Reader-Update erkennen (26.09.2026, B3): seit 0.9.4 tauscht der Reader sich in der CME-Pause selbst aus —
+    Log-Zeile + Protokollzeile art 'update' (sql/2026-09-26_reader_ausfaelle_update.sql; fehlt sie, nur Log)."""
+    try:
+        rows = sb_select("echoplus_live", {"select": "id,pc_name,reader_version", "limit": "20"}) or []
+    except Exception as e:
+        print(f"[reader-wacht] ⚠️ Versionen: {type(e).__name__}: {e}", flush=True)
+        return
+    neu, wechsel = _rw_versions_wechsel(_reader_wacht_info.get("versionen"), rows)
+    _reader_wacht_info["versionen"] = neu
+    for pc, von, auf in wechsel:
+        notiz = f"Reader {von} → {auf}"
+        print(f"[reader-wacht] ⬆ {notiz} auf {pc}", flush=True)
+        _reader_wacht_info["updates"] = (_reader_wacht_info.get("updates") or [])[-9:] + [{"pc": pc, "notiz": notiz, "at": jetzt}]
+        try:
+            sb_insert("reader_ausfaelle", {"art": "update", "von": _rw_iso(jetzt), "bis": _rw_iso(jetzt), "dauer_s": 0,
+                                           "pc": pc, "gemeldet": 0, "laut": False, "notiz": notiz})
+        except Exception as e:
+            print(f"[reader-wacht] ℹ️ Update nicht protokolliert (SQL 2026-09-26 angewendet?): {type(e).__name__}", flush=True)
+
+
 def reader_wacht_tick(jetzt=None):
     global _reader_wacht_zustand
     jetzt = time.time() if jetzt is None else jetzt
@@ -8410,6 +8510,7 @@ def reader_wacht_tick(jetzt=None):
     seit = _cme_offen_seit_s(dt)
     offen = seit is not None
     m = _rw_messen(jetzt) if offen else {}
+    _rw_versionen(jetzt)        # auch bei geschlossenem Markt — genau dann spielt der Reader Updates ein
     neu, ev = reader_wacht_schritt(_reader_wacht_zustand, jetzt, m.get("feed_alter_s"), offen,
                                    seit_offen_s=seit, kerzen_alter_s=m.get("kerzen_alter_s"),
                                    kerzen_wurzel=m.get("kerzen_wurzel"), letzter_kurs=m.get("letzter_kurs"),
@@ -8419,6 +8520,8 @@ def reader_wacht_tick(jetzt=None):
                                "markt_offen": offen, "letzter_kurs": m.get("letzter_kurs"),
                                "wurzel": m.get("kurs_wurzel"), "pc": m.get("pc")})
     for e in ev:
+        if e["push"] and e["art"] in ("feed_beginn", "kerzen_beginn"):
+            e["text"] += _rw_puls_hinweis(m.get("pc") or _reader_wacht_info.get("pc"), e.get("von"))
         if e["push"]:
             zu, vers = 0, 0
             for uid in READER_WACHT_UIDS:
@@ -8431,6 +8534,8 @@ def reader_wacht_tick(jetzt=None):
             print(f"[reader-wacht] 📣 {e['titel']} — {e['text']} ({zu}/{vers} Geräte)", flush=True)
         elif e["art"].endswith("_beginn"):
             print(f"[reader-wacht] ℹ️ {e['titel']} — {e['text']} (leise, kein Push)", flush=True)
+        elif e["art"] == "kerzen_umgestuft":
+            print(f"[reader-wacht] ↧ Kerzen-Vorfall seit {_rw_uhr(e['von'])} ist {e.get('wurzel')} — leise weitergeführt", flush=True)
         else:
             print(f"[reader-wacht] {e['art']}: Vorfall seit {_rw_uhr(e['von'])} beendet ({e.get('dauer_s')} s)", flush=True)
         _rw_protokoll(e, _reader_wacht_zustand)
@@ -8511,6 +8616,8 @@ def reader_wacht_status():
         "ausfall": vorfall(_reader_wacht_zustand.get("feed")),
         "kerzen_vorfall": vorfall(_reader_wacht_zustand.get("kerzen")),
         "kerzen_hinweis": vorfall(_reader_wacht_zustand.get("kerzen_leise")),   # leise (keine Hauptwurzel), kein Push
+        "reader_versionen": i.get("versionen"),
+        "reader_updates": [{"pc": x["pc"], "notiz": x["notiz"], "at": _rw_iso(x["at"])} for x in (i.get("updates") or [])[-5:]],
         "meldungen_heute": heute_n, "letzte_meldungen": [{"art": x["art"], "titel": x["titel"], "at": _rw_iso(x["at"])}
                                                           for x in i["meldungen"][-5:]],
         "letzte_zustellung": ({**i["letzte_zustellung"], "at": _rw_iso(i["letzte_zustellung"]["at"])}

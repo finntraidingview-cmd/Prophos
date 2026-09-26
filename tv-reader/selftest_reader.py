@@ -315,6 +315,55 @@ def main():
     check(rs._kurs_1m_aus_ring(ring2, None, 9000 + 300.0) == [], "kurs_1m: alles eingefroren → leere Liste")
     check(len(rs._kurs_1m_aus_ring(ring2)) == 3, "kurs_1m ohne jetzt: wie bisher (Erstladung/Chart unberührt)")
 
+    # 0.9.4: Selbst-Update — nur bei geschlossenem CME-Markt, geprueft, alte Datei als Rueckfall
+    from datetime import datetime as _dt, timezone as _tz
+    from zoneinfo import ZoneInfo as _ZI
+    _t = lambda s_: _dt.fromisoformat(s_).replace(tzinfo=_tz.utc).timestamp()
+    abw = 0
+    for h in range(0, 2 * 365 * 24, 7):
+        ts_ = _t("2026-01-01T00:00:00") + h * 3600
+        if _dt.fromtimestamp(ts_, _tz.utc).astimezone(_ZI("America/Chicago")).utcoffset().total_seconds() / 3600 != rs._chicago_offset_h(ts_):
+            abw += 1
+    check(abw == 0, "Chicago-Versatz ohne zoneinfo = zoneinfo (2026–2027, Sommer-/Winterzeit)")
+    check(rs.cme_offen(_t("2026-09-28T15:00:00")) and not rs.cme_offen(_t("2026-09-28T21:30:00"))
+          and not rs.cme_offen(_t("2026-09-26T12:00:00")) and not rs.cme_offen(_t("2026-09-27T21:59:00"))
+          and rs.cme_offen(_t("2026-09-27T22:00:00")) and rs.cme_offen(_t("2026-09-25T20:59:00")) and not rs.cme_offen(_t("2026-09-25T21:00:00"))
+          and not rs.cme_offen(_t("2026-12-14T22:30:00")) and rs.cme_offen(_t("2026-12-14T23:00:00")),
+          "CME: Tagespause 16–17 CT (Sommer/Winter), Wochenende, Sonntag-Öffnung")
+    alt_src = open(rs.__file__, "rb").read()
+    neu_src = alt_src.replace(b'READER_VERSION = "' + rs.READER_VERSION.encode() + b'"', b'READER_VERSION = "9.9.9"')
+    check(rs.update_pruefen(alt_src, neu_src) == (True, "", "9.9.9"), "Update-Prüfung: gültige neue Datei → ok + Version")
+    check(rs.update_pruefen(alt_src, alt_src)[1] == "unveraendert" and rs.update_pruefen(alt_src, b"x")[0] is False
+          and "Syntaxfehler" in rs.update_pruefen(alt_src, neu_src + b"\ndef (:\n")[1],
+          "Update-Prüfung: unverändert / zu klein / Syntaxfehler → nein")
+    import io as _io3, contextlib as _cl3
+    z = {"aktuell": alt_src}
+    with _cl3.redirect_stdout(_io3.StringIO()):
+        a1 = rs.update_schritt(z, 1.0, True, "a" * 40, lambda sha: neu_src)
+        a2 = rs.update_schritt(z, 2.0, True, "a" * 40, lambda sha: 1 / 0)
+        a3 = rs.update_schritt(z, 3.0, False, "a" * 40, lambda sha: 1 / 0)
+    check(a1 == "warten" and a2 == "warten" and a3 == "tauschen" and z["wartend"]["version"] == "9.9.9",
+          "Update bei offenem Markt wartet, in der Pause → tauschen, gleiche Kennung nur einmal geladen")
+    z2 = {"aktuell": alt_src}
+    with _cl3.redirect_stdout(_io3.StringIO()):
+        b1 = rs.update_schritt(z2, 1.0, False, "b" * 40, lambda sha: neu_src + b"\ndef (:\n")
+        b2 = rs.update_schritt(z2, 2.0, False, "b" * 40, lambda sha: neu_src)
+        z2["schlecht"].add("c" * 40)
+        b3 = rs.update_schritt(z2, 3.0, False, "c" * 40, lambda sha: neu_src)
+    check(b1 is None and b2 is None and b3 is None and "b" * 40 in z2["schlecht"] and not z2.get("wartend"),
+          "kaputter Stand verworfen und gesperrt, gesperrte Kennung nie geladen")
+    z3 = {"aktuell": alt_src}
+    with _cl3.redirect_stdout(_io3.StringIO()):
+        d1 = rs.update_schritt(z3, 1.0, False, "d" * 40, lambda sha: (_ for _ in ()).throw(OSError("netz")))
+    check(d1 is None and z3["geprueft"] is None, "Download-Fehler → nächste Prüfung versucht dieselbe Kennung erneut")
+    import tempfile as _tf3, os as _os3
+    dd = _os3.path.join(_tf3.mkdtemp(), "reader-server.py")
+    open(dd, "wb").write(b"alt")
+    rs.update_tauschen(dd, b"neu")
+    t1 = open(dd, "rb").read() == b"neu" and open(dd + ".prev", "rb").read() == b"alt"
+    rs.update_zuruecknehmen(dd)
+    check(t1 and open(dd, "rb").read() == b"alt", "Tausch legt .prev an, Zurücknehmen stellt die alte Datei her")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 
