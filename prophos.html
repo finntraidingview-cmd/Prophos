@@ -26178,9 +26178,10 @@
           liveBal = a.topstep.balance; liveSrc = 'TSX'; liveTime = a.topstep.lastCheck
         } else if(a.ma && a.ma.balance != null){
           liveBal = a.ma.balance; liveSrc = 'MT5'; liveTime = a.ma.lastChecked
-        } else if(dupAcc && dupAcc.balance != null){
-          liveBal = Number(dupAcc.balance); liveSrc = 'Duplikum'; liveCcy = dupAcc.ccy || 'USD'
         } else {
+          // Duplikum ist keine Balance-Quelle mehr (27.09.2026, Finn am Accounts-Tab: „Das Duplikum kannst du komplett weglassen" —
+          // läuft seit 24.09. nicht mehr, sein Wert stand als „Duplikum 157.484,76 $ · älter" unter der Live-Balance). Die Verknüpfung
+          // (Spalte Verknüpfungen) bleibt, nur ihr Kontostand wird nicht mehr gezeigt.
           // 4. Quelle (15.08.2026): lokaler MT5-Copier — immer HINTER Duplikum,
           // nur mit frischen Daten (fetchedAt ≤ 15s, Prüfung im Helper).
           const mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(a.id) : null
@@ -26208,16 +26209,29 @@
         // Live · TradingView (26.09.2026, F3, Finn: „hiervon rede ich btw immer" — Spalte Balance): Futures-Konten mit Puls-Lesung
         // (accounts.tv_balance, Orbit V2). Schlägt Duplikum (läuft seit 24.09. nicht mehr, Wert ohne Zeitstempel = veraltet) und jede
         // ältere Quelle; ist die andere jünger, bleibt sie. MT5-Cloud/Echo und Manuell bleiben daneben getrennt.
-        let tvNeben = ''
         const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
         if(istFut && a.tvBalance != null){
           const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
           if(liveBal == null || liveSrc === 'Duplikum' || !altAt || tvAt > altAt){
-            if(liveBal != null) tvNeben = `${escapeHtml(liveSrc)} ${(liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud') ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)} · älter`
             liveBal = a.tvBalance; liveSrc = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard (eingefügt)' : 'TradingView'; liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
           }
         }
         const nachlese = istFut && typeof tvV2NachleseOffen === 'function' ? tvV2NachleseOffen(a.id) : null
+        // Zustand statt Alter (27.09.2026, Finn: „diese eine Stunde ist ja die ganze Zeit live" — die gelesene Balance gilt, bis ein Trade
+        // sie ändert; „1 Std" hat nur verunsichert). Gezeigt wird deshalb nur, WAS mit dem Stand ist: „aktuell" = gilt; „Trade läuft · Stand
+        // vor dem Trade", solange ein Orbit-V2-Trade nach der Lesung offen ist; nach dem Ende übernimmt die Nachlese-Zeile („aktualisiert
+        // in … min"). Das Alter steht weiter im Tooltip.
+        let tvStandZustand = ''
+        if(istFut && liveSrc === 'TradingView'){
+          tvStandZustand = 'aktuell'
+          try{
+            const leseMs = Date.parse(a.tvBalanceAt || '') || 0
+            const offen = (tradePlans || []).some(p => p && p.route === 'tvv2' && p.status === 'open' && String(p.masterAccountId) === String(a.id)
+              && (Date.parse(p.startedAt || '') || 0) > leseMs)
+            if(offen) tvStandZustand = 'Trade läuft · Stand vor dem Trade'
+            else if(nachlese) tvStandZustand = 'Trade beendet'
+          }catch(_){}
+        }
         // ↻ Balance jetzt lesen (F19): nur Futures mit External ID; Status aus _accBalLauf (übersteht das Neuzeichnen)
         const balRef = (istFut && a.externalId) ? accBalRefHtml(a.id) : ''
         let balCell
@@ -26234,10 +26248,10 @@
             <div style="font-weight:600;color:var(--ink);font-family:var(--mono);display:flex;align-items:center;gap:6px">${balFormatted}${balRef}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
               <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc}</span>
-              ${liveTime ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : ''}
+              ${(liveTime && !tvStandZustand) ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : ''}
+              ${tvStandZustand ? `<span style="margin-left:6px" title="gelesen ${liveTime ? escapeHtml(timeAgo(liveTime)) : ''}">${escapeHtml(tvStandZustand)}</span>` : ''}
             </div>
             ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
-            ${tvNeben ? `<div style="font-size:11px;color:var(--sub-2);font-family:var(--mono);margin-top:2px">${tvNeben}</div>` : ''}
             ${accBalStatusHtml(a.id)}
 `   // Zeile „Manuell $…" raus (26.09.2026, F8, Finn: „mach das manuelle Balance komplett weg, das nutzen wir nicht mehr")
         }else{
@@ -33912,7 +33926,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.663'
+  const OS_TAB_BUILD = '2026-09-22.664'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36632,7 +36646,21 @@
      * Live-Balance für Anzeige im Dropdown.
      * Priorität: TSX > MT5 > Duplikum > initialBalance
      */
+    // Live · TradingView auch im Trade-planen-Dropdown (27.09.2026, Finn am Dropdown: „da wird noch nicht die Live-Balance benutzt,
+    // sondern noch die alte von Duplikum" — APEX…002 stand dort mit Duplikum 157.485 $, Puls hatte 147.911,28 $ gelesen). Die
+    // Accounts-Spalte (F3, 26.09.) hat die Regel schon, diese Kette nicht: Futures mit Puls-/Dashboard-Lesung (accounts.tv_balance)
+    // schlagen Duplikum (läuft seit 24.09. nicht mehr, ohne Zeitstempel), Quellen ohne Zeit und jede ältere Quelle.
     function tpGetDisplayBalance(a){
+      const alt = tpGetDisplayBalanceKette(a)
+      const istFut = !!a && (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
+      if(istFut && a.tvBalance != null && isFinite(Number(a.tvBalance))){
+        const tvAt = Date.parse(a.tvBalanceAt || '') || 0
+        const altAt = Number(alt.at) || 0
+        if(alt.src === 'init' || alt.src === 'Dup' || !altAt || tvAt > altAt) return { val: Number(a.tvBalance), src: 'TV', ccy: 'USD', at: tvAt || null }
+      }
+      return alt
+    }
+    function tpGetDisplayBalanceKette(a){
       // Duplikum-Lookup vorbereiten
       let dupBalance = null, dupCcy = 'USD'
       try {
@@ -36655,9 +36683,8 @@
       if(a.ma && a.ma.balance != null){
         return { val: a.ma.balance, src: 'MT5', ccy: 'USD' }
       }
-      if(dupBalance != null){
-        return { val: dupBalance, src: 'Dup', ccy: dupCcy }
-      }
+      // Duplikum ist keine Balance-Quelle mehr (27.09.2026, Finn: „Das Duplikum kannst du komplett weglassen") — Wert bleibt ungenutzt
+      void dupBalance; void dupCcy
       // 4. Quelle (15.08.2026): lokaler MT5-Copier — immer HINTER Duplikum,
       // Währung von der jeweiligen Seite (Master/Hedge können verschieden führen).
       const mtcBal = (typeof getMt5BalanceForAccount === 'function') ? getMt5BalanceForAccount(a.id) : null
