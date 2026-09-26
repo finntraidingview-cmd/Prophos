@@ -9973,13 +9973,8 @@
           <label>Max Profit / Trade ($)</label>
           <input class="input mono" id="bulk-max-profit-trade" type="number" step="50" placeholder="z.B. 2000" autocomplete="off">
         </div>
-        <div class="field" style="grid-column:1/-1">
-          <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0;padding:9px 12px;border:1px solid var(--border);border-radius:8px">
-            <input type="checkbox" id="bulk-wd-farm" checked style="width:16px;height:16px;flex-shrink:0">
-            <span style="font-weight:500">Im WD-Farm</span>
-            <span style="font-size:11.5px;color:var(--sub)">— Haken raus = der Winning-Day-Farmer lässt diese Konten aus</span>
-          </label>
-        </div>
+        <!-- „Im WD-Farm" raus (27.09.2026, F17-Ergänzung, Finn: „das nie hier rein, das kommt erst später, nie bei Account hinzufügen") —
+             neue Konten immer wd_farm = false; gepflegt wird der Haken im Farmer/IDs und im Bearbeiten-Popup -->
       </div>
 
       <div class="modal-msg" id="bulk-msg" style="margin-top:12px"></div>
@@ -26268,7 +26263,7 @@
       accEls.purchase.value = ''
       accEls.maxDd.value = ''
       if(accEls.extId) accEls.extId.value = ''
-      if(accEls.wdFarm) accEls.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
+      if(accEls.wdFarm) accEls.wdFarm.checked = false   // neue Konten nie im WD-Farm (F17-Ergänzung 27.09.2026, vorher Standard drin)
       accEls.maTok.value = ''
       accEls.maAcc.value = ''
       if(accEls.credLogin)    accEls.credLogin.value    = ''
@@ -26335,6 +26330,8 @@
     if(accEls.payoutSec) accEls.payoutSec.hidden = !(istFunded && !istFutures)
     // Futures · Live (26.09.2026): nur Futures-Firma und nur beim Bearbeiten (ein neues Konto hat noch keine Lesung)
     const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
+    // „Im WD-Farm" nur beim Bearbeiten, nie beim Anlegen (F17-Ergänzung, 27.09.2026)
+    const wdRow = document.getElementById('ac-wd-farm-row'); if(wdRow) wdRow.hidden = !_editingAccountId
   }
   // Füllt „Futures · Live" im Bearbeiten-Popup — frisch aus accounts + den letzten Plänen dieses Master-Kontos (nur lesen).
   // _acTvLiveId schützt gegen Überholen, wenn das Popup schnell für ein anderes Konto neu geöffnet wird.
@@ -26489,7 +26486,7 @@
         goalManualLast: vorher?.goalManualLast || null
       }),
       payoutReadyAt:  payoutReadyVal,
-      wdFarm:         !!accEls.wdFarm?.checked,
+      wdFarm:         isEdit ? !!accEls.wdFarm?.checked : false,   // neue Konten nie im WD-Farm (F17-Ergänzung, 27.09.2026)
       creds: hasCreds ? credObj : null,
       createdAt: new Date().toISOString(),
       ma: null
@@ -27223,7 +27220,6 @@
         if(bEl.maxDailyDd) bEl.maxDailyDd.value = w(v.max_daily_drawdown)
         if(bEl.maxLossTrade) bEl.maxLossTrade.value = w(v.max_loss_per_trade)
         if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = w(v.max_profit_per_trade)
-        if(bEl.wdFarm) bEl.wdFarm.checked = !!v.wd_farm
         bEl.template.value = v.name_template || ''
         bulkVorlageAktiv = v   // goal_kind/goal_target stehen nicht im Formular — beim Speichern aus der Vorlage
         updatePreview(); bulkFuturesUmschalten(); return
@@ -27314,7 +27310,7 @@
       const num = v => { const x = parseFloat(v); return isFinite(x) && x > 0 ? x : null }
       const vorlage = { id: alt ? alt.id : undefined, name, firm, account_type: bEl.type.value, account_size: num(bEl.size.value), starting_balance: num(bEl.balance.value) || num(bEl.size.value),
         max_drawdown: num(bEl.maxdd.value), max_daily_drawdown: num(bEl.maxDailyDd?.value), max_loss_per_trade: num(bEl.maxLossTrade?.value), max_profit_per_trade: num(bEl.maxProfitTrade?.value),
-        purchase_cost: parseFloat(bEl.cost.value) >= 0 ? parseFloat(bEl.cost.value) : null, wd_farm: !!bEl.wdFarm?.checked, name_template: bEl.template.value.trim() || null,
+        purchase_cost: parseFloat(bEl.cost.value) >= 0 ? parseFloat(bEl.cost.value) : null, wd_farm: false, name_template: bEl.template.value.trim() || null,
         goal_kind: alt ? alt.goal_kind || null : null, goal_target: alt ? alt.goal_target || null : null, plattform: alt ? alt.plattform || null : null,
         muster_titel: titel || null, muster_praefix: px || null }
       try{ await bulkZentralRoute({ aktion: 'speichern', vorlage }); await bulkZentralLaden(); renderTplSelect(); setBulkMsg(`Zentrale Vorlage „${name}" gespeichert.`, 'ok') }
@@ -27356,7 +27352,7 @@
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
       if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = ''
       if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = ''
-      if(bEl.wdFarm) bEl.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
+      // WD-Farm-Haken gibt es beim Anlegen nicht mehr (F17-Ergänzung) — neue Konten immer wd_farm = false
       bEl.count.value    = ''
       bEl.startnum.value = '1'
       bulkPaste.bloecke = []; bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPaste.treffer = new Map()   // F16: Kennungs-Zustand leeren
@@ -27433,7 +27429,7 @@
      *      active/passed/failed, Stage Evaluation → challenge, Express Funded/EXPRESS → funded.
      *  (2) Tradeify-Karten (F11): Kennungs-Zeile F?TDFY…, davor Status + Titel, danach „Account Balance"/„Trailing Max Drawdown".
      *  (3) Rückfall ohne (1)/(2): reine Liste — je Zeile das erste Wort mit Ziffer ist eine Kennung (wie das alte Feld, auch MT5-Logins). */
-    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify'], [/^(\d+KTC-SKU|EXPRESS)-V2-/, 'Topstep']]
+    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify'], [/^(\d+KTC-SKU|EXPRESS)-V2-/, 'Topstep'], [/^(PA)?APEX\d/, 'Apex Trader']]
     const BULK_STATUS = /^(active|failed|passed|inactive|breached|disabled|closed)$/i
     const BULK_TOPSTEP_RX = /\b(\d+KTC-SKU-V2-\d+-\d+|EXPRESS-V2-\d+-\d+)\b/g
     function bulkGeld(t){ const m = /-?\$?\s*([\d,]+(?:\.\d+)?)/.exec(String(t || '')); if(!m) return null; const v = parseFloat(m[1].replace(/,/g, '')); return isFinite(v) ? v : null }
@@ -27474,6 +27470,10 @@
         dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma: 'FundedNext', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
                         typ, balance: bal, trailing: null, tvUebernehmen: false })
       })
+      // (1c) Apex (27.09.2026, Master): Kennung APEX + Ziffern = Challenge, PAAPEX + Ziffern = Performance Account (funded). Ein Apex-
+      //      Dashboard-Format ist noch nicht bekannt — nur die Kennung, keine Balance/Größe aus dem Text.
+      for(const m of roh.matchAll(/\b((?:PA)?APEX\d{6,})\b/g))
+        dazu(m.index, { id: m[1], titel: '', status: '', plattform: '', firma: 'Apex Trader', groesse: null, typ: /^PA/.test(m[1]) ? 'funded' : 'challenge', balance: null, trailing: null })
       // (2) Tradeify-Karten
       const zeilen = [], rx = /[^\r\n]+/g; let mm
       while((mm = rx.exec(roh))){ const t = mm[0].trim(); if(t) zeilen.push({ t, pos: mm.index }) }
@@ -27624,7 +27624,7 @@
           external_id: x.id, account_size: gr, starting_balance: gr,
           purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
           max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
-          wd_farm: v ? !!v.wd_farm : !!bEl.wdFarm?.checked,
+          wd_farm: false,   // nie beim Anlegen, auch wenn die Vorlage wd_farm true hat (F17-Ergänzung, 27.09.2026)
           ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null } : {}),
         }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
@@ -33690,7 +33690,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.654'
+  const OS_TAB_BUILD = '2026-09-22.655'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
