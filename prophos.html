@@ -9851,21 +9851,7 @@
         </button>
       </div>
 
-      <!-- AUS DEM DASHBOARD EINFÜGEN (27.09.2026, F11, Finn: „Ich kopiere einfach alles, was ich im Dashboard sehe, und füge es einmal ein …
-           wenn die External-ID schon mal in Prophos war, wird sie nicht reingenommen. Aus der Anzahl der neuen IDs ergibt sich die Anzahl").
-           Erkannt wird nur das Tradeify-/Tradovate-Dashboard (bulkDashboardParsen); andere Formate → Meldung, der Weg darunter bleibt. -->
-      <div class="field" id="bulk-paste-box" style="margin-bottom:14px">
-        <label>Aus dem Dashboard einfügen <span style="font-weight:400;color:var(--sub)">(Tradeify · Tradovate)</span></label>
-        <textarea class="input" id="bulk-paste" rows="4" placeholder="Im Dashboard der Firma alles markieren, kopieren und hier einfügen — Kennung, Größe und Typ werden erkannt, schon vorhandene Konten übersprungen" style="font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
-        <div id="bulk-paste-vorschau" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
-        <div id="bulk-paste-aktion" style="display:none;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
-          <span id="bulk-paste-zaehler" style="font-size:12px;color:var(--sub)"></span>
-          <button class="btn btn-primary" id="bulk-paste-save" type="button" style="margin-left:auto">Neue anlegen</button>
-        </div>
-        <div style="font-size:11px;color:var(--sub);margin-top:6px">Kaufpreis, Max Drawdown, Trade-Limits und „Im WD-Farm" aus dem Formular darunter gelten für alle eingefügten Konten. Die Balance aus dem Dashboard wird als Live-Stand übernommen, nicht als manuelle Balance.</div>
-      </div>
-      <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
-
+      <!-- Der eigene Kasten „Aus dem Dashboard einfügen" (F11) ist seit F16 (27.09.2026) im Feld „External IDs" aufgegangen. -->
       <div class="field" style="margin-bottom:14px">
         <label>Vorlage</label>
         <div style="display:flex;gap:8px">
@@ -9924,23 +9910,21 @@
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
         </div>
-        <div class="field">
-          <label>Anzahl Accounts *</label>
-          <input class="input mono" id="bulk-count" type="number" min="1" max="50" step="1" placeholder="z.B. 16" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Startnummer</label>
-          <input class="input mono" id="bulk-startnum" type="number" min="1" step="1" placeholder="1" autocomplete="off" value="1">
-        </div>
+        <!-- „Anzahl Accounts" und „Startnummer" entfallen (F16): Anzahl = neue Kennungen aus „External IDs", {n} zählt einfach durch.
+             Unsichtbar weiter da, weil ältere Verdrahtung (updatePreview) die Elemente anspricht. -->
+        <input type="hidden" id="bulk-count" value=""><input type="hidden" id="bulk-startnum" value="1">
         <div class="field" style="grid-column:1/-1">
           <label>Name-Vorlage</label>
           <input class="input" id="bulk-nametemplate" placeholder="z.B. AlphaFutures 50K · #{n}" autocomplete="off">
           <div style="font-size:11px;color:var(--sub);margin-top:4px"><code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{n}</code> = laufende Nummer &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{firm}</code> = Firm &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{size}</code> = Account-Größe in K &nbsp;·&nbsp; <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">{ex}</code> = External ID</div>
         </div>
         <div class="field" style="grid-column:1/-1">
-          <label>External IDs (optional)</label>
-          <textarea class="input" id="bulk-extids" rows="3" placeholder="Eine External ID pro Zeile, in Reihenfolge der Accounts" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Wird pro Zeile dem jeweiligen Account zugeordnet (1. Zeile → #{startnum}, 2. Zeile → nächster, …). Mit externer ID wird automatisch mit Duplikum verknüpft, falls dort vorhanden.</div>
+          <!-- External IDs = Pflicht + Einfügefeld (F16, 27.09.2026): reine ID-Liste oder ganzer Dashboard-Text (Tradeify, Topstep, FundedNext) -->
+          <label>External IDs *</label>
+          <textarea class="input" id="bulk-extids" rows="4" placeholder="Eine Kennung je Zeile — oder einfach alles aus dem Dashboard der Firma hier einfügen (Tradeify, Topstep, FundedNext); die Kennungen werden herausgepickt" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
+          <div id="bulk-paste-vorschau" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
+          <div id="bulk-paste-zaehler" style="font-size:12px;color:var(--sub);margin-top:6px"></div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Schon vorhandene Kennungen (alle Nutzer, auch archiviert) werden übersprungen. Anzahl = neue, angehakte Kennungen. Dashboard-Balance von Futures-Konten wird als Live-Stand übernommen.</div>
         </div>
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
@@ -9949,7 +9933,7 @@
         <div class="field" style="grid-column:1/-1" id="bulk-creds-box">
           <label>Zugangsdaten (optional)</label>
           <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
-          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den Accounts zugeordnet (1. Zeile → #{startnum}, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den neuen Kennungen zugeordnet (1. Zeile → 1. neue Kennung, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
         </div>
         <div class="field" id="bulk-dup-create-box" style="grid-column:1/-1;display:none;margin-top:2px;padding:11px 13px;background:rgba(136,124,252,.07);border:1px solid rgba(136,124,252,.25);border-radius:10px">
           <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin:0">
@@ -9966,7 +9950,7 @@
           </div>
         </div>
         <div class="field" style="grid-column:1/-1">
-          <div id="bulk-preview" style="font-size:12px;color:var(--sub);padding:8px 10px;background:var(--surface-tint);border-radius:8px;min-height:36px;display:none;line-height:1.6"></div>
+          <div id="bulk-preview" style="display:none"></div><!-- alte Namens-Vorschau, seit F16 ersetzt durch die Kennungs-Vorschau -->
         </div>
       </div>
 
@@ -27076,7 +27060,14 @@
       let best = null
       for(const v of (liste || [])){ const px = String(v.muster_praefix || '').trim().toUpperCase(); if(px && id.startsWith(px) && (!best || px.length > String(best.muster_praefix).length)) best = v }
       if(best) return best
-      return (liste || []).find(v => v.muster_titel && String(v.muster_titel).trim().toLowerCase() === titel) || null
+      // Titel: mehrere Vorlagen können denselben Titel haben (FundedNext „Stellar 2-Step" 50k/100k, F16-Ergänzung) → Größe muss passen,
+      // bei mehreren zusätzlich der Typ. Titel allein nur, wenn aus dem Text keine Größe erkannt wurde (sonst falsche Limits/Kosten).
+      const gleich = (liste || []).filter(v => v.muster_titel && String(v.muster_titel).trim().toLowerCase() === titel)
+      if(!gleich.length) return null
+      const gr = Number(block && block.groesse) || 0
+      const passt = gr ? gleich.filter(v => Number(v.account_size || v.starting_balance) === gr) : gleich
+      if(!passt.length) return null
+      return passt.find(v => block && block.typ && v.account_type === block.typ) || passt[0]
     }
     window._bulkVorlageFuer = bulkVorlageFuer
 
@@ -27125,7 +27116,8 @@
         .replace(/\{ex\}/g, ex)
     }
 
-    function updatePreview(){
+    function updatePreview(){ if(typeof bulkPasteRender === 'function') bulkPasteRender() }   // F16: Vorschau = Kennungs-Liste
+    function updatePreviewAlt(){   // bis F16 (27.09.2026): Namens-Vorschau nach Anzahl/Startnummer — nicht mehr aufgerufen
       const count    = parseInt(bEl.count.value) || 0
       const startnum = parseInt(bEl.startnum.value) || 1
       const cost     = parseFloat(bEl.cost.value)
@@ -27367,8 +27359,7 @@
       if(bEl.wdFarm) bEl.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
       bEl.count.value    = ''
       bEl.startnum.value = '1'
-      { const bp = document.getElementById('bulk-paste'); if(bp) bp.value = '' }   // F11: Einfüge-Feld leeren
-      { const v = document.getElementById('bulk-paste-vorschau'); if(v) v.style.display = 'none'; const a2 = document.getElementById('bulk-paste-aktion'); if(a2) a2.style.display = 'none' }
+      bulkPaste.bloecke = []; bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPaste.treffer = new Map()   // F16: Kennungs-Zustand leeren
       bEl.template.value = ''
       bEl.extids.value   = ''
       if(bEl.creds) bEl.creds.value = ''
@@ -27387,7 +27378,7 @@
       bEl.saveBtn.disabled = false
       bEl.saveLabel.textContent = 'Accounts anlegen'
       bEl.modal.classList.add('open')
-      bulkFuturesUmschalten(); bulkAltWegUmschalten()
+      bulkPasteRender()
       loadBulkTemplates()
       setTimeout(() => bEl.firm.focus(), 50)
     }
@@ -27406,13 +27397,6 @@
       const b = (typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []
       return b.length > 0 && b.every(x => { const v = bulkPasteVorlage(x); return fut((v && v.firm) || x.firma || bEl.firm.value.trim()) })
     }
-    // Mit Text im Einfügefeld sind „Anzahl", „Startnummer" und „External IDs" doppelt (Master 27.09.2026) → ausblenden, der alte
-    // „Accounts anlegen"-Knopf ist dann gesperrt (angelegt wird über „n neu anlegen"). Leer = alter Weg wie bisher.
-    function bulkAltWegUmschalten(){
-      const voll = !!String(document.getElementById('bulk-paste')?.value || '').trim() && bulkPaste.bloecke.length > 0   // ohne erkannte Kennung bleibt der alte Weg
-      for(const el of [bEl.count, bEl.startnum, bEl.extids]){ const f = el && el.closest('.field'); if(f) f.style.display = voll ? 'none' : '' }
-      if(bEl.saveBtn){ bEl.saveBtn.disabled = voll; bEl.saveBtn.title = voll ? 'Mit eingefügtem Dashboard-Text oben über „n neu anlegen" speichern' : '' }
-    }
     function bulkFuturesUmschalten(){
       const fut = bulkIstFutures(), cb = document.getElementById('bulk-creds-box')
       if(cb) cb.style.display = fut ? 'none' : ''
@@ -27426,228 +27410,228 @@
       bEl.msg.className = 'modal-msg' + (kind ? ' ' + kind : '')
     }
 
-    /* AUS DEM DASHBOARD EINFÜGEN (27.09.2026, F11). REIN RECHNEND: Dashboard-Text → Blöcke. Kennung = Zeile, die nur aus einem
-     * großgeschriebenen Alphanumerik-Token ≥ 10 Zeichen mit Ziffern besteht (FTDFYSLX150372060459, TDFYSL150690223134). Davor
-     * „Traded …" und der Status (Active/Failed/Passed …), davor der Titel („Select Flex Funded 150K"); danach Plattform und die
-     * Paare „Account Balance" / „Trailing Max Drawdown" → nächste $-Zeile. Nur Tradeify/Tradovate ist bekannt — nichts raten. */
-    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify']]   // weitere Firmen hier ergänzen, sobald ihr Dashboard-Text bekannt ist
+    /* EXTERNAL IDs = EINFÜGEFELD (27.09.2026, F16, Finn: „Mach das Einfügen nicht in einen extra Kasten, sondern einfach bei External
+     * IDs. Da pumpe ich einfach alles rein, und die Kennungen werden automatisch rausgepickt. External IDs ist ein Pflichtfeld.")
+     * REIN RECHNEND bulkDashboardParsen(text) → Blöcke {id, titel, status, plattform, firma, groesse, typ, balance, trailing}, Reihenfolge
+     * wie im Text, jede Kennung einmal:
+     *  (1) Topstep-Tabelle (Tab, mehrere Leerzeichen oder je Zelle eine Zeile): Kennung = NAME nach Muster \d+KTC-SKU-V2-\d+-\d+ bzw.
+     *      EXPRESS-V2-\d+-\d+ (nicht die SUB ID); Größe aus „150K Buying Power"/Präfix, Balance = erster $-Betrag danach, Status
+     *      active/passed/failed, Stage Evaluation → challenge, Express Funded/EXPRESS → funded.
+     *  (2) Tradeify-Karten (F11): Kennungs-Zeile F?TDFY…, davor Status + Titel, danach „Account Balance"/„Trailing Max Drawdown".
+     *  (3) Rückfall ohne (1)/(2): reine Liste — je Zeile das erste Wort mit Ziffer ist eine Kennung (wie das alte Feld, auch MT5-Logins). */
+    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify'], [/^(\d+KTC-SKU|EXPRESS)-V2-/, 'Topstep']]
     const BULK_STATUS = /^(active|failed|passed|inactive|breached|disabled|closed)$/i
+    const BULK_TOPSTEP_RX = /\b(\d+KTC-SKU-V2-\d+-\d+|EXPRESS-V2-\d+-\d+)\b/g
     function bulkGeld(t){ const m = /-?\$?\s*([\d,]+(?:\.\d+)?)/.exec(String(t || '')); if(!m) return null; const v = parseFloat(m[1].replace(/,/g, '')); return isFinite(v) ? v : null }
     function bulkDashboardParsen(text){
-      const z = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean)
-      const istId = x => /^[A-Z][A-Z0-9]{9,}$/.test(x) && /\d/.test(x) && /[A-Z]{2}/.test(x)
-      const idx = z.map((x, i) => istId(x) ? i : -1).filter(i => i >= 0)
-      return idx.map((i, k) => {
+      const roh = String(text || ''), out = [], gesehen = new Set()
+      const firmaVon = id => { const pr = BULK_PRAEFIX.find(([rx]) => rx.test(id)); return pr ? pr[1] : '' }
+      const dazu = (pos, b) => { const k = b.id.toUpperCase(); if(gesehen.has(k)) return; gesehen.add(k); out.push(Object.assign({ pos }, b)) }
+      // (1) Topstep
+      const tsTreffer = [...roh.matchAll(BULK_TOPSTEP_RX)]
+      tsTreffer.forEach((m, k) => {
+        const bis = k + 1 < tsTreffer.length ? tsTreffer[k + 1].index : roh.length
+        // Zeile = Text ab der Kennung bis zur nächsten Kennung, höchstens bis zum nächsten Datum am Zeilenanfang (neue Tabellenzeile)
+        let zeile = roh.slice(m.index + m[0].length, bis)
+        const dz = /\n\s*\d{1,2}\/\d{1,2}\/\d{2,4}/.exec(zeile); if(dz) zeile = zeile.slice(0, dz.index)
+        const id = m[1], gm = /(\d+)\s*K\s*Buying/i.exec(zeile) || /^(\d+)KTC/i.exec(id)
+        const betraege = [...zeile.matchAll(/\$\s*[\d,]+(?:\.\d+)?/g)].map(x => bulkGeld(x[0])).filter(v => v != null)
+        const status = (/\b(active|passed|failed|breached|inactive)\b/i.exec(zeile) || [])[1] || ''
+        const stage = (/\b(Express Funded|Evaluation|Funded|Live)\b/i.exec(zeile) || [])[1] || ''
+        dazu(m.index, { id, titel: stage || '', status, plattform: '', firma: 'Topstep', groesse: gm ? (+gm[1]) * 1000 : null,
+                        typ: (/^EXPRESS/i.test(id) || /funded/i.test(stage)) ? 'funded' : 'challenge', balance: betraege.length ? betraege[0] : null, trailing: null })
+      })
+      // (1b) FundedNext (CFD/MT5, F16-Ergänzung): Kennung = Zahl nach „Login:"; die Angaben zum Konto stehen DAVOR (seit dem vorigen
+      //      Login): Programm („Stellar 2-Step") = Titel, „$50K" = Größe, „CHALLENGE • P1/P2" bzw. „FUNDED" = Typ, „Current Balance".
+      //      Balance nur zur Anzeige (MT5-Live-Stand kommt über Echo/MT5-Cloud), deshalb tvUebernehmen false.
+      const fnTreffer = [...roh.matchAll(/Login:\s*(\d{5,})/gi)]
+      fnTreffer.forEach((m, k) => {
+        const von = k > 0 ? fnTreffer[k - 1].index + fnTreffer[k - 1][0].length : 0
+        // Anker = letzte Größen-Zeile („$50K") vor dem Login, Titel = Zeile davor — so stört Text anderer Firmen davor nicht (Mischtext)
+        const zlAlle = roh.slice(von, m.index).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+        let si = -1; zlAlle.forEach((x, j) => { if(/^\$\s*\d+(?:[.,]\d+)?\s*K$/i.test(x)) si = j })
+        const zl = si >= 0 ? zlAlle.slice(si) : zlAlle.slice(-6), teil = zl.join('\n')
+        const titel = si > 0 ? zlAlle[si - 1] : ''
+        const gm = /\$\s*(\d+(?:[.,]\d+)?)\s*K\b/i.exec(teil)
+        const typZeile = (/(CHALLENGE|FUNDED)[^\n]*/i.exec(teil) || [''])[0]
+        const typ = /funded/i.test(typZeile) ? 'funded' : /P2/i.test(typZeile) ? 'phase2' : /P1/i.test(typZeile) ? 'phase1' : 'challenge'
+        const bi = zl.findIndex(x => /^current balance$/i.test(x)), bal = bi >= 0 && bi + 1 < zl.length ? bulkGeld(zl[bi + 1]) : null
+        const nachher = roh.slice(m.index + m[0].length, m.index + m[0].length + 20), plat = (/\b(MT[45])\b/i.exec(nachher) || [])[1] || 'MT5'
+        dazu(m.index, { id: m[1], titel, status: '', plattform: plat.toUpperCase(), firma: 'FundedNext', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
+                        typ, balance: bal, trailing: null, tvUebernehmen: false })
+      })
+      // (2) Tradeify-Karten
+      const zeilen = [], rx = /[^\r\n]+/g; let mm
+      while((mm = rx.exec(roh))){ const t = mm[0].trim(); if(t) zeilen.push({ t, pos: mm.index }) }
+      const z = zeilen.map(x => x.t)
+      const istTdfy = x => /^F?TDFY[A-Z0-9]{6,}$/.test(x) && /\d/.test(x)
+      const idx = z.map((x, i) => istTdfy(x) ? i : -1).filter(i => i >= 0)
+      idx.forEach((i, k) => {
         const id = z[i], bis = k + 1 < idx.length ? idx[k + 1] : z.length
         let st = -1; for(let j = i - 1; j >= Math.max(0, i - 4); j--){ if(BULK_STATUS.test(z[j])){ st = j; break } }
-        const titel = st > 0 ? z[st - 1] : (i >= 3 ? z[i - 3] : '')
-        const status = st >= 0 ? z[st] : ''
+        const titel = st > 0 ? z[st - 1] : ''
         const nach = (lbl) => { for(let j = i + 1; j < bis; j++) if(lbl.test(z[j])){ for(let q = j + 1; q < Math.min(bis, j + 3); q++){ const v = bulkGeld(z[q]); if(v != null) return v } } return null }
-        const plattform = (i + 1 < bis && /^(tradovate|rithmic|tradingview|ninjatrader|projectx|dxtrade)$/i.test(z[i + 1])) ? z[i + 1] : ''
-        const pr = BULK_PRAEFIX.find(([rx]) => rx.test(id))
         const gm = /(\d+(?:[.,]\d+)?)\s*K\b/i.exec(titel)
-        const groesse = gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null
-        return { id, titel, status, plattform, firma: pr ? pr[1] : '', groesse,
-                 typ: (/funded/i.test(titel) || /^F/.test(id)) ? 'funded' : 'challenge',
-                 balance: nach(/^account balance$/i), trailing: nach(/^trailing max drawdown$/i) }
+        dazu(zeilen[i].pos, { id, titel, status: st >= 0 ? z[st] : '', plattform: (i + 1 < bis && /^(tradovate|rithmic|tradingview|ninjatrader|projectx|dxtrade)$/i.test(z[i + 1])) ? z[i + 1] : '',
+                              firma: 'Tradeify', groesse: gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null,
+                              typ: (/funded/i.test(titel) || /^F/.test(id)) ? 'funded' : 'challenge', balance: nach(/^account balance$/i), trailing: nach(/^trailing max drawdown$/i) })
       })
+      // (3) reine Liste
+      if(!out.length) for(const x of zeilen){ const w = (x.t.split(/[\s,;]+/).find(t => /\d/.test(t)) || '').replace(/^[#"']+|["']+$/g, ''); if(w.length >= 4) dazu(x.pos, { id: w, titel: '', status: '', plattform: '', firma: firmaVon(w), groesse: null, typ: '', balance: null, trailing: null }) }
+      return out.sort((a, b) => a.pos - b.pos).map(({ pos, ...b }) => b)
     }
     window._bulkDashboardParsen = bulkDashboardParsen   // Test-Haken
-    const bulkTypLabel = t => ({ funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', winning_days: 'Winning Days' })[t] || t || '?'
+    const bulkTypLabel = t => ({ funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', winning_days: 'Winning Days', live: 'Live' })[t] || t || '?'
     // Vorlage eines Blocks: von Hand gewählt (bulkPaste.vorlage) oder automatisch über Präfix/Titel (F12)
     function bulkPasteVorlage(x){
       if(bulkPaste.vorlage.has(x.id)){ const id = bulkPaste.vorlage.get(x.id); return id ? (bulkZentral.find(z => String(z.id) === String(id)) || null) : null }
       return bulkVorlageFuer(x, bulkZentral)
     }
     const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch
-    const bpEl = { box: document.getElementById('bulk-paste'), vs: document.getElementById('bulk-paste-vorschau'), akt: document.getElementById('bulk-paste-aktion'),
-                   zaehler: document.getElementById('bulk-paste-zaehler'), save: document.getElementById('bulk-paste-save') }
-    // Dubletten: eigene Konten (aktiv + archiviert) sofort; alle Nutzer über Backend POST /admin/konten-pruefen (B10), sobald es sie gibt
-    async function bulkPastePruefen(){
-      const lauf = ++bulkPaste.lauf, ids = bulkPaste.bloecke.map(b => b.id)
-      const arch = (typeof getArchive === 'function') ? getArchive() : {}
-      bulkPaste.treffer = new Map(); bulkPaste.alleGeprueft = false
-      for(const a of (accounts || [])){ const e = String(a.externalId || '').trim().toUpperCase(); if(e && ids.includes(e)) bulkPaste.treffer.set(e, { name: a.name, archiviert: !!arch[a.id], person: '' }) }
-      bulkPasteRender()
+    const bpEl = { box: document.getElementById('bulk-extids'), vs: document.getElementById('bulk-paste-vorschau'), zaehler: document.getElementById('bulk-paste-zaehler') }
+    const bulkKey = id => String(id || '').trim().toUpperCase()
+    // Dubletten (F11 + F16-Ergänzung, Finn: „immer dran denken, External IDs, die es schon mal gab, ignorieren"): eigene Konten
+    // (aktiv + archiviert) und POST /admin/konten-pruefen über ALLE Nutzer — für jeden Weg im Feld. -> true, wenn die Route geantwortet hat
+    async function bulkTrefferHolen(ids){
+      const arch = (typeof getArchive === 'function') ? getArchive() : {}, treffer = new Map(), keys = ids.map(bulkKey)
+      for(const a of (accounts || [])){ const e = bulkKey(a.externalId); if(e && keys.includes(e)) treffer.set(e, { name: a.name, archiviert: !!arch[a.id], person: '' }) }
+      let alle = false
       try{
-        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok || !ids.length) return
-        const r = await fetch(`${WATCHER_HOME}/admin/konten-pruefen`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ external_ids: ids }) })
-        if(!r.ok) return
-        const d = await r.json().catch(() => null); if(lauf !== bulkPaste.lauf || !d || !Array.isArray(d.treffer)) return
-        for(const t of d.treffer){ const e = String(t.external_id || '').trim().toUpperCase(); if(e) bulkPaste.treffer.set(e, { name: t.name || '', archiviert: !!t.archiviert, person: t.person || '' }) }
-        bulkPaste.alleGeprueft = true
-        bulkPasteRender()
-      }catch(_){ /* Route fehlt noch → Hinweis „nur eigene Konten geprüft" bleibt */ }
+        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
+        if(tok && ids.length){
+          const r = await fetch(`${WATCHER_HOME}/admin/konten-pruefen`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ external_ids: ids }) })
+          const d = r.ok ? await r.json().catch(() => null) : null
+          if(d && Array.isArray(d.treffer)){ alle = true; for(const t of d.treffer){ const e = bulkKey(t.external_id); if(e) treffer.set(e, { name: t.name || '', archiviert: !!t.archiviert, person: t.person || '' }) } }
+        }
+      }catch(_){ /* Route nicht erreichbar → nur eigene Konten */ }
+      return { treffer, alle }
+    }
+    async function bulkPastePruefen(){
+      const lauf = ++bulkPaste.lauf
+      bulkPaste.alleGeprueft = false
+      const r = await bulkTrefferHolen(bulkPaste.bloecke.map(b => b.id))
+      if(lauf !== bulkPaste.lauf) return
+      bulkPaste.treffer = r.treffer; bulkPaste.alleGeprueft = r.alle
+      bulkPasteRender()
+    }
+    const bulkIstNeu = x => !bulkPaste.treffer.has(bulkKey(x.id))
+    function bulkWahl(){
+      const firmaForm = bEl.firm.value.trim()
+      return bulkPaste.bloecke.filter(x => { const v = bulkPasteVorlage(x); return bulkIstNeu(x) && ((v && v.firm) || x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached|passed/i.test(x.status)) })
     }
     function bulkPasteRender(){
       const b = bulkPaste.bloecke
       if(!bpEl.vs) return
-      if(!String(bpEl.box.value || '').trim()){ bpEl.vs.style.display = 'none'; bpEl.akt.style.display = 'none'; bulkFuturesUmschalten(); bulkAltWegUmschalten(); return }
+      bulkFuturesUmschalten()
+      const leer = !String(bpEl.box.value || '').trim()
+      if(leer || !b.length){
+        bpEl.vs.style.display = leer ? 'none' : ''
+        if(!leer) bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Kennung erkannt.</div>'
+        bpEl.zaehler.textContent = ''
+        bulkSpeichernKnopf(0); return
+      }
       bpEl.vs.style.display = ''
-      if(!b.length){ bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Konto-Kennung erkannt — bekannt ist nur das Tradeify-/Tradovate-Dashboard. Konten sonst mit dem Formular darunter anlegen.</div>'; bpEl.akt.style.display = 'none'; bulkFuturesUmschalten(); bulkAltWegUmschalten(); return }
       const firmaForm = bEl.firm.value.trim()
       const de = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      let neu = 0, vorh = 0
+      let vorh = 0
       bpEl.vs.innerHTML = b.map(x => {
-        const t = bulkPaste.treffer.get(x.id), v = bulkPasteVorlage(x), firma = (v && v.firm) || x.firma || firmaForm
-        const sperre = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : !firma ? 'Firma unbekannt — oben im Formular „Firm" eintragen' : ''
+        const t = bulkPaste.treffer.get(bulkKey(x.id)), v = bulkPasteVorlage(x), firma = (v && v.firm) || x.firma || firmaForm
+        const sperre = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : !firma ? 'Firma unbekannt — „Firm" im Formular eintragen' : ''
         if(t) vorh++
-        const standard = !sperre && !/failed|breached/i.test(x.status)
+        const standard = !sperre && !/failed|breached|passed/i.test(x.status)
         const an = sperre ? false : (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : standard)
-        if(an) neu++
+        const typ = (v && v.account_type) || x.typ || bEl.type.value, gr = x.groesse || (v && (v.starting_balance || v.account_size)) || BULK_STD_GROESSE
         return `<label class="bpv ${an ? '' : 'aus'}"><input type="checkbox" data-bp="${escapeHtml(x.id)}" ${an ? 'checked' : ''} ${sperre ? 'disabled' : ''}>
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
-          <span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>
-          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${bulkTypLabel((v && v.account_type) || x.typ)} · ${((v && v.starting_balance) || x.groesse) ? Number((v && v.starting_balance) || x.groesse).toLocaleString('de-DE') : 'Größe ?'}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
+          ${(x.titel || x.status) ? `<span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>` : ''}
+          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${bulkTypLabel(typ)} · ${Number(gr).toLocaleString('de-DE')}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
           ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkZentral.map(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`).join('')}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
       bpEl.vs.querySelectorAll('[data-bp]').forEach(cb => cb.addEventListener('change', () => { bulkPaste.an.set(cb.dataset.bp, cb.checked); bulkPasteRender() }))
       bpEl.vs.querySelectorAll('[data-bpv]').forEach(sel => { sel.addEventListener('change', () => { bulkPaste.vorlage.set(sel.dataset.bpv, sel.value); bulkPasteRender() }) })
+      const neu = bulkWahl().length
       bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
-      bpEl.akt.style.display = 'flex'
-      bpEl.save.disabled = !neu
-      bpEl.save.textContent = neu ? `${neu} neu anlegen` : 'Nichts Neues'
-      bulkFuturesUmschalten(); bulkAltWegUmschalten()
+      bulkSpeichernKnopf(neu)
+    }
+    // „Accounts anlegen": Anzahl = neue, angehakte Kennungen; ohne Kennung gesperrt (External IDs ist Pflicht)
+    function bulkSpeichernKnopf(n){
+      if(!bEl.saveBtn) return
+      bEl.saveBtn.disabled = !n
+      if(bEl.saveLabel) bEl.saveLabel.textContent = n ? `${n} Account${n === 1 ? '' : 's'} anlegen` : 'Accounts anlegen'
+      bEl.saveBtn.title = n ? '' : 'Erst External IDs einfügen — mindestens eine neue Kennung'
+      const cost = parseFloat(bEl.cost.value)
+      if(bEl.totalCost) bEl.totalCost.textContent = (n && cost > 0) ? `Gesamtkosten: ${(cost * n).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €` : ''
     }
     bpEl.box?.addEventListener('input', () => {
       clearTimeout(bulkPaste.timer)
-      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPastePruefen() }, 250)
+      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPasteRender(); bulkPastePruefen() }, 250)
     })
-    bEl.firm?.addEventListener('input', () => { if(bulkPaste.bloecke.length) bulkPasteRender(); bulkFuturesUmschalten() })
-    bpEl.save?.addEventListener('click', async () => {
+    bEl.firm?.addEventListener('input', () => bulkPasteRender())
+    bEl.type?.addEventListener('change', () => bulkPasteRender())
+    bEl.cost?.addEventListener('input', () => bulkPasteRender())
+
+    async function saveBulkAccounts(){
       if(!currentUserId){ setBulkMsg('Nicht eingeloggt.', 'err'); return }
-      const firmaForm = bEl.firm.value.trim(), jetzt = new Date().toISOString()
+      const firmaForm = bEl.firm.value.trim(), typForm = bEl.type.value, jetzt = new Date().toISOString()
       const costRaw = parseFloat(bEl.cost.value), maxddRaw = parseFloat(bEl.maxdd.value)
       const lossRaw = parseFloat(bEl.maxLossTrade?.value), profitRaw = parseFloat(bEl.maxProfitTrade?.value), dailyRaw = parseFloat(bEl.maxDailyDd?.value)
       const pos = v => (!isNaN(v) && v > 0) ? v : null
-      const wahl = bulkPaste.bloecke.filter(x => { const v = bulkPasteVorlage(x); return !bulkPaste.treffer.has(x.id) && ((v && v.firm) || x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached/i.test(x.status)) })
-      if(!wahl.length) return
-      bpEl.save.disabled = true
-      let ok = 0, fehler = 0, ohneQuelle = false
-      for(const x of wahl){
-        bpEl.save.textContent = `Anlegen… ${ok + fehler + 1}/${wahl.length}`
-        // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular
+      let wahl = bulkWahl()
+      if(!wahl.length){ setBulkMsg('External IDs ist Pflicht — mindestens eine neue Kennung einfügen.', 'err'); return }
+      if(wahl.length > 50){ setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
+      bEl.saveBtn.disabled = true
+      bEl.saveBtn.classList.add('ts-btn-loading')
+      // Direkt vor dem Anlegen noch einmal über ALLE Nutzer prüfen (F16-Ergänzung) — ohne Antwort der Route wird nichts angelegt
+      if(bEl.saveLabel) bEl.saveLabel.textContent = 'Prüfe Dubletten…'
+      const pr = await bulkTrefferHolen(wahl.map(x => x.id))
+      bulkPaste.treffer = pr.treffer; bulkPaste.alleGeprueft = pr.alle
+      if(!pr.alle){
+        bEl.saveBtn.disabled = false; bEl.saveBtn.classList.remove('ts-btn-loading'); bulkPasteRender()
+        setBulkMsg('Dubletten-Prüfung über alle Nutzer nicht erreichbar — nichts angelegt. Gleich nochmal versuchen.', 'err'); return
+      }
+      wahl = wahl.filter(bulkIstNeu)
+      if(!wahl.length){ bEl.saveBtn.classList.remove('ts-btn-loading'); bulkPasteRender(); setBulkMsg('Alle Kennungen gibt es schon in Prophos — nichts angelegt.', 'err'); return }
+      const bulkFut = bulkIstFutures()   // F13: Futures → keine Zugangsdaten, nichts an Duplikum
+      const credList = bulkFut ? [] : getBulkCreds()
+      const tmplForm = bEl.template.value.trim()
+      let created = 0, errors = 0, anyExtId = false, ohneQuelle = false
+      const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
+      for(let i = 0; i < wahl.length; i++){
+        const x = wahl[i], cred = credList[i] || null
+        // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular; Größe Text > Vorlage > 150.000 (F14)
         const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
-        const gr = x.groesse || vv('account_size', null) || BULK_STD_GROESSE
-        const nameAus = t => String(t).replace(/\{ex\}/g, x.id).replace(/\{firm\}/g, vv('firm', x.firma || firmaForm)).replace(/\{size\}/g, Math.round(gr / 1000) + 'K').replace(/\{n\}/g, x.id.slice(-5)).trim()
-        const row = { user_id: currentUserId, name: (v && v.name_template) ? nameAus(v.name_template) : `${x.titel || (x.firma || firmaForm)} · ${x.id.slice(-5)}`, firm: vv('firm', x.firma || firmaForm), account_type: vv('account_type', x.typ),
-                      external_id: x.id, account_size: x.groesse || vv('account_size', null) || BULK_STD_GROESSE, starting_balance: x.groesse || vv('starting_balance', null) || BULK_STD_GROESSE,   // F14: Titel > Vorlage > 150.000 purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
-                      max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
-                      wd_farm: v ? !!v.wd_farm : !!bEl.wdFarm?.checked,
-                      ...(v && v.goal_kind ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : {}) }
-        // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann noch fehlen)
-        if(x.balance != null && x.balance > 1000) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
+        const firm = vv('firm', x.firma || firmaForm), gr = x.groesse || vv('starting_balance', null) || vv('account_size', null) || BULK_STD_GROESSE
+        const tmpl = (v && v.name_template) || tmplForm
+        const name = tmpl ? String(tmpl).replace(/\{ex\}/g, x.id).replace(/\{firm\}/g, firm).replace(/\{size\}/g, Math.round(gr / 1000) + 'K').replace(/\{n\}/g, String(i + 1)).trim()
+                          : (x.titel ? `${x.titel} · ${x.id}` : `${firm} ${Math.round(gr / 1000)}K · ${x.id}`)
+        const row = {
+          user_id: currentUserId, name, firm, account_type: vv('account_type', x.typ || typForm),
+          external_id: x.id, account_size: gr, starting_balance: gr,
+          purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
+          max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
+          wd_farm: v ? !!v.wd_farm : !!bEl.wdFarm?.checked,
+          ...((v && v.goal_kind) ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : (bulkVorlageAktiv && bulkVorlageAktiv.goal_kind) ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null } : {}),
+        }
+        // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann fehlen)
+        if(x.tvUebernehmen !== false && x.balance != null && x.balance > 1000) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
+        if(cred && (cred.login || cred.password || cred.server)){
+          row.cred_login = cred.login || null; row.cred_password = cred.password || null; row.cred_server = cred.server || null; row.cred_platform = cred.platform || 'MT5'
+        }
+        if(bEl.saveLabel) bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${wahl.length}`
         try{
           let { data, error } = await supabase.from('accounts').insert(row).select('*').single()
           if(error && /tv_balance_quelle/.test(String(error.message || ''))){ ohneQuelle = true; delete row.tv_balance_quelle; ({ data, error } = await supabase.from('accounts').insert(row).select('*').single()) }
           if(error) throw error
-          const neuAcc = rowToAccount(data); accounts.unshift(neuAcc); ok++
-          if(row.purchase_cost) await insertAutoTransaction({ account_id: neuAcc.id, account_name: neuAcc.name, account_firm: neuAcc.firm, kind: 'account_purchase',
-            amount: -Math.abs(row.purchase_cost), currency: 'EUR', occurred_at: jetzt.slice(0, 10), notes: 'Account-Kauf (auto)', auto_generated: true })
-        }catch(e){ console.error('[bulk-paste]', x.id, e); fehler++ }
-      }
-      renderAccounts(); renderOverviewKpis(); updateSidebarBadges()
-      if(!fehler){ closeBulkModal(); if(typeof showSyncBanner === 'function'){ showSyncBanner(`✓ ${ok} Konto${ok === 1 ? '' : 'en'} aus dem Dashboard angelegt`, 'ok'); if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000) } }
-      else { setBulkMsg(`${ok} angelegt, ${fehler} Fehler — Konsole prüfen.`, 'err'); bulkPastePruefen() }
-    })
-
-    async function saveBulkAccounts(){
-      const firm     = bEl.firm.value.trim()
-      const type     = bEl.type.value
-      const sizeRaw  = parseFloat(bEl.size.value)
-      const balRaw   = parseFloat(bEl.balance.value)
-      const costRaw  = parseFloat(bEl.cost.value)
-      const maxddRaw = parseFloat(bEl.maxdd.value)
-      const maxDailyDdRaw = parseFloat(bEl.maxDailyDd?.value)
-      const maxLossTradeRaw   = parseFloat(bEl.maxLossTrade?.value)
-      const maxProfitTradeRaw = parseFloat(bEl.maxProfitTrade?.value)
-      const count    = parseInt(bEl.count.value)
-      const startnum = parseInt(bEl.startnum.value) || 1
-      const extIds   = getExtIds()
-      const bulkFut  = bulkIstFutures()   // F13: Futures → keine Zugangsdaten, nichts an Duplikum
-      const credList = bulkFut ? [] : getBulkCreds()
-
-      if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
-      if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
-      if(count > 50)                { setBulkMsg('Maximal 50 auf einmal.', 'err'); return }
-      if(!currentUserId)            { setBulkMsg('Nicht eingeloggt.', 'err'); return }
-
-      const accountSize    = !isNaN(sizeRaw)  && sizeRaw  > 0 ? sizeRaw  : null
-      const initialBalance = !isNaN(balRaw)   && balRaw   > 0 ? balRaw   : (accountSize || 0)
-      const purchaseCost   = !isNaN(costRaw)  && costRaw  > 0 ? costRaw  : null
-      const maxDrawdown    = !isNaN(maxddRaw) && maxddRaw > 0 ? maxddRaw : null
-      const maxDailyDrawdown = !isNaN(maxDailyDdRaw) && maxDailyDdRaw > 0 ? maxDailyDdRaw : null
-
-      bEl.saveBtn.disabled = true
-      bEl.saveBtn.classList.add('ts-btn-loading')
-
-      let created = 0
-      let errors  = 0
-      let anyExtId = false
-      const dupCandidates = []  // { acc } für Accounts mit vollständigen Zugangsdaten
-
-      for(let i = 0; i < count; i++){
-        const n    = startnum + i
-        const name = buildName(n, i)
-        const extId = extIds[i] || null
-        const cred  = credList[i] || null
-        const row  = {
-          user_id:        currentUserId,
-          name,
-          firm,
-          account_type:   type,
-          // manuelle Balance nicht mehr schreiben (F9) — „Kontogröße" landet nur in starting_balance
-          account_size:   accountSize,
-          starting_balance: initialBalance,
-          purchase_cost:  purchaseCost,
-          max_drawdown:   maxDrawdown,
-          max_daily_drawdown: maxDailyDrawdown,
-          max_loss_per_trade:   !isNaN(maxLossTradeRaw)   && maxLossTradeRaw   > 0 ? maxLossTradeRaw   : null,
-          max_profit_per_trade: !isNaN(maxProfitTradeRaw) && maxProfitTradeRaw > 0 ? maxProfitTradeRaw : null,
-          external_id:    extId,
-          wd_farm:        !!bEl.wdFarm?.checked,
-          // Ziel aus der gewählten zentralen Vorlage (F12) — steht nicht im Formular
-          ...(bulkVorlageAktiv && bulkVorlageAktiv.goal_kind ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null } : {}),
-        }
-        if(cred && (cred.login || cred.password || cred.server)){
-          row.cred_login    = cred.login    || null
-          row.cred_password = cred.password || null
-          row.cred_server   = cred.server   || null
-          row.cred_platform = cred.platform || 'MT5'
-        }
-
-        bEl.saveLabel.textContent = `Anlegen… ${i + 1}/${count}`
-
-        try{
-          const { data, error } = await supabase
-            .from('accounts').insert(row).select('*').single()
-          if(error) throw error
           const newAcc = rowToAccount(data)
           accounts.unshift(newAcc)
-          created++
-          if(extId) anyExtId = true
-          if(newAcc.creds?.login && newAcc.creds?.password && newAcc.creds?.server){
-            dupCandidates.push(newAcc)
+          created++; anyExtId = true
+          if(newAcc.creds?.login && newAcc.creds?.password && newAcc.creds?.server) dupCandidates.push(newAcc)
+          if(row.purchase_cost && row.purchase_cost > 0){
+            await insertAutoTransaction({ account_id: newAcc.id, account_name: newAcc.name, account_firm: newAcc.firm, kind: 'account_purchase',
+              amount: -Math.abs(row.purchase_cost), currency: 'EUR', occurred_at: jetzt.slice(0, 10), notes: 'Account-Kauf (auto)', auto_generated: true })
           }
-
-          if(purchaseCost && purchaseCost > 0){
-            await insertAutoTransaction({
-              account_id:   newAcc.id,
-              account_name: newAcc.name,
-              account_firm: newAcc.firm,
-              kind:         'account_purchase',
-              amount:       -Math.abs(purchaseCost),
-              currency:     'EUR',
-              occurred_at:  new Date().toISOString().slice(0, 10),
-              notes:        'Account-Kauf (auto)',
-              auto_generated: true
-            })
-          }
-        }catch(e){
-          console.error(`Bulk insert #${n} failed:`, e)
-          errors++
-        }
+        }catch(e){ console.error(`Bulk insert ${x.id} failed:`, e); errors++ }
       }
 
       // Neue Accounts mit External ID → in einem Rutsch mit Duplikum verknüpfen (falls dort vorhanden)
@@ -33675,7 +33659,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.652'
+  const OS_TAB_BUILD = '2026-09-22.653'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
