@@ -20579,9 +20579,20 @@
              sichtbar: r.sichtbar !== false, quelle: r.quelle || null, modus: r.modus || null,
              erfasst_ms: jetzt }   // 25.09.2026: alter_ms gilt nur zum Erfassungszeitpunkt — wdKursJetzt rechnet damit weiter
   }
+  // Anker (26.09.2026, Finn am Samstag: „Natürlich ist es Wochenende, aber trotzdem muss ich den Chart von MNQ sehen"): die 24 h
+  // zählen ab der JÜNGSTEN Kerze der Wurzel, nicht ab jetzt — bei Markt zu (Wochenende, Tagespause) liegt der Freitag sonst schon
+  // halb oder ganz vor dem Fenster. Läuft der Markt, ist die jüngste Kerze ≈ jetzt, dann ändert sich nichts.
+  async function mklKerzenAnker(w, jetzt){
+    try{
+      const { data } = await supabase.from('tv_kurs_1m').select('minute').eq('wurzel', w).order('minute', { ascending: false }).limit(1)
+      const t = Date.parse(data && data[0] && data[0].minute) || 0
+      return t > 0 ? Math.min(jetzt, t + 60000) : jetzt
+    }catch(_){ return jetzt }
+  }
   async function mklKerzen24h(jetzt){
-    const seit = new Date(jetzt - 1440 * 60000).toISOString(), alle = []
+    const alle = []
     for(const w of ['NQ', 'MNQ']){
+      const seit = new Date((await mklKerzenAnker(w, jetzt)) - 1440 * 60000).toISOString()
       const je = []
       for(let seite = 0; seite < 2; seite++){
         const { data, error } = await supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle')
@@ -20679,8 +20690,10 @@
       // Nachtrag: gleiche Minute ersetzen, neue anhängen, Spanne vorn kappen
       for(const k of neu){ const tk = Date.parse(k.minute) || 0; const i = mkl.kerzen.findIndex(x => x.wurzel === k.wurzel && (Date.parse(x.minute) || 0) === tk); if(i >= 0) mkl.kerzen[i] = k; else mkl.kerzen.push(k) }
       mkl.kerzen.sort((a, b) => (Date.parse(a.minute) || 0) - (Date.parse(b.minute) || 0))
-      const grenze = jetzt - 1440 * 60000
-      mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= grenze)
+      // Grenze ab der jüngsten Kerze je Wurzel (26.09.2026): bei Markt zu fielen die Freitags-Kerzen sonst nach 24 h aus dem Chart
+      const grenzeJe = {}
+      for(const k of mkl.kerzen){ const t = Date.parse(k.minute) || 0; if(t > (grenzeJe[k.wurzel] || 0)) grenzeJe[k.wurzel] = t }
+      mkl.kerzen = mkl.kerzen.filter(k => (Date.parse(k.minute) || 0) >= Math.min(jetzt, (grenzeJe[k.wurzel] || jetzt) + 60000) - 1440 * 60000)
     }
     // Nur die gewählte Wurzel im Chart (NQ ↔ MNQ-Umschalter); NAS100-Kerzen (Fusion-Feed, wurzel NAS100) bleiben außen vor
     mkl.kerzen = mkl.kerzen.filter(k => k.wurzel === mkl.wurzel)
@@ -20712,8 +20725,8 @@
     if(beide){
       const je = mkl.kursJe || {}
       beide.innerHTML = ['NQ', 'MNQ'].map(w => { const x = je[w]; if(!x) return `<span style="color:var(--sub-2)"><b>${w}</b> –</span>`
-        const a = Math.round(x.alter_ms / 1000), f = x.alter_ms <= HEDGE_KURS_MAX_ALTER_MS, steht = x.alter_ms > 60000
-        return `<span style="${f ? '' : 'opacity:.55'}"><b>${w}</b> ${mklFmt(x.preis)} <span style="color:${steht ? '#b91c1c' : 'var(--sub-2)'}">vor ${a < 120 ? a + ' s' : Math.round(a / 60) + ' min'}</span></span>` }).join('<span style="color:var(--sub-2)">·</span>')
+        const a = Math.round(x.alter_ms / 1000), f = x.alter_ms <= HEDGE_KURS_MAX_ALTER_MS, steht = x.alter_ms > 60000 && !(typeof cmeMarktOffen === 'function' && !cmeMarktOffen())
+        return `<span style="${f ? '' : 'opacity:.55'}"><b>${w}</b> ${mklFmt(x.preis)} <span style="color:${steht ? '#b91c1c' : 'var(--sub-2)'}">vor ${a < 120 ? a + ' s' : a < 7200 ? Math.round(a / 60) + ' min' : Math.round(a / 3600) + ' h'}</span></span>` }).join('<span style="color:var(--sub-2)">·</span>')
     }
     if(!k){
       const andere = mkl.wurzel === 'NQ' ? 'MNQ' : 'NQ', jeA = (mkl.kursJe || {})[andere]
@@ -20734,7 +20747,8 @@
     if(sym) sym.textContent = k.symbol
     // Tagesveränderung gegen die erste Kerze der Spanne (ehrlich: „seit Spannenanfang", nicht Vortag)
     // Vergleichswert = erste Kerze im SICHTBAREN Fenster (1 h / 4 h / 24 h), die Daten sind immer 24 h
-    const ersteK = mkl.kerzen.find(kk => (Date.parse(kk.minute) || 0) >= Date.now() - mkl.span * 60000)
+    const bisK = mkl.kerzen.length ? (Date.parse(mkl.kerzen[mkl.kerzen.length - 1].minute) || 0) + 60000 : Date.now()
+    const ersteK = mkl.kerzen.find(kk => (Date.parse(kk.minute) || 0) >= Math.min(Date.now(), bisK) - mkl.span * 60000)
     const erste = ersteK ? Number(ersteK.o) : null
     if(diff){
       if(erste > 0){ const d = k.preis - erste, pct = d / erste * 100; diff.textContent = `${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(d))} (${d >= 0 ? '+' : '−'}${mklFmt(Math.abs(pct))} %) seit ${mkl.span >= 1440 ? '24 h' : mkl.span / 60 + ' h'}`; diff.style.color = d >= 0 ? 'var(--good)' : 'var(--danger)' }
@@ -20742,7 +20756,9 @@
     }
     const alt = Math.round(k.alter_ms / 1000)
     // Stale-Alarm (24.09.2026 spät): > 60 s ohne Tick = rot „Feed steht seit …" (der Web-Push kommt aus mklStaleWache ab 2 min)
-    const steht = k.alter_ms > 60000
+    // Markt zu (26.09.2026, Samstag): kein roter „Feed steht"-Alarm, sondern ein ruhiger Hinweis mit dem letzten Kurs
+    const zu = typeof cmeMarktOffen === 'function' && !cmeMarktOffen()
+    const steht = k.alter_ms > 60000 && !zu
     const dauer = alt < 3600 ? Math.round(alt / 60) + ' min' : (alt / 3600).toFixed(1) + ' h'
     // modus 'delayed_streaming_600' (Reader 0.8.0): TradingView liefert auf dem PC nur verzögerte CME-Kurse — das ist kein
     // Live-Feed, auch wenn die Ticks frisch aussehen. quelle 'ws' = Socket (Tab darf verdeckt sein), 'titel' = Tab muss sichtbar sein.
@@ -20751,11 +20767,13 @@
       // Stillstand mit Diagnose (25.09.2026, Live-Befund Koordination: „Socket, Tab verdeckt ok" stand bei stehendem Feed und
       // beschrieb den TradingView-Tab — Ursache war ein fehlender Prophos-Tab mit Kurs-Brücke auf dem Reader-PC, dort lief nur
       // noch ein alter .465-Tab). Die Quelle-Angabe (Socket/Titel) gilt nur für einen frischen Feed.
-      q.textContent = steht ? `⚠ Feed steht seit ${dauer} — ${mklFeedDiagnose(k.pc, mklFeedLageCache(k.pc)).zeile}`
+      const letzteMs = Date.now() - k.alter_ms
+      q.textContent = (zu && k.alter_ms > 60000) ? `Markt geschlossen · letzter Kurs ${new Date(letzteMs).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+        : steht ? `⚠ Feed steht seit ${dauer} — ${mklFeedDiagnose(k.pc, mklFeedLageCache(k.pc)).zeile}`
         : !frisch ? `⚠ kein Live-Kurs — letzter Stand vor ${alt} s (PC ${k.pc})`
         : `live · vor ${alt} s` + ` (PC ${k.pc}${k.quelle ? ` · ${k.quelle === 'ws' ? 'Socket, Tab verdeckt ok' : k.quelle === 'titel' ? 'Titel, Tab muss sichtbar sein' : k.quelle}` : ''})${(k.sichtbar || k.quelle === 'ws') ? '' : ' · Tab verdeckt'}`
         + (delayed ? ' · ⚠ TV-CME-Abo auf dem PC nicht aktiv — Kurse 10 min alt' : '')
-      q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : frisch ? '' : '#B45309'
+      q.style.color = steht ? '#b91c1c' : delayed ? '#B45309' : (frisch || zu) ? '' : '#B45309'
       q.style.fontWeight = (steht || delayed) ? '600' : ''
       q.title = `Cloud-Zeile vor ${alt} s geschrieben · letzter Handel (reader_ts) vor ${Math.round((k.handel_ms || 0) / 1000)} s — in ruhigen Minuten liegt der Handel weiter zurück als der Feed. Die Brücke schreibt jede Sekunde bei Änderung; Ausreißer zwischen zwei Anzeigen stecken im High/Low der laufenden Minute, Demo-Orders werten darüber aus.`
     }
@@ -20804,7 +20822,10 @@
   // 1 h / 4 h / 24 h = sichtbarer Bereich bis „jetzt + 5 Kerzen", Daten bleiben die vollen 24 h
   function mklSichtbarSetzen(){
     if(!_mklLw || !_mklLw.n) return
-    const bis = Math.max(_mklLw.letzte, Math.floor(Date.now() / 1000)), von = bis - mkl.span * 60
+    // Liegt die letzte Kerze > 10 min zurück (Markt zu, Feed steht), endet der Ausschnitt an ihr (26.09.2026, Samstag: der Bereich
+    // „jetzt − 1 h … jetzt" lag komplett hinter dem Freitags-Schluss → leerer Chart, obwohl die Kerzen geladen waren)
+    const nun = Math.floor(Date.now() / 1000)
+    const bis = nun - _mklLw.letzte > 600 ? _mklLw.letzte : Math.max(_mklLw.letzte, nun), von = bis - mkl.span * 60
     try{ _mklLw.chart.timeScale().setVisibleRange({ from: Math.max(_mklLw.erste, von), to: bis + 5 * 60 }) }catch(_){}
   }
   function mklChartZeichnen(){
@@ -21151,7 +21172,7 @@
       const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit
       const episode = String(r.updated_at || r.reader_ts || '')
       let alarm = null; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') }catch(_){}
-      if(alter > MKL_STALE_PUSH_MS && alarm !== episode){
+      if(alter > MKL_STALE_PUSH_MS && alarm !== episode && cmeMarktOffen()){   // Markt zu = kein Ausfall (26.09.2026)
         try{ localStorage.setItem('prophos_mkl_stale_alarm', episode) }catch(_){}
         const diag = mklFeedDiagnose(r.pc_name, await mklFeedLageLaden(r.pc_name).catch(() => null))
         if(await mklPushClaim('steht', episode) && typeof pushAnsHandy === 'function')
@@ -32740,7 +32761,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.613'
+  const OS_TAB_BUILD = '2026-09-22.614'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46363,7 +46384,11 @@
             epLokal.kerzenGeraeumt = Date.now()
             // 26 h statt 14 Tage (25.09.2026, Finn: „alle 24 h löschen" — ≈ 2.900 Zeilen/Tag, 440 kB bei 1.409 Zeilen): der Chart zeigt
             // höchstens 24 h, 26 h halten den Ausschnitt am Rand vollständig; ältere Kerzen liest niemand (Demo-Auswertung raus)
-            try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(Date.now() - 26 * 3600000).toISOString()) }catch(_){}
+            // Anker jüngste Kerze (26.09.2026, Befund Samstag: die stündliche Räumung löschte über das Wochenende den ganzen Freitag —
+            // 20 Zeilen übrig, Markt live leer). Bei Markt zu schreibt der Reader weiter die Schluss-Minuten, die bleiben der Anker.
+            const jungste = Math.max(...rows.map(r => Date.parse(r.minute) || 0))
+            const anker = jungste > 0 ? Math.min(Date.now(), jungste + 60000) : Date.now()
+            try{ await supabase.from('tv_kurs_1m').delete().lt('minute', new Date(anker - 26 * 3600000).toISOString()) }catch(_){}
           }
         }
         // Kerzen-Erstladung (Reader 0.8.0, 24.09.2026 spät): TradingViews eigene Erstladung (bis 600 Minutenkerzen je Wurzel)
