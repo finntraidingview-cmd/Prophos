@@ -383,6 +383,29 @@ def main():
     # Samstag 19:40 UTC: Markt zu (dieselbe Regel, mit der der Server die Ticks jetzt sperrt)
     check(not rs.cme_offen(_t("2026-09-26T19:40:00")) and rs.cme_offen(_t("2026-09-28T14:00:00")), "Sa 19:40 UTC zu, Mo 14:00 UTC offen")
 
+    # 0.9.7: Updater-Diagnose
+    import tempfile as _tf9, os as _os9, json as _j9, io as _io9, contextlib as _cl9
+    basis = _tf9.mkdtemp()
+    _os9.makedirs(_os9.path.join(basis, "mt5-copier")); _os9.makedirs(_os9.path.join(basis, "tv-reader"))
+    check(rs.reader_kennung(_os9.path.join(basis, "tv-reader"), host="PC-Moritz_01") == "host-pc-moritz01",
+          "Kennung ohne pc_id.json → host-<Rechnername> (bereinigt)")
+    _j9.dump({"pc_id": "pc-usq1i6"}, open(_os9.path.join(basis, "mt5-copier", "pc_id.json"), "w"))
+    check(rs.reader_kennung(_os9.path.join(basis, "tv-reader"), host="x") == "pc-usq1i6", "Kennung aus ../mt5-copier/pc_id.json")
+    alt_st = dict(rs._UPD_STATUS)
+    try:
+        with _cl9.redirect_stdout(_io9.StringIO()):
+            for i in range(11):
+                rs._update_meldung(f"Meldung {i}")
+        check(len(rs._UPD_STATUS["meldungen"]) == 8 and rs._UPD_STATUS["meldungen"][-1].endswith("Meldung 10"), "Meldungen: die letzten 8 bleiben")
+        rs._UPD_STATUS.update(letzter_check=1.0, sha="a" * 40, sha_fehler="URLError: ssl", schlecht=["b" * 40], fehler="X @ y")
+        pk = rs.reader_diagnose_paket("aufsicht", rs._UPD_STATUS, _t("2026-09-26T19:40:00"))
+        check(pk["rolle"] == "aufsicht" and pk["version"] == rs.READER_VERSION and pk["sha_fehler"] == "URLError: ssl"
+              and pk["markt_offen"] is False and pk["schlecht"] == ["b" * 40] and len(pk["meldungen"]) == 8 and pk["pid"] > 0,
+              "Diagnose-Paket: Version, PID, sha_fehler, gesperrte Kennungen, Meldungen, Markt zu")
+        check(len(_j9.dumps(pk)) < 6000, "Diagnose-Paket klein genug fuer die Route")
+    finally:
+        rs._UPD_STATUS.clear(); rs._UPD_STATUS.update(alt_st)
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

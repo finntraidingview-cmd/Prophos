@@ -65,7 +65,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.6"
+READER_VERSION = "0.9.7"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -1312,14 +1312,66 @@ def update_zuruecknehmen(datei):
         os.replace(datei + ".prev", datei)
 
 
+# ── Updater-Diagnose (0.9.7, 26.09.2026, Auftrag Koordination B9): auf pc-usq1i6 kam 0.9.6 per Selbst-Update nicht an,
+# obwohl dieselbe 0.9.5-Datei auf dem Mac in 61 s tauschte — die Ursache stand nur im Reader-Fenster. Jetzt meldet der
+# Reader seinen Updater-Zustand an Railway (POST /reader-diagnose/<kennung>, Tabelle reader_diagnose): Version, wie
+# gestartet (Aufsicht/Kind, PIDs), letzter Check + Kennung, wartendes Update, gesperrte Kennungen, letzte Meldungen und
+# Fehler MIT Exception-Text. Kennung = pc_id aus ../mt5-copier/pc_id.json (sonst neben dem Reader), sonst host-<Rechnername>.
+DIAGNOSE_BACKEND = "https://web-production-bec81.up.railway.app"
+_UPD_STATUS = {"meldungen": [], "fehler": "", "letzter_check": None, "sha": None, "sha_fehler": "", "wartend": None,
+               "schlecht": [], "tausch": None}
+
+
+def reader_kennung(hier=None, host=None):
+    """pc_id des PCs (mt5-copier/pc_id.json neben tv-reader oder im Reader-Ordner), sonst 'host-<Rechnername>'."""
+    hier = hier or HIER
+    for pfad in (os.path.join(os.path.dirname(hier), "mt5-copier", "pc_id.json"), os.path.join(hier, "pc_id.json")):
+        try:
+            with open(pfad, "r", encoding="utf-8") as f:
+                v = (json.load(f) or {}).get("pc_id")
+            if isinstance(v, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", v):
+                return v
+        except Exception:
+            continue
+    import socket
+    h = re.sub(r"[^a-z0-9-]", "", str(host if host is not None else socket.gethostname()).lower())[:30]
+    return "host-" + (h or "unbekannt")
+
+
+def reader_diagnose_paket(rolle, status, jetzt=None):
+    """REIN RECHNEND (testbar): Paket fuer POST /reader-diagnose/<kennung>."""
+    import platform
+    st = status or {}
+    return {"rolle": rolle, "version": READER_VERSION, "pid": os.getpid(), "ppid": os.getppid() if hasattr(os, "getppid") else None,
+            "at": jetzt or time.time(), "datei": os.path.abspath(__file__)[-120:], "python": platform.python_version(),
+            "system": (platform.system() + " " + platform.release())[:40], "markt_offen": cme_offen(jetzt or time.time()),
+            "letzter_check": st.get("letzter_check"), "sha": st.get("sha"), "sha_fehler": st.get("sha_fehler") or "",
+            "wartend": st.get("wartend"), "schlecht": list(st.get("schlecht") or [])[-6:], "tausch": st.get("tausch"),
+            "fehler": st.get("fehler") or "", "meldungen": list(st.get("meldungen") or [])[-8:]}
+
+
+def _diagnose_senden(rolle):
+    """Zustand an Railway (4 s, Fehler still — die Diagnose darf den Reader nie stoeren)."""
+    try:
+        import urllib.request
+        daten = json.dumps(reader_diagnose_paket(rolle, _UPD_STATUS)).encode("utf-8")
+        req = urllib.request.Request(f"{DIAGNOSE_BACKEND}/reader-diagnose/{reader_kennung()}", data=daten,
+                                     headers={"Content-Type": "application/json", "User-Agent": "prophos-reader"})
+        urllib.request.urlopen(req, timeout=4.0).read()
+    except Exception:
+        pass
+
+
 def _repo_sha(timeout=8):
     import urllib.request
     try:
         req = urllib.request.Request(f"https://github.com/{_REPO}.git/info/refs?service=git-upload-pack",
                                      headers={"User-Agent": "git/2.40"})
         m = re.search(rb"([0-9a-f]{40}) refs/heads/main", urllib.request.urlopen(req, timeout=timeout).read())
+        _UPD_STATUS["sha_fehler"] = "" if m else "refs/heads/main nicht in der Antwort"
         return m.group(1).decode("ascii") if m else None
-    except Exception:
+    except Exception as e:
+        _UPD_STATUS["sha_fehler"] = f"{type(e).__name__}: {e}"[:200]      # 0.9.7: Grund sichtbar (Netz/SSL/Proxy)
         return None
 
 
@@ -1338,7 +1390,11 @@ def _server_version(timeout=2.0):
 
 
 def _update_meldung(text):
-    print(f"\n[{time.strftime('%H:%M:%S')}] Selbst-Update: {text}", flush=True)
+    _UPD_STATUS["meldungen"] = (_UPD_STATUS["meldungen"] + [f"{time.strftime('%H:%M:%S')} {text}"[:220]])[-8:]
+    try:
+        print(f"\n[{time.strftime('%H:%M:%S')}] Selbst-Update: {text}", flush=True)
+    except Exception:
+        pass            # 0.9.7: eine Konsole, die ein Zeichen nicht kann, darf den Update-Faden nie anhalten
 
 
 def update_schritt(zustand, jetzt, markt_offen, sha, lade, pruefe=update_pruefen):
@@ -1375,7 +1431,11 @@ def _updater(datei, schlafen=time.sleep):
             with open(datei, "rb") as f:
                 zustand["aktuell"] = f.read()
             jetzt = time.time()
-            was = update_schritt(zustand, jetzt, cme_offen(jetzt), _repo_sha(), _repo_datei)
+            sha = _repo_sha()
+            was = update_schritt(zustand, jetzt, cme_offen(jetzt), sha, _repo_datei)
+            w_ = zustand.get("wartend")
+            _UPD_STATUS.update(letzter_check=jetzt, sha=sha, schlecht=sorted(zustand.get("schlecht") or ()),
+                               wartend=({"sha": w_["sha"], "version": w_["version"], "seit": w_["seit"]} if w_ else None))
             if was == "tauschen":
                 w = zustand["wartend"]
                 alt_version = _server_version() or READER_VERSION
@@ -1394,6 +1454,7 @@ def _updater(datei, schlafen=time.sleep):
                     if _server_version() == w["version"]:
                         bewiesen = True
                         break
+                _UPD_STATUS["tausch"] = {"version": w["version"], "sha": w["sha"], "at": time.time(), "bewiesen": bewiesen}
                 if bewiesen:
                     _update_meldung(f"{w['version']} laeuft (vorher {alt_version}).")
                 else:
@@ -1409,7 +1470,11 @@ def _updater(datei, schlafen=time.sleep):
                             pass
                 zustand["wartend"] = None
         except Exception as e:
+            import traceback
+            _UPD_STATUS["fehler"] = (f"{type(e).__name__}: {e} @ " + " | ".join(
+                traceback.format_exc().strip().splitlines()[-3:]))[:400]
             _update_meldung(f"Fehler {type(e).__name__}: {e}")
+        _diagnose_senden("aufsicht")
         schlafen(UPDATE_PRUEF_S)
 
 
@@ -1448,6 +1513,7 @@ if __name__ == "__main__" and os.environ.get(KIND_ENV) != "1":
     print(f"Prophos TV-Reader {READER_VERSION} — Aufsicht aktiv: stirbt der Server, startet er in 5 s neu (Strg+C beendet).")
     print("Selbst-Update an: neue Versionen werden nur bei geschlossenem CME-Markt eingespielt (Pause 16–17 CT, Wochenende).")
     threading.Thread(target=_updater, args=(os.path.abspath(__file__),), daemon=True).start()
+    threading.Thread(target=_diagnose_senden, args=("aufsicht",), daemon=True).start()   # 0.9.7: „Aufsicht laeuft"
     try:
         _aufsicht()
     except KeyboardInterrupt:
@@ -1459,6 +1525,8 @@ elif __name__ == "__main__":
     print(f"Schreibt den Stand nach {DATEI}")
     print(f"Reader ist {'AN' if _an else 'PAUSIERT (reader_aus.flag liegt)'}")
     print("Warte auf Daten vom Tampermonkey-Reader … (Strg+C zum Beenden)\n")
+    # 0.9.7: der Server meldet sich einmal selbst — fehlt daneben die Zeile „aufsicht", laeuft keine Aufsicht (kein Updater)
+    threading.Thread(target=_diagnose_senden, args=("kind",), daemon=True).start()
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:

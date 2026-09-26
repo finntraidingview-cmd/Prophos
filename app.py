@@ -8707,6 +8707,58 @@ def puls_diagnose_schreiben(pc_id):
     return jsonify({"ok": True})
 
 
+# ══ READER-DIAGNOSE (26.09.2026, Auftrag Koordination B9) ═════════════════════════════════════════════════════════
+# Der TV-Reader (ab 0.9.7) meldet seinen Updater-Zustand — Anlass: 0.9.6 kam auf pc-usq1i6 per Selbst-Update nicht an,
+# die Ursache stand nur im Reader-Fenster. sql/2026-09-26_reader_diagnose.sql, eine Zeile je (kennung, rolle).
+# Ohne Anmeldung (der Reader hat keinen Login): nur dieses Feld, bekannte Schlüssel, kurze Texte, Größendeckel.
+READER_KENNUNG_MUSTER = re.compile(r"^(pc-[a-z0-9]{4,12}|host-[a-z0-9-]{1,30})$")
+READER_DIAGNOSE_MAX = 8000
+
+
+def reader_diagnose_saeubern(d):
+    """REIN RECHNEND (testbar): → (rolle, dict) oder (None, None) bei Unsinn/zu groß."""
+    if not isinstance(d, dict) or d.get("rolle") not in ("aufsicht", "kind"):
+        return None, None
+
+    def txt(v, n=80):
+        return str(v)[:n] if v is not None else None
+
+    def zahl(v):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    w = d.get("wartend") if isinstance(d.get("wartend"), dict) else None
+    t = d.get("tausch") if isinstance(d.get("tausch"), dict) else None
+    out = {"version": txt(d.get("version"), 16), "pid": zahl(d.get("pid")), "ppid": zahl(d.get("ppid")), "at": zahl(d.get("at")),
+           "datei": txt(d.get("datei"), 120), "python": txt(d.get("python"), 16), "system": txt(d.get("system"), 40),
+           "markt_offen": bool(d.get("markt_offen")), "letzter_check": zahl(d.get("letzter_check")),
+           "sha": txt(d.get("sha"), 40), "sha_fehler": txt(d.get("sha_fehler"), 200), "fehler": txt(d.get("fehler"), 400),
+           "wartend": {"sha": txt(w.get("sha"), 40), "version": txt(w.get("version"), 16), "seit": zahl(w.get("seit"))} if w else None,
+           "tausch": {"sha": txt(t.get("sha"), 40), "version": txt(t.get("version"), 16), "at": zahl(t.get("at")),
+                      "bewiesen": bool(t.get("bewiesen"))} if t else None,
+           "schlecht": [txt(x, 40) for x in (d.get("schlecht") or [])][:6] if isinstance(d.get("schlecht"), list) else [],
+           "meldungen": [txt(x, 220) for x in (d.get("meldungen") or [])][-8:] if isinstance(d.get("meldungen"), list) else []}
+    if len(json.dumps(out, ensure_ascii=False)) > READER_DIAGNOSE_MAX:
+        return None, None
+    return d["rolle"], out
+
+
+@app.route("/reader-diagnose/<kennung>", methods=["POST", "OPTIONS"])
+def reader_diagnose_schreiben(kennung):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not READER_KENNUNG_MUSTER.fullmatch(kennung or ""):
+        return jsonify({"ok": False, "msg": "kennung ungültig"}), 400
+    if (request.content_length or 0) > READER_DIAGNOSE_MAX * 2:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    rolle, d = reader_diagnose_saeubern(request.get_json(silent=True))
+    if d is None:
+        return jsonify({"ok": False, "msg": "Diagnose ungültig"}), 400
+    try:
+        sb_upsert("reader_diagnose", {"kennung": kennung, "rolle": rolle, "diagnose": d, "at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True})
+
+
 start_kompass()
 
 
