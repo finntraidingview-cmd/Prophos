@@ -8420,12 +8420,8 @@
                     <!-- Reibung gespart, gemessen vs. real (26.09.2026, Finn: „über den Chart Reibungskosten sehen, was ich gespart habe
                          an realen und gemessenen — kein Balken, ein Liniendiagramm, das nach oben geht"): Trades dieses Kapitels. -->
                     <div class="kf-chart" data-kf-chart="reibs" hidden><div class="kf-titel">Reibung gespart · gemessen vs. real · kumuliert <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibs"></span></div><div class="kf-sub">je Trade ohne Hedge die Reibung, die nicht angefallen ist, aufsummiert: grau gestrichelt = gemessen (Gruppen-Median der Hedge-Ära), Kapitel-Farbe = real (× realer Anteil der Gruppe) · Personen- und Sach-Filter greifen</div><div class="adm-vl"><canvas id="adm-kf-chart-reibs"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-reibs"></div></div>
-                    <div class="kf-chart" data-kf-chart="reibg" hidden><div class="kf-titel">Reibung gesamt je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibg"></span></div><div class="kf-sub">€ je Hedge-Trade, gemessen in der Hedge-Ära (Median, Ausreißer 1,5×IQR raus) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reibg"></canvas></div></div>
-                    <div class="kf-chart" data-kf-chart="reib" hidden><div class="kf-titel">Reibung real je Firma · Typ <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reib"></span></div><div class="kf-sub">€ je Hedge-Trade, der Anteil, der wirklich anfällt — je Gruppe aus den entschiedenen Ketten gemessen: Fixgröße und Payout-Ketten 100 %, ohne Payout geblowt 0 % (kommt über die Gesamtkosten zurück) · Klick filtert</div><div class="kf-mini-cv"><canvas id="adm-kf-cv-reib"></canvas></div></div>
-                    <!-- Gemessen vs. real je Kontotyp (25.09.2026, Finn: „ein richtig cleaner Chart, wo man die reelle Reibung im Verhältnis der gemessenen sieht … alle Typen von Accounts und deren Reibung bzw. Kosten") -->
-                    <!-- Seit 25.09.2026 abends als Verlauf (Finn: „nicht als Balken, sondern als Chart, der hochgeht … alle Unterteile, die wir gestern hatten"):
-                         kumulierte Reibung je Ausgangs-Kategorie der Kette, nicht je Prophos-Kontotyp. -->
-                    <div class="kf-chart" data-kf-chart="reibv" hidden><div class="kf-titel">Gemessen vs. real · kumuliert <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibv"></span></div><div class="kf-sub">Reibung der Hedge-Ära, aufsummiert über die Zeit: grau gestrichelt = gemessen gesamt, Kapitel-Farbe = real (Payout-Ketten + Fixgröße + archiviert). Darunter die Teile nach Ausgang der Kette: ohne Payout geblowt (0:0, kommt über die Gesamtkosten zurück), laufend (offen), Master nicht verknüpft · Klick auf einen Chip hebt die Linie hervor</div><div class="adm-vl"><canvas id="adm-kf-chart-reibv"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-reibv"></div></div>
+                    <!-- Je Firma (26.09.2026, Finn: „hier nur die Reibung seit der neuen Ära"): reale Reibung, die ohne Hedge nicht anfällt, kumuliert je Prop-Firma. -->
+                    <div class="kf-chart" data-kf-chart="reibf" hidden><div class="kf-titel">Reibung gespart · je Firma · kumuliert <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibf"></span></div><div class="kf-sub">reale Reibung je Trade ohne Hedge, aufsummiert je Prop-Firma · gestrichelt = alle · Klick auf Chip oder Linie filtert auf die Firma</div><div class="adm-vl"><canvas id="adm-kf-chart-reibf"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-reibf"></div></div>
                   </div>
                 </div>
                 <div id="adm-kf-quoten" hidden>
@@ -11402,7 +11398,7 @@
       // d) Balken-Charts (24.09.2026): Reibung je Firma · Typ, je Tag, Histogramm, sechs Dimensionen.
       // Personen-Filter gilt für Sach-Dimensionen, der Balken-Filter für den Personen-Chart (sonst bliebe
       // nur der gewählte Balken); Reibung-Chart zeigt die Hedge-Ära-Gruppen, unabhängig vom Filter.
-      admKfReibChart(admKapData?.reibung_gruppen, f, farbe)
+      // Reibung-Gruppe zeigt seit 26.09.2026 nur die neue Ära (admKfReibSpar) — die Hedge-Ära-Charts (Je Firma, Verlauf nach Ketten-Ausgang) sind raus
       admKfTagChart(alle.filter(persOk), f, fx, farbe)
       admKfKalender(alle.filter(persOk), f)
       admKfHistChart(alle.filter(persOk), f, farbe)
@@ -11466,6 +11462,15 @@
       const gem = mit.reduce((a, t) => a + admKfReibGem(t), 0), real = mit.reduce((a, t) => a + admKfReib(t), 0)
       const el = $('adm-kf-sum-reibs')
       if(el) el.innerHTML = mit.length ? `· gemessen <b>${admVlSign(gem)}</b> · real <b>${admVlSign(real)}</b>${gem > 0 ? ` (${admKfDe(100 * real / gem, 0)} %)` : ''} · ${mit.length} Trades` : ''
+      // Je Firma (reale Reibung), Muster „Verlauf · Hedge-Kosten kumuliert je Firma"
+      const aktivF = admKf.filter && admKf.filter.art === 'firm' ? admKf.filter.wert : ''
+      const fm = new Map()
+      for(const t of mit){ const w = t.master_firm || '—'; const sr = fm.get(w) || { key: w, label: w, n: 0, events: [] }; sr.n++; sr.events.push({ datum: t.datum, eur: admKfReib(t) }); fm.set(w, sr) }
+      const fSerien = [...fm.values()].sort((x, y) => x.label.localeCompare(y.label, 'de'))
+      const elF = $('adm-kf-sum-reibf'); if(elF) elF.innerHTML = mit.length ? `· real <b>${admVlSign(real)}</b> · ${fSerien.length} Firmen` : ''
+      admVerlauf('kfreibf', 'adm-kf-chart-reibf', 'adm-kf-legend-reibf', fSerien, aktivF,
+                 key => { admKf.filter = aktivF === key ? null : { art: 'firm', wert: key }; admKfRender() },
+                 { tage, gesamt: true, gesamtFarbe: farbe, farbe: k => admKfFirmColor(k), labelRoh: true, sub: k => { const sr = fm.get(k); return sr ? `${sr.n} Trades` : '' } })
       const FARBE = { gem: '#94A3B8', real: farbe }
       admVerlauf('kfreibs', 'adm-kf-chart-reibs', 'adm-kf-legend-reibs', serien, admKf.reibsPick || '',
                  key => { admKf.reibsPick = admKf.reibsPick === key ? '' : key; admKfRender() },
@@ -11529,7 +11534,8 @@
       verlauf: [['hyp', 'Mit Hedge'], ['real', 'Real · Master-P&L'], ['dup', 'Duplikum gespart'], ['reibp', 'Reibung gespart']],
       trades:  [['tag', 'Je Tag'], ['kal', 'Kalender'], ['pnl', 'Verteilung'], ['wt', 'Wochentag'], ['std', 'Stunde'], ['dauer', 'Haltedauer']],
       // Linien zuerst (26.09.2026, Finn: „kein Balkendiagramm, ein Liniendiagramm") — die Balken je Firma bleiben dahinter
-      reibung: [['reibs', 'Gespart · gemessen vs. real'], ['reibv', 'Hedge-Ära gemessen vs. real'], ['reibg', 'Je Firma gemessen'], ['reib', 'Je Firma real']],
+      // nur die neue Ära (26.09.2026, Finn: „hier nur die Reibung seit der neuen Ära") — Hedge-Ära-Charts entfernt
+      reibung: [['reibs', 'Gemessen vs. real'], ['reibf', 'Je Firma']],
       firma:   [['fS', 'Je Firma'], ['fT', 'Je Firma · Typ'], ['fA', 'Ø je Trade'], ['fV', 'Verlauf']] }
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
@@ -11710,54 +11716,6 @@
           zeilen: e => [`${e.n} Trade${e.n === 1 ? '' : 's'} · Ø Hedge ${admVlSign(e.a / e.n)} · Ø Master ${admUsdSign(e.b / e.n)}`,
                         e.qn ? `Quote Ø ${admKfQFmt(e.qs / e.qn)}${e.qn < e.n ? ` (${e.n - e.qn} ohne Quote)` : ''}` : 'ohne Quote (FX × 1)'] })
       }
-    }
-    /* Reibung je Firma · Typ (24.09.2026, Finn: „davon auch ein Chart"; abends: „ein Chart, der die gesamte Reibung
-     * zeigt, und einmal den Chart, der nur die reale Reibung zeigt"): Gruppen der Ebene B mit n ≥ min_n als zwei
-     * Sichten — gesamt (gemessen, grau) und real (Kapitel-Farbe), liegende Balken, nach Wert sortiert.
-     * Klick = Filter Firma · Typ wie die Quoten-Zeilen. Backend trimmt je Gruppe mit 1,5 × IQR. */
-    function admKfReibChart(rg, f, farbe){
-      const minN = Number(rg?.min_n) || 5
-      const basis = (rg?.gruppen || []).filter(g => g.ebene === 'B' && g.firm && g.firm !== '—' && Number(g.n) >= minN)
-        .sort((a, b) => Number(b.n) - Number(a.n)).slice(0, 14)
-        .map(g => ({ key: g.firm + ' · ' + admKfTyp(g.typ), label: g.firm + ' · ' + admKfTyp(g.typ), n: Number(g.n), roh: Number(g.n_roh || g.n),
-                     gesamt: Number(g.median), real: Number(g.real_median), mean: Number(g.mean), realMean: Number(g.real_mean), anteil: Number(g.anteil), quelle: g.anteil_quelle || '', nEnt: Number(g.n_entschieden || 0), firm: g.firm }))
-      const aktiv = f && f.art === 'q' ? f.wert : ''
-      const eur = v => admKfDe(v, 2) + ' €', eurK = v => admKfDe(v, 0) + ' €'
-      const klick = e => { admKf.filter = (f && f.art === 'q' && f.wert === e.key) ? null : { art: 'q', wert: e.key }; admKfRender() }
-      const zeilen = e => [`${e.n} Hedge-Trades${e.roh > e.n ? ` (${e.roh - e.n} Ausreißer raus)` : ''} · gesamt Ø ${eur(e.mean)} · real Ø ${eur(e.realMean)} · Anteil real ${admKfDe(100 * e.anteil, 0)} % (${e.quelle}, ${e.nEnt} entschieden)`]
-      const gSum = rg?.global ? [['gemessen Ø', Number(rg.global.mean), eur], ['Median', Number(rg.global.median), eur]] : []
-      const rSum = rg?.global ? [['real Ø', Number(rg.global.real_mean), eur], ['Median', Number(rg.global.real_median), eur]] : []
-      admKfSumHtml('adm-kf-sum-reibg', gSum)
-      admKfSumHtml('adm-kf-sum-reib', rSum)
-      const cg = basis.map(e => ({ ...e, a: e.gesamt })).sort((a, b) => b.a - a.a)
-      admKfBar('reibg', 'adm-kf-cv-reibg', cg, { horizontal: true,
-        a: { label: 'gesamt (gemessen)', farbe: (e, on) => '#94A3B8' + (on ? 'CC' : '33'), fmt: eur, kurz: eurK },
-        istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm), klick, zeilen })
-      const cr = basis.map(e => ({ ...e, a: e.real })).sort((a, b) => b.a - a.a)
-      admKfBar('reib', 'adm-kf-cv-reib', cr, { horizontal: true,
-        a: { label: 'real', farbe: (e, on) => admKapAlpha(farbe, on ? 'CC' : '33'), fmt: eur, kurz: eurK },
-        istOn: e => !aktiv || e.key === aktiv, tick: e => admKfFirmColor(e.firm), klick, zeilen })
-      // Verlauf gemessen vs. real (25.09.2026 abends, Finn: „ein Chart, der hochgeht … alle Unterteile, die wir gestern
-      // hatten"): kumulierte Reibung (Kosten, + = weg) je Ausgangs-Kategorie der Kette aus reibung_gruppen.global.verlauf.
-      // Serien: gemessen gesamt (grau, gestrichelt), real (Kapitel-Farbe) = Payout-Ketten + Fixgröße + archiviert, dazu die
-      // Teile einzeln. Klick auf einen Chip hebt die Linie hervor (admKf.reibvPick), nochmal = aus.
-      const ev = (rg?.global?.verlauf || []).filter(e => e.d)
-      const KAT = [['gesamt', 'Gemessen gesamt', '#94A3B8', [5, 4]], ['real', 'Real gesamt', farbe, null],
-                   ['payout', 'Payout-Ketten (real)', '#15803d', null], ['fix', 'Fixgröße ohne Payout (real)', '#0E7A78', null],
-                   ['manual', 'Manuell archiviert (real)', '#64748B', null], ['blow', 'Ohne Payout geblowt (0:0)', '#7C3AED', null],
-                   ['offen', 'Laufend (offen)', '#F79009', null], ['unbekannt', 'Master nicht verknüpft', '#B42318', [2, 3]]]
-      const REAL = new Set(['payout', 'fix', 'manual'])
-      const serienV = KAT.map(([key, label, col, dash]) => ({ key, label, col, dash,
-        events: ev.filter(e => key === 'gesamt' || (key === 'real' ? REAL.has(e.c) : e.c === key)).map(e => ({ datum: e.d, eur: Number(e.k) || 0 })) }))
-        .filter(sr => sr.events.length)
-      const sumV = key => serienV.find(sr => sr.key === key)?.events.reduce((x, e) => x + e.eur, 0) || 0
-      const gesV = sumV('gesamt'), realV = sumV('real'), blowV = sumV('blow'), offenV = sumV('offen')
-      { const el = $('adm-kf-sum-reibv'); if(el) el.innerHTML = gesV > 0
-          ? `· real <b>${admKfDe(100 * realV / gesV, 0)} %</b> der gemessenen Reibung (${eurK(realV)} von ${eurK(gesV)}) · 0:0 zurückgeholt <b>${admKfDe(100 * blowV / gesV, 0)} %</b> · offen <b>${admKfDe(100 * offenV / gesV, 0)} %</b>` : '' }
-      const farbeV = new Map(KAT.map(([k, , c]) => [k, c]))
-      admVerlauf('kfreibv', 'adm-kf-chart-reibv', 'adm-kf-legend-reibv', serienV, admKf.reibvPick || '',
-                 key => { admKf.reibvPick = admKf.reibvPick === key ? '' : key; admKfRender() },
-                 { farbe: k => farbeV.get(k), labelRoh: true, sub: k => { const sr = serienV.find(x => x.key === k); return sr ? `${sr.events.length} Trades` : '' } })
     }
     /* Kalender-Heatmap (24.09.2026 abends, Finn: „MEHR, CLEAN"): 16 Wochen bis heute (Dubai), Zelle = Tag, Farbe nach
      * Master-P&L-Summe des Tages (grün/rot, Deckkraft relativ zum Tagesmaximum). Klick = Tag-Filter wie im Je-Tag-Chart. */
@@ -32812,7 +32770,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.617'
+  const OS_TAB_BUILD = '2026-09-22.618'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
