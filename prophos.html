@@ -7738,6 +7738,9 @@
       <div class="card" id="mkl-wd-jetzt" style="padding:12px 16px;margin-bottom:14px;display:none"></div>
       <div class="card" id="mkl-wrap" style="padding:14px 16px;margin-bottom:14px">
         <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px">
+          <!-- Name des Charts: „Radar" (27.09.2026, Finn: „passt ja" — Puls/Echo/Orbit/Kompass sind vergeben). Derselbe Chart in
+               Winning Days und Live Trades (F6); interne IDs mkl-* bleiben. -->
+          <span style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sub)">Radar</span>
           <div><span class="mono" id="mkl-preis" style="font-size:28px;font-weight:800;letter-spacing:-.02em">–</span> <span class="mono" id="mkl-sym" style="font-size:12px;color:var(--sub)"></span></div>
           <span class="mono" id="mkl-diff" style="font-size:13px;font-weight:700"></span>
           <!-- laufende Minute H/L (25.09.2026): zeigt, dass Ausreißer zwischen zwei Anzeigen erfasst sind — Demo-Orders werten über H/L aus -->
@@ -33926,7 +33929,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.664'
+  const OS_TAB_BUILD = '2026-09-22.665'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
