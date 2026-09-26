@@ -5812,6 +5812,10 @@ def admin_build_kapitel():
                                         else f'{hg["key"]} · n={hg["n"]} · Ebene {hg["ebene"]}') if hg else None),
                     "reibung_real": reib_real,
                     "reibung_anteil": r_anteil,
+                    # gemessene Reibung je Trade (26.09.2026, Finn: „was ich gespart habe an realen und gemessenen"
+                    # als Linienchart) — Gruppen-Median vor dem realen Anteil; ohne Gruppe der globale Median.
+                    "reibung_gem": (round(rg["median"], 2) if rg else (round(float((reib_global or {}).get("median")), 2)
+                                    if (reib_global or {}).get("median") is not None else round(float(reib_std) * 2, 2))),
                     "reibung_quelle": (f'{rg["key"]} · n={rg["n"]} · Ebene {rg["ebene"]} · gemessen {rg["median"]} € × Anteil {r_anteil} ({rg["anteil_quelle"]}, {rg["n_entschieden"]} entschieden)' if rg else "global"),
                     "hedge_hyp_eur": (round(-mpl * hq - reib_real, 2) if (hq is not None and mpl is not None) else None)})
             ev = _admin_hedge_ev(p, by_id, live_ids, fx)
