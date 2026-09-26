@@ -18960,12 +18960,14 @@
         if(Date.now() - t0 > 170000) return { ok: false, msg: 'Puls/Rundgang 3 min belegt — später nochmal' }
         await new Promise(res => setTimeout(res, 8000 + Math.random() * 6000))
       }
+      // Bot-Zeitspur (F20, Backend B13 schlüsselt die Lesung zeitlich auf): immer mit ins Ergebnis, bei fertig UND fehler
+      const trail = String((r && r.trail) || '').slice(0, 2000)
       const b = tvBalanceAus(r && r.summary)
-      if(b.balance == null) return { ok: false, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 200) : 'keine Account Balance im Panel' }
-      if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
+      if(b.balance == null) return { ok: false, trail, msg: (r && (r.msg || r.code)) ? String(r.msg || r.code).slice(0, 200) : 'keine Account Balance im Panel' }
+      if(r.konto_aktiv && !String(r.konto_aktiv).includes(konto)) return { ok: false, trail, msg: `Puls stand auf einem anderen Konto (${String(r.konto_aktiv).slice(0, 40)})` }
       const at = new Date().toISOString()
       await tvKontoBalanceSchreiben(acc.id, b, at)
-      return { ok: true, balance: b.balance, equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, balance_at: at,
+      return { ok: true, trail, balance: b.balance, equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, balance_at: at,
                msg: `Balance ${b.balance.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $ gelesen` }
     }catch(e){ return { ok: false, msg: 'Lesung abgebrochen: ' + String((e && e.message) || e) } }
     finally{ _tvBalLesenLaeuft.delete(id) }
@@ -18980,6 +18982,7 @@
     if(!tv.konto){ tv.grund = 'kein_konto'; return tv }
     try{
       const r = await tvV2Lesen(tv.konto, 45, plan)
+      tv.lesen_trail = String((r && r.trail) || '').slice(0, 2000); tv.lesen_at = new Date().toISOString()   // Bot-Zeitspur (F20, B13)
       // tabelle_unklar (25.09.2026, Jacob: Positions-Reiter nicht zu sehen): die Zusammenfassung stand trotzdem — der REALISIERTE
       // Tages-G&V hängt nicht an der gerade eröffneten Position, als Startwert taugt er auch ohne Tabelle
       const zahlOk = r && typeof r.today_pnl === 'number' && isFinite(r.today_pnl)
@@ -19051,6 +19054,8 @@
             const altTs = altF && altF.at ? (Date.parse(altF.at) || 0) : 0
             if(!altF || altF.code !== code || altF.msg !== msg || (Date.now() - altTs) > 10 * 60 * 1000){
               await baselinePatch(plan.id, { fehler: { code, msg, at: new Date().toISOString() } }, 'open')   // atomar (Teil B, 25.09.2026)
+              // Bot-Zeitspur nur im Fehlerfall (F20, B13) — im Erfolgsfall kein Schreibzugriff
+              if(r && r.trail && typeof baselinePatchIn === 'function') await baselinePatchIn(plan.id, 'live', { lesen_trail: String(r.trail).slice(0, 1000), lesen_at: new Date().toISOString() }, 'open')
             }
           }catch(_){}
           continue
@@ -20145,7 +20150,7 @@
       if(r && r.ok) hedgeEinstiegNachtragen(p1, r)   // Puls-avg_fill als Einstieg nachtragen (2026-09-22.582)
       const erg = tvV2EndlesungAuswerten(r, w.symbol, dir)
       const nowIso = new Date().toISOString()
-      const patch = { puls_at: nowIso, puls_versuche: versuch }
+      const patch = { puls_at: nowIso, puls_versuche: versuch, lesen_trail: String((r && r.trail) || '').slice(0, 2000), lesen_at: nowIso }   // Zeitspur (F20, B13)
       if(force) patch.puls_aufgegeben = false
       if(erg.ok) Object.assign(patch, { today_pnl: erg.today, datum: tvV2Handelstag(), quelle: 'puls', ende_quelle: fin0.quelle || null,
         puls_flach: erg.flach, puls_fehler: null, puls_diagnose: null, puls_konto: (r && r.konto_aktiv) || null,
@@ -33785,7 +33790,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.658'
+  const OS_TAB_BUILD = '2026-09-22.660'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
