@@ -20755,7 +20755,7 @@
       else diff.textContent = ''
     }
     const alt = Math.round(k.alter_ms / 1000)
-    // Stale-Alarm (24.09.2026 spät): > 60 s ohne Tick = rot „Feed steht seit …" (der Web-Push kommt aus mklStaleWache ab 2 min)
+    // Stale-Alarm (24.09.2026 spät): > 60 s ohne Tick = rot „Feed steht seit …" (Push nur noch über die Backend-Wacht, 26.09.2026)
     // Markt zu (26.09.2026, Samstag): kein roter „Feed steht"-Alarm, sondern ein ruhiger Hinweis mit dem letzten Kurs
     const zu = typeof cmeMarktOffen === 'function' && !cmeMarktOffen()
     const steht = k.alter_ms > 60000 && !zu
@@ -21110,11 +21110,12 @@
   }
   window._mklRealtimeStatus = () => _mklRtStatus
   setTimeout(mklRealtimeStart, 3000); setInterval(mklRealtimeStart, 15000)
-  // Stale-Alarm mit Web-Push (24.09.2026 spät): läuft in jedem eingeloggten Tab alle 60 s, unabhängig von der Markt-View.
-  // Kein NQ/MNQ-Tick > 2 min (obwohl es je einen gab) → EINMAL Push „Kurs-Feed steht" (Tag kursfeed — das Handy fasst
-  // Doppelte mehrerer Geräte zusammen), läuft er wieder → Entwarnung. Merker in localStorage, damit ein Reload nicht erneut
-  // alarmiert. Ohne je einen Kurs (Einrichtung) kein Alarm — das ist kein Ausfall.
-  const MKL_STALE_PUSH_MS = 120000
+  // Kein Frontend-Push mehr für den Kurs-Feed (26.09.2026, Auftrag F2 über den Master, Befund Research R3): am Freitag 25.09.
+  // kamen für DIESELBEN Ausfälle 24 Pushes der Backend-Wacht (app.py READER_WACHT_UIDS) plus 7 aus diesem Tab-Alarm — und der
+  // ging an JEDEN Nutzer mit offenem Tab (Claim je user_id, jede kurze Erholung = neue Episode). Handeln kann nur, wer den
+  // Reader-PC betreut; genau diese IDs bekommen die Backend-Wacht (Schwelle, Karenz nach Öffnung, Erinnerungen). Einziger
+  // Push-Kanal ist damit die Backend-Wacht; im Tab bleiben der Hinweis im Chart-Kopf (alle) und der Feed-Wachhund (nur Admins,
+  // prophos_wd_admin). Alte kursfeed_*-Claims in user_settings sind tot, stören aber nicht.
   /* FEED-DIAGNOSE (25.09.2026, Koordination nach Live-Befund): steht der Kurs-Feed, sagt die Kopfzeile, WO es hängt —
    *   (a) echoplus_live des Reader-PCs frisch, tv_kurse alt → der Reader läuft, aber kein aktueller Prophos-Tab schiebt die Kurse
    *       (Build laut mt5_live.status.tab_build dieses PCs; Chrome verwirft Hintergrund-Tabs beim Speichersparen)
@@ -21153,37 +21154,6 @@
     return { fall: 'b', zeile: `Reader auf ${p} meldet sich nicht — Reader-Fenster (start-reader.bat) prüfen` }
   }
   window._mklFeedDiagnose = mklFeedDiagnose
-  // EIN Push je Stillstand über ALLE Geräte (25.09.2026: jeder offene Prophos-Tab — Mac, PCs, Handy — pushte einmal, auf dem Handy
-  // kam der Alarm deshalb mehrfach). Claim in user_settings (eindeutig je user_id + key) mit dem letzten Tick als Episode: nur das
-  // Gerät, dessen Insert durchgeht, pusht. Alte Claims (> 2 Tage) räumt der Gewinner weg.
-  async function mklPushClaim(art, episode){
-    try{
-      const { error } = await supabase.from('user_settings').insert({ user_id: currentUserId, key: `kursfeed_${art}:${episode}`, value: { at: new Date().toISOString() } })
-      if(error) return false
-      supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'kursfeed_%').lt('created_at', new Date(Date.now() - 2 * 86400000).toISOString()).then(() => {}, () => {})
-      return true
-    }catch(_){ return false }
-  }
-  async function mklStaleWache(){
-    if(!currentUserId) return
-    try{
-      const { data } = await supabase.from('tv_kurse').select('pc_name,wurzel,reader_ts,updated_at').in('wurzel', ['NQ', 'MNQ']).order('updated_at', { ascending: false }).limit(1)
-      const r = (data || [])[0]; if(!r) return
-      const alter = Date.now() - (Date.parse(r.updated_at || '') || Number(r.reader_ts) || 0)   // Cloud-Ankunft, nicht Handelszeit
-      const episode = String(r.updated_at || r.reader_ts || '')
-      let alarm = null; try{ alarm = localStorage.getItem('prophos_mkl_stale_alarm') }catch(_){}
-      if(alter > MKL_STALE_PUSH_MS && alarm !== episode && cmeMarktOffen()){   // Markt zu = kein Ausfall (26.09.2026)
-        try{ localStorage.setItem('prophos_mkl_stale_alarm', episode) }catch(_){}
-        const diag = mklFeedDiagnose(r.pc_name, await mklFeedLageLaden(r.pc_name).catch(() => null))
-        if(await mklPushClaim('steht', episode) && typeof pushAnsHandy === 'function')
-          pushAnsHandy('Kurs-Feed steht', `Kein NQ/MNQ-Tick seit ${Math.round(alter / 60000)} min — ${diag.zeile}`, '#markt', 'kursfeed')
-      } else if(alter <= HEDGE_KURS_MAX_ALTER_MS && alarm){
-        try{ localStorage.removeItem('prophos_mkl_stale_alarm') }catch(_){}
-        if(await mklPushClaim('ok', alarm) && typeof pushAnsHandy === 'function') pushAnsHandy('Kurs-Feed läuft wieder', `NQ/MNQ-Ticks kommen wieder an (PC ${r.pc_name || '?'}).`, '#markt', 'kursfeed')
-      }
-    }catch(_){ /* still — nächster Takt */ }
-  }
-  setInterval(mklStaleWache, 60000); setTimeout(mklStaleWache, 15000)
   /* ── Winning Days heute (25.09.2026, Finn: „Unten reicht es, wenn ich die Übersicht aller Winning Days habe — wie sie aussehen,
    * wie sie laufen, welche es sind — und die Winning Days im Chart sehen, wo die Take Profits sind … Markiere die Winning Days,
    * damit ich weiß, wo sie sind."). Daten: GET /admin/wd-heute (Railway, Service-Key, alle IDs; Vertrag .511 vom Backend) — alle
@@ -32761,7 +32731,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.614'
+  const OS_TAB_BUILD = '2026-09-22.615'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
