@@ -9709,7 +9709,7 @@
             <div id="ac-tvlive-pl-sub" style="font-size:11px;color:var(--sub)">Balance nachher − vorher</div>
           </div>
           <div class="field" style="grid-column:1/-1;margin-top:-6px">
-            <div style="font-size:11px;color:var(--sub)">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) und der Balance oben — wird hier nicht geändert.</div>
+            <div style="font-size:11px;color:var(--sub)">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) — wird hier nicht geändert.</div>
           </div>
         </div>
       </div>
@@ -16943,7 +16943,7 @@
       }
 
       picker.innerHTML = available.map(m => {
-        const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
+        const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : null   // manuelle Balance nicht mehr angezeigt (26.09.2026, F8)
         const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
         const isSel = String(m.id) === String(_linkMt5TargetId) || (!_linkMt5TargetId && String(m.id) === String(currentLinkedId))
         return `
@@ -16953,7 +16953,7 @@
               <div class="lpc-name">${escapeHtml(m.name)}${String(m.id) === String(currentLinkedId) ? ' <span style="font-size:10px;color:var(--violet);font-weight:600">● aktuell</span>' : ''}</div>
               <div class="lpc-meta"><span>${escapeHtml(m.firm || '–')}</span><span>·</span><span>${escapeHtml(typeLbl)}</span></div>
             </div>
-            <span class="lpc-bal">${fmtMoney(bal)}</span>
+            <span class="lpc-bal">${bal != null ? fmtMoney(bal) : ''}</span>
           </button>
         `
       }).join('')
@@ -22891,7 +22891,7 @@
             if(typeFilterEl?.value && m.type !== typeFilterEl.value) return false
             return true
           }).map(m => {
-            const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
+            const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : null   // manuelle Balance nicht mehr angezeigt (26.09.2026, F8)
             const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
             const isCurrentlyLinked = String(m.id) === String(currentLinkedId)
             return `<button type="button" class="link-picker-card${isCurrentlyLinked ? ' selected' : ''}" data-dup-target="${escapeHtml(m.id)}" style="opacity:0.7">
@@ -22900,7 +22900,7 @@
                 <div class="lpc-name">${escapeHtml(m.name)}</div>
                 <div class="lpc-meta"><span>${escapeHtml(m.firm||'–')}</span><span>·</span><span>${escapeHtml(typeLbl)}</span></div>
               </div>
-              <span class="lpc-bal">${fmtMoney(bal)}</span>
+              <span class="lpc-bal">${bal != null ? fmtMoney(bal) : ''}</span>
             </button>`
           }).join('')
           picker.querySelectorAll('.link-picker-card').forEach(card => {
@@ -22931,7 +22931,7 @@
         return
       }
       picker.innerHTML = available.map(m => {
-        const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : m.initialBalance
+        const bal = (m.ma && m.ma.balance != null) ? m.ma.balance : null   // manuelle Balance nicht mehr angezeigt (26.09.2026, F8)
         const typeLbl = (typeof typeLabel === 'function') ? typeLabel(m.type) : (m.type || '')
         const maHint = m.ma ? ' · MT5 verbunden' : ''
         const isCurrentlyLinked = String(m.id) === String(currentLinkedId)
@@ -22947,7 +22947,7 @@
                 ${maHint ? `<span style="color:var(--violet)">${maHint}</span>` : ''}
               </div>
             </div>
-            <span class="lpc-bal">${fmtMoney(bal)}</span>
+            <span class="lpc-bal">${bal != null ? fmtMoney(bal) : ''}</span>
           </button>
         `
       }).join('')
@@ -24956,7 +24956,6 @@
       <div class="lh-name">${escapeHtml(acc.name)}</div>
       <div class="lh-meta">
         <span class="lh-id">${escapeHtml(acc.firm||'')} · ${typeLabel(acc.type)}</span>
-        <span class="lh-bal">${fmtMoney(acc.initialBalance)}</span>
       </div>
     `
 
@@ -25334,7 +25333,8 @@
       firm: a.firm,
       account_type: a.type,
       external_id: a.externalId || null,
-      balance: a.initialBalance || 0,
+      // manuelle Balance: nur, wenn ein Anlege-Weg sie ausdrücklich mitgibt (Nachfolger/Bulk) — sonst gilt der DB-Standard 0 (F8, 26.09.2026)
+      ...(a.initialBalance > 0 ? { balance: a.initialBalance } : {}),
       purchase_cost: a.purchaseCost != null ? a.purchaseCost : null,
       max_drawdown: a.maxDrawdown != null ? a.maxDrawdown : null,
       max_daily_drawdown: a.maxDailyDrawdown != null ? a.maxDailyDrawdown : null,
@@ -25534,7 +25534,7 @@
     }
     const adBalStr = adLiveBal != null
       ? ((adLiveSrc === 'Duplikum' || adLiveSrc === 'MT5-Copier') ? dupFmtMoney(adLiveBal, adLiveCcy) : fmtMoney(adLiveBal))
-      : (acc.initialBalance ? fmtMoney(acc.initialBalance) : '—')
+      : '—'   // keine manuelle Balance mehr (26.09.2026, F8, Finn: „das nutzen wir nicht mehr")
 
     // Gesamtkosten (EUR) — die wichtigste Zahl für Challenge/Funded-Accounts.
     // Live-Accounts sind reines Cash-Konto ohne "Kette"/Kaufpreis-Konzept — keine Kachel dafür.
@@ -25610,7 +25610,6 @@
       const rows = [
         ['Firm', acc.firm||'—'],
         ['Typ', typeLabel(acc.type)],
-        ['Anfangs-Balance', acc.initialBalance ? fmtMoney(acc.initialBalance) : '—'],
         ['Kaufpreis', acc.purchaseCost ? (acc.purchaseCost + ' €') : '—'],
         ['Max Drawdown', acc.maxDrawdown ? ('$' + Number(acc.maxDrawdown).toLocaleString('de-DE')) : '—'],
         ['Max Daily Loss', acc.maxDailyDrawdown ? ('$' + Number(acc.maxDailyDrawdown).toLocaleString('de-DE')) : '—'],
@@ -26018,11 +26017,9 @@
             </div>
             ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
             ${tvNeben ? `<div style="font-size:11px;color:var(--sub-2);font-family:var(--mono);margin-top:2px">${tvNeben}</div>` : ''}
-            <div style="font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px">
-              Manuell ${fmtMoney(a.initialBalance)}
-            </div>`
+`   // Zeile „Manuell $…" raus (26.09.2026, F8, Finn: „mach das manuelle Balance komplett weg, das nutzen wir nicht mehr")
         }else{
-          balCell = `<span class="mono">${fmtMoney(a.initialBalance)}</span>${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}`
+          balCell = `<span class="mono" style="color:var(--sub-2)">—</span>${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}`
         }
 
         // Sub-info unter Name
@@ -26542,7 +26539,7 @@
           name: acc.name,
           firm: acc.firm,
           account_type: acc.type,
-          balance: acc.initialBalance,
+          // balance (manuelle Balance) wird nicht mehr geschrieben (26.09.2026, F8) — die Spalte bleibt, wie sie ist
           purchase_cost: acc.purchaseCost,
           max_drawdown: acc.maxDrawdown,
           max_daily_drawdown: acc.maxDailyDrawdown,
@@ -28712,7 +28709,7 @@
         return
       }
       picker.innerHTML = free.map(a => {
-        const liveBal = (a.ma && a.ma.balance != null) ? a.ma.balance : a.initialBalance
+        const liveBal = (a.ma && a.ma.balance != null) ? a.ma.balance : null   // manuelle Balance nicht mehr angezeigt (26.09.2026, F8)
         const typeLbl = typeLabel(a.type)
         const isCurrentlyLinked = currentLinkedAcc && String(a.id) === String(currentLinkedAcc.id)
         return `
@@ -28726,7 +28723,7 @@
                 <span>${typeLbl}</span>
               </div>
             </div>
-            <span class="lpc-bal">${fmtMoney(liveBal)}</span>
+            <span class="lpc-bal">${liveBal != null ? fmtMoney(liveBal) : ''}</span>
           </button>
         `
       }).join('')
@@ -33410,7 +33407,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.639'
+  const OS_TAB_BUILD = '2026-09-22.640'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36417,7 +36414,7 @@
         const alter   = (bal.src === 'MT5-Cloud' && bal.at) ? (Date.now() - bal.at) : 0
         const veraltet = alter > 60000
         const liveMarker = (bal.src === 'init' || veraltet) ? '' : '●'
-        const balPart = liveMarker ? `${liveMarker} ${balStr}` : balStr
+        const balPart = bal.src === 'init' ? '–' : liveMarker ? `${liveMarker} ${balStr}` : balStr   // 'init' = manuelle Balance, nicht mehr angezeigt (F8)
         // External ID suffix: Tradovate ID > MT5 login
         const extId = a.topstep?.id || a.ma?.login || null
         const idPart = extId ? `  #${extId}` : ''
