@@ -9874,6 +9874,8 @@
           </select>
           <button class="btn btn-ghost" id="bulk-template-save" type="button" title="Aktuelle Werte als Vorlage speichern" style="flex-shrink:0;padding:8px 12px">💾</button>
           <button class="btn btn-ghost" id="bulk-template-delete" type="button" title="Ausgewählte Vorlage löschen" style="flex-shrink:0;padding:8px 12px" disabled>🗑️</button>
+          <!-- Zentrale Vorlage speichern (F12, 27.09.2026) — nur Admin-Geräte (prophos_wd_admin), der Server prüft selbst -->
+          <button class="btn btn-ghost" id="bulk-template-zentral" type="button" title="Als zentrale Vorlage für alle IDs speichern (Admin)" style="flex-shrink:0;padding:8px 12px;display:none">⭐</button>
         </div>
       </div>
 
@@ -9906,14 +9908,11 @@
             <option value="winning_days">Winning Days</option>
           </select>
         </div>
-        <div class="field">
-          <label>Account-Größe ($)</label>
-          <input class="input mono" id="bulk-size" type="number" step="1000" placeholder="z.B. 50000" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Kontogröße ($)</label>
-          <input class="input mono" id="bulk-balance" type="number" step="0.01" placeholder="= Account-Größe" autocomplete="off">
-        </div>
+        <!-- „Account-Größe" und „Kontogröße" raus (27.09.2026, F14, Finn: „die zwei weg, die nutzen wir nie … wir kaufen eh nur 150k-
+             Accounts"). Die Felder bleiben unsichtbar, weil Farmer/Vorplanen/Liquidation die Größe brauchen: gesetzt aus der Vorlage (F12),
+             beim Einfügen aus dem Titel (F11), sonst fest 150.000 (BULK_STD_GROESSE). -->
+        <input type="hidden" id="bulk-size" value="150000">
+        <input type="hidden" id="bulk-balance" value="150000">
         <div class="field">
           <label>Kaufpreis pro Account (€)</label>
           <input class="input mono" id="bulk-cost" type="number" step="0.01" placeholder="z.B. 149" autocomplete="off">
@@ -9946,7 +9945,8 @@
         <div class="field" style="grid-column:1/-1">
           <div style="height:1px;background:var(--border);margin:4px 0 2px"></div>
         </div>
-        <div class="field" style="grid-column:1/-1">
+        <!-- bei Futures-Firmen ausgeblendet (F13, 27.09.2026) — bulkFuturesUmschalten -->
+        <div class="field" style="grid-column:1/-1" id="bulk-creds-box">
           <label>Zugangsdaten (optional)</label>
           <textarea class="input" id="bulk-creds" rows="4" placeholder="Eine Zeile pro Account:  Login  Passwort  Server&#10;z.B.  510023456  AbcPwd!23  ThinkMarkets-Live&#10;Trennung per Tab, Semikolon, Komma oder mehreren Leerzeichen" style="font-family:var(--mono);font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
           <div style="font-size:11px;color:var(--sub);margin-top:4px">Zeile für Zeile den Accounts zugeordnet (1. Zeile → #{startnum}, …). Reihenfolge: <code style="background:var(--surface-tint);padding:1px 4px;border-radius:4px">Login Passwort Server</code>. Server leer → wird aus der Firma vorausgefüllt. Plattform = MT5 (Standard).</div>
@@ -27057,6 +27057,28 @@
 
     const BULK_TPL_LS = 'prophos_bulk_templates'  // localStorage-Fallback falls Supabase-Tabelle/RLS noch nicht bereit
     let bulkTemplates = []
+    /* ZENTRALE VORLAGEN (27.09.2026, F12, Finn: „Schablonen für das Bulk-Hinzufügen, die auf jede ID angewendet werden können … wir
+     * beginnen mit Tradeify"). Tabelle bulk_vorlagen (Backend B11): alle lesen, pflegen nur Admins über POST /admin/bulk-vorlagen.
+     * Fehlt die Tabelle, bleibt die Liste leer und alles läuft wie bisher. muster_praefix/muster_titel ordnen eingefügte Dashboard-
+     * Blöcke (F11) automatisch zu. Die eigenen Vorlagen (account_templates, je Nutzer) bleiben daneben bestehen. */
+    let bulkZentral = [], bulkVorlageAktiv = null
+    const BULK_STD_GROESSE = 150000   // F14: Standardgröße ohne Vorlage/Titel
+    const bulkIstAdmin = () => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } }
+    async function bulkZentralLaden(){
+      try{
+        const { data, error } = await supabase.from('bulk_vorlagen').select('*').eq('aktiv', true).order('sortierung', { ascending: true }).order('name', { ascending: true })
+        bulkZentral = (!error && Array.isArray(data)) ? data.filter(v => v && v.aktiv !== false) : []
+      }catch(_){ bulkZentral = [] }
+    }
+    // REIN RECHNEND: passende zentrale Vorlage für einen Dashboard-Block — zuerst längster Präfix-Treffer, sonst gleicher Titel
+    function bulkVorlageFuer(block, liste){
+      const id = String(block && block.id || '').toUpperCase(), titel = String(block && block.titel || '').trim().toLowerCase()
+      let best = null
+      for(const v of (liste || [])){ const px = String(v.muster_praefix || '').trim().toUpperCase(); if(px && id.startsWith(px) && (!best || px.length > String(best.muster_praefix).length)) best = v }
+      if(best) return best
+      return (liste || []).find(v => v.muster_titel && String(v.muster_titel).trim().toLowerCase() === titel) || null
+    }
+    window._bulkVorlageFuer = bulkVorlageFuer
 
     function getExtIds(){
       return (bEl.extids?.value || '')
@@ -27175,30 +27197,49 @@
       } else if(!bulkTemplates.length){
         bulkTemplates = local
       }
+      await bulkZentralLaden()
       renderTplSelect()
+      if(bulkPaste.bloecke.length) bulkPasteRender()
     }
 
     function renderTplSelect(){
       const prev = bEl.tplSelect.value
+      const opt = (v, n) => `<option value="${escapeHtml(v)}">${escapeHtml(n)}</option>`
       bEl.tplSelect.innerHTML = '<option value="">— Keine Vorlage —</option>' +
-        bulkTemplates.map(t => `<option value="${escapeHtml(String(t.id))}">${escapeHtml(t.name)}</option>`).join('')
-      if(prev && bulkTemplates.some(t => String(t.id) === prev)) bEl.tplSelect.value = prev
-      bEl.tplDelete.disabled = !bEl.tplSelect.value
+        (bulkZentral.length ? `<optgroup label="Für alle">${bulkZentral.map(v => opt('z:' + v.id, v.name)).join('')}</optgroup>` : '') +
+        (bulkTemplates.length ? (bulkZentral.length ? '<optgroup label="Meine">' : '') + bulkTemplates.map(t => opt(String(t.id), t.name)).join('') + (bulkZentral.length ? '</optgroup>' : '') : '')
+      if(prev && [...bEl.tplSelect.options].some(o => o.value === prev)) bEl.tplSelect.value = prev
+      bEl.tplDelete.disabled = !bEl.tplSelect.value || (bEl.tplSelect.value.startsWith('z:') && !bulkIstAdmin())
+      const zb = document.getElementById('bulk-template-zentral'); if(zb) zb.style.display = bulkIstAdmin() ? '' : 'none'
     }
 
     function applyTemplate(id){
+      bulkVorlageAktiv = null
+      if(String(id).startsWith('z:')){
+        const v = bulkZentral.find(x => 'z:' + x.id === String(id)); if(!v) return
+        const w = x => x != null ? x : ''
+        bEl.firm.value = v.firm || ''; bEl.type.value = v.account_type || 'challenge'
+        bEl.size.value = v.account_size || v.starting_balance || BULK_STD_GROESSE; bEl.balance.value = v.starting_balance || v.account_size || BULK_STD_GROESSE; bEl.cost.value = w(v.purchase_cost); bEl.maxdd.value = w(v.max_drawdown)
+        if(bEl.maxDailyDd) bEl.maxDailyDd.value = w(v.max_daily_drawdown)
+        if(bEl.maxLossTrade) bEl.maxLossTrade.value = w(v.max_loss_per_trade)
+        if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = w(v.max_profit_per_trade)
+        if(bEl.wdFarm) bEl.wdFarm.checked = !!v.wd_farm
+        bEl.template.value = v.name_template || ''
+        bulkVorlageAktiv = v   // goal_kind/goal_target stehen nicht im Formular — beim Speichern aus der Vorlage
+        updatePreview(); bulkFuturesUmschalten(); return
+      }
       const t = bulkTemplates.find(x => String(x.id) === String(id))
       if(!t) return
       bEl.firm.value     = t.firm || ''
       bEl.type.value     = t.account_type || 'phase1'
-      bEl.size.value     = t.account_size != null ? t.account_size : ''
+      bEl.size.value     = t.account_size != null ? t.account_size : BULK_STD_GROESSE
       bEl.cost.value     = t.purchase_cost != null ? t.purchase_cost : ''
       bEl.maxdd.value    = t.max_drawdown != null ? t.max_drawdown : ''
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = t.max_daily_drawdown != null ? t.max_daily_drawdown : ''
       if(bEl.maxLossTrade)   bEl.maxLossTrade.value   = t.max_loss_per_trade   != null ? t.max_loss_per_trade   : ''
       if(bEl.maxProfitTrade) bEl.maxProfitTrade.value = t.max_profit_per_trade != null ? t.max_profit_per_trade : ''
       bEl.template.value = t.name_template || ''
-      updatePreview()
+      updatePreview(); bulkFuturesUmschalten()
     }
 
     async function saveBulkTemplate(){
@@ -27253,9 +27294,43 @@
       }
     }
 
+    // Zentrale Vorlage speichern/löschen (Admin) über das Backend — Muster für die Dashboard-Zuordnung per Abfrage
+    async function bulkZentralRoute(body){
+      const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token
+      if(!tok) throw new Error('nicht angemeldet')
+      const r = await fetch(`${WATCHER_HOME}/admin/bulk-vorlagen`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const d = await r.json().catch(() => ({}))
+      if(r.status === 401 || r.status === 403) throw new Error('nur für Admins (Server hat abgelehnt)')
+      if(!r.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + r.status))
+      return d
+    }
+    async function bulkZentralSpeichern(){
+      const firm = bEl.firm.value.trim()
+      if(!firm){ setBulkMsg('Erst Firm und Werte ausfüllen, dann als zentrale Vorlage speichern.', 'err'); return }
+      const alt = bEl.tplSelect.value.startsWith('z:') ? bulkZentral.find(x => 'z:' + x.id === bEl.tplSelect.value) : null
+      const name = (prompt('Name der zentralen Vorlage (für alle IDs):', alt ? alt.name : firm) || '').trim(); if(!name) return
+      const titel = (prompt('Erkennung Titel (optional, z. B. „Select Flex Funded 150K"):', alt ? (alt.muster_titel || '') : '') || '').trim()
+      const px = (prompt('Erkennung Kennungs-Präfix (optional, z. B. FTDFYSLX):', alt ? (alt.muster_praefix || '') : '') || '').trim().toUpperCase()
+      const num = v => { const x = parseFloat(v); return isFinite(x) && x > 0 ? x : null }
+      const vorlage = { id: alt ? alt.id : undefined, name, firm, account_type: bEl.type.value, account_size: num(bEl.size.value), starting_balance: num(bEl.balance.value) || num(bEl.size.value),
+        max_drawdown: num(bEl.maxdd.value), max_daily_drawdown: num(bEl.maxDailyDd?.value), max_loss_per_trade: num(bEl.maxLossTrade?.value), max_profit_per_trade: num(bEl.maxProfitTrade?.value),
+        purchase_cost: parseFloat(bEl.cost.value) >= 0 ? parseFloat(bEl.cost.value) : null, wd_farm: !!bEl.wdFarm?.checked, name_template: bEl.template.value.trim() || null,
+        goal_kind: alt ? alt.goal_kind || null : null, goal_target: alt ? alt.goal_target || null : null, plattform: alt ? alt.plattform || null : null,
+        muster_titel: titel || null, muster_praefix: px || null }
+      try{ await bulkZentralRoute({ aktion: 'speichern', vorlage }); await bulkZentralLaden(); renderTplSelect(); setBulkMsg(`Zentrale Vorlage „${name}" gespeichert.`, 'ok') }
+      catch(e){ setBulkMsg('Zentrale Vorlage nicht gespeichert: ' + (e.message || e), 'err') }
+    }
+    document.getElementById('bulk-template-zentral')?.addEventListener('click', bulkZentralSpeichern)
     async function deleteBulkTemplate(){
       const id = bEl.tplSelect.value
       if(!id) return
+      if(id.startsWith('z:')){
+        const v = bulkZentral.find(x => 'z:' + x.id === id); if(!v || !bulkIstAdmin()) return
+        if(!confirm(`Zentrale Vorlage "${v.name}" für ALLE IDs löschen?`)) return
+        try{ await bulkZentralRoute({ aktion: 'loeschen', vorlage: { id: v.id } }); await bulkZentralLaden(); renderTplSelect(); setBulkMsg(`Zentrale Vorlage „${v.name}" gelöscht.`, 'ok') }
+        catch(e){ setBulkMsg('Nicht gelöscht: ' + (e.message || e), 'err') }
+        return
+      }
       const t = bulkTemplates.find(x => String(x.id) === String(id))
       if(!t) return
       if(!confirm(`Vorlage "${t.name}" löschen?`)) return
@@ -27274,8 +27349,8 @@
     function openBulkModal(){
       bEl.firm.value     = ''
       bEl.type.value     = 'phase1'
-      bEl.size.value     = ''
-      bEl.balance.value  = ''
+      bEl.size.value     = String(BULK_STD_GROESSE)   // F14: keine Eingabe mehr, Standard 150.000
+      bEl.balance.value  = String(BULK_STD_GROESSE)
       bEl.cost.value     = ''
       bEl.maxdd.value    = ''
       if(bEl.maxDailyDd) bEl.maxDailyDd.value = ''
@@ -27304,6 +27379,7 @@
       bEl.saveBtn.disabled = false
       bEl.saveLabel.textContent = 'Accounts anlegen'
       bEl.modal.classList.add('open')
+      bulkFuturesUmschalten(); bulkAltWegUmschalten()
       loadBulkTemplates()
       setTimeout(() => bEl.firm.focus(), 50)
     }
@@ -27312,6 +27388,31 @@
       bEl.modal.classList.remove('open')
     }
 
+    /* FUTURES OHNE ZUGANGSDATEN/DUPLIKUM (27.09.2026, F13, Finn per Screenshot: „Das da alles weg bei jeder Future-Propfirma"):
+     * bei Futures-Firmen (zentral tpFirmIstFutures, dieselbe Liste wie der Futures-Live-Block) die Blöcke „Zugangsdaten" und
+     * „direkt in Duplikum anlegen" ausblenden; beim Speichern gehen dann weder Zugangsdaten noch etwas an Duplikum. Futures gilt,
+     * wenn die Firma im Formular Futures ist ODER alle eingefügten Dashboard-Blöcke (F11) zu Futures-Firmen gehören. */
+    function bulkIstFutures(){
+      const fut = f => (typeof tpFirmIstFutures === 'function') && !!f && tpFirmIstFutures(f)
+      if(fut(bEl.firm.value.trim())) return true
+      const b = (typeof bulkPaste !== 'undefined' && bulkPaste.bloecke) || []
+      return b.length > 0 && b.every(x => { const v = bulkPasteVorlage(x); return fut((v && v.firm) || x.firma || bEl.firm.value.trim()) })
+    }
+    // Mit Text im Einfügefeld sind „Anzahl", „Startnummer" und „External IDs" doppelt (Master 27.09.2026) → ausblenden, der alte
+    // „Accounts anlegen"-Knopf ist dann gesperrt (angelegt wird über „n neu anlegen"). Leer = alter Weg wie bisher.
+    function bulkAltWegUmschalten(){
+      const voll = !!String(document.getElementById('bulk-paste')?.value || '').trim() && bulkPaste.bloecke.length > 0   // ohne erkannte Kennung bleibt der alte Weg
+      for(const el of [bEl.count, bEl.startnum, bEl.extids]){ const f = el && el.closest('.field'); if(f) f.style.display = voll ? 'none' : '' }
+      if(bEl.saveBtn){ bEl.saveBtn.disabled = voll; bEl.saveBtn.title = voll ? 'Mit eingefügtem Dashboard-Text oben über „n neu anlegen" speichern' : '' }
+    }
+    function bulkFuturesUmschalten(){
+      const fut = bulkIstFutures(), cb = document.getElementById('bulk-creds-box')
+      if(cb) cb.style.display = fut ? 'none' : ''
+      if(bEl.dupCreateBox){
+        const dupOn = typeof dupState !== 'undefined' && !!dupState.token
+        bEl.dupCreateBox.style.display = (!fut && dupOn) ? '' : 'none'
+      }
+    }
     function setBulkMsg(text, kind){
       bEl.msg.textContent = text || ''
       bEl.msg.className = 'modal-msg' + (kind ? ' ' + kind : '')
@@ -27344,7 +27445,13 @@
       })
     }
     window._bulkDashboardParsen = bulkDashboardParsen   // Test-Haken
-    const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null }
+    const bulkTypLabel = t => ({ funded: 'Funded', challenge: 'Challenge', phase1: 'Phase 1', phase2: 'Phase 2', winning_days: 'Winning Days' })[t] || t || '?'
+    // Vorlage eines Blocks: von Hand gewählt (bulkPaste.vorlage) oder automatisch über Präfix/Titel (F12)
+    function bulkPasteVorlage(x){
+      if(bulkPaste.vorlage.has(x.id)){ const id = bulkPaste.vorlage.get(x.id); return id ? (bulkZentral.find(z => String(z.id) === String(id)) || null) : null }
+      return bulkVorlageFuer(x, bulkZentral)
+    }
+    const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null, vorlage: new Map() }   // vorlage: Kennung → Vorlagen-id ('' = keine), sonst automatisch
     const bpEl = { box: document.getElementById('bulk-paste'), vs: document.getElementById('bulk-paste-vorschau'), akt: document.getElementById('bulk-paste-aktion'),
                    zaehler: document.getElementById('bulk-paste-zaehler'), save: document.getElementById('bulk-paste-save') }
     // Dubletten: eigene Konten (aktiv + archiviert) sofort; alle Nutzer über Backend POST /admin/konten-pruefen (B10), sobald es sie gibt
@@ -27367,14 +27474,14 @@
     function bulkPasteRender(){
       const b = bulkPaste.bloecke
       if(!bpEl.vs) return
-      if(!String(bpEl.box.value || '').trim()){ bpEl.vs.style.display = 'none'; bpEl.akt.style.display = 'none'; return }
+      if(!String(bpEl.box.value || '').trim()){ bpEl.vs.style.display = 'none'; bpEl.akt.style.display = 'none'; bulkFuturesUmschalten(); bulkAltWegUmschalten(); return }
       bpEl.vs.style.display = ''
-      if(!b.length){ bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Konto-Kennung erkannt — bekannt ist nur das Tradeify-/Tradovate-Dashboard. Konten sonst mit dem Formular darunter anlegen.</div>'; bpEl.akt.style.display = 'none'; return }
+      if(!b.length){ bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Konto-Kennung erkannt — bekannt ist nur das Tradeify-/Tradovate-Dashboard. Konten sonst mit dem Formular darunter anlegen.</div>'; bpEl.akt.style.display = 'none'; bulkFuturesUmschalten(); bulkAltWegUmschalten(); return }
       const firmaForm = bEl.firm.value.trim()
       const de = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       let neu = 0, vorh = 0
       bpEl.vs.innerHTML = b.map(x => {
-        const t = bulkPaste.treffer.get(x.id), firma = x.firma || firmaForm
+        const t = bulkPaste.treffer.get(x.id), v = bulkPasteVorlage(x), firma = (v && v.firm) || x.firma || firmaForm
         const sperre = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : !firma ? 'Firma unbekannt — oben im Formular „Firm" eintragen' : ''
         if(t) vorh++
         const standard = !sperre && !/failed|breached/i.test(x.status)
@@ -27383,35 +27490,44 @@
         return `<label class="bpv ${an ? '' : 'aus'}"><input type="checkbox" data-bp="${escapeHtml(x.id)}" ${an ? 'checked' : ''} ${sperre ? 'disabled' : ''}>
           <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
           <span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>
-          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${x.typ === 'funded' ? 'Funded' : 'Challenge'} · ${x.groesse ? x.groesse.toLocaleString('de-DE') : 'Größe ?'}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span></span>
+          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${bulkTypLabel((v && v.account_type) || x.typ)} · ${((v && v.starting_balance) || x.groesse) ? Number((v && v.starting_balance) || x.groesse).toLocaleString('de-DE') : 'Größe ?'}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span>
+          ${sperre || !bulkZentral.length ? '' : `<select class="input" data-bpv="${escapeHtml(x.id)}" style="margin-top:4px;padding:3px 8px;font-size:11.5px;height:auto;width:auto;max-width:100%"><option value="">ohne Vorlage</option>${bulkZentral.map(z => `<option value="${escapeHtml(String(z.id))}" ${v && String(v.id) === String(z.id) ? 'selected' : ''}>${escapeHtml(z.name)}</option>`).join('')}</select>`}</span>
           <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
       }).join('')
       bpEl.vs.querySelectorAll('[data-bp]').forEach(cb => cb.addEventListener('change', () => { bulkPaste.an.set(cb.dataset.bp, cb.checked); bulkPasteRender() }))
+      bpEl.vs.querySelectorAll('[data-bpv]').forEach(sel => { sel.addEventListener('change', () => { bulkPaste.vorlage.set(sel.dataset.bpv, sel.value); bulkPasteRender() }) })
       bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
       bpEl.akt.style.display = 'flex'
       bpEl.save.disabled = !neu
       bpEl.save.textContent = neu ? `${neu} neu anlegen` : 'Nichts Neues'
+      bulkFuturesUmschalten(); bulkAltWegUmschalten()
     }
     bpEl.box?.addEventListener('input', () => {
       clearTimeout(bulkPaste.timer)
-      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPastePruefen() }, 250)
+      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPaste.vorlage = new Map(); bulkPastePruefen() }, 250)
     })
-    bEl.firm?.addEventListener('input', () => { if(bulkPaste.bloecke.length) bulkPasteRender() })
+    bEl.firm?.addEventListener('input', () => { if(bulkPaste.bloecke.length) bulkPasteRender(); bulkFuturesUmschalten() })
     bpEl.save?.addEventListener('click', async () => {
       if(!currentUserId){ setBulkMsg('Nicht eingeloggt.', 'err'); return }
       const firmaForm = bEl.firm.value.trim(), jetzt = new Date().toISOString()
       const costRaw = parseFloat(bEl.cost.value), maxddRaw = parseFloat(bEl.maxdd.value)
       const lossRaw = parseFloat(bEl.maxLossTrade?.value), profitRaw = parseFloat(bEl.maxProfitTrade?.value), dailyRaw = parseFloat(bEl.maxDailyDd?.value)
       const pos = v => (!isNaN(v) && v > 0) ? v : null
-      const wahl = bulkPaste.bloecke.filter(x => !bulkPaste.treffer.has(x.id) && (x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached/i.test(x.status)))
+      const wahl = bulkPaste.bloecke.filter(x => { const v = bulkPasteVorlage(x); return !bulkPaste.treffer.has(x.id) && ((v && v.firm) || x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached/i.test(x.status)) })
       if(!wahl.length) return
       bpEl.save.disabled = true
       let ok = 0, fehler = 0, ohneQuelle = false
       for(const x of wahl){
         bpEl.save.textContent = `Anlegen… ${ok + fehler + 1}/${wahl.length}`
-        const row = { user_id: currentUserId, name: `${x.titel || (x.firma || firmaForm)} · ${x.id.slice(-5)}`, firm: x.firma || firmaForm, account_type: x.typ,
-                      external_id: x.id, account_size: x.groesse, starting_balance: x.groesse, purchase_cost: pos(costRaw), max_drawdown: pos(maxddRaw),
-                      max_daily_drawdown: pos(dailyRaw), max_loss_per_trade: pos(lossRaw), max_profit_per_trade: pos(profitRaw), wd_farm: !!bEl.wdFarm?.checked }
+        // Werte: zentrale Vorlage des Blocks (F12) > Erkennung aus dem Text > Formular
+        const v = bulkPasteVorlage(x), vv = (k, sonst) => (v && v[k] != null) ? v[k] : sonst
+        const gr = x.groesse || vv('account_size', null) || BULK_STD_GROESSE
+        const nameAus = t => String(t).replace(/\{ex\}/g, x.id).replace(/\{firm\}/g, vv('firm', x.firma || firmaForm)).replace(/\{size\}/g, Math.round(gr / 1000) + 'K').replace(/\{n\}/g, x.id.slice(-5)).trim()
+        const row = { user_id: currentUserId, name: (v && v.name_template) ? nameAus(v.name_template) : `${x.titel || (x.firma || firmaForm)} · ${x.id.slice(-5)}`, firm: vv('firm', x.firma || firmaForm), account_type: vv('account_type', x.typ),
+                      external_id: x.id, account_size: x.groesse || vv('account_size', null) || BULK_STD_GROESSE, starting_balance: x.groesse || vv('starting_balance', null) || BULK_STD_GROESSE,   // F14: Titel > Vorlage > 150.000 purchase_cost: vv('purchase_cost', pos(costRaw)), max_drawdown: vv('max_drawdown', pos(maxddRaw)),
+                      max_daily_drawdown: vv('max_daily_drawdown', pos(dailyRaw)), max_loss_per_trade: vv('max_loss_per_trade', pos(lossRaw)), max_profit_per_trade: vv('max_profit_per_trade', pos(profitRaw)),
+                      wd_farm: v ? !!v.wd_farm : !!bEl.wdFarm?.checked,
+                      ...(v && v.goal_kind ? { goal_kind: v.goal_kind, goal_target: v.goal_target || null } : {}) }
         // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann noch fehlen)
         if(x.balance != null && x.balance > 1000) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
         try{
@@ -27441,7 +27557,8 @@
       const count    = parseInt(bEl.count.value)
       const startnum = parseInt(bEl.startnum.value) || 1
       const extIds   = getExtIds()
-      const credList = getBulkCreds()
+      const bulkFut  = bulkIstFutures()   // F13: Futures → keine Zugangsdaten, nichts an Duplikum
+      const credList = bulkFut ? [] : getBulkCreds()
 
       if(!firm)                     { setBulkMsg('Firm ist Pflicht.', 'err'); return }
       if(!count || count < 1)       { setBulkMsg('Anzahl muss mindestens 1 sein.', 'err'); return }
@@ -27482,6 +27599,8 @@
           max_profit_per_trade: !isNaN(maxProfitTradeRaw) && maxProfitTradeRaw > 0 ? maxProfitTradeRaw : null,
           external_id:    extId,
           wd_farm:        !!bEl.wdFarm?.checked,
+          // Ziel aus der gewählten zentralen Vorlage (F12) — steht nicht im Formular
+          ...(bulkVorlageAktiv && bulkVorlageAktiv.goal_kind ? { goal_kind: bulkVorlageAktiv.goal_kind, goal_target: bulkVorlageAktiv.goal_target || null } : {}),
         }
         if(cred && (cred.login || cred.password || cred.server)){
           row.cred_login    = cred.login    || null
@@ -27533,7 +27652,7 @@
       }
 
       // Accounts mit vollständigen Zugangsdaten direkt in Duplikum anlegen (Checkbox aktiv)
-      const dupCreateOn = bEl.dupCreate?.checked && bEl.dupCreateBox && bEl.dupCreateBox.style.display !== 'none'
+      const dupCreateOn = !bulkFut && bEl.dupCreate?.checked && bEl.dupCreateBox && bEl.dupCreateBox.style.display !== 'none'
       if(dupCreateOn && dupCandidates.length && typeof dupCreateAccountInDuplikum === 'function'){
         const roleType = bEl.dupRole?.value || '0'
         let dupOk = 0, dupErr = 0
@@ -27582,8 +27701,8 @@
     bEl.cancelBtn?.addEventListener('click', closeBulkModal)
     bEl.saveBtn?.addEventListener('click',   saveBulkAccounts)
     bEl.tplSelect?.addEventListener('change', () => {
-      bEl.tplDelete.disabled = !bEl.tplSelect.value
-      if(bEl.tplSelect.value) applyTemplate(bEl.tplSelect.value)
+      bEl.tplDelete.disabled = !bEl.tplSelect.value || (bEl.tplSelect.value.startsWith('z:') && !bulkIstAdmin())
+      if(bEl.tplSelect.value) applyTemplate(bEl.tplSelect.value); else bulkVorlageAktiv = null
     })
     bEl.tplSave?.addEventListener('click', saveBulkTemplate)
     bEl.tplDelete?.addEventListener('click', deleteBulkTemplate)
@@ -33548,7 +33667,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.649'
+  const OS_TAB_BUILD = '2026-09-22.651'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
