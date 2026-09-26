@@ -5964,6 +5964,7 @@ def _admin_auth():
         if r.status_code != 200 or not u.get("id"):
             return None, (jsonify({"error": "Nicht angemeldet"}), 401)
         mail = str(u.get("email") or "").strip().lower()
+        request.environ["prophos.admin_uid"] = str(u.get("id"))    # 27.09.2026 (B11): für updated_by
     except Exception:
         return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
     if not ADMIN_EMAILS:
@@ -8828,6 +8829,115 @@ def admin_konten_pruefen():
     except Exception as e:
         print(f"[konten-pruefen] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Prüfung nicht möglich ({type(e).__name__})"}), 502
+
+
+# ══ BULK-VORLAGEN (27.09.2026, Auftrag Koordination B11 für F12: zentrale Vorlagen fürs Bulk-Hinzufügen, für alle IDs) ══
+# Tabelle bulk_vorlagen (sql/2026-09-27_bulk_vorlagen.sql): Lesen per RLS für alle Eingeloggten, Schreiben NUR hier —
+# Admin-Gate wie Rechnungen/Payout-Kalender (_admin_auth, ADMIN_EMAILS). Nur die Spalten der Tabelle, Typen geprüft.
+# account_templates (pro Nutzer) bleibt unberührt.
+BULK_VORLAGE_TEXT = ("name", "firm", "account_type", "purchase_ccy", "goal_kind", "name_template", "plattform",
+                     "muster_titel", "muster_praefix")
+BULK_VORLAGE_ZAHL = ("account_size", "starting_balance", "max_drawdown", "max_daily_drawdown", "max_loss_per_trade",
+                     "max_profit_per_trade", "purchase_cost")
+BULK_VORLAGE_GANZ = ("goal_target", "sortierung")
+BULK_VORLAGE_BOOL = ("wd_farm", "aktiv")
+
+
+def bulk_vorlage_pruefen(v):
+    """REIN RECHNEND (testbar): Vorlage aus dem Body → (body, None) oder (None, fehlertext). Nur bekannte Spalten; fehlende
+    Schlüssel bleiben weg (beim Ändern unverändert), '' / None = leeren. name Pflicht (1–80 Zeichen)."""
+    if not isinstance(v, dict):
+        return None, "vorlage fehlt"
+    body = {}
+    for k in BULK_VORLAGE_TEXT:
+        if k in v:
+            x = v.get(k)
+            if x is not None and not isinstance(x, (str, int, float)):
+                return None, f"{k} muss Text sein"
+            x = str(x).strip() if x is not None else ""
+            body[k] = x[:120] or None
+    for k in BULK_VORLAGE_ZAHL + BULK_VORLAGE_GANZ:
+        if k in v:
+            x = v.get(k)
+            if x in (None, ""):
+                body[k] = None
+                continue
+            if isinstance(x, bool):
+                return None, f"{k} muss eine Zahl sein"
+            try:
+                f = float(str(x).replace(",", ".")) if isinstance(x, str) else float(x)
+            except (TypeError, ValueError):
+                return None, f"{k} muss eine Zahl sein"
+            if f != f or abs(f) > 1e9:
+                return None, f"{k} außerhalb des Bereichs"
+            if k in BULK_VORLAGE_GANZ:
+                if f != int(f):
+                    return None, f"{k} muss eine ganze Zahl sein"
+                f = int(f)
+            body[k] = f
+    for k in BULK_VORLAGE_BOOL:
+        if k in v:
+            x = v.get(k)
+            if not isinstance(x, bool):
+                return None, f"{k} muss true/false sein"
+            body[k] = x
+    if not body.get("name"):
+        return None, "name ist Pflicht"
+    if len(body["name"]) > 80:
+        return None, "name höchstens 80 Zeichen"
+    return body, None
+
+
+@app.route("/admin/bulk-vorlagen", methods=["POST", "OPTIONS"])
+def admin_bulk_vorlagen():
+    """POST /admin/bulk-vorlagen {aktion: 'speichern'|'loeschen', vorlage: {…}} → {ok, vorlage}. Speichern: mit id → ändern,
+    ohne id → neu anlegen (name eindeutig, sonst 409). Löschen: id Pflicht, Antwort = die gelöschte Zeile."""
+    if request.method == "OPTIONS":
+        return "", 200
+    mail, err = _admin_auth()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    aktion = b.get("aktion")
+    v = b.get("vorlage") if isinstance(b.get("vorlage"), dict) else {}
+    vid = str(v.get("id") or "").strip()
+    if vid and not re.fullmatch(r"[0-9a-fA-F-]{36}", vid):
+        return jsonify({"ok": False, "error": "id ungültig"}), 400
+    try:
+        if aktion == "loeschen":
+            if not vid:
+                return jsonify({"ok": False, "error": "id fehlt"}), 400
+            r = requests.delete(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"},
+                                headers=_sb_headers("return=representation"), timeout=12)
+            r.raise_for_status()
+            rows = r.json() or []
+            if not rows:
+                return jsonify({"ok": False, "error": "Vorlage nicht gefunden"}), 404
+            return jsonify({"ok": True, "vorlage": rows[0]})
+        if aktion != "speichern":
+            return jsonify({"ok": False, "error": "aktion muss 'speichern' oder 'loeschen' sein"}), 400
+        body, fehler = bulk_vorlage_pruefen(v)
+        if fehler:
+            return jsonify({"ok": False, "error": fehler}), 400
+        body["updated_at"] = datetime.now(timezone.utc).isoformat()
+        body["updated_by"] = request.environ.get("prophos.admin_uid")
+        if vid:
+            r = requests.patch(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", params={"id": f"eq.{vid}"}, json=body,
+                               headers=_sb_headers("return=representation"), timeout=12)
+        else:
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/bulk_vorlagen", json=body,
+                              headers=_sb_headers("return=representation"), timeout=12)
+        if r.status_code == 409 or "duplicate key" in (r.text or ""):
+            return jsonify({"ok": False, "error": f"Eine Vorlage „{body['name']}\" gibt es schon"}), 409
+        r.raise_for_status()
+        rows = r.json() or []
+        if not rows:
+            return jsonify({"ok": False, "error": "Vorlage nicht gefunden"}), 404
+        print(f"[bulk-vorlagen] {mail}: {'geändert' if vid else 'neu'} „{body['name']}\"", flush=True)
+        return jsonify({"ok": True, "vorlage": rows[0]})
+    except Exception as e:
+        print(f"[bulk-vorlagen] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"nicht speicherbar ({type(e).__name__})"}), 502
 
 
 start_kompass()
