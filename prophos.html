@@ -19629,6 +19629,42 @@
       return null
     }
   }
+  /* LIQUIDATIONS-LEVEL STATT MASTER-SL (27.09.2026, F22 / Backend B14 Variante 3, Master-Freigabe): Winning Days haben nie einen SL
+   * (Finns Regel) — der Fusion-Hedge schließt deshalb am Liquidations-Level des Masters: Balance = Kontogröße + 100 $ (100 %).
+   * WD = Konto winning_days ODER plan.konto_typ winning_days ODER hedge_eur > 0 (wie app.py _lt_liq). Kontogröße = starting_balance,
+   * sonst aus dem Namen („150k"). Start-Balance: tv.balance_start (kommt beim Platzieren erst NACH dem Hedge-Open), vorher als Rückfall
+   * accounts.tv_balance — nur, wenn tv_balance_at nach dem Ende des letzten Trades dieses Kontos liegt und keine Nachlesung aussteht
+   * (liq_quelle 'konto_balance'); sonst kein Level beim Open, der Wächter rechnet nach, sobald tv.balance_start da ist ('balance_start').
+   * master_sl bleibt null. */
+  function hedgeIstWd(plan){
+    const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
+    return !!((acc && acc.type === 'winning_days') || (plan && (plan.kontoTyp === 'winning_days' || plan.konto_typ === 'winning_days')) || Number(plan && plan.hedgeEur) > 0)
+  }
+  function hedgeLiqStart(plan){
+    const tv = plan && plan.mt5Baseline && plan.mt5Baseline.tv
+    if(tv && typeof tv.balance_start === 'number' && isFinite(tv.balance_start)) return { balance: tv.balance_start, quelle: 'balance_start', at: tv.at || null }
+    const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
+    if(!acc || acc.tvBalance == null || !acc.tvBalanceAt) return null
+    let letzteEnde = 0; try{ for(const q of (tradePlans || [])){ if(!q || String(q.id) === String(plan.id) || String(q.masterAccountId) !== String(acc.id)) continue
+      const e = Date.parse((q.mt5Baseline && q.mt5Baseline.final && q.mt5Baseline.final.at) || q.endedAt || '') || 0; if(e > letzteEnde) letzteEnde = e } }catch(_){}
+    if(!((Date.parse(acc.tvBalanceAt) || 0) > letzteEnde)) return null
+    if(typeof tvV2NachleseOffen === 'function' && tvV2NachleseOffen(acc.id)) return null
+    return { balance: Number(acc.tvBalance), quelle: 'konto_balance', at: acc.tvBalanceAt }
+  }
+  // -> {sl_punkte, sl_level_nq, sl_art, liq_balance, sl_usd_hedge, liq_quelle, liq_balance_start} | {hinweis}
+  function hedgeLiqLevel(plan, einstieg, ppl, kt){
+    const acc = (accounts || []).find(a => String(a.id) === String(plan && plan.masterAccountId))
+    const groesse = (acc && Number(acc.startingBalance) > 0) ? Number(acc.startingBalance) : tpKontoGroesseAusName((acc && acc.name) || (plan && plan.masterName) || '')
+    if(!(groesse > 0)) return { hinweis: 'Kontogröße unbekannt — Hedge schließt nur am TP' }
+    const liq = groesse + 100, st = hedgeLiqStart(plan)
+    if(!st) return { hinweis: 'keine Start-Balance — Hedge schließt nur am TP', liq_balance: liq }
+    const usd = Math.round((st.balance - liq) * 100) / 100
+    if(!(usd > 0) || !(ppl > 0) || !(kt > 0)) return { hinweis: 'Start-Balance nicht über dem Liquidations-Level — Hedge schließt nur am TP', liq_balance: liq }
+    const pkt = Math.round(usd / (ppl * kt) * 100) / 100
+    const lvl = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - pkt : einstieg + pkt) * 100) / 100 : null
+    return { sl_punkte: pkt, sl_level_nq: lvl, sl_art: 'liquidation', liq_balance: liq, sl_usd_hedge: usd, liq_quelle: st.quelle, liq_balance_start: st.balance }
+  }
+  window._hedgeLiqLevel = hedgeLiqLevel   // Test-Haken
   async function hedgeSoloOeffnenKern(plan, r){
     // Doppel-Open-Riegel (Gegenprüfung 25.09.2026): frisch lesen — steht schon ein Hedge in Arbeit oder offen, NICHT noch einmal
     // öffnen. 'wartet' eines anderen Laufs zählt nur, solange er jünger als 2 min ist (sonst Rest eines neu geladenen Tabs).
@@ -19646,7 +19682,7 @@
     const punkte = (ppl > 0 && kt > 0 && tp > 0) ? Math.round(tp / (ppl * kt) * 100) / 100 : 0
     // Zweites Level (24.09.2026 spät, Finns Zielbild „beide Schließ-Level liegen in MetaTrader"): die Master-SL-Distanz
     // in Punkten wird zum Fusion-TP. Ohne Master-SL kein zweites Level (0) — der Hedge endet dann mit dem Master.
-    const slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
+    let slPunkte = (ppl > 0 && kt > 0 && sl > 0) ? Math.round(sl / (ppl * kt) * 100) / 100 : 0
     const gegen = plan.richtung === 'buy' ? 'sell' : plan.richtung === 'sell' ? 'buy' : ''
     const at = new Date().toISOString()
     if(!gegen || !(punkte > 0)){
@@ -19660,9 +19696,15 @@
     let einstiegWurzel = null
     if(!(einstieg > 1000)){ const kq = await hedgeKursAktuell(ppl === 20 ? 'NQ' : 'MNQ'); einstieg = kq ? kq.preis : null; einstiegWurzel = kq ? kq.wurzel : null; quelle = kq ? `feed ${kq.wurzel} (${kq.quelle})` : 'keine' }   // Plan-Wurzel bevorzugt, sonst die andere (Gegenprüfung 25.09.2026)
     const tpLevel = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null
+    // Winning Day (F22): zweites Level = Liquidation des Masters (Kontogröße + 100 $) statt Master-SL
+    const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
+    if(liqWd) slPunkte = liqWd.sl_punkte > 0 ? liqWd.sl_punkte : 0
     const slLevel = (einstieg > 0 && slPunkte > 0) ? Math.round((plan.richtung === 'buy' ? einstieg - slPunkte : einstieg + slPunkte) * 100) / 100 : null
+    const liqFelder = liqWd ? (liqWd.sl_art ? { sl_art: 'liquidation', liq_balance: liqWd.liq_balance, sl_usd_hedge: liqWd.sl_usd_hedge, liq_quelle: liqWd.liq_quelle, liq_balance_start: liqWd.liq_balance_start, sl_hinweis: null }
+                                            : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis }) : {}
+    if(liqWd && liqWd.hinweis && typeof atToast === 'function') atToast(`⚠ Fusion-Hedge: ${liqWd.hinweis} (Wächter trägt das Level nach, sobald die Start-Balance gelesen ist)`, 'end')
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
-    try{ await hedgeAmPlanSchreiben(plan.id, { status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }) }catch(_){}
+    try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, liqFelder)) }catch(_){}
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -19727,7 +19769,9 @@
   // Lesbarer Schließ-Grund. Der Copier meldet aus MASTER-Sicht (Backend-Gegenprüfung 24.09.2026 spät — erste Fassung hatte
   // es vertauscht): level_tp = Master hat seinen TP erreicht (die Fusion-Gegenposition ist am SL gefüllt), level_sl = Master
   // am SL (Fusion am TP); dazu hand, stopout, close, unbekannt; level_mt5 = Frontend-Grund vor .470. Unbekanntes als Rohtext.
-  function hedgeGrundText(g){
+  function hedgeGrundText(g, h){
+    // Winning Day (F22): das zweite Level ist die Liquidation des Masters, kein Master-SL
+    if(h && h.sl_art === 'liquidation' && (g === 'sl_feed' || g === 'level_sl')) return g === 'sl_feed' ? 'am Liquidations-Level über den Kurs-Feed geschlossen' : 'am Liquidations-Level geschlossen (Fusion-TP im Terminal gefüllt)'
     return g === 'tp_feed' ? 'am Master-TP über den Kurs-Feed geschlossen' : g === 'sl_feed' ? 'am Master-SL über den Kurs-Feed geschlossen'
       : g === 'level_tp' ? 'Notfall-SL gefüllt (Master-TP erreicht, Fusion-SL im Terminal)' : g === 'level_sl' ? 'Master-SL erreicht (Fusion-TP im Terminal gefüllt)'
       : g === 'level_mt5' ? 'Level in MetaTrader erreicht' : g === 'master_ende_reader' ? 'Master zu (Reader) → Hedge geschlossen' : g === 'master_ende' ? 'Master beendet' : g === 'hand' ? 'von Hand'
@@ -19848,6 +19892,12 @@
   const HEDGE_REVIEW_GRUENDE = { tp_feed: 'tp', level_tp: 'tp', sl_feed: 'sl', level_sl: 'sl' }
   const _hedgeReviewVersucht = new Map()   // planId → ms des letzten Versuchs (höchstens alle 60 s, falls ein Write scheitert)
   function hedgeLevelSchaetzung(p, art){
+    // Liquidation (F22): Master-P&L ≈ Liquidations-Balance − Start-Balance (negativ), exakt später per Balance-Nachlesung
+    const hh = p && p.mt5Baseline && p.mt5Baseline.hedge, bs = p && p.mt5Baseline && p.mt5Baseline.tv && p.mt5Baseline.tv.balance_start
+    if(art === 'sl' && hh && hh.sl_art === 'liquidation' && Number(hh.liq_balance) > 0){
+      const start = (typeof bs === 'number' && isFinite(bs)) ? bs : Number(hh.liq_balance_start)
+      return start > 0 ? Math.round((Number(hh.liq_balance) - start) * 100) / 100 : null
+    }
     if(art === 'tp') return (Number(p.masterTp) > 0) ? Number(Number(p.masterTp).toFixed(2)) : null
     if(art === 'sl') return (Number(p.masterSl) > 0) ? -Number(Number(p.masterSl).toFixed(2)) : null
     return null
@@ -19874,7 +19924,7 @@
     if(!beendet) return false
     // atShowEndPrompt schiebt schon auf Überprüfen — explizit nachziehen, falls das Popup für diesen Plan schon gemeldet war
     try{ const pf = tradePlans.find(x => String(x.id) === pid); if(pf && pf.status === 'open' && typeof atMoveToReview === 'function') await atMoveToReview(pf) }catch(e){ console.warn('[hedgeReview] Überprüfen', e) }
-    if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: Master-${art === 'tp' ? 'TP' : 'SL'} erreicht → Überprüfen`
+    if(typeof atToast === 'function') atToast(`✓ ${p.masterName || 'Plan'}: ${art === 'tp' ? 'Master-TP' : (h.sl_art === 'liquidation' ? 'Liquidations-Level' : 'Master-SL')} erreicht → Überprüfen`
       + (schaetzung != null ? ` · Master ${schaetzung >= 0 ? '+' : '−'}${Math.abs(schaetzung).toLocaleString('de-DE', { minimumFractionDigits: 2 })} $ geschätzt, Puls liest nach` : ' · Master-P&L: Puls liest nach'), 'end')
     setTimeout(() => { hedgeReviewPulsLesen(pid).catch(e => console.warn('[hedgeReview] Puls', e)) }, 10000 + Math.random() * 10000)
     return true
@@ -20703,7 +20753,20 @@
           // Übernommene Hedges ohne NQ-Level: aus tv.einstieg_nq rechnen (hedgeLevelAusPlan), sonst kein Docht-Schluss (Prüfliste 12)
           const lvAus = (Number(h.tp_level_nq) > 0) ? null : hedgeLevelAusPlan(p)
           const tpL = Number(h.tp_level_nq) > 0 ? Number(h.tp_level_nq) : (lvAus && Number(lvAus.tp_level_nq)) || 0
-          const slL = Number(h.sl_level_nq) > 0 ? Number(h.sl_level_nq) : (lvAus && Number(lvAus.sl_level_nq)) || 0
+          let slL = Number(h.sl_level_nq) > 0 ? Number(h.sl_level_nq) : (lvAus && Number(lvAus.sl_level_nq)) || 0
+          // Liquidations-Level nachtragen (F22): Winning Day, Start-Balance jetzt da, Level noch nicht aus ihr → EINMAL rechnen + schreiben
+          // (Einstieg = hedge.einstieg_nq); die Copier-Reserve bleibt auf dem alten Wert, maßgeblich ist der Wächter
+          try{
+            const tvS = p.mt5Baseline && p.mt5Baseline.tv
+            if(hedgeIstWd(p) && h.liq_quelle !== 'balance_start' && tvS && typeof tvS.balance_start === 'number' && Number(h.einstieg_nq) > 0){
+              const wz2 = (typeof tvSymbolWurzel === 'function' && tvSymbolWurzel(h.symbol_nq || '')) || 'NQ'
+              const lq = hedgeLiqLevel(p, Number(h.einstieg_nq), wz2 === 'MNQ' ? 2 : 20, Number(p.masterContracts) || 0)
+              if(lq && lq.sl_level_nq > 0){
+                await hedgeAmPlanSchreiben(p.id, { sl_level_nq: lq.sl_level_nq, sl_art: 'liquidation', liq_balance: lq.liq_balance, sl_usd_hedge: lq.sl_usd_hedge, liq_quelle: 'balance_start', liq_balance_start: lq.liq_balance_start, sl_hinweis: null, sl_nachgetragen_at: new Date().toISOString() })
+                slL = lq.sl_level_nq
+              }
+            }
+          }catch(e){ console.warn('[hedge] Liq-Level nachtragen', e) }
           const det = hedgeFeedEntscheidDetail(p.richtung, kurs, tpL, slL, hedgePuffer(), ext ? ext.hoch : null, ext ? ext.tief : null)
           if(det){
             // Auslöser mit Kerzen-Quelle, z. B. 'kerze_high MNQ ws' (Koordination 25.09.2026)
@@ -20861,12 +20924,12 @@
                    const qTxt = ws.kerzen_wurzel ? ` (${ws.kerzen_wurzel} ${ws.kerzen_quelle === 'ws' ? 'Chart-Serie' : ws.kerzen_quelle === 'gemischt' ? 'Chart-Serie + Ticks/andere Wurzel mit Basis-Ausgleich' : ws.kerzen_quelle === 'andere-ohne-basis' ? '— nur andere Wurzel ohne Basis, zählt nicht' : 'aus Ticks — kurze Ausschläge evtl. nicht erfasst'})` : ''
                    const lTxt = ws.kerzen_luecke_seit ? `⚠ Kerzen-Lücke seit ${new Date(ws.kerzen_luecke_seit).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} — ` : ''
                    return lTxt + hedgeMasterWegTitel(p, h) + ((x > 0 && sbNq > 0) ? `${p.richtung === 'sell' ? 'Tief' : 'Hoch'} seit Open ${f(x)}${qTxt} · schließt bei ${f(sbNq)} — ` : '') })()
-          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? ` · Master-SL ≈ NQ ${h.sl_level_nq}` : ''} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
+          + `Fusion-Gegenhedge Ticket ${h.ticket}${h.klick_at && h.opened_at ? ` · ${((Date.parse(h.opened_at) - Date.parse(h.klick_at)) / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} s nach dem Klick` : ''} · ${h.eur} €${h.hedge_faktor > 0 ? ` (Multiplikator ${Number(h.hedge_faktor).toFixed(3)}${h.lots_soll ? `, ${f(h.lots_soll)} Lot angefragt` : ''})` : ''} über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''} · Fill NAS100 ${h.fill ?? '?'}${h.sl ? ` · Level in MetaTrader: ${f(h.sl)} = Master-TP + ${hedgePuffer()} Pkt${h.tp > 0 ? ` · ${f(h.tp)} = Master-SL` : (h.tp_fehler ? ` · Master-SL-Level FEHLT (${h.tp_fehler})` : ' · kein Master-SL → endet mit dem Master')}` : ' · KEIN Schließ-Level gesetzt — von Hand beobachten'} · Master-TP ≈ NQ ${h.tp_level_nq ?? '?'}${h.sl_level_nq ? (h.sl_art === 'liquidation' ? ` · Liquidation ≈ NQ ${h.sl_level_nq} (Balance ${h.liq_balance ?? '?'} $, Start-Balance aus ${h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : h.liq_quelle === 'konto_balance' ? 'dem Konto' : '?'})` : ` · Master-SL ≈ NQ ${h.sl_level_nq}`) : (h.sl_hinweis ? ` · ${h.sl_hinweis}` : '')} · PC ${h.pc || '?'}${h.close_fehler ? ` · letzter Close-Fehler: ${h.close_fehler}${h.close_versuche > 0 ? ` (${h.close_versuche}× · Backoff)` : ''}` : ''}${h.feed_fehlt_seit && Date.now() - (Date.parse(h.feed_fehlt_seit) || 0) > 15000 ? ` · ⚠ Feed fehlt seit ${Math.round((Date.now() - Date.parse(h.feed_fehlt_seit)) / 1000)} s — Wächter kann nicht schließen` : ''}${h.waechter_stand && h.waechter_stand.kurs ? ` · Wächter: ${Number(h.waechter_stand.kurs).toLocaleString('de-DE')} (${h.waechter_stand.wurzel}, ${h.waechter_stand.quelle})` : ''}${h.master_teil != null ? ` · ⚠ Master teilweise zu (noch ${h.master_teil} Kt laut Reader) — Hedge bleibt bis 0` : ''}`)
       }
       if(h.status === 'geschlossen'){
         const pl = (h.pl == null) ? NaN : Number(h.pl)   // null = P&L folgt — nie als 0,00 € zeigen
         return box(isFinite(pl) ? `<b style="font-size:12px;color:${pl >= 0 ? '#15803d' : '#b91c1c'};opacity:.85">${fmtE(pl)}</b>` : `<span style="font-size:11px;color:${h.pl_offen === false ? '#B45309' : 'var(--sub)'}">${h.pl_offen === false ? 'zu · P&L ? (Terminal)' : 'zu · P&L folgt'}</span>`,
-          'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
+          'var(--bg)', `Fusion-Hedge geschlossen: ${hedgeGrundText(h.grund, h)} ${h.closed_at ? new Date(h.closed_at).toLocaleString('de-DE') : ''} · ${h.eur} € über ${h.punkte} Pkt${h.sl_punkte > 0 ? ` / SL ${h.sl_punkte} Pkt` : ''}${h.fill_close ? ` · zu bei ${f(h.fill_close)}` : ''}${h.schon_zu ? ' · Level im Terminal hat gefüllt' : ''}`)
       }
       if(h.status === 'unklar') return box(`<span style="font-size:11px;color:#B45309">unklar</span>`, 'rgba(247,144,9,.12)', `Hedge-Open ohne Quittung (${h.msg || ''}) — der Wächter fragt nach; sonst im Hedge-Terminal nachsehen`)
       if(h.status === 'oeffnet') return box(`<span style="font-size:11px;color:var(--sub)">öffnet…</span>`, 'var(--bg)', 'Auftrag an den Copier unterwegs')
@@ -21444,7 +21507,7 @@
       const wl = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: hervor, title: titel })) }catch(_){} }
       wl(pw.einstieg_nq, farbe, kurz, 0, hervor ? 3 : 1)
       wl(pw.tp_level_nq, '#15803d', `TP ${kurz}`, 2, hervor ? 2 : 1)
-      wl(pw.sl_level_nq, '#b91c1c', `SL ${kurz}`, 2, hervor ? 2 : 1)
+      wl(pw.sl_level_nq, '#b91c1c', pw.sl_art === 'liquidation' ? `Liq ${Number(pw.liq_balance || 0).toLocaleString('de-DE')} ${kurz}` : `SL ${kurz}`, 2, hervor ? 2 : 1)   // WD: Liquidation statt SL (F22)
     }
   }
   function mklOrdersRender(){
@@ -21740,12 +21803,12 @@
         const dSl = (offen && kp != null && sl != null) ? (buy ? kp - sl : sl - kp) : null
         level = `<div class="mwd-level">
           <div class="mwd-bar" style="background:${grad}">
-            ${mark(sl, 'mwd-m-sl', 'SL ' + f2(sl))}${mark(entry, 'mwd-m-entry', 'Entry ' + f2(entry))}${mark(tp, 'mwd-m-tp', 'TP ' + f2(tp))}
+            ${mark(sl, 'mwd-m-sl', (pw.sl_art === 'liquidation' ? 'Liq ' : 'SL ') + f2(sl))}${mark(entry, 'mwd-m-entry', 'Entry ' + f2(entry))}${mark(tp, 'mwd-m-tp', 'TP ' + f2(tp))}
             ${(offen && kp != null) ? `<span class="mwd-kurs" style="left:${pct(kp)}%" title="Kurs jetzt"><b>${f2(kp)}</b><i></i></span>` : ''}
           </div>
           <div class="mwd-level-txt mono">${offen ? (kp != null
-              ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}</span>` : ''}${dSl != null ? ` · SL in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
-              : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? ' · SL ' + f2(sl) : ''} · Entry ${f2(entry)}`}</div>
+              ? `Kurs ${f2(kp)}${dTp != null ? ` · <span class="${Math.abs(dTp) <= 5 ? 'mwd-nah' : ''}">TP in ${f0(Math.abs(dTp))} Pkt${dTp < 0 ? ' (überschritten)' : ''}</span>` : ''}${dSl != null ? ` · ${pw.sl_art === 'liquidation' ? 'Liq' : 'SL'} in ${f0(Math.abs(dSl))} Pkt${dSl < 0 ? ' (unterschritten)' : ''}` : ''}`
+              : 'kein frischer Kurs — Abstände folgen mit dem Feed') : `${tp != null ? 'TP ' + f2(tp) : ''}${sl != null ? (pw.sl_art === 'liquidation' ? ' · Liq ' : ' · SL ') + f2(sl) : ''} · Entry ${f2(entry)}`}${pw.sl_art === 'liquidation' && num(pw.liq_balance) != null ? ` <span style="color:var(--sub-2)" title="Liquidations-Level: Balance ${f0(pw.liq_balance)} $ (Kontogröße + 100 $)${h && h.liq_quelle ? ' · Start-Balance aus ' + (h.liq_quelle === 'balance_start' ? 'der Lesung beim Platzieren' : 'dem Konto (letzte Lesung)') : ''}">· Liq bei ${f0(pw.liq_balance)} $</span>` : ''}${pw.sl_hinweis ? ` <span style="color:#B45309">· ${escapeHtml(String(pw.sl_hinweis))}</span>` : ''}</div>
         </div>`
       } else {
         level = `<div class="mwd-level-txt mono">${geplant ? 'Order noch nicht platziert' : 'kein Einstieg gespeichert'}${num(pw.master_tp) != null ? ` · TP ${f0(pw.master_tp)} $` : ''}${num(pw.master_sl) != null ? ` · SL ${f0(pw.master_sl)} $` : ''}${(kt != null && ppl) ? ` · ${f0(num(pw.master_tp) / (ppl * kt))} Pkt` : ''}</div>`
@@ -21764,7 +21827,7 @@
       const fWert = h ? (h.status === 'geschlossen' ? num(h.pl) : fLive) : null
       const sb = mklWdSchliesstBei(pw)
       const fSub = !h ? (num(pw.hedge_eur) > 0 ? (geplant ? `öffnet beim Start · ${f0(pw.hedge_eur)} € am Master-TP` : 'kein Hedge geöffnet') : 'ohne Gegenhedge')
-        : h.status === 'geschlossen' ? `realisiert · ${escapeHtml(typeof hedgeGrundText === 'function' ? hedgeGrundText(h.grund) : String(h.grund || ''))}${h.fill_close ? ` · zu bei ${f2(h.fill_close)}` : ''}`
+        : h.status === 'geschlossen' ? `realisiert · ${escapeHtml(typeof hedgeGrundText === 'function' ? hedgeGrundText(h.grund, h) : String(h.grund || ''))}${h.fill_close ? ` · zu bei ${f2(h.fill_close)}` : ''}`
         : h.status === 'fehler' ? 'nicht geöffnet — Grund unten' : h.status === 'unklar' ? 'unklar — im Hedge-Terminal prüfen' : h.status === 'oeffnet' ? 'öffnet…'
         : `${fLive != null ? 'live' : (h.status === 'schliesst' ? 'schließt…' : h.status === 'offen' ? 'offen · P&L folgt' : h.status)} · ${escapeHtml(String(h.richtung || '').toUpperCase())} ${f2(h.lots)} Lot${sb ? ` · schließt bei NQ ${f2(sb)} (Feed)` : ''}${num(h.sl) != null ? ` · Notfall-SL im Terminal ${f2(h.sl)}` : ''}`
       const zusammen = (mWert != null && fWert != null) ? mWert * fx + fWert : null
@@ -22009,7 +22072,7 @@
     const col = n => (n == null || !isFinite(n)) ? 'var(--sub)' : n >= 0 ? '#15803d' : '#b91c1c'
     const uhr = t => t ? new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–'
     const kopf = x => { const k = x.konto || {}, buy = x.richtung === 'buy', sell = x.richtung === 'sell'
-      const grund = (x.hedge && x.hedge.grund && typeof hedgeGrundText === 'function') ? hedgeGrundText(x.hedge.grund) : (x.final_quelle || x.grund || '')
+      const grund = (x.hedge && x.hedge.grund && typeof hedgeGrundText === 'function') ? hedgeGrundText(x.hedge.grund, x.hedge) : (x.final_quelle || x.grund || '')
       return `<div class="mwd-kopf"><span class="mwd-person">${escapeHtml(String(x.person || '?'))}</span>`
         + `<span class="mwd-konto" title="${escapeHtml(String(k.name || ''))}">${escapeHtml(String(k.firma || '?'))}${k.groesse ? ' ' + escapeHtml(String(k.groesse)) : ''}${k.kontonr_ende ? ` <span class="mono">…${escapeHtml(String(k.kontonr_ende))}</span>` : ''}</span>`
         + ((buy || sell) ? `<span class="mwd-chip ${buy ? 'mwd-buy' : 'mwd-sell'}">${buy ? 'BUY' : 'SELL'}</span>` : '')
@@ -33849,7 +33912,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.661'
+  const OS_TAB_BUILD = '2026-09-22.662'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -41344,7 +41407,7 @@
     const fmtE = v => `${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
     if(h && h.status === 'geschlossen' && h.pl != null){
       const pl = Number(h.pl)
-      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund))} · aus der Deal-Historie, wird auf ‚Erledigt' als WD-Hedge in Finanzen gebucht</span></div>`
+      return `<div style="font-size:12.5px"><span style="color:var(--sub);font-size:11.5px">Fusion-Gegenhedge realisiert</span> <span class="mono" style="font-weight:600;color:${pl >= 0 ? 'var(--good)' : 'var(--danger)'}">${fmtE(pl)}</span> <span style="color:var(--sub);font-size:11.5px">· ${escapeHtml(hedgeGrundText(h.grund, h))} · aus der Deal-Historie, wird auf ‚Erledigt' als WD-Hedge in Finanzen gebucht</span></div>`
     }
     if(h && h.status === 'geschlossen') return '<div style="font-size:12.5px;color:#B45309">Fusion-Gegenhedge zu · P&L folgt — der Slave-P&L bleibt unangetastet, bis der PC ihn nachgeholt hat.</div>'
     if(h && ['offen', 'schliesst', 'unklar', 'oeffnet'].includes(h.status)) return `<div style="font-size:12.5px;color:#B45309">⚠ Fusion-Hedge noch ${h.status === 'unklar' ? 'unklar' : 'offen'} (${eur} €) — erst im Hedge-Terminal schließen; der Slave-P&L bleibt unangetastet.</div>`
