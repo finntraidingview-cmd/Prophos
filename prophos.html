@@ -33408,7 +33408,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.642'
+  const OS_TAB_BUILD = '2026-09-22.643'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39114,9 +39114,9 @@
       const tpFeld = sperren ? `<span class="mono">${tpWert ? '$' + de(tpWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-tp="${escapeHtml(String(k.id))}" value="${tpWert ? escapeHtml(String(tpWert)) : ''}" placeholder="${k.tpVon != null ? escapeHtml(de(k.tpVon) + '–' + de(k.tpBis)) : ''}" title="TP in $ — leer = zufällig aus der Firmen-Spanne">`
       const slFeld = sperren ? `<span class="mono">${slWert ? '$' + de(slWert) : '—'}</span>` : `<input type="number" class="input mono vp-in wd-in" data-wd-sl="${escapeHtml(String(k.id))}" value="${slWert ? escapeHtml(String(slWert)) : ''}" placeholder="—" title="SL in $ — leer = kein SL">`
       const live = kd.live_balance != null ? kd.live_balance : (k.live != null ? k.live : null)
-      const groesse = kd.balance > 0 ? kd.balance : tpKontoGroesseAusName(k.name)
+      const groesse = kd.starting_balance > 0 ? kd.starting_balance : tpKontoGroesseAusName(k.name)   // nie die manuelle Balance (F9)
       const plus = live != null && groesse > 0 ? Math.round(live - groesse) : (k.plus != null ? k.plus : null)
-      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${groesse ? de(groesse) : '?'}</div>` : ''}` : (kd.balance > 0 ? `$${de(kd.balance)}<div class="kf">kein Live-Stand</div>` : '<span class="kf">kein Live-Stand</span>')
+      const bal = live != null ? `$${de(live)}${plus != null ? `<div class="kf" style="color:${plus >= 0 ? '#2a9d5c' : 'var(--danger)'}">${plus >= 0 ? '+' : ''}${de(plus)} über ${groesse ? de(groesse) : '?'}</div>` : ''}` : '<span class="kf">kein Live-Stand</span>'
       const dd = kd.max_drawdown ? `$${de(kd.max_drawdown)}` : '—'
       const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
       const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
