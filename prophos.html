@@ -32910,7 +32910,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.623'
+  const OS_TAB_BUILD = '2026-09-22.624'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37839,6 +37839,7 @@
       rail = d; _wd.railFehler = ''
     }catch(e){ _wd.railFehler = String(e.message || e); console.warn('[wd] Railway', e) } }
     await Promise.all([ladeRpc(), ladeRail()])
+    const rpcOk = !!konten   // rpc wd_konten_alle liefert NUR Typ winning_days — dann ist „nicht in der Liste" = kein Winning-Days-Konto
     if(konten && rail && Array.isArray(rail.konten)){
       // Railway kennt Archiv + ausgeblendete Personen: solche Konten bleiben in der Liste, aber als
       // „archiviert" markiert (fahren nicht mit, zeigen den Grund) — vorher fielen sie stumm raus und
@@ -37852,7 +37853,7 @@
     // diesen Tag schon existieren — Grundlage für die Selbstheilung der Zeilen (wdZeilenHeilen)
     const ptag = (rail && Array.isArray(rail.plaene_tag)) ? rail.plaene_tag : []
     const plaene = rail ? [...((rail.plaene) || []), ...ptag.filter(q => !((rail.plaene) || []).some(z => String(z.id) === String(q.id)))] : null
-    _wd.daten = { konten: konten || [], slaves: (rail && rail.slaves) || {}, plaene, fx: (rail && rail.fx) || window._fxUsdEur || 0.85, rail: !!rail,
+    _wd.daten = { rpc: rpcOk, konten: konten || [], slaves: (rail && rail.slaves) || {}, plaene, fx: (rail && rail.fx) || window._fxUsdEur || 0.85, rail: !!rail,
                   belegt: (rail && rail.belegt) || {}, plaene_tag: ptag }
     _wd.datenFehler = konten ? '' : _wd.datenFehler
     _wd.datenTag = tag
@@ -38157,6 +38158,12 @@
     const planVon = k => k.plan_id ? (tradePlans || []).find(p => String(p.id) === String(k.plan_id)) : null
     const offenFuer = row.status !== 'fertig' && row.status !== 'verpasst'
     const sl = wdFusionGegenstueck(), zVon = new Map()   // fest Fusion (26.09.2026)
+    // Nur Typ Winning Days (26.09.2026): Konten dieses Profils, die kein WD-Konto (mehr) sind, fliegen ohne Plan aus der Zeile —
+    // sonst legte der Rückfall für eingetragene Funded-Konten (Zeilen vor .622) Pläne an
+    for(let i = konten.length - 1; i >= 0; i--){
+      const acc = (accounts || []).find(a => String(a.id) === String(konten[i].id))
+      if(acc && !konten[i].plan_id && !wdIstWdKonto(acc)){ konten.splice(i, 1); geaendert = true }
+    }
     const farmVon = acc => (acc.wdFarm === undefined) ? true : !!acc.wdFarm
     // (1a) Neue Konten in die Zeile — sonst käme ein frisch angelegtes Funded erst am nächsten Tag an
     if(offenFuer){
@@ -38577,7 +38584,9 @@
     // die ohne Haken zusammengeklappt in einer Zeile, auf Wunsch einblenden
     // Archivierte Konten (Konto-Archiv) standardmäßig weg — bei Moritz 13 von 16 (Finn 23.09.2026: „da müssen ganz viele
     // archivierte sein, da kann nicht gar nichts sein"); Konten ohne Haken bleiben sichtbar (grau)
-    const ohne = [], sichtbar = (x.konten || []).filter(k => !k.archiviert || k.plan_id)   // archivierte Konten existieren hier nicht (Finn 23.09.2026)
+    // archivierte Konten existieren hier nicht (Finn 23.09.2026); nur Typ Winning Days (26.09.2026) — ohne Plan und nicht in der RPC = kein WD-Konto
+    const nurWd = k => k.plan_id || !(_wd.daten && _wd.daten.rpc) || !!wdKontoDaten(k.id)
+    const ohne = [], sichtbar = (x.konten || []).filter(k => (!k.archiviert || k.plan_id) && nurWd(k))
     const zeilen = sichtbar.map(k => {
       const kd = wdKontoDaten(k.id) || {}
       const aus = k.aktiv === false || !k.farm
@@ -39206,6 +39215,9 @@
       if(!x || x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst') continue
       const konten = (x.konten || []).map(k => ({ ...k })); let ge = false
       for(let i = konten.length - 1; i >= 0; i--){ const kd = wdKontoDaten(konten[i].id); if(kd && kd.archiviert && !konten[i].plan_id){ konten.splice(i, 1); ge = true } }   // archiviert = weg
+      // Nur Typ Winning Days (26.09.2026, Finn: „ich will nur die Konten dastehen haben, die als Typ Winning Days haben"): Zeilen, die
+      // PC-Tabs vor .622 eingetragen haben, enthalten noch Funded-Konten — ohne Plan raus (die RPC kennt nur winning_days).
+      if(d.rpc){ for(let i = konten.length - 1; i >= 0; i--){ if(!konten[i].plan_id && !wdKontoDaten(konten[i].id)){ konten.splice(i, 1); ge = true } } }
       for(const k of konten){
         const kd = wdKontoDaten(k.id)
         if(kd){
