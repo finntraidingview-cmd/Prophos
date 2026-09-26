@@ -9673,6 +9673,33 @@
       </div>
       </div>
 
+      <!-- Futures · Live (26.09.2026, Finn: „bei Futures quasi ein Feld Live P&L, getrennt und separat von Echo, weil es
+           unterschiedliche Wege gibt, wie der P&L gerechnet wird"). NUR ANZEIGE, nichts davon wird gespeichert:
+           accounts.tv_balance / tv_balance_at (Puls liest beim Platzieren und 1–30 min nach dem Ende eines Orbit-V2-Trades,
+           seit .625) und der P&L des letzten Trades = mt5_baseline.final.balance_end − tv.balance_start. Getrennt von der
+           Handeingabe (accounts.balance) und von Echos MT5-Balance. Nur bei Futures-Firmen im Bearbeiten-Modus, acTvLiveRender. -->
+      <div id="ac-tvlive-section" hidden>
+        <div class="modal-divider">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--violet)"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Futures · Live <span style="font-weight:400;color:var(--sub);font-size:11.5px">(TradingView · nur Anzeige)</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Live-Balance</label>
+            <div class="mono" id="ac-tvlive-bal" style="font-size:15px;font-weight:600;padding:6px 0 2px">–</div>
+            <div id="ac-tvlive-stand" style="font-size:11px;color:var(--sub)">noch nicht gelesen</div>
+          </div>
+          <div class="field">
+            <label>P&amp;L letzter Trade</label>
+            <div class="mono" id="ac-tvlive-pl" style="font-size:15px;font-weight:600;padding:6px 0 2px">–</div>
+            <div id="ac-tvlive-pl-sub" style="font-size:11px;color:var(--sub)">Balance nachher − vorher</div>
+          </div>
+          <div class="field" style="grid-column:1/-1;margin-top:-6px">
+            <div style="font-size:11px;color:var(--sub)">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) und der Balance oben — wird hier nicht geändert.</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Payout-Termin (15.09.2026, Finn: "bei CFD-Accounts direkt ein Feld, an
            welchem Datum ich den Payout anfragen kann") — CFD-Firmen zahlen in
            Zeitfenstern, das nächste Fenster steht hier (Spalte payout_ready_at).
@@ -19912,6 +19939,31 @@
     let h = 2166136261; for(const ch of String(id || '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
     return (60 + (h % 8941)) * 1000
   }
+  // Nachlesung ab (ms) — EINE Rechnung für Live Trades, Accounts-Balance und das Konto-Popup (26.09.2026, F3)
+  const tvV2NachleseAb = (id, endeIso) => { const e = Date.parse(endeIso || '') || 0; return e ? e + tvV2NachleseMs(id) : 0 }
+  // Ausstehende Balance-Nachlesung des Kontos (jüngster beendeter Orbit-V2-Plan in „Überprüfen" mit Start-Balance, ohne balance_end).
+  // Pläne ohne Start-Balance zählen nicht (Befund F4: nach Tageswechsel nicht lesbar). -> {ab, text, kurz} | null
+  function tvV2NachleseOffen(accountId, jetzt){
+    let _tp = []; try{ _tp = tradePlans }catch(_){}
+    jetzt = jetzt || Date.now()
+    const p = (_tp || []).filter(x => x && x.route === 'tvv2' && x.status === 'review' && String(x.masterAccountId) === String(accountId))
+      .sort((a, b) => (Date.parse(b.endedAt || '') || 0) - (Date.parse(a.endedAt || '') || 0))[0]
+    const b = p && p.mt5Baseline, fin = b && b.final
+    if(!fin || !(b.tv && typeof b.tv.balance_start === 'number') || (typeof fin.balance_end === 'number' && isFinite(fin.balance_end))) return null
+    const ab = tvV2NachleseAb(p.id, fin.at || p.endedAt)
+    const uhr = new Date(ab).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if(ab && jetzt < ab){ const m = Math.max(1, Math.ceil((ab - jetzt) / 60000)); return { ab, text: `Nachlesung ab ${uhr} (in ${m} min)`, kurz: `aktualisiert in ${m} min` } }
+    if(fin.puls_aufgegeben) return { ab, text: 'Nachlesung aufgegeben: ' + String(fin.puls_fehler || ''), kurz: 'Nachlesung aufgegeben' }
+    return { ab, text: 'wird gerade gelesen', kurz: 'wird gerade gelesen' }
+  }
+  window._tvV2NachleseOffen = tvV2NachleseOffen
+  // „aktualisiert in … min" unter Accounts läuft mit: EIN Takt je Minute, rendert die Konten-Liste nur, wenn sie sichtbar ist und
+  // mindestens ein Konto eine ausstehende Nachlesung hat (kein Timer pro Zeile, 26.09.2026 F3)
+  setInterval(() => { try{
+    const v = document.querySelector('#dashboard-view .view[data-view="accounts"]')
+    if(!v || !v.classList.contains('active') || typeof renderAccounts !== 'function') return
+    if((accounts || []).some(a => a && tvV2NachleseOffen(a.id))) renderAccounts()
+  }catch(_){} }, 60000)
   // Der PC, der liest: am Hedge (Winning Day) bzw. beim Start gemerkt — ohne Merker jeder PC-Tab des Profils (eine ID = ein PC)
   function tvV2EndlesungPc(p){ const b = (p && p.mt5Baseline) || {}; return (b.hedge && b.hedge.pc) || (b.tv && b.tv.pc) || '' }
   function tvV2EndlesungPcPasst(p){
@@ -22186,7 +22238,7 @@
         : d.status === 'laeuft' ? `<span class="wdl-demo lauf">Demo läuft · ${f0(d.minuten)} Minuten Kurs seit Start${dTp != null ? ` · TP in ${f0(Math.abs(dTp))} Pkt` : ''}</span>`
         : d.status === 'ohne_kurs' ? '<span class="wdl-demo">Demo: kein Reader-Kurs seit dem Start</span>'
         : d.status === 'ohne_level' ? '<span class="wdl-demo">Demo: kein Einstieg/TP gespeichert</span>' : ''
-      const nachAb = (!offen && !gepl && num(t.balance_end) == null && t.ended_at && typeof tvV2NachleseMs === 'function') ? (Date.parse(t.ended_at) || 0) + tvV2NachleseMs(t.id) : 0
+      const nachAb = (!offen && !gepl && num(t.balance_end) == null && t.ended_at && typeof tvV2NachleseMs === 'function') ? tvV2NachleseAb(t.id, t.ended_at) : 0
       const endSub = num(t.balance_end) != null ? 'nach der Nachlesung' : offen ? 'nach dem Trade' : gepl ? '–' : (nachAb > Date.now() ? `Nachlesung ab ${uhr(nachAb)}` : 'Nachlesung ausstehend')
       return `<div class="mwd-card ${offen ? 'mwd-open' : gepl ? 'mwd-planned' : 'mwd-done'}" style="--mwd-farbe:${farbe}">
         <div class="mwd-kopf">
@@ -25777,6 +25829,19 @@
           }
         }
 
+        // Live · TradingView (26.09.2026, F3, Finn: „hiervon rede ich btw immer" — Spalte Balance): Futures-Konten mit Puls-Lesung
+        // (accounts.tv_balance, Orbit V2). Schlägt Duplikum (läuft seit 24.09. nicht mehr, Wert ohne Zeitstempel = veraltet) und jede
+        // ältere Quelle; ist die andere jünger, bleibt sie. MT5-Cloud/Echo und Manuell bleiben daneben getrennt.
+        let tvNeben = ''
+        const istFut = (typeof tpFirmIstFutures === 'function') && tpFirmIstFutures(a.firm)
+        if(istFut && a.tvBalance != null){
+          const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
+          if(liveBal == null || liveSrc === 'Duplikum' || !altAt || tvAt > altAt){
+            if(liveBal != null) tvNeben = `${escapeHtml(liveSrc)} ${(liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud') ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)} · älter`
+            liveBal = a.tvBalance; liveSrc = 'TradingView'; liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
+          }
+        }
+        const nachlese = istFut && typeof tvV2NachleseOffen === 'function' ? tvV2NachleseOffen(a.id) : null
         let balCell
         if(liveBal != null){
           const balFormatted = (liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud')
@@ -25793,11 +25858,13 @@
               <span style="color:var(--violet);font-weight:500">${cloudAlt ? 'Stand' : 'Live'} · ${liveSrc}</span>
               ${liveTime ? `<span style="margin-left:6px">${timeAgo(liveTime)}</span>` : ''}
             </div>
+            ${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}
+            ${tvNeben ? `<div style="font-size:11px;color:var(--sub-2);font-family:var(--mono);margin-top:2px">${tvNeben}</div>` : ''}
             <div style="font-size:11px;color:var(--sub);font-family:var(--mono);margin-top:2px">
               Manuell ${fmtMoney(a.initialBalance)}
             </div>`
         }else{
-          balCell = `<span class="mono">${fmtMoney(a.initialBalance)}</span>`
+          balCell = `<span class="mono">${fmtMoney(a.initialBalance)}</span>${nachlese ? `<div style="font-size:11px;color:var(--sub);margin-top:2px" title="${escapeHtml(nachlese.text)}">${escapeHtml(nachlese.kurz)}</div>` : ''}`
         }
 
         // Sub-info unter Name
@@ -26066,6 +26133,7 @@
     accEls.msg.className = 'modal-msg'
     toggleMaSection()
     toggleAcBloecke()
+    acTvLiveRender(editAccount || null)
     if(typeof acMaybeFillServer === 'function') acMaybeFillServer()
     accEls.modal.classList.add('open')
     setTimeout(() => accEls.name.focus(), 50)
@@ -26103,6 +26171,54 @@
     if(accEls.goalSec)   accEls.goalSec.hidden   = !(istPhase && !istFutures)
     if(accEls.wdSec)     accEls.wdSec.hidden     = !(istFunded && istFutures)
     if(accEls.payoutSec) accEls.payoutSec.hidden = !(istFunded && !istFutures)
+    // Futures · Live (26.09.2026): nur Futures-Firma und nur beim Bearbeiten (ein neues Konto hat noch keine Lesung)
+    const tvSec = document.getElementById('ac-tvlive-section'); if(tvSec) tvSec.hidden = !(istFutures && _editingAccountId)
+  }
+  // Füllt „Futures · Live" im Bearbeiten-Popup — frisch aus accounts + den letzten Plänen dieses Master-Kontos (nur lesen).
+  // _acTvLiveId schützt gegen Überholen, wenn das Popup schnell für ein anderes Konto neu geöffnet wird.
+  let _acTvLiveId = null
+  async function acTvLiveRender(acc){
+    const g = id => document.getElementById(id)
+    const bal = g('ac-tvlive-bal'), stand = g('ac-tvlive-stand'), pl = g('ac-tvlive-pl'), plSub = g('ac-tvlive-pl-sub')
+    if(!bal) return
+    const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const vor = iso => { const ms = Date.now() - (Date.parse(iso || '') || 0), m = Math.round(ms / 60000)
+      return m < 1 ? 'gerade eben' : m < 60 ? `vor ${m} min` : m < 1440 ? `vor ${Math.round(m / 60)} h` : `vor ${Math.round(m / 1440)} Tagen` }
+    const zeigeBal = (b, at) => {
+      bal.textContent = b != null ? f2(b) + ' $' : '–'
+      stand.textContent = b != null ? `${at ? vor(at) + ' · ' : ''}aus Orbit-V2-Trade (Puls)` : 'noch nicht gelesen'
+      stand.title = at ? new Date(at).toLocaleString('de-DE') : ''
+    }
+    _acTvLiveId = acc ? acc.id : null
+    zeigeBal(acc && acc.tvBalance != null ? acc.tvBalance : null, acc && acc.tvBalanceAt)
+    pl.textContent = '–'; pl.style.color = ''; plSub.textContent = 'Balance nachher − vorher'
+    if(!acc || !acc.id) return
+    const id = acc.id
+    try{
+      const [ra, rp] = await Promise.all([
+        supabase.from('accounts').select('tv_balance,tv_balance_at').eq('id', id).maybeSingle(),
+        supabase.from('trade_plans').select('id,ended_at,completed_at,created_at,bs:mt5_baseline->tv->balance_start,be:mt5_baseline->final->balance_end')
+          .eq('master_account_id', id).order('created_at', { ascending: false }).limit(15)
+      ])
+      if(_acTvLiveId !== id) return
+      if(ra && ra.data && ra.data.tv_balance != null) zeigeBal(Number(ra.data.tv_balance), ra.data.tv_balance_at)
+      const zahl = v => (v != null && isFinite(Number(v))) ? Number(v) : null
+      const t = ((rp && rp.data) || []).find(x => zahl(x.bs) != null && zahl(x.be) != null)
+      const offen = (typeof tvV2NachleseOffen === 'function') ? tvV2NachleseOffen(id) : null
+      if(offen){
+        // Nachlesung steht aus (F3-Ergänzung, Finn: „wird in so und so vielen Minuten aktualisiert") — Minuten laufen mit, solange das Popup offen ist
+        const zeig = () => { const o = tvV2NachleseOffen(id); if(!o || _acTvLiveId !== id) return false; pl.textContent = 'P&L folgt'; pl.style.color = 'var(--sub)'; plSub.textContent = o.text; return true }
+        zeig()
+        clearInterval(acTvLiveRender._takt)
+        acTvLiveRender._takt = setInterval(() => { if(!accEls.modal.classList.contains('open') || !zeig()) clearInterval(acTvLiveRender._takt) }, 30000)
+      } else if(t){
+        const d = Math.round((zahl(t.be) - zahl(t.bs)) * 100) / 100
+        pl.textContent = (d > 0 ? '+' : d < 0 ? '−' : '') + f2(Math.abs(d)) + ' $'
+        pl.style.color = d > 0 ? 'var(--good)' : d < 0 ? 'var(--danger)' : ''
+        const wann = t.ended_at || t.completed_at || t.created_at
+        plSub.textContent = `${f2(zahl(t.be))} − ${f2(zahl(t.bs))}${wann ? ' · ' + new Date(wann).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) : ''}`
+      } else plSub.textContent = 'noch kein Trade mit Balance vorher + nachher'
+    }catch(e){ console.warn('[konto] Futures-Live', e && e.message || e) }
   }
 
   function setModalMsg(text, kind){
@@ -33136,7 +33252,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.633'
+  const OS_TAB_BUILD = '2026-09-22.634'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
