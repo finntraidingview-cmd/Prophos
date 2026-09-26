@@ -8424,6 +8424,20 @@
                     <div class="kf-chart" data-kf-chart="reibf" hidden><div class="kf-titel">Reibung gespart · je Firma · kumuliert <span class="adm-sub kf-mini-sum" id="adm-kf-sum-reibf"></span></div><div class="kf-sub">reale Reibung je Trade ohne Hedge, aufsummiert je Prop-Firma · gestrichelt = alle · Klick auf Chip oder Linie filtert auf die Firma</div><div class="adm-vl"><canvas id="adm-kf-chart-reibf"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-reibf"></div></div>
                   </div>
                 </div>
+                <!-- Winning Days (26.09.2026, Finn: „für Winning Days auch cleane Statistik"): Orbit V2 mit Fusion-Gegenhedge — echter Hedge,
+                     eigene Liste wd_liste aus /admin/kapitel. Kacheln, je Person eine Zeile, zwei Verläufe. Gezeichnet von admKfWd. -->
+                <div id="adm-kf-wd" hidden>
+                  <div class="kf-abschnitt">Winning Days <span class="adm-sub" id="adm-kf-wd-sub" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+                  <div class="kpis kf-kpis" id="adm-kf-wd-kpis"></div>
+                  <div class="adm-dist kf-rows kf-quoten" id="adm-kf-rows-wd"></div>
+                  <div class="kf-gruppe" data-kf-gruppe="wd">
+                    <div class="kf-gruppe-kopf"><div class="kf-abschnitt">Verlauf</div><div class="kf-chip-bar" data-kf-chips="wd"></div></div>
+                    <div class="kf-gross">
+                      <div class="kf-chart" data-kf-chart="wdv" hidden><div class="kf-titel">Master vs. Fusion · kumuliert <span class="adm-sub kf-mini-sum" id="adm-kf-sum-wdv"></span></div><div class="kf-sub">grün = Master-P&amp;L der Winning Days (in € zum FX), Kapitel-Farbe = Fusion-Gegenhedge (€, echt gebucht) · gestrichelt = beides zusammen</div><div class="adm-vl"><canvas id="adm-kf-chart-wdv"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-wdv"></div></div>
+                      <div class="kf-chart" data-kf-chart="wdp" hidden><div class="kf-titel">Fusion-Hedge je Person · kumuliert</div><div class="kf-sub">echte Fusion-€ je Winning Day, aufsummiert je Person · gestrichelt = alle · Klick auf eine Linie filtert</div><div class="adm-vl"><canvas id="adm-kf-chart-wdp"></canvas></div><div class="adm-vl-legend" id="adm-kf-legend-wdp"></div></div>
+                    </div>
+                  </div>
+                </div>
                 <div id="adm-kf-quoten" hidden>
                   <div class="kf-abschnitt">Hedge-Quoten aus der Hedge-Ära</div>
                   <div class="kf-sub" id="adm-kf-quoten-sub">€ Hedge je $ Master-P&amp;L (Median, Ausreißer 1,5×IQR raus) je Firma, darunter Challenge → Phasen → Funded → Winning Day — Klick filtert Kacheln und Charts</div>
@@ -11406,6 +11420,7 @@
       admKfTradeListe(trades, fx, pick, pers, alle.filter(artOk), personen, tage)
       admKfPersonen(alle.filter(artOk), fx, pick, pers, personen, tage, farbe)
       admKfReibSpar(trades, farbe, tage)
+      admKfWd(k, fx, pick, pers, personen, farbe)
       admKfFirmaCharts(alle.filter(persOk), f, fx, farbe, tage)
     }
     /* Personen im Vergleich (26.09.2026, Finn: „mehr auf die einzelnen Personen … im Vergleich sehen, wie sie beim Vorteil
@@ -11452,6 +11467,65 @@
       for(const t of rows){ if(!t.datum) continue; const u = String(t.user_id); const s = sm.get(u) || { key: u, label: personen.get(u) || u, events: [] }; s.events.push({ datum: t.datum, eur: -admKfHyp(t, fx) }); sm.set(u, s) }
       admVerlauf('kfpv', 'adm-kf-chart-pv', 'adm-kf-legend-pv', [...sm.values()].sort((a, b) => a.label.localeCompare(b.label, 'de')), pers, pick,
                  { tage, gesamt: true, gesamtFarbe: farbe, sub: k => { const e = m.get(String(k)); return e ? `${e.n} Trades` : '' } })
+    }
+    /* Winning Days (26.09.2026, Finn: „für Winning Days auch cleane Statistik"): wd_liste des Kapitels (Orbit V2 + Fusion-Gegenhedge).
+     * Kacheln (Anzahl · TP erreicht · Master $ · Fusion € · Ø je Winning Day · Farmer-Anteil), je Person eine Zeile (Balken = Anzahl,
+     * Wert = Fusion €), Verläufe Master vs. Fusion und Fusion je Person. Personen-Filter greift, der Sach-Filter nur über die Firma. */
+    function admKfWd(k, fx, pick, pers, personen, farbe){
+      const wrap = $('adm-kf-wd'); if(!wrap) return
+      const alle = (Array.isArray(k.wd_liste) ? k.wd_liste : [])
+      const fa = admKf.filter && admKf.filter.art === 'firm' ? admKf.filter.wert : ''
+      const basis = alle.filter(t => !fa || t.master_firm === fa)
+      const rows = basis.filter(t => !pers || String(t.user_id) === pers)
+      wrap.hidden = !alle.length
+      if(!alle.length) return
+      for(const t of alle){ const u = String(t.user_id); if(!personen.has(u)) personen.set(u, t.person || u) }
+      const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v)
+      const n = rows.length, tp = rows.filter(t => (num(t.master_pl) || 0) > 0).length
+      const mSum = rows.reduce((a, t) => a + (num(t.master_pl) || 0), 0)
+      const mitF = rows.filter(t => num(t.fusion_eur) !== null), fSum = mitF.reduce((a, t) => a + num(t.fusion_eur), 0)
+      const farmer = rows.filter(t => t.quelle === 'farmer').length
+      const col = v => v < 0 ? '#b91c1c' : '#15803d'
+      const kpi = (label, value, sub, st) => `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value" style="${st || ''}">${value}</div><div class="kpi-delta delta-neutral">${sub}</div></div>`
+      const sub = $('adm-kf-wd-sub'); if(sub) sub.textContent = `${alle.length} im Kapitel${fa ? ' · ' + fa : ''}${pers ? ' · ' + admShortName(personen.get(pers) || pers) : ''}`
+      const kp = $('adm-kf-wd-kpis')
+      if(kp) kp.innerHTML =
+        kpi('Winning Days', String(n), `${farmer} vom Farmer · ${n - farmer} von Hand`) +
+        kpi('TP erreicht', n ? Math.round(100 * tp / n) + ' %' : '–', `${tp} von ${n} mit Master im Plus`) +
+        kpi('Master-P&amp;L', admUsdSign(mSum), n ? `Ø ${admUsdSign(mSum / n)} je Winning Day` : '–', `color:${col(mSum)}`) +
+        kpi('Fusion-Hedge', admVlSign(fSum), mitF.length ? `Ø ${admVlSign(fSum / mitF.length)} je Winning Day · ${mitF.length} gebucht` : 'noch nichts gebucht', `color:${col(fSum)}`)
+      // je Person: Balken = Anzahl, Wert = Fusion €
+      const el = $('adm-kf-rows-wd')
+      if(el){
+        el.innerHTML = ''
+        const m = new Map()
+        for(const t of basis){ const u = String(t.user_id); const e = m.get(u) || { u, n: 0, tp: 0, m: 0, f: 0, fn: 0 }; e.n++; const mp = num(t.master_pl) || 0; e.m += mp; if(mp > 0) e.tp++; const fe = num(t.fusion_eur); if(fe !== null){ e.f += fe; e.fn++ } m.set(u, e) }
+        const liste = [...m.values()].sort((a, b) => b.n - a.n || a.f - b.f), maxN = Math.max(1, ...liste.map(e => e.n))
+        for(const e of liste){
+          const on = String(pers) === e.u
+          const row = document.createElement('button'); row.type = 'button'
+          row.className = 'adm-row adm-row-btn' + (on ? ' is-on' : ''); if(pers && !on) row.style.opacity = '.45'
+          row.innerHTML = `<div class="adm-row-name">${admDot(e.u)}<span><span class="nm"></span><small class="kf-q-sub"></small></span></div>` +
+            `<div class="adm-track"><div class="adm-fill" style="width:${(100 * e.n / maxN).toFixed(1)}%;background:${admPersonColor(e.u)}"></div></div>` +
+            `<div class="adm-val" style="color:${col(e.f)}">${e.fn ? admVlSign(e.f) : '–'}</div>`
+          row.querySelector('.nm').textContent = admShortName(personen.get(e.u) || e.u)
+          row.querySelector('.kf-q-sub').textContent = `${e.n} Winning Day${e.n === 1 ? '' : 's'} · TP ${Math.round(100 * e.tp / e.n)} % · Master ${admUsdSign(e.m)}`
+          row.title = `Fusion-Hedge ${e.fn ? admVlSign(e.f) : '–'} (${e.fn} gebucht) — ` + (on ? 'klicken hebt den Filter auf' : 'klicken filtert auf diese Person')
+          row.addEventListener('click', () => pick(e.u))
+          el.appendChild(row)
+        }
+      }
+      const tage = [...new Set(rows.map(t => t.datum).filter(Boolean))].sort()
+      if(tage.length){ const d = new Date(tage[0] + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); tage.unshift(d.toISOString().slice(0, 10)) }
+      const mit = rows.filter(t => t.datum)
+      const sv = [{ key: 'm', label: 'Master (€)', events: mit.map(t => ({ datum: t.datum, eur: (num(t.master_pl) || 0) * fx })) },
+                  { key: 'f', label: 'Fusion-Hedge', events: mit.map(t => ({ datum: t.datum, eur: num(t.fusion_eur) || 0 })) }]
+      const FA = { m: '#15803d', f: farbe }
+      const es = $('adm-kf-sum-wdv'); if(es) es.innerHTML = n ? `· Master <b>${admVlSign(mSum * fx)}</b> · Fusion <b>${admVlSign(fSum)}</b>` : ''
+      admVerlauf('kfwdv', 'adm-kf-chart-wdv', 'adm-kf-legend-wdv', sv, '', null, { tage, gesamt: true, gesamtFarbe: '#101828', farbe: k2 => FA[k2], labelRoh: true })
+      const pm = new Map()
+      for(const t of basis){ if(!t.datum || num(t.fusion_eur) === null) continue; const u = String(t.user_id); const sr = pm.get(u) || { key: u, label: personen.get(u) || u, events: [] }; sr.events.push({ datum: t.datum, eur: num(t.fusion_eur) }); pm.set(u, sr) }
+      admVerlauf('kfwdp', 'adm-kf-chart-wdp', 'adm-kf-legend-wdp', [...pm.values()].sort((a, b) => a.label.localeCompare(b.label, 'de')), pers, pick, { tage, gesamt: true, gesamtFarbe: farbe })
     }
     /* Reibung gespart, gemessen vs. real, kumuliert (26.09.2026, Finn: „einen Graph, der nach oben geht") — Trades des
      * Kapitels mit Personen- und Sach-Filter; zwei Linien: gemessen (grau, gestrichelt) und real (Kapitel-Farbe). */
@@ -11536,6 +11610,7 @@
       // Linien zuerst (26.09.2026, Finn: „kein Balkendiagramm, ein Liniendiagramm") — die Balken je Firma bleiben dahinter
       // nur die neue Ära (26.09.2026, Finn: „hier nur die Reibung seit der neuen Ära") — Hedge-Ära-Charts entfernt
       reibung: [['reibs', 'Gemessen vs. real'], ['reibf', 'Je Firma']],
+      wd:      [['wdv', 'Master vs. Fusion'], ['wdp', 'Je Person']],
       firma:   [['fS', 'Je Firma'], ['fT', 'Je Firma · Typ'], ['fA', 'Ø je Trade'], ['fV', 'Verlauf']] }
     function admKfChartWahlRender(){
       if(!admKf.charts) admKf.charts = {}
@@ -32770,7 +32845,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.619'
+  const OS_TAB_BUILD = '2026-09-22.620'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37627,6 +37702,31 @@
   }
   // Zufällig aus der Spanne, je Konto neu (Jitter-Doktrin: nicht auf allen IDs dieselbe Größe)
   function wdKontrakteFuer(firma, vp){ const [a, b] = wdKtSpanne(tpVorplanFirmaKey(firma), vp); return a + Math.floor(Math.random() * (b - a + 1)) }
+  /* Farmer ohne Duplikum (26.09.2026, Finn: „die Winning Days werden gewürfelt wie im Admin-Terminal … und unter Winning Days mit der
+   * Logik ausgeführt, die wir da entwickelt haben"): Gegenstück ist fest Fusion (wie Popup „Winning Days Farm", TP_WD_SLAVE_FIRM) — ein
+   * reines Rechen-Gegenstück ohne Konto-ID; der Server dreht die Zeile auf Orbit V2 und nullt die Slave-Felder. Vorher hing jeder
+   * Farmer-Plan an einem Duplikum-Slave je ID; IDs ohne Duplikum-Plan wurden übersprungen. */
+  window._wdFarmHedge = (pr, r, e, an) => { const x = { ...pr }; const h = wdFarmHedge(x, r, e, an); return { ...x, hinweis: h } }   // REIN RECHNEND, Prüf-Haken (Muster _mklWdAbhakenVorbelegung)
+  function wdFusionGegenstueck(){ return { slave: { id: null, name: TP_WD_SLAVE_FIRM, firm: TP_WD_SLAVE_FIRM } } }
+  /* Hedge-Felder eines Farmer-Plans — exakt die Rechnung des Popups (tpWdRechnung/tpWdHedgeEurAus): Risiko Master ($) = SL-Vorgabe des
+   * Kontos (wd_sl, nur Rechenfeld, nie master_sl), Kontrakte, Risiko Slave (€) = Staffel → Multiplikator (tpCalcMultiplier gegen Fusion);
+   * hedge_faktor = Multiplikator, hedge_eur = Lots × 0,85 €/Pkt × TP-Punkte. Der Copier öffnet Kontrakte × multiplier Lots.
+   * Schalter AUS oder keine Staffel → kein Hedge (alles null). Ohne SL-Vorgabe kein Multiplikator: dann nur hedge_eur = Staffel
+   * (alter Farmer-Weg, Copier rechnet über eur/TP-Punkte) — Hinweis am Konto. */
+  function wdFarmHedge(pr, riskMaster, slaveEur, an){
+    const aus = () => { pr.hedge_eur = null; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = null; return '' }
+    if(!an || !(slaveEur > 0)) return aus()
+    const kt = Number(pr.master_contracts) || 0, tp = Number(pr.master_tp) || 0, ppl = tpMasterPpl(pr.master_firm) || 0
+    const mult = (riskMaster > 0 && kt > 0) ? tpCalcMultiplier(pr.master_firm, TP_WD_SLAVE_FIRM, riskMaster, kt, slaveEur) : null
+    if(mult > 0 && ppl > 0 && tp > 0){
+      const lots = Math.round(kt * mult * 100) / 100, tpPkt = tp / (ppl * kt)
+      pr.multiplier = mult; pr.hedge_faktor = Math.round(mult * 1000) / 1000; pr.slave_risk = slaveEur; pr.master_risk = riskMaster
+      pr.hedge_eur = Math.round(lots * tpWdSlavePpl() * tpPkt * 100) / 100
+      return ''
+    }
+    pr.hedge_eur = Math.round(slaveEur * 100) / 100; pr.hedge_faktor = null; pr.multiplier = null; pr.slave_risk = slaveEur
+    return 'ohne SL-Vorgabe (Risiko Master) kein Multiplikator — Hedge nur über den Staffel-Betrag'
+  }
   async function wdVorplanRegelnSpeichern(v){
     const { data: { user } } = await supabase.auth.getUser()
     await supabase.from('wd_farmer_regeln').update({ vorplan: v, updated_at: new Date().toISOString(), updated_by: user ? user.id : null }).eq('id', 1)
@@ -37773,7 +37873,7 @@
   }
   // PC-Tab: eigene Funded-Konten mit Vorschau (Rückfall, wenn der Mac nicht eingetragen hat)
   function wdKandidaten(){
-    const sl = tpDupSlaveAccount()
+    const sl = wdFusionGegenstueck()
     const sPreset = sl.fehler ? null : (FIRM_PRESETS[firmToPreset(sl.slave.firm)] || FIRM_PRESETS.projectx)
     const fx = window._fxUsdEur || 0.85, vp = wdVorplanRegeln()
     const alle = tpVorplanKandidaten(), konten = []
@@ -37860,7 +37960,7 @@
       if(!row.start_um || !row.richtung || row.status !== 'geplant') continue
       const konten = (row.konten || []).map(k => ({ ...k }))
       const zeiten = wdKontoZeiten(konten, row.start_um, r); let ge = zeiten.geaendert
-      const slave = d.slaves && d.slaves[String(row.user_id)]
+      const slave = wdFusionGegenstueck().slave   // fest Fusion statt Duplikum-Slave je ID (26.09.2026)
       const sPreset = slave ? (FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx) : null
       const zVon = new Map()
       for(const k of konten){
@@ -37868,7 +37968,6 @@
         // Vom Server abgewählt („hat schon einen Plan", „nicht gefunden") → erneut versuchen, sobald Haken + External ID da
         // sind; der Server räumt alte, nie gestartete Farmer-Pläne jetzt selbst weg und verknüpft gleiche-Tag-Pläne (23.09.2026)
         if(!wdAktiv(k)){ if(k.farm && k.ext && WD_AUTO_HINWEISE.includes(k.hinweis)){ k.aktiv = true; k.hinweis = ''; ge = true } else continue }
-        if(!slave){ const h = 'kein Duplikum-Slave bekannt (noch nie ein Duplikum-Plan bei dieser ID) — der PC-Tab legt den Plan an'; if(k.hinweis !== h){ k.hinweis = h; ge = true } continue }
         const kd = wdKontoDaten(k.id)
         if(!kd || kd.archiviert){ k.aktiv = false; k.hinweis = kd ? WD_HINWEIS_ARCHIV : 'Konto nicht (mehr) gefunden'; ge = true; continue }
         const accLike = wdAccLike(kd)
@@ -37879,9 +37978,9 @@
         const pr = tpVorplanPlanRow(accLike, slave, z, wdKontrakteFuer(kd.firm, vp), symbol, row.richtung, tag)
         pr.user_id = String(row.user_id); pr.start_um = zeiten.get(String(k.id)); pr.notes = 'Winning-Day-Farmer'
         pr.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026) — sl_vorgabe (wd_sl) ist nur noch Risiko Master im Popup
-        // Fusion-Gegenhedge (24.09.2026 abends): Staffel-Betrag in € als hedge_eur — der Server dreht die Zeile auf
-        // V2 (Slave-Felder null), hedge_eur bleibt stehen. Schalter AUS → NULL = kein Hedge.
-        pr.hedge_eur = (vp.hedge_an && z.slaveEur > 0) ? Math.round(z.slaveEur * 100) / 100 : null
+        // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
+        // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
+        { const h = wdFarmHedge(pr, kd.sl_vorgabe, z.slaveEur, vp.hedge_an); if(h) k.hinweis = h }
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
       bloecke.push({ row, konten, ge, sPreset, zVon })
@@ -37944,7 +38043,7 @@
 
   /* ── PC-Tab: Plan für ein Konto anlegen (Rückfall, wenn der Mac es nicht konnte — z.B. Railway aus) ── */
   async function wdPlanAnlegen(acc, richtung, vp, startIso, tag){
-    const sl = tpDupSlaveAccount(); if(sl.fehler) return { fehler: sl.fehler }
+    const sl = wdFusionGegenstueck()   // fest Fusion statt Duplikum-Slave (26.09.2026)
     const slave = sl.slave, sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx: window._fxUsdEur || 0.85, regeln: vp.regeln })
     if(z.fehler) return { fehler: z.fehler }
@@ -37956,6 +38055,7 @@
     const row = tpVorplanPlanRow(acc, slave, z, wdKontrakteFuer(acc.firm, vp), symbol, richtung, tag || new Date().toLocaleDateString('en-CA'))
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
+    wdFarmHedge(row, Number(acc.wdSl) || 0, z.slaveEur, vp.hedge_an)   // wie der Mac: Popup-Rechnung (26.09.2026)
     /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
      * → den übernehmen; (b) Claim per Insert in user_settings (eindeutig user_id + key 'wd_rueckfall:<tag>:<konto>', Muster .563):
@@ -37988,7 +38088,7 @@
     const set = (k, f, v) => { if(k[f] !== v){ k[f] = v; geaendert = true } }
     const planVon = k => k.plan_id ? (tradePlans || []).find(p => String(p.id) === String(k.plan_id)) : null
     const offenFuer = row.status !== 'fertig' && row.status !== 'verpasst'
-    const sl = tpDupSlaveAccount(), zVon = new Map()
+    const sl = wdFusionGegenstueck(), zVon = new Map()   // fest Fusion (26.09.2026)
     const farmVon = acc => (acc.wdFarm === undefined) ? true : !!acc.wdFarm
     // (1a) Neue Konten in die Zeile — sonst käme ein frisch angelegtes Funded erst am nächsten Tag an
     if(offenFuer){
@@ -38058,7 +38158,13 @@
           if(plan.route === 'tvv2'){
             // V2 (24.09.2026 abends): kein Slave mehr — nachgezogen wird nur der Fusion-Gegenhedge-Betrag (hedge_eur),
             // und nur, wenn der Plan schon einen trägt (Schalter AUS → bleibt NULL)
-            if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs(plan.hedgeEur - z.slaveEur) > 0.5) upd.hedge_eur = Math.round(z.slaveEur * 100) / 100
+            // seit 26.09.2026 mit der Popup-Rechnung: Multiplikator/hedge_faktor/hedge_eur gemeinsam nachziehen
+            if(vp.hedge_an && plan.hedgeEur > 0 && z && z.live != null && z.slaveEur > 0 && Math.abs((plan.slaveRisk || 0) - z.slaveEur) > 0.5){
+              const acc = (accounts || []).find(a => String(a.id) === String(k.id))
+              const h = { master_firm: plan.masterFirm, master_contracts: plan.masterContracts, master_tp: plan.masterTp }
+              wdFarmHedge(h, acc ? Number(acc.wdSl) || 0 : 0, z.slaveEur, true)
+              for(const f of ['hedge_eur', 'hedge_faktor', 'multiplier', 'slave_risk']) if(h[f] != null) upd[f] = h[f]
+            }
           } else if(z && z.live != null && typeof z.slaveRisk === 'number' && Math.abs((plan.slaveRisk || 0) - z.slaveRisk) > 0.5){
             upd.slave_risk = z.slaveRisk
             const m = tpCalcMultiplier(plan.masterFirm, sl.slave.firm, plan.masterRisk, plan.masterContracts, z.slaveRisk); if(m) upd.multiplier = m

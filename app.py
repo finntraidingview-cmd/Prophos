@@ -5654,7 +5654,9 @@ def admin_build_kapitel():
     # hedge-freie Kapitel liefert die Einzel-Trades, das Frontend rechnet den Kontrafakt daraus.
     _plans_sel = ("id,user_id,master_account_id,slave_account_id,"
                   "slave_pl,master_pl,blown,completed_at,kapitel_id,ohne_hedge,master_symbol,"
-                  "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day")
+                  "route,master_name,richtung,slave_risk,master_risk,hedge_eur,winning_day,"
+                  # Winning-Days-Statistik (26.09.2026): Herkunft, TP, Kontrakte, Zeiten, Schließgrund des Fusion-Hedges
+                  "notes,master_tp,master_contracts,started_at,ended_at,hedge_grund:mt5_baseline->hedge->>grund")
     # konto_typ (25.09.2026, Kontotyp zum Zeitpunkt des Trades): fehlt die Spalte noch (SQL nicht eingespielt), ohne sie laden —
     # die Statistik darf daran nie kippen
     try:
@@ -5718,6 +5720,7 @@ def admin_build_kapitel():
         # datierte EUR-Beträge. Hedge-Kapitel bekommen die Listen nicht (dort ist der Hedge real).
         kontrafakt = not bool(k.get("hedge"))
         trades_liste, payouts_liste, kauf_liste = [], [], []
+        wd_liste = []   # Winning Days des Kapitels (26.09.2026, Finn: „für Winning Days auch cleane Statistik")
         def _person(uid):
             return personen.setdefault(uid, {
                 "user_id": uid, "person": disp.get(uid) or names.get(uid, uid[:8] or "—"),
@@ -5768,6 +5771,23 @@ def admin_build_kapitel():
             # unten über _admin_hedge_ev als echte Hedge-Seite, nicht als Kontrafakt.
             if p.get("ohne_hedge"):
                 trades_ohne_hedge += 1
+            # Winning Day (26.09.2026): Orbit V2 mit Fusion-Gegenhedge (hedge_eur > 0) oder als Winning Day markiert — echter
+            # Hedge, Fusion-€ = slave_pl (Deal-Historie). Eigene Liste, zählt NICHT in die Kontrafakt-Trades.
+            if kontrafakt and str(p.get("route") or "") == "tvv2" and ((_f(p.get("hedge_eur")) or 0) > 0 or p.get("winning_day")
+                                                                        or str(p.get("konto_typ") or "") == "winning_days"):
+                macc = by_id.get(str(p.get("master_account_id") or "")) or {}
+                wd_liste.append({
+                    "id": p.get("id"), "user_id": pe["user_id"], "person": pe["person"],
+                    "account_name": p.get("master_name") or macc.get("name") or "",
+                    "master_firm": _firm_norm(macc.get("firm")) if macc else "—",
+                    "datum": str(p.get("completed_at") or "")[:10],
+                    "zeit": p.get("completed_at") or p.get("ended_at") or None,
+                    "master_pl": _f(p.get("master_pl")), "fusion_eur": _f(p.get("slave_pl")),
+                    "hedge_eur": _f(p.get("hedge_eur")), "master_tp": _f(p.get("master_tp")),
+                    "kt": _f(p.get("master_contracts")), "richtung": str(p.get("richtung") or "").lower(),
+                    "grund": p.get("hedge_grund") or None, "blown": bool(p.get("blown")),
+                    "quelle": "farmer" if "winning-day-farmer" in str(p.get("notes") or "").lower() else "hand",
+                    "dauer_min": _kapitel_dauer_min(p.get("started_at"), p.get("ended_at") or p.get("completed_at"))})
             mpl = _f(p.get("master_pl"))
             if mpl is not None:
                 master_pl += mpl
@@ -5879,6 +5899,7 @@ def admin_build_kapitel():
             "trades_liste": sorted(trades_liste, key=lambda t: (t["datum"], str(t.get("zeit") or ""), str(t["id"]))),
             "payouts_liste": sorted(payouts_liste, key=lambda t: t["datum"]),
             "kauf_liste": sorted(kauf_liste, key=lambda t: t["datum"]),
+            "wd_liste": sorted(wd_liste, key=lambda t: (t["datum"], str(t.get("zeit") or ""), str(t["id"]))),
         })
     return {"kapitel": out, "fx_usd_eur": fx, "generated": _wt_now_iso(),
             # Hedge-Quoten der Hedge-Ära (24.09.2026): Gruppen A→D mit n/median/mean/p25/p75/median_r
@@ -6645,7 +6666,18 @@ def _wd_plan_v2(body, firm=None, jetzt=None):
     route = str(body.get("route") or "")
     if route not in WD_V2_ROUTEN:
         body["route"] = _wd_v2_route(firm if firm is not None else body.get("master_firm"))
+    # Winning Days Farm mit Fusion-Gegenhedge (26.09.2026, Finn: „die Winning Days werden gewürfelt wie im Admin … und unter
+    # Winning Days mit der Logik ausgeführt, die wir entwickelt haben"): trägt die Zeile hedge_eur > 0, bleiben Multiplikator
+    # und Risiko Slave stehen — genau wie beim Handweg im Popup. Der Copier rechnet die Fusion-Lots aus Kontrakte × multiplier
+    # (hedgeSoloOeffnenKern); ohne ihn fiele er auf die nie live gefahrene eur/tp_punkte-Rechnung zurück.
+    hedge = False
+    try:
+        hedge = body["route"] == "tvv2" and float(body.get("hedge_eur") or 0) > 0
+    except (TypeError, ValueError):
+        hedge = False
     for k in WD_V2_NULL_FELDER:
+        if hedge and k in ("slave_risk", "multiplier"):
+            continue
         body[k] = None
     if body["route"] == "mt5v2":
         # Review-Finding 24.09.2026 (W12): das Frontend schickt MNQ+Frontcode für JEDE Zeile —
@@ -7384,8 +7416,13 @@ def admin_wd_plaene():
             # V2-Plan (24.09.2026): Slave-Risiko/Multiplier gibt es ohne Hedge nicht — ein
             # Admin-Nachzug (Staffel) darf sie nicht wieder an einen V2-Plan schreiben.
             if "slave_risk" in upd or "multiplier" in upd:
-                alt = sb_select("trade_plans", {"select": "route", "id": f"eq.{pid}", "limit": "1"})
-                if alt and (alt[0].get("route") or "") in WD_V2_ROUTEN:
+                alt = sb_select("trade_plans", {"select": "route,hedge_eur", "id": f"eq.{pid}", "limit": "1"})
+                # Farm-Plan mit Fusion-Hedge (26.09.2026): Multiplikator/Risiko Slave darf nachgezogen werden
+                try: alt_hedge = bool(alt) and float(alt[0].get("hedge_eur") or 0) > 0
+                except (TypeError, ValueError): alt_hedge = False
+                try: alt_hedge = alt_hedge or float(upd.get("hedge_eur") or 0) > 0
+                except (TypeError, ValueError): pass
+                if alt and (alt[0].get("route") or "") in WD_V2_ROUTEN and not alt_hedge:
                     upd.pop("slave_risk", None); upd.pop("multiplier", None)
                     if not upd:
                         return jsonify({"geaendert": False, "plan": None, "hinweis": "V2-Plan ohne Slave — nichts zu ändern"})
