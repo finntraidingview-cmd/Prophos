@@ -275,6 +275,46 @@ def main():
     check(k1 == {("MNQ", 6000): 240, ("MNQ", 6060): 17, ("NQ", 6060): 238} and rs._kurs_1m_aus_ring(ring)[0]["n"] == 0,
           "kurs_1m: Serien-Kerzen tragen den Paket-Zähler, Tick-Kerzen ihre eigene Zahl, ohne Zähler 0 wie bisher")
 
+    # 0.9.3: Feed-Gedaechtnis — ein Tab, der einmal Feed war, wird nach einem Login nie Broker-Quelle
+    ids = {}
+    check(rs._feed_rolle("feed", "t1", ids, 100.0) == ("feed", False) and ids == {"t1": 100.0}, "Feed-Tab wird gemerkt")
+    check(rs._feed_rolle("broker", "t1", ids, 200.0) == ("feed", True) and ids["t1"] == 200.0,
+          "Login im Feed-Tab → bleibt Feed, login_im_feed gemeldet")
+    check(rs._feed_rolle("broker", "t2", ids, 200.0) == ("broker", False) and "t2" not in ids, "unbekannter Broker-Tab bleibt Broker")
+    check(rs._feed_rolle("broker", "standard", {"standard": 1.0}, 200.0) == ("broker", False)
+          and rs._feed_rolle("feed", "standard", ids, 200.0) == ("feed", False) and "standard" not in ids,
+          "Tab ohne tab_id ('standard') wird nie gemerkt")
+    import tempfile as _tf, os as _os2
+    _alt_datei, _alt_ids, _alt_tabs = rs.FEED_DATEI, rs._feed_ids, dict(rs._tabs)
+    try:
+        rs.FEED_DATEI = _os2.path.join(_tf.mkdtemp(), "feed_tabs.json")
+        rs._feed_ids, rs._tabs = None, {}
+        import io as _io, contextlib as _cl
+        with _cl.redirect_stdout(_io.StringIO()) as _out:
+            rs._tab({"tab_id": "feedX", "rolle": "feed"}, 1000.0)
+            tid_, t_ = rs._tab({"tab_id": "feedX", "rolle": "broker", "konto": "APEX_641699"}, 1001.0)
+        check(t_["rolle"] == "feed" and t_["login_im_feed"]["konto"] == "APEX_641699" and "ACHTUNG" in _out.getvalue(),
+              "_tab: Login im Feed-Tab → Rolle feed, Konto gemeldet, Warnzeile")
+        check(rs._broker_wahl(rs._tabs, 1001.0) == (None, False), "eingeloggter Feed-Tab ist keine Broker-Quelle")
+        rs._feed_ids = None
+        check("feedX" in rs._feed_ids_laden(), "Feed-Gedaechtnis ueberlebt einen Server-Neustart (feed_tabs.json)")
+        rs._feed_ids = {"alt": 0.0, "feedX": 1000.0}
+        rs._feed_ids_sichern(rs.FEED_VERGESSEN_S + 10.0, False)
+        check("alt" not in rs._feed_ids and "feedX" in rs._feed_ids, "tab_id ohne POST > 7 Tage wird vergessen")
+    finally:
+        rs.FEED_DATEI, rs._feed_ids, rs._tabs = _alt_datei, _alt_ids, _alt_tabs
+
+    # 0.9.3: kurs_1m nur mit frischen Minuten (eingefrorener Feed → leer statt Freitags-Minuten im 5-s-Takt)
+    ring2 = {"MNQ": {6000: {"symbol": "MNQ1!", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "quelle": "ws"},
+                     6060: {"symbol": "MNQ1!", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "quelle": "ws"}},
+             "NQ": {9000: {"symbol": "NQ1!", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "quelle": "ws"}}}
+    jetzt1m = 9030.0
+    k2 = rs._kurs_1m_aus_ring(ring2, None, jetzt1m)
+    check([(x["wurzel"], x["minute"]) for x in k2] == [("NQ", 9000)], "kurs_1m: eingefrorene Wurzel leer, frische Minute drin")
+    check(len(rs._kurs_1m_aus_ring(ring2, None, 6060 + 150.0)) == 2, "kurs_1m: Minute 120 s vor der laufenden zählt noch")
+    check(rs._kurs_1m_aus_ring(ring2, None, 9000 + 300.0) == [], "kurs_1m: alles eingefroren → leere Liste")
+    check(len(rs._kurs_1m_aus_ring(ring2)) == 3, "kurs_1m ohne jetzt: wie bisher (Erstladung/Chart unberührt)")
+
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
 

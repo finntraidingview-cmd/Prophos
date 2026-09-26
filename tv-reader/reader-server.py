@@ -64,7 +64,7 @@ PORT = 8790
 # < 0.7.0 (Tampermonkey prueft nur taeglich). Ab jetzt sagt jede Antwort, welcher Server und
 # welches Script wirklich laufen; die Bruecke schreibt beides nach echoplus_live, der Markt-
 # Kopf zeigt es. Bei JEDER Aenderung an dieser Datei mitbumpen.
-READER_VERSION = "0.9.2"
+READER_VERSION = "0.9.3"
 HIER = os.path.dirname(os.path.abspath(__file__))
 DATEI = os.path.join(HIER, "positions.json")
 AUS_FLAG = os.path.join(HIER, "reader_aus.flag")   # Datei vorhanden = pausiert
@@ -248,7 +248,24 @@ def _kerzen_liste(ring, seit=None):
     return out
 
 
-def _kurs_1m_aus_ring(ring, zaehler=None):
+KURS_1M_FRISCH_S = 120   # 0.9.3: kurs_1m traegt nur Minuten, die hoechstens so weit vor der laufenden liegen
+
+
+def _kurs_1m_frisch(minute, jetzt, max_alter_s=KURS_1M_FRISCH_S):
+    """REIN RECHNEND (testbar): liegt die Minute hoechstens max_alter_s vor der laufenden Minute?
+    0.9.3 (26.09.2026, Befund Koordination R3-Nachtrag): bei eingefrorenem Feed gab kurs_1m immer wieder die
+    letzten beiden Freitags-Minuten aus; die Bruecke schrieb sie alle ~5 s neu nach tv_kurs_1m (~640 POSTs/h,
+    updated_at vom Samstag auf Freitags-Minuten) — Kerzen-POSTs sahen nach 'live' aus, obwohl nichts lief.
+    jetzt None = kein Filter (alter Aufruf)."""
+    if jetzt is None:
+        return True
+    try:
+        return float(minute) >= int(jetzt // 60) * 60 - max_alter_s
+    except (TypeError, ValueError):
+        return False
+
+
+def _kurs_1m_aus_ring(ring, zaehler=None, jetzt=None):
     """REIN RECHNEND: letzte abgeschlossene + laufende Minute je Wurzel in der Form von kurs_1m
     (minute in Unix-Sekunden, o/h/l/c, n) — damit die bestehende Bruecke unveraendert nach tv_kurs_1m schreibt.
     n: Tick-Kerzen zaehlen selbst; fuer Chart-Serien-Kerzen (bisher immer 0) seit 0.9.1 die Zahl der Pakete mit
@@ -258,6 +275,8 @@ def _kurs_1m_aus_ring(ring, zaehler=None):
     out = []
     for w in sorted((ring or {}).keys()):
         for m in sorted(ring[w])[-2:]:
+            if not _kurs_1m_frisch(m, jetzt):
+                continue          # 0.9.3: eingefrorene Minute → fuer diese Wurzel nichts statt Altes
             b = ring[w][m]
             n = int(b.get("n") or 0)
             if not n and zaehler:
@@ -471,6 +490,63 @@ def _bf_wahl(tabs, jetzt, broker_zuerst=False, frisch_s=BROKER_FRISCH_S):
     return max(frisch, key=schluessel)[0]
 
 
+# ── Feed-Gedaechtnis (0.9.3, 26.09.2026, Befund Koordination R3 auf pc-usq1i6) ─────────────────────
+# Puls griff ins Reader-Chrome (Profil 'Terminal 1'), meldete sich dort bei Tradovate an — ab da meldete der
+# Feed-Tab rolle 'broker' und konnte Positions-Quelle werden (_broker_wahl), obwohl in diesem Tab nie
+# gehandelt wird. Regel: eine tab_id, die einmal als 'feed' kam, bleibt Feed — ein spaeterer Login macht sie
+# NICHT zur Broker-Quelle, er wird nur gemeldet (login_im_feed). Die tab_id lebt in sessionStorage (ueberlebt
+# Reloads desselben Tabs); gemerkt wird in feed_tabs.json, damit ein Neustart des Servers nichts vergisst.
+FEED_DATEI = os.path.join(HIER, "feed_tabs.json")
+FEED_VERGESSEN_S = 7 * 86400     # tab_id ohne POST so lange → vergessen (Tab laengst zu)
+_feed_ids = None                 # tab_id -> zuletzt gesehen (s)
+_feed_ids_s = 0.0                # letzter Schreibstand
+
+
+def _feed_rolle(gemeldet, tid, feed_ids, jetzt):
+    """REIN RECHNEND (testbar): (wirksame Rolle, login_im_feed). feed_ids wird fortgeschrieben.
+    'standard' (Userscript ohne tab_id) bleibt aussen vor — dort teilen sich alle Tabs eine Kennung."""
+    if tid == "standard":
+        return gemeldet, False
+    if gemeldet == "feed":
+        feed_ids[tid] = jetzt
+        return "feed", False
+    if tid in feed_ids:
+        feed_ids[tid] = jetzt
+        return "feed", True
+    return gemeldet, False
+
+
+def _feed_ids_laden():
+    global _feed_ids
+    if _feed_ids is None:
+        try:
+            with open(FEED_DATEI, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            _feed_ids = {str(k): float(v) for k, v in d.items()} if isinstance(d, dict) else {}
+        except Exception:
+            _feed_ids = {}
+    return _feed_ids
+
+
+def _feed_ids_sichern(jetzt, geaendert):
+    """Neue tab_id sofort, sonst hoechstens alle 5 min (Zeitstempel frisch halten); Altes faellt raus."""
+    global _feed_ids_s
+    ids = _feed_ids_laden()
+    for k in [k for k, v in ids.items() if jetzt - v > FEED_VERGESSEN_S]:
+        ids.pop(k, None)
+        geaendert = True
+    if not geaendert and jetzt - _feed_ids_s < 300:
+        return
+    try:
+        tmp = FEED_DATEI + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(ids, f)
+        os.replace(tmp, FEED_DATEI)
+        _feed_ids_s = jetzt
+    except Exception:
+        pass
+
+
 def _tab(daten, jetzt):
     """Tab-Eintrag zum Payload holen/anlegen. Ohne tab_id (Userscript < 0.8.5) = 'standard' als Broker —
     genau das alte Ein-Tab-Verhalten."""
@@ -478,7 +554,21 @@ def _tab(daten, jetzt):
     tid = str(daten.get("tab_id") or "standard")[:40]
     rolle = str(daten.get("rolle") or "broker")
     rolle = rolle if rolle in ("broker", "feed") else "broker"
+    ids = _feed_ids_laden()
+    neu = tid not in ids
+    rolle, login_im_feed = _feed_rolle(rolle, tid, ids, jetzt)
+    if tid in ids:
+        _feed_ids_sichern(jetzt, neu)
     t = _tabs.setdefault(tid, {"stand": None, "stand_s": 0.0, "blind_grund": "", "blind_seit": 0.0, "bf": None, "bf_s": 0.0})
+    if login_im_feed:
+        konto = str(daten.get("konto") or "")[:40]
+        if not t.get("login_im_feed"):
+            print(f"\n[{time.strftime('%H:%M:%S')}] ACHTUNG: im Feed-Tab {tid[:6]} ist ein Broker-Konto angemeldet"
+                  f"{(' (' + konto + ')') if konto else ''} — zaehlt NICHT als Positions-Quelle. Im Reader-Chrome abmelden.",
+                  flush=True)
+        t["login_im_feed"] = {"s": jetzt, "konto": konto or (t.get("login_im_feed") or {}).get("konto") or ""}
+    elif t.get("login_im_feed") and jetzt - float(t["login_im_feed"].get("s") or 0) > 60:
+        t.pop("login_im_feed", None)
     t.update({"rolle": rolle, "last_s": jetzt, "version": daten.get("version") or t.get("version")})
     if "sichtbar" in daten:
         t["sichtbar"] = daten.get("sichtbar") is not False
@@ -508,7 +598,8 @@ def _tabs_liste(jetzt):
                     "quelle": t.get("quelle"), "sichtbar": t.get("sichtbar"), "fokus": t.get("fokus"),
                     "version": t.get("version"),
                     "konto": ((t.get("stand") or {}).get("konto") if t.get("rolle") == "broker" else None),
-                    "blind": bool(t.get("blind_grund"))})
+                    "blind": bool(t.get("blind_grund")),
+                    "login_im_feed": (t.get("login_im_feed") or {}).get("konto") if t.get("login_im_feed") else None})
     return out
 
 
@@ -627,6 +718,8 @@ def _mit_an(stand):
     jetzt_ = time.time()
     _bft = _bf_wahl(_tabs, jetzt_, broker_zuerst=True)
     bf = ((_tabs.get(_bft) or {}).get("bf") if _bft else None) or _bedienfeld or {}
+    if _bft and (_tabs.get(_bft) or {}).get("login_im_feed"):
+        bf = {}   # 0.9.3: Konto-Summary (Balance!) eines eingeloggten Feed-Tabs gehoert zu keinem Plan — nie ausgeben
     out["summary"] = bf.get("summary")
     out["today_pnl_text"] = bf.get("today_pnl_text")
     out["today_label"] = bf.get("today_label")
@@ -640,12 +733,13 @@ def _mit_an(stand):
     # fallen die Titel-Kerzen (_k1m) hinein, damit nichts verloren geht.
     out["kurse"] = _kurse_ausgabe(_kurse, time.time())
     # 0.8.0: Kerzen zuerst aus dem Socket-Ring (fertige TradingView-Bars), sonst Tick-Kerzen (Legende/Titel)
-    kerzen = _kurs_1m_aus_ring(_kerzen, _paket_zaehler) if _kerzen else []
+    _j1m = time.time()
+    kerzen = _kurs_1m_aus_ring(_kerzen, _paket_zaehler, _j1m) if _kerzen else []
     if not kerzen:
         for w in sorted(_k1m_je.keys()):
-            kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k]
+            kerzen += [k for k in (_k1m_vor_je.get(w), _k1m_je.get(w)) if k and _kurs_1m_frisch(k.get("minute"), _j1m)]
     if not kerzen:
-        kerzen = [k for k in (_k1m_vor, _k1m) if k]
+        kerzen = [k for k in (_k1m_vor, _k1m) if k and _kurs_1m_frisch(k.get("minute"), _j1m)]
     out["kurs_1m"] = kerzen
     out["kerzen_alter_s"] = round(time.time() - _kerzen_s, 3) if _kerzen_s else None
     out["kerzen_anzahl"] = {w: len(r) for w, r in _kerzen.items()}

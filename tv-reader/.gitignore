@@ -7,3 +7,4 @@ verbinder.config.json
 # Selbst-Update-Reste (30.08.2026, start-reader.bat/start-verbinder.bat)
 *.newc
 *.prev
+feed_tabs.json
