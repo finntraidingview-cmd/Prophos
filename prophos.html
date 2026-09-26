@@ -21329,9 +21329,20 @@
     _mklLw.wdLinien = []
     // Live Trades (F6): statt der Winning-Day-Linien die gewählten Trades — je Trade eigene Farbe, Level über die Linienart
     if(typeof wdlAktiv === 'function' && wdlAktiv()){
-      for(const L of wdlChartLinien()){ try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: L.preis, color: L.farbe, lineWidth: L.breite, lineStyle: L.art, axisLabelVisible: true, title: L.titel })) }catch(_){} }
+      const ll = wdlChartLinien()
+      for(const L of ll){ try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: L.preis, color: L.farbe, lineWidth: L.breite, lineStyle: L.art, axisLabelVisible: true, title: L.titel })) }catch(_){} }
+      // Auto-Skala schließt die Level der EINGEBLENDETEN Trades ein (F7, Master 26.09.2026 nach F6: Liquidation lag sonst außerhalb des
+      // Bereichs). Ausgeblendete Trades ziehen nicht auf; in „Markt live" wieder die reine Kerzen-Skala (unten).
+      const preise = ll.map(L => L.preis), lo = preise.length ? Math.min(...preise) : null, hi = preise.length ? Math.max(...preise) : null, sig = lo == null ? '' : lo + '|' + hi
+      if(_mklLw.skalaSig !== sig){
+        _mklLw.skalaSig = sig
+        try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => { const r = orig(); if(lo == null) return r
+          const pr = (r && r.priceRange) || { minValue: lo, maxValue: hi }
+          return Object.assign({}, r || {}, { priceRange: { minValue: Math.min(pr.minValue, lo), maxValue: Math.max(pr.maxValue, hi) } }) } }) }catch(_){}
+      }
       return
     }
+    if(_mklLw.skalaSig){ _mklLw.skalaSig = ''; try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => orig() }) }catch(_){} }
     for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && x.status === 'open' && Number(x.einstieg_nq) > 0)){
       const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
       const wl = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: hervor, title: titel })) }catch(_){} }
@@ -33399,7 +33410,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.637'
+  const OS_TAB_BUILD = '2026-09-22.638'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
