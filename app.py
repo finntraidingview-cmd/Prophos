@@ -4656,16 +4656,21 @@ HQ_VORGABEN = {
     # 25.09.2026 abends, Finn (Topstep Challenge hat keine Hedge-Messung, Mikes Trade fiel auf die globale Quote
     # 0,55): „Beim ersten Trade sind 4.500 $ da 200 €, beim zweiten Trade 4.500 $ so 450 € — mach genau die Mitte,
     # der erste Trade kommt zu 100 % vor, der zweite zu 50 %." Gewichteter Schnitt: (200 × 1 + 450 × 0,5) / 1,5
-    # = 366,67 € je 4.500 $ → 0,0815 €/$.
-    "Topstep|challenge": {"ziel_usd": 4500.0, "ziel_eur": 366.67},
+    # = 366,67 € je 4.500 $ → 0,0815 €/$. KORRIGIERT 26.09.2026 (Finn: „kann nicht stimmen — Kauf 230 €, erster Trade 230 €,
+    # Gesamtkosten 230 → 460, zweiter Trade 460 → 920 … ~7 Cent"): der Wert je Trade ist der ZUWACHS der Gesamtkosten
+    # (Risiko Slave = Gesamtkosten, TP ≈ Drawdown → jeder Gewinn verdoppelt sie), nicht der Stand. (230 × 1 + 460 × 0,5) / 1,5
+    # = 306,67 € je 4.500 $ → 0,0681 €/$. (Die alte Zeile hatte sich auch verrechnet: (200 + 225) / 1,5 wären 283, nicht 366,67.)
+    "Topstep|challenge": {"ziel_usd": 4500.0, "ziel_eur": 306.67},
     # 25.09.2026, Finn: „bei FundedNext-Funded-Account machen 4.000 $ grob 850 €". Nur FundedNext (CFD) — „FundedNext Futures" ist
     # eine eigene Firmengruppe (_firm_norm) und hat keine Vorgabe; sie wird hier bewusst nicht mitgenommen.
     "FundedNext|funded": {"ziel_usd": 4000.0, "ziel_eur": 850.0},
     # 26.09.2026, Finn (Statistik „Tradeify · Challenge" maß 0,047 €/$ → −3.600 $ ≙ +170 €): „ersetz das mit der Challenge —
     # wir nehmen die Daten hier für jeden der Trades". Auswertung Supabase 26.09.2026, 234 Tradeify-Challenges, Gesamtkosten
     # (Kauf + Hedge, EUR): nach dem 1. +3.600-Gewinn Ø 374 € (128 Konten), nach dem 2. Ø 641 € (42 Konten). Gewichtet nach
-    # Häufigkeit (374 × 128 + 641 × 42) / 170 = 440 € je 3.600 $ → 0,1222 €/$ (gleiches Muster wie Topstep|challenge).
-    "Tradeify|challenge": {"ziel_usd": 3600.0, "ziel_eur": 440.0},
+    # Häufigkeit (374 × 128 + 641 × 42) / 170 = 440 € je 3.600 $ → 0,1222 €/$. FALSCH (26.09.2026, Finn): 374/641 sind STÄNDE der
+    # Gesamtkosten, nicht der Wert eines Trades — der Trade bringt nur den Zuwachs (Daten: +174 € beim 1., +267 € beim 2. Gewinn).
+    # Finn: Tradeify-Challenge ist gleich teuer wie Topstep-Challenge → dieselbe Quote 0,0681 €/$ → 3.600 $ ≙ 245,33 €.
+    "Tradeify|challenge": {"ziel_usd": 3600.0, "ziel_eur": 245.33},
     # 25.09.2026, Finn am Statistik-Tab: „Topstep · Winning Day" fehlt (Rückfall-Quote 0,55). Er nennt „250/150 $ entsprechen 90 €" —
     # der genaue Bezug ($-Betrag) klärt die Koordination mit ihm; dann diese Zeile mit seinem Wert einkommentieren (wie Tradeify|wd):
     # "Topstep|wd": {"ziel_usd": 250.0, "ziel_eur": 90.0},
