@@ -6811,8 +6811,91 @@ def _wd_konto_groesse(acc):
     return float(m.group(1)) * 1000 if m else None
 
 
-def _wd_heute_zeile(p, acc, disp):
-    """Eine Plan-Zeile für /admin/wd-heute — der JSON-Vertrag steht in der Route."""
+def wd_start_balance(p, tv, acc, vorher):
+    """REIN RECHNEND (testbar, B14): Balance vor dem Trade → (wert, quelle, at). tv.balance_start zuerst ('balance_start');
+    sonst accounts.tv_balance als Vorläufer ('konto_balance'), aber nur wenn frisch: gelesen NACH dem Ende des letzten Trades
+    dieses Kontos (vorher = {ended_at, balance_end_da}), dessen Nachlesung nicht mehr aussteht (balance_end da), und nicht
+    NACH dem Ende dieses Plans (sonst wäre es schon die End-Balance). Sonst (None, None, None).
+    Hintergrund (Front end 27.09.2026): tv.balance_start kommt erst NACH dem Hedge-Open — der Hedge öffnet sofort nach dem Klick."""
+    bs = _wd_num((tv or {}).get("balance_start"))
+    if bs is not None and bs > 0:
+        return bs, "balance_start", (tv or {}).get("balance_start_at") or p.get("started_at")
+    kb = _wd_num((acc or {}).get("tv_balance"))
+    kb_at = str((acc or {}).get("tv_balance_at") or "")
+    if kb is None or kb <= 0 or not kb_at:
+        return None, None, None
+    if p.get("ended_at") and kb_at > str(p.get("ended_at")):
+        return None, None, None                    # schon die Balance NACH diesem Trade
+    if vorher:
+        if not vorher.get("balance_end_da"):
+            return None, None, None                # Nachlesung des vorigen Trades steht noch aus
+        if not vorher.get("ended_at") or kb_at <= str(vorher.get("ended_at")):
+            return None, None, None                # vor dem Ende des vorigen Trades gelesen
+    return kb, "konto_balance", kb_at
+
+
+def wd_vorher_waehlen(p, fruehere):
+    """REIN RECHNEND (testbar): letzter beendeter Trade desselben Kontos VOR diesem Plan → {ended_at, balance_end_da} | None.
+    fruehere = [{id, master_account_id, ended_at, bal_end}]."""
+    t = str(p.get("started_at") or p.get("start_um") or p.get("created_at") or "")
+    acc = str(p.get("master_account_id") or "")
+    kand = [f for f in (fruehere or []) if str(f.get("master_account_id") or "") == acc and str(f.get("id")) != str(p.get("id"))
+            and f.get("ended_at") and (not t or str(f["ended_at"]) < t)]
+    if not kand:
+        return None
+    f = max(kand, key=lambda x: str(x["ended_at"]))
+    return {"ended_at": f["ended_at"], "balance_end_da": _wd_num(f.get("bal_end")) is not None}
+
+
+def _wd_fruehere_trades(acc_ids):
+    """Beendete Pläne der Konten (14 Tage) für wd_vorher_waehlen — eine Abfrage je 80 Konten, Fehler → []."""
+    out, ids = [], sorted({str(x) for x in acc_ids if x})
+    seit = datetime.fromtimestamp(time.time() - 14 * 86400, timezone.utc).isoformat()
+    try:
+        for i in range(0, len(ids), 80):
+            out += _sb_all("trade_plans", {"select": "id,master_account_id,ended_at,bal_end:mt5_baseline->final->balance_end",
+                                           "master_account_id": f"in.({','.join(ids[i:i + 80])})", "ended_at": f"gte.{seit}"})
+    except Exception as e:
+        print(f"[wd-heute] ⚠️ frühere Trades: {type(e).__name__}: {e}", flush=True)
+    return out
+
+
+def wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher=None):
+    """REIN RECHNEND (testbar, B14, 27.09.2026 — Finn: „Bei den Winning Days ist der Stop Loss im Chart immer der
+    Liquidationspreis, also Balance 150.100. Wenn dieser Preis erreicht wird, wird der Fusion-Account geschlossen … bei den
+    anderen Sachen rechnen wir den Liquidationspreis über den Max Drawdown."): SL-Linie einer /admin/wd-heute-Zeile.
+    Winning Day: Liquidations-Level zu 100 % aus Start-Balance − (Kontogröße + 100 $) — hedge.sl_level_nq (vom Hedge-Open
+    eingefroren, F22) hat Vorrang, sonst gerechnet wie /admin/live-trades (_lt_liq). Der Master bekommt KEINEN SL.
+    Sonst: master_sl wie bisher. -> {sl_level_nq, sl_art 'liquidation'|'master_sl'|None, liq_balance, sl_hinweis}"""
+    hedge = hedge or {}
+    start_bal, liq_quelle, _start_at = wd_start_balance(p, tv, acc, vorher)
+    liq = _lt_liq(acc, p, start_bal, einstieg, richtung, ppl, kt)
+    typ = str((acc or {}).get("account_type") or "").lower()
+    wd = typ == "winning_days" or str(p.get("konto_typ") or "") == "winning_days" or (_wd_num(p.get("hedge_eur")) or 0) > 0
+    if wd:
+        # Rechnung zuerst (mit balance_start, sobald da), dann das beim Open eingefrorene Hedge-Level
+        h_lvl = _wd_num(hedge.get("sl_level_nq"))
+        if liq_quelle == "balance_start" and liq["level"] is not None:
+            lvl, q = liq["level"], "balance_start"
+        elif h_lvl:
+            lvl, q = h_lvl, (hedge.get("liq_quelle") or "hedge")
+        else:
+            lvl, q = liq["level"], (liq_quelle if liq["level"] is not None else None)
+        hinweis = None
+        if lvl is None:
+            hinweis = ("keine Start-Balance — Hedge schließt nur am TP" if start_bal is None
+                       else "Start-Balance nicht über Kontogröße + 100 $ — kein Liquidations-Level" if liq["balance"] is not None
+                       else "Kontogröße unbekannt — kein Liquidations-Level")
+        return {"sl_level_nq": lvl, "sl_art": "liquidation" if lvl is not None else None,
+                "liq_balance": liq["balance"], "liq_quelle": q, "sl_hinweis": hinweis}
+    lvl = (_wd_num(hedge.get("sl_level_nq")) or _wd_level(einstieg, richtung, sl_usd, ppl, kt, False)) if sl_usd else None
+    return {"sl_level_nq": lvl, "sl_art": "master_sl" if lvl is not None else None, "liq_balance": None, "liq_quelle": None,
+            "sl_hinweis": None}
+
+
+def _wd_heute_zeile(p, acc, disp, vorher=None):
+    """Eine Plan-Zeile für /admin/wd-heute — der JSON-Vertrag steht in der Route. vorher = letzter beendeter Trade
+    desselben Kontos vor diesem Plan ({ended_at, balance_end_da}) für den Balance-Vorläufer (B14)."""
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     hedge = base.get("hedge") if isinstance(base.get("hedge"), dict) else None
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
@@ -6843,6 +6926,7 @@ def _wd_heute_zeile(p, acc, disp):
         mpl = {"wert": round(wert, 2), "at": final.get("at"), "quelle": "final"}
     uid = str(p.get("user_id") or "")
     ext = str((acc or {}).get("external_id") or "").strip()
+    slz = wd_sl_zeile(p, acc, hedge, tv, einstieg, richtung, ppl, kt, sl_usd, vorher)
     return {
         "id": str(p.get("id")), "plan_id": str(p.get("id")), "user_id": uid, "person": disp.get(uid, uid[:8]),
         # farbe_key: derselbe Schluessel, mit dem die Flotte Personen faerbt (merken(w.uid) → mt5FleetFarbe(uid)) —
@@ -6858,7 +6942,9 @@ def _wd_heute_zeile(p, acc, disp):
         # hedge.tp_level_nq / sl_level_nq / schliesst_bei_nq sind beim Open eingefroren; einstieg_nq kann danach auf den Fill wandern.
         # Aus einstieg_nq + $-Distanz nur rechnen, wenn am Hedge kein Level steht (ungehedgte Winning Days, alte Pläne).
         "tp_level_nq": _wd_num((hedge or {}).get("tp_level_nq")) or _wd_level(einstieg, richtung, tp_usd, ppl, kt, True),
-        "sl_level_nq": (_wd_num((hedge or {}).get("sl_level_nq")) or _wd_level(einstieg, richtung, sl_usd, ppl, kt, False)) if sl_usd else None,
+        # B14/F22 (27.09.2026): Winning Days → Liquidations-Level als „SL" (100 %, Start-Balance − (Größe + 100 $)), sonst master_sl
+        "sl_level_nq": slz["sl_level_nq"], "sl_art": slz["sl_art"], "liq_balance": slz["liq_balance"], "liq_quelle": slz["liq_quelle"],
+        "sl_hinweis": slz["sl_hinweis"],
         "schliesst_bei_nq": _wd_num((hedge or {}).get("schliesst_bei_nq")) or None,
         "level_quelle": ("hedge" if _wd_num((hedge or {}).get("tp_level_nq")) else ("einstieg" if einstieg is not None else None)),
         "master_pl": mpl,
@@ -6986,11 +7072,12 @@ def admin_wd_heute():
         accs = {}
         ids = sorted(acc_ids)
         for i in range(0, len(ids), 80):
-            for a in sb_select("accounts", {"select": "id,name,firm,starting_balance,external_id", "id": f"in.({','.join(ids[i:i + 80])})"}):
+            for a in sb_select("accounts", {"select": "id,name,firm,account_type,starting_balance,external_id,tv_balance,tv_balance_at", "id": f"in.({','.join(ids[i:i + 80])})"}):
                 accs[str(a["id"])] = a
         zeilen = []
+        fruehere = _wd_fruehere_trades(acc_ids)       # B14: für den Balance-Vorläufer (konto_balance)
         for p in plaene:
-            z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp)
+            z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
             if _wd_heute_behalten(z, tag):
                 zeilen.append(z)
         return jsonify({"tag": tag, "jetzt": datetime.now(timezone.utc).isoformat(), "plaene": _wd_heute_sortieren(zeilen)})
@@ -7090,14 +7177,16 @@ def _lt_demo(richtung, tp_level, liq_level, kerzen, start_iso, ende_iso=None):
     return {"status": "laeuft", "minuten": len(ks), "letzte_minute": ks[-1][0].isoformat()}
 
 
-def _lt_zeile(p, acc, disp, kerzen_je_wurzel):
-    z = _wd_heute_zeile(p, acc, disp)
+def _lt_zeile(p, acc, disp, kerzen_je_wurzel, vorher=None):
+    z = _wd_heute_zeile(p, acc, disp, vorher)
     base = p.get("mt5_baseline") if isinstance(p.get("mt5_baseline"), dict) else {}
     tv = base.get("tv") if isinstance(base.get("tv"), dict) else {}
     fin = base.get("final") if isinstance(base.get("final"), dict) else {}
     bs, be = _wd_num(tv.get("balance_start")), _wd_num(fin.get("balance_end"))
     ppl, kt = WD_HEUTE_PPL.get(z.get("symbol_root") or ""), z.get("kt")
-    liq = _lt_liq(acc, p, bs, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
+    # B14: Start-Balance wie /admin/wd-heute — balance_start, sonst frische Konto-Balance (Vorläufer), sonst keine
+    start_bal, liq_quelle, _sa = wd_start_balance(p, tv, acc, vorher)
+    liq = _lt_liq(acc, p, start_bal, z.get("einstieg_nq"), z.get("richtung"), ppl, kt)
     liq_bal, liq_regel, liq_level = liq["balance"], liq["regel"], liq["level"]
     kerzen = kerzen_je_wurzel.get(z.get("symbol_root") or "") or []
     # Ende (B5): beendete Trades rechnen die Demo nur bis zum Ende — ended_at, sonst final.at, sonst completed_at
@@ -7110,6 +7199,7 @@ def _lt_zeile(p, acc, disp, kerzen_je_wurzel):
     z.update({"balance_start": bs, "equity_start": _wd_num(tv.get("equity_start")), "balance_end": be,
               "pl_balance": round(be - bs, 2) if (bs is not None and be is not None) else None,
               "liq_balance": liq_bal, "liq_regel": liq_regel, "liq_level_nq": liq_level, "demo": demo,
+              "liq_quelle": liq_quelle if liq_level is not None else None,
               "konto_balance": _wd_num((acc or {}).get("tv_balance")), "konto_balance_at": (acc or {}).get("tv_balance_at")})
     return z
 
@@ -7126,13 +7216,22 @@ def admin_live_trades():
         return err
     try:
         tage = max(1, min(14, int(request.args.get("tage") or 2)))
+        # F21 (27.09.2026): jeder PC-Tab fragt alle 55–70 s ?tage=1&nur_eigene=1&status=open — Last klein halten
+        nur_eigene = str(request.args.get("nur_eigene") or "") in ("1", "true", "ja")
+        nur_offen = str(request.args.get("status") or "").lower() == "open"
         disp, excluded = _wd_personen()
         seit = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - tage * 86400, timezone.utc).isoformat()
         felder = ("id,user_id,master_account_id,master_name,master_firm,route,notes,status,richtung,master_contracts,master_symbol,"
                   "master_symbol_root,master_tp,master_sl,master_pl,hedge_eur,hedge_faktor,start_um,start_um_gestartet_at,orbit_gesendet_at,"
                   "started_at,ended_at,completed_at,planned_for,created_at,mt5_baseline,slave_pl,pl_quelle,konto_typ")
-        rows = _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "in.(open,review,planned)"})
-        rows += _sb_all("trade_plans", {"select": felder, "route": "eq.tvv2", "status": "eq.completed", "completed_at": f"gte.{seit}"})
+        basis_f = {"select": felder, "route": "eq.tvv2"}
+        if nur_eigene:
+            basis_f["user_id"] = f"eq.{me}"
+        if nur_offen:
+            rows = _sb_all("trade_plans", dict(basis_f, status="eq.open"))
+        else:
+            rows = _sb_all("trade_plans", dict(basis_f, status="in.(open,review,planned)"))
+            rows += _sb_all("trade_plans", dict(basis_f, status="eq.completed", completed_at=f"gte.{seit}"))
         gesehen, plaene = set(), []
         for p in rows:
             pid = str(p.get("id"))
@@ -7153,14 +7252,20 @@ def admin_live_trades():
         kerzen = {}
         if starts:
             ab = min(starts)
-            for w in ("NQ", "MNQ"):
+            # F21: Kerzen nur für die Wurzeln der gelieferten Pläne (Rückfall: die andere Wurzel, preisgleich)
+            noetig = {_symbol_wurzel(p.get("master_symbol_root") or p.get("master_symbol")) for p in plaene if p.get("started_at")}
+            noetig = [w for w in ("NQ", "MNQ") if w in noetig] or ["NQ", "MNQ"]
+            for w in noetig:
                 kerzen[w] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{w}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
             # NQ und MNQ laufen preisgleich — fehlt einer Wurzel der Feed, nimmt die andere
-            if not kerzen["NQ"]:
-                kerzen["NQ"] = kerzen["MNQ"]
-            if not kerzen["MNQ"]:
-                kerzen["MNQ"] = kerzen["NQ"]
-        trades = [_lt_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, kerzen) for p in plaene]
+            for w, andere in (("NQ", "MNQ"), ("MNQ", "NQ")):
+                if not kerzen.get(w):
+                    if andere not in kerzen:
+                        kerzen[andere] = _sb_all("tv_kurs_1m", {"select": "minute,h,l", "wurzel": f"eq.{andere}", "minute": f"gte.{ab[:16]}", "order": "minute.asc"})
+                    kerzen[w] = kerzen[andere]
+        fruehere = _wd_fruehere_trades(ids)          # B14: für den Balance-Vorläufer (konto_balance)
+        trades = [_lt_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, kerzen, wd_vorher_waehlen(p, fruehere))
+                  for p in plaene]
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
         trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
         return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "trades": trades})

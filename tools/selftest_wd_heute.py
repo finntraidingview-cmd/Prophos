@@ -28,7 +28,8 @@ def lade():
         m = re.search(rf"^{name} = .*$", src, re.M)
         return m.group(0)
 
-    code = "\n".join([const("WD_HEUTE_PPL"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
+    code = "\n".join([const("WD_HEUTE_PPL"), const("LT_WD_BLOW_PLUS"), block("_lt_liq_balance"), block("_lt_liq"),
+                      block("wd_start_balance"), block("wd_vorher_waehlen"), block("wd_sl_zeile"), block("_wd_num"), block("_symbol_wurzel"), block("_cme_handelstag"),
                       block("_wd_level"), block("_wd_konto_groesse"), block("_wd_endlesung_zeile"), block("_wd_heute_zeile"),
                       block("_wd_heute_behalten"), block("_wd_heute_sortkey"), block("_wd_heute_sortieren"), block("_wd_ohne_master_sl")])
     exec(code, ns)
@@ -139,6 +140,45 @@ def main():
     check(zf["tv"] == {"einstieg_nq": 30000.25, "einstieg_quelle": "fill", "today_pnl_start": -12.5, "datum_start": "2026-09-25"}
           and zf["final"] == {"today_pnl": 258.5, "datum": "2026-09-25", "quelle": "puls", "art": "tp", "exit_fill": {"preis": 30027.25}},
           "Zeile: tv/final nur mit den Feldern für die Fill-Rechnung (kein konto, keine puls_versuche)")
+
+    # B14 (27.09.2026): WD-„SL" = Liquidations-Level 100 % (Start-Balance − (Kontogröße + 100 $)); Vorläufer frische Konto-Balance
+    sb, sz = a["wd_start_balance"], a["wd_sl_zeile"]
+    wdk = {"account_type": "winning_days", "starting_balance": 150000, "tv_balance": 151500, "tv_balance_at": "2026-09-27T09:00:00+00:00"}
+    pw = {"id": "w1", "konto_typ": "winning_days", "started_at": "2026-09-27T10:00:00+00:00", "ended_at": None}
+    check(sb(pw, {"balance_start": 152100}, wdk, None) == (152100.0, "balance_start", "2026-09-27T10:00:00+00:00"),
+          "Start-Balance: balance_start zuerst")
+    check(sb(pw, {}, wdk, {"ended_at": "2026-09-27T08:00:00+00:00", "balance_end_da": True})[:2] == (151500.0, "konto_balance"),
+          "ohne balance_start: frische Konto-Balance (nach dem Ende des letzten Trades, Nachlesung da)")
+    check(sb(pw, {}, wdk, {"ended_at": "2026-09-27T09:30:00+00:00", "balance_end_da": True}) == (None, None, None)
+          and sb(pw, {}, wdk, {"ended_at": "2026-09-27T08:00:00+00:00", "balance_end_da": False}) == (None, None, None)
+          and sb(dict(pw, ended_at="2026-09-27T08:30:00+00:00"), {}, wdk, None) == (None, None, None),
+          "Konto-Balance NICHT: vor dem Ende des letzten Trades, Nachlesung offen, oder schon nach diesem Trade gelesen")
+    check(sb(pw, {}, wdk, None)[:2] == (151500.0, "konto_balance") and sb(pw, {}, {}, None) == (None, None, None),
+          "erster Trade des Kontos: Konto-Balance ok; ohne alles: nichts")
+    r = sz(pw, wdk, {}, {"balance_start": 152100}, 30000.0, "buy", 20.0, 2, None)
+    check(r == {"sl_level_nq": 29950.0, "sl_art": "liquidation", "liq_balance": 150100.0, "liq_quelle": "balance_start", "sl_hinweis": None},
+          "WD BUY NQ ×2: Liq-Level 30.000 − 2.000 $/(20×2) = 29.950, sl_art liquidation, 100 %")
+    r = sz(pw, wdk, {}, {"balance_start": 150900}, 30000.0, "sell", 2.0, 4, None)
+    check(r["sl_level_nq"] == 30100.0 and r["liq_quelle"] == "balance_start", "WD SELL MNQ ×4: 800 $/(2×4) = 100 Pkt über dem Einstieg")
+    r = sz(pw, wdk, {"sl_level_nq": 29960.0, "liq_quelle": "konto_balance"}, {}, 30000.0, "buy", 20.0, 2, None,
+           {"ended_at": "2026-09-27T08:00:00+00:00", "balance_end_da": False})
+    check(r["sl_level_nq"] == 29960.0 and r["liq_quelle"] == "konto_balance", "ohne Start-Balance: das beim Open eingefrorene Hedge-Level (Quelle vom Hedge)")
+    r = sz(pw, wdk, {"sl_level_nq": 29960.0}, {"balance_start": 152100}, 30000.0, "buy", 20.0, 2, None)
+    check(r["sl_level_nq"] == 29950.0 and r["liq_quelle"] == "balance_start", "sobald balance_start da ist, gewinnt die Rechnung damit")
+    r = sz(pw, dict(wdk, tv_balance=None), {}, {}, 30000.0, "buy", 20.0, 2, None)
+    check(r["sl_level_nq"] is None and r["sl_art"] is None and "Start-Balance" in r["sl_hinweis"], "ohne jede Balance: kein Level + Hinweis")
+    r = sz(pw, wdk, {}, {"balance_start": 150050}, 30000.0, "buy", 20.0, 2, None)
+    check(r["sl_level_nq"] is None and "nicht über" in r["sl_hinweis"], "Start-Balance unter Kontogröße + 100 → kein Level + Hinweis")
+    r = sz({"id": "f1", "konto_typ": "funded"}, {"account_type": "funded"}, {}, {}, 30000.0, "buy", 20.0, 1, 400.0)
+    check(r == {"sl_level_nq": 29980.0, "sl_art": "master_sl", "liq_balance": None, "liq_quelle": None, "sl_hinweis": None},
+          "Nicht-WD: master_sl wie bisher")
+    vw = a["wd_vorher_waehlen"]
+    fr = [{"id": "a", "master_account_id": "K", "ended_at": "2026-09-27T07:00:00+00:00", "bal_end": 151000},
+          {"id": "b", "master_account_id": "K", "ended_at": "2026-09-27T08:00:00+00:00", "bal_end": None},
+          {"id": "c", "master_account_id": "K", "ended_at": "2026-09-27T11:00:00+00:00", "bal_end": 1},
+          {"id": "d", "master_account_id": "X", "ended_at": "2026-09-27T09:00:00+00:00", "bal_end": 1}]
+    check(vw({"id": "w", "master_account_id": "K", "started_at": "2026-09-27T10:00:00+00:00"}, fr)
+          == {"ended_at": "2026-09-27T08:00:00+00:00", "balance_end_da": False}, "vorheriger Trade: jüngster VOR dem Start, gleiches Konto")
 
     print("\n" + ("alle Tests bestanden" if ok else "FEHLER"))
     return 0 if ok else 1
