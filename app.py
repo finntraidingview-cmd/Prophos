@@ -4661,6 +4661,11 @@ HQ_VORGABEN = {
     # 25.09.2026, Finn: „bei FundedNext-Funded-Account machen 4.000 $ grob 850 €". Nur FundedNext (CFD) — „FundedNext Futures" ist
     # eine eigene Firmengruppe (_firm_norm) und hat keine Vorgabe; sie wird hier bewusst nicht mitgenommen.
     "FundedNext|funded": {"ziel_usd": 4000.0, "ziel_eur": 850.0},
+    # 26.09.2026, Finn (Statistik „Tradeify · Challenge" maß 0,047 €/$ → −3.600 $ ≙ +170 €): „ersetz das mit der Challenge —
+    # wir nehmen die Daten hier für jeden der Trades". Auswertung Supabase 26.09.2026, 234 Tradeify-Challenges, Gesamtkosten
+    # (Kauf + Hedge, EUR): nach dem 1. +3.600-Gewinn Ø 374 € (128 Konten), nach dem 2. Ø 641 € (42 Konten). Gewichtet nach
+    # Häufigkeit (374 × 128 + 641 × 42) / 170 = 440 € je 3.600 $ → 0,1222 €/$ (gleiches Muster wie Topstep|challenge).
+    "Tradeify|challenge": {"ziel_usd": 3600.0, "ziel_eur": 440.0},
     # 25.09.2026, Finn am Statistik-Tab: „Topstep · Winning Day" fehlt (Rückfall-Quote 0,55). Er nennt „250/150 $ entsprechen 90 €" —
     # der genaue Bezug ($-Betrag) klärt die Koordination mit ihm; dann diese Zeile mit seinem Wert einkommentieren (wie Tradeify|wd):
     # "Topstep|wd": {"ziel_usd": 250.0, "ziel_eur": 90.0},
