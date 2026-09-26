@@ -1855,6 +1855,14 @@
   #dashboard-view .tc2-hedge > *{white-space:nowrap}
   /* Winning-Days-Karten unter Markt (25.09.2026, Finn: „ich will erstmal eine cleane Order sehen und die unterscheiden können") */
   #dashboard-view .mwd-liste{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:8px}
+  /* Bulk: Vorschau „Aus dem Dashboard einfügen" (F11, 27.09.2026) */
+  #bulk-paste-vorschau .bpv{display:flex;gap:10px;align-items:flex-start;padding:8px 11px;border-top:1px solid var(--border);font-size:12.5px}
+  #bulk-paste-vorschau .bpv:first-child{border-top:none}
+  #bulk-paste-vorschau .bpv input{margin-top:3px;width:15px;height:15px;flex:none}
+  #bulk-paste-vorschau .bpv.aus{opacity:.5}
+  #bulk-paste-vorschau .bpv .id{font-family:var(--mono);font-weight:600;word-break:break-all}
+  #bulk-paste-vorschau .bpv .m{display:block;font-size:11.5px;color:var(--sub);margin-top:1px}
+  #bulk-paste-vorschau .bpv .bal{margin-left:auto;font-family:var(--mono);white-space:nowrap;text-align:right}
   /* Live Trades: Farbpunkt je Trade (= Farbe seiner Linien im Chart), hohl = Linien aus (26.09.2026, F6) */
   #dashboard-view .wdl-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--mwd-farbe,#667085);background:var(--mwd-farbe,#667085);flex:none;padding:0;cursor:pointer}
   #dashboard-view .wdl-dot.aus{background:transparent}
@@ -9842,6 +9850,21 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
+
+      <!-- AUS DEM DASHBOARD EINFÜGEN (27.09.2026, F11, Finn: „Ich kopiere einfach alles, was ich im Dashboard sehe, und füge es einmal ein …
+           wenn die External-ID schon mal in Prophos war, wird sie nicht reingenommen. Aus der Anzahl der neuen IDs ergibt sich die Anzahl").
+           Erkannt wird nur das Tradeify-/Tradovate-Dashboard (bulkDashboardParsen); andere Formate → Meldung, der Weg darunter bleibt. -->
+      <div class="field" id="bulk-paste-box" style="margin-bottom:14px">
+        <label>Aus dem Dashboard einfügen <span style="font-weight:400;color:var(--sub)">(Tradeify · Tradovate)</span></label>
+        <textarea class="input" id="bulk-paste" rows="4" placeholder="Im Dashboard der Firma alles markieren, kopieren und hier einfügen — Kennung, Größe und Typ werden erkannt, schon vorhandene Konten übersprungen" style="font-size:12.5px;resize:vertical" autocomplete="off"></textarea>
+        <div id="bulk-paste-vorschau" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
+        <div id="bulk-paste-aktion" style="display:none;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+          <span id="bulk-paste-zaehler" style="font-size:12px;color:var(--sub)"></span>
+          <button class="btn btn-primary" id="bulk-paste-save" type="button" style="margin-left:auto">Neue anlegen</button>
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-top:6px">Kaufpreis, Max Drawdown, Trade-Limits und „Im WD-Farm" aus dem Formular darunter gelten für alle eingefügten Konten. Die Balance aus dem Dashboard wird als Live-Stand übernommen, nicht als manuelle Balance.</div>
+      </div>
+      <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
 
       <div class="field" style="margin-bottom:14px">
         <label>Vorlage</label>
@@ -18919,9 +18942,12 @@
   async function tvKontoBalanceSchreiben(accountId, b, at){
     if(!accountId || !b || !(typeof b.balance === 'number' && isFinite(b.balance) && b.balance > 1000)) return
     try{
-      const { error } = await supabase.from('accounts').update({ tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString() }).eq('id', accountId)
+      const upd = { tv_balance: b.balance, tv_equity: (typeof b.equity === 'number' && isFinite(b.equity)) ? b.equity : null, tv_balance_at: at || new Date().toISOString(), tv_balance_quelle: 'puls' }
+      let { error } = await supabase.from('accounts').update(upd).eq('id', accountId)
+      // Spalte tv_balance_quelle noch nicht angelegt (F11, 27.09.2026) → ohne sie schreiben
+      if(error && /tv_balance_quelle/.test(String(error.message || ''))){ delete upd.tv_balance_quelle; ({ error } = await supabase.from('accounts').update(upd).eq('id', accountId)) }
       if(error) console.warn('[tv-balance] Konto', error.message || error)
-      else { const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = at || new Date().toISOString() } }
+      else { const a = (accounts || []).find(x => String(x.id) === String(accountId)); if(a){ a.tvBalance = b.balance; a.tvBalanceAt = upd.tv_balance_at; a.tvBalanceQuelle = 'puls' } }
     }catch(e){ console.warn('[tv-balance] Konto', e) }
   }
   // Start-Baseline direkt nach dem bewiesenen Kauf-Klick: Today's P&L JETZT, als Startwert. Ohne Antwort
@@ -25281,6 +25307,7 @@
       wdSl: row.wd_sl != null ? Number(row.wd_sl) : null,
       // Live-Balance aus TradingView (26.09.2026, Puls-Lesung bei Start/Nachlesung) — jüngste Quelle für die Hedge-Staffel
       tvBalance: row.tv_balance != null ? Number(row.tv_balance) : null, tvBalanceAt: row.tv_balance_at || null,
+      tvBalanceQuelle: row.tv_balance_quelle || null,   // 'puls' | 'dashboard' (F11, 27.09.2026); null = Puls
       // Kontogröße (26.09.2026, F9): starting_balance statt der manuellen Balance — Rückfall ist der Kontoname („150k")
       startingBalance: row.starting_balance != null ? Number(row.starting_balance) : null,
       // WD-Farm-Haken (23.09.2026, Finn: „nur bei Fundeds, wo ich einen Haken setzen kann ‚Zu WD-Farm
@@ -25991,7 +26018,7 @@
           const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
           if(liveBal == null || liveSrc === 'Duplikum' || !altAt || tvAt > altAt){
             if(liveBal != null) tvNeben = `${escapeHtml(liveSrc)} ${(liveSrc === 'Duplikum' || liveSrc === 'MT5-Copier' || liveSrc === 'MT5-Cloud') ? dupFmtMoney(liveBal, liveCcy) : fmtMoney(liveBal)} · älter`
-            liveBal = a.tvBalance; liveSrc = 'TradingView'; liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
+            liveBal = a.tvBalance; liveSrc = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard (eingefügt)' : 'TradingView'; liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
           }
         }
         const nachlese = istFut && typeof tvV2NachleseOffen === 'function' ? tvV2NachleseOffen(a.id) : null
@@ -26004,7 +26031,7 @@
           // auf dem Konto", aber er behauptet nicht „jetzt gerade" — ab einer
           // Minute heisst er ehrlich „Stand". Die Zeitangabe daneben stand hier
           // schon immer, sie trägt die Aussage jetzt mit.
-          const cloudAlt = liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000
+          const cloudAlt = (liveSrc === 'MT5-Cloud' && liveTime && (Date.now() - liveTime) > 60000) || liveSrc === 'Dashboard (eingefügt)'   // eingefügter Stand ist nie „Live" (F11)
           balCell = `
             <div style="font-weight:600;color:var(--ink);font-family:var(--mono)">${balFormatted}</div>
             <div style="font-size:11px;color:var(--sub);margin-top:2px">
@@ -26335,24 +26362,24 @@
     const f2 = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const vor = iso => { const ms = Date.now() - (Date.parse(iso || '') || 0), m = Math.round(ms / 60000)
       return m < 1 ? 'gerade eben' : m < 60 ? `vor ${m} min` : m < 1440 ? `vor ${Math.round(m / 60)} h` : `vor ${Math.round(m / 1440)} Tagen` }
-    const zeigeBal = (b, at) => {
+    const zeigeBal = (b, at, quelle) => {
       bal.textContent = b != null ? f2(b) + ' $' : '–'
-      stand.textContent = b != null ? `${at ? vor(at) + ' · ' : ''}aus Orbit-V2-Trade (Puls)` : 'noch nicht gelesen'
+      stand.textContent = b != null ? `${at ? vor(at) + ' · ' : ''}${quelle === 'dashboard' ? 'aus Dashboard eingefügt' : 'aus Orbit-V2-Trade (Puls)'}` : 'noch nicht gelesen'
       stand.title = at ? new Date(at).toLocaleString('de-DE') : ''
     }
     _acTvLiveId = acc ? acc.id : null
-    zeigeBal(acc && acc.tvBalance != null ? acc.tvBalance : null, acc && acc.tvBalanceAt)
+    zeigeBal(acc && acc.tvBalance != null ? acc.tvBalance : null, acc && acc.tvBalanceAt, acc && acc.tvBalanceQuelle)
     pl.textContent = '–'; pl.style.color = ''; plSub.textContent = 'Balance nachher − vorher'
     if(!acc || !acc.id) return
     const id = acc.id
     try{
       const [ra, rp] = await Promise.all([
-        supabase.from('accounts').select('tv_balance,tv_balance_at').eq('id', id).maybeSingle(),
+        supabase.from('accounts').select('*').eq('id', id).maybeSingle(),   // '*': tv_balance_quelle kann noch fehlen (F11)
         supabase.from('trade_plans').select('id,ended_at,completed_at,created_at,bs:mt5_baseline->tv->balance_start,be:mt5_baseline->final->balance_end')
           .eq('master_account_id', id).order('created_at', { ascending: false }).limit(15)
       ])
       if(_acTvLiveId !== id) return
-      if(ra && ra.data && ra.data.tv_balance != null) zeigeBal(Number(ra.data.tv_balance), ra.data.tv_balance_at)
+      if(ra && ra.data && ra.data.tv_balance != null) zeigeBal(Number(ra.data.tv_balance), ra.data.tv_balance_at, ra.data.tv_balance_quelle)
       const zahl = v => (v != null && isFinite(Number(v))) ? Number(v) : null
       const t = ((rp && rp.data) || []).find(x => zahl(x.bs) != null && zahl(x.be) != null)
       const offen = (typeof tvV2NachleseOffen === 'function') ? tvV2NachleseOffen(id) : null
@@ -27257,6 +27284,8 @@
       if(bEl.wdFarm) bEl.wdFarm.checked = true   // Standard: drin (Finn 23.09.2026)
       bEl.count.value    = ''
       bEl.startnum.value = '1'
+      { const bp = document.getElementById('bulk-paste'); if(bp) bp.value = '' }   // F11: Einfüge-Feld leeren
+      { const v = document.getElementById('bulk-paste-vorschau'); if(v) v.style.display = 'none'; const a2 = document.getElementById('bulk-paste-aktion'); if(a2) a2.style.display = 'none' }
       bEl.template.value = ''
       bEl.extids.value   = ''
       if(bEl.creds) bEl.creds.value = ''
@@ -27287,6 +27316,117 @@
       bEl.msg.textContent = text || ''
       bEl.msg.className = 'modal-msg' + (kind ? ' ' + kind : '')
     }
+
+    /* AUS DEM DASHBOARD EINFÜGEN (27.09.2026, F11). REIN RECHNEND: Dashboard-Text → Blöcke. Kennung = Zeile, die nur aus einem
+     * großgeschriebenen Alphanumerik-Token ≥ 10 Zeichen mit Ziffern besteht (FTDFYSLX150372060459, TDFYSL150690223134). Davor
+     * „Traded …" und der Status (Active/Failed/Passed …), davor der Titel („Select Flex Funded 150K"); danach Plattform und die
+     * Paare „Account Balance" / „Trailing Max Drawdown" → nächste $-Zeile. Nur Tradeify/Tradovate ist bekannt — nichts raten. */
+    const BULK_PRAEFIX = [[/^F?TDFY/, 'Tradeify']]   // weitere Firmen hier ergänzen, sobald ihr Dashboard-Text bekannt ist
+    const BULK_STATUS = /^(active|failed|passed|inactive|breached|disabled|closed)$/i
+    function bulkGeld(t){ const m = /-?\$?\s*([\d,]+(?:\.\d+)?)/.exec(String(t || '')); if(!m) return null; const v = parseFloat(m[1].replace(/,/g, '')); return isFinite(v) ? v : null }
+    function bulkDashboardParsen(text){
+      const z = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean)
+      const istId = x => /^[A-Z][A-Z0-9]{9,}$/.test(x) && /\d/.test(x) && /[A-Z]{2}/.test(x)
+      const idx = z.map((x, i) => istId(x) ? i : -1).filter(i => i >= 0)
+      return idx.map((i, k) => {
+        const id = z[i], bis = k + 1 < idx.length ? idx[k + 1] : z.length
+        let st = -1; for(let j = i - 1; j >= Math.max(0, i - 4); j--){ if(BULK_STATUS.test(z[j])){ st = j; break } }
+        const titel = st > 0 ? z[st - 1] : (i >= 3 ? z[i - 3] : '')
+        const status = st >= 0 ? z[st] : ''
+        const nach = (lbl) => { for(let j = i + 1; j < bis; j++) if(lbl.test(z[j])){ for(let q = j + 1; q < Math.min(bis, j + 3); q++){ const v = bulkGeld(z[q]); if(v != null) return v } } return null }
+        const plattform = (i + 1 < bis && /^(tradovate|rithmic|tradingview|ninjatrader|projectx|dxtrade)$/i.test(z[i + 1])) ? z[i + 1] : ''
+        const pr = BULK_PRAEFIX.find(([rx]) => rx.test(id))
+        const gm = /(\d+(?:[.,]\d+)?)\s*K\b/i.exec(titel)
+        const groesse = gm ? Math.round(parseFloat(gm[1].replace(',', '.')) * 1000) : null
+        return { id, titel, status, plattform, firma: pr ? pr[1] : '', groesse,
+                 typ: (/funded/i.test(titel) || /^F/.test(id)) ? 'funded' : 'challenge',
+                 balance: nach(/^account balance$/i), trailing: nach(/^trailing max drawdown$/i) }
+      })
+    }
+    window._bulkDashboardParsen = bulkDashboardParsen   // Test-Haken
+    const bulkPaste = { bloecke: [], an: new Map(), treffer: new Map(), alleGeprueft: false, lauf: 0, timer: null }
+    const bpEl = { box: document.getElementById('bulk-paste'), vs: document.getElementById('bulk-paste-vorschau'), akt: document.getElementById('bulk-paste-aktion'),
+                   zaehler: document.getElementById('bulk-paste-zaehler'), save: document.getElementById('bulk-paste-save') }
+    // Dubletten: eigene Konten (aktiv + archiviert) sofort; alle Nutzer über Backend POST /admin/konten-pruefen (B10), sobald es sie gibt
+    async function bulkPastePruefen(){
+      const lauf = ++bulkPaste.lauf, ids = bulkPaste.bloecke.map(b => b.id)
+      const arch = (typeof getArchive === 'function') ? getArchive() : {}
+      bulkPaste.treffer = new Map(); bulkPaste.alleGeprueft = false
+      for(const a of (accounts || [])){ const e = String(a.externalId || '').trim().toUpperCase(); if(e && ids.includes(e)) bulkPaste.treffer.set(e, { name: a.name, archiviert: !!arch[a.id], person: '' }) }
+      bulkPasteRender()
+      try{
+        const { data: { session } } = await supabase.auth.getSession(); const tok = session?.access_token; if(!tok || !ids.length) return
+        const r = await fetch(`${WATCHER_HOME}/admin/konten-pruefen`, { method: 'POST', headers: { 'sb-token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ external_ids: ids }) })
+        if(!r.ok) return
+        const d = await r.json().catch(() => null); if(lauf !== bulkPaste.lauf || !d || !Array.isArray(d.treffer)) return
+        for(const t of d.treffer){ const e = String(t.external_id || '').trim().toUpperCase(); if(e) bulkPaste.treffer.set(e, { name: t.name || '', archiviert: !!t.archiviert, person: t.person || '' }) }
+        bulkPaste.alleGeprueft = true
+        bulkPasteRender()
+      }catch(_){ /* Route fehlt noch → Hinweis „nur eigene Konten geprüft" bleibt */ }
+    }
+    function bulkPasteRender(){
+      const b = bulkPaste.bloecke
+      if(!bpEl.vs) return
+      if(!String(bpEl.box.value || '').trim()){ bpEl.vs.style.display = 'none'; bpEl.akt.style.display = 'none'; return }
+      bpEl.vs.style.display = ''
+      if(!b.length){ bpEl.vs.innerHTML = '<div class="bpv" style="color:var(--sub)">Keine Konto-Kennung erkannt — bekannt ist nur das Tradeify-/Tradovate-Dashboard. Konten sonst mit dem Formular darunter anlegen.</div>'; bpEl.akt.style.display = 'none'; return }
+      const firmaForm = bEl.firm.value.trim()
+      const de = v => v == null ? '–' : Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      let neu = 0, vorh = 0
+      bpEl.vs.innerHTML = b.map(x => {
+        const t = bulkPaste.treffer.get(x.id), firma = x.firma || firmaForm
+        const sperre = t ? `schon in Prophos · ${t.archiviert ? 'archiviert' : 'aktiv'}${t.person ? ' · ' + t.person : ''}${t.name ? ' · ' + t.name : ''}` : !firma ? 'Firma unbekannt — oben im Formular „Firm" eintragen' : ''
+        if(t) vorh++
+        const standard = !sperre && !/failed|breached/i.test(x.status)
+        const an = sperre ? false : (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : standard)
+        if(an) neu++
+        return `<label class="bpv ${an ? '' : 'aus'}"><input type="checkbox" data-bp="${escapeHtml(x.id)}" ${an ? 'checked' : ''} ${sperre ? 'disabled' : ''}>
+          <span style="min-width:0"><span class="id">${escapeHtml(x.id)}</span>
+          <span class="m">${escapeHtml(x.titel || '–')}${x.status ? ' · ' + escapeHtml(x.status) : ''}</span>
+          <span class="m">${sperre ? escapeHtml(sperre) : `${escapeHtml(firma)} · ${x.typ === 'funded' ? 'Funded' : 'Challenge'} · ${x.groesse ? x.groesse.toLocaleString('de-DE') : 'Größe ?'}${x.plattform ? ' · ' + escapeHtml(x.plattform) : ''}`}</span></span>
+          <span class="bal">${x.balance != null ? '$' + de(x.balance) : ''}</span></label>`
+      }).join('')
+      bpEl.vs.querySelectorAll('[data-bp]').forEach(cb => cb.addEventListener('change', () => { bulkPaste.an.set(cb.dataset.bp, cb.checked); bulkPasteRender() }))
+      bpEl.zaehler.textContent = `${b.length} erkannt · ${neu} neu · ${vorh} schon vorhanden${bulkPaste.alleGeprueft ? '' : ' (nur eigene Konten geprüft)'}`
+      bpEl.akt.style.display = 'flex'
+      bpEl.save.disabled = !neu
+      bpEl.save.textContent = neu ? `${neu} neu anlegen` : 'Nichts Neues'
+    }
+    bpEl.box?.addEventListener('input', () => {
+      clearTimeout(bulkPaste.timer)
+      bulkPaste.timer = setTimeout(() => { bulkPaste.bloecke = bulkDashboardParsen(bpEl.box.value); bulkPaste.an = new Map(); bulkPastePruefen() }, 250)
+    })
+    bEl.firm?.addEventListener('input', () => { if(bulkPaste.bloecke.length) bulkPasteRender() })
+    bpEl.save?.addEventListener('click', async () => {
+      if(!currentUserId){ setBulkMsg('Nicht eingeloggt.', 'err'); return }
+      const firmaForm = bEl.firm.value.trim(), jetzt = new Date().toISOString()
+      const costRaw = parseFloat(bEl.cost.value), maxddRaw = parseFloat(bEl.maxdd.value)
+      const lossRaw = parseFloat(bEl.maxLossTrade?.value), profitRaw = parseFloat(bEl.maxProfitTrade?.value), dailyRaw = parseFloat(bEl.maxDailyDd?.value)
+      const pos = v => (!isNaN(v) && v > 0) ? v : null
+      const wahl = bulkPaste.bloecke.filter(x => !bulkPaste.treffer.has(x.id) && (x.firma || firmaForm) && (bulkPaste.an.has(x.id) ? bulkPaste.an.get(x.id) : !/failed|breached/i.test(x.status)))
+      if(!wahl.length) return
+      bpEl.save.disabled = true
+      let ok = 0, fehler = 0, ohneQuelle = false
+      for(const x of wahl){
+        bpEl.save.textContent = `Anlegen… ${ok + fehler + 1}/${wahl.length}`
+        const row = { user_id: currentUserId, name: `${x.titel || (x.firma || firmaForm)} · ${x.id.slice(-5)}`, firm: x.firma || firmaForm, account_type: x.typ,
+                      external_id: x.id, account_size: x.groesse, starting_balance: x.groesse, purchase_cost: pos(costRaw), max_drawdown: pos(maxddRaw),
+                      max_daily_drawdown: pos(dailyRaw), max_loss_per_trade: pos(lossRaw), max_profit_per_trade: pos(profitRaw), wd_farm: !!bEl.wdFarm?.checked }
+        // Balance aus dem Dashboard = Live-Stand (tv_balance), NICHT die manuelle Balance; Quelle 'dashboard' (Spalte kann noch fehlen)
+        if(x.balance != null && x.balance > 1000) Object.assign(row, { tv_balance: x.balance, tv_balance_at: jetzt }, ohneQuelle ? {} : { tv_balance_quelle: 'dashboard' })
+        try{
+          let { data, error } = await supabase.from('accounts').insert(row).select('*').single()
+          if(error && /tv_balance_quelle/.test(String(error.message || ''))){ ohneQuelle = true; delete row.tv_balance_quelle; ({ data, error } = await supabase.from('accounts').insert(row).select('*').single()) }
+          if(error) throw error
+          const neuAcc = rowToAccount(data); accounts.unshift(neuAcc); ok++
+          if(row.purchase_cost) await insertAutoTransaction({ account_id: neuAcc.id, account_name: neuAcc.name, account_firm: neuAcc.firm, kind: 'account_purchase',
+            amount: -Math.abs(row.purchase_cost), currency: 'EUR', occurred_at: jetzt.slice(0, 10), notes: 'Account-Kauf (auto)', auto_generated: true })
+        }catch(e){ console.error('[bulk-paste]', x.id, e); fehler++ }
+      }
+      renderAccounts(); renderOverviewKpis(); updateSidebarBadges()
+      if(!fehler){ closeBulkModal(); if(typeof showSyncBanner === 'function'){ showSyncBanner(`✓ ${ok} Konto${ok === 1 ? '' : 'en'} aus dem Dashboard angelegt`, 'ok'); if(typeof hideSyncBannerSoon === 'function') hideSyncBannerSoon(5000) } }
+      else { setBulkMsg(`${ok} angelegt, ${fehler} Fehler — Konsole prüfen.`, 'err'); bulkPastePruefen() }
+    })
 
     async function saveBulkAccounts(){
       const firm     = bEl.firm.value.trim()
@@ -33408,7 +33548,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.645'
+  const OS_TAB_BUILD = '2026-09-22.649'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
