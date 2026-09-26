@@ -8759,6 +8759,77 @@ def reader_diagnose_schreiben(kennung):
     return jsonify({"ok": True})
 
 
+# ══ KONTEN PRÜFEN (27.09.2026, Auftrag Koordination B10 für F11: Konten per Einfügen des Tradeify-Dashboard-Texts
+# anlegen, Dubletten über ALLE Nutzer ausschließen) ════════════════════════════════════════════════════════════════
+# accounts liegt unter RLS am Login — ob eine External ID schon bei einer ANDEREN Person liegt, sieht nur der Service-Key.
+# Ausgeliefert werden nur die Treffer (External ID, Konto-ID, Person, Name, Firma, Typ, archiviert), nichts sonst.
+# „archiviert" = derselbe Archiv-Stand wie in /admin/overview (user_settings key 'archive', je Konto-ID).
+KONTEN_PRUEFEN_MAX = 200
+
+
+def konten_pruefen_ids(roh):
+    """REIN RECHNEND (testbar): Eingabe → Liste getrimmter External IDs (Reihenfolge, ohne Leere/Dubletten, max. 200,
+    je max. 64 Zeichen). None, wenn keine Liste."""
+    if not isinstance(roh, list):
+        return None
+    out, gesehen = [], set()
+    for x in roh:
+        if not isinstance(x, (str, int)):
+            continue
+        v = str(x).strip()[:64]
+        k = v.casefold()
+        if v and k not in gesehen:
+            gesehen.add(k)
+            out.append(v)
+        if len(out) >= KONTEN_PRUEFEN_MAX:
+            break
+    return out
+
+
+def konten_treffer(ids, konten, disp, archiviert):
+    """REIN RECHNEND (testbar): welche External IDs gibt es schon (Groß/klein egal, getrimmt), bei wem?
+    → [{external_id, account_id, person, name, firm, account_type, archiviert}] in der Reihenfolge der Eingabe;
+    external_id = wie am Konto gespeichert. Mehrere Konten mit derselben ID → alle."""
+    je = {}
+    for a in konten or []:
+        e = str((a or {}).get("external_id") or "").strip()
+        if e:
+            je.setdefault(e.casefold(), []).append(a)
+    aus = {str(x) for x in (archiviert or ())}
+    out = []
+    for i in ids or []:
+        for a in je.get(str(i).strip().casefold(), []):
+            uid = str(a.get("user_id") or "")
+            out.append({"external_id": str(a.get("external_id") or "").strip(), "account_id": str(a.get("id")),
+                        "person": (disp or {}).get(uid) or uid[:8], "name": a.get("name") or "",
+                        "firm": a.get("firm") or "", "account_type": a.get("account_type") or "",
+                        "archiviert": str(a.get("id")) in aus})
+    return out
+
+
+@app.route("/admin/konten-pruefen", methods=["POST", "OPTIONS"])
+def admin_konten_pruefen():
+    """POST /admin/konten-pruefen  Body {external_ids: [...]} (≤ 200) → {treffer: [{external_id, account_id, person, name,
+    firm, account_type, archiviert}]}. Auth: eingeloggt (sb-token), wie /admin/wd-heute."""
+    if request.method == "OPTIONS":
+        return "", 200
+    me, err = _wd_login()
+    if err:
+        return err
+    ids = konten_pruefen_ids((request.get_json(silent=True) or {}).get("external_ids"))
+    if ids is None:
+        return jsonify({"error": "external_ids muss eine Liste sein"}), 400
+    if not ids:
+        return jsonify({"treffer": []})
+    try:
+        konten = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id", "external_id": "not.is.null"})
+        disp, _excluded = _wd_personen()
+        return jsonify({"treffer": konten_treffer(ids, konten, disp, _acc_plan_archiviert())})
+    except Exception as e:
+        print(f"[konten-pruefen] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"error": f"Prüfung nicht möglich ({type(e).__name__})"}), 502
+
+
 start_kompass()
 
 
