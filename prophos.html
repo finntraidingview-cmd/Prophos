@@ -33408,7 +33408,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.643'
+  const OS_TAB_BUILD = '2026-09-22.645'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38331,7 +38331,8 @@
       konten = (data || []).filter(a => WD_FUTURES_RX.test(a.firm || '')).map(a => ({
         id: String(a.id), user_id: String(a.user_id), person: a.person || String(a.user_id).slice(0, 8), name: a.name || '', firm: a.firm || '',
         type: a.account_type || '', ext: String(a.external_id || '').trim(), max_drawdown: a.max_drawdown != null ? Number(a.max_drawdown) : null,
-        balance: a.balance != null ? Number(a.balance) : null, wd_farm: !!a.wd_farm,
+        // Kontogröße aus starting_balance (RPC liefert es seit Backend 62aa1c9, F10 26.09.2026); balance (manuell) wird nicht mehr mitgenommen
+        starting_balance: a.starting_balance != null ? Number(a.starting_balance) : null, wd_farm: !!a.wd_farm,
         // 23.09.2026: eigene Spalten wd_tp/wd_sl — max_profit/max_loss_per_trade sind die Prop-Firm-LIMITS (Tradeify 3600/4500),
         // die standen hier vorher drin und Jacobs Farmer-Pläne bekamen TP 3600 statt 270–290
         tp_vorgabe: a.wd_tp > 0 ? Number(a.wd_tp) : null, sl_vorgabe: a.wd_sl > 0 ? Number(a.wd_sl) : null,
@@ -38357,7 +38358,9 @@
       const ok = new Set(rail.konten.map(k => String(k.id)))
       for(const k of konten){ k.archiviert = !ok.has(k.id); if(k.archiviert) k.wd_farm = false }
     }
-    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: null, sl_vorgabe: null, winning_days: null, live_balance: null }))
+    if(!konten && rail && Array.isArray(rail.konten)) konten = rail.konten.map(k => ({ ...k, id: String(k.id), user_id: String(k.user_id), tp_vorgabe: null, sl_vorgabe: null, winning_days: null,
+      // live_balance/starting_balance aus Railway übernehmen, falls geliefert (Backend B8, F10 26.09.2026) — vorher hart null
+      live_balance: k.live_balance != null ? Number(k.live_balance) : null, live_at: k.live_at || null, starting_balance: k.starting_balance != null ? Number(k.starting_balance) : null }))
     if(!konten && !rail){ _wd.daten = null; return null }
     // belegt / plaene_tag (23.09.2026): welche Konten wirklich einen fremden Plan haben, und welche Farmer-Pläne für
     // diesen Tag schon existieren — Grundlage für die Selbstheilung der Zeilen (wdZeilenHeilen)
