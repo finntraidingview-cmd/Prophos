@@ -8149,7 +8149,7 @@
               <div class="panel-title">IDs <span style="font-weight:400;color:var(--sub);font-size:12px">· eine Zeile je ID in Block-Reihenfolge · anklicken zeigt die Konten der ID</span></div>
               <div class="vp-zeile">
                 <input type="search" class="input vp-in" id="wd-such" placeholder="ID / Konto / Firma suchen" style="width:190px;text-align:left">
-                <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm" checked><span>nur IDs mit Konten drin</span></label>
+                <label class="at-toggle" style="margin-left:6px"><input type="checkbox" id="wd-nur-farm"><span>nur IDs mit Konten drin</span></label>
                 <span class="mono" id="wd-k-zeile" style="font-size:12px;color:var(--sub);margin-left:10px"></span>
               </div>
             </div>
@@ -32906,7 +32906,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.621'
+  const OS_TAB_BUILD = '2026-09-22.622'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -37867,6 +37867,9 @@
   const wdKontoDaten = id => ((_wd.daten && _wd.daten.konten) || []).find(q => String(q.id) === String(id)) || null
   // IDs, die NIE gefahren werden (Finn 23.09.2026: „Emin und Finn — die ID immer weglassen, immer") — wd_farmer_regeln.ids_aus
   const wdIdsAus = () => new Set((((_wd.regeln || {}).ids_aus) || []).map(String))
+  // Nur Konten vom Typ Winning Days fahren im Farmer (26.09.2026, Finn: „von jeder ID alle Konten, die als Typ Winning Days sind") —
+  // der Mac-Weg (rpc wd_konten_alle) filterte das schon, der PC-Tab-Weg nahm bis .621 auch Funded/Live (tpVorplanIstFunded).
+  const wdIstWdKonto = acc => String((acc && (acc.type || acc.account_type)) || '').toLowerCase() === 'winning_days'
   const WD_HINWEIS_FARM = 'nicht im Farm (Haken aus)'
   const WD_HINWEIS_EXT = 'ohne External ID — der Bot kann das Konto nicht wählen'
   const WD_HINWEIS_ARCHIV = 'archiviert (Konto-Archiv) — fährt nicht mit'
@@ -37888,7 +37891,7 @@
     }else{
       const a = window._admData; if(!a || !Array.isArray(a.rows)) return null
       for(const r of a.rows){
-        if(aus.has(String(r.user_id)) || r.archived || !(r.type === 'funded' || r.type === 'live' || r.type === 'winning_days') || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
+        if(aus.has(String(r.user_id)) || r.archived || r.type !== 'winning_days' || !WD_FUTURES_RX.test(r.firm_raw || r.firm || '')) continue
         add(String(r.user_id), r.person, konto(r, r.firm_raw || r.firm || '', r.wd_farm === undefined ? true : !!r.wd_farm))
       }
     }
@@ -37939,7 +37942,7 @@
     const fx = window._fxUsdEur || 0.85, vp = wdVorplanRegeln()
     const alle = tpVorplanKandidaten(), konten = []
     for(const k of alle){
-      if(!tpVorplanIstFunded(k.acc)) continue
+      if(!wdIstWdKonto(k.acc)) continue   // nur Typ Winning Days (26.09.2026)
       const farm = (k.acc.wdFarm === undefined) ? true : !!k.acc.wdFarm   // alter Build ohne Feld: alle
       const basis = { id: String(k.acc.id), name: k.acc.name, firm: k.acc.firm, ext: String(k.acc.externalId || '').trim(), farm }
       const sp = wdTpSpanne(k.acc.firm)
@@ -38154,7 +38157,7 @@
     // (1a) Neue Konten in die Zeile — sonst käme ein frisch angelegtes Funded erst am nächsten Tag an
     if(offenFuer){
       for(const c of tpVorplanKandidaten()){
-        if(!tpVorplanIstFunded(c.acc) || konten.some(k => String(k.id) === String(c.acc.id))) continue
+        if(!wdIstWdKonto(c.acc) || konten.some(k => String(k.id) === String(c.acc.id))) continue   // nur Typ Winning Days (26.09.2026)
         const farm = farmVon(c.acc), sp = wdTpSpanne(c.acc.firm)
         konten.push({ id: String(c.acc.id), name: c.acc.name, firm: c.acc.firm, ext: String(c.acc.externalId || '').trim(), farm, aktiv: farm, tpVon: sp[0], tpBis: sp[1], hinweis: farm ? '' : WD_HINWEIS_FARM })
         geaendert = true
@@ -38574,6 +38577,11 @@
       const aus = k.aktiv === false || !k.farm
       const planFest = (k.plan_id && k.status && k.status !== 'planned') || k.gestartet
       const sperren = erw || fest || planFest || (!k.ext && !k.plan_id) || (k.archiviert && !k.plan_id)
+      // Haken = DAUERHAFT (26.09.2026, Finn: „einmal live stellen, dann jeden Tag automatisch, bis ich Stopp drücke") — geht auch bei
+      // IDs, die für den Tag noch nicht eingetragen sind (vorher gesperrt, bis gewürfelt war). „nur heute" ist ein eigener Knopf.
+      const hakenSperre = fest || planFest || (k.archiviert && !k.plan_id)
+      const tagKnopf = (!erw && !fest && !planFest && k.farm && k.ext && !k.archiviert)
+        ? `<button type="button" class="btn btn-ghost btn-xs" data-wd-heute="${escapeHtml(String(k.id))}" data-wd-heute-rein="${k.aktiv === false ? '1' : ''}" title="${k.aktiv === false ? 'für diesen Tag wieder mitfahren lassen' : 'nur an diesem Tag auslassen — morgen fährt das Konto wieder mit'}">${k.aktiv === false ? 'heute wieder rein' : 'nur heute raus'}</button>` : ''
       const start = k.plan_id && k.start_um ? wdHhmm(k.start_um) : (wdAktiv(k) && zeiten.get(String(k.id))) ? wdHhmm(zeiten.get(String(k.id))) : '—'
       const tpWert = k.plan_id && k.tp ? k.tp : (kd.tp_vorgabe || '')
       const slWert = kd.sl_vorgabe || ''   // Vorgabe für Risiko Master (Lot-Rechnung) — kein Stop am Plan (25.09.2026)
@@ -38587,14 +38595,14 @@
       const slave = (k.slave != null) ? `${escapeHtml(k.waehrung || '€')}${de(k.slave)}` : (wdAktiv(k) ? '<span class="kf">nach Staffel</span>' : '—')
       const wd = kd.winning_days != null ? `${kd.winning_days}${kd.goal_target ? `<span class="kf"> / ${kd.goal_target}</span>` : ''}` : '—'
       return `<tr class="${aus ? 'aus' : ''}">
-        <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${aus ? '' : 'checked'} ${sperren ? 'disabled' : ''} title="Haken = dauerhaft im Farm (gilt auch morgen); ohne Haken bleibt das Konto draußen, bis du ihn wieder setzt"></td>
+        <td><input type="checkbox" data-wd-konto="${escapeHtml(String(k.id))}" ${k.farm ? 'checked' : ''} ${hakenSperre ? 'disabled' : ''} title="Haken = dauerhaft im Farm: jeden Handelstag neu gewürfelt und gefahren, bis du ihn rausnimmst"></td>
         <td><div class="kn">${escapeHtml(k.name || '')}</div><div class="kf">${escapeHtml(k.firm || '')}${k.ext ? ' · ' + escapeHtml(k.ext) : ' · <span style="color:var(--danger)">ohne External ID</span>'}</div></td>
-        <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}</td></tr>`
+        <td class="mono">${wd}</td><td class="mono">${bal}</td><td class="mono">${start}</td><td>${tpFeld}</td><td>${slFeld}</td><td class="mono">${dd}</td><td class="mono">${slave}</td><td>${wdStand(k)}${tagKnopf ? `<div style="margin-top:3px">${tagKnopf}</div>` : ''}</td></tr>`
     }).join('')
     const ohneZeile = ''   // keine Einblenden-Zeile mehr — archivierte Konten sind für den Farmer weg (Finn 23.09.2026)
     const hinweis = !erw && x.ergebnis && x.ergebnis.hinweis ? `<div style="font-size:12px;color:var(--sub);padding-top:6px">${escapeHtml(x.ergebnis.hinweis)}</div>` : ''
     const nAkt = (x.konten || []).filter(wdAktiv).length
-    return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? '' : `data-wd-user="${uid}"`}>
+    return `<div class="wd-karte ${erw ? 'erwartet' : escapeHtml(x.status)}" ${erw ? `data-wd-erw="${uid}"` : `data-wd-user="${uid}"`}>
       <div class="wd-karte-kopf">
         <label class="wd-id-haken" title="ganze ID rein/raus (alle Konten)"><input type="checkbox" data-wd-id-alle ${alleAn ? 'checked' : ''} ${erw || fest ? 'disabled' : ''}> <span class="kf">alle</span></label>
         <span class="kf">Start</span>
@@ -38630,6 +38638,39 @@
       wdSay(an ? `${k.name || 'Konto'} ist drin — dauerhaft${angelegt ? ', Plan angelegt' : ''}.` : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`, 'ok')
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
+  }
+  /* Haken für eine ID ohne Tageszeile (26.09.2026): nur dauerhaft am Konto (rpc wd_konto_setzen) — die Zeile entsteht beim Würfeln bzw.
+   * um 00:00 über den PC-Tab und übernimmt den Haken dann von selbst (wdErwartet/wdKandidaten lesen wd_farm). */
+  async function wdKontoHakenOhneZeile(kontoId, an){
+    const kd = wdKontoDaten(kontoId); if(kd) kd.wd_farm = !!an
+    try{
+      const { error } = await supabase.rpc('wd_konto_setzen', { p_account: kontoId, p_wd_farm: !!an }); if(error) throw error
+      wdSay(`${(kd && kd.name) || 'Konto'} ist ${an ? 'drin' : 'raus'} — dauerhaft. Die ID fährt ab dem nächsten Würfeln mit.`, 'ok')
+    }catch(e){ if(kd) kd.wd_farm = !an; wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
+    wdAblauf(_wd.rows || [], wdFehlend())
+  }
+  /* Nur für diesen Tag raus/rein (26.09.2026, Finn: „darf ich die hinzufügen oder rausmachen für den jeweiligen Tag?"): der Haken am Konto
+   * (dauerhaft) bleibt, nur wd_tagesplan.konten[].aktiv des Tages ändert sich. Raus → nie gestarteten Plan löschen; rein → bei SCHARF und
+   * gewürfelter Zeile den Plan anlegen. Der nächste Tag baut seine Zeile neu aus dem Haken — dort fährt das Konto wieder mit. */
+  async function wdKontoHeute(uid, kontoId, rein){
+    const x = (_wd.rows || []).find(r => String(r.user_id) === String(uid)); if(!x || x.status === 'laeuft' || x.status === 'fertig') return
+    const k = (x.konten || []).find(q => String(q.id) === String(kontoId)); if(!k || !k.farm) return
+    k.aktiv = !!(rein && k.ext && !k.archiviert); k.hinweis = ''
+    x.status = (x.konten || []).some(wdAktiv) ? (x.status === 'leer' ? 'geplant' : x.status) : 'leer'
+    wdRender()
+    try{
+      let planWeg = false
+      if(!rein && k.plan_id && (k.status === 'planned' || !k.status) && !k.gestartet && _wd.daten && _wd.daten.rail){
+        try{ await wdApi('DELETE', { id: k.plan_id }); planWeg = true; k.plan_id = null; k.status = null; k.um = null; k.gesendet = false }
+        catch(e){ console.warn('[wd] Plan löschen', e) }
+      }
+      const konten = (x.konten || []).map(q => ({ ...q }))
+      await supabase.from('wd_tagesplan').update({ konten, status: x.status, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
+      let angelegt = 0
+      if(rein && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
+      wdSay(rein ? `${k.name || 'Konto'} fährt am ${x.tag} wieder mit${angelegt ? ' — Plan angelegt' : ''}.` : `${k.name || 'Konto'} setzt nur am ${x.tag} aus${planWeg ? ' — Plan gelöscht' : ''}; morgen wieder dabei.`, 'ok')
+      wdCacheSchreiben(x.tag)
+    }catch(e){ wdSay('Nicht gespeichert: ' + (e.message || e), 'err') }
   }
   // Ebene 1: eine Zeile je ID (Block-Reihenfolge, ungewürfelte alphabetisch), Klick klappt die Konten der ID auf
   function wdAblauf(rows, fehlend){
@@ -38693,7 +38734,15 @@
     // Haken je Konto: sofort wirksam (wdKontoHaken); die Zeilen-Klicks (tr.klick) lösen dasselbe change-Ereignis aus
     box.querySelectorAll('[data-wd-konto]').forEach(cb => cb.addEventListener('change', () => {
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
-      if(uid && !cb.disabled) wdKontoHaken(uid, cb.dataset.wdKonto, cb.checked)
+      if(cb.disabled) return
+      if(uid) wdKontoHaken(uid, cb.dataset.wdKonto, cb.checked)
+      else if(karte && karte.dataset.wdErw) wdKontoHakenOhneZeile(cb.dataset.wdKonto, cb.checked)   // ID noch nicht eingetragen (26.09.2026)
+    }))
+    // „nur heute raus" / „heute wieder rein" (26.09.2026) — eigene Verdrahtung je Knopf
+    box.querySelectorAll('[data-wd-heute]').forEach(b => b.addEventListener('click', ev => {
+      ev.stopPropagation()
+      const karte = b.closest('.wd-karte'), uid = karte && karte.dataset.wdUser
+      if(uid) wdKontoHeute(uid, b.dataset.wdHeute, b.dataset.wdHeuteRein === '1')
     }))
     box.querySelectorAll('[data-wd-id-alle]').forEach(cb => cb.addEventListener('change', async () => {
       const karte = cb.closest('.wd-karte'), uid = karte && karte.dataset.wdUser, an = cb.checked
