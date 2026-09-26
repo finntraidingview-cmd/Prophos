@@ -8940,6 +8940,126 @@ def admin_bulk_vorlagen():
         return jsonify({"ok": False, "error": f"nicht speicherbar ({type(e).__name__})"}), 502
 
 
+# ══ KONTO-BALANCE LESEN AUF ZURUF (27.09.2026, Auftrag Koordination B12 mit F19: Refresh-Knopf neben der Futures-Balance
+# in der Accounts-Liste — Puls liest am PC der Konto-ID die Account Balance dieses Kontos) ═════════════════════════════
+# Muster wie „Jetzt lesen" (Endlesung): Railway legt eine order_signale-Zeile im Namen des Konto-BESITZERS an
+# (order_signale-RLS: nur eigene Zeilen) — dessen PC-Tab claimt sie (orderSignalTick, aktion 'konto_balance'), liest per
+# Puls (tv-lesen mit Konto wie die Balance-Lesung seit .625) und schreibt accounts.tv_balance/_at/_quelle 'puls' +
+# ergebnis {ok, balance, equity, msg}. plan_id ist in order_signale Pflicht → 'konto:<account_id>'.
+# Ein offener Auftrag je Konto (wartet/laeuft, jünger als 10 min → derselbe wird zurückgegeben); älter = verfallen.
+# Auth: Admin (ADMIN_EMAILS) ODER Besitzer des Kontos.
+KONTO_BALANCE_VERFALL_S = 600
+
+
+def _login_uid_mail():
+    """(user_id, email, None) oder (None, None, (resp, status)) — eingeloggt über sb-token."""
+    if not SUPABASE_SERVICE_KEY:
+        return None, None, (jsonify({"error": "Server nicht konfiguriert (SUPABASE_SERVICE_KEY fehlt)"}), 503)
+    token = (request.headers.get("sb-token") or "").strip()
+    if not token:
+        return None, None, (jsonify({"error": "Nicht angemeldet"}), 401)
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user", timeout=12,
+                         headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"})
+        u = r.json() or {}
+        if r.status_code != 200 or not u.get("id"):
+            return None, None, (jsonify({"error": "Nicht angemeldet"}), 401)
+        return str(u["id"]), str(u.get("email") or "").strip().lower(), None
+    except Exception:
+        return None, None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
+
+
+def konto_balance_darf(uid, mail, konto, admins):
+    """REIN RECHNEND (testbar): Admin oder Besitzer des Kontos."""
+    return bool(konto) and (str(konto.get("user_id") or "") == str(uid or "#") or (mail or "#") in (admins or ()))
+
+
+def konto_balance_signal(konto, von):
+    """REIN RECHNEND (testbar): order_signale-Zeile fuer den Auftrag."""
+    return {"user_id": str(konto["user_id"]), "plan_id": f"konto:{konto['id']}", "status": "wartet",
+            "params": {"aktion": "konto_balance", "account_id": str(konto["id"]),
+                       "external_id": str(konto.get("external_id") or "").strip(), "firm": konto.get("firm") or "",
+                       "name": konto.get("name") or "", "von": von}}
+
+
+def konto_balance_stand(sig, jetzt_s, verfall_s=KONTO_BALANCE_VERFALL_S):
+    """REIN RECHNEND (testbar): Signal-Zeile → Antwort {status, grund, balance, equity, balance_at, pc, updated_at, account_id,
+    verfallen}. wartet/laeuft aelter als verfall_s → status 'verfallen'."""
+    e = sig.get("ergebnis") if isinstance(sig.get("ergebnis"), dict) else {}
+    st = str(sig.get("status") or "")
+    try:
+        alt_s = jetzt_s - datetime.fromisoformat(str(sig.get("created_at")).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        alt_s = 0
+    verfallen = st in ("wartet", "laeuft") and alt_s > verfall_s
+    grund = e.get("msg") or e.get("grund") or ""
+    if verfallen:
+        grund = ("Kein PC-Tab hat den Auftrag abgeholt" if st == "wartet" else "PC-Tab hat nicht fertig gemeldet") + \
+                f" (älter als {int(verfall_s // 60)} min) — läuft Prophos am PC der ID?"
+    return {"status": "verfallen" if verfallen else st, "grund": str(grund)[:300],
+            "balance": _wd_num(e.get("balance")), "equity": _wd_num(e.get("equity")), "balance_at": e.get("balance_at"),
+            "pc": sig.get("pc"), "updated_at": sig.get("updated_at"),
+            "account_id": str((sig.get("params") or {}).get("account_id") or ""), "verfallen": verfallen}
+
+
+@app.route("/admin/konto-balance-lesen", methods=["POST", "OPTIONS"])
+def admin_konto_balance_lesen():
+    """POST {aktion:'start', account_id} → {ok, signal_id, status, neu}; POST {aktion:'stand', signal_id} → {ok, status,
+    grund, balance, equity, balance_at, pc, updated_at, account_id, verfallen}. Auth: Admin oder Besitzer des Kontos."""
+    if request.method == "OPTIONS":
+        return "", 200
+    uid, mail, err = _login_uid_mail()
+    if err:
+        return err
+    b = request.get_json(silent=True) or {}
+    try:
+        if b.get("aktion") == "start":
+            aid = str(b.get("account_id") or "").strip()
+            if not re.fullmatch(r"[0-9a-fA-F-]{36}", aid):
+                return jsonify({"ok": False, "error": "account_id fehlt/ungültig"}), 400
+            rows = sb_select("accounts", {"select": "id,user_id,name,firm,external_id,account_type", "id": f"eq.{aid}", "limit": "1"})
+            konto = rows[0] if rows else None
+            if not konto:
+                return jsonify({"ok": False, "error": "Konto nicht gefunden"}), 404
+            if not konto_balance_darf(uid, mail, konto, ADMIN_EMAILS):
+                return jsonify({"ok": False, "error": "Nur Admin oder Besitzer des Kontos"}), 403
+            if not str(konto.get("external_id") or "").strip():
+                return jsonify({"ok": False, "error": "Konto ohne External ID — Puls weiß nicht, welches Konto er wählen soll"}), 409
+            jetzt = time.time()
+            offen = sb_select("order_signale", {"select": "id,status,created_at,updated_at,pc,ergebnis,params",
+                                                "plan_id": f"eq.konto:{aid}", "status": "in.(wartet,laeuft)",
+                                                "order": "created_at.desc", "limit": "5"}) or []
+            for sg in offen:
+                if konto_balance_stand(sg, jetzt)["verfallen"]:
+                    sb_update("order_signale", {"id": f"eq.{sg['id']}", "status": f"eq.{sg['status']}"},
+                              {"status": "fehler", "updated_at": datetime.now(timezone.utc).isoformat(),
+                               "ergebnis": {"ok": False, "verfallen": True, "msg": konto_balance_stand(sg, jetzt)["grund"]}})
+                else:
+                    return jsonify({"ok": True, "signal_id": str(sg["id"]), "status": sg.get("status"), "neu": False})
+            sig = sb_insert("order_signale", konto_balance_signal(konto, "admin" if str(konto.get("user_id")) != uid else "besitzer"))
+            return jsonify({"ok": True, "signal_id": str((sig or {}).get("id") or ""), "status": "wartet", "neu": True})
+        if b.get("aktion") == "stand":
+            sid = str(b.get("signal_id") or "").strip()
+            if not re.fullmatch(r"[0-9a-fA-F-]{36}", sid):
+                return jsonify({"ok": False, "error": "signal_id fehlt/ungültig"}), 400
+            rows = sb_select("order_signale", {"select": "id,user_id,status,created_at,updated_at,pc,ergebnis,params", "id": f"eq.{sid}", "limit": "1"})
+            sg = rows[0] if rows else None
+            if not sg or (sg.get("params") or {}).get("aktion") != "konto_balance":
+                return jsonify({"ok": False, "error": "Auftrag nicht gefunden"}), 404
+            if str(sg.get("user_id")) != uid and mail not in ADMIN_EMAILS:
+                return jsonify({"ok": False, "error": "Nur Admin oder Besitzer des Kontos"}), 403
+            st = konto_balance_stand(sg, time.time())
+            if st["verfallen"]:
+                sb_update("order_signale", {"id": f"eq.{sid}", "status": f"eq.{sg['status']}"},
+                          {"status": "fehler", "updated_at": datetime.now(timezone.utc).isoformat(),
+                           "ergebnis": {"ok": False, "verfallen": True, "msg": st["grund"]}})
+            return jsonify({"ok": True, **st})
+        return jsonify({"ok": False, "error": "aktion muss 'start' oder 'stand' sein"}), 400
+    except Exception as e:
+        print(f"[konto-balance] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return jsonify({"ok": False, "error": f"nicht möglich ({type(e).__name__})"}), 502
+
+
 start_kompass()
 
 
