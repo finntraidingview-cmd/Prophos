@@ -1562,8 +1562,23 @@
   #adm-pane-wd .wd-set-grid{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px}
   @media (max-width:1180px){#adm-pane-wd .wd-set-grid{grid-template-columns:1fr}}
   #adm-pane-wd .wd-set-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px 14px;background:var(--surface,#fff)}
-  #adm-pane-wd .wd-set-card h4{font-size:13.5px;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-  #adm-pane-wd .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px}
+  #adm-pane-wd .wd-set-card h4{font-size:13.5px;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  /* Design-Runde 26.09.2026 (Finn, Screenshot Einstellungen: „mach mal das Design schöner"): Titel + Unterzeile statt Umbruch
+     mitten im Titel, Felder unten bündig (zweizeilige Labels), Kurs-Feed als eigene Statuszeile, Verlauf mit Namens-Chips */
+  #adm-pane-wd .wd-set-card h4 .h4sub{display:block;font-size:11.5px;font-weight:400;color:var(--sub);margin-top:2px}
+  #adm-pane-wd .wd-felder{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 14px;align-items:end;margin-bottom:12px}
+  #adm-pane-wd .wd-felder:last-child{margin-bottom:0}
+  #adm-pane-wd .wd-feld label small{color:var(--sub-2);font-size:10.5px}
+  #adm-pane-wd .wd-feed{grid-column:1/-1;display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--sub);padding:6px 9px;border-radius:8px;background:rgba(0,0,0,.03)}
+  #adm-pane-wd .wd-feed::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--good,#15803d);flex:0 0 7px}
+  #adm-pane-wd .wd-feed.aus{color:#B45309;background:rgba(180,83,9,.07)}
+  #adm-pane-wd .wd-feed.aus::before{background:#B45309}
+  #adm-pane-wd .wd-feed.leer::before{background:var(--sub-2)}
+  #adm-pane-wd .wd-wer{display:flex;flex-wrap:wrap;gap:4px}
+  #adm-pane-wd .wd-wer span{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;font-size:11.5px;background:rgba(0,0,0,.04);color:var(--sub);white-space:nowrap}
+  #adm-pane-wd .wd-wer span.ok{background:rgba(21,128,61,.09);color:#15803d}
+  #adm-pane-wd .wd-wer span.weg{background:rgba(185,28,28,.08);color:#b91c1c}
+  #adm-pane-wd .wd-tab td.zahl,#adm-pane-wd .wd-tab th.zahl{text-align:right;padding-right:18px;font-variant-numeric:tabular-nums}
   #adm-pane-wd .wd-feld label{display:block;font-size:11px;color:var(--sub);margin-bottom:3px}
   #adm-pane-wd .wd-feld .input{width:100%;text-align:left;font-size:13px;padding:6px 9px;height:auto}
   #adm-pane-wd .wd-felder.drei{grid-template-columns:repeat(3,1fr)}
@@ -1576,7 +1591,8 @@
   #adm-pane-wd .wd-spanne span{font-size:11.5px;color:var(--sub);white-space:nowrap}
   #adm-pane-wd .wd-firma{display:grid;grid-template-columns:10px minmax(0,1fr) auto 14px;align-items:center;gap:12px;padding:9px 10px;border-radius:9px;cursor:pointer;border:1px solid transparent;transition:background .12s}
   #adm-pane-wd .wd-firma .fl{min-width:0}
-  #adm-pane-wd .wd-firma .fk{display:block;font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  #adm-pane-wd .wd-firma .fk{display:block;font-size:11.5px;color:var(--sub);line-height:1.35;margin-top:1px}
+  #adm-pane-wd .wd-firma .pfeil{font-size:12px;color:var(--sub);text-align:center}
   #adm-pane-wd .wd-firma:hover{background:rgba(0,0,0,.03)}
   #adm-pane-wd .wd-firma.offen{background:rgba(99,91,255,.06);border-color:var(--violet)}
   #adm-pane-wd .wd-firma .punkt{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
@@ -8198,36 +8214,36 @@
             </div>
             <div class="wd-set-grid">
               <div class="wd-set-card">
-                <h4>Ablauf <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
+                <h4><span>Ablauf<span class="h4sub">Automatik, Gegenhedge, Zeiten</span></span> <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
                 <label class="wd-schalter"><input type="checkbox" id="wd-aktiv"><span><b>Automatik</b><small>nachts um 00:10 von allein würfeln und planen — starten nur, wenn oben „Farmer SCHARF" steht</small></span></label>
                 <!-- Fusion-Gegenhedge (24.09.2026 abends, Finn: „Winning Days jetzt gegenhedgen, ohne Duplikum"): Betrag je Konto aus der
                      Hedge-Staffel, Puls öffnet ihn direkt nach der Order auf Fusion, der Wächter schließt ihn am TP (+ Puffer). -->
                 <label class="wd-schalter"><input type="checkbox" id="wd-hedge-an"><span><b>Fusion-Gegenhedge</b><small>je Konto den Staffel-Betrag als Gegen-Order auf Fusion — zu, sobald NQ den TP erreicht (Notfall-SL 110 % broker-seitig)</small></span></label>
-                <div class="wd-felder drei" id="wd-hedge-felder">
+                <div class="wd-felder" id="wd-hedge-felder">
                   <!-- Puffer in TICKS (25.09.2026, Finn: „8 Ticks über dem Master-TP, TP 31.000 → bei 31.002"); intern bleibt hedge_puffer in Punkten (Ticks × 0,25) -->
                   <div class="wd-feld"><label>Puffer hinter dem Master-TP (Ticks)</label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="8" title="so viele Ticks (0,25 Pkt) über/unter dem Master-TP, bevor der Wächter die Fusion-Position über den Kurs-Feed schließt — 8 Ticks = 2 Punkte"></div>
                   <div class="wd-feld"><label>Notfall-SL Fusion (%)</label><input type="number" class="input mono" id="wd-hedge-notfall" min="100" max="200" step="5" value="110" title="Sicherheitsnetz broker-seitig in MetaTrader: Stop am Hedge = Fill ± Master-TP-Distanz × Prozent (alte Logik, 110 %) — greift nur, wenn der Feed-Wächter nicht schließt"></div>
-                  <div class="wd-feld" style="grid-column:span 2"><label>&nbsp;</label><div class="kf" id="wd-hedge-kurs" style="padding-top:8px">Kurs-Feed: —</div></div>
+                  <div class="wd-feed leer" id="wd-hedge-kurs">Kurs-Feed: —</div>
                 </div>
                 <div class="wd-felder drei">
                   <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
                   <div class="wd-feld"><label>Instrument</label><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select></div>
                   <div class="wd-feld"><label>Kontrakte (Standard)</label><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" title="gilt, wenn die Firma keine eigene Spanne hat"></div>
-                  <div class="wd-feld" style="grid-column:span 2"><label>Pause zwischen Blöcken</label><div class="wd-spanne"><input type="number" class="input mono" id="wd-pause-min" min="0" step="5" value="15"><span>bis</span><input type="number" class="input mono" id="wd-pause-max" min="0" step="5" value="60"><span>min</span></div></div>
-                  <div class="wd-feld"><label>&nbsp;</label><div class="kf" style="padding-top:8px">Zufall je Block</div></div>
-                  <div class="wd-feld" style="grid-column:span 2"><label>Abstand zwischen Konten</label><div class="wd-spanne"><input type="number" class="input mono" id="wd-abst-min" min="0" step="1" value="2"><span>bis</span><input type="number" class="input mono" id="wd-abst-max" min="0" step="1" value="4"><span>min</span></div></div>
-                  <div class="wd-feld"><label>&nbsp;</label><div class="kf" style="padding-top:8px">Zufall je Konto</div></div>
+                </div>
+                <div class="wd-felder">
+                  <div class="wd-feld"><label>Pause zwischen Blöcken <small>· Zufall je Block</small></label><div class="wd-spanne"><input type="number" class="input mono" id="wd-pause-min" min="0" step="5" value="15"><span>bis</span><input type="number" class="input mono" id="wd-pause-max" min="0" step="5" value="60"><span>min</span></div></div>
+                  <div class="wd-feld"><label>Abstand zwischen Konten <small>· Zufall je Konto</small></label><div class="wd-spanne"><input type="number" class="input mono" id="wd-abst-min" min="0" step="1" value="2"><span>bis</span><input type="number" class="input mono" id="wd-abst-max" min="0" step="1" value="4"><span>min</span></div></div>
                 </div>
               </div>
               <div class="wd-set-card">
-                <h4>Firmen · TP je Gewinntag <button class="btn btn-ghost btn-xs" id="wdHedgeSave">Speichern</button></h4>
+                <h4><span>Firmen<span class="h4sub">TP je Gewinntag</span></span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave">Speichern</button></h4>
                 <div id="wd-firmen"></div>
                 <div class="kf" style="margin-top:8px">TP wird je Konto zufällig aus der Spanne gezogen — außer das Konto hat eine eigene TP-Vorgabe (in der ID-Tabelle).</div>
               </div>
               <!-- Staffel = Slave-Betrag nach Balance-Überschuss — ohne Slave sinnlos, darum im
                    hedge-freien Kapitel ausgeblendet (24.09.2026, admHedgeModus). Daten bleiben unangetastet. -->
               <div class="wd-set-card" id="wd-staffel-card">
-                <h4>Hedge-Staffel · <span id="wd-staffel-titel">Standard</span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
+                <h4><span>Hedge-Staffel<span class="h4sub" id="wd-staffel-titel">Standard</span></span> <button class="btn btn-ghost btn-xs" id="wdHedgeSave2">Speichern</button></h4>
                 <!-- Eine Tabelle je Firma (23.09.2026, Finn: „jede Prop soll ihre eigene Tabelle haben — auf Tradeify drücken, dann
                      die Tabelle von Tradeify"): Chips wählen die Tabelle, Klick auf eine Firma links tut dasselbe. Ohne eigene
                      Tabelle gilt Standard. -->
@@ -33117,7 +33133,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.626'
+  const OS_TAB_BUILD = '2026-09-22.627'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -38677,7 +38693,7 @@
     if(g('wd-hedge-puffer')) g('wd-hedge-puffer').value = Math.round((Number(vp.hedge_puffer) || 0) / HEDGE_TICK)   // Punkte → Ticks (bestehende 3 Pkt = 12 Ticks)
     if(g('wd-hedge-notfall')) g('wd-hedge-notfall').value = Math.round((Number(vp.hedge_notfall) || HEDGE_NOTFALL_STD) * 100)
     if(g('wd-staffel-card')) g('wd-staffel-card').hidden = !vp.hedge_an && (typeof admOhneHedge === 'function' ? admOhneHedge() : false)
-    if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${k.pc}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
+    if(typeof hedgeKursLesen === 'function') hedgeKursLesen().then(k => { const el = g('wd-hedge-kurs'); if(el){ el.classList.toggle('aus', !k); el.classList.remove('leer') } if(el) el.textContent = k ? `Kurs-Feed: ${k.symbol} ${Number(k.preis).toLocaleString('de-DE')} · vor ${Math.round(k.alter_ms / 1000)} s · ${k.pc}` : 'Kurs-Feed: kein frischer Kurs (TradingView + Reader auf dem 24/7-PC offen?)' }).catch(() => {})
     wdStaffelArbeitInit(vp.regeln); wdStaffelChips(); wdStaffelRender(wdStaffelAktuell())
     wdFirmenRender(fu, vp)
     wdStatus()
@@ -38736,12 +38752,15 @@
         const t = tage.get(x.tag) || { tag: x.tag, ids: 0, verpasst: 0, konten: 0, ok: 0, fehler: 0, pl: 0, namen: [] }
         t.ids++; if(x.status === 'verpasst') t.verpasst++
         for(const k of (x.konten || []).filter(wdAktiv)){ t.konten++; if(k.status && k.status !== 'planned' && k.status !== 'verpasst' && k.status !== 'weg') t.ok++; if(k.status === 'verpasst' || k.status === 'weg') t.fehler++; if(typeof k.pl === 'number') t.pl += k.pl }
-        t.namen.push(`${x.name || '?'}${x.status === 'verpasst' ? ' ✗' : x.status === 'fertig' ? ' ✓' : x.status === 'leer' ? ' –' : ''}`)
+        t.namen.push({ name: x.name || '?', st: x.status })
         tage.set(x.tag, t)
       }
       if(!tage.size){ box.innerHTML = '<div class="wd-leer" style="padding:4px 0">Noch kein Tag gelaufen. Danach steht hier je Tag: wie viele Blöcke und Konten, was gestartet wurde, P&L.</div>'; return }
-      box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th>Blöcke</th><th>Konten</th><th>gestartet</th><th>verpasst</th><th>P&L</th><th>Wer</th></tr></thead><tbody>` +
-        [...tage.values()].map(t => `<tr><td class="mono">${escapeHtml(t.tag)}</td><td>${t.ids}${t.verpasst ? ` <span style="color:var(--danger)">(${t.verpasst} verpasst)</span>` : ''}</td><td>${t.konten}</td><td>${t.ok}</td><td>${t.fehler ? `<span style="color:var(--danger)">${t.fehler}</span>` : '0'}</td><td class="mono">${t.pl ? (t.pl > 0 ? '+' : '') + t.pl.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : '—'}</td><td style="color:var(--sub)">${escapeHtml(t.namen.join(' · '))}</td></tr>`).join('') + '</tbody></table>'
+      // Wer als Chips (26.09.2026): fertig grün ✓, verpasst rot ✗, leer/geplant grau — vorher „Finn – · Jacob –" als Fließtext
+      const wer = n => `<span class="${n.st === 'fertig' ? 'ok' : n.st === 'verpasst' ? 'weg' : ''}" title="${escapeHtml(n.st || 'geplant')}">${escapeHtml(n.name)}${n.st === 'fertig' ? ' ✓' : n.st === 'verpasst' ? ' ✗' : ''}</span>`
+      const tagTxt = tg => { const d = new Date(tg + 'T12:00:00'); return isNaN(d) ? tg : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) }
+      box.innerHTML = `<table class="wd-tab"><thead><tr><th>Tag</th><th class="zahl">Blöcke</th><th class="zahl">Konten</th><th class="zahl">gestartet</th><th class="zahl">verpasst</th><th class="zahl">P&L</th><th>Wer</th></tr></thead><tbody>` +
+        [...tage.values()].map(t => `<tr><td class="mono" style="white-space:nowrap">${escapeHtml(tagTxt(t.tag))}</td><td class="zahl">${t.ids}${t.verpasst ? ` <span style="color:var(--danger)">(${t.verpasst} verpasst)</span>` : ''}</td><td class="zahl">${t.konten}</td><td class="zahl">${t.ok}</td><td class="zahl">${t.fehler ? `<span style="color:var(--danger);font-weight:600">${t.fehler}</span>` : '0'}</td><td class="zahl mono" style="${t.pl ? `color:${t.pl > 0 ? '#15803d' : '#b91c1c'};font-weight:600` : 'color:var(--sub-2)'}">${t.pl ? (t.pl > 0 ? '+' : '') + t.pl.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' $' : '—'}</td><td><div class="wd-wer">${t.namen.map(wer).join('')}</div></td></tr>`).join('') + '</tbody></table>'
     }catch(e){ box.innerHTML = `<div style="color:var(--danger)">Verlauf: ${escapeHtml(String(e.message || e))}</div>` }
   }
   // Zeile mit dem Live-Stand der Pläne aus Railway (Mac sieht fremde Pläne sonst nicht) — Zustand je Konto
