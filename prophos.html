@@ -9872,8 +9872,8 @@
           <select class="input" id="bulk-template-select" style="flex:1">
             <option value="">— Keine Vorlage —</option>
           </select>
-          <button class="btn btn-ghost" id="bulk-template-save" type="button" title="Aktuelle Werte als Vorlage speichern" style="flex-shrink:0;padding:8px 12px">💾</button>
-          <button class="btn btn-ghost" id="bulk-template-delete" type="button" title="Ausgewählte Vorlage löschen" style="flex-shrink:0;padding:8px 12px" disabled>🗑️</button>
+          <!-- 💾 „eigene Vorlage speichern" raus (27.09.2026, F15, Finn: „Meine kommt weg") — nur noch zentrale Vorlagen (bulk_vorlagen) -->
+          <button class="btn btn-ghost" id="bulk-template-delete" type="button" title="Zentrale Vorlage für alle IDs löschen (Admin)" style="flex-shrink:0;padding:8px 12px;display:none" disabled>🗑️</button>
           <!-- Zentrale Vorlage speichern (F12, 27.09.2026) — nur Admin-Geräte (prophos_wd_admin), der Server prüft selbst -->
           <button class="btn btn-ghost" id="bulk-template-zentral" type="button" title="Als zentrale Vorlage für alle IDs speichern (Admin)" style="flex-shrink:0;padding:8px 12px;display:none">⭐</button>
         </div>
@@ -27162,6 +27162,14 @@
 
     // ── Templates: laden, Dropdown füllen ──
     async function loadBulkTemplates(){
+      // F15 (27.09.2026, Finn: „Meine kommt weg"): account_templates je Nutzer werden nicht mehr gelesen (Tabelle bleibt in der DB) —
+      // es gibt nur noch die zentralen Vorlagen aus bulk_vorlagen
+      bulkTemplates = []
+      await bulkZentralLaden()
+      renderTplSelect()
+      if(bulkPaste.bloecke.length) bulkPasteRender()
+    }
+    async function loadBulkTemplatesAlt(){   // bis 27.09.2026: eigene Vorlagen (account_templates + localStorage) — nicht mehr aufgerufen
       bulkTemplates = []
       let dbOk = false
       if(currentUserId){
@@ -27206,11 +27214,11 @@
       const prev = bEl.tplSelect.value
       const opt = (v, n) => `<option value="${escapeHtml(v)}">${escapeHtml(n)}</option>`
       bEl.tplSelect.innerHTML = '<option value="">— Keine Vorlage —</option>' +
-        (bulkZentral.length ? `<optgroup label="Für alle">${bulkZentral.map(v => opt('z:' + v.id, v.name)).join('')}</optgroup>` : '') +
-        (bulkTemplates.length ? (bulkZentral.length ? '<optgroup label="Meine">' : '') + bulkTemplates.map(t => opt(String(t.id), t.name)).join('') + (bulkZentral.length ? '</optgroup>' : '') : '')
+        bulkZentral.map(v => opt('z:' + v.id, v.name)).join('')   // nur zentrale Vorlagen (F15)
       if(prev && [...bEl.tplSelect.options].some(o => o.value === prev)) bEl.tplSelect.value = prev
       bEl.tplDelete.disabled = !bEl.tplSelect.value || (bEl.tplSelect.value.startsWith('z:') && !bulkIstAdmin())
       const zb = document.getElementById('bulk-template-zentral'); if(zb) zb.style.display = bulkIstAdmin() ? '' : 'none'
+      if(bEl.tplDelete) bEl.tplDelete.style.display = bulkIstAdmin() ? '' : 'none'   // 🗑 wirkt nur auf bulk_vorlagen, nur Admins
     }
 
     function applyTemplate(id){
@@ -33667,7 +33675,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.651'
+  const OS_TAB_BUILD = '2026-09-22.652'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
