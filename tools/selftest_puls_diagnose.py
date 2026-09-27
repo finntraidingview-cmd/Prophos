@@ -16,8 +16,10 @@ def lade():
     src = open(APP, encoding="utf-8").read()
     ns = {"re": re, "json": json}
     i = src.index("def puls_diagnose_saeubern(")
+    j = src.index("def puls_inventar_saeubern(")
     exec("\n".join([re.search(r"^PC_ID_MUSTER = .*$", src, re.M).group(0), re.search(r"^PULS_DIAGNOSE_MAX = .*$", src, re.M).group(0),
-                    src[i:src.find("\n\n\n", i)]]), ns)
+                    re.search(r"^PULS_INVENTAR_MAX = .*$", src, re.M).group(0),
+                    src[i:src.find("\n\n\n", i)], src[j:src.find("\n\n\n", j)]]), ns)
     return ns
 
 
@@ -48,6 +50,18 @@ def main():
 
     d5 = s({"modus": "tsxlesen", "schritt": "tsx_vorbereitet", "spur": "x" * 5000})
     check(d5["schritt"] == "tsx_vorbereitet" and len(d5["spur"]) == 1800, "B17: Spur + Schritt, Spur auf 1800 gekuerzt")
+
+    pi = a["puls_inventar_saeubern"]
+    di = pi({"ok": True, "titel": "NQZ26 $30,921.75", "url": "topstepx.com/trade", "erkannt": {"titel_tsx": 1, "x": 1},
+             "tabs": [{"name": "Prophos", "tsx": 0, "tv": 0, "boese": 1}], "seite": [0, 120, 2560, 1400],
+             "inventar": {"grund": [["$150K EXPRESS", "Text", [20, 160, 120, 180]], ["x", "Text", "kaputt"]], "boese": [1]},
+             "zeilen_kandidaten": [["$150K EXPRESS | EXPRESS-…", [20, 160, 220, 180]]], "edits": ["Adress- und Suchleiste"], "hack": 1})
+    check(di and "hack" not in di and di["erkannt"] == {"titel_tsx": True, "url_tsx": False, "titel_tv": False}
+          and di["tabs"] == [{"name": "Prophos", "tsx": False, "tv": False}] and "boese" not in di["inventar"]
+          and di["inventar"]["grund"][1][2] is None and di["zeilen_kandidaten"][0][1] == [20, 160, 220, 180],
+          "B20 Inventar: nur bekannte Felder, Rechtecke nur als Zahlen")
+    check(pi(None) is None and pi({"inventar": {"grund": [["n" * 90, "Text", [0, 0, 1, 1]]] * 400}})["inventar"]["grund"].__len__() == 260,
+          "B20 Inventar: Unsinn abgewiesen, höchstens 260 Elemente je Zustand")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1

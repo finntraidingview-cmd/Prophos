@@ -10287,10 +10287,19 @@ def tsx_inventar_kurz(roh, fenster=None, max_n=260):
 TSX_RX_ADRESSLEISTE = re.compile(r"address and search bar|adress- und suchleiste|adressleiste|address bar", re.I)
 
 
+_EDIT_NAMEN = []
+
+
 def _chrome_url(w):
-    """Adresse des AKTIVEN Tabs aus Chromes Adressleiste (UIA-Edit 'Address and search bar'). '' = nicht lesbar."""
+    """Adresse des AKTIVEN Tabs aus Chromes Adressleiste (UIA-Edit 'Address and search bar'). '' = nicht lesbar.
+    B20: ohne Tiefengrenze (depth=12 fand sie bei Mike nicht); gesehene Edit-Namen landen in _EDIT_NAMEN (Inventar)."""
     try:
-        for e in w.descendants(control_type="Edit", depth=12):
+        for e in w.descendants(control_type="Edit"):
+            try:
+                if len(_EDIT_NAMEN) < 8:
+                    _EDIT_NAMEN.append((e.window_text() or "")[:50])
+            except Exception:
+                pass
             try:
                 if TSX_RX_ADRESSLEISTE.search(e.window_text() or ""):
                     try:
@@ -10326,6 +10335,11 @@ def _tsx_tab_holen(trail, warten_s=25.0):
     except Exception:
         tabs = []
     kand = [t for t in tabs if ist_topstepx_titel(t.window_text())]
+    try:   # B20: warum „neuer Tab"? — alle Tabs mit Erkennung in die Spur
+        trail.append("Tabs: " + " | ".join(f"{(t.window_text() or '')[:28]}={'TSX' if ist_topstepx_titel(t.window_text()) else 'TV' if tv_tab_rang(t.window_text() or '', '', '') > 0 else '-'}"
+                                           for t in tabs[:10]) if tabs else "Tabs: keine gelesen")
+    except Exception:
+        pass
     if len(kand) >= 1:
         try:
             pw.set_focus()
@@ -10430,10 +10444,67 @@ def _tsx_seite_roh(w, typen=None):
     return seiten_filter(_tsx_roh(w, typen) if typen else _tsx_roh(w), _tsx_seite(w))
 
 
+def tsx_zeilen(roh, tol=8, luecke=40):
+    """REIN RECHNEND (testbar, B20): Elemente zu Text-Stücken zusammenfügen — gleiche Zeile (Mitte ±tol px), von links nach
+    rechts, neues Stück bei einer Lücke > luecke px. TopstepX liefert „$150K EXPRESS", „|" und „EXPRESS-…" womöglich als
+    GETRENNTE Knoten; kein einzelnes trägt dann das ganze Muster. -> [(text, (l,t,r,b))] (Rechteck = Vereinigung des Stücks)"""
+    els = []
+    for e in roh or ():
+        try:
+            l, t, r, b = (int(v) for v in e[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        n = str(e[0] or "").strip()
+        if n and r - l >= 2 and b - t >= 2:
+            els.append((n, (l, t, r, b)))
+    els.sort(key=lambda x: ((x[1][1] + x[1][3]) // 2, x[1][0]))
+    zeilen = []
+    for n, r in els:
+        cy = (r[1] + r[3]) // 2
+        if zeilen and abs(zeilen[-1]["cy"] - cy) <= tol:
+            zeilen[-1]["els"].append((n, r))
+        else:
+            zeilen.append({"cy": cy, "els": [(n, r)]})
+    out = []
+    for z in zeilen:
+        stueck = None
+        for n, r in sorted(z["els"], key=lambda x: x[1][0]):
+            if stueck and r[0] - stueck["r"][2] <= luecke:
+                if n not in stueck["t"].split(" | ") and n not in stueck["t"]:
+                    stueck["t"] = stueck["t"] + " " + n
+                stueck["r"] = (min(stueck["r"][0], r[0]), min(stueck["r"][1], r[1]), max(stueck["r"][2], r[2]), max(stueck["r"][3], r[3]))
+            else:
+                if stueck:
+                    out.append((stueck["t"], stueck["r"]))
+                stueck = {"t": n, "r": r}
+        if stueck:
+            out.append((stueck["t"], stueck["r"]))
+    return out
+
+
+def tsx_ausloeser_waehlen(roh):
+    """REIN RECHNEND (testbar, B20): Konto-Auslöser — erst ein einzelnes Element mit dem ganzen Muster, sonst ein
+    zusammengefügtes Stück (tsx_zeilen). Oberstes zuerst. -> (text, rect, typ) | None"""
+    einzeln = [e for e in roh or () if e[1] and tsx_konto_sichtbar(e[0])[0]]
+    if einzeln:
+        return sorted(einzeln, key=lambda e: (e[1][1], e[1][0]))[0]
+    st = [(t, r) for t, r in tsx_zeilen(roh) if tsx_konto_sichtbar(t)[0]]
+    if st:
+        t, r = sorted(st, key=lambda x: (x[1][1], x[1][0]))[0]
+        return (t, r, "Zeile")
+    return None
+
+
+def tsx_eintraege_waehlen(roh, unter_y):
+    """REIN RECHNEND (testbar, B20): Dropdown-Einträge unterhalb des Auslösers — einzeln oder als zusammengefügte Stücke."""
+    einzeln = [(str(e[0]), e[1], e[2] if len(e) > 2 else "") for e in roh or () if e[1] and tsx_konto_aus_text(e[0]) and e[1][1] > unter_y]
+    if einzeln:
+        return einzeln
+    return [(t, r, "Zeile") for t, r in tsx_zeilen(roh) if tsx_konto_aus_text(t) and r[1] > unter_y]
+
+
 def _tsx_ausloeser(w):
-    els = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom"))
-           if e[1] and tsx_konto_sichtbar(e[0])[0]]
-    return sorted(els, key=lambda e: (e[1][1], e[1][0]))[0] if els else None
+    return tsx_ausloeser_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom")))
 
 
 def _tsx_warte_seite(w, trail, sek=20.0):
@@ -10470,6 +10541,23 @@ def _tsx_wachhund(res, trail, sek=100.0):
     t.daemon = True
     t.start()
     return t
+
+
+def _puls_inventar_senden(res, trail):
+    """B20: volles TopstepX-Inventar an POST /puls-inventar/<pc_id> (Tabelle puls_inventar) — 6 s, Fehler still."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pc_id.json"), "r", encoding="utf-8") as f:
+            pc = (json.load(f) or {}).get("pc_id")
+        if not (isinstance(pc, str) and re.fullmatch(r"pc-[a-z0-9]{4,12}", pc)):
+            return
+        import urllib.request
+        daten = dict(res)
+        daten["trail"] = " > ".join(list(trail))[-3000:]
+        req = urllib.request.Request(f"{PULS_BACKEND}/puls-inventar/{pc}", data=json.dumps(daten, ensure_ascii=False).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=6.0).read()
+    except Exception:
+        pass
 
 
 def _tsx_klick(e, name, trail):
@@ -10551,9 +10639,13 @@ def modus_tsxinventar(cmd):
     res["inventar"]["seite_150"] = tsx_inventar_kurz(seiten_filter(roh, seite0), fr, 150)
     res["ausloeser_kandidaten"] = tsx_inventar_kurz([e for e in seiten_filter(roh, seite0)
                                                      if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", str(e[0] or ""))], fr, 30)
+    res["edits"] = list(_EDIT_NAMEN)
+    res["zeilen_kandidaten"] = [[t[:120], list(r)] for t, r in tsx_zeilen(seiten_filter(roh, seite0))
+                                if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", t)][:20]
     trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente, Seite {len(res['inventar']['seite_150'])}, "
-                 f"Auslöser-Kandidaten {len(res['ausloeser_kandidaten'])}, URL {res['url'][:40] or '—'}")
+                 f"Auslöser-Kandidaten {len(res['ausloeser_kandidaten'])}, Zeilen {len(res['zeilen_kandidaten'])}, URL {res['url'][:40] or '—'}")
     _puls_diagnose_senden(trail, "tsx_inventar")
+    _puls_inventar_senden(res, trail)                 # B20: volles Inventar sofort in die DB (unabhängig vom Aufrufer)
     seite = _tsx_seite(w)
     res["seite"] = list(seite) if seite else None
     _puls_diagnose_senden(trail, "tsx_inventar")      # B17: Spur vor den Klicks
@@ -10593,6 +10685,7 @@ def modus_tsxinventar(cmd):
     else:
         trail.append(f"Bracket-Zahnrad nicht eindeutig ({len(gear)} Kandidaten) — nichts geklickt")
     res.update(ok=True, schritt="fertig", msg="Inventar gelesen (keine Order).")
+    _puls_inventar_senden(res, trail)
     try:
         pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsx_inventar.json")
         with open(pfad, "w", encoding="utf-8") as fh:
@@ -10659,8 +10752,8 @@ def modus_tsxlesen(cmd):
         eintraege, t_bis = [], time.time() + 4.0
         while time.time() < min(t_bis, frist):
             _warte(0.35, 0.25)
-            eintraege = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem"))
-                         if e[1] and tsx_konto_aus_text(e[0]) and e[1][1] > ke[1][1] + 4]
+            eintraege = tsx_eintraege_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem",
+                                                                 "Group", "Custom")), ke[1][1] + 4)
             if len(eintraege) >= 1:
                 break
         texte = [str(e[0]) for e in eintraege]
@@ -10678,8 +10771,8 @@ def modus_tsxlesen(cmd):
         while time.time() < min(t_bis, frist):
             _warte(0.35, 0.25)
             ke2 = ausloeser()
-            offen = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem"))
-                     if e[1] and tsx_konto_aus_text(e[0]) and ke2 and e[1][1] > ke2[1][1] + 4]
+            offen = tsx_eintraege_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem",
+                                                             "Group", "Custom")), ke2[1][1] + 4) if ke2 else []
             if ke2 and tsx_konto_steht(ke2[0], ext) in ("ja", "vielleicht") and not offen:
                 ok_k = True
                 break

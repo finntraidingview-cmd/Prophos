@@ -1766,6 +1766,7 @@ def main():
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
     results.append(test_tsx_titel_url())
+    results.append(test_tsx_zeilen())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2646,6 +2647,42 @@ def test_tsx_titel_url():
     chk("Strg+W auf TopstepX nie mit TV-Ziel", not ob.strg_w_erlaubt(tsx[0], "tv", 3))
     if ok:
         print("✓ TSX-Titel/URL: „NQZ26 $…“ = TopstepX, nie TradingView; TV-Titel unverändert; Adresse topstepx.com")
+    return ok
+
+
+def test_tsx_zeilen():
+    """B20 (27.09.2026, Inventar bei Mike: 2 Kandidaten, aber kein Auslöser): getrennte Knoten „$150K EXPRESS" / „|" /
+    „EXPRESS-…" zu einem Stück zusammenfügen — ohne die Kopfzeile (BAL …) rechts daneben mitzunehmen."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Zeilen: " + name); ok = False
+
+    roh = [("$150K EXPRESS", (20, 160, 120, 180), "Text"), ("|", (124, 160, 128, 180), "Text"),
+           ("EXPRESS-…", (132, 160, 220, 180), "Text"), ("BAL: $11,079.66", (600, 160, 720, 180), "Text"),
+           ("MLL: $145,500.00", (740, 160, 860, 180), "Text"), ("Chart", (20, 400, 80, 420), "Text")]
+    z = ob.tsx_zeilen(roh)
+    chk("Stücke: Auslöser zusammen, Kopfzeile getrennt", ("$150K EXPRESS | EXPRESS-…", (20, 160, 220, 180)) in z
+        and any(t.startswith("BAL: $11,079.66") for t, _r in z) and not any("EXPRESS" in t and "BAL" in t for t, _r in z))
+    a = ob.tsx_ausloeser_waehlen(roh)
+    chk("Auslöser aus Stücken, Rechteck nur der Auslöser", a == ("$150K EXPRESS | EXPRESS-…", (20, 160, 220, 180), "Zeile")
+        and ob.tsx_konto_steht(a[0], "EXPRESS-V2-682437-57131691") == "vielleicht")
+    einzeln = [("$150K EXPRESS | EXPRESS-V2-682437-57131691", (20, 160, 300, 180), "Button")] + roh
+    chk("ein einzelnes Element mit dem ganzen Muster geht vor", ob.tsx_ausloeser_waehlen(einzeln)[2] == "Button")
+    liste = roh + [("$150K TRADING COMBINE", (20, 200, 150, 220), "Text"), ("|", (152, 200, 156, 220), "Text"),
+                   ("150KTC-SKU-V2-682437-58370042", (160, 200, 360, 220), "Text"),
+                   ("$150K EXPRESS", (20, 230, 120, 250), "Text"), ("|", (124, 230, 128, 250), "Text"),
+                   ("EXPRESS-V2-682437-57131691", (132, 230, 330, 250), "Text")]
+    e = ob.tsx_eintraege_waehlen(liste, 184)
+    chk("Einträge unterhalb aus Stücken, volle ID", [t for t, _r, _ty in e] ==
+        ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K EXPRESS | EXPRESS-V2-682437-57131691"]
+        and ob.tsx_konto_treffer([t for t, _r, _ty in e], "EXPRESS-V2-682437-57131691") == (1, ""))
+    chk("leer/Unsinn wirft nicht", ob.tsx_zeilen(None) == [] and ob.tsx_ausloeser_waehlen([("x", None, "Text")]) is None)
+    if ok:
+        print("✓ TSX-Zeilen: getrennte Knoten → Auslöser/Einträge, Kopfzeile bleibt getrennt, Einzel-Element geht vor")
     return ok
 
 

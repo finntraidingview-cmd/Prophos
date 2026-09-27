@@ -9254,6 +9254,62 @@ def admin_konto_balance_lesen():
         return jsonify({"ok": False, "error": f"nicht möglich ({type(e).__name__})"}), 502
 
 
+# ══ PULS-INVENTAR (27.09.2026, Auftrag Koordination B20) — volles TopstepX-Inventar je PC (puls_inventar) ═══════════════
+PULS_INVENTAR_MAX = 150_000
+
+
+def puls_inventar_saeubern(d):
+    """REIN RECHNEND (testbar): nur bekannte Felder, Elemente als [name ≤ 60, typ ≤ 20, [l,t,r,b] Zahlen], Größendeckel."""
+    if not isinstance(d, dict):
+        return None
+
+    def txt(v, n=120):
+        return str(v)[:n] if v is not None else None
+
+    def rechteck(r):
+        return [int(x) for x in r][:4] if isinstance(r, (list, tuple)) and len(r) == 4 and all(
+            isinstance(x, (int, float)) and not isinstance(x, bool) for x in r) else None
+
+    def elemente(lst, n):
+        out = []
+        for e in (lst or [])[:n] if isinstance(lst, list) else []:
+            if isinstance(e, (list, tuple)) and len(e) >= 3:
+                out.append([txt(e[0], 60), txt(e[1], 20), rechteck(e[2])])
+        return out
+    inv = d.get("inventar") if isinstance(d.get("inventar"), dict) else {}
+    er = d.get("erkannt") if isinstance(d.get("erkannt"), dict) else {}
+    out = {"ok": bool(d.get("ok")), "code": txt(d.get("code"), 20), "msg": txt(d.get("msg"), 200), "schritt": txt(d.get("schritt"), 20),
+           "titel": txt(d.get("titel")), "url": txt(d.get("url"), 200), "seite": rechteck(d.get("seite")),
+           "erkannt": {k: bool(er.get(k)) for k in ("titel_tsx", "url_tsx", "titel_tv")},
+           "tabs": [{"name": txt(t.get("name"), 70), "tsx": bool(t.get("tsx")), "tv": bool(t.get("tv"))}
+                    for t in (d.get("tabs") or [])[:20] if isinstance(t, dict)] if isinstance(d.get("tabs"), list) else [],
+           "edits": [txt(x, 50) for x in (d.get("edits") or [])][:8] if isinstance(d.get("edits"), list) else [],
+           "inventar": {k: elemente(inv.get(k), 260) for k in ("grund", "seite_150", "konto_offen", "bracket_offen") if k in inv},
+           "ausloeser_kandidaten": elemente(d.get("ausloeser_kandidaten"), 30),
+           "zeilen_kandidaten": [[txt(z[0], 120), rechteck(z[1])] for z in (d.get("zeilen_kandidaten") or [])[:20]
+                                 if isinstance(z, (list, tuple)) and len(z) >= 2] if isinstance(d.get("zeilen_kandidaten"), list) else [],
+           "trail": txt(d.get("trail"), 3000)}
+    return out if len(json.dumps(out, ensure_ascii=False)) <= PULS_INVENTAR_MAX else None
+
+
+@app.route("/puls-inventar/<pc_id>", methods=["POST", "OPTIONS"])
+def puls_inventar_schreiben(pc_id):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not PC_ID_MUSTER.fullmatch(pc_id or ""):
+        return jsonify({"ok": False, "msg": "pc_id ungültig"}), 400
+    if (request.content_length or 0) > PULS_INVENTAR_MAX * 2:
+        return jsonify({"ok": False, "msg": "zu groß"}), 413
+    d = puls_inventar_saeubern(request.get_json(silent=True))
+    if d is None:
+        return jsonify({"ok": False, "msg": "Inventar ungültig"}), 400
+    try:
+        sb_upsert("puls_inventar", {"pc_id": pc_id, "inventar": d, "at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"nicht speicherbar ({type(e).__name__})"}), 502
+    return jsonify({"ok": True})
+
+
 start_kompass()
 
 
