@@ -20237,9 +20237,11 @@
     if(res && res.ok){
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
       const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
-        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: hedgePuffer(),
+        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill(),
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
-        schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer()),   // Feed-Wächter schließt hier (TP ± 8 Ticks)
+        // Feed-Wächter schließt hier: TP ± 8 Ticks mit echtem Fill, ohne Fill TP ± (Puffer + Zuschlag) (Vorfall Jacob 28.09.2026)
+        schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill()),
+        puffer_ohne_fill: quelle === 'fill' ? null : hedgePufferOhneFill(),
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
         open_grund: res.open_grund || null })
@@ -20252,7 +20254,7 @@
         }catch(_){}
       }
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
-      const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, hedgePuffer())
+      const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill())
       const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
         + (res.sl ? ` · Notfall-SL Fusion ${f(res.sl)} (${Math.round((res.notfall_faktor || hedgeNotfallFaktorFuer(punkte)) * 100)} %)${res.tp ? ` / Master-SL-Level ${f(res.tp)}` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
                   : ' · ⚠ KEIN Notfall-SL gesetzt (' + (res.sl_fehler || '?') + ')')
@@ -20337,6 +20339,21 @@
     }finally{ _hedgeBusy.delete(pid) }
   }
   function hedgePuffer(){ try{ const v = wdVorplanRegeln().hedge_puffer; return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : HEDGE_PUFFER_STD }catch(_){ return HEDGE_PUFFER_STD } }
+  /* PUFFER OHNE ECHTEN FILL (28.09.2026, Vorfall Jacob c28a7639: einstieg_nq kam aus dem Feed (30825,75), der TV-Fill lag bei ~30838 —
+   * der Wächter schloss Fusion 12 Punkte vor dem echten TP, Master blieb offen ohne Gegenhedge). Solange der Einstieg nur aus dem Kurs-Feed
+   * stammt, schließt der Wächter erst bei TP ± (Puffer + HEDGE_PUFFER_OHNE_FILL) — lieber ein paar Punkte zu spät als zu früh.
+   * Regel vorplan.hedge_puffer_ohne_fill (Punkte) überstimmt die Konstante. */
+  const HEDGE_PUFFER_OHNE_FILL = 12
+  function hedgePufferOhneFill(){ try{ const v = ((_wd && _wd.regeln && _wd.regeln.vorplan) || {}).hedge_puffer_ohne_fill; return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : HEDGE_PUFFER_OHNE_FILL }catch(_){ return HEDGE_PUFFER_OHNE_FILL } }
+  // Schließ-Abstand zum TP für einen Hedge: gespeichertes schliesst_bei_nq ist maßgeblich (Open, Fill-Nachtrag, Hand-TP schreiben es),
+  // sonst Standard-Puffer + Zuschlag, solange der Einstieg aus dem Feed kommt und der TP nicht von Hand gesetzt ist
+  function hedgePufferFuer(h, tpL){
+    const sb = Number(h && h.schliesst_bei_nq), tp = Number(tpL || (h && h.tp_level_nq))
+    if(sb > 0 && tp > 0){ const d = Math.abs(sb - tp); if(d <= 60) return d }
+    const feed = /^feed/.test(String((h && h.einstieg_quelle) || '')) && !(h && h.tp_quelle === 'hand')
+    return hedgePuffer() + (feed ? hedgePufferOhneFill() : 0)
+  }
+  window._hedgePufferFuer = hedgePufferFuer   // Test-Haken
   // Wächter (PC-Tab, alle 5 s): eigene Pläne mit offenem Hedge auf diesem PC. Zwei Auslöser:
   //   1) Plan nicht mehr „open" → Master ist zu (Rundgang, Auto-Close, Schließen, Erledigt) → Hedge zu.
   //   2) Das Schließ-Level in MetaTrader hat gefüllt (Finn: „sobald der Preis in MetaTrader erreicht wird") — die
@@ -20434,7 +20451,7 @@
   /* EINSTIEG AUS DEM PULS-FILL NACHTRAGEN (25.09.2026, Live-Daten .580: das tvlesen-Ergebnis trägt avg_fill_je_wurzel =
    * {NQ: {avg_fill, symbol, seite, menge}, MNQ: {…}}). Nur wenn der Einstieg am Hedge noch aus dem Kurs-Feed stammt (einstieg_quelle
    * beginnt mit 'feed'), die Wurzel die des Plans ist und die Seite zur Plan-Richtung passt → einstieg_nq = avg_fill, Quelle
-   * 'puls avg_fill (nachgetragen)'. NUR Anzeige/Statistik: tp_level_nq, sl_level_nq und schliesst_bei_nq bleiben, was beim Open galt —
+   * 'puls avg_fill (nachgetragen)'. (Bis 28.09.2026: NUR Anzeige — seitdem rechnet er die Level neu, siehe unten.) Früherer Grund:
    * sonst schlösse ein laufender Hedge plötzlich an anderer Stelle. Schreiben atomar über mt5_baseline_patch_in('hedge'). */
   async function hedgeEinstiegNachtragen(plan, r){
     try{
@@ -20448,8 +20465,18 @@
       if(!x || tvSeiteNorm(x.seite) !== plan.richtung) return
       const fill = (typeof x.avg_fill === 'number') ? x.avg_fill : ((typeof tvKursZahl === 'function') ? tvKursZahl(String(x.avg_fill || '')) : NaN)
       if(!(fill > 1000)) return
-      await baselinePatchIn(plan.id, 'hedge', { einstieg_nq: fill, einstieg_quelle: 'puls avg_fill (nachgetragen)', einstieg_feed_vorher: (h.einstieg_nq != null) ? h.einstieg_nq : null,
-        einstieg_nachgetragen_at: new Date().toISOString() })
+      // SEIT 28.09.2026 (Vorfall Jacob c28a7639) auch die LEVEL: Fill ± TP-Distanz (h.punkte, wie beim Open), zweites Level ∓ sl_punkte,
+      // Schließ-Level mit normalem Puffer (echter Fill). Die Feed-Level bleiben als *_feed_vorher stehen. Ein von Hand gesetzter TP bleibt.
+      const upd = { einstieg_nq: fill, einstieg_quelle: 'puls avg_fill (nachgetragen)', einstieg_feed_vorher: (h.einstieg_nq != null) ? h.einstieg_nq : null,
+        einstieg_nachgetragen_at: new Date().toISOString() }
+      const pkt = Number(h.punkte), slp = Number(h.sl_punkte), plus = plan.richtung === 'buy' ? 1 : -1
+      if(h.tp_quelle !== 'hand' && pkt > 0 && !['geschlossen', 'fehler'].includes(String(h.status || ''))){
+        const tpNeu = Math.round((fill + plus * pkt) * 100) / 100
+        Object.assign(upd, { tp_level_feed_vorher: h.tp_level_nq ?? null, schliesst_bei_feed_vorher: h.schliesst_bei_nq ?? null, tp_level_nq: tpNeu,
+          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: 'fill_nachtrag' })
+        if(slp > 0) Object.assign(upd, { sl_level_feed_vorher: h.sl_level_nq ?? null, sl_level_nq: Math.round((fill - plus * slp) * 100) / 100 })
+      }
+      await baselinePatchIn(plan.id, 'hedge', upd)
     }catch(e){ console.warn('[hedge] Einstieg nachtragen', e) }
   }
   window._hedgeEinstiegNachtragen = hedgeEinstiegNachtragen
@@ -21267,7 +21294,7 @@
               }
             }
           }catch(e){ console.warn('[hedge] Liq-Level nachtragen', e) }
-          const det = hedgeFeedEntscheidDetail(p.richtung, kurs, tpL, slL, hedgePuffer(), ext ? ext.hoch : null, ext ? ext.tief : null)
+          const det = hedgeFeedEntscheidDetail(p.richtung, kurs, tpL, slL, hedgePufferFuer(h, tpL), ext ? ext.hoch : null, ext ? ext.tief : null)   // 28.09.2026: ohne Fill größerer Puffer
           if(det){
             // Auslöser mit Kerzen-Quelle, z. B. 'kerze_high MNQ ws' (Koordination 25.09.2026)
             const ausl = (det.ausloeser !== 'kurs' && ext) ? `${det.ausloeser} ${(det.ausloeser === 'kerze_high' ? ext.hoch_von : ext.tief_von) || (ext.wurzel + ' ' + ext.quelle)}` : det.ausloeser
@@ -22007,8 +22034,12 @@
     for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && x.status === 'open' && Number(x.einstieg_nq) > 0)){
       const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
       const wl = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: hervor, title: titel })) }catch(_){} }
+      // Preis als Zahl im Titel (28.09.2026, Finn: 1:1 mit der Sell-Limit-Linie in TradingView vergleichen); TP + Fusion-zu immer an der Achse
+      const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      const wlA = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: true, title: titel })) }catch(_){} }
       wl(pw.einstieg_nq, farbe, kurz, 0, hervor ? 3 : 1)
-      wl(pw.tp_level_nq, '#15803d', `TP ${kurz}`, 2, hervor ? 2 : 1)
+      wlA(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, hervor ? 2 : 1)
+      if(pw.hedge && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(pw.hedge.status || ''))) wlA(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 1, 1)
       wl(pw.sl_level_nq, '#b91c1c', pw.sl_art === 'liquidation' ? `Liq ${Number(pw.liq_balance || 0).toLocaleString('de-DE')} ${kurz}` : `SL ${kurz}`, 2, hervor ? 2 : 1)   // WD: Liquidation statt SL (F22)
     }
   }
@@ -22752,6 +22783,8 @@
         aktionen = `<span class="mwd-aktionen">`
           + (hedgeHier ? knopf('hedge', 'Hedge zu', 'Fusion-Gegenposition jetzt schließen (dieser PC hält sie)') : '')
           + knopf('ende', 'Beendet', 'Master ist schon zu (von Hand) — Plan als beendet setzen, danach Master- und Fusion-P&L eintragen')
+          // echter TP aus TradingView (28.09.2026, Vorfall Jacob): Level von Hand setzen, der Wächter schließt dann bei TP ± Puffer
+          + ((h && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) ? `<button type="button" class="btn btn-ghost mwd-btn" data-mwd-tp="${escapeHtml(String(pw.id))}" title="Echten TP aus TradingView (Sell-/Buy-Limit-Linie, NQ-Preis) eintragen — Fusion schließt dann bei TP ± ${hedgePufferTicks()} Ticks">✎ TP aus TV</button>` : '')
           + `</span>`
       }
       const fuss = `<div class="mwd-fuss"><span>${pw.quelle === 'farmer' ? 'Farmer' : 'manuell'}</span>${pw.started_at ? `<span>gestartet ${uhr(pw.started_at)}</span>` : pw.start_um ? `<span>Start ${uhr(pw.start_um)}</span>` : ''}${num(pw.master_tp) != null ? `<span>TP ${f0(pw.master_tp)} $</span>` : ''}${num(pw.master_sl) != null ? `<span>SL ${f0(pw.master_sl)} $</span>` : ''}${chip ? `<span class="mwd-fuss-chip">${chip}</span>` : ''}${fehlerTxt}${aktionen}</div>`
@@ -22770,6 +22803,7 @@
     el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${zLauf} ${zLauf === 1 ? 'läuft' : 'laufen'} · ${zGepl} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
+    el.querySelectorAll('[data-mwd-tp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdTpVonHand(b.dataset.mwdTp) }))
     mklWdAbhakenVerdrahten(el)
     mklWdPlanVerdrahten(el)   // Plan heute Nacht: Stift/Bearbeiten (F33), eigene Handler je Knopf
     mklWdZeitVerdrahten(el)   // Zeitstrahl: Blöcke tauschen per Drag & Drop (F34)
@@ -23186,6 +23220,26 @@
   setTimeout(feedWacheTick, 8000); setInterval(feedWacheTick, 30000)
   document.getElementById('tb-feedwarn')?.addEventListener('click', () => { document.querySelector('#dashboard-view .sb-link[data-view="markt"]')?.click() })
   // Eigener Plan? Nur dann darf „Beendet" schreiben (trade_plans unter RLS des angemeldeten Nutzers)
+  /* ECHTER TP AUS TV (28.09.2026, Master nach Vorfall Jacob c28a7639): tp_level_nq = Wert, schliesst_bei_nq = Wert ± hedge_puffer,
+   * tp_quelle 'hand' (der Fill-Nachtrag überschreibt ihn nicht mehr). Schreiben über mt5_baseline_patch_in — die RPC folgt der RLS,
+   * also nur für EIGENE Pläne; fremde IDs brauchen eine Backend-Route (per SQL wie bei Jacob 8ae97242). */
+  async function mklWdTpVonHand(pid){
+    const pw = ((mkl.wd && mkl.wd.plaene) || []).find(x => String(x.id) === String(pid)); if(!pw) return
+    const eigen = mklWdEigenerPlan(pid)
+    if(!eigen){ if(typeof atToast === 'function') atToast(`TP von Hand geht nur im Profil von ${pw.person || 'dieser ID'} (fremder Plan — Backend-Route fehlt noch)`, 'end'); return }
+    const alt = Number(pw.tp_level_nq) > 0 ? Number(pw.tp_level_nq).toLocaleString('de-DE', { minimumFractionDigits: 2 }) : ''
+    const ein = prompt(`Echter TP aus TradingView für ${pw.person || ''} (${pw.richtung === 'sell' ? 'Buy' : 'Sell'}-Limit-Linie, NQ-Preis):`, alt)
+    if(ein == null) return
+    const v = tvKursZahl(String(ein).trim())
+    if(!(v > 1000)){ if(typeof atToast === 'function') atToast('Kein gültiger Preis: ' + ein, 'end'); return }
+    const sb = hedgeSchliesstBei(pw.richtung, v, hedgePuffer())
+    try{
+      await baselinePatchIn(pid, 'hedge', { tp_level_nq: v, schliesst_bei_nq: sb, puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: 'hand',
+        tp_level_vorher: Number(pw.tp_level_nq) > 0 ? Number(pw.tp_level_nq) : null, tp_hand_at: new Date().toISOString() })
+      if(typeof atToast === 'function') atToast(`✓ TP ${v.toLocaleString('de-DE', { minimumFractionDigits: 2 })} gesetzt — Fusion schließt bei ${sb.toLocaleString('de-DE', { minimumFractionDigits: 2 })}`, 'start')
+      mkl.wd.at = 0; try{ await mklWdLaden() }catch(_){} ; mklWdRender(); try{ mklChartZeichnen() }catch(_){}
+    }catch(e){ if(typeof atToast === 'function') atToast('TP nicht gespeichert: ' + ((e && e.message) || e), 'end') }
+  }
   const mklWdEigenerPlan = id => { try{ return (tradePlans || []).find(x => String(x.id) === String(id)) || null }catch(_){ return null } }
   /* Aktionen der Markt-Karte (25.09.2026). ende = PATCH /admin/wd-plaene {aktion:'ende'} für jede ID (Backend .539, gleiche
    * Form wie tvV2EndeSetzen + atMoveToReview: final quelle 'hand', status review, ended_at); danach Pläne + Block neu laden.
@@ -23373,7 +23427,10 @@
       if(!wdlPasst(t) || !wdlLinienAn(t)) continue
       const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085', wer = String(t.person || '?').split(/\s+/)[0]
       const l = (v, art, name, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: `${wer} ${name}` }) }
-      l(t.einstieg_nq, 0, 'Entry', 2); l(t.tp_level_nq, 2, 'TP', 1); l(t.liq_level_nq, 1, 'Liq', 1); l(t.sl_level_nq, 3, 'SL', 1)
+      const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })   // Preis als Zahl (28.09.2026, Vergleich mit TV)
+      l(t.einstieg_nq, 0, 'Entry', 2); if(num(t.tp_level_nq) != null) l(t.tp_level_nq, 2, 'TP ' + pz(t.tp_level_nq), 1); l(t.liq_level_nq, 1, 'Liq', 1); l(t.sl_level_nq, 3, 'SL', 1)
+      const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
+      if(sb != null && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) out.push({ preis: sb, farbe: '#7C3AED', art: 1, breite: 1, titel: `${wer} Fusion zu ${pz(sb)}` })
     }
     return out
   }
@@ -34946,7 +35003,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.721'
+  const OS_TAB_BUILD = '2026-09-22.722'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
