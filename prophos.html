@@ -21605,8 +21605,9 @@
     }catch(_){ return jetzt }
   }
   async function mklKerzen24h(jetzt){
-    const alle = []
-    for(const w of ['NQ', 'MNQ']){
+    // Beide Wurzeln PARALLEL (F32-Zusatz 28.09.2026, Finn: „Der Radar soll viel schneller sein"): vorher liefen Anker + Seiten
+    // NQ und danach MNQ nacheinander — 4–6 Round-Trips hintereinander für ~600 Zeilen je Wurzel.
+    const jeWurzel = await Promise.all(['NQ', 'MNQ'].map(async w => {
       const seit = new Date((await mklKerzenAnker(w, jetzt)) - 1440 * 60000).toISOString()
       const je = []
       for(let seite = 0; seite < 2; seite++){
@@ -21616,9 +21617,9 @@
         je.push(...(data || []))
         if(!data || data.length < 1000) break
       }
-      alle.push(...je.reverse())
-    }
-    return { data: alle }
+      return je.reverse()
+    }))
+    return { data: jeWurzel.flat() }
   }
   async function mklLaden(vollstaendig){
     if(mkl.stub) return
@@ -21650,8 +21651,9 @@
     // Loch hinter dem Nachtrag (Stub-Test 25.09.2026): war Prophos ein paar Minuten ohne Verbindung und lief die Probe genau in
     // dieses Fenster, holte der 3-min-Nachtrag nur das Ende — das Stück dazwischen fehlte dauerhaft. Erkennt der Nachtrag ein Loch
     // zur jüngsten bekannten Kerze, lädt der nächste Takt voll (kerzenLoch).
-    const voll = vollstaendig || (!mkl.kerzen.length && deckelOk) || kerzeLuecke || !!mkl.kerzenLoch
-    if(voll) mkl.kerzenLoch = false
+    // kerzenNurSchnell: der Schnell-Start (mklBetreten) zeichnet nur die letzten 90 Kerzen — die 24 h müssen danach sicher kommen
+    const voll = vollstaendig || (!mkl.kerzen.length && deckelOk) || kerzeLuecke || !!mkl.kerzenLoch || !!mkl.kerzenNurSchnell
+    if(voll){ mkl.kerzenLoch = false; mkl.kerzenNurSchnell = false }
     if(voll) mkl.kerzenVollAt = jetzt
     if(voll) q.push(mklKerzen24h(jetzt))
     else q.push(supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle').gte('minute', new Date(jetzt - 3 * 60000).toISOString()).order('minute', { ascending: true }).limit(10))
@@ -22040,16 +22042,48 @@
     }catch(e){ say('Nicht gespeichert: ' + (e && e.message || e), 'err') }
     finally{ if(b) b.disabled = false }
   }
+  // Winning Days + Plan NEBEN dem Chart laden (F32-Zusatz 28.09.2026): bisher wartete jeder Tick auf /admin/wd-heute (bis 12 s) und
+  // /admin/live-trades (bis 15 s), BEVOR Kopf, Chart und Block gezeichnet wurden — beim Betreten stand nur „RADAR –". Jetzt eigener,
+  // nicht abgewarteter Lauf, der nur den Block neu zeichnet. mklWdLaden sperrt sich selbst (laeuft), der Plan drosselt auf 60 s.
+  async function mklWdHolen(){
+    try{ await Promise.all([mklWdLaden(), mklWdPlanLaden()]) }catch(_){}
+    try{ if(mklAktiv()) mklWdRender() }catch(_){}
+  }
   async function mklTick(vollstaendig){
-    if(mkl.busy) return; mkl.busy = true
+    // Läuft schon ein Tick, geht ein Aufruf nicht verloren („Aktualisieren" während des Takts): danach genau einmal nachholen
+    if(mkl.busy){ mkl.nochmal = mkl.nochmal || vollstaendig || 'ja'; return }
+    mkl.busy = true
     try{
+      if(mklMarktAktiv() && (vollstaendig || Date.now() - mkl.wd.at > MKL_WD_POLL_MS)) mklWdHolen()   // Winning Days, 15 s (nur Markt-View) — nicht abwarten
       await mklLaden(vollstaendig)
-      if(mklMarktAktiv() && (vollstaendig || Date.now() - mkl.wd.at > MKL_WD_POLL_MS)){ await mklWdLaden(); await mklWdPlanLaden() }   // Winning Days, 15 s (nur Markt-View); Plan drosselt selbst auf 60 s
       const zu = mklAuswerten(mkl.orders, mkl.kerzen, mkl.kurs)
       if(zu.length){ await mklDemoSchliessenDb(zu); if(typeof atToast === 'function') atToast(`Demo: ${zu.length} Order${zu.length > 1 ? 's' : ''} geschlossen (${zu.map(z => z.grund.toUpperCase() + ' ' + (z.pl_usd >= 0 ? '+' : '−') + mklFmt(Math.abs(z.pl_usd)) + ' $').join(', ')})`, 'end') }
       if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
     }catch(e){ console.warn('[markt-live]', e) }
-    finally{ mkl.busy = false }
+    finally{
+      mkl.busy = false
+      if(mkl.nochmal){ const v = mkl.nochmal === true; mkl.nochmal = null; setTimeout(() => mklTick(v), 0) }
+    }
+  }
+  /* BETRETEN (F32-Zusatz 28.09.2026, Finn: „Selbst wenn der Chart einen Tick zum Laden braucht, will ich schon mal die geplanten Trades
+   * unten sehen"): sofort aus dem Speicher dieser Sitzung zeichnen (Kopf, Chart, Winning Days + Plan), Block-Daten parallel holen.
+   * Kerzen: stehen welche aus dieser Sitzung, reicht der Nachtrag (Lücken erkennt mklLaden selbst); sonst erst die letzten 90 Kerzen
+   * der gewählten Wurzel (eine kleine Abfrage) zeichnen und die 24 h im selben Zug nachladen (kerzenNurSchnell erzwingt das). */
+  async function mklBetreten(){
+    try{ mklKopf(); mklChartZeichnen(); mklWdRender() }catch(_){}
+    mklWdHolen()
+    if(!mkl.kerzen.length && !mkl.stub){
+      try{
+        const { data } = await supabase.from('tv_kurs_1m').select('wurzel,minute,symbol,o,h,l,c,ticks,pc,quelle')
+          .eq('wurzel', mkl.wurzel).order('minute', { ascending: false }).limit(90)
+        if(data && data.length && !mkl.kerzen.length){
+          mkl.kerzen = data.slice().reverse(); mkl.kerzenNurSchnell = true
+          try{ mklChartZeichnen() }catch(_){}
+        }
+      }catch(_){}
+      return mklTick(true)
+    }
+    return mklTick(false)
   }
   // Stub ohne Login (Muster _admKapStub): window._mklStub({kurs, kerzen, orders}) zeichnet die View mit Testdaten
   window._mklTick = v => mklTick(!!v)   // Test-Haken (25.09.2026): Takt von außen auslösen, z. B. mit verstellter Uhr im Stub
@@ -22072,13 +22106,14 @@
     document.querySelectorAll('#mkl-instr button').forEach(x => x.classList.toggle('active', x === b))
   }))
   $mkl('mkl-go')?.addEventListener('click', mklDemoPlatzieren)
-  document.querySelectorAll('#dashboard-view .sb-link[data-view="markt"]').forEach(b => b.addEventListener('click', () => setTimeout(() => mklTick(true), 80)))
+  document.querySelectorAll('#dashboard-view .sb-link[data-view="markt"]').forEach(b => b.addEventListener('click', () => setTimeout(mklBetreten, 0)))
   // Takt: 5 s in der Markt-View (Kurs + Kerzen-Nachtrag), sonst alle 60 s nur die Auswertung offener Demo-Orders
   // Polling als Rückfall zum Realtime-Kanal (25.09.2026): 5 s ohne Kanal, 15 s bei SUBSCRIBED (mklPollMs, s. u.); 1-s-Prüfer
   setInterval(() => { if(mklAktiv() && Date.now() - (mkl.tickAt || 0) >= mklPollMs){ mkl.tickAt = Date.now(); mklTick(false) } }, 1000)
   // Hintergrund-Takt für Demo-Orders entfernt (25.09.2026) — außerhalb der Markt-View pollt nur noch der Stale-Wächter (60 s)
   // „Aktualisieren" oben rechts (25.09.2026): Kurs-Feed + Kerzen voll neu laden, Winning Days sofort (mkl.wd.at = 0) — eigener Handler
-  $mkl('mk-refresh')?.addEventListener('click', () => { if(mkl.wd) mkl.wd.at = 0; mkl.kerzen = []; mklTick(true) })
+  // F32-Zusatz: Kerzen bleiben stehen, bis die neuen da sind (vorher mkl.kerzen = [] → leerer Chart), Plan sofort mit
+  $mkl('mk-refresh')?.addEventListener('click', () => { if(mkl.wd){ mkl.wd.at = 0; if(mkl.wd.plan) mkl.wd.plan.at = 0 } mklWdHolen(); mklTick(true) })
   // Wurzel-Umschalter NQ ↔ MNQ (24.09.2026 spät) — eigener Handler, letzte Wahl bleibt am Gerät
   document.querySelectorAll('#mkl-wurzel-seg [data-mkl-wurzel]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-mkl-wurzel') === mkl.wurzel)
@@ -22226,6 +22261,9 @@
       const aus = new Set(((r && r.ids_aus) || []).map(String))
       const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
       const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
+      // Sofort zeichnen (F32-Zusatz): Tagesplan steht, der Plan-Status von Railway kommt gleich nach — bis dahin der letzte bekannte
+      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene: mkl.wd.plan.tag === tag ? mkl.wd.plan.plaene : null, at: mkl.wd.plan.at, fehler: '' }
+      try{ if(mklAktiv()) mklWdRender() }catch(_){}
       // Status JE PLAN (F32, Finn: „Es sind 4 geplant, aber nur 3 unter WD"): trade_plans zeigt per RLS nur eigene Pläne —
       // /admin/live-trades (Service-Key, alle IDs, tvv2/tsv2 inkl. planned) liefert Status/TP/Kontrakte/Start je plan_id.
       // Nicht ladbar → plaene null, die Zeilen zeigen dann den Stand aus wd_tagesplan.konten.
@@ -22332,7 +22370,7 @@
     const pl = alle.filter(x => x.status === 'open' || x.status === 'planned')
       .sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || zeit(a) - zeit(b))
     const nachtrag = alle.filter(x => x.status === 'review' && !(x.master_pl && x.master_pl.quelle === 'plan'))
-    if(!alle.length && !mkl.wd.fehler && !mkl.wd.at){ el.style.display = 'none'; return }
+    if(!alle.length && !mkl.wd.fehler && !mkl.wd.at && !(mkl.wd.plan && mkl.wd.plan.tag)){ el.style.display = 'none'; return }   // Plan allein reicht (F32-Zusatz)
     el.style.display = ''
     // NQ/MNQ preisgleich — irgendein frischer Kurs: je Wurzel aus tv_kurse (mkl.kursJe, Realtime/Poll), sonst der Kopf-Kurs (mkl.kurs)
     // 25.09.2026: Kurs über wdKursJetzt (dieselbe Quelle wie der MASTER-Chip der Trade-Karte, echtes Alter ≤ 10 s)
@@ -34614,7 +34652,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.713'
+  const OS_TAB_BUILD = '2026-09-22.714'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
