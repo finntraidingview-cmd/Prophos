@@ -11361,6 +11361,118 @@ def tsx_mengenfeld(felder, leiste, label_rect=None):
     return tsx_feld_zu_label(felder, label_rect) if label_rect else None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# TOPSTEPX-TABELLEN UNTEN (B35, 27.09.2026 — Master: Ablehnung/Fill im Reiter „Orders" lesen, Einstieg (Avg) / TP / SL für den
+# Radar-Weg F28). Inventar Mike: Reiter „Positions X" / „Orders X" / „Trades X" (TabItem, y≈1056; „X" = Schließen-Kreuz im
+# Reiter — nie dorthin klicken), Tabelle = DataItems: Kopfzellen je Spalte (x-Spanne) + eine Zeilen-Zelle über die volle Breite.
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_RX_STATUS_ABGELEHNT = re.compile(r"reject|cancel+ed\s+by\s+system|denied|failed|abgelehnt", re.I)
+TSX_RX_STATUS_GEFUELLT = re.compile(r"\bfill", re.I)
+TSX_RX_STATUS_AKTIV = re.compile(r"working|open|pending|accepted|active|new|suspended", re.I)
+
+
+def tsx_tabelle_lesen(roh, y_ab, tol=6):
+    """REIN RECHNEND (testbar): DataItems unterhalb y_ab → (kopf [namen], zeilen [{spalte: wert}]). Zeilen nach Mitte-y
+    gruppiert; die oberste Zeile ist der Kopf; Zellen breiter als 60 % der Tabelle (ganze Zeile als ein Knoten) zählen nicht.
+    Jede Datenzelle geht an die Kopfspalte, in deren x-Spanne ihre Mitte liegt."""
+    els = [e for e in roh or () if e[1] and (e[2] if len(e) > 2 else "") == "DataItem" and e[1][1] >= y_ab and str(e[0] or "").strip()]
+    if not els:
+        return [], []
+    breite = max(e[1][2] for e in els) - min(e[1][0] for e in els)
+    els = [e for e in els if (e[1][2] - e[1][0]) <= 0.6 * max(breite, 1)]
+    reihen = []
+    for e in sorted(els, key=lambda e: ((e[1][1] + e[1][3]) / 2, e[1][0])):
+        my = (e[1][1] + e[1][3]) / 2
+        if reihen and abs(reihen[-1][0] - my) <= tol:
+            reihen[-1][1].append(e)
+        else:
+            reihen.append([my, [e]])
+    if not reihen:
+        return [], []
+    kopf = sorted(reihen[0][1], key=lambda e: e[1][0])
+    namen = [str(e[0]).strip() for e in kopf]
+    zeilen = []
+    for _my, zellen in reihen[1:]:
+        z = {}
+        for c in zellen:
+            cx = (c[1][0] + c[1][2]) / 2
+            for k in kopf:
+                if k[1][0] - 2 <= cx <= k[1][2] + 2:
+                    z.setdefault(str(k[0]).strip(), str(c[0]).strip())
+                    break
+        if z:
+            zeilen.append(z)
+    return namen, zeilen
+
+
+def tsx_spalte(zeile, *muster):
+    """REIN RECHNEND (testbar): Wert der ersten Spalte, deren Name zu einem Muster passt (Regex, ohne Groß/klein)."""
+    for m in muster:
+        for k, v in (zeile or {}).items():
+            if re.search(m, k, re.I):
+                return v
+    return None
+
+
+def tsx_orders_urteil(vorher, nachher):
+    """REIN RECHNEND (testbar): neue/geänderte Order-Zeilen nach dem Klick → ('abgelehnt', grund) | ('gefuellt', zeile) |
+    ('aktiv', zeile) | (None, None). vorher/nachher = [{spalte: wert}]."""
+    alt = {tuple(sorted(z.items())) for z in vorher or ()}
+    neu = [z for z in nachher or () if tuple(sorted(z.items())) not in alt]
+    for z in neu:
+        st = tsx_spalte(z, r"^status$", r"status") or ""
+        if TSX_RX_STATUS_ABGELEHNT.search(st):
+            grund = tsx_spalte(z, r"reason", r"message", r"note", r"text", r"comment") or ""
+            return "abgelehnt", (f"{st}: {grund}" if grund else st) or " · ".join(z.values())
+    for z in neu:
+        if TSX_RX_STATUS_GEFUELLT.search(tsx_spalte(z, r"status") or ""):
+            return "gefuellt", z
+    for z in neu:
+        if TSX_RX_STATUS_AKTIV.search(tsx_spalte(z, r"status") or ""):
+            return "aktiv", z
+    return None, None
+
+
+def tsx_levels(positionen, orders, contract):
+    """REIN RECHNEND (testbar): Einstieg (Avg der Position) und TP/SL-Level (aktive Limit-/Stop-Orders desselben Contracts).
+    -> {einstieg, tp_level, sl_level} (None, wo nicht lesbar)."""
+    c = str(contract or "").upper()
+    rx_c = re.compile(rf"(?<![A-Z0-9]){re.escape(c)}(?![A-Z0-9])") if c else None     # NQZ26 ≠ MNQZ26
+    passt = lambda z: not c or any(rx_c.search(str(v).upper()) for v in z.values())
+    pos = [z for z in positionen or () if passt(z)]
+    ein = None
+    if pos:
+        ein = tsx_geld(tsx_spalte(pos[0], r"avg", r"entry\s*price", r"^price$", r"price"))
+    tp = sl = None
+    for z in orders or ():
+        if not passt(z) or not TSX_RX_STATUS_AKTIV.search(tsx_spalte(z, r"status") or "working"):
+            continue
+        typ = (tsx_spalte(z, r"^type$", r"type") or "").lower()
+        if "limit" in typ and tp is None:
+            tp = tsx_geld(tsx_spalte(z, r"limit\s*price", r"^price$", r"price"))
+        elif "stop" in typ and sl is None:
+            sl = tsx_geld(tsx_spalte(z, r"stop\s*price", r"^price$", r"price"))
+    return {"einstieg": ein, "tp_level": tp, "sl_level": sl}
+
+
+def _tsx_reiter(w, name, trail):
+    """Reiter unten („Positions"/„Orders"/„Trades") wählen: Klick ins linke Drittel des kleinsten passenden TabItems — nie auf
+    das Schließen-„X" rechts im Reiter. -> Unterkante der Reiterleiste | None"""
+    tabs = [e for e in _tsx_seite_roh(w, ("TabItem",)) if e[1] and re.match(rf"^\s*{name}\b", str(e[0] or ""), re.I)]
+    if not tabs:
+        trail.append(f"Reiter {name} nicht gefunden")
+        return None
+    t = min(tabs, key=lambda e: (e[1][2] - e[1][0]) * (e[1][3] - e[1][1]))
+    l, o, r, u = t[1]
+    _tv_uia_klick({"punkt": (int(l + (r - l) * 0.3), int((o + u) / 2))}, f"Reiter {name}", trail)
+    _warte(0.5, 0.3)
+    return max(e[1][3] for e in tabs)
+
+
+def _tsx_tabelle(w, y_ab):
+    return tsx_tabelle_lesen(_tsx_seite_roh(w, ("DataItem",)), y_ab)
+
+
 TSX_RX_ABGELEHNT = re.compile(r"reject|market\s+(is\s+)?closed|not\s+allowed|outside\s+(of\s+)?(regular\s+)?trading\s+hours|"
                               r"denied|insufficient|order\s+failed|failed\s+to|abgelehnt|nicht\s+erlaubt", re.I)
 
@@ -11652,7 +11764,9 @@ def _tsx_order_nach_kopf(befehl):
                     f2 = _tsx_felder(w)
                     if any(f[0].lower().startswith("risk") for f in f2):
                         break
-                h2 = tsx_haken_zu_text(f2, txt[0][1])
+                # Dialog kann beim zweiten Öffnen woanders liegen (Mike 16:38: 29 px tiefer) — Text neu suchen
+                txt2 = [e for e in _tsx_seite_roh(w, ("Text",)) if e[1] and str(e[0]).lower().startswith("automatically apply")]
+                h2 = tsx_haken_zu_text(f2, (txt2 or txt)[0][1])
                 zustand = {0: "aus", 1: "an"}.get(h2[4] if h2 else None, "unlesbar")
                 trail.append(f"Haken nach Wiederöffnen: {zustand} (roh {h2[4] if h2 else '—'})")
                 res["haken_kontrolle"] = zustand
@@ -11757,6 +11871,11 @@ def _tsx_order_nach_kopf(befehl):
             return _tsx_ausgabe(res, trail)
         # 8. Senden
         _TOAST_TYPEN = ("Text", "Button", "Group", "Custom", "ListItem")
+        # B35: Reiter „Orders" vorher öffnen und merken — nach dem Klick zeigt die neue Zeile Status (Rejected/Filled) + Grund
+        orders_y = _tsx_reiter(w, "Orders", trail)
+        orders_vorher = _tsx_tabelle(w, orders_y)[1] if orders_y else []
+        if orders_y:
+            trail.append(f"Orders vorher: {len(orders_vorher)} Zeilen")
         vorher_txt = [e[0] for e in _tsx_seite_roh(w, _TOAST_TYPEN) if e[1]]
         res["retry_ok"] = False
         res["klick_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -11772,14 +11891,37 @@ def _tsx_order_nach_kopf(befehl):
             if abl:
                 trail.append(f"TopstepX-Meldung nach dem Klick: „{abl[:160]}\"")
                 return ende("abgelehnt", f"Von TopstepX abgelehnt: {abl[:200]}", gesendet=True, retry_ok=False, abgelehnt_text=abl[:300])
+            ord_urteil, ord_wert = (None, None)
+            if orders_y:
+                kopf_o, orders_n = _tsx_tabelle(w, orders_y)
+                ord_urteil, ord_wert = tsx_orders_urteil(orders_vorher, orders_n)
+                if ord_urteil == "abgelehnt":
+                    trail.append(f"Orders: neue Zeile abgelehnt — „{str(ord_wert)[:160]}\"")
+                    return ende("abgelehnt", f"Von TopstepX abgelehnt: {str(ord_wert)[:200]}", gesendet=True, retry_ok=False,
+                                abgelehnt_text=str(ord_wert)[:300], orders_kopf=kopf_o[:20])
+                if ord_urteil == "gefuellt" and not res.get("order_gefuellt"):
+                    res["order_gefuellt"] = ord_wert
+                    trail.append("Orders: neue Zeile Filled")
             if tsx_position_zustand([e[0] for e in roh_n if e[1]]) != "keine":
                 werte = tsx_kopf_werte(roh_n)
                 res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
                                   (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
                 res["positionen"] = [{"symbol": cb[3], "seite": befehl["richtung"], "menge": befehl["menge"]}]
-                res.update(ok=True, schritt="fertig", einstieg=None, tp_level=None, sl_level=None,
-                           msg=f"Order gesendet: {knopf[0]} ({cb[3]}) — Position steht.")
                 trail.append("Nachher-Beweis: „No Active Position\" ist weg")
+                # B35: Einstieg (Avg, Reiter Positions) + TP/SL-Level (aktive Limit/Stop, Reiter Orders) für den Radar-Weg
+                lv, tabs = {"einstieg": None, "tp_level": None, "sl_level": None}, {}
+                try:
+                    ya = _tsx_reiter(w, "Positions", trail)
+                    kp, pz = _tsx_tabelle(w, ya) if ya else ([], [])
+                    yo = _tsx_reiter(w, "Orders", trail)
+                    ko, oz = _tsx_tabelle(w, yo) if yo else ([], [])
+                    lv = tsx_levels(pz, oz, cb[3])
+                    tabs = {"positions": {"kopf": kp[:20], "zeilen": pz[:5]}, "orders": {"kopf": ko[:20], "zeilen": oz[:8]}}
+                except Exception as e:
+                    trail.append(f"Levels nicht lesbar: {type(e).__name__}")
+                trail.append(f"Levels: Einstieg {lv['einstieg']} · TP {lv['tp_level']} · SL {lv['sl_level']}")
+                res.update(ok=True, schritt="fertig", einstieg=lv["einstieg"], tp_level=lv["tp_level"], sl_level=lv["sl_level"],
+                           tv_symbol=cb[3], tabellen=tabs, msg=f"Order gesendet: {knopf[0]} ({cb[3]}) — Position steht.")
                 _puls_diagnose_senden(trail, "tsx_fertig")
                 return _tsx_ausgabe(res, trail)
         if markt_zu:

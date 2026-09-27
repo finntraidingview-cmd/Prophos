@@ -2879,7 +2879,7 @@ def test_tsx_order():
     chk("Haken neben „Automatically apply\"", ob.tsx_haken_zu_text(hk, (957, 872, 1296, 891)) == hk[0])
 
     # Trockenlauf
-    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market", haken=0, markt=False, nach="pos"):
+    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market", haken=0, markt=False, nach="pos", tabelle=False):
         z = {"dialog": False, "profit": "250", "risk": "100", "haken": haken, "contract": "NQZ26", "menge": 1, "pos": pos_offen, "klicks": []}
 
         def roh(w, typen=None):
@@ -2896,6 +2896,19 @@ def test_tsx_order():
                 r.append(("Market closed", (2094, 740, 2440, 770), "Button"))
             if z.get("toast"):
                 r.append(("Order rejected: Market is closed", (2000, 1200, 2440, 1240), "Text"))
+            if tabelle:
+                r += [("Positions X", (194, 1056, 281, 1092), "TabItem"), ("Positions X", (196, 1061, 261, 1088), "TabItem"),
+                      ("Orders X", (292, 1056, 360, 1092), "TabItem"), ("Orders X", (294, 1061, 341, 1088), "TabItem")]
+                kopf = [("Contract", (86, 1095, 300, 1124)), ("Side", (300, 1095, 400, 1124)), ("Type", (400, 1095, 500, 1124)),
+                        ("Status", (500, 1095, 700, 1124)), ("Price", (700, 1095, 850, 1124)), ("Reason", (850, 1095, 1400, 1124))]
+                r.append(("Contract Side Type Status Price Reason", (86, 1095, 2552, 1124), "DataItem"))
+                r += [(n, q, "DataItem") for n, q in kopf]
+                reihen = [["MNQZ26", "Buy", "Market", "Filled", "30900.00", ""]]
+                if z.get("rej"):
+                    reihen.insert(0, ["MNQZ26", "Buy", "Market", "Rejected", "", "Market is closed"])
+                for i, werte in enumerate(reihen):
+                    y = 1130 + 30 * i
+                    r += [(v, (q[0] + 4, y, q[2] - 4, y + 24), "DataItem") for v, (_n, q) in zip(werte, kopf) if v]
             if z["dialog"]:
                 r += [("Position Brackets close", (906, 577, 1654, 658), "Text"), ("close", (1601, 587, 1644, 630), "Button"),
                       ("Automatically apply Risk / Profit bracket to new Positions", (957, 872, 1296, 891), "Text")]
@@ -2919,6 +2932,7 @@ def test_tsx_order():
             elif name.startswith("Order senden"):
                 if nach == "pos": z["pos"] = True
                 elif nach == "toast": z["toast"] = True
+                elif nach == "orders_rej": z["rej"] = True
             elif name.startswith("Schnellknopf "): z["menge"] = int(name.split()[-1])
             elif name == "Increase quantity": z["menge"] += 1
 
@@ -2930,7 +2944,8 @@ def test_tsx_order():
             if key: z[key] = str(text)
             elif name == "# of Contracts": z["menge"] = int(text)
             return True
-        alt = {k: getattr(ob, k) for k in ("_tsx_seite_roh", "_tsx_felder", "_tsx_klick", "_tsx_tippen", "_warte", "_puls_diagnose_senden", "_tsx_esc")}
+        alt = {k: getattr(ob, k) for k in ("_tsx_seite_roh", "_tsx_felder", "_tsx_klick", "_tsx_tippen", "_warte", "_puls_diagnose_senden", "_tsx_esc", "_tv_uia_klick")}
+        ob._tv_uia_klick = lambda ziel, name, trail: z["klicks"].append(name) or trail.append(name + " geklickt")
         ob._tsx_seite_roh, ob._tsx_felder, ob._tsx_klick, ob._tsx_tippen = roh, fld, klick, tippen
         ob._warte = lambda *a, **k: None
         ob._puls_diagnose_senden = lambda *a, **k: None
@@ -3025,6 +3040,25 @@ def test_tsx_order():
     neu_li = alt_li + [(f"6{c}Z26", (1977, 320 + 32 * i, 2448, 350 + 32 * i), "ListItem") for i, c in enumerate("ABCD")]
     chk("B33: neue Vorschlagsliste unter dem Feld gezählt", ob.tsx_liste_neu(alt_li, neu_li, feldc) == 4 and ob.tsx_liste_neu(neu_li, neu_li, feldc) == 0)
     chk("B33: Bot-Stand in der Spur", ob.puls_bot_stand().startswith("Bot ") and "Datei " in ob.puls_bot_stand())
+    r, z = lauf(dict(cmd, scharf=True), markt=True, nach="orders_rej", haken=1, tabelle=True)
+    chk(f"B35: Orders-Reiter → neue Zeile Rejected → abgelehnt mit Grund ({r.get('code')}: {r.get('msg')})", r.get("code") == "abgelehnt"
+        and "Market is closed" in r.get("msg", "") and "Reiter Orders" in z["klicks"] and r.get("gesendet") is True)
+    rt = [e for e in []]
+    kopf_t = [("Contract", (86, 1095, 300, 1124), "DataItem"), ("Avg Price", (300, 1095, 500, 1124), "DataItem"),
+              ("Contract Avg Price", (86, 1095, 2552, 1124), "DataItem"), ("MNQZ26", (90, 1130, 296, 1154), "DataItem"),
+              ("30,921.75", (304, 1130, 496, 1154), "DataItem")]
+    kp, zz = ob.tsx_tabelle_lesen(kopf_t, 1090)
+    chk(f"B35: Tabelle lesen ({kp}, {zz})", kp == ["Contract", "Avg Price"] and zz == [{"Contract": "MNQZ26", "Avg Price": "30,921.75"}])
+    ou = ob.tsx_orders_urteil
+    chk("B35: Orders-Urteil", ou([], [{"Status": "Rejected", "Reason": "Outside trading hours"}]) == ("abgelehnt", "Rejected: Outside trading hours")
+        and ou([{"Status": "Filled"}], [{"Status": "Filled"}]) == (None, None) and ou([], [{"Status": "Filled", "Side": "Buy"}])[0] == "gefuellt")
+    lv = ob.tsx_levels([{"Contract": "MNQZ26", "Avg Price": "30,921.75"}],
+                       [{"Contract": "MNQZ26", "Type": "Limit", "Status": "Working", "Price": "30,927.75"},
+                        {"Contract": "MNQZ26", "Type": "Stop", "Status": "Working", "Price": "30,800.00"},
+                        {"Contract": "NQZ26", "Type": "Limit", "Status": "Working", "Price": "1.00"}], "MNQZ26")
+    chk(f"B35: Levels aus Positions/Orders ({lv})", lv == {"einstieg": 30921.75, "tp_level": 30927.75, "sl_level": 30800.0})
+    lv2 = ob.tsx_levels([{"Contract": "MNQZ26", "Avg Price": "30,921.75"}], [], "NQZ26")
+    chk("B35: NQZ26 trifft nie MNQZ26", lv2["einstieg"] is None)
     ab = ob.tsx_ablehnung
     chk("B31: Ablehnung nur als neuer Text", ab(["Market closed", "BUY +1 @ MARKET"], ["Market closed", "Order rejected: Market is closed"])
         == "Order rejected: Market is closed" and ab(["Market closed"], ["Market closed"]) is None

@@ -7047,6 +7047,7 @@ def _wd_heute_zeile(p, acc, disp, vorher=None):
                   # B25: Start-Balance eines frischen Kontos — Topstep Express 0 $, sonst die Größe
                   "basis_balance": konto_basis_balance(acc), "topstep_express": ist_topstep_express(acc)},
         "route": p.get("route"), "richtung": richtung or None, "kt": kt, "kontrakte": kt, "symbol_root": root or None,
+        "punktwert": ppl,   # B35/F28: $ je Punkt und Kontrakt (NQ 20, MNQ 2) — Live-P&L im Radar = (Kurs − Einstieg) · punktwert · kt
         "master_tp": tp_usd, "master_sl": sl_usd, "status": p.get("status"),
         "start_um": p.get("start_um"), "started_at": p.get("started_at"), "ended_at": p.get("ended_at"),
         "einstieg_nq": einstieg, "einstieg_quelle": einstieg_quelle,
@@ -7193,7 +7194,10 @@ def admin_wd_heute():
             z = _wd_heute_zeile(p, accs.get(str(p.get("master_account_id") or "")), disp, wd_vorher_waehlen(p, fruehere))
             if _wd_heute_behalten(z, tag):
                 zeilen.append(z)
-        return jsonify({"tag": tag, "jetzt": datetime.now(timezone.utc).isoformat(), "plaene": _wd_heute_sortieren(zeilen)})
+        kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
+        for z in zeilen:
+            z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
+        return jsonify({"tag": tag, "jetzt": datetime.now(timezone.utc).isoformat(), "kurs_jetzt": kj, "plaene": _wd_heute_sortieren(zeilen)})
     except Exception as e:
         print(f"[wd-heute] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Winning Days des Tages nicht ladbar ({type(e).__name__}: {e})"}), 502
@@ -7226,6 +7230,33 @@ def konto_basis_balance(acc):
     """REIN RECHNEND (testbar, B25): Balance, bei der ein frisches Konto startet — Topstep Express 0 $, sonst die Kontogröße
     (starting_balance, sonst „150k" aus dem Namen). None = unbekannt."""
     return 0.0 if ist_topstep_express(acc) else _wd_konto_groesse(acc)
+
+
+def kurs_jetzt_wahl(zeilen):
+    """REIN RECHNEND (testbar, B35/F28): letzte Reader-Minute je Wurzel → {wurzel: {kurs, minute}}. NQ und MNQ laufen
+    preisgleich — fehlt eine Wurzel, übernimmt sie den Kurs der anderen (quelle = die andere Wurzel)."""
+    out = {}
+    for z in zeilen or ():
+        w = str(z.get("wurzel") or "").upper()
+        c = _wd_num(z.get("c"))
+        if w in ("NQ", "MNQ") and c is not None and (w not in out or str(z.get("minute")) > str(out[w]["minute"])):
+            out[w] = {"kurs": c, "minute": z.get("minute"), "quelle": w}
+    for w, andere in (("NQ", "MNQ"), ("MNQ", "NQ")):
+        if w not in out and andere in out:
+            out[w] = dict(out[andere])
+    return out
+
+
+def _kurs_jetzt():
+    """Letzte Reader-Minute je Wurzel aus tv_kurs_1m (zwei kleine Abfragen). Fehler → {}."""
+    try:
+        zeilen = []
+        for w in ("NQ", "MNQ"):
+            zeilen += sb_select("tv_kurs_1m", {"select": "wurzel,minute,c", "wurzel": f"eq.{w}", "order": "minute.desc", "limit": "1"}) or []
+        return kurs_jetzt_wahl(zeilen)
+    except Exception as e:
+        print(f"[kurs-jetzt] ⚠️ {type(e).__name__}: {e}", flush=True)
+        return {}
 
 
 def _lt_liq_balance(acc, plan, balance_start):
@@ -7397,7 +7428,10 @@ def admin_live_trades():
                   for p in plaene]
         rang = {"open": 0, "planned": 1, "review": 2, "completed": 3}
         trades.sort(key=lambda z: (rang.get(z.get("status"), 9), str(z.get("started_at") or z.get("start_um") or "")), reverse=False)
-        return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "trades": trades})
+        kj = _kurs_jetzt()                       # B35/F28: aktueller Kurs je Wurzel (Radar-Weg Topstep)
+        for z in trades:
+            z["kurs_jetzt"] = kj.get(z.get("symbol_root") or "")
+        return jsonify({"jetzt": datetime.now(timezone.utc).isoformat(), "tage": tage, "kurs_jetzt": kj, "trades": trades})
     except Exception as e:
         print(f"[live-trades] ⚠️ {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": f"Live Trades nicht ladbar ({type(e).__name__}: {e})"}), 502

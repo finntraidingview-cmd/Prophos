@@ -26,7 +26,7 @@ def lade():
         return re.search(rf"^{name} = .*$", src, re.M).group(0)
     exec("\n".join([const("LT_WD_BLOW_PLUS"), const("WD_HEUTE_PPL")]
                    + [block(f) for f in ("_wd_num", "_wd_level", "_wd_konto_groesse", "ist_topstep_express", "konto_basis_balance",
-                                           "_lt_liq_balance", "_lt_liq", "_lt_demo")]), ns)
+                                           "_lt_liq_balance", "_lt_liq", "_lt_demo", "kurs_jetzt_wahl")]), ns)
     return ns
 
 
@@ -96,6 +96,14 @@ def main():
           "Ende ohne Kerze im Fenster → ohne_kurs")
     check(dm("sell", 29700.0, None, k2, "2026-09-25T00:59:30+00:00", "kaputt")["status"] == "tp",
           "kaputtes Ende wirft nicht, rechnet wie ohne Ende")
+
+    # B35/F28: aktueller Kurs je Wurzel — jüngste Minute, fehlende Wurzel übernimmt die andere
+    kw = a["kurs_jetzt_wahl"]
+    kj = kw([{"wurzel": "NQ", "minute": "2026-09-27T16:00:00+00:00", "c": 30900.0},
+             {"wurzel": "NQ", "minute": "2026-09-27T16:05:00+00:00", "c": 30921.75}])
+    check(kj["NQ"]["kurs"] == 30921.75 and kj["MNQ"]["kurs"] == 30921.75 and kj["MNQ"]["quelle"] == "NQ",
+          "kurs_jetzt: jüngste Minute, MNQ übernimmt NQ")
+    check(kw([]) == {} and kw([{"wurzel": "ES", "minute": "x", "c": 1}]) == {}, "kurs_jetzt: leer/fremde Wurzel → {}")
 
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1
