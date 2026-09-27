@@ -19247,7 +19247,9 @@
   async function tvV2Lesen(konto, timeoutS, plan, zusatz){
     if(typeof window.mtcApi !== 'function') return { ok:false, code:'reader_fehlt', msg:'Copier-Backend nicht erreichbar' }
     // zusatz (25.09.2026): {ende, symbol, richtung} nur von der Endlesung — Ende-Modus des Bots (Befund, Rückfall, Exit-Fill)
-    const r = await window.mtcApi(pulsApiName(plan, 'lesen'), { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
+    const _api = pulsApiName(plan, 'lesen')
+    const r = await window.mtcApi(_api, { method:'POST', headers:{ 'Content-Type':'application/json' },   // tsx-lesen für Topstep (F23)
+      timeoutMs: _api === 'tsx-lesen' ? 120000 : undefined,   // F25: TopstepX wartet bis 20 s auf die Seite + Wachhund 100/110 s — 20 s Standard war zu kurz
       body: JSON.stringify(Object.assign({ konto: String(konto), timeout_s: timeoutS || 45 }, tvV2KontoKontext(plan), zusatz || {})) })
     if(!r || r._httpFail || r.copier_offline) return { ok:false, code:'reader_fehlt', msg: (r && r.error) || 'keine Antwort' }
     return r
@@ -19348,7 +19350,7 @@
     }
     tvV2Poll.busy = true
     try{
-      const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeoutMs: 150000 })   // F25: 150 s
       if(!r || r.copier_offline) return { ok: false, msg: 'Copier-Backend am PC nicht erreichbar' + (r && r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
       if(r._httpFail) return { ok: false, msg: 'Panel kennt /api/tsx-inventar noch nicht' + (r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
       const inv = {}; for(const [k, v] of Object.entries(r.inventar || {})) inv[k] = Array.isArray(v) ? v.slice(0, 200) : v
@@ -26865,7 +26867,9 @@
     _editingAccountId = editAccount?.id || null
 
     // Modal-Title je nach Modus
-    const titleEl = accEls.modal.querySelector('.modal-head h3')
+    // Titel hängt direkt als #addAccountTitle im Modal (kein .modal-head) — die alte Abfrage fand ihn nie, das Popup hieß beim
+    // Bearbeiten immer „Account hinzufügen" (F25, 27.09.2026, Finns Screenshot)
+    const titleEl = document.getElementById('addAccountTitle') || accEls.modal.querySelector('.modal-head h3')
     if(titleEl) titleEl.textContent = editAccount ? 'Account bearbeiten' : 'Account hinzufügen'
     if(accEls.save) accEls.save.textContent = editAccount ? 'Speichern' : 'Hinzufügen'
 
@@ -34373,7 +34377,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.680'
+  const OS_TAB_BUILD = '2026-09-22.681'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -46962,7 +46966,7 @@
   // Antwort nie kommt, für immer; _fleetPushBusy bleibt gesetzt, kein Push, keine lokalen Chips. Kurze Wege
   // 20 s, die langen Bot-Wege (tv-lesen/-close/-konto/-order, master-close) 320 s (> Proxy 310 s in app.py).
   async function mtcApi(path, opts){
-    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus)/.test(String(path))   // lokal: kein TDZ bei frühen Ticks
+    const lang = /^(tv-lesen|tv-close|tv-konto|tv-order|master-close|order|tv-fokus|tsx-konto|tsx-close)/.test(String(path))   // tsx-* (F23/F25): Order/Schließen in TopstepX lang   // lokal: kein TDZ bei frühen Ticks
     const ctrl = new AbortController()
     const ms = (opts && opts.timeoutMs) || (lang ? 320000 : 20000)
     const tm = setTimeout(() => { try{ ctrl.abort() }catch(_){} }, ms)
