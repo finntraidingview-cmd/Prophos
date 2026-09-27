@@ -22044,7 +22044,7 @@
     if(mkl.busy) return; mkl.busy = true
     try{
       await mklLaden(vollstaendig)
-      if(mklMarktAktiv() && (vollstaendig || Date.now() - mkl.wd.at > MKL_WD_POLL_MS)) await mklWdLaden()   // Winning Days, 15 s (nur Markt-View)
+      if(mklMarktAktiv() && (vollstaendig || Date.now() - mkl.wd.at > MKL_WD_POLL_MS)){ await mklWdLaden(); await mklWdPlanLaden() }   // Winning Days, 15 s (nur Markt-View); Plan drosselt selbst auf 60 s
       const zu = mklAuswerten(mkl.orders, mkl.kerzen, mkl.kurs)
       if(zu.length){ await mklDemoSchliessenDb(zu); if(typeof atToast === 'function') atToast(`Demo: ${zu.length} Order${zu.length > 1 ? 's' : ''} geschlossen (${zu.map(z => z.grund.toUpperCase() + ' ' + (z.pl_usd >= 0 ? '+' : '−') + mklFmt(Math.abs(z.pl_usd)) + ' $').join(', ')})`, 'end') }
       if(mklAktiv()){ mklKopf(); mklChartZeichnen(); mklOrdersRender(); mklWdRender() }
@@ -22208,6 +22208,65 @@
     }catch(e){ mkl.wd.fehler = String(e && e.message || e) }
     finally{ mkl.wd.at = Date.now(); mkl.wd.laeuft = false }
   }
+  /* PLAN HEUTE NACHT (F31, 28.09.2026, Finn am Winning-Days-Block: „Ich will hier unten die geplanten Trades sehen … die Slots mit der
+   * ID, wie viele Slots, wann es losgeht, meine Übersicht"). Daten wie der Farmer-Tab: wd_farmer_regeln + wd_tagesplan (RLS: jeder
+   * Angemeldete liest), Tag = Farmer-Tag (wdNaechsterTag) — hat der heutige Tag noch geplante/laufende Blöcke, bleibt er es (nach
+   * 02:00 läuft die Nacht ja noch). Ausgelassene IDs (ids_aus) fehlen wie im Farmer. Nur Anzeige, höchstens alle 60 s. */
+  mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, at: 0, fehler: '' }
+  async function mklWdPlanLaden(){
+    if(mkl.stub || Date.now() - mkl.wd.plan.at < 60000) return
+    mkl.wd.plan.at = Date.now()
+    try{
+      const { data: r, error: e1 } = await supabase.from('wd_farmer_regeln').select('*').eq('id', 1).maybeSingle()
+      if(e1) throw e1
+      const j = wdJetzt((r && r.tz) || WD_TZ_STD); if(!j) return
+      const naechster = wdNaechsterTag(r || {}, j)
+      const { data: rows, error: e2 } = await supabase.from('wd_tagesplan').select('tag,user_id,name,konten,status,start_um,richtung,reihenfolge').in('tag', [...new Set([j.tag, naechster])])
+      if(e2) throw e2
+      const aus = new Set(((r && r.ids_aus) || []).map(String))
+      const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
+      const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
+      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, at: mkl.wd.plan.at, fehler: '' }
+    }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
+  }
+  const mklWdPlanTagTxt = tag => { try{ return new Date(tag + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' }) }catch(_){ return tag } }
+  function mklWdPlanHtml(){
+    const P = mkl.wd.plan
+    if(!P || !P.tag) return P && P.fehler ? `<div class="mwj-naechste" style="color:#B45309">Plan nicht ladbar: ${escapeHtml(P.fehler)}</div>` : ''
+    const r = P.regeln || {}, jetzt = Date.now()
+    const aktivK = x => (x.konten || []).filter(k => k && k.aktiv !== false)
+    const zeit = x => Date.parse(x.start_um || '') || 9e15
+    const mit = P.rows.filter(x => aktivK(x).length).sort((a, b) => zeit(a) - zeit(b) || (+a.reihenfolge || 99) - (+b.reihenfolge || 99))
+    const ohne = P.rows.filter(x => !aktivK(x).length)
+    const nKonten = mit.reduce((a, x) => a + aktivK(x).length, 0), erster = mit.find(x => x.start_um && x.status === 'geplant') || mit.find(x => x.start_um)
+    const dauer = ms => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
+    const flag = (name, an) => `<b style="font-weight:600;color:${an ? '#15803d' : 'var(--sub)'}">${name} ${an ? 'an' : 'aus'}</b>`
+    const titel = P.tag === P.heute ? 'Plan heute Nacht' : `Plan für ${mklWdPlanTagTxt(P.tag)}`
+    const kopf = `<div class="mwj-kopf" style="margin-top:14px">${titel} <span>${mit.length} ${mit.length === 1 ? 'ID' : 'IDs'} · ${nKonten} ${nKonten === 1 ? 'Konto' : 'Konten'}${erster ? ` · erster Start ${escapeHtml(wdHhmm(erster.start_um))} Dubai` : ''} · ${flag('SCHARF', !!r.scharf)} · ${flag('Automatik', !!r.aktiv)} · ${flag('Gegenhedge', !!(r.vorplan && r.vorplan.hedge_an))}</span></div>`
+    const hinweis = r.scharf ? '' : `<div class="mwj-naechste">Startet nicht, solange SCHARF aus ist.</div>`
+    const ST = { geplant: ['geplant', 'var(--violet)'], laeuft: ['läuft', '#15803d'], fertig: ['fertig', 'var(--sub)'], verpasst: ['verpasst', '#b91c1c'] }
+    const zeilen = mit.map(x => {
+      const k = aktivK(x), st = ST[x.status] || [x.status || '–', 'var(--sub)'], a = Date.parse(x.start_um || '') || 0
+      const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(String(x.user_id)) : '#667085'
+      const cd = x.status === 'laeuft' ? ['läuft', 'seit ' + (a ? dauer(jetzt - a) : '–')] : x.status === 'fertig' ? ['✓', 'durch'] : x.status === 'verpasst' ? ['–', 'verpasst']
+        : !a ? ['–', 'ohne Zeit'] : a > jetzt ? ['in ' + dauer(a - jetzt), 'bis Start'] : ['fällig', 'seit ' + dauer(jetzt - a)]
+      const kurz = k.map(y => `${String(y.firm || '?').trim().split(/\s+/)[0]}${y.ext ? ' …' + String(y.ext).slice(-4) : ''}`).join(', ')
+      const buy = x.richtung === 'buy', sell = x.richtung === 'sell'
+      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default" title="${escapeHtml(k.map(y => y.name || '').join('\n'))}">
+          <span class="mwj-wer"><b>${escapeHtml(String(x.name || '?'))}</b><small>${escapeHtml(kurz)}</small></span>
+          <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
+          <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}<small>Dubai</small></span>
+          <span class="mwj-zelle">${escapeHtml(cd[0])}<small>${escapeHtml(cd[1])}</small></span>
+          <span class="mwj-zelle">${k.length}<small>${k.length === 1 ? 'Konto' : 'Konten'}</small></span>
+          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}<small>Status</small></span>
+        </div>`
+    }).join('')
+    const leer = !mit.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
+    const ohneZ = ohne.length ? `<div class="mwj-naechste">Kein Konto angehakt: ${ohne.map(x => escapeHtml(String(x.name || '?'))).join(', ')}</div>` : ''
+    return kopf + hinweis + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ
+  }
+  // Stub ohne Login: window._mklWdPlanStub({tag, heute, rows, regeln})
+  window._mklWdPlanStub = p => { mkl.wd.plan = Object.assign({ tag: '', heute: '', rows: [], regeln: {}, at: Date.now(), fehler: '' }, p); mkl.wd.at = mkl.wd.at || Date.now(); mklWdRender() }
   // Kurz-Name fürs Chart-Label: erstes Wort der Firma + Kontonr-Ende
   const mklWdKurz = pw => { const k = pw.konto || {}; const fi = String(k.firma || '').trim().split(/\s+/)[0]; return `${fi || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
   const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
@@ -22347,8 +22406,9 @@
     const kurzKonto = x => { const k = x.konto || {}; return `${x.person || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
     const nachtragZeile = nachtrag.length ? `<div class="mwd-nachtrag"><span>${nachtrag.length} beendet ohne Ergebnis — Erledigt eintragen:</span>`
       + nachtrag.map(x => `<button type="button" class="mwd-nachtrag-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(x.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">${escapeHtml(kurzKonto(x))}</button>`).join('') + `</div>` : ''
-    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
-      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdAbhakenHtml()}`
+    // Titel-Datum = Farmer-Tag (F31: /admin/wd-heute liefert den CME-Handelstag — nachts um 01:15 stand da noch der Vortag)
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+      ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     mklWdAbhakenVerdrahten(el)
     mklWdJetztRender(jetzt, pl, { sig, col, uhr, dauer, f0, kp })
@@ -34509,7 +34569,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.710'
+  const OS_TAB_BUILD = '2026-09-22.711'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
