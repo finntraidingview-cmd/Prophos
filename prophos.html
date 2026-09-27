@@ -26415,6 +26415,17 @@
     const st = _accBalLauf.get(String(id)); if(!st || !st.text) return ''
     return `<div style="font-size:11px;margin-top:2px;color:${st.fehler ? 'var(--danger)' : 'var(--sub)'}">${escapeHtml(st.text)}</div>`
   }
+  async function accBalSignaleAufraeumen(id){
+    try{
+      const jetzt = Date.now(), iso = new Date().toISOString()
+      const { data } = await supabase.from('order_signale').select('id,status,updated_at,created_at').eq('plan_id', 'konto:' + id).in('status', ['wartet', 'laeuft'])
+      for(const r of (data || [])){
+        const alt = jetzt - (Date.parse(r.updated_at || r.created_at || '') || 0)
+        if((r.status === 'laeuft' && alt > 240000) || (r.status === 'wartet' && alt > 600000))
+          await supabase.from('order_signale').update({ status: 'fehler', updated_at: iso, ergebnis: { ok: false, msg: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' } }).eq('id', r.id).eq('status', r.status)
+      }
+    }catch(_){}
+  }
   async function accBalanceLesen(id){
     id = String(id)
     const setz = (o) => { _accBalLauf.set(id, o); try{ renderAccounts() }catch(_){} }
@@ -26426,6 +26437,9 @@
       setz({ laeuft: false, fehler: !r.ok, text: r.ok ? 'gerade gelesen' : r.msg })
       return
     }
+    // Hängende Signale freigeben (F24, 27.09.2026, Live-Test Mike: Puls öffnete TopstepX, danach schloss sich das ganze Chrome samt
+    // Prophos-Tab — die Signale blieben ewig 'laeuft'): 'laeuft' > 4 min bzw. 'wartet' > 10 min für dieses Konto → fehler
+    await accBalSignaleAufraeumen(id)
     let sig = null
     try{
       const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'konto:' + id, params: { aktion: 'konto_balance', account_id: id, external_id: acc.externalId, firm: acc.firm, name: acc.name, von: 'besitzer' } }).select('*').single()
@@ -26442,7 +26456,12 @@
         setz({ laeuft: false, text: 'gerade gelesen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
       }
       if(row && ['fehler', 'verfallen', 'verworfen'].includes(row.status)){ setz({ laeuft: false, fehler: true, text: String((row.ergebnis || {}).msg || row.status) }); return }
-      if(sek > 180){
+      // 'laeuft' > 4 min seit der letzten Bewegung = PC-Tab weg (Fenster zu, neu geladen) → fehler, Konto frei für einen neuen Versuch
+      if(row && row.status === 'laeuft' && Date.now() - (Date.parse(row.updated_at || '') || 0) > 240000){
+        try{ await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' } }).eq('id', sig.id).eq('status', 'laeuft') }catch(_){}
+        setz({ laeuft: false, fehler: true, text: 'PC-Tab nicht erreichbar — Prophos am PC neu öffnen' + (row.pc ? ` (PC ${row.pc})` : '') }); return
+      }
+      if(sek > 180 && (!row || row.status === 'wartet')){
         try{ await supabase.from('order_signale').update({ status: 'verfallen', updated_at: new Date().toISOString(), ergebnis: { ok: false, msg: 'keine Antwort vom PC' } }).eq('id', sig.id).in('status', ['wartet']) }catch(_){}
         setz({ laeuft: false, fehler: true, text: 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC der ID offen?)' }); return
       }
@@ -34347,7 +34366,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.675'
+  const OS_TAB_BUILD = '2026-09-22.676'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36010,6 +36029,7 @@
     }catch(e){ console.warn('[signal] Ergebnis-Write:', e) }
   }
 
+  let _osStartAufgeraeumt = false   // F24: Aufräumen beim Tab-Start genau einmal
   async function orderSignalTick(){
     if(!MT5_LOCAL) return
     if(_osBusy || _osActive){ _osStand = 'lauf-aktiv'; return }
@@ -36036,6 +36056,18 @@
     if(document.getElementById('tpOrderModal')?.classList.contains('open')){ _osStand = 'popup-offen'; return }
     _osBusy = true
     try{
+      // Tab-Start (F24, 27.09.2026): EINMAL nach dem Laden eigene 'laeuft'-Signale dieses PCs älter als 4 min abschließen — der vorige
+      // Tab ist weg (Chrome zu, neu geladen), die Läufe kommen nie mehr zurück
+      if(!_osStartAufgeraeumt){
+        _osStartAufgeraeumt = true
+        try{
+          const pcIch0 = (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : ''
+          const pcAlle0 = [pcIch0, ...((typeof pcIdFrueher === 'function') ? pcIdFrueher() : [])].filter(Boolean)
+          if(pcAlle0.length) await supabase.from('order_signale').update({ status: 'fehler', updated_at: new Date().toISOString(),
+              ergebnis: { ok: false, unklar: true, msg: '⚠ abgebrochen (Tab neu gestartet) — bei einer Order erst in TradingView/TopstepX nachsehen' } })
+            .eq('status', 'laeuft').in('pc', pcAlle0).lt('updated_at', new Date(Date.now() - 4 * 60000).toISOString())
+        }catch(_){}
+      }
       // Verwaiste Läufe (25.09.2026): 'laeuft' auf DIESEM PC, seit > 6 min ohne Abschluss, und hier läuft gerade nichts —
       // der Lauf ist abgerissen (Tab neu geladen, Build-Wechsel). Abschließen statt ewig 'laeuft' — Ergebnis UNKLAR.
       try{
