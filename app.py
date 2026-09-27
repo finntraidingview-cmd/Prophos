@@ -6708,7 +6708,22 @@ WD_PLAN_FELDER = {
     "hedge_eur",   # Fusion-Gegenhedge in € (24.09.2026 abends, Winning Days ohne Duplikum)
     "hedge_faktor",  # Faktor 1,0 = am Master-TP verliert Fusion in € so viel, wie der Master in $ gewinnt (24.09.2026 spät)
 }
-WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur", "hedge_faktor"}
+WD_PATCH_FELDER = {"start_um", "richtung", "master_tp", "master_sl", "slave_risk", "multiplier", "master_symbol", "hedge_eur", "hedge_faktor",
+                   "master_contracts"}     # B39 (28.09.2026): „Plan heute Nacht bearbeiten" (F33) ändert die Kontrakte
+
+
+def wd_kontrakte_pruefen(v):
+    """REIN RECHNEND (testbar, B39): master_contracts aus dem PATCH — ganze Zahl ≥ 1 (auch „3" / 3.0), sonst Fehler.
+    -> (int, None) | (None, fehler)"""
+    if isinstance(v, bool):
+        return None, "master_contracts muss eine ganze Zahl ≥ 1 sein"
+    try:
+        f = float(str(v).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None, "master_contracts muss eine ganze Zahl ≥ 1 sein"
+    if f != f or f != int(f) or f < 1:
+        return None, "master_contracts muss eine ganze Zahl ≥ 1 sein"
+    return int(f), None
 
 
 def _wd_ohne_master_sl(d):
@@ -7923,6 +7938,11 @@ def admin_wd_plaene():
         upd = {k: v for k, v in (daten.get("upd") or {}).items() if k in WD_PATCH_FELDER}
         if len(pid) < 10 or not upd:
             return jsonify({"error": "id/upd fehlt"}), 400
+        if "master_contracts" in upd:
+            kt, kf = wd_kontrakte_pruefen(upd["master_contracts"])
+            if kf:
+                return jsonify({"error": kf}), 400
+            upd["master_contracts"] = kt
         # master_sl: nur null wird geschrieben (Winning Days ohne Master-SL, 25.09.2026) — ein Wert wird zu null
         sl_verworfen = False
         if "master_sl" in upd:
