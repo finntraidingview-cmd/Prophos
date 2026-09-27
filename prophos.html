@@ -22133,7 +22133,7 @@
     for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && Number(x.einstieg_nq) > 0 && (x.status === 'open' || mkl.wd.aktiv === String(x.id)))){
       const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
       const linie = (v, col, titel, style, w, achse) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: achse, title: titel })) }catch(_){} }
-      const hOffen = pw.hedge && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(pw.hedge.status || ''))
+      const hOffen = !!(pw.hedge && pw.status === 'open' && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(pw.hedge.status || '')) && mklWdSchliesstBei(pw) > 0)   // Fusion zu, solange der Hedge nicht zu ist
       const slTxt = pw.sl_art === 'liquidation' ? 'SL/Liq' : 'SL'
       if(hervor){
         linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} · ${quelleKurz(pw)}`, 0, 3, true)
@@ -22141,7 +22141,7 @@
         linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${pz(pw.sl_level_nq)}`, 0, 2, true)
         if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))}`, 2, 1, true)
       } else {
-        linie(pw.einstieg_nq, farbe, `Entry ${pz(pw.einstieg_nq)} ${kurz}`, 0, 2, true)   // Preis an der Achse auch ohne Klick (Finn 28.09.2026: „bei den Entrys auch Zahlen hinschreiben“)
+        linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} ${kurz}`, 0, 2, true)   // einheitlich: Entry blau, TP grün, SL/Liq rot, Fusion violett (28.09.2026)   // Preis an der Achse auch ohne Klick (Finn 28.09.2026: „bei den Entrys auch Zahlen hinschreiben“)
         linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, 1, true)
         if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 2, 1, true)
         linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${kurz}`, 2, 1, false)   // WD: Liquidation statt SL (F22)
@@ -22504,7 +22504,7 @@
     const kopf = `<div class="mwj-kopf" style="margin-top:14px">${titel} <span>${nIds} ${nIds === 1 ? 'ID' : 'IDs'} · ${tr.length} ${tr.length === 1 ? 'Trade' : 'Trades'}${erster ? ` · erster Start ${escapeHtml(wdHhmm(erster.start_um))} Dubai` : ''} · ${flag('SCHARF', !!r.scharf)} · ${flag('Automatik', !!r.aktiv)} · ${flag('Gegenhedge', !!(r.vorplan && r.vorplan.hedge_an))}</span></div>`
     const hinweis = r.scharf ? '' : `<div class="mwj-naechste">Startet nicht, solange SCHARF aus ist.</div>`
     const ST = { planned: ['geplant', 'var(--violet)'], open: ['läuft', '#15803d'], review: ['Überprüfen', '#B45309'], completed: ['fertig', 'var(--sub)'],
-                 kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['Plan fehlt', '#b91c1c'], unbekannt: ['–', 'var(--sub)'] }
+                 kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['wird neu angelegt', '#B45309'], unbekannt: ['–', 'var(--sub)'] }
     const f0 = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     // Farmer-Admin: frischer Stand, sonst der gemerkte (F34 — Stift sofort, der Server prüft beim Speichern)
     const admin = P.farmerAdmin !== undefined ? P.farmerAdmin : mklWdAdminGemerkt()
@@ -22525,7 +22525,7 @@
       const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
       if(admin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
       // Plan fehlt (28.09.2026, Chris 92dd21d0 von Hand gelöscht, Verweis blieb stehen): Farmer-Admins legen ihn hier neu an
-      const neuKnopf = (admin && t.status === 'fehlt' && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-neu="${escapeHtml(pid)}" style="padding:0 7px;margin-left:6px;font-size:11.5px;line-height:18px;height:auto;vertical-align:1px;color:#b91c1c" title="Verweis im Tagesplan lösen und den Plan wie der Farmer neu anlegen (gleiche Startzeit, TP aus der Vorgabe)"${P.neuBusy === pid ? ' disabled' : ''}>${P.neuBusy === pid ? 'legt an…' : 'Plan neu anlegen'}</button>` : ''
+      const neuKnopf = ''   // „Plan neu anlegen" entfällt (28.09.2026): der PC-Tab der ID legt einen fehlenden Plan selbst neu an (wdAbgleich, Selbstheilung)
       const stift = (admin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
       return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
@@ -23532,7 +23532,8 @@
     const id = z.getAttribute('data-mwj')
     mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
     mklWdRender(); mklChartZeichnen()
-    if(mkl.wd.aktiv){ try{ const karte = [...document.querySelectorAll('#mkl-wd [data-mkl-wd]')].find(x => x.getAttribute('data-mkl-wd') === id); if(karte) karte.scrollIntoView({ behavior: 'smooth', block: 'center' }) }catch(_){} }
+    // 28.09.2026 (Finn über den Master): Auswahl zeigt die Level im Chart → zum CHART scrollen (oben im Bild), nicht zur Karte
+    if(mkl.wd.aktiv){ try{ const ch = document.getElementById('mkl-wrap'); if(ch) ch.scrollIntoView({ behavior: 'smooth', block: 'start' }) }catch(_){} }
   })
   // Stub für die Optik ohne Login: window._mklWdStub([...Pläne wie im Vertrag])
   window._mklWdStub = pl => { mkl.wd.plaene = pl || []; mkl.wd.tag = 'Stub'; mkl.wd.fehler = ''; mklWdRender(); mklChartZeichnen() }
@@ -34000,6 +34001,12 @@
     // und das Konto wird für diesen Tag sauber ausgetragen (aktiv false + Hinweis) — Farmer-Tab und „Plan heute Nacht" stimmen.
     const p0 = (tradePlans || []).find(p => String(p.id) === String(planId))
     const farmer = !!(p0 && p0.notes === 'Winning-Day-Farmer')
+    // SCHUTZ (28.09.2026, Master: „Plan fehlt darf nie wieder vorkommen"): geplante Farmer-Pläne nicht über die Karte löschen —
+    // raus nimmt man ein Konto im Farmer („nur heute raus"), dann stimmen Tagesplan und Pläne. Laufende/beendete wie bisher.
+    if(farmer && p0.status === 'planned'){
+      alert('Das ist ein geplanter Winning-Day-Farmer-Plan.\n\nLöschen geht hier nicht mehr — bitte im Admin → Winning Days beim Konto „nur heute raus" drücken. Dann fällt der Plan sauber weg und der Tagesplan stimmt.')
+      return
+    }
     if(!confirm(farmer ? `Das ist ein Winning-Day-Farmer-Plan (${p0.masterName || 'Konto'}${p0.startUm ? ', Start ' + new Date(p0.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}).\n\nLöschen nimmt das Konto für diesen Tag aus dem Farmer — es startet dann NICHT.\nWirklich löschen?` : 'Trade-Plan wirklich löschen?')) return
     try{
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
@@ -35153,7 +35160,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.727'
+  const OS_TAB_BUILD = '2026-09-22.728'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40073,6 +40080,9 @@
   // CME-Futures: Fr 17:00 New York zu, So 18:00 auf → in Dubai gibt es Sa und So um 02:00 keine Session
   function wdHandelstag(wochentag){ return wochentag !== 0 && wochentag !== 6 }
   // Nächster Lauf-Tag: heute, wenn die Startzeit noch nicht vorbei ist, sonst morgen — Sa/So übersprungen
+  // Tag, dessen Nacht gerade läuft bzw. als Nächstes läuft: bis 10:00 Dubai an einem Handelstag der heutige (die Blöcke laufen bis in den
+  // Morgen), danach wdNaechsterTag. Nur für die Anzeige im Admin-Farmer — Eintragen/Würfeln der PC-Tabs bleibt bei wdNaechsterTag.
+  function wdLaufTag(r, j){ return (j && wdHandelstag(j.wochentag) && j.minuten < 10 * 60) ? j.tag : wdNaechsterTag(r, j) }
   function wdNaechsterTag(r, j){
     const m = /^(\d{1,2}):(\d{2})$/.exec((r && r.start_hhmm) || '02:00'), startMin = m ? (+m[1]) * 60 + (+m[2]) : 120
     let tag = j.minuten < startMin ? j.tag : wdTagPlus(j.tag, 1)
@@ -40530,7 +40540,8 @@
   window._wdPlanAufV2 = wdPlanAufV2   // Test-Haken
 
   /* ── PC-Tab: Plan für ein Konto anlegen (Rückfall, wenn der Mac es nicht konnte — z.B. Railway aus) ── */
-  async function wdPlanAnlegen(acc, richtung, vp, startIso, tag){
+  // extra (28.09.2026, Selbstheilung): { id, master_tp, master_contracts } — gleicher Plan mit derselben ID neu, eigener Claim wd_heil:<id>
+  async function wdPlanAnlegen(acc, richtung, vp, startIso, tag, extra){
     const sl = wdFusionGegenstueck()   // fest Fusion statt Duplikum-Slave (26.09.2026)
     const slave = sl.slave, sPreset = FIRM_PRESETS[firmToPreset(slave.firm)] || FIRM_PRESETS.projectx
     const z = tpVorplanZeile(acc, { live: tpVorplanLive(acc), slaveCurrency: sPreset.currency, fx: window._fxUsdEur || 0.85, regeln: vp.regeln })
@@ -40547,6 +40558,13 @@
     // BUG 28.09.2026 (Jacobs Pläne 2368ebe6/f644c1f8 mit route 'tvplus'): dieser Rückfall schreibt DIREKT in trade_plans — die
     // V2-Umschreibung des Servers (/admin/wd-plaene POST, _wd_plan_v2) griff hier nie. Jetzt dieselbe Umschreibung im Browser.
     wdPlanAufV2(row)
+    row.winning_day = true   // wie der Server-Weg (POST setzt winning_day) — Farmer fährt nur Konten vom Typ Winning Days
+    if(extra){
+      if(extra.id) row.id = String(extra.id)
+      if(Number(extra.master_tp) > 0) row.master_tp = Number(extra.master_tp)
+      if(Number.isInteger(Number(extra.master_contracts)) && Number(extra.master_contracts) >= 1) row.master_contracts = Number(extra.master_contracts)
+      if(Number(row.hedge_eur) > 0) wdFarmHedge(row, Number(acc.wdSl) || 0, z.slaveEur, vp.hedge_an)   // Hedge zu TP/Kontrakten neu rechnen
+    }
     /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
      * → den übernehmen; (b) Claim per Insert in user_settings (eindeutig user_id + key 'wd_rueckfall:<tag>:<konto>', Muster .563):
@@ -40560,10 +40578,11 @@
         return { plan: p0, z, uebernommen: true }
       }
     }catch(_){}
-    const claimKey = `wd_rueckfall:${tagKey}:${acc.id}`
+    const claimKey = (extra && extra.id) ? `wd_heil:${extra.id}` : `wd_rueckfall:${tagKey}:${acc.id}`
     const { error: ce } = await supabase.from('user_settings').insert({ user_id: currentUserId, key: claimKey, value: { at: new Date().toISOString(), pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null } })
     if(ce) return { warten: true }   // ein anderer Tab legt gerade an — beim nächsten Abgleich steht sein Plan da
     supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_rueckfall:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
+    supabase.from('user_settings').delete().eq('user_id', currentUserId).like('key', 'wd_heil:%').lt('created_at', new Date(Date.now() - 3 * 86400000).toISOString()).then(() => {}, () => {})
     const { data, error } = await supabase.from('trade_plans').insert(row).select('*')
     if(error){ supabase.from('user_settings').delete().eq('user_id', currentUserId).eq('key', claimKey).then(() => {}, () => {}); return { fehler: error.message } }
     const plan = rowToPlan(data[0]); tradePlans.unshift(plan); renderTradePlans()
@@ -40679,7 +40698,26 @@
     let offen = 0, laeuft = 0, fertig = 0, verpasst = 0
     for(const k of konten){
       if(!wdAktiv(k) || !k.plan_id) continue
-      const plan = planVon(k)
+      let plan = planVon(k)
+      /* SELBSTHEILUNG (28.09.2026, Master: „Plan fehlt darf im Farmer NIE wieder vorkommen" — Chris 79633d2e verschwand zweimal):
+       * der Tagesplan verweist auf einen Plan, den es nicht mehr gibt (frisch per ID geprüft), Konto aktiv, Zeile nicht fertig, Start
+       * höchstens 60 min vorbei → derselbe Plan mit DERSELBEN ID neu (Werte aus dem Konto-Eintrag: TP, Kontrakte, Start; Richtung der
+       * Zeile; V2, winning_day). Claim wd_heil:<id> — nur ein Tab legt an. */
+      if(!plan && offenFuer && k.plan_id){
+        const startMs = Date.parse(k.start_um || row.start_um || '') || 0
+        if(startMs && Date.now() - startMs <= 60 * 60000){
+          try{
+            const { data: da } = await supabase.from('trade_plans').select('id').eq('id', String(k.plan_id)).limit(1)
+            if(!(da && da.length)){
+              const acc = (accounts || []).find(a => String(a.id) === String(k.id))
+              if(acc){
+                const p = await wdPlanAnlegen(acc, row.richtung, vp, new Date(startMs).toISOString(), row.tag, { id: k.plan_id, master_tp: k.tp, master_contracts: k.kt })
+                if(p && p.plan){ plan = p.plan; if(String(p.plan.id) !== String(k.plan_id)) set(k, 'plan_id', String(p.plan.id)); set(k, 'hinweis', ''); console.warn('[wd] Plan neu angelegt (Selbstheilung)', k.plan_id) }
+              }
+            }
+          }catch(e){ console.warn('[wd] Selbstheilung', e) }
+        }
+      }
       if(!plan){ set(k, 'status', 'weg'); set(k, 'hinweis', 'Plan wurde gelöscht'); continue }
       const zuSpaet = plan.status === 'planned' && plan.startUmGestartetAt && !plan.orbitGesendetAt && Date.now() - new Date(plan.startUm || 0).getTime() > 15 * 60000
       const st = zuSpaet ? 'verpasst' : plan.status
@@ -41299,7 +41337,10 @@
     const c = wdCacheLesen(), tagEl = document.getElementById('wd-tag')
     if(c && !_wd.geladen && c.regeln) _wd.regeln = c.regeln
     const j = wdJetzt(WD_TZ_STD)
-    if(tagEl && !tagEl.value) tagEl.value = j ? wdNaechsterTag(_wd.regeln || {}, j) : new Date().toLocaleDateString('en-CA')
+    // Lauf-Tag statt „nächster Tag" (28.09.2026, Chris 79633d2e um 22:47 UTC gelöscht): nach 02:00 Dubai sprang der Tab auf morgen —
+    // GET /admin/wd-plaene?tag=<morgen> räumt serverseitig alle geplanten Farmer-Pläne mit planned_for < tag weg, also die laufende
+    // Nacht. Bis 10:00 Dubai an einem Handelstag bleibt der heutige Tag stehen; von Hand gewählt (_wd.tagHand) wird nie überschrieben.
+    if(tagEl && (!tagEl.value || !_wd.tagHand)) tagEl.value = j ? wdLaufTag(_wd.regeln || {}, j) : new Date().toLocaleDateString('en-CA')
     if(c && Array.isArray(c.rows) && c.tag === (tagEl && tagEl.value) && !(_wd.rows || []).length){
       if(!_wd.daten && Array.isArray(c.konten)) _wd.daten = { konten: c.konten, slaves: {}, plaene: null, fx: 0.85, rail: false, belegt: {}, plaene_tag: [] }
       _wd.rows = c.rows; _wd.tag = c.tag
@@ -41800,7 +41841,7 @@
   document.getElementById('wdHedgeSave2')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdHedgeSave')?.addEventListener('click', () => wdHedgeSpeichern().catch(e => wdSay('Fehler: ' + (e.message || e), 'err')))
   document.getElementById('wdReload')?.addEventListener('click', () => { wdNeuLaden(); wdVerlauf() })
-  document.getElementById('wd-tag')?.addEventListener('change', wdNeuLaden)
+  document.getElementById('wd-tag')?.addEventListener('change', () => { _wd.tagHand = true; wdNeuLaden() })   // von Hand gewählt → wdOpen setzt nicht zurück
   document.getElementById('wd-such')?.addEventListener('input', () => wdAblauf(_wd.rows || [], wdFehlend()))
   document.getElementById('wd-nur-farm')?.addEventListener('change', () => wdAblauf(_wd.rows || [], wdFehlend()))
   document.getElementById('wdSave')?.addEventListener('click', async () => {
