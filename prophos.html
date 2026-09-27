@@ -4700,7 +4700,7 @@
       <!-- Live Trades (26.09.2026, Finn: „bei jedem Trade, den Puls auf TradingView platziert, eine neue Navigation unter Winning Days") -->
       <button class="sb-link" data-view="wdlive">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg>
-        Live Trades
+        Radar
       </button>
       <button class="sb-link" data-view="payouts">
         <svg class="sb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
@@ -7701,7 +7701,8 @@
     <section class="view" data-view="wdlive">
       <div class="view-head">
         <div>
-          <h1 class="view-title">Live Trades</h1>
+          <!-- „Live Trades" heißt seit 27.09.2026 „Radar" (Finn: „änder mal Live Trades zu Radar"); data-view="wdlive" und wdl-* bleiben -->
+          <h1 class="view-title">Radar</h1>
           <p class="view-sub">Jeder Orbit-V2-Trade als Demo gegen den Reader-Kurs · Balance vorher/nachher aus TradingView</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
@@ -10486,7 +10487,7 @@
     managed:   ['Manage',    'Topstep-Accounts für andere'],
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
-    wdlive:    ['Live Trades', 'Orbit V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
+    wdlive:    ['Radar', 'Orbit V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
@@ -22585,7 +22586,7 @@
     }
     const gruppe = (titel, arr) => arr.length ? `<div class="wdl-gruppe">${titel} · ${arr.length}</div><div class="mwd-liste">${arr.map(karte).join('')}</div>` : ''
     liste.innerHTML = trades.length ? gruppe('Läuft', lauf) + gruppe('Geplant', geplant) + gruppe('Beendet', zu.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || ''))))
-      : `<div class="mwd-leer">${wdl.daten ? 'Keine Orbit-V2-Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Live Trades…')}</div>`
+      : `<div class="mwd-leer">${wdl.daten ? 'Keine Orbit-V2-Trades im Zeitraum.' : (wdl.fehler ? 'Nicht ladbar: ' + escapeHtml(wdl.fehler) : 'Lade Radar…')}</div>`
     try{ if(wdlAktiv() && typeof mklChartZeichnen === 'function') mklChartZeichnen() }catch(_){}
   }
   // Klick auf eine Karte (oder ihren Punkt) schaltet die Linien dieses Trades — eigener Handler am Listen-Container
@@ -33929,7 +33930,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.665'
+  const OS_TAB_BUILD = '2026-09-22.666'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
