@@ -10539,6 +10539,10 @@ def _tsx_seite_roh(w, typen=None):
 
 
 def tsx_zeilen(roh, tol=8, luecke=40):
+    return [(t, r) for t, r, _e in tsx_zeilen_voll(roh, tol, luecke)]
+
+
+def tsx_zeilen_voll(roh, tol=8, luecke=40):
     """REIN RECHNEND (testbar, B20): Elemente zu Text-Stücken zusammenfügen — gleiche Zeile (Mitte ±tol px), von links nach
     rechts, neues Stück bei einer Lücke > luecke px. TopstepX liefert „$150K EXPRESS", „|" und „EXPRESS-…" womöglich als
     GETRENNTE Knoten; kein einzelnes trägt dann das ganze Muster. -> [(text, (l,t,r,b))] (Rechteck = Vereinigung des Stücks)"""
@@ -10549,7 +10553,7 @@ def tsx_zeilen(roh, tol=8, luecke=40):
         except (TypeError, ValueError, IndexError):
             continue
         n = str(e[0] or "").strip()
-        if n and r - l >= 2 and b - t >= 2:
+        if n and r - l >= 2 and b - t >= 2 and r - l <= 600:      # B24: breite Container gehören in kein Stück
             els.append((n, (l, t, r, b)))
     els.sort(key=lambda x: ((x[1][1] + x[1][3]) // 2, x[1][0]))
     zeilen = []
@@ -10567,12 +10571,15 @@ def tsx_zeilen(roh, tol=8, luecke=40):
                 if n not in stueck["t"].split(" | ") and n not in stueck["t"]:
                     stueck["t"] = stueck["t"] + " " + n
                 stueck["r"] = (min(stueck["r"][0], r[0]), min(stueck["r"][1], r[1]), max(stueck["r"][2], r[2]), max(stueck["r"][3], r[3]))
+                if not stueck["label"] and re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I):
+                    stueck["erst"], stueck["label"] = r, True
             else:
                 if stueck:
-                    out.append((stueck["t"], stueck["r"]))
-                stueck = {"t": n, "r": r}
+                    out.append((stueck["t"], stueck["r"], stueck["erst"]))
+                # erst = Rechteck des Label-Knotens („$150K …") bzw. des ersten Knotens — Klickpunkt (B24)
+                stueck = {"t": n, "r": r, "erst": r, "label": bool(re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b", n, re.I))}
         if stueck:
-            out.append((stueck["t"], stueck["r"]))
+            out.append((stueck["t"], stueck["r"], stueck["erst"]))
     return out
 
 
@@ -10581,12 +10588,36 @@ def tsx_ausloeser_waehlen(roh):
     zusammengefügtes Stück (tsx_zeilen). Oberstes zuerst. -> (text, rect, typ) | None"""
     # B22: IMMER der oberste Kandidat — Einzel-Element mit Kennung ODER zusammengefügtes Stück. Vorher gingen Einzel-Elemente
     # vor: blieb die Liste nach dem Klick im Baum, galt ein Listeneintrag (volle ID) als „Auslöser" → falsche Bestätigung.
-    kand = [(str(e[0]), tuple(e[1]), e[2] if len(e) > 2 else "", 0) for e in roh or () if e[1] and tsx_konto_sichtbar(e[0])[0]]
-    kand += [(t, r, "Zeile", 1) for t, r in tsx_zeilen(roh) if tsx_ist_ausloeser_text(t)]
+    kand = [(str(e[0]), tuple(e[1]), e[2] if len(e) > 2 else "", 0, tuple(e[1])) for e in roh or ()
+            if e[1] and tsx_konto_sichtbar(e[0])[0]]
+    kand += [(t, r, "Zeile", 1, erst) for t, r, erst in tsx_zeilen_voll(roh) if tsx_ist_ausloeser_text(t)]
     if not kand:
         return None
-    t, r, typ, _v = sorted(kand, key=lambda x: (x[1][1], x[3], x[1][0]))[0]
-    return (t, r, typ)
+    t, r, typ, _v, erst = sorted(kand, key=lambda x: (x[1][1], x[3], x[1][0]))[0]
+    # B24 (27.09.2026, Mike): NIE in die Mitte eines zusammengefügten Stücks klicken — mit ID im Auslöser reichte es bis x≈560,
+    # die Mitte (477) lag neben dem Knopf → „Liste: 0 Einträge". Klick-Rechteck: kleinster Button/ComboBox, der den ersten
+    # Knoten (Label) umschließt; sonst der erste Knoten selbst.
+    return (t, tsx_klick_rechteck(roh, erst), typ)
+
+
+def tsx_klick_rechteck(roh, erst):
+    """REIN RECHNEND (testbar, B24): kleinstes Button/ComboBox-Rechteck, das die Mitte von 'erst' enthält (Breite < 700 px);
+    sonst 'erst'."""
+    try:
+        mx, my = (erst[0] + erst[2]) // 2, (erst[1] + erst[3]) // 2
+    except (TypeError, IndexError):
+        return erst
+    best = None
+    for e in roh or ():
+        try:
+            if (e[2] if len(e) > 2 else "") not in ("Button", "ComboBox"):
+                continue
+            l, t, r, b = (int(v) for v in e[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if l <= mx <= r and t <= my <= b and (r - l) < 700 and (best is None or (r - l) * (b - t) < best[0]):
+            best = ((r - l) * (b - t), (l, t, r, b))
+    return best[1] if best else tuple(erst)
 
 
 def tsx_eintraege_waehlen(roh, unter_y):
@@ -10888,6 +10919,19 @@ def modus_tsxlesen(cmd):
                                                                  "Group", "Custom")), ke[1][1] + 4)
             if len(eintraege) >= 1:
                 break
+        if not eintraege:
+            # B24: Rückfall — einmal am linken Rand des Auslösers (Label-Knoten) erneut öffnen
+            l_, t_, r_, b_ = ke[1]
+            rueck = (ke[0], (l_, t_, min(r_, l_ + 60), b_), ke[2])
+            trail.append("Liste leer — zweiter Versuch am Label-Knoten")
+            _tsx_klick(rueck, "Konto-Dropdown öffnen (Rückfall)", trail)
+            t_bis2 = time.time() + 3.0
+            while time.time() < min(t_bis2, frist):
+                _warte(0.35, 0.25)
+                eintraege = tsx_eintraege_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem",
+                                                                     "Group", "Custom")), ke[1][1] + 4)
+                if eintraege:
+                    break
         texte = [str(e[0]) for e in eintraege]
         trail.append(f"Liste: {len(texte)} Einträge")
         _puls_diagnose_senden(trail, "tsx_liste")

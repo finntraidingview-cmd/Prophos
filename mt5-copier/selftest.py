@@ -2689,7 +2689,7 @@ def test_tsx_zeilen():
     chk("Stücke: Auslöser zusammen, Kopfzeile getrennt", ("$150K EXPRESS | EXPRESS-…", (20, 160, 220, 180)) in z
         and any(t.startswith("BAL: $11,079.66") for t, _r in z) and not any("EXPRESS" in t and "BAL" in t for t, _r in z))
     a = ob.tsx_ausloeser_waehlen(roh)
-    chk("Auslöser aus Stücken, Rechteck nur der Auslöser", a == ("$150K EXPRESS | EXPRESS-…", (20, 160, 220, 180), "Zeile")
+    chk("Auslöser aus Stücken, Klick-Rechteck = erster Knoten (Label)", a == ("$150K EXPRESS | EXPRESS-…", (20, 160, 120, 180), "Zeile")
         and ob.tsx_konto_steht(a[0], "EXPRESS-V2-682437-57131691") == "vielleicht")
     einzeln = [("$150K EXPRESS | EXPRESS-V2-682437-57131691", (20, 160, 300, 180), "Button")] + roh
     chk("ein einzelnes Element mit dem ganzen Muster geht vor", ob.tsx_ausloeser_waehlen(einzeln)[2] == "Button")
@@ -2727,8 +2727,16 @@ def test_tsx_inventar_mike():
            ("UP&L:", (727, 181, 769, 200), "Text"), ("$0.00", (768, 181, 803, 200), "Text"),
            ("Trading Lockout", (832, 181, 852, 201), "Button"), ("Chart X", (95, 218, 155, 254), "TabItem")]
     a = ob.tsx_ausloeser_waehlen(roh)
-    chk("Auslöser ohne Kennung gefunden (nur Label + |), Rechteck nur der Auslöser",
-        a is not None and a[0].startswith("$150K TRADING COMBINE") and a[1] == (102, 180, 280, 199))
+    chk("Auslöser ohne Kennung gefunden (nur Label + |), Klick-Rechteck = Label-Knoten",
+        a is not None and a[0].startswith("$150K TRADING COMBINE") and a[1] == (102, 180, 262, 199))
+    mit_id = [("$150K TRADING COMBINE", (102, 180, 262, 199), "Text"), ("|", (267, 180, 280, 199), "Text"),
+              ("150KTC-SKU-V2-682437-58370042", (284, 180, 560, 199), "Text"), ("BAL:", (620, 181, 650, 200), "Text")]
+    a2 = ob.tsx_ausloeser_waehlen(mit_id)
+    chk("B24: Auslöser MIT ID (Stück bis x=560) → Klick auf den Label-Knoten, nicht in die Stück-Mitte",
+        a2[1] == (102, 180, 262, 199) and (a2[1][0] + a2[1][2]) // 2 < 300)
+    knopf = mit_id + [("", (90, 172, 300, 206), "Button"), ("Konto", (80, 170, 900, 210), "Button")]
+    a3 = ob.tsx_ausloeser_waehlen([e for e in knopf if e[0]] + [("Kontoauswahl", (90, 172, 300, 206), "Button")])
+    chk("B24: umschließender (kleinster) Button → dessen Rechteck", a3[1] == (90, 172, 300, 206))
     chk("Stand ohne Kennung = unbekannt → Liste öffnen", ob.tsx_konto_steht(a[0], "150KTC-SKU-V2-682437-58370042") == "unbekannt")
     chk("Kopfzeile aus drei Knoten: BAL/MLL/RP&L/UP&L", ob.tsx_kopf_werte(roh) == {"balance": 154504.88, "mll": 150000.0, "rpl": 0.0, "upl": 0.0})
     chk("Kopfzeile negativ getrennt: -$ und 120.25 als zwei Knoten", ob.tsx_kopf_werte([("RP&L:", None, "T"), ("-$", None, "T"), ("120.25", None, "T")])["rpl"] == -120.25)
