@@ -14,7 +14,7 @@ import uuid
 import logging
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, Response, send_from_directory
+from flask import Flask, request, jsonify, Response, send_from_directory, g
 import os
 from signalrcore.hub_connection_builder import HubConnectionBuilder
 
@@ -4370,6 +4370,19 @@ ADMIN_EMAILS = {
 }
 
 
+# NUR EIGENE DATEN IM ADMIN (27.09.2026, Finn: „einen anderen Code als meinen …
+# sodass er dann seine Finanzen sieht — nicht die ganzen Kunden-Daten von mir,
+# sondern nur seine eigenen"). Vorher lieferte /admin/overview jedem Eingeloggten
+# alle Personen; der Code im Frontend ist nur Sichtschutz. Steht eine ID in der
+# Tabelle admin_zugang (nur_eigene), setzt _wd_login das je Anfrage — die
+# bestehende Ausblendung (excluded_ids) wird dann umgedreht: ausgeblendet ist
+# jeder AUSSER ihr. Tabelle statt E-Mail-Liste im Code, weil app.py im Repo liegt
+# (sql/2026-09-27_admin_zugang.sql).
+def _admin_nur_uid():
+    """user_id des Aufrufers, wenn er im Admin nur sich selbst sehen darf — sonst None."""
+    return getattr(g, "admin_nur_uid", None)
+
+
 def _firm_norm(name):
     """Schreibweisen zusammenführen — sonst wird das Klumpenrisiko zu klein
     angezeigt (real vorhanden: 'MyFoundedFutures'; 'Apex' vs 'Apex Trader' seit
@@ -4520,6 +4533,16 @@ def _admin_basis():
             if str(mail).strip().lower() in ADMIN_EXCLUDE_EMAILS:
                 excluded_ids.add(str(uid))
                 excluded_names.append(mail)
+
+    # Nur eigene Daten (27.09.2026): jeder außer dem Aufrufer ist ausgeblendet. Ohne
+    # Auth-API kennt der Server nicht alle Personen — dann lieber gar nichts liefern.
+    # Die E-Mails der anderen gehen nie raus (excluded leer).
+    nur = _admin_nur_uid()
+    if nur:
+        if not names_ok:
+            raise RuntimeError("Auth-API nicht erreichbar — eigene Daten nicht sicher trennbar.")
+        excluded_ids = (set(names) | {str(a.get("user_id")) for a in accounts}) - {nur}
+        excluded_names = []
 
     return {"accounts": accounts, "archived": archived, "preds_of": preds_of, "arch_info": arch_info, "fx": fx,
             "by_id": by_id, "live_ids": live_ids, "names": names, "disp": disp,
@@ -6794,6 +6817,11 @@ def _wd_login():
         u = r.json() or {}
         if r.status_code != 200 or not u.get("id"):
             return None, (jsonify({"error": "Nicht angemeldet"}), 401)
+        # Nur eigene Daten (27.09.2026): gilt für diese eine Anfrage. Ist admin_zugang nicht
+        # lesbar, greift das except unten (502) — nie still alles ausliefern.
+        z = sb_select("admin_zugang", {"select": "nur_eigene", "user_id": f"eq.{u['id']}"})
+        if isinstance(z, list) and z and z[0].get("nur_eigene"):
+            g.admin_nur_uid = str(u["id"])
         return str(u["id"]), None
     except Exception:
         return None, (jsonify({"error": "Anmeldung nicht prüfbar"}), 502)
@@ -6812,6 +6840,9 @@ def _wd_personen():
         disp[uid] = meta_name or (mail.split("@")[0] if "@" in mail else (mail or uid[:8]))
         if mail.strip().lower() in ADMIN_EXCLUDE_EMAILS:
             excluded.add(uid)
+    nur = _admin_nur_uid()
+    if nur:   # nur eigene Daten (27.09.2026): alle anderen raus
+        excluded = set(disp) - {nur}
     return disp, excluded
 
 
@@ -7477,6 +7508,30 @@ def admin_wd_plaene():
     me, err = _wd_login()
     if err:
         return err
+    # Der Farmer plant über alle IDs (Tagesplan, belegte Konten, Anlegen/Löschen) — nichts
+    # für eine ID, die im Admin nur sich selbst sieht (27.09.2026). PATCH bleibt, aber nur
+    # auf EIGENE Pläne/Signale/Konten: der PC-Tab beendet, liest nach und hakt darüber
+    # auch seine eigenen Trades ab (ende/endlesung/endlesung_stand/erledigt/farm/id).
+    nur = _admin_nur_uid()
+    if nur:
+        if request.method != "PATCH":
+            return jsonify({"error": "Winning-Day-Farmer ist für diese ID nicht freigegeben"}), 403
+        d = request.get_json(silent=True) or {}
+        akt = d.get("aktion")
+        try:
+            if akt == "endlesung_stand":
+                tab, key = "order_signale", str(d.get("signal_id") or "").strip()
+            elif akt == "farm":
+                tab, key = "accounts", str(d.get("account_id") or "").strip()
+            elif akt in ("ende", "endlesung", "erledigt"):
+                tab, key = "trade_plans", str(d.get("plan_id") or "").strip()
+            else:
+                tab, key = "trade_plans", str(d.get("id") or request.args.get("id") or "").strip()
+            besitz = sb_select(tab, {"select": "user_id", "id": f"eq.{key}", "limit": "1"}) if len(key) >= 10 else []
+        except Exception as e:
+            return jsonify({"error": f"Besitz nicht prüfbar ({type(e).__name__})"}), 502
+        if not besitz or str(besitz[0].get("user_id") or "") != nur:
+            return jsonify({"error": "Nur eigene Pläne und Konten"}), 403
 
     if request.method == "GET":
         tag = (request.args.get("tag") or "").strip()[:10]
@@ -9018,6 +9073,8 @@ def admin_konten_pruefen():
         return jsonify({"treffer": []})
     try:
         konten = _sb_all("accounts", {"select": "id,user_id,name,firm,account_type,external_id", "external_id": "not.is.null"})
+        if _admin_nur_uid():   # nur eigene Daten (27.09.2026): fremde Kontonummern nicht verraten
+            konten = [k for k in konten if str(k.get("user_id") or "") == _admin_nur_uid()]
         disp, _excluded = _wd_personen()
         return jsonify({"treffer": konten_treffer(ids, konten, disp, _acc_plan_archiviert())})
     except Exception as e:

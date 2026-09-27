@@ -10700,9 +10700,30 @@
     const kasseFreiLesen = () => {
       try { return localStorage.getItem(kasseSchluessel()) === '1' } catch(_){ return false }
     }
-    const kasseFreiSetzen = an => {
-      try { an ? localStorage.setItem(kasseSchluessel(), '1')
+    const kasseFreiSetzen = (an, wert = '1') => {
+      try { an ? localStorage.setItem(kasseSchluessel(), wert)
                 : localStorage.removeItem(kasseSchluessel()) } catch(_){}
+    }
+    /* Eigener Code je ID (27.09.2026, Finn: „wenn Emin unter seiner ID auf Admin geht, einen
+     * anderen Code als meinen eingibt, sodass er dann seine Finanzen sieht"). Steht die ID in
+     * admin_zugang (sql/2026-09-27_admin_zugang.sql, RLS: nur die eigene Zeile lesbar), gilt NUR
+     * deren Code — und das Backend liefert ihr im Admin nur sich selbst (_admin_nur_uid). Flag
+     * '2' statt '1': eine ältere Freischaltung mit dem Standard-Code zählt dort nicht mehr.
+     * Tabelle nicht lesbar → Standard-Code (die Datengrenze zieht ohnehin das Backend). */
+    let eigenerCode, eigenerCodeUid = null   // eigenerCode: undefined = nicht geladen, null = keiner
+    async function eigenerCodeLaden(){
+      const uid = currentUserId
+      if(uid && eigenerCodeUid === uid && eigenerCode !== undefined) return eigenerCode
+      let c = null
+      try {
+        const { data, error } = await supabase.from('admin_zugang').select('code').eq('user_id', uid).maybeSingle()
+        if(!error && data && data.code) c = String(data.code)
+      } catch(_){}
+      eigenerCodeUid = uid; eigenerCode = c
+      return c
+    }
+    const kasseFreiFuer = ec => {
+      try { return localStorage.getItem(kasseSchluessel()) === (ec ? '2' : '1') } catch(_){ return false }
     }
     window.kasseVergessen = () => kasseFreiSetzen(false)   // beim Abmelden gerufen
 
@@ -13359,14 +13380,22 @@
       // Umschalten blieb der Admin sonst offen, weil die Variable noch die
       // Freischaltung des VORIGEN Profils trug (live gefunden 31.08.2026).
       // Der Speicher ist die Wahrheit, die Variable nur ihr Zwischenspeicher.
-      unlocked = kasseFreiLesen()
-      unlocked ? showContent() : showLocked()
+      // Eigener Code (27.09.2026): erst wissen, welcher Code für diese ID gilt — bis dahin weder
+      // Sperre noch Inhalt zeigen (einmal pro ID, danach aus dem Zwischenspeicher).
+      if(!(currentUserId && eigenerCodeUid === currentUserId && eigenerCode !== undefined)){
+        $('kasse-lock').style.display = 'none'; $('kasse-content').hidden = true
+      }
+      eigenerCodeLaden().then(ec => {
+        unlocked = kasseFreiFuer(ec)
+        unlocked ? showContent() : showLocked()
+      })
     }
 
-    function tryUnlock(){
-      if(($('kasse-code').value || '').trim() === CODE){
+    async function tryUnlock(){
+      const ec = await eigenerCodeLaden()
+      if(($('kasse-code').value || '').trim() === (ec || CODE)){
         unlocked = true
-        kasseFreiSetzen(true)
+        kasseFreiSetzen(true, ec ? '2' : '1')
         showContent()
       }
       else { $('kasse-code-err').textContent = 'Falscher Code'; const c = $('kasse-code'); c.value = ''; c.focus() }
@@ -34378,7 +34407,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.687'
+  const OS_TAB_BUILD = '2026-09-22.688'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
