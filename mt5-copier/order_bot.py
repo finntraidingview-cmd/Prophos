@@ -837,7 +837,7 @@ def _tv_neuer_tab(w, url, trail):
         keyboard.send_keys("{ENTER}")
     except Exception as e:
         return False, f"neuer Tab liess sich nicht oeffnen ({type(e).__name__})"
-    trail.append("TradingView im neuen Tab des Puls-Fensters geoeffnet")
+    trail.append("Neuer Tab im Puls-Fenster geoeffnet: " + re.sub(r"^https?://", "", str(url))[:40])   # B18: war fest „TradingView"
     return True, ""
 
 
@@ -10158,6 +10158,29 @@ def tsx_konto_aus_text(text):
     return m.group(1).upper() if m else ""
 
 
+TSX_RX_AUSLOESER = re.compile(r"\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*\|\s*([A-Z0-9][A-Z0-9-]*)\s*(…|\.\.\.)?", re.I)
+
+
+def tsx_konto_sichtbar(text):
+    """REIN RECHNEND (testbar, B18): Konto-Auslöser oben links → (sichtbare Kennung, abgekürzt?). TopstepX kürzt die Kennung im
+    Auslöser („$150K EXPRESS | EXPRESS-…"); die volle ID steht erst in der aufgeklappten Liste. ('', False) = kein Auslöser."""
+    m = TSX_RX_AUSLOESER.search(str(text or ""))
+    if not m:
+        return "", False
+    return m.group(1).upper().rstrip("-") if m.group(2) else m.group(1).upper(), bool(m.group(2))
+
+
+def tsx_konto_steht(text, ext_id):
+    """REIN RECHNEND (testbar, B18): 'ja' (volle Kennung = External ID), 'vielleicht' (abgekürzt, Präfix passt — erst die Liste
+    beweist es), 'nein'."""
+    k, kurz = tsx_konto_sichtbar(text)
+    if not k:
+        return "nein"
+    if not kurz:
+        return "ja" if _nur_alnum(k) == _nur_alnum(ext_id) else "nein"
+    return "vielleicht" if len(_nur_alnum(k)) >= 4 and _nur_alnum(ext_id).startswith(_nur_alnum(k)) else "nein"
+
+
 def tsx_konto_treffer(texte, ext_id):
     """REIN RECHNEND (testbar): Dropdown-Eintraege (Texte) → (Index | None, grund). Genau EIN Eintrag, dessen Kontokennung
     die External ID exakt ist; „(Ineligible)" nie."""
@@ -10338,10 +10361,25 @@ def strg_w_erlaubt(titel_vorn, ziel, tab_anzahl):
     return False
 
 
+_TSX_SEITE = {}
+
+
 def _tsx_seite(w):
-    """Rechteck der Webseite (Chrome-Dokument) im Fenster — das größte sichtbare 'Document'-Element. None = unbekannt."""
+    """Rechteck der Webseite (Chrome-Dokument) im Fenster — das größte sichtbare 'Document'-Element. None = unbekannt.
+    B18: einmal je Lauf und Fenster (der Baum-Durchgang ist auf der TopstepX-Seite teuer)."""
     try:
-        docs = w.descendants(control_type="Document")
+        k = int(w.handle)
+    except Exception:
+        k = id(w)
+    if k in _TSX_SEITE:
+        return _TSX_SEITE[k]
+    _TSX_SEITE[k] = r_ = _tsx_seite_suchen(w)
+    return r_
+
+
+def _tsx_seite_suchen(w):
+    try:
+        docs = w.descendants(control_type="Document", depth=8)
     except Exception:
         return None
     best = None
@@ -10380,11 +10418,8 @@ def _tsx_vorbereiten(w, trail):
         _tsx_klick(login[0], f"'{login[0][0]}' (Login/Connect)", trail)
         _warte(2.0, 1.0)
         roh = seiten_filter(_tsx_roh(w, ("Button",)), seite)
-    hoehe = max(1, seite[3] - seite[1])
-    xs = [e for e in roh if e[1] and TSX_RX_SCHLIESSEN.match(str(e[0]).strip()) and (e[1][1] - seite[1]) < 0.25 * hoehe]
-    for e in xs[:2]:
-        _tsx_klick(e, f"Banner schliessen ('{e[0]}')", trail)
-        _warte(0.4, 0.3)
+    # B18 (27.09.2026, zweiter Live-Test): KEINE Banner-X mehr — der orange „Weekend Hours"-Banner liegt über dem Dropdown,
+    # verdeckt nichts, und zwei Klicks auf „close"/„Schließen" trafen ihn nicht. Overlays/Modals mittig kommen mit Etappe 2.
 
 
 def _tsx_konto_element(roh):
@@ -10503,35 +10538,66 @@ def modus_tsxlesen(cmd):
     _puls_diagnose_senden(trail, "tsx_tab")          # B17: Spur liegt schon in der DB, bevor geklickt wird
     _tsx_vorbereiten(w, trail)
     _puls_diagnose_senden(trail, "tsx_vorbereitet")
-    # Konto: steht es schon? sonst Dropdown → genau ein Eintrag mit der External ID (nie Ineligible)
-    roh = _tsx_seite_roh(w)
-    ke = _tsx_konto_element(roh)
-    if not ke:
-        res.update(code="konto", schritt="konto", msg="Konto-Dropdown nicht gefunden (kein Text '$…K … | KENNUNG').",
-                   inventar=tsx_inventar_kurz(roh, fr, 80))
+    # Konto (B18, 27.09.2026 — zweiter Live-Test: Auslöser zeigt die Kennung ABGEKÜRZT „$150K EXPRESS | EXPRESS-…", Lauf stand
+    # danach ohne Spur): Auslöser finden (auch abgekürzt) → steht die volle ID da, fertig; sonst aufklappen, Eintrag mit der
+    # vollen External ID (nie Ineligible, genau einer) klicken, Liste zu + Präfix passt = gewählt. Jeder Schritt mit
+    # Obergrenze und Spur in puls_diagnose; ehrliches Ende mit Fehler statt Stillstand.
+    frist = time.time() + 90.0
+
+    def ende_mit(code, msg, **extra):
+        res.update(code=code, schritt=code, msg=msg, **extra)
+        _puls_diagnose_senden(trail, "tsx_" + code)
         return _tsx_ausgabe(res, trail)
-    if _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
-        _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
-        _warte(0.8, 0.4)
-        roh_d = [e for e in _tsx_seite_roh(w) if e[1] and tsx_konto_aus_text(e[0])]
-        texte = [str(e[0]) for e in roh_d]
+
+    def ausloeser():
+        els = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink")) if e[1] and tsx_konto_sichtbar(e[0])[0]]
+        return sorted(els, key=lambda e: (e[1][1], e[1][0]))[0] if els else None
+
+    ke = ausloeser()
+    if not ke:
+        return ende_mit("konto", "Konto-Auslöser oben links nicht gefunden (kein Text '$…K … | KENNUNG').",
+                        inventar=tsx_inventar_kurz(_tsx_seite_roh(w), fr, 80))
+    stand = tsx_konto_steht(ke[0], ext)
+    trail.append(f"Konto-Auslöser: '{ke[0][:50]}' → {stand}")
+    _puls_diagnose_senden(trail, "tsx_konto")
+    if stand != "ja":
+        _tsx_klick(ke, "Konto-Dropdown öffnen", trail)
+        eintraege, t_bis = [], time.time() + 4.0
+        while time.time() < min(t_bis, frist):
+            _warte(0.35, 0.25)
+            eintraege = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem"))
+                         if e[1] and tsx_konto_aus_text(e[0]) and e[1][1] > ke[1][1] + 4]
+            if len(eintraege) >= 1:
+                break
+        texte = [str(e[0]) for e in eintraege]
+        trail.append(f"Liste: {len(texte)} Einträge")
+        _puls_diagnose_senden(trail, "tsx_liste")
+        if not eintraege:
+            _tsx_esc()
+            return ende_mit("konto", "Konto-Dropdown ging nicht auf (keine Einträge in 4 s).")
         i, grund = tsx_konto_treffer(texte, ext)
         if i is None:
             _tsx_esc()
-            res.update(code="konto", schritt="konto", msg=f"{grund} ({ext}).", liste=texte[:20])
-            return _tsx_ausgabe(res, trail)
-        _tsx_klick(roh_d[i], f"Konto {ext}", trail)
-        ende = time.time() + 6.0
-        while time.time() < ende:
-            _warte(0.4, 0.3)
-            ke = _tsx_konto_element(_tsx_seite_roh(w))
-            if ke and _nur_alnum(tsx_konto_aus_text(ke[0])) == _nur_alnum(ext):
+            return ende_mit("konto", f"{grund} ({ext}).", liste=texte[:20])
+        _tsx_klick(eintraege[i], f"Konto {ext}", trail)
+        ok_k, t_bis = False, time.time() + 5.0
+        while time.time() < min(t_bis, frist):
+            _warte(0.35, 0.25)
+            ke2 = ausloeser()
+            offen = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem"))
+                     if e[1] and tsx_konto_aus_text(e[0]) and ke2 and e[1][1] > ke2[1][1] + 4]
+            if ke2 and tsx_konto_steht(ke2[0], ext) in ("ja", "vielleicht") and not offen:
+                ok_k = True
                 break
-        if not ke or _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
-            res.update(code="konto", schritt="konto", msg=f"Konto {ext} geklickt, steht aber nicht im Dropdown.")
-            return _tsx_ausgabe(res, trail)
+        if not ok_k:
+            return ende_mit("konto", f"Konto {ext} geklickt, der Auslöser zeigt es nicht (Liste noch offen oder anderes Konto).")
+        trail.append("Konto per Liste gewählt" + (" (Auslöser zeigt die Kennung abgekürzt)" if stand == "vielleicht" or
+                                                  tsx_konto_sichtbar(ke2[0])[1] else ""))
+    if time.time() > frist:
+        return ende_mit("zeit", "Obergrenze 90 s überschritten.")
     trail.append(f"Konto steht auf {ext}")
     res["konto"] = ext
+    _puls_diagnose_senden(trail, "tsx_kopf")
     roh = _tsx_seite_roh(w)
     werte = tsx_kopf_werte(roh)
     res.update(werte)
@@ -10547,6 +10613,7 @@ def modus_tsxlesen(cmd):
     res["konto_aktiv"] = ext
     res["positionen"] = [] if res["position"] == "keine" else None
     res.update(ok=True, schritt="fertig", msg=f"Balance {werte['balance']:,.2f} $ gelesen ({ext}).")
+    _puls_diagnose_senden(trail, "tsx_fertig")
     return _tsx_ausgabe(res, trail)
 
 def main():

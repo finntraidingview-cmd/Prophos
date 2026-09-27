@@ -1764,6 +1764,7 @@ def main():
     results.append(test_puls_tempo())
     results.append(test_puls_topstep())
     results.append(test_puls_nie_chrome_schliessen())
+    results.append(test_tsx_konto_abgekuerzt())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2529,6 +2530,91 @@ def test_puls_nie_chrome_schliessen():
             _s.modules["pywinauto"] = alt_mod
     if ok:
         print("✓ Nie-Chrome-schliessen: Klicks nur in der Seite, Strg+W-Regel (Titel/Prophos/≥2 Tabs), Trockenlauf ohne Chrome-X")
+    return ok
+
+
+def test_tsx_konto_abgekuerzt():
+    """B18 (27.09.2026, zweiter Live-Test bei Mike): Auslöser zeigt „$150K EXPRESS | EXPRESS-…" (abgekürzt) — Konto über die
+    aufgeklappte Liste mit der vollen ID wählen; jeder Schritt mit Ende."""
+    import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Konto abgekürzt: " + name); ok = False
+
+    chk("sichtbar: abgekürzt", ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-…") == ("EXPRESS", True)
+        and ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-V2-68...") == ("EXPRESS-V2-68", True))
+    chk("sichtbar: voll", ob.tsx_konto_sichtbar("$150K EXPRESS | EXPRESS-V2-682437-57131691") == ("EXPRESS-V2-682437-57131691", False)
+        and ob.tsx_konto_sichtbar("BAL: $11,079.66") == ("", False))
+    ext = "EXPRESS-V2-682437-57131691"
+    chk("steht: voll gleich → ja, abgekürzt Präfix → vielleicht, anderes → nein",
+        ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-682437-57131691", ext) == "ja"
+        and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-…", ext) == "vielleicht"
+        and ob.tsx_konto_steht("$150K TRADING COMBINE | 150KTC-…", ext) == "nein"
+        and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-682437-57131690", ext) == "nein")
+
+    alt_mod = _s.modules.get("pywinauto")
+    pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
+    z = {"offen": False, "konto": "EXPRESS-V2-682437-11111111"}
+    class Wf:
+        handle = 4711
+        def window_text(self): return "NQZ26 $30,921.75 | TopstepX - Google Chrome"
+        def set_focus(self): pass
+        def descendants(self, **kw): return []
+    def roh(w_, typen=None, mx=0, muster=()):
+        kurz = z["konto"][:8] + "…"
+        out = [("Close", (1870, 0, 1920, 30), "Button"), (f"$150K EXPRESS | {kurz}", (20, 160, 300, 180), "Button"),
+               ("BAL: $11,079.66", (400, 160, 520, 180), "Text"), ("MLL: $145,500.00", (540, 160, 660, 180), "Text"),
+               ("No Active Position", (1500, 400, 1700, 420), "Text")]
+        if z["offen"]:
+            out += [("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", (20, 200, 300, 220), "ListItem"),
+                    ("$150K EXPRESS | EXPRESS-V2-682437-57131691", (20, 230, 300, 250), "ListItem"),
+                    ("$50K EXPRESS | EXPRESS-V2-682437-57131690 (Ineligible)", (20, 260, 300, 280), "ListItem")]
+        return out
+    def klick(el, name, trail):
+        trail.append("Klick " + name)
+        if name == "Konto-Dropdown öffnen":
+            z["offen"] = True
+        elif name.startswith("Konto EXPRESS"):
+            z.update(offen=False, konto="EXPRESS-V2-682437-57131691")
+        return True, ""
+    orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
+                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden")}
+    try:
+        wf = Wf()
+        ob._puls_fenster = lambda trail: (wf, "gemerkt", "")
+        ob._tv_fenster_rect = lambda w_: (0, 0, 1920, 1040)
+        ob._dpi_bewusst = lambda: None
+        ob._warte = lambda a, b: None
+        ob._tsx_seite = lambda w_: (0, 120, 1920, 1040)
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tv_uia_roh = roh
+        ob._tv_uia_klick = klick
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            ob.modus_tsxlesen({"konto": ext})
+        r = _j.loads(b.getvalue().strip().splitlines()[-1])
+        chk("Trockenlauf: abgekürzter Auslöser → Liste → voller Eintrag → Balance", r.get("ok") and r.get("konto_aktiv") == ext
+            and r.get("balance") == 11079.66 and "Konto per Liste gewählt" in r.get("trail", "") and "Klick Konto EXPRESS" in r.get("trail", ""))
+        chk("Spur ohne 'TradingView' im TopstepX-Lauf", "TradingView" not in r.get("trail", ""))
+        z.update(offen=False, konto="EXPRESS-V2-682437-11111111")
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            ob.modus_tsxlesen({"konto": "EXPRESS-V2-682437-99999999"})
+        r2 = _j.loads(b.getvalue().strip().splitlines()[-1])
+        chk("unbekanntes Konto: ehrliches Ende mit Grund + Liste", not r2.get("ok") and r2.get("code") == "konto"
+            and "nicht in der Liste" in r2.get("msg", "") and len(r2.get("liste") or []) == 3)
+    finally:
+        for k, v in orig.items():
+            setattr(ob, k, v)
+        if alt_mod is None:
+            _s.modules.pop("pywinauto", None)
+        else:
+            _s.modules["pywinauto"] = alt_mod
+    if ok:
+        print("✓ TSX-Konto abgekürzt: sichtbar/steht, Liste → voller Eintrag, Balance, ehrliches Ende")
     return ok
 
 
