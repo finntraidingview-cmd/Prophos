@@ -1095,6 +1095,22 @@ def main():
         and _k1 == {"punkt": (90, 1080), "text": "Show more"}
         and order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show less 3", (40, 1070, 140, 1090), "Button")]) is None
         and order_bot.tv_show_more_knopf([("Show more", (1500, 300, 1580, 320), "Button")]) is None)
+    # LIVE-BEFUND .726 (Plan 32652690, Jacob-PC): ["TabItem:Positions 1", "TabItem:Orders 1", "Text:Market order executed on", "Text:Buy 1",
+    # "Text:at 30,801.00"] — Seite+Menge und Preis in ZWEI Knoten; 'Show more' rechts UEBER dem Toast (Button mit Text-Kind, Zaehler 3)
+    _LV = [("Positions 1", (60, 1200, 150, 1220), "TabItem"), ("Orders 1", (160, 1200, 240, 1220), "TabItem"),
+           ("Market order executed on", (40, 1020, 250, 1038), "Text"), ("MNQZ6", (255, 1020, 310, 1038), "Button"),
+           ("Buy 1", (40, 1042, 85, 1058), "Text"), ("at 30,801.00", (90, 1042, 190, 1058), "Text"),
+           ("Show more", (230, 985, 330, 1005), "Button"), ("Show more", (240, 988, 310, 1002), "Text"), ("3", (335, 987, 351, 1003), "Text")]
+    _l1 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["Positions", "Orders"])
+    _l2 = order_bot.tv_meldung_preise([("Market order executed on", (40, 1020, 250, 1038), "Text"), ("Buy 1", (40, 1042, 85, 1058), "Text"),
+                                       ("at 30,801.00", (40, 1062, 140, 1078), "Text")], "MNQZ6", "buy", 1)
+    _l3 = order_bot.tv_meldung_preise([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("at 30,858.25", (40, 1042, 140, 1058), "Text")], "MNQZ6", "buy", 1)
+    _l4 = order_bot.tv_meldung_preise(_LV, "MNQZ6", "buy", 1, vorher=["at 30,801.00"])   # alter Preis-Knoten zaehlt nie
+    _rl = order_bot.tv_meldung_roh(_LV)
+    chk("TV-ORDER Live .726: 'Buy 1' + 'at 30,801.00' getrennt -> Fill 30801, 'at' allein unter TP-Titel = TP, 'Show more' ueber dem Toast (Text-Kind), Umgebung in der Rohliste",
+        _l1["fill"] == 30801.0 and _l2["fill"] == 30801.0 and _l3["tp"] == 30858.25 and _l3["fill"] is None and _l4["fill"] is None
+        and order_bot.tv_show_more_knopf(_LV) == {"punkt": (275, 995), "text": "Show more"}
+        and any(x.startswith("UMGEBUNG: ") and "Button:Show more" in x for x in _rl))
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
     chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
         order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"

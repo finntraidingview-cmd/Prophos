@@ -20229,7 +20229,7 @@
       : hedgeSchliesstBei(plan.richtung, tpLevel, echterTp ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill())
     // Herkunft am Hedge festhalten (Nachweis für den ersten echten Lauf): Klickzeit, Fill-Quelle von Puls, roher TP-Preis aus TV
     const herkunft = { order_klick_at: klickMs ? new Date(klickMs).toISOString() : null, einstieg_fill_quelle: (r && r.einstieg_quelle) || null,
-      tp_limit_tv: (tpPreisTv > 0) ? tpPreisTv : null, tp_quelle: handTp ? handAlt.tp_quelle : tpVonOrder ? 'tv_limit' : null,
+      tp_limit_tv: (tpPreisTv > 0) ? tpPreisTv : null, tp_quelle: handTp ? handAlt.tp_quelle : tpVonOrder ? 'tv_limit' : (quelle === 'fill' ? 'fill_rechnung' : null),   // fill_rechnung = Fill ± TP-Distanz (normaler Puffer)
       einstieg_klick_abstand_ms: feedKlick ? feedKlick.abstand_ms : null, tv_meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null }
     // Winning Day (F22): zweites Level = Liquidation des Masters (Kontogröße + 100 $) statt Master-SL
     const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
@@ -35153,7 +35153,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.726'
+  const OS_TAB_BUILD = '2026-09-22.727'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

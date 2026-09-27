@@ -5372,6 +5372,33 @@ def tv_meldung_art(text):
     return None
 
 
+TV_RX_MELDUNG_SEITE = re.compile(r"^(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)$", re.I)
+TV_RX_MELDUNG_AT = re.compile(r"^(?:@|at|zu|bei)\s*([\d][\d.,]*)$", re.I)
+
+
+def tv_meldung_zusammen(roh, vorher=()):
+    """LIVE-BEFUND .726 (Plan 32652690, Jacob-PC, 28.09.2026): TradingView liefert 'Buy 1' und 'at 30,801.00' als ZWEI Text-Knoten
+    hintereinander. Hier werden sie zu EINEM Knoten 'Buy 1 at 30,801.00' zusammengesetzt (Rechteck = Vereinigung): Seite+Menge aus dem
+    einen, 'at PREIS' aus einem der naechsten 3 Knoten, der hoechstens 40 px tiefer und 400 px daneben steht. Zaehlt nur, wenn der
+    'at'-Teil NEU ist (nicht in vorher). Rein rechnend. -> roh + zusammengesetzte Knoten (typ 'Zusammen')"""
+    vorher = {" ".join(str(x).split()) for x in (vorher or ())}
+    el = [e for e in roh or () if len(e) > 1 and e[1]]
+    neu = []
+    for i, e in enumerate(el):
+        n = " ".join(str(e[0]).split())
+        if not TV_RX_MELDUNG_SEITE.match(n):
+            continue
+        for f in el[i + 1:i + 4]:
+            m = " ".join(str(f[0]).split())
+            if not TV_RX_MELDUNG_AT.match(m) or m in vorher:
+                continue
+            a, b = e[1], f[1]
+            if -5 <= b[1] - a[1] <= 40 and (b[0] - a[2]) <= 400 and (a[0] - b[2]) <= 400:
+                neu.append((n + " " + m, (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])), "Zusammen"))
+                break
+    return list(roh or ()) + neu
+
+
 def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
     """Fill und TP-Preis aus den TradingView-Meldungen nach dem Kauf-Klick. Rein rechnend (selftest).
     roh = [(name, rect|None, typ)], vorher = Namen, die VOR dem Klick schon da waren (alte Meldungen bleiben minutenlang
@@ -5384,6 +5411,7 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
     root = tv_symbol_root(symbol)
     rich = str(richtung or "").lower()
     gegen = "sell" if rich == "buy" else "buy" if rich == "sell" else ""
+    roh = tv_meldung_zusammen(roh, vorher)
     vorher = {" ".join(str(x).split()) for x in (vorher or ())}
     titel, details = [], []
     # Symbol-Chip neben dem Titel (Finns Screenshot 28.09.2026: 'Market order executed on' + eigener Knoten 'MNQZ6'): steht dort ein
@@ -5418,6 +5446,14 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
             if menge and qty and abs(float(qty) - float(menge)) > 1e-9:
                 continue
             details.append({"seite": seite, "preis": preis, "r": r, "text": n, "art": art})
+        elif TV_RX_MELDUNG_AT.match(n) and n not in vorher:
+            # 'at PREIS' ganz allein (ohne Seite davor): zaehlt nur ueber die Zuordnung zu einer Meldungs-Zeile darueber
+            preis = tv_zahl_lesen(TV_RX_MELDUNG_AT.match(n).group(1))
+            if preis and preis > 0:
+                details.append({"seite": None, "preis": preis, "r": r, "text": n, "art": None, "allein": True})
+    # zusammengesetzte Knoten schlagen die Einzelteile: steht 'Buy 1 at X' da, zaehlt das allein stehende 'at X' nicht extra
+    ganz = {d["preis"] for d in details if not d.get("allein")}
+    details = [d for d in details if not (d.get("allein") and d["preis"] in ganz)]
     out = {"fill": None, "tp": None, "sl": None, "texte": []}
     ohne = []
     for d in details:
@@ -5426,9 +5462,13 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
             best = None
             for a, tr, _n in titel:
                 dy = d["r"][1] - tr[1]
-                if 0 <= dy <= 70 and min(d["r"][2], tr[2]) > max(d["r"][0], tr[0]) and (best is None or dy < best[0]):
+                if 0 <= dy <= 90 and min(d["r"][2], tr[2]) > max(d["r"][0], tr[0]) and (best is None or dy < best[0]):
                     best = (dy, a)
             art = best[1] if best else None
+        if d.get("allein"):
+            if art not in ("fill", "tp", "sl"):
+                continue
+            d = dict(d, seite=rich if art == "fill" else gegen)   # Seite aus der Meldung: executed = Plan-Seite, TP/SL = Gegenseite
         if art == "fill" and d["seite"] == rich:
             out["fill"] = out["fill"] if out["fill"] is not None else d["preis"]
             out["texte"].append("fill: " + d["text"][:50])
@@ -5452,7 +5492,7 @@ def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
     return out
 
 
-TV_RX_SHOW_MORE = re.compile(r"^(show more|mehr anzeigen)\b", re.I)
+TV_RX_SHOW_MORE = re.compile(r"\b(show more|mehr anzeigen)\b", re.I)
 
 
 def tv_show_more_knopf(roh):
@@ -5461,18 +5501,44 @@ def tv_show_more_knopf(roh):
     sichtbar ist nur EINE plus 'Show more' mit Zaehler). Nur ein sichtbarer 'Show more' in der Naehe einer Meldungs-Zeile (0–220 px
     darunter/darueber, waagrecht hoechstens 250 px daneben) — nie irgendein 'Show more' anderswo auf der Seite. Genau EIN Treffer,
     sonst None. Steht schon 'Show less' da, ist der Stapel offen -> None. Rein rechnend. -> {'punkt': (x, y), 'text'} | None"""
+    # LIVE-BEFUND .726 (Finn 28.09.2026): 'Show more' steht RECHTS UEBER dem obersten Toast (~20–40 px darueber, mit rundem Zaehler
+    # und X daneben) — die alte Regel (waagrecht hoechstens 250 px, Knopf-Anfang links) fand ihn nicht. Jetzt: jeder Typ, Name ENTHAELT
+    # 'Show more' (auch 'Show more 3'), bis 250 px ueber/unter einer Meldungs-Zeile, waagrecht bis 400 px Luecke. Knopf + Text-Kind an
+    # derselben Stelle zaehlen als EIN Treffer (Mitte des einen im anderen); bleiben mehrere Stellen, gewinnt die naechste zum Toast.
     el = [(" ".join(str(e[0]).split()), e[1]) for e in roh or () if len(e) > 1 and e[1]]
     titel = [r for n, r in el if n and len(n) <= 90 and (tv_meldung_art(n) is not None or TV_RX_MELDUNG.search(n))]
+    if not titel:
+        return None
+
+    def abstand(r):
+        best = None
+        for tr in titel:
+            dy = abs(((r[1] + r[3]) / 2) - ((tr[1] + tr[3]) / 2))
+            dx = max(0, r[0] - tr[2], tr[0] - r[2])
+            if dy <= 250 and dx <= 400:
+                d = dy + dx
+                best = d if best is None or d < best else best
+        return best
     treffer = []
     for n, r in el:
-        if not TV_RX_SHOW_MORE.search(n):
+        if len(n) > 30 or not TV_RX_SHOW_MORE.search(n) or re.search(r"show less|weniger", n, re.I):
             continue
-        nah = any(abs(r[1] - tr[1]) <= 220 and (r[0] - 250) <= tr[0] <= (r[2] + 250) for tr in titel)
-        if nah and not any(abs(r[0] - t_[1][0]) <= 4 and abs(r[1] - t_[1][1]) <= 4 for t_ in treffer):
-            treffer.append((n, r))
-    if len(treffer) != 1:
+        d = abstand(r)
+        if d is None:
+            continue
+        cx, cy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
+        gleich = [t_ for t_ in treffer if (t_[1][0] <= cx <= t_[1][2] and t_[1][1] <= cy <= t_[1][3])
+                  or (r[0] <= (t_[1][0] + t_[1][2]) / 2 <= r[2] and r[1] <= (t_[1][1] + t_[1][3]) / 2 <= r[3])]
+        if gleich:
+            # derselbe Knopf: den kleineren Knoten nehmen (Text-Kind liegt genau auf der Schrift)
+            alt = gleich[0]
+            if (r[2] - r[0]) * (r[3] - r[1]) < (alt[1][2] - alt[1][0]) * (alt[1][3] - alt[1][1]):
+                treffer[treffer.index(alt)] = (n, r, d)
+            continue
+        treffer.append((n, r, d))
+    if not treffer:
         return None
-    n, r = treffer[0]
+    n, r, _d = min(treffer, key=lambda t_: t_[2])
     return {"punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2), "text": n}
 
 
@@ -5490,12 +5556,26 @@ def tv_meldung_roh(roh, vorher=(), max_n=14):
         ist_titel = bool(tv_meldung_art(n) or TV_RX_MELDUNG.search(n))
         neu = n not in vorher
         nah = any(-8 <= r[1] - tr[1] <= 90 and min(r[2], tr[2]) > max(r[0], tr[0]) for tr in titel)
-        if ist_titel or (neu and (nah or TV_RX_MELDUNG_DETAIL.search(n))):
+        if ist_titel or (neu and (nah or TV_RX_MELDUNG_DETAIL.search(n) or TV_RX_MELDUNG_AT.match(n))):
             k = f"{t}:{n}"
             if k not in out:
                 out.append(k)
         if len(out) >= max_n:
             break
+    # Umgebung (LIVE-BEFUND .726: 'Show more' wurde nicht gefunden, und die Rohliste zeigte nicht, was dort stand): alle Knoten
+    # 250 px ueber bis 120 px unter einer Meldungs-Zeile, waagrecht bis 400 px daneben — egal ob alt oder neu, jeder Typ
+    umg = []
+    for n, r, t in el:
+        if not n or len(n) > 40:
+            continue
+        if any(-250 <= r[1] - tr[1] <= 120 and max(0, r[0] - tr[2], tr[0] - r[2]) <= 400 for tr in titel):
+            k = f"{t}:{n}"
+            if k not in out and k not in umg:
+                umg.append(k)
+        if len(umg) >= 20:
+            break
+    if umg:
+        out.append("UMGEBUNG: " + " | ".join(umg))
     return out
 
 
