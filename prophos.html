@@ -1453,6 +1453,43 @@
   #adm-pane-stat .kf-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
   /* Kacheln: Unterzeile einzeilig mit Ellipse, voller Text im Tooltip (Finn: „schau mal die Kacheln an, wie hässlich die sind") */
   #adm-pane-stat .kf-kpis .kpi-delta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  /* Accounts je Firma (27.09.2026): Chips wie in der Statistik, Karten je Konto,
+     ID-Badge in der Flotten-Farbe der Person, laufender Trade leuchtet grün. */
+  #adm-pane-firma .af-chip-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  #adm-pane-firma .af-chip-bar .adm-vl-chip{font-size:12px;padding:4px 11px;border:1px solid var(--border);border-radius:999px;background:var(--surface,#fff);color:var(--sub);line-height:1.4}
+  #adm-pane-firma .af-chip-bar .adm-vl-chip:hover{background:var(--surface-tint)}
+  #adm-pane-firma .af-chip-bar .adm-vl-chip.is-on{color:var(--violet);border-color:var(--violet);background:var(--violet-tint);font-weight:600}
+  #adm-pane-firma .af-n{margin-left:5px;font-variant-numeric:tabular-nums;color:var(--sub-2);font-weight:400}
+  #adm-pane-firma .af-firmen{margin-bottom:12px}
+  #adm-pane-firma .af-schalter{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--sub);cursor:pointer;white-space:nowrap}
+  /* 11 Admin-Reiter: einzeilig + horizontal scrollbar wie am Handy (sonst brechen die Beschriftungen zweizeilig um) */
+  #dashboard-view #kasse-content > .subtabs{overflow-x:auto;scrollbar-width:thin}
+  #dashboard-view #kasse-content > .subtabs .subtab{white-space:nowrap;flex-shrink:0}
+  #adm-pane-firma .af-kpis{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+  #adm-pane-firma .af-kpis .kpi{cursor:pointer}
+  #adm-pane-firma .af-kpis .kpi.is-on{border-color:var(--violet);background:var(--violet-tint)}
+  #adm-pane-firma .af-kpis .kpi.is-leer{opacity:.45}
+  #adm-pane-firma .af-matrix{overflow-x:auto}
+  #adm-pane-firma .af-matrix td,#adm-pane-firma .af-matrix th{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #adm-pane-firma .af-matrix td:first-child,#adm-pane-firma .af-matrix th:first-child{text-align:left}
+  #adm-pane-firma .af-matrix tbody tr{cursor:pointer}
+  #adm-pane-firma .af-matrix tbody tr:hover{background:var(--surface-tint)}
+  #adm-pane-firma .af-matrix .af-0{color:var(--sub-2)}
+  #adm-pane-firma .af-phase{margin-top:14px}
+  #adm-pane-firma .af-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+  #adm-pane-firma .af-karte{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--surface);display:flex;flex-direction:column;gap:5px;min-width:0}
+  #adm-pane-firma .af-karte.is-trade{border-color:rgba(16,185,129,.6);animation:afTradeGlow 2.4s ease-in-out infinite}
+  #adm-pane-firma .af-karte.is-arch{opacity:.55}
+  @keyframes afTradeGlow{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}50%{box-shadow:0 0 16px 3px rgba(16,185,129,.30)}}
+  #adm-pane-firma .af-kopf{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+  #adm-pane-firma .af-id{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+  #adm-pane-firma .af-trade{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;color:#15803d;background:rgba(16,185,129,.12);padding:2px 8px;border-radius:999px;white-space:nowrap}
+  #adm-pane-firma .af-trade i{width:6px;height:6px;border-radius:50%;background:#10B981;animation:tcLivePulse 1.6s ease-in-out infinite}
+  #adm-pane-firma .af-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #adm-pane-firma .af-meta{font-size:11.5px;color:var(--sub);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #adm-pane-firma .af-bal{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;font-variant-numeric:tabular-nums}
+  #adm-pane-firma .af-fuss{display:flex;gap:6px;flex-wrap:wrap}
+  #adm-pane-firma .af-tag{font-size:10.5px;padding:1px 7px;border-radius:999px;background:var(--surface-tint);color:var(--sub)}
   #adm-pane-stat .kf-kpis .kpi-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #adm-pane-stat .kf-gross{margin-top:8px}
   #adm-pane-stat .kf-gross .kf-chart[hidden]{display:none}
@@ -8003,6 +8040,7 @@
         </div>
         <div class="subtabs">
           <button class="subtab active adm-tab" data-admtab="overview">Übersicht</button>
+          <button class="subtab adm-tab" data-admtab="firma">Accounts je Firma</button>
           <button class="subtab adm-tab" data-admtab="wd">Winning Days</button>
           <button class="subtab adm-tab" data-admtab="kompass">Kompass</button>
           <button class="subtab adm-tab" data-admtab="kapitel">📖 Kapitel</button>
@@ -8578,6 +8616,30 @@
               </div>
             </div>
         </div>
+        <!-- ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN IDs auf einen Blick"):
+             Firma → Phase → Accounts mit ID-Badge. Daten aus admLoad (/admin/overview), reine Anzeige. -->
+        <div id="adm-pane-firma" hidden>
+          <div id="adm-af-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
+          <div id="adm-af-body" hidden>
+            <div class="af-chip-bar af-firmen" id="adm-af-firmen"></div>
+            <div class="adm-toolbar">
+              <div class="af-chip-bar" id="adm-af-ids" style="flex:1;min-width:0"></div>
+              <label class="af-schalter"><input type="checkbox" id="adm-af-arch"> Archivierte / geblowte zeigen</label>
+              <span class="adm-sub" id="adm-af-stand"></span>
+              <button class="btn btn-ghost" id="adm-af-refresh" title="Neu laden" style="padding:8px 12px">↻</button>
+            </div>
+            <div class="kpis af-kpis" id="adm-af-kpis"></div>
+            <div class="panel" id="adm-af-matrix-panel" hidden style="margin-top:14px">
+              <div class="panel-head"><div>
+                <div class="panel-title">Firma × Phase</div>
+                <div class="panel-sub">Anzahl Accounts — Klick auf eine Zeile wählt die Firma</div>
+              </div></div>
+              <div class="af-matrix"><table class="t" id="adm-af-matrix"></table></div>
+            </div>
+            <div id="adm-af-phasen"></div>
+          </div>
+        </div>
+
         <div id="adm-pane-buys" hidden>
           <div id="adm-buys-msg" style="color:var(--sub);font-size:13px;padding:22px 2px">Lade Übersicht…</div>
           <div id="adm-buys-body" hidden>
@@ -10699,7 +10761,7 @@
 
     window._admLaden = () => admLoad()   // Farmer-Tab lädt die Übersicht selbst nach, wenn sie fehlt (23.09.2026)
     // Isoliert prüfbar mit Stub-Daten, wie _admKapitelRender (24.09.2026): Übersicht + Payouts ohne Login/Server zeichnen
-    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender() }
+    window._admStub = d => { admData = d; window._admData = d; admPersonColorsBauen(); admRender(); admFinRender(); admFirmaRender() }
     window._admKapStub = d => admKapitelRender(d)   // Entwickler-Haken wie _admStub: Kapitel/Statistik mit Stub-Daten zeichnen (24.09.2026)
     async function admLoad(){
       const msg = $('adm-msg'), body = $('adm-body')
@@ -10768,12 +10830,13 @@
         admRender()
         admBuysRender()
         admFinRender()
+        admFirmaRender()
       }catch(e){
         msg.style.display = ''
         msg.textContent = 'Übersicht nicht verfügbar: ' + (e.message || e)
         // Käufe- und Finanzen-Tab hängen an denselben Daten — dort denselben
         // Fehler zeigen, sonst steht da für immer „Lade Übersicht…".
-        for(const [mid, bid] of [['adm-buys-msg', 'adm-buys-body'], ['adm-fin-msg', 'adm-fin-body']]){
+        for(const [mid, bid] of [['adm-buys-msg', 'adm-buys-body'], ['adm-fin-msg', 'adm-fin-body'], ['adm-af-msg', 'adm-af-body']]){
           const bm = $(mid)
           if(bm){ bm.style.display = ''; bm.textContent = msg.textContent; $(bid).hidden = true }
         }
@@ -12460,6 +12523,164 @@
         row.addEventListener('click', () => onPick(g))
         el.appendChild(row)
       }
+    }
+
+    /* ── ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN IDs auf einen
+     * Blick, nicht pro ID … an jedem Account muss klar erkennbar sein, zu welcher ID er gehört" und
+     * „falls ein Account gerade schon im Trade ist, soll der leuchten"). Gruppierung Firma → Phase →
+     * Accounts mit ID-Badge, NICHT ID → Firma. Quelle sind die admLoad-Zeilen (/admin/overview) plus
+     * live_konten (Hedge-Broker, fehlen in den Zeilen bewusst, weil jede Summe sie sonst zählt).
+     * im_trade = offener Plan (status open) als Master oder Slave, Stand = Ladezeit der Übersicht.
+     * ID-Farbe = mt5FleetFarbe(user_id), dieselbe wie in der Flotte der Live Trades. Reine Anzeige. */
+    const AF_PHASEN = [['challenge', 'Challenge'], ['phase1', 'Phase 1'], ['phase2', 'Phase 2'],
+                       ['funded', 'Funded'], ['winning_days', 'Winning Days'], ['live', 'Live']]
+    let afFirma = '', afPerson = '', afArch = false, afPhase = ''
+    const afPhaseName = t => (AF_PHASEN.find(p => p[0] === t) || [t, t || 'Sonstige'])[1]
+    const afFarbe = uid => typeof mt5FleetFarbe === 'function' ? mt5FleetFarbe(String(uid)) : admPersonColor(uid)
+    const afGeld = (v, ccy) => new Intl.NumberFormat('de-DE', { style:'currency', currency: ccy || 'USD', maximumFractionDigits:0 }).format(v)
+    const afDatum = d => d ? String(d).slice(0, 10).split('-').reverse().join('.').replace(/^(\d\d\.\d\d\.)\d\d(\d\d)$/, '$1$2') : ''
+    function afAlle(){
+      if(!admData) return []
+      // Namen der Live-Konten wie in admLoad (Profil-Umschalter/Server-Name über people)
+      const nm = new Map((admData.people || []).map(p => [String(p.user_id), p.name]))
+      const live = (admData.live_konten || []).map(r => ({ ...r, person: nm.get(String(r.user_id)) || admShortName(r.person) }))
+      return [...(admData.accounts || []), ...live]
+    }
+    function admFirmaRender(){
+      const body = $('adm-af-body'); if(!body || !admData) return
+      $('adm-af-msg').style.display = 'none'; body.hidden = false
+      const alle = afAlle()
+      const sichtbar = r => afArch || !r.archived
+      // 1) Firmen-Chips: Anzahl AKTIVER Accounts über alle IDs
+      const firmN = new Map()
+      for(const r of alle){ if(!firmN.has(r.firm)) firmN.set(r.firm, 0); if(!r.archived) firmN.set(r.firm, firmN.get(r.firm) + 1) }
+      const firmen = [...firmN.keys()].filter(f => firmN.get(f) > 0 || afArch)
+        .sort((a, b) => (firmN.get(b) - firmN.get(a)) || String(a).localeCompare(String(b), 'de'))
+      if(afFirma && !firmN.has(afFirma)) afFirma = ''
+      const chip = (label, n, on, klick, dot) => {
+        const b = document.createElement('button'); b.type = 'button'
+        b.className = 'adm-vl-chip' + (on ? ' is-on' : '')
+        b.innerHTML = (dot ? `<span class="adm-dot" style="background:${dot}"></span>` : '') + '<span class="nm"></span><span class="af-n"></span>'
+        b.querySelector('.nm').textContent = label
+        b.querySelector('.af-n').textContent = String(n)
+        b.addEventListener('click', klick)
+        return b
+      }
+      const fBar = $('adm-af-firmen'); fBar.innerHTML = ''
+      fBar.appendChild(chip('Alle', alle.filter(r => !r.archived).length, !afFirma, () => { afFirma = ''; afPerson = ''; afPhase = ''; admFirmaRender() }))
+      for(const f of firmen) fBar.appendChild(chip(f || '—', firmN.get(f), afFirma === f, () => { afFirma = afFirma === f ? '' : f; afPerson = ''; afPhase = ''; admFirmaRender() }))
+
+      // 2) ID-Filter innerhalb der Firma (Standard: alle IDs)
+      const inFirma = alle.filter(r => (!afFirma || r.firm === afFirma) && sichtbar(r))
+      const persN = new Map(), persName = new Map()
+      for(const r of inFirma){ const u = String(r.user_id); persN.set(u, (persN.get(u) || 0) + 1); persName.set(u, r.person) }
+      if(afPerson && !persN.has(afPerson)) afPerson = ''
+      const iBar = $('adm-af-ids'); iBar.innerHTML = ''
+      iBar.appendChild(chip('Alle IDs', inFirma.length, !afPerson, () => { afPerson = ''; admFirmaRender() }))
+      for(const u of [...persN.keys()].sort((a, b) => String(persName.get(a)).localeCompare(String(persName.get(b)), 'de')))
+        iBar.appendChild(chip(persName.get(u), persN.get(u), afPerson === u, () => { afPerson = afPerson === u ? '' : u; admFirmaRender() }, afFarbe(u)))
+      $('adm-af-arch').checked = afArch
+      const lz = window._admLadeZeit
+      $('adm-af-stand').textContent = lz ? 'Stand ' + new Date(lz).toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' }) : ''
+
+      // 3) Kennzahlen je Phase (Klick filtert auf die Phase, zweiter Klick hebt auf)
+      const rows = inFirma.filter(r => !afPerson || String(r.user_id) === afPerson)
+      const phasen = AF_PHASEN.map(p => p[0])
+      for(const r of rows) if(!phasen.includes(r.type)) phasen.push(r.type)
+      if(afPhase && !phasen.includes(afPhase)) afPhase = ''
+      const kp = $('adm-af-kpis'); kp.innerHTML = ''
+      for(const t of phasen){
+        const g = rows.filter(r => r.type === t)
+        if(!g.length && !AF_PHASEN.some(p => p[0] === t && t !== 'winning_days')) continue   // WD/Sonstige nur, wenn vorhanden
+        const nt = g.filter(r => r.im_trade).length
+        const k = document.createElement('div')
+        k.className = 'kpi' + (afPhase === t ? ' is-on' : '') + (g.length ? '' : ' is-leer')
+        k.innerHTML = '<div class="kpi-label"></div><div class="kpi-value"></div><div class="kpi-delta delta-neutral"></div>'
+        k.querySelector('.kpi-label').textContent = afPhaseName(t)
+        k.querySelector('.kpi-value').textContent = String(g.length)
+        const sub = k.querySelector('.kpi-delta')
+        sub.textContent = nt ? `${nt} im Trade` : (afPhase === t ? 'Filter aktiv' : '—')
+        if(nt) sub.style.color = '#15803d'
+        k.title = afPhase === t ? 'Filter aufheben' : 'Nur diese Phase zeigen'
+        k.addEventListener('click', () => { afPhase = afPhase === t ? '' : t; admFirmaRender() })
+        kp.appendChild(k)
+      }
+
+      // 6) Bei „Alle": Firma × Phase mit Anzahlen (gleiche Filter: ID, Archiv)
+      const mp = $('adm-af-matrix-panel'); mp.hidden = !!afFirma
+      if(!afFirma){
+        const basis = alle.filter(r => sichtbar(r) && (!afPerson || String(r.user_id) === afPerson))
+        const spalten = phasen.filter(t => basis.some(r => r.type === t))
+        const zeilen = [...new Set(basis.map(r => r.firm))].map(f => {
+          const g = basis.filter(r => r.firm === f)
+          return { f, n: g.length, je: spalten.map(t => g.filter(r => r.type === t).length) }
+        }).sort((a, b) => (b.n - a.n) || String(a.f).localeCompare(String(b.f), 'de'))
+        const zelle = v => `<td class="${v ? '' : 'af-0'}">${v || '·'}</td>`
+        $('adm-af-matrix').innerHTML =
+          `<thead><tr><th>Firma</th>${spalten.map(t => `<th>${escapeHtml(afPhaseName(t))}</th>`).join('')}<th>Gesamt</th></tr></thead><tbody>`
+          + zeilen.map(z => `<tr data-firm="${escapeHtml(z.f)}"><td>${escapeHtml(z.f || '—')}</td>${z.je.map(zelle).join('')}<td><b>${z.n}</b></td></tr>`).join('')
+          + `</tbody><tfoot><tr><td><b>Summe</b></td>${spalten.map(t => `<td><b>${basis.filter(r => r.type === t).length}</b></td>`).join('')}<td><b>${basis.length}</b></td></tr></tfoot>`
+        $('adm-af-matrix').querySelectorAll('tbody tr').forEach(tr =>
+          tr.addEventListener('click', () => { afFirma = tr.dataset.firm; afPhase = ''; admFirmaRender() }))
+      }
+
+      // 3) Hauptteil: Blöcke je Phase (challenge → … → live), darin nach ID, dann Accountname
+      const box = $('adm-af-phasen'); box.innerHTML = ''
+      for(const t of phasen){
+        if(afPhase && afPhase !== t) continue
+        const g = rows.filter(r => r.type === t).sort((a, b) =>
+          String(a.person).localeCompare(String(b.person), 'de') || String(a.name).localeCompare(String(b.name), 'de', { numeric:true }))
+        if(!g.length) continue
+        const nt = g.filter(r => r.im_trade).length
+        const p = document.createElement('div'); p.className = 'panel af-phase'
+        p.innerHTML = `<div class="panel-head"><div><div class="panel-title"></div><div class="panel-sub"></div></div></div><div class="af-grid"></div>`
+        p.querySelector('.panel-title').textContent = `${afPhaseName(t)} · ${g.length}`
+        p.querySelector('.panel-sub').textContent = (afFirma || 'Alle Firmen') + (nt ? ` · ${nt} im Trade` : '')
+        const grid = p.querySelector('.af-grid')
+        for(const r of g) grid.appendChild(afKarte(r, !afFirma))
+        box.appendChild(p)
+      }
+      if(!box.children.length) box.innerHTML = '<div style="color:var(--sub);font-size:13px;padding:18px 2px">Keine Accounts für diese Auswahl.</div>'
+    }
+    function afKarte(r, mitFirma){
+      const k = document.createElement('div')
+      k.className = 'af-karte' + (r.im_trade ? ' is-trade' : '') + (r.archived ? ' is-arch' : '')
+      const ccy = r.balance_ccy || 'USD'
+      const size = r.size > 0 ? Number(r.size) : admAccGroesse(r.name, r.balance)
+      const start = r.start > 0 ? Number(r.start) : size
+      const bal = r.balance == null ? null : Number(r.balance)
+      const pl = (bal != null && start) ? bal - start : null
+      const tr = r.im_trade
+      const seit = tr && tr.seit ? new Date(tr.seit) : null
+      const seitTxt = seit && !isNaN(seit) ? (seit.toDateString() === new Date().toDateString()
+        ? seit.toLocaleTimeString('de-DE', { hour:'2-digit', minute:'2-digit' })
+        : seit.toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit' })) : ''
+      const tradeTxt = tr ? ['im Trade', tr.rolle === 'slave' ? 'Hedge' : '', tr.richtung, tr.symbol].filter(Boolean).join(' · ') : ''
+      const grund = r.archived ? ({ blown:'geblowt', passed:'bestanden', passed_pending:'bestanden' }[r.arch_grund] || 'archiviert') : ''
+      k.innerHTML = `<div class="af-kopf"><span class="af-id"></span>${tr ? '<span class="af-trade"><i></i><span></span></span>' : ''}</div>`
+        + `<div class="af-name"></div><div class="af-meta"></div>`
+        + `<div class="af-bal"><span class="af-b"></span><b class="af-pl"></b></div><div class="af-fuss"></div>`
+      const id = k.querySelector('.af-id')
+      id.textContent = r.person || '—'; id.style.background = afFarbe(r.user_id)
+      if(tr){ k.querySelector('.af-trade span').textContent = tradeTxt; k.querySelector('.af-trade').title = seitTxt ? 'seit ' + seitTxt : '' }
+      k.querySelector('.af-name').textContent = r.name || '—'
+      k.querySelector('.af-name').title = r.name || ''
+      k.querySelector('.af-meta').textContent = [mitFirma ? r.firm : '', size ? (size >= 1000 ? (size / 1000).toLocaleString('de-DE') + 'k' : String(size)) : '', r.ext ? '#' + r.ext : 'keine Kontonummer'].filter(Boolean).join(' · ')
+      k.querySelector('.af-b').textContent = bal != null ? afGeld(bal, ccy) : 'keine Live-Balance'
+      if(bal == null) k.querySelector('.af-b').style.color = 'var(--sub-2)'
+      if(r.balance_at && bal != null) k.querySelector('.af-b').title = `${r.balance_src || ''} · Stand ${new Date(r.balance_at).toLocaleString('de-DE')}`
+      const plEl = k.querySelector('.af-pl')
+      if(pl != null){
+        plEl.textContent = (pl >= 0 ? '+' : '−') + afGeld(Math.abs(pl), ccy)
+        plEl.style.color = pl >= 0 ? '#15803d' : '#b91c1c'
+        plEl.title = 'seit Start ' + afGeld(start, ccy)
+      }
+      const fuss = k.querySelector('.af-fuss')
+      const tag = (txt, farbe) => { const s = document.createElement('span'); s.className = 'af-tag'; s.textContent = txt; if(farbe) s.style.color = farbe; fuss.appendChild(s) }
+      if(r.payout_at) tag('Payout ab ' + afDatum(r.payout_at), r.payout_at <= new Date().toISOString().slice(0, 10) ? '#15803d' : '')
+      if(grund) tag(grund, grund === 'geblowt' ? '#b91c1c' : '')
+      if(!fuss.children.length) fuss.remove()
+      return k
     }
 
     function admBuysRender(){
@@ -14984,6 +15205,7 @@
           x.style.color = on ? 'var(--violet)' : ''
         })
         $('adm-pane-overview').hidden = name !== 'overview'
+        $('adm-pane-firma').hidden    = name !== 'firma'
         $('adm-pane-buys').hidden     = name !== 'buys'
         $('adm-pane-fin').hidden      = name !== 'fin'
         $('adm-pane-kasse').hidden    = name !== 'kasse'
@@ -15000,6 +15222,8 @@
         admHedgeModus()   // Kapitel ohne Hedge: Staffel-Karte/Weg-Chip im Farmer, Hedge-Spalten (24.09.2026)
         if(name === 'wallet') walOpen()
         if(name === 'buys') admBuysRender()   // Daten kommen aus admLoad — hier nur neu zeichnen
+        // „im Trade" ist ein Zeitpunkt: älter als 1 min → frisch laden, sonst nur zeichnen (27.09.2026)
+        if(name === 'firma'){ if(Date.now() - (window._admLadeZeit || 0) > 60000) admLoad(); else admFirmaRender() }
         if(name === 'fin')  admFinRender()
         if(name === 'overview') admVlResize()   // Verlaufs-Chart war evtl. bei 0 px Breite gebaut (23.09.2026)
         if(name === 'rg')   rgOpen()
@@ -15026,6 +15250,8 @@
         admRender()
       })
       $('adm-buys-back')?.addEventListener('click', () => { bPerson = ''; bFirm = ''; admBuysRender() })
+      $('adm-af-arch')?.addEventListener('change', e => { afArch = e.target.checked; admFirmaRender() })
+      $('adm-af-refresh')?.addEventListener('click', admLoad)
       $('adm-fin-back')?.addEventListener('click', () => { finPerson = ''; admFinRender() })
       $('adm-f-recv-back')?.addEventListener('click', () => { finPoPerson = ''; admFinRender() })
       $('kasse-list').addEventListener('click', ev => {
@@ -33941,7 +34167,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.669'
+  const OS_TAB_BUILD = '2026-09-22.670'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){

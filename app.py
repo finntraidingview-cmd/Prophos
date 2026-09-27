@@ -5504,6 +5504,57 @@ def admin_build_overview(kapitel_id=None):
             "payouts_n": payout_n.get(r["id"], 0),
         })
 
+    # ACCOUNTS JE FIRMA (27.09.2026, Finn: „pro Prop-Firma ALLE Accounts von ALLEN
+    # IDs auf einen Blick … und falls ein Account gerade schon im Trade ist, soll
+    # das leuchten"). Reine Anzeige, zählt in keine Summe: Größe, Start-Balance,
+    # Payout-Datum und Archiv-Grund stehen schon im Accounts-Read von _admin_basis,
+    # dazu EIN Read der offenen Pläne (status open = Trade läuft) — Master UND
+    # Slave-Konto gelten als „im Trade".
+    arch_info = b.get("arch_info") or {}
+    offen = {}
+    try:
+        for p in _sb_all("trade_plans", {"select": "id,master_account_id,slave_account_id,richtung,route,"
+                                                   "master_symbol,started_at,created_at",
+                                         "status": "eq.open"}):
+            info = {"plan_id": p.get("id"), "richtung": p.get("richtung") or "",
+                    "route": p.get("route") or "", "symbol": (p.get("master_symbol") or "").strip(),
+                    "seit": p.get("started_at") or p.get("created_at") or ""}
+            for rolle, key in (("master", "master_account_id"), ("slave", "slave_account_id")):
+                k = str(p.get(key) or "")
+                if k and k not in offen:
+                    offen[k] = dict(info, rolle=rolle)
+    except Exception as e:
+        print(f"[admin] ⚠️ offene Pläne: {type(e).__name__}: {e}", flush=True)
+
+    def _firma_felder(a, aid):
+        return {"size": _pnum(a.get("account_size")),
+                "start": _pnum(a.get("starting_balance")),
+                "payout_at": str(a.get("payout_ready_at") or "")[:10],
+                "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
+                "im_trade": offen.get(aid)}
+
+    for r in rows:
+        r.update(_firma_felder(by_id.get(r["id"]) or {}, r["id"]))
+
+    # Live-Konten (Hedge-Broker) stehen bewusst NICHT in rows — jede Summe der
+    # Übersicht würde sie sonst mitzählen. Die Firmen-Ansicht zeigt sie trotzdem
+    # als Phase „live", deshalb als eigene Liste in derselben Zeilen-Form.
+    live_konten = []
+    for a in accounts:
+        aid, uid = str(a["id"]), str(a.get("user_id"))
+        if (a.get("account_type") or "") != "live" or uid in excluded_ids:
+            continue
+        bal, ccy, src, at = _acc_balance(a)
+        z = {"id": aid, "ext": a.get("external_id") or "", "name": a.get("name") or "",
+             "firm": _firm_norm(a.get("firm")), "firm_raw": (a.get("firm") or "").strip(),
+             "type": "live", "user_id": uid,
+             "person": disp.get(uid) or names.get(uid, uid[:8]), "person_mail": names.get(uid, ""),
+             "archived": aid in archived, "kapitel_id": _kapitel_int(a.get("kapitel_id")),
+             "balance": round(bal, 2) if bal is not None else None,
+             "balance_ccy": ccy, "balance_src": src, "balance_at": at}
+        z.update(_firma_felder(a, aid))
+        live_konten.append(z)
+
     payout_ready = []
     for a in accounts:
         aid = str(a["id"])
@@ -5614,6 +5665,7 @@ def admin_build_overview(kapitel_id=None):
     # Frontend blendet diese Personen komplett aus und braucht dafuer die uid —
     # dup_live/mt5_live-Zeilen tragen nur user_id, keine E-Mail.
     return {"accounts": rows, "people": people_list, "firms": firm_list,
+            "live_konten": live_konten,   # nur für „Accounts je Firma" (27.09.2026)
             "pending_payouts": pending_rows,
             "payouts_received": recv_rows,
             "verlauf": verlauf,
