@@ -10632,14 +10632,29 @@ def _tsx_ausloeser(w):
     return tsx_ausloeser_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom")))
 
 
-def _tsx_warte_seite(w, trail, sek=20.0):
+def _tsx_warte_seite(w, trail, sek=20.0, login=None):
     """B19: nach Tab-Öffnen/-Wechsel rendert TopstepX erst nach einigen Sekunden — warten, bis der Konto-Auslöser da ist
-    (Obergrenze sek). -> Auslöser-Element | None"""
+    (Obergrenze sek). -> Auslöser-Element | None
+    B27: login (dict je Lauf) — steht die Login-Seite im Weg, EIN Klick auf „PLATFORM LOGIN" (nur bei vorausgefüllten
+    Feldern), danach bis 20 s auf /trade warten; login['fehler'] = (code, msg) → Aufrufer beendet den Lauf."""
+    login = {} if login is None else login
     ende = time.time() + sek
     while True:
         _TSX_SEITE.clear()                    # Seitenbereich neu (Tab kann gerade erst gezeichnet sein)
         ke = _tsx_ausloeser(w)
+        if not ke and _tsx_login_versuch(w, trail, login):
+            if login.get("fehler"):
+                trail.append("ENDE " + login["fehler"][0] + ": " + login["fehler"][1])
+                return None
+            if login.get("geklickt") and not login.get("verlaengert"):
+                login["verlaengert"] = True
+                ende = max(ende, login["geklickt"] + 20.0)
         if ke or time.time() >= ende:
+            if not ke and login.get("geklickt") and _tsx_login_versuch(w, trail, login):
+                # nach dem einen Klick immer noch Login-Seite (ohne Fehlertext) — kein zweiter Klick, ehrliches Ende
+                login.setdefault("fehler", ("login", "Login geklickt, aber TopstepX steht nach 20 s noch auf der Login-Seite."))
+                trail.append("ENDE " + login["fehler"][0] + ": " + login["fehler"][1])
+                return None
             trail.append(f"Seite bereit ({(ke[0] or '')[:40]})" if ke else f"Seite nach {int(sek)} s ohne Konto-Auslöser")
             return ke
         _warte(0.8, 0.4)
@@ -10730,9 +10745,9 @@ def _tsx_felder(w):
         u = IUIA()
         dll = u.UIA_dll
         anfrage = u.iuia.CreateCacheRequest()
-        wert_id, toggle_id = 30045, 30086          # UIA_ValueValuePropertyId, UIA_ToggleToggleStatePropertyId
+        wert_id, toggle_id, pw_id = 30045, 30086, 30019   # Value, ToggleState, IsPassword (B27)
         for pid in (dll.UIA_NamePropertyId, dll.UIA_BoundingRectanglePropertyId, dll.UIA_IsOffscreenPropertyId,
-                    dll.UIA_ControlTypePropertyId, wert_id, toggle_id):
+                    dll.UIA_ControlTypePropertyId, wert_id, toggle_id, pw_id):
             anfrage.AddProperty(pid)
         bed = None
         for t in ("Edit", "CheckBox", "Spinner", "ComboBox"):
@@ -10760,7 +10775,13 @@ def _tsx_felder(w):
                     tg = int(tg) if isinstance(tg, int) else None
                 except Exception:
                     tg = None
-                out.append((str(e.CachedName or "").strip()[:60], rr, name_von.get(e.CachedControlType, ""), wert, tg))
+                try:
+                    pw = bool(e.GetCachedPropertyValue(pw_id))
+                except Exception:
+                    pw = False
+                if pw:
+                    wert = "•" * len(wert)             # B27: Passwort nie im Klartext — nur „gefüllt ja/nein" zählt
+                out.append((str(e.CachedName or "").strip()[:60], rr, name_von.get(e.CachedControlType, ""), wert, tg, pw))
             except Exception:
                 continue
         return out
@@ -10768,12 +10789,85 @@ def _tsx_felder(w):
         return []
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# TOPSTEPX-LOGIN-SEITE (B27, 27.09.2026, Finn mit Screenshot bei Mike): beim ↻/Lesen landet TopstepX manchmal auf
+# topstepx.com/login — Username/Password von Chrome vorausgefüllt, gelber Knopf „PLATFORM LOGIN". Finn: „Da müsste man nochmal
+# auf Login drücken … die Daten müssten immer schon automatisch ausgefüllt sein." Puls drückt deshalb NUR den Knopf, wenn
+# beide Felder schon einen Wert haben — er tippt, liest oder speichert nie Zugangsdaten, höchstens EIN Klick je Lauf.
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_RX_PLATFORM_LOGIN = re.compile(r"^\s*(platform\s+)?log\s?in\s*$", re.I)
+TSX_RX_USER_FELD = re.compile(r"user|e-?mail|benutzer|login", re.I)
+TSX_RX_PW_FELD = re.compile(r"pass|kennwort", re.I)
+TSX_RX_LOGIN_FEHLER = re.compile(r"invalid|incorrect|wrong|failed|error|not\s+found|locked|ungültig|falsch|fehl", re.I)
+
+
+def tsx_ist_zugangsfeld(f):
+    """REIN RECHNEND (testbar): Feld trägt womöglich Zugangsdaten (Passwort, Username/Mail, „@" im Wert)."""
+    try:
+        return bool((len(f) > 5 and f[5]) or TSX_RX_PW_FELD.search(str(f[0] or "")) or TSX_RX_USER_FELD.search(str(f[0] or ""))
+                    or "@" in str(f[3] or ""))
+    except (TypeError, IndexError):
+        return True
+
+
+def tsx_login_lage(url, roh, felder):
+    """REIN RECHNEND (testbar): ist das die TopstepX-Login-Seite, und darf Puls „PLATFORM LOGIN" drücken?
+    -> {'seite': bool, 'knopf': Element|None, 'user': bool, 'pw': bool} — user/pw = Feld hat einen Wert (nie der Wert selbst).
+    Seite = Adresse …/login ODER Knopf „PLATFORM LOGIN" + Passwortfeld. Felder: über Namen, sonst die zwei Edits über dem Knopf."""
+    knoepfe = [e for e in roh or () if e[1] and (e[2] if len(e) > 2 else "Button") == "Button"
+               and TSX_RX_PLATFORM_LOGIN.match(str(e[0] or ""))]
+    knopf = knoepfe[0] if len(knoepfe) == 1 else None
+    edits = [f for f in felder or () if len(f) > 3 and f[2] == "Edit" and f[1]]
+    pw_f = [f for f in edits if (len(f) > 5 and f[5]) or TSX_RX_PW_FELD.search(str(f[0] or ""))]
+    user_f = [f for f in edits if f not in pw_f and TSX_RX_USER_FELD.search(str(f[0] or ""))]
+    if knopf and (not pw_f or not user_f):
+        ueber = sorted([f for f in edits if f[1][3] <= knopf[1][1] + 4], key=lambda f: f[1][1])[-2:]
+        if len(ueber) == 2:
+            user_f, pw_f = user_f or [ueber[0]], pw_f or [ueber[1]]
+    url_login = bool(re.search(r"topstepx\.com/+(login|signin|sign-in)\b", str(url or "").lower()))
+    seite = url_login or bool(knopf and pw_f)
+    return {"seite": seite, "knopf": knopf,
+            "user": bool(user_f and str(user_f[0][3] or "").strip()),
+            "pw": bool(pw_f and str(pw_f[0][3] or ""))}
+
+
+def _tsx_login_versuch(w, trail, stand):
+    """B27: Login-Seite? Felder gefüllt → EIN Klick auf „PLATFORM LOGIN". stand (dict je Lauf) merkt den Klick;
+    stand['fehler'] = (code, msg) beendet den Lauf. -> True, wenn die Login-Seite gerade im Weg ist."""
+    url = _chrome_url(w)
+    roh = _tsx_seite_roh(w, ("Button", "Text"))
+    lage = tsx_login_lage(url, roh, _tsx_felder(w))
+    if not lage["seite"]:
+        return False
+    if stand.get("geklickt"):
+        fehl = [str(e[0]).strip() for e in roh if e[1] and (e[2] if len(e) > 2 else "") == "Text"
+                and TSX_RX_LOGIN_FEHLER.search(str(e[0] or "")) and len(str(e[0])) < 200]
+        if fehl:
+            stand["fehler"] = ("login", f"TopstepX-Login abgelehnt: {fehl[0][:160]}")
+        return True
+    if not (lage["user"] and lage["pw"]):
+        trail.append(f"TopstepX-Login-Seite: Username {'gefüllt' if lage['user'] else 'leer'}, "
+                     f"Passwort {'gefüllt' if lage['pw'] else 'leer'} — kein Klick")
+        stand["fehler"] = ("login", "TopstepX will einen Login, die Felder sind nicht vorausgefüllt — bitte einmal von Hand anmelden.")
+        return True
+    if not lage["knopf"]:
+        return True                                  # Seite zeichnet noch — nächste Runde
+    _tsx_klick(lage["knopf"], "TopstepX-Login geklickt (Felder vorausgefüllt)", trail)
+    stand["geklickt"] = time.time()
+    _puls_diagnose_senden(trail, "tsx_login")
+    return True
+
+
 def tsx_felder_kurz(felder, max_n=120):
-    """REIN RECHNEND (testbar): [name, typ, [l,t,r,b], wert, toggle] für Inventar/DB."""
+    """REIN RECHNEND (testbar): [name, typ, [l,t,r,b], wert, toggle] für Inventar/DB.
+    B27: Werte von Zugangsfeldern (Passwort, Username/Mail, „@" im Wert) nur als „<n Zeichen>" — nie in die DB."""
     out = []
     for f in felder or ():
         try:
-            out.append([str(f[0] or "")[:60], str(f[2] or "")[:20], [int(v) for v in f[1]], str(f[3] or "")[:60],
+            wert = str(f[3] or "")
+            if tsx_ist_zugangsfeld(f):
+                wert = f"<{len(wert)} Zeichen>" if wert else ""
+            out.append([str(f[0] or "")[:60], str(f[2] or "")[:20], [int(v) for v in f[1]], wert[:60],
                         f[4] if isinstance(f[4], int) else None])
         except (TypeError, ValueError, IndexError):
             continue
@@ -10841,7 +10935,12 @@ def modus_tsxinventar(cmd):
         res.update(code="tab", schritt="tab", msg=f)
         return _tsx_ausgabe(res, trail)
     fr = _tv_fenster_rect(w)
-    _tsx_warte_seite(w, trail, 20.0)
+    lg = {}
+    _tsx_warte_seite(w, trail, 20.0, lg)
+    if lg.get("fehler"):
+        res.update(code=lg["fehler"][0], schritt="login", msg=lg["fehler"][1])
+        _puls_diagnose_senden(trail, "tsx_login")
+        return _tsx_ausgabe(res, trail)
     # B19: die offenen Fragen direkt beantworten — Titel/URL/Erkennung, alle Tabs, Seitenbereich, erste 150 Seiten-Elemente,
     # Kandidaten für den Konto-Auslöser
     res["titel"] = (w.window_text() or "")[:120]
@@ -10945,7 +11044,12 @@ def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0):
     fr = _tv_fenster_rect(w)
     res["schritt"] = "tsx_seite"
     _puls_diagnose_senden(trail, "tsx_tab")          # B17: Spur liegt schon in der DB, bevor geklickt wird
-    _tsx_warte_seite(w, trail)
+    lg = {}
+    _tsx_warte_seite(w, trail, 20.0, lg)
+    if lg.get("fehler"):
+        res.update(code=lg["fehler"][0], schritt="login", msg=lg["fehler"][1])
+        _puls_diagnose_senden(trail, "tsx_login")
+        return _tsx_ausgabe(res, trail)
     res["schritt"] = "tsx_vorbereiten"
     _tsx_vorbereiten(w, trail)
     _puls_diagnose_senden(trail, "tsx_vorbereitet")

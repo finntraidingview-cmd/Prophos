@@ -1770,6 +1770,7 @@ def main():
     results.append(test_tsx_inventar_mike())
     results.append(test_tsx_beweis())
     results.append(test_tsx_order())
+    results.append(test_tsx_login())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2950,6 +2951,74 @@ def test_tsx_order():
     chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
     if ok:
         print("✓ TSX-Order: Befehl, Mengenfeld, Haken, Panel-Knopf, Probe bis vor den Knopf, scharf mit Nachher-Beweis, Riegel")
+    return ok
+
+
+
+def test_tsx_login():
+    """B27 (27.09.2026, Mike): TopstepX-Login-Seite — nur bei vorausgefüllten Feldern EIN Klick auf „PLATFORM LOGIN",
+    nie tippen, Zugangsdaten nie in Spur/Inventar, leere Felder bzw. Fehlertext → ehrliches Ende 'login'."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Login: " + name); ok = False
+
+    MAIL = "mike.beispiel@example.com"
+    knopf = ("PLATFORM LOGIN", (1100, 700, 1460, 750), "Button")
+    f_user = ("Username", (1100, 520, 1460, 560), "Edit", MAIL, None, False)
+    f_pw = ("Password", (1100, 600, 1460, 640), "Edit", "••••••••", None, True)
+    L = ob.tsx_login_lage
+    lg = L("https://topstepx.com/login", [knopf], [f_user, f_pw])
+    chk("Login-Seite, beide gefüllt, Knopf eindeutig", lg["seite"] and lg["user"] and lg["pw"] and lg["knopf"] == knopf)
+    chk("Seite auch ohne URL (Knopf + Passwortfeld)", L("", [knopf], [f_user, f_pw])["seite"])
+    chk("Handelsseite ist keine Login-Seite", not L("https://topstepx.com/trade", [("BUY +1 @ MARKET", (1, 1, 9, 9), "Button")], [])["seite"])
+    chk("Passwort leer → pw False", not L("topstepx.com/login", [knopf], [f_user, f_pw[:3] + ("", None, True)])["pw"])
+    unb = [("", (1100, 520, 1460, 560), "Edit", MAIL, None, False), ("", (1100, 600, 1460, 640), "Edit", "•••", None, False)]
+    lg = L("", [knopf], unb)
+    chk("unbenannte Felder: die zwei Edits über dem Knopf", lg["seite"] and lg["user"] and lg["pw"])
+    kurz = str(ob.tsx_felder_kurz([f_user, f_pw, ("", (1, 1, 5, 5), "Edit", MAIL, None, False), ("Profit (~$)", (1, 1, 5, 5), "Edit", "400", None)]))
+    chk("Inventar maskiert Mail/Passwort, Profit bleibt", MAIL not in kurz and "••" not in kurz and "<25 Zeichen>" in kurz and "'400'" in kurz)
+
+    def lauf(user_wert, pw_wert, nach_klick):
+        z = {"seite": "login", "klicks": 0}
+        spur = ob._StempelSpur()
+        alt = {k: getattr(ob, k) for k in ("_tsx_ausloeser", "_chrome_url", "_tsx_seite_roh", "_tsx_felder", "_tsx_klick", "_warte", "_puls_diagnose_senden")}
+        ob._tsx_ausloeser = lambda w: ("$150K TRADING COMBINE | 150KTC-X", (10, 10, 200, 30), "Button") if z["seite"] == "trade" else None
+        ob._chrome_url = lambda w: "https://topstepx.com/" + z["seite"]
+        ob._tsx_seite_roh = lambda w, typen=None: ([knopf] + ([("Invalid username or password", (1100, 660, 1460, 680), "Text")]
+                                                             if z["seite"] == "fehler" else [])) if z["seite"] != "trade" else []
+        ob._tsx_felder = lambda w: [f_user[:3] + (user_wert, None, False), f_pw[:3] + (pw_wert, None, True)] if z["seite"] != "trade" else []
+
+        def klick(e, name, trail):
+            z["klicks"] += 1
+            trail.append(name)
+            z["seite"] = nach_klick
+        ob._tsx_klick = klick
+        ob._warte = lambda *a, **k: None
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        try:
+            stand = {}
+            ke = ob._tsx_warte_seite(object(), spur, 20.0, stand)
+            return ke, stand, z, " > ".join(spur)
+        finally:
+            for k, v in alt.items():
+                setattr(ob, k, v)
+            ob._TSX_SEITE.clear()
+
+    ke, st, z, sp = lauf(MAIL, "••••••••", "trade")
+    chk(f"gefüllt → ein Klick → Handelsseite ({sp})", ke and z["klicks"] == 1 and not st.get("fehler") and "TopstepX-Login geklickt (Felder vorausgefüllt)" in sp)
+    chk("Mail nie in der Spur", MAIL not in sp)
+    ke, st, z, sp = lauf("", "", "trade")
+    chk("leer → kein Klick, Ende 'login'", ke is None and z["klicks"] == 0 and st.get("fehler", ("",))[0] == "login"
+        and "nicht vorausgefüllt" in st["fehler"][1])
+    ke, st, z, sp = lauf(MAIL, "••••", "fehler")
+    chk(f"falsches Passwort → genau EIN Klick, Ende mit Fehlertext ({st.get('fehler')})", ke is None and z["klicks"] == 1
+        and "Invalid username or password" in (st.get("fehler") or ("", ""))[1])
+    if ok:
+        print("✓ TSX-Login: Login-Seite erkannt, nur vorausgefüllt EIN Klick, leer/abgelehnt → Ende 'login', Zugangsdaten maskiert")
     return ok
 
 
