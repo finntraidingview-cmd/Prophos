@@ -8260,8 +8260,8 @@
                 </div>
                 <div class="wd-felder">
                   <!-- Takt fest 35 min + 0–5 min Zufall (26.09.2026, Finn) — ersetzt „Pause zwischen Blöcken" (pause_min/max wirken nicht mehr) -->
-                  <div class="wd-feld"><label>Takt je Block <small>· fest</small></label><div class="kf mono" style="padding:7px 0;font-size:13px;color:var(--text)" title="ein Block belegt 35 min, der nächste startet 35–40 min später; braucht ein Block für seine Konten länger, gilt das">35–40 min</div></div>
-                  <div class="wd-feld"><label>Abstand zwischen Konten <small>· Zufall je Konto</small></label><div class="wd-spanne"><input type="number" class="input mono" id="wd-abst-min" min="0" step="1" value="2"><span>bis</span><input type="number" class="input mono" id="wd-abst-max" min="0" step="1" value="4"><span>min</span></div></div>
+                  <div class="wd-feld"><label>Takt je Block <small>· Zufall</small></label><div class="kf mono" style="padding:7px 0;font-size:13px;color:var(--text)" title="der nächste Block (nächste ID) startet 20–55 min nach dem vorigen; die Konten einer ID laufen über die Warteschlange ihres PCs nacheinander">20–55 min</div></div>
+                  <!-- „Abstand zwischen Konten" raus (27.09.2026, Finn: „bei einer ID können alle Trades nacheinander gestartet werden, mit dem normalen Warteschlangen-Prinzip") -->
                 </div>
               </div>
               <div class="wd-set-card">
@@ -33930,7 +33930,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.666'
+  const OS_TAB_BUILD = '2026-09-22.667'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -36503,7 +36503,9 @@
       if(!data || !data.length) return
       const i = tradePlans.findIndex(x => String(x.id) === String(plan.id)); if(i >= 0) tradePlans[i] = rowToPlan(data[0])
       renderTradePlans()
-      if(verspaetet > 10 * 60 * 1000){
+      // Farmer-Pläne einer ID werden seit 27.09.2026 gleichzeitig fällig und laufen nacheinander — der letzte in der Schlange ist
+      // bei ~10 Konten × 40–60 s leicht über 10 min „spät". Für sie gilt 60 min, für alle anderen weiter 10 min.
+      if(verspaetet > (tpIstFarmerPlan(plan) ? 60 : 10) * 60 * 1000){
         if(typeof atToast === 'function') atToast(`⏰ Startzeit von „${plan.masterName || '—'}" um ${Math.round(verspaetet / 60000)} min verpasst — NICHT gestartet. Von Hand starten.`, 'end')
         return
       }
@@ -38749,8 +38751,11 @@
   // Vorher: Konten × (abstand_max + 2) + Pause pause_min..pause_max (15–60) → ~57 min. Braucht ein Block für seine Konto-Starts
   // länger (Konten × (abstand_max + 2) > 35, z. B. 7 Konten à 5 min), gilt der größere Wert — sonst überlappt der nächste Block
   // mit wdKontoZeiten. pause_min/pause_max bleiben in wd_farmer_regeln stehen, wirken aber nicht mehr.
-  const WD_TAKT_MIN = 35, WD_TAKT_ZUFALL_MIN = 5
-  const wdDauerMs = (x, r) => Math.max(WD_TAKT_MIN, Math.max(1, (x.konten || []).filter(wdAktiv).length) * (Math.max(1, +((r || {}).abstand_max) || 4) + 2)) * 60000
+  // Takt 20–55 min (27.09.2026, Finn: „mach hier 20–55 min"): der nächste Block (= nächste ID) startet 20 min + 0–35 min Zufall nach
+  // dem vorigen. Die Konten-Dauer zählt nicht mehr: alle Konten einer ID werden zur Blockzeit fällig und laufen über die
+  // Warteschlange ihres PCs nacheinander (tpStartUmTick), jede ID hat ihren eigenen PC — Blöcke dürfen sich also überlappen.
+  const WD_TAKT_MIN = 20, WD_TAKT_ZUFALL_MIN = 35
+  const wdDauerMs = () => WD_TAKT_MIN * 60000
 
   /* Würfeln (rein rechnend, testbar). rows = Zeilen des Tages; Zeilen mit start_um bleiben fest
    * (außer alleNeu) und Neue werden dahinter angehängt. seed → deterministisch, null → Math.random.
@@ -38760,8 +38765,8 @@
     const nAkt = x => (x.konten || []).filter(wdAktiv).length
     const aMax = Math.max(1, +r.abstand_max || 4)
     const jit = (r.jitter_min == null) ? 10 : Math.max(0, +r.jitter_min || 0)
-    const dauer = x => wdDauerMs(x, { abstand_max: aMax })   // 35 min, mehr nur wenn die Konten mehr brauchen (Takt 26.09.2026)
-    const luft = () => rnd() * WD_TAKT_ZUFALL_MIN * 60000    // kleiner Zufall 0–5 min, Seed-Zufall (zwei Tabs würfeln gleich)
+    const dauer = () => wdDauerMs()   // 20 min fest + luft() 0–35 min = 20–55 min (27.09.2026)
+    const luft = () => rnd() * WD_TAKT_ZUFALL_MIN * 60000    // Zufall 0–35 min, Seed-Zufall (zwei Tabs würfeln gleich)
     const out = new Map()
     const fest = alleNeu ? [] : (rows || []).filter(x => x.start_um && nAkt(x) > 0 && x.status !== 'leer')
     const teil = (rows || []).filter(x => nAkt(x) > 0 && (alleNeu || !x.start_um) && x.status !== 'laeuft' && x.status !== 'fertig' && x.status !== 'verpasst')
@@ -39061,8 +39066,9 @@
     const out = new Map(); out.geaendert = false
     for(const k of konten){
       if(!wdAktiv(k)) continue
-      if(i > 0 && k.abstand_min == null){ k.abstand_min = Math.round((aMin + Math.random() * (aMax - aMin)) * 10) / 10; out.geaendert = true }
-      if(i > 0) t += (k.abstand_min || 0) * 60000
+      // Kein Abstand mehr (27.09.2026): alle Konten der ID zur Blockzeit, die Warteschlange des PCs startet sie nacheinander.
+      // Alte, schon gewürfelte k.abstand_min bleiben am Konto stehen, wirken aber nicht mehr.
+      void aMin; void aMax
       out.set(String(k.id), new Date(t).toISOString()); i++
     }
     return out
@@ -40361,7 +40367,7 @@
     const g = id => document.getElementById(id), n = (id, std) => { const v = parseFloat(g(id)?.value); return isFinite(v) ? Math.max(0, Math.round(v)) : std }
     const { data: { user } } = await supabase.auth.getUser()
     const r = { aktiv: !!g('wd-aktiv')?.checked, start_hhmm: g('wd-start')?.value || '02:00', tz: WD_TZ_STD,
-                abstand_min: n('wd-abst-min', 2), abstand_max: n('wd-abst-max', 4),
+                abstand_min: 0, abstand_max: 0,   // Abstand entfällt (27.09.2026), Warteschlange je PC
                 updated_at: new Date().toISOString(), updated_by: user ? user.id : null }
     if(r.abstand_max < r.abstand_min) r.abstand_max = r.abstand_min
     const { error } = await supabase.from('wd_farmer_regeln').update(r).eq('id', 1)
