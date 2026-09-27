@@ -8998,6 +8998,9 @@
           <div id="wal-db-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
             Tabellen <code>id_wallets</code>/<code>wallet_snapshots</code> fehlen noch — bitte <code>sql/2026-08-24_id_wallets.sql</code> im Supabase SQL-Editor ausführen.
           </div>
+          <div id="wal-excl-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
+            Liste der ausgeblendeten IDs nicht ladbar — Wallets und Summen bleiben leer, damit keine fremden Zahlen erscheinen. Tab gleich noch einmal öffnen.
+          </div>
 
           <div class="adm-toolbar">
             <select id="wal-person" class="adm-f"><option value="">Alle Personen</option></select>
@@ -13659,6 +13662,7 @@
      * und dieselbe Tx taucht bei Sender UND Empfänger auf, wenn beide Wallets
      * in Prophos stehen. Genau diese Formel steht auch in der SQL-Datei. */
     const walTxDb = new Map()   // tx_key → Zeile aus wallet_tx
+    let walErlaubt = new Set()  // B37: wallet_ids, die nach dem Ausblenden sichtbar sind (walLoad)
     let walKats = []            // Vorlagen aus wallet_tx_kategorien
     let walTxDbOk = true        // false = SQL noch nicht eingespielt (Tabellen fehlen)
     const walTxKey = (w, e) => [
@@ -13701,8 +13705,17 @@
         ])
         if(w.error) throw w.error
         if(s.error) throw s.error
-        wallets = w.data || []
-        walSnaps = s.data || []
+        // AUSGEBLENDETE IDs (B37, 28.09.2026, Finn: „Mach Emin bei uns weg"): die RLS lässt den Admin alle Wallets lesen — Emins
+        // 3.049,94 USDT standen in Gesamt, „Nach Person", Verlauf und Liste. Gleiche Regel wie die übrigen Admin-Ansichten:
+        // excluded_uids aus /admin/overview (fleetPersonen), nicht hart „Emin". Wallets dieser IDs fallen raus, ihre Snapshots
+        // und TX über wallet_id mit. Emins eigene Sicht: dort liefert der Server alle außer ihm, seine Wallets bleiben.
+        // Liste nicht frisch ladbar → lieber leer mit Hinweis als fremde Zahlen.
+        let excl = null
+        try{ const fp = await fleetPersonen(); if(fp && fp.exclFrisch && fp.exclUids) excl = fp.exclUids }catch(_){}
+        $('wal-excl-warn').style.display = excl ? 'none' : ''
+        wallets = excl ? (w.data || []).filter(x => !excl.has(String(x.person_uid || ''))) : []
+        walErlaubt = new Set(wallets.map(x => String(x.id)))
+        walSnaps = (s.data || []).filter(x => walErlaubt.has(String(x.wallet_id)))
         $('wal-db-warn').style.display = 'none'
         // Labels getrennt und tolerant: fehlt die Tabelle (SQL noch nicht eingespielt),
         // laufen Wallets/Balances trotzdem — nur die CoinPayments-Anzeige fehlt dann.
@@ -13722,7 +13735,7 @@
           if(tx.error) throw tx.error
           if(kat.error) throw kat.error
           walTxDb.clear()
-          for(const r of (tx.data || [])) walTxDb.set(r.tx_key, r)
+          for(const r of (tx.data || [])) if(walErlaubt.has(String(r.wallet_id))) walTxDb.set(r.tx_key, r)   // B37: nur Wallets sichtbarer IDs
           walKats = kat.data || []
           walTxDbOk = true
         }catch(e){
@@ -13934,7 +13947,7 @@
       msgEl.textContent = fail ? `${wallets.length - fail} von ${wallets.length} Wallets geladen` : 'Stand: gerade eben'
       // Snapshots neu lesen, damit der heutige Punkt direkt im Verlauf auftaucht
       const { data } = await supabase.from('wallet_snapshots').select('wallet_id,day,usdt,coin_usdt').order('day')
-      if(data){ walSnaps = data; walRender() }
+      if(data){ walSnaps = data.filter(x => walErlaubt.has(String(x.wallet_id))); walRender() }   // B37: wie walLoad
     }
 
     const walFiltered = () => {
@@ -18157,6 +18170,9 @@
       // weil seine Daten nirgends auftauchen — Finns Duplikium-Zeilen stehen
       // aber in dup_live, deshalb braucht es die uid-Liste vom Server.
       _fleetPers.exclUids = new Set((d.excluded_uids || []).map(String))
+      // Frisch vom Server in DIESER Sitzung (B37, 28.09.2026): die Wallet-Summen im Admin verlassen sich nur darauf, nie auf
+      // den localStorage-Seed — der kann von einem anderen Login im selben Browser stammen (Emins Liste = alle außer ihm).
+      _fleetPers.exclFrisch = true
       // Für den nächsten Seitenaufruf merken — der erste Render hat die Liste
       // dann sofort, ohne auf den Server zu warten (kein Aufblitzen mehr).
       try{ localStorage.setItem('prophos_fleet_excl', JSON.stringify([..._fleetPers.exclUids])) }catch(_){}
@@ -34488,7 +34504,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.708'
+  const OS_TAB_BUILD = '2026-09-22.709'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
