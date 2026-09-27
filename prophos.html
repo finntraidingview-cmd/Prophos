@@ -22354,6 +22354,8 @@
       // BEARBEITEN (F33): nur Farmer-Admins, nur geplant + nicht gestartet (der Server prüft dasselbe beim PATCH)
       const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
       if(P.farmerAdmin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
+      // Plan fehlt (28.09.2026, Chris 92dd21d0 von Hand gelöscht, Verweis blieb stehen): Farmer-Admins legen ihn hier neu an
+      const neuKnopf = (P.farmerAdmin && t.status === 'fehlt' && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-neu="${escapeHtml(pid)}" style="padding:0 7px;margin-left:6px;font-size:11.5px;line-height:18px;height:auto;vertical-align:1px;color:#b91c1c" title="Verweis im Tagesplan lösen und den Plan wie der Farmer neu anlegen (gleiche Startzeit, TP aus der Vorgabe)"${P.neuBusy === pid ? ' disabled' : ''}>${P.neuBusy === pid ? 'legt an…' : 'Plan neu anlegen'}</button>` : ''
       const stift = (P.farmerAdmin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
       return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
@@ -22361,7 +22363,7 @@
           <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml(startSub)}</small></span>
           <span class="mwj-zelle">${escapeHtml(cd[0])}<small>${escapeHtml(cd[1])}</small></span>
           <span class="mwj-zelle">${t.tp != null ? f0(t.tp) + ' $' : '–'}<small>${t.kt != null ? f0(t.kt) + ' × ' + escapeHtml(t.root || 'Kt.') : 'TP'}</small></span>
-          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}${stift}<small>Plan</small></span>
+          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}${neuKnopf || stift}<small>${P.neuMsg && P.neuMsg.id === pid ? escapeHtml(P.neuMsg.text) : 'Plan'}</small></span>
         </div>`
     }).join('')
     const leer = !tr.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
@@ -22402,6 +22404,7 @@
     el.querySelectorAll('[data-mwp-dir]').forEach(b => b.addEventListener('click', () => { if(P.edit){ P.edit.dir = b.dataset.mwpDir; mklWdRender() } }))
     el.querySelectorAll('[data-mwp-cancel]').forEach(b => b.addEventListener('click', () => { P.edit = null; mklWdRender() }))
     el.querySelectorAll('[data-mwp-save]').forEach(b => b.addEventListener('click', () => mklWdPlanSpeichern()))
+    el.querySelectorAll('[data-mwp-neu]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdPlanNeuAnlegen(b.dataset.mwpNeu) }))
   }
   async function mklWdPlanSpeichern(){
     const P = mkl.wd.plan, e = P && P.edit; if(!e || e.busy) return
@@ -22446,6 +22449,28 @@
     P.edit = hinweise.length ? { ...e, busy: false, fehler: true, msg: '✓ gespeichert · ' + hinweise.join(' · ') } : null
     P.at = 0; await mklWdPlanLaden(); mklWdRender()
     if(P.edit && mkl.wd.plan.edit !== P.edit) mkl.wd.plan.edit = P.edit
+  }
+  /* PLAN NEU ANLEGEN (28.09.2026): „Plan fehlt" = Tagesplan verweist auf einen Plan, den es nicht mehr gibt. Der Farmer legt für ein
+   * Konto MIT plan_id nie neu an — also Verweis lösen und denselben Weg wie „Würfeln"/SCHARF nehmen (wdDatenLaden + wdPlaeneAnlegen
+   * über /admin/wd-plaene POST, Server dreht auf V2). Legt dabei auch andere Konten ohne Plan an — genau wie der Farmer selbst. */
+  async function mklWdPlanNeuAnlegen(pid){
+    const P = mkl.wd.plan; if(!P || P.neuBusy) return
+    const t = mklWdPlanTrades(P).find(x => String(x.konto.plan_id) === String(pid)); if(!t || t.status !== 'fehlt') return
+    P.neuBusy = pid; P.neuMsg = null; mklWdRender()
+    let text = ''
+    try{
+      const row = t.row
+      const konten = (row.konten || []).map(k => (k && String(k.plan_id) === String(pid)) ? { ...k, plan_id: null, status: null, start_um: null, aktiv: true, hinweis: '' } : k)
+      const { error } = await supabase.from('wd_tagesplan').update({ konten, status: row.status === 'leer' ? 'geplant' : row.status, updated_at: new Date().toISOString() }).eq('tag', row.tag).eq('user_id', row.user_id).neq('status', 'laeuft')
+      if(error) throw error
+      await wdDatenLaden(row.tag)
+      const a = await wdPlaeneAnlegen(row.tag)
+      text = a.angelegt ? `✓ ${a.angelegt} Plan${a.angelegt === 1 ? '' : 'e'} angelegt` : ('nichts angelegt' + (a.fehler && a.fehler.length ? ' · ' + a.fehler.join(' · ') : ''))
+    }catch(e){ text = 'Fehler: ' + ((e && e.message) || e) }
+    P.neuBusy = null
+    P.at = 0; await mklWdPlanLaden()
+    mkl.wd.plan.neuMsg = { id: pid, text }; mklWdRender()   // die neue plan_id hat eine neue Zeile — deshalb auch als Toast
+    if(typeof atToast === 'function') atToast(`${t.name}: ${text}`, /^✓/.test(text) ? 'start' : 'end')
   }
   // Zähler für den Block-Titel aus DERSELBEN Quelle (F32: oben stand „0 geplant", unten 4 Trades)
   function mklWdPlanZaehler(){
@@ -33617,11 +33642,26 @@
   }
 
   async function deleteTradePlan(planId){
-    if(!confirm('Trade-Plan wirklich löschen?')) return
+    // FARMER-PLAN (28.09.2026, Chris 92dd21d0 um 21:44 UTC per Löschknopf in Chris' Profil gelöscht — die plan_id blieb im
+    // Tagesplan stehen: „Plan fehlt", kein Start, der Farmer legt für ein Konto MIT plan_id nie neu an). Jetzt eigene Warnung,
+    // und das Konto wird für diesen Tag sauber ausgetragen (aktiv false + Hinweis) — Farmer-Tab und „Plan heute Nacht" stimmen.
+    const p0 = (tradePlans || []).find(p => String(p.id) === String(planId))
+    const farmer = !!(p0 && p0.notes === 'Winning-Day-Farmer')
+    if(!confirm(farmer ? `Das ist ein Winning-Day-Farmer-Plan (${p0.masterName || 'Konto'}${p0.startUm ? ', Start ' + new Date(p0.startUm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : ''}).\n\nLöschen nimmt das Konto für diesen Tag aus dem Farmer — es startet dann NICHT.\nWirklich löschen?` : 'Trade-Plan wirklich löschen?')) return
     try{
       const { error } = await supabase.from('trade_plans').delete().eq('id', planId)
       if(error) throw error
       tradePlans = tradePlans.filter(p => String(p.id) !== String(planId))
+      if(farmer){
+        try{
+          const { data: rows } = await supabase.from('wd_tagesplan').select('tag,user_id,konten,status').eq('user_id', currentUserId).gte('tag', new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10))
+          for(const x of (rows || [])){
+            if(!(x.konten || []).some(k => k && String(k.plan_id) === String(planId))) continue
+            const konten = x.konten.map(k => (k && String(k.plan_id) === String(planId)) ? { ...k, plan_id: null, status: null, start_um: null, aktiv: false, hinweis: 'Plan von Hand gelöscht' } : k)
+            await supabase.from('wd_tagesplan').update({ konten, status: konten.some(k => k && k.aktiv !== false) ? x.status : 'leer', updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
+          }
+        }catch(e){ console.warn('[wd] Tagesplan nach Löschen', e) }
+      }
       // Mirror-Route: scharfgeschaltetes Pair freigeben (stoppt die Engine, falls
       // kein anderer Plan sie hält) — sonst würde ein gelöschter Plan weiterspiegeln
       if(typeof mirrorReleasePlan === 'function') mirrorReleasePlan(planId)
@@ -34760,7 +34800,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.718'
+  const OS_TAB_BUILD = '2026-09-22.719'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
