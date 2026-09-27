@@ -10188,6 +10188,27 @@ def tsx_konto_steht(text, ext_id):
     return "vielleicht" if len(_nur_alnum(k)) >= 4 and _nur_alnum(ext_id).startswith(_nur_alnum(k)) else "nein"
 
 
+def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetzt):
+    """REIN RECHNEND (testbar, B21, 27.09.2026 — Mike: TopstepX HATTE gewechselt, Puls meldete trotzdem Fehler, weil er
+    zusätzlich „Liste zu" verlangte und unterhalb des Auslösers weiter Kontozeilen stehen blieben). Bestätigt ist der Wechsel:
+    - Auslöser trägt die VOLLE Ziel-ID ('ja') — Regelfall, per UIA steht die volle ID auch bei optisch gekürzter Anzeige;
+    - oder Auslöser abgekürzt mit passendem Präfix ('vielleicht'), der Präfix ist in der Liste EINDEUTIG (Mike hat zwei
+      „$150K TRADING COMBINE") UND BAL hat sich gegenüber vorher geändert.
+    -> (True|False, grund)"""
+    stand = tsx_konto_steht(ausloeser_text, ext_id)
+    if stand == "ja":
+        return True, "Auslöser zeigt die Ziel-ID"
+    if stand == "vielleicht":
+        k, _kurz = tsx_konto_sichtbar(ausloeser_text)
+        gleich = [t for t in liste_texte or () if _nur_alnum(tsx_konto_aus_text(t)).startswith(_nur_alnum(k))]
+        if len(gleich) != 1:
+            return False, f"Auslöser abgekürzt, Präfix {len(gleich)}× in der Liste — nicht eindeutig"
+        if bal_vorher is None or bal_jetzt is None or abs(bal_jetzt - bal_vorher) < 0.005:
+            return False, "Auslöser abgekürzt, BAL unverändert — Wechsel nicht bewiesen"
+        return True, "Auslöser abgekürzt, Präfix eindeutig und BAL geändert"
+    return False, f"Auslöser zeigt ein anderes Konto ('{str(ausloeser_text or '')[:50]}')"
+
+
 def tsx_konto_treffer(texte, ext_id):
     """REIN RECHNEND (testbar): Dropdown-Eintraege (Texte) → (Index | None, grund). Genau EIN Eintrag, dessen Kontokennung
     die External ID exakt ist; „(Ineligible)" nie."""
@@ -10748,6 +10769,7 @@ def modus_tsxlesen(cmd):
     trail.append(f"Konto-Auslöser: '{ke[0][:50]}' → {stand}")
     _puls_diagnose_senden(trail, "tsx_konto")
     if stand != "ja":
+        bal_vorher = tsx_kopf_werte(_tsx_seite_roh(w, ("Text", "Button", "Group", "Custom")))["balance"]
         _tsx_klick(ke, "Konto-Dropdown öffnen", trail)
         eintraege, t_bis = [], time.time() + 4.0
         while time.time() < min(t_bis, frist):
@@ -10767,19 +10789,24 @@ def modus_tsxlesen(cmd):
             _tsx_esc()
             return ende_mit("konto", f"{grund} ({ext}).", liste=texte[:20])
         _tsx_klick(eintraege[i], f"Konto {ext}", trail)
-        ok_k, t_bis = False, time.time() + 5.0
+        # B21: in Runden bis 6 s frisch sammeln (jede Runde ein neuer UIA-Aufruf) — bestätigt, sobald der Auslöser die volle
+        # Ziel-ID trägt; abgekürzt nur mit eindeutigem Präfix + geänderter BAL. „Liste zu" ist KEINE Bedingung mehr.
+        ok_k, grund_k, runde, t_bis = False, "", 0, time.time() + 6.0
         while time.time() < min(t_bis, frist):
             _warte(0.35, 0.25)
-            ke2 = ausloeser()
-            offen = tsx_eintraege_waehlen(_tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem",
-                                                             "Group", "Custom")), ke2[1][1] + 4) if ke2 else []
-            if ke2 and tsx_konto_steht(ke2[0], ext) in ("ja", "vielleicht") and not offen:
-                ok_k = True
+            runde += 1
+            roh_n = _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom"))
+            ke2 = tsx_ausloeser_waehlen(roh_n)
+            ok_k, grund_k = tsx_wechsel_urteil(ke2[0] if ke2 else "", ext, texte, bal_vorher, tsx_kopf_werte(roh_n)["balance"])
+            if ok_k:
                 break
+        trail.append(f"Wechsel-Prüfung ({runde} Runden): {grund_k}")
         if not ok_k:
-            return ende_mit("konto", f"Konto {ext} geklickt, der Auslöser zeigt es nicht (Liste noch offen oder anderes Konto).")
-        trail.append("Konto per Liste gewählt" + (" (Auslöser zeigt die Kennung abgekürzt)" if stand == "vielleicht" or
-                                                  tsx_konto_sichtbar(ke2[0])[1] else ""))
+            return ende_mit("konto", f"Konto {ext} geklickt, Wechsel nicht bewiesen: {grund_k}.")
+        # Steht die Liste noch sichtbar da, einmal Esc (schließt nur das Dropdown)
+        if tsx_eintraege_waehlen(_tsx_seite_roh(w, ("ListItem", "MenuItem")), ke2[1][1] + 4):
+            _tsx_esc()
+        trail.append("Konto per Liste gewählt")
     if time.time() > frist:
         return ende_mit("zeit", "Obergrenze 90 s überschritten.")
     trail.append(f"Konto steht auf {ext}")

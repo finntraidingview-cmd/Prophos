@@ -2558,6 +2558,20 @@ def test_tsx_konto_abgekuerzt():
         and ob.tsx_konto_steht("$150K TRADING COMBINE | 150KTC-…", ext) == "nein"
         and ob.tsx_konto_steht("$150K EXPRESS | EXPRESS-V2-682437-57131690", ext) == "nein")
 
+    wu = ob.tsx_wechsel_urteil
+    liste2 = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127",
+              "$150K EXPRESS | EXPRESS-V2-682437-57131691"]
+    chk("Urteil: volle Ziel-ID → bestätigt", wu("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042",
+                                               "150KTC-SKU-V2-682437-58370042", liste2, 11079.66, 11079.66)[0])
+    chk("Urteil: anderes TRADING COMBINE (gleiches Präfix, volle ID) → nein",
+        not wu("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127", "150KTC-SKU-V2-682437-58370042", liste2, 1.0, 2.0)[0])
+    chk("Urteil: abgekürzt + Präfix doppelt (zwei TRADING COMBINE) → nie bestätigt, auch wenn BAL sich ändert",
+        not wu("$150K TRADING COMBINE | 150KTC-…", "150KTC-SKU-V2-682437-58370042", liste2, 11079.66, 154504.88)[0])
+    chk("Urteil: abgekürzt + Präfix eindeutig + BAL geändert → bestätigt; BAL gleich → nein",
+        wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-682437-57131691", liste2, 154504.88, 11079.66)[0]
+        and not wu("$150K EXPRESS | EXPRESS-…", "EXPRESS-V2-682437-57131691", liste2, 11079.66, 11079.66)[0])
+    chk("BAL US-Format aus Finns Screenshot", ob.tsx_kopf_werte([("BAL: $154,504.88", (0, 0, 9, 9), "Text")])["balance"] == 154504.88)
+
     alt_mod = _s.modules.get("pywinauto")
     pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
     z = {"offen": False, "konto": "EXPRESS-V2-682437-11111111"}
@@ -2567,8 +2581,12 @@ def test_tsx_konto_abgekuerzt():
         def set_focus(self): pass
         def descendants(self, **kw): return []
     def roh(w_, typen=None, mx=0, muster=()):
-        kurz = z["konto"][:8] + "…"
-        out = [("Close", (1870, 0, 1920, 30), "Button"), (f"$150K EXPRESS | {kurz}", (20, 160, 300, 180), "Button"),
+        if z.get("alt_runden", 0) > 0:          # B21: React-Knoten bleibt nach dem Klick eine Runde alt stehen
+            z["alt_runden"] -= 1
+            anzeige = z["alt_konto"]
+        else:
+            anzeige = z["konto"]
+        out = [("Close", (1870, 0, 1920, 30), "Button"), (f"$150K EXPRESS | {anzeige}", (20, 160, 300, 180), "Button"),
                ("BAL: $11,079.66", (400, 160, 520, 180), "Text"), ("MLL: $145,500.00", (540, 160, 660, 180), "Text"),
                ("No Active Position", (1500, 400, 1700, 420), "Text")]
         if z["offen"]:
@@ -2581,7 +2599,7 @@ def test_tsx_konto_abgekuerzt():
         if name == "Konto-Dropdown öffnen":
             z["offen"] = True
         elif name.startswith("Konto EXPRESS"):
-            z.update(offen=False, konto="EXPRESS-V2-682437-57131691")
+            z.update(offen=True, alt_konto=z["konto"], konto="EXPRESS-V2-682437-57131691", alt_runden=1)   # Liste bleibt im Baum
         return True, ""
     orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
                                          "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund")}
@@ -2600,10 +2618,11 @@ def test_tsx_konto_abgekuerzt():
         with contextlib.redirect_stdout(b):
             ob.modus_tsxlesen({"konto": ext})
         r = _j.loads(b.getvalue().strip().splitlines()[-1])
-        chk("Trockenlauf: abgekürzter Auslöser → Liste → voller Eintrag → Balance", r.get("ok") and r.get("konto_aktiv") == ext
-            and r.get("balance") == 11079.66 and "Konto per Liste gewählt" in r.get("trail", "") and "Klick Konto EXPRESS" in r.get("trail", ""))
+        chk("Trockenlauf: anderes Konto → Liste → Eintrag → alter Knoten 1 Runde, Liste bleibt im Baum → trotzdem bestätigt → Balance",
+            r.get("ok") and r.get("konto_aktiv") == ext and r.get("balance") == 11079.66 and "Konto per Liste gewählt" in r.get("trail", "")
+            and "Klick Konto EXPRESS" in r.get("trail", "") and "Wechsel-Prüfung (2 Runden)" in r.get("trail", ""))
         chk("Spur ohne 'TradingView' im TopstepX-Lauf", "TradingView" not in r.get("trail", ""))
-        z.update(offen=False, konto="EXPRESS-V2-682437-11111111")
+        z.update(offen=False, konto="EXPRESS-V2-682437-11111111", alt_runden=0)
         b = io.StringIO()
         with contextlib.redirect_stdout(b):
             ob.modus_tsxlesen({"konto": "EXPRESS-V2-682437-99999999"})
