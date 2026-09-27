@@ -1586,6 +1586,15 @@
   #adm-pane-wd .wd-schalter input{margin-top:3px;width:15px;height:15px;flex:0 0 15px}
   #adm-pane-wd .wd-schalter b{font-size:13px;font-weight:600}
   #adm-pane-wd .wd-schalter small{display:block;color:var(--sub);font-size:11.5px;line-height:1.35}
+  /* Ablauf-Karte (27.09.2026, „cleaner"): Schalter als Zeile mit Haken rechts, Abschnitts-Labels, Hedge-Felder blass bei Hedge aus */
+  #adm-pane-wd .wd-abl-schalter{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 0;cursor:pointer}
+  #adm-pane-wd .wd-abl-schalter b{font-size:13px;font-weight:600}
+  #adm-pane-wd .wd-abl-schalter small{display:block;color:var(--sub);font-size:11.5px;line-height:1.35;margin-top:1px}
+  #adm-pane-wd .wd-abl-schalter input{width:16px;height:16px;flex:0 0 16px;margin:0;accent-color:var(--violet)}
+  #adm-pane-wd .wd-abl-abschnitt{font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--sub-2);margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--line)}
+  #adm-pane-wd .wd-abl-wert{font-size:13px;color:var(--text);padding:6px 0}
+  #adm-pane-wd .wd-abl-wert small{color:var(--sub-2);font-size:10.5px;margin-left:4px;font-family:var(--sans,inherit)}
+  #adm-pane-wd .wd-abl-schalter:has(#wd-hedge-an:not(:checked)) + #wd-hedge-felder{opacity:.45}
   #adm-pane-wd .wd-spanne{display:flex;align-items:center;gap:6px}
   #adm-pane-wd .wd-spanne .input{flex:1;min-width:0}
   #adm-pane-wd .wd-spanne span{font-size:11.5px;color:var(--sub);white-space:nowrap}
@@ -8243,25 +8252,27 @@
             <div class="wd-set-grid">
               <div class="wd-set-card">
                 <h4><span>Ablauf<span class="h4sub">Automatik, Gegenhedge, Zeiten</span></span> <button class="btn btn-ghost btn-xs" id="wdRegelnSave">Speichern</button></h4>
-                <label class="wd-schalter"><input type="checkbox" id="wd-aktiv"><span><b>Automatik</b><small>nachts um 00:10 von allein würfeln und planen — starten nur, wenn oben „Farmer SCHARF" steht</small></span></label>
-                <!-- Fusion-Gegenhedge (24.09.2026 abends, Finn: „Winning Days jetzt gegenhedgen, ohne Duplikum"): Betrag je Konto aus der
-                     Hedge-Staffel, Puls öffnet ihn direkt nach der Order auf Fusion, der Wächter schließt ihn am TP (+ Puffer). -->
-                <label class="wd-schalter"><input type="checkbox" id="wd-hedge-an"><span><b>Fusion-Gegenhedge</b><small>je Konto den Staffel-Betrag als Gegen-Order auf Fusion — zu, sobald NQ den TP erreicht (Notfall-SL 110 % broker-seitig)</small></span></label>
+                <!-- Ablauf aufgeräumt (27.09.2026, Finn: „mach das Design von Ablauf allgemein mal bisschen cleaner"): drei Abschnitte
+                     Zeiten · Order · Gegenhedge statt gestapelter Kästen, Schalter als Zeilen, Hedge-Felder blass solange der Hedge aus ist.
+                     Alle IDs unverändert (wdRegelnInsFormular / wdRegelnSpeichern / wdHedgeSpeichern). -->
+                <label class="wd-abl-schalter"><span><b>Automatik</b><small>würfelt und plant nachts um 00:10 — gestartet wird nur mit „Farmer SCHARF"</small></span><input type="checkbox" id="wd-aktiv"></label>
+                <div class="wd-abl-abschnitt">Zeiten</div>
+                <div class="wd-felder">
+                  <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
+                  <div class="wd-feld"><label>Takt je ID</label><div class="wd-abl-wert mono" title="die nächste ID startet 20–55 min nach der vorigen; die Konten einer ID laufen über die Warteschlange ihres PCs nacheinander">20–55 min <small>Zufall</small></div></div>
+                </div>
+                <div class="wd-abl-abschnitt">Order</div>
+                <div class="wd-felder">
+                  <div class="wd-feld"><label>Instrument</label><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select></div>
+                  <div class="wd-feld"><label>Kontrakte <small>· Standard</small></label><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" title="gilt, wenn die Firma keine eigene Spanne hat"></div>
+                </div>
+                <div class="wd-abl-abschnitt">Gegenhedge</div>
+                <label class="wd-abl-schalter"><span><b>Fusion-Gegenhedge</b><small>Staffel-Betrag je Konto auf Fusion — zu am Master-TP (+ Puffer) oder am Liquidations-Level</small></span><input type="checkbox" id="wd-hedge-an"></label>
                 <div class="wd-felder" id="wd-hedge-felder">
                   <!-- Puffer in TICKS (25.09.2026, Finn: „8 Ticks über dem Master-TP, TP 31.000 → bei 31.002"); intern bleibt hedge_puffer in Punkten (Ticks × 0,25) -->
-                  <div class="wd-feld"><label>Puffer hinter dem Master-TP (Ticks)</label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="8" title="so viele Ticks (0,25 Pkt) über/unter dem Master-TP, bevor der Wächter die Fusion-Position über den Kurs-Feed schließt — 8 Ticks = 2 Punkte"></div>
-                  <div class="wd-feld"><label>Notfall-SL Fusion (%)</label><input type="number" class="input mono" id="wd-hedge-notfall" min="100" max="200" step="5" value="110" title="Sicherheitsnetz broker-seitig in MetaTrader: Stop am Hedge = Fill ± Master-TP-Distanz × Prozent (alte Logik, 110 %) — greift nur, wenn der Feed-Wächter nicht schließt"></div>
+                  <div class="wd-feld"><label>Puffer hinter TP <small>· Ticks</small></label><input type="number" class="input mono" id="wd-hedge-puffer" min="0" step="1" value="8" title="so viele Ticks (0,25 Pkt) über/unter dem Master-TP, bevor der Wächter die Fusion-Position über den Kurs-Feed schließt — 8 Ticks = 2 Punkte"></div>
+                  <div class="wd-feld"><label>Notfall-SL <small>· % broker-seitig</small></label><input type="number" class="input mono" id="wd-hedge-notfall" min="100" max="200" step="5" value="110" title="Sicherheitsnetz broker-seitig in MetaTrader: Stop am Hedge = Fill ± Master-TP-Distanz × Prozent — greift nur, wenn der Feed-Wächter nicht schließt"></div>
                   <div class="wd-feed leer" id="wd-hedge-kurs">Kurs-Feed: —</div>
-                </div>
-                <div class="wd-felder drei">
-                  <div class="wd-feld"><label>Start ab · Dubai</label><input type="time" class="input mono" id="wd-start" value="02:00"></div>
-                  <div class="wd-feld"><label>Instrument</label><select class="input mono" id="wd-instr"><option value="mnq">MNQ</option><option value="nq">NQ</option></select></div>
-                  <div class="wd-feld"><label>Kontrakte (Standard)</label><input type="number" class="input mono" id="wd-kt" min="1" step="1" value="1" title="gilt, wenn die Firma keine eigene Spanne hat"></div>
-                </div>
-                <div class="wd-felder">
-                  <!-- Takt fest 35 min + 0–5 min Zufall (26.09.2026, Finn) — ersetzt „Pause zwischen Blöcken" (pause_min/max wirken nicht mehr) -->
-                  <div class="wd-feld"><label>Takt je Block <small>· Zufall</small></label><div class="kf mono" style="padding:7px 0;font-size:13px;color:var(--text)" title="der nächste Block (nächste ID) startet 20–55 min nach dem vorigen; die Konten einer ID laufen über die Warteschlange ihres PCs nacheinander">20–55 min</div></div>
-                  <!-- „Abstand zwischen Konten" raus (27.09.2026, Finn: „bei einer ID können alle Trades nacheinander gestartet werden, mit dem normalen Warteschlangen-Prinzip") -->
                 </div>
               </div>
               <div class="wd-set-card">
@@ -33930,7 +33941,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.667'
+  const OS_TAB_BUILD = '2026-09-22.668'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
