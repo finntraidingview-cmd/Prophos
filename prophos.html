@@ -22031,16 +22031,29 @@
       return
     }
     if(_mklLw.skalaSig){ _mklLw.skalaSig = ''; try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => orig() }) }catch(_){} }
-    for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && x.status === 'open' && Number(x.einstieg_nq) > 0)){
+    /* MARKIERTE LINIEN (28.09.2026, Finn über den Master: „Entry, TP und SL dick markiert, jeweils mit dem Preis rechts an der Achse —
+     * 1:1 mit Tradovate/TradingView vergleichen"). Angeklickter Trade (mkl.wd.aktiv, auch gerade beendet): Entry blau, TP grün, SL/Liq
+     * rot, durchgezogen 2–3 px, Titel mit exaktem Preis (de-DE, 2 Nachkommastellen) + Einstiegs-Quelle; dazu dünn violett gestrichelt
+     * „Fusion zu". Nicht angeklickte laufende Trades wie bisher dünn (Entry in Personenfarbe), TP + Fusion-zu mit Preis an der Achse. */
+    const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const quelleKurz = pw => { const q = String((pw.hedge && pw.hedge.einstieg_quelle) || (pw.tv && pw.tv.einstieg_quelle) || pw.einstieg_quelle || '')
+      return (pw.hedge && pw.hedge.tp_quelle === 'hand') && !q ? 'hand' : /hand/i.test(q) ? 'hand' : /^feed/i.test(q) ? 'feed' : /fill|^tv$|^hedge$/i.test(q) ? 'fill' : (q || '–') }
+    for(const pw of ((mkl.wd && mkl.wd.plaene) || []).filter(x => x && Number(x.einstieg_nq) > 0 && (x.status === 'open' || mkl.wd.aktiv === String(x.id)))){
       const hervor = mkl.wd.aktiv === String(pw.id), farbe = mklWdFarbe(pw), kurz = mklWdKurz(pw)
-      const wl = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: hervor, title: titel })) }catch(_){} }
-      // Preis als Zahl im Titel (28.09.2026, Finn: 1:1 mit der Sell-Limit-Linie in TradingView vergleichen); TP + Fusion-zu immer an der Achse
-      const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      const wlA = (v, col, titel, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: true, title: titel })) }catch(_){} }
-      wl(pw.einstieg_nq, farbe, kurz, 0, hervor ? 3 : 1)
-      wlA(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, hervor ? 2 : 1)
-      if(pw.hedge && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(pw.hedge.status || ''))) wlA(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 1, 1)
-      wl(pw.sl_level_nq, '#b91c1c', pw.sl_art === 'liquidation' ? `Liq ${Number(pw.liq_balance || 0).toLocaleString('de-DE')} ${kurz}` : `SL ${kurz}`, 2, hervor ? 2 : 1)   // WD: Liquidation statt SL (F22)
+      const linie = (v, col, titel, style, w, achse) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: achse, title: titel })) }catch(_){} }
+      const hOffen = pw.hedge && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(pw.hedge.status || ''))
+      const slTxt = pw.sl_art === 'liquidation' ? 'SL/Liq' : 'SL'
+      if(hervor){
+        linie(pw.einstieg_nq, '#2563EB', `Entry ${pz(pw.einstieg_nq)} · ${quelleKurz(pw)}`, 0, 3, true)
+        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)}`, 0, 2, true)
+        linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${pz(pw.sl_level_nq)}`, 0, 2, true)
+        if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))}`, 2, 1, true)
+      } else {
+        linie(pw.einstieg_nq, farbe, kurz, 0, 1, false)
+        linie(pw.tp_level_nq, '#15803d', `TP ${pz(pw.tp_level_nq)} ${kurz}`, 2, 1, true)
+        if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', `Fusion zu ${pz(mklWdSchliesstBei(pw))} ${kurz}`, 2, 1, true)
+        linie(pw.sl_level_nq, '#b91c1c', `${slTxt} ${kurz}`, 2, 1, false)   // WD: Liquidation statt SL (F22)
+      }
     }
   }
   function mklOrdersRender(){
@@ -22804,6 +22817,12 @@
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     el.querySelectorAll('[data-mwd-tp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdTpVonHand(b.dataset.mwdTp) }))
+    // Gerade beendete Trades (Abhak-Liste) markieren ebenfalls ihre Linien im Chart (28.09.2026) — Klick außerhalb der Felder/Knöpfe
+    el.querySelectorAll('[data-mwd-abh]').forEach(z => z.addEventListener('click', ev => {
+      if(ev.target.closest('input, button, a, select, textarea')) return
+      const id = z.getAttribute('data-mwd-abh'); mkl.wd.aktiv = mkl.wd.aktiv === id ? null : id
+      mklWdRender(); try{ mklChartZeichnen() }catch(_){}
+    }))
     mklWdAbhakenVerdrahten(el)
     mklWdPlanVerdrahten(el)   // Plan heute Nacht: Stift/Bearbeiten (F33), eigene Handler je Knopf
     mklWdZeitVerdrahten(el)   // Zeitstrahl: Blöcke tauschen per Drag & Drop (F34)
@@ -23428,7 +23447,9 @@
       const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085', wer = String(t.person || '?').split(/\s+/)[0]
       const l = (v, art, name, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: `${wer} ${name}` }) }
       const pz = v => Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })   // Preis als Zahl (28.09.2026, Vergleich mit TV)
-      l(t.einstieg_nq, 0, 'Entry', 2); if(num(t.tp_level_nq) != null) l(t.tp_level_nq, 2, 'TP ' + pz(t.tp_level_nq), 1); l(t.liq_level_nq, 1, 'Liq', 1); l(t.sl_level_nq, 3, 'SL', 1)
+      // 28.09.2026: alle Level 2 px mit exaktem Preis (Vergleich mit Tradovate/TradingView)
+      if(num(t.einstieg_nq) != null) l(t.einstieg_nq, 0, 'Entry ' + pz(t.einstieg_nq), 2); if(num(t.tp_level_nq) != null) l(t.tp_level_nq, 2, 'TP ' + pz(t.tp_level_nq), 2)
+      if(num(t.liq_level_nq) != null) l(t.liq_level_nq, 1, 'Liq ' + pz(t.liq_level_nq), 2); if(num(t.sl_level_nq) != null) l(t.sl_level_nq, 3, 'SL ' + pz(t.sl_level_nq), 2)
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
       if(sb != null && ['offen', 'schliesst', 'oeffnet', 'wartet'].includes(String(h.status || ''))) out.push({ preis: sb, farbe: '#7C3AED', art: 1, breite: 1, titel: `${wer} Fusion zu ${pz(sb)}` })
     }
@@ -35003,7 +35024,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.722'
+  const OS_TAB_BUILD = '2026-09-22.723'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
