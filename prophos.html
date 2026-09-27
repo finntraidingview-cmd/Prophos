@@ -34425,7 +34425,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.699'
+  const OS_TAB_BUILD = '2026-09-22.701'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34669,7 +34669,9 @@
                                    diagnose: (r && r.diagnose) || null })
       if(imPopup){
         _pfSet('ob-order', 'err', escapeHtml(text))
-        pfEnde(false, /UNKLAR/.test(text) ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, NICHT blind erneut starten.' : '✗ Nichts platziert — Meldung oben.')
+        pfEnde(false, /^✗ von TopstepX abgelehnt/.test(text) ? '✗ Von TopstepX abgelehnt — Plan bleibt Geplant.'
+          : /^⚠ Order geklickt, keine Position/.test(text) ? '⚠ Order geklickt, keine Position — erst in TopstepX unter Orders nachsehen. Plan bleibt Geplant.'
+          : /UNKLAR/.test(text) ? '⚠ Ergebnis UNKLAR — erst in TradingView nachsehen, NICHT blind erneut starten.' : '✗ Nichts platziert — Meldung oben.')
         return
       }
       await openTpOrderModal(planId)
@@ -34886,6 +34888,22 @@
           }
         }catch(e){ console.warn('[v2] einstieg_nq', e) }
       }
+      // TOPSTEPX SCHARF (B31, Master 27.09.2026): Puls klickt auch bei „Market closed", TopstepX lehnt am
+      // Wochenende ab → code 'abgelehnt' (gesendet:true, msg = TopstepX-Text). code 'beweis' ohne ok = Klick
+      // raus, aber keine Position gefunden. In BEIDEN Fällen bleibt der Plan Geplant — nie v2AufOpen, auch
+      // wenn retry_ok:false mitkommt (der UNKLAR-Zweig unten würde sonst auf open stempeln).
+      if(plan.route === 'tsv2' && r && !r.ok && r.code === 'abgelehnt'){
+        // abgelehnt_text = reiner TopstepX-Text (r.msg trägt schon „Von TopstepX abgelehnt: …" vom Bot).
+        // Abgelehnt ist eindeutig nichts im Markt → kein „UNKLAR" (retry_ok des Bots hier nicht durchreichen).
+        const abl = String(r.abgelehnt_text || String(r.msg || r.error || '').replace(/^von TopstepX abgelehnt:\s*/i, '') || 'ohne Text')
+        await fehler('✗ von TopstepX abgelehnt: ' + abl, Object.assign({}, r, { retry_ok: undefined }))
+        return
+      }
+      if(plan.route === 'tsv2' && r && !r.ok && r.code === 'beweis'){
+        await fehler('⚠ Order geklickt, keine Position — in TopstepX unter Orders nachsehen. Plan bleibt Geplant, NICHT blind erneut starten.',
+          Object.assign({}, r, { retry_ok: false }))
+        return
+      }
       if(r && r.ok && r.gesendet){
         // Position bewiesen → Kauf-Klick stempeln; „Läuft" setzt die Duplikum-Erkennung (s. tvPlanGesendet).
         // ORBIT V2 (23.09.2026): niemand erkennt hier etwas — der bewiesene Klick IST „Läuft".
@@ -35100,10 +35118,15 @@
         const altTab = /unvollständig/i.test(String(erg.msg || ''))
         _rsqStep(ziel, 'err', escapeHtml(String(erg.msg || row.status))
           + (altTab ? '<br>Der PC-Tab fährt noch einen alten Build — am PC neu laden (Strg+F5).' : ''))
+        // TopstepX (B31, 27.09.2026): „✗ von TopstepX abgelehnt" / „⚠ Order geklickt, keine Position" kommen fertig
+        // formuliert vom PC-Tab — unverändert zeigen, nicht noch ein ✗ bzw. „in TradingView nachsehen" davor.
+        const _tsxText = /^(✗ von TopstepX abgelehnt|⚠ Order geklickt, keine Position)/.test(String(erg.msg || ''))
         fertig(false,
-          erg.unklar ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt: ' + escapeHtml(String(erg.msg || ''))
+          _tsxText ? escapeHtml(String(erg.msg))
+          : erg.unklar ? '⚠ Ergebnis UNKLAR — erst am PC in TradingView nachsehen, ob die Order liegt: ' + escapeHtml(String(erg.msg || ''))
                      : '✗ ' + escapeHtml(String(erg.msg || row.status)),
-          erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst in TradingView nachsehen, NICHT blind weiter (liegt die Order, erkennt Duplikum sie von selbst).'
+          (_tsxText && erg.unklar) ? '⏸ Angehalten — erst in TopstepX unter Orders nachsehen, NICHT blind weiter.'
+          : erg.unklar ? '⏸ Angehalten — Ergebnis unklar, erst in TradingView nachsehen, NICHT blind weiter (liegt die Order, erkennt Duplikum sie von selbst).'
                      : '⏸ Angehalten — Fehler beim letzten Trade, erst beheben, dann ▶ Weiter.')
       }
     }
