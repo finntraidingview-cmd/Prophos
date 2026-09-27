@@ -2395,7 +2395,7 @@ _TV_UIA_TYPEN = ("Text", "ListItem", "MenuItem", "Button", "ComboBox", "DataItem
 _UIA_TYPID = {"Button": 50000, "CheckBox": 50002, "ComboBox": 50003, "Edit": 50004,
               "Hyperlink": 50005, "Image": 50006, "ListItem": 50007, "MenuItem": 50011,
               "List": 50008, "Menu": 50009, "RadioButton": 50013, "TabItem": 50019, "Text": 50020,
-              "Custom": 50025, "Group": 50026, "DataItem": 50029, "Pane": 50033}
+              "Custom": 50025, "Group": 50026, "DataItem": 50029, "Pane": 50033, "Spinner": 50016}
 _UIA_SAMMEL = {"geht": None}      # None = noch nicht probiert, True/False = Ergebnis
 
 
@@ -10721,6 +10721,67 @@ def _tsx_markiert(w):
     return out[:6]
 
 
+def _tsx_felder(w):
+    """B26 (Inventar v2, 27.09.2026): Eingabefelder und Kästchen in der Seite — AUCH UNBENANNTE — mit Wert und Zustand:
+    [(name, (l,t,r,b), typ, wert, toggle)] für Edit/CheckBox/Spinner/ComboBox. wert = ValuePattern-Wert, toggle = 0 aus / 1 an /
+    2 unbestimmt / None. Grundlage für das Mengenfeld „# of Contracts" und den Haken „Automatically apply …"."""
+    try:
+        from pywinauto.uia_defines import IUIA
+        u = IUIA()
+        dll = u.UIA_dll
+        anfrage = u.iuia.CreateCacheRequest()
+        wert_id, toggle_id = 30045, 30086          # UIA_ValueValuePropertyId, UIA_ToggleToggleStatePropertyId
+        for pid in (dll.UIA_NamePropertyId, dll.UIA_BoundingRectanglePropertyId, dll.UIA_IsOffscreenPropertyId,
+                    dll.UIA_ControlTypePropertyId, wert_id, toggle_id):
+            anfrage.AddProperty(pid)
+        bed = None
+        for t in ("Edit", "CheckBox", "Spinner", "ComboBox"):
+            c = u.iuia.CreatePropertyCondition(dll.UIA_ControlTypePropertyId, _UIA_TYPID[t])
+            bed = c if bed is None else u.iuia.CreateOrCondition(bed, c)
+        feld = w.element_info.element.FindAllBuildCache(u.tree_scope["descendants"], bed, anfrage)
+        name_von = {v: k for k, v in _UIA_TYPID.items()}
+        seite = _tsx_seite(w)
+        out = []
+        for i in range(min(feld.Length, 400)):
+            e = feld.GetElement(i)
+            try:
+                if e.CachedIsOffscreen:
+                    continue
+                r = e.CachedBoundingRectangle
+                rr = (r.left, r.top, r.right, r.bottom)
+                if seite and not seiten_filter([("x", rr)], seite):
+                    continue
+                try:
+                    wert = str(e.GetCachedPropertyValue(wert_id) or "")[:60]
+                except Exception:
+                    wert = ""
+                try:
+                    tg = e.GetCachedPropertyValue(toggle_id)
+                    tg = int(tg) if isinstance(tg, int) else None
+                except Exception:
+                    tg = None
+                out.append((str(e.CachedName or "").strip()[:60], rr, name_von.get(e.CachedControlType, ""), wert, tg))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []
+
+
+def tsx_felder_kurz(felder, max_n=120):
+    """REIN RECHNEND (testbar): [name, typ, [l,t,r,b], wert, toggle] für Inventar/DB."""
+    out = []
+    for f in felder or ():
+        try:
+            out.append([str(f[0] or "")[:60], str(f[2] or "")[:20], [int(v) for v in f[1]], str(f[3] or "")[:60],
+                        f[4] if isinstance(f[4], int) else None])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if len(out) >= max_n:
+            break
+    return out
+
+
 def _tsx_klick(e, name, trail):
     return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
 
@@ -10801,6 +10862,7 @@ def modus_tsxinventar(cmd):
     res["ausloeser_kandidaten"] = tsx_inventar_kurz([e for e in seiten_filter(roh, seite0)
                                                      if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", str(e[0] or ""))], fr, 30)
     res["edits"] = list(_EDIT_NAMEN)
+    res["inventar"]["felder_grund"] = tsx_felder_kurz(_tsx_felder(w))         # B26: auch unbenannte Felder, Wert + Haken
     res["zeilen_kandidaten"] = [[t[:120], list(r)] for t, r in tsx_zeilen(seiten_filter(roh, seite0))
                                 if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", t)][:20]
     trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente, Seite {len(res['inventar']['seite_150'])}, "
@@ -10835,6 +10897,7 @@ def modus_tsxinventar(cmd):
         _warte(0.8, 0.4)
         roh_b = _tsx_roh(w)
         res["inventar"]["bracket_offen"] = tsx_inventar_kurz(roh_b, fr)
+        res["inventar"]["felder_bracket"] = tsx_felder_kurz(_tsx_felder(w))    # B26: Risk/Profit-Wert + Haken-Zustand
         trail.append(f"Bracket-Dialog: {len(res['inventar']['bracket_offen'])} Elemente")
         zu = [e for e in seiten_filter(roh_b, seite) if e[1] and e[2] == "Button" and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())]
         if len(zu) == 1:

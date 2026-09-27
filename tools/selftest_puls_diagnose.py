@@ -63,6 +63,10 @@ def main():
     check(pi(None) is None and pi({"inventar": {"grund": [["n" * 90, "Text", [0, 0, 1, 1]]] * 400}})["inventar"]["grund"].__len__() == 260,
           "B20 Inventar: Unsinn abgewiesen, höchstens 260 Elemente je Zustand")
 
+    d6 = pi({"inventar": {"felder_bracket": [["", "CheckBox", [940, 870, 956, 890], "", 1], ["Risk (~$)", "Edit", [1, 2, 3, 4], "250", True]]}})
+    check(d6["felder"]["felder_bracket"] == [["", "CheckBox", [940, 870, 956, 890], "", 1], ["Risk (~$)", "Edit", [1, 2, 3, 4], "250", None]],
+          "B26 Inventar v2: Felder mit Wert + Haken, Haken nur als Zahl")
+
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1
 

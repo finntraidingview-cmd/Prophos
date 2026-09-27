@@ -2840,6 +2840,11 @@ def test_tsx_beweis():
             _s.modules.pop("pywinauto", None)
         else:
             _s.modules["pywinauto"] = alt_mod
+    fk = ob.tsx_felder_kurz([("", (2100, 560, 2150, 600), "Edit", "1", None), ("Risk (~$)", (936, 800, 1177, 851), "Edit", "250", None),
+                             ("", (940, 870, 956, 890), "CheckBox", "", 1), ("kaputt", None, "Edit", "", None)])
+    chk("Inventar v2: unbenanntes Mengenfeld + Wert, Haken-Zustand, kaputtes raus",
+        fk == [["", "Edit", [2100, 560, 2150, 600], "1", None], ["Risk (~$)", "Edit", [936, 800, 1177, 851], "250", None],
+               ["", "CheckBox", [940, 870, 956, 890], "", 1]])
     if ok:
         print("✓ TSX-Beweis: Label aus Nachbarknoten, markierter Eintrag vorher/nachher, Reihenfolge ID → markiert → Label+BAL")
     return ok

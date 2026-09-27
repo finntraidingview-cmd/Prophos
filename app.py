@@ -9360,6 +9360,11 @@ def puls_inventar_saeubern(d):
                     for t in (d.get("tabs") or [])[:20] if isinstance(t, dict)] if isinstance(d.get("tabs"), list) else [],
            "edits": [txt(x, 50) for x in (d.get("edits") or [])][:8] if isinstance(d.get("edits"), list) else [],
            "inventar": {k: elemente(inv.get(k), 260) for k in ("grund", "seite_150", "konto_offen", "bracket_offen") if k in inv},
+           # B26 (Inventar v2): Felder mit Wert + Kästchen-Zustand, auch unbenannte — [name, typ, rect, wert, toggle]
+           "felder": {k: [[txt(f[0], 60), txt(f[1], 20), rechteck(f[2]), txt(f[3], 60),
+                           f[4] if isinstance(f[4], int) and not isinstance(f[4], bool) else None]
+                          for f in (inv.get(k) or [])[:120] if isinstance(f, (list, tuple)) and len(f) >= 5]
+                      for k in ("felder_grund", "felder_bracket") if isinstance(inv.get(k), list)},
            "ausloeser_kandidaten": elemente(d.get("ausloeser_kandidaten"), 30),
            "zeilen_kandidaten": [[txt(z[0], 120), rechteck(z[1])] for z in (d.get("zeilen_kandidaten") or [])[:20]
                                  if isinstance(z, (list, tuple)) and len(z) >= 2] if isinstance(d.get("zeilen_kandidaten"), list) else [],
