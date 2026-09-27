@@ -22212,7 +22212,7 @@
    * ID, wie viele Slots, wann es losgeht, meine Übersicht"). Daten wie der Farmer-Tab: wd_farmer_regeln + wd_tagesplan (RLS: jeder
    * Angemeldete liest), Tag = Farmer-Tag (wdNaechsterTag) — hat der heutige Tag noch geplante/laufende Blöcke, bleibt er es (nach
    * 02:00 läuft die Nacht ja noch). Ausgelassene IDs (ids_aus) fehlen wie im Farmer. Nur Anzeige, höchstens alle 60 s. */
-  mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, at: 0, fehler: '' }
+  mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, plaene: null, at: 0, fehler: '' }
   async function mklWdPlanLaden(){
     if(mkl.stub || Date.now() - mkl.wd.plan.at < 60000) return
     mkl.wd.plan.at = Date.now()
@@ -22226,47 +22226,90 @@
       const aus = new Set(((r && r.ids_aus) || []).map(String))
       const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
       const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
-      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, at: mkl.wd.plan.at, fehler: '' }
+      // Status JE PLAN (F32, Finn: „Es sind 4 geplant, aber nur 3 unter WD"): trade_plans zeigt per RLS nur eigene Pläne —
+      // /admin/live-trades (Service-Key, alle IDs, tvv2/tsv2 inkl. planned) liefert Status/TP/Kontrakte/Start je plan_id.
+      // Nicht ladbar → plaene null, die Zeilen zeigen dann den Stand aus wd_tagesplan.konten.
+      let plaene = null
+      try{
+        const tok = await _pushTok()
+        if(tok){
+          const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 15000)
+          const res = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=2`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
+          const d = res.ok ? await res.json().catch(() => null) : null
+          if(d && Array.isArray(d.trades)){ plaene = {}; for(const t of d.trades) plaene[String(t.id || t.plan_id)] = t }
+        }
+      }catch(e){ console.warn('[wd-plan] live-trades', (e && e.message) || e) }
+      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, at: mkl.wd.plan.at, fehler: '' }
     }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
   }
   const mklWdPlanTagTxt = tag => { try{ return new Date(tag + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' }) }catch(_){ return tag } }
+  /* REIN RECHNEND: eine Zeile JE KONTO (= je Trade) des Farmer-Tags, nach ID gruppiert in Startreihenfolge. Status aus dem Plan
+   * (live-trades), ohne Plan-Verweis „kein Plan" (bei SCHARF aus normal), Plan-Verweis ohne Treffer „Plan fehlt". */
+  function mklWdPlanTrades(P){
+    const aktivK = x => (x.konten || []).filter(k => k && k.aktiv !== false)
+    const zeit = x => Date.parse(x.start_um || '') || 9e15
+    const ids = (P.rows || []).filter(x => aktivK(x).length).sort((a, b) => zeit(a) - zeit(b) || (+a.reihenfolge || 99) - (+b.reihenfolge || 99))
+    const out = []
+    for(const x of ids){
+      const ks = aktivK(x)
+      ks.forEach((k, i) => {
+        const p = (k.plan_id && P.plaene) ? P.plaene[String(k.plan_id)] || null : null
+        const st = !k.plan_id ? 'kein_plan' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
+        out.push({ uid: String(x.user_id), name: x.name || '?', nr: i + 1, n: ks.length, konto: k, plan: p, status: st,
+                   richtung: (p && p.richtung) || x.richtung || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
+                   tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt, root: (p && p.symbol_root) || null })
+      })
+    }
+    return out
+  }
   function mklWdPlanHtml(){
     const P = mkl.wd.plan
     if(!P || !P.tag) return P && P.fehler ? `<div class="mwj-naechste" style="color:#B45309">Plan nicht ladbar: ${escapeHtml(P.fehler)}</div>` : ''
     const r = P.regeln || {}, jetzt = Date.now()
-    const aktivK = x => (x.konten || []).filter(k => k && k.aktiv !== false)
-    const zeit = x => Date.parse(x.start_um || '') || 9e15
-    const mit = P.rows.filter(x => aktivK(x).length).sort((a, b) => zeit(a) - zeit(b) || (+a.reihenfolge || 99) - (+b.reihenfolge || 99))
-    const ohne = P.rows.filter(x => !aktivK(x).length)
-    const nKonten = mit.reduce((a, x) => a + aktivK(x).length, 0), erster = mit.find(x => x.start_um && x.status === 'geplant') || mit.find(x => x.start_um)
+    const tr = mklWdPlanTrades(P)
+    const ohne = (P.rows || []).filter(x => !(x.konten || []).some(k => k && k.aktiv !== false))
+    const nIds = new Set(tr.map(t => t.uid)).size, erster = tr.find(t => t.start_um && t.status === 'planned') || tr.find(t => t.start_um)
     const dauer = ms => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` }
     const flag = (name, an) => `<b style="font-weight:600;color:${an ? '#15803d' : 'var(--sub)'}">${name} ${an ? 'an' : 'aus'}</b>`
     const titel = P.tag === P.heute ? 'Plan heute Nacht' : `Plan für ${mklWdPlanTagTxt(P.tag)}`
-    const kopf = `<div class="mwj-kopf" style="margin-top:14px">${titel} <span>${mit.length} ${mit.length === 1 ? 'ID' : 'IDs'} · ${nKonten} ${nKonten === 1 ? 'Konto' : 'Konten'}${erster ? ` · erster Start ${escapeHtml(wdHhmm(erster.start_um))} Dubai` : ''} · ${flag('SCHARF', !!r.scharf)} · ${flag('Automatik', !!r.aktiv)} · ${flag('Gegenhedge', !!(r.vorplan && r.vorplan.hedge_an))}</span></div>`
+    const kopf = `<div class="mwj-kopf" style="margin-top:14px">${titel} <span>${nIds} ${nIds === 1 ? 'ID' : 'IDs'} · ${tr.length} ${tr.length === 1 ? 'Trade' : 'Trades'}${erster ? ` · erster Start ${escapeHtml(wdHhmm(erster.start_um))} Dubai` : ''} · ${flag('SCHARF', !!r.scharf)} · ${flag('Automatik', !!r.aktiv)} · ${flag('Gegenhedge', !!(r.vorplan && r.vorplan.hedge_an))}</span></div>`
     const hinweis = r.scharf ? '' : `<div class="mwj-naechste">Startet nicht, solange SCHARF aus ist.</div>`
-    const ST = { geplant: ['geplant', 'var(--violet)'], laeuft: ['läuft', '#15803d'], fertig: ['fertig', 'var(--sub)'], verpasst: ['verpasst', '#b91c1c'] }
-    const zeilen = mit.map(x => {
-      const k = aktivK(x), st = ST[x.status] || [x.status || '–', 'var(--sub)'], a = Date.parse(x.start_um || '') || 0
-      const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(String(x.user_id)) : '#667085'
-      const cd = x.status === 'laeuft' ? ['läuft', 'seit ' + (a ? dauer(jetzt - a) : '–')] : x.status === 'fertig' ? ['✓', 'durch'] : x.status === 'verpasst' ? ['–', 'verpasst']
+    const ST = { planned: ['geplant', 'var(--violet)'], open: ['läuft', '#15803d'], review: ['Überprüfen', '#B45309'], completed: ['fertig', 'var(--sub)'],
+                 kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['Plan fehlt', '#b91c1c'], unbekannt: ['–', 'var(--sub)'] }
+    const f0 = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    const zeilen = tr.map(t => {
+      const st = ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
+      const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(t.uid) : '#667085'
+      const lauf = t.plan && t.plan.started_at ? Date.parse(t.plan.started_at) : a
+      const cd = t.status === 'open' ? ['läuft', 'seit ' + (lauf ? dauer(jetzt - lauf) : '–')] : (t.status === 'completed' || t.status === 'review') ? ['✓', 'durch']
         : !a ? ['–', 'ohne Zeit'] : a > jetzt ? ['in ' + dauer(a - jetzt), 'bis Start'] : ['fällig', 'seit ' + dauer(jetzt - a)]
-      const kurz = k.map(y => `${String(y.firm || '?').trim().split(/\s+/)[0]}${y.ext ? ' …' + String(y.ext).slice(-4) : ''}`).join(', ')
-      const buy = x.richtung === 'buy', sell = x.richtung === 'sell'
-      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default" title="${escapeHtml(k.map(y => y.name || '').join('\n'))}">
-          <span class="mwj-wer"><b>${escapeHtml(String(x.name || '?'))}</b><small>${escapeHtml(kurz)}</small></span>
+      const k = t.konto, kurz = `${String(k.firm || '?').trim().split(/\s+/)[0]}${k.ext ? ' …' + String(k.ext).slice(-4) : ''}`
+      const buy = t.richtung === 'buy', sell = t.richtung === 'sell'
+      // mehrere Konten einer ID laufen über die Warteschlange ihres PCs nacheinander (tpStartUmTick)
+      const startSub = t.n > 1 && t.nr > 1 ? `#${t.nr} in der Warteschlange` : 'Dubai'
+      const wer = t.nr === 1 ? `<b>${escapeHtml(t.name)}</b><small>${escapeHtml(kurz)}</small>` : `<b style="font-weight:400;color:var(--sub-2)">↳</b><small>${escapeHtml(kurz)}</small>`
+      return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz))}">
+          <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
-          <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(x.start_um)) : '—:—'}<small>Dubai</small></span>
+          <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml(startSub)}</small></span>
           <span class="mwj-zelle">${escapeHtml(cd[0])}<small>${escapeHtml(cd[1])}</small></span>
-          <span class="mwj-zelle">${k.length}<small>${k.length === 1 ? 'Konto' : 'Konten'}</small></span>
-          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}<small>Status</small></span>
+          <span class="mwj-zelle">${t.tp != null ? f0(t.tp) + ' $' : '–'}<small>${t.kt != null ? f0(t.kt) + ' × ' + escapeHtml(t.root || 'Kt.') : 'TP'}</small></span>
+          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}<small>Plan</small></span>
         </div>`
     }).join('')
-    const leer = !mit.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
+    const leer = !tr.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
     const ohneZ = ohne.length ? `<div class="mwj-naechste">Kein Konto angehakt: ${ohne.map(x => escapeHtml(String(x.name || '?'))).join(', ')}</div>` : ''
-    return kopf + hinweis + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ
+    const quelle = P.plaene ? '' : `<div class="mwj-naechste">Plan-Status gerade nicht ladbar — Stand aus dem Tagesplan.</div>`
+    return kopf + hinweis + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ + (tr.length ? quelle : '')
   }
-  // Stub ohne Login: window._mklWdPlanStub({tag, heute, rows, regeln})
-  window._mklWdPlanStub = p => { mkl.wd.plan = Object.assign({ tag: '', heute: '', rows: [], regeln: {}, at: Date.now(), fehler: '' }, p); mkl.wd.at = mkl.wd.at || Date.now(); mklWdRender() }
+  // Zähler für den Block-Titel aus DERSELBEN Quelle (F32: oben stand „0 geplant", unten 4 Trades)
+  function mklWdPlanZaehler(){
+    const P = mkl.wd.plan; if(!P || !P.tag) return null
+    const tr = mklWdPlanTrades(P)
+    return { lauf: tr.filter(t => t.status === 'open').length, geplant: tr.filter(t => t.status === 'planned' || t.status === 'kein_plan').length }
+  }
+  // Stub ohne Login: window._mklWdPlanStub({tag, heute, rows, regeln, plaene})
+  window._mklWdPlanStub = p => { mkl.wd.plan = Object.assign({ tag: '', heute: '', rows: [], regeln: {}, plaene: null, at: Date.now(), fehler: '' }, p); mkl.wd.at = mkl.wd.at || Date.now(); mklWdRender() }
   // Kurz-Name fürs Chart-Label: erstes Wort der Firma + Kontonr-Ende
   const mklWdKurz = pw => { const k = pw.konto || {}; const fi = String(k.firma || '').trim().split(/\s+/)[0]; return `${fi || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
   const mklWdFarbe = pw => { try{ return (typeof mt5FleetFarbe === 'function' && pw.farbe_key) ? mt5FleetFarbe(pw.farbe_key) : '#667085' }catch(_){ return '#667085' } }
@@ -22406,8 +22449,10 @@
     const kurzKonto = x => { const k = x.konto || {}; return `${x.person || '?'} · ${k.firma || '?'}${k.kontonr_ende ? ' …' + k.kontonr_ende : ''}` }
     const nachtragZeile = nachtrag.length ? `<div class="mwd-nachtrag"><span>${nachtrag.length} beendet ohne Ergebnis — Erledigt eintragen:</span>`
       + nachtrag.map(x => `<button type="button" class="mwd-nachtrag-btn" data-mwd-aktion="erledigt" data-mwd-plan="${escapeHtml(String(x.id))}" title="Master- und Fusion-P&L eintragen — wird in Finanzen gebucht">${escapeHtml(kurzKonto(x))}</button>`).join('') + `</div>` : ''
-    // Titel-Datum = Farmer-Tag (F31: /admin/wd-heute liefert den CME-Handelstag — nachts um 01:15 stand da noch der Vortag)
-    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${offenN} ${offenN === 1 ? 'läuft' : 'laufen'} · ${geplantN} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
+    // Titel-Datum = Farmer-Tag (F31: /admin/wd-heute liefert den CME-Handelstag — nachts um 01:15 stand da noch der Vortag).
+    // Zähler aus dem Plan des Farmer-Tags (F32), sonst wie bisher aus wd-heute
+    const pz = mklWdPlanZaehler(), zLauf = pz ? pz.lauf : offenN, zGepl = pz ? pz.geplant : geplantN
+    el.innerHTML = `<div class="panel-title">Winning Days ${mkl.wd.plan && mkl.wd.plan.tag ? escapeHtml(mklWdPlanTagTxt(mkl.wd.plan.tag)) : mkl.wd.tag ? escapeHtml(mkl.wd.tag) : 'heute'} <span style="font-weight:400;color:var(--sub);font-size:12px">· ${zLauf} ${zLauf === 1 ? 'läuft' : 'laufen'} · ${zGepl} geplant · alle IDs${kp == null && offenN ? ' · kein frischer Kurs' : ''}${mkl.wd.fehler ? ` · <span style="color:#B45309">${escapeHtml(mkl.wd.fehler)}</span>` : ''}</span></div>
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     mklWdAbhakenVerdrahten(el)
@@ -34569,7 +34614,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.711'
+  const OS_TAB_BUILD = '2026-09-22.712'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
