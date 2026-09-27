@@ -679,11 +679,14 @@ def _reader_geos():
     return out
 
 
-def _puls_diagnose_senden():
-    """Einmal je Lauf: gemerktes Fenster + gesehene Fenster mit Ausschlussgrund ans Backend (2 s, Fehler still)."""
-    if _FENSTER_DIAG.get("gesendet") == (_FENSTER_DIAG.get("code") or "-"):
-        return                         # je Lauf einmal je Ergebnis (z. B. erst 'kein_chrome', nach dem Start 'neu')
-    _FENSTER_DIAG["gesendet"] = _FENSTER_DIAG.get("code") or "-"
+def _puls_diagnose_senden(spur=None, schritt=""):
+    """Einmal je Lauf: gemerktes Fenster + gesehene Fenster mit Ausschlussgrund ans Backend (2 s, Fehler still).
+    B17 (27.09.2026): mit spur/schritt IMMER senden — die Spur liegt dann schon in puls_diagnose, bevor ein riskanter
+    Schritt laeuft (ueberlebt einen Absturz/ein geschlossenes Fenster)."""
+    if spur is None:
+        if _FENSTER_DIAG.get("gesendet") == (_FENSTER_DIAG.get("code") or "-"):
+            return                     # je Lauf einmal je Ergebnis (z. B. erst 'kein_chrome', nach dem Start 'neu')
+        _FENSTER_DIAG["gesendet"] = _FENSTER_DIAG.get("code") or "-"
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pc_id.json"), "r", encoding="utf-8") as f:
             pc = (json.load(f) or {}).get("pc_id")
@@ -695,6 +698,9 @@ def _puls_diagnose_senden():
                  "eigen": regel.get("eigen") or "", "tabu": sorted(regel.get("tabu") or ()),
                  "profile": [{"dir": d_, "name": n_} for d_, n_ in sorted(_PROFIL_NAMEN.items())][:12],
                  "fenster": (_FENSTER_DIAG.get("kandidaten") or [])[:12]}
+        if spur is not None:
+            daten["schritt"] = str(schritt or "")[:20]
+            daten["spur"] = " > ".join(list(spur))[-1800:]
         req = urllib.request.Request(f"{PULS_BACKEND}/puls-diagnose/{pc}", data=json.dumps(daten).encode("utf-8"),
                                      headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=2.0).read()
@@ -3211,6 +3217,20 @@ def _tv_tab_neu_mit_link(w, cfg, begriff, trail):
                     if not tv_tab_schliessbar(titel_1, w.element_info.class_name, begriff):
                         return False, (f"Nach Strg+1 steht nicht TradingView vorn ('{titel_1[:40]}') — es wird nichts "
                                        "geschlossen; der neue leere Tab bleibt offen.")
+                # B17 (27.09.2026): allgemeine Strg+W-Regel — Titel vorn DIREKT vor dem Tastendruck = TradingView, nie
+                # Prophos, und das Fenster behaelt mindestens einen Tab
+                try:
+                    import ctypes
+                    _u = ctypes.windll.user32
+                    _h = _u.GetForegroundWindow()
+                    _b = ctypes.create_unicode_buffer(_u.GetWindowTextLengthW(_h) + 1)
+                    _u.GetWindowTextW(_h, _b, len(_b))
+                    titel_w = _b.value or ""
+                except Exception:
+                    titel_w = w.window_text() or ""
+                n_jetzt = _tab_anzahl(w)
+                if not strg_w_erlaubt(titel_w, "tv", n_jetzt):
+                    return False, (f"Strg+W verweigert: vorn '{titel_w[:40]}', {n_jetzt} Tab(s) — es wird nichts geschlossen.")
                 keyboard.send_keys("^w")
                 trail.append("TradingView-Tab geschlossen")
                 verlassen_bestaetigen()
@@ -10280,22 +10300,88 @@ def _tsx_tab_holen(trail, warten_s=25.0):
     return None, f"TopstepX-Tab nach {int(warten_s)} s nicht geladen (Titel ohne 'TopstepX')."
 
 
+def seiten_filter(roh, seite):
+    """REIN RECHNEND (testbar, B17): nur Elemente, deren Mitte INNERHALB der Webseite liegt (seite = l,t,r,b des Chrome-
+    Dokuments). Chromes eigene Leisten — Tab-X „Schließen", Fenster-X, Adressleiste — liegen darüber und fallen raus.
+    Ohne Seitenbereich: leere Liste (lieber nichts klicken als Chrome selbst)."""
+    if not seite:
+        return []
+    l, t, r, b = seite
+    out = []
+    for e in roh or ():
+        try:
+            el, et, er, eb = (int(v) for v in e[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        mx, my = (el + er) // 2, (et + eb) // 2
+        if l <= mx <= r and t <= my <= b:
+            out.append(e)
+    return out
+
+
+def strg_w_erlaubt(titel_vorn, ziel, tab_anzahl):
+    """REIN RECHNEND (testbar, B17 — allgemeine Regel für ALLE Puls-Modi): Strg+W nur, wenn der Titel des Vordergrund-Fensters
+    DIREKT vor dem Tastendruck nachweislich der Ziel-Tab ist ('tv' = TradingView, 'tsx' = TopstepX), er NIE Prophos ist und
+    das Fenster danach noch mindestens einen Tab hat (tab_anzahl ≥ 2)."""
+    t = str(titel_vorn or "")
+    if not t.strip() or t.strip().lower().startswith("prophos") or " prophos" in t.lower()[:40]:
+        return False
+    try:
+        if int(tab_anzahl) < 2:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if ziel == "tsx":
+        return ist_topstepx_titel(t)
+    if ziel == "tv":
+        return ist_tradingview_fenster(t, "Chrome_WidgetWin_1") or tv_tab_rang(t, "", "") > 0
+    return False
+
+
+def _tsx_seite(w):
+    """Rechteck der Webseite (Chrome-Dokument) im Fenster — das größte sichtbare 'Document'-Element. None = unbekannt."""
+    try:
+        docs = w.descendants(control_type="Document")
+    except Exception:
+        return None
+    best = None
+    for d in docs:
+        try:
+            r = d.rectangle()
+            fl = (r.right - r.left) * (r.bottom - r.top)
+            if r.right - r.left > 300 and r.bottom - r.top > 200 and (best is None or fl > best[0]):
+                best = (fl, (r.left, r.top, r.right, r.bottom))
+        except Exception:
+            continue
+    return best[1] if best else None
+
+
+def _tsx_seite_roh(w, typen=None):
+    """_tsx_roh, aber NUR innerhalb der Webseite (B17: nie Chromes eigene Knöpfe)."""
+    return seiten_filter(_tsx_roh(w, typen) if typen else _tsx_roh(w), _tsx_seite(w))
+
+
 def _tsx_klick(e, name, trail):
     return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
 
 
 def _tsx_vorbereiten(w, trail):
-    """Einmal Login/Connect mittig drücken, benannte Banner-/Modal-X oben schließen (nur benannte Knöpfe)."""
-    fr = _tv_fenster_rect(w)
-    roh = _tsx_roh(w, ("Button",))
+    """Einmal Login/Connect mittig drücken, benannte Banner-/Modal-X oben schließen (nur benannte Knöpfe).
+    B17 (27.09.2026, Mikes PC pc-l5o8bv): gesucht wird NUR innerhalb der Webseite. Vorher sah die Suche das ganze Chrome-
+    Fenster — Chromes Tab-X „Close" und das Fenster-X oben rechts heißen genauso und lagen im oberen Viertel: Puls klickte
+    sie und schloss das Fenster samt Prophos-Tab (Signal ohne Ergebnis). Ohne erkannten Seitenbereich: gar kein Klick."""
+    seite = _tsx_seite(w)
+    if not seite:
+        trail.append("Seitenbereich (Chrome-Dokument) nicht erkannt — kein Login-/X-Klick")
+        return
+    roh = seiten_filter(_tsx_roh(w, ("Button",)), seite)
     login = [e for e in roh if e[1] and TSX_RX_LOGIN.match(str(e[0]).strip())]
     if len(login) == 1:
         _tsx_klick(login[0], f"'{login[0][0]}' (Login/Connect)", trail)
         _warte(2.0, 1.0)
-        roh = _tsx_roh(w, ("Button",))
-    hoehe = max(1, (fr[3] - fr[1])) if fr else 1
-    xs = [e for e in roh if e[1] and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())
-          and (not fr or (e[1][1] - fr[1]) < 0.25 * hoehe)]
+        roh = seiten_filter(_tsx_roh(w, ("Button",)), seite)
+    hoehe = max(1, seite[3] - seite[1])
+    xs = [e for e in roh if e[1] and TSX_RX_SCHLIESSEN.match(str(e[0]).strip()) and (e[1][1] - seite[1]) < 0.25 * hoehe]
     for e in xs[:2]:
         _tsx_klick(e, f"Banner schliessen ('{e[0]}')", trail)
         _warte(0.4, 0.3)
@@ -10344,7 +10430,10 @@ def modus_tsxinventar(cmd):
     roh = _tsx_roh(w)
     res["inventar"]["grund"] = tsx_inventar_kurz(roh, fr)
     trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente")
-    ke = _tsx_konto_element(roh)
+    seite = _tsx_seite(w)
+    res["seite"] = list(seite) if seite else None
+    _puls_diagnose_senden(trail, "tsx_inventar")      # B17: Spur vor den Klicks
+    ke = _tsx_konto_element(seiten_filter(roh, seite))
     if ke:
         _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
         _warte(0.8, 0.4)
@@ -10355,7 +10444,7 @@ def modus_tsxinventar(cmd):
     else:
         trail.append("Konto-Dropdown nicht gefunden (kein Text '$…K … | KENNUNG')")
     # Bracket-Dialog: benannter Knopf 'Manage Brackets', sonst GENAU EIN kleiner Knopf rechts neben 'Position Bracket'
-    roh = _tsx_roh(w)
+    roh = seiten_filter(_tsx_roh(w), seite)
     gear = [e for e in roh if e[1] and e[2] == "Button" and TSX_RX_MANAGE_BRACKETS.search(str(e[0]))]
     if not gear:
         txt = [e for e in roh if e[1] and TSX_RX_BRACKET_TEXT.search(str(e[0]))]
@@ -10370,7 +10459,7 @@ def modus_tsxinventar(cmd):
         roh_b = _tsx_roh(w)
         res["inventar"]["bracket_offen"] = tsx_inventar_kurz(roh_b, fr)
         trail.append(f"Bracket-Dialog: {len(res['inventar']['bracket_offen'])} Elemente")
-        zu = [e for e in roh_b if e[1] and e[2] == "Button" and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())]
+        zu = [e for e in seiten_filter(roh_b, seite) if e[1] and e[2] == "Button" and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())]
         if len(zu) == 1:
             _tsx_klick(zu[0], "Bracket-Dialog schliessen (X)", trail)
         else:
@@ -10411,9 +10500,11 @@ def modus_tsxlesen(cmd):
         res.update(code="tab", schritt="tab", msg=f)
         return _tsx_ausgabe(res, trail)
     fr = _tv_fenster_rect(w)
+    _puls_diagnose_senden(trail, "tsx_tab")          # B17: Spur liegt schon in der DB, bevor geklickt wird
     _tsx_vorbereiten(w, trail)
+    _puls_diagnose_senden(trail, "tsx_vorbereitet")
     # Konto: steht es schon? sonst Dropdown → genau ein Eintrag mit der External ID (nie Ineligible)
-    roh = _tsx_roh(w)
+    roh = _tsx_seite_roh(w)
     ke = _tsx_konto_element(roh)
     if not ke:
         res.update(code="konto", schritt="konto", msg="Konto-Dropdown nicht gefunden (kein Text '$…K … | KENNUNG').",
@@ -10422,7 +10513,7 @@ def modus_tsxlesen(cmd):
     if _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
         _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
         _warte(0.8, 0.4)
-        roh_d = [e for e in _tsx_roh(w) if e[1] and tsx_konto_aus_text(e[0])]
+        roh_d = [e for e in _tsx_seite_roh(w) if e[1] and tsx_konto_aus_text(e[0])]
         texte = [str(e[0]) for e in roh_d]
         i, grund = tsx_konto_treffer(texte, ext)
         if i is None:
@@ -10433,7 +10524,7 @@ def modus_tsxlesen(cmd):
         ende = time.time() + 6.0
         while time.time() < ende:
             _warte(0.4, 0.3)
-            ke = _tsx_konto_element(_tsx_roh(w))
+            ke = _tsx_konto_element(_tsx_seite_roh(w))
             if ke and _nur_alnum(tsx_konto_aus_text(ke[0])) == _nur_alnum(ext):
                 break
         if not ke or _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
@@ -10441,7 +10532,7 @@ def modus_tsxlesen(cmd):
             return _tsx_ausgabe(res, trail)
     trail.append(f"Konto steht auf {ext}")
     res["konto"] = ext
-    roh = _tsx_roh(w)
+    roh = _tsx_seite_roh(w)
     werte = tsx_kopf_werte(roh)
     res.update(werte)
     res["position"] = tsx_position_zustand([e[0] for e in roh if e[1]])

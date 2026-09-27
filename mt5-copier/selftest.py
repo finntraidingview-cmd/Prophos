@@ -1763,6 +1763,7 @@ def main():
     results.append(test_fenster_treue())
     results.append(test_puls_tempo())
     results.append(test_puls_topstep())
+    results.append(test_puls_nie_chrome_schliessen())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2462,6 +2463,72 @@ def test_puls_topstep():
     chk("Inventar: sichtbar, im Fenster, ohne Dubletten", inv == [["Buy", "Button", [10, 10, 50, 30]]])
     if ok:
         print("✓ Puls-Topstep: TopstepX nie TV, Konto exakt/nie Ineligible, Contract MNQ≠NQ, BAL US, Knopf mit Menge, Position, Inventar")
+    return ok
+
+
+def test_puls_nie_chrome_schliessen():
+    """B17 (27.09.2026, Mikes PC): Puls klickte in TopstepX Chromes eigenes Tab-/Fenster-X („Close") und schloss Prophos.
+    Jetzt: Klicks nur in der Webseite; allgemeine Strg+W-Regel; Trockenlauf mit Chromes Knöpfen im UIA-Baum."""
+    import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Nie-Chrome-schliessen: " + name); ok = False
+
+    seite = (0, 120, 1920, 1040)
+    chrome_x = [("Close", (1870, 0, 1920, 30), "Button"), ("Close", (400, 10, 420, 30), "Button"),
+                ("Schließen", (620, 10, 640, 30), "Button")]
+    banner_x = [("Close", (1800, 130, 1820, 150), "Button")]
+    chk("Seitenfilter: Chromes Tab-/Fenster-X fallen raus, Seiten-X bleibt",
+        ob.seiten_filter(chrome_x + banner_x, seite) == banner_x)
+    chk("ohne Seitenbereich: nichts", ob.seiten_filter(chrome_x + banner_x, None) == [])
+    w = ob.strg_w_erlaubt
+    chk("Strg+W: TradingView vorn + 2 Tabs → ja", w("MNQZ2026 30,922.50 ▲ +0.4% Unnamed - Google Chrome", "tv", 2))
+    chk("Strg+W: Prophos vorn → nie", not w("Prophos - Google Chrome", "tv", 3) and not w("Prophos", "tsx", 3))
+    chk("Strg+W: nur ein Tab → nie (Fenster ginge zu)", not w("MNQZ2026 30,922.50 ▲ +0.4% Unnamed", "tv", 1))
+    chk("Strg+W: TopstepX nur mit Ziel tsx, TV-Ziel nie auf TopstepX",
+        w("MNQZ26 | TopstepX - Google Chrome", "tsx", 2) and not w("MNQZ26 30,922.50 | TopstepX - Google Chrome", "tv", 2))
+    chk("Strg+W: leerer Titel/Tabzahl unbekannt → nie", not w("", "tv", 3) and not w("MNQZ2026 30,922.50 ▲ +0.4%", "tv", None))
+
+    # Trockenlauf tsxlesen: Fenster = Prophos-Fenster mit TopstepX-Tab, Chromes X-Knoepfe im Baum
+    alt_mod = _s.modules.get("pywinauto")
+    pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
+    geklickt = []
+    class Wf:
+        def window_text(self): return "MNQZ26 30,922.50 | TopstepX - Google Chrome"
+        def set_focus(self): pass
+        def descendants(self, **kw): return []
+    orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
+                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden")}
+    try:
+        wf = Wf()
+        ob._puls_fenster = lambda trail: (wf, "gemerkt", "")
+        ob._tv_fenster_rect = lambda w_: (0, 0, 1920, 1040)
+        ob._dpi_bewusst = lambda: None
+        ob._warte = lambda a, b: None
+        ob._tsx_seite = lambda w_: seite
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tv_uia_roh = lambda w_, typen=None, mx=0, muster=(): chrome_x + [
+            ("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127", (20, 160, 300, 180), "Text"),
+            ("BAL: $149,210.00", (400, 130, 520, 150), "Text"), ("No Active Position", (1500, 400, 1700, 420), "Text")]
+        ob._tv_uia_klick = lambda el, name, trail: (geklickt.append((name, el.get("punkt"))), (True, ""))[1]
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+        r = _j.loads(b.getvalue().strip().splitlines()[-1])
+        chk("Trockenlauf: Balance gelesen, kein einziger Klick auf Chromes X",
+            r.get("ok") and r.get("balance") == 149210.0 and not any(p_ and p_[1] < 120 for _n, p_ in geklickt))
+    finally:
+        for k, v in orig.items():
+            setattr(ob, k, v)
+        if alt_mod is None:
+            _s.modules.pop("pywinauto", None)
+        else:
+            _s.modules["pywinauto"] = alt_mod
+    if ok:
+        print("✓ Nie-Chrome-schliessen: Klicks nur in der Seite, Strg+W-Regel (Titel/Prophos/≥2 Tabs), Trockenlauf ohne Chrome-X")
     return ok
 
 

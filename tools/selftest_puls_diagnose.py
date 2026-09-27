@@ -46,6 +46,9 @@ def main():
     check(gross is not None and len(gross["profile"]) == 12 and len(gross["fenster"]) == 12
           and len(json.dumps(gross, ensure_ascii=False)) <= a["PULS_DIAGNOSE_MAX"], "Diagnose: hoechstens 12 Profile/Fenster, unter dem Deckel")
 
+    d5 = s({"modus": "tsxlesen", "schritt": "tsx_vorbereitet", "spur": "x" * 5000})
+    check(d5["schritt"] == "tsx_vorbereitet" and len(d5["spur"]) == 1800, "B17: Spur + Schritt, Spur auf 1800 gekuerzt")
+
     print("\nALLES GRUEN" if ok else "\nFEHLER")
     return 0 if ok else 1
 

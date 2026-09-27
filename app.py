@@ -8859,7 +8859,9 @@ def puls_diagnose_saeubern(d):
         return str(v)[:n] if v is not None else None
     liste = lambda v: v if isinstance(v, list) else []
     out = {"modus": txt(d.get("modus"), 20), "code": txt(d.get("code"), 20), "eigen": txt(d.get("eigen")),
-           "tabu": [txt(x) for x in liste(d.get("tabu"))][:6], "gemerkt": None, "profile": [], "fenster": []}
+           "tabu": [txt(x) for x in liste(d.get("tabu"))][:6], "gemerkt": None, "profile": [], "fenster": [],
+           # B17 (27.09.2026): Spur des laufenden Puls-Laufs, VOR riskanten Schritten geschrieben (überlebt einen Absturz)
+           "schritt": txt(d.get("schritt"), 20), "spur": txt(d.get("spur"), 1800)}
     g = d.get("gemerkt")
     if isinstance(g, dict):
         out["gemerkt"] = {"hwnd": g.get("hwnd") if isinstance(g.get("hwnd"), int) else None,
