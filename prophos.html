@@ -26617,7 +26617,8 @@
         if(istFut && a.tvBalance != null){
           const tvAt = Date.parse(a.tvBalanceAt || '') || 0, altAt = liveTime ? (Date.parse(liveTime) || Number(liveTime) || 0) : 0
           if(liveBal == null || liveSrc === 'Duplikum' || !altAt || tvAt > altAt){
-            liveBal = a.tvBalance; liveSrc = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard (eingefügt)' : 'TradingView'; liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
+            // Quelle nach Plattform (F26, 27.09.2026: erste echte TopstepX-Balance bei Mike stand als „Live · TradingView"): Topstep → TopstepX
+            liveBal = a.tvBalance; liveSrc = a.tvBalanceQuelle === 'dashboard' ? 'Dashboard (eingefügt)' : (/topstep/i.test(String(a.firm || '')) ? 'TopstepX' : 'TradingView'); liveTime = a.tvBalanceAt || null; liveCcy = 'USD'
           }
         }
         const nachlese = istFut && typeof tvV2NachleseOffen === 'function' ? tvV2NachleseOffen(a.id) : null
@@ -26626,7 +26627,7 @@
         // vor dem Trade", solange ein Orbit-V2-Trade nach der Lesung offen ist; nach dem Ende übernimmt die Nachlese-Zeile („aktualisiert
         // in … min"). Das Alter steht weiter im Tooltip.
         let tvStandZustand = ''
-        if(istFut && liveSrc === 'TradingView'){
+        if(istFut && (liveSrc === 'TradingView' || liveSrc === 'TopstepX')){
           tvStandZustand = 'aktuell'
           try{
             const leseMs = Date.parse(a.tvBalanceAt || '') || 0
@@ -34377,7 +34378,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.685'
+  const OS_TAB_BUILD = '2026-09-22.686'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
