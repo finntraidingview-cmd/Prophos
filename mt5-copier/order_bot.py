@@ -10920,8 +10920,9 @@ def modus_tsxinventar(cmd):
     return _tsx_ausgabe(res, trail)
 
 
-def modus_tsxlesen(cmd):
-    """Konto wählen und lesen: {ok, konto, balance, mll, rpl, upl, position, trail, code, schritt}. Keine Order."""
+def modus_tsxlesen(cmd, weiter=None, wachhund_s=100.0):
+    """Konto wählen und lesen: {ok, konto, balance, mll, rpl, upl, position, trail, code, schritt}. Keine Order.
+    weiter (Etappe 2): nach erfolgreicher Kopf-Lesung weiter(w, res, trail) statt der Lese-Antwort (tsxorder)."""
     res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto": "", "balance": None,
            "mll": None, "rpl": None, "upl": None, "position": None}
     trail = _StempelSpur()
@@ -10935,7 +10936,7 @@ def modus_tsxlesen(cmd):
         res.update(code="pywinauto", msg="pywinauto fehlt (nur auf dem PC lauffaehig).")
         return _tsx_ausgabe(res, trail)
     _dpi_bewusst()
-    _tsx_wachhund(res, trail)                         # B19: ehrliches Ende nach 100 s, auch wenn UIA hängt
+    _tsx_wachhund(res, trail, wachhund_s)             # B19: ehrliches Ende nach 100 s, auch wenn UIA hängt
     _warte(0.1, 0.4)
     w, f = _tsx_tab_holen(trail)
     if w is None:
@@ -11074,9 +11075,315 @@ def modus_tsxlesen(cmd):
                       (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
     res["konto_aktiv"] = ext
     res["positionen"] = [] if res["position"] == "keine" else None
+    if weiter is not None:
+        return weiter(w, res, trail)
     res.update(ok=True, schritt="fertig", msg=f"Balance {werte['balance']:,.2f} $ gelesen ({ext}).")
     _puls_diagnose_senden(trail, "tsx_fertig")
     return _tsx_ausgabe(res, trail)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS FÜR TOPSTEP — ETAPPE 2: ORDER (27.09.2026, Plan B26, vom Master freigegeben)
+# Grundlage: echtes Inventar von Mike (puls_inventar) — Namen wörtlich: ComboBox „Order Type Market", ComboBox „Position
+# Bracket Enabled", Knopf „Manage brackets", Dialog „Position Brackets" mit Edits „Risk (~$)" / „Profit (~$)" und Text
+# „Automatically apply Risk / Profit bracket to new Positions", ComboBox „Contract", Text „# of Contracts" (+ Schnellknöpfe),
+# Order-Knöpfe „BUY +n @ MARKET" / „SELL -n @ MARKET" (Order-Panel rechts; die DOM-Leiter hat gleichnamige — nie die).
+# scharf:false = PROBE bis vor den Knopf (Brackets/Contract/Menge werden wirklich gesetzt, nichts wird zurückgedreht).
+# scharf:true  = ein Klick, danach Beweis „No Active Position" weg. Alle Klicks nur in der Seite, Knopf-/Label-Rechteck.
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_RX_NIE = re.compile(r"\boco\b|switch to auto|close position|reverse position|cancel|flatten|join", re.I)
+
+
+def tsx_feld_zu_label(felder, label_rect, typen=("Edit", "Spinner"), max_abstand=140):
+    """REIN RECHNEND (testbar): das Eingabefeld zu einer Beschriftung — nächstes Feld (Typ passend) unterhalb oder rechts
+    daneben, Abstand der Mitten ≤ max_abstand. felder = [(name, rect, typ, wert, toggle)]. -> Feld | None"""
+    if not label_rect:
+        return None
+    lx, ly = (label_rect[0] + label_rect[2]) / 2, (label_rect[1] + label_rect[3]) / 2
+    best = None
+    for f in felder or ():
+        try:
+            if f[2] not in typen:
+                continue
+            l, t, r, b = f[1]
+        except (TypeError, ValueError, IndexError):
+            continue
+        fx, fy = (l + r) / 2, (t + b) / 2
+        if fy < label_rect[1] - 6:
+            continue                               # nicht oberhalb der Beschriftung
+        d = ((fx - lx) ** 2 + (fy - ly) ** 2) ** 0.5
+        if d <= max_abstand and (best is None or d < best[0]):
+            best = (d, f)
+    return best[1] if best else None
+
+
+def tsx_haken_zu_text(felder, text_rect, max_abstand=70):
+    """REIN RECHNEND (testbar): das Kästchen zu einem Text („Automatically apply …") — CheckBox in derselben Zeile links oder
+    rechts, sonst das nächste innerhalb max_abstand. -> Feld | None"""
+    if not text_rect:
+        return None
+    ty = (text_rect[1] + text_rect[3]) / 2
+    best = None
+    for f in felder or ():
+        try:
+            if f[2] != "CheckBox":
+                continue
+            l, t, r, b = f[1]
+        except (TypeError, ValueError, IndexError):
+            continue
+        dy = abs((t + b) / 2 - ty)
+        dx = 0 if l <= text_rect[2] and r >= text_rect[0] else min(abs(l - text_rect[2]), abs(text_rect[0] - r))
+        d = dx + 2 * dy
+        if dy <= 20 and dx <= max_abstand and (best is None or d < best[0]):
+            best = (d, f)
+    return best[1] if best else None
+
+
+def tsx_order_knopf(roh, richtung, menge, panel_links):
+    """REIN RECHNEND (testbar): der Order-Knopf im ORDER-PANEL (Mitte rechts von panel_links) mit Richtung + Menge im Namen —
+    genau einer, sonst None. Die DOM-Leiter links davon hat gleichnamige Knöpfe."""
+    k = [e for e in roh or () if e[1] and (e[2] if len(e) > 2 else "") == "Button" and tsx_knopf_passt(e[0], richtung, menge)
+         and (e[1][0] + e[1][2]) / 2 >= panel_links]
+    return k[0] if len(k) == 1 else None
+
+
+def tsx_order_befehl(cmd):
+    """REIN RECHNEND (testbar): Befehl prüfen → (dict | None, fehler). richtung buy/sell, Menge 1–50 ganz, Wurzel MNQ/NQ aus
+    symbol, TP > 0, SL optional (> 0 oder leer), scharf bool."""
+    c = cmd or {}
+    r = str(c.get("richtung") or "").lower()
+    if r not in ("buy", "sell"):
+        return None, "richtung muss buy/sell sein"
+    try:
+        m = float(c.get("volumen") or c.get("menge") or 0)
+    except (TypeError, ValueError):
+        return None, "volumen ist keine Zahl"
+    if m != int(m) or not (1 <= m <= 50):
+        return None, "volumen muss eine ganze Zahl 1–50 sein"
+    w = tv_symbol_root(str(c.get("symbol") or ""))
+    if w not in ("MNQ", "NQ"):
+        return None, f"symbol '{c.get('symbol')}' ist weder MNQ noch NQ"
+    werte, f = tsx_bracket_werte(c.get("tp_usd"), c.get("sl_usd"))
+    if f:
+        return None, f
+    ext = str(c.get("ext_id") or c.get("konto") or "").strip()
+    if len(_nur_alnum(ext)) < 5:
+        return None, "ext_id fehlt"
+    return {"richtung": r, "menge": int(m), "wurzel": w, "brackets": werte, "ext": ext, "scharf": c.get("scharf") is True,
+            "plan_id": str(c.get("plan_id") or "")[:64]}, ""
+
+
+def _tsx_tippen(feld, text, trail, name):
+    """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren)."""
+    try:
+        from pywinauto import keyboard
+    except ImportError:
+        return False
+    _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
+    _warte(0.25, 0.2)
+    keyboard.send_keys("^a")
+    _warte(0.1, 0.1)
+    keyboard.send_keys("{DELETE}")
+    _warte(0.15, 0.1)
+    if text:
+        keyboard.send_keys(tv_tasten_escape(str(text)), with_spaces=True, pause=0.03)
+        _warte(0.2, 0.15)
+    return True
+
+
+def _tsx_feld_wert(w, name=None, rect=None):
+    for f in _tsx_felder(w):
+        if (name and f[0] == name) or (rect and tuple(f[1]) == tuple(rect)):
+            return f[3]
+    return None
+
+
+def _tsx_order_nach_kopf(befehl):
+    """Etappe 2, Schritte 2–10 — läuft nach der Kopf-Lesung von modus_tsxlesen."""
+    def weiter(w, res, trail):
+        res.update(gesendet=False, retry_ok=True)
+        res["balance_start"] = res.get("balance")
+
+        def ende(code, msg, **extra):
+            res.update(ok=False, code=code, schritt=code, msg=msg, **extra)
+            trail.append("ENDE " + code + ": " + msg)
+            _puls_diagnose_senden(trail, "tsx_" + code)
+            return _tsx_ausgabe(res, trail)
+        roh = _tsx_seite_roh(w)
+        namen = [str(e[0]) for e in roh if e[1]]
+        # 2. flach + Markt
+        if res.get("position") != "keine":
+            return ende("position", "Im Konto ist eine Position offen (kein „No Active Position\") — keine zweite Order.")
+        markt_zu = any(n.strip().lower() == "market closed" for n in namen)
+        if markt_zu and befehl["scharf"]:
+            return ende("markt_zu", "TopstepX meldet „Market closed\" — keine Order.")
+        if markt_zu:
+            trail.append("Markt zu (Probe läuft trotzdem bis vor den Knopf)")
+        # 3. Order-Typ, 4a. Position Bracket
+        typ = [n for n in namen if n.lower().startswith("order type")]
+        if not typ or "market" not in typ[0].lower():
+            return ende("ordertyp", f"Order-Typ ist nicht Market ({typ[0] if typ else 'nicht gefunden'}).")
+        pb = [n for n in namen if n.lower().startswith("position bracket") and n.lower() != "position bracket"]
+        if not pb or "enabled" not in pb[0].lower():
+            return ende("bracket", f"Position Bracket ist nicht Enabled ({pb[0] if pb else 'nicht gefunden'}).")
+        _puls_diagnose_senden(trail, "tsx_order_pruef")
+        # 4b. Brackets setzen
+        mb = [e for e in roh if e[1] and e[2] == "Button" and TSX_RX_MANAGE_BRACKETS.search(str(e[0]))]
+        if len(mb) != 1:
+            return ende("bracket", f"Knopf „Manage brackets\" nicht eindeutig ({len(mb)}).")
+        _tsx_klick(mb[0], "Manage brackets", trail)
+        felder, t_bis = [], time.time() + 4.0
+        while time.time() < t_bis:
+            _warte(0.35, 0.2)
+            felder = _tsx_felder(w)
+            if any(f[0].lower().startswith("risk") for f in felder) and any(f[0].lower().startswith("profit") for f in felder):
+                break
+        f_risk = next((f for f in felder if f[0].lower().startswith("risk")), None)
+        f_prof = next((f for f in felder if f[0].lower().startswith("profit")), None)
+        if not f_risk or not f_prof:
+            _tsx_esc()
+            return ende("bracket", "Bracket-Dialog: Felder „Risk (~$)\"/„Profit (~$)\" nicht gefunden.",
+                        felder=tsx_felder_kurz(felder, 40))
+        for feld, wert, nm in ((f_prof, befehl["brackets"]["profit"], "Profit"), (f_risk, befehl["brackets"]["risk"], "Risk")):
+            _tsx_tippen(feld, wert, trail, nm)
+        _warte(0.3, 0.2)
+        felder = _tsx_felder(w)
+        r_ist = next((f[3] for f in felder if f[0].lower().startswith("risk")), None)
+        p_ist = next((f[3] for f in felder if f[0].lower().startswith("profit")), None)
+        trail.append(f"Brackets zurückgelesen: Profit '{p_ist}' (soll {befehl['brackets']['profit']}), "
+                     f"Risk '{r_ist}' (soll {befehl['brackets']['risk'] or 'leer'})")
+        p_ok = tsx_geld(p_ist) is not None and abs(tsx_geld(p_ist) - float(befehl["brackets"]["profit"])) < 0.01
+        r_ok = (tsx_geld(r_ist) in (None, 0.0)) if not befehl["brackets"]["risk"] else (
+            tsx_geld(r_ist) is not None and abs(tsx_geld(r_ist) - float(befehl["brackets"]["risk"])) < 0.01)
+        if not (p_ok and r_ok):
+            _tsx_esc()
+            return ende("bracket", "Bracket-Werte stehen nach dem Tippen nicht wie gewollt im Dialog.")
+        roh_b = _tsx_seite_roh(w)
+        txt = [e for e in roh_b if e[1] and str(e[0]).lower().startswith("automatically apply")]
+        haken = tsx_haken_zu_text(felder, txt[0][1]) if txt else None
+        if not haken or haken[4] not in (0, 1):
+            _tsx_esc()
+            return ende("bracket", "Haken „Automatically apply …\" nicht lesbar.", felder=tsx_felder_kurz(felder, 40))
+        if haken[4] == 0:
+            _tsx_klick(("Haken", haken[1], "CheckBox"), "Haken Automatically apply", trail)
+            _warte(0.4, 0.2)
+            neu = tsx_haken_zu_text(_tsx_felder(w), txt[0][1])
+            if not neu or neu[4] != 1:
+                _tsx_esc()
+                return ende("bracket", "Haken „Automatically apply …\" ließ sich nicht setzen.")
+        trail.append("Haken „Automatically apply\" an")
+        zu = [e for e in roh_b if e[1] and e[2] == "Button" and str(e[0]).strip().lower() in ("close", "schließen", "×")
+              and not TSX_RX_NIE.search(str(e[0])) and e[1][3] <= f_risk[1][1] and abs(e[1][0] - f_prof[1][2]) < 400]
+        if len(zu) == 1:
+            _tsx_klick(zu[0], "Bracket-Dialog schließen", trail)
+        else:
+            _tsx_esc()
+            trail.append(f"Bracket-Dialog per Esc geschlossen ({len(zu)} close-Knöpfe)")
+        _warte(0.5, 0.3)
+        if any(f[0].lower().startswith("risk") for f in _tsx_felder(w)):
+            return ende("bracket", "Bracket-Dialog ging nicht zu.")
+        _puls_diagnose_senden(trail, "tsx_order_brackets")
+        # 5. Contract
+        felder = _tsx_felder(w)
+        cb = next((f for f in felder if f[2] == "ComboBox" and f[0].strip().lower() == "contract"), None)
+        if not cb:
+            return ende("contract", "ComboBox „Contract\" nicht gefunden.", felder=tsx_felder_kurz(felder, 40))
+        if tsx_contract_wahl([cb[3]], befehl["wurzel"]) is None:
+            _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract")
+            vor, t_bis = [], time.time() + 4.0
+            while time.time() < t_bis:
+                _warte(0.4, 0.2)
+                vor = [e for e in _tsx_seite_roh(w, ("ListItem", "Text", "Button", "MenuItem", "Group", "Custom"))
+                       if e[1] and e[1][1] > cb[1][3] - 2 and re.match(r"^\s*M?NQ[FGHJKMNQUVXZ]\d", str(e[0]))]
+                if tsx_contract_wahl([e[0] for e in vor], befehl["wurzel"]) is not None:
+                    break
+            i = tsx_contract_wahl([e[0] for e in vor], befehl["wurzel"])
+            if i is None:
+                _tsx_esc()
+                return ende("contract", f"Contract-Vorschlag für {befehl['wurzel']} nicht eindeutig.", liste=[str(e[0])[:40] for e in vor][:10])
+            _tsx_klick(vor[i], f"Contract {vor[i][0][:20]}", trail)
+            _warte(0.6, 0.3)
+            cb = next((f for f in _tsx_felder(w) if f[2] == "ComboBox" and f[0].strip().lower() == "contract"), None)
+            if not cb or tsx_contract_wahl([cb[3]], befehl["wurzel"]) is None:
+                return ende("contract", f"Contract steht nicht auf {befehl['wurzel']} ({cb[3] if cb else '—'}).")
+        trail.append(f"Contract steht: {cb[3]}")
+        # 6. Menge
+        roh = _tsx_seite_roh(w)
+        lab = [e for e in roh if e[1] and str(e[0]).strip().lower() == "# of contracts"]
+        panel_links = (min(e[1][0] for e in roh if e[1] and str(e[0]).strip().lower() == "contract") - 60) if any(
+            e[1] and str(e[0]).strip().lower() == "contract" for e in roh) else 0
+        knopf = tsx_order_knopf(roh, befehl["richtung"], befehl["menge"], panel_links)
+        if not knopf:
+            mf = tsx_feld_zu_label(_tsx_felder(w), lab[0][1]) if lab else None
+            if mf:
+                _tsx_tippen(mf, str(befehl["menge"]), trail, "# of Contracts")
+                try:
+                    from pywinauto import keyboard
+                    keyboard.send_keys("{TAB}")
+                except Exception:
+                    pass
+            else:
+                sk = [e for e in roh if e[1] and e[2] == "Button" and str(e[0]).strip() == str(befehl["menge"])
+                      and (e[1][0] + e[1][2]) / 2 >= panel_links]
+                if len(sk) != 1:
+                    return ende("menge", "Mengenfeld nicht gefunden und kein passender Schnellknopf.",
+                                felder=tsx_felder_kurz(_tsx_felder(w), 40))
+                _tsx_klick(sk[0], f"Schnellknopf {befehl['menge']}", trail)
+            t_bis = time.time() + 3.0
+            while time.time() < t_bis and not knopf:
+                _warte(0.3, 0.2)
+                knopf = tsx_order_knopf(_tsx_seite_roh(w, ("Button",)), befehl["richtung"], befehl["menge"], panel_links)
+        # 7. Vorab-Beweis: Knopf-Name
+        if not knopf and markt_zu and not befehl["scharf"]:
+            # Wochenende: statt „BUY +n @ MARKET" steht „Market closed" — Probe gilt bis hierher als bestanden
+            trail.append("Markt zu: Order-Knopf nicht prüfbar (steht „Market closed\")")
+            res.update(ok=True, gesendet=False, schritt="probe", retry_ok=True,
+                       msg=f"Probe bis vor den Knopf (Markt zu — Knopf nicht prüfbar; Contract {cb[3]}, Brackets gesetzt).")
+            _puls_diagnose_senden(trail, "tsx_probe")
+            return _tsx_ausgabe(res, trail)
+        if not knopf:
+            kn = [str(e[0]) for e in _tsx_seite_roh(w, ("Button",)) if e[1] and re.search(r"@\s*MARKET", str(e[0]), re.I)]
+            return ende("knopf", "Order-Knopf mit Richtung + Menge nicht eindeutig im Order-Panel.", knoepfe=kn[:8])
+        trail.append(f"Vorab-Beweis: Knopf „{knopf[0]}\" im Order-Panel")
+        _puls_diagnose_senden(trail, "tsx_order_bereit")
+        if not befehl["scharf"]:
+            res.update(ok=True, gesendet=False, schritt="probe", retry_ok=True,
+                       msg=f"Probe bis vor den Knopf: {knopf[0]} bereit (Contract {cb[3]}, Brackets gesetzt).")
+            _puls_diagnose_senden(trail, "tsx_probe")
+            return _tsx_ausgabe(res, trail)
+        # 8. Senden
+        res["retry_ok"] = False
+        res["klick_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        _tsx_klick(knopf, f"Order senden ({knopf[0]})", trail)
+        res["gesendet"] = True
+        _puls_diagnose_senden(trail, "tsx_gesendet")
+        # 9. Nachher-Beweis
+        t_bis = time.time() + 10.0
+        while time.time() < t_bis:
+            _warte(0.4, 0.2)
+            roh_n = _tsx_seite_roh(w)
+            if tsx_position_zustand([e[0] for e in roh_n if e[1]]) != "keine":
+                werte = tsx_kopf_werte(roh_n)
+                res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
+                                  (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
+                res["positionen"] = [{"symbol": cb[3], "seite": befehl["richtung"], "menge": befehl["menge"]}]
+                res.update(ok=True, schritt="fertig", einstieg=None, tp_level=None, sl_level=None,
+                           msg=f"Order gesendet: {knopf[0]} ({cb[3]}) — Position steht.")
+                trail.append("Nachher-Beweis: „No Active Position\" ist weg")
+                _puls_diagnose_senden(trail, "tsx_fertig")
+                return _tsx_ausgabe(res, trail)
+        return ende("beweis", "Order-Knopf geklickt, aber „No Active Position\" steht nach 10 s noch — in TopstepX nachsehen, "
+                              "nichts wiederholen.", gesendet=True, retry_ok=False)
+    return weiter
+
+
+def modus_tsxorder(cmd):
+    """Etappe 2: Order in TopstepX (scharf:false = Probe bis vor den Knopf). Antwort wie tv-konto."""
+    befehl, f = tsx_order_befehl(cmd)
+    if f:
+        print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f}, ensure_ascii=False))
+        return
+    return modus_tsxlesen({"konto": befehl["ext"]}, weiter=_tsx_order_nach_kopf(befehl), wachhund_s=150.0)
 
 def main():
     # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
@@ -11121,6 +11428,19 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "tsxorder":
+        # Puls für Topstep, Etappe 2 (27.09.2026): Order bzw. Probe (scharf:false) — retry_ok bei Absturz immer False
+        try:
+            cmd = json.loads(sys.argv[2])
+        except ValueError as e:
+            print(json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False, "msg": f"Befehl kein gueltiges JSON: {e}"}))
+            return 2
+        try:
+            modus_tsxorder(cmd if isinstance(cmd, dict) else {})
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz", "retry_ok": False,
+                              "msg": f"TopstepX-Order abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)} — erst in TopstepX nachsehen."}))
         return 0
     if len(sys.argv) >= 2 and sys.argv[1] in ("tsxinventar", "tsxlesen"):
         # Puls für Topstep, Etappe 1 (27.09.2026, B16): nur lesen, keine Order

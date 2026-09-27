@@ -2554,6 +2554,50 @@ class Handler(BaseHTTPRequestHandler):
                   f"[{res.get('zustand')}] ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path == "/api/tsx-konto":
+            # Puls für Topstep, Etappe 2 (27.09.2026, Plan B26, vom Master freigegeben): Order in TopstepX per UIA.
+            # scharf:false = PROBE bis vor den Order-Knopf (Brackets/Contract/Menge werden wirklich gesetzt, kein Klick auf
+            # BUY/SELL); scharf nur bei echtem true (Finns Schalter „scharf"). Antwort wie /api/tv-konto.
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "msg": f"ungueltige Daten: {e}"}))
+            felder = ("ext_id", "firma", "symbol", "richtung", "volumen", "tp_usd", "sl_usd", "plan_id")
+            cmd = {k: body.get(k) for k in felder}
+            cmd["scharf"] = body.get("scharf") is True
+            if len(re.sub(r"[^A-Za-z0-9]", "", str(cmd.get("ext_id") or ""))) < 5:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "retry_ok": True, "gesendet": False,
+                    "msg": "Feld 'ext_id' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True, "gesendet": False,
+                    "msg": "Es laeuft schon ein Browser-Lauf (Order/Konto/Lesen) — spaeter erneut."}, ensure_ascii=False))
+            to = 170                                    # Bot-Wachhund steht auf 150 s — das Panel wartet länger
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                if not os.path.exists(bot):
+                    res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "gesendet": False, "msg": "order_bot.py fehlt auf diesem PC."}
+                else:
+                    p = subprocess.run([sys.executable, bot, "tsxorder", json.dumps(cmd)],
+                                       capture_output=True, text=True, errors="replace", timeout=to)
+                    line = (p.stdout or "").strip().splitlines()
+                    res = json.loads(line[-1]) if line else {
+                        "ok": False, "code": "bot_stumm", "retry_ok": not cmd["scharf"],
+                        "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                # scharf: der Klick KANN schon raus sein — nie blind wiederholen
+                res = {"ok": False, "code": "timeout", "retry_ok": not cmd["scharf"],
+                       "msg": f"TopstepX-Order Timeout ({to}s) — in TopstepX nachsehen, wie weit er kam."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "retry_ok": not cmd["scharf"], "msg": f"TopstepX-Order fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] tsxorder {'SCHARF' if cmd['scharf'] else 'probe'} @{cmd.get('ext_id')}: "
+                  f"{'ok' if res.get('ok') else res.get('code')} [{res.get('schritt')}] · {str(res.get('msg') or '')[:120]} "
+                  f"{res.get('trail') or ''}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
         if u.path in ("/api/tsx-lesen", "/api/tsx-inventar"):
             # Puls für Topstep, Etappe 1 (27.09.2026, Auftrag Koordination B16): TopstepX-Web-App per UIA — NUR LESEN,
             # keine Order. tsx-lesen = Konto wählen + BAL/MLL/RP&L/UP&L + „No Active Position" (Vertrag wie tv-lesen:

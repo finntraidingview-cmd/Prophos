@@ -1769,6 +1769,7 @@ def main():
     results.append(test_tsx_zeilen())
     results.append(test_tsx_inventar_mike())
     results.append(test_tsx_beweis())
+    results.append(test_tsx_order())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2847,6 +2848,108 @@ def test_tsx_beweis():
                ["", "CheckBox", [940, 870, 956, 890], "", 1]])
     if ok:
         print("✓ TSX-Beweis: Label aus Nachbarknoten, markierter Eintrag vorher/nachher, Reihenfolge ID → markiert → Label+BAL")
+    return ok
+
+
+
+def test_tsx_order():
+    """B26 Etappe 2 (27.09.2026): Order in TopstepX — Trockenlauf mit Mikes Inventar-Rechtecken. Probe endet vor dem Knopf
+    (Brackets/Contract/Menge gesetzt, kein Order-Klick), scharf klickt genau den Panel-Knopf, Riegel bei offener Position."""
+    import order_bot as ob, io, contextlib, json as _j
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Order: " + name); ok = False
+
+    # reine Teile
+    b, f = ob.tsx_order_befehl({"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ1!", "richtung": "BUY", "volumen": 2, "tp_usd": 400})
+    chk("Befehl gültig", b and b["wurzel"] == "MNQ" and b["menge"] == 2 and b["brackets"] == {"profit": "400", "risk": ""} and b["scharf"] is False)
+    chk("scharf nur bei echtem true", ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "NQ", "richtung": "sell", "volumen": 1, "tp_usd": 50, "scharf": "true"})[0]["scharf"] is False)
+    chk("Menge 1.5 / Symbol ES / ohne TP abgelehnt", ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "NQ", "richtung": "buy", "volumen": 1.5, "tp_usd": 5})[0] is None
+        and ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "ES1!", "richtung": "buy", "volumen": 1, "tp_usd": 5})[0] is None
+        and ob.tsx_order_befehl({"ext_id": "12345X", "symbol": "NQ", "richtung": "buy", "volumen": 1})[0] is None)
+    lad = [("BUY +1 @ MARKET", (500, 684, 640, 718), "Button"), ("BUY +1 @ MARKET", (2094, 684, 2249, 718), "Button")]
+    chk("Order-Knopf nur im Panel (DOM-Leiter ignoriert)", ob.tsx_order_knopf(lad, "buy", 1, 1917) == lad[1] and ob.tsx_order_knopf(lad, "buy", 1, 0) is None)
+    felder = [("", (1976, 410, 2100, 440), "Edit", "1", None), ("Risk (~$)", (936, 800, 1177, 851), "Edit", "", None)]
+    chk("Mengenfeld unter „# of Contracts\"", ob.tsx_feld_zu_label(felder, (1976, 389, 2100, 405)) == felder[0])
+    hk = [("", (935, 873, 951, 889), "CheckBox", None, 0), ("", (1500, 873, 1516, 889), "CheckBox", None, 1)]
+    chk("Haken neben „Automatically apply\"", ob.tsx_haken_zu_text(hk, (957, 872, 1296, 891)) == hk[0])
+
+    # Trockenlauf
+    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market"):
+        z = {"dialog": False, "profit": "250", "risk": "100", "haken": 0, "contract": "NQZ26", "menge": 1, "pos": pos_offen, "klicks": []}
+
+        def roh(w, typen=None):
+            r = [("Contract", (1977, 278, 2448, 314), "ComboBox"), (typ, (1977, 330, 2448, 366), "ComboBox"),
+                 ("# of Contracts", (1976, 389, 2100, 405), "Text"), ("5", (2200, 410, 2230, 440), "Button"),
+                 ("Position Bracket Enabled", (1977, 580, 2370, 616), "ComboBox"), ("Manage brackets", (2383, 623, 2413, 653), "Button"),
+                 (f"BUY +{z['menge']} @ MARKET", (2094, 684, 2249, 718), "Button"), (f"SELL -{z['menge']} @ MARKET", (2260, 684, 2440, 718), "Button"),
+                 ("BUY +1 @ MARKET", (500, 684, 640, 718), "Button"), ("CLOSE POSITION", (2094, 730, 2440, 760), "Button")]
+            if not z["pos"]:
+                r.append(("No Active Position", (2100, 800, 2300, 820), "Text"))
+            if z["dialog"]:
+                r += [("Position Brackets close", (906, 577, 1654, 658), "Text"), ("close", (1601, 587, 1644, 630), "Button"),
+                      ("Automatically apply Risk / Profit bracket to new Positions", (957, 872, 1296, 891), "Text")]
+            if z["contract"].startswith("mnq"):
+                r.append(("MNQZ26 · Micro E-mini Nasdaq-100 (Dec 2026)", (1977, 320, 2448, 350), "ListItem"))
+            return [e for e in r if not typen or e[2] in typen]
+
+        def fld(w):
+            r = [("Contract", (1977, 278, 2448, 314), "ComboBox", z["contract"], None), ("", (1976, 410, 2100, 440), "Edit", str(z["menge"]), None)]
+            if z["dialog"]:
+                r += [("Risk (~$)", (936, 800, 1177, 851), "Edit", z["risk"], None), ("Profit (~$)", (1197, 800, 1438, 851), "Edit", z["profit"], None),
+                      ("", (935, 873, 951, 889), "CheckBox", None, z["haken"])]
+            return r
+
+        def klick(e, name, trail):
+            z["klicks"].append(name)
+            if name == "Manage brackets": z["dialog"] = True
+            elif name == "Bracket-Dialog schließen": z["dialog"] = False
+            elif name.startswith("Haken"): z["haken"] = 1
+            elif name.startswith("Contract "): z["contract"] = "MNQZ26"
+            elif name.startswith("Order senden"): z["pos"] = True
+
+        def tippen(feld, text, trail, name):
+            z["klicks"].append("tippe " + name)
+            key = {"Profit": "profit", "Risk": "risk", "Contract": "contract"}.get(name)
+            if key: z[key] = str(text)
+            elif name == "# of Contracts": z["menge"] = int(text)
+            return True
+        alt = {k: getattr(ob, k) for k in ("_tsx_seite_roh", "_tsx_felder", "_tsx_klick", "_tsx_tippen", "_warte", "_puls_diagnose_senden", "_tsx_esc")}
+        ob._tsx_seite_roh, ob._tsx_felder, ob._tsx_klick, ob._tsx_tippen = roh, fld, klick, tippen
+        ob._warte = lambda *a, **k: None
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tsx_esc = lambda: z.update(dialog=False)
+        try:
+            befehl, _f = ob.tsx_order_befehl(befehl_cmd)
+            res = {"position": None if pos_offen else "keine", "balance": 150000.0}
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ob._tsx_order_nach_kopf(befehl)(object(), res, [])
+            return _j.loads(buf.getvalue().strip().splitlines()[-1]), z
+        finally:
+            for k, v in alt.items():
+                setattr(ob, k, v)
+
+    cmd = {"ext_id": "150KTC-SKU-V2-682437-71275127", "symbol": "MNQ1!", "richtung": "buy", "volumen": 2, "tp_usd": 400, "sl_usd": None}
+    r, z = lauf(cmd)
+    chk(f"Probe: ok/probe/nicht gesendet ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("schritt") == "probe" and r.get("gesendet") is False)
+    chk("Probe: Brackets 400/leer, Haken an, MNQ, Menge 2", z["profit"] == "400" and z["risk"] == "" and z["haken"] == 1
+        and z["contract"] == "MNQZ26" and z["menge"] == 2 and not z["dialog"])
+    chk("Probe: kein Order-Klick", not any(k.startswith("Order senden") for k in z["klicks"]))
+    chk("Probe: Rücklesung in der Spur", "Brackets zurückgelesen" in r.get("trail", ""))
+    r, z = lauf(dict(cmd, scharf=True, sl_usd=150))
+    chk(f"Scharf: gesendet + Position steht ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("gesendet") is True and r.get("schritt") == "fertig"
+        and r.get("retry_ok") is False and z["risk"] == "150")
+    chk("Scharf: genau ein Order-Klick", sum(k.startswith("Order senden") for k in z["klicks"]) == 1)
+    r, z = lauf(dict(cmd, scharf=True), pos_offen=True)
+    chk("Offene Position: Riegel, kein Klick", r.get("code") == "position" and not z["klicks"])
+    r, z = lauf(cmd, typ="Order Type Limit")
+    chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
+    if ok:
+        print("✓ TSX-Order: Befehl, Mengenfeld, Haken, Panel-Knopf, Probe bis vor den Knopf, scharf mit Nachher-Beweis, Riegel")
     return ok
 
 
