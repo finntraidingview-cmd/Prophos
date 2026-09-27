@@ -10593,7 +10593,7 @@
     notes:     ['Notizzettel', 'Schneller Zettel — geräteübergreifend synchron'],
     markt:     ['Winning Days', 'NQ & MNQ live · Winning Days des Handelstags'],
     firmen:    ['Accounts je Firma', 'Alle Accounts aller IDs · nach Firma und Phase'],
-    wdlive:    ['Radar', 'Orbit V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
+    wdlive:    ['Radar', 'Orbit V2 · Topstep V2 · Demo gegen den Reader-Kurs · Balance vorher/nachher'],
     news:      ['News', 'USD-Kalender & Alerts (Forex Factory)'],
     kasse:     ['Admin', 'Kapitalverteilung über alle Personen'],
     settings:  ['Einstellungen', 'Profil & Integrationen']
@@ -17597,7 +17597,8 @@
     try{
       const plan = tradePlans.find(x => String(x.id) === String(planId))
       if(!plan || plan.status !== 'planned') return
-      const upd = { status: 'open', started_at: new Date().toISOString(), ended_at: null }
+      // started_at = Klickzeit, wenn die Baseline sie kennt (F28: Topstep V2) — die Demo im Radar zählt ab dieser Minute
+      const upd = { status: 'open', started_at: (tvBaseline && tvBaseline.klick_at) || new Date().toISOString(), ended_at: null }
       // MERGE statt Überschreiben (25.09.2026, Live-Befund Plan 2089a033): seit .527 öffnet der Fusion-Hedge VOR diesem
       // Schritt und schreibt mt5_baseline.hedge — das frühere „mt5_baseline = { tv }" hat das hedge-Objekt gelöscht.
       // Teil B (25.09.2026): erst der Status (Guard planned), danach NUR die eigenen Felder atomar per RPC (Guard open) —
@@ -19430,6 +19431,31 @@
     if(tv.today_pnl_start == null) console.warn('[tvV2] Start-Baseline ohne Today\'s P&L:', tv.grund)
     return tv
   }
+  /* TOPSTEP V2 START-BASELINE AUS DER ORDER-ANTWORT (F28, Master 27.09.2026 nach Mikes erstem scharfen Lauf): /api/tsx-konto hat die
+   * Kopfzeile VOR dem Klick schon gelesen (balance/mll/rpl oben, balance_start) und nach dem Beweis summary + positionen + klick_at.
+   * Bisher fuhr v2AufOpen danach noch ein zweites tsx-lesen (~1 min Chrome, Plan so lange „Geplant") und warf alles andere weg.
+   * Einstieg: Fill vom Bot (einstieg, heute noch null), sonst der Reader-Kurs direkt nach dem Klick — Quelle steht dabei. */
+  function tsxBaselineAusOrder(plan, r){
+    const zahl = v => (typeof v === 'number' && isFinite(v)) ? v : null
+    const at = (r && r.klick_at) || new Date().toISOString()
+    const tv = { konto: tvV2Konto(plan) || (r && r.konto) || null, today_pnl_start: null, datum_start: tvV2Handelstag(), at, puls: 'tsx',
+                 pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : null, quelle: 'tsx_order', klick_at: (r && r.klick_at) || null,
+                 balance_start: zahl(r.balance_start), mll_start: zahl(r.mll), rpl_start: zahl(r.rpl),
+                 // echte Bracket-Orders aus dem TopstepX-Reiter „Orders" (Backend F28, 0030ba6) — Heuristik, kann Montag noch null sein
+                 tp_level_nq: zahl(r.tp_level) > 1000 ? r.tp_level : null, sl_level_nq: zahl(r.sl_level) > 1000 ? r.sl_level : null,
+                 positionen: Array.isArray(r.positionen) ? r.positionen.slice(0, 5) : null,
+                 lesen_trail: String(r.trail || '').slice(0, 2000), lesen_at: new Date().toISOString() }
+    const ein = r.einstieg != null ? tvKursZahl(r.einstieg) : null
+    if(ein > 1000){ tv.einstieg_nq = ein; tv.einstieg_quelle = 'fill'; tv.einstieg_symbol = r.tv_symbol || null }
+    else {
+      const wurzel = /^MNQ/i.test(String(plan.masterSymbol || plan.masterSymbolRoot || '')) ? 'MNQ' : 'NQ'
+      const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(wurzel, 15000) : null
+      if(k && k.preis > 1000){ tv.einstieg_nq = k.preis; tv.einstieg_quelle = 'reader_klick'; tv.einstieg_symbol = k.wurzel }
+    }
+    if(tv.balance_start != null) tvKontoBalanceSchreiben(plan.masterAccountId, { balance: tv.balance_start, equity: null }, at)
+    return tv
+  }
+  window._tsxBaselineAusOrder = tsxBaselineAusOrder   // Test-Haken (Stub)
 
   const tvV2Poll = {
     // Stündlich statt 50–80 s (24.09.2026 abends, Finn: „alle 60 Sekunden in jeden Account einloggen ist zu viel —
@@ -22952,6 +22978,40 @@
     try{ const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt('NQ', 15000) : null; if(k && k.preis > 0) return k }catch(_){}
     return (wdl.kurs && wdl.kurs.alter_ms < 120000) ? wdl.kurs : null
   }
+  /* LIVE-P&L DES MASTER-KONTOS (F28, 27.09.2026, Finn: „Sehe ich den P&L vom Master-Account, wo TP bzw. Liquidationspreis wäre?"):
+   * dieselbe Rechnung wie der Winning-Days-Block im Markt (wdMasterLive, Punktwert mklPpl: MNQ 2 $/Pkt, NQ 20 $/Pkt = WD_HEUTE_PPL im
+   * Backend). NQ und MNQ laufen preisgleich, der Kurs gilt für beide. Nur Anzeige: exakt bleibt „Balance nachher − vorher". */
+  function wdlLive(t, kp){
+    const n = v => (v == null || v === '' || !isFinite(Number(v))) ? null : Number(v)
+    const buy = t.richtung === 'buy', ri = buy ? 1 : t.richtung === 'sell' ? -1 : 0
+    const tp = n(t.tp_level_nq), lq = n(t.liq_level_nq), kt = n(t.kt), wurzel = String(t.symbol_root || '')
+    const ppl = (wurzel === 'NQ' || wurzel === 'MNQ') ? mklPpl(wurzel) : null
+    const usd = pkt => (pkt != null && ppl && kt) ? pkt * ppl * kt : null
+    if(t.status !== 'open' || kp == null || !ri || !ppl) return { pl: null, bal: null, dTp: null, dTpUsd: null, dLq: null, dLqUsd: null }
+    const m = wdMasterLive(t.richtung, t.einstieg_nq, kt, wurzel, kp), pl = m ? m.pl : null, bs = n(t.balance_start)
+    const dTp = (tp != null && tp > 0) ? (buy ? tp - kp : kp - tp) : null
+    const dLq = (lq != null && lq > 0) ? (buy ? kp - lq : lq - kp) : null
+    return { pl, bal: (pl != null && bs != null) ? bs + pl : null, dTp, dTpUsd: usd(dTp), dLq, dLqUsd: usd(dLq) }
+  }
+  function wdlLiveTexte(L, kp){
+    const z = (v, d) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d })
+    const abst = (pkt, usd, name) => pkt == null ? '' : pkt <= 0 ? `${name} erreicht (Kurs)` : `noch ${z(pkt, pkt < 10 ? 2 : 0)} Pkt${usd != null ? ' · ' + z(usd, 0) + ' $' : ''}`
+    return { kp: kp != null ? z(kp, 2) : '–', tp: abst(L.dTp, L.dTpUsd, 'TP'), lq: abst(L.dLq, L.dLqUsd, 'Liq.'),
+             pl: L.pl != null ? `${L.pl < 0 ? '−' : '+'}${z(Math.abs(L.pl), 2)} $` : '–',
+             bal: L.bal != null ? '≈ ' + z(L.bal, 2) + ' $' : '–',
+             plFarbe: L.pl == null ? 'var(--sub)' : L.pl >= 0 ? '#15803d' : '#b91c1c' }
+  }
+  // Nur die Live-Zahlen der laufenden Karten alle 2 s nachschreiben — kein Neuaufbau (Chart-Linien, ID-Leiste bleiben stehen)
+  function wdlLiveTick(){
+    if(!wdl.daten || !wdlAktiv()) return
+    const k = wdlKursJetzt(), kp = k ? k.preis : null
+    for(const c of document.querySelectorAll('#wdl-liste .mwd-open[data-wdl-trade]')){
+      const t = (wdl.daten.trades || []).find(x => wdlTid(x) === c.getAttribute('data-wdl-trade')); if(!t) continue
+      const T = wdlLiveTexte(wdlLive(t, kp), kp)
+      c.querySelectorAll('[data-wdl-lv]').forEach(el => { const f = el.getAttribute('data-wdl-lv'); if(el.textContent !== T[f]) el.textContent = T[f]; if(f === 'pl') el.style.color = T.plFarbe })
+    }
+  }
+  setInterval(wdlLiveTick, 2000)
   function wdlRender(){
     const kopf = document.getElementById('wdl-kopf'), liste = document.getElementById('wdl-liste'); if(!kopf || !liste) return
     wdlFarben()
@@ -22970,18 +23030,19 @@
     const demoTp = trades.filter(t => t.demo && t.demo.status === 'tp').length, demoLiq = trades.filter(t => t.demo && t.demo.status === 'liquidiert').length
     const plSumme = trades.reduce((a, t) => a + (num(t.pl_balance) || 0), 0), plN = trades.filter(t => num(t.pl_balance) != null).length
     const legende = `<div class="wdl-legende"><span><i></i>Entry</span><span><i style="border-top-style:dashed"></i>TP</span><span><i style="border-top-style:dotted"></i>Liquidation</span><span><i style="border-top-style:dashed;border-top-width:3px"></i>SL</span><span>· Farbe = Trade (Punkt an der Karte), Klick auf die Karte blendet seine Linien ein/aus</span></div>`
-    kopf.innerHTML = `<div class="mwj-kopf">Orbit V2 <span>${lauf.length} laufen · ${geplant.length} geplant · ${zu.length} beendet · Demo: ${demoTp} TP, ${demoLiq} liquidiert${plN ? ` · P&L aus Balance ${sig(plSumme, '$', 0)} (${plN} Trades)` : ''} · Kurs ${kp != null ? f2(kp) + ' ' + escapeHtml(kurs.wurzel || '') : 'kein frischer Reader-Kurs'}${wdl.fehler ? ` · <span style="color:#B45309">${escapeHtml(wdl.fehler)}</span>` : ''}</span></div>` + legende
+    kopf.innerHTML = `<div class="mwj-kopf">${trades.some(t => t.route === 'tsv2') ? 'Orbit V2 · Topstep V2' : 'Orbit V2'} <span>${lauf.length} laufen · ${geplant.length} geplant · ${zu.length} beendet · Demo: ${demoTp} TP, ${demoLiq} liquidiert${plN ? ` · P&L aus Balance ${sig(plSumme, '$', 0)} (${plN} Trades)` : ''} · Kurs ${kp != null ? f2(kp) + ' ' + escapeHtml(kurs.wurzel || '') : 'kein frischer Reader-Kurs'}${wdl.fehler ? ` · <span style="color:#B45309">${escapeHtml(wdl.fehler)}</span>` : ''}</span></div>` + legende
     const karte = t => {
       const farbe = (wdl.tFarbe && wdl.tFarbe.get(wdlTid(t))) || '#667085'   // Trade-Farbe = Farbe seiner Linien im Chart (F6)
       const k = t.konto || {}, buy = t.richtung === 'buy', sell = t.richtung === 'sell', offen = t.status === 'open', gepl = t.status === 'planned'
       const e = num(t.einstieg_nq), tp = num(t.tp_level_nq), lq = num(t.liq_level_nq)
-      const dTp = (offen && kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null, dLq = (offen && kp != null && lq != null) ? (buy ? kp - lq : lq - kp) : null
+      const dTp = (offen && kp != null && tp != null) ? (buy ? tp - kp : kp - tp) : null
+      const LT = wdlLiveTexte(wdlLive(t, kp), kp)   // Live-P&L + Abstände (F28), der 2-s-Takt schreibt dieselben Texte nach
       const st = offen ? `läuft seit ${uhr(t.started_at)}` : gepl ? `geplant${t.start_um ? ' · Start ' + uhr(t.start_um) : ''}` : `zu ${tagUhr(t.ended_at)}`
       const d = t.demo || {}
       const demo = d.status === 'tp' ? `<span class="wdl-demo tp">Demo: TP erreicht ${uhr(d.at)} · ${sig(d.pl_usd, '$', 0)}</span>`
         : d.status === 'liquidiert' ? `<span class="wdl-demo liq">Demo: liquidiert ${uhr(d.at)}${num(d.pl_usd) != null ? ' · ' + sig(d.pl_usd, '$', 0) : ''}</span>`
         : d.status === 'beide_in_minute' ? `<span class="wdl-demo liq">Demo: TP und Liquidation in derselben Minute ${uhr(d.at)} — Reihenfolge unklar</span>`
-        : d.status === 'laeuft' ? `<span class="wdl-demo lauf">Demo läuft · ${f0(d.minuten)} Minuten Kurs seit Start${dTp != null ? ` · TP in ${f0(Math.abs(dTp))} Pkt` : ''}</span>`
+        : d.status === 'laeuft' ? `<span class="wdl-demo lauf">Demo läuft · ${f0(d.minuten)} Minuten Kurs seit Start${dTp != null && dTp > 0 ? ` · TP in ${f0(dTp)} Pkt` : ''}</span>`
         : d.status === 'ohne_kurs' ? '<span class="wdl-demo">Demo: kein Reader-Kurs seit dem Start</span>'
         : d.status === 'ohne_level' ? '<span class="wdl-demo">Demo: kein Einstieg/TP gespeichert</span>'
         // B5 (Backend .636): Trade zu, ohne dass TP oder Liquidation im Kurs lag
@@ -23000,15 +23061,17 @@
         </div>
         <div class="wdl-level">
           <div><small>Einstieg</small><b>${f2(e)}</b></div>
-          <div><small>TP-Level${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b></div>
-          <div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : ''}</div>
-          <div><small>Kurs jetzt</small><b>${offen && kp != null ? f2(kp) : '–'}</b>${dLq != null ? `<small>Liq. in ${f0(Math.abs(dLq))} Pkt</small>` : ''}</div>
+          <div><small>TP-Level${num(t.master_tp) != null ? ' · ' + f0(t.master_tp) + ' $' : ''}</small><b style="color:#0E9757">${f2(tp)}</b>${offen && tp != null ? `<small data-wdl-lv="tp">${LT.tp}</small>` : ''}</div>
+          <div title="${escapeHtml(String(t.liq_regel || ''))}"><small>Liquidation${num(t.liq_balance) != null ? ' · bei ' + f0(t.liq_balance) + ' $' : ''}</small><b style="color:#D92D20">${lq != null ? f2(lq) : '–'}</b>${lq == null && t.liq_regel ? `<small>${escapeHtml(String(t.liq_regel))}</small>` : offen && lq != null ? `<small data-wdl-lv="lq">${LT.lq}</small>` : ''}</div>
+          <div><small>Kurs jetzt</small><b data-wdl-lv="kp">${offen ? LT.kp : '–'}</b></div>
         </div>
         ${demo}
         <div class="mwd-pl">
           <div class="mwd-box"><div class="mwd-box-t">Balance vorher</div><div class="mwd-box-v">${num(t.balance_start) != null ? f2(t.balance_start) + ' $' : '–'}</div><div class="mwd-box-s">${num(t.balance_start) != null ? 'beim Platzieren (Puls)' : gepl ? '–' : 'beim Start nicht gelesen'}</div></div>
-          <div class="mwd-box"><div class="mwd-box-t">Balance nachher</div><div class="mwd-box-v">${num(t.balance_end) != null ? f2(t.balance_end) + ' $' : '–'}</div><div class="mwd-box-s">${escapeHtml(endSub)}</div></div>
-          <div class="mwd-box mwd-box-sum"><div class="mwd-box-t">P&amp;L exakt</div><div class="mwd-box-v" style="color:${col(t.pl_balance)}">${sig(t.pl_balance, '$', 2)}</div><div class="mwd-box-s">${num(t.pl_balance) != null ? 'Balance nachher − vorher' : (num(d.pl_usd) != null ? 'Demo ' + sig(d.pl_usd, '$', 0) + ' · exakt nach der Nachlesung' : 'folgt nach der Nachlesung')}</div></div>
+          ${offen ? `<div class="mwd-box"><div class="mwd-box-t">Balance live</div><div class="mwd-box-v" data-wdl-lv="bal">${LT.bal}</div><div class="mwd-box-s">${num(t.balance_start) != null ? 'vorher + Live-P&amp;L aus dem Kurs' : 'ohne Balance vorher'}</div></div>
+          <div class="mwd-box mwd-box-sum"><div class="mwd-box-t">Live-P&amp;L</div><div class="mwd-box-v" data-wdl-lv="pl" style="color:${LT.plFarbe}">${LT.pl}</div><div class="mwd-box-s">${e != null ? 'aus dem Kurs · exakt nach der Nachlesung' : 'kein Einstieg gespeichert'}</div></div>`
+          : `<div class="mwd-box"><div class="mwd-box-t">Balance nachher</div><div class="mwd-box-v">${num(t.balance_end) != null ? f2(t.balance_end) + ' $' : '–'}</div><div class="mwd-box-s">${escapeHtml(endSub)}</div></div>
+          <div class="mwd-box mwd-box-sum"><div class="mwd-box-t">P&amp;L exakt</div><div class="mwd-box-v" style="color:${col(t.pl_balance)}">${sig(t.pl_balance, '$', 2)}</div><div class="mwd-box-s">${num(t.pl_balance) != null ? 'Balance nachher − vorher' : (num(d.pl_usd) != null ? 'Demo ' + sig(d.pl_usd, '$', 0) + ' · exakt nach der Nachlesung' : 'folgt nach der Nachlesung')}</div></div>`}
         </div>
       </div>`
     }
@@ -34425,7 +34488,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.704'
+  const OS_TAB_BUILD = '2026-09-22.706'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -34874,7 +34937,9 @@
           try{ await hedgeSoloOeffnen(plan, Object.assign({}, r || {}, { klick_at: klickAt })) }catch(e){ console.warn('[hedgeSolo]', e) }
         }
         let tvb = null
-        if(MT5_LOCAL && typeof tvV2BaselineLesen === 'function'){
+        // Topstep V2 (F28): Start-Werte stecken schon in der tsx-konto-Antwort — kein zweiter Chrome-Lauf
+        if(plan.route === 'tsv2' && r && typeof r.balance_start === 'number' && isFinite(r.balance_start)) tvb = tsxBaselineAusOrder(plan, r)
+        else if(MT5_LOCAL && typeof tvV2BaselineLesen === 'function'){
           if(imPopup) _pfSet('ob-order', 'warn', '⏳ Order platziert — Puls liest Today\'s P&L als Startwert…')
           try{ tvb = await tvV2BaselineLesen(plan) }catch(_){ tvb = null }
         }
