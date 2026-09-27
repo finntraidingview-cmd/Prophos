@@ -11396,11 +11396,16 @@ def tsx_wert_gleich(ist, soll):
     return ga is not None and gb is not None and abs(ga - gb) < 1e-9
 
 
-def tsx_fokus_passt(fokus, feld_rect):
+def tsx_fokus_passt(fokus, feld_rect, liste_ok=False):
     """REIN RECHNEND (testbar, B30): fokus = (typ, (l,t,r,b)) des fokussierten UIA-Elements. Tippen nur, wenn es ein
     Eingabefeld ist und im Ziel-Feld liegt (Mitte drin oder Feld-Mitte in ihm) — sonst markiert Strg+A die ganze Seite."""
     try:
         typ, r = fokus
+        if liste_ok and typ in ("ListItem", "List"):
+            # B32 (27.09.2026, erster scharfer Lauf bei Mike): Chrome meldet bei der Autocomplete-Combobox „Contract" den
+            # aktiven Listeneintrag (aria-activedescendant) als Fokus, obwohl die Tastatur im Eingabefeld ist — gilt, wenn
+            # die Liste direkt unter dem Feld aufgegangen ist (oben ab der Unterkante, gleiche x-Spanne ±50 px)
+            return (feld_rect[3] - 6 <= r[1] <= feld_rect[3] + 700 and r[0] >= feld_rect[0] - 50 and r[2] <= feld_rect[2] + 50)
         if typ not in ("Edit", "ComboBox", "Spinner"):
             return False
         fx, fy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
@@ -11423,7 +11428,27 @@ def _uia_fokus():
         return None
 
 
-def _tsx_tippen(feld, text, trail, name, ist=None):
+def _uia_tastatur_im_feld(rect):
+    """B32: Element am Feld-Mittelpunkt (oder sein Eltern-Feld) meldet HasKeyboardFocus. -> bool"""
+    try:
+        from pywinauto.uia_defines import IUIA
+        import ctypes.wintypes as _wt
+        u = IUIA()
+        pt = _wt.POINT(int((rect[0] + rect[2]) / 2), int((rect[1] + rect[3]) / 2))
+        e = u.iuia.ElementFromPoint(pt)
+        walker = u.iuia.ControlViewWalker
+        for _ in range(3):
+            if e is None:
+                break
+            if e.CurrentHasKeyboardFocus:
+                return True
+            e = walker.GetParentElement(e)
+    except Exception:
+        pass
+    return False
+
+
+def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
     """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren).
     B30 (27.09.2026, erste Probe bei Mike — Finn: „etwas wurde markiert, der ganze Bildschirm, da, wo das Bracket eingestellt
     wurde"): Strg+A lief, als der Fokus nicht im Feld war (Risk war schon leer). Jetzt: steht der Soll-Wert schon (ist), wird
@@ -11441,7 +11466,13 @@ def _tsx_tippen(feld, text, trail, name, ist=None):
         _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
         _warte(0.25, 0.2)
         fk = _uia_fokus()
-        if tsx_fokus_passt(fk, feld[1]):
+        if tsx_fokus_passt(fk, feld[1], liste_ok):
+            if liste_ok and fk and fk[0] in ("ListItem", "List"):
+                trail.append(f"Fokus-Beweis Feld {name}: Vorschlagsliste unter dem Feld offen (Tastatur im Feld)")
+            fokus_ok = True
+            break
+        if liste_ok and _uia_tastatur_im_feld(feld[1]):
+            trail.append(f"Fokus-Beweis Feld {name}: HasKeyboardFocus")
             fokus_ok = True
             break
         trail.append(f"Fokus nicht im Feld {name} ({fk[0] if fk else '?'})")
@@ -11574,7 +11605,7 @@ def _tsx_order_nach_kopf(befehl):
         cw_ok = lambda v: tsx_contract_wahl([str(v or "").split("·")[0].strip()], befehl["wurzel"]) is not None
         trail.append(f"Contract vorher: {cwert} ({cq})" if cwert else "Contract vorher unlesbar")
         if not cw_ok(cwert):
-            if not _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract"):
+            if not _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract", liste_ok=True):
                 return ende("contract", "Contract-Suche bekam keinen Fokus — nichts getippt.")
             vor, t_bis = [], time.time() + 4.0
             while time.time() < t_bis:

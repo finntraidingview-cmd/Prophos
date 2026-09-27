@@ -2922,7 +2922,7 @@ def test_tsx_order():
             elif name.startswith("Schnellknopf "): z["menge"] = int(name.split()[-1])
             elif name == "Increase quantity": z["menge"] += 1
 
-        def tippen(feld, text, trail, name, ist=None):
+        def tippen(feld, text, trail, name, ist=None, liste_ok=False):
             if ist is not None and ob.tsx_wert_gleich(ist, text):
                 return True
             z["klicks"].append("tippe " + name)
@@ -2973,6 +2973,33 @@ def test_tsx_order():
     chk("B30: Fokus-Beweis", ob.tsx_fokus_passt(("Edit", (940, 805, 1170, 845)), (936, 800, 1177, 851))
         and not ob.tsx_fokus_passt(("Document", (0, 0, 2560, 1400)), (936, 800, 1177, 851))
         and not ob.tsx_fokus_passt(("Edit", (1200, 805, 1430, 845)), (936, 800, 1177, 851)) and not ob.tsx_fokus_passt(None, (1, 1, 2, 2)))
+    cbr = (1977, 278, 2448, 314)
+    chk("B32: Contract-Suche — Fokus = ListItem der Liste unter dem Feld gilt", ob.tsx_fokus_passt(("ListItem", (1977, 318, 2448, 350)), cbr, True)
+        and not ob.tsx_fokus_passt(("ListItem", (1977, 318, 2448, 350)), cbr)
+        and not ob.tsx_fokus_passt(("ListItem", (500, 318, 900, 350)), cbr, True)
+        and not ob.tsx_fokus_passt(("ListItem", (1977, 100, 2448, 130)), cbr, True))
+    import sys as _s2, types as _t2
+    tasten = []
+    pw_alt = _s2.modules.get("pywinauto")
+    pw = _t2.ModuleType("pywinauto"); pw.keyboard = _t2.SimpleNamespace(send_keys=lambda k, **kw: tasten.append(k)); _s2.modules["pywinauto"] = pw
+    alt2 = {k: getattr(ob, k) for k in ("_uia_fokus", "_tsx_klick", "_warte", "_uia_tastatur_im_feld")}
+    ob._uia_fokus = lambda: ("ListItem", (1977, 318, 2448, 350))
+    ob._tsx_klick = lambda e, n, t: t.append(n + " geklickt")
+    ob._warte = lambda *a, **k: None
+    ob._uia_tastatur_im_feld = lambda r: False
+    try:
+        sp2 = []
+        g1 = ob._tsx_tippen(("Contract", cbr, "ComboBox", "MNQZ26", None), "nq", sp2, "Contract", liste_ok=True)
+        t1 = list(tasten); tasten.clear()
+        g2 = ob._tsx_tippen(("Risk (~$)", (936, 800, 1177, 851), "Edit", "100", None), "", [], "Risk", ist="100")
+        t2 = list(tasten)
+    finally:
+        for k, v in alt2.items():
+            setattr(ob, k, v)
+        if pw_alt is not None: _s2.modules["pywinauto"] = pw_alt
+        else: _s2.modules.pop("pywinauto", None)
+    chk(f"B32: Contract bei ListItem-Fokus getippt ({t1})", g1 and "nq" in t1 and any("Vorschlagsliste" in x for x in sp2))
+    chk(f"B32: Risk bei ListItem-Fokus NICHT getippt ({t2})", g2 is False and not t2)
     mp = ob.tsx_menge_plan
     chk("B30: Mengen-Plan", mp(2, [1, 3, 5, 10, 15]) == (1, 1) and mp(15, [1, 3, 5, 10, 15]) == (15, 0) and mp(7, [1, 3, 5, 10, 15]) == (5, 2)
         and mp(30, [1, 3, 5, 10, 15]) is None and mp(1, []) is None)
