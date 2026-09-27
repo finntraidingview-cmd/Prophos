@@ -2449,6 +2449,12 @@ def test_puls_topstep():
     chk("Knopf mit Menge", ob.tsx_knopf_passt("BUY +2 @ MARKET", "buy", 2) and ob.tsx_knopf_passt("SELL -3 @ MARKET", "sell", 3)
         and not ob.tsx_knopf_passt("BUY +1 @ MARKET", "buy", 2) and not ob.tsx_knopf_passt("SELL -2 @ MARKET", "buy", 2)
         and not ob.tsx_knopf_passt("BUY -2 @ MARKET", "buy", 2) and not ob.tsx_knopf_passt("BUY +2 @ LIMIT", "buy", 2))
+    bw = ob.tsx_bracket_werte
+    chk("Brackets: Plan MIT SL → Risk = SL, Profit = TP", bw(400, 250) == ({"profit": "400", "risk": "250"}, None)
+        and bw("212.5", "122") == ({"profit": "212.5", "risk": "122"}, None))
+    chk("Brackets: OHNE SL (WD und normal) → Risk wird geleert, Profit = TP", bw(400, None) == ({"profit": "400", "risk": ""}, None)
+        and bw(400, 0) == ({"profit": "400", "risk": ""}, None) and bw(400, "") == ({"profit": "400", "risk": ""}, None))
+    chk("Brackets: ohne TP → Abbruch", bw(None, 250)[0] is None and bw(0, None)[0] is None)
     chk("Position: No Active Position → keine, sonst unbekannt", ob.tsx_position_zustand(["No Active Position"]) == "keine"
         and ob.tsx_position_zustand(["MNQZ26 +2"]) is None)
     inv = ob.tsx_inventar_kurz([("Buy", (10, 10, 50, 30), "Button"), ("Buy", (10, 10, 50, 30), "Button"), ("", (0, 0, 9, 9), "Text"),

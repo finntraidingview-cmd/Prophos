@@ -10169,6 +10169,24 @@ def tsx_contract_wahl(texte, wurzel):
     return t_[0] if len(t_) == 1 else None
 
 
+def tsx_bracket_werte(tp_usd, sl_usd):
+    """REIN RECHNEND (testbar, B16-Korrektur 27.09.2026, Finn): Werte für den Dialog „Position Brackets".
+    Profit (~$) = TP immer (Pflicht, > 0). Risk (~$) = SL NUR, wenn der Plan einen SL hat (master_sl > 0) — sonst wird das
+    Feld GELEERT (''), damit kein alter Wert aus dem letzten Lauf stehen bleibt (Winning Days UND meist auch normale Trades).
+    -> ({'profit': '…', 'risk': '…' | ''}, None) oder (None, fehler)"""
+    def zahl(v):
+        try:
+            f = float(v)
+            return f if f == f else None
+        except (TypeError, ValueError):
+            return None
+    tp, sl = zahl(tp_usd), zahl(sl_usd)
+    if tp is None or tp <= 0:
+        return None, "TP in $ fehlt — ohne Profit-Bracket wird nicht gehandelt"
+    fmt = lambda x: (f"{x:.2f}".rstrip("0").rstrip(".") if x != int(x) else str(int(x)))
+    return {"profit": fmt(tp), "risk": fmt(sl) if (sl is not None and sl > 0) else ""}, None
+
+
 def tsx_knopf_passt(name, richtung, menge):
     """REIN RECHNEND (testbar): Order-Knopf traegt Richtung UND Menge: 'BUY +2 @ MARKET' / 'SELL -2 @ MARKET'."""
     m = re.match(r"^\s*(BUY|SELL)\s*([+-]?)\s*(\d+)\s*@\s*MARKET\s*$", str(name or ""), re.I)
