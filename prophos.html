@@ -22262,12 +22262,12 @@
       const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
       const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
       // Sofort zeichnen (F32-Zusatz): Tagesplan steht, der Plan-Status von Railway kommt gleich nach — bis dahin der letzte bekannte
-      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene: mkl.wd.plan.tag === tag ? mkl.wd.plan.plaene : null, at: mkl.wd.plan.at, fehler: '' }
+      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene: mkl.wd.plan.tag === tag ? mkl.wd.plan.plaene : null, farmerAdmin: mkl.wd.plan.farmerAdmin, edit: mkl.wd.plan.edit, at: mkl.wd.plan.at, fehler: '' }
       try{ if(mklAktiv()) mklWdRender() }catch(_){}
       // Status JE PLAN (F32, Finn: „Es sind 4 geplant, aber nur 3 unter WD"): trade_plans zeigt per RLS nur eigene Pläne —
       // /admin/live-trades (Service-Key, alle IDs, tvv2/tsv2 inkl. planned) liefert Status/TP/Kontrakte/Start je plan_id.
       // Nicht ladbar → plaene null, die Zeilen zeigen dann den Stand aus wd_tagesplan.konten.
-      let plaene = null
+      let plaene = null, farmerAdmin = mkl.wd.plan.farmerAdmin
       try{
         const tok = await _pushTok()
         if(tok){
@@ -22281,14 +22281,23 @@
       // 27.09.2026): route + Status nachschlagen — eigene Pläne direkt (RLS), alle IDs über /admin/wd-plaene?tag (Farmer-Admin).
       const fehlen = je(tag).flatMap(x => (x.konten || []).filter(k => k && k.aktiv !== false && k.plan_id).map(k => String(k.plan_id))).filter(id => !(plaene && plaene[id]))
       if(plaene && fehlen.length){
-        try{ const { data } = await supabase.from('trade_plans').select('id,route,status,master_tp,master_contracts,richtung,start_um,started_at').in('id', fehlen)
+        try{ const { data } = await supabase.from('trade_plans').select('id,route,status,master_tp,master_contracts,master_symbol,richtung,start_um,started_at,start_um_gestartet_at').in('id', fehlen)
              for(const p of (data || [])) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}
-        if(fehlen.some(id => !plaene[id])){
-          try{ const d = await wdApi('GET', null, `?tag=${encodeURIComponent(tag)}`)
-               for(const p of ((d && d.plaene) || [])) if(fehlen.includes(String(p.id)) && !plaene[String(p.id)]) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}   // kein Farmer-Admin → 403, egal
-        }
       }
-      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, at: mkl.wd.plan.at, fehler: '' }
+      // /admin/wd-plaene?tag (Farmer-Admin, F33): route, master_symbol, master_contracts, start_um_gestartet_at je Plan über ALLE IDs —
+      // ergänzt live-trades und sagt nebenbei, ob hier bearbeitet werden darf (403 = keine Farmer-Freigabe → kein Stift).
+      if(mkl.wd.plan.farmerAdmin !== false){
+        try{
+          const d = await wdApi('GET', null, `?tag=${encodeURIComponent(tag)}`)
+          farmerAdmin = true
+          if(plaene) for(const p of ((d && d.plaene) || [])){
+            const id = String(p.id), da = plaene[id]
+            plaene[id] = da ? Object.assign({}, da, { route: p.route || da.route, master_symbol: p.master_symbol, master_contracts: p.master_contracts, start_um_gestartet_at: p.start_um_gestartet_at, orbit_gesendet_at: p.orbit_gesendet_at })
+                            : Object.assign({ kt: p.master_contracts }, p)
+          }
+        }catch(e){ if(/freigegeben|403/i.test(String((e && e.message) || e))) farmerAdmin = false }
+      }
+      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, farmerAdmin, edit: mkl.wd.plan.edit, at: mkl.wd.plan.at, fehler: '' }
     }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
   }
   const mklWdPlanTagTxt = tag => { try{ return new Date(tag + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' }) }catch(_){ return tag } }
@@ -22308,7 +22317,10 @@
         const st = !k.plan_id ? 'kein_plan' : wegFalsch ? 'falscher_weg' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
         out.push({ uid: String(x.user_id), name: x.name || '?', nr: i + 1, n: ks.length, konto: k, plan: p, status: st,
                    richtung: (p && p.richtung) || x.richtung || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
-                   tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt, root: (p && p.symbol_root) || null })
+                   tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt,
+                   root: (p && p.symbol_root) || (p && /^MNQ/i.test(String(p.master_symbol || '')) ? 'MNQ' : p && /^NQ/i.test(String(p.master_symbol || '')) ? 'NQ' : null),
+                   // Start-Stempel (Puls hat zugegriffen) — ab da nicht mehr bearbeitbar (F33); live-trades nennt ihn „verknuepft"
+                   gestartet: !!(p && (p.start_um_gestartet_at || p.orbit_gesendet_at || p.verknuepft)), row: x })
       })
     }
     return out
@@ -22339,19 +22351,101 @@
       // mehrere Konten einer ID laufen über die Warteschlange ihres PCs nacheinander (tpStartUmTick)
       const startSub = t.n > 1 && t.nr > 1 ? `#${t.nr} danach` : 'Dubai'
       const wer = t.nr === 1 ? `<b>${escapeHtml(t.name)}</b><small>${escapeHtml(kurz)}</small>` : `<b style="font-weight:400;color:var(--sub-2)">↳</b><small>${escapeHtml(kurz)}</small>`
+      // BEARBEITEN (F33): nur Farmer-Admins, nur geplant + nicht gestartet (der Server prüft dasselbe beim PATCH)
+      const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
+      if(P.farmerAdmin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
+      const stift = (P.farmerAdmin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
       return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
           <span class="mwj-zelle">${a ? escapeHtml(wdHhmm(t.start_um)) : '—:—'}<small>${escapeHtml(startSub)}</small></span>
           <span class="mwj-zelle">${escapeHtml(cd[0])}<small>${escapeHtml(cd[1])}</small></span>
           <span class="mwj-zelle">${t.tp != null ? f0(t.tp) + ' $' : '–'}<small>${t.kt != null ? f0(t.kt) + ' × ' + escapeHtml(t.root || 'Kt.') : 'TP'}</small></span>
-          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}<small>Plan</small></span>
+          <span class="mwj-zelle" style="color:${st[1]}">${escapeHtml(st[0])}${stift}<small>Plan</small></span>
         </div>`
     }).join('')
     const leer = !tr.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
     const ohneZ = ohne.length ? `<div class="mwj-naechste">Kein Konto angehakt: ${ohne.map(x => escapeHtml(String(x.name || '?'))).join(', ')}</div>` : ''
     const quelle = P.plaene ? '' : `<div class="mwj-naechste">Plan-Status gerade nicht ladbar — Stand aus dem Tagesplan.</div>`
     return kopf + hinweis + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ + (tr.length ? quelle : '')
+  }
+  /* INLINE-BEARBEITUNG (F33, 28.09.2026, Finn am „Plan heute Nacht": „einmal auf Bearbeiten gehen und dann genau hier TP oder
+   * Lotanzahl oder NQ/MNQ bearbeiten"). Stand im Speicher (P.edit), damit der 15-s-Neuaufbau nichts verliert; Eingabefelder tragen
+   * mwp-in (Fokus-Schutz in mklWdRender). Richtung gilt für die GANZE ID: Farmer-Mac und PC-Tab ziehen richtung immer aus der
+   * Tagesplan-Zeile nach — eine Einzeländerung würde zurückgedreht. */
+  function mklWdPlanEditHtml(t, farbe, wer){
+    const e = mkl.wd.plan.edit, seg = (attr, wert, txt) => `<button type="button" ${attr}="${wert}" class="${(attr === 'data-mwp-instr' ? e.instr : e.dir) === wert ? 'active' : ''}">${txt}</button>`
+    return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default;grid-template-columns:1fr">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:12.5px">
+          <span class="mwj-wer" style="flex:0 1 auto">${wer}</span>
+          <label style="display:flex;align-items:center;gap:5px">TP $ <input type="number" class="input mono mwp-in" data-mwp="tp" min="1" step="1" value="${escapeHtml(String(e.tp ?? ''))}" style="width:84px;padding:4px 7px"></label>
+          <label style="display:flex;align-items:center;gap:5px">Kontrakte <input type="number" class="input mono mwp-in" data-mwp="kt" min="1" step="1" value="${escapeHtml(String(e.kt ?? ''))}" style="width:62px;padding:4px 7px"></label>
+          <div class="seg">${seg('data-mwp-instr', 'MNQ', 'MNQ')}${seg('data-mwp-instr', 'NQ', 'NQ')}</div>
+          <div class="seg" title="Richtung gilt für die ganze ID (alle Konten von ${escapeHtml(t.name)})">${seg('data-mwp-dir', 'buy', 'BUY')}${seg('data-mwp-dir', 'sell', 'SELL')}</div>
+          <button type="button" class="btn btn-primary" data-mwp-save style="padding:4px 12px"${e.busy ? ' disabled' : ''}>${e.busy ? 'speichert…' : 'Speichern'}</button>
+          <button type="button" class="btn btn-ghost" data-mwp-cancel style="padding:4px 10px"${e.busy ? ' disabled' : ''}>Abbrechen</button>
+          ${e.msg ? `<span style="color:${e.fehler ? '#b91c1c' : 'var(--sub)'}">${escapeHtml(e.msg)}</span>` : ''}
+        </div>
+      </div>`
+  }
+  function mklWdPlanVerdrahten(el){
+    const P = mkl.wd.plan; if(!P) return
+    el.querySelectorAll('[data-mwp-edit]').forEach(b => b.addEventListener('click', ev => {
+      ev.stopPropagation()
+      const t = mklWdPlanTrades(P).find(x => String(x.konto.plan_id) === b.dataset.mwpEdit); if(!t) return
+      P.edit = { id: b.dataset.mwpEdit, tp: t.tp != null ? Number(t.tp) : '', kt: t.kt != null ? Number(t.kt) : '', instr: t.root === 'NQ' ? 'NQ' : 'MNQ', dir: t.richtung || 'buy',
+                 alt: { tp: t.tp != null ? Number(t.tp) : null, kt: t.kt != null ? Number(t.kt) : null, instr: t.root === 'NQ' ? 'NQ' : 'MNQ', dir: t.richtung || null } }
+      mklWdRender()
+    }))
+    el.querySelectorAll('.mwp-in[data-mwp]').forEach(i => i.addEventListener('input', () => { if(P.edit) P.edit[i.dataset.mwp] = i.value }))
+    el.querySelectorAll('[data-mwp-instr]').forEach(b => b.addEventListener('click', () => { if(P.edit){ P.edit.instr = b.dataset.mwpInstr; mklWdRender() } }))
+    el.querySelectorAll('[data-mwp-dir]').forEach(b => b.addEventListener('click', () => { if(P.edit){ P.edit.dir = b.dataset.mwpDir; mklWdRender() } }))
+    el.querySelectorAll('[data-mwp-cancel]').forEach(b => b.addEventListener('click', () => { P.edit = null; mklWdRender() }))
+    el.querySelectorAll('[data-mwp-save]').forEach(b => b.addEventListener('click', () => mklWdPlanSpeichern()))
+  }
+  async function mklWdPlanSpeichern(){
+    const P = mkl.wd.plan, e = P && P.edit; if(!e || e.busy) return
+    const t = mklWdPlanTrades(P).find(x => String(x.konto.plan_id) === e.id)
+    const fehler = m => { e.busy = false; e.fehler = true; e.msg = m; mklWdRender() }
+    if(!t) return fehler('Plan nicht mehr in der Liste')
+    if(t.status !== 'planned' || t.gestartet) return fehler('Plan ist schon gestartet — nicht mehr bearbeitbar')
+    const tp = Math.round(Number(e.tp)), kt = Number(e.kt)
+    if(!(tp > 0)) return fehler('TP $ muss größer als 0 sein')
+    if(!(Number.isInteger(kt) && kt >= 1)) return fehler('Kontrakte: ganze Zahl ab 1')
+    const upd = {}
+    if(tp !== e.alt.tp) upd.master_tp = tp
+    if(kt !== e.alt.kt) upd.master_contracts = kt
+    if(e.instr !== e.alt.instr) upd.master_symbol = e.instr + (typeof tpFuturesFrontcode === 'function' ? tpFuturesFrontcode() : '')
+    const dirNeu = (e.dir === 'buy' || e.dir === 'sell') && e.dir !== e.alt.dir ? e.dir : null
+    if(!Object.keys(upd).length && !dirNeu){ P.edit = null; return mklWdRender() }
+    e.busy = true; e.fehler = false; e.msg = ''; mklWdRender()
+    const hinweise = []
+    try{
+      if(Object.keys(upd).length){
+        const x = await wdApi('PATCH', { id: e.id, upd })
+        if(!x.geaendert) return fehler('Nicht gespeichert — Plan ist nicht mehr geplant oder schon gestartet')
+        if('master_contracts' in upd && x.plan && Number(x.plan.master_contracts) !== kt) hinweise.push('Kontrakte speichert das Backend noch nicht (B39)')
+      }
+      // Richtung je ID: alle noch geplanten, nicht gestarteten Pläne der ID + die Tagesplan-Zeile
+      if(dirNeu){
+        for(const q of mklWdPlanTrades(P).filter(q => q.uid === t.uid && q.status === 'planned' && !q.gestartet && q.konto.plan_id)){
+          try{ await wdApi('PATCH', { id: String(q.konto.plan_id), upd: { richtung: dirNeu } }) }catch(err){ hinweise.push(`Richtung ${q.name}: ${(err && err.message) || err}`) }
+        }
+      }
+      // Tagesplan mitziehen (wie wdPlaeneNachziehen: k.tp; dazu k.kt) — Farmer-Tab und Plan bleiben gleich
+      const row = t.row
+      const konten = (row.konten || []).map(k => String(k.plan_id || '') === e.id ? Object.assign({}, k, 'master_tp' in upd ? { tp } : {}, ('master_contracts' in upd && !hinweise.length) ? { kt } : {}) : k)
+      const tpUpd = { konten, updated_at: new Date().toISOString() }; if(dirNeu) tpUpd.richtung = dirNeu
+      const { error } = await supabase.from('wd_tagesplan').update(tpUpd).eq('tag', row.tag).eq('user_id', row.user_id).neq('status', 'laeuft')
+      if(error) hinweise.push('Tagesplan: ' + (error.message || error))
+    }catch(err){
+      const m = String((err && err.message) || err)
+      // Backend filtert unbekannte Felder weg — nur Kontrakte geändert → 400 „id/upd fehlt" (bis B39)
+      return fehler(/id\/upd fehlt/.test(m) && Object.keys(upd).join() === 'master_contracts' ? 'Kontrakte speichert das Backend noch nicht (B39)' : 'Nicht gespeichert: ' + m)
+    }
+    P.edit = hinweise.length ? { ...e, busy: false, fehler: true, msg: '✓ gespeichert · ' + hinweise.join(' · ') } : null
+    P.at = 0; await mklWdPlanLaden(); mklWdRender()
+    if(P.edit && mkl.wd.plan.edit !== P.edit) mkl.wd.plan.edit = P.edit
   }
   // Zähler für den Block-Titel aus DERSELBEN Quelle (F32: oben stand „0 geplant", unten 4 Trades)
   function mklWdPlanZaehler(){
@@ -22375,7 +22469,7 @@
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     // Tippt Finn gerade in der Abhak-Liste, nicht neu zeichnen — sonst verliert das Feld den Fokus (25.09.2026)
-    try{ const a = document.activeElement; if(a && a.classList && (a.classList.contains('mwd-abh-in') || a.classList.contains('mwd-geb-in')) && el.contains(a)) return }catch(_){}
+    try{ const a = document.activeElement; if(a && a.classList && (a.classList.contains('mwd-abh-in') || a.classList.contains('mwd-geb-in') || a.classList.contains('mwp-in')) && el.contains(a)) return }catch(_){}
     // Nur laufende und geplante Karten (Finn 25.09.2026: „Die vergangenen Trades sollen da nicht sein, das hat keinen Sinn");
     // beendete ohne eingetragenes Ergebnis erscheinen nur als EINE Nachtrag-Zeile unter den Karten, completed nie.
     const alle = mkl.wd.plaene || []
@@ -22507,6 +22601,7 @@
       ${feedWacheZeile()}${leerZeile}<div class="mwd-liste">${karten.join('')}</div>${mklWdPlanHtml()}${mklWdAbhakenHtml()}`
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     mklWdAbhakenVerdrahten(el)
+    mklWdPlanVerdrahten(el)   // Plan heute Nacht: Stift/Bearbeiten (F33), eigene Handler je Knopf
     mklWdJetztRender(jetzt, pl, { sig, col, uhr, dauer, f0, kp })
   }
   /* Läuft gerade (26.09.2026, Finn: „eine Übersicht darüber, welche Winning Days gerade ablaufen"): oben über dem Chart je laufendem
@@ -34665,7 +34760,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.716'
+  const OS_TAB_BUILD = '2026-09-22.718'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
