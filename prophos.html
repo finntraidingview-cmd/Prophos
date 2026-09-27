@@ -20382,7 +20382,7 @@
    * der Wächter schloss Fusion 12 Punkte vor dem echten TP, Master blieb offen ohne Gegenhedge). Solange der Einstieg nur aus dem Kurs-Feed
    * stammt, schließt der Wächter erst bei TP ± (Puffer + HEDGE_PUFFER_OHNE_FILL) — lieber ein paar Punkte zu spät als zu früh.
    * Regel vorplan.hedge_puffer_ohne_fill (Punkte) überstimmt die Konstante. */
-  const HEDGE_PUFFER_OHNE_FILL = 12
+  const HEDGE_PUFFER_OHNE_FILL = 6   // Finn 28.09.2026: ohne echten Fill schließt Fusion 8 Pkt hinter dem TP (2 Puffer + 6), vorher +12
   function hedgePufferOhneFill(){ try{ const v = ((_wd && _wd.regeln && _wd.regeln.vorplan) || {}).hedge_puffer_ohne_fill; return (typeof v === 'number' && isFinite(v) && v >= 0) ? v : HEDGE_PUFFER_OHNE_FILL }catch(_){ return HEDGE_PUFFER_OHNE_FILL } }
   // Schließ-Abstand zum TP für einen Hedge: gespeichertes schliesst_bei_nq ist maßgeblich (Open, Fill-Nachtrag, Hand-TP schreiben es),
   // sonst Standard-Puffer + Zuschlag, solange der Einstieg aus dem Feed kommt und der TP nicht von Hand gesetzt ist
@@ -35160,7 +35160,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.728'
+  const OS_TAB_BUILD = '2026-09-22.729'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
