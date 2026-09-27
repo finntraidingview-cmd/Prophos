@@ -287,10 +287,17 @@ def ist_prophos_fenster(titel, klasse):
     return t.startswith("prophos") and (klasse or "") in BROWSER_KLASSEN
 
 
+TSX_RX_TITEL = re.compile(r"^\s*(?:\(\d+\)\s*)?[A-Z]{1,5}[FGHJKMNQUVXZ]\d{2}\s+\$\s?\d")
+
+
 def ist_topstepx_titel(titel):
     """B16 (27.09.2026): TopstepX-Web-App (topstepx.com/trade) — Titel/Tab-Name enthaelt 'topstepx'. Der Titel kann
-    wie ein TradingView-Chart aussehen ('MNQZ26 30,922.50 …'), deshalb schliesst dieses Merkmal ihn ueberall aus."""
-    return "topstepx" in str(titel or "").lower()
+    wie ein TradingView-Chart aussehen ('MNQZ26 30,922.50 …'), deshalb schliesst dieses Merkmal ihn ueberall aus.
+    B19 (27.09.2026, dritter Live-Test bei Mike): der geladene TopstepX-Tab heisst NUR „NQZ26 $30,921.75 ▲ +0.50%" — kein
+    'TopstepX'. Merkmal: Kontrakt mit ZWEISTELLIGEM Jahr (NQZ26) und '$' vor dem Kurs. TradingView schreibt 'NQZ2026 30,882.00'
+    bzw. 'MNQ1! 30,889.25' (vierstelliges Jahr/Dauerkontrakt, kein '$') — diese Titel bleiben TradingView."""
+    t = str(titel or "")
+    return "topstepx" in t.lower() or bool(TSX_RX_TITEL.match(t))
 
 
 def ist_tradingview_fenster(titel, klasse):
@@ -10277,15 +10284,40 @@ def tsx_inventar_kurz(roh, fenster=None, max_n=260):
     return out
 
 
+TSX_RX_ADRESSLEISTE = re.compile(r"address and search bar|adress- und suchleiste|adressleiste|address bar", re.I)
+
+
+def _chrome_url(w):
+    """Adresse des AKTIVEN Tabs aus Chromes Adressleiste (UIA-Edit 'Address and search bar'). '' = nicht lesbar."""
+    try:
+        for e in w.descendants(control_type="Edit", depth=12):
+            try:
+                if TSX_RX_ADRESSLEISTE.search(e.window_text() or ""):
+                    try:
+                        return str(e.get_value() or "")
+                    except Exception:
+                        return str(e.iface_value.CurrentValue or "")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+def ist_topstepx_url(url):
+    """REIN RECHNEND (testbar): Adresse gehört zu TopstepX (topstepx.com, auch ohne https://)."""
+    return bool(re.search(r"(^|[/.])topstepx\.com(/|$)", str(url or "").strip().lower()))
+
+
 def _tsx_tab_holen(trail, warten_s=25.0):
     """TopstepX-Tab im Puls-Fenster nach vorn, sonst Strg+T + topstepx.com/trade (Fenster-Treue). (fenster, fehler)"""
     pw, code, msg = _puls_fenster(trail)
     if pw is None:
         return None, msg
     try:
-        if ist_topstepx_titel(pw.window_text()):
+        if ist_topstepx_titel(pw.window_text()) or ist_topstepx_url(_chrome_url(pw)):
             pw.set_focus()
-            trail.append("TopstepX war schon der aktive Tab")
+            trail.append(f"TopstepX war schon der aktive Tab ({(pw.window_text() or '')[:40]})")
             return pw, ""
     except Exception:
         pass
@@ -10314,9 +10346,8 @@ def _tsx_tab_holen(trail, warten_s=25.0):
     while time.time() < ende:
         _warte(0.5, 0.3)
         try:
-            if ist_topstepx_titel(pw.window_text()):
-                trail.append("TopstepX geladen (neuer Tab)")
-                _warte(1.0, 0.5)
+            if ist_topstepx_titel(pw.window_text()) or ist_topstepx_url(_chrome_url(pw)):
+                trail.append("TopstepX-Tab offen (neuer Tab) — warte auf die Seite")
                 return pw, ""
         except Exception:
             pass
@@ -10399,6 +10430,48 @@ def _tsx_seite_roh(w, typen=None):
     return seiten_filter(_tsx_roh(w, typen) if typen else _tsx_roh(w), _tsx_seite(w))
 
 
+def _tsx_ausloeser(w):
+    els = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom"))
+           if e[1] and tsx_konto_sichtbar(e[0])[0]]
+    return sorted(els, key=lambda e: (e[1][1], e[1][0]))[0] if els else None
+
+
+def _tsx_warte_seite(w, trail, sek=20.0):
+    """B19: nach Tab-Öffnen/-Wechsel rendert TopstepX erst nach einigen Sekunden — warten, bis der Konto-Auslöser da ist
+    (Obergrenze sek). -> Auslöser-Element | None"""
+    ende = time.time() + sek
+    while True:
+        _TSX_SEITE.clear()                    # Seitenbereich neu (Tab kann gerade erst gezeichnet sein)
+        ke = _tsx_ausloeser(w)
+        if ke or time.time() >= ende:
+            trail.append(f"Seite bereit ({(ke[0] or '')[:40]})" if ke else f"Seite nach {int(sek)} s ohne Konto-Auslöser")
+            return ke
+        _warte(0.8, 0.4)
+
+
+def _tsx_wachhund(res, trail, sek=100.0):
+    """B19: hängt ein UIA-Aufruf ohne eigene Zeitgrenze, beendet der Wachhund den Lauf nach sek ehrlich (JSON + Spur in
+    puls_diagnose) — das Panel bekommt eine Antwort statt eines Timeouts, der PC-Tab kann das Signal abschließen."""
+    import threading
+
+    def aus():
+        trail.append(f"Wachhund: nach {int(sek)} s abgebrochen (UIA-Aufruf hing, Schritt {res.get('schritt')})")
+        res.update(ok=False, code="haenger", msg=f"TopstepX-Lauf hing nach {int(sek)} s (Schritt {res.get('schritt')}) — abgebrochen.")
+        try:
+            _puls_diagnose_senden(trail, "tsx_haenger")
+        except Exception:
+            pass
+        try:
+            _tsx_ausgabe(res, trail)
+            sys.stdout.flush()
+        finally:
+            os._exit(0)
+    t = threading.Timer(sek, aus)
+    t.daemon = True
+    t.start()
+    return t
+
+
 def _tsx_klick(e, name, trail):
     return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
 
@@ -10451,20 +10524,36 @@ def modus_tsxinventar(cmd):
         res.update(code="pywinauto", msg="pywinauto fehlt (nur auf dem PC lauffaehig).")
         return _tsx_ausgabe(res, trail)
     _dpi_bewusst()
+    _tsx_wachhund(res, trail, 110.0)
     _warte(0.1, 0.4)
     w, f = _tsx_tab_holen(trail)
     if w is None:
         res.update(code="tab", schritt="tab", msg=f)
         return _tsx_ausgabe(res, trail)
     fr = _tv_fenster_rect(w)
+    _tsx_warte_seite(w, trail, 20.0)
+    # B19: die offenen Fragen direkt beantworten — Titel/URL/Erkennung, alle Tabs, Seitenbereich, erste 150 Seiten-Elemente,
+    # Kandidaten für den Konto-Auslöser
     res["titel"] = (w.window_text() or "")[:120]
+    res["url"] = _chrome_url(w)[:200]
+    res["erkannt"] = {"titel_tsx": ist_topstepx_titel(res["titel"]), "url_tsx": ist_topstepx_url(res["url"]),
+                      "titel_tv": ist_tradingview_fenster(res["titel"], "Chrome_WidgetWin_1")}
     try:
-        res["tabs"] = [(t.window_text() or "")[:60] for t in w.descendants(control_type="TabItem")][:15]
+        res["tabs"] = [{"name": (t.window_text() or "")[:70], "tsx": ist_topstepx_titel(t.window_text()),
+                        "tv": tv_tab_rang(t.window_text() or "", "", "") > 0}
+                       for t in w.descendants(control_type="TabItem", depth=12)][:20]
     except Exception:
         res["tabs"] = []
     roh = _tsx_roh(w)
+    seite0 = _tsx_seite(w)
+    res["seite"] = list(seite0) if seite0 else None
     res["inventar"]["grund"] = tsx_inventar_kurz(roh, fr)
-    trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente")
+    res["inventar"]["seite_150"] = tsx_inventar_kurz(seiten_filter(roh, seite0), fr, 150)
+    res["ausloeser_kandidaten"] = tsx_inventar_kurz([e for e in seiten_filter(roh, seite0)
+                                                     if re.search(r"\$\s*\d+(?:[.,]\d+)?\s*K\b|\|", str(e[0] or ""))], fr, 30)
+    trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente, Seite {len(res['inventar']['seite_150'])}, "
+                 f"Auslöser-Kandidaten {len(res['ausloeser_kandidaten'])}, URL {res['url'][:40] or '—'}")
+    _puls_diagnose_senden(trail, "tsx_inventar")
     seite = _tsx_seite(w)
     res["seite"] = list(seite) if seite else None
     _puls_diagnose_senden(trail, "tsx_inventar")      # B17: Spur vor den Klicks
@@ -10529,13 +10618,17 @@ def modus_tsxlesen(cmd):
         res.update(code="pywinauto", msg="pywinauto fehlt (nur auf dem PC lauffaehig).")
         return _tsx_ausgabe(res, trail)
     _dpi_bewusst()
+    _tsx_wachhund(res, trail)                         # B19: ehrliches Ende nach 100 s, auch wenn UIA hängt
     _warte(0.1, 0.4)
     w, f = _tsx_tab_holen(trail)
     if w is None:
         res.update(code="tab", schritt="tab", msg=f)
         return _tsx_ausgabe(res, trail)
     fr = _tv_fenster_rect(w)
+    res["schritt"] = "tsx_seite"
     _puls_diagnose_senden(trail, "tsx_tab")          # B17: Spur liegt schon in der DB, bevor geklickt wird
+    _tsx_warte_seite(w, trail)
+    res["schritt"] = "tsx_vorbereiten"
     _tsx_vorbereiten(w, trail)
     _puls_diagnose_senden(trail, "tsx_vorbereitet")
     # Konto (B18, 27.09.2026 — zweiter Live-Test: Auslöser zeigt die Kennung ABGEKÜRZT „$150K EXPRESS | EXPRESS-…", Lauf stand
@@ -10546,13 +10639,14 @@ def modus_tsxlesen(cmd):
 
     def ende_mit(code, msg, **extra):
         res.update(code=code, schritt=code, msg=msg, **extra)
+        trail.append("ENDE " + code + ": " + msg)            # B19: Grund steht in der Spur (puls_diagnose)
         _puls_diagnose_senden(trail, "tsx_" + code)
         return _tsx_ausgabe(res, trail)
 
     def ausloeser():
-        els = [e for e in _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink")) if e[1] and tsx_konto_sichtbar(e[0])[0]]
-        return sorted(els, key=lambda e: (e[1][1], e[1][0]))[0] if els else None
+        return _tsx_ausloeser(w)
 
+    res["schritt"] = "tsx_konto"
     ke = ausloeser()
     if not ke:
         return ende_mit("konto", "Konto-Auslöser oben links nicht gefunden (kein Text '$…K … | KENNUNG').",

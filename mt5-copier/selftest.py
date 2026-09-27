@@ -1765,6 +1765,7 @@ def main():
     results.append(test_puls_topstep())
     results.append(test_puls_nie_chrome_schliessen())
     results.append(test_tsx_konto_abgekuerzt())
+    results.append(test_tsx_titel_url())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2502,7 +2503,7 @@ def test_puls_nie_chrome_schliessen():
         def set_focus(self): pass
         def descendants(self, **kw): return []
     orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
-                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden")}
+                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund")}
     try:
         wf = Wf()
         ob._puls_fenster = lambda trail: (wf, "gemerkt", "")
@@ -2511,6 +2512,7 @@ def test_puls_nie_chrome_schliessen():
         ob._warte = lambda a, b: None
         ob._tsx_seite = lambda w_: seite
         ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tsx_wachhund = lambda *a, **k: None
         ob._tv_uia_roh = lambda w_, typen=None, mx=0, muster=(): chrome_x + [
             ("$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127", (20, 160, 300, 180), "Text"),
             ("BAL: $149,210.00", (400, 130, 520, 150), "Text"), ("No Active Position", (1500, 400, 1700, 420), "Text")]
@@ -2581,7 +2583,7 @@ def test_tsx_konto_abgekuerzt():
             z.update(offen=False, konto="EXPRESS-V2-682437-57131691")
         return True, ""
     orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh",
-                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden")}
+                                         "_tv_uia_klick", "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund")}
     try:
         wf = Wf()
         ob._puls_fenster = lambda trail: (wf, "gemerkt", "")
@@ -2590,6 +2592,7 @@ def test_tsx_konto_abgekuerzt():
         ob._warte = lambda a, b: None
         ob._tsx_seite = lambda w_: (0, 120, 1920, 1040)
         ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tsx_wachhund = lambda *a, **k: None
         ob._tv_uia_roh = roh
         ob._tv_uia_klick = klick
         b = io.StringIO()
@@ -2615,6 +2618,34 @@ def test_tsx_konto_abgekuerzt():
             _s.modules["pywinauto"] = alt_mod
     if ok:
         print("✓ TSX-Konto abgekürzt: sichtbar/steht, Liste → voller Eintrag, Balance, ehrliches Ende")
+    return ok
+
+
+def test_tsx_titel_url():
+    """B19 (27.09.2026, dritter Live-Test bei Mike): der geladene TopstepX-Tab heisst „NQZ26 $30,921.75 ▲ +0.50%" (ohne
+    'TopstepX') — trotzdem TopstepX, nie TradingView; TradingView-Titel bleiben TradingView; Adresse topstepx.com."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Titel/URL: " + name); ok = False
+
+    tsx = ["NQZ26 $30,921.75 ▲ +0.50%", "MNQZ26 $30,921.75 ▼ −0.10% – Arbeitsspeichernutzung – 188 MB",
+           "(2) NQZ26 $30,921.75 ▲ +0.50%", "TopstepX", "NQH27 $31,000.00"]
+    tv = ["MNQ1! 30,889.25 ▲ +0.4% Unnamed - Google Chrome", "NQZ2026 30,882.00 ▲ +0.37% Unnamed - Google Chrome",
+          "MNQZ2026 30,933.75 ▲ +0.54% Unnamed", "NQZ2026 30,784.50 0% Unnamed"]
+    chk("TopstepX-Titel erkannt (auch mit Zähler/Speicher-Zusatz)", all(ob.ist_topstepx_titel(t) for t in tsx))
+    chk("TopstepX-Titel nie TradingView", not any(ob.ist_tradingview_fenster(t, "Chrome_WidgetWin_1") or ob.tv_tab_rang(t, "", "") > 0 for t in tsx))
+    chk("TradingView-Titel bleiben TradingView, nie TopstepX", all(not ob.ist_topstepx_titel(t) and ob.tv_tab_rang(t, "", "") > 0 for t in tv))
+    chk("Prophos/Gmail sind weder noch", not ob.ist_topstepx_titel("Prophos - Google Chrome") and not ob.ist_topstepx_titel("Inbox (585) - x@gmail.com"))
+    chk("URL", ob.ist_topstepx_url("topstepx.com/trade") and ob.ist_topstepx_url("https://topstepx.com/trade?x=1")
+        and ob.ist_topstepx_url("https://www.topstepx.com/") and not ob.ist_topstepx_url("https://www.tradingview.com/chart/")
+        and not ob.ist_topstepx_url("notopstepx.com.evil.io") and not ob.ist_topstepx_url(""))
+    chk("Strg+W auf TopstepX nie mit TV-Ziel", not ob.strg_w_erlaubt(tsx[0], "tv", 3))
+    if ok:
+        print("✓ TSX-Titel/URL: „NQZ26 $…“ = TopstepX, nie TradingView; TV-Titel unverändert; Adresse topstepx.com")
     return ok
 
 
