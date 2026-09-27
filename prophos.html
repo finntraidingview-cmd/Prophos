@@ -8999,7 +8999,7 @@
             Tabellen <code>id_wallets</code>/<code>wallet_snapshots</code> fehlen noch — bitte <code>sql/2026-08-24_id_wallets.sql</code> im Supabase SQL-Editor ausführen.
           </div>
           <div id="wal-excl-warn" style="display:none;margin-bottom:14px;padding:11px 14px;border-radius:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);font-size:12.5px;color:var(--sub)">
-            Liste der ausgeblendeten IDs nicht ladbar — Wallets und Summen bleiben leer, damit keine fremden Zahlen erscheinen. Tab gleich noch einmal öffnen.
+            Liste der ausgeblendeten IDs gerade nicht ladbar — es werden alle Wallets gezeigt. Tab gleich noch einmal öffnen, dann fallen ausgeblendete IDs wieder raus.
           </div>
 
           <div class="adm-toolbar">
@@ -13710,10 +13710,15 @@
         // excluded_uids aus /admin/overview (fleetPersonen), nicht hart „Emin". Wallets dieser IDs fallen raus, ihre Snapshots
         // und TX über wallet_id mit. Emins eigene Sicht: dort liefert der Server alle außer ihm, seine Wallets bleiben.
         // Liste nicht frisch ladbar → lieber leer mit Hinweis als fremde Zahlen.
+        // Nachtrag (28.09.2026, Finn: „ich will einfach alle Wallets, genauso wie es immer war, außer die von Emin"): NIE mehr leer.
+        // Frische Liste vom Server → sonst die gemerkte Liste (localStorage) → sonst alle Wallets ohne Filter (nur Hinweis).
         let excl = null
-        try{ const fp = await fleetPersonen(); if(fp && fp.exclFrisch && fp.exclUids) excl = fp.exclUids }catch(_){}
+        // Erste Wahl: die Admin-Übersicht dieses Tabs hat excluded_uids schon geladen (window._admData, jede /admin/overview-Antwort)
+        try{ const ad = window._admData; if(ad && Array.isArray(ad.excluded_uids)) excl = new Set(ad.excluded_uids.map(String)) }catch(_){}
+        if(!excl){ try{ const fp = await fleetPersonen(); if(fp && fp.exclUids && (fp.exclFrisch || fp.exclUids.size)) excl = fp.exclUids }catch(_){} }
+        if(!excl){ try{ const m = JSON.parse(localStorage.getItem('prophos_fleet_excl') || 'null'); if(Array.isArray(m) && m.length) excl = new Set(m.map(String)) }catch(_){} }
         $('wal-excl-warn').style.display = excl ? 'none' : ''
-        wallets = excl ? (w.data || []).filter(x => !excl.has(String(x.person_uid || ''))) : []
+        wallets = excl ? (w.data || []).filter(x => !excl.has(String(x.person_uid || ''))) : (w.data || [])
         walErlaubt = new Set(wallets.map(x => String(x.id)))
         walSnaps = (s.data || []).filter(x => walErlaubt.has(String(x.wallet_id)))
         $('wal-db-warn').style.display = 'none'
@@ -34504,7 +34509,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.709'
+  const OS_TAB_BUILD = '2026-09-22.710'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
