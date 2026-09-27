@@ -11255,6 +11255,52 @@ def tsx_order_knopf(roh, richtung, menge, panel_links):
     return k[0] if len(k) == 1 else None
 
 
+def tsx_feld_wert(label, roh, felder=()):
+    """REIN RECHNEND (testbar, B29 27.09.2026 — erste Probe bei Mike: ComboBox hieß nur „Order Type", „Market" stand woanders):
+    sichtbarer Wert eines beschrifteten Feldes (Order Type / Position Bracket / Contract). Quellen der Reihe nach:
+    1. ValuePattern des Feldes mit diesem Namen, 2. Name mit Wert dahinter („Order Type Market"), 3. anderer Knoten im
+    Rechteck des Feldes, 4. zusammengefügte Zeile nach der Beschriftung, 5. Knoten direkt unter der Beschriftung.
+    -> (wert, quelle) | (None, None)"""
+    lab = str(label or "").strip().lower()
+    if not lab:
+        return None, None
+    ist_lab = lambda t: str(t or "").strip().lower() == lab
+    for f in felder or ():
+        try:
+            if ist_lab(f[0]) and str(f[3] or "").strip() and not ist_lab(f[3]):
+                return str(f[3]).strip(), "value"
+        except (TypeError, IndexError):
+            continue
+    for e in roh or ():
+        t = str(e[0] or "").strip()
+        if t.lower().startswith(lab + " ") and len(t) > len(lab) + 1:
+            return t[len(lab):].strip(" :·|"), "name"
+    boxen = [e[1] for e in list(roh or ()) + list(felder or ()) if e[1] and ist_lab(e[0])
+             and (e[2] if len(e) > 2 else "") in ("ComboBox", "Edit", "Button", "Spinner")]
+    for bx in boxen:
+        drin = [e for e in roh or () if e[1] and not ist_lab(e[0]) and str(e[0] or "").strip()
+                and bx[0] - 2 <= (e[1][0] + e[1][2]) / 2 <= bx[2] + 2 and bx[1] - 2 <= (e[1][1] + e[1][3]) / 2 <= bx[3] + 2
+                and (e[1][2] - e[1][0]) <= (bx[2] - bx[0]) + 4]
+        drin.sort(key=lambda e: (e[1][0], e[1][1]))
+        if drin:
+            return str(drin[0][0]).strip(), "im_feld"
+    try:
+        for t, r in tsx_zeilen(roh):
+            tl = t.lower()
+            if tl.startswith(lab) and len(t) > len(lab) + 1:
+                return t[len(lab):].strip(" :·|"), "zeile"
+    except Exception:
+        pass
+    labs = [e for e in roh or () if e[1] and ist_lab(e[0]) and (e[2] if len(e) > 2 else "") == "Text"]   # nie das Feld selbst
+    for le in labs:
+        unter = [e for e in roh or () if e[1] and not ist_lab(e[0]) and str(e[0] or "").strip()
+                 and 0 <= e[1][1] - le[1][3] <= 50 and abs(e[1][0] - le[1][0]) <= 40]
+        unter.sort(key=lambda e: e[1][1])
+        if unter:
+            return str(unter[0][0]).strip(), "darunter"
+    return None, None
+
+
 def tsx_order_befehl(cmd):
     """REIN RECHNEND (testbar): Befehl prüfen → (dict | None, fehler). richtung buy/sell, Menge 1–50 ganz, Wurzel MNQ/NQ aus
     symbol, TP > 0, SL optional (> 0 oder leer), scharf bool."""
@@ -11328,12 +11374,17 @@ def _tsx_order_nach_kopf(befehl):
         if markt_zu:
             trail.append("Markt zu (Probe läuft trotzdem bis vor den Knopf)")
         # 3. Order-Typ, 4a. Position Bracket
-        typ = [n for n in namen if n.lower().startswith("order type")]
-        if not typ or "market" not in typ[0].lower():
-            return ende("ordertyp", f"Order-Typ ist nicht Market ({typ[0] if typ else 'nicht gefunden'}).")
-        pb = [n for n in namen if n.lower().startswith("position bracket") and n.lower() != "position bracket"]
-        if not pb or "enabled" not in pb[0].lower():
-            return ende("bracket", f"Position Bracket ist nicht Enabled ({pb[0] if pb else 'nicht gefunden'}).")
+        # B29 (27.09.2026, erste Probe bei Mike: „Order-Typ ist nicht Market (Order Type)", obwohl Market stand): Wert über
+        # tsx_feld_wert; abgebrochen wird nur bei eindeutig anderem Wert — unlesbar = weiter, der Knopf-Beweis entscheidet
+        felder0 = _tsx_felder(w)
+        typ, q = tsx_feld_wert("Order Type", roh, felder0)
+        if typ and re.search(r"limit|stop|bracket|trail", typ, re.I) and not re.search(r"\bmarket\b", typ, re.I):
+            return ende("ordertyp", f"Order-Typ ist nicht Market ({typ}).")
+        trail.append(f"Order-Typ: {typ} ({q})" if typ else "Order-Typ unlesbar, Knopf-Beweis entscheidet")
+        pb, q = tsx_feld_wert("Position Bracket", roh, felder0)
+        if pb and re.search(r"disabled|\boff\b|aus", pb, re.I):
+            return ende("bracket", f"Position Bracket ist nicht Enabled ({pb}).")
+        trail.append(f"Position Bracket: {pb} ({q})" if pb else "Position Bracket unlesbar — Brackets werden im Dialog gesetzt")
         _puls_diagnose_senden(trail, "tsx_order_pruef")
         # 4b. Brackets setzen
         mb = [e for e in roh if e[1] and e[2] == "Button" and TSX_RX_MANAGE_BRACKETS.search(str(e[0]))]
@@ -11396,7 +11447,10 @@ def _tsx_order_nach_kopf(befehl):
         cb = next((f for f in felder if f[2] == "ComboBox" and f[0].strip().lower() == "contract"), None)
         if not cb:
             return ende("contract", "ComboBox „Contract\" nicht gefunden.", felder=tsx_felder_kurz(felder, 40))
-        if tsx_contract_wahl([cb[3]], befehl["wurzel"]) is None:
+        cwert, cq = tsx_feld_wert("Contract", _tsx_seite_roh(w), felder)          # B29: Wert nicht nur aus ValuePattern
+        cw_ok = lambda v: tsx_contract_wahl([str(v or "").split("·")[0].strip()], befehl["wurzel"]) is not None
+        trail.append(f"Contract vorher: {cwert} ({cq})" if cwert else "Contract vorher unlesbar")
+        if not cw_ok(cwert):
             _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract")
             vor, t_bis = [], time.time() + 4.0
             while time.time() < t_bis:
@@ -11409,12 +11463,20 @@ def _tsx_order_nach_kopf(befehl):
             if i is None:
                 _tsx_esc()
                 return ende("contract", f"Contract-Vorschlag für {befehl['wurzel']} nicht eindeutig.", liste=[str(e[0])[:40] for e in vor][:10])
-            _tsx_klick(vor[i], f"Contract {vor[i][0][:20]}", trail)
+            gewaehlt = str(vor[i][0])
+            _tsx_klick(vor[i], f"Contract {gewaehlt[:20]}", trail)
             _warte(0.6, 0.3)
-            cb = next((f for f in _tsx_felder(w) if f[2] == "ComboBox" and f[0].strip().lower() == "contract"), None)
-            if not cb or tsx_contract_wahl([cb[3]], befehl["wurzel"]) is None:
-                return ende("contract", f"Contract steht nicht auf {befehl['wurzel']} ({cb[3] if cb else '—'}).")
-        trail.append(f"Contract steht: {cb[3]}")
+            cwert, cq = tsx_feld_wert("Contract", _tsx_seite_roh(w), _tsx_felder(w))
+            if cwert and not cw_ok(cwert):
+                return ende("contract", f"Contract steht nicht auf {befehl['wurzel']} ({cwert}).")
+            if not cwert:
+                # unlesbar: für die Probe reicht der exakt gewählte Listeneintrag; scharf erst mit gelesenem Wert (MNQ ≠ NQ)
+                if befehl["scharf"]:
+                    return ende("contract", f"Contract nach der Auswahl unlesbar — ohne Beweis {befehl['wurzel']} keine Order.")
+                trail.append(f"Contract nach Auswahl unlesbar — gewählt: {gewaehlt[:40]}")
+                cwert = gewaehlt.split("·")[0].strip()
+        cb = (cb[0], cb[1], cb[2], cwert) + tuple(cb[4:])
+        trail.append(f"Contract steht: {cwert}")
         # 6. Menge
         roh = _tsx_seite_roh(w)
         lab = [e for e in roh if e[1] and str(e[0]).strip().lower() == "# of contracts"]

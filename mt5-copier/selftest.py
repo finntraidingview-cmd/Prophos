@@ -2949,6 +2949,17 @@ def test_tsx_order():
     chk("Offene Position: Riegel, kein Klick", r.get("code") == "position" and not z["klicks"])
     r, z = lauf(cmd, typ="Order Type Limit")
     chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
+    # B29 (Mike 16:04 UTC): ComboBox heißt nur „Order Type" — unlesbar = weiter, Knopf-Beweis entscheidet
+    r, z = lauf(cmd, typ="Order Type")
+    chk(f"B29: nur „Order Type\" → Probe läuft durch ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("schritt") == "probe"
+        and "Order-Typ unlesbar" in r.get("trail", ""))
+    fw = ob.tsx_feld_wert
+    box = [("Order Type", (1977, 330, 2448, 366), "ComboBox"), ("Market", (1990, 338, 2060, 358), "Text")]
+    chk("B29: Wert als Knoten im Feld", fw("Order Type", box) == ("Market", "im_feld"))
+    chk("B29: Wert unter der Beschriftung", fw("Order Type", [("Order Type", (1977, 320, 2080, 336), "Text"), ("Limit", (1980, 345, 2040, 362), "Text")])[0] == "Limit")
+    chk("B29: Wert aus ValuePattern", fw("Contract", [], [("Contract", (1, 1, 9, 9), "ComboBox", "MNQZ26", None)]) == ("MNQZ26", "value"))
+    chk("B29: Name mit Wert", fw("Position Bracket", [("Position Bracket Enabled", (1, 1, 9, 9), "ComboBox")]) == ("Enabled", "name"))
+    chk("B29: nichts lesbar", fw("Order Type", [("Order Type", (1977, 330, 2448, 366), "ComboBox")]) == (None, None))
     if ok:
         print("✓ TSX-Order: Befehl, Mengenfeld, Haken, Panel-Knopf, Probe bis vor den Knopf, scharf mit Nachher-Beweis, Riegel")
     return ok
