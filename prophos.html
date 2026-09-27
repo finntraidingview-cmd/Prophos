@@ -22277,6 +22277,17 @@
           if(d && Array.isArray(d.trades)){ plaene = {}; for(const t of d.trades) plaene[String(t.id || t.plan_id)] = t }
         }
       }catch(e){ console.warn('[wd-plan] live-trades', (e && e.message) || e) }
+      // Plan-Verweise, die live-trades NICHT kennt (nur tvv2/tsv2 — also Echo V2 oder ein falscher Weg wie Jacobs tvplus-Pläne vom
+      // 27.09.2026): route + Status nachschlagen — eigene Pläne direkt (RLS), alle IDs über /admin/wd-plaene?tag (Farmer-Admin).
+      const fehlen = je(tag).flatMap(x => (x.konten || []).filter(k => k && k.aktiv !== false && k.plan_id).map(k => String(k.plan_id))).filter(id => !(plaene && plaene[id]))
+      if(plaene && fehlen.length){
+        try{ const { data } = await supabase.from('trade_plans').select('id,route,status,master_tp,master_contracts,richtung,start_um,started_at').in('id', fehlen)
+             for(const p of (data || [])) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}
+        if(fehlen.some(id => !plaene[id])){
+          try{ const d = await wdApi('GET', null, `?tag=${encodeURIComponent(tag)}`)
+               for(const p of ((d && d.plaene) || [])) if(fehlen.includes(String(p.id)) && !plaene[String(p.id)]) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}   // kein Farmer-Admin → 403, egal
+        }
+      }
       mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, at: mkl.wd.plan.at, fehler: '' }
     }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
   }
@@ -22292,7 +22303,9 @@
       const ks = aktivK(x)
       ks.forEach((k, i) => {
         const p = (k.plan_id && P.plaene) ? P.plaene[String(k.plan_id)] || null : null
-        const st = !k.plan_id ? 'kein_plan' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
+        // falscher Weg (28.09.2026): ein Farmer-Plan gehört auf tvv2/mt5v2 (tsv2 für Topstep) — tvplus (Duplikum, tot) fährt nie
+        const wegFalsch = !!(p && p.route && !['tvv2', 'mt5v2', 'tsv2'].includes(String(p.route)))
+        const st = !k.plan_id ? 'kein_plan' : wegFalsch ? 'falscher_weg' : p ? String(p.status || '') : P.plaene ? 'fehlt' : ({ planned: 'planned', open: 'open', review: 'review', completed: 'completed' })[k.status] || 'unbekannt'
         out.push({ uid: String(x.user_id), name: x.name || '?', nr: i + 1, n: ks.length, konto: k, plan: p, status: st,
                    richtung: (p && p.richtung) || x.richtung || null, start_um: (p && (p.start_um || p.started_at)) || k.start_um || x.start_um || null,
                    tp: (p && p.master_tp != null) ? p.master_tp : k.tp, kt: (p && p.kt != null) ? p.kt : k.kt, root: (p && p.symbol_root) || null })
@@ -22316,7 +22329,7 @@
                  kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['Plan fehlt', '#b91c1c'], unbekannt: ['–', 'var(--sub)'] }
     const f0 = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
     const zeilen = tr.map(t => {
-      const st = ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
+      const st = t.status === 'falscher_weg' ? [`falscher Weg (${t.plan.route})`, '#b91c1c'] : ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
       const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(t.uid) : '#667085'
       const lauf = t.plan && t.plan.started_at ? Date.parse(t.plan.started_at) : a
       const cd = t.status === 'open' ? ['läuft', 'seit ' + (lauf ? dauer(jetzt - lauf) : '–')] : (t.status === 'completed' || t.status === 'review') ? ['✓', 'durch']
@@ -34652,7 +34665,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.714'
+  const OS_TAB_BUILD = '2026-09-22.715'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -39950,6 +39963,7 @@
         // Fusion-Gegenhedge: Rechnung wie Popup „Winning Days Farm" (26.09.2026) — der Server dreht die Zeile auf V2, behält bei
         // hedge_eur > 0 Multiplikator + Risiko Slave. Schalter AUS → alles null = kein Hedge.
         { const h = wdFarmHedge(pr, kd.sl_vorgabe, z.slaveEur, vp.hedge_an); if(h) k.hinweis = h }
+        wdPlanAufV2(pr)   // der Server dreht ohnehin — so verlässt nie eine tvplus-Zeile den Browser (28.09.2026)
         allePlaene.push(pr); zVon.set(String(k.id), z)
       }
       bloecke.push({ row, konten, ge, sPreset, zVon })
@@ -40010,6 +40024,22 @@
     return { geaendert, geloescht }
   }
 
+  /* Farmer-Zeile auf V2 drehen — exakt wie der Server (_wd_plan_v2 in app.py): Futures-Firma → tvv2, sonst mt5v2; Slave-Felder
+   * null, außer Risiko Slave + Multiplikator bei tvv2 mit Fusion-Gegenhedge (hedge_eur > 0); mt5v2 ohne master_symbol (Firmen-
+   * Standard statt „MNQZ6"). Duplikum ist tot (24.09.2026) — kein Farmer-Plan darf auf tvplus landen. */
+  function wdPlanAufV2(row){
+    if(!row) return row
+    if(row.route !== 'tvv2' && row.route !== 'mt5v2') row.route = WD_FUTURES_RX.test(String(row.master_firm || '')) ? 'tvv2' : 'mt5v2'
+    const hedge = row.route === 'tvv2' && Number(row.hedge_eur) > 0
+    for(const k of ['slave_account_id', 'slave_name', 'slave_firm', 'slave_risk', 'multiplier']){
+      if(hedge && (k === 'slave_risk' || k === 'multiplier')) continue
+      row[k] = null
+    }
+    if(row.route === 'mt5v2') row.master_symbol = null
+    return row
+  }
+  window._wdPlanAufV2 = wdPlanAufV2   // Test-Haken
+
   /* ── PC-Tab: Plan für ein Konto anlegen (Rückfall, wenn der Mac es nicht konnte — z.B. Railway aus) ── */
   async function wdPlanAnlegen(acc, richtung, vp, startIso, tag){
     const sl = wdFusionGegenstueck()   // fest Fusion statt Duplikum-Slave (26.09.2026)
@@ -40025,6 +40055,9 @@
     row.start_um = startIso; row.notes = 'Winning-Day-Farmer'
     row.master_sl = null   // Winning Days: nie ein SL (Finn 25.09.2026)
     wdFarmHedge(row, Number(acc.wdSl) || 0, z.slaveEur, vp.hedge_an)   // wie der Mac: Popup-Rechnung (26.09.2026)
+    // BUG 28.09.2026 (Jacobs Pläne 2368ebe6/f644c1f8 mit route 'tvplus'): dieser Rückfall schreibt DIREKT in trade_plans — die
+    // V2-Umschreibung des Servers (/admin/wd-plaene POST, _wd_plan_v2) griff hier nie. Jetzt dieselbe Umschreibung im Browser.
+    wdPlanAufV2(row)
     /* RIEGEL gegen Doppel-Pläne (25.09.2026, Koordination: zwei Chrome-Profile am selben PC = zwei Tabs desselben Nutzers — beide
      * hätten beim Rückfall für ein Konto je einen Plan angelegt). (a) frisch prüfen, ob für Konto + Tag schon ein Farmer-Plan steht
      * → den übernehmen; (b) Claim per Insert in user_settings (eindeutig user_id + key 'wd_rueckfall:<tag>:<konto>', Muster .563):
