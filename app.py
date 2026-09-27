@@ -7673,7 +7673,9 @@ def admin_wd_plaene():
                 for i in range(0, len(ids), 80):
                     chunk = ",".join(ids[i:i + 80])
                     plaene += sb_select("trade_plans", {
-                        "select": "id,user_id,master_account_id,status,start_um,start_um_gestartet_at,orbit_gesendet_at,"
+                        # B38 (28.09.2026): route + master_contracts — „Plan heute Nacht" erkennt einen falschen Weg (tvplus vom
+                        # PC-Rückfall, Jacob) auch bei fremden IDs
+                        "select": "id,user_id,master_account_id,status,route,master_contracts,start_um,start_um_gestartet_at,orbit_gesendet_at,"
                                   "ended_at,master_pl,master_tp,master_risk,slave_risk,multiplier,richtung,master_symbol,"
                                   "slave_name,master_name,updated_at",
                         "id": f"in.({chunk})"})
@@ -7683,7 +7685,7 @@ def admin_wd_plaene():
             # der Tab seine Zeilen selbst heilen kann, ohne dass jemand „Wuerfeln" drueckt.
             belegt, plaene_tag = {}, []
             if tag and uids:
-                offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,notes,planned_for,start_um,start_um_gestartet_at,"
+                offen = _sb_all("trade_plans", {"select": "id,user_id,master_account_id,status,route,notes,planned_for,start_um,start_um_gestartet_at,"
                                                           "orbit_gesendet_at,ended_at,master_pl,master_tp,master_sl,master_risk,slave_risk,"
                                                           "master_contracts,multiplier,richtung,master_symbol,slave_name,master_name,updated_at",
                                                 "status": "in.(planned,open)"})
