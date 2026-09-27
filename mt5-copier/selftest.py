@@ -1768,6 +1768,7 @@ def main():
     results.append(test_tsx_titel_url())
     results.append(test_tsx_zeilen())
     results.append(test_tsx_inventar_mike())
+    results.append(test_tsx_beweis())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2747,6 +2748,92 @@ def test_tsx_inventar_mike():
     chk("Kopfzeile ist kein Auslöser", not ob.tsx_ist_ausloeser_text("BAL: $ 154,504.88") and ob.tsx_ist_ausloeser_text("$150K TRADING COMBINE |"))
     if ok:
         print("✓ TSX-Inventar Mike: Auslöser ohne Kennung, Kopfzeile aus drei Knoten, Urteil über Label + BAL")
+    return ok
+
+
+def test_tsx_beweis():
+    """B23 (27.09.2026, Mike .684): Wechsel klappte, Beweis scheiterte („Ziel-Label ''") — Label aus Nachbarknoten, markierter
+    Listeneintrag als Beweis (vorher: steht schon; nachher: Liste erneut öffnen), Reihenfolge ID → markiert → Label + BAL."""
+    import order_bot as ob, io, contextlib, json as _j, sys as _s, types as _t
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ TSX-Beweis: " + name); ok = False
+
+    roh = [("$150K TRADING COMBINE", (102, 270, 262, 288), "Text"), ("150KTC-SKU-V2-682437-71275127", (102, 289, 330, 305), "Text")]
+    e = ("✓ 150KTC-SKU-V2-682437-71275127", (102, 289, 330, 305), "Text")
+    chk("Label aus Nachbarknoten derselben Listenzeile", ob.tsx_eintrag_label(e, roh) == "$150K TRADING COMBINE")
+    chk("Label ohne Anker im eigenen Text", ob.tsx_label("✓ $150K TRADING COMBINE | 150KTC-X") == "$150K TRADING COMBINE")
+    mu = ob.tsx_markiert_urteil
+    chk("markiert: Ziel / anderes / nichts", mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127"], "150KTC-SKU-V2-682437-71275127") == "ja"
+        and mu(["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042"], "150KTC-SKU-V2-682437-71275127") == "nein"
+        and mu([], "150KTC-SKU-V2-682437-71275127") == "unbekannt" and mu(["$150K TRADING COMBINE"], "X-1-2") == "unbekannt")
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K TRADING COMBINE | 150KTC-SKU-V2-682437-71275127"]
+    chk("Urteil mit Label aus Nachbarknoten: Label + BAL geändert → ja",
+        ob.tsx_wechsel_urteil("$150K TRADING COMBINE |", "150KTC-SKU-V2-682437-71275127", ["150KTC-SKU-V2-682437-71275127"],
+                              154504.88, 149210.0, "$150K TRADING COMBINE")[0])
+
+    # Trockenlauf: Auslöser ohne ID, zwei TRADING COMBINE, BAL gleich → nur der markierte Eintrag beweist
+    alt_mod = _s.modules.get("pywinauto")
+    pw = _t.ModuleType("pywinauto"); pw.Desktop = object; _s.modules["pywinauto"] = pw
+    z = {"konto": "150KTC-SKU-V2-682437-58370042", "offen": False}
+    class Wf:
+        handle = 1
+        def window_text(self): return "NQZ26 $30,921.75 ▲ +0.50% - Google Chrome"
+        def set_focus(self): pass
+        def descendants(self, **kw): return []
+    def roh_f(w_, typen=None, mx=0, muster=()):
+        out = [("$150K TRADING COMBINE", (102, 180, 262, 199), "Text"), ("|", (267, 180, 280, 199), "Text"),
+               ("BAL:", (346, 181, 379, 200), "Text"), ("$", (378, 181, 386, 200), "Text"), ("154,504.88", (385, 181, 455, 200), "Text")]
+        if z["offen"]:
+            out += [(liste[0], (102, 230, 400, 250), "Text"), (liste[1], (102, 260, 400, 280), "Text")]
+        return out
+    def klick(el, name, trail):
+        trail.append("Klick " + name)
+        if "öffnen" in name:
+            z["offen"] = True
+        elif name.startswith("Konto 150KTC"):
+            z.update(konto="150KTC-SKU-V2-682437-71275127", offen=False)
+        return True, ""
+    orig = {k: getattr(ob, k) for k in ("_puls_fenster", "_tv_fenster_rect", "_dpi_bewusst", "_warte", "_tv_uia_roh", "_tv_uia_klick",
+                                         "_tsx_seite", "_puls_diagnose_senden", "_tsx_wachhund", "_tsx_markiert", "_tsx_esc")}
+    try:
+        wf = Wf()
+        ob._puls_fenster = lambda t: (wf, "gemerkt", "")
+        ob._tv_fenster_rect = lambda w_: (0, 0, 2560, 1381)
+        ob._dpi_bewusst = lambda: None
+        ob._warte = lambda a, b: None
+        ob._tsx_seite = lambda w_: (0, 109, 2560, 1381)
+        ob._puls_diagnose_senden = lambda *a, **k: None
+        ob._tsx_wachhund = lambda *a, **k: None
+        ob._tsx_esc = lambda: z.update(offen=False)
+        ob._tv_uia_roh = roh_f
+        ob._tv_uia_klick = klick
+        ob._tsx_markiert = lambda w_: ([f"$150K TRADING COMBINE | {z['konto']}"] if z["offen"] else [])
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+        r = _j.loads(b.getvalue().strip().splitlines()[-1])
+        chk("Trockenlauf zwei TRADING COMBINE, BAL gleich: markierter Eintrag beweist, Balance gelesen",
+            r.get("ok") and "markierter Listeneintrag = Ziel-ID" in r.get("trail", "") and r.get("balance") == 154504.88)
+        z.update(konto="150KTC-SKU-V2-682437-71275127", offen=False)
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            ob.modus_tsxlesen({"konto": "150KTC-SKU-V2-682437-71275127"})
+        r2 = _j.loads(b.getvalue().strip().splitlines()[-1])
+        chk("Ziel stand schon (markiert vorher) → kein Klick auf den Eintrag", r2.get("ok") and "schon ausgewählt" in r2.get("trail", "")
+            and "Klick Konto 150KTC" not in r2.get("trail", ""))
+    finally:
+        for k, v in orig.items():
+            setattr(ob, k, v)
+        if alt_mod is None:
+            _s.modules.pop("pywinauto", None)
+        else:
+            _s.modules["pywinauto"] = alt_mod
+    if ok:
+        print("✓ TSX-Beweis: Label aus Nachbarknoten, markierter Eintrag vorher/nachher, Reihenfolge ID → markiert → Label+BAL")
     return ok
 
 

@@ -10187,8 +10187,32 @@ TSX_RX_OHNE_ID = re.compile(r"^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*?)\s*\|?\s*(�
 
 def tsx_label(text):
     """REIN RECHNEND (testbar, B22): Produkt-Label vor dem '|' („$150K TRADING COMBINE"), normalisiert; '' ohne Label."""
-    m = re.match(r"^\s*(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|]*)", str(text or ""), re.I)
+    # B23: ohne Anker am Textanfang — Listeneinträge tragen vorne womöglich Haken/Symbole oder die Kennung
+    m = re.search(r"(\$\s*\d+(?:[.,]\d+)?\s*K\b[^|$]*)", str(text or ""), re.I)
     return re.sub(r"\s+", " ", m.group(1)).strip().upper() if m else ""
+
+
+def tsx_eintrag_label(eintrag, roh):
+    """REIN RECHNEND (testbar, B23): Label eines Listeneintrags — aus seinem Text, sonst aus Nachbarknoten derselben Listenzeile
+    (vertikal ±25 px, waagerecht überlappend oder links davon): TopstepX setzt Label und Kennung als getrennte Knoten."""
+    lab = tsx_label(eintrag[0] if eintrag else "")
+    if lab or not eintrag or not eintrag[1]:
+        return lab
+    l, t, r, b = eintrag[1]
+    for tt, rr in tsx_zeilen(roh):
+        if tsx_label(tt) and rr[1] >= t - 25 and rr[3] <= b + 25 and rr[0] <= r:
+            return tsx_label(tt)
+    return ""
+
+
+def tsx_markiert_urteil(markiert_texte, ext_id):
+    """REIN RECHNEND (testbar, B23): welcher Listeneintrag ist als ausgewählt markiert? 'ja' (die Ziel-ID), 'nein' (ein anderer mit
+    Kennung), 'unbekannt' (nichts Markiertes mit Kennung lesbar)."""
+    ids = [_nur_alnum(m.group(0)) for t in (markiert_texte or ())
+           for m in [re.search(r"[A-Z0-9]{3,}(?:-[A-Z0-9]+){2,}", str(t or "").upper())] if m]
+    if not ids:
+        return "unbekannt"
+    return "ja" if _nur_alnum(ext_id) in ids else "nein"
 
 
 def tsx_ist_ausloeser_text(text):
@@ -10209,7 +10233,7 @@ def tsx_konto_steht(text, ext_id):
     return "vielleicht" if len(_nur_alnum(k)) >= 4 and _nur_alnum(ext_id).startswith(_nur_alnum(k)) else "nein"
 
 
-def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetzt):
+def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetzt, ziel_label=""):
     """REIN RECHNEND (testbar, B21, 27.09.2026 — Mike: TopstepX HATTE gewechselt, Puls meldete trotzdem Fehler, weil er
     zusätzlich „Liste zu" verlangte und unterhalb des Auslösers weiter Kontozeilen stehen blieben). Bestätigt ist der Wechsel:
     - Auslöser trägt die VOLLE Ziel-ID ('ja') — Regelfall, per UIA steht die volle ID auch bei optisch gekürzter Anzeige;
@@ -10223,12 +10247,12 @@ def tsx_wechsel_urteil(ausloeser_text, ext_id, liste_texte, bal_vorher, bal_jetz
         # B22: Auslöser ohne Kennung — Label muss dem Ziel-Eintrag entsprechen; bewiesen durch geänderte BAL oder ein in der
         # Liste EINDEUTIGES Label (Mikes zwei „$150K TRADING COMBINE" → nur über die BAL)
         ziel = [t for t in liste_texte or () if _nur_alnum(tsx_konto_aus_text(t)) == _nur_alnum(ext_id)]
-        z_label = tsx_label(ziel[0]) if ziel else ""
+        z_label = (tsx_label(ziel[0]) if ziel else "") or str(ziel_label or "").strip().upper()
         if not z_label or tsx_label(ausloeser_text) != z_label:
             return False, f"Auslöser-Label '{tsx_label(ausloeser_text)}' ≠ Ziel '{z_label}'"
         if bal_vorher is not None and bal_jetzt is not None and abs(bal_jetzt - bal_vorher) >= 0.005:
             return True, "Auslöser ohne Kennung, Label passt und BAL geändert"
-        if sum(1 for t in liste_texte or () if tsx_label(t) == z_label) == 1:
+        if sum(1 for t in liste_texte or () if tsx_label(t) == z_label) == 1 and any(tsx_label(t) for t in liste_texte or ()):
             return True, "Auslöser ohne Kennung, Label in der Liste eindeutig"
         return False, "Auslöser ohne Kennung, Label doppelt und BAL unverändert — Wechsel nicht beweisbar"
     if stand == "vielleicht":
@@ -10630,6 +10654,42 @@ def _puls_inventar_senden(res, trail):
         pass
 
 
+def _tsx_markiert(w):
+    """B23: Texte der als ausgewählt markierten Listeneinträge in der Webseite — UIA SelectionItem.IsSelected, sonst Legacy-
+    Zustand STATE_SYSTEM_SELECTED (0x2). [] = nichts lesbar (TopstepX markiert womöglich nur farbig)."""
+    seite = _tsx_seite(w)
+    out = []
+    for typ in ("ListItem", "MenuItem", "RadioButton"):      # kein 'Custom' — der Baumgang wäre auf TopstepX teuer
+        try:
+            els = w.descendants(control_type=typ)
+        except Exception:
+            continue
+        for e in els[:200]:
+            try:
+                r = e.rectangle()
+                if seite and not (seite[0] <= (r.left + r.right) // 2 <= seite[2] and seite[1] <= (r.top + r.bottom) // 2 <= seite[3]):
+                    continue
+                sel = None
+                try:
+                    sel = bool(e.iface_selection_item.CurrentIsSelected)
+                except Exception:
+                    try:
+                        sel = bool(int(e.legacy_properties().get("State") or 0) & 0x2)
+                    except Exception:
+                        sel = None
+                if sel:
+                    t = (e.window_text() or "").strip()
+                    if not t:
+                        try:
+                            t = " ".join((c.window_text() or "").strip() for c in e.descendants()[:12])
+                        except Exception:
+                            t = ""
+                    out.append(t[:150])
+            except Exception:
+                continue
+    return out[:6]
+
+
 def _tsx_klick(e, name, trail):
     return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
 
@@ -10817,6 +10877,7 @@ def modus_tsxlesen(cmd):
     stand = tsx_konto_steht(ke[0], ext)
     trail.append(f"Konto-Auslöser: '{ke[0][:50]}' → {stand}")
     _puls_diagnose_senden(trail, "tsx_konto")
+    ok_vor, ke2 = False, None
     if stand != "ja":
         bal_vorher = tsx_kopf_werte(_tsx_seite_roh(w, ("Text", "Button", "Group", "Custom")))["balance"]
         _tsx_klick(ke, "Konto-Dropdown öffnen", trail)
@@ -10837,6 +10898,18 @@ def modus_tsxlesen(cmd):
         if i is None:
             _tsx_esc()
             return ende_mit("konto", f"{grund} ({ext}).", liste=texte[:20])
+        roh_l = _tsx_seite_roh(w, ("Button", "Text", "ListItem", "MenuItem", "Hyperlink", "DataItem", "Group", "Custom"))
+        ziel_label = tsx_eintrag_label(eintraege[i], roh_l)
+        # B23: markierten Eintrag VOR dem Klick lesen — steht das Ziel schon, kein Wechsel nötig
+        m_vor = tsx_markiert_urteil(_tsx_markiert(w), ext)
+        trail.append(f"Liste: Ziel-Label '{ziel_label or '—'}', markiert vorher: {m_vor}")
+        if m_vor == "ja":
+            _tsx_esc()
+            trail.append("Ziel war schon ausgewählt (markiert) — kein Klick")
+            ok_vor = True
+        else:
+            ok_vor = False
+    if stand != "ja" and not ok_vor:
         _tsx_klick(eintraege[i], f"Konto {ext}", trail)
         # B21: in Runden bis 6 s frisch sammeln (jede Runde ein neuer UIA-Aufruf) — bestätigt, sobald der Auslöser die volle
         # Ziel-ID trägt; abgekürzt nur mit eindeutigem Präfix + geänderter BAL. „Liste zu" ist KEINE Bedingung mehr.
@@ -10846,14 +10919,33 @@ def modus_tsxlesen(cmd):
             runde += 1
             roh_n = _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom"))
             ke2 = tsx_ausloeser_waehlen(roh_n)
-            ok_k, grund_k = tsx_wechsel_urteil(ke2[0] if ke2 else "", ext, texte, bal_vorher, tsx_kopf_werte(roh_n)["balance"])
-            if ok_k:
+            # Beweis (1): volle ID im Auslöser — nur die sichere Stufe in der Schleife
+            if ke2 and tsx_konto_steht(ke2[0], ext) == "ja":
+                ok_k, grund_k = True, "Auslöser zeigt die Ziel-ID"
                 break
+            if ke2 and runde >= 3 and tsx_konto_steht(ke2[0], ext) in ("unbekannt", "vielleicht"):
+                break                     # Auslöser ohne volle ID — gleich zu Beweis (2), nicht 6 s warten
+        if not ok_k and ke2:
+            # Beweis (2): Liste erneut öffnen, markierten Eintrag lesen, Esc
+            _tsx_klick(ke2, "Konto-Dropdown erneut öffnen (Beweis)", trail)
+            _warte(0.6, 0.3)
+            m_nach = tsx_markiert_urteil(_tsx_markiert(w), ext)
+            _tsx_esc()
+            _warte(0.3, 0.2)
+            if m_nach == "ja":
+                ok_k, grund_k = True, "markierter Listeneintrag = Ziel-ID"
+            elif m_nach == "nein":
+                ok_k, grund_k = False, "markierter Listeneintrag ist ein anderes Konto"
+        if not ok_k and grund_k != "markierter Listeneintrag ist ein anderes Konto":
+            # Beweis (3): Label gleich + BAL geändert (bzw. Label eindeutig)
+            roh_n = _tsx_seite_roh(w, ("Button", "Text", "ComboBox", "Hyperlink", "Group", "Custom"))
+            ke2 = tsx_ausloeser_waehlen(roh_n)
+            ok_k, grund_k = tsx_wechsel_urteil(ke2[0] if ke2 else "", ext, texte, bal_vorher, tsx_kopf_werte(roh_n)["balance"], ziel_label)
         trail.append(f"Wechsel-Prüfung ({runde} Runden): {grund_k}")
         if not ok_k:
             return ende_mit("konto", f"Konto {ext} geklickt, Wechsel nicht bewiesen: {grund_k}.")
         # Steht die Liste noch sichtbar da, einmal Esc (schließt nur das Dropdown)
-        if tsx_eintraege_waehlen(_tsx_seite_roh(w, ("ListItem", "MenuItem")), ke2[1][1] + 4):
+        if ke2 and tsx_eintraege_waehlen(_tsx_seite_roh(w, ("ListItem", "MenuItem")), ke2[1][1] + 4):
             _tsx_esc()
         trail.append("Konto per Liste gewählt")
     if time.time() > frist:
