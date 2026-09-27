@@ -22154,6 +22154,7 @@
           const pr = (r && r.priceRange) || { minValue: lo, maxValue: hi }
           return Object.assign({}, r || {}, { priceRange: { minValue: Math.min(pr.minValue, lo), maxValue: Math.max(pr.maxValue, hi) } }) } }) }catch(_){}
       }
+      mklZonenZeichnen()   // Positions-Zonen + Live-P&L des ausgewählten Trades (28.09.2026)
       return
     }
     if(_mklLw.skalaSig){ _mklLw.skalaSig = ''; try{ _mklLw.serie.applyOptions({ autoscaleInfoProvider: orig => orig() }) }catch(_){} }
@@ -22166,11 +22167,85 @@
       const linie = (v, col, style, w) => { if(!(Number(v) > 0)) return; try{ _mklLw.wdLinien.push(_mklLw.serie.createPriceLine({ price: Number(v), color: col, lineWidth: w, lineStyle: style, axisLabelVisible: true, title: '' })) }catch(_){} }
       const hOffen = !!(pw.hedge && pw.status === 'open' && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(pw.hedge.status || '')) && mklWdSchliesstBei(pw) > 0)
       linie(pw.einstieg_nq, '#2563EB', 0, 3)
-      linie(pw.tp_level_nq, '#15803d', 0, 2)
+      linie(pw.tp_level_nq, '#2563EB', 0, 2)   // Entry und TP in derselben Farbe (Positions-Werkzeug wie in TradingView)
       linie(pw.sl_level_nq, '#b91c1c', 0, 2)
       if(hOffen) linie(mklWdSchliesstBei(pw), '#7C3AED', 2, 2)
     }
+    mklZonenZeichnen()
   }
+  /* POSITIONS-ZONEN WIE IN TRADINGVIEW (28.09.2026, Finn über den Master, Screenshots TV neben dem WD-Chart): für den AUSGEWÄHLTEN
+   * Trade ab Trade-Start nach rechts eine leicht grüne Box Entry→TP und eine ganz dezente rote Box Entry→Liq (an der Chartkante
+   * abgeschnitten), dazu auf der Entry-Linie ein Kästchen „Kontrakte | Live-P&L" (Kurs − Entry) × Richtung × Kontrakte × $/Pkt,
+   * grün/rot. Umsetzung als HTML-Overlay über dem Zeichenbereich (priceToCoordinate / timeToCoordinate) — keine neue Bibliothek,
+   * kein Primitive. Neu gezeichnet bei Zoom/Scroll (Abo), Mausbewegung und jede Sekunde (Kurs, Auto-Skala). */
+  function mklAuswahlTrade(){
+    const n = v => (v == null || v === '' || !isFinite(Number(v)) || !(Number(v) > 0)) ? null : Number(v)
+    try{
+      if(typeof wdlAktiv === 'function' && wdlAktiv()){
+        const t = wdl.auswahl ? ((wdl.daten && wdl.daten.trades) || []).find(x => wdlTid(x) === wdl.auswahl) : null
+        if(!t) return null
+        return { entry: n(t.einstieg_nq), tp: n(t.tp_level_nq), liq: n(t.liq_level_nq) || n(t.sl_level_nq), start: t.started_at, kt: n(t.kt), root: String(t.symbol_root || 'MNQ'), richtung: t.richtung, offen: t.status === 'open' }
+      }
+    }catch(_){}
+    const pw = mkl.wd.aktiv ? ((mkl.wd && mkl.wd.plaene) || []).find(x => x && String(x.id) === String(mkl.wd.aktiv)) : null
+    if(!pw) return null
+    return { entry: n(pw.einstieg_nq), tp: n(pw.tp_level_nq), liq: n(pw.sl_level_nq), start: pw.started_at, kt: n(pw.kt), root: String(pw.symbol_root || 'MNQ'), richtung: pw.richtung, offen: pw.status === 'open' }
+  }
+  function mklZonenZeichnen(){
+    const box = $mkl('mkl-chart'); if(!box || !box.parentNode) return
+    let ov = document.getElementById('mkl-zonen')
+    const weg = () => { if(ov) ov.style.display = 'none' }
+    if(!_mklLw || !_mklLw.chart || !_mklLw.serie || !mklAktiv()) return weg()
+    const a = mklAuswahlTrade()
+    if(!a || !(a.entry > 0)) return weg()
+    const ch = _mklLw.chart, se = _mklLw.serie
+    if(!_mklLw.zonenAbo){ _mklLw.zonenAbo = true; try{ ch.timeScale().subscribeVisibleLogicalRangeChange(() => mklZonenZeichnen()); ch.subscribeCrosshairMove(() => mklZonenZeichnen()) }catch(_){} }
+    let breite = 0, hoehe = 0
+    try{ breite = ch.timeScale().width() }catch(_){}
+    try{ const ps = ch.paneSize ? ch.paneSize() : null; hoehe = ps ? ps.height : 0 }catch(_){}
+    if(!breite) breite = box.clientWidth - 70
+    if(!hoehe) hoehe = box.clientHeight - 28
+    if(!ov){
+      ov = document.createElement('div'); ov.id = 'mkl-zonen'
+      ov.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;overflow:hidden;z-index:2'
+      box.parentNode.insertBefore(ov, box.nextSibling)
+    }
+    ov.style.display = ''; ov.style.width = breite + 'px'; ov.style.height = hoehe + 'px'
+    ov.style.top = box.offsetTop + 'px'; ov.style.left = box.offsetLeft + 'px'
+    const y = p => { try{ const v = se.priceToCoordinate(p); return (v == null || !isFinite(v)) ? null : v }catch(_){ return null } }
+    // x ab Trade-Start (auf die Minute); liegt der Start vor dem Sichtbereich → linker Rand, fehlt er → rechts neben der letzten Kerze
+    let x0 = 0
+    const st = Date.parse(a.start || '') || 0
+    if(st){
+      const tt = Math.floor(st / 60000) * 60
+      let xs = null; try{ xs = ch.timeScale().timeToCoordinate(tt) }catch(_){}
+      if(xs == null){ try{ const vr = ch.timeScale().getVisibleRange(); xs = (vr && tt < vr.from) ? 0 : breite * 0.92 }catch(_){ xs = 0 } }
+      x0 = Math.max(0, Math.min(breite - 4, xs))
+    }
+    const klemm = v => Math.max(-2, Math.min(hoehe + 2, v))
+    const yE = y(a.entry), yT = a.tp ? y(a.tp) : null
+    // Liq weit weg (WD) → priceToCoordinate liefert einen Wert außerhalb → an der Kante abgeschnitten
+    const yL = a.liq ? y(a.liq) : null
+    let html = ''
+    const zone = (ya, yb, farbe) => { if(ya == null || yb == null) return; const o = klemm(Math.min(ya, yb)), u = klemm(Math.max(ya, yb)); if(u - o < 1) return
+      html += `<div style="position:absolute;left:${x0}px;right:0;top:${o}px;height:${u - o}px;background:${farbe}"></div>` }
+    if(yE != null){
+      zone(yE, yT, 'rgba(22,163,74,.12)')
+      zone(yE, yL, 'rgba(220,38,38,.05)')
+      // Live-P&L-Kästchen auf der Entry-Linie (nur laufend, frischer Kurs)
+      if(a.offen){
+        const k = (typeof wdKursJetzt === 'function') ? wdKursJetzt(a.root === 'NQ' ? 'NQ' : 'MNQ', 15000) : null
+        const m = (k && typeof wdMasterLive === 'function') ? wdMasterLive(a.richtung, a.entry, a.kt, a.root === 'NQ' ? 'NQ' : 'MNQ', k.preis) : null
+        if(m && yE > -10 && yE < hoehe + 10){
+          const plus = m.pl >= 0, txt = `${a.kt != null ? Number(a.kt).toLocaleString('de-DE') : '?'} | ${plus ? '+' : '−'}${Math.abs(m.pl).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`
+          html += `<div style="position:absolute;right:8px;top:${klemm(yE) - 10}px;padding:1px 7px;border-radius:4px;font:600 11px/18px var(--mono, ui-monospace, monospace);color:#fff;background:${plus ? '#16a34a' : '#dc2626'};box-shadow:0 1px 2px rgba(16,24,40,.2);white-space:nowrap">${escapeHtml(txt)}</div>`
+        }
+      }
+    }
+    if(ov.innerHTML !== html) ov.innerHTML = html
+  }
+  // Live-P&L + Auto-Skala: jede Sekunde nachziehen, solange ein Trade ausgewählt und der Chart sichtbar ist
+  setInterval(() => { try{ if(mklAktiv() && (mkl.wd.aktiv || (typeof wdl !== 'undefined' && wdl.auswahl))) mklZonenZeichnen(); else { const o = document.getElementById('mkl-zonen'); if(o) o.style.display = 'none' } }catch(_){} }, 1000)
   function mklOrdersRender(){
     const offenEl = $mkl('mkl-offen'), verlaufEl = $mkl('mkl-verlauf'); if(!offenEl || !verlaufEl) return
     const kurs = mkl.kurs ? mkl.kurs.preis : null
@@ -23600,7 +23675,7 @@
       if(!wdlPasst(t) || !wdlLinienAn(t)) continue
       // feste Farben wie im Winning-Days-Chart, an der Achse nur der Preis (Titel leer)
       const l = (v, farbe, art, breite) => { const p = num(v); if(p != null) out.push({ preis: p, farbe, art, breite, titel: '' }) }
-      l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#15803d', 0, 2); l(t.liq_level_nq, '#b91c1c', 0, 2); l(t.sl_level_nq, '#b91c1c', 0, 2)
+      l(t.einstieg_nq, '#2563EB', 0, 3); l(t.tp_level_nq, '#2563EB', 0, 2); l(t.liq_level_nq, '#b91c1c', 0, 2); l(t.sl_level_nq, '#b91c1c', 0, 2)
       const h = t.hedge || {}, sb = num(t.schliesst_bei_nq) != null ? num(t.schliesst_bei_nq) : num(h.schliesst_bei_nq)
       if(sb != null && t.status === 'open' && h.status && !['geschlossen', 'fehler', 'abgelehnt', 'zu'].includes(String(h.status))) l(sb, '#7C3AED', 2, 2)
     }
@@ -35181,7 +35256,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.735'
+  const OS_TAB_BUILD = '2026-09-22.736'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
