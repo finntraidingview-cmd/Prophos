@@ -1988,6 +1988,27 @@
   #dashboard-view .mwj-zelle small{display:block;font-family:inherit;font-weight:400;font-size:10.5px;color:var(--sub-2)}
   #dashboard-view .mwj-naechste{margin-top:8px;font-size:12px;color:var(--sub)}
   @media (max-width:820px){ #dashboard-view .mwj-zeile{grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr);row-gap:4px} }
+  /* Zeitstrahl „Plan heute Nacht" (F34) — Muster des Farmer-Zeitstrahls (#wz-panel), eine Bahn, Blöcke in Personenfarbe */
+  #dashboard-view .mwz{position:relative;margin:10px 0 4px;padding:0 2px}
+  #dashboard-view .mwz-achse{position:relative;height:20px;border-bottom:1px solid var(--line)}
+  #dashboard-view .mwz-tick{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  #dashboard-view .mwz-tick span{position:absolute;top:1px;left:4px;font-size:10.5px;color:var(--sub);white-space:nowrap;font-style:normal}
+  #dashboard-view .mwz-bahn{position:relative;margin-top:6px}
+  #dashboard-view .mwz-block{position:absolute;min-width:112px;max-width:170px;padding:4px 9px 4px 10px;border:1px solid var(--border-soft);border-left:4px solid var(--mwd-farbe,#667085);border-radius:8px;background:var(--surface);font-size:12px;line-height:1.3;box-shadow:0 1px 2px rgba(16,24,40,.05);user-select:none;touch-action:none}
+  #dashboard-view .mwz-block b{display:block;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #dashboard-view .mwz-block span{display:block;font-family:var(--mono);font-size:11px;color:var(--sub);white-space:nowrap}
+  #dashboard-view .mwz-block.zieh{cursor:grab}
+  #dashboard-view .mwz-block.fest{opacity:.62}
+  #dashboard-view .mwz-block.is-zieht{cursor:grabbing;z-index:5;box-shadow:0 8px 20px rgba(16,24,40,.18)}
+  #dashboard-view .mwz-block.ziel{box-shadow:0 0 0 2px var(--mwd-farbe,#667085);background:var(--surface-2,#f7f8fa)}
+  #dashboard-view .mwz.busy{opacity:.6;pointer-events:none}
+  #dashboard-view .mwz-jetzt{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);pointer-events:none}
+  #dashboard-view .mwz-jetzt span{position:absolute;top:1px;left:3px;padding:0 3px;border-radius:3px;background:var(--surface);font-size:10.5px;color:var(--danger);white-space:nowrap;font-style:normal;z-index:1}
+  @media (max-width:700px){
+    #dashboard-view .mwz-achse,#dashboard-view .mwz-jetzt{display:none}
+    #dashboard-view .mwz-bahn{height:auto!important;display:grid;gap:6px}
+    #dashboard-view .mwz-block{position:static;max-width:none}
+  }
   #dashboard-view .mwd-leer{margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);font-size:12.5px;color:var(--sub)}
   #dashboard-view .mwd-nachtrag{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:8px;padding:8px 10px;border:1px dashed var(--border);border-radius:8px;font-size:12px;color:var(--sub)}
   #dashboard-view .mwd-nachtrag-btn{padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);font-size:11.5px;font-weight:600;cursor:pointer}
@@ -22247,7 +22268,7 @@
    * ID, wie viele Slots, wann es losgeht, meine Übersicht"). Daten wie der Farmer-Tab: wd_farmer_regeln + wd_tagesplan (RLS: jeder
    * Angemeldete liest), Tag = Farmer-Tag (wdNaechsterTag) — hat der heutige Tag noch geplante/laufende Blöcke, bleibt er es (nach
    * 02:00 läuft die Nacht ja noch). Ausgelassene IDs (ids_aus) fehlen wie im Farmer. Nur Anzeige, höchstens alle 60 s. */
-  mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, plaene: null, at: 0, fehler: '' }
+  mkl.wd.plan = { tag: '', heute: '', rows: [], regeln: null, plaene: null, konten: null, farmerAdmin: undefined, at: 0, fehler: '' }
   async function mklWdPlanLaden(){
     if(mkl.stub || Date.now() - mkl.wd.plan.at < 60000) return
     mkl.wd.plan.at = Date.now()
@@ -22261,45 +22282,53 @@
       const aus = new Set(((r && r.ids_aus) || []).map(String))
       const je = t => (rows || []).filter(x => x.tag === t && !aus.has(String(x.user_id)))
       const tag = je(j.tag).some(x => x.status === 'geplant' || x.status === 'laeuft') ? j.tag : naechster
+      const alt = mkl.wd.plan
       // Sofort zeichnen (F32-Zusatz): Tagesplan steht, der Plan-Status von Railway kommt gleich nach — bis dahin der letzte bekannte
-      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene: mkl.wd.plan.tag === tag ? mkl.wd.plan.plaene : null, farmerAdmin: mkl.wd.plan.farmerAdmin, edit: mkl.wd.plan.edit, at: mkl.wd.plan.at, fehler: '' }
+      mkl.wd.plan = Object.assign({}, alt, { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene: alt.tag === tag ? alt.plaene : null, konten: alt.tag === tag ? alt.konten : null, fehler: '' })
       try{ if(mklAktiv()) mklWdRender() }catch(_){}
-      // Status JE PLAN (F32, Finn: „Es sind 4 geplant, aber nur 3 unter WD"): trade_plans zeigt per RLS nur eigene Pläne —
-      // /admin/live-trades (Service-Key, alle IDs, tvv2/tsv2 inkl. planned) liefert Status/TP/Kontrakte/Start je plan_id.
-      // Nicht ladbar → plaene null, die Zeilen zeigen dann den Stand aus wd_tagesplan.konten.
-      let plaene = null, farmerAdmin = mkl.wd.plan.farmerAdmin
-      try{
-        const tok = await _pushTok()
-        if(tok){
+      // Status JE PLAN (F32): /admin/live-trades (Service-Key, alle IDs) und /admin/wd-plaene?tag (Farmer-Admin: route, Symbol,
+      // Kontrakte, Start-Stempel, Konto-Balances, 403 = kein Stift) laufen PARALLEL (F34: der Stift kam erst nach beiden nacheinander).
+      const ladeLt = async () => {
+        try{
+          const tok = await _pushTok(); if(!tok) return null
           const ctrl = new AbortController(), tm = setTimeout(() => ctrl.abort(), 15000)
           const res = await fetch(`${WATCHER_HOME}/admin/live-trades?tage=2`, { headers: { 'sb-token': tok }, cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(tm))
           const d = res.ok ? await res.json().catch(() => null) : null
-          if(d && Array.isArray(d.trades)){ plaene = {}; for(const t of d.trades) plaene[String(t.id || t.plan_id)] = t }
+          return (d && Array.isArray(d.trades)) ? d.trades : null
+        }catch(e){ console.warn('[wd-plan] live-trades', (e && e.message) || e); return null }
+      }
+      const ladeWdp = async () => {
+        if(alt.farmerAdmin === false) return { admin: false }
+        try{ return { admin: true, d: await wdApi('GET', null, `?tag=${encodeURIComponent(tag)}`) } }
+        catch(e){ return { admin: /freigegeben|403/i.test(String((e && e.message) || e)) ? false : alt.farmerAdmin } }
+      }
+      const [lt, wdp] = await Promise.all([ladeLt(), ladeWdp()])
+      let plaene = null
+      if(lt){ plaene = {}; for(const t of lt) plaene[String(t.id || t.plan_id)] = t }
+      const farmerAdmin = wdp.admin
+      mklWdAdminMerken(farmerAdmin)
+      let konten = null
+      if(wdp.d){
+        konten = {}; for(const k of (wdp.d.konten || [])) konten[String(k.id)] = k
+        if(plaene) for(const p of (wdp.d.plaene || [])){
+          const id = String(p.id), da = plaene[id]
+          plaene[id] = da ? Object.assign({}, da, { route: p.route || da.route, master_symbol: p.master_symbol, master_contracts: p.master_contracts, start_um_gestartet_at: p.start_um_gestartet_at, orbit_gesendet_at: p.orbit_gesendet_at })
+                          : Object.assign({ kt: p.master_contracts }, p)
         }
-      }catch(e){ console.warn('[wd-plan] live-trades', (e && e.message) || e) }
-      // Plan-Verweise, die live-trades NICHT kennt (nur tvv2/tsv2 — also Echo V2 oder ein falscher Weg wie Jacobs tvplus-Pläne vom
-      // 27.09.2026): route + Status nachschlagen — eigene Pläne direkt (RLS), alle IDs über /admin/wd-plaene?tag (Farmer-Admin).
+      }
+      // Plan-Verweise, die keiner kennt: eigene Pläne direkt (RLS) — z. B. Echo V2 ohne Farmer-Freigabe
       const fehlen = je(tag).flatMap(x => (x.konten || []).filter(k => k && k.aktiv !== false && k.plan_id).map(k => String(k.plan_id))).filter(id => !(plaene && plaene[id]))
       if(plaene && fehlen.length){
         try{ const { data } = await supabase.from('trade_plans').select('id,route,status,master_tp,master_contracts,master_symbol,richtung,start_um,started_at,start_um_gestartet_at').in('id', fehlen)
              for(const p of (data || [])) plaene[String(p.id)] = Object.assign({ kt: p.master_contracts }, p) }catch(_){}
       }
-      // /admin/wd-plaene?tag (Farmer-Admin, F33): route, master_symbol, master_contracts, start_um_gestartet_at je Plan über ALLE IDs —
-      // ergänzt live-trades und sagt nebenbei, ob hier bearbeitet werden darf (403 = keine Farmer-Freigabe → kein Stift).
-      if(mkl.wd.plan.farmerAdmin !== false){
-        try{
-          const d = await wdApi('GET', null, `?tag=${encodeURIComponent(tag)}`)
-          farmerAdmin = true
-          if(plaene) for(const p of ((d && d.plaene) || [])){
-            const id = String(p.id), da = plaene[id]
-            plaene[id] = da ? Object.assign({}, da, { route: p.route || da.route, master_symbol: p.master_symbol, master_contracts: p.master_contracts, start_um_gestartet_at: p.start_um_gestartet_at, orbit_gesendet_at: p.orbit_gesendet_at })
-                            : Object.assign({ kt: p.master_contracts }, p)
-          }
-        }catch(e){ if(/freigegeben|403/i.test(String((e && e.message) || e))) farmerAdmin = false }
-      }
-      mkl.wd.plan = { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, farmerAdmin, edit: mkl.wd.plan.edit, at: mkl.wd.plan.at, fehler: '' }
+      mkl.wd.plan = Object.assign({}, mkl.wd.plan, { tag, heute: j.tag, rows: je(tag), regeln: r || {}, plaene, konten, farmerAdmin, at: mkl.wd.plan.at, fehler: '' })
     }catch(e){ mkl.wd.plan.fehler = String((e && e.message) || e) }
   }
+  // Farmer-Admin je Nutzer merken (F34, Finn: „Der Edit-Button braucht ewig"): der Stift steht sofort, geprüft wird beim Speichern
+  const MKL_WD_ADMIN_LS = 'prophos_wd_farmer_admin'
+  function mklWdAdminGemerkt(){ try{ const v = JSON.parse(localStorage.getItem(MKL_WD_ADMIN_LS) || 'null'); return (v && v.uid === String(currentUserId || '')) ? !!v.admin : undefined }catch(_){ return undefined } }
+  function mklWdAdminMerken(a){ if(a === true || a === false){ try{ localStorage.setItem(MKL_WD_ADMIN_LS, JSON.stringify({ uid: String(currentUserId || ''), admin: a })) }catch(_){} } }
   const mklWdPlanTagTxt = tag => { try{ return new Date(tag + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' }) }catch(_){ return tag } }
   /* REIN RECHNEND: eine Zeile JE KONTO (= je Trade) des Farmer-Tags, nach ID gruppiert in Startreihenfolge. Status aus dem Plan
    * (live-trades), ohne Plan-Verweis „kein Plan" (bei SCHARF aus normal), Plan-Verweis ohne Treffer „Plan fehlt". */
@@ -22340,6 +22369,8 @@
     const ST = { planned: ['geplant', 'var(--violet)'], open: ['läuft', '#15803d'], review: ['Überprüfen', '#B45309'], completed: ['fertig', 'var(--sub)'],
                  kein_plan: ['kein Plan', 'var(--sub)'], fehlt: ['Plan fehlt', '#b91c1c'], unbekannt: ['–', 'var(--sub)'] }
     const f0 = v => (v == null || v === '' || !isFinite(Number(v))) ? '–' : Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 })
+    // Farmer-Admin: frischer Stand, sonst der gemerkte (F34 — Stift sofort, der Server prüft beim Speichern)
+    const admin = P.farmerAdmin !== undefined ? P.farmerAdmin : mklWdAdminGemerkt()
     const zeilen = tr.map(t => {
       const st = t.status === 'falscher_weg' ? [`falscher Weg (${t.plan.route})`, '#b91c1c'] : ST[t.status] || [t.status || '–', 'var(--sub)'], a = Date.parse(t.start_um || '') || 0
       const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(t.uid) : '#667085'
@@ -22350,13 +22381,15 @@
       const buy = t.richtung === 'buy', sell = t.richtung === 'sell'
       // mehrere Konten einer ID laufen über die Warteschlange ihres PCs nacheinander (tpStartUmTick)
       const startSub = t.n > 1 && t.nr > 1 ? `#${t.nr} danach` : 'Dubai'
-      const wer = t.nr === 1 ? `<b>${escapeHtml(t.name)}</b><small>${escapeHtml(kurz)}</small>` : `<b style="font-weight:400;color:var(--sub-2)">↳</b><small>${escapeHtml(kurz)}</small>`
+      const bal = mklWdKontoBalance(P, k)
+      const balZ = `<small style="display:block;margin-left:0" title="${escapeHtml(bal.tip)}">${escapeHtml(bal.text)}</small>`
+      const wer = (t.nr === 1 ? `<b>${escapeHtml(t.name)}</b><small>${escapeHtml(kurz)}</small>` : `<b style="font-weight:400;color:var(--sub-2)">↳</b><small>${escapeHtml(kurz)}</small>`) + balZ
       // BEARBEITEN (F33): nur Farmer-Admins, nur geplant + nicht gestartet (der Server prüft dasselbe beim PATCH)
       const pid = String(k.plan_id || ''), darf = t.status === 'planned' && !t.gestartet
-      if(P.farmerAdmin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
+      if(admin && P.edit && P.edit.id === pid) return mklWdPlanEditHtml(t, farbe, wer)
       // Plan fehlt (28.09.2026, Chris 92dd21d0 von Hand gelöscht, Verweis blieb stehen): Farmer-Admins legen ihn hier neu an
-      const neuKnopf = (P.farmerAdmin && t.status === 'fehlt' && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-neu="${escapeHtml(pid)}" style="padding:0 7px;margin-left:6px;font-size:11.5px;line-height:18px;height:auto;vertical-align:1px;color:#b91c1c" title="Verweis im Tagesplan lösen und den Plan wie der Farmer neu anlegen (gleiche Startzeit, TP aus der Vorgabe)"${P.neuBusy === pid ? ' disabled' : ''}>${P.neuBusy === pid ? 'legt an…' : 'Plan neu anlegen'}</button>` : ''
-      const stift = (P.farmerAdmin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
+      const neuKnopf = (admin && t.status === 'fehlt' && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-neu="${escapeHtml(pid)}" style="padding:0 7px;margin-left:6px;font-size:11.5px;line-height:18px;height:auto;vertical-align:1px;color:#b91c1c" title="Verweis im Tagesplan lösen und den Plan wie der Farmer neu anlegen (gleiche Startzeit, TP aus der Vorgabe)"${P.neuBusy === pid ? ' disabled' : ''}>${P.neuBusy === pid ? 'legt an…' : 'Plan neu anlegen'}</button>` : ''
+      const stift = (admin && pid) ? `<button type="button" class="btn btn-ghost" data-mwp-edit="${escapeHtml(pid)}" style="padding:0 6px;margin-left:6px;font-size:12px;line-height:18px;height:auto;vertical-align:1px"${darf ? ' title="TP, Kontrakte, MNQ/NQ, Richtung bearbeiten"' : ` disabled title="${escapeHtml(t.gestartet ? 'Puls hat den Plan schon gestartet — nicht mehr bearbeitbar' : 'nur geplante Trades sind bearbeitbar')}"`}>✎</button>` : ''
       return `<div class="mwj-zeile" style="--mwd-farbe:${farbe};cursor:default${t.nr > 1 ? ';margin-top:-2px' : ''}" title="${escapeHtml(t.name + ' · ' + (k.name || kurz) + (t.n > 1 ? ` · Konto ${t.nr} von ${t.n} — läuft über die Warteschlange des PCs nacheinander` : ''))}">
           <span class="mwj-wer">${wer}</span>
           <span class="mwd-chip ${buy ? 'mwd-buy' : sell ? 'mwd-sell' : ''}">${buy ? 'BUY' : sell ? 'SELL' : '?'}</span>
@@ -22369,7 +22402,7 @@
     const leer = !tr.length ? `<div class="mwd-leer">Für ${escapeHtml(mklWdPlanTagTxt(P.tag))} ist noch keine ID mit Konto eingeplant.</div>` : ''
     const ohneZ = ohne.length ? `<div class="mwj-naechste">Kein Konto angehakt: ${ohne.map(x => escapeHtml(String(x.name || '?'))).join(', ')}</div>` : ''
     const quelle = P.plaene ? '' : `<div class="mwj-naechste">Plan-Status gerade nicht ladbar — Stand aus dem Tagesplan.</div>`
-    return kopf + hinweis + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ + (tr.length ? quelle : '')
+    return kopf + hinweis + mklWdZeitHtml(P, tr, admin) + leer + `<div class="mwj-liste">${zeilen}</div>` + ohneZ + (tr.length ? quelle : '')
   }
   /* INLINE-BEARBEITUNG (F33, 28.09.2026, Finn am „Plan heute Nacht": „einmal auf Bearbeiten gehen und dann genau hier TP oder
    * Lotanzahl oder NQ/MNQ bearbeiten"). Stand im Speicher (P.edit), damit der 15-s-Neuaufbau nichts verliert; Eingabefelder tragen
@@ -22467,10 +22500,121 @@
       const a = await wdPlaeneAnlegen(row.tag)
       text = a.angelegt ? `✓ ${a.angelegt} Plan${a.angelegt === 1 ? '' : 'e'} angelegt` : ('nichts angelegt' + (a.fehler && a.fehler.length ? ' · ' + a.fehler.join(' · ') : ''))
     }catch(e){ text = 'Fehler: ' + ((e && e.message) || e) }
-    P.neuBusy = null
-    P.at = 0; await mklWdPlanLaden()
+    P.neuBusy = null; mkl.wd.plan.neuBusy = null
+    P.at = 0; mkl.wd.plan.at = 0; await mklWdPlanLaden()
     mkl.wd.plan.neuMsg = { id: pid, text }; mklWdRender()   // die neue plan_id hat eine neue Zeile — deshalb auch als Toast
     if(typeof atToast === 'function') atToast(`${t.name}: ${text}`, /^✓/.test(text) ? 'start' : 'end')
+  }
+  /* BALANCE JE KONTO (F34, Finn: „Dazu die Balance der Accounts sehen"): Live · TradingView aus /admin/wd-plaene (konten[].live_balance,
+   * live_at — dieselbe Quelle wie der Farmer), sonst der Stand, den der PC-Tab in den Tagesplan geschrieben hat (k.live/k.plus).
+   * „+x über 150k" = Balance − Kontogröße (starting_balance, sonst die Zahl vor dem k im Namen). */
+  function mklWdKontoBalance(P, k){
+    const kd = (P.konten && k && P.konten[String(k.id)]) || null
+    const live = kd && Number(kd.live_balance) > 0 ? Number(kd.live_balance) : (Number(k && k.live) > 0 ? Number(k.live) : null)
+    if(live == null) return { text: 'Balance noch nicht gelesen', tip: 'Puls hat dieses Konto noch nicht in TradingView gelesen' }
+    const m = /(\d{2,3})\s*k/i.exec(String((k && k.name) || (kd && kd.name) || ''))
+    const groesse = (kd && Number(kd.starting_balance) > 1000) ? Number(kd.starting_balance) : m ? Number(m[1]) * 1000 : null
+    const plus = groesse ? live - groesse : (Number(k && k.plus) || null)
+    const z = v => Math.round(v).toLocaleString('de-DE')
+    const at = kd && kd.live_at ? Date.parse(kd.live_at) : 0
+    const alter = at ? (() => { const min = Math.max(0, Math.round((Date.now() - at) / 60000)); return min < 60 ? `vor ${min} min` : min < 2880 ? `vor ${Math.round(min / 60)} h` : `vor ${Math.round(min / 1440)} T` })() : ''
+    return { text: `${z(live)} $${plus != null ? ` · ${plus >= 0 ? '+' : '−'}${z(Math.abs(plus))}${groesse ? ' über ' + z(groesse / 1000) + 'k' : ''}` : ''}${alter ? ' · ' + alter : ''}`,
+             tip: `Live · TradingView${at ? ' — gelesen ' + new Date(at).toLocaleString('de-DE') : ' (Stand aus dem Tagesplan)'}` }
+  }
+  /* ZEITSTRAHL (F34, Finn: „ein Zeitstrahl, Jacob, dann der Abstand, dann die nächsten … per Drag & Drop verschieben, z. B. Jacob hinter
+   * Pascal, sodass die Blöcke tauschen"). Eine Bahn in Dubai-Zeit, je ID ein Block in Personenfarbe (Name · Start · Trades · Richtung,
+   * „+x min" = Abstand zum vorigen Block), jetzt-Linie. Blöcke, die zu dicht stehen, rutschen in die nächste Zeile (höchstens 3). Auf dem
+   * Handy (CSS) untereinander. Ziehen nur für Farmer-Admins und nur geplante, nicht gestartete Blöcke. */
+  function mklWdZeitHtml(P, tr, admin){
+    const ids = []
+    for(const t of tr){ if(!ids.some(x => x.uid === t.uid)) ids.push({ uid: t.uid, name: t.name, row: t.row, trades: [] }); ids.find(x => x.uid === t.uid).trades.push(t) }
+    const mitZeit = ids.filter(x => Date.parse(x.row.start_um || '') > 0).sort((a, b) => Date.parse(a.row.start_um) - Date.parse(b.row.start_um))
+    if(!mitZeit.length) return ''
+    const H = 3600000, jetzt = Date.now(), zeiten = mitZeit.map(x => Date.parse(x.row.start_um))
+    const t0 = Math.floor((Math.min(...zeiten) - 15 * 60000) / (H / 2)) * (H / 2), t1 = Math.ceil((Math.max(...zeiten) + 45 * 60000) / (H / 2)) * (H / 2)
+    const pct = t => Math.max(0, Math.min(100, (t - t0) / (t1 - t0) * 100))
+    let ticks = ''
+    for(let t = t0; t <= t1; t += H / 2){ const voll = ((t - t0) % H) === 0 || (t1 - t0) <= 2 * H; ticks += `<i class="mwz-tick" style="left:${pct(t).toFixed(2)}%">${voll ? `<span>${escapeHtml(wdHhmm(new Date(t).toISOString()))}</span>` : ''}</i>` }
+    // Block ≈ 150 px breit → in % der echten Bahnbreite (letzter Stand des Blocks), damit nichts überlappt; höchstens 3 Zeilen
+    const bw = (document.getElementById('mkl-wd') && document.getElementById('mkl-wd').clientWidth) || 900
+    const BREITE = Math.min(60, 150 / Math.max(300, bw - 40) * 100), bahnEnde = [-99, -99, -99]
+    const bloecke = mitZeit.map((x, i) => {
+      const a = Date.parse(x.row.start_um), p = pct(a)
+      let bahn = bahnEnde.findIndex(e => p - e >= BREITE); if(bahn < 0) bahn = bahnEnde.indexOf(Math.min(...bahnEnde)); bahnEnde[bahn] = p
+      const farbe = (typeof mt5FleetFarbe === 'function') ? mt5FleetFarbe(x.uid) : '#667085'
+      const fest = x.row.status !== 'geplant' || x.trades.some(t => t.gestartet || !['planned', 'kein_plan', 'fehlt'].includes(t.status))
+      const zieh = admin && !fest && !P.tauschBusy
+      const dir = x.row.richtung === 'buy' ? 'BUY' : x.row.richtung === 'sell' ? 'SELL' : ''
+      const abst = i > 0 ? Math.round((a - Date.parse(mitZeit[i - 1].row.start_um)) / 60000) : null
+      const rechts = p > 82
+      return `<div class="mwz-block${fest ? ' fest' : ''}${zieh ? ' zieh' : ''}${P.zielUid === x.uid ? ' ziel' : ''}" ${zieh ? `data-mwz-drag="${escapeHtml(x.uid)}"` : ''} style="--mwd-farbe:${farbe};top:${bahn * 44}px;${rechts ? `right:${(100 - p).toFixed(2)}%` : `left:${p.toFixed(2)}%`}" title="${escapeHtml(x.name)} · ${escapeHtml(wdHhmm(x.row.start_um))} Dubai · ${x.trades.length} Trade${x.trades.length === 1 ? '' : 's'}${zieh ? ' — auf einen anderen Block ziehen: die beiden tauschen ihre Startzeit' : fest ? ' — läuft/fertig, fest' : ''}">
+          <b>${escapeHtml(x.name)}</b><span>${escapeHtml(wdHhmm(x.row.start_um))}${abst != null ? ` · +${abst} min` : ''} · ${x.trades.length} × ${dir || '?'}</span></div>`
+    }).join('')
+    const bahnen = Math.max(1, bahnEnde.filter(e => e > -99).length)
+    const jetztL = (jetzt >= t0 && jetzt <= t1) ? `<i class="mwz-jetzt" style="left:${pct(jetzt).toFixed(2)}%"><span>jetzt ${escapeHtml(wdHhmm(new Date(jetzt).toISOString()))}</span></i>` : ''
+    return `<div class="mwz${P.tauschBusy ? ' busy' : ''}"><div class="mwz-achse">${ticks}</div><div class="mwz-bahn" style="height:${bahnen * 44}px">${bloecke}</div>${jetztL}</div>`
+      + (admin ? `<div class="mwj-naechste" style="margin-top:4px">${P.tauschBusy ? 'tauscht …' : 'Block auf einen anderen ziehen → die beiden IDs tauschen ihre Startzeit.'}</div>` : '')
+  }
+  // Ziehen mit Pointer-Events (Maus + Touch); ab 6 px Bewegung, Ziel = Block unter dem Finger. Während des Ziehens zeichnet mklWdRender nicht.
+  function mklWdZeitVerdrahten(el){
+    const P = mkl.wd.plan; if(!P) return
+    el.querySelectorAll('.mwz-block[data-mwz-drag]').forEach(b => {
+      b.addEventListener('pointerdown', ev => {
+        if(ev.button > 0 || P.tauschBusy) return
+        const x0 = ev.clientX, y0 = ev.clientY; let zieht = false, ziel = null
+        try{ b.setPointerCapture(ev.pointerId) }catch(_){}
+        const zielUnter = e => { try{ return document.elementsFromPoint(e.clientX, e.clientY).map(n => n.closest && n.closest('.mwz-block[data-mwz-drag]')).find(n => n && n !== b) || null }catch(_){ return null } }
+        const move = e => {
+          const dx = e.clientX - x0, dy = e.clientY - y0
+          if(!zieht && Math.hypot(dx, dy) < 6) return
+          zieht = true; P.zieht = true; b.classList.add('is-zieht'); b.style.transform = `translate(${dx}px,${dy}px)`
+          const z = zielUnter(e); if(z !== ziel){ if(ziel) ziel.classList.remove('ziel'); ziel = z; if(ziel) ziel.classList.add('ziel') }
+        }
+        const ende = () => {
+          b.removeEventListener('pointermove', move); b.removeEventListener('pointerup', ende); b.removeEventListener('pointercancel', ende)
+          b.style.transform = ''; b.classList.remove('is-zieht'); if(ziel) ziel.classList.remove('ziel')
+          P.zieht = false; mkl.wd.plan.zieht = false
+          if(zieht && ziel) mklWdPlanTauschen(b.dataset.mwzDrag, ziel.dataset.mwzDrag)
+          else mklWdRender()
+        }
+        b.addEventListener('pointermove', move); b.addEventListener('pointerup', ende); b.addEventListener('pointercancel', ende)
+      })
+    })
+  }
+  /* TAUSCH: die beiden Tagesplan-Zeilen tauschen start_um + reihenfolge (die Slots bleiben, nur die IDs wechseln), konten[].start_um und
+   * alle geplanten, nicht gestarteten Pläne ziehen mit (/admin/wd-plaene PATCH start_um; der Server prüft planned + nicht gestartet).
+   * Zeilen nur, solange sie „geplant" sind. Geht etwas schief, wird der alte Stand zurückgeschrieben. Der Farmer (Mac + PC-Tab) zieht
+   * start_um ohnehin aus der Zeile nach — nach dem Tausch zeigt alles dieselbe Zeit. */
+  async function mklWdPlanTauschen(uidA, uidB){
+    const P = mkl.wd.plan; if(!P || P.tauschBusy || !uidA || !uidB || uidA === uidB) return
+    const A = (P.rows || []).find(x => String(x.user_id) === String(uidA)), B = (P.rows || []).find(x => String(x.user_id) === String(uidB))
+    const toast = (t, k) => { if(typeof atToast === 'function') atToast(t, k) }
+    if(!A || !B || !A.start_um || !B.start_um || A.status !== 'geplant' || B.status !== 'geplant') return toast('Tauschen geht nur zwischen geplanten Blöcken', 'end')
+    P.tauschBusy = true; mklWdRender()
+    const schreibe = async (row, start, rf, basis) => {
+      const konten = (basis || []).map(k => (k && k.aktiv !== false) ? { ...k, start_um: start } : k)
+      const { data, error } = await supabase.from('wd_tagesplan').update({ start_um: start, reihenfolge: rf, konten, updated_at: new Date().toISOString() })
+        .eq('tag', row.tag).eq('user_id', row.user_id).eq('status', 'geplant').select('user_id')
+      if(error) throw error
+      if(!data || !data.length) throw new Error(`${row.name}: Zeile ist nicht mehr geplant`)
+      for(const k of konten){
+        if(!k || k.aktiv === false || !k.plan_id) continue
+        const p = P.plaene && P.plaene[String(k.plan_id)]; if(p && p.status && p.status !== 'planned') continue
+        const x = await wdApi('PATCH', { id: String(k.plan_id), upd: { start_um: start } })
+        if(x && x.geaendert === false && p) throw new Error(`${row.name}: Plan schon gestartet`)
+      }
+    }
+    const alt = [[A, A.start_um, A.reihenfolge, A.konten], [B, B.start_um, B.reihenfolge, B.konten]]
+    try{
+      await schreibe(A, B.start_um, B.reihenfolge, A.konten)
+      await schreibe(B, A.start_um, A.reihenfolge, B.konten)
+      toast(`✓ ${A.name} ↔ ${B.name} getauscht — ${A.name} ${wdHhmm(B.start_um)}, ${B.name} ${wdHhmm(A.start_um)}`, 'start')
+    }catch(e){
+      for(const [row, s, rf, k] of alt){ try{ await schreibe(row, s, rf, k) }catch(_){} }   // zurück auf den alten Stand
+      toast('Tausch nicht möglich: ' + ((e && e.message) || e) + ' — alter Stand wiederhergestellt', 'end')
+    }
+    P.tauschBusy = false; P.at = 0; mkl.wd.plan.tauschBusy = false; mkl.wd.plan.at = 0   // der Lader kann das Objekt inzwischen ersetzt haben
+    await mklWdPlanLaden(); mklWdRender()
   }
   // Zähler für den Block-Titel aus DERSELBEN Quelle (F32: oben stand „0 geplant", unten 4 Trades)
   function mklWdPlanZaehler(){
@@ -22494,6 +22638,7 @@
   function mklWdRender(){
     const el = $mkl('mkl-wd'); if(!el) return
     // Tippt Finn gerade in der Abhak-Liste, nicht neu zeichnen — sonst verliert das Feld den Fokus (25.09.2026)
+    if(mkl.wd.plan && mkl.wd.plan.zieht) return   // F34: während ein Zeitstrahl-Block gezogen wird, nicht neu zeichnen
     try{ const a = document.activeElement; if(a && a.classList && (a.classList.contains('mwd-abh-in') || a.classList.contains('mwd-geb-in') || a.classList.contains('mwp-in')) && el.contains(a)) return }catch(_){}
     // Nur laufende und geplante Karten (Finn 25.09.2026: „Die vergangenen Trades sollen da nicht sein, das hat keinen Sinn");
     // beendete ohne eingetragenes Ergebnis erscheinen nur als EINE Nachtrag-Zeile unter den Karten, completed nie.
@@ -22627,6 +22772,7 @@
     el.querySelectorAll('[data-mwd-aktion]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); mklWdAktion(b.dataset.mwdPlan, b.dataset.mwdAktion) }))
     mklWdAbhakenVerdrahten(el)
     mklWdPlanVerdrahten(el)   // Plan heute Nacht: Stift/Bearbeiten (F33), eigene Handler je Knopf
+    mklWdZeitVerdrahten(el)   // Zeitstrahl: Blöcke tauschen per Drag & Drop (F34)
     mklWdJetztRender(jetzt, pl, { sig, col, uhr, dauer, f0, kp })
   }
   /* Läuft gerade (26.09.2026, Finn: „eine Übersicht darüber, welche Winning Days gerade ablaufen"): oben über dem Chart je laufendem
@@ -34800,7 +34946,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.719'
+  const OS_TAB_BUILD = '2026-09-22.720'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
