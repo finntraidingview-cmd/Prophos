@@ -1046,6 +1046,55 @@ def main():
         and order_bot.tv_order_meldungen(_TO, "ESZ6") == []
         and order_bot.tv_order_meldungen([("Take Profit order placed on", (130, 1100, 400, 1120), "Text"), ("Stop Loss order placed on", (130, 1130, 400, 1150), "Text")], "NQZ6")
             == ["Take Profit order placed on", "Stop Loss order placed on"])
+    # Fill aus der Meldung (28.09.2026, Vorfall Jacob c28a7639: Einstieg aus dem Feed 12 Pkt neben dem echten Fill)
+    _ME = [("Market order executed on", (130, 1040, 330, 1058), "Text"), ("MNQZ6", (335, 1040, 390, 1058), "Hyperlink"),
+           ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text"),
+           ("Take Profit order placed on", (130, 1100, 330, 1118), "Text"), ("MNQZ6", (335, 1100, 390, 1118), "Hyperlink"),
+           ("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 MNQZ6 MARKET", (1325, 920, 1618, 978), "Button")]
+    _m1 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4)
+    _m2 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 4, vorher=["Buy 4 at 30,838.00"])   # alte Meldung zaehlt nie
+    _m3 = order_bot.tv_meldung_preise([("Take Profit order placed on MNQZ6 · Sell 2 at 30,858.25", (130, 1100, 520, 1118), "Text")], "MNQZ6", "buy", 2)
+    _m4 = order_bot.tv_meldung_preise([("Market order executed on NQZ6 · Sell 1 at 30.838,50", (130, 1100, 520, 1118), "Text")], "NQZ6", "sell", 1)
+    _m5 = order_bot.tv_meldung_preise(_ME, "MNQZ6", "buy", 3)            # falsche Menge -> nichts
+    _m6 = order_bot.tv_meldung_preise(_ME, "ESZ6", "buy", 4)             # Symbol-Chip MNQZ6 neben dem Titel, Plan ES -> fremd, nichts
+    _m7 = order_bot.tv_meldung_preise([("Stop Loss order placed on", (130, 1100, 330, 1118), "Text"), ("Sell 4 at 30,700.00", (130, 1122, 300, 1138), "Text")], "MNQZ6", "buy", 4)
+    _m8 = order_bot.tv_meldung_preise([("Sell 4 at 30,872.75", (130, 1122, 300, 1138), "Text"), ("Buy 4 at 30,838.00", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 4)
+    chk("TV-ORDER Fill aus der Meldung: executed + Plan-Seite = Fill, TP-Order-Preis der Gegenseite, alte/fremde Menge nie, SL nie als TP",
+        _m1["fill"] == 30838.0 and _m1["tp"] == 30872.75 and _m1["sl"] is None
+        and _m2["fill"] is None and _m2["tp"] == 30872.75
+        and _m3["fill"] is None and _m3["tp"] == 30858.25
+        and _m4["fill"] == 30838.5 and _m4["tp"] is None
+        and _m5["fill"] is None and _m5["tp"] is None
+        and _m6["fill"] is None and _m6["tp"] is None
+        and _m7["tp"] is None and _m7["sl"] == 30700.0 and _m7["fill"] is None
+        and _m8["fill"] == 30838.0 and _m8["tp"] == 30872.75
+        and order_bot.tv_meldung_art("Take Profit order filled on MNQZ6") == "tp" and order_bot.tv_meldung_art("Market order executed on") == "fill"
+        and "Text:Buy 4 at 30,838.00" in order_bot.tv_meldung_zone(_ME))
+    # Finn 28.09.2026: „Market order filled" + Bracket-Modification, DE-Format, deutsche Woerter; Rohtexte immer
+    _MD = [("Market order filled", (130, 1040, 330, 1058), "Text"), ("Buy 1 at 30,816.25", (130, 1062, 300, 1078), "Text"),
+           ("Limit order modified", (130, 1100, 330, 1118), "Text"), ("Sell 1 at 30,822.00", (130, 1122, 300, 1138), "Text"),
+           ("Take profit, $", (1325, 500, 1420, 518), "Text"), ("Sell 1 at 30,999.00", (1325, 522, 1480, 538), "Text")]
+    _d1 = order_bot.tv_meldung_preise(_MD, "MNQZ6", "buy", 1)
+    _d2 = order_bot.tv_meldung_preise([("Marktorder ausgeführt", (130, 1040, 330, 1058), "Text"), ("Kaufen 1 zu 30.816,25", (130, 1062, 300, 1078), "Text")], "MNQZ6", "buy", 1)
+    _r1 = order_bot.tv_meldung_roh(_MD + [("Chart", (0, 0, 50, 20), "Text")], vorher=["Chart"])
+    chk("TV-ORDER Meldung: 'Market order filled' = Fill, 'Limit order modified' = TP (tv_limit), DE-Format/deutsch, Panel-Label nie, Rohtexte",
+        _d1["fill"] == 30816.25 and _d1["tp"] == 30822.0
+        and _d2["fill"] == 30816.25
+        and order_bot.tv_meldung_art("Take profit, $") is None and order_bot.tv_meldung_art("Limit order filled on MNQZ6") == "tp"
+        and "Text:Market order filled" in _r1 and "Text:Sell 1 at 30,822.00" in _r1 and not any("Chart" in x for x in _r1))
+    # Finns Screenshots 28.09.2026 00:34 (Jacob-PC): drei gestapelte Meldungen, sichtbar nur eine + 'Show more' (Zaehler 3)
+    _ST = [("Market order placed on", (40, 900, 240, 918), "Text"), ("MNQZ6", (245, 900, 300, 918), "Button"), ("Buy 1", (40, 922, 90, 938), "Text"),
+           ("Market order executed on", (40, 960, 250, 978), "Text"), ("MNQZ6", (255, 960, 310, 978), "Button"), ("Buy 1 at 30,807.25", (40, 982, 200, 998), "Text"),
+           ("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("MNQZ6", (265, 1020, 320, 1038), "Button"), ("Sell 1 at 30,812.75", (40, 1042, 200, 1058), "Text")]
+    _s1 = order_bot.tv_meldung_preise(_ST, "MNQZ6", "buy", 1)
+    _k1 = order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show more", (40, 1070, 140, 1090), "Button"),
+                                        ("Show more", (1500, 300, 1580, 320), "Button")])
+    chk("TV-ORDER Stapel: executed = Fill 30807.25, TP-Limit 30812.75, 'Buy 1' ohne Preis nie; 'Show more' nur am Stapel, 'Show less' nie, fremdes nie",
+        _s1["fill"] == 30807.25 and _s1["tp"] == 30812.75
+        and order_bot.tv_meldung_preise(_ST, "ESZ6", "buy", 1)["fill"] is None   # Chip MNQZ6 neben dem Titel, Plan ES -> fremd
+        and _k1 == {"punkt": (90, 1080), "text": "Show more"}
+        and order_bot.tv_show_more_knopf([("Take Profit order placed on", (40, 1020, 260, 1038), "Text"), ("Show less 3", (40, 1070, 140, 1090), "Button")]) is None
+        and order_bot.tv_show_more_knopf([("Show more", (1500, 300, 1580, 320), "Button")]) is None)
     # Leerzeit Konto-Lesen (22.09.2026): ein sichtbar FREMDES Konto beendet die Leseschleife.
     chk("TV-KONTO: fremdes Konto erkannt — kontoartig (Buchstaben + Ziffern, ' USD'), nie eine erwartete ID, nie reine Ziffern",
         order_bot.tv_fremdes_konto(["30,849.00", "4470324", "APEX6416990000025 USD"], ["TDFYSL150813173931", "TDFYSL150813173930"]) == "APEX6416990000025 USD"

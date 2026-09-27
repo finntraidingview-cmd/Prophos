@@ -20168,9 +20168,11 @@
   async function hedgeSoloOeffnenKern(plan, r){
     // Doppel-Open-Riegel (Gegenprüfung 25.09.2026): frisch lesen — steht schon ein Hedge in Arbeit oder offen, NICHT noch einmal
     // öffnen. 'wartet' eines anderen Laufs zählt nur, solange er jünger als 2 min ist (sonst Rest eines neu geladenen Tabs).
+    let handAlt = null   // Hand-Werte am Hedge (✎ Entry aus TV: einstieg_quelle 'hand (TV)', tp_quelle 'entry_hand'/'hand') — nie überschreiben (Master 28.09.2026)
     try{
       const { data: z, error: ze } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
       const hz = (!ze && z && z.mt5_baseline && z.mt5_baseline.hedge) || null
+      if(hz && (/^hand/.test(String(hz.einstieg_quelle || '')) || /hand/.test(String(hz.tp_quelle || '')))) handAlt = hz
       const alterMs = hz ? Date.now() - (Date.parse(hz.at || hz.opened_at || '') || 0) : Infinity
       if(hz && (['oeffnet', 'offen', 'schliesst', 'unklar'].includes(hz.status) || (hz.status === 'wartet' && alterMs < 120000))){
         console.warn('[hedgeSolo] nicht erneut geöffnet — Hedge steht schon auf', hz.status)
@@ -20191,11 +20193,44 @@
       if(typeof atToast === 'function') atToast('⚠ Fusion-Hedge NICHT geöffnet: ' + msg, 'end')
       return null
     }
-    // Einstiegskurs: vom Bot (Avg Fill Price der Position), sonst der Live-Kurs des Feeds — mit Quelle
+    // Einstiegskurs — RANGFOLGE (28.09.2026, Finn 02:20 Dubai nach Vorfall Jacob c28a7639: „Einstieg = der echte Fill in dem Moment,
+    // in dem die Order wirklich gefüllt ist, nicht der Kurs beim Drücken und nicht beim Hedge-Open"):
+    //   1) echter Fill von Puls (TradingView-Meldung „executed … at", sonst Avg Fill aus Tabelle/Reader)          → 'fill'
+    //   2) Feed-Kurs zum Klickzeitpunkt (r.order_klick_ms) aus dem Tab-Puffer (hedgeFeedAmKlick)                   → 'feed_klick'
+    //   3) wie bisher: Feed-Kurs jetzt, beim Hedge-Open                                                            → 'feed …'
+    // TP-LEVEL (Finns Testorder 385f70a5, 1 MNQ, TP 11 $ = 5,5 Pkt: Entry 30816,25, Sell Limit 30822,00 — TradingView rechnet die Bracket
+    // ab dem Kurs beim ABSENDEN, nicht ab dem Fill): meldet Puls den Preis der TP-Limit-Order (r.tp_limit, aus TradingViews Meldung
+    // „Take Profit order placed … at"), ist DER tp_level_nq (tp_quelle 'tv_limit'), Schließen bei Limit ± hedge_puffer ohne Zuschlag.
+    // Sonst Einstieg ± TP-Distanz, und alles außer 'fill' bekommt den Zuschlag HEDGE_PUFFER_OHNE_FILL; ein späterer Puls-avg_fill
+    // rechnet nach (hedgeEinstiegNachtragen), ein 'tv_limit'-TP bleibt dabei stehen.
     let einstieg = (r && r.einstieg != null) ? tvKursZahl(r.einstieg) : null, quelle = 'fill'
-    let einstiegWurzel = null
-    if(!(einstieg > 1000)){ const kq = await hedgeKursAktuell(ppl === 20 ? 'NQ' : 'MNQ'); einstieg = kq ? kq.preis : null; einstiegWurzel = kq ? kq.wurzel : null; quelle = kq ? `feed ${kq.wurzel} (${kq.quelle})` : 'keine' }   // Plan-Wurzel bevorzugt, sonst die andere (Gegenprüfung 25.09.2026)
-    const tpLevel = (einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null
+    let einstiegWurzel = null, tpVonOrder = null, feedKlick = null
+    const wPlan = ppl === 20 ? 'NQ' : 'MNQ'
+    const klickMs = (r && Number(r.order_klick_ms) > 0) ? Number(r.order_klick_ms) : null
+    const tpPreisTv = (r && r.tp_limit != null) ? Number(r.tp_limit) : null   // Puls: Preis der TP-Limit-Order aus der Meldung „Take Profit order placed … Sell 1 at …"
+    if(!(einstieg > 1000) && klickMs) feedKlick = hedgeFeedAmKlick(wPlan, klickMs)
+    const feedJetzt = (!(einstieg > 1000) && !feedKlick) ? await hedgeKursAktuell(wPlan) : null   // Plan-Wurzel bevorzugt, sonst die andere (Gegenprüfung 25.09.2026)
+    const tpRef = (einstieg > 1000) ? einstieg : feedKlick ? feedKlick.preis : feedJetzt ? feedJetzt.preis : null
+    if(hedgeTpPreisPasst(tpPreisTv, tpRef, plan.richtung, punkte)) tpVonOrder = Math.round(tpPreisTv * 100) / 100
+    if(!(einstieg > 1000)){
+      if(feedKlick){ einstieg = feedKlick.preis; einstiegWurzel = feedKlick.wurzel; quelle = 'feed_klick' }
+      else { einstieg = feedJetzt ? feedJetzt.preis : null; einstiegWurzel = feedJetzt ? feedJetzt.wurzel : null; quelle = feedJetzt ? `feed ${feedJetzt.wurzel} (${feedJetzt.quelle})` : 'keine' }
+    }
+    let tpLevel = tpVonOrder || ((einstieg > 0) ? Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100 : null)
+    // Hand-Werte gehen vor (Master 28.09.2026: „Ein Hand-Wert darf von deinem Fill-Weg NIE überschrieben werden")
+    const handEin = !!(handAlt && /^hand/.test(String(handAlt.einstieg_quelle || '')) && Number(handAlt.einstieg_nq) > 1000)
+    const handTp = !!(handAlt && /hand/.test(String(handAlt.tp_quelle || '')) && Number(handAlt.tp_level_nq) > 1000)
+    if(handEin){ einstieg = Number(handAlt.einstieg_nq); quelle = String(handAlt.einstieg_quelle); einstiegWurzel = handAlt.einstieg_wurzel || einstiegWurzel }
+    if(handTp){ tpLevel = Number(handAlt.tp_level_nq); tpVonOrder = null }
+    else if(handEin && !tpVonOrder) tpLevel = Math.round((plan.richtung === 'buy' ? einstieg + punkte : einstieg - punkte) * 100) / 100
+    const echterEinstieg = quelle === 'fill' || /^hand/.test(quelle)
+    const echterTp = echterEinstieg || !!tpVonOrder || handTp   // TP-Level ist echt (Fill/Hand/Limit-Preis) → ohne Zuschlag HEDGE_PUFFER_OHNE_FILL
+    const schliesstBeiOpen = (handTp && Number(handAlt.schliesst_bei_nq) > 0) ? Number(handAlt.schliesst_bei_nq)
+      : hedgeSchliesstBei(plan.richtung, tpLevel, echterTp ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill())
+    // Herkunft am Hedge festhalten (Nachweis für den ersten echten Lauf): Klickzeit, Fill-Quelle von Puls, roher TP-Preis aus TV
+    const herkunft = { order_klick_at: klickMs ? new Date(klickMs).toISOString() : null, einstieg_fill_quelle: (r && r.einstieg_quelle) || null,
+      tp_limit_tv: (tpPreisTv > 0) ? tpPreisTv : null, tp_quelle: handTp ? handAlt.tp_quelle : tpVonOrder ? 'tv_limit' : null,
+      einstieg_klick_abstand_ms: feedKlick ? feedKlick.abstand_ms : null, tv_meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null }
     // Winning Day (F22): zweites Level = Liquidation des Masters (Kontogröße + 100 $) statt Master-SL
     const liqWd = hedgeIstWd(plan) ? hedgeLiqLevel(plan, einstieg, ppl, kt) : null
     if(liqWd) slPunkte = liqWd.sl_punkte > 0 ? liqWd.sl_punkte : 0
@@ -20204,7 +20239,7 @@
                                             : { sl_art: 'liquidation', liq_balance: liqWd.liq_balance || null, sl_hinweis: liqWd.hinweis }) : {}
     if(liqWd && liqWd.hinweis && typeof atToast === 'function') atToast(`⚠ Fusion-Hedge: ${liqWd.hinweis} (Wächter trägt das Level nach, sobald die Start-Balance gelesen ist)`, 'end')
     // Merker VOR dem Auftrag: bleibt die Antwort aus, sieht man am Plan, dass ein Open unterwegs war
-    try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, liqFelder)) }catch(_){}
+    try{ await hedgeAmPlanSchreiben(plan.id, Object.assign({ status: 'oeffnet', klick_at: (r && r.klick_at) || at, richtung: gegen, eur: plan.hedgeEur, hedge_faktor: plan.hedgeFaktor ?? null, punkte, sl_punkte: slPunkte, einstieg_nq: einstieg, einstieg_quelle: quelle, einstieg_wurzel: einstiegWurzel, tp_level_nq: tpLevel, sl_level_nq: slLevel, symbol_nq: symbol, pc: hedgePcId(), at }, herkunft, liqFelder)) }catch(_){}
     // lots (Backend .484): Kontrakte × Multiplikator — die klassische Rechnung aus Popup 1 (Finn: „genauso wie bisher");
     // überstimmt eur/tp_punkte, der Copier rundet aufs Broker-Raster. eur/tp_punkte/sl_punkte reisen weiter mit (Anzeige, Alt-Weg).
     // Vertrag .470: tp_punkte (Pflicht) + sl_punkte (0 = kein zweites Level); 'punkte' bleibt als alter Name.
@@ -20235,18 +20270,22 @@
       await new Promise(ok => setTimeout(ok, warte))
     }
     if(res && res.ok){
+      // Hand-Wert (Entry/TP), der WÄHREND des Opens gesetzt wurde (bis 90 s Wiederholung): frisch lesen, dann Schließ-Level/Puffer NICHT schreiben
+      let handWaehrend = false
+      try{ const { data: zz } = await supabase.from('trade_plans').select('mt5_baseline').eq('id', plan.id).maybeSingle()
+        const hh = zz && zz.mt5_baseline && zz.mt5_baseline.hedge; handWaehrend = !!(hh && (/hand/.test(String(hh.tp_quelle || '')) || /^hand/.test(String(hh.einstieg_quelle || '')))) }catch(_){}
+      const pufferFelder = handWaehrend ? {} : { schliesst_bei_nq: schliesstBeiOpen, puffer_punkte: echterTp ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill(),
+        puffer_ohne_fill: echterTp ? null : hedgePufferOhneFill() }
       // sl = Fusion-Level am Master-TP (Fusion im Minus), tp = Fusion-Level am Master-SL (Fusion im Plus), 0 ohne Master-SL
-      const h = await hedgeAmPlanSchreiben(plan.id, { status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
-        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null, puffer_punkte: quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill(),
+      const h = await hedgeAmPlanSchreiben(plan.id, { ...pufferFelder, status: 'offen', ticket: res.ticket, lots: res.lots, lots_soll: res.lots_soll || null, lots_quelle: res.lots_quelle || null, fill: res.fill, sl: res.sl || 0, tp: res.tp || 0,
+        notfall_faktor: res.notfall_faktor || hedgeNotfallFaktorFuer(punkte), sl_distanz_punkte: res.sl_distanz_punkte || null,
         hedge_login: res.hedge_login || hedgeLoginDiesesPcs(),   // Konto, auf dem der Hedge liegt — WD-Hedge-Buchung sucht danach (25.09.2026)
-        // Feed-Wächter schließt hier: TP ± 8 Ticks mit echtem Fill, ohne Fill TP ± (Puffer + Zuschlag) (Vorfall Jacob 28.09.2026)
-        schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpLevel, quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill()),
-        puffer_ohne_fill: quelle === 'fill' ? null : hedgePufferOhneFill(),
+        // Feed-Wächter schließt bei schliesst_bei_nq (pufferFelder oben): TP ± 8 Ticks mit echtem Fill/Hand, sonst TP ± (Puffer + Zuschlag)
         sl_fehler: res.sl_fehler || null, tp_fehler: res.tp_fehler || null, symbol: res.symbol || 'NAS100',
         wert_pro_punkt: res.wert_pro_punkt, waehrung: res.waehrung || 'EUR', nas_bid: res.nas_bid, opened_at: new Date().toISOString(), cmd_id: res.cmd_id || null, msg: res.msg || '',
         open_grund: res.open_grund || null })
       // schon_offen (Copier-Riegel): Level aus tv.einstieg_nq (Puls-Fill) wie bei der Selbstheilung, falls der Einstieg oben nur vom Feed kam
-      if(res.open_grund === 'schon_offen' && quelle !== 'fill'){
+      if(res.open_grund === 'schon_offen' && !echterEinstieg && !echterTp && !handWaehrend){   // nie über Hand-Werte (28.09.2026)
         try{
           const pf = tradePlans.find(x => String(x.id) === String(plan.id)) || plan
           const lv = hedgeLevelAusPlan(pf)
@@ -20254,7 +20293,7 @@
         }catch(_){}
       }
       const f = v => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 2 })   // Level: max. 2 Nachkommastellen (Float-Rauschen wie 30.749,778)
-      const sbNq = hedgeSchliesstBei(plan.richtung, tpLevel, quelle === 'fill' ? hedgePuffer() : hedgePuffer() + hedgePufferOhneFill())
+      const sbNq = schliesstBeiOpen
       const levelText = (sbNq ? ` · schließt bei NQ ${f(sbNq)} (TP ${plan.richtung === 'sell' ? '−' : '+'} ${hedgePufferTicks()} Ticks, Kurs-Feed)` : ' · ⚠ kein NQ-Einstieg — Feed-Schließen erst nach Nachfrage')
         + (res.sl ? ` · Notfall-SL Fusion ${f(res.sl)} (${Math.round((res.notfall_faktor || hedgeNotfallFaktorFuer(punkte)) * 100)} %)${res.tp ? ` / Master-SL-Level ${f(res.tp)}` : (slPunkte > 0 ? ` / ⚠ Master-SL-Level fehlt (${res.tp_fehler || '?'})` : '')}`
                   : ' · ⚠ KEIN Notfall-SL gesetzt (' + (res.sl_fehler || '?') + ')')
@@ -20350,7 +20389,7 @@
   function hedgePufferFuer(h, tpL){
     const sb = Number(h && h.schliesst_bei_nq), tp = Number(tpL || (h && h.tp_level_nq))
     if(sb > 0 && tp > 0){ const d = Math.abs(sb - tp); if(d <= 60) return d }
-    const feed = /^feed/.test(String((h && h.einstieg_quelle) || '')) && !(h && h.tp_quelle === 'hand')
+    const feed = /^feed/.test(String((h && h.einstieg_quelle) || '')) && !/hand|tv_limit/.test(String((h && h.tp_quelle) || ''))   // feed_klick zählt als Feed; Hand/Limit-TP ohne Zuschlag (28.09.2026)
     return hedgePuffer() + (feed ? hedgePufferOhneFill() : 0)
   }
   window._hedgePufferFuer = hedgePufferFuer   // Test-Haken
@@ -20457,6 +20496,7 @@
     try{
       const h = plan && plan.mt5Baseline && plan.mt5Baseline.hedge
       const je = r && r.avg_fill_je_wurzel
+      // 'feed_klick' (Feed zum Klickzeitpunkt, seit 28.09.2026) beginnt auch mit 'feed' — kein echter Fill, wird ersetzt
       if(!h || !je || typeof je !== 'object' || !/^feed/.test(String(h.einstieg_quelle || ''))) return
       if(!(plan.richtung === 'buy' || plan.richtung === 'sell')) return
       const sym = h.symbol_nq || ((typeof tpOrbitWerte === 'function') ? tpOrbitWerte(plan).symbol : plan.masterSymbol) || ''
@@ -20470,10 +20510,12 @@
       const upd = { einstieg_nq: fill, einstieg_quelle: 'puls avg_fill (nachgetragen)', einstieg_feed_vorher: (h.einstieg_nq != null) ? h.einstieg_nq : null,
         einstieg_nachgetragen_at: new Date().toISOString() }
       const pkt = Number(h.punkte), slp = Number(h.sl_punkte), plus = plan.richtung === 'buy' ? 1 : -1
-      if(h.tp_quelle !== 'hand' && pkt > 0 && !['geschlossen', 'fehler'].includes(String(h.status || ''))){
-        const tpNeu = Math.round((fill + plus * pkt) * 100) / 100
+      if(!/hand/.test(String(h.tp_quelle || '')) && pkt > 0 && !['geschlossen', 'fehler'].includes(String(h.status || ''))){   // 'hand'/'entry_hand' bleiben (28.09.2026)
+        // TP aus TradingViews TP-Limit-Order (tp_quelle 'tv_limit', 28.09.2026) ist schon der echte Preis — bleibt stehen
+        const tpFest = h.tp_quelle === 'tv_limit' && Number(h.tp_level_nq) > 0
+        const tpNeu = tpFest ? Number(h.tp_level_nq) : Math.round((fill + plus * pkt) * 100) / 100
         Object.assign(upd, { tp_level_feed_vorher: h.tp_level_nq ?? null, schliesst_bei_feed_vorher: h.schliesst_bei_nq ?? null, tp_level_nq: tpNeu,
-          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: 'fill_nachtrag' })
+          schliesst_bei_nq: hedgeSchliesstBei(plan.richtung, tpNeu, hedgePuffer()), puffer_punkte: hedgePuffer(), puffer_ohne_fill: null, tp_quelle: tpFest ? 'tv_limit' : 'fill_nachtrag' })
         if(slp > 0) Object.assign(upd, { sl_level_feed_vorher: h.sl_level_nq ?? null, sl_level_nq: Math.round((fill - plus * slp) * 100) / 100 })
       }
       await baselinePatchIn(plan.id, 'hedge', upd)
@@ -21077,6 +21119,55 @@
     if(x) x.luecke_seit = hedgeKerzenLuecke(x.minuten, abSec, Date.now())
     return x
   }
+  /* FEED-PUFFER FÜR DEN KLICKZEITPUNKT (28.09.2026, Finn 02:20 Dubai, Vorfall Jacob c28a7639: ohne Puls-Fill nahm der Hedge den Feed-Kurs
+   * beim Hedge-Open — Sekunden NACH dem echten Fill: Einstieg 30825,75 statt ~30838, Fusion schloss 12 Punkte vor dem echten TP).
+   * Der Tab merkt sich die tv_kurse-Zeilen (Realtime-Kanal markt-live + Poll — dieselbe Quelle wie hedgeKursAktuell) der letzten 5 min
+   * mit Zeitstempel. Puls meldet order_klick_ms (Mitte des SendInput am Kauf-Knopf, dieselbe Uhr wie dieser Tab am PC).
+   * Zeitstempel: Realtime = Ankunft hier (Date.now()), Poll = updated_at (Cloud-Ankunft) — beides liegt ~0,3–1 s hinter dem Handel,
+   * und die Market-Order füllt ~0,2–0,5 s nach dem Klick; deshalb gilt der letzte Kurs bis Klick + HEDGE_FEED_KLICK_VERZUG_MS.
+   * Liegt der letzte Kurs davor mehr als HEDGE_FEED_KLICK_LUECKE_MS zurück (Feed hing), zählt der Puffer nicht (null → wie bisher). */
+  const HEDGE_FEED_PUFFER_MS = 5 * 60000, HEDGE_FEED_KLICK_VERZUG_MS = 800, HEDGE_FEED_KLICK_LUECKE_MS = 10000
+  const _hedgeFeedPuffer = { NQ: [], MNQ: [] }
+  function hedgeFeedPuffern(r, t){
+    try{
+      if(!r || r.preis == null || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || /^delayed/.test(String(r.modus || ''))) return   // delayed_* = 10 min alt
+      const preis = Number(r.preis), ts = Number(t) || 0
+      if(!(preis > 1000) || !(ts > 0)) return
+      const l = _hedgeFeedPuffer[r.wurzel], key = `${r.pc_name || r.id || ''}|${r.updated_at || ''}|${preis}`
+      if(l.some(x => x.key === key)) return   // Realtime und Poll liefern dieselbe Zeile
+      l.push({ t: ts, preis, key })
+      for(let i = l.length - 1; i > 0 && l[i].t < l[i - 1].t; i--){ const x = l[i]; l[i] = l[i - 1]; l[i - 1] = x }   // nach Zeit sortiert halten
+      const grenze = Date.now() - HEDGE_FEED_PUFFER_MS
+      while(l.length && l[0].t < grenze) l.shift()
+      if(l.length > 4000) l.splice(0, l.length - 4000)
+    }catch(_){}
+  }
+  // REIN RECHNEND (Test-Haken window._hedgeFeedAmKlickAus): letzter Kurs bis Klick + Verzug aus einer Liste [{t, preis}]
+  function hedgeFeedAmKlickAus(liste, klickMs){
+    const k = Number(klickMs)
+    if(!(k > 0) || !Array.isArray(liste)) return null
+    const ziel = k + HEDGE_FEED_KLICK_VERZUG_MS
+    let best = null
+    for(const x of liste){ if(x && x.t <= ziel && (!best || x.t >= best.t)) best = x }
+    if(!best || ziel - best.t > HEDGE_FEED_KLICK_LUECKE_MS) return null
+    return { preis: best.preis, t: best.t, abstand_ms: Math.round(best.t - k) }
+  }
+  window._hedgeFeedAmKlickAus = hedgeFeedAmKlickAus
+  function hedgeFeedAmKlick(wurzel, klickMs){
+    const w = wurzel === 'MNQ' ? 'MNQ' : 'NQ', andere = w === 'NQ' ? 'MNQ' : 'NQ'   // wie hedgeKursAktuell: Plan-Wurzel, sonst die andere
+    for(const ww of [w, andere]){ const x = hedgeFeedAmKlickAus(_hedgeFeedPuffer[ww], klickMs); if(x) return Object.assign(x, { wurzel: ww }) }
+    return null
+  }
+  window._hedgeFeedPufferStand = () => ({ NQ: _hedgeFeedPuffer.NQ.length, MNQ: _hedgeFeedPuffer.MNQ.length })   // Diagnose
+  // REIN RECHNEND (Test-Haken window._hedgeTpPreisPasst): TP-Preis aus TradingViews Meldung nur nehmen, wenn er auf der richtigen
+  // Seite liegt und sein Abstand zur Referenz (Fill, Feed zum Klick oder jetzt) ungefähr der TP-Distanz entspricht
+  function hedgeTpPreisPasst(tpPreis, ref, richtung, punkte){
+    const tp = Number(tpPreis), e = Number(ref), p = Number(punkte)
+    if(!(tp > 1000) || !(e > 1000) || !(p > 0)) return false
+    const d = richtung === 'buy' ? tp - e : richtung === 'sell' ? e - tp : NaN
+    return d > 0 && Math.abs(d - p) <= Math.max(8, p * 0.4)
+  }
+  window._hedgeTpPreisPasst = hedgeTpPreisPasst
   // Aktueller Kurs für den Wächter: zuerst der lokale Reader dieses PCs (GET /positions → kurse[wurzel], ≤ 5 s, nicht stale),
   // sonst tv_kurse über Realtime/Poll (mkl.kursJe, ≤ 5 s), sonst die Cloud-Abfrage (≤ 5 s). null = kein Beweis → nichts tun.
   async function hedgeKursAktuell(wurzel){
@@ -21719,6 +21810,7 @@
       mkl.readerPcs = (data || []).filter(r => r && r.pc_name && (Date.now() - (Date.parse(r.updated_at) || 0)) < 600000)
     }catch(_){ mkl.readerPcs = [] }
     const rows = (rk && rk.data) || []
+    for(const x of rows) hedgeFeedPuffern(x, Date.parse((x && x.updated_at) || '') || 0)   // Rückfall ohne Realtime (28.09.2026)
     // 0.7.0 (24.09.2026 spät): je Wurzel die frischeste Zeile über alle PCs (`${pc}:NQ` / `${pc}:MNQ`; alte Ein-Symbol-Zeilen
     // zählen über ihre wurzel mit). Kopfzeile zeigt beide, Chart + Demo-Orders folgen der gewählten Wurzel (mkl.wurzel).
     const kursAus = r => mklKursAus(r, jetzt)   // dieselbe Rechnung wie der Realtime-Kanal (mklKursAus)
@@ -22218,6 +22310,7 @@
       _mklRt = supabase.channel('markt-live')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'tv_kurse' }, m => { try{
           const r = m.new; if(!r || !(r.wurzel === 'NQ' || r.wurzel === 'MNQ') || mkl.stub) return
+          hedgeFeedPuffern(r, Date.now())   // Kurs zum Puls-Klick (28.09.2026) — vor dem Zwei-PC-Filter, jeder Kurs zählt
           const kk = mklKursAus(r, Date.now()), alt = mkl.kursJe[r.wurzel]
           if(alt && alt.pc !== kk.pc && alt.alter_ms < 15000) return   // zweiter PC liefert dieselbe Wurzel — nicht hin- und herspringen
           mkl.kursJe[r.wurzel] = kk
@@ -35060,7 +35153,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.725'
+  const OS_TAB_BUILD = '2026-09-22.726'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -35491,7 +35584,8 @@
           await supabase.from('order_signale').insert({ plan_id: String(plan.id),
             status: (r && r.ok) ? 'fertig' : 'fehler', pc: (typeof mt5FleetPcId === 'function') ? mt5FleetPcId() : '',
             params: { aktion: 'orbit', lokal: true, orbit: { symbol, richtung: dir, volumen: lots, tp_usd: tp > 0 ? tp : null, sl_usd: (tp > 0 && sl > 0) ? sl : null } },
-            ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail } })
+            ergebnis: { ok: !!(r && r.ok), gesendet: !!(r && r.gesendet), schritt: r && r.schritt, msg: r && (r.msg || r.error), trail: r && r.trail,
+              einstieg: (r && r.einstieg) || null, einstieg_quelle: (r && r.einstieg_quelle) || null, tp_limit: (r && r.tp_limit) || null, order_klick_ms: (r && r.order_klick_ms) || null, meldung_roh: (r && Array.isArray(r.meldung_roh)) ? r.meldung_roh.slice(0, 14) : null } })   // Fill-Nachweis (28.09.2026)
         }catch(_){}
       }
       // ORBIT V2 (24.09.2026 nachts): direkt nach dem bewiesenen Klick liest Puls einmal Today's P&L als

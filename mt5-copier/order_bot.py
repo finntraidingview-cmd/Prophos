@@ -5308,7 +5308,8 @@ def tv_positions_zone(roh, max_n=24):
     return " | ".join(out) or "nichts unter dem Reiter"
 
 
-TV_RX_MELDUNG = re.compile(r"\b(order (placed|filled|executed)|position opened|filled)\b", re.I)
+# 28.09.2026: dazu 'order modified' (Bracket-Aenderung, Finn) und deutsche Woerter — beweist genauso, dass die Order liegt
+TV_RX_MELDUNG = re.compile(r"\b(order (placed|filled|executed|modified)|position opened|filled|ausgef(ü|ue)hrt|gef(ü|ue)llt|platziert)\b", re.I)
 
 
 def tv_order_meldungen(roh, symbol):
@@ -5332,6 +5333,188 @@ def tv_order_meldungen(roh, symbol):
         if n not in out:
             out.append(n)
     return out
+
+
+# FILL AUS TRADINGVIEWS EIGENER MELDUNG (28.09.2026, Finn 02:20 Dubai, Vorfall Jacob c28a7639: Einstieg kam aus dem Kurs-Feed
+# beim Hedge-Open (30825,75), der echte Fill lag bei ~30838 — Fusion schloss 12 Punkte vor dem echten TP). Beleg aus
+# order_signale (letzte 5 Tage): die Positions-Tabelle war auf KEINEM PC ein einziges Mal lesbar ('kein Reiter Positions zu
+# sehen', Avg Fill 0/29) — damit faellt auch die Historie weg (_tv_exit_fill_lesen braucht genau EINEN Reiter 'Positions').
+# Was Puls dagegen JEDES Mal sieht, ist TradingViews Meldung unten links ('Market order executed on' 25.09. 19:20,
+# 'Take Profit order placed on' 25.09. 16:31, 27.09. 22:02/22:03). Laut Finns Screenshot 22.09. 01:50 steht darunter
+# 'MNQZ6 · Sell 2 at 30,858.25' — Seite, Menge und PREIS als eigener Knoten. Daraus:
+#   'executed/filled' + Plan-Seite  -> echter Fill (Einstieg)
+#   'Take Profit order placed' + Gegenseite -> Preis der TP-Limit-Order (= wo der Master wirklich schliesst)
+TV_RX_MELDUNG_FILL = re.compile(r"\b(order (filled|executed)|position opened|executed|filled|ausgef(ü|ue)hrt|gef(ü|ue)llt)\b", re.I)
+TV_RX_MELDUNG_TP = re.compile(r"\b(take[ -]?profit|gewinnmitnahme)\b", re.I)
+TV_RX_MELDUNG_SL = re.compile(r"\b(stop[ -]?loss|verlustbegrenzung|stop order|stop-order)\b", re.I)
+# Bracket-Aenderung (Finn 28.09.2026: „Meldungen zur Modification der Bracket — darin steht der exakte Wert"): eine LIMIT-Order der
+# Gegenseite ist bei einer Market-Order mit Bracket der TP (Stop = SL, Einstieg ist Market)
+TV_RX_MELDUNG_LIMIT = re.compile(r"\blimit\b", re.I)
+# 'Sell 2 at 30,858.25' / 'Buy 1 @ 30,838.00' / deutsch 'Kaufen 2 zu 30.858,25' (ungeprueft, nur mitgenommen)
+TV_RX_MELDUNG_DETAIL = re.compile(r"\b(buy|sell|kauf(?:en)?|verkauf(?:en)?)\s+([\d.,]+)\s*(?:@|\bat\b|\bzu\b|\bbei\b)\s*([\d][\d.,]*)", re.I)
+
+
+def tv_meldung_art(text):
+    """Art einer TradingView-Order-Meldung: 'tp' | 'sl' | 'fill' | None. TP/SL zuerst — 'Take Profit order placed'
+    enthaelt kein 'filled', ein spaeteres 'Take Profit order filled' waere aber ein AUSSTIEG, nie ein Einstieg."""
+    n = " ".join(str(text or "").split())
+    # nur Meldungen, nie die Panel-Beschriftung 'Take profit, $': es muss ein Order-Wort oder eine 'buy/sell … at'-Zeile drinstehen
+    if not (TV_RX_MELDUNG.search(n) or TV_RX_MELDUNG_DETAIL.search(n) or re.search(r"\b(order|modified|ge(ä|ae)ndert)\b", n, re.I)):
+        return None
+    if TV_RX_MELDUNG_TP.search(n):
+        return "tp"
+    if TV_RX_MELDUNG_SL.search(n):
+        return "sl"
+    if TV_RX_MELDUNG_LIMIT.search(n) and TV_RX_MELDUNG.search(n):
+        return "tp"               # 'Limit order modified/placed/filled' — nie ein Einstieg (der ist Market)
+    if TV_RX_MELDUNG_FILL.search(n):
+        return "fill"
+    return None
+
+
+def tv_meldung_preise(roh, symbol, richtung, menge=None, vorher=()):
+    """Fill und TP-Preis aus den TradingView-Meldungen nach dem Kauf-Klick. Rein rechnend (selftest).
+    roh = [(name, rect|None, typ)], vorher = Namen, die VOR dem Klick schon da waren (alte Meldungen bleiben minutenlang
+    stehen — ein Detail-Knoten, der schon vorher existierte, zaehlt nie).
+    Zuordnung Detail -> Meldung: (1) steht beides im selben Text, gilt dessen Art; (2) sonst die naechste Meldungs-Zeile
+    DARUEBER (0–70 px, waagrecht ueberlappend); (3) ohne Zuordnung nur ueber die Seite: Plan-Seite = Fill, Gegenseite =
+    TP nur dann, wenn es genau EINEN solchen Preis gibt (sonst koennte es genauso der SL sein).
+    Menge muss zur Plan-Menge passen, wenn beides lesbar ist. Fremdes Symbol im Text -> verworfen.
+    -> {'fill': float|None, 'tp': float|None, 'sl': float|None, 'texte': [..]}"""
+    root = tv_symbol_root(symbol)
+    rich = str(richtung or "").lower()
+    gegen = "sell" if rich == "buy" else "buy" if rich == "sell" else ""
+    vorher = {" ".join(str(x).split()) for x in (vorher or ())}
+    titel, details = [], []
+    # Symbol-Chip neben dem Titel (Finns Screenshot 28.09.2026: 'Market order executed on' + eigener Knoten 'MNQZ6'): steht dort ein
+    # FREMDES Symbol, gilt die ganze Meldung nicht
+    chips = [(tv_symbol_root(" ".join(str(e[0]).split())), e[1]) for e in roh or ()
+             if len(e) > 1 and e[1] and re.fullmatch(r"[A-Za-z]{1,6}[A-Za-z0-9]*\d[A-Za-z0-9!]*", " ".join(str(e[0]).split()))]
+
+    def fremd(tr):
+        if not root:
+            return False
+        neben = [c for c, cr in chips if abs(cr[1] - tr[1]) <= 8 and cr[0] >= tr[0] and cr[0] - tr[2] <= 80]
+        return bool(neben) and root not in neben
+    for e in roh or ():
+        n = " ".join(str(e[0]).split())
+        r = e[1] if len(e) > 1 else None
+        if not n or not r:
+            continue
+        woerter = [tv_symbol_root(x) for x in re.findall(r"\b[A-Za-z]{1,6}[A-Za-z0-9]*\d[A-Za-z0-9!]*", n)]
+        if root and woerter and root not in woerter:
+            continue
+        art = tv_meldung_art(n)
+        if art and fremd(r):
+            art = "fremd"
+        if art:
+            titel.append((art, r, n))
+        m = TV_RX_MELDUNG_DETAIL.search(n)
+        if m and n not in vorher:
+            seite = "buy" if m.group(1).lower().startswith(("buy", "kauf")) else "sell"
+            qty, preis = tv_zahl_lesen(m.group(2)), tv_zahl_lesen(m.group(3))
+            if preis is None or preis <= 0:
+                continue
+            if menge and qty and abs(float(qty) - float(menge)) > 1e-9:
+                continue
+            details.append({"seite": seite, "preis": preis, "r": r, "text": n, "art": art})
+    out = {"fill": None, "tp": None, "sl": None, "texte": []}
+    ohne = []
+    for d in details:
+        art = d["art"]
+        if not art:
+            best = None
+            for a, tr, _n in titel:
+                dy = d["r"][1] - tr[1]
+                if 0 <= dy <= 70 and min(d["r"][2], tr[2]) > max(d["r"][0], tr[0]) and (best is None or dy < best[0]):
+                    best = (dy, a)
+            art = best[1] if best else None
+        if art == "fill" and d["seite"] == rich:
+            out["fill"] = out["fill"] if out["fill"] is not None else d["preis"]
+            out["texte"].append("fill: " + d["text"][:50])
+        elif art in ("tp", "sl") and d["seite"] == gegen:
+            if out[art] is None:
+                out[art] = d["preis"]
+                out["texte"].append(art + ": " + d["text"][:50])
+        elif art is None:
+            ohne.append(d)
+    if out["fill"] is None:
+        eigen = [d for d in ohne if d["seite"] == rich]
+        if len({d["preis"] for d in eigen}) == 1:
+            out["fill"] = eigen[0]["preis"]
+            out["texte"].append("fill (nur Seite): " + eigen[0]["text"][:50])
+    if out["tp"] is None and out["sl"] is None:
+        fremd = [d for d in ohne if d["seite"] == gegen]
+        # nur wenn KEINE SL-Meldung zu sehen ist — sonst ist ein einzelner Gegenseiten-Preis nicht eindeutig
+        if len({d["preis"] for d in fremd}) == 1 and not any(a == "sl" for a, _r, _n in titel):
+            out["tp"] = fremd[0]["preis"]
+            out["texte"].append("tp (nur Seite): " + fremd[0]["text"][:50])
+    return out
+
+
+TV_RX_SHOW_MORE = re.compile(r"^(show more|mehr anzeigen)\b", re.I)
+
+
+def tv_show_more_knopf(roh):
+    """Der Knopf 'Show more' am Meldungs-Stapel (Finns Screenshots 28.09.2026 00:34, Jacob-PC: nach dem Order-Klick liegen 3 Meldungen
+    gestapelt — 'Market order placed', 'Market order executed … Buy 1 at 30,807.25', 'Take Profit order placed … Sell 1 at 30,812.75' —,
+    sichtbar ist nur EINE plus 'Show more' mit Zaehler). Nur ein sichtbarer 'Show more' in der Naehe einer Meldungs-Zeile (0–220 px
+    darunter/darueber, waagrecht hoechstens 250 px daneben) — nie irgendein 'Show more' anderswo auf der Seite. Genau EIN Treffer,
+    sonst None. Steht schon 'Show less' da, ist der Stapel offen -> None. Rein rechnend. -> {'punkt': (x, y), 'text'} | None"""
+    el = [(" ".join(str(e[0]).split()), e[1]) for e in roh or () if len(e) > 1 and e[1]]
+    titel = [r for n, r in el if n and len(n) <= 90 and (tv_meldung_art(n) is not None or TV_RX_MELDUNG.search(n))]
+    treffer = []
+    for n, r in el:
+        if not TV_RX_SHOW_MORE.search(n):
+            continue
+        nah = any(abs(r[1] - tr[1]) <= 220 and (r[0] - 250) <= tr[0] <= (r[2] + 250) for tr in titel)
+        if nah and not any(abs(r[0] - t_[1][0]) <= 4 and abs(r[1] - t_[1][1]) <= 4 for t_ in treffer):
+            treffer.append((n, r))
+    if len(treffer) != 1:
+        return None
+    n, r = treffer[0]
+    return {"punkt": ((r[0] + r[2]) // 2, (r[1] + r[3]) // 2), "text": n}
+
+
+def tv_meldung_roh(roh, vorher=(), max_n=14):
+    """ROHTEXTE der TradingView-Meldungen nach dem Klick (Finn 28.09.2026: „die Rohtexte IMMER in puls_diagnose, auch wenn das Parsen
+    scheitert"): jede sichtbare Meldungs-Zeile (tv_meldung_art/TV_RX_MELDUNG) und alles NEUE (nicht in vorher), das 0–90 px darunter
+    bzw. in derselben Zeile waagrecht ueberlappend steht, dazu jede neue 'buy/sell … at'-Zeile. Rein rechnend. -> Liste 'Typ:Text'."""
+    vorher = {" ".join(str(x).split()) for x in (vorher or ())}
+    el = [(" ".join(str(e[0]).split()), e[1], e[2] if len(e) > 2 else "?") for e in roh or () if len(e) > 1 and e[1]]
+    titel = [r for n, r, _t in el if n and len(n) <= 90 and (tv_meldung_art(n) or TV_RX_MELDUNG.search(n))]
+    out = []
+    for n, r, t in el:
+        if not n or len(n) > 90:
+            continue
+        ist_titel = bool(tv_meldung_art(n) or TV_RX_MELDUNG.search(n))
+        neu = n not in vorher
+        nah = any(-8 <= r[1] - tr[1] <= 90 and min(r[2], tr[2]) > max(r[0], tr[0]) for tr in titel)
+        if ist_titel or (neu and (nah or TV_RX_MELDUNG_DETAIL.search(n))):
+            k = f"{t}:{n}"
+            if k not in out:
+                out.append(k)
+        if len(out) >= max_n:
+            break
+    return out
+
+
+def tv_meldung_zone(roh, vorher=(), max_n=8):
+    """Diagnose fuer die Spur: neue Knoten mit 'buy/sell … at'-Muster oder Meldungs-Art — damit der erste echte Lauf
+    zeigt, wie TradingView die Meldung in UIA zerlegt (Beweis offen, siehe tv_meldung_preise)."""
+    vorher = {" ".join(str(x).split()) for x in (vorher or ())}
+    out = []
+    for e in roh or ():
+        n = " ".join(str(e[0]).split())
+        if not n or not (len(e) > 1 and e[1]) or n in vorher or len(n) > 70:
+            continue
+        if TV_RX_MELDUNG_DETAIL.search(n) or tv_meldung_art(n):
+            k = f"{e[2] if len(e) > 2 else '?'}:{n}"
+            if k not in out:
+                out.append(k)
+        if len(out) >= max_n:
+            break
+    return " | ".join(out) or "nichts"
 
 
 def tv_ist_scharf(cmd):
@@ -5791,11 +5974,66 @@ def tv_order_schritt(w, cmd, trail, erg=None):
     # derselbe Blick, kein neues Suchen dazwischen — und genau EINMAL. Nach dem
     # Klick gibt es keinen zweiten Versuch: ob die Order liegt, sagt nur der
     # Reader.
+    # Klickzeitpunkt mit Millisekunden (28.09.2026, Finn: „Einstieg = echter Fill, nicht der Kurs beim Hedge-Open"):
+    # Mitte zwischen vor und nach dem SendInput — der PC-Tab sucht damit den Feed-Kurs genau dieses Moments aus
+    # seinem Puffer, wenn TradingView keinen Fill-Preis zeigt (Rangfolge: Fill → feed_klick → Feed beim Open).
+    _t_vor = time.time()
     ok, f = _tv_uia_klick(knopf[0], "Order senden", trail)
     if not ok:
         # Der Klick kam nachweislich nicht raus (SendInput abgelehnt) — nichts gesendet.
         return False, f + " — NICHT gesendet."
+    erg["order_klick_ms"] = int(round((_t_vor + time.time()) / 2.0 * 1000))
     erg["gesendet"] = True
+
+    def _meldung_nachlauf(roh_erst, sekunden=1.6):
+        """Fill/TP-Preis aus TradingViews Meldung (tv_meldung_preise). Mehrere Blicke, weil 'Take Profit order placed'
+        oft vor/nach 'Market order executed' kommt; Schluss, sobald Fill UND (bei TP) TP-Preis da sind.
+        -> (fill|None, tp|None, spur-text)"""
+        fill_, tp_, texte_ = None, None, []
+        roh_ = roh_erst
+        t0_m = time.time()
+        ende_m = t0_m + sekunden
+        mehr_geklickt = False
+        while True:
+            try:
+                pr = tv_meldung_preise(roh_, cmd.get("symbol"), plan["richtung"], plan["menge"], namen_vorher)
+                fill_ = fill_ if fill_ is not None else pr["fill"]
+                tp_ = tp_ if tp_ is not None else pr["tp"]
+                texte_ = texte_ or pr["texte"]
+            except Exception:
+                pass
+            if fill_ is not None and (tp_ is not None or not plan["tp"]):
+                break
+            # TP-Preis da, Fill-Meldung nicht: noch kurz (0,9 s) auf 'executed' warten, dann weiter — jede Sekunde hier
+            # verzoegert den Fusion-Hedge (Finn 25.09.2026: „hat aber mies lange gedauert")
+            if tp_ is not None and time.time() - t0_m >= 0.9 and mehr_geklickt:
+                break
+            # Gestapelte Meldungen (Finns Screenshots 28.09.2026): sichtbar ist nur die oberste (meist 'Take Profit order placed'),
+            # 'Market order executed … at PREIS' liegt darunter — 'Show more' EINMAL klicken, danach nie wieder, 'Show less' und das
+            # Schliessen der Meldungen bleiben unberuehrt (keine Nebenwirkung auf TradingView)
+            if not mehr_geklickt:
+                mehr_geklickt = True
+                try:
+                    k_ = tv_show_more_knopf(roh_)
+                    if k_:
+                        _tv_uia_klick(k_, "Meldungen 'Show more'", trail)
+                        ende_m = max(ende_m, time.time() + 1.5)
+                        _warte(0.35, 0.15)
+                        roh_ = _tv_uia_roh(w, typen)
+                        continue
+                    trail.append("Meldungen: kein 'Show more' am Stapel")
+                except Exception:
+                    pass
+            if time.time() >= ende_m:
+                break
+            _warte(0.3, 0.15)
+            roh_ = _tv_uia_roh(w, typen)
+        zone_ = "" if fill_ is not None else tv_meldung_zone(roh_, namen_vorher)
+        try:
+            erg["meldung_roh"] = tv_meldung_roh(roh_, namen_vorher)
+        except Exception:
+            erg["meldung_roh"] = []
+        return fill_, tp_, ("; ".join(texte_) or "keine Preis-Zeile") + (f" [Meldungs-Zone: {zone_}]" if zone_ else "")
 
     def _avg_fill_nachlauf(sekunden=1.2):     # B13: 3,0 -> 1,2 s — lief in jeder Spur voll ab (Positions-Reiter nie sichtbar)
         """Avg Fill Price NACH dem Beweis nachlesen (25.09.2026, erster echter Fusion-Hedge: die
@@ -5837,10 +6075,34 @@ def tv_order_schritt(w, cmd, trail, erg=None):
         neu_t = [t for t in tv_order_meldungen(roh_t, cmd.get("symbol")) if t not in toasts_vorher]
         if neu_t:
             trail.append(f"TradingView meldet: '{neu_t[0][:60]}'")
-            einstieg_, sym_, diag_ = _avg_fill_nachlauf()
+            # 28.09.2026: zuerst der Preis AUS der Meldung (echter Fill), erst danach der Avg-Fill-Weg ueber die Tabelle
+            m_fill, m_tp, m_spur = _meldung_nachlauf(roh_t)
+            trail.append(f"Meldung: Fill {m_fill if m_fill is not None else '-'}, TP-Order {m_tp if m_tp is not None else '-'} ({m_spur[:160]})")
+            trail.append("Meldung roh: " + (" | ".join(erg.get("meldung_roh") or []) or "nichts")[:600])
+            # Rohtexte IMMER in puls_diagnose (Finn 28.09.2026) — im eigenen Faden, damit der Hedge nicht auf die 2 s wartet;
+            # dauerhaft stehen sie zusaetzlich im Ergebnis (meldung_roh → order_signale), puls_diagnose ueberschreibt der naechste Lauf
+            try:
+                import threading
+                threading.Thread(target=_puls_diagnose_senden, args=(["TV-Meldung roh: " + " | ".join(erg.get("meldung_roh") or []),
+                                 f"Fill {m_fill}, TP {m_tp}"], "tv_meldung")).start()
+            except Exception:
+                pass
+            if m_fill is not None:
+                einstieg_, sym_, diag_ = str(m_fill), None, None
+                erg["einstieg_quelle"] = "fill_toast"
+            elif m_tp is not None:
+                # Positions-Tabelle war in 5 Tagen 0/29 lesbar — mit dem TP-Limit-Preis hat der PC-Tab das echte TP-Level (tv_limit), Einstieg = Feed zum Klick,
+                # die 1,2 s Tabellen-Nachlauf spart das dem Hedge
+                einstieg_, sym_, diag_ = None, None, None
+            else:
+                einstieg_, sym_, diag_ = _avg_fill_nachlauf()
+                if einstieg_:
+                    erg["einstieg_quelle"] = "tabelle_avg_fill"
+                trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (1,2 s)'}"
+                             + (f" [{diag_}]" if (diag_ and not einstieg_) else ""))
+            if m_tp is not None:
+                erg["tp_limit"] = m_tp
             erg.update(bestaetigt=True, menge=float(plan["menge"]), einstieg=einstieg_, tv_symbol=sym_)
-            trail.append(f"Avg Fill nach der Meldung: {einstieg_ or 'nicht lesbar (1,2 s)'}"
-                         + (f" [{diag_}]" if (diag_ and not einstieg_) else ""))
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} {sym_ or cmd.get('symbol')}"
                           + (f" @ {einstieg_}" if einstieg_ else "") + f" · {tpsl} "
                           f"(bewiesen: TradingView-Meldung '{neu_t[0][:60]}')")
@@ -5869,6 +6131,21 @@ def tv_order_schritt(w, cmd, trail, erg=None):
                     trail.append(f"Avg Fill nachgelesen: {e_}")
                 elif d_:
                     trail.append(f"Avg Fill nicht lesbar (2 s) [{d_}]")
+            if treffer.get("einstieg"):
+                erg["einstieg_quelle"] = "reader_avg_fill" if quelle == "reader" else "tabelle_avg_fill"
+            # 28.09.2026: auch hier einmal in die Meldungen sehen — Fill (falls die Tabelle keinen hatte) und TP-Order-Preis
+            try:
+                roh_m = _tv_uia_roh(w, typen)
+                erg["meldung_roh"] = tv_meldung_roh(roh_m, namen_vorher)
+                trail.append("Meldung roh: " + (" | ".join(erg["meldung_roh"]) or "nichts")[:600])
+                m_ = tv_meldung_preise(roh_m, cmd.get("symbol"), plan["richtung"], plan["menge"], namen_vorher)
+                if not treffer.get("einstieg") and m_["fill"] is not None:
+                    treffer = dict(treffer, einstieg=str(m_["fill"]))
+                    erg["einstieg_quelle"] = "fill_toast"
+                if m_["tp"] is not None:
+                    erg["tp_limit"] = m_["tp"]
+            except Exception:
+                pass
             erg.update(bestaetigt=True, menge=zuwachs, einstieg=treffer.get("einstieg"), tv_symbol=treffer.get("symbol"))
             trail.append(f"Position bestaetigt ({quelle}): +{zuwachs:g}")
             return True, (f"Order platziert: {plan['richtung'].upper()} {plan['menge']} "
@@ -5985,7 +6262,7 @@ def modus_tvkette(cmd):
             res["gesendet"] = True
             res["retry_ok"] = False
             res["bestaetigt"] = bool(erg.get("bestaetigt"))
-            for _k in ("menge", "einstieg", "tv_symbol"):
+            for _k in ("menge", "einstieg", "tv_symbol", "einstieg_quelle", "tp_limit", "order_klick_ms", "meldung_roh"):
                 res[_k] = erg.get(_k)
     res["konto_msg"] = res.get("msg")
     res["ok"] = bool(ok)
