@@ -2879,12 +2879,14 @@ def test_tsx_order():
     chk("Haken neben „Automatically apply\"", ob.tsx_haken_zu_text(hk, (957, 872, 1296, 891)) == hk[0])
 
     # Trockenlauf
-    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market"):
-        z = {"dialog": False, "profit": "250", "risk": "100", "haken": 0, "contract": "NQZ26", "menge": 1, "pos": pos_offen, "klicks": []}
+    def lauf(befehl_cmd, pos_offen=False, typ="Order Type Market", haken=0):
+        z = {"dialog": False, "profit": "250", "risk": "100", "haken": haken, "contract": "NQZ26", "menge": 1, "pos": pos_offen, "klicks": []}
 
         def roh(w, typen=None):
             r = [("Contract", (1977, 278, 2448, 314), "ComboBox"), (typ, (1977, 330, 2448, 366), "ComboBox"),
-                 ("# of Contracts", (1976, 389, 2100, 405), "Text"), ("5", (2200, 410, 2230, 440), "Button"),
+                 ("# of Contracts", (1976, 389, 2040, 403), "Text"), ("Decrease quantity", (2108, 567, 2135, 594), "Button"),
+                 ("1", (2157, 567, 2184, 594), "Button"), ("1", (2167, 572, 2174, 588), "Text"), ("5", (2223, 567, 2250, 594), "Button"),
+                 ("Increase quantity", (2338, 567, 2365, 594), "Button"),
                  ("Position Bracket Enabled", (1977, 580, 2370, 616), "ComboBox"), ("Manage brackets", (2383, 623, 2413, 653), "Button"),
                  (f"BUY +{z['menge']} @ MARKET", (2094, 684, 2249, 718), "Button"), (f"SELL -{z['menge']} @ MARKET", (2260, 684, 2440, 718), "Button"),
                  ("BUY +1 @ MARKET", (500, 684, 640, 718), "Button"), ("CLOSE POSITION", (2094, 730, 2440, 760), "Button")]
@@ -2911,8 +2913,12 @@ def test_tsx_order():
             elif name.startswith("Haken"): z["haken"] = 1
             elif name.startswith("Contract "): z["contract"] = "MNQZ26"
             elif name.startswith("Order senden"): z["pos"] = True
+            elif name.startswith("Schnellknopf "): z["menge"] = int(name.split()[-1])
+            elif name == "Increase quantity": z["menge"] += 1
 
-        def tippen(feld, text, trail, name):
+        def tippen(feld, text, trail, name, ist=None):
+            if ist is not None and ob.tsx_wert_gleich(ist, text):
+                return True
             z["klicks"].append("tippe " + name)
             key = {"Profit": "profit", "Risk": "risk", "Contract": "contract"}.get(name)
             if key: z[key] = str(text)
@@ -2940,6 +2946,9 @@ def test_tsx_order():
     chk("Probe: Brackets 400/leer, Haken an, MNQ, Menge 2", z["profit"] == "400" and z["risk"] == "" and z["haken"] == 1
         and z["contract"] == "MNQZ26" and z["menge"] == 2 and not z["dialog"])
     chk("Probe: kein Order-Klick", not any(k.startswith("Order senden") for k in z["klicks"]))
+    chk("B30: Menge 2 = Schnellknopf 1 + 1× Increase, kein Tippen", "Schnellknopf 1" in z["klicks"] and z["klicks"].count("Increase quantity") == 1
+        and "tippe # of Contracts" not in z["klicks"])
+    chk("B30: Haken-Zustand vorher in der Spur", "war aus → geklickt → an" in r.get("trail", ""))
     chk("Probe: Rücklesung in der Spur", "Brackets zurückgelesen" in r.get("trail", ""))
     r, z = lauf(dict(cmd, scharf=True, sl_usd=150))
     chk(f"Scharf: gesendet + Position steht ({r.get('code')}: {r.get('msg')})", r.get("ok") and r.get("gesendet") is True and r.get("schritt") == "fertig"
@@ -2947,6 +2956,24 @@ def test_tsx_order():
     chk("Scharf: genau ein Order-Klick", sum(k.startswith("Order senden") for k in z["klicks"]) == 1)
     r, z = lauf(dict(cmd, scharf=True), pos_offen=True)
     chk("Offene Position: Riegel, kein Klick", r.get("code") == "position" and not z["klicks"])
+    r, z = lauf(cmd, haken=None)
+    chk(f"B30: Haken unlesbar, Probe → nicht angefasst, weiter ({r.get('code')})", r.get("ok") and "nicht angefasst" in r.get("trail", "")
+        and not any(k.startswith("Haken") for k in z["klicks"]))
+    r, z = lauf(dict(cmd, scharf=True), haken=None)
+    chk("B30: Haken unlesbar, scharf → ENDE, kein Order-Klick", r.get("code") == "bracket" and not any(k.startswith("Order senden") for k in z["klicks"]))
+    r, z = lauf(cmd, haken=1)
+    chk("B30: Haken schon an → nicht angefasst", r.get("ok") and "war schon an" in r.get("trail", "") and not any(k.startswith("Haken") for k in z["klicks"]))
+    chk("B30: Soll-Wert steht → nichts tippen", ob.tsx_wert_gleich("", "") and ob.tsx_wert_gleich("12.00", "12") and not ob.tsx_wert_gleich("100", ""))
+    chk("B30: Fokus-Beweis", ob.tsx_fokus_passt(("Edit", (940, 805, 1170, 845)), (936, 800, 1177, 851))
+        and not ob.tsx_fokus_passt(("Document", (0, 0, 2560, 1400)), (936, 800, 1177, 851))
+        and not ob.tsx_fokus_passt(("Edit", (1200, 805, 1430, 845)), (936, 800, 1177, 851)) and not ob.tsx_fokus_passt(None, (1, 1, 2, 2)))
+    mp = ob.tsx_menge_plan
+    chk("B30: Mengen-Plan", mp(2, [1, 3, 5, 10, 15]) == (1, 1) and mp(15, [1, 3, 5, 10, 15]) == (15, 0) and mp(7, [1, 3, 5, 10, 15]) == (5, 2)
+        and mp(30, [1, 3, 5, 10, 15]) is None and mp(1, []) is None)
+    ml = ob.tsx_mengen_leiste([("Decrease quantity", (2108, 567, 2135, 594), "Button"), ("1", (2157, 567, 2184, 594), "Button"),
+                               ("1", (500, 100, 520, 120), "Button"), ("Increase quantity", (2338, 567, 2365, 594), "Button")], 1917)
+    chk("B30: Mengen-Leiste nur in der ±-Zeile", list(ml["schnell"].keys()) == [1] and ml["plus"] is not None)
+    chk("B30: Mengenfeld in der ±-Zeile", ob.tsx_mengenfeld([("", (1977, 565, 2100, 596), "Edit", "1", None)], ml)[1] == (1977, 565, 2100, 596))
     r, z = lauf(cmd, typ="Order Type Limit")
     chk("Order-Typ Limit: Riegel", r.get("code") == "ordertyp" and not z["klicks"])
     # B29 (Mike 16:04 UTC): ComboBox heißt nur „Order Type" — unlesbar = weiter, Knopf-Beweis entscheidet

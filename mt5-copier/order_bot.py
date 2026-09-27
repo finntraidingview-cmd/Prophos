@@ -11301,6 +11301,51 @@ def tsx_feld_wert(label, roh, felder=()):
     return None, None
 
 
+def tsx_menge_plan(n, schnell):
+    """REIN RECHNEND (testbar, B30): Menge ohne Tippen — größter Schnellknopf ≤ n, dann (n − Basis)× „Increase quantity".
+    schnell = verfügbare Schnellknopf-Werte. -> (basis, plus) | None (kein Knopf ≤ n oder mehr als 10 Klicks)."""
+    try:
+        n = int(n)
+        werte = sorted({int(v) for v in schnell or () if str(v).strip().isdigit() and int(v) > 0})
+    except (TypeError, ValueError):
+        return None
+    basis = [v for v in werte if v <= n]
+    if not basis:
+        return None
+    b = basis[-1]
+    return (b, n - b) if n - b <= 10 else None
+
+
+def tsx_mengen_leiste(roh, panel_links):
+    """REIN RECHNEND (testbar, B30 — Inventar Mike: „# of Contracts" y≈396, Knöpfe y≈580): die Mengen-Leiste im Order-Panel
+    = Zeile von „Decrease quantity"/„Increase quantity". -> {'schnell': {wert: el}, 'plus': el|None, 'minus': el|None, 'zeile': (t,b)|None}"""
+    btn = [e for e in roh or () if e[1] and (e[2] if len(e) > 2 else "") == "Button" and (e[1][0] + e[1][2]) / 2 >= panel_links]
+    plus = next((e for e in btn if re.match(r"^\s*increase quantity\s*$", str(e[0]), re.I)), None)
+    minus = next((e for e in btn if re.match(r"^\s*decrease quantity\s*$", str(e[0]), re.I)), None)
+    anker = plus or minus
+    if not anker:
+        return {"schnell": {}, "plus": None, "minus": None, "zeile": None}
+    my = (anker[1][1] + anker[1][3]) / 2
+    schnell = {}
+    for e in btn:
+        t = str(e[0]).strip()
+        if t.isdigit() and abs((e[1][1] + e[1][3]) / 2 - my) <= 12:
+            schnell.setdefault(int(t), e)
+    return {"schnell": schnell, "plus": plus, "minus": minus, "zeile": (anker[1][1], anker[1][3])}
+
+
+def tsx_mengenfeld(felder, leiste, label_rect=None):
+    """REIN RECHNEND (testbar, B30): Mengenfeld = Eingabefeld in der Zeile der Mengen-Leiste (links von „Decrease"), sonst
+    das Feld zur Beschriftung „# of Contracts"."""
+    z = (leiste or {}).get("zeile")
+    if z:
+        my = (z[0] + z[1]) / 2
+        k = [f for f in felder or () if len(f) > 2 and f[2] in ("Edit", "Spinner") and f[1] and abs((f[1][1] + f[1][3]) / 2 - my) <= 14]
+        if len(k) == 1:
+            return k[0]
+    return tsx_feld_zu_label(felder, label_rect) if label_rect else None
+
+
 def tsx_order_befehl(cmd):
     """REIN RECHNEND (testbar): Befehl prüfen → (dict | None, fehler). richtung buy/sell, Menge 1–50 ganz, Wurzel MNQ/NQ aus
     symbol, TP > 0, SL optional (> 0 oder leer), scharf bool."""
@@ -11327,18 +11372,72 @@ def tsx_order_befehl(cmd):
             "plan_id": str(c.get("plan_id") or "")[:64]}, ""
 
 
-def _tsx_tippen(feld, text, trail, name):
-    """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren)."""
+def tsx_wert_gleich(ist, soll):
+    """REIN RECHNEND (testbar, B30): Feld hat schon den Soll-Wert (Zahlen numerisch, '' = leer) — dann nichts tippen."""
+    a, b = str(ist or "").strip(), str(soll or "").strip()
+    if a == b:
+        return True
+    ga, gb = tsx_geld(a), tsx_geld(b)
+    return ga is not None and gb is not None and abs(ga - gb) < 1e-9
+
+
+def tsx_fokus_passt(fokus, feld_rect):
+    """REIN RECHNEND (testbar, B30): fokus = (typ, (l,t,r,b)) des fokussierten UIA-Elements. Tippen nur, wenn es ein
+    Eingabefeld ist und im Ziel-Feld liegt (Mitte drin oder Feld-Mitte in ihm) — sonst markiert Strg+A die ganze Seite."""
+    try:
+        typ, r = fokus
+        if typ not in ("Edit", "ComboBox", "Spinner"):
+            return False
+        fx, fy = (r[0] + r[2]) / 2, (r[1] + r[3]) / 2
+        gx, gy = (feld_rect[0] + feld_rect[2]) / 2, (feld_rect[1] + feld_rect[3]) / 2
+        drin = lambda x, y, q: q[0] - 4 <= x <= q[2] + 4 and q[1] - 4 <= y <= q[3] + 4
+        return drin(fx, fy, feld_rect) or drin(gx, gy, r)
+    except (TypeError, ValueError, IndexError):
+        return False
+
+
+def _uia_fokus():
+    """(typ, rect) des fokussierten UIA-Elements | None."""
+    try:
+        from pywinauto.uia_defines import IUIA
+        e = IUIA().iuia.GetFocusedElement()
+        r = e.CurrentBoundingRectangle
+        name_von = {v: k for k, v in _UIA_TYPID.items()}
+        return name_von.get(e.CurrentControlType, str(e.CurrentControlType)), (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        return None
+
+
+def _tsx_tippen(feld, text, trail, name, ist=None):
+    """Feld anklicken, Inhalt löschen (Strg+A, Entf), text tippen (leer = nur leeren).
+    B30 (27.09.2026, erste Probe bei Mike — Finn: „etwas wurde markiert, der ganze Bildschirm, da, wo das Bracket eingestellt
+    wurde"): Strg+A lief, als der Fokus nicht im Feld war (Risk war schon leer). Jetzt: steht der Soll-Wert schon (ist), wird
+    gar nichts getippt; sonst nur tippen, wenn das fokussierte Element ein Eingabefeld IM Ziel-Feld ist (zweiter Klick als
+    Versuch) — ohne Fokus-Beweis kein Tastendruck. -> True = Feld steht/wurde getippt, False = nichts getippt."""
+    if ist is not None and tsx_wert_gleich(ist, text):
+        trail.append(f"Feld {name} steht schon ({'leer' if not str(text or '') else text}) — nichts getippt")
+        return True
     try:
         from pywinauto import keyboard
     except ImportError:
         return False
-    _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
-    _warte(0.25, 0.2)
-    keyboard.send_keys("^a")
-    _warte(0.1, 0.1)
-    keyboard.send_keys("{DELETE}")
-    _warte(0.15, 0.1)
+    fokus_ok = False
+    for versuch in range(2):
+        _tsx_klick((name, feld[1], feld[2]), f"Feld {name}", trail)
+        _warte(0.25, 0.2)
+        fk = _uia_fokus()
+        if tsx_fokus_passt(fk, feld[1]):
+            fokus_ok = True
+            break
+        trail.append(f"Fokus nicht im Feld {name} ({fk[0] if fk else '?'})")
+    if not fokus_ok:
+        trail.append(f"Feld {name}: kein Fokus — nichts getippt")
+        return False
+    if ist is None or str(ist or ""):
+        keyboard.send_keys("^a")
+        _warte(0.1, 0.1)
+        keyboard.send_keys("{DELETE}")
+        _warte(0.15, 0.1)
     if text:
         keyboard.send_keys(tv_tasten_escape(str(text)), with_spaces=True, pause=0.03)
         _warte(0.2, 0.15)
@@ -11404,7 +11503,9 @@ def _tsx_order_nach_kopf(befehl):
             return ende("bracket", "Bracket-Dialog: Felder „Risk (~$)\"/„Profit (~$)\" nicht gefunden.",
                         felder=tsx_felder_kurz(felder, 40))
         for feld, wert, nm in ((f_prof, befehl["brackets"]["profit"], "Profit"), (f_risk, befehl["brackets"]["risk"], "Risk")):
-            _tsx_tippen(feld, wert, trail, nm)
+            if not _tsx_tippen(feld, wert, trail, nm, ist=feld[3]):
+                _tsx_esc()
+                return ende("bracket", f"Feld „{nm}\" bekam keinen Fokus — nichts getippt.")
         _warte(0.3, 0.2)
         felder = _tsx_felder(w)
         r_ist = next((f[3] for f in felder if f[0].lower().startswith("risk")), None)
@@ -11420,17 +11521,23 @@ def _tsx_order_nach_kopf(befehl):
         roh_b = _tsx_seite_roh(w)
         txt = [e for e in roh_b if e[1] and str(e[0]).lower().startswith("automatically apply")]
         haken = tsx_haken_zu_text(felder, txt[0][1]) if txt else None
+        # B30: Zustand VOR dem Klick in die Spur; unlesbar = nie klicken (würde einen aktiven Haken ausschalten)
         if not haken or haken[4] not in (0, 1):
-            _tsx_esc()
-            return ende("bracket", "Haken „Automatically apply …\" nicht lesbar.", felder=tsx_felder_kurz(felder, 40))
-        if haken[4] == 0:
+            if befehl["scharf"]:
+                _tsx_esc()
+                return ende("bracket", "Haken „Automatically apply …\" unlesbar — nicht angefasst, keine Order.",
+                            felder=tsx_felder_kurz(felder, 40))
+            trail.append("Haken „Automatically apply\" unlesbar — nicht angefasst")
+        elif haken[4] == 0:
             _tsx_klick(("Haken", haken[1], "CheckBox"), "Haken Automatically apply", trail)
             _warte(0.4, 0.2)
             neu = tsx_haken_zu_text(_tsx_felder(w), txt[0][1])
             if not neu or neu[4] != 1:
                 _tsx_esc()
-                return ende("bracket", "Haken „Automatically apply …\" ließ sich nicht setzen.")
-        trail.append("Haken „Automatically apply\" an")
+                return ende("bracket", f"Haken „Automatically apply …\" war aus → geklickt → {'unlesbar' if not neu else 'weiter aus'}.")
+            trail.append("Haken „Automatically apply\": war aus → geklickt → an")
+        else:
+            trail.append("Haken „Automatically apply\": war schon an — nicht angefasst")
         zu = [e for e in roh_b if e[1] and e[2] == "Button" and str(e[0]).strip().lower() in ("close", "schließen", "×")
               and not TSX_RX_NIE.search(str(e[0])) and e[1][3] <= f_risk[1][1] and abs(e[1][0] - f_prof[1][2]) < 400]
         if len(zu) == 1:
@@ -11451,7 +11558,8 @@ def _tsx_order_nach_kopf(befehl):
         cw_ok = lambda v: tsx_contract_wahl([str(v or "").split("·")[0].strip()], befehl["wurzel"]) is not None
         trail.append(f"Contract vorher: {cwert} ({cq})" if cwert else "Contract vorher unlesbar")
         if not cw_ok(cwert):
-            _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract")
+            if not _tsx_tippen(cb, befehl["wurzel"].lower(), trail, "Contract"):
+                return ende("contract", "Contract-Suche bekam keinen Fokus — nichts getippt.")
             vor, t_bis = [], time.time() + 4.0
             while time.time() < t_bis:
                 _warte(0.4, 0.2)
@@ -11484,21 +11592,29 @@ def _tsx_order_nach_kopf(befehl):
             e[1] and str(e[0]).strip().lower() == "contract" for e in roh) else 0
         knopf = tsx_order_knopf(roh, befehl["richtung"], befehl["menge"], panel_links)
         if not knopf:
-            mf = tsx_feld_zu_label(_tsx_felder(w), lab[0][1]) if lab else None
-            if mf:
-                _tsx_tippen(mf, str(befehl["menge"]), trail, "# of Contracts")
+            # B30: Menge ohne Tippen — Schnellknopf (1/3/5/10/15) + n× „Increase quantity"; Feld nur als Rückfall
+            leiste = tsx_mengen_leiste(roh, panel_links)
+            plan = tsx_menge_plan(befehl["menge"], leiste["schnell"].keys())
+            if plan and (plan[1] == 0 or leiste["plus"]):
+                _tsx_klick(leiste["schnell"][plan[0]], f"Schnellknopf {plan[0]}", trail)
+                for _i in range(plan[1]):
+                    _warte(0.2, 0.15)
+                    _tsx_klick(leiste["plus"], "Increase quantity", trail)
+                if plan[1]:
+                    trail.append(f"Menge {befehl['menge']} = Schnellknopf {plan[0]} + {plan[1]}× Increase")
+            else:
+                felder = _tsx_felder(w)
+                mf = tsx_mengenfeld(felder, leiste, lab[0][1] if lab else None)
+                if not mf:
+                    return ende("menge", f"Menge {befehl['menge']}: weder Schnellknopf-Weg noch Mengenfeld gefunden.",
+                                felder=tsx_felder_kurz(felder, 40), schnell=sorted(leiste["schnell"].keys()))
+                if not _tsx_tippen(mf, str(befehl["menge"]), trail, "# of Contracts", ist=mf[3]):
+                    return ende("menge", "Mengenfeld bekam keinen Fokus — nichts getippt.")
                 try:
                     from pywinauto import keyboard
                     keyboard.send_keys("{TAB}")
                 except Exception:
                     pass
-            else:
-                sk = [e for e in roh if e[1] and e[2] == "Button" and str(e[0]).strip() == str(befehl["menge"])
-                      and (e[1][0] + e[1][2]) / 2 >= panel_links]
-                if len(sk) != 1:
-                    return ende("menge", "Mengenfeld nicht gefunden und kein passender Schnellknopf.",
-                                felder=tsx_felder_kurz(_tsx_felder(w), 40))
-                _tsx_klick(sk[0], f"Schnellknopf {befehl['menge']}", trail)
             t_bis = time.time() + 3.0
             while time.time() < t_bis and not knopf:
                 _warte(0.3, 0.2)
