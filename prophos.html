@@ -9800,6 +9800,16 @@
             <div class="mono" id="ac-tvlive-pl" style="font-size:15px;font-weight:600;padding:6px 0 2px">–</div>
             <div id="ac-tvlive-pl-sub" style="font-size:11px;color:var(--sub)">Balance nachher − vorher</div>
           </div>
+          <!-- TopstepX-Inventar (27.09.2026, F23-Nachtrag, Wunsch Backend B16): nur Admin-Geräte, nur Topstep-Konten; am PC direkt, vom Mac per
+               Signal 'tsx_inventar' an den PC-Tab. Ergebnis gekürzt + „kopieren" (eigene Verdrahtung acTsxInventar) -->
+          <div class="field" id="ac-tsx-inv" style="grid-column:1/-1" hidden>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn btn-ghost btn-xs" id="ac-tsx-inv-btn" title="Puls öffnet am PC dieser ID die TopstepX-Web-App und liest die Oberfläche aus (nur lesen, keine Order)">TopstepX-Inventar</button>
+              <button type="button" class="btn btn-ghost btn-xs" id="ac-tsx-inv-kopie" hidden>kopieren</button>
+              <span id="ac-tsx-inv-stand" style="font-size:11px;color:var(--sub)"></span>
+            </div>
+            <pre id="ac-tsx-inv-erg" style="display:none;margin:6px 0 0;max-height:160px;overflow:auto;font-size:10.5px;background:var(--surface-tint);padding:8px;border-radius:8px;white-space:pre-wrap"></pre>
+          </div>
           <div class="field" style="grid-column:1/-1;margin-top:-6px">
             <div style="font-size:11px;color:var(--sub)">Puls liest die Account Balance aus TradingView beim Platzieren und nach dem Ende eines Orbit-V2-Trades. Unabhängig von Echo (MT5) — wird hier nicht geändert.</div>
           </div>
@@ -19270,9 +19280,10 @@
     tvV2Poll.busy = true
     try{
       const r = await window.mtcApi('tsx-inventar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      if(!r || r._httpFail) return { ok: false, msg: 'Panel kennt /api/tsx-inventar noch nicht' }
+      if(!r || r.copier_offline) return { ok: false, msg: 'Copier-Backend am PC nicht erreichbar' + (r && r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
+      if(r._httpFail) return { ok: false, msg: 'Panel kennt /api/tsx-inventar noch nicht' + (r.error ? ' (' + String(r.error).slice(0, 80) + ')' : '') }
       const inv = {}; for(const [k, v] of Object.entries(r.inventar || {})) inv[k] = Array.isArray(v) ? v.slice(0, 200) : v
-      return { ok: !!r.ok, msg: r.msg || null, titel: r.titel || null, tabs: r.tabs || null, inventar: inv, datei: r.datei || null, trail: String(r.trail || '').slice(0, 2000) }
+      return { ok: !!r.ok, msg: r.msg || r.error || r.code || null, titel: r.titel || null, tabs: r.tabs || null, inventar: inv, datei: r.datei || null, trail: String(r.trail || '').slice(0, 2000) }
     }finally{ tvV2Poll.busy = false }
   }
   window._tsxInventarLesen = tsxInventarLesen
@@ -26875,7 +26886,45 @@
   // Füllt „Futures · Live" im Bearbeiten-Popup — frisch aus accounts + den letzten Plänen dieses Master-Kontos (nur lesen).
   // _acTvLiveId schützt gegen Überholen, wenn das Popup schnell für ein anderes Konto neu geöffnet wird.
   let _acTvLiveId = null
+  // TopstepX-Inventar (F23-Nachtrag): Knopf im Futures-Live-Block, nur Admin + Topstep. Ergebnis aus order_signale.ergebnis bzw. lokal.
+  let _acTsxInvErg = null
+  function acTsxInventarZeigen(acc){
+    const box = document.getElementById('ac-tsx-inv'); if(!box) return
+    const admin = (() => { try{ return localStorage.getItem('prophos_wd_admin') === '1' }catch(_){ return false } })()
+    box.hidden = !(admin && acc && /topstep/i.test(String(acc.firm || '')))
+    const st = document.getElementById('ac-tsx-inv-stand'), pre = document.getElementById('ac-tsx-inv-erg'), kp = document.getElementById('ac-tsx-inv-kopie')
+    if(st) st.textContent = ''; if(pre){ pre.style.display = 'none'; pre.textContent = '' }; if(kp) kp.hidden = true; _acTsxInvErg = null
+  }
+  function acTsxInventarKurz(e){
+    if(!e) return ''
+    const inv = e.inventar || {}, z = Object.entries(inv).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.length + ' Elemente' : String(v)}`).join(' · ')
+    const bsp = Object.entries(inv).map(([k, v]) => Array.isArray(v) ? `${k}:\n` + v.slice(0, 12).map(x => '  ' + (Array.isArray(x) ? x.slice(0, 2).join(' — ') : JSON.stringify(x))).join('\n') : '').filter(Boolean).join('\n')
+    return `${e.ok ? '✓' : '✗'} ${e.msg || ''}\nFenster: ${e.titel || '—'}\nTabs: ${Array.isArray(e.tabs) ? e.tabs.length + ' (' + e.tabs.slice(0, 4).map(t => typeof t === 'string' ? t : (t && (t.titel || t.title || t.url)) || '?').join(' | ') + ')' : '—'}\n${z}${e.datei ? '\nDatei am PC: ' + e.datei : ''}\n\n${bsp}`
+  }
+  document.getElementById('ac-tsx-inv-kopie')?.addEventListener('click', async ev => {
+    try{ await navigator.clipboard.writeText(JSON.stringify(_acTsxInvErg, null, 1)); ev.target.textContent = '✓ kopiert' }catch(_){ ev.target.textContent = 'Kopieren blockiert' }
+  })
+  document.getElementById('ac-tsx-inv-btn')?.addEventListener('click', async ev => {
+    const btn = ev.target, st = document.getElementById('ac-tsx-inv-stand'), pre = document.getElementById('ac-tsx-inv-erg'), kp = document.getElementById('ac-tsx-inv-kopie')
+    const fertig = e => { _acTsxInvErg = e; btn.disabled = false; if(st) st.textContent = e && e.ok ? 'gelesen' : 'Fehler'; if(pre){ pre.style.display = 'block'; pre.textContent = acTsxInventarKurz(e) }; if(kp){ kp.hidden = false; kp.textContent = 'kopieren' } }
+    btn.disabled = true
+    if(MT5_LOCAL){ if(st) st.textContent = 'liest hier am PC …'; fertig(await tsxInventarLesen()); return }
+    let sig = null
+    try{ const { data, error } = await supabase.from('order_signale').insert({ plan_id: 'tsx:inventar', params: { aktion: 'tsx_inventar', von: 'besitzer' } }).select('*').single(); if(error) throw error; sig = data }
+    catch(e){ btn.disabled = false; if(st) st.textContent = 'Signal nicht gesendet: ' + String((e && e.message) || e).slice(0, 80); return }
+    if(st) st.textContent = 'wartet auf den PC dieser ID …'
+    const t0 = Date.now()
+    const tick = async () => {
+      let row = null; try{ const { data } = await supabase.from('order_signale').select('*').eq('id', sig.id).maybeSingle(); row = data }catch(_){}
+      if(row && ['fertig', 'fehler', 'verfallen', 'verworfen'].includes(row.status)) return fertig(Object.assign({ ok: row.status === 'fertig' }, row.ergebnis || { msg: row.status }))
+      if(Date.now() - t0 > 240000) return fertig({ ok: false, msg: 'keine Antwort vom PC (Prophos-Tab + Copier auf dem PC offen?)' })
+      if(row && row.status === 'laeuft' && st) st.textContent = `liest … (PC ${row.pc || '?'})`
+      setTimeout(tick, 2000)
+    }
+    setTimeout(tick, 1500)
+  })
   async function acTvLiveRender(acc){
+    acTsxInventarZeigen(acc)   // F23-Nachtrag
     const g = id => document.getElementById(id)
     const bal = g('ac-tvlive-bal'), stand = g('ac-tvlive-stand'), pl = g('ac-tvlive-pl'), plSub = g('ac-tvlive-pl-sub')
     if(!bal) return
@@ -34229,7 +34278,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.673'
+  const OS_TAB_BUILD = '2026-09-22.674'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
