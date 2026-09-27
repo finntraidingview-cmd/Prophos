@@ -30,3 +30,14 @@ select '6cceb3f3-dc78-48ee-8668-26081da3e70f', s, s, 0, 0, s, 'Neustart Finanz-T
 -- Umschalter oben auf „Ohne Hedge“ (gesynct über user_settings 'kapitel').
 update public.user_settings set value = '{"id":2}'::jsonb, updated_at = now()
  where user_id = '6cceb3f3-dc78-48ee-8668-26081da3e70f' and key = 'kapitel';
+
+-- Nachtrag 2 (27.09.2026 16:45, Finn: Payout auf „50k Funding Pips 20368773 → Funded“ taucht
+-- nirgends auf): Buchungen/Payouts erben per Trigger set_kapitel das Kapitel des KONTOS — Emins
+-- Konten standen noch in Kapitel 1, also landete jeder neue Payout unsichtbar im Archiv.
+-- Emins Konten ziehen deshalb ins aktuelle Kapitel. Bestehende Buchungen behalten ihr eigenes
+-- kapitel_id (Trigger greift nur beim Insert) und bleiben archiviert.
+update public.accounts set kapitel_id = 2
+ where user_id = '6cceb3f3-dc78-48ee-8668-26081da3e70f' and kapitel_id = 1;
+-- Die zwei Payout-Anfragen von 16:41/16:42 (je 754 €) nachträglich ins aktuelle Kapitel.
+update public.pending_payouts set kapitel_id = 2
+ where id in ('c16b7e19-2925-42ba-ba23-f4f3a61964d7', 'b96e1087-10e8-42f6-b8b5-bd88c140fe18');
