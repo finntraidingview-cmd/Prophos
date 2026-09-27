@@ -2997,7 +2997,10 @@ def test_tsx_login():
             trail.append(name)
             z["seite"] = nach_klick
         ob._tsx_klick = klick
-        ob._warte = lambda *a, **k: None
+        uhr = [1000.0]
+        alt_time = ob.time
+        ob._warte = lambda *a, **k: uhr.__setitem__(0, uhr[0] + 1.0)
+        ob.time = type("Uhr", (), {"time": staticmethod(lambda: uhr[0]), "sleep": staticmethod(lambda x: None)})
         ob._puls_diagnose_senden = lambda *a, **k: None
         try:
             stand = {}
@@ -3007,18 +3010,22 @@ def test_tsx_login():
             for k, v in alt.items():
                 setattr(ob, k, v)
             ob._TSX_SEITE.clear()
+            ob.time = alt_time
 
     ke, st, z, sp = lauf(MAIL, "••••••••", "trade")
     chk(f"gefüllt → ein Klick → Handelsseite ({sp})", ke and z["klicks"] == 1 and not st.get("fehler") and "TopstepX-Login geklickt (Felder vorausgefüllt)" in sp)
     chk("Mail nie in der Spur", MAIL not in sp)
     ke, st, z, sp = lauf("", "", "trade")
-    chk("leer → kein Klick, Ende 'login'", ke is None and z["klicks"] == 0 and st.get("fehler", ("",))[0] == "login"
-        and "nicht vorausgefüllt" in st["fehler"][1])
+    chk(f"per UIA leer (Chrome-Autofill) → nach Wartezeit EIN Klick → Handelsseite ({sp})", ke and z["klicks"] == 1
+        and not st.get("fehler") and "Chrome-Autofill" in sp)
+    ke, st, z, sp = lauf("", "", "login")
+    chk(f"Klick ohne Erfolg → kein zweiter Klick, Ende 'login' ({st.get('fehler')})", ke is None and z["klicks"] == 1
+        and st.get("fehler", ("",))[0] == "login" and "von Hand" in st["fehler"][1])
     ke, st, z, sp = lauf(MAIL, "••••", "fehler")
     chk(f"falsches Passwort → genau EIN Klick, Ende mit Fehlertext ({st.get('fehler')})", ke is None and z["klicks"] == 1
         and "Invalid username or password" in (st.get("fehler") or ("", ""))[1])
     if ok:
-        print("✓ TSX-Login: Login-Seite erkannt, nur vorausgefüllt EIN Klick, leer/abgelehnt → Ende 'login', Zugangsdaten maskiert")
+        print("✓ TSX-Login: Login-Seite erkannt, höchstens EIN Klick (auch bei Chrome-Autofill), abgelehnt → Ende 'login', Zugangsdaten maskiert")
     return ok
 
 

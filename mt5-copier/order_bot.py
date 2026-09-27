@@ -10652,7 +10652,8 @@ def _tsx_warte_seite(w, trail, sek=20.0, login=None):
         if ke or time.time() >= ende:
             if not ke and login.get("geklickt") and _tsx_login_versuch(w, trail, login):
                 # nach dem einen Klick immer noch Login-Seite (ohne Fehlertext) — kein zweiter Klick, ehrliches Ende
-                login.setdefault("fehler", ("login", "Login geklickt, aber TopstepX steht nach 20 s noch auf der Login-Seite."))
+                login.setdefault("fehler", ("login", "Login geklickt, aber TopstepX steht nach 20 s noch auf der Login-Seite "
+                                                     "— bitte einmal von Hand anmelden."))
                 trail.append("ENDE " + login["fehler"][0] + ": " + login["fehler"][1])
                 return None
             trail.append(f"Seite bereit ({(ke[0] or '')[:40]})" if ke else f"Seite nach {int(sek)} s ohne Konto-Auslöser")
@@ -10798,7 +10799,7 @@ def _tsx_felder(w):
 TSX_RX_PLATFORM_LOGIN = re.compile(r"^\s*(platform\s+)?log\s?in\s*$", re.I)
 TSX_RX_USER_FELD = re.compile(r"user|e-?mail|benutzer|login", re.I)
 TSX_RX_PW_FELD = re.compile(r"pass|kennwort", re.I)
-TSX_RX_LOGIN_FEHLER = re.compile(r"invalid|incorrect|wrong|failed|error|not\s+found|locked|ungültig|falsch|fehl", re.I)
+TSX_RX_LOGIN_FEHLER = re.compile(r"invalid|incorrect|wrong|failed|error|not\s+found|locked|required|erforderlich|ungültig|falsch|fehl", re.I)
 
 
 def tsx_ist_zugangsfeld(f):
@@ -10845,14 +10846,18 @@ def _tsx_login_versuch(w, trail, stand):
         if fehl:
             stand["fehler"] = ("login", f"TopstepX-Login abgelehnt: {fehl[0][:160]}")
         return True
-    if not (lage["user"] and lage["pw"]):
-        trail.append(f"TopstepX-Login-Seite: Username {'gefüllt' if lage['user'] else 'leer'}, "
-                     f"Passwort {'gefüllt' if lage['pw'] else 'leer'} — kein Klick")
-        stand["fehler"] = ("login", "TopstepX will einen Login, die Felder sind nicht vorausgefüllt — bitte einmal von Hand anmelden.")
-        return True
+    gefuellt = lage["user"] and lage["pw"]
+    if not gefuellt:
+        # Nachtrag B27 (27.09.2026, Mike pc-l5o8bv, 4,1 s nach Tab-Öffnen „Username leer, Passwort leer", obwohl Chrome beide
+        # sichtbar ausgefüllt hatte — Finn: „er muss nur hier drauf drücken"): Chrome gibt Autofill-Werte erst nach einem
+        # echten Klick an die Seite (und an UIA) frei. Erst bis 5 s warten, dann trotzdem EIN Klick — getippt wird nie.
+        stand.setdefault("leer_seit", time.time())
+        if time.time() - stand["leer_seit"] < 5.0:
+            return True
     if not lage["knopf"]:
         return True                                  # Seite zeichnet noch — nächste Runde
-    _tsx_klick(lage["knopf"], "TopstepX-Login geklickt (Felder vorausgefüllt)", trail)
+    _tsx_klick(lage["knopf"], "TopstepX-Login geklickt (Felder vorausgefüllt)" if gefuellt else
+               "TopstepX-Login geklickt (Felder per UIA leer — Chrome-Autofill gibt sie erst beim Klick frei)", trail)
     stand["geklickt"] = time.time()
     _puls_diagnose_senden(trail, "tsx_login")
     return True
