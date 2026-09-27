@@ -15642,22 +15642,53 @@
     }
     const basis = await holen()
     if(!basis) return
+    /* NUR ECHTE FRONTEND-UPDATES (28.09.2026, Chris' PC: „⬆ Neue Version .730" 5× in 5 min). Backend-Commits zählen VERSION hoch, ohne
+     * prophos.html anzufassen (heute .730 = app.py, OS_TAB_BUILD blieb .729) — der Tab lud neu, bekam wieder .729 und fing von vorn an.
+     * Weicht VERSION ab, liest der Wächter EINMAL je VERSION-Wert die frische Seite (Cache-Bust) und vergleicht deren OS_TAB_BUILD:
+     * nur eine wirklich neuere Seite ist ein Update. Ergebnis je VERSION gemerkt, damit die 1-MB-Seite nicht alle 2 min kommt. */
+    const bwNrV = v => { const m = /^(\d{4}-\d{2}-\d{2})\.(\d+)$/.exec(v || ''); return m ? [m[1], Number(m[2])] : null }
+    const bwNeuerV = (a, b) => { const x = bwNrV(a), y = bwNrV(b); if(!x || !y) return false; return x[0] !== y[0] ? x[0] > y[0] : x[1] > y[1] }
+    const bwSeitenBuild = {}   // VERSION → OS_TAB_BUILD der frischen Seite (null = nicht lesbar)
+    const seiteBuild = async v => {
+      if(v in bwSeitenBuild) return bwSeitenBuild[v]
+      let b = null
+      try{
+        const u = location.pathname + (location.pathname.includes('?') ? '&' : '?') + 'bwcheck=' + encodeURIComponent(v) + '.' + Date.now()
+        const r = await fetch(u, { cache: 'no-store' })
+        if(r.ok){ const m = /const OS_TAB_BUILD = '([0-9.-]+)'/.exec(await r.text()); b = m ? m[1] : null }
+      }catch(_){ b = null }
+      bwSeitenBuild[v] = b
+      return b
+    }
+    const eigenBuild = () => { try{ return OS_TAB_BUILD }catch(_){ return basis } }
+    // Liefert die Ziel-Build-Nummer, wenn die frische Seite wirklich neuer ist als dieser Tab — sonst null
+    const echtNeu = async v => { if(!v) return null; const b = await seiteBuild(v); return (b && bwNeuerV(b, eigenBuild())) ? b : null }
+    // Neu laden mit Cache-Bust (?v=<build>), Hash bleibt — der Browser/pages.dev liefert so sicher die neue Datei
+    const frischLaden = ziel => { try{ const u = new URL(location.href); u.searchParams.set('v', ziel); location.replace(u.toString()) }catch(_){ location.reload() } }
     // Ehrlicher Stand im „Mehr"-Sheet statt des statischen „v0.1 · alles live"
     const foot = document.querySelector('#dashboard-view .sb-foot')
-    if(foot) foot.innerHTML = '<span class="dot"></span> Build ' + basis
+    if(foot) foot.innerHTML = '<span class="dot"></span> Build ' + eigenBuild()   // der laufende Code, nicht die VERSION (Backend zählt die ohne neue Seite hoch)
+    // Pille (Mac/Handy): je Version höchstens EINMAL — gezeigt/weggetippt → gemerkt, bis eine neuere kommt; mehrere Pushes kurz
+    // hintereinander → dieselbe Pille zeigt die neueste Nummer (kein Stapel)
+    const BW_PILLE_KEY = 'prophos_bw_pille'
+    const pilleGesehen = () => { try{ return localStorage.getItem(BW_PILLE_KEY) || '' }catch(_){ return '' } }
     let pille = null
     const zeigen = neu => {
-      if(pille) return
+      if(!neu) return
+      if(pille){ if(bwNeuerV(neu, pille.dataset.ziel || '')){ pille.dataset.ziel = neu; pille.textContent = '⬆ Neue Version ' + neu + ' — antippen' } return }
+      const gesehen = pilleGesehen(); if(gesehen && !bwNeuerV(neu, gesehen)) return
+      try{ localStorage.setItem(BW_PILLE_KEY, neu) }catch(_){}
       pille = document.createElement('button')
       pille.id = 'build-update-pill'
       pille.type = 'button'
+      pille.dataset.ziel = neu
       pille.textContent = '⬆ Neue Version ' + neu + ' — antippen'
-      pille.addEventListener('click', () => location.reload())
+      pille.addEventListener('click', () => frischLaden(pille.dataset.ziel || neu))
       document.body.appendChild(pille)
     }
     const pruefen = async () => {
       const v = await holen()
-      if(v && v !== basis) zeigen(v)
+      if(v && v !== basis) zeigen(await echtNeu(v))
     }
     if(!MT5_LOCAL){
       document.addEventListener('visibilitychange', () => { if(!document.hidden) pruefen() })
@@ -15702,14 +15733,17 @@
     // Danach nur noch die Pille.
     const BW_KEY = 'prophos_bw_reload'
     const bwVersuche = ziel => { try{ const o = JSON.parse(localStorage.getItem(BW_KEY) || 'null'); return (o && o.ziel === ziel) ? o : { ziel, n: 0, at: 0 } }catch(_){ return { ziel, n: 0, at: 0 } } }
-    const bwLaden = window._bwLadenHaken || (() => location.reload())
+    const bwLaden = window._bwLadenHaken || (ziel => frischLaden(ziel))
     let bwWarteSeit = 0, bwTimer = null
     const bwPruefen = async () => {
       if(bwTimer){ clearTimeout(bwTimer); bwTimer = null }
-      const v = await holen()
-      if(!v || !bwNeuer(v, bwEigen())){ bwWarteSeit = 0; return }
+      const vRoh = await holen()
+      // nur eine wirklich neuere SEITE zählt (Backend-VERSION ohne neues prophos.html → Ruhe)
+      const v = (vRoh && bwNeuer(vRoh, bwEigen())) ? await echtNeu(vRoh) : null
+      if(!v){ bwWarteSeit = 0; return }
       const vs = bwVersuche(v)
-      if(vs.n >= 3 || Date.now() - vs.at < 5 * 60 * 1000){ zeigen(v); return }
+      // PC-Tabs zeigen NIE die Pille (28.09.2026) — nach 3 Versuchen bzw. innerhalb von 5 min still weiter warten
+      if(vs.n >= 3 || Date.now() - vs.at < 5 * 60 * 1000){ window._bwStatus = { ziel: v, grund: vs.n >= 3 ? '3 Versuche — wartet auf nächste Version' : 'Pause nach Neuladen' }; return }
       if(!bwWarteSeit) bwWarteSeit = Date.now()
       const grund = bwGrund(Date.now() - bwWarteSeit)
       if(grund){
@@ -15722,7 +15756,7 @@
       try{ localStorage.setItem(BW_KEY, JSON.stringify({ ziel: v, n: vs.n + 1, at: Date.now() })) }catch(_){}
       console.info('[build] lade neu: ' + bwEigen() + ' → ' + v)
       window._bwStatus = { ziel: v, grund: '', geladen: Date.now() }
-      bwLaden()
+      bwLaden(v)
     }
     window._bwPruefen = bwPruefen   // Test-Haken (Stub)
     // PC-Tabs laufen oft im Hintergrund oder minimiert — deshalb hier auch
@@ -35160,7 +35194,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.729'
+  const OS_TAB_BUILD = '2026-09-22.732'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
