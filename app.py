@@ -5526,12 +5526,39 @@ def admin_build_overview(kapitel_id=None):
     except Exception as e:
         print(f"[admin] ⚠️ offene Pläne: {type(e).__name__}: {e}", flush=True)
 
+    # HEUTE SCHON ZU ENDE (27.09.2026 nachmittags, Finn: „rot, wenn sie heute schon
+    # Stop Loss gehittet oder TP gehittet haben"): je Konto der jüngste beendete Plan
+    # (review/completed) der letzten 36 h — welcher Kalendertag „heute" ist, entscheidet
+    # das Frontend in Ortszeit (wie trades_heute). Ein eigenes TP/SL-Feld gibt es nicht:
+    # das Vorzeichen des P&L der eigenen Seite zählt (Master: master_pl, Hedge: slave_pl),
+    # blown = SL. P&L noch leer (review vor der Nachlesung) → ergebnis „ende".
+    ende = {}
+    try:
+        seit_e = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 36 * 3600,
+                                        tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for p in _sb_all("trade_plans", {"select": "master_account_id,slave_account_id,master_pl,slave_pl,"
+                                                   "blown,ended_at,completed_at,richtung,master_symbol",
+                                         "status": "in.(review,completed)",
+                                         "or": f"(ended_at.gte.{seit_e},completed_at.gte.{seit_e})"}):
+            at = str(p.get("ended_at") or p.get("completed_at") or "")
+            for rolle, key, plk in (("master", "master_account_id", "master_pl"), ("slave", "slave_account_id", "slave_pl")):
+                k = str(p.get(key) or "")
+                if not k or (k in ende and ende[k]["at"] >= at):
+                    continue
+                pl = _pnum(p.get(plk))
+                erg = "sl" if (p.get("blown") and rolle == "master") else ("tp" if (pl or 0) > 0 else "sl" if (pl or 0) < 0 else "ende")
+                ende[k] = {"at": at, "pl": pl, "ergebnis": erg, "rolle": rolle, "blown": bool(p.get("blown")),
+                           "richtung": p.get("richtung") or "", "symbol": (p.get("master_symbol") or "").strip()}
+    except Exception as e:
+        print(f"[admin] ⚠️ beendete Pläne: {type(e).__name__}: {e}", flush=True)
+
     def _firma_felder(a, aid):
         return {"size": _pnum(a.get("account_size")),
                 "start": _pnum(a.get("starting_balance")),
                 "payout_at": str(a.get("payout_ready_at") or "")[:10],
                 "arch_grund": (arch_info.get(aid) or {}).get("reason") or "",
-                "im_trade": offen.get(aid)}
+                "im_trade": offen.get(aid),
+                "letztes_ende": ende.get(aid)}
 
     for r in rows:
         r.update(_firma_felder(by_id.get(r["id"]) or {}, r["id"]))
