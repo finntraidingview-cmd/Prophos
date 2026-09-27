@@ -34946,7 +34946,7 @@
   // .168 gar nicht gab). Ein Stempel, der zu ALT meldet, ist schlimmer als
   // keiner: die Ferndiagnose hätte als Nächstes „PC-Tab ist veraltet"
   // geschlossen und am falschen Ende gesucht.
-  const OS_TAB_BUILD = '2026-09-22.720'
+  const OS_TAB_BUILD = '2026-09-22.721'
   let _tpRemoteSig = null   // Sender: { id, timer, t0 }
 
   function tpOrderRemoteBox(html, art){
@@ -40844,6 +40844,52 @@
       </div>
       <table class="wd-konten"><thead><tr><th></th><th>Konto</th><th title="Winning Days (gezählt / Ziel)">WD</th><th>Balance</th><th>Start</th><th>TP $</th><th title="Risiko Master für die Lot-Rechnung — kein Stop Loss in TradingView (Winning Days laufen ohne SL)">Risiko $</th><th>Risiko (DD)</th><th>Slave</th><th>Stand</th></tr></thead><tbody>${zeilen}${ohneZeile}</tbody></table>${hinweis}</div>`
   }
+  /* ID OHNE NEU-WÜRFELN EINPLANEN (F35, 28.09.2026, Finn: „dass ich die ID einfach hinzufüge, sodass ich nicht neu würfeln muss — per
+   * Zufallsprinzip in irgendeinen Block rein … nicht jedes Mal neu würfeln"). REIN RECHNEND (window._wdSlotWaehlen): Startzeit NUR für
+   * diese Zeile, feste Blöcke bleiben unberührt. Zufällig eine Lücke, in der ≥ 20 min Abstand zu beiden Nachbarn bleibt (Takt 20–55 min
+   * nach dem vorigen Block), sonst hinter den letzten Block (+20–55 min). Ohne Blöcke: Startzeit der Regeln + Jitter. Nie vor jetzt + 5 min.
+   * → { start_ms, vor: Zeile|null, nach: Zeile|null } */
+  function wdSlotWaehlen(rows, ich, regeln, tag, jetztMs, rnd){
+    const r = regeln || {}, M = 60000, zufall = rnd || Math.random, jetzt = jetztMs || Date.now(), frueh = jetzt + 5 * M
+    const fest = (rows || []).filter(x => x && x !== ich && String(x.user_id) !== String(ich && ich.user_id) && x.start_um
+      && (x.status === 'laeuft' || x.status === 'fertig' || x.status === 'verpasst' || (x.konten || []).some(wdAktiv)))
+      .map(x => ({ x, t: new Date(x.start_um).getTime() })).filter(e => e.t > 0).sort((a, b) => a.t - b.t)
+    const runde = t => Math.round(t / M) * M
+    if(!fest.length){
+      const t = wdZeitpunkt(tag, r.start_hhmm || '02:00', r.tz || WD_TZ_STD).getTime() + zufall() * ((r.jitter_min == null ? 10 : +r.jitter_min || 0) * M)
+      return { start_ms: runde(Math.max(t, frueh)), vor: null, nach: null }
+    }
+    const MIN = WD_TAKT_MIN * M, MAX = (WD_TAKT_MIN + WD_TAKT_ZUFALL_MIN) * M
+    const luecken = []
+    for(let i = 0; i < fest.length - 1; i++){
+      const lo = Math.max(fest[i].t + MIN, frueh), hi = Math.min(fest[i + 1].t - MIN, fest[i].t + MAX)
+      if(hi >= lo) luecken.push({ lo, hi, vor: fest[i].x, nach: fest[i + 1].x })
+    }
+    if(luecken.length){
+      const l = luecken[Math.floor(zufall() * luecken.length)]
+      return { start_ms: runde(l.lo + zufall() * (l.hi - l.lo)), vor: l.vor, nach: l.nach }
+    }
+    const letzte = fest[fest.length - 1]
+    return { start_ms: runde(Math.max(letzte.t + MIN + zufall() * (MAX - MIN), frueh)), vor: letzte.x, nach: null }
+  }
+  window._wdSlotWaehlen = wdSlotWaehlen   // Test-Haken
+  // Zeile einplanen + Pläne anlegen (bei SCHARF, gleicher Weg wie Würfeln). Nur diese Zeile wird geschrieben. → Text für den Toast
+  async function wdSlotEinplanen(x){
+    const r = _wd.regeln || {}
+    const s = wdSlotWaehlen(_wd.rows || [], x, r, x.tag, Date.now())
+    const start = new Date(s.start_ms).toISOString(), richtung = Math.random() < 0.5 ? 'buy' : 'sell'
+    const rf = Math.max(0, ...(_wd.rows || []).map(q => +q.reihenfolge || 0)) + 1
+    const konten = (x.konten || []).map(k => wdAktiv(k) ? { ...k, start_um: start } : k)
+    const { data, error } = await supabase.from('wd_tagesplan').update({ start_um: start, richtung, reihenfolge: rf, status: 'geplant', konten, updated_at: new Date().toISOString() })
+      .eq('tag', x.tag).eq('user_id', x.user_id).is('start_um', null).neq('status', 'laeuft').select('*')
+    if(error) throw error
+    if(!data || !data.length) return ''   // inzwischen von anderswo eingeplant — nichts überschreiben
+    Object.assign(x, data[0])
+    let angelegt = 0
+    if(r.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
+    const wo = s.vor && s.nach ? ` (zwischen ${s.vor.name || '?'} und ${s.nach.name || '?'})` : s.vor ? ` (nach ${s.vor.name || '?'})` : ' (erster Block)'
+    return `${x.name || 'ID'} eingeplant: ${wdHhmm(start)} Dubai${wo} · ${richtung === 'buy' ? 'BUY' : 'SELL'}${angelegt ? ` · ${angelegt} Plan${angelegt === 1 ? '' : 'e'} angelegt` : r.scharf ? '' : ' · SCHARF aus, noch kein Plan'}`
+  }
   /* Haken sofort wirksam (23.09.2026, Finn: „ich drücke auf den Account, der Haken geht weg, aber die sind immer noch
    * aktiv — bei nur einem Haken soll 0 von 3 stehen"): Anzeige sofort, dann dauerhaft am Konto (rpc wd_konto_setzen),
    * Zeile (aktiv/hinweis/status) in die DB, bei Haken raus den noch nicht gestarteten Plan löschen, bei Haken rein
@@ -40864,9 +40910,13 @@
       }
       const konten = (x.konten || []).map(q => ({ ...q }))
       await supabase.from('wd_tagesplan').update({ konten, status: x.status, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
-      let angelegt = 0
-      if(an && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
-      wdSay(an ? `${k.name || 'Konto'} ist drin — dauerhaft${angelegt ? ', Plan angelegt' : ''}.` : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`, 'ok')
+      let angelegt = 0, slot = ''
+      // F35: erstes aktives Konto einer ID ohne Startzeit → eigener Slot, ohne neu zu würfeln (bestehende Blöcke bleiben)
+      if(an && !x.start_um && wdAktiv(k)){ try{ slot = await wdSlotEinplanen(x) }catch(e){ slot = 'Einplanen fehlgeschlagen: ' + (e.message || e) } }
+      else if(an && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }   // hängt sich in den bestehenden Block
+      wdSay(slot || (an ? `${k.name || 'Konto'} ist drin — dauerhaft${angelegt ? ', Plan angelegt' : ''}.` : `${k.name || 'Konto'} ist raus — dauerhaft${planWeg ? ', Plan gelöscht' : ''}.`), 'ok')
+      if(slot && typeof atToast === 'function') atToast(slot, /fehlgeschlagen/.test(slot) ? 'end' : 'start')
+      if(slot){ try{ wdRender() }catch(_){} }
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Haken nicht gespeichert: ' + (e.message || e), 'err') }
   }
@@ -40897,9 +40947,13 @@
       }
       const konten = (x.konten || []).map(q => ({ ...q }))
       await supabase.from('wd_tagesplan').update({ konten, status: x.status, updated_at: new Date().toISOString() }).eq('tag', x.tag).eq('user_id', x.user_id).neq('status', 'laeuft')
-      let angelegt = 0
-      if(rein && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
-      wdSay(rein ? `${k.name || 'Konto'} fährt am ${x.tag} wieder mit${angelegt ? ' — Plan angelegt' : ''}.` : `${k.name || 'Konto'} setzt nur am ${x.tag} aus${planWeg ? ' — Plan gelöscht' : ''}; morgen wieder dabei.`, 'ok')
+      let angelegt = 0, slot = ''
+      // F35: ID ohne Startzeit bekommt ihren Slot sofort (nur diese Zeile), sonst hängt sich das Konto in den bestehenden Block
+      if(rein && !x.start_um && wdAktiv(k)){ try{ slot = await wdSlotEinplanen(x) }catch(e){ slot = 'Einplanen fehlgeschlagen: ' + (e.message || e) } }
+      else if(rein && x.start_um && !k.plan_id && _wd.regeln && _wd.regeln.scharf && _wd.daten && _wd.daten.rail){ try{ angelegt = (await wdPlaeneAnlegen(x.tag)).angelegt || 0 }catch(_){} }
+      wdSay(slot || (rein ? `${k.name || 'Konto'} fährt am ${x.tag} wieder mit${angelegt ? ' — Plan angelegt' : ''}.` : `${k.name || 'Konto'} setzt nur am ${x.tag} aus${planWeg ? ' — Plan gelöscht' : ''}; morgen wieder dabei.`), 'ok')
+      if(slot && typeof atToast === 'function') atToast(slot, /fehlgeschlagen/.test(slot) ? 'end' : 'start')
+      if(slot){ try{ wdRender() }catch(_){} }
       wdCacheSchreiben(x.tag)
     }catch(e){ wdSay('Nicht gespeichert: ' + (e.message || e), 'err') }
   }
