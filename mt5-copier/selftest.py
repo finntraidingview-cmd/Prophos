@@ -1762,6 +1762,7 @@ def main():
     results.append(test_profil_riegel())
     results.append(test_fenster_treue())
     results.append(test_puls_tempo())
+    results.append(test_puls_topstep())
     results.append(test_hedge_bereit())
     results.append(test_quickedit())
 
@@ -2410,6 +2411,51 @@ def test_puls_tempo():
     chk("Avg Fill wartet 1,2 s statt 3 s", "_avg_fill_nachlauf(sekunden=1.2)" in inspect.getsource(ob))
     if ok:
         print("✓ Puls-Tempo: Dialog sofort, Network error → Connect erneut (max. 3), Login-Enter nach 1,5 s, Avg Fill 1,2 s")
+    return ok
+
+
+def test_puls_topstep():
+    """Puls für Topstep, Etappe 1 (27.09.2026, B16): reine Teile — TopstepX nie als TradingView, Konto-Treffer, Ineligible,
+    Contract MNQ/NQ, BAL US-Format, Kopfzeile, Knopf mit Menge, Position, Inventar."""
+    import order_bot as ob
+    ok = True
+
+    def chk(name, bed):
+        nonlocal ok
+        if not bed:
+            print("✗ Puls-Topstep: " + name); ok = False
+
+    tsx_titel = "MNQZ26 30,922.50 ▲ +0.4% | TopstepX - Google Chrome"
+    chk("TopstepX-Titel erkannt", ob.ist_topstepx_titel(tsx_titel) and ob.ist_topstepx_titel("TopstepX") and not ob.ist_topstepx_titel("Topstep Dashboard"))
+    chk("TopstepX nie als TradingView-Fenster/-Tab/schliessbar", not ob.ist_tradingview_fenster(tsx_titel, "Chrome_WidgetWin_1")
+        and ob.tv_tab_rang(tsx_titel, "MNQZ26", "MNQZ6") == 0 and not ob.tv_tab_schliessbar(tsx_titel, "Chrome_WidgetWin_1", "MNQZ26"))
+    chk("TradingView-Chart weiter erkannt", ob.tv_tab_rang("MNQZ2026 30,922.50 ▲ +0.4% Unnamed", "", "") > 0)
+    liste = ["$150K TRADING COMBINE | 150KTC-SKU-V2-682437-58370042", "$150K EXPRESS | EXPRESS-V2-682437-57131691",
+             "$50K EXPRESS | EXPRESS-V2-682437-57131690 (Ineligible)"]
+    chk("Konto aus Text", ob.tsx_konto_aus_text(liste[1]) == "EXPRESS-V2-682437-57131691" and ob.tsx_konto_aus_text("BAL: $11,079.66") == "")
+    chk("Konto-Treffer genau einer", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131691") == (1, ""))
+    chk("nur Ineligible → kein Treffer mit Grund", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131690")[0] is None
+        and "Ineligible" in ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-57131690")[1])
+    chk("Teiltreffer zählt nicht (…5713169 vs …57131691)", ob.tsx_konto_treffer(liste, "EXPRESS-V2-682437-5713169")[0] is None)
+    chk("doppelt → nicht eindeutig", ob.tsx_konto_treffer(liste + [liste[1]], "EXPRESS-V2-682437-57131691")[0] is None)
+    vor = ["MNQZ26 · Micro Nasdaq (Dec 2026)", "NQZ26 · Nasdaq (Dec 2026)", "MNQH27 · Micro Nasdaq (Mar 2027)"]
+    chk("Contract NQ ≠ MNQ", ob.tsx_contract_wahl(vor[:2], "NQ") == 1 and ob.tsx_contract_wahl(vor[:2], "MNQ") == 0)
+    chk("Contract mehrdeutig (zwei MNQ-Monate) → None", ob.tsx_contract_wahl(vor, "MNQ") is None)
+    chk("BAL US-Format", ob.tsx_geld("$11,079.66") == 11079.66 and ob.tsx_geld("-$1,234.50") == -1234.5
+        and ob.tsx_geld("($12.50)") == -12.5 and ob.tsx_geld("—") is None)
+    kopf = [("BAL: $11,079.66", (0, 0, 9, 9), "Text"), ("MLL:", (0, 0, 9, 9), "Text"), ("$10,500.00", (0, 0, 9, 9), "Text"),
+            ("RP&L: -$120.25", (0, 0, 9, 9), "Text"), ("UP&L", (0, 0, 9, 9), "Text"), ("$0.00", (0, 0, 9, 9), "Text")]
+    chk("Kopfzeile: Wert im selben oder im nächsten Element", ob.tsx_kopf_werte(kopf) == {"balance": 11079.66, "mll": 10500.0, "rpl": -120.25, "upl": 0.0})
+    chk("Knopf mit Menge", ob.tsx_knopf_passt("BUY +2 @ MARKET", "buy", 2) and ob.tsx_knopf_passt("SELL -3 @ MARKET", "sell", 3)
+        and not ob.tsx_knopf_passt("BUY +1 @ MARKET", "buy", 2) and not ob.tsx_knopf_passt("SELL -2 @ MARKET", "buy", 2)
+        and not ob.tsx_knopf_passt("BUY -2 @ MARKET", "buy", 2) and not ob.tsx_knopf_passt("BUY +2 @ LIMIT", "buy", 2))
+    chk("Position: No Active Position → keine, sonst unbekannt", ob.tsx_position_zustand(["No Active Position"]) == "keine"
+        and ob.tsx_position_zustand(["MNQZ26 +2"]) is None)
+    inv = ob.tsx_inventar_kurz([("Buy", (10, 10, 50, 30), "Button"), ("Buy", (10, 10, 50, 30), "Button"), ("", (0, 0, 9, 9), "Text"),
+                               ("Weit weg", (5000, 5000, 5050, 5020), "Text"), ("Kaputt", None, "Text")], (0, 0, 1920, 1080))
+    chk("Inventar: sichtbar, im Fenster, ohne Dubletten", inv == [["Buy", "Button", [10, 10, 50, 30]]])
+    if ok:
+        print("✓ Puls-Topstep: TopstepX nie TV, Konto exakt/nie Ineligible, Contract MNQ≠NQ, BAL US, Knopf mit Menge, Position, Inventar")
     return ok
 
 

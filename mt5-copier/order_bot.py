@@ -287,6 +287,12 @@ def ist_prophos_fenster(titel, klasse):
     return t.startswith("prophos") and (klasse or "") in BROWSER_KLASSEN
 
 
+def ist_topstepx_titel(titel):
+    """B16 (27.09.2026): TopstepX-Web-App (topstepx.com/trade) — Titel/Tab-Name enthaelt 'topstepx'. Der Titel kann
+    wie ein TradingView-Chart aussehen ('MNQZ26 30,922.50 …'), deshalb schliesst dieses Merkmal ihn ueberall aus."""
+    return "topstepx" in str(titel or "").lower()
+
+
 def ist_tradingview_fenster(titel, klasse):
     """Ist dieses Fenster der Browser mit AKTIVEM TradingView-Tab? (Orbit-Puls
     Schritt 1, 28.08.2026.) Gleiche Positiv-Signatur wie ist_prophos_fenster:
@@ -299,8 +305,8 @@ def ist_tradingview_fenster(titel, klasse):
     t = (titel or "").strip().lower()
     if not t or (klasse or "") not in BROWSER_KLASSEN:
         return False
-    if t.startswith("devtools"):
-        return False
+    if t.startswith("devtools") or ist_topstepx_titel(t):
+        return False                  # B16: TopstepX-Tab ist nie TradingView (Suche, Heilung, Strg+W)
     return "tradingview" in t
 
 
@@ -1751,6 +1757,12 @@ def tv_tab_suchbegriff(titel):
 
 
 def tv_tab_rang(name, begriff, symbol):
+    if ist_topstepx_titel(name):
+        return 0                      # B16: TopstepX-Tab nie als TradingView-Tab werten
+    return _tv_tab_rang_roh(name, begriff, symbol)
+
+
+def _tv_tab_rang_roh(name, begriff, symbol):
     """Wie gut passt dieser Tab-Name? 0 = gar nicht, hoeher = besser.
 
     Vier Wege, absteigend nach Verlaesslichkeit (31.08.2026, nach Finns
@@ -10064,6 +10076,370 @@ def modus_inspect(cfg_path):
     print("\nDump komplett an Claude schicken — daraus wird die Feld-Zuordnung gebaut.")
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PULS FÜR TOPSTEP (TopstepX-Web-App) — ETAPPE 1 (27.09.2026, Auftrag Koordination B16)
+#
+# Finn hat den Weg per UIA in der Web-App topstepx.com/trade gewaehlt (Research R4: TopstepX geht nicht in
+# TradingView). Etappe 1 = NUR LESEN, keine Order:
+#   tsxinventar — TopstepX-Tab nach vorn, UIA-Inventar Grundzustand / Konto-Dropdown offen / Bracket-Dialog offen
+#                 (nur oeffnen, ueber sein X bzw. Esc schliessen, nichts tippen)
+#   tsxlesen    — Tab, Login-/Connect-Knopf einmal, benannte Banner-X, Konto per Dropdown (External ID exakt, nie
+#                 „(Ineligible)", genau 1 Treffer), BAL/MLL/RP&L/UP&L aus der Kopfzeile, „No Active Position"
+# Fenster-Treue (B6): nur im gemerkten Puls-Fenster, TopstepX als eigener Tab; Reader-Chrome nie. Etappe 2 (Order,
+# Brackets, Contract, Menge, Knopf „BUY +n @ MARKET") erst nach dem Inventar am PC.
+# ═══════════════════════════════════════════════════════════════════════════
+TSX_URL = "https://topstepx.com/trade"
+TSX_RX_KONTO = re.compile(r"\$\s*\d+(?:[.,]\d+)?\s*K\b.*\|\s*([A-Z0-9][A-Z0-9-]{5,})", re.I)
+TSX_RX_LOGIN = re.compile(r"^(log ?in|sign ?in|connect|anmelden|verbinden|einloggen)$", re.I)
+TSX_RX_SCHLIESSEN = re.compile(r"^(close|schlie(ß|ss)en|dismiss|×|✕|x)$", re.I)
+TSX_RX_KEINE_POS = re.compile(r"no active position|keine aktive position", re.I)
+TSX_RX_BRACKET_TEXT = re.compile(r"position bracket", re.I)
+TSX_RX_MANAGE_BRACKETS = re.compile(r"manage brackets", re.I)
+TSX_KOPF_LABELS = {"BAL": "balance", "MLL": "mll", "RP&L": "rpl", "UP&L": "upl"}
+
+
+def tsx_geld(text):
+    """REIN RECHNEND (testbar): US-Geldformat ('$11,079.66', '-$1,234.50', '($12.50)', '11079.66') → float | None."""
+    t = str(text or "").strip().replace("−", "-")
+    neg = t.startswith("-") or (t.startswith("(") and t.endswith(")"))
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", t)
+    if not m:
+        return None
+    try:
+        v = float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+    return -v if neg else v
+
+
+def tsx_kopf_werte(elemente):
+    """REIN RECHNEND (testbar): Kopfzeile → {balance, mll, rpl, upl}. elemente = [(name, rect|None, typ)] in Lesereihenfolge.
+    Form 1 'BAL: $11,079.66' in einem Element; Form 2 Label 'BAL:' und Wert im naechsten Element."""
+    out = {v: None for v in TSX_KOPF_LABELS.values()}
+    namen = [str(e[0] or "").strip() for e in (elemente or ())]
+    for i, n in enumerate(namen):
+        m = re.match(r"^(BAL|MLL|RP&L|UP&L)\s*:?\s*(.*)$", n, re.I)
+        if not m:
+            continue
+        key = TSX_KOPF_LABELS[m.group(1).upper()]
+        if out[key] is not None:
+            continue
+        wert = tsx_geld(m.group(2)) if m.group(2) else None
+        if wert is None and i + 1 < len(namen):
+            wert = tsx_geld(namen[i + 1])
+        out[key] = wert
+    return out
+
+
+def tsx_konto_aus_text(text):
+    """REIN RECHNEND (testbar): '$150K EXPRESS | EXPRESS-V2-682437-57131691' → 'EXPRESS-V2-682437-57131691' | ''."""
+    m = TSX_RX_KONTO.search(str(text or ""))
+    return m.group(1).upper() if m else ""
+
+
+def tsx_konto_treffer(texte, ext_id):
+    """REIN RECHNEND (testbar): Dropdown-Eintraege (Texte) → (Index | None, grund). Genau EIN Eintrag, dessen Kontokennung
+    die External ID exakt ist; „(Ineligible)" nie."""
+    ziel = _nur_alnum(ext_id)
+    if len(ziel) < 5:
+        return None, "External ID fehlt"
+    treffer, ineligible = [], 0
+    for i, t in enumerate(texte or ()):
+        k = tsx_konto_aus_text(t)
+        if not k or _nur_alnum(k) != ziel:
+            continue
+        if "ineligible" in str(t).lower():
+            ineligible += 1
+            continue
+        treffer.append(i)
+    if len(treffer) == 1:
+        return treffer[0], ""
+    if not treffer:
+        return None, ("Konto steht nur als (Ineligible) in der Liste" if ineligible else "Konto nicht in der Liste")
+    return None, f"Konto {len(treffer)}× in der Liste — nicht eindeutig"
+
+
+def tsx_contract_wahl(texte, wurzel):
+    """REIN RECHNEND (testbar): Vorschlagsliste ('MNQZ26 · Micro Nasdaq (Dec 2026)') → Index des Eintrags, dessen CODE genau
+    die Wurzel + Monatsbuchstabe + Jahr ist (MNQ ≠ NQ, Roll-Monat nie hart). Genau einer, sonst None."""
+    w = str(wurzel or "").upper()
+    rx = re.compile(rf"^{re.escape(w)}[FGHJKMNQUVXZ]\d{{1,2}}\b")
+    t_ = [i for i, t in enumerate(texte or ()) if rx.match(str(t or "").strip().upper())]
+    return t_[0] if len(t_) == 1 else None
+
+
+def tsx_knopf_passt(name, richtung, menge):
+    """REIN RECHNEND (testbar): Order-Knopf traegt Richtung UND Menge: 'BUY +2 @ MARKET' / 'SELL -2 @ MARKET'."""
+    m = re.match(r"^\s*(BUY|SELL)\s*([+-]?)\s*(\d+)\s*@\s*MARKET\s*$", str(name or ""), re.I)
+    if not m:
+        return False
+    try:
+        n = int(menge)
+    except (TypeError, ValueError):
+        return False
+    r = m.group(1).lower()
+    vorz_ok = (m.group(2) in ("+", "")) if r == "buy" else (m.group(2) in ("-", ""))
+    return r == str(richtung or "").lower() and int(m.group(3)) == n and vorz_ok
+
+
+def tsx_position_zustand(namen):
+    """REIN RECHNEND (testbar): 'keine' bei „No Active Position", sonst None (unbekannt — Etappe 2 liest die Position)."""
+    return "keine" if any(TSX_RX_KEINE_POS.search(str(n or "")) for n in (namen or ())) else None
+
+
+def _tsx_roh(w, typen=("Button", "Text", "Edit", "ComboBox", "ListItem", "MenuItem", "DataItem", "TabItem", "Hyperlink")):
+    """Alle benannten Elemente MIT Rechteck (Inventar/Suche) — Muster '.+' holt fuer jedes Element das Rechteck."""
+    return _tv_uia_roh(w, typen, 6000, muster=(re.compile(r".+"),))
+
+
+def tsx_inventar_kurz(roh, fenster=None, max_n=260):
+    """REIN RECHNEND (testbar): Inventar kompakt [name[:60], typ, [l,t,r,b]] — nur sichtbare, im Fenster, ohne Dubletten."""
+    out, gesehen = [], set()
+    for e in roh or ():
+        try:
+            n, r, typ = str(e[0] or "").strip(), e[1], (e[2] if len(e) > 2 else "")
+            l, t, rr, b = (int(v) for v in r)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not n or rr - l < 2 or b - t < 2:
+            continue
+        if fenster and not (fenster[0] <= (l + rr) // 2 <= fenster[2] and fenster[1] <= (t + b) // 2 <= fenster[3]):
+            continue
+        k = (n[:60], typ, l // 4, t // 4)
+        if k in gesehen:
+            continue
+        gesehen.add(k)
+        out.append([n[:60], typ, [l, t, rr, b]])
+        if len(out) >= max_n:
+            break
+    return out
+
+
+def _tsx_tab_holen(trail, warten_s=25.0):
+    """TopstepX-Tab im Puls-Fenster nach vorn, sonst Strg+T + topstepx.com/trade (Fenster-Treue). (fenster, fehler)"""
+    pw, code, msg = _puls_fenster(trail)
+    if pw is None:
+        return None, msg
+    try:
+        if ist_topstepx_titel(pw.window_text()):
+            pw.set_focus()
+            trail.append("TopstepX war schon der aktive Tab")
+            return pw, ""
+    except Exception:
+        pass
+    try:
+        tabs = pw.descendants(control_type="TabItem")
+    except Exception:
+        tabs = []
+    kand = [t for t in tabs if ist_topstepx_titel(t.window_text())]
+    if len(kand) >= 1:
+        try:
+            pw.set_focus()
+            _warte(0.2, 0.2)
+            r = kand[0].rectangle()
+            x, y = int((r.left + r.right) / 2), int((r.top + r.bottom) / 2)
+            _maus_fahren(x, y)
+            _klick_absolut(x, y)
+            _warte(0.4, 0.3)
+            trail.append(f"TopstepX-Tab angeklickt ({(kand[0].window_text() or '')[:40]})")
+            return pw, ""
+        except Exception as e:
+            trail.append(f"TopstepX-Tab-Klick fehlgeschlagen ({type(e).__name__})")
+    ok, f = _tv_neuer_tab(pw, TSX_URL, trail)
+    if not ok:
+        return None, f
+    ende = time.time() + warten_s
+    while time.time() < ende:
+        _warte(0.5, 0.3)
+        try:
+            if ist_topstepx_titel(pw.window_text()):
+                trail.append("TopstepX geladen (neuer Tab)")
+                _warte(1.0, 0.5)
+                return pw, ""
+        except Exception:
+            pass
+    return None, f"TopstepX-Tab nach {int(warten_s)} s nicht geladen (Titel ohne 'TopstepX')."
+
+
+def _tsx_klick(e, name, trail):
+    return _tv_uia_klick({"punkt": ((e[1][0] + e[1][2]) // 2, (e[1][1] + e[1][3]) // 2)}, name, trail)
+
+
+def _tsx_vorbereiten(w, trail):
+    """Einmal Login/Connect mittig drücken, benannte Banner-/Modal-X oben schließen (nur benannte Knöpfe)."""
+    fr = _tv_fenster_rect(w)
+    roh = _tsx_roh(w, ("Button",))
+    login = [e for e in roh if e[1] and TSX_RX_LOGIN.match(str(e[0]).strip())]
+    if len(login) == 1:
+        _tsx_klick(login[0], f"'{login[0][0]}' (Login/Connect)", trail)
+        _warte(2.0, 1.0)
+        roh = _tsx_roh(w, ("Button",))
+    hoehe = max(1, (fr[3] - fr[1])) if fr else 1
+    xs = [e for e in roh if e[1] and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())
+          and (not fr or (e[1][1] - fr[1]) < 0.25 * hoehe)]
+    for e in xs[:2]:
+        _tsx_klick(e, f"Banner schliessen ('{e[0]}')", trail)
+        _warte(0.4, 0.3)
+
+
+def _tsx_konto_element(roh):
+    """Das Konto-Dropdown oben links (Text mit '$…K … | KENNUNG'), das oberste zuerst."""
+    k = [e for e in roh if e[1] and tsx_konto_aus_text(e[0])]
+    return sorted(k, key=lambda e: (e[1][1], e[1][0]))[0] if k else None
+
+
+def _tsx_esc():
+    try:
+        from pywinauto import keyboard
+        keyboard.send_keys("{ESC}")
+    except Exception:
+        pass
+
+
+def _tsx_ausgabe(res, trail):
+    res["trail"] = " > ".join(trail)
+    print(json.dumps(res, ensure_ascii=False))
+
+
+def modus_tsxinventar(cmd):
+    """Nur lesen: Inventar Grundzustand / Konto-Dropdown / Bracket-Dialog (je öffnen und wieder schließen)."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "inventar": {}}
+    trail = _StempelSpur()
+    try:
+        from pywinauto import Desktop  # noqa: F401
+    except ImportError:
+        res.update(code="pywinauto", msg="pywinauto fehlt (nur auf dem PC lauffaehig).")
+        return _tsx_ausgabe(res, trail)
+    _dpi_bewusst()
+    _warte(0.1, 0.4)
+    w, f = _tsx_tab_holen(trail)
+    if w is None:
+        res.update(code="tab", schritt="tab", msg=f)
+        return _tsx_ausgabe(res, trail)
+    fr = _tv_fenster_rect(w)
+    res["titel"] = (w.window_text() or "")[:120]
+    try:
+        res["tabs"] = [(t.window_text() or "")[:60] for t in w.descendants(control_type="TabItem")][:15]
+    except Exception:
+        res["tabs"] = []
+    roh = _tsx_roh(w)
+    res["inventar"]["grund"] = tsx_inventar_kurz(roh, fr)
+    trail.append(f"Grundzustand: {len(res['inventar']['grund'])} Elemente")
+    ke = _tsx_konto_element(roh)
+    if ke:
+        _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
+        _warte(0.8, 0.4)
+        res["inventar"]["konto_offen"] = tsx_inventar_kurz(_tsx_roh(w), fr)
+        trail.append(f"Konto-Dropdown offen: {len(res['inventar']['konto_offen'])} Elemente")
+        _tsx_esc()
+        _warte(0.4, 0.3)
+    else:
+        trail.append("Konto-Dropdown nicht gefunden (kein Text '$…K … | KENNUNG')")
+    # Bracket-Dialog: benannter Knopf 'Manage Brackets', sonst GENAU EIN kleiner Knopf rechts neben 'Position Bracket'
+    roh = _tsx_roh(w)
+    gear = [e for e in roh if e[1] and e[2] == "Button" and TSX_RX_MANAGE_BRACKETS.search(str(e[0]))]
+    if not gear:
+        txt = [e for e in roh if e[1] and TSX_RX_BRACKET_TEXT.search(str(e[0]))]
+        if len(txt) == 1:
+            ty = (txt[0][1][1] + txt[0][1][3]) // 2
+            gear = [e for e in roh if e[1] and e[2] == "Button" and e[1][0] >= txt[0][1][2] - 2
+                    and abs((e[1][1] + e[1][3]) // 2 - ty) <= 12 and (e[1][2] - e[1][0]) <= 44
+                    and not TSX_RX_BRACKET_TEXT.search(str(e[0]))]
+    if len(gear) == 1:
+        _tsx_klick(gear[0], f"Bracket-Zahnrad ('{gear[0][0][:30]}')", trail)
+        _warte(0.8, 0.4)
+        roh_b = _tsx_roh(w)
+        res["inventar"]["bracket_offen"] = tsx_inventar_kurz(roh_b, fr)
+        trail.append(f"Bracket-Dialog: {len(res['inventar']['bracket_offen'])} Elemente")
+        zu = [e for e in roh_b if e[1] and e[2] == "Button" and TSX_RX_SCHLIESSEN.match(str(e[0]).strip())]
+        if len(zu) == 1:
+            _tsx_klick(zu[0], "Bracket-Dialog schliessen (X)", trail)
+        else:
+            _tsx_esc()
+            trail.append(f"Bracket-Dialog per Esc geschlossen ({len(zu)} X-Knöpfe)")
+        _warte(0.4, 0.3)
+    else:
+        trail.append(f"Bracket-Zahnrad nicht eindeutig ({len(gear)} Kandidaten) — nichts geklickt")
+    res.update(ok=True, schritt="fertig", msg="Inventar gelesen (keine Order).")
+    try:
+        pfad = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tsx_inventar.json")
+        with open(pfad, "w", encoding="utf-8") as fh:
+            json.dump(res, fh, ensure_ascii=False, indent=1)
+        res["datei"] = pfad
+    except Exception:
+        pass
+    return _tsx_ausgabe(res, trail)
+
+
+def modus_tsxlesen(cmd):
+    """Konto wählen und lesen: {ok, konto, balance, mll, rpl, upl, position, trail, code, schritt}. Keine Order."""
+    res = {"ok": False, "code": "", "msg": "", "trail": "", "schritt": "start", "konto": "", "balance": None,
+           "mll": None, "rpl": None, "upl": None, "position": None}
+    trail = _StempelSpur()
+    ext = str((cmd or {}).get("konto") or (cmd or {}).get("ext_id") or "").strip()
+    if len(_nur_alnum(ext)) < 5:
+        res.update(code="befehl", msg="Feld 'konto' (External ID) fehlt")
+        return _tsx_ausgabe(res, trail)
+    try:
+        from pywinauto import Desktop  # noqa: F401
+    except ImportError:
+        res.update(code="pywinauto", msg="pywinauto fehlt (nur auf dem PC lauffaehig).")
+        return _tsx_ausgabe(res, trail)
+    _dpi_bewusst()
+    _warte(0.1, 0.4)
+    w, f = _tsx_tab_holen(trail)
+    if w is None:
+        res.update(code="tab", schritt="tab", msg=f)
+        return _tsx_ausgabe(res, trail)
+    fr = _tv_fenster_rect(w)
+    _tsx_vorbereiten(w, trail)
+    # Konto: steht es schon? sonst Dropdown → genau ein Eintrag mit der External ID (nie Ineligible)
+    roh = _tsx_roh(w)
+    ke = _tsx_konto_element(roh)
+    if not ke:
+        res.update(code="konto", schritt="konto", msg="Konto-Dropdown nicht gefunden (kein Text '$…K … | KENNUNG').",
+                   inventar=tsx_inventar_kurz(roh, fr, 80))
+        return _tsx_ausgabe(res, trail)
+    if _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
+        _tsx_klick(ke, f"Konto-Dropdown ('{ke[0][:40]}')", trail)
+        _warte(0.8, 0.4)
+        roh_d = [e for e in _tsx_roh(w) if e[1] and tsx_konto_aus_text(e[0])]
+        texte = [str(e[0]) for e in roh_d]
+        i, grund = tsx_konto_treffer(texte, ext)
+        if i is None:
+            _tsx_esc()
+            res.update(code="konto", schritt="konto", msg=f"{grund} ({ext}).", liste=texte[:20])
+            return _tsx_ausgabe(res, trail)
+        _tsx_klick(roh_d[i], f"Konto {ext}", trail)
+        ende = time.time() + 6.0
+        while time.time() < ende:
+            _warte(0.4, 0.3)
+            ke = _tsx_konto_element(_tsx_roh(w))
+            if ke and _nur_alnum(tsx_konto_aus_text(ke[0])) == _nur_alnum(ext):
+                break
+        if not ke or _nur_alnum(tsx_konto_aus_text(ke[0])) != _nur_alnum(ext):
+            res.update(code="konto", schritt="konto", msg=f"Konto {ext} geklickt, steht aber nicht im Dropdown.")
+            return _tsx_ausgabe(res, trail)
+    trail.append(f"Konto steht auf {ext}")
+    res["konto"] = ext
+    roh = _tsx_roh(w)
+    werte = tsx_kopf_werte(roh)
+    res.update(werte)
+    res["position"] = tsx_position_zustand([e[0] for e in roh if e[1]])
+    trail.append(f"Kopf: BAL {werte['balance']} · MLL {werte['mll']} · RP&L {werte['rpl']} · UP&L {werte['upl']}"
+                 f" · Position {res['position'] or 'unbekannt'}")
+    if werte["balance"] is None:
+        res.update(code="balance", schritt="lesen", msg="BAL in der Kopfzeile nicht lesbar.", inventar=tsx_inventar_kurz(roh, fr, 80))
+        return _tsx_ausgabe(res, trail)
+    # Vertrag wie tv-lesen (F23): summary {Label: Text} fuer tvBalanceAus, konto_aktiv, positionen ([] = flach, None = unbekannt)
+    res["summary"] = {lbl: (f"${werte[k]:,.2f}" if werte[k] is not None else None) for lbl, k in
+                      (("Balance", "balance"), ("MLL", "mll"), ("RP&L", "rpl"), ("UP&L", "upl"))}
+    res["konto_aktiv"] = ext
+    res["positionen"] = [] if res["position"] == "keine" else None
+    res.update(ok=True, schritt="fertig", msg=f"Balance {werte['balance']:,.2f} $ gelesen ({ext}).")
+    return _tsx_ausgabe(res, trail)
+
 def main():
     # Konsole robust (24.09.2026 abends, Finns PC: tvlesen 'absturz @ raus' = UnicodeEncodeError, cp1252 kann
     # '\u25bc' aus dem TradingView-Tab-Titel nicht kodieren — die Spur traegt den Titel, die JSON-Antwort
@@ -10107,6 +10483,18 @@ def main():
         except Exception as e:
             print(json.dumps({"ok": False, "schritt": "absturz",
                               "msg": f"TV-Kette abgebrochen: {type(e).__name__}: {e}"}))
+        return 0
+    if len(sys.argv) >= 2 and sys.argv[1] in ("tsxinventar", "tsxlesen"):
+        # Puls für Topstep, Etappe 1 (27.09.2026, B16): nur lesen, keine Order
+        try:
+            cmd = json.loads(sys.argv[2]) if len(sys.argv) >= 3 else {}
+        except ValueError:
+            cmd = {}
+        try:
+            (modus_tsxinventar if sys.argv[1] == "tsxinventar" else modus_tsxlesen)(cmd if isinstance(cmd, dict) else {})
+        except Exception as e:
+            print(json.dumps({"ok": False, "code": "absturz", "schritt": "absturz",
+                              "msg": f"TopstepX-Lauf abgebrochen: {type(e).__name__}: {e} @ {_absturz_ort(e)}"}))
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "tvlesen":
         # Orbit-V2-Rundgang (24.09.2026): Konto anfahren, dann NUR lesen —

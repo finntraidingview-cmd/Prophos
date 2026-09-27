@@ -2554,6 +2554,48 @@ class Handler(BaseHTTPRequestHandler):
                   f"[{res.get('zustand')}] ({res.get('msg')}) {res.get('trail') or ''}", flush=True)
             return self._send(200, json.dumps(res, ensure_ascii=False))
 
+        if u.path in ("/api/tsx-lesen", "/api/tsx-inventar"):
+            # Puls für Topstep, Etappe 1 (27.09.2026, Auftrag Koordination B16): TopstepX-Web-App per UIA — NUR LESEN,
+            # keine Order. tsx-lesen = Konto wählen + BAL/MLL/RP&L/UP&L + „No Active Position" (Vertrag wie tv-lesen:
+            # summary/konto_aktiv/positionen); tsx-inventar = UIA-Inventar Grundzustand/Konto-Dropdown/Bracket-Dialog.
+            # Unter dem TV-Lock wie jeder Browser-Lauf (ein Chrome, eine Maus).
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            except Exception as e:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl", "msg": f"ungueltige Daten: {e}"}))
+            modus = "tsxlesen" if u.path == "/api/tsx-lesen" else "tsxinventar"
+            konto = str(body.get("konto") or body.get("ext_id") or "").strip()[:60]
+            if modus == "tsxlesen" and len(re.sub(r"[^A-Za-z0-9]", "", konto)) < 5:
+                return self._send(400, json.dumps({"ok": False, "code": "befehl",
+                    "msg": "Feld 'konto' (External ID) fehlt oder ist zu kurz"}, ensure_ascii=False))
+            cmd = {"konto": konto, "firma": str(body.get("firma") or "").strip()[:60]}
+            if not TV_ORDER_LOCK.acquire(blocking=False):
+                return self._send(409, json.dumps({"ok": False, "code": "puls_beschaeftigt", "retry_ok": True,
+                    "msg": "Es laeuft schon ein Browser-Lauf (Order/Konto/Lesen) — spaeter erneut."}, ensure_ascii=False))
+            to = 150
+            try:
+                bot = os.path.join(HERE, "order_bot.py")
+                if not os.path.exists(bot):
+                    ensure_bot_source()
+                if not os.path.exists(bot):
+                    res = {"ok": False, "code": "bot_fehlt", "retry_ok": True, "msg": "order_bot.py fehlt auf diesem PC."}
+                else:
+                    p = subprocess.run([sys.executable, bot, modus, json.dumps(cmd)],
+                                       capture_output=True, text=True, errors="replace", timeout=to)
+                    line = (p.stdout or "").strip().splitlines()
+                    res = json.loads(line[-1]) if line else {
+                        "ok": False, "code": "bot_stumm",
+                        "msg": "keine Antwort vom Bot: " + ((p.stderr or "").strip()[-200:] or "kein stderr")}
+            except subprocess.TimeoutExpired:
+                res = {"ok": False, "code": "timeout", "retry_ok": True,
+                       "msg": f"TopstepX-Lauf Timeout ({to}s) — in TopstepX nachsehen, wie weit er kam."}
+            except (OSError, ValueError) as e:
+                res = {"ok": False, "code": "bot_fehlt", "msg": f"TopstepX-Lauf fehlgeschlagen: {e}"}
+            finally:
+                TV_ORDER_LOCK.release()
+            print(f"[panel] {modus}: {'ok' if res.get('ok') else res.get('code')} · {str(res.get('msg') or '')[:120]}", flush=True)
+            return self._send(200, json.dumps(res, ensure_ascii=False))
         if u.path == "/api/tv-lesen":
             # Orbit-V2-Rundgang (24.09.2026 nachts, Finn: "Der Bot geht sich in
             # einem gewissen Intervall automatisch in das Konto bei Tradovate auf
