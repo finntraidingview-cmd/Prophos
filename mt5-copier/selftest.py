@@ -2991,7 +2991,9 @@ def test_tsx_order():
     ob._uia_tastatur_im_feld = lambda r: False
     try:
         sp2 = []
-        g1 = ob._tsx_tippen(("Contract", cbr, "ComboBox", "MNQZ26", None), "nq", sp2, "Contract", liste_ok=True)
+        li = [(f"6{c}Z26", (1977, 320 + 32 * i, 2448, 350 + 32 * i), "ListItem") for i, c in enumerate("ABCD")]
+        g1 = ob._tsx_tippen(("Contract", cbr, "ComboBox", "MNQZ26", None), "nq", sp2, "Contract", liste_ok=lambda: li)
+        g0 = ob._tsx_tippen(("Contract", cbr, "ComboBox", "MNQZ26", None), "nq", [], "Contract", liste_ok=lambda: li[:2])
         t1 = list(tasten); tasten.clear()
         g2 = ob._tsx_tippen(("Risk (~$)", (936, 800, 1177, 851), "Edit", "100", None), "", [], "Risk", ist="100")
         t2 = list(tasten)
@@ -3000,7 +3002,8 @@ def test_tsx_order():
             setattr(ob, k, v)
         if pw_alt is not None: _s2.modules["pywinauto"] = pw_alt
         else: _s2.modules.pop("pywinauto", None)
-    chk(f"B32: Contract bei ListItem-Fokus getippt ({t1})", g1 and "nq" in t1 and any("Vorschlagsliste" in x for x in sp2))
+    chk(f"B33: Contract mit offener Vorschlagsliste getippt, ohne Liste nicht ({t1})", g1 and "nq" in t1
+        and any("Vorschlagsliste offen" in x for x in sp2) and g0 is False)
     chk(f"B32: Risk bei ListItem-Fokus NICHT getippt ({t2})", g2 is False and not t2)
     mp = ob.tsx_menge_plan
     chk("B30: Mengen-Plan", mp(2, [1, 3, 5, 10, 15]) == (1, 1) and mp(15, [1, 3, 5, 10, 15]) == (15, 0) and mp(7, [1, 3, 5, 10, 15]) == (5, 2)
@@ -3015,8 +3018,8 @@ def test_tsx_order():
     r, z = lauf(dict(cmd, scharf=True), markt=True, nach="nichts", haken=1)
     chk(f"B31: Markt zu, keine Meldung, keine Position → beweis ({r.get('msg')})", r.get("code") == "beweis" and "vermutlich abgelehnt" in r.get("msg", ""))
     r, z = lauf(dict(cmd, scharf=True), haken=0)
-    chk(f"B33: scharf + „war aus\" → ENDE ohne Haken-/Order-Klick ({r.get('code')})", r.get("code") == "bracket" and "unsicher" in r.get("msg", "")
-        and not any(k.startswith("Haken") or k.startswith("Order senden") for k in z["klicks"]))
+    chk(f"B33-Korrektur: scharf + „war aus\" → Haken geklickt, Order gesendet ({r.get('code')})", r.get("ok") and r.get("gesendet")
+        and "war aus → geklickt → an" in r.get("trail", ""))
     feldc = (1977, 278, 2448, 314)
     alt_li = [("CLX26 · Crude", (1977, 5000, 2448, 5030), "ListItem")]
     neu_li = alt_li + [(f"6{c}Z26", (1977, 320 + 32 * i, 2448, 350 + 32 * i), "ListItem") for i, c in enumerate("ABCD")]

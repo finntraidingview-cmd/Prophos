@@ -11501,17 +11501,16 @@ def _tsx_tippen(feld, text, trail, name, ist=None, liste_ok=False):
         _warte(0.25, 0.2)
         fk = _uia_fokus()
         if liste:
-            # B33 (Mike 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste —
-            # Rechteck außerhalb. Beweis: ≥ 3 NEUE Einträge unter dem Feld UND Fokus ListItem (egal wo) oder HasKeyboardFocus
-            n_neu = tsx_liste_neu(liste_vorher, liste(), feld[1])
-            tast = _uia_tastatur_im_feld(feld[1])
-            if n_neu >= 3 and ((fk and fk[0] in ("ListItem", "List")) or tast):
-                trail.append(f"Fokus-Beweis Feld {name}: Vorschlagsliste mit {n_neu} Einträgen offen, Fokus "
-                             f"{fk[0] if fk else '?'}{', HasKeyboardFocus' if tast else ''}")
+            # B33 (Mike 16:29 UTC): der aktive Eintrag (aktueller Wert MNQZ26) liegt weit unten in der gescrollten Liste.
+            # Korrektur B33 (Finn: „einfach mit der Maus ins Feld, tippen, dann den Vorschlag wählen — am Anfang ging es
+            # sogar"): Beweis = Vorschlagsliste aufgegangen (≥ 3 Einträge unter dem Feld, irgendwo in der Seite); der Fokus
+            # zählt nicht — die Rücklesung des Contracts (MNQ ≠ NQ) sichert ab.
+            n_unter = sum(1 for e in liste() if e[1] and e[1][1] >= feld[1][3] - 6)
+            if n_unter >= 3:
+                trail.append(f"Feld {name}: Vorschlagsliste offen ({n_unter} Einträge, Fokus {fk[0] if fk else '?'})")
                 fokus_ok = True
                 break
-            trail.append(f"Fokus-Beweis Feld {name} fehlt: {n_neu} neue Einträge, Fokus {fk[0] if fk else '?'}, "
-                         f"HasKeyboardFocus {'ja' if tast else 'nein'}")
+            trail.append(f"Feld {name}: keine Vorschlagsliste ({n_unter} Einträge, Fokus {fk[0] if fk else '?'})")
             continue
         if tsx_fokus_passt(fk, feld[1], liste_ok):
             if liste_ok and fk and fk[0] in ("ListItem", "List"):
@@ -11622,12 +11621,6 @@ def _tsx_order_nach_kopf(befehl):
                 return ende("bracket", "Haken „Automatically apply …\" unlesbar — nicht angefasst, keine Order.",
                             felder=tsx_felder_kurz(felder, 40))
             trail.append("Haken „Automatically apply\" unlesbar — nicht angefasst")
-        elif haken[4] == 0 and befehl["scharf"]:
-            # B33 (27.09.2026): beim selben Konto …58370042 zweimal hintereinander „war aus → geklickt → an" — Lesung womöglich
-            # INVERTIERT (dann schaltet Puls den Haken jedes Mal AUS und TP greift nicht). Bis geklärt: scharf nie klicken.
-            _tsx_esc()
-            return ende("bracket", "Haken-Zustand unsicher („war aus“ gelesen) — scharf nicht angefasst, keine Order.",
-                        haken_roh=[haken[0], list(haken[1]), haken[4]])
         elif haken[4] == 0:
             _tsx_klick(("Haken", haken[1], "CheckBox"), "Haken Automatically apply", trail)
             _warte(0.4, 0.2)
